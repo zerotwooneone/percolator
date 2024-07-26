@@ -2,6 +2,8 @@
 Microsoft Visual Studio Solution File, Format Version 12.00
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.Console", "Percolator.Console\Percolator.Console.csproj", "{F2F1FF96-E903-43B6-B462-78FFA193C161}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.Windows.Api", "Percolator.Windows.Api\Percolator.Windows.Api.csproj", "{4C086912-BB08-4BB8-9822-734A62907B69}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -12,5 +14,9 @@ Global
 		{F2F1FF96-E903-43B6-B462-78FFA193C161}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{F2F1FF96-E903-43B6-B462-78FFA193C161}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{F2F1FF96-E903-43B6-B462-78FFA193C161}.Release|Any CPU.Build.0 = Release|Any CPU
+		{4C086912-BB08-4BB8-9822-734A62907B69}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{4C086912-BB08-4BB8-9822-734A62907B69}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{4C086912-BB08-4BB8-9822-734A62907B69}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{4C086912-BB08-4BB8-9822-734A62907B69}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal
