@@ -1,6 +1,0 @@
-﻿BCryptOpenAlgorithmProvider
-NCryptCreatePersistedKey
-NCryptSetProperty
-NCryptFinalizeKey
-BCryptGenerateSymmetricKey
-BCRYPT_RSA_ALGORITHM
