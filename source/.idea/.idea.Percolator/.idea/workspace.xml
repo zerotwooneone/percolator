@@ -7,15 +7,8 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="ee5b6474-56c5-411d-818f-247a4838ead2" name="Changes" comment="">
-      <change beforePath="$PROJECT_DIR$/.idea/.idea.Percolator/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/.idea.Percolator/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/Percolator.Console/Percolator.Console.csproj" beforeDir="false" afterPath="$PROJECT_DIR$/Percolator.Console/Percolator.Console.csproj" afterDir="false" />
+    <list default="true" id="ee5b6474-56c5-411d-818f-247a4838ead2" name="Changes" comment="rsa encrypt/decrypt">
       <change beforePath="$PROJECT_DIR$/Percolator.Console/Program.cs" beforeDir="false" afterPath="$PROJECT_DIR$/Percolator.Console/Program.cs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/Percolator.Windows.Api/AlgorithmHandle.cs" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/Percolator.Windows.Api/Class1.cs" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/Percolator.Windows.Api/NativeMethods.txt" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/Percolator.Windows.Api/Percolator.Windows.Api.csproj" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/Percolator.sln" beforeDir="false" afterPath="$PROJECT_DIR$/Percolator.sln" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -119,7 +112,7 @@
       <workItem from="1722016650766" duration="28000" />
       <workItem from="1722016696887" duration="11303000" />
       <workItem from="1722030296559" duration="1516000" />
-      <workItem from="1722032132604" duration="1755000" />
+      <workItem from="1722032132604" duration="2243000" />
     </task>
     <task id="LOCAL-00001" summary="init console">
       <option name="closed" value="true" />
@@ -145,7 +138,15 @@
       <option name="project" value="LOCAL" />
       <updated>1722029659576</updated>
     </task>
-    <option name="localTasksCounter" value="4" />
+    <task id="LOCAL-00004" summary="rsa encrypt/decrypt">
+      <option name="closed" value="true" />
+      <created>1722034237464</created>
+      <option name="number" value="00004" />
+      <option name="presentableId" value="LOCAL-00004" />
+      <option name="project" value="LOCAL" />
+      <updated>1722034237464</updated>
+    </task>
+    <option name="localTasksCounter" value="5" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -166,6 +167,7 @@
   </component>
   <component name="VcsManagerConfiguration">
     <option name="ADD_EXTERNAL_FILES_SILENTLY" value="true" />
+    <option name="LOCAL_CHANGES_DETAILS_PREVIEW_SHOWN" value="false" />
     <ignored-roots>
       <path value="$PROJECT_DIR$/../.." />
     </ignored-roots>
@@ -173,7 +175,8 @@
     <MESSAGE value="init console" />
     <MESSAGE value="add rsa alg" />
     <MESSAGE value="add generate key" />
-    <option name="LAST_COMMIT_MESSAGE" value="add generate key" />
+    <MESSAGE value="rsa encrypt/decrypt" />
+    <option name="LAST_COMMIT_MESSAGE" value="rsa encrypt/decrypt" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
