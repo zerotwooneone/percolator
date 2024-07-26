@@ -1,4 +1,5 @@
 ﻿using System.Diagnostics.CodeAnalysis;
+using System.Security.Cryptography;
 using Windows.Win32.Security.Cryptography;
 
 namespace Percolator.WindowsX.Api;
@@ -11,9 +12,12 @@ public class Class1
         {
             return;
         }
-        using (alg)
+
+        using var algorithmHandle = alg;
+        unsafe
         {
-            
+            Span<byte> pbSecret=new byte[]{};
+            Windows.Win32.PInvoke.BCryptGenerateSymmetricKey(algorithmHandle.Handle, out var publicKeyHandle, null, pbSecret, 0);
         }
     }
 

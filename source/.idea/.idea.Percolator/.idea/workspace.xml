@@ -7,15 +7,9 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="ee5b6474-56c5-411d-818f-247a4838ead2" name="Changes" comment="init console">
-      <change afterPath="$PROJECT_DIR$/Percolator.Windows.Api/AlgorithmHandle.cs" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/Percolator.Windows.Api/Class1.cs" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/Percolator.Windows.Api/NativeMethods.txt" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/Percolator.Windows.Api/Percolator.Windows.Api.csproj" afterDir="false" />
+    <list default="true" id="ee5b6474-56c5-411d-818f-247a4838ead2" name="Changes" comment="add rsa alg">
       <change beforePath="$PROJECT_DIR$/.idea/.idea.Percolator/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/.idea.Percolator/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/Percolator.Console/Percolator.Console.csproj" beforeDir="false" afterPath="$PROJECT_DIR$/Percolator.Console/Percolator.Console.csproj" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/Percolator.Console/Program.cs" beforeDir="false" afterPath="$PROJECT_DIR$/Percolator.Console/Program.cs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/Percolator.sln" beforeDir="false" afterPath="$PROJECT_DIR$/Percolator.sln" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Percolator.Windows.Api/Class1.cs" beforeDir="false" afterPath="$PROJECT_DIR$/Percolator.Windows.Api/Class1.cs" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -44,6 +38,11 @@
     &quot;accountId&quot;: &quot;2bb8ccc4-5d61-45a1-9530-19116bfd725b&quot;
   }
 }</component>
+  <component name="HighlightingSettingsPerFile">
+    <setting file="file://$USER_HOME$/AppData/Local/Symbols/src/dotnet/runtime/9f4b1f5d664afdfc80e1508ab7ed099dff210fbd/src/libraries/Common/src/Interop/Windows/NCrypt/Interop.ErrorCode.cs" root0="SKIP_HIGHLIGHTING" />
+    <setting file="file://$USER_HOME$/AppData/Local/Symbols/src/dotnet/runtime/9f4b1f5d664afdfc80e1508ab7ed099dff210fbd/src/libraries/System.Security.Cryptography/src/System/Security/Cryptography/RSA.cs" root0="SKIP_HIGHLIGHTING" />
+    <setting file="file://$USER_HOME$/AppData/Local/Symbols/src/dotnet/runtime/9f4b1f5d664afdfc80e1508ab7ed099dff210fbd/src/libraries/System.Security.Cryptography/src/System/Security/Cryptography/RSABCrypt.cs" root0="SKIP_HIGHLIGHTING" />
+  </component>
   <component name="MetaFilesCheckinStateConfiguration" checkMetaFiles="true" />
   <component name="ProjectColorInfo">{
   &quot;customColor&quot;: &quot;&quot;,
@@ -110,7 +109,7 @@
       <updated>1722016584791</updated>
       <workItem from="1722016586690" duration="53000" />
       <workItem from="1722016650766" duration="28000" />
-      <workItem from="1722016696887" duration="7244000" />
+      <workItem from="1722016696887" duration="10585000" />
     </task>
     <task id="LOCAL-00001" summary="init console">
       <option name="closed" value="true" />
@@ -120,7 +119,15 @@
       <option name="project" value="LOCAL" />
       <updated>1722016778801</updated>
     </task>
-    <option name="localTasksCounter" value="2" />
+    <task id="LOCAL-00002" summary="add rsa alg">
+      <option name="closed" value="true" />
+      <created>1722024694123</created>
+      <option name="number" value="00002" />
+      <option name="presentableId" value="LOCAL-00002" />
+      <option name="project" value="LOCAL" />
+      <updated>1722024694123</updated>
+    </task>
+    <option name="localTasksCounter" value="3" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -146,20 +153,21 @@
     </ignored-roots>
     <option name="CLEAR_INITIAL_COMMIT_MESSAGE" value="true" />
     <MESSAGE value="init console" />
-    <option name="LAST_COMMIT_MESSAGE" value="init console" />
+    <MESSAGE value="add rsa alg" />
+    <option name="LAST_COMMIT_MESSAGE" value="add rsa alg" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
       <breakpoints>
         <line-breakpoint enabled="true" type="DotNet Breakpoints">
           <url>file://$PROJECT_DIR$/Percolator.Windows.Api/Class1.cs</url>
-          <line>11</line>
+          <line>12</line>
           <properties documentPath="C:\Users\squir\source\repos\percolator\source\Percolator.Windows.Api\Class1.cs" containingFunctionPresentation="Method 'Go'">
             <startOffsets>
-              <option value="245" />
+              <option value="281" />
             </startOffsets>
             <endOffsets>
-              <option value="252" />
+              <option value="288" />
             </endOffsets>
           </properties>
           <option name="timeStamp" value="2" />
