@@ -25,6 +25,15 @@
         <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
         <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
       </None>
+      <None Update="gradient.bmp">
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      </None>
+      <None Update="gradient.png">
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      </None>
+      <None Update="gradient.large.bmp">
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      </None>
     </ItemGroup>
 
 </Project>
