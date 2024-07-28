@@ -16,7 +16,7 @@ builder.Services.AddGrpc();
 
 //todo: move these registrations
 builder.Services.AddSingleton<PersistenceService>();
-builder.Services.AddSingleton<SelfEncryptionService>();
+builder.Services.AddSingleton<SelfEncryptionService>(s=>new SelfEncryptionService("6e3c367d-380c-4a0d-8b66-ad397fbac2d9"));
 builder.Services.AddSingleton<HandshakeService>();
 builder.Services.AddSingleton<BusyService>();
 

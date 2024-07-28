@@ -31,10 +31,28 @@ public class GreeterService : Greeter.GreeterBase
     {
         var currentUtcTime = _busyService.GetCurrentUtcTime();
         const int arbitraryMinimumKeyLength = 120;
-        if (request.Payload.PublicKey.Length < arbitraryMinimumKeyLength)
+        if (request.Payload.IdentityKey == null)
         {
-            _logger.LogWarning("Request with invalid key length: {PublicKeyLength}", request.Payload.PublicKey.Length);
-            return Task.FromException<HelloReply>(new Exception("Request with invalid key length: " + request.Payload.PublicKey.Length));
+            _logger.LogWarning("Request with missing identity key");
+            return Task.FromException<HelloReply>(new Exception("Request with missing identity key"));
+        }
+
+        if (request.Payload.IdentityKey.Length < arbitraryMinimumKeyLength)
+        {
+            _logger.LogWarning("Request with invalid key length: {PublicKeyLength}", request.Payload.IdentityKey.Length);
+            return Task.FromException<HelloReply>(new Exception("Request with invalid key length: " + request.Payload.IdentityKey.Length));
+        }
+
+        if (request.Payload.EphemeralKey == null)
+        {
+            _logger.LogWarning("Request with missing ephemeral key");
+            return Task.FromException<HelloReply>(new Exception("Request with missing ephemeral key"));
+        }
+
+        if (request.Payload.EphemeralKey.Length < arbitraryMinimumKeyLength)
+        {
+            _logger.LogWarning("Request with invalid ephemeral key length: {PublicKeyLength}", request.Payload.EphemeralKey.Length);
+            return Task.FromException<HelloReply>(new Exception("Request with invalid ephemeral key length: " + request.Payload.EphemeralKey.Length));
         }
 
         if (request.PayloadSignature.Length < arbitraryMinimumKeyLength)
@@ -59,61 +77,84 @@ public class GreeterService : Greeter.GreeterBase
             return Task.FromException<HelloReply>(new Exception("Request with invalid timestamp: " + request.Payload.TimeStampUnixUtcMs));
         }
 
-        var otherRsa = new RSACng();
+        var callerIdentity = new RSACng();
         try
         {
-            otherRsa.ImportRSAPublicKey(request.Payload.PublicKey.ToArray(), out _);
+            callerIdentity.ImportRSAPublicKey(request.Payload.IdentityKey.ToArray(), out _);
         }
         catch (CryptographicException cryptographicException)
         {
-            _logger.LogError(cryptographicException, "Failed to import public key");
+            _logger.LogError(cryptographicException, "Failed to import caller identity key");
+            return Task.FromException<HelloReply>(cryptographicException);
+        }
+        
+        var callerEphemeral = new RSACng();
+        try
+        {
+            callerEphemeral.ImportRSAPublicKey(request.Payload.EphemeralKey.ToArray(), out _);
+        }
+        catch (CryptographicException cryptographicException)
+        {
+            _logger.LogError(cryptographicException, "Failed to import caller ephemeral key");
             return Task.FromException<HelloReply>(cryptographicException);
         }
 
         //we need the payload bytes to verify the signature
         var requestPayloadBytes = request.Payload.ToByteArray();
         
-        if (!otherRsa.VerifyData(requestPayloadBytes,request.PayloadSignature.ToArray(), HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1))
+        if (!callerIdentity.VerifyData(requestPayloadBytes,request.PayloadSignature.ToArray(), HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1))
         {
             return Task.FromException<HelloReply>(new Exception("Failed to verify public key signature"));
         }
 
-        if (_persistenceService.BannedKeys.Contains(request.Payload.PublicKey))
+        if (_persistenceService.BannedKeys.Contains(request.Payload.IdentityKey))
         {
-            _logger.LogInformation("Request with banned key: {PublicKey}", request.Payload.PublicKey);
-            return Task.FromException<HelloReply>(new Exception("Request with banned key: " + request.Payload.PublicKey));
+            _logger.LogInformation("Request with banned key: {PublicKey}", request.Payload.IdentityKey);
+            return Task.FromException<HelloReply>(new Exception("Request with banned key: " + request.Payload.IdentityKey));
         }
-        var selfPublicKey = _selfEncryptionService.PublicKey;
-        if (_persistenceService.PendingKeys.TryGetValue(request.Payload.PublicKey, out var pendingExpiration))
+        var selfIdentityKey = _selfEncryptionService.Identity.ExportRSAPublicKey();
+        var selfEphemeralKey = _selfEncryptionService.Ephemeral.ExportRSAPublicKey();
+        if (_persistenceService.PendingKeys.TryGetValue(request.Payload.IdentityKey, out var pendingExpiration))
         {
             if (pendingExpiration > currentUtcTime)
             {
-                _logger.LogInformation("Request while busy key: {PublicKey} will be BANNED", request.Payload.PublicKey);
-                _persistenceService.BannedKeys.Add(request.Payload.PublicKey);
-                return Task.FromException<HelloReply>(new Exception("Request with banned key: " + request.Payload.PublicKey));
+                _logger.LogInformation("Request while busy key: {PublicKey} will be BANNED", request.Payload.IdentityKey);
+                _persistenceService.BannedKeys.Add(request.Payload.IdentityKey);
+                return Task.FromException<HelloReply>(new Exception("Request with banned key: " + request.Payload.IdentityKey));
             }
             
-            _persistenceService.PendingKeys.TryRemove(request.Payload.PublicKey, out _);
+            _persistenceService.PendingKeys.TryRemove(request.Payload.IdentityKey, out _);
             
-            if (!_handshakeService.TryCreateHandshake(otherRsa, out var handshake))
+            if (!_handshakeService.TryCreateHandshake(callerEphemeral, out var handshake))
             {
                 return Task.FromException<HelloReply>(new Exception("Could not create handshake"));
             }
 
             var payload = new HelloReply.Types.Proceed.Types.Payload
             {
-                PublicKey = ByteString.CopyFrom(selfPublicKey),
+                IdentityKey = ByteString.CopyFrom(selfIdentityKey),
+                EphemeralKey = ByteString.CopyFrom(selfEphemeralKey),
                 Iv = ByteString.CopyFrom(handshake.Key.IV),
                 EncryptedSessionKey = ByteString.CopyFrom(handshake.EncryptedSessionKey),
                 TimeStampUnixUtcMs = currentUtcTime.ToUnixTimeMilliseconds()
             };
             var responsePayloadBytes= payload.ToByteArray();
-            var responsePayloadHashSignature = _selfEncryptionService.SignData(responsePayloadBytes);
-            _persistenceService.KnownSessions.AddOrUpdate(request.Payload.PublicKey,handshake.Key, (_,old) =>
-            {
-                //old.Dispose();
-                return handshake.Key;
-            });
+            var responsePayloadHashSignature = _selfEncryptionService.Identity.SignData(responsePayloadBytes, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+            _persistenceService.KnownSessionsByIdentity.AddOrUpdate(request.Payload.IdentityKey,
+                _=> new SessionTracker(new KnownSession
+                {
+                    SessionKey = handshake.Key,
+                    EphemeralPublicKey = callerEphemeral
+                }), 
+                (_,old) =>
+                {
+                    old.ReplaceCurrent(new KnownSession
+                    {
+                        SessionKey = handshake.Key,
+                        EphemeralPublicKey = callerEphemeral
+                    });
+                    return old;
+                });
             return Task.FromResult(new HelloReply
             {
                 Proceed = new HelloReply.Types.Proceed
@@ -126,25 +167,35 @@ public class GreeterService : Greeter.GreeterBase
         var notBefore = _busyService.GetDelaySeconds();
         if (notBefore <= 0)
         {
-            
-            if (!_handshakeService.TryCreateHandshake(otherRsa, out var handshake))
+            if (!_handshakeService.TryCreateHandshake(callerEphemeral, out var handshake))
             {
                 return Task.FromException<HelloReply>(new Exception("Could not create handshake"));
             }
             var payload = new HelloReply.Types.Proceed.Types.Payload
             {
-                PublicKey = ByteString.CopyFrom(selfPublicKey),
+                IdentityKey = ByteString.CopyFrom(selfIdentityKey),
+                EphemeralKey = ByteString.CopyFrom(selfEphemeralKey),
                 Iv = ByteString.CopyFrom(handshake.Key.IV),
                 EncryptedSessionKey = ByteString.CopyFrom(handshake.EncryptedSessionKey),
                 TimeStampUnixUtcMs = currentUtcTime.ToUnixTimeMilliseconds()
             };
             var responsePayloadBytes= payload.ToByteArray();
-            var responsePayloadHashSignature = _selfEncryptionService.SignData(responsePayloadBytes);
-            _persistenceService.KnownSessions.AddOrUpdate(request.Payload.PublicKey,handshake.Key, (_,old) =>
-            {
-                //old.Dispose();
-                return handshake.Key;
-            });
+            var responsePayloadHashSignature = _selfEncryptionService.Identity.SignData(responsePayloadBytes, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+            _persistenceService.KnownSessionsByIdentity.AddOrUpdate(request.Payload.IdentityKey,
+                _=> new SessionTracker(new KnownSession
+                {
+                    SessionKey = handshake.Key,
+                    EphemeralPublicKey = callerEphemeral
+                }), 
+                (_,old) =>
+                {
+                    old.ReplaceCurrent(new KnownSession
+                    {
+                        SessionKey = handshake.Key,
+                        EphemeralPublicKey = callerEphemeral
+                    });
+                    return old;
+                });
             return Task.FromResult(new HelloReply
             {
                 Proceed = new HelloReply.Types.Proceed
@@ -156,7 +207,7 @@ public class GreeterService : Greeter.GreeterBase
         }
 
         var dateTimeOffset = currentUtcTime.AddSeconds(notBefore);
-        _persistenceService.PendingKeys.AddOrUpdate(request.Payload.PublicKey, dateTimeOffset, (_,_) => dateTimeOffset);
+        _persistenceService.PendingKeys.AddOrUpdate(request.Payload.IdentityKey, dateTimeOffset, (_,_) => dateTimeOffset);
         return Task.FromResult(new HelloReply
         {
             Busy = new HelloReply.Types.Busy

@@ -25,6 +25,11 @@ using (var deleteRsa = new RSACryptoServiceProvider(csp))
 }
 return;*/
 
+using var identityRsa = new RSACryptoServiceProvider()
+{
+    PersistKeyInCsp = false,
+};
+
 using var ephemeralRsa = new RSACryptoServiceProvider()
 {
     PersistKeyInCsp = false,
@@ -39,11 +44,12 @@ do
 {
     var payload = new HelloRequest.Types.Payload()
     {
-        PublicKey = ByteString.CopyFrom(ephemeralRsa.ExportRSAPublicKey()),
+        IdentityKey = ByteString.CopyFrom(identityRsa.ExportRSAPublicKey()),
+        EphemeralKey = ByteString.CopyFrom(ephemeralRsa.ExportRSAPublicKey()),
         TimeStampUnixUtcMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
     };
     var payloadBytes = payload.ToByteArray();
-    var payloadHashSignature = ephemeralRsa.SignData(payloadBytes, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+    var payloadHashSignature = identityRsa.SignData(payloadBytes, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
     reply = await client.SayHelloAsync(
         new HelloRequest
         {
@@ -90,14 +96,20 @@ await using CryptoStream cs = new CryptoStream(plaintext, aes.CreateDecryptor(),
 // string message = Encoding.UTF8.GetString(plaintext.ToArray());
 // Console.WriteLine(message);
 
-var otherRsa = new RSACryptoServiceProvider()
+// var serverEphemeralRsa = new RSACryptoServiceProvider()
+// {
+//     PersistKeyInCsp = false
+// };
+// serverEphemeralRsa.ImportRSAPublicKey(reply.Proceed.Payload.EphemeralKey.ToByteArray(), out _);
+
+var serverIdentityRsa = new RSACryptoServiceProvider()
 {
     PersistKeyInCsp = false
 };
-otherRsa.ImportRSAPublicKey(reply.Proceed.Payload.PublicKey.ToByteArray(), out _);
+serverIdentityRsa.ImportRSAPublicKey(reply.Proceed.Payload.IdentityKey.ToByteArray(), out _);
 
 var responsePayloadBytes = reply.Proceed.Payload.ToByteArray();
-if (!otherRsa.VerifyData(responsePayloadBytes, reply.Proceed.PayloadSignature.ToArray(), HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1))
+if (!serverIdentityRsa.VerifyData(responsePayloadBytes, reply.Proceed.PayloadSignature.ToArray(), HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1))
 {
     Console.WriteLine("Failed to verify signature");
     return;

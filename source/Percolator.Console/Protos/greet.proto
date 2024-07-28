@@ -15,8 +15,9 @@ service Greeter {
 
 message HelloRequest {
   message Payload {
-    bytes publicKey = 1;
-    int64 timeStampUnixUtcMs = 2;
+    bytes identityKey = 1;
+    bytes ephemeralKey = 2;
+    int64 timeStampUnixUtcMs = 3;
   }
   Payload payload = 1;
   bytes payloadSignature = 2;
@@ -25,12 +26,15 @@ message HelloRequest {
 message HelloReply {
   message Proceed {
     message Payload {
-      bytes publicKey = 1;
-      bytes iv = 2;
-      bytes encryptedSessionKey = 3;
-      int64 timeStampUnixUtcMs = 4;
+      bytes identityKey = 1;
+      bytes ephemeralKey = 2;
+      bytes iv = 3;
+      //encrypted with ephemeral key
+      bytes encryptedSessionKey = 4;
+      int64 timeStampUnixUtcMs = 5;
     }
     Payload payload = 1;
+    //signed with the identity key
     bytes payloadSignature = 2;
   }
 
