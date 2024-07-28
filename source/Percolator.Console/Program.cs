@@ -25,7 +25,7 @@ using (var deleteRsa = new RSACryptoServiceProvider(csp))
 }
 return;*/
 
-using var epheremalRsa = new RSACryptoServiceProvider()
+using var ephemeralRsa = new RSACryptoServiceProvider()
 {
     PersistKeyInCsp = false,
 };
@@ -39,11 +39,11 @@ do
 {
     var payload = new HelloRequest.Types.Payload()
     {
-        PublicKey = ByteString.CopyFrom(epheremalRsa.ExportRSAPublicKey()),
+        PublicKey = ByteString.CopyFrom(ephemeralRsa.ExportRSAPublicKey()),
         TimeStampUnixUtcMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
     };
     var payloadBytes = payload.ToByteArray();
-    var payloadHashSignature = epheremalRsa.SignData(payloadBytes, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+    var payloadHashSignature = ephemeralRsa.SignData(payloadBytes, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
     reply = await client.SayHelloAsync(
         new HelloRequest
         {
@@ -78,7 +78,7 @@ using Aes aes = new AesCryptoServiceProvider();
 aes.IV = reply.Proceed.Payload.Iv.ToByteArray();
 
 // Decrypt the session key
-RSAOAEPKeyExchangeDeformatter keyDeformatter = new RSAOAEPKeyExchangeDeformatter(epheremalRsa);
+RSAOAEPKeyExchangeDeformatter keyDeformatter = new RSAOAEPKeyExchangeDeformatter(ephemeralRsa);
 aes.Key = keyDeformatter.DecryptKeyExchange(reply.Proceed.Payload.EncryptedSessionKey.ToByteArray());
 
 using MemoryStream plaintext = new MemoryStream();
