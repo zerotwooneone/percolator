@@ -13,17 +13,36 @@ service Greeter {
   rpc Gimme (google.protobuf.Empty) returns (stream StreamMessage);
 }
 
-// The request message containing the user's name.
 message HelloRequest {
-  string name = 1;
+  //string name = 1;
+  message Payload {
+    bytes publicKey = 1;
+    int64 timeStampUnixMs = 2;
+  }
+  Payload payload = 2;
+  bytes payloadSignature = 3;
 }
 
-// The response message containing the greetings.
 message HelloReply {
-  string message = 1;
+  message Proceed {
+    bytes publicKey = 1;
+    bytes publicKeySignature = 2;
+    bytes iv = 3;
+    bytes encryptedSessionKey = 4;
+  }
+
+  message Busy {
+    int64 notBeforeUnixMs = 1;
+  }
+  //string message = 1;
+  oneof responseType {
+    Proceed proceed = 2;
+    Busy busy = 3;
+    google.protobuf.Empty empty = 4;
+  }
 }
 
 message StreamMessage {
   repeated bytes bytes =1;
   int32 startIndex = 2;
-} 
+}

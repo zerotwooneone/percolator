@@ -14,6 +14,12 @@ builder.Services.AddDefaultIdentity<IdentityUser>(options => options.SignIn.Requ
     .AddEntityFrameworkStores<ApplicationDbContext>();
 builder.Services.AddGrpc();
 
+//todo: move these registrations
+builder.Services.AddSingleton<PersistenceService>();
+builder.Services.AddSingleton<SelfEncryptionService>();
+builder.Services.AddSingleton<HandshakeService>();
+builder.Services.AddSingleton<BusyService>();
+
 var app = builder.Build();
 
 app.UseAuthorization();

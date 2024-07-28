@@ -1,14 +1,11 @@
-﻿// See https://aka.ms/new-console-template for more information
-
-using System.Security.Cryptography;
-using System.Text;
+﻿using System.Security.Cryptography;
+using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
 using Grpc.Net.Client;
 using Percolator.Console;
 
-const string KeyContainerName = "Percolator";
-
+/*const string KeyContainerName = "Percolator";
 var csp = new CspParameters
 {
     KeyContainerName = KeyContainerName,
@@ -17,38 +14,63 @@ var csp = new CspParameters
         CspProviderFlags.UseMachineKeyStore | 
         CspProviderFlags.UseDefaultKeyContainer
 };
-
-byte[]? encrypted = null;
-//this gets or creates the key
-using (var rsa = new RSACryptoServiceProvider(csp))
+using (var deleteRsa = new RSACryptoServiceProvider(csp))
 {
-    //Console.WriteLine($"rsa key: {rsa.ToXmlString(true)}");
-    encrypted = rsa.Encrypt("Hello World!"u8.ToArray(), false);
+    deleteRsa.PersistKeyInCsp = false;
+    //this deletes the stored key, and disposes the object
+    deleteRsa.Clear();
+
+    Console.WriteLine("Deleted key");
 }
+return;*/
 
-// using (var deleteRsa = new RSACryptoServiceProvider(csp))
-// {
-//     deleteRsa.PersistKeyInCsp = false;
-//     //this deletes the stored key, and disposes the object
-//     deleteRsa.Clear();
-//
-//     Console.WriteLine("Deleted key");
-// }
-
-using (var decrypter = new RSACryptoServiceProvider(csp))
+using var epheremalRsa = new RSACryptoServiceProvider()
 {
-    var decrypted = decrypter.Decrypt(encrypted, false);
-    Console.WriteLine(Encoding.UTF8.GetString(decrypted, 0, decrypted.Length));
-}
+    PersistKeyInCsp = false,
+};
 
 using var channel = GrpcChannel.ForAddress("http://localhost:5076");
 var client = new Greeter.GreeterClient(channel);
-var reply = await client.SayHelloAsync(
-    new HelloRequest { Name = "GreeterClient" });
-Console.WriteLine("Greeting: " + reply.Message);
 
-var h = new Handler();
-h.Handle(client).Wait();
+var success = false;
+do
+{
+    var payload = new HelloRequest.Types.Payload()
+    {
+        PublicKey = ByteString.CopyFrom(epheremalRsa.ExportRSAPublicKey()),
+        TimeStampUnixMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+    };
+    var payloadBytes = payload.ToByteArray();
+    var payloadHash = SHA256.Create().ComputeHash(payloadBytes);
+    var payloadHashSignature = epheremalRsa.SignHash(payloadHash, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+    var reply = await client.SayHelloAsync(
+        new HelloRequest
+        {
+            Payload = payload,
+            PayloadSignature = ByteString.CopyFrom(payloadHashSignature)
+        });
+    success = reply.ResponseTypeCase switch
+    {
+        HelloReply.ResponseTypeOneofCase.Proceed => true,
+        HelloReply.ResponseTypeOneofCase.Empty => true, 
+        _ => false
+    };
+    if (reply.ResponseTypeCase == HelloReply.ResponseTypeOneofCase.Busy)
+    {
+        var wakeUpTime = DateTimeOffset.FromUnixTimeMilliseconds(reply.Busy.NotBeforeUnixMs);
+        var now = DateTimeOffset.UtcNow;
+        if (wakeUpTime > now)
+        {
+            var timeToWait = wakeUpTime - now;
+            Thread.Sleep(timeToWait);
+        }
+    }
+    Console.WriteLine("Response Type: " + reply.ResponseTypeCase);
+} while (!success);
+
+
+//var h = new Handler();
+//h.Handle(client).Wait();
 
 Console.WriteLine("Press any key to exit...");
 
