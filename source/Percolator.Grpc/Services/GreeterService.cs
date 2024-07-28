@@ -103,12 +103,17 @@ public class GreeterService : Greeter.GreeterBase
             var payload = new HelloReply.Types.Proceed.Types.Payload
             {
                 PublicKey = ByteString.CopyFrom(selfPublicKey),
-                Iv = ByteString.CopyFrom(handshake.Iv),
+                Iv = ByteString.CopyFrom(handshake.Key.IV),
                 EncryptedSessionKey = ByteString.CopyFrom(handshake.EncryptedSessionKey),
                 TimeStampUnixUtcMs = currentUtcTime.ToUnixTimeMilliseconds()
             };
             var responsePayloadBytes= payload.ToByteArray();
             var responsePayloadHashSignature = _selfEncryptionService.SignData(responsePayloadBytes);
+            _persistenceService.KnownSessions.AddOrUpdate(request.Payload.PublicKey,handshake.Key, (_,old) =>
+            {
+                //old.Dispose();
+                return handshake.Key;
+            });
             return Task.FromResult(new HelloReply
             {
                 Proceed = new HelloReply.Types.Proceed
@@ -129,12 +134,17 @@ public class GreeterService : Greeter.GreeterBase
             var payload = new HelloReply.Types.Proceed.Types.Payload
             {
                 PublicKey = ByteString.CopyFrom(selfPublicKey),
-                Iv = ByteString.CopyFrom(handshake.Iv),
+                Iv = ByteString.CopyFrom(handshake.Key.IV),
                 EncryptedSessionKey = ByteString.CopyFrom(handshake.EncryptedSessionKey),
                 TimeStampUnixUtcMs = currentUtcTime.ToUnixTimeMilliseconds()
             };
             var responsePayloadBytes= payload.ToByteArray();
             var responsePayloadHashSignature = _selfEncryptionService.SignData(responsePayloadBytes);
+            _persistenceService.KnownSessions.AddOrUpdate(request.Payload.PublicKey,handshake.Key, (_,old) =>
+            {
+                //old.Dispose();
+                return handshake.Key;
+            });
             return Task.FromResult(new HelloReply
             {
                 Proceed = new HelloReply.Types.Proceed

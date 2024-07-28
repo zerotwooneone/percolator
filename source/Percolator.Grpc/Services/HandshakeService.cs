@@ -16,12 +16,10 @@ public class HandshakeService
         RSA key, 
         [NotNullWhen(true)]out Handshake handshake)
     {
-        using (Aes aes = Aes.Create())
-        {
-            var keyFormatter = new RSAOAEPKeyExchangeFormatter(key);
-            var encryptedSessionKey = keyFormatter.CreateKeyExchange(aes.Key, typeof(Aes));
-            handshake = new Handshake(aes.IV, encryptedSessionKey);
-            return true;
-        }
+        using Aes aes = Aes.Create();
+        var keyFormatter = new RSAOAEPKeyExchangeFormatter(key);
+        var encryptedSessionKey = keyFormatter.CreateKeyExchange(aes.Key, typeof(Aes));
+        handshake = new Handshake(aes, encryptedSessionKey);
+        return true;
     }
 }

@@ -1,7 +1,7 @@
 namespace Percolator.Grpc.Services;
 
-public struct Handshake(byte[] iv, byte[] encryptedSessionKey)
+public struct Handshake(System.Security.Cryptography.Aes key, byte[] encryptedSessionKey)
 {
-    public byte[] Iv { get; init; } = iv;
+    public System.Security.Cryptography.Aes Key { get; init; } = key;
     public byte[] EncryptedSessionKey { get; init; } = encryptedSessionKey;
 }
