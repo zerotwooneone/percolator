@@ -43,8 +43,7 @@ do
         TimeStampUnixUtcMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
     };
     var payloadBytes = payload.ToByteArray();
-    var payloadHash = SHA256.Create().ComputeHash(payloadBytes);
-    var payloadHashSignature = epheremalRsa.SignHash(payloadHash, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+    var payloadHashSignature = epheremalRsa.SignData(payloadBytes, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
     reply = await client.SayHelloAsync(
         new HelloRequest
         {
@@ -98,8 +97,7 @@ var otherRsa = new RSACryptoServiceProvider()
 otherRsa.ImportRSAPublicKey(reply.Proceed.Payload.PublicKey.ToByteArray(), out _);
 
 var responsePayloadBytes = reply.Proceed.Payload.ToByteArray();
-var responsePayloadHash = SHA256.Create().ComputeHash(responsePayloadBytes);
-if (!otherRsa.VerifyHash(responsePayloadHash, reply.Proceed.PayloadSignature.ToArray(), HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1))
+if (!otherRsa.VerifyData(responsePayloadBytes, reply.Proceed.PayloadSignature.ToArray(), HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1))
 {
     Console.WriteLine("Failed to verify signature");
     return;

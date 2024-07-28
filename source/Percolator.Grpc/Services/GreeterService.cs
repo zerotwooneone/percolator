@@ -72,9 +72,8 @@ public class GreeterService : Greeter.GreeterBase
 
         //we need the payload bytes to verify the signature
         var requestPayloadBytes = request.Payload.ToByteArray();
-        var payloadHash = SHA256.Create().ComputeHash(requestPayloadBytes);
         
-        if (!otherRsa.VerifyHash(payloadHash,request.PayloadSignature.ToArray(), HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1))
+        if (!otherRsa.VerifyData(requestPayloadBytes,request.PayloadSignature.ToArray(), HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1))
         {
             return Task.FromException<HelloReply>(new Exception("Failed to verify public key signature"));
         }
@@ -109,8 +108,7 @@ public class GreeterService : Greeter.GreeterBase
                 TimeStampUnixUtcMs = currentUtcTime.ToUnixTimeMilliseconds()
             };
             var responsePayloadBytes= payload.ToByteArray();
-            var responsePayloadHash = SHA256.Create().ComputeHash(responsePayloadBytes);
-            var responsePayloadHashSignature = _selfEncryptionService.SignHash(responsePayloadHash);
+            var responsePayloadHashSignature = _selfEncryptionService.SignData(responsePayloadBytes);
             return Task.FromResult(new HelloReply
             {
                 Proceed = new HelloReply.Types.Proceed
@@ -136,8 +134,7 @@ public class GreeterService : Greeter.GreeterBase
                 TimeStampUnixUtcMs = currentUtcTime.ToUnixTimeMilliseconds()
             };
             var responsePayloadBytes= payload.ToByteArray();
-            var responsePayloadHash = SHA256.Create().ComputeHash(responsePayloadBytes);
-            var responsePayloadHashSignature = _selfEncryptionService.SignHash(responsePayloadHash);
+            var responsePayloadHashSignature = _selfEncryptionService.SignData(responsePayloadBytes);
             return Task.FromResult(new HelloReply
             {
                 Proceed = new HelloReply.Types.Proceed

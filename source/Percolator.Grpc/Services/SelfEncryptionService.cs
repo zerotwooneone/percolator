@@ -23,7 +23,7 @@ public class SelfEncryptionService
     }
     public byte[] PublicKey { get; }
 
-    public byte[] SignHash(byte[] data)
+    public byte[] SignData(byte[] data)
     {
         var csp = new CspParameters
         {
@@ -36,6 +36,6 @@ public class SelfEncryptionService
         
         //this gets or creates the key
         using var rsa = new RSACryptoServiceProvider(csp);
-        return rsa.SignHash(data, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        return rsa.SignData(data, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
     }
 }
