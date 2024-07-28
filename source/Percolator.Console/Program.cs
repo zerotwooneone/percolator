@@ -1,10 +1,9 @@
 ﻿using System.Security.Cryptography;
-using System.Text;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
 using Grpc.Net.Client;
-using Percolator.Console;
+using Percolator.Protobuf;
 
 /*const string KeyContainerName = "Percolator";
 var csp = new CspParameters

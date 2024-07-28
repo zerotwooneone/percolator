@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
+using Percolator.Protobuf;
 
 namespace Percolator.Grpc.Services;
 

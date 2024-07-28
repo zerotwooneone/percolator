@@ -2,7 +2,7 @@ syntax = "proto3";
 
 import "google/protobuf/empty.proto";
 
-option csharp_namespace = "Percolator.Console";
+option csharp_namespace = "Percolator.Protobuf";
 
 package greet;
 
