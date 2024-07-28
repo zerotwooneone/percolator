@@ -17,7 +17,7 @@ public class BusyService
         return (_random.NextDouble()*5)+1D;
     }
     
-    public DateTimeOffset GetCurrentTime()
+    public DateTimeOffset GetCurrentUtcTime()
     {
         return DateTimeOffset.UtcNow;
     }

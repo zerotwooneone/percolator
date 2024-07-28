@@ -1,4 +1,5 @@
 ﻿using System.Security.Cryptography;
+using System.Text;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
@@ -33,17 +34,18 @@ using var channel = GrpcChannel.ForAddress("http://localhost:5076");
 var client = new Greeter.GreeterClient(channel);
 
 var success = false;
+HelloReply reply;
 do
 {
     var payload = new HelloRequest.Types.Payload()
     {
         PublicKey = ByteString.CopyFrom(epheremalRsa.ExportRSAPublicKey()),
-        TimeStampUnixMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+        TimeStampUnixUtcMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
     };
     var payloadBytes = payload.ToByteArray();
     var payloadHash = SHA256.Create().ComputeHash(payloadBytes);
     var payloadHashSignature = epheremalRsa.SignHash(payloadHash, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
-    var reply = await client.SayHelloAsync(
+    reply = await client.SayHelloAsync(
         new HelloRequest
         {
             Payload = payload,
@@ -68,6 +70,41 @@ do
     Console.WriteLine("Response Type: " + reply.ResponseTypeCase);
 } while (!success);
 
+if (reply.ResponseTypeCase != HelloReply.ResponseTypeOneofCase.Proceed)
+{
+    return;
+}
+
+using Aes aes = new AesCryptoServiceProvider();
+aes.IV = reply.Proceed.Payload.Iv.ToByteArray();
+
+// Decrypt the session key
+RSAOAEPKeyExchangeDeformatter keyDeformatter = new RSAOAEPKeyExchangeDeformatter(epheremalRsa);
+aes.Key = keyDeformatter.DecryptKeyExchange(reply.Proceed.Payload.EncryptedSessionKey.ToByteArray());
+
+using MemoryStream plaintext = new MemoryStream();
+await using CryptoStream cs = new CryptoStream(plaintext, aes.CreateDecryptor(), CryptoStreamMode.Write);
+
+// cs.Write(encryptedMessage, 0, encryptedMessage.Length);
+// cs.Close();
+//
+// string message = Encoding.UTF8.GetString(plaintext.ToArray());
+// Console.WriteLine(message);
+
+var otherRsa = new RSACryptoServiceProvider()
+{
+    PersistKeyInCsp = false
+};
+otherRsa.ImportRSAPublicKey(reply.Proceed.Payload.PublicKey.ToByteArray(), out _);
+
+var responsePayloadBytes = reply.Proceed.Payload.ToByteArray();
+var responsePayloadHash = SHA256.Create().ComputeHash(responsePayloadBytes);
+if (!otherRsa.VerifyHash(responsePayloadHash, reply.Proceed.PayloadSignature.ToArray(), HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1))
+{
+    Console.WriteLine("Failed to verify signature");
+    return;
+}
+Console.WriteLine("Success! The response payload matches the signature");
 
 //var h = new Handler();
 //h.Handle(client).Wait();

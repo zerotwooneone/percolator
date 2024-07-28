@@ -14,21 +14,24 @@ service Greeter {
 }
 
 message HelloRequest {
-  //string name = 1;
   message Payload {
     bytes publicKey = 1;
-    int64 timeStampUnixMs = 2;
+    int64 timeStampUnixUtcMs = 2;
   }
-  Payload payload = 2;
-  bytes payloadSignature = 3;
+  Payload payload = 1;
+  bytes payloadSignature = 2;
 }
 
 message HelloReply {
   message Proceed {
-    bytes publicKey = 1;
-    bytes publicKeySignature = 2;
-    bytes iv = 3;
-    bytes encryptedSessionKey = 4;
+    message Payload {
+      bytes publicKey = 1;
+      bytes iv = 2;
+      bytes encryptedSessionKey = 3;
+      int64 timeStampUnixUtcMs = 4;
+    }
+    Payload payload = 1;
+    bytes payloadSignature = 2;
   }
 
   message Busy {

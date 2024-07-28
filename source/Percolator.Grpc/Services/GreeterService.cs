@@ -29,7 +29,7 @@ public class GreeterService : Greeter.GreeterBase
 
     public override Task<HelloReply> SayHello(HelloRequest request, ServerCallContext context)
     {
-        var currentTime = _busyService.GetCurrentTime();
+        var currentUtcTime = _busyService.GetCurrentUtcTime();
         const int arbitraryMinimumKeyLength = 120;
         if (request.Payload.PublicKey.Length < arbitraryMinimumKeyLength)
         {
@@ -45,18 +45,18 @@ public class GreeterService : Greeter.GreeterBase
         
         //todo: make this configurable
         const double maxHelloTimeoutSeconds = 10;
-        if (request.Payload.TimeStampUnixMs <= 0)
+        if (request.Payload.TimeStampUnixUtcMs <= 0)
         {
-            _logger.LogWarning("Request with invalid timestamp: {TimeStampUnixMs}", request.Payload.TimeStampUnixMs);
-            return Task.FromException<HelloReply>(new Exception("Request with invalid timestamp: " + request.Payload.TimeStampUnixMs));
+            _logger.LogWarning("Request with invalid timestamp: {TimeStampUnixMs}", request.Payload.TimeStampUnixUtcMs);
+            return Task.FromException<HelloReply>(new Exception("Request with invalid timestamp: " + request.Payload.TimeStampUnixUtcMs));
         }
 
-        var payloadTimestamp = DateTimeOffset.FromUnixTimeMilliseconds(request.Payload.TimeStampUnixMs);
-        var deltaTimespan = payloadTimestamp - currentTime;
+        var payloadTimestamp = DateTimeOffset.FromUnixTimeMilliseconds(request.Payload.TimeStampUnixUtcMs);
+        var deltaTimespan = payloadTimestamp - currentUtcTime;
         if (Math.Abs(deltaTimespan.TotalSeconds) > maxHelloTimeoutSeconds)
         {
-            _logger.LogWarning("Request with invalid timestamp: {TimeStampUnixMs}", request.Payload.TimeStampUnixMs);
-            return Task.FromException<HelloReply>(new Exception("Request with invalid timestamp: " + request.Payload.TimeStampUnixMs));
+            _logger.LogWarning("Request with invalid timestamp: {TimeStampUnixMs}", request.Payload.TimeStampUnixUtcMs);
+            return Task.FromException<HelloReply>(new Exception("Request with invalid timestamp: " + request.Payload.TimeStampUnixUtcMs));
         }
 
         var otherRsa = new RSACng();
@@ -71,8 +71,8 @@ public class GreeterService : Greeter.GreeterBase
         }
 
         //we need the payload bytes to verify the signature
-        var payloadBytes = request.Payload.ToByteArray();
-        var payloadHash = SHA256.Create().ComputeHash(payloadBytes);
+        var requestPayloadBytes = request.Payload.ToByteArray();
+        var payloadHash = SHA256.Create().ComputeHash(requestPayloadBytes);
         
         if (!otherRsa.VerifyHash(payloadHash,request.PayloadSignature.ToArray(), HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1))
         {
@@ -85,11 +85,9 @@ public class GreeterService : Greeter.GreeterBase
             return Task.FromException<HelloReply>(new Exception("Request with banned key: " + request.Payload.PublicKey));
         }
         var selfPublicKey = _selfEncryptionService.PublicKey;
-        var publicKeyHash = SHA256.Create().ComputeHash(selfPublicKey);
-        var signedPublicHash = _selfEncryptionService.SignHash(publicKeyHash);
         if (_persistenceService.PendingKeys.TryGetValue(request.Payload.PublicKey, out var pendingExpiration))
         {
-            if (pendingExpiration > currentTime)
+            if (pendingExpiration > currentUtcTime)
             {
                 _logger.LogInformation("Request while busy key: {PublicKey} will be BANNED", request.Payload.PublicKey);
                 _persistenceService.BannedKeys.Add(request.Payload.PublicKey);
@@ -102,14 +100,23 @@ public class GreeterService : Greeter.GreeterBase
             {
                 return Task.FromException<HelloReply>(new Exception("Could not create handshake"));
             }
+
+            var payload = new HelloReply.Types.Proceed.Types.Payload
+            {
+                PublicKey = ByteString.CopyFrom(selfPublicKey),
+                Iv = ByteString.CopyFrom(handshake.Iv),
+                EncryptedSessionKey = ByteString.CopyFrom(handshake.EncryptedSessionKey),
+                TimeStampUnixUtcMs = currentUtcTime.ToUnixTimeMilliseconds()
+            };
+            var responsePayloadBytes= payload.ToByteArray();
+            var responsePayloadHash = SHA256.Create().ComputeHash(responsePayloadBytes);
+            var responsePayloadHashSignature = _selfEncryptionService.SignHash(responsePayloadHash);
             return Task.FromResult(new HelloReply
             {
                 Proceed = new HelloReply.Types.Proceed
                 {
-                    PublicKey = ByteString.CopyFrom(selfPublicKey),
-                    PublicKeySignature = ByteString.CopyFrom(signedPublicHash),
-                    Iv = ByteString.CopyFrom(handshake.Iv),
-                    EncryptedSessionKey = ByteString.CopyFrom(handshake.EncryptedSessionKey)
+                    Payload = payload,
+                    PayloadSignature = ByteString.CopyFrom(responsePayloadHashSignature),
                 }
             });
         }
@@ -121,19 +128,27 @@ public class GreeterService : Greeter.GreeterBase
             {
                 return Task.FromException<HelloReply>(new Exception("Could not create handshake"));
             }
+            var payload = new HelloReply.Types.Proceed.Types.Payload
+            {
+                PublicKey = ByteString.CopyFrom(selfPublicKey),
+                Iv = ByteString.CopyFrom(handshake.Iv),
+                EncryptedSessionKey = ByteString.CopyFrom(handshake.EncryptedSessionKey),
+                TimeStampUnixUtcMs = currentUtcTime.ToUnixTimeMilliseconds()
+            };
+            var responsePayloadBytes= payload.ToByteArray();
+            var responsePayloadHash = SHA256.Create().ComputeHash(responsePayloadBytes);
+            var responsePayloadHashSignature = _selfEncryptionService.SignHash(responsePayloadHash);
             return Task.FromResult(new HelloReply
             {
                 Proceed = new HelloReply.Types.Proceed
                 {
-                    PublicKey = ByteString.CopyFrom(selfPublicKey),
-                    PublicKeySignature = ByteString.CopyFrom(signedPublicHash),
-                    Iv = ByteString.CopyFrom(handshake.Iv),
-                    EncryptedSessionKey = ByteString.CopyFrom(handshake.EncryptedSessionKey)
+                    Payload = payload,
+                    PayloadSignature = ByteString.CopyFrom(responsePayloadHashSignature),
                 }
             });
         }
 
-        var dateTimeOffset = currentTime.AddSeconds(notBefore);
+        var dateTimeOffset = currentUtcTime.AddSeconds(notBefore);
         _persistenceService.PendingKeys.AddOrUpdate(request.Payload.PublicKey, dateTimeOffset, (_,_) => dateTimeOffset);
         return Task.FromResult(new HelloReply
         {
