@@ -25,6 +25,7 @@
         <OutputDir>obj\Debug\net8.0\</OutputDir>
         <Generator>MSBuild:Compile</Generator>
       </Protobuf>
+      <Protobuf Include="Protos\stream.proto"/>
     </ItemGroup>
 
 </Project>
