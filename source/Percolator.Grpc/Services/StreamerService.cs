@@ -61,19 +61,28 @@ public class StreamerService : Streamer.StreamerBase
                 continue;
             }
 
-            var payloadBytes = await session.Current.SessionKey.NaiveDecrypt(message.EncryptedPayload.ToByteArray());
+            var encryptedBytes = message.EncryptedPayload.ToByteArray();
+            var payloadBytes = await session.Current.SessionKey.NaiveDecrypt(encryptedBytes);
             var payload = StreamMessage.Types.Payload.Parser.ParseFrom(payloadBytes);
+            if (payload.PayloadTypeCase == StreamMessage.Types.Payload.PayloadTypeOneofCase.None)
+            {
+                _logger.LogWarning("Request with missing payload type");
+                continue;
+            }
             switch (payload.PayloadTypeCase)
             {
                 case StreamMessage.Types.Payload.PayloadTypeOneofCase.UserChat:
                 {
                     var userMessage = payload.UserChat;
-                    var chatMessage = new StreamMessage.Types.Payload.Types.UserMessage
+                    var chatResponse = new StreamMessage.Types.Payload
                     {
-                        TimeStampUnixUtcMs = currentUtcTime.ToUnixTimeMilliseconds(),
-                        Message = $"responding to : {userMessage.Message}"
+                        UserChat = new StreamMessage.Types.Payload.Types.UserMessage
+                        {
+                            TimeStampUnixUtcMs = currentUtcTime.ToUnixTimeMilliseconds(),
+                            Message = $"responding to : {userMessage.Message}"
+                        }
                     };
-                    var chatBytes = chatMessage.ToByteArray();
+                    var chatBytes = chatResponse.ToByteArray();
                     var encryptedPayload = await session.Current.SessionKey.NaiveEncrypt(chatBytes);
 
                     await responseStream.WriteAsync(new StreamMessage
@@ -85,12 +94,15 @@ public class StreamerService : Streamer.StreamerBase
                 }
                 case StreamMessage.Types.Payload.PayloadTypeOneofCase.Ping:
                     var pingMessage = payload.Ping;
-                    var pongResponse = new StreamMessage.Types.Payload.Types.PongMessage
+                    var pingResponse = new StreamMessage.Types.Payload
                     {
-                        TimeStampUnixUtcMs = currentUtcTime.ToUnixTimeMilliseconds(),
-                        Delta = currentUtcTime.ToUnixTimeMilliseconds() - pingMessage.TimeStampUnixUtcMs
+                        Pong = new StreamMessage.Types.Payload.Types.PongMessage
+                        {
+                            TimeStampUnixUtcMs = currentUtcTime.ToUnixTimeMilliseconds(),
+                            Delta = currentUtcTime.ToUnixTimeMilliseconds() - pingMessage.TimeStampUnixUtcMs
+                        }
                     };
-                    var pongBytes = pongResponse.ToByteArray();
+                    var pongBytes = pingResponse.ToByteArray();
                     var encryptedPong = await session.Current.SessionKey.NaiveEncrypt(pongBytes);
                     await responseStream.WriteAsync(new StreamMessage
                     {

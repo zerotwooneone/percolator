@@ -1,10 +1,10 @@
 ﻿using System.Security.Cryptography;
 using Google.Protobuf;
-using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
 using Grpc.Net.Client;
 using Percolator.Protobuf;
 using Percolator.Protobuf.Stream;
+using StreamMessage = Percolator.Protobuf.Stream.StreamMessage;
 
 /*const string KeyContainerName = "Percolator";
 var csp = new CspParameters
@@ -117,33 +117,69 @@ if (!serverIdentityRsa.VerifyData(responsePayloadBytes, reply.Proceed.PayloadSig
 Console.WriteLine("Success! The response payload matches the signature");
 
 var streamClient = new Streamer.StreamerClient(channel);
-var stream = streamClient.Begin((Metadata?)null,null,new CancellationTokenSource(TimeSpan.FromSeconds(3)).Token);
+var stream = streamClient.Begin(); //cancellationToken: new CancellationTokenSource(TimeSpan.FromSeconds(30)).Token
 
-var pingMessage = new Percolator.Protobuf.Stream.StreamMessage.Types.Payload.Types.PingMessage
+var payloadMessage = new StreamMessage.Types.Payload
 {
-    TimeStampUnixUtcMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+    Ping = new StreamMessage.Types.Payload.Types.PingMessage
+    {
+        TimeStampUnixUtcMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+    }
 };
+var pingBytes = payloadMessage.ToByteArray();
+var encrypedPingBytes = await aes.NaiveEncrypt(pingBytes);
+var pingWrapper = new StreamMessage
+{
+    Identity = ByteString.CopyFrom(identityRsa.ExportRSAPublicKey()),
+    EncryptedPayload = ByteString.CopyFrom(encrypedPingBytes)
+};
+
+var readTask = new TaskFactory().StartNew(() =>
+{
+    while (stream.ResponseStream.MoveNext().Result)
+    {
+        var streamMessage = stream.ResponseStream.Current;
+        var decryptedBytes = aes.NaiveDecrypt(streamMessage.EncryptedPayload.ToByteArray()).Result;
+        var responsePayload = StreamMessage.Types.Payload.Parser.ParseFrom(decryptedBytes);
+        if (responsePayload.PayloadTypeCase == StreamMessage.Types.Payload.PayloadTypeOneofCase.None)
+        {
+            Console.WriteLine("got empty payload");
+            continue;
+        }
+        switch (responsePayload.PayloadTypeCase)
+        {
+            case StreamMessage.Types.Payload.PayloadTypeOneofCase.Pong:
+                Console.WriteLine($"got pong: {responsePayload.Pong.Delta}");
+                break;
+            case StreamMessage.Types.Payload.PayloadTypeOneofCase.UserChat:
+                Console.WriteLine($"got user chat: {responsePayload.UserChat.Message}");
+                break;
+        }
+    }
+    int x = 1;
+}); //, new CancellationTokenSource(TimeSpan.FromSeconds(30)).Token
+
+
+var pingTask = stream.RequestStream.WriteAsync(pingWrapper)
+    /*.ContinueWith(_=>stream.RequestStream.WriteAsync(new StreamMessage
+    {
+        Identity = ByteString.CopyFrom(identityRsa.ExportRSAPublicKey()),
+        EncryptedPayload = ByteString.CopyFrom(new StreamMessage.Types.Payload
+        {
+            UserChat = new StreamMessage.Types.Payload.Types.UserMessage
+            {
+                TimeStampUnixUtcMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                Message = "hello"
+            }
+        }.ToByteArray())
+    }))*/
+    ;
+
+await Task.WhenAll(readTask,pingTask);
+
+stream.Dispose();
 
 //var h = new Handler();
 //h.Handle(client).Wait();
 
 Console.WriteLine("Press any key to exit...");
-
-public class Handler
-{
-    public async Task Handle(Greeter.GreeterClient client)
-    {
-        await using var writeFile = File.OpenWrite($"{DateTimeOffset.Now.ToUnixTimeMilliseconds()}.bmp");
-        var stream = client.Gimme(new Empty(), new CallOptions());
-
-        while (await stream.ResponseStream.MoveNext())
-        {
-            var streamMessage = stream.ResponseStream.Current;
-            //Console.WriteLine(streamMessage);
-            var bytes = streamMessage.Bytes.SelectMany(b=>b.ToByteArray()).ToArray();
-            writeFile.Position = streamMessage.StartIndex;
-            writeFile.Write(bytes, 0, bytes.Length);
-        }
-        await writeFile.FlushAsync();
-    }
-}
