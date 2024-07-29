@@ -3,6 +3,7 @@ using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
 using Percolator.Protobuf;
+using StreamMessage = Percolator.Protobuf.StreamMessage;
 
 namespace Percolator.Grpc.Services;
 
