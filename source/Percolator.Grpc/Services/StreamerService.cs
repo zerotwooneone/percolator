@@ -29,97 +29,102 @@ public class StreamerService : Streamer.StreamerBase
     public override async Task Begin(IAsyncStreamReader<StreamMessage> requestStream,
         IServerStreamWriter<StreamMessage> responseStream, ServerCallContext context)
     {
-        while (await requestStream.MoveNext())
+        //todo: add a message handling queue on a single thread
+        await Task.Factory.StartNew( () =>
         {
-            var currentUtcTime = _busyService.GetCurrentUtcTime();
-            var message = requestStream.Current;
+            while (requestStream.MoveNext().Result)
+            {
+                var currentUtcTime = _busyService.GetCurrentUtcTime();
+                var message = requestStream.Current;
 
-            if (message.Identity == null)
-            {
-                _logger.LogWarning("Request with missing identity key");
-                continue;
-            }
-
-            const int arbitraryMinimumKeyLength = 120;
-            if (message.Identity.Length < arbitraryMinimumKeyLength)
-            {
-                _logger.LogWarning("Request with invalid key length: {PublicKeyLength}", message.Identity.Length);
-                continue;
-            }
-
-            if (!_persistenceService.KnownSessionsByIdentity.TryGetValue(
-                    message.Identity,
-                    out var session))
-            {
-                _logger.LogWarning("Request with unknown identity");
-                continue;
-            }
-
-            if (message.EncryptedPayload == null || message.EncryptedPayload.Length == 0)
-            {
-                _logger.LogWarning("Request with missing encrypted payload");
-                continue;
-            }
-
-            var encryptedBytes = message.EncryptedPayload.ToByteArray();
-            var payloadBytes = await session.Current.SessionKey.NaiveDecrypt(encryptedBytes);
-            var payload = StreamMessage.Types.Payload.Parser.ParseFrom(payloadBytes);
-            if (payload.PayloadTypeCase == StreamMessage.Types.Payload.PayloadTypeOneofCase.None)
-            {
-                _logger.LogWarning("Request with missing payload type");
-                continue;
-            }
-            switch (payload.PayloadTypeCase)
-            {
-                case StreamMessage.Types.Payload.PayloadTypeOneofCase.UserChat:
+                if (message.Identity == null)
                 {
-                    var userMessage = payload.UserChat;
-                    var chatResponse = new StreamMessage.Types.Payload
-                    {
-                        UserChat = new StreamMessage.Types.Payload.Types.UserMessage
-                        {
-                            TimeStampUnixUtcMs = currentUtcTime.ToUnixTimeMilliseconds(),
-                            Message = $"responding to : {userMessage.Message}"
-                        }
-                    };
-                    var chatBytes = chatResponse.ToByteArray();
-                    var encryptedPayload = await session.Current.SessionKey.NaiveEncrypt(chatBytes);
-
-                    await responseStream.WriteAsync(new StreamMessage
-                    {
-                        Identity = ByteString.CopyFrom(_selfEncryptionService.Identity.ExportRSAPublicKey()),
-                        EncryptedPayload = ByteString.CopyFrom(encryptedPayload)
-                    });
-                    break;
-                }
-                case StreamMessage.Types.Payload.PayloadTypeOneofCase.Ping:
-                    var pingMessage = payload.Ping;
-                    var pingResponse = new StreamMessage.Types.Payload
-                    {
-                        Pong = new StreamMessage.Types.Payload.Types.PongMessage
-                        {
-                            TimeStampUnixUtcMs = currentUtcTime.ToUnixTimeMilliseconds(),
-                            Delta = currentUtcTime.ToUnixTimeMilliseconds() - pingMessage.TimeStampUnixUtcMs
-                        }
-                    };
-                    var pongBytes = pingResponse.ToByteArray();
-                    var encryptedPong = await session.Current.SessionKey.NaiveEncrypt(pongBytes);
-                    await responseStream.WriteAsync(new StreamMessage
-                    {
-                        Identity = ByteString.CopyFrom(_selfEncryptionService.Identity.ExportRSAPublicKey()),
-                        EncryptedPayload = ByteString.CopyFrom(encryptedPong)
-                    });
-                    break;
-                case StreamMessage.Types.Payload.PayloadTypeOneofCase.Heartbeat:
-                case StreamMessage.Types.Payload.PayloadTypeOneofCase.Pong:
+                    _logger.LogWarning("Request with missing identity key");
                     continue;
-                    break;
-                default:
-                    _logger.LogWarning("Unknown payload type: {PayloadType}", (int)payload.PayloadTypeCase);
-                    break;
+                }
+
+                const int arbitraryMinimumKeyLength = 120;
+                if (message.Identity.Length < arbitraryMinimumKeyLength)
+                {
+                    _logger.LogWarning("Request with invalid key length: {PublicKeyLength}", message.Identity.Length);
+                    continue;
+                }
+
+                if (!_persistenceService.KnownSessionsByIdentity.TryGetValue(
+                        message.Identity,
+                        out var session))
+                {
+                    _logger.LogWarning("Request with unknown identity");
+                    continue;
+                }
+
+                if (message.EncryptedPayload == null || message.EncryptedPayload.Length == 0)
+                {
+                    _logger.LogWarning("Request with missing encrypted payload");
+                    continue;
+                }
+
+                var encryptedBytes = message.EncryptedPayload.ToByteArray();
+                var payloadBytes = session.Current.SessionKey.NaiveDecrypt(encryptedBytes).Result;
+                var payload = StreamMessage.Types.Payload.Parser.ParseFrom(payloadBytes);
+                if (payload.PayloadTypeCase == StreamMessage.Types.Payload.PayloadTypeOneofCase.None)
+                {
+                    _logger.LogWarning("Request with missing payload type");
+                    continue;
+                }
+
+                switch (payload.PayloadTypeCase)
+                {
+                    case StreamMessage.Types.Payload.PayloadTypeOneofCase.UserChat:
+                    {
+                        var userMessage = payload.UserChat;
+                        var chatResponse = new StreamMessage.Types.Payload
+                        {
+                            UserChat = new StreamMessage.Types.Payload.Types.UserMessage
+                            {
+                                TimeStampUnixUtcMs = currentUtcTime.ToUnixTimeMilliseconds(),
+                                Message = $"responding to : {userMessage.Message}"
+                            }
+                        };
+                        var chatBytes = chatResponse.ToByteArray();
+                        var encryptedPayload = session.Current.SessionKey.NaiveEncrypt(chatBytes).Result;
+
+                         responseStream.WriteAsync(new StreamMessage
+                        {
+                            Identity = ByteString.CopyFrom(_selfEncryptionService.Identity.ExportRSAPublicKey()),
+                            EncryptedPayload = ByteString.CopyFrom(encryptedPayload)
+                        }).Wait();
+                        break;
+                    }
+                    case StreamMessage.Types.Payload.PayloadTypeOneofCase.Ping:
+                        var pingMessage = payload.Ping;
+                        var pingResponse = new StreamMessage.Types.Payload
+                        {
+                            Pong = new StreamMessage.Types.Payload.Types.PongMessage
+                            {
+                                TimeStampUnixUtcMs = currentUtcTime.ToUnixTimeMilliseconds(),
+                                Delta = currentUtcTime.ToUnixTimeMilliseconds() - pingMessage.TimeStampUnixUtcMs
+                            }
+                        };
+                        var pongBytes = pingResponse.ToByteArray();
+                        var encryptedPong = session.Current.SessionKey.NaiveEncrypt(pongBytes).Result;
+                        responseStream.WriteAsync(new StreamMessage
+                        {
+                            Identity = ByteString.CopyFrom(_selfEncryptionService.Identity.ExportRSAPublicKey()),
+                            EncryptedPayload = ByteString.CopyFrom(encryptedPong)
+                        }).Wait();
+                        break;
+                    case StreamMessage.Types.Payload.PayloadTypeOneofCase.Heartbeat:
+                    case StreamMessage.Types.Payload.PayloadTypeOneofCase.Pong:
+                        continue;
+                        break;
+                    default:
+                        _logger.LogWarning("Unknown payload type: {PayloadType}", (int) payload.PayloadTypeCase);
+                        break;
+                }
             }
-        }
 
-
+            int x = 0;
+        });
     }
 }

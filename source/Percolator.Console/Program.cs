@@ -150,10 +150,10 @@ var readTask = new TaskFactory().StartNew(() =>
         {
             case StreamMessage.Types.Payload.PayloadTypeOneofCase.Pong:
                 Console.WriteLine($"got pong: {responsePayload.Pong.Delta}");
-                break;
+                continue;
             case StreamMessage.Types.Payload.PayloadTypeOneofCase.UserChat:
                 Console.WriteLine($"got user chat: {responsePayload.UserChat.Message}");
-                break;
+                continue;
         }
     }
     int x = 1;
@@ -161,18 +161,22 @@ var readTask = new TaskFactory().StartNew(() =>
 
 
 var pingTask = stream.RequestStream.WriteAsync(pingWrapper)
-    /*.ContinueWith(_=>stream.RequestStream.WriteAsync(new StreamMessage
+    .ContinueWith(_=>
     {
-        Identity = ByteString.CopyFrom(identityRsa.ExportRSAPublicKey()),
-        EncryptedPayload = ByteString.CopyFrom(new StreamMessage.Types.Payload
+        Thread.Sleep(300);
+        stream.RequestStream.WriteAsync(new StreamMessage
         {
-            UserChat = new StreamMessage.Types.Payload.Types.UserMessage
+            Identity = ByteString.CopyFrom(identityRsa.ExportRSAPublicKey()),
+            EncryptedPayload = ByteString.CopyFrom(aes.NaiveEncrypt(new StreamMessage.Types.Payload
             {
-                TimeStampUnixUtcMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-                Message = "hello"
-            }
-        }.ToByteArray())
-    }))*/
+                UserChat = new StreamMessage.Types.Payload.Types.UserMessage
+                {
+                    TimeStampUnixUtcMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                    Message = "hello"
+                }
+            }.ToByteArray()).Result)
+        }).Wait();
+    })
     ;
 
 await Task.WhenAll(readTask,pingTask);
