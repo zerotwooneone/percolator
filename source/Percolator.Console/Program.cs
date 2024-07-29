@@ -6,6 +6,9 @@ using Percolator.Protobuf;
 using Percolator.Protobuf.Stream;
 using StreamMessage = Percolator.Protobuf.Stream.StreamMessage;
 
+var appCancellationTokenSource = new CancellationTokenSource();
+Console.CancelKeyPress += (_, e) => appCancellationTokenSource.Cancel();
+
 /*const string KeyContainerName = "Percolator";
 var csp = new CspParameters
 {
@@ -73,9 +76,9 @@ do
         }
     }
     Console.WriteLine("Response Type: " + reply.ResponseTypeCase);
-} while (!success);
+} while (!success && !appCancellationTokenSource.Token.IsCancellationRequested);
 
-if (reply.ResponseTypeCase != HelloReply.ResponseTypeOneofCase.Proceed)
+if (reply.ResponseTypeCase != HelloReply.ResponseTypeOneofCase.Proceed || appCancellationTokenSource.IsCancellationRequested)
 {
     return;
 }
@@ -117,7 +120,7 @@ if (!serverIdentityRsa.VerifyData(responsePayloadBytes, reply.Proceed.PayloadSig
 Console.WriteLine("Success! The response payload matches the signature");
 
 var streamClient = new Streamer.StreamerClient(channel);
-var stream = streamClient.Begin(); //cancellationToken: new CancellationTokenSource(TimeSpan.FromSeconds(30)).Token
+var stream = streamClient.Begin(cancellationToken: appCancellationTokenSource.Token);
 
 var payloadMessage = new StreamMessage.Types.Payload
 {
@@ -136,8 +139,12 @@ var pingWrapper = new StreamMessage
 
 var readTask = new TaskFactory().StartNew(() =>
 {
-    while (stream.ResponseStream.MoveNext().Result)
+    while (!appCancellationTokenSource.IsCancellationRequested && stream.ResponseStream.MoveNext().Result)
     {
+        if (appCancellationTokenSource.IsCancellationRequested)
+        {
+            break;
+        }
         var streamMessage = stream.ResponseStream.Current;
         var decryptedBytes = aes.NaiveDecrypt(streamMessage.EncryptedPayload.ToByteArray()).Result;
         var responsePayload = StreamMessage.Types.Payload.Parser.ParseFrom(decryptedBytes);
@@ -156,8 +163,7 @@ var readTask = new TaskFactory().StartNew(() =>
                 continue;
         }
     }
-    int x = 1;
-}); //, new CancellationTokenSource(TimeSpan.FromSeconds(30)).Token
+}, appCancellationTokenSource.Token); 
 
 
 var pingTask = stream.RequestStream.WriteAsync(pingWrapper)
