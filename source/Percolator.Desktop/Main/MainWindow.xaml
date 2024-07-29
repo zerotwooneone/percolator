@@ -12,7 +12,7 @@
             <RowDefinition Height="Auto"></RowDefinition>
             <RowDefinition></RowDefinition>
         </Grid.RowDefinitions>
-        <ToggleButton Grid.Row="0" >Listen</ToggleButton>
-        <ToggleButton Grid.Row="1" >Announce</ToggleButton>
+        <ToggleButton Grid.Row="0" IsChecked="{Binding IsListening}" Command="{Binding ListenCommand}">Listen</ToggleButton>
+        <ToggleButton Grid.Row="1" IsChecked="{Binding IsAnnouncing}" Command="{Binding AnnounceCommand}">Announce</ToggleButton>
     </Grid>
 </Window>
