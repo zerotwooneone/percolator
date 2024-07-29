@@ -4,6 +4,7 @@ using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
 using Grpc.Net.Client;
 using Percolator.Protobuf;
+using Percolator.Protobuf.Stream;
 
 /*const string KeyContainerName = "Percolator";
 var csp = new CspParameters
@@ -115,6 +116,14 @@ if (!serverIdentityRsa.VerifyData(responsePayloadBytes, reply.Proceed.PayloadSig
 }
 Console.WriteLine("Success! The response payload matches the signature");
 
+var streamClient = new Streamer.StreamerClient(channel);
+var stream = streamClient.Begin((Metadata?)null,null,new CancellationTokenSource(TimeSpan.FromSeconds(3)).Token);
+
+var pingMessage = new Percolator.Protobuf.Stream.StreamMessage.Types.Payload.Types.PingMessage
+{
+    TimeStampUnixUtcMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+};
+
 //var h = new Handler();
 //h.Handle(client).Wait();
 
@@ -138,4 +147,3 @@ public class Handler
         await writeFile.FlushAsync();
     }
 }
-
