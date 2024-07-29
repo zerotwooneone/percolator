@@ -1,0 +1,39 @@
+syntax = "proto3";
+
+import "google/protobuf/empty.proto";
+
+option csharp_namespace = "Percolator.Protobuf.Stream";
+
+package stream;
+
+// this assumes the client has already greeted
+service Streamer {
+  rpc Begin (stream StreamMessage) returns (stream StreamMessage);
+}
+
+message StreamMessage {
+  message Payload {
+    message PingMessage {
+      optional int64 timeStampUnixUtcMs = 1; 
+    }
+    message PongMessage {
+      optional int64 timeStampUnixUtcMs = 1;
+      optional int64 delta = 2;
+    }
+    message UserMessage {
+      string message = 1;
+      optional int64 timeStampUnixUtcMs = 2;
+    }    
+    message UserAckMessage {
+      optional int64 sourceTimestamp = 1;
+    }
+    oneof PayloadType {
+      PingMessage Ping = 1;
+      google.protobuf.Empty Heartbeat = 2;
+      PongMessage Pong = 3;
+      UserMessage UserChat = 4;
+    }
+  }
+  bytes encryptedPayload = 1;
+  bytes identity = 2;
+}

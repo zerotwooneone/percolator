@@ -1,0 +1,55 @@
+syntax = "proto3";
+
+import "google/protobuf/empty.proto";
+
+option csharp_namespace = "Percolator.Protobuf";
+
+package greet;
+
+// The greeting service definition.
+service Greeter {
+  // Sends a greeting
+  rpc SayHello (HelloRequest) returns (HelloReply);
+  rpc Gimme (google.protobuf.Empty) returns (stream StreamMessage);
+}
+
+message HelloRequest {
+  message Payload {
+    bytes identityKey = 1;
+    bytes ephemeralKey = 2;
+    int64 timeStampUnixUtcMs = 3;
+  }
+  Payload payload = 1;
+  bytes payloadSignature = 2;
+}
+
+message HelloReply {
+  message Proceed {
+    message Payload {
+      bytes identityKey = 1;
+      bytes ephemeralKey = 2;
+      bytes iv = 3;
+      //encrypted with ephemeral key
+      bytes encryptedSessionKey = 4;
+      int64 timeStampUnixUtcMs = 5;
+    }
+    Payload payload = 1;
+    //signed with the identity key
+    bytes payloadSignature = 2;
+  }
+
+  message Busy {
+    int64 notBeforeUnixMs = 1;
+  }
+  //string message = 1;
+  oneof responseType {
+    Proceed proceed = 2;
+    Busy busy = 3;
+    google.protobuf.Empty empty = 4;
+  }
+}
+
+message StreamMessage {
+  repeated bytes bytes =1;
+  int32 startIndex = 2;
+}

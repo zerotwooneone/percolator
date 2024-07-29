@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+import "google/protobuf/empty.proto";
+
+option csharp_namespace = "Percolator.Protobuf.Announce";
+
+package announce;
+
+message AnnounceMessage {
+  message Payload {
+    bytes identityKey = 1;
+    bytes ephemeralKey = 2;
+    int64 timeStampUnixUtcMs = 3;
+  }
+  Payload payload = 1;
+  bytes payloadSignature = 2;
+}
