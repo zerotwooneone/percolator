@@ -12,10 +12,7 @@ public class MainWindowViewmodel : INotifyPropertyChanged
     public bool IsListening
     {
         get => _isListening;
-        set
-        {
-            SetField(ref _isListening, value);
-        }
+        set => SetField(ref _isListening, value);
     }
 
     public BaseCommand AnnounceCommand { get; }
