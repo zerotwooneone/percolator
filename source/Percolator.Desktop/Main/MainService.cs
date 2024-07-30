@@ -84,6 +84,12 @@ public class MainService
             _logger.LogWarning("Announce message does not have valid payload");
             return;
         }
+
+        if (announce.Payload.IdentityKey.Equals(
+                ByteString.CopyFrom(_selfEncryptionService.Identity.ExportRSAPublicKey())))
+        {
+            return;
+        }
         if(announce.EphemeralKey == null || 
            announce.EphemeralKey.Length <=0 ||
            announce.EphemeralKeySignature == null ||
