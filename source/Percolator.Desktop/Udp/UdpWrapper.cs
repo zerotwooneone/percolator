@@ -18,7 +18,7 @@ public class UdpWrapper : IBroadcaster, IListener
         IsListening = new ReactiveProperty<bool>(false);
         Port = port;
         UdpClient = new UdpClient();
-        //UdpClient.Client.Bind(new IPEndPoint(IPAddress.Any, port));
+        UdpClient.Client.Bind(new IPEndPoint(IPAddress.Any, port));
         UdpClient.EnableBroadcast = true;
         _received = new Subject<UdpReceiveResult>();
         var receivedConnectable = _received
@@ -33,7 +33,7 @@ public class UdpWrapper : IBroadcaster, IListener
         await UdpClient.SendAsync(
             data, 
             data.Length, 
-            new IPEndPoint(IPAddress.Parse("192.168.1.255"), //todo: get from config
+            new IPEndPoint(IPAddress.Broadcast, 
                 Port)); 
     }
 
@@ -63,6 +63,8 @@ public class UdpWrapper : IBroadcaster, IListener
                 startNewReceive.OnNext(Unit.Default);
                 _received.OnNext(urr);
             });
+        
+        startNewReceive.OnNext(Unit.Default);
 
         IsListening.Value = !cancellationToken.IsCancellationRequested;
         return startNewReceive.LastAsync(cancellationToken);
