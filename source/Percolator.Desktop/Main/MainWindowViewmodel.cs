@@ -5,8 +5,10 @@ namespace Percolator.Desktop.Main;
 
 public class MainWindowViewmodel : INotifyPropertyChanged
 {
+    private readonly MainService _mainService;
     private bool _isListening;
     private bool _isAnnouncing;
+    private CancellationTokenSource _ListenCts=new();
     public BaseCommand ListenCommand { get;  }
 
     public bool IsListening
@@ -23,15 +25,22 @@ public class MainWindowViewmodel : INotifyPropertyChanged
         set => SetField(ref _isAnnouncing, value);
     }
 
-    public MainWindowViewmodel()
+    public MainWindowViewmodel(MainService mainService)
     {
+        _mainService = mainService;
         ListenCommand = new BaseCommand(OnListen);
         AnnounceCommand = new BaseCommand(OnAnnounce);
     }
 
-    private void OnListen(object? obj)
+    private async void OnListen(object? obj)
     {
-        throw new NotImplementedException();
+        await _ListenCts.CancelAsync();
+        if (IsListening)
+        {
+            return;
+        }
+        _ListenCts = new CancellationTokenSource();
+        await _mainService.Listen(_ListenCts.Token);
     }
 
     private void OnAnnounce(object? obj)
