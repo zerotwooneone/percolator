@@ -1,11 +1,13 @@
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
+using Microsoft.Extensions.Logging;
 
 namespace Percolator.Desktop.Main;
 
 public class MainWindowViewmodel : INotifyPropertyChanged
 {
     private readonly MainService _mainService;
+    private readonly ILogger<MainWindowViewmodel> _logger;
     private bool _isListening;
     private bool _isAnnouncing;
     private CancellationTokenSource _ListenCts=new();
@@ -25,9 +27,12 @@ public class MainWindowViewmodel : INotifyPropertyChanged
         set => SetField(ref _isAnnouncing, value);
     }
 
-    public MainWindowViewmodel(MainService mainService)
+    public MainWindowViewmodel(
+        MainService mainService,
+        ILogger<MainWindowViewmodel> logger)
     {
         _mainService = mainService;
+        _logger = logger;
         ListenCommand = new BaseCommand(OnListen);
         AnnounceCommand = new BaseCommand(OnAnnounce);
     }
@@ -35,7 +40,7 @@ public class MainWindowViewmodel : INotifyPropertyChanged
     private async void OnListen(object? obj)
     {
         await _ListenCts.CancelAsync();
-        if (IsListening)
+        if (!IsListening)
         {
             return;
         }
@@ -43,9 +48,10 @@ public class MainWindowViewmodel : INotifyPropertyChanged
         await _mainService.Listen(_ListenCts.Token);
     }
 
-    private void OnAnnounce(object? obj)
+    private async void OnAnnounce(object? obj)
     {
-        throw new NotImplementedException();
+        //await _AnnounceCts.CancelAsync();
+        
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;

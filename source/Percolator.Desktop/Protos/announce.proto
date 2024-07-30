@@ -8,10 +8,13 @@ package announce;
 
 message AnnounceMessage {
   message Payload {
-    bytes identityKey = 1;
-    bytes ephemeralKey = 2;
-    int64 timeStampUnixUtcMs = 3;
+    bytes identityKey = 1;    
+    int64 timeStampUnixUtcMs = 2;
   }
   Payload payload = 1;
+  //signed with ephemeral key
   bytes payloadSignature = 2;
+  bytes ephemeralKey = 3;
+  //signed with identity key
+  bytes ephemeralKeySignature = 4; 
 }
