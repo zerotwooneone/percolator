@@ -12,9 +12,9 @@ public class AnnouncerModel : IEquatable<AnnouncerModel>
     private List<IPAddress> _ipAddresses = new();
     public IReadOnlyCollection<IPAddress> IpAddresses => _ipAddresses;
 
-    public AnnouncerModel(ByteString identity, int? port)
+    public AnnouncerModel(ByteString identity)
     {
-        Port = new ReactiveProperty<int>(port ?? Defaults.DefaultHandshakePort);
+        Port = new ReactiveProperty<int>(Defaults.DefaultHandshakePort);
         Identity = identity;
         Nickname = new ReactiveProperty<string>(Identity.ToBase64());
     }

@@ -46,8 +46,28 @@ public class MainService
             .RefCount();
 
         _selfEncryptionService.EphemeralChanged+=OnEphemeralChanged;
-        PreferredNickname = new ReactiveProperty<string>(Environment.MachineName);
+        PreferredNickname = new ReactiveProperty<string>(GetRandomNickname());
         _announceBytes = GetAnnounceIdentityBytes();
+    }
+
+    private string GetRandomNickname()
+    {
+        var random = new Random();
+        var numberOfChars = random.Next(9, 20);
+        var vowels = new[] {'a', 'A', '4', '@', '^', 'e', 'E', '3', 'i', 'I', '1','o', 'O', '0', 'u', 'U', 'y', 'Y'};
+        var consonants = new[]{'b', 'c', 'd', 'f', 'g', 'h', 'j', 'k', 'l', 'm', 'n', 'p', 'q', 'r', 's', 't', 'v', 'w', 'x', 'z','B', 'C','(', 'D', 'F', 'G', 'H','#','8', 'J', 'K', 'L','7', 'M', 'N', 'P', 'Q', 'R', 'S','$', 'T', 'V', 'W', 'X', 'Z'};
+        var list = new List<char>(numberOfChars*2);
+        var isVowel = random.Next(1,1001) %2 == 0;
+        do
+        {
+            var newPart = isVowel
+                ? Enumerable.Range(0, random.Next(1, 3)).Select(_ => vowels[random.Next(0, vowels.Length)])
+                : new[] {consonants[random.Next(0, consonants.Length)]};
+            list.AddRange(newPart);
+            isVowel = !isVowel;
+        } while (list.Count < numberOfChars);
+
+        return new string(list.ToArray());
     }
 
     private void OnEphemeralChanged(object? sender, EventArgs e)
@@ -143,6 +163,13 @@ public class MainService
                     _logger.LogWarning("Announce message does not have a valid port");
                     return;
                 }
+
+                if (identityMessage.Payload.HasPreferredNickname &&
+                    identityMessage.Payload.PreferredNickname.Length > arbitraryMaxLength)
+                {
+                    _logger.LogWarning("Announce message does not have a valid preferred nickname");
+                    return;
+                }
                 OnIdentityBroadcast(identityMessage, context);
                 break;
             default:
@@ -170,13 +197,20 @@ public class MainService
         var announcerModel = _announcersByIdentity.GetOrAdd(identityMessage.Payload.IdentityKey,_=>
         {
             didAdd = true;
-            int? port = identityMessage.Payload.HasPort
-                ? identityMessage.Payload.Port
-                : null;
-            return new AnnouncerModel(identityMessage.Payload.IdentityKey, port);
+            return new AnnouncerModel(identityMessage.Payload.IdentityKey);
         });
         announcerModel.AddIpAddress(context.RemoteEndPoint.Address);
         announcerModel.LastSeen.Value= DateTimeOffset.Now;
+        if (identityMessage.Payload.HasPreferredNickname)
+        {
+            const int maxNicknameLength=140;
+            var preferredNickname = identityMessage.Payload.PreferredNickname;
+            var identityBase64 = identityMessage.Payload.IdentityKey.ToBase64();
+            var nextNick = preferredNickname.Length ==0 
+                ? identityBase64.Substring(0,Math.Min(maxNicknameLength, identityBase64.Length)) 
+                :preferredNickname.Substring(0, Math.Min( maxNicknameLength, preferredNickname.Length));
+            announcerModel.Nickname.Value = nextNick;
+        }
         if (identityMessage.Payload.HasPort)
         {
             announcerModel.Port.Value = identityMessage.Payload.Port;
