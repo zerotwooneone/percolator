@@ -30,7 +30,8 @@
         <ToggleButton Grid.Row="1" IsChecked="{Binding IsAnnouncing}" Command="{Binding AnnounceCommand}">Announce</ToggleButton>
         <ListView Grid.Row="2"
                   ItemsSource="{Binding Announcers}"
-                  ItemTemplate="{StaticResource AnnouncerTemplate}">
+                  ItemTemplate="{StaticResource AnnouncerTemplate}"
+                  ScrollViewer.HorizontalScrollBarVisibility="Disabled">
             
         </ListView>
     </Grid>
