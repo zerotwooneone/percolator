@@ -104,7 +104,7 @@ public class MainService
             PersistKeyInCsp = false
         };
         identity.ImportRSAPublicKey(announce.Payload.IdentityKey.ToByteArray(), out _);
-        if (!identity.VerifyData(announce.EphemeralKey.ToByteArray(), announce.EphemeralKey.ToByteArray(),
+        if (!identity.VerifyData(announce.EphemeralKey.ToByteArray(), announce.EphemeralKeySignature.ToByteArray(),
                 HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1))
         {
             _logger.LogWarning("Announce message does not have valid ephemeral key signature");
