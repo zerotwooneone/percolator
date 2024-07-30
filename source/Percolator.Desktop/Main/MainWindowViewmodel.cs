@@ -1,6 +1,8 @@
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
+using Google.Protobuf;
 using Microsoft.Extensions.Logging;
+using R3;
 
 namespace Percolator.Desktop.Main;
 
@@ -35,6 +37,13 @@ public class MainWindowViewmodel : INotifyPropertyChanged
         _logger = logger;
         ListenCommand = new BaseCommand(OnListenClicked);
         AnnounceCommand = new BaseCommand(OnAnnounceClicked);
+
+        _mainService.AnnouncerAdded.Subscribe(OnAnnouncerAdded);
+    }
+    
+    private void OnAnnouncerAdded(ByteString announcerId)
+    {
+        _logger.LogInformation("Announcer added: {announcer}", announcerId);
     }
 
     private void OnListenClicked(object? obj)

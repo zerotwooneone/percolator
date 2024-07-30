@@ -19,11 +19,11 @@ public class MainService
     private readonly IBroadcaster _broadcaster;
     private readonly IListener _listener;
     public const int BroadcastPort = 12345;
-    private ConcurrentDictionary<ByteString, ByteString> EpemeralByIdentity = new();
     private CancellationTokenSource _ListenCts=new();
     private readonly Observable<Unit> _announceInterval;
     private IDisposable _announceSubscription = new DummyDisposable();
     private byte[] _announceBytes;
+    private ConcurrentDictionary<ByteString, AnnouncerModel> _othersByIdentity;
 
     public MainService(
         UdpClientFactory udpClientFactory,
@@ -117,32 +117,27 @@ public class MainService
         };
         ephemeral.ImportRSAPublicKey(announce.EphemeralKey.ToByteArray(), out _);
 
-        var alreadyExists = false;
-        EpemeralByIdentity.AddOrUpdate(announce.Payload.IdentityKey,
-            _ => announce.EphemeralKey,
-            (_, oldEphemeral) =>
-            {
-                if (oldEphemeral.Equals(announce.EphemeralKey))
-                {
-                    alreadyExists = true;
-                    return oldEphemeral;
-                }
-
-                _logger.LogInformation("Ephemeral key changed for {Identity}", announce.Payload.IdentityKey.ToBase64());
-                return announce.EphemeralKey;
-            });
-        if (alreadyExists)
-        {
-            return;
-        }
         if(!ephemeral.VerifyData(announce.Payload.ToByteArray(), announce.PayloadSignature.ToByteArray(), 
             HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1))
         {
             _logger.LogWarning("Announce message does not have valid payload signature");
             return;
         }
-        
+
+        var didAdd = false;
+        var announcerModel = _othersByIdentity.GetOrAdd(announce.Payload.IdentityKey,_=>
+        {
+            didAdd = true;
+            return new AnnouncerModel(announce.Payload.IdentityKey, announce.EphemeralKey);
+        });
+        announcerModel.AddIpAddress(result.RemoteEndPoint.Address);
+        announcerModel.Ephemeral.Value = announce.EphemeralKey;
+
+        _announcerAdded.OnNext(announce.EphemeralKey);
     }
+
+    public Observable<ByteString> AnnouncerAdded => _announcerAdded;
+    private Subject<ByteString> _announcerAdded = new();
 
     public void Announce()
     {
