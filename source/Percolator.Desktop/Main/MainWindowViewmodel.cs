@@ -43,7 +43,7 @@ public class MainWindowViewmodel : INotifyPropertyChanged
     
     private void OnAnnouncerAdded(ByteString announcerId)
     {
-        _logger.LogInformation("Announcer added: {announcer}", announcerId);
+        _logger.LogInformation("Announcer added: {announcer}", announcerId.ToBase64());
     }
 
     private void OnListenClicked(object? obj)
