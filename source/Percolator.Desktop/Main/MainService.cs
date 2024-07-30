@@ -133,7 +133,11 @@ public class MainService
         announcerModel.AddIpAddress(result.RemoteEndPoint.Address);
         announcerModel.Ephemeral.Value = announce.EphemeralKey;
 
-        _announcerAdded.OnNext(announce.EphemeralKey);
+        if (didAdd)
+        {
+            _announcerAdded.OnNext(announce.EphemeralKey);
+        }
+        
     }
 
     public Observable<ByteString> AnnouncerAdded => _announcerAdded;
