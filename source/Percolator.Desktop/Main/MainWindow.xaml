@@ -39,8 +39,16 @@
         <StackPanel 
             Orientation="Horizontal"
             Grid.Row="1">
-            <ToggleButton  IsChecked="{Binding IsListening}" Command="{Binding ListenCommand}">Listen</ToggleButton>
-            <ToggleButton IsChecked="{Binding IsAnnouncing}" Command="{Binding AnnounceCommand}">Announce</ToggleButton>    
+            <TextBlock>Listen&gt;</TextBlock>
+            <ToggleButton  
+                IsChecked="{Binding IsListening}" 
+                Command="{Binding ListenCommand}"
+                Style="{StaticResource BetterToggle}" />
+            <TextBlock>Announce&gt;</TextBlock>
+            <ToggleButton 
+                IsChecked="{Binding IsAnnouncing}" 
+                Command="{Binding AnnounceCommand}"
+                Style="{StaticResource BetterToggle}" />
         </StackPanel>
         <Grid 
             Grid.Row="2">
