@@ -50,7 +50,6 @@ public class MainWindowViewmodel : INotifyPropertyChanged
     
     private void OnAnnouncerAdded(ByteString announcerId)
     {
-        _logger.LogInformation("Announcer added: {announcer}", announcerId.ToBase64());
         var announcer = _mainService.Announcers[announcerId];
         var announcerVm = _announcerViewmodelFactory.Create(announcer);
         Announcers.Add(announcerVm);
