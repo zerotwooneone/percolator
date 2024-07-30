@@ -23,7 +23,7 @@ public class MainService
     private readonly Observable<Unit> _announceInterval;
     private IDisposable _announceSubscription = new DummyDisposable();
     private byte[] _announceBytes;
-    private readonly ConcurrentDictionary<ByteString, AnnouncerModel> _othersByIdentity=new();
+    private readonly ConcurrentDictionary<ByteString, AnnouncerModel> _announcersByIdentity= new();
 
     public MainService(
         UdpClientFactory udpClientFactory,
@@ -47,7 +47,6 @@ public class MainService
 
         _selfEncryptionService.EphemeralChanged+=OnEphemeralChanged;
         _announceBytes = GetAnnounceBytes();
-        
     }
 
     private void OnEphemeralChanged(object? sender, EventArgs e)
@@ -125,7 +124,7 @@ public class MainService
         }
 
         var didAdd = false;
-        var announcerModel = _othersByIdentity.GetOrAdd(announce.Payload.IdentityKey,_=>
+        var announcerModel = _announcersByIdentity.GetOrAdd(announce.Payload.IdentityKey,_=>
         {
             didAdd = true;
             return new AnnouncerModel(announce.Payload.IdentityKey, announce.EphemeralKey);
@@ -136,7 +135,7 @@ public class MainService
 
         if (didAdd)
         {
-            _announcerAdded.OnNext(announce.EphemeralKey);
+            _announcerAdded.OnNext(announce.Payload.IdentityKey);
         }
         
     }
@@ -183,6 +182,8 @@ public class MainService
     {
         _announceSubscription.Dispose();
     }
+
+    public IReadOnlyDictionary<ByteString, AnnouncerModel> Announcers => _announcersByIdentity;
 }
 
 internal class DummyDisposable : IDisposable

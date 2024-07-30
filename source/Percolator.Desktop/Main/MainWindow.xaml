@@ -4,8 +4,22 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:Percolator.Desktop"
+        xmlns:main="clr-namespace:Percolator.Desktop.Main"
         mc:Ignorable="d"
         Title="Percolator" Height="450" Width="800">
+    <Window.Resources>
+        <DataTemplate 
+            x:Key="AnnouncerTemplate"
+            DataType="{x:Type main:AnnouncerViewmodel}">
+            <WrapPanel Orientation="Horizontal">
+                <TextBlock Text="{Binding Nickname}" ToolTip="{Binding PublicKey}"></TextBlock>
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                    <Button>Connect</Button>
+                    <Button> X </Button>    
+                </StackPanel>
+            </WrapPanel>
+        </DataTemplate>
+    </Window.Resources>
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"></RowDefinition>
@@ -14,5 +28,10 @@
         </Grid.RowDefinitions>
         <ToggleButton Grid.Row="0" IsChecked="{Binding IsListening}" Command="{Binding ListenCommand}">Listen</ToggleButton>
         <ToggleButton Grid.Row="1" IsChecked="{Binding IsAnnouncing}" Command="{Binding AnnounceCommand}">Announce</ToggleButton>
+        <ListView Grid.Row="2"
+                  ItemsSource="{Binding Announcers}"
+                  ItemTemplate="{StaticResource AnnouncerTemplate}">
+            
+        </ListView>
     </Grid>
 </Window>

@@ -14,8 +14,11 @@ namespace Percolator.Desktop;
 /// </summary>
 public partial class App : Application
 {
+    private ILogger<App> _logger;
+
     private void App_OnStartup(object sender, StartupEventArgs e)
     {
+        WpfProviderInitializer.SetDefaultObservableSystem(UnhandledExceptionHandler);
         var builder = Host.CreateDefaultBuilder()
             .ConfigureServices(services =>
             {
@@ -25,14 +28,19 @@ public partial class App : Application
                 services.AddSingleton<UdpClientFactory>();
                 services.AddSingleton<SelfEncryptionService>(s =>
                     new SelfEncryptionService("6e3c367d-380c-4a0d-8b66-ad397fbac2d9")); //todo: get id from config
+                services.AddSingleton<IAnnouncerViewmodelFactory, ViewmodelFactory>();
             });
-        //todo: wire up error handling to logging
-        //WpfProviderInitializer.SetDefaultObservableSystem();
         
         var host = builder.Build();
+        _logger = host.Services.GetRequiredService<ILogger<App>>();
         
         var mainWindow = host.Services.GetRequiredService<MainWindow>();
         mainWindow.DataContext = host.Services.GetRequiredService<MainWindowViewmodel>();
         mainWindow.Show();
+    }
+
+    private void UnhandledExceptionHandler(Exception ex)
+    {
+        _logger.LogError(ex, "Unhandled exception in app");
     }
 }

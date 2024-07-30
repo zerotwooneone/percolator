@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using Google.Protobuf;
@@ -10,8 +11,10 @@ public class MainWindowViewmodel : INotifyPropertyChanged
 {
     private readonly MainService _mainService;
     private readonly ILogger<MainWindowViewmodel> _logger;
+    private readonly IAnnouncerViewmodelFactory _announcerViewmodelFactory;
     private bool _isListening;
     private bool _isAnnouncing;
+    public ObservableCollection<AnnouncerViewmodel> Announcers { get; } = new();
     
     public BaseCommand ListenCommand { get;  }
 
@@ -31,19 +34,26 @@ public class MainWindowViewmodel : INotifyPropertyChanged
 
     public MainWindowViewmodel(
         MainService mainService,
-        ILogger<MainWindowViewmodel> logger)
+        ILogger<MainWindowViewmodel> logger,
+        IAnnouncerViewmodelFactory announcerViewmodelFactory)
     {
         _mainService = mainService;
         _logger = logger;
+        _announcerViewmodelFactory = announcerViewmodelFactory;
         ListenCommand = new BaseCommand(OnListenClicked);
         AnnounceCommand = new BaseCommand(OnAnnounceClicked);
 
-        _mainService.AnnouncerAdded.Subscribe(OnAnnouncerAdded);
+        _mainService.AnnouncerAdded
+            .ObserveOnCurrentDispatcher()
+            .Subscribe(OnAnnouncerAdded);
     }
     
     private void OnAnnouncerAdded(ByteString announcerId)
     {
         _logger.LogInformation("Announcer added: {announcer}", announcerId.ToBase64());
+        var announcer = _mainService.Announcers[announcerId];
+        var announcerVm = _announcerViewmodelFactory.Create(announcer);
+        Announcers.Add(announcerVm);
     }
 
     private void OnListenClicked(object? obj)
