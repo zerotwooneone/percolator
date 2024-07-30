@@ -67,4 +67,6 @@ public class AnnouncerModel : IEquatable<AnnouncerModel>
             _ipAddresses.RemoveAt(0);
         }
     }
+
+    public ReactiveProperty<DateTimeOffset> LastSeen { get; } = new();
 }

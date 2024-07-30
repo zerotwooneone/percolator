@@ -132,6 +132,7 @@ public class MainService
         });
         announcerModel.AddIpAddress(result.RemoteEndPoint.Address);
         announcerModel.Ephemeral.Value = announce.EphemeralKey;
+        announcerModel.LastSeen.Value= DateTimeOffset.Now;
 
         if (didAdd)
         {
