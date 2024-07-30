@@ -10,22 +10,22 @@ public sealed class AnnouncerViewmodel : INotifyPropertyChanged
     public string PublicKey { get; }
     public ByteString PublicKeyBytes { get; }
 
-    public BindableReactiveProperty<string> Nickname { get; }
+    public IBindableReactiveProperty Nickname { get; }
 
-    public BindableReactiveProperty<string> Ephemeral { get; }
-
-    public BindableReactiveProperty<string> IpAddress { get; }
+    public IBindableReactiveProperty IpAddress { get; }
+    public IBindableReactiveProperty Port { get; }
+    
+    public IBindableReactiveProperty ToolTip { get; }
 
     public AnnouncerViewmodel(AnnouncerModel announcer)
     {
         PublicKeyBytes = announcer.Identity;
         PublicKey = announcer.Identity.ToBase64();
-        Nickname = announcer.Nickname.ToBindableReactiveProperty(announcer.Nickname.Value);
-        Ephemeral = announcer.Ephemeral
-            .Select(b=>b.ToBase64())
-            .ToBindableReactiveProperty(announcer.Ephemeral.Value.ToBase64());
+        Nickname = announcer.Nickname.ToReadOnlyBindableReactiveProperty(announcer.Nickname.Value);
         //todo: update ip address if it changes
         IpAddress = new BindableReactiveProperty<string>(announcer.IpAddresses.Last().ToString());
+        Port = announcer.Port.ToReadOnlyBindableReactiveProperty();
+        ToolTip = announcer.Port.Select(p => $"{announcer.IpAddresses.Last()}:{p}").ToReadOnlyBindableReactiveProperty("");
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;

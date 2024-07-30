@@ -18,7 +18,6 @@ public class MainService
     private readonly SelfEncryptionService _selfEncryptionService;
     private readonly IBroadcaster _broadcaster;
     private readonly IListener _listener;
-    public const int BroadcastPort = 12345;
     private CancellationTokenSource _ListenCts=new();
     private readonly Observable<Unit> _announceInterval;
     private IDisposable _announceSubscription = new DummyDisposable();
@@ -33,8 +32,8 @@ public class MainService
         _udpClientFactory = udpClientFactory;
         _logger = logger;
         _selfEncryptionService = selfEncryptionService;
-        _broadcaster = _udpClientFactory.CreateBroadcaster(BroadcastPort);
-        _listener = _udpClientFactory.CreateListener(BroadcastPort);
+        _broadcaster = _udpClientFactory.CreateBroadcaster(Defaults.DefaultBroadcastPort);
+        _listener = _udpClientFactory.CreateListener(Defaults.DefaultBroadcastPort);
         _listener.Received
             .ObserveOn(new SynchronizationContext())
             .Subscribe(OnReceived);
@@ -46,12 +45,12 @@ public class MainService
             .RefCount();
 
         _selfEncryptionService.EphemeralChanged+=OnEphemeralChanged;
-        _announceBytes = GetAnnounceBytes();
+        _announceBytes = GetAnnounceIdentityBytes();
     }
 
     private void OnEphemeralChanged(object? sender, EventArgs e)
     {
-        _announceBytes = GetAnnounceBytes();
+        _announceBytes = GetAnnounceIdentityBytes();
     }
 
     public void Listen()
@@ -66,78 +65,125 @@ public class MainService
         _ListenCts.Cancel();
     }
     
-    private void OnReceived(UdpReceiveResult result)
+    private void OnReceived(UdpReceiveResult context)
     {
-        if(result.Buffer == null || result.Buffer.Length == 0)
+        if(context.Buffer == null || context.Buffer.Length == 0)
         {
-            _logger.LogWarning("Empty buffer received from {Ip}", result.RemoteEndPoint.Address);
+            _logger.LogWarning("Empty buffer received from {Ip}", context.RemoteEndPoint.Address);
             return;
         }
-        var announce = AnnounceMessage.Parser.ParseFrom(result.Buffer);
-        if (announce.Payload == null || 
-            announce.Payload.IdentityKey == null || 
-            announce.Payload.IdentityKey.Length <=0 ||
-            announce.Payload.TimeStampUnixUtcMs <=0 || 
-            announce.PayloadSignature == null)
+        
+        //todo: make configurable
+        const int arbitraryMaxLength =  400;
+        
+        if (context.Buffer.Length > arbitraryMaxLength)
         {
-            _logger.LogWarning("Announce message does not have valid payload");
+            _logger.LogWarning("Buffer received from {Ip} is too large", context.RemoteEndPoint.Address);
+            //todo: add to IP ban list
             return;
         }
-
-        if (announce.Payload.IdentityKey.Equals(
-                ByteString.CopyFrom(_selfEncryptionService.Identity.ExportRSAPublicKey())))
+        var announce = AnnounceMessage.Parser.ParseFrom(context.Buffer);
+        if (announce.MessageTypeCase == AnnounceMessage.MessageTypeOneofCase.None)
         {
-            return;
-        }
-        if(announce.EphemeralKey == null || 
-           announce.EphemeralKey.Length <=0 ||
-           announce.EphemeralKeySignature == null ||
-           announce.EphemeralKeySignature.Length <=0)
-        {
-            _logger.LogWarning("Announce message does not have valid ephemeral key");
+            _logger.LogWarning("Announce message does not have valid message type");
+            //todo: add to IP ban list
             return;
         }
 
-        var identity = new RSACryptoServiceProvider
+        var currentUtcTime = DateTimeOffset.UtcNow;
+        switch (announce.MessageTypeCase)
         {
-            PersistKeyInCsp = false
-        };
-        identity.ImportRSAPublicKey(announce.Payload.IdentityKey.ToByteArray(), out _);
-        if (!identity.VerifyData(announce.EphemeralKey.ToByteArray(), announce.EphemeralKeySignature.ToByteArray(),
-                HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1))
-        {
-            _logger.LogWarning("Announce message does not have valid ephemeral key signature");
-            return;
+            case AnnounceMessage.MessageTypeOneofCase.Identity:
+                var identityMessage = announce.Identity;
+                if (identityMessage == null || identityMessage.Payload == null)
+                {
+                    _logger.LogWarning("Announce message does not have valid payload");
+                    return;
+                }
+
+                if (!identityMessage.Payload.HasIdentityKey ||
+                    identityMessage.Payload.IdentityKey.Length == 0 ||
+                    identityMessage.Payload.IdentityKey.Length > arbitraryMaxLength)
+                {
+                    _logger.LogWarning("Announce message does not have valid identity key");
+                    return;
+                }
+                
+                if (identityMessage.Payload.IdentityKey.Equals(
+                        ByteString.CopyFrom(_selfEncryptionService.Identity.ExportRSAPublicKey())))
+                {
+                    return;
+                }
+
+                //todo: make this configurable
+                var timestampGracePeriod = TimeSpan.FromMinutes(1);
+                
+                if (!identityMessage.Payload.HasTimeStampUnixUtcMs ||
+                    identityMessage.Payload.TimeStampUnixUtcMs > currentUtcTime.Add(timestampGracePeriod).ToUnixTimeMilliseconds() ||
+                    identityMessage.Payload.TimeStampUnixUtcMs < currentUtcTime.Add(-timestampGracePeriod).ToUnixTimeMilliseconds())
+                {
+                    _logger.LogWarning("Announce message timestamp is invalid");
+                    //todo: add to IP ban list
+                    return;
+                }
+
+                if (!identityMessage.HasPayloadSignature || 
+                    identityMessage.PayloadSignature.Length == 0 ||
+                    identityMessage.PayloadSignature.Length > arbitraryMaxLength)
+                {
+                    _logger.LogWarning("Announce message does not have a payload signature");
+                    return;
+                }
+
+                if (identityMessage.Payload.HasPort &&
+                    identityMessage.Payload.Port <= 0)
+                {
+                    _logger.LogWarning("Announce message does not have a valid port");
+                    return;
+                }
+                OnIdentityBroadcast(identityMessage, context);
+                break;
+            default:
+                _logger.LogError("Announce message does not have valid message type: {MessageType}", announce.MessageTypeCase);
+                return;
         }
+    }
 
-        var ephemeral = new RSACryptoServiceProvider
-        {
-            PersistKeyInCsp = false
-        };
-        ephemeral.ImportRSAPublicKey(announce.EphemeralKey.ToByteArray(), out _);
-
-        if(!ephemeral.VerifyData(announce.Payload.ToByteArray(), announce.PayloadSignature.ToByteArray(), 
-            HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1))
+    private void OnIdentityBroadcast(AnnounceMessage.Types.Identity identityMessage, UdpReceiveResult context)
+    {
+        using var identity = new RSACryptoServiceProvider();
+        identity.PersistKeyInCsp = false;
+        var identityBytes = identityMessage.Payload.IdentityKey.ToByteArray();
+        identity.ImportRSAPublicKey(identityBytes, out _);
+        var payloadBytes = identityMessage.Payload.ToByteArray();
+        if(!identity.VerifyData(payloadBytes, identityMessage.PayloadSignature.ToByteArray(), 
+               HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1))
         {
             _logger.LogWarning("Announce message does not have valid payload signature");
+            //todo: add to IP ban list
             return;
         }
 
         var didAdd = false;
-        var announcerModel = _announcersByIdentity.GetOrAdd(announce.Payload.IdentityKey,_=>
+        var announcerModel = _announcersByIdentity.GetOrAdd(identityMessage.Payload.IdentityKey,_=>
         {
             didAdd = true;
-            return new AnnouncerModel(announce.Payload.IdentityKey, announce.EphemeralKey);
+            int? port = identityMessage.Payload.HasPort
+                ? identityMessage.Payload.Port
+                : null;
+            return new AnnouncerModel(identityMessage.Payload.IdentityKey, port);
         });
-        announcerModel.AddIpAddress(result.RemoteEndPoint.Address);
-        announcerModel.Ephemeral.Value = announce.EphemeralKey;
+        announcerModel.AddIpAddress(context.RemoteEndPoint.Address);
         announcerModel.LastSeen.Value= DateTimeOffset.Now;
+        if (identityMessage.Payload.HasPort)
+        {
+            announcerModel.Port.Value = identityMessage.Payload.Port;
+        }
 
         if (didAdd)
         {
-            _announcerAdded.OnNext(announce.Payload.IdentityKey);
+            _announcerAdded.OnNext(identityMessage.Payload.IdentityKey);
         }
-        
     }
 
     public Observable<ByteString> AnnouncerAdded => _announcerAdded;
@@ -153,28 +199,31 @@ public class MainService
             });
     }
 
-    private byte[] GetAnnounceBytes()
+    private byte[] GetAnnounceIdentityBytes(int? handshakePort=null)
     {
-        var payload = new AnnounceMessage.Types.Payload
+        var payload = new AnnounceMessage.Types.Identity.Types.Payload()
         {
             IdentityKey = ByteString.CopyFrom(_selfEncryptionService.Identity.ExportRSAPublicKey()),
             TimeStampUnixUtcMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
         };
+        if (handshakePort != null && handshakePort != Defaults.DefaultHandshakePort)
+        {
+            payload.Port = handshakePort.Value;
+        }
         var payloadBytes = payload.ToByteArray();
         var announceBytes = new AnnounceMessage
         {
-            EphemeralKey = ByteString.CopyFrom(_selfEncryptionService.Ephemeral.ExportRSAPublicKey()),
-            EphemeralKeySignature = ByteString.CopyFrom(_selfEncryptionService.Identity.SignData(
-                _selfEncryptionService.Ephemeral.ExportRSAPublicKey(), 
-                HashAlgorithmName.SHA256, 
-                RSASignaturePadding.Pkcs1)),
-            Payload =payload,
-            PayloadSignature = ByteString.CopyFrom(_selfEncryptionService.Ephemeral.SignData(
-                payloadBytes, 
-                HashAlgorithmName.SHA256, 
-                RSASignaturePadding.Pkcs1
-            ))
+            Identity = new AnnounceMessage.Types.Identity
+            {
+                Payload = payload,
+                PayloadSignature = ByteString.CopyFrom(_selfEncryptionService.Identity.SignData(
+                    payloadBytes,
+                    HashAlgorithmName.SHA256,
+                    RSASignaturePadding.Pkcs1
+                ))
+            }
         }.ToByteArray();
+            
         return announceBytes;
     }
 

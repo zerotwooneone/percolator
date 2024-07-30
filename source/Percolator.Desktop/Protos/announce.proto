@@ -7,14 +7,17 @@ option csharp_namespace = "Percolator.Protobuf.Announce";
 package announce;
 
 message AnnounceMessage {
-  message Payload {
-    bytes identityKey = 1;    
-    int64 timeStampUnixUtcMs = 2;
+  message Identity {
+    message Payload {
+      optional bytes identityKey = 1;
+      optional int64 timeStampUnixUtcMs = 2;
+      optional int32 port = 3;
+    }
+    optional Payload payload = 1;
+    //signed with identity key
+    optional bytes payloadSignature = 2;
   }
-  Payload payload = 1;
-  //signed with ephemeral key
-  bytes payloadSignature = 2;
-  bytes ephemeralKey = 3;
-  //signed with identity key
-  bytes ephemeralKeySignature = 4; 
+  oneof messageType {
+      Identity identity = 1;
+  }
 }

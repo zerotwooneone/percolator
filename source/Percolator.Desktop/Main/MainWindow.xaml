@@ -19,7 +19,7 @@
                 <TextBlock 
                     Grid.Column="0"
                     Text="{Binding Nickname}" 
-                    ToolTip="{Binding PublicKey}"></TextBlock>
+                    ToolTip="{Binding ToolTip}"></TextBlock>
                 <StackPanel 
                     Grid.Column="1"
                     Orientation="Horizontal">

@@ -7,14 +7,14 @@ namespace Percolator.Desktop.Main;
 public class AnnouncerModel : IEquatable<AnnouncerModel>
 {
     public ByteString Identity { get; }
-    public ReactiveProperty<ByteString> Ephemeral { get; }
+    public ReactiveProperty<int> Port { get; }
     public ReactiveProperty<string> Nickname { get; }
     private List<IPAddress> _ipAddresses = new();
     public IReadOnlyCollection<IPAddress> IpAddresses => _ipAddresses;
 
-    public AnnouncerModel(ByteString identity, ByteString ephemeral)
+    public AnnouncerModel(ByteString identity, int? port)
     {
-        Ephemeral = new ReactiveProperty<ByteString>(ephemeral);
+        Port = new ReactiveProperty<int>(port ?? Defaults.DefaultHandshakePort);
         Identity = identity;
         Nickname = new ReactiveProperty<string>(Identity.ToBase64());
     }
