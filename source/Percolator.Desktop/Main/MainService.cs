@@ -23,6 +23,7 @@ public class MainService
     private IDisposable _announceSubscription = new DummyDisposable();
     private byte[] _announceBytes;
     private readonly ConcurrentDictionary<ByteString, AnnouncerModel> _announcersByIdentity= new();
+    public ReactiveProperty<string> PreferredNickname { get; }
 
     public MainService(
         UdpClientFactory udpClientFactory,
@@ -45,6 +46,7 @@ public class MainService
             .RefCount();
 
         _selfEncryptionService.EphemeralChanged+=OnEphemeralChanged;
+        PreferredNickname = new ReactiveProperty<string>(Environment.MachineName);
         _announceBytes = GetAnnounceIdentityBytes();
     }
 
@@ -204,7 +206,8 @@ public class MainService
         var payload = new AnnounceMessage.Types.Identity.Types.Payload()
         {
             IdentityKey = ByteString.CopyFrom(_selfEncryptionService.Identity.ExportRSAPublicKey()),
-            TimeStampUnixUtcMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+            TimeStampUnixUtcMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+            PreferredNickname = PreferredNickname.Value
         };
         if (handshakePort != null && handshakePort != Defaults.DefaultHandshakePort)
         {
