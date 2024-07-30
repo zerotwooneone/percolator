@@ -23,7 +23,7 @@ public class MainService
     private readonly Observable<Unit> _announceInterval;
     private IDisposable _announceSubscription = new DummyDisposable();
     private byte[] _announceBytes;
-    private ConcurrentDictionary<ByteString, AnnouncerModel> _othersByIdentity;
+    private readonly ConcurrentDictionary<ByteString, AnnouncerModel> _othersByIdentity=new();
 
     public MainService(
         UdpClientFactory udpClientFactory,
