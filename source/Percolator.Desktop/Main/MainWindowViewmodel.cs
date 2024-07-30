@@ -10,7 +10,7 @@ public class MainWindowViewmodel : INotifyPropertyChanged
     private readonly ILogger<MainWindowViewmodel> _logger;
     private bool _isListening;
     private bool _isAnnouncing;
-    private CancellationTokenSource _ListenCts=new();
+    
     public BaseCommand ListenCommand { get;  }
 
     public bool IsListening
@@ -33,25 +33,34 @@ public class MainWindowViewmodel : INotifyPropertyChanged
     {
         _mainService = mainService;
         _logger = logger;
-        ListenCommand = new BaseCommand(OnListen);
-        AnnounceCommand = new BaseCommand(OnAnnounce);
+        ListenCommand = new BaseCommand(OnListenClicked);
+        AnnounceCommand = new BaseCommand(OnAnnounceClicked);
     }
 
-    private async void OnListen(object? obj)
+    private void OnListenClicked(object? obj)
     {
-        await _ListenCts.CancelAsync();
-        if (!IsListening)
+        //IsListening changes before this is called, so logic is inverted
+        if (IsListening)
         {
-            return;
+            _mainService.Listen();
         }
-        _ListenCts = new CancellationTokenSource();
-        await _mainService.Listen(_ListenCts.Token);
+        else
+        {
+            _mainService.StopListen();
+        }
     }
 
-    private async void OnAnnounce(object? obj)
+    private void OnAnnounceClicked(object? obj)
     {
-        //await _AnnounceCts.CancelAsync();
-        
+        //IsAnnouncing changes before this is called, so logic is inverted
+        if (IsAnnouncing)
+        {
+             _mainService.Announce();
+        }
+        else
+        {
+            _mainService.StopAnnounce();
+        }
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;

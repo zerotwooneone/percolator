@@ -3,6 +3,7 @@ using System.Net.Sockets;
 using System.Security.Cryptography;
 using Google.Protobuf;
 using Microsoft.Extensions.Logging;
+using Percolator.Desktop.Crypto;
 using Percolator.Desktop.Udp;
 using Percolator.Desktop.Udp.Interfaces;
 using Percolator.Protobuf.Announce;
@@ -14,28 +15,56 @@ public class MainService
 {
     private readonly UdpClientFactory _udpClientFactory;
     private readonly ILogger<MainService> _logger;
+    private readonly SelfEncryptionService _selfEncryptionService;
     private readonly IBroadcaster _broadcaster;
     private readonly IListener _listener;
     public const int BroadcastPort = 12345;
     private ConcurrentDictionary<ByteString, ByteString> EpemeralByIdentity = new();
+    private CancellationTokenSource _ListenCts=new();
+    private readonly Observable<Unit> _announceInterval;
+    private IDisposable _announceSubscription = new DummyDisposable();
+    private byte[] _announceBytes;
 
     public MainService(
         UdpClientFactory udpClientFactory,
-        ILogger<MainService> logger)
+        ILogger<MainService> logger,
+        SelfEncryptionService selfEncryptionService)
     {
         _udpClientFactory = udpClientFactory;
         _logger = logger;
+        _selfEncryptionService = selfEncryptionService;
         _broadcaster = _udpClientFactory.CreateBroadcaster(BroadcastPort);
         _listener = _udpClientFactory.CreateListener(BroadcastPort);
         _listener.Received
             .ObserveOn(new SynchronizationContext())
             .Subscribe(OnReceived);
-    }
-    public Task Listen(CancellationToken cancellationToken)
-    {
-        _listener.Listen(cancellationToken);
         
-        return Task.CompletedTask;
+        _announceInterval = Observable
+            .Interval(TimeSpan.FromSeconds(5))  //todo: make configurable()
+            .ObserveOn(new SynchronizationContext())
+            .Publish()
+            .RefCount();
+
+        _selfEncryptionService.EphemeralChanged+=OnEphemeralChanged;
+        _announceBytes = GetAnnounceBytes();
+        
+    }
+
+    private void OnEphemeralChanged(object? sender, EventArgs e)
+    {
+        _announceBytes = GetAnnounceBytes();
+    }
+
+    public void Listen()
+    {
+        _ListenCts.Cancel();
+        _ListenCts = new CancellationTokenSource();
+        _listener.Listen(_ListenCts.Token);
+    }
+    
+    public void StopListen()
+    {
+        _ListenCts.Cancel();
     }
     
     private void OnReceived(UdpReceiveResult result)
@@ -108,5 +137,52 @@ public class MainService
         }
         
     }
-     
+
+    public void Announce()
+    {
+        _announceSubscription.Dispose();
+        _announceSubscription = _announceInterval
+            .Subscribe(_ =>
+            {
+                _broadcaster.Broadcast(_announceBytes);
+            });
+    }
+
+    private byte[] GetAnnounceBytes()
+    {
+        var payload = new AnnounceMessage.Types.Payload
+        {
+            IdentityKey = ByteString.CopyFrom(_selfEncryptionService.Identity.ExportRSAPublicKey()),
+            TimeStampUnixUtcMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+        };
+        var payloadBytes = payload.ToByteArray();
+        var announceBytes = new AnnounceMessage
+        {
+            EphemeralKey = ByteString.CopyFrom(_selfEncryptionService.Ephemeral.ExportRSAPublicKey()),
+            EphemeralKeySignature = ByteString.CopyFrom(_selfEncryptionService.Identity.SignData(
+                _selfEncryptionService.Ephemeral.ExportRSAPublicKey(), 
+                HashAlgorithmName.SHA256, 
+                RSASignaturePadding.Pkcs1)),
+            Payload =payload,
+            PayloadSignature = ByteString.CopyFrom(_selfEncryptionService.Ephemeral.SignData(
+                payloadBytes, 
+                HashAlgorithmName.SHA256, 
+                RSASignaturePadding.Pkcs1
+            ))
+        }.ToByteArray();
+        return announceBytes;
+    }
+
+    public void StopAnnounce()
+    {
+        _announceSubscription.Dispose();
+    }
+}
+
+internal class DummyDisposable : IDisposable
+{
+    public void Dispose()
+    {
+        
+    }
 }
