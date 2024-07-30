@@ -21,7 +21,6 @@ public class MainService
     private CancellationTokenSource _ListenCts=new();
     private readonly Observable<Unit> _announceInterval;
     private IDisposable _announceSubscription = new DummyDisposable();
-    private byte[] _announceBytes;
     private readonly ConcurrentDictionary<ByteString, AnnouncerModel> _announcersByIdentity= new();
     public ReactiveProperty<string> PreferredNickname { get; }
 
@@ -45,9 +44,7 @@ public class MainService
             .Publish()
             .RefCount();
 
-        _selfEncryptionService.EphemeralChanged+=OnEphemeralChanged;
         PreferredNickname = new ReactiveProperty<string>(GetRandomNickname());
-        _announceBytes = GetAnnounceIdentityBytes();
     }
 
     private string GetRandomNickname()
@@ -68,11 +65,6 @@ public class MainService
         } while (list.Count < numberOfChars);
 
         return new string(list.ToArray());
-    }
-
-    private void OnEphemeralChanged(object? sender, EventArgs e)
-    {
-        _announceBytes = GetAnnounceIdentityBytes();
     }
 
     public void Listen()
@@ -231,16 +223,16 @@ public class MainService
         _announceSubscription = _announceInterval
             .Subscribe(_ =>
             {
-                _broadcaster.Broadcast(_announceBytes);
+                _broadcaster.Broadcast(GetAnnounceIdentityBytes(DateTimeOffset.Now));
             });
     }
 
-    private byte[] GetAnnounceIdentityBytes(int? handshakePort=null)
+    private byte[] GetAnnounceIdentityBytes(DateTimeOffset currentTime,int? handshakePort=null)
     {
         var payload = new AnnounceMessage.Types.Identity.Types.Payload()
         {
             IdentityKey = ByteString.CopyFrom(_selfEncryptionService.Identity.ExportRSAPublicKey()),
-            TimeStampUnixUtcMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+            TimeStampUnixUtcMs = currentTime.ToUniversalTime().ToUnixTimeMilliseconds(),
             PreferredNickname = PreferredNickname.Value
         };
         if (handshakePort != null && handshakePort != Defaults.DefaultHandshakePort)
