@@ -37,7 +37,7 @@
         <OutputDir>obj\Debug\net8.0-windows\</OutputDir>
         <Generator>MSBuild:Compile</Generator>
       </Protobuf>
-      <Protobuf Include="Protos\greet.proto" GrpcServices="None"/>
+      <Protobuf Include="Protos\introduce.proto" GrpcServices="None" />
       <Protobuf Include="Protos\stream.proto" GrpcServices="None"/>
     </ItemGroup>
 
