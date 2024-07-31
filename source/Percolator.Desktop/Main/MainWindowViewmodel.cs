@@ -31,6 +31,9 @@ public class MainWindowViewmodel : INotifyPropertyChanged
         get => _isAnnouncing;
         set => SetField(ref _isAnnouncing, value);
     }
+    
+    public BaseCommand OnlineCommand { get; }
+    public BindableReactiveProperty<bool> IsOnline { get; } = new();
 
     public MainWindowViewmodel(
         MainService mainService,
@@ -42,12 +45,13 @@ public class MainWindowViewmodel : INotifyPropertyChanged
         _announcerViewmodelFactory = announcerViewmodelFactory;
         ListenCommand = new BaseCommand(OnListenClicked);
         AnnounceCommand = new BaseCommand(OnAnnounceClicked);
+        OnlineCommand = new BaseCommand(OnOnlineClicked);
 
         _mainService.AnnouncerAdded
             .ObserveOnCurrentDispatcher()
             .Subscribe(OnAnnouncerAdded);
     }
-    
+
     private void OnAnnouncerAdded(ByteString announcerId)
     {
         var announcer = _mainService.Announcers[announcerId];
@@ -78,6 +82,19 @@ public class MainWindowViewmodel : INotifyPropertyChanged
         else
         {
             _mainService.StopAnnounce();
+        }
+    }
+    
+    private void OnOnlineClicked(object? obj)
+    {
+        //value changes before this is called, so logic is inverted
+        if (IsOnline.Value)
+        {
+            _mainService.BeginHandshakeListen();
+        }
+        else
+        {
+            _mainService.StopHandshakeListen();
         }
     }
 

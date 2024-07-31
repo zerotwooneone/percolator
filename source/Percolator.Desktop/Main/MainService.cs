@@ -221,9 +221,9 @@ public class MainService
     {
         _announceSubscription.Dispose();
         _announceSubscription = _announceInterval
-            .Subscribe(_ =>
+            .SubscribeAwait(async (_,c) =>
             {
-                _broadcaster.Broadcast(GetAnnounceIdentityBytes(DateTimeOffset.Now));
+                await _broadcaster.Broadcast(GetAnnounceIdentityBytes(DateTimeOffset.Now),c);
             });
     }
 
@@ -262,6 +262,16 @@ public class MainService
     }
 
     public IReadOnlyDictionary<ByteString, AnnouncerModel> Announcers => _announcersByIdentity;
+
+    public void BeginHandshakeListen()
+    {
+        throw new NotImplementedException();
+    }
+
+    public void StopHandshakeListen()
+    {
+        throw new NotImplementedException();
+    }
 }
 
 internal class DummyDisposable : IDisposable

@@ -28,13 +28,13 @@ public class UdpWrapper : IBroadcaster, IListener
         receivedConnectable.Connect();
     }
 
-    public async Task Broadcast(byte[] data)
+    public async Task Broadcast(byte[] data, CancellationToken cancellationToken)
     {
         await UdpClient.SendAsync(
             data, 
-            data.Length, 
             new IPEndPoint(IPAddress.Broadcast, 
-                Port)); 
+                Port),
+            cancellationToken); 
     }
 
     public Task Listen(CancellationToken cancellationToken)
