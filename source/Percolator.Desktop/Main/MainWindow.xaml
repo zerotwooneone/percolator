@@ -59,7 +59,7 @@
                 <TextBlock Text=" " Margin="15 0"></TextBlock>
                 <TextBlock ToolTip="Allow incoming connections">Online&gt;</TextBlock>
                 <ToggleButton 
-                    IsChecked="{Binding IsOnline}" 
+                    IsChecked="{Binding IsOnline.Value}" 
                     Command="{Binding OnlineCommand}"
                     Style="{StaticResource BetterToggle}"
                     ToolTip="Allow incoming connections"/>
