@@ -90,11 +90,11 @@ public class MainWindowViewmodel : INotifyPropertyChanged
         //value changes before this is called, so logic is inverted
         if (IsOnline.Value)
         {
-            _mainService.BeginHandshakeListen();
+            _mainService.BeginIntroduceListen();
         }
         else
         {
-            _mainService.StopHandshakeListen();
+            _mainService.StopIntroduceListen();
         }
     }
 

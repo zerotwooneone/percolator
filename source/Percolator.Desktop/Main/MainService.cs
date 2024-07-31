@@ -18,12 +18,17 @@ public class MainService
     private readonly SelfEncryptionService _selfEncryptionService;
     private readonly ILoggerFactory _loggerFactory;
     private readonly IBroadcaster _broadcaster;
-    private readonly IListener _listener;
-    private CancellationTokenSource _ListenCts=new();
+    private readonly IListener _broadcastListener;
+    private CancellationTokenSource _broadcastListenCts=new();
     private readonly Observable<Unit> _announceInterval;
     private IDisposable _announceSubscription = new DummyDisposable();
     private readonly ConcurrentDictionary<ByteString, AnnouncerModel> _announcersByIdentity= new();
     public ReactiveProperty<string> PreferredNickname { get; }
+    
+    public Observable<ByteString> AnnouncerAdded => _announcerAdded;
+    private Subject<ByteString> _announcerAdded = new();
+    private CancellationTokenSource _introduceListenCts = new();
+    private IListener _introduceListener;
 
     public MainService(
         UdpClientFactory udpClientFactory,
@@ -36,8 +41,8 @@ public class MainService
         _selfEncryptionService = selfEncryptionService;
         _loggerFactory = loggerFactory;
         _broadcaster = _udpClientFactory.CreateBroadcaster(Defaults.DefaultBroadcastPort);
-        _listener = _udpClientFactory.CreateListener(Defaults.DefaultBroadcastPort);
-        _listener.Received
+        _broadcastListener = _udpClientFactory.CreateListener(Defaults.DefaultBroadcastPort);
+        _broadcastListener.Received
             .ObserveOn(new SynchronizationContext())
             .Subscribe(OnReceived);
         
@@ -48,6 +53,7 @@ public class MainService
             .RefCount();
 
         PreferredNickname = new ReactiveProperty<string>(GetRandomNickname());
+        _introduceListener = _udpClientFactory.CreateListener(Defaults.DefaultIntroducePort);
     }
 
     private string GetRandomNickname()
@@ -72,14 +78,14 @@ public class MainService
 
     public void Listen()
     {
-        _ListenCts.Cancel();
-        _ListenCts = new CancellationTokenSource();
-        _listener.Listen(_ListenCts.Token);
+        _broadcastListenCts.Cancel();
+        _broadcastListenCts = new CancellationTokenSource();
+        _broadcastListener.Listen(_broadcastListenCts.Token);
     }
     
     public void StopListen()
     {
-        _ListenCts.Cancel();
+        _broadcastListenCts.Cancel();
     }
     
     private void OnReceived(UdpReceiveResult context)
@@ -219,9 +225,6 @@ public class MainService
         }
     }
 
-    public Observable<ByteString> AnnouncerAdded => _announcerAdded;
-    private Subject<ByteString> _announcerAdded = new();
-
     public void Announce()
     {
         _announceSubscription.Dispose();
@@ -240,7 +243,7 @@ public class MainService
             TimeStampUnixUtcMs = currentTime.ToUniversalTime().ToUnixTimeMilliseconds(),
             PreferredNickname = PreferredNickname.Value
         };
-        if (handshakePort != null && handshakePort != Defaults.DefaultHandshakePort)
+        if (handshakePort != null && handshakePort != Defaults.DefaultIntroducePort)
         {
             payload.Port = handshakePort.Value;
         }
@@ -268,14 +271,16 @@ public class MainService
 
     public IReadOnlyDictionary<ByteString, AnnouncerModel> Announcers => _announcersByIdentity;
 
-    public void BeginHandshakeListen()
+    public void BeginIntroduceListen()
     {
-        throw new NotImplementedException();
+        _introduceListenCts.Cancel();
+        _introduceListenCts = new CancellationTokenSource();
+        _introduceListener.Listen(_broadcastListenCts.Token);
     }
 
-    public void StopHandshakeListen()
+    public void StopIntroduceListen()
     {
-        throw new NotImplementedException();
+        _introduceListenCts.Cancel();
     }
 }
 

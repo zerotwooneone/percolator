@@ -22,7 +22,7 @@ public class AnnouncerModel : IEquatable<AnnouncerModel>
         ILogger<AnnouncerModel> logger)
     {
         _logger = logger;
-        Port = new ReactiveProperty<int>(Defaults.DefaultHandshakePort);
+        Port = new ReactiveProperty<int>(Defaults.DefaultIntroducePort);
         Identity = identity;
         Nickname = new ReactiveProperty<string>(Identity.ToBase64());
         CanIntroduce = SelectedIpAddress
