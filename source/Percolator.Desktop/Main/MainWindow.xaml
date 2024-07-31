@@ -91,7 +91,8 @@
                     <ListView Grid.Row="1"
                               ItemsSource="{Binding Announcers}"
                               ItemTemplate="{StaticResource AnnouncerTemplate}"
-                              ScrollViewer.HorizontalScrollBarVisibility="Disabled" />
+                              ScrollViewer.HorizontalScrollBarVisibility="Disabled" 
+                              HorizontalContentAlignment="Stretch"/>
                 </Grid>
             </Grid>
             <Grid Grid.Column="1">
