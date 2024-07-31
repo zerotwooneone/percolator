@@ -24,7 +24,7 @@
                     Grid.Column="1"
                     Orientation="Horizontal">
                     <Button 
-                        Foreground="Red"
+                        Visibility="{Binding IntroduceVisible}"
                         Command="{Binding IntroductionCommand}"
                         ToolTip="Send an introduction">Introduce</Button>
                     <Button ToolTip="Add this to the banned list"> X </Button>    

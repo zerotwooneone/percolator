@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
+using System.Windows;
 using Google.Protobuf;
 using R3;
 
@@ -16,6 +17,8 @@ public sealed class AnnouncerViewmodel : INotifyPropertyChanged
     public BindableReactiveProperty<int> Port { get; }
     
     public BindableReactiveProperty<string> ToolTip { get; }
+    public BindableReactiveProperty<Visibility> IntroduceVisible { get; }
+    public BaseCommand IntroduceCommand { get; }
 
     public AnnouncerViewmodel(AnnouncerModel announcer)
     {
@@ -26,6 +29,16 @@ public sealed class AnnouncerViewmodel : INotifyPropertyChanged
         IpAddress = new BindableReactiveProperty<string>(announcer.IpAddresses.Last().ToString());
         Port = announcer.Port.ToBindableReactiveProperty();
         ToolTip = announcer.Port.Select(p => $"{announcer.IpAddresses.Last()}:{p} {Environment.NewLine} {PublicKey}").ToBindableReactiveProperty("");
+
+        IntroduceVisible = announcer.CanIntroduce
+            .Select(b=> b ? Visibility.Visible : Visibility.Collapsed)
+            .ToBindableReactiveProperty();
+        IntroduceCommand = new BaseCommand(OnIntroduceClicked);
+    }
+
+    private void OnIntroduceClicked(object? obj)
+    {
+        throw new NotImplementedException();
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
