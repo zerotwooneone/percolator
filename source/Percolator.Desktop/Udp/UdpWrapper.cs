@@ -5,7 +5,7 @@ using R3;
 
 namespace Percolator.Desktop.Udp;
 
-public class UdpWrapper : IBroadcaster, IListener
+public class UdpWrapper : IBroadcaster, IListener, ISender
 {
     private readonly Subject<UdpReceiveResult> _received;
     public int Port { get; }
@@ -68,5 +68,14 @@ public class UdpWrapper : IBroadcaster, IListener
 
         IsListening.Value = !cancellationToken.IsCancellationRequested;
         return startNewReceive.LastAsync(cancellationToken);
+    }
+
+    public async Task Broadcast(IPAddress destination, byte[] data, CancellationToken cancellationToken)
+    {
+        await UdpClient.SendAsync(
+            data, 
+            new IPEndPoint(destination, 
+                Port),
+            cancellationToken);
     }
 }

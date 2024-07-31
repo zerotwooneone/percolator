@@ -12,6 +12,12 @@ public class UdpClientFactory
          //todo: handle old or errored out clients
          return result;
     }
+    public ISender CreateSender(int port)
+    {
+        var result = _wrappersByPort.GetOrAdd(port, p => new UdpWrapper(p));
+        //todo: handle old or errored out clients
+        return result;
+    }
     public IListener CreateListener(int port)
     {
         var result = _wrappersByPort.GetOrAdd(port, p => new UdpWrapper(p));
