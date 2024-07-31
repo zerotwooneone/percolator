@@ -16,6 +16,7 @@ public class MainService
     private readonly UdpClientFactory _udpClientFactory;
     private readonly ILogger<MainService> _logger;
     private readonly SelfEncryptionService _selfEncryptionService;
+    private readonly ILoggerFactory _loggerFactory;
     private readonly IBroadcaster _broadcaster;
     private readonly IListener _listener;
     private CancellationTokenSource _ListenCts=new();
@@ -27,11 +28,13 @@ public class MainService
     public MainService(
         UdpClientFactory udpClientFactory,
         ILogger<MainService> logger,
-        SelfEncryptionService selfEncryptionService)
+        SelfEncryptionService selfEncryptionService,
+        ILoggerFactory loggerFactory)
     {
         _udpClientFactory = udpClientFactory;
         _logger = logger;
         _selfEncryptionService = selfEncryptionService;
+        _loggerFactory = loggerFactory;
         _broadcaster = _udpClientFactory.CreateBroadcaster(Defaults.DefaultBroadcastPort);
         _listener = _udpClientFactory.CreateListener(Defaults.DefaultBroadcastPort);
         _listener.Received
@@ -189,7 +192,9 @@ public class MainService
         var announcerModel = _announcersByIdentity.GetOrAdd(identityMessage.Payload.IdentityKey,_=>
         {
             didAdd = true;
-            return new AnnouncerModel(identityMessage.Payload.IdentityKey);
+            return new AnnouncerModel(
+                identityMessage.Payload.IdentityKey,
+                _loggerFactory.CreateLogger<AnnouncerModel>());
         });
         announcerModel.AddIpAddress(context.RemoteEndPoint.Address);
         announcerModel.LastSeen.Value= DateTimeOffset.Now;
