@@ -23,9 +23,9 @@ public class UdpWrapper : IBroadcaster, IListener
         _received = new Subject<UdpReceiveResult>();
         var receivedConnectable = _received
             .AsObservable()
-            .Publish();
+            .Publish()
+            .RefCount();
         Received = receivedConnectable;
-        receivedConnectable.Connect();
     }
 
     public async Task Broadcast(byte[] data, CancellationToken cancellationToken)
