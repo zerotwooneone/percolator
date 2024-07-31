@@ -30,56 +30,70 @@
         </DataTemplate>
     </Window.Resources>
     <Grid>
-        <Grid.ColumnDefinitions>
-            <ColumnDefinition></ColumnDefinition>
-            <ColumnDefinition></ColumnDefinition>
-        </Grid.ColumnDefinitions>
-        <Grid Grid.Column="0">
-            <Grid.RowDefinitions>
-                <RowDefinition Height="Auto"></RowDefinition>
-                <RowDefinition Height="Auto"></RowDefinition>
-                <RowDefinition></RowDefinition>
-            </Grid.RowDefinitions>
-            <TextBlock Grid.Row="0" Text="Locals"></TextBlock>
-            <StackPanel 
-                Orientation="Horizontal"
-                Grid.Row="1">
-                <TextBlock ToolTip="Listen for others on the local wifi">Listen&gt;</TextBlock>
-                <ToggleButton  
-                    IsChecked="{Binding IsListening}" 
-                    Command="{Binding ListenCommand}"
-                    Style="{StaticResource BetterToggle}" 
-                    ToolTip="Listen for others on the local wifi"/>
-                <TextBlock ToolTip="Tell others on the local wifi you are here">Announce&gt;</TextBlock>
-                <ToggleButton 
-                    IsChecked="{Binding IsAnnouncing}" 
-                    Command="{Binding AnnounceCommand}"
-                    Style="{StaticResource BetterToggle}"
-                    ToolTip="Tell others on the local wifi you are here"/>
-                <TextBlock Text=" " Margin="15 0"></TextBlock>
-                <TextBlock ToolTip="Allow incoming connections">Online&gt;</TextBlock>
-                <ToggleButton 
-                    IsChecked="{Binding IsOnline.Value}" 
-                    Command="{Binding OnlineCommand}"
-                    Style="{StaticResource BetterToggle}"
-                    ToolTip="Allow incoming connections"/>
-            </StackPanel>
-            <Grid 
-                Grid.Row="2">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"></RowDefinition>
+            <RowDefinition></RowDefinition>
+        </Grid.RowDefinitions>
+        <StackPanel 
+            Grid.Row="0"
+            Orientation="Horizontal">
+            <TextBlock ToolTip="Allow unknown people to identify themselves">Allow Introductions&gt;</TextBlock>
+            <ToggleButton 
+                IsChecked="{Binding AllowIntroductions.Value}"
+                Command="{Binding AllowIntroductionsCommand}"
+                Style="{StaticResource BetterToggle}"
+                ToolTip="Allow unknown people to identify themselves"/>
+            <TextBlock Foreground="Red" ToolTip="Automatically allow unknown people to chat">Auto Reply Introductions&gt;</TextBlock>
+            <ToggleButton 
+                IsChecked="{Binding AutoReply.Value}"
+                Command="{Binding AutoReplyCommand}"
+                Style="{StaticResource BetterToggle}"
+                ToolTip="Automatically allow unknown people to chat"/>
+        </StackPanel>
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition></ColumnDefinition>
+                <ColumnDefinition></ColumnDefinition>
+            </Grid.ColumnDefinitions>
+            <Grid Grid.Column="0" Margin="5 2">
                 <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"></RowDefinition>
                     <RowDefinition Height="Auto"></RowDefinition>
                     <RowDefinition></RowDefinition>
                 </Grid.RowDefinitions>
-            
-                <ListView Grid.Row="1"
-                          ItemsSource="{Binding Announcers}"
-                          ItemTemplate="{StaticResource AnnouncerTemplate}"
-                          ScrollViewer.HorizontalScrollBarVisibility="Disabled" />
+                <TextBlock Grid.Row="0" Text="Local Wifi:"></TextBlock>
+                <StackPanel 
+                    Orientation="Horizontal"
+                    Grid.Row="1">
+                    <TextBlock ToolTip="Listen for others on the local wifi">Listen&gt;</TextBlock>
+                    <ToggleButton  
+                        IsChecked="{Binding IsListening}" 
+                        Command="{Binding ListenCommand}"
+                        Style="{StaticResource BetterToggle}" 
+                        ToolTip="Listen for others on the local wifi"/>
+                    <TextBlock ToolTip="Tell others on the local wifi you are here">Announce&gt;</TextBlock>
+                    <ToggleButton 
+                        IsChecked="{Binding IsAnnouncing}" 
+                        Command="{Binding AnnounceCommand}"
+                        Style="{StaticResource BetterToggle}"
+                        ToolTip="Tell others on the local wifi you are here"/>
+                </StackPanel>
+                <Grid 
+                    Grid.Row="2">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"></RowDefinition>
+                        <RowDefinition></RowDefinition>
+                    </Grid.RowDefinitions>
+                
+                    <ListView Grid.Row="1"
+                              ItemsSource="{Binding Announcers}"
+                              ItemTemplate="{StaticResource AnnouncerTemplate}"
+                              ScrollViewer.HorizontalScrollBarVisibility="Disabled" />
+                </Grid>
+            </Grid>
+            <Grid Grid.Column="1">
+                
             </Grid>
         </Grid>
-        <Grid Grid.Column="1">
-            
-        </Grid>
     </Grid>
-    
 </Window>

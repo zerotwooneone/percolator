@@ -32,8 +32,8 @@ public class MainWindowViewmodel : INotifyPropertyChanged
         set => SetField(ref _isAnnouncing, value);
     }
     
-    public BaseCommand OnlineCommand { get; }
-    public BindableReactiveProperty<bool> IsOnline { get; } = new();
+    public BaseCommand AllowIntroductionsCommand { get; }
+    public BindableReactiveProperty<bool> AllowIntroductions { get; } = new();
 
     public MainWindowViewmodel(
         MainService mainService,
@@ -45,7 +45,7 @@ public class MainWindowViewmodel : INotifyPropertyChanged
         _announcerViewmodelFactory = announcerViewmodelFactory;
         ListenCommand = new BaseCommand(OnListenClicked);
         AnnounceCommand = new BaseCommand(OnAnnounceClicked);
-        OnlineCommand = new BaseCommand(OnOnlineClicked);
+        AllowIntroductionsCommand = new BaseCommand(OnAllowIntroductionsClicked);
 
         _mainService.AnnouncerAdded
             .ObserveOnCurrentDispatcher()
@@ -85,10 +85,10 @@ public class MainWindowViewmodel : INotifyPropertyChanged
         }
     }
     
-    private void OnOnlineClicked(object? obj)
+    private void OnAllowIntroductionsClicked(object? obj)
     {
         //value changes before this is called, so logic is inverted
-        if (IsOnline.Value)
+        if (AllowIntroductions.Value)
         {
             _mainService.BeginIntroduceListen();
         }
