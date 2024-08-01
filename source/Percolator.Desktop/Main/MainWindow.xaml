@@ -34,7 +34,32 @@
         <DataTemplate 
             x:Key="ChatTemplate"
             DataType="main:ChatViewmodel">
-            <TextBlock Text="not empty"></TextBlock>
+            <Grid 
+                Margin="2 5 5 5">
+                <Grid.RowDefinitions>
+                    <RowDefinition></RowDefinition>
+                    <RowDefinition Height="Auto"></RowDefinition>
+                </Grid.RowDefinitions>
+                <ListView Grid.Row="0"
+                          ItemsSource="{Binding Messages}"
+                          ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                          ScrollViewer.VerticalScrollBarVisibility="Visible"
+                          HorizontalContentAlignment="Stretch">
+                    <ListView.ItemTemplate>
+                        <DataTemplate DataType="main:MessageViewmodel">
+                            <TextBlock Text="message placeholder"></TextBlock>
+                        </DataTemplate>
+                    </ListView.ItemTemplate>
+                </ListView>
+                <Grid Grid.Row="1">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition></ColumnDefinition>
+                        <ColumnDefinition Width="Auto"></ColumnDefinition>
+                    </Grid.ColumnDefinitions>
+                    <TextBox Grid.Column="0"></TextBox>
+                    <Button Grid.Column="1" Content="send"></Button>   
+                </Grid>
+            </Grid>
         </DataTemplate>
     </Window.Resources>
     <Grid>
