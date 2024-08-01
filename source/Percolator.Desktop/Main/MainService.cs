@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Net;
 using System.Net.Sockets;
 using System.Security.Cryptography;
 using Google.Protobuf;
@@ -7,11 +8,12 @@ using Percolator.Desktop.Crypto;
 using Percolator.Desktop.Udp;
 using Percolator.Desktop.Udp.Interfaces;
 using Percolator.Protobuf.Announce;
+using Percolator.Protobuf.Introduce;
 using R3;
 
 namespace Percolator.Desktop.Main;
 
-public class MainService
+public class MainService : IAnnouncerService
 {
     private readonly UdpClientFactory _udpClientFactory;
     private readonly ILogger<MainService> _logger;
@@ -42,9 +44,10 @@ public class MainService
         _loggerFactory = loggerFactory;
         _broadcaster = _udpClientFactory.CreateBroadcaster(Defaults.DefaultBroadcastPort);
         _broadcastListener = _udpClientFactory.CreateListener(Defaults.DefaultBroadcastPort);
+        var ingressContext = new SynchronizationContext();
         _broadcastListener.Received
-            .ObserveOn(new SynchronizationContext())
-            .Subscribe(OnReceived);
+            .ObserveOn(ingressContext)
+            .Subscribe(OnReceivedBroadcast);
         
         _announceInterval = Observable
             .Interval(TimeSpan.FromSeconds(5))  //todo: make configurable()
@@ -54,6 +57,9 @@ public class MainService
 
         PreferredNickname = new ReactiveProperty<string>(GetRandomNickname());
         _introduceListener = _udpClientFactory.CreateListener(Defaults.DefaultIntroducePort);
+        _introduceListener.Received 
+            .ObserveOn(ingressContext)
+            .Subscribe(OnReceivedIntroduce);
     }
 
     private string GetRandomNickname()
@@ -87,8 +93,19 @@ public class MainService
     {
         _broadcastListenCts.Cancel();
     }
-    
-    private void OnReceived(UdpReceiveResult context)
+
+    private void OnReceivedIntroduce(UdpReceiveResult context)
+    {
+        if(context.Buffer == null || context.Buffer.Length == 0)
+        {
+            _logger.LogWarning("Empty buffer received from {Ip}", context.RemoteEndPoint.Address);
+            return;
+        }
+        
+        int x = 1;
+    }
+
+    private void OnReceivedBroadcast(UdpReceiveResult context)
     {
         if(context.Buffer == null || context.Buffer.Length == 0)
         {
@@ -281,6 +298,42 @@ public class MainService
     public void StopIntroduceListen()
     {
         _introduceListenCts.Cancel();
+    }
+
+    public async Task SendIntroduction(IPAddress destination, int port, CancellationToken cancellationToken = default)
+    {
+        var udpClient = _udpClientFactory.GetOrCreateSender(port);
+        await udpClient.Send(destination, GetUnknownPublicKeyBytes(DateTimeOffset.Now), cancellationToken);
+    }
+
+    private byte[] GetUnknownPublicKeyBytes(DateTimeOffset currentTime)
+    {
+        var payload = new IntroduceRequest.Types.Payload
+        {
+            IdentityKey =ByteString.CopyFrom( _selfEncryptionService.Identity.ExportRSAPublicKey()),
+            TimeStampUnixUtcMs = currentTime.ToUniversalTime().ToUnixTimeMilliseconds()
+        };
+        var payloadBytes = payload.ToByteArray();
+
+        var ephemeral = new IntroduceRequest.Types.Ephemeral
+        {
+            EphemeralKey = ByteString.CopyFrom(_selfEncryptionService.Ephemeral.ExportRSAPublicKey()),
+            TimeStampUnixUtcMs = currentTime.ToUniversalTime().ToUnixTimeMilliseconds()
+        };
+        var m = new IntroduceRequest
+        {
+            UnknownPublicKey = new IntroduceRequest.Types.UnknownPublicKey
+            {
+                Payload = payload,
+                PayloadSignature = ByteString.CopyFrom(_selfEncryptionService.Ephemeral.SignData(payloadBytes,
+                    HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1)),
+                Ephemeral = ephemeral,
+                EphemeralSignature =
+                    ByteString.CopyFrom(_selfEncryptionService.Identity.SignData(ephemeral.ToByteArray(),
+                        HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1))
+            }
+        };
+        return m.ToByteArray();
     }
 }
 

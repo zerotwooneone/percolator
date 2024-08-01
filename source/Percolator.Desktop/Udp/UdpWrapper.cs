@@ -70,7 +70,7 @@ public class UdpWrapper : IBroadcaster, IListener, ISender
         return startNewReceive.LastAsync(cancellationToken);
     }
 
-    public async Task Broadcast(IPAddress destination, byte[] data, CancellationToken cancellationToken)
+    public async Task Send(IPAddress destination, byte[] data, CancellationToken cancellationToken)
     {
         await UdpClient.SendAsync(
             data, 

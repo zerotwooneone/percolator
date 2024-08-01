@@ -2,12 +2,17 @@ using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Windows;
 using Google.Protobuf;
+using Microsoft.Extensions.Logging;
+using Percolator.Desktop.Udp;
 using R3;
 
 namespace Percolator.Desktop.Main;
 
 public sealed class AnnouncerViewmodel : INotifyPropertyChanged
 {
+    private readonly AnnouncerModel _announcer;
+    private readonly IAnnouncerService _announcerService;
+    private readonly ILogger<AnnouncerViewmodel> _logger;
     public string PublicKey { get; }
     public ByteString PublicKeyBytes { get; }
 
@@ -20,8 +25,14 @@ public sealed class AnnouncerViewmodel : INotifyPropertyChanged
     public BindableReactiveProperty<Visibility> IntroduceVisible { get; }
     public BaseCommand IntroduceCommand { get; }
 
-    public AnnouncerViewmodel(AnnouncerModel announcer)
+    public AnnouncerViewmodel(
+        AnnouncerModel announcer,
+        IAnnouncerService announcerService,
+        ILogger<AnnouncerViewmodel> logger)
     {
+        _announcer = announcer;
+        _announcerService = announcerService;
+        _logger = logger;
         PublicKeyBytes = announcer.Identity;
         PublicKey = announcer.Identity.ToBase64();
         Nickname = announcer.Nickname.ToBindableReactiveProperty(announcer.Nickname.Value);
@@ -33,12 +44,33 @@ public sealed class AnnouncerViewmodel : INotifyPropertyChanged
         IntroduceVisible = announcer.CanIntroduce
             .Select(b=> b ? Visibility.Visible : Visibility.Collapsed)
             .ToBindableReactiveProperty();
-        IntroduceCommand = new BaseCommand(OnIntroduceClicked);
+        IntroduceCommand = new BaseCommand(OnIntroduceClicked, _=>IntroduceInProgress);
     }
 
-    private void OnIntroduceClicked(object? obj)
+    public bool IntroduceInProgress { get; private set; }
+
+    private async void OnIntroduceClicked(object? obj)
     {
-        throw new NotImplementedException();
+        if (!_announcer.CanIntroduce.CurrentValue || _announcer.SelectedIpAddress.CurrentValue == null)
+        {
+            return;
+        }
+
+        IntroduceInProgress = true;
+        IntroduceCommand.RaiseCanExecuteChanged();
+        try
+        {
+            await _announcerService.SendIntroduction(_announcer.SelectedIpAddress.CurrentValue, Port.Value);
+        }
+        catch (Exception e)
+        {
+            _logger.LogError(e, "Failed to introduce");
+        }
+        finally
+        {
+            IntroduceInProgress = false;
+            IntroduceCommand.RaiseCanExecuteChanged();
+        }
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
