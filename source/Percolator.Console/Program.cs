@@ -38,7 +38,7 @@ using var ephemeralRsa = new RSACryptoServiceProvider()
     PersistKeyInCsp = false,
 };
 
-using var channel = GrpcChannel.ForAddress("http://localhost:5076");
+using var channel = GrpcChannel.ForAddress("http://192.168.1.252:5076");
 var client = new Greeter.GreeterClient(channel);
 
 var success = false;
