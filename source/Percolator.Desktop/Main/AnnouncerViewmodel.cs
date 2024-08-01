@@ -44,7 +44,7 @@ public sealed class AnnouncerViewmodel : INotifyPropertyChanged
         IntroduceVisible = announcer.CanIntroduce
             .Select(b=> b ? Visibility.Visible : Visibility.Collapsed)
             .ToBindableReactiveProperty();
-        IntroduceCommand = new BaseCommand(OnIntroduceClicked, _=>IntroduceInProgress);
+        IntroduceCommand = new BaseCommand(OnIntroduceClicked, _=>!IntroduceInProgress);
     }
 
     public bool IntroduceInProgress { get; private set; }

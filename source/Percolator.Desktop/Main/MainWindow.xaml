@@ -25,7 +25,7 @@
                     Orientation="Horizontal">
                     <Button 
                         Visibility="{Binding IntroduceVisible}"
-                        Command="{Binding IntroductionCommand}"
+                        Command="{Binding IntroduceCommand}"
                         ToolTip="Send an introduction">Introduce</Button>
                     <Button ToolTip="Add this to the banned list"> X </Button>    
                 </StackPanel>

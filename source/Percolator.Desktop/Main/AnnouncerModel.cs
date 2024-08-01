@@ -76,10 +76,14 @@ public class AnnouncerModel : IEquatable<AnnouncerModel>
         if (_ipAddresses.Count > sanityLimit)
         {
             _logger.LogWarning("too many ip addresses");
+            while (_ipAddresses.Count > sanityLimit)
+            {
+                _ipAddresses.RemoveAt(0);
+            }
         }
-        while (_ipAddresses.Count > sanityLimit)
+        if(_ipAddresses.Count == 1)
         {
-            _ipAddresses.RemoveAt(0);
+            _selectedIpAddress.Value = _ipAddresses[0];
         }
     }
 
