@@ -13,7 +13,7 @@ message IntroduceRequest {
   } 
   message Payload {
     optional bytes identityKey = 1;
-    optional int64 timeStampUnixUtcMs = 3;
+    optional int64 timeStampUnixUtcMs = 2;
   }  
   message UnknownPublicKey {
     optional Payload payload = 1;
