@@ -31,6 +31,11 @@
                 </StackPanel>
             </Grid>
         </DataTemplate>
+        <DataTemplate 
+            x:Key="ChatTemplate"
+            DataType="main:ChatViewmodel">
+            <TextBlock Text="not empty"></TextBlock>
+        </DataTemplate>
     </Window.Resources>
     <Grid>
         <Grid.RowDefinitions>
@@ -97,7 +102,7 @@
                 </Grid>
             </Grid>
             <Grid Grid.Column="1">
-                <ContentControl>
+                <ContentControl ContentTemplate="{StaticResource ChatTemplate}">
                     <ContentControl.Style>
                         <Style TargetType="ContentControl">
                             <Setter Property="Content" Value="{Binding SelectedAnnouncer.Value}" />
