@@ -148,6 +148,26 @@ public class MainService : IAnnouncerService
             _logger.LogWarning("Blacklisted identity received from {Ip}", context.RemoteEndPoint.Address);
             return;
         }
+
+        var currentUtcTime = DateTimeOffset.UtcNow;
+        //todo: make this configurable
+        var timestampGracePeriod = TimeSpan.FromMinutes(1);
+        if (!introduce.UnknownPublicKey.Payload.HasTimeStampUnixUtcMs ||
+            introduce.UnknownPublicKey.Payload.TimeStampUnixUtcMs < currentUtcTime.Add(-timestampGracePeriod).ToUnixTimeMilliseconds() ||
+            introduce.UnknownPublicKey.Payload.TimeStampUnixUtcMs > currentUtcTime.Add(timestampGracePeriod).ToUnixTimeMilliseconds())
+        {
+            _logger.LogWarning("Introduce payload does not have valid timestamp");
+            //todo: add to IP ban list
+            return;
+        }
+        
+        if (!introduce.UnknownPublicKey.Payload.HasEphemeralKey || 
+            introduce.UnknownPublicKey.Payload.EphemeralKey.Length == 0)
+        {
+            _logger.LogWarning("Introduce message does not have ephemeral");
+            //todo: add to IP ban list
+            return;
+        }
     }
 
     private void OnReceivedBroadcast(UdpReceiveResult context)
@@ -368,26 +388,18 @@ public class MainService : IAnnouncerService
         var payload = new IntroduceRequest.Types.Payload
         {
             IdentityKey =ByteString.CopyFrom( _selfEncryptionService.Identity.ExportRSAPublicKey()),
+            EphemeralKey = ByteString.CopyFrom(_selfEncryptionService.Ephemeral.ExportRSAPublicKey()),
             TimeStampUnixUtcMs = currentTime.ToUniversalTime().ToUnixTimeMilliseconds()
         };
         var payloadBytes = payload.ToByteArray();
 
-        var ephemeral = new IntroduceRequest.Types.Ephemeral
-        {
-            EphemeralKey = ByteString.CopyFrom(_selfEncryptionService.Ephemeral.ExportRSAPublicKey()),
-            TimeStampUnixUtcMs = currentTime.ToUniversalTime().ToUnixTimeMilliseconds()
-        };
         var m = new IntroduceRequest
         {
             UnknownPublicKey = new IntroduceRequest.Types.UnknownPublicKey
             {
                 Payload = payload,
-                PayloadSignature = ByteString.CopyFrom(_selfEncryptionService.Ephemeral.SignData(payloadBytes,
+                PayloadSignature = ByteString.CopyFrom(_selfEncryptionService.Identity.SignData(payloadBytes,
                     HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1)),
-                Ephemeral = ephemeral,
-                EphemeralSignature =
-                    ByteString.CopyFrom(_selfEncryptionService.Identity.SignData(ephemeral.ToByteArray(),
-                        HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1))
             }
         };
         return m.ToByteArray();
