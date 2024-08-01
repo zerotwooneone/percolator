@@ -420,7 +420,7 @@ public class MainService : IAnnouncerService
 
     private byte[] GetUnknownPublicKeyBytes(DateTimeOffset currentTime)
     {
-        var payload = new IntroduceRequest.Types.Payload
+        var payload = new IntroduceRequest.Types.UnknownPublicKey.Types.Payload
         {
             IdentityKey =ByteString.CopyFrom( _selfEncryptionService.Identity.ExportRSAPublicKey()),
             EphemeralKey = ByteString.CopyFrom(_selfEncryptionService.Ephemeral.ExportRSAPublicKey()),
