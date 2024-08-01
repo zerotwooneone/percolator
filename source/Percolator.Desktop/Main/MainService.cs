@@ -119,7 +119,35 @@ public class MainService : IAnnouncerService
             //todo: add to IP ban list
             return;
         }
-        
+
+        var introduce = IntroduceRequest.Parser.ParseFrom(context.Buffer);
+        if (introduce.MessageTypeCase == IntroduceRequest.MessageTypeOneofCase.None)
+        {
+            _logger.LogWarning("Introduce message does not have valid message type");
+            //todo: add to IP ban list
+            return;
+        }
+
+        if (introduce.UnknownPublicKey.Payload == null)
+        {
+            _logger.LogWarning("Introduce message does not have payload");
+            //todo: add to IP ban list
+            return;
+        }
+
+        if (!introduce.UnknownPublicKey.Payload.HasIdentityKey ||
+            introduce.UnknownPublicKey.Payload.IdentityKey.Length == 0)
+        {
+            _logger.LogWarning("Introduce message does not have identity key");
+            //todo: add to IP ban list
+            return;
+        }
+
+        if (_identityBlacklist.Contains(introduce.UnknownPublicKey.Payload.IdentityKey))
+        {
+            _logger.LogWarning("Blacklisted identity received from {Ip}", context.RemoteEndPoint.Address);
+            return;
+        }
     }
 
     private void OnReceivedBroadcast(UdpReceiveResult context)
@@ -169,6 +197,12 @@ public class MainService : IAnnouncerService
                     identityMessage.Payload.IdentityKey.Length > arbitraryMaxLength)
                 {
                     _logger.LogWarning("Announce message does not have valid identity key");
+                    return;
+                }
+                
+                if (_identityBlacklist.Contains(identityMessage.Payload.IdentityKey))
+                {
+                    _logger.LogWarning("Blacklisted identity received from {Ip}", context.RemoteEndPoint.Address);
                     return;
                 }
                 
