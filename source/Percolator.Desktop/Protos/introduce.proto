@@ -15,31 +15,33 @@ message IntroduceRequest {
     //signed with identity key
     bytes payloadSignature = 2;    
   }
+  message IntroduceReply {
+    message Proceed {
+      message Payload {
+        optional bytes identityKey = 1;
+        optional bytes ephemeralKey = 2;
+        optional bytes iv = 3;
+        //encrypted with ephemeral key
+        optional bytes encryptedSessionKey = 4;
+        optional int64 timeStampUnixUtcMs = 5;
+      }
+      optional Payload payload = 1;
+      //signed with the identity key
+      optional bytes payloadSignature = 2;
+    }
+
+    message Busy {
+      optional int64 notBeforeUnixUtcMs = 1;
+    }
+    oneof responseType {
+      Proceed proceed = 1;
+      Busy busy = 2;
+    }
+  }
   oneof messageType {
       UnknownPublicKey unknownPublicKey = 1;
+      IntroduceReply introduceReply = 2;
   } 
 }
 
-message IntroduceReply {
-  message Proceed {
-    message Payload {
-      optional bytes identityKey = 1;
-      optional bytes ephemeralKey = 2;
-      optional bytes iv = 3;
-      //encrypted with ephemeral key
-      optional bytes encryptedSessionKey = 4;
-      optional int64 timeStampUnixUtcMs = 5;
-    }
-    optional Payload payload = 1;
-    //signed with the identity key
-    optional bytes payloadSignature = 2;    
-  }
 
-  message Busy {
-    optional int64 notBeforeUnixUtcMs = 1;
-  }
-  oneof responseType {
-    Proceed proceed = 1;
-    Busy busy = 2;
-  }
-}
