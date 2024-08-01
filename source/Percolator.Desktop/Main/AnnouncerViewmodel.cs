@@ -24,7 +24,7 @@ public sealed class AnnouncerViewmodel : INotifyPropertyChanged
     public BindableReactiveProperty<string> ToolTip { get; }
     public BindableReactiveProperty<Visibility> IntroduceVisible { get; }
     public BaseCommand IntroduceCommand { get; }
-    public  ReadOnlyReactiveProperty<bool> CanChat=> _announcer.CanChat;
+    public  ReadOnlyReactiveProperty<bool> CanChat { get; }
 
     public AnnouncerViewmodel(
         AnnouncerModel announcer,
@@ -45,6 +45,9 @@ public sealed class AnnouncerViewmodel : INotifyPropertyChanged
         IntroduceVisible = announcer.CanIntroduce
             .Select(b=> b ? Visibility.Visible : Visibility.Collapsed)
             .ToBindableReactiveProperty();
+        CanChat = _announcer.CanChat
+            .ObserveOnCurrentDispatcher()
+            .ToReadOnlyReactiveProperty();
         IntroduceCommand = new BaseCommand(OnIntroduceClicked, _=>!IntroduceInProgress);
     }
 
