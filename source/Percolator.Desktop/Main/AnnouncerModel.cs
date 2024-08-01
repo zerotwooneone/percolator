@@ -1,4 +1,5 @@
 using System.Net;
+using System.Security.Cryptography;
 using Google.Protobuf;
 using Microsoft.Extensions.Logging;
 using R3;
@@ -25,6 +26,10 @@ public class AnnouncerModel : IEquatable<AnnouncerModel>
         Port = new ReactiveProperty<int>(Defaults.DefaultIntroducePort);
         Identity = identity;
         Nickname = new ReactiveProperty<string>(Identity.ToBase64());
+        CanChat = Ephemeral
+            .CombineLatest(_selectedIpAddress, (ephemeral, ip) => (ephemeral, ip))
+            .Select(e => e.ephemeral != null && e.ip != null)
+            .ToReadOnlyReactiveProperty();
         CanIntroduce = SelectedIpAddress
             .Select(ip => ip != null)
             .ToReadOnlyReactiveProperty();
@@ -110,4 +115,7 @@ public class AnnouncerModel : IEquatable<AnnouncerModel>
     }
 
     public ReactiveProperty<DateTimeOffset> LastSeen { get; } = new();
+    public ReactiveProperty<RSACryptoServiceProvider?> Ephemeral { get; } = new();
+
+    public ReadOnlyReactiveProperty<bool> CanChat { get; }
 }

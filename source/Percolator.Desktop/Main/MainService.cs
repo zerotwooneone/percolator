@@ -128,22 +128,23 @@ public class MainService : IAnnouncerService
             return;
         }
 
-        if (introduce.UnknownPublicKey.Payload == null)
+        var payload = introduce.UnknownPublicKey.Payload;
+        if (payload == null)
         {
             _logger.LogWarning("Introduce message does not have payload");
             //todo: add to IP ban list
             return;
         }
 
-        if (!introduce.UnknownPublicKey.Payload.HasIdentityKey ||
-            introduce.UnknownPublicKey.Payload.IdentityKey.Length == 0)
+        if (!payload.HasIdentityKey ||
+            payload.IdentityKey.Length == 0)
         {
             _logger.LogWarning("Introduce message does not have identity key");
             //todo: add to IP ban list
             return;
         }
 
-        if (_identityBlacklist.Contains(introduce.UnknownPublicKey.Payload.IdentityKey))
+        if (_identityBlacklist.Contains(payload.IdentityKey))
         {
             _logger.LogWarning("Blacklisted identity received from {Ip}", context.RemoteEndPoint.Address);
             return;
@@ -152,21 +153,54 @@ public class MainService : IAnnouncerService
         var currentUtcTime = DateTimeOffset.UtcNow;
         //todo: make this configurable
         var timestampGracePeriod = TimeSpan.FromMinutes(1);
-        if (!introduce.UnknownPublicKey.Payload.HasTimeStampUnixUtcMs ||
-            introduce.UnknownPublicKey.Payload.TimeStampUnixUtcMs < currentUtcTime.Add(-timestampGracePeriod).ToUnixTimeMilliseconds() ||
-            introduce.UnknownPublicKey.Payload.TimeStampUnixUtcMs > currentUtcTime.Add(timestampGracePeriod).ToUnixTimeMilliseconds())
+        if (!payload.HasTimeStampUnixUtcMs ||
+            payload.TimeStampUnixUtcMs < currentUtcTime.Add(-timestampGracePeriod).ToUnixTimeMilliseconds() ||
+            payload.TimeStampUnixUtcMs > currentUtcTime.Add(timestampGracePeriod).ToUnixTimeMilliseconds())
         {
             _logger.LogWarning("Introduce payload does not have valid timestamp");
             //todo: add to IP ban list
             return;
         }
         
-        if (!introduce.UnknownPublicKey.Payload.HasEphemeralKey || 
-            introduce.UnknownPublicKey.Payload.EphemeralKey.Length == 0)
+        if (!payload.HasEphemeralKey || 
+            payload.EphemeralKey.Length == 0)
         {
             _logger.LogWarning("Introduce message does not have ephemeral");
             //todo: add to IP ban list
             return;
+        }
+
+        var identity = new RSACryptoServiceProvider()
+        {
+            PersistKeyInCsp = false
+        };
+        identity.ImportRSAPublicKey(payload.IdentityKey.ToByteArray(),out _);
+
+        if (!identity.VerifyData(payload.ToByteArray(), payload.IdentityKey.ToByteArray(), HashAlgorithmName.SHA256,
+                RSASignaturePadding.Pkcs1))
+        {
+            _logger.LogWarning("payload signature is invalid");
+            return;
+        }
+
+        var didAdd = false;
+        var announcer =_announcersByIdentity.GetOrAdd(payload.IdentityKey,_ =>
+        {
+            didAdd = true; 
+            return new AnnouncerModel(payload.IdentityKey, _loggerFactory.CreateLogger<AnnouncerModel>());
+        });
+        announcer.AddIpAddress(context.RemoteEndPoint.Address);
+        announcer.LastSeen.Value = DateTimeOffset.Now;
+        var ephemeral = new RSACryptoServiceProvider
+        {
+            PersistKeyInCsp = false
+        };
+        ephemeral.ImportRSAPublicKey(payload.EphemeralKey.ToByteArray(),out _);
+        announcer.Ephemeral.Value = ephemeral;
+
+        if (didAdd)
+        {
+            _announcerAdded.OnNext(announcer.Identity);
         }
     }
 
