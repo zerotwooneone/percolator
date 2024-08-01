@@ -31,6 +31,8 @@ public class MainService : IAnnouncerService
     private Subject<ByteString> _announcerAdded = new();
     private CancellationTokenSource _introduceListenCts = new();
     private IListener _introduceListener;
+    private readonly ConcurrentBag<IPAddress> _ipBlacklist = new();
+    private readonly ConcurrentBag<ByteString> _identityBlacklist = new();
 
     public MainService(
         UdpClientFactory udpClientFactory,
@@ -96,6 +98,12 @@ public class MainService : IAnnouncerService
 
     private void OnReceivedIntroduce(UdpReceiveResult context)
     {
+        if (_ipBlacklist.Contains(context.RemoteEndPoint.Address))
+        {
+            _logger.LogWarning("Blacklisted IP received from {Ip}", context.RemoteEndPoint.Address);
+            return;
+            
+        }
         if(context.Buffer == null || context.Buffer.Length == 0)
         {
             _logger.LogWarning("Empty buffer received from {Ip}", context.RemoteEndPoint.Address);
@@ -111,10 +119,17 @@ public class MainService : IAnnouncerService
             //todo: add to IP ban list
             return;
         }
+        
     }
 
     private void OnReceivedBroadcast(UdpReceiveResult context)
     {
+        if (_ipBlacklist.Contains(context.RemoteEndPoint.Address))
+        {
+            _logger.LogWarning("Blacklisted IP received from {Ip}", context.RemoteEndPoint.Address);
+            return;
+            
+        }
         if(context.Buffer == null || context.Buffer.Length == 0)
         {
             _logger.LogWarning("Empty buffer received from {Ip}", context.RemoteEndPoint.Address);
