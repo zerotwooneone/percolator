@@ -91,6 +91,7 @@
                     <ListView Grid.Row="1"
                               ItemsSource="{Binding Announcers}"
                               ItemTemplate="{StaticResource AnnouncerTemplate}"
+                              SelectedItem="{Binding SelectedAnnouncer.Value}"
                               ScrollViewer.HorizontalScrollBarVisibility="Disabled" 
                               HorizontalContentAlignment="Stretch"/>
                 </Grid>

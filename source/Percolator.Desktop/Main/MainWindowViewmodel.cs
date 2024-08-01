@@ -15,6 +15,7 @@ public class MainWindowViewmodel : INotifyPropertyChanged
     private bool _isListening;
     private bool _isAnnouncing;
     public ObservableCollection<AnnouncerViewmodel> Announcers { get; } = new();
+    public ReactiveProperty<AnnouncerViewmodel> SelectedAnnouncer { get; } = new();
     
     public BaseCommand ListenCommand { get;  }
 
