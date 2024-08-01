@@ -97,7 +97,26 @@
                 </Grid>
             </Grid>
             <Grid Grid.Column="1">
-                
+                <ContentControl>
+                    <ContentControl.Style>
+                        <Style TargetType="ContentControl">
+                            <Setter Property="Content" Value="{Binding SelectedAnnouncer.Value}" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding RelativeSource={x:Static RelativeSource.Self}, Path=Content}" Value="{x:Null}">
+                                    <Setter Property="ContentControl.Template">
+                                        <Setter.Value>
+                                            <ControlTemplate>
+                                                <Grid HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
+                                                    <TextBlock>EMPTY!</TextBlock>
+                                                </Grid>
+                                            </ControlTemplate>
+                                        </Setter.Value>
+                                    </Setter>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </ContentControl.Style>
+                </ContentControl>
             </Grid>
         </Grid>
     </Grid>
