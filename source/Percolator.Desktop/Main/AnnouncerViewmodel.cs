@@ -24,7 +24,7 @@ public sealed class AnnouncerViewmodel : INotifyPropertyChanged
     public BindableReactiveProperty<string> ToolTip { get; }
     public BindableReactiveProperty<Visibility> IntroduceVisible { get; }
     public BaseCommand IntroduceCommand { get; }
-    public  ReadOnlyReactiveProperty<bool> CanChat { get; }
+    public  ReadOnlyReactiveProperty<bool> CanReplyIntroduce { get; }
 
     public AnnouncerViewmodel(
         AnnouncerModel announcer,
@@ -45,7 +45,7 @@ public sealed class AnnouncerViewmodel : INotifyPropertyChanged
         IntroduceVisible = announcer.CanIntroduce
             .Select(b=> b ? Visibility.Visible : Visibility.Collapsed)
             .ToBindableReactiveProperty();
-        CanChat = _announcer.CanChat
+        CanReplyIntroduce = _announcer.CanChat
             .ObserveOnCurrentDispatcher()
             .ToReadOnlyReactiveProperty();
         IntroduceCommand = new BaseCommand(OnIntroduceClicked, _=>!IntroduceInProgress);
@@ -64,7 +64,15 @@ public sealed class AnnouncerViewmodel : INotifyPropertyChanged
         IntroduceCommand.RaiseCanExecuteChanged();
         try
         {
-            await _announcerService.SendIntroduction(_announcer.SelectedIpAddress.CurrentValue, Port.Value);
+            if (CanReplyIntroduce.CurrentValue)
+            {
+                await _announcerService.SendReplyIntroduction(_announcer.SelectedIpAddress.CurrentValue, Port.Value,_announcer.Ephemeral.CurrentValue!);
+            }
+            else
+            {
+                await _announcerService.SendIntroduction(_announcer.SelectedIpAddress.CurrentValue, Port.Value);
+            }
+            
         }
         catch (Exception e)
         {

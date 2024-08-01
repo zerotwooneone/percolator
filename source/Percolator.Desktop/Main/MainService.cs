@@ -418,6 +418,11 @@ public class MainService : IAnnouncerService
         await udpClient.Send(destination, GetUnknownPublicKeyBytes(DateTimeOffset.Now), cancellationToken);
     }
 
+    public Task SendReplyIntroduction(IPAddress ipAddress, int port, RSACryptoServiceProvider ephemeral)
+    {
+        throw new NotImplementedException();
+    }
+
     private byte[] GetUnknownPublicKeyBytes(DateTimeOffset currentTime)
     {
         var payload = new IntroduceRequest.Types.UnknownPublicKey.Types.Payload
