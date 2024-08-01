@@ -176,7 +176,7 @@ public class MainService : IAnnouncerService
         };
         identity.ImportRSAPublicKey(payload.IdentityKey.ToByteArray(),out _);
 
-        if (!identity.VerifyData(payload.ToByteArray(), payload.IdentityKey.ToByteArray(), HashAlgorithmName.SHA256,
+        if (!identity.VerifyData(payload.ToByteArray(), introduce.UnknownPublicKey.PayloadSignature.ToByteArray(), HashAlgorithmName.SHA256,
                 RSASignaturePadding.Pkcs1))
         {
             _logger.LogWarning("payload signature is invalid");
