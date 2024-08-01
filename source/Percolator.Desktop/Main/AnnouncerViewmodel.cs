@@ -24,6 +24,7 @@ public sealed class AnnouncerViewmodel : INotifyPropertyChanged
     public BindableReactiveProperty<string> ToolTip { get; }
     public BindableReactiveProperty<Visibility> IntroduceVisible { get; }
     public BaseCommand IntroduceCommand { get; }
+    public  ReadOnlyReactiveProperty<bool> CanChat=> _announcer.CanChat;
 
     public AnnouncerViewmodel(
         AnnouncerModel announcer,
