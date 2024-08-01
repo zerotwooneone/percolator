@@ -1,7 +1,5 @@
 syntax = "proto3";
 
-import "google/protobuf/empty.proto";
-
 option csharp_namespace = "Percolator.Protobuf.Introduce";
 
 package introduce;
@@ -24,23 +22,17 @@ message IntroduceRequest {
 
 message IntroduceReply {
   message Proceed {
-    message Ephemeral {
-      optional bytes ephemeralKey = 1;
-      optional int64 timeStampUnixUtcMs = 2;
-    }
     message Payload {
       optional bytes identityKey = 1;
+      optional bytes ephemeralKey = 2;
       optional bytes iv = 3;
       //encrypted with ephemeral key
       optional bytes encryptedSessionKey = 4;
       optional int64 timeStampUnixUtcMs = 5;
     }
     optional Payload payload = 1;
-    //signed with the ephemeral key
-    optional bytes payloadSignature = 2;
-    optional Ephemeral ephemeral = 3;
-    //signed with identity key
-    optional bytes ephemeralSignature = 4;    
+    //signed with the identity key
+    optional bytes payloadSignature = 2;    
   }
 
   message Busy {
@@ -49,6 +41,5 @@ message IntroduceReply {
   oneof responseType {
     Proceed proceed = 1;
     Busy busy = 2;
-    google.protobuf.Empty empty = 3;
   }
 }
