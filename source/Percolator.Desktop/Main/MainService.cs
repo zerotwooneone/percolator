@@ -102,7 +102,15 @@ public class MainService : IAnnouncerService
             return;
         }
         
-        int x = 1;
+        //todo: make configurable
+        const int arbitraryMaxLength =  1000;
+        
+        if (context.Buffer.Length > arbitraryMaxLength)
+        {
+            _logger.LogWarning("Buffer received from {Ip} is too large", context.RemoteEndPoint.Address);
+            //todo: add to IP ban list
+            return;
+        }
     }
 
     private void OnReceivedBroadcast(UdpReceiveResult context)
