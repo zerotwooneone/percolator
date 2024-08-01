@@ -84,14 +84,14 @@ public class MainService : IAnnouncerService
         return new string(list.ToArray());
     }
 
-    public void Listen()
+    public void BroadcastListen()
     {
         _broadcastListenCts.Cancel();
         _broadcastListenCts = new CancellationTokenSource();
         _broadcastListener.Listen(_broadcastListenCts.Token);
     }
     
-    public void StopListen()
+    public void StopBroadcastListen()
     {
         _broadcastListenCts.Cancel();
     }
@@ -398,6 +398,7 @@ public class MainService : IAnnouncerService
     }
 
     public IReadOnlyDictionary<ByteString, AnnouncerModel> Announcers => _announcersByIdentity;
+    public ReactiveProperty<bool> AutoReplyIntroductions { get; } = new();
 
     public void BeginIntroduceListen()
     {

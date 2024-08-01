@@ -12,17 +12,17 @@ public class MainWindowViewmodel : INotifyPropertyChanged
     private readonly MainService _mainService;
     private readonly ILogger<MainWindowViewmodel> _logger;
     private readonly IAnnouncerViewmodelFactory _announcerViewmodelFactory;
-    private bool _isListening;
+    private bool _isBroadcastListening;
     private bool _isAnnouncing;
     public ObservableCollection<AnnouncerViewmodel> Announcers { get; } = new();
     public ReactiveProperty<AnnouncerViewmodel> SelectedAnnouncer { get; } = new();
     
-    public BaseCommand ListenCommand { get;  }
+    public BaseCommand ListenBroadcastCommand { get;  }
 
-    public bool IsListening
+    public bool IsBroadcastListening
     {
-        get => _isListening;
-        set => SetField(ref _isListening, value);
+        get => _isBroadcastListening;
+        set => SetField(ref _isBroadcastListening, value);
     }
 
     public BaseCommand AnnounceCommand { get; }
@@ -35,6 +35,8 @@ public class MainWindowViewmodel : INotifyPropertyChanged
     
     public BaseCommand AllowIntroductionsCommand { get; }
     public BindableReactiveProperty<bool> AllowIntroductions { get; } = new();
+    
+    public BindableReactiveProperty<bool> AutoReplyIntroductions { get; }
 
     public MainWindowViewmodel(
         MainService mainService,
@@ -44,10 +46,12 @@ public class MainWindowViewmodel : INotifyPropertyChanged
         _mainService = mainService;
         _logger = logger;
         _announcerViewmodelFactory = announcerViewmodelFactory;
-        ListenCommand = new BaseCommand(OnListenClicked);
+        ListenBroadcastCommand = new BaseCommand(OnListenClicked);
         AnnounceCommand = new BaseCommand(OnAnnounceClicked);
         AllowIntroductionsCommand = new BaseCommand(OnAllowIntroductionsClicked);
-
+        AutoReplyIntroductions = _mainService.AutoReplyIntroductions
+            .ObserveOnCurrentDispatcher()
+            .ToBindableReactiveProperty();
         _mainService.AnnouncerAdded
             .ObserveOnCurrentDispatcher()
             .Subscribe(OnAnnouncerAdded);
@@ -63,13 +67,13 @@ public class MainWindowViewmodel : INotifyPropertyChanged
     private void OnListenClicked(object? obj)
     {
         //IsListening changes before this is called, so logic is inverted
-        if (IsListening)
+        if (IsBroadcastListening)
         {
-            _mainService.Listen();
+            _mainService.BroadcastListen();
         }
         else
         {
-            _mainService.StopListen();
+            _mainService.StopBroadcastListen();
         }
     }
 
