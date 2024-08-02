@@ -22,7 +22,6 @@ public class MainService : IAnnouncerService
     private readonly ILoggerFactory _loggerFactory;
     private readonly IBroadcaster _broadcaster;
     private readonly IListener _broadcastListener;
-    private CancellationTokenSource _broadcastListenCts=new();
     private readonly Observable<Unit> _announceInterval;
     private IDisposable _announceSubscription = new DummyDisposable();
     private readonly ConcurrentDictionary<ByteString, AnnouncerModel> _announcersByIdentity= new();
@@ -30,10 +29,10 @@ public class MainService : IAnnouncerService
     
     public Observable<ByteString> AnnouncerAdded => _announcerAdded;
     private Subject<ByteString> _announcerAdded = new();
-    private CancellationTokenSource _introduceListenCts = new();
     private IListener _introduceListener;
     private readonly ConcurrentBag<IPAddress> _ipBlacklist = new();
     private readonly ConcurrentBag<ByteString> _identityBlacklist = new();
+    public ReactiveProperty<bool> BroadcastListen { get; } = new();
 
     public MainService(
         UdpClientFactory udpClientFactory,
@@ -64,16 +63,10 @@ public class MainService : IAnnouncerService
             .ObserveOn(ingressContext)
             .SubscribeAwait(OnReceivedIntroduce);
 
-        ListenForIntroductions.Subscribe(b =>
+        ListenForIntroductions.Subscribe(b => { _introduceListener.IsListening.Value = b; });
+        BroadcastListen.Subscribe(b =>
         {
-            if (b)
-            {
-                BeginIntroduceListen();
-            }
-            else
-            {
-                StopIntroduceListen();
-            }
+            _broadcastListener.IsListening.Value = b;
         });
     }
 
@@ -95,18 +88,6 @@ public class MainService : IAnnouncerService
         } while (list.Count < numberOfChars);
 
         return new string(list.ToArray());
-    }
-
-    public void BroadcastListen()
-    {
-        _broadcastListenCts.Cancel();
-        _broadcastListenCts = new CancellationTokenSource();
-        _broadcastListener.Listen(_broadcastListenCts.Token);
-    }
-    
-    public void StopBroadcastListen()
-    {
-        _broadcastListenCts.Cancel();
     }
 
     private async ValueTask OnReceivedIntroduce(UdpReceiveResult context, CancellationToken cancellationToken)
@@ -554,18 +535,6 @@ public class MainService : IAnnouncerService
     public IReadOnlyDictionary<ByteString, AnnouncerModel> Announcers => _announcersByIdentity;
     public ReactiveProperty<bool> AutoReplyIntroductions { get; } = new();
     public ReactiveProperty<bool> ListenForIntroductions { get; } = new();
-
-    private void BeginIntroduceListen()
-    {
-        _introduceListenCts.Cancel();
-        _introduceListenCts = new CancellationTokenSource();
-        _introduceListener.Listen(_introduceListenCts.Token);
-    }
-
-    private void StopIntroduceListen()
-    {
-        _introduceListenCts.Cancel();
-    }
 
     public async Task SendIntroduction(IPAddress destination, int port, CancellationToken cancellationToken = default)
     {

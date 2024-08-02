@@ -5,6 +5,6 @@ namespace Percolator.Desktop.Udp.Interfaces;
 
 public interface IListener
 {
-    Task Listen(CancellationToken cancellationToken);
+    ReactiveProperty<bool> IsListening { get; }
     Observable<UdpReceiveResult> Received { get; }
 }
