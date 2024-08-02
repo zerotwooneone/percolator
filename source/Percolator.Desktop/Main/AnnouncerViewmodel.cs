@@ -66,7 +66,7 @@ public sealed class AnnouncerViewmodel : INotifyPropertyChanged
         {
             if (CanReplyIntroduce.CurrentValue)
             {
-                await _announcerService.SendReplyIntroduction(_announcer.SelectedIpAddress.CurrentValue, Port.Value,_announcer.Ephemeral.CurrentValue!);
+                await _announcerService.SendReplyIntroduction(_announcer);
             }
             else
             {

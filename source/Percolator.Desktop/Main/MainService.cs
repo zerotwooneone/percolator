@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
 using System.Security.Cryptography;
+using System.Windows;
 using Google.Protobuf;
 using Microsoft.Extensions.Logging;
 using Percolator.Desktop.Crypto;
@@ -128,65 +129,200 @@ public class MainService : IAnnouncerService
             return;
         }
 
-        var payload = introduce.UnknownPublicKey.Payload;
-        if (payload == null)
-        {
-            _logger.LogWarning("Introduce message does not have payload");
-            //todo: add to IP ban list
-            return;
-        }
-
-        if (!payload.HasIdentityKey ||
-            payload.IdentityKey.Length == 0)
-        {
-            _logger.LogWarning("Introduce message does not have identity key");
-            //todo: add to IP ban list
-            return;
-        }
-
-        if (_identityBlacklist.Contains(payload.IdentityKey))
-        {
-            _logger.LogWarning("Blacklisted identity received from {Ip}", context.RemoteEndPoint.Address);
-            return;
-        }
-
         var currentUtcTime = DateTimeOffset.UtcNow;
         //todo: make this configurable
         var timestampGracePeriod = TimeSpan.FromMinutes(1);
-        if (!payload.HasTimeStampUnixUtcMs ||
-            payload.TimeStampUnixUtcMs < currentUtcTime.Add(-timestampGracePeriod).ToUnixTimeMilliseconds() ||
-            payload.TimeStampUnixUtcMs > currentUtcTime.Add(timestampGracePeriod).ToUnixTimeMilliseconds())
+        switch (introduce.MessageTypeCase)
         {
-            _logger.LogWarning("Introduce payload does not have valid timestamp");
-            //todo: add to IP ban list
-            return;
-        }
-        
-        if (!payload.HasEphemeralKey || 
-            payload.EphemeralKey.Length == 0)
-        {
-            _logger.LogWarning("Introduce message does not have ephemeral");
-            //todo: add to IP ban list
-            return;
+            case IntroduceRequest.MessageTypeOneofCase.UnknownPublicKey:
+                var payload = introduce.UnknownPublicKey.Payload;
+                if (payload == null)
+                {
+                    _logger.LogWarning("Introduce message does not have payload");
+                    //todo: add to IP ban list
+                    return;
+                }
+
+                if (!payload.HasIdentityKey ||
+                    payload.IdentityKey.Length == 0)
+                {
+                    _logger.LogWarning("Introduce message does not have identity key");
+                    //todo: add to IP ban list
+                    return;
+                }
+
+                if (_identityBlacklist.Contains(payload.IdentityKey))
+                {
+                    _logger.LogWarning("Blacklisted identity received from {Ip}", context.RemoteEndPoint.Address);
+                    return;
+                }
+
+                if (!payload.HasTimeStampUnixUtcMs ||
+                    payload.TimeStampUnixUtcMs < currentUtcTime.Add(-timestampGracePeriod).ToUnixTimeMilliseconds() ||
+                    payload.TimeStampUnixUtcMs > currentUtcTime.Add(timestampGracePeriod).ToUnixTimeMilliseconds())
+                {
+                    _logger.LogWarning("Introduce payload does not have valid timestamp");
+                    //todo: add to IP ban list
+                    return;
+                }
+
+                if (!payload.HasEphemeralKey ||
+                    payload.EphemeralKey.Length == 0)
+                {
+                    _logger.LogWarning("Introduce message does not have ephemeral");
+                    //todo: add to IP ban list
+                    return;
+                }
+
+                var identity = new RSACryptoServiceProvider()
+                {
+                    PersistKeyInCsp = false
+                };
+                identity.ImportRSAPublicKey(payload.IdentityKey.ToByteArray(), out _);
+
+                if (!identity.VerifyData(payload.ToByteArray(),
+                        introduce.UnknownPublicKey.PayloadSignature.ToByteArray(), HashAlgorithmName.SHA256,
+                        RSASignaturePadding.Pkcs1))
+                {
+                    _logger.LogWarning("payload signature is invalid");
+                    return;
+                }
+
+                OnReceivedUnknownPublicKey(context, payload);
+                break;
+            case IntroduceRequest.MessageTypeOneofCase.IntroduceReply:
+                var proceedPayload = introduce.IntroduceReply.Proceed.Payload;
+                if (proceedPayload == null)
+                {
+                    _logger.LogWarning("Introduce message does not have payload");
+                    //todo: add to IP ban list
+                    return;
+                }
+
+                if (!proceedPayload.HasIdentityKey ||
+                    proceedPayload.IdentityKey.Length == 0)
+                {
+                    _logger.LogWarning("Introduce message does not have identity key");
+                    //todo: add to IP ban list
+                    return;
+                }
+
+                if (_identityBlacklist.Contains(proceedPayload.IdentityKey))
+                {
+                    _logger.LogWarning("Blacklisted identity received from {Ip}", context.RemoteEndPoint.Address);
+                    return;
+                }
+
+                //todo: make this configurable
+                if (!proceedPayload.HasTimeStampUnixUtcMs ||
+                    proceedPayload.TimeStampUnixUtcMs < currentUtcTime.Add(-timestampGracePeriod).ToUnixTimeMilliseconds() ||
+                    proceedPayload.TimeStampUnixUtcMs > currentUtcTime.Add(timestampGracePeriod).ToUnixTimeMilliseconds())
+                {
+                    _logger.LogWarning("Introduce payload does not have valid timestamp");
+                    //todo: add to IP ban list
+                    return;
+                }
+
+                if (!proceedPayload.HasEphemeralKey ||
+                    proceedPayload.EphemeralKey.Length == 0)
+                {
+                    _logger.LogWarning("Introduce message does not have ephemeral");
+                    //todo: add to IP ban list
+                    return;
+                }
+
+                var proceedIdentity= new RSACryptoServiceProvider()
+                {
+                    PersistKeyInCsp = false
+                };
+                proceedIdentity.ImportRSAPublicKey(proceedPayload.IdentityKey.ToByteArray(), out _);
+
+                if (!proceedIdentity.VerifyData(proceedPayload.ToByteArray(),
+                        introduce.IntroduceReply.Proceed.PayloadSignature.ToByteArray(), HashAlgorithmName.SHA256,
+                        RSASignaturePadding.Pkcs1))
+                {
+                    _logger.LogWarning("payload signature is invalid");
+                    return;
+                }
+
+                if (!proceedPayload.HasEphemeralKey || proceedPayload.EphemeralKey.Length == 0)
+                {
+                    _logger.LogWarning("missing ephemeral key");
+                    return;
+                }
+                if (!proceedPayload.HasIv || proceedPayload.Iv.Length == 0)
+                {
+                    _logger.LogWarning("missing iv");
+                    return;
+                }
+                if (!proceedPayload.HasEncryptedSessionKey || proceedPayload.EncryptedSessionKey.Length == 0)
+                {
+                    _logger.LogWarning("missing encrypted session key");
+                    return;
+                }
+                
+                
+                OnReceivedReplyIntro(context, proceedPayload);
+                break;
+            default:
+                _logger.LogWarning("Introduce message does not have valid message type");
+                //todo: add to IP ban list
+                return;
         }
 
-        var identity = new RSACryptoServiceProvider()
+
+    }
+
+    private void OnReceivedReplyIntro(UdpReceiveResult context, IntroduceRequest.Types.IntroduceReply.Types.Proceed.Types.Payload proceedPayload)
+    {
+        var didAdd = false;
+        var announcer = _announcersByIdentity.GetOrAdd(proceedPayload.IdentityKey, _ =>
+        {
+            didAdd = true;
+            return new AnnouncerModel(proceedPayload.IdentityKey, _loggerFactory.CreateLogger<AnnouncerModel>());
+        });
+
+        announcer.LastSeen.Value = DateTimeOffset.Now;
+        announcer.AddIpAddress(context.RemoteEndPoint.Address);
+        
+        if (didAdd)
+        {
+            if (MessageBox.Show(
+                    $"got a reply from {context.RemoteEndPoint.Address} but we didn't request it. Do you want to allow it?",
+                    "Warning", MessageBoxButton.YesNo, MessageBoxImage.Exclamation) != MessageBoxResult.Yes)
+            { 
+                _announcerAdded.OnNext(announcer.Identity);
+                //todo: remove messagebox to avoid spam
+                return; 
+            }
+        }
+
+        var ephemeral = new RSACryptoServiceProvider
         {
             PersistKeyInCsp = false
         };
-        identity.ImportRSAPublicKey(payload.IdentityKey.ToByteArray(),out _);
-
-        if (!identity.VerifyData(payload.ToByteArray(), introduce.UnknownPublicKey.PayloadSignature.ToByteArray(), HashAlgorithmName.SHA256,
-                RSASignaturePadding.Pkcs1))
+        ephemeral.ImportRSAPublicKey(proceedPayload.EphemeralKey.ToByteArray(), out _);
+        announcer.Ephemeral.Value = ephemeral;
+        
+        Aes aes = Aes.Create();
+        RSAOAEPKeyExchangeDeformatter keyDeformatter = new RSAOAEPKeyExchangeDeformatter(ephemeral);
+        aes.Key = keyDeformatter.DecryptKeyExchange(proceedPayload.EncryptedSessionKey.ToByteArray());
+        aes.IV= proceedPayload.Iv.ToArray();
+        
+        announcer.SessionKey.Value = aes;
+        
+        if (didAdd)
         {
-            _logger.LogWarning("payload signature is invalid");
-            return;
+            _announcerAdded.OnNext(announcer.Identity);
         }
+    }
 
+    private void OnReceivedUnknownPublicKey(UdpReceiveResult context, IntroduceRequest.Types.UnknownPublicKey.Types.Payload payload)
+    {
         var didAdd = false;
-        var announcer =_announcersByIdentity.GetOrAdd(payload.IdentityKey,_ =>
+        var announcer = _announcersByIdentity.GetOrAdd(payload.IdentityKey, _ =>
         {
-            didAdd = true; 
+            didAdd = true;
             return new AnnouncerModel(payload.IdentityKey, _loggerFactory.CreateLogger<AnnouncerModel>());
         });
         announcer.AddIpAddress(context.RemoteEndPoint.Address);
@@ -195,7 +331,7 @@ public class MainService : IAnnouncerService
         {
             PersistKeyInCsp = false
         };
-        ephemeral.ImportRSAPublicKey(payload.EphemeralKey.ToByteArray(),out _);
+        ephemeral.ImportRSAPublicKey(payload.EphemeralKey.ToByteArray(), out _);
         announcer.Ephemeral.Value = ephemeral;
 
         if (didAdd)
@@ -418,11 +554,54 @@ public class MainService : IAnnouncerService
         await udpClient.Send(destination, GetUnknownPublicKeyBytes(DateTimeOffset.Now), cancellationToken);
     }
 
-    public Task SendReplyIntroduction(IPAddress ipAddress, int port, RSACryptoServiceProvider ephemeral)
+    public async Task SendReplyIntroduction(AnnouncerModel announcerModel, CancellationToken cancellationToken = default)
     {
-        throw new NotImplementedException();
+        var udpClient = _udpClientFactory.GetOrCreateSender(announcerModel.Port.Value);
+        
+        //todo:try to reuse keys that failed to send
+        Aes aes = Aes.Create();
+        
+        //todo:consider sending multiple copies
+        await udpClient.Send(announcerModel.SelectedIpAddress.CurrentValue!, GetIntroReplyBytes(
+            DateTimeOffset.Now,
+            announcerModel.Ephemeral.Value!,
+            aes), cancellationToken);
+        
+        announcerModel.SessionKey.Value = aes;
     }
+    
+    private byte[] GetIntroReplyBytes(
+        DateTimeOffset currentTime, 
+        RSACryptoServiceProvider ephemeral,
+        Aes aes)
+    {
+        var keyFormatter = new RSAOAEPKeyExchangeFormatter(ephemeral);
+        var encryptedSessionKey = keyFormatter.CreateKeyExchange(aes.Key, typeof(Aes));
+        var payload = new IntroduceRequest.Types.IntroduceReply.Types.Proceed.Types.Payload
+        {
+            IdentityKey =ByteString.CopyFrom( _selfEncryptionService.Identity.ExportRSAPublicKey()),
+            EphemeralKey = ByteString.CopyFrom(_selfEncryptionService.Ephemeral.ExportRSAPublicKey()),
+            TimeStampUnixUtcMs = currentTime.ToUniversalTime().ToUnixTimeMilliseconds(),
+            Iv = ByteString.CopyFrom(aes.IV),
+            EncryptedSessionKey = ByteString.CopyFrom(encryptedSessionKey),
+        };
+        var payloadBytes = payload.ToByteArray();
 
+        var m = new IntroduceRequest
+        {
+            IntroduceReply = new IntroduceRequest.Types.IntroduceReply
+            {
+                Proceed = new IntroduceRequest.Types.IntroduceReply.Types.Proceed()
+                {
+                    Payload = payload,
+                    PayloadSignature = ByteString.CopyFrom(_selfEncryptionService.Identity.SignData(payloadBytes,
+                        HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1)),
+                }
+            }
+        };
+        return m.ToByteArray();
+    }
+    
     private byte[] GetUnknownPublicKeyBytes(DateTimeOffset currentTime)
     {
         var payload = new IntroduceRequest.Types.UnknownPublicKey.Types.Payload
