@@ -52,6 +52,10 @@ public class MainWindowViewmodel : INotifyPropertyChanged
         AutoReplyIntroductions = _mainService.AutoReplyIntroductions
             .ObserveOnCurrentDispatcher()
             .ToBindableReactiveProperty();
+        AutoReplyIntroductions.Subscribe(b =>
+        {
+            _mainService.AutoReplyIntroductions.Value = b;
+        });
         _mainService.AnnouncerAdded
             .ObserveOnCurrentDispatcher()
             .Subscribe(OnAnnouncerAdded);

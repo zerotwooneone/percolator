@@ -24,7 +24,7 @@
                     Grid.Column="1"
                     Orientation="Horizontal">
                     <Button 
-                        Visibility="{Binding IntroduceVisible}"
+                        Visibility="{Binding IntroduceVisible.Value}"
                         Command="{Binding IntroduceCommand}"
                         ToolTip="Send an introduction">Introduce</Button>
                     <Button ToolTip="Add this to the banned list"> X </Button>    
@@ -79,7 +79,7 @@
             <TextBlock 
                 ToolTip="Automatically allow unknown people to chat">Auto Reply Introductions&gt;</TextBlock>
             <ToggleButton 
-                IsChecked="{Binding AutoReply.Value}"
+                IsChecked="{Binding AutoReplyIntroductions.Value}"
                 Style="{StaticResource BetterToggle}"
                 ToolTip="Automatically allow unknown people to chat"/>
         </StackPanel>
