@@ -118,5 +118,5 @@ public class AnnouncerModel : IEquatable<AnnouncerModel>
     public ReactiveProperty<RSACryptoServiceProvider?> Ephemeral { get; } = new();
 
     public ReadOnlyReactiveProperty<bool> CanChat { get; }
-    public ReactiveProperty<Aes> SessionKey { get; }
+    public ReactiveProperty<Aes> SessionKey { get; }= new();
 }
