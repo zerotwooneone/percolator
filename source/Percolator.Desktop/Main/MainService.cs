@@ -63,6 +63,18 @@ public class MainService : IAnnouncerService
         _introduceListener.Received 
             .ObserveOn(ingressContext)
             .SubscribeAwait(OnReceivedIntroduce);
+
+        ListenForIntroductions.Subscribe(b =>
+        {
+            if (b)
+            {
+                BeginIntroduceListen();
+            }
+            else
+            {
+                StopIntroduceListen();
+            }
+        });
     }
 
     private string GetRandomNickname()
@@ -541,15 +553,16 @@ public class MainService : IAnnouncerService
 
     public IReadOnlyDictionary<ByteString, AnnouncerModel> Announcers => _announcersByIdentity;
     public ReactiveProperty<bool> AutoReplyIntroductions { get; } = new();
+    public ReactiveProperty<bool> ListenForIntroductions { get; } = new();
 
-    public void BeginIntroduceListen()
+    private void BeginIntroduceListen()
     {
         _introduceListenCts.Cancel();
         _introduceListenCts = new CancellationTokenSource();
         _introduceListener.Listen(_introduceListenCts.Token);
     }
 
-    public void StopIntroduceListen()
+    private void StopIntroduceListen()
     {
         _introduceListenCts.Cancel();
     }

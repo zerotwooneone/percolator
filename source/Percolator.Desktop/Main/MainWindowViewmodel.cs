@@ -33,8 +33,7 @@ public class MainWindowViewmodel : INotifyPropertyChanged
         set => SetField(ref _isAnnouncing, value);
     }
     
-    public BaseCommand AllowIntroductionsCommand { get; }
-    public BindableReactiveProperty<bool> AllowIntroductions { get; } = new();
+    public BindableReactiveProperty<bool> AllowIntroductions { get; }
     
     public BindableReactiveProperty<bool> AutoReplyIntroductions { get; }
 
@@ -48,7 +47,12 @@ public class MainWindowViewmodel : INotifyPropertyChanged
         _announcerViewmodelFactory = announcerViewmodelFactory;
         ListenBroadcastCommand = new BaseCommand(OnListenClicked);
         AnnounceCommand = new BaseCommand(OnAnnounceClicked);
-        AllowIntroductionsCommand = new BaseCommand(OnAllowIntroductionsClicked);
+        AllowIntroductions = _mainService.ListenForIntroductions
+            .ToBindableReactiveProperty();
+        AllowIntroductions.Subscribe(b =>
+        {
+            _mainService.ListenForIntroductions.Value = b;
+        });
         AutoReplyIntroductions = _mainService.AutoReplyIntroductions
             .ObserveOnCurrentDispatcher()
             .ToBindableReactiveProperty();
@@ -91,19 +95,6 @@ public class MainWindowViewmodel : INotifyPropertyChanged
         else
         {
             _mainService.StopAnnounce();
-        }
-    }
-    
-    private void OnAllowIntroductionsClicked(object? obj)
-    {
-        //value changes before this is called, so logic is inverted
-        if (AllowIntroductions.Value)
-        {
-            _mainService.BeginIntroduceListen();
-        }
-        else
-        {
-            _mainService.StopIntroduceListen();
         }
     }
 

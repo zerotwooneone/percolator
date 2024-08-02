@@ -73,7 +73,6 @@
             <TextBlock ToolTip="Allow unknown people to identify themselves">Allow Introductions&gt;</TextBlock>
             <ToggleButton 
                 IsChecked="{Binding AllowIntroductions.Value}"
-                Command="{Binding AllowIntroductionsCommand}"
                 Style="{StaticResource BetterToggle}"
                 ToolTip="Allow unknown people to identify themselves"/>
             <TextBlock 
