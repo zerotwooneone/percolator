@@ -546,7 +546,7 @@ public class MainService : IAnnouncerService
     {
         _introduceListenCts.Cancel();
         _introduceListenCts = new CancellationTokenSource();
-        _introduceListener.Listen(_broadcastListenCts.Token);
+        _introduceListener.Listen(_introduceListenCts.Token);
     }
 
     public void StopIntroduceListen()
