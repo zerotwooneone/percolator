@@ -14,7 +14,7 @@ public class UdpWrapper : IBroadcaster, IListener, ISender, IDisposable
     public Observable<UdpReceiveResult> Received { get; }
     private readonly CancellationTokenSource _cancellationTokenSource = new();
 
-    public UdpWrapper(int port)
+    public UdpWrapper(int port,FrameProvider receiveContext)
     {
         IsListening = new ReactiveProperty<bool>(false);
         Port = port;
@@ -30,11 +30,8 @@ public class UdpWrapper : IBroadcaster, IListener, ISender, IDisposable
         
         var startNewReceive = new Subject<Unit>();
 
-        //todo: see if this can be improved
-        var frameProvider = new NewThreadSleepFrameProvider();
-        
         startNewReceive
-            .ObserveOn(frameProvider)
+            .ObserveOn(receiveContext)
             .SelectAwait((_,c) => _udpClient.ReceiveAsync(CancellationTokenSource.CreateLinkedTokenSource(c,_cancellationTokenSource.Token).Token))
             .TakeUntil(_cancellationTokenSource.Token)
             .Subscribe(urr =>
