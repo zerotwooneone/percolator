@@ -298,7 +298,7 @@ public class MainService : IAnnouncerService
         announcer.Ephemeral.Value = ephemeral;
         
         Aes aes = Aes.Create();
-        RSAOAEPKeyExchangeDeformatter keyDeformatter = new RSAOAEPKeyExchangeDeformatter(ephemeral);
+        RSAOAEPKeyExchangeDeformatter keyDeformatter = new RSAOAEPKeyExchangeDeformatter(_selfEncryptionService.Ephemeral);
         aes.Key = keyDeformatter.DecryptKeyExchange(proceedPayload.EncryptedSessionKey.ToByteArray());
         aes.IV= proceedPayload.Iv.ToArray();
         
