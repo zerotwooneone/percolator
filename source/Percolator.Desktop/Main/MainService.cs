@@ -62,7 +62,7 @@ public class MainService : IAnnouncerService
         _introduceListener = _udpClientFactory.CreateListener(Defaults.DefaultIntroducePort);
         _introduceListener.Received 
             .ObserveOn(ingressContext)
-            .Subscribe(OnReceivedIntroduce);
+            .SubscribeAwait(OnReceivedIntroduce);
     }
 
     private string GetRandomNickname()
@@ -97,7 +97,7 @@ public class MainService : IAnnouncerService
         _broadcastListenCts.Cancel();
     }
 
-    private void OnReceivedIntroduce(UdpReceiveResult context)
+    private async ValueTask OnReceivedIntroduce(UdpReceiveResult context, CancellationToken cancellationToken)
     {
         if (_ipBlacklist.Contains(context.RemoteEndPoint.Address))
         {
@@ -188,7 +188,7 @@ public class MainService : IAnnouncerService
                     return;
                 }
 
-                OnReceivedUnknownPublicKey(context, payload);
+                await OnReceivedUnknownPublicKey(context, payload,cancellationToken);
                 break;
             case IntroduceRequest.MessageTypeOneofCase.IntroduceReply:
                 var proceedPayload = introduce.IntroduceReply.Proceed.Payload;
@@ -317,7 +317,8 @@ public class MainService : IAnnouncerService
         }
     }
 
-    private void OnReceivedUnknownPublicKey(UdpReceiveResult context, IntroduceRequest.Types.UnknownPublicKey.Types.Payload payload)
+    private async Task OnReceivedUnknownPublicKey(UdpReceiveResult context,
+        IntroduceRequest.Types.UnknownPublicKey.Types.Payload payload, CancellationToken cancellationToken)
     {
         var didAdd = false;
         var announcer = _announcersByIdentity.GetOrAdd(payload.IdentityKey, _ =>
@@ -337,6 +338,11 @@ public class MainService : IAnnouncerService
         if (didAdd)
         {
             _announcerAdded.OnNext(announcer.Identity);
+        }
+
+        if (AutoReplyIntroductions.CurrentValue)
+        {
+            await SendReplyIntroduction(announcer, cancellationToken);
         }
     }
 
