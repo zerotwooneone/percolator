@@ -336,7 +336,12 @@ public class MainService : IAnnouncerService
 
         if (AutoReplyIntroductions.CurrentValue)
         {
-            await SendReplyIntroduction(announcer, cancellationToken);
+            if (!TryGetIpAddress(out var sourceIp))
+            {
+                _logger.LogWarning("Failed to get own ip address");
+                return;
+            }
+            await SendReplyIntroduction(announcer, sourceIp, cancellationToken);
         }
     }
 
@@ -536,7 +541,7 @@ public class MainService : IAnnouncerService
         return announceBytes;
     }
 
-    private bool TryGetIpAddress([NotNullWhen(true)] out IPAddress? localIp)
+    public bool TryGetIpAddress([NotNullWhen(true)] out IPAddress? localIp)
     {
         try
         {
@@ -568,13 +573,18 @@ public class MainService : IAnnouncerService
     public ReactiveProperty<bool> AutoReplyIntroductions { get; } = new();
     public ReactiveProperty<bool> ListenForIntroductions { get; } = new();
 
-    public async Task SendIntroduction(IPAddress destination, int port, CancellationToken cancellationToken = default)
+    public async Task SendIntroduction(IPAddress destination, 
+        int port, 
+        IPAddress sourceIp,
+        CancellationToken cancellationToken = default)
     {
         var udpClient = _udpClientFactory.GetOrCreateSender(port);
-        await udpClient.Send(destination, GetUnknownPublicKeyBytes(DateTimeOffset.Now), cancellationToken);
+        await udpClient.Send(destination, GetUnknownPublicKeyBytes(DateTimeOffset.Now, sourceIp), cancellationToken);
     }
 
-    public async Task SendReplyIntroduction(AnnouncerModel announcerModel, CancellationToken cancellationToken = default)
+    public async Task SendReplyIntroduction(AnnouncerModel announcerModel, 
+        IPAddress sourceIp,
+        CancellationToken cancellationToken = default)
     {
         var udpClient = _udpClientFactory.GetOrCreateSender(announcerModel.Port.Value);
         
@@ -585,15 +595,16 @@ public class MainService : IAnnouncerService
         await udpClient.Send(announcerModel.SelectedIpAddress.CurrentValue!, GetIntroReplyBytes(
             DateTimeOffset.Now,
             announcerModel.Ephemeral.Value!,
-            aes), cancellationToken);
+            aes,
+            sourceIp), cancellationToken);
         
         announcerModel.SessionKey.Value = aes;
     }
     
-    private byte[] GetIntroReplyBytes(
-        DateTimeOffset currentTime, 
+    private byte[] GetIntroReplyBytes(DateTimeOffset currentTime,
         RSACryptoServiceProvider ephemeral,
-        Aes aes)
+        Aes aes, 
+        IPAddress sourceIp)
     {
         var keyFormatter = new RSAOAEPKeyExchangeFormatter(ephemeral);
         var encryptedSessionKey = keyFormatter.CreateKeyExchange(aes.Key, typeof(Aes));
@@ -604,6 +615,7 @@ public class MainService : IAnnouncerService
             TimeStampUnixUtcMs = currentTime.ToUniversalTime().ToUnixTimeMilliseconds(),
             Iv = ByteString.CopyFrom(aes.IV),
             EncryptedSessionKey = ByteString.CopyFrom(encryptedSessionKey),
+            SourceIp = ByteString.CopyFrom(sourceIp.GetAddressBytes())
         };
         var payloadBytes = payload.ToByteArray();
 
@@ -622,13 +634,14 @@ public class MainService : IAnnouncerService
         return m.ToByteArray();
     }
     
-    private byte[] GetUnknownPublicKeyBytes(DateTimeOffset currentTime)
+    private byte[] GetUnknownPublicKeyBytes(DateTimeOffset currentTime, IPAddress sourceIp)
     {
         var payload = new IntroduceRequest.Types.UnknownPublicKey.Types.Payload
         {
             IdentityKey =ByteString.CopyFrom( _selfEncryptionService.Identity.ExportRSAPublicKey()),
             EphemeralKey = ByteString.CopyFrom(_selfEncryptionService.Ephemeral.ExportRSAPublicKey()),
-            TimeStampUnixUtcMs = currentTime.ToUniversalTime().ToUnixTimeMilliseconds()
+            TimeStampUnixUtcMs = currentTime.ToUniversalTime().ToUnixTimeMilliseconds(),
+            SourceIp = ByteString.CopyFrom(sourceIp.GetAddressBytes())
         };
         var payloadBytes = payload.ToByteArray();
 

@@ -60,17 +60,23 @@ public sealed class AnnouncerViewmodel : INotifyPropertyChanged
             return;
         }
 
+        if (!_announcerService.TryGetIpAddress(out var sourceIp))
+        {
+            _logger.LogWarning("Failed to get ip address");
+            return;
+        }
+
         IntroduceInProgress = true;
         IntroduceCommand.RaiseCanExecuteChanged();
         try
         {
             if (CanReplyIntroduce.CurrentValue)
             {
-                await _announcerService.SendReplyIntroduction(_announcer);
+                await _announcerService.SendReplyIntroduction(_announcer,sourceIp);
             }
             else
             {
-                await _announcerService.SendIntroduction(_announcer.SelectedIpAddress.CurrentValue, Port.Value);
+                await _announcerService.SendIntroduction(_announcer.SelectedIpAddress.CurrentValue, Port.Value, sourceIp);
             }
             
         }
