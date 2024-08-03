@@ -34,6 +34,7 @@ public class MainService : IAnnouncerService
     private readonly ConcurrentBag<IPAddress> _ipBlacklist = new();
     private readonly ConcurrentBag<ByteString> _identityBlacklist = new();
     public ReactiveProperty<bool> BroadcastListen { get; } = new();
+    const int ipMaxBytes = 16;
 
     public MainService(
         UdpClientFactory udpClientFactory,
@@ -168,6 +169,15 @@ public class MainService : IAnnouncerService
                     return;
                 }
 
+                if (!payload.HasSourceIp ||
+                    payload.SourceIp.Length == 0 ||
+                    payload.SourceIp.Length > ipMaxBytes)
+                {
+                    _logger.LogWarning("Introduce message source ip is invalid");
+                    //todo: add to IP ban list
+                    return;
+                }
+
                 var identity = new RSACryptoServiceProvider()
                 {
                     PersistKeyInCsp = false
@@ -221,6 +231,15 @@ public class MainService : IAnnouncerService
                     proceedPayload.EphemeralKey.Length == 0)
                 {
                     _logger.LogWarning("Introduce message does not have ephemeral");
+                    //todo: add to IP ban list
+                    return;
+                }
+                
+                if (!proceedPayload.HasSourceIp ||
+                     proceedPayload.SourceIp.Length == 0 ||
+                     proceedPayload.SourceIp.Length > ipMaxBytes)
+                {
+                    _logger.LogWarning("Introduce reply message source ip is invalid");
                     //todo: add to IP ban list
                     return;
                 }
@@ -381,27 +400,28 @@ public class MainService : IAnnouncerService
         {
             case AnnounceMessage.MessageTypeOneofCase.Identity:
                 var identityMessage = announce.Identity;
-                if (identityMessage == null || identityMessage.Payload == null)
+                var identityPayload = identityMessage.Payload;
+                if (identityMessage == null || identityPayload == null)
                 {
                     _logger.LogWarning("Announce message does not have valid payload");
                     return;
                 }
 
-                if (!identityMessage.Payload.HasIdentityKey ||
-                    identityMessage.Payload.IdentityKey.Length == 0 ||
-                    identityMessage.Payload.IdentityKey.Length > arbitraryMaxLength)
+                if (!identityPayload.HasIdentityKey ||
+                    identityPayload.IdentityKey.Length == 0 ||
+                    identityPayload.IdentityKey.Length > arbitraryMaxLength)
                 {
                     _logger.LogWarning("Announce message does not have valid identity key");
                     return;
                 }
                 
-                if (_identityBlacklist.Contains(identityMessage.Payload.IdentityKey))
+                if (_identityBlacklist.Contains(identityPayload.IdentityKey))
                 {
                     _logger.LogWarning("Blacklisted identity received from {Ip}", context.RemoteEndPoint.Address);
                     return;
                 }
                 
-                if (identityMessage.Payload.IdentityKey.Equals(
+                if (identityPayload.IdentityKey.Equals(
                         ByteString.CopyFrom(_selfEncryptionService.Identity.ExportRSAPublicKey())))
                 {
                     return;
@@ -410,9 +430,9 @@ public class MainService : IAnnouncerService
                 //todo: make this configurable
                 var timestampGracePeriod = TimeSpan.FromMinutes(1);
                 
-                if (!identityMessage.Payload.HasTimeStampUnixUtcMs ||
-                    identityMessage.Payload.TimeStampUnixUtcMs > currentUtcTime.Add(timestampGracePeriod).ToUnixTimeMilliseconds() ||
-                    identityMessage.Payload.TimeStampUnixUtcMs < currentUtcTime.Add(-timestampGracePeriod).ToUnixTimeMilliseconds())
+                if (!identityPayload.HasTimeStampUnixUtcMs ||
+                    identityPayload.TimeStampUnixUtcMs > currentUtcTime.Add(timestampGracePeriod).ToUnixTimeMilliseconds() ||
+                    identityPayload.TimeStampUnixUtcMs < currentUtcTime.Add(-timestampGracePeriod).ToUnixTimeMilliseconds())
                 {
                     _logger.LogWarning("Announce message timestamp is invalid");
                     //todo: add to IP ban list
@@ -427,15 +447,24 @@ public class MainService : IAnnouncerService
                     return;
                 }
 
-                if (identityMessage.Payload.HasPort &&
-                    identityMessage.Payload.Port <= 0)
+                if (identityPayload.HasPort &&
+                    identityPayload.Port <= 0)
                 {
                     _logger.LogWarning("Announce message does not have a valid port");
                     return;
                 }
+                
+                if (!identityPayload.HasSourceIp ||
+                    identityPayload.SourceIp.Length == 0 ||
+                    identityPayload.SourceIp.Length > ipMaxBytes)
+                {
+                    _logger.LogWarning("broadcast message source ip is invalid");
+                    //todo: add to IP ban list
+                    return;
+                }
 
-                if (identityMessage.Payload.HasPreferredNickname &&
-                    identityMessage.Payload.PreferredNickname.Length > arbitraryMaxLength)
+                if (identityPayload.HasPreferredNickname &&
+                    identityPayload.PreferredNickname.Length > arbitraryMaxLength)
                 {
                     _logger.LogWarning("Announce message does not have a valid preferred nickname");
                     return;
