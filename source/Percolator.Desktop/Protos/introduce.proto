@@ -40,9 +40,25 @@ message IntroduceRequest {
       Busy busy = 2;
     }
   }
+  message ChatMessage {    
+    message Signed {
+      message Payload {
+        optional string message = 1;
+      }
+      optional int64 timeStampUnixUtcMs = 1;
+      optional bytes sourceIp = 2;
+      optional bytes sessionKeyId = 3;
+      //encrypted with session key
+      optional bytes encryptedPayload = 4;
+    }
+    optional Signed signed = 1;    
+    //signed with ephemeral key
+    optional bytes signedSignature = 2;
+  }
   oneof messageType {
       UnknownPublicKey unknownPublicKey = 1;
       IntroduceReply introduceReply = 2;
+      ChatMessage chatMessage = 3;
   } 
 }
 
