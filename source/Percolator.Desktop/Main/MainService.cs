@@ -172,8 +172,8 @@ public class MainService : IAnnouncerService
                 if (!payload.HasSourceIp ||
                     payload.SourceIp.Length == 0 ||
                     payload.SourceIp.Length > ipMaxBytes  ||
-                    !IPAddress.TryParse(payload.SourceIp.Select(b => (char) b).ToArray(), out var parsedSourceIp) ||
-                    context.RemoteEndPoint.Address.Equals(parsedSourceIp))
+                    !TryGetIpAddress(payload.SourceIp.ToByteArray(), out var parsedSourceIp) ||
+                    !context.RemoteEndPoint.Address.Equals(parsedSourceIp))
                 {
                     _logger.LogWarning("Introduce message source ip is invalid");
                     //todo: add to IP ban list
@@ -240,8 +240,8 @@ public class MainService : IAnnouncerService
                 if (!proceedPayload.HasSourceIp ||
                      proceedPayload.SourceIp.Length == 0 ||
                      proceedPayload.SourceIp.Length > ipMaxBytes  ||
-                     !IPAddress.TryParse(proceedPayload.SourceIp.Select(b => (char) b).ToArray(), out var proceedSourceIp) ||
-                     context.RemoteEndPoint.Address.Equals(proceedSourceIp))
+                     !TryGetIpAddress(proceedPayload.SourceIp.ToByteArray(), out var proceedSourceIp) ||
+                     !context.RemoteEndPoint.Address.Equals(proceedSourceIp))
                 {
                     _logger.LogWarning("Introduce reply message source ip is invalid");
                     //todo: add to IP ban list
@@ -461,8 +461,8 @@ public class MainService : IAnnouncerService
                 if (!identityPayload.HasSourceIp ||
                     identityPayload.SourceIp.Length == 0 ||
                     identityPayload.SourceIp.Length > ipMaxBytes ||
-                    !IPAddress.TryParse(identityPayload.SourceIp.Select(b => (char) b).ToArray(), out var parsedSourceIp) ||
-                    context.RemoteEndPoint.Address.Equals(parsedSourceIp))
+                    !TryGetIpAddress(identityPayload.SourceIp.ToByteArray(), out var parsedSourceIp) ||
+                    !context.RemoteEndPoint.Address.Equals(parsedSourceIp))
                 {
                     _logger.LogWarning("broadcast message source ip is invalid");
                     //todo: add to IP ban list
@@ -480,6 +480,20 @@ public class MainService : IAnnouncerService
             default:
                 _logger.LogError("Announce message does not have valid message type: {MessageType}", announce.MessageTypeCase);
                 return;
+        }
+    }
+    
+    private bool TryGetIpAddress(byte[] ipBytes, [NotNullWhen(true)] out IPAddress? ipAddress)
+    {
+        try
+        {
+            ipAddress = new IPAddress(ipBytes);
+            return true;
+        }
+        catch (ArgumentException)
+        {
+            ipAddress = null;
+            return false;
         }
     }
 
