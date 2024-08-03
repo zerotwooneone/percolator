@@ -11,6 +11,7 @@ message AnnounceMessage {
       optional int64 timeStampUnixUtcMs = 2;
       optional int32 port = 3;
       optional string preferredNickname = 4;
+      optional bytes sourceIp = 5;
     }
     optional Payload payload = 1;
     //signed with identity key

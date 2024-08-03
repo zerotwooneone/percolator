@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics.CodeAnalysis;
 using System.Net;
 using System.Net.Sockets;
 using System.Security.Cryptography;
@@ -494,17 +495,25 @@ public class MainService : IAnnouncerService
         _announceSubscription = _announceInterval
             .SubscribeAwait(async (_,c) =>
             {
-                await _broadcaster.Broadcast(GetAnnounceIdentityBytes(DateTimeOffset.Now),c);
+                if (!TryGetIpAddress(out var sourceIp))
+                {
+                    return;
+                }
+                await _broadcaster.Broadcast(GetAnnounceIdentityBytes(DateTimeOffset.Now, sourceIp),c);
             });
     }
 
-    private byte[] GetAnnounceIdentityBytes(DateTimeOffset currentTime,int? handshakePort=null)
+    private byte[] GetAnnounceIdentityBytes(
+        DateTimeOffset currentTime,
+        IPAddress sourceIp,
+        int? handshakePort=null)
     {
         var payload = new AnnounceMessage.Types.Identity.Types.Payload()
         {
             IdentityKey = ByteString.CopyFrom(_selfEncryptionService.Identity.ExportRSAPublicKey()),
             TimeStampUnixUtcMs = currentTime.ToUniversalTime().ToUnixTimeMilliseconds(),
-            PreferredNickname = PreferredNickname.Value
+            PreferredNickname = PreferredNickname.Value,
+            SourceIp = ByteString.CopyFrom(sourceIp.GetAddressBytes()),
         };
         if (handshakePort != null && handshakePort != Defaults.DefaultIntroducePort)
         {
@@ -525,6 +534,29 @@ public class MainService : IAnnouncerService
         }.ToByteArray();
             
         return announceBytes;
+    }
+
+    private bool TryGetIpAddress([NotNullWhen(true)] out IPAddress? localIp)
+    {
+        try
+        {
+            using (Socket socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, 0))
+            {
+                socket.Connect("8.8.8.8", 65530);
+                if (socket.LocalEndPoint is not IPEndPoint endPoint)
+                {
+                    localIp = null;
+                    return false;
+                }
+                localIp = endPoint.Address;
+                return true;
+            }
+        }
+        catch (SocketException socketException)
+        {
+            localIp = null;
+            return false;
+        }
     }
 
     public void StopAnnounce()
