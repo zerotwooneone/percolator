@@ -119,4 +119,5 @@ public class AnnouncerModel : IEquatable<AnnouncerModel>
 
     public ReadOnlyReactiveProperty<bool> CanChat { get; }
     public ReactiveProperty<Aes> SessionKey { get; }= new();
+    public ReactiveProperty<ByteString?> SessionId { get; } = new();
 }

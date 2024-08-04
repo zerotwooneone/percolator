@@ -33,6 +33,7 @@ public class MainService : IAnnouncerService
     private IListener _introduceListener;
     private readonly ConcurrentBag<IPAddress> _ipBlacklist = new();
     private readonly ConcurrentBag<ByteString> _identityBlacklist = new();
+    private ConcurrentDictionary<ByteString,AnnouncerModel> _announcersBySessionId= new();
     public ReactiveProperty<bool> BroadcastListen { get; } = new();
     const int ipMaxBytes = 16;
 
@@ -281,13 +282,14 @@ public class MainService : IAnnouncerService
                 
                 OnReceivedReplyIntro(context, proceedPayload);
                 break;
+            case IntroduceRequest.MessageTypeOneofCase.ChatMessage:
+                //OnReceivedChatMessage(context, introduce.ChatMessage);
+                break;
             default:
                 _logger.LogWarning("Introduce message does not have valid message type");
                 //todo: add to IP ban list
                 return;
         }
-
-
     }
 
     private void OnReceivedReplyIntro(UdpReceiveResult context, IntroduceRequest.Types.IntroduceReply.Types.Proceed.Types.Payload proceedPayload)
@@ -325,8 +327,11 @@ public class MainService : IAnnouncerService
         RSAOAEPKeyExchangeDeformatter keyDeformatter = new RSAOAEPKeyExchangeDeformatter(_selfEncryptionService.Ephemeral);
         aes.Key = keyDeformatter.DecryptKeyExchange(proceedPayload.EncryptedSessionKey.ToByteArray());
         aes.IV= proceedPayload.Iv.ToArray();
-        
         announcer.SessionKey.Value = aes;
+        
+        var sessionId = GetSessionId(proceedPayload.EncryptedSessionKey.ToByteArray(),DateTimeOffset.FromUnixTimeMilliseconds(proceedPayload.TimeStampUnixUtcMs));
+        _announcersBySessionId.TryAdd(sessionId, announcer);
+        announcer.SessionId.Value = sessionId;
         
         if (didAdd)
         {
@@ -640,23 +645,58 @@ public class MainService : IAnnouncerService
         //todo:try to reuse keys that failed to send
         Aes aes = Aes.Create();
         
+        var keyFormatter = new RSAOAEPKeyExchangeFormatter(announcerModel.Ephemeral.Value!);
+        var encryptedSessionKey = keyFormatter.CreateKeyExchange(aes.Key, typeof(Aes));
+        
+        var curretTime = DateTimeOffset.Now;
+
+        var sessionId = GetSessionId(encryptedSessionKey, curretTime);
+        
+        //todo:remove old session keys
+        _announcersBySessionId.TryAdd(sessionId, announcerModel);
+        announcerModel.SessionId.Value = sessionId;
+        
         //todo:consider sending multiple copies
         await udpClient.Send(announcerModel.SelectedIpAddress.CurrentValue!, GetIntroReplyBytes(
-            DateTimeOffset.Now,
-            announcerModel.Ephemeral.Value!,
+            curretTime,
             aes,
-            sourceIp), cancellationToken);
+            sourceIp,
+            encryptedSessionKey), cancellationToken);
         
         announcerModel.SessionKey.Value = aes;
     }
-    
-    private byte[] GetIntroReplyBytes(DateTimeOffset currentTime,
-        RSACryptoServiceProvider ephemeral,
-        Aes aes, 
-        IPAddress sourceIp)
+
+    private ByteString GetSessionId(byte[] encryptedSessionKey, DateTimeOffset currentTime)
     {
-        var keyFormatter = new RSAOAEPKeyExchangeFormatter(ephemeral);
-        var encryptedSessionKey = keyFormatter.CreateKeyExchange(aes.Key, typeof(Aes));
+        byte[] bytes = encryptedSessionKey.Take(2)
+            .Concat(encryptedSessionKey.Skip(3).Take(3).Concat(encryptedSessionKey.Skip(7)))
+            .Concat(BitConverter.GetBytes(currentTime.Ticks))
+            .Concat(BitConverter.GetBytes(currentTime.Offset.TotalMinutes))
+            .ToArray();
+        var md5 = MD5.Create();
+        var hash = ByteString.CopyFrom(md5.ComputeHash(bytes));
+        
+        const int sessionIdLength = 8;
+        //const int OffsetBasis = unchecked((int)2166136261);
+        const int Prime = 16777619;
+        var result = new byte[sessionIdLength]{3,7,11,15,19,23,27,31};
+        
+        for (int startIndex = 0; startIndex < hash.Length; startIndex+=sessionIdLength)
+        {
+            for (int i = 0; i < sessionIdLength; i++)
+            {
+                result[i] = (byte) ((unchecked((hash[i+startIndex] ^ result[i])*Prime))%255);
+            }
+        }
+
+        return ByteString.CopyFrom(result);
+    }
+
+    private byte[] GetIntroReplyBytes(DateTimeOffset currentTime,
+        Aes aes, 
+        IPAddress sourceIp,
+        byte[] encryptedSessionKey)
+    {
         var payload = new IntroduceRequest.Types.IntroduceReply.Types.Proceed.Types.Payload
         {
             IdentityKey =ByteString.CopyFrom( _selfEncryptionService.Identity.ExportRSAPublicKey()),
