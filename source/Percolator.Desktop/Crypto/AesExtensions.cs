@@ -1,7 +1,7 @@
 using System.IO;
 using System.Security.Cryptography;
 
-namespace Percolator.Desktop.Main;
+namespace Percolator.Desktop.Crypto;
 
 public static class AesExtensions
 {
