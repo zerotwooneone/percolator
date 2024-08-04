@@ -125,10 +125,11 @@
                 </Grid>
             </Grid>
             <Grid Grid.Column="1">
-                <ContentControl ContentTemplate="{StaticResource ChatTemplate}">
+                <ContentControl ContentTemplate="{StaticResource ChatTemplate}"
+                                DataContext="{Binding Chat.Value}">
                     <ContentControl.Style>
                         <Style TargetType="ContentControl">
-                            <Setter Property="Content" Value="{Binding SelectedAnnouncer.Value}" />
+                            <Setter Property="Content" Value="{Binding}" />
                             <Style.Triggers>
                                 <DataTrigger Binding="{Binding RelativeSource={x:Static RelativeSource.Self}, Path=Content}" Value="{x:Null}">
                                     <Setter Property="ContentControl.Template">

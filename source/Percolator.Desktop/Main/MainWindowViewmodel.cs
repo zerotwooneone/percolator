@@ -12,9 +12,10 @@ public class MainWindowViewmodel : INotifyPropertyChanged
     private readonly MainService _mainService;
     private readonly ILogger<MainWindowViewmodel> _logger;
     private readonly IAnnouncerViewmodelFactory _announcerViewmodelFactory;
+    private readonly IChatViewmodelFactory _chatViewmodelFactory;
     private bool _isAnnouncing;
     public ObservableCollection<AnnouncerViewmodel> Announcers { get; } = new();
-    public ReactiveProperty<AnnouncerViewmodel> SelectedAnnouncer { get; } = new();
+    public ReactiveProperty<AnnouncerViewmodel?> SelectedAnnouncer { get; } = new();
 
     public BindableReactiveProperty<bool> IsBroadcastListening { get; }
 
@@ -33,11 +34,13 @@ public class MainWindowViewmodel : INotifyPropertyChanged
     public MainWindowViewmodel(
         MainService mainService,
         ILogger<MainWindowViewmodel> logger,
-        IAnnouncerViewmodelFactory announcerViewmodelFactory)
+        IAnnouncerViewmodelFactory announcerViewmodelFactory,
+        IChatViewmodelFactory chatViewmodelFactory)
     {
         _mainService = mainService;
         _logger = logger;
         _announcerViewmodelFactory = announcerViewmodelFactory;
+        _chatViewmodelFactory = chatViewmodelFactory;
         AnnounceCommand = new BaseCommand(OnAnnounceClicked);
         AllowIntroductions = _mainService.ListenForIntroductions
             .ToBindableReactiveProperty();
@@ -56,7 +59,11 @@ public class MainWindowViewmodel : INotifyPropertyChanged
             .ObserveOnCurrentDispatcher()
             .ToBindableReactiveProperty();
         IsBroadcastListening.Subscribe(b => _mainService.BroadcastListen.Value = b);
+        SelectedAnnouncer
+            .Subscribe(a=> Chat.Value = a == null ? null : _chatViewmodelFactory.Create());
     }
+
+    public BindableReactiveProperty<ChatViewmodel?> Chat { get; }= new();
 
     private void OnAnnouncerAdded(ByteString announcerId)
     {

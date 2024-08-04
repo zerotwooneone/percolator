@@ -3,7 +3,7 @@ using Microsoft.Extensions.Logging;
 
 namespace Percolator.Desktop.Main;
 
-public class ViewmodelFactory : IAnnouncerViewmodelFactory
+public class ViewmodelFactory : IAnnouncerViewmodelFactory, IChatViewmodelFactory
 {
     private IAnnouncerService _announcerService;
     private readonly ILoggerFactory _loggerFactory;
@@ -21,4 +21,14 @@ public class ViewmodelFactory : IAnnouncerViewmodelFactory
         var logger = _loggerFactory.CreateLogger<AnnouncerViewmodel>();
         return new AnnouncerViewmodel(announcer, _announcerService, logger);
     }
+    
+    public ChatViewmodel Create()
+    {
+        return new ChatViewmodel();
+    }
+}
+
+public interface IChatViewmodelFactory
+{
+    ChatViewmodel Create();
 }
