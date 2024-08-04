@@ -92,7 +92,7 @@ public class MainService : IAnnouncerService
 
         return new string(list.ToArray());
     }
-
+    const int SessionIdLength = 8;
     private async ValueTask OnReceivedIntroduce(UdpReceiveResult context, CancellationToken cancellationToken)
     {
         if (_ipBlacklist.Contains(context.RemoteEndPoint.Address))
@@ -220,7 +220,6 @@ public class MainService : IAnnouncerService
                     return;
                 }
 
-                //todo: make this configurable
                 if (!proceedPayload.HasTimeStampUnixUtcMs ||
                     proceedPayload.TimeStampUnixUtcMs < currentUtcTime.Add(-timestampGracePeriod).ToUnixTimeMilliseconds() ||
                     proceedPayload.TimeStampUnixUtcMs > currentUtcTime.Add(timestampGracePeriod).ToUnixTimeMilliseconds())
@@ -283,13 +282,85 @@ public class MainService : IAnnouncerService
                 OnReceivedReplyIntro(context, proceedPayload);
                 break;
             case IntroduceRequest.MessageTypeOneofCase.ChatMessage:
-                //OnReceivedChatMessage(context, introduce.ChatMessage);
+                var chatMessage = introduce.ChatMessage;
+                if (chatMessage == null)
+                {
+                    _logger.LogWarning("chat message is null");
+                    //todo: add to IP ban list
+                    return;
+                }
+
+                if (chatMessage.Signed == null)
+                {
+                    _logger.LogWarning("chat message does not have signed");
+                    //todo: add to IP ban list
+                    return;
+                }
+
+                if (!chatMessage.HasSignedSignature || chatMessage.SignedSignature.Length == 0)
+                {
+                    _logger.LogWarning("chat message does not have signed signature");
+                    //todo: add to IP ban list
+                    return;
+                }
+                if (!chatMessage.Signed.HasTimeStampUnixUtcMs ||
+                     chatMessage.Signed.TimeStampUnixUtcMs < currentUtcTime.Add(-timestampGracePeriod).ToUnixTimeMilliseconds() ||
+                     chatMessage.Signed.TimeStampUnixUtcMs > currentUtcTime.Add(timestampGracePeriod).ToUnixTimeMilliseconds())
+                {
+                    _logger.LogWarning("Introduce payload does not have valid timestamp");
+                    //todo: add to IP ban list
+                    return;
+                }
+                
+                if (!chatMessage.Signed.HasSourceIp ||
+                    chatMessage.Signed.SourceIp.Length == 0 ||
+                    chatMessage.Signed.SourceIp.Length > ipMaxBytes  ||
+                    !TryGetIpAddress(chatMessage.Signed.SourceIp.ToByteArray(), out var chatSourceIp) ||
+                    !context.RemoteEndPoint.Address.Equals(chatSourceIp))
+                {
+                    _logger.LogWarning("chat message source ip is invalid");
+                    //todo: add to IP ban list
+                    return;
+                }
+
+                if (!chatMessage.Signed.HasSessionKeyId || chatMessage.Signed.SessionKeyId.Length != 8)
+                {
+                    _logger.LogWarning("chat message does not have a valid session key id");
+                    //todo: add to IP ban list
+                    return;
+                }
+
+                if (!_announcersBySessionId.TryGetValue(chatMessage.Signed.SessionKeyId, out var announcer))
+                {
+                    _logger.LogWarning("chat message session key id was not found");
+                    //todo: add to IP ban list
+                    return;
+                }
+
+                if (!announcer.Ephemeral.Value.VerifyData(chatMessage.Signed.ToByteArray(),
+                        chatMessage.SignedSignature.ToByteArray(), HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1))
+                {
+                    _logger.LogWarning("chat message signature is invalid");
+                    return;
+                }
+
+                var payloadBytes =
+                    await announcer.SessionKey.Value.NaiveDecrypt(chatMessage.Signed.EncryptedPayload.ToByteArray());
+                var chatPayload =
+                    IntroduceRequest.Types.ChatMessage.Types.Signed.Types.Payload.Parser.ParseFrom(payloadBytes);
+                OnReceivedChatMessage(context, chatMessage,announcer, chatPayload);
                 break;
             default:
                 _logger.LogWarning("Introduce message does not have valid message type");
                 //todo: add to IP ban list
                 return;
         }
+    }
+
+    private void OnReceivedChatMessage(UdpReceiveResult context, IntroduceRequest.Types.ChatMessage chatMessage,
+        AnnouncerModel announcer, IntroduceRequest.Types.ChatMessage.Types.Signed.Types.Payload chatPayload)
+    {
+        throw new NotImplementedException();
     }
 
     private void OnReceivedReplyIntro(UdpReceiveResult context, IntroduceRequest.Types.IntroduceReply.Types.Proceed.Types.Payload proceedPayload)
@@ -676,14 +747,14 @@ public class MainService : IAnnouncerService
         var md5 = MD5.Create();
         var hash = ByteString.CopyFrom(md5.ComputeHash(bytes));
         
-        const int sessionIdLength = 8;
+        
         //const int OffsetBasis = unchecked((int)2166136261);
         const int Prime = 16777619;
-        var result = new byte[sessionIdLength]{3,7,11,15,19,23,27,31};
+        var result = new byte[SessionIdLength]{3,7,11,15,19,23,27,31};
         
-        for (int startIndex = 0; startIndex < hash.Length; startIndex+=sessionIdLength)
+        for (int startIndex = 0; startIndex < hash.Length; startIndex+=SessionIdLength)
         {
-            for (int i = 0; i < sessionIdLength; i++)
+            for (int i = 0; i < SessionIdLength; i++)
             {
                 result[i] = (byte) ((unchecked((hash[i+startIndex] ^ result[i])*Prime))%255);
             }
