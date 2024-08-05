@@ -7,13 +7,16 @@ public class ViewmodelFactory : IAnnouncerViewmodelFactory, IChatViewmodelFactor
 {
     private IAnnouncerService _announcerService;
     private readonly ILoggerFactory _loggerFactory;
+    private readonly IChatService _chatService;
 
     public ViewmodelFactory(
         IAnnouncerService announcerService,
-        ILoggerFactory loggerFactory)
+        ILoggerFactory loggerFactory,
+        IChatService chatService)
     {
         _announcerService = announcerService;
         _loggerFactory = loggerFactory;
+        _chatService = chatService;
     }
 
     public AnnouncerViewmodel Create(AnnouncerModel announcer)
@@ -24,7 +27,7 @@ public class ViewmodelFactory : IAnnouncerViewmodelFactory, IChatViewmodelFactor
     
     public ChatViewmodel CreateChat(AnnouncerModel announcerModel)
     {
-        return new ChatViewmodel(announcerModel);
+        return new ChatViewmodel(announcerModel, _chatService, _loggerFactory.CreateLogger<ChatViewmodel>());
     }
 }
 

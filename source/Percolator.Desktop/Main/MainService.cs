@@ -15,7 +15,7 @@ using R3;
 
 namespace Percolator.Desktop.Main;
 
-public class MainService : IAnnouncerService
+public class MainService : IAnnouncerService, IChatService
 {
     private readonly UdpClientFactory _udpClientFactory;
     private readonly ILogger<MainService> _logger;
@@ -819,6 +819,54 @@ public class MainService : IAnnouncerService
             }
         };
         return m.ToByteArray();
+    }
+
+    public async Task SendChatMessage(AnnouncerModel announcerModel, string text,
+        CancellationToken cancellationToken = default)
+    {
+        var udpClient = _udpClientFactory.GetOrCreateSender(announcerModel.Port.Value);
+        
+        var curretTime = DateTimeOffset.Now;
+
+        await udpClient.Send(announcerModel.SelectedIpAddress.CurrentValue!, await GetChatBytes(
+            curretTime,
+            announcerModel,
+            text), 
+            cancellationToken);
+    }
+
+    private async Task< byte[]> GetChatBytes(DateTimeOffset curretTime, AnnouncerModel announcerModel,string text)
+    {
+        if (!TryGetIpAddress(out var selfIp))
+        {
+            throw new InvalidOperationException("Failed to get ip address");
+        }
+
+        var payload = new IntroduceRequest.Types.ChatMessage.Types.Signed.Types.Payload
+        {
+            Message = text
+        };
+        var naiveEncrypt = await announcerModel.SessionKey.Value.NaiveEncrypt(payload.ToByteArray());
+        var signed = new IntroduceRequest.Types.ChatMessage.Types.Signed
+        {
+            SourceIp = ByteString.CopyFrom(selfIp.GetAddressBytes()),
+            EncryptedPayload = ByteString.CopyFrom(naiveEncrypt),
+            SessionKeyId = announcerModel.SessionId.Value,
+            TimeStampUnixUtcMs = curretTime.ToUnixTimeMilliseconds()
+        };
+        
+        return new IntroduceRequest
+        {
+            ChatMessage = new IntroduceRequest.Types.ChatMessage
+            {
+                Signed = signed,
+                SignedSignature = ByteString.CopyFrom(_selfEncryptionService.Ephemeral.SignData(
+                    signed.ToByteArray(),
+                    HashAlgorithmName.SHA256,
+                    RSASignaturePadding.Pkcs1
+                )),
+            }
+        }.ToByteArray();
     }
 }
 
