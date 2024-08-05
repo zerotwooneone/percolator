@@ -2,12 +2,12 @@ namespace Percolator.Desktop.Main;
 
 public class MessageModel
 {
-    public MessageModel(DateTime received, string messae)
+    public MessageModel(DateTime received, string message)
     {
         Received = received;
-        Messae = messae;
+        Message = message;
     }
 
     public DateTime Received { get; }
-    public string Messae { get; }
+    public string Message { get; }
 }

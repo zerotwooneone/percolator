@@ -4,10 +4,10 @@ public class MessageViewmodel
 {
     public MessageViewmodel(MessageModel messageModel)
     {
-        Received = messageModel.Received;
-        Text = messageModel.Messae;
+        Received = messageModel.Received.ToString("HH:mm:ss");
+        Text = messageModel.Message;
     }
 
-    public DateTime Received { get; }
+    public string Received { get; }
     public string Text { get; }
 }
