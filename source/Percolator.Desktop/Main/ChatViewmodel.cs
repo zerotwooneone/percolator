@@ -12,8 +12,20 @@ public class ChatViewmodel
     {
         _announcerModel = announcerModel;
         _chatSubcription = _announcerModel.ChatMessage.Subscribe(OnReceivedChatMessage);
+
+        SendCommand = new BaseCommand(OnSendClicked);
     }
-    
+
+    private void OnSendClicked(object? obj)
+    {
+        if (string.IsNullOrWhiteSpace(Text.Value))
+        {
+            return;
+        }
+        
+        Text.Value="";
+    }
+
     private void OnReceivedChatMessage(MessageModel messageModel)
     {
         var messageViewmodel = new MessageViewmodel(messageModel);
@@ -21,4 +33,6 @@ public class ChatViewmodel
     }
 
     public ObservableCollection<MessageViewmodel> Messages { get; } = new();
+    public BaseCommand SendCommand { get; }
+    public BindableReactiveProperty<string> Text { get; }= new("");
 }
