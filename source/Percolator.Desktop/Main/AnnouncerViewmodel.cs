@@ -10,7 +10,7 @@ namespace Percolator.Desktop.Main;
 
 public sealed class AnnouncerViewmodel : INotifyPropertyChanged
 {
-    private readonly AnnouncerModel _announcer;
+    public AnnouncerModel AnnouncerModel{get;}
     private readonly IAnnouncerService _announcerService;
     private readonly ILogger<AnnouncerViewmodel> _logger;
     public string PublicKey { get; }
@@ -27,25 +27,25 @@ public sealed class AnnouncerViewmodel : INotifyPropertyChanged
     public  ReadOnlyReactiveProperty<bool> CanReplyIntroduce { get; }
 
     public AnnouncerViewmodel(
-        AnnouncerModel announcer,
+        AnnouncerModel announcerModel,
         IAnnouncerService announcerService,
         ILogger<AnnouncerViewmodel> logger)
     {
-        _announcer = announcer;
+        AnnouncerModel = announcerModel;
         _announcerService = announcerService;
         _logger = logger;
-        PublicKeyBytes = announcer.Identity;
-        PublicKey = announcer.Identity.ToBase64();
-        Nickname = announcer.Nickname.ToBindableReactiveProperty(announcer.Nickname.Value);
+        PublicKeyBytes = announcerModel.Identity;
+        PublicKey = announcerModel.Identity.ToBase64();
+        Nickname = announcerModel.Nickname.ToBindableReactiveProperty(announcerModel.Nickname.Value);
         //todo: update ip address if it changes
-        IpAddress = new BindableReactiveProperty<string>(announcer.IpAddresses.Last().ToString());
-        Port = announcer.Port.ToBindableReactiveProperty();
-        ToolTip = announcer.Port.Select(p => $"{announcer.IpAddresses.Last()}:{p} {Environment.NewLine} {PublicKey}").ToBindableReactiveProperty("");
+        IpAddress = new BindableReactiveProperty<string>(announcerModel.IpAddresses.Last().ToString());
+        Port = announcerModel.Port.ToBindableReactiveProperty();
+        ToolTip = announcerModel.Port.Select(p => $"{announcerModel.IpAddresses.Last()}:{p} {Environment.NewLine} {PublicKey}").ToBindableReactiveProperty("");
 
-        IntroduceVisible = announcer.CanIntroduce
+        IntroduceVisible = announcerModel.CanIntroduce
             .Select(b=> b ? Visibility.Visible : Visibility.Collapsed)
             .ToBindableReactiveProperty();
-        CanReplyIntroduce = _announcer.CanChat
+        CanReplyIntroduce = AnnouncerModel.CanChat
             .ObserveOnCurrentDispatcher()
             .ToReadOnlyReactiveProperty();
         IntroduceCommand = new BaseCommand(OnIntroduceClicked, _=>!IntroduceInProgress);
@@ -55,7 +55,7 @@ public sealed class AnnouncerViewmodel : INotifyPropertyChanged
 
     private async void OnIntroduceClicked(object? obj)
     {
-        if (!_announcer.CanIntroduce.CurrentValue || _announcer.SelectedIpAddress.CurrentValue == null)
+        if (!AnnouncerModel.CanIntroduce.CurrentValue || AnnouncerModel.SelectedIpAddress.CurrentValue == null)
         {
             return;
         }
@@ -72,11 +72,11 @@ public sealed class AnnouncerViewmodel : INotifyPropertyChanged
         {
             if (CanReplyIntroduce.CurrentValue)
             {
-                await _announcerService.SendReplyIntroduction(_announcer,sourceIp);
+                await _announcerService.SendReplyIntroduction(AnnouncerModel,sourceIp);
             }
             else
             {
-                await _announcerService.SendIntroduction(_announcer.SelectedIpAddress.CurrentValue, Port.Value, sourceIp);
+                await _announcerService.SendIntroduction(AnnouncerModel.SelectedIpAddress.CurrentValue, Port.Value, sourceIp);
             }
             
         }

@@ -22,13 +22,13 @@ public class ViewmodelFactory : IAnnouncerViewmodelFactory, IChatViewmodelFactor
         return new AnnouncerViewmodel(announcer, _announcerService, logger);
     }
     
-    public ChatViewmodel Create()
+    public ChatViewmodel CreateChat(AnnouncerModel announcerModel)
     {
-        return new ChatViewmodel();
+        return new ChatViewmodel(announcerModel);
     }
 }
 
 public interface IChatViewmodelFactory
 {
-    ChatViewmodel Create();
+    ChatViewmodel CreateChat(AnnouncerModel announcerModel);
 }
