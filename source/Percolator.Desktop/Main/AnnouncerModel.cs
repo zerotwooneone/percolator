@@ -123,4 +123,9 @@ public class AnnouncerModel : IEquatable<AnnouncerModel>
     public ReactiveProperty<ByteString?> SessionId { get; } = new();
     public Observable<MessageModel> ChatMessage { get; }
     private readonly Subject<MessageModel> _messageSubject = new();
+
+    public void OnChatMessage(MessageModel messageModel)
+    {
+        _messageSubject.OnNext(messageModel);
+    }
 }

@@ -348,6 +348,10 @@ public class MainService : IAnnouncerService
                     await announcer.SessionKey.Value.NaiveDecrypt(chatMessage.Signed.EncryptedPayload.ToByteArray());
                 var chatPayload =
                     IntroduceRequest.Types.ChatMessage.Types.Signed.Types.Payload.Parser.ParseFrom(payloadBytes);
+                if (!chatPayload.HasMessage || string.IsNullOrWhiteSpace(chatPayload.Message))
+                {
+                    return;
+                }
                 OnReceivedChatMessage(context, chatMessage,announcer, chatPayload);
                 break;
             default:
@@ -360,7 +364,7 @@ public class MainService : IAnnouncerService
     private void OnReceivedChatMessage(UdpReceiveResult context, IntroduceRequest.Types.ChatMessage chatMessage,
         AnnouncerModel announcer, IntroduceRequest.Types.ChatMessage.Types.Signed.Types.Payload chatPayload)
     {
-        throw new NotImplementedException();
+        announcer.OnChatMessage(new MessageModel(DateTime.Now, chatPayload.Message));
     }
 
     private void OnReceivedReplyIntro(UdpReceiveResult context, IntroduceRequest.Types.IntroduceReply.Types.Proceed.Types.Payload proceedPayload)
