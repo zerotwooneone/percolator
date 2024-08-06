@@ -400,11 +400,13 @@ public class MainService : IAnnouncerService, IChatService
         
         Aes aes = Aes.Create();
         RSAOAEPKeyExchangeDeformatter keyDeformatter = new RSAOAEPKeyExchangeDeformatter(_selfEncryptionService.Ephemeral);
-        aes.Key = keyDeformatter.DecryptKeyExchange(proceedPayload.EncryptedSessionKey.ToByteArray());
+        var encryptedSessionKey = proceedPayload.EncryptedSessionKey.ToByteArray();
+        aes.Key = keyDeformatter.DecryptKeyExchange(encryptedSessionKey);
         aes.IV= proceedPayload.Iv.ToArray();
         announcer.SessionKey.Value = aes;
-        
-        var sessionId = GetSessionId(proceedPayload.EncryptedSessionKey.ToByteArray(),DateTimeOffset.FromUnixTimeMilliseconds(proceedPayload.TimeStampUnixUtcMs));
+
+        var timestamp = DateTimeOffset.FromUnixTimeMilliseconds(proceedPayload.TimeStampUnixUtcMs).ToLocalTime();
+        var sessionId = GetSessionId(encryptedSessionKey,timestamp);
         _announcersBySessionId.TryAdd(sessionId, announcer);
         announcer.SessionId.Value = sessionId;
         
