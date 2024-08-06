@@ -60,7 +60,7 @@ public class MainService : IAnnouncerService, IChatService
             .Publish()
             .RefCount();
 
-        PreferredNickname = new ReactiveProperty<string>(GetRandomNickname());
+        PreferredNickname = new ReactiveProperty<string>(GetRandomNickname(GetIntFromBytes(_selfEncryptionService.Identity.ExportRSAPublicKey())));
         _introduceListener = _udpClientFactory.CreateListener(Defaults.DefaultIntroducePort);
         _introduceListener.Received 
             .ObserveOn(ingressContext)
@@ -73,9 +73,22 @@ public class MainService : IAnnouncerService, IChatService
         });
     }
 
-    private string GetRandomNickname()
+    private int GetIntFromBytes(byte[] bytes)
     {
-        var random = new Random();
+        var resultBytes =new byte[]{3,7,11,15};
+        const int Prime = 16777619;
+        for (int i = 0; i < resultBytes.Length; i++)
+        {
+            resultBytes[i%4] = (byte)((unchecked(bytes[i] ^ resultBytes[i % 4] * Prime)) % 255);
+        }
+        return BitConverter.ToInt32(resultBytes, 0);
+    }
+
+    private string GetRandomNickname(int? seed=null)
+    {
+        var random = seed is null 
+            ? new Random() 
+            : new Random(seed.Value);
         var numberOfChars = random.Next(9, 20);
         var vowels = new[] {'a', 'A', '4', '@', '^', 'e', 'E', '3', 'i', 'I', '1','o', 'O', '0', 'u', 'U', 'y', 'Y'};
         var consonants = new[]{'b', 'c', 'd', 'f', 'g', 'h', 'j', 'k', 'l', 'm', 'n', 'p', 'q', 'r', 's', 't', 'v', 'w', 'x', 'z','B', 'C','(', 'D', 'F', 'G', 'H','#','8', 'J', 'K', 'L','7', 'M', 'N', 'P', 'Q', 'R', 'S','$', 'T', 'V', 'W', 'X', 'Z'};
