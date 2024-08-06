@@ -405,8 +405,7 @@ public class MainService : IAnnouncerService, IChatService
         aes.IV= proceedPayload.Iv.ToArray();
         announcer.SessionKey.Value = aes;
 
-        var timestamp = DateTimeOffset.FromUnixTimeMilliseconds(proceedPayload.TimeStampUnixUtcMs).ToLocalTime();
-        var sessionId = GetSessionId(encryptedSessionKey,timestamp);
+        var sessionId = GetSessionId(encryptedSessionKey);
         _announcersBySessionId.TryAdd(sessionId, announcer);
         announcer.SessionId.Value = sessionId;
         
@@ -727,7 +726,7 @@ public class MainService : IAnnouncerService, IChatService
         
         var curretTime = DateTimeOffset.Now;
 
-        var sessionId = GetSessionId(encryptedSessionKey, curretTime);
+        var sessionId = GetSessionId(encryptedSessionKey);
         
         //todo:remove old session keys
         _announcersBySessionId.TryAdd(sessionId, announcerModel);
@@ -743,18 +742,14 @@ public class MainService : IAnnouncerService, IChatService
         announcerModel.SessionKey.Value = aes;
     }
 
-    private ByteString GetSessionId(byte[] encryptedSessionKey, DateTimeOffset currentTime)
+    private ByteString GetSessionId(byte[] encryptedSessionKey)
     {
-        //var dateBytes = BitConverter.GetBytes(currentTime.Ticks).Concat(BitConverter.GetBytes(currentTime.Offset.TotalMinutes));
         byte[] bytes = encryptedSessionKey.Take(2)
             .Concat(encryptedSessionKey.Skip(3).Take(3).Concat(encryptedSessionKey.Skip(7)))
-            //.Concat(dateBytes)
             .ToArray();
         var md5 = MD5.Create();
         var hash = md5.ComputeHash(bytes);
-        _logger.LogInformation($"bytes: {Convert.ToBase64String(bytes)} {Environment.NewLine} hash: {Convert.ToBase64String(hash)}");
         
-        //const int OffsetBasis = unchecked((int)2166136261);
         const int Prime = 16777619;
         var result = new byte[SessionIdLength]{3,7,11,15,19,23,27,31};
         
