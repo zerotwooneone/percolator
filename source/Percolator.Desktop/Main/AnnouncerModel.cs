@@ -119,7 +119,7 @@ public class AnnouncerModel : IEquatable<AnnouncerModel>
     public ReactiveProperty<RSACryptoServiceProvider?> Ephemeral { get; } = new();
 
     public ReadOnlyReactiveProperty<bool> CanChat { get; }
-    public ReactiveProperty<Aes> SessionKey { get; }= new();
+    public ReactiveProperty<Aes?> SessionKey { get; }= new();
     public ReactiveProperty<ByteString?> SessionId { get; } = new();
     public Observable<MessageModel> ChatMessage { get; }
     private readonly Subject<MessageModel> _messageSubject = new();

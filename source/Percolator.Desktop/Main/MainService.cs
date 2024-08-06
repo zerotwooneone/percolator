@@ -852,6 +852,11 @@ public class MainService : IAnnouncerService, IChatService
             throw new InvalidOperationException("Failed to get ip address");
         }
 
+        if (announcerModel.SessionKey.Value == null)
+        {
+            throw new InvalidOperationException("must have session key");
+        }
+
         var payload = new IntroduceRequest.Types.ChatMessage.Types.Signed.Types.Payload
         {
             Message = text

@@ -33,6 +33,11 @@ public class ChatViewmodel
 
         try
         {
+            if (_announcerModel.SessionKey.Value == null)
+            {
+                //todo:introduce
+                return;
+            }
             await _chatService.SendChatMessage(_announcerModel, Text.Value);
         }
         catch (Exception e)
