@@ -745,11 +745,10 @@ public class MainService : IAnnouncerService, IChatService
 
     private ByteString GetSessionId(byte[] encryptedSessionKey, DateTimeOffset currentTime)
     {
-        var dateBytes = BitConverter.GetBytes(currentTime.Ticks).Concat(BitConverter.GetBytes(currentTime.Offset.TotalMinutes));
+        //var dateBytes = BitConverter.GetBytes(currentTime.Ticks).Concat(BitConverter.GetBytes(currentTime.Offset.TotalMinutes));
         byte[] bytes = encryptedSessionKey.Take(2)
             .Concat(encryptedSessionKey.Skip(3).Take(3).Concat(encryptedSessionKey.Skip(7)))
-            .Concat(dateBytes)
-            
+            //.Concat(dateBytes)
             .ToArray();
         var md5 = MD5.Create();
         var hash = md5.ComputeHash(bytes);
