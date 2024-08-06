@@ -751,9 +751,8 @@ public class MainService : IAnnouncerService, IChatService
             .Concat(dateBytes)
             
             .ToArray();
-        //var md5 = MD5.Create();
-        var hash = ByteString.CopyFrom(bytes);//md5.ComputeHash(bytes));
-        
+        var md5 = MD5.Create();
+        var hash = md5.ComputeHash(bytes);
         
         //const int OffsetBasis = unchecked((int)2166136261);
         const int Prime = 16777619;
