@@ -753,6 +753,7 @@ public class MainService : IAnnouncerService, IChatService
             .ToArray();
         var md5 = MD5.Create();
         var hash = md5.ComputeHash(bytes);
+        _logger.LogInformation($"bytes: {Convert.ToBase64String(bytes)} {Environment.NewLine} hash: {Convert.ToBase64String(hash)}");
         
         //const int OffsetBasis = unchecked((int)2166136261);
         const int Prime = 16777619;
