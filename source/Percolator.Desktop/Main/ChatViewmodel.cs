@@ -40,6 +40,8 @@ public class ChatViewmodel
             _logger.LogError(e, "error sending chat message"); 
         }
         
+        OnReceivedChatMessage(new MessageModel(DateTime.Now, Text.Value,true));
+        
         Text.Value="";
     }
 

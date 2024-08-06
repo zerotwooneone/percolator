@@ -39,7 +39,7 @@
                     <ColumnDefinition></ColumnDefinition>
                     <ColumnDefinition Width="Auto"></ColumnDefinition>
                 </Grid.ColumnDefinitions>
-                <TextBlock Grid.Column="0" Text="{Binding Text}"></TextBlock>
+                <TextBlock Grid.Column="0" Text="{Binding Text}" TextAlignment="{Binding Alignment}"></TextBlock>
                 <TextBlock Grid.Column="1" Text="{Binding Received}"></TextBlock>
             </Grid>
         </DataTemplate>

@@ -364,7 +364,7 @@ public class MainService : IAnnouncerService, IChatService
     private void OnReceivedChatMessage(UdpReceiveResult context, IntroduceRequest.Types.ChatMessage chatMessage,
         AnnouncerModel announcer, IntroduceRequest.Types.ChatMessage.Types.Signed.Types.Payload chatPayload)
     {
-        announcer.OnChatMessage(new MessageModel(DateTime.Now, chatPayload.Message));
+        announcer.OnChatMessage(new MessageModel(DateTime.Now, chatPayload.Message,false));
     }
 
     private void OnReceivedReplyIntro(UdpReceiveResult context, IntroduceRequest.Types.IntroduceReply.Types.Proceed.Types.Payload proceedPayload)
