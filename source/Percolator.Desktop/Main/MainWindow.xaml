@@ -43,7 +43,8 @@
                     Grid.Column="0" 
                     Text="{Binding Text}" 
                     TextAlignment="{Binding Alignment}"
-                    Background="{Binding Background}"></TextBlock>
+                    Background="{Binding Background}">
+                </TextBlock>
                 <TextBlock Grid.Column="1" Text="{Binding Received}"></TextBlock>
             </Grid>
         </DataTemplate>
@@ -68,7 +69,11 @@
                         <ColumnDefinition></ColumnDefinition>
                         <ColumnDefinition Width="Auto"></ColumnDefinition>
                     </Grid.ColumnDefinitions>
-                    <TextBox Grid.Column="0" Text="{Binding Text.Value}"></TextBox>
+                    <TextBox Grid.Column="0" Text="{Binding Text.Value, UpdateSourceTrigger=PropertyChanged}">
+                        <TextBox.InputBindings>
+                            <KeyBinding Command="{Binding SendCommand}" Key="Enter"></KeyBinding>
+                        </TextBox.InputBindings>
+                    </TextBox>
                     <Button Grid.Column="1" Content="send" Command="{Binding SendCommand}"></Button>   
                 </Grid>
             </Grid>
