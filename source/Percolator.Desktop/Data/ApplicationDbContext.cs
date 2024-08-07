@@ -12,7 +12,7 @@ public class ApplicationDbContext : DbContext
         : base(options)
     {
         var path = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        DbPath = System.IO.Path.Join(path,"percolator", "app.db");
+        DbPath = System.IO.Path.Join(path,"ZeroHome","Percolator", "app.db");
     }
     
     protected override void OnConfiguring(DbContextOptionsBuilder options)
