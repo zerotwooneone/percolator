@@ -45,7 +45,7 @@ public sealed class AnnouncerViewmodel : INotifyPropertyChanged
         IntroduceVisible = announcerModel.CanIntroduce
             .Select(b=> b ? Visibility.Visible : Visibility.Collapsed)
             .ToBindableReactiveProperty();
-        CanReplyIntroduce = AnnouncerModel.CanChat
+        CanReplyIntroduce = AnnouncerModel.CanReplyIntroduce
             .ObserveOnCurrentDispatcher()
             .ToReadOnlyReactiveProperty();
         IntroduceCommand = new BaseCommand(OnIntroduceClicked, _=>!IntroduceInProgress);

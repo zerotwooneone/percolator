@@ -26,7 +26,7 @@ public class AnnouncerModel : IEquatable<AnnouncerModel>
         Port = new ReactiveProperty<int>(Defaults.DefaultIntroducePort);
         Identity = identity;
         Nickname = new ReactiveProperty<string>(Identity.ToBase64());
-        CanChat = Ephemeral
+        CanReplyIntroduce = Ephemeral
             .CombineLatest(_selectedIpAddress, (ephemeral, ip) => (ephemeral, ip))
             .Select(e => e.ephemeral != null && e.ip != null)
             .ToReadOnlyReactiveProperty();
@@ -118,10 +118,12 @@ public class AnnouncerModel : IEquatable<AnnouncerModel>
     public ReactiveProperty<DateTimeOffset> LastSeen { get; } = new();
     public ReactiveProperty<RSACryptoServiceProvider?> Ephemeral { get; } = new();
 
-    public ReadOnlyReactiveProperty<bool> CanChat { get; }
+    public ReadOnlyReactiveProperty<bool> CanReplyIntroduce { get; }
     public ReactiveProperty<Aes?> SessionKey { get; }= new();
     public ReactiveProperty<ByteString?> SessionId { get; } = new();
     public Observable<MessageModel> ChatMessage { get; }
+    public ReactiveProperty<bool> IntroduceInProgress { get; }= new();
+
     private readonly Subject<MessageModel> _messageSubject = new();
 
     public void OnChatMessage(MessageModel messageModel)

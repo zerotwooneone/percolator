@@ -35,8 +35,11 @@ public class ChatViewmodel
         {
             if (_announcerModel.SessionKey.Value == null)
             {
-                //todo:introduce
-                return;
+                if (!await TryIntroduce())
+                {
+                    return;
+                }
+                await Task.Delay(500);
             }
             await _chatService.SendChatMessage(_announcerModel, Text.Value);
         }
@@ -48,6 +51,46 @@ public class ChatViewmodel
         OnReceivedChatMessage(new MessageModel(DateTime.Now, Text.Value,true));
         
         Text.Value="";
+    }
+    
+    private async Task<bool> TryIntroduce()
+    {
+        if (!_announcerModel.CanIntroduce.CurrentValue || _announcerModel.SelectedIpAddress.CurrentValue == null)
+        {
+            return false;
+        }
+
+        if (!_chatService.TryGetIpAddress(out var sourceIp))
+        {
+            _logger.LogWarning("Failed to get ip address");
+            return false;
+        }
+
+        _announcerModel.IntroduceInProgress.Value = true;
+        try
+        {
+            if (_announcerModel.CanReplyIntroduce.CurrentValue)
+            {
+                await _chatService.SendReplyIntroduction(_announcerModel,sourceIp);
+                return true;
+            }
+            else
+            {
+                await _chatService.SendIntroduction(_announcerModel.SelectedIpAddress.CurrentValue,_announcerModel.Port.Value, sourceIp);
+                //todo:await response
+                return true;
+            }
+            
+        }
+        catch (Exception e)
+        {
+            _logger.LogError(e, "Failed to introduce");
+            return false;
+        }
+        finally
+        {
+            _announcerModel.IntroduceInProgress.Value = false;
+        }
     }
 
     private void OnReceivedChatMessage(MessageModel messageModel)
