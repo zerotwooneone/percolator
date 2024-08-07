@@ -18,7 +18,7 @@ public sealed class AnnouncerViewmodel : INotifyPropertyChanged
 
     public BindableReactiveProperty<string> Nickname { get; }
 
-    public BindableReactiveProperty<string> IpAddress { get; }
+    public BindableReactiveProperty<string?> IpAddress { get; }
     public BindableReactiveProperty<int> Port { get; }
     
     public BindableReactiveProperty<string> ToolTip { get; }
@@ -38,9 +38,9 @@ public sealed class AnnouncerViewmodel : INotifyPropertyChanged
         PublicKey = announcerModel.Identity.ToBase64();
         Nickname = announcerModel.Nickname.ToBindableReactiveProperty(announcerModel.Nickname.Value);
         //todo: update ip address if it changes
-        IpAddress = new BindableReactiveProperty<string>(announcerModel.IpAddresses.Last().ToString());
+        IpAddress = new BindableReactiveProperty<string?>(announcerModel.IpAddresses.LastOrDefault()?.ToString());
         Port = announcerModel.Port.ToBindableReactiveProperty();
-        ToolTip = announcerModel.Port.Select(p => $"{announcerModel.IpAddresses.Last()}:{p} {Environment.NewLine} {PublicKey}").ToBindableReactiveProperty("");
+        ToolTip = announcerModel.Port.Select(p => $"{announcerModel.SelectedIpAddress.CurrentValue}:{p} {Environment.NewLine} {PublicKey}").ToBindableReactiveProperty("");
 
         IntroduceVisible = announcerModel.CanIntroduce
             .Select(b=> b ? Visibility.Visible : Visibility.Collapsed)
