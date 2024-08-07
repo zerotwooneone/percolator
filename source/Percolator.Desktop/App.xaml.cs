@@ -1,5 +1,4 @@
-﻿using System.IO;
-using System.Windows;
+﻿using System.Windows;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -30,6 +29,7 @@ public partial class App : Application
                 services.AddSingleton<MainService>();
                 services.AddSingleton<IAnnouncerService>(p=>p.GetRequiredService<MainService>());
                 services.AddSingleton<IChatService>(p=>p.GetRequiredService<MainService>());
+                services.AddSingleton<IAnnouncerInitializer>(p=>p.GetRequiredService<MainService>());
                 services.AddSingleton<UdpClientFactory>();
                 services.AddSingleton<SelfEncryptionService>(s =>
                     new SelfEncryptionService("6e3c367d-380c-4a0d-8b66-ad397fbac2d9")); //todo: get id from config
@@ -56,26 +56,5 @@ public partial class App : Application
     private void UnhandledExceptionHandler(Exception ex)
     {
         _logger.LogError(ex, "Unhandled exception in app");
-    }
-}
-
-internal class SqliteService : IHostedService
-{
-    private readonly ApplicationDbContext _dbContext;
-
-    public SqliteService(ApplicationDbContext dbContext)
-    {
-        _dbContext = dbContext;
-    }
-    public async Task StartAsync(CancellationToken cancellationToken)
-    {
-        var dbPath = Directory.GetParent(_dbContext.DbPath).FullName;
-        Directory.CreateDirectory(dbPath);
-        await _dbContext.Database.MigrateAsync(cancellationToken);
-    }
-
-    public async Task StopAsync(CancellationToken cancellationToken)
-    {
-        throw new NotImplementedException();
     }
 }

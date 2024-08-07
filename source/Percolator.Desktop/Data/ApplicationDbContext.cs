@@ -4,6 +4,7 @@ namespace Percolator.Desktop.Data;
 
 public class ApplicationDbContext : DbContext
 {
+    public DbSet<RemoteClient> RemoteClients { get; set; }
     public DbSet<RemoteClientIp> RemoteClientIps { get; set; }
     public string DbPath { get; }
     public ApplicationDbContext()
