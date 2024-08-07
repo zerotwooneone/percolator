@@ -36,8 +36,8 @@ public sealed class AnnouncerViewmodel : INotifyPropertyChanged
         _logger = logger;
         PublicKeyBytes = announcerModel.Identity;
         PublicKey = announcerModel.Identity.ToBase64();
-        Nickname = announcerModel.Nickname.ToBindableReactiveProperty(announcerModel.Nickname.Value);
-        //todo: update ip address if it changes
+        Nickname = announcerModel.PreferredNickname
+            .ToBindableReactiveProperty(announcerModel.PreferredNickname.Value);
         IpAddress = new BindableReactiveProperty<string?>(announcerModel.IpAddresses.LastOrDefault()?.ToString());
         Port = announcerModel.Port.ToBindableReactiveProperty();
         ToolTip = announcerModel.Port.Select(p => $"{announcerModel.SelectedIpAddress.CurrentValue}:{p} {Environment.NewLine} {PublicKey}").ToBindableReactiveProperty("");

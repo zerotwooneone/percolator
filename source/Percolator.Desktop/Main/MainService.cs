@@ -389,11 +389,11 @@ public class MainService : IAnnouncerService, IChatService,IAnnouncerInitializer
             var newModel = new AnnouncerModel(payload.IdentityKey, _loggerFactory.CreateLogger<AnnouncerModel>());
             if (payload.HasPreferredNickname && !string.IsNullOrWhiteSpace(payload.PreferredNickname))
             {
-                newModel.Nickname.Value = payload.PreferredNickname.Truncate(maxNicknameLength)!;
+                newModel.PreferredNickname.Value = payload.PreferredNickname.Truncate(maxNicknameLength)!;
             }
             else
             {
-                newModel.Nickname.Value = GetRandomNickname(GetIntFromBytes(payload.IdentityKey.ToByteArray()));
+                newModel.PreferredNickname.Value = GetRandomNickname(GetIntFromBytes(payload.IdentityKey.ToByteArray()));
             }
             return newModel;
         });
@@ -402,7 +402,7 @@ public class MainService : IAnnouncerService, IChatService,IAnnouncerInitializer
         announcer.AddIpAddress(context.RemoteEndPoint.Address);
         if (payload.HasPreferredNickname && !string.IsNullOrWhiteSpace(payload.PreferredNickname))
         {
-            announcer.Nickname.Value = payload.PreferredNickname.Truncate(maxNicknameLength)!;
+            announcer.PreferredNickname.Value = payload.PreferredNickname.Truncate(maxNicknameLength)!;
         }
         
         if (didAdd)
@@ -451,11 +451,11 @@ public class MainService : IAnnouncerService, IChatService,IAnnouncerInitializer
             var newModel = new AnnouncerModel(payload.IdentityKey, _loggerFactory.CreateLogger<AnnouncerModel>());
             if (payload.HasPreferredNickname && !string.IsNullOrWhiteSpace(payload.PreferredNickname))
             {
-                newModel.Nickname.Value = payload.PreferredNickname.Truncate(maxNicknameLength)!;
+                newModel.PreferredNickname.Value = payload.PreferredNickname.Truncate(maxNicknameLength)!;
             }
             else
             {
-                newModel.Nickname.Value = GetRandomNickname(GetIntFromBytes(payload.IdentityKey.ToByteArray()));
+                newModel.PreferredNickname.Value = GetRandomNickname(GetIntFromBytes(payload.IdentityKey.ToByteArray()));
             }
             return newModel;
         });
@@ -469,7 +469,7 @@ public class MainService : IAnnouncerService, IChatService,IAnnouncerInitializer
         announcer.Ephemeral.Value = ephemeral;
         if (payload.HasPreferredNickname && !string.IsNullOrWhiteSpace(payload.PreferredNickname))
         {
-            announcer.Nickname.Value = payload.PreferredNickname.Truncate(35)!;
+            announcer.PreferredNickname.Value = payload.PreferredNickname.Truncate(35)!;
         }
 
         if (didAdd)
@@ -650,7 +650,7 @@ public class MainService : IAnnouncerService, IChatService,IAnnouncerInitializer
             var nextNick = preferredNickname.Length ==0 
                 ? identityBase64.Substring(0,Math.Min(maxNicknameLength, identityBase64.Length)) 
                 :preferredNickname.Substring(0, Math.Min( maxNicknameLength, preferredNickname.Length));
-            announcerModel.Nickname.Value = nextNick;
+            announcerModel.PreferredNickname.Value = nextNick;
         }
         if (identityMessage.Payload.HasPort)
         {

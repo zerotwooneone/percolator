@@ -11,7 +11,7 @@ public class AnnouncerModel : IEquatable<AnnouncerModel>
     private readonly ILogger<AnnouncerModel> _logger;
     public ByteString Identity { get; }
     public ReactiveProperty<int> Port { get; }
-    public ReactiveProperty<string> Nickname { get; }
+    public ReactiveProperty<string> PreferredNickname { get; }
     private List<IPAddress> _ipAddresses = new();
     public IReadOnlyCollection<IPAddress> IpAddresses => _ipAddresses;
     public ReadOnlyReactiveProperty<IPAddress?> SelectedIpAddress => _selectedIpAddress;
@@ -27,7 +27,7 @@ public class AnnouncerModel : IEquatable<AnnouncerModel>
         _logger = logger;
         Port = new ReactiveProperty<int>( port ?? Defaults.DefaultIntroducePort);
         Identity = identity;
-        Nickname = new ReactiveProperty<string>(String.IsNullOrWhiteSpace(nickname) ? Identity.ToBase64(): nickname);
+        PreferredNickname = new ReactiveProperty<string>(String.IsNullOrWhiteSpace(nickname) ? Identity.ToBase64(): nickname);
         CanReplyIntroduce = Ephemeral
             .CombineLatest(_selectedIpAddress, (ephemeral, ip) => (ephemeral, ip))
             .Select(e => e.ephemeral != null && e.ip != null)

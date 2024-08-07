@@ -18,8 +18,8 @@
                 </Grid.ColumnDefinitions>
                 <TextBlock 
                     Grid.Column="0"
-                    Text="{Binding Nickname}" 
-                    ToolTip="{Binding ToolTip}"></TextBlock>
+                    Text="{Binding Nickname.Value}" 
+                    ToolTip="{Binding ToolTip.Value}"></TextBlock>
                 <StackPanel 
                     Grid.Column="1"
                     Orientation="Horizontal">
