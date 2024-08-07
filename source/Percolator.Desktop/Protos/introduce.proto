@@ -11,6 +11,7 @@ message IntroduceRequest {
       optional bytes ephemeralKey = 2;
       optional int64 timeStampUnixUtcMs = 3;
       optional bytes sourceIp = 4;
+      optional string preferredNickname = 5;
     }
     optional Payload payload = 1;
     //signed with identity key
@@ -26,6 +27,7 @@ message IntroduceRequest {
         optional bytes encryptedSessionKey = 4;
         optional int64 timeStampUnixUtcMs = 5;
         optional bytes sourceIp = 6;
+        optional string preferredNickname = 7;
       }
       optional Payload payload = 1;
       //signed with the identity key

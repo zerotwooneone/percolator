@@ -380,17 +380,30 @@ public class MainService : IAnnouncerService, IChatService
         announcer.OnChatMessage(new MessageModel(DateTime.Now, chatPayload.Message,false));
     }
 
-    private void OnReceivedReplyIntro(UdpReceiveResult context, IntroduceRequest.Types.IntroduceReply.Types.Proceed.Types.Payload proceedPayload)
+    private void OnReceivedReplyIntro(UdpReceiveResult context, IntroduceRequest.Types.IntroduceReply.Types.Proceed.Types.Payload payload)
     {
         var didAdd = false;
-        var announcer = _announcersByIdentity.GetOrAdd(proceedPayload.IdentityKey, _ =>
+        var announcer = _announcersByIdentity.GetOrAdd(payload.IdentityKey, _ =>
         {
             didAdd = true;
-            return new AnnouncerModel(proceedPayload.IdentityKey, _loggerFactory.CreateLogger<AnnouncerModel>());
+            var newModel = new AnnouncerModel(payload.IdentityKey, _loggerFactory.CreateLogger<AnnouncerModel>());
+            if (payload.HasPreferredNickname && !string.IsNullOrWhiteSpace(payload.PreferredNickname))
+            {
+                newModel.Nickname.Value = payload.PreferredNickname.Truncate(maxNicknameLength)!;
+            }
+            else
+            {
+                newModel.Nickname.Value = GetRandomNickname(GetIntFromBytes(payload.IdentityKey.ToByteArray()));
+            }
+            return newModel;
         });
 
         announcer.LastSeen.Value = DateTimeOffset.Now;
         announcer.AddIpAddress(context.RemoteEndPoint.Address);
+        if (payload.HasPreferredNickname && !string.IsNullOrWhiteSpace(payload.PreferredNickname))
+        {
+            announcer.Nickname.Value = payload.PreferredNickname.Truncate(maxNicknameLength)!;
+        }
         
         if (didAdd)
         {
@@ -408,14 +421,14 @@ public class MainService : IAnnouncerService, IChatService
         {
             PersistKeyInCsp = false
         };
-        ephemeral.ImportRSAPublicKey(proceedPayload.EphemeralKey.ToByteArray(), out _);
+        ephemeral.ImportRSAPublicKey(payload.EphemeralKey.ToByteArray(), out _);
         announcer.Ephemeral.Value = ephemeral;
         
         Aes aes = Aes.Create();
         RSAOAEPKeyExchangeDeformatter keyDeformatter = new RSAOAEPKeyExchangeDeformatter(_selfEncryptionService.Ephemeral);
-        var encryptedSessionKey = proceedPayload.EncryptedSessionKey.ToByteArray();
+        var encryptedSessionKey = payload.EncryptedSessionKey.ToByteArray();
         aes.Key = keyDeformatter.DecryptKeyExchange(encryptedSessionKey);
-        aes.IV= proceedPayload.Iv.ToArray();
+        aes.IV= payload.Iv.ToArray();
         announcer.SessionKey.Value = aes;
 
         var sessionId = GetSessionId(encryptedSessionKey);
@@ -427,7 +440,7 @@ public class MainService : IAnnouncerService, IChatService
             _announcerAdded.OnNext(announcer.Identity);
         }
     }
-
+const int maxNicknameLength = 35;
     private async Task OnReceivedUnknownPublicKey(UdpReceiveResult context,
         IntroduceRequest.Types.UnknownPublicKey.Types.Payload payload, CancellationToken cancellationToken)
     {
@@ -435,7 +448,16 @@ public class MainService : IAnnouncerService, IChatService
         var announcer = _announcersByIdentity.GetOrAdd(payload.IdentityKey, _ =>
         {
             didAdd = true;
-            return new AnnouncerModel(payload.IdentityKey, _loggerFactory.CreateLogger<AnnouncerModel>());
+            var newModel = new AnnouncerModel(payload.IdentityKey, _loggerFactory.CreateLogger<AnnouncerModel>());
+            if (payload.HasPreferredNickname && !string.IsNullOrWhiteSpace(payload.PreferredNickname))
+            {
+                newModel.Nickname.Value = payload.PreferredNickname.Truncate(maxNicknameLength)!;
+            }
+            else
+            {
+                newModel.Nickname.Value = GetRandomNickname(GetIntFromBytes(payload.IdentityKey.ToByteArray()));
+            }
+            return newModel;
         });
         announcer.AddIpAddress(context.RemoteEndPoint.Address);
         announcer.LastSeen.Value = DateTimeOffset.Now;
@@ -445,6 +467,10 @@ public class MainService : IAnnouncerService, IChatService
         };
         ephemeral.ImportRSAPublicKey(payload.EphemeralKey.ToByteArray(), out _);
         announcer.Ephemeral.Value = ephemeral;
+        if (payload.HasPreferredNickname && !string.IsNullOrWhiteSpace(payload.PreferredNickname))
+        {
+            announcer.Nickname.Value = payload.PreferredNickname.Truncate(35)!;
+        }
 
         if (didAdd)
         {
