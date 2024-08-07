@@ -74,13 +74,6 @@ internal class SqliteService : IHostedService
         var dbPath = Directory.GetParent(_dbContext.DbPath).FullName;
         Directory.CreateDirectory(dbPath);
         await _dbContext.Database.MigrateAsync(cancellationToken);
-        
-        _dbContext.RemoteClientIps.Add(new RemoteClientIp
-        {
-            IpAddress = "127.0.0.1",
-            Identity = "test"
-        });
-        await _dbContext.SaveChangesAsync();
     }
 
     public async Task StopAsync(CancellationToken cancellationToken)
