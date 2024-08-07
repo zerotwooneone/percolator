@@ -62,7 +62,10 @@ internal class SqliteService : IHostedService
         Directory.CreateDirectory(dbPath);
         await _dbContext.Database.MigrateAsync(cancellationToken);
         
-        _announcerInitializer.AddKnownAnnouncers(_dbContext.RemoteClients.ToArray().SelectMany(dm =>
+        _announcerInitializer.AddKnownAnnouncers(_dbContext.RemoteClients
+            .Include(c=>c.RemoteClientIps)
+            .ToArray()
+            .SelectMany(dm =>
         {
             if(!dm.TryGetIdentityBytes(out var bytes))
             {
@@ -79,6 +82,11 @@ internal class SqliteService : IHostedService
                     continue;
                 }
                 announcerModel.AddIpAddress(ipAddress);
+            }
+
+            if (announcerModel.IpAddresses.Count != 0)
+            {
+                announcerModel.SelectIpAddress(announcerModel.IpAddresses.Count-1);
             }
             return new [] {announcerModel};
         }));
