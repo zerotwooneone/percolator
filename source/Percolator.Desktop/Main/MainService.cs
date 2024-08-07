@@ -15,7 +15,7 @@ using R3;
 
 namespace Percolator.Desktop.Main;
 
-public class MainService : IAnnouncerService, IChatService
+public class MainService : IAnnouncerService, IChatService,IAnnouncerInitializer
 {
     private readonly UdpClientFactory _udpClientFactory;
     private readonly ILogger<MainService> _logger;
@@ -440,7 +440,7 @@ public class MainService : IAnnouncerService, IChatService
             _announcerAdded.OnNext(announcer.Identity);
         }
     }
-const int maxNicknameLength = 35;
+    const int maxNicknameLength = 35;
     private async Task OnReceivedUnknownPublicKey(UdpReceiveResult context,
         IntroduceRequest.Types.UnknownPublicKey.Types.Payload payload, CancellationToken cancellationToken)
     {
@@ -908,6 +908,17 @@ const int maxNicknameLength = 35;
                 )),
             }
         }.ToByteArray();
+    }
+
+    public void AddKnownAnnouncers(IEnumerable<AnnouncerModel> announcerModels)
+    {
+        foreach (var model in announcerModels)
+        {
+            if (_announcersByIdentity.TryAdd(model.Identity, model))
+            {
+                _announcerAdded.OnNext(model.Identity);
+            }
+        }
     }
 }
 

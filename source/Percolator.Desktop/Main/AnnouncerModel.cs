@@ -20,12 +20,14 @@ public class AnnouncerModel : IEquatable<AnnouncerModel>
 
     public AnnouncerModel(
         ByteString identity,
-        ILogger<AnnouncerModel> logger)
+        ILogger<AnnouncerModel> logger,
+        int? port = null,
+        string? nickname = null)
     {
         _logger = logger;
-        Port = new ReactiveProperty<int>(Defaults.DefaultIntroducePort);
+        Port = new ReactiveProperty<int>( port ?? Defaults.DefaultIntroducePort);
         Identity = identity;
-        Nickname = new ReactiveProperty<string>(Identity.ToBase64());
+        Nickname = new ReactiveProperty<string>(String.IsNullOrWhiteSpace(nickname) ? Identity.ToBase64(): nickname);
         CanReplyIntroduce = Ephemeral
             .CombineLatest(_selectedIpAddress, (ephemeral, ip) => (ephemeral, ip))
             .Select(e => e.ephemeral != null && e.ip != null)
