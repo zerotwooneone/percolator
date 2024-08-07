@@ -1,8 +1,13 @@
-﻿using System.Windows;
+﻿using System.IO;
+using System.Windows;
+using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Percolator.Desktop.Crypto;
+using Percolator.Desktop.Data;
 using Percolator.Desktop.Main;
 using Percolator.Desktop.Udp;
 using R3;
@@ -33,10 +38,17 @@ public partial class App : Application
                 services.AddSingleton<ViewmodelFactory>();
                 services.AddSingleton<IAnnouncerViewmodelFactory>(p=>p.GetRequiredService<ViewmodelFactory>());
                 services.AddSingleton<IChatViewmodelFactory>(p=>p.GetRequiredService<ViewmodelFactory>());
+                services.AddHostedService<SqliteService>();
+                services.AddDbContext<ApplicationDbContext>(options =>
+                {
+                    options.UseSqlite("Data Source=percolator.db");
+                });
             });
         
         var host = builder.Build();
         _logger = host.Services.GetRequiredService<ILogger<App>>();
+        
+        Task.Factory.StartNew(() => host.StartAsync().Wait());
         
         var mainWindow = host.Services.GetRequiredService<MainWindow>();
         mainWindow.DataContext = host.Services.GetRequiredService<MainWindowViewmodel>();
@@ -46,5 +58,33 @@ public partial class App : Application
     private void UnhandledExceptionHandler(Exception ex)
     {
         _logger.LogError(ex, "Unhandled exception in app");
+    }
+}
+
+internal class SqliteService : IHostedService
+{
+    private readonly ApplicationDbContext _dbContext;
+
+    public SqliteService(ApplicationDbContext dbContext)
+    {
+        _dbContext = dbContext;
+    }
+    public async Task StartAsync(CancellationToken cancellationToken)
+    {
+        var dbPath = Directory.GetParent(_dbContext.DbPath).FullName;
+        Directory.CreateDirectory(dbPath);
+        await _dbContext.Database.MigrateAsync(cancellationToken);
+        
+        _dbContext.RemoteClientIps.Add(new RemoteClientIp
+        {
+            IpAddress = "127.0.0.1",
+            Identity = "test"
+        });
+        await _dbContext.SaveChangesAsync();
+    }
+
+    public async Task StopAsync(CancellationToken cancellationToken)
+    {
+        throw new NotImplementedException();
     }
 }
