@@ -10,6 +10,7 @@ public class ChatViewmodel
     private readonly IChatService _chatService;
     private readonly ILogger<ChatViewmodel> _logger;
     private readonly IDisposable _chatSubcription;
+    public BindableReactiveProperty<bool> SendEnabled { get; }
 
     public ChatViewmodel(
         AnnouncerModel announcerModel,
@@ -24,11 +25,19 @@ public class ChatViewmodel
             .Subscribe(OnReceivedChatMessage);
 
         SendCommand = new BaseCommand(OnSendClicked);
+        SendEnabled = _announcerModel.CanIntroduce
+            .CombineLatest(_announcerModel.IntroduceInProgress, (canIntroduce, introduceInProgress) => canIntroduce && !introduceInProgress)
+            .ToBindableReactiveProperty();
     }
 
     private async void OnSendClicked(object? obj)
     {
         if (string.IsNullOrWhiteSpace(Text.Value))
+        {
+            return;
+        }
+
+        if (!SendEnabled.CurrentValue)
         {
             return;
         }

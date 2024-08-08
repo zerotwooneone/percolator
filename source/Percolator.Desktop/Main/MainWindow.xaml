@@ -74,7 +74,10 @@
                             <KeyBinding Command="{Binding SendCommand}" Key="Enter"></KeyBinding>
                         </TextBox.InputBindings>
                     </TextBox>
-                    <Button Grid.Column="1" Content="send" Command="{Binding SendCommand}"></Button>   
+                    <Button Grid.Column="1" 
+                            Content="send" 
+                            Command="{Binding SendCommand}"
+                            IsEnabled="{Binding SendEnabled.Value}"></Button>   
                 </Grid>
             </Grid>
         </DataTemplate>
