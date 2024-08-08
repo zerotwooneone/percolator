@@ -105,6 +105,11 @@ internal class SqliteService : IHostedService
             {
                 announcerModel.PreferredNickname.Value = dm.PreferredNickname;
             }
+
+            if (dm.LastSeenUtc > 0)
+            {
+                announcerModel.LastSeen.Value = dm.GetLocalLastSeen();
+            }
             return new [] {announcerModel};
         }));
     }
