@@ -70,7 +70,7 @@ public class MainWindowViewmodel : INotifyPropertyChanged
 
     private void OnAnnouncerAdded(ByteString announcerId)
     {
-        var announcer = _remoteClientRepository.RemoteClients[announcerId];
+        var announcer = _remoteClientRepository.GetClientByIdentity(announcerId);
         var announcerVm = _remoteClientViewmodelFactory.Create(announcer);
         RemoteClients.Add(announcerVm);
     }

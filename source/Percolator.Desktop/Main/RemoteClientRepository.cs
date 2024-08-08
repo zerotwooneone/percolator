@@ -10,8 +10,7 @@ public class RemoteClientRepository : IRemoteClientRepository,IRemoteClientIniti
 {
     public Observable<ByteString> ClientAdded { get; }
     private readonly Subject<ByteString> _clientAdded = new();
-    private readonly ConcurrentDictionary<ByteString, RemoteClientModel> _clientsByIdentity= new();
-    public IReadOnlyDictionary<ByteString, RemoteClientModel> RemoteClients => _clientsByIdentity;
+    private readonly ConcurrentDictionary<ByteString, ClientWrapper> _clientsByIdentity= new();
     private readonly IServiceScopeFactory _serviceScopeFactory;
     private readonly FrameProvider _dbIoSyncContext;
 
@@ -31,16 +30,21 @@ public class RemoteClientRepository : IRemoteClientRepository,IRemoteClientIniti
     {
         foreach (var model in announcerModels)
         {
-            if (_clientsByIdentity.TryAdd(model.Identity, model))
+            if (_clientsByIdentity.TryAdd(model.Identity, new ClientWrapper(model)))
             {
                 _clientAdded.OnNext(model.Identity);
             }
         }
     }
 
+    public RemoteClientModel? GetClientByIdentity(ByteString identity)
+    {
+        return !_clientsByIdentity.TryGetValue(identity, out var clientWrapper) ? null : clientWrapper.Client;
+    }
+
     public RemoteClientModel GetOrAdd(ByteString identity, Func<ByteString, RemoteClientModel> addCallback)
     {
-        return _clientsByIdentity.GetOrAdd(identity, addCallback);
+        return _clientsByIdentity.GetOrAdd(identity, b => new ClientWrapper(addCallback(b))).Client;
     }
 
     public void OnNext(ByteString identity)
@@ -73,7 +77,7 @@ public class RemoteClientRepository : IRemoteClientRepository,IRemoteClientIniti
     {
         using var scope = _serviceScopeFactory.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-        var announcer = RemoteClients[announcerId];
+        var announcer = _clientsByIdentity[announcerId].Client;
         var remoteClient = new RemoteClient();
         remoteClient.SetIdentity( announcer.Identity.ToByteArray());
         
@@ -98,5 +102,25 @@ public class RemoteClientRepository : IRemoteClientRepository,IRemoteClientIniti
 
         dbContext.RemoteClients.Add(remoteClient);
         dbContext.SaveChanges();
+    }
+    
+    private class ClientWrapper
+    {
+        public RemoteClientModel Client { get; }
+        public Observable<Unit> DoDbUpdate { get; }
+        public ClientWrapper(RemoteClientModel client)
+        {
+            Client = client;
+            var propertyChanged = client.LastSeen
+                .Skip(1)
+                .Select(_=>Unit.Default)
+                .Merge(client.PreferredNickname
+                    .Skip(1)
+                    .Select(_=>Unit.Default));
+            DoDbUpdate = Observable.Interval(TimeSpan.FromSeconds(2))
+                .CombineLatest(propertyChanged, (_, _) => Unit.Default)
+                .Publish()
+                .RefCount();
+        }
     }
 }
