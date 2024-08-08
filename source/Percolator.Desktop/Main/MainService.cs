@@ -5,6 +5,7 @@ using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Windows;
 using Google.Protobuf;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Percolator.Desktop.Crypto;
 using Percolator.Desktop.Udp;
@@ -21,7 +22,7 @@ public class MainService : IAnnouncerService, IChatService,IAnnouncerInitializer
     private readonly ILogger<MainService> _logger;
     private readonly SelfEncryptionService _selfEncryptionService;
     private readonly ILoggerFactory _loggerFactory;
-    private readonly IPersistenceService _persistenceService;
+    private readonly IServiceScopeFactory _serviceScopeFactory;
     private readonly IBroadcaster _broadcaster;
     private readonly IListener _broadcastListener;
     private readonly Observable<Unit> _announceInterval;
@@ -43,13 +44,13 @@ public class MainService : IAnnouncerService, IChatService,IAnnouncerInitializer
         ILogger<MainService> logger,
         SelfEncryptionService selfEncryptionService,
         ILoggerFactory loggerFactory,
-        IPersistenceService persistenceService)
+        IServiceScopeFactory serviceScopeFactory)
     {
         _udpClientFactory = udpClientFactory;
         _logger = logger;
         _selfEncryptionService = selfEncryptionService;
         _loggerFactory = loggerFactory;
-        _persistenceService = persistenceService;
+        _serviceScopeFactory = serviceScopeFactory;
         _broadcaster = _udpClientFactory.CreateBroadcaster(Defaults.DefaultBroadcastPort);
         _broadcastListener = _udpClientFactory.CreateListener(Defaults.DefaultBroadcastPort);
         var ingressContext = new SynchronizationContext();
@@ -451,8 +452,10 @@ public class MainService : IAnnouncerService, IChatService,IAnnouncerInitializer
             .Skip(1)
             .Take(1)
             .SubscribeAwait(async (nickname,c) =>
-            {
-                await _persistenceService.SetPreferredNickname(announcer.Identity, nickname);
+            {   
+                using var scope = _serviceScopeFactory.CreateScope();
+                var persistenceService = scope.ServiceProvider.GetRequiredService<IPersistenceService>();
+                await persistenceService.SetPreferredNickname(announcer.Identity, nickname);
             });
     }
 

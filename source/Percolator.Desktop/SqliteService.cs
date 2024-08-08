@@ -2,6 +2,7 @@ using System.IO;
 using System.Net;
 using Google.Protobuf;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Percolator.Desktop.Data;
@@ -15,19 +16,20 @@ internal class SqliteService : IHostedService
     private readonly IAnnouncerInitializer _announcerInitializer;
     private readonly ILoggerFactory _loggerFactory;
     private readonly ILogger<SqliteService> _logger;
-    private readonly ApplicationDbContext _dbContext;
+    private readonly IServiceScopeFactory _serviceScopeFactory;
     private readonly FrameProvider _dbIoSyncContext;
 
-    public SqliteService(ApplicationDbContext dbContext,
+    public SqliteService(
         IAnnouncerInitializer announcerInitializer,
         ILoggerFactory loggerFactory,
-        ILogger<SqliteService> logger)
+        ILogger<SqliteService> logger,
+        IServiceScopeFactory serviceScopeFactory)
     {
         _dbIoSyncContext = new NewThreadSleepFrameProvider();
         _announcerInitializer = announcerInitializer;
         _loggerFactory = loggerFactory;
         _logger = logger;
-        _dbContext = dbContext;
+        _serviceScopeFactory = serviceScopeFactory;
         
         _announcerInitializer.AnnouncerAdded
             .ObserveOn(_dbIoSyncContext)
@@ -36,10 +38,13 @@ internal class SqliteService : IHostedService
     
     private void OnAnnouncerAdded(ByteString announcerId)
     {
+        using var scope = _serviceScopeFactory.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
         var announcer = _announcerInitializer.Announcers[announcerId];
         var remoteClient = new RemoteClient();
         remoteClient.SetIdentity( announcer.Identity.ToByteArray());
-        if (_dbContext.RemoteClients.Any(client => client.Identity ==remoteClient.Identity))
+        
+        if (dbContext.RemoteClients.Any(client => client.Identity ==remoteClient.Identity))
         {
             return;
         }
@@ -58,16 +63,18 @@ internal class SqliteService : IHostedService
             });
         }
 
-        _dbContext.RemoteClients.Add(remoteClient);
-        _dbContext.SaveChanges();
+        dbContext.RemoteClients.Add(remoteClient);
+        dbContext.SaveChanges();
     }
     public async Task StartAsync(CancellationToken cancellationToken)
     {
-        var dbPath = Directory.GetParent(_dbContext.DbPath).FullName;
+        using var scope = _serviceScopeFactory.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var dbPath = Directory.GetParent(dbContext.DbPath).FullName;
         Directory.CreateDirectory(dbPath);
-        await _dbContext.Database.MigrateAsync(cancellationToken);
+        await dbContext.Database.MigrateAsync(cancellationToken);
         
-        _announcerInitializer.AddKnownAnnouncers(_dbContext.RemoteClients
+        _announcerInitializer.AddKnownAnnouncers(dbContext.RemoteClients
             .Include(c=>c.RemoteClientIps)
             .ToArray()
             .SelectMany(dm =>
@@ -110,23 +117,26 @@ internal class SqliteService : IHostedService
 
 internal class SqliteService2 : IPersistenceService
 {
+    private readonly IServiceScopeFactory _serviceScopeFactory;
     private readonly ILogger<SqliteService2> _logger;
-    private readonly ApplicationDbContext _dbContext;
     private readonly FrameProvider _dbIoSyncContext;
 
-    public SqliteService2(ApplicationDbContext dbContext,
+    public SqliteService2(
+        IServiceScopeFactory serviceScopeFactory,
         ILogger<SqliteService2> logger)
     {
         _dbIoSyncContext = new NewThreadSleepFrameProvider();
+        _serviceScopeFactory = serviceScopeFactory;
         _logger = logger;
-        _dbContext = dbContext;
     }
 
     public async Task SetPreferredNickname(ByteString identity, string nickname)
     {
         await Observable.FromAsync(async c =>
             {
-                var rc = await _dbContext.RemoteClients.FirstOrDefaultAsync(
+                using var scope = _serviceScopeFactory.CreateScope();
+                var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+                var rc = await dbContext.RemoteClients.FirstOrDefaultAsync(
                     client => client.Identity == identity.ToBase64());
                 if (rc == null)
                 {
@@ -139,7 +149,7 @@ internal class SqliteService2 : IPersistenceService
                 }
 
                 rc.PreferredNickname = nickname;
-                await _dbContext.SaveChangesAsync();
+                await dbContext.SaveChangesAsync();
             })
             .SubscribeOn(_dbIoSyncContext)
             .ObserveOn(_dbIoSyncContext)

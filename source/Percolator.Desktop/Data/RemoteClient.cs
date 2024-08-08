@@ -14,6 +14,7 @@ public class RemoteClient
     
     [MaxLength(140)]
     public string? PreferredNickname { get; set; }
+    //public DateTimeOffset LastSeenUtc { get; set; } = DateTimeOffset.UtcNow;
     public ICollection<RemoteClientIp> RemoteClientIps { get; set; }=new List<RemoteClientIp>();
     
     public void SetIdentity(byte[] bytes)
