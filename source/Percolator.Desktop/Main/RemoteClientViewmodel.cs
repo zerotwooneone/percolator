@@ -8,11 +8,11 @@ using R3;
 
 namespace Percolator.Desktop.Main;
 
-public sealed class AnnouncerViewmodel : INotifyPropertyChanged
+public sealed class RemoteClientViewmodel : INotifyPropertyChanged
 {
     public RemoteClientModel RemoteClientModel{get;}
-    private readonly IAnnouncerService _announcerService;
-    private readonly ILogger<AnnouncerViewmodel> _logger;
+    private readonly IRemoteClientService _remoteClientService;
+    private readonly ILogger<RemoteClientViewmodel> _logger;
     public string PublicKey { get; }
     public ByteString PublicKeyBytes { get; }
 
@@ -26,13 +26,13 @@ public sealed class AnnouncerViewmodel : INotifyPropertyChanged
     public BaseCommand IntroduceCommand { get; }
     public  ReadOnlyReactiveProperty<bool> CanReplyIntroduce { get; }
 
-    public AnnouncerViewmodel(
+    public RemoteClientViewmodel(
         RemoteClientModel remoteClientModel,
-        IAnnouncerService announcerService,
-        ILogger<AnnouncerViewmodel> logger)
+        IRemoteClientService remoteClientService,
+        ILogger<RemoteClientViewmodel> logger)
     {
         RemoteClientModel = remoteClientModel;
-        _announcerService = announcerService;
+        _remoteClientService = remoteClientService;
         _logger = logger;
         PublicKeyBytes = remoteClientModel.Identity;
         PublicKey = remoteClientModel.Identity.ToBase64();
@@ -60,7 +60,7 @@ public sealed class AnnouncerViewmodel : INotifyPropertyChanged
             return;
         }
 
-        if (!_announcerService.TryGetIpAddress(out var sourceIp))
+        if (!_remoteClientService.TryGetIpAddress(out var sourceIp))
         {
             _logger.LogWarning("Failed to get ip address");
             return;
@@ -72,11 +72,11 @@ public sealed class AnnouncerViewmodel : INotifyPropertyChanged
         {
             if (CanReplyIntroduce.CurrentValue)
             {
-                await _announcerService.SendReplyIntroduction(RemoteClientModel,sourceIp);
+                await _remoteClientService.SendReplyIntroduction(RemoteClientModel,sourceIp);
             }
             else
             {
-                await _announcerService.SendIntroduction(RemoteClientModel.SelectedIpAddress.CurrentValue, Port.Value, sourceIp);
+                await _remoteClientService.SendIntroduction(RemoteClientModel.SelectedIpAddress.CurrentValue, Port.Value, sourceIp);
             }
             
         }

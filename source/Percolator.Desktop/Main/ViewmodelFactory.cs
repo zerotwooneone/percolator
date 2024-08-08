@@ -3,26 +3,26 @@ using Microsoft.Extensions.Logging;
 
 namespace Percolator.Desktop.Main;
 
-public class ViewmodelFactory : IAnnouncerViewmodelFactory, IChatViewmodelFactory
+public class ViewmodelFactory : IRemoteClientViewmodelFactory, IChatViewmodelFactory
 {
-    private IAnnouncerService _announcerService;
+    private IRemoteClientService _remoteClientService;
     private readonly ILoggerFactory _loggerFactory;
     private readonly IChatService _chatService;
 
     public ViewmodelFactory(
-        IAnnouncerService announcerService,
+        IRemoteClientService remoteClientService,
         ILoggerFactory loggerFactory,
         IChatService chatService)
     {
-        _announcerService = announcerService;
+        _remoteClientService = remoteClientService;
         _loggerFactory = loggerFactory;
         _chatService = chatService;
     }
 
-    public AnnouncerViewmodel Create(RemoteClientModel remoteClient)
+    public RemoteClientViewmodel Create(RemoteClientModel remoteClient)
     {
-        var logger = _loggerFactory.CreateLogger<AnnouncerViewmodel>();
-        return new AnnouncerViewmodel(remoteClient, _announcerService, logger);
+        var logger = _loggerFactory.CreateLogger<RemoteClientViewmodel>();
+        return new RemoteClientViewmodel(remoteClient, _remoteClientService, logger);
     }
     
     public ChatViewmodel CreateChat(RemoteClientModel remoteClientModel)

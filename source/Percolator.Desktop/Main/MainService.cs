@@ -16,7 +16,7 @@ using R3;
 
 namespace Percolator.Desktop.Main;
 
-public class MainService : IAnnouncerService, IChatService
+public class MainService : IRemoteClientService, IChatService
 {
     private readonly UdpClientFactory _udpClientFactory;
     private readonly ILogger<MainService> _logger;
@@ -951,38 +951,43 @@ public class MainService : IAnnouncerService, IChatService
 
 public interface IAnnouncerRepository
 {
-    Observable<ByteString> AnnouncerAdded { get; }
-    IReadOnlyDictionary<ByteString, RemoteClientModel> Announcers { get; }
+    Observable<ByteString> ClientAdded { get; }
+    IReadOnlyDictionary<ByteString, RemoteClientModel> RemoteClients { get; }
     RemoteClientModel GetOrAdd(ByteString identity, Func<ByteString, RemoteClientModel> addCallback);
     void OnNext(ByteString identity);
 }
 
-public class AnnouncerRepository : IAnnouncerRepository,IAnnouncerInitializer
+public class RemoteClientRepository : IAnnouncerRepository,IRemoteClientInitializer
 {
-    public Observable<ByteString> AnnouncerAdded => _announcerAdded;
-    private Subject<ByteString> _announcerAdded = new();
-    private readonly ConcurrentDictionary<ByteString, RemoteClientModel> _announcersByIdentity= new();
-    public IReadOnlyDictionary<ByteString, RemoteClientModel> Announcers => _announcersByIdentity;
+    public Observable<ByteString> ClientAdded { get; }
+    private readonly Subject<ByteString> _clientAdded = new();
+    private readonly ConcurrentDictionary<ByteString, RemoteClientModel> _clientsByIdentity= new();
+    public IReadOnlyDictionary<ByteString, RemoteClientModel> RemoteClients => _clientsByIdentity;
+
+    public RemoteClientRepository()
+    {
+        ClientAdded = _clientAdded.AsObservable();
+    }
     
     public void AddKnownAnnouncers(IEnumerable<RemoteClientModel> announcerModels)
     {
         foreach (var model in announcerModels)
         {
-            if (_announcersByIdentity.TryAdd(model.Identity, model))
+            if (_clientsByIdentity.TryAdd(model.Identity, model))
             {
-                _announcerAdded.OnNext(model.Identity);
+                _clientAdded.OnNext(model.Identity);
             }
         }
     }
 
     public RemoteClientModel GetOrAdd(ByteString identity, Func<ByteString, RemoteClientModel> addCallback)
     {
-        return _announcersByIdentity.GetOrAdd(identity, addCallback);
+        return _clientsByIdentity.GetOrAdd(identity, addCallback);
     }
 
     public void OnNext(ByteString identity)
     {
-        _announcerAdded.OnNext(identity);
+        _clientAdded.OnNext(identity);
     }
 }
 

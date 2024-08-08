@@ -3,7 +3,7 @@ using System.Net;
 
 namespace Percolator.Desktop.Main;
 
-public interface IAnnouncerService
+public interface IRemoteClientService
 {
     bool TryGetIpAddress([NotNullWhen(true)] out IPAddress? localIp);
     Task SendIntroduction(IPAddress destination, int port, IPAddress sourceIp,

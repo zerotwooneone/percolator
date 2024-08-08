@@ -27,18 +27,18 @@ public partial class App : Application
                 services.AddSingleton<MainWindow>();
                 services.AddScoped<MainWindowViewmodel>();
                 services.AddSingleton<MainService>();
-                services.AddSingleton<IAnnouncerService>(p=>p.GetRequiredService<MainService>());
+                services.AddSingleton<IRemoteClientService>(p=>p.GetRequiredService<MainService>());
                 services.AddSingleton<IChatService>(p=>p.GetRequiredService<MainService>());
 
-                services.AddSingleton<AnnouncerRepository>();
-                services.AddSingleton<IAnnouncerRepository>(p => p.GetRequiredService<AnnouncerRepository>());
-                services.AddSingleton<IAnnouncerInitializer>(p=>p.GetRequiredService<AnnouncerRepository>());
+                services.AddSingleton<RemoteClientRepository>();
+                services.AddSingleton<IAnnouncerRepository>(p => p.GetRequiredService<RemoteClientRepository>());
+                services.AddSingleton<IRemoteClientInitializer>(p=>p.GetRequiredService<RemoteClientRepository>());
                 
                 services.AddSingleton<UdpClientFactory>();
                 services.AddSingleton<SelfEncryptionService>(s =>
                     new SelfEncryptionService("6e3c367d-380c-4a0d-8b66-ad397fbac2d9")); //todo: get id from config
                 services.AddSingleton<ViewmodelFactory>();
-                services.AddSingleton<IAnnouncerViewmodelFactory>(p=>p.GetRequiredService<ViewmodelFactory>());
+                services.AddSingleton<IRemoteClientViewmodelFactory>(p=>p.GetRequiredService<ViewmodelFactory>());
                 services.AddSingleton<IChatViewmodelFactory>(p=>p.GetRequiredService<ViewmodelFactory>());
                 services.AddHostedService<SqliteService>();
                 services.AddSingleton<IPersistenceService,SqliteService2>();

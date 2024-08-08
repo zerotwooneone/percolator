@@ -13,25 +13,25 @@ namespace Percolator.Desktop;
 
 internal class SqliteService : IHostedService
 {
-    private readonly IAnnouncerInitializer _announcerInitializer;
+    private readonly IRemoteClientInitializer _remoteClientInitializer;
     private readonly ILoggerFactory _loggerFactory;
     private readonly ILogger<SqliteService> _logger;
     private readonly IServiceScopeFactory _serviceScopeFactory;
     private readonly FrameProvider _dbIoSyncContext;
 
     public SqliteService(
-        IAnnouncerInitializer announcerInitializer,
+        IRemoteClientInitializer remoteClientInitializer,
         ILoggerFactory loggerFactory,
         ILogger<SqliteService> logger,
         IServiceScopeFactory serviceScopeFactory)
     {
         _dbIoSyncContext = new NewThreadSleepFrameProvider();
-        _announcerInitializer = announcerInitializer;
+        _remoteClientInitializer = remoteClientInitializer;
         _loggerFactory = loggerFactory;
         _logger = logger;
         _serviceScopeFactory = serviceScopeFactory;
         
-        _announcerInitializer.AnnouncerAdded
+        _remoteClientInitializer.ClientAdded
             .ObserveOn(_dbIoSyncContext)
             .Subscribe(OnAnnouncerAdded);
     }
@@ -40,7 +40,7 @@ internal class SqliteService : IHostedService
     {
         using var scope = _serviceScopeFactory.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-        var announcer = _announcerInitializer.Announcers[announcerId];
+        var announcer = _remoteClientInitializer.RemoteClients[announcerId];
         var remoteClient = new RemoteClient();
         remoteClient.SetIdentity( announcer.Identity.ToByteArray());
         
@@ -73,45 +73,46 @@ internal class SqliteService : IHostedService
         var dbPath = Directory.GetParent(dbContext.DbPath).FullName;
         Directory.CreateDirectory(dbPath);
         await dbContext.Database.MigrateAsync(cancellationToken);
-        
-        _announcerInitializer.AddKnownAnnouncers(dbContext.RemoteClients
+
+        var models = dbContext.RemoteClients
             .Include(c=>c.RemoteClientIps)
             .ToArray()
             .SelectMany(dm =>
-        {
-            if(!dm.TryGetIdentityBytes(out var bytes))
             {
-                _logger.LogError("failed to get identity from remote client. id:{RemoteClientId}", dm.Id);
-                return Array.Empty<RemoteClientModel>();
-            }
-
-            var announcerModel = new RemoteClientModel(ByteString.CopyFrom(bytes), _loggerFactory.CreateLogger<RemoteClientModel>());
-            foreach (var remoteClientIp in dm.RemoteClientIps)
-            {
-                if (!IPAddress.TryParse(remoteClientIp.IpAddress, out var ipAddress))
+                if(!dm.TryGetIdentityBytes(out var bytes))
                 {
-                    _logger.LogError("failed to parse ip address. id:{RemoteClientId}", dm.Id);
-                    continue;
+                    _logger.LogError("failed to get identity from remote client. id:{RemoteClientId}", dm.Id);
+                    return Array.Empty<RemoteClientModel>();
                 }
-                announcerModel.AddIpAddress(ipAddress);
-            }
 
-            if (announcerModel.IpAddresses.Count != 0)
-            {
-                announcerModel.SelectIpAddress(announcerModel.IpAddresses.Count-1);
-            }
+                var announcerModel = new RemoteClientModel(ByteString.CopyFrom(bytes), _loggerFactory.CreateLogger<RemoteClientModel>());
+                foreach (var remoteClientIp in dm.RemoteClientIps)
+                {
+                    if (!IPAddress.TryParse(remoteClientIp.IpAddress, out var ipAddress))
+                    {
+                        _logger.LogError("failed to parse ip address. id:{RemoteClientId}", dm.Id);
+                        continue;
+                    }
+                    announcerModel.AddIpAddress(ipAddress);
+                }
 
-            if (!string.IsNullOrWhiteSpace(dm.PreferredNickname) )
-            {
-                announcerModel.PreferredNickname.Value = dm.PreferredNickname;
-            }
+                if (announcerModel.IpAddresses.Count != 0)
+                {
+                    announcerModel.SelectIpAddress(announcerModel.IpAddresses.Count-1);
+                }
 
-            if (dm.LastSeenUtc > 0)
-            {
-                announcerModel.LastSeen.Value = dm.GetLocalLastSeen();
-            }
-            return new [] {announcerModel};
-        }));
+                if (!string.IsNullOrWhiteSpace(dm.PreferredNickname) )
+                {
+                    announcerModel.PreferredNickname.Value = dm.PreferredNickname;
+                }
+
+                if (dm.LastSeenUtc > 0)
+                {
+                    announcerModel.LastSeen.Value = dm.GetLocalLastSeen();
+                }
+                return new [] {announcerModel};
+            }).ToArray();
+        _remoteClientInitializer.AddKnownAnnouncers(models);
     }
 
     public async Task StopAsync(CancellationToken cancellationToken)

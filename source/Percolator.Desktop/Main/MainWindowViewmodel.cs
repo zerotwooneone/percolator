@@ -11,12 +11,12 @@ public class MainWindowViewmodel : INotifyPropertyChanged
 {
     private readonly MainService _mainService;
     private readonly ILogger<MainWindowViewmodel> _logger;
-    private readonly IAnnouncerViewmodelFactory _announcerViewmodelFactory;
+    private readonly IRemoteClientViewmodelFactory _remoteClientViewmodelFactory;
     private readonly IChatViewmodelFactory _chatViewmodelFactory;
     private readonly IAnnouncerRepository _announcerRepository;
     private bool _isAnnouncing;
-    public ObservableCollection<AnnouncerViewmodel> Announcers { get; } = new();
-    public ReactiveProperty<AnnouncerViewmodel?> SelectedAnnouncer { get; } = new();
+    public ObservableCollection<RemoteClientViewmodel> RemoteClients { get; } = new();
+    public ReactiveProperty<RemoteClientViewmodel?> SelectedAnnouncer { get; } = new();
 
     public BindableReactiveProperty<bool> IsBroadcastListening { get; }
 
@@ -35,13 +35,13 @@ public class MainWindowViewmodel : INotifyPropertyChanged
     public MainWindowViewmodel(
         MainService mainService,
         ILogger<MainWindowViewmodel> logger,
-        IAnnouncerViewmodelFactory announcerViewmodelFactory,
+        IRemoteClientViewmodelFactory remoteClientViewmodelFactory,
         IChatViewmodelFactory chatViewmodelFactory,
         IAnnouncerRepository announcerRepository)
     {
         _mainService = mainService;
         _logger = logger;
-        _announcerViewmodelFactory = announcerViewmodelFactory;
+        _remoteClientViewmodelFactory = remoteClientViewmodelFactory;
         _chatViewmodelFactory = chatViewmodelFactory;
         _announcerRepository = announcerRepository;
         AnnounceCommand = new BaseCommand(OnAnnounceClicked);
@@ -55,7 +55,7 @@ public class MainWindowViewmodel : INotifyPropertyChanged
             .ObserveOnCurrentDispatcher()
             .ToBindableReactiveProperty();
         AutoReplyIntroductions.Subscribe(b => _mainService.AutoReplyIntroductions.Value = b);
-        _announcerRepository.AnnouncerAdded
+        _announcerRepository.ClientAdded
             .ObserveOnCurrentDispatcher()
             .Subscribe(OnAnnouncerAdded);
         IsBroadcastListening = _mainService.BroadcastListen
@@ -70,9 +70,9 @@ public class MainWindowViewmodel : INotifyPropertyChanged
 
     private void OnAnnouncerAdded(ByteString announcerId)
     {
-        var announcer = _announcerRepository.Announcers[announcerId];
-        var announcerVm = _announcerViewmodelFactory.Create(announcer);
-        Announcers.Add(announcerVm);
+        var announcer = _announcerRepository.RemoteClients[announcerId];
+        var announcerVm = _remoteClientViewmodelFactory.Create(announcer);
+        RemoteClients.Add(announcerVm);
     }
 
     private void OnAnnounceClicked(object? obj)

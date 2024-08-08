@@ -10,7 +10,7 @@
     <Window.Resources>
         <DataTemplate 
             x:Key="AnnouncerTemplate"
-            DataType="{x:Type main:AnnouncerViewmodel}">
+            DataType="{x:Type main:RemoteClientViewmodel}">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition></ColumnDefinition>
@@ -137,7 +137,7 @@
                     </Grid.RowDefinitions>
                 
                     <ListView Grid.Row="1"
-                              ItemsSource="{Binding Announcers}"
+                              ItemsSource="{Binding RemoteClients}"
                               ItemTemplate="{StaticResource AnnouncerTemplate}"
                               SelectedItem="{Binding SelectedAnnouncer.Value}"
                               ScrollViewer.HorizontalScrollBarVisibility="Disabled" 
