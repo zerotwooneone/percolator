@@ -14,9 +14,18 @@ public class RemoteClient
     
     [MaxLength(140)]
     public string? PreferredNickname { get; set; }
-    //public DateTimeOffset LastSeenUtc { get; set; } = DateTimeOffset.UtcNow;
+    public long LastSeenUtc { get; set; } = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
     public ICollection<RemoteClientIp> RemoteClientIps { get; set; }=new List<RemoteClientIp>();
-    
+
+    public DateTimeOffset GetLocalLastSeen()
+    {
+        return DateTimeOffset.FromUnixTimeMilliseconds(LastSeenUtc).ToLocalTime();
+    }
+
+    public void SetLastSeen(DateTimeOffset? lastSeen = null)
+    {
+        LastSeenUtc= lastSeen?.ToUniversalTime().ToUnixTimeMilliseconds() ?? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+    }
     public void SetIdentity(byte[] bytes)
     {
         if (bytes == null || bytes.Length == 0)
