@@ -130,7 +130,7 @@ internal class SqliteService2 : IPersistenceService
         _logger = logger;
     }
 
-    public async Task SetPreferredNickname(ByteString identity, string nickname)
+    public async Task UpdateAnnouncer(ByteString identity, string nickname, DateTimeOffset lastSeenValue)
     {
         await Observable.FromAsync(async c =>
             {
@@ -143,12 +143,8 @@ internal class SqliteService2 : IPersistenceService
                     return;
                 }
 
-                if (rc.PreferredNickname == nickname)
-                {
-                    return;
-                }
-
                 rc.PreferredNickname = nickname;
+                rc.SetLastSeen(lastSeenValue);
                 await dbContext.SaveChangesAsync();
             })
             .SubscribeOn(_dbIoSyncContext)

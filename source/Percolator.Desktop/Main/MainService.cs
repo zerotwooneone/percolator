@@ -449,14 +449,21 @@ public class MainService : IAnnouncerService, IChatService,IAnnouncerInitializer
     private IDisposable WatchForChanges(AnnouncerModel announcer)
     {
         return announcer.PreferredNickname
-            .Skip(1)
-            .Take(1)
-            .SubscribeAwait(async (nickname,c) =>
-            {   
-                using var scope = _serviceScopeFactory.CreateScope();
-                var persistenceService = scope.ServiceProvider.GetRequiredService<IPersistenceService>();
-                await persistenceService.SetPreferredNickname(announcer.Identity, nickname);
-            });
+                .Skip(1)
+                .Take(1)
+                .Select(_=>Unit.Default)
+                .Amb(announcer.LastSeen
+                    .Skip(1)
+                    .Take(1)
+                    .Select(_=>Unit.Default))
+                .SelectAwait(async (_, _) =>
+                {
+                    using var scope = _serviceScopeFactory.CreateScope();
+                    var persistenceService = scope.ServiceProvider.GetRequiredService<IPersistenceService>();
+                    await persistenceService.UpdateAnnouncer(announcer.Identity, announcer.PreferredNickname.Value,announcer.LastSeen.Value);
+                    return Unit.Default;
+                })
+            .Subscribe();
     }
 
     const int maxNicknameLength = 35;
@@ -671,7 +678,9 @@ public class MainService : IAnnouncerService, IChatService,IAnnouncerInitializer
             var nextNick = preferredNickname.Length ==0 
                 ? identityBase64.Substring(0,Math.Min(maxNicknameLength, identityBase64.Length)) 
                 :preferredNickname.Substring(0, Math.Min( maxNicknameLength, preferredNickname.Length));
-            announcerModel.PreferredNickname.Value = nextNick;
+            
+            _logger.LogWarning($"using test nickname");
+            announcerModel.PreferredNickname.Value = nextNick+DateTimeOffset.Now.ToUnixTimeMilliseconds();
         }
         if (identityMessage.Payload.HasPort)
         {

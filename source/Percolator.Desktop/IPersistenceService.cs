@@ -4,5 +4,5 @@ namespace Percolator.Desktop;
 
 public interface IPersistenceService
 {
-    Task SetPreferredNickname(ByteString identity,string nickname);
+    Task UpdateAnnouncer(ByteString identity, string nickname, DateTimeOffset lastSeenValue);
 }
