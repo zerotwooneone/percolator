@@ -610,7 +610,7 @@ public class MainService : IAnnouncerService, IChatService,IAnnouncerInitializer
                 }
 
                 if (identityPayload.HasPreferredNickname &&
-                    identityPayload.PreferredNickname.Length > arbitraryMaxLength)
+                    identityPayload.PreferredNickname.Length > maxNicknameLength)
                 {
                     _logger.LogWarning("Announce message does not have a valid preferred nickname");
                     return;
