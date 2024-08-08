@@ -80,6 +80,7 @@ public class ChatViewmodel
             {
                 await _chatService.SendIntroduction(_announcerModel.SelectedIpAddress.CurrentValue,_announcerModel.Port.Value, sourceIp);
                 //todo:await response
+                await Task.Delay(500);
                 return true;
             }
             
