@@ -19,19 +19,19 @@ public class ViewmodelFactory : IAnnouncerViewmodelFactory, IChatViewmodelFactor
         _chatService = chatService;
     }
 
-    public AnnouncerViewmodel Create(AnnouncerModel announcer)
+    public AnnouncerViewmodel Create(RemoteClientModel remoteClient)
     {
         var logger = _loggerFactory.CreateLogger<AnnouncerViewmodel>();
-        return new AnnouncerViewmodel(announcer, _announcerService, logger);
+        return new AnnouncerViewmodel(remoteClient, _announcerService, logger);
     }
     
-    public ChatViewmodel CreateChat(AnnouncerModel announcerModel)
+    public ChatViewmodel CreateChat(RemoteClientModel remoteClientModel)
     {
-        return new ChatViewmodel(announcerModel, _chatService, _loggerFactory.CreateLogger<ChatViewmodel>());
+        return new ChatViewmodel(remoteClientModel, _chatService, _loggerFactory.CreateLogger<ChatViewmodel>());
     }
 }
 
 public interface IChatViewmodelFactory
 {
-    ChatViewmodel CreateChat(AnnouncerModel announcerModel);
+    ChatViewmodel CreateChat(RemoteClientModel remoteClientModel);
 }

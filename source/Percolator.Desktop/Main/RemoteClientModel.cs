@@ -6,9 +6,9 @@ using R3;
 
 namespace Percolator.Desktop.Main;
 
-public class AnnouncerModel : IEquatable<AnnouncerModel>
+public class RemoteClientModel : IEquatable<RemoteClientModel>
 {
-    private readonly ILogger<AnnouncerModel> _logger;
+    private readonly ILogger<RemoteClientModel> _logger;
     public ByteString Identity { get; }
     public ReactiveProperty<int> Port { get; }
     public ReactiveProperty<string> PreferredNickname { get; }
@@ -18,9 +18,9 @@ public class AnnouncerModel : IEquatable<AnnouncerModel>
     private readonly ReactiveProperty<IPAddress?> _selectedIpAddress = new(null);
     public ReadOnlyReactiveProperty<bool> CanIntroduce { get; }
 
-    public AnnouncerModel(
+    public RemoteClientModel(
         ByteString identity,
-        ILogger<AnnouncerModel> logger,
+        ILogger<RemoteClientModel> logger,
         int? port = null,
         string? nickname = null)
     {
@@ -45,14 +45,14 @@ public class AnnouncerModel : IEquatable<AnnouncerModel>
 
     public override bool Equals(object? obj)
     {
-        if (obj is AnnouncerModel other)
+        if (obj is RemoteClientModel other)
         {
             return Identity.Equals(other.Identity);
         }
         return false;
     }
 
-    public bool Equals(AnnouncerModel? other)
+    public bool Equals(RemoteClientModel? other)
     {
         if (ReferenceEquals(null, other)) return false;
         if (ReferenceEquals(this, other)) return true;
@@ -64,12 +64,12 @@ public class AnnouncerModel : IEquatable<AnnouncerModel>
         return Identity.GetHashCode();
     }
 
-    public static bool operator ==(AnnouncerModel? left, AnnouncerModel? right)
+    public static bool operator ==(RemoteClientModel? left, RemoteClientModel? right)
     {
         return Equals(left, right);
     }
 
-    public static bool operator !=(AnnouncerModel? left, AnnouncerModel? right)
+    public static bool operator !=(RemoteClientModel? left, RemoteClientModel? right)
     {
         return !Equals(left, right);
     }

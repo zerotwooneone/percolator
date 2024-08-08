@@ -6,27 +6,27 @@ namespace Percolator.Desktop.Main;
 
 public class ChatViewmodel
 {
-    private readonly AnnouncerModel _announcerModel;
+    private readonly RemoteClientModel _remoteClientModel;
     private readonly IChatService _chatService;
     private readonly ILogger<ChatViewmodel> _logger;
     private readonly IDisposable _chatSubcription;
     public BindableReactiveProperty<bool> SendEnabled { get; }
 
     public ChatViewmodel(
-        AnnouncerModel announcerModel,
+        RemoteClientModel remoteClientModel,
         IChatService chatService,
         ILogger<ChatViewmodel> logger)
     {
-        _announcerModel = announcerModel;
+        _remoteClientModel = remoteClientModel;
         _chatService = chatService;
         _logger = logger;
-        _chatSubcription = _announcerModel.ChatMessage
+        _chatSubcription = _remoteClientModel.ChatMessage
             .ObserveOnCurrentDispatcher()
             .Subscribe(OnReceivedChatMessage);
 
         SendCommand = new BaseCommand(OnSendClicked);
-        SendEnabled = _announcerModel.CanIntroduce
-            .CombineLatest(_announcerModel.IntroduceInProgress, (canIntroduce, introduceInProgress) => canIntroduce && !introduceInProgress)
+        SendEnabled = _remoteClientModel.CanIntroduce
+            .CombineLatest(_remoteClientModel.IntroduceInProgress, (canIntroduce, introduceInProgress) => canIntroduce && !introduceInProgress)
             .ToBindableReactiveProperty();
     }
 
@@ -44,7 +44,7 @@ public class ChatViewmodel
 
         try
         {
-            if (_announcerModel.SessionKey.Value == null)
+            if (_remoteClientModel.SessionKey.Value == null)
             {
                 if (!await TryIntroduce())
                 {
@@ -52,7 +52,7 @@ public class ChatViewmodel
                 }
                 await Task.Delay(500);
             }
-            await _chatService.SendChatMessage(_announcerModel, Text.Value);
+            await _chatService.SendChatMessage(_remoteClientModel, Text.Value);
         }
         catch (Exception e)
         {
@@ -66,7 +66,7 @@ public class ChatViewmodel
     
     private async Task<bool> TryIntroduce()
     {
-        if (!_announcerModel.CanIntroduce.CurrentValue || _announcerModel.SelectedIpAddress.CurrentValue == null)
+        if (!_remoteClientModel.CanIntroduce.CurrentValue || _remoteClientModel.SelectedIpAddress.CurrentValue == null)
         {
             return false;
         }
@@ -77,17 +77,17 @@ public class ChatViewmodel
             return false;
         }
 
-        _announcerModel.IntroduceInProgress.Value = true;
+        _remoteClientModel.IntroduceInProgress.Value = true;
         try
         {
-            if (_announcerModel.CanReplyIntroduce.CurrentValue)
+            if (_remoteClientModel.CanReplyIntroduce.CurrentValue)
             {
-                await _chatService.SendReplyIntroduction(_announcerModel,sourceIp);
+                await _chatService.SendReplyIntroduction(_remoteClientModel,sourceIp);
                 return true;
             }
             else
             {
-                await _chatService.SendIntroduction(_announcerModel.SelectedIpAddress.CurrentValue,_announcerModel.Port.Value, sourceIp);
+                await _chatService.SendIntroduction(_remoteClientModel.SelectedIpAddress.CurrentValue,_remoteClientModel.Port.Value, sourceIp);
                 //todo:await response
                 await Task.Delay(500);
                 return true;
@@ -101,7 +101,7 @@ public class ChatViewmodel
         }
         finally
         {
-            _announcerModel.IntroduceInProgress.Value = false;
+            _remoteClientModel.IntroduceInProgress.Value = false;
         }
     }
 

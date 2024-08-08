@@ -35,7 +35,7 @@ public class MainService : IAnnouncerService, IChatService
     private IListener _introduceListener;
     private readonly ConcurrentBag<IPAddress> _ipBlacklist = new();
     private readonly ConcurrentBag<ByteString> _identityBlacklist = new();
-    private ConcurrentDictionary<ByteString,AnnouncerModel> _announcersBySessionId= new();
+    private ConcurrentDictionary<ByteString,RemoteClientModel> _announcersBySessionId= new();
     public ReactiveProperty<bool> BroadcastListen { get; } = new();
     const int ipMaxBytes = 16;
 
@@ -386,9 +386,9 @@ public class MainService : IAnnouncerService, IChatService
     }
 
     private void OnReceivedChatMessage(UdpReceiveResult context, IntroduceRequest.Types.ChatMessage chatMessage,
-        AnnouncerModel announcer, IntroduceRequest.Types.ChatMessage.Types.Signed.Types.Payload chatPayload)
+        RemoteClientModel remoteClient, IntroduceRequest.Types.ChatMessage.Types.Signed.Types.Payload chatPayload)
     {
-        announcer.OnChatMessage(new MessageModel(DateTime.Now, chatPayload.Message,false));
+        remoteClient.OnChatMessage(new MessageModel(DateTime.Now, chatPayload.Message,false));
     }
 
     private void OnReceivedReplyIntro(UdpReceiveResult context, IntroduceRequest.Types.IntroduceReply.Types.Proceed.Types.Payload payload)
@@ -397,7 +397,7 @@ public class MainService : IAnnouncerService, IChatService
         var announcer = _announcerRepository.GetOrAdd(payload.IdentityKey, _ =>
         {
             didAdd = true;
-            var newModel = new AnnouncerModel(payload.IdentityKey, _loggerFactory.CreateLogger<AnnouncerModel>());
+            var newModel = new RemoteClientModel(payload.IdentityKey, _loggerFactory.CreateLogger<RemoteClientModel>());
             if (payload.HasPreferredNickname && !string.IsNullOrWhiteSpace(payload.PreferredNickname))
             {
                 newModel.PreferredNickname.Value = payload.PreferredNickname.Truncate(maxNicknameLength)!;
@@ -453,13 +453,13 @@ public class MainService : IAnnouncerService, IChatService
         }
     }
 
-    private IDisposable WatchForChanges(AnnouncerModel announcer)
+    private IDisposable WatchForChanges(RemoteClientModel remoteClient)
     {
-        return announcer.PreferredNickname
+        return remoteClient.PreferredNickname
                 .Skip(1)
                 .Take(1)
                 .Select(_=>Unit.Default)
-                .Amb(announcer.LastSeen
+                .Amb(remoteClient.LastSeen
                     .Skip(1)
                     .Take(1)
                     .Select(_=>Unit.Default))
@@ -467,7 +467,7 @@ public class MainService : IAnnouncerService, IChatService
                 {
                     using var scope = _serviceScopeFactory.CreateScope();
                     var persistenceService = scope.ServiceProvider.GetRequiredService<IPersistenceService>();
-                    await persistenceService.UpdateAnnouncer(announcer.Identity, announcer.PreferredNickname.Value,announcer.LastSeen.Value);
+                    await persistenceService.UpdateAnnouncer(remoteClient.Identity, remoteClient.PreferredNickname.Value,remoteClient.LastSeen.Value);
                     return Unit.Default;
                 })
             .Subscribe();
@@ -481,7 +481,7 @@ public class MainService : IAnnouncerService, IChatService
         var announcer = _announcerRepository.GetOrAdd(payload.IdentityKey, _ =>
         {
             didAdd = true;
-            var newModel = new AnnouncerModel(payload.IdentityKey, _loggerFactory.CreateLogger<AnnouncerModel>());
+            var newModel = new RemoteClientModel(payload.IdentityKey, _loggerFactory.CreateLogger<RemoteClientModel>());
             if (payload.HasPreferredNickname && !string.IsNullOrWhiteSpace(payload.PreferredNickname))
             {
                 newModel.PreferredNickname.Value = payload.PreferredNickname.Truncate(maxNicknameLength)!;
@@ -670,9 +670,9 @@ public class MainService : IAnnouncerService, IChatService
         var announcerModel = _announcerRepository.GetOrAdd(identityMessage.Payload.IdentityKey,_=>
         {
             didAdd = true;
-            return new AnnouncerModel(
+            return new RemoteClientModel(
                 identityMessage.Payload.IdentityKey,
-                _loggerFactory.CreateLogger<AnnouncerModel>());
+                _loggerFactory.CreateLogger<RemoteClientModel>());
         });
         using var announcerSub = WatchForChanges(announcerModel);
         announcerModel.AddIpAddress(context.RemoteEndPoint.Address);
@@ -787,16 +787,16 @@ public class MainService : IAnnouncerService, IChatService
         await udpClient.Send(destination, GetUnknownPublicKeyBytes(DateTimeOffset.Now, sourceIp), cancellationToken);
     }
 
-    public async Task SendReplyIntroduction(AnnouncerModel announcerModel, 
+    public async Task SendReplyIntroduction(RemoteClientModel remoteClientModel, 
         IPAddress sourceIp,
         CancellationToken cancellationToken = default)
     {
-        var udpClient = _udpClientFactory.GetOrCreateSender(announcerModel.Port.Value);
+        var udpClient = _udpClientFactory.GetOrCreateSender(remoteClientModel.Port.Value);
         
         //todo:try to reuse keys that failed to send
         Aes aes = Aes.Create();
         
-        var keyFormatter = new RSAOAEPKeyExchangeFormatter(announcerModel.Ephemeral.Value!);
+        var keyFormatter = new RSAOAEPKeyExchangeFormatter(remoteClientModel.Ephemeral.Value!);
         var encryptedSessionKey = keyFormatter.CreateKeyExchange(aes.Key, typeof(Aes));
         
         var curretTime = DateTimeOffset.Now;
@@ -804,17 +804,17 @@ public class MainService : IAnnouncerService, IChatService
         var sessionId = GetSessionId(encryptedSessionKey);
         
         //todo:remove old session keys
-        _announcersBySessionId.TryAdd(sessionId, announcerModel);
-        announcerModel.SessionId.Value = sessionId;
+        _announcersBySessionId.TryAdd(sessionId, remoteClientModel);
+        remoteClientModel.SessionId.Value = sessionId;
         
         //todo:consider sending multiple copies
-        await udpClient.Send(announcerModel.SelectedIpAddress.CurrentValue!, GetIntroReplyBytes(
+        await udpClient.Send(remoteClientModel.SelectedIpAddress.CurrentValue!, GetIntroReplyBytes(
             curretTime,
             aes,
             sourceIp,
             encryptedSessionKey), cancellationToken);
         
-        announcerModel.SessionKey.Value = aes;
+        remoteClientModel.SessionKey.Value = aes;
     }
 
     private ByteString GetSessionId(byte[] encryptedSessionKey)
@@ -893,28 +893,28 @@ public class MainService : IAnnouncerService, IChatService
         return m.ToByteArray();
     }
 
-    public async Task SendChatMessage(AnnouncerModel announcerModel, string text,
+    public async Task SendChatMessage(RemoteClientModel remoteClientModel, string text,
         CancellationToken cancellationToken = default)
     {
-        var udpClient = _udpClientFactory.GetOrCreateSender(announcerModel.Port.Value);
+        var udpClient = _udpClientFactory.GetOrCreateSender(remoteClientModel.Port.Value);
         
         var curretTime = DateTimeOffset.Now;
 
-        await udpClient.Send(announcerModel.SelectedIpAddress.CurrentValue!, await GetChatBytes(
+        await udpClient.Send(remoteClientModel.SelectedIpAddress.CurrentValue!, await GetChatBytes(
             curretTime,
-            announcerModel,
+            remoteClientModel,
             text), 
             cancellationToken);
     }
 
-    private async Task< byte[]> GetChatBytes(DateTimeOffset curretTime, AnnouncerModel announcerModel,string text)
+    private async Task< byte[]> GetChatBytes(DateTimeOffset curretTime, RemoteClientModel remoteClientModel,string text)
     {
         if (!TryGetIpAddress(out var selfIp))
         {
             throw new InvalidOperationException("Failed to get ip address");
         }
 
-        if (announcerModel.SessionKey.Value == null)
+        if (remoteClientModel.SessionKey.Value == null)
         {
             throw new InvalidOperationException("must have session key");
         }
@@ -923,12 +923,12 @@ public class MainService : IAnnouncerService, IChatService
         {
             Message = text
         };
-        var naiveEncrypt = await announcerModel.SessionKey.Value.NaiveEncrypt(payload.ToByteArray());
+        var naiveEncrypt = await remoteClientModel.SessionKey.Value.NaiveEncrypt(payload.ToByteArray());
         var signed = new IntroduceRequest.Types.ChatMessage.Types.Signed
         {
             SourceIp = ByteString.CopyFrom(selfIp.GetAddressBytes()),
             EncryptedPayload = ByteString.CopyFrom(naiveEncrypt),
-            SessionKeyId = announcerModel.SessionId.Value,
+            SessionKeyId = remoteClientModel.SessionId.Value,
             TimeStampUnixUtcMs = curretTime.ToUnixTimeMilliseconds()
         };
         
@@ -952,8 +952,8 @@ public class MainService : IAnnouncerService, IChatService
 public interface IAnnouncerRepository
 {
     Observable<ByteString> AnnouncerAdded { get; }
-    IReadOnlyDictionary<ByteString, AnnouncerModel> Announcers { get; }
-    AnnouncerModel GetOrAdd(ByteString identity, Func<ByteString, AnnouncerModel> addCallback);
+    IReadOnlyDictionary<ByteString, RemoteClientModel> Announcers { get; }
+    RemoteClientModel GetOrAdd(ByteString identity, Func<ByteString, RemoteClientModel> addCallback);
     void OnNext(ByteString identity);
 }
 
@@ -961,10 +961,10 @@ public class AnnouncerRepository : IAnnouncerRepository,IAnnouncerInitializer
 {
     public Observable<ByteString> AnnouncerAdded => _announcerAdded;
     private Subject<ByteString> _announcerAdded = new();
-    private readonly ConcurrentDictionary<ByteString, AnnouncerModel> _announcersByIdentity= new();
-    public IReadOnlyDictionary<ByteString, AnnouncerModel> Announcers => _announcersByIdentity;
+    private readonly ConcurrentDictionary<ByteString, RemoteClientModel> _announcersByIdentity= new();
+    public IReadOnlyDictionary<ByteString, RemoteClientModel> Announcers => _announcersByIdentity;
     
-    public void AddKnownAnnouncers(IEnumerable<AnnouncerModel> announcerModels)
+    public void AddKnownAnnouncers(IEnumerable<RemoteClientModel> announcerModels)
     {
         foreach (var model in announcerModels)
         {
@@ -975,7 +975,7 @@ public class AnnouncerRepository : IAnnouncerRepository,IAnnouncerInitializer
         }
     }
 
-    public AnnouncerModel GetOrAdd(ByteString identity, Func<ByteString, AnnouncerModel> addCallback)
+    public RemoteClientModel GetOrAdd(ByteString identity, Func<ByteString, RemoteClientModel> addCallback)
     {
         return _announcersByIdentity.GetOrAdd(identity, addCallback);
     }

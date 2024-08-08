@@ -6,6 +6,6 @@ namespace Percolator.Desktop.Main;
 public interface IAnnouncerInitializer
 {
     Observable<ByteString> AnnouncerAdded { get; }
-    IReadOnlyDictionary<ByteString, AnnouncerModel> Announcers { get; }
-    void AddKnownAnnouncers(IEnumerable<AnnouncerModel> announcerModels);
+    IReadOnlyDictionary<ByteString, RemoteClientModel> Announcers { get; }
+    void AddKnownAnnouncers(IEnumerable<RemoteClientModel> announcerModels);
 }

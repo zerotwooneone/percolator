@@ -4,5 +4,5 @@ namespace Percolator.Desktop.Main;
 
 public interface IAnnouncerViewmodelFactory
 {
-    AnnouncerViewmodel Create(AnnouncerModel announcer);
+    AnnouncerViewmodel Create(RemoteClientModel remoteClient);
 }

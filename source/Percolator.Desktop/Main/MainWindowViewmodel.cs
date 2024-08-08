@@ -63,7 +63,7 @@ public class MainWindowViewmodel : INotifyPropertyChanged
             .ToBindableReactiveProperty();
         IsBroadcastListening.Subscribe(b => _mainService.BroadcastListen.Value = b);
         SelectedAnnouncer
-            .Subscribe(a=> Chat.Value = a == null ? null : _chatViewmodelFactory.CreateChat(a.AnnouncerModel));
+            .Subscribe(a=> Chat.Value = a == null ? null : _chatViewmodelFactory.CreateChat(a.RemoteClientModel));
     }
 
     public BindableReactiveProperty<ChatViewmodel?> Chat { get; }= new();

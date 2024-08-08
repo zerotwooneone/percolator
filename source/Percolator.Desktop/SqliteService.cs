@@ -82,10 +82,10 @@ internal class SqliteService : IHostedService
             if(!dm.TryGetIdentityBytes(out var bytes))
             {
                 _logger.LogError("failed to get identity from remote client. id:{RemoteClientId}", dm.Id);
-                return Array.Empty<AnnouncerModel>();
+                return Array.Empty<RemoteClientModel>();
             }
 
-            var announcerModel = new AnnouncerModel(ByteString.CopyFrom(bytes), _loggerFactory.CreateLogger<AnnouncerModel>());
+            var announcerModel = new RemoteClientModel(ByteString.CopyFrom(bytes), _loggerFactory.CreateLogger<RemoteClientModel>());
             foreach (var remoteClientIp in dm.RemoteClientIps)
             {
                 if (!IPAddress.TryParse(remoteClientIp.IpAddress, out var ipAddress))

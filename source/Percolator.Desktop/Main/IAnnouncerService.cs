@@ -8,6 +8,6 @@ public interface IAnnouncerService
     bool TryGetIpAddress([NotNullWhen(true)] out IPAddress? localIp);
     Task SendIntroduction(IPAddress destination, int port, IPAddress sourceIp,
         CancellationToken cancellationToken = default);
-    Task SendReplyIntroduction(AnnouncerModel announcerModel, IPAddress sourceIp,
+    Task SendReplyIntroduction(RemoteClientModel remoteClientModel, IPAddress sourceIp,
         CancellationToken cancellationToken = default);
 }
