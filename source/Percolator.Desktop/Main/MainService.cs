@@ -469,7 +469,7 @@ public class MainService : IAnnouncerService, IChatService,IAnnouncerInitializer
         announcer.Ephemeral.Value = ephemeral;
         if (payload.HasPreferredNickname && !string.IsNullOrWhiteSpace(payload.PreferredNickname))
         {
-            announcer.PreferredNickname.Value = payload.PreferredNickname.Truncate(35)!;
+            announcer.PreferredNickname.Value = payload.PreferredNickname.Truncate(maxNicknameLength)!;
         }
 
         if (didAdd)
