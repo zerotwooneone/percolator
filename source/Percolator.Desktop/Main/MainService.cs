@@ -23,7 +23,7 @@ public class MainService : IRemoteClientService, IChatService
     private readonly SelfEncryptionService _selfEncryptionService;
     private readonly ILoggerFactory _loggerFactory;
     private readonly IServiceScopeFactory _serviceScopeFactory;
-    private readonly IAnnouncerRepository _announcerRepository;
+    private readonly IRemoteClientRepository _remoteClientRepository;
     private readonly IBroadcaster _broadcaster;
     private readonly IListener _broadcastListener;
     private readonly Observable<Unit> _announceInterval;
@@ -45,14 +45,14 @@ public class MainService : IRemoteClientService, IChatService
         SelfEncryptionService selfEncryptionService,
         ILoggerFactory loggerFactory,
         IServiceScopeFactory serviceScopeFactory,
-        IAnnouncerRepository announcerRepository)
+        IRemoteClientRepository remoteClientRepository)
     {
         _udpClientFactory = udpClientFactory;
         _logger = logger;
         _selfEncryptionService = selfEncryptionService;
         _loggerFactory = loggerFactory;
         _serviceScopeFactory = serviceScopeFactory;
-        _announcerRepository = announcerRepository;
+        _remoteClientRepository = remoteClientRepository;
         _broadcaster = _udpClientFactory.CreateBroadcaster(Defaults.DefaultBroadcastPort);
         _broadcastListener = _udpClientFactory.CreateListener(Defaults.DefaultBroadcastPort);
         var ingressContext = new SynchronizationContext();
@@ -394,7 +394,7 @@ public class MainService : IRemoteClientService, IChatService
     private void OnReceivedReplyIntro(UdpReceiveResult context, IntroduceRequest.Types.IntroduceReply.Types.Proceed.Types.Payload payload)
     {
         var didAdd = false;
-        var announcer = _announcerRepository.GetOrAdd(payload.IdentityKey, _ =>
+        var announcer = _remoteClientRepository.GetOrAdd(payload.IdentityKey, _ =>
         {
             didAdd = true;
             var newModel = new RemoteClientModel(payload.IdentityKey, _loggerFactory.CreateLogger<RemoteClientModel>());
@@ -423,7 +423,7 @@ public class MainService : IRemoteClientService, IChatService
                     $"got a reply from {context.RemoteEndPoint.Address} but we didn't request it. Do you want to allow it?",
                     "Warning", MessageBoxButton.YesNo, MessageBoxImage.Exclamation) != MessageBoxResult.Yes)
             { 
-                _announcerRepository.OnNext(announcer.Identity);
+                _remoteClientRepository.OnNext(announcer.Identity);
                 //todo: remove messagebox to avoid spam
                 return; 
             }
@@ -449,7 +449,7 @@ public class MainService : IRemoteClientService, IChatService
         
         if (didAdd)
         {
-            _announcerRepository.OnNext(announcer.Identity);
+            _remoteClientRepository.OnNext(announcer.Identity);
         }
     }
 
@@ -478,7 +478,7 @@ public class MainService : IRemoteClientService, IChatService
         IntroduceRequest.Types.UnknownPublicKey.Types.Payload payload, CancellationToken cancellationToken)
     {
         var didAdd = false;
-        var announcer = _announcerRepository.GetOrAdd(payload.IdentityKey, _ =>
+        var announcer = _remoteClientRepository.GetOrAdd(payload.IdentityKey, _ =>
         {
             didAdd = true;
             var newModel = new RemoteClientModel(payload.IdentityKey, _loggerFactory.CreateLogger<RemoteClientModel>());
@@ -508,7 +508,7 @@ public class MainService : IRemoteClientService, IChatService
 
         if (didAdd)
         {
-            _announcerRepository.OnNext(announcer.Identity);
+            _remoteClientRepository.OnNext(announcer.Identity);
         }
 
         if (AutoReplyIntroductions.CurrentValue)
@@ -667,7 +667,7 @@ public class MainService : IRemoteClientService, IChatService
         }
 
         var didAdd = false;
-        var announcerModel = _announcerRepository.GetOrAdd(identityMessage.Payload.IdentityKey,_=>
+        var announcerModel = _remoteClientRepository.GetOrAdd(identityMessage.Payload.IdentityKey,_=>
         {
             didAdd = true;
             return new RemoteClientModel(
@@ -695,7 +695,7 @@ public class MainService : IRemoteClientService, IChatService
 
         if (didAdd)
         {
-            _announcerRepository.OnNext(identityMessage.Payload.IdentityKey);
+            _remoteClientRepository.OnNext(identityMessage.Payload.IdentityKey);
         }
     }
 
@@ -947,48 +947,6 @@ public class MainService : IRemoteClientService, IChatService
     }
 
     
-}
-
-public interface IAnnouncerRepository
-{
-    Observable<ByteString> ClientAdded { get; }
-    IReadOnlyDictionary<ByteString, RemoteClientModel> RemoteClients { get; }
-    RemoteClientModel GetOrAdd(ByteString identity, Func<ByteString, RemoteClientModel> addCallback);
-    void OnNext(ByteString identity);
-}
-
-public class RemoteClientRepository : IAnnouncerRepository,IRemoteClientInitializer
-{
-    public Observable<ByteString> ClientAdded { get; }
-    private readonly Subject<ByteString> _clientAdded = new();
-    private readonly ConcurrentDictionary<ByteString, RemoteClientModel> _clientsByIdentity= new();
-    public IReadOnlyDictionary<ByteString, RemoteClientModel> RemoteClients => _clientsByIdentity;
-
-    public RemoteClientRepository()
-    {
-        ClientAdded = _clientAdded.AsObservable();
-    }
-    
-    public void AddKnownAnnouncers(IEnumerable<RemoteClientModel> announcerModels)
-    {
-        foreach (var model in announcerModels)
-        {
-            if (_clientsByIdentity.TryAdd(model.Identity, model))
-            {
-                _clientAdded.OnNext(model.Identity);
-            }
-        }
-    }
-
-    public RemoteClientModel GetOrAdd(ByteString identity, Func<ByteString, RemoteClientModel> addCallback)
-    {
-        return _clientsByIdentity.GetOrAdd(identity, addCallback);
-    }
-
-    public void OnNext(ByteString identity)
-    {
-        _clientAdded.OnNext(identity);
-    }
 }
 
 internal class DummyDisposable : IDisposable

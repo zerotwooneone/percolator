@@ -13,7 +13,7 @@ public class MainWindowViewmodel : INotifyPropertyChanged
     private readonly ILogger<MainWindowViewmodel> _logger;
     private readonly IRemoteClientViewmodelFactory _remoteClientViewmodelFactory;
     private readonly IChatViewmodelFactory _chatViewmodelFactory;
-    private readonly IAnnouncerRepository _announcerRepository;
+    private readonly IRemoteClientRepository _remoteClientRepository;
     private bool _isAnnouncing;
     public ObservableCollection<RemoteClientViewmodel> RemoteClients { get; } = new();
     public ReactiveProperty<RemoteClientViewmodel?> SelectedAnnouncer { get; } = new();
@@ -37,13 +37,13 @@ public class MainWindowViewmodel : INotifyPropertyChanged
         ILogger<MainWindowViewmodel> logger,
         IRemoteClientViewmodelFactory remoteClientViewmodelFactory,
         IChatViewmodelFactory chatViewmodelFactory,
-        IAnnouncerRepository announcerRepository)
+        IRemoteClientRepository remoteClientRepository)
     {
         _mainService = mainService;
         _logger = logger;
         _remoteClientViewmodelFactory = remoteClientViewmodelFactory;
         _chatViewmodelFactory = chatViewmodelFactory;
-        _announcerRepository = announcerRepository;
+        _remoteClientRepository = remoteClientRepository;
         AnnounceCommand = new BaseCommand(OnAnnounceClicked);
         AllowIntroductions = _mainService.ListenForIntroductions
             .ToBindableReactiveProperty();
@@ -55,7 +55,7 @@ public class MainWindowViewmodel : INotifyPropertyChanged
             .ObserveOnCurrentDispatcher()
             .ToBindableReactiveProperty();
         AutoReplyIntroductions.Subscribe(b => _mainService.AutoReplyIntroductions.Value = b);
-        _announcerRepository.ClientAdded
+        _remoteClientRepository.ClientAdded
             .ObserveOnCurrentDispatcher()
             .Subscribe(OnAnnouncerAdded);
         IsBroadcastListening = _mainService.BroadcastListen
@@ -70,7 +70,7 @@ public class MainWindowViewmodel : INotifyPropertyChanged
 
     private void OnAnnouncerAdded(ByteString announcerId)
     {
-        var announcer = _announcerRepository.RemoteClients[announcerId];
+        var announcer = _remoteClientRepository.RemoteClients[announcerId];
         var announcerVm = _remoteClientViewmodelFactory.Create(announcer);
         RemoteClients.Add(announcerVm);
     }

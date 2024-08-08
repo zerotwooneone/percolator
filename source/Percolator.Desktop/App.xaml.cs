@@ -31,7 +31,7 @@ public partial class App : Application
                 services.AddSingleton<IChatService>(p=>p.GetRequiredService<MainService>());
 
                 services.AddSingleton<RemoteClientRepository>();
-                services.AddSingleton<IAnnouncerRepository>(p => p.GetRequiredService<RemoteClientRepository>());
+                services.AddSingleton<IRemoteClientRepository>(p => p.GetRequiredService<RemoteClientRepository>());
                 services.AddSingleton<IRemoteClientInitializer>(p=>p.GetRequiredService<RemoteClientRepository>());
                 
                 services.AddSingleton<UdpClientFactory>();
