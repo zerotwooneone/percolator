@@ -350,7 +350,12 @@ public class MainService : IAnnouncerService, IChatService,IAnnouncerInitializer
                 if (!_announcersBySessionId.TryGetValue(chatMessage.Signed.SessionKeyId, out var announcer))
                 {
                     _logger.LogWarning("chat message session key id was not found");
-                    //todo: add to IP ban list
+                    if (AutoReplyIntroductions.CurrentValue && TryGetIpAddress(out var selfIp))
+                    {
+                        //do we have a better port to send to?
+                        await SendIntroduction(context.RemoteEndPoint.Address, Defaults.DefaultIntroducePort , selfIp,
+                            cancellationToken);
+                    }
                     return;
                 }
 
