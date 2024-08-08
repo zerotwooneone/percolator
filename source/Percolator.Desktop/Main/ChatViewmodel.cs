@@ -19,7 +19,9 @@ public class ChatViewmodel
         _announcerModel = announcerModel;
         _chatService = chatService;
         _logger = logger;
-        _chatSubcription = _announcerModel.ChatMessage.Subscribe(OnReceivedChatMessage);
+        _chatSubcription = _announcerModel.ChatMessage
+            .ObserveOnCurrentDispatcher()
+            .Subscribe(OnReceivedChatMessage);
 
         SendCommand = new BaseCommand(OnSendClicked);
     }
