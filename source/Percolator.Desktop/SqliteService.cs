@@ -44,7 +44,7 @@ internal class SqliteService : IHostedService
             return;
         }
 
-        if (string.IsNullOrWhiteSpace(announcer.PreferredNickname.CurrentValue))
+        if (!string.IsNullOrWhiteSpace(announcer.PreferredNickname.CurrentValue))
         {
             remoteClient.PreferredNickname = announcer.PreferredNickname.CurrentValue;
         }
@@ -93,6 +93,11 @@ internal class SqliteService : IHostedService
             {
                 announcerModel.SelectIpAddress(announcerModel.IpAddresses.Count-1);
             }
+
+            if (!string.IsNullOrWhiteSpace(dm.PreferredNickname) )
+            {
+                announcerModel.PreferredNickname.Value = dm.PreferredNickname;
+            }
             return new [] {announcerModel};
         }));
     }
@@ -100,5 +105,44 @@ internal class SqliteService : IHostedService
     public async Task StopAsync(CancellationToken cancellationToken)
     {
         throw new NotImplementedException();
+    }
+}
+
+internal class SqliteService2 : IPersistenceService
+{
+    private readonly ILogger<SqliteService2> _logger;
+    private readonly ApplicationDbContext _dbContext;
+    private readonly FrameProvider _dbIoSyncContext;
+
+    public SqliteService2(ApplicationDbContext dbContext,
+        ILogger<SqliteService2> logger)
+    {
+        _dbIoSyncContext = new NewThreadSleepFrameProvider();
+        _logger = logger;
+        _dbContext = dbContext;
+    }
+
+    public async Task SetPreferredNickname(ByteString identity, string nickname)
+    {
+        await Observable.FromAsync(async c =>
+            {
+                var rc = await _dbContext.RemoteClients.FirstOrDefaultAsync(
+                    client => client.Identity == identity.ToBase64());
+                if (rc == null)
+                {
+                    return;
+                }
+
+                if (rc.PreferredNickname == nickname)
+                {
+                    return;
+                }
+
+                rc.PreferredNickname = nickname;
+                await _dbContext.SaveChangesAsync();
+            })
+            .SubscribeOn(_dbIoSyncContext)
+            .ObserveOn(_dbIoSyncContext)
+            .LastOrDefaultAsync();
     }
 }

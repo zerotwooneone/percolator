@@ -21,6 +21,7 @@ public class MainService : IAnnouncerService, IChatService,IAnnouncerInitializer
     private readonly ILogger<MainService> _logger;
     private readonly SelfEncryptionService _selfEncryptionService;
     private readonly ILoggerFactory _loggerFactory;
+    private readonly IPersistenceService _persistenceService;
     private readonly IBroadcaster _broadcaster;
     private readonly IListener _broadcastListener;
     private readonly Observable<Unit> _announceInterval;
@@ -41,12 +42,14 @@ public class MainService : IAnnouncerService, IChatService,IAnnouncerInitializer
         UdpClientFactory udpClientFactory,
         ILogger<MainService> logger,
         SelfEncryptionService selfEncryptionService,
-        ILoggerFactory loggerFactory)
+        ILoggerFactory loggerFactory,
+        IPersistenceService persistenceService)
     {
         _udpClientFactory = udpClientFactory;
         _logger = logger;
         _selfEncryptionService = selfEncryptionService;
         _loggerFactory = loggerFactory;
+        _persistenceService = persistenceService;
         _broadcaster = _udpClientFactory.CreateBroadcaster(Defaults.DefaultBroadcastPort);
         _broadcastListener = _udpClientFactory.CreateListener(Defaults.DefaultBroadcastPort);
         var ingressContext = new SynchronizationContext();
@@ -398,6 +401,7 @@ public class MainService : IAnnouncerService, IChatService,IAnnouncerInitializer
             return newModel;
         });
 
+        using var announcerSub = WatchForChanges(announcer);
         announcer.LastSeen.Value = DateTimeOffset.Now;
         announcer.AddIpAddress(context.RemoteEndPoint.Address);
         if (payload.HasPreferredNickname && !string.IsNullOrWhiteSpace(payload.PreferredNickname))
@@ -440,6 +444,18 @@ public class MainService : IAnnouncerService, IChatService,IAnnouncerInitializer
             _announcerAdded.OnNext(announcer.Identity);
         }
     }
+
+    private IDisposable WatchForChanges(AnnouncerModel announcer)
+    {
+        return announcer.PreferredNickname
+            .Skip(1)
+            .Take(1)
+            .SubscribeAwait(async (nickname,c) =>
+            {
+                await _persistenceService.SetPreferredNickname(announcer.Identity, nickname);
+            });
+    }
+
     const int maxNicknameLength = 35;
     private async Task OnReceivedUnknownPublicKey(UdpReceiveResult context,
         IntroduceRequest.Types.UnknownPublicKey.Types.Payload payload, CancellationToken cancellationToken)
@@ -459,6 +475,7 @@ public class MainService : IAnnouncerService, IChatService,IAnnouncerInitializer
             }
             return newModel;
         });
+        using var announcerSub = WatchForChanges(announcer);
         announcer.AddIpAddress(context.RemoteEndPoint.Address);
         announcer.LastSeen.Value = DateTimeOffset.Now;
         var ephemeral = new RSACryptoServiceProvider
@@ -640,6 +657,7 @@ public class MainService : IAnnouncerService, IChatService,IAnnouncerInitializer
                 identityMessage.Payload.IdentityKey,
                 _loggerFactory.CreateLogger<AnnouncerModel>());
         });
+        using var announcerSub = WatchForChanges(announcerModel);
         announcerModel.AddIpAddress(context.RemoteEndPoint.Address);
         announcerModel.LastSeen.Value= DateTimeOffset.Now;
         if (identityMessage.Payload.HasPreferredNickname)
