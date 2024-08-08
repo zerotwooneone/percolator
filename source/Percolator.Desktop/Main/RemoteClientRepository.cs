@@ -58,6 +58,7 @@ public class RemoteClientRepository : IRemoteClientRepository,IRemoteClientIniti
                 .Skip(1)
                 .Take(1)
                 .Select(_=>Unit.Default))
+            //.ObserveOn(_dbIoSyncContext)
             .SelectAwait(async (_, _) =>
             {
                 using var scope = _serviceScopeFactory.CreateScope();

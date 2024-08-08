@@ -27,7 +27,7 @@ public class RemoteClientModel : IEquatable<RemoteClientModel>
         _logger = logger;
         Port = new ReactiveProperty<int>( port ?? Defaults.DefaultIntroducePort);
         Identity = identity;
-        PreferredNickname = new ReactiveProperty<string>(String.IsNullOrWhiteSpace(nickname) ? Identity.ToBase64(): nickname);
+        PreferredNickname = new SynchronizedReactiveProperty<string>(String.IsNullOrWhiteSpace(nickname) ? Identity.ToBase64(): nickname);
         CanReplyIntroduce = Ephemeral
             .CombineLatest(_selectedIpAddress, (ephemeral, ip) => (ephemeral, ip))
             .Select(e => e.ephemeral != null && e.ip != null)
@@ -117,7 +117,7 @@ public class RemoteClientModel : IEquatable<RemoteClientModel>
         _selectedIpAddress.Value = _ipAddresses[index];
     }
 
-    public ReactiveProperty<DateTimeOffset> LastSeen { get; } = new();
+    public ReactiveProperty<DateTimeOffset> LastSeen { get; } = new SynchronizedReactiveProperty<DateTimeOffset>();
     public ReactiveProperty<RSACryptoServiceProvider?> Ephemeral { get; } = new();
 
     public ReadOnlyReactiveProperty<bool> CanReplyIntroduce { get; }
