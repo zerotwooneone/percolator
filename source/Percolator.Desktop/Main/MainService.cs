@@ -679,8 +679,7 @@ public class MainService : IAnnouncerService, IChatService,IAnnouncerInitializer
                 ? identityBase64.Substring(0,Math.Min(maxNicknameLength, identityBase64.Length)) 
                 :preferredNickname.Substring(0, Math.Min( maxNicknameLength, preferredNickname.Length));
             
-            _logger.LogWarning($"using test nickname");
-            announcerModel.PreferredNickname.Value = nextNick+DateTimeOffset.Now.ToUnixTimeMilliseconds();
+            announcerModel.PreferredNickname.Value = nextNick;
         }
         if (identityMessage.Payload.HasPort)
         {
