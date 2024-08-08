@@ -9,4 +9,5 @@ public interface IRemoteClientRepository
     IReadOnlyDictionary<ByteString, RemoteClientModel> RemoteClients { get; }
     RemoteClientModel GetOrAdd(ByteString identity, Func<ByteString, RemoteClientModel> addCallback);
     void OnNext(ByteString identity);
+    IDisposable WatchForChanges(RemoteClientModel remoteClient);
 }

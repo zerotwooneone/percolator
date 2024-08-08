@@ -22,7 +22,6 @@ public class MainService : IRemoteClientService, IChatService
     private readonly ILogger<MainService> _logger;
     private readonly SelfEncryptionService _selfEncryptionService;
     private readonly ILoggerFactory _loggerFactory;
-    private readonly IServiceScopeFactory _serviceScopeFactory;
     private readonly IRemoteClientRepository _remoteClientRepository;
     private readonly IBroadcaster _broadcaster;
     private readonly IListener _broadcastListener;
@@ -44,14 +43,12 @@ public class MainService : IRemoteClientService, IChatService
         ILogger<MainService> logger,
         SelfEncryptionService selfEncryptionService,
         ILoggerFactory loggerFactory,
-        IServiceScopeFactory serviceScopeFactory,
         IRemoteClientRepository remoteClientRepository)
     {
         _udpClientFactory = udpClientFactory;
         _logger = logger;
         _selfEncryptionService = selfEncryptionService;
         _loggerFactory = loggerFactory;
-        _serviceScopeFactory = serviceScopeFactory;
         _remoteClientRepository = remoteClientRepository;
         _broadcaster = _udpClientFactory.CreateBroadcaster(Defaults.DefaultBroadcastPort);
         _broadcastListener = _udpClientFactory.CreateListener(Defaults.DefaultBroadcastPort);
@@ -409,7 +406,7 @@ public class MainService : IRemoteClientService, IChatService
             return newModel;
         });
 
-        using var announcerSub = WatchForChanges(announcer);
+        using var announcerSub = _remoteClientRepository.WatchForChanges(announcer);
         announcer.LastSeen.Value = DateTimeOffset.Now;
         announcer.AddIpAddress(context.RemoteEndPoint.Address);
         if (payload.HasPreferredNickname && !string.IsNullOrWhiteSpace(payload.PreferredNickname))
@@ -453,26 +450,6 @@ public class MainService : IRemoteClientService, IChatService
         }
     }
 
-    private IDisposable WatchForChanges(RemoteClientModel remoteClient)
-    {
-        return remoteClient.PreferredNickname
-                .Skip(1)
-                .Take(1)
-                .Select(_=>Unit.Default)
-                .Amb(remoteClient.LastSeen
-                    .Skip(1)
-                    .Take(1)
-                    .Select(_=>Unit.Default))
-                .SelectAwait(async (_, _) =>
-                {
-                    using var scope = _serviceScopeFactory.CreateScope();
-                    var persistenceService = scope.ServiceProvider.GetRequiredService<IPersistenceService>();
-                    await persistenceService.UpdateAnnouncer(remoteClient.Identity, remoteClient.PreferredNickname.Value,remoteClient.LastSeen.Value);
-                    return Unit.Default;
-                })
-            .Subscribe();
-    }
-
     const int maxNicknameLength = 35;
     private async Task OnReceivedUnknownPublicKey(UdpReceiveResult context,
         IntroduceRequest.Types.UnknownPublicKey.Types.Payload payload, CancellationToken cancellationToken)
@@ -492,7 +469,7 @@ public class MainService : IRemoteClientService, IChatService
             }
             return newModel;
         });
-        using var announcerSub = WatchForChanges(announcer);
+        using var announcerSub = _remoteClientRepository.WatchForChanges(announcer);
         announcer.AddIpAddress(context.RemoteEndPoint.Address);
         announcer.LastSeen.Value = DateTimeOffset.Now;
         var ephemeral = new RSACryptoServiceProvider
@@ -674,7 +651,7 @@ public class MainService : IRemoteClientService, IChatService
                 identityMessage.Payload.IdentityKey,
                 _loggerFactory.CreateLogger<RemoteClientModel>());
         });
-        using var announcerSub = WatchForChanges(announcerModel);
+        using var announcerSub = _remoteClientRepository.WatchForChanges(announcerModel);
         announcerModel.AddIpAddress(context.RemoteEndPoint.Address);
         announcerModel.LastSeen.Value= DateTimeOffset.Now;
         if (identityMessage.Payload.HasPreferredNickname)
