@@ -17,7 +17,6 @@ internal class SqliteService : IHostedService
     private readonly ILoggerFactory _loggerFactory;
     private readonly ILogger<SqliteService> _logger;
     private readonly IServiceScopeFactory _serviceScopeFactory;
-    private readonly FrameProvider _dbIoSyncContext;
 
     public SqliteService(
         IRemoteClientInitializer remoteClientInitializer,
@@ -25,47 +24,12 @@ internal class SqliteService : IHostedService
         ILogger<SqliteService> logger,
         IServiceScopeFactory serviceScopeFactory)
     {
-        _dbIoSyncContext = new NewThreadSleepFrameProvider();
         _remoteClientInitializer = remoteClientInitializer;
         _loggerFactory = loggerFactory;
         _logger = logger;
         _serviceScopeFactory = serviceScopeFactory;
-        
-        _remoteClientInitializer.ClientAdded
-            .ObserveOn(_dbIoSyncContext)
-            .Subscribe(OnAnnouncerAdded);
     }
     
-    private void OnAnnouncerAdded(ByteString announcerId)
-    {
-        using var scope = _serviceScopeFactory.CreateScope();
-        var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-        var announcer = _remoteClientInitializer.RemoteClients[announcerId];
-        var remoteClient = new RemoteClient();
-        remoteClient.SetIdentity( announcer.Identity.ToByteArray());
-        
-        if (dbContext.RemoteClients.Any(client => client.Identity ==remoteClient.Identity))
-        {
-            return;
-        }
-
-        if (!string.IsNullOrWhiteSpace(announcer.PreferredNickname.CurrentValue))
-        {
-            remoteClient.PreferredNickname = announcer.PreferredNickname.CurrentValue;
-        }
-        foreach (var ipAddress in announcer.IpAddresses)
-        {
-            var ipString = ipAddress.ToString();
-            remoteClient.RemoteClientIps.Add(new RemoteClientIp
-            {
-                IpAddress = ipString,
-                RemoteClient = remoteClient
-            });
-        }
-
-        dbContext.RemoteClients.Add(remoteClient);
-        dbContext.SaveChanges();
-    }
     public async Task StartAsync(CancellationToken cancellationToken)
     {
         using var scope = _serviceScopeFactory.CreateScope();
