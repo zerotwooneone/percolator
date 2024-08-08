@@ -29,7 +29,11 @@ public partial class App : Application
                 services.AddSingleton<MainService>();
                 services.AddSingleton<IAnnouncerService>(p=>p.GetRequiredService<MainService>());
                 services.AddSingleton<IChatService>(p=>p.GetRequiredService<MainService>());
-                services.AddSingleton<IAnnouncerInitializer>(p=>p.GetRequiredService<MainService>());
+
+                services.AddSingleton<AnnouncerRepository>();
+                services.AddSingleton<IAnnouncerRepository>(p => p.GetRequiredService<AnnouncerRepository>());
+                services.AddSingleton<IAnnouncerInitializer>(p=>p.GetRequiredService<AnnouncerRepository>());
+                
                 services.AddSingleton<UdpClientFactory>();
                 services.AddSingleton<SelfEncryptionService>(s =>
                     new SelfEncryptionService("6e3c367d-380c-4a0d-8b66-ad397fbac2d9")); //todo: get id from config

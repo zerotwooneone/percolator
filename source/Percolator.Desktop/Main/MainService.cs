@@ -16,22 +16,22 @@ using R3;
 
 namespace Percolator.Desktop.Main;
 
-public class MainService : IAnnouncerService, IChatService,IAnnouncerInitializer
+public class MainService : IAnnouncerService, IChatService
 {
     private readonly UdpClientFactory _udpClientFactory;
     private readonly ILogger<MainService> _logger;
     private readonly SelfEncryptionService _selfEncryptionService;
     private readonly ILoggerFactory _loggerFactory;
     private readonly IServiceScopeFactory _serviceScopeFactory;
+    private readonly IAnnouncerRepository _announcerRepository;
     private readonly IBroadcaster _broadcaster;
     private readonly IListener _broadcastListener;
     private readonly Observable<Unit> _announceInterval;
     private IDisposable _announceSubscription = new DummyDisposable();
-    private readonly ConcurrentDictionary<ByteString, AnnouncerModel> _announcersByIdentity= new();
+    
     public ReactiveProperty<string> PreferredNickname { get; }
     
-    public Observable<ByteString> AnnouncerAdded => _announcerAdded;
-    private Subject<ByteString> _announcerAdded = new();
+    
     private IListener _introduceListener;
     private readonly ConcurrentBag<IPAddress> _ipBlacklist = new();
     private readonly ConcurrentBag<ByteString> _identityBlacklist = new();
@@ -44,13 +44,15 @@ public class MainService : IAnnouncerService, IChatService,IAnnouncerInitializer
         ILogger<MainService> logger,
         SelfEncryptionService selfEncryptionService,
         ILoggerFactory loggerFactory,
-        IServiceScopeFactory serviceScopeFactory)
+        IServiceScopeFactory serviceScopeFactory,
+        IAnnouncerRepository announcerRepository)
     {
         _udpClientFactory = udpClientFactory;
         _logger = logger;
         _selfEncryptionService = selfEncryptionService;
         _loggerFactory = loggerFactory;
         _serviceScopeFactory = serviceScopeFactory;
+        _announcerRepository = announcerRepository;
         _broadcaster = _udpClientFactory.CreateBroadcaster(Defaults.DefaultBroadcastPort);
         _broadcastListener = _udpClientFactory.CreateListener(Defaults.DefaultBroadcastPort);
         var ingressContext = new SynchronizationContext();
@@ -392,7 +394,7 @@ public class MainService : IAnnouncerService, IChatService,IAnnouncerInitializer
     private void OnReceivedReplyIntro(UdpReceiveResult context, IntroduceRequest.Types.IntroduceReply.Types.Proceed.Types.Payload payload)
     {
         var didAdd = false;
-        var announcer = _announcersByIdentity.GetOrAdd(payload.IdentityKey, _ =>
+        var announcer = _announcerRepository.GetOrAdd(payload.IdentityKey, _ =>
         {
             didAdd = true;
             var newModel = new AnnouncerModel(payload.IdentityKey, _loggerFactory.CreateLogger<AnnouncerModel>());
@@ -421,7 +423,7 @@ public class MainService : IAnnouncerService, IChatService,IAnnouncerInitializer
                     $"got a reply from {context.RemoteEndPoint.Address} but we didn't request it. Do you want to allow it?",
                     "Warning", MessageBoxButton.YesNo, MessageBoxImage.Exclamation) != MessageBoxResult.Yes)
             { 
-                _announcerAdded.OnNext(announcer.Identity);
+                _announcerRepository.OnNext(announcer.Identity);
                 //todo: remove messagebox to avoid spam
                 return; 
             }
@@ -447,7 +449,7 @@ public class MainService : IAnnouncerService, IChatService,IAnnouncerInitializer
         
         if (didAdd)
         {
-            _announcerAdded.OnNext(announcer.Identity);
+            _announcerRepository.OnNext(announcer.Identity);
         }
     }
 
@@ -476,7 +478,7 @@ public class MainService : IAnnouncerService, IChatService,IAnnouncerInitializer
         IntroduceRequest.Types.UnknownPublicKey.Types.Payload payload, CancellationToken cancellationToken)
     {
         var didAdd = false;
-        var announcer = _announcersByIdentity.GetOrAdd(payload.IdentityKey, _ =>
+        var announcer = _announcerRepository.GetOrAdd(payload.IdentityKey, _ =>
         {
             didAdd = true;
             var newModel = new AnnouncerModel(payload.IdentityKey, _loggerFactory.CreateLogger<AnnouncerModel>());
@@ -506,7 +508,7 @@ public class MainService : IAnnouncerService, IChatService,IAnnouncerInitializer
 
         if (didAdd)
         {
-            _announcerAdded.OnNext(announcer.Identity);
+            _announcerRepository.OnNext(announcer.Identity);
         }
 
         if (AutoReplyIntroductions.CurrentValue)
@@ -665,7 +667,7 @@ public class MainService : IAnnouncerService, IChatService,IAnnouncerInitializer
         }
 
         var didAdd = false;
-        var announcerModel = _announcersByIdentity.GetOrAdd(identityMessage.Payload.IdentityKey,_=>
+        var announcerModel = _announcerRepository.GetOrAdd(identityMessage.Payload.IdentityKey,_=>
         {
             didAdd = true;
             return new AnnouncerModel(
@@ -693,7 +695,7 @@ public class MainService : IAnnouncerService, IChatService,IAnnouncerInitializer
 
         if (didAdd)
         {
-            _announcerAdded.OnNext(identityMessage.Payload.IdentityKey);
+            _announcerRepository.OnNext(identityMessage.Payload.IdentityKey);
         }
     }
 
@@ -772,7 +774,7 @@ public class MainService : IAnnouncerService, IChatService,IAnnouncerInitializer
         _announceSubscription.Dispose();
     }
 
-    public IReadOnlyDictionary<ByteString, AnnouncerModel> Announcers => _announcersByIdentity;
+    
     public ReactiveProperty<bool> AutoReplyIntroductions { get; } = new();
     public ReactiveProperty<bool> ListenForIntroductions { get; } = new();
 
@@ -944,6 +946,24 @@ public class MainService : IAnnouncerService, IChatService,IAnnouncerInitializer
         }.ToByteArray();
     }
 
+    
+}
+
+public interface IAnnouncerRepository
+{
+    Observable<ByteString> AnnouncerAdded { get; }
+    IReadOnlyDictionary<ByteString, AnnouncerModel> Announcers { get; }
+    AnnouncerModel GetOrAdd(ByteString identity, Func<ByteString, AnnouncerModel> addCallback);
+    void OnNext(ByteString identity);
+}
+
+public class AnnouncerRepository : IAnnouncerRepository,IAnnouncerInitializer
+{
+    public Observable<ByteString> AnnouncerAdded => _announcerAdded;
+    private Subject<ByteString> _announcerAdded = new();
+    private readonly ConcurrentDictionary<ByteString, AnnouncerModel> _announcersByIdentity= new();
+    public IReadOnlyDictionary<ByteString, AnnouncerModel> Announcers => _announcersByIdentity;
+    
     public void AddKnownAnnouncers(IEnumerable<AnnouncerModel> announcerModels)
     {
         foreach (var model in announcerModels)
@@ -953,6 +973,16 @@ public class MainService : IAnnouncerService, IChatService,IAnnouncerInitializer
                 _announcerAdded.OnNext(model.Identity);
             }
         }
+    }
+
+    public AnnouncerModel GetOrAdd(ByteString identity, Func<ByteString, AnnouncerModel> addCallback)
+    {
+        return _announcersByIdentity.GetOrAdd(identity, addCallback);
+    }
+
+    public void OnNext(ByteString identity)
+    {
+        _announcerAdded.OnNext(identity);
     }
 }
 

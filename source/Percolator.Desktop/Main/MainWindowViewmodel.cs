@@ -13,6 +13,7 @@ public class MainWindowViewmodel : INotifyPropertyChanged
     private readonly ILogger<MainWindowViewmodel> _logger;
     private readonly IAnnouncerViewmodelFactory _announcerViewmodelFactory;
     private readonly IChatViewmodelFactory _chatViewmodelFactory;
+    private readonly IAnnouncerRepository _announcerRepository;
     private bool _isAnnouncing;
     public ObservableCollection<AnnouncerViewmodel> Announcers { get; } = new();
     public ReactiveProperty<AnnouncerViewmodel?> SelectedAnnouncer { get; } = new();
@@ -35,12 +36,14 @@ public class MainWindowViewmodel : INotifyPropertyChanged
         MainService mainService,
         ILogger<MainWindowViewmodel> logger,
         IAnnouncerViewmodelFactory announcerViewmodelFactory,
-        IChatViewmodelFactory chatViewmodelFactory)
+        IChatViewmodelFactory chatViewmodelFactory,
+        IAnnouncerRepository announcerRepository)
     {
         _mainService = mainService;
         _logger = logger;
         _announcerViewmodelFactory = announcerViewmodelFactory;
         _chatViewmodelFactory = chatViewmodelFactory;
+        _announcerRepository = announcerRepository;
         AnnounceCommand = new BaseCommand(OnAnnounceClicked);
         AllowIntroductions = _mainService.ListenForIntroductions
             .ToBindableReactiveProperty();
@@ -52,7 +55,7 @@ public class MainWindowViewmodel : INotifyPropertyChanged
             .ObserveOnCurrentDispatcher()
             .ToBindableReactiveProperty();
         AutoReplyIntroductions.Subscribe(b => _mainService.AutoReplyIntroductions.Value = b);
-        _mainService.AnnouncerAdded
+        _announcerRepository.AnnouncerAdded
             .ObserveOnCurrentDispatcher()
             .Subscribe(OnAnnouncerAdded);
         IsBroadcastListening = _mainService.BroadcastListen
@@ -67,7 +70,7 @@ public class MainWindowViewmodel : INotifyPropertyChanged
 
     private void OnAnnouncerAdded(ByteString announcerId)
     {
-        var announcer = _mainService.Announcers[announcerId];
+        var announcer = _announcerRepository.Announcers[announcerId];
         var announcerVm = _announcerViewmodelFactory.Create(announcer);
         Announcers.Add(announcerVm);
     }
