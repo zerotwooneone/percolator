@@ -11,6 +11,9 @@ public class RemoteClient
     public int? Id { get; set; }
     [MaxLength(200)]
     public string Identity { get; set; }
+    
+    [MaxLength(140)]
+    public string? PreferredNickname { get; set; }
     public ICollection<RemoteClientIp> RemoteClientIps { get; set; }=new List<RemoteClientIp>();
     
     public void SetIdentity(byte[] bytes)

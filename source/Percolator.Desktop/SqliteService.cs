@@ -43,6 +43,11 @@ internal class SqliteService : IHostedService
         {
             return;
         }
+
+        if (string.IsNullOrWhiteSpace(announcer.PreferredNickname.CurrentValue))
+        {
+            remoteClient.PreferredNickname = announcer.PreferredNickname.CurrentValue;
+        }
         foreach (var ipAddress in announcer.IpAddresses)
         {
             var ipString = ipAddress.ToString();
