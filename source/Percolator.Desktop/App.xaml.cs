@@ -41,7 +41,6 @@ public partial class App : Application
                 services.AddSingleton<IRemoteClientViewmodelFactory>(p=>p.GetRequiredService<ViewmodelFactory>());
                 services.AddSingleton<IChatViewmodelFactory>(p=>p.GetRequiredService<ViewmodelFactory>());
                 services.AddHostedService<SqliteService>();
-                services.AddSingleton<IPersistenceService,SqliteService2>();
                 services.AddDbContext<ApplicationDbContext>(options =>
                 {
                     options.UseSqlite("Data Source=percolator.db");

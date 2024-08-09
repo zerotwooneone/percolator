@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using Google.Protobuf;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Percolator.Desktop.Data;
 using R3;
@@ -30,10 +31,15 @@ public class RemoteClientRepository : IRemoteClientRepository,IRemoteClientIniti
     {
         foreach (var model in announcerModels)
         {
-            if (_clientsByIdentity.TryAdd(model.Identity, new ClientWrapper(model)))
+            var identity = model.Identity;
+            if (!_clientsByIdentity.TryAdd(identity, new ClientWrapper(model)))
             {
-                _clientAdded.OnNext(model.Identity);
+                continue;
             }
+
+            _clientsByIdentity[identity].DoUpdate
+                .SubscribeAwait(async (_,c)=>await OnUpdate(identity,c));
+            _clientAdded.OnNext(identity);
         }
     }
 
@@ -44,33 +50,53 @@ public class RemoteClientRepository : IRemoteClientRepository,IRemoteClientIniti
 
     public RemoteClientModel GetOrAdd(ByteString identity, Func<ByteString, RemoteClientModel> addCallback)
     {
-        return _clientsByIdentity.GetOrAdd(identity, b => new ClientWrapper(addCallback(b))).Client;
+        return _clientsByIdentity.GetOrAdd(identity, b =>
+        {
+            var clientWrapper = new ClientWrapper(addCallback(b));
+            clientWrapper.DoUpdate
+                .SubscribeAwait(async (_,c)=>await OnUpdate(identity,c));
+            return clientWrapper;
+        }).Client;
     }
-
+    
     public void OnNext(ByteString identity)
     {
         _clientAdded.OnNext(identity);
     }
     
+    private async ValueTask OnUpdate(ByteString identity, CancellationToken cancellationToken)
+    {
+        var rc  = _clientsByIdentity[identity].Client;
+        await UpdateAnnouncer(identity, rc.PreferredNickname.Value,rc.LastSeen.Value,cancellationToken);
+    }
+    
+    public async Task UpdateAnnouncer(ByteString identity, string nickname, DateTimeOffset lastSeenValue,
+        CancellationToken cancellationToken)
+    {
+        using var scope = _serviceScopeFactory.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var rc = await dbContext.RemoteClients.FirstOrDefaultAsync(
+            client => client.Identity == identity.ToBase64(), cancellationToken: cancellationToken);
+        if (rc == null)
+        {
+            return;
+        }
+
+        rc.PreferredNickname = nickname;
+        rc.SetLastSeen(lastSeenValue);
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+    
     public IDisposable WatchForChanges(RemoteClientModel remoteClient)
     {
-        return remoteClient.PreferredNickname
-            .Skip(1)
+        var identity = remoteClient.Identity;
+        return _clientsByIdentity[identity].PropertyChanged
             .Take(1)
-            .Select(_=>Unit.Default)
-            .Amb(remoteClient.LastSeen
-                .Skip(1)
-                .Take(1)
-                .Select(_=>Unit.Default))
             //.ObserveOn(_dbIoSyncContext)
-            .SelectAwait(async (_, _) =>
+            .Subscribe(_ =>
             {
-                using var scope = _serviceScopeFactory.CreateScope();
-                var persistenceService = scope.ServiceProvider.GetRequiredService<IPersistenceService>();
-                await persistenceService.UpdateAnnouncer(remoteClient.Identity, remoteClient.PreferredNickname.Value,remoteClient.LastSeen.Value);
-                return Unit.Default;
-            })
-            .Subscribe();
+                _clientsByIdentity[identity].RequestUpdate();
+            });
     }
     
     private void OnAnnouncerAdded(ByteString announcerId)
@@ -106,21 +132,31 @@ public class RemoteClientRepository : IRemoteClientRepository,IRemoteClientIniti
     
     private class ClientWrapper
     {
+        private readonly Subject<Unit> _updateRequest;
         public RemoteClientModel Client { get; }
-        public Observable<Unit> DoDbUpdate { get; }
+        public Observable<Unit> DoUpdate { get; }
+        public Observable<Unit> PropertyChanged { get;}
         public ClientWrapper(RemoteClientModel client)
         {
             Client = client;
-            var propertyChanged = client.LastSeen
+            PropertyChanged = client.LastSeen
                 .Skip(1)
                 .Select(_=>Unit.Default)
                 .Merge(client.PreferredNickname
                     .Skip(1)
-                    .Select(_=>Unit.Default));
-            DoDbUpdate = Observable.Interval(TimeSpan.FromSeconds(2))
-                .CombineLatest(propertyChanged, (_, _) => Unit.Default)
+                    .Select(_=>Unit.Default))
                 .Publish()
                 .RefCount();
+            _updateRequest = new Subject<Unit>();
+            DoUpdate = _updateRequest
+                .ThrottleFirst(TimeSpan.FromSeconds(2),timeProvider: TimeProvider.System)
+                .Publish()
+                .RefCount();
+        }
+
+        public void RequestUpdate()
+        {
+            _updateRequest.OnNext(Unit.Default);
         }
     }
 }
