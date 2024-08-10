@@ -38,13 +38,27 @@ internal class SqliteService : IHostedService
         Directory.CreateDirectory(dbPath);
         await dbContext.Database.MigrateAsync(cancellationToken);
 
-        if (dbContext.SelfRows.FirstOrDefault() == null)
+        var selfRows = (from s in dbContext.SelfRows
+            select s).Take(2).ToArray();
+        if (selfRows.Length >= 2)
         {
-            dbContext.SelfRows.Add(new Self
+            _logger.LogWarning("too many self rows");
+        }
+
+        Self self;
+        if (selfRows.Length == 0)
+        {
+            var newSelf = new Self
             {
                 IdentitySuffix = Convert.ToBase64String(Guid.NewGuid().ToByteArray()),
-            });
+            };
+            dbContext.SelfRows.Add(newSelf);
             await dbContext.SaveChangesAsync(cancellationToken);
+            self=newSelf;
+        }
+        else
+        {
+            self=selfRows[0];
         }
         var models = dbContext.RemoteClients
             .Include(c=>c.RemoteClientIps)
