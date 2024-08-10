@@ -38,6 +38,14 @@ internal class SqliteService : IHostedService
         Directory.CreateDirectory(dbPath);
         await dbContext.Database.MigrateAsync(cancellationToken);
 
+        if (dbContext.SelfRows.FirstOrDefault() == null)
+        {
+            dbContext.SelfRows.Add(new Self
+            {
+                IdentitySuffix = Convert.ToBase64String(Guid.NewGuid().ToByteArray()),
+            });
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
         var models = dbContext.RemoteClients
             .Include(c=>c.RemoteClientIps)
             .ToArray()

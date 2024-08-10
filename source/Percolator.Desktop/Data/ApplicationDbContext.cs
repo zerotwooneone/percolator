@@ -6,6 +6,7 @@ public class ApplicationDbContext : DbContext
 {
     public DbSet<RemoteClient> RemoteClients { get; set; }
     public DbSet<RemoteClientIp> RemoteClientIps { get; set; }
+    public DbSet<Self> SelfRows { get; set; }
     public string DbPath { get; }
     public ApplicationDbContext()
     {
