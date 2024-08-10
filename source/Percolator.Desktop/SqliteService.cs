@@ -11,26 +11,44 @@ using R3;
 
 namespace Percolator.Desktop;
 
-internal class SqliteService : IHostedService
+internal class SqliteService : IHostedService, IPreAppInitializer
 {
     private readonly IRemoteClientInitializer _remoteClientInitializer;
     private readonly ILoggerFactory _loggerFactory;
     private readonly ILogger<SqliteService> _logger;
     private readonly IServiceScopeFactory _serviceScopeFactory;
+    private readonly ISelfInitializer _selfInitializer;private readonly TaskCompletionSource _preAppComplete = new();
+    public Task PreAppComplete => _preAppComplete.Task;
 
     public SqliteService(
         IRemoteClientInitializer remoteClientInitializer,
         ILoggerFactory loggerFactory,
         ILogger<SqliteService> logger,
-        IServiceScopeFactory serviceScopeFactory)
+        IServiceScopeFactory serviceScopeFactory,
+        ISelfInitializer selfInitializer)
     {
         _remoteClientInitializer = remoteClientInitializer;
         _loggerFactory = loggerFactory;
         _logger = logger;
         _serviceScopeFactory = serviceScopeFactory;
+        _selfInitializer = selfInitializer;
     }
     
     public async Task StartAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Start_Inner(cancellationToken);
+            _preAppComplete.SetResult();
+        }
+        catch (Exception e)
+        {
+            _preAppComplete.SetException(e);
+            throw;
+        }
+    }
+
+    private async Task Start_Inner(CancellationToken cancellationToken)
     {
         using var scope = _serviceScopeFactory.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
@@ -60,6 +78,7 @@ internal class SqliteService : IHostedService
         {
             self=selfRows[0];
         }
+        _selfInitializer.InitSelf(new Guid( Convert.FromBase64String( self.IdentitySuffix) ));
         var models = dbContext.RemoteClients
             .Include(c=>c.RemoteClientIps)
             .ToArray()

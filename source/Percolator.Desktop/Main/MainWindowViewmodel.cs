@@ -58,6 +58,10 @@ public class MainWindowViewmodel : INotifyPropertyChanged
         _remoteClientRepository.ClientAdded
             .ObserveOnCurrentDispatcher()
             .Subscribe(OnAnnouncerAdded);
+        foreach (var rc in _remoteClientRepository.GetAll())
+        {
+            OnAnnouncerAdded(rc.Identity);
+        }
         IsBroadcastListening = _mainService.BroadcastListen
             .ObserveOnCurrentDispatcher()
             .ToBindableReactiveProperty();

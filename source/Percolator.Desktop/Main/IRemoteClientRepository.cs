@@ -10,4 +10,5 @@ public interface IRemoteClientRepository
     RemoteClientModel GetOrAdd(ByteString identity, Func<ByteString, RemoteClientModel> addCallback);
     void OnNext(ByteString identity);
     IDisposable WatchForChanges(RemoteClientModel remoteClient);
+    IEnumerable<RemoteClientModel> GetAll();
 }

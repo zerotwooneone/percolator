@@ -98,7 +98,12 @@ public class RemoteClientRepository : IRemoteClientRepository,IRemoteClientIniti
                 _clientsByIdentity[identity].RequestUpdate();
             });
     }
-    
+
+    public IEnumerable<RemoteClientModel> GetAll()
+    {
+        return _clientsByIdentity.Values.Select(c => c.Client);
+    }
+
     private void OnAnnouncerAdded(ByteString announcerId)
     {
         using var scope = _serviceScopeFactory.CreateScope();

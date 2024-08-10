@@ -5,7 +5,6 @@ using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Windows;
 using Google.Protobuf;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Percolator.Desktop.Crypto;
 using Percolator.Desktop.Udp;
@@ -23,6 +22,7 @@ public class MainService : IRemoteClientService, IChatService
     private readonly SelfEncryptionService _selfEncryptionService;
     private readonly ILoggerFactory _loggerFactory;
     private readonly IRemoteClientRepository _remoteClientRepository;
+    private readonly ISelfProvider _selfProvider;
     private readonly IBroadcaster _broadcaster;
     private readonly IListener _broadcastListener;
     private readonly Observable<Unit> _announceInterval;
@@ -43,27 +43,29 @@ public class MainService : IRemoteClientService, IChatService
         ILogger<MainService> logger,
         SelfEncryptionService selfEncryptionService,
         ILoggerFactory loggerFactory,
-        IRemoteClientRepository remoteClientRepository)
+        IRemoteClientRepository remoteClientRepository,
+        ISelfProvider selfProvider)
     {
         _udpClientFactory = udpClientFactory;
         _logger = logger;
         _selfEncryptionService = selfEncryptionService;
         _loggerFactory = loggerFactory;
         _remoteClientRepository = remoteClientRepository;
+        _selfProvider = selfProvider;
         _broadcaster = _udpClientFactory.CreateBroadcaster(Defaults.DefaultBroadcastPort);
         _broadcastListener = _udpClientFactory.CreateListener(Defaults.DefaultBroadcastPort);
         var ingressContext = new SynchronizationContext();
         _broadcastListener.Received
             .ObserveOn(ingressContext)
             .Subscribe(OnReceivedBroadcast);
-        
+    
         _announceInterval = Observable
             .Interval(TimeSpan.FromSeconds(5))  //todo: make configurable()
             .ObserveOn(new SynchronizationContext())
             .Publish()
             .RefCount();
 
-        PreferredNickname = new ReactiveProperty<string>(GetRandomNickname(GetIntFromBytes(_selfEncryptionService.Identity.ExportRSAPublicKey())));
+        PreferredNickname = new ReactiveProperty<string>(GetRandomNickname(GetIntFromBytes(_selfProvider.GetSelf().Identity.ExportRSAPublicKey())));
         _introduceListener = _udpClientFactory.CreateListener(Defaults.DefaultIntroducePort);
         _introduceListener.Received 
             .ObserveOn(ingressContext)
@@ -557,7 +559,7 @@ public class MainService : IRemoteClientService, IChatService
                 }
                 
                 if (identityPayload.IdentityKey.Equals(
-                        ByteString.CopyFrom(_selfEncryptionService.Identity.ExportRSAPublicKey())))
+                        ByteString.CopyFrom(_selfProvider.GetSelf().Identity.ExportRSAPublicKey())))
                 {
                     return;
                 }
@@ -697,7 +699,7 @@ public class MainService : IRemoteClientService, IChatService
     {
         var payload = new AnnounceMessage.Types.Identity.Types.Payload()
         {
-            IdentityKey = ByteString.CopyFrom(_selfEncryptionService.Identity.ExportRSAPublicKey()),
+            IdentityKey = ByteString.CopyFrom(_selfProvider.GetSelf().Identity.ExportRSAPublicKey()),
             TimeStampUnixUtcMs = currentTime.ToUniversalTime().ToUnixTimeMilliseconds(),
             PreferredNickname = PreferredNickname.Value,
             SourceIp = ByteString.CopyFrom(sourceIp.GetAddressBytes()),
@@ -712,7 +714,7 @@ public class MainService : IRemoteClientService, IChatService
             Identity = new AnnounceMessage.Types.Identity
             {
                 Payload = payload,
-                PayloadSignature = ByteString.CopyFrom(_selfEncryptionService.Identity.SignData(
+                PayloadSignature = ByteString.CopyFrom(_selfProvider.GetSelf().Identity.SignData(
                     payloadBytes,
                     HashAlgorithmName.SHA256,
                     RSASignaturePadding.Pkcs1
@@ -823,7 +825,7 @@ public class MainService : IRemoteClientService, IChatService
     {
         var payload = new IntroduceRequest.Types.IntroduceReply.Types.Proceed.Types.Payload
         {
-            IdentityKey =ByteString.CopyFrom( _selfEncryptionService.Identity.ExportRSAPublicKey()),
+            IdentityKey =ByteString.CopyFrom( _selfProvider.GetSelf().Identity.ExportRSAPublicKey()),
             EphemeralKey = ByteString.CopyFrom(_selfEncryptionService.Ephemeral.ExportRSAPublicKey()),
             TimeStampUnixUtcMs = currentTime.ToUniversalTime().ToUnixTimeMilliseconds(),
             Iv = ByteString.CopyFrom(aes.IV),
@@ -839,7 +841,7 @@ public class MainService : IRemoteClientService, IChatService
                 Proceed = new IntroduceRequest.Types.IntroduceReply.Types.Proceed()
                 {
                     Payload = payload,
-                    PayloadSignature = ByteString.CopyFrom(_selfEncryptionService.Identity.SignData(payloadBytes,
+                    PayloadSignature = ByteString.CopyFrom(_selfProvider.GetSelf().Identity.SignData(payloadBytes,
                         HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1)),
                 }
             }
@@ -851,7 +853,7 @@ public class MainService : IRemoteClientService, IChatService
     {
         var payload = new IntroduceRequest.Types.UnknownPublicKey.Types.Payload
         {
-            IdentityKey =ByteString.CopyFrom( _selfEncryptionService.Identity.ExportRSAPublicKey()),
+            IdentityKey =ByteString.CopyFrom( _selfProvider.GetSelf().Identity.ExportRSAPublicKey()),
             EphemeralKey = ByteString.CopyFrom(_selfEncryptionService.Ephemeral.ExportRSAPublicKey()),
             TimeStampUnixUtcMs = currentTime.ToUniversalTime().ToUnixTimeMilliseconds(),
             SourceIp = ByteString.CopyFrom(sourceIp.GetAddressBytes())
@@ -863,7 +865,7 @@ public class MainService : IRemoteClientService, IChatService
             UnknownPublicKey = new IntroduceRequest.Types.UnknownPublicKey
             {
                 Payload = payload,
-                PayloadSignature = ByteString.CopyFrom(_selfEncryptionService.Identity.SignData(payloadBytes,
+                PayloadSignature = ByteString.CopyFrom(_selfProvider.GetSelf().Identity.SignData(payloadBytes,
                     HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1)),
             }
         };
@@ -924,6 +926,12 @@ public class MainService : IRemoteClientService, IChatService
     }
 
     
+}
+
+public interface IPreAppInitializer
+{
+    //delays the main window until the pre app is complete
+    Task PreAppComplete { get; }
 }
 
 internal class DummyDisposable : IDisposable

@@ -40,17 +40,28 @@ public partial class App : Application
                 services.AddSingleton<ViewmodelFactory>();
                 services.AddSingleton<IRemoteClientViewmodelFactory>(p=>p.GetRequiredService<ViewmodelFactory>());
                 services.AddSingleton<IChatViewmodelFactory>(p=>p.GetRequiredService<ViewmodelFactory>());
-                services.AddHostedService<SqliteService>();
+                
+                services.AddSingleton<SqliteService>();
+                services.AddHostedService<SqliteService>(p => p.GetRequiredService<SqliteService>());
+                services.AddSingleton<IPreAppInitializer, SqliteService>(p => p.GetRequiredService<SqliteService>());
                 services.AddDbContext<ApplicationDbContext>(options =>
                 {
                     options.UseSqlite("Data Source=percolator.db");
                 });
+
+                services.AddSingleton<SelfProvider>();
+                services.AddSingleton<ISelfProvider>(p => p.GetRequiredService<SelfProvider>());
+                services.AddSingleton<ISelfInitializer>(p => p.GetRequiredService<SelfProvider>());
             });
         
         var host = builder.Build();
         _logger = host.Services.GetRequiredService<ILogger<App>>();
         
         Task.Factory.StartNew(() => host.StartAsync().Wait());
+        
+        var preAppComplete = host.Services.GetServices<IPreAppInitializer>().Select(i => i.PreAppComplete);
+        //todo: add a splash screen
+        Task.WhenAll(preAppComplete).Wait();
         
         var mainWindow = host.Services.GetRequiredService<MainWindow>();
         mainWindow.DataContext = host.Services.GetRequiredService<MainWindowViewmodel>();
