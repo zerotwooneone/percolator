@@ -7,6 +7,7 @@ using System.Windows;
 using Google.Protobuf;
 using Microsoft.Extensions.Logging;
 using Percolator.Desktop.Crypto;
+using Percolator.Desktop.Domain.Chat;
 using Percolator.Desktop.Domain.Client;
 using Percolator.Desktop.Udp;
 using Percolator.Desktop.Udp.Interfaces;

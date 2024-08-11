@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using Microsoft.Extensions.Logging;
+using Percolator.Desktop.Domain.Chat;
 using R3;
 
 namespace Percolator.Desktop.Main;

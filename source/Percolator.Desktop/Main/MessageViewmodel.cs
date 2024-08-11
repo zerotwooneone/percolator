@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Media;
+using Percolator.Desktop.Domain.Chat;
 
 namespace Percolator.Desktop.Main;
 

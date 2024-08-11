@@ -1,4 +1,4 @@
-namespace Percolator.Desktop.Main;
+namespace Percolator.Desktop.Domain.Chat;
 
 public class MessageModel
 {
