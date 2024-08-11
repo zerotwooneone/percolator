@@ -17,7 +17,6 @@ internal class SqliteService : IHostedService, IPreAppInitializer
     private readonly ILoggerFactory _loggerFactory;
     private readonly ILogger<SqliteService> _logger;
     private readonly IServiceScopeFactory _serviceScopeFactory;
-    private readonly ISelfInitializer _selfInitializer;
     private readonly TaskCompletionSource _preAppComplete = new();
     public Task PreAppComplete => _preAppComplete.Task;
 
@@ -25,14 +24,12 @@ internal class SqliteService : IHostedService, IPreAppInitializer
         IRemoteClientInitializer remoteClientInitializer,
         ILoggerFactory loggerFactory,
         ILogger<SqliteService> logger,
-        IServiceScopeFactory serviceScopeFactory,
-        ISelfInitializer selfInitializer)
+        IServiceScopeFactory serviceScopeFactory)
     {
         _remoteClientInitializer = remoteClientInitializer;
         _loggerFactory = loggerFactory;
         _logger = logger;
         _serviceScopeFactory = serviceScopeFactory;
-        _selfInitializer = selfInitializer;
     }
     
     public async Task StartAsync(CancellationToken cancellationToken)
@@ -63,29 +60,6 @@ internal class SqliteService : IHostedService, IPreAppInitializer
         using var scope = _serviceScopeFactory.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
 
-        var selfRows = (from s in dbContext.SelfRows
-            select s).Take(2).ToArray();
-        if (selfRows.Length >= 2)
-        {
-            _logger.LogWarning("too many self rows");
-        }
-
-        Self self;
-        if (selfRows.Length == 0)
-        {
-            var newSelf = new Self
-            {
-                IdentitySuffix = Convert.ToBase64String(Guid.NewGuid().ToByteArray()),
-            };
-            dbContext.SelfRows.Add(newSelf);
-            await dbContext.SaveChangesAsync(cancellationToken);
-            self=newSelf;
-        }
-        else
-        {
-            self=selfRows[0];
-        }
-        _selfInitializer.InitSelf(new Guid( Convert.FromBase64String( self.IdentitySuffix) ));
         var models = dbContext.RemoteClients
             .Include(c=>c.RemoteClientIps)
             .ToArray()

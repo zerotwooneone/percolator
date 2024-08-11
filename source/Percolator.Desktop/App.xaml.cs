@@ -51,7 +51,8 @@ public partial class App : Application
 
                 services.AddSingleton<SelfProvider>();
                 services.AddSingleton<ISelfProvider>(p => p.GetRequiredService<SelfProvider>());
-                services.AddSingleton<ISelfInitializer>(p => p.GetRequiredService<SelfProvider>());
+                services.AddHostedService<SelfProvider>(p => p.GetRequiredService<SelfProvider>());
+                services.AddSingleton<IPreAppInitializer, SelfProvider>(p => p.GetRequiredService<SelfProvider>());
             });
         
         var host = builder.Build();

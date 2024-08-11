@@ -1,11 +1,30 @@
 using System.Security.Cryptography;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Percolator.Desktop.Data;
 using Percolator.Desktop.Main;
 
 namespace Percolator.Desktop.Domain.Client;
 
-public class SelfProvider : ISelfProvider, ISelfInitializer
+public class SelfProvider : ISelfProvider, IHostedService, IPreAppInitializer
 {
+    private readonly ILoggerFactory _loggerFactory;
+    private readonly ILogger<SelfProvider> _logger;
+    private readonly IServiceScopeFactory _serviceScopeFactory;
     private SelfModel? _self;
+    private readonly TaskCompletionSource _preAppComplete = new();
+    public Task PreAppComplete => _preAppComplete.Task;
+    
+    public SelfProvider(
+        ILoggerFactory loggerFactory,
+        ILogger<SelfProvider> logger,
+        IServiceScopeFactory serviceScopeFactory)
+    {
+        _loggerFactory = loggerFactory;
+        _logger = logger;
+        _serviceScopeFactory = serviceScopeFactory;
+    }
     
     public SelfModel GetSelf()
     {
@@ -16,22 +35,6 @@ public class SelfProvider : ISelfProvider, ISelfInitializer
         return _self;
     }
     private const string KeyContainerName = "Percolator";
-    public void InitSelf(Guid identitySuffix)
-    {
-        if (identitySuffix == Guid.Empty)
-            throw new ArgumentException("identitySuffix cannot be null or empty", nameof(identitySuffix));
-        var csp = new CspParameters
-        {
-            KeyContainerName = $"{KeyContainerName}.{identitySuffix}",
-            Flags = 
-                CspProviderFlags.UseArchivableKey | 
-                CspProviderFlags.UseMachineKeyStore | 
-                CspProviderFlags.UseDefaultKeyContainer
-        };
-        var identity = new RSACryptoServiceProvider(csp);
-        _self = new SelfModel(identitySuffix, identity,GetRandomNickname(ByteUtils.GetIntFromBytes(identity.ExportRSAPublicKey())));
-    }
-    
 
     public static string GetRandomNickname(int? seed=null)
     {
@@ -53,5 +56,68 @@ public class SelfProvider : ISelfProvider, ISelfInitializer
         } while (list.Count < numberOfChars);
 
         return new string(list.ToArray());
+    }
+
+    public async Task StartAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Start_PreUi(cancellationToken);
+            _preAppComplete.SetResult();
+        }
+        catch (Exception e)
+        {
+            _preAppComplete.SetException(e);
+            throw;
+        }
+    }
+
+    private async Task Start_PreUi(CancellationToken cancellationToken)
+    {
+        using var scope = _serviceScopeFactory.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+
+        var selfRows = (from s in dbContext.SelfRows
+            select s).Take(2).ToArray();
+        if (selfRows.Length >= 2)
+        {
+            _logger.LogWarning("too many self rows");
+        }
+
+        Self self;
+        if (selfRows.Length == 0)
+        {
+            var newSelf = new Self
+            {
+                IdentitySuffix = Convert.ToBase64String(Guid.NewGuid().ToByteArray()),
+            };
+            dbContext.SelfRows.Add(newSelf);
+            await dbContext.SaveChangesAsync(cancellationToken);
+            self=newSelf;
+        }
+        else
+        {
+            self=selfRows[0];
+        }
+        
+        var identitySuffix = new Guid( Convert.FromBase64String(self.IdentitySuffix));
+        var csp = new CspParameters
+        {
+            KeyContainerName = $"{KeyContainerName}.{identitySuffix}",
+            Flags = 
+                CspProviderFlags.UseArchivableKey | 
+                CspProviderFlags.UseMachineKeyStore | 
+                CspProviderFlags.UseDefaultKeyContainer
+        };
+        var identity = new RSACryptoServiceProvider(csp);
+        _self = new SelfModel(
+            identitySuffix, 
+            identity,GetRandomNickname(ByteUtils.GetIntFromBytes(identity.ExportRSAPublicKey())),
+            _loggerFactory.CreateLogger<SelfModel>());
+    }
+
+    public async Task StopAsync(CancellationToken cancellationToken)
+    {
+        throw new NotImplementedException();
     }
 }
