@@ -9,13 +9,16 @@ public class SelfModel
     private readonly ILogger<SelfModel> _logger;
     public Guid IdentitySuffix { get; }
     public RSA Identity { get; }
-    public ReactiveProperty<string> PreferredNickname { get; }
+    public ReactiveProperty<string> PreferredNickname { get; } = new();
+    public ReactiveProperty<bool> BroadcastListen { get; } = new();
+    public ReactiveProperty<bool> IntroduceListen { get; } = new();
+    public ReactiveProperty<bool> AutoReplyIntroductions { get; } = new();
+    public ReactiveProperty<bool> BroadcastSelf { get; } = new();
 
-    public SelfModel(Guid identitySuffix, RSA identity, string preferredNickname, ILogger<SelfModel> logger)
+    public SelfModel(Guid identitySuffix, RSA identity, ILogger<SelfModel> logger)
     {
         _logger = logger;
         IdentitySuffix = identitySuffix;
         Identity = identity;
-        PreferredNickname = new ReactiveProperty<string>(preferredNickname);
     }
 }

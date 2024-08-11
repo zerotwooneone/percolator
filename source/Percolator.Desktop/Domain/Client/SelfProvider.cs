@@ -116,8 +116,12 @@ public class SelfProvider : ISelfProvider, IHostedService, IPreUiInitializer
         _self = new SelfModel(
             identitySuffix, 
             identity,
-            preferredNickname,
-            _loggerFactory.CreateLogger<SelfModel>());
+           _loggerFactory.CreateLogger<SelfModel>());
+        _self.PreferredNickname.Value = preferredNickname;
+        _self.BroadcastListen.Value = selfDb.BroadcastListen;
+        _self.BroadcastSelf.Value = selfDb.BroadcastSelf;
+        _self.IntroduceListen.Value = selfDb.IntroduceListen;
+        _self.AutoReplyIntroductions.Value = selfDb.AutoReplyIntroductions;
         
         var propertyChanged =_self.PreferredNickname
             .Skip(1)
