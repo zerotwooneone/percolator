@@ -31,5 +31,6 @@
     </Window.Resources>
     <ContentControl
         ContentTemplate="{StaticResource View}"
-        Content="{Binding}"></ContentControl>
+        Content="{Binding}"
+        Margin="2"></ContentControl>
 </Window>
