@@ -48,16 +48,26 @@ public class MainWindowViewmodel : INotifyPropertyChanged
         _chatViewmodelFactory = chatViewmodelFactory;
         _remoteClientRepository = remoteClientRepository;
         _selfProvider = selfProvider;
-        AllowIntroductions = _mainService.ListenForIntroductions
-            .ToBindableReactiveProperty();
+        var selfModel = _selfProvider.GetSelf();
+        AllowIntroductions = selfModel.IntroduceListen
+            .ObserveOnCurrentDispatcher()
+            .ToBindableReactiveProperty(selfModel.IntroduceListen.Value);
         AllowIntroductions.Subscribe(b =>
         {
-            _mainService.ListenForIntroductions.Value = b;
+            selfModel.IntroduceListen.Value = b;
+            if (b)
+            {
+                _mainService.ListenForIntroductions();
+            }
+            else
+            {
+                _mainService.StopListeningForIntroductions();
+            }
         });
-        AutoReplyIntroductions = _mainService.AutoReplyIntroductions
+        AutoReplyIntroductions = selfModel.AutoReplyIntroductions
             .ObserveOnCurrentDispatcher()
-            .ToBindableReactiveProperty();
-        AutoReplyIntroductions.Subscribe(b => _mainService.AutoReplyIntroductions.Value = b);
+            .ToBindableReactiveProperty(selfModel.AutoReplyIntroductions.Value);
+        AutoReplyIntroductions.Subscribe(b => selfModel.AutoReplyIntroductions.Value = b);
         _remoteClientRepository.ClientAdded
             .ObserveOnCurrentDispatcher()
             .Subscribe(OnAnnouncerAdded);
@@ -68,20 +78,32 @@ public class MainWindowViewmodel : INotifyPropertyChanged
 
         SaveSelfNicknameCommand = new BaseCommand(OnSaveSelfNickname);
         EditSelfNicknameCommand = new BaseCommand(OnEditSelfNickname);
-        IsBroadcastListening = _mainService.BroadcastListen
+        IsBroadcastListening = selfModel.BroadcastListen
             .ObserveOnCurrentDispatcher()
-            .ToBindableReactiveProperty();
-        IsBroadcastListening.Subscribe(b => _mainService.BroadcastListen.Value = b);
+            .ToBindableReactiveProperty(selfModel.BroadcastListen.Value);
+        IsBroadcastListening.Subscribe(b =>
+        {
+            selfModel.BroadcastListen.Value = b;
+            if (b)
+            {
+                _mainService.ListenForBroadcasts();
+            }
+            else
+            {
+                _mainService.StopListeningForBroadcasts();
+            }
+        });
         SelectedAnnouncer
             .Subscribe(a=> Chat.Value = a == null ? null : _chatViewmodelFactory.CreateChat(a.RemoteClientModel));
-        SelfNickname.Value = _selfProvider.GetSelf().PreferredNickname.Value;
+        
+        SelfNickname.Value = selfModel.PreferredNickname.Value;
 
-        IsAnnouncing = _selfProvider.GetSelf().BroadcastSelf
+        IsAnnouncing = selfModel.BroadcastSelf
             .ObserveOnCurrentDispatcher()
-            .ToBindableReactiveProperty();
+            .ToBindableReactiveProperty(selfModel.BroadcastListen.Value);
         IsAnnouncing.Subscribe(b =>
         {
-            _selfProvider.GetSelf().BroadcastSelf.Value = b;
+            selfModel.BroadcastSelf.Value = b;
             if (b)
             {
                 _mainService.Announce();

@@ -33,9 +33,8 @@ public class MainService : IRemoteClientService, IChatService
     private readonly ConcurrentBag<IPAddress> _ipBlacklist = new();
     private readonly ConcurrentBag<ByteString> _identityBlacklist = new();
     private ConcurrentDictionary<ByteString,RemoteClientModel> _announcersBySessionId= new();
-    public ReactiveProperty<bool> BroadcastListen { get; } = new();
     const int ipMaxBytes = 16;
-
+    
     public MainService(
         UdpClientFactory udpClientFactory,
         ILogger<MainService> logger,
@@ -67,12 +66,6 @@ public class MainService : IRemoteClientService, IChatService
         _introduceListener.Received 
             .ObserveOn(ingressContext)
             .SubscribeAwait(OnReceivedIntroduce);
-
-        ListenForIntroductions.Subscribe(b => { _introduceListener.IsListening.Value = b; });
-        BroadcastListen.Subscribe(b =>
-        {
-            _broadcastListener.IsListening.Value = b;
-        });
     }
 
     const int SessionIdLength = 8;
@@ -316,7 +309,7 @@ public class MainService : IRemoteClientService, IChatService
                 if (!_announcersBySessionId.TryGetValue(chatMessage.Signed.SessionKeyId, out var announcer))
                 {
                     _logger.LogWarning("chat message session key id was not found");
-                    if (AutoReplyIntroductions.CurrentValue && TryGetIpAddress(out var selfIp))
+                    if (_selfProvider.GetSelf().AutoReplyIntroductions.Value && TryGetIpAddress(out var selfIp))
                     {
                         //do we have a better port to send to?
                         await SendIntroduction(context.RemoteEndPoint.Address, Defaults.DefaultIntroducePort , selfIp,
@@ -455,7 +448,7 @@ public class MainService : IRemoteClientService, IChatService
             _remoteClientRepository.OnNext(announcer.Identity);
         }
 
-        if (AutoReplyIntroductions.CurrentValue)
+        if (_selfProvider.GetSelf().AutoReplyIntroductions.CurrentValue)
         {
             if (!TryGetIpAddress(out var sourceIp))
             {
@@ -719,10 +712,26 @@ public class MainService : IRemoteClientService, IChatService
         _announceSubscription.Dispose();
     }
 
-    
-    public ReactiveProperty<bool> AutoReplyIntroductions { get; } = new();
-    public ReactiveProperty<bool> ListenForIntroductions { get; } = new();
+    public void ListenForIntroductions()
+    {
+        _introduceListener.IsListening.Value = true;
+    }
 
+    public void StopListeningForIntroductions()
+    {
+        _introduceListener.IsListening.Value = false;
+    }
+
+    public void ListenForBroadcasts()
+    {
+        _broadcastListener.IsListening.Value = true;
+    }
+
+    public void StopListeningForBroadcasts()
+    {
+        _broadcastListener.IsListening.Value = false;
+    }
+    
     public async Task SendIntroduction(IPAddress destination, 
         int port, 
         IPAddress sourceIp,
