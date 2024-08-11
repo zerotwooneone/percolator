@@ -8,7 +8,6 @@ using Microsoft.Extensions.Logging;
 using Percolator.Desktop.Data;
 using Percolator.Desktop.Domain.Client;
 using Percolator.Desktop.Main;
-using R3;
 
 namespace Percolator.Desktop;
 
@@ -18,7 +17,8 @@ internal class SqliteService : IHostedService, IPreAppInitializer
     private readonly ILoggerFactory _loggerFactory;
     private readonly ILogger<SqliteService> _logger;
     private readonly IServiceScopeFactory _serviceScopeFactory;
-    private readonly ISelfInitializer _selfInitializer;private readonly TaskCompletionSource _preAppComplete = new();
+    private readonly ISelfInitializer _selfInitializer;
+    private readonly TaskCompletionSource _preAppComplete = new();
     public Task PreAppComplete => _preAppComplete.Task;
 
     public SqliteService(
