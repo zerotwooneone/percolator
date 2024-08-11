@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using System.Windows;
 using Google.Protobuf;
 using Microsoft.Extensions.Logging;
+using Percolator.Desktop.Domain.Client;
 using Percolator.Desktop.Udp;
 using R3;
 

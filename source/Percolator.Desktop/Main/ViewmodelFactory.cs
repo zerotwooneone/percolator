@@ -1,5 +1,6 @@
 using Google.Protobuf;
 using Microsoft.Extensions.Logging;
+using Percolator.Desktop.Domain.Client;
 
 namespace Percolator.Desktop.Main;
 

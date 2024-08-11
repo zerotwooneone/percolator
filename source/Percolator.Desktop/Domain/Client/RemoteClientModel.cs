@@ -3,9 +3,10 @@ using System.Security.Cryptography;
 using Google.Protobuf;
 using Microsoft.Extensions.Logging;
 using Percolator.Desktop.Domain.Chat;
+using Percolator.Desktop.Main;
 using R3;
 
-namespace Percolator.Desktop.Main;
+namespace Percolator.Desktop.Domain.Client;
 
 public class RemoteClientModel : IEquatable<RemoteClientModel>
 {

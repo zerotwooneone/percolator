@@ -1,4 +1,5 @@
 using Google.Protobuf;
+using Percolator.Desktop.Domain.Client;
 
 namespace Percolator.Desktop.Main;
 

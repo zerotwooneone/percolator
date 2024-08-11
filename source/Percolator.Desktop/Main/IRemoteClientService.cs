@@ -1,5 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Net;
+using Percolator.Desktop.Domain.Client;
 
 namespace Percolator.Desktop.Main;
 

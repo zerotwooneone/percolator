@@ -1,7 +1,4 @@
-using Google.Protobuf;
-using R3;
-
-namespace Percolator.Desktop.Main;
+namespace Percolator.Desktop.Domain.Client;
 
 public interface IRemoteClientInitializer
 {

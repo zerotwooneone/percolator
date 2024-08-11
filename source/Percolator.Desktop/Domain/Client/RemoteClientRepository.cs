@@ -5,7 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Percolator.Desktop.Data;
 using R3;
 
-namespace Percolator.Desktop.Main;
+namespace Percolator.Desktop.Domain.Client;
 
 public class RemoteClientRepository : IRemoteClientRepository,IRemoteClientInitializer
 {
