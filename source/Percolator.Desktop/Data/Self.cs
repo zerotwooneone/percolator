@@ -12,4 +12,9 @@ public class Self
     public string IdentitySuffix { get; set; } = string.Empty;
     [MaxLength(100)]
     public string? PreferredNickname { get; set; }
+
+    public bool BroadcastListen { get; set; } = false;
+    public bool BroadcastSelf { get; set; } = false;
+    public bool IntroduceListen { get; set; } = false;
+    public bool AutoReplyIntroductions { get; set; } = false;
 }
