@@ -890,14 +890,6 @@ public class MainService : IRemoteClientService, IChatService
             }
         }.ToByteArray();
     }
-
-    
-}
-
-public interface IPreAppInitializer
-{
-    //delays the main window until the pre app is complete
-    Task PreAppComplete { get; }
 }
 
 internal class DummyDisposable : IDisposable

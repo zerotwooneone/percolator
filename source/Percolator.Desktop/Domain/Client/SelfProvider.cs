@@ -7,7 +7,7 @@ using Percolator.Desktop.Main;
 
 namespace Percolator.Desktop.Domain.Client;
 
-public class SelfProvider : ISelfProvider, IHostedService, IPreAppInitializer
+public class SelfProvider : ISelfProvider, IHostedService, IPreUiInitializer
 {
     private readonly ILoggerFactory _loggerFactory;
     private readonly ILogger<SelfProvider> _logger;

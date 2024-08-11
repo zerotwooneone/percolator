@@ -11,7 +11,7 @@ using Percolator.Desktop.Main;
 
 namespace Percolator.Desktop;
 
-internal class SqliteService : IHostedService, IPreAppInitializer
+internal class SqliteService : IHostedService, IPreUiInitializer
 {
     private readonly IRemoteClientInitializer _remoteClientInitializer;
     private readonly ILoggerFactory _loggerFactory;

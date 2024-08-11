@@ -43,7 +43,7 @@ public partial class App : Application
                 
                 services.AddSingleton<SqliteService>();
                 services.AddHostedService<SqliteService>(p => p.GetRequiredService<SqliteService>());
-                services.AddSingleton<IPreAppInitializer, SqliteService>(p => p.GetRequiredService<SqliteService>());
+                services.AddSingleton<IPreUiInitializer, SqliteService>(p => p.GetRequiredService<SqliteService>());
                 services.AddDbContext<ApplicationDbContext>(options =>
                 {
                     options.UseSqlite("Data Source=percolator.db");
@@ -52,7 +52,7 @@ public partial class App : Application
                 services.AddSingleton<SelfProvider>();
                 services.AddSingleton<ISelfProvider>(p => p.GetRequiredService<SelfProvider>());
                 services.AddHostedService<SelfProvider>(p => p.GetRequiredService<SelfProvider>());
-                services.AddSingleton<IPreAppInitializer, SelfProvider>(p => p.GetRequiredService<SelfProvider>());
+                services.AddSingleton<IPreUiInitializer, SelfProvider>(p => p.GetRequiredService<SelfProvider>());
             });
         
         var host = builder.Build();
@@ -63,7 +63,7 @@ public partial class App : Application
         
         Task.Factory.StartNew(() => host.StartAsync().Wait());
         
-        var preAppComplete = host.Services.GetServices<IPreAppInitializer>().Select(i => i.PreAppComplete);
+        var preAppComplete = host.Services.GetServices<IPreUiInitializer>().Select(i => i.PreAppComplete);
         //todo: add a splash screen
         Task.WhenAll(preAppComplete).Wait();
         
