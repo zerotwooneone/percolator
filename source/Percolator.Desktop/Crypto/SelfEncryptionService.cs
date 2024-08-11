@@ -5,7 +5,7 @@ namespace Percolator.Desktop.Crypto;
 public class SelfEncryptionService
 {
     
-    public SelfEncryptionService(string id)
+    public SelfEncryptionService()
     {
         Ephemeral = new RSACryptoServiceProvider(){PersistKeyInCsp = false};
     }

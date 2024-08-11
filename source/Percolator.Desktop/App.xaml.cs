@@ -37,7 +37,7 @@ public partial class App : Application
                 
                 services.AddSingleton<UdpClientFactory>();
                 services.AddSingleton<SelfEncryptionService>(s =>
-                    new SelfEncryptionService("6e3c367d-380c-4a0d-8b66-ad397fbac2d9")); //todo: get id from config
+                    new SelfEncryptionService());
                 services.AddSingleton<ViewmodelFactory>();
                 services.AddSingleton<IRemoteClientViewmodelFactory>(p=>p.GetRequiredService<ViewmodelFactory>());
                 services.AddSingleton<IChatViewmodelFactory>(p=>p.GetRequiredService<ViewmodelFactory>());
