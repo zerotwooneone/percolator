@@ -4,6 +4,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Percolator.Desktop.Data;
 using Percolator.Desktop.Main;
+using R3;
 
 namespace Percolator.Desktop.Domain.Client;
 
@@ -14,6 +15,7 @@ public class SelfProvider : ISelfProvider, IHostedService, IPreUiInitializer
     private readonly IServiceScopeFactory _serviceScopeFactory;
     private SelfModel? _self;
     private readonly TaskCompletionSource _preAppComplete = new();
+    private IDisposable _propChangeSub;
     public Task PreAppComplete => _preAppComplete.Task;
     
     public SelfProvider(
@@ -116,6 +118,25 @@ public class SelfProvider : ISelfProvider, IHostedService, IPreUiInitializer
             identity,
             preferredNickname,
             _loggerFactory.CreateLogger<SelfModel>());
+        
+        var propertyChanged =_self.PreferredNickname
+            .Skip(1)
+            .Select(_ => Unit.Default)
+            //.Concat() other properties here
+            .Publish()
+            .RefCount();
+        _propChangeSub = propertyChanged
+            .ThrottleLast(TimeSpan.FromSeconds(2),TimeProvider.System)
+            .SubscribeAwait((_,c)=>UpdateSelfDb(c));
+    }
+
+    private async ValueTask UpdateSelfDb(CancellationToken cancellationToken)
+    {
+        using var scope = _serviceScopeFactory.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var selfDb = dbContext.SelfRows.First();
+        selfDb.PreferredNickname = _self.PreferredNickname.CurrentValue;
+        await dbContext.SaveChangesAsync(cancellationToken);
     }
 
     public async Task StopAsync(CancellationToken cancellationToken)
