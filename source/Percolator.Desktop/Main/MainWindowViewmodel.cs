@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using Google.Protobuf;
 using Microsoft.Extensions.Logging;
+using Percolator.Desktop.Domain.Client;
 using R3;
 
 namespace Percolator.Desktop.Main;
@@ -14,6 +15,7 @@ public class MainWindowViewmodel : INotifyPropertyChanged
     private readonly IRemoteClientViewmodelFactory _remoteClientViewmodelFactory;
     private readonly IChatViewmodelFactory _chatViewmodelFactory;
     private readonly IRemoteClientRepository _remoteClientRepository;
+    private readonly ISelfProvider _selfProvider;
     private bool _isAnnouncing;
     public ObservableCollection<RemoteClientViewmodel> RemoteClients { get; } = new();
     public ReactiveProperty<RemoteClientViewmodel?> SelectedAnnouncer { get; } = new();
@@ -31,19 +33,28 @@ public class MainWindowViewmodel : INotifyPropertyChanged
     public BindableReactiveProperty<bool> AllowIntroductions { get; }
     
     public BindableReactiveProperty<bool> AutoReplyIntroductions { get; }
+    
+    public BindableReactiveProperty<bool> EditSelfNickname { get; } = new();
+    public BindableReactiveProperty<string> SelfNickname { get; } = new();
+    
+    public BaseCommand SaveSelfNicknameCommand { get; }
+    public BaseCommand EditSelfNicknameCommand { get; }
 
+    
     public MainWindowViewmodel(
         MainService mainService,
         ILogger<MainWindowViewmodel> logger,
         IRemoteClientViewmodelFactory remoteClientViewmodelFactory,
         IChatViewmodelFactory chatViewmodelFactory,
-        IRemoteClientRepository remoteClientRepository)
+        IRemoteClientRepository remoteClientRepository,
+        ISelfProvider selfProvider)
     {
         _mainService = mainService;
         _logger = logger;
         _remoteClientViewmodelFactory = remoteClientViewmodelFactory;
         _chatViewmodelFactory = chatViewmodelFactory;
         _remoteClientRepository = remoteClientRepository;
+        _selfProvider = selfProvider;
         AnnounceCommand = new BaseCommand(OnAnnounceClicked);
         AllowIntroductions = _mainService.ListenForIntroductions
             .ToBindableReactiveProperty();
@@ -62,12 +73,16 @@ public class MainWindowViewmodel : INotifyPropertyChanged
         {
             OnAnnouncerAdded(rc.Identity);
         }
+
+        SaveSelfNicknameCommand = new BaseCommand(OnSaveSelfNickname);
+        EditSelfNicknameCommand = new BaseCommand(OnEditSelfNickname);
         IsBroadcastListening = _mainService.BroadcastListen
             .ObserveOnCurrentDispatcher()
             .ToBindableReactiveProperty();
         IsBroadcastListening.Subscribe(b => _mainService.BroadcastListen.Value = b);
         SelectedAnnouncer
             .Subscribe(a=> Chat.Value = a == null ? null : _chatViewmodelFactory.CreateChat(a.RemoteClientModel));
+        SelfNickname.Value = _selfProvider.GetSelf().PreferredNickname.Value;
     }
 
     public BindableReactiveProperty<ChatViewmodel?> Chat { get; }= new();
@@ -105,5 +120,22 @@ public class MainWindowViewmodel : INotifyPropertyChanged
         field = value;
         OnPropertyChanged(propertyName);
         return true;
+    }
+    
+    private void OnEditSelfNickname(object? _)
+    {
+        EditSelfNickname.Value = true;
+    }
+
+    private void OnSaveSelfNickname(object? _)
+    {
+        EditSelfNickname.Value = false;
+        if(string.IsNullOrWhiteSpace(SelfNickname.Value))
+        {
+            SelfNickname.Value = _selfProvider.GetSelf().PreferredNickname.Value;
+            return;
+        }
+
+        _selfProvider.GetSelf().PreferredNickname.Value = SelfNickname.Value;
     }
 }
