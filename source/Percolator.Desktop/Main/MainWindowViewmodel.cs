@@ -16,19 +16,12 @@ public class MainWindowViewmodel : INotifyPropertyChanged
     private readonly IChatViewmodelFactory _chatViewmodelFactory;
     private readonly IRemoteClientRepository _remoteClientRepository;
     private readonly ISelfProvider _selfProvider;
-    private bool _isAnnouncing;
     public ObservableCollection<RemoteClientViewmodel> RemoteClients { get; } = new();
     public ReactiveProperty<RemoteClientViewmodel?> SelectedAnnouncer { get; } = new();
 
     public BindableReactiveProperty<bool> IsBroadcastListening { get; }
 
-    public BaseCommand AnnounceCommand { get; }
-
-    public bool IsAnnouncing
-    {
-        get => _isAnnouncing;
-        set => SetField(ref _isAnnouncing, value);
-    }
+    public BindableReactiveProperty<bool> IsAnnouncing { get; }
     
     public BindableReactiveProperty<bool> AllowIntroductions { get; }
     
@@ -55,7 +48,6 @@ public class MainWindowViewmodel : INotifyPropertyChanged
         _chatViewmodelFactory = chatViewmodelFactory;
         _remoteClientRepository = remoteClientRepository;
         _selfProvider = selfProvider;
-        AnnounceCommand = new BaseCommand(OnAnnounceClicked);
         AllowIntroductions = _mainService.ListenForIntroductions
             .ToBindableReactiveProperty();
         AllowIntroductions.Subscribe(b =>
@@ -83,6 +75,22 @@ public class MainWindowViewmodel : INotifyPropertyChanged
         SelectedAnnouncer
             .Subscribe(a=> Chat.Value = a == null ? null : _chatViewmodelFactory.CreateChat(a.RemoteClientModel));
         SelfNickname.Value = _selfProvider.GetSelf().PreferredNickname.Value;
+
+        IsAnnouncing = _selfProvider.GetSelf().BroadcastSelf
+            .ObserveOnCurrentDispatcher()
+            .ToBindableReactiveProperty();
+        IsAnnouncing.Subscribe(b =>
+        {
+            _selfProvider.GetSelf().BroadcastSelf.Value = b;
+            if (b)
+            {
+                _mainService.Announce();
+            }
+            else
+            {
+                _mainService.StopAnnounce();
+            }
+        });
     }
 
     public BindableReactiveProperty<ChatViewmodel?> Chat { get; }= new();
@@ -93,19 +101,7 @@ public class MainWindowViewmodel : INotifyPropertyChanged
         var announcerVm = _remoteClientViewmodelFactory.Create(announcer);
         RemoteClients.Add(announcerVm);
     }
-
-    private void OnAnnounceClicked(object? obj)
-    {
-        //IsAnnouncing changes before this is called, so logic is inverted
-        if (IsAnnouncing)
-        {
-             _mainService.Announce();
-        }
-        else
-        {
-            _mainService.StopAnnounce();
-        }
-    }
+    
 
     public event PropertyChangedEventHandler? PropertyChanged;
 

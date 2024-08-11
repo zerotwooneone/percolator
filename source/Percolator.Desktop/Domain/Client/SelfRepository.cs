@@ -143,6 +143,10 @@ public class SelfRepository : ISelfProvider, IHostedService, IPreUiInitializer
         var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
         var selfDb = dbContext.SelfRows.First();
         selfDb.PreferredNickname = _self.PreferredNickname.CurrentValue;
+        selfDb.BroadcastSelf = _self.BroadcastSelf.CurrentValue;
+        selfDb.BroadcastListen = _self.BroadcastListen.CurrentValue;
+        selfDb.AutoReplyIntroductions = _self.AutoReplyIntroductions.CurrentValue;
+        selfDb.IntroduceListen = _self.IntroduceListen.CurrentValue;
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 

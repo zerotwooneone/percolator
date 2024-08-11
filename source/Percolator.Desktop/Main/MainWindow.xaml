@@ -185,8 +185,7 @@
                         ToolTip="Listen for others on the local wifi"/>
                     <TextBlock ToolTip="Tell others on the local wifi you are here">Announce&gt;</TextBlock>
                     <ToggleButton 
-                        IsChecked="{Binding IsAnnouncing}" 
-                        Command="{Binding AnnounceCommand}"
+                        IsChecked="{Binding IsAnnouncing.Value}"
                         Style="{StaticResource BetterToggle}"
                         ToolTip="Tell others on the local wifi you are here"/>
                 </StackPanel>
