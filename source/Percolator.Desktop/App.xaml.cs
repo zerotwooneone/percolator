@@ -5,6 +5,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Percolator.Desktop.Crypto;
 using Percolator.Desktop.Data;
+using Percolator.Desktop.Domain.Client;
 using Percolator.Desktop.Main;
 using Percolator.Desktop.Udp;
 using R3;

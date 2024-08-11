@@ -7,6 +7,7 @@ using System.Windows;
 using Google.Protobuf;
 using Microsoft.Extensions.Logging;
 using Percolator.Desktop.Crypto;
+using Percolator.Desktop.Domain.Client;
 using Percolator.Desktop.Udp;
 using Percolator.Desktop.Udp.Interfaces;
 using Percolator.Protobuf.Announce;
@@ -27,9 +28,6 @@ public class MainService : IRemoteClientService, IChatService
     private readonly IListener _broadcastListener;
     private readonly Observable<Unit> _announceInterval;
     private IDisposable _announceSubscription = new DummyDisposable();
-    
-    public ReactiveProperty<string> PreferredNickname { get; }
-    
     
     private IListener _introduceListener;
     private readonly ConcurrentBag<IPAddress> _ipBlacklist = new();
@@ -65,7 +63,6 @@ public class MainService : IRemoteClientService, IChatService
             .Publish()
             .RefCount();
 
-        PreferredNickname = new ReactiveProperty<string>(GetRandomNickname(GetIntFromBytes(_selfProvider.GetSelf().Identity.ExportRSAPublicKey())));
         _introduceListener = _udpClientFactory.CreateListener(Defaults.DefaultIntroducePort);
         _introduceListener.Received 
             .ObserveOn(ingressContext)
@@ -78,38 +75,6 @@ public class MainService : IRemoteClientService, IChatService
         });
     }
 
-    private int GetIntFromBytes(byte[] bytes)
-    {
-        var resultBytes =new byte[]{3,7,11,15};
-        const int Prime = 16777619;
-        for (int i = 0; i < resultBytes.Length; i++)
-        {
-            resultBytes[i%4] = (byte)((unchecked(bytes[i] ^ resultBytes[i % 4] * Prime)) % 255);
-        }
-        return BitConverter.ToInt32(resultBytes, 0);
-    }
-
-    private string GetRandomNickname(int? seed=null)
-    {
-        var random = seed is null 
-            ? new Random() 
-            : new Random(seed.Value);
-        var numberOfChars = random.Next(9, 20);
-        var vowels = new[] {'a', 'A', '4', '@', '^', 'e', 'E', '3', 'i', 'I', '1','o', 'O', '0', 'u', 'U', 'y', 'Y'};
-        var consonants = new[]{'b', 'c', 'd', 'f', 'g', 'h', 'j', 'k', 'l', 'm', 'n', 'p', 'q', 'r', 's', 't', 'v', 'w', 'x', 'z','B', 'C','(', 'D', 'F', 'G', 'H','#','8', 'J', 'K', 'L','7', 'M', 'N', 'P', 'Q', 'R', 'S','$', 'T', 'V', 'W', 'X', 'Z'};
-        var list = new List<char>(numberOfChars*2);
-        var isVowel = random.Next(1,1001) %2 == 0;
-        do
-        {
-            var newPart = isVowel
-                ? Enumerable.Range(0, random.Next(1, 3)).Select(_ => vowels[random.Next(0, vowels.Length)])
-                : new[] {consonants[random.Next(0, consonants.Length)]};
-            list.AddRange(newPart);
-            isVowel = !isVowel;
-        } while (list.Count < numberOfChars);
-
-        return new string(list.ToArray());
-    }
     const int SessionIdLength = 8;
     private async ValueTask OnReceivedIntroduce(UdpReceiveResult context, CancellationToken cancellationToken)
     {
@@ -403,7 +368,7 @@ public class MainService : IRemoteClientService, IChatService
             }
             else
             {
-                newModel.PreferredNickname.Value = GetRandomNickname(GetIntFromBytes(payload.IdentityKey.ToByteArray()));
+                newModel.PreferredNickname.Value = SelfProvider.GetRandomNickname(ByteUtils.GetIntFromBytes(payload.IdentityKey.ToByteArray()));
             }
             return newModel;
         });
@@ -467,7 +432,7 @@ public class MainService : IRemoteClientService, IChatService
             }
             else
             {
-                newModel.PreferredNickname.Value = GetRandomNickname(GetIntFromBytes(payload.IdentityKey.ToByteArray()));
+                newModel.PreferredNickname.Value = SelfProvider.GetRandomNickname(ByteUtils.GetIntFromBytes(payload.IdentityKey.ToByteArray()));
             }
             return newModel;
         });
@@ -697,11 +662,12 @@ public class MainService : IRemoteClientService, IChatService
         IPAddress sourceIp,
         int? handshakePort=null)
     {
+        var selfModel = _selfProvider.GetSelf();
         var payload = new AnnounceMessage.Types.Identity.Types.Payload()
         {
-            IdentityKey = ByteString.CopyFrom(_selfProvider.GetSelf().Identity.ExportRSAPublicKey()),
+            IdentityKey = ByteString.CopyFrom(selfModel.Identity.ExportRSAPublicKey()),
             TimeStampUnixUtcMs = currentTime.ToUniversalTime().ToUnixTimeMilliseconds(),
-            PreferredNickname = PreferredNickname.Value,
+            PreferredNickname = selfModel.PreferredNickname.Value,
             SourceIp = ByteString.CopyFrom(sourceIp.GetAddressBytes()),
         };
         if (handshakePort != null && handshakePort != Defaults.DefaultIntroducePort)
@@ -714,7 +680,7 @@ public class MainService : IRemoteClientService, IChatService
             Identity = new AnnounceMessage.Types.Identity
             {
                 Payload = payload,
-                PayloadSignature = ByteString.CopyFrom(_selfProvider.GetSelf().Identity.SignData(
+                PayloadSignature = ByteString.CopyFrom(selfModel.Identity.SignData(
                     payloadBytes,
                     HashAlgorithmName.SHA256,
                     RSASignaturePadding.Pkcs1

@@ -6,6 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Percolator.Desktop.Data;
+using Percolator.Desktop.Domain.Client;
 using Percolator.Desktop.Main;
 using R3;
 

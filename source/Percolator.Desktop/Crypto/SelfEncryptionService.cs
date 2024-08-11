@@ -7,10 +7,6 @@ public class SelfEncryptionService
     
     public SelfEncryptionService(string id)
     {
-        
-        
-        
-        
         Ephemeral = new RSACryptoServiceProvider(){PersistKeyInCsp = false};
     }
     public RSA Ephemeral { get; private set; }

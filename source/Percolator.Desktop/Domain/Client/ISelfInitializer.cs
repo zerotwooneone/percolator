@@ -1,4 +1,4 @@
-namespace Percolator.Desktop;
+namespace Percolator.Desktop.Domain.Client;
 
 public interface ISelfInitializer
 {
