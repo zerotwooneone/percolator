@@ -3,7 +3,6 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-        xmlns:local="clr-namespace:Percolator.Desktop"
         xmlns:main="clr-namespace:Percolator.Desktop.Main"
         mc:Ignorable="d"
         Title="Percolator" Height="450" Width="800">
@@ -11,15 +10,26 @@
         <DataTemplate DataType="{x:Type main:MainDefaultViewmodel}">
             <main:MainDefault></main:MainDefault>
         </DataTemplate>
-    </Window.Resources>
-    <DockPanel>
-        <Menu DockPanel.Dock="Top">
-            <MenuItem Header="_File">
-                <MenuItem Header="_Settings"></MenuItem>
-            </MenuItem>
-        </Menu>
-        <ContentControl 
-            Content="{Binding
+        <DataTemplate DataType="{x:Type main:SettingsViewmodel}">
+            <main:SettingsView></main:SettingsView>
+        </DataTemplate>
+        <DataTemplate
+            x:Key="View"
+            DataType="{x:Type main:MainWindowViewmodel}">
+            <DockPanel>
+                <Menu DockPanel.Dock="Top">
+                    <MenuItem Header="_View">
+                        <MenuItem Header="_Chat" Command="{Binding ChatCommand}"></MenuItem>
+                        <MenuItem Header="_Settings" Command="{Binding SettingsCommand}"></MenuItem>
+                    </MenuItem>
+                </Menu>
+                <ContentControl 
+                    Content="{Binding
             SelectedViewmodel.Value}"></ContentControl>
-    </DockPanel>
+            </DockPanel>
+        </DataTemplate>
+    </Window.Resources>
+    <ContentControl
+        ContentTemplate="{StaticResource View}"
+        Content="{Binding}"></ContentControl>
 </Window>
