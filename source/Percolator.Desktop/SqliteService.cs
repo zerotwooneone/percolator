@@ -49,13 +49,19 @@ internal class SqliteService : IHostedService, IPreAppInitializer
         }
     }
 
-    private async Task Start_Inner(CancellationToken cancellationToken)
+    public static async Task EnsureDatabase(IServiceScopeFactory serviceScopeFactory, CancellationToken cancellationToken)
     {
-        using var scope = _serviceScopeFactory.CreateScope();
+        using var scope = serviceScopeFactory.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
         var dbPath = Directory.GetParent(dbContext.DbPath).FullName;
         Directory.CreateDirectory(dbPath);
         await dbContext.Database.MigrateAsync(cancellationToken);
+    }
+
+    private async Task Start_Inner(CancellationToken cancellationToken)
+    {
+        using var scope = _serviceScopeFactory.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
 
         var selfRows = (from s in dbContext.SelfRows
             select s).Take(2).ToArray();

@@ -57,6 +57,9 @@ public partial class App : Application
         
         var host = builder.Build();
         _logger = host.Services.GetRequiredService<ILogger<App>>();
+
+        //todo:remove migrations in production
+        SqliteService.EnsureDatabase(host.Services.GetRequiredService<IServiceScopeFactory>(), CancellationToken.None).Wait();
         
         Task.Factory.StartNew(() => host.StartAsync().Wait());
         
