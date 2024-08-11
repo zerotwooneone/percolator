@@ -84,7 +84,7 @@ public class SelfProvider : ISelfProvider, IHostedService, IPreUiInitializer
             _logger.LogWarning("too many self rows");
         }
 
-        Self self;
+        Self selfDb;
         if (selfRows.Length == 0)
         {
             var newSelf = new Self
@@ -93,14 +93,14 @@ public class SelfProvider : ISelfProvider, IHostedService, IPreUiInitializer
             };
             dbContext.SelfRows.Add(newSelf);
             await dbContext.SaveChangesAsync(cancellationToken);
-            self=newSelf;
+            selfDb=newSelf;
         }
         else
         {
-            self=selfRows[0];
+            selfDb=selfRows[0];
         }
         
-        var identitySuffix = new Guid( Convert.FromBase64String(self.IdentitySuffix));
+        var identitySuffix = new Guid( Convert.FromBase64String(selfDb.IdentitySuffix));
         var csp = new CspParameters
         {
             KeyContainerName = $"{KeyContainerName}.{identitySuffix}",
@@ -110,9 +110,11 @@ public class SelfProvider : ISelfProvider, IHostedService, IPreUiInitializer
                 CspProviderFlags.UseDefaultKeyContainer
         };
         var identity = new RSACryptoServiceProvider(csp);
+        var preferredNickname = selfDb.PreferredNickname ?? GetRandomNickname(ByteUtils.GetIntFromBytes(identity.ExportRSAPublicKey()));
         _self = new SelfModel(
             identitySuffix, 
-            identity,GetRandomNickname(ByteUtils.GetIntFromBytes(identity.ExportRSAPublicKey())),
+            identity,
+            preferredNickname,
             _loggerFactory.CreateLogger<SelfModel>());
     }
 
