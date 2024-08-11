@@ -9,5 +9,7 @@ public class Self
     [DatabaseGenerated(DatabaseGeneratedOption.Identity)]
     public int? Id { get; set; }
     [MaxLength(100)]
-    public string IdentitySuffix { get; set; }
+    public string IdentitySuffix { get; set; } = string.Empty;
+    [MaxLength(100)]
+    public string? PreferredNickname { get; set; }
 }
