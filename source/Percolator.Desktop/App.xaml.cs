@@ -26,6 +26,7 @@ public partial class App : Application
             .ConfigureServices(services =>
             {
                 services.AddSingleton<MainWindow>();
+                services.AddSingleton<MainDefaultViewmodel>();
                 services.AddScoped<MainWindowViewmodel>();
                 services.AddSingleton<MainService>();
                 services.AddSingleton<IRemoteClientService>(p=>p.GetRequiredService<MainService>());
