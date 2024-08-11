@@ -368,7 +368,7 @@ public class MainService : IRemoteClientService, IChatService
             }
             else
             {
-                newModel.PreferredNickname.Value = SelfProvider.GetRandomNickname(ByteUtils.GetIntFromBytes(payload.IdentityKey.ToByteArray()));
+                newModel.PreferredNickname.Value = SelfRepository.GetRandomNickname(ByteUtils.GetIntFromBytes(payload.IdentityKey.ToByteArray()));
             }
             return newModel;
         });
@@ -432,7 +432,7 @@ public class MainService : IRemoteClientService, IChatService
             }
             else
             {
-                newModel.PreferredNickname.Value = SelfProvider.GetRandomNickname(ByteUtils.GetIntFromBytes(payload.IdentityKey.ToByteArray()));
+                newModel.PreferredNickname.Value = SelfRepository.GetRandomNickname(ByteUtils.GetIntFromBytes(payload.IdentityKey.ToByteArray()));
             }
             return newModel;
         });

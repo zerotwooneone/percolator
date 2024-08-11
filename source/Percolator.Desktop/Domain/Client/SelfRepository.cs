@@ -8,19 +8,19 @@ using R3;
 
 namespace Percolator.Desktop.Domain.Client;
 
-public class SelfProvider : ISelfProvider, IHostedService, IPreUiInitializer
+public class SelfRepository : ISelfProvider, IHostedService, IPreUiInitializer
 {
     private readonly ILoggerFactory _loggerFactory;
-    private readonly ILogger<SelfProvider> _logger;
+    private readonly ILogger<SelfRepository> _logger;
     private readonly IServiceScopeFactory _serviceScopeFactory;
     private SelfModel? _self;
     private readonly TaskCompletionSource _preAppComplete = new();
     private IDisposable _propChangeSub;
     public Task PreAppComplete => _preAppComplete.Task;
     
-    public SelfProvider(
+    public SelfRepository(
         ILoggerFactory loggerFactory,
-        ILogger<SelfProvider> logger,
+        ILogger<SelfRepository> logger,
         IServiceScopeFactory serviceScopeFactory)
     {
         _loggerFactory = loggerFactory;

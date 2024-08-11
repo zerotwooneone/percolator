@@ -49,10 +49,10 @@ public partial class App : Application
                     options.UseSqlite("Data Source=percolator.db");
                 });
 
-                services.AddSingleton<SelfProvider>();
-                services.AddSingleton<ISelfProvider>(p => p.GetRequiredService<SelfProvider>());
-                services.AddHostedService<SelfProvider>(p => p.GetRequiredService<SelfProvider>());
-                services.AddSingleton<IPreUiInitializer, SelfProvider>(p => p.GetRequiredService<SelfProvider>());
+                services.AddSingleton<SelfRepository>();
+                services.AddSingleton<ISelfProvider>(p => p.GetRequiredService<SelfRepository>());
+                services.AddHostedService<SelfRepository>(p => p.GetRequiredService<SelfRepository>());
+                services.AddSingleton<IPreUiInitializer, SelfRepository>(p => p.GetRequiredService<SelfRepository>());
             });
         
         var host = builder.Build();
