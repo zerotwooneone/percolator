@@ -126,7 +126,10 @@ public class SelfProvider : ISelfProvider, IHostedService, IPreUiInitializer
         var propertyChanged =_self.PreferredNickname
             .Skip(1)
             .Select(_ => Unit.Default)
-            //.Concat() other properties here
+            .Merge(_self.BroadcastSelf.Skip(1).Select(_ => Unit.Default))
+            .Merge(_self.BroadcastListen.Skip(1).Select(_ => Unit.Default))
+            .Merge(_self.AutoReplyIntroductions.Skip(1).Select(_ => Unit.Default))
+            .Merge(_self.IntroduceListen.Skip(1).Select(_ => Unit.Default))
             .Publish()
             .RefCount();
         _propChangeSub = propertyChanged
