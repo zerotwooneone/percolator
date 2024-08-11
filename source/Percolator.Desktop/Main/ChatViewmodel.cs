@@ -51,6 +51,11 @@ public class ChatViewmodel
                     return;
                 }
                 await Task.Delay(500);
+                if (_remoteClientModel.SessionKey.Value == null)
+                {
+                    //todo:tell the user that they are not responding
+                    return;
+                }
             }
             await _chatService.SendChatMessage(_remoteClientModel, Text.Value);
         }
