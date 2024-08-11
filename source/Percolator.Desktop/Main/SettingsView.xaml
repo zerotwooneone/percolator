@@ -1,0 +1,135 @@
+<UserControl x:Class="Percolator.Desktop.Main.SettingsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:local="clr-namespace:Percolator.Desktop.Main"
+             mc:Ignorable="d"
+             d:DesignHeight="300" d:DesignWidth="300">
+    <UserControl.Resources>
+        <DataTemplate 
+            x:Key="NicknameTemplate"
+            DataType="{x:Type local:SettingsViewmodel}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="200"></ColumnDefinition>
+                    <ColumnDefinition Width="Auto"></ColumnDefinition>
+                </Grid.ColumnDefinitions>
+                <ContentControl Grid.Column="0" >
+                    <ContentControl.Style>
+                        <Style TargetType="ContentControl">
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding EditSelfNickname.Value}" Value="True">
+                                    <Setter Property="ContentControl.Template">
+                                        <Setter.Value>
+                                            <ControlTemplate>
+                                                <TextBox Text="{Binding SelfNickname.Value, UpdateSourceTrigger=PropertyChanged}">
+                                                    <TextBox.InputBindings>
+                                                        <KeyBinding Command="{Binding SaveSelfNicknameCommand}" Key="Enter"></KeyBinding>
+                                                    </TextBox.InputBindings>
+                                                </TextBox>
+                                            </ControlTemplate>
+                                        </Setter.Value>
+                                    </Setter>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </ContentControl.Style>
+                    <TextBlock  Text="{Binding SelfNickname.Value}"></TextBlock>
+                </ContentControl>
+                <ContentControl Grid.Column="1">
+                    <ContentControl.Style>
+                        <Style TargetType="ContentControl">
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding EditSelfNickname.Value}" Value="True">
+                                    <Setter Property="ContentControl.Template">
+                                        <Setter.Value>
+                                            <ControlTemplate>
+                                                <Button Command="{Binding SaveSelfNicknameCommand}">Save</Button>
+                                            </ControlTemplate>
+                                        </Setter.Value>
+                                    </Setter>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </ContentControl.Style>
+                    <Button Command="{Binding EditSelfNicknameCommand}">Edit</Button>
+                </ContentControl>
+            </Grid>
+        </DataTemplate>
+        <DataTemplate 
+            x:Key="View"
+            DataType="{x:Type local:SettingsViewmodel}">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition></RowDefinition>
+                    <RowDefinition></RowDefinition>
+                    <RowDefinition></RowDefinition>
+                    <RowDefinition></RowDefinition>
+                    <RowDefinition></RowDefinition>
+                    <RowDefinition></RowDefinition>
+                </Grid.RowDefinitions>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition></ColumnDefinition>
+                    <ColumnDefinition></ColumnDefinition>
+                </Grid.ColumnDefinitions>
+                <TextBlock 
+                    Grid.Row="0" 
+                    Grid.Column="0" 
+                    ToolTip="Allow unknown people to identify themselves">Allow Introductions</TextBlock>
+                <ToggleButton 
+                    Grid.Row="0" 
+                    Grid.Column="1"  
+                    IsChecked="{Binding AllowIntroductions.Value}"
+                    ToolTip="Allow unknown people to identify themselves"
+                    Content="toggle"/>
+                <TextBlock 
+                    Grid.Row="1" 
+                    Grid.Column="0"  
+                    ToolTip="Automatically allow unknown people to chat">Auto Reply Introductions</TextBlock>
+                <ToggleButton 
+                    Grid.Row="1" 
+                    Grid.Column="1"  
+                    IsChecked="{Binding AutoReplyIntroductions.Value}"
+                    Content="toggle"
+                    ToolTip="Automatically allow unknown people to chat"/>
+                <TextBlock 
+                    Grid.Row="2" 
+                    Grid.Column="0"  
+                    ToolTip="The name others see for you">Nickname</TextBlock>
+                <ContentControl 
+                    Grid.Row="2" 
+                    Grid.Column="1"  
+                    Content="{Binding}"
+                    ContentTemplate="{StaticResource NicknameTemplate}"
+                    ToolTip="The name others see for you"></ContentControl>
+                <TextBlock
+                    Grid.Row="3" 
+                    Grid.Column="0"
+                    Margin="0 5 0 0"
+                    Text="Local Wifi:"></TextBlock>
+                <TextBlock
+                    Grid.Row="4" 
+                    Grid.Column="0" ToolTip="Listen for others on the local wifi">Listen</TextBlock>
+                <ToggleButton
+                    Grid.Row="4" 
+                    Grid.Column="1"  
+                    IsChecked="{Binding IsBroadcastListening.Value}" 
+                    Content="toggle"
+                    ToolTip="Listen for others on the local wifi"/>
+                <TextBlock
+                    Grid.Row="5" 
+                    Grid.Column="0" ToolTip="Tell others on the local wifi you are here">Announce</TextBlock>
+                <ToggleButton
+                    Grid.Row="5" 
+                    Grid.Column="1" 
+                    IsChecked="{Binding IsAnnouncing.Value}"
+                    Content="toggle"
+                    ToolTip="Tell others on the local wifi you are here"/>
+            </Grid>
+        </DataTemplate>
+    </UserControl.Resources>
+    <ContentControl 
+        Content="{Binding}"
+        ContentTemplate="{StaticResource View}"></ContentControl>
+</UserControl>
