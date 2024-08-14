@@ -5,6 +5,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Percolator.Desktop.Crypto;
 using Percolator.Desktop.Data;
+using Percolator.Desktop.Domain.Chat;
 using Percolator.Desktop.Domain.Client;
 using Percolator.Desktop.Main;
 using Percolator.Desktop.Udp;
@@ -55,6 +56,8 @@ public partial class App : Application
                 services.AddSingleton<ISelfProvider>(p => p.GetRequiredService<SelfRepository>());
                 services.AddHostedService<SelfRepository>(p => p.GetRequiredService<SelfRepository>());
                 services.AddSingleton<IPreUiInitializer, SelfRepository>(p => p.GetRequiredService<SelfRepository>());
+
+                services.AddSingleton<ChatRepository>();
             });
         
         var host = builder.Build();

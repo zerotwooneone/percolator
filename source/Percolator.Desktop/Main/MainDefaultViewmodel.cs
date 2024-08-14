@@ -45,10 +45,18 @@ public class MainDefaultViewmodel : INotifyPropertyChanged
         {
             OnAnnouncerAdded(rc.Identity);
         }
-
         
         SelectedAnnouncer
-            .Subscribe(a=> Chat.Value = a == null ? null : _chatViewmodelFactory.CreateChat(a.RemoteClientModel));
+            .Subscribe(a=>
+            {
+                var oldChat = Chat.Value;
+                Chat.Value = null;
+                if (oldChat != null)
+                {
+                    oldChat.Dispose();
+                }
+                Chat.Value = a == null ? null : _chatViewmodelFactory.CreateChat(a.RemoteClientModel);
+            });
     }
 
     public BindableReactiveProperty<ChatViewmodel?> Chat { get; }= new();

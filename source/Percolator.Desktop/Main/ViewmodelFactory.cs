@@ -1,5 +1,6 @@
 using Google.Protobuf;
 using Microsoft.Extensions.Logging;
+using Percolator.Desktop.Domain.Chat;
 using Percolator.Desktop.Domain.Client;
 
 namespace Percolator.Desktop.Main;
@@ -9,30 +10,33 @@ public class ViewmodelFactory : IRemoteClientViewmodelFactory, IChatViewmodelFac
     private IRemoteClientService _remoteClientService;
     private readonly ILoggerFactory _loggerFactory;
     private readonly IChatService _chatService;
+    private readonly ChatRepository _chatRepository;
 
     public ViewmodelFactory(
         IRemoteClientService remoteClientService,
         ILoggerFactory loggerFactory,
-        IChatService chatService)
+        IChatService chatService,
+        ChatRepository chatRepository)
     {
         _remoteClientService = remoteClientService;
         _loggerFactory = loggerFactory;
         _chatService = chatService;
+        _chatRepository = chatRepository;
     }
 
     public RemoteClientViewmodel Create(RemoteClientModel remoteClient)
     {
         var logger = _loggerFactory.CreateLogger<RemoteClientViewmodel>();
-        return new RemoteClientViewmodel(remoteClient, _remoteClientService, logger);
+        return new RemoteClientViewmodel(remoteClient, _remoteClientService, logger, _chatRepository);
     }
     
     public ChatViewmodel CreateChat(RemoteClientModel remoteClientModel)
     {
-        return new ChatViewmodel(remoteClientModel, _chatService, _loggerFactory.CreateLogger<ChatViewmodel>());
+        if (!_chatRepository.TryGetByIdentity(remoteClientModel.Identity, out var chatModel))
+        {
+            chatModel = new ChatModel(remoteClientModel);
+            _chatRepository.Add(chatModel);
+        }
+        return new ChatViewmodel(chatModel, _chatService, _loggerFactory.CreateLogger<ChatViewmodel>());
     }
-}
-
-public interface IChatViewmodelFactory
-{
-    ChatViewmodel CreateChat(RemoteClientModel remoteClientModel);
 }

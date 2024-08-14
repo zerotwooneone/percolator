@@ -6,29 +6,29 @@ using R3;
 
 namespace Percolator.Desktop.Main;
 
-public class ChatViewmodel
+public class ChatViewmodel:IDisposable
 {
-    private readonly RemoteClientModel _remoteClientModel;
+    private readonly ChatModel _chatModel;
     private readonly IChatService _chatService;
     private readonly ILogger<ChatViewmodel> _logger;
     private readonly IDisposable _chatSubcription;
     public BindableReactiveProperty<bool> SendEnabled { get; }
 
     public ChatViewmodel(
-        RemoteClientModel remoteClientModel,
+        ChatModel chatModel,
         IChatService chatService,
         ILogger<ChatViewmodel> logger)
     {
-        _remoteClientModel = remoteClientModel;
+        _chatModel = chatModel;
         _chatService = chatService;
         _logger = logger;
-        _chatSubcription = _remoteClientModel.ChatMessage
+        _chatSubcription = _chatModel.ChatMessage
             .ObserveOnCurrentDispatcher()
             .Subscribe(OnReceivedChatMessage);
 
         SendCommand = new BaseCommand(OnSendClicked);
-        SendEnabled = _remoteClientModel.CanIntroduce
-            .CombineLatest(_remoteClientModel.IntroduceInProgress, (canIntroduce, introduceInProgress) => canIntroduce && !introduceInProgress)
+        SendEnabled = _chatModel.CanIntroduce
+            .CombineLatest(_chatModel.IntroduceInProgress, (canIntroduce, introduceInProgress) => canIntroduce && !introduceInProgress)
             .ToBindableReactiveProperty();
     }
 
@@ -46,20 +46,20 @@ public class ChatViewmodel
 
         try
         {
-            if (_remoteClientModel.SessionKey.Value == null)
+            if (_chatModel.SessionKey.Value == null)
             {
                 if (!await TryIntroduce())
                 {
                     return;
                 }
                 await Task.Delay(500);
-                if (_remoteClientModel.SessionKey.Value == null)
+                if (_chatModel.SessionKey.Value == null)
                 {
                     //todo:tell the user that they are not responding
                     return;
                 }
             }
-            await _chatService.SendChatMessage(_remoteClientModel, Text.Value);
+            await _chatService.SendChatMessage(_chatModel, Text.Value);
         }
         catch (Exception e)
         {
@@ -71,30 +71,24 @@ public class ChatViewmodel
         Text.Value="";
     }
     
-    private async Task<bool> TryIntroduce()
+    private async Task<bool> TryIntroduce(CancellationToken cancellationToken = default)
     {
-        if (!_remoteClientModel.CanIntroduce.CurrentValue || _remoteClientModel.SelectedIpAddress.CurrentValue == null)
+        if (!_chatModel.CanIntroduce.CurrentValue || _chatModel.RemoteClientModel.SelectedIpAddress.CurrentValue == null)
         {
             return false;
         }
 
-        if (!_chatService.TryGetIpAddress(out var sourceIp))
-        {
-            _logger.LogWarning("Failed to get ip address");
-            return false;
-        }
-
-        _remoteClientModel.IntroduceInProgress.Value = true;
+        _chatModel.IntroduceInProgress.Value = true;
         try
         {
-            if (_remoteClientModel.CanReplyIntroduce.CurrentValue)
+            if (_chatModel.CanReplyIntroduce.CurrentValue)
             {
-                await _chatService.SendReplyIntroduction(_remoteClientModel,sourceIp);
+                return await _chatService.TrySendReplyIntroduction(_chatModel, cancellationToken);
                 return true;
             }
             else
             {
-                await _chatService.SendIntroduction(_remoteClientModel.SelectedIpAddress.CurrentValue,_remoteClientModel.Port.Value, sourceIp);
+                await _chatService.TrySendIntroduction(_chatModel,cancellationToken);
                 //todo:await response
                 await Task.Delay(500);
                 return true;
@@ -108,7 +102,7 @@ public class ChatViewmodel
         }
         finally
         {
-            _remoteClientModel.IntroduceInProgress.Value = false;
+            _chatModel.IntroduceInProgress.Value = false;
         }
     }
 
@@ -121,4 +115,11 @@ public class ChatViewmodel
     public ObservableCollection<MessageViewmodel> Messages { get; } = new();
     public BaseCommand SendCommand { get; }
     public BindableReactiveProperty<string> Text { get; }= new("");
+
+    public void Dispose()
+    {
+        _chatSubcription.Dispose();
+        SendEnabled.Dispose();
+        Text.Dispose();
+    }
 }

@@ -18,7 +18,6 @@ public class RemoteClientModel : IEquatable<RemoteClientModel>
     public IReadOnlyCollection<IPAddress> IpAddresses => _ipAddresses;
     public ReadOnlyReactiveProperty<IPAddress?> SelectedIpAddress => _selectedIpAddress;
     private readonly ReactiveProperty<IPAddress?> _selectedIpAddress = new(null);
-    public ReadOnlyReactiveProperty<bool> CanIntroduce { get; }
 
     public RemoteClientModel(
         ByteString identity,
@@ -30,14 +29,6 @@ public class RemoteClientModel : IEquatable<RemoteClientModel>
         Port = new ReactiveProperty<int>( port ?? Defaults.DefaultIntroducePort);
         Identity = identity;
         PreferredNickname = new SynchronizedReactiveProperty<string>(String.IsNullOrWhiteSpace(nickname) ? Identity.ToBase64(): nickname);
-        CanReplyIntroduce = Ephemeral
-            .CombineLatest(_selectedIpAddress, (ephemeral, ip) => (ephemeral, ip))
-            .Select(e => e.ephemeral != null && e.ip != null)
-            .ToReadOnlyReactiveProperty();
-        CanIntroduce = SelectedIpAddress
-            .Select(ip => ip != null)
-            .ToReadOnlyReactiveProperty();
-        ChatMessage = _messageSubject.AsObservable();
     }
     
     public override string ToString()
@@ -120,18 +111,5 @@ public class RemoteClientModel : IEquatable<RemoteClientModel>
     }
 
     public ReactiveProperty<DateTimeOffset> LastSeen { get; } = new SynchronizedReactiveProperty<DateTimeOffset>();
-    public ReactiveProperty<RSACryptoServiceProvider?> Ephemeral { get; } = new();
-
-    public ReadOnlyReactiveProperty<bool> CanReplyIntroduce { get; }
-    public ReactiveProperty<Aes?> SessionKey { get; }= new();
-    public ReactiveProperty<ByteString?> SessionId { get; } = new();
-    public Observable<MessageModel> ChatMessage { get; }
-    public ReactiveProperty<bool> IntroduceInProgress { get; }= new();
-
-    private readonly Subject<MessageModel> _messageSubject = new();
-
-    public void OnChatMessage(MessageModel messageModel)
-    {
-        _messageSubject.OnNext(messageModel);
-    }
+    
 }

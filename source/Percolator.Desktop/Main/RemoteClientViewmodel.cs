@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using System.Windows;
 using Google.Protobuf;
 using Microsoft.Extensions.Logging;
+using Percolator.Desktop.Domain.Chat;
 using Percolator.Desktop.Domain.Client;
 using Percolator.Desktop.Udp;
 using R3;
@@ -14,6 +15,7 @@ public sealed class RemoteClientViewmodel : INotifyPropertyChanged
     public RemoteClientModel RemoteClientModel{get;}
     private readonly IRemoteClientService _remoteClientService;
     private readonly ILogger<RemoteClientViewmodel> _logger;
+    private readonly ChatRepository _chatRepository;
     public string PublicKey { get; }
     public ByteString PublicKeyBytes { get; }
 
@@ -23,18 +25,18 @@ public sealed class RemoteClientViewmodel : INotifyPropertyChanged
     public BindableReactiveProperty<int> Port { get; }
     
     public BindableReactiveProperty<string> ToolTip { get; }
-    public BindableReactiveProperty<Visibility> IntroduceVisible { get; }
     public BaseCommand IntroduceCommand { get; }
-    public  ReadOnlyReactiveProperty<bool> CanReplyIntroduce { get; }
 
     public RemoteClientViewmodel(
         RemoteClientModel remoteClientModel,
         IRemoteClientService remoteClientService,
-        ILogger<RemoteClientViewmodel> logger)
+        ILogger<RemoteClientViewmodel> logger,
+        ChatRepository chatRepository)
     {
         RemoteClientModel = remoteClientModel;
         _remoteClientService = remoteClientService;
         _logger = logger;
+        _chatRepository = chatRepository;
         PublicKeyBytes = remoteClientModel.Identity;
         PublicKey = remoteClientModel.Identity.ToBase64();
         Nickname = remoteClientModel.PreferredNickname
@@ -43,12 +45,6 @@ public sealed class RemoteClientViewmodel : INotifyPropertyChanged
         Port = remoteClientModel.Port.ToBindableReactiveProperty();
         ToolTip = remoteClientModel.Port.Select(p => $"{remoteClientModel.SelectedIpAddress.CurrentValue}:{p} {Environment.NewLine} {PublicKey}").ToBindableReactiveProperty("");
 
-        IntroduceVisible = remoteClientModel.CanIntroduce
-            .Select(b=> b ? Visibility.Visible : Visibility.Collapsed)
-            .ToBindableReactiveProperty();
-        CanReplyIntroduce = RemoteClientModel.CanReplyIntroduce
-            .ObserveOnCurrentDispatcher()
-            .ToReadOnlyReactiveProperty();
         IntroduceCommand = new BaseCommand(OnIntroduceClicked, _=>!IntroduceInProgress);
     }
 
@@ -56,14 +52,12 @@ public sealed class RemoteClientViewmodel : INotifyPropertyChanged
 
     private async void OnIntroduceClicked(object? obj)
     {
-        if (!RemoteClientModel.CanIntroduce.CurrentValue || RemoteClientModel.SelectedIpAddress.CurrentValue == null)
+        if (!_chatRepository.TryGetBySessionId(RemoteClientModel.Identity, out var chatModel))
         {
             return;
         }
-
-        if (!_remoteClientService.TryGetIpAddress(out var sourceIp))
+        if (!chatModel.CanIntroduce.CurrentValue || RemoteClientModel.SelectedIpAddress.CurrentValue == null)
         {
-            _logger.LogWarning("Failed to get ip address");
             return;
         }
 
@@ -71,13 +65,13 @@ public sealed class RemoteClientViewmodel : INotifyPropertyChanged
         IntroduceCommand.RaiseCanExecuteChanged();
         try
         {
-            if (CanReplyIntroduce.CurrentValue)
+            if (chatModel.CanReplyIntroduce.CurrentValue)
             {
-                await _remoteClientService.SendReplyIntroduction(RemoteClientModel,sourceIp);
+                await _remoteClientService.TrySendReplyIntroduction(chatModel);
             }
             else
             {
-                await _remoteClientService.SendIntroduction(RemoteClientModel.SelectedIpAddress.CurrentValue, Port.Value, sourceIp);
+                await _remoteClientService.TrySendIntroduction(chatModel);
             }
             
         }
