@@ -1,9 +1,8 @@
 using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
 using System.Security.Cryptography;
-using System.Text;
-using System.Windows.Controls;
 using Google.Protobuf;
+using Microsoft.Extensions.Logging;
 using Percolator.Protobuf.DoubleRatchet;
 
 namespace Percolator.Desktop;
@@ -43,7 +42,8 @@ public class DoubleRatchetModel
     /// </summary>
     public uint PN { get; private set; }
     
-    private ConcurrentDictionary<MKSkippedKey, byte[]> MKSkipped { get; } = new(); 
+    private ConcurrentDictionary<MKSkippedKey, byte[]> MKSkipped { get; } = new();
+    private readonly ILogger<DoubleRatchetModel> _logger;
     public readonly uint MaxSkip;
     public static readonly byte[] KDF_RK_Info = [3, 7, 9, 13];
     
@@ -51,8 +51,10 @@ public class DoubleRatchetModel
         ECDiffieHellman dHs, 
         ECDiffieHellmanPublicKey? dHr, 
         byte[] rootKey,
+        ILogger<DoubleRatchetModel> logger,
         uint maxSkip = 1000)
     {
+        _logger = logger;
         MaxSkip = maxSkip;
         DHs = dHs;
         DHr = dHr;
@@ -60,19 +62,21 @@ public class DoubleRatchetModel
     }
 
     public static DoubleRatchetModel CreateSender(ECDiffieHellmanPublicKey otherPublicKey,
-        byte[] secretKey)
+        byte[] secretKey,
+        ILogger<DoubleRatchetModel> logger)
     {
         var dHs = ECDiffieHellman.Create();
         var (rootKey, chainKey) = KDF_RK(secretKey, dHs.DeriveKeyMaterial(otherPublicKey), KDF_RK_Info);
-        var model = new DoubleRatchetModel(dHs, otherPublicKey, rootKey);
+        var model = new DoubleRatchetModel(dHs, otherPublicKey, rootKey,logger);
         model.CKs = chainKey;
         return model;
     }
     
     public static DoubleRatchetModel CreateReceiver(ECDiffieHellman dHs,
-        byte[] secretKey)
+        byte[] secretKey,
+        ILogger<DoubleRatchetModel> logger)
     {
-        return new DoubleRatchetModel(dHs, null, secretKey);
+        return new DoubleRatchetModel(dHs, null, secretKey,logger);
     }
     
     public  bool TrySetOtherPublicKey(ECDiffieHellmanPublicKey otherPublicKey)
@@ -111,7 +115,7 @@ public class DoubleRatchetModel
         {
             Header = new Percolator.Protobuf.DoubleRatchet.encryptionWrapper.Types.Header
             {
-                PublicKey = ByteString.CopyFrom(DHs.ExportSubjectPublicKeyInfo()),
+                PublicKey = ByteString.CopyFrom(DHs.PublicKey.ToByteArray()),
                 PreviousChainLength = PN,
                 MessageNumber = Ns
             },
@@ -145,12 +149,13 @@ public class DoubleRatchetModel
         var encryptedBytes = encryptor.TransformFinalBlock(plainText, 0, plainText.Length);
         
         var hmac = new HMACSHA256(authenticationKey);
+        
         var signed = hmac.ComputeHash(associatedData.Concat(encryptedBytes).ToArray());
         
         return (encryptedBytes, signed);
     }
     
-    private byte[] Decrypt(byte[] messageKey, byte[] cipherText, encryptionWrapper.Types.AssociatedData associatedData,
+    private byte[] Decrypt(byte[] messageKey, byte[] cipherText, encryptionWrapper encryptionWrapper,
         byte[] headerSignature)
     {
         var extracted = HKDF.Extract(HashAlgorithmName.SHA256, messageKey);
@@ -158,9 +163,11 @@ public class DoubleRatchetModel
         
         var authenticationKey = expanded.Skip(32).Take(32).ToArray();
         var hmac = new HMACSHA256(authenticationKey);
-        var associatedDataBytes = associatedData.ToByteArray();
+        var associatedDataBytes = encryptionWrapper.ToByteArray();
+        
         var actualSignature = ByteString.CopyFrom(hmac.ComputeHash(associatedDataBytes.Concat(cipherText).ToArray()));
-        if (!actualSignature.Equals(headerSignature))
+        //todo: avoid the array copy if possible
+        if (!actualSignature.Equals(ByteString.CopyFrom( headerSignature)))
         {
             throw new CryptographicException("signature mismatch");
         }
@@ -200,13 +207,13 @@ public class DoubleRatchetModel
             MessageNumber = headerWrapper.Header.MessageNumber,
             MessagePublicKey = headerWrapper.Header.PublicKey
         };
-        if (TrySkippedMessageKeys(currentSkippedKey, cipherText, headerWrapper.AssociatedData,headerSignature, out var skippedBytes))
+        if (TrySkippedMessageKeys(currentSkippedKey, cipherText, headerWrapper,headerSignature, out var skippedBytes))
         {
             return skippedBytes;
         }
         
         //todo:avoid the array copy here
-        if (!ByteString.CopyFrom(DHr.ExportSubjectPublicKeyInfo()).Equals(headerWrapper.Header.PublicKey))
+        if (DHr == null || !ByteString.CopyFrom(DHr.ToByteArray()).Equals(headerWrapper.Header.PublicKey))
         {
             SkipMessageKeys(headerWrapper.Header.PreviousChainLength,currentSkippedKey);
             DHRatchet(headerWrapper.Header);
@@ -215,7 +222,7 @@ public class DoubleRatchetModel
         var (nextCKr, mk) = KDF_CK(CKr);
         Nr++;
         CKr = nextCKr;
-        var decrypted = Decrypt(mk, cipherText, headerWrapper.AssociatedData,headerSignature);
+        var decrypted = Decrypt(mk, cipherText, headerWrapper,headerSignature);
         return decrypted;
     }
 
@@ -224,7 +231,7 @@ public class DoubleRatchetModel
         PN = Ns;
         Ns = 0;
         Nr = 0;
-        var publicKey = ECDiffieHellmanCngPublicKey.FromByteArray(header.PublicKey.ToByteArray(),CngKeyBlobFormat.EccPublicBlob);
+        var publicKey = ECDiffieHellmanCngPublicKey.FromByteArray(header.PublicKey.ToByteArray(), CngKeyBlobFormat.EccPublicBlob);
         
         
         DHr = publicKey;
@@ -264,7 +271,7 @@ public class DoubleRatchetModel
     private bool TrySkippedMessageKeys(
         MKSkippedKey currentSkippedKey,
         byte[] cipherText,
-        encryptionWrapper.Types.AssociatedData associatedData, 
+        encryptionWrapper encryptionWrapper, 
         byte[] headerSignature, 
         [NotNullWhen(true)] out byte[]? decrypted)
     {
@@ -273,7 +280,7 @@ public class DoubleRatchetModel
             decrypted = null;
             return false;
         }
-        decrypted = Decrypt(mk, cipherText, associatedData,headerSignature);
+        decrypted = Decrypt(mk, cipherText, encryptionWrapper,headerSignature);
         return true;
     }
     
