@@ -44,14 +44,6 @@
         <OutputDir>obj\Debug\net8.0-windows\</OutputDir>
         <Generator>MSBuild:Compile</Generator>
       </Protobuf>
-      <Protobuf Include="Protos\doubleRatchet.proto">
-        <GrpcServices>None</GrpcServices>
-        <Access>Public</Access>
-        <ProtoCompile>True</ProtoCompile>
-        <CompileOutputs>True</CompileOutputs>
-        <OutputDir>obj\Debug\net8.0-windows\</OutputDir>
-        <Generator>MSBuild:Compile</Generator>
-      </Protobuf>
       <Protobuf Include="Protos\introduce.proto" GrpcServices="None">
           <Access>Public</Access>
           <ProtoCompile>True</ProtoCompile>
