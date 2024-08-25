@@ -263,7 +263,11 @@ public class DoubleRatchetModel
         {
             var (nextCKr, mk) = KDF_CK(CKr);
             CKr = nextCKr;
-            MKSkipped[currentSkippedKey]= mk;
+            MKSkipped[new MKSkippedKey
+            {
+                MessagePublicKey = DHr.ToByteArray(),
+                MessageNumber = Nr
+            }]= mk;
             Nr++;
         }
     }
