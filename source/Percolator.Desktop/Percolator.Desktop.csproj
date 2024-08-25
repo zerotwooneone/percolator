@@ -17,7 +17,7 @@
     </ItemGroup>
 
     <ItemGroup>
-      <PackageReference Include="Google.Protobuf" Version="3.27.2" />
+      <PackageReference Include="Google.Protobuf" Version="3.27.3" />
       <PackageReference Include="Grpc.Net.Client" Version="2.65.0" />
       <PackageReference Include="Grpc.Tools" Version="2.65.0">
         <PrivateAssets>all</PrivateAssets>
@@ -75,6 +75,7 @@
     </ItemGroup>
 
     <ItemGroup>
+      <ProjectReference Include="..\Percolator.Crypto.GrpcSerializer\Percolator.Crypto.GrpcSerializer.csproj" />
       <ProjectReference Include="..\Percolator.Crypto\Percolator.Crypto.csproj" />
     </ItemGroup>
 

@@ -8,6 +8,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.Desktop", "Perco
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.Crypto", "Percolator.Crypto\Percolator.Crypto.csproj", "{CDBCFCA1-8CDA-4381-B851-551F7444B6BE}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.Crypto.Abstractions", "Percolator.Crypto.Abstractions\Percolator.Crypto.Abstractions.csproj", "{1728B2D0-C035-4B28-8EF1-140BC78A68EA}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.Crypto.GrpcSerializer", "Percolator.Crypto.GrpcSerializer\Percolator.Crypto.GrpcSerializer.csproj", "{A09F678A-85A5-40A4-8779-FE8073A85799}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -30,5 +34,13 @@ Global
 		{CDBCFCA1-8CDA-4381-B851-551F7444B6BE}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{CDBCFCA1-8CDA-4381-B851-551F7444B6BE}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{CDBCFCA1-8CDA-4381-B851-551F7444B6BE}.Release|Any CPU.Build.0 = Release|Any CPU
+		{1728B2D0-C035-4B28-8EF1-140BC78A68EA}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1728B2D0-C035-4B28-8EF1-140BC78A68EA}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1728B2D0-C035-4B28-8EF1-140BC78A68EA}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1728B2D0-C035-4B28-8EF1-140BC78A68EA}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A09F678A-85A5-40A4-8779-FE8073A85799}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A09F678A-85A5-40A4-8779-FE8073A85799}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A09F678A-85A5-40A4-8779-FE8073A85799}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A09F678A-85A5-40A4-8779-FE8073A85799}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

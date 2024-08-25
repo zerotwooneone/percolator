@@ -1,8 +1,11 @@
-﻿using System.Windows;
+﻿using System.Security.Cryptography;
+using System.Text;
+using System.Windows;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Percolator.Crypto;
 using Percolator.Desktop.Crypto;
 using Percolator.Desktop.Data;
 using Percolator.Desktop.Domain.Chat;
@@ -58,6 +61,8 @@ public partial class App : Application
                 services.AddSingleton<IPreUiInitializer, SelfRepository>(p => p.GetRequiredService<SelfRepository>());
 
                 services.AddSingleton<ChatRepository>();
+
+                services.AddSingleton<ISerializer, Percolator.Crypto.GrpcSerializer.GrpcSerializer>();
             });
         
         var host = builder.Build();

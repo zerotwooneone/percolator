@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+option csharp_namespace = "Percolator.Crypto.GrpcSerializer";
+
+package doubleRatchet;
+
+message GrpcHeaderWrapper {
+  message AssociatedData {
+    optional bytes data = 1;
+  }
+
+  message Header {
+    optional bytes publicKey = 1;
+    optional uint32 previousChainLength = 2;
+    optional uint32 messageNumber = 3;
+  }
+
+  optional Header header = 1;
+  optional AssociatedData associatedData = 2;
+}
