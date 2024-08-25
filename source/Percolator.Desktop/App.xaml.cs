@@ -34,19 +34,19 @@ public partial class App : Application
                 services.AddSingleton<MainDefaultViewmodel>();
                 services.AddScoped<MainWindowViewmodel>();
                 services.AddSingleton<MainService>();
-                services.AddSingleton<IRemoteClientService>(p=>p.GetRequiredService<MainService>());
-                services.AddSingleton<IChatService>(p=>p.GetRequiredService<MainService>());
+                services.AddSingleton<IRemoteClientService>(p => p.GetRequiredService<MainService>());
+                services.AddSingleton<IChatService>(p => p.GetRequiredService<MainService>());
 
                 services.AddSingleton<RemoteClientRepository>();
                 services.AddSingleton<IRemoteClientRepository>(p => p.GetRequiredService<RemoteClientRepository>());
-                services.AddSingleton<IRemoteClientInitializer>(p=>p.GetRequiredService<RemoteClientRepository>());
-                
+                services.AddSingleton<IRemoteClientInitializer>(p => p.GetRequiredService<RemoteClientRepository>());
+
                 services.AddSingleton<UdpClientFactory>();
                 services.AddSingleton<SelfEncryptionService>();
                 services.AddSingleton<ViewmodelFactory>();
-                services.AddSingleton<IRemoteClientViewmodelFactory>(p=>p.GetRequiredService<ViewmodelFactory>());
-                services.AddSingleton<IChatViewmodelFactory>(p=>p.GetRequiredService<ViewmodelFactory>());
-                
+                services.AddSingleton<IRemoteClientViewmodelFactory>(p => p.GetRequiredService<ViewmodelFactory>());
+                services.AddSingleton<IChatViewmodelFactory>(p => p.GetRequiredService<ViewmodelFactory>());
+
                 services.AddSingleton<SqliteService>();
                 services.AddHostedService<SqliteService>(p => p.GetRequiredService<SqliteService>());
                 services.AddSingleton<IPreUiInitializer, SqliteService>(p => p.GetRequiredService<SqliteService>());
@@ -64,15 +64,16 @@ public partial class App : Application
 
                 services.AddSingleton<ISerializer, Percolator.Crypto.GrpcSerializer.GrpcSerializer>();
             });
-        
+
         var host = builder.Build();
         _logger = host.Services.GetRequiredService<ILogger<App>>();
 
         //todo:remove migrations in production
-        SqliteService.EnsureDatabase(host.Services.GetRequiredService<IServiceScopeFactory>(), CancellationToken.None).Wait();
-        
+        SqliteService.EnsureDatabase(host.Services.GetRequiredService<IServiceScopeFactory>(), CancellationToken.None)
+            .Wait();
+
         Task.Factory.StartNew(() => host.StartAsync().Wait());
-        
+
         var preAppComplete = host.Services.GetServices<IPreUiInitializer>().Select(i => i.PreAppComplete);
         //todo: add a splash screen
         Task.WhenAll(preAppComplete).Wait();
