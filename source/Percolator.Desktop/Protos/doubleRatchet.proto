@@ -18,8 +18,3 @@ message encryptionWrapper {
   optional Header header = 1;
   optional AssociatedData associatedData = 2;
 }
-
-message EncryptionPayload {
-  optional bytes EncryptedData = 1;
-  optional bytes AssociatedDataSignature = 2;
-}
