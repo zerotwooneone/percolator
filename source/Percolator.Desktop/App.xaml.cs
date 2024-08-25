@@ -77,7 +77,7 @@ public partial class App : Application
         var preAppComplete = host.Services.GetServices<IPreUiInitializer>().Select(i => i.PreAppComplete);
         //todo: add a splash screen
         Task.WhenAll(preAppComplete).Wait();
-        
+
         var mainWindow = host.Services.GetRequiredService<MainWindow>();
         mainWindow.DataContext = host.Services.GetRequiredService<MainWindowViewmodel>();
         mainWindow.Show();

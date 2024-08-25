@@ -12,6 +12,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.Crypto.Abstracti
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.Crypto.GrpcSerializer", "Percolator.Crypto.GrpcSerializer\Percolator.Crypto.GrpcSerializer.csproj", "{A09F678A-85A5-40A4-8779-FE8073A85799}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.Crypto.Tests", "Percolator.Crypto.Tests\Percolator.Crypto.Tests.csproj", "{01F527E3-71C0-4DC7-8EA6-61A053B6543C}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -42,5 +44,9 @@ Global
 		{A09F678A-85A5-40A4-8779-FE8073A85799}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{A09F678A-85A5-40A4-8779-FE8073A85799}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{A09F678A-85A5-40A4-8779-FE8073A85799}.Release|Any CPU.Build.0 = Release|Any CPU
+		{01F527E3-71C0-4DC7-8EA6-61A053B6543C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{01F527E3-71C0-4DC7-8EA6-61A053B6543C}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{01F527E3-71C0-4DC7-8EA6-61A053B6543C}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{01F527E3-71C0-4DC7-8EA6-61A053B6543C}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal
