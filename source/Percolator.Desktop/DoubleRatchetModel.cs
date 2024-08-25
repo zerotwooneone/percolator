@@ -103,7 +103,7 @@ public class DoubleRatchetModel
 
     public static readonly byte[] Nonce = [3,7,11,15,19,23,27,31,35,39,43,47]; //must be 12 bytes
     
-    private (byte[] header, byte[] encrypted, byte[] headerSignature) RatchetEncrypt(byte[] plainText, byte[] associatedData)
+    public (byte[] header, byte[] encrypted, byte[] headerSignature) RatchetEncrypt(byte[] plainText, byte[] associatedData)
     {
         var (nextCKs, mk) = KDF_CK(CKs);
         CKs = nextCKs;
@@ -177,7 +177,7 @@ public class DoubleRatchetModel
         return decryptor.TransformFinalBlock(cipherText, 0, cipherText.Length);
     }
 
-    private string? RatchetDecrypt(byte[] headerBytes, byte[] cipherText, byte[] headerSignature)
+    public byte[]? RatchetDecrypt(byte[] headerBytes, byte[] cipherText, byte[] headerSignature)
     {
         var headerWrapper = encryptionWrapper.Parser.ParseFrom(headerBytes);
         if (headerWrapper == null)
@@ -202,7 +202,7 @@ public class DoubleRatchetModel
         };
         if (TrySkippedMessageKeys(currentSkippedKey, cipherText, headerWrapper.AssociatedData,headerSignature, out var skippedBytes))
         {
-            return Encoding.UTF8.GetString(skippedBytes);
+            return skippedBytes;
         }
         
         //todo:avoid the array copy here
@@ -216,7 +216,7 @@ public class DoubleRatchetModel
         Nr++;
         CKr = nextCKr;
         var decrypted = Decrypt(mk, cipherText, headerWrapper.AssociatedData,headerSignature);
-        return Encoding.UTF8.GetString(decrypted);
+        return decrypted;
     }
 
     private void DHRatchet(encryptionWrapper.Types.Header header)
