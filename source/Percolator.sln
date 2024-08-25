@@ -6,6 +6,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.Grpc", "Percolat
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.Desktop", "Percolator.Desktop\Percolator.Desktop.csproj", "{5EEC1600-14E1-45CE-970D-4EB14380F151}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.Crypto", "Percolator.Crypto\Percolator.Crypto.csproj", "{CDBCFCA1-8CDA-4381-B851-551F7444B6BE}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -24,5 +26,9 @@ Global
 		{5EEC1600-14E1-45CE-970D-4EB14380F151}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{5EEC1600-14E1-45CE-970D-4EB14380F151}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{5EEC1600-14E1-45CE-970D-4EB14380F151}.Release|Any CPU.Build.0 = Release|Any CPU
+		{CDBCFCA1-8CDA-4381-B851-551F7444B6BE}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{CDBCFCA1-8CDA-4381-B851-551F7444B6BE}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{CDBCFCA1-8CDA-4381-B851-551F7444B6BE}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{CDBCFCA1-8CDA-4381-B851-551F7444B6BE}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

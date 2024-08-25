@@ -74,4 +74,8 @@
       </Content>
     </ItemGroup>
 
+    <ItemGroup>
+      <ProjectReference Include="..\Percolator.Crypto\Percolator.Crypto.csproj" />
+    </ItemGroup>
+
 </Project>
