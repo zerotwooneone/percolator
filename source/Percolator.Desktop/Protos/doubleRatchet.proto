@@ -1,0 +1,25 @@
+syntax = "proto3";
+
+option csharp_namespace = "Percolator.Protobuf.DoubleRatchet";
+
+package doubleRatchet;
+
+message encryptionWrapper {
+  message AssociatedData {
+    optional bytes data = 1;
+  }
+
+  message Header {
+    optional bytes publicKey = 1;
+    optional uint32 previousChainLength = 2;
+    optional uint32 messageNumber = 3;
+  }
+
+  optional Header header = 1;
+  optional AssociatedData associatedData = 2;
+}
+
+message EncryptionPayload {
+  optional bytes EncryptedData = 1;
+  optional bytes AssociatedDataSignature = 2;
+}
