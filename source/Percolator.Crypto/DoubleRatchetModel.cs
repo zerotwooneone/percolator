@@ -233,12 +233,12 @@ public class DoubleRatchetModel
         
         
         DHr = publicKey;
-        var (rootKeyR, ckr) = KDF_RK(RootKey, DHs.DeriveKeyMaterial(publicKey), KDF_RK_Info);
+        var (rootKeyR, ckr) = KDF_RK(RootKey, DH(DHs), KDF_RK_Info);
         RootKey = rootKeyR;
         CKr = ckr;
         
         DHs = ECDiffieHellman.Create();
-        var (rootKeyS, cks) = KDF_RK(RootKey, DHs.DeriveKeyMaterial(publicKey), KDF_RK_Info);
+        var (rootKeyS, cks) = KDF_RK(RootKey, DH(DHs), KDF_RK_Info);
         RootKey = rootKeyS;
         CKs = cks;
     }
