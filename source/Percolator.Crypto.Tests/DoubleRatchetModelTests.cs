@@ -37,14 +37,14 @@ public class DoubleRatchetModelTests
         var bob = DoubleRatchetModel.CreateReceiver(bobIdentity, secretKey,
             _logger, _serializer);
 
-        var decrypted1 = bob.RatchetDecrypt(encrypted.header, encrypted.encrypted, encrypted.headerSignature);
-        CollectionAssert.AreEqual(plainText1,decrypted1);
+        var tuple1 = bob.RatchetDecrypt(encrypted.header, encrypted.encrypted, encrypted.headerSignature);
+        CollectionAssert.AreEqual(plainText1,tuple1.Value.plainText);
 
         var plainText2 = "sir, this is an arby's"u8.ToArray();
         var bobEnc = bob.RatchetEncrypt(plainText2, associatedData);
-        var decrypted2 = alice.RatchetDecrypt(bobEnc.header, bobEnc.encrypted, bobEnc.headerSignature);
+        var tuple2 = alice.RatchetDecrypt(bobEnc.header, bobEnc.encrypted, bobEnc.headerSignature);
         
-        CollectionAssert.AreEqual(plainText2,decrypted2);
+        CollectionAssert.AreEqual(plainText2,tuple2.Value.plainText);
     }
     
     [Test]
@@ -58,10 +58,10 @@ public class DoubleRatchetModelTests
         var firstBytes = "this is the first sent message"u8.ToArray();
         var first = alice.RatchetEncrypt(firstBytes, associatedData);
         
-        var decrypedFirst = bob.RatchetDecrypt(first.header, first.encrypted, first.headerSignature);
-        CollectionAssert.AreEqual(firstBytes,decrypedFirst);
-        var decrypedDelayed = bob.RatchetDecrypt(delayed.header, delayed.encrypted, delayed.headerSignature);
-        CollectionAssert.AreEqual(delayedBytes,decrypedDelayed);
+        var tuple = bob.RatchetDecrypt(first.header, first.encrypted, first.headerSignature);
+        CollectionAssert.AreEqual(firstBytes,tuple.Value.plainText);
+        var tupleDelayed = bob.RatchetDecrypt(delayed.header, delayed.encrypted, delayed.headerSignature);
+        CollectionAssert.AreEqual(delayedBytes,tupleDelayed.Value.plainText);
     }
 
     private (DoubleRatchetModel alice, DoubleRatchetModel bob) CreateHandshake()

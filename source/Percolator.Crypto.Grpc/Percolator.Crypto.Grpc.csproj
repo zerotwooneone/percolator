@@ -8,6 +8,7 @@
 
     <ItemGroup>
       <ProjectReference Include="..\Percolator.Crypto.Abstractions\Percolator.Crypto.Abstractions.csproj" />
+      <ProjectReference Include="..\Percolator.Crypto\Percolator.Crypto.csproj" />
     </ItemGroup>
 
     <ItemGroup>

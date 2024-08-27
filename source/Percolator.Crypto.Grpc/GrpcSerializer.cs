@@ -57,3 +57,10 @@ public class GrpcSerializer: ISerializer
         };
     }
 }
+
+public class DecryptResult
+{
+    public byte[] PlainText { get; set; }
+    public byte[] AssociatedData { get; set; }
+    public uint MessageNumber { get; set; }
+}

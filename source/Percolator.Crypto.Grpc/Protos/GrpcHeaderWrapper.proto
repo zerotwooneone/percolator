@@ -18,3 +18,9 @@ message GrpcHeaderWrapper {
   optional Header header = 1;
   optional AssociatedData associatedData = 2;
 }
+
+message Payload {
+  optional bytes data = 1;
+  optional bytes header = 2;
+  optional bytes headerSignature = 3;
+}

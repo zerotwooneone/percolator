@@ -180,7 +180,7 @@ public class DoubleRatchetModel
         return decryptor.TransformFinalBlock(cipherText, 0, cipherText.Length);
     }
 
-    public byte[]? RatchetDecrypt(byte[] headerBytes, byte[] cipherText, byte[] headerSignature)
+    public (byte[] plainText,byte[] associatedData,uint messageNumber)? RatchetDecrypt(byte[] headerBytes, byte[] cipherText, byte[] headerSignature)
     {
         var headerWrapper = _serializer.Deserialize(headerBytes);
         if (headerWrapper == null)
@@ -208,7 +208,7 @@ public class DoubleRatchetModel
         };
         if (TrySkippedMessageKeys(currentSkippedKey, cipherText, headerWrapper,headerSignature,headerBytes, out var skippedBytes))
         {
-            return skippedBytes;
+            return (plainText:skippedBytes,associatedData:headerWrapper.AssociatedData.Data,messageNumber:headerWrapper.Header.MessageNumber.Value);
         }
         
         if (DHr == null || !ArrayEqualityComparer.Equals(DHr.ToByteArray(),headerWrapper.Header.PublicKey))
@@ -221,7 +221,7 @@ public class DoubleRatchetModel
         Nr++;
         CKr = nextCKr;
         var decrypted = Decrypt(mk, cipherText, headerWrapper,headerSignature,headerBytes);
-        return decrypted;
+        return (plainText:decrypted,associatedData:headerWrapper.AssociatedData.Data,messageNumber:headerWrapper.Header.MessageNumber.Value);
     }
 
     private void DHRatchet(HeaderWrapper.HeaderType header)
