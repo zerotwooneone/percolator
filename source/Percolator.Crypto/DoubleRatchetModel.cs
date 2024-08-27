@@ -102,8 +102,6 @@ public class DoubleRatchetModel
         return ( HMACSHA512.HashData(key,MessageTypeId), HMACSHA512.HashData(key,ChainKeyTypeId) );
     }
 
-    public static readonly byte[] Nonce = [3,7,11,15,19,23,27,31,35,39,43,47]; //must be 12 bytes
-    
     public (byte[] header, byte[] encrypted, byte[] headerSignature) RatchetEncrypt(byte[] plainText, byte[] associatedData)
     {
         var (nextCKs, mk) = KDF_CK(CKs);
