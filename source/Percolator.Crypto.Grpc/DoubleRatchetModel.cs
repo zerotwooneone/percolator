@@ -1,4 +1,6 @@
+using System.Security.Cryptography;
 using Google.Protobuf;
+using Microsoft.Extensions.Logging;
 using Percolator.Crypto.Grpc.Protos;
 
 namespace Percolator.Crypto.Grpc;
@@ -7,9 +9,16 @@ public class DoubleRatchetModel
 {
     private readonly Crypto.DoubleRatchetModel _model;
 
-    public DoubleRatchetModel(Percolator.Crypto.DoubleRatchetModel model)
+    private DoubleRatchetModel(Percolator.Crypto.DoubleRatchetModel model)
     {
         _model = model;
+    }
+
+    public static DoubleRatchetModel CreateReceiver(ECDiffieHellman dhs,
+        byte[] rootKey, ILogger<Crypto.DoubleRatchetModel> logger, ISerializer serializer, uint maxSkip = 1000)
+    {
+        var model = Crypto.DoubleRatchetModel.CreateReceiver(dhs, rootKey, logger, serializer, maxSkip);
+        return new DoubleRatchetModel(model);
     }
     public byte[] RatchetEncrypt(byte[] plainText, byte[] associatedData)
     {

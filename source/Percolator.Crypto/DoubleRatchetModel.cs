@@ -66,11 +66,12 @@ public class DoubleRatchetModel
     public static DoubleRatchetModel CreateSender(ECDiffieHellmanPublicKey otherPublicKey,
         byte[] secretKey,
         ILogger<DoubleRatchetModel> logger,
-        ISerializer serializer)
+        ISerializer serializer,
+        uint maxSkip = 1000)
     {
         var dHs = ECDiffieHellman.Create();
         var (rootKey, chainKey) = KDF_RK(secretKey, dHs.DeriveKeyMaterial(otherPublicKey), KDF_RK_Info);
-        var model = new DoubleRatchetModel(dHs, otherPublicKey, rootKey,logger,serializer);
+        var model = new DoubleRatchetModel(dHs, otherPublicKey, rootKey,logger,serializer,maxSkip);
         model.CKs = chainKey;
         return model;
     }
@@ -78,9 +79,10 @@ public class DoubleRatchetModel
     public static DoubleRatchetModel CreateReceiver(ECDiffieHellman dHs,
         byte[] secretKey,
         ILogger<DoubleRatchetModel> logger,
-        ISerializer serializer)
+        ISerializer serializer,
+        uint maxSkip = 1000)
     {
-        return new DoubleRatchetModel(dHs, null, secretKey,logger, serializer);
+        return new DoubleRatchetModel(dHs, null, secretKey,logger, serializer,maxSkip);
     }
 
     private byte[] DH(ECDiffieHellman key)
