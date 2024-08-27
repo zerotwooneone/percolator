@@ -24,7 +24,7 @@
     </ItemGroup>
 
     <ItemGroup>
-      <ProjectReference Include="..\Percolator.Crypto.GrpcSerializer\Percolator.Crypto.GrpcSerializer.csproj" />
+      <ProjectReference Include="..\Percolator.Crypto.Grpc\Percolator.Crypto.Grpc.csproj" />
       <ProjectReference Include="..\Percolator.Crypto\Percolator.Crypto.csproj" />
     </ItemGroup>
 

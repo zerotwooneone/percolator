@@ -1,6 +1,7 @@
 ﻿using Google.Protobuf;
+using Percolator.Crypto.Grpc.Protos;
 
-namespace Percolator.Crypto.GrpcSerializer;
+namespace Percolator.Crypto.Grpc;
 
 public class GrpcSerializer: ISerializer
 {
@@ -10,20 +11,23 @@ public class GrpcSerializer: ISerializer
         {
             Header = new GrpcHeaderWrapper.Types.Header
             {
-                PublicKey = ByteString.CopyFrom(header.Header.PublicKey),
+                PublicKey = header.Header == null ? ByteString.Empty : ByteString.CopyFrom(header.Header.PublicKey),
             },
 
             AssociatedData = new GrpcHeaderWrapper.Types.AssociatedData()
         };
 
-        if (header.Header.PreviousChainLength.HasValue)
+        if (header.Header != null)
         {
-            wrapper.Header.PreviousChainLength = header.Header.PreviousChainLength.Value;
-        }
+            if (header.Header.PreviousChainLength.HasValue)
+            {
+                wrapper.Header.PreviousChainLength = header.Header.PreviousChainLength.Value;
+            }
 
-        if (header.Header.MessageNumber.HasValue)
-        {
-            wrapper.Header.MessageNumber = header.Header.MessageNumber.Value;
+            if (header.Header.MessageNumber.HasValue)
+            {
+                wrapper.Header.MessageNumber = header.Header.MessageNumber.Value;
+            }
         }
 
         if (header.AssociatedData != null && header.AssociatedData.Data != null)

@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-option csharp_namespace = "Percolator.Crypto.GrpcSerializer";
+option csharp_namespace = "Percolator.Crypto.Grpc.Protos";
 
 package doubleRatchet;
 

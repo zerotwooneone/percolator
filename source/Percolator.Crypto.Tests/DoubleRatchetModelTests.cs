@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Percolator.Crypto.Grpc;
 
 namespace Percolator.Crypto.Tests;
 
@@ -12,7 +13,7 @@ public class DoubleRatchetModelTests
     [SetUp]
     public void Setup()
     {
-        _serializer = new GrpcSerializer.GrpcSerializer();
+        _serializer = new GrpcSerializer();
         
         var serviceProvider = new ServiceCollection()
             .AddLogging()

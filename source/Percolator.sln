@@ -10,7 +10,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.Crypto", "Percol
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.Crypto.Abstractions", "Percolator.Crypto.Abstractions\Percolator.Crypto.Abstractions.csproj", "{1728B2D0-C035-4B28-8EF1-140BC78A68EA}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.Crypto.GrpcSerializer", "Percolator.Crypto.GrpcSerializer\Percolator.Crypto.GrpcSerializer.csproj", "{A09F678A-85A5-40A4-8779-FE8073A85799}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.Crypto.Grpc", "Percolator.Crypto.Grpc\Percolator.Crypto.Grpc.csproj", "{A09F678A-85A5-40A4-8779-FE8073A85799}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.Crypto.Tests", "Percolator.Crypto.Tests\Percolator.Crypto.Tests.csproj", "{01F527E3-71C0-4DC7-8EA6-61A053B6543C}"
 EndProject
