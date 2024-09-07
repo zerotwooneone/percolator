@@ -52,7 +52,7 @@ public sealed class RemoteClientViewmodel : INotifyPropertyChanged
 
     private async void OnIntroduceClicked(object? obj)
     {
-        if (!_chatRepository.TryGetBySessionId(RemoteClientModel.Identity, out var chatModel))
+        if (!_chatRepository.TryGetByIdentity(RemoteClientModel.Identity, out var chatModel))
         {
             return;
         }

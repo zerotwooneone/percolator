@@ -226,6 +226,17 @@ public class DoubleRatchetModel
         return (plainText:decrypted,associatedData:headerWrapper.AssociatedData.Data,messageNumber:headerWrapper.Header.MessageNumber.Value);
     }
 
+    public static byte[]? GetUnverifiedAssociatedData(ISerializer serializer, byte[] headerBytes)
+    {
+        var headerWrapper = serializer.Deserialize(headerBytes);
+        if (headerWrapper == null)
+        {
+            return null;
+        }
+
+        return headerWrapper.AssociatedData?.Data == null ? null : headerWrapper.AssociatedData.Data;
+    }
+
     private void DHRatchet(HeaderWrapper.HeaderType header)
     {
         PN = Ns;

@@ -43,7 +43,6 @@ public partial class App : Application
                 services.AddSingleton<IRemoteClientInitializer>(p => p.GetRequiredService<RemoteClientRepository>());
 
                 services.AddSingleton<UdpClientFactory>();
-                services.AddSingleton<SelfEncryptionService>();
                 services.AddSingleton<ViewmodelFactory>();
                 services.AddSingleton<IRemoteClientViewmodelFactory>(p => p.GetRequiredService<ViewmodelFactory>());
                 services.AddSingleton<IChatViewmodelFactory>(p => p.GetRequiredService<ViewmodelFactory>());
@@ -64,6 +63,8 @@ public partial class App : Application
                 services.AddSingleton<ChatRepository>();
 
                 services.AddSingleton<ISerializer, GrpcSerializer>();
+
+                services.AddSingleton<DoubleRatchetModelFactory>();
             });
 
         var host = builder.Build();

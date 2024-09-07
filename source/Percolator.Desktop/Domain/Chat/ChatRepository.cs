@@ -23,13 +23,12 @@ public class ChatRepository
     public void Add(ChatModel chatModel)
     {
         var removed = _chats.RemoveAll(c => 
-            c.RemoteClientModel.Identity.Equals(chatModel.RemoteClientModel.Identity) ||
-            (c.SessionId.Value != null && c.SessionId.Value.Equals(chatModel.SessionId.Value)));
+            c.RemoteClientModel.Identity.Equals(chatModel.RemoteClientModel.Identity));
 
         if (removed != 0)
         {
-            _logger.LogError("Removed {Removed} chat(s) for {Identity} with session:{SessionId}", 
-                removed, chatModel.RemoteClientModel.Identity.ToBase64(), chatModel.SessionId.Value?.ToBase64());
+            _logger.LogError("Removed {Removed} chat(s) for {Identity}", 
+                removed, chatModel.RemoteClientModel.Identity.ToBase64());
             _removed.OnNext(chatModel.RemoteClientModel.Identity);
         }
 
@@ -40,12 +39,6 @@ public class ChatRepository
     {
         chat = _chats
             .FirstOrDefault(c => c.RemoteClientModel.Identity.Equals(identity));
-        return chat != null;
-    }
-    public bool TryGetBySessionId(ByteString sessionId,[NotNullWhen(true)] out ChatModel? chat)
-    {
-        chat = _chats
-            .FirstOrDefault(c => c.SessionId.Value?.Equals(sessionId) ?? false);
         return chat != null;
     }
 }

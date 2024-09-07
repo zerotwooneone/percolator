@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using Microsoft.Extensions.Logging;
+using Percolator.Crypto.Grpc;
 using Percolator.Desktop.Domain.Chat;
 using Percolator.Desktop.Domain.Client;
 using R3;
@@ -46,14 +47,14 @@ public class ChatViewmodel:IDisposable
 
         try
         {
-            if (_chatModel.SessionKey.Value == null)
+            if (!_chatModel.CanReplyIntroduce.CurrentValue)
             {
                 if (!await TryIntroduce())
                 {
                     return;
                 }
                 await Task.Delay(500);
-                if (_chatModel.SessionKey.Value == null)
+                if (!_chatModel.CanReplyIntroduce.CurrentValue)
                 {
                     //todo:tell the user that they are not responding
                     return;

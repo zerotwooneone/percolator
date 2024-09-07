@@ -30,6 +30,17 @@ public class DoubleRatchetModel
             HeaderSignature = ByteString.CopyFrom(headerSignature)
         }.ToByteArray();
     }
+    
+    public static byte[]? GetUnverifiedAssociatedData(
+        ISerializer serializer,
+        byte[] encrypted)
+    {
+        var payload = Payload.Parser.ParseFrom(encrypted);
+        var bytes = Crypto.DoubleRatchetModel.GetUnverifiedAssociatedData(
+            serializer,
+            payload.Header.ToByteArray());
+        return bytes;
+    }
 
     public DecryptResult Decrypt(byte[] encrypted)
     {

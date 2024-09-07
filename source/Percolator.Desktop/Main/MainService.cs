@@ -3,9 +3,11 @@ using System.Diagnostics.CodeAnalysis;
 using System.Net;
 using System.Net.Sockets;
 using System.Security.Cryptography;
+using System.Text;
 using System.Windows;
 using Google.Protobuf;
 using Microsoft.Extensions.Logging;
+using Percolator.Crypto;
 using Percolator.Desktop.Crypto;
 using Percolator.Desktop.Domain.Chat;
 using Percolator.Desktop.Domain.Client;
@@ -14,6 +16,7 @@ using Percolator.Desktop.Udp.Interfaces;
 using Percolator.Protobuf.Announce;
 using Percolator.Protobuf.Introduce;
 using R3;
+using DoubleRatchetModel = Percolator.Crypto.Grpc.DoubleRatchetModel;
 
 namespace Percolator.Desktop.Main;
 
@@ -21,11 +24,12 @@ public class MainService : IRemoteClientService, IChatService
 {
     private readonly UdpClientFactory _udpClientFactory;
     private readonly ILogger<MainService> _logger;
-    private readonly SelfEncryptionService _selfEncryptionService;
     private readonly ILoggerFactory _loggerFactory;
     private readonly IRemoteClientRepository _remoteClientRepository;
     private readonly ISelfProvider _selfProvider;
     private readonly ChatRepository _chatRepository;
+    private readonly DoubleRatchetModelFactory _doubleRatchetModelFactory;
+    private readonly ISerializer _serializer;
     private readonly IBroadcaster _broadcaster;
     private readonly IListener _broadcastListener;
     private readonly Observable<Unit> _announceInterval;
@@ -39,19 +43,21 @@ public class MainService : IRemoteClientService, IChatService
     public MainService(
         UdpClientFactory udpClientFactory,
         ILogger<MainService> logger,
-        SelfEncryptionService selfEncryptionService,
         ILoggerFactory loggerFactory,
         IRemoteClientRepository remoteClientRepository,
         ISelfProvider selfProvider, 
-        ChatRepository chatRepository)
+        ChatRepository chatRepository,
+        DoubleRatchetModelFactory doubleRatchetModelFactory,
+        ISerializer serializer)
     {
         _udpClientFactory = udpClientFactory;
         _logger = logger;
-        _selfEncryptionService = selfEncryptionService;
         _loggerFactory = loggerFactory;
         _remoteClientRepository = remoteClientRepository;
         _selfProvider = selfProvider;
         _chatRepository = chatRepository;
+        _doubleRatchetModelFactory = doubleRatchetModelFactory;
+        _serializer = serializer;
         _broadcaster = _udpClientFactory.CreateBroadcaster(Defaults.DefaultBroadcastPort);
         _broadcastListener = _udpClientFactory.CreateListener(Defaults.DefaultBroadcastPort);
         var ingressContext = new SynchronizationContext();
@@ -68,11 +74,11 @@ public class MainService : IRemoteClientService, IChatService
         _introduceListener = _udpClientFactory.CreateListener(Defaults.DefaultIntroducePort);
         _introduceListener.Received 
             .ObserveOn(ingressContext)
-            .SubscribeAwait(OnReceivedIntroduce);
+            .SubscribeAwait(OnReceivedIntroduceMessage);
     }
 
     const int SessionIdLength = 8;
-    private async ValueTask OnReceivedIntroduce(UdpReceiveResult context, CancellationToken cancellationToken)
+    private async ValueTask OnReceivedIntroduceMessage(UdpReceiveResult context, CancellationToken cancellationToken)
     {
         if (_ipBlacklist.Contains(context.RemoteEndPoint.Address))
         {
@@ -96,8 +102,8 @@ public class MainService : IRemoteClientService, IChatService
             return;
         }
 
-        var introduce = IntroduceRequest.Parser.ParseFrom(context.Buffer);
-        if (introduce.MessageTypeCase == IntroduceRequest.MessageTypeOneofCase.None)
+        var introduce = IntroduceMessage.Parser.ParseFrom(context.Buffer);
+        if (introduce.MessageTypeCase == IntroduceMessage.MessageTypeOneofCase.None)
         {
             _logger.LogWarning("Introduce message does not have valid message type");
             //todo: add to IP ban list
@@ -109,8 +115,8 @@ public class MainService : IRemoteClientService, IChatService
         var timestampGracePeriod = TimeSpan.FromMinutes(1);
         switch (introduce.MessageTypeCase)
         {
-            case IntroduceRequest.MessageTypeOneofCase.UnknownPublicKey:
-                var payload = introduce.UnknownPublicKey.Payload;
+            case IntroduceMessage.MessageTypeOneofCase.IntroduceRequest:
+                var payload = introduce.IntroduceRequest.Payload;
                 if (payload == null)
                 {
                     _logger.LogWarning("Introduce message does not have payload");
@@ -167,16 +173,16 @@ public class MainService : IRemoteClientService, IChatService
                 identity.ImportRSAPublicKey(payload.IdentityKey.ToByteArray(), out _);
 
                 if (!identity.VerifyData(payload.ToByteArray(),
-                        introduce.UnknownPublicKey.PayloadSignature.ToByteArray(), HashAlgorithmName.SHA256,
+                        introduce.IntroduceRequest.PayloadSignature.ToByteArray(), HashAlgorithmName.SHA256,
                         RSASignaturePadding.Pkcs1))
                 {
                     _logger.LogWarning("payload signature is invalid");
                     return;
                 }
 
-                await OnReceivedUnknownPublicKey(context, payload,cancellationToken);
+                await OnReceivedIntroRequest(context, payload,cancellationToken);
                 break;
-            case IntroduceRequest.MessageTypeOneofCase.IntroduceReply:
+            case IntroduceMessage.MessageTypeOneofCase.IntroduceReply:
                 var proceedPayload = introduce.IntroduceReply.Proceed.Payload;
                 if (proceedPayload == null)
                 {
@@ -246,21 +252,11 @@ public class MainService : IRemoteClientService, IChatService
                     _logger.LogWarning("missing ephemeral key");
                     return;
                 }
-                if (!proceedPayload.HasIv || proceedPayload.Iv.Length == 0)
-                {
-                    _logger.LogWarning("missing iv");
-                    return;
-                }
-                if (!proceedPayload.HasEncryptedSessionKey || proceedPayload.EncryptedSessionKey.Length == 0)
-                {
-                    _logger.LogWarning("missing encrypted session key");
-                    return;
-                }
                 
                 
                 OnReceivedReplyIntro(context, proceedPayload);
                 break;
-            case IntroduceRequest.MessageTypeOneofCase.ChatMessage:
+            case IntroduceMessage.MessageTypeOneofCase.ChatMessage:
                 var chatMessage = introduce.ChatMessage;
                 if (chatMessage == null)
                 {
@@ -269,32 +265,35 @@ public class MainService : IRemoteClientService, IChatService
                     return;
                 }
 
-                if (chatMessage.Signed == null)
+                if (!chatMessage.HasData || chatMessage.Data.Length == 0)
                 {
-                    _logger.LogWarning("chat message does not have signed");
+                    _logger.LogWarning("chat message does not have data");
                     //todo: add to IP ban list
                     return;
                 }
 
-                if (!chatMessage.HasSignedSignature || chatMessage.SignedSignature.Length == 0)
+                var chatMessageDataBytes = chatMessage.Data.ToByteArray();
+                var unverifiedAdBytes =
+                    DoubleRatchetModel.GetUnverifiedAssociatedData(_serializer, chatMessageDataBytes);
+                var unverifiedAssociatedData = AssociatedData.Parser.ParseFrom(unverifiedAdBytes);
+                if (unverifiedAssociatedData == null)
                 {
-                    _logger.LogWarning("chat message does not have signed signature");
-                    //todo: add to IP ban list
+                    _logger.LogWarning("chat message does not have valid associated data");
                     return;
                 }
-                if (!chatMessage.Signed.HasTimeStampUnixUtcMs ||
-                     chatMessage.Signed.TimeStampUnixUtcMs < currentUtcTime.Add(-timestampGracePeriod).ToUnixTimeMilliseconds() ||
-                     chatMessage.Signed.TimeStampUnixUtcMs > currentUtcTime.Add(timestampGracePeriod).ToUnixTimeMilliseconds())
+                if (!unverifiedAssociatedData.HasTimeStampUnixUtcMs ||
+                    unverifiedAssociatedData.TimeStampUnixUtcMs < currentUtcTime.Add(-timestampGracePeriod).ToUnixTimeMilliseconds() ||
+                    unverifiedAssociatedData.TimeStampUnixUtcMs > currentUtcTime.Add(timestampGracePeriod).ToUnixTimeMilliseconds())
                 {
-                    _logger.LogWarning("Introduce payload does not have valid timestamp");
+                    _logger.LogWarning("chat message does not have valid timestamp");
                     //todo: add to IP ban list
                     return;
                 }
                 
-                if (!chatMessage.Signed.HasSourceIp ||
-                    chatMessage.Signed.SourceIp.Length == 0 ||
-                    chatMessage.Signed.SourceIp.Length > ipMaxBytes  ||
-                    !TryGetIpAddress(chatMessage.Signed.SourceIp.ToByteArray(), out var chatSourceIp) ||
+                if (!unverifiedAssociatedData.HasSourceIp ||
+                    unverifiedAssociatedData.SourceIp.Length == 0 ||
+                    unverifiedAssociatedData.SourceIp.Length > ipMaxBytes  ||
+                    !TryGetIpAddress(unverifiedAssociatedData.SourceIp.ToByteArray(), out var chatSourceIp) ||
                     !context.RemoteEndPoint.Address.Equals(chatSourceIp))
                 {
                     _logger.LogWarning("chat message source ip is invalid");
@@ -302,40 +301,33 @@ public class MainService : IRemoteClientService, IChatService
                     return;
                 }
 
-                if (!chatMessage.Signed.HasSessionKeyId || chatMessage.Signed.SessionKeyId.Length != 8)
+                //todo:check for valid rsa key length
+                if (!unverifiedAssociatedData.HasIdentityKey || unverifiedAssociatedData.IdentityKey.Length == 0)
                 {
-                    _logger.LogWarning("chat message does not have a valid session key id");
+                    _logger.LogWarning("chat message does not have a valid identity key");
                     //todo: add to IP ban list
                     return;
                 }
 
-                if (!_chatRepository.TryGetBySessionId(chatMessage.Signed.SessionKeyId, out var chatModel))
+                if (!_chatRepository.TryGetByIdentity(unverifiedAssociatedData.IdentityKey, out var chatModel))
                 {
-                    _logger.LogWarning("chat message session key id was not found");
-                    if (_selfProvider.GetSelf().AutoReplyIntroductions.Value && TryGetIpAddress(out var selfIp))
-                    {
-                        //do we have a better port to send to?
-                        await TrySendIntroduction(context.RemoteEndPoint.Address,context.RemoteEndPoint.Port,cancellationToken);
-                    }
+                    _logger.LogWarning("chat message identity was not found");
                     return;
                 }
 
-                if (!chatModel.Ephemeral.Value.VerifyData(chatMessage.Signed.ToByteArray(),
-                        chatMessage.SignedSignature.ToByteArray(), HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1))
+                if (!chatModel.TryDecrypt(
+                    chatMessageDataBytes,
+                    out var decryptResult))
                 {
-                    _logger.LogWarning("chat message signature is invalid");
+                    _logger.LogWarning("failed to decrypt");
                     return;
                 }
 
-                var payloadBytes =
-                    await chatModel.SessionKey.Value.NaiveDecrypt(chatMessage.Signed.EncryptedPayload.ToByteArray());
-                var chatPayload =
-                    IntroduceRequest.Types.ChatMessage.Types.Signed.Types.Payload.Parser.ParseFrom(payloadBytes);
-                if (!chatPayload.HasMessage || string.IsNullOrWhiteSpace(chatPayload.Message))
+                if (decryptResult.PlainText == null || decryptResult.PlainText.Length == 0)
                 {
                     return;
                 }
-                OnReceivedChatMessage(context, chatMessage,chatModel, chatPayload);
+                chatModel.OnChatMessage(new MessageModel(DateTime.Now, Encoding.UTF8.GetString(decryptResult.PlainText),false));
                 break;
             default:
                 _logger.LogWarning("Introduce message does not have valid message type");
@@ -344,14 +336,9 @@ public class MainService : IRemoteClientService, IChatService
         }
     }
 
-    private void OnReceivedChatMessage(UdpReceiveResult context, IntroduceRequest.Types.ChatMessage chatMessage,
-        ChatModel  chatModel, IntroduceRequest.Types.ChatMessage.Types.Signed.Types.Payload chatPayload)
+    private void OnReceivedReplyIntro(UdpReceiveResult context, IntroduceMessage.Types.IntroduceReply.Types.Proceed.Types.Payload payload)
     {
-        chatModel.OnChatMessage(new MessageModel(DateTime.Now, chatPayload.Message,false));
-    }
-
-    private void OnReceivedReplyIntro(UdpReceiveResult context, IntroduceRequest.Types.IntroduceReply.Types.Proceed.Types.Payload payload)
-    {
+        //todo: make sure this is was actually requested
         var didAdd = false;
         var announcer = _remoteClientRepository.GetOrAdd(payload.IdentityKey, _ =>
         {
@@ -388,27 +375,12 @@ public class MainService : IRemoteClientService, IChatService
             }
         }
 
-        var ephemeral = new RSACryptoServiceProvider
-        {
-            PersistKeyInCsp = false
-        };
-        ephemeral.ImportRSAPublicKey(payload.EphemeralKey.ToByteArray(), out _);
         if (!_chatRepository.TryGetByIdentity(announcer.Identity, out var chatModel))
         {
-            chatModel = new ChatModel(announcer);
+            chatModel = new ChatModel(announcer,_doubleRatchetModelFactory);
             _chatRepository.Add(chatModel);
         }
-        chatModel.Ephemeral.Value = ephemeral;
-        
-        Aes aes = Aes.Create();
-        RSAOAEPKeyExchangeDeformatter keyDeformatter = new RSAOAEPKeyExchangeDeformatter(_selfEncryptionService.Ephemeral);
-        var encryptedSessionKey = payload.EncryptedSessionKey.ToByteArray();
-        aes.Key = keyDeformatter.DecryptKeyExchange(encryptedSessionKey);
-        aes.IV= payload.Iv.ToArray();
-        chatModel.SessionKey.Value = aes;
-
-        var sessionId = GetSessionId(encryptedSessionKey);
-        chatModel.SessionId.Value = sessionId;
+        chatModel.OnIntroduce(payload.IdentityKey.ToByteArray(),ECDiffieHellmanCngPublicKey.FromByteArray(payload.EphemeralKey.ToByteArray(), CngKeyBlobFormat.EccPublicBlob));
         
         if (didAdd)
         {
@@ -417,10 +389,11 @@ public class MainService : IRemoteClientService, IChatService
     }
 
     const int maxNicknameLength = 35;
-    private async Task OnReceivedUnknownPublicKey(UdpReceiveResult context,
-        IntroduceRequest.Types.UnknownPublicKey.Types.Payload payload, CancellationToken cancellationToken)
+    private async Task OnReceivedIntroRequest(UdpReceiveResult context,
+        IntroduceMessage.Types.IntroduceRequest.Types.Payload payload, CancellationToken cancellationToken)
     {
         var didAdd = false;
+        var identityKeyBytes = payload.IdentityKey.ToByteArray();
         var announcer = _remoteClientRepository.GetOrAdd(payload.IdentityKey, _ =>
         {
             didAdd = true;
@@ -431,24 +404,25 @@ public class MainService : IRemoteClientService, IChatService
             }
             else
             {
-                newModel.PreferredNickname.Value = SelfRepository.GetRandomNickname(ByteUtils.GetIntFromBytes(payload.IdentityKey.ToByteArray()));
+                newModel.PreferredNickname.Value = SelfRepository.GetRandomNickname(ByteUtils.GetIntFromBytes(identityKeyBytes));
             }
             return newModel;
         });
         using var announcerSub = _remoteClientRepository.WatchForChanges(announcer);
         announcer.AddIpAddress(context.RemoteEndPoint.Address);
         announcer.LastSeen.Value = DateTimeOffset.Now;
-        var ephemeral = new RSACryptoServiceProvider
+        var identity = new RSACryptoServiceProvider
         {
             PersistKeyInCsp = false
         };
-        ephemeral.ImportRSAPublicKey(payload.EphemeralKey.ToByteArray(), out _);
+        identity.ImportRSAPublicKey(identityKeyBytes, out _);
         if (!_chatRepository.TryGetByIdentity(announcer.Identity, out var chatModel))
         {
-            chatModel = new ChatModel(announcer);
+            chatModel = new ChatModel(announcer,_doubleRatchetModelFactory);
             _chatRepository.Add(chatModel);
         }
-        chatModel.Ephemeral.Value = ephemeral;
+        var ephemeral = ECDiffieHellmanCngPublicKey.FromByteArray(payload.EphemeralKey.ToByteArray(), CngKeyBlobFormat.EccPublicBlob);
+        chatModel.OnIntroduce(identityKeyBytes, ephemeral);
         if (payload.HasPreferredNickname && !string.IsNullOrWhiteSpace(payload.PreferredNickname))
         {
             announcer.PreferredNickname.Value = payload.PreferredNickname.Truncate(maxNicknameLength)!;
@@ -747,12 +721,16 @@ public class MainService : IRemoteClientService, IChatService
             return false;
         }
 
-        return await TrySendIntroduction(chatModel.RemoteClientModel.SelectedIpAddress.CurrentValue,
+        return await TrySendIntroduction(
+            chatModel,
+            chatModel.RemoteClientModel.SelectedIpAddress.CurrentValue,
             chatModel.RemoteClientModel.Port.Value,
             cancellationToken);
     }
     
-    private async Task<bool> TrySendIntroduction(IPAddress destinationIp, 
+    private async Task<bool> TrySendIntroduction(
+        ChatModel chatModel,
+        IPAddress destinationIp, 
         int? port=null,
         CancellationToken cancellationToken = default)
     {
@@ -762,7 +740,8 @@ public class MainService : IRemoteClientService, IChatService
             return false;
         }
         var udpClient = _udpClientFactory.GetOrCreateSender(port ?? Defaults.DefaultIntroducePort);
-        await udpClient.Send(destinationIp, GetUnknownPublicKeyBytes(DateTimeOffset.Now, sourceIp), cancellationToken);
+        var ephemeralPublicKey = chatModel.EphemeralPublicKey as byte[] ?? chatModel.EphemeralPublicKey.ToArray();
+        await udpClient.Send(destinationIp, GetIntroduceRequestBytes(DateTimeOffset.Now, sourceIp,ephemeralPublicKey), cancellationToken);
 
         return true;
     }
@@ -775,75 +754,44 @@ public class MainService : IRemoteClientService, IChatService
             _logger.LogWarning("unable to get self ip");
             return false;
         }
+
+        if (!chatModel.CanReplyIntroduce.CurrentValue)
+        {
+            _logger.LogWarning("cannot send reply introduction");
+            return false;
+        }
         var udpClient = _udpClientFactory.GetOrCreateSender(chatModel.RemoteClientModel.Port.Value);
         
-        //todo:try to reuse keys that failed to send
-        Aes aes = Aes.Create();
-        
-        var keyFormatter = new RSAOAEPKeyExchangeFormatter(chatModel.Ephemeral.Value!);
-        var encryptedSessionKey = keyFormatter.CreateKeyExchange(aes.Key, typeof(Aes));
-        
         var curretTime = DateTimeOffset.Now;
-
-        var sessionId = GetSessionId(encryptedSessionKey);
-        
-        //todo:remove old session keys
-        chatModel.SessionId.Value = sessionId;
         
         //todo:consider sending multiple copies
         await udpClient.Send(chatModel.RemoteClientModel.SelectedIpAddress.CurrentValue!, GetIntroReplyBytes(
             curretTime,
-            aes,
             selfIp,
-            encryptedSessionKey), cancellationToken);
+            chatModel.EphemeralPublicKey as byte[] ?? chatModel.EphemeralPublicKey.ToArray()), cancellationToken);
         
-        chatModel.SessionKey.Value = aes;
         return true;
     }
 
-    private ByteString GetSessionId(byte[] encryptedSessionKey)
-    {
-        byte[] bytes = encryptedSessionKey.Take(2)
-            .Concat(encryptedSessionKey.Skip(3).Take(3).Concat(encryptedSessionKey.Skip(7)))
-            .ToArray();
-        var md5 = MD5.Create();
-        var hash = md5.ComputeHash(bytes);
-        
-        const int Prime = 16777619;
-        var result = new byte[SessionIdLength]{3,7,11,15,19,23,27,31};
-        
-        for (int startIndex = 0; startIndex < hash.Length; startIndex+=SessionIdLength)
-        {
-            for (int i = 0; i < SessionIdLength; i++)
-            {
-                result[i] = (byte) ((unchecked((hash[i+startIndex] ^ result[i])*Prime))%255);
-            }
-        }
-
-        return ByteString.CopyFrom(result);
-    }
-
     private byte[] GetIntroReplyBytes(DateTimeOffset currentTime,
-        Aes aes, 
         IPAddress sourceIp,
-        byte[] encryptedSessionKey)
+        byte[] ephemeralKey)
     {
-        var payload = new IntroduceRequest.Types.IntroduceReply.Types.Proceed.Types.Payload
+        var payload = new IntroduceMessage.Types.IntroduceReply.Types.Proceed.Types.Payload
         {
             IdentityKey =ByteString.CopyFrom( _selfProvider.GetSelf().Identity.ExportRSAPublicKey()),
-            EphemeralKey = ByteString.CopyFrom(_selfEncryptionService.Ephemeral.ExportRSAPublicKey()),
+            EphemeralKey = ByteString.CopyFrom(ephemeralKey),
             TimeStampUnixUtcMs = currentTime.ToUniversalTime().ToUnixTimeMilliseconds(),
-            Iv = ByteString.CopyFrom(aes.IV),
-            EncryptedSessionKey = ByteString.CopyFrom(encryptedSessionKey),
-            SourceIp = ByteString.CopyFrom(sourceIp.GetAddressBytes())
+            SourceIp = ByteString.CopyFrom(sourceIp.GetAddressBytes()),
+            PreferredNickname = _selfProvider.GetSelf().PreferredNickname.Value
         };
         var payloadBytes = payload.ToByteArray();
 
-        var m = new IntroduceRequest
+        var m = new IntroduceMessage
         {
-            IntroduceReply = new IntroduceRequest.Types.IntroduceReply
+            IntroduceReply = new IntroduceMessage.Types.IntroduceReply
             {
-                Proceed = new IntroduceRequest.Types.IntroduceReply.Types.Proceed()
+                Proceed = new IntroduceMessage.Types.IntroduceReply.Types.Proceed()
                 {
                     Payload = payload,
                     PayloadSignature = ByteString.CopyFrom(_selfProvider.GetSelf().Identity.SignData(payloadBytes,
@@ -854,20 +802,20 @@ public class MainService : IRemoteClientService, IChatService
         return m.ToByteArray();
     }
     
-    private byte[] GetUnknownPublicKeyBytes(DateTimeOffset currentTime, IPAddress sourceIp)
+    private byte[] GetIntroduceRequestBytes(DateTimeOffset currentTime, IPAddress sourceIp, byte[] ephemeralPublicKey)
     {
-        var payload = new IntroduceRequest.Types.UnknownPublicKey.Types.Payload
+        var payload = new IntroduceMessage.Types.IntroduceRequest.Types.Payload
         {
             IdentityKey =ByteString.CopyFrom( _selfProvider.GetSelf().Identity.ExportRSAPublicKey()),
-            EphemeralKey = ByteString.CopyFrom(_selfEncryptionService.Ephemeral.ExportRSAPublicKey()),
+            EphemeralKey = ByteString.CopyFrom(ephemeralPublicKey),
             TimeStampUnixUtcMs = currentTime.ToUniversalTime().ToUnixTimeMilliseconds(),
             SourceIp = ByteString.CopyFrom(sourceIp.GetAddressBytes())
         };
         var payloadBytes = payload.ToByteArray();
 
-        var m = new IntroduceRequest
+        var m = new IntroduceMessage
         {
-            UnknownPublicKey = new IntroduceRequest.Types.UnknownPublicKey
+            IntroduceRequest = new IntroduceMessage.Types.IntroduceRequest
             {
                 Payload = payload,
                 PayloadSignature = ByteString.CopyFrom(_selfProvider.GetSelf().Identity.SignData(payloadBytes,
@@ -898,34 +846,16 @@ public class MainService : IRemoteClientService, IChatService
             throw new InvalidOperationException("Failed to get ip address");
         }
 
-        if (chatModel.SessionKey.Value == null)
+        if (!chatModel.CanReplyIntroduce.CurrentValue)
         {
-            throw new InvalidOperationException("must have session key");
+            throw new InvalidOperationException("must have double ratchet");
         }
-
-        var payload = new IntroduceRequest.Types.ChatMessage.Types.Signed.Types.Payload
-        {
-            Message = text
-        };
-        var naiveEncrypt = await chatModel.SessionKey.Value.NaiveEncrypt(payload.ToByteArray());
-        var signed = new IntroduceRequest.Types.ChatMessage.Types.Signed
-        {
-            SourceIp = ByteString.CopyFrom(selfIp.GetAddressBytes()),
-            EncryptedPayload = ByteString.CopyFrom(naiveEncrypt),
-            SessionKeyId = chatModel.SessionId.Value,
-            TimeStampUnixUtcMs = curretTime.ToUnixTimeMilliseconds()
-        };
         
-        return new IntroduceRequest
+        return new IntroduceMessage
         {
-            ChatMessage = new IntroduceRequest.Types.ChatMessage
+            ChatMessage = new IntroduceMessage.Types.ChatMessage
             {
-                Signed = signed,
-                SignedSignature = ByteString.CopyFrom(_selfEncryptionService.Ephemeral.SignData(
-                    signed.ToByteArray(),
-                    HashAlgorithmName.SHA256,
-                    RSASignaturePadding.Pkcs1
-                )),
+                Data = ByteString.CopyFrom(chatModel.GetChatData(curretTime,selfIp,_selfProvider.GetSelf().Identity.ExportRSAPublicKey(),text))
             }
         }.ToByteArray();
     }
