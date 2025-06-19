@@ -2,10 +2,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Net;
 using System.Security.Cryptography;
 using System.Text;
-using System.Text.Unicode;
 using Google.Protobuf;
-using Microsoft.Extensions.Logging;
-using Percolator.Crypto;
 using Percolator.Crypto.Grpc;
 using Percolator.Desktop.Domain.Client;
 using Percolator.Desktop.Main;
@@ -33,7 +30,7 @@ public class ChatModel
     public IReadOnlyCollection<byte> EphemeralPublicKey => _ephemeralPublicKey;
 
     public ReadOnlyReactiveProperty<bool> CanIntroduce { get; }
-    public ByteString Identity => RemoteClientModel.Identity;
+    public ByteString OtherIdentity => RemoteClientModel.Identity;
 
     public ChatModel(
         RemoteClientModel remoteClientModel,
@@ -65,7 +62,7 @@ public class ChatModel
             return;
         }
         var rootKey = _doubleRatchetModelFactory.CreateRootKey(ephemeral,identity,  _ephemeral);
-        _doubleRatchetModel.Value = _doubleRatchetModelFactory.Create(rootKey, _ephemeral);
+        _doubleRatchetModel.Value = _doubleRatchetModelFactory.CreateReceiver(rootKey, _ephemeral);
     }
 
     public byte[] GetChatData(DateTimeOffset timeStamp, IPAddress selfIp, byte[] identity, string text)
@@ -93,7 +90,6 @@ public class ChatModel
         try
         {
             result = _doubleRatchetModel.Value.Decrypt(encrypted);
-            OnChatMessage(new MessageModel(DateTime.Now, Encoding.UTF8.GetString(result.PlainText),false));
             return true;
         }
         catch 

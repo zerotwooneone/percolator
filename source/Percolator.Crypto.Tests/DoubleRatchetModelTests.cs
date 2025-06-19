@@ -81,4 +81,30 @@ public class DoubleRatchetModelTests
         bob.RatchetDecrypt(encrypted1.header, encrypted1.encrypted, encrypted1.headerSignature);
         return (alice, bob);
     }
+    
+    [Test]
+    public void SendAndReplyBothSenders()
+    {
+        var aliceIdentity = ECDiffieHellman.Create();
+        var bobIdentity = ECDiffieHellman.Create();
+        byte[] secretKey = [3, 5, 9, 13];
+        var alice = DoubleRatchetModel.CreateSender(bobIdentity.PublicKey, secretKey,
+            _logger, _serializer, aliceIdentity);
+
+        byte[] associatedData = [9, 9, 9, 9, 9];
+        var plainText1 = "hello, attack at dawn"u8.ToArray();
+        var encrypted = alice.RatchetEncrypt(plainText1, associatedData);
+
+        var bob = DoubleRatchetModel.CreateSender(aliceIdentity.PublicKey, secretKey,
+            _logger, _serializer, bobIdentity);
+
+        var tuple1 = bob.RatchetDecrypt(encrypted.header, encrypted.encrypted, encrypted.headerSignature);
+        CollectionAssert.AreEqual(plainText1,tuple1.Value.plainText);
+
+        var plainText2 = "sir, this is an arby's"u8.ToArray();
+        var bobEnc = bob.RatchetEncrypt(plainText2, associatedData);
+        var tuple2 = alice.RatchetDecrypt(bobEnc.header, bobEnc.encrypted, bobEnc.headerSignature);
+        
+        CollectionAssert.AreEqual(plainText2,tuple2.Value.plainText);
+    }
 }

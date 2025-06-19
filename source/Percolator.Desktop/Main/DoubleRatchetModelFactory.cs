@@ -15,7 +15,7 @@ public class DoubleRatchetModelFactory
         _loggerFactory = loggerFactory;
         _serializer = serializer;
     }
-    public DoubleRatchetModel Create(
+    public DoubleRatchetModel CreateReceiver(
         byte[] rootKey,
         ECDiffieHellman ephemeral)
     {
@@ -29,7 +29,7 @@ public class DoubleRatchetModelFactory
 
     public byte[] CreateRootKey(
         ECDiffieHellmanPublicKey otherPublicKey,
-        byte[] otherIdentity,
+        byte[] sourceIdentity,
         ECDiffieHellman selfEphemeral)
     {
         var sharedDh = selfEphemeral.DeriveKeyMaterial(otherPublicKey);
@@ -37,6 +37,6 @@ public class DoubleRatchetModelFactory
         //todo: consider avoiding HDKF - just use sharedDh - it may not improve security
         return HKDF.Extract(HashAlgorithmName.SHA256,
             sharedDh,
-            otherIdentity.Concat(_appRootKeyBytes).ToArray());
+            sourceIdentity.Concat(_appRootKeyBytes).ToArray());
     }
 }

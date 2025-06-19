@@ -67,9 +67,10 @@ public class DoubleRatchetModel
         byte[] secretKey,
         ILogger<DoubleRatchetModel> logger,
         ISerializer serializer,
+        ECDiffieHellman? self = null,
         uint maxSkip = 1000)
     {
-        var dHs = ECDiffieHellman.Create();
+        var dHs = self ?? ECDiffieHellman.Create();
         var (rootKey, chainKey) = KDF_RK(secretKey, dHs.DeriveKeyMaterial(otherPublicKey), KDF_RK_Info);
         var model = new DoubleRatchetModel(dHs, otherPublicKey, rootKey,logger,serializer,maxSkip);
         model.CKs = chainKey;
@@ -327,6 +328,92 @@ public class DoubleRatchetModel
         {
             return !Equals(left, right);
         }
+    }
+}
+
+public class DoubleRatchetClient
+{
+    private readonly ECDiffieHellman _self;
+    private readonly ECDiffieHellmanPublicKey _other;
+    private readonly byte[] _sharedSecret;
+    private readonly ISerializer _serializer;
+    private readonly DoubleRatchetModel _sender;
+    private readonly DoubleRatchetModel _receiver;
+    private bool? _preferReceiver = null;
+
+    public DoubleRatchetClient(
+        ECDiffieHellman self,
+        ECDiffieHellmanPublicKey other,
+        byte[] sharedSecret,
+        ILoggerFactory loggerFactory,
+        ISerializer serializer,
+        uint maxSkip = 1000)
+    {
+        _self = self;
+        SelfPublicKey = self.PublicKey.ToByteArray();
+        _other = other;
+        OtherPublicKey = other.ToByteArray();
+        _serializer = serializer;
+
+        var logger = loggerFactory.CreateLogger<DoubleRatchetModel>();
+        _sender = DoubleRatchetModel.CreateSender(other,sharedSecret, logger, _serializer,_self, maxSkip);
+        _receiver = DoubleRatchetModel.CreateReceiver(_self,sharedSecret, logger, _serializer,maxSkip);
+    }
+
+    public byte[] OtherPublicKey { get; }
+
+    public byte[] SelfPublicKey { get; }
+
+    public bool TryDecrypt(
+        byte[] headerBytes, 
+        byte[] cipherText, 
+        byte[] headerSignature, 
+        [NotNullWhen(true)](byte[] plainText,byte[] associatedData,uint messageNumber)? decrypted)
+    {
+        var initialPreferReceiver = _preferReceiver;
+        Func<byte[], byte[], byte[], (byte[] plainText, byte[] associatedData, uint messageNumber)?> first =
+            _preferReceiver == null || _preferReceiver.Value
+                ? _receiver.RatchetDecrypt
+                : _sender.RatchetDecrypt;
+        Func<byte[], byte[], byte[], (byte[] plainText, byte[] associatedData, uint messageNumber)?> second =
+            _preferReceiver != null && !_preferReceiver.Value
+            ? _sender.RatchetDecrypt
+            : _receiver.RatchetDecrypt;
+        try
+        {
+            decrypted = first(headerBytes, cipherText, headerSignature);
+            if (decrypted != null)
+            {
+                if (initialPreferReceiver == null)
+                {
+                    _preferReceiver = true;
+                }
+                return true;
+            }
+        }
+        catch 
+        {
+            //todo: log
+        }
+
+        try
+        {
+            decrypted = second(headerBytes, cipherText, headerSignature);
+            if (decrypted != null)
+            {
+                if (initialPreferReceiver == null)
+                {
+                    _preferReceiver = false;
+                }
+                return true;
+            }
+        }
+        catch
+        {
+            //todo: log
+        }
+
+        return false;
     }
 }
 
