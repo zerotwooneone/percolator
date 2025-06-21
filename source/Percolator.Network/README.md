@@ -15,3 +15,7 @@ The networking layer uses a hybrid model to balance efficiency and reliability f
   - The gRPC services handle:
     - Announcing and requesting manifests.
     - Transferring file chunks using server-side streaming for efficiency.
+
+## Design Goals
+
+- **IPv6 First**: The networking stack is designed to be IPv6-first to ensure future compatibility. It will include a fallback to IPv4 to maintain support for older networks.

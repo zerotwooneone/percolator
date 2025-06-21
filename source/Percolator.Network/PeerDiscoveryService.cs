@@ -1,9 +1,11 @@
+using System;
 using System.Collections.Concurrent;
 using System.Net;
+using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Text;
-using System.Threading;
 using System.Threading.Tasks;
+using System.Threading;
 using System.Linq;
 
 namespace Percolator.Network
@@ -15,20 +17,25 @@ namespace Percolator.Network
         private static readonly TimeSpan PeerExpirationTime = TimeSpan.FromSeconds(30);
 
         private readonly UdpClient _udpClient;
-        private readonly int _discoveryPort;
         private readonly int _grpcPort;
+        private readonly IPAddress _localIpAddress;
         private readonly ConcurrentDictionary<IPEndPoint, Peer> _peers = new();
         private CancellationTokenSource? _cancellationTokenSource;
 
-        public PeerDiscoveryService(int grpcPort, int discoveryPort = 8999)
-        {
-            _grpcPort = grpcPort;
-            _discoveryPort = discoveryPort;
-            _udpClient = new UdpClient(_discoveryPort);
-            _udpClient.EnableBroadcast = true;
-        }
+        public event EventHandler<Peer>? PeerDiscovered;
+        public event EventHandler<Peer>? PeerExpired;
 
         public IReadOnlyCollection<Peer> DiscoveredPeers => _peers.Values.ToList();
+
+        public PeerDiscoveryService(int grpcPort)
+        {
+            _grpcPort = grpcPort;
+            _localIpAddress = GetPrimaryLocalIpAddress();
+            _udpClient = new UdpClient();
+            _udpClient.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+            _udpClient.Client.Bind(new IPEndPoint(IPAddress.Any, BroadcastPort));
+            _udpClient.EnableBroadcast = true;
+        }
 
         public async Task StartAsync(CancellationToken cancellationToken = default)
         {
@@ -57,9 +64,9 @@ namespace Percolator.Network
         {
             while (!token.IsCancellationRequested)
             {
-                var message = $"PERCOLATOR_DISCOVERY:{_grpcPort}";
+                var message = $"PERCOLATOR_DISCOVERY:{_localIpAddress}:{_grpcPort}";
                 var data = Encoding.UTF8.GetBytes(message);
-                await _udpClient.SendAsync(data, new IPEndPoint(IPAddress.Broadcast, _discoveryPort), token);
+                await _udpClient.SendAsync(data, new IPEndPoint(IPAddress.Broadcast, BroadcastPort), token);
                 await Task.Delay(TimeSpan.FromSeconds(5), token);
             }
         }
@@ -72,33 +79,42 @@ namespace Percolator.Network
                 {
                     var result = await _udpClient.ReceiveAsync(token);
                     var message = Encoding.UTF8.GetString(result.Buffer);
+                    var parts = message.Split(':');
 
-                    if (message.StartsWith("PERCOLATOR_DISCOVERY:"))
+                    if (parts.Length == 3 && parts[0] == "PERCOLATOR_DISCOVERY")
                     {
-                        var parts = message.Split(':');
-                        if (parts.Length == 2 && int.TryParse(parts[1], out var receivedGrpcPort))
+                        if (IPAddress.TryParse(parts[1], out var discoveredIp) && int.TryParse(parts[2], out var discoveredPort))
                         {
-                            var remoteEndpoint = result.RemoteEndPoint;
-                            if (IsSelf(remoteEndpoint.Address, receivedGrpcPort)) continue;
-
-                            var peer = new Peer(remoteEndpoint.Address, receivedGrpcPort);
-                            peer.LastSeenUtc = DateTime.UtcNow;
-
-                            _peers.AddOrUpdate(peer.GrpcEndpoint, peer, (key, existingPeer) =>
+                            // Ignore our own broadcast
+                            if (discoveredIp.Equals(_localIpAddress) && discoveredPort == _grpcPort)
                             {
-                                existingPeer.LastSeenUtc = DateTime.UtcNow;
-                                return existingPeer;
-                            });
+                                continue;
+                            }
+
+                            var peerEndpoint = new IPEndPoint(discoveredIp, discoveredPort);
+                            var resultingPeer = new Peer(discoveredIp, discoveredPort);
+
+                            if (_peers.TryAdd(peerEndpoint, resultingPeer))
+                            {
+                                PeerDiscovered?.Invoke(this, resultingPeer);
+                                _ = Task.Delay(PeerExpirationTime, token).ContinueWith(_ =>
+                                {
+                                    if (_peers.TryRemove(peerEndpoint, out var removedPeer))
+                                    {
+                                        PeerExpired?.Invoke(this, removedPeer);
+                                    }
+                                }, token);
+                            }
                         }
                     }
                 }
                 catch (OperationCanceledException)
                 {
-                    break; // Service is stopping
+                    // Expected when cancellation is requested
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"Error during peer discovery: {ex.Message}");
+                    Console.WriteLine($"[Discovery] Error while listening for peers: {ex.Message}");
                 }
             }
         }
@@ -113,9 +129,10 @@ namespace Percolator.Network
 
                     foreach (var peer in expiredPeers)
                     {
-                        if (_peers.TryRemove(peer.GrpcEndpoint, out _))
+                        if (_peers.TryRemove(peer.GrpcEndpoint, out var removedPeer))
                         {
-                            Console.WriteLine($"[Discovery] Peer expired: {peer}");
+                            Console.WriteLine($"[Discovery] Peer expired: {removedPeer}");
+                            PeerExpired?.Invoke(this, removedPeer);
                         }
                     }
 
@@ -128,13 +145,17 @@ namespace Percolator.Network
             }
         }
 
-        private bool IsSelf(IPAddress address, int port)
+        private IPAddress GetPrimaryLocalIpAddress()
         {
-            if (port != _grpcPort) return false;
-            if (IPAddress.IsLoopback(address)) return true;
+            var primaryIp = NetworkInterface.GetAllNetworkInterfaces()
+                .Where(ni => ni.OperationalStatus == OperationalStatus.Up &&
+                             (ni.NetworkInterfaceType == NetworkInterfaceType.Ethernet ||
+                              ni.NetworkInterfaceType == NetworkInterfaceType.Wireless80211))
+                .SelectMany(ni => ni.GetIPProperties().UnicastAddresses)
+                .FirstOrDefault(ip => ip.Address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)?
+                .Address;
 
-            var host = Dns.GetHostEntry(Dns.GetHostName());
-            return host.AddressList.Any(ip => ip.AddressFamily == AddressFamily.InterNetwork && ip.Equals(address));
+            return primaryIp ?? throw new Exception("Could not determine primary local IP address for discovery.");
         }
 
         public void Dispose()

@@ -18,7 +18,9 @@ namespace Percolator.NetworkTests
 
             // Manually add a peer to the internal dictionary for testing purposes
             var peersField = typeof(PeerDiscoveryService).GetField("_peers", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            Assert.That(peersField, Is.Not.Null, "_peers field not found.");
             var peersDictionary = peersField.GetValue(service) as System.Collections.Concurrent.ConcurrentDictionary<IPEndPoint, Peer>;
+            Assert.That(peersDictionary, Is.Not.Null, "_peers dictionary is null.");
 
             // Set the LastSeenUtc to be older than the expiration time
             peer.LastSeenUtc = System.DateTime.UtcNow.AddSeconds(-40);
@@ -27,8 +29,10 @@ namespace Percolator.NetworkTests
             Assert.That(service.DiscoveredPeers.Count(), Is.EqualTo(1), "Pre-condition: Peer should be in the list.");
 
             // Act
-            var cleanupTask = typeof(PeerDiscoveryService).GetMethod("CleanupExpiredPeersAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var task = (Task)cleanupTask.Invoke(service, new object[] { new System.Threading.CancellationToken() });
+            var cleanupTaskMethod = typeof(PeerDiscoveryService).GetMethod("CleanupExpiredPeersAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            Assert.That(cleanupTaskMethod, Is.Not.Null, "CleanupExpiredPeersAsync method not found.");
+            var task = cleanupTaskMethod.Invoke(service, new object[] { new System.Threading.CancellationToken() }) as Task;
+            Assert.That(task, Is.Not.Null, "Cleanup task is null.");
 
             // We don't await the task directly as it's an infinite loop.
             // Instead, we give it a moment to run one cleanup cycle.

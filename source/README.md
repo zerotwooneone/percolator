@@ -25,6 +25,19 @@ The primary component of this solution is the `Percolator.Cryptography` library,
 *   **Bounded Caches for Skipped Messages**: Protocols like the Double Ratchet and Sender Key need to handle out-of-order messages by temporarily caching skipped message keys. This cache must have a strict upper bound (e.g., `MaxSkippedMessages`) to prevent a Denial-of-Service (DoS) attack where an attacker forces the client to cache an excessive number of keys, leading to memory exhaustion.
 *   **Preventing Cross-Group Attacks**: In a system where a user can be a member of multiple groups, a critical vulnerability can arise if control messages (like a re-key message) are not bound to their specific group context. An attacker could potentially record a re-key message from `Group A` and replay it to a member in `Group B`, causing their session state to become corrupted and out of sync with the rest of the group. To prevent this, all re-key messages contain an `OldGroupId` field, which is verified by the recipient's `GroupManager`. This ensures that the re-key message is only processed if it originated from the group it is intended for, effectively preventing cross-group state confusion attacks.
 
+### gRPC Networking for Peer-to-Peer Communication
+
+When building the peer-to-peer networking layer using gRPC, several critical configuration details were discovered to ensure reliable communication, especially when running multiple nodes on a single machine for testing.
+
+*   **Startup Race Condition**: A race condition can easily occur where the `PeerDiscoveryService` starts broadcasting and attempting to connect to peers *before* the Kestrel gRPC server is fully initialized and ready to accept connections. This leads to persistent "connection refused" errors.
+    *   **Solution**: The `IHostedService` adapter pattern can exacerbate this issue. The robust solution is to manage the `PeerDiscoveryService` lifecycle directly. By tying its `StartAsync` and `Stop` methods to the `IHostApplicationLifetime` events (`ApplicationStarted` and `ApplicationStopping`), we guarantee that peer discovery only begins after the gRPC server is confirmed to be listening.
+
+*   **HTTP/2 Protocol Requirement**: gRPC requires the HTTP/2 protocol. When running without TLS (as is common in local development or trusted networks), Kestrel may default to HTTP/1.1, causing connection attempts to fail with an `HTTP_1_1_REQUIRED` error.
+    *   **Solution**: Explicitly configure Kestrel to use HTTP/2 on its listening endpoints. This is done by using `ConfigureKestrel` and setting the protocol: `options.ListenAnyIP(port, listenOptions => { listenOptions.Protocols = HttpProtocols.Http2; });`.
+
+*   **Local Peer Connection IP**: In network environments like Docker or WSL, a node's broadcasted IP address (e.g., `172.25.0.1`) may not be the correct address for another local node to connect to. For inter-process communication on the same machine, the loopback address is the correct and most reliable target.
+    *   **Solution**: When a peer is discovered, if it is known to be running on the same machine, the `PeerConnectionManager` should force the gRPC client to connect to `127.0.0.1` (loopback) on the discovered port, rather than using the IP address from the discovery broadcast.
+
 ## Usage
 
 This library is designed to be straightforward to use. Below are examples for common scenarios.
