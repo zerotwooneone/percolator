@@ -3,8 +3,6 @@ using System.Security.Cryptography;
 using System.Linq;
 using System.Runtime.CompilerServices;
 
-[assembly: InternalsVisibleTo("Percolator.CryptographyTests")]
-
 namespace Pecolator.Cryptography
 {
     public class DoubleRatchetSession
