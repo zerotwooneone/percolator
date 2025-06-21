@@ -67,8 +67,8 @@ The `GroupManager` provides a secure way to manage group chats, including the cr
 // Prerequisite: Alice, Bob, and Carol have established pairwise DoubleRatchetSessions.
 // (aliceToBob, bobToAlice, aliceToCarol, carolToAlice)
 
-// 1. Alice creates a new group.
-var aliceManager = new GroupManager();
+// 1. Alice creates a new group, providing her identity key.
+var aliceManager = new GroupManager(aliceIdentity);
 
 // 2. Alice invites Bob and Carol to the group.
 var bobInvitation = aliceManager.CreateInvitation("bob", aliceToBob);
@@ -76,8 +76,9 @@ var carolInvitation = aliceManager.CreateInvitation("carol", aliceToCarol);
 // These invitations are sent to Bob and Carol over their secure 1-on-1 channels.
 
 // 3. Bob and Carol accept their invitations.
-var bobManager = GroupManager.AcceptInvitation(bobToAlice, bobInvitation);
-var carolManager = GroupManager.AcceptInvitation(carolToAlice, carolInvitation);
+// They must be provided with Alice's public signing key and public identity key.
+var bobManager = GroupManager.AcceptInvitation(bobToAlice, bobInvitation, aliceManager.SigningPublicKey!, aliceIdentity);
+var carolManager = GroupManager.AcceptInvitation(carolToAlice, carolInvitation, aliceManager.SigningPublicKey!, aliceIdentity);
 
 // 4. Alice sends a message to the group.
 var welcomeMessage = aliceManager.GroupSession.Encrypt("Welcome!"u8.ToArray());
@@ -113,7 +114,7 @@ catch (CryptographicException)
 ### 3. Session Persistence
 
 To support long-running, asynchronous conversations, sessions can be serialized. The library provides a state object that can be serialized to JSON (or any other format).
-**IMPORTANT**: The user is responsible for encrypting the serialized state at rest.
+**IMPORTANT**: For `DoubleRatchetSession`, the user is responsible for encrypting the serialized state at rest. `GroupManager` provides built-in encryption.
 
 ```csharp
 using System.Text.Json;
@@ -136,14 +137,15 @@ var loadedAliceSession = new DoubleRatchetSession(loadedAliceState, aliceIdentit
 
 
 // --- GroupManager Persistence ---
-// Alice gets her group manager state.
-var groupState = aliceManager.GetState();
+// The library provides built-in authenticated encryption for state persistence.
+// You must provide a master key, which you should derive using a secure KDF
+// like Argon2 or PBKDF2 from a user password or other secret.
+var masterKey = RandomNumberGenerator.GetBytes(32); // Example key
 
-// She can serialize it.
-var groupStateJson = JsonSerializer.Serialize(groupState);
+// Alice saves her group manager state. The result is encrypted.
+var encryptedState = aliceManager.SaveState(masterKey);
 
-// TODO: Encrypt groupStateJson before storing it securely.
+// The encrypted state can be stored safely.
 
-// Later, she can restore it.
-var loadedGroupState = JsonSerializer.Deserialize<GroupManager.GroupManagerState>(groupStateJson)!;
-var loadedGroupManager = new GroupManager(loadedGroupState);
+// Later, she can restore it using the same master key and her identity key.
+var loadedGroupManager = GroupManager.LoadState(encryptedState, masterKey, aliceIdentity);
