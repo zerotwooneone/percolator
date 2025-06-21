@@ -7,6 +7,9 @@ using System.Text;
 using System.Threading.Tasks;
 using System.Threading;
 using System.Linq;
+using System.Runtime.CompilerServices;
+
+[assembly: InternalsVisibleTo("Percolator.NetworkTests")]
 
 namespace Percolator.Network
 {
@@ -20,16 +23,15 @@ namespace Percolator.Network
         private readonly int _grpcPort;
         private readonly IPAddress _localIpAddress;
         private readonly ConcurrentDictionary<IPEndPoint, Peer> _peers = new();
+        private readonly IPeerDiscoveryHandler _handler;
         private CancellationTokenSource? _cancellationTokenSource;
 
-        public event EventHandler<Peer>? PeerDiscovered;
-        public event EventHandler<Peer>? PeerExpired;
+        public IReadOnlyCollection<Peer> DiscoveredPeers => _peers.Values.ToList().AsReadOnly();
 
-        public IReadOnlyCollection<Peer> DiscoveredPeers => _peers.Values.ToList();
-
-        public PeerDiscoveryService(int grpcPort)
+        public PeerDiscoveryService(int grpcPort, IPeerDiscoveryHandler handler)
         {
             _grpcPort = grpcPort;
+            _handler = handler;
             _localIpAddress = GetPrimaryLocalIpAddress();
             _udpClient = new UdpClient();
             _udpClient.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
@@ -43,7 +45,7 @@ namespace Percolator.Network
 
             var listenTask = ListenForPeersAsync(_cancellationTokenSource.Token);
             var broadcastTask = BroadcastPresenceAsync(_cancellationTokenSource.Token);
-            var cleanupTask = CleanupExpiredPeersAsync(_cancellationTokenSource.Token);
+            var cleanupTask = RunCleanupLoopAsync(_cancellationTokenSource.Token);
 
             try
             {
@@ -92,19 +94,21 @@ namespace Percolator.Network
                             }
 
                             var peerEndpoint = new IPEndPoint(discoveredIp, discoveredPort);
-                            var resultingPeer = new Peer(discoveredIp, discoveredPort);
 
-                            if (_peers.TryAdd(peerEndpoint, resultingPeer))
-                            {
-                                PeerDiscovered?.Invoke(this, resultingPeer);
-                                _ = Task.Delay(PeerExpirationTime, token).ContinueWith(_ =>
+                            _peers.AddOrUpdate(peerEndpoint,
+                                // Factory for adding a new peer
+                                (key) =>
                                 {
-                                    if (_peers.TryRemove(peerEndpoint, out var removedPeer))
-                                    {
-                                        PeerExpired?.Invoke(this, removedPeer);
-                                    }
-                                }, token);
-                            }
+                                    var newPeer = new Peer(discoveredIp, discoveredPort);
+                                    _ = _handler.HandlePeerDiscoveredAsync(newPeer);
+                                    return newPeer;
+                                },
+                                // Factory for updating an existing peer
+                                (key, existingPeer) =>
+                                {
+                                    existingPeer.LastSeenUtc = DateTime.UtcNow;
+                                    return existingPeer;
+                                });
                         }
                     }
                 }
@@ -119,41 +123,46 @@ namespace Percolator.Network
             }
         }
 
-        private async Task CleanupExpiredPeersAsync(CancellationToken cancellationToken)
+        private async Task RunCleanupLoopAsync(CancellationToken cancellationToken)
         {
             while (!cancellationToken.IsCancellationRequested)
             {
                 try
                 {
-                    var expiredPeers = _peers.Values.Where(p => DateTime.UtcNow - p.LastSeenUtc > PeerExpirationTime).ToList();
-
-                    foreach (var peer in expiredPeers)
-                    {
-                        if (_peers.TryRemove(peer.GrpcEndpoint, out var removedPeer))
-                        {
-                            Console.WriteLine($"[Discovery] Peer expired: {removedPeer}");
-                            PeerExpired?.Invoke(this, removedPeer);
-                        }
-                    }
+                    CleanupExpiredPeers();
 
                     await Task.Delay(BroadcastInterval, cancellationToken);
                 }
-                catch (OperationCanceledException)
+                catch (TaskCanceledException)
                 {
                     break; // Exit loop on cancellation
                 }
             }
         }
 
-        private IPAddress GetPrimaryLocalIpAddress()
+        internal void AddPeerForTesting(Peer peer)
         {
-            var primaryIp = NetworkInterface.GetAllNetworkInterfaces()
-                .Where(ni => ni.OperationalStatus == OperationalStatus.Up &&
-                             (ni.NetworkInterfaceType == NetworkInterfaceType.Ethernet ||
-                              ni.NetworkInterfaceType == NetworkInterfaceType.Wireless80211))
-                .SelectMany(ni => ni.GetIPProperties().UnicastAddresses)
-                .FirstOrDefault(ip => ip.Address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)?
-                .Address;
+            _peers[peer.GrpcEndpoint] = peer;
+        }
+
+        internal void CleanupExpiredPeers()
+        {
+            var expiredPeers = _peers.Values.Where(p => (DateTime.UtcNow - p.LastSeenUtc) > PeerExpirationTime).ToList();
+            foreach (var peer in expiredPeers)
+            {
+                if (_peers.TryRemove(peer.GrpcEndpoint, out var removedPeer))
+                {
+                    Console.WriteLine($"[Discovery] Peer expired: {removedPeer}");
+                    _ = _handler.HandlePeerExpiredAsync(removedPeer);
+                }
+            }
+        }
+
+        private static IPAddress GetPrimaryLocalIpAddress()
+        {
+            var host = Dns.GetHostEntry(Dns.GetHostName());
+            var primaryIp = host.AddressList
+                .FirstOrDefault(ip => ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork);
 
             return primaryIp ?? throw new Exception("Could not determine primary local IP address for discovery.");
         }

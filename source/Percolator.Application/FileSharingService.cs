@@ -1,12 +1,18 @@
+using System;
+using System.Threading.Tasks;
 using Grpc.Core;
 using Percolator.Contracts.Protos;
-using System.Threading.Tasks;
 
 namespace Percolator.Application
 {
     public class FileSharingService : FileSharing.FileSharingBase
     {
-        // In a real application, a logger would be injected here.
+        private readonly ManifestStore _manifestStore;
+
+        public FileSharingService(ManifestStore manifestStore)
+        {
+            _manifestStore = manifestStore;
+        }
 
         public override Task<AnnounceManifestResponse> AnnounceManifest(AnnounceManifestRequest request, ServerCallContext context)
         {
@@ -16,9 +22,14 @@ namespace Percolator.Application
 
         public override Task<RequestManifestResponse> RequestManifest(RequestManifestRequest request, ServerCallContext context)
         {
-            Console.WriteLine($"[gRPC] Received manifest request from {context.Peer}.");
-            // Placeholder: In the future, this would look up and return the actual manifest.
-            return Task.FromResult(new RequestManifestResponse());
+            Console.WriteLine($"[gRPC] Received manifest request from {context.Peer} for hash: {request.ManifestHash.ToByteArray().Length} bytes");
+            var manifest = _manifestStore.GetManifest(request.ManifestHash);
+            var response = new RequestManifestResponse();
+            if (manifest != null)
+            {
+                response.SignedManifest = manifest;
+            }
+            return Task.FromResult(response);
         }
 
         public override Task DownloadChunk(DownloadChunkRequest request, IServerStreamWriter<DownloadChunkResponse> responseStream, ServerCallContext context)

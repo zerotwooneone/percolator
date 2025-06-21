@@ -1,7 +1,9 @@
+using AutoFixture;
+using FluentAssertions;
+using Moq;
 using NUnit.Framework;
 using Percolator.Network;
 using System.Linq;
-using System.Net;
 using System.Threading.Tasks;
 
 namespace Percolator.NetworkTests
@@ -10,36 +12,29 @@ namespace Percolator.NetworkTests
     public class PeerDiscoveryServiceTests
     {
         [Test]
-        public async Task PeerExpiration_RemovesStalePeers()
+        public void PeerExpiration_RemovesStalePeersAndNotifiesHandler()
         {
             // Arrange
-            var service = new PeerDiscoveryService(5000);
-            var peer = new Peer(IPAddress.Loopback, 5001);
+            var fixture = new Fixture();
+            var handlerMock = new Mock<IPeerDiscoveryHandler>();
+            fixture.Register(() => handlerMock.Object);
 
-            // Manually add a peer to the internal dictionary for testing purposes
-            var peersField = typeof(PeerDiscoveryService).GetField("_peers", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            Assert.That(peersField, Is.Not.Null, "_peers field not found.");
-            var peersDictionary = peersField.GetValue(service) as System.Collections.Concurrent.ConcurrentDictionary<IPEndPoint, Peer>;
-            Assert.That(peersDictionary, Is.Not.Null, "_peers dictionary is null.");
+            var service = fixture.Create<PeerDiscoveryService>();
+            var peer = fixture.Create<Peer>();
 
-            // Set the LastSeenUtc to be older than the expiration time
+            // Set the peer's state and add it to the service using the test helper
             peer.LastSeenUtc = System.DateTime.UtcNow.AddSeconds(-40);
-            peersDictionary[peer.GrpcEndpoint] = peer;
+            service.AddPeerForTesting(peer);
 
-            Assert.That(service.DiscoveredPeers.Count(), Is.EqualTo(1), "Pre-condition: Peer should be in the list.");
+            service.DiscoveredPeers.Should().HaveCount(1, "because a peer was added for testing");
 
             // Act
-            var cleanupTaskMethod = typeof(PeerDiscoveryService).GetMethod("CleanupExpiredPeersAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            Assert.That(cleanupTaskMethod, Is.Not.Null, "CleanupExpiredPeersAsync method not found.");
-            var task = cleanupTaskMethod.Invoke(service, new object[] { new System.Threading.CancellationToken() }) as Task;
-            Assert.That(task, Is.Not.Null, "Cleanup task is null.");
-
-            // We don't await the task directly as it's an infinite loop.
-            // Instead, we give it a moment to run one cleanup cycle.
-            await Task.Delay(100);
+            service.CleanupExpiredPeers();
 
             // Assert
-            Assert.That(service.DiscoveredPeers.Count(), Is.EqualTo(0), "Post-condition: Peer should have been removed.");
+            service.DiscoveredPeers.Should().BeEmpty("because the stale peer should have been removed");
+            handlerMock.Verify(h => h.HandlePeerExpiredAsync(peer), Times.Once,
+                "the handler should be notified exactly once when a peer expires");
         }
     }
 }
