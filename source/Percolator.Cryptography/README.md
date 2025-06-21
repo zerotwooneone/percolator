@@ -1,12 +1,21 @@
-# Pecolator.Cryptography
+# Percolator.Cryptography
 
-This project is a core domain library for the Pecolator chat application. It is responsible for all cryptographic operations required to establish and maintain secure, end-to-end encrypted communication sessions.
+This project is a core domain library for the Percolator chat application. It is responsible for all cryptographic operations required to establish and maintain secure, end-to-end encrypted communication sessions.
 
 ## Goal
 
-The primary goal of this library is to provide a self-contained, secure, and well-tested implementation of the cryptographic protocols needed for Pecolator. It encapsulates the complexity of modern cryptographic systems, offering a simple API to the application layer for encrypting and decrypting messages.
+The primary goal of this library is to provide a self-contained, secure, and well-tested implementation of the cryptographic protocols needed for Percolator. It encapsulates the complexity of modern cryptographic systems, offering a simple API to the application layer for encrypting and decrypting messages.
 
 This library is designed with Domain-Driven Design (DDD) principles in mind. It contains only pure cryptographic logic and is completely isolated from any infrastructure concerns like networking, databases, or user interfaces.
+
+## AI Assistant Guidance
+
+When modifying this project, adhere to the following architectural rules:
+
+1.  **Domain Independence**: This is a foundational domain library. It **must not** contain references to other domain libraries (e.g., `Percolator.Identity`, `Percolator.Network`). It should have no dependencies on other Percolator projects except for `Percolator.Contracts` if necessary.
+2.  **Provide Primitives**: This library's role is to provide low-level, reusable cryptographic primitives and operations (e.g., `CertificateGenerator`). It should not contain business logic specific to other domains.
+3.  **Consumed via Interfaces**: Higher-level domains that consume these operations should do so via interfaces defined in their own projects. The `Percolator.Application` layer is responsible for implementing those interfaces and calling the primitives in this library.
+4.  **Fail Forward**: Do not add logging for security-sensitive errors. The established pattern is to throw an exception (e.g., `CryptographicException`) to ensure failures are handled by the consuming layer.
 
 ## High-Level Concepts
 
