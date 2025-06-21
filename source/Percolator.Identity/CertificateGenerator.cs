@@ -17,7 +17,7 @@ public static class CertificateGenerator
             sanBuilder.AddDnsName(commonName);
         }
 
-        using var rsa = RSA.Create(2048);
+        using var rsa = RSA.Create(4096);
         var request = new CertificateRequest(
             $"cn={commonName}",
             rsa,

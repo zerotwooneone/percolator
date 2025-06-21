@@ -166,13 +166,13 @@ static IServiceCollection ConfigureServices(string[] args)
 {
     var services = new ServiceCollection();
     services.AddLogging(configure => configure.AddConsole());
-    services.AddSingleton<ICredentialService, CredentialService>();
     services.AddSingleton<IIdentityService, PersistentIdentityService>();
+    services.AddSingleton<ICredentialService, CredentialService>();
+    services.AddSingleton<ISignatureService, SignatureService>();
     services.AddSingleton<IManifestService, ManifestService>();
     services.AddSingleton<IManifestStore, ManifestStore>();
     services.AddSingleton<IPeerConnectionManager, PeerConnectionManager>();
     services.AddSingleton<IPeerDiscoveryHandler, PeerDiscoveryHandler>();
-    services.AddSingleton<ISignatureService, SignatureService>();
 
     // Pre-parse the port to configure services correctly.
     var portOption = new Option<int>(new[] { "--port", "-p" }, () => 9000);
@@ -187,8 +187,11 @@ static IServiceCollection ConfigureServices(string[] args)
         var certificate = identity.GetDefaultIdentityCertificate();
         return new PeerDiscoveryService(port, certificate.Thumbprint, handler, logger);
     });
-    services.AddGrpc();
-    services.AddMediatR(cfg => cfg.RegisterServicesFromAssemblyContaining<AnnounceManifestsOnPeerDiscoveredHandler>());
+    services.AddMediatR(cfg => cfg.RegisterServicesFromAssemblyContaining<Program>());
+    services.AddGrpc(options =>
+    {
+        options.MaxReceiveMessageSize = 4 * 1024 * 1024; // 4 MB
+    });
 
     // Add a reference to the service collection itself so we can transfer it to the WebApplication host.
     services.AddSingleton<IServiceCollection>(services);
