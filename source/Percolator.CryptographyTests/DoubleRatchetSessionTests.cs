@@ -85,7 +85,7 @@ namespace Percolator.CryptographyTests
             // Simulate serializing and deserializing the state
             var serializedState = JsonSerializer.Serialize(state);
             var deserializedState = JsonSerializer.Deserialize<DoubleRatchetSessionState>(serializedState)!;
-            using var loadedBobSession = new DoubleRatchetSession(deserializedState);
+            using var loadedBobSession = new DoubleRatchetSession(deserializedState, _bobIdentity);
 
             var response = loadedBobSession.Encrypt("Hello, Alice!"u8.ToArray());
             var decryptedResponse = _aliceSession.Decrypt(response);

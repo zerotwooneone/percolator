@@ -47,7 +47,7 @@ namespace Percolator.Cryptography.Tests
         public void FullGroupLifecycle_ShouldSucceed()
         {
             // 1. Setup: Creator and two new members (Alice, Bob)
-            var creatorManager = new GroupManager();
+            var creatorManager = new GroupManager(_creatorIdentity);
             
             // Establish 1-on-1 sessions for invitations
             var sessionToAlice = DoubleRatchetSession.CreateInitiatorSession(_creatorIdentity, _aliceIdentity, _aliceRatchet);
@@ -59,10 +59,10 @@ namespace Percolator.Cryptography.Tests
 
             // 3. Members accept invitations
             var sessionFromAlice = DoubleRatchetSession.CreateResponderSession(_aliceIdentity, _aliceRatchet, _creatorIdentity);
-            var aliceGroupManager = GroupManager.AcceptInvitation(sessionFromAlice, invitationToAlice, creatorManager.SigningPublicKey!);
+            var aliceGroupManager = GroupManager.AcceptInvitation(sessionFromAlice, invitationToAlice, creatorManager.SigningPublicKey!, _creatorIdentity);
             
             var sessionFromBob = DoubleRatchetSession.CreateResponderSession(_bobIdentity, _bobRatchet, _creatorIdentity);
-            var bobGroupManager = GroupManager.AcceptInvitation(sessionFromBob, invitationToBob, creatorManager.SigningPublicKey!);
+            var bobGroupManager = GroupManager.AcceptInvitation(sessionFromBob, invitationToBob, creatorManager.SigningPublicKey!, _creatorIdentity);
             
             aliceGroupManager.GroupId.Should().Be(creatorManager.GroupId);
             bobGroupManager.GroupId.Should().Be(creatorManager.GroupId);
@@ -74,7 +74,7 @@ namespace Percolator.Cryptography.Tests
 
             // 5. State Persistence
             var savedState = creatorManager.SaveState(_masterKey);
-            var loadedCreatorManager = GroupManager.LoadState(savedState, _masterKey);
+            var loadedCreatorManager = GroupManager.LoadState(savedState, _masterKey, _creatorIdentity);
             var oldGroupId = creatorManager.GroupId;
 
             // 6. Member Removal and Re-keying
@@ -106,7 +106,7 @@ namespace Percolator.Cryptography.Tests
         public void AcceptInvitation_WithTamperedSignature_ThrowsException()
         {
             // Arrange
-            var creatorManager = new GroupManager();
+            var creatorManager = new GroupManager(_creatorIdentity);
             var sessionToAlice = DoubleRatchetSession.CreateInitiatorSession(_creatorIdentity, _aliceIdentity, _aliceRatchet);
 
             // Manually create a control message with a bad signature
@@ -121,7 +121,7 @@ namespace Percolator.Cryptography.Tests
 
             // Act & Assert
             var sessionFromAlice = DoubleRatchetSession.CreateResponderSession(_aliceIdentity, _aliceRatchet, _creatorIdentity);
-            Action act = () => GroupManager.AcceptInvitation(sessionFromAlice, tamperedInvitation, creatorManager.SigningPublicKey!);
+            Action act = () => GroupManager.AcceptInvitation(sessionFromAlice, tamperedInvitation, creatorManager.SigningPublicKey!, _creatorIdentity);
             
             act.Should().Throw<CryptographicException>().WithMessage("Invalid signature on invitation.");
             
@@ -132,11 +132,11 @@ namespace Percolator.Cryptography.Tests
         public void NonCreator_CannotPerformAdminActions()
         {
             // Arrange: Create a group and have Alice join
-            var creatorManager = new GroupManager();
+            var creatorManager = new GroupManager(_creatorIdentity);
             var sessionToAlice = DoubleRatchetSession.CreateInitiatorSession(_creatorIdentity, _aliceIdentity, _aliceRatchet);
             var invitation = creatorManager.CreateInvitation("alice", sessionToAlice);
             var sessionFromAlice = DoubleRatchetSession.CreateResponderSession(_aliceIdentity, _aliceRatchet, _creatorIdentity);
-            var aliceGroupManager = GroupManager.AcceptInvitation(sessionFromAlice, invitation, creatorManager.SigningPublicKey!);
+            var aliceGroupManager = GroupManager.AcceptInvitation(sessionFromAlice, invitation, creatorManager.SigningPublicKey!, _creatorIdentity);
 
             // Act & Assert: Alice tries to invite Bob
             var sessionToBobForAlice = DoubleRatchetSession.CreateInitiatorSession(_aliceIdentity, _bobIdentity, _bobRatchet);

@@ -9,27 +9,29 @@ namespace Percolator.Cryptography;
 
 public class DoubleRatchetSession : IDisposable
 {
-    private const int MaxSkippedMessages = 100;
+    private const int MaxSkippedMessages = 1000;
 
+    private readonly ECDiffieHellman _identityKey;
     private byte[] _rootKey;
     private byte[]? _sendingChainKey;
     private byte[]? _receivingChainKey;
-    private uint _sendingCounter;
-    private uint _receivingCounter;
+    private ulong _sendingCounter;
+    private ulong _receivingCounter;
     private ECDiffieHellman? _dhRatchetKey;
     private byte[]? _remoteRatchetKeyBytes;
-    private Dictionary<uint, byte[]> _skippedMessageKeys = new();
+    private Dictionary<ulong, byte[]> _skippedMessageKeys = new();
     private byte[] _remoteIdentityPublicKey;
 
     // Combined private constructor to resolve ambiguity
     private DoubleRatchetSession(ECDiffieHellman identityKey, ECDiffieHellman key1, ECDiffieHellman key2, bool isInitiator)
     {
+        _identityKey = identityKey;
         if (isInitiator)
         {
             // For initiator: key1 is remoteIdentityKey, key2 is remoteRatchetKey
             _remoteIdentityPublicKey = key1.PublicKey.ExportSubjectPublicKeyInfo();
             _remoteRatchetKeyBytes = key2.PublicKey.ExportSubjectPublicKeyInfo();
-            var sharedSecret = identityKey.DeriveKeyMaterial(key1.PublicKey);
+            var sharedSecret = _identityKey.DeriveKeyMaterial(key1.PublicKey);
             _rootKey = SHA256.HashData(sharedSecret);
         }
         else
@@ -37,13 +39,14 @@ public class DoubleRatchetSession : IDisposable
             // For responder: key1 is remoteIdentityKey, key2 is ourRatchetKey
             _dhRatchetKey = key2;
             _remoteIdentityPublicKey = key1.PublicKey.ExportSubjectPublicKeyInfo();
-            var sharedSecret = identityKey.DeriveKeyMaterial(key1.PublicKey);
+            var sharedSecret = _identityKey.DeriveKeyMaterial(key1.PublicKey);
             _rootKey = SHA256.HashData(sharedSecret);
         }
     }
 
-    public DoubleRatchetSession(DoubleRatchetSessionState state)
+    public DoubleRatchetSession(DoubleRatchetSessionState state, ECDiffieHellman identityKey)
     {
+        _identityKey = identityKey;
         _rootKey = state.RootKey;
         _sendingChainKey = state.SendingChainKey;
         _receivingChainKey = state.ReceivingChainKey;
@@ -123,51 +126,47 @@ public class DoubleRatchetSession : IDisposable
 
     public byte[] Decrypt(RatchetMessage message)
     {
-        var plaintext = TrySkippedMessageKeys(message);
-        if (plaintext is not null)
+        var associatedData = message.Header.ToAssociatedData();
+
+        var plaintext = TrySkippedMessageKeys(message, associatedData);
+        if (plaintext is not null) return plaintext;
+
+        if (message.Header.Counter < _receivingCounter)
         {
-            return plaintext;
+            throw new CryptographicException("Message was received out of order and has already been processed.");
+        }
+
+        if (message.Header.Counter - _receivingCounter > MaxSkippedMessages)
+        {
+            throw new CryptographicException("Message exceeds the maximum number of skippable messages.");
         }
 
         if (_remoteRatchetKeyBytes is null || !message.Header.RatchetKey.SequenceEqual(_remoteRatchetKeyBytes))
         {
+            // This message has a new ratchet key from the other party.
             DoDhRatchet(message.Header.RatchetKey);
         }
 
+        // Symmetrically ratchet forward to the current message.
         SkipMessageKeys(message.Header.Counter);
 
         if (_receivingChainKey is null)
         {
-            // This is the first message, so we need to initialize the receiving chain
-            using var remoteRatchetKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-            remoteRatchetKey.ImportSubjectPublicKeyInfo(message.Header.RatchetKey, out _);
-            var dhSecret = _dhRatchetKey!.DeriveKeyMaterial(remoteRatchetKey.PublicKey);
-            var dhResult = SHA256.HashData(dhSecret);
-            var kdfResult = CryptoUtils.KDF(_rootKey, dhResult, "ratchet-kdf", CryptoUtils.KeySize * 2);
-            _rootKey = kdfResult[..CryptoUtils.KeySize];
-            _receivingChainKey = kdfResult[CryptoUtils.KeySize..];
-        }
-
-        // TODO: Handle skipped messages
-        if (message.Header.Counter < _receivingCounter)
-        {
-            throw new InvalidOperationException("Received message is out of order.");
+            throw new CryptographicException("Session is not properly initialized to decrypt messages.");
         }
 
         var messageKey = CryptoUtils.KDF(null, _receivingChainKey, "message-key-kdf", CryptoUtils.KeySize);
         _receivingChainKey = CryptoUtils.KDF(null, _receivingChainKey, "ratchet-chain-kdf", CryptoUtils.KeySize);
 
-        var associatedData = message.Header.ToAssociatedData();
         plaintext = CryptoUtils.DecryptAesGcm(messageKey, message.Header.Counter, message.Ciphertext, associatedData);
         _receivingCounter++;
         return plaintext;
     }
 
-    private byte[]? TrySkippedMessageKeys(RatchetMessage message)
+    private byte[]? TrySkippedMessageKeys(RatchetMessage message, byte[] associatedData)
     {
         if (_skippedMessageKeys.TryGetValue(message.Header.Counter, out var key))
         {
-            var associatedData = message.Header.ToAssociatedData();
             var plaintext = CryptoUtils.DecryptAesGcm(key, message.Header.Counter, message.Ciphertext, associatedData);
             _skippedMessageKeys.Remove(message.Header.Counter);
             return plaintext;
@@ -175,18 +174,23 @@ public class DoubleRatchetSession : IDisposable
         return null;
     }
 
-    private void SkipMessageKeys(uint until)
+    private void SkipMessageKeys(ulong until)
     {
         if (_receivingChainKey is null) return;
 
+        if (until - _receivingCounter > MaxSkippedMessages)
+        {
+            throw new CryptographicException("Attempted to skip too many messages.");
+        }
+
         while (_receivingCounter < until)
         {
-            var skippedMessageKey = CryptoUtils.KDF(null, _receivingChainKey, "message-key-kdf", CryptoUtils.KeySize);
+            var messageKey = CryptoUtils.KDF(null, _receivingChainKey, "message-key-kdf", CryptoUtils.KeySize);
             _receivingChainKey = CryptoUtils.KDF(null, _receivingChainKey, "ratchet-chain-kdf", CryptoUtils.KeySize);
 
             if (_skippedMessageKeys.Count < MaxSkippedMessages)
             {
-                _skippedMessageKeys.Add(_receivingCounter, skippedMessageKey);
+                _skippedMessageKeys.Add(_receivingCounter, messageKey);
             }
             _receivingCounter++;
         }
@@ -227,9 +231,9 @@ public class DoubleRatchetSession : IDisposable
         public byte[] RootKey { get; set; } = Array.Empty<byte>();
         public byte[]? SendingChainKey { get; set; }
         public byte[]? ReceivingChainKey { get; set; }
-        public uint SendingCounter { get; set; }
-        public uint ReceivingCounter { get; set; }
-        public Dictionary<uint, byte[]> SkippedMessageKeys { get; set; } = new();
+        public ulong SendingCounter { get; set; }
+        public ulong ReceivingCounter { get; set; }
+        public Dictionary<ulong, byte[]> SkippedMessageKeys { get; set; } = new();
         public byte[]? TheirIdentityPublicKey { get; set; }
         public byte[]? TheirDhRatchetPublicKey { get; set; }
         public byte[]? DhRatchetPrivateKey { get; set; }

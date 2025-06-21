@@ -13,13 +13,15 @@ namespace Percolator.Cryptography
         private readonly Dictionary<string, DoubleRatchetSession> _members = new();
         private readonly ECDsa? _signingKey;
         private readonly byte[]? _creatorSigningPublicKey;
+        private readonly ECDiffieHellman _creatorIdentityKey;
 
         public SenderKeySession GroupSession { get; private set; }
         public string GroupId { get; private set; }
         public byte[]? SigningPublicKey { get; }
 
-        public GroupManager()
+        public GroupManager(ECDiffieHellman creatorIdentityKey)
         {
+            _creatorIdentityKey = creatorIdentityKey;
             GroupId = Guid.NewGuid().ToString();
             var groupContext = Encoding.UTF8.GetBytes(GroupId);
             GroupSession = new SenderKeySession(null, groupContext);
@@ -27,15 +29,17 @@ namespace Percolator.Cryptography
             SigningPublicKey = _signingKey.ExportSubjectPublicKeyInfo();
         }
 
-        private GroupManager(SenderKeySession groupSession, string groupId, byte[] creatorSigningPublicKey)
+        private GroupManager(SenderKeySession groupSession, string groupId, byte[] creatorSigningPublicKey, ECDiffieHellman creatorIdentityKey)
         {
             GroupSession = groupSession;
             GroupId = groupId;
             _creatorSigningPublicKey = creatorSigningPublicKey;
+            _creatorIdentityKey = creatorIdentityKey;
         }
 
-        private GroupManager(GroupManagerState state)
+        private GroupManager(GroupManagerState state, ECDiffieHellman identityKey)
         {
+            _creatorIdentityKey = identityKey;
             _signingKey = ECDsa.Create(new ECParameters
             {
                 Curve = ECCurve.NamedCurves.nistP256,
@@ -51,7 +55,7 @@ namespace Percolator.Cryptography
             foreach (var (memberId, sessionStateBytes) in state.MemberSessionStates)
             {
                 var sessionState = JsonSerializer.Deserialize<DoubleRatchetSessionState>(sessionStateBytes)!;
-                _members[memberId] = new DoubleRatchetSession(sessionState);
+                _members[memberId] = new DoubleRatchetSession(sessionState, identityKey);
             }
         }
 
@@ -76,11 +80,11 @@ namespace Percolator.Cryptography
             return CryptoUtils.EncryptAtRest(masterKey, plaintext, Encoding.UTF8.GetBytes("GroupManagerState"));
         }
 
-        public static GroupManager LoadState(byte[] encryptedState, byte[] masterKey)
+        public static GroupManager LoadState(byte[] encryptedState, byte[] masterKey, ECDiffieHellman identityKey)
         {
             var plaintext = CryptoUtils.DecryptAtRest(masterKey, encryptedState, Encoding.UTF8.GetBytes("GroupManagerState"));
             var state = JsonSerializer.Deserialize<GroupManagerState>(plaintext)!;
-            return new GroupManager(state);
+            return new GroupManager(state, identityKey);
         }
 
         public RatchetMessage CreateInvitation(string memberId, DoubleRatchetSession sessionToMember)
@@ -135,7 +139,7 @@ namespace Percolator.Cryptography
             return rekeyMessages;
         }
 
-        public static GroupManager AcceptInvitation(DoubleRatchetSession sessionToCreator, RatchetMessage invitationMessage, byte[] creatorSigningPublicKey)
+        public static GroupManager AcceptInvitation(DoubleRatchetSession sessionToCreator, RatchetMessage invitationMessage, byte[] creatorSigningPublicKey, ECDiffieHellman creatorIdentityKey)
         {
             var payload = sessionToCreator.Decrypt(invitationMessage);
             var controlMessage = JsonSerializer.Deserialize<GroupControlMessage>(payload)!;
@@ -153,7 +157,7 @@ namespace Percolator.Cryptography
 
             var groupContext = Encoding.UTF8.GetBytes(controlMessage.GroupId);
             var groupSession = new SenderKeySession(controlMessage.SessionKey, groupContext);
-            return new GroupManager(groupSession, controlMessage.GroupId, creatorSigningPublicKey);
+            return new GroupManager(groupSession, controlMessage.GroupId, creatorSigningPublicKey, creatorIdentityKey);
         }
 
         public void ProcessRekeyMessage(DoubleRatchetSession sessionToCreator, RatchetMessage rekeyMessage)

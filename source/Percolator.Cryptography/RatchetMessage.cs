@@ -15,7 +15,7 @@ namespace Percolator.Cryptography
         public byte[] RatchetKey { get; set; } = null!;
 
         [JsonInclude]
-        public uint Counter { get; set; }
+        public ulong Counter { get; set; }
 
         public byte[] ToAssociatedData()
         {

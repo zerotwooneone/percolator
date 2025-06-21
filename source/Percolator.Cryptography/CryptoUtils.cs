@@ -20,10 +20,10 @@ namespace Percolator.Cryptography
                 Encoding.UTF8.GetBytes(info));
         }
 
-        public static byte[] EncryptAesGcm(byte[] key, uint counter, byte[] plaintext, byte[]? associatedData)
+        public static byte[] EncryptAesGcm(byte[] key, ulong counter, byte[] plaintext, byte[]? associatedData)
         {
             var nonceBytes = new byte[12];
-            BinaryPrimitives.WriteUInt64BigEndian(nonceBytes, (ulong)counter);
+            BinaryPrimitives.WriteUInt64BigEndian(nonceBytes, counter);
 
             using var aes = new AesGcm(key, TagSize);
             var ciphertext = new byte[plaintext.Length];
@@ -36,10 +36,10 @@ namespace Percolator.Cryptography
             return result;
         }
 
-        public static byte[] DecryptAesGcm(byte[] key, uint counter, byte[] ciphertextWithTag, byte[]? associatedData)
+        public static byte[] DecryptAesGcm(byte[] key, ulong counter, byte[] ciphertextWithTag, byte[]? associatedData)
         {
             var nonceBytes = new byte[12];
-            BinaryPrimitives.WriteUInt64BigEndian(nonceBytes, (ulong)counter);
+            BinaryPrimitives.WriteUInt64BigEndian(nonceBytes, counter);
 
             using var aes = new AesGcm(key, TagSize);
             var tagOffset = ciphertextWithTag.Length - TagSize;
