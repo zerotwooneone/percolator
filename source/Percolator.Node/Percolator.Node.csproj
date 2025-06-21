@@ -10,6 +10,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Percolator.Network\Percolator.Network.csproj" />
     <ProjectReference Include="..\Percolator.Application\Percolator.Application.csproj" />
+    <ProjectReference Include="..\Percolator.Identity\Percolator.Identity.csproj" />
   </ItemGroup>
 
   <ItemGroup>

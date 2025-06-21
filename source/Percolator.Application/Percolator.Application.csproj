@@ -4,6 +4,7 @@
     <ProjectReference Include="..\Percolator.Cryptography\Percolator.Cryptography.csproj" />
     <ProjectReference Include="..\Percolator.Contracts\Percolator.Contracts.csproj" />
     <ProjectReference Include="..\Percolator.Network\Percolator.Network.csproj" />
+    <ProjectReference Include="..\Percolator.Identity\Percolator.Identity.csproj" />
   </ItemGroup>
 
   <ItemGroup>
