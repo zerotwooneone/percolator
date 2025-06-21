@@ -37,7 +37,7 @@ public static class X3DHManager
         Buffer.BlockCopy(dh3, 0, combined, dh1.Length + dh2.Length, dh3.Length);
         Buffer.BlockCopy(dh4, 0, combined, dh1.Length + dh2.Length + dh3.Length, dh4.Length);
 
-        return HKDF.Extract(HashAlgorithmName.SHA256, combined, new byte[KeySize]);
+        return HKDF.DeriveKey(HashAlgorithmName.SHA256, combined, KeySize, salt: new byte[KeySize], info: "Percolator-X3DH-v1"u8.ToArray());
     }
 
     public static byte[] RespondToHandshake(byte[] remoteIdentityKeyBytes, byte[] remoteEphemeralKeyBytes, ECDiffieHellman identityKey, ECDiffieHellman signedPreKey, ECDiffieHellman oneTimePreKey)
@@ -63,7 +63,7 @@ public static class X3DHManager
         Buffer.BlockCopy(dh3, 0, combined, dh1.Length + dh2.Length, dh3.Length);
         Buffer.BlockCopy(dh4, 0, combined, dh1.Length + dh2.Length + dh3.Length, dh4.Length);
 
-        return HKDF.Extract(HashAlgorithmName.SHA256, combined, new byte[KeySize]);
+        return HKDF.DeriveKey(HashAlgorithmName.SHA256, combined, KeySize, salt: new byte[KeySize], info: "Percolator-X3DH-v1"u8.ToArray());
     }
 
     public static byte[] SignPreKey(ECDiffieHellman identityKey, byte[] signedPreKey)

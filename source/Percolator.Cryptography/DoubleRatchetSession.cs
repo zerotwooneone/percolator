@@ -22,26 +22,11 @@ public class DoubleRatchetSession : IDisposable
     private Dictionary<ulong, byte[]> _skippedMessageKeys = new();
     private byte[] _remoteIdentityPublicKey;
 
-    // Combined private constructor to resolve ambiguity
-    private DoubleRatchetSession(ECDiffieHellman identityKey, ECDiffieHellman key1, ECDiffieHellman key2, bool isInitiator)
+    private DoubleRatchetSession(byte[] sharedSecret, ECDiffieHellman identityKey, byte[] remoteIdentityPublicKey)
     {
         _identityKey = identityKey;
-        if (isInitiator)
-        {
-            // For initiator: key1 is remoteIdentityKey, key2 is remoteRatchetKey
-            _remoteIdentityPublicKey = key1.PublicKey.ExportSubjectPublicKeyInfo();
-            _remoteRatchetKeyBytes = key2.PublicKey.ExportSubjectPublicKeyInfo();
-            var sharedSecret = _identityKey.DeriveKeyMaterial(key1.PublicKey);
-            _rootKey = SHA256.HashData(sharedSecret);
-        }
-        else
-        {
-            // For responder: key1 is remoteIdentityKey, key2 is ourRatchetKey
-            _dhRatchetKey = key2;
-            _remoteIdentityPublicKey = key1.PublicKey.ExportSubjectPublicKeyInfo();
-            var sharedSecret = _identityKey.DeriveKeyMaterial(key1.PublicKey);
-            _rootKey = SHA256.HashData(sharedSecret);
-        }
+        _remoteIdentityPublicKey = remoteIdentityPublicKey;
+        _rootKey = sharedSecret;
     }
 
     public DoubleRatchetSession(DoubleRatchetSessionState state, ECDiffieHellman identityKey)
@@ -62,14 +47,18 @@ public class DoubleRatchetSession : IDisposable
         _remoteIdentityPublicKey = state.TheirIdentityPublicKey ?? Array.Empty<byte>();
     }
 
-    public static DoubleRatchetSession CreateInitiatorSession(ECDiffieHellman identityKey, ECDiffieHellman remoteIdentityKey, ECDiffieHellman remoteRatchetKey)
+    public static DoubleRatchetSession AsInitiator(byte[] sharedSecret, ECDiffieHellman identityKey, byte[] remoteIdentityPublicKey, byte[] remoteRatchetPublicKey)
     {
-        return new DoubleRatchetSession(identityKey, remoteIdentityKey, remoteRatchetKey, true);
+        var session = new DoubleRatchetSession(sharedSecret, identityKey, remoteIdentityPublicKey);
+        session._remoteRatchetKeyBytes = remoteRatchetPublicKey;
+        return session;
     }
 
-    public static DoubleRatchetSession CreateResponderSession(ECDiffieHellman identityKey, ECDiffieHellman ratchetKey, ECDiffieHellman remoteIdentityKey)
+    public static DoubleRatchetSession AsResponder(byte[] sharedSecret, ECDiffieHellman identityKey, byte[] remoteIdentityPublicKey, ECDiffieHellman localRatchetKey)
     {
-        return new DoubleRatchetSession(identityKey, remoteIdentityKey, ratchetKey, false);
+        var session = new DoubleRatchetSession(sharedSecret, identityKey, remoteIdentityPublicKey);
+        session._dhRatchetKey = localRatchetKey;
+        return session;
     }
 
     public DoubleRatchetSessionState GetState()
@@ -98,8 +87,7 @@ public class DoubleRatchetSession : IDisposable
             using var remoteRatchetKey = ECDiffieHellman.Create();
             remoteRatchetKey.ImportSubjectPublicKeyInfo(_remoteRatchetKeyBytes, out _);
             var dhSecret = _dhRatchetKey.DeriveKeyMaterial(remoteRatchetKey.PublicKey);
-            var dhResult = SHA256.HashData(dhSecret);
-            var kdfResult = CryptoUtils.KDF(_rootKey, dhResult, "ratchet-kdf", CryptoUtils.KeySize * 2);
+            var kdfResult = CryptoUtils.KDF(_rootKey, dhSecret, "ratchet-kdf", CryptoUtils.KeySize * 2);
             _rootKey = kdfResult[..CryptoUtils.KeySize];
             _sendingChainKey = kdfResult[CryptoUtils.KeySize..];
         }
@@ -203,16 +191,14 @@ public class DoubleRatchetSession : IDisposable
         remoteRatchetKey.ImportSubjectPublicKeyInfo(remoteRatchetKeyBytes, out _);
 
         var dhSecret = _dhRatchetKey!.DeriveKeyMaterial(remoteRatchetKey.PublicKey);
-        var dhResult = SHA256.HashData(dhSecret);
-        var kdfResult = CryptoUtils.KDF(_rootKey, dhResult, "ratchet-kdf", CryptoUtils.KeySize * 2);
+        var kdfResult = CryptoUtils.KDF(_rootKey, dhSecret, "ratchet-kdf", CryptoUtils.KeySize * 2);
         _rootKey = kdfResult[..CryptoUtils.KeySize];
         _receivingChainKey = kdfResult[CryptoUtils.KeySize..];
 
         _dhRatchetKey.Dispose();
         _dhRatchetKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         dhSecret = _dhRatchetKey.DeriveKeyMaterial(remoteRatchetKey.PublicKey);
-        dhResult = SHA256.HashData(dhSecret);
-        kdfResult = CryptoUtils.KDF(_rootKey, dhResult, "ratchet-kdf", CryptoUtils.KeySize * 2);
+        kdfResult = CryptoUtils.KDF(_rootKey, dhSecret, "ratchet-kdf", CryptoUtils.KeySize * 2);
         _rootKey = kdfResult[..CryptoUtils.KeySize];
         _sendingChainKey = kdfResult[CryptoUtils.KeySize..];
 

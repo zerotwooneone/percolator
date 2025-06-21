@@ -11,32 +11,34 @@ namespace Percolator.CryptographyTests
     [TestFixture]
     public class DoubleRatchetSessionTests
     {
-        private DoubleRatchetSession _aliceSession = null!;
-        private DoubleRatchetSession _bobSession = null!;
-
-        // Keys must be managed by the test fixture to prevent disposal.
-        private ECDiffieHellman _aliceIdentity = null!;
-        private ECDiffieHellman _bobIdentity = null!;
-        private ECDiffieHellman _bobRatchetKey = null!;
+        private ECDiffieHellman _aliceIdentity;
+        private ECDiffieHellman _bobIdentity;
+        private ECDiffieHellman _bobRatchetKey;
+        private DoubleRatchetSession _aliceSession;
+        private DoubleRatchetSession _bobSession;
 
         [SetUp]
         public void Setup()
         {
-            // Create and store keys as instance fields.
             _aliceIdentity = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
             _bobIdentity = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
             _bobRatchetKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
 
-            _aliceSession = DoubleRatchetSession.CreateInitiatorSession(
+            // Simulate a secure key exchange (e.g., X3DH) to get a shared secret.
+            var sharedSecret = _aliceIdentity.DeriveKeyMaterial(_bobIdentity.PublicKey);
+
+            _aliceSession = DoubleRatchetSession.AsInitiator(
+                sharedSecret,
                 _aliceIdentity,
-                _bobIdentity,
-                _bobRatchetKey
+                _bobIdentity.PublicKey.ExportSubjectPublicKeyInfo(),
+                _bobRatchetKey.PublicKey.ExportSubjectPublicKeyInfo()
             );
 
-            _bobSession = DoubleRatchetSession.CreateResponderSession(
+            _bobSession = DoubleRatchetSession.AsResponder(
+                sharedSecret,
                 _bobIdentity,
-                _bobRatchetKey,
-                _aliceIdentity
+                _aliceIdentity.PublicKey.ExportSubjectPublicKeyInfo(),
+                _bobRatchetKey
             );
         }
 

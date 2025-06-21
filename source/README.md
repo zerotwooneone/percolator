@@ -31,7 +31,7 @@ This library is designed to be straightforward to use. Below are examples for co
 
 ### 1. Establishing a Secure 1-on-1 Session
 
-Before you can communicate, two parties (e.g., Alice and Bob) must establish a `DoubleRatchetSession`.
+Before you can communicate, two parties (e.g., Alice and Bob) must establish a `DoubleRatchetSession`. This requires a `sharedSecret` that must be derived from a secure key exchange protocol like X3DH (the implementation of which is outside the scope of this library).
 
 ```csharp
 // Setup: Alice and Bob both have long-term identity keys.
@@ -40,18 +40,28 @@ using var aliceIdentity = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
 using var bobIdentity = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
 using var bobRatchetKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
 
-// Alice (initiator) creates a session with Bob.
-using var aliceToBobSession = DoubleRatchetSession.CreateInitiatorSession(
+// 1. Alice and Bob perform a secure key exchange (e.g., X3DH) to get a shared secret.
+// For this example, we'll simulate a simple DH exchange.
+var sharedSecret = aliceIdentity.DeriveKeyMaterial(bobIdentity.PublicKey);
+
+// 2. Alice (initiator) creates a session with Bob.
+var alicePublicIdentity = aliceIdentity.PublicKey.ExportSubjectPublicKeyInfo();
+var bobPublicIdentity = bobIdentity.PublicKey.ExportSubjectPublicKeyInfo();
+var bobPublicRatchet = bobRatchetKey.PublicKey.ExportSubjectPublicKeyInfo();
+
+using var aliceToBobSession = DoubleRatchetSession.AsInitiator(
+    sharedSecret,
     aliceIdentity,
-    bobIdentity,
-    bobRatchetKey
+    bobPublicIdentity,
+    bobPublicRatchet
 );
 
-// Bob (responder) creates his side of the session.
-using var bobToAliceSession = DoubleRatchetSession.CreateResponderSession(
+// 3. Bob (responder) creates his side of the session.
+using var bobToAliceSession = DoubleRatchetSession.AsResponder(
+    sharedSecret,
     bobIdentity,
-    bobRatchetKey, // Bob provides his private ratchet key
-    aliceIdentity
+    alicePublicIdentity,
+    bobRatchetKey // Bob provides his private ratchet key
 );
 
 // Alice can now encrypt a message for Bob.
@@ -72,21 +82,32 @@ The `GroupManager` provides a secure way to manage group chats, including the cr
 var aliceManager = new GroupManager(aliceIdentity);
 
 // 2. Alice invites Bob and Carol to the group.
+// First, establish secure 1-on-1 sessions with them.
+var sharedSecretBob = aliceIdentity.DeriveKeyMaterial(bobIdentity.PublicKey);
+var aliceToBob = DoubleRatchetSession.AsInitiator(sharedSecretBob, aliceIdentity, bobIdentity.PublicKey.ExportSubjectPublicKeyInfo(), bobRatchet.PublicKey.ExportSubjectPublicKeyInfo());
+
+var sharedSecretCarol = aliceIdentity.DeriveKeyMaterial(carolIdentity.PublicKey);
+var aliceToCarol = DoubleRatchetSession.AsInitiator(sharedSecretCarol, aliceIdentity, carolIdentity.PublicKey.ExportSubjectPublicKeyInfo(), carolRatchet.PublicKey.ExportSubjectPublicKeyInfo());
+
 var bobInvitation = aliceManager.CreateInvitation("bob", aliceToBob);
 var carolInvitation = aliceManager.CreateInvitation("carol", aliceToCarol);
 // These invitations are sent to Bob and Carol over their secure 1-on-1 channels.
 
 // 3. Bob and Carol accept their invitations.
 // They must be provided with Alice's public signing key and public identity key.
+var bobToAlice = DoubleRatchetSession.AsResponder(sharedSecretBob, bobIdentity, aliceIdentity.PublicKey.ExportSubjectPublicKeyInfo(), bobRatchet);
 var bobManager = GroupManager.AcceptInvitation(bobToAlice, bobInvitation, aliceManager.SigningPublicKey!, aliceIdentity);
+
+var carolToAlice = DoubleRatchetSession.AsResponder(sharedSecretCarol, carolIdentity, aliceIdentity.PublicKey.ExportSubjectPublicKeyInfo(), carolRatchet);
 var carolManager = GroupManager.AcceptInvitation(carolToAlice, carolInvitation, aliceManager.SigningPublicKey!, aliceIdentity);
 
 // 4. Alice sends a message to the group.
 var welcomeMessage = aliceManager.GroupSession.Encrypt("Welcome!"u8.ToArray());
 
 // Bob and Carol can decrypt it.
-var bobsDecrypted = bobManager.GroupSession.Decrypt(welcomeMessage);
-var carolsDecrypted = carolManager.GroupSession.Decrypt(welcomeMessage);
+// They must receive the message from a trusted source that identifies Alice as the sender.
+var bobPlaintext = bobManager.GroupSession.Decrypt(welcomeMessage);
+var carolPlaintext = carolManager.GroupSession.Decrypt(welcomeMessage);
 
 // 5. CRITICAL: Alice removes Carol from the group.
 var rekeyMessages = aliceManager.RemoveMember("carol");
@@ -112,10 +133,21 @@ catch (CryptographicException)
 }
 ```
 
-### 3. Session Persistence
+### Important Security Considerations
 
-To support long-running, asynchronous conversations, sessions can be serialized. The library provides a state object that can be serialized to JSON (or any other format).
-**IMPORTANT**: For `DoubleRatchetSession`, the user is responsible for encrypting the serialized state at rest. `GroupManager` provides built-in encryption.
+### Sender Authentication (Signing Messages)
+
+**Critical:** The `SenderKeySession` and `GroupManager` components are responsible for message *confidentiality* (encryption) in a group setting, but they do **not** provide sender *authentication* (signing). The original implementation included a flawed signing mechanism where any group member could forge messages from any other member. This has been removed.
+
+It is the developer's responsibility to implement sender authentication at a higher protocol layer. The recommended approach is to take the `SenderKeyMessage` object, serialize it, and then sign the serialized data with the sender's unique, long-term identity key (e.g., using `ECDsa.SignData`). The recipient must then verify this signature before passing the `SenderKeyMessage` to the `Decrypt` method.
+
+### State Persistence
+
+Both `DoubleRatchetSession` and `GroupManager` support state serialization so that sessions can be persisted. When persisting this state, you **must** encrypt it at rest using a master key that is securely stored on the device. The library provides `SaveState(masterKey)` and `LoadState(encryptedState, masterKey)` methods for this purpose.
+
+### `OldGroupId` for Re-Key Messages
+
+A `GroupControlMessage` for re-keying now includes an `OldGroupId`. This ensures that a re-key message is cryptographically bound to the specific group it came from, preventing a malicious actor from tricking a user into applying a re-key message from one group to another, which could otherwise lead to state confusion and a denial-of-service attack.
 
 ```csharp
 using System.Text.Json;

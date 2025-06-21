@@ -4,9 +4,8 @@ namespace Percolator.Cryptography
 {
     public class SenderKeyMessage
     {
-        public SenderKeyHeader Header { get; set; } = null!;
-        public byte[] Ciphertext { get; set; } = null!;
-        public byte[] Signature { get; set; } = null!;
+        public SenderKeyHeader Header { get; set; } = new();
+        public byte[]? Ciphertext { get; set; } = Array.Empty<byte>();
     }
 
     public class SenderKeyHeader
