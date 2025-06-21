@@ -7,6 +7,9 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Percolator.Application;
+using Percolator.Application.Manifests;
+using Percolator.Application.PeerDiscovery;
+using Percolator.Application.RateLimiting;
 using Percolator.Contracts.Protos;
 using Percolator.Cryptography;
 using Percolator.Identity;
@@ -16,10 +19,6 @@ using System.CommandLine.Builder;
 using System.CommandLine.Invocation;
 using System.Net;
 using System.Net.Http;
-using Percolator.Application.Identity;
-using Percolator.Application.Manifests;
-using Percolator.Application.PeerDiscovery;
-using Percolator.Application.RateLimiting;
 
 var serviceProvider = ConfigureServices(args).BuildServiceProvider();
 
@@ -160,29 +159,25 @@ static IServiceCollection ConfigureServices(string[] args)
 {
     var services = new ServiceCollection();
     services.AddLogging(configure => configure.AddConsole());
+
+    // Domain Services
     services.AddSingleton<IIdentityService, PersistentIdentityService>();
     services.AddSingleton<ICredentialService, CredentialService>();
-    services.AddSingleton<ISignatureService, SignatureService>();
-    services.AddSingleton<IManifestService, ManifestService>();
-    services.AddSingleton<IManifestStore, ManifestStore>();
+    services.AddSingleton<IDiscoverySignatureProvider, DiscoverySignatureProvider>();
     services.AddSingleton<ISharedDirectoryProvider, SharedDirectoryProvider>();
     services.AddSingleton<IRateLimiter, InMemoryRateLimiter>();
+
+    // Application Services
+    services.AddSingleton<ManifestStore>();
+    services.AddSingleton<IManifestService, ManifestService>();
     services.AddSingleton<IPeerConnectionManager, PeerConnectionManager>();
     services.AddSingleton<IPeerDiscoveryHandler, PeerDiscoveryHandler>();
-    services.AddSingleton<IDiscoverySignatureProvider, DiscoverySignatureProvider>();
-
-    // Pre-parse the port to configure services correctly.
-    var portOption = new Option<int>(new[] { "--port", "-p" }, () => 9000);
-    var preParseCommand = new RootCommand { portOption };
-    var port = preParseCommand.Parse(args).GetValueForOption(portOption);
-
-    // Manually create the peer discovery service with the correct port and thumbprint
     services.AddSingleton<IPeerDiscoveryService>(sp =>
     {
         var identityService = sp.GetRequiredService<IIdentityService>();
         var thumbprint = identityService.GetDefaultIdentityCertificate().Thumbprint;
         return new PeerDiscoveryService(
-            port,
+            9000,
             thumbprint,
             sp.GetRequiredService<IPeerDiscoveryHandler>(),
             sp.GetRequiredService<IDiscoverySignatureProvider>(),

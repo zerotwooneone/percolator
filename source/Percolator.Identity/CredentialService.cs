@@ -1,7 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 
-namespace Percolator.Application.Identity
+namespace Percolator.Identity
 {
     public interface ICredentialService
     {
@@ -19,6 +19,16 @@ namespace Percolator.Application.Identity
             var percolatorAppDataPath = Path.Combine(appDataPath, "Percolator");
             Directory.CreateDirectory(percolatorAppDataPath);
             _credentialFilePath = Path.Combine(percolatorAppDataPath, "pfx.cred");
+        }
+
+        internal CredentialService(string credentialFilePath)
+        {
+            _credentialFilePath = credentialFilePath;
+            var directoryPath = Path.GetDirectoryName(_credentialFilePath);
+            if (!string.IsNullOrEmpty(directoryPath))
+            {
+                Directory.CreateDirectory(directoryPath);
+            }
         }
 
         public string GetOrCreatePfxPassword()
