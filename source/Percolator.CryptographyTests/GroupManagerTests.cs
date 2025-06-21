@@ -1,94 +1,159 @@
-using System.Security.Cryptography;
+using NUnit.Framework;
+using System;
+using System.Linq;
 using System.Text;
 using FluentAssertions;
-using NUnit.Framework;
-using Percolator.Cryptography;
+using System.Security.Cryptography;
+using System.Text.Json;
 
-namespace Percolator.CryptographyTests
+namespace Percolator.Cryptography.Tests
 {
+    [TestFixture]
     public class GroupManagerTests
     {
-        private ECDiffieHellman _aliceIdentity, _bobIdentity, _carolIdentity;
-        private ECDiffieHellman _aliceRatchet, _bobRatchet, _carolRatchet;
+        private byte[] _masterKey = null!;
+
+        // Use distinct keys for creator and members to avoid confusion
+        private ECDiffieHellman _creatorIdentity = null!;
+        private ECDiffieHellman _aliceIdentity = null!;
+        private ECDiffieHellman _bobIdentity = null!;
+
+        // Pre-keys for members
+        private ECDiffieHellman _aliceRatchet = null!;
+        private ECDiffieHellman _bobRatchet = null!;
 
         [SetUp]
         public void Setup()
         {
+            _masterKey = RandomNumberGenerator.GetBytes(32);
+            _creatorIdentity = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
             _aliceIdentity = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
             _bobIdentity = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-            _carolIdentity = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-            
             _aliceRatchet = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
             _bobRatchet = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-            _carolRatchet = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         }
 
         [TearDown]
         public void Teardown()
         {
+            _creatorIdentity.Dispose();
             _aliceIdentity.Dispose();
             _bobIdentity.Dispose();
-            _carolIdentity.Dispose();
             _aliceRatchet.Dispose();
             _bobRatchet.Dispose();
-            _carolRatchet.Dispose();
         }
 
         [Test]
-        public void CreateGroup_And_SendReceiveMessage_Succeeds()
+        public void FullGroupLifecycle_ShouldSucceed()
+        {
+            // 1. Setup: Creator and two new members (Alice, Bob)
+            var creatorManager = new GroupManager();
+            
+            // Establish 1-on-1 sessions for invitations
+            var sessionToAlice = DoubleRatchetSession.CreateInitiatorSession(_creatorIdentity, _aliceIdentity, _aliceRatchet);
+            var sessionToBob = DoubleRatchetSession.CreateInitiatorSession(_creatorIdentity, _bobIdentity, _bobRatchet);
+
+            // 2. Invitations
+            var invitationToAlice = creatorManager.CreateInvitation("alice", sessionToAlice);
+            var invitationToBob = creatorManager.CreateInvitation("bob", sessionToBob);
+
+            // 3. Members accept invitations
+            var sessionFromAlice = DoubleRatchetSession.CreateResponderSession(_aliceIdentity, _aliceRatchet, _creatorIdentity);
+            var aliceGroupManager = GroupManager.AcceptInvitation(sessionFromAlice, invitationToAlice, creatorManager.SigningPublicKey!);
+            
+            var sessionFromBob = DoubleRatchetSession.CreateResponderSession(_bobIdentity, _bobRatchet, _creatorIdentity);
+            var bobGroupManager = GroupManager.AcceptInvitation(sessionFromBob, invitationToBob, creatorManager.SigningPublicKey!);
+            
+            aliceGroupManager.GroupId.Should().Be(creatorManager.GroupId);
+            bobGroupManager.GroupId.Should().Be(creatorManager.GroupId);
+
+            // 4. Communication
+            var messageFromCreator = creatorManager.GroupSession.Encrypt("Welcome!"u8.ToArray());
+            Encoding.UTF8.GetString(aliceGroupManager.GroupSession.Decrypt(messageFromCreator)).Should().Be("Welcome!");
+            Encoding.UTF8.GetString(bobGroupManager.GroupSession.Decrypt(messageFromCreator)).Should().Be("Welcome!");
+
+            // 5. State Persistence
+            var savedState = creatorManager.SaveState(_masterKey);
+            var loadedCreatorManager = GroupManager.LoadState(savedState, _masterKey);
+            var oldGroupId = creatorManager.GroupId;
+
+            // 6. Member Removal and Re-keying
+            var rekeyMessages = loadedCreatorManager.RemoveMember("alice");
+            rekeyMessages.Should().HaveCount(1);
+            rekeyMessages.Should().ContainKey("bob");
+            loadedCreatorManager.GroupId.Should().NotBe(oldGroupId); // Group ID must change
+
+            // 7. Bob processes the re-key message
+            bobGroupManager.ProcessRekeyMessage(sessionFromBob, rekeyMessages["bob"]);
+            bobGroupManager.GroupId.Should().Be(loadedCreatorManager.GroupId); // Bob is in the new group
+
+            // 8. Communication in the new group
+            var messageInNewGroup = loadedCreatorManager.GroupSession.Encrypt("Alice is gone"u8.ToArray());
+            Encoding.UTF8.GetString(bobGroupManager.GroupSession.Decrypt(messageInNewGroup)).Should().Be("Alice is gone");
+
+            // Alice should not be able to decrypt the new message
+            Action act = () => aliceGroupManager.GroupSession.Decrypt(messageInNewGroup);
+            act.Should().Throw<CryptographicException>();
+            
+            // Dispose all managers
+            creatorManager.Dispose();
+            loadedCreatorManager.Dispose();
+            aliceGroupManager.Dispose();
+            bobGroupManager.Dispose();
+        }
+
+        [Test]
+        public void AcceptInvitation_WithTamperedSignature_ThrowsException()
         {
             // Arrange
-            var aliceManager = new GroupManager();
-            var aliceToBobSession = new DoubleRatchetSession(_aliceIdentity, _bobIdentity.PublicKey.ExportSubjectPublicKeyInfo(), _bobRatchet.PublicKey.ExportSubjectPublicKeyInfo());
-            var bobToAliceSession = new DoubleRatchetSession(_bobIdentity, _bobRatchet, _aliceIdentity.PublicKey.ExportSubjectPublicKeyInfo());
+            var creatorManager = new GroupManager();
+            var sessionToAlice = DoubleRatchetSession.CreateInitiatorSession(_creatorIdentity, _aliceIdentity, _aliceRatchet);
 
-            // Act
-            var invitation = aliceManager.CreateInvitation("bob", aliceToBobSession);
-            var bobManager = GroupManager.AcceptInvitation(bobToAliceSession, invitation);
+            // Manually create a control message with a bad signature
+            var controlMessage = new GroupControlMessage
+            {
+                SessionKey = creatorManager.GroupSession.SessionKey,
+                GroupId = creatorManager.GroupId,
+                Signature = RandomNumberGenerator.GetBytes(64) // Bad signature
+            };
+            var tamperedPayload = JsonSerializer.SerializeToUtf8Bytes(controlMessage);
+            var tamperedInvitation = sessionToAlice.Encrypt(tamperedPayload);
 
-            var plaintext = "Welcome to the group!";
-            var senderKeyMessage = aliceManager.GroupSession.Encrypt(Encoding.UTF8.GetBytes(plaintext));
-
-            var decryptedBytes = bobManager.GroupSession.Decrypt(senderKeyMessage);
-            var decryptedText = Encoding.UTF8.GetString(decryptedBytes);
-
-            // Assert
-            decryptedText.Should().Be(plaintext);
+            // Act & Assert
+            var sessionFromAlice = DoubleRatchetSession.CreateResponderSession(_aliceIdentity, _aliceRatchet, _creatorIdentity);
+            Action act = () => GroupManager.AcceptInvitation(sessionFromAlice, tamperedInvitation, creatorManager.SigningPublicKey!);
+            
+            act.Should().Throw<CryptographicException>().WithMessage("Invalid signature on invitation.");
+            
+            creatorManager.Dispose();
         }
-
+        
         [Test]
-        public void RemoveMember_PreventsDecryptionByRemovedMember()
+        public void NonCreator_CannotPerformAdminActions()
         {
-            // Arrange: Alice creates a group and invites Bob and Carol.
-            var aliceManager = new GroupManager();
-            var aliceToBob = new DoubleRatchetSession(_aliceIdentity, _bobIdentity.PublicKey.ExportSubjectPublicKeyInfo(), _bobRatchet.PublicKey.ExportSubjectPublicKeyInfo());
-            var bobToAlice = new DoubleRatchetSession(_bobIdentity, _bobRatchet, _aliceIdentity.PublicKey.ExportSubjectPublicKeyInfo());
-            var aliceToCarol = new DoubleRatchetSession(_aliceIdentity, _carolIdentity.PublicKey.ExportSubjectPublicKeyInfo(), _carolRatchet.PublicKey.ExportSubjectPublicKeyInfo());
-            var carolToAlice = new DoubleRatchetSession(_carolIdentity, _carolRatchet, _aliceIdentity.PublicKey.ExportSubjectPublicKeyInfo());
+            // Arrange: Create a group and have Alice join
+            var creatorManager = new GroupManager();
+            var sessionToAlice = DoubleRatchetSession.CreateInitiatorSession(_creatorIdentity, _aliceIdentity, _aliceRatchet);
+            var invitation = creatorManager.CreateInvitation("alice", sessionToAlice);
+            var sessionFromAlice = DoubleRatchetSession.CreateResponderSession(_aliceIdentity, _aliceRatchet, _creatorIdentity);
+            var aliceGroupManager = GroupManager.AcceptInvitation(sessionFromAlice, invitation, creatorManager.SigningPublicKey!);
 
-            var bobInvitation = aliceManager.CreateInvitation("bob", aliceToBob);
-            var carolInvitation = aliceManager.CreateInvitation("carol", aliceToCarol);
-
-            var bobManager = GroupManager.AcceptInvitation(bobToAlice, bobInvitation);
-            var carolManager = GroupManager.AcceptInvitation(carolToAlice, carolInvitation);
-            var carolOldGroupSession = carolManager.GroupSession; // Save Carol's session before she's removed.
-
-            // Act: Alice removes Carol from the group.
-            var rekeyMessages = aliceManager.RemoveMember("carol");
-
-            // Bob processes the re-key message.
-            bobManager.ProcessRekeyMessage(bobToAlice, rekeyMessages["bob"]);
-
-            // Alice sends a new message to the group after re-keying.
-            var messageAfterRemoval = aliceManager.GroupSession.Encrypt("Carol is gone"u8.ToArray());
-
-            // Assert
-            // Bob should be able to decrypt the new message with his updated session.
-            var decryptedByBob = bobManager.GroupSession.Decrypt(messageAfterRemoval);
-            Encoding.UTF8.GetString(decryptedByBob).Should().Be("Carol is gone");
-
-            // Carol should NOT be able to decrypt the new message with her old session.
-            Assert.Throws<CryptographicException>(() => carolOldGroupSession.Decrypt(messageAfterRemoval));
+            // Act & Assert: Alice tries to invite Bob
+            var sessionToBobForAlice = DoubleRatchetSession.CreateInitiatorSession(_aliceIdentity, _bobIdentity, _bobRatchet);
+            Action inviteAction = () => aliceGroupManager.CreateInvitation("bob", sessionToBobForAlice);
+            inviteAction.Should().Throw<InvalidOperationException>().WithMessage("Only the group creator can send invitations.");
+            
+            // Act & Assert: Alice tries to remove herself (or anyone)
+            Action removeAction = () => aliceGroupManager.RemoveMember("alice");
+            removeAction.Should().Throw<InvalidOperationException>().WithMessage("Only the group creator can remove members.");
+            
+            // Act & Assert: Alice tries to save state
+            Action saveAction = () => aliceGroupManager.SaveState(_masterKey);
+            saveAction.Should().Throw<InvalidOperationException>().WithMessage("Only the group creator can save state.");
+            
+            creatorManager.Dispose();
+            aliceGroupManager.Dispose();
+            sessionToBobForAlice.Dispose();
         }
     }
 }

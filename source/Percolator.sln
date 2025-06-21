@@ -1,19 +1,4 @@
-﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.Console", "Percolator.Console\Percolator.Console.csproj", "{F2F1FF96-E903-43B6-B462-78FFA193C161}"
-EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.Grpc", "Percolator.Grpc\Percolator.Grpc.csproj", "{4A668132-80AF-4064-838F-93411EEAB90D}"
-EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.Desktop", "Percolator.Desktop\Percolator.Desktop.csproj", "{5EEC1600-14E1-45CE-970D-4EB14380F151}"
-EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.Crypto", "Percolator.Crypto\Percolator.Crypto.csproj", "{CDBCFCA1-8CDA-4381-B851-551F7444B6BE}"
-EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.Crypto.Abstractions", "Percolator.Crypto.Abstractions\Percolator.Crypto.Abstractions.csproj", "{1728B2D0-C035-4B28-8EF1-140BC78A68EA}"
-EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.Crypto.Grpc", "Percolator.Crypto.Grpc\Percolator.Crypto.Grpc.csproj", "{A09F678A-85A5-40A4-8779-FE8073A85799}"
-EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.Crypto.Tests", "Percolator.Crypto.Tests\Percolator.Crypto.Tests.csproj", "{01F527E3-71C0-4DC7-8EA6-61A053B6543C}"
-EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "SolutionFolder", "SolutionFolder", "{D7D1220C-3D34-48E0-BDAE-00BCD95649B5}"
 	ProjectSection(SolutionItems) = preProject
 		..\README.md = ..\README.md
@@ -31,34 +16,6 @@ Global
 		Release|Any CPU = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
-		{F2F1FF96-E903-43B6-B462-78FFA193C161}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{F2F1FF96-E903-43B6-B462-78FFA193C161}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{F2F1FF96-E903-43B6-B462-78FFA193C161}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{F2F1FF96-E903-43B6-B462-78FFA193C161}.Release|Any CPU.Build.0 = Release|Any CPU
-		{4A668132-80AF-4064-838F-93411EEAB90D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{4A668132-80AF-4064-838F-93411EEAB90D}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{4A668132-80AF-4064-838F-93411EEAB90D}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{4A668132-80AF-4064-838F-93411EEAB90D}.Release|Any CPU.Build.0 = Release|Any CPU
-		{5EEC1600-14E1-45CE-970D-4EB14380F151}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{5EEC1600-14E1-45CE-970D-4EB14380F151}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{5EEC1600-14E1-45CE-970D-4EB14380F151}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{5EEC1600-14E1-45CE-970D-4EB14380F151}.Release|Any CPU.Build.0 = Release|Any CPU
-		{CDBCFCA1-8CDA-4381-B851-551F7444B6BE}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{CDBCFCA1-8CDA-4381-B851-551F7444B6BE}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{CDBCFCA1-8CDA-4381-B851-551F7444B6BE}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{CDBCFCA1-8CDA-4381-B851-551F7444B6BE}.Release|Any CPU.Build.0 = Release|Any CPU
-		{1728B2D0-C035-4B28-8EF1-140BC78A68EA}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{1728B2D0-C035-4B28-8EF1-140BC78A68EA}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{1728B2D0-C035-4B28-8EF1-140BC78A68EA}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{1728B2D0-C035-4B28-8EF1-140BC78A68EA}.Release|Any CPU.Build.0 = Release|Any CPU
-		{A09F678A-85A5-40A4-8779-FE8073A85799}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{A09F678A-85A5-40A4-8779-FE8073A85799}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{A09F678A-85A5-40A4-8779-FE8073A85799}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{A09F678A-85A5-40A4-8779-FE8073A85799}.Release|Any CPU.Build.0 = Release|Any CPU
-		{01F527E3-71C0-4DC7-8EA6-61A053B6543C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{01F527E3-71C0-4DC7-8EA6-61A053B6543C}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{01F527E3-71C0-4DC7-8EA6-61A053B6543C}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{01F527E3-71C0-4DC7-8EA6-61A053B6543C}.Release|Any CPU.Build.0 = Release|Any CPU
 		{F88E64D0-D7F8-4876-BD39-2175D1B86889}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{F88E64D0-D7F8-4876-BD39-2175D1B86889}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{F88E64D0-D7F8-4876-BD39-2175D1B86889}.Release|Any CPU.ActiveCfg = Release|Any CPU

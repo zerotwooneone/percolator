@@ -34,7 +34,7 @@ namespace Percolator.Cryptography
             });
         }
 
-        private SenderKeySession(SenderKeySessionState state)
+        public SenderKeySession(SenderKeySessionState state)
         {
             Context = state.Context;
             SessionKey = state.SessionKey;
@@ -42,8 +42,8 @@ namespace Percolator.Cryptography
             _iteration = state.Iteration;
             _messageKeyCache = state.MessageKeyCache;
 
-            _signingKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
-            _signingKey.ImportPkcs8PrivateKey(state.SigningKeyPrivate, out _);
+            _signingKey = ECDsa.Create();
+            _signingKey.ImportECPrivateKey(state.SigningKeyPrivate, out _);
         }
 
         public static SenderKeySession LoadState(byte[] encryptedState, byte[] masterKey)
@@ -63,9 +63,9 @@ namespace Percolator.Cryptography
             return new SenderKeySession(state);
         }
 
-        public byte[] SaveState(byte[] masterKey)
+        public SenderKeySessionState GetState()
         {
-            var state = new SenderKeySessionState
+            return new SenderKeySessionState
             {
                 Context = Context,
                 SessionKey = SessionKey,
@@ -74,7 +74,11 @@ namespace Percolator.Cryptography
                 MessageKeyCache = _messageKeyCache,
                 SigningKeyPrivate = _signingKey.ExportECPrivateKey()
             };
+        }
 
+        public byte[] SaveState(byte[] masterKey)
+        {
+            var state = GetState();
             var plaintextState = JsonSerializer.SerializeToUtf8Bytes(state);
             return CryptoUtils.EncryptAtRest(masterKey, plaintextState, Encoding.UTF8.GetBytes("SenderKeySessionState"));
         }
@@ -84,12 +88,15 @@ namespace Percolator.Cryptography
             var messageKey = CryptoUtils.KDF(null, _chainKey, "SenderKey-MessageKey", CryptoUtils.KeySize);
             _chainKey = CryptoUtils.KDF(null, _chainKey, "SenderKey-ChainKey", CryptoUtils.KeySize);
 
-            var ciphertext = CryptoUtils.EncryptAesGcm(messageKey, _iteration, plaintext, Context);
-            var signature = SignMessage(ciphertext);
+            var header = new SenderKeyHeader { Iteration = _iteration };
+            var associatedData = header.ToAssociatedData(Context);
+
+            var ciphertext = CryptoUtils.EncryptAesGcm(messageKey, _iteration, plaintext, associatedData);
+            var signature = SignMessage(associatedData, ciphertext);
 
             var message = new SenderKeyMessage
             {
-                Iteration = _iteration,
+                Header = header,
                 Ciphertext = ciphertext,
                 Signature = signature
             };
@@ -100,34 +107,35 @@ namespace Percolator.Cryptography
 
         public byte[] Decrypt(SenderKeyMessage message)
         {
-            if (!VerifySignature(message))
+            var associatedData = message.Header.ToAssociatedData(Context);
+            if (!VerifySignature(message, associatedData))
             {
                 throw new CryptographicException("Invalid signature.");
             }
 
-            if (message.Iteration < _iteration)
+            if (message.Header.Iteration < _iteration)
             {
-                if (_messageKeyCache.TryGetValue(message.Iteration, out var cachedKey))
+                if (_messageKeyCache.TryGetValue(message.Header.Iteration, out var cachedKey))
                 {
-                    var plaintext = CryptoUtils.DecryptAesGcm(cachedKey, message.Iteration, message.Ciphertext!, Context);
-                    _messageKeyCache.Remove(message.Iteration);
+                    var plaintext = CryptoUtils.DecryptAesGcm(cachedKey, message.Header.Iteration, message.Ciphertext!, associatedData);
+                    _messageKeyCache.Remove(message.Header.Iteration);
                     return plaintext;
                 }
-                if (_messageKeyCache.ContainsKey(message.Iteration))
+                if (_messageKeyCache.ContainsKey(message.Header.Iteration))
                 {
                     throw new CryptographicException("Received an old message that was already decrypted.");
                 }
                 throw new CryptographicException("Received an old message that was not in the cache.");
             }
 
-            if (message.Iteration > _iteration)
+            if (message.Header.Iteration > _iteration)
             {
-                if (message.Iteration - _iteration > MaxSkippedMessages)
+                if (message.Header.Iteration - _iteration > MaxSkippedMessages)
                 {
-                    throw new CryptographicException($"Cannot process message with iteration {message.Iteration} because it exceeds the maximum number of skippable messages ({MaxSkippedMessages}).");
+                    throw new CryptographicException($"Cannot process message with iteration {message.Header.Iteration} because it exceeds the maximum number of skippable messages ({MaxSkippedMessages}).");
                 }
 
-                while (_iteration < message.Iteration)
+                while (_iteration < message.Header.Iteration)
                 {
                     var skippedMessageKey = CryptoUtils.KDF(null, _chainKey, "SenderKey-MessageKey", CryptoUtils.KeySize);
                     _messageKeyCache.Add(_iteration, skippedMessageKey);
@@ -136,34 +144,32 @@ namespace Percolator.Cryptography
                 }
             }
 
-            // At this point, message.Iteration == _iteration
+            // At this point, message.Header.Iteration == _iteration
             var messageKey = CryptoUtils.KDF(null, _chainKey, "SenderKey-MessageKey", CryptoUtils.KeySize);
             _chainKey = CryptoUtils.KDF(null, _chainKey, "SenderKey-ChainKey", CryptoUtils.KeySize);
             _iteration++;
 
-            return CryptoUtils.DecryptAesGcm(messageKey, message.Iteration, message.Ciphertext!, Context);
+            return CryptoUtils.DecryptAesGcm(messageKey, message.Header.Iteration, message.Ciphertext!, associatedData);
         }
 
-        private byte[] SignMessage(byte[] ciphertext)
+        private byte[] SignMessage(byte[] associatedData, byte[] ciphertext)
         {
-            var dataToSign = new byte[Context.Length + sizeof(uint) + ciphertext.Length];
-            Context.CopyTo(dataToSign, 0);
-            BitConverter.GetBytes(_iteration).CopyTo(dataToSign, Context.Length);
-            ciphertext.CopyTo(dataToSign, Context.Length + sizeof(uint));
+            var dataToSign = new byte[associatedData.Length + ciphertext.Length];
+            associatedData.CopyTo(dataToSign, 0);
+            ciphertext.CopyTo(dataToSign, associatedData.Length);
             return _signingKey.SignData(dataToSign, HashAlgorithmName.SHA256);
         }
 
-        private bool VerifySignature(SenderKeyMessage message)
+        private bool VerifySignature(SenderKeyMessage message, byte[] associatedData)
         {
             if (message.Ciphertext is null || message.Signature is null)
             {
                 return false;
             }
 
-            var dataToVerify = new byte[Context.Length + sizeof(uint) + message.Ciphertext.Length];
-            Context.CopyTo(dataToVerify, 0);
-            BitConverter.GetBytes(message.Iteration).CopyTo(dataToVerify, Context.Length);
-            message.Ciphertext.CopyTo(dataToVerify, Context.Length + sizeof(uint));
+            var dataToVerify = new byte[associatedData.Length + message.Ciphertext.Length];
+            associatedData.CopyTo(dataToVerify, 0);
+            message.Ciphertext.CopyTo(dataToVerify, associatedData.Length);
             return _signingKey.VerifyData(dataToVerify, message.Signature, HashAlgorithmName.SHA256);
         }
 

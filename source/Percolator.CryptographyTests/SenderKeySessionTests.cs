@@ -13,12 +13,14 @@ namespace Percolator.CryptographyTests
         private byte[] _context;
         private SenderKeySession _senderSession;
         private SenderKeySession _receiverSession;
+        private byte[] _masterKey;
 
         [SetUp]
         public void Setup()
         {
             _sessionKey = RandomNumberGenerator.GetBytes(32);
             _context = Encoding.UTF8.GetBytes("test-context");
+            _masterKey = RandomNumberGenerator.GetBytes(32);
             _senderSession = new SenderKeySession(_sessionKey, _context);
             _receiverSession = new SenderKeySession(_sessionKey, _context);
         }
@@ -52,14 +54,13 @@ namespace Percolator.CryptographyTests
         [Test]
         public void Decrypt_WithSkippedMessages_Succeeds()
         {
-            var msg1 = _senderSession.Encrypt(Encoding.UTF8.GetBytes("message 1"));
-            var msg2 = _senderSession.Encrypt(Encoding.UTF8.GetBytes("message 2"));
-            var msg3 = _senderSession.Encrypt(Encoding.UTF8.GetBytes("message 3"));
+            var msg1 = _senderSession.Encrypt("one"u8.ToArray());
+            var msg2 = _senderSession.Encrypt("two"u8.ToArray());
+            var msg3 = _senderSession.Encrypt("three"u8.ToArray());
 
-            // Decrypt in reverse order
-            _receiverSession.Decrypt(msg3).Should().BeEquivalentTo(Encoding.UTF8.GetBytes("message 3"));
-            _receiverSession.Decrypt(msg2).Should().BeEquivalentTo(Encoding.UTF8.GetBytes("message 2"));
-            _receiverSession.Decrypt(msg1).Should().BeEquivalentTo(Encoding.UTF8.GetBytes("message 1"));
+            _receiverSession.Decrypt(msg3).Should().BeEquivalentTo("three"u8.ToArray());
+            _receiverSession.Decrypt(msg1).Should().BeEquivalentTo("one"u8.ToArray());
+            _receiverSession.Decrypt(msg2).Should().BeEquivalentTo("two"u8.ToArray());
         }
 
         [Test]
@@ -75,20 +76,55 @@ namespace Percolator.CryptographyTests
         [Test]
         public void Decrypt_WithTooManySkippedMessages_ThrowsException()
         {
-            // Arrange
-            // Create a message from the sender that is far in the future for the receiver.
-            // The receiver is at iteration 0. A message with iteration > MaxSkippedMessages (1000) should be rejected.
-            SenderKeyMessage? message = null;
-            for (var i = 0; i <= 1001; i++)
-            {
-                message = _senderSession.Encrypt("ping"u8.ToArray());
-            }
+            var message = _senderSession.Encrypt("ping"u8.ToArray());
 
-            // Act & Assert
-            // The message is validly signed, but its iteration (1001) is too far
-            // ahead of the receiver's current iteration (0).
-            var ex = Assert.Throws<CryptographicException>(() => _receiverSession.Decrypt(message!));
-            ex.Message.Should().Contain("exceeds the maximum number of skippable messages");
+            // Manually create a message with a very high iteration number
+            // This requires creating a valid signature for the tampered data.
+            var tamperedHeader = new SenderKeyHeader { Iteration = 2000 };
+            var tamperedAd = tamperedHeader.ToAssociatedData(_context);
+            var tamperedSignature = SignData(tamperedAd, message.Ciphertext);
+
+            var tamperedMessage = new SenderKeyMessage
+            {
+                Header = tamperedHeader,
+                Ciphertext = message.Ciphertext,
+                Signature = tamperedSignature
+            };
+
+            Assert.Throws<CryptographicException>(
+                () => _receiverSession.Decrypt(tamperedMessage),
+                "Cannot process message with iteration 2000 because it exceeds the maximum number of skippable messages (1000)."
+            );
+        }
+
+        [Test]
+        public void Decrypt_WithTamperedIteration_ThrowsException()
+        {
+            // Arrange
+            var message = _senderSession.Encrypt("ping"u8.ToArray());
+
+            // Act: Tamper with the iteration in the header
+            message.Header.Iteration++;
+
+            // Assert: Decryption must fail. The signature verification should catch this.
+            var ex = Assert.Throws<CryptographicException>(() => _receiverSession.Decrypt(message));
+            ex.Message.Should().Be("Invalid signature.");
+        }
+
+        // Helper to sign data with the sender's private key, needed for the DoS test.
+        private byte[] SignData(byte[] associatedData, byte[] ciphertext)
+        {
+            // To test the DoS scenario, we need to re-sign a message with a tampered header.
+            // We can get the private signing key from the session's state.
+            var senderState = _senderSession.GetState();
+            using var signingKey = ECDsa.Create();
+            signingKey.ImportECPrivateKey(senderState.SigningKeyPrivate, out _);
+
+            var dataToSign = new byte[associatedData.Length + ciphertext.Length];
+            associatedData.CopyTo(dataToSign, 0);
+            ciphertext.CopyTo(dataToSign, associatedData.Length);
+
+            return signingKey.SignData(dataToSign, HashAlgorithmName.SHA256);
         }
     }
 }

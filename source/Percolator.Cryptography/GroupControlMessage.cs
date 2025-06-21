@@ -9,4 +9,7 @@ internal class GroupControlMessage
 
     [JsonInclude]
     public string GroupId { get; set; } = null!;
+
+    [JsonInclude]
+    public byte[] Signature { get; set; } = null!;
 }
