@@ -1,6 +1,7 @@
 syntax = "proto3";
 
 import "Protos/manifest.proto";
+import "google/protobuf/timestamp.proto";
 
 option csharp_namespace = "Percolator.Contracts.Protos";
 
@@ -28,6 +29,8 @@ message AnnounceManifestResponse {
     optional bool success = 1;
     // An optional message, e.g., an error reason.
     optional string message = 2;
+    // If the request was rate-limited, this is the UTC time to retry after.
+    optional google.protobuf.Timestamp retry_after_utc = 3;
 }
 
 message RequestManifestRequest {
@@ -40,6 +43,8 @@ message RequestManifestRequest {
 message RequestManifestResponse {
     // The signed manifest, using the definition from manifest.proto.
     optional SignedManifest signed_manifest = 1;
+    // If the request was rate-limited, this is the UTC time to retry after.
+    optional google.protobuf.Timestamp retry_after_utc = 2;
 }
 
 message DownloadChunkRequest {

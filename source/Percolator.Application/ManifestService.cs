@@ -11,35 +11,52 @@ public class ManifestService : IManifestService
     private readonly IIdentityService _identityService;
     private readonly IManifestStore _manifestStore;
     private readonly ISignatureService _signatureService;
+    private readonly ISharedDirectoryProvider _sharedDirectoryProvider;
 
-    public ManifestService(IIdentityService identityService, IManifestStore manifestStore, ISignatureService signatureService)
+    public ManifestService(IIdentityService identityService, IManifestStore manifestStore, ISignatureService signatureService, ISharedDirectoryProvider sharedDirectoryProvider)
     { 
         _identityService = identityService;
         _manifestStore = manifestStore;
         _signatureService = signatureService;
+        _sharedDirectoryProvider = sharedDirectoryProvider;
     }
 
-    public (ByteString hash, SignedManifest manifest) CreateManifestFromFile(string path)
+    public IEnumerable<(ByteString hash, SignedManifest manifest)> CreateManifestsFromSharedDirectories()
     {
-        var manifest = new Manifest();
-        var basePath = Path.GetDirectoryName(path) ?? string.Empty;
-        PopulateManifestEntries(manifest, path, basePath);
+        var manifests = new List<(ByteString, SignedManifest)>();
+        var sharedDirs = _sharedDirectoryProvider.GetSharedDirectories();
 
-        var manifestBytes = manifest.ToByteArray();
-
-        using var sha256 = SHA256.Create();
-        var hash = ByteString.CopyFrom(sha256.ComputeHash(manifestBytes));
-
-        var signedManifest = new SignedManifest
+        foreach (var dir in sharedDirs)
         {
-            Version = 1,
-            Manifest = manifest
-        };
-        _signatureService.Sign(signedManifest);
+            foreach (var entryPath in Directory.EnumerateFileSystemEntries(dir))
+            {
+                var manifest = new Manifest();
+                // The base path for relativity is the parent of the item being manifested.
+                var basePath = Path.GetDirectoryName(entryPath) ?? string.Empty;
+                PopulateManifestEntries(manifest, entryPath, basePath);
 
-        _manifestStore.Add(hash, signedManifest, path);
+                if (manifest.Entries.Count == 0)
+                {
+                    continue; // Do not create empty manifests
+                }
 
-        return (hash, signedManifest);
+                var manifestBytes = manifest.ToByteArray();
+
+                using var sha256 = SHA256.Create();
+                var hash = ByteString.CopyFrom(sha256.ComputeHash(manifestBytes));
+
+                var signedManifest = new SignedManifest
+                {
+                    Version = 1,
+                    Manifest = manifest
+                };
+                _signatureService.Sign(signedManifest);
+
+                _manifestStore.Add(hash, signedManifest, entryPath);
+                manifests.Add((hash, signedManifest));
+            }
+        }
+        return manifests;
     }
 
     private void PopulateManifestEntries(Manifest manifest, string currentPath, string basePath)

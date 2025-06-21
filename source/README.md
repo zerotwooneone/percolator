@@ -43,6 +43,16 @@ When building the peer-to-peer networking layer using gRPC, several critical con
 *   **Local Peer Connection IP**: In network environments like Docker or WSL, a node's broadcasted IP address (e.g., `172.25.0.1`) may not be the correct address for another local node to connect to. For inter-process communication on the same machine, the loopback address is the correct and most reliable target.
     *   **Solution**: When a peer is discovered, if it is known to be running on the same machine, the `PeerConnectionManager` should force the gRPC client to connect to `127.0.0.1` (loopback) on the discovered port, rather than using the IP address from the discovery broadcast.
 
+## Security
+
+The Percolator Node is designed with a security-first approach. Key security features include:
+
+-   **End-to-End Encryption**: All gRPC communication between nodes is encrypted using TLS, with identities verified by self-signed X.509 certificates. This prevents eavesdropping and man-in-the-middle attacks.
+-   **Cryptographic Peer Discovery**: UDP discovery messages are cryptographically signed to prevent peer spoofing.
+-   **Path Traversal Prevention**: The node no longer accepts arbitrary file paths from remote peers. All shared files are managed through a pre-configured, safe directory (`~/PercolatorShares`), eliminating the risk of path traversal and information disclosure attacks.
+-   **Denial-of-Service (DoS) Protection**: The application implements service-side rate-limiting to protect against resource exhaustion attacks from malicious peers. It also enforces strict quotas on manifest storage.
+-   **Fail-Forward Security Policy**: Domain libraries are designed to throw exceptions on security violations rather than logging warnings, ensuring that insecure states are never ignored.
+
 ## Usage
 
 This library is designed to be straightforward to use. Below are examples for common scenarios.

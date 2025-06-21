@@ -3,6 +3,7 @@ using MediatR;
 using Microsoft.Extensions.Logging;
 using System.Security.Cryptography;
 using Google.Protobuf;
+using Google.Protobuf.WellKnownTypes;
 using Percolator.Contracts.Protos;
 using Percolator.Cryptography;
 
@@ -13,18 +14,32 @@ namespace Percolator.Application
         private readonly IMediator _mediator;
         private readonly IManifestStore _manifestStore;
         private readonly ISignatureService _signatureService;
+        private readonly IRateLimiter _rateLimiter;
         private readonly ILogger<FileSharingService> _logger;
 
-        public FileSharingService(IMediator mediator, IManifestStore manifestStore, ISignatureService signatureService, ILogger<FileSharingService> logger)
+        public FileSharingService(IMediator mediator, IManifestStore manifestStore, ISignatureService signatureService, IRateLimiter rateLimiter, ILogger<FileSharingService> logger)
         {
             _mediator = mediator;
             _manifestStore = manifestStore;
             _signatureService = signatureService;
+            _rateLimiter = rateLimiter;
             _logger = logger;
         }
 
         public override Task<AnnounceManifestResponse> AnnounceManifest(AnnounceManifestRequest request, ServerCallContext context)
         {
+            var decision = _rateLimiter.IsRequestAllowed(context.Peer);
+            if (!decision.IsAllowed)
+            {
+                _logger.LogWarning("Rate limit exceeded for peer {Peer}. Throttling request.", context.Peer);
+                return Task.FromResult(new AnnounceManifestResponse
+                {
+                    Success = false,
+                    Message = "Rate limit exceeded.",
+                    RetryAfterUtc = Timestamp.FromDateTime(decision.RetryAfterUtc!.Value)
+                });
+            }
+
             _logger.LogInformation("Received a manifest announcement from a peer.");
 
             if (request.SignedManifest is null)
@@ -53,6 +68,16 @@ namespace Percolator.Application
 
         public override Task<RequestManifestResponse> RequestManifest(RequestManifestRequest request, ServerCallContext context)
         {
+            var decision = _rateLimiter.IsRequestAllowed(context.Peer);
+            if (!decision.IsAllowed)
+            {
+                _logger.LogWarning("Rate limit exceeded for peer {Peer}. Throttling request.", context.Peer);
+                return Task.FromResult(new RequestManifestResponse
+                {
+                    RetryAfterUtc = Timestamp.FromDateTime(decision.RetryAfterUtc!.Value)
+                });
+            }
+
             _logger.LogInformation("Received a request for manifest {ManifestHash}", request.ManifestHash.ToBase64());
 
             var manifest = _manifestStore.Get(request.ManifestHash);
@@ -72,6 +97,14 @@ namespace Percolator.Application
 
         public override Task DownloadChunk(DownloadChunkRequest request, IServerStreamWriter<DownloadChunkResponse> responseStream, ServerCallContext context)
         {
+            var decision = _rateLimiter.IsRequestAllowed(context.Peer);
+            if (!decision.IsAllowed)
+            {
+                _logger.LogWarning("Rate limit exceeded for peer {Peer}. Throttling request.", context.Peer);
+                var metadata = new Metadata { { "retry-after-utc", decision.RetryAfterUtc!.Value.ToString("o") } };
+                throw new RpcException(new Status(StatusCode.ResourceExhausted, "Rate limit exceeded. Try again later."), metadata);
+            }
+
             _logger.LogInformation("[gRPC] Received chunk download request from {Peer}.", context.Peer);
 
             // Placeholder: In the future, this would stream the file chunks.

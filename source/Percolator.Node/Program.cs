@@ -16,6 +16,7 @@ using System.CommandLine;
 using System.CommandLine.Builder;
 using System.CommandLine.Invocation;
 using System.Net;
+using System.Net.Http;
 
 var serviceProvider = ConfigureServices(args).BuildServiceProvider();
 
@@ -38,10 +39,6 @@ static RootCommand CreateRootCommand(IServiceProvider serviceProvider)
         description: "The port for the gRPC server to listen on.");
     portOption.SetDefaultValue(9000);
 
-    var addFileCommand = new Command("add-file", "Creates a manifest for a file or directory.");
-    var fileArgument = new Argument<FileInfo>("path", "The path to the file or directory.");
-    addFileCommand.AddArgument(fileArgument);
-
     var requestManifestCommand = new Command("request-manifest", "Requests a manifest from a peer.");
     var hashArgument = new Argument<string>("manifest-hash", "The Base64 hash of the manifest to request.");
     var subPathOption = new Option<string>("--sub-path", "The sub-path within the manifest to request.");
@@ -53,33 +50,12 @@ static RootCommand CreateRootCommand(IServiceProvider serviceProvider)
 
     var rootCommand = new RootCommand("Percolator Node");
     rootCommand.AddGlobalOption(portOption);
-    rootCommand.AddCommand(addFileCommand);
     rootCommand.AddCommand(requestManifestCommand);
 
     rootCommand.SetHandler<int>(async (port) =>
     {
         await RunNodeAsync(port, serviceProvider);
     }, portOption);
-
-    addFileCommand.SetHandler((InvocationContext context) =>
-    {
-        var fileInfo = context.ParseResult.GetValueForArgument(fileArgument);
-        var logger = serviceProvider.GetRequiredService<ILogger<Program>>();
-        var manifestService = serviceProvider.GetRequiredService<IManifestService>();
-        var identityService = serviceProvider.GetRequiredService<IIdentityService>();
-
-        if (fileInfo is null || !fileInfo.Exists)
-        {
-            logger.LogError("Error: File or directory not found at '{FullPath}'", fileInfo?.FullName);
-            context.ExitCode = 1;
-            return;
-        }
-
-        identityService.GetDefaultIdentityCertificate();
-        logger.LogInformation("Creating manifest for {AbsolutePath}...", fileInfo.FullName);
-        var (hash, _) = manifestService.CreateManifestFromFile(fileInfo.FullName);
-        logger.LogInformation("Successfully created and stored manifest with hash: {ManifestHash}", hash.ToBase64());
-    });
 
     requestManifestCommand.SetHandler(async (InvocationContext context) =>
     {
@@ -89,7 +65,12 @@ static RootCommand CreateRootCommand(IServiceProvider serviceProvider)
         var subPath = context.ParseResult.GetValueForOption(subPathOption);
 
         logger.LogInformation("Requesting sub-manifest for path '{SubPath}' from manifest '{ManifestHash}' on port {Port}...", subPath, manifestHash, port);
-        using var channel = GrpcChannel.ForAddress($"http://localhost:{port}");
+        
+        var httpHandler = new HttpClientHandler();
+        // Allow self-signed certificates. In a production scenario, you would want
+        // to properly validate the certificate chain or pin to a specific certificate.
+        httpHandler.ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator;
+        using var channel = GrpcChannel.ForAddress($"https://localhost:{port}", new GrpcChannelOptions { HttpHandler = httpHandler });
         var client = new FileSharing.FileSharingClient(channel);
 
         try
@@ -143,7 +124,6 @@ static async Task RunNodeAsync(int port, IServiceProvider serviceProvider)
                 };
             });
         });
-        options.Listen(IPAddress.Loopback, port, o => o.Protocols = HttpProtocols.Http2);
     });
 
     var app = builder.Build();
@@ -154,11 +134,22 @@ static async Task RunNodeAsync(int port, IServiceProvider serviceProvider)
 
     var lifetime = app.Services.GetRequiredService<IHostApplicationLifetime>();
     var discoveryService = app.Services.GetRequiredService<IPeerDiscoveryService>();
-    lifetime.ApplicationStarted.Register(() => discoveryService.Start());
+    lifetime.ApplicationStarted.Register(() =>
+    {
+        discoveryService.Start();
+
+        // Create and announce manifests for shared directories
+        using var scope = app.Services.CreateScope();
+        var manifestService = scope.ServiceProvider.GetRequiredService<IManifestService>();
+        var manifests = manifestService.CreateManifestsFromSharedDirectories();
+
+        // TODO: Announce these manifests to the network
+    });
     lifetime.ApplicationStopping.Register(() => discoveryService.Stop());
 
     app.MapGrpcService<FileSharingService>();
 
+    // Run the host
     await app.RunAsync();
 }
 
@@ -171,6 +162,8 @@ static IServiceCollection ConfigureServices(string[] args)
     services.AddSingleton<ISignatureService, SignatureService>();
     services.AddSingleton<IManifestService, ManifestService>();
     services.AddSingleton<IManifestStore, ManifestStore>();
+    services.AddSingleton<ISharedDirectoryProvider, SharedDirectoryProvider>();
+    services.AddSingleton<IRateLimiter, InMemoryRateLimiter>();
     services.AddSingleton<IPeerConnectionManager, PeerConnectionManager>();
     services.AddSingleton<IPeerDiscoveryHandler, PeerDiscoveryHandler>();
     services.AddSingleton<IDiscoverySignatureProvider, DiscoverySignatureProvider>();
@@ -193,14 +186,6 @@ static IServiceCollection ConfigureServices(string[] args)
             sp.GetRequiredService<ILogger<PeerDiscoveryService>>());
     });
 
-    services.AddMediatR(cfg => cfg.RegisterServicesFromAssemblyContaining<Program>());
-    services.AddGrpc(options =>
-    {
-        options.MaxReceiveMessageSize = 4 * 1024 * 1024; // 4 MB
-    });
-
-    // Add a reference to the service collection itself so we can transfer it to the WebApplication host.
-    services.AddSingleton<IServiceCollection>(services);
-
+    services.AddSingleton(services);
     return services;
 }

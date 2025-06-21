@@ -23,7 +23,7 @@ public class DiscoverySignatureProvider : IDiscoverySignatureProvider
 
     public string GetThumbprint(byte[] publicKeyCertificate)
     {
-        using var certificate = new System.Security.Cryptography.X509Certificates.X509Certificate2(publicKeyCertificate);
+        using var certificate = X509CertificateLoader.LoadCertificate(publicKeyCertificate);
         return certificate.Thumbprint;
     }
 
@@ -38,8 +38,8 @@ public class DiscoverySignatureProvider : IDiscoverySignatureProvider
     {
         try
         {
-            var certificate = X509CertificateLoader.LoadCertificate(publicKeyCertificate);
-            var publicKey = certificate.GetRSAPublicKey()!;
+            using var certificate = X509CertificateLoader.LoadCertificate(publicKeyCertificate);
+            using var publicKey = certificate.GetRSAPublicKey()!;
             return publicKey.VerifyData(data, signature, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
         }
         catch (CryptographicException)

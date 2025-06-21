@@ -1,9 +1,10 @@
 using Google.Protobuf;
 using Percolator.Contracts.Protos;
+using System.Collections.Generic;
 
 namespace Percolator.Application;
 
 public interface IManifestService
 {
-    (ByteString hash, SignedManifest manifest) CreateManifestFromFile(string path);
+    IEnumerable<(ByteString hash, SignedManifest manifest)> CreateManifestsFromSharedDirectories();
 }

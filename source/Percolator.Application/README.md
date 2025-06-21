@@ -12,6 +12,9 @@ The primary responsibility of the `Application` layer is to orchestrate business
 -   **Secure Credential Management**: Implements `CredentialService` and `PersistentIdentityService` to securely store and manage user identity certificates and passwords using platform-native features.
 -   **Orchestration**: Manages the flow of data and calls between different parts of the system. For example, it would handle receiving a manifest announcement, verifying its signature using the `Cryptography` library, and storing it.
 -   **Dependency Injection**: Wires up dependencies for the main executable (`Percolator.Node`).
+-   **`IManifestStore`**: Manages the persistent storage of manifests, enforcing size and count quotas to prevent DoS attacks.
+-   **`ISharedDirectoryProvider`**: Provides a list of safe, pre-approved directories that can be shared. This is a security-critical component that prevents path traversal attacks.
+-   **`IRateLimiter`**: Provides a mechanism to throttle requests from peers to prevent resource exhaustion.
 
 ## Platform Dependencies
 
@@ -33,6 +36,6 @@ This layer uses the **MediatR** library to implement the Command Query Responsib
 
 ### Error Handling and Exception Prevention
 
-This application layer serves as a security boundary. It is responsible for validating data and performing sanity checks **before** passing requests to the domain layers (`Percolator.Network`, `Percolator.Cryptography`).
+This application layer serves as a security boundary. It is responsible for validating data and performing sanity checks **before** passing requests to the domain layers (`Percolator.Network`, `Percolator.Cryptography`). This includes enforcing rate limits on incoming requests.
 
 The domain layers operate on a "fail forward" policy and will throw exceptions on any data that violates their contracts. The application layer's primary error handling duty is to prevent these exceptions from occurring under normal conditions by rigorously validating all inputs. This ensures that domain-level exceptions represent true, unexpected security or logic violations, not routine validation failures.
