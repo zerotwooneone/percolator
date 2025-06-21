@@ -6,24 +6,29 @@ namespace Percolator.Identity;
 public class IdentityService : IIdentityService
 {
     private readonly ILogger<IdentityService> _logger;
+    private readonly ICertificateOperations _certificateOperations;
 
-    public IdentityService(ILogger<IdentityService> logger)
+    public IdentityService(ILogger<IdentityService> logger, ICertificateOperations certificateOperations)
     {
         _logger = logger;
+        _certificateOperations = certificateOperations;
     }
 
     public X509Certificate2 GetDefaultIdentityCertificate()
     {
-        // TODO: Implement logic to load the user's default identity certificate.
-        // For now, we can generate a new one for placeholder purposes.
-        _logger.LogWarning("[IdentityService] WARNING: No default identity found. Generating a temporary one.");
-        return CertificateGenerator.CreateSelfSignedCertificate("temp-default");
+        return GetOrCreateIdentity("default");
     }
 
-    public X509Certificate2 CreateIdentity(string identityName)
+    public X509Certificate2 CreateIdentity(string name)
     {
-        // TODO: Implement logic to create and persist a new named identity.
-        _logger.LogWarning("[IdentityService] WARNING: Creating a non-persistent identity named '{IdentityName}'.", identityName);
-        return CertificateGenerator.CreateSelfSignedCertificate(identityName);
+        return GetOrCreateIdentity(name);
+    }
+
+    private X509Certificate2 GetOrCreateIdentity(string name)
+    {
+        // NOTE: This implementation is for demonstration and does not persist the certificate.
+        // Use PersistentIdentityService for production scenarios.
+        _logger.LogInformation("Creating new in-memory identity certificate for {name}", name);
+        return _certificateOperations.CreateSelfSignedCertificate(name);
     }
 }

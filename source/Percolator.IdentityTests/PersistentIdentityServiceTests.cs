@@ -12,6 +12,7 @@ namespace Percolator.IdentityTests
     public class PersistentIdentityServiceTests
     {
         private Mock<ICredentialService> _mockCredentialService;
+        private Mock<ICertificateOperations> _mockCertificateOperations;
         private string _testIdentitiesPath;
         private const string TestIdentityName = "test-identity";
         private const string TestPassword = "test-password";
@@ -21,6 +22,15 @@ namespace Percolator.IdentityTests
         {
             _mockCredentialService = new Mock<ICredentialService>();
             _mockCredentialService.Setup(s => s.GetOrCreatePfxPassword()).Returns(TestPassword);
+
+            _mockCertificateOperations = new Mock<ICertificateOperations>();
+            _mockCertificateOperations.Setup(co => co.CreateSelfSignedCertificate(It.IsAny<string>()))
+                .Returns((string commonName) =>
+                {
+                    using var rsa = RSA.Create();
+                    var request = new CertificateRequest($"cn={commonName}", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+                    return request.CreateSelfSigned(DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddYears(1));
+                });
 
             _testIdentitiesPath = Path.Combine(Path.GetTempPath(), "PercolatorTests", Path.GetRandomFileName());
             Directory.CreateDirectory(_testIdentitiesPath);
@@ -37,7 +47,7 @@ namespace Percolator.IdentityTests
 
         private PersistentIdentityService CreateService()
         {
-            return new PersistentIdentityService(_mockCredentialService.Object, _testIdentitiesPath);
+            return new PersistentIdentityService(_mockCredentialService.Object, _mockCertificateOperations.Object, _testIdentitiesPath);
         }
 
         [Test]

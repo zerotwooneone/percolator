@@ -13,6 +13,7 @@ using Percolator.Application.RateLimiting;
 using Percolator.Contracts.Protos;
 using Percolator.Cryptography;
 using Percolator.Identity;
+using Percolator.Application.Identity;
 using Percolator.Network;
 using System.CommandLine;
 using System.CommandLine.Builder;
@@ -161,8 +162,9 @@ static IServiceCollection ConfigureServices(string[] args)
     services.AddLogging(configure => configure.AddConsole());
 
     // Domain Services
-    services.AddSingleton<IIdentityService, PersistentIdentityService>();
     services.AddSingleton<ICredentialService, CredentialService>();
+    services.AddSingleton<ICertificateOperations, CertificateOperations>();
+    services.AddSingleton<IIdentityService, PersistentIdentityService>();
     services.AddSingleton<IDiscoverySignatureProvider, DiscoverySignatureProvider>();
     services.AddSingleton<ISharedDirectoryProvider, SharedDirectoryProvider>();
     services.AddSingleton<IRateLimiter, InMemoryRateLimiter>();

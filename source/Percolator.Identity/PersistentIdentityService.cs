@@ -7,19 +7,22 @@ namespace Percolator.Identity
     {
         private readonly string _identitiesPath;
         private readonly ICredentialService _credentialService;
+        private readonly ICertificateOperations _certificateOperations;
 
-        public PersistentIdentityService(ICredentialService credentialService)
+        public PersistentIdentityService(ICredentialService credentialService, ICertificateOperations certificateOperations)
         {
             _credentialService = credentialService;
+            _certificateOperations = certificateOperations;
             var appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
             var percolatorAppDataPath = Path.Combine(appDataPath, "Percolator");
             _identitiesPath = Path.Combine(percolatorAppDataPath, "identities");
             Directory.CreateDirectory(_identitiesPath);
         }
 
-        internal PersistentIdentityService(ICredentialService credentialService, string identitiesPath)
+        internal PersistentIdentityService(ICredentialService credentialService, ICertificateOperations certificateOperations, string identitiesPath)
         {
             _credentialService = credentialService;
+            _certificateOperations = certificateOperations;
             _identitiesPath = identitiesPath;
             Directory.CreateDirectory(_identitiesPath);
         }
@@ -53,7 +56,7 @@ namespace Percolator.Identity
             }
             else
             {
-                var newCert = CertificateGenerator.CreateSelfSignedCertificate(identityName);
+                var newCert = _certificateOperations.CreateSelfSignedCertificate(identityName);
                 var pfxBytes = newCert.Export(X509ContentType.Pfx, pfxPassword);
                 File.WriteAllBytes(identityCertPath, pfxBytes);
                 return X509CertificateLoader.LoadPkcs12(pfxBytes, pfxPassword, X509KeyStorageFlags.Exportable | X509KeyStorageFlags.UserKeySet);
