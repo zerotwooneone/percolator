@@ -5,6 +5,7 @@ using NUnit.Framework;
 using Percolator.Network;
 using System.Linq;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Percolator.NetworkTests
 {
@@ -20,7 +21,7 @@ namespace Percolator.NetworkTests
         {
             _fixture = new Fixture();
             _handlerMock = new Mock<IPeerDiscoveryHandler>();
-            _service = new PeerDiscoveryService(9000, "test_thumbprint", _handlerMock.Object);
+            _service = new PeerDiscoveryService(9000, "test_thumbprint", _handlerMock.Object, NullLogger<PeerDiscoveryService>.Instance);
         }
 
         [TearDown]
@@ -39,13 +40,13 @@ namespace Percolator.NetworkTests
             peer.LastSeenUtc = System.DateTime.UtcNow.AddSeconds(-40);
             _service.AddPeerForTesting(peer);
 
-            _service.DiscoveredPeers.Should().HaveCount(1, "because a peer was added for testing");
+            _service.GetDiscoveredPeersForTesting().Should().HaveCount(1, "because a peer was added for testing");
 
             // Act
             _service.CleanupExpiredPeers();
 
             // Assert
-            _service.DiscoveredPeers.Should().BeEmpty("because the stale peer should have been removed");
+            _service.GetDiscoveredPeersForTesting().Should().BeEmpty("because the stale peer should have been removed");
             _handlerMock.Verify(h => h.HandlePeerExpiredAsync(peer), Times.Once,
                 "the handler should be notified exactly once when a peer expires");
         }

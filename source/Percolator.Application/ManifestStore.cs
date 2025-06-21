@@ -1,29 +1,60 @@
 using System.Collections.Concurrent;
 using System.Security.Cryptography;
+using System.Text.Json;
 using Google.Protobuf;
+using Microsoft.Extensions.Logging;
 using Percolator.Contracts.Protos; 
 using System.IO;
 using System;
 
 namespace Percolator.Application
 {
-    public class ManifestStore
+    public class ManifestStore : IManifestStore
     {
-        private readonly string _manifestDirectory;
+        private static readonly string ManifestDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Percolator", "Manifests");
+        private readonly ILogger<ManifestStore> _logger;
         // The string is the nullable root path. Only manifests created locally will have one.
         private readonly ConcurrentDictionary<ByteString, (SignedManifest Manifest, string? RootPath)> _manifests = new();
 
-        public ManifestStore()
+        public ManifestStore(ILogger<ManifestStore> logger)
         {
-            _manifestDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Percolator", "manifests");
-            Directory.CreateDirectory(_manifestDirectory);
+            _logger = logger;
+            Directory.CreateDirectory(ManifestDirectory);
             LoadManifestsFromDisk();
+        }
+
+        public void Add(ByteString hash, SignedManifest manifest, string? rootPath = null)
+        {
+            if (_manifests.TryAdd(hash, (manifest, rootPath)))
+            {
+                try
+                {
+                    // Use a filename-safe version of Base64
+                    var fileName = hash.ToBase64().Replace('/', '_');
+                    var filePath = Path.Combine(ManifestDirectory, fileName);
+                    File.WriteAllBytes(filePath, manifest.ToByteArray());
+
+                    if (rootPath is not null)
+                    {
+                        File.WriteAllText($"{filePath}.meta", rootPath);
+                    }
+                }
+                catch (IOException ex)
+                {
+                    _logger.LogError(ex, "Failed to write manifest {Hash} to disk.", hash.ToBase64());
+                }
+            }
+        }
+
+        public SignedManifest? Get(ByteString hash)
+        {
+            return _manifests.TryGetValue(hash, out var value) ? value.Manifest : null;
         }
 
         private void LoadManifestsFromDisk()
         {
-            Console.WriteLine($"[ManifestStore] Loading manifests from {_manifestDirectory}...");
-            var manifestFiles = Directory.GetFiles(_manifestDirectory).Where(f => !f.EndsWith(".meta"));
+            _logger.LogInformation("Loading manifests from {ManifestDirectory}...", ManifestDirectory);
+            var manifestFiles = Directory.GetFiles(ManifestDirectory).Where(f => !f.EndsWith(".meta"));
             foreach (var file in manifestFiles)
             {
                 try
@@ -47,18 +78,18 @@ namespace Percolator.Application
                     var calculatedHash = ByteString.CopyFrom(SHA256.HashData(manifest.Manifest.ToByteArray()));
                     if (!hash.Equals(calculatedHash))
                     {
-                        Console.WriteLine($"[ManifestStore] WARNING: Manifest file {fileName} is corrupt or mismatched. Hash does not match content. Skipping.");
+                        _logger.LogWarning("Manifest file {fileName} is corrupt or mismatched. Hash does not match content. Skipping.", fileName);
                         continue;
                     }
 
                     if (_manifests.TryAdd(hash, (manifest, rootPath)))
                     {
-                        Console.WriteLine($"[ManifestStore] Loaded manifest {hash.ToBase64()} from disk. Root path: {(rootPath ?? "N/A")}");
+                        _logger.LogInformation("Loaded manifest {hash.ToBase64()} from disk. Root path: {(rootPath ?? \"N/A\")}", hash.ToBase64(), (rootPath ?? "N/A"));
                     }
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[ManifestStore] ERROR: Failed to load manifest from {file}. {ex.Message}");
+                    _logger.LogError(ex, "Failed to load manifest from {file}.", file);
                 }
             }
         }
@@ -71,7 +102,7 @@ namespace Percolator.Application
                 {
                     // Use a filename-safe version of Base64
                     var fileName = hash.ToBase64().Replace('/', '_');
-                    var filePath = Path.Combine(_manifestDirectory, fileName);
+                    var filePath = Path.Combine(ManifestDirectory, fileName);
                     File.WriteAllBytes(filePath, manifest.ToByteArray());
 
                     if (rootPath is not null)
@@ -79,11 +110,11 @@ namespace Percolator.Application
                         var metaFile = filePath + ".meta";
                         File.WriteAllText(metaFile, rootPath);
                     }
-                    Console.WriteLine($"[ManifestStore] Persisted manifest {hash.ToBase64()} to disk.");
+                    _logger.LogInformation("Persisted manifest {hash.ToBase64()} to disk.", hash.ToBase64());
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[ManifestStore] ERROR: Failed to persist manifest {hash.ToBase64()} to disk. {ex.Message}");
+                    _logger.LogError(ex, "Failed to persist manifest {hash.ToBase64()} to disk.", hash.ToBase64());
                 }
             }
         }

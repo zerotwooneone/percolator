@@ -1,84 +1,83 @@
 using System;
 using System.Threading.Tasks;
 using Grpc.Core;
-using Percolator.Contracts.Protos;
-using System.IO;
+using MediatR;
+using Microsoft.Extensions.Logging;
 using System.Security.Cryptography;
-using System.Linq;
 using Google.Protobuf;
+using Percolator.Contracts.Protos;
+using Percolator.Cryptography;
+using System.IO;
+using System.Linq;
 
 namespace Percolator.Application
 {
     public class FileSharingService : FileSharing.FileSharingBase
     {
-        private readonly ManifestStore _manifestStore;
-        private readonly ManifestService _manifestService;
+        private readonly IMediator _mediator;
+        private readonly IManifestStore _manifestStore;
+        private readonly ISignatureService _signatureService;
+        private readonly ILogger<FileSharingService> _logger;
 
-        public FileSharingService(ManifestStore manifestStore, ManifestService manifestService)
+        public FileSharingService(IMediator mediator, IManifestStore manifestStore, ISignatureService signatureService, ILogger<FileSharingService> logger)
         {
+            _mediator = mediator;
             _manifestStore = manifestStore;
-            _manifestService = manifestService;
+            _signatureService = signatureService;
+            _logger = logger;
         }
 
         public override Task<AnnounceManifestResponse> AnnounceManifest(AnnounceManifestRequest request, ServerCallContext context)
         {
-            Console.WriteLine($"[gRPC] Received manifest announcement from {context.Peer}.");
+            _logger.LogInformation("Received a manifest announcement from a peer.");
 
-            // TODO: Add a trust model for signers
-            if (!_manifestService.VerifyManifest(request.SignedManifest))
+            if (request.SignedManifest is null)
             {
-                Console.WriteLine($"[gRPC] Discarding manifest with invalid signature from {context.Peer}.");
-                return Task.FromResult(new AnnounceManifestResponse { Success = false, Message = "Invalid signature" });
+                return Task.FromResult(new AnnounceManifestResponse { Success = false, Message = "Request did not contain a manifest." });
             }
 
-            // If we get here, the signature is valid.
-            var manifestHash = ByteString.CopyFrom(SHA256.HashData(request.SignedManifest.Manifest.ToByteArray()));
-            _manifestStore.StoreManifest(manifestHash, request.SignedManifest);
-            Console.WriteLine($"[gRPC] Received and verified manifest with hash {manifestHash.ToBase64()} from {context.Peer}.");
-
-            return Task.FromResult(new AnnounceManifestResponse
+            // 1. Verify the signature
+            var isSignatureValid = _signatureService.Verify(request.SignedManifest);
+            if (!isSignatureValid)
             {
-                Success = true,
-                Message = "Manifest received."
-            });
+                _logger.LogWarning("Received a manifest with an invalid signature.");
+                return Task.FromResult(new AnnounceManifestResponse { Success = false, Message = "Invalid signature." });
+            }
+
+            // 2. Calculate the hash of the inner manifest to use as the key
+            using var sha256 = SHA256.Create();
+            var manifestHash = ByteString.CopyFrom(sha256.ComputeHash(request.SignedManifest.Manifest.ToByteArray()));
+
+            // 3. Store the manifest
+            _manifestStore.Add(manifestHash, request.SignedManifest);
+            _logger.LogInformation("Successfully stored manifest with hash {ManifestHash}", manifestHash.ToBase64());
+
+            return Task.FromResult(new AnnounceManifestResponse { Success = true, Message = "Manifest accepted." });
         }
 
         public override Task<RequestManifestResponse> RequestManifest(RequestManifestRequest request, ServerCallContext context)
         {
-            if (request.HasSubPath && !string.IsNullOrEmpty(request.SubPath))
+            _logger.LogInformation("Received a request for manifest {ManifestHash}", request.ManifestHash.ToBase64());
+
+            var manifest = _manifestStore.Get(request.ManifestHash);
+
+            if (manifest is null)
             {
-                // On-demand generation for a subdirectory
-                Console.WriteLine($"[gRPC] Received request for subdirectory '{request.SubPath}' within manifest {request.ManifestHash.ToBase64()}.");
-                var (rootManifest, rootPath) = _manifestStore.GetManifestAndRootPath(request.ManifestHash);
-
-                if (rootManifest is null || rootPath is null)
-                {
-                    return Task.FromResult(new RequestManifestResponse()); // Not found or not a local manifest
-                }
-
-                var subPath = Path.GetFullPath(Path.Combine(rootPath, request.SubPath));
-
-                // Security check: ensure the requested subpath is actually within the original root path
-                if (!subPath.StartsWith(rootPath, StringComparison.OrdinalIgnoreCase))
-                {
-                    Console.WriteLine($"[gRPC] SECURITY: Denied request for invalid sub-path '{request.SubPath}'.");
-                    return Task.FromResult(new RequestManifestResponse());
-                }
-
-                var (_, subManifest) = _manifestService.CreateManifestFromFile(subPath);
-                return Task.FromResult(new RequestManifestResponse { SignedManifest = subManifest });
+                _logger.LogWarning("Could not find manifest with hash {ManifestHash}", request.ManifestHash.ToBase64());
+                return Task.FromResult(new RequestManifestResponse()); // Return empty response
             }
-            else
-            {
-                // Standard request for a manifest by its hash
-                var manifest = _manifestStore.GetManifest(request.ManifestHash);
-                return Task.FromResult(new RequestManifestResponse { SignedManifest = manifest });
-            }
+
+            // TODO: Handle sub-path requests to return partial manifests.
+            // For now, we return the whole thing.
+
+            _logger.LogInformation("Found manifest {ManifestHash}, returning it.", request.ManifestHash.ToBase64());
+            return Task.FromResult(new RequestManifestResponse { SignedManifest = manifest });
         }
 
         public override Task DownloadChunk(DownloadChunkRequest request, IServerStreamWriter<DownloadChunkResponse> responseStream, ServerCallContext context)
         {
-            Console.WriteLine($"[gRPC] Received chunk download request from {context.Peer}.");
+            _logger.LogInformation("[gRPC] Received chunk download request from {Peer}.", context.Peer);
+
             // Placeholder: In the future, this would stream the file chunks.
             return Task.CompletedTask;
         }

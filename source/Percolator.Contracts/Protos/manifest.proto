@@ -25,5 +25,6 @@ message Manifest {
 message SignedManifest {
   optional uint32 version = 1;
   optional Manifest manifest = 2;
-  optional bytes signature = 3;
+  optional bytes public_key = 3;
+  optional bytes signature = 4;
 }

@@ -1,4 +1,5 @@
 using MediatR;
+using Microsoft.Extensions.Logging;
 using Percolator.Application.Notifications;
 using System;
 using System.Threading;
@@ -8,11 +9,13 @@ namespace Percolator.Application.Handlers
 {
     public class AnnounceManifestsOnPeerDiscoveredHandler : INotificationHandler<PeerDiscoveredNotification>
     {
+        private readonly ILogger<AnnounceManifestsOnPeerDiscoveredHandler> _logger;
         private readonly PeerConnectionManager _connectionManager;
         private readonly ManifestStore _manifestStore;
 
-        public AnnounceManifestsOnPeerDiscoveredHandler(PeerConnectionManager connectionManager, ManifestStore manifestStore)
+        public AnnounceManifestsOnPeerDiscoveredHandler(ILogger<AnnounceManifestsOnPeerDiscoveredHandler> logger, PeerConnectionManager connectionManager, ManifestStore manifestStore)
         {
+            _logger = logger;
             _connectionManager = connectionManager;
             _manifestStore = manifestStore;
         }
@@ -20,7 +23,7 @@ namespace Percolator.Application.Handlers
         public async Task Handle(PeerDiscoveredNotification notification, CancellationToken cancellationToken)
         {
             var peer = notification.Peer;
-            Console.WriteLine($"+ Peer discovered: {peer.IpAddress}:{peer.GrpcEndpoint.Port}");
+            _logger.LogInformation("+ Peer discovered: {IpAddress}:{Port}", peer.IpAddress, peer.GrpcEndpoint.Port);
 
             // Announce all our available manifests to the new peer
             foreach (var manifestHash in _manifestStore.GetManifestHashes())
@@ -30,7 +33,7 @@ namespace Percolator.Application.Handlers
                     var signedManifest = _manifestStore.GetManifest(manifestHash);
                     if (signedManifest is null)
                     {
-                        Console.WriteLine($"[Announcer] Could not find manifest for hash {manifestHash.ToBase64()} to announce. Skipping.");
+                        _logger.LogWarning("Could not find manifest for hash {ManifestHash} to announce. Skipping.", manifestHash.ToBase64());
                         continue;
                     }
 
@@ -41,11 +44,11 @@ namespace Percolator.Application.Handlers
                         SignedManifest = signedManifest
                     };
                     await client.AnnounceManifestAsync(request, cancellationToken: cancellationToken);
-                    Console.WriteLine($"Announced existing manifest to new peer {peer.IpAddress}");
+                    _logger.LogInformation("Announced existing manifest to new peer {IpAddress}", peer.IpAddress);
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"Error announcing manifest to peer {peer.IpAddress}: {ex.Message}");
+                    _logger.LogError(ex, "Error announcing manifest to peer {IpAddress}", peer.IpAddress);
                 }
             }
         }

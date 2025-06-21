@@ -11,6 +11,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Percolator.CryptographyTests" />
+    <ProjectReference Include="..\Percolator.Contracts\Percolator.Contracts.csproj" />
   </ItemGroup>
 
   <ItemGroup>

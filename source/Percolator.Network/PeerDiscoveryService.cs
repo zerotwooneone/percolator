@@ -8,12 +8,13 @@ using System.Threading.Tasks;
 using System.Threading;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using Microsoft.Extensions.Logging;
 
 [assembly: InternalsVisibleTo("Percolator.NetworkTests")]
 
 namespace Percolator.Network
 {
-    public class PeerDiscoveryService : IDisposable
+    public class PeerDiscoveryService : IDisposable, IPeerDiscoveryService
     {
         private const int BroadcastPort = 8888;
         private static readonly TimeSpan BroadcastInterval = TimeSpan.FromSeconds(5);
@@ -25,20 +26,25 @@ namespace Percolator.Network
         private readonly string _thumbprint;
         private readonly ConcurrentDictionary<IPEndPoint, Peer> _peers = new();
         private readonly IPeerDiscoveryHandler _handler;
+        private readonly ILogger<PeerDiscoveryService> _logger;
         private CancellationTokenSource? _cancellationTokenSource;
 
-        public IReadOnlyCollection<Peer> DiscoveredPeers => _peers.Values.ToList().AsReadOnly();
-
-        public PeerDiscoveryService(int grpcPort, string thumbprint, IPeerDiscoveryHandler handler)
+        public PeerDiscoveryService(int grpcPort, string thumbprint, IPeerDiscoveryHandler handler, ILogger<PeerDiscoveryService> logger)
         {
             _grpcPort = grpcPort;
             _thumbprint = thumbprint;
             _handler = handler;
+            _logger = logger;
             _localIpAddress = GetPrimaryLocalIpAddress();
             _udpClient = new UdpClient();
             _udpClient.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
             _udpClient.Client.Bind(new IPEndPoint(IPAddress.Any, BroadcastPort));
             _udpClient.EnableBroadcast = true;
+        }
+
+        public void Start()
+        {
+            _ = StartAsync();
         }
 
         public async Task StartAsync(CancellationToken cancellationToken = default)
@@ -121,7 +127,7 @@ namespace Percolator.Network
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[Discovery] Error while listening for peers: {ex.Message}");
+                    _logger.LogError(ex, "[Discovery] Error while listening for peers");
                 }
             }
         }
@@ -148,6 +154,8 @@ namespace Percolator.Network
             _peers[peer.GrpcEndpoint] = peer;
         }
 
+        internal IReadOnlyCollection<Peer> GetDiscoveredPeersForTesting() => _peers.Values.ToList().AsReadOnly();
+
         internal void CleanupExpiredPeers()
         {
             var expiredPeers = _peers.Values.Where(p => (DateTime.UtcNow - p.LastSeenUtc) > PeerExpirationTime).ToList();
@@ -155,7 +163,7 @@ namespace Percolator.Network
             {
                 if (_peers.TryRemove(peer.GrpcEndpoint, out var removedPeer))
                 {
-                    Console.WriteLine($"[Discovery] Peer expired: {removedPeer}");
+                    _logger.LogInformation("[Discovery] Peer expired: {Peer}", removedPeer);
                     _ = _handler.HandlePeerExpiredAsync(removedPeer);
                 }
             }

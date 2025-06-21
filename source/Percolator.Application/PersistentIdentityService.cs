@@ -3,16 +3,19 @@ using System;
 using System.IO;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using Microsoft.Extensions.Logging;
 
 namespace Percolator.Application
 {
     public class PersistentIdentityService : IIdentityService
     {
+        private readonly ILogger<PersistentIdentityService> _logger;
         private readonly string _identitiesPath;
         private readonly ICredentialService _credentialService;
 
-        public PersistentIdentityService(ICredentialService credentialService)
+        public PersistentIdentityService(ILogger<PersistentIdentityService> logger, ICredentialService credentialService)
         {
+            _logger = logger;
             _credentialService = credentialService;
             var appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
             _identitiesPath = Path.Combine(appDataPath, "Percolator", "identities");
@@ -44,14 +47,14 @@ namespace Percolator.Application
                 }
                 catch (CryptographicException ex)
                 {
-                    Console.WriteLine($"Error loading identity '{identityName}'. It may be corrupt or the credential store has changed. {ex.Message}");
+                    _logger.LogError(ex, "Error loading identity '{IdentityName}'. It may be corrupt or the credential store has changed.", identityName);
                     // Potentially delete and recreate, or throw.
                     throw;
                 }
             }
             else
             {
-                Console.WriteLine($"No identity '{identityName}' found. Generating a new one.");
+                _logger.LogInformation("No identity '{IdentityName}' found. Generating a new one.", identityName);
                 var newCert = CertificateGenerator.CreateSelfSignedCertificate(identityName);
                 var pfxBytes = newCert.Export(X509ContentType.Pfx, pfxPassword);
                 File.WriteAllBytes(identityCertPath, pfxBytes);
