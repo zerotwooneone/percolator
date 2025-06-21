@@ -21,7 +21,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "SolutionFolder", "SolutionF
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Cryptography", "Cryptography", "{D3EFBBDF-641F-4849-8BCB-BFAA7DEA0447}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Pecolator.Cryptography", "Pecolator.Cryptography\Pecolator.Cryptography.csproj", "{F88E64D0-D7F8-4876-BD39-2175D1B86889}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.Cryptography", "Percolator.Cryptography\Percolator.Cryptography.csproj", "{F88E64D0-D7F8-4876-BD39-2175D1B86889}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.CryptographyTests", "Percolator.CryptographyTests\Percolator.CryptographyTests.csproj", "{16B3EE24-05F8-474F-B952-76C5B4A4B725}"
 EndProject

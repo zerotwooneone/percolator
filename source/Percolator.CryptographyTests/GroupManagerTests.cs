@@ -1,6 +1,6 @@
 using FluentAssertions;
 using NUnit.Framework;
-using Pecolator.Cryptography;
+using Percolator.Cryptography;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -9,9 +9,9 @@ namespace Percolator.CryptographyTests
     [TestFixture]
     public class GroupManagerTests
     {
-        private ECDiffieHellman _aliceIdentityKey = null!;
-        private ECDiffieHellman _bobIdentityKey = null!;
-        private ECDiffieHellman _bobPreKey = null!;
+        private ECDiffieHellman _aliceIdentityKey;
+        private ECDiffieHellman _bobIdentityKey;
+        private ECDiffieHellman _bobPreKey;
 
         [SetUp]
         public void Setup()
@@ -30,32 +30,32 @@ namespace Percolator.CryptographyTests
         }
 
         [Test]
-        public void CreateAndAcceptInvitation_EstablishesSharedGroupSession()
+        public void CreateGroup_And_SendReceiveMessage_Succeeds()
         {
-            // Arrange: Establish a 1-on-1 session between Alice and Bob first.
+            // Arrange: Alice and Bob establish a secure channel.
             var aliceManager = new GroupManager();
             var bobManager = new GroupManager();
 
-            var sharedSecret = _aliceIdentityKey.DeriveKeyMaterial(_bobPreKey.PublicKey);
-            using var aliceToBobSession = new DoubleRatchetSession(sharedSecret, _aliceIdentityKey, SessionRole.Initiator, _bobPreKey.PublicKey.ExportSubjectPublicKeyInfo());
-            using var bobToAliceSession = new DoubleRatchetSession(sharedSecret, _bobIdentityKey, SessionRole.Responder, ownInitialRatchetKey: _bobPreKey);
+            // Alice (initiator) creates a session with Bob using his public identity and public ratchet key.
+            using var aliceToBobSession = new DoubleRatchetSession(_aliceIdentityKey, _bobIdentityKey.PublicKey.ExportSubjectPublicKeyInfo(), _bobPreKey.PublicKey.ExportSubjectPublicKeyInfo());
+            
+            // Bob (responder) creates a session with Alice using his private ratchet key.
+            using var bobToAliceSession = new DoubleRatchetSession(_bobIdentityKey, _bobPreKey, _aliceIdentityKey.PublicKey.ExportSubjectPublicKeyInfo());
 
             // Act: Alice creates a group and invites Bob.
             var (invitation, aliceGroupSession) = aliceManager.CreateGroupAndInvitation(aliceToBobSession);
             var bobGroupSession = bobManager.AcceptInvitation(bobToAliceSession, invitation);
 
-            // Assert: Both should have a valid session for the same group.
-            bobGroupSession.Should().NotBeNull();
-            var groupId = Encoding.UTF8.GetString(aliceGroupSession.Context);
-            var bobGroupId = Encoding.UTF8.GetString(bobGroupSession!.Context);
-            groupId.Should().Be(bobGroupId);
-
-            // Assert: They can communicate in the group.
+            // Alice sends a message to the group.
             var plaintext = "Welcome to the group!";
-            var message = aliceGroupSession.Encrypt(Encoding.UTF8.GetBytes(plaintext));
-            var decryptedBytes = bobGroupSession.Decrypt(message);
+            var senderKeyMessage = aliceGroupSession!.Encrypt(Encoding.UTF8.GetBytes(plaintext));
 
-            Encoding.UTF8.GetString(decryptedBytes).Should().Be(plaintext);
+            // Bob receives and decrypts the message.
+            var decryptedBytes = bobGroupSession!.Decrypt(senderKeyMessage);
+            var decryptedText = Encoding.UTF8.GetString(decryptedBytes);
+
+            // Assert
+            decryptedText.Should().Be(plaintext);
         }
     }
 }

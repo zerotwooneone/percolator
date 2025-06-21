@@ -4,7 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 
-namespace Pecolator.Cryptography
+namespace Percolator.Cryptography
 {
     public class GroupManager
     {

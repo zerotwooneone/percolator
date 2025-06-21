@@ -1,4 +1,4 @@
-namespace Pecolator.Cryptography
+namespace Percolator.Cryptography
 {
     public enum SessionRole
     {

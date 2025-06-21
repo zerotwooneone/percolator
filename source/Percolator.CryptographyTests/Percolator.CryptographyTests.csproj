@@ -24,7 +24,7 @@
     </ItemGroup>
 
     <ItemGroup>
-      <ProjectReference Include="..\Pecolator.Cryptography\Pecolator.Cryptography.csproj" />
+      <ProjectReference Include="..\Percolator.Cryptography\Percolator.Cryptography.csproj" />
     </ItemGroup>
 
 </Project>

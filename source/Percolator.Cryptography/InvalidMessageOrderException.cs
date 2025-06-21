@@ -1,6 +1,4 @@
-using System;
-
-namespace Pecolator.Cryptography
+namespace Percolator.Cryptography
 {
     public class InvalidMessageOrderException : Exception
     {

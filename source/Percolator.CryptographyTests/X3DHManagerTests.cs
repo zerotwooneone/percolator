@@ -1,7 +1,7 @@
 using NUnit.Framework;
 using FluentAssertions;
 using System.Security.Cryptography;
-using Pecolator.Cryptography;
+using Percolator.Cryptography;
 
 namespace Percolator.CryptographyTests;
 

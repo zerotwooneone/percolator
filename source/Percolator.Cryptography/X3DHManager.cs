@@ -1,6 +1,6 @@
 using System.Security.Cryptography;
 
-namespace Pecolator.Cryptography;
+namespace Percolator.Cryptography;
 
 public static class X3DHManager
 {
