@@ -47,6 +47,7 @@ The security of the chat application is built upon several key cryptographic con
 *   `DoubleRatchetSession`: Manages the ongoing stateful session, handling encryption and decryption of messages.
 *   `PreKeyBundle`: A data structure representing a user's public keys needed for the X3DH handshake.
 *   `RatchetMessage`: A data structure for transporting the ciphertext and the sender's ephemeral public key.
+*   `SenderKeySession`: Manages the state for a secure group conversation from the perspective of a single member.
 
 ## Basic Usage Example
 
@@ -110,6 +111,39 @@ if (originalMessageFromBob == decryptedMessageForAlice)
 }
 
 // The 'using' statements ensure that the session objects and their ephemeral keys are properly disposed.
+```
+
+## SenderKeySession
+
+`SenderKeySession` implements the core cryptographic logic for the Sender Keys protocol, enabling secure group messaging. Each member of a group maintains their own `SenderKeySession` instance, initialized with a shared group key.
+
+### Security Properties
+
+-   **Confidentiality**: Messages are encrypted using AES-256-GCM.
+-   **Integrity and Authenticity**: Each message is signed with ECDSA P-256, verifying the sender's identity and protecting against tampering.
+-   **Forward Secrecy**: The session uses a symmetric-key ratchet. If a member's session key is compromised, an attacker cannot decrypt previous messages sent to the group.
+-   **Out-of-Order Message Handling**: The session can handle and decrypt messages that arrive out of sequence, up to a configurable limit.
+
+### Usage Pattern
+
+A trusted group creator generates a random 32-byte session key and securely distributes it to all group members (e.g., over an existing Double Ratchet channel).
+
+```csharp
+// 1. All members initialize their session with the same shared key.
+var sharedGroupKey = RandomNumberGenerator.GetBytes(32);
+
+using var aliceSession = new SenderKeySession(sharedGroupKey);
+using var bobSession = new SenderKeySession(sharedGroupKey);
+
+// 2. Alice sends a message to the group.
+var plaintext = Encoding.UTF8.GetBytes("Hello, group!");
+var messageFromAlice = aliceSession.Encrypt(plaintext);
+
+// 3. Bob receives and decrypts the message.
+// In a real application, Bob would receive messageFromAlice over the network.
+var decryptedPlaintext = bobSession.Decrypt(messageFromAlice);
+
+Console.WriteLine(Encoding.UTF8.GetString(decryptedPlaintext)); // "Hello, group!"
 ```
 
 ## Guidance for AI Assistants
