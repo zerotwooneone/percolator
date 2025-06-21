@@ -1,2 +1,77 @@
-# percolator
-a project to learn more about messaging 
+# Percolator: A Secure, Decentralized Chat Application
+
+## Overview
+
+Percolator is an innovative chat application designed with a strong emphasis on security, decentralization, and a robust Domain-Driven Design (DDD) architecture. It leverages advanced cryptographic protocols and a Distributed Hash Table (DHT) for peer discovery, aiming to provide a secure and resilient communication platform. The project is built using C# .NET 9 and showcases a clear separation of concerns through distinct domain libraries.
+
+## Key Features
+
+- **Secure One-to-One & Group Messaging**: Implements state-of-the-art cryptographic protocols (Double Ratchet and Sender Keys) for end-to-end encrypted pairwise and group conversations.
+- **Peer-to-Peer Distributed File System**: A decentralized file sharing system allowing users to grant access to their files and directories, with peers being able to share-alike the content they have access to.
+- **Decentralized Peer Discovery**: Utilizes a custom Distributed Hash Table (DHT) for peer discovery, eliminating the need for central servers for user presence.
+- **Domain-Driven Design (DDD)**: A layered architecture with clearly defined Bounded Contexts to manage complexity and maintain a clean domain model.
+- **Multiple Client Applications**:
+  - **Console Application**: Serves as a lightweight peer, capable of bootstrapping the DHT network and acting as a foundational node.
+  - **WPF Desktop Application**: Provides a rich graphical user interface for chat interactions.
+- **Modern .NET Development**: Built on .NET 9, leveraging features like `System.Text.Json` source generation for high performance.
+- **CQRS with MediatR**: The application layer uses MediatR for clear command and query separation.
+- **Reactive UI with R3**: The WPF application utilizes the R3 library for `ReactiveProperty<T>` and `ReadOnlyReactiveProperty<T>`, enabling reactive patterns for state management and UI binding.
+
+## Architecture
+
+Percolator's architecture is structured around several distinct projects, each representing a specific bounded context or layer.
+
+### Core Domain Libraries (Business Logic Only)
+
+These projects contain the pure domain logic and are designed to be highly cohesive and loosely coupled. They depend only on the absolute minimum necessary libraries to perform their core business functions. There are no shared utility libraries between these domains; any common types (like a custom `UserId` value object) are duplicated and exist independently within each relevant domain, or explicit mapping is performed at the application layer boundary. Each domain is self-contained and comes with its own dedicated unit tests.
+
+#### Percolator.Messaging
+- **Responsibility**: Manages chat conversations, message content, message history, read statuses, and participants within a conversation.
+- **Key Concepts**: `Message`, `Conversation`, `Participant`, `ConversationRepository`.
+- **Dependencies**: Minimal (e.g., `System.Collections.Generic`, `System.DateTime`).
+
+#### Percolator.Cryptography
+- **Responsibility**: Implements and manages the Signal Double Ratchet algorithm, key exchanges (e.g., X3DH), and cryptographic operations (encryption, decryption, signature verification).
+- **Key Concepts**: `DoubleRatchetSession`, `RsaPublicKey`, `PrekeyBundle`, `KeyExchangeService`.
+- **Dependencies**: Minimal (e.g., `System.Security.Cryptography`, `System.Buffers`).
+
+#### Percolator.Network
+- **Responsibility**: Handles the Distributed Hash Table (DHT) for peer discovery, node management, and low-level network communication (UDP).
+- **Key Concepts**: `DhtNode`, `PeerAddress`, `RoutingTable`, `DhtService`.
+- **Dependencies**: Minimal (e.g., `System.Net.Sockets`, `System.Collections.Concurrent`).
+
+## Getting Started
+
+To get a local copy up and running, follow these simple steps.
+
+### Prerequisites
+
+- .NET 9 SDK or later
+
+### Installation & Running
+
+1. Clone the repo:
+   ```sh
+   git clone https://github.com/your_username/percolator.git
+   ```
+2. Navigate to the source directory:
+   ```sh
+   cd percolator/source
+   ```
+3. Build the solution:
+   ```sh
+   dotnet build
+   ```
+4. Run the desired application:
+   - **Desktop App**:
+     ```sh
+     dotnet run --project Percolator.Desktop
+     ```
+   - **Console App**:
+     ```sh
+     dotnet run --project Percolator.Console
+     ```
+
+## License
+
+Distributed under the MIT License. See `LICENSE` for more information.

@@ -14,6 +14,17 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.Crypto.Grpc", "P
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.Crypto.Tests", "Percolator.Crypto.Tests\Percolator.Crypto.Tests.csproj", "{01F527E3-71C0-4DC7-8EA6-61A053B6543C}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "SolutionFolder", "SolutionFolder", "{D7D1220C-3D34-48E0-BDAE-00BCD95649B5}"
+	ProjectSection(SolutionItems) = preProject
+		..\README.md = ..\README.md
+	EndProjectSection
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Cryptography", "Cryptography", "{D3EFBBDF-641F-4849-8BCB-BFAA7DEA0447}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Pecolator.Cryptography", "Pecolator.Cryptography\Pecolator.Cryptography.csproj", "{F88E64D0-D7F8-4876-BD39-2175D1B86889}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.CryptographyTests", "Percolator.CryptographyTests\Percolator.CryptographyTests.csproj", "{16B3EE24-05F8-474F-B952-76C5B4A4B725}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -48,5 +59,17 @@ Global
 		{01F527E3-71C0-4DC7-8EA6-61A053B6543C}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{01F527E3-71C0-4DC7-8EA6-61A053B6543C}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{01F527E3-71C0-4DC7-8EA6-61A053B6543C}.Release|Any CPU.Build.0 = Release|Any CPU
+		{F88E64D0-D7F8-4876-BD39-2175D1B86889}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F88E64D0-D7F8-4876-BD39-2175D1B86889}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F88E64D0-D7F8-4876-BD39-2175D1B86889}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F88E64D0-D7F8-4876-BD39-2175D1B86889}.Release|Any CPU.Build.0 = Release|Any CPU
+		{16B3EE24-05F8-474F-B952-76C5B4A4B725}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{16B3EE24-05F8-474F-B952-76C5B4A4B725}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{16B3EE24-05F8-474F-B952-76C5B4A4B725}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{16B3EE24-05F8-474F-B952-76C5B4A4B725}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{F88E64D0-D7F8-4876-BD39-2175D1B86889} = {D3EFBBDF-641F-4849-8BCB-BFAA7DEA0447}
+		{16B3EE24-05F8-474F-B952-76C5B4A4B725} = {D3EFBBDF-641F-4849-8BCB-BFAA7DEA0447}
 	EndGlobalSection
 EndGlobal
