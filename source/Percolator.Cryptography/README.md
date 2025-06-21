@@ -168,3 +168,9 @@ The design and implementation of this library operate on the following assumptio
 2.  **Domain Purity**: This project will remain a pure domain library. It will not contain any references to UI frameworks, databases, network sockets, or other infrastructure-level concerns. Its dependencies will be minimal.
 3.  **Reliable Primitives**: We trust that the underlying cryptographic primitives provided by the .NET Base Class Library (BCL) are implemented correctly and are secure against known attacks. We are not implementing our own primitives.
 4.  **Out-of-Band Identity Verification**: This library does not handle the process of verifying a user's identity out-of-band (e.g., by comparing safety numbers or scanning QR codes). It assumes that the identity keys retrieved for a user are authentic.
+
+## Error Handling and Security
+
+This domain adheres to a strict "fail forward" security policy. Methods must not log warnings or errors for security-sensitive violations (e.g., invalid cryptographic signatures, malformed packets). Instead, they **must** throw an appropriate exception, typically a `System.Security.SecurityException`.
+
+This ensures that security violations are never ignored and are always propagated up to the consuming layer, preventing the system from continuing in an insecure or indeterminate state. The responsibility for handling these exceptions and preventing them through input validation lies with the `Percolator.Application` layer.

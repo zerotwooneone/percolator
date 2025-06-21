@@ -14,8 +14,4 @@
     <ProjectReference Include="..\Percolator.Contracts\Percolator.Contracts.csproj" />
   </ItemGroup>
 
-  <ItemGroup>
-    <PackageReference Include="System.Security.Cryptography.Cng" Version="5.0.0" />
-  </ItemGroup>
-
 </Project>

@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Security;
 using System.Security.Cryptography;
 using Google.Protobuf;
 using Microsoft.Extensions.Logging;
@@ -9,9 +10,12 @@ namespace Percolator.Application
     public class ManifestStore : IManifestStore
     {
         private static readonly string ManifestDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Percolator", "Manifests");
+        private const long MaxManifestSize = 1 * 1024 * 1024; // 1 MB
+        private const long MaxTotalStoreSize = 1 * 1024 * 1024 * 1024; // 1 GB
+
         private readonly ILogger<ManifestStore> _logger;
-        // The string is the nullable root path. Only manifests created locally will have one.
         private readonly ConcurrentDictionary<ByteString, (SignedManifest Manifest, string? RootPath)> _manifests = new();
+        private long _currentStoreSize;
 
         public ManifestStore(ILogger<ManifestStore> logger)
         {
@@ -22,24 +26,57 @@ namespace Percolator.Application
 
         public void Add(ByteString hash, SignedManifest manifest, string? rootPath = null)
         {
-            if (_manifests.TryAdd(hash, (manifest, rootPath)))
+            var manifestSize = manifest.CalculateSize();
+            if (manifestSize == 0)
             {
-                try
-                {
-                    // Use a filename-safe version of Base64
-                    var fileName = hash.ToBase64().Replace('/', '_');
-                    var filePath = Path.Combine(ManifestDirectory, fileName);
-                    File.WriteAllBytes(filePath, manifest.ToByteArray());
+                throw new ArgumentException("Manifest cannot be empty.", nameof(manifest));
+            }
 
-                    if (rootPath is not null)
-                    {
-                        File.WriteAllText($"{filePath}.meta", rootPath);
-                    }
-                }
-                catch (IOException ex)
+            if (manifestSize > MaxManifestSize)
+            {
+                throw new SecurityException($"Manifest rejected: size {manifestSize} exceeds limit of {MaxManifestSize}");
+            }
+
+            // Optimistically reserve space
+            long newTotalSize = Interlocked.Add(ref _currentStoreSize, manifestSize);
+
+            if (newTotalSize > MaxTotalStoreSize)
+            {
+                // Roll back reservation and fail
+                Interlocked.Add(ref _currentStoreSize, -manifestSize);
+                throw new SecurityException($"Manifest rejected: store size would exceed quota of {MaxTotalStoreSize}. Current size: {_currentStoreSize}, attempted to add {manifestSize}.");
+            }
+
+            if (!_manifests.TryAdd(hash, (manifest, rootPath)))
+            {
+                // Roll back reservation and fail
+                Interlocked.Add(ref _currentStoreSize, -manifestSize);
+                throw new ArgumentException($"Attempted to add duplicate manifest {hash.ToBase64()}.");
+            }
+
+            // At this point, the manifest is in memory and space is reserved.
+            // Now, persist to disk.
+            try
+            {
+                var fileName = hash.ToBase64().Replace('/', '_');
+                var filePath = Path.Combine(ManifestDirectory, fileName);
+                var manifestBytes = manifest.ToByteArray();
+                File.WriteAllBytes(filePath, manifestBytes);
+
+                if (rootPath is not null)
                 {
-                    _logger.LogError(ex, "Failed to write manifest {Hash} to disk.", hash.ToBase64());
+                    File.WriteAllText($"{filePath}.meta", rootPath);
                 }
+                _logger.LogInformation("Added manifest {Hash} to store. Current size: {CurrentStoreSize} bytes.", hash.ToBase64(), newTotalSize);
+            }
+            catch (IOException ex)
+            {
+                // If persistence fails, we must roll back the in-memory state.
+                _manifests.TryRemove(hash, out _);
+                Interlocked.Add(ref _currentStoreSize, -manifestSize);
+                _logger.LogError(ex, "Failed to write manifest {Hash} to disk. State has been rolled back.", hash.ToBase64());
+                // Re-throw the critical exception
+                throw;
             }
         }
 
@@ -51,19 +88,27 @@ namespace Percolator.Application
         private void LoadManifestsFromDisk()
         {
             _logger.LogInformation("Loading manifests from {ManifestDirectory}...", ManifestDirectory);
+            long totalSize = 0;
             var manifestFiles = Directory.GetFiles(ManifestDirectory).Where(f => !f.EndsWith(".meta"));
             foreach (var file in manifestFiles)
             {
                 try
                 {
-                    // Filename is the Base64 representation of the hash, with '/' replaced by '_'
-                    var fileName = Path.GetFileName(file);
-                    var hashBase64 = fileName.Replace('_', '/');
-                    var hash = ByteString.FromBase64(hashBase64);
+                    var fileInfo = new FileInfo(file);
                     var manifestBytes = File.ReadAllBytes(file);
                     var manifest = SignedManifest.Parser.ParseFrom(manifestBytes);
 
-                    // Load associated root path if it exists
+                    var fileName = Path.GetFileName(file);
+                    var hashBase64 = fileName.Replace('_', '/');
+                    var hash = ByteString.FromBase64(hashBase64);
+
+                    var calculatedHash = ByteString.CopyFrom(SHA256.HashData(manifest.Manifest.ToByteArray()));
+                    if (!hash.Equals(calculatedHash))
+                    {
+                        _logger.LogWarning("Manifest file {fileName} is corrupt. Hash does not match content. Skipping.", fileName);
+                        continue;
+                    }
+
                     string? rootPath = null;
                     var metaFile = file + ".meta";
                     if (File.Exists(metaFile))
@@ -71,17 +116,10 @@ namespace Percolator.Application
                         rootPath = File.ReadAllText(metaFile);
                     }
 
-                    // Verify the hash of the manifest content matches the filename to ensure integrity
-                    var calculatedHash = ByteString.CopyFrom(SHA256.HashData(manifest.Manifest.ToByteArray()));
-                    if (!hash.Equals(calculatedHash))
-                    {
-                        _logger.LogWarning("Manifest file {fileName} is corrupt or mismatched. Hash does not match content. Skipping.", fileName);
-                        continue;
-                    }
-
                     if (_manifests.TryAdd(hash, (manifest, rootPath)))
                     {
-                        _logger.LogInformation("Loaded manifest {hash.ToBase64()} from disk. Root path: {(rootPath ?? \"N/A\")}", hash.ToBase64(), (rootPath ?? "N/A"));
+                        totalSize += fileInfo.Length;
+                        _logger.LogInformation("Loaded manifest {Hash} from disk.", hash.ToBase64());
                     }
                 }
                 catch (Exception ex)
@@ -89,31 +127,8 @@ namespace Percolator.Application
                     _logger.LogError(ex, "Failed to load manifest from {file}.", file);
                 }
             }
-        }
-
-        public void StoreManifest(ByteString hash, SignedManifest manifest, string? rootPath = null)
-        {
-            if (_manifests.TryAdd(hash, (manifest, rootPath)))
-            {
-                try
-                {
-                    // Use a filename-safe version of Base64
-                    var fileName = hash.ToBase64().Replace('/', '_');
-                    var filePath = Path.Combine(ManifestDirectory, fileName);
-                    File.WriteAllBytes(filePath, manifest.ToByteArray());
-
-                    if (rootPath is not null)
-                    {
-                        var metaFile = filePath + ".meta";
-                        File.WriteAllText(metaFile, rootPath);
-                    }
-                    _logger.LogInformation("Persisted manifest {hash.ToBase64()} to disk.", hash.ToBase64());
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Failed to persist manifest {hash.ToBase64()} to disk.", hash.ToBase64());
-                }
-            }
+            _currentStoreSize = totalSize;
+            _logger.LogInformation("Finished loading manifests. Total size: {CurrentStoreSize} bytes.", _currentStoreSize);
         }
 
         public SignedManifest? GetManifest(ByteString hash)

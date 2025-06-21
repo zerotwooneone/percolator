@@ -173,20 +173,26 @@ static IServiceCollection ConfigureServices(string[] args)
     services.AddSingleton<IManifestStore, ManifestStore>();
     services.AddSingleton<IPeerConnectionManager, PeerConnectionManager>();
     services.AddSingleton<IPeerDiscoveryHandler, PeerDiscoveryHandler>();
+    services.AddSingleton<IDiscoverySignatureProvider, DiscoverySignatureProvider>();
 
     // Pre-parse the port to configure services correctly.
     var portOption = new Option<int>(new[] { "--port", "-p" }, () => 9000);
     var preParseCommand = new RootCommand { portOption };
     var port = preParseCommand.Parse(args).GetValueForOption(portOption);
 
+    // Manually create the peer discovery service with the correct port and thumbprint
     services.AddSingleton<IPeerDiscoveryService>(sp =>
     {
-        var logger = sp.GetRequiredService<ILogger<PeerDiscoveryService>>();
-        var identity = sp.GetRequiredService<IIdentityService>();
-        var handler = sp.GetRequiredService<IPeerDiscoveryHandler>();
-        var certificate = identity.GetDefaultIdentityCertificate();
-        return new PeerDiscoveryService(port, certificate.Thumbprint, handler, logger);
+        var identityService = sp.GetRequiredService<IIdentityService>();
+        var thumbprint = identityService.GetDefaultIdentityCertificate().Thumbprint;
+        return new PeerDiscoveryService(
+            port,
+            thumbprint,
+            sp.GetRequiredService<IPeerDiscoveryHandler>(),
+            sp.GetRequiredService<IDiscoverySignatureProvider>(),
+            sp.GetRequiredService<ILogger<PeerDiscoveryService>>());
     });
+
     services.AddMediatR(cfg => cfg.RegisterServicesFromAssemblyContaining<Program>());
     services.AddGrpc(options =>
     {
