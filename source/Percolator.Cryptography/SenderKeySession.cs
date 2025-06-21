@@ -12,19 +12,21 @@ namespace Percolator.Cryptography
 
         private const int MaxMessageKeys = 40;
         public byte[] Context { get; }
+        public byte[] SessionKey { get; }
 
         private byte[] _chainKey;
         private uint _iteration = 0;
         private readonly ECDsa _signingKey;
         private readonly Dictionary<uint, byte[]> _messageKeyCache = new();
 
-        public SenderKeySession(byte[] sessionKey, byte[] context)
+        public SenderKeySession(byte[]? sessionKey, byte[] context)
         {
             Context = context;
+            SessionKey = sessionKey ?? RandomNumberGenerator.GetBytes(32);
 
-            _chainKey = CryptoUtils.KDF(null, sessionKey, "SenderKey-InitialChainKey", CryptoUtils.KeySize);
+            _chainKey = CryptoUtils.KDF(null, SessionKey, "SenderKey-InitialChainKey", CryptoUtils.KeySize);
 
-            var privateKey = CryptoUtils.KDF(null, sessionKey, "SenderKey-SigningKey", CryptoUtils.KeySize);
+            var privateKey = CryptoUtils.KDF(null, SessionKey, "SenderKey-SigningKey", CryptoUtils.KeySize);
             _signingKey = ECDsa.Create(new ECParameters
             {
                 Curve = ECCurve.NamedCurves.nistP256,
@@ -35,6 +37,7 @@ namespace Percolator.Cryptography
         private SenderKeySession(SenderKeySessionState state)
         {
             Context = state.Context;
+            SessionKey = state.SessionKey;
             _chainKey = state.ChainKey;
             _iteration = state.Iteration;
             _messageKeyCache = state.MessageKeyCache;
@@ -65,6 +68,7 @@ namespace Percolator.Cryptography
             var state = new SenderKeySessionState
             {
                 Context = Context,
+                SessionKey = SessionKey,
                 ChainKey = _chainKey,
                 Iteration = _iteration,
                 MessageKeyCache = _messageKeyCache,
@@ -118,6 +122,11 @@ namespace Percolator.Cryptography
 
             if (message.Iteration > _iteration)
             {
+                if (message.Iteration - _iteration > MaxSkippedMessages)
+                {
+                    throw new CryptographicException($"Cannot process message with iteration {message.Iteration} because it exceeds the maximum number of skippable messages ({MaxSkippedMessages}).");
+                }
+
                 while (_iteration < message.Iteration)
                 {
                     var skippedMessageKey = CryptoUtils.KDF(null, _chainKey, "SenderKey-MessageKey", CryptoUtils.KeySize);

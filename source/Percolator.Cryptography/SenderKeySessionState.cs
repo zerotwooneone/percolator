@@ -1,15 +1,30 @@
 using System;
 using System.Collections.Generic;
+using System.Text.Json.Serialization;
 
 namespace Percolator.Cryptography
 {
     public class SenderKeySessionState
     {
-        public byte[] Context { get; set; } = Array.Empty<byte>();
-        public byte[] SigningKeyPrivate { get; set; } = Array.Empty<byte>();
+        [JsonInclude]
+        public byte[] SessionKey { get; set; } = null!;
+
+        [JsonInclude]
+        public byte[] Context { get; set; } = null!;
+
+        [JsonInclude]
+        public byte[] SigningKeyPrivate { get; set; } = null!;
+
+        [JsonInclude]
         public byte[] SigningKeyPublic { get; set; } = Array.Empty<byte>();
+
+        [JsonInclude]
         public uint Iteration { get; set; }
-        public byte[] ChainKey { get; set; } = Array.Empty<byte>();
-        public Dictionary<uint, byte[]> MessageKeyCache { get; set; } = new();
+
+        [JsonInclude]
+        public byte[] ChainKey { get; set; } = null!;
+
+        [JsonInclude]
+        public Dictionary<uint, byte[]> MessageKeyCache { get; set; } = null!;
     }
 }

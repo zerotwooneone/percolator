@@ -4,19 +4,25 @@ This repository contains the Percolator project, a collection of libraries and a
 
 ## Key Projects
 
-*   **`Pecolator.Cryptography`**: A high-performance, secure cryptography library providing implementations of advanced protocols for secure messaging.
+*   **`Percolator.Cryptography`**: A high-performance, secure cryptography library providing implementations of advanced protocols for secure messaging.
 *   **`Percolator.CryptographyTests`**: A comprehensive test suite for the cryptography library, ensuring its correctness and security through rigorous unit testing.
 
 ## Overview
 
-The primary component of this solution is the `Pecolator.Cryptography` library, which implements a full end-to-end secure messaging system based on the Signal Protocol. This includes the X3DH key agreement protocol and the Double Ratchet algorithm.
+The primary component of this solution is the `Percolator.Cryptography` library, which implements a full end-to-end secure messaging system inspired by the Signal Protocol. This includes the X3DH key agreement protocol and the Double Ratchet algorithm for pairwise sessions, as well as a secure group messaging protocol.
 
 ## Guidance for AI Assistants
 
 *   **Project Goal**: The main objective of this solution is to provide a robust, secure, and well-tested implementation of modern cryptographic protocols.
-*   **Key Components**: The core logic is in `Pecolator.Cryptography`. All changes to this library must be accompanied by corresponding tests in `Percolator.CryptographyTests`.
+*   **Key Components**: The core logic is in `Percolator.Cryptography`. All changes to this library must be accompanied by corresponding tests in `Percolator.CryptographyTests`.
 *   **Development Philosophy**: Follow a test-driven development (TDD) approach. Ensure all cryptographic operations use standard, modern, and secure primitives from `.NET`'s `System.Security.Cryptography` namespace. Avoid implementing cryptographic primitives from scratch.
 *   **Dependencies**: The project targets a modern .NET version. Ensure cross-platform compatibility.
+
+### Security Best Practices & Lessons Learned
+
+*   **Stateful Group Management**: Securely managing group membership is inherently stateful. The `GroupManager` must track all current members to correctly distribute keys and handle membership changes.
+*   **Secure Member Removal (Re-keying)**: When a member is removed from a group, simply deleting them from a list is insufficient. To maintain forward secrecy and prevent the removed member from decrypting future messages, the group **must be re-keyed**. This involves generating a new group session key and securely distributing it to all *remaining* members.
+*   **Bounded Caches for Skipped Messages**: Protocols like the Double Ratchet and Sender Key need to handle out-of-order messages by temporarily caching skipped message keys. This cache must have a strict upper bound (e.g., `MaxSkippedMessages`) to prevent a Denial-of-Service (DoS) attack where an attacker forces the client to cache an excessive number of keys, leading to memory exhaustion.
 
 ## Usage
 
@@ -24,81 +30,106 @@ This library is designed to be straightforward to use. Below are examples for co
 
 ### 1. Establishing a Secure 1-on-1 Session
 
-Before you can communicate, two parties (e.g., Alice and Bob) must establish a `DoubleRatchetSession`. This is done using a simplified X3DH-like key agreement flow.
+Before you can communicate, two parties (e.g., Alice and Bob) must establish a `DoubleRatchetSession`.
 
 ```csharp
 // Setup: Alice and Bob both have long-term identity keys.
-// Bob has also published an ephemeral pre-key.
-using var aliceIdentityKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-using var bobIdentityKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-using var bobPreKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+// Bob has also published an ephemeral ratchet key for this session.
+using var aliceIdentity = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+using var bobIdentity = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+using var bobRatchetKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
 
-// Alice initiates the session using Bob's public keys.
-var sharedSecret = aliceIdentityKey.DeriveKeyMaterial(bobPreKey.PublicKey);
-var aliceSession = new DoubleRatchetSession(
-    sharedSecret,
-    aliceIdentityKey,
-    SessionRole.Initiator,
-    bobPreKey.PublicKey.ExportSubjectPublicKeyInfo()
+// Alice (initiator) creates a session with Bob using his public identity and public ratchet key.
+using var aliceToBobSession = new DoubleRatchetSession(
+    aliceIdentity,
+    bobIdentity.PublicKey.ExportSubjectPublicKeyInfo(),
+    bobRatchetKey.PublicKey.ExportSubjectPublicKeyInfo()
 );
 
-// Bob establishes his side of the session using his keys.
-var bobSession = new DoubleRatchetSession(
-    sharedSecret,
-    bobIdentityKey,
-    SessionRole.Responder,
-    ownInitialRatchetKey: bobPreKey
+// Bob (responder) creates his side of the session using his private ratchet key.
+using var bobToAliceSession = new DoubleRatchetSession(
+    bobIdentity,
+    bobRatchetKey, // Bob provides his private ratchet key
+    aliceIdentity.PublicKey.ExportSubjectPublicKeyInfo()
 );
 
 // Alice can now encrypt a message for Bob.
-var message = aliceSession.Encrypt(Encoding.UTF8.GetBytes("Hello, Bob!"));
-var plaintext = bobSession.Decrypt(message);
+var message = aliceToBobSession.Encrypt(Encoding.UTF8.GetBytes("Hello, Bob!"));
+var plaintextBytes = bobToAliceSession.Decrypt(message);
 // plaintext is "Hello, Bob!"
 ```
 
-### 2. Group Messaging with `GroupManager`
+### 2. Secure Group Messaging
 
-Once a secure 1-on-1 session is established, it can be used to securely invite a member to a new group.
+The `GroupManager` provides a secure way to manage group chats, including the critical ability to remove members and re-key the group.
 
 ```csharp
-// Prerequisite: Alice and Bob have an established DoubleRatchetSession.
-// (aliceToBobSession and bobToAliceSession from the example above)
+// Prerequisite: Alice, Bob, and Carol have established pairwise DoubleRatchetSessions.
+// (aliceToBob, bobToAlice, aliceToCarol, carolToAlice)
 
-// 1. Alice creates a new group and an invitation for Bob.
+// 1. Alice creates a new group.
 var aliceManager = new GroupManager();
-var (invitation, aliceGroupSession) = aliceManager.CreateGroupAndInvitation(aliceSession);
 
-// The 'invitation' is a standard RatchetMessage that can be sent over the 1-on-1 channel.
+// 2. Alice invites Bob and Carol to the group.
+var bobInvitation = aliceManager.CreateInvitation("bob", aliceToBob);
+var carolInvitation = aliceManager.CreateInvitation("carol", aliceToCarol);
+// These invitations are sent to Bob and Carol over their secure 1-on-1 channels.
 
-// 2. Bob receives the invitation and accepts it.
-var bobManager = new GroupManager();
-var bobGroupSession = bobManager.AcceptInvitation(bobSession, invitation);
+// 3. Bob and Carol accept their invitations.
+var bobManager = GroupManager.AcceptInvitation(bobToAlice, bobInvitation);
+var carolManager = GroupManager.AcceptInvitation(carolToAlice, carolInvitation);
 
-// 3. Alice and Bob can now communicate in the group.
-var groupMessage = aliceGroupSession.Encrypt(Encoding.UTF8.GetBytes("Welcome to the group!"));
-var decryptedGroupMessage = bobGroupSession.Decrypt(groupMessage);
-// decryptedGroupMessage is "Welcome to the group!"
+// 4. Alice sends a message to the group.
+var welcomeMessage = aliceManager.GroupSession.Encrypt("Welcome!"u8.ToArray());
+
+// Bob and Carol can decrypt it.
+var bobsDecrypted = bobManager.GroupSession.Decrypt(welcomeMessage);
+var carolsDecrypted = carolManager.GroupSession.Decrypt(welcomeMessage);
+
+// 5. CRITICAL: Alice removes Carol from the group.
+var rekeyMessages = aliceManager.RemoveMember("carol");
+// A re-key message must now be sent to all remaining members (in this case, just Bob).
+
+// 6. Bob processes the re-key message to update his group session.
+bobManager.ProcessRekeyMessage(bobToAlice, rekeyMessages["bob"]);
+
+// 7. Alice sends a new message to the re-keyed group.
+var messageAfterRemoval = aliceManager.GroupSession.Encrypt("Carol is gone."u8.ToArray());
+
+// 8. Bob can decrypt the new message, but Carol cannot.
+var bobDecryptedAfter = bobManager.GroupSession.Decrypt(messageAfterRemoval);
+
+try
+{
+    // This will fail with a CryptographicException.
+    carolManager.GroupSession.Decrypt(messageAfterRemoval);
+}
+catch (CryptographicException)
+{
+    // Carol failed to decrypt the message as expected.
+}
 ```
 
 ### 3. Session Persistence
 
-To support long-running, asynchronous conversations, both `DoubleRatchetSession` and `SenderKeySession` can be serialized to a byte array and restored later.
+To support long-running, asynchronous conversations, sessions can be serialized. A `masterKey` is required to encrypt the session state at rest.
 
 ```csharp
-// --- DoubleRatchetSession Persistence ---
+// A 256-bit master key, which should be securely stored (e.g., in a secure enclave or keychain).
+var masterKey = RandomNumberGenerator.GetBytes(32);
 
+// --- DoubleRatchetSession Persistence ---
 // Alice saves her session state.
-var aliceStateBytes = aliceSession.SaveState();
+var aliceStateBytes = aliceToBobSession.SaveState(masterKey);
 
 // Later, she can restore it.
 // Note: The long-term identity key is NOT serialized and must be provided again.
-var loadedAliceSession = DoubleRatchetSession.LoadState(aliceStateBytes, aliceIdentityKey);
+var loadedAliceSession = DoubleRatchetSession.LoadState(aliceStateBytes, masterKey, aliceIdentity);
 
 
 // --- SenderKeySession Persistence ---
-
 // Alice saves her group session state.
-var groupStateBytes = aliceGroupSession.SaveState();
+var groupStateBytes = aliceManager.GroupSession.SaveState(masterKey);
 
 // Later, she can restore it.
-var loadedGroupSession = SenderKeySession.LoadState(groupStateBytes);
+var loadedGroupSession = SenderKeySession.LoadState(groupStateBytes, masterKey);

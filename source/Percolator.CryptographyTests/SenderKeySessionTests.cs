@@ -71,5 +71,24 @@ namespace Percolator.CryptographyTests
             // Try to decrypt it again
             Assert.Throws<CryptographicException>(() => _receiverSession.Decrypt(msg1));
         }
+
+        [Test]
+        public void Decrypt_WithTooManySkippedMessages_ThrowsException()
+        {
+            // Arrange
+            // Create a message from the sender that is far in the future for the receiver.
+            // The receiver is at iteration 0. A message with iteration > MaxSkippedMessages (1000) should be rejected.
+            SenderKeyMessage? message = null;
+            for (var i = 0; i <= 1001; i++)
+            {
+                message = _senderSession.Encrypt("ping"u8.ToArray());
+            }
+
+            // Act & Assert
+            // The message is validly signed, but its iteration (1001) is too far
+            // ahead of the receiver's current iteration (0).
+            var ex = Assert.Throws<CryptographicException>(() => _receiverSession.Decrypt(message!));
+            ex.Message.Should().Contain("exceeds the maximum number of skippable messages");
+        }
     }
 }

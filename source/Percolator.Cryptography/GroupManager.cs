@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -8,50 +9,80 @@ namespace Percolator.Cryptography
 {
     public class GroupManager
     {
-        private readonly Dictionary<string, SenderKeySession> _groupSessions = new();
+        private readonly Dictionary<string, DoubleRatchetSession> _members = new();
+        public SenderKeySession GroupSession { get; private set; }
+        public string GroupId { get; private set; }
 
-        public (RatchetMessage invitation, SenderKeySession creatorSession) CreateGroupAndInvitation(DoubleRatchetSession sessionToMember, string? groupId = null)
+        public GroupManager()
         {
-            var newGroupId = groupId ?? Guid.NewGuid().ToString();
-            var groupContext = Encoding.UTF8.GetBytes(newGroupId);
-            var groupSessionKey = RandomNumberGenerator.GetBytes(32);
+            GroupId = Guid.NewGuid().ToString();
+            var groupContext = Encoding.UTF8.GetBytes(GroupId);
+            GroupSession = new SenderKeySession(null, groupContext);
+        }
 
-            var invitation = new GroupInvitationMessage
+        public GroupManager(SenderKeySession groupSession, string groupId)
+        {
+            GroupSession = groupSession;
+            GroupId = groupId;
+        }
+
+        public RatchetMessage CreateInvitation(string memberId, DoubleRatchetSession sessionToMember)
+        {
+            _members[memberId] = sessionToMember;
+            var controlMessage = new GroupControlMessage
             {
-                GroupId = newGroupId,
-                SessionKey = groupSessionKey
+                SessionKey = GroupSession.SessionKey,
+                GroupId = this.GroupId
             };
-
-            var invitationBytes = JsonSerializer.SerializeToUtf8Bytes(invitation);
-            var encryptedInvitation = sessionToMember.Encrypt(invitationBytes);
-
-            var creatorSession = new SenderKeySession(groupSessionKey, groupContext);
-            _groupSessions[newGroupId] = creatorSession;
-
-            return (encryptedInvitation, creatorSession);
+            var payload = JsonSerializer.SerializeToUtf8Bytes(controlMessage);
+            return sessionToMember.Encrypt(payload);
         }
 
-        public SenderKeySession? AcceptInvitation(DoubleRatchetSession sessionToCreator, RatchetMessage invitationMessage)
+        public Dictionary<string, RatchetMessage> RemoveMember(string memberId)
         {
-            var invitationBytes = sessionToCreator.Decrypt(invitationMessage);
-            var invitation = JsonSerializer.Deserialize<GroupInvitationMessage>(invitationBytes);
-
-            if (invitation is null)
+            if (!_members.Remove(memberId))
             {
-                return null;
+                throw new InvalidOperationException("Member not found.");
             }
-            
-            var groupContext = Encoding.UTF8.GetBytes(invitation.GroupId);
-            var memberSession = new SenderKeySession(invitation.SessionKey, groupContext);
-            _groupSessions[invitation.GroupId] = memberSession;
 
-            return memberSession;
+            // Critical: Create a new group session with a new key and ID.
+            GroupId = Guid.NewGuid().ToString();
+            var groupContext = Encoding.UTF8.GetBytes(GroupId);
+            GroupSession = new SenderKeySession(null, groupContext);
+
+            var rekeyMessages = new Dictionary<string, RatchetMessage>();
+            var controlMessage = new GroupControlMessage
+            {
+                SessionKey = GroupSession.SessionKey,
+                GroupId = this.GroupId
+            };
+            var payload = JsonSerializer.SerializeToUtf8Bytes(controlMessage);
+
+            foreach (var (id, session) in _members)
+            {
+                var rekeyMessage = session.Encrypt(payload);
+                rekeyMessages[id] = rekeyMessage;
+            }
+
+            return rekeyMessages;
         }
-    }
 
-    internal class GroupInvitationMessage
-    {
-        public string GroupId { get; set; } = string.Empty;
-        public byte[] SessionKey { get; set; } = Array.Empty<byte>();
+        public static GroupManager AcceptInvitation(DoubleRatchetSession sessionToCreator, RatchetMessage invitationMessage)
+        {
+            var payload = sessionToCreator.Decrypt(invitationMessage);
+            var controlMessage = JsonSerializer.Deserialize<GroupControlMessage>(payload)!;
+            var groupContext = Encoding.UTF8.GetBytes(controlMessage.GroupId);
+            var groupSession = new SenderKeySession(controlMessage.SessionKey, groupContext);
+            return new GroupManager(groupSession, controlMessage.GroupId);
+        }
+
+        public void ProcessRekeyMessage(DoubleRatchetSession sessionToCreator, RatchetMessage rekeyMessage)
+        {
+            var payload = sessionToCreator.Decrypt(rekeyMessage);
+            var controlMessage = JsonSerializer.Deserialize<GroupControlMessage>(payload)!;
+            var groupContext = Encoding.UTF8.GetBytes(controlMessage.GroupId);
+            GroupSession = new SenderKeySession(controlMessage.SessionKey, groupContext);
+            GroupId = controlMessage.GroupId;
+        }
     }
 }
