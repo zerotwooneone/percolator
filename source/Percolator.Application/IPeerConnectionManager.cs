@@ -1,4 +1,3 @@
-using Grpc.Net.Client;
 using Percolator.Contracts.Protos;
 using Percolator.Network;
 

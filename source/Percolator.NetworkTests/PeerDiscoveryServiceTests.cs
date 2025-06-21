@@ -1,10 +1,7 @@
 using AutoFixture;
 using FluentAssertions;
 using Moq;
-using NUnit.Framework;
 using Percolator.Network;
-using System.Linq;
-using System.Threading.Tasks;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Percolator.NetworkTests

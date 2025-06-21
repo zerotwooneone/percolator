@@ -1,7 +1,5 @@
 using Microsoft.Extensions.Hosting;
 using Percolator.Network;
-using System.Threading;
-using System.Threading.Tasks;
 
 namespace Percolator.Node;
 

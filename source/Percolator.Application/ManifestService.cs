@@ -1,15 +1,8 @@
-using System;
-using System.IO;
 using System.Security.Cryptography;
-using System.Security.Cryptography.X509Certificates;
 using Google.Protobuf;
-using Google.Protobuf.WellKnownTypes;
 using Percolator.Contracts.Protos;
 using Percolator.Identity;
-using System.Collections.Generic;
-using System.Text.Json;
 using Percolator.Cryptography;
-using Microsoft.Extensions.Logging;
 
 namespace Percolator.Application;
 

@@ -1,6 +1,5 @@
 using Google.Protobuf;
 using Grpc.Net.Client;
-using MediatR;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
@@ -9,7 +8,6 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Percolator.Application;
 using Percolator.Application.Handlers;
-using Percolator.Contracts;
 using Percolator.Contracts.Protos;
 using Percolator.Cryptography;
 using Percolator.Identity;
@@ -17,7 +15,6 @@ using Percolator.Network;
 using System.CommandLine;
 using System.CommandLine.Builder;
 using System.CommandLine.Invocation;
-using System.IO;
 using System.Net;
 
 var serviceProvider = ConfigureServices(args).BuildServiceProvider();

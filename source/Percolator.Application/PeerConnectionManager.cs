@@ -3,9 +3,6 @@ using Microsoft.Extensions.Logging;
 using Percolator.Contracts.Protos;
 using Percolator.Network;
 using System.Collections.Concurrent;
-using System.Net;
-using System.Net.Http;
-using System.Security.Cryptography.X509Certificates;
 
 namespace Percolator.Application;
 

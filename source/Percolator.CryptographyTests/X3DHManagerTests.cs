@@ -1,4 +1,3 @@
-using NUnit.Framework;
 using FluentAssertions;
 using System.Security.Cryptography;
 using Percolator.Cryptography;

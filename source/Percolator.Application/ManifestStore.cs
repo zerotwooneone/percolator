@@ -1,11 +1,8 @@
 using System.Collections.Concurrent;
 using System.Security.Cryptography;
-using System.Text.Json;
 using Google.Protobuf;
 using Microsoft.Extensions.Logging;
-using Percolator.Contracts.Protos; 
-using System.IO;
-using System;
+using Percolator.Contracts.Protos;
 
 namespace Percolator.Application
 {

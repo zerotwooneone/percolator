@@ -1,9 +1,6 @@
 using MediatR;
 using Microsoft.Extensions.Logging;
 using Percolator.Application.Notifications;
-using System;
-using System.Threading;
-using System.Threading.Tasks;
 
 namespace Percolator.Application.Handlers
 {

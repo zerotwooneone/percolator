@@ -2,11 +2,8 @@ using System.Security.Cryptography;
 using FluentAssertions;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
-using NUnit.Framework;
 using Percolator.Contracts.Protos;
 using Percolator.Cryptography;
-using System;
-using System.Linq;
 
 namespace Percolator.CryptographyTests
 {

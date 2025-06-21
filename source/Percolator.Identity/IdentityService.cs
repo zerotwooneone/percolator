@@ -1,6 +1,5 @@
 using System.Security.Cryptography.X509Certificates;
 using Microsoft.Extensions.Logging;
-using Percolator.Contracts;
 
 namespace Percolator.Identity;
 

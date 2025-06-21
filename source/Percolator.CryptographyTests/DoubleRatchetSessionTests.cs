@@ -1,5 +1,4 @@
 using FluentAssertions;
-using NUnit.Framework;
 using Percolator.Cryptography;
 using System.Security.Cryptography;
 using System.Text;

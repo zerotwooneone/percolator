@@ -1,5 +1,3 @@
-using System;
-using System.Threading.Tasks;
 using Grpc.Core;
 using MediatR;
 using Microsoft.Extensions.Logging;
@@ -7,8 +5,6 @@ using System.Security.Cryptography;
 using Google.Protobuf;
 using Percolator.Contracts.Protos;
 using Percolator.Cryptography;
-using System.IO;
-using System.Linq;
 
 namespace Percolator.Application
 {

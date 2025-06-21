@@ -1,7 +1,6 @@
 using MediatR;
 using Percolator.Application.Notifications;
 using Percolator.Network;
-using System.Threading.Tasks;
 
 namespace Percolator.Application
 {

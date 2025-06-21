@@ -1,7 +1,5 @@
 using Google.Protobuf;
 using Percolator.Contracts.Protos;
-using System;
-using System.Linq;
 
 namespace Percolator.Application
 {

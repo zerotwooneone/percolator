@@ -1,5 +1,3 @@
-using System.IO;
-
 namespace Percolator.Cryptography
 {
     public class SenderKeyMessage

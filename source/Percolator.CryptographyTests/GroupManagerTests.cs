@@ -1,6 +1,3 @@
-using NUnit.Framework;
-using System;
-using System.Linq;
 using System.Text;
 using FluentAssertions;
 using System.Security.Cryptography;

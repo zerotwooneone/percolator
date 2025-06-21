@@ -1,5 +1,3 @@
-using System.Text.Json.Serialization;
-
 namespace Percolator.Cryptography;
 
 internal class GroupControlMessage
