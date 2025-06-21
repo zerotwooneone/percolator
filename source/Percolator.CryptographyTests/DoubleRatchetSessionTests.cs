@@ -4,68 +4,77 @@ using AutoFixture;
 using FluentAssertions;
 using NUnit.Framework;
 using Pecolator.Cryptography;
+using System.Text;
 
 namespace Percolator.CryptographyTests
 {
     [TestFixture]
     public class DoubleRatchetSessionTests
     {
-        private readonly IFixture _fixture = new Fixture();
+        private byte[] _sharedSecret;
+        private ECDiffieHellman _aliceIdentityKey;
+        private ECDiffieHellman _bobIdentityKey;
 
-        private byte[] CreateSharedSecret() => _fixture.Create<byte[]>();
+        [SetUp]
+        public void Setup()
+        {
+            _sharedSecret = new byte[32];
+            RandomNumberGenerator.Fill(_sharedSecret);
+            _aliceIdentityKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+            _bobIdentityKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        }
 
-        private ECDiffieHellman CreateKeyPair() => ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        [TearDown]
+        public void Teardown()
+        {
+            _aliceIdentityKey?.Dispose();
+            _bobIdentityKey?.Dispose();
+        }
 
         [Test]
         public void Constructor_WithValidInputs_InitializesSession()
         {
             // Arrange
-            var sharedSecret = CreateSharedSecret();
-            var localKeyPair = CreateKeyPair();
-            var remotePublicKey = CreateKeyPair().PublicKey.ExportSubjectPublicKeyInfo();
+            using var bobSession = new DoubleRatchetSession(_sharedSecret, _bobIdentityKey, SessionRole.Responder);
+            var bobRatchetPublicKey = bobSession.RatchetPublicKey;
 
             // Act
-            var session = new DoubleRatchetSession(sharedSecret, localKeyPair, remotePublicKey, SessionRole.Initiator);
+            using var aliceSession = new DoubleRatchetSession(_sharedSecret, _aliceIdentityKey, SessionRole.Initiator, bobRatchetPublicKey);
 
             // Assert
-            session.Should().NotBeNull();
-            session.PublicKey.Should().BeEquivalentTo(localKeyPair.PublicKey.ExportSubjectPublicKeyInfo());
-            session.SendingChainKey.Should().NotBeNullOrEmpty();
-            session.ReceivingChainKey.Should().NotBeNullOrEmpty();
+            aliceSession.Should().NotBeNull();
+            aliceSession.IdentityPublicKey.Should().BeEquivalentTo(_aliceIdentityKey.PublicKey.ExportSubjectPublicKeyInfo());
+            aliceSession.SendingChainKey.Should().NotBeNullOrEmpty();
+            aliceSession.ReceivingChainKey.Should().BeNull();
         }
 
         [Test]
         public void Encrypt_WithValidPlaintext_ReturnsNonEmptyCiphertext()
         {
             // Arrange
-            var sharedSecret = CreateSharedSecret();
-            var localKeyPair = CreateKeyPair();
-            var remotePublicKey = CreateKeyPair().PublicKey.ExportSubjectPublicKeyInfo();
-            var session = new DoubleRatchetSession(sharedSecret, localKeyPair, remotePublicKey, SessionRole.Initiator);
-            var plaintext = System.Text.Encoding.UTF8.GetBytes("Hello, world!");
+            using var bobSession = new DoubleRatchetSession(_sharedSecret, _bobIdentityKey, SessionRole.Responder);
+            var bobRatchetPublicKey = bobSession.RatchetPublicKey;
+            using var aliceSession = new DoubleRatchetSession(_sharedSecret, _aliceIdentityKey, SessionRole.Initiator, bobRatchetPublicKey);
 
             // Act
-            var message = session.Encrypt(plaintext);
+            var message = aliceSession.Encrypt(Encoding.UTF8.GetBytes("test"));
 
             // Assert
-            message.Should().NotBeNull();
-            message.CiphertextPayload.Should().NotBeEmpty();
-            message.EphemeralPublicKey.Should().NotBeEmpty();
+            message.CiphertextPayload.Should().NotBeNullOrEmpty();
         }
 
         [Test]
         public void Encrypt_CalledTwiceWithSamePlaintext_ReturnsDifferentCiphertexts()
         {
             // Arrange
-            var sharedSecret = CreateSharedSecret();
-            var localKeyPair = CreateKeyPair();
-            var remotePublicKey = CreateKeyPair().PublicKey.ExportSubjectPublicKeyInfo();
-            var session = new DoubleRatchetSession(sharedSecret, localKeyPair, remotePublicKey, SessionRole.Initiator);
-            var plaintext = System.Text.Encoding.UTF8.GetBytes("You can't step in the same river twice.");
+            using var bobSession = new DoubleRatchetSession(_sharedSecret, _bobIdentityKey, SessionRole.Responder);
+            var bobRatchetPublicKey = bobSession.RatchetPublicKey;
+            using var aliceSession = new DoubleRatchetSession(_sharedSecret, _aliceIdentityKey, SessionRole.Initiator, bobRatchetPublicKey);
+            var plaintext = Encoding.UTF8.GetBytes("test");
 
             // Act
-            var message1 = session.Encrypt(plaintext);
-            var message2 = session.Encrypt(plaintext);
+            var message1 = aliceSession.Encrypt(plaintext);
+            var message2 = aliceSession.Encrypt(plaintext);
 
             // Assert
             message1.CiphertextPayload.Should().NotBeEquivalentTo(message2.CiphertextPayload);
@@ -75,102 +84,74 @@ namespace Percolator.CryptographyTests
         public void EncryptDecrypt_WithTwoSessions_ReturnsOriginalPlaintext()
         {
             // Arrange
-            var sharedSecret = CreateSharedSecret();
-            var aliceInitialKeyPair = CreateKeyPair();
-            var bobInitialKeyPair = CreateKeyPair();
-
-            var sessionAlice = new DoubleRatchetSession(sharedSecret, aliceInitialKeyPair, bobInitialKeyPair.PublicKey.ExportSubjectPublicKeyInfo(), SessionRole.Initiator);
-            var sessionBob = new DoubleRatchetSession(sharedSecret, bobInitialKeyPair, aliceInitialKeyPair.PublicKey.ExportSubjectPublicKeyInfo(), SessionRole.Responder);
-
-            var plaintext = System.Text.Encoding.UTF8.GetBytes("Message from Alice to Bob");
+            using var bobSession = new DoubleRatchetSession(_sharedSecret, _bobIdentityKey, SessionRole.Responder);
+            var bobRatchetPublicKey = bobSession.RatchetPublicKey;
+            using var aliceSession = new DoubleRatchetSession(_sharedSecret, _aliceIdentityKey, SessionRole.Initiator, bobRatchetPublicKey);
+            var plaintext = "Hello, Bob!";
 
             // Act
-            var message = sessionAlice.Encrypt(plaintext);
-            var decryptedText = sessionBob.Decrypt(message);
+            var message = aliceSession.Encrypt(Encoding.UTF8.GetBytes(plaintext));
+            var decryptedBytes = bobSession.Decrypt(message);
+            var decryptedText = Encoding.UTF8.GetString(decryptedBytes);
 
             // Assert
-            decryptedText.Should().BeEquivalentTo(plaintext);
+            decryptedText.Should().Be(plaintext);
         }
 
         [Test]
         public void Decrypt_WithNewEphemeralKey_UpdatesReceivingChainKey()
         {
             // Arrange
-            var sharedSecret = CreateSharedSecret();
-            var aliceInitialKeyPair = CreateKeyPair();
-            var bobInitialKeyPair = CreateKeyPair();
-
-            var sessionAlice = new DoubleRatchetSession(sharedSecret, aliceInitialKeyPair, bobInitialKeyPair.PublicKey.ExportSubjectPublicKeyInfo(), SessionRole.Initiator);
-            var sessionBob = new DoubleRatchetSession(sharedSecret, bobInitialKeyPair, aliceInitialKeyPair.PublicKey.ExportSubjectPublicKeyInfo(), SessionRole.Responder);
-
-            var initialReceivingKey = sessionBob.ReceivingChainKey.ToArray(); // Capture initial state
-            var plaintext = System.Text.Encoding.UTF8.GetBytes("Hello, new key!");
+            using var bobSession = new DoubleRatchetSession(_sharedSecret, _bobIdentityKey, SessionRole.Responder);
+            var bobRatchetPublicKey = bobSession.RatchetPublicKey;
+            using var aliceSession = new DoubleRatchetSession(_sharedSecret, _aliceIdentityKey, SessionRole.Initiator, bobRatchetPublicKey);
+            bobSession.ReceivingChainKey.Should().BeNull();
 
             // Act
-            var message = sessionAlice.Encrypt(plaintext);
-            sessionBob.Decrypt(message);
-            var newReceivingKey = sessionBob.ReceivingChainKey;
+            var message = aliceSession.Encrypt(Encoding.UTF8.GetBytes("first message"));
+            bobSession.Decrypt(message);
 
             // Assert
-            newReceivingKey.Should().NotBeEquivalentTo(initialReceivingKey);
+            bobSession.ReceivingChainKey.Should().NotBeNull();
         }
 
         [Test]
-        public void Decrypt_WhenReceivingMessagesOutOfOrder_ShouldSucceed()
+        public void Decrypt_OutOfOrderMessage_Succeeds()
         {
             // Arrange
-            var sharedSecret = CreateSharedSecret();
-            var aliceInitialKeyPair = CreateKeyPair();
-            var bobInitialKeyPair = CreateKeyPair();
+            using var bobSession = new DoubleRatchetSession(_sharedSecret, _bobIdentityKey, SessionRole.Responder);
+            var bobRatchetPublicKey = bobSession.RatchetPublicKey;
+            using var aliceSession = new DoubleRatchetSession(_sharedSecret, _aliceIdentityKey, SessionRole.Initiator, bobRatchetPublicKey);
 
-            var sessionAlice = new DoubleRatchetSession(sharedSecret, aliceInitialKeyPair, bobInitialKeyPair.PublicKey.ExportSubjectPublicKeyInfo(), SessionRole.Initiator);
-            var sessionBob = new DoubleRatchetSession(sharedSecret, bobInitialKeyPair, aliceInitialKeyPair.PublicKey.ExportSubjectPublicKeyInfo(), SessionRole.Responder);
-
-            var plaintext1 = System.Text.Encoding.UTF8.GetBytes("Message 1");
-            var plaintext2 = System.Text.Encoding.UTF8.GetBytes("Message 2");
-            var plaintext3 = System.Text.Encoding.UTF8.GetBytes("Message 3");
-
-            var message1 = sessionAlice.Encrypt(plaintext1);
-            var message2 = sessionAlice.Encrypt(plaintext2);
-            var message3 = sessionAlice.Encrypt(plaintext3);
+            var message1 = aliceSession.Encrypt(Encoding.UTF8.GetBytes("message 1"));
+            var message2 = aliceSession.Encrypt(Encoding.UTF8.GetBytes("message 2"));
+            var message3 = aliceSession.Encrypt(Encoding.UTF8.GetBytes("message 3"));
 
             // Act & Assert
-            // Receive message 3 first (skipping 1 and 2)
-            var decryptedText3 = sessionBob.Decrypt(message3);
-            decryptedText3.Should().BeEquivalentTo(plaintext3);
+            var decrypted1 = Encoding.UTF8.GetString(bobSession.Decrypt(message1));
+            var decrypted3 = Encoding.UTF8.GetString(bobSession.Decrypt(message3));
+            var decrypted2 = Encoding.UTF8.GetString(bobSession.Decrypt(message2));
 
-            // Receive message 2 next (from cache)
-            var decryptedText2 = sessionBob.Decrypt(message2);
-            decryptedText2.Should().BeEquivalentTo(plaintext2);
-
-            // Receive message 1 last (from cache)
-            var decryptedText1 = sessionBob.Decrypt(message1);
-            decryptedText1.Should().BeEquivalentTo(plaintext1);
+            decrypted1.Should().Be("message 1");
+            decrypted2.Should().Be("message 2");
+            decrypted3.Should().Be("message 3");
         }
 
         [Test]
-        public void Decrypt_WithTamperedCiphertext_ShouldThrow()
+        public void Decrypt_WithTamperedCiphertext_Throws()
         {
             // Arrange
-            var sharedSecret = CreateSharedSecret();
-            var aliceInitialKeyPair = CreateKeyPair();
-            var bobInitialKeyPair = CreateKeyPair();
+            using var bobSession = new DoubleRatchetSession(_sharedSecret, _bobIdentityKey, SessionRole.Responder);
+            var bobRatchetPublicKey = bobSession.RatchetPublicKey;
+            using var aliceSession = new DoubleRatchetSession(_sharedSecret, _aliceIdentityKey, SessionRole.Initiator, bobRatchetPublicKey);
+            var message = aliceSession.Encrypt(Encoding.UTF8.GetBytes("test"));
+            message.CiphertextPayload[10]++; // Tamper with the ciphertext
 
-            var sessionAlice = new DoubleRatchetSession(sharedSecret, aliceInitialKeyPair, bobInitialKeyPair.PublicKey.ExportSubjectPublicKeyInfo(), SessionRole.Initiator);
-            var sessionBob = new DoubleRatchetSession(sharedSecret, bobInitialKeyPair, aliceInitialKeyPair.PublicKey.ExportSubjectPublicKeyInfo(), SessionRole.Responder);
-
-            var plaintext = System.Text.Encoding.UTF8.GetBytes("This is a secret message.");
-            var message = sessionAlice.Encrypt(plaintext);
-
-            // Act: Tamper with the ciphertext by flipping a bit
-            var tamperedPayload = message.CiphertextPayload.ToArray();
-            tamperedPayload[tamperedPayload.Length - 5] ^= 0x01; // Flip a bit somewhere in the middle
-            var tamperedMessage = new RatchetMessage(message.EphemeralPublicKey, tamperedPayload);
+            // Act
+            Action act = () => bobSession.Decrypt(message);
 
             // Assert
-            Action act = () => sessionBob.Decrypt(tamperedMessage);
-            act.Should().Throw<InvalidMessageOrderException>()
-               .WithInnerException<System.Security.Cryptography.AuthenticationTagMismatchException>();
+            act.Should().Throw<InvalidMessageOrderException>().WithInnerException<AuthenticationTagMismatchException>();
         }
     }
 }

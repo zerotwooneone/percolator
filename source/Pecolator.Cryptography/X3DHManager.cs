@@ -6,15 +6,12 @@ public static class X3DHManager
 {
     private const int KeySize = 32;
 
-    public static byte[] InitiateHandshake(PreKeyBundle remoteBundle, ECDiffieHellman identityKey, out byte[] ephemeralKey)
+    public static byte[] InitiateHandshake(PreKeyBundle remoteBundle, ECDiffieHellman identityKey, ECDiffieHellman ephemeralKeyPair)
     {
         if (!VerifySignature(remoteBundle.IdentityKey, remoteBundle.SignedPreKey, remoteBundle.Signature))
         {
             throw new CryptographicException("Invalid signature for signed pre-key.");
         }
-
-        using var ephemeralKeyPair = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        ephemeralKey = ephemeralKeyPair.PublicKey.ExportSubjectPublicKeyInfo();
 
         using var remoteIdentityKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         remoteIdentityKey.ImportSubjectPublicKeyInfo(remoteBundle.IdentityKey, out _);

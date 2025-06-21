@@ -28,14 +28,15 @@ public class X3DHManagerTests
 
         // Arrange: Alice (Initiator) generates her keys
         using var aliceIdentityKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        using var aliceEphemeralKeyPair = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
 
         // Act: Alice initiates the handshake
-        var aliceSharedSecret = X3DHManager.InitiateHandshake(bobBundle, aliceIdentityKey, out var aliceEphemeralKey);
+        var aliceSharedSecret = X3DHManager.InitiateHandshake(bobBundle, aliceIdentityKey, aliceEphemeralKeyPair);
 
         // Act: Bob responds to the handshake
         var bobSharedSecret = X3DHManager.RespondToHandshake(
             aliceIdentityKey.PublicKey.ExportSubjectPublicKeyInfo(),
-            aliceEphemeralKey,
+            aliceEphemeralKeyPair.PublicKey.ExportSubjectPublicKeyInfo(),
             bobIdentityKey,
             bobSignedPreKey,
             bobOneTimePreKey
@@ -65,9 +66,10 @@ public class X3DHManagerTests
         );
 
         using var aliceIdentityKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        using var aliceEphemeralKeyPair = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
 
         // Act
-        Action act = () => X3DHManager.InitiateHandshake(bobBundle, aliceIdentityKey, out _);
+        Action act = () => X3DHManager.InitiateHandshake(bobBundle, aliceIdentityKey, aliceEphemeralKeyPair);
 
         // Assert
         act.Should().Throw<CryptographicException>().WithMessage("Invalid signature for signed pre-key.");

@@ -1,10 +1,10 @@
-# Percolator.Cryptography
+# Pecolator.Cryptography
 
-This project is a core domain library for the Percolator chat application. It is responsible for all cryptographic operations required to establish and maintain secure, end-to-end encrypted communication sessions.
+This project is a core domain library for the Pecolator chat application. It is responsible for all cryptographic operations required to establish and maintain secure, end-to-end encrypted communication sessions.
 
 ## Goal
 
-The primary goal of this library is to provide a self-contained, secure, and well-tested implementation of the cryptographic protocols needed for Percolator. It encapsulates the complexity of modern cryptographic systems, offering a simple API to the application layer for encrypting and decrypting messages.
+The primary goal of this library is to provide a self-contained, secure, and well-tested implementation of the cryptographic protocols needed for Pecolator. It encapsulates the complexity of modern cryptographic systems, offering a simple API to the application layer for encrypting and decrypting messages.
 
 This library is designed with Domain-Driven Design (DDD) principles in mind. It contains only pure cryptographic logic and is completely isolated from any infrastructure concerns like networking, databases, or user interfaces.
 
@@ -47,6 +47,70 @@ The security of the chat application is built upon several key cryptographic con
 *   `DoubleRatchetSession`: Manages the ongoing stateful session, handling encryption and decryption of messages.
 *   `PreKeyBundle`: A data structure representing a user's public keys needed for the X3DH handshake.
 *   `RatchetMessage`: A data structure for transporting the ciphertext and the sender's ephemeral public key.
+
+## Basic Usage Example
+
+This example demonstrates how to establish and use a `DoubleRatchetSession` after two parties have already derived a shared secret using a key agreement protocol like X3DH.
+
+```csharp
+using System;
+using System.Security.Cryptography;
+using System.Text;
+using Pecolator.Cryptography; // Use the namespace from your project
+
+// 1. Setup: Pre-computation and shared secret
+// In a real application, identity keys are long-term and stored securely.
+// The sharedSecret would be the result of an X3DH handshake.
+using var aliceIdentityKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+using var bobIdentityKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+byte[] sharedSecret = new byte[32]; // Placeholder for X3DH result
+RandomNumberGenerator.Fill(sharedSecret);
+
+// 2. Session Initialization
+// Bob, the responder, creates his session first.
+using var bobSession = new DoubleRatchetSession(sharedSecret, bobIdentityKey, SessionRole.Responder);
+
+// Alice, the initiator, needs Bob's initial ratchet public key to start the session.
+// This key would typically be retrieved from a server as part of Bob's pre-key bundle.
+byte[] bobRatchetPublicKey = bobSession.RatchetPublicKey;
+using var aliceSession = new DoubleRatchetSession(sharedSecret, aliceIdentityKey, SessionRole.Initiator, bobRatchetPublicKey);
+
+Console.WriteLine("Sessions initialized successfully.");
+
+// 3. Alice sends the first message to Bob
+string originalMessageFromAlice = "Hello Bob!";
+RatchetMessage messageToBob = aliceSession.Encrypt(Encoding.UTF8.GetBytes(originalMessageFromAlice));
+
+Console.WriteLine($"Alice sends: '{originalMessageFromAlice}'");
+
+// 4. Bob decrypts the message from Alice
+byte[] decryptedBytesFromAlice = bobSession.Decrypt(messageToBob);
+string decryptedMessageForBob = Encoding.UTF8.GetString(decryptedBytesFromAlice);
+
+Console.WriteLine($"Bob decrypts: '{decryptedMessageForBob}'");
+if (originalMessageFromAlice == decryptedMessageForBob)
+{
+    Console.WriteLine("SUCCESS: Message decrypted correctly!");
+}
+
+// 5. Bob replies to Alice
+string originalMessageFromBob = "Hello Alice, message received!";
+RatchetMessage messageToAlice = bobSession.Encrypt(Encoding.UTF8.GetBytes(originalMessageFromBob));
+
+Console.WriteLine($"Bob replies: '{originalMessageFromBob}'");
+
+// 6. Alice decrypts the reply from Bob
+byte[] decryptedBytesFromBob = aliceSession.Decrypt(messageToAlice);
+string decryptedMessageForAlice = Encoding.UTF8.GetString(decryptedBytesFromBob);
+
+Console.WriteLine($"Alice decrypts: '{decryptedMessageForAlice}'");
+if (originalMessageFromBob == decryptedMessageForAlice)
+{
+    Console.WriteLine("SUCCESS: Reply decrypted correctly!");
+}
+
+// The 'using' statements ensure that the session objects and their ephemeral keys are properly disposed.
+```
 
 ## Guidance for AI Assistants
 
