@@ -5,6 +5,7 @@ using Grpc.Core;
 using MediatR;
 using Microsoft.Extensions.Logging;
 using Percolator.Application.RateLimiting;
+using Percolator.Application.Security;
 using Percolator.Contracts.Protos;
 using Percolator.Cryptography;
 
@@ -69,6 +70,12 @@ namespace Percolator.Application.Manifests
 
         public override Task<RequestManifestResponse> RequestManifest(RequestManifestRequest request, ServerCallContext context)
         {
+            if (!InputValidator.IsValidPathSegment(request.SubPath))
+            {
+                _logger.LogWarning("Peer {Peer} sent a request with an invalid sub-path: {SubPath}. Rejecting request.", context.Peer, request.SubPath);
+                throw new RpcException(new Status(StatusCode.InvalidArgument, "The request contains an invalid sub-path."));
+            }
+
             var decision = _rateLimiter.IsRequestAllowed(context.Peer);
             if (!decision.IsAllowed)
             {

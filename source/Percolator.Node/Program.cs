@@ -14,12 +14,16 @@ using Percolator.Contracts.Protos;
 using Percolator.Cryptography;
 using Percolator.Identity;
 using Percolator.Application.Identity;
+using Percolator.Application.Security;
 using Percolator.Network;
 using System.CommandLine;
 using System.CommandLine.Builder;
 using System.CommandLine.Invocation;
 using System.Net;
 using System.Net.Http;
+using System.Net.Security;
+using System.Security.Cryptography.X509Certificates;
+using Microsoft.AspNetCore.Server.Kestrel.Https;
 
 var serviceProvider = ConfigureServices(args).BuildServiceProvider();
 
@@ -70,9 +74,26 @@ static RootCommand CreateRootCommand(IServiceProvider serviceProvider)
         logger.LogInformation("Requesting sub-manifest for path '{SubPath}' from manifest '{ManifestHash}' on port {Port}...", subPath, manifestHash, port);
         
         var httpHandler = new HttpClientHandler();
-        // Allow self-signed certificates. In a production scenario, you would want
-        // to properly validate the certificate chain or pin to a specific certificate.
-        httpHandler.ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator;
+        // The client must also validate the server's certificate.
+        // We replace the dangerous "accept all" with a check that the server's certificate thumbprint
+        // matches our own identity, establishing a self-trust model.
+        httpHandler.ServerCertificateCustomValidationCallback = (request, cert, chain, errors) =>
+        {
+            if (cert is null)
+            {
+                return false;
+            }
+
+            // We expect chain errors because we are using self-signed certificates.
+            if (errors != SslPolicyErrors.None && errors != SslPolicyErrors.RemoteCertificateChainErrors)
+            {
+                return false;
+            }
+
+            var trustedStore = serviceProvider.GetRequiredService<ITrustedPeerStore>();
+            return trustedStore.IsTrusted(cert.Thumbprint);
+        };
+
         using var channel = GrpcChannel.ForAddress($"https://localhost:{port}", new GrpcChannelOptions { HttpHandler = httpHandler });
         var client = new FileSharing.FileSharingClient(channel);
 
@@ -121,9 +142,27 @@ static async Task RunNodeAsync(int port, IServiceProvider serviceProvider)
             listenOptions.Protocols = HttpProtocols.Http2;
             listenOptions.UseHttps(https =>
             {
+                // Select the server certificate
                 https.ServerCertificateSelector = (connectionContext, hostName) =>
                 {
                     return serviceProvider.GetService<IIdentityService>()?.GetDefaultIdentityCertificate();
+                };
+
+                // Require the client to provide a certificate
+                https.ClientCertificateMode = ClientCertificateMode.RequireCertificate;
+
+                // Implement custom validation for the client certificate
+                https.ClientCertificateValidation = (certificate, chain, sslPolicyErrors) =>
+                {
+                    // We expect chain errors because we are using self-signed certificates.
+                    if (sslPolicyErrors != SslPolicyErrors.None && sslPolicyErrors != SslPolicyErrors.RemoteCertificateChainErrors)
+                    {
+                        return false;
+                    }
+
+                    // Trust the peer if its certificate thumbprint is in our trusted store.
+                    var trustedStore = serviceProvider.GetRequiredService<ITrustedPeerStore>();
+                    return trustedStore.IsTrusted(certificate.Thumbprint);
                 };
             });
         });
@@ -160,11 +199,17 @@ static IServiceCollection ConfigureServices(string[] args)
 {
     var services = new ServiceCollection();
     services.AddLogging(configure => configure.AddConsole());
+    services.AddGrpc(options =>
+    {
+        // Mitigate DoS attacks by limiting the max message size.
+        options.MaxReceiveMessageSize = 4 * 1024 * 1024; // 4 MB
+    });
 
     // Domain Services
     services.AddSingleton<ICredentialService, CredentialService>();
     services.AddSingleton<ICertificateOperations, CertificateOperations>();
     services.AddSingleton<IIdentityService, PersistentIdentityService>();
+    services.AddSingleton<ITrustedPeerStore, InMemoryTrustedPeerStore>();
     services.AddSingleton<IDiscoverySignatureProvider, DiscoverySignatureProvider>();
     services.AddSingleton<ISharedDirectoryProvider, SharedDirectoryProvider>();
     services.AddSingleton<IRateLimiter, InMemoryRateLimiter>();
