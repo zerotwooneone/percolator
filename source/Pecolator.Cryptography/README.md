@@ -119,6 +119,12 @@ if (originalMessageFromBob == decryptedMessageForAlice)
 *   **Server Role**: The X3DH protocol assumes a server exists to store and distribute public `PreKeyBundle`s. This server enables asynchronous communication but is not trusted; authenticity is guaranteed by the `ECDSA` signature in the bundle, which this library verifies.
 *   **Encryption**: Encryption is handled by `AES-GCM`. Decryption of a tampered message will throw an `AuthenticationTagMismatchException`, which is caught and re-thrown as a custom exception. Any code calling `Decrypt` must handle this.
 *   **Stateful Sessions**: `DoubleRatchetSession` is highly stateful. Do not reuse session objects for different conversations.
+*   **Asymmetric Initialization and Roles**: The session's behavior depends heavily on its `SessionRole`.
+    *   A `Responder` must be created first. It cannot send a message until it has first received one, which initializes its sending chain.
+    *   An `Initiator` requires the `Responder`'s initial public ratchet key (`RatchetPublicKey`) for its constructor. This key must be transmitted from the responder to the initiator.
+*   **Ratchet Steps are Asymmetric**: The Diffie-Hellman ratchet step, which provides healing, occurs only within the `Decrypt` method when a new ephemeral key is received. `Encrypt` only performs a symmetric ratchet step. This means the session state changes more significantly on decryption than on encryption.
+*   **Key Ownership**: The caller owns and manages the lifecycle of the long-term `identityKey`. The `DoubleRatchetSession` only manages its own internal, ephemeral ratchet keys. Always use a `using` block or manually call `Dispose()` to prevent key leakage.
+*   **Serializable Public Keys**: Public keys are exposed as `byte[]` (specifically, in `SubjectPublicKeyInfo` format). This is intentional to ensure they are easily serializable for transport over a network or storage, avoiding platform-specific type dependencies.
 
 ## Assumptions
 

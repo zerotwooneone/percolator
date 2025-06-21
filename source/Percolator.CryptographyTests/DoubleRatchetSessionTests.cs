@@ -116,6 +116,19 @@ namespace Percolator.CryptographyTests
         }
 
         [Test]
+        public void Security_ImportInvalidPublicKey_ThrowsException()
+        {
+            // Arrange
+            // This is a known invalid public key for the nistP256 curve (point is not on the curve).
+            // It is correctly formatted as an X.509 SubjectPublicKeyInfo.
+            var invalidPublicKeyBytes = Convert.FromBase64String("MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE/1+t8y0tLg3qGSs3fR018R3g2cNa3/zI/pECm8bYm24D4sYf6dZ1ZgE8tVAvCg2mUDV/a51Zy1s8Oa6hZw==");
+            using var ecdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+
+            // Act & Assert
+            Assert.Throws<CryptographicException>(() => ecdh.ImportSubjectPublicKeyInfo(invalidPublicKeyBytes, out _));
+        }
+
+        [Test]
         public void Decrypt_OutOfOrderMessage_Succeeds()
         {
             // Arrange
