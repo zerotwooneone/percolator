@@ -49,6 +49,9 @@ These projects contain the pure domain logic and are designed to be highly cohes
 
     > **Note for AI/Developers**: This rule is critical for maintaining a stable API in a distributed system. Always enforce this for new Protobuf schemas.
 - **Protobuf in C# Gotcha**: When checking for the presence of an `optional` field that is another message type (not a scalar like `int32` or `string`), the C# Protobuf generator does not create a `Has...()` method. Instead, you must check if the property is `null`.
+- **Hybrid Networking Model**: The system is designed for both local (LAN) and internet-based peer-to-peer communication. It uses a hybrid approach:
+    - **gRPC (over TCP)** is used for all reliable, stateful communication, such as announcing and transferring manifests and file chunks.
+    - **UDP Broadcast/Multicast** is used for efficient, zero-configuration peer discovery on the local network.
 
 ## AI Collaboration Guidance
 

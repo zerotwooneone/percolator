@@ -1,34 +1,37 @@
-using FluentAssertions;
-using NUnit.Framework;
-using Percolator.Cryptography;
-using Percolator.Cryptography.Protos;
-using System;
-using System.Collections.Generic;
-using System.Linq;
 using System.Security.Cryptography;
+using FluentAssertions;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
+using NUnit.Framework;
+using Percolator.Contracts.Protos;
+using Percolator.Cryptography;
+using System;
+using System.Linq;
 
 namespace Percolator.CryptographyTests
 {
     [TestFixture]
     public class ManifestTests
     {
-        private ECDsa _authorKey;
+        private ECDsa _privateKey;
+        private ECDsa _publicKey;
+        private byte[] _publicKeyBytes;
 
         [SetUp]
         public void Setup()
         {
-            _authorKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+            (_privateKey, _publicKey) = CryptoUtils.GenerateNewKeys();
+            _publicKeyBytes = _publicKey.ExportSubjectPublicKeyInfo();
         }
 
         [TearDown]
-        public void TearDown()
+        public void Teardown()
         {
-            _authorKey?.Dispose();
+            _privateKey?.Dispose();
+            _publicKey?.Dispose();
         }
 
-        private static byte[] GetCanonicalBytes(Manifest manifest)
+        private byte[] GetCanonicalBytes(Manifest manifest)
         {
             var canonicalManifest = manifest.Clone();
             var sortedEntries = canonicalManifest.Entries.OrderBy(e => e.Path, StringComparer.Ordinal).ToList();
@@ -37,146 +40,81 @@ namespace Percolator.CryptographyTests
             return canonicalManifest.ToByteArray();
         }
 
-        [Test]
-        public void ToCanonicalBytes_IsDeterministic()
+        private Manifest CreateTestManifest()
         {
-            var timestamp = new Timestamp { Seconds = 1704067200 }; // 2024-01-01 00:00:00 UTC
-            var authorPublicKey = ByteString.CopyFrom(_authorKey.ExportSubjectPublicKeyInfo());
-
-            var manifest1 = new Manifest
+            return new Manifest
             {
-                AuthorIdentityPublicKey = authorPublicKey,
-                TimestampUtc = timestamp,
+                AuthorIdentityPublicKey = ByteString.CopyFrom(_publicKeyBytes),
+                TimestampUtc = Timestamp.FromDateTime(DateTime.UtcNow),
                 Entries =
                 {
-                    new ManifestEntry { Path = "b.txt", Type = ManifestEntry.Types.ManifestEntryType.File, Size = 100, Hash = ByteString.CopyFrom(new byte[] { 2 }) },
-                    new ManifestEntry { Path = "a.txt", Type = ManifestEntry.Types.ManifestEntryType.File, Size = 200, Hash = ByteString.CopyFrom(new byte[] { 1 }) }
+                    new ManifestEntry { Path = "b.txt", Hash = ByteString.CopyFrom(new byte[] { 2 }) },
+                    new ManifestEntry { Path = "a.txt", Hash = ByteString.CopyFrom(new byte[] { 1 }) }
+                }
+            };
+        }
+
+        [Test]
+        public void Signature_Verification_Should_Succeed_For_Valid_Signature()
+        {
+            // Arrange
+            var manifest = CreateTestManifest();
+            var canonicalBytes = GetCanonicalBytes(manifest);
+
+            // Act
+            var signature = CryptoUtils.Sign(canonicalBytes, _privateKey);
+            var isValid = CryptoUtils.Verify(canonicalBytes, signature, _publicKey);
+
+            // Assert
+            isValid.Should().BeTrue();
+        }
+
+        [Test]
+        public void Signature_Verification_Should_Fail_For_Tampered_Data()
+        {
+            // Arrange
+            var manifest = CreateTestManifest();
+            var canonicalBytes = GetCanonicalBytes(manifest);
+            var signature = CryptoUtils.Sign(canonicalBytes, _privateKey);
+
+            // Act
+            var tamperedManifest = manifest.Clone();
+            tamperedManifest.Entries[0].Path = "c.txt";
+            var tamperedBytes = GetCanonicalBytes(tamperedManifest);
+            var isValid = CryptoUtils.Verify(tamperedBytes, signature, _publicKey);
+
+            // Assert
+            isValid.Should().BeFalse();
+        }
+
+        [Test]
+        public void Canonical_Serialization_Should_Be_Deterministic()
+        {
+            // Arrange
+            var manifest1 = new Manifest
+            {
+                Entries =
+                {
+                    new ManifestEntry { Path = "b.txt" },
+                    new ManifestEntry { Path = "a.txt" }
                 }
             };
 
             var manifest2 = new Manifest
             {
-                AuthorIdentityPublicKey = authorPublicKey,
-                TimestampUtc = timestamp,
                 Entries =
                 {
-                    new ManifestEntry { Path = "a.txt", Type = ManifestEntry.Types.ManifestEntryType.File, Size = 200, Hash = ByteString.CopyFrom(new byte[] { 1 }) },
-                    new ManifestEntry { Path = "b.txt", Type = ManifestEntry.Types.ManifestEntryType.File, Size = 100, Hash = ByteString.CopyFrom(new byte[] { 2 }) }
+                    new ManifestEntry { Path = "a.txt" },
+                    new ManifestEntry { Path = "b.txt" }
                 }
             };
 
-            var canonicalBytes1 = GetCanonicalBytes(manifest1);
-            var canonicalBytes2 = GetCanonicalBytes(manifest2);
+            // Act
+            var bytes1 = GetCanonicalBytes(manifest1);
+            var bytes2 = GetCanonicalBytes(manifest2);
 
-            canonicalBytes1.Should().BeEquivalentTo(canonicalBytes2);
-        }
-
-        [Test]
-        public void SignAndVerify_SuccessfulRoundtrip()
-        {
-            var manifest = new Manifest
-            {
-                AuthorIdentityPublicKey = ByteString.CopyFrom(_authorKey.ExportSubjectPublicKeyInfo()),
-                TimestampUtc = Timestamp.FromDateTime(DateTime.UtcNow),
-                Entries = { new ManifestEntry { Path = "file.txt", Type = ManifestEntry.Types.ManifestEntryType.File, Size = 123, Hash = ByteString.CopyFrom(SHA256.HashData(new byte[] { 1, 2, 3 })) } }
-            };
-
-            var signature = CryptoUtils.SignManifest(manifest, _authorKey);
-            var signedManifest = new SignedManifest { Version = 1, Manifest = manifest, Signature = signature };
-
-            var isValid = CryptoUtils.VerifyManifest(signedManifest);
-
-            isValid.Should().BeTrue();
-        }
-
-        [Test]
-        public void VerifyManifest_FailsWithTamperedContent()
-        {
-            var manifest = new Manifest
-            {
-                AuthorIdentityPublicKey = ByteString.CopyFrom(_authorKey.ExportSubjectPublicKeyInfo()),
-                TimestampUtc = Timestamp.FromDateTime(DateTime.UtcNow),
-                Entries = { new ManifestEntry { Path = "file.txt" } }
-            };
-
-            var signature = CryptoUtils.SignManifest(manifest, _authorKey);
-            var signedManifest = new SignedManifest { Version = 1, Manifest = manifest, Signature = signature };
-
-            // Tamper with the manifest after signing
-            signedManifest.Manifest.Entries[0].Path = "hacked.txt";
-
-            var isValid = CryptoUtils.VerifyManifest(signedManifest);
-
-            isValid.Should().BeFalse();
-        }
-
-        [Test]
-        public void VerifyManifest_FailsWithWrongKey()
-        {
-            var manifest = new Manifest
-            {
-                AuthorIdentityPublicKey = ByteString.CopyFrom(_authorKey.ExportSubjectPublicKeyInfo()),
-                TimestampUtc = Timestamp.FromDateTime(DateTime.UtcNow),
-                Entries = { new ManifestEntry { Path = "file.txt" } }
-            };
-
-            var signature = CryptoUtils.SignManifest(manifest, _authorKey);
-            var signedManifest = new SignedManifest { Version = 1, Manifest = manifest, Signature = signature };
-
-            // Replace author key with a different one
-            using var wrongKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
-            signedManifest.Manifest.AuthorIdentityPublicKey = ByteString.CopyFrom(wrongKey.ExportSubjectPublicKeyInfo());
-
-            var isValid = CryptoUtils.VerifyManifest(signedManifest);
-
-            isValid.Should().BeFalse();
-        }
-
-        [Test]
-        public void VerifyManifest_FailsWithMissingParts()
-        {
-            var manifest = new Manifest
-            {
-                AuthorIdentityPublicKey = ByteString.CopyFrom(_authorKey.ExportSubjectPublicKeyInfo()),
-                TimestampUtc = Timestamp.FromDateTime(DateTime.UtcNow)
-            };
-            var signature = CryptoUtils.SignManifest(manifest, _authorKey);
-
-            var missingManifest = new SignedManifest { Version = 1, Signature = signature };
-            var missingSignature = new SignedManifest { Version = 1, Manifest = manifest };
-
-            CryptoUtils.VerifyManifest(missingManifest).Should().BeFalse();
-            CryptoUtils.VerifyManifest(missingSignature).Should().BeFalse();
-        }
-
-        [Test]
-        public void VerifyManifest_FailsIfStale()
-        {
-            var manifest = new Manifest
-            {
-                AuthorIdentityPublicKey = ByteString.CopyFrom(_authorKey.ExportSubjectPublicKeyInfo()),
-                TimestampUtc = Timestamp.FromDateTime(DateTime.UtcNow.AddMinutes(-10))
-            };
-            var signature = CryptoUtils.SignManifest(manifest, _authorKey);
-            var signedManifest = new SignedManifest { Version = 1, Manifest = manifest, Signature = signature };
-
-            // Verification should fail because the manifest is older than the allowed 5 minutes.
-            CryptoUtils.VerifyManifest(signedManifest, TimeSpan.FromMinutes(5)).Should().BeFalse();
-        }
-
-        [Test]
-        public void VerifyManifest_SucceedsIfFresh()
-        {
-            var manifest = new Manifest
-            {
-                AuthorIdentityPublicKey = ByteString.CopyFrom(_authorKey.ExportSubjectPublicKeyInfo()),
-                TimestampUtc = Timestamp.FromDateTime(DateTime.UtcNow.AddMinutes(-1))
-            };
-            var signature = CryptoUtils.SignManifest(manifest, _authorKey);
-            var signedManifest = new SignedManifest { Version = 1, Manifest = manifest, Signature = signature };
-
-            // Verification should succeed because the manifest is newer than the allowed 5 minutes.
-            CryptoUtils.VerifyManifest(signedManifest, TimeSpan.FromMinutes(5)).Should().BeTrue();
+            // Assert
+            bytes1.Should().Equal(bytes2);
         }
     }
 }

@@ -2,8 +2,6 @@ using System;
 using System.Buffers.Binary;
 using System.Security.Cryptography;
 using System.Text;
-using Google.Protobuf;
-using Percolator.Cryptography.Protos;
 
 namespace Percolator.Cryptography
 {
@@ -92,45 +90,20 @@ namespace Percolator.Cryptography
             return plaintext;
         }
 
-        private static byte[] GetCanonicalBytes(Manifest manifest)
+        public static (ECDsa privateKey, ECDsa publicKey) GenerateNewKeys()
         {
-            var canonicalManifest = manifest.Clone();
-            // Sort the entries by path to ensure a deterministic byte representation for signing
-            var sortedEntries = canonicalManifest.Entries.OrderBy(e => e.Path, StringComparer.Ordinal).ToList();
-            canonicalManifest.Entries.Clear();
-            canonicalManifest.Entries.AddRange(sortedEntries);
-            return canonicalManifest.ToByteArray();
+            var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+            return (key, ECDsa.Create(key.ExportParameters(false)));
         }
 
-        public static ByteString SignManifest(Manifest manifest, ECDsa privateKey)
+        public static byte[] Sign(byte[] data, ECDsa privateKey)
         {
-            var canonicalBytes = GetCanonicalBytes(manifest);
-            var signature = privateKey.SignData(canonicalBytes, HashAlgorithmName.SHA256);
-            return ByteString.CopyFrom(signature);
+            return privateKey.SignData(data, HashAlgorithmName.SHA256);
         }
 
-        public static bool VerifyManifest(SignedManifest signedManifest, TimeSpan? maxAge = null)
+        public static bool Verify(byte[] data, byte[] signature, ECDsa publicKey)
         {
-            if (signedManifest.Manifest == null || !signedManifest.HasSignature || !signedManifest.Manifest.HasAuthorIdentityPublicKey)
-            {
-                return false;
-            }
-
-            if (maxAge.HasValue) 
-            {
-                if (signedManifest.Manifest.TimestampUtc == null) return false;
-                var timestamp = signedManifest.Manifest.TimestampUtc.ToDateTime();
-                if (timestamp < DateTime.UtcNow - maxAge.Value) 
-                {
-                    return false; // Timestamp is too old
-                }
-            }
-
-            using var verifier = ECDsa.Create();
-            verifier.ImportSubjectPublicKeyInfo(signedManifest.Manifest.AuthorIdentityPublicKey.ToByteArray(), out _);
-
-            var canonicalBytes = GetCanonicalBytes(signedManifest.Manifest);
-            return verifier.VerifyData(canonicalBytes, signedManifest.Signature.ToByteArray(), HashAlgorithmName.SHA256);
+            return publicKey.VerifyData(data, signature, HashAlgorithmName.SHA256);
         }
     }
 }

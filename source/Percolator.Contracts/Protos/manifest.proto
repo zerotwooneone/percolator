@@ -2,7 +2,7 @@ syntax = "proto3";
 
 import "google/protobuf/timestamp.proto";
 
-option csharp_namespace = "Percolator.Cryptography.Protos";
+option csharp_namespace = "Percolator.Contracts.Protos";
 
 message ManifestEntry {
   enum ManifestEntryType {
