@@ -1,150 +1,111 @@
-using Google.Protobuf;
-using MediatR;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Configuration;
-using System.Net;
 using Percolator.Application;
-using Percolator.Contracts.Protos;
 using Percolator.Network;
-using System.Security.Cryptography;
+using System.Net;
+using System.CommandLine;
+using Percolator.Node;
+using System.IO;
+using System.Security.Cryptography.X509Certificates;
 
-// 1. Configure the host and services
-var builder = WebApplication.CreateBuilder(args);
+// Set up command-line parsing
+var portOption = new Option<int>(
+    name: "--port",
+    description: "The port to listen on for gRPC services.",
+    getDefaultValue: () => 9000);
 
-// Add MediatR and scan the Application assembly for handlers
-builder.Services.AddMediatR(cfg => cfg.RegisterServicesFromAssemblyContaining<PeerDiscoveryHandler>());
+var rootCommand = new RootCommand("Percolator Node");
+rootCommand.AddOption(portOption);
 
-var grpcPort = builder.Configuration.GetValue<int>("port", 50051);
-
-builder.WebHost.ConfigureKestrel(options =>
+// The handler is passed the parsed value of the option.
+rootCommand.SetHandler(async (port) =>
 {
-    options.Listen(IPAddress.Any, grpcPort, listenOptions => listenOptions.Protocols = HttpProtocols.Http2);
-    options.Listen(IPAddress.Loopback, grpcPort, listenOptions => listenOptions.Protocols = HttpProtocols.Http2);
-});
+    // Use WebApplication.CreateBuilder for a combined app/web host.
+    // Pass an empty string array to avoid conflicts with System.CommandLine parsing.
+    var builder = WebApplication.CreateBuilder(new string[0]);
 
-builder.Services.AddGrpc();
+    // 1. Load or generate certificate and configure Kestrel with HTTPS
+    var appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+    var percolatorAppDataPath = Path.Combine(appDataPath, "Percolator");
+    var certPath = Path.Combine(percolatorAppDataPath, "node.pfx");
 
-// Register the handler implementation from the Application layer
-builder.Services.AddSingleton<IPeerDiscoveryHandler, PeerDiscoveryHandler>();
+    Directory.CreateDirectory(percolatorAppDataPath);
 
-// Register the domain service using a factory to inject its dependencies
-builder.Services.AddSingleton(provider =>
-{
-    var handler = provider.GetRequiredService<IPeerDiscoveryHandler>();
-    return new PeerDiscoveryService(grpcPort, handler);
-});
-
-builder.Services.AddSingleton<PeerConnectionManager>();
-builder.Services.AddSingleton<FileSharingService>();
-builder.Services.AddSingleton<ManifestStore>();
-builder.Services.AddSingleton<ManifestService>();
-
-var app = builder.Build();
-
-// 2. Configure the HTTP pipeline
-app.MapGrpcService<FileSharingService>();
-app.MapGet("/", () => "Percolator Node is running.");
-
-// 3. Manage service lifecycles and get required services for the console
-var lifetime = app.Services.GetRequiredService<IHostApplicationLifetime>();
-var discoveryService = app.Services.GetRequiredService<PeerDiscoveryService>();
-var connectionManager = app.Services.GetRequiredService<PeerConnectionManager>();
-var manifestService = app.Services.GetRequiredService<ManifestService>();
-var manifestStore = app.Services.GetRequiredService<ManifestStore>();
-
-lifetime.ApplicationStarted.Register(() =>
-{
-    Console.WriteLine("[Kestrel] Server is listening on the following addresses:");
-    foreach (var address in app.Urls)
+    X509Certificate2 selfSignedCert;
+    if (File.Exists(certPath))
     {
-        Console.WriteLine($"- {address}");
+        Console.WriteLine($"[Security] Loading existing certificate from: {certPath}");
+        var certBytes = File.ReadAllBytes(certPath);
+        selfSignedCert = X509CertificateLoader.LoadPkcs12(certBytes, password: null);
     }
-    // Start discovery only after the server is ready
-    discoveryService.StartAsync(CancellationToken.None).ContinueWith(t =>
+    else
     {
-        Console.WriteLine("[Discovery] Service failed to start.");
-    }, TaskContinuationOptions.OnlyOnFaulted);
-});
-
-lifetime.ApplicationStopping.Register(() =>
-{
-    discoveryService.Stop();
-});
-
-// NOTE: The event handler logic has been moved to MediatR notification handlers
-// in the Percolator.Application.Handlers namespace, achieving better separation of concerns.
-
-// 4. Run the application and the interactive console
-var appTask = app.RunAsync();
-Console.WriteLine("Node is running. Type 'peers' to see discovered peers or 'exit' to quit.");
-
-while (true)
-{
-    var input = Console.ReadLine()?.Trim();
-    if (string.IsNullOrEmpty(input)) continue;
-
-    var parts = input.Split(' ', 2);
-    var command = parts[0].ToLower();
-
-    switch (command)
-    {
-        case "exit":
-            goto EndOfLoop;
-
-        case "peers":
-            Console.WriteLine("Discovered peers:");
-            foreach (var peer in discoveryService.DiscoveredPeers)
-            {
-                Console.WriteLine($"- {peer.IpAddress}:{peer.GrpcEndpoint.Port}");
-            }
-            break;
-
-        case "manifest" when parts.Length > 1 && parts[1].StartsWith("create "):
-            var filePath = parts[1].Substring("create ".Length).Trim();
-            if (string.IsNullOrEmpty(filePath))
-            {
-                Console.WriteLine("Usage: manifest create <file_path>");
-                break;
-            }
-
-            try
-            {
-                var (hash, manifest) = manifestService.CreateManifestFromFile(filePath);
-                manifestStore.StoreManifest(hash, manifest);
-                Console.WriteLine($"Manifest created and stored with hash: {BitConverter.ToString(hash.ToByteArray()).Replace("-", "").Substring(0, 12)}...");
-
-                // Announce to all known peers
-                var announcement = new AnnounceManifestRequest { ManifestHash = hash };
-                foreach (var peer in discoveryService.DiscoveredPeers)
-                {
-                    try
-                    {
-                        var client = connectionManager.GetClient(peer);
-                        await client.AnnounceManifestAsync(announcement);
-                        Console.WriteLine($"Announced manifest to {peer.IpAddress}:{peer.GrpcEndpoint.Port}");
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"Failed to announce to peer {peer.IpAddress}: {ex.Message}");
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error creating manifest: {ex.Message}");
-            }
-            break;
-
-        default:
-            Console.WriteLine($"Unknown command: {input}");
-            break;
+        Console.WriteLine("[Security] No existing certificate found. Generating a new one.");
+        selfSignedCert = CertificateGenerator.CreateSelfSignedCertificate();
+        Console.WriteLine($"[Security] Saving new certificate to: {certPath}");
+        var certBytes = selfSignedCert.Export(X509ContentType.Pfx);
+        File.WriteAllBytes(certPath, certBytes);
     }
-}
 
-EndOfLoop:
-await app.StopAsync();
-await appTask;
+    Console.WriteLine($"[Security] Using certificate with thumbprint: {selfSignedCert.Thumbprint}");
+
+    builder.WebHost.ConfigureKestrel(options =>
+    {
+        options.Listen(IPAddress.Any, port, listenOptions =>
+        {
+            listenOptions.Protocols = HttpProtocols.Http2;
+            listenOptions.UseHttps(selfSignedCert);
+        });
+        options.Listen(IPAddress.Loopback, port, listenOptions =>
+        {
+            listenOptions.Protocols = HttpProtocols.Http2;
+            listenOptions.UseHttps(selfSignedCert);
+        });
+    });
+
+    // 2. Configure services for Dependency Injection
+    builder.Services.AddMediatR(cfg =>
+    {
+        cfg.RegisterServicesFromAssemblyContaining<PeerDiscoveryHandler>();
+    });
+
+    builder.Services.AddSingleton<IPeerDiscoveryHandler, PeerDiscoveryHandler>();
+    builder.Services.AddSingleton<PeerConnectionManager>();
+    builder.Services.AddSingleton(sp => new PeerDiscoveryService(
+        port,
+        selfSignedCert.Thumbprint,
+        sp.GetRequiredService<IPeerDiscoveryHandler>()
+    ));
+    builder.Services.AddSingleton<ManifestStore>();
+    builder.Services.AddSingleton<ManifestService>();
+
+    builder.Services.AddGrpc();
+    builder.Services.AddSingleton<FileSharingService>();
+
+    // 3. Build the application
+    var app = builder.Build();
+
+    // 4. Configure the HTTP request pipeline
+    app.MapGrpcService<FileSharingService>();
+    app.MapGet("/", () => "Communication with gRPC endpoints must be made through a gRPC client. Secure connection established.");
+
+    // 5. Configure application lifecycle hooks
+    var discoveryService = app.Services.GetRequiredService<PeerDiscoveryService>();
+    var appLifetime = app.Services.GetRequiredService<IHostApplicationLifetime>();
+    appLifetime.ApplicationStarted.Register(() =>
+    {
+        // Start the service in a non-blocking way and pass the application stopping token
+        _ = discoveryService.StartAsync(appLifetime.ApplicationStopping);
+    });
+    appLifetime.ApplicationStopping.Register(() => discoveryService.Stop());
+
+    // 6. Run the application
+    await app.RunAsync();
+
+}, portOption);
+
+// Invoke the command handler with the process arguments
+await rootCommand.InvokeAsync(args);

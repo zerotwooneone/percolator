@@ -7,37 +7,38 @@ namespace Percolator.Network
     {
         public IPAddress IpAddress { get; }
         public int GrpcPort { get; }
+        public string Thumbprint { get; }
         public DateTime LastSeenUtc { get; set; }
 
-        public Peer(IPAddress ipAddress, int grpcPort)
+        public Peer(IPAddress ipAddress, int grpcPort, string thumbprint)
         {
             IpAddress = ipAddress;
             GrpcPort = grpcPort;
+            Thumbprint = thumbprint;
             LastSeenUtc = DateTime.UtcNow;
         }
 
         public IPEndPoint GrpcEndpoint => new(IpAddress, GrpcPort);
 
+        public override string ToString()
+        {
+            return GrpcEndpoint.ToString();
+        }
+
+        public override int GetHashCode()
+        {
+            return HashCode.Combine(IpAddress, GrpcPort, Thumbprint);
+        }
+
         public bool Equals(Peer? other)
         {
             if (other is null) return false;
-            if (ReferenceEquals(this, other)) return true;
-            return GrpcEndpoint.Equals(other.GrpcEndpoint);
+            return IpAddress.Equals(other.IpAddress) && GrpcPort == other.GrpcPort && Thumbprint == other.Thumbprint;
         }
 
         public override bool Equals(object? obj)
         {
             return obj is Peer other && Equals(other);
-        }
-
-        public override int GetHashCode()
-        {
-            return GrpcEndpoint.GetHashCode();
-        }
-
-        public override string ToString()
-        {
-            return GrpcEndpoint.ToString();
         }
 
         public static bool operator ==(Peer? left, Peer? right)

@@ -22,15 +22,17 @@ namespace Percolator.Network
         private readonly UdpClient _udpClient;
         private readonly int _grpcPort;
         private readonly IPAddress _localIpAddress;
+        private readonly string _thumbprint;
         private readonly ConcurrentDictionary<IPEndPoint, Peer> _peers = new();
         private readonly IPeerDiscoveryHandler _handler;
         private CancellationTokenSource? _cancellationTokenSource;
 
         public IReadOnlyCollection<Peer> DiscoveredPeers => _peers.Values.ToList().AsReadOnly();
 
-        public PeerDiscoveryService(int grpcPort, IPeerDiscoveryHandler handler)
+        public PeerDiscoveryService(int grpcPort, string thumbprint, IPeerDiscoveryHandler handler)
         {
             _grpcPort = grpcPort;
+            _thumbprint = thumbprint;
             _handler = handler;
             _localIpAddress = GetPrimaryLocalIpAddress();
             _udpClient = new UdpClient();
@@ -66,7 +68,7 @@ namespace Percolator.Network
         {
             while (!token.IsCancellationRequested)
             {
-                var message = $"PERCOLATOR_DISCOVERY:{_localIpAddress}:{_grpcPort}";
+                var message = $"PERCOLATOR_DISCOVERY:{_localIpAddress}:{_grpcPort}:{_thumbprint}";
                 var data = Encoding.UTF8.GetBytes(message);
                 await _udpClient.SendAsync(data, new IPEndPoint(IPAddress.Broadcast, BroadcastPort), token);
                 await Task.Delay(TimeSpan.FromSeconds(5), token);
@@ -83,10 +85,11 @@ namespace Percolator.Network
                     var message = Encoding.UTF8.GetString(result.Buffer);
                     var parts = message.Split(':');
 
-                    if (parts.Length == 3 && parts[0] == "PERCOLATOR_DISCOVERY")
+                    if (parts.Length == 4 && parts[0] == "PERCOLATOR_DISCOVERY")
                     {
                         if (IPAddress.TryParse(parts[1], out var discoveredIp) && int.TryParse(parts[2], out var discoveredPort))
                         {
+                            var discoveredThumbprint = parts[3];
                             // Ignore our own broadcast
                             if (discoveredIp.Equals(_localIpAddress) && discoveredPort == _grpcPort)
                             {
@@ -99,7 +102,7 @@ namespace Percolator.Network
                                 // Factory for adding a new peer
                                 (key) =>
                                 {
-                                    var newPeer = new Peer(discoveredIp, discoveredPort);
+                                    var newPeer = new Peer(discoveredIp, discoveredPort, discoveredThumbprint);
                                     _ = _handler.HandlePeerDiscoveredAsync(newPeer);
                                     return newPeer;
                                 },
