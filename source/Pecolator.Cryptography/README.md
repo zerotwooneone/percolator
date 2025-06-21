@@ -34,6 +34,28 @@ The security of the chat application is built upon several key cryptographic con
     -   **HMAC-SHA256**: For authenticating messages and deriving keys.
     -   **Curve25519 (or similar)**: For Elliptic Curve Diffie-Hellman (ECDH) key exchanges.
 
+## Features
+
+*   **X3DH (Extended Triple Diffie-Hellman) Protocol**: Securely establishes a shared secret key between two parties, even if the responder is offline. It provides authenticity through digital signatures (`ECDSA`).
+*   **Double Ratchet Algorithm**: Provides ongoing secure communication with forward secrecy and post-compromise security.
+*   **Authenticated Encryption**: Uses `AES-256-GCM` to ensure all messages are confidential, tamper-proof, and authentic.
+*   **Resilience**: Handles out-of-order message delivery through a key caching mechanism.
+
+## Key Classes
+
+*   `X3DHManager`: Implements the X3DH handshake to establish an initial shared secret.
+*   `DoubleRatchetSession`: Manages the ongoing stateful session, handling encryption and decryption of messages.
+*   `PreKeyBundle`: A data structure representing a user's public keys needed for the X3DH handshake.
+*   `RatchetMessage`: A data structure for transporting the ciphertext and the sender's ephemeral public key.
+
+## Guidance for AI Assistants
+
+*   **Two-Stage Protocol**: Understand that this is a two-part system. `X3DHManager` is used **once** at the beginning of a conversation to create a shared secret. This secret is then fed into the `DoubleRatchetSession` constructor to manage the ongoing conversation.
+*   **Key Management**: The security of X3DH relies on a long-term identity key. This library assumes the key is provided; a real application must store this key securely on the client device.
+*   **Server Role**: The X3DH protocol assumes a server exists to store and distribute public `PreKeyBundle`s. This server enables asynchronous communication but is not trusted; authenticity is guaranteed by the `ECDSA` signature in the bundle, which this library verifies.
+*   **Encryption**: Encryption is handled by `AES-GCM`. Decryption of a tampered message will throw an `AuthenticationTagMismatchException`, which is caught and re-thrown as a custom exception. Any code calling `Decrypt` must handle this.
+*   **Stateful Sessions**: `DoubleRatchetSession` is highly stateful. Do not reuse session objects for different conversations.
+
 ## Assumptions
 
 The design and implementation of this library operate on the following assumptions:

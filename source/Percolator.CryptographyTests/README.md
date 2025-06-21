@@ -1,21 +1,27 @@
 # Percolator.CryptographyTests
 
-This project contains the unit tests for the `Percolator.Cryptography` domain library. The primary goal is to ensure the correctness, security, and robustness of the cryptographic logic in complete isolation from the rest of the application.
+This project contains the complete unit test suite for the `Percolator.Cryptography` library. The primary goal is to ensure the cryptographic implementation is correct, secure, and robust.
 
 ## Testing Philosophy
 
-Our testing strategy for the cryptography domain is guided by the following principles:
+*   **Test-Driven Development (TDD)**: The library was built following TDD principles. Every feature in the main library has corresponding tests in this project.
+*   **Security-First**: Tests cover not only the "happy path" but also critical security failure modes, such as attempts to use tampered messages or invalid signatures.
+*   **Clarity**: Tests are written to be readable and to serve as documentation for the library's expected behavior. `FluentAssertions` is used for its expressive syntax.
 
-1.  **Domain Purity**: Tests must verify the domain logic in isolation. There should be absolutely no dependencies on external infrastructure like networks, file systems, or databases.
-2.  **Deterministic Tests**: All tests must be 100% deterministic. Any sources of randomness (e.g., for key generation or nonces) must be mocked or controlled to ensure that tests produce the same output every single time.
-3.  **Clarity and Readability**: Tests should be highly readable and serve as living documentation for the cryptographic protocols. We use a combination of clear naming conventions and expressive assertions to achieve this.
-4.  **Correctness over Performance**: While performance is important, the primary focus of these tests is to rigorously verify the correctness of the cryptographic implementations.
+## Key Test Scenarios
 
-## Testing Frameworks & Libraries
+*   **`X3DHManagerTests`**:
+    *   Verifies that a full, successful handshake results in both parties deriving the exact same shared secret.
+    *   Ensures that a handshake attempt with an invalid `ECDSA` signature is rejected with a `CryptographicException`.
+*   **`DoubleRatchetSessionTests`**:
+    *   Confirms a full encrypt-decrypt cycle.
+    *   Verifies that both the symmetric (chain key) and asymmetric (Diffie-Hellman) ratchets advance correctly.
+    *   Ensures that decrypting a tampered message is rejected with an exception wrapping an `AuthenticationTagMismatchException`.
+    *   Proves that the session can correctly handle messages arriving out of order by using its key cache.
 
-We use a combination of industry-standard libraries to write effective and maintainable tests:
+## Guidance for AI Assistants
 
--   **NUnit**: The core test framework used to define, structure, and run our tests.
--   **Moq**: A powerful and flexible mocking library used to create test doubles and isolate the code under test from its dependencies.
--   **FluentAssertions**: Provides a set of extension methods that allow for writing more readable and natural-language-like assertions.
--   **AutoFixture**: Used to automate the generation of test data and objects, reducing boilerplate setup code and making tests easier to write and maintain.
+*   **Mandatory Testing**: Any new feature or bug fix in the `Percolator.Cryptography` library **must** be accompanied by a new or updated test in this project.
+*   **Internal Access**: The test project uses `<InternalsVisibleTo>` in the `Percolator.Cryptography.csproj` file to access internal members of the main library (like `SendingChainKey`). This is intentional and necessary for verifying the internal state of the ratchet during tests.
+*   **Test Structure**: Follow the existing Arrange-Act-Assert pattern. Create separate test methods for distinct behaviors.
+*   **Cryptographic Helpers**: The test suite contains helper methods (e.g., `CreateKeyPair`) to reduce boilerplate when setting up cryptographic objects for tests. Use them.
