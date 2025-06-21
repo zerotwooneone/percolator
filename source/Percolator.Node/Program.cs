@@ -12,6 +12,10 @@ using System.CommandLine;
 using System.IO;
 using System.Net;
 using System.Security.Cryptography.X509Certificates;
+using Grpc.Net.Client;
+using Percolator.Contracts.Protos;
+using Google.Protobuf;
+using Grpc.Core;
 
 // --- CONSTANTS ---
 
@@ -20,35 +24,50 @@ using System.Security.Cryptography.X509Certificates;
 // system, such as DPAPI on Windows or the system keychain.
 const string PfxPassword = "insecure-temporary-password";
 
-// 1. DEFINE COMMAND-LINE INTERFACE
-var portOption = new Option<int>(
-    name: "--port",
-    description: "The port to listen on for gRPC services.",
-    getDefaultValue: () => 9000);
+// --- ENTRYPOINT & COMMAND SETUP ---
 
-var filePathArgument = new Argument<FileInfo>(
-    name: "file-path",
-    description: "The full path to the file.");
+return await Main(args);
 
-var addFileCommand = new Command("add-file", "Create a manifest for a file and share it.")
+async Task<int> Main(string[] args)
 {
-    filePathArgument
-};
+    // 1. DEFINE COMMAND-LINE INTERFACE
+    var portOption = new Option<int>("--port", () => 9000, "Port to run the gRPC server on");
+    var filePathArgument = new Argument<FileInfo>("file-path", "The path to the file or directory.");
+    var addFileCommand = new Command("add-file", "Creates and stores a manifest for a given file or directory.");
+    addFileCommand.AddArgument(filePathArgument);
+    var rootCommand = new RootCommand("Percolator Node");
+    rootCommand.AddOption(portOption);
+    rootCommand.AddCommand(addFileCommand);
 
-var rootCommand = new RootCommand("Percolator Node")
-{
-    portOption,
-    addFileCommand
-};
+    // Add a temporary command to test requesting manifests
+    var requestManifestCommand = new Command("request-manifest", "Requests a manifest or sub-manifest from a peer.");
+    var manifestHashArgument = new Argument<string>("manifest-hash", "The Base64 hash of the root manifest.");
+    var subPathArgument = new Argument<string>("sub-path", "The relative sub-path to request a manifest for.");
+    var peerPortOption = new Option<int>("--port", () => 9000, "The port of the peer to connect to.");
+    requestManifestCommand.AddArgument(manifestHashArgument);
+    requestManifestCommand.AddArgument(subPathArgument);
+    requestManifestCommand.AddOption(peerPortOption);
+    rootCommand.AddCommand(requestManifestCommand);
 
-// 2. SET UP COMMAND HANDLERS
-rootCommand.SetHandler(RunNodeAsync, portOption);
-addFileCommand.SetHandler(AddFile, filePathArgument);
+    // --- HANDLER SETUP ---
+    rootCommand.SetHandler(async (port) =>
+    {
+        await RunNodeAsync(port);
+    }, portOption);
 
-// 3. INVOKE THE APPROPRIATE HANDLER
-return await rootCommand.InvokeAsync(args);
+    addFileCommand.SetHandler((fileInfo) =>
+    {
+        using var host = CreateCliHost();
+        AddFile(fileInfo, host);
+    }, filePathArgument);
 
-// --- HANDLER IMPLEMENTATIONS ---
+    requestManifestCommand.SetHandler(RequestManifest, manifestHashArgument, subPathArgument, peerPortOption);
+
+    // --- RUN THE APP ---
+    return await rootCommand.InvokeAsync(args);
+}
+
+// --- COMMAND HANDLERS ---
 
 async Task RunNodeAsync(int port)
 {
@@ -61,15 +80,11 @@ async Task RunNodeAsync(int port)
 
     builder.WebHost.ConfigureKestrel(options =>
     {
+        // For local testing, we allow insecure HTTP/2. 
+        // In a production environment, you would want to enforce HTTPS.
         options.Listen(IPAddress.Any, port, listenOptions =>
         {
             listenOptions.Protocols = HttpProtocols.Http2;
-            listenOptions.UseHttps(selfSignedCert);
-        });
-        options.Listen(IPAddress.Loopback, port, listenOptions =>
-        {
-            listenOptions.Protocols = HttpProtocols.Http2;
-            listenOptions.UseHttps(selfSignedCert);
         });
     });
 
@@ -108,24 +123,55 @@ async Task RunNodeAsync(int port)
     await app.RunAsync();
 }
 
-void AddFile(FileInfo fileInfo)
+static void AddFile(FileInfo fileInfo, IHost host)
 {
-    if (!fileInfo.Exists)
+    // The FileInfo.Exists property returns false for directories.
+    // We must check for both file and directory existence explicitly.
+    if (!File.Exists(fileInfo.FullName) && !Directory.Exists(fileInfo.FullName))
     {
-        Console.WriteLine($"Error: File not found at '{fileInfo.FullName}'");
+        Console.WriteLine($"Error: File or directory not found at '{fileInfo.FullName}'");
         return;
     }
 
-    // Use a minimal host for DI to access required services for this one-shot command
-    using var host = CreateCliHost();
     var manifestService = host.Services.GetRequiredService<ManifestService>();
     var manifestStore = host.Services.GetRequiredService<ManifestStore>();
 
     var absolutePath = Path.GetFullPath(fileInfo.FullName);
     Console.WriteLine($"Creating manifest for {absolutePath}...");
     var (hash, manifest) = manifestService.CreateManifestFromFile(absolutePath);
-    manifestStore.StoreManifest(hash, manifest);
+    manifestStore.StoreManifest(hash, manifest, absolutePath);
     Console.WriteLine($"Successfully created and stored manifest with hash: {hash.ToBase64()}");
+}
+
+static async Task RequestManifest(string manifestHash, string subPath, int port)
+{
+    Console.WriteLine($"Requesting sub-manifest for path '{subPath}' from manifest '{manifestHash}' on port {port}...");
+    var channel = GrpcChannel.ForAddress($"http://127.0.0.1:{port}");
+    var client = new FileSharing.FileSharingClient(channel);
+
+    var request = new RequestManifestRequest
+    {
+        ManifestHash = ByteString.FromBase64(manifestHash.Replace('_', '/')), // Handle filename-safe base64
+        SubPath = subPath
+    };
+
+    try
+    {
+        var response = await client.RequestManifestAsync(request);
+        if (response.SignedManifest != null)
+        {
+            Console.WriteLine("Successfully received manifest:");
+            Console.WriteLine(response.SignedManifest.ToString());
+        }
+        else
+        {
+            Console.WriteLine("Failed to retrieve manifest. The peer may not have it or the sub-path may be invalid.");
+        }
+    }
+    catch (RpcException ex)
+    {
+        Console.WriteLine($"gRPC Error: {ex.StatusCode} - {ex.Status.Detail}");
+    }
 }
 
 // --- HELPER METHODS ---

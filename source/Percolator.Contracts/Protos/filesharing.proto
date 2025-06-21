@@ -33,6 +33,8 @@ message AnnounceManifestResponse {
 message RequestManifestRequest {
     // The hash of the manifest being requested.
     optional bytes manifest_hash = 1;
+    // If specified, requests a manifest for a subdirectory within the root manifest.
+    optional string sub_path = 2;
 }
 
 message RequestManifestResponse {

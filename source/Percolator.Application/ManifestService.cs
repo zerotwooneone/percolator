@@ -6,6 +6,7 @@ using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Percolator.Contracts.Protos;
 using Percolator.Identity;
+using System.Collections.Generic;
 
 namespace Percolator.Application;
 
@@ -18,30 +19,26 @@ public class ManifestService
         _identityService = identityService;
     }
 
-    public (ByteString ManifestHash, SignedManifest Manifest) CreateManifestFromFile(string filePath)
+    public (ByteString ManifestHash, SignedManifest Manifest) CreateManifestFromFile(string topLevelPath)
     {
-        if (!File.Exists(filePath))
+        if (!File.Exists(topLevelPath) && !Directory.Exists(topLevelPath))
         {
-            throw new FileNotFoundException("The specified file does not exist.", filePath);
+            throw new FileNotFoundException("The specified file or directory does not exist.", topLevelPath);
         }
 
         // 1. Get the user's identity certificate
         var identityCert = _identityService.GetDefaultIdentityCertificate();
         using var rsaPrivateKey = identityCert.GetRSAPrivateKey() ?? throw new InvalidOperationException("Identity certificate must have an exportable RSA private key.");
 
-        // 2. Create the file entry
-        var fileInfo = new FileInfo(filePath);
-        using var sha256 = SHA256.Create();
-        using var fileStream = File.OpenRead(filePath);
-        var fileHash = sha256.ComputeHash(fileStream);
+        // 2. Create the list of manifest entries by recursively walking the path
+        var entries = new List<ManifestEntry>();
+        var topLevelAttributes = File.GetAttributes(topLevelPath);
+        // The base path for calculating relative paths is the directory containing the top-level item.
+        string basePath = topLevelAttributes.HasFlag(FileAttributes.Directory)
+            ? topLevelPath
+            : Path.GetDirectoryName(topLevelPath) ?? string.Empty;
 
-        var manifestEntry = new ManifestEntry
-        {
-            Path = fileInfo.Name,
-            Type = ManifestEntry.Types.ManifestEntryType.File,
-            Size = fileInfo.Length,
-            Hash = ByteString.CopyFrom(fileHash)
-        };
+        CreateEntriesRecursive(topLevelPath, basePath, entries);
 
         // 3. Create the inner manifest, embedding the public certificate
         var manifest = new Manifest
@@ -49,7 +46,7 @@ public class ManifestService
             SignerCertificateDer = ByteString.CopyFrom(identityCert.Export(X509ContentType.Cert)),
             TimestampUtc = Timestamp.FromDateTime(DateTime.UtcNow),
         };
-        manifest.Entries.Add(manifestEntry);
+        manifest.Entries.AddRange(entries);
 
         // 4. Sign the inner manifest
         var manifestBytes = manifest.ToByteArray();
@@ -63,9 +60,50 @@ public class ManifestService
         };
 
         // 5. The hash for announcement is the hash of the inner manifest object itself.
+        using var sha256 = SHA256.Create();
         var manifestHash = ByteString.CopyFrom(sha256.ComputeHash(manifestBytes));
 
         return (manifestHash, signedManifest);
+    }
+
+    private void CreateEntriesRecursive(string currentPath, string basePath, List<ManifestEntry> entries)
+    {
+        var attributes = File.GetAttributes(currentPath);
+        string relativePath = Path.GetRelativePath(basePath, currentPath);
+
+        if (attributes.HasFlag(FileAttributes.Directory))
+        {
+            entries.Add(new ManifestEntry
+            {
+                Path = relativePath,
+                Type = ManifestEntry.Types.ManifestEntryType.Directory,
+            });
+
+            // Recurse for children
+            foreach (var directory in Directory.GetDirectories(currentPath))
+            {
+                CreateEntriesRecursive(directory, basePath, entries);
+            }
+            foreach (var file in Directory.GetFiles(currentPath))
+            {
+                CreateEntriesRecursive(file, basePath, entries);
+            }
+        }
+        else // It's a file
+        {
+            var fileInfo = new FileInfo(currentPath);
+            using var sha256 = SHA256.Create();
+            using var fileStream = File.OpenRead(currentPath);
+            var fileHash = sha256.ComputeHash(fileStream);
+
+            entries.Add(new ManifestEntry
+            {
+                Path = relativePath,
+                Type = ManifestEntry.Types.ManifestEntryType.File,
+                Size = fileInfo.Length,
+                Hash = ByteString.CopyFrom(fileHash)
+            });
+        }
     }
 
     public bool VerifyManifest(SignedManifest signedManifest)
