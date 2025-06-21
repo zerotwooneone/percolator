@@ -39,18 +39,18 @@ using var aliceIdentity = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
 using var bobIdentity = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
 using var bobRatchetKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
 
-// Alice (initiator) creates a session with Bob using his public identity and public ratchet key.
-using var aliceToBobSession = new DoubleRatchetSession(
+// Alice (initiator) creates a session with Bob.
+using var aliceToBobSession = DoubleRatchetSession.CreateInitiatorSession(
     aliceIdentity,
-    bobIdentity.PublicKey.ExportSubjectPublicKeyInfo(),
-    bobRatchetKey.PublicKey.ExportSubjectPublicKeyInfo()
+    bobIdentity,
+    bobRatchetKey
 );
 
-// Bob (responder) creates his side of the session using his private ratchet key.
-using var bobToAliceSession = new DoubleRatchetSession(
+// Bob (responder) creates his side of the session.
+using var bobToAliceSession = DoubleRatchetSession.CreateResponderSession(
     bobIdentity,
     bobRatchetKey, // Bob provides his private ratchet key
-    aliceIdentity.PublicKey.ExportSubjectPublicKeyInfo()
+    aliceIdentity
 );
 
 // Alice can now encrypt a message for Bob.
@@ -112,24 +112,38 @@ catch (CryptographicException)
 
 ### 3. Session Persistence
 
-To support long-running, asynchronous conversations, sessions can be serialized. A `masterKey` is required to encrypt the session state at rest.
+To support long-running, asynchronous conversations, sessions can be serialized. The library provides a state object that can be serialized to JSON (or any other format).
+**IMPORTANT**: The user is responsible for encrypting the serialized state at rest.
 
 ```csharp
-// A 256-bit master key, which should be securely stored (e.g., in a secure enclave or keychain).
-var masterKey = RandomNumberGenerator.GetBytes(32);
+using System.Text.Json;
+using System.Security.Cryptography;
 
 // --- DoubleRatchetSession Persistence ---
-// Alice saves her session state.
-var aliceStateBytes = aliceToBobSession.SaveState(masterKey);
+// Alice gets her session state.
+var aliceState = aliceToBobSession.GetState();
+
+// She can serialize it to JSON.
+var aliceStateJson = JsonSerializer.Serialize(aliceState);
+
+// TODO: Encrypt aliceStateJson before storing it securely.
 
 // Later, she can restore it.
+// TODO: Decrypt the state JSON before deserializing.
+var loadedAliceState = JsonSerializer.Deserialize<DoubleRatchetSession.DoubleRatchetSessionState>(aliceStateJson)!;
 // Note: The long-term identity key is NOT serialized and must be provided again.
-var loadedAliceSession = DoubleRatchetSession.LoadState(aliceStateBytes, masterKey, aliceIdentity);
+var loadedAliceSession = new DoubleRatchetSession(loadedAliceState, aliceIdentity);
 
 
-// --- SenderKeySession Persistence ---
-// Alice saves her group session state.
-var groupStateBytes = aliceManager.GroupSession.SaveState(masterKey);
+// --- GroupManager Persistence ---
+// Alice gets her group manager state.
+var groupState = aliceManager.GetState();
+
+// She can serialize it.
+var groupStateJson = JsonSerializer.Serialize(groupState);
+
+// TODO: Encrypt groupStateJson before storing it securely.
 
 // Later, she can restore it.
-var loadedGroupSession = SenderKeySession.LoadState(groupStateBytes, masterKey);
+var loadedGroupState = JsonSerializer.Deserialize<GroupManager.GroupManagerState>(groupStateJson)!;
+var loadedGroupManager = new GroupManager(loadedGroupState);
