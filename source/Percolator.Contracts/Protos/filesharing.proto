@@ -19,11 +19,15 @@ service FileSharing {
 message AnnounceManifestRequest {
     // The SHA256 hash of the manifest content, used as a unique identifier.
     optional bytes manifest_hash = 1;
+    // The full signed manifest object.
+    optional SignedManifest signed_manifest = 2;
 }
 
 message AnnounceManifestResponse {
-    // Acknowledge the announcement.
-    optional bool ack = 1;
+    // Whether the manifest was accepted.
+    optional bool success = 1;
+    // An optional message, e.g., an error reason.
+    optional string message = 2;
 }
 
 message RequestManifestRequest {

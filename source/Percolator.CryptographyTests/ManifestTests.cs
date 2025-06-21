@@ -44,7 +44,7 @@ namespace Percolator.CryptographyTests
         {
             return new Manifest
             {
-                AuthorIdentityPublicKey = ByteString.CopyFrom(_publicKeyBytes),
+                SignerCertificateDer = ByteString.CopyFrom(_publicKeyBytes),
                 TimestampUtc = Timestamp.FromDateTime(DateTime.UtcNow),
                 Entries =
                 {

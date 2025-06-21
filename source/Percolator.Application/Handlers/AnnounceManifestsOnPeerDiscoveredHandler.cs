@@ -27,8 +27,19 @@ namespace Percolator.Application.Handlers
             {
                 try
                 {
+                    var signedManifest = _manifestStore.GetManifest(manifestHash);
+                    if (signedManifest is null)
+                    {
+                        Console.WriteLine($"[Announcer] Could not find manifest for hash {manifestHash.ToBase64()} to announce. Skipping.");
+                        continue;
+                    }
+
                     var client = _connectionManager.GetClient(peer);
-                    var request = new Contracts.Protos.AnnounceManifestRequest { ManifestHash = manifestHash };
+                    var request = new Contracts.Protos.AnnounceManifestRequest
+                    {
+                        ManifestHash = manifestHash,
+                        SignedManifest = signedManifest
+                    };
                     await client.AnnounceManifestAsync(request, cancellationToken: cancellationToken);
                     Console.WriteLine($"Announced existing manifest to new peer {peer.IpAddress}");
                 }

@@ -17,7 +17,7 @@ message ManifestEntry {
 }
 
 message Manifest {
-  optional bytes author_identity_public_key = 1;
+  optional bytes signer_certificate_der = 1; // The DER-encoded public certificate of the signer
   optional google.protobuf.Timestamp timestamp_utc = 2;
   repeated ManifestEntry entries = 3;
 }

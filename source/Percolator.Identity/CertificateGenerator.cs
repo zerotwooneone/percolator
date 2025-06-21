@@ -2,7 +2,7 @@ using System.Net;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 
-namespace Percolator.Application;
+namespace Percolator.Identity;
 
 public static class CertificateGenerator
 {
