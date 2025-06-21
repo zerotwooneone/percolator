@@ -4,12 +4,8 @@ namespace Percolator.Cryptography;
 
 internal class GroupControlMessage
 {
-    [JsonInclude]
+    public string? OldGroupId { get; set; }
     public byte[] SessionKey { get; set; } = null!;
-
-    [JsonInclude]
     public string GroupId { get; set; } = null!;
-
-    [JsonInclude]
-    public byte[] Signature { get; set; } = null!;
+    public byte[]? Signature { get; set; }
 }

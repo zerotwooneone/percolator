@@ -113,6 +113,7 @@ namespace Percolator.Cryptography
                 throw new InvalidOperationException("Member not found.");
             }
 
+            var oldGroupId = GroupId;
             // Critical: Create a new group session with a new key and ID.
             GroupId = Guid.NewGuid().ToString();
             var groupContext = Encoding.UTF8.GetBytes(GroupId);
@@ -122,6 +123,7 @@ namespace Percolator.Cryptography
             var rekeyMessages = new Dictionary<string, RatchetMessage>();
             var controlMessage = new GroupControlMessage
             {
+                OldGroupId = oldGroupId,
                 SessionKey = GroupSession.SessionKey,
                 GroupId = this.GroupId
             };
@@ -144,7 +146,16 @@ namespace Percolator.Cryptography
             var payload = sessionToCreator.Decrypt(invitationMessage);
             var controlMessage = JsonSerializer.Deserialize<GroupControlMessage>(payload)!;
 
+            if (controlMessage.OldGroupId is not null)
+            {
+                throw new CryptographicException("Invalid invitation message: must not have OldGroupId.");
+            }
+
             var signature = controlMessage.Signature;
+            if (signature is null)
+            {
+                throw new CryptographicException("Invitation is not signed.");
+            }
             controlMessage.Signature = null!; // Verify the message as it was signed
             var messageToVerify = JsonSerializer.SerializeToUtf8Bytes(controlMessage, new JsonSerializerOptions { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull });
 
@@ -167,7 +178,16 @@ namespace Percolator.Cryptography
             var payload = sessionToCreator.Decrypt(rekeyMessage);
             var controlMessage = JsonSerializer.Deserialize<GroupControlMessage>(payload)!;
 
+            if (controlMessage.OldGroupId != GroupId)
+            {
+                throw new CryptographicException("Re-key message is for a different group.");
+            }
+
             var signature = controlMessage.Signature;
+            if (signature is null)
+            {
+                throw new CryptographicException("Re-key message is not signed.");
+            }
             controlMessage.Signature = null!;
             var messageToVerify = JsonSerializer.SerializeToUtf8Bytes(controlMessage, new JsonSerializerOptions { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull });
 
@@ -194,13 +214,5 @@ namespace Percolator.Cryptography
             }
             GC.SuppressFinalize(this);
         }
-    }
-
-    internal class GroupManagerState
-    {
-        public byte[] SigningKeyPrivate { get; set; } = null!;
-        public string GroupId { get; set; } = null!;
-        public byte[] GroupSessionState { get; set; } = null!;
-        public Dictionary<string, byte[]> MemberSessionStates { get; set; } = new();
     }
 }

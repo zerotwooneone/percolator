@@ -121,7 +121,7 @@ namespace Percolator.Cryptography.Tests
 
             // Act & Assert
             var sessionFromAlice = DoubleRatchetSession.CreateResponderSession(_aliceIdentity, _aliceRatchet, _creatorIdentity);
-            Action act = () => GroupManager.AcceptInvitation(sessionFromAlice, tamperedInvitation, creatorManager.SigningPublicKey!, _creatorIdentity);
+            Action act = () => GroupManager.AcceptInvitation(sessionFromAlice, tamperedInvitation, creatorManager.SigningPublicKey!, _aliceIdentity);
             
             act.Should().Throw<CryptographicException>().WithMessage("Invalid signature on invitation.");
             
@@ -136,7 +136,7 @@ namespace Percolator.Cryptography.Tests
             var sessionToAlice = DoubleRatchetSession.CreateInitiatorSession(_creatorIdentity, _aliceIdentity, _aliceRatchet);
             var invitation = creatorManager.CreateInvitation("alice", sessionToAlice);
             var sessionFromAlice = DoubleRatchetSession.CreateResponderSession(_aliceIdentity, _aliceRatchet, _creatorIdentity);
-            var aliceGroupManager = GroupManager.AcceptInvitation(sessionFromAlice, invitation, creatorManager.SigningPublicKey!, _creatorIdentity);
+            var aliceGroupManager = GroupManager.AcceptInvitation(sessionFromAlice, invitation, creatorManager.SigningPublicKey!, _aliceIdentity);
 
             // Act & Assert: Alice tries to invite Bob
             var sessionToBobForAlice = DoubleRatchetSession.CreateInitiatorSession(_aliceIdentity, _bobIdentity, _bobRatchet);
@@ -154,6 +154,49 @@ namespace Percolator.Cryptography.Tests
             creatorManager.Dispose();
             aliceGroupManager.Dispose();
             sessionToBobForAlice.Dispose();
+        }
+
+        [Test]
+        public void ProcessRekeyMessage_WithMismatchedGroupId_ThrowsException()
+        {
+            // Arrange: Create two separate groups with the same creator and a common member (Bob).
+            var groupAManager = new GroupManager(_creatorIdentity);
+            var groupBManager = new GroupManager(_creatorIdentity);
+
+            // Bob joins Group A
+            var sessionToBobForA = DoubleRatchetSession.CreateInitiatorSession(_creatorIdentity, _bobIdentity, _bobRatchet);
+            var invitationA = groupAManager.CreateInvitation("bob", sessionToBobForA);
+            using var sessionFromBobForA = DoubleRatchetSession.CreateResponderSession(_bobIdentity, _bobRatchet, _creatorIdentity);
+            var bobManagerForA = GroupManager.AcceptInvitation(sessionFromBobForA, invitationA, groupAManager.SigningPublicKey!, _bobIdentity);
+
+            // Bob joins Group B
+            using var bobRatchetB = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+            var sessionToBobForB = DoubleRatchetSession.CreateInitiatorSession(_creatorIdentity, _bobIdentity, bobRatchetB);
+            var invitationB = groupBManager.CreateInvitation("bob", sessionToBobForB);
+            using var sessionFromBobForB = DoubleRatchetSession.CreateResponderSession(_bobIdentity, bobRatchetB, _creatorIdentity);
+            var bobManagerForB = GroupManager.AcceptInvitation(sessionFromBobForB, invitationB, groupBManager.SigningPublicKey!, _bobIdentity);
+
+            // Add a dummy member to Group A, so we can remove them to trigger a re-key.
+            using var dummyIdentity = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+            using var dummyRatchet = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+            var sessionToDummy = DoubleRatchetSession.CreateInitiatorSession(_creatorIdentity, dummyIdentity, dummyRatchet);
+            groupAManager.CreateInvitation("dummy_member", sessionToDummy);
+
+            // Act: Creator re-keys Group A by removing the dummy member.
+            var rekeyMessagesForA = groupAManager.RemoveMember("dummy_member");
+            var rekeyMessageForBobInA = rekeyMessagesForA["bob"];
+
+            // Assert: Bob's manager for Group B must reject the re-key message from Group A,
+            // even when using the correct session (from Group A) to decrypt it.
+            // This verifies the OldGroupId check.
+            Action act = () => bobManagerForB.ProcessRekeyMessage(sessionFromBobForA, rekeyMessageForBobInA);
+            act.Should().Throw<CryptographicException>().WithMessage("Re-key message is for a different group.");
+
+            // Cleanup
+            groupAManager.Dispose();
+            groupBManager.Dispose();
+            bobManagerForA.Dispose();
+            bobManagerForB.Dispose();
         }
     }
 }
