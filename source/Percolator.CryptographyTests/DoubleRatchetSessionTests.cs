@@ -93,34 +93,6 @@ namespace Percolator.CryptographyTests
         }
 
         [Test]
-        public void Decrypt_WhenReceivingMessagesOutOfOrder_ShouldFailForOlderMessage()
-        {
-            // Arrange
-            var sharedSecret = CreateSharedSecret();
-            var aliceInitialKeyPair = CreateKeyPair();
-            var bobInitialKeyPair = CreateKeyPair();
-
-            var sessionAlice = new DoubleRatchetSession(sharedSecret, aliceInitialKeyPair, bobInitialKeyPair.PublicKey.ExportSubjectPublicKeyInfo(), SessionRole.Initiator);
-            var sessionBob = new DoubleRatchetSession(sharedSecret, bobInitialKeyPair, aliceInitialKeyPair.PublicKey.ExportSubjectPublicKeyInfo(), SessionRole.Responder);
-            var plaintext1 = System.Text.Encoding.UTF8.GetBytes("First message");
-            var plaintext2 = System.Text.Encoding.UTF8.GetBytes("Second message");
-
-            // Act
-            var message1 = sessionAlice.Encrypt(plaintext1);
-            var message2 = sessionAlice.Encrypt(plaintext2);
-
-            // Decrypt the second message first, which should succeed.
-            var decryptedText2 = sessionBob.Decrypt(message2);
-
-            // Then, attempting to decrypt the first message should fail.
-            Action act = () => sessionBob.Decrypt(message1);
-
-            // Assert
-            decryptedText2.Should().BeEquivalentTo(plaintext2);
-            act.Should().Throw<InvalidMessageOrderException>();
-        }
-
-        [Test]
         public void Decrypt_WithNewEphemeralKey_UpdatesReceivingChainKey()
         {
             // Arrange
@@ -141,6 +113,39 @@ namespace Percolator.CryptographyTests
 
             // Assert
             newReceivingKey.Should().NotBeEquivalentTo(initialReceivingKey);
+        }
+
+        [Test]
+        public void Decrypt_WhenReceivingMessagesOutOfOrder_ShouldSucceed()
+        {
+            // Arrange
+            var sharedSecret = CreateSharedSecret();
+            var aliceInitialKeyPair = CreateKeyPair();
+            var bobInitialKeyPair = CreateKeyPair();
+
+            var sessionAlice = new DoubleRatchetSession(sharedSecret, aliceInitialKeyPair, bobInitialKeyPair.PublicKey.ExportSubjectPublicKeyInfo(), SessionRole.Initiator);
+            var sessionBob = new DoubleRatchetSession(sharedSecret, bobInitialKeyPair, aliceInitialKeyPair.PublicKey.ExportSubjectPublicKeyInfo(), SessionRole.Responder);
+
+            var plaintext1 = System.Text.Encoding.UTF8.GetBytes("Message 1");
+            var plaintext2 = System.Text.Encoding.UTF8.GetBytes("Message 2");
+            var plaintext3 = System.Text.Encoding.UTF8.GetBytes("Message 3");
+
+            var message1 = sessionAlice.Encrypt(plaintext1);
+            var message2 = sessionAlice.Encrypt(plaintext2);
+            var message3 = sessionAlice.Encrypt(plaintext3);
+
+            // Act & Assert
+            // Receive message 3 first (skipping 1 and 2)
+            var decryptedText3 = sessionBob.Decrypt(message3);
+            decryptedText3.Should().BeEquivalentTo(plaintext3);
+
+            // Receive message 2 next (from cache)
+            var decryptedText2 = sessionBob.Decrypt(message2);
+            decryptedText2.Should().BeEquivalentTo(plaintext2);
+
+            // Receive message 1 last (from cache)
+            var decryptedText1 = sessionBob.Decrypt(message1);
+            decryptedText1.Should().BeEquivalentTo(plaintext1);
         }
 
         [Test]

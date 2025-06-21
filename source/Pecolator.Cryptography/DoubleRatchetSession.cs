@@ -2,6 +2,7 @@ using System;
 using System.Security.Cryptography;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using System.Collections.Generic;
 
 namespace Pecolator.Cryptography
 {
@@ -9,6 +10,7 @@ namespace Pecolator.Cryptography
     {
         private const int KeySize = 32;
         private const int HeaderSize = 4; // For message counter (uint)
+        private const int MaxSkippedMessages = 1000;
 
         private ECDiffieHellman _dhKeyPair;
         private ECDiffieHellman? _dhKeyPairForSending; // A queued key pair for the next DH ratchet step.
@@ -19,6 +21,8 @@ namespace Pecolator.Cryptography
         private byte[] _receivingChainKey;
         private uint _sendingCounter = 0;
         private uint _receivingCounter = 0;
+
+        private readonly Dictionary<uint, byte[]> _skippedMessageKeys = new();
 
         internal byte[] SendingChainKey => _sendingChainKey;
         internal byte[] ReceivingChainKey => _receivingChainKey;
@@ -74,53 +78,67 @@ namespace Pecolator.Cryptography
 
         public byte[] Decrypt(RatchetMessage message)
         {
-            // --- Diffie-Hellman Ratchet Step ---
-            if (!message.EphemeralPublicKey.SequenceEqual(_remotePublicKey))
-            {
-                (_rootKey, _receivingChainKey) = DHRatchetStep(message.EphemeralPublicKey, _dhKeyPair);
-                _remotePublicKey = message.EphemeralPublicKey;
-                _receivingCounter = 0; // The counter for this chain resets.
-
-                // After a DH ratchet, we queue up a new key pair for our next sent message.
-                _dhKeyPairForSending = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-            }
-
-            // --- Symmetric Ratchet Step ---
-            if (message.CiphertextPayload.Length < HeaderSize)
-            {
-                throw new InvalidMessageOrderException("Invalid message format.");
-            }
+            var ciphertextWithTag = new byte[message.CiphertextPayload.Length - HeaderSize];
+            Buffer.BlockCopy(message.CiphertextPayload, HeaderSize, ciphertextWithTag, 0, ciphertextWithTag.Length);
 
             var header = new byte[HeaderSize];
             Buffer.BlockCopy(message.CiphertextPayload, 0, header, 0, HeaderSize);
             var messageCounter = BitConverter.ToUInt32(header, 0);
 
+            if (_skippedMessageKeys.TryGetValue(messageCounter, out var storedMessageKey))
+            {
+                _skippedMessageKeys.Remove(messageCounter);
+                try
+                {
+                    return DecryptAesGcm(storedMessageKey, messageCounter, ciphertextWithTag, message.EphemeralPublicKey);
+                }
+                catch (AuthenticationTagMismatchException ex)
+                {
+                    throw new InvalidMessageOrderException("AEAD authentication failed for a skipped message.", ex);
+                }
+            }
+
+            if (!message.EphemeralPublicKey.SequenceEqual(_remotePublicKey))
+            {
+                _skippedMessageKeys.Clear();
+                (_rootKey, _receivingChainKey) = DHRatchetStep(message.EphemeralPublicKey, _dhKeyPair);
+                _remotePublicKey = message.EphemeralPublicKey;
+                _receivingCounter = 0;
+
+                _dhKeyPairForSending = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+            }
+
             if (messageCounter <= _receivingCounter)
             {
-                throw new InvalidMessageOrderException($"Received out-of-order or duplicate message. Last: {_receivingCounter}, this: {messageCounter}");
+                throw new InvalidMessageOrderException($"Received out-of-order or duplicate message that was not in the cache. Last: {_receivingCounter}, this: {messageCounter}");
+            }
+
+            if (messageCounter - _receivingCounter > MaxSkippedMessages)
+            {
+                throw new InvalidOperationException($"Cannot process message. Exceeds the maximum number of {MaxSkippedMessages} skipped messages.");
             }
 
             var tempReceivingKey = _receivingChainKey;
-            byte[] messageKey = Array.Empty<byte>();
-            for (uint i = _receivingCounter + 1; i <= messageCounter; i++)
+            byte[] currentMessageKey;
+
+            for (uint i = _receivingCounter + 1; i < messageCounter; i++)
             {
-                (tempReceivingKey, messageKey) = RatchetStep(tempReceivingKey);
+                var (nextChainKey, skippedMessageKey) = RatchetStep(tempReceivingKey);
+                _skippedMessageKeys.Add(i, skippedMessageKey);
+                tempReceivingKey = nextChainKey;
             }
+
+            (tempReceivingKey, currentMessageKey) = RatchetStep(tempReceivingKey);
 
             _receivingChainKey = tempReceivingKey;
             _receivingCounter = messageCounter;
 
-            var ciphertextWithTag = new byte[message.CiphertextPayload.Length - HeaderSize];
-            Buffer.BlockCopy(message.CiphertextPayload, HeaderSize, ciphertextWithTag, 0, ciphertextWithTag.Length);
-
             try
             {
-                // The associated data is the public key we received.
-                return DecryptAesGcm(messageKey, messageCounter, ciphertextWithTag, message.EphemeralPublicKey);
+                return DecryptAesGcm(currentMessageKey, messageCounter, ciphertextWithTag, message.EphemeralPublicKey);
             }
             catch (AuthenticationTagMismatchException ex)
             {
-                // This exception means the ciphertext has been tampered with.
                 throw new InvalidMessageOrderException("AEAD authentication failed.", ex);
             }
         }
