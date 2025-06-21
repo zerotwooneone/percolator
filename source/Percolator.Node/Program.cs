@@ -13,6 +13,13 @@ using System.IO;
 using System.Net;
 using System.Security.Cryptography.X509Certificates;
 
+// --- CONSTANTS ---
+
+// WARNING: This is a temporary, insecure placeholder for the security review.
+// In a real application, this should be replaced with a secure secret management
+// system, such as DPAPI on Windows or the system keychain.
+const string PfxPassword = "insecure-temporary-password";
+
 // 1. DEFINE COMMAND-LINE INTERFACE
 var portOption = new Option<int>(
     name: "--port",
@@ -114,8 +121,9 @@ void AddFile(FileInfo fileInfo)
     var manifestService = host.Services.GetRequiredService<ManifestService>();
     var manifestStore = host.Services.GetRequiredService<ManifestStore>();
 
-    Console.WriteLine($"Creating manifest for {fileInfo.FullName}...");
-    var (hash, manifest) = manifestService.CreateManifestFromFile(fileInfo.FullName);
+    var absolutePath = Path.GetFullPath(fileInfo.FullName);
+    Console.WriteLine($"Creating manifest for {absolutePath}...");
+    var (hash, manifest) = manifestService.CreateManifestFromFile(absolutePath);
     manifestStore.StoreManifest(hash, manifest);
     Console.WriteLine($"Successfully created and stored manifest with hash: {hash.ToBase64()}");
 }
@@ -148,14 +156,14 @@ static X509Certificate2 LoadOrGenerateCertificate(string certPath)
     {
         Console.WriteLine($"[Security] Loading existing certificate from: {certPath}");
         var certBytes = File.ReadAllBytes(certPath);
-        return X509CertificateLoader.LoadPkcs12(certBytes, password: null);
+        return X509CertificateLoader.LoadPkcs12(certBytes, PfxPassword);
     }
     else
     {
         Console.WriteLine("[Security] No existing certificate found. Generating a new one.");
         var selfSignedCert = CertificateGenerator.CreateSelfSignedCertificate();
         Console.WriteLine($"[Security] Saving new certificate to: {certPath}");
-        var certBytes = selfSignedCert.Export(X509ContentType.Pfx);
+        var certBytes = selfSignedCert.Export(X509ContentType.Pfx, PfxPassword);
         File.WriteAllBytes(certPath, certBytes);
         return selfSignedCert;
     }

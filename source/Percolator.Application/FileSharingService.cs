@@ -37,7 +37,7 @@ namespace Percolator.Application
             var signedManifest = request.SignedManifest;
 
             _manifestStore.StoreManifest(manifestHash, signedManifest);
-            Console.WriteLine($"[gRPC] Stored manifest {manifestHash.ToBase64()} from {context.Peer}.");
+            Console.WriteLine($"[gRPC] Received and verified manifest with hash {request.ManifestHash.ToBase64()} from {context.Peer}.");
 
             var response = new AnnounceManifestResponse
             {
