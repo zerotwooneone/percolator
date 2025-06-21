@@ -1,5 +1,8 @@
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using System.IO;
+using System.Security.AccessControl;
+using System.Security.Principal;
 
 namespace Percolator.Identity
 {
@@ -59,7 +62,25 @@ namespace Percolator.Identity
                 var newCert = _certificateOperations.CreateSelfSignedCertificate(identityName);
                 var pfxBytes = newCert.Export(X509ContentType.Pfx, pfxPassword);
                 File.WriteAllBytes(identityCertPath, pfxBytes);
+                SetFileSecurity(identityCertPath);
                 return X509CertificateLoader.LoadPkcs12(pfxBytes, pfxPassword, X509KeyStorageFlags.Exportable | X509KeyStorageFlags.UserKeySet);
+            }
+        }
+
+        private void SetFileSecurity(string filePath)
+        {
+            var fileInfo = new FileInfo(filePath);
+            var fileSecurity = fileInfo.GetAccessControl();
+            var currentUser = WindowsIdentity.GetCurrent().User;
+            if (currentUser is not null)
+            {
+                fileSecurity.SetOwner(currentUser);
+                var rule = new FileSystemAccessRule(
+                    currentUser,
+                    FileSystemRights.FullControl,
+                    AccessControlType.Allow);
+                fileSecurity.AddAccessRule(rule);
+                fileInfo.SetAccessControl(fileSecurity);
             }
         }
     }
