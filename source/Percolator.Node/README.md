@@ -44,5 +44,15 @@ dotnet run --project .\Percolator.Node\Percolator.Node.csproj
 
 -   **`add-file <file-path>`**: Creates a manifest for the specified file or directory, signs it with the user's identity, and stores it locally. If no identity exists, this command will trigger the creation of a new secure identity certificate and password.
     -   Example: `dotnet run --project .\Percolator.Node\Percolator.Node.csproj -- add-file C:\path\to\my_file.txt`
--   **`peers`**: Lists all currently discovered peers on the network.
--   **`exit`**: Gracefully shuts down the node and all background services.
+-   **`request-manifest <manifest-hash>`**: Requests a manifest from a running peer using its Base64-encoded hash.
+    -   Example: `dotnet run --project .\Percolator.Node\Percolator.Node.csproj -- request-manifest 4cPQDexTSLrz6CSKErNk6ZD14/Rhxa+wrYsFhXw46iw=`
+
+## Guidance for AI Assistants
+
+This project has specific architectural patterns that must be followed to ensure stability and avoid common pitfalls.
+
+*   **`System.CommandLine` Version**: The project is standardized on `System.CommandLine` version `2.0.0-beta4`. Do not upgrade to newer pre-release versions or introduce the `System.CommandLine.Hosting` package, as this led to significant instability and breaking changes.
+*   **Manual Dependency Injection**: The application manually configures its own dependency injection container in `Program.cs`. It does not use the .NET Generic Host for command-line integration. Command handlers must resolve their dependencies from the `IServiceProvider` made available via the `InvocationContext`.
+*   **Manual Host Lifecycle**: The Kestrel web server is started manually within the root command's handler (`RunNodeAsync`). It is not managed automatically by a hosting library.
+*   **Argument Pre-Parsing for Services**: Some services, like `PeerDiscoveryService`, require configuration values (e.g., the listening port) that are provided via command-line arguments. To handle this, `Program.cs` performs a lightweight pre-parse of the `args` to extract these values *before* the main DI container is built. This ensures services are constructed with the correct configuration.
+*   **`--version` Option Conflict**: The `UseDefaults()` extension method in `System.CommandLine` was found to cause a runtime crash by implicitly adding a `--version` option that conflicted with another registration. To avoid this, middleware (like `UseHelp()`, `UseExceptionHandler()`, etc.) is added individually to the `CommandLineBuilder`.
