@@ -40,6 +40,11 @@ These projects contain the pure domain logic and are designed to be highly cohes
 - **Key Concepts**: `DhtNode`, `PeerAddress`, `RoutingTable`, `DhtService`.
 - **Dependencies**: Minimal (e.g., `System.Net.Sockets`, `System.Collections.Concurrent`).
 
+## Architectural Notes
+
+- **Domain-Driven Design (DDD)**: The solution is organized into distinct domain libraries to promote separation of concerns and maintainability.
+- **Protocol Buffers (Protobuf)**: We use Protobuf for efficient, cross-platform data serialization for network messages and stored data structures.
+
 ## Getting Started
 
 To get a local copy up and running, follow these simple steps.
