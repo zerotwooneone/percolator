@@ -10,6 +10,7 @@ using System.CommandLine;
 using Percolator.Node;
 using System.IO;
 using System.Security.Cryptography.X509Certificates;
+using Percolator.Application;
 
 // Set up command-line parsing
 var portOption = new Option<int>(

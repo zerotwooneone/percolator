@@ -1,3 +1,4 @@
+using FluentAssertions;
 using NUnit.Framework;
 using Percolator.Network;
 using System.Net;
@@ -8,56 +9,92 @@ namespace Percolator.NetworkTests
     public class PeerTests
     {
         [Test]
-        public void Equals_WithSameIpAndPort_ReturnsTrue()
+        public void Equals_WithSameIpPortAndThumbprint_ShouldBeTrue()
         {
-            var ipAddress = IPAddress.Parse("192.168.1.1");
-            var peer1 = new Peer(ipAddress, 8080);
-            var peer2 = new Peer(ipAddress, 8080);
+            // Arrange
+            var ip = IPAddress.Parse("192.168.1.1");
+            var peer1 = new Peer(ip, 8080, "thumbprint1");
+            var peer2 = new Peer(ip, 8080, "thumbprint1");
 
-            Assert.That(peer1.Equals(peer2), Is.True);
-            Assert.That(peer2.Equals(peer1), Is.True);
-            Assert.That(peer1 == peer2, Is.True);
-            Assert.That(peer1 != peer2, Is.False);
+            // Act & Assert
+            peer1.Should().Be(peer2);
+            (peer1 == peer2).Should().BeTrue();
+            (peer1 != peer2).Should().BeFalse();
         }
 
         [Test]
-        public void Equals_WithDifferentIpAddress_ReturnsFalse()
+        public void Equals_WithDifferentIp_ShouldBeFalse()
         {
-            var peer1 = new Peer(IPAddress.Parse("192.168.1.1"), 8080);
-            var peer2 = new Peer(IPAddress.Parse("192.168.1.2"), 8080);
+            // Arrange
+            var peer1 = new Peer(IPAddress.Parse("192.168.1.1"), 8080, "thumbprint1");
+            var peer2 = new Peer(IPAddress.Parse("192.168.1.2"), 8080, "thumbprint1");
 
-            Assert.That(peer1.Equals(peer2), Is.False);
-            Assert.That(peer1 == peer2, Is.False);
-            Assert.That(peer1 != peer2, Is.True);
+            // Act & Assert
+            peer1.Should().NotBe(peer2);
+            (peer1 != peer2).Should().BeTrue();
+            (peer1 == peer2).Should().BeFalse();
         }
 
         [Test]
-        public void Equals_WithDifferentPort_ReturnsFalse()
+        public void Equals_WithDifferentPort_ShouldBeFalse()
         {
-            var ipAddress = IPAddress.Parse("192.168.1.1");
-            var peer1 = new Peer(ipAddress, 8080);
-            var peer2 = new Peer(ipAddress, 8081);
+            // Arrange
+            var ip = IPAddress.Parse("192.168.1.1");
+            var peer1 = new Peer(ip, 8080, "thumbprint1");
+            var peer2 = new Peer(ip, 8081, "thumbprint1");
 
-            Assert.That(peer1.Equals(peer2), Is.False);
-            Assert.That(peer1 == peer2, Is.False);
-            Assert.That(peer1 != peer2, Is.True);
+            // Act & Assert
+            peer1.Should().NotBe(peer2);
+            (peer1 != peer2).Should().BeTrue();
+            (peer1 == peer2).Should().BeFalse();
         }
 
         [Test]
-        public void Equals_WithNull_ReturnsFalse()
+        public void Equals_WithDifferentThumbprint_ShouldBeFalse()
         {
-            var peer1 = new Peer(IPAddress.Parse("192.168.1.1"), 8080);
-            Assert.That(peer1.Equals(null), Is.False);
+            // Arrange
+            var ip = IPAddress.Parse("192.168.1.1");
+            var peer1 = new Peer(ip, 8080, "thumbprint1");
+            var peer2 = new Peer(ip, 8080, "thumbprint2");
+
+            // Act & Assert
+            peer1.Should().NotBe(peer2);
+            (peer1 != peer2).Should().BeTrue();
+            (peer1 == peer2).Should().BeFalse();
         }
 
         [Test]
-        public void GetHashCode_ForEqualObjects_IsSame()
+        public void Equals_WithNull_ShouldBeFalse()
         {
-            var ipAddress = IPAddress.Parse("192.168.1.1");
-            var peer1 = new Peer(ipAddress, 8080);
-            var peer2 = new Peer(ipAddress, 8080);
+            // Arrange
+            var peer1 = new Peer(IPAddress.Parse("192.168.1.1"), 8080, "thumbprint1");
 
-            Assert.That(peer1.GetHashCode(), Is.EqualTo(peer2.GetHashCode()));
+            // Act & Assert
+            peer1.Equals(null).Should().BeFalse();
+        }
+
+        [Test]
+        public void GetHashCode_WithSameIpAndPort_ShouldBeEqual()
+        {
+            // Arrange
+            var ip = IPAddress.Parse("192.168.1.1");
+            var peer1 = new Peer(ip, 8080, "thumbprint1");
+            var peer2 = new Peer(ip, 8080, "thumbprint1");
+
+            // Act & Assert
+            peer1.GetHashCode().Should().Be(peer2.GetHashCode());
+        }
+
+        [Test]
+        public void GetHashCode_WithDifferentThumbprint_ShouldNotBeEqual()
+        {
+            // Arrange
+            var ip = IPAddress.Parse("192.168.1.1");
+            var peer1 = new Peer(ip, 8080, "thumbprint1");
+            var peer2 = new Peer(ip, 8080, "thumbprint2");
+
+            // Act & Assert
+            peer1.GetHashCode().Should().NotBe(peer2.GetHashCode());
         }
     }
 }
