@@ -62,12 +62,12 @@ namespace Pecolator.Cryptography
             var (newSendingKey, messageKey) = RatchetStep(_sendingChainKey);
             _sendingChainKey = newSendingKey;
 
-            var encryptedData = Xor(plaintext, messageKey);
+            var ciphertextWithTag = EncryptAesGcm(messageKey, _sendingCounter, plaintext, PublicKey);
 
             var header = BitConverter.GetBytes(_sendingCounter);
-            var ciphertextPayload = new byte[HeaderSize + encryptedData.Length];
+            var ciphertextPayload = new byte[HeaderSize + ciphertextWithTag.Length];
             Buffer.BlockCopy(header, 0, ciphertextPayload, 0, HeaderSize);
-            Buffer.BlockCopy(encryptedData, 0, ciphertextPayload, HeaderSize, encryptedData.Length);
+            Buffer.BlockCopy(ciphertextWithTag, 0, ciphertextPayload, HeaderSize, ciphertextWithTag.Length);
 
             return new RatchetMessage(PublicKey, ciphertextPayload);
         }
@@ -110,10 +110,19 @@ namespace Pecolator.Cryptography
             _receivingChainKey = tempReceivingKey;
             _receivingCounter = messageCounter;
 
-            var encryptedData = new byte[message.CiphertextPayload.Length - HeaderSize];
-            Buffer.BlockCopy(message.CiphertextPayload, HeaderSize, encryptedData, 0, encryptedData.Length);
+            var ciphertextWithTag = new byte[message.CiphertextPayload.Length - HeaderSize];
+            Buffer.BlockCopy(message.CiphertextPayload, HeaderSize, ciphertextWithTag, 0, ciphertextWithTag.Length);
 
-            return Xor(encryptedData, messageKey);
+            try
+            {
+                // The associated data is the public key we received.
+                return DecryptAesGcm(messageKey, messageCounter, ciphertextWithTag, message.EphemeralPublicKey);
+            }
+            catch (AuthenticationTagMismatchException ex)
+            {
+                // This exception means the ciphertext has been tampered with.
+                throw new InvalidMessageOrderException("AEAD authentication failed.", ex);
+            }
         }
 
         private (byte[] newRootKey, byte[] newChainKey) DHRatchetStep(byte[] peerKeyBytes, ECDiffieHellman ourKeyPair)
@@ -136,14 +145,42 @@ namespace Pecolator.Cryptography
             return (newChainKey, messageKey);
         }
 
-        private static byte[] Xor(byte[] buffer1, byte[] buffer2)
+        private byte[] EncryptAesGcm(byte[] key, uint counter, byte[] plaintext, byte[] associatedData)
         {
-            var result = new byte[buffer1.Length];
-            for (var i = 0; i < buffer1.Length; i++)
-            {
-                result[i] = (byte)(buffer1[i] ^ buffer2[i % buffer2.Length]);
-            }
+            // AES-GCM requires a 12-byte nonce. We can derive it from the counter.
+            var nonce = new byte[12];
+            BitConverter.GetBytes(counter).CopyTo(nonce, 0);
+
+            using var aes = new AesGcm(key, 16);
+            var ciphertext = new byte[plaintext.Length];
+            var tag = new byte[16]; // 16-byte authentication tag
+            aes.Encrypt(nonce, plaintext, ciphertext, tag, associatedData);
+
+            // The final payload is the ciphertext followed by the tag.
+            var result = new byte[ciphertext.Length + tag.Length];
+            ciphertext.CopyTo(result, 0);
+            tag.CopyTo(result, ciphertext.Length);
             return result;
+        }
+
+        private byte[] DecryptAesGcm(byte[] key, uint counter, byte[] ciphertextWithTag, byte[] associatedData)
+        {
+            // AES-GCM requires a 12-byte nonce. We derive it from the counter.
+            var nonce = new byte[12];
+            BitConverter.GetBytes(counter).CopyTo(nonce, 0);
+
+            using var aes = new AesGcm(key, 16);
+            var tag = new byte[16];
+            var ciphertext = new byte[ciphertextWithTag.Length - 16];
+
+            // Separate the ciphertext and the tag
+            Array.Copy(ciphertextWithTag, ciphertextWithTag.Length - 16, tag, 0, 16);
+            Array.Copy(ciphertextWithTag, 0, ciphertext, 0, ciphertextWithTag.Length - 16);
+
+            var plaintext = new byte[ciphertext.Length];
+            aes.Decrypt(nonce, ciphertext, tag, plaintext, associatedData);
+
+            return plaintext;
         }
     }
 }

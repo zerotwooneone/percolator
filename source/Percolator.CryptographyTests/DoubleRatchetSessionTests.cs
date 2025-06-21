@@ -142,5 +142,30 @@ namespace Percolator.CryptographyTests
             // Assert
             newReceivingKey.Should().NotBeEquivalentTo(initialReceivingKey);
         }
+
+        [Test]
+        public void Decrypt_WithTamperedCiphertext_ShouldThrow()
+        {
+            // Arrange
+            var sharedSecret = CreateSharedSecret();
+            var aliceInitialKeyPair = CreateKeyPair();
+            var bobInitialKeyPair = CreateKeyPair();
+
+            var sessionAlice = new DoubleRatchetSession(sharedSecret, aliceInitialKeyPair, bobInitialKeyPair.PublicKey.ExportSubjectPublicKeyInfo(), SessionRole.Initiator);
+            var sessionBob = new DoubleRatchetSession(sharedSecret, bobInitialKeyPair, aliceInitialKeyPair.PublicKey.ExportSubjectPublicKeyInfo(), SessionRole.Responder);
+
+            var plaintext = System.Text.Encoding.UTF8.GetBytes("This is a secret message.");
+            var message = sessionAlice.Encrypt(plaintext);
+
+            // Act: Tamper with the ciphertext by flipping a bit
+            var tamperedPayload = message.CiphertextPayload.ToArray();
+            tamperedPayload[tamperedPayload.Length - 5] ^= 0x01; // Flip a bit somewhere in the middle
+            var tamperedMessage = new RatchetMessage(message.EphemeralPublicKey, tamperedPayload);
+
+            // Assert
+            Action act = () => sessionBob.Decrypt(tamperedMessage);
+            act.Should().Throw<InvalidMessageOrderException>()
+               .WithInnerException<System.Security.Cryptography.AuthenticationTagMismatchException>();
+        }
     }
 }
