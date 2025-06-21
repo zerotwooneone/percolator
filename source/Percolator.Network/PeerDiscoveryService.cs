@@ -4,12 +4,16 @@ using System.Net.Sockets;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Linq; // Added this line
+using System.Linq;
 
 namespace Percolator.Network
 {
     public class PeerDiscoveryService : IDisposable
     {
+        private const int BroadcastPort = 8888;
+        private static readonly TimeSpan BroadcastInterval = TimeSpan.FromSeconds(5);
+        private static readonly TimeSpan PeerExpirationTime = TimeSpan.FromSeconds(30);
+
         private readonly UdpClient _udpClient;
         private readonly int _discoveryPort;
         private readonly int _grpcPort;
@@ -29,12 +33,19 @@ namespace Percolator.Network
         public async Task StartAsync(CancellationToken cancellationToken = default)
         {
             _cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            var token = _cancellationTokenSource.Token;
 
-            var listeningTask = ListenForPeersAsync(token);
-            var broadcastingTask = BroadcastPresenceAsync(token);
+            var listenTask = ListenForPeersAsync(_cancellationTokenSource.Token);
+            var broadcastTask = BroadcastPresenceAsync(_cancellationTokenSource.Token);
+            var cleanupTask = CleanupExpiredPeersAsync(_cancellationTokenSource.Token);
 
-            await Task.WhenAll(listeningTask, broadcastingTask);
+            try
+            {
+                await Task.WhenAll(listenTask, broadcastTask, cleanupTask);
+            }
+            catch (OperationCanceledException)
+            {
+                // This is expected on shutdown
+            }
         }
 
         public void Stop()
@@ -65,13 +76,15 @@ namespace Percolator.Network
                     if (message.StartsWith("PERCOLATOR_DISCOVERY:"))
                     {
                         var parts = message.Split(':');
-                        if (parts.Length == 2 && int.TryParse(parts[1], out var grpcPort))
+                        if (parts.Length == 2 && int.TryParse(parts[1], out var receivedGrpcPort))
                         {
-                            var peerEndpoint = result.RemoteEndPoint;
-                            if (IsSelf(peerEndpoint.Address, grpcPort)) continue;
+                            var remoteEndpoint = result.RemoteEndPoint;
+                            if (IsSelf(remoteEndpoint.Address, receivedGrpcPort)) continue;
 
-                            var peer = new Peer(peerEndpoint.Address, grpcPort);
-                            _peers.AddOrUpdate(peerEndpoint, peer, (_, existingPeer) =>
+                            var peer = new Peer(remoteEndpoint.Address, receivedGrpcPort);
+                            peer.LastSeenUtc = DateTime.UtcNow;
+
+                            _peers.AddOrUpdate(peer.GrpcEndpoint, peer, (key, existingPeer) =>
                             {
                                 existingPeer.LastSeenUtc = DateTime.UtcNow;
                                 return existingPeer;
@@ -86,6 +99,31 @@ namespace Percolator.Network
                 catch (Exception ex)
                 {
                     Console.WriteLine($"Error during peer discovery: {ex.Message}");
+                }
+            }
+        }
+
+        private async Task CleanupExpiredPeersAsync(CancellationToken cancellationToken)
+        {
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                try
+                {
+                    var expiredPeers = _peers.Values.Where(p => DateTime.UtcNow - p.LastSeenUtc > PeerExpirationTime).ToList();
+
+                    foreach (var peer in expiredPeers)
+                    {
+                        if (_peers.TryRemove(peer.GrpcEndpoint, out _))
+                        {
+                            Console.WriteLine($"[Discovery] Peer expired: {peer}");
+                        }
+                    }
+
+                    await Task.Delay(BroadcastInterval, cancellationToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    break; // Exit loop on cancellation
                 }
             }
         }
