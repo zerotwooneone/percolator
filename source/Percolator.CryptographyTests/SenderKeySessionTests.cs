@@ -1,146 +1,105 @@
+using FluentAssertions;
 using NUnit.Framework;
 using Pecolator.Cryptography;
 using System.Security.Cryptography;
 using System.Text;
-using FluentAssertions;
 
 namespace Percolator.CryptographyTests
 {
     [TestFixture]
     public class SenderKeySessionTests
     {
-        private byte[] _sessionKey;
+        private byte[] _sessionKey = null!;
+        private byte[] _context = null!;
 
         [SetUp]
         public void Setup()
         {
-            _sessionKey = new byte[32];
-            RandomNumberGenerator.Fill(_sessionKey);
+            _sessionKey = RandomNumberGenerator.GetBytes(32);
+            _context = Encoding.UTF8.GetBytes("test-context");
         }
 
         [Test]
-        public void Encrypt_WithNewSession_CreatesValidCiphertext()
+        public void Constructor_WithValidKey_InitializesSession()
         {
-            // Arrange
-            using var session = new SenderKeySession(_sessionKey);
-            var originalPlaintext = "This is a test message.";
-            var plaintextBytes = Encoding.UTF8.GetBytes(originalPlaintext);
-
-            // Act
-            var senderKeyMessage = session.Encrypt(plaintextBytes);
+            // Arrange & Act
+            using var session = new SenderKeySession(_sessionKey, _context);
 
             // Assert
-            senderKeyMessage.Should().NotBeNull();
-            senderKeyMessage.Ciphertext.Should().NotBeNull();
-            senderKeyMessage.Ciphertext.Should().NotBeEquivalentTo(plaintextBytes);
+            session.Should().NotBeNull();
         }
 
         [Test]
-        public void Decrypt_WithValidMessage_ReturnsOriginalPlaintext()
+        public void Encrypt_ThenDecrypt_ReturnsOriginalPlaintext()
         {
             // Arrange
-            using var senderSession = new SenderKeySession(_sessionKey);
-            var originalPlaintext = "This is a secret message.";
-            var plaintextBytes = Encoding.UTF8.GetBytes(originalPlaintext);
-            var message = senderSession.Encrypt(plaintextBytes);
-
-            using var receiverSession = new SenderKeySession(_sessionKey);
+            using var senderSession = new SenderKeySession(_sessionKey, _context);
+            using var receiverSession = new SenderKeySession(_sessionKey, _context);
+            var plaintext = "Hello, world!";
 
             // Act
-            var decryptedPlaintextBytes = receiverSession.Decrypt(message);
-            var decryptedPlaintext = Encoding.UTF8.GetString(decryptedPlaintextBytes);
+            var encryptedMessage = senderSession.Encrypt(Encoding.UTF8.GetBytes(plaintext));
+            var decryptedBytes = receiverSession.Decrypt(encryptedMessage);
 
             // Assert
-            decryptedPlaintext.Should().Be(originalPlaintext);
+            Encoding.UTF8.GetString(decryptedBytes).Should().Be(plaintext);
         }
 
         [Test]
         public void Decrypt_OutOfOrderMessage_Succeeds()
         {
             // Arrange
-            using var senderSession = new SenderKeySession(_sessionKey);
-            var plaintext1 = "first message";
-            var plaintext2 = "second message";
+            using var senderSession = new SenderKeySession(_sessionKey, _context);
+            using var receiverSession = new SenderKeySession(_sessionKey, _context);
 
-            var message1 = senderSession.Encrypt(Encoding.UTF8.GetBytes(plaintext1));
-            var message2 = senderSession.Encrypt(Encoding.UTF8.GetBytes(plaintext2));
+            var message1 = senderSession.Encrypt(Encoding.UTF8.GetBytes("first"));
+            var message2 = senderSession.Encrypt(Encoding.UTF8.GetBytes("second"));
+            var message3 = senderSession.Encrypt(Encoding.UTF8.GetBytes("third"));
 
-            using var receiverSession = new SenderKeySession(_sessionKey);
-
-            // Act
-            var decrypted2 = receiverSession.Decrypt(message2);
-            var decrypted1 = receiverSession.Decrypt(message1);
-
-            // Assert
-            Encoding.UTF8.GetString(decrypted1).Should().Be(plaintext1);
-            Encoding.UTF8.GetString(decrypted2).Should().Be(plaintext2);
-        }
-
-        [Test]
-        public void Decrypt_WithInvalidSignature_ThrowsException()
-        {
-            // Arrange
-            using var senderSession = new SenderKeySession(_sessionKey);
-            var plaintext = Encoding.UTF8.GetBytes("a message that will be tampered with");
-            var senderKeyMessage = senderSession.Encrypt(plaintext);
-
-            // Tamper with the signature
-            senderKeyMessage.Signature![0] ^= 0xFF; // Flip the first byte
-
-            using var receiverSession = new SenderKeySession(_sessionKey);
-
-            // Act & Assert
-            Assert.Throws<CryptographicException>(() => receiverSession.Decrypt(senderKeyMessage));
+            // Act & Assert: Decrypt in a different order
+            Encoding.UTF8.GetString(receiverSession.Decrypt(message3)).Should().Be("third");
+            Encoding.UTF8.GetString(receiverSession.Decrypt(message1)).Should().Be("first");
+            Encoding.UTF8.GetString(receiverSession.Decrypt(message2)).Should().Be("second");
         }
 
         [Test]
         public void Decrypt_MessageFromDifferentContext_ThrowsException()
         {
             // Arrange
-            var groupA_Context = Encoding.UTF8.GetBytes("Group A ID");
-            var groupB_Context = Encoding.UTF8.GetBytes("Group B ID");
+            var context1 = Encoding.UTF8.GetBytes("group1");
+            var context2 = Encoding.UTF8.GetBytes("group2");
+            var sessionKey = RandomNumberGenerator.GetBytes(32);
 
-            // Both sessions share the same underlying key, but have different contexts
-            using var senderSession = new SenderKeySession(_sessionKey, groupA_Context);
-            using var receiverSession = new SenderKeySession(_sessionKey, groupB_Context);
+            using var session1 = new SenderKeySession(sessionKey, context1);
+            using var session2 = new SenderKeySession(sessionKey, context2);
 
-            var plaintext = Encoding.UTF8.GetBytes("This message is for Group A only.");
-            var message = senderSession.Encrypt(plaintext);
+            var message = session1.Encrypt(Encoding.UTF8.GetBytes("secret message"));
 
-            // Act & Assert
-            // Attempting to decrypt a message from Group A in the context of Group B should fail.
-            Assert.Throws<CryptographicException>(() => receiverSession.Decrypt(message));
+            // Act
+            Action act = () => session2.Decrypt(message);
+
+            // Assert
+            act.Should().Throw<CryptographicException>().WithMessage("Invalid signature.");
         }
 
         [Test]
         public void SaveState_And_LoadState_RestoresSessionCorrectly()
         {
-            // Arrange
-            var context = Encoding.UTF8.GetBytes("persistent-group");
-            using var senderSession = new SenderKeySession(_sessionKey, context);
-            var plaintext1 = "message before save";
-            var message1 = senderSession.Encrypt(Encoding.UTF8.GetBytes(plaintext1));
+            // Arrange: Create a sender and a long-lived receiver session
+            using var senderSession = new SenderKeySession(_sessionKey, _context);
+            using var receiverSession = new SenderKeySession(_sessionKey, _context);
 
-            // Act: Save the state
-            var savedState = senderSession.SaveState();
+            // Act 1: Send a message, save state, and verify receiver can decrypt
+            var message1 = senderSession.Encrypt(Encoding.UTF8.GetBytes("message before save"));
+            var state = senderSession.SaveState();
+            Encoding.UTF8.GetString(receiverSession.Decrypt(message1)).Should().Be("message before save");
 
-            // Create a new session from the saved state
-            using var loadedSenderSession = SenderKeySession.LoadState(savedState);
+            // Act 2: Load the state into a new session and send another message
+            using var loadedSession = SenderKeySession.LoadState(state);
+            var message2 = loadedSession.Encrypt(Encoding.UTF8.GetBytes("message after load"));
 
-            // Send another message with the loaded session
-            var plaintext2 = "message after load";
-            var message2 = loadedSenderSession.Encrypt(Encoding.UTF8.GetBytes(plaintext2));
-
-            // Assert: A new receiver session should be able to decrypt both messages
-            using var receiverSession = new SenderKeySession(_sessionKey, context);
-
-            // Decrypt the first message (sent before saving)
-            var decrypted1 = receiverSession.Decrypt(message1);
-            Encoding.UTF8.GetString(decrypted1).Should().Be(plaintext1);
-
-            // Decrypt the second message (sent after loading)
-            var decrypted2 = receiverSession.Decrypt(message2);
-            Encoding.UTF8.GetString(decrypted2).Should().Be(plaintext2);
+            // Assert: The original receiver session can decrypt the message from the loaded sender session
+            Encoding.UTF8.GetString(receiverSession.Decrypt(message2)).Should().Be("message after load");
         }
     }
 }

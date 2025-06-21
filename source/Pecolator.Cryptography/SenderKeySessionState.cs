@@ -9,6 +9,6 @@ namespace Pecolator.Cryptography
         public byte[] SigningKeyPrivate { get; set; } = Array.Empty<byte>();
         public byte[] ChainKey { get; set; } = Array.Empty<byte>();
         public uint Iteration { get; set; }
-        public Dictionary<uint, byte[]> SkippedMessageKeys { get; set; } = new();
+        public Dictionary<uint, byte[]> MessageKeyCache { get; set; } = new();
     }
 }
