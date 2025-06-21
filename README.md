@@ -43,7 +43,21 @@ These projects contain the pure domain logic and are designed to be highly cohes
 ## Architectural Notes
 
 - **Domain-Driven Design (DDD)**: The solution is organized into distinct domain libraries to promote separation of concerns and maintainability.
-- **Protocol Buffers (Protobuf)**: We use Protobuf for efficient, cross-platform data serialization for network messages and stored data structures.
+- **Protocol Buffers (Protobuf)**: We use Protobuf for efficient, cross-platform data serialization for network messages and stored data structures. To ensure forward and backward compatibility, all Protobuf messages must adhere to the following rules:
+    1.  **Top-Level Version Field**: Every top-level message schema must include an `optional uint32 version` field. This allows consuming code to handle different message formats gracefully.
+    2.  **Use `optional` Fields**: All data fields within a message should be marked as `optional`. This provides presence-checking capabilities (e.g., the `Has...()` methods in C# for scalar types) and prevents deserialization errors if a field is missing.
+
+    > **Note for AI/Developers**: This rule is critical for maintaining a stable API in a distributed system. Always enforce this for new Protobuf schemas.
+- **Protobuf in C# Gotcha**: When checking for the presence of an `optional` field that is another message type (not a scalar like `int32` or `string`), the C# Protobuf generator does not create a `Has...()` method. Instead, you must check if the property is `null`.
+
+## AI Collaboration Guidance
+
+This section contains notes and guidelines for collaborating with AI assistants (like Cascade) on this project.
+
+- **Protobuf C# Implementation Details**:
+  - When checking for the presence of an `optional` field in a Protobuf message using C#, the method depends on the field's type:
+    - For **scalar types** (e.g., `int32`, `string`, `bytes`, `bool`, `enum`), the compiler generates a `bool Has...` property. Always use this for presence checks (e.g., `if (message.HasMyField)`).
+    - For **message types** (e.g., a field that is another message, like `google.protobuf.Timestamp`), the compiler does **not** generate a `Has...` property. To check for presence, you must compare the property to `null` (e.g., `if (message.MyNestedMessage != null)`).
 
 ## Getting Started
 

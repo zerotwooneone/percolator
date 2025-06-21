@@ -1,0 +1,29 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+option csharp_namespace = "Percolator.Cryptography.Protos";
+
+message ManifestEntry {
+  enum ManifestEntryType {
+    FILE = 0;
+    DIRECTORY = 1;
+  }
+
+  optional string path = 1;
+  optional ManifestEntryType type = 2;
+  optional int64 size = 3;
+  optional bytes hash = 4;
+}
+
+message Manifest {
+  optional bytes author_identity_public_key = 1;
+  optional google.protobuf.Timestamp timestamp_utc = 2;
+  repeated ManifestEntry entries = 3;
+}
+
+message SignedManifest {
+  optional uint32 version = 1;
+  optional Manifest manifest = 2;
+  optional bytes signature = 3;
+}
