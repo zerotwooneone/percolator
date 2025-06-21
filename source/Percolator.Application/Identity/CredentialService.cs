@@ -1,7 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 
-namespace Percolator.Application
+namespace Percolator.Application.Identity
 {
     public interface ICredentialService
     {

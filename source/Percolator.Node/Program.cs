@@ -7,7 +7,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Percolator.Application;
-using Percolator.Application.Handlers;
 using Percolator.Contracts.Protos;
 using Percolator.Cryptography;
 using Percolator.Identity;
@@ -17,6 +16,10 @@ using System.CommandLine.Builder;
 using System.CommandLine.Invocation;
 using System.Net;
 using System.Net.Http;
+using Percolator.Application.Identity;
+using Percolator.Application.Manifests;
+using Percolator.Application.PeerDiscovery;
+using Percolator.Application.RateLimiting;
 
 var serviceProvider = ConfigureServices(args).BuildServiceProvider();
 

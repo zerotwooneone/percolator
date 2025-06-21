@@ -5,7 +5,7 @@ using Google.Protobuf;
 using Microsoft.Extensions.Logging;
 using Percolator.Contracts.Protos;
 
-namespace Percolator.Application
+namespace Percolator.Application.Manifests
 {
     public class ManifestStore : IManifestStore
     {

@@ -1,10 +1,10 @@
 using System.Security.Cryptography;
 using Google.Protobuf;
 using Percolator.Contracts.Protos;
-using Percolator.Identity;
 using Percolator.Cryptography;
+using Percolator.Identity;
 
-namespace Percolator.Application;
+namespace Percolator.Application.Manifests;
 
 public class ManifestService : IManifestService
 {

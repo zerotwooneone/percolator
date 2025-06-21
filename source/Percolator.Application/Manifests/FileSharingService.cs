@@ -1,13 +1,14 @@
-using Grpc.Core;
-using MediatR;
-using Microsoft.Extensions.Logging;
 using System.Security.Cryptography;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
+using Grpc.Core;
+using MediatR;
+using Microsoft.Extensions.Logging;
+using Percolator.Application.RateLimiting;
 using Percolator.Contracts.Protos;
 using Percolator.Cryptography;
 
-namespace Percolator.Application
+namespace Percolator.Application.Manifests
 {
     public class FileSharingService : FileSharing.FileSharingBase
     {

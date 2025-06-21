@@ -1,10 +1,10 @@
+using System.Collections.Concurrent;
 using Grpc.Net.Client;
 using Microsoft.Extensions.Logging;
 using Percolator.Contracts.Protos;
 using Percolator.Network;
-using System.Collections.Concurrent;
 
-namespace Percolator.Application;
+namespace Percolator.Application.PeerDiscovery;
 
 public class PeerConnectionManager : IPeerConnectionManager
 {

@@ -1,10 +1,9 @@
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
-using Percolator.Cryptography;
 using Percolator.Identity;
 using Percolator.Network;
 
-namespace Percolator.Application;
+namespace Percolator.Application.PeerDiscovery;
 
 public class DiscoverySignatureProvider : IDiscoverySignatureProvider
 {

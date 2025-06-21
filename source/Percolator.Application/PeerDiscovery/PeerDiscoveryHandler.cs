@@ -1,8 +1,7 @@
 using MediatR;
-using Percolator.Application.Notifications;
 using Percolator.Network;
 
-namespace Percolator.Application
+namespace Percolator.Application.PeerDiscovery
 {
     public class PeerDiscoveryHandler : IPeerDiscoveryHandler
     {

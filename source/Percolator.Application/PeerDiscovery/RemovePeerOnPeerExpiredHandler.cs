@@ -1,8 +1,7 @@
 using MediatR;
 using Microsoft.Extensions.Logging;
-using Percolator.Application.Notifications;
 
-namespace Percolator.Application.Handlers
+namespace Percolator.Application.PeerDiscovery
 {
     public class RemovePeerOnPeerExpiredHandler : INotificationHandler<PeerExpiredNotification>
     {

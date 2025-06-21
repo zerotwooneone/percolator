@@ -1,6 +1,6 @@
 using System.Collections.Concurrent;
 
-namespace Percolator.Application;
+namespace Percolator.Application.RateLimiting;
 
 public class InMemoryRateLimiter : IRateLimiter
 {

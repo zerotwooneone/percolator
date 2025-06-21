@@ -1,7 +1,7 @@
 using Percolator.Contracts.Protos;
 using Percolator.Network;
 
-namespace Percolator.Application;
+namespace Percolator.Application.PeerDiscovery;
 
 public interface IPeerConnectionManager
 {

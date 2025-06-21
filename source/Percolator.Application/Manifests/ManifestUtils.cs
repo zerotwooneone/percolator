@@ -1,7 +1,7 @@
 using Google.Protobuf;
 using Percolator.Contracts.Protos;
 
-namespace Percolator.Application
+namespace Percolator.Application.Manifests
 {
     public static class ManifestUtils
     {

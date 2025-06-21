@@ -1,9 +1,9 @@
-using Percolator.Identity;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using Microsoft.Extensions.Logging;
+using Percolator.Identity;
 
-namespace Percolator.Application
+namespace Percolator.Application.Identity
 {
     public class PersistentIdentityService : IIdentityService
     {

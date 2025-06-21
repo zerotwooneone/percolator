@@ -1,8 +1,7 @@
 using Google.Protobuf;
 using Percolator.Contracts.Protos;
-using System.Collections.Generic;
 
-namespace Percolator.Application;
+namespace Percolator.Application.Manifests;
 
 public interface IManifestService
 {

@@ -1,4 +1,4 @@
-namespace Percolator.Application;
+namespace Percolator.Application.RateLimiting;
 
 public interface IRateLimiter
 {

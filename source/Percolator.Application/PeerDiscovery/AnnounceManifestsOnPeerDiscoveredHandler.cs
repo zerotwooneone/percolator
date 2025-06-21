@@ -1,8 +1,8 @@
 using MediatR;
 using Microsoft.Extensions.Logging;
-using Percolator.Application.Notifications;
+using Percolator.Application.Manifests;
 
-namespace Percolator.Application.Handlers
+namespace Percolator.Application.PeerDiscovery
 {
     public class AnnounceManifestsOnPeerDiscoveredHandler : INotificationHandler<PeerDiscoveredNotification>
     {
