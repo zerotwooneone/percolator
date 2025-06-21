@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 
 namespace Pecolator.Cryptography
 {
@@ -30,12 +31,11 @@ namespace Pecolator.Cryptography
         public byte[] RatchetPublicKey => _dhRatchetKey.PublicKey.ExportSubjectPublicKeyInfo();
         public byte[] IdentityPublicKey => _identityKey.PublicKey.ExportSubjectPublicKeyInfo();
 
-        public DoubleRatchetSession(byte[] sharedSecret, ECDiffieHellman identityKey, SessionRole role, byte[]? remoteInitialRatchetKey = null)
+        public DoubleRatchetSession(byte[] sharedSecret, ECDiffieHellman identityKey, SessionRole role, byte[]? remoteInitialRatchetKey = null, ECDiffieHellman? ownInitialRatchetKey = null)
         {
             _role = role;
             _identityKey = identityKey; // Reference to the long-term key
             _rootKey = sharedSecret;
-            _dhRatchetKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
 
             if (role == SessionRole.Initiator)
             {
@@ -43,6 +43,7 @@ namespace Pecolator.Cryptography
                 {
                     throw new ArgumentNullException(nameof(remoteInitialRatchetKey), "Initiator requires an initial remote ratchet key.");
                 }
+                _dhRatchetKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
                 _remoteRatchetKeyBytes = remoteInitialRatchetKey;
                 
                 // Perform initial DH ratchet to get a sending key
@@ -51,7 +52,59 @@ namespace Pecolator.Cryptography
                 var dhResult = _dhRatchetKey.DeriveKeyMaterial(remoteKey.PublicKey);
                 (_rootKey, _sendingChainKey) = KDF_RK(_rootKey, dhResult);
             }
-            // Responder waits for the first message to perform its first DH ratchet.
+            else // Responder
+            {
+                if (ownInitialRatchetKey is null)
+                {
+                    throw new ArgumentNullException(nameof(ownInitialRatchetKey), "Responder requires its own initial ratchet key (pre-key).");
+                }
+                // Create a new key instance from the provided key's parameters to avoid lifecycle conflicts.
+                _dhRatchetKey = ECDiffieHellman.Create(ownInitialRatchetKey.ExportParameters(true));
+            }
+        }
+
+        private DoubleRatchetSession(DoubleRatchetSessionState state, ECDiffieHellman identityKey)
+        {
+            _role = state.Role;
+            _rootKey = state.RootKey;
+            _remoteRatchetKeyBytes = state.RemoteRatchetKeyBytes;
+            _sendingChainKey = state.SendingChainKey;
+            _receivingChainKey = state.ReceivingChainKey;
+            _sendingCounter = state.SendingCounter;
+            _receivingCounter = state.ReceivingCounter;
+            _skippedMessageKeys = state.SkippedMessageKeys;
+
+            _identityKey = identityKey;
+            _dhRatchetKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+            _dhRatchetKey.ImportECPrivateKey(state.RatchetKeyPrivate, out _);
+        }
+
+        public static DoubleRatchetSession LoadState(byte[] stateBytes, ECDiffieHellman identityKey)
+        {
+            var state = JsonSerializer.Deserialize<DoubleRatchetSessionState>(stateBytes);
+            if (state is null)
+            {
+                throw new ArgumentException("Invalid session state data.", nameof(stateBytes));
+            }
+            return new DoubleRatchetSession(state, identityKey);
+        }
+
+        public byte[] SaveState()
+        {
+            var state = new DoubleRatchetSessionState
+            {
+                Role = _role,
+                RootKey = _rootKey,
+                RemoteRatchetKeyBytes = _remoteRatchetKeyBytes,
+                SendingChainKey = _sendingChainKey,
+                ReceivingChainKey = _receivingChainKey,
+                SendingCounter = _sendingCounter,
+                ReceivingCounter = _receivingCounter,
+                SkippedMessageKeys = _skippedMessageKeys,
+                RatchetKeyPrivate = _dhRatchetKey.ExportECPrivateKey()
+            };
+
+            return JsonSerializer.SerializeToUtf8Bytes(state);
         }
 
         public RatchetMessage Encrypt(byte[] plaintext)

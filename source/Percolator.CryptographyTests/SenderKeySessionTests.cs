@@ -111,5 +111,36 @@ namespace Percolator.CryptographyTests
             // Attempting to decrypt a message from Group A in the context of Group B should fail.
             Assert.Throws<CryptographicException>(() => receiverSession.Decrypt(message));
         }
+
+        [Test]
+        public void SaveState_And_LoadState_RestoresSessionCorrectly()
+        {
+            // Arrange
+            var context = Encoding.UTF8.GetBytes("persistent-group");
+            using var senderSession = new SenderKeySession(_sessionKey, context);
+            var plaintext1 = "message before save";
+            var message1 = senderSession.Encrypt(Encoding.UTF8.GetBytes(plaintext1));
+
+            // Act: Save the state
+            var savedState = senderSession.SaveState();
+
+            // Create a new session from the saved state
+            using var loadedSenderSession = SenderKeySession.LoadState(savedState);
+
+            // Send another message with the loaded session
+            var plaintext2 = "message after load";
+            var message2 = loadedSenderSession.Encrypt(Encoding.UTF8.GetBytes(plaintext2));
+
+            // Assert: A new receiver session should be able to decrypt both messages
+            using var receiverSession = new SenderKeySession(_sessionKey, context);
+
+            // Decrypt the first message (sent before saving)
+            var decrypted1 = receiverSession.Decrypt(message1);
+            Encoding.UTF8.GetString(decrypted1).Should().Be(plaintext1);
+
+            // Decrypt the second message (sent after loading)
+            var decrypted2 = receiverSession.Decrypt(message2);
+            Encoding.UTF8.GetString(decrypted2).Should().Be(plaintext2);
+        }
     }
 }

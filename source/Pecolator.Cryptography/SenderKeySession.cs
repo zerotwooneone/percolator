@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 
 namespace Pecolator.Cryptography
 {
@@ -21,7 +22,6 @@ namespace Pecolator.Cryptography
             _chainKey = HKDF.DeriveKey(HashAlgorithmName.SHA256, sessionKey, 32, Encoding.UTF8.GetBytes("SenderKey-InitialChainKey"));
 
             var privateKey = HKDF.DeriveKey(HashAlgorithmName.SHA256, sessionKey, 32, Encoding.UTF8.GetBytes("SenderKey-SigningKey"));
-
             _signingKey = ECDsa.Create(new ECParameters
             {
                 Curve = ECCurve.NamedCurves.nistP256,
@@ -29,6 +29,41 @@ namespace Pecolator.Cryptography
             });
 
             _iteration = 0;
+        }
+
+        private SenderKeySession(SenderKeySessionState state)
+        {
+            _context = state.Context;
+            _chainKey = state.ChainKey;
+            _iteration = state.Iteration;
+            _skippedMessageKeys = state.SkippedMessageKeys;
+
+            _signingKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+            _signingKey.ImportPkcs8PrivateKey(state.SigningKeyPrivate, out _);
+        }
+
+        public static SenderKeySession LoadState(byte[] stateBytes)
+        {
+            var state = JsonSerializer.Deserialize<SenderKeySessionState>(stateBytes);
+            if (state is null)
+            {
+                throw new ArgumentException("Invalid session state data.", nameof(stateBytes));
+            }
+            return new SenderKeySession(state);
+        }
+
+        public byte[] SaveState()
+        {
+            var state = new SenderKeySessionState
+            {
+                Context = _context,
+                ChainKey = _chainKey,
+                Iteration = _iteration,
+                SkippedMessageKeys = _skippedMessageKeys,
+                SigningKeyPrivate = _signingKey.ExportPkcs8PrivateKey()
+            };
+
+            return JsonSerializer.SerializeToUtf8Bytes(state);
         }
 
         public SenderKeyMessage Encrypt(byte[] plaintext)
@@ -117,7 +152,7 @@ namespace Pecolator.Cryptography
 
         public void Dispose()
         {
-            _signingKey?.Dispose();
+            _signingKey.Dispose();
             GC.SuppressFinalize(this);
         }
     }
