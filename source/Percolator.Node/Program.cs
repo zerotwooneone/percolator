@@ -11,6 +11,7 @@ using Percolator.Network;
 using System.CommandLine;
 using System.IO;
 using System.Net;
+using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using Grpc.Net.Client;
 using Percolator.Contracts.Protos;
@@ -19,10 +20,7 @@ using Grpc.Core;
 
 // --- CONSTANTS ---
 
-// WARNING: This is a temporary, insecure placeholder for the security review.
-// In a real application, this should be replaced with a secure secret management
-// system, such as DPAPI on Windows or the system keychain.
-const string PfxPassword = "insecure-temporary-password";
+// The hardcoded password has been removed and is now managed by CredentialService.
 
 // --- ENTRYPOINT & COMMAND SETUP ---
 
@@ -73,10 +71,12 @@ async Task RunNodeAsync(int port)
 {
     var builder = WebApplication.CreateBuilder(args);
 
-    // Load or generate certificate and configure Kestrel with HTTPS
+    // Load or generate certificate and configure Kestrel
+    var credentialService = new CredentialService();
+    var pfxPassword = credentialService.GetOrCreatePfxPassword();
     var percolatorAppDataPath = GetAndCreatePercolatorAppDataPath();
     var certPath = Path.Combine(percolatorAppDataPath, "node.pfx");
-    var selfSignedCert = LoadOrGenerateCertificate(certPath);
+    var selfSignedCert = LoadOrGenerateCertificate(certPath, pfxPassword);
 
     builder.WebHost.ConfigureKestrel(options =>
     {
@@ -103,7 +103,8 @@ async Task RunNodeAsync(int port)
     ));
     builder.Services.AddSingleton<ManifestStore>();
     builder.Services.AddSingleton<ManifestService>();
-    builder.Services.AddSingleton<IIdentityService, IdentityService>();
+    builder.Services.AddSingleton<IIdentityService, PersistentIdentityService>();
+    builder.Services.AddSingleton<ICredentialService>(credentialService);
 
     builder.Services.AddGrpc();
     builder.Services.AddSingleton<FileSharingService>();
@@ -182,8 +183,9 @@ static IHost CreateCliHost()
         .ConfigureServices((_, services) =>
         {
             services.AddSingleton<ManifestStore>();
-            services.AddSingleton<IIdentityService, IdentityService>();
+            services.AddSingleton<IIdentityService, PersistentIdentityService>();
             services.AddSingleton<ManifestService>();
+            services.AddSingleton<ICredentialService, CredentialService>();
         })
         .Build();
 }
@@ -196,21 +198,26 @@ static string GetAndCreatePercolatorAppDataPath()
     return percolatorAppDataPath;
 }
 
-static X509Certificate2 LoadOrGenerateCertificate(string certPath)
+static X509Certificate2 LoadOrGenerateCertificate(string certPath, string password)
 {
     if (File.Exists(certPath))
     {
-        Console.WriteLine($"[Security] Loading existing certificate from: {certPath}");
-        var certBytes = File.ReadAllBytes(certPath);
-        return X509CertificateLoader.LoadPkcs12(certBytes, PfxPassword);
+        try
+        {
+            var pfxBytes = File.ReadAllBytes(certPath);
+            return X509CertificateLoader.LoadPkcs12(pfxBytes, password, X509KeyStorageFlags.Exportable);
+        }
+        catch (CryptographicException ex)
+        {
+            Console.WriteLine($"Error loading certificate from {certPath}. It might be corrupted or the password has changed. Error: {ex.Message}");
+            Console.WriteLine("Consider deleting the file and letting the application regenerate it.");
+            throw;
+        }
     }
-    else
-    {
-        Console.WriteLine("[Security] No existing certificate found. Generating a new one.");
-        var selfSignedCert = CertificateGenerator.CreateSelfSignedCertificate();
-        Console.WriteLine($"[Security] Saving new certificate to: {certPath}");
-        var certBytes = selfSignedCert.Export(X509ContentType.Pfx, PfxPassword);
-        File.WriteAllBytes(certPath, certBytes);
-        return selfSignedCert;
-    }
+
+    Console.WriteLine("Generating new self-signed certificate for the node...");
+    var newCert = CertificateGenerator.CreateSelfSignedCertificate("localhost");
+    var newPfxBytes = newCert.Export(X509ContentType.Pfx, password);
+    File.WriteAllBytes(certPath, newPfxBytes);
+    return X509CertificateLoader.LoadPkcs12(newPfxBytes, password, X509KeyStorageFlags.Exportable);
 }

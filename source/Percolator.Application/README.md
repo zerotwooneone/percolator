@@ -8,9 +8,18 @@ The primary responsibility of the `Application` layer is to orchestrate business
 
 ### Key Responsibilities:
 
--   **Service Implementation**: Contains implementations of services, such as the `FileSharingService` for gRPC.
+-   **Service Implementation**: Contains implementations of services, such as the `FileSharingService` for gRPC, `ManifestService` for creating and managing file manifests, and services for managing identity and credentials.
+-   **Secure Credential Management**: Implements `CredentialService` and `PersistentIdentityService` to securely store and manage user identity certificates and passwords using platform-native features.
 -   **Orchestration**: Manages the flow of data and calls between different parts of the system. For example, it would handle receiving a manifest announcement, verifying its signature using the `Cryptography` library, and storing it.
 -   **Dependency Injection**: Wires up dependencies for the main executable (`Percolator.Node`).
+
+## Platform Dependencies
+
+### Windows Only
+
+This library has a hard dependency on the Windows operating system. This is due to the `CredentialService` which uses the **Windows Data Protection API (DPAPI)** via `System.Security.Cryptography.ProtectedData` to securely encrypt and store the password for the identity certificate.
+
+This design decision was made to avoid storing sensitive credentials in plaintext or hardcoded in the source code. Future work may involve abstracting this service to support other platforms (e.g., using macOS Keychain or Linux Secret Service).
 
 ## Architectural Patterns
 
