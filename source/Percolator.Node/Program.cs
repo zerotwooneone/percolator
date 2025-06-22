@@ -200,14 +200,28 @@ static async Task RunNodeAsync(int port, string identityName, IServiceProvider s
 {
     var builder = WebApplication.CreateBuilder();
 
-    // Transfer configuration and services to the WebApplication host
+    // Use the same configuration source from the initial setup
     var configuration = serviceProvider.GetRequiredService<IConfiguration>();
     builder.Configuration.AddConfiguration(configuration);
-    var services = ConfigureServices(builder.Configuration);
-    foreach (var service in services)
+
+    // Configure services for the WebApplication host directly
+    builder.Services.AddLogging(configure =>
     {
-        builder.Services.Add(service);
-    }
+        configure.AddSimpleConsole(options =>
+        {
+            options.SingleLine = true;
+            options.TimestampFormat = "HH:mm:ss ";
+        });
+    });
+
+    builder.Services.AddIdentityServices();
+    // Pass the command-line port to override the config value
+    builder.Services.AddNetworkServices(builder.Configuration, port);
+    builder.Services.AddAppSecurity();
+    builder.Services.AddCryptography();
+    builder.Services.AddMessaging();
+    builder.Services.AddManifests();
+    builder.Services.AddGrpc();
 
     builder.WebHost.ConfigureKestrel(options =>
     {
