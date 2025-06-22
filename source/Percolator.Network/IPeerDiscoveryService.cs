@@ -2,6 +2,6 @@ namespace Percolator.Network;
 
 public interface IPeerDiscoveryService
 {
-    void Start();
+    Task StartAsync(CancellationToken cancellationToken = default);
     void Stop();
 }

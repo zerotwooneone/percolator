@@ -56,8 +56,9 @@ public class PersistentKeyManagementService : IKeyManagementService
             var decryptedBytes = _credentialService.Unprotect(encryptedBytes);
             var serializableKeys = JsonSerializer.Deserialize<SerializableX3dhKeyTriplet>(decryptedBytes, _jsonOptions)!;
 
-            var ik = ECDiffieHellman.Create();
-            ik.ImportParameters(serializableKeys.IdentityKey);
+            var ikParams = serializableKeys.IdentityKey;
+            var ikSigning = ECDsa.Create(ikParams);
+            var ikAgreement = ECDiffieHellman.Create(ikParams);
 
             var spk = ECDiffieHellman.Create();
             spk.ImportParameters(serializableKeys.SignedPreKey);
@@ -65,16 +66,18 @@ public class PersistentKeyManagementService : IKeyManagementService
             var opk = ECDiffieHellman.Create();
             opk.ImportParameters(serializableKeys.OneTimePreKey);
 
-            return new X3dhKeys(ik, spk, opk);
+            return new X3dhKeys(ikSigning, ikAgreement, spk, opk);
         }
         else
         {
-            var ik = CreateKey();
-            var spk = CreateKey();
-            var opk = CreateKey();
+            _logger.LogInformation("No key file found for {IdentityName}. Creating new keys.", identityName);
+            var ikSigning = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+            var ikAgreement = ECDiffieHellman.Create(ikSigning.ExportParameters(true));
+            var spk = CreatePreKey();
+            var opk = CreatePreKey();
 
             var serializableKeys = new SerializableX3dhKeyTriplet(
-                ik.ExportParameters(true),
+                ikSigning.ExportParameters(true),
                 spk.ExportParameters(true),
                 opk.ExportParameters(true)
             );
@@ -84,7 +87,7 @@ public class PersistentKeyManagementService : IKeyManagementService
             File.WriteAllBytes(keyFilePath, encryptedBytes);
             SetFileSecurity(keyFilePath);
             _logger.LogInformation("New keys created and saved for {IdentityName}", identityName);
-            return new X3dhKeys(ik, spk, opk);
+            return new X3dhKeys(ikSigning, ikAgreement, spk, opk);
         }
     }
 
@@ -100,8 +103,9 @@ public class PersistentKeyManagementService : IKeyManagementService
         var decryptedBytes = _credentialService.Unprotect(encryptedBytes);
         var serializableKeys = JsonSerializer.Deserialize<SerializableX3dhKeyTriplet>(decryptedBytes, _jsonOptions)!;
 
-        var ik = ECDiffieHellman.Create();
-        ik.ImportParameters(serializableKeys.IdentityKey);
+        var ikParams = serializableKeys.IdentityKey;
+        var ikSigning = ECDsa.Create(ikParams);
+        var ikAgreement = ECDiffieHellman.Create(ikParams);
 
         var spk = ECDiffieHellman.Create();
         spk.ImportParameters(serializableKeys.SignedPreKey);
@@ -109,10 +113,10 @@ public class PersistentKeyManagementService : IKeyManagementService
         var opk = ECDiffieHellman.Create();
         opk.ImportParameters(serializableKeys.OneTimePreKey);
 
-        return new X3dhKeys(ik, spk, opk);
+        return new X3dhKeys(ikSigning, ikAgreement, spk, opk);
     }
 
-    private ECDiffieHellman CreateKey()
+    private ECDiffieHellman CreatePreKey()
     {
         return ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
     }

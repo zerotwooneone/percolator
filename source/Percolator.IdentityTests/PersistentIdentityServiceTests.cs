@@ -148,7 +148,7 @@ namespace Percolator.IdentityTests
         {
             // Arrange
             var sut = CreateService();
-            var expectedKeys = new X3dhKeys(ECDiffieHellman.Create(), ECDiffieHellman.Create(), ECDiffieHellman.Create());
+            var expectedKeys = new X3dhKeys(ECDsa.Create(), ECDiffieHellman.Create(), ECDiffieHellman.Create(), ECDiffieHellman.Create());
             _mockKeyManagementService.Setup(k => k.GetOrCreateKeys(TestIdentityName)).Returns(expectedKeys);
 
             // Act

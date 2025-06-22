@@ -37,11 +37,6 @@ namespace Percolator.Network
             _udpClient.EnableBroadcast = true;
         }
 
-        public void Start()
-        {
-            _ = StartAsync();
-        }
-
         public async Task StartAsync(CancellationToken cancellationToken = default)
         {
             _cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);

@@ -5,7 +5,7 @@ namespace Percolator.Application.Identity;
 
 public static class ServiceCollectionExtensions
 {
-    public static IServiceCollection AddIdentity(this IServiceCollection services)
+    public static IServiceCollection AddIdentityServices(this IServiceCollection services)
     {
         services.AddSingleton<ICertificateOperations, CertificateOperations>();
         services.AddSingleton<IPeerIdentityStore, InMemoryPeerIdentityStore>();

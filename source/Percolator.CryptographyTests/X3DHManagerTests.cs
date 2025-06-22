@@ -1,5 +1,7 @@
-using FluentAssertions;
 using System.Security.Cryptography;
+using Google.Protobuf;
+using NUnit.Framework;
+using FluentAssertions;
 using Percolator.Cryptography;
 
 namespace Percolator.CryptographyTests;
@@ -8,69 +10,67 @@ namespace Percolator.CryptographyTests;
 public class X3DHManagerTests
 {
     [Test]
-    public void FullHandshake_ShouldResultInSameSharedSecret()
+    public void FullHandshake_Succeeds()
     {
-        // Arrange: Bob (Responder) generates his keys and bundle
-        using var bobIdentityKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        using var bobSignedPreKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        using var bobOneTimePreKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        // Arrange
+        var manager = new X3DHManager();
 
-        var bobSignedPreKeyBytes = bobSignedPreKey.PublicKey.ExportSubjectPublicKeyInfo();
-        var signature = X3DHManager.SignPreKey(bobIdentityKey, bobSignedPreKeyBytes);
+        // Alice's keys
+        var ikA_signing = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var ikA_agreement = ECDiffieHellman.Create(ikA_signing.ExportParameters(true));
+        var ekA = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
 
-        var bobBundle = new PreKeyBundle(
-            bobIdentityKey.PublicKey.ExportSubjectPublicKeyInfo(),
-            bobSignedPreKeyBytes,
-            signature,
-            bobOneTimePreKey.PublicKey.ExportSubjectPublicKeyInfo()
-        );
+        // Bob's keys
+        var ikB_signing = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var ikB_agreement = ECDiffieHellman.Create(ikB_signing.ExportParameters(true));
+        var spkB = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        var opkB = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
 
-        // Arrange: Alice (Initiator) generates her keys
-        using var aliceIdentityKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        using var aliceEphemeralKeyPair = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        var spkB_bytes = spkB.PublicKey.ExportSubjectPublicKeyInfo();
+        var signature = ikB_signing.SignData(spkB_bytes, HashAlgorithmName.SHA256);
 
-        // Act: Alice initiates the handshake
-        var aliceSharedSecret = X3DHManager.InitiateHandshake(bobBundle, aliceIdentityKey, aliceEphemeralKeyPair);
+        var bundle = new PreKeyBundle(
+            ikB_signing.ExportSubjectPublicKeyInfo(),
+            spkB_bytes,
+            opkB.PublicKey.ExportSubjectPublicKeyInfo(),
+            signature);
 
-        // Act: Bob responds to the handshake
-        var bobSharedSecret = X3DHManager.RespondToHandshake(
-            aliceIdentityKey.PublicKey.ExportSubjectPublicKeyInfo(),
-            aliceEphemeralKeyPair.PublicKey.ExportSubjectPublicKeyInfo(),
-            bobIdentityKey,
-            bobSignedPreKey,
-            bobOneTimePreKey
-        );
+        // Act
+        var sharedKeyAlice = manager.InitiateHandshake(bundle, ikA_signing, ikA_agreement, ekA);
+        var sharedKeyBob = manager.RespondToHandshake(
+            ikA_signing.ExportSubjectPublicKeyInfo(),
+            ekA.PublicKey.ExportSubjectPublicKeyInfo(),
+            ikB_signing,
+            ikB_agreement,
+            spkB,
+            opkB);
 
         // Assert
-        aliceSharedSecret.Should().NotBeNull();
-        aliceSharedSecret.Should().BeEquivalentTo(bobSharedSecret);
+        sharedKeyAlice.Should().NotBeNull();
+        sharedKeyAlice.Length.Should().Be(32);
+        sharedKeyAlice.Should().BeEquivalentTo(sharedKeyBob);
     }
 
     [Test]
-    public void InitiateHandshake_WithInvalidSignature_ShouldThrow()
+    public void InitiateHandshake_WithInvalidSignature_ThrowsException()
     {
-        // Arrange
-        using var bobIdentityKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        using var bobSignedPreKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        using var bobOneTimePreKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        var manager = new X3DHManager();
+        var ikA_signing = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var ikA_agreement = ECDiffieHellman.Create(ikA_signing.ExportParameters(true));
+        var ekA = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
 
-        var tamperedSignature = new byte[64];
-        RandomNumberGenerator.Fill(tamperedSignature);
+        var ikB_signing = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var spkB = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        var opkB = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
 
-        var bobBundle = new PreKeyBundle(
-            bobIdentityKey.PublicKey.ExportSubjectPublicKeyInfo(),
-            bobSignedPreKey.PublicKey.ExportSubjectPublicKeyInfo(),
-            tamperedSignature,
-            bobOneTimePreKey.PublicKey.ExportSubjectPublicKeyInfo()
+        var bundle = new PreKeyBundle(
+            ikB_signing.ExportSubjectPublicKeyInfo(),
+            spkB.PublicKey.ExportSubjectPublicKeyInfo(),
+            opkB.PublicKey.ExportSubjectPublicKeyInfo(),
+            new byte[64] // Invalid signature
         );
 
-        using var aliceIdentityKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        using var aliceEphemeralKeyPair = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-
-        // Act
-        Action act = () => X3DHManager.InitiateHandshake(bobBundle, aliceIdentityKey, aliceEphemeralKeyPair);
-
-        // Assert
+        Action act = () => manager.InitiateHandshake(bundle, ikA_signing, ikA_agreement, ekA);
         act.Should().Throw<CryptographicException>().WithMessage("Invalid signature for signed pre-key.");
     }
 }

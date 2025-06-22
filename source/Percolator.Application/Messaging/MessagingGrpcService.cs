@@ -1,4 +1,6 @@
 using System.Security;
+using System.Security.Cryptography;
+using System.Linq;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
@@ -21,14 +23,16 @@ namespace Percolator.Application.Messaging
         private readonly IIdentityService _identityService;
         private readonly IPeerIdentityStore _peerIdentityStore;
         private readonly ILogger<MessagingGrpcService> _logger;
+        private readonly X3DHManager _x3dhManager;
 
-        public MessagingGrpcService(IMessageService messageService, IGroupService groupService, IIdentityService identityService, IPeerIdentityStore peerIdentityStore, ILogger<MessagingGrpcService> logger)
+        public MessagingGrpcService(IMessageService messageService, IGroupService groupService, IIdentityService identityService, IPeerIdentityStore peerIdentityStore, ILogger<MessagingGrpcService> logger, X3DHManager x3dhManager)
         {
             _messageService = messageService;
             _groupService = groupService;
             _identityService = identityService;
             _peerIdentityStore = peerIdentityStore;
             _logger = logger;
+            _x3dhManager = x3dhManager;
         }
 
         private string GetPeerId(ServerCallContext context)
@@ -51,14 +55,21 @@ namespace Percolator.Application.Messaging
             try
             {
                 // 1. Retrieve the recipient's (local user's) private keys (IK, SPK, OPK).
-                var (identityKey, signedPreKey, oneTimePreKey) = _identityService.GetIdentityKeys(request.IdentityName);
+                var localKeys = _identityService.GetIdentityKeys(request.IdentityName);
 
                 // 2. Call X3DHManager.RespondToHandshake to compute the shared secret.
-                var sharedSecret = X3DHManager.RespondToHandshake(
+                var oneTimePreKey = localKeys.OneTimePreKey;
+                if (oneTimePreKey is null)
+                {
+                    throw new RpcException(new Status(StatusCode.FailedPrecondition, "No one-time pre-keys available for the recipient."));
+                }
+
+                var sharedKey = _x3dhManager.RespondToHandshake(
                     request.InitiatorIdentityKey.ToByteArray(),
                     request.InitiatorEphemeralKey.ToByteArray(),
-                    identityKey,
-                    signedPreKey,
+                    localKeys.IdentitySigningKey,
+                    localKeys.IdentityAgreementKey,
+                    localKeys.SignedPreKey,
                     oneTimePreKey);
 
                 _logger.LogInformation("Successfully computed shared secret with peer {peerId}", peerId);
@@ -108,14 +119,13 @@ namespace Percolator.Application.Messaging
 
                 _logger.LogInformation("Certificate validation passed. Getting identity keys.");
                 var keys = _identityService.GetIdentityKeys(request.IdentityName);
-                _logger.LogInformation("Successfully retrieved identity keys. IK: {ik_null}, SPK: {spk_null}, OPK: {opk_null}", keys.IdentityKey is null, keys.SignedPreKey is null, keys.OneTimePreKey is null);
+                _logger.LogInformation("Successfully retrieved identity keys.");
 
-                // TODO: The IdentityKey must be a signing key (e.g., ECDsa) to properly sign the SignedPreKey.
-                // This is a placeholder until the key generation logic is updated.
-                var signedPreKeySignature = ByteString.Empty;
-
-                var ikBytes = keys.IdentityKey.PublicKey.ExportSubjectPublicKeyInfo();
                 var spkBytes = keys.SignedPreKey.PublicKey.ExportSubjectPublicKeyInfo();
+                var signedPreKeySignature = keys.IdentitySigningKey.SignData(spkBytes, HashAlgorithmName.SHA256);
+                _logger.LogInformation("Successfully signed the pre-key.");
+
+                var ikBytes = keys.IdentitySigningKey.ExportSubjectPublicKeyInfo();
                 var opkBytes = keys.OneTimePreKey.PublicKey.ExportSubjectPublicKeyInfo();
                 _logger.LogInformation("Successfully exported public keys to byte arrays.");
 
@@ -124,7 +134,7 @@ namespace Percolator.Application.Messaging
                     IdentityKey = ByteString.CopyFrom(ikBytes),
                     SignedPreKey = ByteString.CopyFrom(spkBytes),
                     OneTimePreKey = ByteString.CopyFrom(opkBytes),
-                    SignedPreKeySignature = signedPreKeySignature
+                    SignedPreKeySignature = ByteString.CopyFrom(signedPreKeySignature)
                 };
                 _logger.LogInformation("Successfully created PreKeyBundle protobuf message. Returning response.");
 

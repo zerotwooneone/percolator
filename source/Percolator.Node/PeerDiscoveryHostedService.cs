@@ -9,9 +9,9 @@ namespace Percolator.Node;
 /// </summary>
 public class PeerDiscoveryHostedService : IHostedService
 {
-    private readonly PeerDiscoveryService _peerDiscoveryService;
+    private readonly IPeerDiscoveryService _peerDiscoveryService;
 
-    public PeerDiscoveryHostedService(PeerDiscoveryService peerDiscoveryService)
+    public PeerDiscoveryHostedService(IPeerDiscoveryService peerDiscoveryService)
     {
         _peerDiscoveryService = peerDiscoveryService;
     }
