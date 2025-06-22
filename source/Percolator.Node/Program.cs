@@ -206,6 +206,7 @@ static async Task RunNodeAsync(int port, string identityName, IServiceProvider s
 
     // Create and register the context for the active identity
     var activeIdentityContext = new ActiveIdentityContext { CurrentIdentityName = identityName };
+    //todo: add activeIdentityContext to both service collections and improve with public key and thumbprint
     builder.Services.AddSingleton(activeIdentityContext);
 
     // Configure services for the WebApplication host directly
