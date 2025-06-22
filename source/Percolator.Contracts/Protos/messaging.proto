@@ -1,0 +1,123 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/wrappers.proto";
+
+package Percolator.Contracts.Protos;
+
+option csharp_namespace = "Percolator.Contracts.Protos";
+
+// Main service for all messaging and group management operations
+service Messaging {
+    // --- Direct Messages ---
+    rpc SendDirectMessage(SendDirectMessageRequest) returns (SendDirectMessageResponse);
+    rpc EditDirectMessage(EditMessageRequest) returns (EditMessageResponse);
+    rpc AnnotateDirectMessage(AnnotateMessageRequest) returns (AnnotateMessageResponse);
+    rpc RemoveDirectMessageAnnotation(RemoveAnnotationRequest) returns (RemoveAnnotationResponse);
+
+    // --- Group Messages ---
+    rpc SendGroupMessage(SendGroupMessageRequest) returns (SendGroupMessageResponse);
+    rpc EditGroupMessage(EditMessageRequest) returns (EditMessageResponse);
+    rpc AnnotateGroupMessage(AnnotateMessageRequest) returns (AnnotateMessageResponse);
+    rpc RemoveGroupMessageAnnotation(RemoveAnnotationRequest) returns (RemoveAnnotationResponse);
+
+    // --- Group Management ---
+    rpc CreateGroup(CreateGroupRequest) returns (CreateGroupResponse);
+    rpc AddGroupMember(UpdateGroupMemberRequest) returns (UpdateGroupMemberResponse);
+    rpc RemoveGroupMember(UpdateGroupMemberRequest) returns (UpdateGroupMemberResponse);
+    rpc RenameGroup(RenameGroupRequest) returns (RenameGroupResponse);
+    rpc GetGroupDetails(GetGroupDetailsRequest) returns (Group);
+}
+
+// --- Data Models ---
+
+message Group {
+    string group_id = 1;
+    string name = 2;
+    repeated string member_ids = 3;
+}
+
+// --- Request/Response Definitions ---
+
+// Direct Messages
+message SendDirectMessageRequest {
+    string recipient_id = 1;
+    string content = 2;
+}
+
+message SendDirectMessageResponse {
+    string message_id = 1;
+    google.protobuf.Timestamp timestamp_utc = 2;
+}
+
+// Group Messages
+message SendGroupMessageRequest {
+    string group_id = 1;
+    string content = 2;
+}
+
+message SendGroupMessageResponse {
+    string message_id = 1;
+    google.protobuf.Timestamp timestamp_utc = 2;
+}
+
+// Common Edit
+message EditMessageRequest {
+    string message_id = 1;
+    string new_content = 2;
+}
+
+message EditMessageResponse {
+    bool success = 1;
+}
+
+// Common Annotation
+message AnnotateMessageRequest {
+    string message_id = 1;
+    string emoji = 2;
+}
+
+message AnnotateMessageResponse {
+    bool success = 1;
+}
+
+message RemoveAnnotationRequest {
+    string message_id = 1;
+    string emoji = 2;
+}
+
+message RemoveAnnotationResponse {
+    bool success = 1;
+}
+
+// Group Management
+message CreateGroupRequest {
+    string name = 1;
+    repeated string member_ids = 2;
+}
+
+message CreateGroupResponse {
+    Group group = 1;
+}
+
+message UpdateGroupMemberRequest {
+    string group_id = 1;
+    string member_id = 2;
+}
+
+message UpdateGroupMemberResponse {
+    bool success = 1;
+}
+
+message RenameGroupRequest {
+    string group_id = 1;
+    string new_name = 2;
+}
+
+message RenameGroupResponse {
+    bool success = 1;
+}
+
+message GetGroupDetailsRequest {
+    string group_id = 1;
+}

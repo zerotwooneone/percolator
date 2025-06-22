@@ -18,6 +18,7 @@
   <ItemGroup>
     <Protobuf Include="Protos\manifest.proto" />
     <Protobuf Include="Protos\filesharing.proto" GrpcServices="Both" />
+    <Protobuf Include="Protos\messaging.proto" GrpcServices="Both" />
   </ItemGroup>
 
 </Project>

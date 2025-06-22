@@ -10,11 +10,13 @@ using Percolator.Application;
 using Percolator.Application.Manifests;
 using Percolator.Application.PeerDiscovery;
 using Percolator.Application.RateLimiting;
+using Percolator.Application.Messaging;
 using Percolator.Contracts.Protos;
 using Percolator.Cryptography;
 using Percolator.Identity;
 using Percolator.Application.Identity;
 using Percolator.Application.Security;
+using Percolator.Messaging;
 using Percolator.Network;
 using System.CommandLine;
 using System.CommandLine.Builder;
@@ -190,6 +192,7 @@ static async Task RunNodeAsync(int port, IServiceProvider serviceProvider)
     lifetime.ApplicationStopping.Register(() => discoveryService.Stop());
 
     app.MapGrpcService<FileSharingService>();
+    app.MapGrpcService<MessagingGrpcService>();
 
     // Run the host
     await app.RunAsync();
@@ -230,6 +233,10 @@ static IServiceCollection ConfigureServices(string[] args)
             sp.GetRequiredService<IDiscoverySignatureProvider>(),
             sp.GetRequiredService<ILogger<PeerDiscoveryService>>());
     });
+
+    services.AddSingleton<IMessageStore, InMemoryMessageStore>();
+    services.AddScoped<IGroupService, GroupService>();
+    services.AddScoped<IMessageService, MessageService>();
 
     services.AddSingleton(services);
     return services;
