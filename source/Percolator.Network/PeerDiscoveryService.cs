@@ -9,12 +9,8 @@ namespace Percolator.Network
 {
     public class PeerDiscoveryService : IDisposable, IPeerDiscoveryService
     {
-        private const int BroadcastPort = 8888;
-        private static readonly TimeSpan BroadcastInterval = TimeSpan.FromSeconds(5);
-        private static readonly TimeSpan PeerExpirationTime = TimeSpan.FromSeconds(30);
-
         private readonly UdpClient _udpClient;
-        private readonly int _grpcPort;
+        private readonly IPeerDiscoveryConfig _config;
         private readonly IPAddress _localIpAddress;
         private readonly string _thumbprint;
         private readonly ConcurrentDictionary<IPEndPoint, Peer> _peers = new();
@@ -23,9 +19,9 @@ namespace Percolator.Network
         private readonly ILogger<PeerDiscoveryService> _logger;
         private CancellationTokenSource? _cancellationTokenSource;
 
-        public PeerDiscoveryService(int grpcPort, string thumbprint, IPeerDiscoveryHandler handler, IDiscoverySignatureProvider signatureProvider, ILogger<PeerDiscoveryService> logger)
+        public PeerDiscoveryService(IPeerDiscoveryConfig config, string thumbprint, IPeerDiscoveryHandler handler, IDiscoverySignatureProvider signatureProvider, ILogger<PeerDiscoveryService> logger)
         {
-            _grpcPort = grpcPort;
+            _config = config;
             _thumbprint = thumbprint;
             _handler = handler;
             _signatureProvider = signatureProvider;
@@ -33,7 +29,7 @@ namespace Percolator.Network
             _localIpAddress = GetPrimaryLocalIpAddress();
             _udpClient = new UdpClient();
             _udpClient.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
-            _udpClient.Client.Bind(new IPEndPoint(IPAddress.Any, BroadcastPort));
+            _udpClient.Client.Bind(new IPEndPoint(IPAddress.Any, _config.BroadcastPort));
             _udpClient.EnableBroadcast = true;
         }
 
@@ -64,15 +60,15 @@ namespace Percolator.Network
         {
             while (!token.IsCancellationRequested)
             {
-                var payload = $"{_localIpAddress}:{_grpcPort}";
+                var payload = $"{_localIpAddress}:{_config.ListenPort}";
                 var payloadBytes = Encoding.UTF8.GetBytes(payload);
                 var signature = _signatureProvider.Sign(payloadBytes);
                 var publicKeyCert = _signatureProvider.GetPublicKeyCertificate();
 
                 var message = $"PERCOLATOR_DISCOVERY:{Convert.ToBase64String(publicKeyCert)}:{Convert.ToBase64String(signature)}:{payload}";
                 var data = Encoding.UTF8.GetBytes(message);
-                await _udpClient.SendAsync(data, new IPEndPoint(IPAddress.Broadcast, BroadcastPort), token);
-                await Task.Delay(BroadcastInterval, token);
+                await _udpClient.SendAsync(data, new IPEndPoint(IPAddress.Broadcast, _config.BroadcastPort), token);
+                await Task.Delay(_config.BroadcastInterval, token);
             }
         }
 
@@ -146,8 +142,8 @@ namespace Percolator.Network
         {
             while (!token.IsCancellationRequested)
             {
-                await Task.Delay(PeerExpirationTime / 2, token);
-                var expiredPeers = _peers.Where(p => (DateTime.UtcNow - p.Value.LastSeenUtc) > PeerExpirationTime).ToList();
+                await Task.Delay(_config.PeerExpiration / 2, token);
+                var expiredPeers = _peers.Where(p => (DateTime.UtcNow - p.Value.LastSeenUtc) > _config.PeerExpiration).ToList();
                 foreach (var expiredPeer in expiredPeers)
                 {
                     if (_peers.TryRemove(expiredPeer.Key, out var removedPeer))
