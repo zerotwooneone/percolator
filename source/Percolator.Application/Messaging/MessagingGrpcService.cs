@@ -2,11 +2,14 @@ using System;
 using System.Linq;
 using System.Security;
 using System.Threading.Tasks;
+using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using Percolator.Contracts.Protos;
+using Percolator.Cryptography;
+using Percolator.Identity;
 using Percolator.Messaging;
 using Proto = Percolator.Contracts.Protos;
 
@@ -19,12 +22,16 @@ namespace Percolator.Application.Messaging
     {
         private readonly IMessageService _messageService;
         private readonly IGroupService _groupService;
+        private readonly IIdentityService _identityService;
+        private readonly IPeerIdentityStore _peerIdentityStore;
         private readonly ILogger<MessagingGrpcService> _logger;
 
-        public MessagingGrpcService(IMessageService messageService, IGroupService groupService, ILogger<MessagingGrpcService> logger)
+        public MessagingGrpcService(IMessageService messageService, IGroupService groupService, IIdentityService identityService, IPeerIdentityStore peerIdentityStore, ILogger<MessagingGrpcService> logger)
         {
             _messageService = messageService;
             _groupService = groupService;
+            _identityService = identityService;
+            _peerIdentityStore = peerIdentityStore;
             _logger = logger;
         }
 
@@ -40,11 +47,45 @@ namespace Percolator.Application.Messaging
             return thumbprint;
         }
 
-        public override async Task<SendDirectMessageResponse> SendDirectMessage(SendDirectMessageRequest request, ServerCallContext context)
+        public override Task<SendDirectMessageResponse> SendPreKeyDirectMessage(SendPreKeyDirectMessageRequest request, ServerCallContext context)
         {
-            var senderId = GetPeerId(context);
-            await _messageService.SendDirectMessageAsync(senderId, request.RecipientId, request.Content);
-            return new SendDirectMessageResponse { MessageId = Guid.NewGuid().ToString(), TimestampUtc = Timestamp.FromDateTime(DateTime.UtcNow) };
+            // TODO: Full implementation requires significant orchestration:
+            // 1. Retrieve the recipient's (local user's) private keys (IK, SPK, OPK) that correspond to the public keys used by the initiator.
+            //    - This functionality needs to be exposed from the Identity/Cryptography domains.
+            // 2. Call X3DHManager.RespondToHandshake to compute the shared secret.
+            // 3. Decrypt request.encrypted_payload using the shared secret.
+            // 4. The decrypted payload will be the original message content.
+            // 5. Create a new DoubleRatchetSession with the shared secret and store it, associated with the initiator's identity.
+            // 6. Store the initiator's identity and pre-key bundle using IPeerIdentityStore.
+            // 7. Pass the decrypted message to _messageService.
+
+            throw new RpcException(new Status(StatusCode.Unimplemented, "Secure session establishment not yet implemented."));
+        }
+
+        public override async Task<PublishPreKeyBundleResponse> PublishPreKeyBundle(PublishPreKeyBundleRequest request, ServerCallContext context)
+        {
+            var identityKey = request.Bundle.IdentityKey.ToByteArray();
+            var bundleBytes = request.Bundle.ToByteArray();
+
+            var peerIdentity = new PeerIdentity(identityKey, bundleBytes);
+            await _peerIdentityStore.StorePeerAsync(peerIdentity);
+
+            return new PublishPreKeyBundleResponse { Success = true };
+        }
+
+        public override async Task<GetPreKeyBundleResponse> GetPreKeyBundle(GetPreKeyBundleRequest request, ServerCallContext context)
+        {
+            var identityKey = request.IdentityKey.ToByteArray();
+            var peer = await _peerIdentityStore.GetPeerAsync(identityKey);
+
+            if (peer is null)
+            {
+                throw new RpcException(new Status(StatusCode.NotFound, "Pre-key bundle not found for the given identity."));
+            }
+
+            var bundle = Proto.PreKeyBundle.Parser.ParseFrom(peer.PreKeyBundle);
+
+            return new GetPreKeyBundleResponse { Bundle = bundle };
         }
 
         public override async Task<EditMessageResponse> EditDirectMessage(EditMessageRequest request, ServerCallContext context)

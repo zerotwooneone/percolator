@@ -212,6 +212,7 @@ static IServiceCollection ConfigureServices(string[] args)
     services.AddSingleton<ICredentialService, CredentialService>();
     services.AddSingleton<ICertificateOperations, CertificateOperations>();
     services.AddSingleton<IIdentityService, PersistentIdentityService>();
+    services.AddSingleton<IPeerIdentityStore, InMemoryPeerIdentityStore>();
     services.AddSingleton<ITrustedPeerStore, InMemoryTrustedPeerStore>();
     services.AddSingleton<IDiscoverySignatureProvider, DiscoverySignatureProvider>();
     services.AddSingleton<ISharedDirectoryProvider, SharedDirectoryProvider>();

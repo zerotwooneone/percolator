@@ -9,11 +9,15 @@ option csharp_namespace = "Percolator.Contracts.Protos";
 
 // Main service for all messaging and group management operations
 service Messaging {
+    // --- Secure Session Management ---
+    rpc PublishPreKeyBundle(PublishPreKeyBundleRequest) returns (PublishPreKeyBundleResponse);
+    rpc GetPreKeyBundle(GetPreKeyBundleRequest) returns (GetPreKeyBundleResponse);
+
     // --- Direct Messages ---
-    rpc SendDirectMessage(SendDirectMessageRequest) returns (SendDirectMessageResponse);
-    rpc EditDirectMessage(EditMessageRequest) returns (EditMessageResponse);
-    rpc AnnotateDirectMessage(AnnotateMessageRequest) returns (AnnotateMessageResponse);
-    rpc RemoveDirectMessageAnnotation(RemoveAnnotationRequest) returns (RemoveAnnotationResponse);
+    rpc SendPreKeyDirectMessage(SendPreKeyDirectMessageRequest) returns (SendDirectMessageResponse);
+    rpc EditDirectMessage(EditMessageRequest) returns (EditMessageResponse); // Note: Assumes session exists
+    rpc AnnotateDirectMessage(AnnotateMessageRequest) returns (AnnotateMessageResponse); // Note: Assumes session exists
+    rpc RemoveDirectMessageAnnotation(RemoveAnnotationRequest) returns (RemoveAnnotationResponse); // Note: Assumes session exists
 
     // --- Group Messages ---
     rpc SendGroupMessage(SendGroupMessageRequest) returns (SendGroupMessageResponse);
@@ -37,17 +41,43 @@ message Group {
     repeated string member_ids = 3;
 }
 
+message PreKeyBundle {
+    bytes identity_key = 1;
+    bytes signed_pre_key = 2;
+    bytes signature = 3;
+    bytes one_time_pre_key = 4;
+}
+
 // --- Request/Response Definitions ---
 
 // Direct Messages
-message SendDirectMessageRequest {
-    string recipient_id = 1;
-    string content = 2;
+message SendPreKeyDirectMessageRequest {
+    bytes recipient_identity_key = 1;
+    bytes initiator_identity_key = 2;
+    bytes initiator_ephemeral_key = 3;
+    bytes encrypted_payload = 4;
 }
 
 message SendDirectMessageResponse {
     string message_id = 1;
     google.protobuf.Timestamp timestamp_utc = 2;
+}
+
+// Secure Session Management
+message PublishPreKeyBundleRequest {
+    PreKeyBundle bundle = 1;
+}
+
+message PublishPreKeyBundleResponse {
+    bool success = 1;
+}
+
+message GetPreKeyBundleRequest {
+    bytes identity_key = 1;
+}
+
+message GetPreKeyBundleResponse {
+    PreKeyBundle bundle = 1;
 }
 
 // Group Messages
