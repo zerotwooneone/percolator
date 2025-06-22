@@ -85,11 +85,11 @@ static RootCommand BuildCommandLine(IServiceProvider serviceProvider)
     var runCommand = new Command("run", "Run the Percolator node.");
     runCommand.AddOption(portOption);
     runCommand.AddOption(identityOption);
-    runCommand.SetHandler(async (port, identity) =>
+    runCommand.SetHandler((port, identity) =>
     {
         var logger = serviceProvider.GetRequiredService<ILogger<Program>>();
         logger.LogInformation("Starting node on port {Port} for identity '{Identity}'...", port, identity);
-        await RunNodeAsync(port, identity, serviceProvider);
+        return RunNodeAsync(port, identity, serviceProvider);
     }, portOption, identityOption);
 
     // --- 'send-dm' Command ---
@@ -203,6 +203,10 @@ static async Task RunNodeAsync(int port, string identityName, IServiceProvider s
     // Use the same configuration source from the initial setup
     var configuration = serviceProvider.GetRequiredService<IConfiguration>();
     builder.Configuration.AddConfiguration(configuration);
+
+    // Create and register the context for the active identity
+    var activeIdentityContext = new ActiveIdentityContext { CurrentIdentityName = identityName };
+    builder.Services.AddSingleton(activeIdentityContext);
 
     // Configure services for the WebApplication host directly
     builder.Services.AddLogging(configure =>

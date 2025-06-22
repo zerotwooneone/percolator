@@ -27,13 +27,13 @@ public class X3DHManagerTests
         var opkB = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
 
         var spkB_bytes = spkB.PublicKey.ExportSubjectPublicKeyInfo();
-        var signature = ikB_signing.SignData(spkB_bytes, HashAlgorithmName.SHA256);
+        var signature = ikB_signing.SignData(spkB_bytes, HashAlgorithmName.SHA256, DSASignatureFormat.IeeeP1363FixedFieldConcatenation);
 
         var bundle = new PreKeyBundle(
             ikB_signing.ExportSubjectPublicKeyInfo(),
             spkB_bytes,
-            opkB.PublicKey.ExportSubjectPublicKeyInfo(),
-            signature);
+            signature,
+            opkB.PublicKey.ExportSubjectPublicKeyInfo());
 
         // Act
         var sharedKeyAlice = manager.InitiateHandshake(bundle, ikA_signing, ikA_agreement, ekA);
@@ -63,11 +63,14 @@ public class X3DHManagerTests
         var spkB = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var opkB = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
 
+        var spkB_bytes = spkB.PublicKey.ExportSubjectPublicKeyInfo();
+        var signature = ikB_signing.SignData(spkB_bytes, HashAlgorithmName.SHA256, DSASignatureFormat.IeeeP1363FixedFieldConcatenation);
+
         var bundle = new PreKeyBundle(
             ikB_signing.ExportSubjectPublicKeyInfo(),
             spkB.PublicKey.ExportSubjectPublicKeyInfo(),
-            opkB.PublicKey.ExportSubjectPublicKeyInfo(),
-            new byte[64] // Invalid signature
+            new byte[64], // Invalid signature
+            opkB.PublicKey.ExportSubjectPublicKeyInfo()
         );
 
         Action act = () => manager.InitiateHandshake(bundle, ikA_signing, ikA_agreement, ekA);

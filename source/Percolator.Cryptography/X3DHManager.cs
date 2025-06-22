@@ -13,7 +13,7 @@ public class X3DHManager
         using var remoteIdentityKey = ECDsa.Create();
         remoteIdentityKey.ImportSubjectPublicKeyInfo(remoteBundle.IdentityKey, out _);
 
-        if (!remoteIdentityKey.VerifyData(remoteBundle.SignedPreKey, remoteBundle.Signature, HashAlgorithmName.SHA256))
+        if (!remoteIdentityKey.VerifyData(remoteBundle.SignedPreKey, remoteBundle.Signature, HashAlgorithmName.SHA256, DSASignatureFormat.IeeeP1363FixedFieldConcatenation))
         {
             throw new CryptographicException("Invalid signature for signed pre-key.");
         }
@@ -77,13 +77,13 @@ public class X3DHManager
     {
         var parameters = identitySigningKey.ExportParameters(true);
         using var ecdsa = ECDsa.Create(parameters);
-        return ecdsa.SignData(signedPreKey, HashAlgorithmName.SHA256);
+        return ecdsa.SignData(signedPreKey, HashAlgorithmName.SHA256, DSASignatureFormat.IeeeP1363FixedFieldConcatenation);
     }
 
     public bool VerifySignature(byte[] identityKey, byte[] signedPreKey, byte[] signature)
     {
         using var ecdsa = ECDsa.Create();
         ecdsa.ImportSubjectPublicKeyInfo(identityKey, out _);
-        return ecdsa.VerifyData(signedPreKey, signature, HashAlgorithmName.SHA256);
+        return ecdsa.VerifyData(signedPreKey, signature, HashAlgorithmName.SHA256, DSASignatureFormat.IeeeP1363FixedFieldConcatenation);
     }
 }

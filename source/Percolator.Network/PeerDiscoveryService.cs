@@ -12,17 +12,17 @@ namespace Percolator.Network
         private readonly UdpClient _udpClient;
         private readonly IPeerDiscoveryConfig _config;
         private readonly IPAddress _localIpAddress;
-        private readonly string _thumbprint;
         private readonly ConcurrentDictionary<IPEndPoint, Peer> _peers = new();
         private readonly IPeerDiscoveryHandler _handler;
         private readonly IDiscoverySignatureProvider _signatureProvider;
+        private readonly IIdentityProvider _identityProvider;
         private readonly ILogger<PeerDiscoveryService> _logger;
         private CancellationTokenSource? _cancellationTokenSource;
 
-        public PeerDiscoveryService(IPeerDiscoveryConfig config, string thumbprint, IPeerDiscoveryHandler handler, IDiscoverySignatureProvider signatureProvider, ILogger<PeerDiscoveryService> logger)
+        public PeerDiscoveryService(IPeerDiscoveryConfig config, IIdentityProvider identityProvider, IPeerDiscoveryHandler handler, IDiscoverySignatureProvider signatureProvider, ILogger<PeerDiscoveryService> logger)
         {
             _config = config;
-            _thumbprint = thumbprint;
+            _identityProvider = identityProvider;
             _handler = handler;
             _signatureProvider = signatureProvider;
             _logger = logger;
@@ -58,17 +58,29 @@ namespace Percolator.Network
 
         private async Task BroadcastPresenceAsync(CancellationToken token)
         {
+            var broadcastEndpoint = new IPEndPoint(IPAddress.Broadcast, _config.BroadcastPort);
             while (!token.IsCancellationRequested)
             {
-                var payload = $"{_localIpAddress}:{_config.ListenPort}";
-                var payloadBytes = Encoding.UTF8.GetBytes(payload);
-                var signature = _signatureProvider.Sign(payloadBytes);
-                var publicKeyCert = _signatureProvider.GetPublicKeyCertificate();
+                try
+                {
+                    var payload = $"{_localIpAddress}:{_config.ListenPort}";
+                    var payloadBytes = Encoding.UTF8.GetBytes(payload);
+                    var signature = _signatureProvider.Sign(payloadBytes);
+                    var publicKeyCert = _signatureProvider.GetPublicKeyCertificate();
 
-                var message = $"PERCOLATOR_DISCOVERY:{Convert.ToBase64String(publicKeyCert)}:{Convert.ToBase64String(signature)}:{payload}";
-                var data = Encoding.UTF8.GetBytes(message);
-                await _udpClient.SendAsync(data, new IPEndPoint(IPAddress.Broadcast, _config.BroadcastPort), token);
-                await Task.Delay(_config.BroadcastInterval, token);
+                    var message = $"PERCOLATOR_DISCOVERY:{Convert.ToBase64String(publicKeyCert)}:{Convert.ToBase64String(signature)}:{payload}";
+                    var data = Encoding.UTF8.GetBytes(message);
+                    await _udpClient.SendAsync(data, data.Length, broadcastEndpoint);
+                    await Task.Delay(_config.BroadcastInterval, token);
+                }
+                catch (OperationCanceledException)
+                {
+                    // This is expected on shutdown
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "An error occurred while broadcasting presence.");
+                }
             }
         }
 
@@ -103,7 +115,7 @@ namespace Percolator.Network
                             var discoveredThumbprint = _signatureProvider.GetThumbprint(publicKeyCert);
 
                             // Ignore our own broadcast
-                            if (discoveredThumbprint == _thumbprint)
+                            if (discoveredThumbprint == _identityProvider.GetThumbprint())
                             {
                                 continue;
                             }

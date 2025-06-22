@@ -12,6 +12,7 @@ namespace Percolator.NetworkTests
         private Mock<IDiscoverySignatureProvider> _mockSignatureProvider;
         private Mock<ILogger<PeerDiscoveryService>> _mockLogger;
         private Mock<IPeerDiscoveryConfig> _mockConfig;
+        private Mock<IIdentityProvider> _mockIdentityProvider;
         private PeerDiscoveryService _service;
 
         [SetUp]
@@ -21,15 +22,18 @@ namespace Percolator.NetworkTests
             _mockSignatureProvider = new Mock<IDiscoverySignatureProvider>();
             _mockLogger = new Mock<ILogger<PeerDiscoveryService>>();
             _mockConfig = new Mock<IPeerDiscoveryConfig>();
+            _mockIdentityProvider = new Mock<IIdentityProvider>();
 
             _mockConfig.SetupGet(c => c.BroadcastPort).Returns(8888);
             _mockConfig.SetupGet(c => c.ListenPort).Returns(5001);
             _mockConfig.SetupGet(c => c.BroadcastInterval).Returns(TimeSpan.FromSeconds(5));
             _mockConfig.SetupGet(c => c.PeerExpiration).Returns(TimeSpan.FromSeconds(30));
 
+            _mockIdentityProvider.Setup(p => p.GetThumbprint()).Returns("test_thumbprint");
+
             _service = new PeerDiscoveryService(
                 _mockConfig.Object,
-                "test_thumbprint",
+                _mockIdentityProvider.Object,
                 _mockHandler.Object,
                 _mockSignatureProvider.Object,
                 _mockLogger.Object);
