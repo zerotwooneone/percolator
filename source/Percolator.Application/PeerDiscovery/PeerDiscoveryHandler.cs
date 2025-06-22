@@ -1,7 +1,6 @@
 using Microsoft.Extensions.Logging;
 using Percolator.Application.Security;
 using Percolator.Network;
-using System.Threading.Tasks;
 
 namespace Percolator.Application.PeerDiscovery
 {

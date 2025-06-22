@@ -5,5 +5,6 @@ namespace Percolator.Identity
     public interface ICertificateOperations
     {
         X509Certificate2 CreateSelfSignedCertificate(string commonName);
+        X509Certificate2 CreateTlsCertificate(string commonName);
     }
 }

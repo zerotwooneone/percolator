@@ -9,6 +9,8 @@ namespace Percolator.Identity
     public interface ICredentialService
     {
         string GetOrCreatePfxPassword();
+        byte[] Protect(byte[] data);
+        byte[] Unprotect(byte[] data);
     }
 
     public class CredentialService : ICredentialService
@@ -56,6 +58,16 @@ namespace Percolator.Identity
                 SetFileSecurity(_credentialFilePath);
                 return newPassword;
             }
+        }
+
+        public byte[] Protect(byte[] data)
+        {
+            return ProtectedData.Protect(data, Entropy, DataProtectionScope.CurrentUser);
+        }
+
+        public byte[] Unprotect(byte[] data)
+        {
+            return ProtectedData.Unprotect(data, Entropy, DataProtectionScope.CurrentUser);
         }
 
         private static string GenerateRandomPassword()

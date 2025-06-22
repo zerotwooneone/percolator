@@ -7,10 +7,10 @@ namespace Percolator.Application.PeerDiscovery
     public class AnnounceManifestsOnPeerDiscoveredHandler : INotificationHandler<PeerDiscoveredNotification>
     {
         private readonly ILogger<AnnounceManifestsOnPeerDiscoveredHandler> _logger;
-        private readonly PeerConnectionManager _connectionManager;
-        private readonly ManifestStore _manifestStore;
+        private readonly IPeerConnectionManager _connectionManager;
+        private readonly IManifestStore _manifestStore;
 
-        public AnnounceManifestsOnPeerDiscoveredHandler(ILogger<AnnounceManifestsOnPeerDiscoveredHandler> logger, PeerConnectionManager connectionManager, ManifestStore manifestStore)
+        public AnnounceManifestsOnPeerDiscoveredHandler(ILogger<AnnounceManifestsOnPeerDiscoveredHandler> logger, IPeerConnectionManager connectionManager, IManifestStore manifestStore)
         {
             _logger = logger;
             _connectionManager = connectionManager;
@@ -27,7 +27,7 @@ namespace Percolator.Application.PeerDiscovery
             {
                 try
                 {
-                    var signedManifest = _manifestStore.GetManifest(manifestHash);
+                    var signedManifest = _manifestStore.Get(manifestHash);
                     if (signedManifest is null)
                     {
                         _logger.LogWarning("Could not find manifest for hash {ManifestHash} to announce. Skipping.", manifestHash.ToBase64());

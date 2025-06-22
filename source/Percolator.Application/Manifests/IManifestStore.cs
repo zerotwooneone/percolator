@@ -7,4 +7,5 @@ public interface IManifestStore
 {
     void Add(ByteString hash, SignedManifest manifest, string? rootPath = null);
     SignedManifest? Get(ByteString hash);
+    IEnumerable<ByteString> GetManifestHashes();
 }

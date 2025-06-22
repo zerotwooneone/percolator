@@ -9,9 +9,13 @@ namespace Percolator.Application.Security
 
         public InMemoryTrustedPeerStore(IIdentityService identityService)
         {
-            // A node must always trust its own certificate.
-            var selfThumbprint = identityService.GetDefaultIdentityCertificate().Thumbprint;
-            Add(selfThumbprint);
+            // A node must always trust its own certificate. The first available identity is used.
+            var selfIdentityName = identityService.ListIdentityNames().FirstOrDefault();
+            if (selfIdentityName is not null)
+            {
+                var selfCertificate = identityService.GetIdentityCertificate(selfIdentityName);
+                Add(selfCertificate.Thumbprint);
+            }
         }
 
         public void Add(string thumbprint)

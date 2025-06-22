@@ -10,5 +10,10 @@ namespace Percolator.Application.Identity
         {
             return CertificateGenerator.CreateSelfSignedCertificate(commonName);
         }
+
+        public X509Certificate2 CreateTlsCertificate(string commonName)
+        {
+            return CertificateGenerator.CreateTlsCertificate(commonName);
+        }
     }
 }

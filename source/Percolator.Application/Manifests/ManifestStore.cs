@@ -131,12 +131,6 @@ namespace Percolator.Application.Manifests
             _logger.LogInformation("Finished loading manifests. Total size: {CurrentStoreSize} bytes.", _currentStoreSize);
         }
 
-        public SignedManifest? GetManifest(ByteString hash)
-        {
-            _manifests.TryGetValue(hash, out var entry);
-            return entry.Manifest;
-        }
-
         public (SignedManifest? Manifest, string? RootPath) GetManifestAndRootPath(ByteString hash)
         {
             _manifests.TryGetValue(hash, out var entry);

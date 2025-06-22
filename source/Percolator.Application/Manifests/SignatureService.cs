@@ -18,7 +18,12 @@ public class SignatureService : ISignatureService
 
     public void Sign(SignedManifest manifest)
     {
-        var certificate = _identityService.GetDefaultIdentityCertificate();
+        var identityName = _identityService.ListIdentityNames().FirstOrDefault();
+        if (identityName is null)
+        {
+            throw new InvalidOperationException("Cannot sign manifest: No identities found.");
+        }
+        var certificate = _identityService.GetIdentityCertificate(identityName);
         var privateKey = certificate.GetRSAPrivateKey()!;
         var dataToSign = manifest.Manifest.ToByteArray();
         var signature = privateKey.SignData(dataToSign, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);

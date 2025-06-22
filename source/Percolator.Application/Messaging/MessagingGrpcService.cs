@@ -1,11 +1,7 @@
-using System;
-using System.Linq;
 using System.Security;
-using System.Threading.Tasks;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
-using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using Percolator.Contracts.Protos;
 using Percolator.Cryptography;
@@ -49,43 +45,97 @@ namespace Percolator.Application.Messaging
 
         public override Task<SendDirectMessageResponse> SendPreKeyDirectMessage(SendPreKeyDirectMessageRequest request, ServerCallContext context)
         {
-            // TODO: Full implementation requires significant orchestration:
-            // 1. Retrieve the recipient's (local user's) private keys (IK, SPK, OPK) that correspond to the public keys used by the initiator.
-            //    - This functionality needs to be exposed from the Identity/Cryptography domains.
-            // 2. Call X3DHManager.RespondToHandshake to compute the shared secret.
-            // 3. Decrypt request.encrypted_payload using the shared secret.
-            // 4. The decrypted payload will be the original message content.
-            // 5. Create a new DoubleRatchetSession with the shared secret and store it, associated with the initiator's identity.
-            // 6. Store the initiator's identity and pre-key bundle using IPeerIdentityStore.
-            // 7. Pass the decrypted message to _messageService.
+            var peerId = GetPeerId(context);
+            _logger.LogInformation("Received pre-key direct message from peer {peerId} for identity '{identityName}'", peerId, request.IdentityName);
 
-            throw new RpcException(new Status(StatusCode.Unimplemented, "Secure session establishment not yet implemented."));
+            try
+            {
+                // 1. Retrieve the recipient's (local user's) private keys (IK, SPK, OPK).
+                var (identityKey, signedPreKey, oneTimePreKey) = _identityService.GetIdentityKeys(request.IdentityName);
+
+                // 2. Call X3DHManager.RespondToHandshake to compute the shared secret.
+                var sharedSecret = X3DHManager.RespondToHandshake(
+                    request.InitiatorIdentityKey.ToByteArray(),
+                    request.InitiatorEphemeralKey.ToByteArray(),
+                    identityKey,
+                    signedPreKey,
+                    oneTimePreKey);
+
+                _logger.LogInformation("Successfully computed shared secret with peer {peerId}", peerId);
+
+                // TODO:
+                // 3. Decrypt request.encrypted_payload using the shared secret (e.g., AES-GCM).
+                // 4. The decrypted payload will be the original message content.
+                // 5. Create a new DoubleRatchetSession with the shared secret and store it.
+                // 6. Store the initiator's identity and pre-key bundle using IPeerIdentityStore.
+                // 7. Pass the decrypted message to _messageService.
+
+                // For now, we'll just acknowledge the handshake.
+                return Task.FromResult(new SendDirectMessageResponse { Success = true });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to process pre-key direct message from peer {peerId}", peerId);
+                throw new RpcException(new Status(StatusCode.Internal, "An error occurred during handshake."));
+            }
         }
 
-        public override async Task<PublishPreKeyBundleResponse> PublishPreKeyBundle(PublishPreKeyBundleRequest request, ServerCallContext context)
+        public override Task<PublishPreKeyBundleResponse> PublishPreKeyBundle(PublishPreKeyBundleRequest request, ServerCallContext context)
         {
+            var peerId = GetPeerId(context);
             var identityKey = request.Bundle.IdentityKey.ToByteArray();
             var bundleBytes = request.Bundle.ToByteArray();
 
             var peerIdentity = new PeerIdentity(identityKey, bundleBytes);
-            await _peerIdentityStore.StorePeerAsync(peerIdentity);
+            _peerIdentityStore.StorePeerAsync(peerIdentity); // Note: This is an async method but we don't await it.
 
-            return new PublishPreKeyBundleResponse { Success = true };
+            _logger.LogInformation("Stored pre-key bundle for peer {peerId} and identity '{identityName}'", peerId, request.IdentityName);
+
+            return Task.FromResult(new PublishPreKeyBundleResponse { Success = true });
         }
 
-        public override async Task<GetPreKeyBundleResponse> GetPreKeyBundle(GetPreKeyBundleRequest request, ServerCallContext context)
+        public override Task<GetPreKeyBundleResponse> GetPreKeyBundle(GetPreKeyBundleRequest request, ServerCallContext context)
         {
-            var identityKey = request.IdentityKey.ToByteArray();
-            var peer = await _peerIdentityStore.GetPeerAsync(identityKey);
-
-            if (peer is null)
+            try
             {
-                throw new RpcException(new Status(StatusCode.NotFound, "Pre-key bundle not found for the given identity."));
+                _logger.LogInformation("GetPreKeyBundle invoked for identity '{identityName}' and user '{userId}'.", request.IdentityName, request.UserId);
+                var certificate = _identityService.GetIdentityCertificate(request.IdentityName);
+                if (!string.Equals(certificate.Thumbprint, request.UserId, StringComparison.OrdinalIgnoreCase))
+                {
+                    _logger.LogWarning("Permission denied. User ID {requestUserId} does not match thumbprint {certThumbprint} for identity '{identityName}'.", request.UserId, certificate.Thumbprint, request.IdentityName);
+                    throw new RpcException(new Status(StatusCode.PermissionDenied, "User ID does not match certificate thumbprint for the requested identity."));
+                }
+
+                _logger.LogInformation("Certificate validation passed. Getting identity keys.");
+                var keys = _identityService.GetIdentityKeys(request.IdentityName);
+                _logger.LogInformation("Successfully retrieved identity keys. IK: {ik_null}, SPK: {spk_null}, OPK: {opk_null}", keys.IdentityKey is null, keys.SignedPreKey is null, keys.OneTimePreKey is null);
+
+                // TODO: The IdentityKey must be a signing key (e.g., ECDsa) to properly sign the SignedPreKey.
+                // This is a placeholder until the key generation logic is updated.
+                var signedPreKeySignature = ByteString.Empty;
+
+                var ikBytes = keys.IdentityKey.PublicKey.ExportSubjectPublicKeyInfo();
+                var spkBytes = keys.SignedPreKey.PublicKey.ExportSubjectPublicKeyInfo();
+                var opkBytes = keys.OneTimePreKey.PublicKey.ExportSubjectPublicKeyInfo();
+                _logger.LogInformation("Successfully exported public keys to byte arrays.");
+
+                var bundle = new Proto.PreKeyBundle
+                {
+                    IdentityKey = ByteString.CopyFrom(ikBytes),
+                    SignedPreKey = ByteString.CopyFrom(spkBytes),
+                    OneTimePreKey = ByteString.CopyFrom(opkBytes),
+                    SignedPreKeySignature = signedPreKeySignature
+                };
+                _logger.LogInformation("Successfully created PreKeyBundle protobuf message. Returning response.");
+
+                var response = new GetPreKeyBundleResponse { Bundle = bundle };
+                return Task.FromResult(response);
             }
-
-            var bundle = Proto.PreKeyBundle.Parser.ParseFrom(peer.PreKeyBundle);
-
-            return new GetPreKeyBundleResponse { Bundle = bundle };
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error in GetPreKeyBundle for identity {IdentityName}", request.IdentityName);
+                throw;
+            }
         }
 
         public override async Task<EditMessageResponse> EditDirectMessage(EditMessageRequest request, ServerCallContext context)

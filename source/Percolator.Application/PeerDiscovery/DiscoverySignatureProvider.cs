@@ -16,7 +16,12 @@ public class DiscoverySignatureProvider : IDiscoverySignatureProvider
 
     public byte[] GetPublicKeyCertificate()
     {
-        var certificate = _identityService.GetDefaultIdentityCertificate();
+        var identityName = _identityService.ListIdentityNames().FirstOrDefault();
+        if (identityName is null)
+        {
+            throw new InvalidOperationException("Cannot get public key certificate: No identities found.");
+        }
+        var certificate = _identityService.GetIdentityCertificate(identityName);
         return certificate.Export(System.Security.Cryptography.X509Certificates.X509ContentType.Cert);
     }
 
@@ -28,7 +33,12 @@ public class DiscoverySignatureProvider : IDiscoverySignatureProvider
 
     public byte[] Sign(byte[] data)
     {
-        var certificate = _identityService.GetDefaultIdentityCertificate();
+        var identityName = _identityService.ListIdentityNames().FirstOrDefault();
+        if (identityName is null)
+        {
+            throw new InvalidOperationException("Cannot sign data: No identities found.");
+        }
+        var certificate = _identityService.GetIdentityCertificate(identityName);
         var privateKey = certificate.GetRSAPrivateKey()!;
         return privateKey.SignData(data, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
     }

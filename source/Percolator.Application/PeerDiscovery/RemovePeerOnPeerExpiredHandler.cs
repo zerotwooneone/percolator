@@ -6,9 +6,9 @@ namespace Percolator.Application.PeerDiscovery
     public class RemovePeerOnPeerExpiredHandler : INotificationHandler<PeerExpiredNotification>
     {
         private readonly ILogger<RemovePeerOnPeerExpiredHandler> _logger;
-        private readonly PeerConnectionManager _connectionManager;
+        private readonly IPeerConnectionManager _connectionManager;
 
-        public RemovePeerOnPeerExpiredHandler(ILogger<RemovePeerOnPeerExpiredHandler> logger, PeerConnectionManager connectionManager)
+        public RemovePeerOnPeerExpiredHandler(ILogger<RemovePeerOnPeerExpiredHandler> logger, IPeerConnectionManager connectionManager)
         {
             _logger = logger;
             _connectionManager = connectionManager;

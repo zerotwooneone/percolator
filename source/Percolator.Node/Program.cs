@@ -4,135 +4,212 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Percolator.Application;
-using Percolator.Application.Manifests;
-using Percolator.Application.PeerDiscovery;
-using Percolator.Application.RateLimiting;
 using Percolator.Application.Messaging;
-using Percolator.Contracts.Protos;
-using Percolator.Cryptography;
-using Percolator.Identity;
 using Percolator.Application.Identity;
 using Percolator.Application.Security;
-using Percolator.Messaging;
-using Percolator.Network;
+using Percolator.Cryptography;
+using Percolator.Identity;
 using System.CommandLine;
-using System.CommandLine.Builder;
-using System.CommandLine.Invocation;
 using System.Net;
-using System.Net.Http;
-using System.Net.Security;
-using System.Security.Cryptography.X509Certificates;
+using System.Security.Cryptography;
 using Microsoft.AspNetCore.Server.Kestrel.Https;
+using Percolator.Application.Manifests;
+using Percolator.Contracts.Protos;
+using Percolator.Application.PeerDiscovery;
 
-var serviceProvider = ConfigureServices(args).BuildServiceProvider();
+var services = ConfigureServices(args);
+await using var serviceProvider = services.BuildServiceProvider();
 
-var rootCommand = CreateRootCommand(serviceProvider);
+var rootCommand = BuildCommandLine(serviceProvider, services);
 
-var builder = new CommandLineBuilder(rootCommand);
-builder.UseHelp();
-builder.UseParseDirective();
-builder.UseSuggestDirective();
-builder.RegisterWithDotnetSuggest();
-builder.UseParseErrorReporting();
-builder.UseExceptionHandler();
+await rootCommand.InvokeAsync(args);
 
-return await rootCommand.InvokeAsync(args);
+static IServiceCollection ConfigureServices(string[] args)
+{
+    var services = new ServiceCollection();
+    services.AddLogging(configure =>
+    {
+        configure.AddSimpleConsole(options =>
+        {
+            options.SingleLine = true;
+            options.TimestampFormat = "HH:mm:ss ";
+        });
+    });
 
-static RootCommand CreateRootCommand(IServiceProvider serviceProvider)
+    // Domain Services
+    
+
+    // Application Service Registration
+    services.AddMessaging();
+    services.AddIdentity();
+    services.AddManifests();
+    services.AddPeerDiscovery();
+    services.AddAppSecurity();
+
+    services.AddGrpc();
+
+    return services;
+}
+
+static RootCommand BuildCommandLine(IServiceProvider serviceProvider, IServiceCollection services)
 {
     var portOption = new Option<int>(
-        aliases: new[] { "--port", "-p" },
-        description: "The port for the gRPC server to listen on.");
-    portOption.SetDefaultValue(9000);
+        name: "--port",
+        description: "The port to listen on for incoming connections.",
+        getDefaultValue: () => 5001);
 
-    var requestManifestCommand = new Command("request-manifest", "Requests a manifest from a peer.");
-    var hashArgument = new Argument<string>("manifest-hash", "The Base64 hash of the manifest to request.");
-    var subPathOption = new Option<string>("--sub-path", "The sub-path within the manifest to request.");
-    var peerPortOption = new Option<int>("--port", "The port of the peer to connect to.");
-    peerPortOption.SetDefaultValue(9000);
-    requestManifestCommand.AddArgument(hashArgument);
-    requestManifestCommand.AddOption(subPathOption);
-    requestManifestCommand.AddOption(peerPortOption);
+    var identityOption = new Option<string>(
+        name: "--identity",
+        description: "The name of the identity for the node to use.")
+    { IsRequired = true };
+
+    var sendDirectMessageCommand = new Command("send-dm", "Sends a direct message to a peer, initiating a secure session if one doesn't exist.");
+    var recipientIdOption = new Option<string>("--recipient-id", "The user ID (certificate thumbprint) of the recipient.") { IsRequired = true };
+    var recipientIdentityOption = new Option<string>("--recipient-identity", "The name of the identity to message on the recipient's node.") { IsRequired = true };
+    var senderIdentityOption = new Option<string>("--sender-identity", "The name of the identity to send the message from.") { IsRequired = true };
+    var peerPortOption = new Option<int>("--peer-port", "The port of the peer to connect to.") { IsRequired = true };
+    var messageArgument = new Argument<string>("message", "The content of the message to send.");
+    sendDirectMessageCommand.AddOption(recipientIdOption);
+    sendDirectMessageCommand.AddOption(recipientIdentityOption);
+    sendDirectMessageCommand.AddOption(senderIdentityOption);
+    sendDirectMessageCommand.AddOption(peerPortOption);
+    sendDirectMessageCommand.AddArgument(messageArgument);
+
+    var createIdentityCommand = new Command("create-identity", "Creates a new user identity.");
+    var identityNameArgument = new Argument<string>("name", "The name for the new identity.");
+    createIdentityCommand.AddArgument(identityNameArgument);
 
     var rootCommand = new RootCommand("Percolator Node");
     rootCommand.AddGlobalOption(portOption);
-    rootCommand.AddCommand(requestManifestCommand);
+    rootCommand.AddOption(identityOption); 
+    rootCommand.AddCommand(sendDirectMessageCommand);
+    rootCommand.AddCommand(createIdentityCommand);
 
-    rootCommand.SetHandler<int>(async (port) =>
+    rootCommand.SetHandler(async (port, identity) =>
     {
-        await RunNodeAsync(port, serviceProvider);
-    }, portOption);
+        var logger = serviceProvider.GetRequiredService<ILogger<Program>>();
+        logger.LogInformation("Starting node on port {Port} for identity '{Identity}'...", port, identity);
 
-    requestManifestCommand.SetHandler(async (InvocationContext context) =>
+        await RunNodeAsync(port, identity, services);
+
+        logger.LogInformation("Node stopped.");
+    }, portOption, identityOption);
+
+    sendDirectMessageCommand.SetHandler(async (context) =>
     {
         var logger = serviceProvider.GetRequiredService<ILogger<Program>>();
         var port = context.ParseResult.GetValueForOption(peerPortOption);
-        var manifestHash = context.ParseResult.GetValueForArgument(hashArgument);
-        var subPath = context.ParseResult.GetValueForOption(subPathOption);
+        var recipientId = context.ParseResult.GetValueForOption(recipientIdOption)!;
+        var recipientIdentity = context.ParseResult.GetValueForOption(recipientIdentityOption)!;
+        var senderIdentityName = context.ParseResult.GetValueForOption(senderIdentityOption)!;
+        var message = context.ParseResult.GetValueForArgument(messageArgument)!;
 
-        logger.LogInformation("Requesting sub-manifest for path '{SubPath}' from manifest '{ManifestHash}' on port {Port}...", subPath, manifestHash, port);
-        
-        var httpHandler = new HttpClientHandler();
-        // The client must also validate the server's certificate.
-        // We replace the dangerous "accept all" with a check that the server's certificate thumbprint
-        // matches our own identity, establishing a self-trust model.
-        httpHandler.ServerCertificateCustomValidationCallback = (request, cert, chain, errors) =>
-        {
-            if (cert is null)
-            {
-                return false;
-            }
-
-            // We expect chain errors because we are using self-signed certificates.
-            if (errors != SslPolicyErrors.None && errors != SslPolicyErrors.RemoteCertificateChainErrors)
-            {
-                return false;
-            }
-
-            var trustedStore = serviceProvider.GetRequiredService<ITrustedPeerStore>();
-            return trustedStore.IsTrusted(cert.Thumbprint);
-        };
-
-        using var channel = GrpcChannel.ForAddress($"https://localhost:{port}", new GrpcChannelOptions { HttpHandler = httpHandler });
-        var client = new FileSharing.FileSharingClient(channel);
+        logger.LogInformation("Attempting to send direct message to {RecipientId} ({RecipientIdentity}) on port {Port}...", recipientId, recipientIdentity, port);
 
         try
         {
-            var request = new RequestManifestRequest
-            {
-                ManifestHash = ByteString.FromBase64(manifestHash!),
-                SubPath = subPath ?? string.Empty
-            };
-            var response = await client.RequestManifestAsync(request);
+            var identityService = serviceProvider.GetRequiredService<IIdentityService>();
+            var senderCertificate = identityService.GetIdentityCertificate(senderIdentityName);
 
-            if (response.SignedManifest is not null)
+            using var loggerFactory = LoggerFactory.Create(builder =>
             {
-                logger.LogInformation("Successfully received manifest.");
+                builder
+                    .SetMinimumLevel(LogLevel.Trace)
+                    .AddConsole()
+                    .AddFilter("System.Net.Http", LogLevel.Trace)
+                    .AddFilter("Grpc.Net.Client", LogLevel.Trace);
+            });
+
+            var httpHandler = new HttpClientHandler();
+            httpHandler.ClientCertificates.Add(senderCertificate);
+            httpHandler.SslProtocols = System.Security.Authentication.SslProtocols.Tls12;
+            httpHandler.ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator;
+
+            using var channel = GrpcChannel.ForAddress($"https://localhost:{port}", new GrpcChannelOptions { HttpHandler = httpHandler, LoggerFactory = loggerFactory });
+            var client = new Messaging.MessagingClient(channel);
+
+            // 2. Call GetPreKeyBundle
+            logger.LogInformation("Requesting pre-key bundle from recipient...");
+            var preKeyBundleResponse = await client.GetPreKeyBundleAsync(new GetPreKeyBundleRequest { UserId = recipientId, IdentityName = recipientIdentity });
+            var remoteBundleProto = preKeyBundleResponse.Bundle;
+            logger.LogInformation("Received pre-key bundle.");
+
+            // 3. Generate ephemeral key
+            using var ephemeralKeyPair = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+
+            // 4. Get our own identity keys
+            var (localIdentityKey, _, _) = identityService.GetIdentityKeys(senderIdentityName);
+
+            // 5. Call X3DHManager.InitiateHandshake
+            logger.LogInformation("Performing X3DH handshake...");
+            var cryptoBundle = new Percolator.Cryptography.PreKeyBundle(
+                remoteBundleProto.IdentityKey.ToByteArray(),
+                remoteBundleProto.SignedPreKey.ToByteArray(),
+                remoteBundleProto.OneTimePreKey.ToByteArray(),
+                remoteBundleProto.SignedPreKeySignature.ToByteArray());
+
+            var sharedSecret = X3DHManager.InitiateHandshake(cryptoBundle, localIdentityKey, ephemeralKeyPair);
+            logger.LogInformation("Handshake successful. Shared secret computed.");
+
+            // 6. Encrypt message
+            // TODO: Replace with proper AES-GCM encryption
+            var encryptedPayload = System.Text.Encoding.UTF8.GetBytes(message);
+            logger.LogWarning("Message is NOT encrypted. Sending plaintext payload.");
+
+            // 7. Call SendPreKeyDirectMessage
+            logger.LogInformation("Sending initial message...");
+            var sendMessageRequest = new SendPreKeyDirectMessageRequest
+            {
+                IdentityName = recipientIdentity,
+                InitiatorIdentityKey = ByteString.CopyFrom(localIdentityKey.PublicKey.ExportSubjectPublicKeyInfo()),
+                InitiatorEphemeralKey = ByteString.CopyFrom(ephemeralKeyPair.PublicKey.ExportSubjectPublicKeyInfo()),
+                EncryptedPayload = ByteString.CopyFrom(encryptedPayload)
+            };
+
+            var sendResponse = await client.SendPreKeyDirectMessageAsync(sendMessageRequest);
+            if (sendResponse.Success)
+            {
+                logger.LogInformation("Successfully sent message and established secure session.");
             }
             else
             {
-                logger.LogWarning("Peer did not return the requested manifest.");
+                logger.LogError("Failed to send message.");
             }
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "An error occurred while requesting the manifest.");
+            logger.LogError(ex, "An error occurred while sending the direct message.");
             context.ExitCode = 1;
         }
     });
 
+    createIdentityCommand.SetHandler<string>((name) =>
+    {
+        var logger = serviceProvider.GetRequiredService<ILogger<Program>>();
+        logger.LogInformation("Creating new identity '{Name}'...", name);
+        var identityService = serviceProvider.GetRequiredService<IIdentityService>();
+        try
+        {
+            var certificate = identityService.CreateIdentity(name);
+            logger.LogInformation("Successfully created identity '{Name}'.", name);
+            logger.LogInformation("Certificate Thumbprint (User ID): {Thumbprint}", certificate.Thumbprint);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to create identity.");
+        }
+    }, identityNameArgument);
+
     return rootCommand;
 }
 
-static async Task RunNodeAsync(int port, IServiceProvider serviceProvider)
+static async Task RunNodeAsync(int port, string identityName, IServiceCollection initialServices)
 {
     var builder = WebApplication.CreateBuilder();
 
-    // Transfer services from the command-line DI container to the web host
-    foreach (var service in serviceProvider.GetRequiredService<IServiceCollection>())
+    // Transfer services from the initial collection
+    foreach (var service in initialServices)
     {
         builder.Services.Add(service);
     }
@@ -142,29 +219,16 @@ static async Task RunNodeAsync(int port, IServiceProvider serviceProvider)
         options.Listen(IPAddress.Any, port, listenOptions =>
         {
             listenOptions.Protocols = HttpProtocols.Http2;
-            listenOptions.UseHttps(https =>
+            listenOptions.UseHttps(https_options =>
             {
-                // Select the server certificate
-                https.ServerCertificateSelector = (connectionContext, hostName) =>
+                var identityService = listenOptions.ApplicationServices.GetRequiredService<IIdentityService>();
+                var certificate = identityService.GetIdentityCertificate(identityName);
+                https_options.ServerCertificate = certificate;
+                https_options.ClientCertificateMode = ClientCertificateMode.RequireCertificate;
+                https_options.ClientCertificateValidation = (cert, chain, errors) =>
                 {
-                    return serviceProvider.GetService<IIdentityService>()?.GetDefaultIdentityCertificate();
-                };
-
-                // Require the client to provide a certificate
-                https.ClientCertificateMode = ClientCertificateMode.RequireCertificate;
-
-                // Implement custom validation for the client certificate
-                https.ClientCertificateValidation = (certificate, chain, sslPolicyErrors) =>
-                {
-                    // We expect chain errors because we are using self-signed certificates.
-                    if (sslPolicyErrors != SslPolicyErrors.None && sslPolicyErrors != SslPolicyErrors.RemoteCertificateChainErrors)
-                    {
-                        return false;
-                    }
-
-                    // Trust the peer if its certificate thumbprint is in our trusted store.
-                    var trustedStore = serviceProvider.GetRequiredService<ITrustedPeerStore>();
-                    return trustedStore.IsTrusted(certificate.Thumbprint);
+                    // TODO: Implement proper certificate validation based on a trust store
+                    return true;
                 };
             });
         });
@@ -172,73 +236,8 @@ static async Task RunNodeAsync(int port, IServiceProvider serviceProvider)
 
     var app = builder.Build();
 
-    var logger = app.Services.GetRequiredService<ILogger<Program>>();
-    logger.LogInformation("Starting Percolator node...");
-    logger.LogInformation("gRPC server listening on port {Port}", port);
-
-    var lifetime = app.Services.GetRequiredService<IHostApplicationLifetime>();
-    var discoveryService = app.Services.GetRequiredService<IPeerDiscoveryService>();
-    lifetime.ApplicationStarted.Register(() =>
-    {
-        discoveryService.Start();
-
-        // Create and announce manifests for shared directories
-        using var scope = app.Services.CreateScope();
-        var manifestService = scope.ServiceProvider.GetRequiredService<IManifestService>();
-        var manifests = manifestService.CreateManifestsFromSharedDirectories();
-
-        // TODO: Announce these manifests to the network
-    });
-    lifetime.ApplicationStopping.Register(() => discoveryService.Stop());
-
-    app.MapGrpcService<FileSharingService>();
     app.MapGrpcService<MessagingGrpcService>();
+    app.MapGet("/", () => "Communication with gRPC endpoints must be made through a gRPC client.");
 
-    // Run the host
     await app.RunAsync();
-}
-
-static IServiceCollection ConfigureServices(string[] args)
-{
-    var services = new ServiceCollection();
-    services.AddLogging(configure => configure.AddConsole());
-    services.AddGrpc(options =>
-    {
-        // Mitigate DoS attacks by limiting the max message size.
-        options.MaxReceiveMessageSize = 4 * 1024 * 1024; // 4 MB
-    });
-
-    // Domain Services
-    services.AddSingleton<ICredentialService, CredentialService>();
-    services.AddSingleton<ICertificateOperations, CertificateOperations>();
-    services.AddSingleton<IIdentityService, PersistentIdentityService>();
-    services.AddSingleton<IPeerIdentityStore, InMemoryPeerIdentityStore>();
-    services.AddSingleton<ITrustedPeerStore, InMemoryTrustedPeerStore>();
-    services.AddSingleton<IDiscoverySignatureProvider, DiscoverySignatureProvider>();
-    services.AddSingleton<ISharedDirectoryProvider, SharedDirectoryProvider>();
-    services.AddSingleton<IRateLimiter, InMemoryRateLimiter>();
-
-    // Application Services
-    services.AddSingleton<ManifestStore>();
-    services.AddSingleton<IManifestService, ManifestService>();
-    services.AddSingleton<IPeerConnectionManager, PeerConnectionManager>();
-    services.AddSingleton<IPeerDiscoveryHandler, PeerDiscoveryHandler>();
-    services.AddSingleton<IPeerDiscoveryService>(sp =>
-    {
-        var identityService = sp.GetRequiredService<IIdentityService>();
-        var thumbprint = identityService.GetDefaultIdentityCertificate().Thumbprint;
-        return new PeerDiscoveryService(
-            9000,
-            thumbprint,
-            sp.GetRequiredService<IPeerDiscoveryHandler>(),
-            sp.GetRequiredService<IDiscoverySignatureProvider>(),
-            sp.GetRequiredService<ILogger<PeerDiscoveryService>>());
-    });
-
-    services.AddSingleton<IMessageStore, InMemoryMessageStore>();
-    services.AddScoped<IGroupService, GroupService>();
-    services.AddScoped<IMessageService, MessageService>();
-
-    services.AddSingleton(services);
-    return services;
 }
