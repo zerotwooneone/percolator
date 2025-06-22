@@ -8,7 +8,7 @@ namespace Percolator.Identity;
 public class ECParametersJsonConverter : JsonConverter<ECParameters>
 {
     // Helper record for easy serialization/deserialization of ECParameters fields.
-    private record SerializableECParameters(string Curve, byte[] D, ECPoint Q);
+    private record SerializableECParameters(string? Curve, byte[]? D, ECPoint Q);
 
     public override ECParameters Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
     {
@@ -17,6 +17,11 @@ public class ECParametersJsonConverter : JsonConverter<ECParameters>
         if (serializableParams is null)
         {
             throw new JsonException("Failed to deserialize ECParameters.");
+        }
+
+        if (serializableParams.Curve is null)
+        {
+            throw new JsonException("Cannot deserialize ECParameters with a null curve name.");
         }
 
         // Construct the real ECParameters struct from the helper record's data.
@@ -35,7 +40,7 @@ public class ECParametersJsonConverter : JsonConverter<ECParameters>
     {
         // Create a serializable helper record from the ECParameters struct.
         var serializableParams = new SerializableECParameters(
-            value.Curve.Oid.FriendlyName,
+            value.Curve.Oid?.FriendlyName,
             value.D,
             value.Q
         );

@@ -11,7 +11,7 @@ namespace Percolator.Messaging
         private HashSet<string> _memberIds;
         public IReadOnlyCollection<string> MemberIds => _memberIds;
 
-        public Group(Guid id, string name, IEnumerable<string> memberIds)
+        public Group(Guid id, string name, IEnumerable<string>? memberIds)
         {
             if (string.IsNullOrWhiteSpace(name))
             {

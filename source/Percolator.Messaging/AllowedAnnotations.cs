@@ -22,7 +22,7 @@ namespace Percolator.Messaging
             Tada
         };
 
-        public static bool IsAllowed(string emoji)
+        public static bool IsAllowed(string? emoji)
         {
             return !string.IsNullOrEmpty(emoji) && ValidEmoji.Contains(emoji);
         }
