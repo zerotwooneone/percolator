@@ -21,7 +21,7 @@ public class ManifestService : IManifestService
         _sharedDirectoryProvider = sharedDirectoryProvider;
     }
 
-    public IEnumerable<(ByteString hash, SignedManifest manifest)> CreateManifestsFromSharedDirectories()
+    public async Task<IEnumerable<(ByteString hash, SignedManifest manifest)>> CreateManifestsFromSharedDirectories()
     {
         var manifests = new List<(ByteString, SignedManifest)>();
         var sharedDirs = _sharedDirectoryProvider.GetSharedDirectories();
@@ -50,7 +50,7 @@ public class ManifestService : IManifestService
                     Version = 1,
                     Manifest = manifest
                 };
-                _signatureService.Sign(signedManifest);
+                await _signatureService.SignAsync(signedManifest);
 
                 _manifestStore.Add(hash, signedManifest, entryPath);
                 manifests.Add((hash, signedManifest));

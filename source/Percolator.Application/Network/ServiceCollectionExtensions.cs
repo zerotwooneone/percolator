@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Percolator.Application.PeerDiscovery;
 using Percolator.Network;
 
 namespace Percolator.Application.Network;
@@ -18,6 +19,9 @@ public static class ServiceCollectionExtensions
 
         services.AddSingleton<IPeerDiscoveryService, PeerDiscoveryService>();
         services.AddSingleton<IIdentityProvider, IdentityProvider>();
+        
+        services.AddSingleton<IPeerDiscoveryHandler, PeerDiscoveryHandler>();
+        services.AddSingleton<IDiscoverySignatureProvider, DiscoverySignatureProvider>();
 
         return services;
     }

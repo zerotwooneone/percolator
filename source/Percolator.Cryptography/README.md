@@ -17,6 +17,10 @@ When modifying this project, adhere to the following architectural rules:
 3.  **Consumed via Interfaces**: Higher-level domains that consume these operations should do so via interfaces defined in their own projects. The `Percolator.Application` layer is responsible for implementing those interfaces and calling the primitives in this library.
 4.  **Fail Forward**: Do not add logging for security-sensitive errors. The established pattern is to throw an exception (e.g., `CryptographicException`) to ensure failures are handled by the consuming layer.
 
+## AI Development Guidelines
+
+- **No Raw Byte Arrays**: Domain libraries should not send or receive raw byte arrays in or out of the domain. These should be wrapped in DDD value types with clear names so that it is more clear when passing parameters or returning results.
+
 ## High-Level Concepts
 
 The security of the chat application is built upon several key cryptographic concepts implemented in this library:

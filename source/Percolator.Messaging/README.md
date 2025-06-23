@@ -19,3 +19,7 @@ For example, to associate a message with a sender's identity, this project shoul
 ### 2. Fail Forward
 
 This project must not contain any logging. If a rule is violated or an unrecoverable error occurs, the code must 'fail forward' by throwing an appropriate exception (e.g., `ArgumentException`, `InvalidOperationException`). The `Application` layer is responsible for catching these exceptions and handling them gracefully.
+
+## AI Development Guidelines
+
+- **No Raw Byte Arrays**: Domain libraries should not send or receive raw byte arrays in or out of the domain. These should be wrapped in DDD value types with clear names so that it is more clear when passing parameters or returning results.

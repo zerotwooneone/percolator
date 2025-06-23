@@ -28,33 +28,33 @@ namespace Percolator.Application.Manifests
             _logger = logger;
         }
 
-        public override Task<AnnounceManifestResponse> AnnounceManifest(AnnounceManifestRequest request, ServerCallContext context)
+        public override async Task<AnnounceManifestResponse> AnnounceManifest(AnnounceManifestRequest request, ServerCallContext context)
         {
             var decision = _rateLimiter.IsRequestAllowed(context.Peer);
             if (!decision.IsAllowed)
             {
                 _logger.LogWarning("Rate limit exceeded for peer {Peer}. Throttling request.", context.Peer);
-                return Task.FromResult(new AnnounceManifestResponse
+                return new AnnounceManifestResponse
                 {
                     Success = false,
                     Message = "Rate limit exceeded.",
                     RetryAfterUtc = Timestamp.FromDateTime(decision.RetryAfterUtc!.Value)
-                });
+                };
             }
 
             _logger.LogInformation("Received a manifest announcement from a peer.");
 
             if (request.SignedManifest is null)
             {
-                return Task.FromResult(new AnnounceManifestResponse { Success = false, Message = "Request did not contain a manifest." });
+                return new AnnounceManifestResponse { Success = false, Message = "Request did not contain a manifest." };
             }
 
             // 1. Verify the signature
-            var isSignatureValid = _signatureService.Verify(request.SignedManifest);
+            var isSignatureValid = await _signatureService.VerifyAsync(request.SignedManifest);
             if (!isSignatureValid)
             {
                 _logger.LogWarning("Received a manifest with an invalid signature.");
-                return Task.FromResult(new AnnounceManifestResponse { Success = false, Message = "Invalid signature." });
+                return new AnnounceManifestResponse { Success = false, Message = "Invalid signature." };
             }
 
             // 2. Calculate the hash of the inner manifest to use as the key
@@ -65,7 +65,7 @@ namespace Percolator.Application.Manifests
             _manifestStore.Add(manifestHash, request.SignedManifest);
             _logger.LogInformation("Successfully stored manifest with hash {ManifestHash}", manifestHash.ToBase64());
 
-            return Task.FromResult(new AnnounceManifestResponse { Success = true, Message = "Manifest accepted." });
+            return new AnnounceManifestResponse { Success = true, Message = "Manifest accepted." };
         }
 
         public override Task<RequestManifestResponse> RequestManifest(RequestManifestRequest request, ServerCallContext context)

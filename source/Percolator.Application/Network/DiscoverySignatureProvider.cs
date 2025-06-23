@@ -1,28 +1,28 @@
+using Percolator.Application.Identity;
+using Percolator.Network;
+using System;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
-using Percolator.Identity;
-using Percolator.Network;
 
 namespace Percolator.Application.Network;
 
 public class DiscoverySignatureProvider : IDiscoverySignatureProvider
 {
-    private readonly IIdentityService _identityService;
+    private readonly ActiveIdentityContext _activeIdentityContext;
 
-    public DiscoverySignatureProvider(IIdentityService identityService)
+    public DiscoverySignatureProvider(ActiveIdentityContext activeIdentityContext)
     {
-        _identityService = identityService;
+        _activeIdentityContext = activeIdentityContext;
     }
 
     public byte[] GetPublicKeyCertificate()
     {
-        var identityName = _identityService.ListIdentityNames().FirstOrDefault();
-        if (identityName is null)
+        if (_activeIdentityContext.Certificate is null)
         {
-            throw new InvalidOperationException("Cannot get public key certificate: No identities found.");
+            throw new InvalidOperationException("Cannot get public key certificate: Active identity is not loaded.");
         }
-        var certificate = _identityService.GetIdentityCertificate(identityName);
-        return certificate.Export(System.Security.Cryptography.X509Certificates.X509ContentType.Cert);
+
+        return _activeIdentityContext.Certificate.Export(X509ContentType.Cert);
     }
 
     public string GetThumbprint(byte[] publicKeyCertificate)
@@ -33,28 +33,29 @@ public class DiscoverySignatureProvider : IDiscoverySignatureProvider
 
     public byte[] Sign(byte[] data)
     {
-        var identityName = _identityService.ListIdentityNames().FirstOrDefault();
-        if (identityName is null)
+        if (_activeIdentityContext.Certificate is null)
         {
-            throw new InvalidOperationException("Cannot sign data: No identities found.");
+            throw new InvalidOperationException("Cannot sign data: Active identity is not loaded.");
         }
-        var certificate = _identityService.GetIdentityCertificate(identityName);
-        var privateKey = certificate.GetRSAPrivateKey()!;
-        return privateKey.SignData(data, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+
+        using var signingKey = _activeIdentityContext.Certificate.GetECDsaPrivateKey();
+        if (signingKey is null)
+        {
+            throw new InvalidOperationException("Cannot sign data: Active identity's signing key is not available or is not an ECDsa key.");
+        }
+
+        return signingKey.SignData(data, HashAlgorithmName.SHA256);
     }
 
     public bool Verify(byte[] data, byte[] signature, byte[] publicKeyCertificate)
     {
-        try
+        using var certificate = X509CertificateLoader.LoadCertificate(publicKeyCertificate);
+        using var publicKey = certificate.GetECDsaPublicKey();
+        if (publicKey is null)
         {
-            using var certificate = X509CertificateLoader.LoadCertificate(publicKeyCertificate);
-            using var publicKey = certificate.GetRSAPublicKey()!;
-            return publicKey.VerifyData(data, signature, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
-        }
-        catch (CryptographicException)
-        {
-            // Invalid certificate format
             return false;
         }
+
+        return publicKey.VerifyData(data, signature, HashAlgorithmName.SHA256);
     }
 }

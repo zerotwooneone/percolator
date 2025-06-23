@@ -22,6 +22,10 @@ When modifying this project, adhere to the following architectural rules:
 2.  **Interface-Based Dependencies**: If this domain requires functionality from another domain, it must define an interface (e.g., `ICertificateOperations`) that declares its needs. The `Percolator.Application` project is responsible for implementing this interface and orchestrating the interaction between domains.
 3.  **Fail Forward**: Do not add logging for security-sensitive errors or validation failures. The established pattern is to throw an exception (e.g., `SecurityException`, `CryptographicException`) to ensure failures are handled by the application layer.
 
+## AI Development Guidelines
+
+- **No Raw Byte Arrays**: Domain libraries should not send or receive raw byte arrays in or out of the domain. These should be wrapped in DDD value types with clear names so that it is more clear when passing parameters or returning results.
+
 ## Future Considerations
 
 *   **Restricted Identity Creation**: Currently, any service with access to `IIdentityService` can create an arbitrary number of identities. In a production environment, it may be necessary to introduce access controls or policies around identity creation. For now, this responsibility is delegated to the `Percolator.Application` layer, which should be the sole orchestrator of identity management.

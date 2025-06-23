@@ -1,3 +1,5 @@
+using System.Threading.Tasks;
+
 namespace Percolator.Identity;
 
 /// <summary>
@@ -10,9 +12,9 @@ public interface IKeyManagementService
     /// </summary>
     /// <param name="identityName">The name of the identity.</param>
     /// <returns>The X3DH keys for the specified identity.</returns>
-    X3dhKeys GetOrCreateKeys(string identityName);
+    Task<X3dhKeys> GetOrCreateKeysAsync(string identityName);
 
     /// <param name="identityName">The name of the identity.</param>
     /// <returns>A KeyContainer containing the identity key, signed pre-key, and one-time pre-key.</returns>
-    X3dhKeys GetIdentityKeys(string identityName);
+    Task<X3dhKeys> GetIdentityKeysAsync(string identityName);
 }

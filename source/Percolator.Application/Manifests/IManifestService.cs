@@ -5,5 +5,5 @@ namespace Percolator.Application.Manifests;
 
 public interface IManifestService
 {
-    IEnumerable<(ByteString hash, SignedManifest manifest)> CreateManifestsFromSharedDirectories();
+    Task<IEnumerable<(ByteString hash, SignedManifest manifest)>> CreateManifestsFromSharedDirectories();
 }

@@ -1,6 +1,7 @@
 using System.Collections.Generic;
-using System.Security.Cryptography;
-using System.Security.Cryptography.X509Certificates;
+using System.Threading.Tasks;
+using Percolator.Identity.Model;
+using Identity = Percolator.Identity.Model.Identity;
 
 namespace Percolator.Identity;
 
@@ -13,26 +14,27 @@ public interface IIdentityService
     /// Lists the names of all available identities.
     /// </summary>
     /// <returns>A collection of identity names.</returns>
-    IEnumerable<string> ListIdentityNames();
+    Task<IEnumerable<string>> ListIdentityNamesAsync();
 
     /// <summary>
-    /// Gets the certificate for a specific identity.
+    /// Gets the identity for a specific identity name.
     /// </summary>
     /// <param name="identityName">The name of the identity.</param>
-    /// <returns>The identity certificate.</returns>
-    X509Certificate2 GetIdentityCertificate(string identityName);
+    /// <returns>The identity.</returns>
+    Task<Model.Identity?> GetIdentityAsync(string identityName);
 
     /// <summary>
     /// Gets the X3DH keys for a specific identity.
     /// </summary>
     /// <param name="identityName">The name of the identity.</param>
     /// <returns>The X3DH keys for the specified identity.</returns>
-    X3dhKeys GetIdentityKeys(string identityName);
+    Task<X3dhKeys> GetIdentityKeysAsync(string identityName);
 
     /// <summary>
     /// Creates a new identity, including its certificate and X3DH keys.
     /// </summary>
     /// <param name="identityName">A friendly name for the new identity.</param>
-    /// <returns>The newly created identity certificate.</returns>
-    X509Certificate2 CreateIdentity(string identityName);
+    /// <param name="nickname">A nickname for the new identity.</param>
+    /// <returns>The newly created identity.</returns>
+    Task<Model.Identity> CreateIdentityAsync(string identityName, string? nickname);
 }

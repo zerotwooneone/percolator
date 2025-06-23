@@ -1,4 +1,3 @@
-using Percolator.Identity;
 using System.Collections.Concurrent;
 
 namespace Percolator.Application.Security
@@ -7,15 +6,9 @@ namespace Percolator.Application.Security
     {
         private readonly ConcurrentDictionary<string, byte> _trustedThumbprints = new(StringComparer.OrdinalIgnoreCase);
 
-        public InMemoryTrustedPeerStore(IIdentityService identityService)
+        public InMemoryTrustedPeerStore()
         {
-            // A node must always trust its own certificate. The first available identity is used.
-            var selfIdentityName = identityService.ListIdentityNames().FirstOrDefault();
-            if (selfIdentityName is not null)
-            {
-                var selfCertificate = identityService.GetIdentityCertificate(selfIdentityName);
-                Add(selfCertificate.Thumbprint);
-            }
+            // The responsibility for trusting the local node's certificate is now handled by the IdentityOrchestrator.
         }
 
         public void Add(string thumbprint)

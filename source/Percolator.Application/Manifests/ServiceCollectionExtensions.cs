@@ -9,6 +9,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IManifestService, ManifestService>();
         services.AddSingleton<IManifestStore, ManifestStore>();
         services.AddSingleton<ISharedDirectoryProvider, SharedDirectoryProvider>();
+        services.AddSingleton<ISignatureService, SignatureService>();
 
         return services;
     }

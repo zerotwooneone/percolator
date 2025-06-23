@@ -23,6 +23,7 @@ using System.CommandLine.Invocation;
 using System.IO;
 using System.Net.Http;
 using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using System.Threading.Tasks;
 using Percolator.Application.PeerDiscovery;
 
@@ -35,7 +36,7 @@ var configuration = new ConfigurationBuilder()
 var services = ConfigureServices(configuration);
 await using var serviceProvider = services.BuildServiceProvider();
 
-var rootCommand = BuildCommandLine(serviceProvider);
+var rootCommand = BuildCommandLine(serviceProvider, args);
 
 await rootCommand.InvokeAsync(args);
 
@@ -69,7 +70,7 @@ static IServiceCollection ConfigureServices(IConfiguration configuration)
 }
 
 // --- Command Line Interface Setup ---
-static RootCommand BuildCommandLine(IServiceProvider serviceProvider)
+static RootCommand BuildCommandLine(IServiceProvider serviceProvider, string[] args)
 {
     // --- Global Options ---
     var identityOption = new Option<string>(
@@ -85,12 +86,53 @@ static RootCommand BuildCommandLine(IServiceProvider serviceProvider)
     var runCommand = new Command("run", "Run the Percolator node.");
     runCommand.AddOption(portOption);
     runCommand.AddOption(identityOption);
-    runCommand.SetHandler((port, identity) =>
+    runCommand.SetHandler(async (identityName, port) =>
     {
-        var logger = serviceProvider.GetRequiredService<ILogger<Program>>();
-        logger.LogInformation("Starting node on port {Port} for identity '{Identity}'...", port, identity);
-        return RunNodeAsync(port, identity, serviceProvider);
-    }, portOption, identityOption);
+        var builder = WebApplication.CreateBuilder(args);
+
+        // --- Service Configuration ---
+        builder.Services.AddLogging(configure =>
+        {
+            configure.AddSimpleConsole(options =>
+            {
+                options.SingleLine = true;
+                options.TimestampFormat = "HH:mm:ss ";
+            });
+        });
+
+        builder.Services.AddSingleton(builder.Configuration);
+        builder.Services.AddCryptography();
+        builder.Services.AddIdentityServices();
+        builder.Services.AddMessaging();
+        builder.Services.AddManifests();
+        builder.Services.AddNetworkServices(builder.Configuration);
+        builder.Services.AddPeerDiscovery();
+        builder.Services.AddAppSecurity();
+        builder.Services.AddGrpc();
+
+        // Use the application layer hosted service to manage the discovery service's lifecycle
+        builder.Services.AddHostedService<PeerDiscoveryHostedService>();
+
+        // --- Kestrel Configuration ---
+        builder.WebHost.ConfigureKestrel(options =>
+        {
+            options.ListenAnyIP(port, listenOptions =>
+            {
+                listenOptions.Protocols = HttpProtocols.Http2;
+            });
+        });
+
+        var app = builder.Build();
+
+        // --- Application Startup ---
+        var identityOrchestrator = app.Services.GetRequiredService<IIdentityOrchestrator>();
+        await identityOrchestrator.LoadActiveIdentityAsync(identityName);
+
+        app.MapGrpcService<MessagingGrpcService>();
+
+        await app.RunAsync();
+
+    }, identityOption, portOption);
 
     // --- 'send-dm' Command ---
     var sendDirectMessageCommand = new Command("send-dm", "Send a direct message to a peer.");
@@ -115,10 +157,20 @@ static RootCommand BuildCommandLine(IServiceProvider serviceProvider)
         try
         {
             var identityService = serviceProvider.GetRequiredService<IIdentityService>();
+            var credentialService = serviceProvider.GetRequiredService<ICredentialService>();
             var keyManagementService = serviceProvider.GetRequiredService<IKeyManagementService>();
             var x3dhManager = serviceProvider.GetRequiredService<X3DHManager>();
 
-            var senderCertificate = identityService.GetIdentityCertificate(senderIdentityName);
+            var senderIdentity = await identityService.GetIdentityAsync(senderIdentityName);
+            if (senderIdentity is null)
+            {
+                logger.LogError("Sender identity '{Sender}' not found.", senderIdentityName);
+                context.ExitCode = 1;
+                return;
+            }
+
+            var pfxPassword = credentialService.GetOrCreatePfxPassword();
+            var senderCertificate = X509CertificateLoader.LoadPkcs12(senderIdentity.PfxCertificate.Value, pfxPassword);
 
             var handler = new HttpClientHandler();
             handler.ClientCertificates.Add(senderCertificate);
@@ -137,7 +189,7 @@ static RootCommand BuildCommandLine(IServiceProvider serviceProvider)
                 remoteBundleResponse.Bundle.OneTimePreKey.ToByteArray(),
                 remoteBundleResponse.Bundle.SignedPreKeySignature.ToByteArray());
 
-            var senderKeys = keyManagementService.GetIdentityKeys(senderIdentityName);
+            var senderKeys = await keyManagementService.GetIdentityKeysAsync(senderIdentityName);
             using var ephemeralKeyPair = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
 
             logger.LogInformation("Performing X3DH handshake...");
@@ -170,21 +222,23 @@ static RootCommand BuildCommandLine(IServiceProvider serviceProvider)
     // --- 'create-identity' Command ---
     var createIdentityCommand = new Command("create-identity", "Create a new identity.");
     var nameOption = new Option<string>("--name", "The name for the new identity.") { IsRequired = true };
+    var nicknameOption = new Option<string>("--nickname", "An optional nickname for the identity.");
     createIdentityCommand.AddOption(nameOption);
-    createIdentityCommand.SetHandler<string>((name) =>
+    createIdentityCommand.AddOption(nicknameOption);
+    createIdentityCommand.SetHandler(async (name, nickname) =>
     {
         var logger = serviceProvider.GetRequiredService<ILogger<Program>>();
         var identityService = serviceProvider.GetRequiredService<IIdentityService>();
         try
         {
-            identityService.CreateIdentity(name);
+            await identityService.CreateIdentityAsync(name, nickname);
             logger.LogInformation("Identity '{Name}' created successfully.", name);
         }
         catch (Exception ex)
-        {
+        { 
             logger.LogError(ex, "Failed to create identity '{Name}'.", name);
         }
-    }, nameOption);
+    }, nameOption, nicknameOption);
 
     // --- Root Command Setup ---
     var rootCommand = new RootCommand("Percolator Node");
@@ -193,72 +247,4 @@ static RootCommand BuildCommandLine(IServiceProvider serviceProvider)
     rootCommand.AddCommand(createIdentityCommand);
 
     return rootCommand;
-}
-
-// --- Node Host Execution ---
-static async Task RunNodeAsync(int port, string identityName, IServiceProvider serviceProvider)
-{
-    var builder = WebApplication.CreateBuilder();
-
-    // Use the same configuration source from the initial setup
-    var configuration = serviceProvider.GetRequiredService<IConfiguration>();
-    builder.Configuration.AddConfiguration(configuration);
-
-    // Create and register the context for the active identity
-    var activeIdentityContext = new ActiveIdentityContext { CurrentIdentityName = identityName };
-    //todo: add activeIdentityContext to both service collections and improve with public key and thumbprint
-    builder.Services.AddSingleton(activeIdentityContext);
-
-    // Configure services for the WebApplication host directly
-    builder.Services.AddLogging(configure =>
-    {
-        configure.AddSimpleConsole(options =>
-        {
-            options.SingleLine = true;
-            options.TimestampFormat = "HH:mm:ss ";
-        });
-    });
-
-    builder.Services.AddIdentityServices();
-    // Pass the command-line port to override the config value
-    builder.Services.AddNetworkServices(builder.Configuration, port);
-    builder.Services.AddAppSecurity();
-    builder.Services.AddCryptography();
-    builder.Services.AddMessaging();
-    builder.Services.AddManifests();
-    builder.Services.AddGrpc();
-
-    builder.WebHost.ConfigureKestrel(options =>
-    {
-        options.ListenAnyIP(port, listenOptions =>
-        {
-            listenOptions.Protocols = HttpProtocols.Http2;
-            var certProvider = builder.Services.BuildServiceProvider().GetRequiredService<IIdentityService>();
-            var certificate = certProvider.GetIdentityCertificate(identityName);
-            listenOptions.UseHttps(certificate);
-        });
-    });
-
-    var app = builder.Build();
-
-    // Start peer discovery using application lifetime hooks
-    var discoveryService = app.Services.GetRequiredService<IPeerDiscoveryService>();
-    var lifetime = app.Services.GetRequiredService<IHostApplicationLifetime>();
-
-    lifetime.ApplicationStarted.Register(() =>
-    {
-        _ = discoveryService.StartAsync(lifetime.ApplicationStopping);
-    });
-
-    lifetime.ApplicationStopping.Register(() =>
-    {
-        discoveryService.Stop();
-    });
-
-    // Configure the gRPC pipeline
-    app.MapGrpcService<MessagingGrpcService>();
-    app.MapGrpcService<FileSharingService>();
-    app.MapGrpcService<ManifestService>();
-
-    await app.RunAsync();
 }

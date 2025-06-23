@@ -47,7 +47,7 @@ namespace Percolator.Application.Messaging
             return thumbprint;
         }
 
-        public override Task<SendDirectMessageResponse> SendPreKeyDirectMessage(SendPreKeyDirectMessageRequest request, ServerCallContext context)
+        public override async Task<SendDirectMessageResponse> SendPreKeyDirectMessage(SendPreKeyDirectMessageRequest request, ServerCallContext context)
         {
             var peerId = GetPeerId(context);
             _logger.LogInformation("Received pre-key direct message from peer {peerId} for identity '{identityName}'", peerId, request.IdentityName);
@@ -55,7 +55,7 @@ namespace Percolator.Application.Messaging
             try
             {
                 // 1. Retrieve the recipient's (local user's) private keys (IK, SPK, OPK).
-                var localKeys = _identityService.GetIdentityKeys(request.IdentityName);
+                var localKeys = await _identityService.GetIdentityKeysAsync(request.IdentityName);
 
                 // 2. Call X3DHManager.RespondToHandshake to compute the shared secret.
                 var oneTimePreKey = localKeys.OneTimePreKey;
@@ -82,7 +82,7 @@ namespace Percolator.Application.Messaging
                 // 7. Pass the decrypted message to _messageService.
 
                 // For now, we'll just acknowledge the handshake.
-                return Task.FromResult(new SendDirectMessageResponse { Success = true });
+                return new SendDirectMessageResponse { Success = true };
             }
             catch (Exception ex)
             {
@@ -91,34 +91,34 @@ namespace Percolator.Application.Messaging
             }
         }
 
-        public override Task<PublishPreKeyBundleResponse> PublishPreKeyBundle(PublishPreKeyBundleRequest request, ServerCallContext context)
+        public override async Task<PublishPreKeyBundleResponse> PublishPreKeyBundle(PublishPreKeyBundleRequest request, ServerCallContext context)
         {
             var peerId = GetPeerId(context);
             var identityKey = request.Bundle.IdentityKey.ToByteArray();
             var bundleBytes = request.Bundle.ToByteArray();
 
             var peerIdentity = new PeerIdentity(identityKey, bundleBytes);
-            _peerIdentityStore.StorePeerAsync(peerIdentity); // Note: This is an async method but we don't await it.
+            await _peerIdentityStore.StorePeerAsync(peerIdentity);
 
             _logger.LogInformation("Stored pre-key bundle for peer {peerId} and identity '{identityName}'", peerId, request.IdentityName);
 
-            return Task.FromResult(new PublishPreKeyBundleResponse { Success = true });
+            return new PublishPreKeyBundleResponse { Success = true };
         }
 
-        public override Task<GetPreKeyBundleResponse> GetPreKeyBundle(GetPreKeyBundleRequest request, ServerCallContext context)
+        public override async Task<GetPreKeyBundleResponse> GetPreKeyBundle(GetPreKeyBundleRequest request, ServerCallContext context)
         {
             try
             {
                 _logger.LogInformation("GetPreKeyBundle invoked for identity '{identityName}' and user '{userId}'.", request.IdentityName, request.UserId);
-                var certificate = _identityService.GetIdentityCertificate(request.IdentityName);
-                if (!string.Equals(certificate.Thumbprint, request.UserId, StringComparison.OrdinalIgnoreCase))
+                var identity = await _identityService.GetIdentityAsync(request.IdentityName);
+                if (identity is null || !string.Equals(identity.Thumbprint, request.UserId, StringComparison.OrdinalIgnoreCase))
                 {
-                    _logger.LogWarning("Permission denied. User ID {requestUserId} does not match thumbprint {certThumbprint} for identity '{identityName}'.", request.UserId, certificate.Thumbprint, request.IdentityName);
+                    _logger.LogWarning("Permission denied. User ID {requestUserId} does not match thumbprint for identity '{identityName}'.", request.UserId, request.IdentityName);
                     throw new RpcException(new Status(StatusCode.PermissionDenied, "User ID does not match certificate thumbprint for the requested identity."));
                 }
 
                 _logger.LogInformation("Certificate validation passed. Getting identity keys.");
-                var keys = _identityService.GetIdentityKeys(request.IdentityName);
+                var keys = await _identityService.GetIdentityKeysAsync(request.IdentityName);
                 _logger.LogInformation("Successfully retrieved identity keys.");
 
                 var spkBytes = keys.SignedPreKey.PublicKey.ExportSubjectPublicKeyInfo();
@@ -139,7 +139,7 @@ namespace Percolator.Application.Messaging
                 _logger.LogInformation("Successfully created PreKeyBundle protobuf message. Returning response.");
 
                 var response = new GetPreKeyBundleResponse { Bundle = bundle };
-                return Task.FromResult(response);
+                return response;
             }
             catch (Exception ex)
             {
