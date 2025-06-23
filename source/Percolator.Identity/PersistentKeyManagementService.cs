@@ -110,9 +110,9 @@ public class PersistentKeyManagementService : IKeyManagementService
         return new X3dhKeys(ikSigning, ikAgreement, spk, opk);
     }
 
-    private async Task<ECDiffieHellman> CreatePreKeyAsync()
+    private Task<ECDiffieHellman> CreatePreKeyAsync()
     {
-        return ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        return Task.Run(() => ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256));
     }
 
     private void SetFileSecurity(string filePath)

@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using Percolator.Identity.Model;
 using System.Collections.Generic;
+using System.Linq;
 using System.Security.Cryptography.X509Certificates;
 using System.Threading;
 using System.Threading.Tasks;
@@ -65,7 +66,7 @@ public class PersistentIdentityService : IIdentityService
         }
 
         var pfxPassword = _credentialService.GetOrCreatePfxPassword();
-        var certificate = new X509Certificate2(identity.PfxCertificate.Value, pfxPassword.Value, X509KeyStorageFlags.PersistKeySet | X509KeyStorageFlags.UserKeySet);
+        var certificate = X509CertificateLoader.LoadPkcs12(identity.PfxCertificate.Value, pfxPassword.Value, X509KeyStorageFlags.PersistKeySet | X509KeyStorageFlags.UserKeySet);
         
         return new Certificate(certificate);
     }
