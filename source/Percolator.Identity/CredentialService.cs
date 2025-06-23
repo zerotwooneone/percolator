@@ -3,12 +3,13 @@ using System.Text;
 using System.IO;
 using System.Security.AccessControl;
 using System.Security.Principal;
+using Percolator.Identity.Model;
 
 namespace Percolator.Identity
 {
     public interface ICredentialService
     {
-        string GetOrCreatePfxPassword();
+        Password GetOrCreatePfxPassword();
         byte[] Protect(byte[] data);
         byte[] Unprotect(byte[] data);
     }
@@ -41,13 +42,13 @@ namespace Percolator.Identity
             }
         }
 
-        public string GetOrCreatePfxPassword()
+        public Password GetOrCreatePfxPassword()
         {
             if (File.Exists(_credentialFilePath))
             {
                 var encryptedPasswordBytes = File.ReadAllBytes(_credentialFilePath);
                 var passwordBytes = ProtectedData.Unprotect(encryptedPasswordBytes, Entropy, DataProtectionScope.CurrentUser);
-                return Encoding.UTF8.GetString(passwordBytes);
+                return new Password(Encoding.UTF8.GetString(passwordBytes));
             }
             else
             {
@@ -56,7 +57,7 @@ namespace Percolator.Identity
                 var encryptedPasswordBytes = ProtectedData.Protect(passwordBytes, Entropy, DataProtectionScope.CurrentUser);
                 File.WriteAllBytes(_credentialFilePath, encryptedPasswordBytes);
                 SetFileSecurity(_credentialFilePath);
-                return newPassword;
+                return new Password(newPassword);
             }
         }
 

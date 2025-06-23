@@ -47,7 +47,7 @@ namespace Percolator.IdentityTests
             var password = sut.GetOrCreatePfxPassword();
 
             // Assert
-            password.Should().NotBeNullOrEmpty();
+            password.Value.Should().NotBeNullOrEmpty();
             File.Exists(_testCredentialPath).Should().BeTrue();
         }
 
@@ -62,7 +62,7 @@ namespace Percolator.IdentityTests
             var passwordSecondCall = sut.GetOrCreatePfxPassword();
 
             // Assert
-            passwordSecondCall.Should().Be(passwordFirstCall);
+            passwordSecondCall.Value.Should().Be(passwordFirstCall.Value);
         }
     }
 }

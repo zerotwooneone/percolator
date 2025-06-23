@@ -161,7 +161,7 @@ static RootCommand BuildCommandLine(IServiceProvider serviceProvider, string[] a
             var keyManagementService = serviceProvider.GetRequiredService<IKeyManagementService>();
             var x3dhManager = serviceProvider.GetRequiredService<X3DHManager>();
 
-            var senderIdentity = await identityService.GetIdentityAsync(senderIdentityName);
+            var senderIdentity = await identityService.GetIdentityRecordAsync(senderIdentityName);
             if (senderIdentity is null)
             {
                 logger.LogError("Sender identity '{Sender}' not found.", senderIdentityName);
@@ -170,7 +170,7 @@ static RootCommand BuildCommandLine(IServiceProvider serviceProvider, string[] a
             }
 
             var pfxPassword = credentialService.GetOrCreatePfxPassword();
-            var senderCertificate = X509CertificateLoader.LoadPkcs12(senderIdentity.PfxCertificate.Value, pfxPassword);
+            var senderCertificate = X509CertificateLoader.LoadPkcs12(senderIdentity.PfxCertificate.Value, pfxPassword.Value);
 
             var handler = new HttpClientHandler();
             handler.ClientCertificates.Add(senderCertificate);

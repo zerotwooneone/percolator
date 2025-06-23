@@ -22,6 +22,18 @@ When modifying this project, adhere to the following architectural rules:
 2.  **Interface-Based Dependencies**: If this domain requires functionality from another domain, it must define an interface (e.g., `ICertificateOperations`) that declares its needs. The `Percolator.Application` project is responsible for implementing this interface and orchestrating the interaction between domains.
 3.  **Fail Forward**: Do not add logging for security-sensitive errors or validation failures. The established pattern is to throw an exception (e.g., `SecurityException`, `CryptographicException`) to ensure failures are handled by the application layer.
 
+## Domain-Driven Design
+
+This library uses DDD value objects to enforce type safety and clarify intent at the domain boundaries.
+
+-   `Password`: Wraps a `string` to ensure passwords are not accidentally logged or mishandled as primitive types.
+-   `Certificate`: Wraps an `X509Certificate2` object. The `IIdentityService.LoadIdentityAsync` method returns this object to provide the application layer with the necessary certificate for operations like signing, without exposing the raw PFX bytes or the password it was loaded with.
+-   `Identity`: Represents the complete, stored identity, including its name, PFX data, and thumbprint.
+
+### API Design
+
+The primary entry point to this domain is `IIdentityService`. Its methods, such as `CreateIdentityAsync` and `LoadIdentityAsync`, intentionally do not require a password parameter. Password management is fully encapsulated within the domain and handled by the `ICredentialService`, which securely stores and retrieves the necessary credentials using the OS's Data Protection API (DPAPI). This design simplifies the public API and strengthens security by preventing password mishandling in the application layer.
+
 ## AI Development Guidelines
 
 - **No Raw Byte Arrays**: Domain libraries should not send or receive raw byte arrays in or out of the domain. These should be wrapped in DDD value types with clear names so that it is more clear when passing parameters or returning results.

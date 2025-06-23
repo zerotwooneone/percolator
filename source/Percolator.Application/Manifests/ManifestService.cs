@@ -50,7 +50,7 @@ public class ManifestService : IManifestService
                     Version = 1,
                     Manifest = manifest
                 };
-                await _signatureService.SignAsync(signedManifest);
+                await _signatureService.SignManifestAsync(signedManifest.Manifest);
 
                 _manifestStore.Add(hash, signedManifest, entryPath);
                 manifests.Add((hash, signedManifest));

@@ -1,20 +1,20 @@
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using Percolator.Identity.Model;
-using Identity = Percolator.Identity.Model.Identity;
 
 namespace Percolator.Identity;
 
 public class FileSystemIdentityStore : IIdentityStore
 {
     private readonly string _identitiesPath;
-
-    private record IdentityMetadata(string? Nickname);
+    private record IdentityMetadata(string? Nickname, string Thumbprint);
 
     public FileSystemIdentityStore()
     {
@@ -24,7 +24,7 @@ public class FileSystemIdentityStore : IIdentityStore
         Directory.CreateDirectory(_identitiesPath);
     }
 
-    public async Task<Model.Identity?> GetIdentityAsync(string identityName)
+    public async Task<IdentityRecord?> GetIdentityAsync(string identityName, CancellationToken cancellationToken = default)
     {
         var pfxPath = Path.Combine(_identitiesPath, $"{identityName}.pfx");
         if (!File.Exists(pfxPath))
@@ -32,22 +32,26 @@ public class FileSystemIdentityStore : IIdentityStore
             return null;
         }
 
-        var pfxBytes = await File.ReadAllBytesAsync(pfxPath);
+        var pfxBytes = await File.ReadAllBytesAsync(pfxPath, cancellationToken);
         var pfxCertificate = new PfxCertificate(pfxBytes);
 
         var metadataPath = Path.Combine(_identitiesPath, $"{identityName}.json");
-        string? nickname = null;
-        if (File.Exists(metadataPath))
+        if (!File.Exists(metadataPath))
         {
-            var json = await File.ReadAllTextAsync(metadataPath);
-            var metadata = JsonSerializer.Deserialize<IdentityMetadata>(json);
-            nickname = metadata?.Nickname;
+            throw new InvalidOperationException($"Identity '{identityName}' is missing its metadata file.");
         }
 
-        return new Model.Identity(identityName, pfxCertificate, nickname);
+        var json = await File.ReadAllTextAsync(metadataPath, cancellationToken);
+        var metadata = JsonSerializer.Deserialize<IdentityMetadata>(json);
+        if (metadata is null || string.IsNullOrEmpty(metadata.Thumbprint))
+        {
+            throw new InvalidOperationException($"Identity '{identityName}' is missing its thumbprint in metadata.");
+        }
+
+        return new IdentityRecord(identityName, pfxCertificate, metadata.Thumbprint, metadata.Nickname);
     }
 
-    public Task<IEnumerable<string>> ListIdentityNamesAsync()
+    public Task<IEnumerable<string>> ListIdentityNamesAsync(CancellationToken cancellationToken = default)
     {
         var names = Directory.EnumerateFiles(_identitiesPath, "*.pfx")
             .Select(Path.GetFileNameWithoutExtension)
@@ -56,22 +60,20 @@ public class FileSystemIdentityStore : IIdentityStore
         return Task.FromResult(names);
     }
 
-    public async Task StoreIdentityAsync(Model.Identity identity)
+    public async Task StoreIdentityAsync(IdentityRecord identity, CancellationToken cancellationToken = default)
     {
-        // Store PFX
         var pfxPath = Path.Combine(_identitiesPath, $"{identity.Name}.pfx");
-        await File.WriteAllBytesAsync(pfxPath, identity.PfxCertificate.Value);
+        await File.WriteAllBytesAsync(pfxPath, identity.PfxCertificate.Value, cancellationToken);
         SetFileSecurity(pfxPath);
 
-        // Store metadata
-        var metadata = new IdentityMetadata(identity.Nickname);
+        var metadata = new IdentityMetadata(identity.Nickname, identity.Thumbprint);
         var metadataPath = Path.Combine(_identitiesPath, $"{identity.Name}.json");
         var json = JsonSerializer.Serialize(metadata);
-        await File.WriteAllTextAsync(metadataPath, json);
+        await File.WriteAllTextAsync(metadataPath, json, cancellationToken);
         SetFileSecurity(metadataPath);
     }
 
-    public Task<bool> IdentityExistsAsync(string identityName)
+    public Task<bool> IdentityExistsAsync(string identityName, CancellationToken cancellationToken = default)
     {
         var pfxPath = Path.Combine(_identitiesPath, $"{identityName}.pfx");
         return Task.FromResult(File.Exists(pfxPath));

@@ -1,74 +1,93 @@
-using System.Collections.Generic;
-using System.Security.Cryptography;
-using System.Security.Cryptography.X509Certificates;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using Percolator.Application.Configuration;
+using Percolator.Identity;
+using System;
+using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Percolator.Application.Security;
-using Percolator.Identity;
 
 namespace Percolator.Application.Identity;
 
-public class IdentityOrchestrator : IIdentityOrchestrator
+public class IdentityOrchestrator : IIdentityOrchestrator, IHostedService
 {
     private readonly IIdentityService _identityService;
-    private readonly ICredentialService _credentialService;
+    private readonly IKeyManagementService _keyManagementService;
+    private readonly ILogger<IdentityOrchestrator> _logger;
+    private readonly NodeOptions _options;
     private readonly ActiveIdentityContext _activeIdentityContext;
+    private readonly IHostApplicationLifetime _lifetime;
     private readonly ITrustedPeerStore _trustedPeerStore;
 
     public IdentityOrchestrator(
         IIdentityService identityService,
-        ICredentialService credentialService,
+        IKeyManagementService keyManagementService,
+        ILogger<IdentityOrchestrator> logger,
+        IOptions<NodeOptions> options,
         ActiveIdentityContext activeIdentityContext,
+        IHostApplicationLifetime lifetime,
         ITrustedPeerStore trustedPeerStore)
     {
         _identityService = identityService;
-        _credentialService = credentialService;
+        _keyManagementService = keyManagementService;
+        _logger = logger;
+        _options = options.Value;
         _activeIdentityContext = activeIdentityContext;
+        _lifetime = lifetime;
         _trustedPeerStore = trustedPeerStore;
     }
 
-    public async Task LoadActiveIdentityAsync(string identityName)
+    public async Task StartAsync(CancellationToken cancellationToken)
     {
-        var identity = await _identityService.GetIdentityAsync(identityName);
+        var identityName = _options.IdentityName;
+        if (string.IsNullOrEmpty(identityName))
+        {
+            _logger.LogError("Identity name is not configured. Please set Node:IdentityName in configuration.");
+            _lifetime.StopApplication();
+            return;
+        }
+
+        await LoadActiveIdentityAsync(identityName, cancellationToken);
+    }
+
+    public async Task LoadActiveIdentityAsync(string identityName, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrEmpty(identityName))
+        {
+            _logger.LogInformation("No identity specified. Skipping identity load.");
+            return;
+        }
+
+        _logger.LogInformation("Loading identity {IdentityName}...", identityName);
+
+        var identity = await _identityService.GetIdentityRecordAsync(identityName, cancellationToken);
         if (identity is null)
         {
-            throw new System.InvalidOperationException($"Identity '{identityName}' not found.");
+            _logger.LogInformation("No identity found with name {IdentityName}. Creating a new one.", identityName);
+            identity = await _identityService.CreateIdentityAsync(identityName, _options.IdentityNickname, cancellationToken);
+        }
+        else
+        {
+            _logger.LogInformation("Found existing identity {IdentityName}", identityName);
         }
 
-        X509Certificate2 certificate;
-        try
-        {
-            var pfxPassword = _credentialService.GetOrCreatePfxPassword();
-            certificate = X509CertificateLoader.LoadPkcs12(
-                identity.PfxCertificate.Value,
-                pfxPassword,
-                X509KeyStorageFlags.Exportable | X509KeyStorageFlags.PersistKeySet);
-        }
-        catch (CryptographicException ex)
-        {
-            throw new CryptographicException($"Failed to load identity '{identityName}'. The identity file may be corrupt or the credential store may have been changed.", ex);
-        }
-
-        var x3dhKeys = await _identityService.GetIdentityKeysAsync(identityName);
+        var certificate = await _identityService.LoadIdentityAsync(identityName, cancellationToken);
+        var keys = await _keyManagementService.GetOrCreateKeysAsync(identityName);
 
         _activeIdentityContext.IdentityName = identity.Name;
         _activeIdentityContext.Nickname = identity.Nickname;
-        _activeIdentityContext.Certificate = certificate;
+        _activeIdentityContext.Certificate = certificate.Value;
+        // Note: PublicKeys and KeyThumbprints from X3DH are not set here as they are for a different protocol.
 
-        var publicKeys = new Dictionary<string, byte[]>
-        {
-            { ActiveIdentityContext.SigningKey, certificate.GetECDsaPublicKey()!.ExportSubjectPublicKeyInfo() },
-            { ActiveIdentityContext.IdentityKey, x3dhKeys.IdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo() },
-            { ActiveIdentityContext.PreKey, x3dhKeys.SignedPreKey.PublicKey.ExportSubjectPublicKeyInfo() }
-        };
-        _activeIdentityContext.PublicKeys = publicKeys;
+        _trustedPeerStore.Add(identity.Thumbprint);
 
-        var keyThumbprints = new Dictionary<string, string>
-        {
-            { ActiveIdentityContext.SigningKey, certificate.Thumbprint }
-        };
-        _activeIdentityContext.KeyThumbprints = keyThumbprints;
+        _logger.LogInformation("Successfully loaded identity {IdentityName} with thumbprint {Thumbprint}", identityName, identity.Thumbprint);
+    }
 
-        // A node must always trust its own certificate.
-        _trustedPeerStore.Add(certificate.Thumbprint);
+    public Task StopAsync(CancellationToken cancellationToken)
+    {
+        return Task.CompletedTask;
     }
 }

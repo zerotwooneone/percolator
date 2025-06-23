@@ -50,7 +50,7 @@ namespace Percolator.Application.Manifests
             }
 
             // 1. Verify the signature
-            var isSignatureValid = await _signatureService.VerifyAsync(request.SignedManifest);
+            var isSignatureValid = await _signatureService.VerifyManifestAsync(request.SignedManifest);
             if (!isSignatureValid)
             {
                 _logger.LogWarning("Received a manifest with an invalid signature.");

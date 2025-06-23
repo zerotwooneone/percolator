@@ -1,5 +1,6 @@
 namespace Percolator.Application.Identity;
 
+using System.Threading;
 using System.Threading.Tasks;
 
 /// <summary>
@@ -11,5 +12,6 @@ public interface IIdentityOrchestrator
     /// Loads the specified identity into the ActiveIdentityContext.
     /// </summary>
     /// <param name="identityName">The name of the identity to load.</param>
-    Task LoadActiveIdentityAsync(string identityName);
+    /// <param name="cancellationToken">The cancellation token.</param>
+    Task LoadActiveIdentityAsync(string identityName, CancellationToken cancellationToken=default);
 }

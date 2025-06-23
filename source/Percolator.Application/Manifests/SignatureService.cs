@@ -1,69 +1,81 @@
-using System.Security.Cryptography;
-using System.Security.Cryptography.X509Certificates;
-using System.Threading.Tasks;
 using Google.Protobuf;
+using Microsoft.Extensions.Logging;
 using Percolator.Application.Identity;
 using Percolator.Contracts.Protos;
 using Percolator.Cryptography;
 using Percolator.Identity;
-using Cryptography_PublicKey = Percolator.Cryptography.PublicKey;
-using Cryptography_Signature = Percolator.Cryptography.Signature;
+using System.Security.Cryptography.X509Certificates;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace Percolator.Application.Manifests;
 
 public class SignatureService : ISignatureService
 {
+    private readonly ILogger<SignatureService> _logger;
     private readonly IIdentityService _identityService;
     private readonly ICredentialService _credentialService;
     private readonly ActiveIdentityContext _activeIdentityContext;
-    private readonly ISigningService _signingService;
 
     public SignatureService(
+        ILogger<SignatureService> logger,
         IIdentityService identityService,
         ICredentialService credentialService,
-        ActiveIdentityContext activeIdentityContext,
-        ISigningService signingService)
+        ActiveIdentityContext activeIdentityContext)
     {
+        _logger = logger;
         _identityService = identityService;
         _credentialService = credentialService;
         _activeIdentityContext = activeIdentityContext;
-        _signingService = signingService;
     }
 
-    public async Task SignAsync(SignedManifest manifest)
+    public Task<SignedManifest> SignManifestAsync(Manifest manifest, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrEmpty(_activeIdentityContext.IdentityName))
+        if (_activeIdentityContext.Certificate is null)
         {
-            throw new System.InvalidOperationException("Cannot sign manifest: No active identity.");
+            throw new InvalidOperationException("Cannot sign manifest: Active identity is not loaded or does not have a certificate.");
         }
 
-        var identity = await _identityService.GetIdentityAsync(_activeIdentityContext.IdentityName);
-        if (identity is null)
+        return Task.Run(() =>
         {
-            throw new System.InvalidOperationException($"Cannot sign manifest: Active identity '{_activeIdentityContext.IdentityName}' not found.");
-        }
+            // Embed the signer's certificate in the manifest payload
+            manifest.SignerCertificateDer = ByteString.CopyFrom(_activeIdentityContext.Certificate.RawData);
 
-        var pfxPassword = _credentialService.GetOrCreatePfxPassword();
-        using var certificate = X509CertificateLoader.LoadPkcs12(identity.PfxCertificate.Value, pfxPassword, X509KeyStorageFlags.Exportable);
-        
-        using var privateKey = certificate.GetECDsaPrivateKey()!;
-        using var publicKey = certificate.GetECDsaPublicKey()!;
-        var publicKeyBytes = publicKey.ExportSubjectPublicKeyInfo();
+            var payloadBytes = manifest.ToByteArray();
+            var signatureBytes = CryptoUtils.Sign(payloadBytes, _activeIdentityContext.Certificate.GetECDsaPrivateKey()!);
 
-        var dataToSign = manifest.Manifest.ToByteArray();
-        var signature = _signingService.Sign(dataToSign, privateKey);
+            var signedManifest = new SignedManifest
+            {
+                Manifest = manifest,
+                Signature = ByteString.CopyFrom(signatureBytes)
+            };
 
-        manifest.Signature = ByteString.CopyFrom(signature.Value);
-        manifest.PublicKey = ByteString.CopyFrom(publicKeyBytes);
+            _logger.LogInformation("Signed manifest with thumbprint {Thumbprint}", _activeIdentityContext.Certificate.Thumbprint);
+            return signedManifest;
+        }, cancellationToken);
     }
 
-    public Task<bool> VerifyAsync(SignedManifest manifest)
+    public Task<bool> VerifyManifestAsync(SignedManifest signedManifest, CancellationToken cancellationToken)
     {
-        var publicKey = new Cryptography_PublicKey(manifest.PublicKey.ToByteArray());
-        var signature = new Cryptography_Signature(manifest.Signature.ToByteArray());
-        var dataToVerify = manifest.Manifest.ToByteArray();
+        if (signedManifest.Manifest is null || signedManifest.Manifest.SignerCertificateDer.IsEmpty)
+        {
+            _logger.LogWarning("Manifest verification failed: Signer certificate is missing.");
+            return Task.FromResult(false);
+        }
 
-        var isValid = _signingService.Verify(dataToVerify, signature, publicKey);
-        return Task.FromResult(isValid);
+        return Task.Run(() =>
+        {
+            var certificate = X509CertificateLoader.LoadCertificate(signedManifest.Manifest.SignerCertificateDer.ToByteArray());
+
+            var payloadBytes = signedManifest.Manifest.ToByteArray();
+            var isValid = CryptoUtils.Verify(
+                payloadBytes,
+                signedManifest.Signature.ToByteArray(),
+                certificate.GetECDsaPublicKey()!);
+
+            _logger.LogInformation("Verified manifest signed by {Subject} ({Thumbprint}). IsValid: {IsValid}", certificate.Subject, certificate.Thumbprint, isValid);
+
+            return isValid;
+        }, cancellationToken);
     }
 }
