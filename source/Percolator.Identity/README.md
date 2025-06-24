@@ -4,9 +4,9 @@ This project is a domain library responsible for managing node identities within
 
 ## Core Responsibilities
 
--   **Identity Generation**: Creates new cryptographic identities for the node.
--   **Identity Storage**: Manages the persistent storage of identity materials.
--   **Identity Retrieval**: Provides access to the node's identity for use in other domains, such as signing and verification.
+-   **Manages the Root Identity**: Creates, stores, and retrieves a user's core cryptographic `Identity`. Each `Identity` is identified by a stable, unique `Guid`, which serves as the primary key for associating all user-related data across different domains.
+-   **Source of Truth for Keys**: Acts as the authoritative source for a user's long-lived cryptographic keys, including signing keys, agreement keys, and their associated X.509 certificates.
+-   **Provides Key Material**: Exposes interfaces that allow the `Application` layer to retrieve the necessary key material for other domains. For example, it provides the public key bundle required by the `Cryptography` domain to initiate a secure session, but it is not involved in the session protocol itself.
 
 ### Error Handling and Security
 

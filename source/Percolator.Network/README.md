@@ -8,13 +8,23 @@ The networking layer uses a hybrid model to balance efficiency and reliability f
 
 - **Peer Discovery**:
   - **LAN**: On a local network, peers discover each other using UDP broadcast/multicast. This allows for zero-configuration discovery.
-  - **Internet**: For peers across the internet, a different mechanism (e.g., a DHT, tracker, or bootstrap node list) will be implemented.
+  - **Internet**: For peers across the internet, a DHT-based peer discovery mechanism is used.
 
-- **Data Transfer**:
-  - All core data exchange is handled via **gRPC** (running over TCP). This provides a reliable, high-performance, and strongly-typed RPC framework that integrates seamlessly with our Protobuf data models.
-  - The gRPC services handle:
-    - Announcing and requesting manifests.
-    - Transferring file chunks using server-side streaming for efficiency.
+## Core Responsibilities
+
+- **DHT-based Peer Discovery**: Manages a simple, small-scale Distributed Hash Table (DHT) for discovering peers across the internet. The DHT is designed for networks of approximately 100 nodes or less, with a maximum of 3 hops.
+- **Routing Table Management**: Maintains the state of the local DHT routing table. Nodes in the DHT are identified by the unique `Guid` from their `Percolator.Identity`.
+- **Network Update Generation**: When its view of the network changes, this domain generates opaque "network update" messages. The actual transport of these messages is handled by the `Application` layer.
+- **Defines Communication Interfaces**: Provides interfaces (e.g., `INetworkUpdatePublisher`) that the `Application` layer implements to distribute the network updates over a secure channel.
+- **Data Transfer**: Implements the gRPC protocols for direct peer-to-peer bulk data transfer (e.g., for files).
+
+## Architectural Integration
+
+While this domain manages the logic of the DHT, it is not responsible for the transport of its own update messages. This is a critical separation of concerns:
+
+1.  The `Network` domain generates an opaque update payload.
+2.  The `Application` layer takes this payload and sends it as a secure, non-text message using the Double Ratchet session established by the `Cryptography` and `Messaging` domains.
+3.  The `Application` layer also handles user-defined policies, such as ignoring updates from certain peers or respecting "back-off" requests, keeping the `Network` domain free of business logic.
 
 ## Design Goals
 

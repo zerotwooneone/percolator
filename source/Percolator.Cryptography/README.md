@@ -8,6 +8,14 @@ The primary goal of this library is to provide a self-contained, secure, and wel
 
 This library is designed with Domain-Driven Design (DDD) principles in mind. It contains only pure cryptographic logic and is completely isolated from any infrastructure concerns like networking, databases, or user interfaces.
 
+## Persistence Ignorance
+
+A key architectural principle of this domain is that it is **persistence-ignorant**. It contains the logic for stateful protocols like the Double Ratchet, but it does not manage the storage of that state itself.
+
+Instead, it defines persistence interfaces (e.g., `IDoubleRatchetStore`, `IGroupStateStore`) that outline the data that needs to be saved. The `Percolator.Application` project is responsible for implementing these interfaces, allowing it to choose the appropriate storage mechanism (e.g., a database, local files) without affecting the cryptographic logic.
+
+This separation ensures that the `Cryptography` domain remains a pure, testable, and reusable engine focused exclusively on its core security responsibilities.
+
 ## AI Assistant Guidance
 
 When modifying this project, adhere to the following architectural rules:

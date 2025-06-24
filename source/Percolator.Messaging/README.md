@@ -4,9 +4,17 @@ This project contains the domain logic for handling direct and group messaging w
 
 ## Domain Responsibilities
 
-- Defining the core models for messages, such as `DirectMessage` and `Group`.
-- Managing the state and rules associated with messages (e.g., timestamps, author identity, content).
-- Providing interfaces for message storage and retrieval, which will be implemented by other layers.
+- **Manages the Social Graph**: Defines and manages the core entities of `Peer`, `Conversation`, and `Group`. These entities are identified by stable, unique `Guid`s to decouple them from underlying cryptographic keys which may rotate.
+- **Conversation Lifecycle**: Manages the state of a `Conversation` using a state machine (e.g., `Establishing`, `Active`, `Terminated`). It enforces rules based on this state, such as only allowing setup messages during the `Establishing` phase.
+- **Opaque Message Handling**: Stores and sequences messages, but treats their content as opaque data blobs (`byte[]`). The domain does not interpret message content, whether it is for session setup, plain text, or an internal gRPC request.
+- **Trusted Intermediary Awareness**: The domain model supports the concept of routing messages through a trusted intermediary `Peer`, but the implementation of this routing logic resides in the `Application` layer.
+- **Defines Persistence Interfaces**: Provides interfaces for storing and retrieving messaging entities, which are implemented by other layers.
+
+## Core Concepts
+
+- **Peer**: Represents a unique contact, identified by a `Guid`. To this domain, a peer is simply an ID and an optional nickname.
+- **Conversation**: A stateful interaction between two peers. It begins in an `Establishing` state and transitions to `Active` once the secure channel is confirmed by the `Application` layer.
+- **Message**: A piece of opaque data exchanged within a conversation, associated with a sender and a timestamp.
 
 ## AI Assistant Guidance
 

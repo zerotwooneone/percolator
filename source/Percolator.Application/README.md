@@ -8,9 +8,13 @@ The primary responsibility of the `Application` layer is to orchestrate business
 
 ### Key Responsibilities:
 
+-   **Orchestration and ID Mapping**: Acts as the central coordinator, managing the flow of data between domains. It is responsible for mapping the stable `Guid` identifiers used in the `Messaging` and `Identity` domains to the session-specific data required by the `Cryptography` domain.
+-   **Persistence Implementation**: Implements the persistence interfaces defined by the domain layers (e.g., `IDoubleRatchetStore`, `IMessageStore`). This keeps the domains pure and allows the application to manage all data storage.
+-   **Business Rule Enforcement**: Enforces application-wide business rules that span multiple domains, such as limiting a user to one active direct messaging session per peer.
+-   **Internal gRPC Service Hosting**: Hosts a non-network reachable, in-process gRPC service. It decrypts incoming secure messages and routes them to this internal service to handle sensitive operations like one-time key requests and file manifest sharing.
+-   **File Sharing Workflow**: Manages the entire file sharing process. It handles requests for file manifests, enforces user-defined access policies, and authorizes direct peer-to-peer gRPC connections for the actual bulk file transfer.
 -   **Service Implementation**: Contains implementations of services, such as the `FileSharingService` for gRPC, `ManifestService` for creating and managing file manifests, and services for managing identity and credentials.
 -   **Secure Credential Management**: Implements `CredentialService` and `PersistentIdentityService` to securely store and manage user identity certificates and passwords using platform-native features.
--   **Orchestration**: Manages the flow of data and calls between different parts of the system. For example, it would handle receiving a manifest announcement, verifying its signature using the `Cryptography` library, and storing it.
 -   **Dependency Injection**: Wires up dependencies for the main executable (`Percolator.Node`).
 -   **`IManifestStore`**: Manages the persistent storage of manifests, enforcing size and count quotas to prevent DoS attacks.
 -   **`ISharedDirectoryProvider`**: Provides a list of safe, pre-approved directories that can be shared. This is a security-critical component that prevents path traversal attacks.
