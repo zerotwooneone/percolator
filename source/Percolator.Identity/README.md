@@ -38,6 +38,11 @@ The primary entry point to this domain is `IIdentityService`. Its methods, such 
 
 - **No Raw Byte Arrays**: Domain libraries should not send or receive raw byte arrays in or out of the domain. These should be wrapped in DDD value types with clear names so that it is more clear when passing parameters or returning results.
 
+### Development Guidelines
+
+- **Strongly-Typed IDs**: To enhance type safety and clarify intent, raw `Guid` primitives must not be used for identifiers in public APIs. Instead, wrap them in strongly-typed DDD value objects with intention-revealing names (e.g., `PeerId`, `ConversationId`). This prevents accidental misuse of identifiers and makes the domain language more explicit.
+- **Test-Driven Development**: All new features and refactoring should follow the Red-Green-Refactor cycle of Test-Driven Development (TDD). Write a failing test first (Red), then write the simplest code to make it pass (Green), and finally, refactor the code to improve its design while keeping the tests passing. This ensures that all logic is covered by tests and promotes a high-quality, maintainable codebase.
+
 ## Future Considerations
 
 *   **Restricted Identity Creation**: Currently, any service with access to `IIdentityService` can create an arbitrary number of identities. In a production environment, it may be necessary to introduce access controls or policies around identity creation. For now, this responsibility is delegated to the `Percolator.Application` layer, which should be the sole orchestrator of identity management.

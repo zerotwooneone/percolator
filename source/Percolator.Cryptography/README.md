@@ -28,6 +28,8 @@ When modifying this project, adhere to the following architectural rules:
 ## AI Development Guidelines
 
 - **No Raw Byte Arrays**: Domain libraries should not send or receive raw byte arrays in or out of the domain. These should be wrapped in DDD value types with clear names so that it is more clear when passing parameters or returning results.
+- **Strongly-Typed IDs**: To enhance type safety and clarify intent, raw `Guid` primitives must not be used for identifiers in public APIs. Instead, wrap them in strongly-typed DDD value objects with intention-revealing names (e.g., `PeerId`, `ConversationId`). This prevents accidental misuse of identifiers and makes the domain language more explicit.
+- **Test-Driven Development**: All new features and refactoring should follow the Red-Green-Refactor cycle of Test-Driven Development (TDD). Write a failing test first (Red), then write the simplest code to make it pass (Green), and finally, refactor the code to improve its design while keeping the tests passing. This ensures that all logic is covered by tests and promotes a high-quality, maintainable codebase.
 
 ## High-Level Concepts
 
@@ -38,6 +40,8 @@ The security of the chat application is built upon several key cryptographic con
     -   **Future Secrecy (or Post-Compromise Security)**: If a user's keys are compromised, the session can "heal" itself, and future messages will once again be secure after a few message exchanges.
 
 -   **Group Messaging (Sender Keys)**: To support secure and efficient group chats, the library will implement a "sender keys" or multicast encryption protocol. Each member of a group will use the pairwise Double Ratchet channel to securely receive a shared group key, which is then used to encrypt messages sent to the entire group.
+
+    This domain is responsible for managing the complex, stateful cryptographic sessions for each group member (e.g., using a `SenderKeySession`). These sessions are mapped by a stable `Guid`. The `Percolator.Messaging` domain uses this same `Guid` to identify a `GroupConversation`, which is a simple, stateless container for the group's messages. This separation of concerns allows the `Cryptography` domain to focus purely on security, while the `Messaging` domain handles the social graph.
 
 -   **Distributed File System Cryptography**: To enable a secure, peer-to-peer file sharing network, the library will provide the cryptographic primitives for a distributed file system. This involves:
     -   **Content Encryption**: Each file is encrypted with its own unique symmetric key.
