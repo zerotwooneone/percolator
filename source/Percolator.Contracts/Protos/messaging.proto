@@ -1,158 +1,80 @@
 syntax = "proto3";
 
 import "google/protobuf/timestamp.proto";
-import "google/protobuf/wrappers.proto";
 
-package Percolator.Contracts.Protos;
+package percolator.contracts;
 
-option csharp_namespace = "Percolator.Contracts.Protos";
+option csharp_namespace = "Percolator.Contracts";
 
-// Main service for all messaging and group management operations
-service Messaging {
-    // --- Secure Session Management ---
-    rpc PublishPreKeyBundle(PublishPreKeyBundleRequest) returns (PublishPreKeyBundleResponse);
-    rpc GetPreKeyBundle(GetPreKeyBundleRequest) returns (GetPreKeyBundleResponse);
+// Defines the public-facing transport service for establishing secure sessions
+// and exchanging opaque, encrypted messages.
+service TransportService {
+    // Establishes a new secure pairwise session with the node.
+    // This is the entry point for the cryptographic handshake.
+    rpc EstablishSession(EstablishSessionRequest) returns (EstablishSessionResponse);
 
-    // --- Direct Messages ---
-    rpc SendPreKeyDirectMessage(SendPreKeyDirectMessageRequest) returns (SendDirectMessageResponse);
-    rpc EditDirectMessage(EditMessageRequest) returns (EditMessageResponse); // Note: Assumes session exists
-    rpc AnnotateDirectMessage(AnnotateMessageRequest) returns (AnnotateMessageResponse); // Note: Assumes session exists
-    rpc RemoveDirectMessageAnnotation(RemoveAnnotationRequest) returns (RemoveAnnotationResponse); // Note: Assumes session exists
+    // Creates a new secure group session with a set of initial members.
+    rpc CreateGroupSession(CreateGroupSessionRequest) returns (CreateGroupSessionResponse);
 
-    // --- Group Messages ---
-    rpc SendGroupMessage(SendGroupMessageRequest) returns (SendGroupMessageResponse);
-    rpc EditGroupMessage(EditMessageRequest) returns (EditMessageResponse);
-    rpc AnnotateGroupMessage(AnnotateMessageRequest) returns (AnnotateMessageResponse);
-    rpc RemoveGroupMessageAnnotation(RemoveAnnotationRequest) returns (RemoveAnnotationResponse);
-
-    // --- Group Management ---
-    rpc CreateGroup(CreateGroupRequest) returns (CreateGroupResponse);
-    rpc AddGroupMember(UpdateGroupMemberRequest) returns (UpdateGroupMemberResponse);
-    rpc RemoveGroupMember(UpdateGroupMemberRequest) returns (UpdateGroupMemberResponse);
-    rpc RenameGroup(RenameGroupRequest) returns (RenameGroupResponse);
-    rpc GetGroupDetails(GetGroupDetailsRequest) returns (Group);
+    // Delivers an opaque, encrypted message to an established session.
+    rpc DeliverOpaqueMessage(DeliverOpaqueMessageRequest) returns (DeliverOpaqueMessageResponse);
 }
 
-// --- Data Models ---
-
-message Group {
-    string group_id = 1;
-    string name = 2;
-    repeated string member_ids = 3;
-}
-
+// Represents the public cryptographic materials needed to establish a secure session.
+// The exact fields will depend on the underlying handshake protocol (e.g., X3DH).
 message PreKeyBundle {
-    bytes identity_key = 1;
+    bytes identity_key = 1;         // Ephemeral identity key for the session.
     bytes signed_pre_key = 2;
-    bytes one_time_pre_key = 3;
-    bytes signed_pre_key_signature = 4;
+    bytes pre_key_signature = 3;
+    optional bytes one_time_pre_key = 4;
 }
 
-// --- Request/Response Definitions ---
+// Request to establish a new secure session.
+message EstablishSessionRequest {
+    uint32 version = 1;
+    // The public key bundle of the peer initiating the session.
+    PreKeyBundle initiator_bundle = 2;
 
-// Direct Messages
-message SendPreKeyDirectMessageRequest {
-    // The name of the recipient's identity being targeted.
-    string identity_name = 1;
-    // The initiator's public identity key (IK_A).
-    bytes initiator_identity_key = 2;
-    // The initiator's public ephemeral key (EK_A).
-    bytes initiator_ephemeral_key = 3;
-    // The initial encrypted message payload.
-    bytes encrypted_payload = 4;
+    // An optional, stable public key that the initiator can use as their
+    // long-term identity across sessions.
+    optional bytes long_term_identity_key = 3;
 }
 
-message SendDirectMessageResponse {
-    bool success = 1;
+// Response containing the responder's key bundle and the new session ID.
+message EstablishSessionResponse {
+    uint32 version = 1;
+    string session_id = 2;
+    PreKeyBundle responder_bundle = 3;
+    optional google.protobuf.Timestamp retry_after_utc = 4;
 }
 
-// Secure Session Management
-message PublishPreKeyBundleRequest {
-    string identity_name = 1;
-    PreKeyBundle bundle = 2;
+// Request to create a new group session.
+message CreateGroupSessionRequest {
+    uint32 version = 1;
+    PreKeyBundle initiator_bundle = 2;
+    optional bytes long_term_identity_key = 3;
+    // The key bundles for all other initial members of the group.
+    repeated PreKeyBundle initial_members = 4;
 }
 
-message PublishPreKeyBundleResponse {
-    bool success = 1;
+// Response for a group session creation request.
+message CreateGroupSessionResponse {
+    uint32 version = 1;
+    string session_id = 2;
+    optional google.protobuf.Timestamp retry_after_utc = 3;
 }
 
-message GetPreKeyBundleRequest {
-    string user_id = 1;
-    string identity_name = 2;
+// Request to deliver an opaque message to a session.
+message DeliverOpaqueMessageRequest {
+    uint32 version = 1;
+    string session_id = 2;
+    // The opaque, encrypted message payload. The transport service has no
+    // knowledge of the contents of this payload.
+    bytes payload = 3;
 }
 
-message GetPreKeyBundleResponse {
-    PreKeyBundle bundle = 1;
-}
-
-// Group Messages
-message SendGroupMessageRequest {
-    string group_id = 1;
-    string content = 2;
-}
-
-message SendGroupMessageResponse {
-    string message_id = 1;
-    google.protobuf.Timestamp timestamp_utc = 2;
-}
-
-// Common Edit
-message EditMessageRequest {
-    string message_id = 1;
-    string new_content = 2;
-}
-
-message EditMessageResponse {
-    bool success = 1;
-}
-
-// Common Annotation
-message AnnotateMessageRequest {
-    string message_id = 1;
-    string emoji = 2;
-}
-
-message AnnotateMessageResponse {
-    bool success = 1;
-}
-
-message RemoveAnnotationRequest {
-    string message_id = 1;
-    string emoji = 2;
-}
-
-message RemoveAnnotationResponse {
-    bool success = 1;
-}
-
-// Group Management
-message CreateGroupRequest {
-    string name = 1;
-    repeated string member_ids = 2;
-}
-
-message CreateGroupResponse {
-    Group group = 1;
-}
-
-message UpdateGroupMemberRequest {
-    string group_id = 1;
-    string member_id = 2;
-}
-
-message UpdateGroupMemberResponse {
-    bool success = 1;
-}
-
-message RenameGroupRequest {
-    string group_id = 1;
-    string new_name = 2;
-}
-
-message RenameGroupResponse {
-    bool success = 1;
-}
-
-message GetGroupDetailsRequest {
-    string group_id = 1;
+// An empty response to acknowledge the message delivery request.
+message DeliverOpaqueMessageResponse {
+    uint32 version = 1;
+    optional google.protobuf.Timestamp retry_after_utc = 2;
 }

@@ -16,9 +16,9 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Protobuf Include="Protos\manifest.proto" />
-    <Protobuf Include="Protos\filesharing.proto" GrpcServices="Both" />
-    <Protobuf Include="Protos\messaging.proto" GrpcServices="Both" />
+    <Protobuf Include="Protos\messaging.proto" GrpcServices="Server" ProtoRoot="Protos" />
+    <Protobuf Include="Protos\internal_messaging.proto" GrpcServices="None" ProtoRoot="Protos" />
+    <Protobuf Include="Protos\file_transfer.proto" GrpcServices="Both" ProtoRoot="Protos" />
   </ItemGroup>
 
 </Project>

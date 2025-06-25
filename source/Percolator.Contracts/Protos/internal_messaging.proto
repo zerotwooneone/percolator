@@ -1,0 +1,126 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+import "messaging.proto"; // For reusing the PreKeyBundle message.
+
+package percolator.contracts;
+
+option csharp_namespace = "Percolator.Contracts";
+
+// The top-level generic envelope for all internal, post-decryption messages.
+// It uses a two-level dispatch system: first by application, then by message type.
+message InternalEnvelope {
+  oneof application_payload {
+    ChatEnvelope chat_envelope = 1;
+    FileShareEnvelope file_share_envelope = 2;
+    DhtEnvelope dht_envelope = 3;
+    MailboxEnvelope mailbox_envelope = 4;
+  }
+}
+
+// === 1. Rich Text Chat Application ===
+
+message ChatEnvelope {
+  oneof message {
+    TextMessage text_message = 1;
+    ReadReceipt read_receipt = 2;
+    EmojiAnnotation emoji_annotation = 3;
+  }
+}
+
+message TextMessage {
+  string content = 1;
+}
+
+message ReadReceipt {
+  string message_id = 1;
+}
+
+message EmojiAnnotation {
+  string message_id = 1;
+  string emoji = 2;
+}
+
+// === 2. File Sharing Application ===
+
+message FileShareEnvelope {
+  oneof message {
+    RequestManifest request_manifest = 1;
+    Manifest manifest = 2;
+  }
+}
+
+message RequestManifest {}
+
+message Manifest {
+  message ManifestEntry {
+    enum EntryType { FILE = 0; DIRECTORY = 1; }
+    EntryType type = 1;
+    string path = 2;
+    repeated bytes chunk_hashes = 3;
+  }
+  string manifest_id = 1;
+  repeated ManifestEntry entries = 2;
+  google.protobuf.Timestamp expires_utc = 3;
+  bytes signature = 4;
+}
+
+// === 3. DHT Peer Discovery Application ===
+
+message DhtEnvelope {
+  oneof message {
+    FindNodeRequest find_node_request = 1;
+    FindNodeResponse find_node_response = 2;
+  }
+}
+
+message FindNodeRequest {
+  bytes target_peer_id = 1;
+}
+
+message NodeInfo {
+  bytes peer_id = 1;
+  string address = 2;
+}
+
+message FindNodeResponse {
+  repeated NodeInfo closer_peers = 1;
+}
+
+// === 4. Asynchronous Message Mailbox Application ===
+
+message MailboxEnvelope {
+  oneof message {
+    StorePreKeyBundleRequest store_prekey_bundle_request = 1;
+    StorePreKeyBundleResponse store_prekey_bundle_response = 2;
+    GetPreKeyBundleRequest get_prekey_bundle_request = 3;
+    GetPreKeyBundleResponse get_prekey_bundle_response = 4;
+    StoreOpaqueMessageRequest store_opaque_message_request = 5;
+    StoreOpaqueMessageResponse store_opaque_message_response = 6;
+    GetOpaqueMessagesRequest get_opaque_messages_request = 7;
+    GetOpaqueMessagesResponse get_opaque_messages_response = 8;
+  }
+}
+
+message StorePreKeyBundleRequest {
+  PreKeyBundle bundle = 1;
+}
+message StorePreKeyBundleResponse {}
+
+message GetPreKeyBundleRequest {
+  bytes target_peer_id = 1;
+}
+message GetPreKeyBundleResponse {
+  PreKeyBundle bundle = 1;
+}
+
+message StoreOpaqueMessageRequest {
+  bytes recipient_peer_id = 1;
+  bytes opaque_message = 2;
+}
+message StoreOpaqueMessageResponse {}
+
+message GetOpaqueMessagesRequest {}
+message GetOpaqueMessagesResponse {
+  repeated bytes opaque_messages = 1;
+}

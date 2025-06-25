@@ -1,0 +1,45 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+package percolator.contracts;
+
+option csharp_namespace = "Percolator.Contracts";
+
+// Service dedicated to the high-throughput, peer-to-peer transfer of file chunks.
+// This service is separate from the primary messaging service and is used only for
+// bulk data transfer after the file sharing has been negotiated via the main channel.
+service FileTransfer {
+  // A bidirectional stream for transferring file chunks. The client streams chunks
+  // to the server, and the server streams back acknowledgements.
+  rpc TransferChunks(stream TransferChunkRequest) returns (stream TransferChunkResponse);
+}
+
+// A request to transfer a single chunk of a file.
+message TransferChunkRequest {
+  // The version of the protocol being used.
+  uint32 version = 1;
+
+  // The SHA-256 hash of the chunk's data. This is used by the receiver to
+  // verify the integrity of the chunk and identify which part of the file it is.
+  bytes chunk_hash = 2;
+
+  // The raw binary data of the chunk.
+  bytes data = 3;
+}
+
+// A response from the server acknowledging the receipt of a chunk.
+message TransferChunkResponse {
+  // The version of the protocol being used.
+  uint32 version = 1;
+
+  // The hash of the chunk that this response is for.
+  bytes chunk_hash = 2;
+
+  // A flag indicating whether the chunk was received successfully and its hash
+  // was verified.
+  bool received_ok = 3;
+
+  // Optional timestamp indicating when the client should retry the transfer.
+  optional google.protobuf.Timestamp retry_after_utc = 4;
+}
