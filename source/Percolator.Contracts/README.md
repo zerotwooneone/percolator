@@ -51,10 +51,13 @@ This file defines the core `InternalEnvelope` used by the application's internal
 
 The following features are built on top of the internal messaging system:
 
--   **Rich Text Chat**: A full-featured chat system including text messages, read receipts, and emoji annotations.
+-   **Rich Text Chat**: A full-featured chat system supporting both direct and group messages.
+    -   **Core Messaging**: Includes `TextMessage` (with a unique ID, author, and timestamp), read receipts, and emoji annotations.
+    -   **Group Management**: Provides messages for inviting/removing members, leaving groups, and updating group information like the name and avatar.
+    -   **State Synchronization**: Uses notification messages to ensure all group members are aware of changes to membership or group info.
 -   **Manifest-Based File Sharing**: A system for peers to discover and request files from each other via signed manifests.
--   **DHT Peer Discovery**: A simple, Kademlia-like Distributed Hash Table for discovering other peers on the network.
--   **Asynchronous Message Mailbox**: A store-and-forward mechanism to support offline messaging by hosting pre-key bundles and opaque messages for other peers.
+-   **DHT Peer Discovery**: A simple, Kademlia-like Distributed Hash Table for discovering other peers on the network. Includes a `FindNode` RPC for discovery and a `Ping` RPC for checking node health.
+-   **Asynchronous Message Mailbox**: A store-and-forward mechanism to support offline messaging. It supports a reliable inbox pattern where clients retrieve messages with unique IDs and then issue a separate command to delete them after successful processing.
 
 ---
 

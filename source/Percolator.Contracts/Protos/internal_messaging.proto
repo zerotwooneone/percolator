@@ -25,20 +25,59 @@ message ChatEnvelope {
     TextMessage text_message = 1;
     ReadReceipt read_receipt = 2;
     EmojiAnnotation emoji_annotation = 3;
+    UpdateGroupMembershipRequest update_group_membership_request = 4;
+    UpdateGroupInfoRequest update_group_info_request = 5;
+    GroupMembershipChangedNotification group_membership_changed_notification = 6;
+    GroupInfoChangedNotification group_info_changed_notification = 7;
   }
 }
 
 message TextMessage {
-  string content = 1;
+  bytes message_id = 1; // A unique identifier for the message.
+  optional bytes author_identity_key = 2; // Required for group messages.
+  google.protobuf.Timestamp sent_timestamp_utc = 3;
+  string content = 4;
 }
 
 message ReadReceipt {
-  string message_id = 1;
+  bytes message_id = 1; // The ID of the message being acknowledged.
+  optional bytes author_identity_key = 2; // Who is acknowledging the message.
+  google.protobuf.Timestamp sent_timestamp_utc = 3;
 }
 
 message EmojiAnnotation {
-  string message_id = 1;
-  string emoji = 2;
+  bytes message_id = 1; // The ID of the message being annotated.
+  optional bytes author_identity_key = 2; // Who is adding the annotation.
+  google.protobuf.Timestamp sent_timestamp_utc = 3;
+  string emoji = 4; // The emoji character, e.g., "👍".
+}
+
+// Group Management Messages
+message UpdateGroupMembershipRequest {
+  repeated bytes members_to_add = 1;
+  repeated bytes members_to_remove = 2;
+  bool leave_group = 3; // Set to true if the sender is leaving the group.
+}
+
+message UpdateGroupInfoRequest {
+  optional string new_group_name = 1;
+  optional bytes new_group_avatar = 2; // Raw image data for the avatar.
+}
+
+// Group Notification Messages
+message GroupMembershipChangedNotification {
+  bytes actor_identity_key = 1; // The identity of the member who made the change.
+  repeated bytes added_members = 2;
+  repeated bytes removed_members = 3;
+  optional bytes member_who_left = 4;
+  google.protobuf.Timestamp change_timestamp_utc = 5;
+}
+
+message GroupInfoChangedNotification {
+  bytes actor_identity_key = 1; // The identity of the member who made the change.
+  optional string new_group_name = 2;
+  optional bytes new_group_avatar = 3;
+  google.protobuf.Timestamp change_timestamp_utc = 4;
 }
 
 // === 2. File Sharing Application ===
@@ -71,6 +110,8 @@ message DhtEnvelope {
   oneof message {
     FindNodeRequest find_node_request = 1;
     FindNodeResponse find_node_response = 2;
+    PingRequest ping_request = 3;
+    PingResponse ping_response = 4;
   }
 }
 
@@ -87,6 +128,9 @@ message FindNodeResponse {
   repeated NodeInfo closer_peers = 1;
 }
 
+message PingRequest {}
+message PingResponse {}
+
 // === 4. Asynchronous Message Mailbox Application ===
 
 message MailboxEnvelope {
@@ -99,6 +143,8 @@ message MailboxEnvelope {
     StoreOpaqueMessageResponse store_opaque_message_response = 6;
     GetOpaqueMessagesRequest get_opaque_messages_request = 7;
     GetOpaqueMessagesResponse get_opaque_messages_response = 8;
+    DeleteMessagesRequest delete_messages_request = 9;
+    DeleteMessagesResponse delete_messages_response = 10;
   }
 }
 
@@ -121,6 +167,17 @@ message StoreOpaqueMessageRequest {
 message StoreOpaqueMessageResponse {}
 
 message GetOpaqueMessagesRequest {}
-message GetOpaqueMessagesResponse {
-  repeated bytes opaque_messages = 1;
+
+message StoredMessage {
+  bytes message_id = 1; // A unique identifier for the stored message.
+  bytes opaque_message = 2;
 }
+
+message GetOpaqueMessagesResponse {
+  repeated StoredMessage messages = 1;
+}
+
+message DeleteMessagesRequest {
+  repeated bytes message_ids = 1;
+}
+message DeleteMessagesResponse {}
