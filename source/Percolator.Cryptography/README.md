@@ -41,7 +41,7 @@ The security of the chat application is built upon several key cryptographic con
 
 -   **Group Messaging (Sender Keys)**: To support secure and efficient group chats, the library will implement a "sender keys" or multicast encryption protocol. Each member of a group will use the pairwise Double Ratchet channel to securely receive a shared group key, which is then used to encrypt messages sent to the entire group.
 
-    This domain is responsible for managing the complex, stateful cryptographic sessions for each group member (e.g., using a `SenderKeySession`). These sessions are mapped by a stable `Guid`. The `Percolator.Messaging` domain uses this same `Guid` to identify a `GroupConversation`, which is a simple, stateless container for the group's messages. This separation of concerns allows the `Cryptography` domain to focus purely on security, while the `Messaging` domain handles the social graph.
+    This domain is responsible for managing the complex, stateful cryptographic sessions for each group member (e.g., using a `SenderKeySession`). These sessions are mapped by a stable `Guid`. The `Percolator.Sessions` domain uses this same `Guid` to identify a `GroupConversation`, which is a simple, stateless container for the group's messages. This separation of concerns allows the `Cryptography` domain to focus purely on security, while the `Sessions` domain handles the conversation lifecycle.
 
 -   **Distributed File System Cryptography**: To enable a secure, peer-to-peer file sharing network, the library will provide the cryptographic primitives for a distributed file system. This involves:
     -   **Content Encryption**: Each file is encrypted with its own unique symmetric key.

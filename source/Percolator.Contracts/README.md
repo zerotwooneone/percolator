@@ -26,14 +26,13 @@ This service is the primary gateway for all secure communication.
 
 -   **Session Management**: Provides RPCs to establish encrypted direct (one-to-one) and group (many-to-many) message sessions, based on the underlying `Percolator.Cryptography` domain.
 -   **Opaque Message Exchange**: Once a session is established, this service's primary role is to accept and forward opaque, encrypted byte payloads. It has zero knowledge of the content of these payloads.
--   **Identity**: Session establishment is based on cryptographic keys. Peers can optionally include an additional long-term identity key to associate with their session.
 
 ### `file_transfer.proto`
 
 This is a secondary, specialized service for high-throughput data transfer.
 
--   **Chunk Streaming**: Provides a single RPC for peers to stream file chunks (identified by their hash) to one another, similar to BitTorrent.
--   **Security**: This endpoint is inherently untrusted. The application layer is responsible for validating incoming stream requests (e.g., checking if the peer is authorized to send a specific chunk hash) and can reject unauthorized streams.
+-   **Chunk Streaming**: Provides a single RPC for peers to stream file chunks (identified by their hash) to one another.
+-   **Security**: This endpoint is inherently untrusted. The application layer is responsible for validating incoming stream requests and can reject unauthorized streams.
 
 ---
 
@@ -45,19 +44,7 @@ These contracts define the structure of messages *after* they have been decrypte
 
 This file defines the core `InternalEnvelope` used by the application's internal message bus (Mediator).
 
--   **Two-Level Dispatch**: All internal messages are wrapped in a top-level `InternalEnvelope`. This envelope uses a `oneof` field to route the payload to the correct application-specific envelope (e.g., `ChatEnvelope`, `DhtEnvelope`). This second-level envelope then uses its own `oneof` to dispatch to a specific message handler. This provides a highly scalable and type-safe routing mechanism.
-
-### Application Features
-
-The following features are built on top of the internal messaging system:
-
--   **Rich Text Chat**: A full-featured chat system supporting both direct and group messages.
-    -   **Core Messaging**: Includes `TextMessage` (with a unique ID, author, and timestamp), read receipts, and emoji annotations.
-    -   **Group Management**: Provides messages for inviting/removing members, leaving groups, and updating group information like the name and avatar.
-    -   **State Synchronization**: Uses notification messages to ensure all group members are aware of changes to membership or group info.
--   **Manifest-Based File Sharing**: A system for peers to discover and request files from each other via signed manifests.
--   **DHT Peer Discovery**: A simple, Kademlia-like Distributed Hash Table for discovering other peers on the network. Includes a `FindNode` RPC for discovery and a `Ping` RPC for checking node health.
--   **Asynchronous Message Mailbox**: A store-and-forward mechanism to support offline messaging. It supports a reliable inbox pattern where clients retrieve messages with unique IDs and then issue a separate command to delete them after successful processing.
+-   **Two-Level Dispatch**: All internal messages are wrapped in a top-level `InternalEnvelope`. This envelope uses a `oneof` field to route the payload to the correct application-specific envelope (e.g., `ChatEnvelope`, `DhtEnvelope`). This second-level envelope then uses its own `oneof` to dispatch to a specific message handler. This provides a highly scalable and type-safe routing mechanism for features like chat, file sharing, and peer discovery.
 
 ---
 

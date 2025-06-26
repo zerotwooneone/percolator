@@ -5,7 +5,11 @@ This repository contains the Percolator project, a collection of libraries and a
 ## Key Projects
 
 *   **`Percolator.Cryptography`**: A high-performance, secure cryptography library providing implementations of advanced protocols for secure messaging.
+*   **`Percolator.Identity`**: A domain library responsible for managing peer identities, including their cryptographic keys and network endpoint information.
+*   **`Percolator.Sessions`**: A domain library that manages the lifecycle of communication sessions and the sequencing of opaque, encrypted messages.
+*   **`Percolator.Application`**: The application layer that orchestrates the domain libraries, implementing the system's use cases and business logic.
 *   **`Percolator.CryptographyTests`**: A comprehensive test suite for the cryptography library, ensuring its correctness and security through rigorous unit testing.
+*   **`Percolator.Node`**: The main executable and command-line interface for the application.
 
 ## Overview
 
