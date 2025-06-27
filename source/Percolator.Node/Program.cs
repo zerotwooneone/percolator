@@ -104,21 +104,13 @@ static RootCommand BuildCommandLine(IServiceProvider serviceProvider, string[] a
         // Use the application layer hosted service to manage the discovery service's lifecycle
         builder.Services.AddHostedService<PeerDiscoveryHostedService>();
 
-        // --- Kestrel Configuration ---
-        builder.WebHost.ConfigureKestrel(options =>
-        {
-            options.ListenAnyIP(port, listenOptions =>
-            {
-                listenOptions.Protocols = HttpProtocols.Http2;
-            });
-        });
-
         var app = builder.Build();
 
-        // --- Application Startup ---
         var identityOrchestrator = app.Services.GetRequiredService<IIdentityOrchestrator>();
         await identityOrchestrator.LoadActiveIdentityAsync(identityName);
 
+        var activeIdentity = app.Services.GetRequiredService<ActiveIdentityContext>();
+        app.Urls.Add($"https://0.0.0.0:{port}");
         await app.RunAsync();
 
     }, identityOption, portOption);
@@ -126,6 +118,20 @@ static RootCommand BuildCommandLine(IServiceProvider serviceProvider, string[] a
     var rootCommand = new RootCommand("Percolator Node");
     rootCommand.AddCommand(runCommand);
     rootCommand.AddGlobalOption(identityOption);
+
+    // --- 'create-identity' Command ---
+    var nameArgument = new Argument<string>("name", "The name of the identity to create.");
+    var nicknameOption = new Option<string>("--nickname", "An optional nickname for the identity.");
+    var createIdentityCommand = new Command("create-identity", "Create a new identity.");
+    createIdentityCommand.AddArgument(nameArgument);
+    createIdentityCommand.AddOption(nicknameOption);
+    createIdentityCommand.SetHandler(async (name, nickname) =>
+    {
+        var identityService = serviceProvider.GetRequiredService<Percolator.Identity.IIdentityService>();
+        var identityRecord = await identityService.CreateIdentityAsync(name, nickname);
+        Console.WriteLine($"Identity created successfully:\n  Name: {identityRecord.Name}\n  Nickname: {identityRecord.Nickname}\n  Thumbprint: {identityRecord.Thumbprint}");
+    }, nameArgument, nicknameOption);
+    rootCommand.AddCommand(createIdentityCommand);
 
     return rootCommand;
 }
