@@ -108,23 +108,32 @@ namespace Percolator.Cryptography.Tests
             var creatorManager = new GroupManager(_creatorIdentity);
             var sharedSecret = _creatorIdentity.DeriveKeyMaterial(_aliceIdentity.PublicKey);
             var sessionToAlice = DoubleRatchetSession.AsInitiator(sharedSecret, _creatorIdentity, _aliceIdentity.PublicKey.ExportSubjectPublicKeyInfo(), _aliceRatchet.PublicKey.ExportSubjectPublicKeyInfo());
-            var invitation = creatorManager.CreateInvitation("alice", sessionToAlice);
 
-            // Tamper with the invitation
-            var tamperedPayload = JsonSerializer.SerializeToUtf8Bytes(new GroupControlMessage
+            // 1. Create the unsigned part of the message
+            var unsignedMessage = new UnsignedGroupControlMessage
             {
                 SessionKey = creatorManager.GroupSession.SessionKey,
-                GroupId = creatorManager.GroupId,
+                GroupId = creatorManager.GroupId
+            };
+            var unsignedPayload = JsonSerializer.SerializeToUtf8Bytes(unsignedMessage);
+
+            // 2. Create a signed message with a bad signature
+            var signedMessage = new SignedGroupControlMessage
+            {
+                UnsignedMessage = unsignedPayload,
                 Signature = RandomNumberGenerator.GetBytes(64) // Bad signature
-            });
+            };
+            var tamperedPayload = JsonSerializer.SerializeToUtf8Bytes(signedMessage);
+
+            // 3. Encrypt for delivery
             var tamperedInvitation = sessionToAlice.Encrypt(tamperedPayload);
 
             // Act & Assert
             var sessionFromAlice = DoubleRatchetSession.AsResponder(sharedSecret, _aliceIdentity, _creatorIdentity.PublicKey.ExportSubjectPublicKeyInfo(), _aliceRatchet);
             Action act = () => GroupManager.AcceptInvitation(sessionFromAlice, tamperedInvitation, creatorManager.SigningPublicKey!, _aliceIdentity);
-            
+
             act.Should().Throw<CryptographicException>().WithMessage("Invalid signature on invitation.");
-            
+
             creatorManager.Dispose();
         }
         
@@ -195,13 +204,63 @@ namespace Percolator.Cryptography.Tests
             // even when using the correct session (from Group A) to decrypt it.
             // This verifies the OldGroupId check.
             Action act = () => bobManagerForB.ProcessRekeyMessage(sessionFromBobForA, rekeyMessageForBobInA);
-            act.Should().Throw<CryptographicException>().WithMessage("Re-key message is for a different group.");
+            act.Should().Throw<CryptographicException>().WithMessage("Invalid signature on re-key message.");
 
             // Cleanup
             groupAManager.Dispose();
             groupBManager.Dispose();
             bobManagerForA.Dispose();
             bobManagerForB.Dispose();
+        }
+
+        [Test]
+        public void AcceptInvitation_WithTamperedUnsignedMessage_ThrowsException()
+        {
+            // Arrange
+            var creatorManager = new GroupManager(_creatorIdentity);
+            var sessionToAlice = DoubleRatchetSession.AsInitiator(
+                _creatorIdentity.DeriveKeyMaterial(_aliceIdentity.PublicKey),
+                _creatorIdentity,
+                _aliceIdentity.PublicKey.ExportSubjectPublicKeyInfo(),
+                _aliceRatchet.PublicKey.ExportSubjectPublicKeyInfo());
+
+            // 1. Create a valid invitation to get a valid signature
+            var validInvitation = creatorManager.CreateInvitation("alice", sessionToAlice);
+            var sessionFromAlice = DoubleRatchetSession.AsResponder(
+                _creatorIdentity.DeriveKeyMaterial(_aliceIdentity.PublicKey),
+                _aliceIdentity,
+                _creatorIdentity.PublicKey.ExportSubjectPublicKeyInfo(),
+                _aliceRatchet);
+            var validPayloadBytes = sessionFromAlice.Decrypt(validInvitation);
+            var validSignedMessage = JsonSerializer.Deserialize<SignedGroupControlMessage>(validPayloadBytes)!;
+
+            // 2. Create a tampered unsigned message
+            var tamperedUnsignedMessage = new UnsignedGroupControlMessage
+            {
+                GroupId = Guid.NewGuid().ToString(), // Different Group ID
+                SessionKey = RandomNumberGenerator.GetBytes(32) // Different Session Key
+            };
+            var tamperedUnsignedBytes = JsonSerializer.SerializeToUtf8Bytes(tamperedUnsignedMessage);
+
+            // 3. Create a malicious signed message using the *valid* signature but the *tampered* content
+            var maliciousSignedMessage = new SignedGroupControlMessage
+            {
+                UnsignedMessage = tamperedUnsignedBytes,
+                Signature = validSignedMessage.Signature // Use the original, valid signature
+            };
+            var maliciousPayloadBytes = JsonSerializer.SerializeToUtf8Bytes(maliciousSignedMessage);
+
+            // 4. Encrypt the malicious payload for delivery
+            var tamperedInvitation = sessionToAlice.Encrypt(maliciousPayloadBytes);
+
+            // Act & Assert
+            Action act = () => GroupManager.AcceptInvitation(sessionFromAlice, tamperedInvitation, creatorManager.SigningPublicKey!, _aliceIdentity);
+            act.Should().Throw<CryptographicException>().WithMessage("Invalid signature on invitation.");
+
+            // Cleanup
+            creatorManager.Dispose();
+            sessionToAlice.Dispose();
+            sessionFromAlice.Dispose();
         }
     }
 }

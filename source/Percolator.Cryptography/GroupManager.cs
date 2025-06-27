@@ -88,16 +88,22 @@ namespace Percolator.Cryptography
         {
             if (_signingKey is null) throw new InvalidOperationException("Only the group creator can send invitations.");
             _members[memberId] = sessionToMember;
-            var controlMessage = new GroupControlMessage
+            var unsignedMessage = new UnsignedGroupControlMessage
             {
                 SessionKey = GroupSession.SessionKey,
                 GroupId = this.GroupId
             };
 
-            var payload = JsonSerializer.SerializeToUtf8Bytes(controlMessage, new JsonSerializerOptions { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull });
-            controlMessage.Signature = _signingKey.SignData(payload, HashAlgorithmName.SHA256);
+            var unsignedPayload = JsonSerializer.SerializeToUtf8Bytes(unsignedMessage);
+            var signature = _signingKey.SignData(unsignedPayload, HashAlgorithmName.SHA256);
 
-            var signedPayload = JsonSerializer.SerializeToUtf8Bytes(controlMessage);
+            var signedMessage = new SignedGroupControlMessage
+            {
+                UnsignedMessage = unsignedPayload,
+                Signature = signature
+            };
+
+            var signedPayload = JsonSerializer.SerializeToUtf8Bytes(signedMessage);
             return sessionToMember.Encrypt(signedPayload);
         }
 
@@ -118,16 +124,22 @@ namespace Percolator.Cryptography
             GroupSession = new SenderKeySession(null, groupContext);
 
             var rekeyMessages = new Dictionary<string, RatchetMessage>();
-            var controlMessage = new GroupControlMessage
+            var unsignedMessage = new UnsignedGroupControlMessage
             {
                 OldGroupId = oldGroupId,
                 SessionKey = GroupSession.SessionKey,
                 GroupId = this.GroupId
             };
 
-            var payload = JsonSerializer.SerializeToUtf8Bytes(controlMessage, new JsonSerializerOptions { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull });
-            controlMessage.Signature = _signingKey.SignData(payload, HashAlgorithmName.SHA256);
-            var signedPayload = JsonSerializer.SerializeToUtf8Bytes(controlMessage);
+            var unsignedPayload = JsonSerializer.SerializeToUtf8Bytes(unsignedMessage);
+            var signature = _signingKey.SignData(unsignedPayload, HashAlgorithmName.SHA256);
+
+            var signedMessage = new SignedGroupControlMessage
+            {
+                UnsignedMessage = unsignedPayload,
+                Signature = signature
+            };
+            var signedPayload = JsonSerializer.SerializeToUtf8Bytes(signedMessage);
 
             foreach (var (id, session) in _members)
             {
@@ -141,31 +153,25 @@ namespace Percolator.Cryptography
         public static GroupManager AcceptInvitation(DoubleRatchetSession sessionToCreator, RatchetMessage invitationMessage, byte[] creatorSigningPublicKey, ECDiffieHellman creatorIdentityKey)
         {
             var payload = sessionToCreator.Decrypt(invitationMessage);
-            var controlMessage = JsonSerializer.Deserialize<GroupControlMessage>(payload)!;
-
-            if (controlMessage.OldGroupId is not null)
-            {
-                throw new CryptographicException("Invalid invitation message: must not have OldGroupId.");
-            }
-
-            var signature = controlMessage.Signature;
-            if (signature is null)
-            {
-                throw new CryptographicException("Invitation is not signed.");
-            }
-            controlMessage.Signature = null!; // Verify the message as it was signed
-            var messageToVerify = JsonSerializer.SerializeToUtf8Bytes(controlMessage, new JsonSerializerOptions { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull });
+            var signedMessage = JsonSerializer.Deserialize<SignedGroupControlMessage>(payload)!;
 
             using var creatorKey = ECDsa.Create();
             creatorKey.ImportSubjectPublicKeyInfo(creatorSigningPublicKey, out _);
-            if (!creatorKey.VerifyData(messageToVerify, signature, HashAlgorithmName.SHA256))
+            if (!creatorKey.VerifyData(signedMessage.UnsignedMessage, signedMessage.Signature, HashAlgorithmName.SHA256))
             {
                 throw new CryptographicException("Invalid signature on invitation.");
             }
 
-            var groupContext = Encoding.UTF8.GetBytes(controlMessage.GroupId);
-            var groupSession = new SenderKeySession(controlMessage.SessionKey, groupContext);
-            return new GroupManager(groupSession, controlMessage.GroupId, creatorSigningPublicKey, creatorIdentityKey);
+            var unsignedMessage = JsonSerializer.Deserialize<UnsignedGroupControlMessage>(signedMessage.UnsignedMessage)!;
+
+            if (unsignedMessage.OldGroupId is not null)
+            {
+                throw new CryptographicException("Invalid invitation message: must not have OldGroupId.");
+            }
+
+            var groupContext = Encoding.UTF8.GetBytes(unsignedMessage.GroupId);
+            var groupSession = new SenderKeySession(unsignedMessage.SessionKey, groupContext);
+            return new GroupManager(groupSession, unsignedMessage.GroupId, creatorSigningPublicKey, creatorIdentityKey);
         }
 
         public void ProcessRekeyMessage(DoubleRatchetSession sessionToCreator, RatchetMessage rekeyMessage)
@@ -173,32 +179,26 @@ namespace Percolator.Cryptography
             if (_creatorSigningPublicKey is null) throw new InvalidOperationException("Cannot process re-key on a creator's group manager.");
 
             var payload = sessionToCreator.Decrypt(rekeyMessage);
-            var controlMessage = JsonSerializer.Deserialize<GroupControlMessage>(payload)!;
-
-            if (controlMessage.OldGroupId != GroupId)
-            {
-                throw new CryptographicException("Re-key message is for a different group.");
-            }
-
-            var signature = controlMessage.Signature;
-            if (signature is null)
-            {
-                throw new CryptographicException("Re-key message is not signed.");
-            }
-            controlMessage.Signature = null!;
-            var messageToVerify = JsonSerializer.SerializeToUtf8Bytes(controlMessage, new JsonSerializerOptions { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull });
+            var signedMessage = JsonSerializer.Deserialize<SignedGroupControlMessage>(payload)!;
 
             using var creatorKey = ECDsa.Create();
             creatorKey.ImportSubjectPublicKeyInfo(_creatorSigningPublicKey, out _);
-            if (!creatorKey.VerifyData(messageToVerify, signature, HashAlgorithmName.SHA256))
+            if (!creatorKey.VerifyData(signedMessage.UnsignedMessage, signedMessage.Signature, HashAlgorithmName.SHA256))
             {
                 throw new CryptographicException("Invalid signature on re-key message.");
             }
 
-            GroupId = controlMessage.GroupId;
+            var unsignedMessage = JsonSerializer.Deserialize<UnsignedGroupControlMessage>(signedMessage.UnsignedMessage)!;
+
+            if (unsignedMessage.OldGroupId != GroupId)
+            {
+                throw new CryptographicException("Re-key message is for a different group.");
+            }
+
+            GroupId = unsignedMessage.GroupId;
             var groupContext = Encoding.UTF8.GetBytes(GroupId);
             GroupSession.Dispose();
-            GroupSession = new SenderKeySession(controlMessage.SessionKey, groupContext);
+            GroupSession = new SenderKeySession(unsignedMessage.SessionKey, groupContext);
         }
 
         public void Dispose()

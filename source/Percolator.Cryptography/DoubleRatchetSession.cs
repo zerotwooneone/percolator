@@ -181,11 +181,16 @@ public class DoubleRatchetSession : IDisposable
 
     private void DoDhRatchet(byte[] remoteRatchetKeyBytes)
     {
+        if (_dhRatchetKey is null)
+        {
+            throw new InvalidOperationException("Cannot perform DH ratchet without a local ratchet key.");
+        }
+
         _remoteRatchetKeyBytes = remoteRatchetKeyBytes;
         using var remoteRatchetKey = ECDiffieHellman.Create();
         remoteRatchetKey.ImportSubjectPublicKeyInfo(remoteRatchetKeyBytes, out _);
 
-        var dhSecret = _dhRatchetKey!.DeriveKeyMaterial(remoteRatchetKey.PublicKey);
+        var dhSecret = _dhRatchetKey.DeriveKeyMaterial(remoteRatchetKey.PublicKey);
         var kdfResult = CryptoUtils.KDF(_rootKey, dhSecret, "ratchet-kdf", CryptoUtils.KeySize * 2);
         _rootKey = kdfResult[..CryptoUtils.KeySize];
         _receivingChainKey = kdfResult[CryptoUtils.KeySize..];

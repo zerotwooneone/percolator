@@ -19,6 +19,22 @@ namespace Percolator.Cryptography
                 Encoding.UTF8.GetBytes(info));
         }
 
+        /// <summary>
+        /// Encrypts data using AES-GCM with a deterministic, counter-based nonce.
+        /// </summary>
+        /// <remarks>
+        /// <strong>Security Warning:</strong> This method uses a deterministic nonce generated from the <paramref name="counter"/>.
+        /// It is critically important that the same combination of <paramref name="key"/> and <paramref name="counter"/>
+        /// is NEVER used to encrypt different plaintext data. Reusing a key/nonce pair completely destroys the confidentiality
+        /// of the messages encrypted with it. This method is safe only when the key is ratcheted forward with every encryption,
+        /// as is done in the Double Ratchet and Sender Key protocols. For general-purpose encryption, use a method that
+        /// generates a random nonce for each operation.
+        /// </remarks>
+        /// <param name="key">The 32-byte encryption key.</param>
+        /// <param name="counter">The unique counter for this encryption operation. This will be used to generate the nonce.</param>
+        /// <param name="plaintext">The data to encrypt.</param>
+        /// <param name="associatedData">Optional associated data to be authenticated but not encrypted.</param>
+        /// <returns>The ciphertext concatenated with the authentication tag.</returns>
         public static byte[] EncryptAesGcm(byte[] key, ulong counter, byte[] plaintext, byte[]? associatedData)
         {
             var nonceBytes = new byte[12];
