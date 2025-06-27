@@ -97,10 +97,63 @@ public class PersistentKeyManagementServiceTests
         var keyFilePath = Path.Combine(_testKeysPath, $"{identityName}.keys");
         await File.WriteAllTextAsync(keyFilePath, "this is not valid json");
 
+        // Act & Assert
+        await _sut.Invoking(s => s.GetOrCreateKeysAsync(identityName)).Should().ThrowAsync<System.Text.Json.JsonException>();
+    }
+
+    [Test]
+    public async Task GetOrCreateKeysAsync_WhenKeyFileIsProtectedCorrupt_ThrowsCryptographicException()
+    {
+        // Arrange
+        var identityName = _fixture.Create<string>();
+        var keyFilePath = Path.Combine(_testKeysPath, $"{identityName}.keys");
+        // Simulate a file that was protected but is now corrupt (e.g., tampered with)
+        await File.WriteAllBytesAsync(keyFilePath, new byte[] { 0x01, 0x02, 0x03 });
+
+        // Setup mock credential service to throw CryptographicException on Unprotect
+        _mockCredentialService.Setup(s => s.Unprotect(It.IsAny<byte[]>()))
+            .Throws(new System.Security.Cryptography.CryptographicException("Corrupt data"));
+
+        // Act & Assert
+        await _sut.Invoking(s => s.GetOrCreateKeysAsync(identityName)).Should().ThrowAsync<System.Security.Cryptography.CryptographicException>();
+    }
+
+    [Test]
+    public async Task GetIdentityKeysAsync_WhenKeysExist_ReturnsExistingKeys()
+    {
+        // Arrange
+        var identityName = _fixture.Create<string>();
+        // First, create the keys using GetOrCreateKeysAsync
+        var originalKeys = await _sut.GetOrCreateKeysAsync(identityName);
+
+        // Reset mocks to ensure GetIdentityKeysAsync loads from file
+        _mockCredentialService.Invocations.Clear();
+
         // Act
-        Func<Task> act = async () => await _sut.GetOrCreateKeysAsync(identityName);
+        var loadedKeys = await _sut.GetIdentityKeysAsync(identityName);
 
         // Assert
-        await act.Should().ThrowAsync<System.Text.Json.JsonException>();
+        loadedKeys.Should().NotBeNull();
+        // Verify that the loaded keys are equivalent to the original ones (comparing public parts)
+        loadedKeys.IdentitySigningKey.ExportParameters(false).Should().BeEquivalentTo(originalKeys.IdentitySigningKey.ExportParameters(false));
+        loadedKeys.IdentityAgreementKey.ExportParameters(false).Should().BeEquivalentTo(originalKeys.IdentityAgreementKey.ExportParameters(false));
+        loadedKeys.SignedPreKey.ExportParameters(false).Should().BeEquivalentTo(originalKeys.SignedPreKey.ExportParameters(false));
+        loadedKeys.OneTimePreKey.ExportParameters(false).Should().BeEquivalentTo(originalKeys.OneTimePreKey.ExportParameters(false));
+
+        _mockCredentialService.Verify(s => s.Unprotect(It.IsAny<byte[]>()), Times.Once);
+        _mockCredentialService.Verify(s => s.Protect(It.IsAny<byte[]>()), Times.Never);
+    }
+
+    [Test]
+    public async Task GetIdentityKeysAsync_WhenKeysDoNotExist_ThrowsKeyNotFoundException()
+    {
+        // Arrange
+        var identityName = _fixture.Create<string>();
+        // Ensure the key file does not exist
+        var keyFilePath = Path.Combine(_testKeysPath, $"{identityName}.keys");
+        if (File.Exists(keyFilePath)) File.Delete(keyFilePath);
+
+        // Act & Assert
+        await _sut.Invoking(s => s.GetIdentityKeysAsync(identityName)).Should().ThrowAsync<KeyNotFoundException>();
     }
 }

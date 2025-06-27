@@ -4,7 +4,8 @@ This project is a domain library responsible for managing node identities within
 
 ## Core Responsibilities
 
--   **Manages the Root Identity**: Creates, stores, and retrieves a user's core cryptographic `Identity`. Each `Identity` is identified by a stable, unique `Guid`, which serves as the primary key for associating all user-related data across different domains.
+-   **Manages Host Identities**: Creates, stores, and retrieves multiple cryptographic `Identity` records for the host application's user, each identifiable by a unique name and an optional nickname. Each `Identity` is identified by a stable, unique `Guid`, which serves as the primary key for associating all user-related data across different domains.
+-   **Manages Peer Identities**: Stores and retrieves cryptographic identities of peers within the Percolator network, enabling secure communication and identification.
 -   **Source of Truth for Keys**: Acts as the authoritative source for a user's long-lived cryptographic keys, including signing keys, agreement keys, and their associated X.509 certificates.
 -   **Provides Key Material**: Exposes interfaces that allow the `Application` layer to retrieve the necessary key material for other domains. For example, it provides the public key bundle required by the `Cryptography` domain to initiate a secure session, but it is not involved in the session protocol itself.
 

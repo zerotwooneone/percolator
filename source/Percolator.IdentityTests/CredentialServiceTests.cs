@@ -62,5 +62,35 @@ namespace Percolator.IdentityTests
             // Assert
             passwordSecondCall.Value.Should().Be(passwordFirstCall.Value);
         }
+
+        [Test]
+        public void Protect_And_Unprotect_ShouldRoundtripSuccessfully()
+        {
+            // Arrange
+            var sut = new CredentialService(_testCredentialPath);
+            var originalData = new byte[] { 1, 2, 3, 4, 5 };
+
+            // Act
+            var protectedData = sut.Protect(originalData);
+            var unprotectedData = sut.Unprotect(protectedData);
+
+            // Assert
+            unprotectedData.Should().Equal(originalData);
+        }
+
+        [Test]
+        public void GetOrCreatePfxPassword_WhenCredentialFileIsCorrupt_ThrowsCryptographicException()
+        {
+            // Arrange
+            // Create a dummy file with corrupt data
+            File.WriteAllBytes(_testCredentialPath, new byte[] { 0x01, 0x02, 0x03 });
+            var sut = new CredentialService(_testCredentialPath);
+
+            // Act
+            Action act = () => sut.GetOrCreatePfxPassword();
+
+            // Assert
+            act.Should().Throw<System.Security.Cryptography.CryptographicException>();
+        }
     }
 }

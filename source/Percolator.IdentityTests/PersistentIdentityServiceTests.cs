@@ -99,6 +99,67 @@ public class PersistentIdentityServiceTests
         await _service.Invoking(s => s.LoadIdentityAsync(identityName)).Should().ThrowAsync<KeyNotFoundException>();
     }
 
+    [Test]
+    public async Task GetIdentityRecordAsync_Should_Return_Record_When_Identity_Exists()
+    {
+        // Arrange
+        var identityName = "test-identity";
+        var identityRecord = new IdentityRecord(identityName, new PfxCertificate(Array.Empty<byte>()), "thumbprint");
+        _mockIdentityStore.Setup(s => s.GetIdentityAsync(identityName, It.IsAny<CancellationToken>())).ReturnsAsync(identityRecord);
+
+        // Act
+        var result = await _service.GetIdentityRecordAsync(identityName);
+
+        // Assert
+        result.Should().NotBeNull();
+        result!.Name.Should().Be(identityName);
+    }
+
+    [Test]
+    public async Task GetIdentityRecordAsync_Should_Return_Null_When_Identity_Does_Not_Exist()
+    {
+        // Arrange
+        var identityName = "non-existent-identity";
+        _mockIdentityStore.Setup(s => s.GetIdentityAsync(identityName, It.IsAny<CancellationToken>())).ReturnsAsync((IdentityRecord?)null);
+
+        // Act
+        var result = await _service.GetIdentityRecordAsync(identityName);
+
+        // Assert
+        result.Should().BeNull();
+    }
+
+    [Test]
+    public async Task ListIdentityNamesAsync_Should_Return_All_Identity_Names()
+    {
+        // Arrange
+        var names = new List<string> { "id1", "id2", "id3" };
+        _mockIdentityStore.Setup(s => s.ListIdentityNamesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(names);
+
+        // Act
+        var result = await _service.ListIdentityNamesAsync();
+
+        // Assert
+        result.Should().BeEquivalentTo(names);
+    }
+
+    [Test]
+    public async Task LoadIdentityAsync_Should_Throw_CryptographicException_When_PfxIsCorrupt()
+    {
+        // Arrange
+        var identityName = "corrupt-identity";
+        var pfxPassword = new Password("password");
+        // Create a PFX with valid password but corrupt data
+        var corruptPfxBytes = new byte[] { 0x01, 0x02, 0x03 }; 
+        var identityRecord = new IdentityRecord(identityName, new PfxCertificate(corruptPfxBytes), "thumbprint");
+
+        _mockIdentityStore.Setup(s => s.GetIdentityAsync(identityName, It.IsAny<CancellationToken>())).ReturnsAsync(identityRecord);
+        _mockCredentialService.Setup(s => s.GetOrCreatePfxPassword()).Returns(pfxPassword);
+
+        // Act & Assert
+        await _service.Invoking(s => s.LoadIdentityAsync(identityName)).Should().ThrowAsync<System.Security.Cryptography.CryptographicException>();
+    }
+
     private static X509Certificate2 CreateSelfSignedCertificate(string commonName)
     {
         using var ecdsa = ECDsa.Create();
