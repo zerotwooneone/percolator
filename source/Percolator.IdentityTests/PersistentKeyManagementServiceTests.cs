@@ -2,10 +2,7 @@ using AutoFixture;
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Moq;
-using NUnit.Framework;
 using Percolator.Identity;
-using System.IO;
-using System.Threading.Tasks;
 
 namespace Percolator.IdentityTests;
 

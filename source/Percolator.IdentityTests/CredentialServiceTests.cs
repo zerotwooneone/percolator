@@ -1,8 +1,6 @@
-using NUnit.Framework;
 using FluentAssertions;
 using AutoFixture;
 using Percolator.Identity;
-using System.IO;
 
 namespace Percolator.IdentityTests
 {

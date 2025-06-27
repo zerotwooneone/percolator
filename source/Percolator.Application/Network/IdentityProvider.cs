@@ -1,9 +1,5 @@
-using Microsoft.Extensions.Logging;
 using Percolator.Application.Identity;
-using Percolator.Identity;
 using Percolator.Network;
-using System;
-using System.Collections.Generic;
 
 namespace Percolator.Application.Network;
 

@@ -1,6 +1,4 @@
 using System.Security.Cryptography;
-using Google.Protobuf;
-using NUnit.Framework;
 using FluentAssertions;
 using Percolator.Cryptography;
 

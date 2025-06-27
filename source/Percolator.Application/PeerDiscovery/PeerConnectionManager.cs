@@ -1,8 +1,9 @@
-using System.Collections.Concurrent;
 using Grpc.Net.Client;
 using Microsoft.Extensions.Logging;
-using Percolator.Contracts.Protos;
-using Percolator.Network;
+using Percolator.Contracts;
+using Percolator.Identity;
+using Percolator.Sessions;
+using System.Collections.Concurrent;
 
 namespace Percolator.Application.PeerDiscovery;
 
@@ -10,14 +11,22 @@ public class PeerConnectionManager : IPeerConnectionManager
 {
     private readonly ConcurrentDictionary<string, GrpcChannel> _channels = new();
     private readonly ILogger<PeerConnectionManager> _logger;
+    private readonly IPeerRepository _peerRepository;
 
-    public PeerConnectionManager(ILogger<PeerConnectionManager> logger)
+    public PeerConnectionManager(ILogger<PeerConnectionManager> logger, IPeerRepository peerRepository)
     {
         _logger = logger;
+        _peerRepository = peerRepository;
     }
 
-    public FileSharing.FileSharingClient GetClient(Peer peer)
+    public async Task<TransportService.TransportServiceClient> GetTransportClient(PeerId peerId)
     {
+        var peer = await _peerRepository.GetByIdAsync(peerId.Value);
+        if (peer is null)
+        {
+            throw new ArgumentException($"Peer with ID '{peerId}' not found.", nameof(peerId));
+        }
+
         var targetUrl = $"https://{peer.IpAddress}:{peer.GrpcEndpoint.Port}";
 
         var channel = _channels.GetOrAdd(targetUrl, url =>
@@ -41,14 +50,22 @@ public class PeerConnectionManager : IPeerConnectionManager
             });
         });
 
-        return new FileSharing.FileSharingClient(channel);
+        return new TransportService.TransportServiceClient(channel);
     }
 
-    public void RemovePeer(Peer peer)
+    public async void RemovePeer(PeerId peerId)
     {
+        var peer = await _peerRepository.GetByIdAsync(peerId.Value);
+        if (peer is null)
+        {
+            _logger.LogWarning("Attempted to remove a non-existent peer with ID '{PeerId}'.", peerId);
+            return;
+        }
+
         var targetUrl = $"https://{peer.IpAddress}:{peer.GrpcEndpoint.Port}";
         if (_channels.TryRemove(targetUrl, out var channel))
         {
+            _logger.LogInformation("Disposing gRPC channel for peer {IpAddress}:{Port}", peer.IpAddress, peer.GrpcEndpoint.Port);
             channel.Dispose();
         }
     }

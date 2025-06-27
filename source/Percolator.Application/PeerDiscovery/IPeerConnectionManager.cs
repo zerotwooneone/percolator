@@ -1,10 +1,10 @@
-using Percolator.Contracts.Protos;
-using Percolator.Network;
+using Percolator.Contracts;
+using Percolator.Sessions;
 
 namespace Percolator.Application.PeerDiscovery;
 
 public interface IPeerConnectionManager
 {
-    FileSharing.FileSharingClient GetClient(Peer peer);
-    void RemovePeer(Peer peer);
+    Task<TransportService.TransportServiceClient> GetTransportClient(PeerId peerId);
+    void RemovePeer(PeerId peerId);
 }

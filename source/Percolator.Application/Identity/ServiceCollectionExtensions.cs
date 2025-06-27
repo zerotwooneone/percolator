@@ -14,6 +14,7 @@ public static class ServiceCollectionExtensions
 
         services.AddSingleton<ActiveIdentityContext>();
         services.AddSingleton<ICertificateOperations, CertificateOperations>();
+        services.AddSingleton<IPeerRepository, PeerRepository>();
         services.AddSingleton<IPeerIdentityStore, InMemoryPeerIdentityStore>();
         services.AddSingleton<IIdentityOrchestrator, IdentityOrchestrator>();
 

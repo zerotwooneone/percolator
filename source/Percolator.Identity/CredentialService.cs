@@ -1,6 +1,5 @@
 using System.Security.Cryptography;
 using System.Text;
-using System.IO;
 using System.Security.AccessControl;
 using System.Security.Principal;
 using Percolator.Identity.Model;

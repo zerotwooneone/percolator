@@ -1,24 +1,25 @@
 # Percolator.Application
 
-This project serves as the central application layer for the Percolator system.
+This project is the **Application Layer** of the Percolator system. It is responsible for orchestrating the domain models and infrastructure services to execute the application's use cases.
 
-## Purpose
+## Guiding Principles
 
-The primary responsibility of the `Application` layer is to orchestrate business logic and coordinate tasks between the various domain libraries (e.g., `Percolator.Network`, `Percolator.Cryptography`, `Percolator.Contracts`). It acts as the "glue" that holds the system together, ensuring that domain models remain pure and decoupled from one another.
+- **Orchestration, Not Logic**: The primary role of this layer is to orchestrate. It coordinates the domain objects from `Percolator.Messaging`, `Percolator.Identity`, etc., to perform tasks. It should contain minimal business logic itself; all business rules are delegated to the domain models.
+- **Use Case Driven**: The services defined here (e.g., `IMessageService`, `IConversationService`) represent the concrete use cases and features of the application.
+- **Thin Services**: Application services should be kept "thin," acting as a facade over the rich domain models.
 
-### Key Responsibilities:
+## Key Responsibilities
 
--   **Orchestration and ID Mapping**: Acts as the central coordinator, managing the flow of data between domains. It is responsible for mapping the stable `Guid` identifiers used in the `Messaging` and `Identity` domains to the session-specific data required by the `Cryptography` domain.
--   **Persistence Implementation**: Implements the persistence interfaces defined by the domain layers (e.g., `IDoubleRatchetStore`, `IMessageStore`). This keeps the domains pure and allows the application to manage all data storage.
--   **Business Rule Enforcement**: Enforces application-wide business rules that span multiple domains, such as limiting a user to one active direct messaging session per peer.
--   **Internal gRPC Service Hosting**: Hosts a non-network reachable, in-process gRPC service. It decrypts incoming secure messages and routes them to this internal service to handle sensitive operations like one-time key requests and file manifest sharing.
--   **File Sharing Workflow**: Manages the entire file sharing process. It handles requests for file manifests, enforces user-defined access policies, and authorizes direct peer-to-peer gRPC connections for the actual bulk file transfer.
--   **Service Implementation**: Contains implementations of services, such as the `FileSharingService` for gRPC, `ManifestService` for creating and managing file manifests, and services for managing identity and credentials.
--   **Secure Credential Management**: Implements `CredentialService` and `PersistentIdentityService` to securely store and manage user identity certificates and passwords using platform-native features.
--   **Dependency Injection**: Wires up dependencies for the main executable (`Percolator.Node`).
--   **`IManifestStore`**: Manages the persistent storage of manifests, enforcing size and count quotas to prevent DoS attacks.
--   **`ISharedDirectoryProvider`**: Provides a list of safe, pre-approved directories that can be shared. This is a security-critical component that prevents path traversal attacks.
--   **`IRateLimiter`**: Provides a mechanism to throttle requests from peers to prevent resource exhaustion.
+1.  **Public API Implementation**: This project contains the implementations of the public-facing gRPC services (e.g., `MessagingGrpcService`). These services receive requests from the network, pass the encrypted data to the cryptography domain, and then hand the decrypted payload to the internal dispatcher.
+
+2.  **Internal Message Dispatching**: A core component of this layer is the `InternalMessageMediator`. This service implements the Mediator pattern to act as an in-memory message bus. It inspects decrypted message envelopes and routes them to the correct, registered handler for processing (e.g., routing a `TextMessage` to the `TextMessageHandler`).
+
+3.  **Dependency Injection**: This layer is responsible for wiring up all the application's components—services, repositories, and domain models—in the dependency injection container.
+
+## Boundaries
+
+- **Entry Point**: It serves as the main entry point for external requests into the system's core logic.
+- **Dependencies**: It depends on the various Domain Libraries (`Percolator.Messaging`, `Percolator.Cryptography`, etc.) and the `Percolator.Contracts` project. It is the central hub that connects all other pieces of the system.
 
 ## Platform Dependencies
 
@@ -43,6 +44,16 @@ This layer uses the **MediatR** library to implement the Command Query Responsib
 This application layer serves as a security boundary. It is responsible for validating data and performing sanity checks **before** passing requests to the domain layers (`Percolator.Network`, `Percolator.Cryptography`). This includes enforcing rate limits on incoming requests.
 
 The domain layers operate on a "fail forward" policy and will throw exceptions on any data that violates their contracts. The application layer's primary error handling duty is to prevent these exceptions from occurring under normal conditions by rigorously validating all inputs. This ensures that domain-level exceptions represent true, unexpected security or logic violations, not routine validation failures.
+
+### Session Reset Handling: Archive and Replace
+
+When a peer initiates a new secure session handshake for a conversation that already exists (e.g., after a device reinstall or state loss), the system must handle the reset gracefully to balance security and user experience. This system follows the "Archive and Replace" model:
+
+1.  **Archive Existing Conversation**: The current `DirectConversation` is marked as `Archived`. Its associated cryptographic session is destroyed, rendering its message history securely unreadable going forward. The message history itself is preserved in a read-only state for the local user's reference.
+2.  **Create New Conversation**: A new `DirectConversation` is created with a new, unique `ConversationId`.
+3.  **Establish New Session**: A new cryptographic session (e.g., Double Ratchet) is established and linked exclusively to the new conversation.
+
+This approach ensures that forward secrecy is maintained by cleanly separating cryptographic sessions while preventing data loss for the user.
 
 ### Development Guidelines
 

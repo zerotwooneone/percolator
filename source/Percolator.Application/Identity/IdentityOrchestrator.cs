@@ -3,10 +3,6 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Percolator.Application.Configuration;
 using Percolator.Identity;
-using System;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
 using Percolator.Application.Security;
 
 namespace Percolator.Application.Identity;
