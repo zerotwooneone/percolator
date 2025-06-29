@@ -4,13 +4,15 @@ namespace Percolator.Network
 {
     public class Peer : IEquatable<Peer>
     {
+        public PeerId Id { get; }
         public IPAddress IpAddress { get; }
         public int GrpcPort { get; }
         public string Thumbprint { get; }
         public DateTime LastSeenUtc { get; set; }
 
-        public Peer(IPAddress ipAddress, int grpcPort, string thumbprint)
+        public Peer(PeerId id, IPAddress ipAddress, int grpcPort, string thumbprint)
         {
+            Id = id;
             IpAddress = ipAddress;
             GrpcPort = grpcPort;
             Thumbprint = thumbprint;
@@ -24,15 +26,19 @@ namespace Percolator.Network
             return GrpcEndpoint.ToString();
         }
 
-        public override int GetHashCode()
-        {
-            return HashCode.Combine(IpAddress, GrpcPort, Thumbprint);
-        }
-
         public bool Equals(Peer? other)
         {
-            if (other is null) return false;
-            return IpAddress.Equals(other.IpAddress) && GrpcPort == other.GrpcPort && Thumbprint == other.Thumbprint;
+            if (other is null)
+            {
+                return false;
+            }
+
+            return Id.Equals(other.Id);
+        }
+
+        public override int GetHashCode()
+        {
+            return Id.GetHashCode();
         }
 
         public override bool Equals(object? obj)

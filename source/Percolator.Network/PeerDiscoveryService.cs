@@ -112,16 +112,16 @@ namespace Percolator.Network
                                 throw new SecurityException($"Received a discovery broadcast with an invalid signature from {result.RemoteEndPoint}.");
                             }
 
-                            var discoveredThumbprint = _signatureProvider.GetThumbprint(publicKeyCert);
+                            var thumbprint = _signatureProvider.GetThumbprint(publicKeyCert);
 
                             // Ignore our own broadcast
-                            if (discoveredThumbprint == _identityProvider.GetThumbprint())
+                            if (thumbprint == _identityProvider.GetThumbprint())
                             {
                                 continue;
                             }
 
                             var peerEndpoint = new IPEndPoint(discoveredIp, discoveredPort);
-                            var peer = new Peer(discoveredIp, discoveredPort, discoveredThumbprint);
+                            var peer = new Peer(PeerId.NewId(), discoveredIp, discoveredPort, thumbprint);
                             if (_peers.TryAdd(peerEndpoint, peer))
                             {
                                 _logger.LogInformation("Discovered new peer {PeerEndpoint} with thumbprint {Thumbprint}", peer.GrpcEndpoint, peer.Thumbprint);
