@@ -18,4 +18,5 @@ public class ActiveIdentityContext
     public IReadOnlyDictionary<string, byte[]> PublicKeys { get; internal set; } = new Dictionary<string, byte[]>();
     public IReadOnlyDictionary<string, string> KeyThumbprints { get; internal set; } = new Dictionary<string, string>();
     public X509Certificate2? Certificate { get; internal set; }
+    public Percolator.Identity.X3dhKeys? X3dhKeys { get; internal set; }
 }

@@ -15,9 +15,11 @@ using Percolator.Identity;
 using System.CommandLine;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using Percolator.Application;
 using Percolator.Application.PeerDiscovery;
 using Percolator.Application.Sessions;
 using Percolator.Contracts;
+using Percolator.Node;
 using ServiceCollectionExtensions = Percolator.Application.Sessions.ServiceCollectionExtensions;
 
 // --- Main Entry Point ---
@@ -55,6 +57,7 @@ static IServiceCollection ConfigureServices(IConfiguration configuration)
     services.AddNetworkServices(configuration);
     services.AddPeerDiscovery();
     services.AddAppSecurity();
+    services.AddApplicationServices(); // Add new application services
 
     services.AddGrpc();
 
@@ -99,10 +102,11 @@ static RootCommand BuildCommandLine(IServiceProvider serviceProvider, string[] a
         builder.Services.AddNetworkServices(builder.Configuration);
         builder.Services.AddPeerDiscovery();
         builder.Services.AddAppSecurity();
-        builder.Services.AddGrpc();
+        builder.Services.AddApplicationServices(); // Add new application services
 
         // Use the application layer hosted service to manage the discovery service's lifecycle
         builder.Services.AddHostedService<PeerDiscoveryHostedService>();
+        builder.Services.AddHostedService<MessageListenerService>();
 
         var app = builder.Build();
 
@@ -132,6 +136,88 @@ static RootCommand BuildCommandLine(IServiceProvider serviceProvider, string[] a
         Console.WriteLine($"Identity created successfully:\n  Name: {identityRecord.Name}\n  Nickname: {identityRecord.Nickname}\n  Thumbprint: {identityRecord.Thumbprint}");
     }, nameArgument, nicknameOption);
     rootCommand.AddCommand(createIdentityCommand);
+
+    // --- 'connect' Command ---
+    var remotePeerIdArgument = new Argument<string>("remote-peer-id", "The PeerId of the remote peer.");
+    var remotePreKeyBundleArgument = new Argument<string>("remote-prekey-bundle", "The Base64 encoded PreKeyBundle of the remote peer.");
+    var connectCommand = new Command("connect", "Establish a direct session with a remote peer.");
+    connectCommand.AddArgument(remotePeerIdArgument);
+    connectCommand.AddArgument(remotePreKeyBundleArgument);
+    connectCommand.SetHandler(async (remotePeerIdString, remotePreKeyBundleString) =>
+    {
+        var x3DhOrchestrator = serviceProvider.GetRequiredService<Percolator.Application.KeyExchange.X3DHOrchestrator>();
+        var directSessionManager = serviceProvider.GetRequiredService<Percolator.Application.Sessions.DirectSessionManager>();
+        var identityService = serviceProvider.GetRequiredService<Percolator.Identity.IIdentityService>();
+
+        try
+        {
+            var remotePeerId = new Percolator.Sessions.PeerId(Guid.Parse(remotePeerIdString));
+            var remotePreKeyBundle = new Percolator.Cryptography.PreKeyBundle(Convert.FromBase64String(remotePreKeyBundleString));
+
+            // For simplicity, we'll assume initiator role for now.
+            // In a real app, this would be more complex, potentially involving a server to exchange bundles.
+            Console.WriteLine($"Attempting to establish session with {remotePeerId}...");
+
+            var (sharedSecret, initialRatchetPublicKey, localPreKeyBundle) = await x3DhOrchestrator.InitiateHandshakeAsync(remotePeerId, remotePreKeyBundle);
+            var conversationId = await directSessionManager.EstablishSessionAsync(remotePeerId, sharedSecret, initialRatchetPublicKey);
+
+            var activeIdentity = await identityService.GetActiveIdentityAsync();
+            Console.WriteLine($"Session established successfully with {remotePeerId}.");
+            Console.WriteLine($"Your PeerId: {activeIdentity.PeerId}");
+            Console.WriteLine($"Your PreKeyBundle (Base64): {Convert.ToBase64String(localPreKeyBundle.ToByteArray())}");
+            Console.WriteLine($"ConversationId: {conversationId}");
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Error establishing session: {ex.Message}");
+            // Log full exception details if needed for debugging, but not to console for user
+        }
+    }, remotePeerIdArgument, remotePreKeyBundleArgument);
+    rootCommand.AddCommand(connectCommand);
+
+    // --- 'send' Command ---
+    var conversationIdArgument = new Argument<string>("conversation-id", "The ID of the conversation.");
+    var messageTextArgument = new Argument<string>("message-text", "The text message to send.");
+    var sendCommand = new Command("send", "Send a message within an established session.");
+    sendCommand.AddArgument(conversationIdArgument);
+    sendCommand.AddArgument(messageTextArgument);
+    sendCommand.SetHandler(async (conversationIdString, messageText) =>
+    {
+        var directSessionManager = serviceProvider.GetRequiredService<Percolator.Application.Sessions.DirectSessionManager>();
+        var messageTransportService = serviceProvider.GetRequiredService<Percolator.Application.Network.IMessageTransportService>();
+        var identityService = serviceProvider.GetRequiredService<Percolator.Identity.IIdentityService>();
+
+        try
+        {
+            var conversationId = new Percolator.Sessions.ConversationId(Guid.Parse(conversationIdString));
+            var activeIdentity = await identityService.GetActiveIdentityAsync();
+            if (activeIdentity == null)
+            {
+                throw new InvalidOperationException("No active identity found to send message.");
+            }
+
+            var conversation = await directSessionManager.GetConversationAsync(conversationId);
+            if (conversation == null)
+            {
+                Console.Error.WriteLine($"Error: Conversation with ID {conversationId} not found.");
+                return;
+            }
+
+            // Determine recipient PeerId based on the conversation
+            var recipientPeerId = conversation.LocalPeerId == activeIdentity.PeerId ? conversation.RemotePeerId : conversation.LocalPeerId;
+
+            Console.WriteLine($"Sending message to conversation {conversationId}...");
+            var ratchetMessage = await directSessionManager.SendMessageAsync(conversationId, messageText);
+            await messageTransportService.SendMessageAsync(recipientPeerId, conversationId, ratchetMessage);
+            Console.WriteLine("Message sent successfully.");
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Error sending message: {ex.Message}");
+            // Log full exception details if needed for debugging, but not to console for user
+        }
+    }, conversationIdArgument, messageTextArgument);
+    rootCommand.AddCommand(sendCommand);
 
     return rootCommand;
 }

@@ -1,4 +1,5 @@
 using Percolator.Sessions;
+using IdentityPeerId = Percolator.Identity.PeerId;
 
 namespace Percolator.Application.Sessions;
 
@@ -13,5 +14,5 @@ public interface IConversationService
     /// </summary>
     /// <param name="peerId">The ID of the peer to create a conversation with.</param>
     /// <returns>The unique ID of the direct conversation.</returns>
-    Task<ConversationId> CreateDirectConversationAsync(PeerId peerId);
+    Task<ConversationId> CreateDirectConversationAsync(IdentityPeerId peerId);
 }

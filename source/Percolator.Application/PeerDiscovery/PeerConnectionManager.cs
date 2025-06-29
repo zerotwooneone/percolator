@@ -2,8 +2,8 @@ using Grpc.Net.Client;
 using Microsoft.Extensions.Logging;
 using Percolator.Contracts;
 using Percolator.Identity;
-using Percolator.Sessions;
 using System.Collections.Concurrent;
+using IdentityPeerId = Percolator.Identity.PeerId;
 
 namespace Percolator.Application.PeerDiscovery;
 
@@ -19,7 +19,7 @@ public class PeerConnectionManager : IPeerConnectionManager
         _peerRepository = peerRepository;
     }
 
-    public async Task<TransportService.TransportServiceClient> GetTransportClient(PeerId peerId)
+    public async Task<TransportService.TransportServiceClient> GetTransportClient(IdentityPeerId peerId)
     {
         var peer = await _peerRepository.GetByIdAsync(peerId.Value);
         if (peer is null)
@@ -53,7 +53,7 @@ public class PeerConnectionManager : IPeerConnectionManager
         return new TransportService.TransportServiceClient(channel);
     }
 
-    public async void RemovePeer(PeerId peerId)
+    public async Task RemovePeer(IdentityPeerId peerId)
     {
         var peer = await _peerRepository.GetByIdAsync(peerId.Value);
         if (peer is null)

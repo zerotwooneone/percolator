@@ -26,8 +26,8 @@ public class RemovePeerOnPeerExpiredHandler : INotificationHandler<PeerExpiredNo
         var identityPeer = await _peerRepository.GetByThumbprintAsync(networkPeer.Thumbprint);
         if (identityPeer is not null)
         {
-            _connectionManager.RemovePeer(new PeerId(identityPeer.Id));
-        }
+            _connectionManager.RemovePeer(identityPeer.Id);
+        }/
         else
         {
             _logger.LogWarning("Could not find peer with thumbprint {Thumbprint} to remove from connection manager.", networkPeer.Thumbprint);

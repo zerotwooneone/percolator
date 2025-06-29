@@ -1,10 +1,10 @@
 using Percolator.Contracts;
-using Percolator.Sessions;
+using IdentityPeerId = Percolator.Identity.PeerId;
 
 namespace Percolator.Application.PeerDiscovery;
 
 public interface IPeerConnectionManager
 {
-    Task<TransportService.TransportServiceClient> GetTransportClient(PeerId peerId);
-    void RemovePeer(PeerId peerId);
+    Task<TransportService.TransportServiceClient> GetTransportClient(IdentityPeerId peerId);
+    Task RemovePeer(IdentityPeerId peerId);
 }
