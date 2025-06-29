@@ -1,4 +1,6 @@
 using FluentAssertions;
+using NUnit.Framework;
+using System;
 using Percolator.Sessions;
 
 namespace Percolator.SessionsTests;
@@ -7,26 +9,27 @@ namespace Percolator.SessionsTests;
 public class DirectConversationTests
 {
     private ConversationId _conversationId;
-    private PeerId _peerId;
-    private PeerId _senderId;
+    private PeerId _localPeerId;
+    private PeerId _remotePeerId;
 
     [SetUp]
-    public void Setup()
+    public void SetUp()
     {
         _conversationId = ConversationId.NewId();
-        _peerId = PeerId.NewId();
-        _senderId = _peerId;
+        _localPeerId = PeerId.NewId();
+        _remotePeerId = PeerId.NewId();
     }
 
     [Test]
-    public void Constructor_WithValidParameters_InitializesCorrectly()
+    public void Constructor_WithValidArguments_CreatesInstance()
     {
         // Act
-        var conversation = new DirectConversation(_conversationId, _peerId);
+        var conversation = new DirectConversation(_conversationId, _localPeerId, _remotePeerId);
 
         // Assert
         conversation.Id.Should().Be(_conversationId);
-        conversation.PeerId.Should().Be(_peerId);
+        conversation.LocalPeerId.Should().Be(_localPeerId);
+        conversation.RemotePeerId.Should().Be(_remotePeerId);
         conversation.State.Should().Be(ConversationState.Establishing);
     }
 
@@ -34,17 +37,27 @@ public class DirectConversationTests
     public void Constructor_WithNullId_ThrowsArgumentNullException()
     {
         // Act
-        Action act = () => new DirectConversation(null!, _peerId);
+        Action act = () => new DirectConversation(null!, _localPeerId, _remotePeerId);
 
         // Assert
         act.Should().Throw<ArgumentNullException>();
     }
 
     [Test]
-    public void Constructor_WithNullPeerId_ThrowsArgumentNullException()
+    public void Constructor_WithNullLocalPeerId_ThrowsArgumentNullException()
     {
         // Act
-        Action act = () => new DirectConversation(_conversationId, null!);
+        Action act = () => new DirectConversation(_conversationId, null!, _remotePeerId);
+
+        // Assert
+        act.Should().Throw<ArgumentNullException>();
+    }
+
+    [Test]
+    public void Constructor_WithNullRemotePeerId_ThrowsArgumentNullException()
+    {
+        // Act
+        Action act = () => new DirectConversation(_conversationId, _localPeerId, null!);
         
         // Assert
         act.Should().Throw<ArgumentNullException>();
@@ -54,8 +67,8 @@ public class DirectConversationTests
     public void ValidateMessage_WithValidMessage_InValidState_DoesNotThrow()
     {
         // Arrange
-        var conversation = new DirectConversation(_conversationId, _peerId);
-        var message = new DirectMessage(MessageId.NewId(), _conversationId, _senderId, new OpaqueContent(new byte[1]));
+        var conversation = new DirectConversation(_conversationId, _localPeerId, _remotePeerId);
+        var message = new DirectMessage(MessageId.NewId(), _conversationId, _localPeerId, new OpaqueContent(new byte[1]));
 
         // Act
         Action act = () => conversation.ValidateMessage(message);
@@ -68,13 +81,13 @@ public class DirectConversationTests
     public void ValidateMessage_InTerminatedState_ThrowsInvalidOperationException()
     {
         // Arrange
-        var conversation = new DirectConversation(_conversationId, _peerId);
+        var conversation = new DirectConversation(_conversationId, _localPeerId, _remotePeerId);
         conversation.Terminate();
-        var message = new DirectMessage(MessageId.NewId(), _conversationId, _senderId, new OpaqueContent(new byte[1]));
+        var message = new DirectMessage(MessageId.NewId(), _conversationId, _localPeerId, new OpaqueContent(new byte[1]));
 
         // Act
         Action act = () => conversation.ValidateMessage(message);
-        
+
         // Assert
         act.Should().Throw<InvalidOperationException>();
     }
@@ -83,13 +96,13 @@ public class DirectConversationTests
     public void ValidateMessage_WithMismatchedConversationId_ThrowsArgumentException()
     {
         // Arrange
-        var conversation = new DirectConversation(_conversationId, _peerId);
+        var conversation = new DirectConversation(_conversationId, _localPeerId, _remotePeerId);
         var wrongConversationId = ConversationId.NewId();
-        var message = new DirectMessage(MessageId.NewId(), wrongConversationId, _senderId, new OpaqueContent(new byte[1]));
+        var message = new DirectMessage(MessageId.NewId(), wrongConversationId, _localPeerId, new OpaqueContent(new byte[1]));
 
         // Act
         Action act = () => conversation.ValidateMessage(message);
-        
+
         // Assert
         act.Should().Throw<ArgumentException>();
     }
@@ -98,11 +111,11 @@ public class DirectConversationTests
     public void Activate_FromEstablishingState_TransitionsToActive()
     {
         // Arrange
-        var conversation = new DirectConversation(_conversationId, _peerId);
+        var conversation = new DirectConversation(_conversationId, _localPeerId, _remotePeerId);
         
         // Act
         conversation.Activate();
-        
+
         // Assert
         conversation.State.Should().Be(ConversationState.Active);
     }
@@ -111,7 +124,7 @@ public class DirectConversationTests
     public void Activate_FromActiveState_ThrowsInvalidOperationException()
     {
         // Arrange
-        var conversation = new DirectConversation(_conversationId, _peerId);
+        var conversation = new DirectConversation(_conversationId, _localPeerId, _remotePeerId);
         conversation.Activate();
         
         // Act
@@ -125,8 +138,8 @@ public class DirectConversationTests
     public void Terminate_FromAnyState_TransitionsToTerminated()
     {
         // Arrange
-        var establishingConversation = new DirectConversation(ConversationId.NewId(), _peerId);
-        var activeConversation = new DirectConversation(ConversationId.NewId(), _peerId);
+        var establishingConversation = new DirectConversation(ConversationId.NewId(), _localPeerId, _remotePeerId);
+        var activeConversation = new DirectConversation(ConversationId.NewId(), _localPeerId, _remotePeerId);
         activeConversation.Activate();
 
         // Act
