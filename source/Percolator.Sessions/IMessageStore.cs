@@ -9,7 +9,7 @@ public interface IMessageStore
     Task StoreDirectConversationAsync(DirectConversation conversation);
     Task UpdateDirectConversationAsync(DirectConversation conversation);
     Task<DirectConversation?> GetDirectConversationAsync(ConversationId conversationId);
-    Task<DirectConversation?> GetDirectConversationByPeerIdAsync(PeerId peerId);
+    Task<DirectConversation?> GetConversationWithPeerAsync(PeerId peerId, CancellationToken cancellationToken);
     Task<IEnumerable<DirectConversation>> GetAllDirectConversationsAsync();
 
     // Group Conversation operations

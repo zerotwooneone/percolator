@@ -6,13 +6,15 @@ namespace Percolator.Sessions;
 public class DirectConversation
 {
     public ConversationId Id { get; }
-    public PeerId PeerId { get; }
+    public PeerId LocalPeerId { get; }
+    public PeerId RemotePeerId { get; }
     public ConversationState State { get; private set; }
 
-    public DirectConversation(ConversationId id, PeerId peerId)
+    public DirectConversation(ConversationId id, PeerId localPeerId, PeerId remotePeerId)
     {
         Id = id ?? throw new ArgumentNullException(nameof(id));
-        PeerId = peerId ?? throw new ArgumentNullException(nameof(peerId));
+        LocalPeerId = localPeerId ?? throw new ArgumentNullException(nameof(localPeerId));
+        RemotePeerId = remotePeerId ?? throw new ArgumentNullException(nameof(remotePeerId));
         State = ConversationState.Establishing;
     }
 
