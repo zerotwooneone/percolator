@@ -122,7 +122,8 @@ static RootCommand BuildCommandLine(IServiceProvider serviceProvider, string[] a
         var response = await client.EstablishSessionAsync(request, cancellationToken: cancellationToken);
         var remotePreKeyBundle = response.ResponderBundle;
 
-        // TODO: The remote PeerId needs to be resolved properly. For now, we generate a new one.
+        // For a new connection, we generate a new local PeerId. In the future, this will be
+        // replaced by a call to a peer management service to resolve or create a persistent peer identity.
         var remotePeerId = new SessionPeerId(Guid.NewGuid());
 
         // 3. Use the orchestrator to derive the shared secret
