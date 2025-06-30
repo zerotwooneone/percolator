@@ -28,13 +28,12 @@ public static class CertificateGenerator
 
         var certificate = request.CreateSelfSigned(DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddYears(1));
 
-        // For Kestrel, it's often necessary to export and re-import the certificate
-        // to include the private key in a way the server can use.
-        // The password is null here; it will be applied by the calling service when saving the file.
-        return X509CertificateLoader.LoadPkcs12(
+        // We have to export and re-import the certificate to get the private key to be associated with it
+        // in a way that works across platforms. Using EphemeralKeySet is important for testability.
+        return new X509Certificate2(
             certificate.Export(X509ContentType.Pfx),
-            password: null,
-            X509KeyStorageFlags.Exportable | X509KeyStorageFlags.UserKeySet);
+            (string?)null,
+            X509KeyStorageFlags.Exportable | X509KeyStorageFlags.EphemeralKeySet);
     }
 
     public static X509Certificate2 CreateTlsCertificate(string commonName = "localhost")
@@ -61,9 +60,11 @@ public static class CertificateGenerator
 
         var certificate = request.CreateSelfSigned(DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddYears(1));
 
-        return X509CertificateLoader.LoadPkcs12(
+        // We have to export and re-import the certificate to get the private key to be associated with it
+        // in a way that works across platforms. Using EphemeralKeySet is important for testability.
+        return new X509Certificate2(
             certificate.Export(X509ContentType.Pfx),
-            password: null,
-            X509KeyStorageFlags.Exportable | X509KeyStorageFlags.UserKeySet);
+            (string?)null,
+            X509KeyStorageFlags.Exportable | X509KeyStorageFlags.EphemeralKeySet);
     }
 }

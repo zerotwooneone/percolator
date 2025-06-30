@@ -20,7 +20,7 @@ public class DirectSessionManagerTests
     private Mock<IDoubleRatchetSessionStore> _mockSessionStore = null!;
     private Mock<IConversationStore> _mockConversationStore = null!;
     private Mock<IMessageStore> _mockMessageStore = null!;
-    private Mock<ActiveIdentityContext> _mockActiveIdentityContext = null!;
+    private ActiveIdentityContext _activeIdentityContext = null!;
     private DirectSessionManager _manager = null!;
 
     private X509Certificate2 _localCertificate = null!;
@@ -32,19 +32,19 @@ public class DirectSessionManagerTests
         _mockSessionStore = new Mock<IDoubleRatchetSessionStore>();
         _mockConversationStore = new Mock<IConversationStore>();
         _mockMessageStore = new Mock<IMessageStore>();
-        _mockActiveIdentityContext = new Mock<ActiveIdentityContext>();
+        _activeIdentityContext = new ActiveIdentityContext();
 
         _localCertificate = CertificateGenerator.CreateSelfSignedCertificate("CN=Local");
         _remoteCertificate = CertificateGenerator.CreateSelfSignedCertificate("CN=Remote");
 
-        _mockActiveIdentityContext.Setup(c => c.Certificate).Returns(_localCertificate);
-        _mockActiveIdentityContext.Setup(c => c.IdentityName).Returns(Guid.NewGuid().ToString());
+        _activeIdentityContext.Certificate = _localCertificate;
+        _activeIdentityContext.IdentityName = Guid.NewGuid().ToString();
 
         _manager = new DirectSessionManager(
             _mockSessionStore.Object,
             _mockConversationStore.Object,
             _mockMessageStore.Object,
-            _mockActiveIdentityContext.Object
+            _activeIdentityContext
         );
     }
 
@@ -84,7 +84,7 @@ public class DirectSessionManagerTests
         _mockSessionStore.Setup(s => s.GetSessionStateAsync(remotePeerId, conversationId))
             .ReturnsAsync(sessionState);
 
-        var localPeerId = new SessionPeerId(Guid.Parse(_mockActiveIdentityContext.Object.IdentityName!));
+        var localPeerId = new SessionPeerId(Guid.Parse(_activeIdentityContext.IdentityName!));
         var conversation = new DirectConversation(conversationId, localPeerId, remotePeerId);
         _mockConversationStore.Setup(s => s.GetConversationAsync(conversationId)).ReturnsAsync(conversation);
 

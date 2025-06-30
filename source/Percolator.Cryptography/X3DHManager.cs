@@ -2,7 +2,7 @@ using System.Security.Cryptography;
 
 namespace Percolator.Cryptography;
 
-public class X3DHManager
+public class X3DHManager : IX3DHManager
 {
     private const int KeySize = 32;
 

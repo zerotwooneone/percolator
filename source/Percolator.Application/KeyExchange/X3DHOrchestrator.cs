@@ -13,9 +13,9 @@ namespace Percolator.Application.KeyExchange;
 public class X3DHOrchestrator
 {
     private readonly ActiveIdentityContext _activeIdentityContext;
-    private readonly X3DHManager _x3DhManager;
+    private readonly IX3DHManager _x3DhManager;
 
-    public X3DHOrchestrator(ActiveIdentityContext activeIdentityContext, X3DHManager x3DhManager)
+    public X3DHOrchestrator(ActiveIdentityContext activeIdentityContext, IX3DHManager x3DhManager)
     {
         _activeIdentityContext = activeIdentityContext;
         _x3DhManager = x3DhManager;

@@ -16,9 +16,9 @@ namespace Percolator.ApplicationTests.KeyExchange;
 
 public class X3DHOrchestratorTests
 {
-    private Mock<X3DHManager> _mockX3dhManager = null!;
-    private Mock<ActiveIdentityContext> _mockActiveIdentityContext = null!;
-    private X3DHOrchestrator _orchestrator = null!;
+    private Mock<IX3DHManager> _mockX3dhManager;
+    private X3DHOrchestrator _orchestrator;
+    private ActiveIdentityContext _activeIdentityContext;
 
     // Local keys
     private ECDsa _localIdentitySigningKey = null!;
@@ -37,8 +37,10 @@ public class X3DHOrchestratorTests
     [SetUp]
     public void Setup()
     {
-        _mockX3dhManager = new Mock<X3DHManager>();
-        _mockActiveIdentityContext = new Mock<ActiveIdentityContext>();
+        _mockX3dhManager = new Mock<IX3DHManager>();
+
+        // Create a real ActiveIdentityContext and populate its properties
+        _activeIdentityContext = new ActiveIdentityContext();
 
         // Local keys setup
         _localIdentitySigningKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
@@ -56,16 +58,19 @@ public class X3DHOrchestratorTests
         _remoteSignedPreKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         _remoteOneTimePreKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         
-        // Mock ActiveIdentityContext
-        _mockActiveIdentityContext.Setup(c => c.Certificate).Returns(_localCertificate);
-        _mockActiveIdentityContext.Setup(c => c.X3dhKeys).Returns(new Percolator.Identity.X3dhKeys(
+        // Populate ActiveIdentityContext
+        _activeIdentityContext.Certificate = _localCertificate;
+        _activeIdentityContext.X3dhKeys = new Percolator.Identity.X3dhKeys(
             _localIdentitySigningKey,
             _localIdentityAgreementKey,
             _localSignedPreKey,
             _localOneTimePreKey
-        ));
+        );
 
-        _orchestrator = new X3DHOrchestrator(_mockActiveIdentityContext.Object, _mockX3dhManager.Object);
+        _orchestrator = new X3DHOrchestrator(
+            _activeIdentityContext,
+            _mockX3dhManager.Object
+        );
     }
 
     [TearDown]

@@ -48,19 +48,7 @@ public class PersistentKeyManagementService : IKeyManagementService
                 _logger.LogInformation("Key file found for {IdentityName}. Loading keys.", identityName);
                 var encryptedBytes = await File.ReadAllBytesAsync(keyFilePath);
                 var decryptedBytes = _credentialService.Unprotect(encryptedBytes);
-                var serializableKeys = JsonSerializer.Deserialize<SerializableX3dhKeyTriplet>(decryptedBytes, _jsonOptions)!;
-
-                var ikParams = serializableKeys.IdentityKey;
-                var ikSigning = ECDsa.Create(ikParams);
-                var ikAgreement = ECDiffieHellman.Create(ikParams);
-
-                var spk = ECDiffieHellman.Create();
-                spk.ImportParameters(serializableKeys.SignedPreKey);
-
-                var opk = ECDiffieHellman.Create();
-                opk.ImportParameters(serializableKeys.OneTimePreKey);
-
-                return new X3dhKeys(ikSigning, ikAgreement, spk, opk);
+                return DeserializeKeys(decryptedBytes);
             }
             else
             {
@@ -100,29 +88,34 @@ public class PersistentKeyManagementService : IKeyManagementService
         {
             if (!File.Exists(keyPath))
             {
-                throw new InvalidOperationException($"Keys for identity '{identityName}' not found.");
+                throw new KeyNotFoundException($"Keys for identity '{identityName}' not found.");
             }
 
             var encryptedBytes = await File.ReadAllBytesAsync(keyPath);
             var decryptedBytes = _credentialService.Unprotect(encryptedBytes);
-            var serializableKeys = JsonSerializer.Deserialize<SerializableX3dhKeyTriplet>(decryptedBytes, _jsonOptions)!;
-
-            var ikParams = serializableKeys.IdentityKey;
-            var ikSigning = ECDsa.Create(ikParams);
-            var ikAgreement = ECDiffieHellman.Create(ikParams);
-
-            var spk = ECDiffieHellman.Create();
-            spk.ImportParameters(serializableKeys.SignedPreKey);
-
-            var opk = ECDiffieHellman.Create();
-            opk.ImportParameters(serializableKeys.OneTimePreKey);
-
-            return new X3dhKeys(ikSigning, ikAgreement, spk, opk);
+            return DeserializeKeys(decryptedBytes);
         }
         finally
         {
             fileLock.Release();
         }
+    }
+
+    private X3dhKeys DeserializeKeys(byte[] decryptedBytes)
+    {
+        var serializableKeys = JsonSerializer.Deserialize<SerializableX3dhKeyTriplet>(decryptedBytes, _jsonOptions)!;
+
+        var ikParams = serializableKeys.IdentityKey;
+        var ikSigning = ECDsa.Create(ikParams);
+        var ikAgreement = ECDiffieHellman.Create(ikSigning.ExportParameters(true));
+
+        var spk = ECDiffieHellman.Create();
+        spk.ImportParameters(serializableKeys.SignedPreKey);
+
+        var opk = ECDiffieHellman.Create();
+        opk.ImportParameters(serializableKeys.OneTimePreKey);
+
+        return new X3dhKeys(ikSigning, ikAgreement, spk, opk);
     }
 
     private Task<ECDiffieHellman> CreatePreKeyAsync()

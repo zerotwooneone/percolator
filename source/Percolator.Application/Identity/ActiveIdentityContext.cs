@@ -1,7 +1,10 @@
-namespace Percolator.Application.Identity;
-
 using System.Collections.Generic;
 using System.Security.Cryptography.X509Certificates;
+using System.Runtime.CompilerServices;
+
+[assembly: InternalsVisibleTo("Percolator.ApplicationTests")]
+
+namespace Percolator.Application.Identity;
 
 /// <summary>
 /// Holds the details of the currently active identity for the running node.

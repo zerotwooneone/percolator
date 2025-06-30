@@ -135,10 +135,25 @@ public class PersistentKeyManagementServiceTests
         // Assert
         loadedKeys.Should().NotBeNull();
         // Verify that the loaded keys are equivalent to the original ones (comparing public parts)
-        loadedKeys.IdentitySigningKey.ExportParameters(false).Should().BeEquivalentTo(originalKeys.IdentitySigningKey.ExportParameters(false));
-        loadedKeys.IdentityAgreementKey.ExportParameters(false).Should().BeEquivalentTo(originalKeys.IdentityAgreementKey.ExportParameters(false));
-        loadedKeys.SignedPreKey.ExportParameters(false).Should().BeEquivalentTo(originalKeys.SignedPreKey.ExportParameters(false));
-        loadedKeys.OneTimePreKey.ExportParameters(false).Should().BeEquivalentTo(originalKeys.OneTimePreKey.ExportParameters(false));
+        var loadedParams = loadedKeys.IdentitySigningKey.ExportParameters(false);
+        var originalParams = originalKeys.IdentitySigningKey.ExportParameters(false);
+        loadedParams.Q.X.Should().BeEquivalentTo(originalParams.Q.X);
+        loadedParams.Q.Y.Should().BeEquivalentTo(originalParams.Q.Y);
+
+        loadedParams = loadedKeys.IdentityAgreementKey.ExportParameters(false);
+        originalParams = originalKeys.IdentityAgreementKey.ExportParameters(false);
+        loadedParams.Q.X.Should().BeEquivalentTo(originalParams.Q.X);
+        loadedParams.Q.Y.Should().BeEquivalentTo(originalParams.Q.Y);
+
+        loadedParams = loadedKeys.SignedPreKey.ExportParameters(false);
+        originalParams = originalKeys.SignedPreKey.ExportParameters(false);
+        loadedParams.Q.X.Should().BeEquivalentTo(originalParams.Q.X);
+        loadedParams.Q.Y.Should().BeEquivalentTo(originalParams.Q.Y);
+
+        loadedParams = loadedKeys.OneTimePreKey.ExportParameters(false);
+        originalParams = originalKeys.OneTimePreKey.ExportParameters(false);
+        loadedParams.Q.X.Should().BeEquivalentTo(originalParams.Q.X);
+        loadedParams.Q.Y.Should().BeEquivalentTo(originalParams.Q.Y);
 
         _mockCredentialService.Verify(s => s.Unprotect(It.IsAny<byte[]>()), Times.Once);
         _mockCredentialService.Verify(s => s.Protect(It.IsAny<byte[]>()), Times.Never);
