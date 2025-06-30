@@ -2,9 +2,7 @@ using FluentAssertions;
 using Percolator.Application.Identity;
 using Percolator.Identity;
 
-using System.Threading.Tasks;
-
-namespace Percolator.ApplicationTests.Identity;
+namespace Percolator.ApplicationTests;
 
 public class InMemoryPeerIdentityStoreTests
 {

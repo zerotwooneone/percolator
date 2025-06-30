@@ -1,11 +1,8 @@
 using FluentAssertions;
 using Percolator.Application.Identity;
-using Percolator.Identity;
+using IdentityPeerId = Percolator.Identity.PeerId;
 
-using System;
-using System.Threading.Tasks;
-
-namespace Percolator.ApplicationTests.Identity;
+namespace Percolator.ApplicationTests;
 
 public class PeerRepositoryTests
 {
@@ -20,7 +17,7 @@ public class PeerRepositoryTests
     public async Task GetByIdAsync_ShouldReturnNull_WhenPeerDoesNotExist()
     {
         // Arrange
-        var peerId = Guid.NewGuid();
+        var peerId = IdentityPeerId.NewId(); 
 
         // Act
         var peer = await _sut.GetByIdAsync(peerId);

@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Threading.Tasks;
@@ -9,6 +10,7 @@ using Percolator.Application.Sessions;
 using Percolator.Cryptography;
 using Percolator.Sessions;
 using Percolator.Identity;
+using SessionPeerId = Percolator.Sessions.PeerId;
 
 namespace Percolator.ApplicationTests.Sessions;
 
@@ -62,10 +64,21 @@ public class DirectSessionManagerTests
         var plaintext = "Hello, world!";
 
         using var localIdentityKey = _localCertificate.GetECDHKeyPair();
-        using var remoteIdentityKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        using var remoteIdentityKey = _remoteCertificate.GetECDHKeyPair();
+        var remoteIdentityPublicKeyBytes = remoteIdentityKey.PublicKey.ExportSubjectPublicKeyInfo();
 
-        var sharedSecret = localIdentityKey.DeriveKeyFromHash(remoteIdentityKey.PublicKey, HashAlgorithmName.SHA256);
-        var doubleRatchetSession = new DoubleRatchetSession(new SharedSecret(sharedSecret), remoteIdentityKey.PublicKey.ToByteArray());
+        using var remoteRatchetKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        var remoteRatchetPublicKeyBytes = remoteRatchetKey.PublicKey.ExportSubjectPublicKeyInfo();
+
+        var sharedSecret = new byte[32];
+        RandomNumberGenerator.Fill(sharedSecret);
+
+        var doubleRatchetSession = DoubleRatchetSession.AsInitiator(
+            sharedSecret,
+            localIdentityKey,
+            remoteIdentityPublicKeyBytes,
+            remoteRatchetPublicKeyBytes
+        );
         var sessionState = doubleRatchetSession.GetState();
 
         _mockSessionStore.Setup(s => s.GetSessionStateAsync(remotePeerId, conversationId))
@@ -76,7 +89,7 @@ public class DirectSessionManagerTests
         _mockConversationStore.Setup(s => s.GetConversationAsync(conversationId)).ReturnsAsync(conversation);
 
         // Act
-        var result = await _manager.SendDirectMessageAsync(conversationId, plaintext);
+        var result = await _manager.SendMessageAsync(conversationId, plaintext);
 
         // Assert
         result.Should().NotBeNull();

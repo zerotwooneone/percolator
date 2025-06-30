@@ -1,19 +1,22 @@
 using Grpc.Net.Client;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using System.CommandLine;
 using System.CommandLine.Invocation;
+using System.Security.Cryptography;
+using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Percolator.Application;
 using Percolator.Application.KeyExchange;
 using Percolator.Application.Identity;
 using Percolator.Application.Sessions;
 using Percolator.Contracts;
-using Percolator.Identity;
 using Percolator.Node;
 using Percolator.Sessions;
 using SessionPeerId = Percolator.Sessions.PeerId;
+using DomainIdentityService = Percolator.Identity.IIdentityService;
 
 // --- Main Entry Point ---
 var configuration = new ConfigurationBuilder()
@@ -58,20 +61,27 @@ static RootCommand BuildCommandLine(IServiceProvider serviceProvider, string[] a
     hostCommand.SetHandler(async context =>
     {
         var cancellationToken = context.GetCancellationToken();
-        var logger = context.BindingContext.GetRequiredService<ILogger<Program>>();
+        var logger = serviceProvider.GetRequiredService<ILogger<Program>>();
 
         //This is a bit of a hack to ensure the identity is created before the host starts
-        var activeIdentity = context.BindingContext.GetRequiredService<ActiveIdentityContext>();
+        var activeIdentity = serviceProvider.GetRequiredService<ActiveIdentityContext>();
         if (activeIdentity.Certificate is null)
         {
             logger.LogInformation("No active identity found, creating a new one...");
-            var identityService = context.BindingContext.GetRequiredService<IIdentityService>();
-            await identityService.CreateIdentityAsync("percolator", cancellationToken);
+            var identityService = serviceProvider.GetRequiredService<DomainIdentityService>();
+            await identityService.CreateIdentityAsync("percolator", null, cancellationToken);
         }
 
-        logger.LogInformation("Hosting identity {thumbprint}", activeIdentity.Certificate.Thumbprint);
+        logger.LogInformation("Hosting identity {thumbprint}", activeIdentity.Certificate?.Thumbprint);
 
-        await app.RunAsync(cancellationToken);
+        var hostedServices = serviceProvider.GetServices<IHostedService>();
+        await Task.WhenAll(hostedServices.Select(s => s.StartAsync(cancellationToken)));
+
+        var tcs = new TaskCompletionSource();
+        cancellationToken.Register(() => tcs.SetResult());
+        await tcs.Task;
+
+        await Task.WhenAll(hostedServices.Select(s => s.StopAsync(CancellationToken.None)));
     });
     rootCommand.AddCommand(hostCommand);
 
@@ -85,30 +95,43 @@ static RootCommand BuildCommandLine(IServiceProvider serviceProvider, string[] a
         var address = context.ParseResult.GetValueForArgument(addressArgument);
         var port = context.ParseResult.GetValueForArgument(portArgument);
         var cancellationToken = context.GetCancellationToken();
-        var logger = context.BindingContext.GetRequiredService<ILogger<Program>>();
+        var logger = serviceProvider.GetRequiredService<ILogger<Program>>();
 
         logger.LogInformation("Connecting to {address}:{port}...", address, port);
 
         var channel = GrpcChannel.ForAddress($"https://{address}:{port}");
-        var client = new KeyExchange.KeyExchangeClient(channel);
+        var client = new TransportService.TransportServiceClient(channel);
 
-        var orchestrator = context.BindingContext.GetRequiredService<X3DHOrchestrator>();
-        var sessionManager = context.BindingContext.GetRequiredService<DirectSessionManager>();
+        var orchestrator = serviceProvider.GetRequiredService<X3DHOrchestrator>();
+        var sessionManager = serviceProvider.GetRequiredService<DirectSessionManager>();
+        var activeIdentity = serviceProvider.GetRequiredService<ActiveIdentityContext>();
 
-        var remotePreKeyBundle = await client.GetPreKeyBundleAsync(new Empty(), cancellationToken: cancellationToken);
+        // 1. Create the initiator's bundle
+        var localKeys = activeIdentity.X3dhKeys ?? throw new InvalidOperationException("X3DH keys not found in active identity.");
+        var signedPreKeyBytes = localKeys.SignedPreKey.PublicKey.ExportSubjectPublicKeyInfo();
+        var localBundle = new PreKeyBundle
+        {
+            IdentityKey = ByteString.CopyFrom(localKeys.IdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
+            SignedPreKey = ByteString.CopyFrom(signedPreKeyBytes),
+            PreKeySignature = ByteString.CopyFrom(localKeys.IdentitySigningKey.SignData(signedPreKeyBytes, HashAlgorithmName.SHA256, DSASignatureFormat.IeeeP1363FixedFieldConcatenation)),
+            OneTimePreKey = ByteString.CopyFrom(localKeys.OneTimePreKey.PublicKey.ExportSubjectPublicKeyInfo())
+        };
 
-        var remotePeerId = new SessionPeerId(Guid.Parse(remotePreKeyBundle.PeerId));
+        // 2. Send request and get the responder's bundle
+        var request = new EstablishSessionRequest { InitiatorBundle = localBundle };
+        var response = await client.EstablishSessionAsync(request, cancellationToken: cancellationToken);
+        var remotePreKeyBundle = response.ResponderBundle;
 
+        // TODO: The remote PeerId needs to be resolved properly. For now, we generate a new one.
+        var remotePeerId = new SessionPeerId(Guid.NewGuid());
+
+        // 3. Use the orchestrator to derive the shared secret
         var initiationResult = orchestrator.InitiateHandshake(remotePeerId, remotePreKeyBundle);
 
-        var response = await client.EstablishSessionAsync(initiationResult.Handshake, cancellationToken: cancellationToken);
-
-        var activeIdentity = context.BindingContext.GetRequiredService<ActiveIdentityContext>();
-        var localPeerId = new SessionPeerId(Guid.Parse(activeIdentity.IdentityName!));
-
+        // 4. Establish the session locally
         var conversationId = await sessionManager.EstablishSessionAsync(remotePeerId, initiationResult.SharedSecret, initiationResult.InitialRatchetPublicKey);
 
-        logger.LogInformation("Session established with peer {peerId}. Conversation ID: {conversationId}", remotePeerId, conversationId);
+        logger.LogInformation("Session established with peer. Conversation ID: {conversationId}", conversationId);
     });
     rootCommand.AddCommand(connectCommand);
 
@@ -122,17 +145,17 @@ static RootCommand BuildCommandLine(IServiceProvider serviceProvider, string[] a
         var conversationId = new ConversationId(context.ParseResult.GetValueForArgument(conversationIdArgument));
         var message = context.ParseResult.GetValueForArgument(messageArgument);
         var cancellationToken = context.GetCancellationToken();
-        var logger = context.BindingContext.GetRequiredService<ILogger<Program>>();
+        var logger = serviceProvider.GetRequiredService<ILogger<Program>>();
 
-        var sessionManager = context.BindingContext.GetRequiredService<DirectSessionManager>();
+        var sessionManager = serviceProvider.GetRequiredService<DirectSessionManager>();
 
         logger.LogInformation("Sending message to conversation {conversationId}...", conversationId);
 
-        var encryptedMessage = await sessionManager.SendDirectMessageAsync(conversationId, message);
+        var encryptedMessage = await sessionManager.SendMessageAsync(conversationId, message);
 
         logger.LogInformation("Message sent. Encrypted size: {size} bytes", encryptedMessage.Ciphertext.Length);
     });
-    rootCommand.Add(sendCommand);
+    rootCommand.AddCommand(sendCommand);
 
     return rootCommand;
 }

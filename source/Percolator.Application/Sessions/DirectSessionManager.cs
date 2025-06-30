@@ -96,4 +96,41 @@ public class DirectSessionManager
     {
         return await _conversationStore.GetConversationAsync(conversationId);
     }
+
+    public async Task<RatchetMessage> SendMessageAsync(ConversationId conversationId, string message)
+    {
+        var activeIdentity = _activeIdentityContext;
+        if (activeIdentity?.Certificate is null || activeIdentity.IdentityName is null)
+        {
+            throw new InvalidOperationException("No active identity found to send message.");
+        }
+
+        var conversation = await _conversationStore.GetConversationAsync(conversationId);
+        if (conversation == null)
+        {
+            throw new InvalidOperationException($"Conversation with ID {conversationId} not found.");
+        }
+
+        var remotePeerId = conversation.RemotePeerId;
+
+        var sessionState = await _doubleRatchetSessionStore.GetSessionStateAsync(remotePeerId, conversationId);
+        if (sessionState == null)
+        {
+            throw new InvalidOperationException($"Double Ratchet session state for conversation {conversationId} not found.");
+        }
+
+        using var identityKey = activeIdentity.Certificate.GetECDHKeyPair();
+
+        using var doubleRatchetSession = new DoubleRatchetSession(sessionState, identityKey);
+
+        var payload = Encoding.UTF8.GetBytes(message);
+        var encryptedMessage = doubleRatchetSession.Encrypt(payload);
+
+        await _doubleRatchetSessionStore.SaveSessionStateAsync(remotePeerId, conversationId, doubleRatchetSession.GetState());
+
+        var directMessage = new DirectMessage(new MessageId(Guid.NewGuid()), conversationId, remotePeerId, new OpaqueContent(encryptedMessage.Ciphertext));
+        await _messageStore.StoreDirectMessageAsync(directMessage);
+
+        return encryptedMessage;
+    }
 }
