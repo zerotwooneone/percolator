@@ -54,3 +54,12 @@ To ensure robustness and future compatibility, all public-facing contracts adher
 
 -   **Versioning**: All request messages include a `uint32 version` field. This allows for smooth protocol upgrades over time.
 -   **Rate-Limiting**: All response messages include an `optional google.protobuf.Timestamp retry_after_utc` field. This provides a standard mechanism for a peer to inform a client that it is being rate-limited and when it is safe to retry the request.
+
+## AI Assistant Guidance
+
+-   **Contracts Only**: This project must only contain `.proto` files. Do not add C# code, build logic, or any other artifacts.
+-   **Principle of Verification: Verify Before Acting**: To avoid hallucination, always verify the existence, name, and location of code artifacts (message types, services, fields) using tools like `grep_search` and `list_dir` before attempting to use or modify them. Actions must be based on evidence from the codebase, not assumptions from training data.
+    *   **Investigate Errors Systematically**: A build error is a clue, not a conclusion. When an error like "type not found" occurs, do not invent the type. Instead, use tools to search the existing codebase for the correct type that fulfills the required role.
+    *   **Use Precise, Definition-Oriented Searches**: When searching for a type, search for its definition (e.g., `grep "message MyMessage"`), not just its name, to avoid ambiguity.
+    *   **Work from Broad to Specific**: When lost, zoom out. First, understand the solution structure by listing projects. Then, list files within a project. Finally, inspect specific files to understand their contents and dependencies.
+    *   **Never Create Code to Justify a Hallucination**: If an assumption about a message name proves false, the solution is *never* to create an empty file or message with that name just to make a build pass. This compounds the error. The correct action is to discard the assumption and find the *actual* message that should be used.
