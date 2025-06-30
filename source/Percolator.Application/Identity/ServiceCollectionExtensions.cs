@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using Percolator.Identity;
+using CertificateOperations = Percolator.Application.Identity.CertificateOperations;
 
 namespace Percolator.Application.Identity;
 
@@ -7,17 +8,19 @@ public static class ServiceCollectionExtensions
 {
     public static IServiceCollection AddIdentityServices(this IServiceCollection services)
     {
-        services.AddSingleton<ICredentialService, CredentialService>();
-        services.AddSingleton<IKeyManagementService,PersistentKeyManagementService>();
-        services.AddSingleton<IIdentityStore, FileSystemIdentityStore>();
+        // Concrete implementations from Percolator.Identity
         services.AddSingleton<IIdentityService, PersistentIdentityService>();
+        services.AddSingleton<IIdentityStore, FileSystemIdentityStore>();
+        services.AddSingleton<IKeyManagementService, PersistentKeyManagementService>();
+        services.AddSingleton<ICredentialService, CredentialService>();
+
+        // Adapter implementation from Percolator.Application
+        services.AddSingleton<ICertificateOperations, CertificateOperations>();
+        
+        // Still needs a concrete implementation
+        services.AddSingleton<IPeerRepository, InMemoryPeerRepository>();
 
         services.AddSingleton<ActiveIdentityContext>();
-        services.AddSingleton<ICertificateOperations, CertificateOperations>();
-        services.AddSingleton<IPeerRepository, PeerRepository>();
-        services.AddSingleton<IPeerIdentityStore, InMemoryPeerIdentityStore>();
-        services.AddSingleton<IIdentityOrchestrator, IdentityOrchestrator>();
-
         return services;
     }
 }

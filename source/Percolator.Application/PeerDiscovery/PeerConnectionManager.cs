@@ -21,7 +21,7 @@ public class PeerConnectionManager : IPeerConnectionManager
 
     public async Task<TransportService.TransportServiceClient> GetTransportClient(IdentityPeerId peerId)
     {
-        var peer = await _peerRepository.GetByIdAsync(peerId.Value);
+        var peer = await _peerRepository.GetByIdAsync(peerId);
         if (peer is null)
         {
             throw new ArgumentException($"Peer with ID '{peerId}' not found.", nameof(peerId));
@@ -55,7 +55,7 @@ public class PeerConnectionManager : IPeerConnectionManager
 
     public async Task RemovePeer(IdentityPeerId peerId)
     {
-        var peer = await _peerRepository.GetByIdAsync(peerId.Value);
+        var peer = await _peerRepository.GetByIdAsync(peerId);
         if (peer is null)
         {
             _logger.LogWarning("Attempted to remove a non-existent peer with ID '{PeerId}'.", peerId);

@@ -1,13 +1,14 @@
 using Microsoft.Extensions.DependencyInjection;
+using Percolator.Network;
 
 namespace Percolator.Application.PeerDiscovery;
 
 public static class ServiceCollectionExtensions
 {
-    public static IServiceCollection AddPeerDiscovery(this IServiceCollection services)
+    public static IServiceCollection AddPeerDiscoveryServices(this IServiceCollection services)
     {
-        services.AddSingleton<IPeerConnectionManager, PeerConnectionManager>();
-
+        // Register the handler for discovered peers
+        services.AddSingleton<IPeerDiscoveryHandler, PeerDiscoveryHandler>();
         return services;
     }
 }

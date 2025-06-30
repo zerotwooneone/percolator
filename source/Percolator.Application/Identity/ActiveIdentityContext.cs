@@ -13,6 +13,7 @@ public class ActiveIdentityContext
     public const string IdentityKey = "identity";
     public const string PreKey = "prekey";
 
+    public Percolator.Identity.PeerId? Id { get; internal set; }
     public string? IdentityName { get; internal set; }
     public string? Nickname { get; internal set; }
     public IReadOnlyDictionary<string, byte[]> PublicKeys { get; internal set; } = new Dictionary<string, byte[]>();

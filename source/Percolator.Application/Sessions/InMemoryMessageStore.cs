@@ -1,5 +1,9 @@
 using Percolator.Sessions;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace Percolator.Application.Sessions;
 
@@ -16,7 +20,7 @@ public class InMemoryMessageStore : IMessageStore
     // Direct Conversation operations
     public Task StoreDirectConversationAsync(DirectConversation conversation)
     {
-        _directConversations[conversation.Id] = conversation;
+        _directConversations.TryAdd(conversation.Id, conversation);
         return Task.CompletedTask;
     }
 
@@ -34,7 +38,7 @@ public class InMemoryMessageStore : IMessageStore
 
     public Task<DirectConversation?> GetDirectConversationByPeerIdAsync(PeerId peerId)
     {
-        var conversation = _directConversations.Values.FirstOrDefault(c => c.PeerId == peerId);
+        var conversation = _directConversations.Values.FirstOrDefault(c => c.RemotePeerId == peerId);
         return Task.FromResult(conversation);
     }
 
@@ -43,10 +47,17 @@ public class InMemoryMessageStore : IMessageStore
         return Task.FromResult<IEnumerable<DirectConversation>>(_directConversations.Values.ToList());
     }
 
+    public Task<DirectConversation?> GetConversationWithPeerAsync(PeerId peerId, CancellationToken cancellationToken)
+    {
+        var conversation = _directConversations.Values
+            .FirstOrDefault(c => c.LocalPeerId.Equals(peerId) || c.RemotePeerId.Equals(peerId));
+        return Task.FromResult(conversation);
+    }
+
     // Group Conversation operations
     public Task StoreGroupConversationAsync(GroupConversation group)
     {
-        _groupConversations[group.Id] = group;
+        _groupConversations.TryAdd(group.Id, group);
         return Task.CompletedTask;
     }
 
@@ -64,7 +75,7 @@ public class InMemoryMessageStore : IMessageStore
     // Message operations
     public Task StoreDirectMessageAsync(DirectMessage message)
     {
-        _directMessages[message.Id] = message;
+        _directMessages.TryAdd(message.Id, message);
         return Task.CompletedTask;
     }
 
@@ -79,7 +90,7 @@ public class InMemoryMessageStore : IMessageStore
 
     public Task StoreGroupMessageAsync(GroupMessage message)
     {
-        _groupMessages[message.Id] = message;
+        _groupMessages.TryAdd(message.Id, message);
         return Task.CompletedTask;
     }
 

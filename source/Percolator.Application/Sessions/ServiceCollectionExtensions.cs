@@ -1,16 +1,16 @@
 using Microsoft.Extensions.DependencyInjection;
+using Percolator.Sessions;
 
 namespace Percolator.Application.Sessions;
 
 public static class ServiceCollectionExtensions
 {
-    public static IServiceCollection AddSessions(this IServiceCollection services)
+    public static IServiceCollection AddSessionServices(this IServiceCollection services)
     {
-        services.AddSingleton<ILocalPeerProvider, LocalPeerProvider>();
-        services.AddSingleton<IConversationService, ConversationService>();
-        services.AddSingleton<IMessageService, MessageService>();
-        services.AddSingleton<IMessageRepository, InMemoryMessageRepository>();
-
+        services.AddSingleton<IMessageStore, InMemoryMessageStore>();
+        services.AddSingleton<IConversationStore, InMemoryConversationStore>();
+        services.AddSingleton<IDoubleRatchetSessionStore, InMemoryDoubleRatchetSessionStore>();
+        services.AddSingleton<DirectSessionManager>();
         return services;
     }
 }

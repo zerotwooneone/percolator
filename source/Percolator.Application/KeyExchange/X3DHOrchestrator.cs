@@ -1,93 +1,94 @@
+using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
-using System.Threading.Tasks;
 using Google.Protobuf;
 using Percolator.Application.Identity;
-using Percolator.Contracts;
 using Percolator.Cryptography;
+using Percolator.Sessions;
 using ContractsPreKeyBundle = Percolator.Contracts.PreKeyBundle;
 using CryptographyPreKeyBundle = Percolator.Cryptography.PreKeyBundle;
 using SessionPeerId = Percolator.Sessions.PeerId;
 
-namespace Percolator.Application.KeyExchange
+namespace Percolator.Application.KeyExchange;
+
+public class X3DHOrchestrator
 {
-    public class X3DHOrchestrator
+    private readonly ActiveIdentityContext _activeIdentityContext;
+    private readonly X3DHManager _x3DhManager;
+
+    public X3DHOrchestrator(ActiveIdentityContext activeIdentityContext, X3DHManager x3DhManager)
     {
-        private readonly ActiveIdentityContext _activeIdentityContext;
-        private readonly X3DHManager _x3DhManager;
+        _activeIdentityContext = activeIdentityContext;
+        _x3DhManager = x3DhManager;
+    }
 
-        public X3DHOrchestrator(ActiveIdentityContext activeIdentityContext, X3DHManager x3DhManager)
+    public OrchestratorInitiationResult InitiateHandshake(SessionPeerId remotePeerId, ContractsPreKeyBundle remotePreKeyBundle)
+    {
+        // Get local identity keys and validate
+        if (_activeIdentityContext.Certificate?.GetECDsaPrivateKey() is not { } identitySigningKey ||
+            _activeIdentityContext.X3dhKeys?.IdentityAgreementKey is not { } identityAgreementKey ||
+            _activeIdentityContext.X3dhKeys?.SignedPreKey is not { } signedPreKey ||
+            _activeIdentityContext.X3dhKeys?.OneTimePreKey is not { } oneTimePreKey)
         {
-            _activeIdentityContext = activeIdentityContext;
-            _x3DhManager = x3DhManager;
+            throw new InvalidOperationException("Active identity is not fully initialized for X3DH handshake.");
         }
 
-        public async Task<(byte[] sharedSecret, byte[] initialRatchetPublicKey, ContractsPreKeyBundle localPreKeyBundle, byte[] ephemeralPublicKey)> InitiateHandshakeAsync(SessionPeerId remotePeerId, ContractsPreKeyBundle remotePreKeyBundle)
+        // Translate contract DTO to cryptography domain object
+        var cryptoBundle = new CryptographyPreKeyBundle(
+            remotePreKeyBundle.IdentityKey.ToByteArray(),
+            remotePreKeyBundle.SignedPreKey.ToByteArray(),
+            remotePreKeyBundle.PreKeySignature.ToByteArray(),
+            remotePreKeyBundle.OneTimePreKey.ToByteArray()
+        );
+
+        // Perform X3DH handshake as initiator
+        var handshakeResult = _x3DhManager.InitiateHandshake(
+            cryptoBundle,
+            identitySigningKey,
+            identityAgreementKey
+        );
+
+        // The initial ratchet public key for the Double Ratchet session is the initiator's ephemeral public key
+        var initialRatchetPublicKey = new OpaquePublicKey(handshakeResult.EphemeralPublicKey.Value);
+
+        // Create and sign the local pre-key bundle for the remote peer
+        var signedPreKeyBytes = signedPreKey.PublicKey.ExportSubjectPublicKeyInfo();
+        var signature = identitySigningKey.SignData(signedPreKeyBytes, HashAlgorithmName.SHA256, DSASignatureFormat.IeeeP1363FixedFieldConcatenation);
+
+        var localPreKeyBundle = new ContractsPreKeyBundle
         {
-            // Get local identity keys
-            var activeIdentity = _activeIdentityContext;
-            if (activeIdentity.Certificate == null || activeIdentity.X3dhKeys == null)
-            {
-                throw new InvalidOperationException("Active identity is not fully initialized for X3DH handshake.");
-            }
+            IdentityKey = ByteString.CopyFrom(identityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
+            SignedPreKey = ByteString.CopyFrom(signedPreKeyBytes),
+            PreKeySignature = ByteString.CopyFrom(signature),
+            OneTimePreKey = ByteString.CopyFrom(oneTimePreKey.PublicKey.ExportSubjectPublicKeyInfo())
+        };
 
-            // Generate ephemeral keys for the initiator
-            using var ephemeralKeyPair = System.Security.Cryptography.ECDiffieHellman.Create(System.Security.Cryptography.ECCurve.NamedCurves.nistP256);
+        return new OrchestratorInitiationResult(handshakeResult.SharedSecret, initialRatchetPublicKey, localPreKeyBundle);
+    }
 
-            // Perform X3DH handshake as initiator
-            var sharedSecret = _x3DhManager.InitiateHandshake(
-                new CryptographyPreKeyBundle(
-                    remotePreKeyBundle.IdentityKey.ToByteArray(),
-                    remotePreKeyBundle.SignedPreKey.ToByteArray(),
-                    remotePreKeyBundle.PreKeySignature.ToByteArray(),
-                    remotePreKeyBundle.OneTimePreKey.ToByteArray()
-                ),
-                activeIdentity.Certificate.GetECDsaPrivateKey(),
-                activeIdentity.X3dhKeys.IdentityAgreementKey,
-                ephemeralKeyPair
-            );
-
-            // The initial ratchet public key for the Double Ratchet session is the initiator's ephemeral public key
-            var initialRatchetPublicKey = ephemeralKeyPair.PublicKey.ExportSubjectPublicKeyInfo();
-
-            // Return local pre-key bundle for the remote peer to complete their side of the handshake
-            var localPreKeyBundle = new ContractsPreKeyBundle
-            {
-                IdentityKey = ByteString.CopyFrom(activeIdentity.X3dhKeys.IdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
-                SignedPreKey = ByteString.CopyFrom(activeIdentity.X3dhKeys.SignedPreKey.PublicKey.ExportSubjectPublicKeyInfo()),
-                PreKeySignature = ByteString.CopyFrom(new byte[0]), // Signature is not implemented yet
-                OneTimePreKey = ByteString.CopyFrom(activeIdentity.X3dhKeys.OneTimePreKey.PublicKey.ExportSubjectPublicKeyInfo())
-            };
-
-            return (sharedSecret, initialRatchetPublicKey, localPreKeyBundle, ephemeralKeyPair.PublicKey.ExportSubjectPublicKeyInfo());
+    public OrchestratorResponseResult ProcessHandshake(SessionPeerId remotePeerId, ContractsPreKeyBundle localPreKeyBundle, byte[] remoteEphemeralPublicKey)
+    {
+        // Get local identity keys and validate
+        if (_activeIdentityContext.Certificate?.GetECDsaPrivateKey() is not { } identitySigningKey ||
+            _activeIdentityContext.X3dhKeys?.IdentityAgreementKey is not { } identityAgreementKey ||
+            _activeIdentityContext.X3dhKeys?.SignedPreKey is not { } signedPreKey ||
+            _activeIdentityContext.X3dhKeys?.OneTimePreKey is not { } oneTimePreKey)
+        {
+            throw new InvalidOperationException("Active identity is not fully initialized for X3DH handshake.");
         }
 
-        public async Task<(byte[] sharedSecret, byte[] initialRatchetPublicKey)> ProcessHandshakeAsync(SessionPeerId remotePeerId, ContractsPreKeyBundle localPreKeyBundle, byte[] remoteEphemeralPublicKey)
-        {
-            // Get local identity keys
-            var activeIdentity = _activeIdentityContext;
-            if (activeIdentity.Certificate == null || activeIdentity.X3dhKeys == null)
-            {
-                throw new InvalidOperationException("Active identity is not fully initialized for X3DH handshake.");
-            }
+        // Perform X3DH handshake as responder
+        var sharedSecret = _x3DhManager.RespondToHandshake(
+            localPreKeyBundle.IdentityKey.ToByteArray(),
+            remoteEphemeralPublicKey,
+            identitySigningKey,
+            identityAgreementKey,
+            signedPreKey,
+            oneTimePreKey
+        );
 
-            // Perform X3DH handshake as responder
-            var sharedSecret = _x3DhManager.RespondToHandshake(
-                new CryptographyPreKeyBundle(
-                    localPreKeyBundle.IdentityKey.ToByteArray(),
-                    localPreKeyBundle.SignedPreKey.ToByteArray(),
-                    localPreKeyBundle.PreKeySignature.ToByteArray(),
-                    localPreKeyBundle.OneTimePreKey.ToByteArray()
-                ),
-                activeIdentity.Certificate.GetECDsaPrivateKey(),
-                activeIdentity.X3dhKeys.IdentityAgreementKey,
-                activeIdentity.X3dhKeys.SignedPreKey,
-                activeIdentity.X3dhKeys.OneTimePreKey
-            );
+        // The initial ratchet public key for the Double Ratchet session is the responder's signed pre-key
+        var initialRatchetPublicKey = new OpaquePublicKey(signedPreKey.PublicKey.ExportSubjectPublicKeyInfo());
 
-            // The initial ratchet public key for the Double Ratchet session is the responder's signed pre-key
-            var initialRatchetPublicKey = activeIdentity.X3dhKeys.SignedPreKey.PublicKey.ExportSubjectPublicKeyInfo();
-
-            return (sharedSecret, initialRatchetPublicKey);
-        }
+        return new OrchestratorResponseResult(sharedSecret, initialRatchetPublicKey);
     }
 }

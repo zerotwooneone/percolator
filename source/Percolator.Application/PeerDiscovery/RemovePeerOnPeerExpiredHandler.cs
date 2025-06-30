@@ -1,7 +1,7 @@
 using MediatR;
 using Microsoft.Extensions.Logging;
+using Percolator.Application.Network;
 using Percolator.Identity;
-using Percolator.Sessions;
 
 namespace Percolator.Application.PeerDiscovery;
 
@@ -23,14 +23,8 @@ public class RemovePeerOnPeerExpiredHandler : INotificationHandler<PeerExpiredNo
         var networkPeer = notification.Peer;
         _logger.LogInformation("- Peer expired: {IpAddress}:{Port}", networkPeer.IpAddress, networkPeer.GrpcEndpoint.Port);
 
-        var identityPeer = await _peerRepository.GetByThumbprintAsync(networkPeer.Thumbprint);
-        if (identityPeer is not null)
-        {
-            _connectionManager.RemovePeer(identityPeer.Id);
-        }/
-        else
-        {
-            _logger.LogWarning("Could not find peer with thumbprint {Thumbprint} to remove from connection manager.", networkPeer.Thumbprint);
-        }
+        var identityPeerId = new PeerId(networkPeer.Id.Value);
+        await _peerRepository.RemoveAsync(identityPeerId);
+        await _connectionManager.RemovePeer(identityPeerId);
     }
 }

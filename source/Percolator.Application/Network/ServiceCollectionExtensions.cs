@@ -7,21 +7,22 @@ namespace Percolator.Application.Network;
 
 public static class ServiceCollectionExtensions
 {
-    public static IServiceCollection AddNetworkServices(this IServiceCollection services, IConfiguration configuration, int? listenPortOverride = null)
+    public static IServiceCollection AddNetworkServices(this IServiceCollection services, IConfiguration configuration)
     {
+        // Bind the config from appsettings.json
         var config = new PeerDiscoveryConfig();
         configuration.GetSection("PeerDiscovery").Bind(config);
-        if (listenPortOverride.HasValue)
-        {
-            config.ListenPort = listenPortOverride.Value;
-        }
         services.AddSingleton<IPeerDiscoveryConfig>(config);
 
-        services.AddSingleton<IPeerDiscoveryService, PeerDiscoveryService>();
+        // Register concrete implementations from the Application layer
         services.AddSingleton<IIdentityProvider, IdentityProvider>();
-        
-        services.AddSingleton<IPeerDiscoveryHandler, PeerDiscoveryHandler>();
         services.AddSingleton<IDiscoverySignatureProvider, DiscoverySignatureProvider>();
+
+        // Register the core service from the Network domain library
+        services.AddSingleton<IPeerDiscoveryService, PeerDiscoveryService>();
+
+        // Register the hosted service that runs the discovery
+        services.AddHostedService<PeerDiscoveryHostedService>();
 
         return services;
     }
