@@ -44,6 +44,43 @@ The Percolator Node is designed with a security-first approach. Key security fea
 -   **Denial-of-Service (DoS) Protection**: The application implements service-side rate-limiting to protect against resource exhaustion attacks from malicious peers. It also enforces strict quotas on manifest storage and has bounded caches for out-of-order messages.
 -   **Fail-Forward Security Policy**: Domain libraries are designed to throw exceptions on security violations rather than logging warnings, ensuring that insecure states are never ignored.
 
+### Complex Topics: Secure Session Establishment
+
+The security of all peer-to-peer communication in Percolator relies on a two-phase process for establishing and maintaining secure sessions. This process is orchestrated by the `DirectSessionManager` and backed by the cryptographic primitives in `Percolator.Cryptography`.
+
+#### Phase 1: The X3DH Handshake
+
+When one peer (the initiator, e.g., Bob) wants to communicate with another (the responder, e.g., Alice) for the first time, they perform the **Extended Triple Diffie-Hellman (X3DH)** handshake.
+
+1.  **Alice Publishes Keys**: Alice generates a set of long-term and medium-term cryptographic keys and publishes them as a "pre-key bundle." This bundle contains:
+    *   Her long-term public identity key (`IK_A`).
+    *   A signed pre-key (`SPK_A`).
+    *   A batch of one-time pre-keys (`OPK_A`).
+
+2.  **Bob Fetches Bundle and Initiates**: Bob fetches one of Alice's pre-key bundles. He then:
+    *   Generates his own ephemeral key pair (`EK_B`).
+    *   Performs three Diffie-Hellman key agreements:
+        1.  `DH1 = DH(IK_B, SPK_A)`
+        2.  `DH2 = DH(EK_B, IK_A)`
+        3.  `DH3 = DH(EK_B, SPK_A)`
+    *   If a one-time pre-key is available, he performs a fourth: `DH4 = DH(EK_B, OPK_A)`.
+
+3.  **Shared Secret Derivation**: Bob combines the results of these Diffie-Hellman agreements and feeds them into a Key Derivation Function (KDF) to produce a single, strong `SharedSecret`.
+
+This `SharedSecret` is the initial root key for the Double Ratchet session. Bob can now use it to encrypt his first message to Alice.
+
+#### Phase 2: The Double Ratchet Protocol
+
+Once the initial shared secret is established, all subsequent communication is protected by the **Double Ratchet** algorithm. This algorithm ensures that every message is encrypted with a unique, ephemeral key, providing exceptional security guarantees.
+
+The "Double" Ratchet has two components:
+
+1.  **The Symmetric-Key Ratchet**: After each message is sent or received, a KDF is used to derive a new message key from the previous one. This is like a ratchet that clicks forward with every message, ensuring that a compromised message key cannot be used to decrypt past or future messages in the same chain.
+
+2.  **The Diffie-Hellman Ratchet**: Whenever the conversation flows from one party to the other, a new Diffie-Hellman key agreement is performed using new ephemeral keys. The result of this handshake is used to re-seed the symmetric-key ratchet. This provides **post-compromise security**; if an attacker steals a party's keys, the session can "heal" itself as soon as the legitimate parties exchange a new DH-ratcheted message.
+
+This two-phase process, orchestrated by `DirectSessionManager`, provides end-to-end encryption with forward secrecy and post-compromise security, making peer-to-peer communication extremely secure.
+
 ## Usage
 
 The Percolator Node is a command-line application for secure peer-to-peer communication.
