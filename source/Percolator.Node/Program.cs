@@ -63,16 +63,7 @@ static RootCommand BuildCommandLine(IServiceProvider serviceProvider, string[] a
         var cancellationToken = context.GetCancellationToken();
         var logger = serviceProvider.GetRequiredService<ILogger<Program>>();
 
-        //This is a bit of a hack to ensure the identity is created before the host starts
-        var activeIdentity = serviceProvider.GetRequiredService<ActiveIdentityContext>();
-        if (activeIdentity.Certificate is null)
-        {
-            logger.LogInformation("No active identity found, creating a new one...");
-            var identityService = serviceProvider.GetRequiredService<DomainIdentityService>();
-            await identityService.CreateIdentityAsync("percolator", null, cancellationToken);
-        }
-
-        logger.LogInformation("Hosting identity {thumbprint}", activeIdentity.Certificate?.Thumbprint);
+        logger.LogInformation("Starting host...");
 
         var hostedServices = serviceProvider.GetServices<IHostedService>();
         await Task.WhenAll(hostedServices.Select(s => s.StartAsync(cancellationToken)));
@@ -133,7 +124,8 @@ static RootCommand BuildCommandLine(IServiceProvider serviceProvider, string[] a
         var initiationResult = orchestrator.InitiateHandshake(remotePeerId, remotePreKeyBundle);
 
         // 4. Establish the session locally
-        var conversationId = await sessionManager.EstablishSessionAsync(remotePeerId, initiationResult.SharedSecret, initiationResult.InitialRatchetPublicKey);
+        var remoteIdentityPublicKey = new OpaquePublicKey(remotePreKeyBundle.IdentityKey.ToByteArray());
+        var conversationId = await sessionManager.EstablishSessionAsync(remotePeerId, remoteIdentityPublicKey, initiationResult.SharedSecret, initiationResult.InitialRatchetPublicKey);
 
         logger.LogInformation("Session established with peer. Conversation ID: {conversationId}", conversationId);
     });

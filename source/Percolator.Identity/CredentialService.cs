@@ -73,16 +73,23 @@ namespace Percolator.Identity
         private static string GenerateRandomPassword()
         {
             const string validChars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890!@#$%^&*()-_=+";
-            var randomBytes = new byte[PasswordLength];
-            using (var rng = RandomNumberGenerator.Create())
+            var password = new StringBuilder(PasswordLength);
+            using var rng = RandomNumberGenerator.Create();
+            
+            // The following algorithm avoids modulo bias, ensuring a uniform distribution of characters.
+            var randomBytes = new byte[1];
+            while (password.Length < PasswordLength)
             {
                 rng.GetBytes(randomBytes);
-            }
+                var randomValue = randomBytes[0];
 
-            var password = new StringBuilder(PasswordLength);
-            foreach (var b in randomBytes)
-            {
-                password.Append(validChars[b % validChars.Length]);
+                // To avoid bias, we only accept values within a range that is an even multiple of validChars.Length.
+                // 256 is the number of possible byte values. 72 is the number of valid characters.
+                // The largest multiple of 72 less than 256 is 216 (72 * 3).
+                if (randomValue < 216)
+                {
+                    password.Append(validChars[randomValue % validChars.Length]);
+                }
             }
             return password.ToString();
         }

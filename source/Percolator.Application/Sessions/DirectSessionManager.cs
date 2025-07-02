@@ -30,7 +30,7 @@ public class DirectSessionManager
         _activeIdentityContext = activeIdentityContext;
     }
 
-    public async Task<ConversationId> EstablishSessionAsync(SessionPeerId remotePeerId, SharedSecret sharedSecret, OpaquePublicKey initialRatchetPublicKey)
+    public async Task<ConversationId> EstablishSessionAsync(SessionPeerId remotePeerId, OpaquePublicKey remoteIdentityPublicKey, SharedSecret sharedSecret, OpaquePublicKey initialRatchetPublicKey)
     {
         if (_activeIdentityContext.Identity is null || _activeIdentityContext.Keys is null)
         {
@@ -43,7 +43,7 @@ public class DirectSessionManager
         using var doubleRatchetSession = DoubleRatchetSession.AsInitiator(
             sharedSecret.Value,
             identityKey,
-            remotePeerId.Value.ToByteArray(), // This needs to be the remote peer's public identity key
+            remoteIdentityPublicKey.Value, 
             initialRatchetPublicKey.Value
         );
 
@@ -87,7 +87,7 @@ public class DirectSessionManager
 
         await _doubleRatchetSessionStore.SaveSessionStateAsync(remotePeerId, conversationId, doubleRatchetSession.GetState());
 
-        var message = new DirectMessage(new MessageId(Guid.NewGuid()), conversationId, remotePeerId, new OpaqueContent(encryptedMessage.Ciphertext));
+        var message = new DirectMessage(new MessageId(Guid.NewGuid()), conversationId, remotePeerId, new OpaqueContent(decryptedBytes));
         await _messageStore.StoreDirectMessageAsync(message);
 
         return decryptedBytes;
@@ -128,7 +128,7 @@ public class DirectSessionManager
             new MessageId(Guid.NewGuid()),
             conversationId,
             localPeerId,
-            new OpaqueContent(encryptedMessage.Ciphertext)
+            new OpaqueContent(plaintextBytes)
         );
         await _messageStore.StoreDirectMessageAsync(message);
 

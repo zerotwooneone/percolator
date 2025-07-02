@@ -1,6 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Percolator.Identity;
-using CertificateOperations = Percolator.Application.Identity.CertificateOperations;
 
 namespace Percolator.Application.Identity;
 
@@ -14,11 +14,12 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IKeyManagementService, PersistentKeyManagementService>();
         services.AddSingleton<ICredentialService, CredentialService>();
 
-        // Adapter implementation from Percolator.Application
-        services.AddSingleton<ICertificateOperations, CertificateOperations>();
-        
         // Still needs a concrete implementation
         services.AddSingleton<IPeerRepository, InMemoryPeerRepository>();
+
+        // Application-layer orchestrator
+        services.AddSingleton<IIdentityOrchestrator, IdentityOrchestrator>();
+        services.AddHostedService(p => (IHostedService)p.GetRequiredService<IIdentityOrchestrator>());
 
         services.AddSingleton<ActiveIdentityContext>();
         return services;

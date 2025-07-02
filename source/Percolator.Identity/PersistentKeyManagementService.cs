@@ -20,7 +20,7 @@ public class PersistentKeyManagementService : IKeyManagementService
     private readonly ILogger<PersistentKeyManagementService> _logger;
 
     // A helper record for serializing ECParameters to and from JSON.
-    private record SerializableX3dhKeyTriplet(ECParameters IdentityKey, ECParameters SignedPreKey, ECParameters OneTimePreKey);
+    private record SerializableX3dhKeyQuadruplet(ECParameters IdentitySigningKey, ECParameters IdentityAgreementKey, ECParameters SignedPreKey, ECParameters OneTimePreKey);
 
     public PersistentKeyManagementService(ICredentialService credentialService,
         ILogger<PersistentKeyManagementService> logger)
@@ -54,12 +54,13 @@ public class PersistentKeyManagementService : IKeyManagementService
             {
                 _logger.LogInformation("No key file found for {IdentityName}. Creating new keys.", identityName);
                 var ikSigning = ECDsa.Create(ECCurve.NamedCurves.nistP256);
-                var ikAgreement = ECDiffieHellman.Create(ikSigning.ExportParameters(true));
+                var ikAgreement = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
                 var spk = await CreatePreKeyAsync();
                 var opk = await CreatePreKeyAsync();
 
-                var serializableKeys = new SerializableX3dhKeyTriplet(
+                var serializableKeys = new SerializableX3dhKeyQuadruplet(
                     ikSigning.ExportParameters(true),
+                    ikAgreement.ExportParameters(true),
                     spk.ExportParameters(true),
                     opk.ExportParameters(true)
                 );
@@ -103,11 +104,13 @@ public class PersistentKeyManagementService : IKeyManagementService
 
     private X3dhKeys DeserializeKeys(byte[] decryptedBytes)
     {
-        var serializableKeys = JsonSerializer.Deserialize<SerializableX3dhKeyTriplet>(decryptedBytes, _jsonOptions)!;
+        var serializableKeys = JsonSerializer.Deserialize<SerializableX3dhKeyQuadruplet>(decryptedBytes, _jsonOptions)!;
 
-        var ikParams = serializableKeys.IdentityKey;
-        var ikSigning = ECDsa.Create(ikParams);
-        var ikAgreement = ECDiffieHellman.Create(ikSigning.ExportParameters(true));
+        var ikSigning = ECDsa.Create();
+        ikSigning.ImportParameters(serializableKeys.IdentitySigningKey);
+
+        var ikAgreement = ECDiffieHellman.Create();
+        ikAgreement.ImportParameters(serializableKeys.IdentityAgreementKey);
 
         var spk = ECDiffieHellman.Create();
         spk.ImportParameters(serializableKeys.SignedPreKey);

@@ -36,6 +36,124 @@ When modifying this project, adhere to the following architectural rules:
 - **Strongly-Typed IDs**: To enhance type safety and clarify intent, raw `Guid` primitives must not be used for identifiers in public APIs. Instead, wrap them in strongly-typed DDD value objects with intention-revealing names (e.g., `PeerId`, `ConversationId`). This prevents accidental misuse of identifiers and makes the domain language more explicit.
 - **Test-Driven Development**: All new features and refactoring should follow the Red-Green-Refactor cycle of Test-Driven Development (TDD). Write a failing test first (Red), then write the simplest code to make it pass (Green), and finally, refactor the code to improve its design while keeping the tests passing. This ensures that all logic is covered by tests and promotes a high-quality, maintainable codebase.
 
+## Library Usage and Security Considerations
+
+The following examples are for developers who wish to use the `Percolator.Cryptography` and related libraries directly in their own applications. Note that some of this functionality, such as group messaging, is not yet exposed in the `Percolator.Node` command-line tool.
+
+### 1. Secure Group Messaging
+
+The `GroupManager` provides a secure way to manage group chats, including the critical ability to remove members and re-key the group.
+
+```csharp
+// Prerequisite: Alice, Bob, and Carol have established pairwise DoubleRatchetSessions.
+// (aliceToBob, bobToAlice, aliceToCarol, carolToAlice)
+
+// 1. Alice creates a new group, providing her identity key.
+var aliceManager = new GroupManager(aliceIdentity);
+
+// 2. Alice invites Bob and Carol to the group.
+// First, establish secure 1-on-1 sessions with them.
+var sharedSecretBob = aliceIdentity.DeriveKeyMaterial(bobIdentity.PublicKey);
+var aliceToBob = DoubleRatchetSession.AsInitiator(sharedSecretBob, aliceIdentity, bobIdentity.PublicKey.ExportSubjectPublicKeyInfo(), bobRatchet.PublicKey.ExportSubjectPublicKeyInfo());
+
+var sharedSecretCarol = aliceIdentity.DeriveKeyMaterial(carolIdentity.PublicKey);
+var aliceToCarol = DoubleRatchetSession.AsInitiator(sharedSecretCarol, aliceIdentity, carolIdentity.PublicKey.ExportSubjectPublicKeyInfo(), carolRatchet.PublicKey.ExportSubjectPublicKeyInfo());
+
+var bobInvitation = aliceManager.CreateInvitation("bob", aliceToBob);
+var carolInvitation = aliceManager.CreateInvitation("carol", aliceToCarol);
+// These invitations are sent to Bob and Carol over their secure 1-on-1 channels.
+
+// 3. Bob and Carol accept their invitations.
+// They must be provided with Alice's public signing key and public identity key.
+var bobToAlice = DoubleRatchetSession.AsResponder(sharedSecretBob, bobIdentity, aliceIdentity.PublicKey.ExportSubjectPublicKeyInfo(), bobRatchet);
+var bobManager = GroupManager.AcceptInvitation(bobToAlice, bobInvitation, aliceManager.SigningPublicKey!, aliceIdentity);
+
+var carolToAlice = DoubleRatchetSession.AsResponder(sharedSecretCarol, carolIdentity, aliceIdentity.PublicKey.ExportSubjectPublicKeyInfo(), carolRatchet);
+var carolManager = GroupManager.AcceptInvitation(carolToAlice, carolInvitation, aliceManager.SigningPublicKey!, aliceIdentity);
+
+// 4. Alice sends a message to the group.
+var welcomeMessage = aliceManager.GroupSession.Encrypt("Welcome!"u8.ToArray());
+
+// Bob and Carol can decrypt it.
+// They must receive the message from a trusted source that identifies Alice as the sender.
+var bobPlaintext = bobManager.GroupSession.Decrypt(welcomeMessage);
+var carolPlaintext = carolManager.GroupSession.Decrypt(welcomeMessage);
+
+// 5. CRITICAL: Alice removes Carol from the group.
+var rekeyMessages = aliceManager.RemoveMember("carol");
+// A re-key message must now be sent to all remaining members (in this case, just Bob).
+
+// 6. Bob processes the re-key message to update his group session.
+bobManager.ProcessRekeyMessage(bobToAlice, rekeyMessages["bob"]);
+
+// 7. Alice sends a new message to the re-keyed group.
+var messageAfterRemoval = aliceManager.GroupSession.Encrypt("Carol is gone."u8.ToArray());
+
+// 8. Bob can decrypt the new message, but Carol cannot.
+var bobDecryptedAfter = bobManager.GroupSession.Decrypt(messageAfterRemoval);
+
+try
+{
+    // This will fail with a CryptographicException.
+    carolManager.GroupSession.Decrypt(messageAfterRemoval);
+}
+catch (CryptographicException)
+{
+    // Carol failed to decrypt the message as expected.
+}
+```
+
+### 2. State Persistence
+
+Both `DoubleRatchetSession` and `GroupManager` support state serialization so that sessions can be persisted. When persisting this state, you **must** encrypt it at rest using a master key that is securely stored on the device.
+
+```csharp
+using System.Text.Json;
+using System.Security.Cryptography;
+
+// --- DoubleRatchetSession Persistence ---
+// Alice gets her session state.
+var aliceState = aliceToBobSession.GetState();
+
+// She can serialize it to JSON.
+var aliceStateJson = JsonSerializer.Serialize(aliceState);
+
+// TODO: Encrypt aliceStateJson before storing it securely.
+
+// Later, she can restore it.
+// TODO: Decrypt the state JSON before deserializing.
+var loadedAliceState = JsonSerializer.Deserialize<DoubleRatchetSession.DoubleRatchetSessionState>(aliceStateJson)!;
+// Note: The long-term identity key is NOT serialized and must be provided again.
+var loadedAliceSession = new DoubleRatchetSession(loadedAliceState, aliceIdentity);
+
+
+// --- GroupManager Persistence ---
+// The library provides built-in authenticated encryption for state persistence.
+// You must provide a master key, which you should derive using a secure KDF
+// like Argon2 or PBKDF2 from a user password or other secret.
+var masterKey = RandomNumberGenerator.GetBytes(32); // Example key
+
+// Alice saves her group manager state. The result is encrypted.
+var encryptedState = aliceManager.SaveState(masterKey);
+
+// The encrypted state can be stored safely.
+
+// Later, she can restore it using the same master key and her identity key.
+var loadedGroupManager = GroupManager.LoadState(encryptedState, masterKey, aliceIdentity);
+```
+
+### Important Security Considerations for Library Developers
+
+#### Sender Authentication (Signing Messages)
+
+**Critical:** The `SenderKeySession` and `GroupManager` components are responsible for message *confidentiality* (encryption) in a group setting, but they do **not** provide sender *authentication* (signing). The original implementation included a flawed signing mechanism where any group member could forge messages from any other member. This has been removed.
+
+It is the developer's responsibility to implement sender authentication at a higher protocol layer. The recommended approach is to take the `SenderKeyMessage` object, serialize it, and then sign the serialized data with the sender's unique, long-term identity key (e.g., using `ECDsa.SignData`). The recipient must then verify this signature before passing the `SenderKeyMessage` to the `Decrypt` method.
+
+#### `OldGroupId` for Re-Key Messages
+
+A `GroupControlMessage` for re-keying now includes an `OldGroupId`. This ensures that a re-key message is cryptographically bound to the specific group it came from, preventing a malicious actor from tricking a user into applying a re-key message from one group to another, which could otherwise lead to state confusion and a denial-of-service attack.
+
 ## High-Level Concepts
 
 The security of the chat application is built upon several key cryptographic concepts implemented in this library:
@@ -78,103 +196,6 @@ The security of the chat application is built upon several key cryptographic con
 *   `PreKeyBundle`: A data structure representing a user's public keys needed for the X3DH handshake.
 *   `RatchetMessage`: A data structure for transporting the ciphertext and the sender's ephemeral public key.
 *   `SenderKeySession`: Manages the state for a secure group conversation from the perspective of a single member.
-
-## Basic Usage Example
-
-This example demonstrates how to establish and use a `DoubleRatchetSession` after two parties have already derived a shared secret using a key agreement protocol like X3DH.
-
-```csharp
-using System;
-using System.Security.Cryptography;
-using System.Text;
-using Pecolator.Cryptography; // Use the namespace from your project
-
-// 1. Setup: Pre-computation and shared secret
-// In a real application, identity keys are long-term and stored securely.
-// The sharedSecret would be the result of an X3DH handshake.
-using var aliceIdentityKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-using var bobIdentityKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-byte[] sharedSecret = new byte[32]; // Placeholder for X3DH result
-RandomNumberGenerator.Fill(sharedSecret);
-
-// 2. Session Initialization
-// Bob, the responder, creates his session first.
-using var bobSession = new DoubleRatchetSession(sharedSecret, bobIdentityKey, SessionRole.Responder);
-
-// Alice, the initiator, needs Bob's initial ratchet public key to start the session.
-// This key would typically be retrieved from a server as part of Bob's pre-key bundle.
-byte[] bobRatchetPublicKey = bobSession.RatchetPublicKey;
-using var aliceSession = new DoubleRatchetSession(sharedSecret, aliceIdentityKey, SessionRole.Initiator, bobRatchetPublicKey);
-
-Console.WriteLine("Sessions initialized successfully.");
-
-// 3. Alice sends the first message to Bob
-string originalMessageFromAlice = "Hello Bob!";
-RatchetMessage messageToBob = aliceSession.Encrypt(Encoding.UTF8.GetBytes(originalMessageFromAlice));
-
-Console.WriteLine($"Alice sends: '{originalMessageFromAlice}'");
-
-// 4. Bob decrypts the message from Alice
-byte[] decryptedBytesFromAlice = bobSession.Decrypt(messageToBob);
-string decryptedMessageForBob = Encoding.UTF8.GetString(decryptedBytesFromAlice);
-
-Console.WriteLine($"Bob decrypts: '{decryptedMessageForBob}'");
-if (originalMessageFromAlice == decryptedMessageForBob)
-{
-    Console.WriteLine("SUCCESS: Message decrypted correctly!");
-}
-
-// 5. Bob replies to Alice
-string originalMessageFromBob = "Hello Alice, message received!";
-RatchetMessage messageToAlice = bobSession.Encrypt(Encoding.UTF8.GetBytes(originalMessageFromBob));
-
-Console.WriteLine($"Bob replies: '{originalMessageFromBob}'");
-
-// 6. Alice decrypts the reply from Bob
-byte[] decryptedBytesFromBob = aliceSession.Decrypt(messageToAlice);
-string decryptedMessageForAlice = Encoding.UTF8.GetString(decryptedBytesFromBob);
-
-Console.WriteLine($"Alice decrypts: '{decryptedMessageForAlice}'");
-if (originalMessageFromBob == decryptedMessageForAlice)
-{
-    Console.WriteLine("SUCCESS: Reply decrypted correctly!");
-}
-
-// The 'using' statements ensure that the session objects and their ephemeral keys are properly disposed.
-```
-
-## SenderKeySession
-
-`SenderKeySession` implements the core cryptographic logic for the Sender Keys protocol, enabling secure group messaging. Each member of a group maintains their own `SenderKeySession` instance, initialized with a shared group key.
-
-### Security Properties
-
--   **Confidentiality**: Messages are encrypted using AES-256-GCM.
--   **Integrity and Authenticity**: Each message is signed with ECDSA P-256, verifying the sender's identity and protecting against tampering.
--   **Forward Secrecy**: The session uses a symmetric-key ratchet. If a member's session key is compromised, an attacker cannot decrypt previous messages sent to the group.
--   **Out-of-Order Message Handling**: The session can handle and decrypt messages that arrive out of sequence, up to a configurable limit.
-
-### Usage Pattern
-
-A trusted group creator generates a random 32-byte session key and securely distributes it to all group members (e.g., over an existing Double Ratchet channel).
-
-```csharp
-// 1. All members initialize their session with the same shared key.
-var sharedGroupKey = RandomNumberGenerator.GetBytes(32);
-
-using var aliceSession = new SenderKeySession(sharedGroupKey);
-using var bobSession = new SenderKeySession(sharedGroupKey);
-
-// 2. Alice sends a message to the group.
-var plaintext = Encoding.UTF8.GetBytes("Hello, group!");
-var messageFromAlice = aliceSession.Encrypt(plaintext);
-
-// 3. Bob receives and decrypts the message.
-// In a real application, Bob would receive messageFromAlice over the network.
-var decryptedPlaintext = bobSession.Decrypt(messageFromAlice);
-
-Console.WriteLine(Encoding.UTF8.GetString(decryptedPlaintext)); // "Hello, group!"
-```
 
 ## Guidance for AI Assistants
 

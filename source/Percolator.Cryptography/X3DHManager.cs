@@ -27,17 +27,21 @@ public class X3DHManager : IX3DHManager
         using var remoteSignedPreKey = ECDiffieHellman.Create();
         remoteSignedPreKey.ImportSubjectPublicKeyInfo(remoteBundle.SignedPreKey, out _);
 
-        using var remoteOneTimePreKey = ECDiffieHellman.Create();
-        remoteOneTimePreKey.ImportSubjectPublicKeyInfo(remoteBundle.OneTimePreKey, out _);
-
         // DH1 = DH(IK_A, SPK_B)
         var dh1 = identityAgreementKey.DeriveKeyMaterial(remoteSignedPreKey.PublicKey);
         // DH2 = DH(EK_A, IK_B)
         var dh2 = ephemeralKeyPair.DeriveKeyMaterial(remoteIdentityKeyECDH.PublicKey);
         // DH3 = DH(EK_A, SPK_B)
         var dh3 = ephemeralKeyPair.DeriveKeyMaterial(remoteSignedPreKey.PublicKey);
-        // DH4 = DH(EK_A, OPK_B)
-        var dh4 = ephemeralKeyPair.DeriveKeyMaterial(remoteOneTimePreKey.PublicKey);
+
+        var dh4 = Array.Empty<byte>();
+        if (remoteBundle.OneTimePreKey.Length > 0)
+        {
+            using var remoteOneTimePreKey = ECDiffieHellman.Create();
+            remoteOneTimePreKey.ImportSubjectPublicKeyInfo(remoteBundle.OneTimePreKey, out _);
+            // DH4 = DH(EK_A, OPK_B)
+            dh4 = ephemeralKeyPair.DeriveKeyMaterial(remoteOneTimePreKey.PublicKey);
+        }
 
         var combined = new byte[dh1.Length + dh2.Length + dh3.Length + dh4.Length];
         Buffer.BlockCopy(dh1, 0, combined, 0, dh1.Length);
@@ -52,7 +56,7 @@ public class X3DHManager : IX3DHManager
         return new HandshakeInitiationResult(sharedSecret, ephemeralPublicKey);
     }
 
-    public SharedSecret RespondToHandshake(byte[] remoteIdentityKeyBytes, byte[] remoteEphemeralKeyBytes, ECDsa identitySigningKey, ECDiffieHellman identityAgreementKey, ECDiffieHellman signedPreKey, ECDiffieHellman oneTimePreKey)
+    public SharedSecret RespondToHandshake(byte[] remoteIdentityKeyBytes, byte[] remoteEphemeralKeyBytes, ECDsa identitySigningKey, ECDiffieHellman identityAgreementKey, ECDiffieHellman signedPreKey, ECDiffieHellman? oneTimePreKey)
     {
         using var remoteIdentityKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         remoteIdentityKey.ImportSubjectPublicKeyInfo(remoteIdentityKeyBytes, out _);
@@ -66,14 +70,22 @@ public class X3DHManager : IX3DHManager
         var dh2 = identityAgreementKey.DeriveKeyMaterial(remoteEphemeralKey.PublicKey);
         // DH3 = DH(SPK_B, EK_A)
         var dh3 = signedPreKey.DeriveKeyMaterial(remoteEphemeralKey.PublicKey);
-        // DH4 = DH(OPK_B, EK_A)
-        var dh4 = oneTimePreKey.DeriveKeyMaterial(remoteEphemeralKey.PublicKey);
+        
+        var dh4 = Array.Empty<byte>();
+        if (oneTimePreKey is not null)
+        {
+            // DH4 = DH(OPK_B, EK_A)
+            dh4 = oneTimePreKey.DeriveKeyMaterial(remoteEphemeralKey.PublicKey);
+        }
 
         var combined = new byte[dh1.Length + dh2.Length + dh3.Length + dh4.Length];
         Buffer.BlockCopy(dh1, 0, combined, 0, dh1.Length);
         Buffer.BlockCopy(dh2, 0, combined, dh1.Length, dh2.Length);
         Buffer.BlockCopy(dh3, 0, combined, dh1.Length + dh2.Length, dh3.Length);
-        Buffer.BlockCopy(dh4, 0, combined, dh1.Length + dh2.Length + dh3.Length, dh4.Length);
+        if (dh4.Length > 0)
+        {
+            Buffer.BlockCopy(dh4, 0, combined, dh1.Length + dh2.Length + dh3.Length, dh4.Length);
+        }
 
         var sharedSecretBytes = HKDF.DeriveKey(HashAlgorithmName.SHA256, combined, KeySize, salt: new byte[KeySize], info: "Percolator-X3DH-v1"u8.ToArray());
         return new SharedSecret(sharedSecretBytes);
@@ -81,9 +93,7 @@ public class X3DHManager : IX3DHManager
 
     public byte[] SignPreKey(ECDsa identitySigningKey, byte[] signedPreKey)
     {
-        var parameters = identitySigningKey.ExportParameters(true);
-        using var ecdsa = ECDsa.Create(parameters);
-        return ecdsa.SignData(signedPreKey, HashAlgorithmName.SHA256, DSASignatureFormat.IeeeP1363FixedFieldConcatenation);
+        return identitySigningKey.SignData(signedPreKey, HashAlgorithmName.SHA256, DSASignatureFormat.IeeeP1363FixedFieldConcatenation);
     }
 
     public bool VerifySignature(byte[] identityKey, byte[] signedPreKey, byte[] signature)
