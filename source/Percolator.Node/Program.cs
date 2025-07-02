@@ -43,7 +43,7 @@ static void ConfigureServices(IServiceCollection services, IConfiguration config
         });
     });
 
-    services.AddSingleton(configuration);
+    services.AddSingleton<IConfiguration>(configuration);
 
     // Register all services from the Application layer via the single extension method
     services.AddApplicationServices(configuration);

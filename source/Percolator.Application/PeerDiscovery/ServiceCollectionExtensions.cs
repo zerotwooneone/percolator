@@ -8,7 +8,7 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddPeerDiscoveryServices(this IServiceCollection services)
     {
         // Register the handler for discovered peers
-        services.AddSingleton<IPeerDiscoveryHandler, PeerDiscoveryHandler>();
+        services.AddSingleton<IPeerConnectionManager, PeerConnectionManager>();
         return services;
     }
 }
