@@ -1,53 +1,79 @@
 # Percolator.Network
 
-This library contains the networking logic for the Percolator file-sharing system. It is responsible for peer discovery, session management, and implementing the data transfer protocols.
+This library contains the networking logic for the Percolator system. It is responsible for discovering peers on the local network using a secure, authenticated broadcast protocol.
 
 ## Architecture
 
-The networking layer uses a hybrid model to balance efficiency and reliability for both local and internet-based peers:
-
-- **Peer Discovery**:
-  - **LAN**: On a local network, peers discover each other using UDP broadcast/multicast. This allows for zero-configuration discovery.
-  - **Internet**: For peers across the internet, a DHT-based peer discovery mechanism is used.
+The networking layer uses UDP broadcasts for zero-configuration peer discovery on a Local Area Network (LAN). All communication is authenticated using cryptographic signatures to ensure that only trusted nodes can participate.
 
 ## Core Responsibilities
 
-- **DHT-based Peer Discovery**: Manages a simple, small-scale Distributed Hash Table (DHT) for discovering peers across the internet. The DHT is designed for networks of approximately 100 nodes or less, with a maximum of 3 hops.
-- **Routing Table Management**: Maintains the state of the local DHT routing table. Nodes in the DHT are identified by the unique `Guid` from their `Percolator.Identity`.
-- **Network Update Generation**: When its view of the network changes, this domain generates opaque "network update" messages. The actual transport of these messages is handled by the `Application` layer.
-- **Defines Communication Interfaces**: Provides interfaces (e.g., `INetworkUpdatePublisher`) that the `Application` layer implements to distribute the network updates over a secure channel.
-- **Data Transfer**: Implements the gRPC protocols for direct peer-to-peer bulk data transfer (e.g., for files).
+-   **Secure Peer Discovery**: Manages the discovery of peers on the local network. It broadcasts the node's presence and listens for broadcasts from other peers.
+-   **Authenticated Communication**: Ensures that all discovery messages are cryptographically signed and verified, preventing spoofing and unauthorized participation.
+-   **Peer Lifecycle Management**: Tracks discovered peers, updates their status, and removes them when they expire.
+-   **Defines Communication Interfaces**: Provides interfaces (e.g., `IPeerDiscoveryHandler`) that the `Application` layer implements to react to network events, such as a new peer being discovered or an existing one expiring.
 
-## Architectural Integration
+## Complex Topics: The Secure Peer Discovery Protocol
 
-While this domain manages the logic of the DHT, it is not responsible for the transport of its own update messages. This is a critical separation of concerns:
+This section provides a detailed breakdown of the most critical component in this library: the `PeerDiscoveryService`. It implements a secure protocol to ensure that all discovered peers are authentic.
 
-1.  The `Network` domain generates an opaque update payload.
-2.  The `Application` layer takes this payload and sends it as a secure, non-text message using the Double Ratchet session established by the `Cryptography` and `Messaging` domains.
-3.  The `Application` layer also handles user-defined policies, such as ignoring updates from certain peers or respecting "back-off" requests, keeping the `Network` domain free of business logic.
+### Protocol Overview
 
-## Design Goals
+The service works by broadcasting a `DiscoveryBroadcast` message over UDP to the local network. This message is carefully constructed to be self-authenticating.
 
-- **IPv6 First**: The networking stack is designed to be IPv6-first to ensure future compatibility. It will include a fallback to IPv4 to maintain support for older networks.
+**Message Structure (`DiscoveryBroadcast`):**
 
-### Error Handling and Security
+1.  **`PublicKey`**: The sender's public *signing* key. This is sent in the clear and serves as the identifier for the sender.
+2.  **`Payload`**: A byte array containing the core discovery information (e.g., the sender's gRPC port and a timestamp). This payload is what gets signed.
+3.  **`Signature`**: The cryptographic signature of the `Payload`, created using the private key corresponding to the `PublicKey`.
 
-This domain adheres to a strict "fail forward" security policy. Methods must not log warnings or errors for security-sensitive violations (e.g., invalid cryptographic signatures, malformed packets). Instead, they **must** throw an appropriate exception, typically a `System.Security.SecurityException`.
+### The Broadcast-and-Sign Process
 
-This ensures that security violations are never ignored and are always propagated up to the consuming layer, preventing the system from continuing in an insecure or indeterminate state. The responsibility for handling these exceptions and preventing them through input validation lies with the `Percolator.Application` layer.
+When a node broadcasts its presence (`BroadcastPresenceAsync`):
 
-## AI Assistant Guidance
+1.  It creates a `DiscoveryPayload` containing its gRPC listening port and the current UTC timestamp.
+2.  It serializes this payload to a byte array.
+3.  It signs the serialized payload bytes using its long-term identity signing key.
+4.  It constructs the final `DiscoveryBroadcast` message, including its public key, the signature, and the payload.
+5.  This message is then broadcast to the LAN.
 
-1.  **Domain Independence**: This is a domain library. It **must not** contain direct references to other domain libraries (e.g., `Percolator.Cryptography`, `Percolator.Identity`). All cross-domain interactions must be handled through interfaces defined within this project. The `Percolator.Application` project is responsible for implementing these interfaces and orchestrating the interactions.
-2.  **Fail Forward**: As detailed in the "Error Handling and Security" section, this project must not contain any logging for security-sensitive violations. It must 'fail forward' by throwing an appropriate exception (e.g., `SecurityException`) to be handled by the application layer.
-3.  **Principle of Verification: Verify Before Acting**: To avoid hallucination, always verify the existence, name, and location of code artifacts (classes, methods, interfaces) using tools like `grep_search` and `list_dir` before attempting to use or modify them. Actions must be based on evidence from the codebase, not assumptions from training data.
-    *   **Investigate Errors Systematically**: A build error is a clue, not a conclusion. When an error like "type not found" occurs, do not invent the type. Instead, use tools to search the existing codebase for the correct type that fulfills the required role.
-    *   **Use Precise, Definition-Oriented Searches**: When searching for a type, search for its definition (e.g., `grep "class MyClass"`), not just its name, to avoid ambiguity.
-    *   **Work from Broad to Specific**: When lost, zoom out. First, understand the solution structure by listing projects. Then, list files within a project. Finally, inspect specific files to understand their contents and dependencies.
-    *   **Never Create Code to Justify a Hallucination**: If an assumption about a class name proves false, the solution is *never* to create an empty file with that name just to make a build pass. This compounds the error. The correct action is to discard the assumption and find the *actual* class that should be used.
+### The Listen-and-Verify Process
 
-## Development Guidelines
+This is the most security-critical part of the protocol (`ListenForPeersAsync`):
 
-- **No Raw Byte Arrays**: Domain libraries should not send or receive raw byte arrays in or out of the domain. These should be wrapped in DDD value types with clear names so that it is more clear when passing parameters or returning results.
-- **Strongly-Typed IDs**: To enhance type safety and clarify intent, raw `Guid` primitives must not be used for identifiers in public APIs. Instead, wrap them in strongly-typed DDD value objects with intention-revealing names (e.g., `PeerId`, `ConversationId`). This prevents accidental misuse of identifiers and makes the domain language more explicit.
-- **Test-Driven Development**: All new features and refactoring should follow the Red-Green-Refactor cycle of Test-Driven Development (TDD). Write a failing test first (Red), then write the simplest code to make it pass (Green), and finally, refactor the code to improve its design while keeping the tests passing. This ensures that all logic is covered by tests and promotes a high-quality, maintainable codebase.
+1.  **Receive Broadcast**: A node receives a `DiscoveryBroadcast` UDP packet.
+2.  **Verify Signature**: It takes the `Payload` bytes, the `Signature`, and the `PublicKey` from the message. It then uses the public key to verify that the signature is valid for the given payload. **If the signature is invalid, the packet is immediately discarded.** This is the primary defense against unauthorized nodes.
+3.  **Verify Payload Integrity (Anti-Spoofing)**: This is a crucial second verification step. The `DiscoveryPayload` *inside* the signed payload also contains a copy of the sender's public key. The service deserializes the payload and verifies that the public key within it is identical to the public key from the outer `DiscoveryBroadcast` message. This prevents a replay or spoofing attack where a malicious actor could take a valid signed payload from one user and wrap it with their own public key.
+4.  **Process Peer**: Only if both verification steps pass is the peer considered authentic. The service then adds the peer to its list of known peers and notifies the application layer.
+
+```csharp
+// Simplified example of the verification logic in ListenForPeersAsync
+
+// 1. Parse the incoming broadcast
+var broadcast = DiscoveryBroadcast.Parser.ParseFrom(result.Buffer);
+
+// 2. Wrap primitives in value types for verification
+var payload = new Payload(broadcast.Payload.ToByteArray());
+var signature = new Signature(broadcast.Signature.ToByteArray());
+var publicKey = new PublicKey(broadcast.PublicKey.ToByteArray());
+
+// 3. Verify the signature (CRITICAL STEP 1)
+if (!_signingService.Verify(payload, signature, publicKey))
+{
+    // Discard the packet
+    throw new SecurityException("Invalid signature.");
+}
+
+// 4. Deserialize payload and verify the inner public key (CRITICAL STEP 2)
+var protoPayload = DiscoveryPayload.Parser.ParseFrom(payload.Value);
+if (!publicKey.Value.SequenceEqual(protoPayload.PublicKey.ToByteArray()))
+{
+    // Discard the packet
+    throw new SecurityException("Public key mismatch (spoofing attempt).");
+}
+
+// 5. If both checks pass, the peer is authentic.
+// ... process the peer ...
+```
+
+This two-step verification process ensures that the peer discovery mechanism is resilient against unauthorized access and tampering, forming a secure foundation for the rest of the application's network interactions.
