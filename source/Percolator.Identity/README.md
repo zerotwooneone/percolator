@@ -1,54 +1,90 @@
 # Percolator.Identity
 
-This project is a domain library responsible for managing node identities within the Percolator network. It handles the creation, storage, and retrieval of cryptographic identities, primarily using X.509 certificates. This ensures that each node can be uniquely and securely identified.
+This project is a domain library responsible for managing node identities within the Percolator network. It handles the creation, secure storage, and retrieval of cryptographic identities based on a modern multi-key model.
 
 ## Core Responsibilities
 
--   **Manages Host Identities**: Creates, stores, and retrieves multiple cryptographic `Identity` records for the host application's user, each identifiable by a unique name and an optional nickname. Each `Identity` is identified by a stable, unique `Guid`, which serves as the primary key for associating all user-related data across different domains.
--   **Manages Peer Identities**: Stores and retrieves cryptographic identities of peers within the Percolator network, enabling secure communication and identification.
--   **Source of Truth for Keys**: Acts as the authoritative source for a user's long-lived cryptographic keys, including signing keys, agreement keys, and their associated X.509 certificates.
--   **Provides Key Material**: Exposes interfaces that allow the `Application` layer to retrieve the necessary key material for other domains. For example, it provides the public key bundle required by the `Cryptography` domain to initiate a secure session, but it is not involved in the session protocol itself.
+-   **Manages Host Identities**: Creates, stores, and retrieves the host's cryptographic identity, which is composed of several distinct keys used for signing and key agreement.
+-   **Secure Key Storage**: Encrypts all sensitive key material at rest using platform-native data protection APIs (Windows DPAPI).
+-   **Source of Truth for Keys**: Acts as the authoritative source for a user's long-lived cryptographic keys.
+-   **Provides Key Material**: Exposes interfaces that allow the `Application` layer to retrieve the necessary key material for other domains, such as the public key bundle required by the `Cryptography` domain to perform an X3DH handshake.
 
-### Error Handling and Security
+## Complex Topics & Security Deep Dive
 
-This domain adheres to a strict "fail forward" security policy. Methods must not log warnings or errors for security-sensitive violations (e.g., failure to create a certificate, inability to access storage). Instead, they **must** throw an appropriate exception, typically a `System.Security.SecurityException`.
+This section covers the most complex and security-critical aspects of the identity system. A thorough understanding of these topics is essential for any developer working on this part of the codebase.
 
-This ensures that security violations are never ignored and are always propagated up to the consuming layer, preventing the system from continuing in an insecure or indeterminate state. The responsibility for handling these exceptions and preventing them through input validation lies with the `Percolator.Application` layer.
+### 1. The Four-Key Identity Model
 
-## AI Assistant Guidance
+Percolator has moved away from a monolithic certificate-based identity to a more flexible and secure multi-key model. Each identity managed by `PersistentKeyManagementService` consists of four distinct keys, each with a single, dedicated purpose:
 
-When modifying this project, adhere to the following architectural rules:
+1.  **Identity Signing Key** (`ECDsa`): A long-term key used exclusively for signing data, such as pre-keys, to prove ownership and prevent tampering. This key establishes the root of trust for an identity.
+2.  **Identity Agreement Key** (`ECDiffieHellman`): A long-term key used exclusively for performing Elliptic Curve Diffie-Hellman (ECDH) key agreements during the X3DH handshake.
+3.  **Signed Pre-Key** (`ECDiffieHellman`): A medium-term key that is signed by the Identity Signing Key. It is used as part of the X3DH protocol.
+4.  **One-Time Pre-Key** (`ECDiffieHellman`): A single-use key used in the X3DH handshake to help provide forward secrecy.
 
-1.  **Domain Independence**: This is a domain library. It **must not** contain direct references to other domain libraries (e.g., `Percolator.Cryptography`, `Percolator.Network`).
-2.  **Interface-Based Dependencies**: If this domain requires functionality from another domain, it must define an interface (e.g., `ICertificateOperations`) that declares its needs. The `Percolator.Application` project is responsible for implementing this interface and orchestrating the interaction between domains.
-3.  **Fail Forward**: Do not add logging for security-sensitive errors or validation failures. The established pattern is to throw an exception (e.g., `SecurityException`, `CryptographicException`) to ensure failures are handled by the application layer.
-*   **Principle of Verification: Verify Before Acting**: To avoid hallucination, always verify the existence, name, and location of code artifacts (classes, methods, interfaces) using tools like `grep_search` and `list_dir` before attempting to use or modify them. Actions must be based on evidence from the codebase, not assumptions from training data.
-    *   **Investigate Errors Systematically**: A build error is a clue, not a conclusion. When an error like "type not found" occurs, do not invent the type. Instead, use tools to search the existing codebase for the correct type that fulfills the required role.
-    *   **Use Precise, Definition-Oriented Searches**: When searching for a type, search for its definition (e.g., `grep "class MyClass"`), not just its name, to avoid ambiguity.
-    *   **Work from Broad to Specific**: When lost, zoom out. First, understand the solution structure by listing projects. Then, list files within a project. Finally, inspect specific files to understand their contents and dependencies.
-    *   **Never Create Code to Justify a Hallucination**: If an assumption about a class name proves false, the solution is *never* to create an empty file with that name just to make a build pass. This compounds the error. The correct action is to discard the assumption and find the *actual* class that should be used.
+**Security Rationale**: Separating the signing and agreement keys is a critical security principle. If a single key were used for both, a vulnerability in the key agreement protocol could potentially be exploited to forge signatures, leading to a catastrophic failure of the identity system. This four-key model ensures that a compromise in one area does not spill over into another.
 
-## Domain-Driven Design
+### 2. Secure Key Persistence
 
-This library uses DDD value objects to enforce type safety and clarify intent at the domain boundaries.
+Storing cryptographic keys securely is paramount. This library uses a two-layer approach to protect keys at rest, orchestrated by `PersistentKeyManagementService` and `CredentialService`.
 
--   `Password`: Wraps a `string` to ensure passwords are not accidentally logged or mishandled as primitive types.
--   `Certificate`: Wraps an `X509Certificate2` object. The `IIdentityService.LoadIdentityAsync` method returns this object to provide the application layer with the necessary certificate for operations like signing, without exposing the raw PFX bytes or the password it was loaded with.
--   `Identity`: Represents the complete, stored identity, including its name, PFX data, and thumbprint.
+-   **Layer 1: In-Memory Protection**: The `CredentialService` generates a random, high-entropy password when an identity is first created. This password is held in memory only as long as necessary and is used to password-protect the serialized key data.
+-   **Layer 2: Platform-Native Encryption**: The password itself is then encrypted using the Windows Data Protection API (`ProtectedData.Protect`). This binds the encryption to the current user account (and optionally the machine), meaning other users on the same machine cannot access the key material.
 
-### API Design
+This process ensures that even if an attacker gains access to the raw, stored files, they cannot decrypt the keys without also compromising the user's Windows account.
 
-The primary entry point to this domain is `IIdentityService`. Its methods, such as `CreateIdentityAsync` and `LoadIdentityAsync`, intentionally do not require a password parameter. Password management is fully encapsulated within the domain and handled by the `ICredentialService`, which securely stores and retrieves the necessary credentials using the OS's Data Protection API (DPAPI). This design simplifies the public API and strengthens security by preventing password mishandling in the application layer.
+```csharp
+// Simplified example of the key persistence flow
 
-## AI Development Guidelines
+// 1. In PersistentKeyManagementService, a new identity's keys are generated.
+var x3dhKeys = new X3dhKeys(
+    identitySigningKey: signingKey.ExportParameters(true),
+    identityAgreementKey: agreementKey.ExportParameters(true),
+    signedPreKey: signedPreKey.ExportParameters(true),
+    oneTimePreKey: oneTimePreKey.ExportParameters(true)
+);
 
-- **No Raw Byte Arrays**: Domain libraries should not send or receive raw byte arrays in or out of the domain. These should be wrapped in DDD value types with clear names so that it is more clear when passing parameters or returning results.
+// 2. The keys are serialized to a JSON string.
+// WARNING: This JSON contains private key material. See next section.
+var serializedKeys = JsonSerializer.Serialize(x3dhKeys, _jsonSerializerOptions);
 
-### Development Guidelines
+// 3. The JSON string is encrypted by CredentialService, which uses DPAPI.
+// The service generates a password, uses it to encrypt the data, and then
+// encrypts the password itself with DPAPI.
+var protectedData = await _credentialService.ProtectAsync(Encoding.UTF8.GetBytes(serializedKeys));
 
-- **Strongly-Typed IDs**: To enhance type safety and clarify intent, raw `Guid` primitives must not be used for identifiers in public APIs. Instead, wrap them in strongly-typed DDD value objects with intention-revealing names (e.g., `PeerId`, `ConversationId`). This prevents accidental misuse of identifiers and makes the domain language more explicit.
-- **Test-Driven Development**: All new features and refactoring should follow the Red-Green-Refactor cycle of Test-Driven Development (TDD). Write a failing test first (Red), then write the simplest code to make it pass (Green), and finally, refactor the code to improve its design while keeping the tests passing. This ensures that all logic is covered by tests and promotes a high-quality, maintainable codebase.
+// 4. The resulting encrypted blob is written to disk.
+await File.WriteAllBytesAsync(filePath, protectedData);
+```
 
-## Future Considerations
+### 3. DANGER: Private Key Serialization (`ECParametersJsonConverter`)
 
-*   **Restricted Identity Creation**: Currently, any service with access to `IIdentityService` can create an arbitrary number of identities. In a production environment, it may be necessary to introduce access controls or policies around identity creation. For now, this responsibility is delegated to the `Percolator.Application` layer, which should be the sole orchestrator of identity management.
+**This is the most important security consideration in this project.**
+
+The `ECParametersJsonConverter` is designed to serialize the full `ECParameters` object, which **includes the private key component (`D`)**. This is necessary to persist the keys for local use, allowing the application to be restarted without losing its identity.
+
+However, this presents a significant security risk if the converter is misused. **You must NEVER use this converter or the `JsonSerializerOptions` that contain it to serialize keys for any other purpose**, such as:
+
+-   Logging
+-   Sending over a network
+-   Displaying in a UI
+
+Exposing the serialized JSON string would leak the private key in plaintext, completely compromising the identity.
+
+**Example of the dangerous serialized output:**
+
+```json
+{
+  "IdentitySigningKey": {
+    "Curve": "nistP256",
+    "D": "PRIVATE_KEY_BYTES_HERE", // <-- PRIVATE KEY LEAK
+    "Q": {
+      "X": "...",
+      "Y": "..."
+    }
+  },
+  // ... other keys
+}
+```
+
+All code handling key serialization must be treated as highly sensitive and subject to strict code review. The only acceptable use case is within the `PersistentKeyManagementService` for writing to and reading from the encrypted local store.
