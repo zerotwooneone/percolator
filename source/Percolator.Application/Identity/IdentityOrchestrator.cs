@@ -4,6 +4,12 @@ using Microsoft.Extensions.Options;
 using Percolator.Application.Configuration;
 using Percolator.Identity;
 using Percolator.Application.Security;
+using System.Threading.Tasks;
+using System.Threading;
+using System;
+using Percolator.Identity.Model;
+using System.Security.Cryptography;
+using Percolator.Network;
 
 namespace Percolator.Application.Identity;
 
@@ -69,17 +75,20 @@ public class IdentityOrchestrator : IIdentityOrchestrator, IHostedService
             _logger.LogInformation("Found existing identity {IdentityName}", identityName);
         }
 
-        var certificate = await _identityService.LoadIdentityAsync(identityName, cancellationToken);
         var keys = await _keyManagementService.GetOrCreateKeysAsync(identityName);
 
-        _activeIdentityContext.IdentityName = identity.Name;
-        _activeIdentityContext.Nickname = identity.Nickname;
-        _activeIdentityContext.Certificate = certificate.Value;
-        // Note: PublicKeys and KeyThumbprints from X3DH are not set here as they are for a different protocol.
+        _activeIdentityContext.Identity = identity;
+        _activeIdentityContext.Keys = keys;
 
-        _trustedPeerStore.Add(identity.Thumbprint);
+        var publicKeyBytes = keys.IdentitySigningKey.ExportSubjectPublicKeyInfo();
+        var publicKey = new PublicKey(publicKeyBytes);
+        var hash = SHA256.HashData(publicKey.Value);
+        var publicKeyHash = new PublicKeyHash(hash);
 
-        _logger.LogInformation("Successfully loaded identity {IdentityName} with thumbprint {Thumbprint}", identityName, identity.Thumbprint);
+        //TODO: Update trusted peer store to use public key hash
+        //_trustedPeerStore.Add(publicKeyHash);
+
+        _logger.LogInformation("Successfully loaded identity {IdentityName} with public key hash {PublicKeyHash}", identityName, publicKeyHash);
     }
 
     public Task StopAsync(CancellationToken cancellationToken)

@@ -13,10 +13,7 @@ public static class ServiceCollectionExtensions
         var config = new PeerDiscoveryConfig();
         configuration.GetSection("PeerDiscovery").Bind(config);
         services.AddSingleton<IPeerDiscoveryConfig>(config);
-
-        // Register concrete implementations from the Application layer
-        services.AddSingleton<IIdentityProvider, IdentityProvider>();
-        services.AddSingleton<IDiscoverySignatureProvider, DiscoverySignatureProvider>();
+        services.AddSingleton<ISigningService, SigningService>();
 
         // Register the core service from the Network domain library
         services.AddSingleton<IPeerDiscoveryService, PeerDiscoveryService>();

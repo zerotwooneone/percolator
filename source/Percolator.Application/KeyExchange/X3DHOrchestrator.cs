@@ -1,5 +1,4 @@
 using System.Security.Cryptography;
-using System.Security.Cryptography.X509Certificates;
 using Google.Protobuf;
 using Percolator.Application.Identity;
 using Percolator.Cryptography;
@@ -24,16 +23,19 @@ public class X3DHOrchestrator
     public OrchestratorInitiationResult InitiateHandshake(SessionPeerId remotePeerId, ContractsPreKeyBundle remotePreKeyBundle)
     {
         // Get local identity keys and validate
-        if (_activeIdentityContext.Certificate?.GetECDsaPrivateKey() is not { } identitySigningKey ||
-            _activeIdentityContext.X3dhKeys?.IdentityAgreementKey is not { } identityAgreementKey ||
-            _activeIdentityContext.X3dhKeys?.SignedPreKey is not { } signedPreKey ||
-            _activeIdentityContext.X3dhKeys?.OneTimePreKey is not { } oneTimePreKey)
+        if (_activeIdentityContext.Keys is not
+            {
+                IdentitySigningKey: var identitySigningKey,
+                IdentityAgreementKey: var identityAgreementKey,
+                SignedPreKey: var signedPreKey,
+                OneTimePreKey: var oneTimePreKey
+            })
         {
             throw new InvalidOperationException("Active identity is not fully initialized for X3DH handshake.");
         }
 
         // Translate contract DTO to cryptography domain object
-        var cryptoBundle = new CryptographyPreKeyBundle(
+        var remoteCryptoBundle = new CryptographyPreKeyBundle(
             remotePreKeyBundle.IdentityKey.ToByteArray(),
             remotePreKeyBundle.SignedPreKey.ToByteArray(),
             remotePreKeyBundle.PreKeySignature.ToByteArray(),
@@ -42,7 +44,7 @@ public class X3DHOrchestrator
 
         // Perform X3DH handshake as initiator
         var handshakeResult = _x3DhManager.InitiateHandshake(
-            cryptoBundle,
+            remoteCryptoBundle,
             identitySigningKey,
             identityAgreementKey
         );
@@ -68,10 +70,13 @@ public class X3DHOrchestrator
     public OrchestratorResponseResult ProcessHandshake(SessionPeerId remotePeerId, ContractsPreKeyBundle localPreKeyBundle, byte[] remoteEphemeralPublicKey)
     {
         // Get local identity keys and validate
-        if (_activeIdentityContext.Certificate?.GetECDsaPrivateKey() is not { } identitySigningKey ||
-            _activeIdentityContext.X3dhKeys?.IdentityAgreementKey is not { } identityAgreementKey ||
-            _activeIdentityContext.X3dhKeys?.SignedPreKey is not { } signedPreKey ||
-            _activeIdentityContext.X3dhKeys?.OneTimePreKey is not { } oneTimePreKey)
+        if (_activeIdentityContext.Keys is not
+            {
+                IdentitySigningKey: var identitySigningKey,
+                IdentityAgreementKey: var identityAgreementKey,
+                SignedPreKey: var signedPreKey,
+                OneTimePreKey: var oneTimePreKey
+            })
         {
             throw new InvalidOperationException("Active identity is not fully initialized for X3DH handshake.");
         }

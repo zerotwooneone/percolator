@@ -7,7 +7,8 @@ public static class ServiceCollectionExtensions
 {
     public static IServiceCollection AddCryptographyServices(this IServiceCollection services)
     {
-        services.AddSingleton<X3DHManager>();
+        services.AddSingleton<IX3DHManager,X3DHManager>();
+        
         return services;
     }
 }

@@ -21,14 +21,14 @@ namespace Percolator.Application.PeerDiscovery
 
         public Task HandlePeerDiscoveredAsync(Peer peer)
         {            
-            _logger.LogInformation("Discovered peer {IpAddress}:{Port} with thumbprint {Thumbprint}. Adding to trusted store.", peer.IpAddress, peer.GrpcPort, peer.Thumbprint);
-            _trustedPeerStore.Add(peer.Thumbprint);
+            _logger.LogInformation("Discovered peer {Endpoint} with public key hash {PublicKeyHash}. Adding to trusted store.", peer.GrpcEndpoint, peer.PublicKeyHash);
+            _trustedPeerStore.Add(peer.PublicKeyHash);
             return Task.CompletedTask;
         }
 
         public Task HandlePeerExpiredAsync(Peer peer)
         {
-            _logger.LogInformation("Peer {IpAddress}:{Port} has expired. It will no longer be trusted until rediscovered.", peer.IpAddress, peer.GrpcPort);
+            _logger.LogInformation("Peer {Endpoint} has expired. It will no longer be trusted until rediscovered.", peer.GrpcEndpoint);
             // Note: Current implementation does not remove from the trusted store on expiry.
             // This is a "trust indefinitely" model after first discovery.
             return Task.CompletedTask;

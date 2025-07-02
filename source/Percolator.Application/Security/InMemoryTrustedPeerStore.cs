@@ -1,24 +1,25 @@
 using System.Collections.Concurrent;
+using Percolator.Network;
 
 namespace Percolator.Application.Security
 {
     public class InMemoryTrustedPeerStore : ITrustedPeerStore
     {
-        private readonly ConcurrentDictionary<string, byte> _trustedThumbprints = new(StringComparer.OrdinalIgnoreCase);
+        private readonly ConcurrentDictionary<PublicKeyHash, byte> _trustedHashes = new();
 
         public InMemoryTrustedPeerStore()
         {
             // The responsibility for trusting the local node's certificate is now handled by the IdentityOrchestrator.
         }
 
-        public void Add(string thumbprint)
+        public void Add(PublicKeyHash publicKeyHash)
         {
-            _trustedThumbprints.TryAdd(thumbprint, 0);
+            _trustedHashes.TryAdd(publicKeyHash, 0);
         }
 
-        public bool IsTrusted(string thumbprint)
+        public bool IsTrusted(PublicKeyHash publicKeyHash)
         {
-            return _trustedThumbprints.ContainsKey(thumbprint);
+            return _trustedHashes.ContainsKey(publicKeyHash);
         }
     }
 }

@@ -40,12 +40,12 @@ public class ConversationService : IConversationService
         }
 
         // Create and store new conversation
-        if (_activeIdentityContext.Id is null)
+        if (_activeIdentityContext.Identity is null)
         {
             throw new InvalidOperationException("No active identity found to create conversation.");
         }
 
-        var localPeerId = new Percolator.Sessions.PeerId(_activeIdentityContext.Id.Value);
+        var localPeerId = new Percolator.Sessions.PeerId(_activeIdentityContext.Identity.Id);
         var newConversation = new DirectConversation(ConversationId.NewId(), localPeerId, sessionPeerId);
         await _messageStore.StoreDirectConversationAsync(newConversation);
         return newConversation.Id;

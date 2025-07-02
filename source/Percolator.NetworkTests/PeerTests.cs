@@ -1,76 +1,69 @@
 using FluentAssertions;
 using Percolator.Network;
 using System.Net;
+using System.Security.Cryptography;
 
-namespace Percolator.NetworkTests
+namespace Percolator.NetworkTests;
+
+[TestFixture]
+public class PeerTests
 {
-    [TestFixture]
-    public class PeerTests
+    [Test]
+    public void Equals_WithSamePublicKeyHash_ShouldBeTrue()
     {
-        [Test]
-        public void Equals_WithSameId_ShouldBeTrue()
-        {
-            // Arrange
-            var id = PeerId.NewId();
-            var peer1 = new Peer(id, IPAddress.Parse("127.0.0.1"), 1234, "thumbprint1");
-            var peer2 = new Peer(id, IPAddress.Parse("127.0.0.2"), 5678, "thumbprint2");
+        // Arrange
+        var hashBytes = SHA256.HashData("key1"u8.ToArray());
+        var publicKeyHash = new PublicKeyHash(hashBytes);
 
-            // Act & Assert
-            peer1.Should().Be(peer2);
-            (peer1 == peer2).Should().BeTrue();
-            (peer1 != peer2).Should().BeFalse();
-        }
+        // Create two peers with the same public key hash but different endpoints and session IDs
+        var peer1 = new Peer(PeerId.NewId(), IPAddress.Parse("127.0.0.1"), 1234, publicKeyHash);
+        var peer2 = new Peer(PeerId.NewId(), IPAddress.Parse("192.168.1.1"), 5678, publicKeyHash);
 
-        [Test]
-        public void Equals_WithDifferentId_ShouldBeFalse()
-        {
-            // Arrange
-            var ipAddress = IPAddress.Parse("127.0.0.1");
-            var port = 1234;
-            var thumbprint = "thumbprint1";
-            var peer1 = new Peer(PeerId.NewId(), ipAddress, port, thumbprint);
-            var peer2 = new Peer(PeerId.NewId(), ipAddress, port, thumbprint);
+        // Act & Assert: They should be considered the same peer because their identity is the same.
+        peer1.Should().Be(peer2);
+        (peer1 == peer2).Should().BeTrue();
+        (peer1 != peer2).Should().BeFalse();
+        peer1.GetHashCode().Should().Be(peer2.GetHashCode());
+    }
 
-            // Act & Assert
-            peer1.Should().NotBe(peer2);
-            (peer1 != peer2).Should().BeTrue();
-            (peer1 == peer2).Should().BeFalse();
-        }
+    [Test]
+    public void Equals_WithDifferentPublicKeyHash_ShouldBeFalse()
+    {
+        // Arrange
+        var hashBytes1 = SHA256.HashData("key1"u8.ToArray());
+        var publicKeyHash1 = new PublicKeyHash(hashBytes1);
 
-        [Test]
-        public void Equals_WithNull_ShouldBeFalse()
-        {
-            // Arrange
-            var peer1 = new Peer(PeerId.NewId(), IPAddress.Parse("127.0.0.1"), 1234, "thumbprint1");
+        var hashBytes2 = SHA256.HashData("key2"u8.ToArray());
+        var publicKeyHash2 = new PublicKeyHash(hashBytes2);
 
-            // Act & Assert
-            peer1.Equals(null).Should().BeFalse();
-        }
+        // Create two peers with different public key hashes but the same endpoint
+        var peer1 = new Peer(PeerId.NewId(), IPAddress.Parse("127.0.0.1"), 1234, publicKeyHash1);
+        var peer2 = new Peer(PeerId.NewId(), IPAddress.Parse("127.0.0.1"), 1234, publicKeyHash2);
 
-        [Test]
-        public void GetHashCode_WithSameId_ShouldBeEqual()
-        {
-            // Arrange
-            var id = PeerId.NewId();
-            var peer1 = new Peer(id, IPAddress.Parse("127.0.0.1"), 1234, "thumbprint1");
-            var peer2 = new Peer(id, IPAddress.Parse("127.0.0.2"), 5678, "thumbprint2");
+        // Act & Assert: They should be considered different peers.
+        peer1.Should().NotBe(peer2);
+        (peer1 != peer2).Should().BeTrue();
+        (peer1 == peer2).Should().BeFalse();
+    }
 
-            // Act & Assert
-            peer1.GetHashCode().Should().Be(peer2.GetHashCode());
-        }
+    [Test]
+    public void Constructor_ShouldSetPropertiesCorrectly()
+    {
+        // Arrange
+        var id = PeerId.NewId();
+        var ipAddress = IPAddress.Parse("127.0.0.1");
+        var port = 1234;
+        var hashBytes = SHA256.HashData("key"u8.ToArray());
+        var publicKeyHash = new PublicKeyHash(hashBytes);
 
-        [Test]
-        public void GetHashCode_WithDifferentId_ShouldNotBeEqual()
-        {
-            // Arrange
-            var ipAddress = IPAddress.Parse("127.0.0.1");
-            var port = 1234;
-            var thumbprint = "thumbprint1";
-            var peer1 = new Peer(PeerId.NewId(), ipAddress, port, thumbprint);
-            var peer2 = new Peer(PeerId.NewId(), ipAddress, port, thumbprint);
+        // Act
+        var peer = new Peer(id, ipAddress, port, publicKeyHash);
 
-            // Act & Assert
-            peer1.GetHashCode().Should().NotBe(peer2.GetHashCode());
-        }
+        // Assert
+        peer.Id.Should().Be(id);
+        peer.GrpcEndpoint.Address.Should().Be(ipAddress);
+        peer.GrpcEndpoint.Port.Should().Be(port);
+        peer.PublicKeyHash.Should().Be(publicKeyHash);
+        peer.LastSeenUtc.Should().BeCloseTo(DateTime.UtcNow, TimeSpan.FromSeconds(1));
     }
 }

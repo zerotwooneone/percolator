@@ -1,6 +1,12 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
 using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
 using Percolator.Identity.Model;
 
 namespace Percolator.Identity;
@@ -8,7 +14,7 @@ namespace Percolator.Identity;
 public class FileSystemIdentityStore : IIdentityStore
 {
     private readonly string _identitiesPath;
-    private record IdentityMetadata(string? Nickname, string Thumbprint);
+    private static readonly JsonSerializerOptions _jsonSerializerOptions = new() { WriteIndented = true };
 
     public FileSystemIdentityStore()
     {
@@ -18,36 +24,23 @@ public class FileSystemIdentityStore : IIdentityStore
         Directory.CreateDirectory(_identitiesPath);
     }
 
+    private string GetIdentityPath(string identityName) => Path.Combine(_identitiesPath, $"{identityName}.json");
+
     public async Task<IdentityRecord?> GetIdentityAsync(string identityName, CancellationToken cancellationToken = default)
     {
-        var pfxPath = Path.Combine(_identitiesPath, $"{identityName}.pfx");
-        if (!File.Exists(pfxPath))
+        var identityPath = GetIdentityPath(identityName);
+        if (!File.Exists(identityPath))
         {
             return null;
         }
 
-        var pfxBytes = await File.ReadAllBytesAsync(pfxPath, cancellationToken);
-        var pfxCertificate = new PfxCertificate(pfxBytes);
-
-        var metadataPath = Path.Combine(_identitiesPath, $"{identityName}.json");
-        if (!File.Exists(metadataPath))
-        {
-            throw new InvalidOperationException($"Identity '{identityName}' is missing its metadata file.");
-        }
-
-        var json = await File.ReadAllTextAsync(metadataPath, cancellationToken);
-        var metadata = JsonSerializer.Deserialize<IdentityMetadata>(json);
-        if (metadata is null || string.IsNullOrEmpty(metadata.Thumbprint))
-        {
-            throw new InvalidOperationException($"Identity '{identityName}' is missing its thumbprint in metadata.");
-        }
-
-        return new IdentityRecord(identityName, pfxCertificate, metadata.Thumbprint, metadata.Nickname);
+        var json = await File.ReadAllTextAsync(identityPath, cancellationToken);
+        return JsonSerializer.Deserialize<IdentityRecord>(json);
     }
 
     public Task<IEnumerable<string>> ListIdentityNamesAsync(CancellationToken cancellationToken = default)
     {
-        var names = Directory.EnumerateFiles(_identitiesPath, "*.pfx")
+        var names = Directory.EnumerateFiles(_identitiesPath, "*.json")
             .Select(Path.GetFileNameWithoutExtension)
             .Where(name => name is not null)
             .Select(name => name!);
@@ -56,37 +49,27 @@ public class FileSystemIdentityStore : IIdentityStore
 
     public async Task StoreIdentityAsync(IdentityRecord identity, CancellationToken cancellationToken = default)
     {
-        var pfxPath = Path.Combine(_identitiesPath, $"{identity.Name}.pfx");
-        await File.WriteAllBytesAsync(pfxPath, identity.PfxCertificate.Value, cancellationToken);
-        SetFileSecurity(pfxPath);
-
-        var metadata = new IdentityMetadata(identity.Nickname, identity.Thumbprint);
-        var metadataPath = Path.Combine(_identitiesPath, $"{identity.Name}.json");
-        var json = JsonSerializer.Serialize(metadata);
-        await File.WriteAllTextAsync(metadataPath, json, cancellationToken);
-        SetFileSecurity(metadataPath);
+        var identityPath = GetIdentityPath(identity.Name);
+        var json = JsonSerializer.Serialize(identity, _jsonSerializerOptions);
+        await File.WriteAllTextAsync(identityPath, json, cancellationToken);
+        SetFileSecurity(identityPath);
     }
 
     public Task<bool> IdentityExistsAsync(string identityName, CancellationToken cancellationToken = default)
     {
-        var pfxPath = Path.Combine(_identitiesPath, $"{identityName}.pfx");
-        return Task.FromResult(File.Exists(pfxPath));
+        return Task.FromResult(File.Exists(GetIdentityPath(identityName)));
     }
 
-    private void SetFileSecurity(string filePath)
+    private void SetFileSecurity(string path)
     {
-        var fileInfo = new FileInfo(filePath);
-        var fileSecurity = new FileSecurity();
-
-        var currentUser = WindowsIdentity.GetCurrent().User;
-        if (currentUser is not null)
+        if (OperatingSystem.IsWindows())
         {
-            fileSecurity.SetOwner(currentUser);
-            var rule = new FileSystemAccessRule(
-                currentUser,
+            var fileInfo = new FileInfo(path);
+            var fileSecurity = fileInfo.GetAccessControl();
+            fileSecurity.AddAccessRule(new FileSystemAccessRule(
+                new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, null),
                 FileSystemRights.FullControl,
-                AccessControlType.Allow);
-            fileSecurity.SetAccessRule(rule);
+                AccessControlType.Deny));
             fileInfo.SetAccessControl(fileSecurity);
         }
     }

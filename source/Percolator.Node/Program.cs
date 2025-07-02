@@ -104,6 +104,9 @@ static RootCommand BuildCommandLine(IServiceProvider serviceProvider, string[] a
 
         var orchestrator = serviceProvider.GetRequiredService<X3DHOrchestrator>();
         var sessionManager = serviceProvider.GetRequiredService<DirectSessionManager>();
+        
+        //todo: we need a command option to set the active identity before we get the active identity context
+        //todo: active identity context is not required, we should ask the user if it is ok to generate a new identity
         var activeIdentity = serviceProvider.GetRequiredService<ActiveIdentityContext>();
 
         // 1. Create the initiator's bundle

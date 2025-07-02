@@ -1,60 +1,63 @@
 using System.Net;
 
-namespace Percolator.Network
+namespace Percolator.Network;
+
+/// <summary>
+/// Represents a discovered peer on the network.
+/// </summary>
+public class Peer
 {
-    public class Peer : IEquatable<Peer>
+    /// <summary>
+    /// A unique identifier for the peer session.
+    /// </summary>
+    public PeerId Id { get; }
+
+    /// <summary>
+    /// The IP address where the peer's gRPC service is listening.
+    /// </summary>
+    public IPEndPoint GrpcEndpoint { get; }
+
+    /// <summary>
+    /// The unique, stable identifier for the peer, derived from its public key.
+    /// </summary>
+    public PublicKeyHash PublicKeyHash { get; }
+
+    /// <summary>
+    /// The last time a broadcast was received from this peer.
+    /// </summary>
+    public DateTime LastSeenUtc { get; set; }
+
+    public Peer(PeerId id, IPAddress ipAddress, int port, PublicKeyHash publicKeyHash)
     {
-        public PeerId Id { get; }
-        public IPAddress IpAddress { get; }
-        public int GrpcPort { get; }
-        public string Thumbprint { get; }
-        public DateTime LastSeenUtc { get; set; }
-
-        public Peer(PeerId id, IPAddress ipAddress, int grpcPort, string thumbprint)
-        {
-            Id = id;
-            IpAddress = ipAddress;
-            GrpcPort = grpcPort;
-            Thumbprint = thumbprint;
-            LastSeenUtc = DateTime.UtcNow;
-        }
-
-        public IPEndPoint GrpcEndpoint => new(IpAddress, GrpcPort);
-
-        public override string ToString()
-        {
-            return GrpcEndpoint.ToString();
-        }
-
-        public bool Equals(Peer? other)
-        {
-            if (other is null)
-            {
-                return false;
-            }
-
-            return Id.Equals(other.Id);
-        }
-
-        public override int GetHashCode()
-        {
-            return Id.GetHashCode();
-        }
-
-        public override bool Equals(object? obj)
-        {
-            return obj is Peer other && Equals(other);
-        }
-
-        public static bool operator ==(Peer? left, Peer? right)
-        {
-            if (left is null)
-            {
-                return right is null;
-            }
-            return left.Equals(right);
-        }
-
-        public static bool operator !=(Peer? left, Peer? right) => !(left == right);
+        Id = id;
+        GrpcEndpoint = new IPEndPoint(ipAddress, port);
+        PublicKeyHash = publicKeyHash;
+        LastSeenUtc = DateTime.UtcNow;
     }
+
+    public override string ToString()
+    {
+        return GrpcEndpoint.ToString();
+    }
+
+    public override bool Equals(object? obj)
+    {
+        return obj is Peer other && PublicKeyHash.Equals(other.PublicKeyHash);
+    }
+
+    public override int GetHashCode()
+    {
+        return PublicKeyHash.GetHashCode();
+    }
+
+    public static bool operator ==(Peer? left, Peer? right)
+    {
+        if (left is null)
+        {
+            return right is null;
+        }
+        return left.PublicKeyHash.Equals(right.PublicKeyHash);
+    }
+
+    public static bool operator !=(Peer? left, Peer? right) => !(left == right);
 }

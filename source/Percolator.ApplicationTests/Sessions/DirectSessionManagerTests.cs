@@ -1,5 +1,5 @@
+using System;
 using System.Security.Cryptography;
-using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Threading.Tasks;
 using FluentAssertions;
@@ -8,6 +8,7 @@ using NUnit.Framework;
 using Percolator.Application.Identity;
 using Percolator.Application.Sessions;
 using Percolator.Cryptography;
+using Percolator.Identity.Model;
 using Percolator.Sessions;
 using Percolator.Identity;
 using SessionPeerId = Percolator.Sessions.PeerId;
@@ -23,8 +24,8 @@ public class DirectSessionManagerTests
     private ActiveIdentityContext _activeIdentityContext = null!;
     private DirectSessionManager _manager = null!;
 
-    private X509Certificate2 _localCertificate = null!;
-    private X509Certificate2 _remoteCertificate = null!;
+    private X3dhKeys _localKeys = null!;
+    private ECDiffieHellman _remoteIdentityKey = null!;
 
     [SetUp]
     public void Setup()
@@ -34,11 +35,17 @@ public class DirectSessionManagerTests
         _mockMessageStore = new Mock<IMessageStore>();
         _activeIdentityContext = new ActiveIdentityContext();
 
-        _localCertificate = CertificateGenerator.CreateSelfSignedCertificate("CN=Local");
-        _remoteCertificate = CertificateGenerator.CreateSelfSignedCertificate("CN=Remote");
+        var identity = new IdentityRecord(Guid.NewGuid(), "Local Identity");
+        var identitySigningKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var identityAgreementKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        var signedPreKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        var oneTimePreKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        _localKeys = new X3dhKeys(identitySigningKey, identityAgreementKey, signedPreKey, oneTimePreKey);
 
-        _activeIdentityContext.Certificate = _localCertificate;
-        _activeIdentityContext.IdentityName = Guid.NewGuid().ToString();
+        _activeIdentityContext.Identity = identity;
+        _activeIdentityContext.Keys = _localKeys;
+
+        _remoteIdentityKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
 
         _manager = new DirectSessionManager(
             _mockSessionStore.Object,
@@ -51,8 +58,8 @@ public class DirectSessionManagerTests
     [TearDown]
     public void TearDown()
     {
-        _localCertificate.Dispose();
-        _remoteCertificate.Dispose();
+        _localKeys.Dispose();
+        _remoteIdentityKey.Dispose();
     }
 
     [Test]
@@ -63,9 +70,7 @@ public class DirectSessionManagerTests
         var remotePeerId = new SessionPeerId(Guid.NewGuid());
         var plaintext = "Hello, world!";
 
-        using var localIdentityKey = _localCertificate.GetECDHKeyPair();
-        using var remoteIdentityKey = _remoteCertificate.GetECDHKeyPair();
-        var remoteIdentityPublicKeyBytes = remoteIdentityKey.PublicKey.ExportSubjectPublicKeyInfo();
+        var remoteIdentityPublicKeyBytes = _remoteIdentityKey.PublicKey.ExportSubjectPublicKeyInfo();
 
         using var remoteRatchetKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var remoteRatchetPublicKeyBytes = remoteRatchetKey.PublicKey.ExportSubjectPublicKeyInfo();
@@ -73,9 +78,10 @@ public class DirectSessionManagerTests
         var sharedSecret = new byte[32];
         RandomNumberGenerator.Fill(sharedSecret);
 
+        using var localIdentityKeyCopy = ECDiffieHellman.Create(_localKeys.IdentityAgreementKey.ExportParameters(true));
         var doubleRatchetSession = DoubleRatchetSession.AsInitiator(
             sharedSecret,
-            localIdentityKey,
+            localIdentityKeyCopy,
             remoteIdentityPublicKeyBytes,
             remoteRatchetPublicKeyBytes
         );
@@ -84,7 +90,7 @@ public class DirectSessionManagerTests
         _mockSessionStore.Setup(s => s.GetSessionStateAsync(remotePeerId, conversationId))
             .ReturnsAsync(sessionState);
 
-        var localPeerId = new SessionPeerId(Guid.Parse(_activeIdentityContext.IdentityName!));
+        var localPeerId = new SessionPeerId(_activeIdentityContext.Identity!.Id);
         var conversation = new DirectConversation(conversationId, localPeerId, remotePeerId);
         _mockConversationStore.Setup(s => s.GetConversationAsync(conversationId)).ReturnsAsync(conversation);
 

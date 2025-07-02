@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+option csharp_namespace = "Percolator.Contracts";
+
+import "google/protobuf/timestamp.proto";
+
+// The top-level message broadcast over UDP for peer discovery.
+// It contains the sender's public key and a signature of the serialized payload.
+message DiscoveryBroadcast {
+  // The sender's public key (e.g., SEC1 format for ECDSA).
+  bytes public_key = 1;
+
+  // The signature of the serialized DiscoveryPayload.
+  bytes signature = 2;
+
+  // The serialized DiscoveryPayload message.
+  bytes payload = 3; 
+}
+
+// The payload that is signed and included in the broadcast.
+// Signing the timestamp prevents replay attacks.
+message DiscoveryPayload {
+  // The UTC time of the broadcast.
+  google.protobuf.Timestamp timestamp = 1;
+
+  // The GRPC listening port of the sender.
+  int32 port = 2;
+
+  // The public key of the sender. Including this in the signed payload
+  // creates an unbreakable link between the key and the payload.
+  bytes public_key = 3;
+}

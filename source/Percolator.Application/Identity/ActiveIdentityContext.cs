@@ -1,5 +1,6 @@
-using System.Collections.Generic;
-using System.Security.Cryptography.X509Certificates;
+using Percolator.Identity;
+using Percolator.Identity.Model;
+using System.Security.Cryptography;
 using System.Runtime.CompilerServices;
 
 [assembly: InternalsVisibleTo("Percolator.ApplicationTests")]
@@ -16,11 +17,6 @@ public class ActiveIdentityContext
     public const string IdentityKey = "identity";
     public const string PreKey = "prekey";
 
-    public Percolator.Identity.PeerId? Id { get; internal set; }
-    public string? IdentityName { get; internal set; }
-    public string? Nickname { get; internal set; }
-    public IReadOnlyDictionary<string, byte[]> PublicKeys { get; internal set; } = new Dictionary<string, byte[]>();
-    public IReadOnlyDictionary<string, string> KeyThumbprints { get; internal set; } = new Dictionary<string, string>();
-    public X509Certificate2? Certificate { get; internal set; }
-    public Percolator.Identity.X3dhKeys? X3dhKeys { get; internal set; }
+    public IdentityRecord? Identity { get; internal set; }
+    public X3dhKeys? Keys { get; internal set; }
 }

@@ -1,8 +1,10 @@
+using Percolator.Network;
+
 namespace Percolator.Application.Security
 {
     public interface ITrustedPeerStore
     {
-        void Add(string thumbprint);
-        bool IsTrusted(string thumbprint);
+        void Add(PublicKeyHash publicKeyHash);
+        bool IsTrusted(PublicKeyHash publicKeyHash);
     }
 }
