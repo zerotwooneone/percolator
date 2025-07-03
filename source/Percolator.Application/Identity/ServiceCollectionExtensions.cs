@@ -17,7 +17,8 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IPeerRepository, InMemoryPeerRepository>();
 
         // Application-layer orchestrator
-        services.AddHostedService<IdentityOrchestrator>();
+        services.AddSingleton<IIdentityOrchestrator, IdentityOrchestrator>();
+        services.AddHostedService<IdentityInitializationService>();
 
         services.AddSingleton<ActiveIdentityContext>();
         return services;

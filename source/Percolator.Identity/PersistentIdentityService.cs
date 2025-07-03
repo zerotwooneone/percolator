@@ -19,6 +19,18 @@ public class PersistentIdentityService : IIdentityService
         _logger = logger;
     }
 
+    public async Task<(IdentityRecord Identity, X3dhKeys Keys)> GetOrCreateIdentityAsync(string name, CancellationToken cancellationToken = default)
+    {
+        var identity = await GetIdentityRecordAsync(name, cancellationToken);
+        if (identity is null)
+        {
+            identity = await CreateIdentityAsync(name, null, cancellationToken);
+        }
+
+        var keys = await _keyManagementService.GetOrCreateKeysAsync(name);
+        return (identity, keys);
+    }
+
     public async Task<IdentityRecord> CreateIdentityAsync(string name, string? nickname, CancellationToken cancellationToken = default)
     {
         if (await _identityStore.IdentityExistsAsync(name, cancellationToken))

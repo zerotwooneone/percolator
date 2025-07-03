@@ -32,46 +32,94 @@ This application is currently **Windows-only**. This is because it relies on the
 
 The `Percolator.Node` executable is driven by a simple set of commands for hosting, connecting, and sending messages.
 
-### 1. Start the Host
+### 1. Start a Host
 
-To run the application as a network host, use the `host` command. This will start the gRPC server and allow other peers to connect to you.
+To run the application as a network host, use the `host` command. This will start the gRPC server and allow other peers to connect to you. You must specify a unique identity for each host, and you can optionally specify a port.
 
+-   `--port` / `-p`: The port to listen on (default: `5000`).
+-   `--identity` / `-i`: The name of the identity to use (default: `default`). A new identity will be created if it doesn't exist.
+
+**Example:**
 ```bash
-dotnet run --project .\Percolator.Node\Percolator.Node.csproj -- host
+dotnet run --project .\Percolator.Node\Percolator.Node.csproj -- host --port 5000 --identity nodeA
 ```
 
-The host will start and display a message like `Starting host...`. It is now ready to accept connections.
+The host will start and display a message like `Starting host on port 5000 with identity 'nodeA'...`. It is now ready to accept connections.
 
 ### 2. Connect to a Peer
 
-To establish a secure session with a host, open a new terminal and use the `connect` command, providing the host's address and port.
+To establish a secure session with a host, use the `connect` command. You must specify which local identity is initiating the connection.
 
 -   `<host>`: The hostname or IP address of the peer (e.g., `localhost`).
--   `<port>`: The port the peer is listening on (default is typically 5000 or 5001, check the host's output).
+-   `<port>`: The port the peer is listening on.
+-   `--identity` / `-i`: The name of the local identity to use for the connection.
 
+**Example:**
 ```bash
-dotnet run --project .\Percolator.Node\Percolator.Node.csproj -- connect localhost 5000
+dotnet run --project .\Percolator.Node\Percolator.Node.csproj -- connect localhost 5000 --identity nodeB
 ```
 
 Upon success, the command will output a unique `Conversation ID`. **Save this ID**, as you will need it to send messages.
 
-Example output:
-```
-Session established with peer. Conversation ID: 1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d
-```
-
 ### 3. Send a Message
 
-Once a session is established, use the `send` command to send an encrypted message. You will need the `conversationId` from the previous step.
+Once a session is established, use the `send` command to send an encrypted message. You must specify the `conversationId` and the identity associated with that conversation.
 
 -   `<conversationId>`: The unique ID generated when you connected to the peer.
 -   `<message>`: The plaintext message you want to send, enclosed in quotes.
+-   `--identity` / `-i`: The name of the local identity that established the session.
 
+**Example:**
 ```bash
-dotnet run --project .\Percolator.Node\Percolator.Node.csproj -- send 1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d "Hello, world!"
+dotnet run --project .\Percolator.Node\Percolator.Node.csproj -- send 1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d "Hello, world!" --identity nodeB
 ```
 
-The host peer's console will display the received message.
+## Example Scenario: Two Nodes on One Machine
+
+This scenario demonstrates how to start two independent nodes and have one send a message to the other. You will need three separate terminal windows.
+
+### Terminal 1: Start Node A
+
+This node will act as the initial host, listening for connections.
+
+```bash
+dotnet run --project .\Percolator.Node\Percolator.Node.csproj -- host --port 5000 --identity nodeA
+```
+
+### Terminal 2: Start Node B
+
+This node will also host, but it will be the one initiating the connection to Node A.
+
+```bash
+dotnet run --project .\Percolator.Node\Percolator.Node.csproj -- host --port 5001 --identity nodeB
+```
+
+### Terminal 3: Initiate Connection and Send Message
+
+Now, from a third terminal, we will perform the client actions using Node B's identity.
+
+**1. Connect Node B to Node A:**
+
+```bash
+dotnet run --project .\Percolator.Node\Percolator.Node.csproj -- connect localhost 5000 --identity nodeB
+```
+
+After a moment, you will see a confirmation with a new Conversation ID. It will look something like this:
+`Session established with peer. Conversation ID: 1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d`
+
+Copy this `Conversation ID`.
+
+**2. Send a Message from Node B to Node A:**
+
+Use the `send` command with the ID you just copied. Remember to specify that you are sending *from* `nodeB`'s identity.
+
+```bash
+dotnet run --project .\Percolator.Node\Percolator.Node.csproj -- send <PASTE_YOUR_CONVERSATION_ID_HERE> "Hello from Node B!" --identity nodeB
+```
+
+You will see a "Message sent." confirmation in Terminal 3.
+
+In **Terminal 1** (Node A's console), the received message will be displayed, confirming that the end-to-end communication was successful.
 
 ## Guidance for AI Assistants
 

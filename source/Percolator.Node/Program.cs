@@ -3,12 +3,15 @@ using System.CommandLine.Invocation;
 using System.Text;
 using Google.Protobuf;
 using Grpc.Net.Client;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.AspNetCore.Hosting;
 using Percolator.Application;
 using Percolator.Application.Identity;
 using Percolator.Application.KeyExchange;
+using Percolator.Application.Network;
 using Percolator.Application.Sessions;
 using Percolator.Contracts;
 using Percolator.Cryptography;
@@ -17,8 +20,23 @@ using SessionPeerId = Percolator.Sessions.PeerId;
 
 var rootCommand = new RootCommand("Percolator Node: A secure peer-to-peer communication tool.");
 
+// *** Common Options ***
+var identityOption = new Option<string>(
+    new[] { "--identity", "-i" },
+    getDefaultValue: () => "default",
+    description: "The name of the identity to use.");
+
 // *** Host Command ***
-var hostCommand = new Command("host", "Starts the node, listens for peers, and hosts the gRPC service.");
+var portOption = new Option<int>(
+    new[] { "--port", "-p" },
+    getDefaultValue: () => 5000,
+    description: "The port to listen on.");
+
+var hostCommand = new Command("host", "Starts the node, listens for peers, and hosts the gRPC service.")
+{
+    portOption,
+    identityOption
+};
 rootCommand.AddCommand(hostCommand);
 
 // *** Connect Command ***
@@ -27,7 +45,8 @@ var portArgument = new Argument<int>("port", "The port of the peer's gRPC servic
 var connectCommand = new Command("connect", "Connects to a peer to establish a secure session.")
 {
     hostArgument,
-    portArgument
+    portArgument,
+    identityOption // Add identity option to client commands
 };
 rootCommand.AddCommand(connectCommand);
 
@@ -37,27 +56,38 @@ var messageArgument = new Argument<string>("message", "The plaintext message to 
 var sendCommand = new Command("send", "Sends an encrypted message to a peer over an established session.")
 {
     conversationIdArgument,
-    messageArgument
+    messageArgument,
+    identityOption // Add identity option to client commands
 };
 rootCommand.AddCommand(sendCommand);
 
-// --- Dependency Injection Setup ---
-var builder = Host.CreateDefaultBuilder(args);
-
-builder.ConfigureServices((hostContext, services) =>
-{
-    var configuration = hostContext.Configuration;
-    services.AddSingleton<IConfiguration>(configuration);
-    services.AddApplicationServices(configuration);
-    services.AddGrpcClient<TransportService.TransportServiceClient>();
-});
-
-var app = builder.Build();
-
 // --- Command Handlers ---
+
 hostCommand.SetHandler(async (InvocationContext context) =>
 {
-    Console.WriteLine("Starting host...");
+    var port = context.ParseResult.GetValueForOption(portOption);
+    var identityName = context.ParseResult.GetValueForOption(identityOption);
+
+    var builder = WebApplication.CreateBuilder(args);
+
+    // Configure Kestrel
+    builder.WebHost.UseKestrel(options =>
+    {
+        options.ListenLocalhost(port);
+    });
+
+    // Configure Services
+    builder.Services.AddSingleton(new IdentityConfiguration(identityName!));
+    builder.Services.AddApplicationServices(builder.Configuration);
+    builder.Services.AddGrpc();
+
+    var app = builder.Build();
+
+    // Configure Middleware
+    app.UseRouting();
+    app.MapGrpcService<PercolatorMessageService>();
+
+    Console.WriteLine($"Starting host on port {port} with identity '{identityName}'...");
     await app.RunAsync(context.GetCancellationToken());
 });
 
@@ -65,14 +95,30 @@ connectCommand.SetHandler(async (InvocationContext context) =>
 {
     var host = context.ParseResult.GetValueForArgument(hostArgument);
     var port = context.ParseResult.GetValueForArgument(portArgument);
+    var identityName = context.ParseResult.GetValueForOption(identityOption);
+
+    // Build client-specific service provider
+    var services = new ServiceCollection();
+    var configuration = new ConfigurationBuilder().Build(); // Empty config, as services don't seem to use it heavily
+    services.AddSingleton(new IdentityConfiguration(identityName!));
+    services.AddApplicationServices(configuration);
+    services.AddGrpcClient<TransportService.TransportServiceClient>(o =>
+    {
+        o.Address = new Uri($"http://{host}:{port}");
+    });
+    
+    await using var serviceProvider = services.BuildServiceProvider();
+
+    // Initialize identity
+    var identityOrchestrator = serviceProvider.GetRequiredService<IIdentityOrchestrator>();
+    await identityOrchestrator.LoadOrCreateIdentityAsync(identityName!, context.GetCancellationToken());
 
     Console.WriteLine($"Connecting to {host}:{port}...");
-    var activeIdentityContext = app.Services.GetRequiredService<ActiveIdentityContext>();
-    var cryptoManager = app.Services.GetRequiredService<IX3DHManager>();
-    var orchestrator = app.Services.GetRequiredService<X3DHOrchestrator>();
-    var sessionManager = app.Services.GetRequiredService<DirectSessionManager>();
-    var channel = GrpcChannel.ForAddress($"http://{host}:{port}");
-    var client = new TransportService.TransportServiceClient(channel);
+    var activeIdentityContext = serviceProvider.GetRequiredService<ActiveIdentityContext>();
+    var cryptoManager = serviceProvider.GetRequiredService<IX3DHManager>();
+    var orchestrator = serviceProvider.GetRequiredService<X3DHOrchestrator>();
+    var sessionManager = serviceProvider.GetRequiredService<DirectSessionManager>();
+    var client = serviceProvider.GetRequiredService<TransportService.TransportServiceClient>();
 
     // 1. Get local keys to create our bundle
     var localKeys = activeIdentityContext.Keys;
@@ -114,8 +160,21 @@ sendCommand.SetHandler(async (InvocationContext context) =>
 {
     var conversationId = context.ParseResult.GetValueForArgument(conversationIdArgument);
     var message = context.ParseResult.GetValueForArgument(messageArgument);
+    var identityName = context.ParseResult.GetValueForOption(identityOption);
 
-    var messageService = app.Services.GetRequiredService<IMessageService>();
+    // Build client-specific service provider
+    var services = new ServiceCollection();
+    var configuration = new ConfigurationBuilder().Build();
+    services.AddSingleton(new IdentityConfiguration(identityName!));
+    services.AddApplicationServices(configuration);
+    
+    await using var serviceProvider = services.BuildServiceProvider();
+
+    // Initialize identity
+    var identityOrchestrator = serviceProvider.GetRequiredService<IIdentityOrchestrator>();
+    await identityOrchestrator.LoadOrCreateIdentityAsync(identityName!, context.GetCancellationToken());
+
+    var messageService = serviceProvider.GetRequiredService<IMessageService>();
     var content = new OpaqueContent(Encoding.UTF8.GetBytes(message));
     await messageService.SendDirectMessageAsync(new ConversationId(conversationId), content);
     Console.WriteLine("Message sent.");
