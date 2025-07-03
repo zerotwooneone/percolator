@@ -59,11 +59,19 @@ public class FileSystemIdentityStore : IIdentityStore
         if (OperatingSystem.IsWindows())
         {
             var fileInfo = new FileInfo(path);
-            var fileSecurity = fileInfo.GetAccessControl();
+            var fileSecurity = new FileSecurity();
+            var currentUser = WindowsIdentity.GetCurrent();
+
+            fileSecurity.SetOwner(currentUser.User!);
+
+            // Disable inheritance and remove existing inherited rules
+            fileSecurity.SetAccessRuleProtection(true, false);
+
             fileSecurity.AddAccessRule(new FileSystemAccessRule(
-                new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, null),
+                currentUser.User!,
                 FileSystemRights.FullControl,
-                AccessControlType.Deny));
+                AccessControlType.Allow));
+
             fileInfo.SetAccessControl(fileSecurity);
         }
     }
