@@ -6,50 +6,74 @@ This project is the main executable entry point for a peer in the Percolator net
 
 The `Percolator.Node` application is responsible for bootstrapping and running all the necessary services for a peer to participate in the network. It integrates components from the various class libraries (`Application`, `Network`, etc.) into a runnable host.
 
-### Key Responsibilities:
+## Key Responsibilities:
 
--   **Hosting**: Sets up and runs the ASP.NET Core host for the gRPC server.
--   **Service Startup**: Initializes and starts background services, such as peer discovery.
--   **Command-Line Interface**: Parses command-line arguments (e.g., `add-file`) to determine the application's behavior.
--   **Configuration**: Manages application configuration (e.g., ports, settings) and bootstraps all services using dependency injection.
--   **Secure Identity Management**: On first run, securely generates and stores a persistent user identity certificate.
+-   **Hosting**: Sets up and runs the ASP.NET Core host for the gRPC server via the `host` command.
+-   **Service Startup**: Initializes and starts all necessary background services for peer communication.
+-   **Command-Line Interface**: Provides a clear and simple command-line interface for hosting, connecting to peers, and sending messages.
+-   **Secure Sessions**: Establishes end-to-end encrypted communication channels using a modern cryptographic handshake (X3DH).
+-   **Identity Management**: Securely generates and manages the user's cryptographic identity.
 
 ## Operational Modes
 
-The node is designed to support several operational modes to provide flexibility:
+The node operates through distinct commands:
 
--   **Standard Mode**: The default mode where the node both broadcasts its presence and listens for other peers.
--   **Listen-Only Mode**: An optional mode where the node only listens for peer broadcasts without announcing its own presence.
--   **Interactive Mode**: A console-based interactive mode will be available for advanced users. This will allow for real-time commands and status checks while file transfers and other background processes continue to run seamlessly.
+-   **Host Mode**: Run the `host` command to start the node, listen for incoming connections, and host the gRPC service. This makes your node available to other peers.
+-   **Connect Mode**: Use the `connect` command to initiate a secure session with a hosting peer.
+-   **Send Mode**: Once a session is established, use the `send` command with a valid `conversationId` to send encrypted messages.
 
 ## Platform Dependencies
 
 ### Windows Only
 
-This application is currently **Windows-only**. This is because it relies on the `Percolator.Application` library, which uses the Windows Data Protection API (DPAPI) for securely storing the identity certificate's password.
+This application is currently **Windows-only**. This is because it relies on the `Percolator.Application` library, which uses the Windows Data Protection API (DPAPI) for securely storing cryptographic keys.
 
-## Command-Line Interface (CLI)
+## Usage
 
-The `Percolator.Node` executable is driven by command-line arguments, leveraging the `System.CommandLine` library. It can be run as a long-running node or used to execute one-off tasks.
+The `Percolator.Node` executable is driven by a simple set of commands for hosting, connecting, and sending messages.
 
-### Running as a Node
+### 1. Start the Host
 
-To run the application as a standard network node, simply execute it without any commands. This will start the gRPC server and the peer discovery service, allowing it to communicate with other peers.
+To run the application as a network host, use the `host` command. This will start the gRPC server and allow other peers to connect to you.
 
 ```bash
-dotnet run --project .\Percolator.Node\Percolator.Node.csproj
+dotnet run --project .\Percolator.Node\Percolator.Node.csproj -- host
 ```
 
-### Available Commands
+The host will start and display a message like `Starting host...`. It is now ready to accept connections.
 
--   **`add-file <file-path>`**: Creates a manifest for the specified file or directory, signs it with the user's identity, and stores it locally. If no identity exists, this command will trigger the creation of a new secure identity certificate and password.
-    -   Example: `dotnet run --project .\Percolator.Node\Percolator.Node.csproj -- add-file C:\path\to\my_file.txt`
--   **`request-manifest <manifest-hash>`**: Requests a manifest from a running peer using its Base64-encoded hash.
-    -   Example: `dotnet run --project .\Percolator.Node\Percolator.Node.csproj -- request-manifest 4cPQDexTSLrz6CSKErNk6ZD14/Rhxa+wrYsFhXw46iw=`
+### 2. Connect to a Peer
+
+To establish a secure session with a host, open a new terminal and use the `connect` command, providing the host's address and port.
+
+-   `<host>`: The hostname or IP address of the peer (e.g., `localhost`).
+-   `<port>`: The port the peer is listening on (default is typically 5000 or 5001, check the host's output).
+
+```bash
+dotnet run --project .\Percolator.Node\Percolator.Node.csproj -- connect localhost 5000
+```
+
+Upon success, the command will output a unique `Conversation ID`. **Save this ID**, as you will need it to send messages.
+
+Example output:
+```
+Session established with peer. Conversation ID: 1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d
+```
+
+### 3. Send a Message
+
+Once a session is established, use the `send` command to send an encrypted message. You will need the `conversationId` from the previous step.
+
+-   `<conversationId>`: The unique ID generated when you connected to the peer.
+-   `<message>`: The plaintext message you want to send, enclosed in quotes.
+
+```bash
+dotnet run --project .\Percolator.Node\Percolator.Node.csproj -- send 1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d "Hello, world!"
+```
+
+The host peer's console will display the received message.
 
 ## Guidance for AI Assistants
-
-This project has specific architectural patterns that must be followed to ensure stability and avoid common pitfalls.
 
 *   **`System.CommandLine` Version**: The project is standardized on `System.CommandLine` version `2.0.0-beta4`. Do not upgrade to newer pre-release versions or introduce the `System.CommandLine.Hosting` package, as this led to significant instability and breaking changes.
 *   **Manual Dependency Injection**: The application manually configures its own dependency injection container in `Program.cs`. It does not use the .NET Generic Host for command-line integration. Command handlers must resolve their dependencies from the `IServiceProvider` made available via the `InvocationContext`.
