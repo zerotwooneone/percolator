@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Percolator.Application.Configuration;
 using Percolator.Application.PeerDiscovery;
 using Percolator.Network;
 
@@ -15,6 +16,8 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IPeerDiscoveryConfig>(config);
 
         services.AddSingleton<ISigningService, SigningService>();
+        
+        services.Configure<NodeOptions>(configuration.GetSection(NodeOptions.SectionName));
 
         // Register the core service from the Network domain library
         services.AddSingleton<IPeerDiscoveryService, PeerDiscoveryService>();
