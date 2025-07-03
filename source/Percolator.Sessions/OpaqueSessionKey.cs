@@ -1,6 +1,8 @@
+using Percolator.Sessions.Primitives;
+
 namespace Percolator.Sessions;
 
 /// <summary>
-/// Represents a derived cryptographic session key.
+/// A DDD value type representing a session key.
 /// </summary>
-public record OpaqueSessionKey(byte[] Value);
+public record OpaqueSessionKey(byte[] Value) : ByteArrayRecord(Value);

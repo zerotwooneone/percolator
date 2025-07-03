@@ -1,6 +1,8 @@
+using Percolator.Identity.Primitives;
+
 namespace Percolator.Identity.Model;
 
 /// <summary>
-/// Represents a PFX certificate as a value object.
+/// A DDD value type representing a PFX certificate blob.
 /// </summary>
-public record PfxCertificate(byte[] Value);
+public record PfxCertificate(byte[] Value) : ByteArrayRecord(Value);
