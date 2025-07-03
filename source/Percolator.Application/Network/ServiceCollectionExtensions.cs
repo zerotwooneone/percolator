@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Percolator.Application.PeerDiscovery;
 using Percolator.Network;
 
 namespace Percolator.Application.Network;
@@ -23,6 +24,7 @@ public static class ServiceCollectionExtensions
 
         services.AddSingleton<IMessageTransportService, GrpcMessageTransportService>();
         services.AddSingleton<PercolatorMessageService>();
+        services.AddSingleton<IPeerDiscoveryHandler, PeerDiscoveryHandler>();
         return services;
     }
 }

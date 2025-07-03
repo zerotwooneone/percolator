@@ -5,6 +5,8 @@ using Percolator.Application.Identity;
 using Percolator.Application.KeyExchange;
 using Percolator.Application.Network;
 using Percolator.Application.PeerDiscovery;
+using Percolator.Application.RateLimiting;
+using Percolator.Application.Security;
 using Percolator.Application.Sessions;
 
 namespace Percolator.Application;
@@ -13,20 +15,16 @@ public static class ServiceCollectionExtensions
 {
     public static IServiceCollection AddApplicationServices(this IServiceCollection services, IConfiguration configuration)
     {
-        services.AddGrpc();
-
+        // Register services from each of the application layers
         services.AddCryptographyServices();
         services.AddIdentityServices();
         services.AddKeyExchangeServices();
         services.AddNetworkServices(configuration);
         services.AddPeerDiscoveryServices();
         services.AddSessionServices();
-
-        services.AddMediatR(cfg =>
-        {
-            cfg.RegisterServicesFromAssemblyContaining(typeof(ServiceCollectionExtensions));
-        });
-
+        services.AddRateLimiting();
+        services.AddAppSecurity();
+        
         return services;
     }
 }

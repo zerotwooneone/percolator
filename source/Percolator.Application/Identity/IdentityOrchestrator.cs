@@ -13,7 +13,7 @@ using Percolator.Network;
 
 namespace Percolator.Application.Identity;
 
-public class IdentityOrchestrator : IIdentityOrchestrator, IHostedService
+public class IdentityOrchestrator : IHostedService
 {
     private readonly IIdentityService _identityService;
     private readonly IKeyManagementService _keyManagementService;
@@ -21,7 +21,6 @@ public class IdentityOrchestrator : IIdentityOrchestrator, IHostedService
     private readonly NodeOptions _options;
     private readonly ActiveIdentityContext _activeIdentityContext;
     private readonly IHostApplicationLifetime _lifetime;
-    private readonly ITrustedPeerStore _trustedPeerStore;
 
     public IdentityOrchestrator(
         IIdentityService identityService,
@@ -29,8 +28,7 @@ public class IdentityOrchestrator : IIdentityOrchestrator, IHostedService
         ILogger<IdentityOrchestrator> logger,
         IOptions<NodeOptions> options,
         ActiveIdentityContext activeIdentityContext,
-        IHostApplicationLifetime lifetime,
-        ITrustedPeerStore trustedPeerStore)
+        IHostApplicationLifetime lifetime)
     {
         _identityService = identityService;
         _keyManagementService = keyManagementService;
@@ -38,7 +36,6 @@ public class IdentityOrchestrator : IIdentityOrchestrator, IHostedService
         _options = options.Value;
         _activeIdentityContext = activeIdentityContext;
         _lifetime = lifetime;
-        _trustedPeerStore = trustedPeerStore;
     }
 
     public async Task StartAsync(CancellationToken cancellationToken)

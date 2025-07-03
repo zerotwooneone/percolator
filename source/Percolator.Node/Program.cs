@@ -1,157 +1,127 @@
+using System.CommandLine;
+using System.CommandLine.Invocation;
+using System.Security.Cryptography;
+using System.Text;
+using Google.Protobuf;
 using Grpc.Net.Client;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
-using System.CommandLine;
-using System.CommandLine.Invocation;
-using System.Security.Cryptography;
-using Google.Protobuf;
-using Google.Protobuf.WellKnownTypes;
 using Percolator.Application;
-using Percolator.Application.KeyExchange;
 using Percolator.Application.Identity;
+using Percolator.Application.KeyExchange;
 using Percolator.Application.Sessions;
 using Percolator.Contracts;
-using Percolator.Node;
+using Percolator.Cryptography;
+using Percolator.Identity;
 using Percolator.Sessions;
 using SessionPeerId = Percolator.Sessions.PeerId;
-using DomainIdentityService = Percolator.Identity.IIdentityService;
 
-// --- Main Entry Point ---
-var configuration = new ConfigurationBuilder()
-    .SetBasePath(Directory.GetCurrentDirectory())
-    .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
-    .Build();
+var rootCommand = new RootCommand("Percolator Node: A secure peer-to-peer communication tool.");
 
-var services = new ServiceCollection();
-ConfigureServices(services, configuration);
-var serviceProvider = services.BuildServiceProvider();
+// *** Host Command ***
+var hostCommand = new Command("host", "Starts the node, listens for peers, and hosts the gRPC service.");
+rootCommand.AddCommand(hostCommand);
 
-var rootCommand = BuildCommandLine(serviceProvider, args);
-return await rootCommand.InvokeAsync(args);
-
-// --- Service Configuration ---
-static void ConfigureServices(IServiceCollection services, IConfiguration configuration)
+// *** Connect Command ***
+var hostArgument = new Argument<string>("host", "The hostname or IP address of the peer.");
+var portArgument = new Argument<int>("port", "The port of the peer's gRPC service.");
+var connectCommand = new Command("connect", "Connects to a peer to establish a secure session.")
 {
-    services.AddLogging(configure =>
-    {
-        configure.AddSimpleConsole(options =>
-        {
-            options.SingleLine = true;
-            options.TimestampFormat = "HH:mm:ss ";
-        });
-    });
+    hostArgument,
+    portArgument
+};
+rootCommand.AddCommand(connectCommand);
 
+// *** Send Command ***
+var conversationIdArgument = new Argument<Guid>("conversationId", "The ID of the conversation to send the message to.");
+var messageArgument = new Argument<string>("message", "The plaintext message to send.");
+var sendCommand = new Command("send", "Sends an encrypted message to a peer over an established session.")
+{
+    conversationIdArgument,
+    messageArgument
+};
+rootCommand.AddCommand(sendCommand);
+
+// --- Dependency Injection Setup ---
+var builder = Host.CreateDefaultBuilder(args);
+
+builder.ConfigureServices((hostContext, services) =>
+{
+    var configuration = hostContext.Configuration;
     services.AddSingleton<IConfiguration>(configuration);
-
-    // Register all services from the Application layer via the single extension method
     services.AddApplicationServices(configuration);
+    services.AddGrpcClient<TransportService.TransportServiceClient>();
+});
 
-    // Register host-specific services
-    services.AddHostedService<MessageListenerService>();
-}
+var app = builder.Build();
 
-// --- Command Line Interface Setup ---
-static RootCommand BuildCommandLine(IServiceProvider serviceProvider, string[] args)
+// --- Command Handlers ---
+hostCommand.SetHandler(async (InvocationContext context) =>
 {
-    var rootCommand = new RootCommand("Percolator Node");
+    Console.WriteLine("Starting host...");
+    await app.RunAsync(context.GetCancellationToken());
+});
 
-    var hostCommand = new Command("host", "Host the node and listen for incoming connections");
-    hostCommand.SetHandler(async context =>
+connectCommand.SetHandler(async (InvocationContext context) =>
+{
+    var host = context.ParseResult.GetValueForArgument(hostArgument);
+    var port = context.ParseResult.GetValueForArgument(portArgument);
+
+    Console.WriteLine($"Connecting to {host}:{port}...");
+    var activeIdentityContext = app.Services.GetRequiredService<ActiveIdentityContext>();
+    var cryptoManager = app.Services.GetRequiredService<IX3DHManager>();
+    var orchestrator = app.Services.GetRequiredService<X3DHOrchestrator>();
+    var sessionManager = app.Services.GetRequiredService<DirectSessionManager>();
+    var channel = GrpcChannel.ForAddress($"http://{host}:{port}");
+    var client = new TransportService.TransportServiceClient(channel);
+
+    // 1. Get local keys to create our bundle
+    var localKeys = activeIdentityContext.Keys;
+    if (localKeys is null)
     {
-        var cancellationToken = context.GetCancellationToken();
-        var logger = serviceProvider.GetRequiredService<ILogger<Program>>();
-
-        logger.LogInformation("Starting host...");
-
-        var hostedServices = serviceProvider.GetServices<IHostedService>();
-        await Task.WhenAll(hostedServices.Select(s => s.StartAsync(cancellationToken)));
-
-        var tcs = new TaskCompletionSource();
-        cancellationToken.Register(() => tcs.SetResult());
-        await tcs.Task;
-
-        await Task.WhenAll(hostedServices.Select(s => s.StopAsync(CancellationToken.None)));
-    });
-    rootCommand.AddCommand(hostCommand);
-
-    var connectCommand = new Command("connect", "Connect to a peer");
-    var addressArgument = new Argument<string>("address", "The address of the peer to connect to");
-    var portArgument = new Argument<int>("port", "The port of the peer to connect to");
-    connectCommand.AddArgument(addressArgument);
-    connectCommand.AddArgument(portArgument);
-    connectCommand.SetHandler(async context =>
+        Console.WriteLine("Could not find local identity. Please create one first.");
+        return;
+    }
+    var signedPreKeyPublicBytes = localKeys.SignedPreKey.PublicKey.ExportSubjectPublicKeyInfo();
+    var signature = cryptoManager.SignPreKey(localKeys.IdentitySigningKey, signedPreKeyPublicBytes);
+    var localBundle = new Percolator.Contracts.PreKeyBundle
     {
-        var address = context.ParseResult.GetValueForArgument(addressArgument);
-        var port = context.ParseResult.GetValueForArgument(portArgument);
-        var cancellationToken = context.GetCancellationToken();
-        var logger = serviceProvider.GetRequiredService<ILogger<Program>>();
+        IdentityKey = ByteString.CopyFrom(localKeys.IdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
+        SignedPreKey = ByteString.CopyFrom(signedPreKeyPublicBytes),
+        PreKeySignature = ByteString.CopyFrom(signature),
+        OneTimePreKey = ByteString.CopyFrom(localKeys.OneTimePreKey.PublicKey.ExportSubjectPublicKeyInfo())
+    };
 
-        logger.LogInformation("Connecting to {address}:{port}...", address, port);
+    // 2. Call the remote peer to establish a session
+    var request = new EstablishSessionRequest { InitiatorBundle = localBundle };
+    var response = await client.EstablishSessionAsync(request);
 
-        var channel = GrpcChannel.ForAddress($"https://{address}:{port}");
-        var client = new TransportService.TransportServiceClient(channel);
+    // 3. Use the response bundle to complete the handshake locally
+    var remotePeerId = new SessionPeerId(new Guid(response.SessionId)); // This assumes the SessionId is the PeerId. A better approach would be to return the PeerId explicitly.
+    var handshakeResult = orchestrator.InitiateHandshake(remotePeerId, response.ResponderBundle);
 
-        var orchestrator = serviceProvider.GetRequiredService<X3DHOrchestrator>();
-        var sessionManager = serviceProvider.GetRequiredService<DirectSessionManager>();
-        
-        //todo: we need a command option to set the active identity before we get the active identity context
-        //todo: active identity context is not required, we should ask the user if it is ok to generate a new identity
-        var activeIdentity = serviceProvider.GetRequiredService<ActiveIdentityContext>();
+    // 4. Create the secure session
+    var conversationId = await sessionManager.EstablishSessionAsync(
+        remotePeerId,
+        new OpaquePublicKey(response.ResponderBundle.IdentityKey.ToByteArray()),
+        handshakeResult.SharedSecret,
+        handshakeResult.InitialRatchetPublicKey
+    );
 
-        // 1. Create the initiator's bundle
-        var localKeys = activeIdentity.X3dhKeys ?? throw new InvalidOperationException("X3DH keys not found in active identity.");
-        var signedPreKeyBytes = localKeys.SignedPreKey.PublicKey.ExportSubjectPublicKeyInfo();
-        var localBundle = new PreKeyBundle
-        {
-            IdentityKey = ByteString.CopyFrom(localKeys.IdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
-            SignedPreKey = ByteString.CopyFrom(signedPreKeyBytes),
-            PreKeySignature = ByteString.CopyFrom(localKeys.IdentitySigningKey.SignData(signedPreKeyBytes, HashAlgorithmName.SHA256, DSASignatureFormat.IeeeP1363FixedFieldConcatenation)),
-            OneTimePreKey = ByteString.CopyFrom(localKeys.OneTimePreKey.PublicKey.ExportSubjectPublicKeyInfo())
-        };
+    Console.WriteLine($"Session established with peer. Conversation ID: {conversationId}");
+});
 
-        // 2. Send request and get the responder's bundle
-        var request = new EstablishSessionRequest { InitiatorBundle = localBundle };
-        var response = await client.EstablishSessionAsync(request, cancellationToken: cancellationToken);
-        var remotePreKeyBundle = response.ResponderBundle;
+sendCommand.SetHandler(async (InvocationContext context) =>
+{
+    var conversationId = context.ParseResult.GetValueForArgument(conversationIdArgument);
+    var message = context.ParseResult.GetValueForArgument(messageArgument);
 
-        // For a new connection, we generate a new local PeerId. In the future, this will be
-        // replaced by a call to a peer management service to resolve or create a persistent peer identity.
-        var remotePeerId = new SessionPeerId(Guid.NewGuid());
+    var messageService = app.Services.GetRequiredService<IMessageService>();
+    var content = new OpaqueContent(Encoding.UTF8.GetBytes(message));
+    await messageService.SendDirectMessageAsync(new ConversationId(conversationId), content);
+    Console.WriteLine("Message sent.");
+});
 
-        // 3. Use the orchestrator to derive the shared secret
-        var initiationResult = orchestrator.InitiateHandshake(remotePeerId, remotePreKeyBundle);
-
-        // 4. Establish the session locally
-        var remoteIdentityPublicKey = new OpaquePublicKey(remotePreKeyBundle.IdentityKey.ToByteArray());
-        var conversationId = await sessionManager.EstablishSessionAsync(remotePeerId, remoteIdentityPublicKey, initiationResult.SharedSecret, initiationResult.InitialRatchetPublicKey);
-
-        logger.LogInformation("Session established with peer. Conversation ID: {conversationId}", conversationId);
-    });
-    rootCommand.AddCommand(connectCommand);
-
-    var sendCommand = new Command("send", "Send a message to a peer");
-    var conversationIdArgument = new Argument<Guid>("conversationId", "The ID of the conversation to send the message to");
-    var messageArgument = new Argument<string>("message", "The message to send");
-    sendCommand.AddArgument(conversationIdArgument);
-    sendCommand.AddArgument(messageArgument);
-    sendCommand.SetHandler(async context =>
-    {
-        var conversationId = new ConversationId(context.ParseResult.GetValueForArgument(conversationIdArgument));
-        var message = context.ParseResult.GetValueForArgument(messageArgument);
-        var cancellationToken = context.GetCancellationToken();
-        var logger = serviceProvider.GetRequiredService<ILogger<Program>>();
-
-        var sessionManager = serviceProvider.GetRequiredService<DirectSessionManager>();
-
-        logger.LogInformation("Sending message to conversation {conversationId}...", conversationId);
-
-        var encryptedMessage = await sessionManager.SendMessageAsync(conversationId, message);
-
-        logger.LogInformation("Message sent. Encrypted size: {size} bytes", encryptedMessage.Ciphertext.Length);
-    });
-    rootCommand.AddCommand(sendCommand);
-
-    return rootCommand;
-}
+// --- Run Application ---
+return await rootCommand.InvokeAsync(args);
