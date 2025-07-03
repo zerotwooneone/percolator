@@ -1,6 +1,5 @@
 using MediatR;
 using Microsoft.Extensions.Logging;
-using Percolator.Application.Network;
 using Percolator.Identity;
 
 namespace Percolator.Application.PeerDiscovery;

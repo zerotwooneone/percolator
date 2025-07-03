@@ -1,7 +1,5 @@
 using Percolator.Sessions;
 using IdentityPeerId = Percolator.Identity.PeerId;
-using System.Threading;
-using System.Threading.Tasks;
 
 namespace Percolator.Application.Sessions;
 

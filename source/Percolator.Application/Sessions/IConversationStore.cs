@@ -1,4 +1,3 @@
-using System.Threading.Tasks;
 using Percolator.Sessions;
 
 namespace Percolator.Application.Sessions

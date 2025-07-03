@@ -1,7 +1,4 @@
-using System;
 using System.Text.Json;
-using System.Threading.Tasks;
-using Google.Protobuf;
 using Grpc.Core;
 using Microsoft.Extensions.Logging;
 using Percolator.Application.Sessions;

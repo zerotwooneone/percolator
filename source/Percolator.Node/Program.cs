@@ -1,6 +1,5 @@
 using System.CommandLine;
 using System.CommandLine.Invocation;
-using System.Security.Cryptography;
 using System.Text;
 using Google.Protobuf;
 using Grpc.Net.Client;
@@ -8,13 +7,11 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Percolator.Application;
-using Percolator.Application.Configuration;
 using Percolator.Application.Identity;
 using Percolator.Application.KeyExchange;
 using Percolator.Application.Sessions;
 using Percolator.Contracts;
 using Percolator.Cryptography;
-using Percolator.Identity;
 using Percolator.Sessions;
 using SessionPeerId = Percolator.Sessions.PeerId;
 

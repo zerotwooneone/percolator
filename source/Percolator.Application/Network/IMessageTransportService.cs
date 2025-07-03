@@ -1,4 +1,3 @@
-using System.Threading.Tasks;
 using Percolator.Cryptography;
 using Percolator.Sessions;
 

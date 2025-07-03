@@ -3,9 +3,6 @@ using Microsoft.Extensions.Logging;
 using Moq;
 using Percolator.Identity;
 using Percolator.Identity.Model;
-using System;
-using System.Collections.Generic;
-using System.Threading.Tasks;
 
 namespace Percolator.IdentityTests;
 

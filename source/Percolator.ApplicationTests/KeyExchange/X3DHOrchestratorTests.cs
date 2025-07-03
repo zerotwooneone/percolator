@@ -1,15 +1,12 @@
-using System;
 using System.Security.Cryptography;
 using FluentAssertions;
 using Google.Protobuf;
 using Moq;
-using NUnit.Framework;
 using Percolator.Application.Identity;
 using Percolator.Application.KeyExchange;
 using Percolator.Cryptography;
 using Percolator.Identity;
 using Percolator.Identity.Model;
-using Percolator.Sessions;
 using ContractsPreKeyBundle = Percolator.Contracts.PreKeyBundle;
 using CryptoPreKeyBundle = Percolator.Cryptography.PreKeyBundle;
 using SessionPeerId = Percolator.Sessions.PeerId;

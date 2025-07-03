@@ -2,7 +2,6 @@ using FluentAssertions;
 using Percolator.Application.Identity;
 using Percolator.Identity.Model;
 using Percolator.Network;
-using System;
 using System.Security.Cryptography;
 
 namespace Percolator.ApplicationTests;

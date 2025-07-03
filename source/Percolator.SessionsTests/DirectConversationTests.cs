@@ -1,6 +1,4 @@
 using FluentAssertions;
-using NUnit.Framework;
-using System;
 using Percolator.Sessions;
 
 namespace Percolator.SessionsTests;

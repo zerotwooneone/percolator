@@ -1,9 +1,5 @@
 using Microsoft.Extensions.Logging;
 using Percolator.Identity.Model;
-using System;
-using System.Collections.Generic;
-using System.Threading;
-using System.Threading.Tasks;
 
 namespace Percolator.Identity;
 

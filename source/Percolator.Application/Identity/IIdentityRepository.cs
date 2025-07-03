@@ -1,6 +1,5 @@
 using Percolator.Identity.Model;
 using Percolator.Network;
-using System.Threading.Tasks;
 
 namespace Percolator.Application.Identity;
 

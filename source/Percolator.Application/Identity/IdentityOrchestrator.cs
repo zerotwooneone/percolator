@@ -3,11 +3,6 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Percolator.Application.Configuration;
 using Percolator.Identity;
-using Percolator.Application.Security;
-using System.Threading.Tasks;
-using System.Threading;
-using System;
-using Percolator.Identity.Model;
 using System.Security.Cryptography;
 using Percolator.Network;
 

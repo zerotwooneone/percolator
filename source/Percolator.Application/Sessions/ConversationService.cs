@@ -1,6 +1,3 @@
-using System;
-using System.Threading;
-using System.Threading.Tasks;
 using Percolator.Application.Identity;
 using Percolator.Identity;
 using Percolator.Sessions;

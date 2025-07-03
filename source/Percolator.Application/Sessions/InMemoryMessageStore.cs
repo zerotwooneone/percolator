@@ -1,9 +1,5 @@
 using Percolator.Sessions;
 using System.Collections.Concurrent;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
 
 namespace Percolator.Application.Sessions;
 

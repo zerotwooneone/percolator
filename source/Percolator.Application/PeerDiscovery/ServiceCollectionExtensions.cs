@@ -1,5 +1,4 @@
 using Microsoft.Extensions.DependencyInjection;
-using Percolator.Network;
 
 namespace Percolator.Application.PeerDiscovery;
 

@@ -1,5 +1,4 @@
 using System.Text.Json.Serialization;
-using System.IO;
 
 namespace Percolator.Cryptography
 {

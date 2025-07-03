@@ -1,5 +1,3 @@
-using System;
-
 namespace Percolator.Identity.Model;
 
 /// <summary>
