@@ -19,6 +19,7 @@ public static class ServiceCollectionExtensions
         // Application-layer orchestrator
         services.AddSingleton<IIdentityOrchestrator, IdentityOrchestrator>();
         services.AddHostedService<IdentityInitializationService>();
+        services.AddSingleton<ITlsCertificateService, TlsCertificateService>();
 
         services.AddSingleton<ActiveIdentityContext>();
         return services;

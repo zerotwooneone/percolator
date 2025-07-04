@@ -1,5 +1,12 @@
-using FluentAssertions;
+using System.IO;
+using System.Security.Cryptography;
+using System.Text;
+using System.Threading.Tasks;
 using AutoFixture;
+using FluentAssertions;
+using Microsoft.Extensions.Logging;
+using Moq;
+using NUnit.Framework;
 using Percolator.Identity;
 
 namespace Percolator.IdentityTests
@@ -8,89 +15,104 @@ namespace Percolator.IdentityTests
     public class CredentialServiceTests
     {
         private Fixture _fixture;
-        private string _testCredentialPath;
+        private Mock<ILogger<CredentialService>> _loggerMock;
+        private CredentialService _sut;
 
         [SetUp]
         public void SetUp()
         {
             _fixture = new Fixture();
-            // Use a unique path for each test run to ensure isolation
-            _testCredentialPath = Path.Combine(Path.GetTempPath(), "PercolatorTests", Path.GetRandomFileName());
+            _loggerMock = new Mock<ILogger<CredentialService>>();
+            _sut = new CredentialService(_loggerMock.Object);
 
-            // Ensure the directory exists
-            var directory = Path.GetDirectoryName(_testCredentialPath);
-            if (directory != null && !Directory.Exists(directory))
+            // Clean up from previous runs
+            var identityName = _fixture.Create<string>();
+            var basePath = IdentityPathHelper.GetBasePath(identityName);
+            var credsPath = Path.Combine(basePath, "creds");
+            if (Directory.Exists(credsPath))
             {
-                Directory.CreateDirectory(directory);
-            }
-        }
-
-        [TearDown]
-        public void TearDown()
-        {
-            // Clean up the created file after each test
-            if (File.Exists(_testCredentialPath))
-            {
-                File.Delete(_testCredentialPath);
+                Directory.Delete(credsPath, true);
             }
         }
 
         [Test]
-        public void GetOrCreatePfxPassword_WhenNoCredentialExists_CreatesAndReturnsPassword()
+        public async Task GetOrCreateCredentialAsync_WhenCredentialDoesNotExist_CreatesAndReturnsNewCredential()
         {
             // Arrange
-            var sut = new CredentialService(_testCredentialPath);
+            var identityName = _fixture.Create<string>();
+            var purpose = _fixture.Create<string>();
 
             // Act
-            var password = sut.GetOrCreatePfxPassword();
+            var credential1 = await _sut.GetOrCreateCredentialAsync(identityName, purpose);
+            var credential2 = await _sut.GetOrCreateCredentialAsync(identityName, purpose);
 
             // Assert
-            password.Value.Should().NotBeNullOrEmpty();
-            File.Exists(_testCredentialPath).Should().BeTrue();
+            credential1.Should().NotBeNullOrEmpty();
+            credential1.Should().Be(credential2);
+            var basePath = IdentityPathHelper.GetBasePath(identityName);
+            var credPath = Path.Combine(basePath, "creds", $"{purpose}.cred");
+            File.Exists(credPath).Should().BeTrue();
         }
 
         [Test]
-        public void GetOrCreatePfxPassword_WhenCredentialExists_ReturnsSamePassword()
+        public async Task GetCredentialAsync_WhenCredentialExists_ReturnsExistingCredential()
         {
             // Arrange
-            var sut = new CredentialService(_testCredentialPath);
+            var identityName = _fixture.Create<string>();
+            var purpose = _fixture.Create<string>();
+            var expectedCredential = await _sut.GetOrCreateCredentialAsync(identityName, purpose);
 
             // Act
-            var passwordFirstCall = sut.GetOrCreatePfxPassword();
-            var passwordSecondCall = sut.GetOrCreatePfxPassword();
+            var actualCredential = await _sut.GetCredentialAsync(identityName, purpose);
 
             // Assert
-            passwordSecondCall.Value.Should().Be(passwordFirstCall.Value);
+            actualCredential.Should().Be(expectedCredential);
         }
 
         [Test]
-        public void Protect_And_Unprotect_ShouldRoundtripSuccessfully()
+        public async Task GetCredentialAsync_WhenCredentialDoesNotExist_ReturnsNull()
         {
             // Arrange
-            var sut = new CredentialService(_testCredentialPath);
-            var originalData = new byte[] { 1, 2, 3, 4, 5 };
+            var identityName = _fixture.Create<string>();
+            var purpose = _fixture.Create<string>();
 
             // Act
-            var protectedData = sut.Protect(originalData);
-            var unprotectedData = sut.Unprotect(protectedData);
+            var credential = await _sut.GetCredentialAsync(identityName, purpose);
+
+            // Assert
+            credential.Should().BeNull();
+        }
+
+        [Test]
+        public async Task Protect_And_Unprotect_ShouldRoundtripSuccessfully()
+        {
+            // Arrange
+            var originalData = System.Text.Encoding.UTF8.GetBytes("super secret data");
+
+            // Act
+            var protectedData = _sut.Protect(originalData);
+            var unprotectedData = _sut.Unprotect(protectedData);
 
             // Assert
             unprotectedData.Should().Equal(originalData);
         }
 
         [Test]
-        public void GetOrCreatePfxPassword_WhenCredentialFileIsCorrupt_ThrowsCryptographicException()
+        public async Task GetOrCreateCredentialAsync_WhenCredentialFileIsCorrupt_ThrowsCryptographicException()
         {
             // Arrange
             // Create a dummy file with corrupt data
-            File.WriteAllBytes(_testCredentialPath, new byte[] { 0x01, 0x02, 0x03 });
-            var sut = new CredentialService(_testCredentialPath);
+            var identityName = _fixture.Create<string>();
+            var purpose = _fixture.Create<string>();
+            var basePath = IdentityPathHelper.GetBasePath(identityName);
+            var credPath = Path.Combine(basePath, "creds", $"{purpose}.cred");
+            File.WriteAllBytes(credPath, new byte[] { 0x01, 0x02, 0x03 });
 
             // Act
-            Action act = () => sut.GetOrCreatePfxPassword();
+            Func<Task> act = async () => await _sut.GetOrCreateCredentialAsync(identityName, purpose);
 
             // Assert
-            act.Should().Throw<System.Security.Cryptography.CryptographicException>();
+            await act.Should().ThrowAsync<System.Security.Cryptography.CryptographicException>();
         }
     }
 }

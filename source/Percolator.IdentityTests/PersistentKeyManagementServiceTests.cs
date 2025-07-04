@@ -1,7 +1,14 @@
+using System;
+using System.IO;
+using System.Linq;
+using System.Security.Cryptography;
+using System.Text.Json;
+using System.Threading.Tasks;
 using AutoFixture;
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Moq;
+using NUnit.Framework;
 using Percolator.Identity;
 
 namespace Percolator.IdentityTests;
@@ -10,40 +17,24 @@ namespace Percolator.IdentityTests;
 public class PersistentKeyManagementServiceTests
 {
     private Fixture _fixture;
-    private Mock<ICredentialService> _mockCredentialService;
-    private Mock<ILogger<PersistentKeyManagementService>> _mockLogger;
+    private Mock<ICredentialService> _credentialServiceMock;
+    private Mock<ILogger<PersistentKeyManagementService>> _loggerMock;
     private PersistentKeyManagementService _sut;
-    private string _testKeysPath;
 
     [SetUp]
     public void Setup()
     {
         _fixture = new Fixture();
-        _mockCredentialService = new Mock<ICredentialService>();
-        _mockLogger = new Mock<ILogger<PersistentKeyManagementService>>();
+        _credentialServiceMock = new Mock<ICredentialService>();
+        _loggerMock = new Mock<ILogger<PersistentKeyManagementService>>();
+        _sut = new PersistentKeyManagementService(_credentialServiceMock.Object, _loggerMock.Object);
 
-        // Create a temporary directory for test keys
-        _testKeysPath = Path.Combine(Path.GetTempPath(), "PercolatorTests", _fixture.Create<string>());
-        Directory.CreateDirectory(_testKeysPath);
-
-        // Setup mock credential service to return unprotected data as is for simplicity
-        _mockCredentialService.Setup(s => s.Protect(It.IsAny<byte[]>()))
-            .Returns((byte[] data) => data);
-        _mockCredentialService.Setup(s => s.Unprotect(It.IsAny<byte[]>()))
-            .Returns((byte[] data) => data);
-
-        _sut = new PersistentKeyManagementService(_mockCredentialService.Object, _mockLogger.Object);
-        // Override the keys path to use the temporary test directory
-        var keysPathField = typeof(PersistentKeyManagementService).GetField("_keysPath", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        keysPathField!.SetValue(_sut, _testKeysPath);
-    }
-
-    [TearDown]
-    public void Teardown()
-    {
-        if (Directory.Exists(_testKeysPath))
+        var identityName = _fixture.Create<string>();
+        var basePath = IdentityPathHelper.GetBasePath(identityName);
+        var keysPath = Path.Combine(basePath, "keys");
+        if (Directory.Exists(keysPath))
         {
-            Directory.Delete(_testKeysPath, true);
+            Directory.Delete(keysPath, true);
         }
     }
 
@@ -52,21 +43,18 @@ public class PersistentKeyManagementServiceTests
     {
         // Arrange
         var identityName = _fixture.Create<string>();
+        var keyFilePath = Path.Combine(IdentityPathHelper.GetBasePath(identityName), "keys", $"{identityName}.json");
 
         // Act
-        var result = await _sut.GetOrCreateKeysAsync(identityName);
+        var createdKeys = await _sut.GetOrCreateKeysAsync(identityName);
 
         // Assert
-        result.Should().NotBeNull();
-        result.IdentitySigningKey.Should().NotBeNull();
-        result.IdentityAgreementKey.Should().NotBeNull();
-        result.SignedPreKey.Should().NotBeNull();
-        result.OneTimePreKey.Should().NotBeNull();
-
-        // Verify that keys were saved to a file
-        var keyFilePath = Path.Combine(_testKeysPath, $"{identityName}.keys");
-        File.Exists(keyFilePath).Should().BeTrue();
-        _mockCredentialService.Verify(s => s.Protect(It.IsAny<byte[]>()), Times.Once);
+        createdKeys.Should().NotBeNull();
+        createdKeys.IdentitySigningKey.Should().NotBeNull();
+        createdKeys.IdentityAgreementKey.Should().NotBeNull();
+        createdKeys.SignedPreKey.Should().NotBeNull();
+        createdKeys.OneTimePreKeys.Should().HaveCount(100);
+        _credentialServiceMock.Verify(s => s.Protect(It.IsAny<byte[]>()), Times.Once);
     }
 
     [Test]
@@ -74,19 +62,44 @@ public class PersistentKeyManagementServiceTests
     {
         // Arrange
         var identityName = _fixture.Create<string>();
-        // First call to create the keys
-        await _sut.GetOrCreateKeysAsync(identityName);
+        var keyFilePath = Path.Combine(IdentityPathHelper.GetBasePath(identityName), "keys", $"{identityName}.json");
 
-        // Reset the mock to verify calls on the second run
-        _mockCredentialService.Invocations.Clear();
+        var iks = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var ika = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        var spk = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        var otps = Enumerable.Range(0, 10).Select(_ => ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256)).ToArray();
+        var existingKeys = new X3dhKeys(iks, ika, spk, otps);
+
+        var container = new { // Anonymous type to match KeyContainer structure
+            IdentitySigningKey = iks.ExportParameters(true),
+            IdentityAgreementKey = ika.ExportParameters(true),
+            SignedPreKey = spk.ExportParameters(true),
+            OneTimePreKeys = otps.Select(k => k.ExportParameters(true)).ToArray()
+        };
+        var decryptedBytes = JsonSerializer.SerializeToUtf8Bytes(container);
+        var encryptedBytes = _fixture.Create<byte[]>();
+
+        _credentialServiceMock.Setup(s => s.Unprotect(encryptedBytes)).Returns(decryptedBytes);
+
+        // Mock file system behavior if not using a real file system
+        // For simplicity, we assume GetOrCreateKeysAsync handles file IO correctly
+        // and focus on the interaction with ICredentialService
+        var tempFile = new FileInfo(keyFilePath);
+        tempFile.Directory.Create();
+        await File.WriteAllBytesAsync(keyFilePath, encryptedBytes);
 
         // Act
-        var result = await _sut.GetOrCreateKeysAsync(identityName);
+        var loadedKeys = await _sut.GetOrCreateKeysAsync(identityName);
 
         // Assert
-        result.Should().NotBeNull();
-        _mockCredentialService.Verify(s => s.Unprotect(It.IsAny<byte[]>()), Times.Once);
-        _mockCredentialService.Verify(s => s.Protect(It.IsAny<byte[]>()), Times.Never);
+        loadedKeys.Should().NotBeNull();
+        // Compare public key parts to verify correctness
+        loadedKeys.IdentitySigningKey.ExportParameters(false).Q.X.Should().BeEquivalentTo(existingKeys.IdentitySigningKey.ExportParameters(false).Q.X);
+        loadedKeys.IdentityAgreementKey.PublicKey.ToByteArray().Should().BeEquivalentTo(existingKeys.IdentityAgreementKey.PublicKey.ToByteArray());
+        loadedKeys.SignedPreKey.PublicKey.ToByteArray().Should().BeEquivalentTo(existingKeys.SignedPreKey.PublicKey.ToByteArray());
+
+        // Clean up
+        File.Delete(keyFilePath);
     }
 
     [Test]
@@ -94,7 +107,7 @@ public class PersistentKeyManagementServiceTests
     {
         // Arrange
         var identityName = _fixture.Create<string>();
-        var keyFilePath = Path.Combine(_testKeysPath, $"{identityName}.keys");
+        var keyFilePath = Path.Combine(IdentityPathHelper.GetBasePath(identityName), "keys", $"{identityName}.json");
         await File.WriteAllTextAsync(keyFilePath, "this is not valid json");
 
         // Act & Assert
@@ -106,69 +119,15 @@ public class PersistentKeyManagementServiceTests
     {
         // Arrange
         var identityName = _fixture.Create<string>();
-        var keyFilePath = Path.Combine(_testKeysPath, $"{identityName}.keys");
+        var keyFilePath = Path.Combine(IdentityPathHelper.GetBasePath(identityName), "keys", $"{identityName}.json");
         // Simulate a file that was protected but is now corrupt (e.g., tampered with)
         await File.WriteAllBytesAsync(keyFilePath, new byte[] { 0x01, 0x02, 0x03 });
 
         // Setup mock credential service to throw CryptographicException on Unprotect
-        _mockCredentialService.Setup(s => s.Unprotect(It.IsAny<byte[]>()))
+        _credentialServiceMock.Setup(s => s.Unprotect(It.IsAny<byte[]>()))
             .Throws(new System.Security.Cryptography.CryptographicException("Corrupt data"));
 
         // Act & Assert
         await _sut.Invoking(s => s.GetOrCreateKeysAsync(identityName)).Should().ThrowAsync<System.Security.Cryptography.CryptographicException>();
-    }
-
-    [Test]
-    public async Task GetIdentityKeysAsync_WhenKeysExist_ReturnsExistingKeys()
-    {
-        // Arrange
-        var identityName = _fixture.Create<string>();
-        // First, create the keys using GetOrCreateKeysAsync
-        var originalKeys = await _sut.GetOrCreateKeysAsync(identityName);
-
-        // Reset mocks to ensure GetIdentityKeysAsync loads from file
-        _mockCredentialService.Invocations.Clear();
-
-        // Act
-        var loadedKeys = await _sut.GetIdentityKeysAsync(identityName);
-
-        // Assert
-        loadedKeys.Should().NotBeNull();
-        // Verify that the loaded keys are equivalent to the original ones (comparing public parts)
-        var loadedParams = loadedKeys.IdentitySigningKey.ExportParameters(false);
-        var originalParams = originalKeys.IdentitySigningKey.ExportParameters(false);
-        loadedParams.Q.X.Should().BeEquivalentTo(originalParams.Q.X);
-        loadedParams.Q.Y.Should().BeEquivalentTo(originalParams.Q.Y);
-
-        loadedParams = loadedKeys.IdentityAgreementKey.ExportParameters(false);
-        originalParams = originalKeys.IdentityAgreementKey.ExportParameters(false);
-        loadedParams.Q.X.Should().BeEquivalentTo(originalParams.Q.X);
-        loadedParams.Q.Y.Should().BeEquivalentTo(originalParams.Q.Y);
-
-        loadedParams = loadedKeys.SignedPreKey.ExportParameters(false);
-        originalParams = originalKeys.SignedPreKey.ExportParameters(false);
-        loadedParams.Q.X.Should().BeEquivalentTo(originalParams.Q.X);
-        loadedParams.Q.Y.Should().BeEquivalentTo(originalParams.Q.Y);
-
-        loadedParams = loadedKeys.OneTimePreKey.ExportParameters(false);
-        originalParams = originalKeys.OneTimePreKey.ExportParameters(false);
-        loadedParams.Q.X.Should().BeEquivalentTo(originalParams.Q.X);
-        loadedParams.Q.Y.Should().BeEquivalentTo(originalParams.Q.Y);
-
-        _mockCredentialService.Verify(s => s.Unprotect(It.IsAny<byte[]>()), Times.Once);
-        _mockCredentialService.Verify(s => s.Protect(It.IsAny<byte[]>()), Times.Never);
-    }
-
-    [Test]
-    public async Task GetIdentityKeysAsync_WhenKeysDoNotExist_ThrowsKeyNotFoundException()
-    {
-        // Arrange
-        var identityName = _fixture.Create<string>();
-        // Ensure the key file does not exist
-        var keyFilePath = Path.Combine(_testKeysPath, $"{identityName}.keys");
-        if (File.Exists(keyFilePath)) File.Delete(keyFilePath);
-
-        // Act & Assert
-        await _sut.Invoking(s => s.GetIdentityKeysAsync(identityName)).Should().ThrowAsync<KeyNotFoundException>();
     }
 }

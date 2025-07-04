@@ -1,19 +1,22 @@
 using System.CommandLine;
 using System.CommandLine.Invocation;
+using System.Net;
+using System.Net.Http;
 using System.Text;
 using Google.Protobuf;
 using Grpc.Net.Client;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using Microsoft.AspNetCore.Hosting;
 using Percolator.Application;
 using Percolator.Application.Identity;
 using Percolator.Application.KeyExchange;
 using Percolator.Application.Network;
 using Percolator.Application.Sessions;
 using Percolator.Contracts;
+using Percolator.Identity;
 using Percolator.Cryptography;
 using Percolator.Sessions;
 using SessionPeerId = Percolator.Sessions.PeerId;
@@ -68,16 +71,27 @@ hostCommand.SetHandler(async (InvocationContext context) =>
     var port = context.ParseResult.GetValueForOption(portOption);
     var identityName = context.ParseResult.GetValueForOption(identityOption);
 
+    // Create a temporary service provider to get the certificate before the host starts
+    var tempServices = new ServiceCollection();
+    var tempConfig = new ConfigurationBuilder().Build();
+    tempServices.AddApplicationServices(tempConfig);
+    await using var tempServiceProvider = tempServices.BuildServiceProvider();
+
+    var certificateService = tempServiceProvider.GetRequiredService<ITlsCertificateService>();
+    var certificate = await certificateService.GetOrCreateTlsCertificateAsync(identityName!);
+
     var builder = WebApplication.CreateBuilder(args);
 
-    // Configure Kestrel
+    // Configure Kestrel with the certificate
     builder.WebHost.UseKestrel(options =>
     {
-        options.ListenLocalhost(port);
+        options.Listen(IPAddress.Loopback, port, listenOptions =>
+        {
+            listenOptions.UseHttps(certificate);
+        });
     });
 
-    // Configure Services
-    builder.Services.AddSingleton(new IdentityConfiguration(identityName!));
+    // Configure Services for the main application
     builder.Services.AddApplicationServices(builder.Configuration);
     builder.Services.AddGrpc();
 
@@ -87,7 +101,7 @@ hostCommand.SetHandler(async (InvocationContext context) =>
     app.UseRouting();
     app.MapGrpcService<PercolatorMessageService>();
 
-    Console.WriteLine($"Starting host on port {port} with identity '{identityName}'...");
+    Console.WriteLine($"Starting HTTPS host on port {port} with identity '{identityName}'...");
     await app.RunAsync(context.GetCancellationToken());
 });
 
@@ -100,12 +114,21 @@ connectCommand.SetHandler(async (InvocationContext context) =>
     // Build client-specific service provider
     var services = new ServiceCollection();
     var configuration = new ConfigurationBuilder().Build(); // Empty config, as services don't seem to use it heavily
-    services.AddSingleton(new IdentityConfiguration(identityName!));
     services.AddApplicationServices(configuration);
+
+    // This is INSECURE and for development purposes only.
+    // In a real-world scenario, you would implement proper certificate pinning
+    // or a custom validation callback that checks the peer's public key.
+    var handler = new HttpClientHandler
+    {
+        ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
+    };
+
     services.AddGrpcClient<TransportService.TransportServiceClient>(o =>
     {
-        o.Address = new Uri($"http://{host}:{port}");
-    });
+        o.Address = new Uri($"https://{host}:{port}");
+    })
+    .ConfigurePrimaryHttpMessageHandler(() => handler);
     
     await using var serviceProvider = services.BuildServiceProvider();
 
@@ -127,6 +150,11 @@ connectCommand.SetHandler(async (InvocationContext context) =>
         Console.WriteLine("Could not find local identity. Please create one first.");
         return;
     }
+    if (localKeys.OneTimePreKeys is null || localKeys.OneTimePreKeys.Length == 0)
+    {
+        Console.WriteLine("Could not find any one-time pre-keys for the local identity.");
+        return;
+    }
     var signedPreKeyPublicBytes = localKeys.SignedPreKey.PublicKey.ExportSubjectPublicKeyInfo();
     var signature = cryptoManager.SignPreKey(localKeys.IdentitySigningKey, signedPreKeyPublicBytes);
     var localBundle = new Percolator.Contracts.PreKeyBundle
@@ -134,7 +162,7 @@ connectCommand.SetHandler(async (InvocationContext context) =>
         IdentityKey = ByteString.CopyFrom(localKeys.IdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
         SignedPreKey = ByteString.CopyFrom(signedPreKeyPublicBytes),
         PreKeySignature = ByteString.CopyFrom(signature),
-        OneTimePreKey = ByteString.CopyFrom(localKeys.OneTimePreKey.PublicKey.ExportSubjectPublicKeyInfo())
+        OneTimePreKey = ByteString.CopyFrom(localKeys.OneTimePreKeys[0].PublicKey.ExportSubjectPublicKeyInfo())
     };
 
     // 2. Call the remote peer to establish a session
@@ -165,7 +193,6 @@ sendCommand.SetHandler(async (InvocationContext context) =>
     // Build client-specific service provider
     var services = new ServiceCollection();
     var configuration = new ConfigurationBuilder().Build();
-    services.AddSingleton(new IdentityConfiguration(identityName!));
     services.AddApplicationServices(configuration);
     
     await using var serviceProvider = services.BuildServiceProvider();
@@ -174,9 +201,8 @@ sendCommand.SetHandler(async (InvocationContext context) =>
     var identityOrchestrator = serviceProvider.GetRequiredService<IIdentityOrchestrator>();
     await identityOrchestrator.LoadOrCreateIdentityAsync(identityName!, context.GetCancellationToken());
 
-    var messageService = serviceProvider.GetRequiredService<IMessageService>();
-    var content = new OpaqueContent(Encoding.UTF8.GetBytes(message));
-    await messageService.SendDirectMessageAsync(new ConversationId(conversationId), content);
+    var sessionManager = serviceProvider.GetRequiredService<DirectSessionManager>();
+    await sessionManager.SendMessageAsync(new ConversationId(conversationId), message);
     Console.WriteLine("Message sent.");
 });
 

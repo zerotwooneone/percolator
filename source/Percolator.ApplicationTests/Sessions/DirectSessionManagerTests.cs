@@ -35,8 +35,8 @@ public class DirectSessionManagerTests
         var identitySigningKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         var identityAgreementKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var signedPreKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        var oneTimePreKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        _localKeys = new X3dhKeys(identitySigningKey, identityAgreementKey, signedPreKey, oneTimePreKey);
+        var oneTimePreKeys = new[] { ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256) };
+        _localKeys = new X3dhKeys(identitySigningKey, identityAgreementKey, signedPreKey, oneTimePreKeys);
 
         _activeIdentityContext.Identity = identity;
         _activeIdentityContext.Keys = _localKeys;

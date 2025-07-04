@@ -40,8 +40,8 @@ public class X3DHOrchestratorTests
         var localIdentitySigningKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         var localIdentityAgreementKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var localSignedPreKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        var localOneTimePreKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        _localKeys = new X3dhKeys(localIdentitySigningKey, localIdentityAgreementKey, localSignedPreKey, localOneTimePreKey);
+        var localOneTimePreKeys = new[] { ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256) };
+        _localKeys = new X3dhKeys(localIdentitySigningKey, localIdentityAgreementKey, localSignedPreKey, localOneTimePreKeys);
 
         // Remote keys setup
         _remoteIdentitySigningKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);

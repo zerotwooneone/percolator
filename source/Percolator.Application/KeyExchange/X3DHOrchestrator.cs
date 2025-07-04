@@ -3,6 +3,7 @@ using Google.Protobuf;
 using Percolator.Application.Identity;
 using Percolator.Cryptography;
 using Percolator.Sessions;
+using System.Linq;
 using ContractsPreKeyBundle = Percolator.Contracts.PreKeyBundle;
 using CryptographyPreKeyBundle = Percolator.Cryptography.PreKeyBundle;
 using SessionPeerId = Percolator.Sessions.PeerId;
@@ -28,7 +29,7 @@ public class X3DHOrchestrator
                 IdentitySigningKey: var identitySigningKey,
                 IdentityAgreementKey: var identityAgreementKey,
                 SignedPreKey: var signedPreKey,
-                OneTimePreKey: var oneTimePreKey
+                OneTimePreKeys: var oneTimePreKeys
             })
         {
             throw new InvalidOperationException("Active identity is not fully initialized for X3DH handshake.");
@@ -61,7 +62,7 @@ public class X3DHOrchestrator
             IdentityKey = ByteString.CopyFrom(identityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
             SignedPreKey = ByteString.CopyFrom(signedPreKeyBytes),
             PreKeySignature = ByteString.CopyFrom(signature),
-            OneTimePreKey = ByteString.CopyFrom(oneTimePreKey.PublicKey.ExportSubjectPublicKeyInfo())
+            OneTimePreKey = ByteString.CopyFrom(oneTimePreKeys.First().PublicKey.ExportSubjectPublicKeyInfo())
         };
 
         return new OrchestratorInitiationResult(handshakeResult.SharedSecret, initialRatchetPublicKey, localPreKeyBundle);
@@ -75,20 +76,25 @@ public class X3DHOrchestrator
                 IdentitySigningKey: var identitySigningKey,
                 IdentityAgreementKey: var identityAgreementKey,
                 SignedPreKey: var signedPreKey,
-                OneTimePreKey: var oneTimePreKey
+                OneTimePreKeys: var oneTimePreKeys
             })
         {
             throw new InvalidOperationException("Active identity is not fully initialized for X3DH handshake.");
         }
 
-        // Perform X3DH handshake as responder
+        var remoteEphemeralKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        remoteEphemeralKey.ImportSubjectPublicKeyInfo(remoteEphemeralPublicKey, out _);
+
+        var remoteIdentityKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        remoteIdentityKey.ImportSubjectPublicKeyInfo(localPreKeyBundle.IdentityKey.ToByteArray(), out _);
+
         var sharedSecret = _x3DhManager.RespondToHandshake(
-            localPreKeyBundle.IdentityKey.ToByteArray(),
-            remoteEphemeralPublicKey,
+            remoteIdentityKey.ExportSubjectPublicKeyInfo(),
+            remoteEphemeralKey.ExportSubjectPublicKeyInfo(),
             identitySigningKey,
             identityAgreementKey,
             signedPreKey,
-            oneTimePreKey
+            oneTimePreKeys.First()
         );
 
         // The initial ratchet public key for the Double Ratchet session is the responder's signed pre-key

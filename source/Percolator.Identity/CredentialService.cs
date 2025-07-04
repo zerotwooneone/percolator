@@ -1,5 +1,8 @@
+using System.IO;
 using System.Security.Cryptography;
 using System.Text;
+using System.Threading.Tasks;
+using Microsoft.Extensions.Logging;
 using System.Security.AccessControl;
 using System.Security.Principal;
 using Percolator.Identity.Model;
@@ -8,56 +11,68 @@ namespace Percolator.Identity
 {
     public interface ICredentialService
     {
-        Password GetOrCreatePfxPassword();
+        Task<string> GetOrCreateCredentialAsync(string identityName, string purpose);
+        Task<string?> GetCredentialAsync(string identityName, string purpose);
         byte[] Protect(byte[] data);
         byte[] Unprotect(byte[] data);
     }
 
     public class CredentialService : ICredentialService
     {
-        private readonly string _credentialFilePath;
         private const int PasswordLength = 32; // 32 chars for a strong password
-
-        // Using a static, hard-coded entropy value adds another layer of protection.
-        // An attacker would need to compromise the user's account AND know this value
-        // to decrypt the credential file.
         private static readonly byte[] Entropy = { 0x18, 0x27, 0x55, 0x9A, 0xBC, 0xDE, 0xF1, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF, 0x12, 0x34 };
+        private readonly ILogger<CredentialService> _logger;
 
-        public CredentialService()
+        public CredentialService(ILogger<CredentialService> logger)
         {
-            var appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-            var percolatorAppDataPath = Path.Combine(appDataPath, "Percolator");
-            Directory.CreateDirectory(percolatorAppDataPath);
-            _credentialFilePath = Path.Combine(percolatorAppDataPath, "pfx.cred");
+            _logger = logger;
         }
 
-        internal CredentialService(string credentialFilePath)
+        public async Task<string> GetOrCreateCredentialAsync(string identityName, string purpose)
         {
-            _credentialFilePath = credentialFilePath;
-            var directoryPath = Path.GetDirectoryName(_credentialFilePath);
-            if (!string.IsNullOrEmpty(directoryPath))
+            var credential = await GetCredentialAsync(identityName, purpose);
+            if (credential is not null)
+            {
+                return credential;
+            }
+
+            _logger.LogInformation("No credential found for identity '{IdentityName}' and purpose '{Purpose}'. Creating a new one.", identityName, purpose);
+
+            var newPassword = GenerateRandomPassword();
+            var passwordBytes = Encoding.UTF8.GetBytes(newPassword);
+            var encryptedPasswordBytes = Protect(passwordBytes);
+
+            var credentialPath = GetCredentialPath(identityName, purpose);
+            var directoryPath = Path.GetDirectoryName(credentialPath);
+            if(directoryPath is not null)
             {
                 Directory.CreateDirectory(directoryPath);
             }
+            
+            await File.WriteAllBytesAsync(credentialPath, encryptedPasswordBytes);
+            SetFileSecurity(credentialPath);
+            return newPassword;
         }
 
-        public Password GetOrCreatePfxPassword()
+        public async Task<string?> GetCredentialAsync(string identityName, string purpose)
         {
-            if (File.Exists(_credentialFilePath))
+            var credentialPath = GetCredentialPath(identityName, purpose);
+            if (!File.Exists(credentialPath))
             {
-                var encryptedPasswordBytes = File.ReadAllBytes(_credentialFilePath);
-                var passwordBytes = ProtectedData.Unprotect(encryptedPasswordBytes, Entropy, DataProtectionScope.CurrentUser);
-                return new Password(Encoding.UTF8.GetString(passwordBytes));
+                return null;
             }
-            else
-            {
-                var newPassword = GenerateRandomPassword();
-                var passwordBytes = Encoding.UTF8.GetBytes(newPassword);
-                var encryptedPasswordBytes = ProtectedData.Protect(passwordBytes, Entropy, DataProtectionScope.CurrentUser);
-                File.WriteAllBytes(_credentialFilePath, encryptedPasswordBytes);
-                SetFileSecurity(_credentialFilePath);
-                return new Password(newPassword);
-            }
+
+            var encryptedPasswordBytes = await File.ReadAllBytesAsync(credentialPath);
+            var passwordBytes = Unprotect(encryptedPasswordBytes);
+            return Encoding.UTF8.GetString(passwordBytes);
+        }
+        
+        private string GetCredentialPath(string identityName, string purpose)
+        {
+            var basePath = IdentityPathHelper.GetBasePath(identityName);
+            var credentialsPath = Path.Combine(basePath, "creds");
+            var sanitizedPurpose = string.Join("_", purpose.Split(Path.GetInvalidFileNameChars()));
+            return Path.Combine(credentialsPath, $"{sanitizedPurpose}.cred");
         }
 
         public byte[] Protect(byte[] data)
@@ -76,17 +91,13 @@ namespace Percolator.Identity
             var password = new StringBuilder(PasswordLength);
             using var rng = RandomNumberGenerator.Create();
             
-            // The following algorithm avoids modulo bias, ensuring a uniform distribution of characters.
             var randomBytes = new byte[1];
             while (password.Length < PasswordLength)
             {
                 rng.GetBytes(randomBytes);
                 var randomValue = randomBytes[0];
 
-                // To avoid bias, we only accept values within a range that is an even multiple of validChars.Length.
-                // 256 is the number of possible byte values. 72 is the number of valid characters.
-                // The largest multiple of 72 less than 256 is 216 (72 * 3).
-                if (randomValue < 216)
+                if (randomValue < 216) // 216 is the largest multiple of 72 (validChars.Length) less than 256
                 {
                     password.Append(validChars[randomValue % validChars.Length]);
                 }
@@ -106,7 +117,7 @@ namespace Percolator.Identity
                     currentUser,
                     FileSystemRights.FullControl,
                     AccessControlType.Allow);
-                fileSecurity.AddAccessRule(rule);
+                fileSecurity.SetAccessRule(rule);
                 fileInfo.SetAccessControl(fileSecurity);
             }
         }

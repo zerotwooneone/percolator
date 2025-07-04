@@ -1,15 +1,18 @@
 using System.Collections.Concurrent;
+using System.IO;
+using System.Linq;
 using System.Security.AccessControl;
 using System.Security.Cryptography;
 using System.Security.Principal;
 using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 
 namespace Percolator.Identity;
 
 public class PersistentKeyManagementService : IKeyManagementService
 {
-    private readonly string _keysPath;
     private readonly ICredentialService _credentialService;
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _fileLocks = new();
     private static readonly JsonSerializerOptions _jsonOptions = new()
@@ -19,26 +22,23 @@ public class PersistentKeyManagementService : IKeyManagementService
     };
     private readonly ILogger<PersistentKeyManagementService> _logger;
 
-    // A helper record for serializing ECParameters to and from JSON.
-    private record SerializableX3dhKeyQuadruplet(ECParameters IdentitySigningKey, ECParameters IdentityAgreementKey, ECParameters SignedPreKey, ECParameters OneTimePreKey);
-
-    public PersistentKeyManagementService(ICredentialService credentialService,
+    public PersistentKeyManagementService(
+        ICredentialService credentialService,
         ILogger<PersistentKeyManagementService> logger)
     {
         _credentialService = credentialService;
         _logger = logger;
-
-        var appDataPath = System.Environment.GetFolderPath(System.Environment.SpecialFolder.LocalApplicationData);
-        var percolatorAppDataPath = Path.Combine(appDataPath, "Percolator");
-        var identitiesPath = Path.Combine(percolatorAppDataPath, "identities");
-        _keysPath = Path.Combine(identitiesPath, "keys");
-        Directory.CreateDirectory(_keysPath);
     }
+
+    private record KeyContainer(ECParameters IdentitySigningKey, ECParameters IdentityAgreementKey, ECParameters SignedPreKey, ECParameters[] OneTimePreKeys);
 
     public async Task<X3dhKeys> GetOrCreateKeysAsync(string identityName)
     {
-        var keyFilePath = Path.Combine(_keysPath, $"{identityName}.keys");
-        var fileLock = _fileLocks.GetOrAdd(identityName, _ => new SemaphoreSlim(1, 1));
+        var basePath = IdentityPathHelper.GetBasePath(identityName);
+        var keysPath = Path.Combine(basePath, "keys");
+        Directory.CreateDirectory(keysPath);
+        var keyFilePath = Path.Combine(keysPath, $"{identityName}.json");
+        var fileLock = _fileLocks.GetOrAdd(keyFilePath, _ => new SemaphoreSlim(1, 1));
 
         await fileLock.WaitAsync();
         try
@@ -48,7 +48,14 @@ public class PersistentKeyManagementService : IKeyManagementService
                 _logger.LogInformation("Key file found for {IdentityName}. Loading keys.", identityName);
                 var encryptedBytes = await File.ReadAllBytesAsync(keyFilePath);
                 var decryptedBytes = _credentialService.Unprotect(encryptedBytes);
-                return DeserializeKeys(decryptedBytes);
+                var keyContainer = JsonSerializer.Deserialize<KeyContainer>(decryptedBytes, _jsonOptions)!;
+
+                var ikSigning = ECDsa.Create(keyContainer.IdentitySigningKey);
+                var ikAgreement = ECDiffieHellman.Create(keyContainer.IdentityAgreementKey);
+                var spk = ECDiffieHellman.Create(keyContainer.SignedPreKey);
+                var otps = keyContainer.OneTimePreKeys.Select(ECDiffieHellman.Create).ToArray();
+
+                return new X3dhKeys(ikSigning, ikAgreement, spk, otps);
             }
             else
             {
@@ -56,69 +63,27 @@ public class PersistentKeyManagementService : IKeyManagementService
                 var ikSigning = ECDsa.Create(ECCurve.NamedCurves.nistP256);
                 var ikAgreement = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
                 var spk = await CreatePreKeyAsync();
-                var opk = await CreatePreKeyAsync();
+                var oneTimePreKeys = await Task.WhenAll(Enumerable.Range(0, 100).Select(_ => CreatePreKeyAsync()));
 
-                var serializableKeys = new SerializableX3dhKeyQuadruplet(
+                var container = new KeyContainer(
                     ikSigning.ExportParameters(true),
                     ikAgreement.ExportParameters(true),
                     spk.ExportParameters(true),
-                    opk.ExportParameters(true)
+                    oneTimePreKeys.Select(k => k.ExportParameters(true)).ToArray()
                 );
 
-                var decryptedBytes = JsonSerializer.SerializeToUtf8Bytes(serializableKeys, _jsonOptions);
+                var decryptedBytes = JsonSerializer.SerializeToUtf8Bytes(container, _jsonOptions);
                 var encryptedBytes = _credentialService.Protect(decryptedBytes);
                 await File.WriteAllBytesAsync(keyFilePath, encryptedBytes);
                 SetFileSecurity(keyFilePath);
                 _logger.LogInformation("New keys created and saved for {IdentityName}", identityName);
-                return new X3dhKeys(ikSigning, ikAgreement, spk, opk);
+                return new X3dhKeys(ikSigning, ikAgreement, spk, oneTimePreKeys);
             }
         }
         finally
         {
             fileLock.Release();
         }
-    }
-
-    public async Task<X3dhKeys> GetIdentityKeysAsync(string identityName)
-    {
-        var keyPath = Path.Combine(_keysPath, $"{identityName}.keys");
-        var fileLock = _fileLocks.GetOrAdd(identityName, _ => new SemaphoreSlim(1, 1));
-
-        await fileLock.WaitAsync();
-        try
-        {
-            if (!File.Exists(keyPath))
-            {
-                throw new KeyNotFoundException($"Keys for identity '{identityName}' not found.");
-            }
-
-            var encryptedBytes = await File.ReadAllBytesAsync(keyPath);
-            var decryptedBytes = _credentialService.Unprotect(encryptedBytes);
-            return DeserializeKeys(decryptedBytes);
-        }
-        finally
-        {
-            fileLock.Release();
-        }
-    }
-
-    private X3dhKeys DeserializeKeys(byte[] decryptedBytes)
-    {
-        var serializableKeys = JsonSerializer.Deserialize<SerializableX3dhKeyQuadruplet>(decryptedBytes, _jsonOptions)!;
-
-        var ikSigning = ECDsa.Create();
-        ikSigning.ImportParameters(serializableKeys.IdentitySigningKey);
-
-        var ikAgreement = ECDiffieHellman.Create();
-        ikAgreement.ImportParameters(serializableKeys.IdentityAgreementKey);
-
-        var spk = ECDiffieHellman.Create();
-        spk.ImportParameters(serializableKeys.SignedPreKey);
-
-        var opk = ECDiffieHellman.Create();
-        opk.ImportParameters(serializableKeys.OneTimePreKey);
-
-        return new X3dhKeys(ikSigning, ikAgreement, spk, opk);
     }
 
     private Task<ECDiffieHellman> CreatePreKeyAsync()
@@ -126,9 +91,9 @@ public class PersistentKeyManagementService : IKeyManagementService
         return Task.Run(() => ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256));
     }
 
-    private void SetFileSecurity(string filePath)
+    private void SetFileSecurity(string path)
     {
-        var fileInfo = new FileInfo(filePath);
+        var fileInfo = new FileInfo(path);
         var fileSecurity = fileInfo.GetAccessControl();
         var currentUser = WindowsIdentity.GetCurrent().User;
         if (currentUser is not null)
