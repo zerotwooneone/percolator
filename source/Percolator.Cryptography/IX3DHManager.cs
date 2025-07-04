@@ -4,7 +4,7 @@ namespace Percolator.Cryptography;
 
 public interface IX3DHManager
 {
-    HandshakeInitiationResult InitiateHandshake(PreKeyBundle remoteBundle, ECDsa identitySigningKey, ECDiffieHellman identityAgreementKey);
+    SharedSecret InitiateHandshake(PreKeyBundle remoteBundle, ECDiffieHellman ephemeralKey, ECDsa identitySigningKey, ECDiffieHellman identityAgreementKey);
     SharedSecret RespondToHandshake(byte[] remoteIdentityKeyBytes, byte[] remoteEphemeralKeyBytes, ECDsa identitySigningKey, ECDiffieHellman identityAgreementKey, ECDiffieHellman signedPreKey, ECDiffieHellman? oneTimePreKey);
     byte[] SignPreKey(ECDsa identitySigningKey, byte[] signedPreKey);
     bool VerifySignature(byte[] identityKey, byte[] signedPreKey, byte[] signature);

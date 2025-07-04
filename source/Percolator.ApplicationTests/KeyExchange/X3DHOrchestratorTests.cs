@@ -71,14 +71,15 @@ public class X3DHOrchestratorTests
 
 
     [Test]
-    public void InitiateHandshake_WithValidBundle_ReturnsCorrectResult()
+    public void CompleteHandshake_WithValidBundle_ReturnsCorrectResult()
     {
         // Arrange
-        var remotePeerId = new SessionPeerId(Guid.NewGuid());
         var remoteSignedPreKeyBytes = _remoteSignedPreKey.PublicKey.ExportSubjectPublicKeyInfo();
+        var remoteIdentitySigningKeyBytes = _remoteIdentitySigningKey.ExportSubjectPublicKeyInfo();
         var remoteBundle = new ContractsPreKeyBundle
         {
-            IdentityKey = ByteString.CopyFrom(_remoteIdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
+            IdentityAgreementKey = ByteString.CopyFrom(_remoteIdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
+            IdentitySigningKey = ByteString.CopyFrom(remoteIdentitySigningKeyBytes),
             SignedPreKey = ByteString.CopyFrom(remoteSignedPreKeyBytes),
             PreKeySignature = ByteString.CopyFrom(_remoteIdentitySigningKey.SignData(remoteSignedPreKeyBytes, HashAlgorithmName.SHA256, DSASignatureFormat.IeeeP1363FixedFieldConcatenation)),
             OneTimePreKey = ByteString.CopyFrom(_remoteOneTimePreKey.PublicKey.ExportSubjectPublicKeyInfo())
@@ -86,23 +87,26 @@ public class X3DHOrchestratorTests
 
         var expectedSharedSecret = new SharedSecret(new byte[32]);
         Random.Shared.NextBytes(expectedSharedSecret.Value);
-        var handshakeResult = new HandshakeInitiationResult(expectedSharedSecret, new PublicKey(new byte[65]));
+        using var ephemeralKey = ECDiffieHellman.Create();
+
+        _mockX3dhManager.Setup(x => x.VerifySignature(remoteIdentitySigningKeyBytes, remoteSignedPreKeyBytes, It.IsAny<byte[]>())).Returns(true);
 
         _mockX3dhManager.Setup(x => x.InitiateHandshake(
                 It.IsAny<CryptoPreKeyBundle>(),
+                ephemeralKey,
                 _localKeys.IdentitySigningKey,
                 _localKeys.IdentityAgreementKey))
-            .Returns(handshakeResult);
+            .Returns(expectedSharedSecret);
 
         // Act
-        var result = _orchestrator.InitiateHandshake(remotePeerId, remoteBundle);
+        var result = _orchestrator.CompleteHandshake(remoteBundle, ephemeralKey);
 
         // Assert
         result.Should().NotBeNull();
-        result.SharedSecret.Value.Should().BeEquivalentTo(expectedSharedSecret.Value);
-        result.InitialRatchetPublicKey.Should().NotBeNull();
+        result.Value.Should().BeEquivalentTo(expectedSharedSecret.Value);
         _mockX3dhManager.Verify(x => x.InitiateHandshake(
-            It.IsAny<CryptoPreKeyBundle>(),
+            It.Is<CryptoPreKeyBundle>(b => b.IdentitySigningKey.SequenceEqual(remoteIdentitySigningKeyBytes)),
+            ephemeralKey,
             _localKeys.IdentitySigningKey,
             _localKeys.IdentityAgreementKey), Times.Once);
     }
@@ -111,47 +115,37 @@ public class X3DHOrchestratorTests
     public void ProcessHandshake_WithValidBundle_ReturnsCorrectResult()
     {
         // Arrange
-        var remotePeerId = new SessionPeerId(Guid.NewGuid());
-
-        // The initiator's ephemeral key for this handshake
-        using var remoteEphemeralKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        var remoteEphemeralPublicKey = remoteEphemeralKey.PublicKey.ExportSubjectPublicKeyInfo();
-
-        // The initiator's pre-key bundle
-        var remoteSignedPreKeyBytes = _remoteSignedPreKey.PublicKey.ExportSubjectPublicKeyInfo();
-        var signature = _remoteIdentitySigningKey.SignData(remoteSignedPreKeyBytes, HashAlgorithmName.SHA256, DSASignatureFormat.IeeeP1363FixedFieldConcatenation);
-        var initiatorPreKeyBundle = new ContractsPreKeyBundle
+        var remoteIdentitySigningKeyBytes = _remoteIdentitySigningKey.ExportSubjectPublicKeyInfo();
+        var remoteBundle = new ContractsPreKeyBundle
         {
-            IdentityKey = ByteString.CopyFrom(_remoteIdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
-            SignedPreKey = ByteString.CopyFrom(remoteSignedPreKeyBytes),
-            PreKeySignature = ByteString.CopyFrom(signature)
+            IdentityAgreementKey = ByteString.CopyFrom(_remoteIdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
+            IdentitySigningKey = ByteString.CopyFrom(remoteIdentitySigningKeyBytes),
+            SignedPreKey = ByteString.CopyFrom(_remoteSignedPreKey.PublicKey.ExportSubjectPublicKeyInfo()),
+            PreKeySignature = ByteString.CopyFrom(new byte[64]) // Dummy signature
         };
 
         var expectedSharedSecret = new SharedSecret(new byte[32]);
         Random.Shared.NextBytes(expectedSharedSecret.Value);
+        using var ephemeralKey = ECDiffieHellman.Create();
+        var ephemeralKeyBytes = ephemeralKey.PublicKey.ExportSubjectPublicKeyInfo();
 
         _mockX3dhManager.Setup(x => x.RespondToHandshake(
-                It.IsAny<byte[]>(),
-                It.IsAny<byte[]>(),
+                _remoteIdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo(),
+                ephemeralKeyBytes,
                 _localKeys.IdentitySigningKey,
                 _localKeys.IdentityAgreementKey,
                 _localKeys.SignedPreKey,
-                It.IsAny<ECDiffieHellman>()))
+                _localKeys.OneTimePreKeys.First()))
             .Returns(expectedSharedSecret);
 
         // Act
-        var result = _orchestrator.ProcessHandshake(initiatorPreKeyBundle, remoteEphemeralPublicKey);
+        var result = _orchestrator.ProcessHandshake(remoteBundle, ephemeralKeyBytes);
 
         // Assert
         result.Should().NotBeNull();
         result.SharedSecret.Value.Should().BeEquivalentTo(expectedSharedSecret.Value);
-        result.InitialRatchetPublicKey.Should().NotBeNull();
-        _mockX3dhManager.Verify(x => x.RespondToHandshake(
-            It.IsAny<byte[]>(),
-            It.IsAny<byte[]>(),
-            _localKeys.IdentitySigningKey,
-            _localKeys.IdentityAgreementKey,
-            _localKeys.SignedPreKey,
-            It.IsAny<ECDiffieHellman>()), Times.Once);
+        result.ResponderBundle.Should().NotBeNull();
+        result.ResponderBundle.IdentityAgreementKey.Should().NotBeNull();
+        result.ResponderBundle.IdentitySigningKey.Should().NotBeNull();
     }
 }

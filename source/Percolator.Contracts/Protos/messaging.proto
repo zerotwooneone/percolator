@@ -23,10 +23,11 @@ service TransportService {
 // Represents the public cryptographic materials needed to establish a secure session.
 // The exact fields will depend on the underlying handshake protocol (e.g., X3DH).
 message PreKeyBundle {
-    bytes identity_key = 1;         // Ephemeral identity key for the session.
+    bytes identity_agreement_key = 1; // The public identity key for DH agreement.
     bytes signed_pre_key = 2;
     bytes pre_key_signature = 3;
     optional bytes one_time_pre_key = 4;
+    bytes identity_signing_key = 5;   // The public identity key for signature verification.
 }
 
 // Request to establish a new secure session.

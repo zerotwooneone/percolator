@@ -1,6 +1,7 @@
 using System.CommandLine;
 using System.CommandLine.Invocation;
 using System.Net;
+using System.Security.Cryptography;
 using Google.Protobuf;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -163,29 +164,38 @@ connectCommand.SetHandler(async (InvocationContext context) =>
         Console.WriteLine("Could not find any one-time pre-keys for the local identity.");
         return;
     }
-    var signedPreKeyPublicBytes = localKeys.SignedPreKey.PublicKey.ExportSubjectPublicKeyInfo();
+    using var signedPreKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+    var signedPreKeyPublicBytes = signedPreKey.PublicKey.ExportSubjectPublicKeyInfo();
     var signature = cryptoManager.SignPreKey(localKeys.IdentitySigningKey, signedPreKeyPublicBytes);
     var localBundle = new Percolator.Contracts.PreKeyBundle
     {
-        IdentityKey = ByteString.CopyFrom(localKeys.IdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
+        IdentityAgreementKey = ByteString.CopyFrom(localKeys.IdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
+        IdentitySigningKey = ByteString.CopyFrom(localKeys.IdentitySigningKey.ExportSubjectPublicKeyInfo()),
         SignedPreKey = ByteString.CopyFrom(signedPreKeyPublicBytes),
         PreKeySignature = ByteString.CopyFrom(signature),
         OneTimePreKey = ByteString.CopyFrom(localKeys.OneTimePreKeys[0].PublicKey.ExportSubjectPublicKeyInfo())
     };
 
-    // 2. Call the remote peer to establish a session
-    var request = new EstablishSessionRequest { InitiatorBundle = localBundle };
+    // 2. Generate an ephemeral key for this handshake
+    using var ephemeralKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+
+    // 3. Call the remote peer to establish a session
+    var request = new EstablishSessionRequest
+    {
+        InitiatorBundle = localBundle,
+        InitiatorEphemeralKey = ByteString.CopyFrom(ephemeralKey.PublicKey.ExportSubjectPublicKeyInfo())
+    };
     var response = await client.EstablishSessionAsync(request);
 
-    // 3. Use the response bundle to complete the handshake locally
+    // 4. Use the response bundle to complete the handshake locally
     var remotePeerId = new SessionPeerId(new Guid(response.SessionId)); // This assumes the SessionId is the PeerId. A better approach would be to return the PeerId explicitly.
-    var handshakeResult = orchestrator.InitiateHandshake(remotePeerId, response.ResponderBundle);
+    var sharedSecret = orchestrator.CompleteHandshake(response.ResponderBundle, ephemeralKey);
 
-    // 4. Create the secure session
+    // 5. Create the secure session
     var conversationId = await sessionManager.EstablishSessionAsync(
         remotePeerId,
-        new OpaquePublicKey(response.ResponderBundle.IdentityKey.ToByteArray()),
-        handshakeResult.SharedSecret
+        new OpaquePublicKey(response.ResponderBundle.IdentityAgreementKey.ToByteArray()),
+        sharedSecret
     );
 
     Console.WriteLine($"Session established with peer. Conversation ID: {conversationId}");

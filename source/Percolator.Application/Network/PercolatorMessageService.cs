@@ -30,9 +30,6 @@ namespace Percolator.Application.Network
             _logger.LogInformation("Received request to establish a new session.");
             try
             {
-                // The cryptographic identity for the session is always the ephemeral key from the bundle.
-                var cryptoIdentityKey = new OpaquePublicKey(request.InitiatorBundle.IdentityKey.ToByteArray());
-
                 // Perform a best-effort check to assign a stable PeerId for our application layer.
                 // If a long-term identity key is provided, we use it to derive a stable ID.
                 // Otherwise, we derive it from the ephemeral bundle key, meaning the peer will
@@ -49,7 +46,7 @@ namespace Percolator.Application.Network
                 else
                 {
                     using var sha256 = SHA256.Create();
-                    var hash = sha256.ComputeHash(request.InitiatorBundle.IdentityKey.ToByteArray());
+                    var hash = sha256.ComputeHash(request.InitiatorBundle.IdentityAgreementKey.ToByteArray());
                     var guid = new Guid(hash.AsSpan(0, 16));
                     remotePeerId = new SessionPeerId(guid);
                     _logger.LogInformation("No long-term identity key provided. Identified peer {PeerId} using ephemeral bundle key.", remotePeerId);
@@ -62,9 +59,10 @@ namespace Percolator.Application.Network
                 );
 
                 // Step 2: Use the shared secret to establish a new Double Ratchet session.
+                var remoteIdentityPublicKey = new OpaquePublicKey(request.InitiatorBundle.IdentityAgreementKey.ToByteArray());
                 var conversationId = await _sessionManager.EstablishSessionAsync(
                     remotePeerId,
-                    cryptoIdentityKey,
+                    remoteIdentityPublicKey,
                     orchestratorResult.SharedSecret
                 );
 

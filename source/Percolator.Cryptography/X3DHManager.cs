@@ -6,54 +6,42 @@ public class X3DHManager : IX3DHManager
 {
     private const int KeySize = 32;
 
-    public HandshakeInitiationResult InitiateHandshake(PreKeyBundle remoteBundle, ECDsa identitySigningKey, ECDiffieHellman identityAgreementKey)
+    public SharedSecret InitiateHandshake(PreKeyBundle remoteBundle, ECDiffieHellman ephemeralKey, ECDsa identitySigningKey, ECDiffieHellman identityAgreementKey)
     {
-        // Step 1: Verify the signature on the signed pre-key.
-        using var remoteIdentityKey = ECDsa.Create();
-        remoteIdentityKey.ImportSubjectPublicKeyInfo(remoteBundle.IdentityKey, out _);
+        // The initiator has received a pre-key bundle from the responder.
+        // It uses its own identity key and a newly generated ephemeral key.
 
-        if (!remoteIdentityKey.VerifyData(remoteBundle.SignedPreKey, remoteBundle.Signature, HashAlgorithmName.SHA256, DSASignatureFormat.IeeeP1363FixedFieldConcatenation))
-        {
-            throw new CryptographicException("Invalid signature for signed pre-key.");
-        }
-
-        // Generate ephemeral keys for the initiator
-        using var ephemeralKeyPair = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-
-        // Step 2: Perform the 4 DH calculations to derive the shared secret.
-        using var remoteIdentityKeyECDH = ECDiffieHellman.Create();
-        remoteIdentityKeyECDH.ImportSubjectPublicKeyInfo(remoteBundle.IdentityKey, out _);
+        // Step 1: Load the remote peer's public keys from the bundle.
+        using var remoteIdentityKey = ECDiffieHellman.Create();
+        remoteIdentityKey.ImportSubjectPublicKeyInfo(remoteBundle.IdentityAgreementKey, out _);
 
         using var remoteSignedPreKey = ECDiffieHellman.Create();
         remoteSignedPreKey.ImportSubjectPublicKeyInfo(remoteBundle.SignedPreKey, out _);
 
-        // DH1 = DH(IK_A, SPK_B)
+        // Step 2: Perform DH calculations.
+        // DH1 = DH(IKA, SPKB)
+        // DH2 = DH(EKA, IKB)
+        // DH3 = DH(EKA, SPKB)
         var dh1 = identityAgreementKey.DeriveKeyMaterial(remoteSignedPreKey.PublicKey);
-        // DH2 = DH(EK_A, IK_B)
-        var dh2 = ephemeralKeyPair.DeriveKeyMaterial(remoteIdentityKeyECDH.PublicKey);
-        // DH3 = DH(EK_A, SPK_B)
-        var dh3 = ephemeralKeyPair.DeriveKeyMaterial(remoteSignedPreKey.PublicKey);
+        var dh2 = ephemeralKey.DeriveKeyMaterial(remoteIdentityKey.PublicKey);
+        var dh3 = ephemeralKey.DeriveKeyMaterial(remoteSignedPreKey.PublicKey);
 
-        var dh4 = Array.Empty<byte>();
-        if (remoteBundle.OneTimePreKey.Length > 0)
-        {
+        // Step 4: If a one-time pre-key is present, perform a fourth DH.
+        // DH4 = DH(EKA, OPKB)
+        var dhCalculations = new List<byte[]> { dh1, dh2, dh3 };
+        if (remoteBundle.OneTimePreKey is { Length: > 0 })
+        { 
             using var remoteOneTimePreKey = ECDiffieHellman.Create();
             remoteOneTimePreKey.ImportSubjectPublicKeyInfo(remoteBundle.OneTimePreKey, out _);
-            // DH4 = DH(EK_A, OPK_B)
-            dh4 = ephemeralKeyPair.DeriveKeyMaterial(remoteOneTimePreKey.PublicKey);
+            var dh4 = ephemeralKey.DeriveKeyMaterial(remoteOneTimePreKey.PublicKey);
+            dhCalculations.Add(dh4);
         }
 
-        var combined = new byte[dh1.Length + dh2.Length + dh3.Length + dh4.Length];
-        Buffer.BlockCopy(dh1, 0, combined, 0, dh1.Length);
-        Buffer.BlockCopy(dh2, 0, combined, dh1.Length, dh2.Length);
-        Buffer.BlockCopy(dh3, 0, combined, dh1.Length + dh2.Length, dh3.Length);
-        Buffer.BlockCopy(dh4, 0, combined, dh1.Length + dh2.Length + dh3.Length, dh4.Length);
+        // Step 5: Combine DH results and derive the shared secret.
+        var combinedDh = dhCalculations.SelectMany(b => b).ToArray();
+        var kdfResult = HKDF.DeriveKey(HashAlgorithmName.SHA256, combinedDh, KeySize, salt: new byte[KeySize], info: "Percolator-X3DH-v1"u8.ToArray());
 
-        // Step 3: Use a KDF to create the final shared key.
-        var sharedSecret = new SharedSecret(HKDF.DeriveKey(HashAlgorithmName.SHA256, combined, KeySize, salt: new byte[KeySize], info: "Percolator-X3DH-v1"u8.ToArray()));
-        var ephemeralPublicKey = new PublicKey(ephemeralKeyPair.PublicKey.ExportSubjectPublicKeyInfo());
-
-        return new HandshakeInitiationResult(sharedSecret, ephemeralPublicKey);
+        return new SharedSecret(kdfResult);
     }
 
     public SharedSecret RespondToHandshake(byte[] remoteIdentityKeyBytes, byte[] remoteEphemeralKeyBytes, ECDsa identitySigningKey, ECDiffieHellman identityAgreementKey, ECDiffieHellman signedPreKey, ECDiffieHellman? oneTimePreKey)
