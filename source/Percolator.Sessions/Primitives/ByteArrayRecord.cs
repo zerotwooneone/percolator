@@ -1,6 +1,3 @@
-using System;
-using System.Linq;
-
 namespace Percolator.Sessions.Primitives;
 
 public abstract record ByteArrayRecord(byte[] Value) : IEquatable<ByteArrayRecord>

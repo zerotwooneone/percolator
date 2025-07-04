@@ -3,7 +3,6 @@ using Google.Protobuf;
 using Percolator.Application.Identity;
 using Percolator.Cryptography;
 using Percolator.Sessions;
-using System.Linq;
 using ContractsPreKeyBundle = Percolator.Contracts.PreKeyBundle;
 using CryptographyPreKeyBundle = Percolator.Cryptography.PreKeyBundle;
 using SessionPeerId = Percolator.Sessions.PeerId;

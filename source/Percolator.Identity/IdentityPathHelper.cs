@@ -1,6 +1,3 @@
-using System;
-using System.IO;
-
 namespace Percolator.Identity;
 
 public static class IdentityPathHelper
