@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Percolator.Application;
 using Percolator.Application.Identity;
 using Percolator.Application.KeyExchange;
@@ -114,6 +115,7 @@ connectCommand.SetHandler(async (InvocationContext context) =>
     // Build client-specific service provider
     var services = new ServiceCollection();
     var configuration = new ConfigurationBuilder().Build(); // Empty config, as services don't seem to use it heavily
+    services.AddLogging(builder => builder.AddConsole());
     services.AddApplicationServices(configuration);
 
     // This is INSECURE and for development purposes only.
@@ -193,6 +195,7 @@ sendCommand.SetHandler(async (InvocationContext context) =>
     // Build client-specific service provider
     var services = new ServiceCollection();
     var configuration = new ConfigurationBuilder().Build();
+    services.AddLogging(builder => builder.AddConsole());
     services.AddApplicationServices(configuration);
     
     await using var serviceProvider = services.BuildServiceProvider();
