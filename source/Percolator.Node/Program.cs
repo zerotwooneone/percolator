@@ -97,6 +97,10 @@ hostCommand.SetHandler(async (InvocationContext context) =>
 
     var app = builder.Build();
 
+    // Manually initialize the identity before the host starts
+    var identityOrchestrator = app.Services.GetRequiredService<IIdentityOrchestrator>();
+    await identityOrchestrator.LoadOrCreateIdentityAsync(identityName!, context.GetCancellationToken());
+
     // Configure Middleware
     app.UseRouting();
     app.MapGrpcService<PercolatorMessageService>();
