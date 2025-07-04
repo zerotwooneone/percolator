@@ -56,6 +56,8 @@ var conversationIdArgument = new Argument<Guid>("conversationId", "The ID of the
 var messageArgument = new Argument<string>("message", "The plaintext message to send.");
 var sendCommand = new Command("send", "Sends an encrypted message to a peer over an established session.")
 {
+    hostArgument, // Re-use host and port arguments for sending
+    portArgument,
     conversationIdArgument,
     messageArgument,
     identityOption // Add identity option to client commands
@@ -183,8 +185,7 @@ connectCommand.SetHandler(async (InvocationContext context) =>
     var conversationId = await sessionManager.EstablishSessionAsync(
         remotePeerId,
         new OpaquePublicKey(response.ResponderBundle.IdentityKey.ToByteArray()),
-        handshakeResult.SharedSecret,
-        handshakeResult.InitialRatchetPublicKey
+        handshakeResult.SharedSecret
     );
 
     Console.WriteLine($"Session established with peer. Conversation ID: {conversationId}");
@@ -192,6 +193,8 @@ connectCommand.SetHandler(async (InvocationContext context) =>
 
 sendCommand.SetHandler(async (InvocationContext context) =>
 {
+    var host = context.ParseResult.GetValueForArgument(hostArgument);
+    var port = context.ParseResult.GetValueForArgument(portArgument);
     var conversationId = context.ParseResult.GetValueForArgument(conversationIdArgument);
     var message = context.ParseResult.GetValueForArgument(messageArgument);
     var identityName = context.ParseResult.GetValueForOption(identityOption);
@@ -202,14 +205,34 @@ sendCommand.SetHandler(async (InvocationContext context) =>
     services.AddLogging(builder => builder.AddConsole());
     services.AddApplicationServices(configuration);
     
+    // This is INSECURE and for development purposes only.
+    var handler = new HttpClientHandler
+    {
+        ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
+    };
+
+    services.AddGrpcClient<TransportService.TransportServiceClient>(o =>
+    {
+        o.Address = new Uri($"https://{host}:{port}");
+    })
+    .ConfigurePrimaryHttpMessageHandler(() => handler);
+
     await using var serviceProvider = services.BuildServiceProvider();
 
     // Initialize identity
     var identityOrchestrator = serviceProvider.GetRequiredService<IIdentityOrchestrator>();
     await identityOrchestrator.LoadOrCreateIdentityAsync(identityName!, context.GetCancellationToken());
 
-    var sessionManager = serviceProvider.GetRequiredService<DirectSessionManager>();
-    await sessionManager.SendMessageAsync(new ConversationId(conversationId), message);
+    var client = serviceProvider.GetRequiredService<TransportService.TransportServiceClient>();
+
+    var request = new DeliverOpaqueMessageRequest
+    {
+        SessionId = conversationId.ToString(),
+        Payload = ByteString.CopyFromUtf8(message)
+    };
+
+    Console.WriteLine($"Sending message to conversation {conversationId}...");
+    await client.DeliverOpaqueMessageAsync(request);
     Console.WriteLine("Message sent.");
 });
 

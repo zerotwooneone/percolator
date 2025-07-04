@@ -27,7 +27,7 @@ public class DirectSessionManager
         _activeIdentityContext = activeIdentityContext;
     }
 
-    public async Task<ConversationId> EstablishSessionAsync(SessionPeerId remotePeerId, OpaquePublicKey remoteIdentityPublicKey, SharedSecret sharedSecret, OpaquePublicKey initialRatchetPublicKey)
+    public async Task<ConversationId> EstablishSessionAsync(SessionPeerId remotePeerId, OpaquePublicKey remoteIdentityPublicKey, SharedSecret sharedSecret)
     {
         if (_activeIdentityContext.Identity is null || _activeIdentityContext.Keys is null)
         {
@@ -36,12 +36,13 @@ public class DirectSessionManager
 
         // DoubleRatchetSession will dispose the key, so we must pass a temporary copy.
         var identityKey = ECDiffieHellman.Create(_activeIdentityContext.Keys.IdentityAgreementKey.ExportParameters(true));
+        var localRatchetKey = ECDiffieHellman.Create(_activeIdentityContext.Keys.SignedPreKey.ExportParameters(true));
 
-        using var doubleRatchetSession = DoubleRatchetSession.AsInitiator(
+        using var doubleRatchetSession = DoubleRatchetSession.AsResponder(
             sharedSecret.Value,
             identityKey,
-            remoteIdentityPublicKey.Value, 
-            initialRatchetPublicKey.Value
+            remoteIdentityPublicKey.Value,
+            localRatchetKey
         );
 
         var conversationId = new ConversationId(Guid.NewGuid());
@@ -88,48 +89,6 @@ public class DirectSessionManager
         await _messageStore.StoreDirectMessageAsync(message);
 
         return decryptedBytes;
-    }
-
-    public async Task<RatchetMessage> SendMessageAsync(ConversationId conversationId, string plaintext)
-    {
-        if (_activeIdentityContext.Identity is null || _activeIdentityContext.Keys is null)
-        {
-            throw new InvalidOperationException("No active identity found to send message.");
-        }
-
-        var conversation = await _conversationStore.GetConversationAsync(conversationId);
-        if (conversation is null)
-        {
-            throw new InvalidOperationException($"Conversation with ID {conversationId} not found.");
-        }
-
-        var remotePeerId = conversation.RemotePeerId;
-
-        var sessionState = await _doubleRatchetSessionStore.GetSessionStateAsync(remotePeerId, conversationId);
-        if (sessionState is null)
-        {
-            throw new InvalidOperationException($"Double Ratchet session state for conversation {conversationId} not found.");
-        }
-
-        var identityKey = ECDiffieHellman.Create(_activeIdentityContext.Keys.IdentityAgreementKey.ExportParameters(true));
-
-        using var doubleRatchetSession = new DoubleRatchetSession(sessionState, identityKey);
-
-        var plaintextBytes = Encoding.UTF8.GetBytes(plaintext);
-        var encryptedMessage = doubleRatchetSession.Encrypt(plaintextBytes);
-
-        await _doubleRatchetSessionStore.SaveSessionStateAsync(remotePeerId, conversationId, doubleRatchetSession.GetState());
-
-        var localPeerId = new SessionPeerId(_activeIdentityContext.Identity.Id);
-        var message = new DirectMessage(
-            new MessageId(Guid.NewGuid()),
-            conversationId,
-            localPeerId,
-            new OpaqueContent(plaintextBytes)
-        );
-        await _messageStore.StoreDirectMessageAsync(message);
-
-        return encryptedMessage;
     }
 
     public async Task<DirectConversation?> GetConversationAsync(ConversationId conversationId)

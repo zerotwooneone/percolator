@@ -48,6 +48,16 @@ This file defines the core `InternalEnvelope` used by the application's internal
 
 ---
 
+## Peer Identification
+
+In Percolator's peer-to-peer model, identity is handled with a "best-effort" approach that respects user privacy and the ephemeral nature of cryptographic keys.
+
+- **No Peer ID Exchange:** Clients **do not** exchange pre-defined user or peer IDs. A peer's identity is not a fixed property.
+- **Long-Term vs. Ephemeral Identity:**
+  - When initiating a session, a client **may** provide an optional `long_term_identity_key`. If provided, the receiving peer will use a hash of this key to derive a stable, recognizable `PeerId` for the duration of their interaction. This allows a peer to be "remembered" across multiple sessions, even if their session keys change.
+  - If the `long_term_identity_key` is **not** provided, the receiving peer will derive a temporary `PeerId` from the ephemeral `identity_key` within the `PreKeyBundle`. In this case, the initiating peer will appear as a new, unknown entity for each new session.
+- **Best-Effort Principle:** This system ensures that peers can always connect, but being recognized as a known contact is a "best-effort" outcome dependent on the initiator providing a stable long-term key. It is acceptable and expected that friends may sometimes appear as "unknown" if they choose not to provide their long-term key.
+
 ## Protocol Design Principles
 
 To ensure robustness and future compatibility, all public-facing contracts adhere to the following principles:

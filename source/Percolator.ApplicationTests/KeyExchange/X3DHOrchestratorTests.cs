@@ -140,7 +140,7 @@ public class X3DHOrchestratorTests
             .Returns(expectedSharedSecret);
 
         // Act
-        var result = _orchestrator.ProcessHandshake(remotePeerId, initiatorPreKeyBundle, remoteEphemeralPublicKey);
+        var result = _orchestrator.ProcessHandshake(initiatorPreKeyBundle, remoteEphemeralPublicKey);
 
         // Assert
         result.Should().NotBeNull();

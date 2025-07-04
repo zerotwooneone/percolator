@@ -1,10 +1,14 @@
 using System.Text.Json;
 using Grpc.Core;
 using Microsoft.Extensions.Logging;
+using Percolator.Application.KeyExchange;
 using Percolator.Application.Sessions;
 using Percolator.Contracts;
 using Percolator.Cryptography;
 using Percolator.Sessions;
+using SessionPeerId = Percolator.Sessions.PeerId;
+using Google.Protobuf;
+using System.Security.Cryptography;
 
 namespace Percolator.Application.Network
 {
@@ -12,11 +16,72 @@ namespace Percolator.Application.Network
     {
         private readonly ILogger<PercolatorMessageService> _logger;
         private readonly DirectSessionManager _sessionManager;
+        private readonly X3DHOrchestrator _x3dhOrchestrator;
 
-        public PercolatorMessageService(ILogger<PercolatorMessageService> logger, DirectSessionManager sessionManager)
+        public PercolatorMessageService(ILogger<PercolatorMessageService> logger, DirectSessionManager sessionManager, X3DHOrchestrator x3dhOrchestrator)
         {
             _logger = logger;
             _sessionManager = sessionManager;
+            _x3dhOrchestrator = x3dhOrchestrator;
+        }
+
+        public override async Task<EstablishSessionResponse> EstablishSession(EstablishSessionRequest request, ServerCallContext context)
+        {
+            _logger.LogInformation("Received request to establish a new session.");
+            try
+            {
+                // The cryptographic identity for the session is always the ephemeral key from the bundle.
+                var cryptoIdentityKey = new OpaquePublicKey(request.InitiatorBundle.IdentityKey.ToByteArray());
+
+                // Perform a best-effort check to assign a stable PeerId for our application layer.
+                // If a long-term identity key is provided, we use it to derive a stable ID.
+                // Otherwise, we derive it from the ephemeral bundle key, meaning the peer will
+                // appear as a new identity on each connection if they don't use a long-term key.
+                SessionPeerId remotePeerId;
+                if (request.HasLongTermIdentityKey)
+                {
+                    using var sha256 = SHA256.Create();
+                    var hash = sha256.ComputeHash(request.LongTermIdentityKey.ToByteArray());
+                    var guid = new Guid(hash.AsSpan(0, 16));
+                    remotePeerId = new SessionPeerId(guid);
+                    _logger.LogInformation("Identified peer {PeerId} using provided long-term identity key.", remotePeerId);
+                }
+                else
+                {
+                    using var sha256 = SHA256.Create();
+                    var hash = sha256.ComputeHash(request.InitiatorBundle.IdentityKey.ToByteArray());
+                    var guid = new Guid(hash.AsSpan(0, 16));
+                    remotePeerId = new SessionPeerId(guid);
+                    _logger.LogInformation("No long-term identity key provided. Identified peer {PeerId} using ephemeral bundle key.", remotePeerId);
+                }
+
+                // Step 1: Use the orchestrator to process the incoming handshake.
+                var orchestratorResult = _x3dhOrchestrator.ProcessHandshake(
+                    request.InitiatorBundle,
+                    request.InitiatorEphemeralKey.ToByteArray()
+                );
+
+                // Step 2: Use the shared secret to establish a new Double Ratchet session.
+                var conversationId = await _sessionManager.EstablishSessionAsync(
+                    remotePeerId,
+                    cryptoIdentityKey,
+                    orchestratorResult.SharedSecret
+                );
+
+                _logger.LogInformation("Successfully established session {ConversationId} with peer {PeerId}", conversationId, remotePeerId);
+
+                // Step 3: Return the session ID and the responder's bundle to complete the handshake.
+                return new EstablishSessionResponse
+                {
+                    SessionId = conversationId.ToString(),
+                    ResponderBundle = orchestratorResult.ResponderBundle
+                };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to establish session.");
+                throw new RpcException(new Status(StatusCode.Internal, "Session establishment failed."));
+            }
         }
 
         public override async Task<DeliverOpaqueMessageResponse> DeliverOpaqueMessage(DeliverOpaqueMessageRequest request, ServerCallContext context)

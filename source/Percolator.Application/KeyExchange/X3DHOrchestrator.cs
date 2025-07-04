@@ -67,7 +67,7 @@ public class X3DHOrchestrator
         return new OrchestratorInitiationResult(handshakeResult.SharedSecret, initialRatchetPublicKey, localPreKeyBundle);
     }
 
-    public OrchestratorResponseResult ProcessHandshake(SessionPeerId remotePeerId, ContractsPreKeyBundle localPreKeyBundle, byte[] remoteEphemeralPublicKey)
+    public OrchestratorResponseResult ProcessHandshake(ContractsPreKeyBundle remotePreKeyBundle, byte[] remoteEphemeralPublicKey)
     {
         // Get local identity keys and validate
         if (_activeIdentityContext.Keys is not
@@ -81,24 +81,37 @@ public class X3DHOrchestrator
             throw new InvalidOperationException("Active identity is not fully initialized for X3DH handshake.");
         }
 
-        var remoteEphemeralKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        remoteEphemeralKey.ImportSubjectPublicKeyInfo(remoteEphemeralPublicKey, out _);
-
-        var remoteIdentityKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        remoteIdentityKey.ImportSubjectPublicKeyInfo(localPreKeyBundle.IdentityKey.ToByteArray(), out _);
+        var remoteCryptoBundle = new CryptographyPreKeyBundle(
+            remotePreKeyBundle.IdentityKey.ToByteArray(),
+            remotePreKeyBundle.SignedPreKey.ToByteArray(),
+            remotePreKeyBundle.PreKeySignature.ToByteArray(),
+            remotePreKeyBundle.OneTimePreKey.ToByteArray()
+        );
 
         var sharedSecret = _x3DhManager.RespondToHandshake(
-            remoteIdentityKey.ExportSubjectPublicKeyInfo(),
-            remoteEphemeralKey.ExportSubjectPublicKeyInfo(),
+            remoteCryptoBundle.IdentityKey,
+            remoteEphemeralPublicKey,
             identitySigningKey,
             identityAgreementKey,
             signedPreKey,
             oneTimePreKeys.First()
         );
 
-        // The initial ratchet public key for the Double Ratchet session is the responder's signed pre-key
-        var initialRatchetPublicKey = new OpaquePublicKey(signedPreKey.PublicKey.ExportSubjectPublicKeyInfo());
+        // The initial ratchet public key for the Double Ratchet session is the initiator's ephemeral public key
+        var initialRatchetPublicKey = new OpaquePublicKey(remoteEphemeralPublicKey);
 
-        return new OrchestratorResponseResult(sharedSecret, initialRatchetPublicKey);
+        // Create the responder's bundle to send back.
+        var signedPreKeyBytes = signedPreKey.PublicKey.ExportSubjectPublicKeyInfo();
+        var signature = identitySigningKey.SignData(signedPreKeyBytes, HashAlgorithmName.SHA256, DSASignatureFormat.IeeeP1363FixedFieldConcatenation);
+
+        var responderBundle = new ContractsPreKeyBundle
+        {
+            IdentityKey = ByteString.CopyFrom(identityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
+            SignedPreKey = ByteString.CopyFrom(signedPreKeyBytes),
+            PreKeySignature = ByteString.CopyFrom(signature),
+            OneTimePreKey = ByteString.CopyFrom(oneTimePreKeys.First().PublicKey.ExportSubjectPublicKeyInfo())
+        };
+
+        return new OrchestratorResponseResult(sharedSecret, initialRatchetPublicKey, responderBundle);
     }
 }

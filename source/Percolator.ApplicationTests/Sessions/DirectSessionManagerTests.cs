@@ -57,45 +57,4 @@ public class DirectSessionManagerTests
         _localKeys.Dispose();
         _remoteIdentityKey.Dispose();
     }
-
-    [Test]
-    public async Task SendMessageAsync_WithValidSession_EncryptsAndSavesMessage()
-    {
-        // Arrange
-        var conversationId = new ConversationId(Guid.NewGuid());
-        var remotePeerId = new SessionPeerId(Guid.NewGuid());
-        var plaintext = "Hello, world!";
-
-        var remoteIdentityPublicKeyBytes = _remoteIdentityKey.PublicKey.ExportSubjectPublicKeyInfo();
-
-        using var remoteRatchetKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        var remoteRatchetPublicKeyBytes = remoteRatchetKey.PublicKey.ExportSubjectPublicKeyInfo();
-
-        var sharedSecret = new byte[32];
-        RandomNumberGenerator.Fill(sharedSecret);
-
-        using var localIdentityKeyCopy = ECDiffieHellman.Create(_localKeys.IdentityAgreementKey.ExportParameters(true));
-        var doubleRatchetSession = DoubleRatchetSession.AsInitiator(
-            sharedSecret,
-            localIdentityKeyCopy,
-            remoteIdentityPublicKeyBytes,
-            remoteRatchetPublicKeyBytes
-        );
-        var sessionState = doubleRatchetSession.GetState();
-
-        _mockSessionStore.Setup(s => s.GetSessionStateAsync(remotePeerId, conversationId))
-            .ReturnsAsync(sessionState);
-
-        var localPeerId = new SessionPeerId(_activeIdentityContext.Identity!.Id);
-        var conversation = new DirectConversation(conversationId, localPeerId, remotePeerId);
-        _mockConversationStore.Setup(s => s.GetConversationAsync(conversationId)).ReturnsAsync(conversation);
-
-        // Act
-        var result = await _manager.SendMessageAsync(conversationId, plaintext);
-
-        // Assert
-        result.Should().NotBeNull();
-        _mockSessionStore.Verify(s => s.SaveSessionStateAsync(remotePeerId, conversationId, It.Is<DoubleRatchetSession.DoubleRatchetSessionState>(state => state.RootKey.Length > 0)), Times.Once);
-        _mockMessageStore.Verify(m => m.StoreDirectMessageAsync(It.Is<DirectMessage>(msg => msg.ConversationId == conversationId)), Times.Once);
-    }
 }
