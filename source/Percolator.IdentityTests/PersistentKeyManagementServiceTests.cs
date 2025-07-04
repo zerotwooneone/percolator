@@ -20,6 +20,11 @@ public class PersistentKeyManagementServiceTests
     private Mock<ICredentialService> _credentialServiceMock;
     private Mock<ILogger<PersistentKeyManagementService>> _loggerMock;
     private PersistentKeyManagementService _sut;
+    private static readonly JsonSerializerOptions s_jsonOptions = new()
+    {
+        WriteIndented = true,
+        Converters = { new ECParametersJsonConverter() }
+    };
 
     [SetUp]
     public void Setup()
@@ -76,7 +81,7 @@ public class PersistentKeyManagementServiceTests
             SignedPreKey = spk.ExportParameters(true),
             OneTimePreKeys = otps.Select(k => k.ExportParameters(true)).ToArray()
         };
-        var decryptedBytes = JsonSerializer.SerializeToUtf8Bytes(container);
+        var decryptedBytes = JsonSerializer.SerializeToUtf8Bytes(container, s_jsonOptions);
         var encryptedBytes = _fixture.Create<byte[]>();
 
         _credentialServiceMock.Setup(s => s.Unprotect(encryptedBytes)).Returns(decryptedBytes);
@@ -108,6 +113,7 @@ public class PersistentKeyManagementServiceTests
         // Arrange
         var identityName = _fixture.Create<string>();
         var keyFilePath = Path.Combine(IdentityPathHelper.GetBasePath(identityName), "keys", $"{identityName}.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(keyFilePath)!);
         await File.WriteAllTextAsync(keyFilePath, "this is not valid json");
 
         // Act & Assert
@@ -120,6 +126,7 @@ public class PersistentKeyManagementServiceTests
         // Arrange
         var identityName = _fixture.Create<string>();
         var keyFilePath = Path.Combine(IdentityPathHelper.GetBasePath(identityName), "keys", $"{identityName}.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(keyFilePath)!);
         // Simulate a file that was protected but is now corrupt (e.g., tampered with)
         await File.WriteAllBytesAsync(keyFilePath, new byte[] { 0x01, 0x02, 0x03 });
 

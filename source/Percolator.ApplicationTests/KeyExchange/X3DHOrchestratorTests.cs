@@ -112,8 +112,20 @@ public class X3DHOrchestratorTests
     {
         // Arrange
         var remotePeerId = new SessionPeerId(Guid.NewGuid());
-        var remoteEphemeralPublicKey = _remoteOneTimePreKey.PublicKey.ExportSubjectPublicKeyInfo();
-        var localPreKeyBundle = new ContractsPreKeyBundle(); // This is sent by initiator
+
+        // The initiator's ephemeral key for this handshake
+        using var remoteEphemeralKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        var remoteEphemeralPublicKey = remoteEphemeralKey.PublicKey.ExportSubjectPublicKeyInfo();
+
+        // The initiator's pre-key bundle
+        var remoteSignedPreKeyBytes = _remoteSignedPreKey.PublicKey.ExportSubjectPublicKeyInfo();
+        var signature = _remoteIdentitySigningKey.SignData(remoteSignedPreKeyBytes, HashAlgorithmName.SHA256, DSASignatureFormat.IeeeP1363FixedFieldConcatenation);
+        var initiatorPreKeyBundle = new ContractsPreKeyBundle
+        {
+            IdentityKey = ByteString.CopyFrom(_remoteIdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
+            SignedPreKey = ByteString.CopyFrom(remoteSignedPreKeyBytes),
+            PreKeySignature = ByteString.CopyFrom(signature)
+        };
 
         var expectedSharedSecret = new SharedSecret(new byte[32]);
         Random.Shared.NextBytes(expectedSharedSecret.Value);
@@ -128,7 +140,7 @@ public class X3DHOrchestratorTests
             .Returns(expectedSharedSecret);
 
         // Act
-        var result = _orchestrator.ProcessHandshake(remotePeerId, localPreKeyBundle, remoteEphemeralPublicKey);
+        var result = _orchestrator.ProcessHandshake(remotePeerId, initiatorPreKeyBundle, remoteEphemeralPublicKey);
 
         // Assert
         result.Should().NotBeNull();

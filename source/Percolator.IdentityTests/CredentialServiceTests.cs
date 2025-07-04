@@ -106,6 +106,7 @@ namespace Percolator.IdentityTests
             var purpose = _fixture.Create<string>();
             var basePath = IdentityPathHelper.GetBasePath(identityName);
             var credPath = Path.Combine(basePath, "creds", $"{purpose}.cred");
+            Directory.CreateDirectory(Path.GetDirectoryName(credPath)!);
             File.WriteAllBytes(credPath, new byte[] { 0x01, 0x02, 0x03 });
 
             // Act
