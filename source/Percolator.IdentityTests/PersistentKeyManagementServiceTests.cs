@@ -87,10 +87,11 @@ public class PersistentKeyManagementServiceTests
         _credentialServiceMock.Setup(s => s.Unprotect(encryptedBytes)).Returns(decryptedBytes);
 
         // Mock file system behavior if not using a real file system
-        // For simplicity, we assume GetOrCreateKeysAsync handles file IO correctly
-        // and focus on the interaction with ICredentialService
-        var tempFile = new FileInfo(keyFilePath);
-        tempFile.Directory.Create();
+        var directory = Path.GetDirectoryName(keyFilePath);
+        if (directory is not null)
+        {
+            Directory.CreateDirectory(directory);
+        }
         await File.WriteAllBytesAsync(keyFilePath, encryptedBytes);
 
         // Act
@@ -100,8 +101,8 @@ public class PersistentKeyManagementServiceTests
         loadedKeys.Should().NotBeNull();
         // Compare public key parts to verify correctness
         loadedKeys.IdentitySigningKey.ExportParameters(false).Q.X.Should().BeEquivalentTo(existingKeys.IdentitySigningKey.ExportParameters(false).Q.X);
-        loadedKeys.IdentityAgreementKey.PublicKey.ToByteArray().Should().BeEquivalentTo(existingKeys.IdentityAgreementKey.PublicKey.ToByteArray());
-        loadedKeys.SignedPreKey.PublicKey.ToByteArray().Should().BeEquivalentTo(existingKeys.SignedPreKey.PublicKey.ToByteArray());
+        loadedKeys.IdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo().Should().BeEquivalentTo(existingKeys.IdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo());
+        loadedKeys.SignedPreKey.PublicKey.ExportSubjectPublicKeyInfo().Should().BeEquivalentTo(existingKeys.SignedPreKey.PublicKey.ExportSubjectPublicKeyInfo());
 
         // Clean up
         File.Delete(keyFilePath);

@@ -56,7 +56,7 @@ public class Peer
         {
             return right is null;
         }
-        return left.PublicKeyHash.Equals(right.PublicKeyHash);
+        return left.Equals(right);
     }
 
     public static bool operator !=(Peer? left, Peer? right) => !(left == right);

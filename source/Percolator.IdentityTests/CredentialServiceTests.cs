@@ -84,7 +84,7 @@ namespace Percolator.IdentityTests
         }
 
         [Test]
-        public async Task Protect_And_Unprotect_ShouldRoundtripSuccessfully()
+        public void Protect_And_Unprotect_ShouldRoundtripSuccessfully()
         {
             // Arrange
             var originalData = System.Text.Encoding.UTF8.GetBytes("super secret data");
