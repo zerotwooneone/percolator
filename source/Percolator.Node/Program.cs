@@ -15,6 +15,7 @@ using Percolator.Application.Network;
 using Percolator.Application.Sessions;
 using Percolator.Contracts;
 using Percolator.Cryptography;
+using Percolator.Identity;
 using Percolator.Sessions;
 using SessionPeerId = Percolator.Sessions.PeerId;
 
@@ -65,45 +66,48 @@ rootCommand.AddCommand(sendCommand);
 
 hostCommand.SetHandler(async (InvocationContext context) =>
 {
-    var port = context.ParseResult.GetValueForOption(portOption);
     var identityName = context.ParseResult.GetValueForOption(identityOption);
+    var port = context.ParseResult.GetValueForOption(portOption);
+    var cancellationToken = context.GetCancellationToken();
 
-    // Create a temporary service provider to get the certificate before the host starts
+    // Step 1: Create a temporary, but complete, service provider to resolve the TLS certificate.
+    // This breaks the circular dependency between Kestrel configuration and service initialization.
     var tempServices = new ServiceCollection();
-    var tempConfig = new ConfigurationBuilder().Build();
-    tempServices.AddApplicationServices(tempConfig);
+    tempServices.AddLogging(b => b.AddConsole());
+    tempServices.AddApplicationServices(new ConfigurationBuilder().Build());
     await using var tempServiceProvider = tempServices.BuildServiceProvider();
 
+    // Step 2: Use the temporary provider to load the identity and then get the certificate.
+    var tempIdentityOrchestrator = tempServiceProvider.GetRequiredService<IIdentityOrchestrator>();
+    await tempIdentityOrchestrator.LoadOrCreateIdentityAsync(identityName!, cancellationToken);
     var certificateService = tempServiceProvider.GetRequiredService<ITlsCertificateService>();
-    var certificate = await certificateService.GetOrCreateTlsCertificateAsync(identityName!);
+    var serverCertificate = await certificateService.GetOrCreateTlsCertificateAsync(identityName!); 
 
-    var builder = WebApplication.CreateBuilder(args);
+    // Step 3: Configure and build the main application using the pre-fetched certificate.
+    var builder = WebApplication.CreateBuilder();
 
-    // Configure Kestrel with the certificate
     builder.WebHost.UseKestrel(options =>
     {
-        options.Listen(IPAddress.Loopback, port, listenOptions =>
+        options.Listen(IPAddress.Any, port, listenOptions =>
         {
-            listenOptions.UseHttps(certificate);
+            listenOptions.UseHttps(serverCertificate);
         });
     });
 
-    // Configure Services for the main application
+    builder.Logging.ClearProviders().AddConsole();
     builder.Services.AddApplicationServices(builder.Configuration);
     builder.Services.AddGrpc();
 
     var app = builder.Build();
 
-    // Manually initialize the identity before the host starts
+    // Step 4: Manually initialize the identity *again* using the main service provider
+    // to ensure the ActiveIdentityContext is correct for the running application.
     var identityOrchestrator = app.Services.GetRequiredService<IIdentityOrchestrator>();
-    await identityOrchestrator.LoadOrCreateIdentityAsync(identityName!, context.GetCancellationToken());
+    await identityOrchestrator.LoadOrCreateIdentityAsync(identityName!, cancellationToken);
 
-    // Configure Middleware
-    app.UseRouting();
+    // Step 5: Configure and run the application.
     app.MapGrpcService<PercolatorMessageService>();
-
-    Console.WriteLine($"Starting HTTPS host on port {port} with identity '{identityName}'...");
-    await app.RunAsync(context.GetCancellationToken());
+    await app.RunAsync(cancellationToken);
 });
 
 connectCommand.SetHandler(async (InvocationContext context) =>
