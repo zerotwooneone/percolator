@@ -4,22 +4,30 @@ This project is the **Application Layer** of the Percolator system. It is respon
 
 ## Guiding Principles
 
-- **Orchestration, Not Logic**: The primary role of this layer is to orchestrate. It coordinates the domain objects from `Percolator.Messaging`, `Percolator.Identity`, etc., to perform tasks. It should contain minimal business logic itself; all business rules are delegated to the domain models.
-- **Use Case Driven**: The services defined here (e.g., `IMessageService`, `IConversationService`) represent the concrete use cases and features of the application.
+- **Orchestration, Not Logic**: The primary role of this layer is to orchestrate. It coordinates the domain objects from `Percolator.Cryptography`, `Percolator.Identity`, etc., to perform tasks. It should contain minimal business logic itself; all business rules are delegated to the domain models.
+- **Use Case Driven**: The services defined here (e.g., `DirectSessionManager`) represent the concrete use cases and features of the application.
 - **Thin Services**: Application services should be kept "thin," acting as a facade over the rich domain models.
+
+## Security Posture
+
+This application layer is a hardened security boundary designed to protect the underlying domain logic. It implements several key security controls:
+
+- **Secure Session Establishment**: The primary network entry point, `PercolatorMessageService`, enforces a strict security model for session creation. It generates a new, random, and unique `PeerId` for every incoming session request, preventing session collision and hijacking attacks where a malicious client could attempt to control its identifier.
+- **Resilience to Race Conditions**: The `DirectSessionManager` implements a per-conversation locking mechanism (`SemaphoreSlim`) to serialize message processing. This prevents race conditions where concurrent messages could corrupt the Double Ratchet state, ensuring session integrity and preventing denial-of-service attacks.
+- **Input Validation**: All incoming requests are rigorously validated before being passed to domain services. This includes enforcing rate limits to protect against resource exhaustion attacks.
 
 ## Key Responsibilities
 
-1.  **Public API Implementation**: This project contains the implementations of the public-facing gRPC services (e.g., `MessagingGrpcService`). These services receive requests from the network, pass the encrypted data to the cryptography domain, and then hand the decrypted payload to the internal dispatcher.
+1.  **gRPC Service Implementation**: This project contains `PercolatorMessageService`, the implementation of the public-facing gRPC transport service. It serves as the primary entry point for all remote communication. It is responsible for receiving requests, orchestrating the X3DH handshake via `X3DHOrchestrator`, and establishing secure sessions with `DirectSessionManager`.
 
-2.  **Internal Message Dispatching**: A core component of this layer is the `InternalMessageMediator`. This service implements the Mediator pattern to act as an in-memory message bus. It inspects decrypted message envelopes and routes them to the correct, registered handler for processing (e.g., routing a `TextMessage` to the `TextMessageHandler`).
+2.  **Session and Message Management**: It manages the lifecycle of cryptographic sessions (`DirectSessionManager`) and handles the routing and processing of decrypted messages.
 
 3.  **Dependency Injection**: This layer is responsible for wiring up all the application's components—services, repositories, and domain models—in the dependency injection container.
 
 ## Boundaries
 
 - **Entry Point**: It serves as the main entry point for external requests into the system's core logic.
-- **Dependencies**: It depends on the various Domain Libraries (`Percolator.Messaging`, `Percolator.Cryptography`, etc.) and the `Percolator.Contracts` project. It is the central hub that connects all other pieces of the system.
+- **Dependencies**: It depends on the various Domain Libraries (`Percolator.Cryptography`, `Percolator.Identity`, etc.) and the `Percolator.Contracts` project. It is the central hub that connects all other pieces of the system.
 
 ## Platform Dependencies
 
@@ -29,21 +37,11 @@ This library has a hard dependency on the Windows operating system. This is due 
 
 This design decision was made to avoid storing sensitive credentials in plaintext or hardcoded in the source code. Future work may involve abstracting this service to support other platforms (e.g., using macOS Keychain or Linux Secret Service).
 
-## Architectural Patterns
+## Error Handling and Exception Prevention
 
-### CQRS with MediatR
+This application layer serves as a security boundary. It is responsible for validating data and performing sanity checks **before** passing requests to the domain layers (`Percolator.Cryptography`, `Percolator.Identity`). This includes enforcing rate limits on incoming requests.
 
-This layer uses the **MediatR** library to implement the Command Query Responsibility Segregation (CQRS) pattern. This keeps the orchestration logic clean, decoupled, and easy to test.
-
--   **Commands**: Represent an intention to change the state of the system (e.g., `CreateManifestCommand`). They are handled by a single handler and should not return data.
--   **Queries**: Represent a request for data (e.g., `GetPeerListQuery`). They are handled by a single handler and must not change state.
--   **Notifications**: Represent a domain event that has occurred (e.g., `PeerDiscoveredNotification`). They can be handled by multiple handlers and are used to trigger side effects across different parts of the application. This is how the application layer responds to domain-level communication (e.g., implementing `IPeerDiscoveryHandler` to publish notifications).
-
-### Error Handling and Exception Prevention
-
-This application layer serves as a security boundary. It is responsible for validating data and performing sanity checks **before** passing requests to the domain layers (`Percolator.Network`, `Percolator.Cryptography`). This includes enforcing rate limits on incoming requests.
-
-The domain layers operate on a "fail forward" policy and will throw exceptions on any data that violates their contracts. The application layer's primary error handling duty is to prevent these exceptions from occurring under normal conditions by rigorously validating all inputs. This ensures that domain-level exceptions represent true, unexpected security or logic violations, not routine validation failures.
+The domain layers operate on a "fail forward" policy and will throw exceptions on any data that violates their contracts. The application layer's primary error handling duty is to prevent these exceptions from occurring under normal conditions by rigorously validating all inputs. This ensures that domain-level exceptions represent true, unexpected security or logic violations, not routine validation failures. The per-conversation lock in `DirectSessionManager` is a key part of this strategy, preventing state corruption from concurrent requests.
 
 ### Session Reset Handling: Archive and Replace
 
