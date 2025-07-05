@@ -1,50 +1,122 @@
+using System.Net.Http;
+using System.Security.Cryptography;
+using Google.Protobuf;
+using Grpc.Net.Client;
+using Microsoft.Extensions.Logging;
 using Percolator.Application.Identity;
+using Percolator.Application.KeyExchange;
+using Percolator.Chat;
+using Percolator.Contracts;
+using Percolator.Cryptography;
 using Percolator.Identity;
 using Percolator.Sessions;
-using IdentityPeerId = Percolator.Identity.PeerId;
+using ChatConversation = Percolator.Chat.Conversation;
+using ChatConversationId = Percolator.Chat.ValueObjects.ConversationId;
+using ChatParticipantId = Percolator.Chat.ValueObjects.ParticipantId;
+using OpaquePublicKey = Percolator.Sessions.OpaquePublicKey;
+using SessionConversationId = Percolator.Sessions.ConversationId;
 using SessionPeerId = Percolator.Sessions.PeerId;
+using ContractsPreKeyBundle = Percolator.Contracts.PreKeyBundle;
 
 namespace Percolator.Application.Sessions;
 
 public class ConversationService : IConversationService
 {
-    private readonly IMessageStore _messageStore;
-    private readonly IPeerRepository _peerRepository;
     private readonly ActiveIdentityContext _activeIdentityContext;
+    private readonly IX3DHManager _cryptoManager;
+    private readonly X3DHOrchestrator _orchestrator;
+    private readonly DirectSessionManager _sessionManager;
+    private readonly IConversationRepository _conversationRepository;
+    private readonly ILocalPeerProvider _localPeerProvider;
+    private readonly ILogger<ConversationService> _logger;
 
-    public ConversationService(IMessageStore messageStore, IPeerRepository peerRepository, ActiveIdentityContext activeIdentityContext)
+    public ConversationService(
+        ActiveIdentityContext activeIdentityContext,
+        IX3DHManager cryptoManager,
+        X3DHOrchestrator orchestrator,
+        DirectSessionManager sessionManager,
+        IConversationRepository conversationRepository,
+        ILocalPeerProvider localPeerProvider,
+        ILogger<ConversationService> logger)
     {
-        _messageStore = messageStore;
-        _peerRepository = peerRepository;
         _activeIdentityContext = activeIdentityContext;
+        _cryptoManager = cryptoManager;
+        _orchestrator = orchestrator;
+        _sessionManager = sessionManager;
+        _conversationRepository = conversationRepository;
+        _localPeerProvider = localPeerProvider;
+        _logger = logger;
     }
 
-    public async Task<ConversationId> CreateDirectConversationAsync(IdentityPeerId peerId, CancellationToken cancellationToken)
+    public async Task<ChatConversationId> CreateDirectConversationAsync(string host, int port)
     {
-        // Check if peer exists
-        if (await _peerRepository.GetByIdAsync(peerId) is null)
+        _logger.LogInformation("Attempting to create direct conversation with {Host}:{Port}", host, port);
+
+        var localKeys = _activeIdentityContext.Keys;
+        if (localKeys is null)
         {
-            throw new ArgumentException("Peer not found.", nameof(peerId));
+            throw new InvalidOperationException("Could not find local identity. Please create one first.");
         }
 
-        var sessionPeerId = new SessionPeerId(peerId.Value);
-
-        // Check if conversation already exists
-        var conversation = await _messageStore.GetConversationWithPeerAsync(sessionPeerId, cancellationToken);
-        if (conversation is not null)
+        if (localKeys.OneTimePreKeys is null || localKeys.OneTimePreKeys.Length == 0)
         {
-            return conversation.Id;
+            throw new InvalidOperationException("Could not find any one-time pre-keys for the local identity.");
         }
 
-        // Create and store new conversation
-        if (_activeIdentityContext.Identity is null)
+        using var signedPreKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        var signedPreKeyPublicBytes = signedPreKey.PublicKey.ExportSubjectPublicKeyInfo();
+        var signature = _cryptoManager.SignPreKey(localKeys.IdentitySigningKey, signedPreKeyPublicBytes);
+        var localBundle = new ContractsPreKeyBundle
         {
-            throw new InvalidOperationException("No active identity found to create conversation.");
-        }
+            IdentityAgreementKey = ByteString.CopyFrom(localKeys.IdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
+            IdentitySigningKey = ByteString.CopyFrom(localKeys.IdentitySigningKey.ExportSubjectPublicKeyInfo()),
+            SignedPreKey = ByteString.CopyFrom(signedPreKeyPublicBytes),
+            PreKeySignature = ByteString.CopyFrom(signature),
+            OneTimePreKey = ByteString.CopyFrom(localKeys.OneTimePreKeys[0].PublicKey.ExportSubjectPublicKeyInfo())
+        };
 
-        var localPeerId = new Percolator.Sessions.PeerId(_activeIdentityContext.Identity.Id);
-        var newConversation = new DirectConversation(ConversationId.NewId(), localPeerId, sessionPeerId);
-        await _messageStore.StoreDirectConversationAsync(newConversation);
-        return newConversation.Id;
+        using var ephemeralKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+
+        var request = new EstablishSessionRequest
+        {
+            InitiatorBundle = localBundle,
+            InitiatorEphemeralKey = ByteString.CopyFrom(ephemeralKey.PublicKey.ExportSubjectPublicKeyInfo())
+        };
+
+        var handler = new HttpClientHandler
+        {
+            ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
+        };
+        var channel = GrpcChannel.ForAddress($"https://{host}:{port}", new GrpcChannelOptions { HttpHandler = handler });
+        var client = new TransportService.TransportServiceClient(channel);
+
+        _logger.LogInformation("Sending EstablishSessionRequest to {Host}:{Port}", host, port);
+        var response = await client.EstablishSessionAsync(request);
+
+        var remotePeerId = new SessionPeerId(new Guid(response.ResponderPeerId));
+        var sharedSecret = _orchestrator.CompleteHandshake(response.ResponderBundle, ephemeralKey);
+
+        var sessionConversationId = await _sessionManager.EstablishSessionAsync(
+            remotePeerId,
+            new OpaquePublicKey(response.ResponderBundle.IdentityAgreementKey.ToByteArray()),
+            sharedSecret
+        );
+
+        _logger.LogInformation("Session established with peer {RemotePeerId}. Conversation ID: {ConversationId}", remotePeerId, sessionConversationId);
+
+        var localPeerId = await _localPeerProvider.GetPeerIdAsync();
+        var participants = new List<ChatParticipantId>
+        {
+            new(localPeerId.Value),
+            new(remotePeerId.Value)
+        };
+
+        var chatConversationId = new ChatConversationId(sessionConversationId.Value);
+        var chatConversation = new ChatConversation(chatConversationId, participants);
+
+        await _conversationRepository.AddAsync(chatConversation);
+        _logger.LogInformation("Created and persisted Chat.Conversation with ID {ConversationId}", chatConversationId);
+
+        return chatConversationId;
     }
 }

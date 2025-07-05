@@ -111,4 +111,44 @@ public class DirectSessionManager
     {
         return await _conversationStore.GetConversationAsync(conversationId);
     }
+
+    public async Task<(SessionPeerId RemotePeerId, RatchetMessage EncryptedMessage)?> EncryptMessageAsync(ConversationId conversationId, byte[] plaintext)
+    {
+        if (_activeIdentityContext.Identity is null || _activeIdentityContext.Keys is null)
+        {
+            throw new InvalidOperationException("No active identity found to encrypt message.");
+        }
+
+        var semaphore = _sessionLocks.GetOrAdd(conversationId, new SemaphoreSlim(1, 1));
+        await semaphore.WaitAsync();
+
+        try
+        {
+            var conversation = await _conversationStore.GetConversationAsync(conversationId);
+            if (conversation is null)
+            {
+                return null;
+            }
+
+            var remotePeerId = conversation.RemotePeerId;
+            var sessionState = await _doubleRatchetSessionStore.GetSessionStateAsync(remotePeerId, conversationId);
+            if (sessionState is null)
+            {
+                throw new InvalidOperationException($"Double Ratchet session state for conversation {conversationId} not found.");
+            }
+
+            var identityKey = ECDiffieHellman.Create(_activeIdentityContext.Keys.IdentityAgreementKey.ExportParameters(true));
+            using var doubleRatchetSession = new DoubleRatchetSession(sessionState, identityKey);
+
+            var encryptedMessage = doubleRatchetSession.Encrypt(plaintext);
+
+            await _doubleRatchetSessionStore.SaveSessionStateAsync(remotePeerId, conversationId, doubleRatchetSession.GetState());
+
+            return (remotePeerId, encryptedMessage);
+        }
+        finally
+        {
+            semaphore.Release();
+        }
+    }
 }

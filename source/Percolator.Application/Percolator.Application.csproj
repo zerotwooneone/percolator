@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <ProjectReference Include="..\Percolator.Chat\Percolator.Chat.csproj" />
     <ProjectReference Include="..\Percolator.Contracts\Percolator.Contracts.csproj" />
     <ProjectReference Include="..\Percolator.Cryptography\Percolator.Cryptography.csproj" />
     <ProjectReference Include="..\Percolator.Identity\Percolator.Identity.csproj" />

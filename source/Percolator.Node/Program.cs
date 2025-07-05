@@ -19,6 +19,7 @@ using Percolator.Cryptography;
 using Percolator.Identity;
 using Percolator.Sessions;
 using SessionPeerId = Percolator.Sessions.PeerId;
+using ChatConversationId = Percolator.Chat.ValueObjects.ConversationId;
 
 var rootCommand = new RootCommand("Percolator Node: A secure peer-to-peer communication tool.");
 
@@ -57,8 +58,6 @@ var conversationIdArgument = new Argument<Guid>("conversationId", "The ID of the
 var messageArgument = new Argument<string>("message", "The plaintext message to send.");
 var sendCommand = new Command("send", "Sends an encrypted message to a peer over an established session.")
 {
-    hostArgument, // Re-use host and port arguments for sending
-    portArgument,
     conversationIdArgument,
     messageArgument,
     identityOption // Add identity option to client commands
@@ -121,91 +120,35 @@ connectCommand.SetHandler(async (InvocationContext context) =>
 
     // Build client-specific service provider
     var services = new ServiceCollection();
-    var configuration = new ConfigurationBuilder().Build(); // Empty config, as services don't seem to use it heavily
+    var configuration = new ConfigurationBuilder().Build();
     services.AddLogging(builder => builder.AddConsole());
     services.AddApplicationServices(configuration);
 
-    // This is INSECURE and for development purposes only.
-    // In a real-world scenario, you would implement proper certificate pinning
-    // or a custom validation callback that checks the peer's public key.
-    var handler = new HttpClientHandler
-    {
-        ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
-    };
-
-    services.AddGrpcClient<TransportService.TransportServiceClient>(o =>
-    {
-        o.Address = new Uri($"https://{host}:{port}");
-    })
-    .ConfigurePrimaryHttpMessageHandler(() => handler);
-    
     await using var serviceProvider = services.BuildServiceProvider();
 
     // Initialize identity
     var identityOrchestrator = serviceProvider.GetRequiredService<IIdentityOrchestrator>();
     await identityOrchestrator.LoadOrCreateIdentityAsync(identityName!, context.GetCancellationToken());
 
+    var conversationService = serviceProvider.GetRequiredService<IConversationService>();
+
     Console.WriteLine($"Connecting to {host}:{port}...");
-    var activeIdentityContext = serviceProvider.GetRequiredService<ActiveIdentityContext>();
-    var cryptoManager = serviceProvider.GetRequiredService<IX3DHManager>();
-    var orchestrator = serviceProvider.GetRequiredService<X3DHOrchestrator>();
-    var sessionManager = serviceProvider.GetRequiredService<DirectSessionManager>();
-    var client = serviceProvider.GetRequiredService<TransportService.TransportServiceClient>();
-
-    // 1. Get local keys to create our bundle
-    var localKeys = activeIdentityContext.Keys;
-    if (localKeys is null)
+    try
     {
-        Console.WriteLine("Could not find local identity. Please create one first.");
-        return;
+        var conversationId = await conversationService.CreateDirectConversationAsync(host, port);
+        Console.WriteLine($"Session established. Conversation ID: {conversationId}");
     }
-    if (localKeys.OneTimePreKeys is null || localKeys.OneTimePreKeys.Length == 0)
+    catch (Exception ex)
     {
-        Console.WriteLine("Could not find any one-time pre-keys for the local identity.");
-        return;
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine($"Failed to establish session: {ex.Message}");
+        Console.ResetColor();
     }
-    using var signedPreKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-    var signedPreKeyPublicBytes = signedPreKey.PublicKey.ExportSubjectPublicKeyInfo();
-    var signature = cryptoManager.SignPreKey(localKeys.IdentitySigningKey, signedPreKeyPublicBytes);
-    var localBundle = new Percolator.Contracts.PreKeyBundle
-    {
-        IdentityAgreementKey = ByteString.CopyFrom(localKeys.IdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
-        IdentitySigningKey = ByteString.CopyFrom(localKeys.IdentitySigningKey.ExportSubjectPublicKeyInfo()),
-        SignedPreKey = ByteString.CopyFrom(signedPreKeyPublicBytes),
-        PreKeySignature = ByteString.CopyFrom(signature),
-        OneTimePreKey = ByteString.CopyFrom(localKeys.OneTimePreKeys[0].PublicKey.ExportSubjectPublicKeyInfo())
-    };
-
-    // 2. Generate an ephemeral key for this handshake
-    using var ephemeralKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-
-    // 3. Call the remote peer to establish a session
-    var request = new EstablishSessionRequest
-    {
-        InitiatorBundle = localBundle,
-        InitiatorEphemeralKey = ByteString.CopyFrom(ephemeralKey.PublicKey.ExportSubjectPublicKeyInfo())
-    };
-    var response = await client.EstablishSessionAsync(request);
-
-    // 4. Complete the handshake
-    var remotePeerId = new SessionPeerId(new Guid(response.ResponderPeerId));
-    var sharedSecret = orchestrator.CompleteHandshake(response.ResponderBundle, ephemeralKey);
-
-    // 5. Create the secure session
-    var conversationId = await sessionManager.EstablishSessionAsync(
-        remotePeerId,
-        new OpaquePublicKey(response.ResponderBundle.IdentityAgreementKey.ToByteArray()),
-        sharedSecret
-    );
-
-    Console.WriteLine($"Session established with peer {remotePeerId}. Conversation ID: {conversationId}");
 });
 
 sendCommand.SetHandler(async (InvocationContext context) =>
 {
-    var host = context.ParseResult.GetValueForArgument(hostArgument);
-    var port = context.ParseResult.GetValueForArgument(portArgument);
-    var conversationId = context.ParseResult.GetValueForArgument(conversationIdArgument);
+    var conversationIdGuid = context.ParseResult.GetValueForArgument(conversationIdArgument);
     var message = context.ParseResult.GetValueForArgument(messageArgument);
     var identityName = context.ParseResult.GetValueForOption(identityOption);
 
@@ -214,18 +157,6 @@ sendCommand.SetHandler(async (InvocationContext context) =>
     var configuration = new ConfigurationBuilder().Build();
     services.AddLogging(builder => builder.AddConsole());
     services.AddApplicationServices(configuration);
-    
-    // This is INSECURE and for development purposes only.
-    var handler = new HttpClientHandler
-    {
-        ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
-    };
-
-    services.AddGrpcClient<TransportService.TransportServiceClient>(o =>
-    {
-        o.Address = new Uri($"https://{host}:{port}");
-    })
-    .ConfigurePrimaryHttpMessageHandler(() => handler);
 
     await using var serviceProvider = services.BuildServiceProvider();
 
@@ -233,17 +164,21 @@ sendCommand.SetHandler(async (InvocationContext context) =>
     var identityOrchestrator = serviceProvider.GetRequiredService<IIdentityOrchestrator>();
     await identityOrchestrator.LoadOrCreateIdentityAsync(identityName!, context.GetCancellationToken());
 
-    var client = serviceProvider.GetRequiredService<TransportService.TransportServiceClient>();
-
-    var request = new DeliverOpaqueMessageRequest
-    {
-        SessionId = conversationId.ToString(),
-        Payload = ByteString.CopyFromUtf8(message)
-    };
+    var messageService = serviceProvider.GetRequiredService<IMessageService>();
+    var conversationId = new ChatConversationId(conversationIdGuid);
 
     Console.WriteLine($"Sending message to conversation {conversationId}...");
-    await client.DeliverOpaqueMessageAsync(request);
-    Console.WriteLine("Message sent.");
+    try
+    {
+        var sentMessage = await messageService.SendDirectMessageAsync(conversationId, message);
+        Console.WriteLine($"Message sent with ID: {sentMessage.Id}");
+    }
+    catch (Exception ex)
+    {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine($"Failed to send message: {ex.Message}");
+        Console.ResetColor();
+    }
 });
 
 // --- Run Application ---

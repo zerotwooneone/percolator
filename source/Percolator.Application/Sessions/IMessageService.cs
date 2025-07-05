@@ -1,8 +1,9 @@
-using Percolator.Sessions;
+using Percolator.Chat;
+using Percolator.Chat.ValueObjects;
 
 namespace Percolator.Application.Sessions;
 
 public interface IMessageService
 {
-    Task<DirectMessage> SendDirectMessageAsync(ConversationId conversationId, OpaqueContent content);
+    Task<Message> SendDirectMessageAsync(ConversationId conversationId, string content);
 }

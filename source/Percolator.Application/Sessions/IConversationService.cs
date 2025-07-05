@@ -1,5 +1,4 @@
-using Percolator.Sessions;
-using IdentityPeerId = Percolator.Identity.PeerId;
+using Percolator.Chat.ValueObjects;
 
 namespace Percolator.Application.Sessions;
 
@@ -9,11 +8,10 @@ namespace Percolator.Application.Sessions;
 public interface IConversationService
 {
     /// <summary>
-    /// Creates a new direct conversation with a peer if one does not already exist.
-    /// If a conversation already exists, its ID is returned.
+    /// Creates a new direct conversation with a remote peer by connecting to the specified host and port.
     /// </summary>
-    /// <param name="peerId">The ID of the peer to create a conversation with.</param>
-    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <param name="host">The host of the remote peer.</param>
+    /// <param name="port">The port of the remote peer.</param>
     /// <returns>The unique ID of the direct conversation.</returns>
-    Task<ConversationId> CreateDirectConversationAsync(IdentityPeerId peerId, CancellationToken cancellationToken);
+    Task<ConversationId> CreateDirectConversationAsync(string host, int port);
 }

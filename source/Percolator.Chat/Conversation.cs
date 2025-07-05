@@ -35,6 +35,24 @@ public class Conversation
         Name = name;
     }
 
+    public Conversation(ConversationId id, IEnumerable<ParticipantId> participants, string? name = null)
+    {
+        var participantList = participants.ToList();
+        if (participantList.Count < 2)
+        {
+            throw new ArgumentException("A conversation must have at least two participants.", nameof(participants));
+        }
+
+        if (participantList.Distinct().Count() != participantList.Count)
+        {
+            throw new ArgumentException("A conversation cannot have duplicate participants.", nameof(participants));
+        }
+
+        Id = id;
+        _participants.AddRange(participantList);
+        Name = name;
+    }
+
     public void ChangeName(string? newName)
     {
         Name = newName;
