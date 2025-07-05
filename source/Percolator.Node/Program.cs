@@ -187,8 +187,8 @@ connectCommand.SetHandler(async (InvocationContext context) =>
     };
     var response = await client.EstablishSessionAsync(request);
 
-    // 4. Use the response bundle to complete the handshake locally
-    var remotePeerId = new SessionPeerId(new Guid(response.SessionId)); // This assumes the SessionId is the PeerId. A better approach would be to return the PeerId explicitly.
+    // 4. Complete the handshake
+    var remotePeerId = new SessionPeerId(new Guid(response.ResponderPeerId));
     var sharedSecret = orchestrator.CompleteHandshake(response.ResponderBundle, ephemeralKey);
 
     // 5. Create the secure session
@@ -198,7 +198,7 @@ connectCommand.SetHandler(async (InvocationContext context) =>
         sharedSecret
     );
 
-    Console.WriteLine($"Session established with peer. Conversation ID: {conversationId}");
+    Console.WriteLine($"Session established with peer {remotePeerId}. Conversation ID: {conversationId}");
 });
 
 sendCommand.SetHandler(async (InvocationContext context) =>

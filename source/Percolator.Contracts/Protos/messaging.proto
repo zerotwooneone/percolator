@@ -48,7 +48,8 @@ message EstablishSessionResponse {
     uint32 version = 1;
     string session_id = 2;
     PreKeyBundle responder_bundle = 3;
-    optional google.protobuf.Timestamp retry_after_utc = 4;
+    string responder_peer_id = 4;
+    optional google.protobuf.Timestamp retry_after_utc = 5;
 }
 
 // Request to create a new group session.

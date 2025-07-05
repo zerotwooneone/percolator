@@ -5,10 +5,12 @@ using Percolator.Application.KeyExchange;
 using Percolator.Application.Sessions;
 using Percolator.Contracts;
 using Percolator.Cryptography;
+using Percolator.Identity;
 using Percolator.Sessions;
 using SessionPeerId = Percolator.Sessions.PeerId;
 using Google.Protobuf;
 using System.Security.Cryptography;
+using Percolator.Application.Identity;
 
 namespace Percolator.Application.Network
 {
@@ -17,12 +19,14 @@ namespace Percolator.Application.Network
         private readonly ILogger<PercolatorMessageService> _logger;
         private readonly DirectSessionManager _sessionManager;
         private readonly X3DHOrchestrator _x3dhOrchestrator;
+        private readonly ActiveIdentityContext _activeIdentityContext;
 
-        public PercolatorMessageService(ILogger<PercolatorMessageService> logger, DirectSessionManager sessionManager, X3DHOrchestrator x3dhOrchestrator)
+        public PercolatorMessageService(ILogger<PercolatorMessageService> logger, DirectSessionManager sessionManager, X3DHOrchestrator x3dhOrchestrator, ActiveIdentityContext activeIdentityContext)
         {
             _logger = logger;
             _sessionManager = sessionManager;
             _x3dhOrchestrator = x3dhOrchestrator;
+            _activeIdentityContext = activeIdentityContext;
         }
 
         public override async Task<EstablishSessionResponse> EstablishSession(EstablishSessionRequest request, ServerCallContext context)
@@ -66,13 +70,19 @@ namespace Percolator.Application.Network
                     orchestratorResult.SharedSecret
                 );
 
-                _logger.LogInformation("Successfully established session {ConversationId} with peer {PeerId}", conversationId, remotePeerId);
+                _logger.LogInformation("Successfully established session {SessionId} with peer {PeerId}", conversationId, remotePeerId);
 
-                // Step 3: Return the session ID and the responder's bundle to complete the handshake.
+                if (_activeIdentityContext.Identity is null)
+                {
+                    _logger.LogError("Local peer identity has not been established. Cannot respond to handshake.");
+                    throw new RpcException(new Status(StatusCode.FailedPrecondition, "Server identity not initialized."));
+                }
+
                 return new EstablishSessionResponse
                 {
-                    SessionId = conversationId.ToString(),
-                    ResponderBundle = orchestratorResult.ResponderBundle
+                    SessionId = conversationId.Value.ToString(),
+                    ResponderBundle = orchestratorResult.ResponderBundle,
+                    ResponderPeerId = _activeIdentityContext.Identity.Id.ToString()
                 };
             }
             catch (Exception ex)
