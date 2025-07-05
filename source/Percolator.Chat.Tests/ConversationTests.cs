@@ -1,10 +1,6 @@
 using AutoFixture;
 using FluentAssertions;
-using NUnit.Framework;
 using Percolator.Chat.ValueObjects;
-using System;
-using System.Collections.Generic;
-using System.Linq;
 
 namespace Percolator.Chat.Tests;
 

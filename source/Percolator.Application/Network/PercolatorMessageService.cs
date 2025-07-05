@@ -5,11 +5,8 @@ using Percolator.Application.KeyExchange;
 using Percolator.Application.Sessions;
 using Percolator.Contracts;
 using Percolator.Cryptography;
-using Percolator.Identity;
 using Percolator.Sessions;
 using SessionPeerId = Percolator.Sessions.PeerId;
-using Google.Protobuf;
-using System.Security.Cryptography;
 using Percolator.Application.Identity;
 
 namespace Percolator.Application.Network

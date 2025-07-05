@@ -1,4 +1,3 @@
-using System.Net.Http;
 using System.Security.Cryptography;
 using Google.Protobuf;
 using Grpc.Net.Client;
@@ -8,13 +7,10 @@ using Percolator.Application.KeyExchange;
 using Percolator.Chat;
 using Percolator.Contracts;
 using Percolator.Cryptography;
-using Percolator.Identity;
-using Percolator.Sessions;
 using ChatConversation = Percolator.Chat.Conversation;
 using ChatConversationId = Percolator.Chat.ValueObjects.ConversationId;
 using ChatParticipantId = Percolator.Chat.ValueObjects.ParticipantId;
 using OpaquePublicKey = Percolator.Sessions.OpaquePublicKey;
-using SessionConversationId = Percolator.Sessions.ConversationId;
 using SessionPeerId = Percolator.Sessions.PeerId;
 using ContractsPreKeyBundle = Percolator.Contracts.PreKeyBundle;
 

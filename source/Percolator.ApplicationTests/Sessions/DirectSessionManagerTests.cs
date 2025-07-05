@@ -1,13 +1,10 @@
 using System.Security.Cryptography;
-using FluentAssertions;
 using Moq;
 using Percolator.Application.Identity;
 using Percolator.Application.Sessions;
-using Percolator.Cryptography;
 using Percolator.Identity.Model;
 using Percolator.Sessions;
 using Percolator.Identity;
-using SessionPeerId = Percolator.Sessions.PeerId;
 
 namespace Percolator.ApplicationTests.Sessions;
 

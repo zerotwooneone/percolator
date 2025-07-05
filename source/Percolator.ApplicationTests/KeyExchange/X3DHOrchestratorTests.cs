@@ -9,7 +9,6 @@ using Percolator.Identity;
 using Percolator.Identity.Model;
 using ContractsPreKeyBundle = Percolator.Contracts.PreKeyBundle;
 using CryptoPreKeyBundle = Percolator.Cryptography.PreKeyBundle;
-using SessionPeerId = Percolator.Sessions.PeerId;
 
 namespace Percolator.ApplicationTests.KeyExchange;
 

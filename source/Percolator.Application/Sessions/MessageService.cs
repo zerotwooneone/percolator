@@ -1,6 +1,5 @@
 using System.Text;
 using Percolator.Application.Network;
-using Percolator.Chat;
 using Percolator.Sessions;
 using ChatConversationId = Percolator.Chat.ValueObjects.ConversationId;
 using ChatMessage = Percolator.Chat.Message;

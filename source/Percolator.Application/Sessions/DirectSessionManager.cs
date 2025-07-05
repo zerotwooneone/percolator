@@ -1,5 +1,4 @@
 using System.Security.Cryptography;
-using System.Text;
 using Percolator.Application.Identity;
 using Percolator.Cryptography;
 using Percolator.Sessions;

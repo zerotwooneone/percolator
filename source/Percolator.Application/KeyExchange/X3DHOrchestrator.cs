@@ -1,13 +1,9 @@
 using System.Security.Cryptography;
 using Google.Protobuf;
 using Percolator.Application.Identity;
-using Percolator.Contracts;
 using Percolator.Cryptography;
-using Percolator.Identity.Model;
-using Percolator.Sessions;
 using ContractsPreKeyBundle = Percolator.Contracts.PreKeyBundle;
 using CryptographyPreKeyBundle = Percolator.Cryptography.PreKeyBundle;
-using SessionPeerId = Percolator.Sessions.PeerId;
 
 namespace Percolator.Application.KeyExchange;
 

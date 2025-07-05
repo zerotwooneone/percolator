@@ -3,7 +3,6 @@ using Percolator.Contracts;
 using Percolator.Cryptography;
 using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
-using System.Net.Http;
 using Percolator.Identity;
 using ConversationId = Percolator.Chat.ValueObjects.ConversationId;
 

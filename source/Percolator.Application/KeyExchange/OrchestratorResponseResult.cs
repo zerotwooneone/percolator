@@ -1,6 +1,4 @@
 using Percolator.Cryptography;
-using Percolator.Contracts;
-using Percolator.Sessions;
 
 namespace Percolator.Application.KeyExchange;
 

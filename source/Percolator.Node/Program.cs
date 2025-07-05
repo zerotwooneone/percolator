@@ -1,8 +1,6 @@
 using System.CommandLine;
 using System.CommandLine.Invocation;
 using System.Net;
-using System.Security.Cryptography;
-using Google.Protobuf;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Configuration;
@@ -11,14 +9,8 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Percolator.Application;
 using Percolator.Application.Identity;
-using Percolator.Application.KeyExchange;
 using Percolator.Application.Network;
 using Percolator.Application.Sessions;
-using Percolator.Contracts;
-using Percolator.Cryptography;
-using Percolator.Identity;
-using Percolator.Sessions;
-using SessionPeerId = Percolator.Sessions.PeerId;
 using ChatConversationId = Percolator.Chat.ValueObjects.ConversationId;
 
 var rootCommand = new RootCommand("Percolator Node: A secure peer-to-peer communication tool.");
