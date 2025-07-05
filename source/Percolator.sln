@@ -1,4 +1,5 @@
-﻿Microsoft Visual Studio Solution File, Format Version 12.00
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "SolutionFolder", "SolutionFolder", "{D7D1220C-3D34-48E0-BDAE-00BCD95649B5}"
 	ProjectSection(SolutionItems) = preProject
 		..\README.md = ..\README.md
@@ -43,6 +44,8 @@ EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.Chat", "Percolator.Chat\Percolator.Chat.csproj", "{4964336F-920F-4B5B-B757-7E71EBFD9703}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.Chat.Tests", "Percolator.Chat.Tests\Percolator.Chat.Tests.csproj", "{B1E04D25-BA49-4B8B-9320-593DB3C05D8D}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.Infrastructure", "Percolator.Infrastructure\Percolator.Infrastructure.csproj", "{413F3BB7-359D-4138-82B2-2D6663812CD0}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -222,6 +225,18 @@ Global
 		{B1E04D25-BA49-4B8B-9320-593DB3C05D8D}.Release|x64.Build.0 = Release|Any CPU
 		{B1E04D25-BA49-4B8B-9320-593DB3C05D8D}.Release|x86.ActiveCfg = Release|Any CPU
 		{B1E04D25-BA49-4B8B-9320-593DB3C05D8D}.Release|x86.Build.0 = Release|Any CPU
+		{413F3BB7-359D-4138-82B2-2D6663812CD0}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{413F3BB7-359D-4138-82B2-2D6663812CD0}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{413F3BB7-359D-4138-82B2-2D6663812CD0}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{413F3BB7-359D-4138-82B2-2D6663812CD0}.Debug|x64.Build.0 = Debug|Any CPU
+		{413F3BB7-359D-4138-82B2-2D6663812CD0}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{413F3BB7-359D-4138-82B2-2D6663812CD0}.Debug|x86.Build.0 = Debug|Any CPU
+		{413F3BB7-359D-4138-82B2-2D6663812CD0}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{413F3BB7-359D-4138-82B2-2D6663812CD0}.Release|Any CPU.Build.0 = Release|Any CPU
+		{413F3BB7-359D-4138-82B2-2D6663812CD0}.Release|x64.ActiveCfg = Release|Any CPU
+		{413F3BB7-359D-4138-82B2-2D6663812CD0}.Release|x64.Build.0 = Release|Any CPU
+		{413F3BB7-359D-4138-82B2-2D6663812CD0}.Release|x86.ActiveCfg = Release|Any CPU
+		{413F3BB7-359D-4138-82B2-2D6663812CD0}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

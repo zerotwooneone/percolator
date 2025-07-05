@@ -10,7 +10,7 @@ public static class ServiceCollectionExtensions
         // Register domain services and their in-memory stores
         services.AddSingleton<IMessageStore, InMemoryMessageStore>();
         services.AddSingleton<IConversationStore, InMemoryConversationStore>();
-        services.AddSingleton<IDoubleRatchetSessionStore, InMemoryDoubleRatchetSessionStore>();
+        // Service registration for IDoubleRatchetSessionStore is now handled by the Infrastructure layer.
         services.AddSingleton<IMessageRepository, InMemoryMessageRepository>();
 
         // Register application services

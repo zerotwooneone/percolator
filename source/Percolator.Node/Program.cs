@@ -11,6 +11,7 @@ using Percolator.Application;
 using Percolator.Application.Identity;
 using Percolator.Application.Network;
 using Percolator.Application.Sessions;
+using Percolator.Infrastructure;
 using ChatConversationId = Percolator.Chat.ValueObjects.ConversationId;
 
 var rootCommand = new RootCommand("Percolator Node: A secure peer-to-peer communication tool.");
@@ -69,6 +70,7 @@ hostCommand.SetHandler(async (InvocationContext context) =>
     var tempServices = new ServiceCollection();
     tempServices.AddLogging(b => b.AddConsole());
     tempServices.AddApplicationServices(new ConfigurationBuilder().Build());
+    tempServices.AddInfrastructureServices(new ConfigurationBuilder().Build());
     await using var tempServiceProvider = tempServices.BuildServiceProvider();
 
     // Step 2: Use the temporary provider to load the identity and then get the certificate.
@@ -90,6 +92,7 @@ hostCommand.SetHandler(async (InvocationContext context) =>
 
     builder.Logging.ClearProviders().AddConsole();
     builder.Services.AddApplicationServices(builder.Configuration);
+    builder.Services.AddInfrastructureServices(builder.Configuration);
     builder.Services.AddGrpc();
 
     var app = builder.Build();
@@ -115,6 +118,7 @@ connectCommand.SetHandler(async (InvocationContext context) =>
     var configuration = new ConfigurationBuilder().Build();
     services.AddLogging(builder => builder.AddConsole());
     services.AddApplicationServices(configuration);
+    services.AddInfrastructureServices(configuration);
 
     await using var serviceProvider = services.BuildServiceProvider();
 
@@ -149,6 +153,7 @@ sendCommand.SetHandler(async (InvocationContext context) =>
     var configuration = new ConfigurationBuilder().Build();
     services.AddLogging(builder => builder.AddConsole());
     services.AddApplicationServices(configuration);
+    services.AddInfrastructureServices(configuration);
 
     await using var serviceProvider = services.BuildServiceProvider();
 
