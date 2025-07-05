@@ -40,67 +40,108 @@ When modifying this project, adhere to the following architectural rules:
 
 The following examples are for developers who wish to use the `Percolator.Cryptography` and related libraries directly in their own applications. Note that some of this functionality, such as group messaging, is not yet exposed in the `Percolator.Node` command-line tool.
 
-### 1. Secure Group Messaging
+### 1. Secure End-to-End Session Establishment and Group Messaging
 
-The `GroupManager` provides a secure way to manage group chats, including the critical ability to remove members and re-key the group.
+The following example demonstrates the complete, secure flow for establishing a one-to-one session using the X3DH handshake and then using that secure channel to create a group.
 
 ```csharp
-// Prerequisite: Alice, Bob, and Carol have established pairwise DoubleRatchetSessions.
-// (aliceToBob, bobToAlice, aliceToCarol, carolToAlice)
+using System.Security.Cryptography;
+using Percolator.Cryptography;
 
-// 1. Alice creates a new group, providing her identity key.
-var aliceManager = new GroupManager(aliceIdentity);
-
-// 2. Alice invites Bob and Carol to the group.
-// First, establish secure 1-on-1 sessions with them.
-var sharedSecretBob = aliceIdentity.DeriveKeyMaterial(bobIdentity.PublicKey);
-var aliceToBob = DoubleRatchetSession.AsInitiator(sharedSecretBob, aliceIdentity, bobIdentity.PublicKey.ExportSubjectPublicKeyInfo(), bobRatchet.PublicKey.ExportSubjectPublicKeyInfo());
-
-var sharedSecretCarol = aliceIdentity.DeriveKeyMaterial(carolIdentity.PublicKey);
-var aliceToCarol = DoubleRatchetSession.AsInitiator(sharedSecretCarol, aliceIdentity, carolIdentity.PublicKey.ExportSubjectPublicKeyInfo(), carolRatchet.PublicKey.ExportSubjectPublicKeyInfo());
-
-var bobInvitation = aliceManager.CreateInvitation("bob", aliceToBob);
-var carolInvitation = aliceManager.CreateInvitation("carol", aliceToCarol);
-// These invitations are sent to Bob and Carol over their secure 1-on-1 channels.
-
-// 3. Bob and Carol accept their invitations.
-// They must be provided with Alice's public signing key and public identity key.
-var bobToAlice = DoubleRatchetSession.AsResponder(sharedSecretBob, bobIdentity, aliceIdentity.PublicKey.ExportSubjectPublicKeyInfo(), bobRatchet);
-var bobManager = GroupManager.AcceptInvitation(bobToAlice, bobInvitation, aliceManager.SigningPublicKey!, aliceIdentity);
-
-var carolToAlice = DoubleRatchetSession.AsResponder(sharedSecretCarol, carolIdentity, aliceIdentity.PublicKey.ExportSubjectPublicKeyInfo(), carolRatchet);
-var carolManager = GroupManager.AcceptInvitation(carolToAlice, carolInvitation, aliceManager.SigningPublicKey!, aliceIdentity);
-
-// 4. Alice sends a message to the group.
-var welcomeMessage = aliceManager.GroupSession.Encrypt("Welcome!"u8.ToArray());
-
-// Bob and Carol can decrypt it.
-// They must receive the message from a trusted source that identifies Alice as the sender.
-var bobPlaintext = bobManager.GroupSession.Decrypt(welcomeMessage);
-var carolPlaintext = carolManager.GroupSession.Decrypt(welcomeMessage);
-
-// 5. CRITICAL: Alice removes Carol from the group.
-var rekeyMessages = aliceManager.RemoveMember("carol");
-// A re-key message must now be sent to all remaining members (in this case, just Bob).
-
-// 6. Bob processes the re-key message to update his group session.
-bobManager.ProcessRekeyMessage(bobToAlice, rekeyMessages["bob"]);
-
-// 7. Alice sends a new message to the re-keyed group.
-var messageAfterRemoval = aliceManager.GroupSession.Encrypt("Carol is gone."u8.ToArray());
-
-// 8. Bob can decrypt the new message, but Carol cannot.
-var bobDecryptedAfter = bobManager.GroupSession.Decrypt(messageAfterRemoval);
-
-try
+// Helper function to create identity keys
+void CreateIdentity(out ECDsa signingKey, out ECDiffieHellman agreementKey)
 {
-    // This will fail with a CryptographicException.
-    carolManager.GroupSession.Decrypt(messageAfterRemoval);
+    signingKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+    agreementKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
 }
-catch (CryptographicException)
-{
-    // Carol failed to decrypt the message as expected.
-}
+
+// --- 1. Setup: Alice and Bob create their long-term identity keys ---
+CreateIdentity(out var aliceSigningKey, out var aliceAgreementKey);
+CreateIdentity(out var bobSigningKey, out var bobAgreementKey);
+
+// --- 2. Bob (the Responder) creates and publishes his PreKeyBundle ---
+var x3dhManager = new X3DHManager();
+using var bobSignedPreKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+using var bobOneTimePreKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+
+// Bob signs his signed pre-key's public key
+var bobSignedPreKeyPublicBytes = bobSignedPreKey.PublicKey.ExportSubjectPublicKeyInfo();
+var bobSignature = x3dhManager.SignPreKey(bobSigningKey, bobSignedPreKeyPublicBytes);
+
+// Bob creates his bundle for Alice to fetch from a server
+var bobBundle = new PreKeyBundle(
+    IdentityAgreementKey: bobAgreementKey.PublicKey.ExportSubjectPublicKeyInfo(),
+    IdentitySigningKey: bobSigningKey.PublicKey.ExportSubjectPublicKeyInfo(),
+    SignedPreKey: bobSignedPreKeyPublicBytes,
+    Signature: bobSignature,
+    OneTimePreKey: bobOneTimePreKey.PublicKey.ExportSubjectPublicKeyInfo()
+);
+
+// --- 3. Alice (the Initiator) initiates the handshake ---
+// Alice fetches Bob's PreKeyBundle from the server.
+using var aliceEphemeralKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+var sharedSecretAlice = x3dhManager.InitiateHandshake(bobBundle, aliceEphemeralKey, aliceAgreementKey);
+
+// --- 4. Alice establishes a DoubleRatchetSession with Bob ---
+var aliceToBob = DoubleRatchetSession.AsInitiator(
+    sharedSecretAlice.Value,
+    aliceAgreementKey,
+    bobBundle.IdentitySigningKey, // Bob's public signing key
+    bobBundle.SignedPreKey      // Bob's public signed pre-key
+);
+
+// --- 5. Alice creates a group and invites Bob ---
+var aliceGroupManager = new GroupManager(aliceAgreementKey);
+// The invitation is encrypted using the newly established 1-on-1 session
+var invitationToBob = aliceGroupManager.CreateInvitation("bob", aliceToBob);
+
+// Alice sends the invitation to Bob. This is the first application message.
+
+// --- 6. Bob (the Responder) receives the message and completes the handshake ---
+// Bob needs Alice's public keys, which would be sent with the initial message.
+var aliceIdentityAgreementKeyPublicBytes = aliceAgreementKey.PublicKey.ExportSubjectPublicKeyInfo();
+var aliceEphemeralKeyPublicBytes = aliceEphemeralKey.PublicKey.ExportSubjectPublicKeyInfo();
+
+var sharedSecretBob = x3dhManager.RespondToHandshake(
+    aliceIdentityAgreementKeyPublicBytes,
+    aliceEphemeralKeyPublicBytes,
+    bobSigningKey,
+    bobAgreementKey,
+    bobSignedPreKey,
+    bobOneTimePreKey
+);
+
+// --- 7. Bob establishes his side of the DoubleRatchetSession ---
+var bobToAlice = DoubleRatchetSession.AsResponder(
+    sharedSecretBob.Value,
+    bobAgreementKey,
+    aliceAgreementKey.PublicKey.ExportSubjectPublicKeyInfo(), // Alice's public identity key
+    bobSignedPreKey
+);
+
+// --- 8. Bob accepts the group invitation ---
+// Bob decrypts the invitation and uses the payload to accept.
+var bobGroupManager = GroupManager.AcceptInvitation(
+    bobToAlice,
+    invitationToBob,
+    aliceGroupManager.SigningPublicKey!,
+    aliceAgreementKey
+);
+
+// --- 9. Secure communication is established! ---
+var welcomeMessage = aliceGroupManager.GroupSession.Encrypt("Welcome!"u8.ToArray());
+var bobPlaintext = bobGroupManager.GroupSession.Decrypt(welcomeMessage);
+
+// --- 10. CRITICAL: Removing a member ---
+// Alice removes a member, which generates re-keying messages for remaining members.
+var rekeyMessages = aliceGroupManager.RemoveMember("carol"); // Assuming Carol was added earlier
+
+// Bob processes the re-key message to update his group session state.
+bobGroupManager.ProcessRekeyMessage(bobToAlice, rekeyMessages["bob"]);
+
+// Alice sends a new message. Bob can decrypt it, but Carol cannot.
+var messageAfterRemoval = aliceGroupManager.GroupSession.Encrypt("Carol is gone."u8.ToArray());
+var bobDecryptedAfter = bobGroupManager.GroupSession.Decrypt(messageAfterRemoval);
 ```
 
 ### 2. State Persistence
