@@ -13,8 +13,8 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IKeyManagementService, PersistentKeyManagementService>();
         services.AddSingleton<ICredentialService, CredentialService>();
 
-        // Still needs a concrete implementation
-        services.AddSingleton<IPeerRepository, InMemoryPeerRepository>();
+        // Peer repository is now handled by the infrastructure layer
+        // services.AddSingleton<IPeerRepository, InMemoryPeerRepository>();
 
         // Application-layer orchestrator
         services.AddSingleton<IIdentityOrchestrator, IdentityOrchestrator>();

@@ -2,6 +2,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Percolator.Infrastructure.Chat;
+using Percolator.Infrastructure.Identity;
 using Percolator.Infrastructure.Sessions;
 using System.IO;
 
@@ -24,6 +25,7 @@ public static class ServiceCollectionExtensions
 
         services.AddChatInfrastructure();
         services.AddSessionsInfrastructure();
+        services.AddIdentityInfrastructure();
 
         return services;
     }

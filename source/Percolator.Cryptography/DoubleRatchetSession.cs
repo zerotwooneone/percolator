@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Text.Json.Serialization;
 
 namespace Percolator.Cryptography;
 
@@ -6,7 +7,6 @@ public class DoubleRatchetSession : IDisposable
 {
     private const int MaxSkippedMessages = 1000;
 
-    private readonly ECDiffieHellman _identityKey;
     private byte[] _rootKey;
     private byte[]? _sendingChainKey;
     private byte[]? _receivingChainKey;
@@ -19,14 +19,12 @@ public class DoubleRatchetSession : IDisposable
 
     private DoubleRatchetSession(byte[] sharedSecret, ECDiffieHellman identityKey, byte[] remoteIdentityPublicKey)
     {
-        _identityKey = identityKey;
         _remoteIdentityPublicKey = remoteIdentityPublicKey;
         _rootKey = sharedSecret;
     }
 
     public DoubleRatchetSession(DoubleRatchetSessionState state, ECDiffieHellman identityKey)
     {
-        _identityKey = identityKey;
         _rootKey = state.RootKey;
         _sendingChainKey = state.SendingChainKey;
         _receivingChainKey = state.ReceivingChainKey;

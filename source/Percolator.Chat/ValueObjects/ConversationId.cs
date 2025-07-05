@@ -1,17 +1,14 @@
-using System.Text.Json.Serialization;
-
 namespace Percolator.Chat.ValueObjects;
 
 public readonly record struct ConversationId
 {
     public Guid Value { get; }
 
-    [JsonConstructor]
-    public ConversationId(Guid Value)
+    public ConversationId(Guid value)
     {
-        if (Value == Guid.Empty)
-            throw new ArgumentException("Conversation ID cannot be empty.", nameof(Value));
-        this.Value = Value;
+        if (value == Guid.Empty)
+            throw new ArgumentException("Conversation ID cannot be empty.", nameof(value));
+        Value = value;
     }
 
     public static ConversationId NewId() => new(Guid.NewGuid());
