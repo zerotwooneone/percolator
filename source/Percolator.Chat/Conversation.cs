@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using Percolator.Chat.ValueObjects;
 
 namespace Percolator.Chat;
@@ -12,6 +13,25 @@ public class Conversation
     public IReadOnlyList<Message> Messages => _messages.AsReadOnly();
     public string? Name { get; private set; }
     public string? AvatarUrl { get; private set; }
+
+    /// <summary>
+    /// This constructor is intended for use by the JSON deserializer.
+    /// It allows for the rehydration of a Conversation object from a persistent store.
+    /// </summary>
+    [JsonConstructor]
+    public Conversation(
+        ConversationId Id,
+        IReadOnlyList<ParticipantId> Participants,
+        IReadOnlyList<Message> Messages,
+        string? Name,
+        string? AvatarUrl)
+    {
+        this.Id = Id;
+        _participants = Participants.ToList();
+        _messages = Messages.ToList();
+        this.Name = Name;
+        this.AvatarUrl = AvatarUrl;
+    }
 
     public Conversation(IEnumerable<ParticipantId> participants) : this(participants, null)
     {
