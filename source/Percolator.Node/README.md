@@ -76,50 +76,33 @@ dotnet run --project .\Percolator.Node\Percolator.Node.csproj -- send 1a2b3c4d-5
 
 ## Example Scenario: Two Nodes on One Machine
 
-This scenario demonstrates how to start two independent nodes and have one send a message to the other. You will need three separate terminal windows.
+This scenario demonstrates how to start two independent nodes and have one send a message to the other. You will need two separate terminal windows.
 
-### Terminal 1: Start Node A
+### Terminal 1: Start Node A (Host)
 
-This node will act as the initial host, listening for connections.
+This node will act as the host, listening for connections on port 5000 with the identity `nodeA`.
 
 ```bash
 dotnet run --project .\Percolator.Node\Percolator.Node.csproj -- host --port 5000 --identity nodeA
 ```
 
-### Terminal 2: Start Node B
+### Terminal 2: Connect and Send Message with Node B
 
-This node will also host, but it will be the one initiating the connection to Node A.
+In a second terminal, use the `nodeB` identity to connect to `nodeA` and then send a message.
 
-```bash
-dotnet run --project .\Percolator.Node\Percolator.Node.csproj -- host --port 5001 --identity nodeB
-```
-
-### Terminal 3: Initiate Connection and Send Message
-
-Now, from a third terminal, we will perform the client actions using Node B's identity.
-
-**1. Connect Node B to Node A:**
-
+**Step 1: Connect to Node A**
 ```bash
 dotnet run --project .\Percolator.Node\Percolator.Node.csproj -- connect localhost 5000 --identity nodeB
 ```
+This will output a `Conversation ID`. Copy it for the next step.
 
-After a moment, you will see a confirmation with a new Conversation ID. It will look something like this:
-`Session established with peer. Conversation ID: 1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d`
-
-Copy this `Conversation ID`.
-
-**2. Send a Message from Node B to Node A:**
-
-Use the `send` command with the ID you just copied. Remember to specify that you are sending *from* `nodeB`'s identity.
-
+**Step 2: Send a message**
+Replace `<conversation_id>` with the ID from the previous step.
 ```bash
-dotnet run --project .\Percolator.Node\Percolator.Node.csproj -- send <PASTE_YOUR_CONVERSATION_ID_HERE> "Hello from Node B!" --identity nodeB
+dotnet run --project .\Percolator.Node\Percolator.Node.csproj -- send <conversation_id> "Hello from Node B!" --identity nodeB
 ```
 
-You will see a "Message sent." confirmation in Terminal 3.
-
-In **Terminal 1** (Node A's console), the received message will be displayed, confirming that the end-to-end communication was successful.
+You should see the message appear in the console for Node A.
 
 ## Important Note on PeerId
 

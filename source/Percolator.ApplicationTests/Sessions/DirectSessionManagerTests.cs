@@ -4,7 +4,9 @@ using Percolator.Application.Identity;
 using Percolator.Application.Sessions;
 using Percolator.Identity.Model;
 using Percolator.Sessions;
+using Percolator.Chat;
 using Percolator.Identity;
+using SessionPeerId = Percolator.Sessions.PeerId;
 
 namespace Percolator.ApplicationTests.Sessions;
 
@@ -12,9 +14,9 @@ namespace Percolator.ApplicationTests.Sessions;
 public class DirectSessionManagerTests
 {
     private Mock<IDoubleRatchetSessionStore> _mockSessionStore = null!;
-    private Mock<IConversationStore> _mockConversationStore = null!;
+    private Mock<IConversationRepository> _mockConversationRepository = null!;
+    private Mock<ILocalPeerProvider> _mockLocalPeerProvider = null!;
     private Mock<IMessageStore> _mockMessageStore = null!;
-    private ActiveIdentityContext _activeIdentityContext = null!;
     private DirectSessionManager _manager = null!;
 
     private X3dhKeys _localKeys = null!;
@@ -22,11 +24,12 @@ public class DirectSessionManagerTests
 
     [SetUp]
     public void Setup()
-    {
+    {        
         _mockSessionStore = new Mock<IDoubleRatchetSessionStore>();
-        _mockConversationStore = new Mock<IConversationStore>();
+        _mockConversationRepository = new Mock<IConversationRepository>();
+        _mockLocalPeerProvider = new Mock<ILocalPeerProvider>();
         _mockMessageStore = new Mock<IMessageStore>();
-        _activeIdentityContext = new ActiveIdentityContext();
+        var activeIdentityContext = new ActiveIdentityContext();
 
         var identity = new IdentityRecord(Guid.NewGuid(), "Local Identity");
         var identitySigningKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
@@ -35,16 +38,19 @@ public class DirectSessionManagerTests
         var oneTimePreKeys = new[] { ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256) };
         _localKeys = new X3dhKeys(identitySigningKey, identityAgreementKey, signedPreKey, oneTimePreKeys);
 
-        _activeIdentityContext.Identity = identity;
-        _activeIdentityContext.Keys = _localKeys;
+        activeIdentityContext.Identity = identity;
+        activeIdentityContext.Keys = _localKeys;
 
         _remoteIdentityKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        
+        _mockLocalPeerProvider.Setup(p => p.GetPeerIdAsync()).ReturnsAsync(new SessionPeerId(identity.Id));
 
         _manager = new DirectSessionManager(
             _mockSessionStore.Object,
-            _mockConversationStore.Object,
+            _mockConversationRepository.Object,
+            _mockLocalPeerProvider.Object,
             _mockMessageStore.Object,
-            _activeIdentityContext
+            activeIdentityContext
         );
     }
 
@@ -53,5 +59,11 @@ public class DirectSessionManagerTests
     {
         _localKeys.Dispose();
         _remoteIdentityKey.Dispose();
+    }
+
+    [Test]
+    public void Test1()
+    {
+        Assert.Pass();
     }
 }

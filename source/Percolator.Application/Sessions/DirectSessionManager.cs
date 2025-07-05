@@ -5,30 +5,34 @@ using Percolator.Sessions;
 using SessionPeerId = Percolator.Sessions.PeerId;
 using OpaquePublicKey = Percolator.Sessions.OpaquePublicKey;
 using System.Collections.Concurrent;
+using Percolator.Chat;
 
 namespace Percolator.Application.Sessions;
 
 public class DirectSessionManager
 {
     private readonly IDoubleRatchetSessionStore _doubleRatchetSessionStore;
-    private readonly IConversationStore _conversationStore;
+    private readonly IConversationRepository _conversationRepository;
+    private readonly ILocalPeerProvider _localPeerProvider;
     private readonly IMessageStore _messageStore;
     private readonly ActiveIdentityContext _activeIdentityContext;
     private readonly ConcurrentDictionary<ConversationId, SemaphoreSlim> _sessionLocks = new();
 
     public DirectSessionManager(
         IDoubleRatchetSessionStore doubleRatchetSessionStore,
-        IConversationStore conversationStore,
+        IConversationRepository conversationRepository,
+        ILocalPeerProvider localPeerProvider,
         IMessageStore messageStore,
         ActiveIdentityContext activeIdentityContext)
     {
         _doubleRatchetSessionStore = doubleRatchetSessionStore;
-        _conversationStore = conversationStore;
+        _conversationRepository = conversationRepository;
+        _localPeerProvider = localPeerProvider;
         _messageStore = messageStore;
         _activeIdentityContext = activeIdentityContext;
     }
 
-    public async Task<ConversationId> EstablishSessionAsync(SessionPeerId remotePeerId, OpaquePublicKey remoteIdentityPublicKey, SharedSecret sharedSecret)
+    public async Task EstablishSessionAsync(ConversationId conversationId, SessionPeerId remotePeerId, OpaquePublicKey remoteIdentityPublicKey, SharedSecret sharedSecret)
     {
         if (_activeIdentityContext.Identity is null || _activeIdentityContext.Keys is null)
         {
@@ -45,18 +49,11 @@ public class DirectSessionManager
             remoteIdentityPublicKey.Value,
             localRatchetKey
         );
-
-        var conversationId = new ConversationId(Guid.NewGuid());
-        var localPeerId = new SessionPeerId(_activeIdentityContext.Identity.Id);
-        var conversation = new DirectConversation(conversationId, localPeerId, remotePeerId);
-
+        
         await _doubleRatchetSessionStore.SaveSessionStateAsync(remotePeerId, conversationId, doubleRatchetSession.GetState());
-        await _conversationStore.SaveConversationAsync(conversation);
 
         // Initialize a lock for the new session to prevent race conditions during message processing
         _sessionLocks.TryAdd(conversationId, new SemaphoreSlim(1, 1));
-
-        return conversationId;
     }
 
     public async Task<byte[]> ReceiveMessageAsync(ConversationId conversationId, RatchetMessage encryptedMessage)
@@ -72,13 +69,7 @@ public class DirectSessionManager
 
         try
         {
-            var conversation = await _conversationStore.GetConversationAsync(conversationId);
-            if (conversation == null)
-            { 
-                throw new InvalidOperationException($"Conversation with ID {conversationId} not found.");
-            }
-
-            var remotePeerId = conversation.RemotePeerId;
+            var remotePeerId = await GetRemotePeerId(conversationId);
 
             var sessionState = await _doubleRatchetSessionStore.GetSessionStateAsync(remotePeerId, conversationId);
             if (sessionState == null)
@@ -106,15 +97,10 @@ public class DirectSessionManager
         }
     }
 
-    public async Task<DirectConversation?> GetConversationAsync(ConversationId conversationId)
-    {
-        return await _conversationStore.GetConversationAsync(conversationId);
-    }
-
     public async Task<(SessionPeerId RemotePeerId, RatchetMessage EncryptedMessage)?> EncryptMessageAsync(ConversationId conversationId, byte[] plaintext)
     {
         if (_activeIdentityContext.Identity is null || _activeIdentityContext.Keys is null)
-        {
+        { 
             throw new InvalidOperationException("No active identity found to encrypt message.");
         }
 
@@ -123,17 +109,12 @@ public class DirectSessionManager
 
         try
         {
-            var conversation = await _conversationStore.GetConversationAsync(conversationId);
-            if (conversation is null)
-            {
-                return null;
-            }
-
-            var remotePeerId = conversation.RemotePeerId;
+            var remotePeerId = await GetRemotePeerId(conversationId);
             var sessionState = await _doubleRatchetSessionStore.GetSessionStateAsync(remotePeerId, conversationId);
             if (sessionState is null)
             {
-                throw new InvalidOperationException($"Double Ratchet session state for conversation {conversationId} not found.");
+                // This is the likely source of the error if the conversation exists but the session file doesn't.
+                return null;
             }
 
             var identityKey = ECDiffieHellman.Create(_activeIdentityContext.Keys.IdentityAgreementKey.ExportParameters(true));
@@ -149,5 +130,26 @@ public class DirectSessionManager
         {
             semaphore.Release();
         }
+    }
+
+    private async Task<SessionPeerId> GetRemotePeerId(ConversationId conversationId)
+    {
+        var chatConversation = await _conversationRepository.GetByIdAsync(new Chat.ValueObjects.ConversationId(conversationId.Value));
+        if (chatConversation is null)
+        {
+            throw new InvalidOperationException($"Conversation with ID {conversationId} not found.");
+        }
+
+        var localPeerId = await _localPeerProvider.GetPeerIdAsync();
+
+        var localParticipantId = new Chat.ValueObjects.ParticipantId(localPeerId.Value);
+        var remoteParticipant = chatConversation.Participants.FirstOrDefault(p => p.Value != localParticipantId.Value);
+
+        if (remoteParticipant.Value == Guid.Empty)
+        {
+            throw new InvalidOperationException("Could not determine remote peer in conversation.");
+        }
+
+        return new SessionPeerId(remoteParticipant.Value);
     }
 }

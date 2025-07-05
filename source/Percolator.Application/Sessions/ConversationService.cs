@@ -12,6 +12,7 @@ using ChatConversationId = Percolator.Chat.ValueObjects.ConversationId;
 using ChatParticipantId = Percolator.Chat.ValueObjects.ParticipantId;
 using OpaquePublicKey = Percolator.Sessions.OpaquePublicKey;
 using SessionPeerId = Percolator.Sessions.PeerId;
+using SessionConversationId = Percolator.Sessions.ConversationId;
 using ContractsPreKeyBundle = Percolator.Contracts.PreKeyBundle;
 
 namespace Percolator.Application.Sessions;
@@ -73,8 +74,11 @@ public class ConversationService : IConversationService
 
         using var ephemeralKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
 
+        var localPeerId = await _localPeerProvider.GetPeerIdAsync();
+
         var request = new EstablishSessionRequest
         {
+            InitiatorPeerId = localPeerId.Value.ToString(),
             InitiatorBundle = localBundle,
             InitiatorEphemeralKey = ByteString.CopyFrom(ephemeralKey.PublicKey.ExportSubjectPublicKeyInfo())
         };
@@ -92,27 +96,24 @@ public class ConversationService : IConversationService
         var remotePeerId = new SessionPeerId(new Guid(response.ResponderPeerId));
         var sharedSecret = _orchestrator.CompleteHandshake(response.ResponderBundle, ephemeralKey);
 
-        var sessionConversationId = await _sessionManager.EstablishSessionAsync(
+        var conversation = new ChatConversation(
+            new ChatConversationId(Guid.NewGuid()),
+            new List<ChatParticipantId>
+            {
+                new(localPeerId.Value),
+                new(remotePeerId.Value)
+            }
+        );
+
+        await _conversationRepository.AddAsync(conversation);
+
+        await _sessionManager.EstablishSessionAsync(
+            new SessionConversationId(conversation.Id.Value),
             remotePeerId,
             new OpaquePublicKey(response.ResponderBundle.IdentityAgreementKey.ToByteArray()),
             sharedSecret
         );
 
-        _logger.LogInformation("Session established with peer {RemotePeerId}. Conversation ID: {ConversationId}", remotePeerId, sessionConversationId);
-
-        var localPeerId = await _localPeerProvider.GetPeerIdAsync();
-        var participants = new List<ChatParticipantId>
-        {
-            new(localPeerId.Value),
-            new(remotePeerId.Value)
-        };
-
-        var chatConversationId = new ChatConversationId(sessionConversationId.Value);
-        var chatConversation = new ChatConversation(chatConversationId, participants);
-
-        await _conversationRepository.AddAsync(chatConversation);
-        _logger.LogInformation("Created and persisted Chat.Conversation with ID {ConversationId}", chatConversationId);
-
-        return chatConversationId;
+        return conversation.Id;
     }
 }

@@ -41,6 +41,8 @@ message EstablishSessionRequest {
     optional bytes long_term_identity_key = 3;
     // The initiator's ephemeral public key for this handshake.
     bytes initiator_ephemeral_key = 4;
+    // The initiator's peer ID.
+    string initiator_peer_id = 5;
 }
 
 // Response containing the responder's key bundle and the new session ID.
