@@ -1,4 +1,4 @@
-Microsoft Visual Studio Solution File, Format Version 12.00
+﻿Microsoft Visual Studio Solution File, Format Version 12.00
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "SolutionFolder", "SolutionFolder", "{D7D1220C-3D34-48E0-BDAE-00BCD95649B5}"
 	ProjectSection(SolutionItems) = preProject
 		..\README.md = ..\README.md
@@ -35,6 +35,14 @@ EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.SessionsTests", "Percolator.SessionsTests\Percolator.SessionsTests.csproj", "{8941C5D8-010E-42C0-BDE5-535B46771640}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.ApplicationTests", "Percolator.ApplicationTests\Percolator.ApplicationTests.csproj", "{58617EF5-4875-4B42-9CD8-1E622D2C2C37}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Apps", "Apps", "{2CB618DD-9551-4593-8B98-FFAE20DC4C64}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Chat", "Chat", "{869EC03E-6CCA-48A9-B7E1-C6CEC6796ED5}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.Chat", "Percolator.Chat\Percolator.Chat.csproj", "{4964336F-920F-4B5B-B757-7E71EBFD9703}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.Chat.Tests", "Percolator.Chat.Tests\Percolator.Chat.Tests.csproj", "{B1E04D25-BA49-4B8B-9320-593DB3C05D8D}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -190,6 +198,30 @@ Global
 		{58617EF5-4875-4B42-9CD8-1E622D2C2C37}.Release|x64.Build.0 = Release|Any CPU
 		{58617EF5-4875-4B42-9CD8-1E622D2C2C37}.Release|x86.ActiveCfg = Release|Any CPU
 		{58617EF5-4875-4B42-9CD8-1E622D2C2C37}.Release|x86.Build.0 = Release|Any CPU
+		{4964336F-920F-4B5B-B757-7E71EBFD9703}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{4964336F-920F-4B5B-B757-7E71EBFD9703}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{4964336F-920F-4B5B-B757-7E71EBFD9703}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{4964336F-920F-4B5B-B757-7E71EBFD9703}.Debug|x64.Build.0 = Debug|Any CPU
+		{4964336F-920F-4B5B-B757-7E71EBFD9703}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{4964336F-920F-4B5B-B757-7E71EBFD9703}.Debug|x86.Build.0 = Debug|Any CPU
+		{4964336F-920F-4B5B-B757-7E71EBFD9703}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{4964336F-920F-4B5B-B757-7E71EBFD9703}.Release|Any CPU.Build.0 = Release|Any CPU
+		{4964336F-920F-4B5B-B757-7E71EBFD9703}.Release|x64.ActiveCfg = Release|Any CPU
+		{4964336F-920F-4B5B-B757-7E71EBFD9703}.Release|x64.Build.0 = Release|Any CPU
+		{4964336F-920F-4B5B-B757-7E71EBFD9703}.Release|x86.ActiveCfg = Release|Any CPU
+		{4964336F-920F-4B5B-B757-7E71EBFD9703}.Release|x86.Build.0 = Release|Any CPU
+		{B1E04D25-BA49-4B8B-9320-593DB3C05D8D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B1E04D25-BA49-4B8B-9320-593DB3C05D8D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B1E04D25-BA49-4B8B-9320-593DB3C05D8D}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{B1E04D25-BA49-4B8B-9320-593DB3C05D8D}.Debug|x64.Build.0 = Debug|Any CPU
+		{B1E04D25-BA49-4B8B-9320-593DB3C05D8D}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{B1E04D25-BA49-4B8B-9320-593DB3C05D8D}.Debug|x86.Build.0 = Debug|Any CPU
+		{B1E04D25-BA49-4B8B-9320-593DB3C05D8D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B1E04D25-BA49-4B8B-9320-593DB3C05D8D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B1E04D25-BA49-4B8B-9320-593DB3C05D8D}.Release|x64.ActiveCfg = Release|Any CPU
+		{B1E04D25-BA49-4B8B-9320-593DB3C05D8D}.Release|x64.Build.0 = Release|Any CPU
+		{B1E04D25-BA49-4B8B-9320-593DB3C05D8D}.Release|x86.ActiveCfg = Release|Any CPU
+		{B1E04D25-BA49-4B8B-9320-593DB3C05D8D}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -203,5 +235,8 @@ Global
 		{3DFDC043-0D74-493E-B9F2-2B4E902AB9FA} = {A2C7AA6D-251E-45AB-A32A-8EA6BB634ACA}
 		{D81C08E6-0245-4963-8DDA-82825E767EB1} = {931EB666-3734-4D83-8FB6-350D55616E09}
 		{8941C5D8-010E-42C0-BDE5-535B46771640} = {931EB666-3734-4D83-8FB6-350D55616E09}
+		{869EC03E-6CCA-48A9-B7E1-C6CEC6796ED5} = {2CB618DD-9551-4593-8B98-FFAE20DC4C64}
+		{4964336F-920F-4B5B-B757-7E71EBFD9703} = {869EC03E-6CCA-48A9-B7E1-C6CEC6796ED5}
+		{B1E04D25-BA49-4B8B-9320-593DB3C05D8D} = {869EC03E-6CCA-48A9-B7E1-C6CEC6796ED5}
 	EndGlobalSection
 EndGlobal
