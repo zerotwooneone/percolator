@@ -87,6 +87,9 @@ namespace Percolator.Identity
             const string validChars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890!@#$%^&*()-_=+";
             var password = new StringBuilder(PasswordLength);
             using var rng = RandomNumberGenerator.Create();
+
+            // To avoid modulo bias, we'll only accept values within the largest multiple of validChars.Length that fits in a byte.
+            var maxMultiple = (256 / validChars.Length) * validChars.Length;
             
             var randomBytes = new byte[1];
             while (password.Length < PasswordLength)
@@ -94,7 +97,7 @@ namespace Percolator.Identity
                 rng.GetBytes(randomBytes);
                 var randomValue = randomBytes[0];
 
-                if (randomValue < 216) // 216 is the largest multiple of 72 (validChars.Length) less than 256
+                if (randomValue < maxMultiple)
                 {
                     password.Append(validChars[randomValue % validChars.Length]);
                 }

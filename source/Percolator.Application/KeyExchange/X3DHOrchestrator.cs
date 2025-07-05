@@ -31,27 +31,35 @@ public class X3DHOrchestrator
             throw new InvalidOperationException("Active identity does not have keys loaded.");
         }
 
-        // Step 1: Verify the signature on the signed pre-key.
-        if (!_x3DhManager.VerifySignature(remotePreKeyBundle.IdentitySigningKey.ToByteArray(), remotePreKeyBundle.SignedPreKey.ToByteArray(), remotePreKeyBundle.PreKeySignature.ToByteArray()))
+        try
         {
-            throw new CryptographicException("Invalid signature on signed pre-key.");
+            // Step 1: Verify the signature on the signed pre-key.
+            if (!_x3DhManager.VerifySignature(remotePreKeyBundle.IdentitySigningKey.ToByteArray(),
+                    remotePreKeyBundle.SignedPreKey.ToByteArray(), remotePreKeyBundle.PreKeySignature.ToByteArray()))
+            {
+                throw new CryptographicException("Invalid signature on signed pre-key.");
+            }
+
+            var remoteCryptoBundle = new CryptographyPreKeyBundle(
+                remotePreKeyBundle.IdentityAgreementKey.ToByteArray(),
+                remotePreKeyBundle.IdentitySigningKey.ToByteArray(),
+                remotePreKeyBundle.SignedPreKey.ToByteArray(),
+                remotePreKeyBundle.PreKeySignature.ToByteArray(),
+                remotePreKeyBundle.OneTimePreKey?.ToByteArray()
+            );
+
+            var sharedSecret = _x3DhManager.InitiateHandshake(
+                remoteCryptoBundle,
+                ephemeralKey,
+                _activeIdentityContext.Keys.IdentityAgreementKey);
+
+            return sharedSecret;
         }
-
-        var remoteCryptoBundle = new CryptographyPreKeyBundle(
-            remotePreKeyBundle.IdentityAgreementKey.ToByteArray(),
-            remotePreKeyBundle.IdentitySigningKey.ToByteArray(),
-            remotePreKeyBundle.SignedPreKey.ToByteArray(),
-            remotePreKeyBundle.PreKeySignature.ToByteArray(),
-            remotePreKeyBundle.OneTimePreKey?.ToByteArray()
-        );
-
-        var sharedSecret = _x3DhManager.InitiateHandshake(
-            remoteCryptoBundle, 
-            ephemeralKey, 
-            _activeIdentityContext.Keys.IdentitySigningKey, 
-            _activeIdentityContext.Keys.IdentityAgreementKey);
-
-        return sharedSecret;
+        catch (CryptographicException ex)
+        {
+            // Catch exceptions from malformed keys or invalid signatures to prevent DoS.
+            throw new CryptographicException("Handshake failed due to an invalid pre-key bundle or signature.", ex);
+        }
     }
 
     public OrchestratorResponseResult ProcessHandshake(ContractsPreKeyBundle remotePreKeyBundle, byte[] remoteEphemeralPublicKey)

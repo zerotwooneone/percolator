@@ -77,3 +77,16 @@ if (!publicKey.Value.SequenceEqual(protoPayload.PublicKey.ToByteArray()))
 ```
 
 This two-step verification process ensures that the peer discovery mechanism is resilient against unauthorized access and tampering, forming a secure foundation for the rest of the application's network interactions.
+
+## Important Note on PeerId
+
+A `PeerId` is a **local-only, non-cryptographic identifier**. It is randomly generated (as a GUID) and is used to uniquely identify a peer within the local application instance.
+
+**Key Principles:**
+-   **Local Scope:** A `PeerId` is only meaningful to the local application. It is never shared with remote peers.
+-   **Not for Authentication:** It MUST NOT be used for authentication or as a security credential. All security operations (like session management) are tied to cryptographic keys, not the `PeerId`.
+-   **Stable Identifier:** It allows the application to maintain a stable reference to a peer, even if that peer's underlying cryptographic keys change.
+
+This rule is enforced across all projects in the solution to ensure a clear and secure identity model.
+
+**Note:** The `PeerId` plays a crucial role in managing peer connections locally but does not participate in the authentication or security verification process. Its primary function is to provide a stable identifier for peers within the local application context, ensuring that the application can maintain a consistent view of its connected peers despite changes in their cryptographic keys or other identifiers.

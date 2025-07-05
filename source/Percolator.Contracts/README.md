@@ -58,6 +58,17 @@ In Percolator's peer-to-peer model, identity is handled with a "best-effort" app
   - If the `long_term_identity_key` is **not** provided, the receiving peer will derive a temporary `PeerId` from the ephemeral `identity_key` within the `PreKeyBundle`. In this case, the initiating peer will appear as a new, unknown entity for each new session.
 - **Best-Effort Principle:** This system ensures that peers can always connect, but being recognized as a known contact is a "best-effort" outcome dependent on the initiator providing a stable long-term key. It is acceptable and expected that friends may sometimes appear as "unknown" if they choose not to provide their long-term key.
 
+## Important Note on PeerId
+
+A `PeerId` is a **local-only, non-cryptographic identifier**. It is randomly generated (as a GUID) and is used to uniquely identify a peer within the local application instance.
+
+**Key Principles:**
+-   **Local Scope:** A `PeerId` is only meaningful to the local application. It is never shared with remote peers.
+-   **Not for Authentication:** It MUST NOT be used for authentication or as a security credential. All security operations (like session management) are tied to cryptographic keys, not the `PeerId`.
+-   **Stable Identifier:** It allows the application to maintain a stable reference to a peer, even if that peer's underlying cryptographic keys change.
+
+This rule is enforced across all projects in the solution to ensure a clear and secure identity model.
+
 ## Protocol Design Principles
 
 To ensure robustness and future compatibility, all public-facing contracts adhere to the following principles:

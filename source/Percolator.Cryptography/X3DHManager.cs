@@ -6,16 +6,22 @@ public class X3DHManager : IX3DHManager
 {
     private const int KeySize = 32;
 
-    public SharedSecret InitiateHandshake(PreKeyBundle remoteBundle, ECDiffieHellman ephemeralKey, ECDsa identitySigningKey, ECDiffieHellman identityAgreementKey)
+    public SharedSecret InitiateHandshake(PreKeyBundle remoteBundle, ECDiffieHellman ephemeralKey, ECDiffieHellman identityAgreementKey)
     {
+        // Step 0: Verify the signature on the signed pre-key. This is critical to prevent a MITM attack.
+        if (!VerifySignature(remoteBundle.IdentitySigningKey, remoteBundle.SignedPreKey, remoteBundle.Signature))
+        {
+            throw new CryptographicException("Invalid signature on remote pre-key bundle.");
+        }
+
         // The initiator has received a pre-key bundle from the responder.
         // It uses its own identity key and a newly generated ephemeral key.
 
         // Step 1: Load the remote peer's public keys from the bundle.
-        using var remoteIdentityKey = ECDiffieHellman.Create();
+        using var remoteIdentityKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         remoteIdentityKey.ImportSubjectPublicKeyInfo(remoteBundle.IdentityAgreementKey, out _);
 
-        using var remoteSignedPreKey = ECDiffieHellman.Create();
+        using var remoteSignedPreKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         remoteSignedPreKey.ImportSubjectPublicKeyInfo(remoteBundle.SignedPreKey, out _);
 
         // Step 2: Perform DH calculations.
@@ -31,7 +37,7 @@ public class X3DHManager : IX3DHManager
         var dhCalculations = new List<byte[]> { dh1, dh2, dh3 };
         if (remoteBundle.OneTimePreKey is { Length: > 0 })
         { 
-            using var remoteOneTimePreKey = ECDiffieHellman.Create();
+            using var remoteOneTimePreKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
             remoteOneTimePreKey.ImportSubjectPublicKeyInfo(remoteBundle.OneTimePreKey, out _);
             var dh4 = ephemeralKey.DeriveKeyMaterial(remoteOneTimePreKey.PublicKey);
             dhCalculations.Add(dh4);

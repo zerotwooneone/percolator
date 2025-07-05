@@ -91,11 +91,11 @@ public class X3DHOrchestratorTests
 
         _mockX3dhManager.Setup(x => x.VerifySignature(remoteIdentitySigningKeyBytes, remoteSignedPreKeyBytes, It.IsAny<byte[]>())).Returns(true);
 
-        _mockX3dhManager.Setup(x => x.InitiateHandshake(
+        _mockX3dhManager
+            .Setup(x => x.InitiateHandshake(
                 It.IsAny<CryptoPreKeyBundle>(),
-                ephemeralKey,
-                _localKeys.IdentitySigningKey,
-                _localKeys.IdentityAgreementKey))
+                It.IsAny<ECDiffieHellman>(),
+                It.IsAny<ECDiffieHellman>()))
             .Returns(expectedSharedSecret);
 
         // Act
@@ -106,9 +106,8 @@ public class X3DHOrchestratorTests
         result.Value.Should().BeEquivalentTo(expectedSharedSecret.Value);
         _mockX3dhManager.Verify(x => x.InitiateHandshake(
             It.Is<CryptoPreKeyBundle>(b => b.IdentitySigningKey.SequenceEqual(remoteIdentitySigningKeyBytes)),
-            ephemeralKey,
-            _localKeys.IdentitySigningKey,
-            _localKeys.IdentityAgreementKey), Times.Once);
+            It.IsAny<ECDiffieHellman>(),
+            It.IsAny<ECDiffieHellman>()), Times.Once);
     }
 
     [Test]

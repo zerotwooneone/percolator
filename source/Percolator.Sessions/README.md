@@ -28,6 +28,17 @@ This project is a core **Domain Library** in the Percolator system. It is respon
 - **GroupConversation**: A stateless container for messages between a defined set of peer IDs. It is identified by a `Guid` that directly corresponds to a cryptographic group managed by the `Percolator.Cryptography` domain.
 - **DirectMessage / GroupMessage**: A piece of opaque data exchanged within a conversation, associated with a sender and a timestamp. Using distinct types makes the domain language clearer.
 
+## Important Note on PeerId
+
+A `PeerId` is a **local-only, non-cryptographic identifier**. It is randomly generated (as a GUID) and is used to uniquely identify a peer within the local application instance.
+
+**Key Principles:**
+-   **Local Scope:** A `PeerId` is only meaningful to the local application. It is never shared with remote peers.
+-   **Not for Authentication:** It MUST NOT be used for authentication or as a security credential. All security operations (like session management) are tied to cryptographic keys, not the `PeerId`.
+-   **Stable Identifier:** It allows the application to maintain a stable reference to a peer, even if that peer's underlying cryptographic keys change.
+
+This rule is enforced across all projects in the solution to ensure a clear and secure identity model.
+
 ## AI Assistant Guidance
 
 ### 1. Strict Domain Independence

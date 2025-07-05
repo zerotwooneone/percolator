@@ -43,7 +43,6 @@ public class X3DHManagerTests
         var aliceSharedSecret = manager.InitiateHandshake(
             bobPreKeyBundle,
             aliceEphemeralKey,
-            aliceIdentitySigningKey,
             aliceIdentityAgreementKey
             );
 
