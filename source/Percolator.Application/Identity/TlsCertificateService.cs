@@ -24,7 +24,7 @@ public class TlsCertificateService : ITlsCertificateService
         _logger = logger;
     }
 
-    public async Task<X509Certificate2> GetOrCreateTlsCertificateAsync(string identityName)
+    public async Task<X509Certificate2> GetOrCreateTlsCertificateAsync(string identityName, byte[] publicIdentitySigningKey)
     {
         var identityRecord = await _identityService.GetIdentityRecordAsync(identityName);
         if (identityRecord is null)
@@ -44,7 +44,8 @@ public class TlsCertificateService : ITlsCertificateService
             try
             {
                 var pfxBytes = await File.ReadAllBytesAsync(certPath);
-                var loadedCertificate = X509CertificateLoader.LoadPkcs12(pfxBytes, password, X509KeyStorageFlags.UserKeySet);
+                var loadedCertificate = X509CertificateLoader.LoadPkcs12(pfxBytes, password, X509KeyStorageFlags.UserKeySet | X509KeyStorageFlags.PersistKeySet | X509KeyStorageFlags.Exportable);
+                _logger.LogInformation("Loaded certificate. HasPrivateKey: {HasPrivateKey}", loadedCertificate.HasPrivateKey);
                 return loadedCertificate;
             }
             catch (System.Exception ex)
@@ -55,7 +56,8 @@ public class TlsCertificateService : ITlsCertificateService
 
         _logger.LogInformation("Creating new TLS certificate for {IdentityName}", identityName);
         var keys = await _keyManagementService.GetOrCreateKeysAsync(identityName);
-        var newCertificate = CertificateGenerator.CreateTlsCertificate(keys.IdentitySigningKey, identityName);
+        var newCertificate = CertificateGenerator.CreateTlsCertificate(keys.IdentitySigningKey, identityName, publicIdentitySigningKey);
+        _logger.LogInformation("Created new certificate. HasPrivateKey: {HasPrivateKey}", newCertificate.HasPrivateKey);
 
         var newPfxBytes = newCertificate.Export(X509ContentType.Pfx, password);
         await File.WriteAllBytesAsync(certPath, newPfxBytes);

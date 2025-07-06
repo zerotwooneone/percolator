@@ -12,6 +12,7 @@ public interface IConversationService
     /// </summary>
     /// <param name="host">The host of the remote peer.</param>
     /// <param name="port">The port of the remote peer.</param>
+    /// <param name="remotePublicIdentityKey">The remote peer's public identity signing key, encoded as a Base64 string.</param>
     /// <returns>The unique ID of the direct conversation.</returns>
-    Task<ConversationId> CreateDirectConversationAsync(string host, int port);
+    Task<ConversationId> CreateDirectConversationAsync(string host, int port, string remotePublicIdentityKey);
 }

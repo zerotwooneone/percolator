@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Formats.Asn1;
 using Google.Protobuf;
 using Grpc.Net.Client;
 using Microsoft.Extensions.Logging;
@@ -45,7 +46,7 @@ public class ConversationService : IConversationService
         _logger = logger;
     }
 
-    public async Task<ChatConversationId> CreateDirectConversationAsync(string host, int port)
+    public async Task<ChatConversationId> CreateDirectConversationAsync(string host, int port, string remotePublicIdentityKey)
     {
         _logger.LogInformation("Attempting to create direct conversation with {Host}:{Port}", host, port);
 
@@ -83,10 +84,66 @@ public class ConversationService : IConversationService
             InitiatorEphemeralKey = ByteString.CopyFrom(ephemeralKey.PublicKey.ExportSubjectPublicKeyInfo())
         };
 
-        var handler = new HttpClientHandler
+        var expectedPublicKey = Convert.FromBase64String(remotePublicIdentityKey);
+        var handler = new HttpClientHandler();
+        handler.ServerCertificateCustomValidationCallback = (request, cert, chain, errors) =>
         {
-            ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
+            _logger.LogInformation("Performing custom server certificate validation. SSL Policy Errors: {SslPolicyErrors}", errors);
+
+            if (cert is null)
+            {
+                _logger.LogWarning("Server certificate is null. Validation failed.");
+                return false;
+            }
+
+            _logger.LogInformation("Received server certificate. Subject: {Subject}, Thumbprint: {Thumbprint}", cert.Subject, cert.Thumbprint);
+
+            // For self-signed certs, RemoteCertificateChainErrors is expected. We proceed with our custom validation.
+            // If other errors are present, we log them but still proceed, as our custom validation is the source of truth.
+            if (errors != System.Net.Security.SslPolicyErrors.RemoteCertificateChainErrors && errors != System.Net.Security.SslPolicyErrors.None)
+            {
+                _logger.LogWarning("SSL policy reported errors other than chain trust: {SslPolicyErrors}", errors);
+            }
+
+            var identityExtension = cert.Extensions[Oids.PeerIdentityKey];
+            if (identityExtension is null)
+            {
+                _logger.LogError("Certificate does not contain the required peer identity extension (OID: {Oid}). Validation failed.", Oids.PeerIdentityKey);
+                return false;
+            }
+
+            _logger.LogInformation("Found peer identity extension. Validating content.");
+
+            try
+            {
+                var asnReader = new AsnReader(identityExtension.RawData, AsnEncodingRules.BER);
+                var actualPublicKey = asnReader.ReadOctetString();
+
+                if (asnReader.HasData)
+                {
+                    _logger.LogWarning("ASN.1 reader has extra data after reading the OCTET STRING. The data may be malformed.");
+                }
+
+                var validationResult = actualPublicKey.SequenceEqual(expectedPublicKey);
+                if (validationResult)
+                {
+                    _logger.LogInformation("Public key in certificate matches expected public key. Validation successful.");
+                }
+                else
+                {
+                    _logger.LogError("Public key in certificate does NOT match expected public key. Validation failed.");
+                    _logger.LogDebug("Expected Key (Base64): {ExpectedKey}", Convert.ToBase64String(expectedPublicKey));
+                    _logger.LogDebug("Actual Key (Base64): {ActualKey}", Convert.ToBase64String(actualPublicKey));
+                }
+                return validationResult;
+            }
+            catch (AsnContentException e)
+            {
+                _logger.LogError(e, "Failed to parse ASN.1 content from certificate extension. Validation failed.");
+                return false;
+            }
         };
+
         var channel = GrpcChannel.ForAddress($"https://{host}:{port}", new GrpcChannelOptions { HttpHandler = handler });
         var client = new TransportService.TransportServiceClient(channel);
 

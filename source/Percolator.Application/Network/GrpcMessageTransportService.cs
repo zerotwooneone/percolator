@@ -34,7 +34,7 @@ public class GrpcMessageTransportService : IMessageTransportService
 
         try
         {
-            var client = GetOrCreateClient(recipientPeerId, recipientAddress);
+            var client = GetOrCreateClient(peer, recipientAddress);
 
             var request = new DeliverOpaqueMessageRequest
             {
@@ -53,14 +53,22 @@ public class GrpcMessageTransportService : IMessageTransportService
         }
     }
 
-    private TransportService.TransportServiceClient GetOrCreateClient(PeerId peerId, string address)
+    private TransportService.TransportServiceClient GetOrCreateClient(Peer peer, string address)
     {
-        return _clients.GetOrAdd(peerId, _ =>
+        return _clients.GetOrAdd(peer.Id, _ =>
         {
-            var handler = new HttpClientHandler
+            var handler = new HttpClientHandler();
+            handler.ServerCertificateCustomValidationCallback = (request, cert, chain, errors) =>
             {
-                ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
+                if (cert is null)
+                {
+                    return false;
+                }
+
+                var serverCertThumbprint = cert.GetCertHashString(System.Security.Cryptography.HashAlgorithmName.SHA256);
+                return string.Equals(serverCertThumbprint, peer.Thumbprint, StringComparison.OrdinalIgnoreCase);
             };
+
             var channel = GrpcChannel.ForAddress(address, new GrpcChannelOptions { HttpHandler = handler });
             return new TransportService.TransportServiceClient(channel);
         });

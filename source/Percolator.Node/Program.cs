@@ -1,6 +1,7 @@
 using System.CommandLine;
 using System.CommandLine.Invocation;
 using System.Net;
+using System.Security.Cryptography.X509Certificates;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Configuration;
@@ -36,12 +37,10 @@ var hostCommand = new Command("host", "Starts the node, listens for peers, and h
 rootCommand.AddCommand(hostCommand);
 
 // *** Connect Command ***
-var hostArgument = new Argument<string>("host", "The hostname or IP address of the peer.");
-var portArgument = new Argument<int>("port", "The port of the peer's gRPC service.");
-var connectCommand = new Command("connect", "Connects to a peer to establish a secure session.")
+var invitationLinkArgument = new Argument<string>("link", "The percolator:// invitation link from the peer.");
+var connectCommand = new Command("connect", "Connects to a peer using an invitation link.")
 {
-    hostArgument,
-    portArgument,
+    invitationLinkArgument,
     identityOption // Add identity option to client commands
 };
 rootCommand.AddCommand(connectCommand);
@@ -59,68 +58,97 @@ rootCommand.AddCommand(sendCommand);
 
 // --- Command Handlers ---
 
-hostCommand.SetHandler(async (InvocationContext context) =>
+hostCommand.SetHandler(HostCommandHandler);
+connectCommand.SetHandler(ConnectCommandHandler);
+sendCommand.SetHandler(SendCommandHandler);
+
+// --- Run Application ---
+return await rootCommand.InvokeAsync(args);
+
+// --- Handler Implementations ---
+
+async Task HostCommandHandler(InvocationContext context)
 {
-    var identityName = context.ParseResult.GetValueForOption(identityOption);
-    var port = context.ParseResult.GetValueForOption(portOption);
-    var cancellationToken = context.GetCancellationToken();
+    CancellationToken cancellationToken = context.GetCancellationToken();
+    int port = context.ParseResult.GetValueForOption(portOption);
+    string? identityName = context.ParseResult.GetValueForOption(identityOption);
 
-    // Step 1: Create a temporary, but complete, service provider to resolve the TLS certificate.
-    // This breaks the circular dependency between Kestrel configuration and service initialization.
-    var tempServices = new ServiceCollection();
-    tempServices.AddLogging(b => b.AddConsole());
-    tempServices.AddApplicationServices(new ConfigurationBuilder().Build());
-    tempServices.AddInfrastructureServices(new ConfigurationBuilder().Build());
-    await using var tempServiceProvider = tempServices.BuildServiceProvider();
+    // Step 1: Build a temporary service provider to get services needed for startup.
+    ServiceCollection tempServices = new ServiceCollection();
+    IConfigurationRoot tempConfig = new ConfigurationBuilder().Build();
+    tempServices.AddLogging(builder => builder.AddConsole());
+    tempServices.AddApplicationServices(tempConfig);
+    tempServices.AddInfrastructureServices(tempConfig);
+    ServiceProvider tempServiceProvider = tempServices.BuildServiceProvider();
 
-    // Step 2: Use the temporary provider to load the identity and then get the certificate.
-    var tempIdentityOrchestrator = tempServiceProvider.GetRequiredService<IIdentityOrchestrator>();
-    await tempIdentityOrchestrator.LoadOrCreateIdentityAsync(identityName!, cancellationToken);
-    var certificateService = tempServiceProvider.GetRequiredService<ITlsCertificateService>();
-    var serverCertificate = await certificateService.GetOrCreateTlsCertificateAsync(identityName!); 
-
-    // Step 3: Configure and build the main application using the pre-fetched certificate.
-    var builder = WebApplication.CreateBuilder();
-
-    builder.WebHost.UseKestrel(options =>
+    try
     {
-        options.Listen(IPAddress.Any, port, listenOptions =>
+        // Step 2: Use the temporary provider to load the identity and then get the certificate object.
+        IIdentityOrchestrator tempIdentityOrchestrator = tempServiceProvider.GetRequiredService<IIdentityOrchestrator>();
+        ActiveIdentityContext tempActiveIdentityContext = tempServiceProvider.GetRequiredService<ActiveIdentityContext>();
+        await tempIdentityOrchestrator.LoadOrCreateIdentityAsync(identityName!, cancellationToken);
+
+        ITlsCertificateService certificateService = tempServiceProvider.GetRequiredService<ITlsCertificateService>();
+        X509Certificate2 serverCertificate = await certificateService.GetOrCreateTlsCertificateAsync(
+            identityName!,
+            tempActiveIdentityContext.Keys!.IdentitySigningKey.ExportSubjectPublicKeyInfo());
+
+        string publicKeyB64 = Convert.ToBase64String(tempActiveIdentityContext.Keys!.IdentitySigningKey.ExportSubjectPublicKeyInfo());
+
+        // For simplicity in a local dev environment, we'll use localhost.
+        // A more advanced implementation might try to discover the local network IP.
+        InvitationLink invitationLink = new InvitationLink("localhost", port, publicKeyB64);
+
+        Console.ForegroundColor = ConsoleColor.Green;
+        Console.WriteLine($"Host started successfully.");
+        Console.WriteLine($"Invitation Link: {invitationLink}");
+        Console.ResetColor();
+        Console.WriteLine("Share this link with peers who want to connect.");
+
+        // Step 3: Configure and build the main application using the pre-fetched certificate.
+        WebApplicationBuilder builder = WebApplication.CreateBuilder();
+
+        builder.WebHost.UseKestrel(options =>
         {
-            listenOptions.UseHttps(serverCertificate);
+            options.Listen(IPAddress.Any, port, listenOptions =>
+            {
+                listenOptions.UseHttps(httpsOptions =>
+                {
+                    httpsOptions.ServerCertificateSelector = (connectionContext, name) => serverCertificate;
+                });
+            });
         });
-    });
 
-    builder.Logging.ClearProviders().AddConsole();
-    builder.Services.AddApplicationServices(builder.Configuration);
-    builder.Services.AddInfrastructureServices(builder.Configuration);
-    builder.Services.AddGrpc();
+        builder.Logging.ClearProviders().AddConsole();
+        builder.Services.AddApplicationServices(builder.Configuration);
+        builder.Services.AddInfrastructureServices(builder.Configuration);
+        builder.Services.AddGrpc();
 
-    var app = builder.Build();
+        WebApplication app = builder.Build();
 
-    // Step 4: Manually initialize the identity *again* using the main service provider
-    // to ensure the ActiveIdentityContext is correct for the running application.
-    var identityOrchestrator = app.Services.GetRequiredService<IIdentityOrchestrator>();
-    await identityOrchestrator.LoadOrCreateIdentityAsync(identityName!, cancellationToken);
+        // Step 4: Manually initialize the identity *again* using the main service provider
+        // to ensure the ActiveIdentityContext is correct for the running application.
+        IIdentityOrchestrator identityOrchestrator = app.Services.GetRequiredService<IIdentityOrchestrator>();
+        await identityOrchestrator.LoadOrCreateIdentityAsync(identityName!, cancellationToken);
 
-    // Step 5: Configure and run the application.
-    app.MapGrpcService<PercolatorMessageService>();
-    await app.RunAsync(cancellationToken);
-});
+        // Step 5: Configure and run the application.
+        app.MapGrpcService<PercolatorMessageService>();
+        await app.RunAsync(cancellationToken);
 
-connectCommand.SetHandler(async (InvocationContext context) =>
+    }
+    finally
+    {
+        await tempServiceProvider.DisposeAsync();
+    }
+}
+
+async Task ConnectCommandHandler(InvocationContext context)
 {
-    var host = context.ParseResult.GetValueForArgument(hostArgument);
-    var port = context.ParseResult.GetValueForArgument(portArgument);
+    var link = context.ParseResult.GetValueForArgument(invitationLinkArgument);
     var identityName = context.ParseResult.GetValueForOption(identityOption);
 
     // Build client-specific service provider
-    var services = new ServiceCollection();
-    var configuration = new ConfigurationBuilder().Build();
-    services.AddLogging(builder => builder.AddConsole());
-    services.AddApplicationServices(configuration);
-    services.AddInfrastructureServices(configuration);
-
-    await using var serviceProvider = services.BuildServiceProvider();
+    await using ServiceProvider serviceProvider = BuildClientServiceProvider(identityName!, context.GetCancellationToken());
 
     // Initialize identity
     var identityOrchestrator = serviceProvider.GetRequiredService<IIdentityOrchestrator>();
@@ -128,34 +156,35 @@ connectCommand.SetHandler(async (InvocationContext context) =>
 
     var conversationService = serviceProvider.GetRequiredService<IConversationService>();
 
-    Console.WriteLine($"Connecting to {host}:{port}...");
     try
     {
-        var conversationId = await conversationService.CreateDirectConversationAsync(host, port);
+        var invitation = InvitationLink.Parse(link);
+        Console.WriteLine($"Connecting to {invitation.Host}:{invitation.Port}...");
+        var conversationId = await conversationService.CreateDirectConversationAsync(invitation.Host, invitation.Port, invitation.PublicKey);
         Console.WriteLine($"Session established. Conversation ID: {conversationId}");
+    }
+    catch (FormatException ex)
+    {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine($"Invalid invitation link: {ex.Message}");
+        Console.ResetColor();
     }
     catch (Exception ex)
     {
         Console.ForegroundColor = ConsoleColor.Red;
-        Console.WriteLine($"Failed to establish session: {ex.Message}");
+        Console.WriteLine($"An unexpected error occurred: {ex.Message}");
         Console.ResetColor();
     }
-});
+}
 
-sendCommand.SetHandler(async (InvocationContext context) =>
+async Task SendCommandHandler(InvocationContext context)
 {
     var conversationIdGuid = context.ParseResult.GetValueForArgument(conversationIdArgument);
     var message = context.ParseResult.GetValueForArgument(messageArgument);
     var identityName = context.ParseResult.GetValueForOption(identityOption);
 
     // Build client-specific service provider
-    var services = new ServiceCollection();
-    var configuration = new ConfigurationBuilder().Build();
-    services.AddLogging(builder => builder.AddConsole());
-    services.AddApplicationServices(configuration);
-    services.AddInfrastructureServices(configuration);
-
-    await using var serviceProvider = services.BuildServiceProvider();
+    await using ServiceProvider serviceProvider = BuildClientServiceProvider(identityName!, context.GetCancellationToken());
 
     // Initialize identity
     var identityOrchestrator = serviceProvider.GetRequiredService<IIdentityOrchestrator>();
@@ -176,7 +205,15 @@ sendCommand.SetHandler(async (InvocationContext context) =>
         Console.WriteLine($"Failed to send message: {ex.Message}");
         Console.ResetColor();
     }
-});
+}
 
-// --- Run Application ---
-return await rootCommand.InvokeAsync(args);
+ServiceProvider BuildClientServiceProvider(string identityName, CancellationToken cancellationToken)
+{
+    var services = new ServiceCollection();
+    var configuration = new ConfigurationBuilder().Build();
+    services.AddLogging(builder => builder.AddConsole());
+    services.AddApplicationServices(configuration);
+    services.AddInfrastructureServices(configuration);
+
+    return services.BuildServiceProvider();
+}
