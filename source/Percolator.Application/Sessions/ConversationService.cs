@@ -63,13 +63,13 @@ public class ConversationService : IConversationService
 
         using var signedPreKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var signedPreKeyPublicBytes = signedPreKey.PublicKey.ExportSubjectPublicKeyInfo();
-        var signature = _cryptoManager.SignPreKey(localKeys.IdentitySigningKey, signedPreKeyPublicBytes);
+        var signature = _cryptoManager.SignPreKey(localKeys.IdentitySigningKey, new PublicKey(signedPreKeyPublicBytes));
         var localBundle = new ContractsPreKeyBundle
         {
             IdentityAgreementKey = ByteString.CopyFrom(localKeys.IdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
             IdentitySigningKey = ByteString.CopyFrom(localKeys.IdentitySigningKey.ExportSubjectPublicKeyInfo()),
             SignedPreKey = ByteString.CopyFrom(signedPreKeyPublicBytes),
-            PreKeySignature = ByteString.CopyFrom(signature),
+            PreKeySignature = ByteString.CopyFrom(signature.Value),
             OneTimePreKey = ByteString.CopyFrom(localKeys.OneTimePreKeys[0].PublicKey.ExportSubjectPublicKeyInfo())
         };
 

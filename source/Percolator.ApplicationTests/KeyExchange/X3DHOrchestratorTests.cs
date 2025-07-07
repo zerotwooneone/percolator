@@ -88,7 +88,11 @@ public class X3DHOrchestratorTests
         Random.Shared.NextBytes(expectedSharedSecret.Value);
         using var ephemeralKey = ECDiffieHellman.Create();
 
-        _mockX3dhManager.Setup(x => x.VerifySignature(remoteIdentitySigningKeyBytes, remoteSignedPreKeyBytes, It.IsAny<byte[]>())).Returns(true);
+        _mockX3dhManager.Setup(x => x.VerifySignature(
+            It.Is<PublicKey>(k => k.Value.SequenceEqual(remoteIdentitySigningKeyBytes)),
+            It.Is<PublicKey>(k => k.Value.SequenceEqual(remoteSignedPreKeyBytes)),
+            It.IsAny<Signature>()))
+            .Returns(true);
 
         _mockX3dhManager
             .Setup(x => x.InitiateHandshake(
@@ -128,13 +132,18 @@ public class X3DHOrchestratorTests
         var ephemeralKeyBytes = ephemeralKey.PublicKey.ExportSubjectPublicKeyInfo();
 
         _mockX3dhManager.Setup(x => x.RespondToHandshake(
-                _remoteIdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo(),
-                ephemeralKeyBytes,
+                It.Is<PublicKey>(k => k.Value.SequenceEqual(_remoteIdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo())),
+                It.Is<PublicKey>(k => k.Value.SequenceEqual(ephemeralKeyBytes)),
                 _localKeys.IdentitySigningKey,
                 _localKeys.IdentityAgreementKey,
                 _localKeys.SignedPreKey,
                 _localKeys.OneTimePreKeys.First()))
             .Returns(expectedSharedSecret);
+
+        _mockX3dhManager.Setup(x => x.SignPreKey(
+                _localKeys.IdentitySigningKey,
+                It.IsAny<PublicKey>()))
+            .Returns(new Signature(new byte[64]));
 
         // Act
         var result = _orchestrator.ProcessHandshake(remoteBundle, ephemeralKeyBytes);

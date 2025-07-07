@@ -9,7 +9,7 @@ public class X3DHManager : IX3DHManager
     public SharedSecret InitiateHandshake(PreKeyBundle remoteBundle, ECDiffieHellman ephemeralKey, ECDiffieHellman identityAgreementKey)
     {
         // Step 0: Verify the signature on the signed pre-key. This is critical to prevent a MITM attack.
-        if (!VerifySignature(remoteBundle.IdentitySigningKey, remoteBundle.SignedPreKey, remoteBundle.Signature))
+        if (!VerifySignature(new PublicKey(remoteBundle.IdentitySigningKey), new PublicKey(remoteBundle.SignedPreKey), new Signature(remoteBundle.Signature)))
         {
             throw new CryptographicException("Invalid signature on remote pre-key bundle.");
         }
@@ -50,26 +50,26 @@ public class X3DHManager : IX3DHManager
         return new SharedSecret(kdfResult);
     }
 
-    public SharedSecret RespondToHandshake(byte[] remoteIdentityKeyBytes, byte[] remoteEphemeralKeyBytes, ECDsa identitySigningKey, ECDiffieHellman identityAgreementKey, ECDiffieHellman signedPreKey, ECDiffieHellman? oneTimePreKey)
+    public SharedSecret RespondToHandshake(PublicKey remoteIdentityKey, PublicKey remoteEphemeralKey, ECDsa identitySigningKey, ECDiffieHellman identityAgreementKey, ECDiffieHellman signedPreKey, ECDiffieHellman? oneTimePreKey)
     {
-        using var remoteIdentityKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        remoteIdentityKey.ImportSubjectPublicKeyInfo(remoteIdentityKeyBytes, out _);
+        using var remoteIdentityKeyHandle = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        remoteIdentityKeyHandle.ImportSubjectPublicKeyInfo(remoteIdentityKey.Value, out _);
 
-        using var remoteEphemeralKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        remoteEphemeralKey.ImportSubjectPublicKeyInfo(remoteEphemeralKeyBytes, out _);
+        using var remoteEphemeralKeyHandle = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        remoteEphemeralKeyHandle.ImportSubjectPublicKeyInfo(remoteEphemeralKey.Value, out _);
 
         // DH1 = DH(SPK_B, IK_A)
-        var dh1 = signedPreKey.DeriveKeyMaterial(remoteIdentityKey.PublicKey);
+        var dh1 = signedPreKey.DeriveKeyMaterial(remoteIdentityKeyHandle.PublicKey);
         // DH2 = DH(IK_B, EK_A)
-        var dh2 = identityAgreementKey.DeriveKeyMaterial(remoteEphemeralKey.PublicKey);
+        var dh2 = identityAgreementKey.DeriveKeyMaterial(remoteEphemeralKeyHandle.PublicKey);
         // DH3 = DH(SPK_B, EK_A)
-        var dh3 = signedPreKey.DeriveKeyMaterial(remoteEphemeralKey.PublicKey);
+        var dh3 = signedPreKey.DeriveKeyMaterial(remoteEphemeralKeyHandle.PublicKey);
         
         var dh4 = Array.Empty<byte>();
         if (oneTimePreKey is not null)
         {
             // DH4 = DH(OPK_B, EK_A)
-            dh4 = oneTimePreKey.DeriveKeyMaterial(remoteEphemeralKey.PublicKey);
+            dh4 = oneTimePreKey.DeriveKeyMaterial(remoteEphemeralKeyHandle.PublicKey);
         }
 
         var combined = new byte[dh1.Length + dh2.Length + dh3.Length + dh4.Length];
@@ -85,15 +85,16 @@ public class X3DHManager : IX3DHManager
         return new SharedSecret(sharedSecretBytes);
     }
 
-    public byte[] SignPreKey(ECDsa identitySigningKey, byte[] signedPreKey)
+    public Signature SignPreKey(ECDsa identitySigningKey, PublicKey signedPreKey)
     {
-        return identitySigningKey.SignData(signedPreKey, HashAlgorithmName.SHA256, DSASignatureFormat.IeeeP1363FixedFieldConcatenation);
+        var signatureBytes = identitySigningKey.SignData(signedPreKey.Value, HashAlgorithmName.SHA256, DSASignatureFormat.IeeeP1363FixedFieldConcatenation);
+        return new Signature(signatureBytes);
     }
 
-    public bool VerifySignature(byte[] identityKey, byte[] signedPreKey, byte[] signature)
+    public bool VerifySignature(PublicKey identityKey, PublicKey signedPreKey, Signature signature)
     {
         using var ecdsa = ECDsa.Create();
-        ecdsa.ImportSubjectPublicKeyInfo(identityKey, out _);
-        return ecdsa.VerifyData(signedPreKey, signature, HashAlgorithmName.SHA256, DSASignatureFormat.IeeeP1363FixedFieldConcatenation);
+        ecdsa.ImportSubjectPublicKeyInfo(identityKey.Value, out _);
+        return ecdsa.VerifyData(signedPreKey.Value, signature.Value, HashAlgorithmName.SHA256, DSASignatureFormat.IeeeP1363FixedFieldConcatenation);
     }
 }

@@ -26,14 +26,14 @@ public class X3DHManagerTests
         using var bobOneTimePreKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
 
         // --- Bob creates his pre-key bundle ---
-        var bobSignedPreKeyBytes = bobSignedPreKey.PublicKey.ExportSubjectPublicKeyInfo();
-        var bobSignature = manager.SignPreKey(bobIdentitySigningKey, bobSignedPreKeyBytes);
+        var bobSignedPreKeyPublicKey = new PublicKey(bobSignedPreKey.PublicKey.ExportSubjectPublicKeyInfo());
+        var bobSignature = manager.SignPreKey(bobIdentitySigningKey, bobSignedPreKeyPublicKey);
 
         var bobPreKeyBundle = new PreKeyBundle(
             IdentityAgreementKey: bobIdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo(),
             IdentitySigningKey: bobIdentitySigningKey.ExportSubjectPublicKeyInfo(),
-            SignedPreKey: bobSignedPreKeyBytes,
-            Signature: bobSignature,
+            SignedPreKey: bobSignedPreKeyPublicKey.Value,
+            Signature: bobSignature.Value,
             OneTimePreKey: bobOneTimePreKey.PublicKey.ExportSubjectPublicKeyInfo()
             );
 
@@ -48,8 +48,8 @@ public class X3DHManagerTests
         // --- Bob responds to the handshake ---
         // Bob receives Alice's identity and ephemeral keys
         var bobSharedSecret = manager.RespondToHandshake(
-            aliceIdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo(),
-            aliceEphemeralKey.PublicKey.ExportSubjectPublicKeyInfo(),
+            new PublicKey(aliceIdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
+            new PublicKey(aliceEphemeralKey.PublicKey.ExportSubjectPublicKeyInfo()),
             bobIdentitySigningKey,
             bobIdentityAgreementKey,
             bobSignedPreKey,

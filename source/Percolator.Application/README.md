@@ -68,3 +68,7 @@ A `PeerId` is a **local-only, non-cryptographic identifier**. It is randomly gen
 -   **Stable Identifier:** It allows the application to maintain a stable reference to a peer, even if that peer's underlying cryptographic keys change.
 
 This rule is enforced across all projects in the solution to ensure a clear and secure identity model.
+
+*   **`CredentialService`**: (Note: This service is located in the `Percolator.Identity` project). It manages the secure storage and retrieval of the user's cryptographic identity, using Windows DPAPI with additional entropy for protection.
+*   **`DirectSessionManager`**: Manages the lifecycle of direct peer-to-peer conversations. It uses `SemaphoreSlim` to enforce per-conversation locking, preventing race conditions during message processing.
+*   **`PeerConnectionManager`**: Manages gRPC connections to other peers.

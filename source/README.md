@@ -33,6 +33,12 @@ The primary component of this solution is the `Percolator.Cryptography` library,
     *   **Work from Broad to Specific**: When lost, zoom out. First, understand the solution structure by listing projects. Then, list files within a project. Finally, inspect specific files to understand their contents and dependencies.
     *   **Never Create Code to Justify a Hallucination**: If an assumption about a class name proves false, the solution is *never* to create an empty file with that name just to make a build pass. This compounds the error. The correct action is to discard the assumption and find the *actual* class that should be used.
 
+## AI Development Guidelines
+
+- **No Raw Byte Arrays**: Domain libraries should not send or receive raw byte arrays in or out of the domain. These should be wrapped in DDD value types with clear names so that it is more clear when passing parameters or returning results.
+- **Strongly-Typed IDs**: To enhance type safety and clarify intent, raw `Guid` primitives must not be used for identifiers in public APIs. Instead, wrap them in strongly-typed DDD value objects with intention-revealing names (e.g., `PeerId`, `ConversationId`). This prevents accidental misuse of identifiers and makes the domain language more explicit.
+- **Test-Driven Development**: All new features and refactoring should follow the Red-Green-Refactor cycle of Test-Driven Development (TDD). Write a failing test first (Red), then write the simplest code to make it pass (Green), and finally, refactor the code to improve its design while keeping the tests passing. This ensures that all logic is covered by tests and promotes a high-quality, maintainable codebase.
+
 ## Security
 
 The Percolator Node is designed with a security-first approach. Key security features include:
@@ -130,3 +136,5 @@ Alice's terminal will show:
 ```
 info: Percolator.Application.Messages.MessageReceivedHandler[0]
       Received message for conversation 1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d: Hello, Alice!
+
+```

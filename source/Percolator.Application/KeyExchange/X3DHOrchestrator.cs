@@ -30,8 +30,10 @@ public class X3DHOrchestrator
         try
         {
             // Step 1: Verify the signature on the signed pre-key.
-            if (!_x3DhManager.VerifySignature(remotePreKeyBundle.IdentitySigningKey.ToByteArray(),
-                    remotePreKeyBundle.SignedPreKey.ToByteArray(), remotePreKeyBundle.PreKeySignature.ToByteArray()))
+            if (!_x3DhManager.VerifySignature(
+                    new PublicKey(remotePreKeyBundle.IdentitySigningKey.ToByteArray()),
+                    new PublicKey(remotePreKeyBundle.SignedPreKey.ToByteArray()), 
+                    new Signature(remotePreKeyBundle.PreKeySignature.ToByteArray())))
             {
                 throw new CryptographicException("Invalid signature on signed pre-key.");
             }
@@ -74,22 +76,22 @@ public class X3DHOrchestrator
         var oneTimePreKey = oneTimePreKeys.FirstOrDefault();
 
         var sharedSecret = _x3DhManager.RespondToHandshake(
-            remotePreKeyBundle.IdentityAgreementKey.ToByteArray(),
-            remoteEphemeralPublicKey,
+            new PublicKey(remotePreKeyBundle.IdentityAgreementKey.ToByteArray()),
+            new PublicKey(remoteEphemeralPublicKey),
             identitySigningKey,
             identityAgreementKey,
             signedPreKey,
             oneTimePreKey);
 
         var signedPreKeyPublicBytes = signedPreKey.PublicKey.ExportSubjectPublicKeyInfo();
-        var signature = _x3DhManager.SignPreKey(identitySigningKey, signedPreKeyPublicBytes);
+        var signature = _x3DhManager.SignPreKey(identitySigningKey, new PublicKey(signedPreKeyPublicBytes));
 
         var responderBundle = new ContractsPreKeyBundle
         {
             IdentityAgreementKey = ByteString.CopyFrom(identityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
             IdentitySigningKey = ByteString.CopyFrom(identitySigningKey.ExportSubjectPublicKeyInfo()),
             SignedPreKey = ByteString.CopyFrom(signedPreKeyPublicBytes),
-            PreKeySignature = ByteString.CopyFrom(signature)
+            PreKeySignature = ByteString.CopyFrom(signature.Value)
         };
 
         if (oneTimePreKey is not null)

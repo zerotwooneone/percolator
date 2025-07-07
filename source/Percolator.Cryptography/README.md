@@ -8,13 +8,19 @@ The primary goal of this library is to provide a self-contained, secure, and wel
 
 This library is designed with Domain-Driven Design (DDD) principles in mind. It contains only pure cryptographic logic and is completely isolated from any infrastructure concerns like networking, databases, or user interfaces.
 
-## Persistence Ignorance
+## Design Principles
 
-A key architectural principle of this domain is that it is **persistence-ignorant**. It contains the logic for stateful protocols like the Double Ratchet, but it does not manage the storage of that state itself.
+*   **Domain-Driven Design**: The library is self-contained and exposes its capabilities through a clear, explicit public API. It has no dependencies on other domains.
+*   **No Raw `byte[]` in Public APIs**: As a rule, public method signatures in this library do not accept or return raw `byte[]` arrays. Instead, all cryptographic primitives like keys and signatures are wrapped in strongly-typed DDD value objects (e.g., `PublicKey`, `Signature`). This improves type safety and makes the domain language explicit. Data Transfer Objects (DTOs) like `PreKeyBundle` may still contain raw `byte[]` properties for efficient serialization, but they are consumed and produced by methods that adhere to the value-type rule.
+*   **Fail Forward**: The library does not handle or log errors. It throws exceptions (e.g., `CryptographicException`) on invalid input or failed cryptographic checks, expecting the application layer to perform necessary validation beforehand.
 
-Instead, it defines persistence interfaces (e.g., `IDoubleRatchetStore`, `IGroupStateStore`) that outline the data that needs to be saved. The `Percolator.Application` project is responsible for implementing these interfaces, allowing it to choose the appropriate storage mechanism (e.g., a database, local files) without affecting the cryptographic logic.
+## Key Components
 
-This separation ensures that the `Cryptography` domain remains a pure, testable, and reusable engine focused exclusively on its core security responsibilities.
+*   `X3DHManager`: Implements the X3DH handshake to establish an initial shared secret.
+*   `DoubleRatchetSession`: Manages the ongoing stateful session, handling encryption and decryption of messages.
+*   `PreKeyBundle`: A data structure representing a user's public keys needed for the X3DH handshake.
+*   `RatchetMessage`: A data structure for transporting the ciphertext and the sender's ephemeral public key.
+*   `SenderKeySession`: Manages the state for a secure group conversation from the perspective of a single member.
 
 ## AI Assistant Guidance
 
@@ -229,28 +235,6 @@ The security of the chat application is built upon several key cryptographic con
 *   **Double Ratchet Algorithm**: Provides ongoing secure communication with forward secrecy and post-compromise security.
 *   **Authenticated Encryption**: Uses `AES-256-GCM` to ensure all messages are confidential, tamper-proof, and authentic.
 *   **Resilience**: Handles out-of-order message delivery through a key caching mechanism.
-
-## Key Classes
-
-*   `X3DHManager`: Implements the X3DH handshake to establish an initial shared secret.
-*   `DoubleRatchetSession`: Manages the ongoing stateful session, handling encryption and decryption of messages.
-*   `PreKeyBundle`: A data structure representing a user's public keys needed for the X3DH handshake.
-*   `RatchetMessage`: A data structure for transporting the ciphertext and the sender's ephemeral public key.
-*   `SenderKeySession`: Manages the state for a secure group conversation from the perspective of a single member.
-
-## Guidance for AI Assistants
-
-*   **Two-Stage Protocol**: Understand that this is a two-part system. `X3DHManager` is used **once** at the beginning of a conversation to create a shared secret. This secret is then fed into the `DoubleRatchetSession` constructor to manage the ongoing conversation.
-*   **Key Management**: The security of X3DH relies on a long-term identity key. This library assumes the key is provided; a real application must store this key securely on the client device.
-*   **Server Role**: The X3DH protocol assumes a server exists to store and distribute public `PreKeyBundle`s. This server enables asynchronous communication but is not trusted; authenticity is guaranteed by the `ECDSA` signature in the bundle, which this library verifies.
-*   **Encryption**: Encryption is handled by `AES-GCM`. Decryption of a tampered message will throw an `AuthenticationTagMismatchException`, which is caught and re-thrown as a custom exception. Any code calling `Decrypt` must handle this.
-*   **Stateful Sessions**: `DoubleRatchetSession` is highly stateful. Do not reuse session objects for different conversations.
-*   **Asymmetric Initialization and Roles**: The session's behavior depends heavily on its `SessionRole`.
-    *   A `Responder` must be created first. It cannot send a message until it has first received one, which initializes its sending chain.
-    *   An `Initiator` requires the `Responder`'s initial public ratchet key (`RatchetPublicKey`) for its constructor. This key must be transmitted from the responder to the initiator.
-*   **Ratchet Steps are Asymmetric**: The Diffie-Hellman ratchet step, which provides healing, occurs only within the `Decrypt` method when a new ephemeral key is received. `Encrypt` only performs a symmetric ratchet step. This means the session state changes more significantly on decryption than on encryption.
-*   **Key Ownership**: The caller owns and manages the lifecycle of the long-term `identityKey`. The `DoubleRatchetSession` only manages its own internal, ephemeral ratchet keys. Always use a `using` block or manually call `Dispose()` to prevent key leakage.
-*   **Serializable Public Keys**: Public keys are exposed as `byte[]` (specifically, in `SubjectPublicKeyInfo` format). This is intentional to ensure they are easily serializable for transport over a network or storage, avoiding platform-specific type dependencies.
 
 ## Assumptions
 
