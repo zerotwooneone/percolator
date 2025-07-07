@@ -39,10 +39,10 @@ public class X3DHOrchestrator
             }
 
             var remoteCryptoBundle = new CryptographyPreKeyBundle(
-                remotePreKeyBundle.IdentityAgreementKey.ToByteArray(),
                 remotePreKeyBundle.IdentitySigningKey.ToByteArray(),
-                remotePreKeyBundle.SignedPreKey.ToByteArray(),
+                remotePreKeyBundle.IdentityAgreementKey.ToByteArray(),
                 remotePreKeyBundle.PreKeySignature.ToByteArray(),
+                remotePreKeyBundle.SignedPreKey.ToByteArray(),
                 remotePreKeyBundle.OneTimePreKey?.ToByteArray()
             );
 

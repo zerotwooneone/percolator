@@ -59,7 +59,7 @@ namespace Percolator.Application.Network
 
                 await _conversationRepository.AddAsync(conversation);
 
-                await _sessionManager.EstablishSessionAsync(
+                await _sessionManager.EstablishSessionAsResponderAsync(
                     new SessionConversationId(conversation.Id.Value),
                     initiatorPeerId,
                     new OpaquePublicKey(request.InitiatorBundle.IdentityAgreementKey.ToByteArray()),

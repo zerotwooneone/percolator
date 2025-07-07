@@ -108,7 +108,7 @@ public class X3DHOrchestratorTests
         result.Should().NotBeNull();
         result.Value.Should().BeEquivalentTo(expectedSharedSecret.Value);
         _mockX3dhManager.Verify(x => x.InitiateHandshake(
-            It.Is<CryptoPreKeyBundle>(b => b.IdentitySigningKey.SequenceEqual(remoteIdentitySigningKeyBytes)),
+            It.Is<CryptoPreKeyBundle>(b => b.IdentitySigningKey.Value.SequenceEqual(remoteIdentitySigningKeyBytes)),
             It.IsAny<ECDiffieHellman>(),
             It.IsAny<ECDiffieHellman>()), Times.Once);
     }

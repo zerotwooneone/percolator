@@ -164,12 +164,12 @@ public class ConversationService : IConversationService
 
         await _conversationRepository.AddAsync(conversation);
 
-        await _sessionManager.EstablishSessionAsync(
+        await _sessionManager.EstablishSessionAsInitiatorAsync(
             new SessionConversationId(conversation.Id.Value),
             remotePeerId,
             new OpaquePublicKey(response.ResponderBundle.IdentityAgreementKey.ToByteArray()),
-            sharedSecret
-        );
+            new OpaquePublicKey(response.ResponderBundle.SignedPreKey.ToByteArray()),
+            sharedSecret);
 
         return conversation.Id;
     }

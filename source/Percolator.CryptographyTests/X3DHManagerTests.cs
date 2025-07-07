@@ -30,11 +30,11 @@ public class X3DHManagerTests
         var bobSignature = manager.SignPreKey(bobIdentitySigningKey, bobSignedPreKeyPublicKey);
 
         var bobPreKeyBundle = new PreKeyBundle(
-            IdentityAgreementKey: bobIdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo(),
-            IdentitySigningKey: bobIdentitySigningKey.ExportSubjectPublicKeyInfo(),
-            SignedPreKey: bobSignedPreKeyPublicKey.Value,
-            Signature: bobSignature.Value,
-            OneTimePreKey: bobOneTimePreKey.PublicKey.ExportSubjectPublicKeyInfo()
+            bobIdentitySigningKey.ExportSubjectPublicKeyInfo(),
+            bobIdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo(),
+            bobSignature.Value,
+            bobSignedPreKeyPublicKey.Value,
+            bobOneTimePreKey.PublicKey.ExportSubjectPublicKeyInfo()
             );
 
         // --- Alice initiates the handshake ---

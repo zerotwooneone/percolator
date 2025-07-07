@@ -25,6 +25,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Percolator.Application\Percolator.Application.csproj" />
+    <ProjectReference Include="..\Percolator.Infrastructure\Percolator.Infrastructure.csproj" />
   </ItemGroup>
 
 </Project>
