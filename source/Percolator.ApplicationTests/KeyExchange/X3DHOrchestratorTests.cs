@@ -134,10 +134,9 @@ public class X3DHOrchestratorTests
         _mockX3dhManager.Setup(x => x.RespondToHandshake(
                 It.Is<PublicKey>(k => k.Value.SequenceEqual(_remoteIdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo())),
                 It.Is<PublicKey>(k => k.Value.SequenceEqual(ephemeralKeyBytes)),
-                _localKeys.IdentitySigningKey,
-                _localKeys.IdentityAgreementKey,
-                _localKeys.SignedPreKey,
-                _localKeys.OneTimePreKeys.First()))
+                It.Is<PrivateKey>(k => k.Value.SequenceEqual(_localKeys.IdentityAgreementKey.ExportECPrivateKey())),
+                It.Is<PrivateKey>(k => k.Value.SequenceEqual(_localKeys.SignedPreKey.ExportECPrivateKey())),
+                It.Is<PrivateKey>(k => k.Value.SequenceEqual(_localKeys.OneTimePreKeys.First().ExportECPrivateKey()))))
             .Returns(expectedSharedSecret);
 
         _mockX3dhManager.Setup(x => x.SignPreKey(

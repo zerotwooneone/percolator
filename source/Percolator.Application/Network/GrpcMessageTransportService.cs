@@ -39,7 +39,7 @@ public class GrpcMessageTransportService : IMessageTransportService
             var request = new DeliverOpaqueMessageRequest
             {
                 SessionId = conversationId.Value.ToString(),
-                Payload = Google.Protobuf.ByteString.CopyFrom(message.Ciphertext)
+                Payload = Google.Protobuf.ByteString.CopyFrom(message.Ciphertext.Value)
             };
 
             _logger.LogInformation("Sending message to {RecipientPeerId} for conversation {ConversationId}", recipientPeerId, conversationId);

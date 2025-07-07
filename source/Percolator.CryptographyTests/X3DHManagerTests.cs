@@ -32,7 +32,7 @@ public class X3DHManagerTests
         var bobPreKeyBundle = new PreKeyBundle(
             bobIdentitySigningKey.ExportSubjectPublicKeyInfo(),
             bobIdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo(),
-            bobSignature.Value,
+            bobSignature,
             bobSignedPreKeyPublicKey.Value,
             bobOneTimePreKey.PublicKey.ExportSubjectPublicKeyInfo()
             );
@@ -50,10 +50,9 @@ public class X3DHManagerTests
         var bobSharedSecret = manager.RespondToHandshake(
             new PublicKey(aliceIdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
             new PublicKey(aliceEphemeralKey.PublicKey.ExportSubjectPublicKeyInfo()),
-            bobIdentitySigningKey,
-            bobIdentityAgreementKey,
-            bobSignedPreKey,
-            bobOneTimePreKey
+            new PrivateKey(bobIdentityAgreementKey.ExportECPrivateKey()),
+            new PrivateKey(bobSignedPreKey.ExportECPrivateKey()),
+            new PrivateKey(bobOneTimePreKey.ExportECPrivateKey())
             );
 
         // Assert

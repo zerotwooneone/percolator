@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.Extensions.Options;
 using Percolator.Application.Sessions;
+using Percolator.Cryptography;
 using Percolator.Infrastructure.Serialization;
 using Percolator.Sessions;
 using DoubleRatchetSessionState = Percolator.Cryptography.DoubleRatchetSession.DoubleRatchetSessionState;
@@ -59,15 +60,15 @@ public class FileBasedDoubleRatchetSessionStore: IDoubleRatchetSessionStore
     {
         return new SessionStateModel
         {
-            RootKey = state.RootKey,
-            SendingChainKey = state.SendingChainKey,
-            ReceivingChainKey = state.ReceivingChainKey,
+            RootKey = state.RootKey.Value,
+            SendingChainKey = state.SendingChainKey?.Value,
+            ReceivingChainKey = state.ReceivingChainKey?.Value,
             SendingCounter = state.SendingCounter,
             ReceivingCounter = state.ReceivingCounter,
-            SkippedMessageKeys = state.SkippedMessageKeys,
-            TheirIdentityPublicKey = state.TheirIdentityPublicKey,
-            TheirDhRatchetPublicKey = state.TheirDhRatchetPublicKey,
-            DhRatchetPrivateKey = state.DhRatchetPrivateKey
+            SkippedMessageKeys = state.SkippedMessageKeys.ToDictionary(kvp => kvp.Key, kvp => kvp.Value.Value),
+            TheirIdentityPublicKey = state.TheirIdentityPublicKey.Value,
+            TheirDhRatchetPublicKey = state.TheirDhRatchetPublicKey?.Value,
+            DhRatchetPrivateKey = state.DhRatchetPrivateKey is not null ? state.DhRatchetPrivateKey.Value : null
         };
     }
 
@@ -75,15 +76,15 @@ public class FileBasedDoubleRatchetSessionStore: IDoubleRatchetSessionStore
     {
         return new DoubleRatchetSessionState
         {
-            RootKey = model.RootKey,
-            SendingChainKey = model.SendingChainKey,
-            ReceivingChainKey = model.ReceivingChainKey,
+            RootKey = new RootKey(model.RootKey!),
+            SendingChainKey = model.SendingChainKey is not null ? new ChainKey(model.SendingChainKey) : null,
+            ReceivingChainKey = model.ReceivingChainKey is not null ? new ChainKey(model.ReceivingChainKey) : null,
             SendingCounter = model.SendingCounter,
             ReceivingCounter = model.ReceivingCounter,
-            SkippedMessageKeys = model.SkippedMessageKeys,
-            TheirIdentityPublicKey = model.TheirIdentityPublicKey,
-            TheirDhRatchetPublicKey = model.TheirDhRatchetPublicKey,
-            DhRatchetPrivateKey = model.DhRatchetPrivateKey
+            SkippedMessageKeys = model.SkippedMessageKeys.ToDictionary(kvp => kvp.Key, kvp => new MessageKey(kvp.Value)),
+            TheirIdentityPublicKey = new PublicKey(model.TheirIdentityPublicKey!),
+            TheirDhRatchetPublicKey = model.TheirDhRatchetPublicKey is not null ? new PublicKey(model.TheirDhRatchetPublicKey) : null,
+            DhRatchetPrivateKey = model.DhRatchetPrivateKey is not null ? new PrivateKey(model.DhRatchetPrivateKey) : null
         };
     }
 

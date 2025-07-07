@@ -1,17 +1,18 @@
 using System.Text.Json.Serialization;
+using System.IO;
 
 namespace Percolator.Cryptography
 {
     public class RatchetMessage
     {
-        public RatchetHeader Header { get; set; } = null!;
-        public byte[] Ciphertext { get; set; } = null!;
+        public RatchetHeader Header { get; set; } = new();
+        public Ciphertext Ciphertext { get; set; } = new(Array.Empty<byte>());
     }
 
     public class RatchetHeader
     {
         [JsonInclude]
-        public byte[] RatchetKey { get; set; } = null!;
+        public PublicKey RatchetKey { get; set; } = new(Array.Empty<byte>());
 
         [JsonInclude]
         public ulong Counter { get; set; }
@@ -22,7 +23,7 @@ namespace Percolator.Cryptography
             // The order and format must be identical for both sender and receiver.
             using var stream = new MemoryStream();
             using var writer = new BinaryWriter(stream);
-            writer.Write(RatchetKey);
+            writer.Write(RatchetKey.Value);
             writer.Write(Counter);
             return stream.ToArray();
         }

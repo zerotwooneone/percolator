@@ -109,7 +109,7 @@ public class SessionMessageTests
         var bobPreKeyBundle = new PreKeyBundle(
             _bobIdentity.Keys!.IdentitySigningKey.ExportSubjectPublicKeyInfo(),
             _bobIdentity.Keys!.IdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo(),
-            _bobSignature.Value,
+            _bobSignature,
             _bobIdentity.Keys!.SignedPreKey.PublicKey.ExportSubjectPublicKeyInfo(),
             _bobIdentity.Keys!.OneTimePreKeys[0].PublicKey.ExportSubjectPublicKeyInfo()
         );
@@ -119,10 +119,9 @@ public class SessionMessageTests
         var bobSharedSecret = x3dhManager.RespondToHandshake(
             new PublicKey(_aliceIdentity.Keys!.IdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
             new PublicKey(aliceEphemeralKey.PublicKey.ExportSubjectPublicKeyInfo()),
-            _bobIdentity.Keys!.IdentitySigningKey,
-            _bobIdentity.Keys!.IdentityAgreementKey,
-            _bobIdentity.Keys!.SignedPreKey,
-            _bobIdentity.Keys!.OneTimePreKeys[0]
+            new PrivateKey(_bobIdentity.Keys!.IdentityAgreementKey.ExportECPrivateKey()),
+            new PrivateKey(_bobIdentity.Keys!.SignedPreKey.ExportECPrivateKey()),
+            new PrivateKey(_bobIdentity.Keys!.OneTimePreKeys[0].ExportECPrivateKey())
         );
 
         return (aliceSharedSecret, bobSharedSecret);

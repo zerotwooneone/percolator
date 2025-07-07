@@ -31,17 +31,26 @@ public class X3DHManager : IX3DHManager
         return new SharedSecret(kdfResult);
     }
 
-    public SharedSecret RespondToHandshake(PublicKey remoteIdentityKey, PublicKey remoteEphemeralKey, ECDsa identitySigningKey, ECDiffieHellman identityAgreementKey, ECDiffieHellman signedPreKey, ECDiffieHellman? oneTimePreKey)
+    public SharedSecret RespondToHandshake(PublicKey remoteIdentityKey, PublicKey remoteEphemeralKey, PrivateKey identityAgreementKey, PrivateKey signedPreKey, PrivateKey? oneTimePreKey)
     {
+        // Reconstruct keys from private key bytes
+        using var identityAgreementKeyEcdh = ECDiffieHellman.Create();
+        identityAgreementKeyEcdh.ImportECPrivateKey(identityAgreementKey.Value, out _);
+
+        using var signedPreKeyEcdh = ECDiffieHellman.Create();
+        signedPreKeyEcdh.ImportECPrivateKey(signedPreKey.Value, out _);
+
         // 1. Perform DH calculations.
-        var dh1 = signedPreKey.DeriveKeyFromHash(remoteIdentityKey.ToEcdhPublicKey(), HashAlgorithmName.SHA256);
-        var dh2 = identityAgreementKey.DeriveKeyFromHash(remoteEphemeralKey.ToEcdhPublicKey(), HashAlgorithmName.SHA256);
-        var dh3 = signedPreKey.DeriveKeyFromHash(remoteEphemeralKey.ToEcdhPublicKey(), HashAlgorithmName.SHA256);
+        var dh1 = signedPreKeyEcdh.DeriveKeyFromHash(remoteIdentityKey.ToEcdhPublicKey(), HashAlgorithmName.SHA256);
+        var dh2 = identityAgreementKeyEcdh.DeriveKeyFromHash(remoteEphemeralKey.ToEcdhPublicKey(), HashAlgorithmName.SHA256);
+        var dh3 = signedPreKeyEcdh.DeriveKeyFromHash(remoteEphemeralKey.ToEcdhPublicKey(), HashAlgorithmName.SHA256);
 
         var dh4 = Array.Empty<byte>();
         if (oneTimePreKey is not null)
         {
-            dh4 = oneTimePreKey.DeriveKeyFromHash(remoteEphemeralKey.ToEcdhPublicKey(), HashAlgorithmName.SHA256);
+            using var oneTimePreKeyEcdh = ECDiffieHellman.Create();
+            oneTimePreKeyEcdh.ImportECPrivateKey(oneTimePreKey.Value, out _);
+            dh4 = oneTimePreKeyEcdh.DeriveKeyFromHash(remoteEphemeralKey.ToEcdhPublicKey(), HashAlgorithmName.SHA256);
         }
 
         // 2. Concatenate the DH results and use a KDF.

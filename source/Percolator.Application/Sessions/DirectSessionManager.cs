@@ -39,10 +39,10 @@ public class DirectSessionManager
             throw new InvalidOperationException("Identity context not loaded");
 
         using var session = DoubleRatchetSession.AsInitiator(
-            sharedSecret.Value,
+            sharedSecret,
             _activeIdentityContext.Keys.IdentityAgreementKey,
-            remoteIdentityKey.Value,
-            remoteRatchetKey.Value
+            new PublicKey(remoteIdentityKey.Value),
+            new PublicKey(remoteRatchetKey.Value)
             );
 
         await _sessionStore.SaveSessionStateAsync(remotePeerId, conversationId, session.GetState());
@@ -55,9 +55,9 @@ public class DirectSessionManager
             throw new InvalidOperationException("Identity context not loaded");
 
         using var session = DoubleRatchetSession.AsResponder(
-            sharedSecret.Value,
+            sharedSecret,
             _activeIdentityContext.Keys.IdentityAgreementKey,
-            remoteIdentityKey.Value,
+            new PublicKey(remoteIdentityKey.Value),
             _activeIdentityContext.Keys.SignedPreKey
             );
 
@@ -91,14 +91,14 @@ public class DirectSessionManager
 
             using var doubleRatchetSession = new DoubleRatchetSession(sessionState, identityKey);
 
-            var decryptedBytes = doubleRatchetSession.Decrypt(encryptedMessage);
+            var decryptedPlaintext = doubleRatchetSession.Decrypt(encryptedMessage);
 
             await _sessionStore.SaveSessionStateAsync(remotePeerId, conversationId, doubleRatchetSession.GetState());
 
-            var message = new DirectMessage(new MessageId(Guid.NewGuid()), conversationId, remotePeerId, new OpaqueContent(decryptedBytes));
+            var message = new DirectMessage(new MessageId(Guid.NewGuid()), conversationId, remotePeerId, new OpaqueContent(decryptedPlaintext.Value));
             await _messageStore.StoreDirectMessageAsync(message);
 
-            return decryptedBytes;
+            return decryptedPlaintext.Value;
         }
         finally
         {
@@ -129,7 +129,7 @@ public class DirectSessionManager
             var identityKey = ECDiffieHellman.Create(_activeIdentityContext.Keys.IdentityAgreementKey.ExportParameters(true));
             using var doubleRatchetSession = new DoubleRatchetSession(sessionState, identityKey);
 
-            var encryptedMessage = doubleRatchetSession.Encrypt(plaintext);
+            var encryptedMessage = doubleRatchetSession.Encrypt(new Plaintext(plaintext));
 
             await _sessionStore.SaveSessionStateAsync(remotePeerId, conversationId, doubleRatchetSession.GetState());
 

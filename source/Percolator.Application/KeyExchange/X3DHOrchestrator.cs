@@ -41,7 +41,7 @@ public class X3DHOrchestrator
             var remoteCryptoBundle = new CryptographyPreKeyBundle(
                 remotePreKeyBundle.IdentitySigningKey.ToByteArray(),
                 remotePreKeyBundle.IdentityAgreementKey.ToByteArray(),
-                remotePreKeyBundle.PreKeySignature.ToByteArray(),
+                new Signature(remotePreKeyBundle.PreKeySignature.ToByteArray()),
                 remotePreKeyBundle.SignedPreKey.ToByteArray(),
                 remotePreKeyBundle.OneTimePreKey?.ToByteArray()
             );
@@ -78,10 +78,9 @@ public class X3DHOrchestrator
         var sharedSecret = _x3DhManager.RespondToHandshake(
             new PublicKey(remotePreKeyBundle.IdentityAgreementKey.ToByteArray()),
             new PublicKey(remoteEphemeralPublicKey),
-            identitySigningKey,
-            identityAgreementKey,
-            signedPreKey,
-            oneTimePreKey);
+            new PrivateKey(identityAgreementKey.ExportECPrivateKey()),
+            new PrivateKey(signedPreKey.ExportECPrivateKey()),
+            oneTimePreKey is not null ? new PrivateKey(oneTimePreKey.ExportECPrivateKey()) : null);
 
         var signedPreKeyPublicBytes = signedPreKey.PublicKey.ExportSubjectPublicKeyInfo();
         var signature = _x3DhManager.SignPreKey(identitySigningKey, new PublicKey(signedPreKeyPublicBytes));
@@ -90,7 +89,7 @@ public class X3DHOrchestrator
         {
             IdentityAgreementKey = ByteString.CopyFrom(identityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
             IdentitySigningKey = ByteString.CopyFrom(identitySigningKey.ExportSubjectPublicKeyInfo()),
-            SignedPreKey = ByteString.CopyFrom(signedPreKeyPublicBytes),
+            SignedPreKey = ByteString.CopyFrom(signedPreKey.PublicKey.ExportSubjectPublicKeyInfo()),
             PreKeySignature = ByteString.CopyFrom(signature.Value)
         };
 

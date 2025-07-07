@@ -7,20 +7,20 @@ public class DoubleRatchetSession : IDisposable
 {
     private const int MaxSkippedMessages = 1000;
 
-    private byte[] _rootKey;
-    private byte[]? _sendingChainKey;
-    private byte[]? _receivingChainKey;
+    private RootKey _rootKey;
+    private ChainKey? _sendingChainKey;
+    private ChainKey? _receivingChainKey;
     private ulong _sendingCounter;
     private ulong _receivingCounter;
     private ECDiffieHellman? _dhRatchetKey;
-    private byte[]? _remoteRatchetKeyBytes;
-    private Dictionary<ulong, byte[]> _skippedMessageKeys = new();
-    private byte[] _remoteIdentityPublicKey;
+    private PublicKey? _remoteRatchetKey;
+    private Dictionary<ulong, MessageKey> _skippedMessageKeys = new();
+    private PublicKey _remoteIdentityPublicKey;
 
-    private DoubleRatchetSession(byte[] sharedSecret, ECDiffieHellman identityKey, byte[] remoteIdentityPublicKey)
+    private DoubleRatchetSession(SharedSecret sharedSecret, ECDiffieHellman identityKey, PublicKey remoteIdentityPublicKey)
     {
         _remoteIdentityPublicKey = remoteIdentityPublicKey;
-        _rootKey = sharedSecret;
+        _rootKey = new RootKey(sharedSecret.Value);
     }
 
     public DoubleRatchetSession(DoubleRatchetSessionState state, ECDiffieHellman identityKey)
@@ -30,24 +30,24 @@ public class DoubleRatchetSession : IDisposable
         _receivingChainKey = state.ReceivingChainKey;
         _sendingCounter = state.SendingCounter;
         _receivingCounter = state.ReceivingCounter;
-        _remoteRatchetKeyBytes = state.TheirDhRatchetPublicKey;
+        _remoteRatchetKey = state.TheirDhRatchetPublicKey;
         if (state.DhRatchetPrivateKey is not null)
         {
             _dhRatchetKey = ECDiffieHellman.Create();
-            _dhRatchetKey.ImportECPrivateKey(state.DhRatchetPrivateKey, out _);
+            _dhRatchetKey.ImportECPrivateKey(state.DhRatchetPrivateKey.Value, out _);
         }
         _skippedMessageKeys = state.SkippedMessageKeys;
-        _remoteIdentityPublicKey = state.TheirIdentityPublicKey ?? Array.Empty<byte>();
+        _remoteIdentityPublicKey = state.TheirIdentityPublicKey ?? new PublicKey(Array.Empty<byte>());
     }
 
-    public static DoubleRatchetSession AsInitiator(byte[] sharedSecret, ECDiffieHellman identityKey, byte[] remoteIdentityPublicKey, byte[] remoteRatchetPublicKey)
+    public static DoubleRatchetSession AsInitiator(SharedSecret sharedSecret, ECDiffieHellman identityKey, PublicKey remoteIdentityPublicKey, PublicKey remoteRatchetPublicKey)
     {
         var session = new DoubleRatchetSession(sharedSecret, identityKey, remoteIdentityPublicKey);
-        session._remoteRatchetKeyBytes = remoteRatchetPublicKey;
+        session._remoteRatchetKey = remoteRatchetPublicKey;
         return session;
     }
 
-    public static DoubleRatchetSession AsResponder(byte[] sharedSecret, ECDiffieHellman identityKey, byte[] remoteIdentityPublicKey, ECDiffieHellman localRatchetKey)
+    public static DoubleRatchetSession AsResponder(SharedSecret sharedSecret, ECDiffieHellman identityKey, PublicKey remoteIdentityPublicKey, ECDiffieHellman localRatchetKey)
     {
         var session = new DoubleRatchetSession(sharedSecret, identityKey, remoteIdentityPublicKey);
         session._dhRatchetKey = localRatchetKey;
@@ -65,47 +65,49 @@ public class DoubleRatchetSession : IDisposable
             ReceivingCounter = _receivingCounter,
             SkippedMessageKeys = _skippedMessageKeys,
             TheirIdentityPublicKey = _remoteIdentityPublicKey,
-            TheirDhRatchetPublicKey = _remoteRatchetKeyBytes,
-            DhRatchetPrivateKey = _dhRatchetKey?.ExportECPrivateKey()
+            TheirDhRatchetPublicKey = _remoteRatchetKey,
+            DhRatchetPrivateKey = _dhRatchetKey is not null ? new PrivateKey(_dhRatchetKey.ExportECPrivateKey()) : null
         };
     }
 
-    public RatchetMessage Encrypt(byte[] plaintext)
+    public RatchetMessage Encrypt(Plaintext plaintext)
     {
         if (_sendingChainKey is null)
         {
+            if (_remoteRatchetKey is null)
+                throw new InvalidOperationException("Remote ratchet key is not available.");
             // First message, perform initial ratchet
             _dhRatchetKey?.Dispose();
             _dhRatchetKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
             using var remoteRatchetKey = ECDiffieHellman.Create();
-            remoteRatchetKey.ImportSubjectPublicKeyInfo(_remoteRatchetKeyBytes, out _);
+            remoteRatchetKey.ImportSubjectPublicKeyInfo(_remoteRatchetKey.Value, out _);
             var dhSecret = _dhRatchetKey.DeriveKeyMaterial(remoteRatchetKey.PublicKey);
-            var kdfResult = CryptoUtils.KDF(_rootKey, dhSecret, "ratchet-kdf", CryptoUtils.KeySize * 2);
-            _rootKey = kdfResult[..CryptoUtils.KeySize];
-            _sendingChainKey = kdfResult[CryptoUtils.KeySize..];
+            var kdfResult = CryptoUtils.KDF(_rootKey.Value, dhSecret, "ratchet-kdf", CryptoUtils.KeySize * 2);
+            _rootKey = new RootKey(kdfResult[..CryptoUtils.KeySize]);
+            _sendingChainKey = new ChainKey(kdfResult[CryptoUtils.KeySize..]);
         }
 
-        var messageKey = CryptoUtils.KDF(null, _sendingChainKey, "message-key-kdf", CryptoUtils.KeySize);
-        _sendingChainKey = CryptoUtils.KDF(null, _sendingChainKey, "ratchet-chain-kdf", CryptoUtils.KeySize);
+        var messageKey = CryptoUtils.KDF(null, _sendingChainKey.Value, "message-key-kdf", CryptoUtils.KeySize);
+        _sendingChainKey = new ChainKey(CryptoUtils.KDF(null, _sendingChainKey.Value, "ratchet-chain-kdf", CryptoUtils.KeySize));
 
         var header = new RatchetHeader
         {
-            RatchetKey = _dhRatchetKey!.PublicKey.ExportSubjectPublicKeyInfo(),
+            RatchetKey = new PublicKey(_dhRatchetKey!.PublicKey.ExportSubjectPublicKeyInfo()),
             Counter = _sendingCounter
         };
 
         var associatedData = header.ToAssociatedData();
-        var ciphertext = CryptoUtils.EncryptAesGcm(messageKey, _sendingCounter, plaintext, associatedData);
+        var ciphertext = CryptoUtils.EncryptAesGcm(messageKey, _sendingCounter, plaintext.Value, associatedData);
 
         _sendingCounter++;
         return new RatchetMessage
         {
             Header = header,
-            Ciphertext = ciphertext
+            Ciphertext = new Ciphertext(ciphertext)
         };
     }
 
-    public byte[] Decrypt(RatchetMessage message)
+    public Plaintext Decrypt(RatchetMessage message)
     {
         var associatedData = message.Header.ToAssociatedData();
 
@@ -122,7 +124,7 @@ public class DoubleRatchetSession : IDisposable
             throw new CryptographicException("Message exceeds the maximum number of skippable messages.");
         }
 
-        if (_remoteRatchetKeyBytes is null || !message.Header.RatchetKey.SequenceEqual(_remoteRatchetKeyBytes))
+        if (_remoteRatchetKey is null || !message.Header.RatchetKey.Equals(_remoteRatchetKey))
         {
             // This message has a new ratchet key from the other party.
             DoDhRatchet(message.Header.RatchetKey);
@@ -136,21 +138,21 @@ public class DoubleRatchetSession : IDisposable
             throw new CryptographicException("Session is not properly initialized to decrypt messages.");
         }
 
-        var messageKey = CryptoUtils.KDF(null, _receivingChainKey, "message-key-kdf", CryptoUtils.KeySize);
-        _receivingChainKey = CryptoUtils.KDF(null, _receivingChainKey, "ratchet-chain-kdf", CryptoUtils.KeySize);
+        var messageKey = CryptoUtils.KDF(null, _receivingChainKey.Value, "message-key-kdf", CryptoUtils.KeySize);
+        _receivingChainKey = new ChainKey(CryptoUtils.KDF(null, _receivingChainKey.Value, "ratchet-chain-kdf", CryptoUtils.KeySize));
 
-        plaintext = CryptoUtils.DecryptAesGcm(messageKey, message.Header.Counter, message.Ciphertext, associatedData);
+        var decryptedBytes = CryptoUtils.DecryptAesGcm(messageKey, message.Header.Counter, message.Ciphertext.Value, associatedData);
         _receivingCounter++;
-        return plaintext;
+        return new Plaintext(decryptedBytes);
     }
 
-    private byte[]? TrySkippedMessageKeys(RatchetMessage message, byte[] associatedData)
+    private Plaintext? TrySkippedMessageKeys(RatchetMessage message, byte[] associatedData)
     {
         if (_skippedMessageKeys.TryGetValue(message.Header.Counter, out var key))
         {
-            var plaintext = CryptoUtils.DecryptAesGcm(key, message.Header.Counter, message.Ciphertext, associatedData);
+            var plaintextBytes = CryptoUtils.DecryptAesGcm(key.Value, message.Header.Counter, message.Ciphertext.Value, associatedData);
             _skippedMessageKeys.Remove(message.Header.Counter);
-            return plaintext;
+            return new Plaintext(plaintextBytes);
         }
         return null;
     }
@@ -166,8 +168,8 @@ public class DoubleRatchetSession : IDisposable
 
         while (_receivingCounter < until)
         {
-            var messageKey = CryptoUtils.KDF(null, _receivingChainKey, "message-key-kdf", CryptoUtils.KeySize);
-            _receivingChainKey = CryptoUtils.KDF(null, _receivingChainKey, "ratchet-chain-kdf", CryptoUtils.KeySize);
+            var messageKey = new MessageKey(CryptoUtils.KDF(null, _receivingChainKey.Value, "message-key-kdf", CryptoUtils.KeySize));
+            _receivingChainKey = new ChainKey(CryptoUtils.KDF(null, _receivingChainKey.Value, "ratchet-chain-kdf", CryptoUtils.KeySize));
 
             if (_skippedMessageKeys.Count < MaxSkippedMessages)
             {
@@ -177,28 +179,28 @@ public class DoubleRatchetSession : IDisposable
         }
     }
 
-    private void DoDhRatchet(byte[] remoteRatchetKeyBytes)
+    private void DoDhRatchet(PublicKey remoteRatchetKey)
     {
         if (_dhRatchetKey is null)
         {
             throw new InvalidOperationException("Cannot perform DH ratchet without a local ratchet key.");
         }
 
-        _remoteRatchetKeyBytes = remoteRatchetKeyBytes;
-        using var remoteRatchetKey = ECDiffieHellman.Create();
-        remoteRatchetKey.ImportSubjectPublicKeyInfo(remoteRatchetKeyBytes, out _);
+        _remoteRatchetKey = remoteRatchetKey;
+        using var remoteDhKey = ECDiffieHellman.Create();
+        remoteDhKey.ImportSubjectPublicKeyInfo(remoteRatchetKey.Value, out _);
 
-        var dhSecret = _dhRatchetKey.DeriveKeyMaterial(remoteRatchetKey.PublicKey);
-        var kdfResult = CryptoUtils.KDF(_rootKey, dhSecret, "ratchet-kdf", CryptoUtils.KeySize * 2);
-        _rootKey = kdfResult[..CryptoUtils.KeySize];
-        _receivingChainKey = kdfResult[CryptoUtils.KeySize..];
+        var dhSecret = _dhRatchetKey.DeriveKeyMaterial(remoteDhKey.PublicKey);
+        var kdfResult = CryptoUtils.KDF(_rootKey.Value, dhSecret, "ratchet-kdf", CryptoUtils.KeySize * 2);
+        _rootKey = new RootKey(kdfResult[..CryptoUtils.KeySize]);
+        _receivingChainKey = new ChainKey(kdfResult[CryptoUtils.KeySize..]);
 
         _dhRatchetKey.Dispose();
         _dhRatchetKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        dhSecret = _dhRatchetKey.DeriveKeyMaterial(remoteRatchetKey.PublicKey);
-        kdfResult = CryptoUtils.KDF(_rootKey, dhSecret, "ratchet-kdf", CryptoUtils.KeySize * 2);
-        _rootKey = kdfResult[..CryptoUtils.KeySize];
-        _sendingChainKey = kdfResult[CryptoUtils.KeySize..];
+        dhSecret = _dhRatchetKey.DeriveKeyMaterial(remoteDhKey.PublicKey);
+        kdfResult = CryptoUtils.KDF(_rootKey.Value, dhSecret, "ratchet-kdf", CryptoUtils.KeySize * 2);
+        _rootKey = new RootKey(kdfResult[..CryptoUtils.KeySize]);
+        _sendingChainKey = new ChainKey(kdfResult[CryptoUtils.KeySize..]);
 
         _receivingCounter = 0;
         _sendingCounter = 0;
@@ -212,14 +214,14 @@ public class DoubleRatchetSession : IDisposable
 
     public class DoubleRatchetSessionState
     {
-        public byte[] RootKey { get; set; } = Array.Empty<byte>();
-        public byte[]? SendingChainKey { get; set; }
-        public byte[]? ReceivingChainKey { get; set; }
+        public RootKey RootKey { get; set; } = new(Array.Empty<byte>());
+        public ChainKey? SendingChainKey { get; set; }
+        public ChainKey? ReceivingChainKey { get; set; }
         public ulong SendingCounter { get; set; }
         public ulong ReceivingCounter { get; set; }
-        public Dictionary<ulong, byte[]> SkippedMessageKeys { get; set; } = new();
-        public byte[]? TheirIdentityPublicKey { get; set; }
-        public byte[]? TheirDhRatchetPublicKey { get; set; }
-        public byte[]? DhRatchetPrivateKey { get; set; }
+        public Dictionary<ulong, MessageKey> SkippedMessageKeys { get; set; } = new();
+        public PublicKey? TheirIdentityPublicKey { get; set; }
+        public PublicKey? TheirDhRatchetPublicKey { get; set; }
+        public PrivateKey? DhRatchetPrivateKey { get; set; }
     }
 }

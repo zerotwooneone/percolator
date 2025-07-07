@@ -11,13 +11,13 @@ public record PreKeyBundle
     public PreKeyBundle(
         byte[] identitySigningKey,
         byte[] identityAgreementKey,
-        byte[] signedPreKeySignature,
+        Signature signedPreKeySignature,
         byte[] signedPreKey,
         byte[]? oneTimePreKey)
     {
         IdentitySigningKey = new PublicKey(identitySigningKey);
         IdentityAgreementKey = new PublicKey(identityAgreementKey);
-        SignedPreKeySignature = new Signature(signedPreKeySignature);
+        SignedPreKeySignature = signedPreKeySignature;
         SignedPreKey = new PublicKey(signedPreKey);
         OneTimePreKey = oneTimePreKey is not null ? new PublicKey(oneTimePreKey) : null;
     }

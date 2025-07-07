@@ -104,7 +104,7 @@ namespace Percolator.Cryptography
             };
 
             var signedPayload = JsonSerializer.SerializeToUtf8Bytes(signedMessage);
-            return sessionToMember.Encrypt(signedPayload);
+            return sessionToMember.Encrypt(new Plaintext(signedPayload));
         }
 
         public Dictionary<string, RatchetMessage> RemoveMember(string memberId)
@@ -143,7 +143,7 @@ namespace Percolator.Cryptography
 
             foreach (var (id, session) in _members)
             {
-                var rekeyMessage = session.Encrypt(signedPayload);
+                var rekeyMessage = session.Encrypt(new Plaintext(signedPayload));
                 rekeyMessages[id] = rekeyMessage;
             }
 
@@ -153,7 +153,7 @@ namespace Percolator.Cryptography
         public static GroupManager AcceptInvitation(DoubleRatchetSession sessionToCreator, RatchetMessage invitationMessage, byte[] creatorSigningPublicKey, ECDiffieHellman creatorIdentityKey)
         {
             var payload = sessionToCreator.Decrypt(invitationMessage);
-            var signedMessage = JsonSerializer.Deserialize<SignedGroupControlMessage>(payload)!;
+            var signedMessage = JsonSerializer.Deserialize<SignedGroupControlMessage>(payload.Value)!;
 
             using var creatorKey = ECDsa.Create();
             creatorKey.ImportSubjectPublicKeyInfo(creatorSigningPublicKey, out _);
@@ -179,7 +179,7 @@ namespace Percolator.Cryptography
             if (_creatorSigningPublicKey is null) throw new InvalidOperationException("Cannot process re-key on a creator's group manager.");
 
             var payload = sessionToCreator.Decrypt(rekeyMessage);
-            var signedMessage = JsonSerializer.Deserialize<SignedGroupControlMessage>(payload)!;
+            var signedMessage = JsonSerializer.Deserialize<SignedGroupControlMessage>(payload.Value)!;
 
             using var creatorKey = ECDsa.Create();
             creatorKey.ImportSubjectPublicKeyInfo(_creatorSigningPublicKey, out _);
