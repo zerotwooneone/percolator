@@ -6,7 +6,6 @@ using Percolator.Application.KeyExchange;
 using Percolator.Application.Network;
 using Percolator.Application.PeerDiscovery;
 using Percolator.Application.RateLimiting;
-using Percolator.Application.Security;
 using Percolator.Application.Sessions;
 
 namespace Percolator.Application;
@@ -23,7 +22,6 @@ public static class ServiceCollectionExtensions
         services.AddPeerDiscoveryServices();
         services.AddSessionServices();
         services.AddRateLimiting();
-        services.AddAppSecurity();
         
         return services;
     }
