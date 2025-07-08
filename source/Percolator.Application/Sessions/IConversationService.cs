@@ -15,4 +15,11 @@ public interface IConversationService
     /// <param name="remotePublicIdentityKey">The remote peer's public identity signing key, encoded as a Base64 string.</param>
     /// <returns>The unique ID of the direct conversation.</returns>
     Task<ConversationId> CreateDirectConversationAsync(string host, int port, string remotePublicIdentityKey);
+
+    /// <summary>
+    /// Gets the last active direct conversation ID for a given peer.
+    /// </summary>
+    /// <param name="peerId">The ID of the peer.</param>
+    /// <returns>The conversation ID, or null if no active conversation is found.</returns>
+    Task<ConversationId?> GetLastActiveConversationIdAsync(Guid peerId);
 }

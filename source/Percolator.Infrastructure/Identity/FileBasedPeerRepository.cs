@@ -89,7 +89,7 @@ public class FileBasedPeerRepository : IPeerRepository, ITrustedPeerStore
     }
 
     private static Peer ToDomain(PeerModel model) =>
-        new(new PeerId(model.Id), model.IpAddress, new Endpoint(model.GrpcEndpoint.Port), model.Thumbprint);
+        new(new PeerId(model.Id), model.IpAddress, new Endpoint(model.GrpcEndpoint.Port), model.Thumbprint, model.LastDirectConversationId is null ? null : new ConversationId(model.LastDirectConversationId.Value));
 
     private static PeerModel ToModel(Peer peer) =>
         new()
@@ -97,7 +97,8 @@ public class FileBasedPeerRepository : IPeerRepository, ITrustedPeerStore
             Id = peer.Id.Value,
             IpAddress = peer.IpAddress,
             GrpcEndpoint = new EndpointModel { Port = peer.GrpcEndpoint.Port },
-            Thumbprint = peer.Thumbprint
+            Thumbprint = peer.Thumbprint,
+            LastDirectConversationId = peer.LastDirectConversationId?.Value
         };
 
     public async void Add(PublicKeyHash publicKeyHash)

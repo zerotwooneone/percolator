@@ -15,9 +15,11 @@ public class DirectSessionManagerTests
 {
     private Mock<IDoubleRatchetSessionStore> _mockSessionStore = null!;
     private Mock<IConversationRepository> _mockConversationRepository = null!;
+    private Mock<IPeerRepository> _mockPeerRepository = null!;
     private Mock<ILocalPeerProvider> _mockLocalPeerProvider = null!;
     private Mock<IMessageStore> _mockMessageStore = null!;
-    private DirectSessionManager _manager = null!;
+    private Mock<ActiveIdentityContext> _mockActiveIdentityContext = null!;
+    private DirectSessionManager _sessionManager = null!;
 
     private X3dhKeys _localKeys = null!;
     private ECDiffieHellman _remoteIdentityKey = null!;
@@ -27,9 +29,10 @@ public class DirectSessionManagerTests
     {        
         _mockSessionStore = new Mock<IDoubleRatchetSessionStore>();
         _mockConversationRepository = new Mock<IConversationRepository>();
+        _mockPeerRepository = new Mock<IPeerRepository>();
         _mockLocalPeerProvider = new Mock<ILocalPeerProvider>();
         _mockMessageStore = new Mock<IMessageStore>();
-        var activeIdentityContext = new ActiveIdentityContext();
+        _mockActiveIdentityContext = new Mock<ActiveIdentityContext>();
 
         var identity = new IdentityRecord(Guid.NewGuid(), "Local Identity");
         var identitySigningKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
@@ -38,19 +41,17 @@ public class DirectSessionManagerTests
         var oneTimePreKeys = new[] { ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256) };
         _localKeys = new X3dhKeys(identitySigningKey, identityAgreementKey, signedPreKey, oneTimePreKeys);
 
-        activeIdentityContext.Identity = identity;
-        activeIdentityContext.Keys = _localKeys;
+        _mockLocalPeerProvider.Setup(p => p.GetPeerIdAsync()).ReturnsAsync(new SessionPeerId(identity.Id));
 
         _remoteIdentityKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         
-        _mockLocalPeerProvider.Setup(p => p.GetPeerIdAsync()).ReturnsAsync(new SessionPeerId(identity.Id));
-
-        _manager = new DirectSessionManager(
+        _sessionManager = new DirectSessionManager(
             _mockSessionStore.Object,
             _mockConversationRepository.Object,
+            _mockPeerRepository.Object,
             _mockLocalPeerProvider.Object,
             _mockMessageStore.Object,
-            activeIdentityContext
+            _mockActiveIdentityContext.Object
         );
     }
 

@@ -1,7 +1,7 @@
 <component name="ProjectRunConfigurationManager">
   <configuration default="false" name="Send" type="DotNetProject" factoryName=".NET Project">
     <option name="EXE_PATH" value="$PROJECT_DIR$/Percolator.Node/bin/Debug/net9.0-windows/Percolator.Node.exe" />
-    <option name="PROGRAM_PARAMETERS" value="send e84bb2f2-c965-4efd-b61a-19133130234a &quot;Hello from Node B!&quot; --identity nodeB" />
+    <option name="PROGRAM_PARAMETERS" value="send &quot;Hello from Bob!&quot; --invite &quot;percolator://localhost:5000/MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEOvhqOfrzzFKY0QqNZ/OtJhMj2E0OuntLQquHBuH/2dYftOJgE98VI5V0pU++00uR7IqbwdECZ/UiWOYDMZbV0Q==&quot; --identity Bob" />
     <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/Percolator.Node/bin/Debug/net9.0-windows" />
     <option name="PASS_PARENT_ENVS" value="1" />
     <option name="USE_EXTERNAL_CONSOLE" value="0" />

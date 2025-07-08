@@ -68,15 +68,42 @@ Upon success, the command will output a unique `Conversation ID`. **Save this ID
 
 ### 3. Send a Message
 
-Once a session is established, use the `send` command to send an encrypted message. You must specify the `conversationId` and the identity associated with that conversation.
+Once a conversation is established, you can send encrypted messages. The `send` command is flexible, allowing you to send messages in several ways.
 
--   `<conversationId>`: The unique ID generated when you connected to the peer.
 -   `<message>`: The plaintext message you want to send, enclosed in quotes.
--   `--identity` / `-i`: The name of the local identity that established the session.
+-   `--identity` / `-i`: The name of the local identity to use.
+
+#### Method 1: Send to a Known Conversation
+
+If you have a `conversation-id` from a previous `connect` command, you can use it directly. This is the most explicit way to send a message.
+
+-   `--conversation-id`: The unique ID generated when you connected to the peer.
 
 **Example:**
 ```bash
-dotnet run --project .\Percolator.Node\ -- send 1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d "Hello, world!" --identity Bob
+dotnet run --project .\Percolator.Node\ -- send --conversation-id 1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d "Hello, world!" --identity Bob
+```
+
+#### Method 2: Send to a Peer's Last Active Conversation
+
+For convenience, you can send a message to a peer using their `peer-id`. The application will automatically find the last active conversation with that peer and send the message.
+
+-   `--peer-id`: The ID of the peer you want to message.
+
+**Example:**
+```bash
+dotnet run --project .\Percolator.Node\ -- send --peer-id 1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d "Hello again!" --identity Bob
+```
+
+#### Method 3: Connect and Send in One Step
+
+The most streamlined way to initiate contact is to use the `--invite` flag. This will establish a secure session using the host's invitation link and send your message in a single command.
+
+-   `--invite`: The full `percolator://` link provided by the host.
+
+**Example:**
+```bash
+dotnet run --project .\Percolator.Node\ -- send "Hello from Bob!" --invite "percolator://localhost:5000/MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEx..." --identity Bob
 ```
 
 ## Example Scenario: Two Nodes on One Machine
@@ -95,27 +122,17 @@ After the host starts, **copy the `Invitation Link`** that is displayed in the c
 
 ### Terminal 2: Connect and Send Message with Node B
 
-In a second terminal, use the `Bob` identity to connect to `Alice` using her invitation link.
+In a second terminal, use the `Bob` identity to connect to `Alice` and send a message in a single step using the `--invite` flag.
 
-**Step 1: Connect to Node A**
+**Step 1: Connect and Send**
 
-Paste the full invitation link you copied from Terminal 1.
-
-```bash
-dotnet run --project .\Percolator.Node\ -- connect "percolator://localhost:5000/MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEx..." --identity Bob
-```
-
-This will output a `Conversation ID`. Copy it for the next step.
-
-**Step 2: Send a message**
-
-Replace `<conversation_id>` with the ID from the previous step.
+Paste the full invitation link you copied from Terminal 1 into the command below.
 
 ```bash
-dotnet run --project .\Percolator.Node\ -- send <conversation_id> "Hello from Bob!" --identity Bob
+dotnet run --project .\Percolator.Node\ -- send "Hello from Bob!" --invite "percolator://localhost:5000/MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEx..." --identity Bob
 ```
 
-You should see the message appear in the console for Node A.
+You should see the message appear in the console for Node A (Terminal 1).
 
 ## Important Note on PeerId
 

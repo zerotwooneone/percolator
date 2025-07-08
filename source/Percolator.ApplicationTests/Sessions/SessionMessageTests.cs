@@ -28,6 +28,8 @@ public class SessionMessageTests
     private Mock<IDoubleRatchetSessionStore> _aliceSessionStore = null!;
     private Mock<IDoubleRatchetSessionStore> _bobSessionStore = null!;
     private Mock<IConversationRepository> _mockConversationRepo = null!;
+    private Mock<IPeerRepository> _mockPeerRepo = null!;
+    private Mock<IMessageStore> _mockMessageStore = null!;
 
     private ActiveIdentityContext _aliceIdentity = null!;
     private Signature _aliceSignature = null!;
@@ -52,6 +54,8 @@ public class SessionMessageTests
             .Callback((SessionPeerId p, SessionConversationId c, DoubleRatchetSession.DoubleRatchetSessionState s) => bobBackingStore[(p, c)] = s);
 
         _mockConversationRepo = new Mock<IConversationRepository>();
+        _mockPeerRepo = new Mock<IPeerRepository>();
+        _mockMessageStore = new Mock<IMessageStore>();
 
         (_aliceIdentity, _aliceSignature) = CreateIdentityContext("Alice");
         (_bobIdentity, _bobSignature) = CreateIdentityContext("Bob");
@@ -62,8 +66,21 @@ public class SessionMessageTests
         var mockBobLocalPeerProvider = new Mock<ILocalPeerProvider>();
         mockBobLocalPeerProvider.Setup(p => p.GetPeerIdAsync()).ReturnsAsync(new SessionPeerId(_bobIdentity.Identity!.Id));
 
-        _aliceManager = new DirectSessionManager(_aliceSessionStore.Object, _mockConversationRepo.Object, mockAliceLocalPeerProvider.Object, new Mock<IMessageStore>().Object, _aliceIdentity);
-        _bobManager = new DirectSessionManager(_bobSessionStore.Object, _mockConversationRepo.Object, mockBobLocalPeerProvider.Object, new Mock<IMessageStore>().Object, _bobIdentity);
+        _aliceManager = new DirectSessionManager(
+            _aliceSessionStore.Object,
+            _mockConversationRepo.Object,
+            _mockPeerRepo.Object,
+            mockAliceLocalPeerProvider.Object,
+            _mockMessageStore.Object,
+            _aliceIdentity);
+
+        _bobManager = new DirectSessionManager(
+            _bobSessionStore.Object,
+            _mockConversationRepo.Object,
+            _mockPeerRepo.Object,
+            mockBobLocalPeerProvider.Object,
+            _mockMessageStore.Object,
+            _bobIdentity);
     }
 
     [Test]

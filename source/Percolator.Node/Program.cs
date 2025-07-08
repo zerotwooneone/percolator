@@ -46,12 +46,17 @@ var connectCommand = new Command("connect", "Connects to a peer using an invitat
 rootCommand.AddCommand(connectCommand);
 
 // *** Send Command ***
-var conversationIdArgument = new Argument<Guid>("conversationId", "The ID of the conversation to send the message to.");
+var conversationIdOption = new Option<Guid?>("--conversation-id", "The ID of the conversation. If omitted, the last active conversation with the target peer will be used.");
+var peerIdOption = new Option<Guid?>("--peer-id", "The ID of the peer to send the message to. Required if conversation-id is not specified.");
 var messageArgument = new Argument<string>("message", "The plaintext message to send.");
+var inviteOption = new Option<string>("--invite", "The invitation link to connect and send in one step.");
+
 var sendCommand = new Command("send", "Sends an encrypted message to a peer over an established session.")
 {
-    conversationIdArgument,
+    conversationIdOption,
+    peerIdOption,
     messageArgument,
+    inviteOption,
     identityOption // Add identity option to client commands
 };
 rootCommand.AddCommand(sendCommand);
@@ -179,8 +184,10 @@ async Task ConnectCommandHandler(InvocationContext context)
 
 async Task SendCommandHandler(InvocationContext context)
 {
-    var conversationIdGuid = context.ParseResult.GetValueForArgument(conversationIdArgument);
+    var conversationIdGuid = context.ParseResult.GetValueForOption(conversationIdOption);
+    var peerIdGuid = context.ParseResult.GetValueForOption(peerIdOption);
     var message = context.ParseResult.GetValueForArgument(messageArgument);
+    var inviteLink = context.ParseResult.GetValueForOption(inviteOption);
     var identityName = context.ParseResult.GetValueForOption(identityOption);
 
     // Build client-specific service provider
@@ -191,19 +198,80 @@ async Task SendCommandHandler(InvocationContext context)
     await identityOrchestrator.LoadOrCreateIdentityAsync(identityName!, context.GetCancellationToken());
 
     var messageService = serviceProvider.GetRequiredService<IMessageService>();
-    var conversationId = new ChatConversationId(conversationIdGuid);
+    var conversationService = serviceProvider.GetRequiredService<IConversationService>();
 
-    Console.WriteLine($"Sending message to conversation {conversationId}...");
-    try
+    if (inviteLink != null)
     {
-        var sentMessage = await messageService.SendDirectMessageAsync(conversationId, message);
-        Console.WriteLine($"Message sent with ID: {sentMessage.Id}");
+        try
+        {
+            var invitation = InvitationLink.Parse(inviteLink);
+            Console.WriteLine($"Connecting to {invitation.Host}:{invitation.Port}...");
+            var conversationId = await conversationService.CreateDirectConversationAsync(invitation.Host, invitation.Port, invitation.PublicKey);
+            Console.WriteLine($"Session established. Conversation ID: {conversationId}");
+            var sentMessage = await messageService.SendDirectMessageAsync(conversationId, message);
+            Console.WriteLine($"Message sent with ID: {sentMessage.Id}");
+        }
+        catch (FormatException ex)
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine($"Invalid invitation link: {ex.Message}");
+            Console.ResetColor();
+        }
+        catch (Exception ex)
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine($"Failed to send message: {ex.Message}");
+            Console.ResetColor();
+        }
     }
-    catch (Exception ex)
+    else
     {
-        Console.ForegroundColor = ConsoleColor.Red;
-        Console.WriteLine($"Failed to send message: {ex.Message}");
-        Console.ResetColor();
+        if (conversationIdGuid.HasValue)
+        {
+            Console.WriteLine($"Sending message to conversation {conversationIdGuid}...");
+            try
+            {
+                var sentMessage = await messageService.SendDirectMessageAsync(new ChatConversationId(conversationIdGuid.Value), message);
+                Console.WriteLine($"Message sent with ID: {sentMessage.Id}");
+            }
+            catch (Exception ex)
+            {
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine($"Failed to send message: {ex.Message}");
+                Console.ResetColor();
+            }
+        }
+        else if (peerIdGuid.HasValue)
+        {
+            Console.WriteLine($"Sending message to peer {peerIdGuid}...");
+            try
+            {
+                var conversationId = await conversationService.GetLastActiveConversationIdAsync(peerIdGuid.Value);
+                if (conversationId.HasValue)
+                {
+                    var sentMessage = await messageService.SendDirectMessageAsync(new ChatConversationId(conversationId.Value.Value), message);
+                    Console.WriteLine($"Message sent with ID: {sentMessage.Id}");
+                }
+                else
+                {
+                    Console.ForegroundColor = ConsoleColor.Red;
+                    Console.WriteLine($"No active conversation found with peer {peerIdGuid}.");
+                    Console.ResetColor();
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine($"Failed to send message: {ex.Message}");
+                Console.ResetColor();
+            }
+        }
+        else
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine("Either conversation-id or peer-id must be specified.");
+            Console.ResetColor();
+        }
     }
 }
 

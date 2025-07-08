@@ -6,6 +6,8 @@ using SessionPeerId = Percolator.Sessions.PeerId;
 using OpaquePublicKey = Percolator.Sessions.OpaquePublicKey;
 using System.Collections.Concurrent;
 using Percolator.Chat;
+using Percolator.Identity;
+using IdentityConversationId = Percolator.Identity.ConversationId;
 using SessionConversationId = Percolator.Sessions.ConversationId;
 
 namespace Percolator.Application.Sessions;
@@ -14,6 +16,7 @@ public class DirectSessionManager
 {
     private readonly IDoubleRatchetSessionStore _sessionStore;
     private readonly IConversationRepository _conversationRepository;
+    private readonly IPeerRepository _peerRepository;
     private readonly ILocalPeerProvider _localPeerProvider;
     private readonly IMessageStore _messageStore;
     private readonly ActiveIdentityContext _activeIdentityContext;
@@ -22,12 +25,14 @@ public class DirectSessionManager
     public DirectSessionManager(
         IDoubleRatchetSessionStore sessionStore,
         IConversationRepository conversationRepository,
+        IPeerRepository peerRepository,
         ILocalPeerProvider localPeerProvider,
         IMessageStore messageStore,
         ActiveIdentityContext activeIdentityContext)
     {
         _sessionStore = sessionStore;
         _conversationRepository = conversationRepository;
+        _peerRepository = peerRepository;
         _localPeerProvider = localPeerProvider;
         _messageStore = messageStore;
         _activeIdentityContext = activeIdentityContext;
@@ -65,7 +70,7 @@ public class DirectSessionManager
         _sessionLocks.TryAdd(conversationId, new SemaphoreSlim(1, 1));
     }
 
-    public async Task<byte[]> ReceiveMessageAsync(ConversationId conversationId, RatchetMessage encryptedMessage)
+    public async Task<byte[]> ReceiveMessageAsync(SessionConversationId conversationId, RatchetMessage encryptedMessage)
     {
         if (_activeIdentityContext.Identity is null || _activeIdentityContext.Keys is null)
         {
@@ -106,7 +111,7 @@ public class DirectSessionManager
         }
     }
 
-    public async Task<(SessionPeerId RemotePeerId, RatchetMessage EncryptedMessage)?> EncryptMessageAsync(ConversationId conversationId, byte[] plaintext)
+    public async Task<(SessionPeerId RemotePeerId, RatchetMessage EncryptedMessage)?> EncryptMessageAsync(SessionConversationId conversationId, byte[] plaintext)
     {
         if (_activeIdentityContext.Identity is null || _activeIdentityContext.Keys is null)
         { 
@@ -132,6 +137,14 @@ public class DirectSessionManager
             var encryptedMessage = doubleRatchetSession.Encrypt(new Plaintext(plaintext));
 
             await _sessionStore.SaveSessionStateAsync(remotePeerId, conversationId, doubleRatchetSession.GetState());
+
+            var identityPeerId = new Percolator.Identity.PeerId(remotePeerId.Value);
+            var peer = await _peerRepository.GetByIdAsync(identityPeerId);
+            if (peer is not null && peer.LastDirectConversationId?.Value != conversationId.Value)
+            {
+                var updatedPeer = new Peer(peer.Id, peer.IpAddress, peer.GrpcEndpoint, peer.Thumbprint,new IdentityConversationId(conversationId.Value));
+                await _peerRepository.AddAsync(updatedPeer);
+            }
 
             return (remotePeerId, encryptedMessage);
         }
