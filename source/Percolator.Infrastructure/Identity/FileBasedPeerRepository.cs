@@ -81,11 +81,11 @@ public class FileBasedPeerRepository : IPeerRepository, ITrustedPeerStore
             hashes.Select(h => new KeyValuePair<PublicKeyHash, byte>(new PublicKeyHash(h), 0)));
     }
 
-    private void SaveTrustedHashesToDisk()
+    private async Task SaveTrustedHashesToDiskAsync()
     {
         var hashes = _trustedHashes.Keys.Select(k => k.Value).ToList();
         var json = JsonSerializer.Serialize(hashes);
-        File.WriteAllText(_trustedHashesFilePath, json);
+        await File.WriteAllTextAsync(_trustedHashesFilePath, json);
     }
 
     private static Peer ToDomain(PeerModel model) =>
@@ -100,11 +100,11 @@ public class FileBasedPeerRepository : IPeerRepository, ITrustedPeerStore
             Thumbprint = peer.Thumbprint
         };
 
-    public void Add(PublicKeyHash publicKeyHash)
+    public async void Add(PublicKeyHash publicKeyHash)
     {
         if (_trustedHashes.TryAdd(publicKeyHash, 0))
         {
-            SaveTrustedHashesToDisk();
+            await SaveTrustedHashesToDiskAsync();
         }
     }
 
