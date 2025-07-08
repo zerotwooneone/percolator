@@ -60,15 +60,15 @@ public class FileBasedDoubleRatchetSessionStore: IDoubleRatchetSessionStore
     {
         return new SessionStateModel
         {
-            RootKey = state.RootKey.Value,
-            SendingChainKey = state.SendingChainKey?.Value,
-            ReceivingChainKey = state.ReceivingChainKey?.Value,
+            RootKey = Convert.ToBase64String(state.RootKey.Value),
+            SendingChainKey = state.SendingChainKey is not null ? Convert.ToBase64String(state.SendingChainKey.Value) : null,
+            ReceivingChainKey = state.ReceivingChainKey is not null ? Convert.ToBase64String(state.ReceivingChainKey.Value) : null,
             SendingCounter = state.SendingCounter,
             ReceivingCounter = state.ReceivingCounter,
-            SkippedMessageKeys = state.SkippedMessageKeys.ToDictionary(kvp => kvp.Key, kvp => kvp.Value.Value),
-            TheirIdentityPublicKey = state.TheirIdentityPublicKey.Value,
-            TheirDhRatchetPublicKey = state.TheirDhRatchetPublicKey?.Value,
-            DhRatchetPrivateKey = state.DhRatchetPrivateKey is not null ? state.DhRatchetPrivateKey.Value : null
+            SkippedMessageKeys = state.SkippedMessageKeys.ToDictionary(kvp => kvp.Key.ToString(), kvp => Convert.ToBase64String(kvp.Value.Value)),
+            TheirIdentityPublicKey = Convert.ToBase64String(state.TheirIdentityPublicKey.Value),
+            TheirDhRatchetPublicKey = state.TheirDhRatchetPublicKey is not null ? Convert.ToBase64String(state.TheirDhRatchetPublicKey.Value) : null,
+            DhRatchetPrivateKey = state.DhRatchetPrivateKey is not null ? Convert.ToBase64String(state.DhRatchetPrivateKey.Value) : null
         };
     }
 
@@ -76,15 +76,15 @@ public class FileBasedDoubleRatchetSessionStore: IDoubleRatchetSessionStore
     {
         return new DoubleRatchetSessionState
         {
-            RootKey = new RootKey(model.RootKey!),
-            SendingChainKey = model.SendingChainKey is not null ? new ChainKey(model.SendingChainKey) : null,
-            ReceivingChainKey = model.ReceivingChainKey is not null ? new ChainKey(model.ReceivingChainKey) : null,
+            RootKey = new RootKey(Convert.FromBase64String(model.RootKey!)),
+            SendingChainKey = model.SendingChainKey is not null ? new ChainKey(Convert.FromBase64String(model.SendingChainKey)) : null,
+            ReceivingChainKey = model.ReceivingChainKey is not null ? new ChainKey(Convert.FromBase64String(model.ReceivingChainKey)) : null,
             SendingCounter = model.SendingCounter,
             ReceivingCounter = model.ReceivingCounter,
-            SkippedMessageKeys = model.SkippedMessageKeys.ToDictionary(kvp => kvp.Key, kvp => new MessageKey(kvp.Value)),
-            TheirIdentityPublicKey = new PublicKey(model.TheirIdentityPublicKey!),
-            TheirDhRatchetPublicKey = model.TheirDhRatchetPublicKey is not null ? new PublicKey(model.TheirDhRatchetPublicKey) : null,
-            DhRatchetPrivateKey = model.DhRatchetPrivateKey is not null ? new PrivateKey(model.DhRatchetPrivateKey) : null
+            SkippedMessageKeys = model.SkippedMessageKeys.ToDictionary(kvp => ulong.Parse(kvp.Key), kvp => new MessageKey(Convert.FromBase64String(kvp.Value))),
+            TheirIdentityPublicKey = new PublicKey(Convert.FromBase64String(model.TheirIdentityPublicKey!)),
+            TheirDhRatchetPublicKey = model.TheirDhRatchetPublicKey is not null ? new PublicKey(Convert.FromBase64String(model.TheirDhRatchetPublicKey)) : null,
+            DhRatchetPrivateKey = model.DhRatchetPrivateKey is not null ? new PrivateKey(Convert.FromBase64String(model.DhRatchetPrivateKey)) : null
         };
     }
 

@@ -98,15 +98,16 @@ public class MessageServiceTests
         };
         var conversation = new ChatConversation(conversationId, participants.ToList());
 
+        var localDhKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+
         var sessionState = new DoubleRatchetSession.DoubleRatchetSessionState
         {
             RootKey = new RootKey(new byte[32]),
-            SendingChainKey = new ChainKey(new byte[32]),
-            ReceivingChainKey = new ChainKey(new byte[32]),
             SendingCounter = 0,
             ReceivingCounter = 0,
-            TheirIdentityPublicKey = new PublicKey(new byte[65]),
-            TheirDhRatchetPublicKey = new PublicKey(new byte[65]),
+            TheirIdentityPublicKey = new PublicKey(ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256).PublicKey.ExportSubjectPublicKeyInfo()),
+            TheirDhRatchetPublicKey = new PublicKey(ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256).PublicKey.ExportSubjectPublicKeyInfo()),
+            DhRatchetPrivateKey = new PrivateKey(localDhKey.ExportECPrivateKey()),
             SkippedMessageKeys = new Dictionary<ulong, MessageKey>()
         };
 
