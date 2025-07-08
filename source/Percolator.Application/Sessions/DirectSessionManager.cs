@@ -141,18 +141,19 @@ public class DirectSessionManager
         }
     }
 
-    private async Task<SessionPeerId> GetRemotePeerId(ConversationId conversationId)
+    private async Task<SessionPeerId> GetRemotePeerId(SessionConversationId conversationId)
     {
-        var chatConversation = await _conversationRepository.GetByIdAsync(new Chat.ValueObjects.ConversationId(conversationId.Value));
-        if (chatConversation is null)
+        var chatConversationId = new Percolator.Chat.ValueObjects.ConversationId(conversationId.Value);
+        var conversation = await _conversationRepository.GetByIdAsync(chatConversationId);
+        if (conversation is null)
         {
-            throw new InvalidOperationException($"Conversation with ID {conversationId} not found.");
+            throw new InvalidOperationException($"Conversation {conversationId} not found.");
         }
 
         var localPeerId = await _localPeerProvider.GetPeerIdAsync();
 
         var localParticipantId = new Chat.ValueObjects.ParticipantId(localPeerId.Value);
-        var remoteParticipant = chatConversation.Participants.FirstOrDefault(p => p.Value != localParticipantId.Value);
+        var remoteParticipant = conversation.Participants.FirstOrDefault(p => p.Value != localParticipantId.Value);
 
         if (remoteParticipant.Value == Guid.Empty)
         {
