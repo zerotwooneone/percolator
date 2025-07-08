@@ -32,26 +32,25 @@ message PreKeyBundle {
 
 // Request to establish a new secure session.
 message EstablishSessionRequest {
-    uint32 version = 1;
-    // The public key bundle of the peer initiating the session.
-    PreKeyBundle initiator_bundle = 2;
-
+    // The initiator's pre-key bundle.
+    PreKeyBundle initiator_bundle = 1;
+    // The initiator's ephemeral public key for this handshake.
+    bytes initiator_ephemeral_key = 2;
     // An optional, stable public key that the initiator can use as their
     // long-term identity across sessions.
     optional bytes long_term_identity_key = 3;
-    // The initiator's ephemeral public key for this handshake.
-    bytes initiator_ephemeral_key = 4;
-    // The initiator's peer ID.
-    string initiator_peer_id = 5;
 }
 
 // Response containing the responder's key bundle and the new session ID.
 message EstablishSessionResponse {
+    // The protocol version.
     uint32 version = 1;
+    // The session ID for the newly established session.
     string session_id = 2;
+    // The responder's pre-key bundle.
     PreKeyBundle responder_bundle = 3;
-    string responder_peer_id = 4;
-    optional google.protobuf.Timestamp retry_after_utc = 5;
+    // If the request is rejected, this field may be set to indicate when the client should try again.
+    optional google.protobuf.Timestamp retry_after_utc = 4;
 }
 
 // Request to create a new group session.

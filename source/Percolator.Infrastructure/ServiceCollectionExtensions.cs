@@ -22,7 +22,6 @@ public static class ServiceCollectionExtensions
                     options.Path = Path.Combine(appDataPath, options.Path);
                 }
             });
-
         services.AddChatInfrastructure();
         services.AddSessionsInfrastructure();
         services.AddIdentityInfrastructure();

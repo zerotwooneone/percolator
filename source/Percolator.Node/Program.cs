@@ -79,7 +79,7 @@ async Task HostCommandHandler(InvocationContext context)
     string? identityName = context.ParseResult.GetValueForOption(identityOption);
 
     // Step 1: Build a temporary service provider to get services needed for startup.
-    ServiceCollection tempServices = new ServiceCollection();
+    var tempServices = new ServiceCollection();
     IConfigurationRoot tempConfig = new ConfigurationBuilder().Build();
     tempServices.AddLogging(builder => builder.AddConsole());
     tempServices.AddApplicationServices(tempConfig);
@@ -153,7 +153,8 @@ async Task ConnectCommandHandler(InvocationContext context)
     var identityName = context.ParseResult.GetValueForOption(identityOption);
 
     // Build client-specific service provider
-    await using ServiceProvider serviceProvider = BuildClientServiceProvider(identityName!, context.GetCancellationToken());
+    var configuration = new ConfigurationBuilder().AddJsonFile("appsettings.json", optional: true).Build();
+    await using var serviceProvider = BuildServiceProvider(configuration);
 
     // Initialize identity
     var identityOrchestrator = serviceProvider.GetRequiredService<IIdentityOrchestrator>();
@@ -191,7 +192,8 @@ async Task SendCommandHandler(InvocationContext context)
     var identityName = context.ParseResult.GetValueForOption(identityOption);
 
     // Build client-specific service provider
-    await using ServiceProvider serviceProvider = BuildClientServiceProvider(identityName!, context.GetCancellationToken());
+    var configuration = new ConfigurationBuilder().AddJsonFile("appsettings.json", optional: true).Build();
+    await using var serviceProvider = BuildServiceProvider(configuration);
 
     // Initialize identity
     var identityOrchestrator = serviceProvider.GetRequiredService<IIdentityOrchestrator>();
@@ -275,10 +277,9 @@ async Task SendCommandHandler(InvocationContext context)
     }
 }
 
-ServiceProvider BuildClientServiceProvider(string identityName, CancellationToken cancellationToken)
+static ServiceProvider BuildServiceProvider(IConfiguration configuration)
 {
     var services = new ServiceCollection();
-    var configuration = new ConfigurationBuilder().Build();
     services.AddLogging(builder => builder.AddConsole());
     services.AddApplicationServices(configuration);
     services.AddInfrastructureServices(configuration);

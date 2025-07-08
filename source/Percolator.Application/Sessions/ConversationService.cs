@@ -84,9 +84,9 @@ public class ConversationService : IConversationService
 
         var request = new EstablishSessionRequest
         {
-            InitiatorPeerId = localPeerId.Value.ToString(),
             InitiatorBundle = localBundle,
-            InitiatorEphemeralKey = ByteString.CopyFrom(ephemeralKey.PublicKey.ExportSubjectPublicKeyInfo())
+            InitiatorEphemeralKey = ByteString.CopyFrom(ephemeralKey.PublicKey.ExportSubjectPublicKeyInfo()),
+            LongTermIdentityKey = ByteString.CopyFrom(localKeys.IdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo())
         };
 
         using var channel = CreateChannel(host, port, remotePublicIdentityKey);
@@ -95,28 +95,59 @@ public class ConversationService : IConversationService
         _logger.LogInformation("Sending EstablishSessionRequest to {Host}:{Port}", host, port);
         var response = await client.EstablishSessionAsync(request);
 
-        var remotePeerId = new SessionPeerId(new Guid(response.ResponderPeerId));
+        Peer? peer = null;
+
+        // 1. Look up peer by the long-term public key provided.
+        var longTermKeyBytes = Convert.FromBase64String(remotePublicIdentityKey);
+        var longTermThumbprint = Convert.ToHexString(SHA1.HashData(longTermKeyBytes));
+        _logger.LogInformation("Attempting to find peer by long-term key thumbprint: {Thumbprint}", longTermThumbprint);
+        peer = await _peerRepository.GetByThumbprintAsync(longTermThumbprint);
+
+        // 2. If not found, look up by the key in the responder's bundle.
+        if (peer is null)
+        {
+            var bundleKeyBytes = response.ResponderBundle.IdentityAgreementKey.ToByteArray();
+            var bundleThumbprint = Convert.ToHexString(SHA1.HashData(bundleKeyBytes));
+            _logger.LogInformation("Attempting to find peer by bundle key thumbprint: {Thumbprint}", bundleThumbprint);
+            peer = await _peerRepository.GetByThumbprintAsync(bundleThumbprint);
+        }
+
+        // 3. If still not found, create a new peer associated with the long-term key's thumbprint.
+        if (peer is null)
+        {
+            _logger.LogInformation("First contact with peer with thumbprint {Thumbprint}. Creating new identity.", longTermThumbprint);
+            peer = new Peer(
+                new IdentityPeerId(Guid.NewGuid()),
+                host,
+                new Endpoint(port),
+                longTermThumbprint);
+            await _peerRepository.AddAsync(peer);
+        }
+
+        var remotePeerId = new SessionPeerId(peer.Id.Value);
         var sharedSecret = _orchestrator.CompleteHandshake(response.ResponderBundle, ephemeralKey);
 
+        var conversationId = new ChatConversationId(Guid.NewGuid());
         var conversation = new ChatConversation(
-            new ChatConversationId(Guid.NewGuid()),
+            conversationId,
             new List<ChatParticipantId>
             {
                 new(localPeerId.Value),
                 new(remotePeerId.Value)
-            }
-        );
+            });
 
         await _conversationRepository.AddAsync(conversation);
 
         await _sessionManager.EstablishSessionAsInitiatorAsync(
-            new SessionConversationId(conversation.Id.Value),
+            new SessionConversationId(conversationId.Value),
             remotePeerId,
-            new OpaquePublicKey(response.ResponderBundle.IdentityAgreementKey.ToByteArray()),
+            new OpaquePublicKey(longTermKeyBytes),
             new OpaquePublicKey(response.ResponderBundle.SignedPreKey.ToByteArray()),
             sharedSecret);
 
-        return conversation.Id;
+        _logger.LogInformation("Successfully established session and created conversation {ConversationId}", conversationId);
+
+        return conversationId;
     }
 
     public async Task<ChatConversationId?> GetLastActiveConversationIdAsync(Guid peerId)

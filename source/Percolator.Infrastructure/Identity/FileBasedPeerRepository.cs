@@ -17,6 +17,7 @@ public class FileBasedPeerRepository : IPeerRepository, ITrustedPeerStore
     private readonly string _peersFilePath;
     private readonly string _trustedHashesFilePath;
     private readonly PercolatorJsonContext _jsonContext;
+    private readonly SemaphoreSlim _semaphore;
 
     public FileBasedPeerRepository(IOptions<StorageOptions> storageOptions)
     {
@@ -24,19 +25,29 @@ public class FileBasedPeerRepository : IPeerRepository, ITrustedPeerStore
         _peersFilePath = Path.Combine(storagePath, "peers.json");
         _trustedHashesFilePath = Path.Combine(storagePath, "trusted_hashes.json");
         _jsonContext = new PercolatorJsonContext(new JsonSerializerOptions { WriteIndented = true });
+        _semaphore = new SemaphoreSlim(1);
 
         _peers = LoadPeersFromFile();
         _trustedHashes = LoadTrustedHashesFromFile();
     }
 
-    public Task<Peer?> GetByIdAsync(PeerId id) => Task.FromResult(_peers.GetValueOrDefault(id));
+    public Task<Peer?> GetByIdAsync(PeerId id)
+    {
+        return Task.FromResult(_peers.TryGetValue(id, out var peer) ? peer : null);
+    }
 
-    public Task<Peer?> GetByThumbprintAsync(string thumbprint) => Task.FromResult(_peers.Values.FirstOrDefault(p => p.Thumbprint == thumbprint));
+    public Task<Peer?> GetByThumbprintAsync(string thumbprint)
+    {
+        var peer = _peers.Values.FirstOrDefault(p => p.Thumbprint == thumbprint);
+        return Task.FromResult(peer);
+    }
 
     public async Task AddAsync(Peer peer)
     {
+        await _semaphore.WaitAsync();
         _peers[peer.Id] = peer;
         await SavePeersToDiskAsync();
+        _semaphore.Release();
     }
 
     public async Task RemoveAsync(PeerId id)

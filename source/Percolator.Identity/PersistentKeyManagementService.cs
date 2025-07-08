@@ -56,10 +56,10 @@ public class PersistentKeyManagementService : IKeyManagementService
             else
             {
                 _logger.LogInformation("No key file found for {IdentityName}. Creating new keys.", identityName);
-                var ikSigning = ECDsa.Create(ECCurve.NamedCurves.nistP256);
-                var ikAgreement = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-                var spk = await CreatePreKeyAsync();
-                var oneTimePreKeys = await Task.WhenAll(Enumerable.Range(0, 100).Select(_ => CreatePreKeyAsync()));
+                using var ikSigning = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+                using var ikAgreement = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+                using var spk = await CreatePreKeyAsync();
+                using var oneTimePreKeys = new DisposableCollection<ECDiffieHellman>(await Task.WhenAll(Enumerable.Range(0, 100).Select(_ => CreatePreKeyAsync())));
 
                 var container = new KeyContainer(
                     ikSigning.ExportParameters(true),
@@ -73,7 +73,14 @@ public class PersistentKeyManagementService : IKeyManagementService
                 await File.WriteAllBytesAsync(keyFilePath, encryptedBytes);
                 SetFileSecurity(keyFilePath);
                 _logger.LogInformation("New keys created and saved for {IdentityName}", identityName);
-                return new X3dhKeys(ikSigning, ikAgreement, spk, oneTimePreKeys);
+
+                // Return a new set of keys from the persisted parameters to avoid returning disposed objects.
+                return new X3dhKeys(
+                    ECDsa.Create(container.IdentitySigningKey),
+                    ECDiffieHellman.Create(container.IdentityAgreementKey),
+                    ECDiffieHellman.Create(container.SignedPreKey),
+                    container.OneTimePreKeys.Select(ECDiffieHellman.Create).ToArray()
+                );
             }
         }
         finally

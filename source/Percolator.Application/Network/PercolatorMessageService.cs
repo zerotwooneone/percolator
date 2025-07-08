@@ -13,6 +13,8 @@ using SessionPeerId = Percolator.Sessions.PeerId;
 using SessionConversationId = Percolator.Sessions.ConversationId;
 using Percolator.Application.Identity;
 using OpaquePublicKey = Percolator.Sessions.OpaquePublicKey;
+using System.Security.Cryptography;
+using Percolator.Identity;
 
 namespace Percolator.Application.Network
 {
@@ -23,14 +25,16 @@ namespace Percolator.Application.Network
         private readonly X3DHOrchestrator _x3dhOrchestrator;
         private readonly DirectSessionManager _sessionManager;
         private readonly IConversationRepository _conversationRepository;
+        private readonly IPeerRepository _peerRepository;
 
-        public PercolatorMessageService(ILogger<PercolatorMessageService> logger, ActiveIdentityContext activeIdentityContext, X3DHOrchestrator x3dhOrchestrator, DirectSessionManager sessionManager, IConversationRepository conversationRepository)
+        public PercolatorMessageService(ILogger<PercolatorMessageService> logger, ActiveIdentityContext activeIdentityContext, X3DHOrchestrator x3dhOrchestrator, DirectSessionManager sessionManager, IConversationRepository conversationRepository, IPeerRepository peerRepository)
         {
             _logger = logger;
             _activeIdentityContext = activeIdentityContext;
             _x3dhOrchestrator = x3dhOrchestrator;
             _sessionManager = sessionManager;
             _conversationRepository = conversationRepository;
+            _peerRepository = peerRepository;
         }
 
         public override async Task<EstablishSessionResponse> EstablishSession(EstablishSessionRequest request, ServerCallContext context)
@@ -46,7 +50,45 @@ namespace Percolator.Application.Network
 
                 var handshakeResult = _x3dhOrchestrator.ProcessHandshake(request.InitiatorBundle, request.InitiatorEphemeralKey.ToByteArray());
 
-                var initiatorPeerId = new SessionPeerId(new Guid(request.InitiatorPeerId));
+                Peer? peer = null;
+                string? thumbprintToStore = null;
+
+                // 1. Try to look up by the optional long-term identity key first.
+                if (request.HasLongTermIdentityKey)
+                {
+                    var longTermKeyBytes = request.LongTermIdentityKey.ToByteArray();
+                    thumbprintToStore = Convert.ToHexString(SHA1.HashData(longTermKeyBytes));
+                    _logger.LogInformation("Attempting to find peer by long-term key thumbprint: {Thumbprint}", thumbprintToStore);
+                    peer = await _peerRepository.GetByThumbprintAsync(thumbprintToStore);
+                }
+
+                // 2. If not found, try to look up by the bundle's identity key.
+                if (peer is null)
+                {
+                    var bundleKeyBytes = request.InitiatorBundle.IdentityAgreementKey.ToByteArray();
+                    var bundleThumbprint = Convert.ToHexString(SHA1.HashData(bundleKeyBytes));
+                    if (thumbprintToStore is null)
+                    {
+                        thumbprintToStore = bundleThumbprint;
+                    }
+                    _logger.LogInformation("Attempting to find peer by bundle key thumbprint: {Thumbprint}", bundleThumbprint);
+                    peer = await _peerRepository.GetByThumbprintAsync(bundleThumbprint);
+                }
+
+                // 3. If still not found, create a new peer.
+                if (peer is null)
+                {
+                    _logger.LogInformation("First contact with peer with thumbprint {Thumbprint}. Creating new identity.", thumbprintToStore);
+                    peer = new Peer(
+                        new PeerId(Guid.NewGuid()),
+                        context.Peer,
+                        new Endpoint(0), // Port is unknown from this context, set to 0
+                        thumbprintToStore! // It will be non-null here
+                    );
+                    await _peerRepository.AddAsync(peer);
+                }
+
+                var initiatorPeerId = new SessionPeerId(peer.Id.Value);
                 var localPeerId = new SessionPeerId(_activeIdentityContext.Identity.Id);
 
                 var conversation = new ChatConversation(
@@ -70,8 +112,7 @@ namespace Percolator.Application.Network
                 return new EstablishSessionResponse
                 {
                     SessionId = conversation.Id.Value.ToString(),
-                    ResponderBundle = handshakeResult.ResponderBundle,
-                    ResponderPeerId = _activeIdentityContext.Identity.Id.ToString()
+                    ResponderBundle = handshakeResult.ResponderBundle
                 };
             }
             catch (Exception ex)
