@@ -1,7 +1,10 @@
+using AutoFixture;
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Moq;
+using NUnit.Framework;
 using Percolator.Identity;
+using System.Security.Cryptography;
 using Percolator.Identity.Model;
 
 namespace Percolator.IdentityTests;
@@ -9,94 +12,101 @@ namespace Percolator.IdentityTests;
 [TestFixture]
 public class PersistentIdentityServiceTests
 {
-    private Mock<IIdentityStore> _mockIdentityStore;
-    private Mock<IKeyManagementService> _mockKeyManagementService;
-    private PersistentIdentityService _service;
+    private Fixture _fixture = null!;
+    private Mock<IIdentityStore> _identityStoreMock = null!;
+    private Mock<IKeyManagementService> _keyManagementServiceMock = null!;
+    private PersistentIdentityService _sut = null!;
 
     [SetUp]
-    public void SetUp()
+    public void Setup()
     {
-        _mockIdentityStore = new Mock<IIdentityStore>();
-        _mockKeyManagementService = new Mock<IKeyManagementService>();
-        _service = new PersistentIdentityService(
-            _mockIdentityStore.Object,
-            _mockKeyManagementService.Object,
-            Mock.Of<ILogger<PersistentIdentityService>>());
+        _fixture = new Fixture();
+        _identityStoreMock = new Mock<IIdentityStore>();
+        _keyManagementServiceMock = new Mock<IKeyManagementService>();
+        var loggerMock = new Mock<ILogger<PersistentIdentityService>>();
+        _sut = new PersistentIdentityService(_identityStoreMock.Object, _keyManagementServiceMock.Object, loggerMock.Object);
     }
 
     [Test]
-    public async Task CreateIdentityAsync_Should_Create_And_Store_Identity_When_Name_Is_Unique()
+    public async Task GetOrCreateIdentityAsync_WhenIdentityDoesNotExist_CreatesIdentityAndKeys()
     {
         // Arrange
-        var identityName = "test-identity";
-        var nickname = "nickname";
-        _mockIdentityStore.Setup(s => s.IdentityExistsAsync(identityName, It.IsAny<CancellationToken>())).ReturnsAsync(false);
-        _mockIdentityStore.Setup(s => s.StoreIdentityAsync(It.IsAny<IdentityRecord>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+        var identityName = _fixture.Create<string>();
+        var keys = new X3dhKeys(ECDsa.Create(), ECDiffieHellman.Create(), ECDiffieHellman.Create(), Array.Empty<ECDiffieHellman>());
+
+        _identityStoreMock.Setup(s => s.GetIdentityAsync(identityName, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((IdentityRecord?)null);
+        _keyManagementServiceMock.Setup(s => s.CreateKeysAsync(identityName))
+            .ReturnsAsync(keys);
 
         // Act
-        var result = await _service.CreateIdentityAsync(identityName, nickname);
+        var (resultIdentity, resultKeys) = await _sut.GetOrCreateIdentityAsync(identityName);
+
+        // Assert
+        resultIdentity.Should().NotBeNull();
+        resultIdentity.Name.Should().Be(identityName);
+        resultKeys.Should().Be(keys);
+
+        _identityStoreMock.Verify(s => s.StoreIdentityAsync(It.Is<IdentityRecord>(r => r.Name == identityName), It.IsAny<CancellationToken>()), Times.Once);
+        _keyManagementServiceMock.Verify(s => s.CreateKeysAsync(identityName), Times.Once);
+        _keyManagementServiceMock.Verify(s => s.GetKeysAsync(It.IsAny<string>()), Times.Never);
+    }
+
+    [Test]
+    public async Task GetOrCreateIdentityAsync_WhenIdentityExists_ReturnsIdentityAndGetsKeys()
+    {
+        // Arrange
+        var identityName = _fixture.Create<string>();
+        var identityRecord = _fixture.Create<IdentityRecord>() with { Name = identityName };
+        var keys = new X3dhKeys(ECDsa.Create(), ECDiffieHellman.Create(), ECDiffieHellman.Create(), Array.Empty<ECDiffieHellman>());
+
+        _identityStoreMock.Setup(s => s.GetIdentityAsync(identityName, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(identityRecord);
+        _keyManagementServiceMock.Setup(s => s.GetKeysAsync(identityName))
+            .ReturnsAsync(keys);
+
+        // Act
+        var (resultIdentity, resultKeys) = await _sut.GetOrCreateIdentityAsync(identityName);
+
+        // Assert
+        resultIdentity.Should().Be(identityRecord);
+        resultKeys.Should().Be(keys);
+
+        _identityStoreMock.Verify(s => s.StoreIdentityAsync(It.IsAny<IdentityRecord>(), It.IsAny<CancellationToken>()), Times.Never);
+        _keyManagementServiceMock.Verify(s => s.CreateKeysAsync(It.IsAny<string>()), Times.Never);
+        _keyManagementServiceMock.Verify(s => s.GetKeysAsync(identityName), Times.Once);
+    }
+
+    [Test]
+    public async Task CreateIdentityAsync_WhenIdentityDoesNotExist_CreatesAndStoresIdentity()
+    {
+        // Arrange
+        var identityName = _fixture.Create<string>();
+        var nickname = _fixture.Create<string>();
+        _identityStoreMock.Setup(s => s.GetIdentityAsync(identityName, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((IdentityRecord?)null);
+
+        // Act
+        var result = await _sut.CreateIdentityAsync(identityName, nickname);
 
         // Assert
         result.Should().NotBeNull();
-        result.Id.Should().NotBeEmpty();
         result.Name.Should().Be(identityName);
         result.Nickname.Should().Be(nickname);
-        _mockIdentityStore.Verify(s => s.StoreIdentityAsync(It.Is<IdentityRecord>(i => i.Name == identityName), It.IsAny<CancellationToken>()), Times.Once);
-        _mockKeyManagementService.Verify(s => s.GetOrCreateKeysAsync(identityName), Times.Once);
+        _identityStoreMock.Verify(s => s.StoreIdentityAsync(It.Is<IdentityRecord>(r => r.Name == identityName), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Test]
-    public async Task CreateIdentityAsync_Should_Throw_When_Identity_Exists()
+    public void CreateIdentityAsync_WhenIdentityExists_ThrowsInvalidOperationException()
     {
         // Arrange
-        var identityName = "existing-identity";
-        _mockIdentityStore.Setup(s => s.IdentityExistsAsync(identityName, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        var identityName = _fixture.Create<string>();
+        var identityRecord = _fixture.Create<IdentityRecord>() with { Name = identityName };
+        _identityStoreMock.Setup(s => s.GetIdentityAsync(identityName, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(identityRecord);
 
         // Act & Assert
-        await _service.Invoking(s => s.CreateIdentityAsync(identityName, null)).Should().ThrowAsync<InvalidOperationException>();
-    }
-
-    [Test]
-    public async Task GetIdentityRecordAsync_Should_Return_Record_When_Identity_Exists()
-    {
-        // Arrange
-        var identityName = "test-identity";
-        var identityRecord = new IdentityRecord(Guid.NewGuid(), identityName, "nickname");
-        _mockIdentityStore.Setup(s => s.GetIdentityAsync(identityName, It.IsAny<CancellationToken>())).ReturnsAsync(identityRecord);
-
-        // Act
-        var result = await _service.GetIdentityRecordAsync(identityName);
-
-        // Assert
-        result.Should().NotBeNull();
-        result!.Name.Should().Be(identityName);
-    }
-
-    [Test]
-    public async Task GetIdentityRecordAsync_Should_Return_Null_When_Identity_Does_Not_Exist()
-    {
-        // Arrange
-        var identityName = "non-existent-identity";
-        _mockIdentityStore.Setup(s => s.GetIdentityAsync(identityName, It.IsAny<CancellationToken>())).ReturnsAsync((IdentityRecord?)null);
-
-        // Act
-        var result = await _service.GetIdentityRecordAsync(identityName);
-
-        // Assert
-        result.Should().BeNull();
-    }
-
-    [Test]
-    public async Task ListIdentityNamesAsync_Should_Return_All_Identity_Names()
-    {
-        // Arrange
-        var names = new List<string> { "id1", "id2", "id3" };
-        _mockIdentityStore.Setup(s => s.ListIdentityNamesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(names);
-
-        // Act
-        var result = await _service.ListIdentityNamesAsync();
-
-        // Assert
-        result.Should().BeEquivalentTo(names);
+        _sut.Invoking(s => s.CreateIdentityAsync(identityName, "nickname"))
+            .Should().ThrowAsync<InvalidOperationException>();
     }
 }

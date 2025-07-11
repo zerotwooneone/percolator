@@ -1,4 +1,3 @@
-using System.Security.Cryptography;
 using Microsoft.Extensions.Logging;
 using Percolator.Identity.Model;
 
@@ -23,30 +22,32 @@ public class PersistentIdentityService : IIdentityService
     public async Task<(IdentityRecord Identity, X3dhKeys Keys)> GetOrCreateIdentityAsync(string name, CancellationToken cancellationToken = default)
     {
         var identity = await _identityStore.GetIdentityAsync(name, cancellationToken);
+        X3dhKeys keys;
+
         if (identity is null)
         {
             identity = await CreateIdentityAsync(name, name, cancellationToken);
+            keys = await _keyManagementService.CreateKeysAsync(name);
         }
-
-        var keys = await _keyManagementService.GetOrCreateKeysAsync(name);
+        else
+        {
+            keys = await _keyManagementService.GetKeysAsync(name);
+        }
 
         return (identity, keys);
     }
 
-    public async Task<IdentityRecord> CreateIdentityAsync(string name, string? nickname, CancellationToken cancellationToken = default)
+    public async Task<IdentityRecord> CreateIdentityAsync(string name, string nickname, CancellationToken cancellationToken = default)
     {
-        if (await _identityStore.IdentityExistsAsync(name, cancellationToken))
+        var existing = await _identityStore.GetIdentityAsync(name, cancellationToken);
+        if (existing is not null)
         {
-            throw new InvalidOperationException($"An identity with the name '{name}' already exists.");
+            throw new InvalidOperationException($"Identity '{name}' already exists.");
         }
-
-        // Keys are managed separately, but we can ensure they are created here.
-        await _keyManagementService.GetOrCreateKeysAsync(name);
 
         var identity = new IdentityRecord(Guid.NewGuid(), name, nickname);
         await _identityStore.StoreIdentityAsync(identity, cancellationToken);
-        _logger.LogInformation("Created identity {IdentityName} with ID {IdentityId}", name, identity.Id);
-
+        _logger.LogInformation("Created new identity {IdentityName}", name);
         return identity;
     }
 

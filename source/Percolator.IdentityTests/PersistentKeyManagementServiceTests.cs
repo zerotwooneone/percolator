@@ -1,9 +1,11 @@
-using System.Security.Cryptography;
-using System.Text.Json;
 using AutoFixture;
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Moq;
+using NUnit.Framework;
+using Percolator.Identity;
+using System.Security.Cryptography;
+using System.Text.Json;
 using Percolator.Identity;
 
 namespace Percolator.IdentityTests;
@@ -11,15 +13,10 @@ namespace Percolator.IdentityTests;
 [TestFixture]
 public class PersistentKeyManagementServiceTests
 {
-    private Fixture _fixture;
-    private Mock<ICredentialService> _credentialServiceMock;
-    private Mock<ILogger<PersistentKeyManagementService>> _loggerMock;
-    private PersistentKeyManagementService _sut;
-    private static readonly JsonSerializerOptions s_jsonOptions = new()
-    {
-        WriteIndented = true,
-        Converters = { new ECParametersJsonConverter() }
-    };
+    private Fixture _fixture = null!;
+    private Mock<ICredentialService> _credentialServiceMock = null!;
+    private Mock<ILogger<PersistentKeyManagementService>> _loggerMock = null!;
+    private PersistentKeyManagementService _sut = null!;
 
     [SetUp]
     public void Setup()
@@ -30,122 +27,127 @@ public class PersistentKeyManagementServiceTests
         _sut = new PersistentKeyManagementService(_credentialServiceMock.Object, _loggerMock.Object);
     }
 
-    private void CleanupKeys(string identityName)
+    [Test]
+    public async Task GetKeysAsync_WhenKeysExist_LoadsExistingKeys()
     {
-        var basePath = IdentityPathHelper.GetBasePath(identityName);
-        if (Directory.Exists(basePath))
-        {
-            Directory.Delete(basePath, true);
-        }
-    }
-
-    private async Task<X3dhKeys> CreateAndSaveKeys(string identityName)
-    {
-        var keyFilePath = Path.Combine(IdentityPathHelper.GetBasePath(identityName), "keys", $"{identityName}.json");
+        var identityName = _fixture.Create<string>();
+        CleanupKeys(identityName);
+        var keyFilePath = GetKeyFilePath(identityName);
         Directory.CreateDirectory(Path.GetDirectoryName(keyFilePath)!);
 
-        var iks = ECDsa.Create(ECCurve.NamedCurves.nistP256);
-        var ika = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        var spk = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        var otps = Enumerable.Range(0, 10).Select(_ => ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256)).ToArray();
-
-        var container = new
+        byte[] decryptedBytes;
+        string originalKeyJson;
+        using (var originalIks = ECDsa.Create(ECCurve.NamedCurves.nistP256))
+        using (var originalIka = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256))
+        using (var originalSpk = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256))
+        using (var originalOtps = new DisposableArray<ECDiffieHellman>(Enumerable.Range(0, 10).Select(_ => ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256)).ToArray()))
         {
-            IdentitySigningKey = iks.ExportParameters(false),
-            IdentityAgreementKey = ika.ExportParameters(false),
-            SignedPreKey = spk.ExportParameters(false),
-            OneTimePreKeys = otps.Select(k => k.ExportParameters(false)).ToArray()
-        };
+            var originalContainer = new PersistentKeyManagementService.KeyContainer(
+                originalIks.ExportParameters(true),
+                originalIka.ExportParameters(true),
+                originalSpk.ExportParameters(true),
+                originalOtps.Select(k => k.ExportParameters(true)).ToArray()
+            );
+            decryptedBytes = JsonSerializer.SerializeToUtf8Bytes(originalContainer, new JsonSerializerOptions { Converters = { new ECParametersJsonConverter() } });
+            originalKeyJson = JsonSerializer.Serialize(originalContainer, new JsonSerializerOptions { Converters = { new ECParametersJsonConverter() } });
+        }
 
-        var decryptedBytes = JsonSerializer.SerializeToUtf8Bytes(container, s_jsonOptions);
         var encryptedBytes = _fixture.Create<byte[]>();
         _credentialServiceMock.Setup(s => s.Unprotect(encryptedBytes)).Returns(decryptedBytes);
-
         await File.WriteAllBytesAsync(keyFilePath, encryptedBytes);
 
-        return new X3dhKeys(iks, ika, spk, otps);
-    }
-
-    [Test]
-    public async Task GetOrCreateKeysAsync_WhenKeysDoNotExist_CreatesAndSavesNewKeys()
-    {
-        // Arrange
-        var identityName = _fixture.Create<string>();
-        CleanupKeys(identityName);
-        _credentialServiceMock.Setup(s => s.Protect(It.IsAny<byte[]>())).Returns((byte[] b) => b); // Pass-through for test
-
         // Act
-        using var keys = await _sut.GetOrCreateKeysAsync(identityName);
-
-        // Assert
-        keys.Should().NotBeNull();
-
-        keys.IdentitySigningKey.ExportParameters(false).Q.X.Should().NotBeNull();
-        keys.IdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo().Should().NotBeNull();
-        keys.SignedPreKey.PublicKey.ExportSubjectPublicKeyInfo().Should().NotBeNull();
-        keys.OneTimePreKeys.Should().HaveCount(10);
-
-        _credentialServiceMock.Verify(s => s.Protect(It.IsAny<byte[]>()), Times.Once);
-        CleanupKeys(identityName);
-    }
-
-    [Test]
-    public async Task GetOrCreateKeysAsync_WhenKeysExist_LoadsExistingKeys()
-    {
-        // Arrange
-        var identityName = _fixture.Create<string>();
-        CleanupKeys(identityName);
-        using var originalKeys = await CreateAndSaveKeys(identityName);
-        var iksPublicX = originalKeys.IdentitySigningKey.ExportParameters(false).Q.X;
-        var ikaPublic = originalKeys.IdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo();
-        var spkPublic = originalKeys.SignedPreKey.PublicKey.ExportSubjectPublicKeyInfo();
-
-        // Act
-        using var loadedKeys = await _sut.GetOrCreateKeysAsync(identityName);
+        var loadedKeys = await _sut.GetKeysAsync(identityName);
 
         // Assert
         loadedKeys.Should().NotBeNull();
+        var loadedContainer = new PersistentKeyManagementService.KeyContainer(
+            loadedKeys.IdentitySigningKey.ExportParameters(true),
+            loadedKeys.IdentityAgreementKey.ExportParameters(true),
+            loadedKeys.SignedPreKey.ExportParameters(true),
+            loadedKeys.OneTimePreKeys.Select(k => k.ExportParameters(true)).ToArray()
+        );
+        var loadedKeyJson = JsonSerializer.Serialize(loadedContainer, new JsonSerializerOptions { Converters = { new ECParametersJsonConverter() } });
 
-        loadedKeys.IdentitySigningKey.ExportParameters(false).Q.X.Should().BeEquivalentTo(iksPublicX);
-        loadedKeys.IdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo().Should().BeEquivalentTo(ikaPublic);
-        loadedKeys.SignedPreKey.PublicKey.ExportSubjectPublicKeyInfo().Should().BeEquivalentTo(spkPublic);
+        loadedKeyJson.Should().Be(originalKeyJson);
 
         CleanupKeys(identityName);
     }
 
     [Test]
-    public async Task GetOrCreateKeysAsync_WhenKeyFileIsCorrupt_RecoversByCreatingNewKeys()
+    public void GetKeysAsync_WhenKeysDoNotExist_ThrowsFileNotFoundException()
     {
         // Arrange
         var identityName = _fixture.Create<string>();
+        var keyFilePath = GetKeyFilePath(identityName);
         CleanupKeys(identityName);
-        var keyFilePath = Path.Combine(IdentityPathHelper.GetBasePath(identityName), "keys", $"{identityName}.json");
         Directory.CreateDirectory(Path.GetDirectoryName(keyFilePath)!);
 
-        var corruptBytes = "this is not valid json"u8.ToArray();
-        await File.WriteAllBytesAsync(keyFilePath, corruptBytes);
+        // Act & Assert
+        Assert.ThrowsAsync<FileNotFoundException>(() => _sut.GetKeysAsync(identityName));
+    }
 
-        _credentialServiceMock.Setup(s => s.Unprotect(corruptBytes)).Returns(corruptBytes);
-        _credentialServiceMock.Setup(s => s.Protect(It.IsAny<byte[]>())).Returns((byte[] b) => b); // For new key creation
+    [Test]
+    public async Task GetKeysAsync_WhenKeyFileIsCorrupt_ThrowsJsonException()
+    {
+        // Arrange
+        var identityName = _fixture.Create<string>();
+        var keyFilePath = GetKeyFilePath(identityName);
+        CleanupKeys(identityName);
+        Directory.CreateDirectory(Path.GetDirectoryName(keyFilePath)!);
+        File.WriteAllText(keyFilePath, "corrupt data");
+
+        // Act & Assert
+        Assert.ThrowsAsync<JsonException>(() => _sut.GetKeysAsync(identityName));
+    }
+
+    [Test]
+    public async Task CreateKeysAsync_WhenCalled_CreatesAndSavesNewKeys()
+    {
+        var identityName = _fixture.Create<string>();
+        CleanupKeys(identityName);
+
+        var protectedBytes = _fixture.Create<byte[]>();
+        _credentialServiceMock.Setup(s => s.Protect(It.IsAny<byte[]>())).Returns(protectedBytes);
 
         // Act
-        using var keys = await _sut.GetOrCreateKeysAsync(identityName);
+        var keys = await _sut.CreateKeysAsync(identityName);
 
         // Assert
         keys.Should().NotBeNull();
-
-        // Verify the error was logged
-        _loggerMock.Verify(
-            x => x.Log(
-                LogLevel.Error,
-                It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("Failed to load or decrypt existing keys")),
-                It.IsAny<JsonException>(),
-                It.IsAny<Func<It.IsAnyType, Exception?, string>>()!
-            ), Times.Once);
-
-        // Verify that new keys were indeed saved
         _credentialServiceMock.Verify(s => s.Protect(It.IsAny<byte[]>()), Times.Once);
+
+        var keyFilePath = GetKeyFilePath(identityName);
+        File.Exists(keyFilePath).Should().BeTrue();
+        var writtenBytes = await File.ReadAllBytesAsync(keyFilePath);
+        writtenBytes.Should().BeEquivalentTo(protectedBytes);
+
         CleanupKeys(identityName);
+    }
+
+    private void CleanupKeys(string identityName)
+    {
+        var path = GetKeyFilePath(identityName);
+        var dir = Path.GetDirectoryName(path);
+        if (Directory.Exists(dir))
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    private string GetKeyFilePath(string identityName)
+    {
+        return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Percolator", identityName, "keys.json");
+    }
+
+    private class DisposableArray<T> : IDisposable, IEnumerable<T> where T : IDisposable
+    {
+        private readonly T[] _array;
+        public DisposableArray(T[] array) => _array = array;
+        public void Dispose() { foreach (var item in _array) item.Dispose(); }
+
+        public IEnumerator<T> GetEnumerator() => ((IEnumerable<T>)_array).GetEnumerator();
+
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => _array.GetEnumerator();
     }
 }

@@ -9,9 +9,16 @@ namespace Percolator.Identity;
 public interface IKeyManagementService
 {
     /// <summary>
-    /// Retrieves the cryptographic keys for a given identity, creating them if they do not exist.
+    /// Retrieves the cryptographic keys for a given identity.
     /// </summary>
     /// <param name="identityName">The name of the identity.</param>
     /// <returns>The cryptographic keys for the specified identity.</returns>
-    Task<X3dhKeys> GetOrCreateKeysAsync(string identityName);
+    Task<X3dhKeys> GetKeysAsync(string identityName);
+
+    /// <summary>
+    /// Creates the cryptographic keys for a given identity.
+    /// </summary>
+    /// <param name="identityName">The name of the identity.</param>
+    /// <returns>The newly created cryptographic keys for the specified identity.</returns>
+    Task<X3dhKeys> CreateKeysAsync(string identityName);
 }
