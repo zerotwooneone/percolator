@@ -28,14 +28,12 @@ namespace Percolator.CryptographyTests
 
             _aliceSession = DoubleRatchetSession.AsInitiator(
                 sharedSecret,
-                _aliceIdentity,
                 new RatchetIdentityKey(_bobIdentity.PublicKey.ExportSubjectPublicKeyInfo()),
                 new RatchetEphemeralKey(_bobRatchetKey.PublicKey.ExportSubjectPublicKeyInfo())
             );
 
             _bobSession = DoubleRatchetSession.AsResponder(
                 sharedSecret,
-                _bobIdentity,
                 new RatchetIdentityKey(_aliceIdentity.PublicKey.ExportSubjectPublicKeyInfo()),
                 _bobRatchetKey
             );

@@ -17,7 +17,7 @@ public class DoubleRatchetSession : IDisposable
     private readonly Dictionary<ulong, MessageKey> _skippedMessageKeys = new();
     private readonly RatchetIdentityKey _remoteIdentityPublicKey;
 
-    private DoubleRatchetSession(SharedSecret sharedSecret, ECDiffieHellman identityKey, RatchetIdentityKey remoteIdentityPublicKey)
+    private DoubleRatchetSession(SharedSecret sharedSecret, RatchetIdentityKey remoteIdentityPublicKey)
     {
         _remoteIdentityPublicKey = remoteIdentityPublicKey;
         _rootKey = new RootKey(sharedSecret.Value);
@@ -40,16 +40,16 @@ public class DoubleRatchetSession : IDisposable
         _remoteIdentityPublicKey = state.TheirIdentityPublicKey;
     }
 
-    public static DoubleRatchetSession AsInitiator(SharedSecret sharedSecret, ECDiffieHellman identityKey, RatchetIdentityKey remoteIdentityPublicKey, RatchetEphemeralKey remoteRatchetPublicKey)
+    public static DoubleRatchetSession AsInitiator(SharedSecret sharedSecret, RatchetIdentityKey remoteIdentityPublicKey, RatchetEphemeralKey remoteRatchetPublicKey)
     {
-        var session = new DoubleRatchetSession(sharedSecret, identityKey, remoteIdentityPublicKey);
+        var session = new DoubleRatchetSession(sharedSecret, remoteIdentityPublicKey);
         session._remoteRatchetKey = remoteRatchetPublicKey;
         return session;
     }
 
-    public static DoubleRatchetSession AsResponder(SharedSecret sharedSecret, ECDiffieHellman identityKey, RatchetIdentityKey remoteIdentityPublicKey, ECDiffieHellman localRatchetKey)
+    public static DoubleRatchetSession AsResponder(SharedSecret sharedSecret, RatchetIdentityKey remoteIdentityPublicKey, ECDiffieHellman localRatchetKey)
     {
-        var session = new DoubleRatchetSession(sharedSecret, identityKey, remoteIdentityPublicKey);
+        var session = new DoubleRatchetSession(sharedSecret, remoteIdentityPublicKey);
         session._dhRatchetKey = localRatchetKey;
         return session;
     }

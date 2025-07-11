@@ -49,19 +49,19 @@ namespace Percolator.CryptographyTests
             
             // Establish 1-on-1 sessions for invitations
             var sharedSecretAlice = new SharedSecret(_creatorIdentity.DeriveKeyMaterial(_aliceIdentity.PublicKey));
-            var sessionToAlice = DoubleRatchetSession.AsInitiator(sharedSecretAlice, _creatorIdentity, new RatchetIdentityKey(_aliceIdentity.PublicKey.ExportSubjectPublicKeyInfo()), new RatchetEphemeralKey(_aliceRatchet.PublicKey.ExportSubjectPublicKeyInfo()));
+            var sessionToAlice = DoubleRatchetSession.AsInitiator(sharedSecretAlice, new RatchetIdentityKey(_aliceIdentity.PublicKey.ExportSubjectPublicKeyInfo()), new RatchetEphemeralKey(_aliceRatchet.PublicKey.ExportSubjectPublicKeyInfo()));
             var sharedSecretBob = new SharedSecret(_creatorIdentity.DeriveKeyMaterial(_bobIdentity.PublicKey));
-            var sessionToBob = DoubleRatchetSession.AsInitiator(sharedSecretBob, _creatorIdentity, new RatchetIdentityKey(_bobIdentity.PublicKey.ExportSubjectPublicKeyInfo()), new RatchetEphemeralKey(_bobRatchet.PublicKey.ExportSubjectPublicKeyInfo()));
+            var sessionToBob = DoubleRatchetSession.AsInitiator(sharedSecretBob, new RatchetIdentityKey(_bobIdentity.PublicKey.ExportSubjectPublicKeyInfo()), new RatchetEphemeralKey(_bobRatchet.PublicKey.ExportSubjectPublicKeyInfo()));
 
             // 2. Invitations
             var invitationToAlice = creatorManager.CreateInvitation("alice", sessionToAlice);
             var invitationToBob = creatorManager.CreateInvitation("bob", sessionToBob);
 
             // 3. Members accept invitations
-            var sessionFromAlice = DoubleRatchetSession.AsResponder(sharedSecretAlice, _aliceIdentity, new RatchetIdentityKey(_creatorIdentity.PublicKey.ExportSubjectPublicKeyInfo()), _aliceRatchet);
+            var sessionFromAlice = DoubleRatchetSession.AsResponder(sharedSecretAlice, new RatchetIdentityKey(_creatorIdentity.PublicKey.ExportSubjectPublicKeyInfo()), _aliceRatchet);
             var aliceGroupManager = GroupManager.AcceptInvitation(sessionFromAlice, invitationToAlice, creatorManager.SigningPublicKey!, _aliceIdentity);
             
-            var sessionFromBob = DoubleRatchetSession.AsResponder(sharedSecretBob, _bobIdentity, new RatchetIdentityKey(_creatorIdentity.PublicKey.ExportSubjectPublicKeyInfo()), _bobRatchet);
+            var sessionFromBob = DoubleRatchetSession.AsResponder(sharedSecretBob, new RatchetIdentityKey(_creatorIdentity.PublicKey.ExportSubjectPublicKeyInfo()), _bobRatchet);
             var bobGroupManager = GroupManager.AcceptInvitation(sessionFromBob, invitationToBob, creatorManager.SigningPublicKey!, _bobIdentity);
             
             aliceGroupManager.GroupId.Should().Be(creatorManager.GroupId);
@@ -108,7 +108,7 @@ namespace Percolator.CryptographyTests
             // Arrange
             var creatorManager = new GroupManager(_creatorIdentity);
             var sharedSecret = new SharedSecret(_creatorIdentity.DeriveKeyMaterial(_aliceIdentity.PublicKey));
-            var sessionToAlice = DoubleRatchetSession.AsInitiator(sharedSecret, _creatorIdentity, new RatchetIdentityKey(_aliceIdentity.PublicKey.ExportSubjectPublicKeyInfo()), new RatchetEphemeralKey(_aliceRatchet.PublicKey.ExportSubjectPublicKeyInfo()));
+            var sessionToAlice = DoubleRatchetSession.AsInitiator(sharedSecret, new RatchetIdentityKey(_aliceIdentity.PublicKey.ExportSubjectPublicKeyInfo()), new RatchetEphemeralKey(_aliceRatchet.PublicKey.ExportSubjectPublicKeyInfo()));
 
             // 1. Create the unsigned part of the message
             var unsignedMessage = new UnsignedGroupControlMessage
@@ -130,7 +130,7 @@ namespace Percolator.CryptographyTests
             var tamperedInvitation = sessionToAlice.Encrypt(new Plaintext(tamperedPayload));
 
             // Act & Assert
-            var sessionFromAlice = DoubleRatchetSession.AsResponder(sharedSecret, _aliceIdentity, new RatchetIdentityKey(_creatorIdentity.PublicKey.ExportSubjectPublicKeyInfo()), _aliceRatchet);
+            var sessionFromAlice = DoubleRatchetSession.AsResponder(sharedSecret, new RatchetIdentityKey(_creatorIdentity.PublicKey.ExportSubjectPublicKeyInfo()), _aliceRatchet);
             Action act = () => GroupManager.AcceptInvitation(sessionFromAlice, tamperedInvitation, creatorManager.SigningPublicKey!, _aliceIdentity);
 
             act.Should().Throw<CryptographicException>().WithMessage("Invalid signature on invitation.");
@@ -144,14 +144,14 @@ namespace Percolator.CryptographyTests
             // Arrange: Create a group and have Alice join
             var creatorManager = new GroupManager(_creatorIdentity);
             var sharedSecret = new SharedSecret(_creatorIdentity.DeriveKeyMaterial(_aliceIdentity.PublicKey));
-            var sessionToAlice = DoubleRatchetSession.AsInitiator(sharedSecret, _creatorIdentity, new RatchetIdentityKey(_aliceIdentity.PublicKey.ExportSubjectPublicKeyInfo()), new RatchetEphemeralKey(_aliceRatchet.PublicKey.ExportSubjectPublicKeyInfo()));
+            var sessionToAlice = DoubleRatchetSession.AsInitiator(sharedSecret, new RatchetIdentityKey(_aliceIdentity.PublicKey.ExportSubjectPublicKeyInfo()), new RatchetEphemeralKey(_aliceRatchet.PublicKey.ExportSubjectPublicKeyInfo()));
             var invitation = creatorManager.CreateInvitation("alice", sessionToAlice);
-            var sessionFromAlice = DoubleRatchetSession.AsResponder(sharedSecret, _aliceIdentity, new RatchetIdentityKey(_creatorIdentity.PublicKey.ExportSubjectPublicKeyInfo()), _aliceRatchet);
+            var sessionFromAlice = DoubleRatchetSession.AsResponder(sharedSecret, new RatchetIdentityKey(_creatorIdentity.PublicKey.ExportSubjectPublicKeyInfo()), _aliceRatchet);
             var aliceGroupManager = GroupManager.AcceptInvitation(sessionFromAlice, invitation, creatorManager.SigningPublicKey!, _aliceIdentity);
 
             // Act & Assert: Alice tries to invite Bob
             var sharedSecretBob = new SharedSecret(_aliceIdentity.DeriveKeyMaterial(_bobIdentity.PublicKey));
-            var sessionToBobForAlice = DoubleRatchetSession.AsInitiator(sharedSecretBob, _aliceIdentity, new RatchetIdentityKey(_bobIdentity.PublicKey.ExportSubjectPublicKeyInfo()), new RatchetEphemeralKey(_bobRatchet.PublicKey.ExportSubjectPublicKeyInfo()));
+            var sessionToBobForAlice = DoubleRatchetSession.AsInitiator(sharedSecretBob, new RatchetIdentityKey(_bobIdentity.PublicKey.ExportSubjectPublicKeyInfo()), new RatchetEphemeralKey(_bobRatchet.PublicKey.ExportSubjectPublicKeyInfo()));
             Action inviteAction = () => aliceGroupManager.CreateInvitation("bob", sessionToBobForAlice);
             inviteAction.Should().Throw<InvalidOperationException>().WithMessage("Only the group creator can send invitations.");
             
@@ -177,24 +177,24 @@ namespace Percolator.CryptographyTests
 
             // Bob joins Group A
             var sharedSecretA = new SharedSecret(_creatorIdentity.DeriveKeyMaterial(_bobIdentity.PublicKey));
-            var sessionToBobForA = DoubleRatchetSession.AsInitiator(sharedSecretA, _creatorIdentity, new RatchetIdentityKey(_bobIdentity.PublicKey.ExportSubjectPublicKeyInfo()), new RatchetEphemeralKey(_bobRatchet.PublicKey.ExportSubjectPublicKeyInfo()));
+            var sessionToBobForA = DoubleRatchetSession.AsInitiator(sharedSecretA, new RatchetIdentityKey(_bobIdentity.PublicKey.ExportSubjectPublicKeyInfo()), new RatchetEphemeralKey(_bobRatchet.PublicKey.ExportSubjectPublicKeyInfo()));
             var invitationA = groupAManager.CreateInvitation("bob", sessionToBobForA);
-            using var sessionFromBobForA = DoubleRatchetSession.AsResponder(sharedSecretA, _bobIdentity, new RatchetIdentityKey(_creatorIdentity.PublicKey.ExportSubjectPublicKeyInfo()), _bobRatchet);
+            using var sessionFromBobForA = DoubleRatchetSession.AsResponder(sharedSecretA, new RatchetIdentityKey(_creatorIdentity.PublicKey.ExportSubjectPublicKeyInfo()), _bobRatchet);
             var bobManagerForA = GroupManager.AcceptInvitation(sessionFromBobForA, invitationA, groupAManager.SigningPublicKey!, _bobIdentity);
 
             // Bob joins Group B
             using var bobRatchetB = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
             var sharedSecretB = new SharedSecret(_creatorIdentity.DeriveKeyMaterial(_bobIdentity.PublicKey));
-            var sessionToBobForB = DoubleRatchetSession.AsInitiator(sharedSecretB, _creatorIdentity, new RatchetIdentityKey(_bobIdentity.PublicKey.ExportSubjectPublicKeyInfo()), new RatchetEphemeralKey(bobRatchetB.PublicKey.ExportSubjectPublicKeyInfo()));
+            var sessionToBobForB = DoubleRatchetSession.AsInitiator(sharedSecretB, new RatchetIdentityKey(_bobIdentity.PublicKey.ExportSubjectPublicKeyInfo()), new RatchetEphemeralKey(bobRatchetB.PublicKey.ExportSubjectPublicKeyInfo()));
             var invitationB = groupBManager.CreateInvitation("bob", sessionToBobForB);
-            using var sessionFromBobForB = DoubleRatchetSession.AsResponder(sharedSecretB, _bobIdentity, new RatchetIdentityKey(_creatorIdentity.PublicKey.ExportSubjectPublicKeyInfo()), bobRatchetB);
+            using var sessionFromBobForB = DoubleRatchetSession.AsResponder(sharedSecretB, new RatchetIdentityKey(_creatorIdentity.PublicKey.ExportSubjectPublicKeyInfo()), bobRatchetB);
             var bobManagerForB = GroupManager.AcceptInvitation(sessionFromBobForB, invitationB, groupBManager.SigningPublicKey!, _bobIdentity);
 
             // Add a dummy member to Group A, so we can remove them to trigger a re-key.
             using var dummyIdentity = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
             using var dummyRatchet = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
             var sharedSecretDummy = new SharedSecret(_creatorIdentity.DeriveKeyMaterial(dummyIdentity.PublicKey));
-            var sessionToDummy = DoubleRatchetSession.AsInitiator(sharedSecretDummy, _creatorIdentity, new RatchetIdentityKey(dummyIdentity.PublicKey.ExportSubjectPublicKeyInfo()), new RatchetEphemeralKey(dummyRatchet.PublicKey.ExportSubjectPublicKeyInfo()));
+            var sessionToDummy = DoubleRatchetSession.AsInitiator(sharedSecretDummy, new RatchetIdentityKey(dummyIdentity.PublicKey.ExportSubjectPublicKeyInfo()), new RatchetEphemeralKey(dummyRatchet.PublicKey.ExportSubjectPublicKeyInfo()));
             groupAManager.CreateInvitation("dummy_member", sessionToDummy);
 
             // Act: Creator re-keys Group A by removing the dummy member.
@@ -221,7 +221,6 @@ namespace Percolator.CryptographyTests
             var creatorManager = new GroupManager(_creatorIdentity);
             var sessionToAlice = DoubleRatchetSession.AsInitiator(
                 new SharedSecret(_creatorIdentity.DeriveKeyMaterial(_aliceIdentity.PublicKey)),
-                _creatorIdentity,
                 new RatchetIdentityKey(_aliceIdentity.PublicKey.ExportSubjectPublicKeyInfo()),
                 new RatchetEphemeralKey(_aliceRatchet.PublicKey.ExportSubjectPublicKeyInfo()));
 
@@ -229,7 +228,6 @@ namespace Percolator.CryptographyTests
             var validInvitation = creatorManager.CreateInvitation("alice", sessionToAlice);
             var sessionFromAlice = DoubleRatchetSession.AsResponder(
                 new SharedSecret(_creatorIdentity.DeriveKeyMaterial(_aliceIdentity.PublicKey)),
-                _aliceIdentity,
                 new RatchetIdentityKey(_creatorIdentity.PublicKey.ExportSubjectPublicKeyInfo()),
                 _aliceRatchet);
             var validPayloadBytes = sessionFromAlice.Decrypt(validInvitation).Value;
