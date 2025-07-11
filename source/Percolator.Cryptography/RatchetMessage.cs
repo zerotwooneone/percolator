@@ -12,7 +12,7 @@ namespace Percolator.Cryptography
     public class RatchetHeader
     {
         [JsonInclude]
-        public PublicKey RatchetKey { get; set; } = new(Array.Empty<byte>());
+        public RatchetEphemeralKey RatchetKey { get; set; } = new(Array.Empty<byte>());
 
         [JsonInclude]
         public ulong Counter { get; set; }

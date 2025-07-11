@@ -13,17 +13,17 @@ public class DoubleRatchetSession : IDisposable
     private ulong _sendingCounter;
     private ulong _receivingCounter;
     private ECDiffieHellman? _dhRatchetKey;
-    private PublicKey? _remoteRatchetKey;
-    private Dictionary<ulong, MessageKey> _skippedMessageKeys = new();
-    private PublicKey _remoteIdentityPublicKey;
+    private RatchetEphemeralKey? _remoteRatchetKey;
+    private readonly Dictionary<ulong, MessageKey> _skippedMessageKeys = new();
+    private readonly RatchetIdentityKey _remoteIdentityPublicKey;
 
-    private DoubleRatchetSession(SharedSecret sharedSecret, ECDiffieHellman identityKey, PublicKey remoteIdentityPublicKey)
+    private DoubleRatchetSession(SharedSecret sharedSecret, ECDiffieHellman identityKey, RatchetIdentityKey remoteIdentityPublicKey)
     {
         _remoteIdentityPublicKey = remoteIdentityPublicKey;
         _rootKey = new RootKey(sharedSecret.Value);
     }
 
-    public DoubleRatchetSession(DoubleRatchetSessionState state, ECDiffieHellman identityKey)
+    public DoubleRatchetSession(DoubleRatchetSessionState state)
     {
         _rootKey = state.RootKey;
         _sendingChainKey = state.SendingChainKey;
@@ -37,17 +37,17 @@ public class DoubleRatchetSession : IDisposable
             _dhRatchetKey.ImportECPrivateKey(state.DhRatchetPrivateKey.Value, out _);
         }
         _skippedMessageKeys = state.SkippedMessageKeys;
-        _remoteIdentityPublicKey = state.TheirIdentityPublicKey ?? new PublicKey(Array.Empty<byte>());
+        _remoteIdentityPublicKey = state.TheirIdentityPublicKey;
     }
 
-    public static DoubleRatchetSession AsInitiator(SharedSecret sharedSecret, ECDiffieHellman identityKey, PublicKey remoteIdentityPublicKey, PublicKey remoteRatchetPublicKey)
+    public static DoubleRatchetSession AsInitiator(SharedSecret sharedSecret, ECDiffieHellman identityKey, RatchetIdentityKey remoteIdentityPublicKey, RatchetEphemeralKey remoteRatchetPublicKey)
     {
         var session = new DoubleRatchetSession(sharedSecret, identityKey, remoteIdentityPublicKey);
         session._remoteRatchetKey = remoteRatchetPublicKey;
         return session;
     }
 
-    public static DoubleRatchetSession AsResponder(SharedSecret sharedSecret, ECDiffieHellman identityKey, PublicKey remoteIdentityPublicKey, ECDiffieHellman localRatchetKey)
+    public static DoubleRatchetSession AsResponder(SharedSecret sharedSecret, ECDiffieHellman identityKey, RatchetIdentityKey remoteIdentityPublicKey, ECDiffieHellman localRatchetKey)
     {
         var session = new DoubleRatchetSession(sharedSecret, identityKey, remoteIdentityPublicKey);
         session._dhRatchetKey = localRatchetKey;
@@ -92,7 +92,7 @@ public class DoubleRatchetSession : IDisposable
 
         var header = new RatchetHeader
         {
-            RatchetKey = new PublicKey(_dhRatchetKey!.PublicKey.ExportSubjectPublicKeyInfo()),
+            RatchetKey = new RatchetEphemeralKey(_dhRatchetKey!.PublicKey.ExportSubjectPublicKeyInfo()),
             Counter = _sendingCounter
         };
 
@@ -179,7 +179,7 @@ public class DoubleRatchetSession : IDisposable
         }
     }
 
-    private void DoDhRatchet(PublicKey remoteRatchetKey)
+    private void DoDhRatchet(RatchetEphemeralKey remoteRatchetKey)
     {
         if (_dhRatchetKey is null)
         {
@@ -214,14 +214,14 @@ public class DoubleRatchetSession : IDisposable
 
     public class DoubleRatchetSessionState
     {
-        public RootKey RootKey { get; set; } = new(Array.Empty<byte>());
+        public RootKey RootKey { get; set; } = new([]);
         public ChainKey? SendingChainKey { get; set; }
         public ChainKey? ReceivingChainKey { get; set; }
         public ulong SendingCounter { get; set; }
         public ulong ReceivingCounter { get; set; }
         public Dictionary<ulong, MessageKey> SkippedMessageKeys { get; set; } = new();
-        public PublicKey? TheirIdentityPublicKey { get; set; }
-        public PublicKey? TheirDhRatchetPublicKey { get; set; }
+        public RatchetIdentityKey TheirIdentityPublicKey { get; set; } = new([]);
+        public RatchetEphemeralKey? TheirDhRatchetPublicKey { get; set; }
         public PrivateKey? DhRatchetPrivateKey { get; set; }
     }
 }

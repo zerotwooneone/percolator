@@ -29,14 +29,14 @@ namespace Percolator.CryptographyTests
             _aliceSession = DoubleRatchetSession.AsInitiator(
                 sharedSecret,
                 _aliceIdentity,
-                new PublicKey(_bobIdentity.PublicKey.ExportSubjectPublicKeyInfo()),
-                new PublicKey(_bobRatchetKey.PublicKey.ExportSubjectPublicKeyInfo())
+                new RatchetIdentityKey(_bobIdentity.PublicKey.ExportSubjectPublicKeyInfo()),
+                new RatchetEphemeralKey(_bobRatchetKey.PublicKey.ExportSubjectPublicKeyInfo())
             );
 
             _bobSession = DoubleRatchetSession.AsResponder(
                 sharedSecret,
                 _bobIdentity,
-                new PublicKey(_aliceIdentity.PublicKey.ExportSubjectPublicKeyInfo()),
+                new RatchetIdentityKey(_aliceIdentity.PublicKey.ExportSubjectPublicKeyInfo()),
                 _bobRatchetKey
             );
         }
@@ -86,7 +86,7 @@ namespace Percolator.CryptographyTests
             // Simulate serializing and deserializing the state
             var serializedState = JsonSerializer.Serialize(state, new JsonSerializerOptions { WriteIndented = true });
             var deserializedState = JsonSerializer.Deserialize<DoubleRatchetSessionState>(serializedState)!;
-            using var loadedBobSession = new DoubleRatchetSession(deserializedState, _bobIdentity);
+            using var loadedBobSession = new DoubleRatchetSession(deserializedState);
 
             var response = loadedBobSession.Encrypt(new Plaintext("Hello, Alice!"u8.ToArray()));
             var decryptedResponse = _aliceSession.Decrypt(response);

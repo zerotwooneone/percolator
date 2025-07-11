@@ -52,7 +52,7 @@ namespace Percolator.Cryptography
             foreach (var (memberId, sessionStateBytes) in state.MemberSessionStates)
             {
                 var sessionState = JsonSerializer.Deserialize<DoubleRatchetSessionState>(sessionStateBytes)!;
-                _members[memberId] = new DoubleRatchetSession(sessionState, identityKey);
+                _members[memberId] = new DoubleRatchetSession(sessionState);
             }
         }
 

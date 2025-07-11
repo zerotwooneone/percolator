@@ -31,7 +31,7 @@ public class X3DHManager : IX3DHManager
         return new SharedSecret(kdfResult);
     }
 
-    public SharedSecret RespondToHandshake(PublicKey remoteIdentityKey, PublicKey remoteEphemeralKey, PrivateKey identityAgreementKey, PrivateKey signedPreKey, PrivateKey? oneTimePreKey)
+    public SharedSecret RespondToHandshake(RatchetIdentityKey remoteIdentityKey, RatchetEphemeralKey remoteEphemeralKey, PrivateKey identityAgreementKey, PrivateKey signedPreKey, PrivateKey? oneTimePreKey)
     {
         // Reconstruct keys from private key bytes
         using var identityAgreementKeyEcdh = ECDiffieHellman.Create();
@@ -59,13 +59,13 @@ public class X3DHManager : IX3DHManager
         return new SharedSecret(kdfResult);
     }
 
-    public Signature SignPreKey(ECDsa identitySigningKey, PublicKey signedPreKey)
+    public Signature SignPreKey(ECDsa identitySigningKey, PreKey signedPreKey)
     {
         var signatureBytes = identitySigningKey.SignData(signedPreKey.Value, HashAlgorithmName.SHA256, DSASignatureFormat.IeeeP1363FixedFieldConcatenation);
         return new Signature(signatureBytes);
     }
 
-    public bool VerifySignature(PublicKey identitySigningKey, PublicKey signedPreKey, Signature signature)
+    public bool VerifySignature(RatchetIdentityKey identitySigningKey, PreKey signedPreKey, Signature signature)
     {
         using var ecDsa = ECDsa.Create();
         ecDsa.ImportSubjectPublicKeyInfo(identitySigningKey.Value, out _);

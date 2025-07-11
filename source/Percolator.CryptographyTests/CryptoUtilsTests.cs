@@ -1,8 +1,9 @@
-using FluentAssertions;
 using System.Security.Cryptography;
 using System.Text;
+using FluentAssertions;
+using Percolator.Cryptography;
 
-namespace Percolator.Cryptography.Tests;
+namespace Percolator.CryptographyTests;
 
 [TestFixture]
 public class CryptoUtilsTests

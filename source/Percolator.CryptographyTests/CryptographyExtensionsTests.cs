@@ -1,19 +1,19 @@
-using NUnit.Framework;
 using System.Security.Cryptography;
 using FluentAssertions;
+using Percolator.Cryptography;
 
-namespace Percolator.Cryptography.Tests;
+namespace Percolator.CryptographyTests;
 
 [TestFixture]
 public class CryptographyExtensionsTests
 {
     [Test]
-    public void ToEcdhPublicKey_ShouldReturnCorrectPublicKey()
+    public void ToEcdhRatchetIdentityKey_ShouldReturnCorrectPublicKey()
     {
         // Arrange
         using var ecdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var originalPublicKeyBytes = ecdh.PublicKey.ExportSubjectPublicKeyInfo();
-        var publicKey = new PublicKey(originalPublicKeyBytes);
+        var publicKey = new RatchetIdentityKey(originalPublicKeyBytes);
 
         // Act
         var result = publicKey.ToEcdhPublicKey();

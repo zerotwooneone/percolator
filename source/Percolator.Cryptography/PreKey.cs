@@ -2,4 +2,4 @@ using Percolator.Cryptography.Primitives;
 
 namespace Percolator.Cryptography;
 
-public record MessageKey(byte[] Value) : ByteArrayRecord(Value);
+public record PreKey(byte[] Value) : ByteArrayRecord(Value);
