@@ -13,7 +13,7 @@ public class PeerDiscoveryService : IDisposable, IPeerDiscoveryService
 {
     private readonly UdpClient _udpClient;
     private readonly IPeerDiscoveryConfig _config;
-    private readonly ConcurrentDictionary<PublicKeyHash, Peer> _peers = new();
+    private readonly ConcurrentDictionary<PublicKeyHash, DiscoveredPeer> _peers = new();
     private readonly IPeerDiscoveryHandler _handler;
     private readonly ISigningService _signingService;
     private readonly ILogger<PeerDiscoveryService> _logger;
@@ -146,7 +146,7 @@ public class PeerDiscoveryService : IDisposable, IPeerDiscoveryService
                 var discoveredIp = result.RemoteEndPoint.Address;
                 var discoveredPort = protoPayload.Port;
 
-                var peer = new Peer(PeerId.NewId(), discoveredIp, discoveredPort, publicKeyHash);
+                var peer = new DiscoveredPeer(PeerId.NewId(), discoveredIp, discoveredPort, publicKeyHash);
                 if (_peers.TryAdd(publicKeyHash, peer))
                 {
                     _logger.LogInformation("Discovered new peer {PeerEndpoint} with ID {PeerId}", peer.GrpcEndpoint, BitConverter.ToString(publicKeyHash.Value));

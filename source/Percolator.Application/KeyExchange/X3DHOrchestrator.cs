@@ -31,8 +31,8 @@ public class X3DHOrchestrator
         {
             // Step 1: Verify the signature on the signed pre-key.
             if (!_x3DhManager.VerifySignature(
-                    new PublicKey(remotePreKeyBundle.IdentitySigningKey.ToByteArray()),
-                    new PublicKey(remotePreKeyBundle.SignedPreKey.ToByteArray()), 
+                    new RatchetIdentityKey(remotePreKeyBundle.IdentitySigningKey.ToByteArray()),
+                    new PreKey(remotePreKeyBundle.SignedPreKey.ToByteArray()), 
                     new Signature(remotePreKeyBundle.PreKeySignature.ToByteArray())))
             {
                 throw new CryptographicException("Invalid signature on signed pre-key.");
@@ -76,14 +76,14 @@ public class X3DHOrchestrator
         var oneTimePreKey = oneTimePreKeys.FirstOrDefault();
 
         var sharedSecret = _x3DhManager.RespondToHandshake(
-            new PublicKey(remotePreKeyBundle.IdentityAgreementKey.ToByteArray()),
-            new PublicKey(remoteEphemeralPublicKey),
-            new PrivateKey(identityAgreementKey.ExportECPrivateKey()),
-            new PrivateKey(signedPreKey.ExportECPrivateKey()),
-            oneTimePreKey is not null ? new PrivateKey(oneTimePreKey.ExportECPrivateKey()) : null);
+            new RatchetIdentityKey(remotePreKeyBundle.IdentityAgreementKey.ToByteArray()),
+            new RatchetEphemeralKey(remoteEphemeralPublicKey),
+            new PrivateAgreementKey(identityAgreementKey.ExportECPrivateKey()),
+            new PrivatePreKey(signedPreKey.ExportECPrivateKey()),
+            oneTimePreKey is not null ? new PrivateOneTimeKey(oneTimePreKey.ExportECPrivateKey()) : null);
 
         var signedPreKeyPublicBytes = signedPreKey.PublicKey.ExportSubjectPublicKeyInfo();
-        var signature = _x3DhManager.SignPreKey(identitySigningKey, new PublicKey(signedPreKeyPublicBytes));
+        var signature = _x3DhManager.SignPreKey(identitySigningKey, new PreKey(signedPreKeyPublicBytes));
 
         var responderBundle = new ContractsPreKeyBundle
         {

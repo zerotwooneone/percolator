@@ -1,4 +1,4 @@
-namespace Percolator.Cryptography;
+namespace Percolator.Chat.Primitives;
 
 public abstract record ByteArrayRecord(byte[] Value) : IEquatable<ByteArrayRecord>
 {

@@ -5,6 +5,8 @@ using Percolator.Infrastructure.Chat;
 using Percolator.Infrastructure.Identity;
 using Percolator.Infrastructure.Sessions;
 using System.IO;
+using System;
+using Percolator.Infrastructure.Network;
 
 namespace Percolator.Infrastructure;
 
@@ -25,6 +27,7 @@ public static class ServiceCollectionExtensions
         services.AddChatInfrastructure();
         services.AddSessionsInfrastructure();
         services.AddIdentityInfrastructure();
+        services.AddNetworkInfrastructure();
 
         return services;
     }

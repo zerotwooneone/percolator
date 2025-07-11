@@ -18,16 +18,16 @@ namespace Percolator.Application.PeerDiscovery
             _trustedPeerStore = trustedPeerStore;
         }
 
-        public Task HandlePeerDiscoveredAsync(Peer peer)
+        public Task HandlePeerDiscoveredAsync(DiscoveredPeer discoveredPeer)
         {            
-            _logger.LogInformation("Discovered peer {Endpoint} with public key hash {PublicKeyHash}. Adding to trusted store.", peer.GrpcEndpoint, peer.PublicKeyHash);
-            _trustedPeerStore.Add(peer.PublicKeyHash);
+            _logger.LogInformation("Discovered peer {Endpoint} with public key hash {PublicKeyHash}. Adding to trusted store.", discoveredPeer.GrpcEndpoint, discoveredPeer.PublicKeyHash);
+            _trustedPeerStore.Add(discoveredPeer.PublicKeyHash);
             return Task.CompletedTask;
         }
 
-        public Task HandlePeerExpiredAsync(Peer peer)
+        public Task HandlePeerExpiredAsync(DiscoveredPeer discoveredPeer)
         {
-            _logger.LogInformation("Peer {Endpoint} has expired. It will no longer be trusted until rediscovered.", peer.GrpcEndpoint);
+            _logger.LogInformation("Peer {Endpoint} has expired. It will no longer be trusted until rediscovered.", discoveredPeer.GrpcEndpoint);
             // Note: Current implementation does not remove from the trusted store on expiry.
             // This is a "trust indefinitely" model after first discovery.
             return Task.CompletedTask;

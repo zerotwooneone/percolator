@@ -2,7 +2,7 @@ namespace Percolator.Network
 {
     public interface IPeerDiscoveryHandler
     {
-        Task HandlePeerDiscoveredAsync(Peer peer);
-        Task HandlePeerExpiredAsync(Peer peer);
+        Task HandlePeerDiscoveredAsync(DiscoveredPeer discoveredPeer);
+        Task HandlePeerExpiredAsync(DiscoveredPeer discoveredPeer);
     }
 }

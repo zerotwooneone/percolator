@@ -82,9 +82,9 @@ public class FileBasedDoubleRatchetSessionStore: IDoubleRatchetSessionStore
             SendingCounter = model.SendingCounter,
             ReceivingCounter = model.ReceivingCounter,
             SkippedMessageKeys = model.SkippedMessageKeys.ToDictionary(kvp => ulong.Parse(kvp.Key), kvp => new MessageKey(Convert.FromBase64String(kvp.Value))),
-            TheirIdentityPublicKey = new PublicKey(Convert.FromBase64String(model.TheirIdentityPublicKey!)),
-            TheirDhRatchetPublicKey = model.TheirDhRatchetPublicKey is not null ? new PublicKey(Convert.FromBase64String(model.TheirDhRatchetPublicKey)) : null,
-            DhRatchetPrivateKey = model.DhRatchetPrivateKey is not null ? new PrivateKey(Convert.FromBase64String(model.DhRatchetPrivateKey)) : null
+            TheirIdentityPublicKey = new RatchetIdentityKey(Convert.FromBase64String(model.TheirIdentityPublicKey!)),
+            TheirDhRatchetPublicKey = model.TheirDhRatchetPublicKey is not null ? new RatchetEphemeralKey(Convert.FromBase64String(model.TheirDhRatchetPublicKey)) : null,
+            DhRatchetPrivateKey = model.DhRatchetPrivateKey is not null ? new PrivateEphemeralKey(Convert.FromBase64String(model.DhRatchetPrivateKey)) : null
         };
     }
 

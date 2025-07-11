@@ -23,63 +23,64 @@ service TransportService {
 // Represents the public cryptographic materials needed to establish a secure session.
 // The exact fields will depend on the underlying handshake protocol (e.g., X3DH).
 message PreKeyBundle {
-    bytes identity_agreement_key = 1; // The public identity key for DH agreement.
-    bytes signed_pre_key = 2;
-    bytes pre_key_signature = 3;
-    optional bytes one_time_pre_key = 4;
-    bytes identity_signing_key = 5;   // The public identity key for signature verification.
+    // The protocol version.
+    optional uint32 version = 1;
+    optional bytes identity_agreement_key = 2; // The public identity key for DH agreement.
+    optional bytes signed_pre_key = 3;
+    optional bytes pre_key_signature = 4;
+    optional bytes one_time_pre_key = 5;
+    // The public part of the peer's long-term identity signing key (ECDsa).
+    optional bytes identity_signing_key = 6;
 }
 
 // Request to establish a new secure session.
 message EstablishSessionRequest {
+    // The protocol version.
+    optional uint32 version = 1;
     // The initiator's pre-key bundle.
-    PreKeyBundle initiator_bundle = 1;
+    optional PreKeyBundle initiator_bundle = 2;
     // The initiator's ephemeral public key for this handshake.
-    bytes initiator_ephemeral_key = 2;
-    // An optional, stable public key that the initiator can use as their
-    // long-term identity across sessions.
-    optional bytes long_term_identity_key = 3;
+    optional bytes initiator_ephemeral_key = 3;
 }
 
 // Response containing the responder's key bundle and the new session ID.
 message EstablishSessionResponse {
     // The protocol version.
-    uint32 version = 1;
+    optional uint32 version = 1;
     // The session ID for the newly established session.
-    string session_id = 2;
+    optional string session_id = 2;
     // The responder's pre-key bundle.
-    PreKeyBundle responder_bundle = 3;
+    optional PreKeyBundle responder_bundle = 3;
     // If the request is rejected, this field may be set to indicate when the client should try again.
     optional google.protobuf.Timestamp retry_after_utc = 4;
 }
 
 // Request to create a new group session.
 message CreateGroupSessionRequest {
-    uint32 version = 1;
-    PreKeyBundle initiator_bundle = 2;
-    optional bytes long_term_identity_key = 3;
+    optional uint32 version = 1;
+    optional PreKeyBundle initiator_bundle = 2;
     // The key bundles for all other initial members of the group.
-    repeated PreKeyBundle initial_members = 4;
+    repeated PreKeyBundle initial_members = 3;
 }
 
 // Response for a group session creation request.
 message CreateGroupSessionResponse {
-    uint32 version = 1;
-    string session_id = 2;
+    optional uint32 version = 1;
+    optional string session_id = 2;
     optional google.protobuf.Timestamp retry_after_utc = 3;
 }
 
 // Request to deliver an opaque message to a session.
 message DeliverOpaqueMessageRequest {
-    uint32 version = 1;
-    string session_id = 2;
+    optional uint32 version = 1;
+    optional string session_id = 2;
     // The opaque, encrypted message payload. The transport service has no
     // knowledge of the contents of this payload.
-    bytes payload = 3;
+    optional bytes payload = 3;
 }
 
 // An empty response to acknowledge the message delivery request.
 message DeliverOpaqueMessageResponse {
-    uint32 version = 1;
+    optional uint32 version = 1;
     optional google.protobuf.Timestamp retry_after_utc = 2;
 }

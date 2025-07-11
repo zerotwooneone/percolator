@@ -1,3 +1,6 @@
+using Percolator.Identity.Model;
+using System.Security.Cryptography;
+
 namespace Percolator.Identity;
 
 /// <summary>
@@ -6,9 +9,9 @@ namespace Percolator.Identity;
 public interface IKeyManagementService
 {
     /// <summary>
-    /// Retrieves the X3DH keys for a given identity, creating them if they do not exist.
+    /// Retrieves the cryptographic keys for a given identity, creating them if they do not exist.
     /// </summary>
     /// <param name="identityName">The name of the identity.</param>
-    /// <returns>The X3DH keys for the specified identity.</returns>
+    /// <returns>The cryptographic keys for the specified identity.</returns>
     Task<X3dhKeys> GetOrCreateKeysAsync(string identityName);
 }

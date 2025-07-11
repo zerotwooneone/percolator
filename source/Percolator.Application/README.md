@@ -58,16 +58,20 @@ This approach ensures that forward secrecy is maintained by cleanly separating c
 - **Strongly-Typed IDs**: To enhance type safety and clarify intent, raw `Guid` primitives must not be used for identifiers in public APIs. Instead, wrap them in strongly-typed DDD value objects with intention-revealing names (e.g., `PeerId`, `ConversationId`). This prevents accidental misuse of identifiers and makes the domain language more explicit.
 - **Test-Driven Development**: All new features and refactoring should follow the Red-Green-Refactor cycle of Test-Driven Development (TDD). Write a failing test first (Red), then write the simplest code to make it pass (Green), and finally, refactor the code to improve its design while keeping the tests passing. This ensures that all logic is covered by tests and promotes a high-quality, maintainable codebase.
 
-## Important Note on PeerId
+---
 
-A `PeerId` is a **local-only, non-cryptographic identifier**. It is randomly generated (as a GUID) and is used to uniquely identify a peer within the local application instance.
+## Peer Identification and `PeerId`
 
-**Key Principles:**
--   **Local Scope:** A `PeerId` is only meaningful to the local application. It is never shared with remote peers.
--   **Not for Authentication:** It MUST NOT be used for authentication or as a security credential. All security operations (like session management) are tied to cryptographic keys, not the `PeerId`.
--   **Stable Identifier:** It allows the application to maintain a stable reference to a peer, even if that peer's underlying cryptographic keys change.
+In Percolator's peer-to-peer model, identity is handled with a simple and secure approach that cleanly separates local application identifiers from cryptographic identifiers.
 
-This rule is enforced across all projects in the solution to ensure a clear and secure identity model.
+- **`PeerId` is a Local-Only Identifier**: A `PeerId` is a non-cryptographic identifier (e.g., a GUID) used to uniquely reference a peer *within the local application instance only*. It allows the application to maintain a stable reference to a contact, even if their underlying cryptographic keys change.
+    - **Crucially, a `PeerId` MUST NEVER be transmitted to other peers or computed from cryptographic material.**
+
+- **`identity_agreement_key` is the Public Lookup Key**: A peer's public identity is defined by their cryptographic keys. When initiating a session with a peer for the first time, the public `identity_agreement_key` from their `PreKeyBundle` is the canonical value used to look them up. This key is the foundation of their cryptographic identity.
+
+This clear separation ensures that local application logic (managing a contact list) is decoupled from the security-critical operations of session establishment, which are based purely on cryptography.
+
+---
 
 *   **`CredentialService`**: (Note: This service is located in the `Percolator.Identity` project). It manages the secure storage and retrieval of the user's cryptographic identity, using Windows DPAPI with additional entropy for protection.
 *   **`DirectSessionManager`**: Manages the lifecycle of direct peer-to-peer conversations. It uses `SemaphoreSlim` to enforce per-conversation locking, preventing race conditions during message processing.

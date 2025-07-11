@@ -89,8 +89,8 @@ public class X3DHOrchestratorTests
         using var ephemeralKey = ECDiffieHellman.Create();
 
         _mockX3dhManager.Setup(x => x.VerifySignature(
-            It.Is<PublicKey>(k => k.Value.SequenceEqual(remoteIdentitySigningKeyBytes)),
-            It.Is<PublicKey>(k => k.Value.SequenceEqual(remoteSignedPreKeyBytes)),
+            It.Is<RatchetIdentityKey>(k => k.Value.SequenceEqual(remoteIdentitySigningKeyBytes)),
+            It.Is<PreKey>(k => k.Value.SequenceEqual(remoteSignedPreKeyBytes)),
             It.IsAny<Signature>()))
             .Returns(true);
 
@@ -132,16 +132,16 @@ public class X3DHOrchestratorTests
         var ephemeralKeyBytes = ephemeralKey.PublicKey.ExportSubjectPublicKeyInfo();
 
         _mockX3dhManager.Setup(x => x.RespondToHandshake(
-                It.Is<PublicKey>(k => k.Value.SequenceEqual(_remoteIdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo())),
-                It.Is<PublicKey>(k => k.Value.SequenceEqual(ephemeralKeyBytes)),
-                It.Is<PrivateKey>(k => k.Value.SequenceEqual(_localKeys.IdentityAgreementKey.ExportECPrivateKey())),
-                It.Is<PrivateKey>(k => k.Value.SequenceEqual(_localKeys.SignedPreKey.ExportECPrivateKey())),
-                It.Is<PrivateKey>(k => k.Value.SequenceEqual(_localKeys.OneTimePreKeys.First().ExportECPrivateKey()))))
+                It.Is<RatchetIdentityKey>(k => k.Value.SequenceEqual(_remoteIdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo())),
+                It.Is<RatchetEphemeralKey>(k => k.Value.SequenceEqual(ephemeralKeyBytes)),
+                It.Is<PrivateAgreementKey>(k => k.Value.SequenceEqual(_localKeys.IdentityAgreementKey.ExportECPrivateKey())),
+                It.Is<PrivatePreKey>(k => k.Value.SequenceEqual(_localKeys.SignedPreKey.ExportECPrivateKey())),
+                It.Is<PrivateOneTimeKey>(k => k.Value.SequenceEqual(_localKeys.OneTimePreKeys.First().ExportECPrivateKey()))))
             .Returns(expectedSharedSecret);
 
         _mockX3dhManager.Setup(x => x.SignPreKey(
                 _localKeys.IdentitySigningKey,
-                It.IsAny<PublicKey>()))
+                It.IsAny<PreKey>()))
             .Returns(new Signature(new byte[64]));
 
         // Act

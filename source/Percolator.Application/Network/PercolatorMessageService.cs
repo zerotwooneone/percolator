@@ -1,3 +1,4 @@
+using System.Net;
 using System.Text.Json;
 using Grpc.Core;
 using Microsoft.Extensions.Logging;
@@ -12,9 +13,16 @@ using ChatParticipantId = Percolator.Chat.ValueObjects.ParticipantId;
 using SessionPeerId = Percolator.Sessions.PeerId;
 using SessionConversationId = Percolator.Sessions.ConversationId;
 using Percolator.Application.Identity;
-using OpaquePublicKey = Percolator.Sessions.OpaquePublicKey;
 using System.Security.Cryptography;
 using Percolator.Identity;
+using IdentityPublicKey = Percolator.Identity.PublicKey;
+using Percolator.Network;
+using NetworkPeerId = Percolator.Network.PeerId;
+using IdentityPeer = Percolator.Identity.Peer;
+using IdentityPeerId = Percolator.Identity.PeerId;
+using Percolator.Application.Network;
+using Percolator.Chat.ValueObjects;
+using Percolator.Sessions;
 
 namespace Percolator.Application.Network
 {
@@ -26,8 +34,9 @@ namespace Percolator.Application.Network
         private readonly DirectSessionManager _sessionManager;
         private readonly IConversationRepository _conversationRepository;
         private readonly IPeerRepository _peerRepository;
+        private readonly IPeerConnectionRepository _peerConnectionRepository;
 
-        public PercolatorMessageService(ILogger<PercolatorMessageService> logger, ActiveIdentityContext activeIdentityContext, X3DHOrchestrator x3dhOrchestrator, DirectSessionManager sessionManager, IConversationRepository conversationRepository, IPeerRepository peerRepository)
+        public PercolatorMessageService(ILogger<PercolatorMessageService> logger, ActiveIdentityContext activeIdentityContext, X3DHOrchestrator x3dhOrchestrator, DirectSessionManager sessionManager, IConversationRepository conversationRepository, IPeerRepository peerRepository, IPeerConnectionRepository peerConnectionRepository)
         {
             _logger = logger;
             _activeIdentityContext = activeIdentityContext;
@@ -35,6 +44,7 @@ namespace Percolator.Application.Network
             _sessionManager = sessionManager;
             _conversationRepository = conversationRepository;
             _peerRepository = peerRepository;
+            _peerConnectionRepository = peerConnectionRepository;
         }
 
         public override async Task<EstablishSessionResponse> EstablishSession(EstablishSessionRequest request, ServerCallContext context)
@@ -50,64 +60,87 @@ namespace Percolator.Application.Network
 
                 var handshakeResult = _x3dhOrchestrator.ProcessHandshake(request.InitiatorBundle, request.InitiatorEphemeralKey.ToByteArray());
 
-                Peer? peer = null;
-                string? thumbprintToStore = null;
-
-                // 1. Try to look up by the optional long-term identity key first.
-                if (request.HasLongTermIdentityKey)
+                // Look up the peer by their public identity agreement key.
+                var ideneityAgreementKeyBytes = request.InitiatorBundle.IdentityAgreementKey.ToByteArray();
+                var directMessagePublicKey = new DirectMessagePublicKey(ideneityAgreementKeyBytes);
+                var connnectionInfo =
+                    await _peerConnectionRepository.GetByDirectMessage(directMessagePublicKey);
+                
+                var timestamp = DateTimeOffset.Now;
+                
+                
+                var ipEndPoint = IPEndPoint.Parse(context.Peer);;
+                
+                if (connnectionInfo is null)
                 {
-                    var longTermKeyBytes = request.LongTermIdentityKey.ToByteArray();
-                    thumbprintToStore = Convert.ToHexString(SHA1.HashData(longTermKeyBytes));
-                    _logger.LogInformation("Attempting to find peer by long-term key thumbprint: {Thumbprint}", thumbprintToStore);
-                    peer = await _peerRepository.GetByThumbprintAsync(thumbprintToStore);
+                    _logger.LogWarning("No connection info found for peer {directMessagePublicKey}. Creating a new connection record.", directMessagePublicKey);
+                    connnectionInfo = new PeerConnection(
+                        new NetworkPeerId(Guid.NewGuid()),
+                        directMessagePublicKey,
+                        [new GrpcEndPoint(ipEndPoint, timestamp)],
+                        new List<TlsCertificate>(),
+                        timestamp);
                 }
-
-                // 2. If not found, try to look up by the bundle's identity key.
-                if (peer is null)
+                else
                 {
-                    var bundleKeyBytes = request.InitiatorBundle.IdentityAgreementKey.ToByteArray();
-                    var bundleThumbprint = Convert.ToHexString(SHA1.HashData(bundleKeyBytes));
-                    if (thumbprintToStore is null)
+                    var grpcEndPoint = connnectionInfo.GrpcEndPoints.FirstOrDefault(e => e.EndPoint.Equals(ipEndPoint));
+                    if (grpcEndPoint is null)
                     {
-                        thumbprintToStore = bundleThumbprint;
+                        _logger.LogWarning("No gRPC endpoints found for peer {directMessagePublicKey}. Adding a new one.", directMessagePublicKey);
+                        connnectionInfo.AddGrpcEndPoint(new GrpcEndPoint(ipEndPoint, timestamp));
                     }
-                    _logger.LogInformation("Attempting to find peer by bundle key thumbprint: {Thumbprint}", bundleThumbprint);
-                    peer = await _peerRepository.GetByThumbprintAsync(bundleThumbprint);
+                    else
+                    {
+                        connnectionInfo.UpdateLastSeen(grpcEndPoint,timestamp);
+                    }
                 }
+                await _peerConnectionRepository.SaveAsync(connnectionInfo);
+                var networkPeerId = new NetworkPeerId(connnectionInfo.Id.Value);
+                
+                
+                var peer = await _peerRepository.GetByIdAsync(new IdentityPeerId(networkPeerId.Value));
 
-                // 3. If still not found, create a new peer.
+                // If the peer is unknown, create a new record for them.
                 if (peer is null)
                 {
-                    _logger.LogInformation("First contact with peer with thumbprint {Thumbprint}. Creating new identity.", thumbprintToStore);
-                    peer = new Peer(
-                        new PeerId(Guid.NewGuid()),
-                        context.Peer,
-                        new Endpoint(0), // Port is unknown from this context, set to 0
-                        thumbprintToStore! // It will be non-null here
-                    );
+                    var publicKeyHash = new PublicKeyHash(SHA1.HashData(ideneityAgreementKeyBytes));
+                    _logger.LogInformation("Peer with key hash {KeyHash} is unknown. Creating a new peer record.", publicKeyHash);
+                    // For now, we'll auto-generate a name.
+                    var newPeerName = $"Peer-{publicKeyHash.ToString().Substring(0, 8)}";
+                    
+                    peer = new IdentityPeer(new IdentityPeerId(connnectionInfo.Id.Value), newPeerName);
                     await _peerRepository.AddAsync(peer);
                 }
+                
+                var channelId = new ChannelId(directMessagePublicKey.Value);
+                var conversation = await _conversationRepository.GetByChannelIdAsync(channelId);
 
-                var initiatorPeerId = new SessionPeerId(peer.Id.Value);
-                var localPeerId = new SessionPeerId(_activeIdentityContext.Identity.Id);
-
-                var conversation = new ChatConversation(
-                    new ChatConversationId(Guid.NewGuid()),
-                    new List<ChatParticipantId>
+                if (conversation is null)
+                {
+                    var participants = new List<ChatParticipantId>
                     {
-                        new(localPeerId.Value),
-                        new(initiatorPeerId.Value)
-                    });
+                        new(_activeIdentityContext.Identity.Id),
+                        new(peer.Id.Value)
+                    };
 
-                await _conversationRepository.AddAsync(conversation);
+                    conversation = new ChatConversation(
+                        ChatConversationId.NewId(),
+                        channelId,
+                        participants,
+                        new List<Message>(),
+                        peer.Name);
+
+                    await _conversationRepository.AddAsync(conversation);
+                    _logger.LogInformation("Created new conversation with {PeerName} for channel {ChannelId}", peer.Name, channelId);
+                }
 
                 await _sessionManager.EstablishSessionAsResponderAsync(
                     new SessionConversationId(conversation.Id.Value),
-                    initiatorPeerId,
-                    new OpaquePublicKey(request.InitiatorBundle.IdentityAgreementKey.ToByteArray()),
+                    new SessionPeerId(peer.Id.Value),
+                    new SessionIdentityKey(request.InitiatorBundle.IdentityAgreementKey.ToByteArray()),
                     handshakeResult.SharedSecret);
 
-                _logger.LogInformation("Successfully established session {SessionId} with peer {PeerId}", conversation.Id, initiatorPeerId);
+                _logger.LogInformation("Successfully established session {SessionId} with peer {PeerId}", conversation.Id, peer.Id);
 
                 return new EstablishSessionResponse
                 {

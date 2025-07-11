@@ -3,11 +3,8 @@ using Percolator.Application.Identity;
 using Percolator.Cryptography;
 using Percolator.Sessions;
 using SessionPeerId = Percolator.Sessions.PeerId;
-using OpaquePublicKey = Percolator.Sessions.OpaquePublicKey;
 using System.Collections.Concurrent;
 using Percolator.Chat;
-using Percolator.Identity;
-using IdentityConversationId = Percolator.Identity.ConversationId;
 using SessionConversationId = Percolator.Sessions.ConversationId;
 
 namespace Percolator.Application.Sessions;
@@ -16,7 +13,6 @@ public class DirectSessionManager
 {
     private readonly IDoubleRatchetSessionStore _sessionStore;
     private readonly IConversationRepository _conversationRepository;
-    private readonly IPeerRepository _peerRepository;
     private readonly ILocalPeerProvider _localPeerProvider;
     private readonly IMessageStore _messageStore;
     private readonly ActiveIdentityContext _activeIdentityContext;
@@ -25,44 +21,40 @@ public class DirectSessionManager
     public DirectSessionManager(
         IDoubleRatchetSessionStore sessionStore,
         IConversationRepository conversationRepository,
-        IPeerRepository peerRepository,
         ILocalPeerProvider localPeerProvider,
         IMessageStore messageStore,
         ActiveIdentityContext activeIdentityContext)
     {
         _sessionStore = sessionStore;
         _conversationRepository = conversationRepository;
-        _peerRepository = peerRepository;
         _localPeerProvider = localPeerProvider;
         _messageStore = messageStore;
         _activeIdentityContext = activeIdentityContext;
     }
 
-    public async Task EstablishSessionAsInitiatorAsync(SessionConversationId conversationId, SessionPeerId remotePeerId, OpaquePublicKey remoteIdentityKey, OpaquePublicKey remoteRatchetKey, SharedSecret sharedSecret)
+    public async Task EstablishSessionAsInitiatorAsync(SessionConversationId conversationId, SessionPeerId remotePeerId, SessionIdentityKey remoteIdentityKey, SessionRatchetKey remoteRatchetKey, SharedSecret sharedSecret)
     {
         if (_activeIdentityContext.Keys is null)
             throw new InvalidOperationException("Identity context not loaded");
 
         using var session = DoubleRatchetSession.AsInitiator(
             sharedSecret,
-            _activeIdentityContext.Keys.IdentityAgreementKey,
-            new PublicKey(remoteIdentityKey.Value),
-            new PublicKey(remoteRatchetKey.Value)
+            new RatchetIdentityKey(remoteIdentityKey.Value),
+            new RatchetEphemeralKey(remoteRatchetKey.Value)
             );
 
         await _sessionStore.SaveSessionStateAsync(remotePeerId, conversationId, session.GetState());
         _sessionLocks.TryAdd(conversationId, new SemaphoreSlim(1, 1));
     }
 
-    public async Task EstablishSessionAsResponderAsync(SessionConversationId conversationId, SessionPeerId remotePeerId, OpaquePublicKey remoteIdentityKey, SharedSecret sharedSecret)
+    public async Task EstablishSessionAsResponderAsync(SessionConversationId conversationId, SessionPeerId remotePeerId, SessionIdentityKey remoteIdentityKey, SharedSecret sharedSecret)
     {
         if (_activeIdentityContext.Keys is null)
             throw new InvalidOperationException("Identity context not loaded");
 
         using var session = DoubleRatchetSession.AsResponder(
             sharedSecret,
-            _activeIdentityContext.Keys.IdentityAgreementKey,
-            new PublicKey(remoteIdentityKey.Value),
+            new RatchetIdentityKey(remoteIdentityKey.Value),
             _activeIdentityContext.Keys.SignedPreKey
             );
 
@@ -94,7 +86,7 @@ public class DirectSessionManager
             // DoubleRatchetSession will dispose the key, so we must pass a temporary copy.
             var identityKey = ECDiffieHellman.Create(_activeIdentityContext.Keys.IdentityAgreementKey.ExportParameters(true));
 
-            using var doubleRatchetSession = new DoubleRatchetSession(sessionState, identityKey);
+            using var doubleRatchetSession = new DoubleRatchetSession(sessionState);
 
             var decryptedPlaintext = doubleRatchetSession.Decrypt(encryptedMessage);
 
@@ -132,19 +124,11 @@ public class DirectSessionManager
             }
 
             var identityKey = ECDiffieHellman.Create(_activeIdentityContext.Keys.IdentityAgreementKey.ExportParameters(true));
-            using var doubleRatchetSession = new DoubleRatchetSession(sessionState, identityKey);
+            using var doubleRatchetSession = new DoubleRatchetSession(sessionState);
 
             var encryptedMessage = doubleRatchetSession.Encrypt(new Plaintext(plaintext));
 
             await _sessionStore.SaveSessionStateAsync(remotePeerId, conversationId, doubleRatchetSession.GetState());
-
-            var identityPeerId = new Percolator.Identity.PeerId(remotePeerId.Value);
-            var peer = await _peerRepository.GetByIdAsync(identityPeerId);
-            if (peer is not null && peer.LastDirectConversationId?.Value != conversationId.Value)
-            {
-                var updatedPeer = new Peer(peer.Id, peer.IpAddress, peer.GrpcEndpoint, peer.Thumbprint,new IdentityConversationId(conversationId.Value));
-                await _peerRepository.AddAsync(updatedPeer);
-            }
 
             return (remotePeerId, encryptedMessage);
         }

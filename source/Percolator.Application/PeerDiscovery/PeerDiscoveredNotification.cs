@@ -5,11 +5,11 @@ namespace Percolator.Application.PeerDiscovery
 {
     public class PeerDiscoveredNotification : INotification
     {
-        public Peer Peer { get; }
+        public DiscoveredPeer DiscoveredPeer { get; }
 
-        public PeerDiscoveredNotification(Peer peer)
+        public PeerDiscoveredNotification(DiscoveredPeer discoveredPeer)
         {
-            Peer = peer;
+            DiscoveredPeer = discoveredPeer;
         }
     }
 }

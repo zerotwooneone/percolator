@@ -1,4 +1,6 @@
+using System.Net;
 using Percolator.Chat.ValueObjects;
+using Percolator.Network;
 
 namespace Percolator.Application.Sessions;
 
@@ -10,11 +12,8 @@ public interface IConversationService
     /// <summary>
     /// Creates a new direct conversation with a remote peer by connecting to the specified host and port.
     /// </summary>
-    /// <param name="host">The host of the remote peer.</param>
-    /// <param name="port">The port of the remote peer.</param>
-    /// <param name="remotePublicIdentityKey">The remote peer's public identity signing key, encoded as a Base64 string.</param>
     /// <returns>The unique ID of the direct conversation.</returns>
-    Task<ConversationId> CreateDirectConversationAsync(string host, int port, string remotePublicIdentityKey);
+    Task<ConversationId> CreateDirectConversationAsync(DnsEndPoint endpoint, string peerName, TlsCertificate? tlsCertificate = null);
 
     /// <summary>
     /// Gets the last active direct conversation ID for a given peer.

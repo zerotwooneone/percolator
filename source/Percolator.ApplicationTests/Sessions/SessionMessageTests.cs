@@ -69,7 +69,6 @@ public class SessionMessageTests
         _aliceManager = new DirectSessionManager(
             _aliceSessionStore.Object,
             _mockConversationRepo.Object,
-            _mockPeerRepo.Object,
             mockAliceLocalPeerProvider.Object,
             _mockMessageStore.Object,
             _aliceIdentity);
@@ -77,7 +76,6 @@ public class SessionMessageTests
         _bobManager = new DirectSessionManager(
             _bobSessionStore.Object,
             _mockConversationRepo.Object,
-            _mockPeerRepo.Object,
             mockBobLocalPeerProvider.Object,
             _mockMessageStore.Object,
             _bobIdentity);
@@ -92,12 +90,12 @@ public class SessionMessageTests
 
         // Arrange: Establish sessions for both Alice and Bob
         var bobPeerId = new SessionPeerId(_bobIdentity.Identity!.Id);
-        var bobIdentityKey = new OpaquePublicKey(_bobIdentity.Keys!.IdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo());
-        var bobRatchetKey = new OpaquePublicKey(_bobIdentity.Keys!.SignedPreKey.PublicKey.ExportSubjectPublicKeyInfo());
+        var bobIdentityKey = new SessionIdentityKey(_bobIdentity.Keys!.IdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo());
+        var bobRatchetKey = new SessionRatchetKey(_bobIdentity.Keys!.SignedPreKey.PublicKey.ExportSubjectPublicKeyInfo());
         await _aliceManager.EstablishSessionAsInitiatorAsync(conversationId, bobPeerId, bobIdentityKey, bobRatchetKey, aliceSharedSecret);
 
         var alicePeerId = new SessionPeerId(_aliceIdentity.Identity!.Id);
-        var aliceIdentityKey = new OpaquePublicKey(_aliceIdentity.Keys!.IdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo());
+        var aliceIdentityKey = new SessionIdentityKey(_aliceIdentity.Keys!.IdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo());
         await _bobManager.EstablishSessionAsResponderAsync(conversationId, alicePeerId, aliceIdentityKey, bobSharedSecret);
 
         // Arrange: Mock the conversation repository to resolve peer IDs
@@ -134,11 +132,11 @@ public class SessionMessageTests
         var aliceSharedSecret = x3dhManager.InitiateHandshake(bobPreKeyBundle, aliceEphemeralKey, _aliceIdentity.Keys!.IdentityAgreementKey);
 
         var bobSharedSecret = x3dhManager.RespondToHandshake(
-            new PublicKey(_aliceIdentity.Keys!.IdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
-            new PublicKey(aliceEphemeralKey.PublicKey.ExportSubjectPublicKeyInfo()),
-            new PrivateKey(_bobIdentity.Keys!.IdentityAgreementKey.ExportECPrivateKey()),
-            new PrivateKey(_bobIdentity.Keys!.SignedPreKey.ExportECPrivateKey()),
-            new PrivateKey(_bobIdentity.Keys!.OneTimePreKeys[0].ExportECPrivateKey())
+            new RatchetIdentityKey(_aliceIdentity.Keys!.IdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
+            new RatchetEphemeralKey(aliceEphemeralKey.PublicKey.ExportSubjectPublicKeyInfo()),
+            new PrivateAgreementKey(_bobIdentity.Keys!.IdentityAgreementKey.ExportECPrivateKey()),
+            new PrivatePreKey(_bobIdentity.Keys!.SignedPreKey.ExportECPrivateKey()),
+            new PrivateOneTimeKey(_bobIdentity.Keys!.OneTimePreKeys[0].ExportECPrivateKey())
         );
 
         return (aliceSharedSecret, bobSharedSecret);
@@ -150,7 +148,7 @@ public class SessionMessageTests
         var identity = new IdentityRecord(Guid.NewGuid(), name);
         var signingKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         var agreementKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        var signature = new X3DHManager().SignPreKey(signingKey, new PublicKey(signedPreKey.PublicKey.ExportSubjectPublicKeyInfo()));
+        var signature = new X3DHManager().SignPreKey(signingKey, new PreKey(signedPreKey.PublicKey.ExportSubjectPublicKeyInfo()));
 
         var activeIdentity = new ActiveIdentityContext
         {

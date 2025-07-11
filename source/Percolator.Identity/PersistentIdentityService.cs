@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using Microsoft.Extensions.Logging;
 using Percolator.Identity.Model;
 
@@ -21,13 +22,14 @@ public class PersistentIdentityService : IIdentityService
 
     public async Task<(IdentityRecord Identity, X3dhKeys Keys)> GetOrCreateIdentityAsync(string name, CancellationToken cancellationToken = default)
     {
-        var identity = await GetIdentityRecordAsync(name, cancellationToken);
+        var identity = await _identityStore.GetIdentityAsync(name, cancellationToken);
         if (identity is null)
         {
-            identity = await CreateIdentityAsync(name, null, cancellationToken);
+            identity = await CreateIdentityAsync(name, name, cancellationToken);
         }
 
         var keys = await _keyManagementService.GetOrCreateKeysAsync(name);
+
         return (identity, keys);
     }
 

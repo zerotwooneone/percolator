@@ -16,6 +16,31 @@ The system is designed with a two-layer architecture, which is reflected in the 
 
 ---
 
+## Rules for Modifying Contracts
+
+To maintain stability and backward compatibility, all changes to the `.proto` files in this project must adhere to the following rules. This is a critical process that requires careful planning.
+
+-   **Prioritize Backward Compatibility**: The public-facing transport layer must remain as stable as possible. Never change the field numbers of existing fields. Renaming a field is a breaking change and should be avoided.
+-   **Adding New Fields**: New fields can be added, but they MUST be `optional`. This ensures that older clients can still parse messages from newer clients without errors.
+-   **Deprecating Fields**: If a field is no longer needed, it should be marked with the `[deprecated=true]` option rather than being removed immediately. This signals to developers that the field should no longer be used and will be removed in a future major version.
+-   **Removing Fields**: Removing a field is a significant **breaking change**. It should only be done after a thorough analysis of its impact across the entire system and after it has been deprecated for a reasonable period. The process we just followed (analyze, propose, approve, implement) is the model for this.
+-   **Rebuild After Changes**: After any modification to a `.proto` file, the entire solution MUST be rebuilt. This regenerates the C# code and immediately surfaces any compilation errors in the consuming projects, which must then be fixed.
+
+---
+
+## Peer Identification and `PeerId`
+
+In Percolator's peer-to-peer model, identity is handled with a simple and secure approach that cleanly separates local application identifiers from cryptographic identifiers.
+
+- **`PeerId` is a Local-Only Identifier**: A `PeerId` is a non-cryptographic identifier (e.g., a GUID) used to uniquely reference a peer *within the local application instance only*. It allows the application to maintain a stable reference to a contact, even if their underlying cryptographic keys change.
+    - **Crucially, a `PeerId` MUST NEVER be transmitted to other peers or computed from cryptographic material.**
+
+- **`identity_agreement_key` is the Public Lookup Key**: A peer's public identity is defined by their cryptographic keys. When initiating a session with a peer for the first time, the public `identity_agreement_key` from their `PreKeyBundle` is the canonical value used to look them up. This key is the foundation of their cryptographic identity.
+
+This clear separation ensures that local application logic (managing a contact list) is decoupled from the security-critical operations of session establishment, which are based purely on cryptography.
+
+---
+
 ## 1. Public Transport Layer Contracts
 
 These contracts define the public-facing gRPC services that are exposed to other peers on the network.
@@ -48,16 +73,6 @@ This file defines the core `InternalEnvelope` used by the application's internal
 
 ---
 
-## Peer Identification
-
-In Percolator's peer-to-peer model, identity is handled with a "best-effort" approach that respects user privacy and the ephemeral nature of cryptographic keys.
-
-- **No Peer ID Exchange:** Clients **do not** exchange pre-defined user or peer IDs. A peer's identity is not a fixed property.
-- **Long-Term vs. Ephemeral Identity:**
-  - When initiating a session, a client **may** provide an optional `long_term_identity_key`. If provided, the receiving peer will use a hash of this key to derive a stable, recognizable `PeerId` for the duration of their interaction. This allows a peer to be "remembered" across multiple sessions, even if their session keys change.
-  - If the `long_term_identity_key` is **not** provided, the receiving peer will derive a temporary `PeerId` from the ephemeral `identity_key` within the `PreKeyBundle`. In this case, the initiating peer will appear as a new, unknown entity for each new session.
-- **Best-Effort Principle:** This system ensures that peers can always connect, but being recognized as a known contact is a "best-effort" outcome dependent on the initiator providing a stable long-term key. It is acceptable and expected that friends may sometimes appear as "unknown" if they choose not to provide their long-term key.
-
 ## Important Note on PeerId
 
 A `PeerId` is a **local-only, non-cryptographic identifier**. It is randomly generated (as a GUID) and is used to uniquely identify a peer within the local application instance.
@@ -75,6 +90,8 @@ To ensure robustness and future compatibility, all public-facing contracts adher
 
 -   **Versioning**: All request messages include a `uint32 version` field. This allows for smooth protocol upgrades over time.
 -   **Rate-Limiting**: All response messages include an `optional google.protobuf.Timestamp retry_after_utc` field. This provides a standard mechanism for a peer to inform a client that it is being rate-limited and when it is safe to retry the request.
+-   **Compatibility**: All fields must be marked as `optional`. This provides a presence-checking capability (e.g., the `Has...()` methods in C# for scalar types) and prevents deserialization errors if a field is missing.
+    -   The application is responsible for ensuring that all required fields are present in the request message.
 
 ## AI Assistant Guidance
 

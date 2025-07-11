@@ -1,27 +1,31 @@
 using System.Collections.Concurrent;
+using System.Security.Cryptography;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
 using Percolator.Application.Identity;
 using Percolator.Identity;
+using IdentityPublicKey = Percolator.Identity.PublicKey;
 using Percolator.Infrastructure.Serialization;
 using Percolator.Network;
 using Peer = Percolator.Identity.Peer;
-using PeerId = Percolator.Identity.PeerId;
+using IdentityPeerId = Percolator.Identity.PeerId;
 
 namespace Percolator.Infrastructure.Identity;
 
 public class FileBasedPeerRepository : IPeerRepository, ITrustedPeerStore
 {
-    private readonly ConcurrentDictionary<PeerId, Peer> _peers;
+    private readonly ConcurrentDictionary<IdentityPeerId, PeerModel> _peers;
     private readonly ConcurrentDictionary<PublicKeyHash, byte> _trustedHashes;
     private readonly string _peersFilePath;
     private readonly string _trustedHashesFilePath;
     private readonly PercolatorJsonContext _jsonContext;
     private readonly SemaphoreSlim _semaphore;
+    private readonly StorageOptions _storageOptions;
 
     public FileBasedPeerRepository(IOptions<StorageOptions> storageOptions)
     {
-        var storagePath = storageOptions.Value.Path;
+        _storageOptions = storageOptions.Value;
+        var storagePath = _storageOptions.Path;
         _peersFilePath = Path.Combine(storagePath, "peers.json");
         _trustedHashesFilePath = Path.Combine(storagePath, "trusted_hashes.json");
         _jsonContext = new PercolatorJsonContext(new JsonSerializerOptions { WriteIndented = true });
@@ -31,26 +35,22 @@ public class FileBasedPeerRepository : IPeerRepository, ITrustedPeerStore
         _trustedHashes = LoadTrustedHashesFromFile();
     }
 
-    public Task<Peer?> GetByIdAsync(PeerId id)
+    public Task<Peer?> GetByIdAsync(IdentityPeerId id)
     {
-        return Task.FromResult(_peers.TryGetValue(id, out var peer) ? peer : null);
-    }
-
-    public Task<Peer?> GetByThumbprintAsync(string thumbprint)
-    {
-        var peer = _peers.Values.FirstOrDefault(p => p.Thumbprint == thumbprint);
-        return Task.FromResult(peer);
+        var model = _peers.TryGetValue(id, out var peerModel) ? ToDomain(peerModel) : null;
+        return Task.FromResult(model);
     }
 
     public async Task AddAsync(Peer peer)
     {
+        var model = ToModel(peer);
         await _semaphore.WaitAsync();
-        _peers[peer.Id] = peer;
+        _peers[peer.Id] = model;
         await SavePeersToDiskAsync();
         _semaphore.Release();
     }
 
-    public async Task RemoveAsync(PeerId id)
+    public async Task RemoveAsync(IdentityPeerId id)
     {
         if (_peers.TryRemove(id, out _))
         {
@@ -58,22 +58,37 @@ public class FileBasedPeerRepository : IPeerRepository, ITrustedPeerStore
         }
     }
 
-    private ConcurrentDictionary<PeerId, Peer> LoadPeersFromFile()
+    public async Task<Peer?> GetByNameAsync(string name)
+    {
+        var peerFiles = Directory.GetFiles(Path.Combine(_storageOptions.Path, "peers"), "*.json");
+        foreach (var file in peerFiles)
+        {
+            var json = await File.ReadAllTextAsync(file);
+            var model = JsonSerializer.Deserialize<PeerModel>(json, _jsonContext.PeerModel);
+            if (model?.Name.Equals(name, StringComparison.OrdinalIgnoreCase) == true)
+            {
+                return ToDomain(model);
+            }
+        }
+        return null;
+    }
+
+    private ConcurrentDictionary<IdentityPeerId, PeerModel> LoadPeersFromFile()
     {
         if (!File.Exists(_peersFilePath))
         {
-            return new ConcurrentDictionary<PeerId, Peer>();
+            return new ConcurrentDictionary<IdentityPeerId, PeerModel>();
         }
 
         var json = File.ReadAllText(_peersFilePath);
         var models = JsonSerializer.Deserialize(json, _jsonContext.ListPeerModel) ?? new List<PeerModel>();
 
-        return new ConcurrentDictionary<PeerId, Peer>(models.Select(ToDomain).ToDictionary(p => p.Id));
+        return new ConcurrentDictionary<IdentityPeerId, PeerModel>(models.ToDictionary(p => new IdentityPeerId(p.Id)));
     }
 
     private async Task SavePeersToDiskAsync()
     {
-        var models = _peers.Values.Select(ToModel).ToList();
+        var models = _peers.Values.ToList();
         var json = JsonSerializer.Serialize(models, _jsonContext.ListPeerModel);
         await File.WriteAllTextAsync(_peersFilePath, json);
     }
@@ -99,17 +114,15 @@ public class FileBasedPeerRepository : IPeerRepository, ITrustedPeerStore
         await File.WriteAllTextAsync(_trustedHashesFilePath, json);
     }
 
-    private static Peer ToDomain(PeerModel model) =>
-        new(new PeerId(model.Id), model.IpAddress, new Endpoint(model.GrpcEndpoint.Port), model.Thumbprint, model.LastDirectConversationId is null ? null : new ConversationId(model.LastDirectConversationId.Value));
+    private Peer ToDomain(PeerModel model) =>
+        new(new IdentityPeerId(model.Id), model.Name);
 
-    private static PeerModel ToModel(Peer peer) =>
+    private PeerModel ToModel(Peer peer) =>
         new()
         {
             Id = peer.Id.Value,
-            IpAddress = peer.IpAddress,
-            GrpcEndpoint = new EndpointModel { Port = peer.GrpcEndpoint.Port },
-            Thumbprint = peer.Thumbprint,
-            LastDirectConversationId = peer.LastDirectConversationId?.Value
+            Name = peer.Name,
+            PublicKey = null
         };
 
     public async void Add(PublicKeyHash publicKeyHash)

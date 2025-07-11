@@ -1,4 +1,5 @@
-using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.IO;
 using System.Security.AccessControl;
 using System.Security.Cryptography;
 using System.Security.Principal;
@@ -10,10 +11,8 @@ namespace Percolator.Identity;
 public class PersistentKeyManagementService : IKeyManagementService
 {
     private readonly ICredentialService _credentialService;
-    private readonly ConcurrentDictionary<string, SemaphoreSlim> _fileLocks = new();
-    private static readonly JsonSerializerOptions _jsonOptions = new()
+    private static readonly JsonSerializerOptions s_jsonOptions = new()
     {
-        WriteIndented = true,
         Converters = { new ECParametersJsonConverter(), new ECPointJsonConverter() }
     };
     private readonly ILogger<PersistentKeyManagementService> _logger;
@@ -30,83 +29,76 @@ public class PersistentKeyManagementService : IKeyManagementService
 
     public async Task<X3dhKeys> GetOrCreateKeysAsync(string identityName)
     {
-        var basePath = IdentityPathHelper.GetBasePath(identityName);
-        var keysPath = Path.Combine(basePath, "keys");
-        Directory.CreateDirectory(keysPath);
-        var keyFilePath = Path.Combine(keysPath, $"{identityName}.json");
-        var fileLock = _fileLocks.GetOrAdd(keyFilePath, _ => new SemaphoreSlim(1, 1));
+        var keyFilePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Percolator", identityName, "keys.json");
 
-        await fileLock.WaitAsync();
-        try
+        if (File.Exists(keyFilePath))
         {
-            if (File.Exists(keyFilePath))
+            try
             {
-                _logger.LogInformation("Key file found for {IdentityName}. Loading keys.", identityName);
                 var encryptedBytes = await File.ReadAllBytesAsync(keyFilePath);
                 var decryptedBytes = _credentialService.Unprotect(encryptedBytes);
-                var keyContainer = JsonSerializer.Deserialize<KeyContainer>(decryptedBytes, _jsonOptions)!;
+                var keyContainer = JsonSerializer.Deserialize<KeyContainer>(decryptedBytes, s_jsonOptions);
 
-                var ikSigning = ECDsa.Create(keyContainer.IdentitySigningKey);
-                var ikAgreement = ECDiffieHellman.Create(keyContainer.IdentityAgreementKey);
-                var spk = ECDiffieHellman.Create(keyContainer.SignedPreKey);
-                var otps = keyContainer.OneTimePreKeys.Select(ECDiffieHellman.Create).ToArray();
+                if (keyContainer is not null)
+                {
+                    _logger.LogInformation("Existing keys loaded for {IdentityName}", identityName);
+                    var loadedIkSigning = ECDsa.Create(keyContainer.IdentitySigningKey);
+                    var loadedIkAgreement = ECDiffieHellman.Create(keyContainer.IdentityAgreementKey);
+                    var loadedSpk = ECDiffieHellman.Create(keyContainer.SignedPreKey);
+                    var loadedOtps = keyContainer.OneTimePreKeys.Select(p => { var k = ECDiffieHellman.Create(); k.ImportParameters(p); return k; }).ToArray();
 
-                return new X3dhKeys(ikSigning, ikAgreement, spk, otps);
+                    return new X3dhKeys(loadedIkSigning, loadedIkAgreement, loadedSpk, loadedOtps);
+                }
             }
-            else
+            catch (Exception ex) when (ex is JsonException or CryptographicException)
             {
-                _logger.LogInformation("No key file found for {IdentityName}. Creating new keys.", identityName);
-                using var ikSigning = ECDsa.Create(ECCurve.NamedCurves.nistP256);
-                using var ikAgreement = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-                using var spk = await CreatePreKeyAsync();
-                using var oneTimePreKeys = new DisposableCollection<ECDiffieHellman>(await Task.WhenAll(Enumerable.Range(0, 100).Select(_ => CreatePreKeyAsync())));
-
-                var container = new KeyContainer(
-                    ikSigning.ExportParameters(true),
-                    ikAgreement.ExportParameters(true),
-                    spk.ExportParameters(true),
-                    oneTimePreKeys.Select(k => k.ExportParameters(true)).ToArray()
-                );
-
-                var decryptedBytes = JsonSerializer.SerializeToUtf8Bytes(container, _jsonOptions);
-                var encryptedBytes = _credentialService.Protect(decryptedBytes);
-                await File.WriteAllBytesAsync(keyFilePath, encryptedBytes);
-                SetFileSecurity(keyFilePath);
-                _logger.LogInformation("New keys created and saved for {IdentityName}", identityName);
-
-                // Return a new set of keys from the persisted parameters to avoid returning disposed objects.
-                return new X3dhKeys(
-                    ECDsa.Create(container.IdentitySigningKey),
-                    ECDiffieHellman.Create(container.IdentityAgreementKey),
-                    ECDiffieHellman.Create(container.SignedPreKey),
-                    container.OneTimePreKeys.Select(ECDiffieHellman.Create).ToArray()
-                );
+                _logger.LogError(ex, "Failed to load or decrypt existing keys for {IdentityName}. A new set will be created.", identityName);
             }
         }
-        finally
+
+        _logger.LogInformation("No existing keys found for {IdentityName}. Creating a new set.", identityName);
+
+        var newIkSigning = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var newIkAgreement = await CreatePreKeyAsync();
+        var newSpk = await CreatePreKeyAsync();
+        var newOneTimePreKeys = await Task.WhenAll(Enumerable.Range(0, 10).Select(_ => CreatePreKeyAsync()));
+
+        var keysToDispose = new List<IDisposable> { newIkSigning, newIkAgreement, newSpk };
+        keysToDispose.AddRange(newOneTimePreKeys);
+
+        using (var disposableKeys = new DisposableCollection<IDisposable>(keysToDispose))
         {
-            fileLock.Release();
+            var keyContainer = new KeyContainer(
+                newIkSigning.ExportParameters(true),
+                newIkAgreement.ExportParameters(true),
+                newSpk.ExportParameters(true),
+                newOneTimePreKeys.Select(k => k.ExportParameters(true)).ToArray()
+            );
+
+            var decryptedBytes = JsonSerializer.SerializeToUtf8Bytes(keyContainer, s_jsonOptions);
+            var encryptedBytes = _credentialService.Protect(decryptedBytes);
+            Directory.CreateDirectory(Path.GetDirectoryName(keyFilePath)!);
+            await File.WriteAllBytesAsync(keyFilePath, encryptedBytes);
+            SetFileSecurity(keyFilePath);
+            _logger.LogInformation("New keys created and saved for {IdentityName}", identityName);
+
+            // Return the newly created keys
+            return new X3dhKeys(newIkSigning, newIkAgreement, newSpk, newOneTimePreKeys);
         }
     }
 
     private Task<ECDiffieHellman> CreatePreKeyAsync()
     {
-        return Task.Run(() => ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256));
+        return Task.FromResult(ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256));
     }
 
-    private void SetFileSecurity(string path)
+    private static void SetFileSecurity(string filePath)
     {
-        var fileInfo = new FileInfo(path);
-        var fileSecurity = fileInfo.GetAccessControl();
-        var currentUser = WindowsIdentity.GetCurrent().User;
-        if (currentUser is not null)
+        if (OperatingSystem.IsWindows())
         {
-            fileSecurity.SetOwner(currentUser);
-            var rule = new FileSystemAccessRule(
-                currentUser,
-                FileSystemRights.FullControl,
-                AccessControlType.Allow);
-            fileSecurity.SetAccessRule(rule);
+            var fileInfo = new FileInfo(filePath);
+            var fileSecurity = fileInfo.GetAccessControl();
+            fileSecurity.AddAccessRule(new FileSystemAccessRule(new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, null), FileSystemRights.Read, AccessControlType.Allow));
             fileInfo.SetAccessControl(fileSecurity);
         }
     }

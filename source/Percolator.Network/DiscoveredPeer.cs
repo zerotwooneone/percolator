@@ -5,7 +5,7 @@ namespace Percolator.Network;
 /// <summary>
 /// Represents a discovered peer on the network.
 /// </summary>
-public class Peer
+public class DiscoveredPeer
 {
     /// <summary>
     /// A unique identifier for the peer session.
@@ -27,7 +27,7 @@ public class Peer
     /// </summary>
     public DateTime LastSeenUtc { get; set; }
 
-    public Peer(PeerId id, IPAddress ipAddress, int port, PublicKeyHash publicKeyHash)
+    public DiscoveredPeer(PeerId id, IPAddress ipAddress, int port, PublicKeyHash publicKeyHash)
     {
         Id = id;
         GrpcEndpoint = new IPEndPoint(ipAddress, port);
@@ -42,7 +42,7 @@ public class Peer
 
     public override bool Equals(object? obj)
     {
-        return obj is Peer other && PublicKeyHash.Equals(other.PublicKeyHash);
+        return obj is DiscoveredPeer other && PublicKeyHash.Equals(other.PublicKeyHash);
     }
 
     public override int GetHashCode()
@@ -50,7 +50,7 @@ public class Peer
         return PublicKeyHash.GetHashCode();
     }
 
-    public static bool operator ==(Peer? left, Peer? right)
+    public static bool operator ==(DiscoveredPeer? left, DiscoveredPeer? right)
     {
         if (left is null)
         {
@@ -59,5 +59,5 @@ public class Peer
         return left.Equals(right);
     }
 
-    public static bool operator !=(Peer? left, Peer? right) => !(left == right);
+    public static bool operator !=(DiscoveredPeer? left, DiscoveredPeer? right) => !(left == right);
 }

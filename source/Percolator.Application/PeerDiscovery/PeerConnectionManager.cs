@@ -3,6 +3,9 @@ using Microsoft.Extensions.Logging;
 using Percolator.Contracts;
 using Percolator.Identity;
 using System.Collections.Concurrent;
+using System.Security.Cryptography;
+using Percolator.Network;
+using NetworkPeerId = Percolator.Network.PeerId;
 using IdentityPeerId = Percolator.Identity.PeerId;
 
 namespace Percolator.Application.PeerDiscovery;
@@ -12,38 +15,38 @@ public class PeerConnectionManager : IPeerConnectionManager
     private readonly ConcurrentDictionary<string, GrpcChannel> _channels = new();
     private readonly ILogger<PeerConnectionManager> _logger;
     private readonly IPeerRepository _peerRepository;
+    private readonly IPeerConnectionRepository _peerConnectionRepository;
 
-    public PeerConnectionManager(ILogger<PeerConnectionManager> logger, IPeerRepository peerRepository)
+    public PeerConnectionManager(ILogger<PeerConnectionManager> logger, IPeerRepository peerRepository, IPeerConnectionRepository peerConnectionRepository)
     {
         _logger = logger;
         _peerRepository = peerRepository;
+        _peerConnectionRepository = peerConnectionRepository;
     }
 
     public async Task<TransportService.TransportServiceClient> GetTransportClient(IdentityPeerId peerId)
     {
-        var peer = await _peerRepository.GetByIdAsync(peerId);
-        if (peer is null)
+        var connectionInfo = await _peerConnectionRepository.GetByIdAsync(new NetworkPeerId(peerId.Value));
+        if (connectionInfo is null)
         {
-            throw new ArgumentException($"Peer with ID '{peerId}' not found.", nameof(peerId));
+            throw new ArgumentException($"No connection info found for peer with ID '{peerId}'.", nameof(peerId));
         }
 
-        var targetUrl = $"https://{peer.IpAddress}:{peer.GrpcEndpoint.Port}";
+
+        var grpcEndPoint = TryGetEndpoint(connectionInfo);
+        if (grpcEndPoint is null)
+        {
+            throw new ArgumentException($"No gRPC endpoints found for peer with ID '{peerId}'.", nameof(peerId));
+        }
+        var targetUrl = $"https://{grpcEndPoint.EndPoint}";
 
         var channel = _channels.GetOrAdd(targetUrl, url =>
         {
             var handler = new HttpClientHandler();
-            // This callback is the key to our P2P trust model.
-            // We only trust peers whose certificate thumbprint matches the one from discovery.
-            handler.ServerCertificateCustomValidationCallback = (request, cert, chain, errors) =>
-            {
-                if (cert is null)
-                {
-                    return false;
-                }
-                return string.Equals(peer.Thumbprint, cert.GetCertHashString(), StringComparison.OrdinalIgnoreCase);
-            };
+            // TODO: use TLS certificate from peer connection
+            handler.ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator;
 
-            _logger.LogInformation("Creating gRPC channel for peer {IpAddress}:{Port} at target {TargetUrl}", peer.IpAddress, peer.GrpcEndpoint.Port, url);
+            _logger.LogInformation("Creating gRPC channel for peer at target {TargetUrl}", url);
             return GrpcChannel.ForAddress(url, new GrpcChannelOptions
             {
                 HttpHandler = handler
@@ -53,19 +56,30 @@ public class PeerConnectionManager : IPeerConnectionManager
         return new TransportService.TransportServiceClient(channel);
     }
 
+    private static GrpcEndPoint? TryGetEndpoint(PeerConnection connectionInfo)
+    {
+        //todo:find a way to determine the right endpoint
+        return connectionInfo.GrpcEndPoints.FirstOrDefault();
+    }
+
     public async Task RemovePeer(IdentityPeerId peerId)
     {
-        var peer = await _peerRepository.GetByIdAsync(peerId);
-        if (peer is null)
+        var connectionInfo = await _peerConnectionRepository.GetByIdAsync(new NetworkPeerId(peerId.Value));
+        if (connectionInfo is null)
         {
-            _logger.LogWarning("Attempted to remove a non-existent peer with ID '{PeerId}'.", peerId);
+            _logger.LogWarning("Attempted to remove a peer with no connection info: ID '{PeerId}'.", peerId);
             return;
         }
 
-        var targetUrl = $"https://{peer.IpAddress}:{peer.GrpcEndpoint.Port}";
+        var grpcEndPoint = TryGetEndpoint(connectionInfo);
+        if (grpcEndPoint is null)
+        {
+            throw new ArgumentException($"No gRPC endpoints found for peer with ID '{peerId}'.", nameof(peerId));
+        }
+        var targetUrl = $"https://{grpcEndPoint.EndPoint}";
         if (_channels.TryRemove(targetUrl, out var channel))
         {
-            _logger.LogInformation("Disposing gRPC channel for peer {IpAddress}:{Port}", peer.IpAddress, peer.GrpcEndpoint.Port);
+            _logger.LogInformation("Disposing gRPC channel for peer {PeerId} at {TargetUrl}", peerId, targetUrl);
             channel.Dispose();
         }
     }

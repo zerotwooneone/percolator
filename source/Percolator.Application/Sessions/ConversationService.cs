@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Formats.Asn1;
+using System.Net;
 using Google.Protobuf;
 using Grpc.Net.Client;
 using Microsoft.Extensions.Logging;
@@ -9,6 +10,8 @@ using Percolator.Chat;
 using Percolator.Contracts;
 using Percolator.Cryptography;
 using Percolator.Identity;
+using Percolator.Network;
+using NetworkPeerId = Percolator.Network.PeerId;
 using Percolator.Sessions;
 using IdentityPeerId = Percolator.Identity.PeerId;
 using ChatConversation = Percolator.Chat.Conversation;
@@ -23,37 +26,37 @@ namespace Percolator.Application.Sessions;
 public class ConversationService : IConversationService
 {
     private readonly ActiveIdentityContext _activeIdentityContext;
-    private readonly IX3DHManager _cryptoManager;
     private readonly X3DHOrchestrator _orchestrator;
     private readonly DirectSessionManager _sessionManager;
     private readonly IConversationRepository _conversationRepository;
     private readonly IPeerRepository _peerRepository;
     private readonly ILocalPeerProvider _localPeerProvider;
     private readonly ILogger<ConversationService> _logger;
+    private readonly IPeerConnectionRepository _peerConnectionRepository;
 
-    public ConversationService(
-        ActiveIdentityContext activeIdentityContext,
+    public ConversationService(ActiveIdentityContext activeIdentityContext,
         IX3DHManager cryptoManager,
         X3DHOrchestrator orchestrator,
         DirectSessionManager sessionManager,
         IConversationRepository conversationRepository,
         IPeerRepository peerRepository,
         ILocalPeerProvider localPeerProvider,
-        ILogger<ConversationService> logger)
+        ILogger<ConversationService> logger, 
+        IPeerConnectionRepository peerConnectionRepository)
     {
         _activeIdentityContext = activeIdentityContext;
-        _cryptoManager = cryptoManager;
         _orchestrator = orchestrator;
         _sessionManager = sessionManager;
         _conversationRepository = conversationRepository;
         _peerRepository = peerRepository;
         _localPeerProvider = localPeerProvider;
         _logger = logger;
+        _peerConnectionRepository = peerConnectionRepository;
     }
 
-    public async Task<ChatConversationId> CreateDirectConversationAsync(string host, int port, string remotePublicIdentityKey)
+    public async Task<ChatConversationId> CreateDirectConversationAsync(DnsEndPoint endpoint, string peerName, TlsCertificate? tlsCertificate = null)
     {
-        _logger.LogInformation("Attempting to create direct conversation with {Host}:{Port}", host, port);
+        _logger.LogInformation("Attempting to create direct conversation with {endpoint}", endpoint);
 
         var localKeys = _activeIdentityContext.Keys;
         if (localKeys is null)
@@ -68,14 +71,14 @@ public class ConversationService : IConversationService
 
         using var signedPreKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var signedPreKeyPublicBytes = signedPreKey.PublicKey.ExportSubjectPublicKeyInfo();
-        var signature = _cryptoManager.SignPreKey(localKeys.IdentitySigningKey, new PublicKey(signedPreKeyPublicBytes));
+        var signature = localKeys.IdentitySigningKey.SignData(signedPreKey.PublicKey.ExportSubjectPublicKeyInfo(), HashAlgorithmName.SHA256);
+
         var localBundle = new ContractsPreKeyBundle
         {
-            IdentityAgreementKey = ByteString.CopyFrom(localKeys.IdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
             IdentitySigningKey = ByteString.CopyFrom(localKeys.IdentitySigningKey.ExportSubjectPublicKeyInfo()),
+            IdentityAgreementKey = ByteString.CopyFrom(localKeys.IdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
             SignedPreKey = ByteString.CopyFrom(signedPreKeyPublicBytes),
-            PreKeySignature = ByteString.CopyFrom(signature.Value),
-            OneTimePreKey = ByteString.CopyFrom(localKeys.OneTimePreKeys[0].PublicKey.ExportSubjectPublicKeyInfo())
+            PreKeySignature = ByteString.CopyFrom(signature)
         };
 
         using var ephemeralKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
@@ -85,43 +88,31 @@ public class ConversationService : IConversationService
         var request = new EstablishSessionRequest
         {
             InitiatorBundle = localBundle,
-            InitiatorEphemeralKey = ByteString.CopyFrom(ephemeralKey.PublicKey.ExportSubjectPublicKeyInfo()),
-            LongTermIdentityKey = ByteString.CopyFrom(localKeys.IdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo())
+            InitiatorEphemeralKey = ByteString.CopyFrom(ephemeralKey.PublicKey.ExportSubjectPublicKeyInfo())
         };
 
-        using var channel = CreateChannel(host, port, remotePublicIdentityKey);
+        using var channel = CreateChannel(endpoint, tlsCertificate);
         var client = new TransportService.TransportServiceClient(channel);
 
-        _logger.LogInformation("Sending EstablishSessionRequest to {Host}:{Port}", host, port);
+        _logger.LogInformation("Sending EstablishSessionRequest to {endpoint}", endpoint);
         var response = await client.EstablishSessionAsync(request);
 
         Peer? peer = null;
 
         // 1. Look up peer by the long-term public key provided.
-        var longTermKeyBytes = Convert.FromBase64String(remotePublicIdentityKey);
-        var longTermThumbprint = Convert.ToHexString(SHA1.HashData(longTermKeyBytes));
-        _logger.LogInformation("Attempting to find peer by long-term key thumbprint: {Thumbprint}", longTermThumbprint);
-        peer = await _peerRepository.GetByThumbprintAsync(longTermThumbprint);
-
+        _logger.LogInformation("Attempting to find peer by name: {PeerName}", peerName);
+        peer = await _peerRepository.GetByNameAsync(peerName);
+        
         // 2. If not found, look up by the key in the responder's bundle.
         if (peer is null)
         {
-            var bundleKeyBytes = response.ResponderBundle.IdentityAgreementKey.ToByteArray();
-            var bundleThumbprint = Convert.ToHexString(SHA1.HashData(bundleKeyBytes));
-            _logger.LogInformation("Attempting to find peer by bundle key thumbprint: {Thumbprint}", bundleThumbprint);
-            peer = await _peerRepository.GetByThumbprintAsync(bundleThumbprint);
+            throw new InvalidOperationException($"Could not find peer with name {peerName}. Please provide the peer's TLS certificate.");
         }
-
-        // 3. If still not found, create a new peer associated with the long-term key's thumbprint.
-        if (peer is null)
+        
+        var peerConnection = await _peerConnectionRepository.GetByIdAsync(new NetworkPeerId(peer.Id.Value));
+        if (peerConnection is null)
         {
-            _logger.LogInformation("First contact with peer with thumbprint {Thumbprint}. Creating new identity.", longTermThumbprint);
-            peer = new Peer(
-                new IdentityPeerId(Guid.NewGuid()),
-                host,
-                new Endpoint(port),
-                longTermThumbprint);
-            await _peerRepository.AddAsync(peer);
+            throw new InvalidOperationException($"Could not find peer connection info for peer with name {peerName}.");
         }
 
         var remotePeerId = new SessionPeerId(peer.Id.Value);
@@ -141,8 +132,8 @@ public class ConversationService : IConversationService
         await _sessionManager.EstablishSessionAsInitiatorAsync(
             new SessionConversationId(conversationId.Value),
             remotePeerId,
-            new OpaquePublicKey(longTermKeyBytes),
-            new OpaquePublicKey(response.ResponderBundle.SignedPreKey.ToByteArray()),
+            new SessionIdentityKey(response.ResponderBundle.IdentityAgreementKey.ToByteArray()),
+            new SessionRatchetKey(response.ResponderBundle.SignedPreKey.ToByteArray()),
             sharedSecret);
 
         _logger.LogInformation("Successfully established session and created conversation {ConversationId}", conversationId);
@@ -150,18 +141,15 @@ public class ConversationService : IConversationService
         return conversationId;
     }
 
-    public async Task<ChatConversationId?> GetLastActiveConversationIdAsync(Guid peerId)
+    public Task<ChatConversationId?> GetLastActiveConversationIdAsync(Guid peerId)
     {
-        var identityPeerId = new IdentityPeerId(peerId);
-        var peer = await _peerRepository.GetByIdAsync(identityPeerId);
-        return peer?.LastDirectConversationId is null
-            ? null
-            : new ChatConversationId(peer.LastDirectConversationId.Value);
+        //todo: create Session domain peer that tracks last active conversation
+        return Task.FromResult<ChatConversationId?>(null);
     }
 
-    private GrpcChannel CreateChannel(string host, int port, string remotePublicIdentityKey)
+    private GrpcChannel CreateChannel(DnsEndPoint endpoint, TlsCertificate? tlsCertificate = null)
     {
-        var address = $"https://{host}:{port}";
+        var address = $"https://{endpoint.Host}:{endpoint.Port}";
         var handler = new HttpClientHandler();
         handler.ServerCertificateCustomValidationCallback = (request, cert, chain, errors) =>
         {
@@ -199,18 +187,19 @@ public class ConversationService : IConversationService
                     _logger.LogWarning("ASN.1 reader has extra data after reading the OCTET STRING. The data may be malformed.");
                 }
 
-                var validationResult = actualPublicKey.SequenceEqual(Convert.FromBase64String(remotePublicIdentityKey));
+                var validationResult = tlsCertificate is not null && actualPublicKey.SequenceEqual(tlsCertificate.Value);
                 if (validationResult)
                 {
                     _logger.LogInformation("Public key in certificate matches expected public key. Validation successful.");
                 }
-                else
+                else if (tlsCertificate is not null)
                 {
                     _logger.LogError("Public key in certificate does NOT match expected public key. Validation failed.");
-                    _logger.LogDebug("Expected Key (Base64): {ExpectedKey}", Convert.ToBase64String(Convert.FromBase64String(remotePublicIdentityKey)));
+                    _logger.LogDebug("Expected Key (Base64): {ExpectedKey}", Convert.ToBase64String(tlsCertificate.Value));
                     _logger.LogDebug("Actual Key (Base64): {ActualKey}", Convert.ToBase64String(actualPublicKey));
+                    return false;
                 }
-                return validationResult;
+                return true;
             }
             catch (AsnContentException e)
             {

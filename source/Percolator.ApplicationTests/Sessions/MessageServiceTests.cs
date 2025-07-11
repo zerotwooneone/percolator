@@ -16,7 +16,6 @@ using ChatParticipantId = Percolator.Chat.ValueObjects.ParticipantId;
 using IdentityPeerId = Percolator.Identity.PeerId;
 using SessionConversationId = Percolator.Sessions.ConversationId;
 using SessionPeerId = Percolator.Sessions.PeerId;
-using CryptographyPublicKey = Percolator.Cryptography.PublicKey;
 using Percolator.Infrastructure.Sessions;
 using Microsoft.Extensions.Options;
 using Percolator.Infrastructure;
@@ -56,7 +55,6 @@ public class MessageServiceTests
         _sessionManager = new DirectSessionManager(
             _sessionStore,
             _mockConversationRepository.Object,
-            _mockPeerRepository.Object,
             _mockLocalPeerProvider.Object,
             _mockMessageStore.Object,
             _activeIdentityContext);
@@ -108,9 +106,9 @@ public class MessageServiceTests
             RootKey = new RootKey(new byte[32]),
             SendingCounter = 0,
             ReceivingCounter = 0,
-            TheirIdentityPublicKey = new PublicKey(ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256).PublicKey.ExportSubjectPublicKeyInfo()),
-            TheirDhRatchetPublicKey = new PublicKey(ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256).PublicKey.ExportSubjectPublicKeyInfo()),
-            DhRatchetPrivateKey = new PrivateKey(localDhKey.ExportECPrivateKey()),
+            TheirIdentityPublicKey = new RatchetIdentityKey(ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256).PublicKey.ExportSubjectPublicKeyInfo()),
+            TheirDhRatchetPublicKey = new RatchetEphemeralKey(ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256).PublicKey.ExportSubjectPublicKeyInfo()),
+            DhRatchetPrivateKey = new PrivateEphemeralKey(localDhKey.ExportECPrivateKey()),
             SkippedMessageKeys = new Dictionary<ulong, MessageKey>()
         };
 

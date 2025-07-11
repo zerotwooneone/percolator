@@ -22,10 +22,11 @@ public class ConversationTests
     public void Constructor_WithFewerThanTwoParticipants_ShouldThrowArgumentException()
     {
         // Arrange
+        var id = _fixture.Create<ConversationId>();
         var participants = _fixture.CreateMany<ParticipantId>(1).ToList();
 
         // Act
-        Action action = () => new Conversation(participants);
+        Action action = () => new Conversation(id, participants);
 
         // Assert
         action.Should().Throw<ArgumentException>();
@@ -35,11 +36,12 @@ public class ConversationTests
     public void Constructor_WithDuplicateParticipants_ShouldThrowArgumentException()
     {
         // Arrange
+        var id = _fixture.Create<ConversationId>();
         var participantId = _fixture.Create<ParticipantId>();
         var participants = new List<ParticipantId> { participantId, participantId };
 
         // Act
-        Action action = () => new Conversation(participants);
+        Action action = () => new Conversation(id, participants);
 
         // Assert
         action.Should().Throw<ArgumentException>();
@@ -49,13 +51,15 @@ public class ConversationTests
     public void Constructor_WithValidParticipants_ShouldCreateConversation()
     {
         // Arrange
+        var id = _fixture.Create<ConversationId>();
         var participants = _fixture.CreateMany<ParticipantId>(2).ToList();
 
         // Act
-        var conversation = new Conversation(participants);
+        var conversation = new Conversation(id, participants);
 
         // Assert
         conversation.Should().NotBeNull();
+        conversation.Id.Should().Be(id);
         conversation.Participants.Should().BeEquivalentTo(participants);
         conversation.Messages.Should().BeEmpty();
     }
@@ -64,8 +68,9 @@ public class ConversationTests
     public void AddMessage_WhenSenderIsParticipant_ShouldAddMessageToConversation()
     {
         // Arrange
+        var id = _fixture.Create<ConversationId>();
         var participants = _fixture.CreateMany<ParticipantId>(2).ToList();
-        var conversation = new Conversation(participants);
+        var conversation = new Conversation(id, participants);
         var senderId = participants.First();
         var content = _fixture.Create<string>();
 
@@ -83,8 +88,9 @@ public class ConversationTests
     public void AddMessage_WhenSenderIsNotParticipant_ShouldThrowInvalidOperationException()
     {
         // Arrange
+        var id = _fixture.Create<ConversationId>();
         var participants = _fixture.CreateMany<ParticipantId>(2).ToList();
-        var conversation = new Conversation(participants);
+        var conversation = new Conversation(id, participants);
         var senderId = _fixture.Create<ParticipantId>();
         var content = _fixture.Create<string>();
 
@@ -99,8 +105,9 @@ public class ConversationTests
     public void AddMessage_WithNullOrWhitespaceContent_ShouldThrowArgumentException()
     {
         // Arrange
+        var id = _fixture.Create<ConversationId>();
         var participants = _fixture.CreateMany<ParticipantId>(2).ToList();
-        var conversation = new Conversation(participants);
+        var conversation = new Conversation(id, participants);
         var senderId = participants.First();
 
         // Act
@@ -118,8 +125,9 @@ public class ConversationTests
     public void AddParticipant_WhenNotAlreadyInConversation_ShouldAddParticipant()
     {
         // Arrange
+        var id = _fixture.Create<ConversationId>();
         var participants = _fixture.CreateMany<ParticipantId>(2).ToList();
-        var conversation = new Conversation(participants);
+        var conversation = new Conversation(id, participants);
         var newParticipant = _fixture.Create<ParticipantId>();
 
         // Act
@@ -134,8 +142,9 @@ public class ConversationTests
     public void AddParticipant_WhenAlreadyInConversation_ShouldThrowInvalidOperationException()
     {
         // Arrange
+        var id = _fixture.Create<ConversationId>();
         var participants = _fixture.CreateMany<ParticipantId>(2).ToList();
-        var conversation = new Conversation(participants);
+        var conversation = new Conversation(id, participants);
         var existingParticipant = participants.First();
 
         // Act
@@ -149,8 +158,9 @@ public class ConversationTests
     public void RemoveParticipant_WhenParticipantExists_ShouldRemoveParticipant()
     {
         // Arrange
+        var id = _fixture.Create<ConversationId>();
         var participants = _fixture.CreateMany<ParticipantId>(3).ToList();
-        var conversation = new Conversation(participants);
+        var conversation = new Conversation(id, participants);
         var participantToRemove = participants.First();
 
         // Act
@@ -165,8 +175,9 @@ public class ConversationTests
     public void RemoveParticipant_WhenParticipantDoesNotExist_ShouldThrowInvalidOperationException()
     {
         // Arrange
+        var id = _fixture.Create<ConversationId>();
         var participants = _fixture.CreateMany<ParticipantId>(3).ToList();
-        var conversation = new Conversation(participants);
+        var conversation = new Conversation(id, participants);
         var nonExistentParticipant = _fixture.Create<ParticipantId>();
 
         // Act
@@ -180,8 +191,9 @@ public class ConversationTests
     public void RemoveParticipant_WhenConversationHasOnlyTwoParticipants_ShouldThrowInvalidOperationException()
     {
         // Arrange
+        var id = _fixture.Create<ConversationId>();
         var participants = _fixture.CreateMany<ParticipantId>(2).ToList();
-        var conversation = new Conversation(participants);
+        var conversation = new Conversation(id, participants);
         var participantToRemove = participants.First();
 
         // Act
@@ -195,8 +207,9 @@ public class ConversationTests
     public void AddReaction_WhenMessageExistsAndUserIsParticipant_ShouldAddReactionToMessage()
     {
         // Arrange
+        var id = _fixture.Create<ConversationId>();
         var participants = _fixture.CreateMany<ParticipantId>(2).ToList();
-        var conversation = new Conversation(participants);
+        var conversation = new Conversation(id, participants);
         var senderId = participants.First();
         var reactorId = participants.Last();
         var emoji = "👍";
@@ -217,8 +230,9 @@ public class ConversationTests
     public void AddReaction_WhenUserIsNotParticipant_ShouldThrowInvalidOperationException()
     {
         // Arrange
+        var id = _fixture.Create<ConversationId>();
         var participants = _fixture.CreateMany<ParticipantId>(2).ToList();
-        var conversation = new Conversation(participants);
+        var conversation = new Conversation(id, participants);
         var senderId = participants.First();
         var nonParticipantId = _fixture.Create<ParticipantId>();
         var emoji = "👍";
@@ -236,8 +250,9 @@ public class ConversationTests
     public void AddReaction_WhenMessageDoesNotExist_ShouldThrowInvalidOperationException()
     {
         // Arrange
+        var id = _fixture.Create<ConversationId>();
         var participants = _fixture.CreateMany<ParticipantId>(2).ToList();
-        var conversation = new Conversation(participants);
+        var conversation = new Conversation(id, participants);
         var reactorId = participants.First();
         var nonExistentMessageId = _fixture.Create<MessageId>();
         var emoji = "👍";
@@ -253,8 +268,9 @@ public class ConversationTests
     public void AddReaction_WithNullOrWhitespaceEmoji_ShouldThrowArgumentException()
     {
         // Arrange
+        var id = _fixture.Create<ConversationId>();
         var participants = _fixture.CreateMany<ParticipantId>(2).ToList();
-        var conversation = new Conversation(participants);
+        var conversation = new Conversation(id, participants);
         var senderId = participants.First();
         var reactorId = participants.Last();
         conversation.AddMessage(senderId, "Hello");
@@ -275,8 +291,9 @@ public class ConversationTests
     public void AddReaction_WhenReactionAlreadyExists_ShouldNotAddDuplicate()
     {
         // Arrange
+        var id = _fixture.Create<ConversationId>();
         var participants = _fixture.CreateMany<ParticipantId>(2).ToList();
-        var conversation = new Conversation(participants);
+        var conversation = new Conversation(id, participants);
         var senderId = participants.First();
         var reactorId = participants.Last();
         var emoji = "👍";
@@ -295,8 +312,9 @@ public class ConversationTests
     public void RemoveReaction_WhenReactionExists_ShouldRemoveReactionFromMessage()
     {
         // Arrange
+        var id = _fixture.Create<ConversationId>();
         var participants = _fixture.CreateMany<ParticipantId>(2).ToList();
-        var conversation = new Conversation(participants);
+        var conversation = new Conversation(id, participants);
         var senderId = participants.First();
         var reactorId = participants.Last();
         var emoji = "👍";
@@ -315,8 +333,9 @@ public class ConversationTests
     public void RemoveReaction_WhenUserIsNotParticipant_ShouldThrowInvalidOperationException()
     {
         // Arrange
+        var id = _fixture.Create<ConversationId>();
         var participants = _fixture.CreateMany<ParticipantId>(2).ToList();
-        var conversation = new Conversation(participants);
+        var conversation = new Conversation(id, participants);
         var senderId = participants.First();
         var nonParticipantId = _fixture.Create<ParticipantId>();
         var emoji = "👍";
@@ -334,11 +353,12 @@ public class ConversationTests
     public void Constructor_WithName_ShouldCreateConversationWithName()
     {
         // Arrange
+        var id = _fixture.Create<ConversationId>();
         var participants = _fixture.CreateMany<ParticipantId>(2).ToList();
         var name = _fixture.Create<string>();
 
         // Act
-        var conversation = new Conversation(participants, name);
+        var conversation = new Conversation(id, participants, name);
 
         // Assert
         conversation.Name.Should().Be(name);
@@ -348,8 +368,9 @@ public class ConversationTests
     public void ChangeName_WhenCalled_ShouldUpdateConversationName()
     {
         // Arrange
+        var id = _fixture.Create<ConversationId>();
         var participants = _fixture.CreateMany<ParticipantId>(2).ToList();
-        var conversation = new Conversation(participants);
+        var conversation = new Conversation(id, participants);
         var newName = _fixture.Create<string>();
 
         // Act
@@ -363,8 +384,9 @@ public class ConversationTests
     public void MarkMessageAsRead_WhenMessageExistsAndUserIsParticipant_ShouldAddReadReceipt()
     {
         // Arrange
+        var id = _fixture.Create<ConversationId>();
         var participants = _fixture.CreateMany<ParticipantId>(2).ToList();
-        var conversation = new Conversation(participants);
+        var conversation = new Conversation(id, participants);
         var senderId = participants.First();
         var readerId = participants.Last();
         conversation.AddMessage(senderId, "Hello");
@@ -384,8 +406,9 @@ public class ConversationTests
     public void MarkMessageAsRead_WhenUserIsNotParticipant_ShouldThrowInvalidOperationException()
     {
         // Arrange
+        var id = _fixture.Create<ConversationId>();
         var participants = _fixture.CreateMany<ParticipantId>(2).ToList();
-        var conversation = new Conversation(participants);
+        var conversation = new Conversation(id, participants);
         var nonParticipantId = _fixture.Create<ParticipantId>();
         conversation.AddMessage(participants.First(), "Hello");
         var messageId = conversation.Messages.First().Id;
@@ -401,8 +424,9 @@ public class ConversationTests
     public void MarkMessageAsRead_WhenMessageDoesNotExist_ShouldThrowInvalidOperationException()
     {
         // Arrange
+        var id = _fixture.Create<ConversationId>();
         var participants = _fixture.CreateMany<ParticipantId>(2).ToList();
-        var conversation = new Conversation(participants);
+        var conversation = new Conversation(id, participants);
         var readerId = participants.First();
         var nonExistentMessageId = _fixture.Create<MessageId>();
 
@@ -417,8 +441,9 @@ public class ConversationTests
     public void MarkMessageAsRead_WhenAlreadyRead_ShouldNotAddDuplicateReceipt()
     {
         // Arrange
+        var id = _fixture.Create<ConversationId>();
         var participants = _fixture.CreateMany<ParticipantId>(2).ToList();
-        var conversation = new Conversation(participants);
+        var conversation = new Conversation(id, participants);
         var senderId = participants.First();
         var readerId = participants.Last();
         conversation.AddMessage(senderId, "Hello");
@@ -430,20 +455,5 @@ public class ConversationTests
 
         // Assert
         message.ReadReceipts.Should().HaveCount(1);
-    }
-
-    [Test]
-    public void ChangeAvatar_WhenCalled_ShouldUpdateConversationAvatarUrl()
-    {
-        // Arrange
-        var participants = _fixture.CreateMany<ParticipantId>(2).ToList();
-        var conversation = new Conversation(participants);
-        var avatarUrl = _fixture.Create<string>();
-
-        // Act
-        conversation.ChangeAvatar(avatarUrl);
-
-        // Assert
-        conversation.AvatarUrl.Should().Be(avatarUrl);
     }
 }

@@ -48,7 +48,6 @@ public class DirectSessionManagerTests
         _sessionManager = new DirectSessionManager(
             _mockSessionStore.Object,
             _mockConversationRepository.Object,
-            _mockPeerRepository.Object,
             _mockLocalPeerProvider.Object,
             _mockMessageStore.Object,
             _mockActiveIdentityContext.Object

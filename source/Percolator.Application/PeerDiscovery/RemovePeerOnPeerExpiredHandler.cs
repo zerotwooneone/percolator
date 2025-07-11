@@ -19,7 +19,7 @@ public class RemovePeerOnPeerExpiredHandler : INotificationHandler<PeerExpiredNo
 
     public async Task Handle(PeerExpiredNotification notification, CancellationToken cancellationToken)
     {
-        var networkPeer = notification.Peer;
+        var networkPeer = notification.DiscoveredPeer;
         _logger.LogInformation("- Peer expired: {Endpoint}", networkPeer.GrpcEndpoint);
 
         var identityPeerId = new PeerId(networkPeer.Id.Value);

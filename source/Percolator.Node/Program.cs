@@ -12,7 +12,9 @@ using Percolator.Application;
 using Percolator.Application.Identity;
 using Percolator.Application.Network;
 using Percolator.Application.Sessions;
+using Percolator.Identity;
 using Percolator.Infrastructure;
+using Percolator.Network;
 using ChatConversationId = Percolator.Chat.ValueObjects.ConversationId;
 
 var rootCommand = new RootCommand("Percolator Node: A secure peer-to-peer communication tool.");
@@ -37,10 +39,14 @@ var hostCommand = new Command("host", "Starts the node, listens for peers, and h
 rootCommand.AddCommand(hostCommand);
 
 // *** Connect Command ***
-var invitationLinkArgument = new Argument<string>("link", "The percolator:// invitation link from the peer.");
-var connectCommand = new Command("connect", "Connects to a peer using an invitation link.")
+var endpointArgument = new Argument<string>("endpoint", "The endpoint of the peer (e.g., localhost:5000 or just localhost).");
+var peerNameOption = new Option<string>("--peer-name", "The name of the peer to connect to.") { IsRequired = true };
+var remoteTlsKeyOption = new Option<string>("--remote-tls-key", "The public key of the remote TLS certificate (for TOFU).") { IsRequired = true };
+var connectCommand = new Command("connect", "Connects to a peer using their endpoint.")
 {
-    invitationLinkArgument,
+    endpointArgument,
+    peerNameOption,
+    remoteTlsKeyOption,
     identityOption // Add identity option to client commands
 };
 rootCommand.AddCommand(connectCommand);
@@ -49,14 +55,16 @@ rootCommand.AddCommand(connectCommand);
 var conversationIdOption = new Option<Guid?>("--conversation-id", "The ID of the conversation. If omitted, the last active conversation with the target peer will be used.");
 var peerIdOption = new Option<Guid?>("--peer-id", "The ID of the peer to send the message to. Required if conversation-id is not specified.");
 var messageArgument = new Argument<string>("message", "The plaintext message to send.");
-var inviteOption = new Option<string>("--invite", "The invitation link to connect and send in one step.");
+var endpointOption = new Option<string>("--endpoint", "The endpoint of the peer to establish a new session with before sending (e.g., localhost:5000 or just localhost).");
 
 var sendCommand = new Command("send", "Sends an encrypted message to a peer over an established session.")
 {
     conversationIdOption,
     peerIdOption,
     messageArgument,
-    inviteOption,
+    endpointOption,
+    peerNameOption, // Re-use from connect command
+    remoteTlsKeyOption, // Re-use from connect command
     identityOption // Add identity option to client commands
 };
 rootCommand.AddCommand(sendCommand);
@@ -149,11 +157,22 @@ async Task HostCommandHandler(InvocationContext context)
 
 async Task ConnectCommandHandler(InvocationContext context)
 {
-    var link = context.ParseResult.GetValueForArgument(invitationLinkArgument);
+    var endpointString = context.ParseResult.GetValueForArgument(endpointArgument);
     var identityName = context.ParseResult.GetValueForOption(identityOption);
+    var peerName = context.ParseResult.GetValueForOption(peerNameOption)!;
+    var remoteTlsKey = context.ParseResult.GetValueForOption(remoteTlsKeyOption)!;
 
     // Build client-specific service provider
     var configuration = new ConfigurationBuilder().AddJsonFile("appsettings.json", optional: true).Build();
+
+    if (!TryParseEndpoint(endpointString, configuration, out var endpoint))
+    {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine($"Invalid endpoint format: '{endpointString}'. Expected format is host:port or just host.");
+        Console.ResetColor();
+        return;
+    }
+
     await using var serviceProvider = BuildServiceProvider(configuration);
 
     // Initialize identity
@@ -164,15 +183,15 @@ async Task ConnectCommandHandler(InvocationContext context)
 
     try
     {
-        var invitation = InvitationLink.Parse(link);
-        Console.WriteLine($"Connecting to {invitation.Host}:{invitation.Port}...");
-        var conversationId = await conversationService.CreateDirectConversationAsync(invitation.Host, invitation.Port, invitation.PublicKey);
+        Console.WriteLine($"Connecting to {endpoint}...");
+        var tlsCertificate = new TlsCertificate(Convert.FromBase64String(remoteTlsKey));
+        var conversationId = await conversationService.CreateDirectConversationAsync(endpoint!, peerName, tlsCertificate);
         Console.WriteLine($"Session established. Conversation ID: {conversationId}");
     }
     catch (FormatException ex)
     {
         Console.ForegroundColor = ConsoleColor.Red;
-        Console.WriteLine($"Invalid invitation link: {ex.Message}");
+        Console.WriteLine($"Invalid parameter format: {ex.Message}");
         Console.ResetColor();
     }
     catch (Exception ex)
@@ -188,11 +207,14 @@ async Task SendCommandHandler(InvocationContext context)
     var conversationIdGuid = context.ParseResult.GetValueForOption(conversationIdOption);
     var peerIdGuid = context.ParseResult.GetValueForOption(peerIdOption);
     var message = context.ParseResult.GetValueForArgument(messageArgument);
-    var inviteLink = context.ParseResult.GetValueForOption(inviteOption);
+    var endpointString = context.ParseResult.GetValueForOption(endpointOption);
+    var peerName = context.ParseResult.GetValueForOption(peerNameOption);
+    var remoteTlsKey = context.ParseResult.GetValueForOption(remoteTlsKeyOption);
     var identityName = context.ParseResult.GetValueForOption(identityOption);
 
     // Build client-specific service provider
     var configuration = new ConfigurationBuilder().AddJsonFile("appsettings.json", optional: true).Build();
+
     await using var serviceProvider = BuildServiceProvider(configuration);
 
     // Initialize identity
@@ -202,27 +224,39 @@ async Task SendCommandHandler(InvocationContext context)
     var messageService = serviceProvider.GetRequiredService<IMessageService>();
     var conversationService = serviceProvider.GetRequiredService<IConversationService>();
 
-    if (inviteLink != null)
+    // If an endpoint is provided, establish a new session first.
+    if (endpointString is not null)
     {
-        try
-        {
-            var invitation = InvitationLink.Parse(inviteLink);
-            Console.WriteLine($"Connecting to {invitation.Host}:{invitation.Port}...");
-            var conversationId = await conversationService.CreateDirectConversationAsync(invitation.Host, invitation.Port, invitation.PublicKey);
-            Console.WriteLine($"Session established. Conversation ID: {conversationId}");
-            var sentMessage = await messageService.SendDirectMessageAsync(conversationId, message);
-            Console.WriteLine($"Message sent with ID: {sentMessage.Id}");
-        }
-        catch (FormatException ex)
+        if (string.IsNullOrEmpty(peerName) || string.IsNullOrEmpty(remoteTlsKey))
         {
             Console.ForegroundColor = ConsoleColor.Red;
-            Console.WriteLine($"Invalid invitation link: {ex.Message}");
+            Console.WriteLine("When providing an endpoint, --peer-name and --remote-tls-key are required.");
             Console.ResetColor();
+            return;
+        }
+
+        if (!TryParseEndpoint(endpointString, configuration, out var endpoint))
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine($"Invalid endpoint format: '{endpointString}'. Expected format is host:port or just host.");
+            Console.ResetColor();
+            return;
+        }
+
+        try
+        {
+            Console.WriteLine($"Connecting to {endpoint} to establish session...");
+            var tlsCertificate = new TlsCertificate(Convert.FromBase64String(remoteTlsKey));
+            var conversationId = await conversationService.CreateDirectConversationAsync(endpoint!, peerName, tlsCertificate);
+            Console.WriteLine($"Session established. Conversation ID: {conversationId}");
+
+            var sentMessage = await messageService.SendDirectMessageAsync(conversationId, message);
+            Console.WriteLine($"Message sent with ID: {sentMessage.Id}");
         }
         catch (Exception ex)
         {
             Console.ForegroundColor = ConsoleColor.Red;
-            Console.WriteLine($"Failed to send message: {ex.Message}");
+            Console.WriteLine($"Failed to establish session and send message: {ex.Message}");
             Console.ResetColor();
         }
     }
@@ -285,4 +319,33 @@ static ServiceProvider BuildServiceProvider(IConfiguration configuration)
     services.AddInfrastructureServices(configuration);
 
     return services.BuildServiceProvider();
+}
+
+bool TryParseEndpoint(string? text, IConfiguration configuration, out DnsEndPoint? endpoint)
+{
+    endpoint = null;
+    if (string.IsNullOrEmpty(text))
+        return false;
+
+    var parts = text.Split(':', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+    string host;
+    int port;
+
+    switch (parts.Length)
+    {
+        case 1: // Host only, use default port
+            host = parts[0];
+            port = configuration.GetValue<int>("DefaultPeerPort", 5000);
+            break;
+        case 2: // Host and port
+            host = parts[0];
+            if (!int.TryParse(parts[1], out port) || port is < 1 or > 65535)
+                return false;
+            break;
+        default: // Invalid format
+            return false;
+    }
+
+    endpoint = new DnsEndPoint(host, port);
+    return true;
 }

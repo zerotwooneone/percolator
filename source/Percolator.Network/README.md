@@ -1,5 +1,13 @@
 # Percolator.Network
 
+## Core Philosophy: The "Where"
+
+This domain's single responsibility is to answer the question: **"Where can I connect to this peer?"**
+
+It acts as the system's persistent "address book," managing the network connectivity information for peers. It links a peer's stable identity (`PeerId` from the Identity domain) to their transient network endpoints (IP address and port).
+
+---
+
 This library contains the networking logic for the Percolator system. It is responsible for discovering peers on the local network using a secure, authenticated broadcast protocol.
 
 ## Architecture
@@ -77,6 +85,19 @@ if (!publicKey.Value.SequenceEqual(protoPayload.PublicKey.ToByteArray()))
 ```
 
 This two-step verification process ensures that the peer discovery mechanism is resilient against unauthorized access and tampering, forming a secure foundation for the rest of the application's network interactions.
+
+## Trust On First Use (TOFU) and TLS Certificate Pinning
+
+To prevent Man-in-the-Middle (MITM) attacks on the gRPC transport layer, Percolator does not use a traditional Certificate Authority (CA) system. Instead, it employs a **Trust On First Use (TOFU)** model for TLS certificates.
+
+**How it Works:**
+
+1.  **First Connection**: When connecting to a peer for the very first time, the application accepts the TLS certificate presented by the peer's server and permanently stores it, associating it with that peer's `PeerId`.
+2.  **Subsequent Connections**: For all future connections to that same peer, the application will *only* succeed if the server presents a certificate that is already in the local trusted store for that `PeerId`.
+
+**Security Warning: Out-of-Band Verification**
+
+This model's security depends on the authenticity of the certificate received during the *first* connection. It is the user's responsibility to verify the peer's identity through an out-of-band channel (e.g., in-person communication, a text message, comparing a "safety number" like Signal) before establishing the first connection. The application itself does not solve this initial trust bootstrapping problem.
 
 ## Important Note on PeerId
 

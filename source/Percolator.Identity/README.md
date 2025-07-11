@@ -1,5 +1,13 @@
 # Percolator.Identity
 
+## Core Philosophy: The "Who"
+
+This domain's single responsibility is to answer the question: **"Who is this peer?"**
+
+It manages a peer's core identity, which is defined by a simple, stable `PeerId`. It is fundamentally agnostic of any communication or cryptographic protocol. Its concern is pure, abstract identity. The `Peer` object in this domain contains only `PeerId` and a user-friendly `Name`.
+
+---
+
 This project is a domain library responsible for managing node identities within the Percolator network. It handles the creation, secure storage, and retrieval of cryptographic identities based on a modern multi-key model.
 
 ## Core Responsibilities
@@ -89,13 +97,14 @@ Exposing the serialized JSON string would leak the private key in plaintext, com
 
 All code handling key serialization must be treated as highly sensitive and subject to strict code review. The only acceptable use case is within the `PersistentKeyManagementService` for writing to and reading from the encrypted local store.
 
-## Important Note on PeerId
+---
 
-A `PeerId` is a **local-only, non-cryptographic identifier**. It is randomly generated (as a GUID) and is used to uniquely identify a peer within the local application instance.
+## Peer Identification and `PeerId`
 
-**Key Principles:**
--   **Local Scope:** A `PeerId` is only meaningful to the local application. It is never shared with remote peers.
--   **Not for Authentication:** It MUST NOT be used for authentication or as a security credential. All security operations (like session management) are tied to cryptographic keys, not the `PeerId`.
--   **Stable Identifier:** It allows the application to maintain a stable reference to a peer, even if that peer's underlying cryptographic keys change.
+In Percolator's peer-to-peer model, identity is handled with a simple and secure approach that cleanly separates the stable, abstract identity from the cryptographic credentials used to secure sessions.
 
-This rule is enforced across all projects in the solution to ensure a clear and secure identity model.
+- **`PeerId` is the Authoritative Identifier**: A `PeerId` is a non-cryptographic identifier (e.g., a GUID) used to uniquely and persistently reference a peer. It is the single source of truth for a peer's identity and acts as the foreign key that links data across all other domains (e.g., linking a network address in the Network domain to a public key in the Cryptography domain).
+
+- **Cryptographic Keys are Credentials, Not Identity**: A peer's cryptographic keys (e.g., the `identity_agreement_key`) are treated as powerful but replaceable credentials. They are used by the `Application` layer to look up a peer's `PeerId` upon first contact, but the `PeerId` remains the stable identifier throughout the peer's lifetime.
+
+This clear separation ensures that local application logic (managing a contact list via `PeerId`) is decoupled from the security-critical operations of session establishment, which are based on cryptographic credentials.

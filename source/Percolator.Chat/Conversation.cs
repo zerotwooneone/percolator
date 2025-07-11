@@ -8,47 +8,23 @@ public class Conversation
     private readonly List<ParticipantId> _participants = new();
     private readonly List<Message> _messages = new();
 
-    public ConversationId Id { get; private set; }
+    public ConversationId Id { get; }
+    public ChannelId ChannelId { get; private set; }
     public IReadOnlyList<ParticipantId> Participants => new ReadOnlyCollection<ParticipantId>(_participants);
     public IReadOnlyList<Message> Messages => new ReadOnlyCollection<Message>(_messages);
     public string? Name { get; private set; }
-    public string? AvatarUrl { get; private set; }
-
-    private Conversation() { }
 
     public Conversation(
         ConversationId id,
+        ChannelId channelId,
         IReadOnlyList<ParticipantId> participants,
         IReadOnlyList<Message> messages,
-        string? name,
-        string? avatarUrl)
+        string? name)
     {
+        ChannelId = channelId;
         Id = id;
         _participants = participants.ToList();
         _messages = messages.ToList();
-        Name = name;
-        AvatarUrl = avatarUrl;
-    }
-
-    public Conversation(IEnumerable<ParticipantId> participants) : this(participants, null)
-    {
-    }
-
-    public Conversation(IEnumerable<ParticipantId> participants, string? name)
-    {
-        var participantList = participants.ToList();
-        if (participantList.Count < 2)
-        {
-            throw new ArgumentException("A conversation must have at least two participants.", nameof(participants));
-        }
-
-        if (participantList.Distinct().Count() != participantList.Count)
-        {
-            throw new ArgumentException("A conversation cannot have duplicate participants.", nameof(participants));
-        }
-
-        Id = ConversationId.NewId();
-        _participants.AddRange(participantList);
         Name = name;
     }
 
@@ -73,12 +49,6 @@ public class Conversation
     public void ChangeName(string? newName)
     {
         Name = newName;
-    }
-
-    public void ChangeAvatar(string? avatarUrl)
-    {
-        // In a real application, you might want to validate the URL format.
-        AvatarUrl = avatarUrl;
     }
 
     public void AddParticipant(ParticipantId newParticipant)
