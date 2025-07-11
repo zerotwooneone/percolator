@@ -44,17 +44,17 @@ public class PersistentKeyManagementServiceTests
         var keyFilePath = Path.Combine(IdentityPathHelper.GetBasePath(identityName), "keys", $"{identityName}.json");
         Directory.CreateDirectory(Path.GetDirectoryName(keyFilePath)!);
 
-        using var iks = ECDsa.Create(ECCurve.NamedCurves.nistP256);
-        using var ika = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        using var spk = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        var iks = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var ika = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        var spk = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var otps = Enumerable.Range(0, 10).Select(_ => ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256)).ToArray();
 
         var container = new
         {
-            IdentitySigningKey = iks.ExportParameters(true),
-            IdentityAgreementKey = ika.ExportParameters(true),
-            SignedPreKey = spk.ExportParameters(true),
-            OneTimePreKeys = otps.Select(k => k.ExportParameters(true)).ToArray()
+            IdentitySigningKey = iks.ExportParameters(false),
+            IdentityAgreementKey = ika.ExportParameters(false),
+            SignedPreKey = spk.ExportParameters(false),
+            OneTimePreKeys = otps.Select(k => k.ExportParameters(false)).ToArray()
         };
 
         var decryptedBytes = JsonSerializer.SerializeToUtf8Bytes(container, s_jsonOptions);
@@ -75,7 +75,7 @@ public class PersistentKeyManagementServiceTests
         _credentialServiceMock.Setup(s => s.Protect(It.IsAny<byte[]>())).Returns((byte[] b) => b); // Pass-through for test
 
         // Act
-        var keys = await _sut.GetOrCreateKeysAsync(identityName);
+        using var keys = await _sut.GetOrCreateKeysAsync(identityName);
 
         // Assert
         keys.Should().NotBeNull();
@@ -95,13 +95,13 @@ public class PersistentKeyManagementServiceTests
         // Arrange
         var identityName = _fixture.Create<string>();
         CleanupKeys(identityName);
-        var originalKeys = await CreateAndSaveKeys(identityName);
+        using var originalKeys = await CreateAndSaveKeys(identityName);
         var iksPublicX = originalKeys.IdentitySigningKey.ExportParameters(false).Q.X;
         var ikaPublic = originalKeys.IdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo();
         var spkPublic = originalKeys.SignedPreKey.PublicKey.ExportSubjectPublicKeyInfo();
 
         // Act
-        var loadedKeys = await _sut.GetOrCreateKeysAsync(identityName);
+        using var loadedKeys = await _sut.GetOrCreateKeysAsync(identityName);
 
         // Assert
         loadedKeys.Should().NotBeNull();
@@ -129,7 +129,7 @@ public class PersistentKeyManagementServiceTests
         _credentialServiceMock.Setup(s => s.Protect(It.IsAny<byte[]>())).Returns((byte[] b) => b); // For new key creation
 
         // Act
-        var keys = await _sut.GetOrCreateKeysAsync(identityName);
+        using var keys = await _sut.GetOrCreateKeysAsync(identityName);
 
         // Assert
         keys.Should().NotBeNull();

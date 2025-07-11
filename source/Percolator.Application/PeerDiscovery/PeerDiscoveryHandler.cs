@@ -18,11 +18,10 @@ namespace Percolator.Application.PeerDiscovery
             _trustedPeerStore = trustedPeerStore;
         }
 
-        public Task HandlePeerDiscoveredAsync(DiscoveredPeer discoveredPeer)
+        public async Task HandlePeerDiscoveredAsync(DiscoveredPeer discoveredPeer)
         {            
             _logger.LogInformation("Discovered peer {Endpoint} with public key hash {PublicKeyHash}. Adding to trusted store.", discoveredPeer.GrpcEndpoint, discoveredPeer.PublicKeyHash);
-            _trustedPeerStore.Add(discoveredPeer.PublicKeyHash);
-            return Task.CompletedTask;
+            await _trustedPeerStore.AddAsync(discoveredPeer.PublicKeyHash);
         }
 
         public Task HandlePeerExpiredAsync(DiscoveredPeer discoveredPeer)

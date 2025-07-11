@@ -20,8 +20,12 @@ public class FileBasedConversationRepositoryTests
         _fixture.Customize<Conversation>(c => c.FromFactory(() =>
         {
             var id = _fixture.Create<Percolator.Chat.ValueObjects.ConversationId>();
+            var channelId = _fixture.Create<Percolator.Chat.ValueObjects.ChannelId>();
             var participants = _fixture.CreateMany<Percolator.Chat.ValueObjects.ParticipantId>(2).ToList();
-            var conversation = new Conversation(id, participants);
+            var messages = new List<Percolator.Chat.Message>();
+            var name = _fixture.Create<string>();
+
+            var conversation = new Conversation(id, channelId, participants, messages, name);
             conversation.AddMessage(participants[0], _fixture.Create<string>());
             conversation.AddMessage(participants[1], _fixture.Create<string>());
             return conversation;

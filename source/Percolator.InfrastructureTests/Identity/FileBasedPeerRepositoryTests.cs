@@ -26,7 +26,7 @@ public class FileBasedPeerRepositoryTests
     }
 
     [Test]
-    public void Add_WhenCalled_MarksPeerAsTrusted()
+    public async Task AddAsync_WhenCalled_MarksPeerAsTrusted()
     {
         // Arrange
         var repository = new FileBasedPeerRepository(_storageOptions);
@@ -34,19 +34,19 @@ public class FileBasedPeerRepositoryTests
         var publicKeyHash = new PublicKeyHash(RandomNumberGenerator.GetBytes(32));
 
         // Act
-        trustedStore.Add(publicKeyHash);
+        await trustedStore.AddAsync(publicKeyHash);
 
         // Assert
         Assert.That(trustedStore.IsTrusted(publicKeyHash), Is.True);
     }
 
     [Test]
-    public void IsTrusted_WhenHashIsPersisted_ReturnsTrue()
+    public async Task IsTrusted_WhenHashIsPersisted_ReturnsTrueAsync()
     {
         // Arrange
         var publicKeyHash = new PublicKeyHash(RandomNumberGenerator.GetBytes(32));
         var initialRepository = new FileBasedPeerRepository(_storageOptions);
-        ((ITrustedPeerStore)initialRepository).Add(publicKeyHash);
+        await ((ITrustedPeerStore)initialRepository).AddAsync(publicKeyHash);
 
         // Act
         var newRepository = new FileBasedPeerRepository(_storageOptions);

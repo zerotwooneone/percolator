@@ -45,7 +45,12 @@ public class PersistentKeyManagementService : IKeyManagementService
                     var loadedIkSigning = ECDsa.Create(keyContainer.IdentitySigningKey);
                     var loadedIkAgreement = ECDiffieHellman.Create(keyContainer.IdentityAgreementKey);
                     var loadedSpk = ECDiffieHellman.Create(keyContainer.SignedPreKey);
-                    var loadedOtps = keyContainer.OneTimePreKeys.Select(p => { var k = ECDiffieHellman.Create(); k.ImportParameters(p); return k; }).ToArray();
+                    var loadedOtps = keyContainer.OneTimePreKeys.Select(p =>
+                    {
+                        var k = ECDiffieHellman.Create();
+                        k.ImportParameters(p);
+                        return k;
+                    }).ToArray();
 
                     return new X3dhKeys(loadedIkSigning, loadedIkAgreement, loadedSpk, loadedOtps);
                 }
@@ -63,28 +68,22 @@ public class PersistentKeyManagementService : IKeyManagementService
         var newSpk = await CreatePreKeyAsync();
         var newOneTimePreKeys = await Task.WhenAll(Enumerable.Range(0, 10).Select(_ => CreatePreKeyAsync()));
 
-        var keysToDispose = new List<IDisposable> { newIkSigning, newIkAgreement, newSpk };
-        keysToDispose.AddRange(newOneTimePreKeys);
+        var newKeyContainer = new KeyContainer(
+            newIkSigning.ExportParameters(true),
+            newIkAgreement.ExportParameters(true),
+            newSpk.ExportParameters(true),
+            newOneTimePreKeys.Select(k => k.ExportParameters(true)).ToArray()
+        );
 
-        using (var disposableKeys = new DisposableCollection<IDisposable>(keysToDispose))
-        {
-            var keyContainer = new KeyContainer(
-                newIkSigning.ExportParameters(true),
-                newIkAgreement.ExportParameters(true),
-                newSpk.ExportParameters(true),
-                newOneTimePreKeys.Select(k => k.ExportParameters(true)).ToArray()
-            );
+        var newDecryptedBytes = JsonSerializer.SerializeToUtf8Bytes(newKeyContainer, s_jsonOptions);
+        var newEncryptedBytes = _credentialService.Protect(newDecryptedBytes);
+        Directory.CreateDirectory(Path.GetDirectoryName(keyFilePath)!);
+        await File.WriteAllBytesAsync(keyFilePath, newEncryptedBytes);
+        SetFileSecurity(keyFilePath);
+        _logger.LogInformation("New keys created and saved for {IdentityName}", identityName);
 
-            var decryptedBytes = JsonSerializer.SerializeToUtf8Bytes(keyContainer, s_jsonOptions);
-            var encryptedBytes = _credentialService.Protect(decryptedBytes);
-            Directory.CreateDirectory(Path.GetDirectoryName(keyFilePath)!);
-            await File.WriteAllBytesAsync(keyFilePath, encryptedBytes);
-            SetFileSecurity(keyFilePath);
-            _logger.LogInformation("New keys created and saved for {IdentityName}", identityName);
-
-            // Return the newly created keys
-            return new X3dhKeys(newIkSigning, newIkAgreement, newSpk, newOneTimePreKeys);
-        }
+        // Return the newly created keys
+        return new X3dhKeys(newIkSigning, newIkAgreement, newSpk, newOneTimePreKeys);
     }
 
     private Task<ECDiffieHellman> CreatePreKeyAsync()

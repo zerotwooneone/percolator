@@ -125,7 +125,7 @@ public class FileBasedPeerRepository : IPeerRepository, ITrustedPeerStore
             PublicKey = null
         };
 
-    public async void Add(PublicKeyHash publicKeyHash)
+    public async Task AddAsync(PublicKeyHash publicKeyHash)
     {
         if (_trustedHashes.TryAdd(publicKeyHash, 0))
         {
