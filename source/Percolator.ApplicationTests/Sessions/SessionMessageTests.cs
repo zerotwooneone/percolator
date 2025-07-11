@@ -1,11 +1,7 @@
-using System;
-using System.Collections.Generic;
 using System.Security.Cryptography;
 using System.Text;
-using System.Threading.Tasks;
 using FluentAssertions;
 using Moq;
-using NUnit.Framework;
 using Percolator.Application.Identity;
 using Percolator.Application.Sessions;
 using Percolator.Chat;

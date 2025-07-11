@@ -1,10 +1,7 @@
 using System.Collections.Concurrent;
-using System.Security.Cryptography;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
-using Percolator.Application.Identity;
 using Percolator.Identity;
-using IdentityPublicKey = Percolator.Identity.PublicKey;
 using Percolator.Infrastructure.Serialization;
 using Percolator.Network;
 using Peer = Percolator.Identity.Peer;

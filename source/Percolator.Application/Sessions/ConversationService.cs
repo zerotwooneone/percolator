@@ -13,7 +13,6 @@ using Percolator.Identity;
 using Percolator.Network;
 using NetworkPeerId = Percolator.Network.PeerId;
 using Percolator.Sessions;
-using IdentityPeerId = Percolator.Identity.PeerId;
 using ChatConversation = Percolator.Chat.Conversation;
 using ChatConversationId = Percolator.Chat.ValueObjects.ConversationId;
 using ChatParticipantId = Percolator.Chat.ValueObjects.ParticipantId;

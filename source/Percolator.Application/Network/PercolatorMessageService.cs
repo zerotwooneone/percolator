@@ -15,12 +15,10 @@ using SessionConversationId = Percolator.Sessions.ConversationId;
 using Percolator.Application.Identity;
 using System.Security.Cryptography;
 using Percolator.Identity;
-using IdentityPublicKey = Percolator.Identity.PublicKey;
 using Percolator.Network;
 using NetworkPeerId = Percolator.Network.PeerId;
 using IdentityPeer = Percolator.Identity.Peer;
 using IdentityPeerId = Percolator.Identity.PeerId;
-using Percolator.Application.Network;
 using Percolator.Chat.ValueObjects;
 using Percolator.Sessions;
 

@@ -1,7 +1,6 @@
 using Percolator.Identity;
 using Percolator.Identity.Model;
 using System.Runtime.CompilerServices;
-using System.Security.Cryptography;
 
 [assembly: InternalsVisibleTo("Percolator.ApplicationTests")]
 

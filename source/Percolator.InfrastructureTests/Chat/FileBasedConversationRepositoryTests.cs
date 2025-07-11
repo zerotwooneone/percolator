@@ -3,7 +3,6 @@ using FluentAssertions;
 using Microsoft.Extensions.Options;
 using Percolator.Chat;
 using Percolator.Infrastructure.Chat;
-using System.IO;
 
 namespace Percolator.InfrastructureTests.Chat;
 

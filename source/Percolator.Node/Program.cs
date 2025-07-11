@@ -12,7 +12,6 @@ using Percolator.Application;
 using Percolator.Application.Identity;
 using Percolator.Application.Network;
 using Percolator.Application.Sessions;
-using Percolator.Identity;
 using Percolator.Infrastructure;
 using Percolator.Network;
 using ChatConversationId = Percolator.Chat.ValueObjects.ConversationId;

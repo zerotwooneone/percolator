@@ -5,13 +5,9 @@ using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
 using Percolator.Identity;
 using IdentityPeerId = Percolator.Identity.PeerId;
-using System.Security.Cryptography.X509Certificates;
 using System.Net.Security;
-using System.Linq;
 using Percolator.Network;
 using NetworkPeerId = Percolator.Network.PeerId;
-using System.Collections.Generic;
-using System.Net;
 using Percolator.Chat.ValueObjects;
 
 namespace Percolator.Application.Network;

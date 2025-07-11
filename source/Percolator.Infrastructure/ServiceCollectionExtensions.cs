@@ -1,11 +1,8 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Options;
 using Percolator.Infrastructure.Chat;
 using Percolator.Infrastructure.Identity;
 using Percolator.Infrastructure.Sessions;
-using System.IO;
-using System;
 using Percolator.Infrastructure.Network;
 
 namespace Percolator.Infrastructure;

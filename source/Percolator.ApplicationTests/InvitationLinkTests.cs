@@ -1,6 +1,4 @@
-using NUnit.Framework;
 using Percolator.Application; // This namespace will be created next
-using System;
 
 namespace Percolator.ApplicationTests;
 

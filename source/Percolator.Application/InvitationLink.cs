@@ -1,5 +1,3 @@
-using System;
-
 namespace Percolator.Application;
 
 public record InvitationLink(string Host, int Port, string PublicKey)
