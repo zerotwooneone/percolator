@@ -31,7 +31,7 @@ public class X3DHManager : IX3DHManager
         return new SharedSecret(kdfResult);
     }
 
-    public SharedSecret RespondToHandshake(RatchetIdentityKey remoteIdentityKey, RatchetEphemeralKey remoteEphemeralKey, PrivateKey identityAgreementKey, PrivateKey signedPreKey, PrivateKey? oneTimePreKey)
+    public SharedSecret RespondToHandshake(RatchetIdentityKey remoteIdentityKey, RatchetEphemeralKey remoteEphemeralKey, PrivateAgreementKey identityAgreementKey, PrivatePreKey signedPreKey, PrivateOneTimeKey? oneTimePreKey)
     {
         // Reconstruct keys from private key bytes
         using var identityAgreementKeyEcdh = ECDiffieHellman.Create();

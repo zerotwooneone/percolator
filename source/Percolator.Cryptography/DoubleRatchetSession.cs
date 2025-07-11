@@ -66,7 +66,7 @@ public class DoubleRatchetSession : IDisposable
             SkippedMessageKeys = _skippedMessageKeys,
             TheirIdentityPublicKey = _remoteIdentityPublicKey,
             TheirDhRatchetPublicKey = _remoteRatchetKey,
-            DhRatchetPrivateKey = _dhRatchetKey is not null ? new PrivateKey(_dhRatchetKey.ExportECPrivateKey()) : null
+            DhRatchetPrivateKey = _dhRatchetKey is not null ? new PrivateEphemeralKey(_dhRatchetKey.ExportECPrivateKey()) : null
         };
     }
 
@@ -222,6 +222,6 @@ public class DoubleRatchetSession : IDisposable
         public Dictionary<ulong, MessageKey> SkippedMessageKeys { get; set; } = new();
         public RatchetIdentityKey TheirIdentityPublicKey { get; set; } = new([]);
         public RatchetEphemeralKey? TheirDhRatchetPublicKey { get; set; }
-        public PrivateKey? DhRatchetPrivateKey { get; set; }
+        public PrivateEphemeralKey? DhRatchetPrivateKey { get; set; }
     }
 }

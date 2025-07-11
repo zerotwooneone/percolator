@@ -50,9 +50,9 @@ public class X3DHManagerTests
         var bobSharedSecret = manager.RespondToHandshake(
             new RatchetIdentityKey(aliceIdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
             new RatchetEphemeralKey(aliceEphemeralKey.PublicKey.ExportSubjectPublicKeyInfo()),
-            new PrivateKey(bobIdentityAgreementKey.ExportECPrivateKey()),
-            new PrivateKey(bobSignedPreKey.ExportECPrivateKey()),
-            new PrivateKey(bobOneTimePreKey.ExportECPrivateKey())
+            new PrivateAgreementKey(bobIdentityAgreementKey.ExportECPrivateKey()),
+            new PrivatePreKey(bobSignedPreKey.ExportECPrivateKey()),
+            new PrivateOneTimeKey(bobOneTimePreKey.ExportECPrivateKey())
             );
 
         // Assert
