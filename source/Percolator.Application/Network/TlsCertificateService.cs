@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using Percolator.Cryptography;
 using Percolator.Identity;
 using Percolator.Network;
+using PeerId = Percolator.Identity.PeerId;
 
 namespace Percolator.Application.Network;
 
@@ -30,7 +31,8 @@ public class TlsCertificateService : ITlsCertificateService
         var peer = await _peerRepository.GetByNameAsync(identityName);
         if (peer is null)
         {
-            throw new System.InvalidOperationException($"Identity '{identityName}' not found.");
+            peer = new Peer(new PeerId(Guid.NewGuid()), identityName);
+            await _peerRepository.AddAsync(peer);
         }
 
         var keys = await _keyManagementService.GetKeysAsync(identityName);
