@@ -1,14 +1,8 @@
 # Percolator.Network
 
-## Core Philosophy: The "Where"
-
 This domain's single responsibility is to answer the question: **"Where can I connect to this peer?"**
 
-It acts as the system's persistent "address book," managing the network connectivity information for peers. It links a peer's stable identity (`PeerId` from the Identity domain) to their transient network endpoints (IP address and port).
-
----
-
-This library contains the networking logic for the Percolator system. It is responsible for discovering peers on the local network using a secure, authenticated broadcast protocol.
+It acts as the system's persistent "address book," managing the network connectivity information for peers. It links a peer's stable identity (`PeerId` from the Identity domain) to their transient network endpoints (IP address and port) and handles the secure discovery of peers on the local network using an authenticated broadcast protocol.
 
 ## Architecture
 
@@ -98,16 +92,3 @@ To prevent Man-in-the-Middle (MITM) attacks on the gRPC transport layer, Percola
 **Security Warning: Out-of-Band Verification**
 
 This model's security depends on the authenticity of the certificate received during the *first* connection. It is the user's responsibility to verify the peer's identity through an out-of-band channel (e.g., in-person communication, a text message, comparing a "safety number" like Signal) before establishing the first connection. The application itself does not solve this initial trust bootstrapping problem.
-
-## Important Note on PeerId
-
-A `PeerId` is a **local-only, non-cryptographic identifier**. It is randomly generated (as a GUID) and is used to uniquely identify a peer within the local application instance.
-
-**Key Principles:**
--   **Local Scope:** A `PeerId` is only meaningful to the local application. It is never shared with remote peers.
--   **Not for Authentication:** It MUST NOT be used for authentication or as a security credential. All security operations (like session management) are tied to cryptographic keys, not the `PeerId`.
--   **Stable Identifier:** It allows the application to maintain a stable reference to a peer, even if that peer's underlying cryptographic keys change.
-
-This rule is enforced across all projects in the solution to ensure a clear and secure identity model.
-
-**Note:** The `PeerId` plays a crucial role in managing peer connections locally but does not participate in the authentication or security verification process. Its primary function is to provide a stable identifier for peers within the local application context, ensuring that the application can maintain a consistent view of its connected peers despite changes in their cryptographic keys or other identifiers.

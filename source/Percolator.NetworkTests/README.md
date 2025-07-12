@@ -8,6 +8,13 @@ This project contains the unit test suite for the `Percolator.Network` library. 
 *   **State Management**: Tests verify that the state of network components (e.g., the list of known peers) is managed correctly in response to network events.
 *   **Clarity**: Tests are written to be readable and to serve as documentation for the library's expected behavior. `FluentAssertions` is used for its expressive syntax.
 
+## Key Test Scenarios
+
+*   **`PeerDiscoveryServiceTests`**:
+    *   Verifies that a valid, correctly signed broadcast from a new peer results in the `PeerDiscovered` event being raised.
+    *   Ensures that a broadcast with an invalid cryptographic signature is ignored and a `SecurityException` is logged.
+    *   Tests the anti-spoofing mechanism: a broadcast where the public key in the outer message does not match the public key in the inner payload is rejected.
+
 ## Guidance for AI Assistants
 
 *   **Mandatory Testing**: Any new feature or bug fix in the `Percolator.Network` library **must** be accompanied by a new or updated test in this project.

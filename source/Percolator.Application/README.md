@@ -33,7 +33,7 @@ This application layer is a hardened security boundary designed to protect the u
 
 ### Windows Only
 
-This library has a hard dependency on the Windows operating system. This is due to the `CredentialService` which uses the **Windows Data Protection API (DPAPI)** via `System.Security.Cryptography.ProtectedData` to securely encrypt and store the password for the identity certificate.
+This library has a hard dependency on the Windows operating system. This is due to the `CredentialService` (located in the `Percolator.Identity` project) which uses the **Windows Data Protection API (DPAPI)** via `System.Security.Cryptography.ProtectedData` to securely encrypt and store the password for the identity certificate.
 
 This design decision was made to avoid storing sensitive credentials in plaintext or hardcoded in the source code. Future work may involve abstracting this service to support other platforms (e.g., using macOS Keychain or Linux Secret Service).
 

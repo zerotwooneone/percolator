@@ -10,13 +10,18 @@ This project contains the complete unit test suite for the `Percolator.Identity`
 
 ## Key Test Scenarios
 
+*   **`PersistentKeyManagementServiceTests`**:
+    *   **`GetKeysAsync`**: Verifies that existing keys are loaded correctly. It also ensures that a `FileNotFoundException` is thrown if the key file is missing and a `JsonException` is thrown if the file is corrupt.
+    *   **`CreateKeysAsync`**: Confirms that new keys are generated and saved correctly. It also verifies that an `IOException` is thrown if keys for that identity already exist.
+
 *   **`CredentialServiceTests`**:
     *   Verifies that a password file is created if one does not exist.
     *   Ensures that an existing password file is read correctly and the same password is returned on subsequent calls.
+
 *   **`PersistentIdentityServiceTests`**:
-    *   Confirms that a new identity certificate is created when one is not found.
-    *   Verifies that an existing identity certificate is loaded correctly.
-    *   Ensures that a `CryptographicException` is thrown when attempting to load a corrupt certificate file.
+    *   Confirms that creating a new identity correctly orchestrates a call to `CreateKeysAsync`.
+    *   Verifies that getting an existing identity correctly orchestrates a call to `GetKeysAsync`.
+    *   Ensures that the service correctly handles and propagates exceptions from the key management service.
 
 ## Guidance for AI Assistants
 

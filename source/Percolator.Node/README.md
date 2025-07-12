@@ -134,17 +134,6 @@ dotnet run --project .\Percolator.Node\ -- send "Hello from Bob!" --invite "perc
 
 You should see the message appear in the console for Node A (Terminal 1).
 
-## Important Note on PeerId
-
-A `PeerId` is a **local-only, non-cryptographic identifier**. It is randomly generated (as a GUID) and is used to uniquely identify a peer within the local application instance.
-
-**Key Principles:**
--   **Local Scope:** A `PeerId` is only meaningful to the local application. It is never shared with remote peers.
--   **Not for Authentication:** It MUST NOT be used for authentication or as a security credential. All security operations (like session management) are tied to cryptographic keys, not the `PeerId`.
--   **Stable Identifier:** It allows the application to maintain a stable reference to a peer, even if that peer's underlying cryptographic keys change.
-
-This rule is enforced across all projects in the solution to ensure a clear and secure identity model.
-
 ## Guidance for AI Assistants
 
 *   **`System.CommandLine` Version**: The project is standardized on `System.CommandLine` version `2.0.0-beta4`. Do not upgrade to newer pre-release versions or introduce the `System.CommandLine.Hosting` package, as this led to significant instability and breaking changes.

@@ -1,14 +1,8 @@
 # Percolator.Identity
 
-## Core Philosophy: The "Who"
+This project is a domain library whose single responsibility is to answer the question: **"Who is this peer?"**
 
-This domain's single responsibility is to answer the question: **"Who is this peer?"**
-
-It manages a peer's core identity, which is defined by a simple, stable `PeerId`. It is fundamentally agnostic of any communication or cryptographic protocol. Its concern is pure, abstract identity. The `Peer` object in this domain contains only `PeerId` and a user-friendly `Name`.
-
----
-
-This project is a domain library responsible for managing node identities within the Percolator network. It handles the creation, secure storage, and retrieval of cryptographic identities based on a modern multi-key model.
+It manages a peer's core identity, which is defined by a simple, stable `PeerId` and a user-friendly `Name`. It is fundamentally agnostic of any communication protocol. It also manages the creation, secure storage, and retrieval of the cryptographic keys that serve as an identity's credentials.
 
 ## Core Responsibilities
 
@@ -32,7 +26,16 @@ Percolator has moved away from a monolithic certificate-based identity to a more
 
 **Security Rationale**: Separating the signing and agreement keys is a critical security principle. If a single key were used for both, a vulnerability in the key agreement protocol could potentially be exploited to forge signatures, leading to a catastrophic failure of the identity system. This four-key model ensures that a compromise in one area does not spill over into another.
 
-### 2. Secure Key Persistence
+### 2. Fail-Fast Key Management (`PersistentKeyManagementService`)
+
+This service is responsible for creating and retrieving the four-key set. It follows a strict "fail-fast" design to enhance security and predictability:
+
+-   **`CreateKeysAsync`**: This method's only job is to generate a new set of four keys and save them to a protected file. It will throw an exception if keys for the given identity name already exist.
+-   **`GetKeysAsync`**: This method's only job is to load existing keys from their protected file. It will throw a `FileNotFoundException` if the key file does not exist or a `JsonException` if the file is corrupt.
+
+This separation of concerns is critical. It forces the application layer to be explicit about its intent (creating new keys vs. loading existing ones) and prevents the service from making assumptions, which could lead to accidentally overwriting keys.
+
+### 3. Secure Key Persistence
 
 Storing cryptographic keys securely is paramount. This library uses a two-layer approach to protect keys at rest, orchestrated by `PersistentKeyManagementService` and `CredentialService`.
 
@@ -45,7 +48,7 @@ This process ensures that even if an attacker gains access to the raw, stored fi
 // Simplified example of the key persistence flow
 
 // 1. In PersistentKeyManagementService, a new identity's keys are generated.
-var x3dhKeys = new X3dhKeys(
+var keyContainer = new KeyContainer(
     identitySigningKey: signingKey.ExportParameters(true),
     identityAgreementKey: agreementKey.ExportParameters(true),
     signedPreKey: signedPreKey.ExportParameters(true),
@@ -54,7 +57,7 @@ var x3dhKeys = new X3dhKeys(
 
 // 2. The keys are serialized to a JSON string.
 // WARNING: This JSON contains private key material. See next section.
-var serializedKeys = JsonSerializer.Serialize(x3dhKeys, _jsonSerializerOptions);
+var serializedKeys = JsonSerializer.Serialize(keyContainer, _jsonSerializerOptions);
 
 // 3. The JSON string is encrypted by CredentialService, which uses DPAPI.
 // The service generates a password, uses it to encrypt the data, and then

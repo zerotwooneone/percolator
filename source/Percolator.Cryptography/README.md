@@ -13,6 +13,8 @@ This library is designed with Domain-Driven Design (DDD) principles in mind. It 
 *   **Domain-Driven Design**: The library is self-contained and exposes its capabilities through a clear, explicit public API. It has no dependencies on other domains.
 *   **No Raw `byte[]` in Public APIs**: As a rule, public method signatures in this library do not accept or return raw `byte[]` arrays. Instead, all cryptographic primitives like keys and signatures are wrapped in strongly-typed DDD value objects (e.g., `PublicKey`, `Signature`). This improves type safety and makes the domain language explicit. Data Transfer Objects (DTOs) like `PreKeyBundle` may still contain raw `byte[]` properties for efficient serialization, but they are consumed and produced by methods that adhere to the value-type rule.
 *   **Fail Forward**: The library does not handle or log errors. It throws exceptions (e.g., `CryptographicException`) on invalid input or failed cryptographic checks, expecting the application layer to perform necessary validation beforehand.
+*   **Strongly-Typed IDs**: To enhance type safety and clarify intent, raw `Guid` primitives must not be used for identifiers in public APIs. Instead, wrap them in strongly-typed DDD value objects with intention-revealing names (e.g., `PeerId`, `ConversationId`).
+*   **Test-Driven Development (TDD)**: All new features and refactoring should follow the Red-Green-Refactor cycle. This ensures that all logic is covered by tests and promotes a high-quality, maintainable codebase.
 
 ## Key Components
 
@@ -35,12 +37,6 @@ When modifying this project, adhere to the following architectural rules:
     *   **Use Precise, Definition-Oriented Searches**: When searching for a type, search for its definition (e.g., `grep "class MyClass"`), not just its name, to avoid ambiguity.
     *   **Work from Broad to Specific**: When lost, zoom out. First, understand the solution structure by listing projects. Then, list files within a project. Finally, inspect specific files to understand their contents and dependencies.
     *   **Never Create Code to Justify a Hallucination**: If an assumption about a class name proves false, the solution is *never* to create an empty file with that name just to make a build pass. This compounds the error. The correct action is to discard the assumption and find the *actual* class that should be used.
-
-## AI Development Guidelines
-
-- **No Raw Byte Arrays**: Domain libraries should not send or receive raw byte arrays in or out of the domain. These should be wrapped in DDD value types with clear names so that it is more clear when passing parameters or returning results.
-- **Strongly-Typed IDs**: To enhance type safety and clarify intent, raw `Guid` primitives must not be used for identifiers in public APIs. Instead, wrap them in strongly-typed DDD value objects with intention-revealing names (e.g., `PeerId`, `ConversationId`). This prevents accidental misuse of identifiers and makes the domain language more explicit.
-- **Test-Driven Development**: All new features and refactoring should follow the Red-Green-Refactor cycle of Test-Driven Development (TDD). Write a failing test first (Red), then write the simplest code to make it pass (Green), and finally, refactor the code to improve its design while keeping the tests passing. This ensures that all logic is covered by tests and promotes a high-quality, maintainable codebase.
 
 ## Library Usage and Security Considerations
 
@@ -148,7 +144,6 @@ bobGroupManager.ProcessRekeyMessage(bobToAlice, rekeyMessages["bob"]);
 // Alice sends a new message. Bob can decrypt it, but Carol cannot.
 var messageAfterRemoval = aliceGroupManager.GroupSession.Encrypt("Carol is gone."u8.ToArray());
 var bobDecryptedAfter = bobGroupManager.GroupSession.Decrypt(messageAfterRemoval);
-```
 
 ### 2. State Persistence
 
@@ -187,7 +182,6 @@ var encryptedState = aliceManager.SaveState(masterKey);
 
 // Later, she can restore it using the same master key and her identity key.
 var loadedGroupManager = GroupManager.LoadState(encryptedState, masterKey, aliceIdentity);
-```
 
 ### Important Security Considerations for Library Developers
 
