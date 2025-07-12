@@ -14,14 +14,6 @@ The `Percolator.Node` application is responsible for bootstrapping and running a
 -   **Secure Sessions**: Establishes end-to-end encrypted communication channels using a modern cryptographic handshake (X3DH).
 -   **Identity Management**: Securely generates and manages the user's cryptographic identity.
 
-## Operational Modes
-
-The node operates through distinct commands:
-
--   **Host Mode**: Run the `host` command to start the node, listen for incoming connections, and host the gRPC service. This makes your node available to other peers.
--   **Connect Mode**: Use the `connect` command to initiate a secure session with a hosting peer.
--   **Send Mode**: Once a session is established, use the `send` command with a valid `conversationId` to send encrypted messages.
-
 ## Platform Dependencies
 
 ### Windows Only
@@ -30,9 +22,9 @@ This application is currently **Windows-only**. This is because it relies on the
 
 ## Usage
 
-The `Percolator.Node` executable is driven by a simple set of commands for hosting, connecting, and sending messages.
+The `Percolator.Node` executable is driven by a simple set of commands. The primary workflow involves one peer hosting a service and another peer sending them a message.
 
-### 1. Building the Node
+### Building the Node
 
 First, build the project from the `source` directory to create the executable. You only need to do this once, or whenever you make changes to the code.
 
@@ -42,132 +34,107 @@ dotnet build .\Percolator.Node\
 
 All subsequent commands will use the compiled executable directly.
 
-### 2. Start a Host & Get Connection Details
+---
 
-To run the application as a network host, use the `host` command. This will start the gRPC server and generate the connection details a peer needs to connect to you.
+## Primary Workflow: A Secure Chat in Two Steps
 
--   `--port` / `-p`: The port to listen on (default: `5000`).
--   `--identity` / `-i`: The name of the identity to use (default: `default`). A new identity will be created if it doesn't exist.
+This example shows how to start two independent nodes (Alice and Bob) and have Bob send a message to Alice.
 
-**Example:**
+### Step 1: Alice Starts a Host
+
+In one terminal, Alice runs the `host` command. This starts her node and generates an invitation link that Bob can use to connect.
+
 ```bash
-.\Percolator.Node\bin\Debug\net8.0\Percolator.Node.exe host --identity Alice
+# Terminal 1: Alice hosts
+.\Percolator.Node\bin\Debug\net9.0\Percolator.Node.exe host --identity Alice
 ```
 
-The host will start and display the information a peer needs. **You must share the endpoint, peer name (`Alice`), and the full public key** with the peer who wants to connect.
+The host will start and display the invitation link. Alice copies this link and sends it to Bob.
 
 ```
 Host started successfully.
-Share the following details with the connecting peer:
-- Peer Name: Alice
-- Endpoint: localhost:5000
-- Public Key: MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEx...long_public_key...=
+Invitation Link: percolator://localhost:5000/MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEx...long_public_key...=
 Share this link with peers who want to connect.
 ```
 
-### 3. Connect to a Peer
+### Step 2: Bob Sends a Message to Alice
 
-To establish a secure session with a host, use the `connect` command with the details you received from them.
+In a second terminal, Bob uses the `send` command. He provides Alice's endpoint and name. Because this is the first time he's connecting, the application will **Trust On First Use (TOFU)**, automatically saving Alice's certificate for future connections.
 
--   `<endpoint>`: The host and port of the peer (e.g., `localhost:5000`).
--   `--peer-name`: The identity name of the host (e.g., `Alice`).
--   `--remote-tls-key`: The full public key provided by the host.
--   `--identity` / `-i`: The name of your local identity.
+```bash
+# Terminal 2: Bob sends a message
+.\Percolator.Node\bin\Debug\net9.0\Percolator.Node.exe send "Hello, Alice!" --endpoint localhost:5000 --peer-name Alice --identity Bob
+```
+
+That's it! A secure session is established, the message is sent, and Bob's node now remembers Alice's identity for future conversations. You should see the message appear in Alice's console (Terminal 1).
+
+---
+
+## Command Reference
+
+### `host`
+
+Starts the node, listens for incoming connections, and hosts the gRPC service.
+
+-   `--port` / `-p` (Optional): The port to listen on. Default: `5000`.
+-   `--identity` / `-i` (Optional): The name of the identity to use. Default: `default`. A new identity will be created if it doesn't exist.
 
 **Example:**
 ```bash
-.\Percolator.Node\bin\Debug\net8.0\Percolator.Node.exe connect localhost:5000 --peer-name Alice --remote-tls-key "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEx..." --identity Bob
+.\Percolator.Node\bin\Debug\net9.0\Percolator.Node.exe host --identity Alice
 ```
 
-Upon success, the command will output a unique `Conversation ID`. **Save this ID**, as you will need it to send messages.
+### `send`
 
-### 4. Send a Message
+Sends an encrypted message to a peer. Can also establish a new session if one doesn't exist.
 
-Once a conversation is established, you can send encrypted messages.
+-   `<message>` (Required): The plaintext message to send.
+-   `--identity` / `-i` (Optional): The name of your local identity. Default: `default`.
 
--   `<message>`: The plaintext message to send.
--   `--identity` / `-i`: The name of the local identity to use.
+**Sending to a New Peer (Trust On First Use):**
 
-#### Method 1: Send to a Known Conversation
+Use the peer's endpoint and name. The `--remote-tls-key` is not needed.
 
-Use the `conversation-id` from a previous `connect` command.
-
--   `--conversation-id`: The unique ID generated when you connected.
-
-**Example:**
-```bash
-.\Percolator.Node\bin\Debug\net8.0\Percolator.Node.exe send --conversation-id 1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d "Hello, world!" --identity Bob
-```
-
-#### Method 2: Send to a Peer's Last Active Conversation
-
-Use the peer's ID (which you can find in local application data after connecting).
-
--   `--peer-id`: The ID of the peer you want to message.
-
-**Example:**
-```bash
-.\Percolator.Node\bin\Debug\net8.0\Percolator.Node.exe send --peer-id 1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d "Hello again!" --identity Bob
-```
-
-#### Method 3: Connect and Send in One Step
-
-You can establish a session and send a message in a single command using the host's connection details.
-
--   `--endpoint`: The host and port of the peer.
--   `--peer-name`: The identity name of the host.
--   `--remote-tls-key`: The full public key of the host.
-
-**Example:**
-```bash
-.\Percolator.Node\bin\Debug\net8.0\Percolator.Node.exe send "Hello from Bob!" --endpoint localhost:5000 --peer-name Alice --remote-tls-key "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEx..." --identity Bob
-```
-
-## Example Scenario: Two Nodes on One Machine
-
-This scenario demonstrates how to start two independent nodes and have one send a message to the other. You will need two separate terminal windows. All commands assume you are in the `source` directory.
-
-**First, build the project:**
-```bash
-dotnet build .\Percolator.Node\
-```
-
-### Terminal 1: Start Node A (Host)
-
-This node will act as the host with the identity `Alice`. It will generate connection details for Node B to use.
+-   `--endpoint` (Required): The host and port of the peer (e.g., `localhost:5000`).
+-   `--peer-name` (Required): The identity name of the peer you are messaging.
 
 ```bash
-.\Percolator.Node\bin\Debug\net8.0\Percolator.Node.exe host --identity Alice
+.\Percolator.Node\bin\Debug\net9.0\Percolator.Node.exe send "Hello!" --endpoint localhost:5000 --peer-name Alice --identity Bob
 ```
 
-After the host starts, **copy the `Peer Name`, `Endpoint`, and `Public Key`** that are displayed in the console.
+**Sending to an Existing Conversation:**
 
-### Terminal 2: Connect and Send Message with Node B
+If you have already connected, you can send messages using the `conversation-id`.
 
-In a second terminal, use the `Bob` identity to connect to `Alice` and send a message in a single step.
-
-**Step 1: Connect and Send**
-
-Paste the `Endpoint`, `Peer Name`, and `Public Key` you copied from Terminal 1 into the command below.
+-   `--conversation-id` (Required): The unique ID generated when you first connected.
 
 ```bash
-.\Percolator.Node\bin\Debug\net8.0\Percolator.Node.exe send "Hello from Bob!" --endpoint localhost:5000 --peer-name Alice --remote-tls-key "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEx..." --identity Bob
+.\Percolator.Node\bin\Debug\net9.0\Percolator.Node.exe send "Hello again!" --conversation-id <guid> --identity Bob
 ```
 
-You should see the message appear in the console for Node A (Terminal 1).
+### `connect`
+
+Establishes a secure session with a host without sending a message. This is useful if you only want to create the connection for later use.
+
+-   `<endpoint>` (Required): The host and port of the peer (e.g., `localhost:5000`).
+-   `--peer-name` (Required): The identity name of the host.
+-   `--remote-tls-key` (Optional): The public key of the host. If omitted, the host's key will be trusted on first use. If provided, it will be verified against the key presented by the host.
+-   `--identity` / `-i` (Optional): The name of your local identity.
+
+**Example (Trust On First Use):**
+```bash
+.\Percolator.Node\bin\Debug\net9.0\Percolator.Node.exe connect localhost:5000 --peer-name Alice --identity Bob
+```
+
+Upon success, the command will output a unique `Conversation ID` for use in future `send` commands.
+
+---
 
 ## Guidance for AI Assistants
 
 *   **`System.CommandLine` Version**: The project is standardized on `System.CommandLine` version `2.0.0-beta4`. Do not upgrade to newer pre-release versions or introduce the `System.CommandLine.Hosting` package, as this led to significant instability and breaking changes.
 *   **Manual Dependency Injection**: The application manually configures its own dependency injection container in `Program.cs`. It does not use the .NET Generic Host for command-line integration. Command handlers must resolve their dependencies from the `IServiceProvider` made available via the `InvocationContext`.
-*   **Manual Host Lifecycle**: The Kestrel web server is started manually within the root command's handler (`RunNodeAsync`). It is not managed automatically by a hosting library.
-*   **Argument Pre-Parsing for Services**: Some services, like `PeerDiscoveryService`, require configuration values (e.g., the listening port) that are provided via command-line arguments. To handle this, `Program.cs` performs a lightweight pre-parse of the `args` to extract these values *before* the main DI container is built. This ensures services are constructed with the correct configuration.
-*   **`--version` Option Conflict**: The `UseDefaults()` extension method in `System.CommandLine` was found to cause a runtime crash by implicitly adding a `--version` option that conflicted with another registration. To avoid this, middleware (like `UseHelp()`, `UseExceptionHandler()`, etc.) is added individually to the `CommandLineBuilder`.
 *   **Principle of Verification: Verify Before Acting**: To avoid hallucination, always verify the existence, name, and location of code artifacts (classes, methods, interfaces) using tools like `grep_search` and `list_dir` before attempting to use or modify them. Actions must be based on evidence from the codebase, not assumptions from training data.
-    *   **Investigate Errors Systematically**: A build error is a clue, not a conclusion. When an error like "type not found" occurs, do not invent the type. Instead, use tools to search the existing codebase for the correct type that fulfills the required role.
-    *   **Use Precise, Definition-Oriented Searches**: When searching for a type, search for its definition (e.g., `grep "class MyClass"`), not just its name, to avoid ambiguity.
-    *   **Work from Broad to Specific**: When lost, zoom out. First, understand the solution structure by listing projects. Then, list files within a project. Finally, inspect specific files to understand their contents and dependencies.
-    *   **Never Create Code to Justify a Hallucination**: If an assumption about a class name proves false, the solution is *never* to create an empty file with that name just to make a build pass. This compounds the error. The correct action is to discard the assumption and find the *actual* class that should be used.
 
 ### Zero-State Startup
 

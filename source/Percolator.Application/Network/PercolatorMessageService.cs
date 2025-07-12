@@ -66,8 +66,16 @@ namespace Percolator.Application.Network
                 
                 var timestamp = DateTimeOffset.Now;
                 
-                
-                var ipEndPoint = IPEndPoint.Parse(context.Peer);;
+                var dnsEndpointParts = context.Peer.Split(':');
+                if (dnsEndpointParts.Length != 2)
+                {
+                    throw new RpcException(new Status(StatusCode.FailedPrecondition, "Peer not found."));
+                }
+                if(!int.TryParse(dnsEndpointParts[1], out var port) || port <= 0 || port > 65535) 
+                {
+                    throw new RpcException(new Status(StatusCode.FailedPrecondition, "Peer not found."));
+                }
+                var ipEndPoint = new DnsEndPoint(dnsEndpointParts[0], port);
                 
                 if (connnectionInfo is null)
                 {

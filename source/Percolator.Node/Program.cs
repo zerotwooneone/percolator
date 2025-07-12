@@ -40,7 +40,7 @@ rootCommand.AddCommand(hostCommand);
 // *** Connect Command ***
 var endpointArgument = new Argument<string>("endpoint", "The endpoint of the peer (e.g., localhost:5000 or just localhost).");
 var peerNameOption = new Option<string>("--peer-name", "The name of the peer to connect to.") { IsRequired = true };
-var remoteTlsKeyOption = new Option<string>("--remote-tls-key", "The public key of the remote TLS certificate (for TOFU).") { IsRequired = true };
+var remoteTlsKeyOption = new Option<string?>("--remote-tls-key", "The public key of the remote TLS certificate (for TOFU).") { IsRequired = false };
 var connectCommand = new Command("connect", "Connects to a peer using their endpoint.")
 {
     endpointArgument,
@@ -159,7 +159,7 @@ async Task ConnectCommandHandler(InvocationContext context)
     var endpointString = context.ParseResult.GetValueForArgument(endpointArgument);
     var identityName = context.ParseResult.GetValueForOption(identityOption);
     var peerName = context.ParseResult.GetValueForOption(peerNameOption)!;
-    var remoteTlsKey = context.ParseResult.GetValueForOption(remoteTlsKeyOption)!;
+    var remoteTlsKey = context.ParseResult.GetValueForOption(remoteTlsKeyOption);
 
     // Build client-specific service provider
     var configuration = new ConfigurationBuilder().AddJsonFile("appsettings.json", optional: true).Build();
@@ -183,7 +183,11 @@ async Task ConnectCommandHandler(InvocationContext context)
     try
     {
         Console.WriteLine($"Connecting to {endpoint}...");
-        var tlsCertificate = new TlsCertificate(Convert.FromBase64String(remoteTlsKey));
+        TlsCertificate? tlsCertificate = null;
+        if (!string.IsNullOrEmpty(remoteTlsKey))
+        {
+            tlsCertificate = new TlsCertificate(Convert.FromBase64String(remoteTlsKey));
+        }
         var conversationId = await conversationService.CreateDirectConversationAsync(endpoint!, peerName, tlsCertificate);
         Console.WriteLine($"Session established. Conversation ID: {conversationId}");
     }
@@ -226,10 +230,10 @@ async Task SendCommandHandler(InvocationContext context)
     // If an endpoint is provided, establish a new session first.
     if (endpointString is not null)
     {
-        if (string.IsNullOrEmpty(peerName) || string.IsNullOrEmpty(remoteTlsKey))
+        if (string.IsNullOrEmpty(peerName))
         {
             Console.ForegroundColor = ConsoleColor.Red;
-            Console.WriteLine("When providing an endpoint, --peer-name and --remote-tls-key are required.");
+            Console.WriteLine("When providing an endpoint, --peer-name is required.");
             Console.ResetColor();
             return;
         }
@@ -245,7 +249,11 @@ async Task SendCommandHandler(InvocationContext context)
         try
         {
             Console.WriteLine($"Connecting to {endpoint} to establish session...");
-            var tlsCertificate = new TlsCertificate(Convert.FromBase64String(remoteTlsKey));
+            TlsCertificate? tlsCertificate = null;
+            if (!string.IsNullOrEmpty(remoteTlsKey))
+            {
+                tlsCertificate = new TlsCertificate(Convert.FromBase64String(remoteTlsKey));
+            }
             var conversationId = await conversationService.CreateDirectConversationAsync(endpoint!, peerName, tlsCertificate);
             Console.WriteLine($"Session established. Conversation ID: {conversationId}");
 

@@ -61,7 +61,7 @@ public class FileBasedPeerConnectionRepository : IPeerConnectionRepository
     private static PeerConnection ToDomain(PeerConnectionModel model) =>
         new(new PeerId(model.Id),
             new DirectMessagePublicKey(model.DirectMessagePublicKey),
-            model.GrpcEndPoints.Select(e => new GrpcEndPoint(new IPEndPoint(IPAddress.Parse(e.IpAddress), e.Port), e.LastSeen)).ToList(),
+            model.GrpcEndPoints.Select(e => new GrpcEndPoint(new DnsEndPoint(e.Host, e.Port), e.LastSeen)).ToList(),
             model.TlsCertificates.Select(c => new TlsCertificate(c.RawData)).ToList(),
             model.LastSeen);
 
@@ -70,7 +70,7 @@ public class FileBasedPeerConnectionRepository : IPeerConnectionRepository
         {
             Id = connection.Id.Value,
             DirectMessagePublicKey = connection.DirectMessagePublicKey.Value,
-            GrpcEndPoints = connection.GrpcEndPoints.Select(e => new GrpcEndPointModel { IpAddress = e.EndPoint.Address.ToString(), Port = e.EndPoint.Port, LastSeen = e.LastSeen }).ToList(),
+            GrpcEndPoints = connection.GrpcEndPoints.Select(e => new GrpcEndPointModel { Host = e.EndPoint.Host, Port = e.EndPoint.Port, LastSeen = e.LastSeen }).ToList(),
             TlsCertificates = connection.TlsCertificates.Select(c => new TlsCertificateModel { RawData = c.RawData }).ToList(),
             LastSeen = connection.LastSeen
         };

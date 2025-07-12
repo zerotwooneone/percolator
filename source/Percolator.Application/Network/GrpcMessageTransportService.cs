@@ -130,7 +130,7 @@ public class GrpcMessageTransportService : IMessageTransportService
                 return false; // No match found, connection is untrusted.
             };
 
-            var address = $"https://{endPoint.EndPoint.Address}:{endPoint.EndPoint.Port}";
+            var address = $"https://{endPoint.EndPoint.Host}:{endPoint.EndPoint.Port}";
             var channel = GrpcChannel.ForAddress(address, new GrpcChannelOptions { HttpHandler = handler });
             return new TransportService.TransportServiceClient(channel);
         });
