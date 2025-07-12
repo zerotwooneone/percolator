@@ -59,19 +59,10 @@ public class FileBasedPeerRepository : IPeerRepository, ITrustedPeerStore
         }
     }
 
-    public async Task<Peer?> GetByNameAsync(string name)
+    public Task<Peer?> GetByNameAsync(string name)
     {
-        var peerFiles = Directory.GetFiles(Path.Combine(_peersFilePath, "peers"), "*.json");
-        foreach (var file in peerFiles)
-        {
-            var json = await File.ReadAllTextAsync(file);
-            var model = JsonSerializer.Deserialize<PeerModel>(json, _jsonContext.PeerModel);
-            if (model?.Name.Equals(name, StringComparison.OrdinalIgnoreCase) == true)
-            {
-                return ToDomain(model);
-            }
-        }
-        return null;
+        var model = _peers.Values.FirstOrDefault(p => p.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+        return Task.FromResult(model is not null ? ToDomain(model) : null);
     }
 
     private ConcurrentDictionary<IdentityPeerId, PeerModel> LoadPeersFromFile()
