@@ -5,7 +5,6 @@ using Microsoft.Extensions.Logging;
 using Percolator.Application.KeyExchange;
 using Percolator.Application.Sessions;
 using Percolator.Contracts;
-using Percolator.Cryptography;
 using Percolator.Chat;
 using ChatConversation = Percolator.Chat.Conversation;
 using ChatConversationId = Percolator.Chat.ValueObjects.ConversationId;
@@ -23,7 +22,6 @@ using Percolator.Chat.ValueObjects;
 using Percolator.Sessions;
 using SessionSharedSecret = Percolator.Sessions.SharedSecret;
 using SessionRatchetMessage = Percolator.Sessions.RatchetMessage;
-using SessionRatchetIdentityKey = Percolator.Sessions.RatchetIdentityKey;
 
 namespace Percolator.Application.Network
 {

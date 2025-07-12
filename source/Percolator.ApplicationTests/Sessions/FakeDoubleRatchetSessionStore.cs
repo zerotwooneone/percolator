@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Threading.Tasks;
 using Percolator.Sessions;
 
 namespace Percolator.ApplicationTests.Sessions

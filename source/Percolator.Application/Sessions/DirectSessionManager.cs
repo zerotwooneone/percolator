@@ -1,4 +1,3 @@
-using System.Security.Cryptography;
 using Percolator.Application.Identity;
 using Percolator.Sessions;
 using SessionPeerId = Percolator.Sessions.PeerId;

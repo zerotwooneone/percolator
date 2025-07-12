@@ -1,7 +1,4 @@
 using Microsoft.Extensions.DependencyInjection;
-using Percolator.Application.KeyExchange;
-using Percolator.Application.Sessions;
-using Percolator.Chat;
 using Percolator.Cryptography;
 using Percolator.Sessions;
 

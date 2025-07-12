@@ -1,18 +1,12 @@
-using System.Net;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Percolator.Application.Configuration;
 using Percolator.Application.PeerDiscovery;
 using Percolator.Network;
 using Microsoft.Extensions.Logging;
-using Percolator.Contracts;
-using Percolator.Identity;
 using System.Net.Security;
 using System.Security.Cryptography.X509Certificates;
 using Percolator.Application.Identity;
-using Percolator.Application.Sessions;
-using IdentityPeerId = Percolator.Identity.PeerId;
-using NetworkPeerId = Percolator.Network.PeerId;
 
 namespace Percolator.Application.Network;
 

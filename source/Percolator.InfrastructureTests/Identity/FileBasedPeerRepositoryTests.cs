@@ -1,8 +1,5 @@
-using System.Security.Cryptography;
 using Microsoft.Extensions.Options;
 using Percolator.Infrastructure;
-using Percolator.Infrastructure.Identity;
-using Percolator.Network;
 
 namespace Percolator.InfrastructureTests.Identity;
 

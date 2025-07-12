@@ -1,6 +1,5 @@
 using Grpc.Net.Client;
 using Percolator.Contracts;
-using Percolator.Cryptography;
 using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
 using Percolator.Identity;

@@ -6,7 +6,6 @@ using Percolator.Identity.Model;
 using Percolator.Sessions;
 using Percolator.Chat;
 using Percolator.Identity;
-using SessionPeerId = Percolator.Sessions.PeerId;
 
 namespace Percolator.ApplicationTests.Sessions;
 

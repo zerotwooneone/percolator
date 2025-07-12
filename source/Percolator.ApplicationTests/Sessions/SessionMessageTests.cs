@@ -1,9 +1,6 @@
-using System;
-using System.Collections.Generic;
 using System.Security.Cryptography;
 using System.Text;
 using FluentAssertions;
-using Microsoft.VisualStudio.TestPlatform.ObjectModel.DataCollection;
 using Moq;
 using Percolator.Application.Identity;
 using Percolator.Application.Sessions;
@@ -12,7 +9,6 @@ using Percolator.Chat.ValueObjects;
 using Percolator.Cryptography;
 using Percolator.Identity;
 using Percolator.Identity.Model;
-using Percolator.Infrastructure.Identity;
 using Percolator.Sessions;
 using SessionConversationId = Percolator.Sessions.ConversationId;
 using SessionRatchetIdentityKey = Percolator.Sessions.RatchetIdentityKey;

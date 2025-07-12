@@ -1,7 +1,6 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
-using Percolator.Infrastructure.Identity;
 using Percolator.Infrastructure.Serialization;
 using Percolator.Network;
 

@@ -3,7 +3,6 @@ using System.Text.Json;
 using Microsoft.Extensions.Options;
 using Percolator.Identity;
 using Percolator.Infrastructure.Serialization;
-using Percolator.Network;
 using Peer = Percolator.Identity.Peer;
 using IdentityPeerId = Percolator.Identity.PeerId;
 
