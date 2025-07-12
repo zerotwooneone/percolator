@@ -66,14 +66,15 @@ namespace Percolator.Application.Network
                 
                 var timestamp = DateTimeOffset.Now;
                 
-                var dnsEndpointParts = context.Peer.Split(':');
+                //todo: this is not the correct peer endpoint. we need to send the endpoint from the peer
+                var dnsEndpointParts = context.Peer.Split(':').Skip(1).ToArray();
                 if (dnsEndpointParts.Length != 2)
                 {
-                    throw new RpcException(new Status(StatusCode.FailedPrecondition, "Peer not found."));
+                    throw new RpcException(new Status(StatusCode.FailedPrecondition, $"Invalid endpoint: {context.Peer}"));
                 }
                 if(!int.TryParse(dnsEndpointParts[1], out var port) || port <= 0 || port > 65535) 
                 {
-                    throw new RpcException(new Status(StatusCode.FailedPrecondition, "Peer not found."));
+                    throw new RpcException(new Status(StatusCode.FailedPrecondition, "Invalid port."));
                 }
                 var ipEndPoint = new DnsEndPoint(dnsEndpointParts[0], port);
                 

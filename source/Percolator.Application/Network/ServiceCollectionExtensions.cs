@@ -28,6 +28,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IMessageTransportService, GrpcMessageTransportService>();
         services.AddSingleton<PercolatorMessageService>();
         services.AddSingleton<IPeerDiscoveryHandler, PeerDiscoveryHandler>();
+        services.AddSingleton<IGrpcClientFactory, GrpcClientFactory>();
 
         return services;
     }
