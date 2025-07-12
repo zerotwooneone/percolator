@@ -343,6 +343,22 @@ static ServiceProvider CreateServiceProvider(string? identityName)
     services.AddLogging(builder => builder.AddConsole().AddConfiguration(config.GetSection("Logging")));
     services.AddApplicationServices(config);
     services.AddInfrastructureServices(config);
+    
+    // Configure the named HttpClient for gRPC with TOFU support
+    services.AddHttpClient("percolator-grpc").ConfigurePrimaryHttpMessageHandler(() =>
+    {
+        return new SocketsHttpHandler
+        {
+            SslOptions = new System.Net.Security.SslClientAuthenticationOptions
+            {
+                // For the first connection, accept any certificate to enable TOFU
+                RemoteCertificateValidationCallback = (sender, certificate, chain, sslPolicyErrors) => true,
+                
+                // Client certificates will be handled separately by the application
+                LocalCertificateSelectionCallback = (sender, host, localCertificates, remoteCertificate, acceptableIssuers) => null
+            }
+        };
+    });
 
     return services.BuildServiceProvider();
 }

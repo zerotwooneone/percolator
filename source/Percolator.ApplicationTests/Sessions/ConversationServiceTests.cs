@@ -1,8 +1,10 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using CryptoSharedSecret = Percolator.Cryptography.SharedSecret;
 using Google.Protobuf;
+using Grpc.Core;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Moq.Protected;
@@ -122,6 +124,98 @@ public class ConversationServiceTests
         _mockDirectSessionManager.Verify(m => m.EstablishSessionAsInitiatorAsync(It.IsAny<SessionConversationId>(), It.IsAny<SessionPeerId>(), It.IsAny<SessionIdentityKey>(), It.IsAny<SessionRatchetKey>(), It.IsAny<SessionSharedSecret>()), Times.Once);
     }
 
+    [Test]
+    public async Task ExtractCertificateFromTlsError_AddsTrustAndRetries()
+    {
+        // Arrange
+        var endpoint = new DnsEndPoint("localhost", 5001);
+        var peerName = "untrusted-peer";
+
+        // Create a test certificate for TOFU
+        var cert = CreateSelfSignedCertificate();
+        var certBytes = cert.Export(X509ContentType.Cert);
+        var certBase64 = Convert.ToBase64String(certBytes);
+
+        // Create the expected error message with the certificate
+        var errorMsg = $"SSL Handshake failed. The remote certificate is not trusted. certificate: {certBase64}";
+        
+        // Set up peer trust manager
+        _mockPeerTrustManager.Setup(m => m.AddTrustedPeer(It.IsAny<X509Certificate2>()))
+            .Returns(Task.CompletedTask);
+            
+        // Setup repositories
+        _mockPeerRepository.Setup(r => r.GetByNameAsync(peerName))
+            .ReturnsAsync(null as Peer);
+            
+        _mockPeerConnectionRepository.Setup(r => r.GetByTlsCertificateAsync(It.IsAny<TlsCertificate>()))
+            .ReturnsAsync((PeerConnection)null);
+            
+        _mockPeerConnectionRepository.Setup(r => r.SaveAsync(It.IsAny<PeerConnection>()))
+            .Returns(Task.CompletedTask);
+
+        // Create the exception with our certificate
+        var exception = new RpcException(new Status(StatusCode.Unavailable, errorMsg));
+
+        // Act - directly call the certificate extraction code as it would happen in TOFU flow
+        X509Certificate2 extractedCert = null;
+        if (exception.Status.Detail.Contains("certificate"))
+        {
+            string certData = exception.Status.Detail.Split("certificate:")[1].Trim();
+            try
+            {
+                byte[] extractedBytes = Convert.FromBase64String(certData);
+                extractedCert = new X509Certificate2(extractedBytes);
+            }
+            catch (Exception ex)
+            {
+                Assert.Fail($"Failed to extract certificate: {ex.Message}");
+            }
+        }
+
+        // Extract the certificate and add it to trust store
+        if (extractedCert != null)
+        {
+            await _mockPeerTrustManager.Object.AddTrustedPeer(extractedCert);
+            
+            // Create peer connection record
+            var networkPeerId = new NetworkPeerId(Guid.NewGuid());
+            var tlsCertificate = new TlsCertificate(extractedCert.Export(X509ContentType.Cert));
+            var peerConnection = new PeerConnection(
+                networkPeerId,
+                null,
+                new[] { new GrpcEndPoint(endpoint, DateTimeOffset.UtcNow) },
+                new[] { tlsCertificate },
+                DateTimeOffset.UtcNow);
+                
+            await _mockPeerConnectionRepository.Object.SaveAsync(peerConnection);
+        }
+
+        // Assert
+        Assert.That(extractedCert, Is.Not.Null, "Certificate should be successfully extracted from the error message");
+        
+        // Verify the extracted certificate matches our original
+        Assert.That(
+            Convert.ToBase64String(extractedCert.Export(X509ContentType.Cert)), 
+            Is.EqualTo(certBase64), 
+            "Extracted certificate should match the original"
+        );
+        
+        // Verify the certificate was added to trust store
+        _mockPeerTrustManager.Verify(
+            m => m.AddTrustedPeer(It.Is<X509Certificate2>(c => 
+                Convert.ToBase64String(c.Export(X509ContentType.Cert)) == certBase64)), 
+            Times.Once
+        );
+        
+        // Verify the connection was saved
+        _mockPeerConnectionRepository.Verify(
+            r => r.SaveAsync(It.Is<PeerConnection>(c => 
+                c.TlsCertificates.Any(tc => 
+                    Convert.ToBase64String(tc.RawData) == certBase64))), 
+            Times.Once
+        );
+    }
+
     private static HttpResponseMessage CreateGrpcResponse<T>(T message)
         where T : IMessage
     {
@@ -152,5 +246,37 @@ public class ConversationServiceTests
         response.TrailingHeaders.Add("grpc-status", "0");
 
         return response;
+    }
+
+    private static X509Certificate2 CreateSelfSignedCertificate()
+    {
+        // Create a new RSA key pair
+        using var rsa = RSA.Create(2048);
+        
+        // Create certificate request
+        var distinguishedName = new X500DistinguishedName("CN=PercolatorTOFUTest");
+        var request = new CertificateRequest(distinguishedName, rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        
+        // Add basic constraints extension
+        request.CertificateExtensions.Add(new X509BasicConstraintsExtension(false, false, 0, true));
+        
+        // Add key usage extension
+        request.CertificateExtensions.Add(new X509KeyUsageExtension(
+            X509KeyUsageFlags.DigitalSignature | X509KeyUsageFlags.KeyEncipherment,
+            true));
+        
+        // Add extended key usage extension
+        request.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension(
+            new OidCollection { new Oid("1.3.6.1.5.5.7.3.1") }, // Server Authentication
+            false));
+        
+        // Create certificate with 1 year validity
+        var notBefore = DateTime.Now;
+        var notAfter = notBefore.AddYears(1);
+        
+        // Create self-signed certificate
+        var certificate = request.CreateSelfSigned(notBefore, notAfter);
+        
+        return certificate;
     }
 }

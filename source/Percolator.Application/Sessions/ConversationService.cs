@@ -140,7 +140,23 @@ public class ConversationService : IConversationService
             _logger.LogWarning(ex, "TLS handshake failed for peer at {Endpoint}. Attempting Trust on First Use (TOFU).", endpoint);
 
             // Use the TofuHandler to get the server certificate
-            var remoteCert = ex.Status.Detail.Contains("certificate") ? new X509Certificate2(ex.Status.Detail.Split("certificate:")[1].Trim()) : null;
+            X509Certificate2 remoteCert = null;
+            if (ex.Status.Detail.Contains("certificate"))
+            {
+                string certData = ex.Status.Detail.Split("certificate:")[1].Trim();
+                try
+                {
+                    // Try to parse as base64 first
+                    byte[] certBytes = Convert.FromBase64String(certData);
+                    remoteCert = new X509Certificate2(certBytes);
+                }
+                catch (FormatException)
+                {
+                    // If not valid base64, try as file path (for backward compatibility)
+                    remoteCert = new X509Certificate2(certData);
+                }
+            }
+            
             if (remoteCert is null)
             {
                 _logger.LogError("Failed to retrieve server certificate for TOFU from {Endpoint}.", endpoint);
