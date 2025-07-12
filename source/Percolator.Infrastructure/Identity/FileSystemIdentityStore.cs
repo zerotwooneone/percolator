@@ -1,7 +1,9 @@
 using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Text.Json;
+using Microsoft.Extensions.Options;
 using Percolator.Identity.Model;
+using Percolator.Infrastructure;
 
 namespace Percolator.Identity;
 
@@ -10,10 +12,12 @@ public class FileSystemIdentityStore : IIdentityStore
     private readonly string _identitiesPath;
     private static readonly JsonSerializerOptions _jsonSerializerOptions = new() { WriteIndented = true };
 
-    public FileSystemIdentityStore()
+    public FileSystemIdentityStore(IOptions<StorageOptions> storageOptions)
     {
+        var dataDirectory = storageOptions.Value.Path;
+        Directory.CreateDirectory(dataDirectory);
         var appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        var percolatorAppDataPath = Path.Combine(appDataPath, "Percolator");
+        var percolatorAppDataPath = Path.Combine(appDataPath, dataDirectory);
         _identitiesPath = Path.Combine(percolatorAppDataPath, "identities");
         Directory.CreateDirectory(_identitiesPath);
     }

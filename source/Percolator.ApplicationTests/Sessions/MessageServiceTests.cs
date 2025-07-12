@@ -16,6 +16,7 @@ using SessionConversationId = Percolator.Sessions.ConversationId;
 using SessionPeerId = Percolator.Sessions.PeerId;
 using Percolator.Infrastructure.Sessions;
 using Microsoft.Extensions.Options;
+using Percolator.Chat.ValueObjects;
 using Percolator.Infrastructure;
 
 namespace Percolator.ApplicationTests.Sessions;
@@ -95,7 +96,7 @@ public class MessageServiceTests
             new ChatParticipantId(localIdentity.Id),
             new ChatParticipantId(remotePeerId.Value)
         };
-        var conversation = new ChatConversation(conversationId, participants.ToList());
+        var conversation = new ChatConversation(conversationId, new ChannelId(new byte[64]), participants.ToList(), new List<Message>());
 
         var localDhKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
 

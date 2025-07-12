@@ -96,7 +96,7 @@ public class SessionMessageTests
 
         // Arrange: Mock the conversation repository to resolve peer IDs
         var participants = new List<ParticipantId> { new(alicePeerId.Value), new(bobPeerId.Value) };
-        var chatConversation = new Conversation(new ChatConversationId(conversationId.Value), participants, "Test Convo");
+        var chatConversation = new Conversation(new ChatConversationId(conversationId.Value),new ChannelId(new byte[64]), participants,new List<Message>(), "Test Convo");
         _mockConversationRepo.Setup(r => r.GetByIdAsync(It.IsAny<ChatConversationId>())).ReturnsAsync(chatConversation);
 
         // Act: Alice encrypts a message

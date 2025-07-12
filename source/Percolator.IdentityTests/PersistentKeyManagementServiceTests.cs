@@ -86,7 +86,7 @@ public class PersistentKeyManagementServiceTests
     }
 
     [Test]
-    public async Task GetKeysAsync_WhenKeyFileIsCorrupt_ThrowsJsonException()
+    public Task GetKeysAsync_WhenKeyFileIsCorrupt_ThrowsJsonException()
     {
         // Arrange
         var identityName = _fixture.Create<string>();
@@ -97,6 +97,7 @@ public class PersistentKeyManagementServiceTests
 
         // Act & Assert
         Assert.ThrowsAsync<JsonException>(() => _sut.GetKeysAsync(identityName));
+        return Task.CompletedTask;
     }
 
     [Test]

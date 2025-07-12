@@ -11,24 +11,14 @@ public class Conversation
     public ConversationId Id { get; }
     public ChannelId ChannelId { get; private set; }
     public IReadOnlyList<ParticipantId> Participants => new ReadOnlyCollection<ParticipantId>(_participants);
-    public IReadOnlyList<Message> Messages => new ReadOnlyCollection<Message>(_messages);
+    public IReadOnlyList<Message> Messages => _messages;
     public string? Name { get; private set; }
 
-    public Conversation(
-        ConversationId id,
-        ChannelId channelId,
-        IReadOnlyList<ParticipantId> participants,
-        IReadOnlyList<Message> messages,
-        string? name)
-    {
-        ChannelId = channelId;
-        Id = id;
-        _participants = participants.ToList();
-        _messages = messages.ToList();
-        Name = name;
-    }
-
-    public Conversation(ConversationId id, IEnumerable<ParticipantId> participants, string? name = null)
+    public Conversation(ConversationId id,
+        ChannelId channelId, 
+        IEnumerable<ParticipantId> participants,
+        IEnumerable<Message> messages, 
+        string? name = null)
     {
         var participantList = participants.ToList();
         if (participantList.Count < 2)
@@ -44,6 +34,8 @@ public class Conversation
         Id = id;
         _participants.AddRange(participantList);
         Name = name;
+        ChannelId = channelId;
+        _messages = messages.ToList();
     }
 
     public void ChangeName(string? newName)

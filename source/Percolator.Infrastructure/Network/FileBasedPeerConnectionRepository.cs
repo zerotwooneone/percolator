@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Net;
 using System.Text.Json;
+using Microsoft.Extensions.Options;
 using Percolator.Infrastructure.Serialization;
 using Percolator.Network;
 
@@ -12,8 +13,10 @@ public class FileBasedPeerConnectionRepository : IPeerConnectionRepository
     private readonly ConcurrentDictionary<PeerId, PeerConnection> _connections = new();
     private readonly JsonSerializerOptions _jsonSerializerOptions;
 
-    public FileBasedPeerConnectionRepository(string dataDirectory)
+    public FileBasedPeerConnectionRepository(IOptions<StorageOptions> options)
     {
+        var dataDirectory = options.Value.Path;
+        Directory.CreateDirectory(dataDirectory);
         _filePath = Path.Combine(dataDirectory, "peer_connections.json");
         _jsonSerializerOptions = new JsonSerializerOptions { WriteIndented = true };
         LoadConnections();
@@ -31,10 +34,10 @@ public class FileBasedPeerConnectionRepository : IPeerConnectionRepository
         await PersistConnections();
     }
 
-    public async Task<PeerConnection?> GetByDirectMessage(DirectMessagePublicKey directMessagePublicKey)
+    public Task<PeerConnection?> GetByDirectMessage(DirectMessagePublicKey directMessagePublicKey)
     {
         var connection = _connections.Values.FirstOrDefault(c => c.DirectMessagePublicKey == directMessagePublicKey);
-        return connection;
+        return Task.FromResult(connection);
     }
 
     private void LoadConnections()
@@ -60,7 +63,7 @@ public class FileBasedPeerConnectionRepository : IPeerConnectionRepository
 
     private static PeerConnection ToDomain(PeerConnectionModel model) =>
         new(new PeerId(model.Id),
-            new DirectMessagePublicKey(model.DirectMessagePublicKey),
+            model.DirectMessagePublicKey is null ? null : new DirectMessagePublicKey(model.DirectMessagePublicKey),
             model.GrpcEndPoints.Select(e => new GrpcEndPoint(new DnsEndPoint(e.Host, e.Port), e.LastSeen)).ToList(),
             model.TlsCertificates.Select(c => new TlsCertificate(c.RawData)).ToList(),
             model.LastSeen);
@@ -69,7 +72,7 @@ public class FileBasedPeerConnectionRepository : IPeerConnectionRepository
         new()
         {
             Id = connection.Id.Value,
-            DirectMessagePublicKey = connection.DirectMessagePublicKey.Value,
+            DirectMessagePublicKey = connection.DirectMessagePublicKey?.Value,
             GrpcEndPoints = connection.GrpcEndPoints.Select(e => new GrpcEndPointModel { Host = e.EndPoint.Host, Port = e.EndPoint.Port, LastSeen = e.LastSeen }).ToList(),
             TlsCertificates = connection.TlsCertificates.Select(c => new TlsCertificateModel { RawData = c.RawData }).ToList(),
             LastSeen = connection.LastSeen

@@ -23,10 +23,11 @@ public class ConversationTests
     {
         // Arrange
         var id = _fixture.Create<ConversationId>();
+        var channelId = _fixture.Create<ChannelId>();
         var participants = _fixture.CreateMany<ParticipantId>(1).ToList();
 
         // Act
-        Action action = () => new Conversation(id, participants);
+        Action action = () => new Conversation(id, channelId, participants, _fixture.Create<IEnumerable<Message>>());
 
         // Assert
         action.Should().Throw<ArgumentException>();
@@ -41,7 +42,7 @@ public class ConversationTests
         var participants = new List<ParticipantId> { participantId, participantId };
 
         // Act
-        Action action = () => new Conversation(id, participants);
+        Action action = () => new Conversation(id,_fixture.Create<ChannelId>(), participants, _fixture.Create<IEnumerable<Message>>());
 
         // Assert
         action.Should().Throw<ArgumentException>();
@@ -55,7 +56,7 @@ public class ConversationTests
         var participants = _fixture.CreateMany<ParticipantId>(2).ToList();
 
         // Act
-        var conversation = new Conversation(id, participants);
+        var conversation = new Conversation(id,_fixture.Create<ChannelId>(), participants, _fixture.Create<IEnumerable<Message>>());
 
         // Assert
         conversation.Should().NotBeNull();
@@ -70,7 +71,7 @@ public class ConversationTests
         // Arrange
         var id = _fixture.Create<ConversationId>();
         var participants = _fixture.CreateMany<ParticipantId>(2).ToList();
-        var conversation = new Conversation(id, participants);
+        var conversation = new Conversation(id,_fixture.Create<ChannelId>(), participants, _fixture.Create<IEnumerable<Message>>());
         var senderId = participants.First();
         var content = _fixture.Create<string>();
 
@@ -90,7 +91,7 @@ public class ConversationTests
         // Arrange
         var id = _fixture.Create<ConversationId>();
         var participants = _fixture.CreateMany<ParticipantId>(2).ToList();
-        var conversation = new Conversation(id, participants);
+        var conversation = new Conversation(id,_fixture.Create<ChannelId>(), participants, _fixture.Create<IEnumerable<Message>>());
         var senderId = _fixture.Create<ParticipantId>();
         var content = _fixture.Create<string>();
 
@@ -107,7 +108,7 @@ public class ConversationTests
         // Arrange
         var id = _fixture.Create<ConversationId>();
         var participants = _fixture.CreateMany<ParticipantId>(2).ToList();
-        var conversation = new Conversation(id, participants);
+        var conversation = new Conversation(id,_fixture.Create<ChannelId>(), participants, _fixture.Create<IEnumerable<Message>>());
         var senderId = participants.First();
 
         // Act
@@ -127,7 +128,7 @@ public class ConversationTests
         // Arrange
         var id = _fixture.Create<ConversationId>();
         var participants = _fixture.CreateMany<ParticipantId>(2).ToList();
-        var conversation = new Conversation(id, participants);
+        var conversation = new Conversation(id,_fixture.Create<ChannelId>(), participants, _fixture.Create<IEnumerable<Message>>());
         var newParticipant = _fixture.Create<ParticipantId>();
 
         // Act
@@ -144,7 +145,7 @@ public class ConversationTests
         // Arrange
         var id = _fixture.Create<ConversationId>();
         var participants = _fixture.CreateMany<ParticipantId>(2).ToList();
-        var conversation = new Conversation(id, participants);
+        var conversation = new Conversation(id,_fixture.Create<ChannelId>(), participants, _fixture.Create<IEnumerable<Message>>());
         var existingParticipant = participants.First();
 
         // Act
@@ -160,7 +161,7 @@ public class ConversationTests
         // Arrange
         var id = _fixture.Create<ConversationId>();
         var participants = _fixture.CreateMany<ParticipantId>(3).ToList();
-        var conversation = new Conversation(id, participants);
+        var conversation = new Conversation(id,_fixture.Create<ChannelId>(), participants, _fixture.Create<IEnumerable<Message>>());
         var participantToRemove = participants.First();
 
         // Act
@@ -177,7 +178,7 @@ public class ConversationTests
         // Arrange
         var id = _fixture.Create<ConversationId>();
         var participants = _fixture.CreateMany<ParticipantId>(3).ToList();
-        var conversation = new Conversation(id, participants);
+        var conversation = new Conversation(id,_fixture.Create<ChannelId>(), participants, _fixture.Create<IEnumerable<Message>>());
         var nonExistentParticipant = _fixture.Create<ParticipantId>();
 
         // Act
@@ -193,7 +194,7 @@ public class ConversationTests
         // Arrange
         var id = _fixture.Create<ConversationId>();
         var participants = _fixture.CreateMany<ParticipantId>(2).ToList();
-        var conversation = new Conversation(id, participants);
+        var conversation = new Conversation(id,_fixture.Create<ChannelId>(), participants, _fixture.Create<IEnumerable<Message>>());
         var participantToRemove = participants.First();
 
         // Act
@@ -209,7 +210,7 @@ public class ConversationTests
         // Arrange
         var id = _fixture.Create<ConversationId>();
         var participants = _fixture.CreateMany<ParticipantId>(2).ToList();
-        var conversation = new Conversation(id, participants);
+        var conversation = new Conversation(id,_fixture.Create<ChannelId>(), participants, _fixture.Create<IEnumerable<Message>>());
         var senderId = participants.First();
         var reactorId = participants.Last();
         var emoji = "👍";
@@ -232,7 +233,7 @@ public class ConversationTests
         // Arrange
         var id = _fixture.Create<ConversationId>();
         var participants = _fixture.CreateMany<ParticipantId>(2).ToList();
-        var conversation = new Conversation(id, participants);
+        var conversation = new Conversation(id,_fixture.Create<ChannelId>(), participants, _fixture.Create<IEnumerable<Message>>());
         var senderId = participants.First();
         var nonParticipantId = _fixture.Create<ParticipantId>();
         var emoji = "👍";
@@ -252,7 +253,7 @@ public class ConversationTests
         // Arrange
         var id = _fixture.Create<ConversationId>();
         var participants = _fixture.CreateMany<ParticipantId>(2).ToList();
-        var conversation = new Conversation(id, participants);
+        var conversation = new Conversation(id,_fixture.Create<ChannelId>(), participants, _fixture.Create<IEnumerable<Message>>());
         var reactorId = participants.First();
         var nonExistentMessageId = _fixture.Create<MessageId>();
         var emoji = "👍";
@@ -270,7 +271,7 @@ public class ConversationTests
         // Arrange
         var id = _fixture.Create<ConversationId>();
         var participants = _fixture.CreateMany<ParticipantId>(2).ToList();
-        var conversation = new Conversation(id, participants);
+        var conversation = new Conversation(id,_fixture.Create<ChannelId>(), participants, _fixture.Create<IEnumerable<Message>>());
         var senderId = participants.First();
         var reactorId = participants.Last();
         conversation.AddMessage(senderId, "Hello");
@@ -293,7 +294,7 @@ public class ConversationTests
         // Arrange
         var id = _fixture.Create<ConversationId>();
         var participants = _fixture.CreateMany<ParticipantId>(2).ToList();
-        var conversation = new Conversation(id, participants);
+        var conversation = new Conversation(id,_fixture.Create<ChannelId>(), participants, _fixture.Create<IEnumerable<Message>>());
         var senderId = participants.First();
         var reactorId = participants.Last();
         var emoji = "👍";
@@ -314,7 +315,7 @@ public class ConversationTests
         // Arrange
         var id = _fixture.Create<ConversationId>();
         var participants = _fixture.CreateMany<ParticipantId>(2).ToList();
-        var conversation = new Conversation(id, participants);
+        var conversation = new Conversation(id,_fixture.Create<ChannelId>(), participants, _fixture.Create<IEnumerable<Message>>());
         var senderId = participants.First();
         var reactorId = participants.Last();
         var emoji = "👍";
@@ -335,7 +336,7 @@ public class ConversationTests
         // Arrange
         var id = _fixture.Create<ConversationId>();
         var participants = _fixture.CreateMany<ParticipantId>(2).ToList();
-        var conversation = new Conversation(id, participants);
+        var conversation = new Conversation(id,_fixture.Create<ChannelId>(), participants, _fixture.Create<IEnumerable<Message>>());
         var senderId = participants.First();
         var nonParticipantId = _fixture.Create<ParticipantId>();
         var emoji = "👍";
@@ -358,7 +359,7 @@ public class ConversationTests
         var name = _fixture.Create<string>();
 
         // Act
-        var conversation = new Conversation(id, participants, name);
+        var conversation = new Conversation(id,_fixture.Create<ChannelId>(), participants, _fixture.Create<IEnumerable<Message>>(), name);
 
         // Assert
         conversation.Name.Should().Be(name);
@@ -370,7 +371,7 @@ public class ConversationTests
         // Arrange
         var id = _fixture.Create<ConversationId>();
         var participants = _fixture.CreateMany<ParticipantId>(2).ToList();
-        var conversation = new Conversation(id, participants);
+        var conversation = new Conversation(id,_fixture.Create<ChannelId>(), participants, _fixture.Create<IEnumerable<Message>>());
         var newName = _fixture.Create<string>();
 
         // Act
@@ -386,7 +387,7 @@ public class ConversationTests
         // Arrange
         var id = _fixture.Create<ConversationId>();
         var participants = _fixture.CreateMany<ParticipantId>(2).ToList();
-        var conversation = new Conversation(id, participants);
+        var conversation = new Conversation(id,_fixture.Create<ChannelId>(), participants, _fixture.Create<IEnumerable<Message>>());
         var senderId = participants.First();
         var readerId = participants.Last();
         conversation.AddMessage(senderId, "Hello");
@@ -408,7 +409,7 @@ public class ConversationTests
         // Arrange
         var id = _fixture.Create<ConversationId>();
         var participants = _fixture.CreateMany<ParticipantId>(2).ToList();
-        var conversation = new Conversation(id, participants);
+        var conversation = new Conversation(id,_fixture.Create<ChannelId>(), participants, _fixture.Create<IEnumerable<Message>>());
         var nonParticipantId = _fixture.Create<ParticipantId>();
         conversation.AddMessage(participants.First(), "Hello");
         var messageId = conversation.Messages.First().Id;
@@ -426,7 +427,7 @@ public class ConversationTests
         // Arrange
         var id = _fixture.Create<ConversationId>();
         var participants = _fixture.CreateMany<ParticipantId>(2).ToList();
-        var conversation = new Conversation(id, participants);
+        var conversation = new Conversation(id,_fixture.Create<ChannelId>(), participants, _fixture.Create<IEnumerable<Message>>());
         var readerId = participants.First();
         var nonExistentMessageId = _fixture.Create<MessageId>();
 
@@ -443,7 +444,7 @@ public class ConversationTests
         // Arrange
         var id = _fixture.Create<ConversationId>();
         var participants = _fixture.CreateMany<ParticipantId>(2).ToList();
-        var conversation = new Conversation(id, participants);
+        var conversation = new Conversation(id,_fixture.Create<ChannelId>(), participants, _fixture.Create<IEnumerable<Message>>());
         var senderId = participants.First();
         var readerId = participants.Last();
         conversation.AddMessage(senderId, "Hello");

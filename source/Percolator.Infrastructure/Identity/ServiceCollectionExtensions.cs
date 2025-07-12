@@ -14,6 +14,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ITrustedPeerStore>(sp => sp.GetRequiredService<FileBasedPeerRepository>());
         services.AddSingleton<ICredentialService, CredentialService>();
         services.AddSingleton<ITlsCertificateService, TlsCertificateService>();
+        services.AddSingleton<IIdentityStore, FileSystemIdentityStore>();
 
         return services;
     }

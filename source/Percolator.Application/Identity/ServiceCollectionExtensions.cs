@@ -9,7 +9,7 @@ public static class ServiceCollectionExtensions
     {
         // Concrete implementations from Percolator.Identity
         services.AddSingleton<IIdentityService, PersistentIdentityService>();
-        services.AddSingleton<IIdentityStore, FileSystemIdentityStore>();
+        
         services.AddSingleton<IKeyManagementService, PersistentKeyManagementService>();
         services.AddSingleton<ICredentialService, CredentialService>();
 

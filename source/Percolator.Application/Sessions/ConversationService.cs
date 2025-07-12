@@ -8,6 +8,7 @@ using Percolator.Application.Identity;
 using Percolator.Application.KeyExchange;
 using Percolator.Application.Network;
 using Percolator.Chat;
+using Percolator.Chat.ValueObjects;
 using Percolator.Contracts;
 using Percolator.Cryptography;
 using Percolator.Identity;
@@ -102,6 +103,7 @@ public class ConversationService : IConversationService
 
         Peer? peer = await _peerRepository.GetByNameAsync(peerName);
 
+        var remotePeerIdentityKey = response.ResponderBundle.IdentitySigningKey.ToByteArray();
         // If peer is unknown, this is a TOFU scenario.
         if (peer is null)
         {
@@ -113,7 +115,7 @@ public class ConversationService : IConversationService
 
             _logger.LogInformation("Peer '{PeerName}' not found. Creating new peer from TOFU handshake.", peerName);
 
-            var tlsCertificateFromHandshake = new TlsCertificate(response.ResponderBundle.IdentitySigningKey.ToByteArray());
+            var tlsCertificateFromHandshake = new TlsCertificate(remotePeerIdentityKey);
             var newPeer = new Peer(new IdentityPeerId(Guid.NewGuid()), peerName);
             await _peerRepository.AddAsync(newPeer);
             peer = newPeer;
@@ -131,27 +133,31 @@ public class ConversationService : IConversationService
         var remotePeerId = new SessionPeerId(peer.Id.Value);
         var sharedSecret = _orchestrator.CompleteHandshake(response.ResponderBundle, ephemeralKey);
 
-        var conversationId = new ChatConversationId(Guid.NewGuid());
-        var conversation = new ChatConversation(
-            conversationId,
-            new List<ChatParticipantId>
-            {
-                new(localPeerId.Value),
-                new(remotePeerId.Value)
-            });
+        var channelId = new ChannelId(remotePeerIdentityKey);
+        var conversation = (await _conversationRepository.GetByChannelIdAsync(channelId))
+                           ?? new ChatConversation(
+                               new ChatConversationId(Guid.NewGuid()),
+                               channelId,
+                               new List<ChatParticipantId>
+                               {
+                                   new(localPeerId.Value),
+                                   new(remotePeerId.Value)
+                               },
+                               new List<Message>(),
+                               peerName);
 
         await _conversationRepository.AddAsync(conversation);
 
         await _sessionManager.EstablishSessionAsInitiatorAsync(
-            new SessionConversationId(conversationId.Value),
+            new SessionConversationId(conversation.Id.Value),
             remotePeerId,
             new SessionIdentityKey(response.ResponderBundle.IdentityAgreementKey.ToByteArray()),
             new SessionRatchetKey(response.ResponderBundle.SignedPreKey.ToByteArray()),
             sharedSecret);
 
-        _logger.LogInformation("Successfully established session and created conversation {ConversationId}", conversationId);
+        _logger.LogInformation("Successfully established session and created conversation {ConversationId}", conversation.Id.Value);
 
-        return conversationId;
+        return conversation.Id;
     }
 
     public Task<ChatConversationId?> GetLastActiveConversationIdAsync(Guid peerId)

@@ -37,7 +37,7 @@ public class PersistentIdentityService : IIdentityService
         return (identity, keys);
     }
 
-    public async Task<IdentityRecord> CreateIdentityAsync(string name, string nickname, CancellationToken cancellationToken = default)
+    public async Task<IdentityRecord> CreateIdentityAsync(string name, string? nickname, CancellationToken cancellationToken = default)
     {
         var existing = await _identityStore.GetIdentityAsync(name, cancellationToken);
         if (existing is not null)

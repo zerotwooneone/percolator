@@ -3,7 +3,7 @@ namespace Percolator.Infrastructure.Serialization;
 public class PeerConnectionModel
 {
     public Guid Id { get; set; }
-    public byte[] DirectMessagePublicKey { get; set; } = Array.Empty<byte>();
+    public byte[]? DirectMessagePublicKey { get; set; } = Array.Empty<byte>();
     public List<GrpcEndPointModel> GrpcEndPoints { get; set; } = new();
     public List<TlsCertificateModel> TlsCertificates { get; set; } = new();
     public DateTimeOffset LastSeen { get; set; }
