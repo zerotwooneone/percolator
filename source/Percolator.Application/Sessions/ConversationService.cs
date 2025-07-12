@@ -35,6 +35,7 @@ public class ConversationService : IConversationService
     private readonly IPeerConnectionRepository _peerConnectionRepository;
     private readonly ILocalPeerProvider _localPeerProvider;
     private readonly IGrpcClientFactory _grpcClientFactory;
+    private readonly ITlsCertificateService _tlsCertificateService;
     private readonly ILogger<ConversationService> _logger;
 
     public ConversationService(
@@ -46,6 +47,7 @@ public class ConversationService : IConversationService
         IPeerConnectionRepository peerConnectionRepository,
         ILocalPeerProvider localPeerProvider,
         IGrpcClientFactory grpcClientFactory,
+        ITlsCertificateService tlsCertificateService,
         ILogger<ConversationService> logger)
     {
         _activeIdentityContext = activeIdentityContext;
@@ -56,6 +58,7 @@ public class ConversationService : IConversationService
         _peerConnectionRepository = peerConnectionRepository;
         _localPeerProvider = localPeerProvider;
         _grpcClientFactory = grpcClientFactory;
+        _tlsCertificateService = tlsCertificateService;
         _logger = logger;
     }
 
@@ -63,10 +66,15 @@ public class ConversationService : IConversationService
     {
         _logger.LogInformation("Attempting to create direct conversation with {endpoint}", endpoint);
 
+        var localIdentity = _activeIdentityContext.Identity;
+        if (localIdentity is null)
+        {
+            throw new InvalidOperationException("Could not find local identity. Please create one first.");
+        }
         var localKeys = _activeIdentityContext.Keys;
         if (localKeys is null)
         {
-            throw new InvalidOperationException("Could not find local identity. Please create one first.");
+            throw new InvalidOperationException("Could not find local identity's keys. Please create them first.");
         }
 
         if (localKeys.OneTimePreKeys is null || localKeys.OneTimePreKeys.Length == 0)
@@ -96,7 +104,10 @@ public class ConversationService : IConversationService
             InitiatorEphemeralKey = ByteString.CopyFrom(ephemeralKey.PublicKey.ExportSubjectPublicKeyInfo())
         };
 
-        var client = _grpcClientFactory.CreateClient(endpoint, tlsCertificate);
+        var clientCertificate = await _tlsCertificateService.GetOrCreateTlsCertificateAsync(
+            localIdentity.Name, 
+            localKeys.IdentitySigningKey.ExportSubjectPublicKeyInfo());
+        var client = _grpcClientFactory.CreateClient(endpoint, clientCertificate, tlsCertificate);
 
         _logger.LogInformation("Sending EstablishSessionRequest to {endpoint}", endpoint);
         var response = await client.EstablishSessionAsync(request);

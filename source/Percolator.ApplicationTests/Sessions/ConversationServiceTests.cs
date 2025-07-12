@@ -1,5 +1,6 @@
 using System.Net;
 using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using Google.Protobuf;
 using Grpc.Core;
 using Grpc.Net.Client;
@@ -14,6 +15,7 @@ using Percolator.Chat;
 using Percolator.Contracts;
 using Percolator.Cryptography;
 using Percolator.Identity;
+using Percolator.Identity.Model;
 using Percolator.Network;
 using Percolator.Sessions;
 using ECDiffieHellman = System.Security.Cryptography.ECDiffieHellman;
@@ -37,6 +39,7 @@ public class ConversationServiceTests
     private Mock<DirectSessionManager> _mockSessionManager = null!;
     private Mock<IGrpcClientFactory> _mockGrpcFactory = null!;
     private Mock<IX3DHManager> _mockX3dhManager = null!;
+    private Mock<ITlsCertificateService> _mockTlsCertService = null!;
     private ActiveIdentityContext _activeIdentityContext = null!;
     private ConversationService _sut = null!;
 
@@ -49,6 +52,7 @@ public class ConversationServiceTests
         _mockLocalPeerProvider = new Mock<ILocalPeerProvider>();
         _mockGrpcFactory = new Mock<IGrpcClientFactory>();
         _mockX3dhManager = new Mock<IX3DHManager>();
+        _mockTlsCertService = new Mock<ITlsCertificateService>();
 
         // Setup Active Identity
         var identitySigningKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
@@ -57,6 +61,7 @@ public class ConversationServiceTests
         var oneTimeKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         _activeIdentityContext = new ActiveIdentityContext
         {
+            Identity = new IdentityRecord(Guid.Parse("c369a55d-fa2c-43d5-939a-712661a51c07"), "test-identity"),
             Keys = new X3dhKeys(identitySigningKey, identityAgreementKey, signedPreKey, new[] { oneTimeKey })
         };
 
@@ -84,6 +89,7 @@ public class ConversationServiceTests
             _mockPeerConnectionRepo.Object,
             _mockLocalPeerProvider.Object,
             _mockGrpcFactory.Object,
+            _mockTlsCertService.Object,
             new Mock<ILogger<ConversationService>>().Object
         );
     }
@@ -129,7 +135,10 @@ public class ConversationServiceTests
         mockTransportClient.Setup(c => c.EstablishSessionAsync(It.IsAny<EstablishSessionRequest>(), null, null, CancellationToken.None))
             .Returns(fakeCall);
 
-        _mockGrpcFactory.Setup(f => f.CreateClient(endpoint, null)).Returns(mockTransportClient.Object);
+        _mockTlsCertService.Setup(s => s.GetOrCreateTlsCertificateAsync(It.IsAny<string>(), It.IsAny<byte[]>()))
+            .ReturnsAsync(new X509Certificate2());
+        _mockGrpcFactory.Setup(f => f.CreateClient(endpoint, It.IsAny<X509Certificate2>(), It.IsAny<TlsCertificate?>()))
+            .Returns(mockTransportClient.Object);
 
         // Mock other dependencies to allow the method to complete
         _mockLocalPeerProvider.Setup(p => p.GetPeerIdAsync()).Returns(Task.FromResult(new SessionPeerId(Guid.NewGuid())));

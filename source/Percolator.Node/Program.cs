@@ -128,7 +128,20 @@ async Task HostCommandHandler(InvocationContext context)
             {
                 listenOptions.UseHttps(httpsOptions =>
                 {
-                    httpsOptions.ServerCertificateSelector = (connectionContext, name) => serverCertificate;
+                    httpsOptions.ServerCertificate = serverCertificate;
+                    httpsOptions.ClientCertificateMode = Microsoft.AspNetCore.Server.Kestrel.Https.ClientCertificateMode.RequireCertificate;
+                    httpsOptions.ClientCertificateValidation = (certificate, chain, policyErrors) =>
+                    {
+                        var logger = tempServiceProvider.GetRequiredService<ILogger<Program>>();
+                        logger.LogInformation("Performing client certificate validation.");
+                        if (certificate.Extensions[Percolator.Cryptography.Oids.PeerIdentityKey] is null)
+                        {
+                            logger.LogError("Client certificate is missing the required peer identity extension.");
+                            return false;
+                        }
+                        logger.LogInformation("Client certificate validation successful.");
+                        return true;
+                    };
                 });
             });
         });

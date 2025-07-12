@@ -18,16 +18,20 @@ public class GrpcClientFactory : IGrpcClientFactory
         _logger = logger;
     }
 
-    public TransportService.TransportServiceClient CreateClient(DnsEndPoint endpoint, TlsCertificate? tlsCertificate)
+    public TransportService.TransportServiceClient CreateClient(
+        DnsEndPoint endpoint, 
+        X509Certificate2 clientCertificate,
+        TlsCertificate? tlsCertificate)
     {
-        var channel = CreateChannel(endpoint, tlsCertificate);
+        var channel = CreateChannel(endpoint, clientCertificate, tlsCertificate);
         return new TransportService.TransportServiceClient(channel);
     }
 
-    private GrpcChannel CreateChannel(DnsEndPoint endpoint, TlsCertificate? tlsCertificate = null)
+    private GrpcChannel CreateChannel(DnsEndPoint endpoint, X509Certificate2 clientCertificate, TlsCertificate? tlsCertificate = null)
     {
         var address = $"https://{endpoint.Host}:{endpoint.Port}";
         var handler = new HttpClientHandler();
+        handler.ClientCertificates.Add(clientCertificate);
         handler.ServerCertificateCustomValidationCallback = (request, cert, chain, errors) =>
         {
             _logger.LogInformation("Performing custom server certificate validation. SSL Policy Errors: {SslPolicyErrors}", errors);
