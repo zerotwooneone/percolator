@@ -1,7 +1,7 @@
-using Percolator.Sessions;
 using System.Collections.Concurrent;
+using Percolator.Sessions;
 
-namespace Percolator.Application.Sessions;
+namespace Percolator.Infrastructure.Sessions;
 
 /// <summary>
 /// An in-memory, thread-safe implementation of the message store for demonstration and testing purposes.
