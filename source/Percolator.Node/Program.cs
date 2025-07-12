@@ -14,6 +14,7 @@ using Percolator.Application.Network;
 using Percolator.Application.Sessions;
 using Percolator.Infrastructure;
 using Percolator.Network;
+using Percolator.Node;
 using ChatConversationId = Percolator.Chat.ValueObjects.ConversationId;
 
 var rootCommand = new RootCommand("Percolator Node: A secure peer-to-peer communication tool.");
@@ -87,7 +88,8 @@ async Task HostCommandHandler(InvocationContext context)
 
     // Step 1: Build a temporary service provider to get services needed for startup.
     var tempServices = new ServiceCollection();
-    IConfigurationRoot tempConfig = new ConfigurationBuilder().Build();
+    
+    IConfigurationRoot tempConfig = new ConfigurationBuilder().AddNode().Build();
     tempServices.AddLogging(builder => builder.AddConsole());
     tempServices.AddApplicationServices(tempConfig);
     tempServices.AddInfrastructureServices(tempConfig);
@@ -162,7 +164,7 @@ async Task ConnectCommandHandler(InvocationContext context)
     var remoteTlsKey = context.ParseResult.GetValueForOption(remoteTlsKeyOption);
 
     // Build client-specific service provider
-    var configuration = new ConfigurationBuilder().AddJsonFile("appsettings.json", optional: true).Build();
+    var configuration = new ConfigurationBuilder().AddNode().Build();
 
     if (!TryParseEndpoint(endpointString, configuration, out var endpoint))
     {
@@ -216,7 +218,7 @@ async Task SendCommandHandler(InvocationContext context)
     var identityName = context.ParseResult.GetValueForOption(identityOption);
 
     // Build client-specific service provider
-    var configuration = new ConfigurationBuilder().AddJsonFile("appsettings.json", optional: true).Build();
+    var configuration = new ConfigurationBuilder().AddNode().Build();
 
     await using var serviceProvider = BuildServiceProvider(configuration);
 

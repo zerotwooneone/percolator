@@ -56,22 +56,8 @@ public class TlsCertificateService : ITlsCertificateService
             }
         }
 
-        X3dhKeys keys;
-        try
-        {
-            keys = await _keyManagementService.GetKeysAsync(identityName);
-        }
-        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
-        {
-            _logger.LogInformation("No existing keys found for {IdentityName}, creating new ones.", identityName);
-            keys = await _keyManagementService.CreateKeysAsync(identityName);
-        }
-        catch (Exception ex) when (ex is JsonException or CryptographicException)
-        {
-            _logger.LogError(ex, "Failed to load or decrypt existing keys for {IdentityName}. A new set will be created.", identityName);
-            keys = await _keyManagementService.CreateKeysAsync(identityName);
-        }
-
+        var keys = (await _keyManagementService.GetKeysAsync(identityName) ?? await _keyManagementService.CreateKeysAsync(identityName));
+        
         _logger.LogInformation("Creating new TLS certificate for {IdentityName}", identityName);
         var newCertificate = CertificateGenerator.CreateTlsCertificate(keys.IdentitySigningKey, identityName, publicIdentitySigningKey);
         _logger.LogInformation("Created new certificate. HasPrivateKey: {HasPrivateKey}", newCertificate.HasPrivateKey);

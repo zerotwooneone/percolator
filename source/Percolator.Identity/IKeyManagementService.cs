@@ -10,7 +10,7 @@ public interface IKeyManagementService
     /// </summary>
     /// <param name="identityName">The name of the identity.</param>
     /// <returns>The cryptographic keys for the specified identity.</returns>
-    Task<X3dhKeys> GetKeysAsync(string identityName);
+    Task<X3dhKeys?> GetKeysAsync(string identityName);
 
     /// <summary>
     /// Creates the cryptographic keys for a given identity.

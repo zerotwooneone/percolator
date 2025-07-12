@@ -31,7 +31,7 @@ public class PersistentIdentityService : IIdentityService
         }
         else
         {
-            keys = await _keyManagementService.GetKeysAsync(name);
+            keys = (await _keyManagementService.GetKeysAsync(name) ?? await _keyManagementService.CreateKeysAsync(name));
         }
 
         return (identity, keys);

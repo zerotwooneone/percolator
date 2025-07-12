@@ -87,7 +87,7 @@ public class PersistentKeyManagementServiceTests
     }
 
     [Test]
-    public void GetKeysAsync_WhenKeysDoNotExist_ThrowsFileNotFoundException()
+    public void GetKeysAsync_WhenKeysDoNotExist_ReturnsNull()
     {
         // Arrange
         var identityName = _fixture.Create<string>();
@@ -96,7 +96,7 @@ public class PersistentKeyManagementServiceTests
         Directory.CreateDirectory(Path.GetDirectoryName(keyFilePath)!);
 
         // Act & Assert
-        Assert.ThrowsAsync<FileNotFoundException>(() => _sut.GetKeysAsync(identityName));
+        Assert.ThatAsync(async () => await _sut.GetKeysAsync(identityName), Is.Null);
     }
 
     [Test]

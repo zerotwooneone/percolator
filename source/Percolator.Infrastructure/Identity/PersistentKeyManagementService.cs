@@ -30,32 +30,18 @@ public class PersistentKeyManagementService : IKeyManagementService
         
         var appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         _percolatorAppDataPath = Path.Combine(appDataPath, dataDirectory);
+        _logger.LogInformation("Percolator data directory: {PercolatorAppDataPath}!!!!{storageOptionsValuePath}", _percolatorAppDataPath, storageOptions.Value.Path);
     }
 
     internal record KeyContainer(ECParameters IdentitySigningKey, ECParameters IdentityAgreementKey, ECParameters SignedPreKey, ECParameters[] OneTimePreKeys);
 
-    public async Task<X3dhKeys> GetOrCreateKeysAsync(string identityName)
-    {
-        try
-        {
-            return await GetKeysAsync(identityName);
-        }
-        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
-        {
-            _logger.LogInformation(ex, "No existing keys found for {IdentityName}. A new set will be created.", identityName);
-        }
-        catch (Exception ex) when (ex is JsonException or CryptographicException)
-        {
-            _logger.LogError(ex, "Failed to load or decrypt existing keys for {IdentityName}. A new set will be created.", identityName);
-        }
-
-        return await CreateKeysAsync(identityName);
-    }
-
-    public async Task<X3dhKeys> GetKeysAsync(string identityName)
+    public async Task<X3dhKeys?> GetKeysAsync(string identityName)
     {
         var keyFilePath = GetKeyFilePath(identityName);
-        Directory.CreateDirectory(Path.GetDirectoryName(keyFilePath)!);
+        if (!File.Exists(keyFilePath))
+        {
+            return null;
+        }
 
         var encryptedBytes = await File.ReadAllBytesAsync(keyFilePath);
         var decryptedBytes = _credentialService.Unprotect(encryptedBytes);
