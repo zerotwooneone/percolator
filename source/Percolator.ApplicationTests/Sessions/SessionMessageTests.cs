@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using FluentAssertions;
+using Microsoft.VisualStudio.TestPlatform.ObjectModel.DataCollection;
 using Moq;
 using Percolator.Application.Identity;
 using Percolator.Application.Sessions;
@@ -33,19 +34,15 @@ public class SessionMessageTests
     [SetUp]
     public void SetUp()
     {
-        var aliceBackingStore = new Dictionary<(SessionPeerId, SessionConversationId), DoubleRatchetSession.DoubleRatchetSessionState>();
+        var aliceSessionId = Guid.NewGuid().ToString();
         _aliceSessionStore = new Mock<IDoubleRatchetSessionStore>();
-        _aliceSessionStore.Setup(s => s.GetSessionStateAsync(It.IsAny<SessionPeerId>(), It.IsAny<SessionConversationId>()))
-            .ReturnsAsync((SessionPeerId p, SessionConversationId c) => aliceBackingStore.TryGetValue((p, c), out var state) ? state : null);
-        _aliceSessionStore.Setup(s => s.SaveSessionStateAsync(It.IsAny<SessionPeerId>(), It.IsAny<SessionConversationId>(), It.IsAny<DoubleRatchetSession.DoubleRatchetSessionState>()))
-            .Callback((SessionPeerId p, SessionConversationId c, DoubleRatchetSession.DoubleRatchetSessionState s) => aliceBackingStore[(p, c)] = s);
+        _aliceSessionStore.Setup(s => s.GetSessionStateAsync(aliceSessionId)).ReturnsAsync((DoubleRatchetSession.DoubleRatchetSessionState)null!);
+        _aliceSessionStore.Setup(s => s.SetSessionStateAsync(aliceSessionId, It.IsAny<DoubleRatchetSession.DoubleRatchetSessionState>())).Verifiable();
 
-        var bobBackingStore = new Dictionary<(SessionPeerId, SessionConversationId), DoubleRatchetSession.DoubleRatchetSessionState>();
+        var bobSessionId = Guid.NewGuid().ToString();
         _bobSessionStore = new Mock<IDoubleRatchetSessionStore>();
-        _bobSessionStore.Setup(s => s.GetSessionStateAsync(It.IsAny<SessionPeerId>(), It.IsAny<SessionConversationId>()))
-            .ReturnsAsync((SessionPeerId p, SessionConversationId c) => bobBackingStore.TryGetValue((p, c), out var state) ? state : null);
-        _bobSessionStore.Setup(s => s.SaveSessionStateAsync(It.IsAny<SessionPeerId>(), It.IsAny<SessionConversationId>(), It.IsAny<DoubleRatchetSession.DoubleRatchetSessionState>()))
-            .Callback((SessionPeerId p, SessionConversationId c, DoubleRatchetSession.DoubleRatchetSessionState s) => bobBackingStore[(p, c)] = s);
+        _bobSessionStore.Setup(s => s.GetSessionStateAsync(bobSessionId)).ReturnsAsync((DoubleRatchetSession.DoubleRatchetSessionState)null!);
+        _bobSessionStore.Setup(s => s.SetSessionStateAsync(bobSessionId, It.IsAny<DoubleRatchetSession.DoubleRatchetSessionState>())).Verifiable();
 
         _mockConversationRepo = new Mock<IConversationRepository>();
         _mockMessageStore = new Mock<IMessageStore>();

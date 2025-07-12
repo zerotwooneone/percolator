@@ -217,8 +217,10 @@ async Task HostCommandHandler(InvocationContext context)
         IIdentityOrchestrator identityOrchestrator = app.Services.GetRequiredService<IIdentityOrchestrator>();
         await identityOrchestrator.LoadOrCreateIdentityAsync(identityName!, cancellationToken);
 
-        // Step 5: Configure and run the application.
-        app.MapGrpcService<PercolatorMessageService>();
+        // Initialize the in-memory peer trust store
+        var peerTrustManager = app.Services.GetRequiredService<IPeerTrustManager>();
+        peerTrustManager.Initialize();
+
         await app.RunAsync(cancellationToken);
 
     }
@@ -231,44 +233,38 @@ async Task HostCommandHandler(InvocationContext context)
 async Task ConnectCommandHandler(InvocationContext context)
 {
     var endpointString = context.ParseResult.GetValueForArgument(endpointArgument);
+    var peerName = context.ParseResult.GetValueForOption(peerNameOption);
     var identityName = context.ParseResult.GetValueForOption(identityOption);
-    var peerName = context.ParseResult.GetValueForOption(peerNameOption)!;
+    var cancellationToken = context.GetCancellationToken();
 
-    // Build client-specific service provider
-    var configuration = new ConfigurationBuilder().AddNode().Build();
-
-    if (!TryParseEndpoint(endpointString, configuration, out var endpoint))
+    if (!TryParseEndpoint(endpointString, out var endpoint))
     {
         Console.ForegroundColor = ConsoleColor.Red;
-        Console.WriteLine($"Invalid endpoint format: '{endpointString}'. Expected format is host:port or just host.");
+        Console.WriteLine($"Invalid endpoint format: {endpointString}");
         Console.ResetColor();
         return;
     }
 
-    await using var serviceProvider = BuildServiceProvider(configuration);
-
-    // Initialize identity
-    var identityOrchestrator = serviceProvider.GetRequiredService<IIdentityOrchestrator>();
-    await identityOrchestrator.LoadOrCreateIdentityAsync(identityName!, context.GetCancellationToken());
-
-    var conversationService = serviceProvider.GetRequiredService<IConversationService>();
+    var services = CreateServiceProvider(identityName);
+    await using var serviceScope = services.CreateAsyncScope();
+    var serviceProvider = serviceScope.ServiceProvider;
 
     try
     {
-        Console.WriteLine($"Connecting to {endpoint}...");
-        var conversationId = await conversationService.CreateDirectConversationAsync(endpoint!, peerName);
-        Console.WriteLine($"Session established. Conversation ID: {conversationId}");
-    }
-    catch (FormatException ex)
-    {
-        Console.ForegroundColor = ConsoleColor.Red;
-        Console.WriteLine($"Invalid parameter format: {ex.Message}");
+        var identityOrchestrator = serviceProvider.GetRequiredService<IIdentityOrchestrator>();
+        await identityOrchestrator.LoadOrCreateIdentityAsync(identityName!, cancellationToken);
+        
+        var conversationService = serviceProvider.GetRequiredService<IConversationService>();
+        var conversationId = await conversationService.CreateDirectConversationAsync(endpoint, peerName!);
+
+        Console.ForegroundColor = ConsoleColor.Green;
+        Console.WriteLine($"Successfully connected to {peerName} and created conversation {conversationId.Value}");
         Console.ResetColor();
     }
     catch (Exception ex)
     {
         Console.ForegroundColor = ConsoleColor.Red;
-        Console.WriteLine($"An unexpected error occurred: {ex.Message}");
+        Console.WriteLine($"An error occurred while connecting: {ex.Message}");
         Console.ResetColor();
     }
 }
@@ -281,100 +277,74 @@ async Task SendCommandHandler(InvocationContext context)
     var endpointString = context.ParseResult.GetValueForOption(endpointOption);
     var peerName = context.ParseResult.GetValueForOption(peerNameOption);
     var identityName = context.ParseResult.GetValueForOption(identityOption);
+    var cancellationToken = context.GetCancellationToken();
 
-    // Build client-specific service provider
-    var configuration = new ConfigurationBuilder().AddNode().Build();
+    var services = CreateServiceProvider(identityName);
+    await using var serviceScope = services.CreateAsyncScope();
+    var serviceProvider = serviceScope.ServiceProvider;
 
-    await using var serviceProvider = BuildServiceProvider(configuration);
-
-    // Initialize identity
-    var identityOrchestrator = serviceProvider.GetRequiredService<IIdentityOrchestrator>();
-    await identityOrchestrator.LoadOrCreateIdentityAsync(identityName!, context.GetCancellationToken());
-
-    var messageService = serviceProvider.GetRequiredService<IMessageService>();
-    var conversationService = serviceProvider.GetRequiredService<IConversationService>();
-
-    // If an endpoint is provided, establish a new session first.
-    if (endpointString is not null)
+    try
     {
-        if (string.IsNullOrEmpty(peerName))
-        {
-            Console.ForegroundColor = ConsoleColor.Red;
-            Console.WriteLine("When providing an endpoint, --peer-name is required.");
-            Console.ResetColor();
-            return;
-        }
+        var identityOrchestrator = serviceProvider.GetRequiredService<IIdentityOrchestrator>();
+        await identityOrchestrator.LoadOrCreateIdentityAsync(identityName!, cancellationToken);
 
-        if (!TryParseEndpoint(endpointString, configuration, out var endpoint))
-        {
-            Console.ForegroundColor = ConsoleColor.Red;
-            Console.WriteLine($"Invalid endpoint format: '{endpointString}'. Expected format is host:port or just host.");
-            Console.ResetColor();
-            return;
-        }
+        var conversationService = serviceProvider.GetRequiredService<IConversationService>();
+        var messageService = serviceProvider.GetRequiredService<IMessageService>();
 
-        try
-        {
-            Console.WriteLine($"Connecting to {endpoint} to establish session...");
-            var conversationId = await conversationService.CreateDirectConversationAsync(endpoint!, peerName);
-            Console.WriteLine($"Session established. Conversation ID: {conversationId}");
+        ChatConversationId conversationId;
 
-            // After establishing a session, you might want to send the message in the same go.
-            // This part is left as an exercise.
-        }
-        catch (Exception ex)
+        if (conversationIdGuid.HasValue)
         {
-            Console.ForegroundColor = ConsoleColor.Red;
-            Console.WriteLine($"An unexpected error occurred: {ex.Message}");
-            Console.ResetColor();
+            conversationId = new ChatConversationId(conversationIdGuid.Value);
         }
-    }
-    else if (conversationIdGuid.HasValue)
-    {
-        Console.WriteLine($"Sending message to conversation {conversationIdGuid}...");
-        try
+        else
         {
-            var sentMessage = await messageService.SendDirectMessageAsync(new ChatConversationId(conversationIdGuid.Value), message);
-            Console.WriteLine($"Message sent with ID: {sentMessage.Id}");
-        }
-        catch (Exception ex)
-        {
-            Console.ForegroundColor = ConsoleColor.Red;
-            Console.WriteLine($"Failed to send message: {ex.Message}");
-            Console.ResetColor();
-        }
-    }
-    else if (peerIdGuid.HasValue)
-    {
-        Console.WriteLine($"Sending message to peer {peerIdGuid}...");
-        try
-        {
-            var conversationId = await conversationService.GetLastActiveConversationIdAsync(peerIdGuid.Value);
-            if (conversationId.HasValue)
-            {
-                var sentMessage = await messageService.SendDirectMessageAsync(new ChatConversationId(conversationId.Value.Value), message);
-                Console.WriteLine($"Message sent with ID: {sentMessage.Id}");
-            }
-            else
+            if (string.IsNullOrEmpty(endpointString) || string.IsNullOrEmpty(peerName))
             {
                 Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine($"No active conversation found with peer {peerIdGuid}.");
+                Console.WriteLine("Either --conversation-id or both --endpoint and --peer-name must be specified.");
                 Console.ResetColor();
+                return;
             }
-        }
-        catch (Exception ex)
-        {
-            Console.ForegroundColor = ConsoleColor.Red;
-            Console.WriteLine($"Failed to send message: {ex.Message}");
+
+            if (!TryParseEndpoint(endpointString, out var endpoint))
+            {
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine($"Invalid endpoint format: '{endpointString}'.");
+                Console.ResetColor();
+                return;
+            }
+
+            conversationId = await conversationService.CreateDirectConversationAsync(endpoint, peerName);
+            Console.ForegroundColor = ConsoleColor.Cyan;
+            Console.WriteLine($"Established new conversation {conversationId.Value} with {peerName}");
             Console.ResetColor();
         }
-    }
-    else
-    {
-        Console.ForegroundColor = ConsoleColor.Red;
-        Console.WriteLine("Either conversation-id or peer-id must be specified.");
+
+        await messageService.SendDirectMessageAsync(conversationId, message);
+
+        Console.ForegroundColor = ConsoleColor.Green;
+        Console.WriteLine("Message sent successfully.");
         Console.ResetColor();
     }
+    catch (Exception ex)
+    {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine($"An error occurred while sending the message: {ex.Message}");
+        Console.ResetColor();
+    }
+}
+
+static ServiceProvider CreateServiceProvider(string? identityName)
+{
+    var services = new ServiceCollection();
+    var config = new ConfigurationBuilder().AddNode().Build();
+
+    services.AddLogging(builder => builder.AddConsole().AddConfiguration(config.GetSection("Logging")));
+    services.AddApplicationServices(config);
+    services.AddInfrastructureServices(config);
+
+    return services.BuildServiceProvider();
 }
 
 static ServiceProvider BuildServiceProvider(IConfiguration configuration)
@@ -387,13 +357,13 @@ static ServiceProvider BuildServiceProvider(IConfiguration configuration)
     return services.BuildServiceProvider();
 }
 
-bool TryParseEndpoint(string? text, IConfiguration configuration, out DnsEndPoint? endpoint)
+bool TryParseEndpoint(string? text, out DnsEndPoint? endpoint)
 {
     endpoint = null;
     if (string.IsNullOrEmpty(text))
         return false;
 
-    var parts = text.Split(':', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+    var parts = text.Split(':', StringSplitOptions.RemoveEmptyEntries);
     string host;
     int port;
 
@@ -401,14 +371,14 @@ bool TryParseEndpoint(string? text, IConfiguration configuration, out DnsEndPoin
     {
         case 1: // Host only, use default port
             host = parts[0];
-            port = configuration.GetValue<int>("DefaultPeerPort", 5000);
+            port = 5000; // Default port
             break;
         case 2: // Host and port
             host = parts[0];
-            if (!int.TryParse(parts[1], out port) || port is < 1 or > 65535)
+            if (!int.TryParse(parts[1], out port))
                 return false;
             break;
-        default: // Invalid format
+        default:
             return false;
     }
 

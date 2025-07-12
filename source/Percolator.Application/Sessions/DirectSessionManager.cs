@@ -40,7 +40,8 @@ public class DirectSessionManager : IDirectSessionManager
             new RatchetEphemeralKey(remoteRatchetKey.Value)
             );
 
-        await _sessionStore.SaveSessionStateAsync(remotePeerId, conversationId, session.GetState());
+        var sessionId = GetSessionId(remotePeerId, conversationId);
+        await _sessionStore.SetSessionStateAsync(sessionId, session.GetState());
         _sessionLocks.TryAdd(conversationId, new SemaphoreSlim(1, 1));
     }
 
@@ -55,7 +56,8 @@ public class DirectSessionManager : IDirectSessionManager
             _activeIdentityContext.Keys.SignedPreKey
             );
 
-        await _sessionStore.SaveSessionStateAsync(remotePeerId, conversationId, session.GetState());
+        var sessionId = GetSessionId(remotePeerId, conversationId);
+        await _sessionStore.SetSessionStateAsync(sessionId, session.GetState());
         _sessionLocks.TryAdd(conversationId, new SemaphoreSlim(1, 1));
     }
 
@@ -74,7 +76,8 @@ public class DirectSessionManager : IDirectSessionManager
         {
             var remotePeerId = await GetRemotePeerId(conversationId);
 
-            var sessionState = await _sessionStore.GetSessionStateAsync(remotePeerId, conversationId);
+            var sessionId = GetSessionId(remotePeerId, conversationId);
+            var sessionState = await _sessionStore.GetSessionStateAsync(sessionId);
             if (sessionState == null)
             {
                 throw new InvalidOperationException($"Double Ratchet session state for conversation {conversationId} not found.");
@@ -87,7 +90,7 @@ public class DirectSessionManager : IDirectSessionManager
 
             var decryptedPlaintext = doubleRatchetSession.Decrypt(encryptedMessage);
 
-            await _sessionStore.SaveSessionStateAsync(remotePeerId, conversationId, doubleRatchetSession.GetState());
+            await _sessionStore.SetSessionStateAsync(sessionId, doubleRatchetSession.GetState());
 
             var message = new DirectMessage(new MessageId(Guid.NewGuid()), conversationId, remotePeerId, new OpaqueContent(decryptedPlaintext.Value));
             await _messageStore.StoreDirectMessageAsync(message);
@@ -113,7 +116,8 @@ public class DirectSessionManager : IDirectSessionManager
         try
         {
             var remotePeerId = await GetRemotePeerId(conversationId);
-            var sessionState = await _sessionStore.GetSessionStateAsync(remotePeerId, conversationId);
+            var sessionId = GetSessionId(remotePeerId, conversationId);
+            var sessionState = await _sessionStore.GetSessionStateAsync(sessionId);
             if (sessionState is null)
             {
                 // This is the likely source of the error if the conversation exists but the session file doesn't.
@@ -125,7 +129,7 @@ public class DirectSessionManager : IDirectSessionManager
 
             var encryptedMessage = doubleRatchetSession.Encrypt(new Plaintext(plaintext));
 
-            await _sessionStore.SaveSessionStateAsync(remotePeerId, conversationId, doubleRatchetSession.GetState());
+            await _sessionStore.SetSessionStateAsync(sessionId, doubleRatchetSession.GetState());
 
             return (remotePeerId, encryptedMessage);
         }
@@ -158,4 +162,7 @@ public class DirectSessionManager : IDirectSessionManager
 
         return new SessionPeerId(remoteParticipant.Value);
     }
+
+    private static string GetSessionId(SessionPeerId peerId, SessionConversationId conversationId) =>
+        $"{peerId.Value}-{conversationId.Value}";
 }

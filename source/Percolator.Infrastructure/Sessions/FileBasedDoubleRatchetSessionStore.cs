@@ -1,6 +1,5 @@
 using System.Text.Json;
 using Microsoft.Extensions.Options;
-using Percolator.Application.Sessions;
 using Percolator.Cryptography;
 using Percolator.Infrastructure.Serialization;
 using Percolator.Sessions;
@@ -22,18 +21,18 @@ public class FileBasedDoubleRatchetSessionStore: IDoubleRatchetSessionStore
         });
     }
 
-    public async Task SaveSessionStateAsync(PeerId peerId, ConversationId conversationId, DoubleRatchetSessionState sessionState)
+    public async Task SetSessionStateAsync(string sessionId, DoubleRatchetSessionState sessionState)
     {
         var model = ToModel(sessionState);
-        var path = GetPath(peerId, conversationId);
+        var path = GetPath(sessionId);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         var json = JsonSerializer.Serialize(model, _jsonContext.SessionStateModel);
         await File.WriteAllTextAsync(path, json);
     }
 
-    public async Task<DoubleRatchetSessionState?> GetSessionStateAsync(PeerId peerId, ConversationId conversationId)
+    public async Task<DoubleRatchetSessionState?> GetSessionStateAsync(string sessionId)
     {
-        var path = GetPath(peerId, conversationId);
+        var path = GetPath(sessionId);
         if (!File.Exists(path))
         {
             return null;
@@ -43,17 +42,6 @@ public class FileBasedDoubleRatchetSessionStore: IDoubleRatchetSessionStore
         var model = JsonSerializer.Deserialize(json, _jsonContext.SessionStateModel);
 
         return model is null ? null : ToDomain(model);
-    }
-
-    public Task DeleteSessionStateAsync(PeerId peerId, ConversationId conversationId)
-    {
-        var path = GetPath(peerId, conversationId);
-        if (File.Exists(path))
-        {
-            File.Delete(path);
-        }
-
-        return Task.CompletedTask;
     }
 
     private static SessionStateModel ToModel(DoubleRatchetSessionState state)
@@ -88,6 +76,6 @@ public class FileBasedDoubleRatchetSessionStore: IDoubleRatchetSessionStore
         };
     }
 
-    private string GetPath(PeerId peerId, ConversationId conversationId) =>
-        Path.Combine(_storageOptions.Path, "sessions", peerId.Value.ToString(), $"{conversationId.Value}.json");
+    private string GetPath(string sessionId) =>
+        Path.Combine(_storageOptions.Path, "sessions", $"{sessionId}.json");
 }

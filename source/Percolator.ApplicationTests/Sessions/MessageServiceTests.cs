@@ -91,8 +91,7 @@ public class MessageServiceTests
             new ChatParticipantId(localIdentity.Id),
             new ChatParticipantId(remotePeerId.Value)
         };
-        var conversation = new ChatConversation(conversationId, new ChannelId(new byte[64]), participants.ToList(), new List<Message>());
-
+        var conversation = new Conversation(conversationId, new Chat.ValueObjects.ChannelId(remotePeerId.Value.ToByteArray()), participants.ToList(), new List<Message>(), Guid.NewGuid().ToString());
         var localDhKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
 
         var sessionState = new DoubleRatchetSession.DoubleRatchetSessionState
@@ -109,7 +108,7 @@ public class MessageServiceTests
         _mockConversationRepository.Setup(r => r.GetByIdAsync(It.Is<ChatConversationId>(c => c.Value == conversationId.Value)))
             .ReturnsAsync(conversation);
 
-        await _sessionStore.SaveSessionStateAsync(remotePeerId, new SessionConversationId(conversationId.Value), sessionState);
+        await _sessionStore.SetSessionStateAsync(conversation.SessionId, sessionState);
 
         // Act
         await _messageService.SendDirectMessageAsync(conversationId, "Hello");
@@ -119,5 +118,14 @@ public class MessageServiceTests
             It.IsAny<IdentityPeerId>(),
             It.IsAny<ChatConversationId>(),
             It.IsAny<RatchetMessage>()), Times.Once);
+    }
+
+    private class Conversation : Percolator.Chat.Conversation
+    {
+        public string SessionId { get; }
+        public Conversation(ChatConversationId id, Chat.ValueObjects.ChannelId channelId, IEnumerable<Chat.ValueObjects.ParticipantId> participants, IEnumerable<Message> messages, string sessionId) : base(id, channelId, participants, messages)
+        {
+            SessionId = sessionId;
+        }
     }
 }

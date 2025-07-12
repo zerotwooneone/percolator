@@ -8,6 +8,7 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddNetworkInfrastructure(this IServiceCollection services)
     {
         services.AddSingleton<IPeerConnectionRepository, FileBasedPeerConnectionRepository>();
+        services.AddSingleton<ITrustedPeerStore, FileBasedTrustedPeerStore>();
         return services;
     }
 }

@@ -19,4 +19,18 @@ public interface IPeerConnectionRepository
     Task SaveAsync(PeerConnection peerConnection);
 
     Task<PeerConnection?> GetByDirectMessage(DirectMessagePublicKey directMessagePublicKey);
+
+    /// <summary>
+    /// Gets a peer connection by their TLS certificate.
+    /// </summary>
+    /// <param name="tlsCertificate">The peer's TLS certificate.</param>
+    /// <returns>The peer connection, if found.</returns>
+    Task<PeerConnection?> GetByTlsCertificateAsync(TlsCertificate tlsCertificate);
+
+    /// <summary>
+    /// Updates a peer's connection details with their direct message public key.
+    /// </summary>
+    /// <param name="peerId">The ID of the peer.</param>
+    /// <param name="publicKey">The direct message public key to update.</param>
+    Task UpdateDirectMessagePublicKeyAsync(PeerId peerId, DirectMessagePublicKey publicKey);
 }

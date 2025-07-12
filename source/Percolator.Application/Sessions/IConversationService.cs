@@ -1,6 +1,6 @@
 using System.Net;
 using Percolator.Chat.ValueObjects;
-using Percolator.Network;
+using Percolator.Identity;
 
 namespace Percolator.Application.Sessions;
 
@@ -20,5 +20,5 @@ public interface IConversationService
     /// </summary>
     /// <param name="peerId">The ID of the peer.</param>
     /// <returns>The conversation ID, or null if no active conversation is found.</returns>
-    Task<ConversationId?> GetLastActiveConversationIdAsync(Guid peerId);
+    Task<ConversationId?> FindExistingConversationAsync(PeerId peerId);
 }

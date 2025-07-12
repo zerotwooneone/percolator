@@ -40,6 +40,32 @@ public class FileBasedPeerConnectionRepository : IPeerConnectionRepository
         return Task.FromResult(connection);
     }
 
+    public Task<PeerConnection?> GetByTlsCertificateAsync(TlsCertificate tlsCertificate)
+    {
+        var connection = _connections.Values.FirstOrDefault(c =>
+            c.TlsCertificates.Any(storedCert => storedCert.RawData.SequenceEqual(tlsCertificate.RawData)));
+        return Task.FromResult(connection);
+    }
+
+    public async Task UpdateDirectMessagePublicKeyAsync(PeerId peerId, DirectMessagePublicKey publicKey)
+    {
+        if (!_connections.TryGetValue(peerId, out var existingConnection))
+        {
+            throw new KeyNotFoundException($"No peer connection found for PeerId: {peerId.Value}");
+        }
+
+        // PeerConnection has init-only properties, so we must create a new instance.
+        var updatedConnection = new PeerConnection(
+            existingConnection.Id,
+            publicKey, // The new public key
+            existingConnection.GrpcEndPoints,
+            existingConnection.TlsCertificates,
+            existingConnection.LastSeen);
+
+        _connections[peerId] = updatedConnection;
+        await PersistConnections();
+    }
+
     private void LoadConnections()
     {
         if (!File.Exists(_filePath)) return;
