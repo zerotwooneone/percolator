@@ -72,35 +72,18 @@ public class ConversationTests
     }
 
     [Test]
-    public void AddMessage_WhenSenderIsNotParticipant_ThrowsArgumentException()
+    public void AddMessage_WhenSenderIsNotParticipant_ThrowsInvalidOperationException()
     {
         // Arrange
         var conversation = new ConversationBuilder().Build();
-        var senderId = _fixture.Create<ParticipantId>();
+        var nonParticipantId = _fixture.Create<ParticipantId>();
         var content = _fixture.Create<string>();
 
         // Act
-        Action action = () => conversation.AddMessage(senderId, content);
+        Action action = () => conversation.AddMessage(nonParticipantId, content);
 
         // Assert
-        action.Should().Throw<ArgumentException>();
-    }
-
-    [Test]
-    public void AddMessage_ShouldCreateReceiptsForAllParticipants()
-    {
-        // Arrange
-        var participants = _fixture.CreateMany<ParticipantId>(3).ToList();
-        var conversation = new ConversationBuilder().WithParticipants(participants).Build();
-        var senderId = participants.First();
-
-        // Act
-        conversation.AddMessage(senderId, "Hello");
-
-        // Assert
-        var message = conversation.Messages.Single();
-        message.ReadReceipts.Should().HaveCount(participants.Count);
-        message.ReadReceipts.Should().OnlyContain(r => participants.Contains(r.ReaderId));
+        action.Should().Throw<InvalidOperationException>();
     }
 
     [Test]
@@ -119,18 +102,17 @@ public class ConversationTests
     }
 
     [Test]
-    public void AddParticipant_WhenParticipantExists_ThrowsArgumentException()
+    public void AddParticipant_WhenParticipantExists_ThrowsInvalidOperationException()
     {
         // Arrange
-        var participants = _fixture.CreateMany<ParticipantId>(2).ToList();
-        var conversation = new ConversationBuilder().WithParticipants(participants).Build();
-        var existingParticipant = participants.First();
+        var conversation = new ConversationBuilder().Build();
+        var existingParticipant = conversation.Participants.First();
 
         // Act
         Action action = () => conversation.AddParticipant(existingParticipant);
 
         // Assert
-        action.Should().Throw<ArgumentException>();
+        action.Should().Throw<InvalidOperationException>();
     }
 
     [Test]
@@ -150,17 +132,34 @@ public class ConversationTests
     }
 
     [Test]
-    public void RemoveParticipant_WhenParticipantDoesNotExist_ThrowsArgumentException()
+    public void RemoveParticipant_WhenParticipantIsTheSenderOfAMessage_ShouldSucceed()
     {
         // Arrange
-        var conversation = new ConversationBuilder().WithParticipants(_fixture.CreateMany<ParticipantId>(3).ToArray()).Build();
-        var nonExistentParticipant = _fixture.Create<ParticipantId>();
+        var participants = _fixture.CreateMany<ParticipantId>(3).ToList();
+        var conversation = new ConversationBuilder().WithParticipants(participants).Build();
+        var senderId = participants.First();
+        conversation.AddMessage(senderId, "Hello");
 
         // Act
-        Action action = () => conversation.RemoveParticipant(nonExistentParticipant);
+        conversation.RemoveParticipant(senderId);
 
         // Assert
-        action.Should().Throw<ArgumentException>();
+        conversation.Participants.Should().HaveCount(2);
+        conversation.Participants.Should().NotContain(senderId);
+    }
+
+    [Test]
+    public void RemoveParticipant_WhenParticipantDoesNotExist_ThrowsInvalidOperationException()
+    {
+        // Arrange
+        var conversation = new ConversationBuilder().Build();
+        var nonParticipantId = _fixture.Create<ParticipantId>();
+
+        // Act
+        Action action = () => conversation.RemoveParticipant(nonParticipantId);
+
+        // Assert
+        action.Should().Throw<InvalidOperationException>();
     }
 
     [Test]
@@ -171,8 +170,11 @@ public class ConversationTests
         var conversation = new ConversationBuilder().WithParticipants(participants).Build();
 
         // Act
-        conversation.RemoveParticipant(participants[0]);
-        Action action = () => conversation.RemoveParticipant(participants[1]);
+        Action action = () =>
+        {
+            conversation.RemoveParticipant(participants[0]);
+            conversation.RemoveParticipant(participants[1]);
+        };
 
         // Assert
         action.Should().Throw<InvalidOperationException>();
@@ -200,7 +202,7 @@ public class ConversationTests
     }
 
     [Test]
-    public void AddReaction_WhenParticipantIsNotInConversation_ThrowsArgumentException()
+    public void AddReaction_WhenParticipantIsNotInConversation_ThrowsInvalidOperationException()
     {
         // Arrange
         var conversation = new ConversationBuilder().Build();
@@ -214,11 +216,11 @@ public class ConversationTests
         Action action = () => conversation.AddReaction(nonParticipantId, messageId, emoji);
 
         // Assert
-        action.Should().Throw<ArgumentException>();
+        action.Should().Throw<InvalidOperationException>();
     }
 
     [Test]
-    public void AddReaction_ToNonExistentMessage_ThrowsArgumentException()
+    public void AddReaction_ToNonExistentMessage_ThrowsInvalidOperationException()
     {
         // Arrange
         var conversation = new ConversationBuilder().Build();
@@ -230,7 +232,7 @@ public class ConversationTests
         Action action = () => conversation.AddReaction(reactorId, nonExistentMessageId, emoji);
 
         // Assert
-        action.Should().Throw<ArgumentException>();
+        action.Should().Throw<InvalidOperationException>();
     }
 
     [Test]
@@ -281,7 +283,7 @@ public class ConversationTests
     }
 
     [Test]
-    public void MarkMessageAsRead_ShouldAddReadReceipt()
+    public void MarkMessageAsRead_ShouldUpdateReceiptTimestamp()
     {
         // Arrange
         var participants = _fixture.CreateMany<ParticipantId>(2).ToList();
@@ -300,7 +302,7 @@ public class ConversationTests
     }
 
     [Test]
-    public void MarkMessageAsRead_WhenParticipantIsNotInConversation_ThrowsArgumentException()
+    public void MarkMessageAsRead_WhenParticipantIsNotInConversation_ThrowsInvalidOperationException()
     {
         // Arrange
         var conversation = new ConversationBuilder().Build();
@@ -312,11 +314,11 @@ public class ConversationTests
         Action action = () => conversation.MarkMessageAsRead(nonParticipantId, messageId);
 
         // Assert
-        action.Should().Throw<ArgumentException>();
+        action.Should().Throw<InvalidOperationException>();
     }
 
     [Test]
-    public void MarkMessageAsRead_ToNonExistentMessage_ThrowsArgumentException()
+    public void MarkMessageAsRead_ToNonExistentMessage_ThrowsInvalidOperationException()
     {
         // Arrange
         var conversation = new ConversationBuilder().Build();
@@ -327,7 +329,7 @@ public class ConversationTests
         Action action = () => conversation.MarkMessageAsRead(readerId, nonExistentMessageId);
 
         // Assert
-        action.Should().Throw<ArgumentException>();
+        action.Should().Throw<InvalidOperationException>();
     }
 
     [Test]

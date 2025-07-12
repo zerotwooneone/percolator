@@ -118,15 +118,11 @@ public class Conversation
 
     public void AddMessage(ParticipantId senderId, string content)
     {
-        if (!Participants.Contains(senderId))
-        {
+        if (!_participants.Contains(senderId))
             throw new InvalidOperationException("Sender is not a participant of this conversation.");
-        }
 
         if (string.IsNullOrWhiteSpace(content))
-        {
             throw new ArgumentException("Message content cannot be null or whitespace.", nameof(content));
-        }
 
         var message = new Message(MessageId.NewId(), senderId, content, DateTimeOffset.UtcNow);
         _messages.Add(message);
