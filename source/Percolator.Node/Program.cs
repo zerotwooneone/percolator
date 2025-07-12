@@ -122,6 +122,7 @@ async Task HostCommandHandler(InvocationContext context)
         // Step 3: Configure and build the main application using the pre-fetched certificate.
         WebApplicationBuilder builder = WebApplication.CreateBuilder();
 
+        builder.Configuration.AddNode();
         builder.WebHost.UseKestrel(options =>
         {
             options.Listen(IPAddress.Any, port, listenOptions =>

@@ -46,7 +46,9 @@ In one terminal, Alice runs the `host` command. This starts her node and generat
 
 ```bash
 # Terminal 1: Alice hosts
-dotnet run --project .\Percolator.Node\ -- host --identity Alice
+cd ~\source\repos\percolator\source\Percolator.Node
+dotnet run -- host --identity Alice
+# dotnet run --project .\Percolator.Node\ -- host --identity Alice
 ```
 
 The host will start and display the invitation link. Alice copies this link and sends it to Bob.
