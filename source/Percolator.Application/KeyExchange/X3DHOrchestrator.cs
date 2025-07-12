@@ -2,22 +2,26 @@ using System.Security.Cryptography;
 using Google.Protobuf;
 using Percolator.Application.Identity;
 using Percolator.Cryptography;
+using Percolator.Identity;
 using ContractsPreKeyBundle = Percolator.Contracts.PreKeyBundle;
 using CryptographyPreKeyBundle = Percolator.Cryptography.PreKeyBundle;
 
 namespace Percolator.Application.KeyExchange;
 
-public class X3DHOrchestrator
+public class X3DHOrchestrator : IX3DHOrchestrator
 {
     private readonly ActiveIdentityContext _activeIdentityContext;
     private readonly IX3DHManager _x3DhManager;
+    private readonly IOneTimeKeyProvider _oneTimeKeyProvider;
 
     public X3DHOrchestrator(
         ActiveIdentityContext activeIdentityContext,
-        IX3DHManager x3DhManager)
+        IX3DHManager x3DhManager,
+        IOneTimeKeyProvider oneTimeKeyProvider)
     {
         _activeIdentityContext = activeIdentityContext;
         _x3DhManager = x3DhManager;
+        _oneTimeKeyProvider = oneTimeKeyProvider;
     }
 
     public SharedSecret CompleteHandshake(ContractsPreKeyBundle remotePreKeyBundle, ECDiffieHellman ephemeralKey)
@@ -66,14 +70,22 @@ public class X3DHOrchestrator
             {
                 IdentitySigningKey: var identitySigningKey,
                 IdentityAgreementKey: var identityAgreementKey,
-                SignedPreKey: var signedPreKey,
-                OneTimePreKeys: var oneTimePreKeys
+                SignedPreKey: var signedPreKey
             })
         {
             throw new InvalidOperationException("Active identity is not fully initialized for X3DH handshake.");
         }
 
-        var oneTimePreKey = oneTimePreKeys.FirstOrDefault();
+        // CRITICAL: Verify the signature on the initiator's signed pre-key to prevent MITM attacks.
+        if (!_x3DhManager.VerifySignature(
+                new RatchetIdentityKey(remotePreKeyBundle.IdentitySigningKey.ToByteArray()),
+                new PreKey(remotePreKeyBundle.SignedPreKey.ToByteArray()),
+                new Signature(remotePreKeyBundle.PreKeySignature.ToByteArray())))
+        {
+            throw new CryptographicException("Invalid signature on initiator's signed pre-key.");
+        }
+
+        var oneTimePreKey = _oneTimeKeyProvider.PopOneTimeKey();
 
         var sharedSecret = _x3DhManager.RespondToHandshake(
             new RatchetIdentityKey(remotePreKeyBundle.IdentityAgreementKey.ToByteArray()),
@@ -93,10 +105,7 @@ public class X3DHOrchestrator
             PreKeySignature = ByteString.CopyFrom(signature.Value)
         };
 
-        if (oneTimePreKey is not null)
-        {
-            responderBundle.OneTimePreKey = ByteString.CopyFrom(oneTimePreKey.PublicKey.ExportSubjectPublicKeyInfo());
-        }
+        //Do not include one-time pre-key in the response
 
         return new OrchestratorResponseResult(sharedSecret, responderBundle);
     }

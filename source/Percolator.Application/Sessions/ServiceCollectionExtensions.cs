@@ -15,15 +15,10 @@ public static class ServiceCollectionExtensions
 
         // Register key exchange services
         services.AddSingleton<IX3DHManager, X3DHManager>();
-        services.AddSingleton<X3DHOrchestrator>();
 
         // Register application services
         services.AddSingleton<IConversationService, ConversationService>();
         services.AddSingleton<IMessageService, MessageService>();
-        services.AddSingleton<ILocalPeerProvider, LocalPeerProvider>();
-
-        // Register the main session orchestrator
-        services.AddSingleton<DirectSessionManager>();
 
         return services;
     }

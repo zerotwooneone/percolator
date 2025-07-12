@@ -1,9 +1,14 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Net;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using System.Threading;
+using System.Threading.Tasks;
 using Google.Protobuf;
 using Grpc.Core;
-using Grpc.Net.Client;
+using Grpc.Core.Testing;
 using Microsoft.Extensions.Logging;
 using Moq;
 using NUnit.Framework;
@@ -16,144 +21,127 @@ using Percolator.Contracts;
 using Percolator.Cryptography;
 using Percolator.Identity;
 using Percolator.Identity.Model;
+using Percolator.Infrastructure.Sessions;
 using Percolator.Network;
 using Percolator.Sessions;
-using ECDiffieHellman = System.Security.Cryptography.ECDiffieHellman;
-using IdentityPeerId = Percolator.Identity.PeerId;
-using NetworkPeerId = Percolator.Network.PeerId;
-using SessionPeerId = Percolator.Sessions.PeerId;
-using ContractsPreKeyBundle = Percolator.Contracts.PreKeyBundle;
+using ChatConversation = Percolator.Chat.Conversation;
 using ChatConversationId = Percolator.Chat.ValueObjects.ConversationId;
-using Signature = System.Security.Cryptography.Xml.Signature;
+using ChatParticipantId = Percolator.Chat.ValueObjects.ParticipantId;
+using ContractsPreKeyBundle = Percolator.Contracts.PreKeyBundle;
+using IdentityPeerId = Percolator.Identity.PeerId;
+using SessionConversationId = Percolator.Sessions.ConversationId;
+using SessionPeerId = Percolator.Sessions.PeerId;
+using TransportService = Percolator.Contracts.TransportService;
 
 namespace Percolator.ApplicationTests.Sessions;
 
 [TestFixture]
 public class ConversationServiceTests
 {
-    private Mock<IConversationRepository> _mockConversationRepo = null!;
-    private Mock<IPeerRepository> _mockPeerRepo = null!;
-    private Mock<IPeerConnectionRepository> _mockPeerConnectionRepo = null!;
-    private Mock<ILocalPeerProvider> _mockLocalPeerProvider = null!;
-    private X3DHOrchestrator _orchestrator = null!;
-    private Mock<DirectSessionManager> _mockSessionManager = null!;
-    private Mock<IGrpcClientFactory> _mockGrpcFactory = null!;
-    private Mock<IX3DHManager> _mockX3dhManager = null!;
-    private Mock<ITlsCertificateService> _mockTlsCertService = null!;
+    private Mock<IPeerRepository> _mockPeerRepository = null!;
+    private Mock<IGrpcClientFactory> _mockGrpcClientFactory = null!;
+    private Mock<ITlsCertificateService> _mockTlsCertificateService = null!;
+    private Mock<IX3DHOrchestrator> _mockX3dhOrchestrator = null!;
+    private Mock<IDirectSessionManager> _mockSessionManager = null!;
+    private Mock<IConversationRepository> _mockConversationRepository = null!;
+    private Mock<IPeerConnectionRepository> _mockPeerConnectionRepository = null!;
+    private Mock<IOneTimeKeyProvider> _mockOneTimeKeyProvider = null!;
+    private Mock<ILogger<ConversationService>> _mockLogger = null!;
+    private ConversationService _service = null!;
     private ActiveIdentityContext _activeIdentityContext = null!;
-    private ConversationService _sut = null!;
 
     [SetUp]
     public void Setup()
     {
-        _mockConversationRepo = new Mock<IConversationRepository>();
-        _mockPeerRepo = new Mock<IPeerRepository>();
-        _mockPeerConnectionRepo = new Mock<IPeerConnectionRepository>();
-        _mockLocalPeerProvider = new Mock<ILocalPeerProvider>();
-        _mockGrpcFactory = new Mock<IGrpcClientFactory>();
-        _mockX3dhManager = new Mock<IX3DHManager>();
-        _mockTlsCertService = new Mock<ITlsCertificateService>();
-
-        // Setup Active Identity
-        var identitySigningKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
-        var identityAgreementKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        var signedPreKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        var oneTimeKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        _mockPeerRepository = new Mock<IPeerRepository>();
+        _mockGrpcClientFactory = new Mock<IGrpcClientFactory>();
+        _mockTlsCertificateService = new Mock<ITlsCertificateService>();
+        _mockX3dhOrchestrator = new Mock<IX3DHOrchestrator>();
+        _mockSessionManager = new Mock<IDirectSessionManager>();
+        _mockConversationRepository = new Mock<IConversationRepository>();
+        _mockPeerConnectionRepository = new Mock<IPeerConnectionRepository>();
+        _mockOneTimeKeyProvider = new Mock<IOneTimeKeyProvider>();
+        _mockLogger = new Mock<ILogger<ConversationService>>();
         _activeIdentityContext = new ActiveIdentityContext
         {
-            Identity = new IdentityRecord(Guid.Parse("c369a55d-fa2c-43d5-939a-712661a51c07"), "test-identity"),
-            Keys = new X3dhKeys(identitySigningKey, identityAgreementKey, signedPreKey, new[] { oneTimeKey })
+            Identity = new IdentityRecord(Guid.NewGuid(), "Test Identity"),
+            Keys = new X3dhKeys(
+                ECDsa.Create(ECCurve.NamedCurves.nistP256),
+                ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
+                ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256)
+            )
         };
 
-        // Correctly setup concrete class dependencies
-        _orchestrator = new X3DHOrchestrator(
+        _service = new ConversationService(
             _activeIdentityContext,
-            _mockX3dhManager.Object
-        );
-
-        _mockSessionManager = new Mock<DirectSessionManager>(
-            Mock.Of<IDoubleRatchetSessionStore>(),
-            _mockConversationRepo.Object,
-            _mockLocalPeerProvider.Object,
-            Mock.Of<IMessageStore>(),
-            _activeIdentityContext
-        );
-
-        // Setup SUT
-        _sut = new ConversationService(
-            _activeIdentityContext,
-            _orchestrator,
+            _mockX3dhOrchestrator.Object,
             _mockSessionManager.Object,
-            _mockConversationRepo.Object,
-            _mockPeerRepo.Object,
-            _mockPeerConnectionRepo.Object,
-            _mockLocalPeerProvider.Object,
-            _mockGrpcFactory.Object,
-            _mockTlsCertService.Object,
-            new Mock<ILogger<ConversationService>>().Object
-        );
+            _mockConversationRepository.Object,
+            _mockPeerRepository.Object,
+            _mockPeerConnectionRepository.Object,
+            _mockGrpcClientFactory.Object,
+            _mockTlsCertificateService.Object,
+            _mockOneTimeKeyProvider.Object,
+            _mockLogger.Object
+            );
     }
 
     [Test]
-    public async Task CreateDirectConversationAsync_WhenPeerIsUnknownAndNoCertProvided_ShouldCreateAndSaveNewPeer()
+    public async Task CreateDirectConversationAsync_WhenPeerExists_EstablishesSessionAndCreatesConversation()
     {
         // Arrange
-        var peerName = "new-peer";
-        var endpoint = new DnsEndPoint("localhost", 5001);
-        var remoteIdentityKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
-        var remoteIdentityKeyBytes = remoteIdentityKey.ExportSubjectPublicKeyInfo();
+        var peerName = "existing-peer";
+        var endpoint = new DnsEndPoint("localhost", 5000);
+        var remoteIdentityKey = new byte[33];
+        var localIdentity = new IdentityRecord(Guid.NewGuid(), "local-user");
+        var localKeys = new X3dhKeys(ECDsa.Create(), ECDiffieHellman.Create(), ECDiffieHellman.Create());
+        var peerId = new IdentityPeerId(Guid.NewGuid());
+        var peer = new Peer(peerId, peerName);
 
-        // Mock Peer Repository to show peer is unknown
-        _mockPeerRepo.Setup(r => r.GetByNameAsync(peerName)).ReturnsAsync((Peer?)null);
-        _mockPeerRepo.Setup(r => r.AddAsync(It.IsAny<Peer>()))
-            .Returns(Task.CompletedTask);
+        _activeIdentityContext.Identity = localIdentity;
+        _activeIdentityContext.Keys = localKeys;
 
-        // Mock the IX3DHManager to simulate a successful handshake
-        _mockX3dhManager.Setup(m => m.VerifySignature(It.IsAny<RatchetIdentityKey>(), It.IsAny<PreKey>(), It.IsAny<Percolator.Cryptography.Signature>()))
-            .Returns(true);
-        _mockX3dhManager.Setup(m => m.InitiateHandshake(It.IsAny<Cryptography.PreKeyBundle>(),
-                It.IsAny<ECDiffieHellman>(), It.IsAny<ECDiffieHellman>()))
-            .Returns(new SharedSecret(new byte[32]));
+        _mockOneTimeKeyProvider.Setup(p => p.PopOneTimeKey()).Returns(ECDiffieHellman.Create());
 
-        // Mock gRPC client response
-        var mockTransportClient = new Mock<TransportService.TransportServiceClient>();
         var responderBundle = new ContractsPreKeyBundle
         {
-            IdentitySigningKey = ByteString.CopyFrom(remoteIdentityKeyBytes),
-            IdentityAgreementKey = ByteString.CopyFrom(ECDiffieHellman.Create().PublicKey.ExportSubjectPublicKeyInfo()),
-            SignedPreKey = ByteString.CopyFrom(ECDiffieHellman.Create().PublicKey.ExportSubjectPublicKeyInfo()),
-            PreKeySignature = ByteString.CopyFrom(new byte[64]) // No longer needs to be valid
+            IdentitySigningKey = ByteString.CopyFrom(remoteIdentityKey),
+            IdentityAgreementKey = ByteString.CopyFrom(new byte[33]),
+            SignedPreKey = ByteString.CopyFrom(new byte[33]),
+            PreKeySignature = ByteString.CopyFrom(new byte[64])
         };
-        var response = new EstablishSessionResponse { ResponderBundle = responderBundle };
-        var fakeCall = new AsyncUnaryCall<EstablishSessionResponse>(
-            Task.FromResult(response),
-            Task.FromResult(new Metadata()),
-            () => Status.DefaultSuccess,
-            () => new Metadata(),
-            () => { });
 
+        var response = new EstablishSessionResponse { ResponderBundle = responderBundle };
+        var fakeCall = TestCalls.AsyncUnaryCall(Task.FromResult(response), Task.FromResult(new Metadata()), () => Status.DefaultSuccess, () => new Metadata(), () => { });
+
+        var mockTransportClient = new Mock<TransportService.TransportServiceClient>();
         mockTransportClient.Setup(c => c.EstablishSessionAsync(It.IsAny<EstablishSessionRequest>(), null, null, CancellationToken.None))
             .Returns(fakeCall);
 
-        _mockTlsCertService.Setup(s => s.GetOrCreateTlsCertificateAsync(It.IsAny<string>(), It.IsAny<byte[]>()))
-            .ReturnsAsync(new X509Certificate2());
-        _mockGrpcFactory.Setup(f => f.CreateClient(endpoint, It.IsAny<X509Certificate2>(), It.IsAny<TlsCertificate?>()))
+        _mockGrpcClientFactory.Setup(f => f.CreateClient(It.IsAny<DnsEndPoint>(), It.IsAny<string>(), It.IsAny<X509Certificate2>()))
             .Returns(mockTransportClient.Object);
 
-        // Mock other dependencies to allow the method to complete
-        _mockLocalPeerProvider.Setup(p => p.GetPeerIdAsync()).Returns(Task.FromResult(new SessionPeerId(Guid.NewGuid())));
+        _mockTlsCertificateService.Setup(s => s.GetOrCreateTlsCertificateAsync(It.IsAny<string>(), It.IsAny<byte[]>()))
+            .ReturnsAsync(new X509Certificate2());
+
+        _mockPeerRepository.Setup(r => r.GetByNameAsync(peerName)).ReturnsAsync(peer);
+        var sharedSecret = new SharedSecret(new byte[32]);
+        _mockX3dhOrchestrator.Setup(x => x.CompleteHandshake(It.IsAny<ContractsPreKeyBundle>(), It.IsAny<ECDiffieHellman>()))
+            .Returns(sharedSecret);
 
         // Act
-        var conversationId = await _sut.CreateDirectConversationAsync(endpoint, peerName, null);
+        var conversationId = await _service.CreateDirectConversationAsync(endpoint, peerName);
 
         // Assert
-        Assert.That(conversationId.Value, Is.Not.EqualTo(Guid.Empty));
-        _mockPeerRepo.Verify(r => r.AddAsync(It.Is<Peer>(p => p.Name == peerName)), Times.Once);
-        _mockPeerConnectionRepo.Verify(r => r.SaveAsync(It.Is<PeerConnection>(pc =>
-            pc.TlsCertificates.Count == 1 &&
-            pc.TlsCertificates[0].Value.SequenceEqual(remoteIdentityKeyBytes) &&
-            pc.GrpcEndPoints.Count == 1 &&
-            pc.GrpcEndPoints[0].EndPoint.Equals(endpoint)
-        )), Times.Once);
+        _mockSessionManager.Verify(s => s.EstablishSessionAsInitiatorAsync(
+            It.IsAny<SessionConversationId>(),
+            It.IsAny<SessionPeerId>(),
+            It.IsAny<SessionIdentityKey>(),
+            It.IsAny<SessionRatchetKey>(),
+            sharedSecret), Times.Once);
+
+        _mockConversationRepository.Verify(r => r.AddAsync(It.Is<ChatConversation>(c => c.Participants.Count == 2)), Times.Once);
+
+        Assert.That(conversationId, Is.Not.EqualTo(default(ChatConversationId)));
     }
 }

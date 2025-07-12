@@ -9,7 +9,7 @@ namespace Percolator.Application.Network;
 public interface IGrpcClientFactory
 {
     TransportService.TransportServiceClient CreateClient(
-        DnsEndPoint endpoint, 
-        X509Certificate2 clientCertificate,
-        TlsCertificate? tlsCertificate);
+        DnsEndPoint address, 
+        string peerName,
+        X509Certificate2 clientCertificate);
 }

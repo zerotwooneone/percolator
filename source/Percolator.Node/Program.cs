@@ -2,6 +2,7 @@ using System.CommandLine;
 using System.CommandLine.Invocation;
 using System.Net;
 using System.Security.Cryptography.X509Certificates;
+using System.Formats.Asn1;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Configuration;
@@ -41,13 +42,12 @@ rootCommand.AddCommand(hostCommand);
 // *** Connect Command ***
 var endpointArgument = new Argument<string>("endpoint", "The endpoint of the peer (e.g., localhost:5000 or just localhost).");
 var peerNameOption = new Option<string>("--peer-name", "The name of the peer to connect to.") { IsRequired = true };
-var remoteTlsKeyOption = new Option<string?>("--remote-tls-key", "The public key of the remote TLS certificate (for TOFU).") { IsRequired = false };
-var connectCommand = new Command("connect", "Connects to a peer using their endpoint.")
+
+var connectCommand = new Command("connect", "Connect to a peer and establish a session.")
 {
     endpointArgument,
     peerNameOption,
-    remoteTlsKeyOption,
-    identityOption // Add identity option to client commands
+    identityOption
 };
 rootCommand.AddCommand(connectCommand);
 
@@ -57,15 +57,14 @@ var peerIdOption = new Option<Guid?>("--peer-id", "The ID of the peer to send th
 var messageArgument = new Argument<string>("message", "The plaintext message to send.");
 var endpointOption = new Option<string>("--endpoint", "The endpoint of the peer to establish a new session with before sending (e.g., localhost:5000 or just localhost).");
 
-var sendCommand = new Command("send", "Sends an encrypted message to a peer over an established session.")
+var sendCommand = new Command("send", "Send a message to a peer.")
 {
     conversationIdOption,
     peerIdOption,
     messageArgument,
     endpointOption,
-    peerNameOption, // Re-use from connect command
-    remoteTlsKeyOption, // Re-use from connect command
-    identityOption // Add identity option to client commands
+    peerNameOption,
+    identityOption
 };
 rootCommand.AddCommand(sendCommand);
 
@@ -133,13 +132,38 @@ async Task HostCommandHandler(InvocationContext context)
                     httpsOptions.ClientCertificateValidation = (certificate, chain, policyErrors) =>
                     {
                         var logger = tempServiceProvider.GetRequiredService<ILogger<Program>>();
-                        logger.LogInformation("Performing client certificate validation.");
-                        if (certificate.Extensions[Percolator.Cryptography.Oids.PeerIdentityKey] is null)
+                        logger.LogInformation("Server: Performing client certificate validation for subject '{Subject}'", certificate.Subject);
+
+                        var peerIdentityExtension = certificate.Extensions[Percolator.Cryptography.Oids.PeerIdentityKey];
+                        if (peerIdentityExtension is null)
                         {
-                            logger.LogError("Client certificate is missing the required peer identity extension.");
+                            logger.LogError("Server: Client certificate validation failed for '{Subject}'. Reason: Missing the required peer identity extension.", certificate.Subject);
                             return false;
                         }
-                        logger.LogInformation("Client certificate validation successful.");
+
+                        try
+                        {
+                            var reader = new AsnReader(peerIdentityExtension.RawData, AsnEncodingRules.DER);
+                            var publicKey = reader.ReadOctetString();
+                            if (publicKey.Length == 0)
+                            {
+                                logger.LogError("Server: Client certificate validation failed for '{Subject}'. Reason: Peer identity extension contains no public key.", certificate.Subject);
+                                return false;
+                            }
+
+                            if (reader.HasData)
+                            {
+                                logger.LogError("Server: Client certificate validation failed for '{Subject}'. Reason: Peer identity extension contains unexpected trailing data.", certificate.Subject);
+                                return false;
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            logger.LogError(ex, "Server: Client certificate validation failed for '{Subject}'. Reason: Failed to decode peer identity extension.", certificate.Subject);
+                            return false;
+                        }
+
+                        logger.LogInformation("Server: Client certificate validation successful for '{Subject}'.", certificate.Subject);
                         return true;
                     };
                 });
@@ -174,7 +198,6 @@ async Task ConnectCommandHandler(InvocationContext context)
     var endpointString = context.ParseResult.GetValueForArgument(endpointArgument);
     var identityName = context.ParseResult.GetValueForOption(identityOption);
     var peerName = context.ParseResult.GetValueForOption(peerNameOption)!;
-    var remoteTlsKey = context.ParseResult.GetValueForOption(remoteTlsKeyOption);
 
     // Build client-specific service provider
     var configuration = new ConfigurationBuilder().AddNode().Build();
@@ -198,12 +221,7 @@ async Task ConnectCommandHandler(InvocationContext context)
     try
     {
         Console.WriteLine($"Connecting to {endpoint}...");
-        TlsCertificate? tlsCertificate = null;
-        if (!string.IsNullOrEmpty(remoteTlsKey))
-        {
-            tlsCertificate = new TlsCertificate(Convert.FromBase64String(remoteTlsKey));
-        }
-        var conversationId = await conversationService.CreateDirectConversationAsync(endpoint!, peerName, tlsCertificate);
+        var conversationId = await conversationService.CreateDirectConversationAsync(endpoint!, peerName);
         Console.WriteLine($"Session established. Conversation ID: {conversationId}");
     }
     catch (FormatException ex)
@@ -227,7 +245,6 @@ async Task SendCommandHandler(InvocationContext context)
     var message = context.ParseResult.GetValueForArgument(messageArgument);
     var endpointString = context.ParseResult.GetValueForOption(endpointOption);
     var peerName = context.ParseResult.GetValueForOption(peerNameOption);
-    var remoteTlsKey = context.ParseResult.GetValueForOption(remoteTlsKeyOption);
     var identityName = context.ParseResult.GetValueForOption(identityOption);
 
     // Build client-specific service provider
@@ -264,72 +281,64 @@ async Task SendCommandHandler(InvocationContext context)
         try
         {
             Console.WriteLine($"Connecting to {endpoint} to establish session...");
-            TlsCertificate? tlsCertificate = null;
-            if (!string.IsNullOrEmpty(remoteTlsKey))
-            {
-                tlsCertificate = new TlsCertificate(Convert.FromBase64String(remoteTlsKey));
-            }
-            var conversationId = await conversationService.CreateDirectConversationAsync(endpoint!, peerName, tlsCertificate);
+            var conversationId = await conversationService.CreateDirectConversationAsync(endpoint!, peerName);
             Console.WriteLine($"Session established. Conversation ID: {conversationId}");
 
-            var sentMessage = await messageService.SendDirectMessageAsync(conversationId, message);
+            // After establishing a session, you might want to send the message in the same go.
+            // This part is left as an exercise.
+        }
+        catch (Exception ex)
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine($"An unexpected error occurred: {ex.Message}");
+            Console.ResetColor();
+        }
+    }
+    else if (conversationIdGuid.HasValue)
+    {
+        Console.WriteLine($"Sending message to conversation {conversationIdGuid}...");
+        try
+        {
+            var sentMessage = await messageService.SendDirectMessageAsync(new ChatConversationId(conversationIdGuid.Value), message);
             Console.WriteLine($"Message sent with ID: {sentMessage.Id}");
         }
         catch (Exception ex)
         {
             Console.ForegroundColor = ConsoleColor.Red;
-            Console.WriteLine($"Failed to establish session and send message: {ex.Message}");
+            Console.WriteLine($"Failed to send message: {ex.Message}");
+            Console.ResetColor();
+        }
+    }
+    else if (peerIdGuid.HasValue)
+    {
+        Console.WriteLine($"Sending message to peer {peerIdGuid}...");
+        try
+        {
+            var conversationId = await conversationService.GetLastActiveConversationIdAsync(peerIdGuid.Value);
+            if (conversationId.HasValue)
+            {
+                var sentMessage = await messageService.SendDirectMessageAsync(new ChatConversationId(conversationId.Value.Value), message);
+                Console.WriteLine($"Message sent with ID: {sentMessage.Id}");
+            }
+            else
+            {
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine($"No active conversation found with peer {peerIdGuid}.");
+                Console.ResetColor();
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine($"Failed to send message: {ex.Message}");
             Console.ResetColor();
         }
     }
     else
     {
-        if (conversationIdGuid.HasValue)
-        {
-            Console.WriteLine($"Sending message to conversation {conversationIdGuid}...");
-            try
-            {
-                var sentMessage = await messageService.SendDirectMessageAsync(new ChatConversationId(conversationIdGuid.Value), message);
-                Console.WriteLine($"Message sent with ID: {sentMessage.Id}");
-            }
-            catch (Exception ex)
-            {
-                Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine($"Failed to send message: {ex.Message}");
-                Console.ResetColor();
-            }
-        }
-        else if (peerIdGuid.HasValue)
-        {
-            Console.WriteLine($"Sending message to peer {peerIdGuid}...");
-            try
-            {
-                var conversationId = await conversationService.GetLastActiveConversationIdAsync(peerIdGuid.Value);
-                if (conversationId.HasValue)
-                {
-                    var sentMessage = await messageService.SendDirectMessageAsync(new ChatConversationId(conversationId.Value.Value), message);
-                    Console.WriteLine($"Message sent with ID: {sentMessage.Id}");
-                }
-                else
-                {
-                    Console.ForegroundColor = ConsoleColor.Red;
-                    Console.WriteLine($"No active conversation found with peer {peerIdGuid}.");
-                    Console.ResetColor();
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine($"Failed to send message: {ex.Message}");
-                Console.ResetColor();
-            }
-        }
-        else
-        {
-            Console.ForegroundColor = ConsoleColor.Red;
-            Console.WriteLine("Either conversation-id or peer-id must be specified.");
-            Console.ResetColor();
-        }
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine("Either conversation-id or peer-id must be specified.");
+        Console.ResetColor();
     }
 }
 

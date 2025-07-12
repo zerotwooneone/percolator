@@ -6,7 +6,7 @@ public static class ServiceCollectionExtensions
 {
     public static IServiceCollection AddKeyExchangeServices(this IServiceCollection services)
     {
-        services.AddSingleton<X3DHOrchestrator>();
+        services.AddSingleton<IX3DHOrchestrator, X3DHOrchestrator>();
         return services;
     }
 }

@@ -16,7 +16,6 @@ public class DirectSessionManagerTests
     private Mock<IDoubleRatchetSessionStore> _mockSessionStore = null!;
     private Mock<IConversationRepository> _mockConversationRepository = null!;
     private Mock<IPeerRepository> _mockPeerRepository = null!;
-    private Mock<ILocalPeerProvider> _mockLocalPeerProvider = null!;
     private Mock<IMessageStore> _mockMessageStore = null!;
     private Mock<ActiveIdentityContext> _mockActiveIdentityContext = null!;
     private DirectSessionManager _sessionManager = null!;
@@ -30,7 +29,6 @@ public class DirectSessionManagerTests
         _mockSessionStore = new Mock<IDoubleRatchetSessionStore>();
         _mockConversationRepository = new Mock<IConversationRepository>();
         _mockPeerRepository = new Mock<IPeerRepository>();
-        _mockLocalPeerProvider = new Mock<ILocalPeerProvider>();
         _mockMessageStore = new Mock<IMessageStore>();
         _mockActiveIdentityContext = new Mock<ActiveIdentityContext>();
 
@@ -38,17 +36,13 @@ public class DirectSessionManagerTests
         var identitySigningKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         var identityAgreementKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var signedPreKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        var oneTimePreKeys = new[] { ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256) };
-        _localKeys = new X3dhKeys(identitySigningKey, identityAgreementKey, signedPreKey, oneTimePreKeys);
-
-        _mockLocalPeerProvider.Setup(p => p.GetPeerIdAsync()).ReturnsAsync(new SessionPeerId(identity.Id));
+        _localKeys = new X3dhKeys(identitySigningKey, identityAgreementKey, signedPreKey);
 
         _remoteIdentityKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         
         _sessionManager = new DirectSessionManager(
             _mockSessionStore.Object,
             _mockConversationRepository.Object,
-            _mockLocalPeerProvider.Object,
             _mockMessageStore.Object,
             _mockActiveIdentityContext.Object
         );

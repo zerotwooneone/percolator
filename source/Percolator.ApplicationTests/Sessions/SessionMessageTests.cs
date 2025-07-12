@@ -24,11 +24,9 @@ public class SessionMessageTests
     private Mock<IDoubleRatchetSessionStore> _aliceSessionStore = null!;
     private Mock<IDoubleRatchetSessionStore> _bobSessionStore = null!;
     private Mock<IConversationRepository> _mockConversationRepo = null!;
-    private Mock<IPeerRepository> _mockPeerRepo = null!;
     private Mock<IMessageStore> _mockMessageStore = null!;
 
     private ActiveIdentityContext _aliceIdentity = null!;
-    private Signature _aliceSignature = null!;
     private ActiveIdentityContext _bobIdentity = null!;
     private Signature _bobSignature = null!;
 
@@ -50,29 +48,20 @@ public class SessionMessageTests
             .Callback((SessionPeerId p, SessionConversationId c, DoubleRatchetSession.DoubleRatchetSessionState s) => bobBackingStore[(p, c)] = s);
 
         _mockConversationRepo = new Mock<IConversationRepository>();
-        _mockPeerRepo = new Mock<IPeerRepository>();
         _mockMessageStore = new Mock<IMessageStore>();
 
-        (_aliceIdentity, _aliceSignature) = CreateIdentityContext("Alice");
+        (_aliceIdentity, var aliceSignature) = CreateIdentityContext("Alice");
         (_bobIdentity, _bobSignature) = CreateIdentityContext("Bob");
-
-        var mockAliceLocalPeerProvider = new Mock<ILocalPeerProvider>();
-        mockAliceLocalPeerProvider.Setup(p => p.GetPeerIdAsync()).ReturnsAsync(new SessionPeerId(_aliceIdentity.Identity!.Id));
-
-        var mockBobLocalPeerProvider = new Mock<ILocalPeerProvider>();
-        mockBobLocalPeerProvider.Setup(p => p.GetPeerIdAsync()).ReturnsAsync(new SessionPeerId(_bobIdentity.Identity!.Id));
 
         _aliceManager = new DirectSessionManager(
             _aliceSessionStore.Object,
             _mockConversationRepo.Object,
-            mockAliceLocalPeerProvider.Object,
             _mockMessageStore.Object,
             _aliceIdentity);
 
         _bobManager = new DirectSessionManager(
             _bobSessionStore.Object,
             _mockConversationRepo.Object,
-            mockBobLocalPeerProvider.Object,
             _mockMessageStore.Object,
             _bobIdentity);
     }
@@ -115,25 +104,43 @@ public class SessionMessageTests
     private (SharedSecret, SharedSecret) PerformX3DH()
     {
         var x3dhManager = new X3DHManager();
+
+        // Alice (initiator) keys
+        var aliceIdentityKey = _aliceIdentity.Keys!.IdentityAgreementKey;
         var aliceEphemeralKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
 
+        // Bob (responder) keys
+        var bobIdentitySigningKey = _bobIdentity.Keys!.IdentitySigningKey;
+        var bobIdentityAgreementKey = _bobIdentity.Keys!.IdentityAgreementKey;
+        var bobSignedPreKey = _bobIdentity.Keys!.SignedPreKey;
+        var bobOneTimePreKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+
+        // Bob creates a signature for his signed pre-key
+        var bobSignature = x3dhManager.SignPreKey(bobIdentitySigningKey, new PreKey(bobSignedPreKey.PublicKey.ExportSubjectPublicKeyInfo()));
+
+        // Alice receives Bob's pre-key bundle
         var bobPreKeyBundle = new PreKeyBundle(
-            _bobIdentity.Keys!.IdentitySigningKey.ExportSubjectPublicKeyInfo(),
-            _bobIdentity.Keys!.IdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo(),
-            _bobSignature,
-            _bobIdentity.Keys!.SignedPreKey.PublicKey.ExportSubjectPublicKeyInfo(),
-            _bobIdentity.Keys!.OneTimePreKeys[0].PublicKey.ExportSubjectPublicKeyInfo()
+            bobIdentitySigningKey.ExportSubjectPublicKeyInfo(),
+            bobIdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo(),
+            bobSignature,
+            bobSignedPreKey.PublicKey.ExportSubjectPublicKeyInfo(),
+            bobOneTimePreKey.PublicKey.ExportSubjectPublicKeyInfo()
         );
 
-        var aliceSharedSecret = x3dhManager.InitiateHandshake(bobPreKeyBundle, aliceEphemeralKey, _aliceIdentity.Keys!.IdentityAgreementKey);
+        // Alice initiates the handshake to calculate her shared secret
+        var aliceSharedSecret = x3dhManager.InitiateHandshake(bobPreKeyBundle, aliceEphemeralKey, aliceIdentityKey);
 
+        // Bob receives Alice's initial message info and calculates his shared secret
         var bobSharedSecret = x3dhManager.RespondToHandshake(
-            new RatchetIdentityKey(_aliceIdentity.Keys!.IdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
+            new RatchetIdentityKey(aliceIdentityKey.PublicKey.ExportSubjectPublicKeyInfo()),
             new RatchetEphemeralKey(aliceEphemeralKey.PublicKey.ExportSubjectPublicKeyInfo()),
-            new PrivateAgreementKey(_bobIdentity.Keys!.IdentityAgreementKey.ExportECPrivateKey()),
-            new PrivatePreKey(_bobIdentity.Keys!.SignedPreKey.ExportECPrivateKey()),
-            new PrivateOneTimeKey(_bobIdentity.Keys!.OneTimePreKeys[0].ExportECPrivateKey())
+            new PrivateAgreementKey(bobIdentityAgreementKey.ExportECPrivateKey()),
+            new PrivatePreKey(bobSignedPreKey.ExportECPrivateKey()),
+            new PrivateOneTimeKey(bobOneTimePreKey.ExportECPrivateKey())
         );
+
+        aliceEphemeralKey.Dispose();
+        bobOneTimePreKey.Dispose();
 
         return (aliceSharedSecret, bobSharedSecret);
     }
@@ -152,8 +159,7 @@ public class SessionMessageTests
             Keys = new X3dhKeys(
                 signingKey,
                 agreementKey,
-                signedPreKey,
-                new[] { ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256) }
+                signedPreKey
             )
         };
         return (activeIdentity, signature);

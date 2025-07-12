@@ -9,11 +9,10 @@ using SessionConversationId = Percolator.Sessions.ConversationId;
 
 namespace Percolator.Application.Sessions;
 
-public class DirectSessionManager
+public class DirectSessionManager : IDirectSessionManager
 {
     private readonly IDoubleRatchetSessionStore _sessionStore;
     private readonly IConversationRepository _conversationRepository;
-    private readonly ILocalPeerProvider _localPeerProvider;
     private readonly IMessageStore _messageStore;
     private readonly ActiveIdentityContext _activeIdentityContext;
     private readonly ConcurrentDictionary<SessionConversationId, SemaphoreSlim> _sessionLocks = new();
@@ -21,13 +20,11 @@ public class DirectSessionManager
     public DirectSessionManager(
         IDoubleRatchetSessionStore sessionStore,
         IConversationRepository conversationRepository,
-        ILocalPeerProvider localPeerProvider,
         IMessageStore messageStore,
         ActiveIdentityContext activeIdentityContext)
     {
         _sessionStore = sessionStore;
         _conversationRepository = conversationRepository;
-        _localPeerProvider = localPeerProvider;
         _messageStore = messageStore;
         _activeIdentityContext = activeIdentityContext;
     }
@@ -140,6 +137,10 @@ public class DirectSessionManager
 
     private async Task<SessionPeerId> GetRemotePeerId(SessionConversationId conversationId)
     {
+        if (_activeIdentityContext.Identity is null)
+        {
+            throw new InvalidOperationException("No active identity found to get remote peer ID.");
+        }
         var chatConversationId = new Percolator.Chat.ValueObjects.ConversationId(conversationId.Value);
         var conversation = await _conversationRepository.GetByIdAsync(chatConversationId);
         if (conversation is null)
@@ -147,9 +148,7 @@ public class DirectSessionManager
             throw new InvalidOperationException($"Conversation {conversationId} not found.");
         }
 
-        var localPeerId = await _localPeerProvider.GetPeerIdAsync();
-
-        var localParticipantId = new Chat.ValueObjects.ParticipantId(localPeerId.Value);
+        var localParticipantId = new Chat.ValueObjects.ParticipantId(_activeIdentityContext.Identity.Id);
         var remoteParticipant = conversation.Participants.FirstOrDefault(p => p.Value != localParticipantId.Value);
 
         if (remoteParticipant.Value == Guid.Empty)

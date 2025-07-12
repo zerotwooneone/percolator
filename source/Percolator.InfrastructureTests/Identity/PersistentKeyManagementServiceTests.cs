@@ -52,13 +52,12 @@ public class PersistentKeyManagementServiceTests
         using (var originalIks = ECDsa.Create(ECCurve.NamedCurves.nistP256))
         using (var originalIka = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256))
         using (var originalSpk = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256))
-        using (var originalOtps = new DisposableArray<ECDiffieHellman>(Enumerable.Range(0, 10).Select(_ => ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256)).ToArray()))
+        
         {
             var originalContainer = new PersistentKeyManagementService.KeyContainer(
                 originalIks.ExportParameters(true),
                 originalIka.ExportParameters(true),
-                originalSpk.ExportParameters(true),
-                originalOtps.Select(k => k.ExportParameters(true)).ToArray()
+                originalSpk.ExportParameters(true)
             );
             decryptedBytes = JsonSerializer.SerializeToUtf8Bytes(originalContainer, new JsonSerializerOptions { Converters = { new ECParametersJsonConverter() } });
             originalKeyJson = JsonSerializer.Serialize(originalContainer, new JsonSerializerOptions { Converters = { new ECParametersJsonConverter() } });
@@ -76,8 +75,7 @@ public class PersistentKeyManagementServiceTests
         var loadedContainer = new PersistentKeyManagementService.KeyContainer(
             loadedKeys.IdentitySigningKey.ExportParameters(true),
             loadedKeys.IdentityAgreementKey.ExportParameters(true),
-            loadedKeys.SignedPreKey.ExportParameters(true),
-            loadedKeys.OneTimePreKeys.Select(k => k.ExportParameters(true)).ToArray()
+            loadedKeys.SignedPreKey.ExportParameters(true)
         );
         var loadedKeyJson = JsonSerializer.Serialize(loadedContainer, new JsonSerializerOptions { Converters = { new ECParametersJsonConverter() } });
 

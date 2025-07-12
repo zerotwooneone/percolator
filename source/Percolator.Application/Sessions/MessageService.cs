@@ -1,6 +1,8 @@
 using System.Text;
+using Percolator.Application.Identity;
 using Percolator.Application.Network;
 using Percolator.Sessions;
+using SessionPeerId = Percolator.Sessions.PeerId;
 using ChatConversationId = Percolator.Chat.ValueObjects.ConversationId;
 using ChatMessage = Percolator.Chat.Message;
 using ChatMessageId = Percolator.Chat.ValueObjects.MessageId;
@@ -13,27 +15,31 @@ namespace Percolator.Application.Sessions;
 
 public class MessageService : IMessageService
 {
-    private readonly ILocalPeerProvider _localPeerProvider;
     private readonly IMessageStore _messageStore;
-    private readonly DirectSessionManager _sessionManager;
+    private readonly IDirectSessionManager _sessionManager;
     private readonly IMessageTransportService _transportService;
+    private readonly ActiveIdentityContext _activeIdentityContext;
 
     public MessageService(
-        ILocalPeerProvider localPeerProvider, 
         IMessageStore messageStore, 
-        DirectSessionManager sessionManager, 
-        IMessageTransportService transportService)
+        IDirectSessionManager sessionManager, 
+        IMessageTransportService transportService,
+        ActiveIdentityContext activeIdentityContext)
     {
-        _localPeerProvider = localPeerProvider;
         _messageStore = messageStore;
         _sessionManager = sessionManager;
         _transportService = transportService;
+        _activeIdentityContext = activeIdentityContext;
     }
 
     public async Task<ChatMessage> SendDirectMessageAsync(
         ChatConversationId conversationId,
         string content)
     {
+        if (_activeIdentityContext.Identity is null)
+        {
+            throw new InvalidOperationException("Identity context not loaded");
+        }
         var contentBytes = Encoding.UTF8.GetBytes(content);
         var sessionConversationId = new SessionConversationId(conversationId.Value);
 
@@ -51,21 +57,20 @@ public class MessageService : IMessageService
         await _transportService.SendMessageAsync(identityPeerId, conversationId, encryptedMessage);
 
         // For local storage and immediate feedback, create and store the message object.
-        var senderId = await _localPeerProvider.GetPeerIdAsync();
         var sessionMessageId = SessionMessageId.NewId();
         var opaqueContent = new OpaqueContent(contentBytes); // Store plaintext for local history
 
         var directMessage = new DirectMessage(
             sessionMessageId,
             sessionConversationId,
-            senderId,
+            new SessionPeerId(_activeIdentityContext.Identity.Id),
             opaqueContent
         );
 
         await _messageStore.StoreDirectMessageAsync(directMessage);
 
         var chatMessageId = new ChatMessageId(sessionMessageId.Value);
-        var chatSenderId = new ChatParticipantId(senderId.Value);
+        var chatSenderId = new ChatParticipantId(_activeIdentityContext.Identity.Id);
 
         return new ChatMessage(chatMessageId, chatSenderId, content, directMessage.Timestamp);
     }

@@ -31,7 +31,7 @@ public class PersistentIdentityServiceTests
     {
         // Arrange
         var identityName = _fixture.Create<string>();
-        var keys = new X3dhKeys(ECDsa.Create(), ECDiffieHellman.Create(), ECDiffieHellman.Create(), Array.Empty<ECDiffieHellman>());
+        var keys = new X3dhKeys(ECDsa.Create(), ECDiffieHellman.Create(), ECDiffieHellman.Create());
 
         _identityStoreMock.Setup(s => s.GetIdentityAsync(identityName, It.IsAny<CancellationToken>()))
             .ReturnsAsync((IdentityRecord?)null);
@@ -57,7 +57,7 @@ public class PersistentIdentityServiceTests
         // Arrange
         var identityName = _fixture.Create<string>();
         var identityRecord = _fixture.Create<IdentityRecord>() with { Name = identityName };
-        var keys = new X3dhKeys(ECDsa.Create(), ECDiffieHellman.Create(), ECDiffieHellman.Create(), Array.Empty<ECDiffieHellman>());
+        var keys = new X3dhKeys(ECDsa.Create(), ECDiffieHellman.Create(), ECDiffieHellman.Create());
 
         _identityStoreMock.Setup(s => s.GetIdentityAsync(identityName, It.IsAny<CancellationToken>()))
             .ReturnsAsync(identityRecord);

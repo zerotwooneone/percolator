@@ -33,7 +33,7 @@ public class PersistentKeyManagementService : IKeyManagementService
         _logger.LogInformation("Percolator data directory: {PercolatorAppDataPath}!!!!{storageOptionsValuePath}", _percolatorAppDataPath, storageOptions.Value.Path);
     }
 
-    internal record KeyContainer(ECParameters IdentitySigningKey, ECParameters IdentityAgreementKey, ECParameters SignedPreKey, ECParameters[] OneTimePreKeys);
+    internal record KeyContainer(ECParameters IdentitySigningKey, ECParameters IdentityAgreementKey, ECParameters SignedPreKey);
 
     public async Task<X3dhKeys?> GetKeysAsync(string identityName)
     {
@@ -56,14 +56,8 @@ public class PersistentKeyManagementService : IKeyManagementService
         var loadedIkSigning = ECDsa.Create(keyContainer.IdentitySigningKey);
         var loadedIkAgreement = ECDiffieHellman.Create(keyContainer.IdentityAgreementKey);
         var loadedSpk = ECDiffieHellman.Create(keyContainer.SignedPreKey);
-        var loadedOtps = keyContainer.OneTimePreKeys.Select(p =>
-        {
-            var k = ECDiffieHellman.Create();
-            k.ImportParameters(p);
-            return k;
-        }).ToArray();
-
-        return new X3dhKeys(loadedIkSigning, loadedIkAgreement, loadedSpk, loadedOtps);
+        
+        return new X3dhKeys(loadedIkSigning, loadedIkAgreement, loadedSpk);
     }
 
     internal string GetKeyFilePath(string identityName)
@@ -79,17 +73,12 @@ public class PersistentKeyManagementService : IKeyManagementService
         var newIkSigning = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         var newIkAgreement = await CreatePreKeyAsync();
         var newSpk = await CreatePreKeyAsync();
-        var newOtps = new List<ECDiffieHellman>();
-        for (var i = 0; i < 10; i++)
-        {
-            newOtps.Add(await CreatePreKeyAsync());
-        }
+        
 
         var newKeyContainer = new KeyContainer(
             newIkSigning.ExportParameters(true),
             newIkAgreement.ExportParameters(true),
-            newSpk.ExportParameters(true),
-            newOtps.Select(k => k.ExportParameters(true)).ToArray()
+            newSpk.ExportParameters(true)
         );
 
         var keyFilePath = GetKeyFilePath(identityName);
@@ -106,7 +95,7 @@ public class PersistentKeyManagementService : IKeyManagementService
 
         _logger.LogInformation("New keys created and saved for {IdentityName}", identityName);
 
-        return new X3dhKeys(newIkSigning, newIkAgreement, newSpk, newOtps.ToArray());
+        return new X3dhKeys(newIkSigning, newIkAgreement, newSpk);
     }
 
     private async Task<ECDiffieHellman> CreatePreKeyAsync()

@@ -13,7 +13,7 @@ public interface IConversationService
     /// Creates a new direct conversation with a remote peer by connecting to the specified host and port.
     /// </summary>
     /// <returns>The unique ID of the direct conversation.</returns>
-    Task<ConversationId> CreateDirectConversationAsync(DnsEndPoint endpoint, string peerName, TlsCertificate? tlsCertificate = null);
+    Task<ConversationId> CreateDirectConversationAsync(DnsEndPoint endpoint, string peerName);
 
     /// <summary>
     /// Gets the last active direct conversation ID for a given peer.

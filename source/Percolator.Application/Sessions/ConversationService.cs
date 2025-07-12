@@ -28,26 +28,26 @@ namespace Percolator.Application.Sessions;
 public class ConversationService : IConversationService
 {
     private readonly ActiveIdentityContext _activeIdentityContext;
-    private readonly X3DHOrchestrator _orchestrator;
-    private readonly DirectSessionManager _sessionManager;
+    private readonly IX3DHOrchestrator _orchestrator;
+    private readonly IDirectSessionManager _sessionManager;
     private readonly IConversationRepository _conversationRepository;
     private readonly IPeerRepository _peerRepository;
     private readonly IPeerConnectionRepository _peerConnectionRepository;
-    private readonly ILocalPeerProvider _localPeerProvider;
     private readonly IGrpcClientFactory _grpcClientFactory;
     private readonly ITlsCertificateService _tlsCertificateService;
+    private readonly IOneTimeKeyProvider _oneTimeKeyProvider;
     private readonly ILogger<ConversationService> _logger;
 
     public ConversationService(
         ActiveIdentityContext activeIdentityContext,
-        X3DHOrchestrator orchestrator,
-        DirectSessionManager sessionManager,
+        IX3DHOrchestrator orchestrator,
+        IDirectSessionManager sessionManager,
         IConversationRepository conversationRepository,
         IPeerRepository peerRepository,
         IPeerConnectionRepository peerConnectionRepository,
-        ILocalPeerProvider localPeerProvider,
         IGrpcClientFactory grpcClientFactory,
         ITlsCertificateService tlsCertificateService,
+        IOneTimeKeyProvider oneTimeKeyProvider,
         ILogger<ConversationService> logger)
     {
         _activeIdentityContext = activeIdentityContext;
@@ -56,13 +56,13 @@ public class ConversationService : IConversationService
         _conversationRepository = conversationRepository;
         _peerRepository = peerRepository;
         _peerConnectionRepository = peerConnectionRepository;
-        _localPeerProvider = localPeerProvider;
         _grpcClientFactory = grpcClientFactory;
         _tlsCertificateService = tlsCertificateService;
+        _oneTimeKeyProvider = oneTimeKeyProvider;
         _logger = logger;
     }
 
-    public async Task<ChatConversationId> CreateDirectConversationAsync(DnsEndPoint endpoint, string peerName, TlsCertificate? tlsCertificate = null)
+    public async Task<ChatConversationId> CreateDirectConversationAsync(DnsEndPoint endpoint, string peerName)
     {
         _logger.LogInformation("Attempting to create direct conversation with {endpoint}", endpoint);
 
@@ -77,26 +77,21 @@ public class ConversationService : IConversationService
             throw new InvalidOperationException("Could not find local identity's keys. Please create them first.");
         }
 
-        if (localKeys.OneTimePreKeys is null || localKeys.OneTimePreKeys.Length == 0)
-        {
-            throw new InvalidOperationException("Could not find any one-time pre-keys for the local identity.");
-        }
+        //using var signedPreKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        var signedPreKeyPublicBytes = localKeys.SignedPreKey.ExportSubjectPublicKeyInfo();
+        var signature = localKeys.IdentitySigningKey.SignData(localKeys.SignedPreKey.ExportSubjectPublicKeyInfo(), HashAlgorithmName.SHA256);
 
-        using var signedPreKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        var signedPreKeyPublicBytes = signedPreKey.PublicKey.ExportSubjectPublicKeyInfo();
-        var signature = localKeys.IdentitySigningKey.SignData(signedPreKey.PublicKey.ExportSubjectPublicKeyInfo(), HashAlgorithmName.SHA256);
-
+        var oneTimeKey = _oneTimeKeyProvider.PopOneTimeKey();
         var localBundle = new ContractsPreKeyBundle
         {
             IdentitySigningKey = ByteString.CopyFrom(localKeys.IdentitySigningKey.ExportSubjectPublicKeyInfo()),
             IdentityAgreementKey = ByteString.CopyFrom(localKeys.IdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
             SignedPreKey = ByteString.CopyFrom(signedPreKeyPublicBytes),
-            PreKeySignature = ByteString.CopyFrom(signature)
+            PreKeySignature = ByteString.CopyFrom(signature),
+            OneTimePreKey = oneTimeKey is null ? ByteString.Empty : ByteString.CopyFrom(oneTimeKey.PublicKey.ExportSubjectPublicKeyInfo()),
         };
 
         using var ephemeralKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-
-        var localPeerId = await _localPeerProvider.GetPeerIdAsync();
 
         var request = new EstablishSessionRequest
         {
@@ -107,51 +102,28 @@ public class ConversationService : IConversationService
         var clientCertificate = await _tlsCertificateService.GetOrCreateTlsCertificateAsync(
             localIdentity.Name, 
             localKeys.IdentitySigningKey.ExportSubjectPublicKeyInfo());
-        var client = _grpcClientFactory.CreateClient(endpoint, clientCertificate, tlsCertificate);
+        var handshakeClient = _grpcClientFactory.CreateClient(endpoint, peerName, clientCertificate);
+        var response = await handshakeClient.EstablishSessionAsync(request);
 
-        _logger.LogInformation("Sending EstablishSessionRequest to {endpoint}", endpoint);
-        var response = await client.EstablishSessionAsync(request);
-
-        Peer? peer = await _peerRepository.GetByNameAsync(peerName);
-
-        var remotePeerIdentityKey = response.ResponderBundle.IdentitySigningKey.ToByteArray();
-        // If peer is unknown, this is a TOFU scenario.
+        var peer = await _peerRepository.GetByNameAsync(peerName);
         if (peer is null)
         {
-            if (tlsCertificate is not null)
-            {
-                // This case should ideally not be hit if the CLI enforces providing a name for a known peer cert
-                throw new InvalidOperationException("A certificate was provided, but the peer is unknown. Please add the peer first.");
-            }
-
-            _logger.LogInformation("Peer '{PeerName}' not found. Creating new peer from TOFU handshake.", peerName);
-
-            var tlsCertificateFromHandshake = new TlsCertificate(remotePeerIdentityKey);
-            var newPeer = new Peer(new IdentityPeerId(Guid.NewGuid()), peerName);
-            await _peerRepository.AddAsync(newPeer);
-            peer = newPeer;
-
-            var peerConnection = new PeerConnection(
-                new NetworkPeerId(peer.Id.Value),
-                null, // DirectMessagePublicKey is not available at this stage
-                new[] { new GrpcEndPoint(endpoint, DateTimeOffset.UtcNow) },
-                new[] { tlsCertificateFromHandshake },
-                DateTimeOffset.UtcNow);
-
-            await _peerConnectionRepository.SaveAsync(peerConnection);
+            throw new InvalidOperationException($"Peer '{peerName}' was not found after a successful handshake.");
         }
+
+        var remotePublicIdentityKey = response.ResponderBundle.IdentitySigningKey.ToByteArray();
 
         var remotePeerId = new SessionPeerId(peer.Id.Value);
         var sharedSecret = _orchestrator.CompleteHandshake(response.ResponderBundle, ephemeralKey);
 
-        var channelId = new ChannelId(remotePeerIdentityKey);
+        var channelId = new ChannelId(remotePublicIdentityKey);
         var conversation = (await _conversationRepository.GetByChannelIdAsync(channelId))
                            ?? new ChatConversation(
                                new ChatConversationId(Guid.NewGuid()),
                                channelId,
                                new List<ChatParticipantId>
                                {
-                                   new(localPeerId.Value),
+                                   new(localIdentity.Id),
                                    new(remotePeerId.Value)
                                },
                                new List<Message>(),

@@ -15,6 +15,7 @@ namespace Percolator.ApplicationTests.KeyExchange;
 public class X3DHOrchestratorTests
 {
     private Mock<IX3DHManager> _mockX3dhManager = null!;
+    private Mock<IOneTimeKeyProvider> _mockOneTimeKeyProvider = null!;
     private X3DHOrchestrator _orchestrator = null!;
     private ActiveIdentityContext _activeIdentityContext = null!;
 
@@ -32,6 +33,7 @@ public class X3DHOrchestratorTests
     public void Setup()
     {
         _mockX3dhManager = new Mock<IX3DHManager>();
+        _mockOneTimeKeyProvider = new Mock<IOneTimeKeyProvider>();
         _activeIdentityContext = new ActiveIdentityContext();
 
         // Local keys setup
@@ -39,8 +41,7 @@ public class X3DHOrchestratorTests
         var localIdentitySigningKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         var localIdentityAgreementKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var localSignedPreKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        var localOneTimePreKeys = new[] { ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256) };
-        _localKeys = new X3dhKeys(localIdentitySigningKey, localIdentityAgreementKey, localSignedPreKey, localOneTimePreKeys);
+        _localKeys = new X3dhKeys(localIdentitySigningKey, localIdentityAgreementKey, localSignedPreKey);
 
         // Remote keys setup
         _remoteIdentitySigningKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
@@ -54,7 +55,8 @@ public class X3DHOrchestratorTests
 
         _orchestrator = new X3DHOrchestrator(
             _activeIdentityContext,
-            _mockX3dhManager.Object
+            _mockX3dhManager.Object,
+            _mockOneTimeKeyProvider.Object
         );
     }
 
@@ -118,12 +120,13 @@ public class X3DHOrchestratorTests
     {
         // Arrange
         var remoteIdentitySigningKeyBytes = _remoteIdentitySigningKey.ExportSubjectPublicKeyInfo();
+        var remoteSignedPreKeyBytes = _remoteSignedPreKey.PublicKey.ExportSubjectPublicKeyInfo();
         var remoteBundle = new ContractsPreKeyBundle
         {
             IdentityAgreementKey = ByteString.CopyFrom(_remoteIdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
             IdentitySigningKey = ByteString.CopyFrom(remoteIdentitySigningKeyBytes),
-            SignedPreKey = ByteString.CopyFrom(_remoteSignedPreKey.PublicKey.ExportSubjectPublicKeyInfo()),
-            PreKeySignature = ByteString.CopyFrom(new byte[64]) // Dummy signature
+            SignedPreKey = ByteString.CopyFrom(remoteSignedPreKeyBytes),
+            PreKeySignature = ByteString.CopyFrom(_remoteIdentitySigningKey.SignData(remoteSignedPreKeyBytes, HashAlgorithmName.SHA256, DSASignatureFormat.IeeeP1363FixedFieldConcatenation))
         };
 
         var expectedSharedSecret = new SharedSecret(new byte[32]);
@@ -131,12 +134,18 @@ public class X3DHOrchestratorTests
         using var ephemeralKey = ECDiffieHellman.Create();
         var ephemeralKeyBytes = ephemeralKey.PublicKey.ExportSubjectPublicKeyInfo();
 
+        _mockX3dhManager.Setup(x => x.VerifySignature(
+                It.IsAny<RatchetIdentityKey>(),
+                It.IsAny<PreKey>(),
+                It.IsAny<Signature>()))
+            .Returns(true);
+
         _mockX3dhManager.Setup(x => x.RespondToHandshake(
                 It.Is<RatchetIdentityKey>(k => k.Value.SequenceEqual(_remoteIdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo())),
                 It.Is<RatchetEphemeralKey>(k => k.Value.SequenceEqual(ephemeralKeyBytes)),
                 It.Is<PrivateAgreementKey>(k => k.Value.SequenceEqual(_localKeys.IdentityAgreementKey.ExportECPrivateKey())),
                 It.Is<PrivatePreKey>(k => k.Value.SequenceEqual(_localKeys.SignedPreKey.ExportECPrivateKey())),
-                It.Is<PrivateOneTimeKey>(k => k.Value.SequenceEqual(_localKeys.OneTimePreKeys.First().ExportECPrivateKey()))))
+                It.IsAny<PrivateOneTimeKey>()))
             .Returns(expectedSharedSecret);
 
         _mockX3dhManager.Setup(x => x.SignPreKey(

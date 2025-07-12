@@ -31,7 +31,6 @@ public class MessageServiceTests
 
     private Mock<IConversationRepository> _mockConversationRepository = null!;
     private Mock<IPeerRepository> _mockPeerRepository = null!;
-    private Mock<ILocalPeerProvider> _mockLocalPeerProvider = null!;
     private Mock<IMessageStore> _mockMessageStore = null!;
     private Mock<IMessageTransportService> _mockTransportService = null!;
     private string _tempDirectory = null!;
@@ -41,7 +40,6 @@ public class MessageServiceTests
     {
         _mockConversationRepository = new Mock<IConversationRepository>();
         _mockPeerRepository = new Mock<IPeerRepository>();
-        _mockLocalPeerProvider = new Mock<ILocalPeerProvider>();
         _mockMessageStore = new Mock<IMessageStore>();
         _mockTransportService = new Mock<IMessageTransportService>();
         _activeIdentityContext = new ActiveIdentityContext();
@@ -54,15 +52,14 @@ public class MessageServiceTests
         _sessionManager = new DirectSessionManager(
             _sessionStore,
             _mockConversationRepository.Object,
-            _mockLocalPeerProvider.Object,
             _mockMessageStore.Object,
             _activeIdentityContext);
 
         _messageService = new MessageService(
-            _mockLocalPeerProvider.Object,
             _mockMessageStore.Object,
             _sessionManager,
-            _mockTransportService.Object);
+            _mockTransportService.Object,
+            _activeIdentityContext);
     }
 
     [TearDown]
@@ -82,13 +79,11 @@ public class MessageServiceTests
         var localKeys = new X3dhKeys(
             ECDsa.Create(ECCurve.NamedCurves.nistP256),
             ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
-            ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
-            new[] { ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256) });
+            ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256));
         _activeIdentityContext.Identity = localIdentity;
         _activeIdentityContext.Keys = localKeys;
 
-        _mockLocalPeerProvider.Setup(p => p.GetPeerIdAsync()).ReturnsAsync(new SessionPeerId(localIdentity.Id));
-
+        
         var remotePeerId = new SessionPeerId(Guid.NewGuid());
         var conversationId = new ChatConversationId(Guid.NewGuid());
         var participants = new[]

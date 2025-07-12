@@ -10,4 +10,10 @@ public static class Oids
     /// .1.1 (a project-specific identifier for the identity key)
     /// </summary>
     public const string PeerIdentityKey = "1.3.6.1.4.1.58824.1.1";
+
+    /// <summary>
+    /// OID for the X.509 enhanced key usage extension for Server Authentication.
+    /// 1.3.6.1.5.5.7.3.1 (iso.org.dod.internet.security.mechanisms.pkix.kp.serverAuth)
+    /// </summary>
+    public const string ServerAuthentication = "1.3.6.1.5.5.7.3.1";
 }
