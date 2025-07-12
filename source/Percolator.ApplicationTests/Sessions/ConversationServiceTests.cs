@@ -4,7 +4,9 @@ using System.Linq;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Security.Cryptography;
+using CryptoSharedSecret = Percolator.Cryptography.SharedSecret;
 using System.Security.Cryptography.X509Certificates;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Google.Protobuf;
@@ -45,7 +47,7 @@ public class ConversationServiceTests
     private Mock<IPeerRepository> _mockPeerRepository = null!;
     private Mock<ITlsCertificateService> _mockTlsCertificateService = null!;
     private Mock<IX3DHOrchestrator> _mockX3dhOrchestrator = null!;
-    private Mock<IDirectSessionManager> _mockSessionManager = null!;
+    private Mock<IDirectSessionManager> _mockDirectSessionManager = null!;
     private Mock<IConversationRepository> _mockConversationRepository = null!;
     private Mock<IPeerConnectionRepository> _mockPeerConnectionRepository = null!;
     private Mock<IOneTimeKeyProvider> _mockOneTimeKeyProvider = null!;
@@ -61,7 +63,7 @@ public class ConversationServiceTests
         _mockPeerRepository = new Mock<IPeerRepository>();
         _mockTlsCertificateService = new Mock<ITlsCertificateService>();
         _mockX3dhOrchestrator = new Mock<IX3DHOrchestrator>();
-        _mockSessionManager = new Mock<IDirectSessionManager>();
+        _mockDirectSessionManager = new Mock<IDirectSessionManager>();
         _mockOneTimeKeyProvider = new Mock<IOneTimeKeyProvider>();
         _mockConversationRepository = new Mock<IConversationRepository>();
         _mockPeerConnectionRepository = new Mock<IPeerConnectionRepository>();
@@ -81,7 +83,7 @@ public class ConversationServiceTests
         _service = new ConversationService(
             _mockLogger.Object,
             _mockX3dhOrchestrator.Object,
-            _mockSessionManager.Object,
+            _mockDirectSessionManager.Object,
             _mockConversationRepository.Object,
             _mockPeerRepository.Object,
             _mockPeerConnectionRepository.Object,
@@ -100,39 +102,38 @@ public class ConversationServiceTests
         var endpoint = new DnsEndPoint("localhost", 5001);
         var peerName = "test-peer";
         var peer = new Peer(new IdentityPeerId(Guid.NewGuid()), peerName);
-        var responseMessage = new EstablishSessionResponse
-        {
-            ResponderBundle = new ContractsPreKeyBundle
-            {
-                IdentitySigningKey = ByteString.CopyFrom(new byte[32]),
-                IdentityAgreementKey = ByteString.CopyFrom(new byte[32]),
-                SignedPreKey = ByteString.CopyFrom(new byte[32]),
-                PreKeySignature = ByteString.CopyFrom(new byte[64])
-            }
-        };
+
+        _mockX3dhOrchestrator
+            .Setup(o => o.CompleteHandshake(It.IsAny<ContractsPreKeyBundle>(), It.IsAny<ECDiffieHellman>()))
+            .Returns(new CryptoSharedSecret(new byte[32]));
 
         _mockPeerRepository.Setup(r => r.GetByNameAsync(peerName)).ReturnsAsync(peer);
         _mockConversationRepository.Setup(r => r.AddAsync(It.IsAny<ChatConversation>())).Returns(Task.CompletedTask);
-        _mockSessionManager.Setup(m => m.EstablishSessionAsInitiatorAsync(It.IsAny<SessionConversationId>(), It.IsAny<SessionPeerId>(), It.IsAny<SessionIdentityKey>(), It.IsAny<SessionRatchetKey>(), It.IsAny<SessionSharedSecret>()))
+        _mockDirectSessionManager.Setup(m => m.EstablishSessionAsInitiatorAsync(It.IsAny<SessionConversationId>(), It.IsAny<SessionPeerId>(), It.IsAny<SessionIdentityKey>(), It.IsAny<SessionRatchetKey>(), It.IsAny<SessionSharedSecret>()))
             .Returns(Task.CompletedTask);
         _mockPeerConnectionRepository.Setup(r => r.UpdateDirectMessagePublicKeyAsync(It.IsAny<NetworkPeerId>(), It.IsAny<DirectMessagePublicKey>()))
             .Returns(Task.CompletedTask);
 
+        var response = CreateGrpcResponse(new EstablishSessionResponse
+        {
+            ResponderBundle = new ContractsPreKeyBundle { IdentityAgreementKey = ByteString.CopyFrom(new byte[32]), SignedPreKey = ByteString.CopyFrom(new byte[32]) }
+        });
+
         var mockHttpHandler = new Mock<HttpMessageHandler>();
         mockHttpHandler.Protected()
             .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>()) 
-            .ReturnsAsync(CreateGrpcResponse(responseMessage));
+            .ReturnsAsync(response);
 
         var httpClient = new HttpClient(mockHttpHandler.Object);
         _mockHttpClientFactory.Setup(f => f.CreateClient(It.IsAny<string>())).Returns(httpClient);
 
         // Act
-        var conversationId = await _service.CreateDirectConversationAsync(endpoint, peerName);
+        var result = await _service.CreateDirectConversationAsync(endpoint, peerName);
 
         // Assert
-        Assert.That(conversationId, Is.Not.EqualTo(default(ChatConversationId)));
+        Assert.That(result, Is.Not.EqualTo(default(ChatConversationId)));
         _mockConversationRepository.Verify(r => r.AddAsync(It.Is<ChatConversation>(c => c.Name == peerName)), Times.Once);
-        _mockSessionManager.Verify(m => m.EstablishSessionAsInitiatorAsync(It.IsAny<SessionConversationId>(), It.IsAny<SessionPeerId>(), It.IsAny<SessionIdentityKey>(), It.IsAny<SessionRatchetKey>(), It.IsAny<SessionSharedSecret>()), Times.Once);
+        _mockDirectSessionManager.Verify(m => m.EstablishSessionAsInitiatorAsync(It.IsAny<SessionConversationId>(), It.IsAny<SessionPeerId>(), It.IsAny<SessionIdentityKey>(), It.IsAny<SessionRatchetKey>(), It.IsAny<SessionSharedSecret>()), Times.Once);
     }
 
     private static HttpResponseMessage CreateGrpcResponse<T>(T message)
@@ -153,12 +154,17 @@ public class ConversationServiceTests
         message.WriteTo(stream);
         stream.Position = 0;
 
+        var streamContent = new StreamContent(stream);
+        streamContent.Headers.ContentType = new MediaTypeHeaderValue("application/grpc");
+
         var response = new HttpResponseMessage(HttpStatusCode.OK)
         {
             Version = new Version(2, 0),
-            Content = new StreamContent(stream)
+            Content = streamContent
         };
-        response.Content.Headers.ContentType = new MediaTypeHeaderValue("application/grpc");
+
+        response.TrailingHeaders.Add("grpc-status", "0");
+
         return response;
     }
 }
