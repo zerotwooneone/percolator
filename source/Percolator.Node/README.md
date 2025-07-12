@@ -38,7 +38,7 @@ All subsequent commands will use the compiled executable directly.
 
 ## Primary Workflow: A Secure Chat in Two Steps
 
-This example shows how to start two independent nodes (Alice and Bob) and have Bob send a message to Alice.
+This example shows how to start two independent nodes (Alice and Bob) and have Bob send a message to Alice. All commands should be run from the `source` directory.
 
 ### Step 1: Alice Starts a Host
 
@@ -46,7 +46,7 @@ In one terminal, Alice runs the `host` command. This starts her node and generat
 
 ```bash
 # Terminal 1: Alice hosts
-.\Percolator.Node\bin\Debug\net9.0\Percolator.Node.exe host --identity Alice
+dotnet run --project .\Percolator.Node\ -- host --identity Alice
 ```
 
 The host will start and display the invitation link. Alice copies this link and sends it to Bob.
@@ -63,7 +63,7 @@ In a second terminal, Bob uses the `send` command. He provides Alice's endpoint 
 
 ```bash
 # Terminal 2: Bob sends a message
-.\Percolator.Node\bin\Debug\net9.0\Percolator.Node.exe send "Hello, Alice!" --endpoint localhost:5000 --peer-name Alice --identity Bob
+dotnet run --project .\Percolator.Node\ -- send "Hello, Alice!" --endpoint localhost:5000 --peer-name Alice --identity Bob
 ```
 
 That's it! A secure session is established, the message is sent, and Bob's node now remembers Alice's identity for future conversations. You should see the message appear in Alice's console (Terminal 1).
@@ -81,7 +81,7 @@ Starts the node, listens for incoming connections, and hosts the gRPC service.
 
 **Example:**
 ```bash
-.\Percolator.Node\bin\Debug\net9.0\Percolator.Node.exe host --identity Alice
+dotnet run --project .\Percolator.Node\ -- host --identity Alice
 ```
 
 ### `send`
@@ -99,7 +99,7 @@ Use the peer's endpoint and name. The `--remote-tls-key` is not needed.
 -   `--peer-name` (Required): The identity name of the peer you are messaging.
 
 ```bash
-.\Percolator.Node\bin\Debug\net9.0\Percolator.Node.exe send "Hello!" --endpoint localhost:5000 --peer-name Alice --identity Bob
+dotnet run --project .\Percolator.Node\ -- send "Hello!" --endpoint localhost:5000 --peer-name Alice --identity Bob
 ```
 
 **Sending to an Existing Conversation:**
@@ -109,7 +109,7 @@ If you have already connected, you can send messages using the `conversation-id`
 -   `--conversation-id` (Required): The unique ID generated when you first connected.
 
 ```bash
-.\Percolator.Node\bin\Debug\net9.0\Percolator.Node.exe send "Hello again!" --conversation-id <guid> --identity Bob
+dotnet run --project .\Percolator.Node\ -- send "Hello again!" --conversation-id <guid> --identity Bob
 ```
 
 ### `connect`
@@ -123,7 +123,7 @@ Establishes a secure session with a host without sending a message. This is usef
 
 **Example (Trust On First Use):**
 ```bash
-.\Percolator.Node\bin\Debug\net9.0\Percolator.Node.exe connect localhost:5000 --peer-name Alice --identity Bob
+dotnet run --project .\Percolator.Node\ -- connect localhost:5000 --peer-name Alice --identity Bob
 ```
 
 Upon success, the command will output a unique `Conversation ID` for use in future `send` commands.
