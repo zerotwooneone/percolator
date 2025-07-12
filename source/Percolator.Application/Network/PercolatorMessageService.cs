@@ -49,7 +49,7 @@ namespace Percolator.Application.Network
         {
             _logger.LogInformation("EstablishSession invoked by peer {Peer}", context.Peer);
 
-            var clientCertificate = context.GetHttpContext().Connection.ClientCertificate;
+            var clientCertificate = await context.GetHttpContext().Connection.GetClientCertificateAsync();
             if (clientCertificate is null)
             {
                 _logger.LogError("Handshake failed: Client did not provide a certificate.");

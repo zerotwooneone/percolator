@@ -204,14 +204,9 @@ async Task HostCommandHandler(InvocationContext context)
             serverOptions.ConfigureHttpsDefaults(listenOptions =>
             {
                 listenOptions.ServerCertificate = serverCertificateForKestrel;
-                listenOptions.ClientCertificateMode = ClientCertificateMode.RequireCertificate;
-                listenOptions.ClientCertificateValidation = (certificate, chain, sslPolicyErrors) =>
-                {
-                    // For our TOFU model, we don't use a traditional CA.
-                    // We accept the certificate here and let the application layer
-                    // (PercolatorMessageService) handle the logic of trusting the key on first use.
-                    return true;
-                };
+                // DelayCertificate is crucial for our TOFU model. It establishes the TLS connection
+                // and delegates certificate validation entirely to the application layer.
+                listenOptions.ClientCertificateMode = ClientCertificateMode.DelayCertificate;
             });
         });
 
