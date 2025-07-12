@@ -1,12 +1,15 @@
+using System.Security.Cryptography;
+using System.Text.Json;
 using AutoFixture;
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Moq;
 using Percolator.Identity;
-using System.Security.Cryptography;
-using System.Text.Json;
+using Percolator.Infrastructure;
+using Percolator.Infrastructure.Identity;
 
-namespace Percolator.IdentityTests;
+namespace Percolator.InfrastructureTests.Identity;
 
 [TestFixture]
 public class PersistentKeyManagementServiceTests
@@ -15,14 +18,25 @@ public class PersistentKeyManagementServiceTests
     private Mock<ICredentialService> _credentialServiceMock = null!;
     private Mock<ILogger<PersistentKeyManagementService>> _loggerMock = null!;
     private PersistentKeyManagementService _sut = null!;
+    private IOptions<StorageOptions> _storageOptions;
+    private string _storagePath;
 
     [SetUp]
     public void Setup()
     {
+        _storagePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
         _fixture = new Fixture();
         _credentialServiceMock = new Mock<ICredentialService>();
         _loggerMock = new Mock<ILogger<PersistentKeyManagementService>>();
-        _sut = new PersistentKeyManagementService(_credentialServiceMock.Object, _loggerMock.Object);
+        _storageOptions = Options.Create(new StorageOptions { Path = _storagePath });
+        
+        _sut = new PersistentKeyManagementService(_credentialServiceMock.Object, _loggerMock.Object, _storageOptions);
+    }
+
+    [TearDown]
+    public void TearDown()
+    {
+        Directory.Delete(_storagePath, true);
     }
 
     [Test]
@@ -30,7 +44,7 @@ public class PersistentKeyManagementServiceTests
     {
         var identityName = _fixture.Create<string>();
         CleanupKeys(identityName);
-        var keyFilePath = GetKeyFilePath(identityName);
+        var keyFilePath = _sut.GetKeyFilePath(identityName);
         Directory.CreateDirectory(Path.GetDirectoryName(keyFilePath)!);
 
         byte[] decryptedBytes;
@@ -77,7 +91,7 @@ public class PersistentKeyManagementServiceTests
     {
         // Arrange
         var identityName = _fixture.Create<string>();
-        var keyFilePath = GetKeyFilePath(identityName);
+        var keyFilePath = _sut.GetKeyFilePath(identityName);
         CleanupKeys(identityName);
         Directory.CreateDirectory(Path.GetDirectoryName(keyFilePath)!);
 
@@ -90,7 +104,7 @@ public class PersistentKeyManagementServiceTests
     {
         // Arrange
         var identityName = _fixture.Create<string>();
-        var keyFilePath = GetKeyFilePath(identityName);
+        var keyFilePath = _sut.GetKeyFilePath(identityName);
         CleanupKeys(identityName);
         Directory.CreateDirectory(Path.GetDirectoryName(keyFilePath)!);
         File.WriteAllText(keyFilePath, "corrupt data");
@@ -116,7 +130,7 @@ public class PersistentKeyManagementServiceTests
         keys.Should().NotBeNull();
         _credentialServiceMock.Verify(s => s.Protect(It.IsAny<byte[]>()), Times.Once);
 
-        var keyFilePath = GetKeyFilePath(identityName);
+        var keyFilePath = _sut.GetKeyFilePath(identityName);
         File.Exists(keyFilePath).Should().BeTrue();
         var writtenBytes = await File.ReadAllBytesAsync(keyFilePath);
         writtenBytes.Should().BeEquivalentTo(protectedBytes);
@@ -126,17 +140,12 @@ public class PersistentKeyManagementServiceTests
 
     private void CleanupKeys(string identityName)
     {
-        var path = GetKeyFilePath(identityName);
-        var dir = Path.GetDirectoryName(path);
+        var keyFilePath = _sut.GetKeyFilePath(identityName);
+        var dir = Path.GetDirectoryName(keyFilePath);
         if (Directory.Exists(dir))
         {
             Directory.Delete(dir, true);
         }
-    }
-
-    private string GetKeyFilePath(string identityName)
-    {
-        return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Percolator", identityName, "keys.json");
     }
 
     private class DisposableArray<T> : IDisposable, IEnumerable<T> where T : IDisposable

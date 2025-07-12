@@ -15,6 +15,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ICredentialService, CredentialService>();
         services.AddSingleton<ITlsCertificateService, TlsCertificateService>();
         services.AddSingleton<IIdentityStore, FileSystemIdentityStore>();
+        services.AddSingleton<IKeyManagementService, PersistentKeyManagementService>();
 
         return services;
     }

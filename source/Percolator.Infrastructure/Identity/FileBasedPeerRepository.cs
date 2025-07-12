@@ -17,14 +17,18 @@ public class FileBasedPeerRepository : IPeerRepository, ITrustedPeerStore
     private readonly string _trustedHashesFilePath;
     private readonly PercolatorJsonContext _jsonContext;
     private readonly SemaphoreSlim _semaphore;
-    private readonly StorageOptions _storageOptions;
 
     public FileBasedPeerRepository(IOptions<StorageOptions> storageOptions)
     {
-        _storageOptions = storageOptions.Value;
-        var storagePath = _storageOptions.Path;
+        var dataDirectory = storageOptions.Value.Path;
+        
+        var appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        var percolatorAppDataPath = Path.Combine(appDataPath, dataDirectory);
+        
+        var storagePath = percolatorAppDataPath;
         _peersFilePath = Path.Combine(storagePath, "peers.json");
         _trustedHashesFilePath = Path.Combine(storagePath, "trusted_hashes.json");
+        Directory.CreateDirectory(storagePath);
         _jsonContext = new PercolatorJsonContext(new JsonSerializerOptions { WriteIndented = true });
         _semaphore = new SemaphoreSlim(1);
 
@@ -57,7 +61,7 @@ public class FileBasedPeerRepository : IPeerRepository, ITrustedPeerStore
 
     public async Task<Peer?> GetByNameAsync(string name)
     {
-        var peerFiles = Directory.GetFiles(Path.Combine(_storageOptions.Path, "peers"), "*.json");
+        var peerFiles = Directory.GetFiles(Path.Combine(_peersFilePath, "peers"), "*.json");
         foreach (var file in peerFiles)
         {
             var json = await File.ReadAllTextAsync(file);

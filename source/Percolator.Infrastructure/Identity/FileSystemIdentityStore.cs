@@ -15,9 +15,10 @@ public class FileSystemIdentityStore : IIdentityStore
     public FileSystemIdentityStore(IOptions<StorageOptions> storageOptions)
     {
         var dataDirectory = storageOptions.Value.Path;
-        Directory.CreateDirectory(dataDirectory);
+        
         var appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         var percolatorAppDataPath = Path.Combine(appDataPath, dataDirectory);
+        
         _identitiesPath = Path.Combine(percolatorAppDataPath, "identities");
         Directory.CreateDirectory(_identitiesPath);
     }

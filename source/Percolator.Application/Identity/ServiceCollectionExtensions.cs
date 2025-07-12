@@ -10,7 +10,7 @@ public static class ServiceCollectionExtensions
         // Concrete implementations from Percolator.Identity
         services.AddSingleton<IIdentityService, PersistentIdentityService>();
         
-        services.AddSingleton<IKeyManagementService, PersistentKeyManagementService>();
+        
         services.AddSingleton<ICredentialService, CredentialService>();
 
         // Peer repository is now handled by the infrastructure layer

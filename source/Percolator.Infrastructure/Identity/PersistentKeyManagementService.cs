@@ -3,8 +3,10 @@ using System.Security.Cryptography;
 using System.Security.Principal;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using Percolator.Identity;
 
-namespace Percolator.Identity;
+namespace Percolator.Infrastructure.Identity;
 
 public class PersistentKeyManagementService : IKeyManagementService
 {
@@ -14,13 +16,20 @@ public class PersistentKeyManagementService : IKeyManagementService
         Converters = { new ECParametersJsonConverter(), new ECPointJsonConverter() }
     };
     private readonly ILogger<PersistentKeyManagementService> _logger;
+    private readonly string _percolatorAppDataPath;
 
     public PersistentKeyManagementService(
         ICredentialService credentialService,
-        ILogger<PersistentKeyManagementService> logger)
+        ILogger<PersistentKeyManagementService> logger,
+        IOptions<StorageOptions> storageOptions)
     {
         _credentialService = credentialService;
         _logger = logger;
+        
+        var dataDirectory = storageOptions.Value.Path;
+        
+        var appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        _percolatorAppDataPath = Path.Combine(appDataPath, dataDirectory);
     }
 
     internal record KeyContainer(ECParameters IdentitySigningKey, ECParameters IdentityAgreementKey, ECParameters SignedPreKey, ECParameters[] OneTimePreKeys);
@@ -45,7 +54,8 @@ public class PersistentKeyManagementService : IKeyManagementService
 
     public async Task<X3dhKeys> GetKeysAsync(string identityName)
     {
-        var keyFilePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Percolator", identityName, "keys.json");
+        var keyFilePath = GetKeyFilePath(identityName);
+        Directory.CreateDirectory(Path.GetDirectoryName(keyFilePath)!);
 
         var encryptedBytes = await File.ReadAllBytesAsync(keyFilePath);
         var decryptedBytes = _credentialService.Unprotect(encryptedBytes);
@@ -70,6 +80,11 @@ public class PersistentKeyManagementService : IKeyManagementService
         return new X3dhKeys(loadedIkSigning, loadedIkAgreement, loadedSpk, loadedOtps);
     }
 
+    internal string GetKeyFilePath(string identityName)
+    {
+        return Path.Combine(_percolatorAppDataPath, identityName, "keys.json");
+    }
+
     public async Task<X3dhKeys> CreateKeysAsync(string identityName)
     {
         _logger.LogInformation("No existing keys found for {IdentityName}. Creating a new set.", identityName);
@@ -91,7 +106,11 @@ public class PersistentKeyManagementService : IKeyManagementService
             newOtps.Select(k => k.ExportParameters(true)).ToArray()
         );
 
-        var keyFilePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Percolator", identityName, "keys.json");
+        var keyFilePath = GetKeyFilePath(identityName);
+        Directory.CreateDirectory(Path.GetDirectoryName(keyFilePath)!);
+        var file = new FileInfo(keyFilePath);
+        _logger.LogInformation("Saving new keys to {Path}", file.DirectoryName);
+        Directory.CreateDirectory(Path.GetDirectoryName(file.DirectoryName)!);
         var newDecryptedBytes = JsonSerializer.SerializeToUtf8Bytes(newKeyContainer, s_jsonOptions);
         var newEncryptedBytes = _credentialService.Protect(newDecryptedBytes);
 

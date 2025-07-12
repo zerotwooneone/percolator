@@ -11,4 +11,8 @@
     <ProjectReference Include="..\Percolator.Application\Percolator.Application.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="Percolator.InfrastructureTests" />
+  </ItemGroup>
+
 </Project>
