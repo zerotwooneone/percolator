@@ -47,9 +47,21 @@ namespace Percolator.Application.Network
 
         public override async Task<EstablishSessionResponse> EstablishSession(EstablishSessionRequest request, ServerCallContext context)
         {
-            _logger.LogInformation("Received request to establish a new session.");
+            _logger.LogInformation("EstablishSession invoked by peer {Peer}", context.Peer);
+
+            var clientCertificate = context.GetHttpContext().Connection.ClientCertificate;
+            if (clientCertificate is null)
+            {
+                _logger.LogError("Handshake failed: Client did not provide a certificate.");
+                throw new RpcException(new Status(StatusCode.PermissionDenied, "Client certificate is required."));
+            }
+            
+            _logger.LogInformation("Client certificate provided. Subject: {Subject}, Issuer: {Issuer}", clientCertificate.Subject, clientCertificate.Issuer);
+
             try
             {
+                //The client certificate's public key is used as the peer's identity key.
+                _logger.LogInformation("Received request to establish a new session.");
                 if (_activeIdentityContext.Identity is null)
                 {
                     _logger.LogError("Local peer identity has not been established. Cannot respond to handshake.");

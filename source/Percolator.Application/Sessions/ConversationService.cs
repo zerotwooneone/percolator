@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Formats.Asn1;
 using System.Net;
 using Google.Protobuf;
+using Grpc.Core;
 using Grpc.Net.Client;
 using Microsoft.Extensions.Logging;
 using Percolator.Application.Identity;
@@ -77,7 +78,6 @@ public class ConversationService : IConversationService
             throw new InvalidOperationException("Could not find local identity's keys. Please create them first.");
         }
 
-        //using var signedPreKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var signedPreKeyPublicBytes = localKeys.SignedPreKey.ExportSubjectPublicKeyInfo();
         var signature = localKeys.IdentitySigningKey.SignData(localKeys.SignedPreKey.ExportSubjectPublicKeyInfo(), HashAlgorithmName.SHA256);
 
@@ -103,44 +103,60 @@ public class ConversationService : IConversationService
             localIdentity.Name, 
             localKeys.IdentitySigningKey.ExportSubjectPublicKeyInfo());
         var handshakeClient = _grpcClientFactory.CreateClient(endpoint, peerName, clientCertificate);
-        var response = await handshakeClient.EstablishSessionAsync(request);
 
-        var peer = await _peerRepository.GetByNameAsync(peerName);
-        if (peer is null)
+        try
         {
-            throw new InvalidOperationException($"Peer '{peerName}' was not found after a successful handshake.");
+            _logger.LogInformation("Sending EstablishSession request to {Endpoint}", endpoint);
+            var response = await handshakeClient.EstablishSessionAsync(request);
+            _logger.LogInformation("Successfully received EstablishSession response from {Endpoint}", endpoint);
+
+            var peer = await _peerRepository.GetByNameAsync(peerName);
+            if (peer is null)
+            {
+                throw new InvalidOperationException($"Peer '{peerName}' was not found after a successful handshake.");
+            }
+
+            var remotePublicIdentityKey = response.ResponderBundle.IdentitySigningKey.ToByteArray();
+
+            var remotePeerId = new SessionPeerId(peer.Id.Value);
+            var sharedSecret = _orchestrator.CompleteHandshake(response.ResponderBundle, ephemeralKey);
+
+            var channelId = new ChannelId(remotePublicIdentityKey);
+            var conversation = (await _conversationRepository.GetByChannelIdAsync(channelId))
+                               ?? new ChatConversation(
+                                   new ChatConversationId(Guid.NewGuid()),
+                                   channelId,
+                                   new List<ChatParticipantId>
+                                   {
+                                       new(localIdentity.Id),
+                                       new(remotePeerId.Value)
+                                   },
+                                   new List<Message>(),
+                                   peerName);
+
+            await _conversationRepository.AddAsync(conversation);
+
+            await _sessionManager.EstablishSessionAsInitiatorAsync(
+                new SessionConversationId(conversation.Id.Value),
+                remotePeerId,
+                new SessionIdentityKey(response.ResponderBundle.IdentityAgreementKey.ToByteArray()),
+                new SessionRatchetKey(response.ResponderBundle.SignedPreKey.ToByteArray()),
+                sharedSecret);
+
+            _logger.LogInformation("Successfully established session and created conversation {ConversationId}", conversation.Id.Value);
+
+            return conversation.Id;
         }
-
-        var remotePublicIdentityKey = response.ResponderBundle.IdentitySigningKey.ToByteArray();
-
-        var remotePeerId = new SessionPeerId(peer.Id.Value);
-        var sharedSecret = _orchestrator.CompleteHandshake(response.ResponderBundle, ephemeralKey);
-
-        var channelId = new ChannelId(remotePublicIdentityKey);
-        var conversation = (await _conversationRepository.GetByChannelIdAsync(channelId))
-                           ?? new ChatConversation(
-                               new ChatConversationId(Guid.NewGuid()),
-                               channelId,
-                               new List<ChatParticipantId>
-                               {
-                                   new(localIdentity.Id),
-                                   new(remotePeerId.Value)
-                               },
-                               new List<Message>(),
-                               peerName);
-
-        await _conversationRepository.AddAsync(conversation);
-
-        await _sessionManager.EstablishSessionAsInitiatorAsync(
-            new SessionConversationId(conversation.Id.Value),
-            remotePeerId,
-            new SessionIdentityKey(response.ResponderBundle.IdentityAgreementKey.ToByteArray()),
-            new SessionRatchetKey(response.ResponderBundle.SignedPreKey.ToByteArray()),
-            sharedSecret);
-
-        _logger.LogInformation("Successfully established session and created conversation {ConversationId}", conversation.Id.Value);
-
-        return conversation.Id;
+        catch (RpcException ex)
+        {
+            _logger.LogError(ex, "gRPC call failed while establishing session with {Endpoint}: {StatusCode} - {Detail}", endpoint, ex.StatusCode, ex.Status.Detail);
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "An unexpected error occurred while establishing session with {Endpoint}", endpoint);
+            throw;
+        }
     }
 
     public Task<ChatConversationId?> GetLastActiveConversationIdAsync(Guid peerId)

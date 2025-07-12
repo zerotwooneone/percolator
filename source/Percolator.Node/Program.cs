@@ -5,6 +5,7 @@ using System.Security.Cryptography.X509Certificates;
 using System.Formats.Asn1;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Server.Kestrel.Https;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -170,10 +171,48 @@ async Task HostCommandHandler(InvocationContext context)
             });
         });
 
-        builder.Logging.ClearProviders().AddConsole();
         builder.Services.AddApplicationServices(builder.Configuration);
         builder.Services.AddInfrastructureServices(builder.Configuration);
         builder.Services.AddGrpc();
+
+        // Step 3.5: Configure Kestrel for Mutual TLS (mTLS)
+        // We need to build a temporary service provider here to get the certificate service,
+        // as Kestrel's configuration is finalized before the main app.Services provider is ready.
+        var tempKestrelServices = new ServiceCollection();
+        tempKestrelServices.AddLogging(); // Add logging services
+        tempKestrelServices.AddApplicationServices(builder.Configuration);
+        tempKestrelServices.AddInfrastructureServices(builder.Configuration);
+        await using var tempKestrelProvider = tempKestrelServices.BuildServiceProvider();
+
+        var identityOrchestratorForKestrel = tempKestrelProvider.GetRequiredService<IIdentityOrchestrator>();
+        await identityOrchestratorForKestrel.LoadOrCreateIdentityAsync(identityName!, cancellationToken);
+
+        // After loading the identity, the ActiveIdentityContext is populated.
+        var activeIdentityContextForKestrel = tempKestrelProvider.GetRequiredService<ActiveIdentityContext>();
+        if (activeIdentityContextForKestrel.Identity is null || activeIdentityContextForKestrel.Keys is null)
+        {
+            throw new InvalidOperationException("Failed to load identity context for Kestrel configuration.");
+        }
+        var publicSigningKey = activeIdentityContextForKestrel.Keys.IdentitySigningKey.ExportSubjectPublicKeyInfo();
+
+        var tlsCertificateService = tempKestrelProvider.GetRequiredService<ITlsCertificateService>();
+        var serverCertificateForKestrel = await tlsCertificateService.GetOrCreateTlsCertificateAsync(activeIdentityContextForKestrel.Identity.Name, publicSigningKey);
+
+        builder.WebHost.ConfigureKestrel(serverOptions =>
+        {
+            serverOptions.ConfigureHttpsDefaults(listenOptions =>
+            {
+                listenOptions.ServerCertificate = serverCertificateForKestrel;
+                listenOptions.ClientCertificateMode = ClientCertificateMode.RequireCertificate;
+                listenOptions.ClientCertificateValidation = (certificate, chain, sslPolicyErrors) =>
+                {
+                    // For our TOFU model, we don't use a traditional CA.
+                    // We accept the certificate here and let the application layer
+                    // (PercolatorMessageService) handle the logic of trusting the key on first use.
+                    return true;
+                };
+            });
+        });
 
         WebApplication app = builder.Build();
 
