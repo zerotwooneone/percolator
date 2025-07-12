@@ -50,6 +50,28 @@ The Percolator Node is designed with a security-first approach. Key security fea
 -   **Denial-of-Service (DoS) Protection**: The application implements service-side rate-limiting to protect against resource exhaustion attacks from malicious peers. It also enforces strict quotas on manifest storage and has bounded caches for out-of-order messages.
 -   **Fail-Forward Security Policy**: Domain libraries are designed to throw exceptions on security violations rather than logging warnings, ensuring that insecure states are never ignored.
 
+## Security Model: Mutual TLS and Trust On First Use (TOFU)
+
+The peer-to-peer communication in Percolator is secured by a strict mutual TLS (mTLS) handshake protocol combined with a Trust On First Use (TOFU) model for peer validation. Both the client (initiator) and server (responder) must present valid, self-signed certificates to establish a connection.
+
+### Key Requirements
+
+1.  **Custom Certificate Extension**: All TLS certificates used for peer communication **must** contain a custom X.509 extension with the OID `1.3.6.1.4.1.58753.1.1` (`PeerIdentityKey`). The value of this extension must be the ASN.1 DER-encoded public key of the peer's identity signing key (an `OCTET STRING`). This extension is the primary mechanism for identifying a certificate as a valid Percolator peer certificate.
+
+2.  **Client-Side Handshake**: When initiating a connection, the client (`GrpcClientFactory`) must:
+    *   Attach its own self-signed TLS certificate (containing the custom OID) to the `HttpClientHandler`.
+    *   Implement a custom server certificate validation callback (`ServerCertificateCustomValidationCallback`). This callback implements the TOFU logic:
+        *   If the peer is known, the presented server certificate **must** match the certificate stored for that peer.
+        *   If the peer is unknown, the client trusts the presented certificate on first use and stores it for future validation.
+
+3.  **Server-Side Handshake**: When accepting a connection, the Kestrel server must:
+    *   Be configured to `RequireCertificate` for all incoming TLS connections.
+    *   Implement a custom client certificate validation callback (`ClientCertificateValidation`). This callback **must**:
+        *   Verify that the incoming client certificate contains the custom `PeerIdentityKey` OID extension.
+        *   Decode the ASN.1 `OCTET STRING` from the extension's raw data to ensure it contains a valid public key.
+
+This end-to-end configuration ensures that only authenticated and authorized Percolator nodes can communicate with each other, preventing unauthorized access and man-in-the-middle attacks.
+
 ### Complex Topics: Secure Session Establishment
 
 The security of all peer-to-peer communication in Percolator relies on a two-phase process for establishing and maintaining secure sessions. This process is orchestrated by the `DirectSessionManager` and backed by the cryptographic primitives in `Percolator.Cryptography`.
