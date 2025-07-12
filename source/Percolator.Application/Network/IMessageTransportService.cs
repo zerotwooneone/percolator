@@ -1,10 +1,10 @@
-using Percolator.Cryptography;
-using PeerId = Percolator.Identity.PeerId;
-using ConversationId = Percolator.Chat.ValueObjects.ConversationId;
+using Percolator.Identity;
+using Percolator.Chat.ValueObjects;
+using SessionRatchetMessage = Percolator.Sessions.RatchetMessage;
 
 namespace Percolator.Application.Network;
 
 public interface IMessageTransportService
 {
-    Task SendMessageAsync(PeerId recipientPeerId, ConversationId conversationId, RatchetMessage message);
+    Task SendMessageAsync(PeerId recipientPeerId, ConversationId conversationId, SessionRatchetMessage message);
 }

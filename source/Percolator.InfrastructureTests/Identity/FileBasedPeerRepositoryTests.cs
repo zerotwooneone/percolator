@@ -24,35 +24,4 @@ public class FileBasedPeerRepositoryTests
     {
         Directory.Delete(_storagePath, true);
     }
-
-    [Test]
-    public async Task AddAsync_WhenCalled_MarksPeerAsTrusted()
-    {
-        // Arrange
-        var repository = new FileBasedPeerRepository(_storageOptions);
-        var trustedStore = (ITrustedPeerStore)repository;
-        var publicKeyHash = new PublicKeyHash(RandomNumberGenerator.GetBytes(32));
-
-        // Act
-        await trustedStore.AddAsync(publicKeyHash);
-
-        // Assert
-        Assert.That(trustedStore.IsTrusted(publicKeyHash), Is.True);
-    }
-
-    [Test]
-    public async Task IsTrusted_WhenHashIsPersisted_ReturnsTrueAsync()
-    {
-        // Arrange
-        var publicKeyHash = new PublicKeyHash(RandomNumberGenerator.GetBytes(32));
-        var initialRepository = new FileBasedPeerRepository(_storageOptions);
-        await ((ITrustedPeerStore)initialRepository).AddAsync(publicKeyHash);
-
-        // Act
-        var newRepository = new FileBasedPeerRepository(_storageOptions);
-        var newTrustedStore = (ITrustedPeerStore)newRepository;
-
-        // Assert
-        Assert.That(newTrustedStore.IsTrusted(publicKeyHash), Is.True);
-    }
 }

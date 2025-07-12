@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
+using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Threading;
@@ -11,6 +12,7 @@ using Grpc.Core;
 using Grpc.Core.Testing;
 using Microsoft.Extensions.Logging;
 using Moq;
+using Moq.Protected;
 using NUnit.Framework;
 using Percolator.Application.Identity;
 using Percolator.Application.KeyExchange;
@@ -23,6 +25,7 @@ using Percolator.Identity;
 using Percolator.Identity.Model;
 using Percolator.Infrastructure.Sessions;
 using Percolator.Network;
+using NetworkPeerId = Percolator.Network.PeerId;
 using Percolator.Sessions;
 using ChatConversation = Percolator.Chat.Conversation;
 using ChatConversationId = Percolator.Chat.ValueObjects.ConversationId;
@@ -31,6 +34,7 @@ using ContractsPreKeyBundle = Percolator.Contracts.PreKeyBundle;
 using IdentityPeerId = Percolator.Identity.PeerId;
 using SessionConversationId = Percolator.Sessions.ConversationId;
 using SessionPeerId = Percolator.Sessions.PeerId;
+using SessionSharedSecret = Percolator.Sessions.SharedSecret;
 using TransportService = Percolator.Contracts.TransportService;
 
 namespace Percolator.ApplicationTests.Sessions;
@@ -89,63 +93,72 @@ public class ConversationServiceTests
         );
     }
 
-    // TODO: This test is disabled because it relies on the obsolete IGrpcClientFactory.
-    // It needs to be refactored to mock HttpClient and its underlying message handlers to test the new implementation.
-    /*
     [Test]
     public async Task CreateDirectConversationAsync_WhenPeerExists_EstablishesSessionAndCreatesConversation()
     {
         // Arrange
-        var peerName = "existing-peer";
-        var endpoint = new DnsEndPoint("localhost", 5000);
-        var remoteIdentityKey = new byte[33];
-        var localIdentity = new IdentityRecord(Guid.NewGuid(), "local-user");
-        var localKeys = new X3dhKeys(ECDsa.Create(), ECDiffieHellman.Create(), ECDiffieHellman.Create());
-        var peerId = new IdentityPeerId(Guid.NewGuid());
-        var peer = new Peer(peerId, peerName);
-
-        _activeIdentityContext.Identity = localIdentity;
-        _activeIdentityContext.Keys = localKeys;
-
-        _mockOneTimeKeyProvider.Setup(p => p.PopOneTimeKey()).Returns(ECDiffieHellman.Create());
-
-        var responderBundle = new ContractsPreKeyBundle
+        var endpoint = new DnsEndPoint("localhost", 5001);
+        var peerName = "test-peer";
+        var peer = new Peer(new IdentityPeerId(Guid.NewGuid()), peerName);
+        var responseMessage = new EstablishSessionResponse
         {
-            IdentitySigningKey = ByteString.CopyFrom(remoteIdentityKey),
-            IdentityAgreementKey = ByteString.CopyFrom(new byte[33]),
-            SignedPreKey = ByteString.CopyFrom(new byte[33]),
-            PreKeySignature = ByteString.CopyFrom(new byte[64])
+            ResponderBundle = new ContractsPreKeyBundle
+            {
+                IdentitySigningKey = ByteString.CopyFrom(new byte[32]),
+                IdentityAgreementKey = ByteString.CopyFrom(new byte[32]),
+                SignedPreKey = ByteString.CopyFrom(new byte[32]),
+                PreKeySignature = ByteString.CopyFrom(new byte[64])
+            }
         };
 
-        var response = new EstablishSessionResponse { ResponderBundle = responderBundle };
-        var fakeCall = TestCalls.AsyncUnaryCall(Task.FromResult(response), Task.FromResult(new Metadata()), () => Status.DefaultSuccess, () => new Metadata(), () => { });
-
-        var mockTransportClient = new Mock<TransportService.TransportServiceClient>();
-        mockTransportClient.Setup(c => c.EstablishSessionAsync(It.IsAny<EstablishSessionRequest>(), null, null, CancellationToken.None))
-            .Returns(fakeCall);
-
-        _mockTlsCertificateService.Setup(s => s.GetOrCreateTlsCertificateAsync(It.IsAny<string>(), It.IsAny<byte[]>()))
-            .ReturnsAsync(new X509Certificate2());
-
         _mockPeerRepository.Setup(r => r.GetByNameAsync(peerName)).ReturnsAsync(peer);
-        var sharedSecret = new SharedSecret(new byte[32]);
-        _mockX3dhOrchestrator.Setup(x => x.CompleteHandshake(It.IsAny<ContractsPreKeyBundle>(), It.IsAny<ECDiffieHellman>()))
-            .Returns(sharedSecret);
+        _mockConversationRepository.Setup(r => r.AddAsync(It.IsAny<ChatConversation>())).Returns(Task.CompletedTask);
+        _mockSessionManager.Setup(m => m.EstablishSessionAsInitiatorAsync(It.IsAny<SessionConversationId>(), It.IsAny<SessionPeerId>(), It.IsAny<SessionIdentityKey>(), It.IsAny<SessionRatchetKey>(), It.IsAny<SessionSharedSecret>()))
+            .Returns(Task.CompletedTask);
+        _mockPeerConnectionRepository.Setup(r => r.UpdateDirectMessagePublicKeyAsync(It.IsAny<NetworkPeerId>(), It.IsAny<DirectMessagePublicKey>()))
+            .Returns(Task.CompletedTask);
+
+        var mockHttpHandler = new Mock<HttpMessageHandler>();
+        mockHttpHandler.Protected()
+            .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>()) 
+            .ReturnsAsync(CreateGrpcResponse(responseMessage));
+
+        var httpClient = new HttpClient(mockHttpHandler.Object);
+        _mockHttpClientFactory.Setup(f => f.CreateClient(It.IsAny<string>())).Returns(httpClient);
 
         // Act
         var conversationId = await _service.CreateDirectConversationAsync(endpoint, peerName);
 
         // Assert
-        _mockSessionManager.Verify(s => s.EstablishSessionAsInitiatorAsync(
-            It.IsAny<SessionConversationId>(),
-            It.IsAny<SessionPeerId>(),
-            It.IsAny<SessionIdentityKey>(),
-            It.IsAny<SessionRatchetKey>(),
-            sharedSecret), Times.Once);
-
-        _mockConversationRepository.Verify(r => r.AddAsync(It.Is<ChatConversation>(c => c.Participants.Count == 2)), Times.Once);
-
         Assert.That(conversationId, Is.Not.EqualTo(default(ChatConversationId)));
+        _mockConversationRepository.Verify(r => r.AddAsync(It.Is<ChatConversation>(c => c.Name == peerName)), Times.Once);
+        _mockSessionManager.Verify(m => m.EstablishSessionAsInitiatorAsync(It.IsAny<SessionConversationId>(), It.IsAny<SessionPeerId>(), It.IsAny<SessionIdentityKey>(), It.IsAny<SessionRatchetKey>(), It.IsAny<SessionSharedSecret>()), Times.Once);
     }
-    */
+
+    private static HttpResponseMessage CreateGrpcResponse<T>(T message)
+        where T : IMessage
+    {
+        var stream = new MemoryStream();
+        // Write the compression flag (0 for uncompressed)
+        stream.WriteByte(0);
+        // Write the 4-byte message length
+        var length = message.CalculateSize();
+        var lengthBytes = BitConverter.GetBytes(length);
+        if (BitConverter.IsLittleEndian)
+        {
+            Array.Reverse(lengthBytes);
+        }
+        stream.Write(lengthBytes, 0, 4);
+        // Write the message
+        message.WriteTo(stream);
+        stream.Position = 0;
+
+        var response = new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Version = new Version(2, 0),
+            Content = new StreamContent(stream)
+        };
+        response.Content.Headers.ContentType = new MediaTypeHeaderValue("application/grpc");
+        return response;
+    }
 }

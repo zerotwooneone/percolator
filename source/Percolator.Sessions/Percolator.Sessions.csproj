@@ -8,8 +8,4 @@
     <AssemblyName>Percolator.Sessions</AssemblyName>
   </PropertyGroup>
 
-  <ItemGroup>
-    <ProjectReference Include="..\Percolator.Cryptography\Percolator.Cryptography.csproj" />
-  </ItemGroup>
-
 </Project>

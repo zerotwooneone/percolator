@@ -17,6 +17,7 @@ public class DirectSessionManagerTests
     private Mock<IConversationRepository> _mockConversationRepository = null!;
     private Mock<IPeerRepository> _mockPeerRepository = null!;
     private Mock<IMessageStore> _mockMessageStore = null!;
+    private Mock<IDoubleRatchetProtocol> _mockProtocol = null!;
     private Mock<ActiveIdentityContext> _mockActiveIdentityContext = null!;
     private DirectSessionManager _sessionManager = null!;
 
@@ -30,6 +31,7 @@ public class DirectSessionManagerTests
         _mockConversationRepository = new Mock<IConversationRepository>();
         _mockPeerRepository = new Mock<IPeerRepository>();
         _mockMessageStore = new Mock<IMessageStore>();
+        _mockProtocol = new Mock<IDoubleRatchetProtocol>();
         _mockActiveIdentityContext = new Mock<ActiveIdentityContext>();
 
         var identity = new IdentityRecord(Guid.NewGuid(), "Local Identity");
@@ -44,7 +46,8 @@ public class DirectSessionManagerTests
             _mockSessionStore.Object,
             _mockConversationRepository.Object,
             _mockMessageStore.Object,
-            _mockActiveIdentityContext.Object
+            _mockActiveIdentityContext.Object,
+            _mockProtocol.Object
         );
     }
 

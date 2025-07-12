@@ -1,23 +1,25 @@
-using Percolator.Cryptography;
+using System.Threading.Tasks;
 
 namespace Percolator.Sessions;
 
 /// <summary>
-/// Defines the contract for storing and retrieving the state of Double Ratchet sessions.
+/// Provides a persistent storage mechanism for Double Ratchet session states.
+/// The session state itself is treated as an opaque blob by this interface,
+/// with the application layer being responsible for serialization and deserialization.
 /// </summary>
 public interface IDoubleRatchetSessionStore
 {
     /// <summary>
-    /// Retrieves the state of a Double Ratchet session.
+    /// Retrieves the opaque session state for a given session ID.
     /// </summary>
     /// <param name="sessionId">The unique identifier for the session.</param>
     /// <returns>The session state, or null if not found.</returns>
-    Task<DoubleRatchetSession.DoubleRatchetSessionState?> GetSessionStateAsync(string sessionId);
+    Task<SessionState?> GetSessionStateAsync(string sessionId);
 
     /// <summary>
-    /// Stores the state of a Double Ratchet session.
+    /// Saves the opaque session state for a given session ID.
     /// </summary>
     /// <param name="sessionId">The unique identifier for the session.</param>
-    /// <param name="sessionState">The state to store.</param>
-    Task SetSessionStateAsync(string sessionId, DoubleRatchetSession.DoubleRatchetSessionState sessionState);
+    /// <param name="sessionState">The opaque session state to save.</param>
+    Task SetSessionStateAsync(string sessionId, SessionState sessionState);
 }

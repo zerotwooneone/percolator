@@ -1,6 +1,5 @@
 using System.Security.Cryptography;
 using Percolator.Application.Identity;
-using Percolator.Cryptography;
 using Percolator.Sessions;
 using SessionPeerId = Percolator.Sessions.PeerId;
 using System.Collections.Concurrent;
@@ -15,18 +14,21 @@ public class DirectSessionManager : IDirectSessionManager
     private readonly IConversationRepository _conversationRepository;
     private readonly IMessageStore _messageStore;
     private readonly ActiveIdentityContext _activeIdentityContext;
+    private readonly IDoubleRatchetProtocol _doubleRatchetProtocol;
     private readonly ConcurrentDictionary<SessionConversationId, SemaphoreSlim> _sessionLocks = new();
 
     public DirectSessionManager(
         IDoubleRatchetSessionStore sessionStore,
         IConversationRepository conversationRepository,
         IMessageStore messageStore,
-        ActiveIdentityContext activeIdentityContext)
+        ActiveIdentityContext activeIdentityContext,
+        IDoubleRatchetProtocol doubleRatchetProtocol)
     {
         _sessionStore = sessionStore;
         _conversationRepository = conversationRepository;
         _messageStore = messageStore;
         _activeIdentityContext = activeIdentityContext;
+        _doubleRatchetProtocol = doubleRatchetProtocol;
     }
 
     public async Task EstablishSessionAsInitiatorAsync(SessionConversationId conversationId, SessionPeerId remotePeerId, SessionIdentityKey remoteIdentityKey, SessionRatchetKey remoteRatchetKey, SharedSecret sharedSecret)
@@ -34,14 +36,13 @@ public class DirectSessionManager : IDirectSessionManager
         if (_activeIdentityContext.Keys is null)
             throw new InvalidOperationException("Identity context not loaded");
 
-        using var session = DoubleRatchetSession.AsInitiator(
-            sharedSecret,
+        var (sessionState, _) = _doubleRatchetProtocol.InitiateSession(
             new RatchetIdentityKey(remoteIdentityKey.Value),
-            new RatchetEphemeralKey(remoteRatchetKey.Value)
-            );
+            new RatchetEphemeralKey(remoteRatchetKey.Value),
+            sharedSecret);
 
         var sessionId = GetSessionId(remotePeerId, conversationId);
-        await _sessionStore.SetSessionStateAsync(sessionId, session.GetState());
+        await _sessionStore.SetSessionStateAsync(sessionId, sessionState);
         _sessionLocks.TryAdd(conversationId, new SemaphoreSlim(1, 1));
     }
 
@@ -50,18 +51,17 @@ public class DirectSessionManager : IDirectSessionManager
         if (_activeIdentityContext.Keys is null)
             throw new InvalidOperationException("Identity context not loaded");
 
-        using var session = DoubleRatchetSession.AsResponder(
-            sharedSecret,
+        var sessionState = _doubleRatchetProtocol.RespondToSession(
             new RatchetIdentityKey(remoteIdentityKey.Value),
-            _activeIdentityContext.Keys.SignedPreKey
-            );
+            new PrivateEphemeralKey(_activeIdentityContext.Keys.SignedPreKey.ExportPkcs8PrivateKey()),
+            sharedSecret);
 
         var sessionId = GetSessionId(remotePeerId, conversationId);
-        await _sessionStore.SetSessionStateAsync(sessionId, session.GetState());
+        await _sessionStore.SetSessionStateAsync(sessionId, sessionState);
         _sessionLocks.TryAdd(conversationId, new SemaphoreSlim(1, 1));
     }
 
-    public async Task<byte[]> ReceiveMessageAsync(SessionConversationId conversationId, RatchetMessage encryptedMessage)
+    public async Task<Plaintext?> ReceiveMessageAsync(SessionConversationId conversationId, RatchetMessage encryptedMessage)
     {
         if (_activeIdentityContext.Identity is null || _activeIdentityContext.Keys is null)
         {
@@ -83,19 +83,21 @@ public class DirectSessionManager : IDirectSessionManager
                 throw new InvalidOperationException($"Double Ratchet session state for conversation {conversationId} not found.");
             }
 
-            // DoubleRatchetSession will dispose the key, so we must pass a temporary copy.
-            var identityKey = ECDiffieHellman.Create(_activeIdentityContext.Keys.IdentityAgreementKey.ExportParameters(true));
+            var (newState, decryptedPlaintext) = _doubleRatchetProtocol.Decrypt(sessionState, encryptedMessage);
 
-            using var doubleRatchetSession = new DoubleRatchetSession(sessionState);
+            await _sessionStore.SetSessionStateAsync(sessionId, newState);
 
-            var decryptedPlaintext = doubleRatchetSession.Decrypt(encryptedMessage);
-
-            await _sessionStore.SetSessionStateAsync(sessionId, doubleRatchetSession.GetState());
-
+            if (decryptedPlaintext is null)
+            {
+                // This can happen if the message was a skipped message that was already processed.
+                // In this case, we don't need to do anything.
+                return null;
+            }
+            
             var message = new DirectMessage(new MessageId(Guid.NewGuid()), conversationId, remotePeerId, new OpaqueContent(decryptedPlaintext.Value));
             await _messageStore.StoreDirectMessageAsync(message);
 
-            return decryptedPlaintext.Value;
+            return decryptedPlaintext;
         }
         finally
         {
@@ -103,33 +105,26 @@ public class DirectSessionManager : IDirectSessionManager
         }
     }
 
-    public async Task<(SessionPeerId RemotePeerId, RatchetMessage EncryptedMessage)?> EncryptMessageAsync(SessionConversationId conversationId, byte[] plaintext)
+    public async Task<(SessionPeerId remotePeerId, RatchetMessage encryptedMessage)?> EncryptMessageAsync(SessionConversationId conversationId, Plaintext plaintext)
     {
-        if (_activeIdentityContext.Identity is null || _activeIdentityContext.Keys is null)
-        { 
-            throw new InvalidOperationException("No active identity found to encrypt message.");
-        }
-
+        // Ensure only one message is processed at a time for a given conversation to prevent race conditions.
         var semaphore = _sessionLocks.GetOrAdd(conversationId, new SemaphoreSlim(1, 1));
         await semaphore.WaitAsync();
 
         try
         {
             var remotePeerId = await GetRemotePeerId(conversationId);
+
             var sessionId = GetSessionId(remotePeerId, conversationId);
             var sessionState = await _sessionStore.GetSessionStateAsync(sessionId);
-            if (sessionState is null)
+            if (sessionState == null)
             {
-                // This is the likely source of the error if the conversation exists but the session file doesn't.
                 return null;
             }
 
-            var identityKey = ECDiffieHellman.Create(_activeIdentityContext.Keys.IdentityAgreementKey.ExportParameters(true));
-            using var doubleRatchetSession = new DoubleRatchetSession(sessionState);
+            var (newState, encryptedMessage) = _doubleRatchetProtocol.Encrypt(sessionState, plaintext);
 
-            var encryptedMessage = doubleRatchetSession.Encrypt(new Plaintext(plaintext));
-
-            await _sessionStore.SetSessionStateAsync(sessionId, doubleRatchetSession.GetState());
+            await _sessionStore.SetSessionStateAsync(sessionId, newState);
 
             return (remotePeerId, encryptedMessage);
         }
@@ -141,28 +136,18 @@ public class DirectSessionManager : IDirectSessionManager
 
     private async Task<SessionPeerId> GetRemotePeerId(SessionConversationId conversationId)
     {
-        if (_activeIdentityContext.Identity is null)
-        {
-            throw new InvalidOperationException("No active identity found to get remote peer ID.");
-        }
-        var chatConversationId = new Percolator.Chat.ValueObjects.ConversationId(conversationId.Value);
-        var conversation = await _conversationRepository.GetByIdAsync(chatConversationId);
+        var conversation = await _conversationRepository.GetByIdAsync(new Chat.ValueObjects.ConversationId(conversationId.Value));
         if (conversation is null)
-        {
-            throw new InvalidOperationException($"Conversation {conversationId} not found.");
-        }
+            throw new InvalidOperationException($"Conversation with id {conversationId} not found");
 
-        var localParticipantId = new Chat.ValueObjects.ParticipantId(_activeIdentityContext.Identity.Id);
-        var remoteParticipant = conversation.Participants.FirstOrDefault(p => p.Value != localParticipantId.Value);
+        if (_activeIdentityContext.Identity is null)
+            throw new InvalidOperationException("Identity context not loaded");
 
-        if (remoteParticipant.Value == Guid.Empty)
-        {
-            throw new InvalidOperationException("Could not determine remote peer in conversation.");
-        }
-
-        return new SessionPeerId(remoteParticipant.Value);
+        var localPeerId = _activeIdentityContext.Identity.Id;
+        var remotePeerId = conversation.Participants.First(p => p.Value != localPeerId);
+        return new SessionPeerId(remotePeerId.Value);
     }
 
-    private static string GetSessionId(SessionPeerId peerId, SessionConversationId conversationId) =>
-        $"{peerId.Value}-{conversationId.Value}";
+    private static string GetSessionId(SessionPeerId remotePeerId, SessionConversationId conversationId) =>
+        $"{remotePeerId.Value}-{conversationId.Value}";
 }

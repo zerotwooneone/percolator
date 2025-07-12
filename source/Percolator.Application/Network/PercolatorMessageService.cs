@@ -21,6 +21,9 @@ using IdentityPeer = Percolator.Identity.Peer;
 using IdentityPeerId = Percolator.Identity.PeerId;
 using Percolator.Chat.ValueObjects;
 using Percolator.Sessions;
+using SessionSharedSecret = Percolator.Sessions.SharedSecret;
+using SessionRatchetMessage = Percolator.Sessions.RatchetMessage;
+using SessionRatchetIdentityKey = Percolator.Sessions.RatchetIdentityKey;
 
 namespace Percolator.Application.Network
 {
@@ -157,7 +160,7 @@ namespace Percolator.Application.Network
                     new SessionConversationId(conversation.Id.Value),
                     new SessionPeerId(peer.Id.Value),
                     new SessionIdentityKey(request.InitiatorBundle.IdentityAgreementKey.ToByteArray()),
-                    handshakeResult.SharedSecret);
+                    new SessionSharedSecret(handshakeResult.SharedSecret.Value));
 
                 _logger.LogInformation("Successfully established session {SessionId} with peer {PeerId}", conversation.Id, peer.Id);
 
@@ -183,17 +186,22 @@ namespace Percolator.Application.Network
                 var conversationId = new SessionConversationId(Guid.Parse(request.SessionId));
 
                 // The payload is a JSON-serialized RatchetMessage
-                var ratchetMessage = JsonSerializer.Deserialize<RatchetMessage>(request.Payload.ToByteArray());
+                var ratchetMessage = JsonSerializer.Deserialize<SessionRatchetMessage>(request.Payload.ToByteArray());
                 if (ratchetMessage is null)
                 {
                     throw new InvalidOperationException("Failed to deserialize RatchetMessage.");
                 }
 
                 // Decrypt the message to get the Protobuf-serialized InternalEnvelope
-                var internalEnvelopeBytes = await _sessionManager.ReceiveMessageAsync(conversationId, ratchetMessage);
+                var plaintext = await _sessionManager.ReceiveMessageAsync(conversationId, ratchetMessage);
+                if (plaintext is null)
+                {
+                    _logger.LogWarning("Decryption resulted in null plaintext for session {SessionId}. This may be a skipped message.", request.SessionId);
+                    return new DeliverOpaqueMessageResponse { Version = 1 }; // Acknowledge receipt
+                }
 
                 // Deserialize the InternalEnvelope
-                var internalEnvelope = InternalEnvelope.Parser.ParseFrom(internalEnvelopeBytes);
+                var internalEnvelope = InternalEnvelope.Parser.ParseFrom(plaintext.Value);
 
                 // Dispatch based on the application payload
                 switch (internalEnvelope.ApplicationPayloadCase)

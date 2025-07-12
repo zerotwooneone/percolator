@@ -25,6 +25,7 @@ using IdentityPeerId = Percolator.Identity.PeerId;
 using NetworkPeerId = Percolator.Network.PeerId;
 using SessionPeerId = Percolator.Sessions.PeerId;
 using SessionConversationId = Percolator.Sessions.ConversationId;
+using SessionSharedSecret = Percolator.Sessions.SharedSecret;
 using ContractsPreKeyBundle = Percolator.Contracts.PreKeyBundle;
 
 namespace Percolator.Application.Sessions;
@@ -133,7 +134,7 @@ public class ConversationService : IConversationService
                 new SessionPeerId(peer.Id.Value),
                 new SessionIdentityKey(response.ResponderBundle.IdentityAgreementKey.ToByteArray()),
                 new SessionRatchetKey(response.ResponderBundle.SignedPreKey.ToByteArray()),
-                sharedSecret);
+                new SessionSharedSecret(sharedSecret.Value));
 
             _logger.LogInformation("Successfully established session and created conversation {ConversationId}", conversation.Id.Value);
 
@@ -216,7 +217,7 @@ public class ConversationService : IConversationService
                 new SessionPeerId(peer.Id.Value),
                 new SessionIdentityKey(response.ResponderBundle.IdentityAgreementKey.ToByteArray()),
                 new SessionRatchetKey(response.ResponderBundle.SignedPreKey.ToByteArray()),
-                sharedSecret);
+                new SessionSharedSecret(sharedSecret.Value));
 
             _logger.LogInformation("Successfully established session and created conversation {ConversationId}", conversation.Id.Value);
 

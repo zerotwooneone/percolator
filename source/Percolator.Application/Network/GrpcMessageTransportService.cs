@@ -9,6 +9,7 @@ using System.Net.Security;
 using Percolator.Network;
 using NetworkPeerId = Percolator.Network.PeerId;
 using Percolator.Chat.ValueObjects;
+using SessionRatchetMessage = Percolator.Sessions.RatchetMessage;
 
 namespace Percolator.Application.Network;
 
@@ -26,7 +27,7 @@ public class GrpcMessageTransportService : IMessageTransportService
         _peerConnectionRepository = peerConnectionRepository;
     }
 
-    public async Task SendMessageAsync(IdentityPeerId recipientPeerId, ConversationId conversationId, RatchetMessage message)
+    public async Task SendMessageAsync(IdentityPeerId recipientPeerId, ConversationId conversationId, SessionRatchetMessage message)
     {
         var peer = await _peerRepository.GetByIdAsync(recipientPeerId);
         if (peer is null)
@@ -58,7 +59,7 @@ public class GrpcMessageTransportService : IMessageTransportService
             var request = new DeliverOpaqueMessageRequest
             {
                 SessionId = conversationId.Value.ToString(),
-                Payload = Google.Protobuf.ByteString.CopyFrom(message.Ciphertext.Value)
+                Payload = Google.Protobuf.ByteString.CopyFrom(message.Value)
             };
 
             _logger.LogInformation("Sending message to {RecipientPeerId} for conversation {ConversationId}", recipientPeerId, conversationId);

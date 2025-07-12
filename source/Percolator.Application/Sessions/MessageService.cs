@@ -43,14 +43,14 @@ public class MessageService : IMessageService
         var contentBytes = Encoding.UTF8.GetBytes(content);
         var sessionConversationId = new SessionConversationId(conversationId.Value);
 
-        var encryptionResult = await _sessionManager.EncryptMessageAsync(sessionConversationId, contentBytes);
+        var encryptionResult = await _sessionManager.EncryptMessageAsync(sessionConversationId, new Plaintext(contentBytes));
         if (encryptionResult is null)
         {
             // Or throw an exception, depending on desired error handling
             throw new InvalidOperationException($"Failed to encrypt message. Conversation {conversationId} not found.");
         }
 
-        var (remotePeerId, encryptedMessage) = encryptionResult.Value;
+        (SessionPeerId remotePeerId, RatchetMessage encryptedMessage) = encryptionResult.Value;
         var identityPeerId = new IdentityPeerId(remotePeerId.Value);
 
         // Asynchronously send the message over the network
