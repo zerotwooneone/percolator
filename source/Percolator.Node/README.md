@@ -32,104 +32,126 @@ This application is currently **Windows-only**. This is because it relies on the
 
 The `Percolator.Node` executable is driven by a simple set of commands for hosting, connecting, and sending messages.
 
-### 1. Start a Host & Get an Invitation Link
+### 1. Building the Node
 
-To run the application as a network host, use the `host` command. This will start the gRPC server, allow other peers to connect to you, and generate a unique, shareable invitation link.
+First, build the project from the `source` directory to create the executable. You only need to do this once, or whenever you make changes to the code.
+
+```bash
+dotnet build .\Percolator.Node\
+```
+
+All subsequent commands will use the compiled executable directly.
+
+### 2. Start a Host & Get Connection Details
+
+To run the application as a network host, use the `host` command. This will start the gRPC server and generate the connection details a peer needs to connect to you.
 
 -   `--port` / `-p`: The port to listen on (default: `5000`).
 -   `--identity` / `-i`: The name of the identity to use (default: `default`). A new identity will be created if it doesn't exist.
 
 **Example:**
 ```bash
-dotnet run --project .\Percolator.Node\ -- host --identity Alice
+.\Percolator.Node\bin\Debug\net8.0\Percolator.Node.exe host --identity Alice
 ```
 
-The host will start and display an invitation link. **Copy this entire link** to share it with a peer who wants to connect to you.
+The host will start and display the information a peer needs. **You must share the endpoint, peer name (`Alice`), and the full public key** with the peer who wants to connect.
 
 ```
 Host started successfully.
-Invitation Link: percolator://localhost:5000/MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEx...long_public_key...=
+Share the following details with the connecting peer:
+- Peer Name: Alice
+- Endpoint: localhost:5000
+- Public Key: MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEx...long_public_key...=
 Share this link with peers who want to connect.
 ```
 
-### 2. Connect to a Peer
+### 3. Connect to a Peer
 
-To establish a secure session with a host, use the `connect` command with the invitation link you received from them.
+To establish a secure session with a host, use the `connect` command with the details you received from them.
 
--   `<invitation-link>`: The full `percolator://` link provided by the host.
--   `--identity` / `-i`: The name of the local identity to use for the connection.
+-   `<endpoint>`: The host and port of the peer (e.g., `localhost:5000`).
+-   `--peer-name`: The identity name of the host (e.g., `Alice`).
+-   `--remote-tls-key`: The full public key provided by the host.
+-   `--identity` / `-i`: The name of your local identity.
 
 **Example:**
 ```bash
-dotnet run --project .\Percolator.Node\ -- connect "percolator://localhost:5000/MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEx..." --identity Bob
+.\Percolator.Node\bin\Debug\net8.0\Percolator.Node.exe connect localhost:5000 --peer-name Alice --remote-tls-key "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEx..." --identity Bob
 ```
 
 Upon success, the command will output a unique `Conversation ID`. **Save this ID**, as you will need it to send messages.
 
-### 3. Send a Message
+### 4. Send a Message
 
-Once a conversation is established, you can send encrypted messages. The `send` command is flexible, allowing you to send messages in several ways.
+Once a conversation is established, you can send encrypted messages.
 
--   `<message>`: The plaintext message you want to send, enclosed in quotes.
+-   `<message>`: The plaintext message to send.
 -   `--identity` / `-i`: The name of the local identity to use.
 
 #### Method 1: Send to a Known Conversation
 
-If you have a `conversation-id` from a previous `connect` command, you can use it directly. This is the most explicit way to send a message.
+Use the `conversation-id` from a previous `connect` command.
 
--   `--conversation-id`: The unique ID generated when you connected to the peer.
+-   `--conversation-id`: The unique ID generated when you connected.
 
 **Example:**
 ```bash
-dotnet run --project .\Percolator.Node\ -- send --conversation-id 1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d "Hello, world!" --identity Bob
+.\Percolator.Node\bin\Debug\net8.0\Percolator.Node.exe send --conversation-id 1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d "Hello, world!" --identity Bob
 ```
 
 #### Method 2: Send to a Peer's Last Active Conversation
 
-For convenience, you can send a message to a peer using their `peer-id`. The application will automatically find the last active conversation with that peer and send the message.
+Use the peer's ID (which you can find in local application data after connecting).
 
 -   `--peer-id`: The ID of the peer you want to message.
 
 **Example:**
 ```bash
-dotnet run --project .\Percolator.Node\ -- send --peer-id 1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d "Hello again!" --identity Bob
+.\Percolator.Node\bin\Debug\net8.0\Percolator.Node.exe send --peer-id 1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d "Hello again!" --identity Bob
 ```
 
 #### Method 3: Connect and Send in One Step
 
-The most streamlined way to initiate contact is to use the `--invite` flag. This will establish a secure session using the host's invitation link and send your message in a single command.
+You can establish a session and send a message in a single command using the host's connection details.
 
--   `--invite`: The full `percolator://` link provided by the host.
+-   `--endpoint`: The host and port of the peer.
+-   `--peer-name`: The identity name of the host.
+-   `--remote-tls-key`: The full public key of the host.
 
 **Example:**
 ```bash
-dotnet run --project .\Percolator.Node\ -- send "Hello from Bob!" --invite "percolator://localhost:5000/MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEx..." --identity Bob
+.\Percolator.Node\bin\Debug\net8.0\Percolator.Node.exe send "Hello from Bob!" --endpoint localhost:5000 --peer-name Alice --remote-tls-key "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEx..." --identity Bob
 ```
 
 ## Example Scenario: Two Nodes on One Machine
 
-This scenario demonstrates how to start two independent nodes and have one send a message to the other. You will need two separate terminal windows.
+This scenario demonstrates how to start two independent nodes and have one send a message to the other. You will need two separate terminal windows. All commands assume you are in the `source` directory.
+
+**First, build the project:**
+```bash
+dotnet build .\Percolator.Node\
+```
 
 ### Terminal 1: Start Node A (Host)
 
-This node will act as the host, listening for connections with the identity `Alice`. It will generate an invitation link for Node B to use.
+This node will act as the host with the identity `Alice`. It will generate connection details for Node B to use.
 
 ```bash
-dotnet run --project .\Percolator.Node\ -- host --identity Alice
+.\Percolator.Node\bin\Debug\net8.0\Percolator.Node.exe host --identity Alice
 ```
 
-After the host starts, **copy the `Invitation Link`** that is displayed in the console.
+After the host starts, **copy the `Peer Name`, `Endpoint`, and `Public Key`** that are displayed in the console.
 
 ### Terminal 2: Connect and Send Message with Node B
 
-In a second terminal, use the `Bob` identity to connect to `Alice` and send a message in a single step using the `--invite` flag.
+In a second terminal, use the `Bob` identity to connect to `Alice` and send a message in a single step.
 
 **Step 1: Connect and Send**
 
-Paste the full invitation link you copied from Terminal 1 into the command below.
+Paste the `Endpoint`, `Peer Name`, and `Public Key` you copied from Terminal 1 into the command below.
 
 ```bash
-dotnet run --project .\Percolator.Node\ -- send "Hello from Bob!" --invite "percolator://localhost:5000/MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEx..." --identity Bob
+.\Percolator.Node\bin\Debug\net8.0\Percolator.Node.exe send "Hello from Bob!" --endpoint localhost:5000 --peer-name Alice --remote-tls-key "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEx..." --identity Bob
 ```
 
 You should see the message appear in the console for Node A (Terminal 1).
