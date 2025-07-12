@@ -26,6 +26,8 @@ using CryptoSharedSecret = Percolator.Cryptography.SharedSecret;
 using SessionState = Percolator.Sessions.SessionState;
 using SessionPlaintext = Percolator.Sessions.Plaintext;
 using SessionRatchetMessage = Percolator.Sessions.RatchetMessage;
+using SessionIdentityKey = Percolator.Sessions.SessionIdentityKey;
+using SessionRatchetKey = Percolator.Sessions.SessionRatchetKey;
 using CryptoRatchetIdentityKey = Percolator.Cryptography.RatchetIdentityKey;
 using CryptoRatchetEphemeralKey = Percolator.Cryptography.RatchetEphemeralKey;
 using CryptoPrivateAgreementKey = Percolator.Cryptography.PrivateAgreementKey;
@@ -48,7 +50,6 @@ public class SessionMessageTests
     private DirectSessionManager _bobManager = null!;
     private ActiveIdentityContext _aliceIdentity = null!;
     private ActiveIdentityContext _bobIdentity = null!;
-    private Signature _bobSignature = null!;
 
     [SetUp]
     public void SetUp()
@@ -62,30 +63,26 @@ public class SessionMessageTests
 
         var dummySessionState = new SessionState(new byte[32]);
         _mockProtocol.Setup(p => p.InitiateSession(It.IsAny<SessionRatchetIdentityKey>(), It.IsAny<SessionRatchetEphemeralKey>(), It.IsAny<SessionSharedSecret>()))
-            .Returns((dummySessionState, new SessionRatchetEphemeralKey(new byte[16])));
+            .Returns((dummySessionState, new SessionRatchetEphemeralKey(new byte[33])));
         _mockProtocol.Setup(p => p.RespondToSession(It.IsAny<SessionRatchetIdentityKey>(), It.IsAny<SessionPrivateEphemeralKey>(), It.IsAny<SessionSharedSecret>()))
             .Returns(dummySessionState);
 
-        (_aliceIdentity, var aliceSignature) = CreateIdentityContext("Alice");
-        (_bobIdentity, _bobSignature) = CreateIdentityContext("Bob");
-
-        var aliceIdentityContext = new ActiveIdentityContext { Identity = _aliceIdentity.Identity, Keys = _aliceIdentity.Keys };
+        (_aliceIdentity, _) = CreateIdentityContext("Alice");
+        (_bobIdentity, _) = CreateIdentityContext("Bob");
 
         _aliceManager = new DirectSessionManager(
             _aliceSessionStore,
             _mockConversationRepo.Object,
             _mockMessageStore.Object,
-            aliceIdentityContext,
+            _aliceIdentity,
             _mockProtocol.Object
         );
-
-        var bobIdentityContext = new ActiveIdentityContext { Identity = _bobIdentity.Identity, Keys = _bobIdentity.Keys };
 
         _bobManager = new DirectSessionManager(
             _bobSessionStore,
             _mockConversationRepo.Object,
             _mockMessageStore.Object,
-            bobIdentityContext,
+            _bobIdentity,
             _mockProtocol.Object
         );
     }
@@ -93,11 +90,11 @@ public class SessionMessageTests
     [Test]
     public async Task EncryptAndDecrypt_Should_SucceedSymmetrically_WhenSessionsAreEstablished()
     {
-        // Arrange: Manually perform X3DH to get a shared secret
+        // Arrange: Establish a shared secret between Alice and Bob
         var (aliceSharedSecret, bobSharedSecret) = PerformX3DH();
-        var conversationId = new SessionConversationId(Guid.NewGuid());
 
-        // Arrange: Establish sessions for both Alice and Bob
+        // Arrange: Use the shared secret to establish a double ratchet session
+        var conversationId = new SessionConversationId(Guid.NewGuid());
         var bobPeerId = new SessionPeerId(_bobIdentity.Identity!.Id);
         var bobIdentityKey = new SessionIdentityKey(_bobIdentity.Keys!.IdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo());
         var bobRatchetKey = new SessionRatchetKey(_bobIdentity.Keys!.SignedPreKey.PublicKey.ExportSubjectPublicKeyInfo());
@@ -110,7 +107,7 @@ public class SessionMessageTests
         // Arrange: Mock the conversation repository to allow the manager to resolve the remote peer ID.
         var participants = new List<ParticipantId> { new(alicePeerId.Value), new(bobPeerId.Value) };
         var chatConversation = new Conversation(new ChatConversationId(conversationId.Value), new ChannelId(new byte[64]), participants, new List<Message>(), "Test Convo");
-        _mockConversationRepo.Setup(r => r.GetByIdAsync(It.Is<ChatConversationId>(c => c.Value == conversationId.Value)))
+        _mockConversationRepo.Setup(r => r.GetByIdAsync(It.IsAny<ChatConversationId>()))
             .ReturnsAsync(chatConversation);
 
         // Arrange: Mock the protocol to correctly link the output of the encryption mock with the input of the decryption mock

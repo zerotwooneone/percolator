@@ -26,6 +26,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Percolator.Application\Percolator.Application.csproj" />
+    <ProjectReference Include="..\Percolator.Cryptography\Percolator.Cryptography.csproj" />
+    <ProjectReference Include="..\Percolator.Identity\Percolator.Identity.csproj" />
     <ProjectReference Include="..\Percolator.Infrastructure\Percolator.Infrastructure.csproj" />
   </ItemGroup>
 
