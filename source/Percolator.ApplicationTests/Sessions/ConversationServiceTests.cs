@@ -91,37 +91,107 @@ public class ConversationServiceTests
         var peerName = "test-peer";
         var peer = new Peer(new IdentityPeerId(Guid.NewGuid()), peerName);
 
+        // Setup peer repository to return the existing peer
+        _mockPeerRepository.Setup(r => r.GetByNameAsync(peerName)).ReturnsAsync(peer);
+        _mockPeerRepository.Setup(r => r.GetByIdAsync(It.Is<IdentityPeerId>(id => id.Value == peer.Id.Value))).ReturnsAsync(peer);
+        
+        // Create a mock peer connection
+        var peerConnection = new PeerConnection(
+            new NetworkPeerId(peer.Id.Value),
+            new DirectMessagePublicKey(new byte[32]), // Valid DirectMessagePublicKey
+            new[] { new GrpcEndPoint(endpoint, DateTimeOffset.UtcNow) },
+            new[] { new TlsCertificate(new byte[100]) }, // Mock certificate
+            DateTimeOffset.UtcNow
+        );
+        
+        // Setup peer connection repository to return the connection when asked
+        _mockPeerConnectionRepository
+            .Setup(r => r.GetByTlsCertificateAsync(It.IsAny<TlsCertificate>()))
+            .ReturnsAsync(peerConnection);
+        
+        _mockPeerConnectionRepository
+            .Setup(r => r.UpdateDirectMessagePublicKeyAsync(It.IsAny<NetworkPeerId>(), It.IsAny<DirectMessagePublicKey>()))
+            .Returns(Task.CompletedTask);
+
+        // Setup X3DH orchestrator to return a shared secret
         _mockX3dhOrchestrator
             .Setup(o => o.CompleteHandshake(It.IsAny<ContractsPreKeyBundle>(), It.IsAny<ECDiffieHellman>()))
             .Returns(new CryptoSharedSecret(new byte[32]));
 
-        _mockPeerRepository.Setup(r => r.GetByNameAsync(peerName)).ReturnsAsync(peer);
-        _mockConversationRepository.Setup(r => r.AddAsync(It.IsAny<ChatConversation>())).Returns(Task.CompletedTask);
-        _mockDirectSessionManager.Setup(m => m.EstablishSessionAsInitiatorAsync(It.IsAny<SessionConversationId>(), It.IsAny<SessionPeerId>(), It.IsAny<SessionIdentityKey>(), It.IsAny<SessionRatchetKey>(), It.IsAny<SessionSharedSecret>()))
+        // Setup the one-time key provider to return a key
+        var oneTimeKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        _mockOneTimeKeyProvider
+            .Setup(p => p.PopOneTimeKey())
+            .Returns(oneTimeKey);
+        
+        // Setup peer trust manager
+        var cert = CreateSelfSignedCertificate("localhost");
+        _mockPeerTrustManager
+            .Setup(m => m.AddTrustedPeer(It.IsAny<X509Certificate2>()))
             .Returns(Task.CompletedTask);
-        _mockPeerConnectionRepository.Setup(r => r.UpdateDirectMessagePublicKeyAsync(It.IsAny<NetworkPeerId>(), It.IsAny<DirectMessagePublicKey>()))
+            
+        // Setup conversation repository
+        _mockConversationRepository
+            .Setup(r => r.AddAsync(It.IsAny<ChatConversation>()))
+            .Returns(Task.CompletedTask);
+            
+        // Setup direct session manager
+        _mockDirectSessionManager
+            .Setup(m => m.EstablishSessionAsInitiatorAsync(
+                It.IsAny<SessionConversationId>(), 
+                It.IsAny<SessionPeerId>(), 
+                It.IsAny<SessionIdentityKey>(), 
+                It.IsAny<SessionRatchetKey>(), 
+                It.IsAny<SessionSharedSecret>()))
             .Returns(Task.CompletedTask);
 
+        // Setup the HTTP handler to simulate successful GRPC response
         var response = CreateGrpcResponse(new EstablishSessionResponse
         {
-            ResponderBundle = new ContractsPreKeyBundle { IdentityAgreementKey = ByteString.CopyFrom(new byte[32]), SignedPreKey = ByteString.CopyFrom(new byte[32]) }
+            ResponderBundle = new ContractsPreKeyBundle { 
+                IdentityAgreementKey = ByteString.CopyFrom(new byte[32]), 
+                SignedPreKey = ByteString.CopyFrom(new byte[32]),
+                IdentitySigningKey = ByteString.CopyFrom(new byte[32])
+            }
         });
 
         var mockHttpHandler = new Mock<HttpMessageHandler>();
         mockHttpHandler.Protected()
-            .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>()) 
-            .ReturnsAsync(response);
-
+            .SetupSequence<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync(response); // First call succeeds
+            
         var httpClient = new HttpClient(mockHttpHandler.Object);
-        _mockHttpClientFactory.Setup(f => f.CreateClient(It.IsAny<string>())).Returns(httpClient);
+        _mockHttpClientFactory
+            .Setup(f => f.CreateClient(It.IsAny<string>()))
+            .Returns(httpClient);
+            
+        // Update our ConversationService to bypass the TLS handshake for testing
+        var service = new TestableConversationService(
+            _mockLogger.Object,
+            _mockX3dhOrchestrator.Object,
+            _mockDirectSessionManager.Object,
+            _mockConversationRepository.Object,
+            _mockPeerRepository.Object,
+            _mockPeerConnectionRepository.Object,
+            _mockTlsCertificateService.Object,
+            _mockOneTimeKeyProvider.Object,
+            _activeIdentityContext,
+            _mockHttpClientFactory.Object,
+            _mockPeerTrustManager.Object,
+            cert); // Pass the certificate to use for testing
 
         // Act
-        var result = await _service.CreateDirectConversationAsync(endpoint, peerName);
+        var result = await service.CreateDirectConversationAsync(endpoint, peerName);
 
         // Assert
         Assert.That(result, Is.Not.EqualTo(default(ChatConversationId)));
         _mockConversationRepository.Verify(r => r.AddAsync(It.Is<ChatConversation>(c => c.Name == peerName)), Times.Once);
-        _mockDirectSessionManager.Verify(m => m.EstablishSessionAsInitiatorAsync(It.IsAny<SessionConversationId>(), It.IsAny<SessionPeerId>(), It.IsAny<SessionIdentityKey>(), It.IsAny<SessionRatchetKey>(), It.IsAny<SessionSharedSecret>()), Times.Once);
+        _mockDirectSessionManager.Verify(m => m.EstablishSessionAsInitiatorAsync(
+            It.IsAny<SessionConversationId>(), 
+            It.IsAny<SessionPeerId>(), 
+            It.IsAny<SessionIdentityKey>(), 
+            It.IsAny<SessionRatchetKey>(), 
+            It.IsAny<SessionSharedSecret>()), Times.Once);
     }
 
     [Test]
@@ -278,5 +348,109 @@ public class ConversationServiceTests
         var certificate = request.CreateSelfSigned(notBefore, notAfter);
         
         return certificate;
+    }
+
+    private static X509Certificate2 CreateSelfSignedCertificate(string subjectName)
+    {
+        // Create a new RSA key pair
+        using var rsa = RSA.Create(2048);
+        
+        // Create certificate request
+        var distinguishedName = new X500DistinguishedName($"CN={subjectName}");
+        var request = new CertificateRequest(distinguishedName, rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        
+        // Add basic constraints extension
+        request.CertificateExtensions.Add(new X509BasicConstraintsExtension(false, false, 0, true));
+        
+        // Add key usage extension
+        request.CertificateExtensions.Add(new X509KeyUsageExtension(
+            X509KeyUsageFlags.DigitalSignature | X509KeyUsageFlags.KeyEncipherment,
+            true));
+        
+        // Add extended key usage extension
+        request.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension(
+            new OidCollection { new Oid("1.3.6.1.5.5.7.3.1") }, // Server Authentication
+            false));
+        
+        // Create certificate with 1 year validity
+        var notBefore = DateTime.Now;
+        var notAfter = notBefore.AddYears(1);
+        
+        // Create self-signed certificate
+        var certificate = request.CreateSelfSigned(notBefore, notAfter);
+        
+        return certificate;
+    }
+}
+
+// Testable version of ConversationService that bypasses the TLS handshake for testing
+public class TestableConversationService : ConversationService
+{
+    private readonly X509Certificate2 _testCertificate;
+    private readonly EstablishSessionResponse _testResponse;
+    private readonly Mock<ILogger<ConversationService>> _logger;
+
+    public TestableConversationService(
+        ILogger<ConversationService> logger,
+        IX3DHOrchestrator orchestrator,
+        IDirectSessionManager sessionManager,
+        IConversationRepository conversationRepository,
+        IPeerRepository peerRepository,
+        IPeerConnectionRepository peerConnectionRepository,
+        ITlsCertificateService tlsCertificateService,
+        IOneTimeKeyProvider oneTimeKeyProvider,
+        ActiveIdentityContext activeIdentityContext,
+        IHttpClientFactory httpClientFactory,
+        IPeerTrustManager peerTrustManager,
+        X509Certificate2 testCertificate)
+        : base(logger, orchestrator, sessionManager, conversationRepository, peerRepository, 
+              peerConnectionRepository, tlsCertificateService, oneTimeKeyProvider, activeIdentityContext, 
+              httpClientFactory, peerTrustManager)
+    {
+        _testCertificate = testCertificate;
+        _logger = logger as Mock<ILogger<ConversationService>>;
+        
+        // Create a test response to use in the override methods
+        _testResponse = new EstablishSessionResponse
+        {
+            ResponderBundle = new ContractsPreKeyBundle
+            {
+                IdentityAgreementKey = ByteString.CopyFrom(new byte[32]),
+                SignedPreKey = ByteString.CopyFrom(new byte[32]),
+                IdentitySigningKey = ByteString.CopyFrom(new byte[32])
+            }
+        };
+    }
+
+    // Override the method that attempts to capture a certificate
+    protected override Task<X509Certificate2?> CaptureRemoteCertificateAsync(DnsEndPoint endpoint)
+    {
+        return Task.FromResult<X509Certificate2?>(_testCertificate);
+    }
+    
+    // Override TOFU retry connection method to bypass actual network connection
+    protected override Task<EstablishSessionResponse> PerformRetryConnectionAsync(
+        DnsEndPoint endpoint, 
+        X509Certificate2 remoteCert,
+        EstablishSessionRequest request)
+    {
+        // Return our predefined response without making a real connection
+        return Task.FromResult(_testResponse);
+    }
+    
+    // Override the regular TOFU handling method to bypass network operations
+    protected override Task<ChatConversationId?> HandleRegularTofuAsync(
+        DnsEndPoint endpoint, 
+        string peerName, 
+        EstablishSessionRequest request, 
+        ECDiffieHellman ephemeralKey)
+    {
+        // Directly call the HandleTofuWithCapturedCertificateAsync method with our test certificate
+        return HandleTofuWithCapturedCertificateAsync(
+            endpoint, 
+            peerName, 
+            _testCertificate, 
+            request, 
+            ephemeralKey);
     }
 }

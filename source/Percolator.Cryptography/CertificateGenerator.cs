@@ -36,6 +36,6 @@ public static class CertificateGenerator
         request.CertificateExtensions.Add(sanBuilder.Build());
         request.CertificateExtensions.Add(new X509Extension(Oids.PeerIdentityKey, encodedPublicKey, false));
 
-        return request.CreateSelfSigned(DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddYears(1));
+        return request.CreateSelfSigned(DateTimeOffset.UtcNow.AddSeconds(-1), DateTimeOffset.UtcNow.AddYears(1));
     }
 }

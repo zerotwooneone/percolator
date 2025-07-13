@@ -1,16 +1,22 @@
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Hosting;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Server.Kestrel.Core;
+using System.Globalization;
 using System.CommandLine;
+using System.CommandLine.Builder;
 using System.CommandLine.Invocation;
+using System.CommandLine.Parsing;
 using System.Net;
+using System.Net.Http;
+using System.Net.Security;
+using System.Security.Authentication;
 using System.Security.Cryptography.X509Certificates;
 using System.Formats.Asn1;
-using System.Net.Security;
 using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Server.Kestrel.Https;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
 using Percolator.Application;
 using Percolator.Application.Identity;
 using Percolator.Application.Network;
@@ -133,8 +139,36 @@ async Task HostCommandHandler(InvocationContext context)
         builder.Configuration.AddNode();
         builder.WebHost.UseKestrel(options =>
         {
+            // Configure HTTP/2 protocol explicitly
+            options.ConfigureHttpsDefaults(https => {
+                https.AllowAnyClientCertificate(); // For debugging
+                https.SslProtocols = SslProtocols.Tls12 | SslProtocols.Tls13;
+                https.HandshakeTimeout = TimeSpan.FromSeconds(30); // Increase timeout further
+                
+                // Configure ALPN negotiation parameters
+                https.OnAuthenticate = (connectionContext, authOptions) => {
+                    // Ensure HTTP/2 is offered first in ALPN negotiation
+                    authOptions.ApplicationProtocols = new List<SslApplicationProtocol>
+                    {
+                        SslApplicationProtocol.Http2,
+                        SslApplicationProtocol.Http11
+                    };
+                    
+                    // Add more detailed logging to trace the handshake
+                    var logger = tempServiceProvider.GetRequiredService<ILogger<Program>>();
+                    logger.LogInformation("SERVER: Setting up TLS connection from {RemoteEndpoint}", 
+                        connectionContext.RemoteEndPoint);
+                };
+            });
+            
             options.Listen(IPAddress.Any, port, listenOptions =>
             {
+                // Allow both HTTP/1.1 and HTTP/2 - sometimes forcing only HTTP/2 can cause negotiation failures
+                listenOptions.Protocols = HttpProtocols.Http1AndHttp2;
+                
+                // Increase timeouts for connection handling
+                listenOptions.UseConnectionLogging();
+                
                 listenOptions.UseHttps(httpsOptions =>
                 {
                     httpsOptions.ServerCertificate = serverCertificate;
@@ -142,7 +176,7 @@ async Task HostCommandHandler(InvocationContext context)
                     httpsOptions.ClientCertificateValidation = (certificate, chain, policyErrors) =>
                     {
                         var logger = tempServiceProvider.GetRequiredService<ILogger<Program>>();
-                        logger.LogInformation("Server: Performing client certificate validation for subject '{Subject}'", certificate.Subject);
+                        logger.LogInformation("SERVER: Performing client certificate validation for subject '{Subject}'", certificate.Subject);
                         
                         try 
                         {
@@ -173,26 +207,21 @@ async Task HostCommandHandler(InvocationContext context)
                                     logger.LogError("Server: Client certificate validation failed for '{Subject}'. Reason: Peer identity extension contains no public key.", certificate.Subject);
                                     return false;
                                 }
-
-                                if (reader.HasData)
-                                {
-                                    logger.LogError("Server: Client certificate validation failed for '{Subject}'. Reason: Peer identity extension contains unexpected trailing data.", certificate.Subject);
-                                    return false;
-                                }
+                            
+                                // TODO: Additional checks?
+                                logger.LogInformation("Server: Client certificate validation succeeded for '{Subject}'.", certificate.Subject);
+                                return true;
                             }
-                            catch (Exception ex)
+                            catch (AsnContentException ex)
                             {
-                                logger.LogError(ex, "Server: Client certificate validation failed for '{Subject}'. Reason: Failed to decode peer identity extension.", certificate.Subject);
+                                logger.LogError(ex, "Server: Client certificate validation failed for '{Subject}'. Reason: Invalid peer identity extension format.", certificate.Subject);
                                 return false;
                             }
-
-                            logger.LogInformation("Server: Client certificate validation successful for '{Subject}'.", certificate.Subject);
-                            return true;
                             */
                         }
-                        catch (Exception ex)
+                        catch (Exception ex) 
                         {
-                            logger.LogError(ex, "Unhandled exception during client certificate validation");
+                            logger.LogError(ex, "Server: Client certificate validation failed with an unexpected error for subject '{Subject}'", certificate.Subject);
                             return false;
                         }
                     };
@@ -372,107 +401,96 @@ static ServiceProvider CreateServiceProvider(string? identityName)
     services.AddApplicationServices(config);
     services.AddInfrastructureServices(config);
     
-    services.AddHttpClient("percolator-grpc").ConfigurePrimaryHttpMessageHandler(() =>
+    services.AddHttpClient("percolator-grpc", client =>
     {
+        client.DefaultRequestVersion = HttpVersion.Version20;
+        client.DefaultVersionPolicy = HttpVersionPolicy.RequestVersionOrLower;
+        // Base address is not set here as it will be different for each peer
+    })
+    .ConfigurePrimaryHttpMessageHandler(() =>
+    {
+        // Create a logger factory and logger instance that can be used within this scope
+        var loggerFactory = services.BuildServiceProvider().GetRequiredService<ILoggerFactory>();
+        var logger = loggerFactory.CreateLogger<Program>();
+        
         var handler = new SocketsHttpHandler
         {
-            PooledConnectionLifetime = TimeSpan.FromMinutes(15),
+            PooledConnectionIdleTimeout = TimeSpan.FromMinutes(10), // Longer timeout for idle connections
+            KeepAlivePingDelay = TimeSpan.FromSeconds(30),
+            KeepAlivePingTimeout = TimeSpan.FromSeconds(30),
+            EnableMultipleHttp2Connections = true,
+            ConnectTimeout = TimeSpan.FromSeconds(20), // Longer connection timeout
+            ResponseDrainTimeout = TimeSpan.FromSeconds(5), // More time to drain responses
+            
+            // Explicitly control connection pooling to prevent premature disposal
+            PooledConnectionLifetime = TimeSpan.FromMinutes(30), // Longer connection lifetime
+            
             SslOptions = new SslClientAuthenticationOptions
             {
+                // Explicitly enable TLS 1.2 and 1.3
+                EnabledSslProtocols = SslProtocols.Tls12 | SslProtocols.Tls13,
+                
+                // Disable certificate revocation checking during debugging
+                CertificateRevocationCheckMode = X509RevocationMode.NoCheck,
+                
+                // Use the custom certificate validation callback
                 RemoteCertificateValidationCallback = (sender, certificate, chain, sslPolicyErrors) =>
                 {
-                    try
+                    if (certificate == null)
                     {
-                        using var scope = services.BuildServiceProvider().CreateScope();
-                        var peerTrustManager = scope.ServiceProvider.GetRequiredService<IPeerTrustManager>();
-                        var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
-                        
-                        logger.LogInformation(
-                            "CLIENT: TLS Certificate Validation: Subject={Subject}, Issuer={Issuer}, PolicyErrors={PolicyErrors}", 
-                            certificate?.Subject ?? "null", 
-                            certificate?.Issuer ?? "null", 
-                            sslPolicyErrors);
-
-                        // TEMPORARY FOR DEBUGGING: Log detailed certificate info
-                        if (certificate != null)
-                        {
-                            var x509Cert = new X509Certificate2(certificate);
-                            logger.LogInformation("CLIENT: Certificate details - Thumbprint={Thumbprint}, NotBefore={NotBefore}, NotAfter={NotAfter}", 
-                                x509Cert.Thumbprint, 
-                                x509Cert.NotBefore,
-                                x509Cert.NotAfter);
-                        }
-                        
-                        if (sslPolicyErrors == SslPolicyErrors.None)
-                        {
-                            logger.LogInformation("CLIENT: Certificate is valid according to system trust store");
-                            return true;
-                        }
-                            
-                        if (certificate != null)
-                        {
-                            try
-                            {
-                                logger.LogWarning("CLIENT: TEMPORARY DEBUG MODE: Accepting all certificates for TOFU debugging");
-                                return true;
-                                
-                                /* Uncomment once we confirm the basic TLS handshake works
-                                var x509Cert = new X509Certificate2(certificate);
-                                var thumbprint = x509Cert.Thumbprint;
-                                logger.LogInformation("CLIENT: Checking certificate with thumbprint: {Thumbprint}", thumbprint);
-                                
-                                var isTrusted = peerTrustManager.IsTrusted(x509Cert);
-                                logger.LogInformation("CLIENT: Certificate is{Trusted} trusted by our peer trust manager", 
-                                    isTrusted ? "" : " NOT");
-                                return isTrusted;
-                                */
-                            }
-                            catch (Exception ex)
-                            {
-                                logger.LogError(ex, "CLIENT: Error during certificate trust check");
-                                return true;
-                            }
-                        }
-                        
-                        logger.LogWarning("CLIENT: Certificate validation failed: No certificate provided");
+                        logger.LogError("CLIENT: No certificate provided by the server");
                         return false;
                     }
-                    catch (Exception ex)
-                    {
-                        Console.Error.WriteLine($"CLIENT: CRITICAL ERROR in certificate validation: {ex}");
-                        return true;
-                    }
-                },
-                
-                LocalCertificateSelectionCallback = (sender, host, localCertificates, remoteCertificate, acceptableIssuers) => 
-                {
-                    try
-                    {
-                        using var scope = services.BuildServiceProvider().CreateScope();
-                        var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
-                        
-                        logger.LogInformation(
-                            "CLIENT: TLS Client Certificate Selection: Host={Host}, RemoteCertSubject={RemoteSubject}, LocalCerts={LocalCertCount}", 
-                            host,
-                            remoteCertificate?.Subject ?? "null", 
-                            localCertificates?.Count ?? 0);
-                    }
-                    catch
-                    {
-                        // Ignore errors in logging
-                    }
+
+                    var cert = new X509Certificate2(certificate);
+                    logger.LogInformation("CLIENT: TLS Certificate Validation: Subject={Subject}, Issuer={Issuer}, PolicyErrors={PolicyErrors}",
+                        cert.Subject, cert.Issuer, sslPolicyErrors);
                     
-                    return null;
+                    logger.LogInformation("CLIENT: Certificate details - Thumbprint={Thumbprint}, NotBefore={NotBefore}, NotAfter={NotAfter}",
+                        cert.Thumbprint, cert.NotBefore, cert.NotAfter);
+
+                    // If there are policy errors, log details to help diagnose
+                    if (sslPolicyErrors != SslPolicyErrors.None)
+                    {
+                        logger.LogWarning("CLIENT: Certificate validation errors: {Errors}", sslPolicyErrors);
+                        
+                        if ((sslPolicyErrors & SslPolicyErrors.RemoteCertificateChainErrors) != 0 && chain != null)
+                        {
+                            for (int i = 0; i < chain.ChainStatus.Length; i++)
+                            {
+                                logger.LogWarning("CLIENT: Chain error {Index}: {Status}, {Information}", 
+                                    i, chain.ChainStatus[i].Status, chain.ChainStatus[i].StatusInformation);
+                            }
+                        }
+                    }
+
+                    // TEMPORARY FOR DEBUGGING: Accept any certificate to diagnose TOFU mechanism
+                    logger.LogWarning("CLIENT: TEMPORARY DEBUG MODE: Accepting all certificates for TOFU debugging");
+                    return true;
+
+                    // In production, we'd use the peer trust manager:
+                    // return peerTrustManager.IsTrusted(certificate);
                 },
                 
-                EnabledSslProtocols = System.Security.Authentication.SslProtocols.Tls12 | 
-                                      System.Security.Authentication.SslProtocols.Tls13,
-                                      
-                EncryptionPolicy = EncryptionPolicy.RequireEncryption,
-                
-                CertificateRevocationCheckMode = X509RevocationMode.NoCheck
-            }
+                // Client certificates will be selected by the callback
+                LocalCertificateSelectionCallback = (sender, targetHost, localCertificates, remoteCertificate, acceptableIssuers) =>
+                {
+                    logger.LogInformation("CLIENT: TLS Client Certificate Selection: Host={Host}, RemoteCertSubject={RemoteSubject}, LocalCerts={LocalCertCount}",
+                        targetHost, 
+                        remoteCertificate?.Subject ?? "null",
+                        localCertificates?.Count ?? 0);
+                    
+                    // For now, return null (no client certificate)
+                    // Later, we'll add client certificate selection logic
+                    return null;
+                }
+            },
+            // Increase timeouts to prevent premature connection closure
+            AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate,
+            UseCookies = false, // gRPC doesn't need cookies
+            MaxConnectionsPerServer = 100 // Allow more concurrent connections
         };
+        
         return handler;
     });
 
