@@ -6,6 +6,7 @@ using CryptoSharedSecret = Percolator.Cryptography.SharedSecret;
 using Google.Protobuf;
 using Grpc.Core;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Moq.Protected;
 using Percolator.Application.Identity;
@@ -32,18 +33,19 @@ namespace Percolator.ApplicationTests.Sessions;
 [TestFixture]
 public class ConversationServiceTests
 {
-    private Mock<IPeerRepository> _mockPeerRepository = null!;
-    private Mock<ITlsCertificateService> _mockTlsCertificateService = null!;
-    private Mock<IX3DHOrchestrator> _mockX3dhOrchestrator = null!;
-    private Mock<IDirectSessionManager> _mockDirectSessionManager = null!;
-    private Mock<IConversationRepository> _mockConversationRepository = null!;
-    private Mock<IPeerConnectionRepository> _mockPeerConnectionRepository = null!;
-    private Mock<IOneTimeKeyProvider> _mockOneTimeKeyProvider = null!;
-    private Mock<IHttpClientFactory> _mockHttpClientFactory = null!;
-    private Mock<IPeerTrustManager> _mockPeerTrustManager = null!;
-    private Mock<ILogger<ConversationService>> _mockLogger = null!;
-    private ConversationService _service = null!;
-    private ActiveIdentityContext _activeIdentityContext = null!;
+    private Mock<IPeerRepository> _mockPeerRepository;
+    private Mock<ITlsCertificateService> _mockTlsCertificateService;
+    private Mock<IX3DHOrchestrator> _mockX3dhOrchestrator;
+    private Mock<IDirectSessionManager> _mockDirectSessionManager;
+    private Mock<IOneTimeKeyProvider> _mockOneTimeKeyProvider;
+    private Mock<IConversationRepository> _mockConversationRepository;
+    private Mock<IPeerConnectionRepository> _mockPeerConnectionRepository;
+    private Mock<IPeerTrustManager> _mockPeerTrustManager;
+    private Mock<ITlsHandshakeService> _mockTlsHandshakeService;
+    private Mock<IGrpcSessionService> _mockGrpcSessionService;
+    private ILogger<ConversationService> _testLogger;
+    private ActiveIdentityContext _activeIdentityContext;
+    private ConversationService _service;
 
     [SetUp]
     public void Setup()
@@ -55,9 +57,10 @@ public class ConversationServiceTests
         _mockOneTimeKeyProvider = new Mock<IOneTimeKeyProvider>();
         _mockConversationRepository = new Mock<IConversationRepository>();
         _mockPeerConnectionRepository = new Mock<IPeerConnectionRepository>();
-        _mockHttpClientFactory = new Mock<IHttpClientFactory>();
         _mockPeerTrustManager = new Mock<IPeerTrustManager>();
-        _mockLogger = new Mock<ILogger<ConversationService>>();
+        _mockTlsHandshakeService = new Mock<ITlsHandshakeService>();
+        _mockGrpcSessionService = new Mock<IGrpcSessionService>();
+        _testLogger = NullLogger<ConversationService>.Instance;
         _activeIdentityContext = new ActiveIdentityContext
         {
             Identity = new IdentityRecord(Guid.NewGuid(), "Test Identity"),
@@ -69,7 +72,7 @@ public class ConversationServiceTests
         };
 
         _service = new ConversationService(
-            _mockLogger.Object,
+            _testLogger,
             _mockX3dhOrchestrator.Object,
             _mockDirectSessionManager.Object,
             _mockConversationRepository.Object,
@@ -78,7 +81,8 @@ public class ConversationServiceTests
             _mockTlsCertificateService.Object,
             _mockOneTimeKeyProvider.Object,
             _activeIdentityContext,
-            _mockHttpClientFactory.Object,
+            _mockTlsHandshakeService.Object,
+            _mockGrpcSessionService.Object,
             _mockPeerTrustManager.Object
         );
     }
@@ -113,6 +117,10 @@ public class ConversationServiceTests
             .Setup(r => r.UpdateDirectMessagePublicKeyAsync(It.IsAny<NetworkPeerId>(), It.IsAny<DirectMessagePublicKey>()))
             .Returns(Task.CompletedTask);
 
+        _mockPeerConnectionRepository
+            .Setup(r => r.SaveAsync(It.IsAny<PeerConnection>()))
+            .Returns(Task.CompletedTask);
+
         // Setup X3DH orchestrator to return a shared secret
         _mockX3dhOrchestrator
             .Setup(o => o.CompleteHandshake(It.IsAny<ContractsPreKeyBundle>(), It.IsAny<ECDiffieHellman>()))
@@ -145,43 +153,41 @@ public class ConversationServiceTests
                 It.IsAny<SessionSharedSecret>()))
             .Returns(Task.CompletedTask);
 
-        // Setup the HTTP handler to simulate successful GRPC response
-        var response = CreateGrpcResponse(new EstablishSessionResponse
+        // Create the response for the GrpcSessionService
+        var grpcResponse = new EstablishSessionResponse
         {
             ResponderBundle = new ContractsPreKeyBundle { 
                 IdentityAgreementKey = ByteString.CopyFrom(new byte[32]), 
                 SignedPreKey = ByteString.CopyFrom(new byte[32]),
                 IdentitySigningKey = ByteString.CopyFrom(new byte[32])
             }
-        });
+        };
 
-        var mockHttpHandler = new Mock<HttpMessageHandler>();
-        mockHttpHandler.Protected()
-            .SetupSequence<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
-            .ReturnsAsync(response); // First call succeeds
+        // Setup TLS Handshake and gRPC Services
+        _mockTlsHandshakeService
+            .Setup(s => s.CaptureCertificateAsync(It.IsAny<DnsEndPoint>()))
+            .ReturnsAsync(cert);
             
-        var httpClient = new HttpClient(mockHttpHandler.Object);
-        _mockHttpClientFactory
-            .Setup(f => f.CreateClient(It.IsAny<string>()))
-            .Returns(httpClient);
+        var sequence = new MockSequence();
+        
+        _mockGrpcSessionService
+            .InSequence(sequence)
+            .Setup(s => s.EstablishSessionAsync(
+                It.IsAny<DnsEndPoint>(), 
+                It.IsAny<EstablishSessionRequest>(), 
+                null))
+            .ThrowsAsync(new RpcException(new Status(StatusCode.Unavailable, "TLS handshake failed"))); // First call fails
             
-        // Update our ConversationService to bypass the TLS handshake for testing
-        var service = new TestableConversationService(
-            _mockLogger.Object,
-            _mockX3dhOrchestrator.Object,
-            _mockDirectSessionManager.Object,
-            _mockConversationRepository.Object,
-            _mockPeerRepository.Object,
-            _mockPeerConnectionRepository.Object,
-            _mockTlsCertificateService.Object,
-            _mockOneTimeKeyProvider.Object,
-            _activeIdentityContext,
-            _mockHttpClientFactory.Object,
-            _mockPeerTrustManager.Object,
-            cert); // Pass the certificate to use for testing
+        _mockGrpcSessionService
+            .InSequence(sequence)
+            .Setup(s => s.EstablishSessionAsync(
+                It.IsAny<DnsEndPoint>(), 
+                It.IsAny<EstablishSessionRequest>(), 
+                It.IsAny<X509Certificate2>()))
+            .ReturnsAsync(grpcResponse); // Second call with certificate succeeds
 
         // Act
-        var result = await service.CreateDirectConversationAsync(endpoint, peerName);
+        var result = await _service.CreateDirectConversationAsync(endpoint, peerName);
 
         // Assert
         Assert.That(result, Is.Not.EqualTo(default(ChatConversationId)));
@@ -192,139 +198,150 @@ public class ConversationServiceTests
             It.IsAny<SessionIdentityKey>(), 
             It.IsAny<SessionRatchetKey>(), 
             It.IsAny<SessionSharedSecret>()), Times.Once);
+        
+        // Verify that our services were called correctly
+        _mockTlsHandshakeService.Verify(s => s.CaptureCertificateAsync(It.IsAny<DnsEndPoint>()), Times.Once);
+        _mockGrpcSessionService.Verify(s => s.EstablishSessionAsync(
+            It.IsAny<DnsEndPoint>(), 
+            It.IsAny<EstablishSessionRequest>(), 
+            null), 
+            Times.Once);
+        _mockGrpcSessionService.Verify(s => s.EstablishSessionAsync(
+            It.IsAny<DnsEndPoint>(), 
+            It.IsAny<EstablishSessionRequest>(), 
+            It.IsAny<X509Certificate2>()), 
+            Times.AtLeastOnce());
     }
 
     [Test]
-    public async Task ExtractCertificateFromTlsError_AddsTrustAndRetries()
+    public async Task CreateDirectConversationAsync_WithRemoteTlsKey_UsesTlsCertificateService()
     {
         // Arrange
         var endpoint = new DnsEndPoint("localhost", 5001);
-        var peerName = "untrusted-peer";
+        var peerName = "test-peer";
+        var peer = new Peer(new IdentityPeerId(Guid.NewGuid()), peerName);
 
-        // Create a test certificate for TOFU
-        var cert = CreateSelfSignedCertificate();
-        var certBytes = cert.Export(X509ContentType.Cert);
-        var certBase64 = Convert.ToBase64String(certBytes);
+        _mockPeerRepository.Setup(r => r.GetByNameAsync(peerName)).ReturnsAsync(peer);
+        _mockPeerRepository.Setup(r => r.GetByIdAsync(It.Is<IdentityPeerId>(id => id.Value == peer.Id.Value))).ReturnsAsync(peer);
 
-        // Create the expected error message with the certificate
-        var errorMsg = $"SSL Handshake failed. The remote certificate is not trusted. certificate: {certBase64}";
+        // Create a mock TLS certificate and key
+        var cert = CreateSelfSignedCertificate("localhost");
+        var remoteTlsKey = cert.GetRSAPrivateKey()!.ExportPkcs8PrivateKey();
+
+        _mockTlsCertificateService
+            .Setup(s => s.GetOrCreateTlsCertificateAsync(peerName, remoteTlsKey))
+            .ReturnsAsync(cert);
+            
+        // Setup peer trust manager
+        _mockPeerTrustManager
+            .Setup(m => m.AddTrustedPeer(It.IsAny<X509Certificate2>()))
+            .Returns(Task.CompletedTask);
+
+        // Create a mock peer connection
+        var peerConnection = new PeerConnection(
+            new NetworkPeerId(peer.Id.Value),
+            new DirectMessagePublicKey(new byte[32]), // Valid DirectMessagePublicKey
+            new[] { new GrpcEndPoint(endpoint, DateTimeOffset.UtcNow) },
+            new[] { new TlsCertificate(cert.RawData) }, // Certificate matching our test cert
+            DateTimeOffset.UtcNow
+        );
         
-        // Set up peer trust manager
-        _mockPeerTrustManager.Setup(m => m.AddTrustedPeer(It.IsAny<X509Certificate2>()))
-            .Returns(Task.CompletedTask);
+        // Setup peer connection repository
+        _mockPeerConnectionRepository
+            .Setup(r => r.GetByTlsCertificateAsync(It.Is<TlsCertificate>(t => t.Value.SequenceEqual(cert.RawData))))
+            .ReturnsAsync(peerConnection);
             
-        // Setup repositories
-        _mockPeerRepository.Setup(r => r.GetByNameAsync(peerName))
-            .ReturnsAsync(null as Peer);
-            
-        _mockPeerConnectionRepository.Setup(r => r.GetByTlsCertificateAsync(It.IsAny<TlsCertificate>()))
-            .ReturnsAsync((PeerConnection)null);
-            
-        _mockPeerConnectionRepository.Setup(r => r.SaveAsync(It.IsAny<PeerConnection>()))
+        _mockPeerConnectionRepository
+            .Setup(r => r.UpdateDirectMessagePublicKeyAsync(It.IsAny<NetworkPeerId>(), It.IsAny<DirectMessagePublicKey>()))
             .Returns(Task.CompletedTask);
 
-        // Create the exception with our certificate
-        var exception = new RpcException(new Status(StatusCode.Unavailable, errorMsg));
+        _mockPeerConnectionRepository
+            .Setup(r => r.SaveAsync(It.IsAny<PeerConnection>()))
+            .Returns(Task.CompletedTask);
 
-        // Act - directly call the certificate extraction code as it would happen in TOFU flow
-        X509Certificate2 extractedCert = null;
-        if (exception.Status.Detail.Contains("certificate"))
-        {
-            string certData = exception.Status.Detail.Split("certificate:")[1].Trim();
-            try
-            {
-                byte[] extractedBytes = Convert.FromBase64String(certData);
-                extractedCert = new X509Certificate2(extractedBytes);
-            }
-            catch (Exception ex)
-            {
-                Assert.Fail($"Failed to extract certificate: {ex.Message}");
-            }
-        }
+        // Setup X3DH orchestrator to return a shared secret
+        _mockX3dhOrchestrator
+            .Setup(o => o.CompleteHandshake(It.IsAny<ContractsPreKeyBundle>(), It.IsAny<ECDiffieHellman>()))
+            .Returns(new CryptoSharedSecret(new byte[32]));
 
-        // Extract the certificate and add it to trust store
-        if (extractedCert != null)
-        {
-            await _mockPeerTrustManager.Object.AddTrustedPeer(extractedCert);
+        // Setup the one-time key provider to return a key
+        var oneTimeKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        _mockOneTimeKeyProvider
+            .Setup(p => p.PopOneTimeKey())
+            .Returns(oneTimeKey);
             
-            // Create peer connection record
-            var networkPeerId = new NetworkPeerId(Guid.NewGuid());
-            var tlsCertificate = new TlsCertificate(extractedCert.Export(X509ContentType.Cert));
-            var peerConnection = new PeerConnection(
-                networkPeerId,
-                null,
-                new[] { new GrpcEndPoint(endpoint, DateTimeOffset.UtcNow) },
-                new[] { tlsCertificate },
-                DateTimeOffset.UtcNow);
-                
-            await _mockPeerConnectionRepository.Object.SaveAsync(peerConnection);
-        }
+        // Setup conversation repository
+        _mockConversationRepository
+            .Setup(r => r.AddAsync(It.IsAny<ChatConversation>()))
+            .Returns(Task.CompletedTask);
+            
+        // Setup direct session manager
+        _mockDirectSessionManager
+            .Setup(m => m.EstablishSessionAsInitiatorAsync(
+                It.IsAny<SessionConversationId>(), 
+                It.IsAny<SessionPeerId>(), 
+                It.IsAny<SessionIdentityKey>(), 
+                It.IsAny<SessionRatchetKey>(), 
+                It.IsAny<SessionSharedSecret>()))
+            .Returns(Task.CompletedTask);
+            
+        // Create the response for the GrpcSessionService
+        var grpcResponse = new EstablishSessionResponse
+        {
+            ResponderBundle = new ContractsPreKeyBundle { 
+                IdentityAgreementKey = ByteString.CopyFrom(new byte[32]), 
+                SignedPreKey = ByteString.CopyFrom(new byte[32]),
+                IdentitySigningKey = ByteString.CopyFrom(new byte[32])
+            }
+        };
+            
+        // Setup GrpcSessionService to return success with the certificate
+        _mockGrpcSessionService
+            .Setup(s => s.EstablishSessionAsync(
+                It.IsAny<DnsEndPoint>(), 
+                It.IsAny<EstablishSessionRequest>(), 
+                (X509Certificate2)cert))
+            .ReturnsAsync(grpcResponse);
+
+        // Act
+        var result = await _service.CreateDirectConversationAsync(endpoint, peerName, remoteTlsKey);
 
         // Assert
-        Assert.That(extractedCert, Is.Not.Null, "Certificate should be successfully extracted from the error message");
-        
-        // Verify the extracted certificate matches our original
-        Assert.That(
-            Convert.ToBase64String(extractedCert.Export(X509ContentType.Cert)), 
-            Is.EqualTo(certBase64), 
-            "Extracted certificate should match the original"
-        );
-        
-        // Verify the certificate was added to trust store
-        _mockPeerTrustManager.Verify(
-            m => m.AddTrustedPeer(It.Is<X509Certificate2>(c => 
-                Convert.ToBase64String(c.Export(X509ContentType.Cert)) == certBase64)), 
-            Times.Once
-        );
-        
-        // Verify the connection was saved
-        _mockPeerConnectionRepository.Verify(
-            r => r.SaveAsync(It.Is<PeerConnection>(c => 
-                c.TlsCertificates.Any(tc => 
-                    Convert.ToBase64String(tc.RawData) == certBase64))), 
-            Times.Once
-        );
+        Assert.That(result, Is.Not.EqualTo(default(ChatConversationId)));
+        _mockTlsCertificateService.Verify(s => s.GetOrCreateTlsCertificateAsync(peerName, remoteTlsKey), Times.Once);
+        _mockPeerTrustManager.Verify(m => m.AddTrustedPeer(It.IsAny<X509Certificate2>()), Times.Once);
+        _mockGrpcSessionService.Verify(s => s.EstablishSessionAsync(
+            It.IsAny<DnsEndPoint>(), 
+            It.IsAny<EstablishSessionRequest>(), 
+            (X509Certificate2)cert), 
+            Times.AtLeastOnce);
     }
 
-    private static HttpResponseMessage CreateGrpcResponse<T>(T message)
-        where T : IMessage
+    private HttpResponseMessage CreateGrpcResponse(object responseMessage)
     {
-        var stream = new MemoryStream();
-        // Write the compression flag (0 for uncompressed)
-        stream.WriteByte(0);
-        // Write the 4-byte message length
-        var length = message.CalculateSize();
-        var lengthBytes = BitConverter.GetBytes(length);
-        if (BitConverter.IsLittleEndian)
+        // Serialize the gRPC response message
+        var bytes = responseMessage.GetType().GetMethod("ToByteArray")?.Invoke(responseMessage, null) as byte[];
+        var content = new ByteArrayContent(bytes ?? Array.Empty<byte>());
+        content.Headers.ContentType = new MediaTypeHeaderValue("application/grpc");
+        
+        // Create the HTTP response message
+        var responseHttpMessage = new HttpResponseMessage
         {
-            Array.Reverse(lengthBytes);
-        }
-        stream.Write(lengthBytes, 0, 4);
-        // Write the message
-        message.WriteTo(stream);
-        stream.Position = 0;
-
-        var streamContent = new StreamContent(stream);
-        streamContent.Headers.ContentType = new MediaTypeHeaderValue("application/grpc");
-
-        var response = new HttpResponseMessage(HttpStatusCode.OK)
-        {
-            Version = new Version(2, 0),
-            Content = streamContent
+            StatusCode = System.Net.HttpStatusCode.OK,
+            Content = content
         };
-
-        response.TrailingHeaders.Add("grpc-status", "0");
-
-        return response;
-    }
-
-    private static X509Certificate2 CreateSelfSignedCertificate()
-    {
-        // Create a new RSA key pair
-        using var rsa = RSA.Create(2048);
+        responseHttpMessage.Headers.Add("grpc-status", "0"); // OK status
         
-        // Create certificate request
-        var distinguishedName = new X500DistinguishedName("CN=PercolatorTOFUTest");
+        return responseHttpMessage;
+    }
+    
+    private static X509Certificate2 CreateSelfSignedCertificate(ECDiffieHellman ecdhKey, string subjectName)
+    {
+        // Create certificate request with the specified key
+        var distinguishedName = new X500DistinguishedName($"CN={subjectName}");
+        
+        // For simplicity in tests, we'll create an RSA certificate instead
+        using var rsa = RSA.Create(2048);
         var request = new CertificateRequest(distinguishedName, rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
         
         // Add basic constraints extension
@@ -380,77 +397,5 @@ public class ConversationServiceTests
         var certificate = request.CreateSelfSigned(notBefore, notAfter);
         
         return certificate;
-    }
-}
-
-// Testable version of ConversationService that bypasses the TLS handshake for testing
-public class TestableConversationService : ConversationService
-{
-    private readonly X509Certificate2 _testCertificate;
-    private readonly EstablishSessionResponse _testResponse;
-    private readonly Mock<ILogger<ConversationService>> _logger;
-
-    public TestableConversationService(
-        ILogger<ConversationService> logger,
-        IX3DHOrchestrator orchestrator,
-        IDirectSessionManager sessionManager,
-        IConversationRepository conversationRepository,
-        IPeerRepository peerRepository,
-        IPeerConnectionRepository peerConnectionRepository,
-        ITlsCertificateService tlsCertificateService,
-        IOneTimeKeyProvider oneTimeKeyProvider,
-        ActiveIdentityContext activeIdentityContext,
-        IHttpClientFactory httpClientFactory,
-        IPeerTrustManager peerTrustManager,
-        X509Certificate2 testCertificate)
-        : base(logger, orchestrator, sessionManager, conversationRepository, peerRepository, 
-              peerConnectionRepository, tlsCertificateService, oneTimeKeyProvider, activeIdentityContext, 
-              httpClientFactory, peerTrustManager)
-    {
-        _testCertificate = testCertificate;
-        _logger = logger as Mock<ILogger<ConversationService>>;
-        
-        // Create a test response to use in the override methods
-        _testResponse = new EstablishSessionResponse
-        {
-            ResponderBundle = new ContractsPreKeyBundle
-            {
-                IdentityAgreementKey = ByteString.CopyFrom(new byte[32]),
-                SignedPreKey = ByteString.CopyFrom(new byte[32]),
-                IdentitySigningKey = ByteString.CopyFrom(new byte[32])
-            }
-        };
-    }
-
-    // Override the method that attempts to capture a certificate
-    protected override Task<X509Certificate2?> CaptureRemoteCertificateAsync(DnsEndPoint endpoint)
-    {
-        return Task.FromResult<X509Certificate2?>(_testCertificate);
-    }
-    
-    // Override TOFU retry connection method to bypass actual network connection
-    protected override Task<EstablishSessionResponse> PerformRetryConnectionAsync(
-        DnsEndPoint endpoint, 
-        X509Certificate2 remoteCert,
-        EstablishSessionRequest request)
-    {
-        // Return our predefined response without making a real connection
-        return Task.FromResult(_testResponse);
-    }
-    
-    // Override the regular TOFU handling method to bypass network operations
-    protected override Task<ChatConversationId?> HandleRegularTofuAsync(
-        DnsEndPoint endpoint, 
-        string peerName, 
-        EstablishSessionRequest request, 
-        ECDiffieHellman ephemeralKey)
-    {
-        // Directly call the HandleTofuWithCapturedCertificateAsync method with our test certificate
-        return HandleTofuWithCapturedCertificateAsync(
-            endpoint, 
-            peerName, 
-            _testCertificate, 
-            request, 
-            ephemeralKey);
     }
 }

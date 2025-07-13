@@ -28,6 +28,10 @@ public static class ServiceCollectionExtensions
 
         services.AddSingleton<IPeerTrustManager, InMemoryPeerTrustStore>();
 
+        // Register our network communication services
+        services.AddSingleton<ITlsHandshakeService, TlsHandshakeService>();
+        services.AddSingleton<IGrpcSessionService, GrpcSessionService>();
+
         // Register a named HttpClient with our custom TLS validation logic.
         // This will be used by ConversationService to create gRPC channels on the fly.
         services.AddHttpClient("percolator-grpc", (serviceProvider, client) =>

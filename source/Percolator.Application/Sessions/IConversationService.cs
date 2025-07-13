@@ -14,11 +14,4 @@ public interface IConversationService
     /// </summary>
     /// <returns>The unique ID of the direct conversation.</returns>
     Task<ConversationId> CreateDirectConversationAsync(DnsEndPoint endpoint, string peerName);
-
-    /// <summary>
-    /// Gets the last active direct conversation ID for a given peer.
-    /// </summary>
-    /// <param name="peerId">The ID of the peer.</param>
-    /// <returns>The conversation ID, or null if no active conversation is found.</returns>
-    Task<ConversationId?> FindExistingConversationAsync(PeerId peerId);
 }
