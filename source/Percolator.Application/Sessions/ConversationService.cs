@@ -280,15 +280,67 @@ namespace Percolator.Application.Sessions
             IdentityPeerId peerId,
             PeerConnection? existingConnection = null)
         {
+            // Create a fresh copy of the certificate to use for the trusted connection
+            byte[] certData = remoteCert.Export(X509ContentType.Cert);
+            using var freshCertificate = new X509Certificate2(certData);
+            
             // Add the certificate to the trusted certs for this request
-            await _peerTrustManager.AddTrustedPeer(remoteCert);
+            await _peerTrustManager.AddTrustedPeer(freshCertificate);
+            
+            const int MaxRetries = 3;
+            const int RetryDelayMs = 1000;
+            
+            EstablishSessionResponse? response = null;
+            Exception? lastException = null;
+            
+            // Implement retry mechanism with delay
+            for (int attempt = 0; attempt < MaxRetries; attempt++)
+            {
+                try 
+                {
+                    if (attempt > 0)
+                    {
+                        _logger.LogInformation("TOFU: Retrying connection attempt {Attempt} of {MaxRetries} with {Endpoint} after delay", 
+                            attempt + 1, MaxRetries, endpoint);
+                        // Add delay between retries to allow certificate store to process
+                        await Task.Delay(RetryDelayMs * attempt);
+                    }
+                    
+                    // Try to establish the session
+                    response = await _grpcSessionService.EstablishSessionAsync(endpoint, request, freshCertificate);
+                    
+                    if (response != null)
+                    {
+                        _logger.LogInformation("TOFU: Successfully received EstablishSession response from {Endpoint} on attempt {Attempt}", 
+                            endpoint, attempt + 1);
+                        break; // Success, exit the retry loop
+                    }
+                }
+                catch (Exception ex)
+                {
+                    lastException = ex;
+                    _logger.LogWarning(ex, "TOFU: Attempt {Attempt} of {MaxRetries} to establish connection with {Endpoint} failed", 
+                        attempt + 1, MaxRetries, endpoint);
+                    
+                    // If this is the last attempt, we'll throw later after cleanup
+                    if (attempt < MaxRetries - 1)
+                    {
+                        continue; // Try again
+                    }
+                }
+            }
+            
+            // If we never got a response after all retries, throw the last exception
+            if (response == null)
+            {
+                _logger.LogError(lastException, "Failed to establish secure connection with peer {PeerName} at {Endpoint} after {MaxRetries} attempts", 
+                    peerName, endpoint, MaxRetries);
+                throw new RpcException(new Status(StatusCode.Unavailable, "Failed to establish secure connection after multiple attempts"), 
+                    $"Failed to establish connection with peer {peerName}");
+            }
             
             try 
             {
-                var response = await _grpcSessionService.EstablishSessionAsync(endpoint, request, remoteCert);
-                
-                _logger.LogInformation("TOFU: Successfully received retry EstablishSession response from {Endpoint}", endpoint);
-
                 // Persist the DirectMessagePublicKey now that we have it
                 var directMessagePublicKey = new DirectMessagePublicKey(response.ResponderBundle.IdentityAgreementKey.ToByteArray());
                 
@@ -327,7 +379,8 @@ namespace Percolator.Application.Sessions
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to establish retry connection with peer {PeerName} at {Endpoint}", peerName, endpoint);
+                _logger.LogError(ex, "Failed to process conversation data after successful connection with peer {PeerName} at {Endpoint}", 
+                    peerName, endpoint);
                 throw;
             }
         }

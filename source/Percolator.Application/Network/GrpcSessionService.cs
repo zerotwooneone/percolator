@@ -1,154 +1,185 @@
-using Grpc.Core;
+using System;
+using System.Collections.Concurrent;
+using System.Net;
+using System.Net.Http;
+using System.Net.Security;
+using System.Security.Cryptography.X509Certificates;
+using System.Threading.Tasks;
 using Grpc.Net.Client;
 using Microsoft.Extensions.Logging;
 using Percolator.Contracts;
 using Percolator.Identity;
-using System;
-using System.Net;
-using System.Net.Http;
-using System.Security.Cryptography.X509Certificates;
-using System.Threading.Tasks;
 
 namespace Percolator.Application.Network
 {
     /// <summary>
-    /// Default implementation of IGrpcSessionService for establishing gRPC sessions with TOFU support
+    /// Service for establishing gRPC sessions with remote peers
     /// </summary>
     public class GrpcSessionService : IGrpcSessionService
     {
         private readonly ILogger<GrpcSessionService> _logger;
         private readonly IPeerTrustManager _peerTrustManager;
-        private readonly IHttpClientFactory _httpClientFactory;
-
+        private readonly ITlsHandshakeService _tlsHandshakeService;
+        
+        // Keep strong references to active channels and certificates
+        private readonly ConcurrentDictionary<string, GrpcChannel> _channels = 
+            new ConcurrentDictionary<string, GrpcChannel>();
+        private readonly ConcurrentDictionary<string, X509Certificate2> _certificates =
+            new ConcurrentDictionary<string, X509Certificate2>();
+        private readonly ConcurrentDictionary<string, HttpClient> _httpClients =
+            new ConcurrentDictionary<string, HttpClient>();
+            
         public GrpcSessionService(
             ILogger<GrpcSessionService> logger,
             IPeerTrustManager peerTrustManager,
-            IHttpClientFactory httpClientFactory)
+            ITlsHandshakeService tlsHandshakeService)
         {
             _logger = logger;
             _peerTrustManager = peerTrustManager;
-            _httpClientFactory = httpClientFactory;
+            _tlsHandshakeService = tlsHandshakeService;
         }
 
-        /// <inheritdoc />
         public async Task<EstablishSessionResponse> EstablishSessionAsync(
-            DnsEndPoint endpoint, 
-            EstablishSessionRequest request, 
-            X509Certificate2? remoteCert = null)
+            DnsEndPoint endpoint, EstablishSessionRequest request, X509Certificate2? remoteCert = null)
         {
-            if (remoteCert != null)
-            {
-                return await EstablishSessionWithTrustedCertAsync(endpoint, request, remoteCert);
-            }
-            
             try
             {
-                _logger.LogInformation("Establishing gRPC session with {Endpoint}", endpoint);
-                
-                // Use the default HTTP client if no certificate is provided
-                var httpClient = _httpClientFactory.CreateClient("percolator-grpc");
-                var channelOptions = new GrpcChannelOptions 
-                { 
-                    HttpClient = httpClient,
-                    DisposeHttpClient = false,
-                    ThrowOperationCanceledOnCancellation = true,
-                    MaxReceiveMessageSize = null,
-                    MaxSendMessageSize = null
-                };
-                
-                using var channel = GrpcChannel.ForAddress($"https://{endpoint.Host}:{endpoint.Port}", channelOptions);
-                var client = new TransportService.TransportServiceClient(channel);
-                var callOptions = new CallOptions(
-                    deadline: DateTime.UtcNow.AddSeconds(45),
-                    headers: new Metadata { { "grpc-timeout", "45S" } }
-                );
-                
-                return await client.EstablishSessionAsync(request, callOptions);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to establish gRPC session with {Endpoint}", endpoint);
-                throw;
-            }
-        }
-        
-        private async Task<EstablishSessionResponse> EstablishSessionWithTrustedCertAsync(
-            DnsEndPoint endpoint, 
-            EstablishSessionRequest request,
-            X509Certificate2 remoteCert)
-        {
-            // Add the certificate to the trusted certs for this request
-            await _peerTrustManager.AddTrustedPeer(remoteCert);
-            
-            try 
-            {
-                _logger.LogInformation("TOFU: Creating retry channel with trusted certificate for {Endpoint}", endpoint);
-                
-                // Create a handler that accepts the specific certificate
-                var handler = new SocketsHttpHandler
+                if (remoteCert == null)
                 {
-                    PooledConnectionLifetime = TimeSpan.FromMinutes(10),
-                    KeepAlivePingDelay = TimeSpan.FromSeconds(60),
-                    KeepAlivePingTimeout = TimeSpan.FromSeconds(30),
-                    EnableMultipleHttp2Connections = true,
-                    SslOptions = new System.Net.Security.SslClientAuthenticationOptions
+                    _logger.LogInformation("No certificate provided, performing TOFU handshake with {Endpoint}", endpoint);
+                    
+                    // Do a direct TLS handshake to capture the certificate first
+                    remoteCert = await _tlsHandshakeService.CaptureCertificateAsync(endpoint);
+                        
+                    if (remoteCert == null)
                     {
-                        RemoteCertificateValidationCallback = (sender, certificate, chain, errors) =>
-                        {
-                            if (certificate == null)
-                            {
-                                _logger.LogWarning("TOFU: No certificate provided during validation callback");
-                                return false;
-                            }
+                        throw new InvalidOperationException($"Failed to capture certificate from {endpoint}");
+                    }
+                    
+                    _logger.LogInformation("TOFU: Captured certificate with thumbprint {Thumbprint} from {Endpoint}", 
+                        remoteCert.Thumbprint, endpoint);
+                }
 
-                            // For TOFU, we explicitly trust this specific certificate
-                            using var cert2 = new X509Certificate2(certificate);
-                            var isMatch = cert2.Thumbprint == remoteCert.Thumbprint;
-                            
-                            if (!isMatch)
-                            {
-                                _logger.LogWarning("TOFU: Certificate thumbprint mismatch. Expected: {Expected}, Got: {Actual}", 
-                                    remoteCert.Thumbprint, cert2.Thumbprint);
-                            }
-                            else
-                            {
-                                _logger.LogInformation("TOFU: Certificate thumbprint match confirmed: {Thumbprint}", cert2.Thumbprint);
-                            }
-                            
-                            return isMatch;
+                _logger.LogInformation("Establishing gRPC session with {Endpoint} using certificate with thumbprint {Thumbprint}", 
+                    endpoint, remoteCert.Thumbprint);
+                
+                // Add to trust store for future connections
+                await _peerTrustManager.AddTrustedPeer(remoteCert);
+                
+                // Store certificate in our dictionary to keep it alive throughout the connection
+                string connectionKey = $"{endpoint}:{remoteCert.Thumbprint}";
+                
+                // First make a clean copy to avoid disposal issues
+                var certData = remoteCert.GetRawCertData();
+                var certCopy = X509CertificateLoader.LoadCertificate(certData);
+                _certificates[connectionKey] = certCopy;
+
+                // Clean up any existing resources for this endpoint
+                await CleanupConnectionResourcesAsync(connectionKey);
+
+                // Create HTTP handler with custom certificate validation
+                var handler = new HttpClientHandler
+                {
+                    ServerCertificateCustomValidationCallback = (message, cert, chain, errors) =>
+                    {
+                        if (cert == null)
+                        {
+                            _logger.LogWarning("No server certificate provided during validation");
+                            return false;
+                        }
+                        
+                        bool isMatch = cert.Thumbprint.Equals(certCopy.Thumbprint, StringComparison.OrdinalIgnoreCase);
+                        
+                        if (isMatch)
+                        {
+                            _logger.LogInformation("Certificate validation succeeded for {Endpoint}", endpoint);
+                            return true;
+                        }
+                        else
+                        {
+                            _logger.LogWarning("Certificate mismatch! Expected {ExpectedThumbprint} but got {ActualThumbprint}",
+                                certCopy.Thumbprint, cert.Thumbprint);
+                            return false;
                         }
                     }
                 };
 
-                // Create HTTP client with our custom handler
-                var httpClient = new HttpClient(handler)
-                {
-                    BaseAddress = new Uri($"https://{endpoint.Host}:{endpoint.Port}"),
-                    Timeout = TimeSpan.FromSeconds(30)
-                };
-                
-                var retryChannelOptions = new GrpcChannelOptions 
+                // Create and store HTTP client
+                var httpClient = new HttpClient(handler);
+                _httpClients[connectionKey] = httpClient;
+
+                _logger.LogInformation("Creating gRPC channel to {Endpoint}", endpoint);
+
+                // Create gRPC channel with the correct URI format
+                var uri = new Uri($"https://{endpoint.Host}:{endpoint.Port}");
+                var channelOptions = new GrpcChannelOptions
                 {
                     HttpClient = httpClient,
-                    DisposeHttpClient = true,
-                    ThrowOperationCanceledOnCancellation = true,
-                    MaxReceiveMessageSize = null,
-                    MaxSendMessageSize = null
+                    MaxReceiveMessageSize = 4 * 1024 * 1024,  // 4 MB
+                    MaxSendMessageSize = 4 * 1024 * 1024      // 4 MB
                 };
-                
-                using var retryChannel = GrpcChannel.ForAddress($"https://{endpoint.Host}:{endpoint.Port}", retryChannelOptions);
-                var retryClient = new TransportService.TransportServiceClient(retryChannel);
 
-                _logger.LogInformation("TOFU: Sending retry EstablishSession request to {Endpoint}", endpoint);
-                // Use a longer timeout for the retry connection
-                var retryCallOptions = new CallOptions(deadline: DateTime.UtcNow.AddSeconds(30));
-                return await retryClient.EstablishSessionAsync(request, retryCallOptions);
+                var channel = GrpcChannel.ForAddress(uri, channelOptions);
+                _channels[connectionKey] = channel;
+
+                // Create client and make the call
+                var client = new TransportService.TransportServiceClient(channel);
+
+                _logger.LogInformation("Sending EstablishSession request to {Endpoint}", endpoint);
+                
+                // Add a cancellation deadline
+                using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(30));
+
+                var response = await client.EstablishSessionAsync(request, cancellationToken: cts.Token);
+
+                _logger.LogInformation("Session successfully established with {Endpoint}", endpoint);
+                return response;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "TOFU: Failed to establish retry connection with peer at {Endpoint}", endpoint);
+                _logger.LogError(ex, "Failed to establish gRPC session with {Endpoint}: {ErrorMessage}", 
+                    endpoint, ex.Message);
+                
+                // Clean up on failure
+                string connectionKey = $"{endpoint}:{remoteCert?.Thumbprint ?? "unknown"}";
+                await CleanupConnectionResourcesAsync(connectionKey);
                 throw;
             }
+        }
+
+        private async Task CleanupConnectionResourcesAsync(string connectionKey)
+        {
+            // Clean up channel
+            if (_channels.TryRemove(connectionKey, out var channel))
+            {
+                try 
+                {
+                    await channel.ShutdownAsync();
+                    _logger.LogInformation("Cleaned up existing channel for {ConnectionKey}", connectionKey);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Error shutting down channel for {ConnectionKey}: {ErrorMessage}", 
+                        connectionKey, ex.Message);
+                }
+            }
+            
+            // Clean up HTTP client
+            if (_httpClients.TryRemove(connectionKey, out var httpClient))
+            {
+                try
+                {
+                    httpClient.Dispose();
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Error disposing HTTP client for {ConnectionKey}: {ErrorMessage}", 
+                        connectionKey, ex.Message);
+                }
+            }
+            
+            // Remove certificate
+            _certificates.TryRemove(connectionKey, out _);
         }
     }
 }
