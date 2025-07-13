@@ -234,6 +234,26 @@ public class ConversationService : IConversationService
 
             return conversation.Id;
         }
+        catch (RpcException ex) when (ex.StatusCode == StatusCode.Unavailable && 
+                                       (ex.Status.Detail.Contains("The SSL connection could not be established") ||
+                                        ex.Status.Detail.Contains("Received an unexpected EOF")))
+        {
+            _logger.LogWarning(ex, "SSL connection terminated during handshake with {Endpoint}. This may indicate a TLS protocol version mismatch or network issues.", endpoint);
+            
+            // Try to add more diagnostic information
+            _logger.LogInformation("Local identity: {Identity}, Attempting connection to: {Endpoint}", 
+                _activeIdentityContext.Identity?.Name ?? "unknown", endpoint);
+                
+            // Check if we can retrieve the inner exception for more details
+            if (ex.Status.DebugException is HttpRequestException httpEx && httpEx.InnerException != null)
+            {
+                _logger.LogWarning("Inner exception details: {Details}", httpEx.InnerException.Message);
+            }
+            
+            throw new InvalidOperationException(
+                $"Failed to establish secure connection to {endpoint}. The connection was terminated during TLS handshake. " +
+                "This may be due to incompatible TLS versions, network issues, or server configuration.", ex);
+        }
         catch (RpcException ex)
         {
             _logger.LogError(ex, "An unexpected gRPC error occurred while creating a direct conversation.");
