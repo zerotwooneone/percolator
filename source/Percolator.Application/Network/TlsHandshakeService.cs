@@ -39,7 +39,11 @@ namespace Percolator.Application.Network
                         // Capture the certificate but always return true during TOFU
                         if (certificate != null)
                         {
-                            remoteCert = new X509Certificate2(certificate);
+                            // Create a completely independent copy of the certificate by exporting and reimporting it
+                            var tempCert = new X509Certificate2(certificate);
+                            byte[] certBytes = tempCert.Export(X509ContentType.Cert);
+                            remoteCert = new X509Certificate2(certBytes);
+                            
                             _logger.LogInformation("Captured certificate with thumbprint {Thumbprint} during TLS handshake", 
                                 remoteCert.Thumbprint);
                         }
@@ -50,18 +54,8 @@ namespace Percolator.Application.Network
                     new SslClientAuthenticationOptions
                     {
                         TargetHost = endpoint.Host,
-                        EnabledSslProtocols = SslProtocols.Tls12 | SslProtocols.Tls13,
-                        RemoteCertificateValidationCallback = (sender, certificate, chain, errors) => 
-                        {
-                            // Same callback to ensure capture
-                            if (certificate != null && remoteCert == null)
-                            {
-                                remoteCert = new X509Certificate2(certificate);
-                                _logger.LogInformation("Captured certificate in second callback with thumbprint {Thumbprint}", 
-                                    remoteCert.Thumbprint);
-                            }
-                            return true;
-                        }
+                        EnabledSslProtocols = SslProtocols.Tls12 | SslProtocols.Tls13
+                        // Removed duplicate RemoteCertificateValidationCallback that was causing the error
                     });
                 
                 // If we got here, the handshake succeeded
