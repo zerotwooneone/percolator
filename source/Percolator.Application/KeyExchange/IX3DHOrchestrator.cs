@@ -7,4 +7,7 @@ namespace Percolator.Application.KeyExchange;
 public interface IX3DHOrchestrator
 {
     SharedSecret CompleteHandshake(ContractsPreKeyBundle remotePreKeyBundle, ECDiffieHellman ephemeralKey);
+
+    OrchestratorResponseResult ProcessHandshake(ContractsPreKeyBundle remotePreKeyBundle,
+        byte[] remoteEphemeralPublicKey);
 }

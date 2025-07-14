@@ -29,13 +29,13 @@ namespace Percolator.Application.Network
     {
         private readonly ILogger<PercolatorMessageService> _logger;
         private readonly ActiveIdentityContext _activeIdentityContext;
-        private readonly X3DHOrchestrator _x3dhOrchestrator;
+        private readonly IX3DHOrchestrator _x3dhOrchestrator;
         private readonly IDirectSessionManager _sessionManager;
         private readonly IConversationRepository _conversationRepository;
         private readonly IPeerRepository _peerRepository;
         private readonly IPeerConnectionRepository _peerConnectionRepository;
 
-        public PercolatorMessageService(ILogger<PercolatorMessageService> logger, ActiveIdentityContext activeIdentityContext, X3DHOrchestrator x3dhOrchestrator, IDirectSessionManager sessionManager, IConversationRepository conversationRepository, IPeerRepository peerRepository, IPeerConnectionRepository peerConnectionRepository)
+        public PercolatorMessageService(ILogger<PercolatorMessageService> logger, ActiveIdentityContext activeIdentityContext, IX3DHOrchestrator x3dhOrchestrator, IDirectSessionManager sessionManager, IConversationRepository conversationRepository, IPeerRepository peerRepository, IPeerConnectionRepository peerConnectionRepository)
         {
             _logger = logger;
             _activeIdentityContext = activeIdentityContext;

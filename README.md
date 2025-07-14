@@ -77,15 +77,21 @@ To get a local copy up and running, follow these simple steps.
    ```sh
    git clone https://github.com/your_username/percolator.git
    ```
-2. Navigate to the source directory:
+2. Run the One-Time-Setup scripts:
+   ```sh
+   cd percolator/source/One-Time-Setup
+   # Generate the self-signed TLS certificates for gRPC communication
+   .\generate-cert.ps1
+   ```
+3. Navigate to the source directory:
    ```sh
    cd percolator/source
    ```
-3. Build the solution:
+4. Build the solution:
    ```sh
    dotnet build
    ```
-4. Run the desired application:
+5. Run the desired application:
    - **Desktop App**:
      ```sh
      dotnet run --project Percolator.Desktop

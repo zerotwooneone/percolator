@@ -11,18 +11,39 @@ public class InMemoryPeerTrustStore : IPeerTrustManager
     private readonly ITrustedPeerStore _trustedPeerStore;
     private readonly ILogger<InMemoryPeerTrustStore> _logger;
     private readonly ConcurrentDictionary<PublicKeyHash, byte> _trustedHashes = new();
+    private readonly SharedCertificateManager _sharedCertificateManager;
+    private string? _sharedCertificateThumbprint;
 
     public InMemoryPeerTrustStore(
         ITrustedPeerStore trustedPeerStore, 
-        ILogger<InMemoryPeerTrustStore> logger)
+        ILogger<InMemoryPeerTrustStore> logger,
+        SharedCertificateManager sharedCertificateManager)
     {
         _trustedPeerStore = trustedPeerStore;
         _logger = logger;
+        _sharedCertificateManager = sharedCertificateManager;
     }
 
     public void Initialize()
     {
-        _logger.LogInformation("Initializing in-memory peer trust store...");
+        _logger.LogInformation("Initializing in-memory peer trust store with shared certificate support...");
+        
+        // First, load the shared certificate and register it as trusted
+        try
+        {
+            var sharedCertificate = _sharedCertificateManager.GetServerCertificate();
+            _sharedCertificateThumbprint = sharedCertificate.Thumbprint;
+            
+            // Add the shared certificate to our trusted store
+            AddTrustedPeerInternal(sharedCertificate).GetAwaiter().GetResult();
+            _logger.LogInformation("Registered shared certificate with thumbprint {Thumbprint} as trusted", _sharedCertificateThumbprint);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to register shared certificate as trusted");
+        }
+        
+        // Then load any other trusted certificates from the store
         var allTrustedHashes = _trustedPeerStore.GetAllAsync().GetAwaiter().GetResult();
         foreach (var hash in allTrustedHashes)
         {
@@ -34,6 +55,15 @@ public class InMemoryPeerTrustStore : IPeerTrustManager
 
     public bool IsTrusted(X509Certificate2 presentedCertificate)
     {
+        // First check if this is our shared certificate by comparing thumbprints
+        if (!string.IsNullOrEmpty(_sharedCertificateThumbprint) && 
+            presentedCertificate.Thumbprint.Equals(_sharedCertificateThumbprint, StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogDebug("Certificate with thumbprint {Thumbprint} matched shared certificate - trusted", presentedCertificate.Thumbprint);
+            return true;
+        }
+        
+        // Fall back to the public key hash check for backward compatibility
         AsymmetricAlgorithm? presentedKey = presentedCertificate.GetRSAPublicKey();
         if (presentedKey is null)
         {
@@ -52,6 +82,11 @@ public class InMemoryPeerTrustStore : IPeerTrustManager
     }
 
     public async Task AddTrustedPeer(X509Certificate2 certificate)
+    {
+        await AddTrustedPeerInternal(certificate);
+    }
+    
+    private async Task AddTrustedPeerInternal(X509Certificate2 certificate)
     {
         AsymmetricAlgorithm? presentedKey = certificate.GetRSAPublicKey();
         if (presentedKey is null)

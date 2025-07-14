@@ -1,0 +1,14 @@
+
+# Certificate files (security-sensitive)
+*.pfx
+*.cer
+*.pem
+*.key
+*.crt
+*.p12
+*.der
+*.csr
+
+# Specifically for our project
+percolator-shared-cert.*
+source/Percolator.Node/certificates/

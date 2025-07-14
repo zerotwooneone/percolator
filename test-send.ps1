@@ -1,6 +1,6 @@
 param (
     [int]$AlicePort = 5001,
-    [int]$BobPort = 5002
+    [int]$BobPort = 5010
 )
 
 $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
@@ -93,17 +93,6 @@ try {
     # Wait for nodes to initialize
     Wait-ForNodeStartup -seconds 10
 
-    # Send message from Alice to Bob using correct argument format
-    Write-Log "=== Test: Alice sending message to Bob ==="
-    $message = "Hello from Alice!"
-    $sendCommand = ".\source\Percolator.Node\bin\Debug\net9.0-windows\Percolator.Node.exe send `"$message`" -i alice --endpoint localhost:$BobPort --peer-name bob"
-    Write-Log "Executing: $sendCommand"
-    $sendOutput = & cmd /c $sendCommand 2>&1
-    $sendOutput | ForEach-Object { Write-Log $_ }
-
-    # Wait a bit for the message to be processed
-    Start-Sleep -Seconds 5
-
     # Try the connect command first
     Write-Log "=== Test: Alice connecting to Bob ==="
     $connectCommand = ".\source\Percolator.Node\bin\Debug\net9.0-windows\Percolator.Node.exe connect localhost:$BobPort -i alice --peer-name bob"
@@ -112,6 +101,17 @@ try {
     $connectOutput | ForEach-Object { Write-Log $_ }
     
     # Wait for connection
+    Start-Sleep -Seconds 5
+
+    # Send message from Alice to Bob
+    Write-Log "=== Test: Alice sending message to Bob ==="
+    $message = "Hello from Alice!"
+    $sendCommand = ".\source\Percolator.Node\bin\Debug\net9.0-windows\Percolator.Node.exe send `"$message`" -i alice --endpoint localhost:$BobPort --peer-name bob"
+    Write-Log "Executing: $sendCommand"
+    $sendOutput = & cmd /c $sendCommand 2>&1
+    $sendOutput | ForEach-Object { Write-Log $_ }
+
+    # Wait a bit for the message to be processed
     Start-Sleep -Seconds 5
     
     # List available commands for message viewing

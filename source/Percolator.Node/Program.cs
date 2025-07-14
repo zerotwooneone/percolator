@@ -111,16 +111,17 @@ async Task HostCommandHandler(InvocationContext context)
 
     try
     {
-        // Step 2: Use the temporary provider to load the identity and then get the certificate object.
+        // Get a logger for startup information
+        var logger = tempServiceProvider.GetRequiredService<ILogger<Program>>();
+        
+        // Get the shared certificate manager
+        var certificateManager = tempServiceProvider.GetRequiredService<SharedCertificateManager>();
+        
+        // Load identity for other features (but not for TLS)
         IIdentityOrchestrator tempIdentityOrchestrator = tempServiceProvider.GetRequiredService<IIdentityOrchestrator>();
         ActiveIdentityContext tempActiveIdentityContext = tempServiceProvider.GetRequiredService<ActiveIdentityContext>();
         await tempIdentityOrchestrator.LoadOrCreateIdentityAsync(identityName!, cancellationToken);
-
-        ITlsCertificateService certificateService = tempServiceProvider.GetRequiredService<ITlsCertificateService>();
-        X509Certificate2 serverCertificate = await certificateService.GetOrCreateTlsCertificateAsync(
-            identityName!,
-            tempActiveIdentityContext.Keys!.IdentitySigningKey.ExportSubjectPublicKeyInfo());
-
+        
         string publicKeyB64 = Convert.ToBase64String(tempActiveIdentityContext.Keys!.IdentitySigningKey.ExportSubjectPublicKeyInfo());
 
         // For simplicity in a local dev environment, we'll use localhost.
@@ -132,6 +133,18 @@ async Task HostCommandHandler(InvocationContext context)
         Console.WriteLine($"Invitation Link: {invitationLink}");
         Console.ResetColor();
         Console.WriteLine("Share this link with peers who want to connect.");
+        
+        // Configure and start the message listener service using our shared certificate
+        logger.LogInformation("Starting MessageListenerService with shared certificate...");
+        int grpcPort = port + 1; // We use port + 1 for gRPC service
+        var messageListenerService = new MessageListenerService(
+            tempServiceProvider.GetRequiredService<ILogger<MessageListenerService>>(),
+            tempServiceProvider,
+            certificateManager,
+            grpcPort);
+            
+        await messageListenerService.StartAsync(cancellationToken);
+        logger.LogInformation("MessageListenerService started on port {Port}", grpcPort);
 
         // Step 3: Configure and build the main application using the pre-fetched certificate.
         WebApplicationBuilder builder = WebApplication.CreateBuilder();
@@ -139,133 +152,18 @@ async Task HostCommandHandler(InvocationContext context)
         builder.Configuration.AddNode();
         builder.WebHost.UseKestrel(options =>
         {
-            // Configure HTTP/2 protocol explicitly
-            options.ConfigureHttpsDefaults(https => {
-                https.AllowAnyClientCertificate(); // For debugging
-                https.SslProtocols = SslProtocols.Tls12 | SslProtocols.Tls13;
-                https.HandshakeTimeout = TimeSpan.FromSeconds(30); // Increase timeout further
-                
-                // Configure ALPN negotiation parameters
-                https.OnAuthenticate = (connectionContext, authOptions) => {
-                    // Ensure HTTP/2 is offered first in ALPN negotiation
-                    authOptions.ApplicationProtocols = new List<SslApplicationProtocol>
-                    {
-                        SslApplicationProtocol.Http2,
-                        SslApplicationProtocol.Http11
-                    };
-                    
-                    // Add more detailed logging to trace the handshake
-                    var logger = tempServiceProvider.GetRequiredService<ILogger<Program>>();
-                    logger.LogInformation("SERVER: Setting up TLS connection from {RemoteEndpoint}", 
-                        connectionContext.RemoteEndPoint);
-                };
-            });
-            
+            // Configure HTTP endpoint on the main port
             options.Listen(IPAddress.Any, port, listenOptions =>
             {
-                // Allow both HTTP/1.1 and HTTP/2 - sometimes forcing only HTTP/2 can cause negotiation failures
                 listenOptions.Protocols = HttpProtocols.Http1AndHttp2;
                 
-                // Increase timeouts for connection handling
-                listenOptions.UseConnectionLogging();
-                
-                listenOptions.UseHttps(httpsOptions =>
-                {
-                    httpsOptions.ServerCertificate = serverCertificate;
-                    httpsOptions.ClientCertificateMode = Microsoft.AspNetCore.Server.Kestrel.Https.ClientCertificateMode.RequireCertificate;
-                    httpsOptions.ClientCertificateValidation = (certificate, chain, policyErrors) =>
-                    {
-                        var logger = tempServiceProvider.GetRequiredService<ILogger<Program>>();
-                        logger.LogInformation("SERVER: Performing client certificate validation for subject '{Subject}'", certificate.Subject);
-                        
-                        try 
-                        {
-                            // TEMPORARY FOR DEBUGGING: Log all certificate details
-                            logger.LogWarning("SERVER DEBUG: Certificate={Subject}, Issuer={Issuer}, PolicyErrors={PolicyErrors}", 
-                                certificate.Subject, 
-                                certificate.Issuer, 
-                                policyErrors);
-
-                            // Temporarily accept all client certificates to help diagnose the issue
-                            logger.LogWarning("SERVER TEMPORARY DEBUG MODE: Accepting all client certificates");
-                            return true;
-                            
-                            /* ORIGINAL VALIDATION - COMMENTED OUT FOR DEBUGGING
-                            var peerIdentityExtension = certificate.Extensions[Percolator.Cryptography.Oids.PeerIdentityKey];
-                            if (peerIdentityExtension is null)
-                            {
-                                logger.LogError("Server: Client certificate validation failed for '{Subject}'. Reason: Missing the required peer identity extension.", certificate.Subject);
-                                return false;
-                            }
-
-                            try
-                            {
-                                var reader = new AsnReader(peerIdentityExtension.RawData, AsnEncodingRules.DER);
-                                var publicKey = reader.ReadOctetString();
-                                if (publicKey.Length == 0)
-                                {
-                                    logger.LogError("Server: Client certificate validation failed for '{Subject}'. Reason: Peer identity extension contains no public key.", certificate.Subject);
-                                    return false;
-                                }
-                            
-                                // TODO: Additional checks?
-                                logger.LogInformation("Server: Client certificate validation succeeded for '{Subject}'.", certificate.Subject);
-                                return true;
-                            }
-                            catch (AsnContentException ex)
-                            {
-                                logger.LogError(ex, "Server: Client certificate validation failed for '{Subject}'. Reason: Invalid peer identity extension format.", certificate.Subject);
-                                return false;
-                            }
-                            */
-                        }
-                        catch (Exception ex) 
-                        {
-                            logger.LogError(ex, "Server: Client certificate validation failed with an unexpected error for subject '{Subject}'", certificate.Subject);
-                            return false;
-                        }
-                    };
-                });
+                // No HTTPS on this endpoint as it's for the web interface
+                logger.LogInformation("Configured HTTP endpoint on port {Port}", port);
             });
         });
 
         builder.Services.AddApplicationServices(builder.Configuration);
         builder.Services.AddInfrastructureServices(builder.Configuration);
-        builder.Services.AddGrpc();
-
-        // Step 3.5: Configure Kestrel for Mutual TLS (mTLS)
-        // We need to build a temporary service provider here to get the certificate service,
-        // as Kestrel's configuration is finalized before the main app.Services provider is ready.
-        var tempKestrelServices = new ServiceCollection();
-        tempKestrelServices.AddLogging(); // Add logging services
-        tempKestrelServices.AddApplicationServices(builder.Configuration);
-        tempKestrelServices.AddInfrastructureServices(builder.Configuration);
-        await using var tempKestrelProvider = tempKestrelServices.BuildServiceProvider();
-
-        var identityOrchestratorForKestrel = tempKestrelProvider.GetRequiredService<IIdentityOrchestrator>();
-        await identityOrchestratorForKestrel.LoadOrCreateIdentityAsync(identityName!, cancellationToken);
-
-        // After loading the identity, the ActiveIdentityContext is populated.
-        var activeIdentityContextForKestrel = tempKestrelProvider.GetRequiredService<ActiveIdentityContext>();
-        if (activeIdentityContextForKestrel.Identity is null || activeIdentityContextForKestrel.Keys is null)
-        {
-            throw new InvalidOperationException("Failed to load identity context for Kestrel configuration.");
-        }
-        var publicSigningKey = activeIdentityContextForKestrel.Keys.IdentitySigningKey.ExportSubjectPublicKeyInfo();
-
-        var tlsCertificateService = tempKestrelProvider.GetRequiredService<ITlsCertificateService>();
-        var serverCertificateForKestrel = await tlsCertificateService.GetOrCreateTlsCertificateAsync(activeIdentityContextForKestrel.Identity.Name, publicSigningKey);
-
-        builder.WebHost.ConfigureKestrel(serverOptions =>
-        {
-            serverOptions.ConfigureHttpsDefaults(listenOptions =>
-            {
-                listenOptions.ServerCertificate = serverCertificateForKestrel;
-                // DelayCertificate is crucial for our TOFU model. It establishes the TLS connection
-                // and delegates certificate validation entirely to the application layer.
-                listenOptions.ClientCertificateMode = ClientCertificateMode.DelayCertificate;
-            });
-        });
 
         WebApplication app = builder.Build();
 

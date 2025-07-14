@@ -18,7 +18,9 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ICredentialService, CredentialService>();
         // Application-layer orchestrator
         services.AddSingleton<IIdentityOrchestrator, IdentityOrchestrator>();
-        services.AddSingleton<ITlsCertificateService, TlsCertificateService>();
+        
+        // Use SharedCertificateAdapter to bridge the shared certificate implementation to the old interface
+        services.AddSingleton<ITlsCertificateService, SharedCertificateAdapter>();
 
         services.AddSingleton<IDirectSessionManager, DirectSessionManager>();
 
