@@ -152,13 +152,12 @@ async Task HostCommandHandler(InvocationContext context)
         builder.Configuration.AddNode();
         builder.WebHost.UseKestrel(options =>
         {
-            // Configure HTTP endpoint on the main port
+            // Configure HTTPS endpoint with HTTP/2 only on the main port
             options.Listen(IPAddress.Any, port, listenOptions =>
             {
-                listenOptions.Protocols = HttpProtocols.Http1AndHttp2;
-                
-                // No HTTPS on this endpoint as it's for the web interface
-                logger.LogInformation("Configured HTTP endpoint on port {Port}", port);
+                // HTTP/2 only (not HTTP/1.1), no TLS for local development
+                listenOptions.Protocols = HttpProtocols.Http2;
+                logger.LogInformation("Configured HTTP/2 without TLS on port {Port}", port);
             });
         });
 

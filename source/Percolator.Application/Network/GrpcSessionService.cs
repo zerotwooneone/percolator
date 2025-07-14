@@ -7,6 +7,7 @@ using System.Net.Security;
 using System.Security.Authentication;
 using System.Security.Cryptography.X509Certificates;
 using System.Threading.Tasks;
+using Grpc.Core;
 using Grpc.Net.Client;
 using Grpc.Net.Client.Web;
 using Microsoft.Extensions.Logging;
@@ -40,23 +41,37 @@ namespace Percolator.Application.Network
         }
 
         public async Task<EstablishSessionResponse> EstablishSessionAsync(
-            DnsEndPoint endpoint, EstablishSessionRequest request, X509Certificate2? remoteCert = null)
+            DnsEndPoint endpoint, 
+            EstablishSessionRequest request,
+            X509Certificate2? remoteCert = null)
         {
+            string connectionKey = $"{endpoint.Host}:{endpoint.Port}";
+            
             try
             {
-                string connectionKey = $"{endpoint.Host}:{endpoint.Port}";
-                _logger.LogInformation("Establishing gRPC session with {Endpoint}", endpoint);
+                _logger.LogInformation("Establishing session with {Endpoint}", endpoint);
 
-                // Clean up any existing resources for this endpoint
+                // Clean up any existing resources if they exist
                 await CleanupConnectionResourcesAsync(connectionKey);
-
-                // Get our shared certificate - this is the same certificate used by all peers
-                var sharedCertificate = _certificateManager.GetServerCertificate(); 
                 
-                _logger.LogInformation("Using client certificate - Thumbprint: {Thumbprint}, Subject: {Subject}, HasPrivateKey: {HasPrivateKey}",
-                    sharedCertificate.Thumbprint, sharedCertificate.Subject, sharedCertificate.HasPrivateKey);
+                // Get the shared certificate
+                _logger.LogInformation("Getting shared certificate for mutual TLS");
+                var sharedCertificate = _certificateManager.GetServerCertificate(); // Use server certificate with private key
+                
+                if (sharedCertificate == null)
+                {
+                    _logger.LogError("Failed to get shared certificate");
+                    throw new InvalidOperationException("Failed to get shared certificate");
+                }
+                
+                _logger.LogInformation("Using certificate: Subject={Subject}, Thumbprint={Thumbprint}, HasPrivateKey={HasPrivateKey}, NotBefore={NotBefore}, NotAfter={NotAfter}",
+                    sharedCertificate.Subject,
+                    sharedCertificate.Thumbprint,
+                    sharedCertificate.HasPrivateKey,
+                    sharedCertificate.NotBefore,
+                    sharedCertificate.NotAfter);
 
-                // Store certificate reference
+                // Store the certificate for future reference
                 _certificates[connectionKey] = sharedCertificate;
 
                 // Create handler with proper HTTP/2 and TLS configuration
@@ -82,6 +97,8 @@ namespace Percolator.Application.Network
                     SslApplicationProtocol.Http2
                 };
                 handler.SslOptions.ApplicationProtocols = protocols;
+                
+                _logger.LogInformation("Configured TLS with protocols: TLS1.2, TLS1.3 and ALPN for HTTP/2 only");
 
                 // Certificate validation callback
                 handler.SslOptions.RemoteCertificateValidationCallback = (sender, cert, chain, errors) =>
@@ -95,6 +112,11 @@ namespace Percolator.Application.Network
                         _logger.LogWarning("Remote server did not present a certificate");
                         return false;
                     }
+                    
+                    _logger.LogInformation("Validating server certificate: Subject={Subject}, Thumbprint={Thumbprint}, Error={SslPolicyErrors}",
+                        cert.Subject,
+                        ((X509Certificate2)cert).Thumbprint,
+                        errors);
                     
                     // Simply compare with our shared certificate thumbprint
                     bool isMatch = ((X509Certificate2)cert).Thumbprint.Equals(sharedCertificate.Thumbprint, StringComparison.OrdinalIgnoreCase);
@@ -123,6 +145,8 @@ namespace Percolator.Application.Network
                 _logger.LogInformation("Creating gRPC channel to {Endpoint}", endpoint);
 
                 // Create gRPC channel with the correct URI format and explicit HTTP/2 configuration
+                // For TLS connections, we need to use the correct TLS port based on how the server is configured
+                // The server's MessageListenerService uses the provided port directly for TLS
                 var uri = new Uri($"https://{endpoint.Host}:{endpoint.Port}");
                 var channelOptions = new GrpcChannelOptions
                 {
@@ -132,7 +156,7 @@ namespace Percolator.Application.Network
                     DisposeHttpClient = false                 // We manage the HttpClient ourselves
                 };
 
-                _logger.LogInformation("Configured gRPC channel options with HTTP/2 support");
+                _logger.LogInformation("Configured gRPC channel options with HTTP/2 support for TLS");
 
                 var channel = GrpcChannel.ForAddress(uri, channelOptions);
                 _channels[connectionKey] = channel;
@@ -145,27 +169,54 @@ namespace Percolator.Application.Network
                 // Add a cancellation deadline
                 using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(30));
 
-                var response = await client.EstablishSessionAsync(request, cancellationToken: cts.Token);
-
-                _logger.LogInformation("Session successfully established with {Endpoint}", endpoint);
-                
-                // If this is a new peer that we've never seen before, add it to the trusted peers
-                if (remoteCert == null)
-                {
-                    await _peerTrustManager.AddTrustedPeer(sharedCertificate);
+                try {
+                    var response = await client.EstablishSessionAsync(request, cancellationToken: cts.Token);
+                    _logger.LogInformation("Session successfully established with {Endpoint}", endpoint);
+                    return response;
                 }
-                
-                return response;
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Failed to establish gRPC session with {Endpoint}: {ErrorMessage}", endpoint, ex.Message);
+                    
+                    // Enhanced error information
+                    if (ex is RpcException rpcEx)
+                    {
+                        _logger.LogError("gRPC error details - Status: {Status}, Detail: {Detail}", 
+                            rpcEx.Status.StatusCode, 
+                            rpcEx.Status.Detail);
+                    }
+                    
+                    // Check for inner HttpRequestException
+                    if (ex.InnerException is HttpRequestException httpEx)
+                    {
+                        _logger.LogError("HTTP error details: {Message}", httpEx.Message);
+                        
+                        // Check for authentication exceptions
+                        if (httpEx.InnerException is System.Security.Authentication.AuthenticationException authEx)
+                        {
+                            _logger.LogError("TLS authentication failed: {Message}", authEx.Message);
+                            
+                            // Check for more specific TLS handshake errors
+                            if (authEx.InnerException != null)
+                            {
+                                _logger.LogError("TLS inner exception: {Type}: {Message}", 
+                                    authEx.InnerException.GetType().Name,
+                                    authEx.InnerException.Message);
+                            }
+                        }
+                    }
+                    
+                    throw;
+                }
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not RpcException)
             {
-                _logger.LogError(ex, "Failed to establish gRPC session with {Endpoint}: {ErrorMessage}", 
-                    endpoint, ex.Message);
-                
-                // Clean up on failure
-                string connectionKey = $"{endpoint.Host}:{endpoint.Port}";
-                await CleanupConnectionResourcesAsync(connectionKey);
-                throw;
+                _logger.LogError(ex, "Failed to establish gRPC session with {Endpoint}: {ErrorMessage}", endpoint, ex.Message);
+                throw new RpcException(new Status(StatusCode.Unavailable, ex.Message), "blah");
+            }
+            finally
+            {
+                // Don't clean up here as we want to keep the connection open
             }
         }
 
