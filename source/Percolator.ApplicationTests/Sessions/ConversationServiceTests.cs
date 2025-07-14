@@ -15,6 +15,7 @@ using Percolator.Application.Network;
 using Percolator.Application.Sessions;
 using Percolator.Chat;
 using Percolator.Contracts;
+using Percolator.Cryptography;
 using Percolator.Identity;
 using Percolator.Identity.Model;
 using Percolator.Network;
@@ -79,7 +80,8 @@ public class ConversationServiceTests
             _mockPeerRepository.Object,
             _mockOneTimeKeyProvider.Object,
             _activeIdentityContext,
-            _mockGrpcSessionService.Object
+            _mockGrpcSessionService.Object, 
+            new X3DHManager()
         );
     }
 

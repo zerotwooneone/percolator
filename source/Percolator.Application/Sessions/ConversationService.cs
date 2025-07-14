@@ -21,7 +21,7 @@ using Google.Protobuf;
 using Percolator.Application.Identity;
 using Percolator.Application.KeyExchange;
 using Percolator.Chat.ValueObjects;
-
+using Percolator.Cryptography;
 using ChatConversation = Percolator.Chat.Conversation;
 using ChatConversationId = Percolator.Chat.ValueObjects.ConversationId;
 using ChatParticipantId = Percolator.Chat.ValueObjects.ParticipantId;
@@ -47,6 +47,7 @@ namespace Percolator.Application.Sessions
         private readonly IOneTimeKeyProvider _oneTimeKeyProvider;
         private readonly ActiveIdentityContext _activeIdentityContext;
         private readonly IGrpcSessionService _grpcSessionService;
+        private readonly IX3DHManager _x3DhManager;
 
         public ConversationService(
             ILogger<ConversationService> logger,
@@ -56,7 +57,8 @@ namespace Percolator.Application.Sessions
             IPeerRepository peerRepository,
             IOneTimeKeyProvider oneTimeKeyProvider,
             ActiveIdentityContext activeIdentityContext,
-            IGrpcSessionService grpcSessionService)
+            IGrpcSessionService grpcSessionService, 
+            IX3DHManager x3DhManager)
         {
             _logger = logger;
             _orchestrator = orchestrator;
@@ -66,6 +68,7 @@ namespace Percolator.Application.Sessions
             _oneTimeKeyProvider = oneTimeKeyProvider;
             _activeIdentityContext = activeIdentityContext;
             _grpcSessionService = grpcSessionService;
+            _x3DhManager = x3DhManager;
         }
 
         public async Task<ChatConversationId> CreateDirectConversationAsync(DnsEndPoint endpoint, string peerName)
@@ -99,7 +102,9 @@ namespace Percolator.Application.Sessions
                     throw new InvalidOperationException("No active identity or keys available");
                 }
                 
+                var signedPreKeyPublicBytes = _activeIdentityContext.Keys.SignedPreKey.PublicKey.ExportSubjectPublicKeyInfo();
                 // Prepare handshake request
+                var signPreKey = _x3DhManager.SignPreKey(_activeIdentityContext.Keys.IdentitySigningKey, new PreKey(signedPreKeyPublicBytes));
                 var request = new EstablishSessionRequest
                 {
                     InitiatorBundle = new ContractsPreKeyBundle
@@ -107,10 +112,14 @@ namespace Percolator.Application.Sessions
                         IdentityAgreementKey = Google.Protobuf.ByteString.CopyFrom(_activeIdentityContext.Keys.IdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
                         SignedPreKey = Google.Protobuf.ByteString.CopyFrom(_activeIdentityContext.Keys.SignedPreKey.PublicKey.ExportSubjectPublicKeyInfo()),
                         IdentitySigningKey = Google.Protobuf.ByteString.CopyFrom(_activeIdentityContext.Keys.IdentitySigningKey.ExportSubjectPublicKeyInfo()),
-                        OneTimePreKey = ephemeralKey is null ? ByteString.Empty : Google.Protobuf.ByteString.CopyFrom(ephemeralKey.ExportSubjectPublicKeyInfo()) 
-                    }
+                        OneTimePreKey = ephemeralKey is null ? ByteString.Empty : Google.Protobuf.ByteString.CopyFrom(ephemeralKey.ExportSubjectPublicKeyInfo()),
+                        PreKeySignature = ByteString.CopyFrom(signPreKey.Value)
+                    },
+                    InitiatorEphemeralKey = ephemeralKey is null ? ByteString.Empty : Google.Protobuf.ByteString.CopyFrom(ephemeralKey.ExportSubjectPublicKeyInfo())
                 };
 
+                _logger.LogInformation("Created establish session request with valid signature for X3DH handshake");
+                
                 // For shared certificate approach, we don't need TOFU flow or special cert handling
                 // We know both sides use the same certificate, so skip all the cert verification logic
                 
