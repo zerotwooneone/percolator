@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using FluentAssertions;
 using Google.Protobuf;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Percolator.Application.Identity;
 using Percolator.Application.KeyExchange;
@@ -56,7 +57,8 @@ public class X3DHOrchestratorTests
         _orchestrator = new X3DHOrchestrator(
             _activeIdentityContext,
             _mockX3dhManager.Object,
-            _mockOneTimeKeyProvider.Object
+            _mockOneTimeKeyProvider.Object,
+            new NullLogger<X3DHOrchestrator>()
         );
     }
 

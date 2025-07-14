@@ -52,7 +52,7 @@ public class DirectSessionManager : IDirectSessionManager
 
         var sessionState = _doubleRatchetProtocol.RespondToSession(
             new RatchetIdentityKey(remoteIdentityKey.Value),
-            new PrivateEphemeralKey(_activeIdentityContext.Keys.SignedPreKey.ExportPkcs8PrivateKey()),
+            new PrivateEphemeralKey(_activeIdentityContext.Keys.SignedPreKey.ExportECPrivateKey()),
             sharedSecret);
 
         var sessionId = GetSessionId(remotePeerId, conversationId);

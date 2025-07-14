@@ -101,23 +101,30 @@ namespace Percolator.Application.Sessions
                     _logger.LogError("No active identity or keys available");
                     throw new InvalidOperationException("No active identity or keys available");
                 }
-                
                 var signedPreKeyPublicBytes = _activeIdentityContext.Keys.SignedPreKey.PublicKey.ExportSubjectPublicKeyInfo();
                 // Prepare handshake request
                 var signPreKey = _x3DhManager.SignPreKey(_activeIdentityContext.Keys.IdentitySigningKey, new PreKey(signedPreKeyPublicBytes));
+                
+                // Log the key formats being used
+                _logger.LogDebug("Initiating handshake with keys - SignedPreKey length: {Length}, Signature length: {SigLength}",
+                    signedPreKeyPublicBytes.Length, signPreKey.Value.Length);
+                
                 var request = new EstablishSessionRequest
                 {
                     InitiatorBundle = new ContractsPreKeyBundle
                     {
+                        // Use consistent key export format for all keys - SubjectPublicKeyInfo
                         IdentityAgreementKey = Google.Protobuf.ByteString.CopyFrom(_activeIdentityContext.Keys.IdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
-                        SignedPreKey = Google.Protobuf.ByteString.CopyFrom(_activeIdentityContext.Keys.SignedPreKey.PublicKey.ExportSubjectPublicKeyInfo()),
+                        SignedPreKey = Google.Protobuf.ByteString.CopyFrom(signedPreKeyPublicBytes),
                         IdentitySigningKey = Google.Protobuf.ByteString.CopyFrom(_activeIdentityContext.Keys.IdentitySigningKey.ExportSubjectPublicKeyInfo()),
-                        OneTimePreKey = ephemeralKey is null ? ByteString.Empty : Google.Protobuf.ByteString.CopyFrom(ephemeralKey.ExportSubjectPublicKeyInfo()),
+                        OneTimePreKey = ephemeralKey is null ? ByteString.Empty : Google.Protobuf.ByteString.CopyFrom(ephemeralKey.PublicKey.ExportSubjectPublicKeyInfo()),
                         PreKeySignature = ByteString.CopyFrom(signPreKey.Value)
                     },
-                    InitiatorEphemeralKey = ephemeralKey is null ? ByteString.Empty : Google.Protobuf.ByteString.CopyFrom(ephemeralKey.ExportSubjectPublicKeyInfo())
+                    InitiatorEphemeralKey = ephemeralKey is null ? ByteString.Empty : Google.Protobuf.ByteString.CopyFrom(ephemeralKey.PublicKey.ExportSubjectPublicKeyInfo())
                 };
-
+                
+                _logger.LogDebug("Created handshake request with valid signature");
+                
                 _logger.LogInformation("Created establish session request with valid signature for X3DH handshake");
                 
                 // For shared certificate approach, we don't need TOFU flow or special cert handling
