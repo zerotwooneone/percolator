@@ -44,13 +44,9 @@ namespace Percolator.Application.Sessions
         private readonly IDirectSessionManager _sessionManager;
         private readonly IConversationRepository _conversationRepository;
         private readonly IPeerRepository _peerRepository;
-        private readonly IPeerConnectionRepository _peerConnectionRepository;
-        private readonly ITlsCertificateService _tlsCertificateService;
         private readonly IOneTimeKeyProvider _oneTimeKeyProvider;
         private readonly ActiveIdentityContext _activeIdentityContext;
-        private readonly ITlsHandshakeService _tlsHandshakeService;
         private readonly IGrpcSessionService _grpcSessionService;
-        private readonly IPeerTrustManager _peerTrustManager;
 
         public ConversationService(
             ILogger<ConversationService> logger,
@@ -58,26 +54,18 @@ namespace Percolator.Application.Sessions
             IDirectSessionManager sessionManager,
             IConversationRepository conversationRepository,
             IPeerRepository peerRepository,
-            IPeerConnectionRepository peerConnectionRepository,
-            ITlsCertificateService tlsCertificateService,
             IOneTimeKeyProvider oneTimeKeyProvider,
             ActiveIdentityContext activeIdentityContext,
-            ITlsHandshakeService tlsHandshakeService,
-            IGrpcSessionService grpcSessionService,
-            IPeerTrustManager peerTrustManager)
+            IGrpcSessionService grpcSessionService)
         {
             _logger = logger;
             _orchestrator = orchestrator;
             _sessionManager = sessionManager;
             _conversationRepository = conversationRepository;
             _peerRepository = peerRepository;
-            _peerConnectionRepository = peerConnectionRepository;
-            _tlsCertificateService = tlsCertificateService;
             _oneTimeKeyProvider = oneTimeKeyProvider;
             _activeIdentityContext = activeIdentityContext;
-            _tlsHandshakeService = tlsHandshakeService;
             _grpcSessionService = grpcSessionService;
-            _peerTrustManager = peerTrustManager;
         }
 
         public async Task<ChatConversationId> CreateDirectConversationAsync(DnsEndPoint endpoint, string peerName)
@@ -92,24 +80,10 @@ namespace Percolator.Application.Sessions
             
             return result.Value;
         }
-
-        public async Task<ChatConversationId> CreateDirectConversationAsync(DnsEndPoint endpoint, string peerName, byte[] remoteTlsKey)
-        {
-            _logger.LogInformation("Creating direct conversation with peer {PeerName} at {Endpoint} with provided TLS key", peerName, endpoint);
-            var result = await CreateDirectConversationWithKeyAsync(endpoint, peerName, remoteTlsKey);
-            
-            if (result == null)
-            {
-                throw new InvalidOperationException($"Failed to create conversation with peer {peerName}");
-            }
-            
-            return result.Value;
-        }
         
         private async Task<ChatConversationId?> CreateDirectConversationWithKeyAsync(
             DnsEndPoint endpoint, 
-            string peerName, 
-            byte[]? remoteTlsKey = null)
+            string peerName)
         {
             try
             {

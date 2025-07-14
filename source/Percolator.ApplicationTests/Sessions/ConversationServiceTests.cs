@@ -77,13 +77,9 @@ public class ConversationServiceTests
             _mockDirectSessionManager.Object,
             _mockConversationRepository.Object,
             _mockPeerRepository.Object,
-            _mockPeerConnectionRepository.Object,
-            _mockTlsCertificateService.Object,
             _mockOneTimeKeyProvider.Object,
             _activeIdentityContext,
-            _mockTlsHandshakeService.Object,
-            _mockGrpcSessionService.Object,
-            _mockPeerTrustManager.Object
+            _mockGrpcSessionService.Object
         );
     }
 
@@ -163,28 +159,19 @@ public class ConversationServiceTests
             }
         };
 
-        // Setup TLS Handshake and gRPC Services
-        _mockTlsHandshakeService
-            .Setup(s => s.CaptureCertificateAsync(It.IsAny<DnsEndPoint>()))
-            .ReturnsAsync(cert);
+        // Configure mocks for shared certificate approach
+        var sharedCert = CreateSelfSignedCertificate("localhost");
+        _mockTlsCertificateService
+            .Setup(s => s.GetOrCreateTlsCertificateAsync(It.IsAny<string>(), It.IsAny<byte[]>()))
+            .ReturnsAsync(sharedCert);
             
-        var sequence = new MockSequence();
-        
+        // Setup GrpcSessionService to succeed with the shared certificate
         _mockGrpcSessionService
-            .InSequence(sequence)
             .Setup(s => s.EstablishSessionAsync(
                 It.IsAny<DnsEndPoint>(), 
-                It.IsAny<EstablishSessionRequest>(), 
-                null))
-            .ThrowsAsync(new RpcException(new Status(StatusCode.Unavailable, "TLS handshake failed"))); // First call fails
-            
-        _mockGrpcSessionService
-            .InSequence(sequence)
-            .Setup(s => s.EstablishSessionAsync(
-                It.IsAny<DnsEndPoint>(), 
-                It.IsAny<EstablishSessionRequest>(), 
+                It.IsAny<EstablishSessionRequest>(),
                 It.IsAny<X509Certificate2>()))
-            .ReturnsAsync(grpcResponse); // Second call with certificate succeeds
+            .ReturnsAsync(grpcResponse);
 
         // Act
         var result = await _service.CreateDirectConversationAsync(endpoint, peerName);
@@ -200,171 +187,12 @@ public class ConversationServiceTests
             It.IsAny<SessionSharedSecret>()), Times.Once);
         
         // Verify that our services were called correctly
-        _mockTlsHandshakeService.Verify(s => s.CaptureCertificateAsync(It.IsAny<DnsEndPoint>()), Times.Once);
+        _mockTlsHandshakeService.Verify(s => s.CaptureCertificateAsync(It.IsAny<DnsEndPoint>()), Times.Never);
         _mockGrpcSessionService.Verify(s => s.EstablishSessionAsync(
             It.IsAny<DnsEndPoint>(), 
-            It.IsAny<EstablishSessionRequest>(), 
-            null), 
-            Times.Once);
-        _mockGrpcSessionService.Verify(s => s.EstablishSessionAsync(
-            It.IsAny<DnsEndPoint>(), 
-            It.IsAny<EstablishSessionRequest>(), 
+            It.IsAny<EstablishSessionRequest>(),
             It.IsAny<X509Certificate2>()), 
-            Times.AtLeastOnce());
-    }
-
-    [Test]
-    public async Task CreateDirectConversationAsync_WithRemoteTlsKey_UsesTlsCertificateService()
-    {
-        // Arrange
-        var endpoint = new DnsEndPoint("localhost", 5001);
-        var peerName = "test-peer";
-        var peer = new Peer(new IdentityPeerId(Guid.NewGuid()), peerName);
-
-        _mockPeerRepository.Setup(r => r.GetByNameAsync(peerName)).ReturnsAsync(peer);
-        _mockPeerRepository.Setup(r => r.GetByIdAsync(It.Is<IdentityPeerId>(id => id.Value == peer.Id.Value))).ReturnsAsync(peer);
-
-        // Create a mock TLS certificate and key
-        var cert = CreateSelfSignedCertificate("localhost");
-        var remoteTlsKey = cert.GetRSAPrivateKey()!.ExportPkcs8PrivateKey();
-
-        _mockTlsCertificateService
-            .Setup(s => s.GetOrCreateTlsCertificateAsync(peerName, remoteTlsKey))
-            .ReturnsAsync(cert);
-            
-        // Setup peer trust manager
-        _mockPeerTrustManager
-            .Setup(m => m.AddTrustedPeer(It.IsAny<X509Certificate2>()))
-            .Returns(Task.CompletedTask);
-
-        // Create a mock peer connection
-        var peerConnection = new PeerConnection(
-            new NetworkPeerId(peer.Id.Value),
-            new DirectMessagePublicKey(new byte[32]), // Valid DirectMessagePublicKey
-            new[] { new GrpcEndPoint(endpoint, DateTimeOffset.UtcNow) },
-            new[] { new TlsCertificate(cert.RawData) }, // Certificate matching our test cert
-            DateTimeOffset.UtcNow
-        );
-        
-        // Setup peer connection repository
-        _mockPeerConnectionRepository
-            .Setup(r => r.GetByTlsCertificateAsync(It.Is<TlsCertificate>(t => t.Value.SequenceEqual(cert.RawData))))
-            .ReturnsAsync(peerConnection);
-            
-        _mockPeerConnectionRepository
-            .Setup(r => r.UpdateDirectMessagePublicKeyAsync(It.IsAny<NetworkPeerId>(), It.IsAny<DirectMessagePublicKey>()))
-            .Returns(Task.CompletedTask);
-
-        _mockPeerConnectionRepository
-            .Setup(r => r.SaveAsync(It.IsAny<PeerConnection>()))
-            .Returns(Task.CompletedTask);
-
-        // Setup X3DH orchestrator to return a shared secret
-        _mockX3dhOrchestrator
-            .Setup(o => o.CompleteHandshake(It.IsAny<ContractsPreKeyBundle>(), It.IsAny<ECDiffieHellman>()))
-            .Returns(new CryptoSharedSecret(new byte[32]));
-
-        // Setup the one-time key provider to return a key
-        var oneTimeKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        _mockOneTimeKeyProvider
-            .Setup(p => p.PopOneTimeKey())
-            .Returns(oneTimeKey);
-            
-        // Setup conversation repository
-        _mockConversationRepository
-            .Setup(r => r.AddAsync(It.IsAny<ChatConversation>()))
-            .Returns(Task.CompletedTask);
-            
-        // Setup direct session manager
-        _mockDirectSessionManager
-            .Setup(m => m.EstablishSessionAsInitiatorAsync(
-                It.IsAny<SessionConversationId>(), 
-                It.IsAny<SessionPeerId>(), 
-                It.IsAny<SessionIdentityKey>(), 
-                It.IsAny<SessionRatchetKey>(), 
-                It.IsAny<SessionSharedSecret>()))
-            .Returns(Task.CompletedTask);
-            
-        // Create the response for the GrpcSessionService
-        var grpcResponse = new EstablishSessionResponse
-        {
-            ResponderBundle = new ContractsPreKeyBundle { 
-                IdentityAgreementKey = ByteString.CopyFrom(new byte[32]), 
-                SignedPreKey = ByteString.CopyFrom(new byte[32]),
-                IdentitySigningKey = ByteString.CopyFrom(new byte[32])
-            }
-        };
-            
-        // Setup GrpcSessionService to return success with the certificate
-        _mockGrpcSessionService
-            .Setup(s => s.EstablishSessionAsync(
-                It.IsAny<DnsEndPoint>(), 
-                It.IsAny<EstablishSessionRequest>(), 
-                (X509Certificate2)cert))
-            .ReturnsAsync(grpcResponse);
-
-        // Act
-        var result = await _service.CreateDirectConversationAsync(endpoint, peerName, remoteTlsKey);
-
-        // Assert
-        Assert.That(result, Is.Not.EqualTo(default(ChatConversationId)));
-        _mockTlsCertificateService.Verify(s => s.GetOrCreateTlsCertificateAsync(peerName, remoteTlsKey), Times.Once);
-        _mockPeerTrustManager.Verify(m => m.AddTrustedPeer(It.IsAny<X509Certificate2>()), Times.Once);
-        _mockGrpcSessionService.Verify(s => s.EstablishSessionAsync(
-            It.IsAny<DnsEndPoint>(), 
-            It.IsAny<EstablishSessionRequest>(), 
-            (X509Certificate2)cert), 
-            Times.AtLeastOnce);
-    }
-
-    private HttpResponseMessage CreateGrpcResponse(object responseMessage)
-    {
-        // Serialize the gRPC response message
-        var bytes = responseMessage.GetType().GetMethod("ToByteArray")?.Invoke(responseMessage, null) as byte[];
-        var content = new ByteArrayContent(bytes ?? Array.Empty<byte>());
-        content.Headers.ContentType = new MediaTypeHeaderValue("application/grpc");
-        
-        // Create the HTTP response message
-        var responseHttpMessage = new HttpResponseMessage
-        {
-            StatusCode = System.Net.HttpStatusCode.OK,
-            Content = content
-        };
-        responseHttpMessage.Headers.Add("grpc-status", "0"); // OK status
-        
-        return responseHttpMessage;
-    }
-    
-    private static X509Certificate2 CreateSelfSignedCertificate(ECDiffieHellman ecdhKey, string subjectName)
-    {
-        // Create certificate request with the specified key
-        var distinguishedName = new X500DistinguishedName($"CN={subjectName}");
-        
-        // For simplicity in tests, we'll create an RSA certificate instead
-        using var rsa = RSA.Create(2048);
-        var request = new CertificateRequest(distinguishedName, rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
-        
-        // Add basic constraints extension
-        request.CertificateExtensions.Add(new X509BasicConstraintsExtension(false, false, 0, true));
-        
-        // Add key usage extension
-        request.CertificateExtensions.Add(new X509KeyUsageExtension(
-            X509KeyUsageFlags.DigitalSignature | X509KeyUsageFlags.KeyEncipherment,
-            true));
-        
-        // Add extended key usage extension
-        request.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension(
-            new OidCollection { new Oid("1.3.6.1.5.5.7.3.1") }, // Server Authentication
-            false));
-        
-        // Create certificate with 1 year validity
-        var notBefore = DateTime.Now;
-        var notAfter = notBefore.AddYears(1);
-        
-        // Create self-signed certificate
-        var certificate = request.CreateSelfSigned(notBefore, notAfter);
-        
-        return certificate;
+            Times.Once);
     }
 
     private static X509Certificate2 CreateSelfSignedCertificate(string subjectName)

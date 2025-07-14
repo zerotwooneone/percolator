@@ -25,12 +25,9 @@ namespace Percolator.Application.Network
         private readonly SharedCertificateManager _certificateManager;
         
         // Keep strong references to active resources
-        private readonly ConcurrentDictionary<string, GrpcChannel> _channels = 
-            new ConcurrentDictionary<string, GrpcChannel>();
-        private readonly ConcurrentDictionary<string, X509Certificate2> _certificates =
-            new ConcurrentDictionary<string, X509Certificate2>();
-        private readonly ConcurrentDictionary<string, HttpClient> _httpClients =
-            new ConcurrentDictionary<string, HttpClient>();
+        private readonly ConcurrentDictionary<string, GrpcChannel> _channels = new();
+        private readonly ConcurrentDictionary<string, X509Certificate2> _certificates = new();
+        private readonly ConcurrentDictionary<string, HttpClient> _httpClients = new();
             
         public GrpcSessionService(
             ILogger<GrpcSessionService> logger,
@@ -62,67 +59,57 @@ namespace Percolator.Application.Network
                 // Store certificate reference
                 _certificates[connectionKey] = sharedCertificate;
 
-                // Configure a SocketsHttpHandler which gives more control over TLS settings than HttpClientHandler
+                // Create handler with proper HTTP/2 and TLS configuration
                 var handler = new SocketsHttpHandler
                 {
-                    // Enable HTTP/2 explicitly - this also handles ALPN negotiation properly
-                    EnableMultipleHttp2Connections = true,
-                    
-                    // Connection pooling and lifecycle management
-                    PooledConnectionIdleTimeout = TimeSpan.FromMinutes(2),
-                    PooledConnectionLifetime = TimeSpan.FromMinutes(5),
-                    MaxConnectionsPerServer = 10,
-                    KeepAlivePingTimeout = TimeSpan.FromSeconds(30),
-                    KeepAlivePingDelay = TimeSpan.FromSeconds(60),
-                    
-                    // Configure TLS options
                     SslOptions = new SslClientAuthenticationOptions
                     {
-                        // Use our client certificate
                         ClientCertificates = new X509CertificateCollection { sharedCertificate },
-                        
-                        // Configure protocols
                         EnabledSslProtocols = System.Security.Authentication.SslProtocols.Tls12 | System.Security.Authentication.SslProtocols.Tls13,
-                        
-                        // Explicitly enable protocols for ALPN
-                        ApplicationProtocols = new List<SslApplicationProtocol> { SslApplicationProtocol.Http2 },
-                        
-                        // TLS specific timeouts
-                        TargetHost = endpoint.Host,
-                        AllowRenegotiation = false,
-                        
-                        // Don't check revocation - this is a self-signed certificate
                         CertificateRevocationCheckMode = X509RevocationMode.NoCheck,
-                        
-                        // Configure server certificate validation
-                        RemoteCertificateValidationCallback = (sender, cert, chain, errors) =>
-                        {
-                            // Store the cert for future reference
-                            var remoteCert = cert as X509Certificate2;
-                            _certificates[connectionKey] = remoteCert;
-                            
-                            if (cert == null)
-                            {
-                                _logger.LogWarning("Remote server did not present a certificate");
-                                return false;
-                            }
-                            
-                            // Simply compare with our shared certificate thumbprint
-                            bool isMatch = ((X509Certificate2)cert).Thumbprint.Equals(sharedCertificate.Thumbprint, StringComparison.OrdinalIgnoreCase);
-                            
-                            if (isMatch)
-                            {
-                                _logger.LogInformation("Certificate validation succeeded for {Endpoint} with thumbprint {Thumbprint}", 
-                                    endpoint, ((X509Certificate2)cert).Thumbprint);
-                                return true;
-                            }
-                            else
-                            {
-                                _logger.LogWarning("Certificate mismatch! Expected {ExpectedThumbprint} but got {ActualThumbprint}",
-                                    sharedCertificate.Thumbprint, ((X509Certificate2)cert).Thumbprint);
-                                return false;
-                            }
-                        }
+                        TargetHost = endpoint.Host
+                    },
+                    PooledConnectionIdleTimeout = TimeSpan.FromMinutes(5),
+                    KeepAlivePingTimeout = TimeSpan.FromSeconds(20),
+                    KeepAlivePingDelay = TimeSpan.FromSeconds(60),
+                    EnableMultipleHttp2Connections = true,
+                    ConnectTimeout = TimeSpan.FromSeconds(10)
+                };
+
+                // Explicitly set HTTP/2 ALPN protocols
+                var protocols = new List<SslApplicationProtocol>
+                {
+                    SslApplicationProtocol.Http2
+                };
+                handler.SslOptions.ApplicationProtocols = protocols;
+
+                // Certificate validation callback
+                handler.SslOptions.RemoteCertificateValidationCallback = (sender, cert, chain, errors) =>
+                {
+                    // Store the cert for future reference
+                    var remoteCert = cert as X509Certificate2;
+                    _certificates[connectionKey] = remoteCert;
+                    
+                    if (cert == null)
+                    {
+                        _logger.LogWarning("Remote server did not present a certificate");
+                        return false;
+                    }
+                    
+                    // Simply compare with our shared certificate thumbprint
+                    bool isMatch = ((X509Certificate2)cert).Thumbprint.Equals(sharedCertificate.Thumbprint, StringComparison.OrdinalIgnoreCase);
+                    
+                    if (isMatch)
+                    {
+                        _logger.LogInformation("Certificate validation succeeded for {Endpoint} with thumbprint {Thumbprint}", 
+                            endpoint, ((X509Certificate2)cert).Thumbprint);
+                        return true;
+                    }
+                    else
+                    {
+                        _logger.LogWarning("Certificate mismatch! Expected {ExpectedThumbprint} but got {ActualThumbprint}",
+                            sharedCertificate.Thumbprint, ((X509Certificate2)cert).Thumbprint);
+                        return false;
                     }
                 };
 
