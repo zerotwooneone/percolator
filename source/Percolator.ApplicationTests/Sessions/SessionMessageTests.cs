@@ -59,7 +59,7 @@ public class SessionMessageTests
 
         var dummySessionState = new SessionState(new byte[32]);
         _mockProtocol.Setup(p => p.InitiateSession(It.IsAny<SessionRatchetIdentityKey>(), It.IsAny<SessionRatchetEphemeralKey>(), It.IsAny<SessionSharedSecret>()))
-            .Returns((dummySessionState, new SessionRatchetEphemeralKey(new byte[33])));
+            .Returns(dummySessionState);
         _mockProtocol.Setup(p => p.RespondToSession(It.IsAny<SessionRatchetIdentityKey>(), It.IsAny<SessionPrivateEphemeralKey>(), It.IsAny<SessionSharedSecret>()))
             .Returns(dummySessionState);
 

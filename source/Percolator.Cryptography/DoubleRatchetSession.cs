@@ -16,8 +16,6 @@ public class DoubleRatchetSession : IDisposable
     private readonly Dictionary<ulong, MessageKey> _skippedMessageKeys = new();
     private readonly RatchetIdentityKey _remoteIdentityPublicKey;
 
-    public RatchetEphemeralKey RatchetKey => new(_dhRatchetKey!.PublicKey.ExportSubjectPublicKeyInfo());
-
     private DoubleRatchetSession(SharedSecret sharedSecret, RatchetIdentityKey remoteIdentityPublicKey)
     {
         _remoteIdentityPublicKey = remoteIdentityPublicKey;
@@ -44,6 +42,8 @@ public class DoubleRatchetSession : IDisposable
     public static DoubleRatchetSession AsInitiator(SharedSecret sharedSecret, RatchetIdentityKey remoteIdentityPublicKey, RatchetEphemeralKey remoteRatchetPublicKey)
     {
         var session = new DoubleRatchetSession(sharedSecret, remoteIdentityPublicKey);
+        // Initialize a local ratchet key for the initiator as well
+        session._dhRatchetKey = ECDiffieHellman.Create();
         session._remoteRatchetKey = remoteRatchetPublicKey;
         return session;
     }

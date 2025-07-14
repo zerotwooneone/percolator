@@ -11,12 +11,12 @@ public class DoubleRatchetProtocolAdapter : IDoubleRatchetProtocol
 {
     private readonly JsonSerializerOptions _jsonOptions = new() { WriteIndented = true };
 
-    public (SessionState, RatchetEphemeralKey) InitiateSession(RatchetIdentityKey theirIdentityKey, RatchetEphemeralKey theirRatchetKey, SharedSecret sharedSecret)
+    public SessionState InitiateSession(RatchetIdentityKey theirIdentityKey, RatchetEphemeralKey theirRatchetKey, SharedSecret sharedSecret)
     {
         var session = Crypto.DoubleRatchetSession.AsInitiator(new Crypto.SharedSecret(sharedSecret.Value), new Crypto.RatchetIdentityKey(theirIdentityKey.Value), new Crypto.RatchetEphemeralKey(theirRatchetKey.Value));
         var state = session.GetState();
         var serializedState = JsonSerializer.SerializeToUtf8Bytes(state, _jsonOptions);
-        return (new SessionState(serializedState), new RatchetEphemeralKey(session.RatchetKey.Value));
+        return new SessionState(serializedState);
     }
 
     public SessionState RespondToSession(RatchetIdentityKey theirIdentityKey, PrivateEphemeralKey ourRatchetKey, SharedSecret sharedSecret)

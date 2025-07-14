@@ -10,7 +10,7 @@ public interface IDoubleRatchetProtocol
     /// Initiates a new Double Ratchet session as the initiator.
     /// </summary>
     /// <returns>The initial state of the session.</returns>
-    (SessionState, RatchetEphemeralKey) InitiateSession(RatchetIdentityKey theirIdentityKey, RatchetEphemeralKey theirRatchetKey, SharedSecret sharedSecret);
+    SessionState InitiateSession(RatchetIdentityKey theirIdentityKey, RatchetEphemeralKey theirRatchetKey, SharedSecret sharedSecret);
 
     /// <summary>
     /// Responds to a new Double Ratchet session as the responder.

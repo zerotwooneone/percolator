@@ -35,7 +35,7 @@ public class DirectSessionManager : IDirectSessionManager
         if (_activeIdentityContext.Keys is null)
             throw new InvalidOperationException("Identity context not loaded");
 
-        var (sessionState, _) = _doubleRatchetProtocol.InitiateSession(
+        var sessionState = _doubleRatchetProtocol.InitiateSession(
             new RatchetIdentityKey(remoteIdentityKey.Value),
             new RatchetEphemeralKey(remoteRatchetKey.Value),
             sharedSecret);
