@@ -48,6 +48,7 @@ namespace Percolator.Application.Sessions
         private readonly ActiveIdentityContext _activeIdentityContext;
         private readonly IGrpcSessionService _grpcSessionService;
         private readonly IX3DHManager _x3DhManager;
+        private readonly IPeerConnectionRepository _peerConnectionRepository;
 
         public ConversationService(
             ILogger<ConversationService> logger,
@@ -58,7 +59,8 @@ namespace Percolator.Application.Sessions
             IOneTimeKeyProvider oneTimeKeyProvider,
             ActiveIdentityContext activeIdentityContext,
             IGrpcSessionService grpcSessionService, 
-            IX3DHManager x3DhManager)
+            IX3DHManager x3DhManager, 
+            IPeerConnectionRepository peerConnectionRepository)
         {
             _logger = logger;
             _orchestrator = orchestrator;
@@ -69,6 +71,7 @@ namespace Percolator.Application.Sessions
             _activeIdentityContext = activeIdentityContext;
             _grpcSessionService = grpcSessionService;
             _x3DhManager = x3DhManager;
+            _peerConnectionRepository = peerConnectionRepository;
         }
 
         public async Task<ChatConversationId> CreateDirectConversationAsync(DnsEndPoint endpoint, string peerName)
@@ -144,7 +147,7 @@ namespace Percolator.Application.Sessions
                 var peer = await _peerRepository.GetByNameAsync(peerName);
                 if (peer == null)
                 {
-                    peer = await CreatePeerAsync(peerName, response.ResponderBundle);
+                    peer = await CreatePeerAsync(peerName, response.ResponderBundle, endpoint);
                 }
 
                 // Create a new conversation
@@ -176,12 +179,19 @@ namespace Percolator.Application.Sessions
             }
         }
         
-        private async Task<IdentityPeer> CreatePeerAsync(
-            string peerName,
-            ContractsPreKeyBundle responderBundle)
+        private async Task<IdentityPeer> CreatePeerAsync(string peerName,
+            ContractsPreKeyBundle responderBundle, DnsEndPoint endpoint)
         {
             var newPeer = new IdentityPeer(new IdentityPeerId(Guid.NewGuid()), peerName);
             await _peerRepository.AddAsync(newPeer);
+            var networkPeerId = new NetworkPeerId(newPeer.Id.Value);
+            var timeStamp=DateTime.UtcNow;
+            var peerConnection = new PeerConnection(
+                networkPeerId, 
+                new DirectMessagePublicKey( responderBundle.IdentityAgreementKey.ToByteArray()), 
+                new List<GrpcEndPoint>{new GrpcEndPoint(endpoint,timeStamp)},
+                new List<TlsCertificate>(),timeStamp);
+            await _peerConnectionRepository.SaveAsync(peerConnection);
             return newPeer;
         }
     }

@@ -9,6 +9,7 @@ using System.CommandLine;
 using System.CommandLine.Builder;
 using System.CommandLine.Invocation;
 using System.CommandLine.Parsing;
+using System.Diagnostics.CodeAnalysis;
 using System.Net;
 using System.Net.Http;
 using System.Net.Security;
@@ -21,8 +22,11 @@ using Percolator.Application;
 using Percolator.Application.Identity;
 using Percolator.Application.Network;
 using Percolator.Application.Sessions;
+using Percolator.Identity;
+using IdentityPeerId = Percolator.Identity.PeerId;
 using Percolator.Infrastructure;
 using Percolator.Network;
+using NetworkPeerId = Percolator.Network.PeerId;
 using Percolator.Node;
 using ChatConversationId = Percolator.Chat.ValueObjects.ConversationId;
 
@@ -268,7 +272,7 @@ async Task SendCommandHandler(InvocationContext context)
                 Console.ResetColor();
                 return;
             }
-
+            
             conversationId = await conversationService.CreateDirectConversationAsync(endpoint, peerName);
             Console.ForegroundColor = ConsoleColor.Cyan;
             Console.WriteLine($"Established new conversation {conversationId.Value} with {peerName}");
@@ -404,7 +408,7 @@ static ServiceProvider BuildServiceProvider(IConfiguration configuration)
     return services.BuildServiceProvider();
 }
 
-bool TryParseEndpoint(string? text, out DnsEndPoint? endpoint)
+bool TryParseEndpoint(string? text, [NotNullWhen(true)] out DnsEndPoint? endpoint)
 {
     endpoint = null;
     if (string.IsNullOrEmpty(text))

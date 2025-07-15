@@ -13,7 +13,7 @@ public class PeerConnection
     /// <summary>
     /// The public key required to initiate a direct message session with this peer.
     /// </summary>
-    public DirectMessagePublicKey? DirectMessagePublicKey { get; init; }
+    public DirectMessagePublicKey? DirectMessagePublicKey { get; private set; }
 
     /// <summary>
     /// A list of known gRPC endpoints for this peer.
@@ -57,5 +57,10 @@ public class PeerConnection
     public void AddGrpcEndPoint(GrpcEndPoint grpcEndPoint)
     {
         _grpcEndPoints.Add(grpcEndPoint);
+    }
+    
+    public void SetDirectMessagePublicKey(DirectMessagePublicKey directMessagePublicKey)
+    {
+        DirectMessagePublicKey = directMessagePublicKey;
     }
 }

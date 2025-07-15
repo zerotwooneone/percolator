@@ -81,7 +81,8 @@ public class ConversationServiceTests
             _mockOneTimeKeyProvider.Object,
             _activeIdentityContext,
             _mockGrpcSessionService.Object, 
-            new X3DHManager()
+            new X3DHManager(), 
+            _mockPeerConnectionRepository.Object
         );
     }
 
