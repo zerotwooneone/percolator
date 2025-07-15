@@ -22,8 +22,8 @@ public class GrpcMessageTransportService : IMessageTransportService
     private readonly SharedCertificateManager _certificateManager;
 
     public GrpcMessageTransportService(
-        ILogger<GrpcMessageTransportService> logger, 
-        IPeerRepository peerRepository, 
+        ILogger<GrpcMessageTransportService> logger,
+        IPeerRepository peerRepository,
         IPeerConnectionRepository peerConnectionRepository,
         SharedCertificateManager certificateManager)
     {
@@ -33,7 +33,8 @@ public class GrpcMessageTransportService : IMessageTransportService
         _certificateManager = certificateManager;
     }
 
-    public async Task SendMessageAsync(IdentityPeerId recipientPeerId, ConversationId conversationId, SessionRatchetMessage message)
+    public async Task SendMessageAsync(IdentityPeerId recipientPeerId, ConversationId conversationId,
+        SessionRatchetMessage message)
     {
         var peer = await _peerRepository.GetByIdAsync(recipientPeerId);
         if (peer is null)
@@ -53,10 +54,10 @@ public class GrpcMessageTransportService : IMessageTransportService
         {
             throw new InvalidOperationException($"No gRPC endpoints found for peer {peer.Id}. Cannot send message.");
         }
-        
+
         //todo: we should loop over all the connections and try to send the message to all of them sequentially
         var endPoint = peerConnection.GrpcEndPoints[0];
-        
+
         // Use the endpoint as the client key, not the peer ID
         var clientKey = $"{endPoint.EndPoint.Host}:{endPoint.EndPoint.Port}";
         var client = GetOrCreateClient(clientKey, endPoint);
@@ -69,16 +70,19 @@ public class GrpcMessageTransportService : IMessageTransportService
                 Payload = Google.Protobuf.ByteString.CopyFrom(message.Value)
             };
 
-            _logger.LogInformation("Sending message to {RecipientPeerId} for conversation {ConversationId}", recipientPeerId, conversationId);
+            _logger.LogInformation("Sending message to {RecipientPeerId} for conversation {ConversationId}",
+                recipientPeerId, conversationId);
             var response = await client.DeliverOpaqueMessageAsync(request);
-            _logger.LogInformation("Message sent successfully to {RecipientPeerId}. Response version: {Version}", recipientPeerId, response.Version);
-            
+            _logger.LogInformation("Message sent successfully to {RecipientPeerId}. Response version: {Version}",
+                recipientPeerId, response.Version);
+
             peerConnection.UpdateLastSeen(endPoint, DateTime.UtcNow);
             await _peerConnectionRepository.SaveAsync(peerConnection);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to send message to {RecipientPeerId} for conversation {ConversationId}", recipientPeerId, conversationId);
+            _logger.LogError(ex, "Failed to send message to {RecipientPeerId} for conversation {ConversationId}",
+                recipientPeerId, conversationId);
             throw;
         }
     }
@@ -91,51 +95,29 @@ public class GrpcMessageTransportService : IMessageTransportService
             {
                 _logger.LogInformation("Creating new gRPC client for {Endpoint}", endPoint);
 
-                // Load the trusted certificate for client validation
-                var sharedCertificate = _certificateManager.GetClientCertificate();
-                
-                _logger.LogInformation("Using shared certificate with thumbprint: {Thumbprint}", 
-                    sharedCertificate.Thumbprint);
-
-                var handler = new HttpClientHandler
+                // For local connections, use a simple handler without any TLS configuration
+                _logger.LogInformation("Using HTTP/2 without TLS for local connection: {Endpoint}", endPoint);
+                var handler = new SocketsHttpHandler
                 {
-                    ServerCertificateCustomValidationCallback = (request, cert, chain, errors) =>
-                    {
-                        if (cert is null)
-                        {
-                            _logger.LogWarning("TLS validation failed for endpoint {Endpoint}: No certificate was presented", endPoint);
-                            return false;
-                        }
-
-                        // Simply compare with our shared certificate thumbprint
-                        bool isMatch = cert.Thumbprint.Equals(sharedCertificate.Thumbprint, StringComparison.OrdinalIgnoreCase);
-                        
-                        if (isMatch)
-                        {
-                            _logger.LogInformation("Certificate validation succeeded for {Endpoint}", endPoint);
-                            return true;
-                        }
-                        else
-                        {
-                            _logger.LogWarning("Certificate mismatch for {Endpoint}! Expected {ExpectedThumbprint} but got {ActualThumbprint}",
-                                endPoint, sharedCertificate.Thumbprint, cert.Thumbprint);
-                            return false;
-                        }
-                    }
+                    EnableMultipleHttp2Connections = true,
+                    KeepAlivePingPolicy = HttpKeepAlivePingPolicy.Always,
+                    KeepAlivePingDelay = TimeSpan.FromSeconds(60),
+                    KeepAlivePingTimeout = TimeSpan.FromSeconds(30)
                 };
+
 
                 // Create HTTP client and configure channel options
                 var httpClient = new HttpClient(handler);
-                
+
                 var channelOptions = new GrpcChannelOptions
                 {
                     HttpClient = httpClient,
-                    MaxReceiveMessageSize = 4 * 1024 * 1024,  // 4 MB
-                    MaxSendMessageSize = 4 * 1024 * 1024      // 4 MB
+                    MaxReceiveMessageSize = 4 * 1024 * 1024, // 4 MB
+                    MaxSendMessageSize = 4 * 1024 * 1024 // 4 MB
                 };
-                
-                var uri = new Uri($"https://{endPoint.EndPoint.Host}:{endPoint.EndPoint.Port}");
-                _logger.LogInformation("Creating gRPC channel to {Uri}", uri);
+
+                var uri = new Uri($"http://{endPoint.EndPoint.Host}:{endPoint.EndPoint.Port}");
+                _logger.LogInformation("Creating gRPC channel to {Uri} using http", uri);
 
                 var channel = GrpcChannel.ForAddress(uri, channelOptions);
                 return new TransportService.TransportServiceClient(channel);
