@@ -30,9 +30,6 @@ public class FileBasedTrustedPeerStore : ITrustedPeerStore
 
     public async Task AddAsync(PublicKeyHash publicKeyHash)
     {
-        _mutex.WaitOne();
-        _trustedHashes.TryAdd(publicKeyHash, 0);
-        
         try
         {
             // wait if another process is already using it.
