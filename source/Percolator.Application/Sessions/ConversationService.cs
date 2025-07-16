@@ -152,7 +152,7 @@ namespace Percolator.Application.Sessions
 
                 // Create a new conversation
                 var conversation = new ChatConversation(
-                    new ChatConversationId(Guid.NewGuid()),
+                    new ChatConversationId(Guid.Parse(response.SessionId)),
                     new ChannelId(response.ResponderBundle.IdentitySigningKey.ToByteArray()),
                     new List<ChatParticipantId> { new(_activeIdentityContext.Identity!.Id), new(peer.Id.Value) },
                     new List<Message>(),
