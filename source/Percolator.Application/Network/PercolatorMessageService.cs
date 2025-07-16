@@ -13,6 +13,7 @@ using SessionPeerId = Percolator.Sessions.PeerId;
 using SessionConversationId = Percolator.Sessions.ConversationId;
 using Percolator.Application.Identity;
 using System.Security.Cryptography;
+using System.Text;
 using Percolator.Identity;
 using Percolator.Network;
 using NetworkPeerId = Percolator.Network.PeerId;
@@ -120,7 +121,7 @@ namespace Percolator.Application.Network
                 }
                 await _peerConnectionRepository.SaveAsync(connnectionInfo);
                 var networkPeerId = new NetworkPeerId(connnectionInfo.Id.Value);
-                
+                _logger.LogInformation("Connection info saved for peer {networkPeerId}", networkPeerId.Value);
                 
                 var peer = await _peerRepository.GetByIdAsync(new IdentityPeerId(networkPeerId.Value));
 
@@ -128,9 +129,9 @@ namespace Percolator.Application.Network
                 if (peer is null)
                 {
                     var publicKeyHash = new PublicKeyHash(SHA1.HashData(ideneityAgreementKeyBytes));
-                    _logger.LogInformation("Peer with key hash {KeyHash} is unknown. Creating a new peer record.", publicKeyHash);
+                    _logger.LogInformation("Peer with key hash {KeyHash} is unknown. Creating a new peer record", Convert.ToBase64String(publicKeyHash.Value));
                     // For now, we'll auto-generate a name.
-                    var newPeerName = $"Peer-{publicKeyHash.ToString().Substring(0, 8)}";
+                    var newPeerName = $"Peer-{Convert.ToBase64String(publicKeyHash.Value)}";
                     
                     peer = new IdentityPeer(new IdentityPeerId(connnectionInfo.Id.Value), newPeerName);
                     await _peerRepository.AddAsync(peer);
@@ -146,6 +147,8 @@ namespace Percolator.Application.Network
                         new(_activeIdentityContext.Identity.Id),
                         new(peer.Id.Value)
                     };
+                    
+                    _logger.LogInformation("Creating new conversation with participants  {Participants}", string.Join(", ", participants));
 
                     conversation = new ChatConversation(
                         ChatConversationId.NewId(),
@@ -155,7 +158,10 @@ namespace Percolator.Application.Network
                         peer.Name);
 
                     await _conversationRepository.AddAsync(conversation);
-                    _logger.LogInformation("Created new conversation with {PeerName} for channel {ChannelId}", peer.Name, channelId);
+                    _logger.LogInformation("Created new conversation with peer {PeerName} ", peer.Name);
+                    
+                    var testConversation = await _conversationRepository.GetByChannelIdAsync(channelId);
+                    _logger.LogWarning("Retrieved conversation with participants {Participants} ", string.Join(", ", testConversation!.Participants));
                 }
 
                 await _sessionManager.EstablishSessionAsResponderAsync(
@@ -222,7 +228,7 @@ namespace Percolator.Application.Network
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error processing opaque message for session {SessionId}", request.SessionId);
+                _logger.LogError(ex, "Error processing opaque message for session {SessionId} - ex:{Exception}", request.SessionId, ex);
                 throw new RpcException(new Status(StatusCode.Internal, "Error processing message."));
             }
         }

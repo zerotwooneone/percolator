@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using FluentAssertions;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Percolator.Application.Identity;
 using Percolator.Application.Sessions;
@@ -71,7 +72,8 @@ public class SessionMessageTests
             _mockConversationRepo.Object,
             _mockMessageStore.Object,
             _aliceIdentity,
-            _mockProtocol.Object
+            _mockProtocol.Object, 
+            new NullLogger<DirectSessionManager>()
         );
 
         _bobManager = new DirectSessionManager(
@@ -79,7 +81,8 @@ public class SessionMessageTests
             _mockConversationRepo.Object,
             _mockMessageStore.Object,
             _bobIdentity,
-            _mockProtocol.Object
+            _mockProtocol.Object, 
+            new NullLogger<DirectSessionManager>()
         );
     }
 

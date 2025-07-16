@@ -1,6 +1,7 @@
 using AutoFixture;
 using FluentAssertions;
 using Microsoft.Extensions.Options;
+using Moq;
 using Percolator.Chat;
 using Percolator.Infrastructure.Chat;
 
@@ -49,7 +50,7 @@ public class FileBasedConversationRepositoryTests
         // Arrange
         var storageOptions = new Percolator.Infrastructure.StorageOptions { Path = _testDirectory };
         var options = Options.Create(storageOptions);
-        var repository = new FileBasedConversationRepository(options);
+        var repository = new FileBasedConversationRepository(options, new Mock<ISelfParticipantIdProvider>().Object);
         var originalConversation = _fixture.Create<Conversation>();
 
         // Act

@@ -9,35 +9,36 @@ namespace Percolator.Infrastructure.Chat;
 
 public class FileBasedConversationRepository : IConversationRepository
 {
+    private readonly ISelfParticipantIdProvider _selfParticipantIdProvider;
     private readonly StorageOptions _storageOptions;
     private readonly PercolatorJsonContext _jsonContext;
-    private readonly string _indexFilePath;
     private readonly ConcurrentDictionary<string, Guid> _channelIdIndex;
 
 
-    public FileBasedConversationRepository(IOptions<StorageOptions> storageOptions)
+    public FileBasedConversationRepository(
+        IOptions<StorageOptions> storageOptions,
+        ISelfParticipantIdProvider selfParticipantIdProvider)
     {
+        _selfParticipantIdProvider = selfParticipantIdProvider;
         _storageOptions = storageOptions.Value;
         _jsonContext = new PercolatorJsonContext(new JsonSerializerOptions
         {
             WriteIndented = true
         });
-        
-        var conversationsDir = Path.Combine(_storageOptions.Path, "conversations");
-        Directory.CreateDirectory(conversationsDir);
-        _indexFilePath = Path.Combine(conversationsDir, "channel_id_index.json");
 
         _channelIdIndex = LoadIndex();
     }
 
     private ConcurrentDictionary<string, Guid> LoadIndex()
     {
-        if (!File.Exists(_indexFilePath))
+        Directory.CreateDirectory(GetConversationsPath());
+        var channelIndexPath = GetChannelIndexPath();
+        if (!File.Exists(channelIndexPath))
         {
             return new ConcurrentDictionary<string, Guid>();
         }
 
-        var json = File.ReadAllText(_indexFilePath);
+        var json = File.ReadAllText(channelIndexPath);
         var index = JsonSerializer.Deserialize<Dictionary<string, Guid>>(json);
         return new ConcurrentDictionary<string, Guid>(index ?? new Dictionary<string, Guid>());
     }
@@ -45,12 +46,14 @@ public class FileBasedConversationRepository : IConversationRepository
     private async Task PersistIndex()
     {
         var json = JsonSerializer.Serialize(_channelIdIndex, new JsonSerializerOptions { WriteIndented = true });
-        await File.WriteAllTextAsync(_indexFilePath, json);
+        Directory.CreateDirectory(GetConversationsPath());
+        await File.WriteAllTextAsync(GetChannelIndexPath(), json);
     }
 
     public async Task<Conversation?> GetByIdAsync(ConversationId conversationId)
     {
-        var path = GetPath(conversationId);
+        Directory.CreateDirectory(GetConversationsPath());
+        var path = GetConversationPath(conversationId);
         if (!File.Exists(path))
         {
             return null;
@@ -79,8 +82,8 @@ public class FileBasedConversationRepository : IConversationRepository
     public async Task AddAsync(Conversation conversation)
     {
         var model = ToModel(conversation);
-        var path = GetPath(conversation.Id);
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        var path = GetConversationPath(conversation.Id);
+        Directory.CreateDirectory(GetConversationsPath());
         var json = JsonSerializer.Serialize(model, _jsonContext.ConversationModel);
         await File.WriteAllTextAsync(path, json);
 
@@ -128,6 +131,10 @@ public class FileBasedConversationRepository : IConversationRepository
         };
     }
 
-    private string GetPath(ConversationId conversationId) =>
-        Path.Combine(_storageOptions.Path, "conversations", $"{conversationId.Value}.json");
+    private string GetConversationsPath() =>
+        Path.Combine(_storageOptions.Path,_selfParticipantIdProvider.Get().Value.ToString(), "conversations");
+    private string GetConversationPath(ConversationId conversationId) =>
+        Path.Combine(GetConversationsPath(), $"{conversationId.Value}.json");
+    private string GetChannelIndexPath() =>
+        Path.Combine(GetConversationsPath(), "channel_id_index.json");
 }

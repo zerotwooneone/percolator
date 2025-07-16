@@ -15,6 +15,7 @@ using IdentityPeerId = Percolator.Identity.PeerId;
 using SessionPeerId = Percolator.Sessions.PeerId;
 using Percolator.Chat.ValueObjects;
 using System.Text.Json;
+using Microsoft.Extensions.Logging.Abstractions;
 using SessionState = Percolator.Sessions.SessionState;
 using SessionRatchetMessage = Percolator.Sessions.RatchetMessage;
 using CryptoRatchetIdentityKey = Percolator.Cryptography.RatchetIdentityKey;
@@ -55,7 +56,8 @@ public class MessageServiceTests
             _mockConversationRepository.Object,
             _mockMessageStore.Object,
             _activeIdentityContext,
-            _mockProtocol.Object);
+            _mockProtocol.Object, 
+            new NullLogger<DirectSessionManager>());
 
         _messageService = new MessageService(
             _mockMessageStore.Object,

@@ -133,8 +133,8 @@ try {
     Wait-ForNodeStartup -seconds $NodeStartupWaitTime
     
     # Start client node (bob)
-    Write-Log "Starting Bob node on web port $bobWebPort (gRPC: $bobGrpcPort)..."
-    $bobNode = Start-PercolatorNode -identity "bob" -port $bobWebPort -enableTlsDebug
+    #Write-Log "Starting Bob node on web port $bobWebPort (gRPC: $bobGrpcPort)..."
+    #$bobNode = Start-PercolatorNode -identity "bob" -port $bobWebPort -enableTlsDebug
     
     # Wait for client to initialize
     Wait-ForNodeStartup -seconds $NodeStartupWaitTime

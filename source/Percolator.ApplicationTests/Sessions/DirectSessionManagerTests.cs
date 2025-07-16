@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Percolator.Application.Identity;
 using Percolator.Application.Sessions;
@@ -46,7 +47,8 @@ public class DirectSessionManagerTests
             _mockConversationRepository.Object,
             _mockMessageStore.Object,
             _mockActiveIdentityContext.Object,
-            _mockProtocol.Object
+            _mockProtocol.Object, 
+            new NullLogger<DirectSessionManager>()
         );
     }
 

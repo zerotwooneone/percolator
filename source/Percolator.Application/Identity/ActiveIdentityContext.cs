@@ -1,6 +1,9 @@
 using Percolator.Identity;
 using Percolator.Identity.Model;
 using System.Runtime.CompilerServices;
+using Percolator.Chat;
+using Percolator.Chat.ValueObjects;
+using ChatParticipantId = Percolator.Chat.ValueObjects.ParticipantId;
 
 [assembly: InternalsVisibleTo("Percolator.ApplicationTests")]
 
@@ -10,7 +13,7 @@ namespace Percolator.Application.Identity;
 /// Holds the details of the currently active identity for the running node.
 /// This context is populated at startup and treated as read-only thereafter.
 /// </summary>
-public class ActiveIdentityContext
+public class ActiveIdentityContext :ISelfParticipantIdProvider
 {
     public const string SigningKey = "signing";
     public const string IdentityKey = "identity";
@@ -18,4 +21,8 @@ public class ActiveIdentityContext
 
     public IdentityRecord? Identity { get; internal set; }
     public X3dhKeys? Keys { get; internal set; }
+    public ChatParticipantId Get()
+    {
+        return new ChatParticipantId(Identity!.Id);
+    }
 }

@@ -2,6 +2,7 @@ using Percolator.Application.Identity;
 using Percolator.Sessions;
 using SessionPeerId = Percolator.Sessions.PeerId;
 using System.Collections.Concurrent;
+using Microsoft.Extensions.Logging;
 using Percolator.Chat;
 using SessionConversationId = Percolator.Sessions.ConversationId;
 
@@ -14,6 +15,7 @@ public class DirectSessionManager : IDirectSessionManager
     private readonly IMessageStore _messageStore;
     private readonly ActiveIdentityContext _activeIdentityContext;
     private readonly IDoubleRatchetProtocol _doubleRatchetProtocol;
+    private readonly ILogger<DirectSessionManager> _logger;
     private readonly ConcurrentDictionary<SessionConversationId, SemaphoreSlim> _sessionLocks = new();
 
     public DirectSessionManager(
@@ -21,13 +23,15 @@ public class DirectSessionManager : IDirectSessionManager
         IConversationRepository conversationRepository,
         IMessageStore messageStore,
         ActiveIdentityContext activeIdentityContext,
-        IDoubleRatchetProtocol doubleRatchetProtocol)
+        IDoubleRatchetProtocol doubleRatchetProtocol,
+        ILogger<DirectSessionManager> logger)
     {
         _sessionStore = sessionStore;
         _conversationRepository = conversationRepository;
         _messageStore = messageStore;
         _activeIdentityContext = activeIdentityContext;
         _doubleRatchetProtocol = doubleRatchetProtocol;
+        _logger = logger;
     }
 
     public async Task EstablishSessionAsInitiatorAsync(SessionConversationId conversationId, SessionPeerId remotePeerId, SessionIdentityKey remoteIdentityKey, SessionRatchetKey remoteRatchetKey, SharedSecret sharedSecret)
@@ -57,6 +61,7 @@ public class DirectSessionManager : IDirectSessionManager
 
         var sessionId = GetSessionId(remotePeerId, conversationId);
         await _sessionStore.SetSessionStateAsync(sessionId, sessionState);
+        _logger.LogInformation("Double Ratchet session saved for conversation {ConversationId}. SessionId: {SessionId}", conversationId, sessionId);
         _sessionLocks.TryAdd(conversationId, new SemaphoreSlim(1, 1));
     }
 
@@ -79,7 +84,7 @@ public class DirectSessionManager : IDirectSessionManager
             var sessionState = await _sessionStore.GetSessionStateAsync(sessionId);
             if (sessionState == null)
             {
-                throw new InvalidOperationException($"Double Ratchet session state for conversation {conversationId} not found.");
+                throw new InvalidOperationException($"Double Ratchet session state for conversation {conversationId} not found. SessionId: {sessionId}");
             }
 
             var (newState, decryptedPlaintext) = _doubleRatchetProtocol.Decrypt(sessionState, encryptedMessage);
@@ -143,7 +148,9 @@ public class DirectSessionManager : IDirectSessionManager
             throw new InvalidOperationException("Identity context not loaded");
 
         var localPeerId = _activeIdentityContext.Identity.Id;
+        
         var remotePeerId = conversation.Participants.First(p => p.Value != localPeerId);
+        _logger.LogInformation("Local peer ID: {LocalPeerId} Remote peer ID: {RemotePeerId}", localPeerId, remotePeerId);
         return new SessionPeerId(remotePeerId.Value);
     }
 

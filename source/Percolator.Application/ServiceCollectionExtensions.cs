@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Percolator.Application.Apps.Chat;
 using Percolator.Application.Cryptography;
 using Percolator.Application.Identity;
 using Percolator.Application.KeyExchange;
@@ -22,6 +23,7 @@ public static class ServiceCollectionExtensions
         services.AddPeerDiscoveryServices();
         services.AddSessionServices();
         services.AddRateLimiting();
+        services.AddChatServices();
         
         return services;
     }

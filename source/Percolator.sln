@@ -3,6 +3,7 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "SolutionFolder", "SolutionFolder", "{D7D1220C-3D34-48E0-BDAE-00BCD95649B5}"
 	ProjectSection(SolutionItems) = preProject
 		..\README.md = ..\README.md
+		..\test-grpc-connection.ps1 = ..\test-grpc-connection.ps1
 	EndProjectSection
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Cryptography", "Cryptography", "{D3EFBBDF-641F-4849-8BCB-BFAA7DEA0447}"
