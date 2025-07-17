@@ -54,7 +54,7 @@ namespace Percolator.Application.Network
             var clientCertificate = await context.GetHttpContext().Connection.GetClientCertificateAsync();
             if (clientCertificate is null)
             {
-                _logger.LogError("Handshake failed: Client did not provide a certificate.");
+                _logger.LogWarning("Handshake failed: Client did not provide a certificate...");
                 //throw new RpcException(new Status(StatusCode.PermissionDenied, "Client certificate is required."));
             }
             
