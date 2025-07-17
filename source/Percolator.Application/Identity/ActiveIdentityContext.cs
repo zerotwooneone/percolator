@@ -5,8 +5,6 @@ using Percolator.Chat;
 using Percolator.Chat.ValueObjects;
 using ChatParticipantId = Percolator.Chat.ValueObjects.ParticipantId;
 
-[assembly: InternalsVisibleTo("Percolator.ApplicationTests")]
-
 namespace Percolator.Application.Identity;
 
 /// <summary>
@@ -15,10 +13,6 @@ namespace Percolator.Application.Identity;
 /// </summary>
 public class ActiveIdentityContext :ISelfParticipantIdProvider
 {
-    public const string SigningKey = "signing";
-    public const string IdentityKey = "identity";
-    public const string PreKey = "prekey";
-
     public IdentityRecord? Identity { get; internal set; }
     public X3dhKeys? Keys { get; internal set; }
     public ChatParticipantId Get()
