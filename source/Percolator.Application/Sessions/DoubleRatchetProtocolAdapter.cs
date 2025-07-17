@@ -48,7 +48,7 @@ public class DoubleRatchetProtocolAdapter : IDoubleRatchetProtocol
         var plaintext = session.Decrypt(cryptoCiphertext);
         var newState = session.GetState();
         var serializedNewState = JsonSerializer.SerializeToUtf8Bytes(newState, _jsonOptions);
-        var sessionsPlaintext = plaintext is not null ? new Plaintext(plaintext.Value) : null;
+        var sessionsPlaintext = new Plaintext(plaintext.Value);
         return (new SessionState(serializedNewState), sessionsPlaintext);
     }
 }

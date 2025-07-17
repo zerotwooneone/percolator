@@ -194,7 +194,7 @@ namespace Percolator.Application.Network
                 var conversationId = new SessionConversationId(Guid.Parse(request.SessionId));
 
                 // The payload is a JSON-serialized RatchetMessage
-                var ratchetMessage = JsonSerializer.Deserialize<SessionRatchetMessage>(request.Payload.ToByteArray());
+                var ratchetMessage = new SessionRatchetMessage(request.Payload.ToByteArray());
                 if (ratchetMessage is null)
                 {
                     throw new InvalidOperationException("Failed to deserialize RatchetMessage.");
