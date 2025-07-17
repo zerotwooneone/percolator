@@ -45,6 +45,7 @@ public class DirectSessionManager : IDirectSessionManager
             sharedSecret);
 
         var sessionId = GetSessionId(remotePeerId, conversationId);
+        _logger.LogInformation("Establish session as initiator for conversation {ConversationId}. SessionId: {SessionId}", conversationId, sessionId);
         await _sessionStore.SetSessionStateAsync(sessionId, sessionState);
         _sessionLocks.TryAdd(conversationId, new SemaphoreSlim(1, 1));
     }
@@ -61,7 +62,7 @@ public class DirectSessionManager : IDirectSessionManager
 
         var sessionId = GetSessionId(remotePeerId, conversationId);
         await _sessionStore.SetSessionStateAsync(sessionId, sessionState);
-        _logger.LogInformation("Double Ratchet session saved for conversation {ConversationId}. SessionId: {SessionId}", conversationId, sessionId);
+        _logger.LogInformation("Establish as responder for conversation {ConversationId}. SessionId: {SessionId}", conversationId, sessionId);
         _sessionLocks.TryAdd(conversationId, new SemaphoreSlim(1, 1));
     }
 
@@ -81,6 +82,7 @@ public class DirectSessionManager : IDirectSessionManager
             var remotePeerId = await GetRemotePeerId(conversationId);
 
             var sessionId = GetSessionId(remotePeerId, conversationId);
+            _logger.LogInformation("Receive message for conversation {ConversationId}. SessionId: {SessionId}", conversationId, sessionId);
             var sessionState = await _sessionStore.GetSessionStateAsync(sessionId);
             if (sessionState == null)
             {
@@ -120,6 +122,7 @@ public class DirectSessionManager : IDirectSessionManager
             var remotePeerId = await GetRemotePeerId(conversationId);
 
             var sessionId = GetSessionId(remotePeerId, conversationId);
+            _logger.LogInformation("Encrypt message for conversation {ConversationId}. SessionId: {SessionId}", conversationId, sessionId);
             var sessionState = await _sessionStore.GetSessionStateAsync(sessionId);
             if (sessionState == null)
             {

@@ -246,6 +246,9 @@ async Task SendCommandHandler(InvocationContext context)
         var identityOrchestrator = serviceProvider.GetRequiredService<IIdentityOrchestrator>();
         await identityOrchestrator.LoadOrCreateIdentityAsync(identityName!, cancellationToken);
 
+        var logger = serviceProvider.GetRequiredService<ILogger<Program>>();
+        var activeIdentityContext = serviceProvider.GetRequiredService<ActiveIdentityContext>();
+        logger.LogInformation("Sending with Identity: {IdentityName}:{PeerId}", identityName, activeIdentityContext.Identity!.Id);
         var conversationService = serviceProvider.GetRequiredService<IConversationService>();
         var messageService = serviceProvider.GetRequiredService<IMessageService>();
 

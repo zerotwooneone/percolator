@@ -158,7 +158,7 @@ namespace Percolator.Application.Network
                         peer.Name);
 
                     await _conversationRepository.AddAsync(conversation);
-                    _logger.LogInformation("Created new conversation with peer {PeerName} ", peer.Name);
+                    _logger.LogInformation("Created new conversation with peer {PeerName}", peer.Name);
                     
                     var testConversation = await _conversationRepository.GetByChannelIdAsync(channelId);
                     _logger.LogWarning("Retrieved conversation with participants {Participants} ", string.Join(", ", testConversation!.Participants));
@@ -187,18 +187,13 @@ namespace Percolator.Application.Network
 
         public override async Task<DeliverOpaqueMessageResponse> DeliverOpaqueMessage(DeliverOpaqueMessageRequest request, ServerCallContext context)
         {
-            _logger.LogInformation("Received opaque message for session {SessionId}", request.SessionId);
+            _logger.LogWarning("Received opaque message for session {SessionId} as {PeerName}:{PeerId}", request.SessionId, _activeIdentityContext.Identity?.Name, _activeIdentityContext.Identity?.Id);
 
             try
             {
                 var conversationId = new SessionConversationId(Guid.Parse(request.SessionId));
 
-                // The payload is a JSON-serialized RatchetMessage
                 var ratchetMessage = new SessionRatchetMessage(request.Payload.ToByteArray());
-                if (ratchetMessage is null)
-                {
-                    throw new InvalidOperationException("Failed to deserialize RatchetMessage.");
-                }
 
                 // Decrypt the message to get the Protobuf-serialized InternalEnvelope
                 var plaintext = await _sessionManager.ReceiveMessageAsync(conversationId, ratchetMessage);
