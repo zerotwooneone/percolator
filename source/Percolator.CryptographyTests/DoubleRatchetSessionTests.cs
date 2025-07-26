@@ -112,11 +112,18 @@ namespace Percolator.CryptographyTests
             var message = _aliceSession.Encrypt(new Plaintext("ping"u8.ToArray()));
 
             // Act: Tamper with the header after encryption
-            message.Header.Counter++;
+            // Extract the original header information
+            var (ratchetKey, counter) = message.GetHeader();
+            
+            // Create a new message with a tampered counter
+            var tamperedMessage = SessionRatchetMessage.Create(
+                ratchetKey, 
+                counter + 1, // Increment the counter to tamper with the header
+                message.GetCiphertext());
 
             // Assert: Decryption must fail because the AD (the header) no longer matches the ciphertext.
             // We expect the specific AuthenticationTagMismatchException, which is a subclass of CryptographicException.
-            Assert.Throws<System.Security.Cryptography.AuthenticationTagMismatchException>(() => _bobSession.Decrypt(message));
+            Assert.Throws<System.Security.Cryptography.AuthenticationTagMismatchException>(() => _bobSession.Decrypt(tamperedMessage));
         }
     }
 }

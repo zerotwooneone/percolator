@@ -84,7 +84,7 @@ namespace Percolator.Cryptography
             return new GroupManager(state, identityKey);
         }
 
-        public RatchetMessage CreateInvitation(string memberId, DoubleRatchetSession sessionToMember)
+        public SessionRatchetMessage CreateInvitation(string memberId, DoubleRatchetSession sessionToMember)
         {
             if (_signingKey is null) throw new InvalidOperationException("Only the group creator can send invitations.");
             _members[memberId] = sessionToMember;
@@ -107,7 +107,7 @@ namespace Percolator.Cryptography
             return sessionToMember.Encrypt(new Plaintext(signedPayload));
         }
 
-        public Dictionary<string, RatchetMessage> RemoveMember(string memberId)
+        public Dictionary<string, SessionRatchetMessage> RemoveMember(string memberId)
         {
             if (_signingKey is null) throw new InvalidOperationException("Only the group creator can remove members.");
 
@@ -123,7 +123,7 @@ namespace Percolator.Cryptography
             GroupSession.Dispose(); // Dispose the old session
             GroupSession = new SenderKeySession(null, groupContext);
 
-            var rekeyMessages = new Dictionary<string, RatchetMessage>();
+            var rekeyMessages = new Dictionary<string, SessionRatchetMessage>();
             var unsignedMessage = new UnsignedGroupControlMessage
             {
                 OldGroupId = oldGroupId,
@@ -150,7 +150,7 @@ namespace Percolator.Cryptography
             return rekeyMessages;
         }
 
-        public static GroupManager AcceptInvitation(DoubleRatchetSession sessionToCreator, RatchetMessage invitationMessage, byte[] creatorSigningPublicKey, ECDiffieHellman creatorIdentityKey)
+        public static GroupManager AcceptInvitation(DoubleRatchetSession sessionToCreator, SessionRatchetMessage invitationMessage, byte[] creatorSigningPublicKey, ECDiffieHellman creatorIdentityKey)
         {
             var payload = sessionToCreator.Decrypt(invitationMessage);
             var signedMessage = JsonSerializer.Deserialize<SignedGroupControlMessage>(payload.Value)!;
@@ -174,7 +174,7 @@ namespace Percolator.Cryptography
             return new GroupManager(groupSession, unsignedMessage.GroupId, creatorSigningPublicKey, creatorIdentityKey);
         }
 
-        public void ProcessRekeyMessage(DoubleRatchetSession sessionToCreator, RatchetMessage rekeyMessage)
+        public void ProcessRekeyMessage(DoubleRatchetSession sessionToCreator, SessionRatchetMessage rekeyMessage)
         {
             if (_creatorSigningPublicKey is null) throw new InvalidOperationException("Cannot process re-key on a creator's group manager.");
 
