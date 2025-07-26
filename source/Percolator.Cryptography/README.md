@@ -21,7 +21,7 @@ This library is designed with Domain-Driven Design (DDD) principles in mind. It 
 *   `X3DHManager`: Implements the X3DH handshake to establish an initial shared secret.
 *   `DoubleRatchetSession`: Manages the ongoing stateful session, handling encryption and decryption of messages.
 *   `PreKeyBundle`: A data structure representing a user's public keys needed for the X3DH handshake.
-*   `RatchetMessage`: A data structure for transporting the ciphertext and the sender's ephemeral public key.
+*   `SessionRatchetMessage`: A protobuf-based data structure for transporting the ciphertext and the sender's ephemeral public key.
 *   `SenderKeySession`: Manages the state for a secure group conversation from the perspective of a single member.
 
 ## AI Assistant Guidance
@@ -49,6 +49,7 @@ The following example demonstrates the complete, secure flow for establishing a 
 ```csharp
 using System.Security.Cryptography;
 using Percolator.Cryptography;
+using Percolator.Cryptography.Primitives;
 
 // Helper function to create identity keys
 void CreateIdentity(out ECDsa signingKey, out ECDiffieHellman agreementKey)
@@ -131,8 +132,9 @@ var bobGroupManager = GroupManager.AcceptInvitation(
 );
 
 // --- 9. Secure communication is established! ---
-var welcomeMessage = aliceGroupManager.GroupSession.Encrypt("Welcome!"u8.ToArray());
+var welcomeMessage = aliceGroupManager.GroupSession.Encrypt(Encoding.UTF8.GetBytes("Welcome!"));
 var bobPlaintext = bobGroupManager.GroupSession.Decrypt(welcomeMessage);
+var welcomeText = Encoding.UTF8.GetString(bobPlaintext);
 
 // --- 10. CRITICAL: Removing a member ---
 // Alice removes a member, which generates re-keying messages for remaining members.
@@ -142,7 +144,7 @@ var rekeyMessages = aliceGroupManager.RemoveMember("carol"); // Assuming Carol w
 bobGroupManager.ProcessRekeyMessage(bobToAlice, rekeyMessages["bob"]);
 
 // Alice sends a new message. Bob can decrypt it, but Carol cannot.
-var messageAfterRemoval = aliceGroupManager.GroupSession.Encrypt("Carol is gone."u8.ToArray());
+var messageAfterRemoval = aliceGroupManager.GroupSession.Encrypt(Encoding.UTF8.GetBytes("Carol is gone."));
 var bobDecryptedAfter = bobGroupManager.GroupSession.Decrypt(messageAfterRemoval);
 
 ### 2. State Persistence
@@ -160,87 +162,18 @@ var aliceState = aliceToBobSession.GetState();
 // She can serialize it to JSON.
 var aliceStateJson = JsonSerializer.Serialize(aliceState);
 
-// TODO: Encrypt aliceStateJson before storing it securely.
+// The library provides built-in authenticated encryption for state persistence.
+var masterKey = RandomNumberGenerator.GetBytes(32); // Example key
+// Encrypt the state before storing
+var encryptedSessionState = CryptoUtils.EncryptAtRest(masterKey, JsonSerializer.SerializeToUtf8Bytes(aliceState), Encoding.UTF8.GetBytes("SessionState"));
+
+// TODO: Store encryptedSessionState securely.
 
 // Later, she can restore it.
-// TODO: Decrypt the state JSON before deserializing.
-var loadedAliceState = JsonSerializer.Deserialize<DoubleRatchetSession.DoubleRatchetSessionState>(aliceStateJson)!;
+// Decrypt the stored state
+var decryptedState = CryptoUtils.DecryptAtRest(masterKey, encryptedSessionState, Encoding.UTF8.GetBytes("SessionState"));
+var loadedAliceState = JsonSerializer.Deserialize<DoubleRatchetSession.DoubleRatchetSessionState>(decryptedState)!;
 // Note: The long-term identity key is NOT serialized and must be provided again.
-var loadedAliceSession = new DoubleRatchetSession(loadedAliceState, aliceIdentity);
+var loadedAliceSession = new DoubleRatchetSession(loadedAliceState);
 
-
-// --- GroupManager Persistence ---
-// The library provides built-in authenticated encryption for state persistence.
-// You must provide a master key, which you should derive using a secure KDF
-// like Argon2 or PBKDF2 from a user password or other secret.
-var masterKey = RandomNumberGenerator.GetBytes(32); // Example key
-
-// Alice saves her group manager state. The result is encrypted.
-var encryptedState = aliceManager.SaveState(masterKey);
-
-// The encrypted state can be stored safely.
-
-// Later, she can restore it using the same master key and her identity key.
-var loadedGroupManager = GroupManager.LoadState(encryptedState, masterKey, aliceIdentity);
-
-### Important Security Considerations for Library Developers
-
-#### Sender Authentication (Signing Messages)
-
-**Critical:** The `SenderKeySession` and `GroupManager` components are responsible for message *confidentiality* (encryption) in a group setting, but they do **not** provide sender *authentication* (signing). The original implementation included a flawed signing mechanism where any group member could forge messages from any other member. This has been removed.
-
-It is the developer's responsibility to implement sender authentication at a higher protocol layer. The recommended approach is to take the `SenderKeyMessage` object, serialize it, and then sign the serialized data with the sender's unique, long-term identity key (e.g., using `ECDsa.SignData`). The recipient must then verify this signature before passing the `SenderKeyMessage` to the `Decrypt` method.
-
-#### `OldGroupId` for Re-Key Messages
-
-A `GroupControlMessage` for re-keying now includes an `OldGroupId`. This ensures that a re-key message is cryptographically bound to the specific group it came from, preventing a malicious actor from tricking a user into applying a re-key message from one group to another, which could otherwise lead to state confusion and a denial-of-service attack.
-
-## High-Level Concepts
-
-The security of the chat application is built upon several key cryptographic concepts implemented in this library:
-
--   **One-to-One Messaging (Double Ratchet)**: At the core of our session management is the Signal Double Ratchet algorithm. This provides exceptional security properties for two-party conversations, including:
-    -   **Forward Secrecy**: If a user's long-term keys are compromised, past messages cannot be decrypted.
-    -   **Future Secrecy (or Post-Compromise Security)**: If a user's keys are compromised, the session can "heal" itself, and future messages will once again be secure after a few message exchanges.
-
--   **Group Messaging (Sender Keys)**: To support secure and efficient group chats, the library will implement a "sender keys" or multicast encryption protocol. Each member of a group will use the pairwise Double Ratchet channel to securely receive a shared group key, which is then used to encrypt messages sent to the entire group.
-
-    This domain is responsible for managing the complex, stateful cryptographic sessions for each group member (e.g., using a `SenderKeySession`). These sessions are mapped by a stable `Guid`. The `Percolator.Sessions` domain uses this same `Guid` to identify a `GroupConversation`, which is a simple, stateless container for the group's messages. This separation of concerns allows the `Cryptography` domain to focus purely on security, while the `Sessions` domain handles the conversation lifecycle.
-
--   **Distributed File System Cryptography**: To enable a secure, peer-to-peer file sharing network, the library will provide the cryptographic primitives for a distributed file system. This involves:
-    -   **Content Encryption**: Each file is encrypted with its own unique symmetric key.
-    -   **Access Control via Key Exchange**: Access to a file is granted by securely sharing its symmetric key with authorized peers using the established Double Ratchet or group messaging channel.
-    -   **Hierarchical Permissions**: Directory structures can be managed by encrypting directory metadata and sharing keys in a hierarchical manner, allowing for access control to entire branches of the file system.
-    -   **Data Integrity and Authenticity**: File contents will be hashed to ensure integrity, allowing peers to verify that the data they receive is correct and untampered.
-
--   **X3DH Key Agreement Protocol**: The "Extended Triple Diffie-Hellman" (X3DH) protocol is used to establish a secure, shared secret key between two users asynchronously. This is crucial for setting up an encrypted session without requiring both users to be online simultaneously. It involves:
-    -   **Identity Keys**: Long-term keys that identify a user.
-    -   **Signed Pre-keys**: Medium-term keys that are signed by the identity key.
-    -   **One-Time Pre-keys**: A large batch of single-use keys for initial message exchanges.
-
--   **Cryptographic Primitives**: The library uses standard, well-vetted cryptographic primitives provided by .NET's `System.Security.Cryptography`:
-    -   **AES-256 (CBC/GCM)**: For symmetric encryption of message content.
-    -   **HMAC-SHA256**: For authenticating messages and deriving keys.
-    -   **Curve25519 (or similar)**: For Elliptic Curve Diffie-Hellman (ECDH) key exchanges.
-
-## Features
-
-*   **X3DH (Extended Triple Diffie-Hellman) Protocol**: Securely establishes a shared secret key between two parties, even if the responder is offline. It provides authenticity through digital signatures (`ECDSA`).
-*   **Double Ratchet Algorithm**: Provides ongoing secure communication with forward secrecy and post-compromise security.
-*   **Authenticated Encryption**: Uses `AES-256-GCM` to ensure all messages are confidential, tamper-proof, and authentic.
-*   **Resilience**: Handles out-of-order message delivery through a key caching mechanism.
-
-## Assumptions
-
-The design and implementation of this library operate on the following assumptions:
-
-1.  **Secure Pre-key Server**: The library assumes the existence of a trusted entity (e.g., a server or a DHT) that can securely store and distribute users' public pre-key bundles. The library is not responsible for the transport of these bundles.
-2.  **Domain Purity**: This project will remain a pure domain library. It will not contain any references to UI frameworks, databases, network sockets, or other infrastructure-level concerns. Its dependencies will be minimal.
-3.  **Reliable Primitives**: We trust that the underlying cryptographic primitives provided by the .NET Base Class Library (BCL) are implemented correctly and are secure against known attacks. We are not implementing our own primitives.
-4.  **Out-of-Band Identity Verification**: This library does not handle the process of verifying a user's identity out-of-band (e.g., by comparing safety numbers or scanning QR codes). It assumes that the identity keys retrieved for a user are authentic.
-
-## Error Handling and Security
-
-This domain adheres to a strict "fail forward" security policy. Methods must not log warnings or errors for security-sensitive violations (e.g., invalid cryptographic signatures, malformed packets). Instead, they **must** throw an appropriate exception, typically a `System.Security.SecurityException`.
-
-This ensures that security violations are never ignored and are always propagated up to the consuming layer, preventing the system from continuing in an insecure or indeterminate state. The responsibility for handling these exceptions and preventing them through input validation lies with the `Percolator.Application` layer.
+{{ ... }}
