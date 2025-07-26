@@ -12,19 +12,9 @@ using Percolator.Identity;
 using Percolator.Identity.Model;
 using Percolator.Sessions;
 using SessionConversationId = Percolator.Sessions.ConversationId;
-using SessionRatchetIdentityKey = Percolator.Sessions.RatchetIdentityKey;
-using SessionRatchetEphemeralKey = Percolator.Sessions.RatchetEphemeralKey;
-using SessionPrivateEphemeralKey = Percolator.Sessions.PrivateEphemeralKey;
-using SessionSharedSecret = Percolator.Sessions.SharedSecret;
 using SessionPeerId = Percolator.Sessions.PeerId;
 using ChatConversationId = Percolator.Chat.ValueObjects.ConversationId;
 using CryptoSharedSecret = Percolator.Cryptography.SharedSecret;
-
-using SessionState = Percolator.Sessions.SessionState;
-using SessionPlaintext = Percolator.Sessions.Plaintext;
-using SessionRatchetMessage = Percolator.Sessions.RatchetMessage;
-using SessionIdentityKey = Percolator.Sessions.SessionIdentityKey;
-using SessionRatchetKey = Percolator.Sessions.SessionRatchetKey;
 using CryptoRatchetIdentityKey = Percolator.Cryptography.RatchetIdentityKey;
 using CryptoRatchetEphemeralKey = Percolator.Cryptography.RatchetEphemeralKey;
 using CryptoPrivateAgreementKey = Percolator.Cryptography.PrivateAgreementKey;
@@ -32,6 +22,7 @@ using CryptoPrivatePreKey = Percolator.Cryptography.PrivatePreKey;
 using CryptoPrivateOneTimeKey = Percolator.Cryptography.PrivateOneTimeKey;
 using CryptoPreKey = Percolator.Cryptography.PreKey;
 using CryptoPreKeyBundle = Percolator.Cryptography.PreKeyBundle;
+using Percolator.Cryptography.Primitives;
 
 namespace Percolator.ApplicationTests.Sessions;
 
@@ -41,8 +32,6 @@ public class SessionMessageTests
     private IDoubleRatchetSessionStore _aliceSessionStore = null!;
     private IDoubleRatchetSessionStore _bobSessionStore = null!;
     private Mock<IConversationRepository> _mockConversationRepo = null!;
-    private Mock<IMessageStore> _mockMessageStore = null!;
-    private Mock<IDoubleRatchetProtocol> _mockProtocol = null!;
     private DirectSessionManager _aliceManager = null!;
     private DirectSessionManager _bobManager = null!;
     private ActiveIdentityContext _aliceIdentity = null!;
@@ -55,35 +44,39 @@ public class SessionMessageTests
         _bobSessionStore = new FakeDoubleRatchetSessionStore();
 
         _mockConversationRepo = new Mock<IConversationRepository>();
-        _mockMessageStore = new Mock<IMessageStore>();
-        _mockProtocol = new Mock<IDoubleRatchetProtocol>();
 
-        var dummySessionState = new SessionState(new byte[32]);
-        _mockProtocol.Setup(p => p.InitiateSession(It.IsAny<SessionRatchetIdentityKey>(), It.IsAny<SessionRatchetEphemeralKey>(), It.IsAny<SessionSharedSecret>()))
-            .Returns(dummySessionState);
-        _mockProtocol.Setup(p => p.RespondToSession(It.IsAny<SessionRatchetIdentityKey>(), It.IsAny<SessionPrivateEphemeralKey>(), It.IsAny<SessionSharedSecret>()))
-            .Returns(dummySessionState);
+        // Create identity contexts
+        _aliceIdentity = new ActiveIdentityContext
+        {
+            Identity = new IdentityRecord(Guid.NewGuid(), "Alice"),
+            Keys = new X3dhKeys(
+                ECDsa.Create(ECCurve.NamedCurves.nistP256),
+                ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
+                ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256)
+            )
+        };
 
-        (_aliceIdentity, _) = CreateIdentityContext("Alice");
-        (_bobIdentity, _) = CreateIdentityContext("Bob");
-
+        _bobIdentity = new ActiveIdentityContext
+        {
+            Identity = new IdentityRecord(Guid.NewGuid(), "Bob"),
+            Keys = new X3dhKeys(
+                ECDsa.Create(ECCurve.NamedCurves.nistP256),
+                ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
+                ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256)
+            )
+        };
+        
         _aliceManager = new DirectSessionManager(
             _aliceSessionStore,
             _mockConversationRepo.Object,
-            _mockMessageStore.Object,
             _aliceIdentity,
-            _mockProtocol.Object, 
-            new NullLogger<DirectSessionManager>()
-        );
-
+            new NullLogger<DirectSessionManager>());
+        
         _bobManager = new DirectSessionManager(
-            _bobSessionStore,
+            _bobSessionStore, 
             _mockConversationRepo.Object,
-            _mockMessageStore.Object,
             _bobIdentity,
-            _mockProtocol.Object, 
-            new NullLogger<DirectSessionManager>()
-        );
+            new NullLogger<DirectSessionManager>());
     }
 
     [Test]
@@ -95,13 +88,13 @@ public class SessionMessageTests
         // Arrange: Use the shared secret to establish a double ratchet session
         var conversationId = new SessionConversationId(Guid.NewGuid());
         var bobPeerId = new SessionPeerId(_bobIdentity.Identity!.Id);
-        var bobIdentityKey = new SessionIdentityKey(_bobIdentity.Keys!.IdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo());
-        var bobRatchetKey = new SessionRatchetKey(_bobIdentity.Keys!.SignedPreKey.PublicKey.ExportSubjectPublicKeyInfo());
-        await _aliceManager.EstablishSessionAsInitiatorAsync(conversationId, bobPeerId, bobIdentityKey, bobRatchetKey, new SessionSharedSecret(aliceSharedSecret.Value));
+        var bobIdentityKey = new CryptoRatchetIdentityKey(_bobIdentity.Keys!.IdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo());
+        var bobRatchetKey = new CryptoRatchetEphemeralKey(_bobIdentity.Keys!.SignedPreKey.PublicKey.ExportSubjectPublicKeyInfo());
+        await _aliceManager.EstablishSessionAsInitiatorAsync(conversationId, bobPeerId, bobIdentityKey, bobRatchetKey, new CryptoSharedSecret(aliceSharedSecret.Value));
 
         var alicePeerId = new SessionPeerId(_aliceIdentity.Identity!.Id);
-        var aliceIdentityKey = new SessionIdentityKey(_aliceIdentity.Keys!.IdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo());
-        await _bobManager.EstablishSessionAsResponderAsync(conversationId, alicePeerId, aliceIdentityKey, new SessionSharedSecret(bobSharedSecret.Value));
+        var aliceIdentityKey = new CryptoRatchetIdentityKey(_aliceIdentity.Keys!.IdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo());
+        await _bobManager.EstablishSessionAsResponderAsync(conversationId, alicePeerId, aliceIdentityKey, new CryptoSharedSecret(bobSharedSecret.Value));
 
         // Arrange: Mock the conversation repository to allow the manager to resolve the remote peer ID.
         var participants = new List<ParticipantId> { new(alicePeerId.Value), new(bobPeerId.Value) };
@@ -114,16 +107,8 @@ public class SessionMessageTests
         var originalBytes = Encoding.UTF8.GetBytes(originalMessage);
         var encryptedBytes = new byte[] { 1, 2, 3, 4, 5 }; // Dummy encrypted data
 
-        _mockProtocol.Setup(p => p.Encrypt(It.IsAny<SessionState>(), It.Is<SessionPlaintext>(pt => pt.Value.SequenceEqual(originalBytes))))
-            .Returns((SessionState state, SessionPlaintext plaintext) =>
-                (state, new SessionRatchetMessage(encryptedBytes)));
-
-        _mockProtocol.Setup(p => p.Decrypt(It.IsAny<SessionState>(), It.Is<SessionRatchetMessage>(rm => rm.Value.SequenceEqual(encryptedBytes))))
-            .Returns((SessionState state, SessionRatchetMessage message) =>
-                (state, new SessionPlaintext(originalBytes)));
-
         // Act: Alice encrypts a message
-        var encryptedResult = await _aliceManager.EncryptMessageAsync(conversationId, new SessionPlaintext(originalBytes));
+        var encryptedResult = await _aliceManager.EncryptMessageAsync(conversationId, new Plaintext(originalBytes));
 
         // Act: Bob decrypts the message
         var decryptedBytes = await _bobManager.ReceiveMessageAsync(conversationId, encryptedResult!.Value.encryptedMessage);
@@ -176,25 +161,5 @@ public class SessionMessageTests
         bobOneTimePreKey.Dispose();
 
         return (aliceSharedSecret, bobSharedSecret);
-    }
-
-    private (ActiveIdentityContext, Signature) CreateIdentityContext(string name)
-    {
-        var signedPreKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        var identity = new IdentityRecord(Guid.NewGuid(), name);
-        var signingKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
-        var agreementKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        var signature = new X3DHManager().SignPreKey(signingKey, new CryptoPreKey(signedPreKey.PublicKey.ExportSubjectPublicKeyInfo()));
-
-        var activeIdentity = new ActiveIdentityContext
-        {
-            Identity = identity,
-            Keys = new X3dhKeys(
-                signingKey,
-                agreementKey,
-                signedPreKey
-            )
-        };
-        return (activeIdentity, signature);
     }
 }

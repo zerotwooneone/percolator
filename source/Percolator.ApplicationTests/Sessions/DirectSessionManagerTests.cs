@@ -4,9 +4,9 @@ using Moq;
 using Percolator.Application.Identity;
 using Percolator.Application.Sessions;
 using Percolator.Identity.Model;
-using Percolator.Sessions;
 using Percolator.Chat;
 using Percolator.Identity;
+using Percolator.Cryptography;
 
 namespace Percolator.ApplicationTests.Sessions;
 
@@ -16,8 +16,6 @@ public class DirectSessionManagerTests
     private Mock<IDoubleRatchetSessionStore> _mockSessionStore = null!;
     private Mock<IConversationRepository> _mockConversationRepository = null!;
     private Mock<IPeerRepository> _mockPeerRepository = null!;
-    private Mock<IMessageStore> _mockMessageStore = null!;
-    private Mock<IDoubleRatchetProtocol> _mockProtocol = null!;
     private Mock<ActiveIdentityContext> _mockActiveIdentityContext = null!;
     private DirectSessionManager _sessionManager = null!;
 
@@ -30,8 +28,6 @@ public class DirectSessionManagerTests
         _mockSessionStore = new Mock<IDoubleRatchetSessionStore>();
         _mockConversationRepository = new Mock<IConversationRepository>();
         _mockPeerRepository = new Mock<IPeerRepository>();
-        _mockMessageStore = new Mock<IMessageStore>();
-        _mockProtocol = new Mock<IDoubleRatchetProtocol>();
         _mockActiveIdentityContext = new Mock<ActiveIdentityContext>();
 
         var identity = new IdentityRecord(Guid.NewGuid(), "Local Identity");
@@ -45,9 +41,7 @@ public class DirectSessionManagerTests
         _sessionManager = new DirectSessionManager(
             _mockSessionStore.Object,
             _mockConversationRepository.Object,
-            _mockMessageStore.Object,
             _mockActiveIdentityContext.Object,
-            _mockProtocol.Object, 
             new NullLogger<DirectSessionManager>()
         );
     }

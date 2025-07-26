@@ -1,5 +1,4 @@
 using System.Net;
-using System.Text.Json;
 using Grpc.Core;
 using Microsoft.Extensions.Logging;
 using Percolator.Application.KeyExchange;
@@ -13,16 +12,14 @@ using SessionPeerId = Percolator.Sessions.PeerId;
 using SessionConversationId = Percolator.Sessions.ConversationId;
 using Percolator.Application.Identity;
 using System.Security.Cryptography;
-using System.Text;
 using Percolator.Identity;
 using Percolator.Network;
 using NetworkPeerId = Percolator.Network.PeerId;
 using IdentityPeer = Percolator.Identity.Peer;
 using IdentityPeerId = Percolator.Identity.PeerId;
 using Percolator.Chat.ValueObjects;
+using Percolator.Cryptography;
 using Percolator.Sessions;
-using SessionSharedSecret = Percolator.Sessions.SharedSecret;
-using SessionRatchetMessage = Percolator.Sessions.RatchetMessage;
 
 namespace Percolator.Application.Network
 {
@@ -36,7 +33,10 @@ namespace Percolator.Application.Network
         private readonly IPeerRepository _peerRepository;
         private readonly IPeerConnectionRepository _peerConnectionRepository;
 
-        public PercolatorMessageService(ILogger<PercolatorMessageService> logger, ActiveIdentityContext activeIdentityContext, IX3DHOrchestrator x3dhOrchestrator, IDirectSessionManager sessionManager, IConversationRepository conversationRepository, IPeerRepository peerRepository, IPeerConnectionRepository peerConnectionRepository)
+        public PercolatorMessageService(
+            ILogger<PercolatorMessageService> logger, 
+            ActiveIdentityContext activeIdentityContext, 
+            IX3DHOrchestrator x3dhOrchestrator, IDirectSessionManager sessionManager, IConversationRepository conversationRepository, IPeerRepository peerRepository, IPeerConnectionRepository peerConnectionRepository)
         {
             _logger = logger;
             _activeIdentityContext = activeIdentityContext;
@@ -167,8 +167,8 @@ namespace Percolator.Application.Network
                 await _sessionManager.EstablishSessionAsResponderAsync(
                     new SessionConversationId(conversation.Id.Value),
                     new SessionPeerId(peer.Id.Value),
-                    new SessionIdentityKey(request.InitiatorBundle.IdentityAgreementKey.ToByteArray()),
-                    new SessionSharedSecret(handshakeResult.SharedSecret.Value));
+                    new RatchetIdentityKey(request.InitiatorBundle.IdentityAgreementKey.ToByteArray()),
+                    new SharedSecret(handshakeResult.SharedSecret.Value));
 
                 _logger.LogInformation("Successfully established session {SessionId} with peer {PeerId}", conversation.Id, peer.Id);
 
@@ -193,10 +193,27 @@ namespace Percolator.Application.Network
             {
                 var conversationId = new SessionConversationId(Guid.Parse(request.SessionId));
 
-                var ratchetMessage = new SessionRatchetMessage(request.Payload.ToByteArray());
+                // Create a SessionRatchetMessage from the payload bytes
+                var sessionRatchetMessage = new SessionRatchetMessage(request.Payload.ToByteArray());
+
+                // Optional: Check version if needed
+                try 
+                {
+                    var protoMessage = Contracts.RatchetMessage.Parser.ParseFrom(request.Payload);
+                    if (protoMessage.Version > 1)
+                    {
+                        _logger.LogWarning("Received message with newer version {Version} than supported (1)", 
+                            protoMessage.Version);
+                    }
+                }
+                catch (Google.Protobuf.InvalidProtocolBufferException ex)
+                {
+                    _logger.LogWarning(ex, "Could not parse protobuf RatchetMessage from payload - may be using legacy format");
+                    // Continue with the SessionRatchetMessage we already created
+                }
 
                 // Decrypt the message to get the Protobuf-serialized InternalEnvelope
-                var plaintext = await _sessionManager.ReceiveMessageAsync(conversationId, ratchetMessage);
+                var plaintext = await _sessionManager.ReceiveMessageAsync(conversationId, sessionRatchetMessage);
                 if (plaintext is null)
                 {
                     _logger.LogWarning("Decryption resulted in null plaintext for session {SessionId}. This may be a skipped message.", request.SessionId);

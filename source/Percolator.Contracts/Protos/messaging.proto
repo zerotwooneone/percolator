@@ -84,3 +84,21 @@ message DeliverOpaqueMessageResponse {
     optional uint32 version = 1;
     optional google.protobuf.Timestamp retry_after_utc = 2;
 }
+
+// Defines the structured format for a ratchet message used in Double Ratchet encryption.
+message RatchetMessage {
+    // The protocol version.
+    optional int32 version = 1;
+    // The header containing metadata for decryption.
+    optional RatchetHeader header = 2;
+    // The encrypted message payload.
+    optional bytes ciphertext = 3;
+}
+
+// The header for a ratchet message, containing metadata needed for decryption.
+message RatchetHeader {
+    // The ephemeral ratchet key used for this message.
+    optional bytes ratchet_key = 1;
+    // The message counter in the current sending chain.
+    optional uint64 counter = 2;
+}

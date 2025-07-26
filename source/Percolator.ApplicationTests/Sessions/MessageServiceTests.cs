@@ -1,69 +1,58 @@
 using System.Security.Cryptography;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Percolator.Application.Identity;
 using Percolator.Application.Network;
 using Percolator.Application.Sessions;
 using Percolator.Chat;
+using Percolator.Chat.ValueObjects;
 using Percolator.Cryptography;
 using Percolator.Identity;
 using Percolator.Identity.Model;
 using Percolator.Sessions;
-using ChatConversation = Percolator.Chat.Conversation;
+using Percolator.Cryptography.Primitives;
 using ChatConversationId = Percolator.Chat.ValueObjects.ConversationId;
-using ChatParticipantId = Percolator.Chat.ValueObjects.ParticipantId;
+using SessionConversationId = Percolator.Sessions.ConversationId;
 using IdentityPeerId = Percolator.Identity.PeerId;
 using SessionPeerId = Percolator.Sessions.PeerId;
-using Percolator.Chat.ValueObjects;
-using System.Text.Json;
-using Microsoft.Extensions.Logging.Abstractions;
-using SessionState = Percolator.Sessions.SessionState;
-using SessionRatchetMessage = Percolator.Sessions.RatchetMessage;
-using CryptoRatchetIdentityKey = Percolator.Cryptography.RatchetIdentityKey;
-using CryptoRatchetEphemeralKey = Percolator.Cryptography.RatchetEphemeralKey;
-using CryptoPrivateEphemeralKey = Percolator.Cryptography.PrivateEphemeralKey;
-using CryptoRootKey = Percolator.Cryptography.RootKey;
-using CryptoMessageKey = Percolator.Cryptography.MessageKey;
+using ChatParticipantId = Percolator.Chat.ValueObjects.ParticipantId;
+using System.Text;
 
 namespace Percolator.ApplicationTests.Sessions;
 
 [TestFixture]
 public class MessageServiceTests
 {
-    private MessageService _messageService = null!;
-    private DirectSessionManager _sessionManager = null!;
-    private ActiveIdentityContext _activeIdentityContext = null!;
-    private Mock<IDoubleRatchetSessionStore> _mockSessionStore = null!;
-
     private Mock<IConversationRepository> _mockConversationRepository = null!;
     private Mock<IPeerRepository> _mockPeerRepository = null!;
-    private Mock<IMessageStore> _mockMessageStore = null!;
     private Mock<IMessageTransportService> _mockTransportService = null!;
-    private Mock<IDoubleRatchetProtocol> _mockProtocol = null!;
+    private Mock<IDoubleRatchetSessionStore> _mockSessionStore = null!;
+    private ActiveIdentityContext _activeIdentityContext = null!;
+    private DirectSessionManager _sessionManager = null!;
+    private MessageService _messageService = null!;
 
     [SetUp]
     public void SetUp()
     {
         _mockConversationRepository = new Mock<IConversationRepository>();
         _mockPeerRepository = new Mock<IPeerRepository>();
-        _mockMessageStore = new Mock<IMessageStore>();
         _mockTransportService = new Mock<IMessageTransportService>();
         _activeIdentityContext = new ActiveIdentityContext();
         _mockSessionStore = new Mock<IDoubleRatchetSessionStore>();
-        _mockProtocol = new Mock<IDoubleRatchetProtocol>();
 
         _sessionManager = new DirectSessionManager(
             _mockSessionStore.Object,
             _mockConversationRepository.Object,
-            _mockMessageStore.Object,
             _activeIdentityContext,
-            _mockProtocol.Object, 
             new NullLogger<DirectSessionManager>());
 
         _messageService = new MessageService(
-            _mockMessageStore.Object,
             _sessionManager,
             _mockTransportService.Object,
-            _activeIdentityContext);
+            _mockConversationRepository.Object,
+            new NullLogger<MessageService>(),
+            _activeIdentityContext,
+            _mockSessionStore.Object);
     }
 
     [TearDown]
@@ -91,29 +80,38 @@ public class MessageServiceTests
             new ChatParticipantId(localIdentity.Id),
             new ChatParticipantId(remotePeerId.Value)
         };
-        var conversation = new ChatConversation(conversationId, new ChannelId(remotePeerId.Value.ToByteArray()), participants.ToList(), new List<Message>());
-        var localDhKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        var conversation = new Conversation(conversationId, new ChannelId(remotePeerId.Value.ToByteArray()), participants.ToList(), new List<Message>());
+        
+        // Create a valid dummy session state with proper cryptographic keys
+        // Generate proper EC keys using nistP256 curve as used in the actual implementation
+        using var dhRatchetKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        var dhPrivateKeyBytes = dhRatchetKey.ExportECPrivateKey();
+        var dhPublicKeyBytes = dhRatchetKey.PublicKey.ExportSubjectPublicKeyInfo();
+        
+        // Create a second key for the remote identity
+        using var remoteIdentityKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        var remotePublicKeyBytes = remoteIdentityKey.PublicKey.ExportSubjectPublicKeyInfo();
 
-        var cryptoSessionState = new DoubleRatchetSession.DoubleRatchetSessionState
+        var dummySessionState = new DoubleRatchetSession.DoubleRatchetSessionState
         {
-            RootKey = new CryptoRootKey(new byte[32]),
+            RootKey = new RootKey(new byte[32]), // Root key can be all zeros for test
             SendingCounter = 0,
             ReceivingCounter = 0,
-            TheirIdentityPublicKey = new CryptoRatchetIdentityKey(ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256).PublicKey.ExportSubjectPublicKeyInfo()),
-            TheirDhRatchetPublicKey = new CryptoRatchetEphemeralKey(ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256).PublicKey.ExportSubjectPublicKeyInfo()),
-            DhRatchetPrivateKey = new CryptoPrivateEphemeralKey(localDhKey.ExportECPrivateKey()),
-            SkippedMessageKeys = new Dictionary<ulong, CryptoMessageKey>()
+            TheirIdentityPublicKey = new RatchetIdentityKey(remotePublicKeyBytes),
+            TheirDhRatchetPublicKey = new RatchetEphemeralKey(dhPublicKeyBytes),
+            DhRatchetPrivateKey = new PrivateEphemeralKey(dhPrivateKeyBytes),
+            SkippedMessageKeys = new Dictionary<ulong, MessageKey>()
         };
-        var sessionState = new SessionState(JsonSerializer.SerializeToUtf8Bytes(cryptoSessionState));
 
         _mockConversationRepository.Setup(r => r.GetByIdAsync(It.Is<ChatConversationId>(c => c.Value == conversationId.Value)))
             .ReturnsAsync(conversation);
 
-        var sessionId = $"{remotePeerId.Value}-{conversationId.Value}";
-        _mockSessionStore.Setup(s => s.GetSessionStateAsync(sessionId)).ReturnsAsync(sessionState);
+        // Create the SessionId to match how MessageService creates it (directly from conversationId.Value)
+        var sessionId = new SessionId(conversationId.Value);
+        _mockSessionStore.Setup(s => s.GetSessionStateAsync(sessionId)).ReturnsAsync(dummySessionState);
 
         // Act
-        await _messageService.SendDirectMessageAsync(conversationId,  "Hello");
+        await _messageService.SendDirectMessageAsync(conversationId, "Hello");
 
         // Assert
         _mockTransportService.Verify(t => t.SendMessageAsync(

@@ -94,7 +94,7 @@ public class X3DHOrchestrator : IX3DHOrchestrator
         }
     }
 
-    public OrchestratorResponseResult ProcessHandshake(ContractsPreKeyBundle remotePreKeyBundle, byte[] remoteEphemeralPublicKey)
+    public HandshakeResponse ProcessHandshake(ContractsPreKeyBundle remotePreKeyBundle, byte[] remoteEphemeralPublicKey)
     {
         if (_activeIdentityContext.Keys is not
             {
@@ -137,6 +137,6 @@ public class X3DHOrchestrator : IX3DHOrchestrator
 
         //Do not include one-time pre-key in the response
 
-        return new OrchestratorResponseResult(sharedSecret, responderBundle);
+        return new HandshakeResponse(sharedSecret, responderBundle);
     }
 }

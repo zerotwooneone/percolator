@@ -27,7 +27,8 @@ using ContractsPreKeyBundle = Percolator.Contracts.PreKeyBundle;
 using IdentityPeerId = Percolator.Identity.PeerId;
 using SessionConversationId = Percolator.Sessions.ConversationId;
 using SessionPeerId = Percolator.Sessions.PeerId;
-using SessionSharedSecret = Percolator.Sessions.SharedSecret;
+using RatchetIdentityKey = Percolator.Cryptography.RatchetIdentityKey;
+using RatchetEphemeralKey = Percolator.Cryptography.RatchetEphemeralKey;
 
 namespace Percolator.ApplicationTests.Sessions;
 
@@ -147,9 +148,9 @@ public class ConversationServiceTests
             .Setup(m => m.EstablishSessionAsInitiatorAsync(
                 It.IsAny<SessionConversationId>(), 
                 It.IsAny<SessionPeerId>(), 
-                It.IsAny<SessionIdentityKey>(), 
-                It.IsAny<SessionRatchetKey>(), 
-                It.IsAny<SessionSharedSecret>()))
+                It.IsAny<RatchetIdentityKey>(), 
+                It.IsAny<RatchetEphemeralKey>(), 
+                It.IsAny<CryptoSharedSecret>()))
             .Returns(Task.CompletedTask);
 
         // Create the response for the GrpcSessionService
@@ -159,7 +160,8 @@ public class ConversationServiceTests
                 IdentityAgreementKey = ByteString.CopyFrom(new byte[32]), 
                 SignedPreKey = ByteString.CopyFrom(new byte[32]),
                 IdentitySigningKey = ByteString.CopyFrom(new byte[32])
-            }
+            },
+            SessionId = Guid.NewGuid().ToString() // Add a valid session ID as a GUID string
         };
 
         // Configure mocks for shared certificate approach
@@ -185,9 +187,9 @@ public class ConversationServiceTests
         _mockDirectSessionManager.Verify(m => m.EstablishSessionAsInitiatorAsync(
             It.IsAny<SessionConversationId>(), 
             It.IsAny<SessionPeerId>(), 
-            It.IsAny<SessionIdentityKey>(), 
-            It.IsAny<SessionRatchetKey>(), 
-            It.IsAny<SessionSharedSecret>()), Times.Once);
+            It.IsAny<RatchetIdentityKey>(), 
+            It.IsAny<RatchetEphemeralKey>(), 
+            It.IsAny<CryptoSharedSecret>()), Times.Once);
         
         // Verify that our services were called correctly
         _mockTlsHandshakeService.Verify(s => s.CaptureCertificateAsync(It.IsAny<DnsEndPoint>()), Times.Never);

@@ -5,5 +5,5 @@ namespace Percolator.Application.Sessions;
 
 public interface IMessageService
 {
-    Task<Message> SendDirectMessageAsync(ConversationId conversationId, string content);
+    Task SendDirectMessageAsync(ConversationId conversationId, string content);
 }

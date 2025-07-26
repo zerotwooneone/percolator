@@ -13,7 +13,6 @@ public static class ServiceCollectionExtensions
         // TODO: Move to application layer
         services.AddSingleton<IConversationService, ConversationService>();
         services.AddSingleton<IMessageService, MessageService>();
-        services.AddSingleton<IDoubleRatchetProtocol, DoubleRatchetProtocolAdapter>();
 
         return services;
     }

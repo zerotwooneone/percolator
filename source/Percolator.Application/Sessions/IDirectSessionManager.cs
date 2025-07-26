@@ -1,3 +1,4 @@
+using Percolator.Cryptography;
 using Percolator.Sessions;
 using SessionConversationId = Percolator.Sessions.ConversationId;
 using SessionPeerId = Percolator.Sessions.PeerId;
@@ -12,20 +13,29 @@ public interface IDirectSessionManager
     /// <summary>
     /// Establishes a new Double Ratchet session as the initiator.
     /// </summary>
-    Task EstablishSessionAsInitiatorAsync(SessionConversationId conversationId, SessionPeerId remotePeerId, SessionIdentityKey remoteIdentityKey, SessionRatchetKey remoteRatchetKey, SharedSecret sharedSecret);
+    Task EstablishSessionAsInitiatorAsync(
+        SessionConversationId conversationId, 
+        SessionPeerId remotePeerId, 
+        RatchetIdentityKey remoteIdentityKey, 
+        RatchetEphemeralKey remoteRatchetKey, 
+        SharedSecret sharedSecret);
 
     /// <summary>
     /// Establishes a new Double Ratchet session as the responder.
     /// </summary>
-    Task EstablishSessionAsResponderAsync(SessionConversationId conversationId, SessionPeerId remotePeerId, SessionIdentityKey remoteIdentityKey, SharedSecret sharedSecret);
+    Task EstablishSessionAsResponderAsync(
+        SessionConversationId conversationId, 
+        SessionPeerId remotePeerId, 
+        RatchetIdentityKey remoteIdentityKey, 
+        SharedSecret sharedSecret);
 
     /// <summary>
     /// Receives and decrypts an incoming message.
     /// </summary>
-    Task<Plaintext?> ReceiveMessageAsync(SessionConversationId conversationId, RatchetMessage encryptedMessage);
+    Task<Plaintext?> ReceiveMessageAsync(SessionConversationId conversationId, SessionRatchetMessage encryptedMessage);
 
     /// <summary>
     /// Encrypts an outgoing message.
     /// </summary>
-    Task<(SessionPeerId remotePeerId, RatchetMessage encryptedMessage)?> EncryptMessageAsync(SessionConversationId conversationId, Plaintext plaintext);
+    Task<(SessionPeerId remotePeerId, SessionRatchetMessage encryptedMessage)?> EncryptMessageAsync(SessionConversationId conversationId, Plaintext plaintext);
 }

@@ -8,8 +8,9 @@ using System.Net.Security;
 using Percolator.Network;
 using NetworkPeerId = Percolator.Network.PeerId;
 using Percolator.Chat.ValueObjects;
-using SessionRatchetMessage = Percolator.Sessions.RatchetMessage;
 using System;
+using Percolator.Cryptography;
+using Google.Protobuf;
 
 namespace Percolator.Application.Network;
 
@@ -33,7 +34,9 @@ public class GrpcMessageTransportService : IMessageTransportService
         _certificateManager = certificateManager;
     }
 
-    public async Task SendMessageAsync(IdentityPeerId recipientPeerId, ConversationId conversationId,
+    public async Task SendMessageAsync(
+        IdentityPeerId recipientPeerId, 
+        ConversationId conversationId,
         SessionRatchetMessage message)
     {
         var peer = await _peerRepository.GetByIdAsync(recipientPeerId);
@@ -66,8 +69,9 @@ public class GrpcMessageTransportService : IMessageTransportService
         {
             var request = new DeliverOpaqueMessageRequest
             {
+                Version = 1,
                 SessionId = conversationId.Value.ToString(),
-                Payload = Google.Protobuf.ByteString.CopyFrom(message.Value)
+                Payload = ByteString.CopyFrom(message.Value)
             };
 
             _logger.LogInformation("Sending message to {RecipientPeerId} for conversation {ConversationId}",
@@ -78,6 +82,11 @@ public class GrpcMessageTransportService : IMessageTransportService
 
             peerConnection.UpdateLastSeen(endPoint, DateTime.UtcNow);
             await _peerConnectionRepository.SaveAsync(peerConnection);
+        }
+        catch (InvalidProtocolBufferException ex)
+        {
+            _logger.LogError(ex, "Failed to serialize message for transport to {RecipientPeerId}", recipientPeerId);
+            throw new Exception("Failed to serialize message for transport", ex);
         }
         catch (Exception ex)
         {

@@ -30,8 +30,6 @@ using IdentityPeerId = Percolator.Identity.PeerId;
 using SessionConversationId = Percolator.Sessions.ConversationId;
 using SessionPeerId = Percolator.Sessions.PeerId;
 using SessionIdentityKey = Percolator.Sessions.SessionIdentityKey;
-using SessionRatchetKey = Percolator.Sessions.SessionRatchetKey;
-using SessionSharedSecret = Percolator.Sessions.SharedSecret;
 using ContractsPreKeyBundle = Percolator.Contracts.PreKeyBundle;
 using IdentityPeer = Percolator.Identity.Peer;
 
@@ -164,9 +162,9 @@ namespace Percolator.Application.Sessions
                 await _sessionManager.EstablishSessionAsInitiatorAsync(
                     new SessionConversationId(conversation.Id.Value),
                     new SessionPeerId(peer.Id.Value),
-                    new SessionIdentityKey(response.ResponderBundle.IdentityAgreementKey.ToByteArray()),
-                    new SessionRatchetKey(response.ResponderBundle.SignedPreKey.ToByteArray()),
-                    new SessionSharedSecret(sharedSecret.Value));
+                    new RatchetIdentityKey(response.ResponderBundle.IdentityAgreementKey.ToByteArray()),
+                    new RatchetEphemeralKey(response.ResponderBundle.SignedPreKey.ToByteArray()),
+                    new SharedSecret(sharedSecret.Value));
 
                 _logger.LogInformation("Successfully established session and created conversation {ConversationId}", conversation.Id);
 

@@ -1,6 +1,6 @@
 using Percolator.Identity;
 using Percolator.Chat.ValueObjects;
-using SessionRatchetMessage = Percolator.Sessions.RatchetMessage;
+using Percolator.Cryptography;
 
 namespace Percolator.Application.Network;
 
