@@ -1,8 +1,6 @@
 using Percolator.Identity;
 using Percolator.Identity.Model;
-using System.Runtime.CompilerServices;
 using Percolator.Chat;
-using Percolator.Chat.ValueObjects;
 using ChatParticipantId = Percolator.Chat.ValueObjects.ParticipantId;
 
 namespace Percolator.Application.Identity;

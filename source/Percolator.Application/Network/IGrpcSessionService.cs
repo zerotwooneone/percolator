@@ -1,7 +1,6 @@
 using Percolator.Contracts;
 using System.Net;
 using System.Security.Cryptography.X509Certificates;
-using System.Threading.Tasks;
 
 namespace Percolator.Application.Network
 {

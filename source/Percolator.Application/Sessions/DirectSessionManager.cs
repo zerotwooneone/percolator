@@ -1,11 +1,9 @@
 using Percolator.Application.Identity;
-using SessionPeerId = Percolator.Sessions.PeerId;
 using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using Microsoft.Extensions.Logging;
 using Percolator.Chat;
 using Percolator.Cryptography;
-using SessionConversationId = Percolator.Sessions.ConversationId;
 
 namespace Percolator.Application.Sessions;
 
@@ -18,7 +16,7 @@ public class DirectSessionManager : IDirectSessionManager
     private readonly IConversationRepository _conversationRepository;
     private readonly ActiveIdentityContext _activeIdentityContext;
     private readonly ILogger<DirectSessionManager> _logger;
-    private readonly ConcurrentDictionary<SessionConversationId, SemaphoreSlim> _sessionLocks = new();
+    private readonly ConcurrentDictionary<Percolator.Cryptography.SessionId, SemaphoreSlim> _sessionLocks = new();
 
     public DirectSessionManager(
         IDoubleRatchetSessionStore sessionStore,
@@ -33,8 +31,8 @@ public class DirectSessionManager : IDirectSessionManager
     }
 
     public async Task EstablishSessionAsInitiatorAsync(
-        SessionConversationId conversationId, 
-        SessionPeerId remotePeerId, 
+        Percolator.Cryptography.SessionId conversationId, 
+        Percolator.Identity.PeerId remotePeerId, 
         RatchetIdentityKey remoteIdentityKey, 
         RatchetEphemeralKey remoteRatchetKey, 
         SharedSecret sharedSecret)
@@ -48,7 +46,7 @@ public class DirectSessionManager : IDirectSessionManager
             remoteIdentityKey,
             remoteRatchetKey);
 
-        var sessionId = new SessionId(conversationId.Value);
+        var sessionId = new Percolator.Cryptography.SessionId(conversationId.Value);
         _logger.LogInformation("Establish session as initiator for conversation {ConversationId}. SessionId: {SessionId}", conversationId, sessionId);
         
         // Get state and store it
@@ -57,8 +55,8 @@ public class DirectSessionManager : IDirectSessionManager
     }
 
     public async Task EstablishSessionAsResponderAsync(
-        SessionConversationId conversationId, 
-        SessionPeerId remotePeerId, 
+        Percolator.Cryptography.SessionId conversationId, 
+        Percolator.Identity.PeerId remotePeerId, 
         RatchetIdentityKey remoteIdentityKey,
         SharedSecret sharedSecret)
     {
@@ -75,7 +73,7 @@ public class DirectSessionManager : IDirectSessionManager
             remoteIdentityKey,
             localRatchetKey);
 
-        var sessionId = new SessionId(conversationId.Value);
+        var sessionId = new Percolator.Cryptography.SessionId(conversationId.Value);
         _logger.LogInformation("Establish session as responder for conversation {ConversationId}. SessionId: {SessionId}", conversationId, sessionId);
         
         // Get state and store it
@@ -84,7 +82,7 @@ public class DirectSessionManager : IDirectSessionManager
     }
 
     public async Task<Plaintext?> ReceiveMessageAsync(
-        SessionConversationId conversationId, 
+        Percolator.Cryptography.SessionId conversationId, 
         SessionRatchetMessage encryptedMessage)
     {
         if (_activeIdentityContext.Identity is null || _activeIdentityContext.Keys is null)
@@ -103,7 +101,7 @@ public class DirectSessionManager : IDirectSessionManager
                 throw new InvalidOperationException($"Conversation with id {conversationId} not found");
             var remotePeerId = await GetRemotePeerIdFromDirectMessage(conversation);
 
-            var sessionId = new SessionId(conversationId.Value);
+            var sessionId = new Percolator.Cryptography.SessionId(conversationId.Value);
             _logger.LogInformation("Receive message for conversation {ConversationId}. SessionId: {SessionId}", conversationId, sessionId);
 
             var sessionState = await _sessionStore.GetSessionStateAsync(sessionId);
@@ -134,8 +132,8 @@ public class DirectSessionManager : IDirectSessionManager
         }
     }
 
-    public async Task<(SessionPeerId remotePeerId, SessionRatchetMessage encryptedMessage)?> EncryptMessageAsync(
-        SessionConversationId conversationId, 
+    public async Task<(Percolator.Identity.PeerId remotePeerId, SessionRatchetMessage encryptedMessage)?> EncryptMessageAsync(
+        Percolator.Cryptography.SessionId conversationId, 
         Plaintext plaintext)
     {
         // Ensure only one message is processed at a time for a given conversation to prevent race conditions.
@@ -149,7 +147,7 @@ public class DirectSessionManager : IDirectSessionManager
                 throw new InvalidOperationException($"Conversation with id {conversationId} not found");
             var remotePeerId = await GetRemotePeerIdFromDirectMessage(conversation);
 
-            var sessionId = new SessionId(conversationId.Value);
+            var sessionId = new Percolator.Cryptography.SessionId(conversationId.Value);
             _logger.LogInformation("Encrypt message for conversation {ConversationId}. SessionId: {SessionId}", conversationId, sessionId);
             
             var sessionState = await _sessionStore.GetSessionStateAsync(sessionId);
@@ -173,13 +171,13 @@ public class DirectSessionManager : IDirectSessionManager
         }
     }
 
-    private async Task<SessionPeerId> GetRemotePeerIdFromDirectMessage(Conversation conversation)
+    private async Task<Percolator.Identity.PeerId> GetRemotePeerIdFromDirectMessage(Conversation conversation)
     {
         if (_activeIdentityContext.Identity is null)
             throw new InvalidOperationException("Identity context not loaded");
 
         var localPeerId = _activeIdentityContext.Identity.Id;
         var remotePeerId = conversation.Participants.First(p => p.Value != localPeerId);
-        return new SessionPeerId(remotePeerId.Value);
+        return new Percolator.Identity.PeerId(remotePeerId.Value);
     }
 }

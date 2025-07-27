@@ -1,4 +1,3 @@
-using Percolator.Chat;
 using Percolator.Chat.ValueObjects;
 
 namespace Percolator.Application.Sessions;

@@ -4,9 +4,6 @@ using Percolator.Application.Configuration;
 using Percolator.Application.PeerDiscovery;
 using Percolator.Network;
 using Microsoft.Extensions.Logging;
-using System.Net.Security;
-using System.Security.Cryptography.X509Certificates;
-using Percolator.Application.Identity;
 
 namespace Percolator.Application.Network;
 

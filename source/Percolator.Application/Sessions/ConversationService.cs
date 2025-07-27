@@ -1,22 +1,10 @@
-using Grpc.Core;
-using Grpc.Net.Client;
 using Microsoft.Extensions.Logging;
 using Percolator.Application.Network;
 using Percolator.Chat;
 using Percolator.Contracts;
 using Percolator.Identity;
 using Percolator.Network;
-using Percolator.Sessions;
-using System;
-using System.Collections.Generic;
-using System.Linq;
 using System.Net;
-using System.Net.Http;
-using System.Net.Security;
-using System.Security.Authentication;
-using System.Security.Cryptography;
-using System.Security.Cryptography.X509Certificates;
-using System.Threading.Tasks;
 using Google.Protobuf;
 using Percolator.Application.Identity;
 using Percolator.Application.KeyExchange;
@@ -27,9 +15,6 @@ using ChatConversationId = Percolator.Chat.ValueObjects.ConversationId;
 using ChatParticipantId = Percolator.Chat.ValueObjects.ParticipantId;
 using NetworkPeerId = Percolator.Network.PeerId;
 using IdentityPeerId = Percolator.Identity.PeerId;
-using SessionConversationId = Percolator.Sessions.ConversationId;
-using SessionPeerId = Percolator.Sessions.PeerId;
-using SessionIdentityKey = Percolator.Sessions.SessionIdentityKey;
 using ContractsPreKeyBundle = Percolator.Contracts.PreKeyBundle;
 using IdentityPeer = Percolator.Identity.Peer;
 
@@ -160,8 +145,8 @@ namespace Percolator.Application.Sessions
 
                 // Establish a session with the peer
                 await _sessionManager.EstablishSessionAsInitiatorAsync(
-                    new SessionConversationId(conversation.Id.Value),
-                    new SessionPeerId(peer.Id.Value),
+                    new SessionId(conversation.Id.Value),
+                    new Percolator.Identity.PeerId(peer.Id.Value),
                     new RatchetIdentityKey(response.ResponderBundle.IdentityAgreementKey.ToByteArray()),
                     new RatchetEphemeralKey(response.ResponderBundle.SignedPreKey.ToByteArray()),
                     new SharedSecret(sharedSecret.Value));

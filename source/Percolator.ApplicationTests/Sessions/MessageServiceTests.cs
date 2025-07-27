@@ -9,14 +9,9 @@ using Percolator.Chat.ValueObjects;
 using Percolator.Cryptography;
 using Percolator.Identity;
 using Percolator.Identity.Model;
-using Percolator.Sessions;
-using Percolator.Cryptography.Primitives;
 using ChatConversationId = Percolator.Chat.ValueObjects.ConversationId;
-using SessionConversationId = Percolator.Sessions.ConversationId;
 using IdentityPeerId = Percolator.Identity.PeerId;
-using SessionPeerId = Percolator.Sessions.PeerId;
 using ChatParticipantId = Percolator.Chat.ValueObjects.ParticipantId;
-using System.Text;
 
 namespace Percolator.ApplicationTests.Sessions;
 
@@ -73,7 +68,7 @@ public class MessageServiceTests
         _activeIdentityContext.Keys = localKeys;
 
         
-        var remotePeerId = new SessionPeerId(Guid.NewGuid());
+        var remotePeerId = new IdentityPeerId(Guid.NewGuid());
         var conversationId = new ChatConversationId(Guid.NewGuid());
         var participants = new[]
         {

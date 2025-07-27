@@ -1,5 +1,4 @@
 using Percolator.Cryptography.Primitives;
-using System.IO;
 using Google.Protobuf;
 
 namespace Percolator.Cryptography;

@@ -8,8 +8,6 @@ using Percolator.Chat;
 using ChatConversation = Percolator.Chat.Conversation;
 using ChatConversationId = Percolator.Chat.ValueObjects.ConversationId;
 using ChatParticipantId = Percolator.Chat.ValueObjects.ParticipantId;
-using SessionPeerId = Percolator.Sessions.PeerId;
-using SessionConversationId = Percolator.Sessions.ConversationId;
 using Percolator.Application.Identity;
 using System.Security.Cryptography;
 using Percolator.Identity;
@@ -19,7 +17,6 @@ using IdentityPeer = Percolator.Identity.Peer;
 using IdentityPeerId = Percolator.Identity.PeerId;
 using Percolator.Chat.ValueObjects;
 using Percolator.Cryptography;
-using Percolator.Sessions;
 
 namespace Percolator.Application.Network
 {
@@ -165,8 +162,8 @@ namespace Percolator.Application.Network
                 }
 
                 await _sessionManager.EstablishSessionAsResponderAsync(
-                    new SessionConversationId(conversation.Id.Value),
-                    new SessionPeerId(peer.Id.Value),
+                    new SessionId(conversation.Id.Value),
+                    new IdentityPeerId(peer.Id.Value),
                     new RatchetIdentityKey(request.InitiatorBundle.IdentityAgreementKey.ToByteArray()),
                     new SharedSecret(handshakeResult.SharedSecret.Value));
 
@@ -191,7 +188,7 @@ namespace Percolator.Application.Network
 
             try
             {
-                var conversationId = new SessionConversationId(Guid.Parse(request.SessionId));
+                var conversationId = new SessionId(Guid.Parse(request.SessionId));
 
                 // Create a SessionRatchetMessage from the payload bytes
                 var sessionRatchetMessage = new SessionRatchetMessage(request.Payload.ToByteArray());

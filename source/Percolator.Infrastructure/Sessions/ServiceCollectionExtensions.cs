@@ -1,5 +1,4 @@
 using Microsoft.Extensions.DependencyInjection;
-using Percolator.Sessions;
 
 namespace Percolator.Infrastructure.Sessions;
 

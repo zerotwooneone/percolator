@@ -1,7 +1,5 @@
 using Percolator.Cryptography;
-using Percolator.Sessions;
-using SessionConversationId = Percolator.Sessions.ConversationId;
-using SessionPeerId = Percolator.Sessions.PeerId;
+using Percolator.Identity;
 
 namespace Percolator.Application.Sessions;
 
@@ -14,8 +12,8 @@ public interface IDirectSessionManager
     /// Establishes a new Double Ratchet session as the initiator.
     /// </summary>
     Task EstablishSessionAsInitiatorAsync(
-        SessionConversationId conversationId, 
-        SessionPeerId remotePeerId, 
+        Percolator.Cryptography.SessionId conversationId, 
+        Percolator.Identity.PeerId remotePeerId, 
         RatchetIdentityKey remoteIdentityKey, 
         RatchetEphemeralKey remoteRatchetKey, 
         SharedSecret sharedSecret);
@@ -24,18 +22,18 @@ public interface IDirectSessionManager
     /// Establishes a new Double Ratchet session as the responder.
     /// </summary>
     Task EstablishSessionAsResponderAsync(
-        SessionConversationId conversationId, 
-        SessionPeerId remotePeerId, 
+        Percolator.Cryptography.SessionId conversationId, 
+        Percolator.Identity.PeerId remotePeerId, 
         RatchetIdentityKey remoteIdentityKey, 
         SharedSecret sharedSecret);
 
     /// <summary>
     /// Receives and decrypts an incoming message.
     /// </summary>
-    Task<Plaintext?> ReceiveMessageAsync(SessionConversationId conversationId, SessionRatchetMessage encryptedMessage);
+    Task<Plaintext?> ReceiveMessageAsync(Percolator.Cryptography.SessionId conversationId, SessionRatchetMessage encryptedMessage);
 
     /// <summary>
     /// Encrypts an outgoing message.
     /// </summary>
-    Task<(SessionPeerId remotePeerId, SessionRatchetMessage encryptedMessage)?> EncryptMessageAsync(SessionConversationId conversationId, Plaintext plaintext);
+    Task<(Percolator.Identity.PeerId remotePeerId, SessionRatchetMessage encryptedMessage)?> EncryptMessageAsync(Percolator.Cryptography.SessionId conversationId, Plaintext plaintext);
 }

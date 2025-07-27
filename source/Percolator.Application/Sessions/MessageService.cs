@@ -8,8 +8,6 @@ using ChatConversationId = Percolator.Chat.ValueObjects.ConversationId;
 using Percolator.Cryptography;
 using IdentityPeerId = Percolator.Identity.PeerId;
 
-using SessionConversationId = Percolator.Sessions.ConversationId;
-
 namespace Percolator.Application.Sessions;
 
 /// <summary>
@@ -58,10 +56,9 @@ public class MessageService : IMessageService
        
         // Convert content to plaintext bytes
         var plaintext = new Plaintext(System.Text.Encoding.UTF8.GetBytes(content));
-        var sessionConversationId = new SessionConversationId(conversationId.Value);
 
         // Encrypt message using Double Ratchet
-        var encryptResult = await _sessionManager.EncryptMessageAsync(sessionConversationId, plaintext);
+        var encryptResult = await _sessionManager.EncryptMessageAsync(new SessionId(conversationId.Value), plaintext);
         if (encryptResult == null)
         {
             throw new InvalidOperationException($"Failed to encrypt message. Conversation {conversationId} not found.");

@@ -10,10 +10,8 @@ using Percolator.Chat.ValueObjects;
 using Percolator.Cryptography;
 using Percolator.Identity;
 using Percolator.Identity.Model;
-using Percolator.Sessions;
-using SessionConversationId = Percolator.Sessions.ConversationId;
-using SessionPeerId = Percolator.Sessions.PeerId;
 using ChatConversationId = Percolator.Chat.ValueObjects.ConversationId;
+using ChatParticipantId = Percolator.Chat.ValueObjects.ParticipantId;
 using CryptoSharedSecret = Percolator.Cryptography.SharedSecret;
 using CryptoRatchetIdentityKey = Percolator.Cryptography.RatchetIdentityKey;
 using CryptoRatchetEphemeralKey = Percolator.Cryptography.RatchetEphemeralKey;
@@ -22,7 +20,6 @@ using CryptoPrivatePreKey = Percolator.Cryptography.PrivatePreKey;
 using CryptoPrivateOneTimeKey = Percolator.Cryptography.PrivateOneTimeKey;
 using CryptoPreKey = Percolator.Cryptography.PreKey;
 using CryptoPreKeyBundle = Percolator.Cryptography.PreKeyBundle;
-using Percolator.Cryptography.Primitives;
 
 namespace Percolator.ApplicationTests.Sessions;
 
@@ -86,18 +83,18 @@ public class SessionMessageTests
         var (aliceSharedSecret, bobSharedSecret) = PerformX3DH();
 
         // Arrange: Use the shared secret to establish a double ratchet session
-        var conversationId = new SessionConversationId(Guid.NewGuid());
-        var bobPeerId = new SessionPeerId(_bobIdentity.Identity!.Id);
+        var conversationId = new SessionId(Guid.NewGuid());
+        var bobPeerId = new PeerId(_bobIdentity.Identity!.Id);
         var bobIdentityKey = new CryptoRatchetIdentityKey(_bobIdentity.Keys!.IdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo());
         var bobRatchetKey = new CryptoRatchetEphemeralKey(_bobIdentity.Keys!.SignedPreKey.PublicKey.ExportSubjectPublicKeyInfo());
         await _aliceManager.EstablishSessionAsInitiatorAsync(conversationId, bobPeerId, bobIdentityKey, bobRatchetKey, new CryptoSharedSecret(aliceSharedSecret.Value));
 
-        var alicePeerId = new SessionPeerId(_aliceIdentity.Identity!.Id);
+        var alicePeerId = new PeerId(_aliceIdentity.Identity!.Id);
         var aliceIdentityKey = new CryptoRatchetIdentityKey(_aliceIdentity.Keys!.IdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo());
         await _bobManager.EstablishSessionAsResponderAsync(conversationId, alicePeerId, aliceIdentityKey, new CryptoSharedSecret(bobSharedSecret.Value));
 
         // Arrange: Mock the conversation repository to allow the manager to resolve the remote peer ID.
-        var participants = new List<ParticipantId> { new(alicePeerId.Value), new(bobPeerId.Value) };
+        var participants = new List<ChatParticipantId> { new(alicePeerId.Value), new(bobPeerId.Value) };
         var chatConversation = new Conversation(new ChatConversationId(conversationId.Value), new ChannelId(new byte[64]), participants, new List<Message>(), "Test Convo");
         _mockConversationRepo.Setup(r => r.GetByIdAsync(It.IsAny<ChatConversationId>()))
             .ReturnsAsync(chatConversation);

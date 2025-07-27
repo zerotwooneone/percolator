@@ -4,11 +4,9 @@ using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
 using Percolator.Identity;
 using IdentityPeerId = Percolator.Identity.PeerId;
-using System.Net.Security;
 using Percolator.Network;
 using NetworkPeerId = Percolator.Network.PeerId;
 using Percolator.Chat.ValueObjects;
-using System;
 using Percolator.Cryptography;
 using Google.Protobuf;
 

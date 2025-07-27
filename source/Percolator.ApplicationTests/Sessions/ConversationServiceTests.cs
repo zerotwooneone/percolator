@@ -1,14 +1,11 @@
 using System.Net;
-using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using CryptoSharedSecret = Percolator.Cryptography.SharedSecret;
 using Google.Protobuf;
-using Grpc.Core;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
-using Moq.Protected;
 using Percolator.Application.Identity;
 using Percolator.Application.KeyExchange;
 using Percolator.Application.Network;
@@ -20,13 +17,10 @@ using Percolator.Identity;
 using Percolator.Identity.Model;
 using Percolator.Network;
 using NetworkPeerId = Percolator.Network.PeerId;
-using Percolator.Sessions;
 using ChatConversation = Percolator.Chat.Conversation;
 using ChatConversationId = Percolator.Chat.ValueObjects.ConversationId;
 using ContractsPreKeyBundle = Percolator.Contracts.PreKeyBundle;
 using IdentityPeerId = Percolator.Identity.PeerId;
-using SessionConversationId = Percolator.Sessions.ConversationId;
-using SessionPeerId = Percolator.Sessions.PeerId;
 using RatchetIdentityKey = Percolator.Cryptography.RatchetIdentityKey;
 using RatchetEphemeralKey = Percolator.Cryptography.RatchetEphemeralKey;
 
@@ -146,8 +140,8 @@ public class ConversationServiceTests
         // Setup direct session manager
         _mockDirectSessionManager
             .Setup(m => m.EstablishSessionAsInitiatorAsync(
-                It.IsAny<SessionConversationId>(), 
-                It.IsAny<SessionPeerId>(), 
+                It.IsAny<Percolator.Cryptography.SessionId>(), 
+                It.IsAny<Percolator.Identity.PeerId>(), 
                 It.IsAny<RatchetIdentityKey>(), 
                 It.IsAny<RatchetEphemeralKey>(), 
                 It.IsAny<CryptoSharedSecret>()))
@@ -185,8 +179,8 @@ public class ConversationServiceTests
         Assert.That(result, Is.Not.EqualTo(default(ChatConversationId)));
         _mockConversationRepository.Verify(r => r.AddAsync(It.Is<ChatConversation>(c => c.Name == peerName)), Times.Once);
         _mockDirectSessionManager.Verify(m => m.EstablishSessionAsInitiatorAsync(
-            It.IsAny<SessionConversationId>(), 
-            It.IsAny<SessionPeerId>(), 
+            It.IsAny<Percolator.Cryptography.SessionId>(), 
+            It.IsAny<Percolator.Identity.PeerId>(), 
             It.IsAny<RatchetIdentityKey>(), 
             It.IsAny<RatchetEphemeralKey>(), 
             It.IsAny<CryptoSharedSecret>()), Times.Once);

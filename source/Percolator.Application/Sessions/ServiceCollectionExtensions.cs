@@ -1,6 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
 using Percolator.Cryptography;
-using Percolator.Sessions;
 
 namespace Percolator.Application.Sessions;
 
