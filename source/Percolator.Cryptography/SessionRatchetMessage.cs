@@ -16,6 +16,7 @@ public record SessionRatchetMessage(byte[] Value) : ByteArrayRecord(Value)
     public static SessionRatchetMessage Create(
         RatchetEphemeralKey ratchetKey,
         ulong counter,
+        ulong previousChainLength,
         Ciphertext ciphertext)
     {
         var protoMessage = new Contracts.RatchetMessage
@@ -24,7 +25,8 @@ public record SessionRatchetMessage(byte[] Value) : ByteArrayRecord(Value)
             Header = new Contracts.RatchetHeader
             {
                 RatchetKey = ByteString.CopyFrom(ratchetKey.Value),
-                Counter = counter
+                Counter = counter,
+                PreviousChainLength = previousChainLength
             },
             Ciphertext = ByteString.CopyFrom(ciphertext.Value)
         };
@@ -37,7 +39,7 @@ public record SessionRatchetMessage(byte[] Value) : ByteArrayRecord(Value)
     /// <summary>
     /// Extracts the header information from the serialized message.
     /// </summary>
-    public (RatchetEphemeralKey RatchetKey, ulong Counter) GetHeader()
+    public (RatchetEphemeralKey RatchetKey, ulong Counter, ulong PreviousChainLength) GetHeader()
     {
         var protoMessage = Contracts.RatchetMessage.Parser.ParseFrom(Value);
         if (protoMessage.Header == null)
@@ -47,7 +49,8 @@ public record SessionRatchetMessage(byte[] Value) : ByteArrayRecord(Value)
         
         return (
             new RatchetEphemeralKey(protoMessage.Header.RatchetKey.ToByteArray()),
-            protoMessage.Header.Counter
+            protoMessage.Header.Counter,
+            protoMessage.Header.PreviousChainLength
         );
     }
 
@@ -79,6 +82,23 @@ public record SessionRatchetMessage(byte[] Value) : ByteArrayRecord(Value)
         using var writer = new BinaryWriter(stream);
         writer.Write(header.RatchetKey.Value);
         writer.Write(header.Counter);
+        writer.Write(header.PreviousChainLength);
+        return stream.ToArray();
+    }
+    
+    /// <summary>
+    /// Gets the associated data for AEAD encryption/decryption.
+    /// </summary>
+    public static byte[] GetAssociatedData(Tuple<RatchetEphemeralKey, ulong, ulong> header, byte[] additionalData)
+    {
+        // It is critical that this serialization is stable and canonical.
+        // The order and format must be identical for both sender and receiver.
+        using var stream = new MemoryStream();
+        using var writer = new BinaryWriter(stream);
+        writer.Write(header.Item1.Value);
+        writer.Write(header.Item2); // Counter
+        writer.Write(header.Item3); // Previous chain length
+        writer.Write(additionalData);
         return stream.ToArray();
     }
 }

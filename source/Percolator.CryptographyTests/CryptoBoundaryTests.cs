@@ -122,15 +122,16 @@ public class CryptoBoundaryTests
         var emptyCiphertext = new Ciphertext(Array.Empty<byte>());
 
         // Act
-        var message = SessionRatchetMessage.Create(ratchetKey, counter, emptyCiphertext);
+        var message = SessionRatchetMessage.Create(ratchetKey, counter, 0, emptyCiphertext);
         var serialized = message.Value;
         var deserialized = new SessionRatchetMessage(serialized);
 
         // Assert
         deserialized.GetCiphertext().Value.Should().BeEmpty();
-        var (key, count) = deserialized.GetHeader();
+        var (key, count, prevChainLen) = deserialized.GetHeader();
         key.Value.Should().BeEquivalentTo(ratchetKey.Value);
         count.Should().Be(counter);
+        prevChainLen.Should().Be(0);
     }
 
     [Test] 

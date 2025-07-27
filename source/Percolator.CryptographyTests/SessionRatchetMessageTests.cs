@@ -14,17 +14,19 @@ public class SessionRatchetMessageTests
         using var keyPair = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var ratchetKey = new RatchetEphemeralKey(keyPair.PublicKey.ExportSubjectPublicKeyInfo());
         ulong counter = 42;
+        ulong previousChainLength = 10;
         byte[] data = "Encrypted data"u8.ToArray();
         var ciphertext = new Ciphertext(data);
 
         // Act
-        var message = SessionRatchetMessage.Create(ratchetKey, counter, ciphertext);
+        var message = SessionRatchetMessage.Create(ratchetKey, counter, previousChainLength, ciphertext);
 
         // Assert
         message.Should().NotBeNull();
-        var (retrievedKey, retrievedCounter) = message.GetHeader();
+        var (retrievedKey, retrievedCounter, retrievedPreviousChainLength) = message.GetHeader();
         retrievedKey.Value.Should().BeEquivalentTo(ratchetKey.Value);
         retrievedCounter.Should().Be(counter);
+        retrievedPreviousChainLength.Should().Be(previousChainLength);
         message.GetCiphertext().Value.Should().BeEquivalentTo(ciphertext.Value);
     }
 
@@ -35,8 +37,9 @@ public class SessionRatchetMessageTests
         using var keyPair = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var ratchetKey = new RatchetEphemeralKey(keyPair.PublicKey.ExportSubjectPublicKeyInfo());
         ulong counter = 123;
+        ulong previousChainLength = 50;
         var ciphertext = new Ciphertext(RandomNumberGenerator.GetBytes(64));
-        var original = SessionRatchetMessage.Create(ratchetKey, counter, ciphertext);
+        var original = SessionRatchetMessage.Create(ratchetKey, counter, previousChainLength, ciphertext);
 
         // Act - Serialize by getting Value and deserialize by creating new instance
         var serialized = original.Value;
@@ -47,10 +50,11 @@ public class SessionRatchetMessageTests
         deserialized.Should().NotBeNull();
         
         // Check that all properties roundtrip correctly
-        var (originalKey, originalCounter) = original.GetHeader();
-        var (deserializedKey, deserializedCounter) = deserialized.GetHeader();
+        var (originalKey, originalCounter, originalPreviousChainLength) = original.GetHeader();
+        var (deserializedKey, deserializedCounter, deserializedPreviousChainLength) = deserialized.GetHeader();
         deserializedKey.Value.Should().BeEquivalentTo(originalKey.Value);
         deserializedCounter.Should().Be(originalCounter);
+        deserializedPreviousChainLength.Should().Be(originalPreviousChainLength);
         deserialized.GetCiphertext().Value.Should().BeEquivalentTo(original.GetCiphertext().Value);
         
         // Header associated data should be deterministic
@@ -76,7 +80,8 @@ public class SessionRatchetMessageTests
         var ratchetKey = new RatchetEphemeralKey(keyPair.PublicKey.ExportSubjectPublicKeyInfo());
         var message = SessionRatchetMessage.Create(
             ratchetKey, 
-            1, 
+            1,
+            0, // previous chain length
             new Ciphertext("data"u8.ToArray()));
         
         // Act
