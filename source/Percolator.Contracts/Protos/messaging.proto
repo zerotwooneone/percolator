@@ -101,4 +101,6 @@ message RatchetHeader {
     optional bytes ratchet_key = 1;
     // The message counter in the current sending chain.
     optional uint64 counter = 2;
+    // The number of messages in the previous sending chain.
+    optional uint64 previous_chain_length = 3;
 }
