@@ -373,34 +373,6 @@ public class DoubleRatchetSession : IDisposable
         messageKey = Array.Empty<byte>();
         return false;
     }
-    
-    private Plaintext DecryptWithSkippedMessageKey(Contracts.RatchetHeader header, Ciphertext ciphertext, byte[] skippedMessageKey)
-    {
-        try
-        {
-            _logger.LogInformation("Decrypting using skipped message key hash: {MessageKeyHash}", 
-                Convert.ToBase64String(SHA256.HashData(skippedMessageKey)));
-                
-            // Create a domain-type tuple header that SessionRatchetMessage.GetAssociatedData expects
-            var domainHeader = (
-                new RatchetEphemeralKey(header.RatchetKey.ToByteArray()), 
-                header.Counter,
-                header.PreviousChainLength
-            );
-            
-            // Get associated data for decryption
-            var associatedData = SessionRatchetMessage.GetAssociatedData(domainHeader, new byte[0]);
-                
-            // Decrypt using the skipped message key
-            var decryptedBytes = CryptoUtils.DecryptAesGcm(ciphertext.Value, skippedMessageKey, associatedData);
-            return new Plaintext(decryptedBytes);
-        }
-        catch (CryptographicException ex)
-        {
-            _logger.LogError(ex, "Decryption with skipped message key failed: {Message}", ex.Message);
-            throw;
-        }
-    }
 
     private void SkipMessageKeys(ulong until)
     {
