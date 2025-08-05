@@ -136,62 +136,7 @@ public class DoubleRatchetSession : IDisposable
         
         return session;
     }
-
-    //todo: delete this unused method
-    public static DoubleRatchetSession Initialize(
-        RatchetIdentityKey remoteIdentityPublicKey,
-        RootKey rootKey,
-        RatchetEphemeralKey remoteRatchetKey,
-        ILogger<DoubleRatchetSession> logger)
-    {
-        logger.LogDebug("Initializing new Double Ratchet session");
-        
-        // Create a new DH key pair
-        var dhRatchetKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        
-        // Import the remote ratchet key
-        using var remoteRatchetKeyImport = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        remoteRatchetKeyImport.ImportSubjectPublicKeyInfo(remoteRatchetKey.Value, out _);
-
-        // Perform DH and KDF to get the initial sending and root keys
-        var dhSecret = dhRatchetKey.DeriveKeyMaterial(remoteRatchetKeyImport.PublicKey);
-        
-        // Log the DH secret for debugging
-        logger.LogDebug("Initial DH secret hash: {DhSecretHash}", 
-            Convert.ToBase64String(SHA256.HashData(dhSecret)));
-
-        var kdfOutput = CryptoUtils.KDF(rootKey.Value, dhSecret, "ratchet-kdf", CryptoUtils.KeySize * 2);
-
-        // Split the KDF output into the new root key and sending chain key
-        var newRootKey = new RootKey(kdfOutput[..CryptoUtils.KeySize]);
-        var sendingChainKey = new ChainKey(kdfOutput[CryptoUtils.KeySize..]);
-
-        // Log key hashes for debugging
-        logger.LogDebug("Initial root key hash: {RootKeyHash}", 
-            Convert.ToBase64String(SHA256.HashData(rootKey.Value)));
-        logger.LogDebug("New root key hash: {NewRootKeyHash}", 
-            Convert.ToBase64String(SHA256.HashData(newRootKey.Value)));
-        logger.LogDebug("Sending chain key hash: {SendingChainKeyHash}", 
-            Convert.ToBase64String(SHA256.HashData(sendingChainKey.Value)));
-        
-        // Create a new session with the derived keys
-        var session = new DoubleRatchetSession(
-            sharedSecret: new SharedSecret(newRootKey.Value), 
-            remoteIdentityPublicKey: remoteIdentityPublicKey,
-            logger: logger
-        );
-        
-        // Set the non-readonly properties
-        session._dhRatchetKey = dhRatchetKey;
-        session._sendingChainKey = sendingChainKey;
-        session._remoteRatchetKey = remoteRatchetKey;
-        session._sendingCounter = 0;
-        session._receivingCounter = 0;
-        session._previousChainLength = 0;
-        
-        return session;
-    }
-
+    
     public DoubleRatchetSessionState GetState()
     {
         return new DoubleRatchetSessionState
