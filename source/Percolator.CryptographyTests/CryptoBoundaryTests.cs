@@ -1,5 +1,7 @@
 using System.Security.Cryptography;
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
+using NUnit.Framework;
 using Percolator.Cryptography;
 
 namespace Percolator.CryptographyTests;
@@ -7,6 +9,14 @@ namespace Percolator.CryptographyTests;
 [TestFixture]
 public class CryptoBoundaryTests
 {
+    private ILogger<DoubleRatchetSession> _logger;
+
+    [SetUp]
+    public void Setup()
+    {
+        _logger = new NullLogger<DoubleRatchetSession>();
+    }
+
     [Test]
     public void EncryptDecryptAesGcm_WithEmptyMessage_ShouldSucceed()
     {
@@ -56,12 +66,14 @@ public class CryptoBoundaryTests
         var aliceSession = DoubleRatchetSession.AsInitiator(
             sharedSecret,
             new RatchetIdentityKey(bobIdentity.PublicKey.ExportSubjectPublicKeyInfo()),
-            new RatchetEphemeralKey(bobEphemeral.PublicKey.ExportSubjectPublicKeyInfo()));
+            new RatchetEphemeralKey(bobEphemeral.PublicKey.ExportSubjectPublicKeyInfo()),
+            _logger);
 
         var bobSession = DoubleRatchetSession.AsResponder(
             sharedSecret,
             new RatchetIdentityKey(aliceIdentity.PublicKey.ExportSubjectPublicKeyInfo()),
-            bobEphemeral);
+            bobEphemeral,
+            _logger);
 
         // Act - Encrypt and decrypt an empty message
         var emptyPlaintext = new Plaintext(Array.Empty<byte>());
@@ -78,18 +90,18 @@ public class CryptoBoundaryTests
         // Arrange
         byte[] sessionKey = RandomNumberGenerator.GetBytes(32);
         byte[] context = "group-context"u8.ToArray();
-        
+
         var senderSession = new SenderKeySession(sessionKey, context);
         var receiverSession = new SenderKeySession(sessionKey, context);
-        
+
         // Act
         var emptyMessage = Array.Empty<byte>();
         var encrypted = senderSession.Encrypt(emptyMessage);
         var decrypted = receiverSession.Decrypt(encrypted);
-        
+
         // Assert
         decrypted.Should().BeEmpty();
-        
+
         // Clean up
         senderSession.Dispose();
         receiverSession.Dispose();
@@ -134,7 +146,7 @@ public class CryptoBoundaryTests
         prevChainLen.Should().Be(0);
     }
 
-    [Test] 
+    [Test]
     public void CryptoUtils_WithInvalidKeySize_ThrowsException()
     {
         // Arrange - Use an invalid key size that's too short for AES (e.g., 8 bytes)
@@ -143,7 +155,7 @@ public class CryptoBoundaryTests
         byte[] associatedData = "metadata"u8.ToArray();
 
         // Act & Assert
-        Assert.Throws<CryptographicException>(() => 
+        Assert.Throws<CryptographicException>(() =>
             CryptoUtils.EncryptAesGcm(invalidKey, 1, plaintext, associatedData));
     }
 }

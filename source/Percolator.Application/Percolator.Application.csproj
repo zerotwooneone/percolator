@@ -25,6 +25,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Percolator.ApplicationTests" />
+    <InternalsVisibleTo Include="Percolator.ApplicationIntegrationTests" />
   </ItemGroup>
 
 </Project>

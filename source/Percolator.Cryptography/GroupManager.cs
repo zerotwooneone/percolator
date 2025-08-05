@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
 using DoubleRatchetSessionState = Percolator.Cryptography.DoubleRatchetSession.DoubleRatchetSessionState;
 
 namespace Percolator.Cryptography
@@ -11,14 +12,16 @@ namespace Percolator.Cryptography
         private readonly ECDsa? _signingKey;
         private readonly byte[]? _creatorSigningPublicKey;
         private readonly ECDiffieHellman _creatorIdentityKey;
+        private readonly ILoggerFactory _loggerFactory;
 
         public SenderKeySession GroupSession { get; private set; }
         public string GroupId { get; private set; }
         public byte[]? SigningPublicKey { get; }
 
-        public GroupManager(ECDiffieHellman creatorIdentityKey)
+        public GroupManager(ECDiffieHellman creatorIdentityKey, ILoggerFactory loggerFactory)
         {
             _creatorIdentityKey = creatorIdentityKey;
+            _loggerFactory = loggerFactory;
             GroupId = Guid.NewGuid().ToString();
             var groupContext = Encoding.UTF8.GetBytes(GroupId);
             GroupSession = new SenderKeySession(null, groupContext);
@@ -26,17 +29,19 @@ namespace Percolator.Cryptography
             SigningPublicKey = _signingKey.ExportSubjectPublicKeyInfo();
         }
 
-        private GroupManager(SenderKeySession groupSession, string groupId, byte[] creatorSigningPublicKey, ECDiffieHellman creatorIdentityKey)
+        private GroupManager(SenderKeySession groupSession, string groupId, byte[] creatorSigningPublicKey, ECDiffieHellman creatorIdentityKey, ILoggerFactory loggerFactory)
         {
             GroupSession = groupSession;
             GroupId = groupId;
             _creatorSigningPublicKey = creatorSigningPublicKey;
             _creatorIdentityKey = creatorIdentityKey;
+            _loggerFactory = loggerFactory;
         }
 
-        private GroupManager(GroupManagerState state, ECDiffieHellman identityKey)
+        private GroupManager(GroupManagerState state, ECDiffieHellman identityKey, ILoggerFactory loggerFactory)
         {
             _creatorIdentityKey = identityKey;
+            _loggerFactory = loggerFactory;
             _signingKey = ECDsa.Create(new ECParameters
             {
                 Curve = ECCurve.NamedCurves.nistP256,
@@ -52,7 +57,8 @@ namespace Percolator.Cryptography
             foreach (var (memberId, sessionStateBytes) in state.MemberSessionStates)
             {
                 var sessionState = JsonSerializer.Deserialize<DoubleRatchetSessionState>(sessionStateBytes)!;
-                _members[memberId] = new DoubleRatchetSession(sessionState);
+                var sessionLogger = _loggerFactory.CreateLogger<DoubleRatchetSession>();
+                _members[memberId] = new DoubleRatchetSession(sessionState, sessionLogger);
             }
         }
 
@@ -77,11 +83,11 @@ namespace Percolator.Cryptography
             return CryptoUtils.EncryptAtRest(masterKey, plaintext, Encoding.UTF8.GetBytes("GroupManagerState"));
         }
 
-        public static GroupManager LoadState(byte[] encryptedState, byte[] masterKey, ECDiffieHellman identityKey)
+        public static GroupManager LoadState(byte[] encryptedState, byte[] masterKey, ECDiffieHellman identityKey, ILoggerFactory loggerFactory)
         {
             var plaintext = CryptoUtils.DecryptAtRest(masterKey, encryptedState, Encoding.UTF8.GetBytes("GroupManagerState"));
             var state = JsonSerializer.Deserialize<GroupManagerState>(plaintext)!;
-            return new GroupManager(state, identityKey);
+            return new GroupManager(state, identityKey, loggerFactory);
         }
 
         public SessionRatchetMessage CreateInvitation(string memberId, DoubleRatchetSession sessionToMember)
@@ -150,7 +156,7 @@ namespace Percolator.Cryptography
             return rekeyMessages;
         }
 
-        public static GroupManager AcceptInvitation(DoubleRatchetSession sessionToCreator, SessionRatchetMessage invitationMessage, byte[] creatorSigningPublicKey, ECDiffieHellman creatorIdentityKey)
+        public static GroupManager AcceptInvitation(DoubleRatchetSession sessionToCreator, SessionRatchetMessage invitationMessage, byte[] creatorSigningPublicKey, ECDiffieHellman creatorIdentityKey, ILoggerFactory loggerFactory)
         {
             var payload = sessionToCreator.Decrypt(invitationMessage);
             var signedMessage = JsonSerializer.Deserialize<SignedGroupControlMessage>(payload.Value)!;
@@ -171,7 +177,7 @@ namespace Percolator.Cryptography
 
             var groupContext = Encoding.UTF8.GetBytes(unsignedMessage.GroupId);
             var groupSession = new SenderKeySession(unsignedMessage.SessionKey, groupContext);
-            return new GroupManager(groupSession, unsignedMessage.GroupId, creatorSigningPublicKey, creatorIdentityKey);
+            return new GroupManager(groupSession, unsignedMessage.GroupId, creatorSigningPublicKey, creatorIdentityKey, loggerFactory);
         }
 
         public void ProcessRekeyMessage(DoubleRatchetSession sessionToCreator, SessionRatchetMessage rekeyMessage)

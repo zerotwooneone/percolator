@@ -90,7 +90,7 @@ public class X3DHOrchestratorTests
 
         var expectedSharedSecret = new SharedSecret(new byte[32]);
         Random.Shared.NextBytes(expectedSharedSecret.Value);
-        using var ephemeralKey = ECDiffieHellman.Create();
+        using var ephemeralKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
 
         _mockX3dhManager.Setup(x => x.VerifySignature(
             It.Is<RatchetIdentityKey>(k => k.Value.SequenceEqual(remoteIdentitySigningKeyBytes)),
@@ -133,7 +133,7 @@ public class X3DHOrchestratorTests
 
         var expectedSharedSecret = new SharedSecret(new byte[32]);
         Random.Shared.NextBytes(expectedSharedSecret.Value);
-        using var ephemeralKey = ECDiffieHellman.Create();
+        using var ephemeralKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var ephemeralKeyBytes = ephemeralKey.PublicKey.ExportSubjectPublicKeyInfo();
 
         _mockX3dhManager.Setup(x => x.VerifySignature(

@@ -89,15 +89,15 @@ public record SessionRatchetMessage(byte[] Value) : ByteArrayRecord(Value)
     /// <summary>
     /// Gets the associated data for AEAD encryption/decryption.
     /// </summary>
-    public static byte[] GetAssociatedData(Tuple<RatchetEphemeralKey, ulong, ulong> header, byte[] additionalData)
+    public static byte[] GetAssociatedData((RatchetEphemeralKey RatchetKey, ulong Counter, ulong PreviousChainLength) header, byte[] additionalData)
     {
         // It is critical that this serialization is stable and canonical.
         // The order and format must be identical for both sender and receiver.
         using var stream = new MemoryStream();
         using var writer = new BinaryWriter(stream);
-        writer.Write(header.Item1.Value);
-        writer.Write(header.Item2); // Counter
-        writer.Write(header.Item3); // Previous chain length
+        writer.Write(header.RatchetKey.Value);
+        writer.Write(header.Counter);
+        writer.Write(header.PreviousChainLength);
         writer.Write(additionalData);
         return stream.ToArray();
     }

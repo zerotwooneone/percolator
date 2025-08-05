@@ -35,11 +35,15 @@ public class MessageServiceTests
         _activeIdentityContext = new ActiveIdentityContext();
         _mockSessionStore = new Mock<IDoubleRatchetSessionStore>();
 
+        // Create a logger factory for DirectSessionManager
+        var loggerFactory = new NullLoggerFactory();
+
         _sessionManager = new DirectSessionManager(
             _mockSessionStore.Object,
             _mockConversationRepository.Object,
             _activeIdentityContext,
-            new NullLogger<DirectSessionManager>());
+            new NullLogger<DirectSessionManager>(),
+            loggerFactory);
 
         _messageService = new MessageService(
             _sessionManager,
@@ -95,7 +99,7 @@ public class MessageServiceTests
             TheirIdentityPublicKey = new RatchetIdentityKey(remotePublicKeyBytes),
             TheirDhRatchetPublicKey = new RatchetEphemeralKey(dhPublicKeyBytes),
             DhRatchetPrivateKey = new PrivateEphemeralKey(dhPrivateKeyBytes),
-            SkippedMessageKeys = new Dictionary<ulong, MessageKey>()
+            SkippedMessageKeys = new Dictionary<SkippedMessageKeyIdentifier, byte[]>()
         };
 
         _mockConversationRepository.Setup(r => r.GetByIdAsync(It.Is<ChatConversationId>(c => c.Value == conversationId.Value)))

@@ -91,10 +91,10 @@ public class X3DHManager : IX3DHManager
     public SharedSecret RespondToHandshake(RatchetIdentityKey remoteIdentityKey, RatchetEphemeralKey remoteEphemeralKey, PrivateAgreementKey identityAgreementKey, PrivatePreKey signedPreKey, PrivateOneTimeKey? oneTimePreKey)
     {
         // Reconstruct keys from private key bytes
-        using var identityAgreementKeyEcdh = ECDiffieHellman.Create();
+        using var identityAgreementKeyEcdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         identityAgreementKeyEcdh.ImportECPrivateKey(identityAgreementKey.Value, out _);
 
-        using var signedPreKeyEcdh = ECDiffieHellman.Create();
+        using var signedPreKeyEcdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         signedPreKeyEcdh.ImportECPrivateKey(signedPreKey.Value, out _);
 
         // 1. Perform DH calculations.
@@ -105,7 +105,7 @@ public class X3DHManager : IX3DHManager
         var dh4 = Array.Empty<byte>();
         if (oneTimePreKey is not null)
         {
-            using var oneTimePreKeyEcdh = ECDiffieHellman.Create();
+            using var oneTimePreKeyEcdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
             oneTimePreKeyEcdh.ImportECPrivateKey(oneTimePreKey.Value, out _);
             dh4 = oneTimePreKeyEcdh.DeriveKeyFromHash(remoteEphemeralKey.ToEcdhPublicKey(), HashAlgorithmName.SHA256);
         }

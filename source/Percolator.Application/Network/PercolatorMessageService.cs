@@ -161,6 +161,17 @@ namespace Percolator.Application.Network
                     _logger.LogWarning("Retrieved conversation with participants {Participants} ", string.Join(", ", testConversation!.Participants));
                 }
 
+                // IMPORTANT: Log the key used in the responder bundle for comparison
+                var signedPreKeyBytes = _activeIdentityContext.Keys.SignedPreKey.PublicKey.ExportSubjectPublicKeyInfo();
+                var bundleKeyHash = Convert.ToBase64String(SHA256.HashData(signedPreKeyBytes));
+                _logger.LogWarning("Responder bundle uses signed pre-key with hash: {BundleKeyHash}", bundleKeyHash);
+
+                // IMPORTANT: Create the local ratchet key using the SAME key that was included in the responder's bundle
+                using var localRatchetKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+                localRatchetKey.ImportECPrivateKey(_activeIdentityContext.Keys.SignedPreKey.ExportECPrivateKey(), out _);
+                var actualKeyHash = Convert.ToBase64String(SHA256.HashData(localRatchetKey.PublicKey.ExportSubjectPublicKeyInfo()));
+                _logger.LogWarning("Local ratchet key for session has hash: {ActualKeyHash}", actualKeyHash);
+
                 await _sessionManager.EstablishSessionAsResponderAsync(
                     new SessionId(conversation.Id.Value),
                     new IdentityPeerId(peer.Id.Value),
@@ -191,7 +202,13 @@ namespace Percolator.Application.Network
                 var conversationId = new SessionId(Guid.Parse(request.SessionId));
 
                 // Create a SessionRatchetMessage from the payload bytes
-                var sessionRatchetMessage = new SessionRatchetMessage(request.Payload.ToByteArray());
+                var payload = request.Payload.ToByteArray();
+                var sessionRatchetMessage = new SessionRatchetMessage(payload);
+
+                // Add diagnostic logging for the received payload
+                _logger.LogInformation("Received message payload with hash: {PayloadHash}, length: {PayloadLength}",
+                    Convert.ToBase64String(System.Security.Cryptography.SHA256.HashData(payload)),
+                    payload.Length);
 
                 // Optional: Check version if needed
                 try 

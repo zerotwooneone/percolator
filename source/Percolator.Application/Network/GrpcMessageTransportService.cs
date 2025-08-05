@@ -72,6 +72,11 @@ public class GrpcMessageTransportService : IMessageTransportService
                 Payload = ByteString.CopyFrom(message.Value)
             };
 
+            // Add diagnostic logging for the payload
+            _logger.LogInformation("Sending message payload with hash: {PayloadHash}, length: {PayloadLength}",
+                Convert.ToBase64String(System.Security.Cryptography.SHA256.HashData(message.Value)),
+                message.Value.Length);
+                
             _logger.LogInformation("Sending message to {RecipientPeerId} for conversation {ConversationId}",
                 recipientPeerId, conversationId);
             var response = await client.DeliverOpaqueMessageAsync(request);

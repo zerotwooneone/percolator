@@ -16,22 +16,25 @@ public class DirectSessionManager : IDirectSessionManager
     private readonly IConversationRepository _conversationRepository;
     private readonly ActiveIdentityContext _activeIdentityContext;
     private readonly ILogger<DirectSessionManager> _logger;
-    private readonly ConcurrentDictionary<Percolator.Cryptography.SessionId, SemaphoreSlim> _sessionLocks = new();
+    private readonly ILoggerFactory _loggerFactory;
+    private readonly ConcurrentDictionary<SessionId, SemaphoreSlim> _sessionLocks = new();
 
     public DirectSessionManager(
         IDoubleRatchetSessionStore sessionStore,
         IConversationRepository conversationRepository,
         ActiveIdentityContext activeIdentityContext,
-        ILogger<DirectSessionManager> logger)
+        ILogger<DirectSessionManager> logger,
+        ILoggerFactory loggerFactory)
     {
         _sessionStore = sessionStore;
         _conversationRepository = conversationRepository;
         _activeIdentityContext = activeIdentityContext;
         _logger = logger;
+        _loggerFactory = loggerFactory;
     }
 
     public async Task EstablishSessionAsInitiatorAsync(
-        Percolator.Cryptography.SessionId conversationId, 
+        SessionId conversationId, 
         Percolator.Identity.PeerId remotePeerId, 
         RatchetIdentityKey remoteIdentityKey, 
         RatchetEphemeralKey remoteRatchetKey, 
@@ -40,22 +43,44 @@ public class DirectSessionManager : IDirectSessionManager
         if (_activeIdentityContext.Keys is null)
             throw new InvalidOperationException("Identity context not loaded");
 
+        // Log key materials (hashes only for security)
+        _logger.LogWarning("Initiator establishing session with remote ratchet key hash: {RemoteRatchetKeyHash}, shared secret hash: {SharedSecretHash}", 
+            Convert.ToBase64String(SHA256.HashData(remoteRatchetKey.Value)),
+            Convert.ToBase64String(SHA256.HashData(sharedSecret.Value)));
+
         // Create the session directly in Crypto domain
+        var sessionLogger = _loggerFactory.CreateLogger<DoubleRatchetSession>();
         var session = DoubleRatchetSession.AsInitiator(
             sharedSecret,
             remoteIdentityKey,
-            remoteRatchetKey);
+            remoteRatchetKey,
+            sessionLogger);
 
-        var sessionId = new Percolator.Cryptography.SessionId(conversationId.Value);
+        var sessionId = new SessionId(conversationId.Value);
         _logger.LogInformation("Establish session as initiator for conversation {ConversationId}. SessionId: {SessionId}", conversationId, sessionId);
         
         // Get state and store it
-        await _sessionStore.SetSessionStateAsync(sessionId, session.GetState());
+        var state = session.GetState();
+        
+        // Log state properties to verify consistency
+        if (state.RootKey != null)
+        {
+            _logger.LogWarning("Initiator session root key hash: {RootKeyHash}", 
+                Convert.ToBase64String(SHA256.HashData(state.RootKey.Value)));
+        }
+        
+        if (state.TheirDhRatchetPublicKey != null)
+        {
+            _logger.LogWarning("Initiator session stored remote ratchet key hash: {StoredRatchetKeyHash}", 
+                Convert.ToBase64String(SHA256.HashData(state.TheirDhRatchetPublicKey.Value)));
+        }
+        
+        await _sessionStore.SetSessionStateAsync(sessionId, state);
         _sessionLocks.TryAdd(conversationId, new SemaphoreSlim(1, 1));
     }
 
     public async Task EstablishSessionAsResponderAsync(
-        Percolator.Cryptography.SessionId conversationId, 
+        SessionId conversationId, 
         Percolator.Identity.PeerId remotePeerId, 
         RatchetIdentityKey remoteIdentityKey,
         SharedSecret sharedSecret)
@@ -64,25 +89,47 @@ public class DirectSessionManager : IDirectSessionManager
             throw new InvalidOperationException("Identity context not loaded");
 
         // Create the ECDiffieHellman key
-        using var localRatchetKey = ECDiffieHellman.Create();
+        using var localRatchetKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         localRatchetKey.ImportECPrivateKey(_activeIdentityContext.Keys.SignedPreKey.ExportECPrivateKey(), out _);
+        
+        // Log key materials (hashes only for security)
+        _logger.LogWarning("Responder establishing session with local ratchet key hash: {LocalRatchetKeyHash}, shared secret hash: {SharedSecretHash}", 
+            Convert.ToBase64String(SHA256.HashData(localRatchetKey.PublicKey.ExportSubjectPublicKeyInfo())),
+            Convert.ToBase64String(SHA256.HashData(sharedSecret.Value)));
 
         // Create the session directly in Crypto domain
+        var sessionLogger = _loggerFactory.CreateLogger<DoubleRatchetSession>();
         var session = DoubleRatchetSession.AsResponder(
             sharedSecret,
             remoteIdentityKey,
-            localRatchetKey);
+            localRatchetKey,
+            sessionLogger);
 
-        var sessionId = new Percolator.Cryptography.SessionId(conversationId.Value);
+        var sessionId = new SessionId(conversationId.Value);
         _logger.LogInformation("Establish session as responder for conversation {ConversationId}. SessionId: {SessionId}", conversationId, sessionId);
         
         // Get state and store it
-        await _sessionStore.SetSessionStateAsync(sessionId, session.GetState());
+        var state = session.GetState();
+        
+        // Log state properties to verify consistency
+        if (state.RootKey != null)
+        {
+            _logger.LogWarning("Responder session root key hash: {RootKeyHash}", 
+                Convert.ToBase64String(SHA256.HashData(state.RootKey.Value)));
+        }
+        
+        if (state.DhRatchetPrivateKey != null)
+        {
+            _logger.LogWarning("Responder session stored local ratchet private key hash: {StoredRatchetPrivateKeyHash}", 
+                Convert.ToBase64String(SHA256.HashData(state.DhRatchetPrivateKey.Value)));
+        }
+        
+        await _sessionStore.SetSessionStateAsync(sessionId, state);
         _sessionLocks.TryAdd(conversationId, new SemaphoreSlim(1, 1));
     }
 
     public async Task<Plaintext?> ReceiveMessageAsync(
-        Percolator.Cryptography.SessionId conversationId, 
+        SessionId conversationId, 
         SessionRatchetMessage encryptedMessage)
     {
         if (_activeIdentityContext.Identity is null || _activeIdentityContext.Keys is null)
@@ -101,7 +148,7 @@ public class DirectSessionManager : IDirectSessionManager
                 throw new InvalidOperationException($"Conversation with id {conversationId} not found");
             var remotePeerId = await GetRemotePeerIdFromDirectMessage(conversation);
 
-            var sessionId = new Percolator.Cryptography.SessionId(conversationId.Value);
+            var sessionId = new SessionId(conversationId.Value);
             _logger.LogInformation("Receive message for conversation {ConversationId}. SessionId: {SessionId}", conversationId, sessionId);
 
             var sessionState = await _sessionStore.GetSessionStateAsync(sessionId);
@@ -110,8 +157,19 @@ public class DirectSessionManager : IDirectSessionManager
                 throw new InvalidOperationException($"Double Ratchet session state for conversation {conversationId} not found.");
             }
             
+            // Add trace logging of session key hashes
+            if (_logger.IsEnabled(LogLevel.Trace))
+            {
+                var rootKeyHash = sessionState.RootKey != null 
+                    ? Convert.ToBase64String(SHA256.HashData(sessionState.RootKey.Value)) 
+                    : "null";
+                _logger.LogTrace("Receiver using session {SessionId} - RootKey hash: {RootKeyHash}", 
+                    sessionId, rootKeyHash);
+            }
+            
             // Use Crypto domain directly
-            using var session = new DoubleRatchetSession(sessionState);
+            var sessionLogger = _loggerFactory.CreateLogger<DoubleRatchetSession>();
+            using var session = new DoubleRatchetSession(sessionState, sessionLogger);
             var decryptedPlaintext = session.Decrypt(encryptedMessage);
 
             // Save the updated state
@@ -133,7 +191,7 @@ public class DirectSessionManager : IDirectSessionManager
     }
 
     public async Task<(Percolator.Identity.PeerId remotePeerId, SessionRatchetMessage encryptedMessage)?> EncryptMessageAsync(
-        Percolator.Cryptography.SessionId conversationId, 
+        SessionId conversationId, 
         Plaintext plaintext)
     {
         // Ensure only one message is processed at a time for a given conversation to prevent race conditions.
@@ -147,7 +205,7 @@ public class DirectSessionManager : IDirectSessionManager
                 throw new InvalidOperationException($"Conversation with id {conversationId} not found");
             var remotePeerId = await GetRemotePeerIdFromDirectMessage(conversation);
 
-            var sessionId = new Percolator.Cryptography.SessionId(conversationId.Value);
+            var sessionId = new SessionId(conversationId.Value);
             _logger.LogInformation("Encrypt message for conversation {ConversationId}. SessionId: {SessionId}", conversationId, sessionId);
             
             var sessionState = await _sessionStore.GetSessionStateAsync(sessionId);
@@ -156,8 +214,19 @@ public class DirectSessionManager : IDirectSessionManager
                 return null;
             }
             
+            // Add trace logging of session key hashes
+            if (_logger.IsEnabled(LogLevel.Trace))
+            {
+                var rootKeyHash = sessionState.RootKey != null 
+                    ? Convert.ToBase64String(SHA256.HashData(sessionState.RootKey.Value)) 
+                    : "null";
+                _logger.LogTrace("Encryptor using session {SessionId} - RootKey hash: {RootKeyHash}", 
+                    sessionId, rootKeyHash);
+            }
+            
             // Use Crypto domain directly
-            using var session = new DoubleRatchetSession(sessionState);
+            var sessionLogger = _loggerFactory.CreateLogger<DoubleRatchetSession>();
+            using var session = new DoubleRatchetSession(sessionState, sessionLogger);
             var encryptedMessage = session.Encrypt(plaintext);
 
             // Save the updated state

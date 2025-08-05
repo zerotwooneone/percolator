@@ -1,3 +1,6 @@
+using Google.Protobuf;
+using Microsoft.Extensions.Logging;
+using Percolator.Cryptography.Primitives;
 using System.Security.Cryptography;
 
 namespace Percolator.Cryptography;
@@ -14,16 +17,18 @@ public class DoubleRatchetSession : IDisposable
     private ulong _previousChainLength;
     private ECDiffieHellman? _dhRatchetKey;
     private RatchetEphemeralKey? _remoteRatchetKey;
-    private readonly Dictionary<ulong, MessageKey> _skippedMessageKeys = new();
+    private readonly Dictionary<SkippedMessageKeyIdentifier, byte[]> _skippedMessageKeys = new();
     private readonly RatchetIdentityKey _remoteIdentityPublicKey;
+    private readonly ILogger<DoubleRatchetSession> _logger;
 
-    private DoubleRatchetSession(SharedSecret sharedSecret, RatchetIdentityKey remoteIdentityPublicKey)
+    private DoubleRatchetSession(SharedSecret sharedSecret, RatchetIdentityKey remoteIdentityPublicKey, ILogger<DoubleRatchetSession> logger)
     {
         _remoteIdentityPublicKey = remoteIdentityPublicKey;
         _rootKey = new RootKey(sharedSecret.Value);
+        _logger = logger;
     }
 
-    public DoubleRatchetSession(DoubleRatchetSessionState state)
+    public DoubleRatchetSession(DoubleRatchetSessionState state, ILogger<DoubleRatchetSession> logger)
     {
         _rootKey = state.RootKey;
         _sendingChainKey = state.SendingChainKey;
@@ -34,37 +39,155 @@ public class DoubleRatchetSession : IDisposable
         _remoteRatchetKey = state.TheirDhRatchetPublicKey;
         if (state.DhRatchetPrivateKey is not null)
         {
-            _dhRatchetKey = ECDiffieHellman.Create();
+            _dhRatchetKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
             _dhRatchetKey.ImportECPrivateKey(state.DhRatchetPrivateKey.Value, out _);
         }
         _skippedMessageKeys = state.SkippedMessageKeys;
         _remoteIdentityPublicKey = state.TheirIdentityPublicKey;
+        _logger = logger;
     }
 
-    public static DoubleRatchetSession AsInitiator(SharedSecret sharedSecret, RatchetIdentityKey remoteIdentityPublicKey, RatchetEphemeralKey remoteRatchetPublicKey)
+    public static DoubleRatchetSession AsInitiator(
+        SharedSecret sharedSecret, 
+        RatchetIdentityKey remoteIdentityPublicKey, 
+        RatchetEphemeralKey remoteRatchetPublicKey,
+        ILogger<DoubleRatchetSession> logger)
     {
-        var session = new DoubleRatchetSession(sharedSecret, remoteIdentityPublicKey);
-        // Initialize a local ratchet key for the initiator as well
-        session._dhRatchetKey = ECDiffieHellman.Create();
+        logger.LogDebug("Creating initiator session");
+        
+        // Create Double Ratchet session with shared secret
+        var session = new DoubleRatchetSession(sharedSecret, remoteIdentityPublicKey, logger);
+        
+        // Create DH key pair for the initiator
+        session._dhRatchetKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        
+        // Log the DH key material for debugging
+        logger.LogDebug("Initiator DH key hash: {DhKeyHash}", 
+            Convert.ToBase64String(SHA256.HashData(session._dhRatchetKey.PublicKey.ExportSubjectPublicKeyInfo())));
+        
+        // Log the root key hash to verify consistency
+        logger.LogDebug("Initiator root key hash: {RootKeyHash}", 
+            Convert.ToBase64String(SHA256.HashData(session._rootKey.Value)));
+        
+        // CRITICAL FIX: Properly derive the sending chain key for the initiator
+        using var remoteRatchetKeyImport = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        remoteRatchetKeyImport.ImportSubjectPublicKeyInfo(remoteRatchetPublicKey.Value, out _);
+        
+        // Store the remote ratchet key for future use
         session._remoteRatchetKey = remoteRatchetPublicKey;
         
-        // Log the session initialization parameters for debugging
-        System.Diagnostics.Debug.WriteLine($"[CRYPTO][INITIATOR] Creating session with remote ratchet key hash: {Convert.ToBase64String(SHA256.HashData(remoteRatchetPublicKey.Value))}");
-        System.Diagnostics.Debug.WriteLine($"[CRYPTO][INITIATOR] Shared secret hash: {Convert.ToBase64String(SHA256.HashData(sharedSecret.Value))}");
-        System.Diagnostics.Debug.WriteLine($"[CRYPTO][INITIATOR] Root key hash: {Convert.ToBase64String(SHA256.HashData(session._rootKey.Value))}");
+        // Derive DH secret using the imported remote ratchet key
+        var dhSecret = session._dhRatchetKey.DeriveKeyMaterial(remoteRatchetKeyImport.PublicKey);
+        
+        logger.LogWarning("Initiator DH secret hash: {DhSecretHash}", 
+            Convert.ToBase64String(SHA256.HashData(dhSecret)));
+        
+        // Perform KDF to get the initial root key and sending chain key
+        var kdfOutput = CryptoUtils.KDF(session._rootKey.Value, dhSecret, "ratchet-kdf", CryptoUtils.KeySize * 2);
+        session._rootKey = new RootKey(kdfOutput[..CryptoUtils.KeySize]);
+        session._sendingChainKey = new ChainKey(kdfOutput[CryptoUtils.KeySize..]);
+        
+        // Initialize counters
+        session._sendingCounter = 0;
+        session._receivingCounter = 0;
+        session._previousChainLength = 0;
+        
+        logger.LogInformation("Initiator session fully initialized - Root key hash: {RootKeyHash}, Sending chain key hash: {SendingChainKeyHash}", 
+            Convert.ToBase64String(SHA256.HashData(session._rootKey.Value)),
+            Convert.ToBase64String(SHA256.HashData(session._sendingChainKey.Value)));
         
         return session;
     }
 
-    public static DoubleRatchetSession AsResponder(SharedSecret sharedSecret, RatchetIdentityKey remoteIdentityPublicKey, ECDiffieHellman localRatchetKey)
+    public static DoubleRatchetSession AsResponder(
+        SharedSecret sharedSecret, 
+        RatchetIdentityKey remoteIdentityPublicKey, 
+        ECDiffieHellman localRatchetKey,
+        ILogger<DoubleRatchetSession> logger)
     {
-        var session = new DoubleRatchetSession(sharedSecret, remoteIdentityPublicKey);
+        logger.LogDebug("Creating responder session");
+        
+        // Create Double Ratchet session with shared secret
+        var session = new DoubleRatchetSession(sharedSecret, remoteIdentityPublicKey, logger);
+        
+        // Set the local ratchet key provided by the caller
         session._dhRatchetKey = localRatchetKey;
         
         // Log the session initialization parameters for debugging
-        System.Diagnostics.Debug.WriteLine($"[CRYPTO][RESPONDER] Creating session with local ratchet key hash: {Convert.ToBase64String(SHA256.HashData(localRatchetKey.PublicKey.ExportSubjectPublicKeyInfo()))}");
-        System.Diagnostics.Debug.WriteLine($"[CRYPTO][RESPONDER] Shared secret hash: {Convert.ToBase64String(SHA256.HashData(sharedSecret.Value))}");
-        System.Diagnostics.Debug.WriteLine($"[CRYPTO][RESPONDER] Root key hash: {Convert.ToBase64String(SHA256.HashData(session._rootKey.Value))}");
+        logger.LogDebug("Responder DH key hash: {LocalRatchetKeyHash}", 
+            Convert.ToBase64String(SHA256.HashData(localRatchetKey.PublicKey.ExportSubjectPublicKeyInfo())));
+        
+        logger.LogDebug("Responder root key hash: {RootKeyHash}", 
+            Convert.ToBase64String(SHA256.HashData(session._rootKey.Value)));
+            
+        // CRITICAL FIX: Initialize the responder's session state consistently
+        // The responder doesn't set up chain keys immediately; this happens
+        // when receiving the first message from the initiator
+        session._sendingChainKey = null;  // Will be created during the first DH ratchet
+        session._receivingChainKey = null; // Will be created during the first Decrypt
+        
+        // Initialize counters
+        session._sendingCounter = 0;
+        session._receivingCounter = 0;
+        session._previousChainLength = 0;
+        
+        logger.LogInformation("Responder session initialized - waiting for first message. Root key hash: {RootKeyHash}", 
+            Convert.ToBase64String(SHA256.HashData(session._rootKey.Value)));
+        
+        return session;
+    }
+
+    //todo: delete this unused method
+    public static DoubleRatchetSession Initialize(
+        RatchetIdentityKey remoteIdentityPublicKey,
+        RootKey rootKey,
+        RatchetEphemeralKey remoteRatchetKey,
+        ILogger<DoubleRatchetSession> logger)
+    {
+        logger.LogDebug("Initializing new Double Ratchet session");
+        
+        // Create a new DH key pair
+        var dhRatchetKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        
+        // Import the remote ratchet key
+        using var remoteRatchetKeyImport = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        remoteRatchetKeyImport.ImportSubjectPublicKeyInfo(remoteRatchetKey.Value, out _);
+
+        // Perform DH and KDF to get the initial sending and root keys
+        var dhSecret = dhRatchetKey.DeriveKeyMaterial(remoteRatchetKeyImport.PublicKey);
+        
+        // Log the DH secret for debugging
+        logger.LogDebug("Initial DH secret hash: {DhSecretHash}", 
+            Convert.ToBase64String(SHA256.HashData(dhSecret)));
+
+        var kdfOutput = CryptoUtils.KDF(rootKey.Value, dhSecret, "ratchet-kdf", CryptoUtils.KeySize * 2);
+
+        // Split the KDF output into the new root key and sending chain key
+        var newRootKey = new RootKey(kdfOutput[..CryptoUtils.KeySize]);
+        var sendingChainKey = new ChainKey(kdfOutput[CryptoUtils.KeySize..]);
+
+        // Log key hashes for debugging
+        logger.LogDebug("Initial root key hash: {RootKeyHash}", 
+            Convert.ToBase64String(SHA256.HashData(rootKey.Value)));
+        logger.LogDebug("New root key hash: {NewRootKeyHash}", 
+            Convert.ToBase64String(SHA256.HashData(newRootKey.Value)));
+        logger.LogDebug("Sending chain key hash: {SendingChainKeyHash}", 
+            Convert.ToBase64String(SHA256.HashData(sendingChainKey.Value)));
+        
+        // Create a new session with the derived keys
+        var session = new DoubleRatchetSession(
+            sharedSecret: new SharedSecret(newRootKey.Value), 
+            remoteIdentityPublicKey: remoteIdentityPublicKey,
+            logger: logger
+        );
+        
+        // Set the non-readonly properties
+        session._dhRatchetKey = dhRatchetKey;
+        session._sendingChainKey = sendingChainKey;
+        session._remoteRatchetKey = remoteRatchetKey;
+        session._sendingCounter = 0;
+        session._receivingCounter = 0;
+        session._previousChainLength = 0;
         
         return session;
     }
@@ -80,9 +203,9 @@ public class DoubleRatchetSession : IDisposable
             ReceivingCounter = _receivingCounter,
             PreviousChainLength = _previousChainLength,
             SkippedMessageKeys = _skippedMessageKeys,
-            TheirIdentityPublicKey = _remoteIdentityPublicKey,
             TheirDhRatchetPublicKey = _remoteRatchetKey,
-            DhRatchetPrivateKey = _dhRatchetKey is not null ? new PrivateEphemeralKey(_dhRatchetKey.ExportECPrivateKey()) : null
+            DhRatchetPrivateKey = _dhRatchetKey is not null ? new PrivateEphemeralKey(_dhRatchetKey.ExportECPrivateKey()) : null,
+            TheirIdentityPublicKey = _remoteIdentityPublicKey
         };
     }
 
@@ -92,172 +215,275 @@ public class DoubleRatchetSession : IDisposable
         {
             if (_remoteRatchetKey is null)
                 throw new InvalidOperationException("Remote ratchet key is not available.");
+                
+            _logger.LogInformation("Initial encryption - Need to perform first ratchet step. " +
+                "Current state: SendingCounter={SendingCounter}, PreviousChainLength={PreviousChainLength}", 
+                _sendingCounter, _previousChainLength);
+                
             // First message, perform initial ratchet
             _dhRatchetKey?.Dispose();
             _dhRatchetKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-            using var remoteRatchetKey = ECDiffieHellman.Create();
+            using var remoteRatchetKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
             remoteRatchetKey.ImportSubjectPublicKeyInfo(_remoteRatchetKey.Value, out _);
+            
+            // CRITICAL FIX: Update previous chain length before ratcheting
+            // This preserves the number of messages sent in the previous chain
+            _previousChainLength = _sendingCounter;
+            _logger.LogDebug("First encrypt: Setting previous chain length to {PreviousChainLength}", _previousChainLength);
+            
             var dhSecret = _dhRatchetKey.DeriveKeyMaterial(remoteRatchetKey.PublicKey);
             var kdfResult = CryptoUtils.KDF(_rootKey.Value, dhSecret, "ratchet-kdf", CryptoUtils.KeySize * 2);
             _rootKey = new RootKey(kdfResult[..CryptoUtils.KeySize]);
             _sendingChainKey = new ChainKey(kdfResult[CryptoUtils.KeySize..]);
             
             // Add debug logging for initial ratchet
-            System.Diagnostics.Debug.WriteLine($"[CRYPTO][ENCRYPT] Initial ratchet performed");
-            System.Diagnostics.Debug.WriteLine($"[CRYPTO][ENCRYPT] Remote ratchet key hash: {Convert.ToBase64String(SHA256.HashData(_remoteRatchetKey.Value))}");
-            System.Diagnostics.Debug.WriteLine($"[CRYPTO][ENCRYPT] New root key hash: {Convert.ToBase64String(SHA256.HashData(_rootKey.Value))}");
-            System.Diagnostics.Debug.WriteLine($"[CRYPTO][ENCRYPT] New sending chain key hash: {Convert.ToBase64String(SHA256.HashData(_sendingChainKey.Value))}");
+            _logger.LogDebug("Initial ratchet performed");
+            _logger.LogDebug("Remote ratchet key hash: {RemoteRatchetKeyHash}", 
+                Convert.ToBase64String(SHA256.HashData(_remoteRatchetKey.Value)));
+            _logger.LogDebug("New root key hash: {RootKeyHash}", 
+                Convert.ToBase64String(SHA256.HashData(_rootKey.Value)));
+            _logger.LogDebug("New sending chain key hash: {SendingChainKeyHash}", 
+                Convert.ToBase64String(SHA256.HashData(_sendingChainKey.Value)));
+                
+            // Reset sending counter for new chain
+            _sendingCounter = 0;
+            
+            _logger.LogInformation("Initial ratchet complete - New state: SendingCounter={SendingCounter}, PreviousChainLength={PreviousChainLength}",
+                _sendingCounter, _previousChainLength);
         }
 
         var messageKey = CryptoUtils.KDF(null, _sendingChainKey.Value, "message-key-kdf", CryptoUtils.KeySize);
         _sendingChainKey = new ChainKey(CryptoUtils.KDF(null, _sendingChainKey.Value, "ratchet-chain-kdf", CryptoUtils.KeySize));
 
+        _logger.LogInformation("Encryption message key hash: {MessageKeyHash}", 
+            Convert.ToBase64String(SHA256.HashData(messageKey)));
+        
         // Add message key debug logging
-        System.Diagnostics.Debug.WriteLine($"[CRYPTO][ENCRYPT] Message key hash: {Convert.ToBase64String(SHA256.HashData(messageKey))}");
-        System.Diagnostics.Debug.WriteLine($"[CRYPTO][ENCRYPT] New sending chain key hash: {Convert.ToBase64String(SHA256.HashData(_sendingChainKey.Value))}");
-        System.Diagnostics.Debug.WriteLine($"[CRYPTO][ENCRYPT] Sending counter: {_sendingCounter}");
+        _logger.LogDebug("Message key hash: {MessageKeyHash}", 
+            Convert.ToBase64String(SHA256.HashData(messageKey)));
+        _logger.LogDebug("New sending chain key hash: {SendingChainKeyHash}", 
+            Convert.ToBase64String(SHA256.HashData(_sendingChainKey.Value)));
+        _logger.LogDebug("Sending counter: {SendingCounter}, Previous chain length: {PreviousChainLength}", 
+            _sendingCounter, _previousChainLength);
 
         // Create ephemeral key from our current ratchet key
         var ourPublicKey = new RatchetEphemeralKey(_dhRatchetKey!.PublicKey.ExportSubjectPublicKeyInfo());
         
         // Encrypt plaintext
-        var header = new Tuple<RatchetEphemeralKey, ulong, ulong>(ourPublicKey, _sendingCounter, _previousChainLength);
+        var header = (ourPublicKey, _sendingCounter, _previousChainLength);
         var associatedData = SessionRatchetMessage.GetAssociatedData(header, new byte[0]);
+        
+        // Log detailed header and associated data information
+        _logger.LogInformation("Encryption header - RatchetKey hash: {RatchetKeyHash}, Counter: {Counter}, PreviousChainLength: {PreviousChainLength}", 
+            Convert.ToBase64String(SHA256.HashData(ourPublicKey.Value)),
+            _sendingCounter,
+            _previousChainLength);
+        _logger.LogInformation("Encryption associated data hash: {AssociatedDataHash}", 
+            Convert.ToBase64String(SHA256.HashData(associatedData)));
+            
         var ciphertext = CryptoUtils.EncryptAesGcm(plaintext.Value, messageKey, associatedData);
         
-        // Increment the sending counter after successful encryption
+        // Create and return ratchet message with encrypted data
+        var message = SessionRatchetMessage.Create(ourPublicKey, _sendingCounter, _previousChainLength, new Ciphertext(ciphertext));
+        
+        // Increment the sending counter after successful encryption and message creation
         _sendingCounter++;
         
-        // Create and return ratchet message with encrypted data
-        return SessionRatchetMessage.Create(ourPublicKey, _sendingCounter - 1, _previousChainLength, new Ciphertext(ciphertext));
+        _logger.LogDebug("After encrypt: Sending counter now {SendingCounter}", _sendingCounter);
+        
+        // DIAGNOSTIC: Log the state before encryption
+        _logger.LogWarning("ENCRYPT - State before encryption: SendingCounter={SendingCounter}, ReceivingCounter={ReceivingCounter}, PreviousChainLength={PreviousChainLength}, DHKeyPair={KeyHash}",
+            _sendingCounter, _receivingCounter, _previousChainLength, 
+            Convert.ToBase64String(SHA256.HashData(ourPublicKey.Value)));
+
+        // DIAGNOSTIC: Log the header in detail
+        _logger.LogWarning("ENCRYPT - Header details: RatchetKey={RatchetKeyHash}, Counter={Counter}, PreviousChainLength={PreviousChainLength}",
+            Convert.ToBase64String(SHA256.HashData(header.Item1.Value)),
+            header.Item2, header.Item3);
+
+        // DIAGNOSTIC: Log the associated data
+        _logger.LogWarning("ENCRYPT - Associated data hash: {AssociatedDataHash}, length: {Length}",
+            Convert.ToBase64String(SHA256.HashData(associatedData)),
+            associatedData.Length);
+            
+        // DIAGNOSTIC: Log message details 
+        _logger.LogWarning("ENCRYPT - Message created: PayloadHash={PayloadHash}, Length={Length}",
+            Convert.ToBase64String(SHA256.HashData(message.Value)),
+            message.Value.Length);
+            
+        return message;
     }
 
-    public Plaintext Decrypt(SessionRatchetMessage message)
+    public Plaintext Decrypt(SessionRatchetMessage cipherMessage)
     {
-        var header = message.GetHeader();
-        var ciphertext = message.GetCiphertext();
-        var associatedData = SessionRatchetMessage.GetAssociatedData(new Tuple<RatchetEphemeralKey, ulong, ulong>(header.RatchetKey, header.Counter, header.PreviousChainLength), new byte[0]);
+        // Extract header and ciphertext from the message
+        var header = cipherMessage.GetHeader();
+        var ciphertext = cipherMessage.GetCiphertext();
+        
+        // Log message details for debugging
+        _logger.LogInformation("Decrypting message with header: RatchetKey hash={RatchetKeyHash}, Counter={Counter}, PreviousChainLength={PreviousChainLength}, Current state: SendingCounter={SendingCounter}, ReceivingCounter={ReceivingCounter}, MyPreviousChainLength={MyPreviousChainLength}", 
+            Convert.ToBase64String(SHA256.HashData(header.RatchetKey.Value)),
+            header.Counter,
+            header.PreviousChainLength,
+            _sendingCounter,
+            _receivingCounter,
+            _previousChainLength);
+        
+        // First check if this is a message that we have skipped
+        if (TryGetSkippedMessageKey(header.RatchetKey, header.Counter, out var skippedMessageKey))
+        {
+            // Get associated data using tuple header format
+            var tupleHeader = (header.RatchetKey, header.Counter, header.PreviousChainLength);
+            var associatedData = SessionRatchetMessage.GetAssociatedData(tupleHeader, new byte[0]);
+                
+            // Decrypt using the skipped message key
+            var decryptedBytes = CryptoUtils.DecryptAesGcm(ciphertext.Value, skippedMessageKey, associatedData);
+            return new Plaintext(decryptedBytes);
+        }
 
-        System.Diagnostics.Debug.WriteLine($"[CRYPTO][DECRYPT] Decrypting message with counter {header.Counter} from ratchet key hash: {Convert.ToBase64String(SHA256.HashData(header.RatchetKey.Value))}");
-        System.Diagnostics.Debug.WriteLine($"[CRYPTO][DECRYPT] Current receiving counter: {_receivingCounter}, previous chain length: {_previousChainLength}");
-        
-        // If we haven't seen this ratchet key before, it's from a new chain
-        bool isFromNewChain = _remoteRatchetKey is null || !header.RatchetKey.Equals(_remoteRatchetKey);
-        
-        // If message is from previous chain (different key but already processed)
-        if (isFromNewChain && header.RatchetKey.Equals(_remoteRatchetKey) == false)
-        {
-            System.Diagnostics.Debug.WriteLine($"[CRYPTO][DECRYPT] Message is from a different ratchet chain");
-            
-            // For messages from a previous chain, apply the previous chain length validation
-            // Only enforce this check when previous chain length is explicitly set (non-zero)
-            if (header.PreviousChainLength > 0 && header.Counter >= header.PreviousChainLength)
-            {
-                System.Diagnostics.Debug.WriteLine($"[CRYPTO][DECRYPT] Message counter {header.Counter} exceeds previous chain length {header.PreviousChainLength}");
-                throw new CryptographicException($"Message counter exceeds the previous chain length.");
-            }
-            
-            // Try to decrypt using skipped message keys for previous chain
-            var skippedPlaintext = TrySkippedMessageKeys(header, ciphertext, associatedData);
-            if (skippedPlaintext != null)
-            {
-                return skippedPlaintext;
-            }
-        }
-        
-        // Message is from current chain, standard counter checking
-        if (!isFromNewChain && header.Counter < _receivingCounter)
-        {
-            System.Diagnostics.Debug.WriteLine($"[CRYPTO][DECRYPT] Message was received out of order and has already been processed");
-            
-            // Try to decrypt with skipped message keys before failing
-            var decryptedPlaintext = TrySkippedMessageKeys(header, ciphertext, associatedData);
-            if (decryptedPlaintext != null)
-            {
-                return decryptedPlaintext;
-            }
-            
-            throw new CryptographicException("Message was already processed.");
-        }
-        
+        // Determine if the message is from a new chain (indicated by a new ratchet key)
+        // or from the current receiving chain
+        bool isFromNewChain = _remoteRatchetKey is null || !_remoteRatchetKey.Equals(header.RatchetKey);
+
+        _logger.LogDebug("Message is from {ChainType} chain. Message counter={Counter}, Our receiving counter={ReceivingCounter}", 
+            isFromNewChain ? "new" : "current", header.Counter, _receivingCounter);
+
         if (isFromNewChain)
         {
             // This message has a new ratchet key from the other party
-            System.Diagnostics.Debug.WriteLine($"[CRYPTO][DECRYPT] New ratchet key detected, performing DH ratchet");
+            _logger.LogDebug("New ratchet key detected, performing DH ratchet");
+            
+            // CRITICAL FIX: Before DH ratchet, log state values for diagnostics
+            _logger.LogDebug("Before DH ratchet - Root key hash: {RootKeyHash}, Previous chain length: {PreviousChainLength}", 
+                Convert.ToBase64String(SHA256.HashData(_rootKey.Value)), 
+                _previousChainLength);
+                
+            // CRITICAL FIX: Store our sending counter as our previous chain length
+            // before performing the ratchet
+            _previousChainLength = _sendingCounter;
+            _logger.LogDebug("Set our previous chain length to {PreviousChainLength} (our sending counter)", _previousChainLength);
+            
+            // CRITICAL FIX: Perform the DH ratchet with the new ratchet key
             DoDhRatchet(header.RatchetKey);
+            
+            // CRITICAL FIX: After DH ratchet, log state values for diagnostics
+            _logger.LogDebug("After DH ratchet - Root key hash: {RootKeyHash}, Previous chain length: {PreviousChainLength}", 
+                Convert.ToBase64String(SHA256.HashData(_rootKey.Value)), 
+                _previousChainLength);
         }
-
+        
         // Symmetrically ratchet forward to the current message.
         SkipMessageKeys(header.Counter);
 
         if (_receivingChainKey is null)
         {
-            throw new CryptographicException("Session is not properly initialized to decrypt messages.");
+            throw new InvalidOperationException("Receiving chain key is null.");
         }
 
+        // Derive the message key
         var messageKey = CryptoUtils.KDF(null, _receivingChainKey.Value, "message-key-kdf", CryptoUtils.KeySize);
-        _receivingChainKey = new ChainKey(CryptoUtils.KDF(null, _receivingChainKey.Value, "ratchet-chain-kdf", CryptoUtils.KeySize));
 
-        var plaintext = new Plaintext(CryptoUtils.DecryptAesGcm(ciphertext.Value, messageKey, associatedData));
-        
-        // Increment the counter after successful decryption
+        _logger.LogInformation("Decryption message key hash: {MessageKeyHash}", 
+            Convert.ToBase64String(SHA256.HashData(messageKey)));
+
+        // Advance the receiving chain key
+        _receivingChainKey = new ChainKey(CryptoUtils.KDF(null, _receivingChainKey.Value, "ratchet-chain-kdf", CryptoUtils.KeySize));
         _receivingCounter++;
-        
-        return plaintext;
+
+        _logger.LogDebug("After decryption: Receiving counter now {ReceivingCounter}", _receivingCounter);
+
+        try
+        {
+            var associatedData = SessionRatchetMessage.GetAssociatedData(header, new byte[0]);
+            
+            // Log detailed header and associated data information
+            _logger.LogInformation("Decryption header - RatchetKey hash: {RatchetKeyHash}, Counter: {Counter}, PreviousChainLength: {PreviousChainLength}", 
+                Convert.ToBase64String(SHA256.HashData(header.RatchetKey.Value)),
+                header.Counter,
+                header.PreviousChainLength);
+            _logger.LogInformation("Decryption associated data hash: {AssociatedDataHash}", 
+                Convert.ToBase64String(SHA256.HashData(associatedData)));
+                
+            var decryptedBytes = CryptoUtils.DecryptAesGcm(ciphertext.Value, messageKey, associatedData);
+            return new Plaintext(decryptedBytes);
+        }
+        catch (CryptographicException ex)
+        {
+            _logger.LogError(ex, "Decryption failed: {Message}", ex.Message);
+            throw;
+        }
     }
 
-    private Plaintext? TrySkippedMessageKeys((RatchetEphemeralKey RatchetKey, ulong Counter, ulong PreviousChainLength) header, Ciphertext ciphertext, byte[] associatedData)
+    private bool TryGetSkippedMessageKey(RatchetEphemeralKey ratchetKey, ulong counter, out byte[] messageKey)
     {
-        // Check for skipped message keys
-        if (_skippedMessageKeys.TryGetValue(header.Counter, out var messageKey))
+        var key = new SkippedMessageKeyIdentifier(ratchetKey, counter);
+        if (_skippedMessageKeys.TryGetValue(key, out messageKey))
         {
-            // Remove the used message key from the dictionary to prevent replay attacks
-            _skippedMessageKeys.Remove(header.Counter);
-            
-            // Decrypt using the skipped message key
-            System.Diagnostics.Debug.WriteLine($"[CRYPTO][DECRYPT] Found skipped message key for counter {header.Counter}");
-            try
-            {
-                var decryptedBytes = CryptoUtils.DecryptAesGcm(ciphertext.Value, messageKey.Value, associatedData);
-                return new Plaintext(decryptedBytes);
-            }
-            catch (CryptographicException ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"[CRYPTO][DECRYPT] Failed to decrypt with skipped message key: {ex.Message}");
-                return null;
-            }
+            _skippedMessageKeys.Remove(key);
+            _logger.LogDebug("Using skipped message key for ratchet key hash {RatchetKeyHash} and counter {Counter}", 
+                Convert.ToBase64String(SHA256.HashData(ratchetKey.Value)), counter);
+            return true;
         }
         
-        return null;
+        messageKey = Array.Empty<byte>();
+        return false;
+    }
+    
+    private Plaintext DecryptWithSkippedMessageKey(Contracts.RatchetHeader header, Ciphertext ciphertext, byte[] skippedMessageKey)
+    {
+        try
+        {
+            _logger.LogInformation("Decrypting using skipped message key hash: {MessageKeyHash}", 
+                Convert.ToBase64String(SHA256.HashData(skippedMessageKey)));
+                
+            // Create a domain-type tuple header that SessionRatchetMessage.GetAssociatedData expects
+            var domainHeader = (
+                new RatchetEphemeralKey(header.RatchetKey.ToByteArray()), 
+                header.Counter,
+                header.PreviousChainLength
+            );
+            
+            // Get associated data for decryption
+            var associatedData = SessionRatchetMessage.GetAssociatedData(domainHeader, new byte[0]);
+                
+            // Decrypt using the skipped message key
+            var decryptedBytes = CryptoUtils.DecryptAesGcm(ciphertext.Value, skippedMessageKey, associatedData);
+            return new Plaintext(decryptedBytes);
+        }
+        catch (CryptographicException ex)
+        {
+            _logger.LogError(ex, "Decryption with skipped message key failed: {Message}", ex.Message);
+            throw;
+        }
     }
 
     private void SkipMessageKeys(ulong until)
     {
-        if (_receivingChainKey == null)
-        {
-            return;
-        }
-
         // Only skip keys if the until value is greater than the current receiving counter
-        if (until <= _receivingCounter)
+        if (until <= _receivingCounter || _receivingChainKey == null)
         {
             return;
         }
         
-        System.Diagnostics.Debug.WriteLine($"[CRYPTO][SKIP] Skipping message keys from {_receivingCounter} to {until - 1}");
+        _logger.LogDebug("Skipping message keys from {ReceivingCounter} to {Until}", _receivingCounter, until);
 
         // Skip enough message keys to get to the target counter
         while (_receivingCounter < until)
         {
             // Store the skipped message key for future use
             var messageKey = CryptoUtils.KDF(null, _receivingChainKey.Value, "message-key-kdf", CryptoUtils.KeySize);
-            _skippedMessageKeys[_receivingCounter] = new MessageKey(messageKey);
+            
+            // Create a tuple key with the current ratchet key and counter
+            var key = new SkippedMessageKeyIdentifier(_remoteRatchetKey!, _receivingCounter);
+            _skippedMessageKeys[key] = messageKey;
             
             // Prevent memory attacks by limiting the number of skipped messages
             if (_skippedMessageKeys.Count > MaxSkippedMessages)
             {
-                var oldestKey = _skippedMessageKeys.Keys.Min();
+                // Remove oldest key - need to implement a proper way to determine this
+                var oldestKey = _skippedMessageKeys.Keys.First();
                 _skippedMessageKeys.Remove(oldestKey);
+                _logger.LogDebug("Removed oldest skipped message key to prevent DoS");
             }
 
             // Advance the receiving chain key
@@ -268,10 +494,15 @@ public class DoubleRatchetSession : IDisposable
 
     private void DoDhRatchet(RatchetEphemeralKey remoteRatchetKey)
     {
-        // Store the current sending chain length as the previous chain length
-        // This MUST be done before resetting the sending counter
-        _previousChainLength = _sendingCounter;
-        System.Diagnostics.Debug.WriteLine($"[CRYPTO][RATCHET] Setting previous chain length to {_previousChainLength}");
+        // CRITICAL FIX: We no longer update previous chain length here because
+        // it's now set correctly in Decrypt() from the message header
+        // before calling this method
+        _logger.LogDebug("Using previous chain length: {PreviousChainLength}", 
+            _previousChainLength);
+            
+        // Enhanced logging to debug session state
+        _logger.LogInformation("DoDhRatchet - Initial state: SendingCounter={SendingCounter}, ReceivingCounter={ReceivingCounter}, PreviousChainLength={PreviousChainLength}", 
+            _sendingCounter, _receivingCounter, _previousChainLength);
         
         // Update remote ratchet key
         _remoteRatchetKey = remoteRatchetKey;
@@ -283,29 +514,48 @@ public class DoubleRatchetSession : IDisposable
         _dhRatchetKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         
         // DH ratchet step 1 - use old private key with new remote public key
-        using var remoteKey = ECDiffieHellman.Create();
+        using var remoteKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         remoteKey.ImportSubjectPublicKeyInfo(remoteRatchetKey.Value, out _);
+        
         var dhSecret = oldDhKey!.DeriveKeyMaterial(remoteKey.PublicKey);
+        
+        // Important: Log this to help diagnose session state symmetry
+        _logger.LogDebug("DH Secret 1 hash: {DhSecretHash}", 
+            Convert.ToBase64String(SHA256.HashData(dhSecret)));
+            
         var kdfResult = CryptoUtils.KDF(_rootKey.Value, dhSecret, "ratchet-kdf", CryptoUtils.KeySize * 2);
         _rootKey = new RootKey(kdfResult[..CryptoUtils.KeySize]);
         _receivingChainKey = new ChainKey(kdfResult[CryptoUtils.KeySize..]);
+        
+        _logger.LogDebug("After DH step 1: Root key hash: {RootKeyHash}", 
+            Convert.ToBase64String(SHA256.HashData(_rootKey.Value)));
         
         // Reset receiving counter for the new receiving chain
         _receivingCounter = 0;
         
         // DH ratchet step 2 - use new private key with remote public key
         dhSecret = _dhRatchetKey.DeriveKeyMaterial(remoteKey.PublicKey);
+        
+        // Important: Log this to help diagnose session state symmetry
+        _logger.LogDebug("DH Secret 2 hash: {DhSecretHash}", 
+            Convert.ToBase64String(SHA256.HashData(dhSecret)));
+            
         kdfResult = CryptoUtils.KDF(_rootKey.Value, dhSecret, "ratchet-kdf", CryptoUtils.KeySize * 2);
         _rootKey = new RootKey(kdfResult[..CryptoUtils.KeySize]);
         _sendingChainKey = new ChainKey(kdfResult[CryptoUtils.KeySize..]);
         
+        _logger.LogDebug("After DH step 2: Root key hash: {RootKeyHash}", 
+            Convert.ToBase64String(SHA256.HashData(_rootKey.Value)));
+        
         // Reset sending counter for the new sending chain
         _sendingCounter = 0;
         
-        // Clean up old DH key
-        oldDhKey?.Dispose();
-        
-        System.Diagnostics.Debug.WriteLine($"[CRYPTO][RATCHET] DH ratchet complete with PreviousChainLength={_previousChainLength}");
+        // Enhanced logging to debug final session state after ratchet
+        _logger.LogInformation("DoDhRatchet - Final state: SendingCounter={SendingCounter}, ReceivingCounter={ReceivingCounter}, PreviousChainLength={PreviousChainLength}", 
+            _sendingCounter, _receivingCounter, _previousChainLength);
+            
+        // Dispose of old DH key
+        oldDhKey.Dispose();
     }
 
     public void Dispose()
@@ -321,14 +571,14 @@ public class DoubleRatchetSession : IDisposable
 
     public class DoubleRatchetSessionState
     {
-        public RootKey RootKey { get; set; } = new([]);
+        public RootKey? RootKey { get; set; }
         public ChainKey? SendingChainKey { get; set; }
         public ChainKey? ReceivingChainKey { get; set; }
         public ulong SendingCounter { get; set; }
         public ulong ReceivingCounter { get; set; }
         public ulong PreviousChainLength { get; set; }
-        public Dictionary<ulong, MessageKey> SkippedMessageKeys { get; set; } = new();
-        public RatchetIdentityKey TheirIdentityPublicKey { get; set; } = new([]);
+        public Dictionary<SkippedMessageKeyIdentifier, byte[]> SkippedMessageKeys { get; set; } = new();
+        public RatchetIdentityKey? TheirIdentityPublicKey { get; set; }
         public RatchetEphemeralKey? TheirDhRatchetPublicKey { get; set; }
         public PrivateEphemeralKey? DhRatchetPrivateKey { get; set; }
     }

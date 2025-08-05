@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Percolator.Application.Identity;
@@ -63,17 +64,22 @@ public class SessionMessageTests
             )
         };
         
+        // Create a logger factory for DirectSessionManager
+        var loggerFactory = new NullLoggerFactory();
+        
         _aliceManager = new DirectSessionManager(
             _aliceSessionStore,
             _mockConversationRepo.Object,
             _aliceIdentity,
-            new NullLogger<DirectSessionManager>());
+            new NullLogger<DirectSessionManager>(),
+            loggerFactory);
         
         _bobManager = new DirectSessionManager(
             _bobSessionStore, 
             _mockConversationRepo.Object,
             _bobIdentity,
-            new NullLogger<DirectSessionManager>());
+            new NullLogger<DirectSessionManager>(),
+            loggerFactory);
     }
 
     [Test]

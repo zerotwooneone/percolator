@@ -8,7 +8,7 @@ public static class CryptographyExtensions
     {
         try
         {
-            using var ecdh = ECDiffieHellman.Create();
+            using var ecdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
             ecdh.ImportSubjectPublicKeyInfo(publicKey.Value, out _);
             return ecdh.PublicKey;
         }
@@ -41,7 +41,7 @@ public static class CryptographyExtensions
     {
         try
         {
-            using var ecdh = ECDiffieHellman.Create();
+            using var ecdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
             ecdh.ImportSubjectPublicKeyInfo(publicKey.Value, out _);
             return ecdh.PublicKey;
         }
@@ -74,7 +74,7 @@ public static class CryptographyExtensions
     {
         try
         {
-            using var ecdh = ECDiffieHellman.Create();
+            using var ecdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
             ecdh.ImportSubjectPublicKeyInfo(publicKey.Value, out _);
             return ecdh.PublicKey;
         }
@@ -107,7 +107,7 @@ public static class CryptographyExtensions
     {
         try
         {
-            using var ecdh = ECDiffieHellman.Create();
+            using var ecdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
             ecdh.ImportSubjectPublicKeyInfo(publicKey.Value, out _);
             return ecdh.PublicKey;
         }
@@ -140,7 +140,7 @@ public static class CryptographyExtensions
     {
         try
         {
-            using var ecdh = ECDiffieHellman.Create();
+            using var ecdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
             ecdh.ImportSubjectPublicKeyInfo(publicKey.Value, out _);
             return ecdh.PublicKey;
         }

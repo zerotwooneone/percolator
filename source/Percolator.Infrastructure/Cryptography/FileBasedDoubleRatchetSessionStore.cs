@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Percolator.Cryptography;
@@ -9,7 +10,7 @@ namespace Percolator.Infrastructure.Cryptography;
 public class FileBasedDoubleRatchetSessionStore : IDoubleRatchetSessionStore
 {
     private readonly string _storagePath;
-    private readonly JsonSerializerOptions _jsonOptions = new() { WriteIndented = true };
+    private readonly JsonSerializerOptions _jsonOptions;
     private readonly ILogger<FileBasedDoubleRatchetSessionStore> _logger;
 
     public FileBasedDoubleRatchetSessionStore(
@@ -19,6 +20,13 @@ public class FileBasedDoubleRatchetSessionStore : IDoubleRatchetSessionStore
         _storagePath = Path.Combine(storageOptions.Value.Path, "sessions");
         _logger = logger;
         Directory.CreateDirectory(_storagePath);
+        
+        // Configure JSON serializer options with our custom converter
+        _jsonOptions = new JsonSerializerOptions
+        {
+            WriteIndented = true,
+        };
+        _jsonOptions.Converters.Add(new SkippedMessageKeyIdentifierConverter());
     }
 
     public async Task<DoubleRatchetSession.DoubleRatchetSessionState?> GetSessionStateAsync(SessionId sessionId)
