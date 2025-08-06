@@ -135,7 +135,11 @@ public class X3DHOrchestrator : IX3DHOrchestrator
             PreKeySignature = ByteString.CopyFrom(signature.Value)
         };
 
-        //Do not include one-time pre-key in the response
+        // Include one-time pre-key in the response if available
+        if (oneTimePreKey != null)
+        {
+            responderBundle.OneTimePreKey = ByteString.CopyFrom(oneTimePreKey.PublicKey.ExportSubjectPublicKeyInfo());
+        }
 
         return new HandshakeResponse(sharedSecret, responderBundle);
     }

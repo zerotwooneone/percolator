@@ -9,6 +9,7 @@ using NetworkPeerId = Percolator.Network.PeerId;
 using Percolator.Chat.ValueObjects;
 using Percolator.Cryptography;
 using Google.Protobuf;
+using System.Net.Http;
 
 namespace Percolator.Application.Network;
 
@@ -19,17 +20,20 @@ public class GrpcMessageTransportService : IMessageTransportService
     private readonly IPeerRepository _peerRepository;
     private readonly IPeerConnectionRepository _peerConnectionRepository;
     private readonly SharedCertificateManager _certificateManager;
+    private readonly IHttpClientFactory _httpClientFactory;
 
     public GrpcMessageTransportService(
         ILogger<GrpcMessageTransportService> logger,
         IPeerRepository peerRepository,
         IPeerConnectionRepository peerConnectionRepository,
-        SharedCertificateManager certificateManager)
+        SharedCertificateManager certificateManager,
+        IHttpClientFactory httpClientFactory)
     {
         _logger = logger;
         _peerRepository = peerRepository;
         _peerConnectionRepository = peerConnectionRepository;
         _certificateManager = certificateManager;
+        _httpClientFactory = httpClientFactory;
     }
 
     public async Task SendMessageAsync(
@@ -107,19 +111,10 @@ public class GrpcMessageTransportService : IMessageTransportService
             {
                 _logger.LogInformation("Creating new gRPC client for {Endpoint}", endPoint);
 
-                // For local connections, use a simple handler without any TLS configuration
-                _logger.LogInformation("Using HTTP/2 without TLS for local connection: {Endpoint}", endPoint);
-                var handler = new SocketsHttpHandler
-                {
-                    EnableMultipleHttp2Connections = true,
-                    KeepAlivePingPolicy = HttpKeepAlivePingPolicy.Always,
-                    KeepAlivePingDelay = TimeSpan.FromSeconds(60),
-                    KeepAlivePingTimeout = TimeSpan.FromSeconds(30)
-                };
-
-
-                // Create HTTP client and configure channel options
-                var httpClient = new HttpClient(handler);
+                // Use the configured HTTP client from DI with certificate validation settings
+                var httpClient = _httpClientFactory.CreateClient("percolator-grpc");
+                _logger.LogInformation("Using configured HTTP client for gRPC connection with handler type: {HandlerType}", 
+                    httpClient.GetType().Name);
 
                 var channelOptions = new GrpcChannelOptions
                 {
@@ -132,7 +127,19 @@ public class GrpcMessageTransportService : IMessageTransportService
                 _logger.LogInformation("Creating gRPC channel to {Uri} using http", uri);
 
                 var channel = GrpcChannel.ForAddress(uri, channelOptions);
-                return new TransportService.TransportServiceClient(channel);
+                
+                // Test the connection by making a simple ping call
+                try
+                {
+                    var client = new TransportService.TransportServiceClient(channel);
+                    _logger.LogInformation("Successfully created gRPC client for {Endpoint}", endPoint);
+                    return client;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Failed to create gRPC client for {Endpoint} - channel creation succeeded but client creation failed", endPoint);
+                    throw;
+                }
             }
             catch (Exception ex)
             {

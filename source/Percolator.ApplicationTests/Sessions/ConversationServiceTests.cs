@@ -194,6 +194,176 @@ public class ConversationServiceTests
             Times.Once);
     }
 
+    [Test]
+    public async Task CreateDirectConversationAsync_WhenPeerDoesNotExist_CreatesNewPeerAndConversation()
+    {
+        // Arrange
+        var endpoint = new DnsEndPoint("localhost", 5001);
+        var peerName = "new-peer";
+        
+        // Setup peer repository to return null (peer does not exist)
+        _mockPeerRepository.Setup(r => r.GetByNameAsync(peerName)).ReturnsAsync((Peer)null);
+        
+        // Setup peer repository AddAsync to succeed
+        _mockPeerRepository.Setup(r => r.AddAsync(It.IsAny<Peer>()))
+            .Returns(Task.CompletedTask);
+            
+        // Setup peer connection repository
+        _mockPeerConnectionRepository
+            .Setup(r => r.SaveAsync(It.IsAny<PeerConnection>()))
+            .Returns(Task.CompletedTask);
+
+        // Setup X3DH orchestrator to return a shared secret
+        var sharedSecret = new CryptoSharedSecret(new byte[32]);
+        Random.Shared.NextBytes(sharedSecret.Value);
+        
+        _mockX3dhOrchestrator
+            .Setup(o => o.CompleteHandshake(It.IsAny<ContractsPreKeyBundle>(), It.IsAny<ECDiffieHellman>()))
+            .Returns(sharedSecret);
+
+        // Setup the one-time key provider to return a key
+        using var oneTimeKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        _mockOneTimeKeyProvider
+            .Setup(p => p.PopOneTimeKey())
+            .Returns(oneTimeKey);
+            
+        // Setup conversation repository
+        _mockConversationRepository
+            .Setup(r => r.AddAsync(It.IsAny<ChatConversation>()))
+            .Returns(Task.CompletedTask);
+            
+        // Setup direct session manager
+        _mockDirectSessionManager
+            .Setup(m => m.EstablishSessionAsInitiatorAsync(
+                It.IsAny<Percolator.Cryptography.SessionId>(), 
+                It.IsAny<IdentityPeerId>(), 
+                It.IsAny<RatchetIdentityKey>(), 
+                It.IsAny<RatchetEphemeralKey>(), 
+                It.IsAny<CryptoSharedSecret>()))
+            .Returns(Task.CompletedTask);
+
+        // Create the response for the GrpcSessionService
+        var sessionId = Guid.NewGuid();
+        var responderBundle = new ContractsPreKeyBundle { 
+            IdentityAgreementKey = ByteString.CopyFrom(new byte[32]), 
+            SignedPreKey = ByteString.CopyFrom(new byte[32]),
+            IdentitySigningKey = ByteString.CopyFrom(new byte[32])
+        };
+        
+        var grpcResponse = new EstablishSessionResponse
+        {
+            ResponderBundle = responderBundle,
+            SessionId = sessionId.ToString()
+        };
+
+        // Setup GrpcSessionService to succeed
+        _mockGrpcSessionService
+            .Setup(s => s.EstablishSessionAsync(
+                It.IsAny<DnsEndPoint>(), 
+                It.IsAny<EstablishSessionRequest>(),
+                It.IsAny<X509Certificate2>()))
+            .ReturnsAsync(grpcResponse);
+            
+        // Capture the peer that gets created
+        Peer capturedPeer = null;
+        _mockPeerRepository.Setup(r => r.AddAsync(It.IsAny<Peer>()))
+            .Callback<Peer>(p => capturedPeer = p)
+            .Returns(Task.CompletedTask);
+            
+        // Capture the conversation that gets created
+        ChatConversation capturedConversation = null;
+        _mockConversationRepository.Setup(r => r.AddAsync(It.IsAny<ChatConversation>()))
+            .Callback<ChatConversation>(c => capturedConversation = c)
+            .Returns(Task.CompletedTask);
+
+        // Act
+        var result = await _service.CreateDirectConversationAsync(endpoint, peerName);
+
+        // Assert
+        Assert.That(result, Is.Not.EqualTo(default(ChatConversationId)));
+        Assert.That(result.Value, Is.EqualTo(sessionId));
+        
+        // Verify peer was created with expected name
+        _mockPeerRepository.Verify(r => r.AddAsync(It.Is<Peer>(p => p.Name == peerName)), Times.Once);
+        Assert.That(capturedPeer, Is.Not.Null);
+        Assert.That(capturedPeer.Name, Is.EqualTo(peerName));
+        
+        // Verify peer connection was saved
+        _mockPeerConnectionRepository.Verify(r => r.SaveAsync(It.IsAny<PeerConnection>()), Times.Once);
+        
+        // Verify conversation was created with expected participants
+        _mockConversationRepository.Verify(r => r.AddAsync(It.IsAny<ChatConversation>()), Times.Once);
+        Assert.That(capturedConversation, Is.Not.Null);
+        Assert.That(capturedConversation.Id.Value, Is.EqualTo(sessionId));
+        Assert.That(capturedConversation.Name, Is.EqualTo(peerName));
+        Assert.That(capturedConversation.Participants, Has.Count.EqualTo(2));
+        
+        // Verify session was established
+        _mockDirectSessionManager.Verify(m => m.EstablishSessionAsInitiatorAsync(
+            It.Is<Percolator.Cryptography.SessionId>(id => id.Value == sessionId),
+            It.IsAny<IdentityPeerId>(), 
+            It.IsAny<RatchetIdentityKey>(), 
+            It.IsAny<RatchetEphemeralKey>(), 
+            It.Is<CryptoSharedSecret>(s => s.Value.SequenceEqual(sharedSecret.Value))), 
+            Times.Once);
+            
+        // Verify gRPC service was called
+        _mockGrpcSessionService.Verify(s => s.EstablishSessionAsync(
+            endpoint,
+            It.IsAny<EstablishSessionRequest>(),
+            It.IsAny<X509Certificate2>()),
+            Times.Once);
+    }
+
+    [Test]
+    public async Task CreateDirectConversationAsync_WhenGrpcServiceThrows_PropagatesException()
+    {
+        // Arrange
+        var endpoint = new DnsEndPoint("localhost", 5001);
+        var peerName = "test-peer";
+        
+        // Setup peer repository
+        _mockPeerRepository.Setup(r => r.GetByNameAsync(peerName))
+            .ReturnsAsync((Peer)null);
+            
+        // Setup one-time key provider
+        using var oneTimeKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        _mockOneTimeKeyProvider
+            .Setup(p => p.PopOneTimeKey())
+            .Returns(oneTimeKey);
+            
+        // Setup GrpcSessionService to throw
+        var expectedError = new InvalidOperationException("Cannot connect to peer");
+        _mockGrpcSessionService
+            .Setup(s => s.EstablishSessionAsync(
+                It.IsAny<DnsEndPoint>(),
+                It.IsAny<EstablishSessionRequest>(),
+                It.IsAny<X509Certificate2>()))
+            .ThrowsAsync(expectedError);
+
+        // Act & Assert
+        var exception = Assert.ThrowsAsync<InvalidOperationException>(
+            async () => await _service.CreateDirectConversationAsync(endpoint, peerName));
+            
+        Assert.That(exception.Message, Is.EqualTo("Failed to establish secure connection using shared certificate"));
+        Assert.That(exception.InnerException, Is.SameAs(expectedError));
+        
+        // Verify peer was not created
+        _mockPeerRepository.Verify(r => r.AddAsync(It.IsAny<Peer>()), Times.Never);
+        
+        // Verify conversation was not created
+        _mockConversationRepository.Verify(r => r.AddAsync(It.IsAny<ChatConversation>()), Times.Never);
+        
+        // Verify session was not established
+        _mockDirectSessionManager.Verify(m => m.EstablishSessionAsInitiatorAsync(
+            It.IsAny<Percolator.Cryptography.SessionId>(),
+            It.IsAny<IdentityPeerId>(),
+            It.IsAny<RatchetIdentityKey>(),
+            It.IsAny<RatchetEphemeralKey>(),
+            It.IsAny<CryptoSharedSecret>()),
+            Times.Never);
+    }
+
     private static X509Certificate2 CreateSelfSignedCertificate(string subjectName)
     {
         // Create a new RSA key pair

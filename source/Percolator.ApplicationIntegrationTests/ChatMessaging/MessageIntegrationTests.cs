@@ -35,6 +35,41 @@ namespace Percolator.ApplicationIntegrationTests.ChatMessaging;
 [TestFixture]
 public class MessageIntegrationTests : IntegrationTestBase
 {
+    // Track temp directories for cleanup
+    private readonly List<string> _tempDirectoriesToCleanup = new();
+
+    // Override the base SetUp method to also clear the temp directories list
+    [SetUp]
+    public new void SetUp()
+    {
+        base.SetUp();
+        _tempDirectoriesToCleanup.Clear();
+    }
+
+    // Override the base TearDown method to also clean up temp directories
+    [TearDown]
+    public new void TearDown()
+    {
+        base.TearDown();
+        
+        // Clean up any temp directories created during the test
+        foreach (var dir in _tempDirectoriesToCleanup)
+        {
+            try
+            {
+                if (Directory.Exists(dir))
+                {
+                    Directory.Delete(dir, true);
+                    TestContext.WriteLine($"Cleaned up temp directory: {dir}");
+                }
+            }
+            catch (Exception ex)
+            {
+                TestContext.WriteLine($"Error cleaning up directory {dir}: {ex.Message}");
+            }
+        }
+    }
+    
     // We'll add a series of simpler tests to isolate where the hanging occurs
     
     [Test, CancelAfter(30000)] // 30-second timeout for the entire test
@@ -301,13 +336,6 @@ public class MessageIntegrationTests : IntegrationTestBase
                     : null;
                 TestContext.WriteLine($"Sender has peer connection to receiver: {peerConnection != null}");
                 
-                var sessionExists = receiverSessionManager.GetType().GetMethod(
-                    "HasSession", 
-                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)?
-                    .Invoke(receiverSessionManager, new object[] { new SessionId(conversationId.Value) });
-                
-                TestContext.WriteLine($"Receiver has session: {sessionExists ?? false}");
-                
                 // Send a message through the established connection
                 TestContext.WriteLine("Sending message");
                 
@@ -381,6 +409,9 @@ public class MessageIntegrationTests : IntegrationTestBase
         string tempDirectory = Path.Combine(Path.GetTempPath(), $"PercolatorTest_{nodeName}_{Guid.NewGuid()}");
         Directory.CreateDirectory(tempDirectory);
         TestContext.WriteLine($"Created temp directory for {nodeName}: {tempDirectory}");
+        
+        // Add to list for cleanup
+        _tempDirectoriesToCleanup.Add(tempDirectory);
         
         // Create minimal configuration
         var configValues = new Dictionary<string, string>
@@ -470,6 +501,7 @@ public class MessageIntegrationTests : IntegrationTestBase
                             {
                                 ServerCertificateCustomValidationCallback = (_, _, _, _) => true // Accept all certificates for testing
                             };
+                            TestContext.WriteLine("Created HttpClientHandler with ServerCertificateCustomValidationCallback = true");
                             return handler;
                         });
                     

@@ -154,7 +154,8 @@ namespace Percolator.Application.Network
 
                 // Create and store HTTP client with longer timeout for debugging
                 var httpClient = new HttpClient(handler);
-                httpClient.Timeout = TimeSpan.FromSeconds(30); // Longer timeout for debugging
+                //todo: make timeout configurable
+                httpClient.Timeout = TimeSpan.FromSeconds(300); // Longer timeout for debugging
                 _httpClients[connectionKey] = httpClient;
 
                 _logger.LogInformation("Creating gRPC channel to {Endpoint}", endpoint);
@@ -197,8 +198,8 @@ namespace Percolator.Application.Network
 
                 _logger.LogInformation("Sending EstablishSession request to {Endpoint}", endpoint);
                 
-                // Add a cancellation deadline
-                using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(30));
+                // todo: make cancellation deadline configurable
+                using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(300));
 
                 try {
                     var response = await client.EstablishSessionAsync(request, cancellationToken: cts.Token);
