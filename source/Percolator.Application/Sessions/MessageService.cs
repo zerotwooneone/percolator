@@ -7,6 +7,9 @@ using ChatParticipantId = Percolator.Chat.ValueObjects.ParticipantId;
 using ChatConversationId = Percolator.Chat.ValueObjects.ConversationId;
 using Percolator.Cryptography;
 using IdentityPeerId = Percolator.Identity.PeerId;
+using Percolator.Contracts;
+using Google.Protobuf;
+using Google.Protobuf.WellKnownTypes;
 
 namespace Percolator.Application.Sessions;
 
@@ -54,8 +57,26 @@ public class MessageService : IMessageService
         }
         _logger.LogInformation("Sending message to conversation {ConversationId}", conversationId);
        
-        // Convert content to plaintext bytes
-        var plaintext = new Plaintext(System.Text.Encoding.UTF8.GetBytes(content));
+        // Create a proper InternalEnvelope with a ChatEnvelope containing a TextMessage
+        var textMessage = new TextMessage
+        {
+            MessageId = ByteString.CopyFrom(Guid.NewGuid().ToByteArray()),
+            SentTimestampUtc = Timestamp.FromDateTime(DateTime.UtcNow),
+            Content = content
+        };
+        
+        var chatEnvelope = new ChatEnvelope
+        {
+            TextMessage = textMessage
+        };
+        
+        var internalEnvelope = new InternalEnvelope
+        {
+            ChatEnvelope = chatEnvelope
+        };
+        
+        // Convert the protobuf message to plaintext bytes
+        var plaintext = new Plaintext(internalEnvelope.ToByteArray());
 
         // Encrypt message using Double Ratchet
         var encryptResult = await _sessionManager.EncryptMessageAsync(new SessionId(conversationId.Value), plaintext);
