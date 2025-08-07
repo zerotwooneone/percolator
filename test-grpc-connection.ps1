@@ -4,7 +4,8 @@
 param (
     [int]$ServerPort = 5000,  # Default server port
     [switch]$SkipBuild = $false,  # Skip build step
-    [int]$NodeStartupWaitTime = 5
+    [int]$NodeStartupWaitTime = 5,
+    [switch]$DisableDiagnosticLogging = $false  # By default, diagnostic logging is enabled
 )
 
 $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
@@ -39,46 +40,62 @@ function Start-PercolatorNode {
     if ($enableTlsDebug) {
         $env:DOTNET_SYSTEM_NET_SECURITY_TLS_DEBUG = "1"
     }
+
+    # Build arguments list with optional crypto logging
+    $argList = @("host", "-p", "$port", "-i", "$identity")
     
-    $process = Start-Process -FilePath $processPath -ArgumentList "host", "-p", "$port", "-i", "$identity" -PassThru -WindowStyle Normal
+    # Add diagnostic crypto logging flag if enabled
+    if (-not $DisableDiagnosticLogging) {
+        Write-Log "Enabling cryptographic diagnostic logging for $identity node"
+        $argList += "--enable-crypto-logging"
+    } else {
+        Write-Log "Cryptographic diagnostic logging is disabled for $identity node"
+    }
+    
+    $process = Start-Process -FilePath $processPath -ArgumentList $argList -PassThru -WindowStyle Normal
     
     Write-Log "$identity node started with PID $($process.Id)"
     return $process
 }
 
-# Test a connection between two nodes
-function Test-Connection {
+# Send a message from one identity to another
+function Send-Message {
     param(
         [string]$fromIdentity,
         [string]$toIdentity,
         [string]$toHost,
-        [int]$toGrpcPort  # This is explicitly the gRPC port now
+        [int]$toGrpcPort,
+        [string]$message = "Test message"
     )
     
-    Write-Log "=== Testing connection from $fromIdentity to $toIdentity at $toHost`:$toGrpcPort ==="
+    Write-Log "=== Sending message from $fromIdentity to $toIdentity at $toHost`:$toGrpcPort ==="
     
     $clientPath = ".\source\Percolator.Node\bin\Debug\net9.0-windows\Percolator.Node.exe"
     $endpoint = "$toHost`:$toGrpcPort"
-    $args = @("connect", "-e", $endpoint, "-i", "$fromIdentity")
     
-    Write-Log "Running: $clientPath $args"
-    $output = & $clientPath $args 2>&1
+    # Build the send command with required parameters
+    $sendArgs = @(
+        "send", 
+        $message,
+        "--endpoint", $endpoint, 
+        "--peer-name", $toIdentity, 
+        "-i", $fromIdentity
+    )
+    
+    # Add diagnostic crypto logging flag if enabled
+    if (-not $DisableDiagnosticLogging) {
+        Write-Log "Enabling cryptographic diagnostic logging for message sending"
+        $sendArgs += "--enable-crypto-logging"
+    } else {
+        Write-Log "Cryptographic diagnostic logging is disabled for message sending"
+    }
+    
+    Write-Log "Running: $clientPath $($sendArgs -join ' ')"
+    $output = & $clientPath $sendArgs 2>&1
     
     # Log the output
     foreach ($line in $output) {
         Write-Log "OUTPUT: $line"
-    }
-    
-    # Send a test message
-    Write-Log "Sending a test message from $fromIdentity to $toIdentity..."
-    $testMessage = "Test message from $fromIdentity"
-    $sendArgs = @("send", $testMessage, "--endpoint", $endpoint, "--peer-name", $toIdentity, "-i", $fromIdentity)
-    
-    Write-Log "Running: $clientPath $sendArgs"
-    $sendOutput = & $clientPath $sendArgs 2>&1
-    
-    foreach ($line in $sendOutput) {
-        Write-Log "SEND OUTPUT: $line"
     }
 }
 
@@ -122,9 +139,6 @@ try {
     $aliceWebPort = $ServerPort
     $aliceGrpcPort = $aliceWebPort + 1  # gRPC port is web port + 1
     
-    $bobWebPort = $ServerPort + 10
-    $bobGrpcPort = $bobWebPort + 1      # gRPC port is web port + 1
-    
     # Start server node (alice)
     Write-Log "Starting Alice node on web port $aliceWebPort (gRPC: $aliceGrpcPort)..."
     $aliceNode = Start-PercolatorNode -identity "alice" -port $aliceWebPort -enableTlsDebug
@@ -132,15 +146,8 @@ try {
     # Wait for server to initialize
     Wait-ForNodeStartup -seconds $NodeStartupWaitTime
     
-    # Start client node (bob)
-    #Write-Log "Starting Bob node on web port $bobWebPort (gRPC: $bobGrpcPort)..."
-    #$bobNode = Start-PercolatorNode -identity "bob" -port $bobWebPort -enableTlsDebug
-    
-    # Wait for client to initialize
-    Wait-ForNodeStartup -seconds $NodeStartupWaitTime
-    
-    # Test connection from bob to alice - Note: Using the gRPC port
-    Test-Connection -fromIdentity "bob" -toIdentity "alice" -toHost "localhost" -toGrpcPort $aliceGrpcPort
+    # Send message from Bob to Alice
+    Send-Message -fromIdentity "bob" -toIdentity "alice" -toHost "localhost" -toGrpcPort $aliceGrpcPort -message "Hello from Bob!"
     
     # User prompt to end test
     Write-Log "Test complete. Press any key to stop the test and cleanup..."
@@ -152,7 +159,6 @@ catch {
 finally {
     # Clean up
     if ($null -ne $aliceNode) { Stop-PercolatorNode $aliceNode }
-    if ($null -ne $bobNode) { Stop-PercolatorNode $bobNode }
     
     Write-Log "Test complete. Results saved to $logFile"
 }
