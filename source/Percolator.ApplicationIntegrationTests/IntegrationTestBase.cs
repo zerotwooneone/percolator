@@ -122,6 +122,12 @@ public abstract class IntegrationTestBase
                     builder.AddDebug();
                 });
 
+                // Register CryptographyOptions with diagnostic logging enabled for integration tests
+                services.AddSingleton(new Percolator.Cryptography.CryptographyOptions 
+                { 
+                    EnableCryptographicMaterialLogging = true 
+                });
+
                 // Add gRPC services
                 services.AddGrpc(options =>
                 {
