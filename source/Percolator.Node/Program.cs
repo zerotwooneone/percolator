@@ -16,6 +16,7 @@ using Percolator.Application;
 using Percolator.Application.Identity;
 using Percolator.Application.Network;
 using Percolator.Application.Sessions;
+using Percolator.Cryptography;
 using Percolator.Infrastructure;
 using Percolator.Network;
 using Percolator.Node;
@@ -28,6 +29,14 @@ var identityOption = new Option<string>(
     new[] { "--identity", "-i" },
     getDefaultValue: () => "default",
     description: "The name of the identity to use.");
+
+// Add a global option for enabling cryptographic diagnostic logging
+var enableCryptoLoggingOption = new Option<bool>(
+    new[] { "--enable-crypto-logging", "-ecl" },
+    getDefaultValue: () => false,
+    description: "Enables diagnostic logging of cryptographic material hashes. WARNING: Do not use in production environments.");
+
+rootCommand.AddGlobalOption(enableCryptoLoggingOption);
 
 // *** Host Command ***
 var portOption = new Option<int>(
@@ -94,6 +103,7 @@ async Task HostCommandHandler(InvocationContext context)
     CancellationToken cancellationToken = context.GetCancellationToken();
     int port = context.ParseResult.GetValueForOption(portOption);
     string? identityName = context.ParseResult.GetValueForOption(identityOption);
+    bool enableCryptoLogging = context.ParseResult.GetValueForOption(enableCryptoLoggingOption);
 
     // Step 1: Build a temporary service provider to get services needed for startup.
     var tempServices = new ServiceCollection();
@@ -184,6 +194,7 @@ async Task ConnectCommandHandler(InvocationContext context)
     var endpointString = context.ParseResult.GetValueForArgument(endpointArgument);
     var peerName = context.ParseResult.GetValueForOption(peerNameOption);
     var identityName = context.ParseResult.GetValueForOption(identityOption);
+    var enableCryptoLogging = context.ParseResult.GetValueForOption(enableCryptoLoggingOption);
     var cancellationToken = context.GetCancellationToken();
 
     if (!TryParseEndpoint(endpointString, out var endpoint))
@@ -194,7 +205,7 @@ async Task ConnectCommandHandler(InvocationContext context)
         return;
     }
 
-    var services = CreateServiceProvider(identityName);
+    var services = CreateServiceProvider(identityName, enableCryptoLogging);
     await using var serviceScope = services.CreateAsyncScope();
     var serviceProvider = serviceScope.ServiceProvider;
 
@@ -226,9 +237,10 @@ async Task SendCommandHandler(InvocationContext context)
     var endpointString = context.ParseResult.GetValueForOption(endpointOption);
     var peerName = context.ParseResult.GetValueForOption(peerNameOption);
     var identityName = context.ParseResult.GetValueForOption(identityOption);
+    var enableCryptoLogging = context.ParseResult.GetValueForOption(enableCryptoLoggingOption);
     var cancellationToken = context.GetCancellationToken();
 
-    var services = CreateServiceProvider(identityName);
+    var services = CreateServiceProvider(identityName, enableCryptoLogging);
     await using var serviceScope = services.CreateAsyncScope();
     var serviceProvider = serviceScope.ServiceProvider;
 
@@ -287,7 +299,7 @@ async Task SendCommandHandler(InvocationContext context)
     }
 }
 
-static ServiceProvider CreateServiceProvider(string? identityName)
+static ServiceProvider CreateServiceProvider(string? identityName, bool enableCryptoLogging)
 {
     var services = new ServiceCollection();
     var config = new ConfigurationBuilder().AddNode().Build();
@@ -295,6 +307,18 @@ static ServiceProvider CreateServiceProvider(string? identityName)
     services.AddLogging(builder => builder.AddConsole().AddConfiguration(config.GetSection("Logging")));
     services.AddApplicationServices(config);
     services.AddInfrastructureServices(config);
+    
+    services.Configure<CryptographyOptions>(options => {
+        options.EnableCryptographicMaterialLogging = enableCryptoLogging;
+        
+        // If crypto logging is enabled, log a warning
+        if (enableCryptoLogging)
+        {
+            var loggerFactory = services.BuildServiceProvider().GetRequiredService<ILoggerFactory>();
+            var logger = loggerFactory.CreateLogger("CryptographyOptions");
+            logger.LogWarning("SECURITY WARNING: Cryptographic material hash logging is ENABLED. This should only be used for debugging.");
+        }
+    });
     
     services.AddHttpClient("percolator-grpc", client =>
     {
@@ -389,6 +413,18 @@ static ServiceProvider CreateServiceProvider(string? identityName)
         return handler;
     });
 
+    if (enableCryptoLogging)
+    {
+        services.AddLogging(builder =>
+        {
+            builder.AddConsole(options =>
+            {
+                options.TimestampFormat = "[yyyy-MM-dd HH:mm:ss] ";
+            });
+            builder.AddDebug();
+        });
+    }
+
     return services.BuildServiceProvider();
 }
 
@@ -435,8 +471,9 @@ async Task TlsDebugCommandHandler(InvocationContext context)
 {
     var host = (string)context.ParseResult.GetValueForArgument(tlsDebugCommand.Arguments[0]);
     var port = (int)context.ParseResult.GetValueForArgument(tlsDebugCommand.Arguments[1]);
+    var enableCryptoLogging = context.ParseResult.GetValueForOption(enableCryptoLoggingOption);
 
-    var serviceProvider = CreateServiceProvider(null); // No identity needed for basic test
+    var serviceProvider = CreateServiceProvider(null, enableCryptoLogging); // No identity needed for basic test
     var logger = serviceProvider.GetRequiredService<ILogger<Program>>();
     
     Console.WriteLine("Starting TLS connectivity test...");

@@ -1,9 +1,32 @@
 using System.Security.Cryptography;
+using Microsoft.Extensions.Logging;
 
 namespace Percolator.Cryptography;
 
 public class X3DHManager : IX3DHManager
 {
+    private readonly ILogger<X3DHManager>? _logger;
+    private readonly CryptographyOptions _options;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="X3DHManager"/> class with default options.
+    /// </summary>
+    public X3DHManager() 
+        : this(null, new CryptographyOptions())
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="X3DHManager"/> class with specified options.
+    /// </summary>
+    /// <param name="logger">Optional logger for diagnostic information.</param>
+    /// <param name="options">Cryptography options controlling behavior.</param>
+    public X3DHManager(ILogger<X3DHManager>? logger, CryptographyOptions options)
+    {
+        _logger = logger;
+        _options = options ?? new CryptographyOptions();
+    }
+
     public SharedSecret InitiateHandshake(PreKeyBundle remoteBundle, ECDiffieHellman ephemeralKey, ECDiffieHellman identityAgreementKey)
     {
         // 1. Verify signature on signed prekey (moved to calling code for better error messages)
@@ -15,6 +38,12 @@ public class X3DHManager : IX3DHManager
             
             try {
                 dh1 = identityAgreementKey.DeriveKeyFromHash(remoteBundle.SignedPreKey.ToEcdhPublicKey(), HashAlgorithmName.SHA256);
+                
+                // Log hash of derived key material if enabled
+                if (_options.EnableCryptographicMaterialLogging && _logger != null)
+                {
+                    _logger.LogWarning("X3DH dh1 hash: {Hash}", Convert.ToBase64String(SHA256.HashData(dh1)));
+                }
             }
             catch (CryptographicException) {
                 // Fallback to safer import if needed
@@ -27,10 +56,22 @@ public class X3DHManager : IX3DHManager
                     }
                 });
                 dh1 = identityAgreementKey.DeriveKeyFromHash(tempEcdh.PublicKey, HashAlgorithmName.SHA256);
+                
+                // Log hash of derived key material if enabled
+                if (_options.EnableCryptographicMaterialLogging && _logger != null)
+                {
+                    _logger.LogWarning("X3DH dh1 hash (fallback): {Hash}", Convert.ToBase64String(SHA256.HashData(dh1)));
+                }
             }
             
             try {
                 dh2 = ephemeralKey.DeriveKeyFromHash(remoteBundle.IdentityAgreementKey.ToEcdhPublicKey(), HashAlgorithmName.SHA256);
+                
+                // Log hash of derived key material if enabled
+                if (_options.EnableCryptographicMaterialLogging && _logger != null)
+                {
+                    _logger.LogWarning("X3DH dh2 hash: {Hash}", Convert.ToBase64String(SHA256.HashData(dh2)));
+                }
             }
             catch (CryptographicException) {
                 // Fallback to safer import if needed
@@ -43,10 +84,22 @@ public class X3DHManager : IX3DHManager
                     }
                 });
                 dh2 = ephemeralKey.DeriveKeyFromHash(tempEcdh.PublicKey, HashAlgorithmName.SHA256);
+                
+                // Log hash of derived key material if enabled
+                if (_options.EnableCryptographicMaterialLogging && _logger != null)
+                {
+                    _logger.LogWarning("X3DH dh2 hash (fallback): {Hash}", Convert.ToBase64String(SHA256.HashData(dh2)));
+                }
             }
             
             try {
                 dh3 = ephemeralKey.DeriveKeyFromHash(remoteBundle.SignedPreKey.ToEcdhPublicKey(), HashAlgorithmName.SHA256);
+                
+                // Log hash of derived key material if enabled
+                if (_options.EnableCryptographicMaterialLogging && _logger != null)
+                {
+                    _logger.LogWarning("X3DH dh3 hash: {Hash}", Convert.ToBase64String(SHA256.HashData(dh3)));
+                }
             }
             catch (CryptographicException) {
                 // Fallback to safer import if needed - reuse same parameters as dh1
@@ -59,6 +112,12 @@ public class X3DHManager : IX3DHManager
                     }
                 });
                 dh3 = ephemeralKey.DeriveKeyFromHash(tempEcdh.PublicKey, HashAlgorithmName.SHA256);
+                
+                // Log hash of derived key material if enabled
+                if (_options.EnableCryptographicMaterialLogging && _logger != null)
+                {
+                    _logger.LogWarning("X3DH dh3 hash (fallback): {Hash}", Convert.ToBase64String(SHA256.HashData(dh3)));
+                }
             }
             
             var dh4 = Array.Empty<byte>();
@@ -67,18 +126,33 @@ public class X3DHManager : IX3DHManager
                 try
                 {
                     dh4 = ephemeralKey.DeriveKeyFromHash(remoteBundle.OneTimePreKey.ToEcdhPublicKey(), HashAlgorithmName.SHA256);
+                    
+                    // Log hash of derived key material if enabled
+                    if (_options.EnableCryptographicMaterialLogging && _logger != null)
+                    {
+                        _logger.LogWarning("X3DH dh4 hash: {Hash}", Convert.ToBase64String(SHA256.HashData(dh4)));
+                    }
                 }
                 catch (CryptographicException)
                 {
                     // If we can't process the OneTimePreKey, continue with empty dh4
                     // This is a pragmatic approach since OneTimePreKey is optional for X3DH
                     dh4 = Array.Empty<byte>();
+                    
+                    _logger?.LogWarning("X3DH failed to process OneTimePreKey, continuing with empty dh4");
                 }
             }
             
             // 3. Concatenate the DH results and use a KDF.
             var combined = dh1.Concat(dh2).Concat(dh3).Concat(dh4).ToArray();
             var kdfResult = HKDF.DeriveKey(HashAlgorithmName.SHA256, combined, 32);
+            
+            // Log hash of final shared secret if enabled
+            if (_options.EnableCryptographicMaterialLogging && _logger != null)
+            {
+                _logger.LogWarning("X3DH final shared secret hash: {Hash}", Convert.ToBase64String(SHA256.HashData(kdfResult)));
+            }
+            
             return new SharedSecret(kdfResult);
         }
         catch (Exception ex) when (ex is not CryptographicException)
@@ -99,8 +173,28 @@ public class X3DHManager : IX3DHManager
 
         // 1. Perform DH calculations.
         var dh1 = signedPreKeyEcdh.DeriveKeyFromHash(remoteIdentityKey.ToEcdhPublicKey(), HashAlgorithmName.SHA256);
+        
+        // Log hash of derived key material if enabled
+        if (_options.EnableCryptographicMaterialLogging && _logger != null)
+        {
+            _logger.LogWarning("X3DH responder dh1 hash: {Hash}", Convert.ToBase64String(SHA256.HashData(dh1)));
+        }
+        
         var dh2 = identityAgreementKeyEcdh.DeriveKeyFromHash(remoteEphemeralKey.ToEcdhPublicKey(), HashAlgorithmName.SHA256);
+        
+        // Log hash of derived key material if enabled
+        if (_options.EnableCryptographicMaterialLogging && _logger != null)
+        {
+            _logger.LogWarning("X3DH responder dh2 hash: {Hash}", Convert.ToBase64String(SHA256.HashData(dh2)));
+        }
+        
         var dh3 = signedPreKeyEcdh.DeriveKeyFromHash(remoteEphemeralKey.ToEcdhPublicKey(), HashAlgorithmName.SHA256);
+        
+        // Log hash of derived key material if enabled
+        if (_options.EnableCryptographicMaterialLogging && _logger != null)
+        {
+            _logger.LogWarning("X3DH responder dh3 hash: {Hash}", Convert.ToBase64String(SHA256.HashData(dh3)));
+        }
 
         var dh4 = Array.Empty<byte>();
         if (oneTimePreKey is not null)
@@ -108,11 +202,24 @@ public class X3DHManager : IX3DHManager
             using var oneTimePreKeyEcdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
             oneTimePreKeyEcdh.ImportECPrivateKey(oneTimePreKey.Value, out _);
             dh4 = oneTimePreKeyEcdh.DeriveKeyFromHash(remoteEphemeralKey.ToEcdhPublicKey(), HashAlgorithmName.SHA256);
+            
+            // Log hash of derived key material if enabled
+            if (_options.EnableCryptographicMaterialLogging && _logger != null)
+            {
+                _logger.LogWarning("X3DH responder dh4 hash: {Hash}", Convert.ToBase64String(SHA256.HashData(dh4)));
+            }
         }
 
         // 2. Concatenate the DH results and use a KDF.
         var combined = dh1.Concat(dh2).Concat(dh3).Concat(dh4).ToArray();
         var kdfResult = HKDF.DeriveKey(HashAlgorithmName.SHA256, combined, 32);
+        
+        // Log hash of final shared secret if enabled
+        if (_options.EnableCryptographicMaterialLogging && _logger != null)
+        {
+            _logger.LogWarning("X3DH responder final shared secret hash: {Hash}", Convert.ToBase64String(SHA256.HashData(kdfResult)));
+        }
+        
         return new SharedSecret(kdfResult);
     }
 

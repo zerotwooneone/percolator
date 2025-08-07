@@ -1,8 +1,10 @@
 using System.Security.Cryptography;
 using System.Text;
 using FluentAssertions;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Logging.Console;
+using Microsoft.Extensions.Logging.Debug;
 using Moq;
 using Percolator.Application.Identity;
 using Percolator.Application.Sessions;
@@ -34,6 +36,9 @@ public class SessionMessageTests
     private DirectSessionManager _bobManager = null!;
     private ActiveIdentityContext _aliceIdentity = null!;
     private ActiveIdentityContext _bobIdentity = null!;
+    private ILoggerFactory _loggerFactory = null!;
+    private CryptographyOptions _cryptoOptions = null!;
+    private ServiceProvider _serviceProvider = null!;
 
     [SetUp]
     public void SetUp()
@@ -42,6 +47,34 @@ public class SessionMessageTests
         _bobSessionStore = new FakeDoubleRatchetSessionStore();
 
         _mockConversationRepo = new Mock<IConversationRepository>();
+
+        // Create a logger factory with console and debug providers for diagnostics
+        _loggerFactory = LoggerFactory.Create(builder =>
+        {
+            builder.AddConsole(options => 
+            {
+                // Use ConsoleFormatterOptions instead of the obsolete ConsoleLoggerOptions
+                if (options.FormatterName == ConsoleFormatterNames.Simple)
+                {
+                    builder.AddSimpleConsole(formatterOptions => 
+                    {
+                        formatterOptions.TimestampFormat = "[yyyy-MM-dd HH:mm:ss] ";
+                    });
+                }
+            });
+            builder.AddDebug();
+            builder.SetMinimumLevel(LogLevel.Debug);
+        });
+        
+        // Create cryptography options with diagnostic logging enabled
+        _cryptoOptions = new CryptographyOptions { EnableCryptographicMaterialLogging = true };
+
+        // Configure services to use our CryptographyOptions
+        var services = new ServiceCollection();
+        services.AddSingleton(_cryptoOptions);
+        services.AddSingleton<IX3DHManager>(provider => 
+            new X3DHManager(_loggerFactory.CreateLogger<X3DHManager>(), _cryptoOptions));
+        _serviceProvider = services.BuildServiceProvider();
 
         // Create identity contexts
         _aliceIdentity = new ActiveIdentityContext
@@ -64,27 +97,37 @@ public class SessionMessageTests
             )
         };
         
-        // Create a logger factory for DirectSessionManager
-        var loggerFactory = new NullLoggerFactory();
-        
+        // Create managers with real loggers for diagnostic output - using the correct 5-parameter constructor
         _aliceManager = new DirectSessionManager(
             _aliceSessionStore,
             _mockConversationRepo.Object,
             _aliceIdentity,
-            new NullLogger<DirectSessionManager>(),
-            loggerFactory);
+            _loggerFactory.CreateLogger<DirectSessionManager>(),
+            _loggerFactory);
         
         _bobManager = new DirectSessionManager(
             _bobSessionStore, 
             _mockConversationRepo.Object,
             _bobIdentity,
-            new NullLogger<DirectSessionManager>(),
-            loggerFactory);
+            _loggerFactory.CreateLogger<DirectSessionManager>(),
+            _loggerFactory);
+    }
+
+    [TearDown]
+    public void TearDown()
+    {
+        // Properly dispose the logger factory
+        _loggerFactory?.Dispose();
+        _serviceProvider?.Dispose();
     }
 
     [Test]
     public async Task EncryptAndDecrypt_Should_SucceedSymmetrically_WhenSessionsAreEstablished()
     {
+        // Log test information
+        var logger = _loggerFactory.CreateLogger<SessionMessageTests>();
+        logger.LogInformation("Starting EncryptAndDecrypt test with cryptographic diagnostic logging enabled");
+        
         // Arrange: Establish a shared secret between Alice and Bob
         var (aliceSharedSecret, bobSharedSecret) = PerformX3DH();
 
