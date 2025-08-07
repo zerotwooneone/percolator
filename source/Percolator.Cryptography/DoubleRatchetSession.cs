@@ -80,55 +80,40 @@ public class DoubleRatchetSession : IDisposable
     }
 
     public static DoubleRatchetSession AsInitiator(
-        SharedSecret sharedSecret, 
-        RatchetIdentityKey remoteIdentityPublicKey, 
+        SharedSecret sharedSecret,
+        RatchetIdentityKey remoteIdentityPublicKey,
         RatchetEphemeralKey remoteRatchetPublicKey,
         ILogger<DoubleRatchetSession> logger,
         CryptographyOptions? options = null)
     {
-        logger.LogDebug("Creating initiator session");
-        
-        // Create Double Ratchet session with shared secret
-        var session = new DoubleRatchetSession(sharedSecret, remoteIdentityPublicKey, logger, options);
-        
-        // Create DH key pair for the initiator
-        session._dhRatchetKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        
-        // Log the DH key material for debugging
-        session.LogDebugCryptoMaterial("Initiator DH key hash: {DhKeyHash}", 
-            Convert.ToBase64String(SHA256.HashData(session._dhRatchetKey.PublicKey.ExportSubjectPublicKeyInfo())));
-        
-        // Log the root key hash to verify consistency
-        session.LogDebugCryptoMaterial("Initiator root key hash: {RootKeyHash}", 
-            Convert.ToBase64String(SHA256.HashData(session._rootKey.Value)));
-        
-        // CRITICAL FIX: Properly derive the sending chain key for the initiator
-        using var remoteRatchetKeyImport = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        remoteRatchetKeyImport.ImportSubjectPublicKeyInfo(remoteRatchetPublicKey.Value, out _);
-        
-        // Store the remote ratchet key for future use
+        logger.LogDebug("Creating initiator session with initial state from X3DH handshake.");
+
+        // Create a new session using a basic constructor.
+        // We assume a private constructor exists that initializes the logger and options.
+        var session = new DoubleRatchetSession(sharedSecret,remoteIdentityPublicKey, logger, options);
+
+        // 1. The initial RootKey IS the shared secret from the handshake.
+        session._rootKey = new RootKey(sharedSecret.Value);
+
+        // 2. Store the public keys of the remote party (the responder).
         session._remoteRatchetKey = remoteRatchetPublicKey;
-        
-        // Derive DH secret using the imported remote ratchet key
-        var dhSecret = session._dhRatchetKey.DeriveKeyMaterial(remoteRatchetKeyImport.PublicKey);
-        
-        session.LogDebugCryptoMaterial("Initiator DH secret hash: {DhSecretHash}", 
-            Convert.ToBase64String(SHA256.HashData(dhSecret)));
-        
-        // Perform KDF to get the initial root key and sending chain key
-        var kdfOutput = CryptoUtils.KDF(session._rootKey.Value, dhSecret, "ratchet-kdf", CryptoUtils.KeySize * 2);
-        session._rootKey = new RootKey(kdfOutput[..CryptoUtils.KeySize]);
-        session._sendingChainKey = new ChainKey(kdfOutput[CryptoUtils.KeySize..]);
-        
-        // Initialize counters
+
+        // 3. Initialize all counters and flags to their default starting state.
+        //    No messages have been sent or received, and no ratchet has occurred yet.
         session._sendingCounter = 0;
         session._receivingCounter = 0;
         session._previousChainLength = 0;
-        
-        session._logger.LogInformation("Initiator session fully initialized - Root key hash: {RootKeyHash}, Sending chain key hash: {SendingChainKeyHash}", 
-            Convert.ToBase64String(SHA256.HashData(session._rootKey.Value)),
-            Convert.ToBase64String(SHA256.HashData(session._sendingChainKey.Value)));
-        
+        session._ratchetFlag = false; // Add this line if you added the flag to your class state
+
+        // 4. There are no chain keys or local DH keys yet. They will be created during
+        //    the first call to the Encrypt() method.
+        session._sendingChainKey = null;
+        session._receivingChainKey = null;
+        session._dhRatchetKey = null;
+
+        session.LogDebugCryptoMaterial("Initiator session created. Root key hash: {RootKeyHash}",
+            Convert.ToBase64String(SHA256.HashData(session._rootKey.Value)));
+
         return session;
     }
 
