@@ -83,18 +83,12 @@ public class DirectSessionManager : IDirectSessionManager
         SessionId conversationId, 
         Percolator.Identity.PeerId remotePeerId, 
         RatchetIdentityKey remoteIdentityKey,
+        ECDiffieHellman privateKeyUsedInHandshake,
         SharedSecret sharedSecret)
     {
-        if (_activeIdentityContext.Keys is null)
-            throw new InvalidOperationException("Identity context not loaded");
-
-        // Create the ECDiffieHellman key
-        using var localRatchetKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        localRatchetKey.ImportECPrivateKey(_activeIdentityContext.Keys.SignedPreKey.ExportECPrivateKey(), out _);
-        
         // Log key materials (hashes only for security)
-        _logger.LogWarning("Responder establishing session with local ratchet key hash: {LocalRatchetKeyHash}, shared secret hash: {SharedSecretHash}", 
-            Convert.ToBase64String(SHA256.HashData(localRatchetKey.PublicKey.ExportSubjectPublicKeyInfo())),
+        _logger.LogWarning("Responder establishing session with provided key hash: {LocalRatchetKeyHash}, shared secret hash: {SharedSecretHash}", 
+            Convert.ToBase64String(SHA256.HashData(privateKeyUsedInHandshake.PublicKey.ExportSubjectPublicKeyInfo())),
             Convert.ToBase64String(SHA256.HashData(sharedSecret.Value)));
 
         // Create the session directly in Crypto domain
@@ -102,7 +96,7 @@ public class DirectSessionManager : IDirectSessionManager
         var session = DoubleRatchetSession.AsResponder(
             sharedSecret,
             remoteIdentityKey,
-            localRatchetKey,
+            privateKeyUsedInHandshake,
             sessionLogger);
 
         var sessionId = new SessionId(conversationId.Value);

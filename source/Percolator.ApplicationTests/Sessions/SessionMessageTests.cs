@@ -140,7 +140,12 @@ public class SessionMessageTests
 
         var alicePeerId = new PeerId(_aliceIdentity.Identity!.Id);
         var aliceIdentityKey = new CryptoRatchetIdentityKey(_aliceIdentity.Keys!.IdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo());
-        await _bobManager.EstablishSessionAsResponderAsync(conversationId, alicePeerId, aliceIdentityKey, new CryptoSharedSecret(bobSharedSecret.Value));
+        
+        // Create the ECDiffieHellman key using Bob's SignedPreKey that was used in the handshake
+        using var bobHandshakeKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        bobHandshakeKey.ImportECPrivateKey(_bobIdentity.Keys!.SignedPreKey.ExportECPrivateKey(), out _);
+        
+        await _bobManager.EstablishSessionAsResponderAsync(conversationId, alicePeerId, aliceIdentityKey, bobHandshakeKey, new CryptoSharedSecret(bobSharedSecret.Value));
 
         // Arrange: Mock the conversation repository to allow the manager to resolve the remote peer ID.
         var participants = new List<ChatParticipantId> { new(alicePeerId.Value), new(bobPeerId.Value) };

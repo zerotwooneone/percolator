@@ -170,7 +170,8 @@ public class DirectSessionManagerTests
         await _bobSessionManager.EstablishSessionAsResponderAsync(
             _sessionId, 
             _alicePeerId, 
-            aliceIdentityKeyPublic, 
+            aliceIdentityKeyPublic,
+            _bobKeys.SignedPreKey, 
             sharedSecret);
             
         // Verify that sessions were established
@@ -282,6 +283,7 @@ public class DirectSessionManagerTests
             _sessionId, 
             _alicePeerId, 
             aliceIdentityKeyPublic, 
+            _bobKeys.SignedPreKey, 
             sharedSecret);
             
         // Capture the initial states
@@ -419,7 +421,8 @@ public class DirectSessionManagerTests
         await _bobSessionManager.EstablishSessionAsResponderAsync(
             _sessionId, 
             _alicePeerId, 
-            aliceIdentityKeyPublic, 
+            aliceIdentityKeyPublic,
+            _bobKeys.SignedPreKey, 
             sharedSecret);
             
         // 1. Alice encrypts 3 messages in sequence

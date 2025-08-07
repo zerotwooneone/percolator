@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using Percolator.Cryptography;
 using Percolator.Identity;
 
@@ -24,7 +25,8 @@ public interface IDirectSessionManager
     Task EstablishSessionAsResponderAsync(
         Percolator.Cryptography.SessionId conversationId, 
         Percolator.Identity.PeerId remotePeerId, 
-        RatchetIdentityKey remoteIdentityKey, 
+        RatchetIdentityKey remoteIdentityKey,
+        ECDiffieHellman privateKeyUsedInHandshake,
         SharedSecret sharedSecret);
 
     /// <summary>

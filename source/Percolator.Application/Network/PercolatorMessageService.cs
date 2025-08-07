@@ -176,6 +176,7 @@ namespace Percolator.Application.Network
                     new SessionId(conversation.Id.Value),
                     new IdentityPeerId(peer.Id.Value),
                     new RatchetIdentityKey(request.InitiatorBundle.IdentityAgreementKey.ToByteArray()),
+                    localRatchetKey,
                     new SharedSecret(handshakeResult.SharedSecret.Value));
 
                 _logger.LogInformation("Successfully established session {SessionId} with peer {PeerId}", conversation.Id, peer.Id);
