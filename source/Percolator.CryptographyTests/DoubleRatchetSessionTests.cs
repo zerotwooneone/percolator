@@ -583,63 +583,32 @@ namespace Percolator.CryptographyTests
         // Helper to create a session state snapshot from a session
         private DoubleRatchetSession.DoubleRatchetSessionState CreateSessionStateSnapshot(DoubleRatchetSession session)
         {
-            // We need to use reflection to access the private fields since there's no public API
-            // to export session state
-            var sessionType = typeof(DoubleRatchetSession);
+            // Use the new internal properties instead of reflection
+            PrivateEphemeralKey? dhPrivateKey = null;
             
-            var rootKeyField = sessionType.GetField("_rootKey", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var sendingChainKeyField = sessionType.GetField("_sendingChainKey", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var receivingChainKeyField = sessionType.GetField("_receivingChainKey", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var sendingCounterField = sessionType.GetField("_sendingCounter", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var receivingCounterField = sessionType.GetField("_receivingCounter", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var skippedMessageKeysField = sessionType.GetField("_skippedMessageKeys", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var remoteIdentityPublicKeyField = sessionType.GetField("_remoteIdentityPublicKey", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var remoteRatchetKeyField = sessionType.GetField("_remoteRatchetKey", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var dhRatchetKeyField = sessionType.GetField("_dhRatchetKey", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            
-            // Extract values using reflection
-            var rootKey = (RootKey)rootKeyField.GetValue(session);
-            var sendingChainKey = (ChainKey)sendingChainKeyField.GetValue(session);
-            var receivingChainKey = (ChainKey)receivingChainKeyField.GetValue(session);
-            var sendingCounter = (ulong)sendingCounterField.GetValue(session);
-            var receivingCounter = (ulong)receivingCounterField.GetValue(session);
-            // Get the skipped message keys with the current type and convert to tuple for test compatibility
-            var currentSkippedMessageKeys = skippedMessageKeysField.GetValue(session) as Dictionary<SkippedMessageKeyIdentifier, byte[]>;
-            // Convert to tuple-based dictionary for test compatibility
-            Dictionary<(RatchetEphemeralKey, ulong), byte[]> skippedMessageKeys = null;
-            if (currentSkippedMessageKeys != null)
+            // Get the DH private key bytes using the internal method
+            byte[]? privateKeyBytes = session.GetDhRatchetPrivateKeyBytes();
+            if (privateKeyBytes != null)
             {
-                skippedMessageKeys = currentSkippedMessageKeys.ToDictionary(
-                    kvp => (kvp.Key.RatchetKey, kvp.Key.MessageNumber),
-                    kvp => kvp.Value);
-            }
-            var remoteIdentityPublicKey = (RatchetIdentityKey)remoteIdentityPublicKeyField.GetValue(session);
-            var remoteRatchetKey = (RatchetEphemeralKey)remoteRatchetKeyField.GetValue(session);
-            var dhRatchetKey = (ECDiffieHellman)dhRatchetKeyField.GetValue(session);
-            
-            // Create private key from ECDiffieHellman
-            PrivateEphemeralKey dhPrivateKey = null;
-            if (dhRatchetKey != null)
-            {
-                var privateKeyBytes = dhRatchetKey.ExportECPrivateKey();
                 dhPrivateKey = new PrivateEphemeralKey(privateKeyBytes);
             }
             
-            // Create session state
+            // Create session state using properties
             return new DoubleRatchetSession.DoubleRatchetSessionState
             {
-                RootKey = rootKey,
-                SendingChainKey = sendingChainKey,
-                ReceivingChainKey = receivingChainKey,
-                SendingCounter = sendingCounter,
-                ReceivingCounter = receivingCounter,
-                SkippedMessageKeys = skippedMessageKeys == null ? new Dictionary<SkippedMessageKeyIdentifier, byte[]>() :
-                    skippedMessageKeys.ToDictionary(
-                        kvp => new SkippedMessageKeyIdentifier(kvp.Key.Item1, kvp.Key.Item2),
-                        kvp => kvp.Value),
-                TheirIdentityPublicKey = remoteIdentityPublicKey,
-                TheirDhRatchetPublicKey = remoteRatchetKey,
-                DhRatchetPrivateKey = dhPrivateKey
+                RootKey = session.RootKey,
+                SendingChainKey = session.SendingChainKey,
+                ReceivingChainKey = session.ReceivingChainKey,
+                SendingCounter = session.SendingCounter,
+                ReceivingCounter = session.ReceivingCounter,
+                PreviousChainLength = session.PreviousChainLength,
+                SkippedMessageKeys = session.SkippedMessageKeys.ToDictionary(
+                    kvp => kvp.Key,
+                    kvp => kvp.Value),
+                TheirIdentityPublicKey = session.RemoteIdentityPublicKey,
+                TheirDhRatchetPublicKey = session.RemoteRatchetKey,
+                DhRatchetPrivateKey = dhPrivateKey,
+                RatchetFlag = session.RatchetFlag
             };
         }
     }
