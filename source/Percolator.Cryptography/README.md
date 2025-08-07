@@ -176,4 +176,37 @@ var loadedAliceState = JsonSerializer.Deserialize<DoubleRatchetSession.DoubleRat
 // Note: The long-term identity key is NOT serialized and must be provided again.
 var loadedAliceSession = new DoubleRatchetSession(loadedAliceState);
 
-{{ ... }}
+### 3. Secure Diagnostic Logging Control
+
+The cryptography library includes diagnostic logging to aid in debugging and troubleshooting. This logging includes hashed values of sensitive cryptographic material like keys and secrets. While these are only hash values and not the actual keys, for maximum security, this diagnostic logging should be disabled in production environments.
+
+The library provides a built-in mechanism to control this logging through the `CryptographyOptions` class:
+
+```csharp
+// Create options with secure defaults (diagnostic logging disabled)
+var options = CryptographyOptions.CreateSecureDefault();
+
+// OR create options for development with diagnostic logging enabled
+var devOptions = CryptographyOptions.CreateDevelopmentDefault();
+
+// Create session with specified options
+var x3dhManager = new X3DHManager();
+var session = DoubleRatchetSession.AsInitiator(
+    sharedSecret, 
+    remoteIdentityPublicKey, 
+    remoteRatchetPublicKey,
+    logger,
+    options); // Pass the secure options
+```
+
+#### Security Recommendations
+
+1. **Development vs. Production**: Use `CreateDevelopmentDefault()` only in development or testing environments. Always use `CreateSecureDefault()` or explicitly set `EnableCryptographicMaterialLogging = false` in production.
+
+2. **Log Level Control**: In addition to using `CryptographyOptions`, configure your application's logging framework to use appropriate log levels in different environments. For example:
+   - Development: `LogLevel.Debug` or `LogLevel.Trace`
+   - Production: `LogLevel.Information` or higher
+
+3. **Audit Logging**: If you need to audit cryptographic operations in production, ensure that your audit logs never contain key material, even in hashed form. Instead, log non-sensitive metadata such as operation timestamps, user IDs, or session identifiers.
+
+This secure-by-default approach helps prevent accidental leakage of sensitive cryptographic state in production environments while still allowing detailed diagnostics during development and testing phases.
