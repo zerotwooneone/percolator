@@ -28,7 +28,7 @@ public class X3DHOrchestrator : IX3DHOrchestrator
         _logger = logger;
     }
 
-    public SharedSecret CompleteHandshake(ContractsPreKeyBundle remotePreKeyBundle, ECDiffieHellman ephemeralKey)
+    public SharedSecret InitiateHandshake(ContractsPreKeyBundle remotePreKeyBundle, ECDiffieHellman ephemeralKey)
     {
         if (_activeIdentityContext.Keys is null)
         {
@@ -94,7 +94,7 @@ public class X3DHOrchestrator : IX3DHOrchestrator
         }
     }
 
-    public HandshakeResponse ProcessHandshake(ContractsPreKeyBundle remotePreKeyBundle, byte[] remoteEphemeralPublicKey)
+    public HandshakeResponse CompleteHandshake(ContractsPreKeyBundle remotePreKeyBundle, byte[] remoteEphemeralPublicKey)
     {
         if (_activeIdentityContext.Keys is not
             {
@@ -115,7 +115,23 @@ public class X3DHOrchestrator : IX3DHOrchestrator
             throw new CryptographicException("Invalid signature on initiator's signed pre-key.");
         }
 
+        // Store which private key is actually used in handshake
+        ECDiffieHellman keyUsedInHandshake;
+        
         var oneTimePreKey = _oneTimeKeyProvider.PopOneTimeKey();
+        
+        // If a one-time key is available and used, that's the key we need to track
+        if (oneTimePreKey != null)
+        {
+            _logger.LogDebug("Using OneTimePreKey in handshake");
+            keyUsedInHandshake = oneTimePreKey;
+        }
+        else
+        {
+            // Otherwise, the SignedPreKey is used
+            _logger.LogDebug("Using SignedPreKey in handshake");
+            keyUsedInHandshake = signedPreKey;
+        }
 
         var sharedSecret = _x3DhManager.RespondToHandshake(
             new RatchetIdentityKey(remotePreKeyBundle.IdentityAgreementKey.ToByteArray()),
@@ -141,6 +157,7 @@ public class X3DHOrchestrator : IX3DHOrchestrator
             responderBundle.OneTimePreKey = ByteString.CopyFrom(oneTimePreKey.PublicKey.ExportSubjectPublicKeyInfo());
         }
 
-        return new HandshakeResponse(sharedSecret, responderBundle);
+        // Return which key was actually used in the handshake
+        return new HandshakeResponse(sharedSecret, responderBundle, keyUsedInHandshake);
     }
 }

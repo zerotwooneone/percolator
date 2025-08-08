@@ -117,7 +117,7 @@ public class ConversationServiceTests
 
         // Setup X3DH orchestrator to return a shared secret
         _mockX3dhOrchestrator
-            .Setup(o => o.CompleteHandshake(It.IsAny<ContractsPreKeyBundle>(), It.IsAny<ECDiffieHellman>()))
+            .Setup(o => o.InitiateHandshake(It.IsAny<ContractsPreKeyBundle>(), It.IsAny<ECDiffieHellman>()))
             .Returns(new CryptoSharedSecret(new byte[32]));
 
         // Setup the one-time key provider to return a key
@@ -218,7 +218,7 @@ public class ConversationServiceTests
         Random.Shared.NextBytes(sharedSecret.Value);
         
         _mockX3dhOrchestrator
-            .Setup(o => o.CompleteHandshake(It.IsAny<ContractsPreKeyBundle>(), It.IsAny<ECDiffieHellman>()))
+            .Setup(o => o.InitiateHandshake(It.IsAny<ContractsPreKeyBundle>(), It.IsAny<ECDiffieHellman>()))
             .Returns(sharedSecret);
 
         // Setup the one-time key provider to return a key

@@ -119,6 +119,7 @@ public class DirectSessionManagerTests
         var bobIdentityKeyPublic = new RatchetIdentityKey(_bobKeys.IdentityAgreementKey.ExportSubjectPublicKeyInfo());
         var bobPreKeyPublic = new RatchetEphemeralKey(_bobKeys.SignedPreKey.ExportSubjectPublicKeyInfo());
         var aliceIdentityKeyPublic = new RatchetIdentityKey(_aliceKeys.IdentityAgreementKey.ExportSubjectPublicKeyInfo());
+        var aliceEphemeralKeyPublic = new RatchetEphemeralKey(_aliceKeys.SignedPreKey.ExportSubjectPublicKeyInfo());
         
         // Setup conversation mocks
         var conversation = new Conversation(
@@ -171,6 +172,7 @@ public class DirectSessionManagerTests
             _sessionId, 
             _alicePeerId, 
             aliceIdentityKeyPublic,
+            aliceEphemeralKeyPublic,
             _bobKeys.SignedPreKey, 
             sharedSecret);
             
@@ -229,8 +231,8 @@ public class DirectSessionManagerTests
         // Extract public keys needed for session establishment
         var bobIdentityKeyPublic = new RatchetIdentityKey(_bobKeys.IdentityAgreementKey.ExportSubjectPublicKeyInfo());
         var bobPreKeyPublic = new RatchetEphemeralKey(_bobKeys.SignedPreKey.ExportSubjectPublicKeyInfo());
-        
         var aliceIdentityKeyPublic = new RatchetIdentityKey(_aliceKeys.IdentityAgreementKey.ExportSubjectPublicKeyInfo());
+        var aliceEphemeralKeyPublic = new RatchetEphemeralKey(_aliceKeys.SignedPreKey.ExportSubjectPublicKeyInfo());
         
         // Setup conversation mocks
         var conversation = new Conversation(
@@ -283,6 +285,7 @@ public class DirectSessionManagerTests
             _sessionId, 
             _alicePeerId, 
             aliceIdentityKeyPublic, 
+            aliceEphemeralKeyPublic,
             _bobKeys.SignedPreKey, 
             sharedSecret);
             
@@ -370,7 +373,8 @@ public class DirectSessionManagerTests
         var bobIdentityKeyPublic = new RatchetIdentityKey(_bobKeys.IdentityAgreementKey.ExportSubjectPublicKeyInfo());
         var bobPreKeyPublic = new RatchetEphemeralKey(_bobKeys.SignedPreKey.ExportSubjectPublicKeyInfo());
         var aliceIdentityKeyPublic = new RatchetIdentityKey(_aliceKeys.IdentityAgreementKey.ExportSubjectPublicKeyInfo());
-        
+        var aliceEphemeralKeyPublic = new RatchetEphemeralKey(_aliceKeys.SignedPreKey.ExportSubjectPublicKeyInfo());
+
         // Setup conversation mocks
         var conversation = new Conversation(
             new ConversationId(_sessionId.Value),
@@ -422,6 +426,7 @@ public class DirectSessionManagerTests
             _sessionId, 
             _alicePeerId, 
             aliceIdentityKeyPublic,
+            aliceEphemeralKeyPublic,
             _bobKeys.SignedPreKey, 
             sharedSecret);
             

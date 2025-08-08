@@ -15,7 +15,7 @@ public interface IDirectSessionManager
     Task EstablishSessionAsInitiatorAsync(
         Percolator.Cryptography.SessionId conversationId, 
         Percolator.Identity.PeerId remotePeerId, 
-        RatchetIdentityKey remoteIdentityKey, 
+        RatchetIdentityKey remoteIdentityKey,
         RatchetEphemeralKey remoteRatchetKey, 
         SharedSecret sharedSecret);
 
@@ -26,6 +26,7 @@ public interface IDirectSessionManager
         Percolator.Cryptography.SessionId conversationId, 
         Percolator.Identity.PeerId remotePeerId, 
         RatchetIdentityKey remoteIdentityKey,
+        RatchetEphemeralKey remoteRatchetPublicKey,
         ECDiffieHellman privateKeyUsedInHandshake,
         SharedSecret sharedSecret);
 

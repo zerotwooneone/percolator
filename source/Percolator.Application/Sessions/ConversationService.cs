@@ -109,22 +109,15 @@ namespace Percolator.Application.Sessions
                     InitiatorEphemeralKey = ephemeralKey is null ? ByteString.Empty : Google.Protobuf.ByteString.CopyFrom(ephemeralKey.PublicKey.ExportSubjectPublicKeyInfo())
                 };
                 
-                _logger.LogDebug("Created handshake request with valid signature");
-                
-                _logger.LogInformation("Created establish session request with valid signature for X3DH handshake");
-                
-                // For shared certificate approach, we don't need TOFU flow or special cert handling
-                // We know both sides use the same certificate, so skip all the cert verification logic
-                
-                _logger.LogInformation("Using shared certificate approach for {Endpoint}", endpoint);
-                
-                // Direct connection using shared certificate
+                _logger.LogInformation("Sending session request to {Endpoint}", endpoint);
                 var response = await _grpcSessionService.EstablishSessionAsync(endpoint, request);
+                _logger.LogInformation("Received session response from peer.");
                 
-                _logger.LogInformation("Successfully connected using shared certificate");
-                
-                // Complete the handshake
-                var sharedSecret = _orchestrator.CompleteHandshake(response.ResponderBundle, ephemeralKey);
+                var handshakeResult = _orchestrator.CompleteHandshake(
+                    response.ResponderBundle, // Alice's bundle from the response
+                    response.ResponderBundle.SignedPreKey.ToByteArray() // Alice's ephemeral key from the response
+                );
+                _logger.LogInformation("Handshake completed locally as Responder.");
                 
                 // Get or create the peer
                 var peer = await _peerRepository.GetByNameAsync(peerName);
@@ -143,13 +136,14 @@ namespace Percolator.Application.Sessions
 
                 await _conversationRepository.AddAsync(conversation);
 
-                // Establish a session with the peer
-                await _sessionManager.EstablishSessionAsInitiatorAsync(
+                await _sessionManager.EstablishSessionAsResponderAsync(
                     new SessionId(conversation.Id.Value),
                     new Percolator.Identity.PeerId(peer.Id.Value),
-                    new RatchetIdentityKey(response.ResponderBundle.IdentityAgreementKey.ToByteArray()),
+                    new RatchetIdentityKey(response.ResponderBundle.IdentityAgreementKey.ToByteArray()), // Alice's Identity Key
                     new RatchetEphemeralKey(response.ResponderBundle.SignedPreKey.ToByteArray()),
-                    new SharedSecret(sharedSecret.Value));
+                    handshakeResult.ResponderPrivateKeyUsed, 
+                    new SharedSecret(handshakeResult.SharedSecret.Value)
+                );
 
                 _logger.LogInformation("Successfully established session and created conversation {ConversationId}", conversation.Id);
 

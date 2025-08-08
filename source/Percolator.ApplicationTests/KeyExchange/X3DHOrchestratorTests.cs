@@ -106,7 +106,7 @@ public class X3DHOrchestratorTests : IDisposable
             .Returns(expectedSharedSecret);
 
         // Act
-        var result = _orchestrator.CompleteHandshake(remoteBundle, ephemeralKey);
+        var result = _orchestrator.InitiateHandshake(remoteBundle, ephemeralKey);
 
         // Assert
         result.Should().NotBeNull();
@@ -150,7 +150,7 @@ public class X3DHOrchestratorTests : IDisposable
             .Returns(expectedSharedSecret);
 
         // Act
-        var result = _orchestrator.CompleteHandshake(remoteBundle, ephemeralKey);
+        var result = _orchestrator.InitiateHandshake(remoteBundle, ephemeralKey);
 
         // Assert
         result.Should().NotBeNull();
@@ -204,7 +204,7 @@ public class X3DHOrchestratorTests : IDisposable
             .Returns(new Signature(new byte[64]));
 
         // Act
-        var result = _orchestrator.ProcessHandshake(remoteBundle, ephemeralKeyBytes);
+        var result = _orchestrator.CompleteHandshake(remoteBundle, ephemeralKeyBytes);
 
         // Assert
         result.Should().NotBeNull();
@@ -261,7 +261,7 @@ public class X3DHOrchestratorTests : IDisposable
             .Returns(new Signature(new byte[64]));
 
         // Act
-        var result = _orchestrator.ProcessHandshake(remoteBundle, ephemeralKeyBytes);
+        var result = _orchestrator.CompleteHandshake(remoteBundle, ephemeralKeyBytes);
 
         // Assert
         result.Should().NotBeNull();

@@ -10,6 +10,7 @@ using ChatConversationId = Percolator.Chat.ValueObjects.ConversationId;
 using ChatParticipantId = Percolator.Chat.ValueObjects.ParticipantId;
 using Percolator.Application.Identity;
 using System.Security.Cryptography;
+using Google.Protobuf;
 using Percolator.Identity;
 using Percolator.Network;
 using NetworkPeerId = Percolator.Network.PeerId;
@@ -17,6 +18,7 @@ using IdentityPeer = Percolator.Identity.Peer;
 using IdentityPeerId = Percolator.Identity.PeerId;
 using Percolator.Chat.ValueObjects;
 using Percolator.Cryptography;
+using PreKeyBundle = Percolator.Contracts.PreKeyBundle;
 
 namespace Percolator.Application.Network
 {
@@ -29,11 +31,17 @@ namespace Percolator.Application.Network
         private readonly IConversationRepository _conversationRepository;
         private readonly IPeerRepository _peerRepository;
         private readonly IPeerConnectionRepository _peerConnectionRepository;
+        private readonly IX3DHManager _x3DhManager;
 
         public PercolatorMessageService(
             ILogger<PercolatorMessageService> logger, 
             ActiveIdentityContext activeIdentityContext, 
-            IX3DHOrchestrator x3dhOrchestrator, IDirectSessionManager sessionManager, IConversationRepository conversationRepository, IPeerRepository peerRepository, IPeerConnectionRepository peerConnectionRepository)
+            IX3DHOrchestrator x3dhOrchestrator, 
+            IDirectSessionManager sessionManager, 
+            IConversationRepository conversationRepository, 
+            IPeerRepository peerRepository, 
+            IPeerConnectionRepository peerConnectionRepository, 
+            IX3DHManager x3DhManager)
         {
             _logger = logger;
             _activeIdentityContext = activeIdentityContext;
@@ -42,6 +50,7 @@ namespace Percolator.Application.Network
             _conversationRepository = conversationRepository;
             _peerRepository = peerRepository;
             _peerConnectionRepository = peerConnectionRepository;
+            _x3DhManager = x3DhManager;
         }
 
         public override async Task<EstablishSessionResponse> EstablishSession(EstablishSessionRequest request, ServerCallContext context)
@@ -69,9 +78,11 @@ namespace Percolator.Application.Network
 
                 // Log details about the initiator bundle to debug prekey signature issues
                 _logger.LogInformation("Processing X3DH handshake with initiator bundle. Examining bundle properties...");
+
+                var ephemeralKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
                 
-                var handshakeResult = _x3dhOrchestrator.ProcessHandshake(request.InitiatorBundle, request.InitiatorEphemeralKey.ToByteArray());
-                _logger.LogInformation("X3DH handshake processed successfully");
+                var sharedSecret = _x3dhOrchestrator.InitiateHandshake(request.InitiatorBundle, ephemeralKey);
+                _logger.LogInformation("X3DH handshake processed successfully as Initiator.");
 
                 // Look up the peer by their public identity agreement key.
                 var ideneityAgreementKeyBytes = request.InitiatorBundle.IdentityAgreementKey.ToByteArray();
@@ -157,34 +168,41 @@ namespace Percolator.Application.Network
                     await _conversationRepository.AddAsync(conversation);
                     _logger.LogInformation("Created new conversation with peer {PeerName}", peer.Name);
                     
-                    var testConversation = await _conversationRepository.GetByChannelIdAsync(channelId);
-                    _logger.LogWarning("Retrieved conversation with participants {Participants} ", string.Join(", ", testConversation!.Participants));
+                    if (_logger.IsEnabled(LogLevel.Warning))
+                    {
+                        var testConversation = await _conversationRepository.GetByChannelIdAsync(channelId);
+                        _logger.LogWarning("Retrieved conversation with participants {Participants} ", string.Join(", ", testConversation!.Participants));
+                    }
+                    
+                    await _sessionManager.EstablishSessionAsInitiatorAsync(
+                        new SessionId(conversation.Id.Value),
+                        new IdentityPeerId(peer.Id.Value),
+                        new RatchetIdentityKey(request.InitiatorBundle.IdentityAgreementKey.ToByteArray()),
+                        new RatchetEphemeralKey(request.InitiatorBundle.SignedPreKey.ToByteArray()),
+                        sharedSecret);
+                    _logger.LogInformation("Successfully established session {SessionId} with peer {PeerId}", conversation.Id, peer.Id);
                 }
+                
+                var responseBundle = new PreKeyBundle
+                {
+                    // Your Identity Keys
+                    IdentitySigningKey = ByteString.CopyFrom(_activeIdentityContext.Keys.IdentitySigningKey.ExportSubjectPublicKeyInfo()),
+                    IdentityAgreementKey = ByteString.CopyFrom(_activeIdentityContext.Keys.IdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
 
-                // IMPORTANT: Log the key used in the responder bundle for comparison
-                var signedPreKeyBytes = _activeIdentityContext.Keys.SignedPreKey.PublicKey.ExportSubjectPublicKeyInfo();
-                var bundleKeyHash = Convert.ToBase64String(SHA256.HashData(signedPreKeyBytes));
-                _logger.LogWarning("Responder bundle uses signed pre-key with hash: {BundleKeyHash}", bundleKeyHash);
+                    // Your new Ephemeral Key for this session. We can place it in the SignedPreKey field.
+                    SignedPreKey = ByteString.CopyFrom(ephemeralKey.PublicKey.ExportSubjectPublicKeyInfo()),
 
-                // IMPORTANT: Create the local ratchet key using the SAME key that was included in the responder's bundle
-                using var localRatchetKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-                localRatchetKey.ImportECPrivateKey(_activeIdentityContext.Keys.SignedPreKey.ExportECPrivateKey(), out _);
-                var actualKeyHash = Convert.ToBase64String(SHA256.HashData(localRatchetKey.PublicKey.ExportSubjectPublicKeyInfo()));
-                _logger.LogWarning("Local ratchet key for session has hash: {ActualKeyHash}", actualKeyHash);
-
-                await _sessionManager.EstablishSessionAsResponderAsync(
-                    new SessionId(conversation.Id.Value),
-                    new IdentityPeerId(peer.Id.Value),
-                    new RatchetIdentityKey(request.InitiatorBundle.IdentityAgreementKey.ToByteArray()),
-                    localRatchetKey,
-                    new SharedSecret(handshakeResult.SharedSecret.Value));
-
-                _logger.LogInformation("Successfully established session {SessionId} with peer {PeerId}", conversation.Id, peer.Id);
-
+                    // You must sign the key you are sending.
+                    PreKeySignature = ByteString.CopyFrom(_x3DhManager.SignPreKey(
+                        _activeIdentityContext.Keys.IdentitySigningKey,
+                        new PreKey(ephemeralKey.PublicKey.ExportSubjectPublicKeyInfo())
+                    ).Value)
+                };
+                
                 return new EstablishSessionResponse
                 {
                     SessionId = conversation.Id.Value.ToString(),
-                    ResponderBundle = handshakeResult.ResponderBundle
+                    ResponderBundle = responseBundle
                 };
             }
             catch (Exception ex)

@@ -375,7 +375,7 @@ public class MessageIntegrationTests : IntegrationTestBase
                     break;
                 }
                 
-                TestContext.WriteLine($"Waiting for message receipt... {i+1}/10");
+                TestContext.WriteLine($"Waiting for message receipt... {i+1}/50");
             }
             
             // Dump all logs for debugging

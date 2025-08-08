@@ -83,6 +83,7 @@ public class DirectSessionManager : IDirectSessionManager
         SessionId conversationId, 
         Percolator.Identity.PeerId remotePeerId, 
         RatchetIdentityKey remoteIdentityKey,
+        RatchetEphemeralKey remoteRatchetPublicKey,
         ECDiffieHellman privateKeyUsedInHandshake,
         SharedSecret sharedSecret)
     {
@@ -96,6 +97,7 @@ public class DirectSessionManager : IDirectSessionManager
         var session = DoubleRatchetSession.AsResponder(
             sharedSecret,
             remoteIdentityKey,
+            remoteRatchetPublicKey,
             privateKeyUsedInHandshake,
             sessionLogger);
 
