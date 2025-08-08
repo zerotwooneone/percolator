@@ -47,6 +47,7 @@ namespace Percolator.CryptographyTests
             _bobSession = DoubleRatchetSession.AsResponder(
                 _sharedSecret,
                 new RatchetIdentityKey(_aliceIdentity.PublicKey.ExportSubjectPublicKeyInfo()),
+                new RatchetEphemeralKey(_aliceIdentity.PublicKey.ExportSubjectPublicKeyInfo()),
                 _bobRatchetKey,
                 _logger);
         }
@@ -207,6 +208,7 @@ namespace Percolator.CryptographyTests
             using var bobSession = DoubleRatchetSession.AsResponder(
                 sharedSecret,
                 new RatchetIdentityKey(aliceIdentityPublicKeyBytes),
+                new RatchetEphemeralKey(aliceIdentity.PublicKey.ExportSubjectPublicKeyInfo()),
                 importedBobRatchetKey,
                 _logger
             );

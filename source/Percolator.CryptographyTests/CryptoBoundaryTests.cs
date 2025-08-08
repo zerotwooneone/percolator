@@ -72,6 +72,7 @@ public class CryptoBoundaryTests
         var bobSession = DoubleRatchetSession.AsResponder(
             sharedSecret,
             new RatchetIdentityKey(aliceIdentity.PublicKey.ExportSubjectPublicKeyInfo()),
+            new RatchetEphemeralKey(aliceIdentity.PublicKey.ExportSubjectPublicKeyInfo()),
             bobEphemeral,
             _logger);
 

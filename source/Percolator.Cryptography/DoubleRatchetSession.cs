@@ -119,7 +119,8 @@ public class DoubleRatchetSession : IDisposable
 
     public static DoubleRatchetSession AsResponder(
         SharedSecret sharedSecret, 
-        RatchetIdentityKey remoteIdentityPublicKey, 
+        RatchetIdentityKey remoteIdentityPublicKey,  
+        RatchetEphemeralKey remoteRatchetPublicKey, 
         ECDiffieHellman localRatchetKey,
         ILogger<DoubleRatchetSession> logger,
         CryptographyOptions? options = null)
@@ -131,6 +132,7 @@ public class DoubleRatchetSession : IDisposable
         
         // Set the local ratchet key provided by the caller
         session._dhRatchetKey = localRatchetKey;
+        session._remoteRatchetKey = remoteRatchetPublicKey;
         
         // Log the session initialization parameters for debugging
         session.LogDebugCryptoMaterial("Responder DH key hash: {LocalRatchetKeyHash}", 

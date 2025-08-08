@@ -81,6 +81,7 @@ namespace Percolator.CryptographyTests
             using var sessionFromAlice = DoubleRatchetSession.AsResponder(
                 sharedSecretAlice, 
                 new RatchetIdentityKey(_creatorIdentity.PublicKey.ExportSubjectPublicKeyInfo()), 
+                new RatchetEphemeralKey(_creatorIdentity.PublicKey.ExportSubjectPublicKeyInfo()),
                 _aliceRatchet,
                 _sessionLogger);
             var aliceGroupManager = GroupManager.AcceptInvitation(sessionFromAlice, invitationToAlice, creatorManager.SigningPublicKey!, _aliceIdentity, _loggerFactory);
@@ -88,6 +89,7 @@ namespace Percolator.CryptographyTests
             using var sessionFromBob = DoubleRatchetSession.AsResponder(
                 sharedSecretBob, 
                 new RatchetIdentityKey(_creatorIdentity.PublicKey.ExportSubjectPublicKeyInfo()), 
+                new RatchetEphemeralKey(_creatorIdentity.PublicKey.ExportSubjectPublicKeyInfo()),
                 _bobRatchet,
                 _sessionLogger);
             var bobGroupManager = GroupManager.AcceptInvitation(sessionFromBob, invitationToBob, creatorManager.SigningPublicKey!, _bobIdentity, _loggerFactory);
@@ -165,6 +167,7 @@ namespace Percolator.CryptographyTests
             var sessionFromAlice = DoubleRatchetSession.AsResponder(
                 sharedSecret, 
                 new RatchetIdentityKey(_creatorIdentity.PublicKey.ExportSubjectPublicKeyInfo()), 
+                new RatchetEphemeralKey(_creatorIdentity.PublicKey.ExportSubjectPublicKeyInfo()),
                 _aliceRatchet,
                 _sessionLogger);
             Action act = () => GroupManager.AcceptInvitation(sessionFromAlice, tamperedInvitation, creatorManager.SigningPublicKey!, _aliceIdentity, _loggerFactory);
@@ -189,6 +192,7 @@ namespace Percolator.CryptographyTests
             var sessionFromAlice = DoubleRatchetSession.AsResponder(
                 sharedSecret, 
                 new RatchetIdentityKey(_creatorIdentity.PublicKey.ExportSubjectPublicKeyInfo()), 
+                new RatchetEphemeralKey(_creatorIdentity.PublicKey.ExportSubjectPublicKeyInfo()),
                 _aliceRatchet,
                 _sessionLogger);
             var aliceGroupManager = GroupManager.AcceptInvitation(sessionFromAlice, invitation, creatorManager.SigningPublicKey!, _aliceIdentity, _loggerFactory);
@@ -234,6 +238,7 @@ namespace Percolator.CryptographyTests
             using var sessionFromBobForA = DoubleRatchetSession.AsResponder(
                 sharedSecretA, 
                 new RatchetIdentityKey(_creatorIdentity.PublicKey.ExportSubjectPublicKeyInfo()), 
+                new RatchetEphemeralKey(_creatorIdentity.PublicKey.ExportSubjectPublicKeyInfo()),
                 _bobRatchet,
                 _sessionLogger);
             var bobManagerForA = GroupManager.AcceptInvitation(sessionFromBobForA, invitationA, groupAManager.SigningPublicKey!, _bobIdentity, _loggerFactory);
@@ -250,6 +255,7 @@ namespace Percolator.CryptographyTests
             using var sessionFromBobForB = DoubleRatchetSession.AsResponder(
                 sharedSecretB, 
                 new RatchetIdentityKey(_creatorIdentity.PublicKey.ExportSubjectPublicKeyInfo()), 
+                new RatchetEphemeralKey(_creatorIdentity.PublicKey.ExportSubjectPublicKeyInfo()),
                 bobRatchetB,
                 _sessionLogger);
             var bobManagerForB = GroupManager.AcceptInvitation(sessionFromBobForB, invitationB, groupBManager.SigningPublicKey!, _bobIdentity, _loggerFactory);
@@ -298,6 +304,7 @@ namespace Percolator.CryptographyTests
             var sessionFromAlice = DoubleRatchetSession.AsResponder(
                 new SharedSecret(_creatorIdentity.DeriveKeyMaterial(_aliceIdentity.PublicKey)),
                 new RatchetIdentityKey(_creatorIdentity.PublicKey.ExportSubjectPublicKeyInfo()),
+                new RatchetEphemeralKey(_creatorIdentity.PublicKey.ExportSubjectPublicKeyInfo()),
                 _aliceRatchet,
                 _sessionLogger);
             var validPayloadBytes = sessionFromAlice.Decrypt(validInvitation).Value;
