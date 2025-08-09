@@ -4,31 +4,38 @@ using System.Text.Json.Serialization;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Percolator.Cryptography;
+using Percolator.Identity;
 
 namespace Percolator.Infrastructure.Cryptography;
 
 public class FileBasedDoubleRatchetSessionStore : IDoubleRatchetSessionStore
 {
-    private readonly string _storagePath;
     private readonly ILogger<FileBasedDoubleRatchetSessionStore> _logger;
+    private readonly ISelfIdentityProvider _selfIdentityProvider;
+    private readonly CryptographyOptions _options;
+    private readonly IOptions<StorageOptions> _storageOptions;
 
     public FileBasedDoubleRatchetSessionStore(
         IOptions<StorageOptions> storageOptions,
-        ILogger<FileBasedDoubleRatchetSessionStore> logger)
+        ILogger<FileBasedDoubleRatchetSessionStore> logger,
+        IOptions<CryptographyOptions> options,
+        ISelfIdentityProvider selfIdentityProvider)
     {
-        _storagePath = Path.Combine(storageOptions.Value.Path, "sessions");
         _logger = logger;
-        Directory.CreateDirectory(_storagePath);
+        _selfIdentityProvider = selfIdentityProvider;
+        _options = options.Value;
+        _storageOptions = storageOptions;
     }
 
     public async Task<DoubleRatchetSession.DoubleRatchetSessionState?> GetSessionStateAsync(SessionId sessionId)
     {
-        var path = GetPath(sessionId.ToString());
+        var path = GetPath(sessionId.ToString(), _selfIdentityProvider.Get().Value.ToString());
         if (!File.Exists(path))
         {
-            _logger.LogTrace("Session state file not found for session {SessionId}", sessionId);
+            _logger.LogWarning("Session state file not found for session {SessionId}", sessionId);
             return null;
         }
+        _logger.LogInformation("Reading Session state file for session {SessionId} at {Path}", sessionId, path);
 
         try
         {
@@ -39,10 +46,17 @@ public class FileBasedDoubleRatchetSessionStore : IDoubleRatchetSessionStore
             
             if (state != null)
             {
-                // Log key hashes after deserialization
-                var rootKeyHash = state.RootKey != null ? Convert.ToBase64String(SHA256.HashData(state.RootKey.Value)) : "null";
-                _logger.LogTrace("Session {SessionId} deserialized - RootKey hash: {RootKeyHash}", 
-                    sessionId, rootKeyHash);
+                if (_logger.IsEnabled(LogLevel.Trace))
+                {
+                    var rootKeyHash = state.RootKey != null ? Convert.ToBase64String(SHA256.HashData(state.RootKey.Value)) : "null";
+                    _logger.LogTrace("Session {SessionId} deserialized - RootKey hash: {RootKeyHash}", 
+                        sessionId, rootKeyHash);
+                }
+
+                if (_options.EnableCryptographicMaterialLogging)
+                {
+                    _logger.LogInformation("Session {SessionId} for {Path} deserialized - RootKey: {RootKey} {DhRatchetPrivateKey}",sessionId, path,state.RootKey, state.DhRatchetPrivateKey);
+                }
             }
             
             return state;
@@ -58,19 +72,31 @@ public class FileBasedDoubleRatchetSessionStore : IDoubleRatchetSessionStore
 
     public async Task SetSessionStateAsync(SessionId sessionId, DoubleRatchetSession.DoubleRatchetSessionState sessionState)
     {
-        // Log key hashes before serialization
-        var rootKeyHash = sessionState.RootKey != null ? Convert.ToBase64String(SHA256.HashData(sessionState.RootKey.Value)) : "null";
-        _logger.LogTrace("Storing session {SessionId} - RootKey hash: {RootKeyHash}", 
-            sessionId, rootKeyHash);
+        if (_logger.IsEnabled(LogLevel.Trace))
+        {
+            var rootKeyHash = sessionState.RootKey != null ? Convert.ToBase64String(SHA256.HashData(sessionState.RootKey.Value)) : "null";
+            _logger.LogTrace("Storing session {SessionId} - RootKey hash: {RootKeyHash}", 
+                sessionId, rootKeyHash);
+        }
+
+        if (_options.EnableCryptographicMaterialLogging)
+        {
+            _logger.LogInformation("Storing session {SessionId} - RootKey: {RootKey} {DhRatchetPrivateKey}", sessionId, sessionState.RootKey, sessionState.DhRatchetPrivateKey);
+        }
         
-        var path = GetPath(sessionId.ToString());
+        
+        var path = GetPath(sessionId.ToString(), _selfIdentityProvider.Get().Value.ToString());
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        
+        _logger.LogInformation("Writing Session state file for session {SessionId} at {Path}", sessionId, path);
         // Open file for writing but allow other processes to read
         await using var stream = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.Read);
         await JsonSerializer.SerializeAsync(stream, sessionState, CryptographyJsonContext.Default.DoubleRatchetSessionState);
     }
 
-    private string GetPath(string sessionId) =>
-        Path.Combine(_storagePath, $"{sessionId}.json");
+    private string GetPath(string sessionId, string peerId)
+    {
+        var path = Path.Combine(_storageOptions.Value.Path, "sessions", peerId);
+        Directory.CreateDirectory(path);
+        return Path.Combine(path, $"{sessionId}.json");
+    }
 }

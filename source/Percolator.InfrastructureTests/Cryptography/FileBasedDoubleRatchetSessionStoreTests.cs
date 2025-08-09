@@ -5,6 +5,7 @@ using Moq;
 using Percolator.Cryptography;
 using Percolator.Infrastructure.Cryptography;
 using NUnit.Framework;
+using Percolator.Identity;
 using Percolator.Infrastructure;
 
 namespace Percolator.InfrastructureTests.Cryptography;
@@ -15,7 +16,9 @@ public class FileBasedDoubleRatchetSessionStoreTests
     private Mock<IOptions<StorageOptions>> _mockOptions;
     private Mock<ILogger<FileBasedDoubleRatchetSessionStore>> _mockLogger;
     private string _testPath;
-    
+    private IOptions<CryptographyOptions> _options;
+    private Mock<ISelfIdentityProvider> _mockSelfIdentityProvider;
+
     [SetUp]
     public void Setup()
     {
@@ -28,13 +31,16 @@ public class FileBasedDoubleRatchetSessionStoreTests
         _mockOptions.Setup(o => o.Value).Returns(new StorageOptions { Path = _testPath });
         
         _mockLogger = new Mock<ILogger<FileBasedDoubleRatchetSessionStore>>();
+        _options = Options.Create(new CryptographyOptions());
+        
+        _mockSelfIdentityProvider = new Mock<ISelfIdentityProvider>();
     }
     
     [Test]
     public async Task SessionState_SetAndGet_MaintainsSymmetry()
     {
         // Arrange
-        var sessionStore = new FileBasedDoubleRatchetSessionStore(_mockOptions.Object, _mockLogger.Object);
+        var sessionStore = new FileBasedDoubleRatchetSessionStore(_mockOptions.Object, _mockLogger.Object, _options, _mockSelfIdentityProvider.Object);
         var sessionId = new SessionId(Guid.NewGuid());
         
         // Create a test session state with known values
@@ -44,6 +50,7 @@ public class FileBasedDoubleRatchetSessionStoreTests
         var originalRootKeyHash = originalState.RootKey.Value != null 
             ? Convert.ToBase64String(SHA256.HashData(originalState.RootKey.Value))
             : "null";
+        _mockSelfIdentityProvider.Setup(p => p.Get()).Returns(new PeerId(Guid.Parse("141db673-cdaa-439e-bd05-c550f78394a5")));
         
         // Act
         await sessionStore.SetSessionStateAsync(sessionId, originalState);

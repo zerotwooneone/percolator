@@ -21,6 +21,7 @@ using Percolator.Infrastructure;
 using Percolator.Network;
 using Percolator.Node;
 using ChatConversationId = Percolator.Chat.ValueObjects.ConversationId;
+using PeerId = Percolator.Identity.PeerId;
 
 var rootCommand = new RootCommand("Percolator Node: A secure peer-to-peer communication tool.");
 
@@ -64,14 +65,12 @@ var connectCommand = new Command("connect", "Connect to a peer and establish a s
 rootCommand.AddCommand(connectCommand);
 
 // *** Send Command ***
-var conversationIdOption = new Option<Guid?>("--conversation-id", "The ID of the conversation. If omitted, the last active conversation with the target peer will be used.");
 var peerIdOption = new Option<Guid?>("--peer-id", "The ID of the peer to send the message to. Required if conversation-id is not specified.");
 var messageArgument = new Argument<string>("message", "The plaintext message to send.");
 var endpointOption = new Option<string>("--endpoint", "The endpoint of the peer to establish a new session with before sending (e.g., localhost:5000 or just localhost).");
 
 var sendCommand = new Command("send", "Send a message to a peer.")
 {
-    conversationIdOption,
     peerIdOption,
     messageArgument,
     endpointOption,
@@ -231,7 +230,6 @@ async Task ConnectCommandHandler(InvocationContext context)
 
 async Task SendCommandHandler(InvocationContext context)
 {
-    var conversationIdGuid = context.ParseResult.GetValueForOption(conversationIdOption);
     var peerIdGuid = context.ParseResult.GetValueForOption(peerIdOption);
     var message = context.ParseResult.GetValueForArgument(messageArgument);
     var endpointString = context.ParseResult.GetValueForOption(endpointOption);
@@ -256,34 +254,29 @@ async Task SendCommandHandler(InvocationContext context)
         var messageService = serviceProvider.GetRequiredService<IMessageService>();
 
         ChatConversationId conversationId;
-
-        if (conversationIdGuid.HasValue)
+        PeerId remotePeerId;
+       
+        if (string.IsNullOrEmpty(endpointString) || string.IsNullOrEmpty(peerName))
         {
-            conversationId = new ChatConversationId(conversationIdGuid.Value);
-        }
-        else
-        {
-            if (string.IsNullOrEmpty(endpointString) || string.IsNullOrEmpty(peerName))
-            {
-                Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine("Either --conversation-id or both --endpoint and --peer-name must be specified.");
-                Console.ResetColor();
-                return;
-            }
-
-            if (!TryParseEndpoint(endpointString, out var endpoint))
-            {
-                Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine($"Invalid endpoint format: '{endpointString}'.");
-                Console.ResetColor();
-                return;
-            }
-            
-            conversationId = await conversationService.CreateDirectConversationAsync(endpoint, peerName);
-            Console.ForegroundColor = ConsoleColor.Cyan;
-            Console.WriteLine($"Established new conversation {conversationId.Value} with {peerName}");
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine("Either --conversation-id or both --endpoint and --peer-name must be specified.");
             Console.ResetColor();
+            return;
         }
+
+        //todo: need to handle getting the peer and endpoint by peer name
+        if (!TryParseEndpoint(endpointString, out var endpoint))
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine($"Invalid endpoint format: '{endpointString}'.");
+            Console.ResetColor();
+            return;
+        }
+        
+        conversationId = await conversationService.CreateDirectConversationAsync(endpoint, peerName);
+        Console.ForegroundColor = ConsoleColor.Cyan;
+        Console.WriteLine($"Established new conversation {conversationId.Value} with {peerName}");
+        Console.ResetColor();
 
         await messageService.SendDirectMessageAsync(conversationId, message);
 

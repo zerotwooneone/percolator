@@ -14,6 +14,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IOneTimeKeyProvider, InMemoryOneTimeKeyProvider>();
         services.AddSingleton<IIdentityService, PersistentIdentityService>();
         services.AddSingleton<ActiveIdentityContext>();
+        services.AddSingleton<ISelfIdentityProvider>(s=> s.GetRequiredService<ActiveIdentityContext>());
         
         services.AddSingleton<ICredentialService, CredentialService>();
         // Application-layer orchestrator

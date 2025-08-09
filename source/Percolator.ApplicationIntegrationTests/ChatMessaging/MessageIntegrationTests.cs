@@ -29,6 +29,7 @@ using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
 using Percolator.Infrastructure.Serialization;
+using PeerId = Percolator.Identity.PeerId;
 
 namespace Percolator.ApplicationIntegrationTests.ChatMessaging;
 
@@ -459,6 +460,7 @@ public class MessageIntegrationTests : IntegrationTestBase
                     
                     // Identity services
                     services.AddSingleton<ActiveIdentityContext>();
+                    services.AddSingleton<ISelfIdentityProvider>(s=> s.GetRequiredService<ActiveIdentityContext>());
                     services.AddSingleton<IIdentityOrchestrator, IdentityOrchestrator>();
                     services.AddSingleton<IIdentityStore, FileSystemIdentityStore>();
                     services.AddSingleton<IIdentityService, PersistentIdentityService>();

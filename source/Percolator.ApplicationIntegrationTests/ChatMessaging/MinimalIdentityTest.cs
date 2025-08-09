@@ -67,6 +67,7 @@ namespace Percolator.ApplicationIntegrationTests.ChatMessaging
                         
                         // Identity services - using the actual implementations from the Identity namespace
                         services.AddSingleton<ActiveIdentityContext>();
+                        services.AddSingleton<ISelfIdentityProvider>(s=> s.GetRequiredService<ActiveIdentityContext>());
                         services.AddSingleton<IIdentityOrchestrator, IdentityOrchestrator>();
                         services.AddSingleton<IIdentityStore, FileSystemIdentityStore>();
                         services.AddSingleton<IIdentityService, PersistentIdentityService>();

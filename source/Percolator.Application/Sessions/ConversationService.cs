@@ -57,11 +57,13 @@ namespace Percolator.Application.Sessions
             _peerConnectionRepository = peerConnectionRepository;
         }
 
-        public async Task<ChatConversationId> CreateDirectConversationAsync(DnsEndPoint endpoint, string peerName)
+        public async Task<ConversationId> CreateDirectConversationAsync(
+            DnsEndPoint endpoint, 
+            string remotePeerName)
         {
             try
             {
-                _logger.LogInformation("Creating direct conversation with {PeerName} at {Endpoint}", peerName,
+                _logger.LogInformation("Creating direct conversation with {PeerName} at {Endpoint}", remotePeerName,
                     endpoint);
 
                 // Create ephemeral key for this handshake
@@ -113,25 +115,25 @@ namespace Percolator.Application.Sessions
                 _logger.LogInformation("Handshake completed locally as Responder.");
 
                 // Get or create the peer
-                var peer = await _peerRepository.GetByNameAsync(peerName);
-                if (peer == null)
+                var remotePeer = await _peerRepository.GetByNameAsync(remotePeerName);
+                if (remotePeer == null)
                 {
-                    peer = await CreatePeerAsync(peerName, response.ResponderBundle, endpoint);
+                    remotePeer = await CreatePeerAsync(remotePeerName, response.ResponderBundle, endpoint);
                 }
 
                 // Create a new conversation
                 var conversation = new ChatConversation(
                     new ChatConversationId(Guid.Parse(response.SessionId)),
                     new ChannelId(response.ResponderBundle.IdentitySigningKey.ToByteArray()),
-                    new List<ChatParticipantId> {new(_activeIdentityContext.Identity!.Id), new(peer.Id.Value)},
+                    new List<ChatParticipantId> {new(_activeIdentityContext.Identity!.Id), new(remotePeer.Id.Value)},
                     new List<Message>(),
-                    peerName);
+                    remotePeerName);
 
                 await _conversationRepository.AddAsync(conversation);
 
                 await _sessionManager.EstablishSessionAsResponderAsync(
                     new SessionId(conversation.Id.Value),
-                    new Percolator.Identity.PeerId(peer.Id.Value),
+                    new Percolator.Identity.PeerId(remotePeer.Id.Value),
                     new RatchetIdentityKey(response.ResponderBundle.IdentityAgreementKey
                         .ToByteArray()), // Alice's Public Identity Key
                     new RatchetEphemeralKey(response.ResponderBundle.SignedPreKey
