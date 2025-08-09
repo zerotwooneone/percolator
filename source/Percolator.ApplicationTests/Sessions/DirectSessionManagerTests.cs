@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Moq;
 using NUnit.Framework;
 using Percolator.Application.Identity;
@@ -40,6 +41,7 @@ public class DirectSessionManagerTests
     // Shared components
     private SessionId _sessionId = null!;
     private ILoggerFactory _loggerFactory = null!;
+    private IOptions<CryptographyOptions> _options = null!;
     private ECDiffieHellman _aliceEphemeral;
     private DoubleRatchetSession.DoubleRatchetSessionState? _aliceSessionState;
     private DoubleRatchetSession.DoubleRatchetSessionState? _bobSessionState;
@@ -48,6 +50,7 @@ public class DirectSessionManagerTests
     public void Setup()
     {
         _loggerFactory = new NullLoggerFactory();
+        _options = Options.Create(new CryptographyOptions());
         
         // Create unique session ID
         _sessionId = new SessionId(Guid.NewGuid());
@@ -75,7 +78,8 @@ public class DirectSessionManagerTests
             _aliceConversationRepository.Object,
             _aliceIdentityContext,
             _loggerFactory.CreateLogger<DirectSessionManager>(),
-            _loggerFactory);
+            _loggerFactory,
+            _options);
             
         // Generate Bob's identity and keys
         _bobPeerId = new Identity.PeerId(Guid.NewGuid());
@@ -99,7 +103,8 @@ public class DirectSessionManagerTests
             _bobConversationRepository.Object,
             _bobIdentityContext,
             _loggerFactory.CreateLogger<DirectSessionManager>(),
-            _loggerFactory);
+            _loggerFactory,
+            _options);
             
         // Setup session store mocks to use class-level state variables
         _aliceSessionStore.Setup(x => x.SetSessionStateAsync(It.IsAny<SessionId>(), It.IsAny<DoubleRatchetSession.DoubleRatchetSessionState>()))

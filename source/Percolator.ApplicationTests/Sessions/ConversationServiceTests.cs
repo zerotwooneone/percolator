@@ -5,6 +5,7 @@ using CryptoSharedSecret = Percolator.Cryptography.SharedSecret;
 using Google.Protobuf;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Moq;
 using Percolator.Application.Identity;
 using Percolator.Application.KeyExchange;
@@ -76,7 +77,7 @@ public class ConversationServiceTests
             _mockOneTimeKeyProvider.Object,
             _activeIdentityContext,
             _mockGrpcSessionService.Object, 
-            new X3DHManager(NullLogger<X3DHManager>.Instance, new CryptographyOptions()), 
+            new X3DHManager(NullLogger<X3DHManager>.Instance, Options.Create(new CryptographyOptions())), 
             _mockPeerConnectionRepository.Object
         );
     }

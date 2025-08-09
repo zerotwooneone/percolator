@@ -1,21 +1,29 @@
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Percolator.Cryptography;
 
 namespace Percolator.Application.Cryptography;
 
 public static class ServiceCollectionExtensions
 {
-    public static IServiceCollection AddCryptographyServices(this IServiceCollection services, bool enableCryptoLogging)
+    public static IServiceCollection AddCryptographyServices(this IServiceCollection services, IConfiguration config)
     {
         services.AddSingleton<ISigningService, EcdsaSigningService>();
         services.AddSingleton<IX3DHManager,X3DHManager>();
         
-        services.Configure<CryptographyOptions>(options => {
-            options.EnableCryptographicMaterialLogging = enableCryptoLogging;
+        // Bind the configuration section to the options class
+        services.AddOptions<CryptographyOptions>()
+            .Bind(config.GetSection(nameof(CryptographyOptions)));
+
+        // Register the validator
+        services.AddSingleton<IValidateOptions<CryptographyOptions>, CryptographyOptionsValidator>();
         
+        // Configure the options
+        services.Configure<CryptographyOptions>(options => {
             // If crypto logging is enabled, log a warning
-            if (enableCryptoLogging)
+            if (options.EnableCryptographicMaterialLogging)
             {
                 var loggerFactory = services.BuildServiceProvider().GetRequiredService<ILoggerFactory>();
                 var logger = loggerFactory.CreateLogger("CryptographyOptions");

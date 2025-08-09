@@ -2,6 +2,7 @@ using Percolator.Application.Identity;
 using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Percolator.Chat;
 using Percolator.Cryptography;
 using Percolator.Identity;
@@ -18,6 +19,7 @@ public class DirectSessionManager : IDirectSessionManager
     private readonly ActiveIdentityContext _activeIdentityContext;
     private readonly ILogger<DirectSessionManager> _logger;
     private readonly ILoggerFactory _loggerFactory;
+    private readonly IOptions<CryptographyOptions> _options;
     private readonly ConcurrentDictionary<SessionId, SemaphoreSlim> _sessionLocks = new();
 
     public DirectSessionManager(
@@ -25,13 +27,15 @@ public class DirectSessionManager : IDirectSessionManager
         IConversationRepository conversationRepository,
         ActiveIdentityContext activeIdentityContext,
         ILogger<DirectSessionManager> logger,
-        ILoggerFactory loggerFactory)
+        ILoggerFactory loggerFactory,
+        IOptions<CryptographyOptions> options)
     {
         _sessionStore = sessionStore;
         _conversationRepository = conversationRepository;
         _activeIdentityContext = activeIdentityContext;
         _logger = logger;
         _loggerFactory = loggerFactory;
+        _options = options;
     }
 
     public async Task EstablishSessionAsInitiatorAsync(SessionId conversationId,
@@ -56,7 +60,8 @@ public class DirectSessionManager : IDirectSessionManager
             remoteIdentityKey,
             remoteRatchetKey,
             localEphemeralKey,
-            sessionLogger);
+            sessionLogger,
+            _options);
 
         var sessionId = new SessionId(conversationId.Value);
         _logger.LogInformation("Establish session as initiator for conversation {ConversationId}. SessionId: {SessionId}", conversationId, sessionId);
@@ -101,7 +106,8 @@ public class DirectSessionManager : IDirectSessionManager
             remoteIdentityKey,
             remoteRatchetPublicKey,
             privateKeyUsedInHandshake,
-            sessionLogger);
+            sessionLogger,
+            _options);
 
         var sessionId = new SessionId(conversationId.Value);
         _logger.LogInformation("Establish session as responder for conversation {ConversationId}. SessionId: {SessionId}", conversationId, sessionId);
@@ -167,7 +173,7 @@ public class DirectSessionManager : IDirectSessionManager
             
             // Use Crypto domain directly
             var sessionLogger = _loggerFactory.CreateLogger<DoubleRatchetSession>();
-            using var session = new DoubleRatchetSession(sessionState, sessionLogger);
+            using var session = new DoubleRatchetSession(sessionState, sessionLogger, _options);
             var decryptedPlaintext = session.Decrypt(encryptedMessage);
 
             // Save the updated state
@@ -224,7 +230,7 @@ public class DirectSessionManager : IDirectSessionManager
             
             // Use Crypto domain directly
             var sessionLogger = _loggerFactory.CreateLogger<DoubleRatchetSession>();
-            using var session = new DoubleRatchetSession(sessionState, sessionLogger);
+            using var session = new DoubleRatchetSession(sessionState, sessionLogger, _options);
             var encryptedMessage = session.Encrypt(plaintext);
 
             // Save the updated state

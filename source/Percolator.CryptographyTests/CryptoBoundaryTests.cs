@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using NUnit.Framework;
 using Percolator.Cryptography;
 
@@ -10,11 +11,13 @@ namespace Percolator.CryptographyTests;
 public class CryptoBoundaryTests
 {
     private ILogger<DoubleRatchetSession> _logger;
+    private IOptions<CryptographyOptions> _options;
 
     [SetUp]
     public void Setup()
     {
         _logger = new NullLogger<DoubleRatchetSession>();
+        _options = Options.Create(new CryptographyOptions());
     }
 
     [Test]
@@ -68,14 +71,16 @@ public class CryptoBoundaryTests
             new RatchetIdentityKey(bobIdentity.PublicKey.ExportSubjectPublicKeyInfo()),
             new RatchetEphemeralKey(bobEphemeral.PublicKey.ExportSubjectPublicKeyInfo()),
             ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
-            _logger);
+            _logger,
+            _options);
 
         var bobSession = DoubleRatchetSession.AsResponder(
             sharedSecret,
             new RatchetIdentityKey(aliceIdentity.PublicKey.ExportSubjectPublicKeyInfo()),
             new RatchetEphemeralKey(aliceIdentity.PublicKey.ExportSubjectPublicKeyInfo()),
             bobEphemeral,
-            _logger);
+            _logger,
+            _options);
 
         // Act - Encrypt and decrypt an empty message
         var emptyPlaintext = new Plaintext(Array.Empty<byte>());

@@ -1,24 +1,25 @@
 using System.Security.Cryptography;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace Percolator.Cryptography;
 
 public class X3DHManager : IX3DHManager
 {
-    private readonly ILogger<X3DHManager>? _logger;
+    private readonly ILogger<X3DHManager> _logger;
     private readonly CryptographyOptions _options;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="X3DHManager"/> class with specified options.
     /// </summary>
-    /// <param name="logger">Optional logger for diagnostic information.</param>
+    /// <param name="logger">Logger for diagnostic information.</param>
     /// <param name="options">Cryptography options controlling behavior.</param>
     public X3DHManager(
         ILogger<X3DHManager> logger, 
-        CryptographyOptions options)
+        IOptions<CryptographyOptions> options)
     {
         _logger = logger;
-        _options = options ?? new CryptographyOptions();
+        _options = options.Value;
     }
 
     public SharedSecret InitiateHandshake(PreKeyBundle remoteBundle, ECDiffieHellman ephemeralKey,

@@ -1,5 +1,6 @@
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using NUnit.Framework;
 using Percolator.Cryptography;
 using System.Security.Cryptography;
@@ -22,12 +23,14 @@ namespace Percolator.CryptographyTests
         private RatchetEphemeralKey _bobPreKey;
         private ILogger<DoubleRatchetSession> _logger;
         private ECDiffieHellman _aliceEphemeral;
+        private IOptions<CryptographyOptions> _options;
 
         [SetUp]
         public void Setup()
         {
             // Setup logger
             _logger = new NullLogger<DoubleRatchetSession>();
+            _options = Options.Create(new CryptographyOptions());
             
             _aliceIdentity = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
             _bobIdentity = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
@@ -46,14 +49,16 @@ namespace Percolator.CryptographyTests
                 _bobIdentityKey,
                 _bobPreKey,
                 _aliceEphemeral,
-                _logger);
+                _logger,
+                _options);
 
             _bobSession = DoubleRatchetSession.AsResponder(
                 _sharedSecret,
                 new RatchetIdentityKey(_aliceIdentity.PublicKey.ExportSubjectPublicKeyInfo()),
                 new RatchetEphemeralKey(_aliceEphemeral.PublicKey.ExportSubjectPublicKeyInfo()),
                 _bobRatchetKey,
-                _logger);
+                _logger,
+                _options);
         }
 
         [TearDown]
@@ -116,7 +121,7 @@ namespace Percolator.CryptographyTests
             // Simulate serializing and deserializing the state
             var serializedState = JsonSerializer.Serialize(state, new JsonSerializerOptions { WriteIndented = true });
             var deserializedState = JsonSerializer.Deserialize<DoubleRatchetSessionState>(serializedState)!;
-            using var loadedBobSession = new DoubleRatchetSession(deserializedState, _logger);
+            using var loadedBobSession = new DoubleRatchetSession(deserializedState, _logger, _options);
 
             var response = loadedBobSession.Encrypt(new Plaintext("Hello, Alice!"u8.ToArray()));
             var decryptedResponse = _aliceSession.Decrypt(response);
@@ -218,7 +223,8 @@ namespace Percolator.CryptographyTests
                 new RatchetIdentityKey(bobIdentityPublicKeyBytes),
                 new RatchetEphemeralKey(bobRatchetKeyPublicBytes),
                 aliceEphemeral,
-                _logger
+                _logger,
+                _options
             );
 
             // Now create Bob's session (responder)
@@ -231,7 +237,8 @@ namespace Percolator.CryptographyTests
                 new RatchetIdentityKey(aliceIdentityPublicKeyBytes),
                 new RatchetEphemeralKey(aliceIdentity.PublicKey.ExportSubjectPublicKeyInfo()),
                 importedBobRatchetKey,
-                _logger
+                _logger,
+                _options
             );
 
             // Now test message exchange in alternating order (crucial for Double Ratchet protocol)
@@ -290,8 +297,8 @@ namespace Percolator.CryptographyTests
                 Console.WriteLine($"Bob root key hash after deserialization: {Convert.ToBase64String(SHA256.HashData(bobStateDeserialized.RootKey.Value))}");
             
             // Create new sessions with the deserialized state
-            using var aliceSession2 = new DoubleRatchetSession(aliceStateDeserialized, _logger);
-            using var bobSession2 = new DoubleRatchetSession(bobStateDeserialized, _logger);
+            using var aliceSession2 = new DoubleRatchetSession(aliceStateDeserialized, _logger, _options);
+            using var bobSession2 = new DoubleRatchetSession(bobStateDeserialized, _logger, _options);
             
             // IMPORTANT: To avoid the "message received out of order" exception,
             // we need to understand that message counters are maintained across
@@ -332,7 +339,8 @@ namespace Percolator.CryptographyTests
                 _bobIdentityKey,
                 _bobPreKey,
                 _aliceEphemeral,
-                _logger
+                _logger,
+                _options
             );
 
             // Send a few messages to advance counters
@@ -356,7 +364,7 @@ namespace Percolator.CryptographyTests
             Assert.That(deserializedState.ReceivingCounter, Is.EqualTo(originalState.ReceivingCounter));
             
             // Create new session from deserialized state
-            using var restoredSession = new DoubleRatchetSession(deserializedState, _logger);
+            using var restoredSession = new DoubleRatchetSession(deserializedState, _logger, _options);
             
             // Try encrypting a new message with the restored session
             var message3 = restoredSession.Encrypt(new Plaintext(Encoding.UTF8.GetBytes("Message 3")));
@@ -504,7 +512,7 @@ namespace Percolator.CryptographyTests
             var aliceSessionStateAfterDirectionChange = CreateSessionStateSnapshot(_aliceSession);
             
             // Create a new session for Alice using the state after direction change
-            var aliceNewSession = new DoubleRatchetSession(aliceSessionStateAfterDirectionChange, _logger);
+            var aliceNewSession = new DoubleRatchetSession(aliceSessionStateAfterDirectionChange, _logger, _options);
             
             try
             {
@@ -588,7 +596,7 @@ namespace Percolator.CryptographyTests
             deserialized.PreviousChainLength.Should().Be(1);
             
             // Create new session from deserialized state
-            using var newAliceSession = new DoubleRatchetSession(deserialized, _logger);
+            using var newAliceSession = new DoubleRatchetSession(deserialized, _logger, _options);
             newAliceSession.PreviousChainLength.Should().Be(1);
             
             // Second message from Bob to Alice - this causes another ratchet step

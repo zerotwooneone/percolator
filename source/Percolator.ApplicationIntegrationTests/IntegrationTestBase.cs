@@ -110,7 +110,8 @@ public abstract class IntegrationTestBase
                 {
                     { "Percolator:DataDirectoryPath", Path.Combine(Path.GetTempPath(), $"PercolatorIntegrationTest_{hostType}_{Guid.NewGuid()}") },
                     { "Percolator:LocalDevelopmentMode", "true" },
-                    { "Percolator:Port", port.ToString() }
+                    { "Percolator:Port", port.ToString() },
+                    {"Percolator:Cryptography:EnableCryptographicMaterialLogging", "true"}
                 });
             })
             .ConfigureServices((context, services) =>
@@ -122,12 +123,6 @@ public abstract class IntegrationTestBase
                     builder.AddDebug();
                 });
 
-                // Register CryptographyOptions with diagnostic logging enabled for integration tests
-                services.AddSingleton(new Percolator.Cryptography.CryptographyOptions 
-                { 
-                    EnableCryptographicMaterialLogging = true 
-                });
-
                 // Add gRPC services
                 services.AddGrpc(options =>
                 {
@@ -137,8 +132,7 @@ public abstract class IntegrationTestBase
                 });
 
                 // Register application and infrastructure services
-                const bool enableCryptoLogging=true;
-                services.AddApplicationServices(context.Configuration, enableCryptoLogging);
+                services.AddApplicationServices(context.Configuration);
                 services.AddInfrastructureServices(context.Configuration);
 
                 // Add additional services if needed

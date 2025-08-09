@@ -5,6 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Console;
 using Microsoft.Extensions.Logging.Debug;
+using Microsoft.Extensions.Options;
 using Moq;
 using Percolator.Application.Identity;
 using Percolator.Application.Sessions;
@@ -37,8 +38,7 @@ public class SessionMessageTests
     private ActiveIdentityContext _aliceIdentity = null!;
     private ActiveIdentityContext _bobIdentity = null!;
     private ILoggerFactory _loggerFactory = null!;
-    private CryptographyOptions _cryptoOptions = null!;
-    private ServiceProvider _serviceProvider = null!;
+    private IOptions<CryptographyOptions> _options = null!;
     private ECDiffieHellman _aliceEphemeral;
 
     [SetUp]
@@ -68,14 +68,7 @@ public class SessionMessageTests
         });
         
         // Create cryptography options with diagnostic logging enabled
-        _cryptoOptions = new CryptographyOptions { EnableCryptographicMaterialLogging = true };
-
-        // Configure services to use our CryptographyOptions
-        var services = new ServiceCollection();
-        services.AddSingleton(_cryptoOptions);
-        services.AddSingleton<IX3DHManager>(provider => 
-            new X3DHManager(_loggerFactory.CreateLogger<X3DHManager>(), _cryptoOptions));
-        _serviceProvider = services.BuildServiceProvider();
+        _options = Options.Create(new CryptographyOptions { EnableCryptographicMaterialLogging = true });
 
         // Create identity contexts
         _aliceEphemeral = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
@@ -105,14 +98,16 @@ public class SessionMessageTests
             _mockConversationRepo.Object,
             _aliceIdentity,
             _loggerFactory.CreateLogger<DirectSessionManager>(),
-            _loggerFactory);
+            _loggerFactory,
+            _options);
         
         _bobManager = new DirectSessionManager(
             _bobSessionStore, 
             _mockConversationRepo.Object,
             _bobIdentity,
             _loggerFactory.CreateLogger<DirectSessionManager>(),
-            _loggerFactory);
+            _loggerFactory,
+            _options);
     }
 
     [TearDown]
@@ -120,7 +115,6 @@ public class SessionMessageTests
     {
         // Properly dispose the logger factory
         _loggerFactory?.Dispose();
-        _serviceProvider?.Dispose();
         _aliceEphemeral?.Dispose();
     }
 
@@ -182,7 +176,7 @@ public class SessionMessageTests
 
     private (CryptoSharedSecret, CryptoSharedSecret) PerformX3DH()
     {
-        var x3dhManager = _serviceProvider.GetRequiredService<IX3DHManager>();
+        var x3dhManager = new X3DHManager(_loggerFactory.CreateLogger<X3DHManager>(), _options);
 
         // Alice (initiator) keys
         var aliceIdentityKey = _aliceIdentity.Keys!.IdentityAgreementKey;

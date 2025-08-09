@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Moq;
 using Percolator.Application.Identity;
 using Percolator.Application.Network;
@@ -25,6 +26,7 @@ public class MessageServiceTests
     private ActiveIdentityContext _activeIdentityContext = null!;
     private DirectSessionManager _sessionManager = null!;
     private MessageService _messageService = null!;
+    private IOptions<CryptographyOptions> _options = null!;
 
     [SetUp]
     public void SetUp()
@@ -34,6 +36,7 @@ public class MessageServiceTests
         _mockTransportService = new Mock<IMessageTransportService>();
         _activeIdentityContext = new ActiveIdentityContext();
         _mockSessionStore = new Mock<IDoubleRatchetSessionStore>();
+        _options = Options.Create(new CryptographyOptions());
 
         // Create a logger factory for DirectSessionManager
         var loggerFactory = new NullLoggerFactory();
@@ -43,7 +46,8 @@ public class MessageServiceTests
             _mockConversationRepository.Object,
             _activeIdentityContext,
             new NullLogger<DirectSessionManager>(),
-            loggerFactory);
+            loggerFactory,
+            _options);
 
         _messageService = new MessageService(
             _sessionManager,

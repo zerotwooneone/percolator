@@ -24,14 +24,6 @@ namespace Percolator.ApplicationIntegrationTests.ChatMessaging
     [TestFixture]
     public class MinimalIdentityTest
     {
-        private IHost? _host;
-
-        [TearDown]
-        public void TearDown()
-        {
-            _host?.Dispose();
-        }
-
         [Test, CancelAfter(10000)] // 10-second timeout
         public async Task MinimalIdentityCreation_ShouldComplete()
         {
@@ -42,7 +34,7 @@ namespace Percolator.ApplicationIntegrationTests.ChatMessaging
             TestContext.WriteLine($"Using port: {port}");
             
             // Create a minimal configuration
-            var configDictionary = new Dictionary<string, string>
+            var configDictionary = new Dictionary<string, string?>
             {
                 { "Identity:StoragePath", "TestIdentities" },
                 { "Logging:LogLevel:Default", "Debug" }
@@ -54,7 +46,7 @@ namespace Percolator.ApplicationIntegrationTests.ChatMessaging
                 
             TestContext.WriteLine("Created minimal configuration");
             
-            _host = Host.CreateDefaultBuilder()
+            using var host = Host.CreateDefaultBuilder()
                 .ConfigureLogging(logging =>
                 {
                     logging.ClearProviders();
@@ -109,14 +101,14 @@ namespace Percolator.ApplicationIntegrationTests.ChatMessaging
                 .Build();
             
             TestContext.WriteLine("Starting host");
-            await _host.StartAsync();
+            await host.StartAsync();
             TestContext.WriteLine("Host started successfully");
             
             // Test identity creation with a short timeout
             try
             {
                 TestContext.WriteLine("Getting identity orchestrator");
-                var identityOrchestrator = _host.Services.GetRequiredService<IIdentityOrchestrator>();
+                var identityOrchestrator = host.Services.GetRequiredService<IIdentityOrchestrator>();
                 TestContext.WriteLine("Identity orchestrator retrieved");
                 
                 // Create a cancellation token with a short timeout
@@ -127,17 +119,10 @@ namespace Percolator.ApplicationIntegrationTests.ChatMessaging
                 TestContext.WriteLine("Identity created successfully");
                 
                 // Verify that the identity is accessible through the context
-                var identityContext = _host.Services.GetRequiredService<ActiveIdentityContext>();
+                var identityContext = host.Services.GetRequiredService<ActiveIdentityContext>();
                 TestContext.WriteLine($"Identity ID: {identityContext.Identity?.Id}");
                 
                 Assert.That(identityContext.Identity, Is.Not.Null, "Identity should be loaded in the context");
-                
-                // Stop the host
-                TestContext.WriteLine("Stopping host");
-                await _host.StopAsync();
-                TestContext.WriteLine("Host stopped successfully");
-                
-                Assert.Pass("Minimal identity creation test passed");
             }
             catch (Exception ex)
             {

@@ -1,5 +1,6 @@
 using Google.Protobuf;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Percolator.Cryptography.Primitives;
 using System.Security.Cryptography;
 
@@ -10,7 +11,7 @@ public class DoubleRatchetSession : IDisposable
     private const int MaxSkippedMessages = 1000;
 
     private RootKey _rootKey;
-    private bool _ratchetFlag = false; // Add this new field
+    private bool _ratchetFlag = false; 
     private ChainKey? _sendingChainKey;
     private ChainKey? _receivingChainKey;
     private ulong _sendingCounter;
@@ -50,17 +51,17 @@ public class DoubleRatchetSession : IDisposable
         return _dhRatchetKey.ExportECPrivateKey();
     }
 
-    private DoubleRatchetSession(SharedSecret sharedSecret, RatchetIdentityKey remoteIdentityPublicKey, ILogger<DoubleRatchetSession> logger, CryptographyOptions? options = null)
+    private DoubleRatchetSession(SharedSecret sharedSecret, RatchetIdentityKey remoteIdentityPublicKey, ILogger<DoubleRatchetSession> logger, IOptions<CryptographyOptions> options)
     {
         _remoteIdentityPublicKey = remoteIdentityPublicKey;
         _rootKey = new RootKey(sharedSecret.Value);
         _logger = logger;
-        _options = options ?? CryptographyOptions.CreateSecureDefault();
+        _options = options.Value;
     }
 
-    public DoubleRatchetSession(DoubleRatchetSessionState state, ILogger<DoubleRatchetSession> logger, CryptographyOptions? options = null)
+    public DoubleRatchetSession(DoubleRatchetSessionState state, ILogger<DoubleRatchetSession> logger, IOptions<CryptographyOptions> options)
     {
-        _rootKey = state.RootKey;
+        _rootKey = state.RootKey ?? throw new ArgumentNullException(nameof(state.RootKey));
         _sendingChainKey = state.SendingChainKey;
         _receivingChainKey = state.ReceivingChainKey;
         _sendingCounter = state.SendingCounter;
@@ -73,9 +74,9 @@ public class DoubleRatchetSession : IDisposable
             _dhRatchetKey.ImportECPrivateKey(state.DhRatchetPrivateKey.Value, out _);
         }
         _skippedMessageKeys = state.SkippedMessageKeys;
-        _remoteIdentityPublicKey = state.TheirIdentityPublicKey;
+        _remoteIdentityPublicKey = state.TheirIdentityPublicKey ?? throw new ArgumentNullException(nameof(state.TheirIdentityPublicKey));
         _logger = logger;
-        _options = options ?? CryptographyOptions.CreateSecureDefault();
+        _options = options.Value;
         _ratchetFlag = state.RatchetFlag;
     }
 
@@ -85,7 +86,7 @@ public class DoubleRatchetSession : IDisposable
         RatchetEphemeralKey remoteRatchetPublicKey,
         ECDiffieHellman localEphemeralKey,
         ILogger<DoubleRatchetSession> logger,
-        CryptographyOptions? options = null)
+        IOptions<CryptographyOptions> options)
     {
         logger.LogDebug("Creating initiator session with initial state from X3DH handshake.");
 
@@ -104,7 +105,7 @@ public class DoubleRatchetSession : IDisposable
         session._sendingCounter = 0;
         session._receivingCounter = 0;
         session._previousChainLength = 0;
-        session._ratchetFlag = false; // Add this line if you added the flag to your class state
+        session._ratchetFlag = false; 
 
         // 4. There are no chain keys or local DH keys yet. They will be created during
         //    the first call to the Encrypt() method.
@@ -124,7 +125,7 @@ public class DoubleRatchetSession : IDisposable
         RatchetEphemeralKey remoteRatchetPublicKey, 
         ECDiffieHellman localRatchetKey,
         ILogger<DoubleRatchetSession> logger,
-        CryptographyOptions? options = null)
+        IOptions<CryptographyOptions> options)
     {
         logger.LogDebug("Creating responder session");
         
@@ -145,9 +146,9 @@ public class DoubleRatchetSession : IDisposable
         // CRITICAL FIX: Initialize the responder's session state consistently
         // The responder doesn't set up chain keys immediately; this happens
         // when receiving the first message from the initiator
-        session._sendingChainKey = null;  // Will be created during the first DH ratchet
-        session._receivingChainKey = null; // Will be created during the first Decrypt
-        
+        session._sendingChainKey = null;  
+        session._receivingChainKey = null; 
+
         // Initialize counters
         session._sendingCounter = 0;
         session._receivingCounter = 0;

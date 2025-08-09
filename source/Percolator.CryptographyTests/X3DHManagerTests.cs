@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Percolator.Cryptography;
 
 namespace Percolator.CryptographyTests;
@@ -13,7 +14,7 @@ public class X3DHManagerTests
     public void FullHandshake_ShouldResultInSameSharedSecret()
     {
         // Arrange
-        var manager = new X3DHManager(new NullLogger<X3DHManager>(), new CryptographyOptions());
+        var manager = new X3DHManager(new NullLogger<X3DHManager>(), Options.Create(new CryptographyOptions()));
 
         // --- Generate keys for both parties ---
         // Alice (initiator)
@@ -67,7 +68,7 @@ public class X3DHManagerTests
     public void InitiateHandshake_WithInvalidSignature_ThrowsException()
     {
         // Arrange
-        var manager = new X3DHManager(new NullLogger<X3DHManager>(), new CryptographyOptions());
+        var manager = new X3DHManager(new NullLogger<X3DHManager>(), Options.Create(new CryptographyOptions()));
 
         // Generate keys for both parties
         using var bobIdentitySigningKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
@@ -112,7 +113,7 @@ public class X3DHManagerTests
     public void InitiateHandshake_WithoutOneTimePreKey_Succeeds()
     {
         // Arrange
-        var manager = new X3DHManager(new NullLogger<X3DHManager>(), new CryptographyOptions());
+        var manager = new X3DHManager(new NullLogger<X3DHManager>(), Options.Create(new CryptographyOptions()));
 
         // Generate keys for both parties
         using var bobIdentitySigningKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);

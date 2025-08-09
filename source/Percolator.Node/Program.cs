@@ -110,7 +110,7 @@ async Task HostCommandHandler(InvocationContext context)
     
     IConfigurationRoot tempConfig = new ConfigurationBuilder().AddNode().Build();
     tempServices.AddLogging(builder => builder.AddConsole());
-    tempServices.AddApplicationServices(tempConfig, enableCryptoLogging);
+    tempServices.AddApplicationServices(tempConfig);
     tempServices.AddInfrastructureServices(tempConfig);
     ServiceProvider tempServiceProvider = tempServices.BuildServiceProvider();
 
@@ -166,7 +166,7 @@ async Task HostCommandHandler(InvocationContext context)
             });
         });
 
-        builder.Services.AddApplicationServices(builder.Configuration, enableCryptoLogging);
+        builder.Services.AddApplicationServices(builder.Configuration);
         builder.Services.AddInfrastructureServices(builder.Configuration);
 
         WebApplication app = builder.Build();
@@ -305,7 +305,7 @@ static ServiceProvider CreateServiceProvider(string? identityName, bool enableCr
     var config = new ConfigurationBuilder().AddNode().Build();
 
     services.AddLogging(builder => builder.AddConsole().AddConfiguration(config.GetSection("Logging")));
-    services.AddApplicationServices(config, enableCryptoLogging);
+    services.AddApplicationServices(config);
     services.AddInfrastructureServices(config);
     
     services.AddHttpClient("percolator-grpc", client =>

@@ -14,11 +14,10 @@ namespace Percolator.Application;
 public static class ServiceCollectionExtensions
 {
     public static IServiceCollection AddApplicationServices(this IServiceCollection services, 
-        IConfiguration configuration,
-        bool enableCryptoLogging)
+        IConfiguration configuration)
     {
         // Register services from each of the application layers
-        services.AddCryptographyServices(enableCryptoLogging);
+        services.AddCryptographyServices(configuration);
         services.AddIdentityServices();
         services.AddKeyExchangeServices();
         services.AddNetworkServices(configuration);
