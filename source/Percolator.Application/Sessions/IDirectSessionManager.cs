@@ -12,12 +12,11 @@ public interface IDirectSessionManager
     /// <summary>
     /// Establishes a new Double Ratchet session as the initiator.
     /// </summary>
-    Task EstablishSessionAsInitiatorAsync(
-        Percolator.Cryptography.SessionId conversationId, 
-        Percolator.Identity.PeerId remotePeerId, 
+    Task EstablishSessionAsInitiatorAsync(SessionId conversationId,
+        PeerId remotePeerId,
         RatchetIdentityKey remoteIdentityKey,
-        RatchetEphemeralKey remoteRatchetKey, 
-        SharedSecret sharedSecret);
+        RatchetEphemeralKey remoteRatchetKey,
+        SharedSecret sharedSecret, ECDiffieHellman localEphemeralKey);
 
     /// <summary>
     /// Establishes a new Double Ratchet session as the responder.

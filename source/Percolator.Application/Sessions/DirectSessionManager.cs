@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using Microsoft.Extensions.Logging;
 using Percolator.Chat;
 using Percolator.Cryptography;
+using Percolator.Identity;
 
 namespace Percolator.Application.Sessions;
 
@@ -33,12 +34,12 @@ public class DirectSessionManager : IDirectSessionManager
         _loggerFactory = loggerFactory;
     }
 
-    public async Task EstablishSessionAsInitiatorAsync(
-        SessionId conversationId, 
-        Percolator.Identity.PeerId remotePeerId, 
-        RatchetIdentityKey remoteIdentityKey, 
-        RatchetEphemeralKey remoteRatchetKey, 
-        SharedSecret sharedSecret)
+    public async Task EstablishSessionAsInitiatorAsync(SessionId conversationId,
+        PeerId remotePeerId,
+        RatchetIdentityKey remoteIdentityKey,
+        RatchetEphemeralKey remoteRatchetKey,
+        SharedSecret sharedSecret, 
+        ECDiffieHellman localEphemeralKey)
     {
         if (_activeIdentityContext.Keys is null)
             throw new InvalidOperationException("Identity context not loaded");
@@ -54,6 +55,7 @@ public class DirectSessionManager : IDirectSessionManager
             sharedSecret,
             remoteIdentityKey,
             remoteRatchetKey,
+            localEphemeralKey,
             sessionLogger);
 
         var sessionId = new SessionId(conversationId.Value);
