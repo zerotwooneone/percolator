@@ -16,7 +16,6 @@ namespace Percolator.ApplicationTests.KeyExchange;
 public class X3DHOrchestratorTests : IDisposable
 {
     private Mock<IX3DHManager> _mockX3dhManager = null!;
-    private Mock<IOneTimeKeyProvider> _mockOneTimeKeyProvider = null!;
     private X3DHOrchestrator _orchestrator = null!;
     private ActiveIdentityContext _activeIdentityContext = null!;
 
@@ -34,7 +33,6 @@ public class X3DHOrchestratorTests : IDisposable
     public void Setup()
     {
         _mockX3dhManager = new Mock<IX3DHManager>();
-        _mockOneTimeKeyProvider = new Mock<IOneTimeKeyProvider>();
         _activeIdentityContext = new ActiveIdentityContext();
 
         // Local keys setup
@@ -57,7 +55,6 @@ public class X3DHOrchestratorTests : IDisposable
         _orchestrator = new X3DHOrchestrator(
             _activeIdentityContext,
             _mockX3dhManager.Object,
-            _mockOneTimeKeyProvider.Object,
             NullLogger<X3DHOrchestrator>.Instance);
     }
 
@@ -204,7 +201,7 @@ public class X3DHOrchestratorTests : IDisposable
             .Returns(new Signature(new byte[64]));
 
         // Act
-        var result = _orchestrator.CompleteHandshake(remoteBundle, ephemeralKeyBytes);
+        var result = _orchestrator.CompleteHandshake(remoteBundle, ephemeralKeyBytes, ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256));
 
         // Assert
         result.Should().NotBeNull();
@@ -243,11 +240,7 @@ public class X3DHOrchestratorTests : IDisposable
                 It.IsAny<Signature>()))
             .Returns(true);
 
-        // Use PopOneTimeKey instead of GetOneTimeKeyAsync
-        _mockOneTimeKeyProvider.Setup(x => x.PopOneTimeKey())
-            .Returns(oneTimeKey);
-
-        _mockX3dhManager.Setup(x => x.RespondToHandshake(
+       _mockX3dhManager.Setup(x => x.RespondToHandshake(
                 It.IsAny<RatchetIdentityKey>(),
                 It.IsAny<RatchetEphemeralKey>(),
                 It.IsAny<PrivateAgreementKey>(),
@@ -261,7 +254,7 @@ public class X3DHOrchestratorTests : IDisposable
             .Returns(new Signature(new byte[64]));
 
         // Act
-        var result = _orchestrator.CompleteHandshake(remoteBundle, ephemeralKeyBytes);
+        var result = _orchestrator.CompleteHandshake(remoteBundle, ephemeralKeyBytes, oneTimeKey);
 
         // Assert
         result.Should().NotBeNull();

@@ -39,8 +39,6 @@ message EstablishSessionRequest {
     optional uint32 version = 1;
     // The initiator's pre-key bundle.
     optional PreKeyBundle initiator_bundle = 2;
-    // The initiator's ephemeral public key for this handshake.
-    optional bytes initiator_ephemeral_key = 3;
 }
 
 // Response containing the responder's key bundle and the new session ID.

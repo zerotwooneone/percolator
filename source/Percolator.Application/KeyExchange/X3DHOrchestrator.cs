@@ -13,18 +13,15 @@ public class X3DHOrchestrator : IX3DHOrchestrator
 {
     private readonly ActiveIdentityContext _activeIdentityContext;
     private readonly IX3DHManager _x3DhManager;
-    private readonly IOneTimeKeyProvider _oneTimeKeyProvider;
     private readonly ILogger<X3DHOrchestrator> _logger;
 
     public X3DHOrchestrator(
         ActiveIdentityContext activeIdentityContext,
         IX3DHManager x3DhManager,
-        IOneTimeKeyProvider oneTimeKeyProvider,
         ILogger<X3DHOrchestrator> logger)
     {
         _activeIdentityContext = activeIdentityContext;
         _x3DhManager = x3DhManager;
-        _oneTimeKeyProvider = oneTimeKeyProvider;
         _logger = logger;
     }
 
@@ -94,7 +91,10 @@ public class X3DHOrchestrator : IX3DHOrchestrator
         }
     }
 
-    public HandshakeResponse CompleteHandshake(ContractsPreKeyBundle remotePreKeyBundle, byte[] remoteEphemeralPublicKey)
+    public HandshakeResponse CompleteHandshake(
+        ContractsPreKeyBundle remotePreKeyBundle, 
+        byte[] remoteEphemeralPublicKey,
+        ECDiffieHellman? localOneTimePreKey)
     {
         if (_activeIdentityContext.Keys is not
             {
@@ -118,7 +118,7 @@ public class X3DHOrchestrator : IX3DHOrchestrator
         // Store which private key is actually used in handshake
         ECDiffieHellman keyUsedInHandshake;
         
-        var oneTimePreKey = _oneTimeKeyProvider.PopOneTimeKey();
+        var oneTimePreKey = localOneTimePreKey;
         
         // If a one-time key is available and used, that's the key we need to track
         if (oneTimePreKey != null)

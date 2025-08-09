@@ -59,66 +59,59 @@ namespace Percolator.Application.Sessions
 
         public async Task<ChatConversationId> CreateDirectConversationAsync(DnsEndPoint endpoint, string peerName)
         {
-            _logger.LogInformation("Creating direct conversation with peer {PeerName} at {Endpoint}", peerName, endpoint);
-            var result = await CreateDirectConversationWithKeyAsync(endpoint, peerName);
-            
-            if (result == null)
-            {
-                throw new InvalidOperationException($"Failed to create conversation with peer {peerName}");
-            }
-            
-            return result.Value;
-        }
-        
-        private async Task<ChatConversationId?> CreateDirectConversationWithKeyAsync(
-            DnsEndPoint endpoint, 
-            string peerName)
-        {
             try
             {
-                _logger.LogInformation("Creating direct conversation with {PeerName} at {Endpoint}", peerName, endpoint);
-                
+                _logger.LogInformation("Creating direct conversation with {PeerName} at {Endpoint}", peerName,
+                    endpoint);
+
                 // Create ephemeral key for this handshake
-                var ephemeralKey = _oneTimeKeyProvider.PopOneTimeKey();
-                
+                var oneTimePreKey = _oneTimeKeyProvider.PopOneTimeKey();
+
                 // Verify identity and keys are available
                 if (_activeIdentityContext.Identity == null || _activeIdentityContext.Keys == null)
                 {
                     _logger.LogError("No active identity or keys available");
                     throw new InvalidOperationException("No active identity or keys available");
                 }
-                var signedPreKeyPublicBytes = _activeIdentityContext.Keys.SignedPreKey.PublicKey.ExportSubjectPublicKeyInfo();
+
+                var signedPreKeyPublicBytes =
+                    _activeIdentityContext.Keys.SignedPreKey.PublicKey.ExportSubjectPublicKeyInfo();
                 // Prepare handshake request
-                var signPreKey = _x3DhManager.SignPreKey(_activeIdentityContext.Keys.IdentitySigningKey, new PreKey(signedPreKeyPublicBytes));
-                
+                var signPreKey = _x3DhManager.SignPreKey(_activeIdentityContext.Keys.IdentitySigningKey,
+                    new PreKey(signedPreKeyPublicBytes));
+
                 // Log the key formats being used
-                _logger.LogDebug("Initiating handshake with keys - SignedPreKey length: {Length}, Signature length: {SigLength}",
+                _logger.LogDebug(
+                    "Initiating handshake with keys - SignedPreKey length: {Length}, Signature length: {SigLength}",
                     signedPreKeyPublicBytes.Length, signPreKey.Value.Length);
-                
+
                 var request = new EstablishSessionRequest
                 {
                     InitiatorBundle = new ContractsPreKeyBundle
                     {
-                        // Use consistent key export format for all keys - SubjectPublicKeyInfo
-                        IdentityAgreementKey = Google.Protobuf.ByteString.CopyFrom(_activeIdentityContext.Keys.IdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
+                        IdentityAgreementKey = Google.Protobuf.ByteString.CopyFrom(_activeIdentityContext.Keys
+                            .IdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
                         SignedPreKey = Google.Protobuf.ByteString.CopyFrom(signedPreKeyPublicBytes),
-                        IdentitySigningKey = Google.Protobuf.ByteString.CopyFrom(_activeIdentityContext.Keys.IdentitySigningKey.ExportSubjectPublicKeyInfo()),
-                        OneTimePreKey = ephemeralKey is null ? ByteString.Empty : Google.Protobuf.ByteString.CopyFrom(ephemeralKey.PublicKey.ExportSubjectPublicKeyInfo()),
+                        IdentitySigningKey = Google.Protobuf.ByteString.CopyFrom(_activeIdentityContext.Keys
+                            .IdentitySigningKey.ExportSubjectPublicKeyInfo()),
+                        OneTimePreKey = oneTimePreKey is null
+                            ? ByteString.Empty
+                            : Google.Protobuf.ByteString.CopyFrom(oneTimePreKey.PublicKey.ExportSubjectPublicKeyInfo()),
                         PreKeySignature = ByteString.CopyFrom(signPreKey.Value)
-                    },
-                    InitiatorEphemeralKey = ephemeralKey is null ? ByteString.Empty : Google.Protobuf.ByteString.CopyFrom(ephemeralKey.PublicKey.ExportSubjectPublicKeyInfo())
+                    }
                 };
-                
+
                 _logger.LogInformation("Sending session request to {Endpoint}", endpoint);
                 var response = await _grpcSessionService.EstablishSessionAsync(endpoint, request);
                 _logger.LogInformation("Received session response from peer.");
-                
+
                 var handshakeResult = _orchestrator.CompleteHandshake(
                     response.ResponderBundle, // Alice's bundle from the response
-                    response.ResponderBundle.SignedPreKey.ToByteArray() // Alice's ephemeral key from the response
+                    response.ResponderBundle.SignedPreKey.ToByteArray(), // Alice's ephemeral key from the response
+                    oneTimePreKey
                 );
                 _logger.LogInformation("Handshake completed locally as Responder.");
-                
+
                 // Get or create the peer
                 var peer = await _peerRepository.GetByNameAsync(peerName);
                 if (peer == null)
@@ -130,32 +123,36 @@ namespace Percolator.Application.Sessions
                 var conversation = new ChatConversation(
                     new ChatConversationId(Guid.Parse(response.SessionId)),
                     new ChannelId(response.ResponderBundle.IdentitySigningKey.ToByteArray()),
-                    new List<ChatParticipantId> { new(_activeIdentityContext.Identity!.Id), new(peer.Id.Value) },
+                    new List<ChatParticipantId> {new(_activeIdentityContext.Identity!.Id), new(peer.Id.Value)},
                     new List<Message>(),
                     peerName);
 
                 await _conversationRepository.AddAsync(conversation);
 
-                await _sessionManager.EstablishSessionAsInitiatorAsync(
+                await _sessionManager.EstablishSessionAsResponderAsync(
                     new SessionId(conversation.Id.Value),
                     new Percolator.Identity.PeerId(peer.Id.Value),
-                    new RatchetIdentityKey(response.ResponderBundle.IdentityAgreementKey.ToByteArray()), // Alice's Identity Key
-                    new RatchetEphemeralKey(response.ResponderBundle.SignedPreKey.ToByteArray()),
-                    new SharedSecret(handshakeResult.SharedSecret.Value),
-                    ephemeralKey
+                    new RatchetIdentityKey(response.ResponderBundle.IdentityAgreementKey
+                        .ToByteArray()), // Alice's Public Identity Key
+                    new RatchetEphemeralKey(response.ResponderBundle.SignedPreKey
+                        .ToByteArray()), // Alice's Public Ratchet Key
+                    handshakeResult
+                        .ResponderPrivateKeyUsed, // The specific one of OUR (Bob's) private keys that was used
+                    new SharedSecret(handshakeResult.SharedSecret.Value)
                 );
 
-                _logger.LogInformation("Successfully established session and created conversation {ConversationId}", conversation.Id);
+                _logger.LogInformation("Successfully established session and created conversation {ConversationId}",
+                    conversation.Id);
 
                 return conversation.Id;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to establish secure connection using shared certificate");
-                throw new InvalidOperationException("Failed to establish secure connection using shared certificate", ex);
+                _logger.LogError(ex, "Failed to establish secure connection");
+                throw new InvalidOperationException("Failed to establish secure connection", ex);
             }
         }
-        
+
         private async Task<IdentityPeer> CreatePeerAsync(string peerName,
             ContractsPreKeyBundle responderBundle, DnsEndPoint endpoint)
         {

@@ -144,7 +144,10 @@ public class ConversationServiceTests
             ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256)
         );
         _mockX3dhOrchestrator
-            .Setup(o => o.CompleteHandshake(It.IsAny<ContractsPreKeyBundle>(), It.IsAny<byte[]>()))
+            .Setup(o => o.CompleteHandshake(
+                It.IsAny<ContractsPreKeyBundle>(), 
+                It.IsAny<byte[]>(), 
+                It.IsAny<ECDiffieHellman>()))
             .Returns(handshakeResponse);
 
         // Setup the one-time key provider to return a key
@@ -181,13 +184,13 @@ public class ConversationServiceTests
         // Assert
         Assert.That(result, Is.Not.EqualTo(default(ChatConversationId)));
         _mockConversationRepository.Verify(r => r.AddAsync(It.Is<ChatConversation>(c => c.Name == peerName)), Times.Once);
-        _mockDirectSessionManager.Verify(m => m.EstablishSessionAsInitiatorAsync(
+        _mockDirectSessionManager.Verify(m => m.EstablishSessionAsResponderAsync(
             It.IsAny<Percolator.Cryptography.SessionId>(), 
             It.IsAny<IdentityPeerId>(), 
             It.IsAny<RatchetIdentityKey>(), 
-            It.IsAny<RatchetEphemeralKey>(), 
-            It.IsAny<CryptoSharedSecret>(),
-            It.IsAny<ECDiffieHellman>()), Times.Once);
+            It.IsAny<RatchetEphemeralKey>(),
+            It.IsAny<ECDiffieHellman>(), 
+            It.IsAny<CryptoSharedSecret>()), Times.Once);
         
         // Verify that our services were called correctly
         _mockTlsHandshakeService.Verify(s => s.CaptureCertificateAsync(It.IsAny<DnsEndPoint>()), Times.Never);
@@ -241,7 +244,10 @@ public class ConversationServiceTests
             ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256)
         );
         _mockX3dhOrchestrator
-            .Setup(o => o.CompleteHandshake(It.IsAny<ContractsPreKeyBundle>(), It.IsAny<byte[]>()))
+            .Setup(o => o.CompleteHandshake(
+                It.IsAny<ContractsPreKeyBundle>(), 
+                It.IsAny<byte[]>(),
+                It.IsAny<ECDiffieHellman>()))
             .Returns(handshakeResponse);
 
         // Setup the one-time key provider to return a key
@@ -301,13 +307,13 @@ public class ConversationServiceTests
         Assert.That(capturedConversation.Participants, Has.Count.EqualTo(2));
         
         // Verify session was established
-        _mockDirectSessionManager.Verify(m => m.EstablishSessionAsInitiatorAsync(
+        _mockDirectSessionManager.Verify(m => m.EstablishSessionAsResponderAsync(
             It.Is<Percolator.Cryptography.SessionId>(id => id.Value == Guid.Parse(grpcResponse.SessionId)),
             It.IsAny<IdentityPeerId>(), 
             It.IsAny<RatchetIdentityKey>(), 
             It.IsAny<RatchetEphemeralKey>(), 
-            It.Is<CryptoSharedSecret>(s => s.Value.SequenceEqual(handshakeResponse.SharedSecret.Value)),
-            It.IsAny<ECDiffieHellman>()),
+            It.IsAny<ECDiffieHellman>(),
+            It.Is<CryptoSharedSecret>(s => s.Value.SequenceEqual(handshakeResponse.SharedSecret.Value))),
             Times.Once);
             
         // Verify gRPC service was called
@@ -348,7 +354,7 @@ public class ConversationServiceTests
         var exception = Assert.ThrowsAsync<InvalidOperationException>(
             async () => await _service.CreateDirectConversationAsync(endpoint, peerName));
             
-        Assert.That(exception.Message, Is.EqualTo("Failed to establish secure connection using shared certificate"));
+        Assert.That(exception.Message, Is.EqualTo("Failed to establish secure connection"));
         Assert.That(exception.InnerException, Is.SameAs(expectedError));
         
         // Verify peer was not created

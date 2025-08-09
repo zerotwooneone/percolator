@@ -8,6 +8,8 @@ public interface IX3DHOrchestrator
 {
     SharedSecret InitiateHandshake(ContractsPreKeyBundle remotePreKeyBundle, ECDiffieHellman ephemeralKey);
 
-    HandshakeResponse CompleteHandshake(ContractsPreKeyBundle remotePreKeyBundle,
-        byte[] remoteEphemeralPublicKey);
+    HandshakeResponse CompleteHandshake(
+        ContractsPreKeyBundle remotePreKeyBundle, 
+        byte[] remoteEphemeralPublicKey,
+        ECDiffieHellman? localOneTimePreKey);
 }
