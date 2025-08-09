@@ -68,7 +68,11 @@ public class FileBasedDoubleRatchetSessionStoreTests
         // Verify counters
         Assert.That(retrievedState.SendingCounter, Is.EqualTo(originalState.SendingCounter));
         Assert.That(retrievedState.ReceivingCounter, Is.EqualTo(originalState.ReceivingCounter));
-        
+        Assert.That(retrievedState.PreviousChainLength, Is.EqualTo(originalState.PreviousChainLength));
+
+        // Verify ratchet flag
+        Assert.That(retrievedState.RatchetFlag, Is.EqualTo(originalState.RatchetFlag));
+
         // Verify skipped message keys
         Assert.That(retrievedState.SkippedMessageKeys.Count, Is.EqualTo(originalState.SkippedMessageKeys.Count));
         foreach (var key in originalState.SkippedMessageKeys.Keys)
@@ -138,10 +142,12 @@ public class FileBasedDoubleRatchetSessionStoreTests
         return new DoubleRatchetSession.DoubleRatchetSessionState
         {
             RootKey = new RootKey(rootKeyData),
+            RatchetFlag = true,
             SendingChainKey = new ChainKey(sendingChainKeyData),
             ReceivingChainKey = new ChainKey(receivingChainKeyData),
             SendingCounter = 1,
             ReceivingCounter = 2,
+            PreviousChainLength = 42,
             SkippedMessageKeys = new Dictionary<SkippedMessageKeyIdentifier, byte[]>
             {
                 { new SkippedMessageKeyIdentifier(new RatchetEphemeralKey(dhRatchetPublicKeyData), 5), messageKeyData }
