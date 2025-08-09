@@ -67,6 +67,7 @@ public class CryptoBoundaryTests
             sharedSecret,
             new RatchetIdentityKey(bobIdentity.PublicKey.ExportSubjectPublicKeyInfo()),
             new RatchetEphemeralKey(bobEphemeral.PublicKey.ExportSubjectPublicKeyInfo()),
+            ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
             _logger);
 
         var bobSession = DoubleRatchetSession.AsResponder(

@@ -64,6 +64,7 @@ namespace Percolator.CryptographyTests
                 sharedSecretAlice, 
                 new RatchetIdentityKey(_aliceIdentity.PublicKey.ExportSubjectPublicKeyInfo()), 
                 new RatchetEphemeralKey(_aliceRatchet.PublicKey.ExportSubjectPublicKeyInfo()),
+                ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
                 _sessionLogger);
                 
             var sharedSecretBob = new SharedSecret(_creatorIdentity.DeriveKeyMaterial(_bobIdentity.PublicKey));
@@ -71,6 +72,7 @@ namespace Percolator.CryptographyTests
                 sharedSecretBob, 
                 new RatchetIdentityKey(_bobIdentity.PublicKey.ExportSubjectPublicKeyInfo()), 
                 new RatchetEphemeralKey(_bobRatchet.PublicKey.ExportSubjectPublicKeyInfo()),
+                ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
                 _sessionLogger);
 
             // 2. Invitations
@@ -142,6 +144,7 @@ namespace Percolator.CryptographyTests
                 sharedSecret, 
                 new RatchetIdentityKey(_aliceIdentity.PublicKey.ExportSubjectPublicKeyInfo()), 
                 new RatchetEphemeralKey(_aliceRatchet.PublicKey.ExportSubjectPublicKeyInfo()),
+                ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
                 _sessionLogger);
 
             // 1. Create the unsigned part of the message
@@ -187,6 +190,7 @@ namespace Percolator.CryptographyTests
                 sharedSecret, 
                 new RatchetIdentityKey(_aliceIdentity.PublicKey.ExportSubjectPublicKeyInfo()), 
                 new RatchetEphemeralKey(_aliceRatchet.PublicKey.ExportSubjectPublicKeyInfo()),
+                ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
                 _sessionLogger);
             var invitation = creatorManager.CreateInvitation("alice", sessionToAlice);
             var sessionFromAlice = DoubleRatchetSession.AsResponder(
@@ -203,6 +207,7 @@ namespace Percolator.CryptographyTests
                 sharedSecretBob, 
                 new RatchetIdentityKey(_bobIdentity.PublicKey.ExportSubjectPublicKeyInfo()), 
                 new RatchetEphemeralKey(_bobRatchet.PublicKey.ExportSubjectPublicKeyInfo()),
+                ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
                 _sessionLogger);
             Action inviteAction = () => aliceGroupManager.CreateInvitation("bob", sessionToBobForAlice);
             inviteAction.Should().Throw<InvalidOperationException>().WithMessage("Only the group creator can send invitations.");
@@ -233,6 +238,7 @@ namespace Percolator.CryptographyTests
                 sharedSecretA, 
                 new RatchetIdentityKey(_bobIdentity.PublicKey.ExportSubjectPublicKeyInfo()), 
                 new RatchetEphemeralKey(_bobRatchet.PublicKey.ExportSubjectPublicKeyInfo()),
+                ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
                 _sessionLogger);
             var invitationA = groupAManager.CreateInvitation("bob", sessionToBobForA);
             using var sessionFromBobForA = DoubleRatchetSession.AsResponder(
@@ -250,6 +256,7 @@ namespace Percolator.CryptographyTests
                 sharedSecretB, 
                 new RatchetIdentityKey(_bobIdentity.PublicKey.ExportSubjectPublicKeyInfo()), 
                 new RatchetEphemeralKey(bobRatchetB.PublicKey.ExportSubjectPublicKeyInfo()),
+                ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
                 _sessionLogger);
             var invitationB = groupBManager.CreateInvitation("bob", sessionToBobForB);
             using var sessionFromBobForB = DoubleRatchetSession.AsResponder(
@@ -268,6 +275,7 @@ namespace Percolator.CryptographyTests
                 sharedSecretDummy, 
                 new RatchetIdentityKey(dummyIdentity.PublicKey.ExportSubjectPublicKeyInfo()), 
                 new RatchetEphemeralKey(dummyRatchet.PublicKey.ExportSubjectPublicKeyInfo()),
+                ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
                 _sessionLogger);
             groupAManager.CreateInvitation("dummy_member", sessionToDummy);
 
@@ -297,6 +305,7 @@ namespace Percolator.CryptographyTests
                 new SharedSecret(_creatorIdentity.DeriveKeyMaterial(_aliceIdentity.PublicKey)),
                 new RatchetIdentityKey(_aliceIdentity.PublicKey.ExportSubjectPublicKeyInfo()),
                 new RatchetEphemeralKey(_aliceRatchet.PublicKey.ExportSubjectPublicKeyInfo()),
+            ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
                 _sessionLogger);
 
             // 1. Create a valid invitation to get a valid signature

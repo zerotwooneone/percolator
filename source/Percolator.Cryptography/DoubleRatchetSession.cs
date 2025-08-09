@@ -83,6 +83,7 @@ public class DoubleRatchetSession : IDisposable
         SharedSecret sharedSecret,
         RatchetIdentityKey remoteIdentityPublicKey,
         RatchetEphemeralKey remoteRatchetPublicKey,
+        ECDiffieHellman localEphemeralKey,
         ILogger<DoubleRatchetSession> logger,
         CryptographyOptions? options = null)
     {
@@ -109,7 +110,7 @@ public class DoubleRatchetSession : IDisposable
         //    the first call to the Encrypt() method.
         session._sendingChainKey = null;
         session._receivingChainKey = null;
-        session._dhRatchetKey = null;
+        session._dhRatchetKey = localEphemeralKey;
 
         session.LogDebugCryptoMaterial("Initiator session created. Root key hash: {RootKeyHash}",
             Convert.ToBase64String(SHA256.HashData(session._rootKey.Value)));

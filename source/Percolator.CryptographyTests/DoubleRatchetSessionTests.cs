@@ -21,6 +21,7 @@ namespace Percolator.CryptographyTests
         private RatchetIdentityKey _bobIdentityKey;
         private RatchetEphemeralKey _bobPreKey;
         private ILogger<DoubleRatchetSession> _logger;
+        private ECDiffieHellman _aliceEphemeral;
 
         [SetUp]
         public void Setup()
@@ -38,16 +39,19 @@ namespace Percolator.CryptographyTests
             _bobIdentityKey = new RatchetIdentityKey(_bobIdentity.PublicKey.ExportSubjectPublicKeyInfo());
             _bobPreKey = new RatchetEphemeralKey(_bobRatchetKey.PublicKey.ExportSubjectPublicKeyInfo());
 
+            _aliceEphemeral= ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+            
             _aliceSession = DoubleRatchetSession.AsInitiator(
                 _sharedSecret,
                 _bobIdentityKey,
                 _bobPreKey,
+                _aliceEphemeral,
                 _logger);
 
             _bobSession = DoubleRatchetSession.AsResponder(
                 _sharedSecret,
                 new RatchetIdentityKey(_aliceIdentity.PublicKey.ExportSubjectPublicKeyInfo()),
-                new RatchetEphemeralKey(_aliceIdentity.PublicKey.ExportSubjectPublicKeyInfo()),
+                new RatchetEphemeralKey(_aliceEphemeral.PublicKey.ExportSubjectPublicKeyInfo()),
                 _bobRatchetKey,
                 _logger);
         }
@@ -61,6 +65,7 @@ namespace Percolator.CryptographyTests
             _aliceIdentity.Dispose();
             _bobIdentity.Dispose();
             _bobRatchetKey.Dispose();
+            _aliceEphemeral.Dispose();
         }
 
         [Test]
@@ -83,6 +88,20 @@ namespace Percolator.CryptographyTests
             var plaintext2 = Encoding.UTF8.GetBytes("Hello Alice, this is Bob.");
             var message2 = _bobSession.Encrypt(new Plaintext(plaintext2));
             var decrypted2 = _aliceSession.Decrypt(message2);
+            decrypted2.Value.Should().BeEquivalentTo(plaintext2);
+        }
+        
+        [Test]
+        public void Encrypt_And_Decrypt_Reversed_Succeeds_After_Ratchet()
+        {
+            var plaintext1 = Encoding.UTF8.GetBytes("Hello Alice, this is Bob.");
+            var message1 = _bobSession.Encrypt(new Plaintext(plaintext1));
+            var decrypted1 = _aliceSession.Decrypt(message1);
+            decrypted1.Value.Should().BeEquivalentTo(plaintext1);
+
+            var plaintext2 = Encoding.UTF8.GetBytes("Hello Bob, this is Alice.");
+            var message2 = _aliceSession.Encrypt(new Plaintext(plaintext2));
+            var decrypted2 = _bobSession.Decrypt(message2);
             decrypted2.Value.Should().BeEquivalentTo(plaintext2);
         }
 
@@ -178,6 +197,7 @@ namespace Percolator.CryptographyTests
 
             // Create fresh keys for this test
             using var aliceIdentity = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+            using var aliceEphemeral = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
             using var bobIdentity = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
             using var bobRatchetKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
 
@@ -197,6 +217,7 @@ namespace Percolator.CryptographyTests
                 sharedSecret,
                 new RatchetIdentityKey(bobIdentityPublicKeyBytes),
                 new RatchetEphemeralKey(bobRatchetKeyPublicBytes),
+                aliceEphemeral,
                 _logger
             );
 
@@ -310,6 +331,7 @@ namespace Percolator.CryptographyTests
                 _sharedSecret,
                 _bobIdentityKey,
                 _bobPreKey,
+                _aliceEphemeral,
                 _logger
             );
 
