@@ -110,7 +110,7 @@ async Task HostCommandHandler(InvocationContext context)
     
     IConfigurationRoot tempConfig = new ConfigurationBuilder().AddNode().Build();
     tempServices.AddLogging(builder => builder.AddConsole());
-    tempServices.AddApplicationServices(tempConfig);
+    tempServices.AddApplicationServices(tempConfig, enableCryptoLogging);
     tempServices.AddInfrastructureServices(tempConfig);
     ServiceProvider tempServiceProvider = tempServices.BuildServiceProvider();
 
@@ -166,7 +166,7 @@ async Task HostCommandHandler(InvocationContext context)
             });
         });
 
-        builder.Services.AddApplicationServices(builder.Configuration);
+        builder.Services.AddApplicationServices(builder.Configuration, enableCryptoLogging);
         builder.Services.AddInfrastructureServices(builder.Configuration);
 
         WebApplication app = builder.Build();
@@ -305,20 +305,8 @@ static ServiceProvider CreateServiceProvider(string? identityName, bool enableCr
     var config = new ConfigurationBuilder().AddNode().Build();
 
     services.AddLogging(builder => builder.AddConsole().AddConfiguration(config.GetSection("Logging")));
-    services.AddApplicationServices(config);
+    services.AddApplicationServices(config, enableCryptoLogging);
     services.AddInfrastructureServices(config);
-    
-    services.Configure<CryptographyOptions>(options => {
-        options.EnableCryptographicMaterialLogging = enableCryptoLogging;
-        
-        // If crypto logging is enabled, log a warning
-        if (enableCryptoLogging)
-        {
-            var loggerFactory = services.BuildServiceProvider().GetRequiredService<ILoggerFactory>();
-            var logger = loggerFactory.CreateLogger("CryptographyOptions");
-            logger.LogWarning("SECURITY WARNING: Cryptographic material hash logging is ENABLED. This should only be used for debugging.");
-        }
-    });
     
     services.AddHttpClient("percolator-grpc", client =>
     {
@@ -424,16 +412,6 @@ static ServiceProvider CreateServiceProvider(string? identityName, bool enableCr
             builder.AddDebug();
         });
     }
-
-    return services.BuildServiceProvider();
-}
-
-static ServiceProvider BuildServiceProvider(IConfiguration configuration)
-{
-    var services = new ServiceCollection();
-    services.AddLogging(builder => builder.AddConsole());
-    services.AddApplicationServices(configuration);
-    services.AddInfrastructureServices(configuration);
 
     return services.BuildServiceProvider();
 }

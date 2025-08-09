@@ -173,7 +173,7 @@ public class SessionMessageTests
 
     private (CryptoSharedSecret, CryptoSharedSecret) PerformX3DH()
     {
-        var x3dhManager = new X3DHManager();
+        var x3dhManager = _serviceProvider.GetRequiredService<IX3DHManager>();
 
         // Alice (initiator) keys
         var aliceIdentityKey = _aliceIdentity.Keys!.IdentityAgreementKey;

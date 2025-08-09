@@ -137,7 +137,8 @@ public abstract class IntegrationTestBase
                 });
 
                 // Register application and infrastructure services
-                services.AddApplicationServices(context.Configuration);
+                const bool enableCryptoLogging=true;
+                services.AddApplicationServices(context.Configuration, enableCryptoLogging);
                 services.AddInfrastructureServices(context.Configuration);
 
                 // Add additional services if needed

@@ -76,7 +76,7 @@ public class ConversationServiceTests
             _mockOneTimeKeyProvider.Object,
             _activeIdentityContext,
             _mockGrpcSessionService.Object, 
-            new X3DHManager(), 
+            new X3DHManager(NullLogger<X3DHManager>.Instance, new CryptographyOptions()), 
             _mockPeerConnectionRepository.Object
         );
     }

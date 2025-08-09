@@ -143,7 +143,11 @@ namespace Percolator.Node
                         IConfigurationRoot tempConfig = new ConfigurationBuilder().AddNode().Build();
                         
                         _logger.LogInformation("Registering application and infrastructure services for gRPC host");
-                        services.AddApplicationServices(tempConfig);
+                        
+                        //todo: make this configurable
+                        bool enableCryptoLogging=true;
+                        _logger.LogWarning("Enabling cryptographic material logging for gRPC host");
+                        services.AddApplicationServices(tempConfig, enableCryptoLogging);
                         services.AddInfrastructureServices(tempConfig);
                         
                         // Get required services from main service provider for shared instances
