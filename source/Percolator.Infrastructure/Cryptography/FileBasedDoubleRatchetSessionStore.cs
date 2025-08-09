@@ -10,7 +10,6 @@ namespace Percolator.Infrastructure.Cryptography;
 public class FileBasedDoubleRatchetSessionStore : IDoubleRatchetSessionStore
 {
     private readonly string _storagePath;
-    private readonly JsonSerializerOptions _jsonOptions;
     private readonly ILogger<FileBasedDoubleRatchetSessionStore> _logger;
 
     public FileBasedDoubleRatchetSessionStore(
@@ -20,13 +19,6 @@ public class FileBasedDoubleRatchetSessionStore : IDoubleRatchetSessionStore
         _storagePath = Path.Combine(storageOptions.Value.Path, "sessions");
         _logger = logger;
         Directory.CreateDirectory(_storagePath);
-        
-        // Configure JSON serializer options with our custom converter
-        _jsonOptions = new JsonSerializerOptions
-        {
-            WriteIndented = true,
-        };
-        _jsonOptions.Converters.Add(new SkippedMessageKeyIdentifierConverter());
     }
 
     public async Task<DoubleRatchetSession.DoubleRatchetSessionState?> GetSessionStateAsync(SessionId sessionId)
@@ -41,15 +33,9 @@ public class FileBasedDoubleRatchetSessionStore : IDoubleRatchetSessionStore
         try
         {
             // Open the file for reading, but allow other processes to also read
-            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
-            using var reader = new StreamReader(stream);
-            var json = await reader.ReadToEndAsync();
+            await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
             
-            // Log a hash of the JSON before deserialization for debugging
-            var jsonHash = Convert.ToBase64String(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(json)));
-            _logger.LogTrace("Reading session state for {SessionId}, JSON hash: {JsonHash}", sessionId, jsonHash);
-            
-            var state = JsonSerializer.Deserialize<DoubleRatchetSession.DoubleRatchetSessionState>(json, _jsonOptions);
+            var state = await JsonSerializer.DeserializeAsync(stream, CryptographyJsonContext.Default.DoubleRatchetSessionState);
             
             if (state != null)
             {
@@ -80,16 +66,9 @@ public class FileBasedDoubleRatchetSessionStore : IDoubleRatchetSessionStore
         var path = GetPath(sessionId.ToString());
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         
-        var json = JsonSerializer.Serialize(sessionState, _jsonOptions);
-        
-        // Log a hash of the JSON after serialization for debugging
-        var jsonHash = Convert.ToBase64String(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(json)));
-        _logger.LogTrace("Writing session state for {SessionId}, JSON hash: {JsonHash}", sessionId, jsonHash);
-        
         // Open file for writing but allow other processes to read
-        using var stream = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.Read);
-        using var writer = new StreamWriter(stream);
-        await writer.WriteAsync(json);
+        await using var stream = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.Read);
+        await JsonSerializer.SerializeAsync(stream, sessionState, CryptographyJsonContext.Default.DoubleRatchetSessionState);
     }
 
     private string GetPath(string sessionId) =>
