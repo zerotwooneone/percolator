@@ -136,13 +136,13 @@ namespace Percolator.Application.Sessions
 
                 await _conversationRepository.AddAsync(conversation);
 
-                await _sessionManager.EstablishSessionAsResponderAsync(
+                await _sessionManager.EstablishSessionAsInitiatorAsync(
                     new SessionId(conversation.Id.Value),
                     new Percolator.Identity.PeerId(peer.Id.Value),
                     new RatchetIdentityKey(response.ResponderBundle.IdentityAgreementKey.ToByteArray()), // Alice's Identity Key
                     new RatchetEphemeralKey(response.ResponderBundle.SignedPreKey.ToByteArray()),
-                    handshakeResult.ResponderPrivateKeyUsed, 
-                    new SharedSecret(handshakeResult.SharedSecret.Value)
+                    new SharedSecret(handshakeResult.SharedSecret.Value),
+                    ephemeralKey
                 );
 
                 _logger.LogInformation("Successfully established session and created conversation {ConversationId}", conversation.Id);

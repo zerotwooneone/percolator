@@ -93,6 +93,20 @@ public class ConversationServiceTests
         _mockPeerRepository.Setup(r => r.GetByNameAsync(peerName)).ReturnsAsync(peer);
         _mockPeerRepository.Setup(r => r.GetByIdAsync(It.Is<IdentityPeerId>(id => id.Value == peer.Id.Value))).ReturnsAsync(peer);
         
+        var grpcResponse = new EstablishSessionResponse
+        {
+            SessionId = Guid.NewGuid().ToString(),
+            ResponderBundle = new ContractsPreKeyBundle
+            {
+                IdentitySigningKey = ByteString.CopyFrom(new byte[32]),
+                IdentityAgreementKey = ByteString.CopyFrom(new byte[32]),
+                SignedPreKey = ByteString.CopyFrom(new byte[32]),
+                OneTimePreKey = ByteString.CopyFrom(new byte[32])
+            }
+        };
+        _mockGrpcSessionService.Setup(s => s.EstablishSessionAsync(It.IsAny<DnsEndPoint>(), It.IsAny<EstablishSessionRequest>(), It.IsAny<X509Certificate2>()))
+            .ReturnsAsync(grpcResponse);
+        
         // Create a mock peer connection
         var peerConnection = new PeerConnection(
             new NetworkPeerId(peer.Id.Value),
@@ -116,9 +130,21 @@ public class ConversationServiceTests
             .Returns(Task.CompletedTask);
 
         // Setup X3DH orchestrator to return a shared secret
+        var dummyBundle = new ContractsPreKeyBundle
+        {
+            IdentitySigningKey = ByteString.CopyFrom(new byte[32]),
+            IdentityAgreementKey = ByteString.CopyFrom(new byte[32]),
+            SignedPreKey = ByteString.CopyFrom(new byte[32]),
+            OneTimePreKey = ByteString.CopyFrom(new byte[32])
+        };
+        var handshakeResponse = new HandshakeResponse(
+            new CryptoSharedSecret(new byte[32]),
+            dummyBundle,
+            ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256)
+        );
         _mockX3dhOrchestrator
-            .Setup(o => o.InitiateHandshake(It.IsAny<ContractsPreKeyBundle>(), It.IsAny<ECDiffieHellman>()))
-            .Returns(new CryptoSharedSecret(new byte[32]));
+            .Setup(o => o.CompleteHandshake(It.IsAny<ContractsPreKeyBundle>(), It.IsAny<byte[]>()))
+            .Returns(handshakeResponse);
 
         // Setup the one-time key provider to return a key
         var oneTimeKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
@@ -141,36 +167,12 @@ public class ConversationServiceTests
         _mockDirectSessionManager
             .Setup(m => m.EstablishSessionAsInitiatorAsync(
                 It.IsAny<Percolator.Cryptography.SessionId>(), 
-                It.IsAny<Percolator.Identity.PeerId>(), 
+                It.IsAny<IdentityPeerId>(), 
                 It.IsAny<RatchetIdentityKey>(), 
                 It.IsAny<RatchetEphemeralKey>(), 
-                It.IsAny<CryptoSharedSecret>()))
+                It.IsAny<CryptoSharedSecret>(), 
+                It.IsAny<ECDiffieHellman>()))
             .Returns(Task.CompletedTask);
-
-        // Create the response for the GrpcSessionService
-        var grpcResponse = new EstablishSessionResponse
-        {
-            ResponderBundle = new ContractsPreKeyBundle { 
-                IdentityAgreementKey = ByteString.CopyFrom(new byte[32]), 
-                SignedPreKey = ByteString.CopyFrom(new byte[32]),
-                IdentitySigningKey = ByteString.CopyFrom(new byte[32])
-            },
-            SessionId = Guid.NewGuid().ToString() // Add a valid session ID as a GUID string
-        };
-
-        // Configure mocks for shared certificate approach
-        var sharedCert = CreateSelfSignedCertificate("localhost");
-        _mockTlsCertificateService
-            .Setup(s => s.GetOrCreateTlsCertificateAsync(It.IsAny<string>(), It.IsAny<byte[]>()))
-            .ReturnsAsync(sharedCert);
-            
-        // Setup GrpcSessionService to succeed with the shared certificate
-        _mockGrpcSessionService
-            .Setup(s => s.EstablishSessionAsync(
-                It.IsAny<DnsEndPoint>(), 
-                It.IsAny<EstablishSessionRequest>(),
-                It.IsAny<X509Certificate2>()))
-            .ReturnsAsync(grpcResponse);
 
         // Act
         var result = await _service.CreateDirectConversationAsync(endpoint, peerName);
@@ -180,18 +182,15 @@ public class ConversationServiceTests
         _mockConversationRepository.Verify(r => r.AddAsync(It.Is<ChatConversation>(c => c.Name == peerName)), Times.Once);
         _mockDirectSessionManager.Verify(m => m.EstablishSessionAsInitiatorAsync(
             It.IsAny<Percolator.Cryptography.SessionId>(), 
-            It.IsAny<Percolator.Identity.PeerId>(), 
+            It.IsAny<IdentityPeerId>(), 
             It.IsAny<RatchetIdentityKey>(), 
             It.IsAny<RatchetEphemeralKey>(), 
-            It.IsAny<CryptoSharedSecret>()), Times.Once);
+            It.IsAny<CryptoSharedSecret>(),
+            It.IsAny<ECDiffieHellman>()), Times.Once);
         
         // Verify that our services were called correctly
         _mockTlsHandshakeService.Verify(s => s.CaptureCertificateAsync(It.IsAny<DnsEndPoint>()), Times.Never);
-        _mockGrpcSessionService.Verify(s => s.EstablishSessionAsync(
-            It.IsAny<DnsEndPoint>(), 
-            It.IsAny<EstablishSessionRequest>(),
-            It.IsAny<X509Certificate2>()), 
-            Times.Once);
+        _mockGrpcSessionService.Verify(s => s.EstablishSessionAsync(It.IsAny<DnsEndPoint>(), It.IsAny<EstablishSessionRequest>(), It.IsAny<X509Certificate2>()), Times.Once);
     }
 
     [Test]
@@ -204,6 +203,20 @@ public class ConversationServiceTests
         // Setup peer repository to return null (peer does not exist)
         _mockPeerRepository.Setup(r => r.GetByNameAsync(peerName)).ReturnsAsync((Peer)null);
         
+        var grpcResponse = new EstablishSessionResponse
+        {
+            SessionId = Guid.NewGuid().ToString(),
+            ResponderBundle = new ContractsPreKeyBundle
+            {
+                IdentitySigningKey = ByteString.CopyFrom(new byte[32]),
+                IdentityAgreementKey = ByteString.CopyFrom(new byte[32]),
+                SignedPreKey = ByteString.CopyFrom(new byte[32]),
+                OneTimePreKey = ByteString.CopyFrom(new byte[32])
+            }
+        };
+        _mockGrpcSessionService.Setup(s => s.EstablishSessionAsync(It.IsAny<DnsEndPoint>(), It.IsAny<EstablishSessionRequest>(), It.IsAny<X509Certificate2>()))
+            .ReturnsAsync(grpcResponse);
+
         // Setup peer repository AddAsync to succeed
         _mockPeerRepository.Setup(r => r.AddAsync(It.IsAny<Peer>()))
             .Returns(Task.CompletedTask);
@@ -214,12 +227,21 @@ public class ConversationServiceTests
             .Returns(Task.CompletedTask);
 
         // Setup X3DH orchestrator to return a shared secret
-        var sharedSecret = new CryptoSharedSecret(new byte[32]);
-        Random.Shared.NextBytes(sharedSecret.Value);
-        
+        var dummyBundle = new ContractsPreKeyBundle
+        {
+            IdentitySigningKey = ByteString.CopyFrom(new byte[32]),
+            IdentityAgreementKey = ByteString.CopyFrom(new byte[32]),
+            SignedPreKey = ByteString.CopyFrom(new byte[32]),
+            OneTimePreKey = ByteString.CopyFrom(new byte[32])
+        };
+        var handshakeResponse = new HandshakeResponse(
+            new CryptoSharedSecret(new byte[32]),
+            dummyBundle,
+            ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256)
+        );
         _mockX3dhOrchestrator
-            .Setup(o => o.InitiateHandshake(It.IsAny<ContractsPreKeyBundle>(), It.IsAny<ECDiffieHellman>()))
-            .Returns(sharedSecret);
+            .Setup(o => o.CompleteHandshake(It.IsAny<ContractsPreKeyBundle>(), It.IsAny<byte[]>()))
+            .Returns(handshakeResponse);
 
         // Setup the one-time key provider to return a key
         using var oneTimeKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
@@ -239,31 +261,10 @@ public class ConversationServiceTests
                 It.IsAny<IdentityPeerId>(), 
                 It.IsAny<RatchetIdentityKey>(), 
                 It.IsAny<RatchetEphemeralKey>(), 
-                It.IsAny<CryptoSharedSecret>()))
+                It.IsAny<CryptoSharedSecret>(), 
+                It.IsAny<ECDiffieHellman>()))
             .Returns(Task.CompletedTask);
 
-        // Create the response for the GrpcSessionService
-        var sessionId = Guid.NewGuid();
-        var responderBundle = new ContractsPreKeyBundle { 
-            IdentityAgreementKey = ByteString.CopyFrom(new byte[32]), 
-            SignedPreKey = ByteString.CopyFrom(new byte[32]),
-            IdentitySigningKey = ByteString.CopyFrom(new byte[32])
-        };
-        
-        var grpcResponse = new EstablishSessionResponse
-        {
-            ResponderBundle = responderBundle,
-            SessionId = sessionId.ToString()
-        };
-
-        // Setup GrpcSessionService to succeed
-        _mockGrpcSessionService
-            .Setup(s => s.EstablishSessionAsync(
-                It.IsAny<DnsEndPoint>(), 
-                It.IsAny<EstablishSessionRequest>(),
-                It.IsAny<X509Certificate2>()))
-            .ReturnsAsync(grpcResponse);
-            
         // Capture the peer that gets created
         Peer capturedPeer = null;
         _mockPeerRepository.Setup(r => r.AddAsync(It.IsAny<Peer>()))
@@ -281,7 +282,7 @@ public class ConversationServiceTests
 
         // Assert
         Assert.That(result, Is.Not.EqualTo(default(ChatConversationId)));
-        Assert.That(result.Value, Is.EqualTo(sessionId));
+        Assert.That(result.Value, Is.EqualTo(Guid.Parse(grpcResponse.SessionId)));
         
         // Verify peer was created with expected name
         _mockPeerRepository.Verify(r => r.AddAsync(It.Is<Peer>(p => p.Name == peerName)), Times.Once);
@@ -294,17 +295,18 @@ public class ConversationServiceTests
         // Verify conversation was created with expected participants
         _mockConversationRepository.Verify(r => r.AddAsync(It.IsAny<ChatConversation>()), Times.Once);
         Assert.That(capturedConversation, Is.Not.Null);
-        Assert.That(capturedConversation.Id.Value, Is.EqualTo(sessionId));
+        Assert.That(capturedConversation.Id.Value, Is.EqualTo(Guid.Parse(grpcResponse.SessionId)));
         Assert.That(capturedConversation.Name, Is.EqualTo(peerName));
         Assert.That(capturedConversation.Participants, Has.Count.EqualTo(2));
         
         // Verify session was established
         _mockDirectSessionManager.Verify(m => m.EstablishSessionAsInitiatorAsync(
-            It.Is<Percolator.Cryptography.SessionId>(id => id.Value == sessionId),
+            It.Is<Percolator.Cryptography.SessionId>(id => id.Value == Guid.Parse(grpcResponse.SessionId)),
             It.IsAny<IdentityPeerId>(), 
             It.IsAny<RatchetIdentityKey>(), 
             It.IsAny<RatchetEphemeralKey>(), 
-            It.Is<CryptoSharedSecret>(s => s.Value.SequenceEqual(sharedSecret.Value))), 
+            It.Is<CryptoSharedSecret>(s => s.Value.SequenceEqual(handshakeResponse.SharedSecret.Value)),
+            It.IsAny<ECDiffieHellman>()),
             Times.Once);
             
         // Verify gRPC service was called
@@ -360,7 +362,8 @@ public class ConversationServiceTests
             It.IsAny<IdentityPeerId>(),
             It.IsAny<RatchetIdentityKey>(),
             It.IsAny<RatchetEphemeralKey>(),
-            It.IsAny<CryptoSharedSecret>()),
+            It.IsAny<CryptoSharedSecret>(), 
+            It.IsAny<ECDiffieHellman>()),
             Times.Never);
     }
 
