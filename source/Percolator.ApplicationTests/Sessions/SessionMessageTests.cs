@@ -39,6 +39,7 @@ public class SessionMessageTests
     private ILoggerFactory _loggerFactory = null!;
     private CryptographyOptions _cryptoOptions = null!;
     private ServiceProvider _serviceProvider = null!;
+    private ECDiffieHellman _aliceEphemeral;
 
     [SetUp]
     public void SetUp()
@@ -77,13 +78,14 @@ public class SessionMessageTests
         _serviceProvider = services.BuildServiceProvider();
 
         // Create identity contexts
+        _aliceEphemeral = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         _aliceIdentity = new ActiveIdentityContext
         {
             Identity = new IdentityRecord(Guid.NewGuid(), "Alice"),
             Keys = new X3dhKeys(
                 ECDsa.Create(ECCurve.NamedCurves.nistP256),
                 ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
-                ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256)
+                _aliceEphemeral
             )
         };
 
@@ -119,6 +121,7 @@ public class SessionMessageTests
         // Properly dispose the logger factory
         _loggerFactory?.Dispose();
         _serviceProvider?.Dispose();
+        _aliceEphemeral?.Dispose();
     }
 
     [Test]
@@ -136,7 +139,13 @@ public class SessionMessageTests
         var bobPeerId = new PeerId(_bobIdentity.Identity!.Id);
         var bobIdentityKey = new CryptoRatchetIdentityKey(_bobIdentity.Keys!.IdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo());
         var bobRatchetKey = new CryptoRatchetEphemeralKey(_bobIdentity.Keys!.SignedPreKey.PublicKey.ExportSubjectPublicKeyInfo());
-        await _aliceManager.EstablishSessionAsInitiatorAsync(conversationId, bobPeerId, bobIdentityKey, bobRatchetKey, new CryptoSharedSecret(aliceSharedSecret.Value));
+        await _aliceManager.EstablishSessionAsInitiatorAsync(
+            conversationId, 
+            bobPeerId, 
+            bobIdentityKey, 
+            bobRatchetKey, 
+            new CryptoSharedSecret(aliceSharedSecret.Value), 
+            _aliceEphemeral);
 
         var alicePeerId = new PeerId(_aliceIdentity.Identity!.Id);
         var aliceIdentityKey = new CryptoRatchetIdentityKey(_aliceIdentity.Keys!.IdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo());
