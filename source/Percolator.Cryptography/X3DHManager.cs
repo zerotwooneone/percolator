@@ -22,27 +22,27 @@ public class X3DHManager : IX3DHManager
         _options = options.Value;
     }
 
-    public SharedSecret InitiateHandshake(PreKeyBundle remoteBundle, ECDiffieHellman ephemeralKey,
+    public SharedSecret InitiateHandshake(X3dPreKeyBundle remoteBundle, ECDiffieHellman ephemeralKey,
         ECDiffieHellman identityAgreementKey)
     {
         // --- DH1 ---
-        if (_options.EnableCryptographicMaterialLogging && _logger != null)
+        if (_options.EnableCryptographicMaterialLogging)
         {
-            _logger.LogInformation("INITIATOR DH1 INPUTS: MyKey={MyKey}, RemoteKey={RemoteKey}",
+            _logger.LogInformation("INITIATOR DH1 INPUTS: identityAgreementPublicKey={IdentityAgreementPublicKey}, OneTimeKey={OneTimeKey}",
                 Convert.ToBase64String(identityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
                 Convert.ToBase64String(remoteBundle.SignedPreKey.Value));
         }
 
         var dh1 = identityAgreementKey.DeriveKeyFromHash(remoteBundle.SignedPreKey.ToEcdhPublicKey(),
             HashAlgorithmName.SHA256);
-        if (_options.EnableCryptographicMaterialLogging && _logger != null)
+        if (_options.EnableCryptographicMaterialLogging)
         {
             _logger.LogInformation("INITIATOR DH1 OUTPUT: Secret={Secret}",
                 Convert.ToBase64String(dh1));
         }
 
         // --- DH2 ---
-        if (_options.EnableCryptographicMaterialLogging && _logger != null)
+        if (_options.EnableCryptographicMaterialLogging)
         {
             _logger.LogInformation("INITIATOR DH2 INPUTS: MyKey={MyKey}, RemoteKey={RemoteKey}",
                 Convert.ToBase64String(ephemeralKey.PublicKey.ExportSubjectPublicKeyInfo()),
@@ -51,14 +51,14 @@ public class X3DHManager : IX3DHManager
 
         var dh2 = ephemeralKey.DeriveKeyFromHash(remoteBundle.IdentityAgreementKey.ToEcdhPublicKey(),
             HashAlgorithmName.SHA256);
-        if (_options.EnableCryptographicMaterialLogging && _logger != null)
+        if (_options.EnableCryptographicMaterialLogging)
         {
             _logger.LogWarning("INITIATOR DH2 OUTPUT: Secret={Secret}",
                 Convert.ToBase64String(SHA256.HashData(dh2)));
         }
 
         // --- DH3 ---
-        if (_options.EnableCryptographicMaterialLogging && _logger != null)
+        if (_options.EnableCryptographicMaterialLogging)
         {
             _logger.LogWarning("INITIATOR DH3 INPUTS: MyKey={MyKey}, RemoteKey={RemoteKey}",
                 Convert.ToBase64String(ephemeralKey.PublicKey.ExportSubjectPublicKeyInfo()),
@@ -66,7 +66,7 @@ public class X3DHManager : IX3DHManager
         }
 
         var dh3 = ephemeralKey.DeriveKeyFromHash(remoteBundle.SignedPreKey.ToEcdhPublicKey(), HashAlgorithmName.SHA256);
-        if (_options.EnableCryptographicMaterialLogging && _logger != null)
+        if (_options.EnableCryptographicMaterialLogging)
         {
             _logger.LogWarning("INITIATOR DH3 OUTPUT: Secret={Secret}",
                 Convert.ToBase64String(dh3));
@@ -76,7 +76,7 @@ public class X3DHManager : IX3DHManager
         if (remoteBundle.OneTimePreKey is not null)
         {
             // --- DH4 ---
-            if (_options.EnableCryptographicMaterialLogging && _logger != null)
+            if (_options.EnableCryptographicMaterialLogging)
             {
                 _logger.LogWarning("INITIATOR DH4 INPUTS: MyKey={MyKey}, RemoteKey={RemoteKey}",
                     Convert.ToBase64String(ephemeralKey.PublicKey.ExportSubjectPublicKeyInfo()),
@@ -85,7 +85,7 @@ public class X3DHManager : IX3DHManager
 
             dh4 = ephemeralKey.DeriveKeyFromHash(remoteBundle.OneTimePreKey.ToEcdhPublicKey(),
                 HashAlgorithmName.SHA256);
-            if (_options.EnableCryptographicMaterialLogging && _logger != null)
+            if (_options.EnableCryptographicMaterialLogging)
             {
                 _logger.LogWarning("INITIATOR DH4 OUTPUT: Secret={Secret}",
                     Convert.ToBase64String(dh4));

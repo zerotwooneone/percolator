@@ -26,7 +26,6 @@
 
     <ItemGroup>
       <ProjectReference Include="..\Percolator.Cryptography\Percolator.Cryptography.csproj" />
-      <ProjectReference Include="..\Percolator.Contracts\Percolator.Contracts.csproj" />
     </ItemGroup>
 
 </Project>

@@ -1,7 +1,5 @@
-using Google.Protobuf;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using Percolator.Cryptography.Primitives;
 using System.Security.Cryptography;
 
 namespace Percolator.Cryptography;

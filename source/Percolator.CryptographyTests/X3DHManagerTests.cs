@@ -32,12 +32,12 @@ public class X3DHManagerTests
         var bobSignedPreKeyPublicKey = new PreKey(bobSignedPreKey.PublicKey.ExportSubjectPublicKeyInfo());
         var bobSignature = manager.SignPreKey(bobIdentitySigningKey, bobSignedPreKeyPublicKey);
 
-        var bobPreKeyBundle = new PreKeyBundle(
-            bobIdentitySigningKey.ExportSubjectPublicKeyInfo(),
-            bobIdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo(),
-            bobSignature,
-            bobSignedPreKeyPublicKey.Value,
-            bobOneTimePreKey.PublicKey.ExportSubjectPublicKeyInfo()
+        var bobPreKeyBundle = new X3dPreKeyBundle(
+            new RatchetIdentityKey(bobIdentitySigningKey.ExportSubjectPublicKeyInfo()),
+            new RatchetAgreementKey( bobIdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
+            new PreKey(bobSignedPreKeyPublicKey.Value),
+            new Signature(bobSignature.Value),
+            new OneTimeKey(bobOneTimePreKey.ExportSubjectPublicKeyInfo())
             );
 
         // --- Alice initiates the handshake ---
@@ -127,11 +127,11 @@ public class X3DHManagerTests
         var bobSignedPreKeyPublicKey = new PreKey(bobSignedPreKey.PublicKey.ExportSubjectPublicKeyInfo());
         var bobSignature = manager.SignPreKey(bobIdentitySigningKey, bobSignedPreKeyPublicKey);
 
-        var bobPreKeyBundle = new PreKeyBundle(
-            bobIdentitySigningKey.ExportSubjectPublicKeyInfo(),
-            bobIdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo(),
+        var bobPreKeyBundle = new X3dPreKeyBundle(
+            new RatchetIdentityKey(bobIdentitySigningKey.ExportSubjectPublicKeyInfo()),
+            new RatchetAgreementKey( bobIdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
+            new PreKey(bobSignedPreKeyPublicKey.Value),
             bobSignature,
-            bobSignedPreKeyPublicKey.Value,
             null // No one-time pre-key
         );
 
