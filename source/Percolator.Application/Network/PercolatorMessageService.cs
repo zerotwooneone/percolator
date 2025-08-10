@@ -85,10 +85,10 @@ namespace Percolator.Application.Network
                 _logger.LogInformation("X3DH handshake processed successfully as Initiator.");
 
                 // Look up the peer by their public identity agreement key.
-                var remoteIdentityAgreementKeyBytes = request.InitiatorBundle.IdentityAgreementKey.ToByteArray();
-                var directMessagePublicKey = new DirectMessagePublicKey(remoteIdentityAgreementKeyBytes);
+                var remoteIdentitySigningKeyBytes = request.InitiatorBundle.IdentitySigningKey.ToByteArray();
+                var networkIdentitySigningKey = new DirectMessagePublicKey(remoteIdentitySigningKeyBytes);
                 var connnectionInfo =
-                    await _peerConnectionRepository.GetByDirectMessage(directMessagePublicKey);
+                    await _peerConnectionRepository.GetByDirectMessage(networkIdentitySigningKey);
                 
                 var timestamp = DateTimeOffset.Now;
                 
@@ -106,10 +106,10 @@ namespace Percolator.Application.Network
                 
                 if (connnectionInfo is null)
                 {
-                    _logger.LogWarning("No connection info found for peer {directMessagePublicKey}. Creating a new connection record.", Convert.ToBase64String(directMessagePublicKey.Value));
+                    _logger.LogWarning("No connection info found for peer {directMessagePublicKey}. Creating a new connection record.", Convert.ToBase64String(networkIdentitySigningKey.Value));
                     connnectionInfo = new PeerConnection(
                         new NetworkPeerId(Guid.NewGuid()),
-                        directMessagePublicKey,
+                        networkIdentitySigningKey,
                         [new GrpcEndPoint(ipEndPoint, timestamp)],
                         new List<TlsCertificate>(),
                         timestamp);
@@ -119,7 +119,7 @@ namespace Percolator.Application.Network
                     var grpcEndPoint = connnectionInfo.GrpcEndPoints.FirstOrDefault(e => e.EndPoint.Equals(ipEndPoint));
                     if (grpcEndPoint is null)
                     {
-                        _logger.LogWarning("No gRPC endpoints found for peer {directMessagePublicKey}. Adding a new one.", Convert.ToBase64String(directMessagePublicKey.Value));
+                        _logger.LogWarning("No gRPC endpoints found for peer {directMessagePublicKey}. Adding a new one.", Convert.ToBase64String(networkIdentitySigningKey.Value));
                         connnectionInfo.AddGrpcEndPoint(new GrpcEndPoint(ipEndPoint, timestamp));
                     }
                     else
@@ -136,15 +136,15 @@ namespace Percolator.Application.Network
                 // If the peer is unknown, create a new record for them.
                 if (peer is null)
                 {
-                    _logger.LogInformation("Peer with key hash {KeyHash} is unknown. Creating a new peer record", Convert.ToBase64String(remoteIdentityAgreementKeyBytes));
+                    _logger.LogInformation("Peer with key hash {KeyHash} is unknown. Creating a new peer record", Convert.ToBase64String(remoteIdentitySigningKeyBytes));
                     // For now, we'll auto-generate a name.
-                    var newPeerName = $"Peer-{Convert.ToBase64String(remoteIdentityAgreementKeyBytes)}";
+                    var newPeerName = $"Peer-{Convert.ToBase64String(remoteIdentitySigningKeyBytes)}";
                     
                     peer = new IdentityPeer(new IdentityPeerId(connnectionInfo.Id.Value), newPeerName);
                     await _peerRepository.AddAsync(peer);
                 }
                 
-                var channelId = new ChannelId(directMessagePublicKey.Value);
+                var channelId = new ChannelId(networkIdentitySigningKey.Value);
                 var conversation = await _conversationRepository.GetByChannelIdAsync(channelId);
 
                 if (conversation is null)
@@ -284,6 +284,7 @@ namespace Percolator.Application.Network
             {
                 case ChatEnvelope.MessageOneofCase.TextMessage:
                     _logger.LogInformation("Received Text Message: {Content}", chatEnvelope.TextMessage.Content);
+                    //todo: add a new MessagesService.ReceiveMessageAsync method to the MediatoR handler
                     // Here you would typically publish a MediatR notification
                     // for another service to handle the text message.
                     break;

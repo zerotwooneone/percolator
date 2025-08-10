@@ -4,6 +4,7 @@ using System.Security.Principal;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Percolator.Cryptography;
 using Percolator.Identity;
 
 namespace Percolator.Infrastructure.Identity;
@@ -16,16 +17,19 @@ public class PersistentKeyManagementService : IKeyManagementService
         Converters = { new ECParametersJsonConverter(), new ECPointJsonConverter() }
     };
     private readonly ILogger<PersistentKeyManagementService> _logger;
+    private readonly IOptions<CryptographyOptions> _cyptographyOptions;
     private readonly string _percolatorAppDataPath;
 
     public PersistentKeyManagementService(
         ICredentialService credentialService,
         ILogger<PersistentKeyManagementService> logger,
-        IOptions<StorageOptions> storageOptions)
+        IOptions<StorageOptions> storageOptions,
+        IOptions<CryptographyOptions> cyptographyOptions)
     {
         _credentialService = credentialService;
         _logger = logger;
-        
+        _cyptographyOptions = cyptographyOptions;
+
         var dataDirectory = storageOptions.Value.Path;
         
         var appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
@@ -56,6 +60,13 @@ public class PersistentKeyManagementService : IKeyManagementService
         var loadedIkSigning = ECDsa.Create(keyContainer.IdentitySigningKey);
         var loadedIkAgreement = ECDiffieHellman.Create(keyContainer.IdentityAgreementKey);
         var loadedSpk = ECDiffieHellman.Create(keyContainer.SignedPreKey);
+
+        if (_cyptographyOptions.Value.EnableCryptographicMaterialLogging)
+        {
+            _logger.LogInformation("Identity Signing Key: {IdentitySigningKey}", Convert.ToBase64String(loadedIkSigning.ExportECPrivateKey()));
+            _logger.LogInformation("Identity Agreement Key: {IdentityAgreementKey}", Convert.ToBase64String(loadedIkAgreement.ExportECPrivateKey()));
+            _logger.LogInformation("Signed Pre Key: {SignedPreKey}", Convert.ToBase64String(loadedSpk.ExportECPrivateKey()));
+        }
         
         return new X3dhKeys(loadedIkSigning, loadedIkAgreement, loadedSpk);
     }
@@ -94,6 +105,12 @@ public class PersistentKeyManagementService : IKeyManagementService
         SetFileSecurity(keyFilePath);
 
         _logger.LogInformation("New keys created and saved for {IdentityName}", identityName);
+        if (_cyptographyOptions.Value.EnableCryptographicMaterialLogging)
+        {
+            _logger.LogInformation("Identity Signing Key: {IdentitySigningKey}", Convert.ToBase64String(newIkSigning.ExportECPrivateKey()));
+            _logger.LogInformation("Identity Agreement Key: {IdentityAgreementKey}", Convert.ToBase64String(newIkAgreement.ExportECPrivateKey()));
+            _logger.LogInformation("Signed Pre Key: {SignedPreKey}", Convert.ToBase64String(newSpk.ExportECPrivateKey()));
+        }
 
         return new X3dhKeys(newIkSigning, newIkAgreement, newSpk);
     }

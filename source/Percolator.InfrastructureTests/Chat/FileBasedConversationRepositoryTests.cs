@@ -1,5 +1,6 @@
 using AutoFixture;
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
 using Percolator.Chat;
@@ -15,6 +16,7 @@ public class FileBasedConversationRepositoryTests
     private Fixture _fixture = null!;
     private string _testDirectory = null!;
     private Mock<ISelfParticipantIdProvider> _mockSelfIdProvider = null!;
+    private Mock<ILogger<FileBasedConversationRepository>> _mockLogger;
 
     [SetUp]
     public void Setup()
@@ -40,6 +42,7 @@ public class FileBasedConversationRepositoryTests
         var selfId = _fixture.Create<ParticipantId>();
         _mockSelfIdProvider = new Mock<ISelfParticipantIdProvider>();
         _mockSelfIdProvider.Setup(p => p.Get()).Returns(selfId);
+        _mockLogger = new Mock<ILogger<FileBasedConversationRepository>>();
     }
 
     [TearDown]
@@ -63,7 +66,7 @@ public class FileBasedConversationRepositoryTests
     {
         // Arrange
         var options = CreateStorageOptions();
-        var repository = new FileBasedConversationRepository(options, _mockSelfIdProvider.Object);
+        var repository = new FileBasedConversationRepository(options, _mockSelfIdProvider.Object, _mockLogger.Object);
         var originalConversation = _fixture.Create<Conversation>();
 
         // Act
@@ -80,7 +83,7 @@ public class FileBasedConversationRepositoryTests
     {
         // Arrange
         var options = CreateStorageOptions();
-        var repository = new FileBasedConversationRepository(options, _mockSelfIdProvider.Object);
+        var repository = new FileBasedConversationRepository(options, _mockSelfIdProvider.Object, _mockLogger.Object);
         var originalConversation = _fixture.Create<Conversation>();
 
         // Act
@@ -97,13 +100,13 @@ public class FileBasedConversationRepositoryTests
     {
         // Arrange
         var options = CreateStorageOptions();
-        var firstRepository = new FileBasedConversationRepository(options, _mockSelfIdProvider.Object);
+        var firstRepository = new FileBasedConversationRepository(options, _mockSelfIdProvider.Object, _mockLogger.Object);
         var originalConversation = _fixture.Create<Conversation>();
         await firstRepository.AddAsync(originalConversation); // This creates the index file
 
         // Act
         // Create a new repository instance to force it to load the index from the file
-        var secondRepository = new FileBasedConversationRepository(options, _mockSelfIdProvider.Object);
+        var secondRepository = new FileBasedConversationRepository(options, _mockSelfIdProvider.Object, _mockLogger.Object);
         var loadedConversation = await secondRepository.GetByChannelIdAsync(originalConversation.ChannelId);
 
         // Assert
@@ -116,7 +119,7 @@ public class FileBasedConversationRepositoryTests
     {
         // Arrange
         var options = CreateStorageOptions();
-        var repository = new FileBasedConversationRepository(options, _mockSelfIdProvider.Object);
+        var repository = new FileBasedConversationRepository(options, _mockSelfIdProvider.Object, _mockLogger.Object);
         var randomChannelId = _fixture.Create<ChannelId>();
 
         // Act

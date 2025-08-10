@@ -36,7 +36,7 @@ public class FileBasedPeerConnectionRepository : IPeerConnectionRepository
 
     public Task<PeerConnection?> GetByDirectMessage(DirectMessagePublicKey directMessagePublicKey)
     {
-        var connection = _connections.Values.FirstOrDefault(c => c.DirectMessagePublicKey == directMessagePublicKey);
+        var connection = _connections.Values.FirstOrDefault(c => c.IdentitySigningKey == directMessagePublicKey);
         return Task.FromResult(connection);
     }
 
@@ -98,7 +98,7 @@ public class FileBasedPeerConnectionRepository : IPeerConnectionRepository
         new()
         {
             Id = connection.Id.Value,
-            DirectMessagePublicKey = connection.DirectMessagePublicKey?.Value,
+            DirectMessagePublicKey = connection.IdentitySigningKey?.Value,
             GrpcEndPoints = connection.GrpcEndPoints.Select(e => new GrpcEndPointModel { Host = e.EndPoint.Host, Port = e.EndPoint.Port, LastSeen = e.LastSeen }).ToList(),
             TlsCertificates = connection.TlsCertificates.Select(c => new TlsCertificateModel { RawData = c.RawData }).ToList(),
             LastSeen = connection.LastSeen

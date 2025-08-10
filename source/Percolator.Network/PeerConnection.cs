@@ -13,7 +13,7 @@ public class PeerConnection
     /// <summary>
     /// The public key required to initiate a direct message session with this peer.
     /// </summary>
-    public DirectMessagePublicKey? DirectMessagePublicKey { get; private set; }
+    public DirectMessagePublicKey? IdentitySigningKey { get; private set; }
 
     /// <summary>
     /// A list of known gRPC endpoints for this peer.
@@ -34,13 +34,13 @@ public class PeerConnection
 
     public PeerConnection(
         PeerId id,
-        DirectMessagePublicKey? directMessagePublicKey,
+        DirectMessagePublicKey? identitySigningKey,
         IEnumerable<GrpcEndPoint> grpcEndPoints,
         IReadOnlyList<TlsCertificate> tlsCertificates,
         DateTimeOffset lastSeen)
     {
         Id = id;
-        DirectMessagePublicKey = directMessagePublicKey;
+        IdentitySigningKey = identitySigningKey;
         _grpcEndPoints = grpcEndPoints.ToList();
         TlsCertificates = tlsCertificates;
         LastSeen = lastSeen;
@@ -61,6 +61,6 @@ public class PeerConnection
     
     public void SetDirectMessagePublicKey(DirectMessagePublicKey directMessagePublicKey)
     {
-        DirectMessagePublicKey = directMessagePublicKey;
+        IdentitySigningKey = directMessagePublicKey;
     }
 }

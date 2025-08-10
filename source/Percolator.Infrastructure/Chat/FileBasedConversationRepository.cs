@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Percolator.Chat;
 using Percolator.Chat.ValueObjects;
@@ -10,6 +11,7 @@ namespace Percolator.Infrastructure.Chat;
 public class FileBasedConversationRepository : IConversationRepository
 {
     private readonly ISelfParticipantIdProvider _selfParticipantIdProvider;
+    private readonly ILogger<FileBasedConversationRepository> _logger;
     private readonly StorageOptions _storageOptions;
     private readonly PercolatorJsonContext _jsonContext;
     private readonly ConcurrentDictionary<string, Guid> _channelIdIndex;
@@ -17,9 +19,10 @@ public class FileBasedConversationRepository : IConversationRepository
 
     public FileBasedConversationRepository(
         IOptions<StorageOptions> storageOptions,
-        ISelfParticipantIdProvider selfParticipantIdProvider)
-    {
+        ISelfParticipantIdProvider selfParticipantIdProvider,
+        ILogger<FileBasedConversationRepository> logger) {
         _selfParticipantIdProvider = selfParticipantIdProvider;
+        _logger = logger;
         _storageOptions = storageOptions.Value;
         _jsonContext = new PercolatorJsonContext(new JsonSerializerOptions
         {
@@ -39,13 +42,16 @@ public class FileBasedConversationRepository : IConversationRepository
         }
 
         var json = File.ReadAllText(channelIndexPath);
-        var index = JsonSerializer.Deserialize(json,_jsonContext.ConcurrentDictionaryStringGuid);
-        return new ConcurrentDictionary<string, Guid>(index ?? new ConcurrentDictionary<string, Guid>());;
+        _logger.LogInformation("LOADING INDEX: {Json}", json);
+        var index = JsonSerializer.Deserialize(json,_jsonContext.ConcurrentDictionaryStringGuid)?? new ConcurrentDictionary<string, Guid>();
+        _logger.LogWarning("LOADED INDEX COUNT: {Count}", index.Count);
+        return new ConcurrentDictionary<string, Guid>(index );
     }
 
     private async Task PersistIndex()
     {
         var json = JsonSerializer.Serialize(_channelIdIndex, _jsonContext.ConcurrentDictionaryStringGuid);
+        _logger.LogInformation("SAVING INDEX: {Json}", json);
         Directory.CreateDirectory(GetConversationsPath());
         await File.WriteAllTextAsync(GetChannelIndexPath(), json);
     }

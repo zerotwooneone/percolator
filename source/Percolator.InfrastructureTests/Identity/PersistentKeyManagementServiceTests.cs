@@ -5,6 +5,7 @@ using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
+using Percolator.Cryptography;
 using Percolator.Identity;
 using Percolator.Infrastructure;
 using Percolator.Infrastructure.Identity;
@@ -30,7 +31,7 @@ public class PersistentKeyManagementServiceTests
         _loggerMock = new Mock<ILogger<PersistentKeyManagementService>>();
         _storageOptions = Options.Create(new StorageOptions { Path = _storagePath });
         
-        _sut = new PersistentKeyManagementService(_credentialServiceMock.Object, _loggerMock.Object, _storageOptions);
+        _sut = new PersistentKeyManagementService(_credentialServiceMock.Object, _loggerMock.Object, _storageOptions, new OptionsWrapper<CryptographyOptions>(new CryptographyOptions{EnableCryptographicMaterialLogging = true}));
     }
 
     [TearDown]

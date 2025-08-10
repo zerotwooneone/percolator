@@ -72,12 +72,12 @@ namespace Percolator.Application.Sessions
                 {
                     _logger.LogInformation("Didn't find connection info for Peer {PeerName} with ID {PeerId}", remotePeerName, remotePeer.Id.Value);
                 }
-                if (peerConnection is {DirectMessagePublicKey: not null})
+                if (peerConnection is {IdentitySigningKey: not null})
                 {
-                    var conversation = await _conversationRepository.GetByChannelIdAsync(new ChannelId(peerConnection.DirectMessagePublicKey.Value));
+                    var conversation = await _conversationRepository.GetByChannelIdAsync(new ChannelId(peerConnection.IdentitySigningKey.Value));
                     if (conversation == null)
                     {
-                        _logger.LogInformation("Didn't find direct conversation with {PeerName} with channel ID {ChannelId}", remotePeerName, Convert.ToBase64String(peerConnection.DirectMessagePublicKey.Value));
+                        _logger.LogInformation("Didn't find direct conversation with {PeerName} with channel ID {ChannelId}", remotePeerName, Convert.ToBase64String(peerConnection.IdentitySigningKey.Value));
                     }
                     else {
                         _logger.LogInformation("Existing conversation with {PeerName} found. Reusing conversation {ConversationId}", remotePeerName, conversation.Id.Value);
@@ -159,7 +159,7 @@ namespace Percolator.Application.Sessions
                 await _sessionManager.EstablishSessionAsResponderAsync(
                     new SessionId(conversation.Id.Value),
                     new Percolator.Identity.PeerId(remotePeer.Id.Value),
-                    new RatchetIdentityKey(response.ResponderBundle.IdentityAgreementKey
+                    new RatchetIdentityKey(response.ResponderBundle.IdentitySigningKey
                         .ToByteArray()), // Alice's Public Identity Key
                     new RatchetEphemeralKey(response.ResponderBundle.SignedPreKey
                         .ToByteArray()), // Alice's Public Ratchet Key
@@ -189,7 +189,7 @@ namespace Percolator.Application.Sessions
             var timeStamp=DateTime.UtcNow;
             var peerConnection = new PeerConnection(
                 networkPeerId, 
-                new DirectMessagePublicKey( responderBundle.IdentityAgreementKey.ToByteArray()), 
+                new DirectMessagePublicKey( responderBundle.IdentitySigningKey.ToByteArray()), 
                 new List<GrpcEndPoint>{new GrpcEndPoint(endpoint,timeStamp)},
                 new List<TlsCertificate>(),timeStamp);
             await _peerConnectionRepository.SaveAsync(peerConnection);

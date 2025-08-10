@@ -245,7 +245,6 @@ async Task SendCommandHandler(InvocationContext context)
         var messageService = serviceProvider.GetRequiredService<IMessageService>();
 
         ChatConversationId conversationId;
-        PeerId remotePeerId;
        
         if (string.IsNullOrEmpty(endpointString) || string.IsNullOrEmpty(peerName))
         {
