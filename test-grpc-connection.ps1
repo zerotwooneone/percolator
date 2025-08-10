@@ -47,7 +47,6 @@ function Start-PercolatorNode {
     # Add diagnostic crypto logging flag if enabled
     if (-not $DisableDiagnosticLogging) {
         Write-Log "Enabling cryptographic diagnostic logging for $identity node"
-        $argList += "--enable-crypto-logging"
     } else {
         Write-Log "Cryptographic diagnostic logging is disabled for $identity node"
     }
@@ -85,7 +84,6 @@ function Send-Message {
     # Add diagnostic crypto logging flag if enabled
     if (-not $DisableDiagnosticLogging) {
         Write-Log "Enabling cryptographic diagnostic logging for message sending"
-        $sendArgs += "--enable-crypto-logging"
     } else {
         Write-Log "Cryptographic diagnostic logging is disabled for message sending"
     }

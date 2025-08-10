@@ -31,14 +31,6 @@ var identityOption = new Option<string>(
     getDefaultValue: () => "default",
     description: "The name of the identity to use.");
 
-// Add a global option for enabling cryptographic diagnostic logging
-var enableCryptoLoggingOption = new Option<bool>(
-    new[] { "--enable-crypto-logging", "-ecl" },
-    getDefaultValue: () => false,
-    description: "Enables diagnostic logging of cryptographic material hashes. WARNING: Do not use in production environments.");
-
-rootCommand.AddGlobalOption(enableCryptoLoggingOption);
-
 // *** Host Command ***
 var portOption = new Option<int>(
     new[] { "--port", "-p" },
@@ -102,13 +94,14 @@ async Task HostCommandHandler(InvocationContext context)
     CancellationToken cancellationToken = context.GetCancellationToken();
     int port = context.ParseResult.GetValueForOption(portOption);
     string? identityName = context.ParseResult.GetValueForOption(identityOption);
-    bool enableCryptoLogging = context.ParseResult.GetValueForOption(enableCryptoLoggingOption);
 
     // Step 1: Build a temporary service provider to get services needed for startup.
     var tempServices = new ServiceCollection();
     
     IConfigurationRoot tempConfig = new ConfigurationBuilder().AddNode().Build();
-    tempServices.AddLogging(builder => builder.AddConsole());
+    tempServices.AddLogging(builder => builder
+        .AddConsole()
+        .AddSimpleConsole(opt=>opt.TimestampFormat = "[yyyy-MM-dd HH:mm:ss.fff] "));
     tempServices.AddApplicationServices(tempConfig);
     tempServices.AddInfrastructureServices(tempConfig);
     ServiceProvider tempServiceProvider = tempServices.BuildServiceProvider();
@@ -193,7 +186,6 @@ async Task ConnectCommandHandler(InvocationContext context)
     var endpointString = context.ParseResult.GetValueForArgument(endpointArgument);
     var peerName = context.ParseResult.GetValueForOption(peerNameOption);
     var identityName = context.ParseResult.GetValueForOption(identityOption);
-    var enableCryptoLogging = context.ParseResult.GetValueForOption(enableCryptoLoggingOption);
     var cancellationToken = context.GetCancellationToken();
 
     if (!TryParseEndpoint(endpointString, out var endpoint))
@@ -204,7 +196,7 @@ async Task ConnectCommandHandler(InvocationContext context)
         return;
     }
 
-    var services = CreateServiceProvider(identityName, enableCryptoLogging);
+    var services = CreateServiceProvider();
     await using var serviceScope = services.CreateAsyncScope();
     var serviceProvider = serviceScope.ServiceProvider;
 
@@ -235,10 +227,9 @@ async Task SendCommandHandler(InvocationContext context)
     var endpointString = context.ParseResult.GetValueForOption(endpointOption);
     var peerName = context.ParseResult.GetValueForOption(peerNameOption);
     var identityName = context.ParseResult.GetValueForOption(identityOption);
-    var enableCryptoLogging = context.ParseResult.GetValueForOption(enableCryptoLoggingOption);
     var cancellationToken = context.GetCancellationToken();
 
-    var services = CreateServiceProvider(identityName, enableCryptoLogging);
+    var services = CreateServiceProvider();
     await using var serviceScope = services.CreateAsyncScope();
     var serviceProvider = serviceScope.ServiceProvider;
 
@@ -292,12 +283,15 @@ async Task SendCommandHandler(InvocationContext context)
     }
 }
 
-static ServiceProvider CreateServiceProvider(string? identityName, bool enableCryptoLogging)
+static ServiceProvider CreateServiceProvider()
 {
     var services = new ServiceCollection();
     var config = new ConfigurationBuilder().AddNode().Build();
 
-    services.AddLogging(builder => builder.AddConsole().AddConfiguration(config.GetSection("Logging")));
+    services.AddLogging(builder => builder
+        .AddConsole()
+        .AddSimpleConsole(opt=>opt.TimestampFormat = "[yyyy-MM-dd HH:mm:ss.fff] ")
+        .AddConfiguration(config.GetSection("Logging")));
     services.AddApplicationServices(config);
     services.AddInfrastructureServices(config);
     
@@ -394,18 +388,6 @@ static ServiceProvider CreateServiceProvider(string? identityName, bool enableCr
         return handler;
     });
 
-    if (enableCryptoLogging)
-    {
-        services.AddLogging(builder =>
-        {
-            builder.AddConsole(options =>
-            {
-                options.TimestampFormat = "[yyyy-MM-dd HH:mm:ss] ";
-            });
-            builder.AddDebug();
-        });
-    }
-
     return services.BuildServiceProvider();
 }
 
@@ -442,9 +424,8 @@ async Task TlsDebugCommandHandler(InvocationContext context)
 {
     var host = (string)context.ParseResult.GetValueForArgument(tlsDebugCommand.Arguments[0]);
     var port = (int)context.ParseResult.GetValueForArgument(tlsDebugCommand.Arguments[1]);
-    var enableCryptoLogging = context.ParseResult.GetValueForOption(enableCryptoLoggingOption);
 
-    var serviceProvider = CreateServiceProvider(null, enableCryptoLogging); // No identity needed for basic test
+    var serviceProvider = CreateServiceProvider(); // No identity needed for basic test
     var logger = serviceProvider.GetRequiredService<ILogger<Program>>();
     
     Console.WriteLine("Starting TLS connectivity test...");
