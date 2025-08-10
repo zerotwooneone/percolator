@@ -39,13 +39,13 @@ public class FileBasedConversationRepository : IConversationRepository
         }
 
         var json = File.ReadAllText(channelIndexPath);
-        var index = JsonSerializer.Deserialize<Dictionary<string, Guid>>(json);
-        return new ConcurrentDictionary<string, Guid>(index ?? new Dictionary<string, Guid>());
+        var index = JsonSerializer.Deserialize(json,_jsonContext.ConcurrentDictionaryStringGuid);
+        return new ConcurrentDictionary<string, Guid>(index ?? new ConcurrentDictionary<string, Guid>());;
     }
 
     private async Task PersistIndex()
     {
-        var json = JsonSerializer.Serialize(_channelIdIndex, new JsonSerializerOptions { WriteIndented = true });
+        var json = JsonSerializer.Serialize(_channelIdIndex, _jsonContext.ConcurrentDictionaryStringGuid);
         Directory.CreateDirectory(GetConversationsPath());
         await File.WriteAllTextAsync(GetChannelIndexPath(), json);
     }
