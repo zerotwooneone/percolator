@@ -35,7 +35,7 @@ public class X3DHOrchestrator : IX3DHOrchestrator
         try
         {
             _logger.LogDebug("Starting handshake with remote bundle. SignedPreKey length: {Length}, IdentityKey length: {IdentityLength}",
-                remotePreKeyBundle.SignedPreKey.ToByteArray().Length,
+                remotePreKeyBundle.SignedPayload.ToByteArray().Length,
                 remotePreKeyBundle.IdentityAgreementKey.ToByteArray().Length);
                 
             if (remotePreKeyBundle.OneTimePreKey != null)
@@ -47,7 +47,7 @@ public class X3DHOrchestrator : IX3DHOrchestrator
             // Step 1: Verify the signature on the signed pre-key.
             if (!_x3DhManager.VerifySignature(
                     new RatchetIdentityKey(remotePreKeyBundle.IdentitySigningKey.ToByteArray()),
-                    new PreKey(remotePreKeyBundle.SignedPreKey.ToByteArray()), 
+                    new PreKey(remotePreKeyBundle.SignedPayload.ToByteArray()), 
                     new Signature(remotePreKeyBundle.PreKeySignature.ToByteArray())))
             {
                 throw new CryptographicException("Invalid signature on signed pre-key.");
@@ -66,7 +66,7 @@ public class X3DHOrchestrator : IX3DHOrchestrator
                 remotePreKeyBundle.IdentitySigningKey.ToByteArray(),
                 remotePreKeyBundle.IdentityAgreementKey.ToByteArray(),
                 new Signature(remotePreKeyBundle.PreKeySignature.ToByteArray()),
-                remotePreKeyBundle.SignedPreKey.ToByteArray(),
+                remotePreKeyBundle.SignedPayload.ToByteArray(),
                 oneTimePreKeyBytes
             );
 
@@ -109,7 +109,7 @@ public class X3DHOrchestrator : IX3DHOrchestrator
         // CRITICAL: Verify the signature on the initiator's signed pre-key to prevent MITM attacks.
         if (!_x3DhManager.VerifySignature(
                 new RatchetIdentityKey(remotePreKeyBundle.IdentitySigningKey.ToByteArray()),
-                new PreKey(remotePreKeyBundle.SignedPreKey.ToByteArray()),
+                new PreKey(remotePreKeyBundle.SignedPayload.ToByteArray()),
                 new Signature(remotePreKeyBundle.PreKeySignature.ToByteArray())))
         {
             throw new CryptographicException("Invalid signature on initiator's signed pre-key.");
@@ -147,7 +147,7 @@ public class X3DHOrchestrator : IX3DHOrchestrator
         {
             IdentityAgreementKey = ByteString.CopyFrom(identityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
             IdentitySigningKey = ByteString.CopyFrom(identitySigningKey.ExportSubjectPublicKeyInfo()),
-            SignedPreKey = ByteString.CopyFrom(signedPreKey.PublicKey.ExportSubjectPublicKeyInfo()),
+            SignedPayload = ByteString.CopyFrom(signedPreKey.PublicKey.ExportSubjectPublicKeyInfo()),
             PreKeySignature = ByteString.CopyFrom(signature.Value)
         };
 

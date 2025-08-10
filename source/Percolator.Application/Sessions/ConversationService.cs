@@ -118,7 +118,7 @@ namespace Percolator.Application.Sessions
                     {
                         IdentityAgreementKey = Google.Protobuf.ByteString.CopyFrom(_activeIdentityContext.Keys
                             .IdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
-                        SignedPreKey = Google.Protobuf.ByteString.CopyFrom(signedPreKeyPublicBytes),
+                        SignedPayload = Google.Protobuf.ByteString.CopyFrom(signedPreKeyPublicBytes),
                         IdentitySigningKey = Google.Protobuf.ByteString.CopyFrom(_activeIdentityContext.Keys
                             .IdentitySigningKey.ExportSubjectPublicKeyInfo()),
                         OneTimePreKey = oneTimePreKey is null
@@ -129,12 +129,18 @@ namespace Percolator.Application.Sessions
                 };
 
                 _logger.LogInformation("Sending session request to {Endpoint}", endpoint);
-                var response = await _grpcSessionService.EstablishSessionAsync(endpoint, request);
+                var message = await _grpcSessionService.EstablishSessionAsync(endpoint, request);
+                if (message.MessageCase != EstablishSessionResponse.MessageOneofCase.Response)
+                {
+                    //todo: handle not until
+                    throw new InvalidOperationException($"Invalid response type:{message.MessageCase}");
+                } 
+                var response = message.Response!;
                 _logger.LogInformation("Received session response from peer.");
 
                 var handshakeResult = _orchestrator.CompleteHandshake(
                     response.ResponderBundle, // Alice's bundle from the response
-                    response.ResponderBundle.SignedPreKey.ToByteArray(), // Alice's ephemeral key from the response
+                    response.ResponderBundle.SignedPayload.ToByteArray(), // Alice's ephemeral key from the response
                     oneTimePreKey
                 );
                 _logger.LogInformation("Handshake completed locally as Responder.");
@@ -161,7 +167,7 @@ namespace Percolator.Application.Sessions
                     new Percolator.Identity.PeerId(remotePeer.Id.Value),
                     new RatchetIdentityKey(response.ResponderBundle.IdentitySigningKey
                         .ToByteArray()), // Alice's Public Identity Key
-                    new RatchetEphemeralKey(response.ResponderBundle.SignedPreKey
+                    new RatchetEphemeralKey(response.ResponderBundle.SignedPayload
                         .ToByteArray()), // Alice's Public Ratchet Key
                     handshakeResult
                         .ResponderPrivateKeyUsed, // The specific one of OUR (Bob's) private keys that was used

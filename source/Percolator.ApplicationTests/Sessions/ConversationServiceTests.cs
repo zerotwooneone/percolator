@@ -96,13 +96,16 @@ public class ConversationServiceTests
         
         var grpcResponse = new EstablishSessionResponse
         {
-            SessionId = Guid.NewGuid().ToString(),
-            ResponderBundle = new ContractsPreKeyBundle
+            Response = new EstablishSessionResponse.Types.Response
             {
-                IdentitySigningKey = ByteString.CopyFrom(new byte[32]),
-                IdentityAgreementKey = ByteString.CopyFrom(new byte[32]),
-                SignedPreKey = ByteString.CopyFrom(new byte[32]),
-                OneTimePreKey = ByteString.CopyFrom(new byte[32])
+                SessionId = Guid.NewGuid().ToString(),
+                ResponderBundle = new ContractsPreKeyBundle
+                {
+                    IdentitySigningKey = ByteString.CopyFrom(new byte[32]),
+                    IdentityAgreementKey = ByteString.CopyFrom(new byte[32]),
+                    SignedPayload = ByteString.CopyFrom(new byte[32]),
+                    OneTimePreKey = ByteString.CopyFrom(new byte[32])
+                }
             }
         };
         _mockGrpcSessionService.Setup(s => s.EstablishSessionAsync(It.IsAny<DnsEndPoint>(), It.IsAny<EstablishSessionRequest>(), It.IsAny<X509Certificate2>()))
@@ -135,7 +138,7 @@ public class ConversationServiceTests
         {
             IdentitySigningKey = ByteString.CopyFrom(new byte[32]),
             IdentityAgreementKey = ByteString.CopyFrom(new byte[32]),
-            SignedPreKey = ByteString.CopyFrom(new byte[32]),
+            SignedPayload = ByteString.CopyFrom(new byte[32]),
             OneTimePreKey = ByteString.CopyFrom(new byte[32])
         };
         var handshakeResponse = new HandshakeResponse(
@@ -209,13 +212,16 @@ public class ConversationServiceTests
         
         var grpcResponse = new EstablishSessionResponse
         {
-            SessionId = Guid.NewGuid().ToString(),
-            ResponderBundle = new ContractsPreKeyBundle
+            Response = new EstablishSessionResponse.Types.Response
             {
-                IdentitySigningKey = ByteString.CopyFrom(new byte[32]),
-                IdentityAgreementKey = ByteString.CopyFrom(new byte[32]),
-                SignedPreKey = ByteString.CopyFrom(new byte[32]),
-                OneTimePreKey = ByteString.CopyFrom(new byte[32])
+                SessionId = Guid.NewGuid().ToString(),
+                ResponderBundle = new ContractsPreKeyBundle
+                {
+                    IdentitySigningKey = ByteString.CopyFrom(new byte[32]),
+                    IdentityAgreementKey = ByteString.CopyFrom(new byte[32]),
+                    SignedPayload = ByteString.CopyFrom(new byte[32]),
+                    OneTimePreKey = ByteString.CopyFrom(new byte[32])
+                }
             }
         };
         _mockGrpcSessionService.Setup(s => s.EstablishSessionAsync(It.IsAny<DnsEndPoint>(), It.IsAny<EstablishSessionRequest>(), It.IsAny<X509Certificate2>()))
@@ -235,7 +241,7 @@ public class ConversationServiceTests
         {
             IdentitySigningKey = ByteString.CopyFrom(new byte[32]),
             IdentityAgreementKey = ByteString.CopyFrom(new byte[32]),
-            SignedPreKey = ByteString.CopyFrom(new byte[32]),
+            SignedPayload = ByteString.CopyFrom(new byte[32]),
             OneTimePreKey = ByteString.CopyFrom(new byte[32])
         };
         var handshakeResponse = new HandshakeResponse(
@@ -289,7 +295,7 @@ public class ConversationServiceTests
 
         // Assert
         Assert.That(result, Is.Not.EqualTo(default(ChatConversationId)));
-        Assert.That(result.Value, Is.EqualTo(Guid.Parse(grpcResponse.SessionId)));
+        Assert.That(result.Value, Is.EqualTo(Guid.Parse(grpcResponse.Response.SessionId)));
         
         // Verify peer was created with expected name
         _mockPeerRepository.Verify(r => r.AddAsync(It.Is<Peer>(p => p.Name == peerName)), Times.Once);
@@ -302,13 +308,13 @@ public class ConversationServiceTests
         // Verify conversation was created with expected participants
         _mockConversationRepository.Verify(r => r.AddAsync(It.IsAny<ChatConversation>()), Times.Once);
         Assert.That(capturedConversation, Is.Not.Null);
-        Assert.That(capturedConversation.Id.Value, Is.EqualTo(Guid.Parse(grpcResponse.SessionId)));
+        Assert.That(capturedConversation.Id.Value, Is.EqualTo(Guid.Parse(grpcResponse.Response.SessionId)));
         Assert.That(capturedConversation.Name, Is.EqualTo(peerName));
         Assert.That(capturedConversation.Participants, Has.Count.EqualTo(2));
         
         // Verify session was established
         _mockDirectSessionManager.Verify(m => m.EstablishSessionAsResponderAsync(
-            It.Is<Percolator.Cryptography.SessionId>(id => id.Value == Guid.Parse(grpcResponse.SessionId)),
+            It.Is<Percolator.Cryptography.SessionId>(id => id.Value == Guid.Parse(grpcResponse.Response.SessionId)),
             It.IsAny<IdentityPeerId>(), 
             It.IsAny<RatchetIdentityKey>(), 
             It.IsAny<RatchetEphemeralKey>(), 

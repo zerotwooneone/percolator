@@ -177,7 +177,7 @@ namespace Percolator.Application.Network
                         new SessionId(conversation.Id.Value),
                         new IdentityPeerId(peer.Id.Value),
                         new RatchetIdentityKey(request.InitiatorBundle.IdentityAgreementKey.ToByteArray()),
-                        new RatchetEphemeralKey(request.InitiatorBundle.SignedPreKey.ToByteArray()),
+                        new RatchetEphemeralKey(request.InitiatorBundle.SignedPayload.ToByteArray()),
                         sharedSecret, 
                         ephemeralKey);
                     _logger.LogInformation("Successfully established session {SessionId} with peer {PeerId}", conversation.Id, peer.Id);
@@ -190,7 +190,7 @@ namespace Percolator.Application.Network
                     IdentityAgreementKey = ByteString.CopyFrom(_activeIdentityContext.Keys.IdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
 
                     // Your new Ephemeral Key for this session. We can place it in the SignedPreKey field.
-                    SignedPreKey = ByteString.CopyFrom(ephemeralKey.PublicKey.ExportSubjectPublicKeyInfo()),
+                    SignedPayload = ByteString.CopyFrom(ephemeralKey.PublicKey.ExportSubjectPublicKeyInfo()),
 
                     // You must sign the key you are sending.
                     PreKeySignature = ByteString.CopyFrom(_x3DhManager.SignPreKey(
@@ -201,8 +201,11 @@ namespace Percolator.Application.Network
                 
                 return new EstablishSessionResponse
                 {
-                    SessionId = conversation.Id.Value.ToString(),
-                    ResponderBundle = responseBundle
+                    Response = new EstablishSessionResponse.Types.Response
+                    {
+                        SessionId = conversation.Id.Value.ToString(),
+                        ResponderBundle = responseBundle
+                    },
                 };
             }
             catch (Exception ex)

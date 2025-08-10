@@ -80,7 +80,7 @@ public class X3DHOrchestratorTests : IDisposable
         {
             IdentityAgreementKey = ByteString.CopyFrom(_remoteIdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
             IdentitySigningKey = ByteString.CopyFrom(remoteIdentitySigningKeyBytes),
-            SignedPreKey = ByteString.CopyFrom(remoteSignedPreKeyBytes),
+            SignedPayload = ByteString.CopyFrom(remoteSignedPreKeyBytes),
             PreKeySignature = ByteString.CopyFrom(_remoteIdentitySigningKey.SignData(remoteSignedPreKeyBytes, HashAlgorithmName.SHA256, DSASignatureFormat.IeeeP1363FixedFieldConcatenation)),
             OneTimePreKey = ByteString.CopyFrom(_remoteOneTimePreKey.PublicKey.ExportSubjectPublicKeyInfo())
         };
@@ -124,7 +124,7 @@ public class X3DHOrchestratorTests : IDisposable
         {
             IdentityAgreementKey = ByteString.CopyFrom(_remoteIdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
             IdentitySigningKey = ByteString.CopyFrom(remoteIdentitySigningKeyBytes),
-            SignedPreKey = ByteString.CopyFrom(remoteSignedPreKeyBytes),
+            SignedPayload = ByteString.CopyFrom(remoteSignedPreKeyBytes),
             PreKeySignature = ByteString.CopyFrom(_remoteIdentitySigningKey.SignData(remoteSignedPreKeyBytes, HashAlgorithmName.SHA256, DSASignatureFormat.IeeeP1363FixedFieldConcatenation)),
             // OneTimePreKey intentionally omitted
         };
@@ -172,7 +172,7 @@ public class X3DHOrchestratorTests : IDisposable
         {
             IdentityAgreementKey = ByteString.CopyFrom(_remoteIdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
             IdentitySigningKey = ByteString.CopyFrom(remoteIdentitySigningKeyBytes),
-            SignedPreKey = ByteString.CopyFrom(remoteSignedPreKeyBytes),
+            SignedPayload = ByteString.CopyFrom(remoteSignedPreKeyBytes),
             PreKeySignature = ByteString.CopyFrom(_remoteIdentitySigningKey.SignData(remoteSignedPreKeyBytes, HashAlgorithmName.SHA256, DSASignatureFormat.IeeeP1363FixedFieldConcatenation))
         };
 
@@ -220,7 +220,7 @@ public class X3DHOrchestratorTests : IDisposable
         {
             IdentityAgreementKey = ByteString.CopyFrom(_remoteIdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
             IdentitySigningKey = ByteString.CopyFrom(remoteIdentitySigningKeyBytes),
-            SignedPreKey = ByteString.CopyFrom(_remoteSignedPreKey.PublicKey.ExportSubjectPublicKeyInfo()),
+            SignedPayload = ByteString.CopyFrom(_remoteSignedPreKey.PublicKey.ExportSubjectPublicKeyInfo()),
             PreKeySignature = ByteString.CopyFrom(_remoteIdentitySigningKey.SignData(
                 _remoteSignedPreKey.PublicKey.ExportSubjectPublicKeyInfo(), 
                 HashAlgorithmName.SHA256, 
