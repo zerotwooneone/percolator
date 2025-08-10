@@ -61,6 +61,31 @@ namespace Percolator.Application.Sessions
             DnsEndPoint endpoint, 
             string remotePeerName)
         {
+            var remotePeer = await _peerRepository.GetByNameAsync(remotePeerName);
+            if (remotePeer == null)
+            {
+                _logger.LogInformation("Didn't find peer {PeerName}", remotePeerName);
+            }
+            else {
+                var peerConnection = await _peerConnectionRepository.GetByIdAsync(new NetworkPeerId(remotePeer.Id.Value));
+                if (peerConnection is null)
+                {
+                    _logger.LogInformation("Didn't find connection info for Peer {PeerName} with ID {PeerId}", remotePeerName, remotePeer.Id.Value);
+                }
+                if (peerConnection is {DirectMessagePublicKey: not null})
+                {
+                    var conversation = await _conversationRepository.GetByChannelIdAsync(new ChannelId(peerConnection.DirectMessagePublicKey.Value));
+                    if (conversation == null)
+                    {
+                        _logger.LogInformation("Didn't find direct conversation with {PeerName} with channel ID {ChannelId}", remotePeerName, Convert.ToBase64String(peerConnection.DirectMessagePublicKey.Value));
+                    }
+                    else {
+                        _logger.LogInformation("Existing conversation with {PeerName} found. Reusing conversation {ConversationId}", remotePeerName, conversation.Id.Value);
+                        // The session already exists, so just return the ID.
+                        return conversation.Id;
+                    }
+                }
+            }
             try
             {
                 _logger.LogInformation("Creating direct conversation with {PeerName} at {Endpoint}", remotePeerName,
@@ -115,7 +140,6 @@ namespace Percolator.Application.Sessions
                 _logger.LogInformation("Handshake completed locally as Responder.");
 
                 // Get or create the peer
-                var remotePeer = await _peerRepository.GetByNameAsync(remotePeerName);
                 if (remotePeer == null)
                 {
                     remotePeer = await CreatePeerAsync(remotePeerName, response.ResponderBundle, endpoint);
@@ -129,6 +153,7 @@ namespace Percolator.Application.Sessions
                     new List<Message>(),
                     remotePeerName);
 
+                _logger.LogInformation("Creating conversation {ConversationId} with channel ID {ChannelId}", conversation.Id.Value, Convert.ToBase64String(conversation.ChannelId.Value));
                 await _conversationRepository.AddAsync(conversation);
 
                 await _sessionManager.EstablishSessionAsResponderAsync(
