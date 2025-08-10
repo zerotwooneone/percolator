@@ -48,14 +48,14 @@ public class FileBasedDoubleRatchetSessionStore : IDoubleRatchetSessionStore
             {
                 if (_logger.IsEnabled(LogLevel.Trace))
                 {
-                    var rootKeyHash = state.RootKey != null ? Convert.ToBase64String(state.RootKey.Value) : "null";
-                    _logger.LogTrace("Session {SessionId} deserialized - RootKey hash: {RootKeyHash}", 
-                        sessionId, rootKeyHash);
+                    var rootKey = state.RootKey != null ? Convert.ToBase64String(state.RootKey.Value) : "null";
+                    _logger.LogTrace("Session {SessionId} deserialized - RootKey : {RootKey}", 
+                        sessionId, rootKey);
                 }
 
                 if (_options.EnableCryptographicMaterialLogging)
                 {
-                    _logger.LogInformation("Session {SessionId} for {Path} deserialized - RootKey: {RootKey} {DhRatchetPrivateKey}",sessionId, path,state.RootKey, state.DhRatchetPrivateKey);
+                    _logger.LogInformation("Session {SessionId} for {Path} deserialized - RootKey: {RootKey} {DhRatchetPrivateKey}",sessionId, path, Convert.ToBase64String(state.RootKey!.Value), state.DhRatchetPrivateKey == null ? "null" : Convert.ToBase64String(state.DhRatchetPrivateKey!.Value));
                 }
             }
             
@@ -76,12 +76,12 @@ public class FileBasedDoubleRatchetSessionStore : IDoubleRatchetSessionStore
         {
             var rootKey = sessionState.RootKey != null ? Convert.ToBase64String(sessionState.RootKey.Value) : "null";
             _logger.LogTrace("Storing session {SessionId} - RootKey : {RootKey}", 
-                sessionId, rootKey);
+                sessionId, Convert.ToBase64String(sessionState.RootKey!.Value));
         }
 
         if (_options.EnableCryptographicMaterialLogging)
         {
-            _logger.LogInformation("Storing session {SessionId} - RootKey: {RootKey} {DhRatchetPrivateKey}", sessionId, sessionState.RootKey, sessionState.DhRatchetPrivateKey);
+            _logger.LogInformation("Storing session {SessionId} - RootKey: {RootKey} {DhRatchetPrivateKey}", sessionId, Convert.ToBase64String(sessionState.RootKey!.Value), Convert.ToBase64String(sessionState.DhRatchetPrivateKey!.Value));
         }
         
         

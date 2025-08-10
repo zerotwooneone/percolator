@@ -106,7 +106,7 @@ namespace Percolator.Application.Network
                 
                 if (connnectionInfo is null)
                 {
-                    _logger.LogWarning("No connection info found for peer {directMessagePublicKey}. Creating a new connection record.", directMessagePublicKey);
+                    _logger.LogWarning("No connection info found for peer {directMessagePublicKey}. Creating a new connection record.", Convert.ToBase64String(directMessagePublicKey.Value));
                     connnectionInfo = new PeerConnection(
                         new NetworkPeerId(Guid.NewGuid()),
                         directMessagePublicKey,
@@ -119,7 +119,7 @@ namespace Percolator.Application.Network
                     var grpcEndPoint = connnectionInfo.GrpcEndPoints.FirstOrDefault(e => e.EndPoint.Equals(ipEndPoint));
                     if (grpcEndPoint is null)
                     {
-                        _logger.LogWarning("No gRPC endpoints found for peer {directMessagePublicKey}. Adding a new one.", directMessagePublicKey);
+                        _logger.LogWarning("No gRPC endpoints found for peer {directMessagePublicKey}. Adding a new one.", Convert.ToBase64String(directMessagePublicKey.Value));
                         connnectionInfo.AddGrpcEndPoint(new GrpcEndPoint(ipEndPoint, timestamp));
                     }
                     else
