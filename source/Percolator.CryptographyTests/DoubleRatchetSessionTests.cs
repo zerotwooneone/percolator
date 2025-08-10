@@ -272,9 +272,9 @@ namespace Percolator.CryptographyTests
             Console.WriteLine($"Bob sending counter before serialization: {bobStateBeforeSerialization.SendingCounter}");
             
             if (aliceStateBeforeSerialization.RootKey != null)
-                Console.WriteLine($"Alice root key hash before serialization: {Convert.ToBase64String(SHA256.HashData(aliceStateBeforeSerialization.RootKey.Value))}");
+                Console.WriteLine($"Alice root key hash before serialization: {Convert.ToBase64String(aliceStateBeforeSerialization.RootKey.Value)}");
             if (bobStateBeforeSerialization.RootKey != null)
-                Console.WriteLine($"Bob root key hash before serialization: {Convert.ToBase64String(SHA256.HashData(bobStateBeforeSerialization.RootKey.Value))}");
+                Console.WriteLine($"Bob root key hash before serialization: {Convert.ToBase64String(bobStateBeforeSerialization.RootKey.Value)}");
 
             // Serialize and deserialize the session states
             var aliceStateJson = JsonSerializer.Serialize(aliceStateBeforeSerialization);
@@ -292,9 +292,9 @@ namespace Percolator.CryptographyTests
             Console.WriteLine($"Bob sending counter after deserialization: {bobStateDeserialized.SendingCounter}");
             
             if (aliceStateDeserialized.RootKey != null)
-                Console.WriteLine($"Alice root key hash after deserialization: {Convert.ToBase64String(SHA256.HashData(aliceStateDeserialized.RootKey.Value))}");
+                Console.WriteLine($"Alice root key hash after deserialization: {Convert.ToBase64String(aliceStateDeserialized.RootKey.Value)}");
             if (bobStateDeserialized.RootKey != null)
-                Console.WriteLine($"Bob root key hash after deserialization: {Convert.ToBase64String(SHA256.HashData(bobStateDeserialized.RootKey.Value))}");
+                Console.WriteLine($"Bob root key hash after deserialization: {Convert.ToBase64String(bobStateDeserialized.RootKey.Value)}");
             
             // Create new sessions with the deserialized state
             using var aliceSession2 = new DoubleRatchetSession(aliceStateDeserialized, _logger, _options);

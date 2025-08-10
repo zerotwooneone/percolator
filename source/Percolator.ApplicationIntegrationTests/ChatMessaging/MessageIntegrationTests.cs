@@ -301,30 +301,30 @@ public class MessageIntegrationTests : IntegrationTestBase
                 // Compare key hashes to detect session asymmetry
                 if (senderSessionState != null && receiverSessionState != null)
                 {
-                    var senderRootKeyHash = senderSessionState.RootKey.Value != null 
-                        ? Convert.ToBase64String(System.Security.Cryptography.SHA256.HashData(senderSessionState.RootKey.Value)) 
+                    var senderRootKey = senderSessionState.RootKey.Value != null 
+                        ? Convert.ToBase64String(senderSessionState.RootKey.Value) 
                         : "null";
                     
-                    var receiverRootKeyHash = receiverSessionState.RootKey.Value != null 
-                        ? Convert.ToBase64String(System.Security.Cryptography.SHA256.HashData(receiverSessionState.RootKey.Value)) 
+                    var receiverRootKey = receiverSessionState.RootKey.Value != null 
+                        ? Convert.ToBase64String(receiverSessionState.RootKey.Value) 
                         : "null";
                     
-                    TestContext.WriteLine($"Sender root key hash: {senderRootKeyHash}");
-                    TestContext.WriteLine($"Receiver root key hash: {receiverRootKeyHash}");
-                    TestContext.WriteLine($"Root keys match: {senderRootKeyHash == receiverRootKeyHash}");
+                    TestContext.WriteLine($"Sender root key hash: {senderRootKey}");
+                    TestContext.WriteLine($"Receiver root key hash: {receiverRootKey}");
+                    TestContext.WriteLine($"Root keys match: {senderRootKey == receiverRootKey}");
                     
                     // Compare chain keys
-                    var senderSendingChainKeyHash = senderSessionState.SendingChainKey?.Value != null 
-                        ? Convert.ToBase64String(System.Security.Cryptography.SHA256.HashData(senderSessionState.SendingChainKey.Value)) 
+                    var senderSendingChainKey = senderSessionState.SendingChainKey?.Value != null 
+                        ? Convert.ToBase64String(senderSessionState.SendingChainKey.Value) 
                         : "null";
                     
-                    var receiverReceivingChainKeyHash = receiverSessionState.ReceivingChainKey?.Value != null 
-                        ? Convert.ToBase64String(System.Security.Cryptography.SHA256.HashData(receiverSessionState.ReceivingChainKey.Value)) 
+                    var receiverReceivingChainKey = receiverSessionState.ReceivingChainKey?.Value != null 
+                        ? Convert.ToBase64String(receiverSessionState.ReceivingChainKey.Value) 
                         : "null";
                     
-                    TestContext.WriteLine($"Sender sending chain key hash: {senderSendingChainKeyHash}");
-                    TestContext.WriteLine($"Receiver receiving chain key hash: {receiverReceivingChainKeyHash}");
-                    TestContext.WriteLine($"Chain keys match (sender's sending = receiver's receiving): {senderSendingChainKeyHash == receiverReceivingChainKeyHash}");
+                    TestContext.WriteLine($"Sender sending chain key hash: {senderSendingChainKey}");
+                    TestContext.WriteLine($"Receiver receiving chain key hash: {receiverReceivingChainKey}");
+                    TestContext.WriteLine($"Chain keys match (sender's sending = receiver's receiving): {senderSendingChainKey == receiverReceivingChainKey}");
                     
                     TestContext.WriteLine($"Sender sending counter: {senderSessionState.SendingCounter}");
                     TestContext.WriteLine($"Receiver receiving counter: {receiverSessionState.ReceivingCounter}");

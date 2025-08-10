@@ -22,7 +22,7 @@ public class DoubleRatchetSession : IDisposable
     private readonly Dictionary<SkippedMessageKeyIdentifier, byte[]> _skippedMessageKeys = new();
     private readonly RatchetIdentityKey _remoteIdentityPublicKey;
     private readonly ILogger<DoubleRatchetSession> _logger;
-    private readonly CryptographyOptions _options;
+    private readonly CryptographyOptions _cryptographyOptions;
 
     // Internal get-only properties for testing and debugging
     internal RootKey RootKey => _rootKey;
@@ -35,7 +35,7 @@ public class DoubleRatchetSession : IDisposable
     internal RatchetEphemeralKey? RemoteRatchetKey => _remoteRatchetKey;
     internal RatchetIdentityKey RemoteIdentityPublicKey => _remoteIdentityPublicKey;
     internal IReadOnlyDictionary<SkippedMessageKeyIdentifier, byte[]> SkippedMessageKeys => _skippedMessageKeys;
-    internal CryptographyOptions Options => _options;
+    internal CryptographyOptions CryptographyOptions => _cryptographyOptions;
     
     /// <summary>
     /// Returns the current DH ratchet private key as a byte array, or null if no key is available.
@@ -56,7 +56,7 @@ public class DoubleRatchetSession : IDisposable
         _remoteIdentityPublicKey = remoteIdentityPublicKey;
         _rootKey = new RootKey(sharedSecret.Value);
         _logger = logger;
-        _options = options.Value;
+        _cryptographyOptions = options.Value;
     }
 
     public DoubleRatchetSession(DoubleRatchetSessionState state, ILogger<DoubleRatchetSession> logger, IOptions<CryptographyOptions> options)
@@ -76,7 +76,7 @@ public class DoubleRatchetSession : IDisposable
         _skippedMessageKeys = state.SkippedMessageKeys;
         _remoteIdentityPublicKey = state.TheirIdentityPublicKey ?? throw new ArgumentNullException(nameof(state.TheirIdentityPublicKey));
         _logger = logger;
-        _options = options.Value;
+        _cryptographyOptions = options.Value;
         _ratchetFlag = state.RatchetFlag;
     }
 
@@ -86,13 +86,13 @@ public class DoubleRatchetSession : IDisposable
         RatchetEphemeralKey remoteRatchetPublicKey,
         ECDiffieHellman localEphemeralKey,
         ILogger<DoubleRatchetSession> logger,
-        IOptions<CryptographyOptions> options)
+        IOptions<CryptographyOptions> cryptographyOptions)
     {
         logger.LogDebug("Creating initiator session with initial state from X3DH handshake.");
 
         // Create a new session using a basic constructor.
         // We assume a private constructor exists that initializes the logger and options.
-        var session = new DoubleRatchetSession(sharedSecret,remoteIdentityPublicKey, logger, options);
+        var session = new DoubleRatchetSession(sharedSecret,remoteIdentityPublicKey, logger, cryptographyOptions);
 
         // 1. The initial RootKey IS the shared secret from the handshake.
         session._rootKey = new RootKey(sharedSecret.Value);
@@ -113,8 +113,11 @@ public class DoubleRatchetSession : IDisposable
         session._receivingChainKey = null;
         session._dhRatchetKey = localEphemeralKey;
 
-        session.LogDebugCryptoMaterial("Initiator session created. Root key hash: {RootKeyHash}",
-            Convert.ToBase64String(SHA256.HashData(session._rootKey.Value)));
+        if (cryptographyOptions.Value.EnableCryptographicMaterialLogging)
+        {
+            logger.LogInformation("Initiator session created. Root key : {RootKey}",
+                Convert.ToBase64String(session._rootKey.Value));
+        }
 
         return session;
     }
@@ -125,23 +128,24 @@ public class DoubleRatchetSession : IDisposable
         RatchetEphemeralKey remoteRatchetPublicKey, 
         ECDiffieHellman localRatchetKey,
         ILogger<DoubleRatchetSession> logger,
-        IOptions<CryptographyOptions> options)
+        IOptions<CryptographyOptions> cryptographyOptions)
     {
         logger.LogDebug("Creating responder session");
         
         // Create Double Ratchet session with shared secret
-        var session = new DoubleRatchetSession(sharedSecret, remoteIdentityPublicKey, logger, options);
+        var session = new DoubleRatchetSession(sharedSecret, remoteIdentityPublicKey, logger, cryptographyOptions);
         
         // Set the local ratchet key provided by the caller
         session._dhRatchetKey = localRatchetKey;
         session._remoteRatchetKey = remoteRatchetPublicKey;
-        
-        // Log the session initialization parameters for debugging
-        session.LogDebugCryptoMaterial("Responder DH key hash: {LocalRatchetKeyHash}", 
-            Convert.ToBase64String(SHA256.HashData(localRatchetKey.PublicKey.ExportSubjectPublicKeyInfo())));
-        
-        session.LogDebugCryptoMaterial("Responder root key hash: {RootKeyHash}", 
-            Convert.ToBase64String(SHA256.HashData(session._rootKey.Value)));
+
+        if (cryptographyOptions.Value.EnableCryptographicMaterialLogging)
+        {
+            logger.LogInformation("Responder DH key: {LocalRatchetKey}", 
+                Convert.ToBase64String(localRatchetKey.PublicKey.ExportSubjectPublicKeyInfo()));
+            logger.LogInformation("Responder root key: {RootKey}", 
+                Convert.ToBase64String(session._rootKey.Value));
+        }
             
         // CRITICAL FIX: Initialize the responder's session state consistently
         // The responder doesn't set up chain keys immediately; this happens
@@ -153,10 +157,14 @@ public class DoubleRatchetSession : IDisposable
         session._sendingCounter = 0;
         session._receivingCounter = 0;
         session._previousChainLength = 0;
-        
-        session._logger.LogInformation("Responder session initialized - waiting for first message. Root key hash: {RootKeyHash}", 
-            Convert.ToBase64String(SHA256.HashData(session._rootKey.Value)));
-        
+
+        if (cryptographyOptions.Value.EnableCryptographicMaterialLogging)
+        {
+            logger.LogInformation(
+                "Responder session initialized - waiting for first message. Root key : {RootKey}",
+                Convert.ToBase64String(session._rootKey.Value));
+        }
+
         return session;
     }
     
@@ -253,10 +261,14 @@ public class DoubleRatchetSession : IDisposable
         // Extract header and ciphertext from the message
         var header = cipherMessage.GetHeader();
         var ciphertext = cipherMessage.GetCiphertext();
-        
+
+        if (_cryptographyOptions.EnableCryptographicMaterialLogging)
+        {
+            _logger.LogInformation("Decrypting message with header: RatchetKey hash={RatchetKey}", 
+                Convert.ToBase64String(header.RatchetKey.Value));
+        }
         // Log message details for debugging
-        _logger.LogInformation("Decrypting message with header: RatchetKey hash={RatchetKeyHash}, Counter={Counter}, PreviousChainLength={PreviousChainLength}, Current state: SendingCounter={SendingCounter}, ReceivingCounter={ReceivingCounter}, MyPreviousChainLength={MyPreviousChainLength}", 
-            Convert.ToBase64String(SHA256.HashData(header.RatchetKey.Value)),
+        _logger.LogDebug("Decrypting message with header: Counter={Counter}, PreviousChainLength={PreviousChainLength}, Current state: SendingCounter={SendingCounter}, ReceivingCounter={ReceivingCounter}, MyPreviousChainLength={MyPreviousChainLength}", 
             header.Counter,
             header.PreviousChainLength,
             _sendingCounter,
@@ -286,11 +298,13 @@ public class DoubleRatchetSession : IDisposable
         {
             // This message has a new ratchet key from the other party
             _logger.LogDebug("New ratchet key detected, performing DH ratchet");
-            
-            // CRITICAL FIX: Before DH ratchet, log state values for diagnostics
-            LogDebugCryptoMaterial("Before DH ratchet - Root key hash: {RootKeyHash}, Previous chain length: {PreviousChainLength}", 
-                Convert.ToBase64String(SHA256.HashData(_rootKey.Value)), 
-                _previousChainLength);
+
+            if (_cryptographyOptions.EnableCryptographicMaterialLogging)
+            {
+                _logger.LogInformation("Before DH ratchet - Root key : {RootKey}, Previous chain length: {PreviousChainLength}", 
+                    Convert.ToBase64String(_rootKey.Value), 
+                    _previousChainLength);
+            }
                 
             // CRITICAL FIX: Store our sending counter as our previous chain length
             // before performing the ratchet
@@ -299,11 +313,13 @@ public class DoubleRatchetSession : IDisposable
             
             // CRITICAL FIX: Perform the DH ratchet with the new ratchet key
             DoDhRatchet(header.RatchetKey);
-            
-            // CRITICAL FIX: After DH ratchet, log state values for diagnostics
-            LogDebugCryptoMaterial("After DH ratchet - Root key hash: {RootKeyHash}, Previous chain length: {PreviousChainLength}", 
-                Convert.ToBase64String(SHA256.HashData(_rootKey.Value)), 
-                _previousChainLength);
+
+            if (_cryptographyOptions.EnableCryptographicMaterialLogging)
+            {
+                _logger.LogInformation("After DH ratchet - Root key : {RootKey}, Previous chain length: {PreviousChainLength}", 
+                    Convert.ToBase64String(_rootKey.Value), 
+                    _previousChainLength);
+            }
         }
         
         // Symmetrically ratchet forward to the current message.
@@ -317,8 +333,11 @@ public class DoubleRatchetSession : IDisposable
         // Derive the message key
         var messageKey = CryptoUtils.KDF(null, _receivingChainKey.Value, "message-key-kdf", CryptoUtils.KeySize);
 
-        LogDebugCryptoMaterial("Decryption message key hash: {MessageKeyHash}", 
-            Convert.ToBase64String(SHA256.HashData(messageKey)));
+        if (_cryptographyOptions.EnableCryptographicMaterialLogging)
+        {
+            _logger.LogInformation("Decryption message key : {MessageKey}", 
+                Convert.ToBase64String(messageKey));
+        }
 
         // Advance the receiving chain key
         _receivingChainKey = new ChainKey(CryptoUtils.KDF(null, _receivingChainKey.Value, "ratchet-chain-kdf", CryptoUtils.KeySize));
@@ -329,14 +348,17 @@ public class DoubleRatchetSession : IDisposable
         try
         {
             var associatedData = SessionRatchetMessage.GetAssociatedData(header, new byte[0]);
-            
-            // Log detailed header and associated data information
-            _logger.LogInformation("Decryption header - RatchetKey hash: {RatchetKeyHash}, Counter: {Counter}, PreviousChainLength: {PreviousChainLength}", 
-                Convert.ToBase64String(SHA256.HashData(header.RatchetKey.Value)),
-                header.Counter,
-                header.PreviousChainLength);
-            _logger.LogInformation("Decryption associated data hash: {AssociatedDataHash}", 
-                Convert.ToBase64String(SHA256.HashData(associatedData)));
+
+            if (_cryptographyOptions.EnableCryptographicMaterialLogging)
+            {
+                // Log detailed header and associated data information
+                _logger.LogInformation("Decryption header - RatchetKey : {RatchetKey}, Counter: {Counter}, PreviousChainLength: {PreviousChainLength}", 
+                    Convert.ToBase64String(header.RatchetKey.Value),
+                    header.Counter,
+                    header.PreviousChainLength);
+                _logger.LogInformation("Decryption associated data : {AssociatedData}", 
+                    Convert.ToBase64String(associatedData));
+            }
                 
             var decryptedBytes = CryptoUtils.DecryptAesGcm(ciphertext.Value, messageKey, associatedData);
             return new Plaintext(decryptedBytes);
@@ -354,8 +376,11 @@ public class DoubleRatchetSession : IDisposable
         if (_skippedMessageKeys.TryGetValue(key, out messageKey))
         {
             _skippedMessageKeys.Remove(key);
-            LogDebugCryptoMaterial("Using skipped message key for ratchet key hash {RatchetKeyHash} and counter {Counter}", 
-                Convert.ToBase64String(SHA256.HashData(ratchetKey.Value)), counter);
+            if (_cryptographyOptions.EnableCryptographicMaterialLogging)
+            {
+                _logger.LogInformation("Using skipped message key for ratchet key  {RatchetKey} and counter {Counter}", 
+                    Convert.ToBase64String(ratchetKey.Value), counter);
+            }
             return true;
         }
         
@@ -413,21 +438,27 @@ public class DoubleRatchetSession : IDisposable
         // _dhRatchetKey is our current key pair.
         var dhSecret = _dhRatchetKey!.DeriveKeyMaterial(remoteKeyHandle.PublicKey);
 
-        // Log the secret and root key for diagnostics.
-        LogDebugCryptoMaterial("DH Secret hash: {DhSecretHash}",
-            Convert.ToBase64String(SHA256.HashData(dhSecret)));
-        LogDebugCryptoMaterial("Old Root key hash: {OldRootKeyHash}",
-            Convert.ToBase64String(SHA256.HashData(_rootKey.Value)));
+        if (_cryptographyOptions.EnableCryptographicMaterialLogging)
+        {
+            // Log the secret and root key for diagnostics.
+            _logger.LogInformation("DH Secret : {DhSecret}",
+                Convert.ToBase64String(dhSecret));
+            _logger.LogInformation("Old Root key : {OldRootKey}",
+                Convert.ToBase64String(_rootKey.Value));
+        }
 
         // Use a KDF to derive the new Root Key and a new Receiving Chain Key from the DH secret.
         var kdfResult = CryptoUtils.KDF(_rootKey.Value, dhSecret, "ratchet-kdf", CryptoUtils.KeySize * 2);
         _rootKey = new RootKey(kdfResult[..CryptoUtils.KeySize]);
         _receivingChainKey = new ChainKey(kdfResult[CryptoUtils.KeySize..]);
 
-        LogDebugCryptoMaterial("New Root key hash: {NewRootKeyHash}",
-            Convert.ToBase64String(SHA256.HashData(_rootKey.Value)));
-        LogDebugCryptoMaterial("New Receiving Chain key hash: {NewReceivingChainKeyHash}",
-            Convert.ToBase64String(SHA256.HashData(_receivingChainKey.Value)));
+        if (_cryptographyOptions.EnableCryptographicMaterialLogging)
+        {
+            _logger.LogInformation("New Root key : {NewRootKey}",
+                Convert.ToBase64String(_rootKey.Value));
+            _logger.LogInformation("New Receiving Chain key : {NewReceivingChainKey}",
+                Convert.ToBase64String(_receivingChainKey.Value));
+        }
 
         // We also need to generate a new key pair for OUR next message, but we don't use it yet.
         _dhRatchetKey.Dispose(); // Dispose of the old key pair.
@@ -444,14 +475,6 @@ public class DoubleRatchetSession : IDisposable
     {
         _dhRatchetKey?.Dispose();
         GC.SuppressFinalize(this);
-    }
-
-    private void LogDebugCryptoMaterial(string message, params object[] args)
-    {
-        if (_options.EnableCryptographicMaterialLogging)
-        {
-            _logger.LogDebug(message, args);
-        }
     }
 
     public class DoubleRatchetSessionState

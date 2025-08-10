@@ -48,7 +48,7 @@ public class FileBasedDoubleRatchetSessionStore : IDoubleRatchetSessionStore
             {
                 if (_logger.IsEnabled(LogLevel.Trace))
                 {
-                    var rootKeyHash = state.RootKey != null ? Convert.ToBase64String(SHA256.HashData(state.RootKey.Value)) : "null";
+                    var rootKeyHash = state.RootKey != null ? Convert.ToBase64String(state.RootKey.Value) : "null";
                     _logger.LogTrace("Session {SessionId} deserialized - RootKey hash: {RootKeyHash}", 
                         sessionId, rootKeyHash);
                 }
@@ -74,9 +74,9 @@ public class FileBasedDoubleRatchetSessionStore : IDoubleRatchetSessionStore
     {
         if (_logger.IsEnabled(LogLevel.Trace))
         {
-            var rootKeyHash = sessionState.RootKey != null ? Convert.ToBase64String(SHA256.HashData(sessionState.RootKey.Value)) : "null";
-            _logger.LogTrace("Storing session {SessionId} - RootKey hash: {RootKeyHash}", 
-                sessionId, rootKeyHash);
+            var rootKey = sessionState.RootKey != null ? Convert.ToBase64String(sessionState.RootKey.Value) : "null";
+            _logger.LogTrace("Storing session {SessionId} - RootKey : {RootKey}", 
+                sessionId, rootKey);
         }
 
         if (_options.EnableCryptographicMaterialLogging)

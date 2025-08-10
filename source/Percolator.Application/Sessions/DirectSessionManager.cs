@@ -19,7 +19,7 @@ public class DirectSessionManager : IDirectSessionManager
     private readonly ActiveIdentityContext _activeIdentityContext;
     private readonly ILogger<DirectSessionManager> _logger;
     private readonly ILoggerFactory _loggerFactory;
-    private readonly IOptions<CryptographyOptions> _options;
+    private readonly IOptions<CryptographyOptions> _cryptographyOptions;
     private readonly ConcurrentDictionary<SessionId, SemaphoreSlim> _sessionLocks = new();
 
     public DirectSessionManager(
@@ -28,14 +28,14 @@ public class DirectSessionManager : IDirectSessionManager
         ActiveIdentityContext activeIdentityContext,
         ILogger<DirectSessionManager> logger,
         ILoggerFactory loggerFactory,
-        IOptions<CryptographyOptions> options)
+        IOptions<CryptographyOptions> cryptographyOptions)
     {
         _sessionStore = sessionStore;
         _conversationRepository = conversationRepository;
         _activeIdentityContext = activeIdentityContext;
         _logger = logger;
         _loggerFactory = loggerFactory;
-        _options = options;
+        _cryptographyOptions = cryptographyOptions;
     }
 
     public async Task EstablishSessionAsInitiatorAsync(SessionId conversationId,
@@ -48,11 +48,13 @@ public class DirectSessionManager : IDirectSessionManager
         if (_activeIdentityContext.Keys is null)
             throw new InvalidOperationException("Identity context not loaded");
 
-        // Log key materials (hashes only for security)
-        _logger.LogWarning("Initiator establishing session with remote ratchet key hash: {RemoteRatchetKeyHash}, shared secret hash: {SharedSecretHash}", 
-            Convert.ToBase64String(SHA256.HashData(remoteRatchetKey.Value)),
-            Convert.ToBase64String(SHA256.HashData(sharedSecret.Value)));
-
+        if (_cryptographyOptions.Value.EnableCryptographicMaterialLogging)
+        {
+            _logger.LogInformation("Initiator establishing session with remote ratchet key : {RemoteRatchetKey}, shared secret : {SharedSecret}", 
+                Convert.ToBase64String(remoteRatchetKey.Value),
+                Convert.ToBase64String(sharedSecret.Value));
+        }
+        
         // Create the session directly in Crypto domain
         var sessionLogger = _loggerFactory.CreateLogger<DoubleRatchetSession>();
         var session = DoubleRatchetSession.AsInitiator(
@@ -61,7 +63,7 @@ public class DirectSessionManager : IDirectSessionManager
             remoteRatchetKey,
             localEphemeralKey,
             sessionLogger,
-            _options);
+            _cryptographyOptions);
 
         var sessionId = new SessionId(conversationId.Value);
         _logger.LogInformation("Establish session as initiator for conversation {ConversationId}. SessionId: {SessionId}", conversationId, sessionId);
@@ -72,14 +74,20 @@ public class DirectSessionManager : IDirectSessionManager
         // Log state properties to verify consistency
         if (state.RootKey != null)
         {
-            _logger.LogWarning("Initiator session root key hash: {RootKeyHash}", 
-                Convert.ToBase64String(SHA256.HashData(state.RootKey.Value)));
+            if (_cryptographyOptions.Value.EnableCryptographicMaterialLogging)
+            {
+                _logger.LogInformation("Initiator session root key: {RootKey}", 
+                    Convert.ToBase64String(state.RootKey.Value));
+            }
         }
         
         if (state.TheirDhRatchetPublicKey != null)
         {
-            _logger.LogWarning("Initiator session stored remote ratchet key hash: {StoredRatchetKeyHash}", 
-                Convert.ToBase64String(SHA256.HashData(state.TheirDhRatchetPublicKey.Value)));
+            if (_cryptographyOptions.Value.EnableCryptographicMaterialLogging)
+            {
+                _logger.LogInformation("Initiator session stored remote ratchet key : {StoredRatchetKey}", 
+                    Convert.ToBase64String(state.TheirDhRatchetPublicKey.Value));
+            }
         }
         
         await _sessionStore.SetSessionStateAsync(sessionId, state);
@@ -94,10 +102,12 @@ public class DirectSessionManager : IDirectSessionManager
         ECDiffieHellman privateKeyUsedInHandshake,
         SharedSecret sharedSecret)
     {
-        // Log key materials (hashes only for security)
-        _logger.LogWarning("Responder establishing session with provided key hash: {LocalRatchetKeyHash}, shared secret hash: {SharedSecretHash}", 
-            Convert.ToBase64String(SHA256.HashData(privateKeyUsedInHandshake.PublicKey.ExportSubjectPublicKeyInfo())),
-            Convert.ToBase64String(SHA256.HashData(sharedSecret.Value)));
+        if (_cryptographyOptions.Value.EnableCryptographicMaterialLogging)
+        {
+            _logger.LogInformation("Responder establishing session with provided key : {LocalRatchetKey}, shared secret : {SharedSecret}", 
+                Convert.ToBase64String(privateKeyUsedInHandshake.PublicKey.ExportSubjectPublicKeyInfo()),
+                Convert.ToBase64String(sharedSecret.Value));
+        }
 
         // Create the session directly in Crypto domain
         var sessionLogger = _loggerFactory.CreateLogger<DoubleRatchetSession>();
@@ -107,7 +117,7 @@ public class DirectSessionManager : IDirectSessionManager
             remoteRatchetPublicKey,
             privateKeyUsedInHandshake,
             sessionLogger,
-            _options);
+            _cryptographyOptions);
 
         var sessionId = new SessionId(conversationId.Value);
         _logger.LogInformation("Establish session as responder for conversation {ConversationId}. SessionId: {SessionId}", conversationId, sessionId);
@@ -116,16 +126,16 @@ public class DirectSessionManager : IDirectSessionManager
         var state = session.GetState();
         
         // Log state properties to verify consistency
-        if (state.RootKey != null)
+        if (state.RootKey != null && _cryptographyOptions.Value.EnableCryptographicMaterialLogging)
         {
-            _logger.LogWarning("Responder session root key hash: {RootKeyHash}", 
-                Convert.ToBase64String(SHA256.HashData(state.RootKey.Value)));
+            _logger.LogInformation("Responder session root key : {RootKey}", 
+                Convert.ToBase64String(state.RootKey.Value));
         }
         
-        if (state.DhRatchetPrivateKey != null)
+        if (state.DhRatchetPrivateKey != null && _cryptographyOptions.Value.EnableCryptographicMaterialLogging)
         {
-            _logger.LogWarning("Responder session stored local ratchet private key hash: {StoredRatchetPrivateKeyHash}", 
-                Convert.ToBase64String(SHA256.HashData(state.DhRatchetPrivateKey.Value)));
+            _logger.LogInformation("Responder session stored local ratchet private key hash: {StoredRatchetPrivateKeyHash}", 
+                Convert.ToBase64String(state.DhRatchetPrivateKey.Value));
         }
         
         await _sessionStore.SetSessionStateAsync(sessionId, state);
@@ -160,20 +170,19 @@ public class DirectSessionManager : IDirectSessionManager
             {
                 throw new InvalidOperationException($"Double Ratchet session state for conversation {conversationId} not found.");
             }
-            
-            // Add trace logging of session key hashes
-            if (_logger.IsEnabled(LogLevel.Trace))
+
+            if (_cryptographyOptions.Value.EnableCryptographicMaterialLogging)
             {
-                var rootKeyHash = sessionState.RootKey != null 
-                    ? Convert.ToBase64String(SHA256.HashData(sessionState.RootKey.Value)) 
+                var rootKey = sessionState.RootKey != null 
+                    ? Convert.ToBase64String(sessionState.RootKey.Value) 
                     : "null";
-                _logger.LogTrace("Receiver using session {SessionId} - RootKey hash: {RootKeyHash}", 
-                    sessionId, rootKeyHash);
+                _logger.LogInformation("Receiver using session {SessionId} - RootKey hash: {RootKeyHash}", 
+                    sessionId, rootKey);
             }
             
             // Use Crypto domain directly
             var sessionLogger = _loggerFactory.CreateLogger<DoubleRatchetSession>();
-            using var session = new DoubleRatchetSession(sessionState, sessionLogger, _options);
+            using var session = new DoubleRatchetSession(sessionState, sessionLogger, _cryptographyOptions);
             var decryptedPlaintext = session.Decrypt(encryptedMessage);
 
             // Save the updated state
@@ -218,19 +227,18 @@ public class DirectSessionManager : IDirectSessionManager
                 return null;
             }
             
-            // Add trace logging of session key hashes
-            if (_logger.IsEnabled(LogLevel.Trace))
+            if (_cryptographyOptions.Value.EnableCryptographicMaterialLogging)
             {
-                var rootKeyHash = sessionState.RootKey != null 
-                    ? Convert.ToBase64String(SHA256.HashData(sessionState.RootKey.Value)) 
+                var rootKey = sessionState.RootKey != null 
+                    ? Convert.ToBase64String(sessionState.RootKey.Value)
                     : "null";
                 _logger.LogTrace("Encryptor using session {SessionId} - RootKey hash: {RootKeyHash}", 
-                    sessionId, rootKeyHash);
+                    sessionId, rootKey);
             }
             
             // Use Crypto domain directly
             var sessionLogger = _loggerFactory.CreateLogger<DoubleRatchetSession>();
-            using var session = new DoubleRatchetSession(sessionState, sessionLogger, _options);
+            using var session = new DoubleRatchetSession(sessionState, sessionLogger, _cryptographyOptions);
             var encryptedMessage = session.Encrypt(plaintext);
 
             // Save the updated state

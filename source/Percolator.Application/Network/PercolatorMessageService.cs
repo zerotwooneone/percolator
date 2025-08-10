@@ -85,8 +85,8 @@ namespace Percolator.Application.Network
                 _logger.LogInformation("X3DH handshake processed successfully as Initiator.");
 
                 // Look up the peer by their public identity agreement key.
-                var ideneityAgreementKeyBytes = request.InitiatorBundle.IdentityAgreementKey.ToByteArray();
-                var directMessagePublicKey = new DirectMessagePublicKey(ideneityAgreementKeyBytes);
+                var remoteIdentityAgreementKeyBytes = request.InitiatorBundle.IdentityAgreementKey.ToByteArray();
+                var directMessagePublicKey = new DirectMessagePublicKey(remoteIdentityAgreementKeyBytes);
                 var connnectionInfo =
                     await _peerConnectionRepository.GetByDirectMessage(directMessagePublicKey);
                 
@@ -136,10 +136,9 @@ namespace Percolator.Application.Network
                 // If the peer is unknown, create a new record for them.
                 if (peer is null)
                 {
-                    var publicKeyHash = new PublicKeyHash(SHA1.HashData(ideneityAgreementKeyBytes));
-                    _logger.LogInformation("Peer with key hash {KeyHash} is unknown. Creating a new peer record", Convert.ToBase64String(publicKeyHash.Value));
+                    _logger.LogInformation("Peer with key hash {KeyHash} is unknown. Creating a new peer record", Convert.ToBase64String(remoteIdentityAgreementKeyBytes));
                     // For now, we'll auto-generate a name.
-                    var newPeerName = $"Peer-{Convert.ToBase64String(publicKeyHash.Value)}";
+                    var newPeerName = $"Peer-{Convert.ToBase64String(remoteIdentityAgreementKeyBytes)}";
                     
                     peer = new IdentityPeer(new IdentityPeerId(connnectionInfo.Id.Value), newPeerName);
                     await _peerRepository.AddAsync(peer);

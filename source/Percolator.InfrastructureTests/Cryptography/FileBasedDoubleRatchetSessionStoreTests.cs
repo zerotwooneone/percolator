@@ -47,8 +47,8 @@ public class FileBasedDoubleRatchetSessionStoreTests
         var originalState = CreateTestSessionState();
         
         // Calculate hash of original root key
-        var originalRootKeyHash = originalState.RootKey.Value != null 
-            ? Convert.ToBase64String(SHA256.HashData(originalState.RootKey.Value))
+        var originalRootKey = originalState.RootKey.Value != null 
+            ? Convert.ToBase64String(originalState.RootKey.Value)
             : "null";
         _mockSelfIdentityProvider.Setup(p => p.Get()).Returns(new PeerId(Guid.Parse("141db673-cdaa-439e-bd05-c550f78394a5")));
         
@@ -60,10 +60,10 @@ public class FileBasedDoubleRatchetSessionStoreTests
         Assert.That(retrievedState, Is.Not.Null);
         
         // Verify root key is preserved
-        var retrievedRootKeyHash = retrievedState.RootKey.Value != null 
-            ? Convert.ToBase64String(SHA256.HashData(retrievedState.RootKey.Value))
+        var retrievedRootKey = retrievedState.RootKey.Value != null 
+            ? Convert.ToBase64String(retrievedState.RootKey.Value)
             : "null";
-        Assert.That(retrievedRootKeyHash, Is.EqualTo(originalRootKeyHash));
+        Assert.That(retrievedRootKey, Is.EqualTo(originalRootKey));
         Assert.That(retrievedState.RootKey.Value, Is.EqualTo(originalState.RootKey.Value));
         
         // Verify sending chain key

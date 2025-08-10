@@ -41,8 +41,6 @@ public class IdentityOrchestrator : IIdentityOrchestrator
         _activeIdentityContext.Identity = identity;
         _activeIdentityContext.Keys = keys;
 
-        var publicKeyHash = new PublicKeyHash(SHA256.HashData(keys.IdentitySigningKey.ExportSubjectPublicKeyInfo()));
-
-        _logger.LogInformation("Successfully loaded identity {IdentityName} with public key hash {PublicKeyHash}", identityName, Convert.ToBase64String(System.Security.Cryptography.SHA256.HashData(publicKeyHash.Value)));
+        _logger.LogInformation("Successfully loaded identity {IdentityName} with public key {PublicKey}", identityName, Convert.ToBase64String(keys.IdentitySigningKey.ExportSubjectPublicKeyInfo()));
     }
 }
