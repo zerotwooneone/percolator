@@ -55,6 +55,11 @@ public class MessageService : IMessageService
         {
             throw new InvalidOperationException($"Double Ratchet session state for conversation {conversationId} not found.");
         }
+
+        if (sessionState.TheirIdentityPublicKey == null)
+        {
+            throw new InvalidOperationException($"Double Ratchet session state for conversation {conversationId} does not have their identity public key. There is no channel id for this conversation.");
+        }
         _logger.LogInformation("Sending message to conversation {ConversationId}", conversationId);
        
         // Create a proper InternalEnvelope with a ChatEnvelope containing a TextMessage
@@ -112,11 +117,17 @@ public class MessageService : IMessageService
                 null // No name for direct conversations
             );
             
+            // Add the message to the conversation
+            _logger.LogInformation("Adding message to NEW conversation {ConversationId} with channel ID {ChannelId}", conversationId, Convert.ToBase64String(sessionState.TheirIdentityPublicKey.Value));
+            conversation.AddMessage(senderParticipantId, content);
             await _conversationRepository.AddAsync(conversation);
         }
+        else
+        {
+            conversation.AddMessage(senderParticipantId, content);
+            _logger.LogInformation("Adding message to conversation {ConversationId} with channel ID {ChannelId}", conversationId, Convert.ToBase64String(sessionState.TheirIdentityPublicKey.Value));
+            await _conversationRepository.UpdateAsync(conversation);
+        }
         
-        // Add the message to the conversation
-        conversation.AddMessage(senderParticipantId, content);
-        await _conversationRepository.UpdateAsync(conversation);
     }
 }

@@ -156,7 +156,7 @@ namespace Percolator.Application.Network
                         new(peer.Id.Value)
                     };
                     
-                    _logger.LogInformation("Creating new conversation with participants  {Participants}", string.Join(", ", participants));
+                    _logger.LogInformation("Creating new conversation with participants  {Participants} channel ID {ChannelId}", string.Join(", ", participants), Convert.ToBase64String(channelId.Value));
 
                     conversation = new ChatConversation(
                         ChatConversationId.NewId(),
