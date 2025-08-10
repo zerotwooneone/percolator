@@ -1,15 +1,14 @@
 using System.Security.Cryptography;
 using Percolator.Cryptography;
-using ContractsPreKeyBundle = Percolator.Contracts.PreKeyBundle;
 
 namespace Percolator.Application.KeyExchange;
 
 public interface IX3DHOrchestrator
 {
-    SharedSecret InitiateHandshake(ContractsPreKeyBundle remotePreKeyBundle, ECDiffieHellman ephemeralKey);
+    SharedSecret InitiateHandshake(X3dPreKeyBundle remotePreKeyBundle, ECDiffieHellman ephemeralKey);
 
     HandshakeResponse CompleteHandshake(
-        ContractsPreKeyBundle remotePreKeyBundle, 
+        X3dPreKeyBundle remotePreKeyBundle, 
         byte[] remoteEphemeralPublicKey,
         ECDiffieHellman? localOneTimePreKey);
 }

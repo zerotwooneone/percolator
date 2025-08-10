@@ -18,7 +18,17 @@ namespace Percolator.Application.Network
         /// <returns>The response from the remote endpoint</returns>
         Task<EstablishSessionResponse> EstablishSessionAsync(
             DnsEndPoint endpoint, 
-            EstablishSessionRequest request, 
-            X509Certificate2? remoteCert = null);
+            EstablishSessionRequest request);
+        
+        /// <summary>
+        /// Establishes a gRPC session with a remote endpoint with trust-on-first-use (TOFU) support
+        /// </summary>
+        /// <param name="endpoint">The endpoint to connect to</param>
+        /// <param name="request">The request to send</param>
+        /// <param name="remoteCert">The certificate to trust, if provided</param>
+        /// <returns>The response from the remote endpoint</returns>
+        Task<EstablishSessionResponse> EstablishDirectSessionAsync(
+            DnsEndPoint endpoint, 
+            EstablishSessionRequest request);
     }
 }

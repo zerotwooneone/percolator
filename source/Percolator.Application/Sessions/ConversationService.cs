@@ -3,6 +3,8 @@ using Percolator.Application.Network;
 using Percolator.Chat;
 using Percolator.Contracts;
 using Percolator.Identity;
+using IdentityPeer = Percolator.Identity.Peer;
+using IdentityPeerId = Percolator.Identity.PeerId;
 using Percolator.Network;
 using System.Net;
 using Google.Protobuf;
@@ -10,13 +12,12 @@ using Percolator.Application.Identity;
 using Percolator.Application.KeyExchange;
 using Percolator.Chat.ValueObjects;
 using Percolator.Cryptography;
+using CryptoSignature = Percolator.Cryptography.Signature;
 using ChatConversation = Percolator.Chat.Conversation;
 using ChatConversationId = Percolator.Chat.ValueObjects.ConversationId;
 using ChatParticipantId = Percolator.Chat.ValueObjects.ParticipantId;
 using NetworkPeerId = Percolator.Network.PeerId;
-using IdentityPeerId = Percolator.Identity.PeerId;
 using ContractsPreKeyBundle = Percolator.Contracts.PreKeyBundle;
-using IdentityPeer = Percolator.Identity.Peer;
 
 namespace Percolator.Application.Sessions
 {
@@ -103,33 +104,42 @@ namespace Percolator.Application.Sessions
 
                 var signedPreKeyPublicBytes =
                     _activeIdentityContext.Keys.SignedPreKey.PublicKey.ExportSubjectPublicKeyInfo();
+                var directPayload = new DirectInitiatorPayload
+                {
+                    //todo: get from config
+                    CallbackPort = 92382,
+                    SignedPreKey = ByteString.CopyFrom(signedPreKeyPublicBytes)
+                };
+
+                var signedPayload = directPayload.ToByteString();
                 // Prepare handshake request
-                var signPreKey = _x3DhManager.SignPreKey(_activeIdentityContext.Keys.IdentitySigningKey,
-                    new PreKey(signedPreKeyPublicBytes));
+                var signedPayloadBytes = _x3DhManager.SignPreKey(_activeIdentityContext.Keys.IdentitySigningKey,
+                    new PreKey(signedPayload.ToByteArray()));
 
                 // Log the key formats being used
                 _logger.LogDebug(
                     "Initiating handshake with keys - SignedPreKey length: {Length}, Signature length: {SigLength}",
-                    signedPreKeyPublicBytes.Length, signPreKey.Value.Length);
+                    signedPreKeyPublicBytes.Length, signedPayloadBytes.Value.Length);
 
+                
                 var request = new EstablishSessionRequest
                 {
                     InitiatorBundle = new ContractsPreKeyBundle
                     {
                         IdentityAgreementKey = Google.Protobuf.ByteString.CopyFrom(_activeIdentityContext.Keys
                             .IdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
-                        SignedPayload = Google.Protobuf.ByteString.CopyFrom(signedPreKeyPublicBytes),
+                        SignedPayload = signedPayload,
                         IdentitySigningKey = Google.Protobuf.ByteString.CopyFrom(_activeIdentityContext.Keys
                             .IdentitySigningKey.ExportSubjectPublicKeyInfo()),
                         OneTimePreKey = oneTimePreKey is null
                             ? ByteString.Empty
                             : Google.Protobuf.ByteString.CopyFrom(oneTimePreKey.PublicKey.ExportSubjectPublicKeyInfo()),
-                        PreKeySignature = ByteString.CopyFrom(signPreKey.Value)
+                        PreKeySignature = ByteString.CopyFrom(signedPayloadBytes.Value)
                     }
                 };
 
                 _logger.LogInformation("Sending session request to {Endpoint}", endpoint);
-                var message = await _grpcSessionService.EstablishSessionAsync(endpoint, request);
+                var message = await _grpcSessionService.EstablishDirectSessionAsync(endpoint, request);
                 if (message.MessageCase != EstablishSessionResponse.MessageOneofCase.Response)
                 {
                     //todo: handle not until
@@ -138,9 +148,19 @@ namespace Percolator.Application.Sessions
                 var response = message.Response!;
                 _logger.LogInformation("Received session response from peer.");
 
+                var responderPayload =DirectResponderPayload.Parser.ParseFrom(response.ResponderBundle.SignedPayload);
+                var remoteBundle = new X3dPreKeyBundle(
+                    new RatchetIdentityKey(response.ResponderBundle.IdentitySigningKey.ToByteArray()),
+                    new RatchetAgreementKey(response.ResponderBundle.IdentityAgreementKey.ToByteArray()),
+                    new PreKey(responderPayload.SignedPreKey.ToByteArray()),
+                    new CryptoSignature(response.ResponderBundle.PreKeySignature.ToByteArray()),
+                    oneTimePreKey is null
+                        ? null
+                        : new OneTimeKey(oneTimePreKey.PublicKey.ExportSubjectPublicKeyInfo()));
+                
                 var handshakeResult = _orchestrator.CompleteHandshake(
-                    response.ResponderBundle, // Alice's bundle from the response
-                    response.ResponderBundle.SignedPayload.ToByteArray(), // Alice's ephemeral key from the response
+                    remoteBundle, // Alice's bundle from the response
+                    responderPayload.SignedPreKey.ToByteArray(), // Alice's ephemeral key from the response
                     oneTimePreKey
                 );
                 _logger.LogInformation("Handshake completed locally as Responder.");
@@ -148,14 +168,14 @@ namespace Percolator.Application.Sessions
                 // Get or create the peer
                 if (remotePeer == null)
                 {
-                    remotePeer = await CreatePeerAsync(remotePeerName, response.ResponderBundle, endpoint);
+                    remotePeer = await CreatePeerAsync(remotePeerName, handshakeResult.ResponderBundle, endpoint);
                 }
 
                 // Create a new conversation
                 var conversation = new ChatConversation(
-                    new ChatConversationId(Guid.Parse(response.SessionId)),
-                    new ChannelId(response.ResponderBundle.IdentitySigningKey.ToByteArray()),
-                    new List<ChatParticipantId> {new(_activeIdentityContext.Identity!.Id), new(remotePeer.Id.Value)},
+                    new ChatConversationId(Guid.Parse(responderPayload.SessionId)),
+                    new ChannelId(handshakeResult.ResponderBundle.IdentitySigningKey.Value),
+                    new List<ChatParticipantId> { new(_activeIdentityContext.Identity!.Id), new(remotePeer.Id.Value) },
                     new List<Message>(),
                     remotePeerName);
 
@@ -165,9 +185,8 @@ namespace Percolator.Application.Sessions
                 await _sessionManager.EstablishSessionAsResponderAsync(
                     new SessionId(conversation.Id.Value),
                     new Percolator.Identity.PeerId(remotePeer.Id.Value),
-                    new RatchetIdentityKey(response.ResponderBundle.IdentitySigningKey
-                        .ToByteArray()), // Alice's Public Identity Key
-                    new RatchetEphemeralKey(response.ResponderBundle.SignedPayload
+                    handshakeResult.ResponderBundle.IdentitySigningKey, // Alice's Public Identity Key
+                    new RatchetEphemeralKey(responderPayload.SignedPreKey
                         .ToByteArray()), // Alice's Public Ratchet Key
                     handshakeResult
                         .ResponderPrivateKeyUsed, // The specific one of OUR (Bob's) private keys that was used
@@ -181,21 +200,20 @@ namespace Percolator.Application.Sessions
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to establish secure connection");
-                throw new InvalidOperationException("Failed to establish secure connection", ex);
+                _logger.LogError(ex, "Failed to establish direct conversation with {PeerName}", remotePeerName);
+                throw;
             }
         }
 
-        private async Task<IdentityPeer> CreatePeerAsync(string peerName,
-            ContractsPreKeyBundle responderBundle, DnsEndPoint endpoint)
+        private async Task<Peer> CreatePeerAsync(string name, X3dPreKeyBundle preKeyBundle, DnsEndPoint endpoint)
         {
-            var newPeer = new IdentityPeer(new IdentityPeerId(Guid.NewGuid()), peerName);
+            var newPeer = new IdentityPeer(new IdentityPeerId(Guid.NewGuid()), name);
             await _peerRepository.AddAsync(newPeer);
             var networkPeerId = new NetworkPeerId(newPeer.Id.Value);
             var timeStamp=DateTime.UtcNow;
             var peerConnection = new PeerConnection(
                 networkPeerId, 
-                new DirectMessagePublicKey( responderBundle.IdentitySigningKey.ToByteArray()), 
+                new DirectMessagePublicKey( preKeyBundle.IdentitySigningKey.Value), 
                 new List<GrpcEndPoint>{new GrpcEndPoint(endpoint,timeStamp)},
                 new List<TlsCertificate>(),timeStamp);
             await _peerConnectionRepository.SaveAsync(peerConnection);

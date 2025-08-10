@@ -18,6 +18,7 @@ using IdentityPeer = Percolator.Identity.Peer;
 using IdentityPeerId = Percolator.Identity.PeerId;
 using Percolator.Chat.ValueObjects;
 using Percolator.Cryptography;
+using CryptoSignature = Percolator.Cryptography.Signature;
 using PreKeyBundle = Percolator.Contracts.PreKeyBundle;
 
 namespace Percolator.Application.Network
@@ -55,24 +56,112 @@ namespace Percolator.Application.Network
 
         public override async Task<EstablishSessionResponse> EstablishSession(EstablishSessionRequest request, ServerCallContext context)
         {
+            byte[] GetResponsePayload(SessionId sessionId, PreKey preKey) => new HandshakePayload
+            {
+                SessionId = sessionId.ToString(),
+                SignedPreKey = ByteString.CopyFrom(preKey.Value)
+            }.ToByteArray();
+            return await Inner_EstablishSessionResponse(
+                request, 
+                context, 
+                requestPayload => requestPayload, 
+                GetResponsePayload);
+        }
+        
+        public override async Task<EstablishSessionResponse> EstablishDirectSession(EstablishSessionRequest request, ServerCallContext context)
+        {
+            var payload = DirectInitiatorPayload.Parser.ParseFrom(request.InitiatorBundle.SignedPayload);
+            if(!payload.HasCallbackPort || payload.CallbackPort < 1024 || payload.CallbackPort > 65535)
+            {
+                throw new RpcException(new Status(StatusCode.FailedPrecondition, $"Invalid callback port: {payload.CallbackPort}"));
+            }
+            uint callbackPort = payload.CallbackPort;
+            
+            var remoteIdentitySigningKeyBytes = request.InitiatorBundle.IdentitySigningKey.ToByteArray();
+            var networkIdentitySigningKey = new DirectMessagePublicKey(remoteIdentitySigningKeyBytes);
+            var peerConnectionInfo =
+                await _peerConnectionRepository.GetByDirectMessage(networkIdentitySigningKey);
+            var timestamp = DateTimeOffset.Now;
+            
+            var peerGrpcEnpointParts = context.Peer.Split(':').Skip(1).ToArray();
+            if (peerGrpcEnpointParts.Length != 2)
+            {
+                throw new RpcException(new Status(StatusCode.FailedPrecondition, $"Invalid endpoint: {context.Peer}"));
+            }
+            var peerEndPoint = new DnsEndPoint(peerGrpcEnpointParts[0], (int)callbackPort);
+                
+            if (peerConnectionInfo is null)
+            {
+                _logger.LogWarning("No connection info found for peer {DirectMessagePublicKey}. Creating a new connection record", Convert.ToBase64String(networkIdentitySigningKey.Value));
+                
+                var grpcEndPoint = new GrpcEndPoint(peerEndPoint, timestamp);
+                peerConnectionInfo = new PeerConnection(
+                    new NetworkPeerId(Guid.NewGuid()),
+                    networkIdentitySigningKey,
+                    grpcEndPoint is null ? [] : new[] { grpcEndPoint },
+                    new List<TlsCertificate>(),
+                    timestamp);
+            }
+            else
+            {
+                var grpcEndPoint = peerConnectionInfo.GrpcEndPoints.FirstOrDefault(e => e.EndPoint.Equals(peerEndPoint));
+                if (grpcEndPoint is null)
+                {
+                    _logger.LogWarning("No gRPC endpoints found for peer {DirectMessagePublicKey}. Adding a new one", Convert.ToBase64String(networkIdentitySigningKey.Value));
+                    peerConnectionInfo.AddGrpcEndPoint(new GrpcEndPoint(peerEndPoint, timestamp));
+                }
+                else
+                {
+                    peerConnectionInfo.UpdateLastSeen(grpcEndPoint,timestamp);
+                }
+            }
+            await _peerConnectionRepository.SaveAsync(peerConnectionInfo);
+            
+            return await Inner_EstablishSessionResponse(
+                request, 
+                context,
+                GetPreKeyFromRequestPayload,
+                GetResponsePayload);
+            
+            byte[] GetPreKeyFromRequestPayload(byte[] _)
+            {
+                return payload.SignedPreKey.ToByteArray();
+            }
+
+            byte[] GetResponsePayload(SessionId sessionId, PreKey preKey) => new DirectResponderPayload
+            {
+                SessionId = sessionId.ToString(),
+                SignedPreKey = ByteString.CopyFrom(preKey.Value),
+                //Port = we do not set the port because they already called us!
+            }.ToByteArray();
+        }
+
+        private async Task<EstablishSessionResponse> Inner_EstablishSessionResponse(
+            EstablishSessionRequest request, 
+            ServerCallContext context,
+            Func<byte[], byte[]> GetPreKeyFromRequestPayload,
+            Func<SessionId,PreKey,byte[]> GetResponsePayload)
+        {
             _logger.LogInformation("EstablishSession invoked by peer {Peer}", context.Peer);
 
             var clientCertificate = await context.GetHttpContext().Connection.GetClientCertificateAsync();
             if (clientCertificate is null)
             {
-                _logger.LogWarning("Handshake failed: Client did not provide a certificate...");
+                _logger.LogWarning("Client did not provide a certificate...");
                 //throw new RpcException(new Status(StatusCode.PermissionDenied, "Client certificate is required."));
             }
-            
-            _logger.LogInformation("Client certificate provided. Subject: {Subject}, Issuer: {Issuer}", clientCertificate?.Subject, clientCertificate?.Issuer);
+            else
+            {
+                _logger.LogInformation("Client certificate provided. Subject: {Subject}, Issuer: {Issuer}", clientCertificate.Subject, clientCertificate.Issuer);
+            }
 
             try
             {
                 //The client certificate's public key is used as the peer's identity key.
-                _logger.LogInformation("Received request to establish a new session.");
+                _logger.LogInformation("Received request to establish a new session");
                 if (_activeIdentityContext.Identity is null)
                 {
-                    _logger.LogError("Local peer identity has not been established. Cannot respond to handshake.");
+                    _logger.LogError("Local peer identity has not been established. Cannot respond to handshake");
                     throw new RpcException(new Status(StatusCode.FailedPrecondition, "Server identity not initialized."));
                 }
 
@@ -80,9 +169,18 @@ namespace Percolator.Application.Network
                 _logger.LogInformation("Processing X3DH handshake with initiator bundle. Examining bundle properties...");
 
                 var ephemeralKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-                
-                var sharedSecret = _x3dhOrchestrator.InitiateHandshake(request.InitiatorBundle, ephemeralKey);
-                _logger.LogInformation("X3DH handshake processed successfully as Initiator.");
+                var preKeyBytes = GetPreKeyFromRequestPayload(request.InitiatorBundle.SignedPayload.ToByteArray());
+
+                var prekeyBundle = new X3dPreKeyBundle(
+                    new RatchetIdentityKey(request.InitiatorBundle.IdentitySigningKey.ToByteArray()),
+                    new RatchetAgreementKey(request.InitiatorBundle.IdentityAgreementKey.ToByteArray()),
+                    new PreKey(preKeyBytes),
+                    new CryptoSignature(request.InitiatorBundle.PreKeySignature.ToByteArray()),
+                    request.InitiatorBundle.HasOneTimePreKey
+                        ? new OneTimeKey(request.InitiatorBundle.OneTimePreKey.ToByteArray())
+                        : null);
+                var sharedSecret = _x3dhOrchestrator.InitiateHandshake(prekeyBundle, ephemeralKey);
+                _logger.LogInformation("X3DH handshake processed successfully as Initiator");
 
                 // Look up the peer by their public identity agreement key.
                 var remoteIdentitySigningKeyBytes = request.InitiatorBundle.IdentitySigningKey.ToByteArray();
@@ -90,46 +188,8 @@ namespace Percolator.Application.Network
                 var connnectionInfo =
                     await _peerConnectionRepository.GetByDirectMessage(networkIdentitySigningKey);
                 
-                var timestamp = DateTimeOffset.Now;
-                
-                //todo: this is not the correct peer endpoint. we need to send the endpoint from the peer
-                var dnsEndpointParts = context.Peer.Split(':').Skip(1).ToArray();
-                if (dnsEndpointParts.Length != 2)
-                {
-                    throw new RpcException(new Status(StatusCode.FailedPrecondition, $"Invalid endpoint: {context.Peer}"));
-                }
-                if(!int.TryParse(dnsEndpointParts[1], out var port) || port <= 0 || port > 65535) 
-                {
-                    throw new RpcException(new Status(StatusCode.FailedPrecondition, "Invalid port."));
-                }
-                var ipEndPoint = new DnsEndPoint(dnsEndpointParts[0], port);
-                
-                if (connnectionInfo is null)
-                {
-                    _logger.LogWarning("No connection info found for peer {directMessagePublicKey}. Creating a new connection record.", Convert.ToBase64String(networkIdentitySigningKey.Value));
-                    connnectionInfo = new PeerConnection(
-                        new NetworkPeerId(Guid.NewGuid()),
-                        networkIdentitySigningKey,
-                        [new GrpcEndPoint(ipEndPoint, timestamp)],
-                        new List<TlsCertificate>(),
-                        timestamp);
-                }
-                else
-                {
-                    var grpcEndPoint = connnectionInfo.GrpcEndPoints.FirstOrDefault(e => e.EndPoint.Equals(ipEndPoint));
-                    if (grpcEndPoint is null)
-                    {
-                        _logger.LogWarning("No gRPC endpoints found for peer {directMessagePublicKey}. Adding a new one.", Convert.ToBase64String(networkIdentitySigningKey.Value));
-                        connnectionInfo.AddGrpcEndPoint(new GrpcEndPoint(ipEndPoint, timestamp));
-                    }
-                    else
-                    {
-                        connnectionInfo.UpdateLastSeen(grpcEndPoint,timestamp);
-                    }
-                }
-                await _peerConnectionRepository.SaveAsync(connnectionInfo);
                 var networkPeerId = new NetworkPeerId(connnectionInfo.Id.Value);
-                _logger.LogInformation("Connection info saved for peer {networkPeerId}", networkPeerId.Value);
+                _logger.LogInformation("Connection info saved for peer {NetworkPeerId}", networkPeerId.Value);
                 
                 var peer = await _peerRepository.GetByIdAsync(new IdentityPeerId(networkPeerId.Value));
 
@@ -172,12 +232,14 @@ namespace Percolator.Application.Network
                         var testConversation = await _conversationRepository.GetByChannelIdAsync(channelId);
                         _logger.LogWarning("Retrieved conversation with participants {Participants} ", string.Join(", ", testConversation!.Participants));
                     }
+
+                    var cryptoSessionId = new SessionId(conversation.Id.Value);
                     
                     await _sessionManager.EstablishSessionAsInitiatorAsync(
-                        new SessionId(conversation.Id.Value),
+                        cryptoSessionId,
                         new IdentityPeerId(peer.Id.Value),
                         new RatchetIdentityKey(request.InitiatorBundle.IdentityAgreementKey.ToByteArray()),
-                        new RatchetEphemeralKey(request.InitiatorBundle.SignedPayload.ToByteArray()),
+                        new RatchetEphemeralKey(preKeyBytes),
                         sharedSecret, 
                         ephemeralKey);
                     _logger.LogInformation("Successfully established session {SessionId} with peer {PeerId}", conversation.Id, peer.Id);
@@ -190,7 +252,7 @@ namespace Percolator.Application.Network
                     IdentityAgreementKey = ByteString.CopyFrom(_activeIdentityContext.Keys.IdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
 
                     // Your new Ephemeral Key for this session. We can place it in the SignedPreKey field.
-                    SignedPayload = ByteString.CopyFrom(ephemeralKey.PublicKey.ExportSubjectPublicKeyInfo()),
+                    SignedPayload = ByteString.CopyFrom(GetResponsePayload(new SessionId(conversation.Id.Value), new PreKey(ephemeralKey.PublicKey.ExportSubjectPublicKeyInfo()))),
 
                     // You must sign the key you are sending.
                     PreKeySignature = ByteString.CopyFrom(_x3DhManager.SignPreKey(
@@ -203,7 +265,6 @@ namespace Percolator.Application.Network
                 {
                     Response = new EstablishSessionResponse.Types.Response
                     {
-                        SessionId = conversation.Id.Value.ToString(),
                         ResponderBundle = responseBundle
                     },
                 };

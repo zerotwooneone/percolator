@@ -35,11 +35,24 @@ namespace Percolator.Application.Network
 
         public async Task<EstablishSessionResponse> EstablishSessionAsync(
             DnsEndPoint endpoint, 
-            EstablishSessionRequest request,
-            X509Certificate2? remoteCert = null)
+            EstablishSessionRequest request)
+        {
+            return await Inner_EstablishSession(endpoint, async (client, cancellationToken) => await client.EstablishSessionAsync(request, cancellationToken: cancellationToken));
+        }
+        
+        public async Task<EstablishSessionResponse> EstablishDirectSessionAsync(
+            DnsEndPoint endpoint, 
+            EstablishSessionRequest request)
+        {
+            return await Inner_EstablishSession(endpoint, async (client, cancellationToken) => await client.EstablishDirectSessionAsync(request, cancellationToken: cancellationToken));
+        }
+
+        private async Task<EstablishSessionResponse> Inner_EstablishSession(
+            DnsEndPoint endpoint, 
+            Func<TransportService.TransportServiceClient,CancellationToken,Task<EstablishSessionResponse>> getResponse)
         {
             string connectionKey = $"{endpoint.Host}:{endpoint.Port}";
-            
+
             try
             {
                 _logger.LogInformation("Establishing session with {Endpoint}", endpoint);
@@ -49,8 +62,8 @@ namespace Percolator.Application.Network
                 
                 // Determine if we're connecting to localhost
                 bool isLocalConnection = endpoint.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase) || 
-                                        IPAddress.TryParse(endpoint.Host, out var ip) && 
-                                        (IPAddress.IsLoopback(ip) || ip.Equals(IPAddress.Any));
+                                         IPAddress.TryParse(endpoint.Host, out var ip) && 
+                                         (IPAddress.IsLoopback(ip) || ip.Equals(IPAddress.Any));
                 
                 _logger.LogInformation("Connection to {Endpoint} identified as {ConnectionType}", 
                     endpoint, isLocalConnection ? "local" : "remote");
@@ -202,7 +215,7 @@ namespace Percolator.Application.Network
                 using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(300));
 
                 try {
-                    var response = await client.EstablishSessionAsync(request, cancellationToken: cts.Token);
+                    var response = await getResponse(client, cts.Token);
                     _logger.LogInformation("Session successfully established with {Endpoint}", endpoint);
                     return response;
                 }

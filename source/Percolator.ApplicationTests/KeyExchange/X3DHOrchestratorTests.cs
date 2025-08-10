@@ -76,14 +76,14 @@ public class X3DHOrchestratorTests : IDisposable
         // Arrange
         var remoteSignedPreKeyBytes = _remoteSignedPreKey.PublicKey.ExportSubjectPublicKeyInfo();
         var remoteIdentitySigningKeyBytes = _remoteIdentitySigningKey.ExportSubjectPublicKeyInfo();
-        var remoteBundle = new ContractsPreKeyBundle
-        {
-            IdentityAgreementKey = ByteString.CopyFrom(_remoteIdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
-            IdentitySigningKey = ByteString.CopyFrom(remoteIdentitySigningKeyBytes),
-            SignedPayload = ByteString.CopyFrom(remoteSignedPreKeyBytes),
-            PreKeySignature = ByteString.CopyFrom(_remoteIdentitySigningKey.SignData(remoteSignedPreKeyBytes, HashAlgorithmName.SHA256, DSASignatureFormat.IeeeP1363FixedFieldConcatenation)),
-            OneTimePreKey = ByteString.CopyFrom(_remoteOneTimePreKey.PublicKey.ExportSubjectPublicKeyInfo())
-        };
+        var remoteBundle = new X3dPreKeyBundle
+        (
+            new RatchetIdentityKey(remoteIdentitySigningKeyBytes),
+            new RatchetAgreementKey(_remoteIdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
+            new PreKey(remoteSignedPreKeyBytes),
+            new Signature(_remoteIdentitySigningKey.SignData(remoteSignedPreKeyBytes, HashAlgorithmName.SHA256, DSASignatureFormat.IeeeP1363FixedFieldConcatenation)),
+            new OneTimeKey(_remoteOneTimePreKey.PublicKey.ExportSubjectPublicKeyInfo())
+        );
 
         var expectedSharedSecret = new SharedSecret(new byte[32]);
         Random.Shared.NextBytes(expectedSharedSecret.Value);
@@ -97,7 +97,7 @@ public class X3DHOrchestratorTests : IDisposable
 
         _mockX3dhManager
             .Setup(x => x.InitiateHandshake(
-                It.IsAny<CryptoPreKeyBundle>(),
+                It.IsAny<X3dPreKeyBundle>(),
                 It.IsAny<ECDiffieHellman>(),
                 It.IsAny<ECDiffieHellman>()))
             .Returns(expectedSharedSecret);
@@ -109,7 +109,7 @@ public class X3DHOrchestratorTests : IDisposable
         result.Should().NotBeNull();
         result.Value.Should().BeEquivalentTo(expectedSharedSecret.Value);
         _mockX3dhManager.Verify(x => x.InitiateHandshake(
-            It.Is<CryptoPreKeyBundle>(b => b.IdentitySigningKey.Value.SequenceEqual(remoteIdentitySigningKeyBytes)),
+            It.Is<X3dPreKeyBundle>(b => b.IdentitySigningKey.Value.SequenceEqual(remoteIdentitySigningKeyBytes)),
             It.IsAny<ECDiffieHellman>(),
             It.IsAny<ECDiffieHellman>()), Times.Once);
     }
@@ -120,14 +120,14 @@ public class X3DHOrchestratorTests : IDisposable
         // Arrange
         var remoteSignedPreKeyBytes = _remoteSignedPreKey.PublicKey.ExportSubjectPublicKeyInfo();
         var remoteIdentitySigningKeyBytes = _remoteIdentitySigningKey.ExportSubjectPublicKeyInfo();
-        var remoteBundle = new ContractsPreKeyBundle
-        {
-            IdentityAgreementKey = ByteString.CopyFrom(_remoteIdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
-            IdentitySigningKey = ByteString.CopyFrom(remoteIdentitySigningKeyBytes),
-            SignedPayload = ByteString.CopyFrom(remoteSignedPreKeyBytes),
-            PreKeySignature = ByteString.CopyFrom(_remoteIdentitySigningKey.SignData(remoteSignedPreKeyBytes, HashAlgorithmName.SHA256, DSASignatureFormat.IeeeP1363FixedFieldConcatenation)),
-            // OneTimePreKey intentionally omitted
-        };
+        var remoteBundle = new X3dPreKeyBundle
+        (
+            new RatchetIdentityKey(remoteIdentitySigningKeyBytes),
+            new RatchetAgreementKey(_remoteIdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
+            new PreKey(remoteSignedPreKeyBytes),
+            new Signature(_remoteIdentitySigningKey.SignData(remoteSignedPreKeyBytes, HashAlgorithmName.SHA256, DSASignatureFormat.IeeeP1363FixedFieldConcatenation)),
+            null // OneTimePreKey intentionally omitted
+        );
 
         var expectedSharedSecret = new SharedSecret(new byte[32]);
         Random.Shared.NextBytes(expectedSharedSecret.Value);
@@ -141,7 +141,7 @@ public class X3DHOrchestratorTests : IDisposable
 
         _mockX3dhManager
             .Setup(x => x.InitiateHandshake(
-                It.IsAny<CryptoPreKeyBundle>(),
+                It.IsAny<X3dPreKeyBundle>(),
                 It.IsAny<ECDiffieHellman>(),
                 It.IsAny<ECDiffieHellman>()))
             .Returns(expectedSharedSecret);
@@ -155,7 +155,7 @@ public class X3DHOrchestratorTests : IDisposable
         
         // Verify that InitiateHandshake was called with a null one-time prekey
         _mockX3dhManager.Verify(x => x.InitiateHandshake(
-            It.Is<CryptoPreKeyBundle>(b => 
+            It.Is<X3dPreKeyBundle>(b => 
                 b.IdentitySigningKey.Value.SequenceEqual(remoteIdentitySigningKeyBytes) && 
                 b.OneTimePreKey == null),
             It.IsAny<ECDiffieHellman>(),
@@ -168,13 +168,14 @@ public class X3DHOrchestratorTests : IDisposable
         // Arrange
         var remoteIdentitySigningKeyBytes = _remoteIdentitySigningKey.ExportSubjectPublicKeyInfo();
         var remoteSignedPreKeyBytes = _remoteSignedPreKey.PublicKey.ExportSubjectPublicKeyInfo();
-        var remoteBundle = new ContractsPreKeyBundle
-        {
-            IdentityAgreementKey = ByteString.CopyFrom(_remoteIdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
-            IdentitySigningKey = ByteString.CopyFrom(remoteIdentitySigningKeyBytes),
-            SignedPayload = ByteString.CopyFrom(remoteSignedPreKeyBytes),
-            PreKeySignature = ByteString.CopyFrom(_remoteIdentitySigningKey.SignData(remoteSignedPreKeyBytes, HashAlgorithmName.SHA256, DSASignatureFormat.IeeeP1363FixedFieldConcatenation))
-        };
+        var remoteBundle = new X3dPreKeyBundle
+        (
+            new RatchetIdentityKey(remoteIdentitySigningKeyBytes),
+            new RatchetAgreementKey(_remoteIdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
+            new PreKey(remoteSignedPreKeyBytes),
+            new Signature(_remoteIdentitySigningKey.SignData(remoteSignedPreKeyBytes, HashAlgorithmName.SHA256, DSASignatureFormat.IeeeP1363FixedFieldConcatenation)),
+            null
+        );
 
         var expectedSharedSecret = new SharedSecret(new byte[32]);
         Random.Shared.NextBytes(expectedSharedSecret.Value);
@@ -216,16 +217,17 @@ public class X3DHOrchestratorTests : IDisposable
     {
         // Arrange
         var remoteIdentitySigningKeyBytes = _remoteIdentitySigningKey.ExportSubjectPublicKeyInfo();
-        var remoteBundle = new ContractsPreKeyBundle
-        {
-            IdentityAgreementKey = ByteString.CopyFrom(_remoteIdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
-            IdentitySigningKey = ByteString.CopyFrom(remoteIdentitySigningKeyBytes),
-            SignedPayload = ByteString.CopyFrom(_remoteSignedPreKey.PublicKey.ExportSubjectPublicKeyInfo()),
-            PreKeySignature = ByteString.CopyFrom(_remoteIdentitySigningKey.SignData(
+        var remoteBundle = new X3dPreKeyBundle
+        (
+            new RatchetIdentityKey(remoteIdentitySigningKeyBytes),
+            new RatchetAgreementKey(_remoteIdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
+            new PreKey(_remoteSignedPreKey.PublicKey.ExportSubjectPublicKeyInfo()),
+            new Signature(_remoteIdentitySigningKey.SignData(
                 _remoteSignedPreKey.PublicKey.ExportSubjectPublicKeyInfo(), 
                 HashAlgorithmName.SHA256, 
-                DSASignatureFormat.IeeeP1363FixedFieldConcatenation))
-        };
+                DSASignatureFormat.IeeeP1363FixedFieldConcatenation)),
+            null
+        );
 
         using var ephemeralKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var ephemeralKeyBytes = ephemeralKey.PublicKey.ExportSubjectPublicKeyInfo();
@@ -260,6 +262,6 @@ public class X3DHOrchestratorTests : IDisposable
         result.Should().NotBeNull();
         result.ResponderBundle.Should().NotBeNull();
         result.ResponderBundle.OneTimePreKey.Should().NotBeNull();
-        result.ResponderBundle.OneTimePreKey.ToByteArray().Should().BeEquivalentTo(oneTimeKeyPublic);
+        result.ResponderBundle.OneTimePreKey.Value.Should().BeEquivalentTo(oneTimeKeyPublic);
     }
 }

@@ -51,10 +51,8 @@ message EstablishSessionResponse {
     message Response {
         // The protocol version.
         optional uint32 version = 1;
-        // The session ID for the newly established session.
-        optional string session_id = 2;
         // The responder's pre-key bundle.
-        optional PreKeyBundle responder_bundle = 3;
+        optional PreKeyBundle responder_bundle = 2;
     }
     message NotBefore {
         // The protocol version.
@@ -70,6 +68,37 @@ message EstablishSessionResponse {
         Response response=3;
         NotBefore not_before=4;        
     }    
+}
+
+message HandshakePayload {
+    optional uint32 version = 1;
+    // The public part of the ephemeral key for this handshake.
+    optional bytes signed_pre_key = 2;
+
+    // The unique ID for the session.
+    // This is EMPTY when sent by the initiator.
+    // This is FILLED IN and signed by the responder.
+    optional string session_id = 3;
+}
+
+message DirectInitiatorPayload {
+    optional uint32 version = 1;
+    // The public part of the ephemeral key for this handshake.
+    optional bytes signed_pre_key = 2;
+
+    // The port the peer is listening on for a direct connection.
+    optional uint32 callback_port = 3;
+}
+
+message DirectResponderPayload {
+    optional uint32 version = 1;
+    // The public part of the ephemeral key for this handshake.
+    optional bytes signed_pre_key = 2;
+
+    // The unique ID for the session.
+    // This is EMPTY when sent by the initiator.
+    // This is FILLED IN and signed by the responder.
+    optional string session_id = 3;
 }
 
 // Request to create a new group session.

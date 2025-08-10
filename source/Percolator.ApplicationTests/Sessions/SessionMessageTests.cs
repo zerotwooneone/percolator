@@ -192,12 +192,12 @@ public class SessionMessageTests
         var bobSignature = x3dhManager.SignPreKey(bobIdentitySigningKey, new CryptoPreKey(bobSignedPreKey.PublicKey.ExportSubjectPublicKeyInfo()));
 
         // Alice receives Bob's pre-key bundle
-        var bobPreKeyBundle = new CryptoPreKeyBundle(
-            bobIdentitySigningKey.ExportSubjectPublicKeyInfo(),
-            bobIdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo(),
-            bobSignature,
-            bobSignedPreKey.PublicKey.ExportSubjectPublicKeyInfo(),
-            bobOneTimePreKey.PublicKey.ExportSubjectPublicKeyInfo()
+        var bobPreKeyBundle = new X3dPreKeyBundle(
+            new RatchetIdentityKey( bobIdentitySigningKey.ExportSubjectPublicKeyInfo()),
+            new RatchetAgreementKey(bobIdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
+            new PreKey( bobSignedPreKey.PublicKey.ExportSubjectPublicKeyInfo()),
+            new Signature(bobSignature.Value),
+            new OneTimeKey( bobOneTimePreKey.PublicKey.ExportSubjectPublicKeyInfo())
         );
 
         // Alice initiates the handshake to calculate her shared secret
