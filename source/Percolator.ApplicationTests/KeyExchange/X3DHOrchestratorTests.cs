@@ -81,7 +81,6 @@ public class X3DHOrchestratorTests : IDisposable
             new RatchetIdentityKey(remoteIdentitySigningKeyBytes),
             new RatchetAgreementKey(_remoteIdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
             new PreKey(remoteSignedPreKeyBytes),
-            new Signature(_remoteIdentitySigningKey.SignData(remoteSignedPreKeyBytes, HashAlgorithmName.SHA256, DSASignatureFormat.IeeeP1363FixedFieldConcatenation)),
             new OneTimeKey(_remoteOneTimePreKey.PublicKey.ExportSubjectPublicKeyInfo())
         );
 
@@ -125,7 +124,6 @@ public class X3DHOrchestratorTests : IDisposable
             new RatchetIdentityKey(remoteIdentitySigningKeyBytes),
             new RatchetAgreementKey(_remoteIdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
             new PreKey(remoteSignedPreKeyBytes),
-            new Signature(_remoteIdentitySigningKey.SignData(remoteSignedPreKeyBytes, HashAlgorithmName.SHA256, DSASignatureFormat.IeeeP1363FixedFieldConcatenation)),
             null // OneTimePreKey intentionally omitted
         );
 
@@ -167,20 +165,12 @@ public class X3DHOrchestratorTests : IDisposable
     {
         // Arrange
         var remoteIdentitySigningKeyBytes = _remoteIdentitySigningKey.ExportSubjectPublicKeyInfo();
-        var remoteSignedPreKeyBytes = _remoteSignedPreKey.PublicKey.ExportSubjectPublicKeyInfo();
-        var remoteBundle = new X3dPreKeyBundle
-        (
-            new RatchetIdentityKey(remoteIdentitySigningKeyBytes),
-            new RatchetAgreementKey(_remoteIdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
-            new PreKey(remoteSignedPreKeyBytes),
-            new Signature(_remoteIdentitySigningKey.SignData(remoteSignedPreKeyBytes, HashAlgorithmName.SHA256, DSASignatureFormat.IeeeP1363FixedFieldConcatenation)),
-            null
-        );
-
+        var ratchetIdentityKey = new RatchetIdentityKey(remoteIdentitySigningKeyBytes);
+        
         var expectedSharedSecret = new SharedSecret(new byte[32]);
         Random.Shared.NextBytes(expectedSharedSecret.Value);
         using var ephemeralKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        var ephemeralKeyBytes = ephemeralKey.PublicKey.ExportSubjectPublicKeyInfo();
+        var ratchetEphemeralKey = new RatchetEphemeralKey(ephemeralKey.PublicKey.ExportSubjectPublicKeyInfo());
 
         _mockX3dhManager.Setup(x => x.VerifySignature(
                 It.IsAny<RatchetIdentityKey>(),
@@ -189,8 +179,8 @@ public class X3DHOrchestratorTests : IDisposable
             .Returns(true);
 
         _mockX3dhManager.Setup(x => x.RespondToHandshake(
-                It.Is<RatchetIdentityKey>(k => k.Value.SequenceEqual(_remoteIdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo())),
-                It.Is<RatchetEphemeralKey>(k => k.Value.SequenceEqual(ephemeralKeyBytes)),
+                It.Is<RatchetIdentityKey>(k => k.Value.SequenceEqual(ratchetIdentityKey.Value)),
+                It.Is<RatchetEphemeralKey>(k => k.Value.SequenceEqual(ratchetEphemeralKey.Value)),
                 It.Is<PrivateAgreementKey>(k => k.Value.SequenceEqual(_localKeys.IdentityAgreementKey.ExportECPrivateKey())),
                 It.Is<PrivatePreKey>(k => k.Value.SequenceEqual(_localKeys.SignedPreKey.ExportECPrivateKey())),
                 It.IsAny<PrivateOneTimeKey>()))
@@ -202,7 +192,10 @@ public class X3DHOrchestratorTests : IDisposable
             .Returns(new Signature(new byte[64]));
 
         // Act
-        var result = _orchestrator.CompleteHandshake(remoteBundle, ephemeralKeyBytes, ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256));
+        var result = _orchestrator.CompleteHandshake(
+            ratchetIdentityKey,
+            ratchetEphemeralKey,
+            ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256));
 
         // Assert
         result.Should().NotBeNull();
@@ -217,23 +210,12 @@ public class X3DHOrchestratorTests : IDisposable
     {
         // Arrange
         var remoteIdentitySigningKeyBytes = _remoteIdentitySigningKey.ExportSubjectPublicKeyInfo();
-        var remoteBundle = new X3dPreKeyBundle
-        (
-            new RatchetIdentityKey(remoteIdentitySigningKeyBytes),
-            new RatchetAgreementKey(_remoteIdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
-            new PreKey(_remoteSignedPreKey.PublicKey.ExportSubjectPublicKeyInfo()),
-            new Signature(_remoteIdentitySigningKey.SignData(
-                _remoteSignedPreKey.PublicKey.ExportSubjectPublicKeyInfo(), 
-                HashAlgorithmName.SHA256, 
-                DSASignatureFormat.IeeeP1363FixedFieldConcatenation)),
-            null
-        );
-
+        var ratchetIdentityKey = new RatchetIdentityKey(remoteIdentitySigningKeyBytes);
+        
         using var ephemeralKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        var ephemeralKeyBytes = ephemeralKey.PublicKey.ExportSubjectPublicKeyInfo();
+        var ratchetEphemeralKey = new RatchetEphemeralKey(ephemeralKey.PublicKey.ExportSubjectPublicKeyInfo());
         
         using var oneTimeKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        var oneTimeKeyBytes = oneTimeKey.ExportECPrivateKey();
         var oneTimeKeyPublic = oneTimeKey.PublicKey.ExportSubjectPublicKeyInfo();
 
         _mockX3dhManager.Setup(x => x.VerifySignature(
@@ -256,7 +238,10 @@ public class X3DHOrchestratorTests : IDisposable
             .Returns(new Signature(new byte[64]));
 
         // Act
-        var result = _orchestrator.CompleteHandshake(remoteBundle, ephemeralKeyBytes, oneTimeKey);
+        var result = _orchestrator.CompleteHandshake(
+            ratchetIdentityKey,
+            ratchetEphemeralKey,
+            oneTimeKey);
 
         // Assert
         result.Should().NotBeNull();

@@ -32,7 +32,6 @@ namespace Percolator.ApplicationTests.Sessions;
 public class ConversationServiceTests
 {
     private Mock<IPeerRepository> _mockPeerRepository;
-    private Mock<ITlsCertificateService> _mockTlsCertificateService;
     private Mock<IX3DHOrchestrator> _mockX3dhOrchestrator;
     private Mock<IDirectSessionManager> _mockDirectSessionManager;
     private Mock<IOneTimeKeyProvider> _mockOneTimeKeyProvider;
@@ -49,7 +48,6 @@ public class ConversationServiceTests
     public void Setup()
     {
         _mockPeerRepository = new Mock<IPeerRepository>();
-        _mockTlsCertificateService = new Mock<ITlsCertificateService>();
         _mockX3dhOrchestrator = new Mock<IX3DHOrchestrator>();
         _mockDirectSessionManager = new Mock<IDirectSessionManager>();
         _mockOneTimeKeyProvider = new Mock<IOneTimeKeyProvider>();
@@ -95,23 +93,24 @@ public class ConversationServiceTests
         _mockPeerRepository.Setup(r => r.GetByNameAsync(peerName)).ReturnsAsync(peer);
         _mockPeerRepository.Setup(r => r.GetByIdAsync(It.Is<IdentityPeerId>(id => id.Value == peer.Id.Value))).ReturnsAsync(peer);
 
-        var directResponderPayload = new DirectResponderPayload
+        // Create valid crypto materials for the mock response
+        using var remoteSigningKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        using var remoteEphemeralKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        var responsePayload = new EstablishSessionResponse.Types.ResponsePayload
         {
+            EphemeralKey = ByteString.CopyFrom(remoteEphemeralKey.PublicKey.ExportSubjectPublicKeyInfo()),
             SessionId = Guid.NewGuid().ToString(),
-            SignedPreKey = ByteString.CopyFrom(new byte[32])
         };
+        var responsePayloadBytes = responsePayload.ToByteString();
+        var signature = remoteSigningKey.SignData(responsePayloadBytes.ToByteArray(), HashAlgorithmName.SHA256);
+        
         var grpcResponse = new EstablishSessionResponse
         {
             Response = new EstablishSessionResponse.Types.Response
             {
-                
-                ResponderBundle = new ContractsPreKeyBundle
-                {
-                    IdentitySigningKey = ByteString.CopyFrom(new byte[32]),
-                    IdentityAgreementKey = ByteString.CopyFrom(new byte[32]),
-                    SignedPayload = directResponderPayload.ToByteString(),
-                    OneTimePreKey = ByteString.CopyFrom(new byte[32]),
-                }
+                IdentitySigningKey = ByteString.CopyFrom(remoteSigningKey.ExportSubjectPublicKeyInfo()),
+                ResponsePayload =  responsePayloadBytes,
+                PayloadSignature = ByteString.CopyFrom(signature)
             }
         };
         _mockGrpcSessionService.Setup(s => s.EstablishDirectSessionAsync(It.IsAny<DnsEndPoint>(), It.IsAny<EstablishSessionRequest>()))
@@ -145,7 +144,6 @@ public class ConversationServiceTests
             new RatchetIdentityKey(new byte[32]),
             new RatchetAgreementKey(new byte[32]),
             new PreKey(new byte[32]),
-            new Signature(new byte[32]),
             new OneTimeKey(new byte[32])
         );
         var handshakeResponse = new HandshakeResponse(
@@ -155,8 +153,8 @@ public class ConversationServiceTests
         );
         _mockX3dhOrchestrator
             .Setup(o => o.CompleteHandshake(
-                It.IsAny<X3dPreKeyBundle>(), 
-                It.IsAny<byte[]>(), 
+                It.IsAny<RatchetIdentityKey>(), 
+                It.IsAny<RatchetEphemeralKey>(),
                 It.IsAny<ECDiffieHellman>()))
             .Returns(handshakeResponse);
 
@@ -213,25 +211,29 @@ public class ConversationServiceTests
         // Arrange
         var endpoint = new DnsEndPoint("localhost", 5001);
         var peerName = "new-peer";
+        var sessionId = Guid.Parse("43e97c9d-5d15-466f-8d0e-4ed1ab1bb7be");
         
         // Setup peer repository to return null (peer does not exist)
         _mockPeerRepository.Setup(r => r.GetByNameAsync(peerName)).ReturnsAsync((Peer)null);
-        var directResponderPayload = new DirectResponderPayload
+        
+        // Create valid crypto materials for the mock response
+        using var remoteSigningKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        using var remoteEphemeralKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        var responsePayload = new EstablishSessionResponse.Types.ResponsePayload
         {
-            SessionId = Guid.NewGuid().ToString(),
-            SignedPreKey = ByteString.CopyFrom(new byte[32])
+            EphemeralKey = ByteString.CopyFrom(remoteEphemeralKey.PublicKey.ExportSubjectPublicKeyInfo()),
+            SessionId = sessionId.ToString(),
         };
+        var responsePayloadBytes = responsePayload.ToByteString();
+        var signature = remoteSigningKey.SignData(responsePayloadBytes.ToByteArray(), HashAlgorithmName.SHA256);
+
         var grpcResponse = new EstablishSessionResponse
         {
             Response = new EstablishSessionResponse.Types.Response
             {
-                ResponderBundle = new ContractsPreKeyBundle
-                {
-                    IdentitySigningKey = ByteString.CopyFrom(new byte[32]),
-                    IdentityAgreementKey = ByteString.CopyFrom(new byte[32]),
-                    SignedPayload = directResponderPayload.ToByteString(),
-                    OneTimePreKey = ByteString.CopyFrom(new byte[32])
-                }
+                IdentitySigningKey = ByteString.CopyFrom(remoteSigningKey.ExportSubjectPublicKeyInfo()),
+                ResponsePayload =  responsePayloadBytes,
+                PayloadSignature = ByteString.CopyFrom(signature)
             }
         };
         _mockGrpcSessionService.Setup(s => s.EstablishDirectSessionAsync(It.IsAny<DnsEndPoint>(), It.IsAny<EstablishSessionRequest>()))
@@ -247,12 +249,12 @@ public class ConversationServiceTests
             .Returns(Task.CompletedTask);
 
         // Setup X3DH orchestrator to return a shared secret
+        var ratchetIdentityKey = new RatchetIdentityKey(new byte[32]);
         var dummyBundle = new X3dPreKeyBundle
         (
-            new RatchetIdentityKey(new byte[32]),
+            ratchetIdentityKey,
             new RatchetAgreementKey(new byte[32]),
             new PreKey(new byte[32]),
-            new Signature(new byte[32]),
             new OneTimeKey(new byte[32])
         );
         var handshakeResponse = new HandshakeResponse(
@@ -262,8 +264,8 @@ public class ConversationServiceTests
         );
         _mockX3dhOrchestrator
             .Setup(o => o.CompleteHandshake(
-                It.IsAny<X3dPreKeyBundle>(), 
-                It.IsAny<byte[]>(),
+                It.IsAny<RatchetIdentityKey>(), 
+                It.IsAny<RatchetEphemeralKey>(),
                 It.IsAny<ECDiffieHellman>()))
             .Returns(handshakeResponse);
 
@@ -303,11 +305,10 @@ public class ConversationServiceTests
 
         // Act
         var result = await _service.CreateDirectConversationAsync(endpoint, peerName);
-
         
         // Assert
         Assert.That(result, Is.Not.EqualTo(default(ChatConversationId)));
-        Assert.That(result.Value, Is.EqualTo(Guid.Parse(directResponderPayload.SessionId)));
+        Assert.That(result.Value, Is.EqualTo(sessionId));
         
         // Verify peer was created with expected name
         _mockPeerRepository.Verify(r => r.AddAsync(It.Is<Peer>(p => p.Name == peerName)), Times.Once);
@@ -320,13 +321,13 @@ public class ConversationServiceTests
         // Verify conversation was created with expected participants
         _mockConversationRepository.Verify(r => r.AddAsync(It.IsAny<ChatConversation>()), Times.Once);
         Assert.That(capturedConversation, Is.Not.Null);
-        Assert.That(capturedConversation.Id.Value, Is.EqualTo(Guid.Parse(directResponderPayload.SessionId)));
+        Assert.That(capturedConversation.Id.Value, Is.EqualTo(sessionId));
         Assert.That(capturedConversation.Name, Is.EqualTo(peerName));
         Assert.That(capturedConversation.Participants, Has.Count.EqualTo(2));
         
         // Verify session was established
         _mockDirectSessionManager.Verify(m => m.EstablishSessionAsResponderAsync(
-            It.Is<Percolator.Cryptography.SessionId>(id => id.Value == Guid.Parse(directResponderPayload.SessionId)),
+            It.Is<Percolator.Cryptography.SessionId>(id => id.Value == sessionId),
             It.IsAny<IdentityPeerId>(), 
             It.IsAny<RatchetIdentityKey>(), 
             It.IsAny<RatchetEphemeralKey>(), 

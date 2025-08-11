@@ -107,7 +107,7 @@ namespace Percolator.Application.Sessions
                 var directPayload = new DirectInitiatorPayload
                 {
                     //todo: get from config
-                    CallbackPort = 92382,
+                    CallbackPort = 52382,
                     SignedPreKey = ByteString.CopyFrom(signedPreKeyPublicBytes)
                 };
 
@@ -134,7 +134,7 @@ namespace Percolator.Application.Sessions
                         OneTimePreKey = oneTimePreKey is null
                             ? ByteString.Empty
                             : Google.Protobuf.ByteString.CopyFrom(oneTimePreKey.PublicKey.ExportSubjectPublicKeyInfo()),
-                        PreKeySignature = ByteString.CopyFrom(signedPayloadBytes.Value)
+                        PayloadSignature = ByteString.CopyFrom(signedPayloadBytes.Value)
                     }
                 };
 
@@ -146,24 +146,23 @@ namespace Percolator.Application.Sessions
                     throw new InvalidOperationException($"Invalid response type:{message.MessageCase}");
                 } 
                 var response = message.Response!;
-                _logger.LogInformation("Received session response from peer.");
+                _logger.LogInformation("Received session response from peer");
 
-                var responderPayload =DirectResponderPayload.Parser.ParseFrom(response.ResponderBundle.SignedPayload);
-                var remoteBundle = new X3dPreKeyBundle(
-                    new RatchetIdentityKey(response.ResponderBundle.IdentitySigningKey.ToByteArray()),
-                    new RatchetAgreementKey(response.ResponderBundle.IdentityAgreementKey.ToByteArray()),
-                    new PreKey(responderPayload.SignedPreKey.ToByteArray()),
-                    new CryptoSignature(response.ResponderBundle.PreKeySignature.ToByteArray()),
-                    oneTimePreKey is null
-                        ? null
-                        : new OneTimeKey(oneTimePreKey.PublicKey.ExportSubjectPublicKeyInfo()));
+                if (!_x3DhManager.VerifySignature(
+                        new RatchetIdentityKey(response.IdentitySigningKey.ToByteArray()),
+                        new PreKey(response.ResponsePayload.ToByteArray()),
+                        new CryptoSignature(response.PayloadSignature.ToByteArray())))
+                {
+                    throw new InvalidOperationException("Invalid signature in response.");
+                }
+                var responderPayload =EstablishSessionResponse.Types.ResponsePayload.Parser.ParseFrom(response.ResponsePayload.ToByteArray());
                 
                 var handshakeResult = _orchestrator.CompleteHandshake(
-                    remoteBundle, // Alice's bundle from the response
-                    responderPayload.SignedPreKey.ToByteArray(), // Alice's ephemeral key from the response
+                    new RatchetIdentityKey(response.IdentitySigningKey.ToByteArray()), 
+                    new RatchetEphemeralKey( responderPayload.EphemeralKey.ToByteArray()),
                     oneTimePreKey
                 );
-                _logger.LogInformation("Handshake completed locally as Responder.");
+                _logger.LogInformation("Handshake completed locally as Responder");
 
                 // Get or create the peer
                 if (remotePeer == null)
@@ -186,8 +185,7 @@ namespace Percolator.Application.Sessions
                     new SessionId(conversation.Id.Value),
                     new Percolator.Identity.PeerId(remotePeer.Id.Value),
                     handshakeResult.ResponderBundle.IdentitySigningKey, // Alice's Public Identity Key
-                    new RatchetEphemeralKey(responderPayload.SignedPreKey
-                        .ToByteArray()), // Alice's Public Ratchet Key
+                    new RatchetEphemeralKey(responderPayload.EphemeralKey.ToByteArray()), // Alice's Public Ratchet Key
                     handshakeResult
                         .ResponderPrivateKeyUsed, // The specific one of OUR (Bob's) private keys that was used
                     new SharedSecret(handshakeResult.SharedSecret.Value)

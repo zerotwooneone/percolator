@@ -187,16 +187,12 @@ public class SessionMessageTests
         var bobIdentityAgreementKey = _bobIdentity.Keys!.IdentityAgreementKey;
         var bobSignedPreKey = _bobIdentity.Keys!.SignedPreKey;
         var bobOneTimePreKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-
-        // Bob creates a signature for his signed pre-key
-        var bobSignature = x3dhManager.SignPreKey(bobIdentitySigningKey, new CryptoPreKey(bobSignedPreKey.PublicKey.ExportSubjectPublicKeyInfo()));
-
+        
         // Alice receives Bob's pre-key bundle
         var bobPreKeyBundle = new X3dPreKeyBundle(
             new RatchetIdentityKey( bobIdentitySigningKey.ExportSubjectPublicKeyInfo()),
             new RatchetAgreementKey(bobIdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
             new PreKey( bobSignedPreKey.PublicKey.ExportSubjectPublicKeyInfo()),
-            new Signature(bobSignature.Value),
             new OneTimeKey( bobOneTimePreKey.PublicKey.ExportSubjectPublicKeyInfo())
         );
 

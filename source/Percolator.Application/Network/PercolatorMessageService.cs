@@ -56,16 +56,10 @@ namespace Percolator.Application.Network
 
         public override async Task<EstablishSessionResponse> EstablishSession(EstablishSessionRequest request, ServerCallContext context)
         {
-            byte[] GetResponsePayload(SessionId sessionId, PreKey preKey) => new HandshakePayload
-            {
-                SessionId = sessionId.ToString(),
-                SignedPreKey = ByteString.CopyFrom(preKey.Value)
-            }.ToByteArray();
             return await Inner_EstablishSessionResponse(
                 request, 
                 context, 
-                requestPayload => requestPayload, 
-                GetResponsePayload);
+                requestPayload => requestPayload);
         }
         
         public override async Task<EstablishSessionResponse> EstablishDirectSession(EstablishSessionRequest request, ServerCallContext context)
@@ -120,30 +114,57 @@ namespace Percolator.Application.Network
             return await Inner_EstablishSessionResponse(
                 request, 
                 context,
-                GetPreKeyFromRequestPayload,
-                GetResponsePayload);
+                GetPreKeyFromRequestPayload);
             
             byte[] GetPreKeyFromRequestPayload(byte[] _)
             {
                 return payload.SignedPreKey.ToByteArray();
             }
-
-            byte[] GetResponsePayload(SessionId sessionId, PreKey preKey) => new DirectResponderPayload
-            {
-                SessionId = sessionId.ToString(),
-                SignedPreKey = ByteString.CopyFrom(preKey.Value),
-                //Port = we do not set the port because they already called us!
-            }.ToByteArray();
         }
 
         private async Task<EstablishSessionResponse> Inner_EstablishSessionResponse(
             EstablishSessionRequest request, 
             ServerCallContext context,
-            Func<byte[], byte[]> GetPreKeyFromRequestPayload,
-            Func<SessionId,PreKey,byte[]> GetResponsePayload)
+            Func<byte[], byte[]> getPreKeyFromRequestPayload)
         {
             _logger.LogInformation("EstablishSession invoked by peer {Peer}", context.Peer);
 
+            if (request.InitiatorBundle is null)
+            {
+                throw new RpcException(new Status(StatusCode.FailedPrecondition, "Initiator bundle is required."));
+            }
+
+            if (!request.InitiatorBundle.HasIdentitySigningKey)
+            {
+                throw new RpcException(new Status(StatusCode.FailedPrecondition, "Initiator bundle must contain identity signing key."));
+            }
+
+            if (!request.InitiatorBundle.HasIdentityAgreementKey)
+            {
+                throw new RpcException(new Status(StatusCode.FailedPrecondition, "Initiator bundle must contain identity agreement key."));
+            }
+
+            if (!request.InitiatorBundle.HasSignedPayload)
+            {
+                throw new RpcException(new Status(StatusCode.FailedPrecondition, "Initiator bundle must contain signed payload."));
+            }
+
+            if (!request.InitiatorBundle.HasPayloadSignature)
+            {
+                throw new RpcException(new Status(StatusCode.FailedPrecondition, "Initiator bundle must contain payload signature."));
+            }
+            var remoteIdentityKey = new RatchetIdentityKey(request.InitiatorBundle.IdentitySigningKey.ToByteArray());
+            var requestPayloadSignature = new CryptoSignature(request.InitiatorBundle.PayloadSignature.ToByteArray());
+            var requestPayload = new PreKey(request.InitiatorBundle.SignedPayload.ToByteArray());
+            if (!_x3DhManager.VerifySignature(
+                    remoteIdentityKey,
+                    requestPayload, 
+                    requestPayloadSignature))
+            {
+                throw new CryptographicException("Invalid signature on signed pre-key.");
+            }
+
+            _logger.LogDebug("Signature verification successful");
             var clientCertificate = await context.GetHttpContext().Connection.GetClientCertificateAsync();
             if (clientCertificate is null)
             {
@@ -169,13 +190,13 @@ namespace Percolator.Application.Network
                 _logger.LogInformation("Processing X3DH handshake with initiator bundle. Examining bundle properties...");
 
                 var ephemeralKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-                var preKeyBytes = GetPreKeyFromRequestPayload(request.InitiatorBundle.SignedPayload.ToByteArray());
+                var preKeyBytes = getPreKeyFromRequestPayload(requestPayload.Value);
 
+                
                 var prekeyBundle = new X3dPreKeyBundle(
-                    new RatchetIdentityKey(request.InitiatorBundle.IdentitySigningKey.ToByteArray()),
+                    remoteIdentityKey,
                     new RatchetAgreementKey(request.InitiatorBundle.IdentityAgreementKey.ToByteArray()),
                     new PreKey(preKeyBytes),
-                    new CryptoSignature(request.InitiatorBundle.PreKeySignature.ToByteArray()),
                     request.InitiatorBundle.HasOneTimePreKey
                         ? new OneTimeKey(request.InitiatorBundle.OneTimePreKey.ToByteArray())
                         : null);
@@ -244,29 +265,22 @@ namespace Percolator.Application.Network
                         ephemeralKey);
                     _logger.LogInformation("Successfully established session {SessionId} with peer {PeerId}", conversation.Id, peer.Id);
                 }
-                
-                var responseBundle = new PreKeyBundle
+
+                var responsePayload = new EstablishSessionResponse.Types.ResponsePayload
                 {
-                    // Your Identity Keys
-                    IdentitySigningKey = ByteString.CopyFrom(_activeIdentityContext.Keys.IdentitySigningKey.ExportSubjectPublicKeyInfo()),
-                    IdentityAgreementKey = ByteString.CopyFrom(_activeIdentityContext.Keys.IdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
-
-                    // Your new Ephemeral Key for this session. We can place it in the SignedPreKey field.
-                    SignedPayload = ByteString.CopyFrom(GetResponsePayload(new SessionId(conversation.Id.Value), new PreKey(ephemeralKey.PublicKey.ExportSubjectPublicKeyInfo()))),
-
-                    // You must sign the key you are sending.
-                    PreKeySignature = ByteString.CopyFrom(_x3DhManager.SignPreKey(
-                        _activeIdentityContext.Keys.IdentitySigningKey,
-                        new PreKey(ephemeralKey.PublicKey.ExportSubjectPublicKeyInfo())
-                    ).Value)
-                };
-                
+                    EphemeralKey = ByteString.CopyFrom(ephemeralKey.PublicKey.ExportSubjectPublicKeyInfo()),
+                    SessionId = conversation.Id.ToString()
+                }.ToByteString();
+                var signedPayloadBytes = _x3DhManager.SignPreKey(_activeIdentityContext.Keys.IdentitySigningKey,
+                    new PreKey(responsePayload.ToByteArray()));
                 return new EstablishSessionResponse
                 {
                     Response = new EstablishSessionResponse.Types.Response
                     {
-                        ResponderBundle = responseBundle
-                    },
+                        IdentitySigningKey = ByteString.CopyFrom(_activeIdentityContext.Keys.IdentitySigningKey.ExportSubjectPublicKeyInfo()),
+                        ResponsePayload = responsePayload,
+                        PayloadSignature = ByteString.CopyFrom(signedPayloadBytes.Value)
+                    }
                 };
             }
             catch (Exception ex)

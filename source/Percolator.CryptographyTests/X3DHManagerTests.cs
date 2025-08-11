@@ -30,13 +30,11 @@ public class X3DHManagerTests
 
         // --- Bob creates his pre-key bundle ---
         var bobSignedPreKeyPublicKey = new PreKey(bobSignedPreKey.PublicKey.ExportSubjectPublicKeyInfo());
-        var bobSignature = manager.SignPreKey(bobIdentitySigningKey, bobSignedPreKeyPublicKey);
-
+        
         var bobPreKeyBundle = new X3dPreKeyBundle(
             new RatchetIdentityKey(bobIdentitySigningKey.ExportSubjectPublicKeyInfo()),
             new RatchetAgreementKey( bobIdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
             new PreKey(bobSignedPreKeyPublicKey.Value),
-            new Signature(bobSignature.Value),
             new OneTimeKey(bobOneTimePreKey.ExportSubjectPublicKeyInfo())
             );
 
@@ -125,13 +123,11 @@ public class X3DHManagerTests
 
         // Bob creates pre-key bundle without one-time pre-key
         var bobSignedPreKeyPublicKey = new PreKey(bobSignedPreKey.PublicKey.ExportSubjectPublicKeyInfo());
-        var bobSignature = manager.SignPreKey(bobIdentitySigningKey, bobSignedPreKeyPublicKey);
-
+        
         var bobPreKeyBundle = new X3dPreKeyBundle(
             new RatchetIdentityKey(bobIdentitySigningKey.ExportSubjectPublicKeyInfo()),
             new RatchetAgreementKey( bobIdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
             new PreKey(bobSignedPreKeyPublicKey.Value),
-            bobSignature,
             null // No one-time pre-key
         );
 

@@ -40,17 +40,6 @@ public class X3DHOrchestrator : IX3DHOrchestrator
                     remotePreKeyBundle.OneTimePreKey.Value.Length);
             }
 
-            // Step 1: Verify the signature on the signed pre-key.
-            if (!_x3DhManager.VerifySignature(
-                    remotePreKeyBundle.IdentitySigningKey,
-                    remotePreKeyBundle.SignedPreKey, 
-                    remotePreKeyBundle.PreKeySignature))
-            {
-                throw new CryptographicException("Invalid signature on signed pre-key.");
-            }
-
-            _logger.LogDebug("Signature verification successful");
-            
             var sharedSecret = _x3DhManager.InitiateHandshake(
                 remotePreKeyBundle,
                 ephemeralKey,
@@ -71,8 +60,8 @@ public class X3DHOrchestrator : IX3DHOrchestrator
     }
 
     public HandshakeResponse CompleteHandshake(
-        X3dPreKeyBundle remotePreKeyBundle, 
-        byte[] remoteEphemeralPublicKey,
+        RatchetIdentityKey remoteIdentityKey,
+        RatchetEphemeralKey remoteEphemeralKey,
         ECDiffieHellman? localOneTimePreKey)
     {
         if (_activeIdentityContext.Keys is not
@@ -83,15 +72,6 @@ public class X3DHOrchestrator : IX3DHOrchestrator
             })
         {
             throw new InvalidOperationException("Active identity is not fully initialized for X3DH handshake.");
-        }
-
-        // CRITICAL: Verify the signature on the initiator's signed pre-key to prevent MITM attacks.
-        if (!_x3DhManager.VerifySignature(
-                remotePreKeyBundle.IdentitySigningKey,
-                remotePreKeyBundle.SignedPreKey,
-                remotePreKeyBundle.PreKeySignature))
-        {
-            throw new CryptographicException("Invalid signature on initiator's signed pre-key.");
         }
 
         // Store which private key is actually used in handshake
@@ -114,8 +94,8 @@ public class X3DHOrchestrator : IX3DHOrchestrator
 
         //todo: figure out if this agreement -> identity switch is a problem
         var sharedSecret = _x3DhManager.RespondToHandshake(
-            new RatchetIdentityKey(remotePreKeyBundle.IdentityAgreementKey.Value),
-            new RatchetEphemeralKey(remoteEphemeralPublicKey),
+            remoteIdentityKey,
+            remoteEphemeralKey,
             new PrivateAgreementKey(identityAgreementKey.ExportECPrivateKey()),
             new PrivatePreKey(signedPreKey.ExportECPrivateKey()),
             oneTimePreKey is not null ? new PrivateOneTimeKey(oneTimePreKey.ExportECPrivateKey()) : null);
@@ -127,7 +107,6 @@ public class X3DHOrchestrator : IX3DHOrchestrator
                 new RatchetIdentityKey(identitySigningKey.ExportSubjectPublicKeyInfo()),
                 new RatchetAgreementKey(identityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
                 new PreKey(signedPreKey.PublicKey.ExportSubjectPublicKeyInfo()),
-                null!,
                 oneTimeKey
             );
 

@@ -31,7 +31,7 @@ message PreKeyBundle {
     optional uint32 version = 1;
     optional bytes identity_agreement_key = 2; // The public identity key for DH agreement.
     optional bytes signed_payload = 3;
-    optional bytes pre_key_signature = 4;
+    optional bytes payload_signature = 4;
     optional bytes one_time_pre_key = 5;
     // The public part of the peer's long-term identity signing key (ECDsa).
     optional bytes identity_signing_key = 6;
@@ -48,11 +48,18 @@ message EstablishSessionRequest {
 // Response containing the responder's key bundle and the new session ID.
 message EstablishSessionResponse {
     message Never {}
-    message Response {
-        // The protocol version.
+    message ResponsePayload {
         optional uint32 version = 1;
-        // The responder's pre-key bundle.
-        optional PreKeyBundle responder_bundle = 2;
+        
+        optional bytes ephemeral_key = 3;
+        optional string session_id = 4;
+    }
+    message Response {
+        optional uint32 version = 1;
+
+        optional bytes identity_signing_key = 2;
+        optional bytes response_payload = 3;
+        optional bytes payload_signature = 4;
     }
     message NotBefore {
         // The protocol version.
@@ -70,17 +77,6 @@ message EstablishSessionResponse {
     }    
 }
 
-message HandshakePayload {
-    optional uint32 version = 1;
-    // The public part of the ephemeral key for this handshake.
-    optional bytes signed_pre_key = 2;
-
-    // The unique ID for the session.
-    // This is EMPTY when sent by the initiator.
-    // This is FILLED IN and signed by the responder.
-    optional string session_id = 3;
-}
-
 message DirectInitiatorPayload {
     optional uint32 version = 1;
     // The public part of the ephemeral key for this handshake.
@@ -88,17 +84,6 @@ message DirectInitiatorPayload {
 
     // The port the peer is listening on for a direct connection.
     optional uint32 callback_port = 3;
-}
-
-message DirectResponderPayload {
-    optional uint32 version = 1;
-    // The public part of the ephemeral key for this handshake.
-    optional bytes signed_pre_key = 2;
-
-    // The unique ID for the session.
-    // This is EMPTY when sent by the initiator.
-    // This is FILLED IN and signed by the responder.
-    optional string session_id = 3;
 }
 
 // Request to create a new group session.
