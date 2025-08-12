@@ -16,6 +16,7 @@ using Percolator.Application;
 using Percolator.Infrastructure;
 using Microsoft.Extensions.Configuration;
 using Microsoft.AspNetCore.Builder;
+using Percolator.Infrastructure.Identity;
 
 namespace Percolator.ApplicationIntegrationTests;
 
@@ -134,6 +135,7 @@ public abstract class IntegrationTestBase
                 // Register application and infrastructure services
                 services.AddApplicationServices(context.Configuration);
                 services.AddInfrastructureServices(context.Configuration);
+                services.AddIdentityInfrastructure();
 
                 // Add additional services if needed
                 additionalServiceRegistration?.Invoke(services);

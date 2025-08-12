@@ -1,30 +1,46 @@
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Percolator.Identity;
 using Percolator.Infrastructure.Persistence;
+using Percolator.Infrastructure.Security;
+using SQLitePCL;
+using System.IO;
 
-namespace Percolator.Infrastructure.Identity;
-
-public static class ServiceCollectionExtensions
+namespace Percolator.Infrastructure.Identity
 {
-    public static IServiceCollection AddIdentityInfrastructure(this IServiceCollection services)
+    public static class ServiceCollectionExtensions
     {
-        services.AddDbContext<PercolatorDbContext>((sp, options) =>
+        public static IServiceCollection AddIdentityInfrastructure(this IServiceCollection services)
         {
-            var storageOptions = sp.GetRequiredService<IOptions<StorageOptions>>().Value;
-            var appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-            var percolatorAppDataPath = Path.Combine(appDataPath, storageOptions.Path);
-            Directory.CreateDirectory(percolatorAppDataPath);
-            var dbPath = Path.Combine(percolatorAppDataPath, "percolator.db");
+            // Initialize the SQLCipher provider
+            Batteries.Init();
 
-            options.UseSqlite($"Data Source={dbPath}");
-        });
-        
-        services.AddScoped<IPeerRepository, SqlitePeerRepository>();
-        services.AddSingleton<IIdentityStore, FileSystemIdentityStore>();
-        services.AddSingleton<IKeyManagementService, PersistentKeyManagementService>();
+            services.AddSingleton<IDatabaseEncryptionService, DatabaseEncryptionService>();
 
-        return services;
+            services.AddDbContext<PercolatorDbContext>((provider, options) =>
+            {
+                var storageOptions = provider.GetRequiredService<IOptions<StorageOptions>>().Value;
+                var encryptionService = provider.GetRequiredService<IDatabaseEncryptionService>();
+
+                // Ensure the data directory exists
+                Directory.CreateDirectory(storageOptions.Path);
+
+                var password = encryptionService.GetDatabasePassword();
+                var dbPath = Path.Combine(storageOptions.Path, "percolator.db");
+
+                var connectionString = new SqliteConnectionStringBuilder
+                {
+                    DataSource = dbPath,
+                    Password = password
+                }.ToString();
+
+                options.UseSqlite(connectionString);
+            });
+
+            services.AddScoped<IPeerRepository, SqlitePeerRepository>();
+            return services;
+        }
     }
 }

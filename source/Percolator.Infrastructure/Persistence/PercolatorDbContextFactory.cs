@@ -1,7 +1,9 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Design;
 using Microsoft.Extensions.Configuration;
+using SQLitePCL;
 using System.IO;
+using Microsoft.Data.Sqlite;
 
 namespace Percolator.Infrastructure.Persistence
 {
@@ -9,19 +11,19 @@ namespace Percolator.Infrastructure.Persistence
     {
         public PercolatorDbContext CreateDbContext(string[] args)
         {
-            // This is a simplified setup for design-time tools. It doesn't use the full app host.
-            // It builds a configuration to get the connection string, similar to how the app would.
-            var configuration = new ConfigurationBuilder()
-                .SetBasePath(Directory.GetCurrentDirectory())
-                .AddJsonFile("appsettings.json", optional: true, reloadOnChange: true)
-                .Build();
+            // Required for the design-time tools to find the SQLCipher binaries
+            Batteries.Init();
 
             var optionsBuilder = new DbContextOptionsBuilder<PercolatorDbContext>();
-
-            // We'll use a hardcoded path for design-time, as the user-specific path isn't available.
-            // The actual application will still use the correct path from IOptions<StorageOptions>.
             var dbPath = Path.Combine(Directory.GetCurrentDirectory(), "percolator-design-time.db");
-            optionsBuilder.UseSqlite($"Data Source={dbPath}");
+
+            var connectionString = new SqliteConnectionStringBuilder
+            {
+                DataSource = dbPath,
+                Password = "DESIGN_TIME_PASSWORD"
+            }.ToString();
+
+            optionsBuilder.UseSqlite(connectionString);
 
             return new PercolatorDbContext(optionsBuilder.Options);
         }
