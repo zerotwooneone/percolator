@@ -104,7 +104,7 @@ namespace Percolator.Application.Sessions
 
                 var signedPreKeyPublicBytes =
                     _activeIdentityContext.Keys.SignedPreKey.PublicKey.ExportSubjectPublicKeyInfo();
-                var directPayload = new DirectInitiatorPayload
+                var directPayload = new EstablishDirectSessionRequest.Types.DirectInitiatorPayload
                 {
                     //todo: get from config
                     CallbackPort = 52382,

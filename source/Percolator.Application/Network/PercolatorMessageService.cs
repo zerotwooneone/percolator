@@ -56,7 +56,7 @@ namespace Percolator.Application.Network
 
         public override async Task<EstablishDirectSessionResponse> EstablishDirectSession(EstablishDirectSessionRequest request, ServerCallContext context)
         {
-            var payload = DirectInitiatorPayload.Parser.ParseFrom(request.InitiatorBundle.SignedPayload);
+            var payload = EstablishDirectSessionRequest.Types.DirectInitiatorPayload.Parser.ParseFrom(request.InitiatorBundle.SignedPayload);
             if(!payload.HasCallbackPort || payload.CallbackPort < 1024 || payload.CallbackPort > 65535)
             {
                 throw new RpcException(new Status(StatusCode.FailedPrecondition, $"Invalid callback port: {payload.CallbackPort}"));
