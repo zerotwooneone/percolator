@@ -69,7 +69,7 @@ public class MessageServiceTests
         // Arrange
         var localIdentity = new IdentityRecord(Guid.NewGuid(), "Local Identity");
         var localKeys = new X3dhKeys(
-            ECDsa.Create(ECCurve.NamedCurves.nistP256),
+            ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
             ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
             ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256));
         _activeIdentityContext.Identity = localIdentity;

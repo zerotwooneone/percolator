@@ -76,7 +76,7 @@ public class SessionMessageTests
         {
             Identity = new IdentityRecord(Guid.NewGuid(), "Alice"),
             Keys = new X3dhKeys(
-                ECDsa.Create(ECCurve.NamedCurves.nistP256),
+                ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
                 ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
                 _aliceEphemeral
             )
@@ -86,7 +86,7 @@ public class SessionMessageTests
         {
             Identity = new IdentityRecord(Guid.NewGuid(), "Bob"),
             Keys = new X3dhKeys(
-                ECDsa.Create(ECCurve.NamedCurves.nistP256),
+                ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
                 ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
                 ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256)
             )
@@ -203,7 +203,7 @@ public class SessionMessageTests
         var bobSharedSecret = x3dhManager.RespondToHandshake(
             new CryptoRatchetIdentityKey(aliceIdentityKey.PublicKey.ExportSubjectPublicKeyInfo()),
             new CryptoRatchetEphemeralKey(aliceEphemeralKey.PublicKey.ExportSubjectPublicKeyInfo()),
-            new CryptoPrivateAgreementKey(bobIdentityAgreementKey.ExportECPrivateKey()),
+            new CryptoRatchetIdentityKey(bobIdentitySigningKey.ExportECPrivateKey()),
             new CryptoPrivatePreKey(bobSignedPreKey.ExportECPrivateKey()),
             new CryptoPrivateOneTimeKey(bobOneTimePreKey.ExportECPrivateKey())
         );

@@ -23,7 +23,7 @@ public class X3DHOrchestratorTests : IDisposable
     private X3dhKeys _localKeys = null!;
 
     // Remote keys
-    private ECDsa _remoteIdentitySigningKey = null!;
+    private ECDiffieHellman _remoteIdentitySigningKey = null!;
     private ECDiffieHellman _remoteIdentityAgreementKey = null!;
     private ECDiffieHellman _remoteSignedPreKey = null!;
     private ECDiffieHellman _remoteOneTimePreKey = null!;
@@ -37,7 +37,7 @@ public class X3DHOrchestratorTests : IDisposable
 
         // Local keys setup
         var localIdentity = new IdentityRecord(Guid.NewGuid(), "Local Identity");
-        var localIdentitySigningKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var localIdentitySigningKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var localIdentityAgreementKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var localSignedPreKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         _localKeys = new X3dhKeys(localIdentitySigningKey, localIdentityAgreementKey, localSignedPreKey);
@@ -47,7 +47,7 @@ public class X3DHOrchestratorTests : IDisposable
         _activeIdentityContext.Keys = _localKeys;
 
         // Remote keys setup
-        _remoteIdentitySigningKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        _remoteIdentitySigningKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         _remoteIdentityAgreementKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         _remoteSignedPreKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         _remoteOneTimePreKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
@@ -181,7 +181,7 @@ public class X3DHOrchestratorTests : IDisposable
         _mockX3dhManager.Setup(x => x.RespondToHandshake(
                 It.Is<RatchetIdentityKey>(k => k.Value.SequenceEqual(ratchetIdentityKey.Value)),
                 It.Is<RatchetEphemeralKey>(k => k.Value.SequenceEqual(ratchetEphemeralKey.Value)),
-                It.Is<PrivateAgreementKey>(k => k.Value.SequenceEqual(_localKeys.IdentityAgreementKey.ExportECPrivateKey())),
+                It.Is<RatchetIdentityKey>(k => k.Value.SequenceEqual(_localKeys.IdentitySigningKey.ExportECPrivateKey())),
                 It.Is<PrivatePreKey>(k => k.Value.SequenceEqual(_localKeys.SignedPreKey.ExportECPrivateKey())),
                 It.IsAny<PrivateOneTimeKey>()))
             .Returns(expectedSharedSecret);
@@ -227,7 +227,7 @@ public class X3DHOrchestratorTests : IDisposable
        _mockX3dhManager.Setup(x => x.RespondToHandshake(
                 It.IsAny<RatchetIdentityKey>(),
                 It.IsAny<RatchetEphemeralKey>(),
-                It.IsAny<PrivateAgreementKey>(),
+                It.IsAny<RatchetIdentityKey>(),
                 It.IsAny<PrivatePreKey>(),
                 It.Is<PrivateOneTimeKey>(k => k != null)))
             .Returns(new SharedSecret(new byte[32]));

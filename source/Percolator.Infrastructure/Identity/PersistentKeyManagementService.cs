@@ -57,7 +57,7 @@ public class PersistentKeyManagementService : IKeyManagementService
         }
 
         _logger.LogInformation("Existing keys loaded for {IdentityName}", identityName);
-        var loadedIkSigning = ECDsa.Create(keyContainer.IdentitySigningKey);
+        var loadedIkSigning = ECDiffieHellman.Create(keyContainer.IdentitySigningKey);
         var loadedIkAgreement = ECDiffieHellman.Create(keyContainer.IdentityAgreementKey);
         var loadedSpk = ECDiffieHellman.Create(keyContainer.SignedPreKey);
 
@@ -81,7 +81,7 @@ public class PersistentKeyManagementService : IKeyManagementService
         _logger.LogInformation("No existing keys found for {IdentityName}. Creating a new set.", identityName);
 
         // Create and save new keys
-        var newIkSigning = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var newIkSigning = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var newIkAgreement = await CreatePreKeyAsync();
         var newSpk = await CreatePreKeyAsync();
         

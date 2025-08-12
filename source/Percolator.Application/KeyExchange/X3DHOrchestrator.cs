@@ -43,7 +43,7 @@ public class X3DHOrchestrator : IX3DHOrchestrator
             var sharedSecret = _x3DhManager.InitiateHandshake(
                 remotePreKeyBundle,
                 ephemeralKey,
-                _activeIdentityContext.Keys.IdentityAgreementKey);
+                _activeIdentityContext.Keys.IdentitySigningKey);
 
             _logger.LogDebug("Handshake completed successfully");
             return sharedSecret;
@@ -96,7 +96,7 @@ public class X3DHOrchestrator : IX3DHOrchestrator
         var sharedSecret = _x3DhManager.RespondToHandshake(
             remoteIdentityKey,
             remoteEphemeralKey,
-            new PrivateAgreementKey(identityAgreementKey.ExportECPrivateKey()),
+            new RatchetIdentityKey(identitySigningKey.ExportECPrivateKey()),
             new PrivatePreKey(signedPreKey.ExportECPrivateKey()),
             oneTimePreKey is not null ? new PrivateOneTimeKey(oneTimePreKey.ExportECPrivateKey()) : null);
 

@@ -208,7 +208,12 @@ namespace Percolator.Application.Network
                 var networkIdentitySigningKey = new DirectMessagePublicKey(remoteIdentitySigningKeyBytes);
                 var connnectionInfo =
                     await _peerConnectionRepository.GetByDirectMessage(networkIdentitySigningKey);
-                
+
+                if (connnectionInfo is null)
+                {
+                    throw new RpcException(new Status(StatusCode.NotFound, "Peer connection info not found."));
+                }
+
                 var networkPeerId = new NetworkPeerId(connnectionInfo.Id.Value);
                 _logger.LogInformation("Connection info saved for peer {NetworkPeerId}", networkPeerId.Value);
                 
@@ -259,7 +264,7 @@ namespace Percolator.Application.Network
                     await _sessionManager.EstablishSessionAsInitiatorAsync(
                         cryptoSessionId,
                         new IdentityPeerId(peer.Id.Value),
-                        new RatchetIdentityKey(request.InitiatorBundle.IdentityAgreementKey.ToByteArray()),
+                        remoteIdentityKey,
                         new RatchetEphemeralKey(preKeyBytes),
                         sharedSecret, 
                         ephemeralKey);

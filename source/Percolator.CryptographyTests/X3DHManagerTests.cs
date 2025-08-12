@@ -18,12 +18,12 @@ public class X3DHManagerTests
 
         // --- Generate keys for both parties ---
         // Alice (initiator)
-        using var aliceIdentitySigningKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        using var aliceIdentitySigningKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         using var aliceIdentityAgreementKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         using var aliceEphemeralKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
 
         // Bob (responder)
-        using var bobIdentitySigningKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        using var bobIdentitySigningKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         using var bobIdentityAgreementKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         using var bobSignedPreKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         using var bobOneTimePreKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
@@ -43,15 +43,15 @@ public class X3DHManagerTests
         var aliceSharedSecret = manager.InitiateHandshake(
             bobPreKeyBundle,
             aliceEphemeralKey,
-            aliceIdentityAgreementKey
+            aliceIdentitySigningKey
             );
 
         // --- Bob responds to the handshake ---
         // Bob receives Alice's identity and ephemeral keys
         var bobSharedSecret = manager.RespondToHandshake(
-            new RatchetIdentityKey(aliceIdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
+            new RatchetIdentityKey(aliceIdentitySigningKey.PublicKey.ExportSubjectPublicKeyInfo()),
             new RatchetEphemeralKey(aliceEphemeralKey.PublicKey.ExportSubjectPublicKeyInfo()),
-            new PrivateAgreementKey(bobIdentityAgreementKey.ExportECPrivateKey()),
+            new RatchetIdentityKey(bobIdentitySigningKey.ExportECPrivateKey()),
             new PrivatePreKey(bobSignedPreKey.ExportECPrivateKey()),
             new PrivateOneTimeKey(bobOneTimePreKey.ExportECPrivateKey())
             );
@@ -63,48 +63,29 @@ public class X3DHManagerTests
     }
 
     [Test]
-    public void InitiateHandshake_WithInvalidSignature_ThrowsException()
+    public void SignatureVerification_WithValidAndInvalidKeys_ReturnsCorrectResult()
     {
         // Arrange
         var manager = new X3DHManager(new NullLogger<X3DHManager>(), Options.Create(new CryptographyOptions()));
+        using var identitySigningKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        using var otherSigningKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        using var preKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        var preKeyToSign = new PreKey(preKey.PublicKey.ExportSubjectPublicKeyInfo());
 
-        // Generate keys for both parties
-        using var bobIdentitySigningKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
-        using var bobIdentityAgreementKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        using var bobSignedPreKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        using var bobOneTimePreKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        
-        using var aliceIdentityAgreementKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        using var aliceEphemeralKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        // Act
+        var signature = manager.SignPreKey(identitySigningKey, preKeyToSign);
+        var isSignatureValid = manager.VerifySignature(
+            new RatchetIdentityKey(identitySigningKey.PublicKey.ExportSubjectPublicKeyInfo()), 
+            preKeyToSign, 
+            signature);
+        var isSignatureInvalid = manager.VerifySignature(
+            new RatchetIdentityKey(otherSigningKey.PublicKey.ExportSubjectPublicKeyInfo()), 
+            preKeyToSign, 
+            signature);
 
-        // Bob creates pre-key bundle
-        var bobSignedPreKeyPublicKey = new PreKey(bobSignedPreKey.PublicKey.ExportSubjectPublicKeyInfo());
-        
-        // Create an invalid signature (sign with wrong key)
-        using var invalidSigningKey = ECDsa.Create(ECCurve.NamedCurves.nistP256); // Different key than bobIdentitySigningKey
-        var invalidSignature = manager.SignPreKey(invalidSigningKey, bobSignedPreKeyPublicKey);
-
-        var bobPreKeyBundle = new PreKeyBundle(
-            bobIdentitySigningKey.ExportSubjectPublicKeyInfo(),
-            bobIdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo(),
-            invalidSignature, // Use the invalid signature
-            bobSignedPreKeyPublicKey.Value,
-            bobOneTimePreKey.PublicKey.ExportSubjectPublicKeyInfo()
-        );
-
-        // Act & Assert
-        // First verify the signature - this should fail since we intentionally used an invalid signature
-        using var identitySigningKey = ECDsa.Create();
-        identitySigningKey.ImportSubjectPublicKeyInfo(bobPreKeyBundle.IdentitySigningKey.Value, out _);
-        
-        bool isSignatureValid = CryptoUtils.Verify(
-            bobPreKeyBundle.SignedPreKey.Value, 
-            bobPreKeyBundle.SignedPreKeySignature.Value, 
-            identitySigningKey
-        );
-        
-        // The signature should be invalid
-        Assert.That(isSignatureValid, Is.False);
+        // Assert
+        isSignatureValid.Should().BeTrue();
+        isSignatureInvalid.Should().BeFalse();
     }
     
     [Test]
@@ -114,12 +95,12 @@ public class X3DHManagerTests
         var manager = new X3DHManager(new NullLogger<X3DHManager>(), Options.Create(new CryptographyOptions()));
 
         // Generate keys for both parties
-        using var bobIdentitySigningKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        using var aliceIdentitySigningKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        using var aliceEphemeralKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        
+        using var bobIdentitySigningKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         using var bobIdentityAgreementKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         using var bobSignedPreKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        
-        using var aliceIdentityAgreementKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        using var aliceEphemeralKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
 
         // Bob creates pre-key bundle without one-time pre-key
         var bobSignedPreKeyPublicKey = new PreKey(bobSignedPreKey.PublicKey.ExportSubjectPublicKeyInfo());
@@ -135,14 +116,14 @@ public class X3DHManagerTests
         var aliceSharedSecret = manager.InitiateHandshake(
             bobPreKeyBundle,
             aliceEphemeralKey,
-            aliceIdentityAgreementKey
+            aliceIdentitySigningKey
         );
 
         // Bob responds to handshake without one-time key
         var bobSharedSecret = manager.RespondToHandshake(
-            new RatchetIdentityKey(aliceIdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
+            new RatchetIdentityKey(aliceIdentitySigningKey.PublicKey.ExportSubjectPublicKeyInfo()),
             new RatchetEphemeralKey(aliceEphemeralKey.PublicKey.ExportSubjectPublicKeyInfo()),
-            new PrivateAgreementKey(bobIdentityAgreementKey.ExportECPrivateKey()),
+            new RatchetIdentityKey(bobIdentitySigningKey.ExportECPrivateKey()),
             new PrivatePreKey(bobSignedPreKey.ExportECPrivateKey()),
             null // No one-time pre-key
         );

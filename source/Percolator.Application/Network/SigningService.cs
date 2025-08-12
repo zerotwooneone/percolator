@@ -16,7 +16,7 @@ public class SigningService : ISigningService
         _cryptographyService = cryptographyService;
     }
 
-    private ECDsa GetActiveSigningKey()
+    private ECDiffieHellman GetActiveSigningKey()
     {
         if (_activeIdentityContext.Keys?.IdentitySigningKey is null)
         {

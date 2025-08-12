@@ -417,7 +417,7 @@ public class MessageIntegrationTests : IntegrationTestBase
         // Create minimal configuration
         var configValues = new Dictionary<string, string>
         {
-            { "Logging:LogLevel:Default", "Information" },
+            { "Logging:LogLevel:Default", "Trace" },
             { "Logging:LogLevel:Microsoft", "Warning" },
             { "Storage:Path", tempDirectory }
         };

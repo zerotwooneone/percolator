@@ -4,9 +4,10 @@ namespace Percolator.Cryptography;
 
 public class EcdsaSigningService : ISigningService
 {
-    public Signature Sign(byte[] data, ECDsa privateKey)
+    public Signature Sign(byte[] data, ECDiffieHellman privateKey)
     {
-        var signature = privateKey.SignData(data, HashAlgorithmName.SHA256);
+        var ecdsa = ECDsa.Create(privateKey.ExportParameters(true));
+        var signature = ecdsa.SignData(data, HashAlgorithmName.SHA256);
         return new Signature(signature);
     }
 

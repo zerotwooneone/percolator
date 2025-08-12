@@ -61,7 +61,7 @@ public class ConversationServiceTests
         {
             Identity = new IdentityRecord(Guid.NewGuid(), "Test Identity"),
             Keys = new X3dhKeys(
-                ECDsa.Create(ECCurve.NamedCurves.nistP256),
+                ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
                 ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
                 ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256)
             )

@@ -59,7 +59,7 @@ public class DirectSessionManagerTests
         _alicePeerId = new Identity.PeerId(Guid.NewGuid());
         _aliceEphemeral = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         _aliceKeys = new X3dhKeys(
-            ECDsa.Create(ECCurve.NamedCurves.nistP256),
+            ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
             ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
             _aliceEphemeral);
             
@@ -84,7 +84,7 @@ public class DirectSessionManagerTests
         // Generate Bob's identity and keys
         _bobPeerId = new Identity.PeerId(Guid.NewGuid());
         _bobKeys = new X3dhKeys(
-            ECDsa.Create(ECCurve.NamedCurves.nistP256),
+            ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
             ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
             ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256));
             
