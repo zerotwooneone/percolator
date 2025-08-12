@@ -19,6 +19,7 @@ using Percolator.Application.Network;
 using Percolator.Application.Sessions;
 using Percolator.Cryptography;
 using Percolator.Infrastructure;
+using Percolator.Infrastructure.Identity;
 using Percolator.Network;
 using Percolator.Node;
 using ChatConversationId = Percolator.Chat.ValueObjects.ConversationId;
@@ -103,8 +104,9 @@ async Task HostCommandHandler(InvocationContext context)
     tempServices.AddLogging(builder => builder
         .AddConsole()
         .AddSimpleConsole(opt=>opt.TimestampFormat = "[yyyy-MM-dd HH:mm:ss.fff] "));
-    tempServices.AddApplicationServices(tempConfig);
     tempServices.AddInfrastructureServices(tempConfig);
+    tempServices.AddIdentityInfrastructure();
+    tempServices.AddApplicationServices(tempConfig);
     ServiceProvider tempServiceProvider = tempServices.BuildServiceProvider();
 
     try
@@ -159,8 +161,9 @@ async Task HostCommandHandler(InvocationContext context)
             });
         });
 
-        builder.Services.AddApplicationServices(builder.Configuration);
         builder.Services.AddInfrastructureServices(builder.Configuration);
+        builder.Services.AddIdentityInfrastructure();
+        builder.Services.AddApplicationServices(builder.Configuration);
 
         WebApplication app = builder.Build();
 
@@ -299,8 +302,9 @@ static ServiceProvider CreateServiceProvider()
         .AddConsole()
         .AddSimpleConsole(opt=>opt.TimestampFormat = "[yyyy-MM-dd HH:mm:ss.fff] ")
         .AddConfiguration(config.GetSection("Logging")));
-    services.AddApplicationServices(config);
     services.AddInfrastructureServices(config);
+    services.AddIdentityInfrastructure();
+    services.AddApplicationServices(config);
     
     services.AddHttpClient("percolator-grpc", client =>
     {

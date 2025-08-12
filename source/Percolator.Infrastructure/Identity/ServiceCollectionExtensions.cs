@@ -19,6 +19,9 @@ namespace Percolator.Infrastructure.Identity
 
             services.AddSingleton<IDatabaseEncryptionService, DatabaseEncryptionService>();
 
+            services.AddSingleton<IIdentityStore, FileSystemIdentityStore>();
+            services.AddSingleton<IKeyManagementService, PersistentKeyManagementService>();
+
             services.AddDbContext<PercolatorDbContext>((provider, options) =>
             {
                 var storageOptions = provider.GetRequiredService<IOptions<StorageOptions>>().Value;
