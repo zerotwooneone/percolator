@@ -54,15 +54,7 @@ namespace Percolator.Application.Network
             _x3DhManager = x3DhManager;
         }
 
-        public override async Task<EstablishSessionResponse> EstablishSession(EstablishSessionRequest request, ServerCallContext context)
-        {
-            return await Inner_EstablishSessionResponse(
-                request, 
-                context, 
-                requestPayload => requestPayload);
-        }
-        
-        public override async Task<EstablishSessionResponse> EstablishDirectSession(EstablishSessionRequest request, ServerCallContext context)
+        public override async Task<EstablishDirectSessionResponse> EstablishDirectSession(EstablishDirectSessionRequest request, ServerCallContext context)
         {
             var payload = DirectInitiatorPayload.Parser.ParseFrom(request.InitiatorBundle.SignedPayload);
             if(!payload.HasCallbackPort || payload.CallbackPort < 1024 || payload.CallbackPort > 65535)
@@ -122,8 +114,8 @@ namespace Percolator.Application.Network
             }
         }
 
-        private async Task<EstablishSessionResponse> Inner_EstablishSessionResponse(
-            EstablishSessionRequest request, 
+        private async Task<EstablishDirectSessionResponse> Inner_EstablishSessionResponse(
+            EstablishDirectSessionRequest request, 
             ServerCallContext context,
             Func<byte[], byte[]> getPreKeyFromRequestPayload)
         {
@@ -271,16 +263,16 @@ namespace Percolator.Application.Network
                     _logger.LogInformation("Successfully established session {SessionId} with peer {PeerId}", conversation.Id, peer.Id);
                 }
 
-                var responsePayload = new EstablishSessionResponse.Types.ResponsePayload
+                var responsePayload = new EstablishDirectSessionResponse.Types.ResponsePayload
                 {
                     EphemeralKey = ByteString.CopyFrom(ephemeralKey.PublicKey.ExportSubjectPublicKeyInfo()),
                     SessionId = conversation.Id.ToString()
                 }.ToByteString();
                 var signedPayloadBytes = _x3DhManager.SignPreKey(_activeIdentityContext.Keys.IdentitySigningKey,
                     new PreKey(responsePayload.ToByteArray()));
-                return new EstablishSessionResponse
+                return new EstablishDirectSessionResponse
                 {
-                    Response = new EstablishSessionResponse.Types.Response
+                    Response = new EstablishDirectSessionResponse.Types.Response
                     {
                         IdentitySigningKey = ByteString.CopyFrom(_activeIdentityContext.Keys.IdentitySigningKey.ExportSubjectPublicKeyInfo()),
                         ResponsePayload = responsePayload,

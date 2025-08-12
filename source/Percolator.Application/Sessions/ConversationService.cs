@@ -122,7 +122,7 @@ namespace Percolator.Application.Sessions
                     signedPreKeyPublicBytes.Length, signedPayloadBytes.Value.Length);
 
                 
-                var request = new EstablishSessionRequest
+                var request = new EstablishDirectSessionRequest
                 {
                     InitiatorBundle = new ContractsPreKeyBundle
                     {
@@ -140,7 +140,7 @@ namespace Percolator.Application.Sessions
 
                 _logger.LogInformation("Sending session request to {Endpoint}", endpoint);
                 var message = await _grpcSessionService.EstablishDirectSessionAsync(endpoint, request);
-                if (message.MessageCase != EstablishSessionResponse.MessageOneofCase.Response)
+                if (message.MessageCase != EstablishDirectSessionResponse.MessageOneofCase.Response)
                 {
                     //todo: handle not until
                     throw new InvalidOperationException($"Invalid response type:{message.MessageCase}");
@@ -155,7 +155,7 @@ namespace Percolator.Application.Sessions
                 {
                     throw new InvalidOperationException("Invalid signature in response.");
                 }
-                var responderPayload =EstablishSessionResponse.Types.ResponsePayload.Parser.ParseFrom(response.ResponsePayload.ToByteArray());
+                var responderPayload =EstablishDirectSessionResponse.Types.ResponsePayload.Parser.ParseFrom(response.ResponsePayload.ToByteArray());
                 
                 var handshakeResult = _orchestrator.CompleteHandshake(
                     new RatchetIdentityKey(response.IdentitySigningKey.ToByteArray()), 

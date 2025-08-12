@@ -21,7 +21,7 @@ service TransportService {
 
     // Establishes a new secure pairwise session with the node.
     // This is the entry point for the cryptographic handshake.
-    rpc EstablishDirectSession(EstablishSessionRequest) returns (EstablishSessionResponse);
+    rpc EstablishDirectSession(EstablishDirectSessionRequest) returns (EstablishDirectSessionResponse);
 }
 
 // Represents the public cryptographic materials needed to establish a secure session.
@@ -37,20 +37,58 @@ message PreKeyBundle {
     optional bytes identity_signing_key = 6;
 }
 
-// Request to establish a new secure session.
 message EstablishSessionRequest {
+    optional uint32 version = 1;
+
+    optional bytes identity_signing_key = 2;
+    optional bytes ephemeral_key = 3;
+    optional bytes prekey_id = 4;
+    optional bytes onetime_prekey_id = 5;
+}
+
+message EstablishSessionResponse {
+    message Never {
+        optional uint32 version = 1;
+    }
+    message Response {
+        message ResponsePayload {
+            optional uint32 version = 1;
+
+            optional bytes ephemeral_key = 2;
+            optional string session_id = 3;
+        }
+        optional uint32 version = 1;
+
+        optional bytes identity_signing_key = 2;
+        optional bytes response_payload = 3;
+        optional bytes payload_signature = 4;
+    }
+    message NotBefore {
+        optional uint32 version = 1;
+        // If the request is rejected, this field may be set to indicate when the client should try again.
+        optional google.protobuf.Timestamp retry_after_utc = 2;
+    }
+    
+    optional uint32 version = 1;
+    oneof message {
+        Never never=2;
+        Response response=3;
+        NotBefore not_before=4;        
+    }    
+}
+
+message EstablishDirectSessionRequest {
     // The protocol version.
     optional uint32 version = 1;
     // The initiator's pre-key bundle.
     optional PreKeyBundle initiator_bundle = 2;
 }
 
-// Response containing the responder's key bundle and the new session ID.
-message EstablishSessionResponse {
+message EstablishDirectSessionResponse {
     message Never {}
     message ResponsePayload {
         optional uint32 version = 1;
-        
+
         optional bytes ephemeral_key = 3;
         optional string session_id = 4;
     }
@@ -67,14 +105,14 @@ message EstablishSessionResponse {
         // If the request is rejected, this field may be set to indicate when the client should try again.
         optional google.protobuf.Timestamp retry_after_utc = 2;
     }
-    
+
     // The protocol version.
     optional uint32 version = 1;
     oneof message {
         Never never=2;
         Response response=3;
-        NotBefore not_before=4;        
-    }    
+        NotBefore not_before=4;
+    }
 }
 
 message DirectInitiatorPayload {

@@ -96,7 +96,7 @@ public class ConversationServiceTests
         // Create valid crypto materials for the mock response
         using var remoteSigningKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         using var remoteEphemeralKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        var responsePayload = new EstablishSessionResponse.Types.ResponsePayload
+        var responsePayload = new EstablishDirectSessionResponse.Types.ResponsePayload
         {
             EphemeralKey = ByteString.CopyFrom(remoteEphemeralKey.PublicKey.ExportSubjectPublicKeyInfo()),
             SessionId = Guid.NewGuid().ToString(),
@@ -104,16 +104,16 @@ public class ConversationServiceTests
         var responsePayloadBytes = responsePayload.ToByteString();
         var signature = remoteSigningKey.SignData(responsePayloadBytes.ToByteArray(), HashAlgorithmName.SHA256);
         
-        var grpcResponse = new EstablishSessionResponse
+        var grpcResponse = new EstablishDirectSessionResponse
         {
-            Response = new EstablishSessionResponse.Types.Response
+            Response = new EstablishDirectSessionResponse.Types.Response
             {
                 IdentitySigningKey = ByteString.CopyFrom(remoteSigningKey.ExportSubjectPublicKeyInfo()),
                 ResponsePayload =  responsePayloadBytes,
                 PayloadSignature = ByteString.CopyFrom(signature)
             }
         };
-        _mockGrpcSessionService.Setup(s => s.EstablishDirectSessionAsync(It.IsAny<DnsEndPoint>(), It.IsAny<EstablishSessionRequest>()))
+        _mockGrpcSessionService.Setup(s => s.EstablishDirectSessionAsync(It.IsAny<DnsEndPoint>(), It.IsAny<EstablishDirectSessionRequest>()))
             .ReturnsAsync(grpcResponse);
         
         // Create a mock peer connection
@@ -202,7 +202,7 @@ public class ConversationServiceTests
         
         // Verify that our services were called correctly
         _mockTlsHandshakeService.Verify(s => s.CaptureCertificateAsync(It.IsAny<DnsEndPoint>()), Times.Never);
-        _mockGrpcSessionService.Verify(s => s.EstablishDirectSessionAsync(It.IsAny<DnsEndPoint>(), It.IsAny<EstablishSessionRequest>()), Times.Once);
+        _mockGrpcSessionService.Verify(s => s.EstablishDirectSessionAsync(It.IsAny<DnsEndPoint>(), It.IsAny<EstablishDirectSessionRequest>()), Times.Once);
     }
 
     [Test]
@@ -219,7 +219,7 @@ public class ConversationServiceTests
         // Create valid crypto materials for the mock response
         using var remoteSigningKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         using var remoteEphemeralKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        var responsePayload = new EstablishSessionResponse.Types.ResponsePayload
+        var responsePayload = new EstablishDirectSessionResponse.Types.ResponsePayload
         {
             EphemeralKey = ByteString.CopyFrom(remoteEphemeralKey.PublicKey.ExportSubjectPublicKeyInfo()),
             SessionId = sessionId.ToString(),
@@ -227,16 +227,16 @@ public class ConversationServiceTests
         var responsePayloadBytes = responsePayload.ToByteString();
         var signature = remoteSigningKey.SignData(responsePayloadBytes.ToByteArray(), HashAlgorithmName.SHA256);
 
-        var grpcResponse = new EstablishSessionResponse
+        var grpcResponse = new EstablishDirectSessionResponse
         {
-            Response = new EstablishSessionResponse.Types.Response
+            Response = new EstablishDirectSessionResponse.Types.Response
             {
                 IdentitySigningKey = ByteString.CopyFrom(remoteSigningKey.ExportSubjectPublicKeyInfo()),
                 ResponsePayload =  responsePayloadBytes,
                 PayloadSignature = ByteString.CopyFrom(signature)
             }
         };
-        _mockGrpcSessionService.Setup(s => s.EstablishDirectSessionAsync(It.IsAny<DnsEndPoint>(), It.IsAny<EstablishSessionRequest>()))
+        _mockGrpcSessionService.Setup(s => s.EstablishDirectSessionAsync(It.IsAny<DnsEndPoint>(), It.IsAny<EstablishDirectSessionRequest>()))
             .ReturnsAsync(grpcResponse);
 
         // Setup peer repository AddAsync to succeed
@@ -338,7 +338,7 @@ public class ConversationServiceTests
         // Verify gRPC service was called
         _mockGrpcSessionService.Verify(s => s.EstablishDirectSessionAsync(
             endpoint,
-            It.IsAny<EstablishSessionRequest>()),
+            It.IsAny<EstablishDirectSessionRequest>()),
             Times.Once);
     }
 
@@ -364,7 +364,7 @@ public class ConversationServiceTests
         _mockGrpcSessionService
             .Setup(s => s.EstablishDirectSessionAsync(
                 It.IsAny<DnsEndPoint>(),
-                It.IsAny<EstablishSessionRequest>()))
+                It.IsAny<EstablishDirectSessionRequest>()))
             .ThrowsAsync(expectedError);
 
         // Act & Assert

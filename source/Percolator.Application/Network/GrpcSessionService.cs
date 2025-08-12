@@ -32,24 +32,17 @@ namespace Percolator.Application.Network
             _peerTrustManager = peerTrustManager;
             _certificateManager = certificateManager;
         }
-
-        public async Task<EstablishSessionResponse> EstablishSessionAsync(
-            DnsEndPoint endpoint, 
-            EstablishSessionRequest request)
-        {
-            return await Inner_EstablishSession(endpoint, async (client, cancellationToken) => await client.EstablishSessionAsync(request, cancellationToken: cancellationToken));
-        }
         
-        public async Task<EstablishSessionResponse> EstablishDirectSessionAsync(
+        public async Task<EstablishDirectSessionResponse> EstablishDirectSessionAsync(
             DnsEndPoint endpoint, 
-            EstablishSessionRequest request)
+            EstablishDirectSessionRequest request)
         {
-            return await Inner_EstablishSession(endpoint, async (client, cancellationToken) => await client.EstablishDirectSessionAsync(request, cancellationToken: cancellationToken));
+            return await Inner_EstablishSession(endpoint, request);
         }
 
-        private async Task<EstablishSessionResponse> Inner_EstablishSession(
+        private async Task<EstablishDirectSessionResponse> Inner_EstablishSession(
             DnsEndPoint endpoint, 
-            Func<TransportService.TransportServiceClient,CancellationToken,Task<EstablishSessionResponse>> getResponse)
+            EstablishDirectSessionRequest request)
         {
             string connectionKey = $"{endpoint.Host}:{endpoint.Port}";
 
@@ -215,7 +208,7 @@ namespace Percolator.Application.Network
                 using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(300));
 
                 try {
-                    var response = await getResponse(client, cts.Token);
+                    var response = await client.EstablishDirectSessionAsync(request, cancellationToken: cts.Token);
                     _logger.LogInformation("Session successfully established with {Endpoint}", endpoint);
                     return response;
                 }
