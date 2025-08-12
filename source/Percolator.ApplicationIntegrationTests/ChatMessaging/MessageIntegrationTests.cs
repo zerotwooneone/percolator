@@ -28,8 +28,11 @@ using System.IO;
 using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Data.Sqlite;
 using Percolator.Infrastructure.Serialization;
 using PeerId = Percolator.Identity.PeerId;
+using Microsoft.EntityFrameworkCore;
+using Percolator.Infrastructure.Persistence;
 
 namespace Percolator.ApplicationIntegrationTests.ChatMessaging;
 
@@ -466,26 +469,43 @@ public class MessageIntegrationTests : IntegrationTestBase
                     services.AddSingleton<IIdentityService, PersistentIdentityService>();
                     services.AddSingleton<IOneTimeKeyProvider, InMemoryOneTimeKeyProvider>();
                     services.AddSingleton<ICredentialService, CredentialService>();
-                    services.AddSingleton<IKeyManagementService, PersistentKeyManagementService>();
+                    services.AddScoped<IKeyManagementService, PersistentKeyManagementService>();
                     
                     // Session services
-                    services.AddSingleton<IDirectSessionManager, DirectSessionManager>();
-                    services.AddSingleton<IConversationService, ConversationService>();
+                    services.AddScoped<IDirectSessionManager, DirectSessionManager>();
+                    services.AddScoped<IConversationService, ConversationService>();
                     
                     // Double Ratchet Session Store
                     services.AddSingleton<IDoubleRatchetSessionStore, FileBasedDoubleRatchetSessionStore>();
                     
                     // Message services
-                    services.AddSingleton<IMessageService, MessageService>();
-                    services.AddSingleton<PercolatorMessageService>();
-                    services.AddSingleton<IConversationRepository, FileBasedConversationRepository>();
+                    services.AddScoped<IMessageService, MessageService>();
+                    services.AddScoped<PercolatorMessageService>();
+                    services.AddScoped<IConversationRepository, FileBasedConversationRepository>();
                     services.AddSingleton<ISelfParticipantIdProvider>(sp => sp.GetRequiredService<ActiveIdentityContext>());
                     
                     // Message Transport Services
                     services.AddSingleton<SharedCertificateManager>();
-                    services.AddSingleton<IPeerRepository, FileBasedPeerRepository>();
+                    
+                    // Use in-memory SQLite for peer repository in tests
+                    var connection = new SqliteConnection("DataSource=:memory:");
+                    connection.Open();
+                    services.AddDbContext<PercolatorDbContext>(options =>
+                    {
+                        options.UseSqlite(connection);
+                    });
+
+                    // Ensure the database is created
+                    using (var scope = services.BuildServiceProvider().CreateScope())
+                    {
+                        var dbContext = scope.ServiceProvider.GetRequiredService<PercolatorDbContext>();
+                        dbContext.Database.EnsureCreated();
+                    }
+
+                    services.AddScoped<IPeerRepository, SqlitePeerRepository>();
+
                     services.AddSingleton<IPeerConnectionRepository, FileBasedPeerConnectionRepository>();
-                    services.AddSingleton<IMessageTransportService, GrpcMessageTransportService>();
+                    services.AddScoped<IMessageTransportService, GrpcMessageTransportService>();
                     services.AddSingleton<IGrpcSessionService, GrpcSessionService>();
                     services.AddSingleton<IPeerTrustManager>(provider => new InMemoryPeerTrustStore(
                         provider.GetRequiredService<ITrustedPeerStore>(),
@@ -508,8 +528,8 @@ public class MessageIntegrationTests : IntegrationTestBase
                         });
                     
                     // X3DH Key Exchange Services
+                    services.AddScoped<IX3DHOrchestrator, X3DHOrchestrator>();
                     services.AddSingleton<IX3DHManager, X3DHManager>();
-                    services.AddSingleton<IX3DHOrchestrator, X3DHOrchestrator>();
                     
                     // Add configuration
                     services.AddSingleton<IConfiguration>(configuration);

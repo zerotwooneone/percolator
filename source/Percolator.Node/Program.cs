@@ -12,6 +12,7 @@ using System.Net.Security;
 using System.Security.Authentication;
 using System.Security.Cryptography.X509Certificates;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.EntityFrameworkCore;
 using Percolator.Application;
 using Percolator.Application.Identity;
 using Percolator.Application.Network;
@@ -162,6 +163,13 @@ async Task HostCommandHandler(InvocationContext context)
         builder.Services.AddInfrastructureServices(builder.Configuration);
 
         WebApplication app = builder.Build();
+
+        // Apply database migrations on startup
+        using (var scope = app.Services.CreateScope())
+        {
+            var dbContext = scope.ServiceProvider.GetRequiredService<Percolator.Infrastructure.Persistence.PercolatorDbContext>();
+            await dbContext.Database.MigrateAsync(cancellationToken);
+        }
 
         // Step 4: Manually initialize the identity *again* using the main service provider
         // to ensure the ActiveIdentityContext is correct for the running application.
