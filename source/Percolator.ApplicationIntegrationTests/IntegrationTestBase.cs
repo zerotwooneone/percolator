@@ -1,12 +1,12 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Hosting;
 using NUnit.Framework;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Text;
 using Microsoft.AspNetCore.Hosting;
-using Microsoft.Extensions.Hosting;
 using System.Net;
 using System.Collections.Concurrent;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
@@ -17,6 +17,10 @@ using Percolator.Infrastructure;
 using Microsoft.Extensions.Configuration;
 using Microsoft.AspNetCore.Builder;
 using Percolator.Infrastructure.Identity;
+using Percolator.Application.Identity;
+using System.Threading;
+using Percolator.Infrastructure.Persistence;
+using Microsoft.EntityFrameworkCore;
 
 namespace Percolator.ApplicationIntegrationTests;
 
@@ -28,66 +32,49 @@ public abstract class IntegrationTestBase
     protected TestLoggerProvider LoggerProvider { get; private set; }
 
     [SetUp]
-    public void SetUp()
+    public virtual async Task SetUpAsync()
     {
+        TestContext.WriteLine("SetUp: Starting setup process.");
         LoggerProvider = new TestLoggerProvider();
+        TestContext.WriteLine("SetUp: TestLoggerProvider created.");
+        await Task.CompletedTask;
     }
 
     [TearDown]
-    public void TearDown()
+    public virtual async Task TearDownAsync()
     {
-        // Use a timeout to ensure teardown completes even if there's an issue
-        using var cancellationTokenSource = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        
-        try
+        TestContext.WriteLine("TearDown: Starting teardown process.");
+
+        if (SenderHost != null)
         {
-            // Log that we're tearing down resources
-            Console.WriteLine("Test teardown: Disposing server resources");
-            
-            // Stop hosts with timeout
-            if (SenderHost != null)
-            {
-                try
-                {
-                    SenderHost.StopAsync(cancellationTokenSource.Token).Wait(TimeSpan.FromSeconds(2));
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"Error stopping sender host: {ex.Message}");
-                }
-                finally
-                {
-                    SenderHost.Dispose();
-                    SenderHost = null;
-                }
-            }
-            
-            if (ReceiverHost != null)
-            {
-                try
-                {
-                    ReceiverHost.StopAsync(cancellationTokenSource.Token).Wait(TimeSpan.FromSeconds(2));
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"Error stopping receiver host: {ex.Message}");
-                }
-                finally
-                {
-                    ReceiverHost.Dispose();
-                    ReceiverHost = null;
-                }
-            }
-            
-            // Dispose logger provider
-            LoggerProvider?.Dispose();
+            TestContext.WriteLine("TearDown: Stopping SenderHost...");
+            await SenderHost.StopAsync();
+            TestContext.WriteLine("TearDown: SenderHost stopped.");
+            SenderHost.Dispose();
+            TestContext.WriteLine("TearDown: SenderHost disposed.");
+            SenderHost = null;
         }
-        catch (Exception ex)
+
+        if (ReceiverHost != null)
         {
-            Console.WriteLine($"Exception during teardown: {ex}");
+            TestContext.WriteLine("TearDown: Stopping ReceiverHost...");
+            await ReceiverHost.StopAsync();
+            TestContext.WriteLine("TearDown: ReceiverHost stopped.");
+            ReceiverHost.Dispose();
+            TestContext.WriteLine("TearDown: ReceiverHost disposed.");
+            ReceiverHost = null;
+        }
+
+        if (LoggerProvider != null)
+        {
+            TestContext.WriteLine("TearDown: Disposing LoggerProvider.");
+            LoggerProvider.Dispose();
+            LoggerProvider = null;
         }
         
-        // Force garbage collection to clean up any lingering connections
+        TestContext.WriteLine("TearDown: Teardown process complete.");
+
+        // Final garbage collection to release any resources
         GC.Collect();
         GC.WaitForPendingFinalizers();
     }
@@ -102,7 +89,7 @@ public abstract class IntegrationTestBase
         return port;
     }
 
-    protected IHost StartGrpcServer(int port, string hostType, Action<IServiceCollection>? additionalServiceRegistration = null)
+    protected virtual IHost CreateHost(int port, string hostType, Action<IServiceCollection>? additionalServiceRegistration = null)
     {
         var hostBuilder = new HostBuilder()
             .ConfigureAppConfiguration((context, config) =>
@@ -133,10 +120,9 @@ public abstract class IntegrationTestBase
                 });
 
                 // Register application and infrastructure services
-                services.AddApplicationServices(context.Configuration);
                 services.AddInfrastructureServices(context.Configuration);
                 services.AddIdentityInfrastructure();
-
+                services.AddApplicationServices(context.Configuration);
                 // Add additional services if needed
                 additionalServiceRegistration?.Invoke(services);
             })
@@ -163,7 +149,26 @@ public abstract class IntegrationTestBase
                 });
             });
 
-        return hostBuilder.Start();
+        return hostBuilder.Build();
+    }
+
+    protected async Task<IHost> CreateAndInitializeHostAsync(int port, string hostType, string identityName, Action<IServiceCollection>? additionalServiceRegistration = null)
+    {
+        var host = CreateHost(port, hostType, additionalServiceRegistration);
+
+        // Apply EF Core migrations to ensure the database is up-to-date
+        using (var scope = host.Services.CreateScope())
+        {
+            var dbContext = scope.ServiceProvider.GetRequiredService<PercolatorDbContext>();
+            await dbContext.Database.MigrateAsync();
+        }
+
+        using (var scope = host.Services.CreateScope())
+        {
+            var identityOrchestrator = scope.ServiceProvider.GetRequiredService<IIdentityOrchestrator>();
+            await identityOrchestrator.LoadOrCreateIdentityAsync(identityName, CancellationToken.None);
+        }
+        return host;
     }
 
     protected class TestLoggerProvider : ILoggerProvider, IDisposable

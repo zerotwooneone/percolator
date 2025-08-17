@@ -1,7 +1,8 @@
 using Microsoft.Extensions.Logging;
+using Percolator.Identity;
 using Percolator.Identity.Model;
 
-namespace Percolator.Identity;
+namespace Percolator.Infrastructure.Identity;
 
 public class PersistentIdentityService : IIdentityService
 {

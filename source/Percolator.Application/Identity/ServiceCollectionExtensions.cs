@@ -11,19 +11,15 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddIdentityServices(this IServiceCollection services)
     {
         // Concrete implementations from Percolator.Identity
-        services.AddSingleton<IOneTimeKeyProvider, InMemoryOneTimeKeyProvider>();
-        services.AddSingleton<IIdentityService, PersistentIdentityService>();
-        services.AddSingleton<ActiveIdentityContext>();
-        services.AddSingleton<ISelfIdentityProvider>(s=> s.GetRequiredService<ActiveIdentityContext>());
-        
         services.AddSingleton<ICredentialService, CredentialService>();
+        services.AddSingleton<IOneTimeKeyProvider, InMemoryOneTimeKeyProvider>();
+        services.AddSingleton<ActiveIdentityContext>();
+        
         // Application-layer orchestrator
-        services.AddSingleton<IIdentityOrchestrator, IdentityOrchestrator>();
+        services.AddScoped<IIdentityOrchestrator, IdentityOrchestrator>();
         
         // Use SharedCertificateAdapter to bridge the shared certificate implementation to the old interface
-        services.AddSingleton<ITlsCertificateService, SharedCertificateAdapter>();
-
-        services.AddSingleton<IDirectSessionManager, DirectSessionManager>();
+        services.AddScoped<ITlsCertificateService, SharedCertificateAdapter>();
 
         return services;
     }

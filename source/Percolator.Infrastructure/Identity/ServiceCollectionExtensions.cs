@@ -21,6 +21,8 @@ namespace Percolator.Infrastructure.Identity
 
             services.AddSingleton<IIdentityStore, FileSystemIdentityStore>();
             services.AddSingleton<IKeyManagementService, PersistentKeyManagementService>();
+            services.AddSingleton<IIdentityService, PersistentIdentityService>();
+            services.AddSingleton<IPeerRepository, SqlitePeerRepository>();
 
             services.AddDbContext<PercolatorDbContext>((provider, options) =>
             {
@@ -41,8 +43,6 @@ namespace Percolator.Infrastructure.Identity
 
                 options.UseSqlite(connectionString);
             });
-
-            services.AddScoped<IPeerRepository, SqlitePeerRepository>();
             return services;
         }
     }

@@ -5,8 +5,9 @@ using Moq;
 using Percolator.Identity;
 using System.Security.Cryptography;
 using Percolator.Identity.Model;
+using Percolator.Infrastructure.Identity;
 
-namespace Percolator.IdentityTests;
+namespace Percolator.InfrastructureTests.Identity;
 
 [TestFixture]
 public class PersistentIdentityServiceTests

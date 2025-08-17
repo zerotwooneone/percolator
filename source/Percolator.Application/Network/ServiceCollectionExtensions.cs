@@ -16,16 +16,17 @@ public static class ServiceCollectionExtensions
         configuration.GetSection("PeerDiscovery").Bind(config);
         services.AddSingleton<IPeerDiscoveryConfig>(config);
 
-        services.AddSingleton<ISigningService, SigningService>();
-        
         services.Configure<NodeOptions>(configuration.GetSection(NodeOptions.SectionName));
+
+        // Register the adapter that bridges the Network and Cryptography domains
+        services.AddSingleton<ISigningService, SigningService>();
 
         // Register the core service from the Network domain library
         services.AddSingleton<IPeerDiscoveryService, PeerDiscoveryService>();
 
         // Register the shared certificate manager as the central certificate authority
         services.AddSingleton<SharedCertificateManager>();
-        
+
         // Register the trust store with the shared certificate manager
         services.AddSingleton<IPeerTrustManager>(provider => new InMemoryPeerTrustStore(
             provider.GetRequiredService<ITrustedPeerStore>(),

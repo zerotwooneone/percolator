@@ -11,7 +11,7 @@ namespace Percolator.Network;
 
 public class PeerDiscoveryService : IDisposable, IPeerDiscoveryService
 {
-    private readonly UdpClient _udpClient;
+    private UdpClient? _udpClient;
     private readonly IPeerDiscoveryConfig _config;
     private readonly ConcurrentDictionary<PublicKeyHash, DiscoveredPeer> _peers = new();
     private readonly IPeerDiscoveryHandler _handler;
@@ -29,33 +29,35 @@ public class PeerDiscoveryService : IDisposable, IPeerDiscoveryService
         _handler = handler;
         _signingService = signingService;
         _logger = logger;
-        _udpClient = new UdpClient();
-        _udpClient.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
-        _udpClient.Client.Bind(new IPEndPoint(IPAddress.Any, _config.BroadcastPort));
-        _udpClient.EnableBroadcast = true;
     }
 
-    public async Task StartAsync(CancellationToken cancellationToken = default)
+    public Task StartAsync(CancellationToken cancellationToken = default)
     {
         _cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
-        var listenTask = ListenForPeersAsync(_cancellationTokenSource.Token);
-        var broadcastTask = BroadcastPresenceAsync(_cancellationTokenSource.Token);
-        var cleanupTask = RunCleanupLoopAsync(_cancellationTokenSource.Token);
+        // Run the entire discovery process on a background thread to avoid blocking startup
+        _ = Task.Run(async () =>
+        {
+            _udpClient = new UdpClient();
+            _udpClient.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+            _udpClient.Client.Bind(new IPEndPoint(IPAddress.Any, _config.BroadcastPort));
+            _udpClient.EnableBroadcast = true;
 
-        try
-        {
+            var listenTask = ListenForPeersAsync(_cancellationTokenSource.Token);
+            var broadcastTask = BroadcastPresenceAsync(_cancellationTokenSource.Token);
+            var cleanupTask = RunCleanupLoopAsync(_cancellationTokenSource.Token);
+
             await Task.WhenAll(listenTask, broadcastTask, cleanupTask);
-        }
-        catch (OperationCanceledException)
-        {
-            // This is expected on shutdown
-        }
+        }, _cancellationTokenSource.Token);
+
+        // Return a completed task so the startup process is not blocked
+        return Task.CompletedTask;
     }
 
     public void Stop()
     {
         _cancellationTokenSource?.Cancel();
+        _udpClient?.Dispose();
     }
 
     private async Task BroadcastPresenceAsync(CancellationToken token)
@@ -65,6 +67,12 @@ public class PeerDiscoveryService : IDisposable, IPeerDiscoveryService
         { 
             try
             {
+                if (_udpClient is null)
+                {
+                    await Task.Delay(100, token); // prevent tight loop if client is not ready
+                    continue;
+                }
+
                 // 1. Get the public key
                 var publicKey = _signingService.GetActivePublicKey();
 
@@ -110,6 +118,11 @@ public class PeerDiscoveryService : IDisposable, IPeerDiscoveryService
         {
             try
             {
+                if (_udpClient is null)
+                {
+                    await Task.Delay(100, token); // prevent tight loop if client is not ready
+                    continue;
+                }
                 var result = await _udpClient.ReceiveAsync(token);
                 
                 // 1. Parse the incoming broadcast
@@ -204,7 +217,7 @@ public class PeerDiscoveryService : IDisposable, IPeerDiscoveryService
 
     public void Dispose()
     {
-        _udpClient.Dispose();
+        _udpClient?.Dispose();
         _cancellationTokenSource?.Dispose();
     }
 }

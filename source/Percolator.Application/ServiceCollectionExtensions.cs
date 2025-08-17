@@ -8,6 +8,7 @@ using Percolator.Application.Network;
 using Percolator.Application.PeerDiscovery;
 using Percolator.Application.RateLimiting;
 using Percolator.Application.Sessions;
+using Percolator.Identity;
 
 namespace Percolator.Application;
 
@@ -24,8 +25,15 @@ public static class ServiceCollectionExtensions
         services.AddPeerDiscoveryServices();
         services.AddSessionServices();
         services.AddRateLimiting();
-        services.AddChatServices();
         
+        services.AddSingleton<ActiveIdentityContext>();
+        services.AddSingleton<ISelfIdentityProvider>(s => s.GetRequiredService<ActiveIdentityContext>());
+
+        services.AddSingleton<IIdentityOrchestrator, IdentityOrchestrator>();
+
+        services.AddChatServices();
+        services.AddChatServices();
+
         return services;
     }
 }

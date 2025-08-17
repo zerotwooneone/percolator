@@ -1,3 +1,4 @@
+using System.Net;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
@@ -5,58 +6,61 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 using NUnit.Framework;
+using Percolator.Application;
 using Percolator.Application.Identity;
-using Percolator.Application.KeyExchange;
 using Percolator.Application.Network;
 using Percolator.Application.Sessions;
 using Percolator.Chat;
-using Percolator.Chat.ValueObjects;
 using Percolator.Cryptography;
 using Percolator.Identity;
 using Percolator.Infrastructure;
-using Percolator.Infrastructure.Chat;
-using Percolator.Infrastructure.Cryptography;
 using Percolator.Infrastructure.Identity;
-using Percolator.Infrastructure.Network;
+using static NUnit.Framework.Assert;
+using System.Collections.Concurrent;
 using Percolator.Network;
 using NetworkPeerId = Percolator.Network.PeerId;
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Net;
-using System.Threading;
-using System.Threading.Tasks;
-using Microsoft.Data.Sqlite;
-using Percolator.Infrastructure.Serialization;
-using PeerId = Percolator.Identity.PeerId;
-using Microsoft.EntityFrameworkCore;
-using Percolator.Infrastructure.Persistence;
 
 namespace Percolator.ApplicationIntegrationTests.ChatMessaging;
 
 [TestFixture]
+[Category("ApplicationIntegrationTests")]
+[NonParallelizable]
 public class MessageIntegrationTests : IntegrationTestBase
 {
-    // Track temp directories for cleanup
-    private readonly List<string> _tempDirectoriesToCleanup = new();
+    private List<string> _tempDirectoriesToCleanup = new();
+    private int SenderPort { get; set; }
+    private int ReceiverPort { get; set; }
 
-    // Override the base SetUp method to also clear the temp directories list
     [SetUp]
-    public new void SetUp()
+    public override async Task SetUpAsync()
     {
-        base.SetUp();
+        await base.SetUpAsync();
         _tempDirectoriesToCleanup.Clear();
+
+        SenderPort = GetAvailablePort();
+        ReceiverPort = GetAvailablePort();
+
+        SenderHost = await CreateAndInitializeHostAsync(SenderPort, "Sender", "sender");
+        ReceiverHost = await CreateAndInitializeHostAsync(ReceiverPort, "Receiver", "receiver");
+
+        var senderDataDir = SenderHost.Services.GetRequiredService<IConfiguration>()["Percolator:DataDirectoryPath"];
+        var receiverDataDir = ReceiverHost.Services.GetRequiredService<IConfiguration>()["Percolator:DataDirectoryPath"];
+
+        if (!string.IsNullOrEmpty(senderDataDir)) _tempDirectoriesToCleanup.Add(senderDataDir);
+        if (!string.IsNullOrEmpty(receiverDataDir)) _tempDirectoriesToCleanup.Add(receiverDataDir);
+        
+        await SenderHost.StartAsync();
+        await ReceiverHost.StartAsync();
     }
 
-    // Override the base TearDown method to also clean up temp directories
     [TearDown]
-    public new void TearDown()
+    public override async Task TearDownAsync()
     {
-        base.TearDown();
-        
-        // Clean up any temp directories created during the test
+        // First, stop the hosts to release ports.
+        await base.TearDownAsync();
+
+        // Then, clean up the directories.
         foreach (var dir in _tempDirectoriesToCleanup)
         {
             try
@@ -64,119 +68,44 @@ public class MessageIntegrationTests : IntegrationTestBase
                 if (Directory.Exists(dir))
                 {
                     Directory.Delete(dir, true);
-                    TestContext.WriteLine($"Cleaned up temp directory: {dir}");
                 }
             }
             catch (Exception ex)
             {
-                TestContext.WriteLine($"Error cleaning up directory {dir}: {ex.Message}");
+                TestContext.WriteLine($"Warning: Could not clean up temp directory {dir}. Reason: {ex.Message}");
             }
         }
     }
-    
-    // We'll add a series of simpler tests to isolate where the hanging occurs
-    
+
     [Test, CancelAfter(30000)] // 30-second timeout for the entire test
-    public async Task Test1_BasicNodeSetup_ShouldComplete()
-    {
-        // Simple test just to set up nodes and verify they start correctly
-        TestContext.WriteLine("Starting Test1_BasicNodeSetup_ShouldComplete");
-        
-        try
-        {
-            // Setup ports
-            int senderPort = GetAvailablePort();
-            int receiverPort = GetAvailablePort();
-            
-            TestContext.WriteLine($"Starting sender on port {senderPort} and receiver on port {receiverPort}");
-            
-            // Create custom hosts with minimal service registration
-            ReceiverHost = CreateHost(receiverPort, "receiver-only");
-            SenderHost = CreateHost(senderPort, "sender");
-            
-            TestContext.WriteLine("Hosts created, starting...");
-            await Task.WhenAll(
-                ReceiverHost.StartAsync(),
-                SenderHost.StartAsync()
-            );
-            
-            // Wait a moment for servers to start
-            await Task.Delay(500);
-            TestContext.WriteLine("Servers started");
-            
-            // Get services from both hosts
-            var receiverServices = ReceiverHost.Services;
-            
-            // Check for basic service resolution
-            TestContext.WriteLine("Testing service resolution on receiver...");
-            var receiverLogger = receiverServices.GetRequiredService<ILogger<MessageIntegrationTests>>();
-            receiverLogger.LogInformation("Receiver service resolution successful");
-            TestContext.WriteLine("Receiver service resolution successful");
-            
-            TestContext.WriteLine("Receiver setup passed!");
-        }
-        catch (Exception ex)
-        {
-            TestContext.WriteLine($"ERROR STARTING RECEIVER: {ex.GetType().Name}: {ex.Message}");
-            TestContext.WriteLine(ex.StackTrace);
-        }
-    }
-    
-    [Test, CancelAfter(30000)] // 30-second timeout for the entire test
-    public async Task Test2_IdentityCreation_ShouldComplete()
+    public void Test2_IdentityCreation_ShouldComplete()
     {
         // Test just the identity creation part
         TestContext.WriteLine("Starting Test2_IdentityCreation_ShouldComplete");
-        
+
         try
         {
-            // Setup ports
-            int senderPort = GetAvailablePort();
-            int receiverPort = GetAvailablePort();
+            // Hosts are created and started in the base SetUpAsync.
+            Assert.That(SenderHost, Is.Not.Null, "SenderHost should be initialized by base setup.");
+            Assert.That(ReceiverHost, Is.Not.Null, "ReceiverHost should be initialized by base setup.");
             
-            TestContext.WriteLine($"Starting sender on port {senderPort} and receiver on port {receiverPort}");
-            
-            // Create custom hosts with minimal service registration
-            ReceiverHost = CreateHost(receiverPort, "receiver");
-            SenderHost = CreateHost(senderPort, "sender");
-            
-            TestContext.WriteLine("Hosts created, starting...");
-            await Task.WhenAll(
-                ReceiverHost.StartAsync(),
-                SenderHost.StartAsync()
-            );
-            
-            // Wait a moment for servers to start
-            await Task.Delay(500);
-            TestContext.WriteLine("Servers started");
-            
+            TestContext.WriteLine("Hosts started");
+
             // Get services from both hosts
             var senderServices = SenderHost.Services;
             var receiverServices = ReceiverHost.Services;
-            
-            // Get identity orchestrators
-            TestContext.WriteLine("Getting identity orchestrators");
-            var senderIdentityOrchestrator = senderServices.GetRequiredService<IIdentityOrchestrator>();
-            var receiverIdentityOrchestrator = receiverServices.GetRequiredService<IIdentityOrchestrator>();
-            
-            // Load or create identities with cancellation token
-            TestContext.WriteLine("Loading identities");
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-            await senderIdentityOrchestrator.LoadOrCreateIdentityAsync("sender-test2", cts.Token);
-            await receiverIdentityOrchestrator.LoadOrCreateIdentityAsync("receiver-test2", cts.Token);
-            TestContext.WriteLine("Identities loaded");
-            
+
             // Get active identity contexts
             TestContext.WriteLine("Getting identity contexts");
             var senderIdentityContext = senderServices.GetRequiredService<ActiveIdentityContext>();
             var receiverIdentityContext = receiverServices.GetRequiredService<ActiveIdentityContext>();
-            
+
             TestContext.WriteLine($"Sender identity: {senderIdentityContext.Identity?.Id}");
             TestContext.WriteLine($"Receiver identity: {receiverIdentityContext.Identity?.Id}");
-            
+
             Assert.That(senderIdentityContext.Identity, Is.Not.Null, "Sender identity should be loaded");
             Assert.That(receiverIdentityContext.Identity, Is.Not.Null, "Receiver identity should be loaded");
-            
+
             TestContext.WriteLine("Identity creation test passed!");
         }
         catch (Exception ex)
@@ -185,77 +114,52 @@ public class MessageIntegrationTests : IntegrationTestBase
             throw;
         }
     }
-    
+
     [Test, CancelAfter(30000)] // 30-second timeout for the entire test
     public async Task SendChatMessage_MessageIsReceivedAndLogged()
     {
         // Create a cancellation token that will timeout after 20 seconds
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
         var token = cts.Token;
-        
+
         try
         {
-            // Setup ports
-            int senderPort = GetAvailablePort();
-            int receiverPort = GetAvailablePort();
-            
-            TestContext.WriteLine($"Starting sender on port {senderPort} and receiver on port {receiverPort}");
-            
-            // Create custom hosts with minimal service registration
-            ReceiverHost = CreateHost(receiverPort, "receiver");
-            SenderHost = CreateHost(senderPort, "sender");
-            
-            TestContext.WriteLine("Hosts created, starting...");
-            await Task.WhenAll(
-                ReceiverHost.StartAsync(token),
-                SenderHost.StartAsync(token)
-            );
-            
-            // Wait a moment for servers to start
-            await Task.Delay(500, token);
+            // Hosts are created and started in the base SetUpAsync.
+            Assert.That(SenderHost, Is.Not.Null, "SenderHost should be initialized by base setup.");
+            Assert.That(ReceiverHost, Is.Not.Null, "ReceiverHost should be initialized by base setup.");
+
             TestContext.WriteLine("Servers started");
-            
+
             // Get services from both hosts
             var senderServices = SenderHost.Services;
             var receiverServices = ReceiverHost.Services;
-            
-            // Get identity orchestrators
-            TestContext.WriteLine("Getting identity orchestrators");
-            var senderIdentityOrchestrator = senderServices.GetRequiredService<IIdentityOrchestrator>();
-            var receiverIdentityOrchestrator = receiverServices.GetRequiredService<IIdentityOrchestrator>();
-            
-            // Load or create identities with cancellation token
-            TestContext.WriteLine("Loading identities");
-            await senderIdentityOrchestrator.LoadOrCreateIdentityAsync("sender", token);
-            await receiverIdentityOrchestrator.LoadOrCreateIdentityAsync("receiver", token);
-            TestContext.WriteLine("Identities loaded");
-            
+
             // Get active identity contexts
             TestContext.WriteLine("Getting identity contexts");
             var senderIdentityContext = senderServices.GetRequiredService<ActiveIdentityContext>();
             var receiverIdentityContext = receiverServices.GetRequiredService<ActiveIdentityContext>();
-            
+
             if (senderIdentityContext.Identity == null)
                 TestContext.WriteLine("WARNING: Sender identity is null");
             if (receiverIdentityContext.Identity == null)
                 TestContext.WriteLine("WARNING: Receiver identity is null");
-            
+
             // Setup direct connection from sender to receiver
             TestContext.WriteLine("Setting up direct connection");
-            
+
             // Get conversation service for creating the direct conversation
             TestContext.WriteLine("Getting conversation service");
             var conversationService = senderServices.GetRequiredService<IConversationService>();
-            
+
             // Create a direct conversation, which handles peer creation, peer connection, and session establishment
             TestContext.WriteLine("Creating direct conversation");
-            
+
             // Set up a DnsEndPoint for the receiver's gRPC server
-            var receiverEndpoint = new System.Net.DnsEndPoint("localhost", receiverPort);
-            
+            var receiverEndpoint = new System.Net.DnsEndPoint("localhost", ReceiverPort);
+
             // Define the message text at a higher scope so it's accessible throughout the test
             var messageText = "Hello from integration test!";
-            
+
             try
             {
                 // This will create the peer, peer connection, conversation, and establish the session
@@ -383,7 +287,7 @@ public class MessageIntegrationTests : IntegrationTestBase
             }
             
             // Dump all logs for debugging
-            TestContext.WriteLine("--------- ALL CAPTURED LOGS ---------");
+            TestContext.WriteLine("--------- ALL CAPTured LOGS ---------");
             foreach (var log in LoggerProvider.GetAllLogMessages())
             {
                 TestContext.WriteLine($"LOG: {log}");
@@ -406,155 +310,64 @@ public class MessageIntegrationTests : IntegrationTestBase
             throw;
         }
     }
-    
-    private IHost CreateHost(int port, string nodeName)
+}
+
+public class TestLoggerProvider : ILoggerProvider
+{
+    private readonly ConcurrentDictionary<string, TestLogger> _loggers = new();
+    private readonly ConcurrentQueue<string> _logMessages = new();
+
+    public ILogger CreateLogger(string categoryName)
     {
-        // Create a unique temp directory for this node
-        string tempDirectory = Path.Combine(Path.GetTempPath(), $"PercolatorTest_{nodeName}_{Guid.NewGuid()}");
-        Directory.CreateDirectory(tempDirectory);
-        TestContext.WriteLine($"Created temp directory for {nodeName}: {tempDirectory}");
-        
-        // Add to list for cleanup
-        _tempDirectoriesToCleanup.Add(tempDirectory);
-        
-        // Create minimal configuration
-        var configValues = new Dictionary<string, string>
+        return _loggers.GetOrAdd(categoryName, name => new TestLogger(name, _logMessages));
+    }
+
+    public bool ContainsLog(string message)
+    {
+        return _logMessages.Any(log => log.Contains(message));
+    }
+
+    public IEnumerable<string> GetAllLogMessages()
+    {
+        return _logMessages.ToList();
+    }
+
+    public void Dispose()
+    {
+        _loggers.Clear();
+        _logMessages.Clear();
+    }
+}
+
+public class TestLogger : ILogger
+{
+    private readonly string _name;
+    private readonly ConcurrentQueue<string> _logMessages;
+
+    public TestLogger(string name, ConcurrentQueue<string> logMessages)
+    {
+        _name = name;
+        _logMessages = logMessages;
+    }
+
+    public IDisposable BeginScope<TState>(TState state)
+    {
+        return null!;
+    }
+
+    public bool IsEnabled(LogLevel logLevel)
+    {
+        return true;
+    }
+
+    public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+    {
+        var message = formatter(state, exception);
+        _logMessages.Enqueue(message);
+        TestContext.WriteLine($"[{logLevel}] {_name}: {message}");
+        if (exception != null)
         {
-            { "Logging:LogLevel:Default", "Trace" },
-            { "Logging:LogLevel:Microsoft", "Warning" },
-            { "Storage:Path", tempDirectory }
-        };
-        
-        var configBuilder = new ConfigurationBuilder();
-        configBuilder.AddInMemoryCollection(configValues);
-        var configuration = configBuilder.Build();
-        
-        return Host.CreateDefaultBuilder()
-            .ConfigureWebHostDefaults(webBuilder =>
-            {
-                webBuilder.UseKestrel(options =>
-                {
-                    options.Listen(IPAddress.Loopback, port, listenOptions =>
-                    {
-                        listenOptions.Protocols = HttpProtocols.Http2;
-                    });
-                });
-                
-                webBuilder.ConfigureServices(services =>
-                {
-                    TestContext.WriteLine($"Registering services for {nodeName} host");
-                    
-                    // Add logging
-                    services.AddLogging(builder =>
-                    {
-                        builder.AddProvider(LoggerProvider);
-                        builder.AddConsole();
-                    });
-                    
-                    // Add gRPC services
-                    services.AddGrpc(options =>
-                    {
-                        options.EnableDetailedErrors = true;
-                        options.MaxReceiveMessageSize = 16 * 1024 * 1024; // 16MB
-                        options.MaxSendMessageSize = 16 * 1024 * 1024;    // 16MB
-                    });
-                    
-                    // Register ONLY the required services (minimal registration)
-                    
-                    // Identity services
-                    services.AddSingleton<ActiveIdentityContext>();
-                    services.AddSingleton<ISelfIdentityProvider>(s=> s.GetRequiredService<ActiveIdentityContext>());
-                    services.AddSingleton<IIdentityOrchestrator, IdentityOrchestrator>();
-                    services.AddSingleton<IIdentityStore, FileSystemIdentityStore>();
-                    services.AddSingleton<IIdentityService, PersistentIdentityService>();
-                    services.AddSingleton<IOneTimeKeyProvider, InMemoryOneTimeKeyProvider>();
-                    services.AddSingleton<ICredentialService, CredentialService>();
-                    services.AddScoped<IKeyManagementService, PersistentKeyManagementService>();
-                    
-                    // Session services
-                    services.AddScoped<IDirectSessionManager, DirectSessionManager>();
-                    services.AddScoped<IConversationService, ConversationService>();
-                    
-                    // Double Ratchet Session Store
-                    services.AddSingleton<IDoubleRatchetSessionStore, FileBasedDoubleRatchetSessionStore>();
-                    
-                    // Message services
-                    services.AddScoped<IMessageService, MessageService>();
-                    services.AddScoped<PercolatorMessageService>();
-                    services.AddScoped<IConversationRepository, FileBasedConversationRepository>();
-                    services.AddSingleton<ISelfParticipantIdProvider>(sp => sp.GetRequiredService<ActiveIdentityContext>());
-                    
-                    // Message Transport Services
-                    services.AddSingleton<SharedCertificateManager>();
-                    
-                    // Use in-memory SQLite for peer repository in tests
-                    var connection = new SqliteConnection("DataSource=:memory:");
-                    connection.Open();
-                    services.AddDbContext<PercolatorDbContext>(options =>
-                    {
-                        options.UseSqlite(connection);
-                    });
-
-                    // Ensure the database is created
-                    using (var scope = services.BuildServiceProvider().CreateScope())
-                    {
-                        var dbContext = scope.ServiceProvider.GetRequiredService<PercolatorDbContext>();
-                        dbContext.Database.EnsureCreated();
-                    }
-
-                    services.AddScoped<IPeerRepository, SqlitePeerRepository>();
-
-                    services.AddSingleton<IPeerConnectionRepository, FileBasedPeerConnectionRepository>();
-                    services.AddScoped<IMessageTransportService, GrpcMessageTransportService>();
-                    services.AddSingleton<IGrpcSessionService, GrpcSessionService>();
-                    services.AddSingleton<IPeerTrustManager>(provider => new InMemoryPeerTrustStore(
-                        provider.GetRequiredService<ITrustedPeerStore>(),
-                        provider.GetRequiredService<ILogger<InMemoryPeerTrustStore>>(),
-                        provider.GetRequiredService<SharedCertificateManager>()
-                    ));
-                    services.AddSingleton<ITrustedPeerStore, FileBasedTrustedPeerStore>();
-                    services.AddSingleton<PercolatorJsonContext>();
-
-                    // Register HTTP client for gRPC communication
-                    services.AddHttpClient("percolator-grpc", (serviceProvider, client) => { })
-                        .ConfigurePrimaryHttpMessageHandler(serviceProvider =>
-                        {
-                            var handler = new HttpClientHandler
-                            {
-                                ServerCertificateCustomValidationCallback = (_, _, _, _) => true // Accept all certificates for testing
-                            };
-                            TestContext.WriteLine("Created HttpClientHandler with ServerCertificateCustomValidationCallback = true");
-                            return handler;
-                        });
-                    
-                    // X3DH Key Exchange Services
-                    services.AddScoped<IX3DHOrchestrator, X3DHOrchestrator>();
-                    services.AddSingleton<IX3DHManager, X3DHManager>();
-                    
-                    // Add configuration
-                    services.AddSingleton<IConfiguration>(configuration);
-                    
-                    // Add storage options
-                    services.AddOptions<StorageOptions>()
-                        .Configure(options => 
-                        {
-                            options.Path = tempDirectory;
-                            TestContext.WriteLine($"Configured storage path for {nodeName}: {options.Path}");
-                        });
-                });
-                
-                webBuilder.Configure(app =>
-                {
-                    TestContext.WriteLine($"Configuring {nodeName} app");
-                    
-                    app.UseRouting();
-                    app.UseEndpoints(endpoints =>
-                    {
-                        endpoints.MapGrpcService<PercolatorMessageService>();
-                        TestContext.WriteLine($"Mapped gRPC service: PercolatorMessageService for {nodeName}");
-                    });
-                });
-            })
-            .Build();
+            TestContext.WriteLine(exception.ToString());
+        }
     }
 }

@@ -7,7 +7,6 @@ public static class ServiceCollectionExtensions
 {
     public static IServiceCollection AddCryptographyInfrastructure(this IServiceCollection services)
     {
-        services.AddSingleton<IDoubleRatchetSessionStore, FileBasedDoubleRatchetSessionStore>();
         services.AddSingleton<ICertificateFactory, FileBasedCertificateFactory>();
         return services;
     }
