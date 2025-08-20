@@ -29,12 +29,6 @@ public class SqlitePreKeyBundleRepository : IPreKeyBundleRepository
             var oneTimePreKey = await _context.OneTimePreKeys
                 .FirstOrDefaultAsync(k => k.PeerIdentityKey.PeerId.Value == peerId.Value);
 
-            if (oneTimePreKey is null)
-            {
-                await transaction.RollbackAsync();
-                return null;
-            }
-
             var identityKeyDbo = await _context.PeerIdentityKeys
                 .Include(ik => ik.SignedPreKeys)
                 .Include(ik => ik.OneTimePreKeys)
@@ -58,7 +52,7 @@ public class SqlitePreKeyBundleRepository : IPreKeyBundleRepository
                 Guid.Parse(signedPreKey.Id),
                 new PreKey(signedPreKey.PublicKey),
                 new Signature(signedPreKey.Signature),
-                Guid.Parse(oneTimePreKey.Id),
+                oneTimePreKey is not null ? Guid.Parse(oneTimePreKey.Id): null,
                 oneTimePreKey is not null ? new OneTimeKey(oneTimePreKey.PublicKey) : null
             );
 
