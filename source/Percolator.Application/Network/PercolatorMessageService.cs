@@ -11,6 +11,7 @@ using ChatParticipantId = Percolator.Chat.ValueObjects.ParticipantId;
 using Percolator.Application.Identity;
 using System.Security.Cryptography;
 using Google.Protobuf;
+using Google.Protobuf.WellKnownTypes;
 using Percolator.Identity;
 using Percolator.Network;
 using NetworkPeerId = Percolator.Network.PeerId;
@@ -20,6 +21,9 @@ using Percolator.Chat.ValueObjects;
 using Percolator.Cryptography;
 using CryptoSignature = Percolator.Cryptography.Signature;
 using PreKeyBundle = Percolator.Contracts.PreKeyBundle;
+using Percolator.Cryptography.Primitives;
+using ISigningService = Percolator.Cryptography.ISigningService;
+using PublicKey = Percolator.Cryptography.PublicKey;
 
 namespace Percolator.Application.Network
 {
@@ -33,6 +37,9 @@ namespace Percolator.Application.Network
         private readonly IPeerRepository _peerRepository;
         private readonly IPeerConnectionRepository _peerConnectionRepository;
         private readonly IX3DHManager _x3DhManager;
+        private readonly IPreKeyBundleRepository _bundleRepository;
+        private readonly ISigningService _signingService;
+        private readonly IPeerTrustManager _peerTrustManager;
 
         public PercolatorMessageService(
             ILogger<PercolatorMessageService> logger, 
@@ -42,7 +49,10 @@ namespace Percolator.Application.Network
             IConversationRepository conversationRepository, 
             IPeerRepository peerRepository, 
             IPeerConnectionRepository peerConnectionRepository, 
-            IX3DHManager x3DhManager)
+            IX3DHManager x3DhManager,
+            IPreKeyBundleRepository bundleRepository,
+            ISigningService signingService,
+            IPeerTrustManager peerTrustManager)
         {
             _logger = logger;
             _activeIdentityContext = activeIdentityContext;
@@ -52,6 +62,9 @@ namespace Percolator.Application.Network
             _peerRepository = peerRepository;
             _peerConnectionRepository = peerConnectionRepository;
             _x3DhManager = x3DhManager;
+            _bundleRepository = bundleRepository;
+            _signingService = signingService;
+            _peerTrustManager = peerTrustManager;
         }
 
         public override async Task<EstablishDirectSessionResponse> EstablishDirectSession(EstablishDirectSessionRequest request, ServerCallContext context)
@@ -285,6 +298,132 @@ namespace Percolator.Application.Network
                 _logger.LogError(ex, "Failed to establish session.");
                 throw new RpcException(new Status(StatusCode.Internal, "Session establishment failed."));
             }
+        }
+
+        public override async Task<SubmitPreKeyBundleResponse> SubmitPreKeyBundle(SubmitPreKeyBundleRequest request, ServerCallContext context)
+        {
+            if (!request.HasIdentityKey)
+            {
+                throw new RpcException(new Status(StatusCode.InvalidArgument, "Request must contain an identity key."));
+            }
+            if(!request.HasSignedPayload)
+            {
+                throw new RpcException(new Status(StatusCode.InvalidArgument, "Request must contain signed payload."));
+            }
+            if (!request.HasSignature)
+            {
+                throw new RpcException(new Status(StatusCode.InvalidArgument, "Request must contain signature."));
+            }
+
+            var identitySigningKeyBytes = request.IdentityKey.ToByteArray();
+            if(!_signingService.Verify(
+                   request.SignedPayload.ToByteArray(), 
+                   new CryptoSignature( request.Signature.ToByteArray()), 
+                   new PublicKey(identitySigningKeyBytes)))
+            {
+                throw new RpcException(new Status(StatusCode.InvalidArgument, "Invalid signature."));
+            }
+            var payload = SubmitPreKeyBundleRequest.Types.PreKeyUploadPayload.Parser.ParseFrom(request.SignedPayload);
+            const int maxBundles = 100;
+            if (payload.OneTimePreKeys.Count == 0 || payload.OneTimePreKeys.Count > maxBundles)
+            {
+                throw new RpcException(new Status(StatusCode.InvalidArgument, $"Request must contain between 1 and {maxBundles} bundles."));
+            }
+            if (payload.TimestampUtc == null)
+            {
+                throw new RpcException(new Status(StatusCode.InvalidArgument, "Request must contain timestamp."));
+            }
+            if (payload.ExpiresUtc == null)
+            {
+                throw new RpcException(new Status(StatusCode.InvalidArgument, "Request must contain expiration."));
+            }
+
+            if (!payload.SignedPreKey.HasId)
+            {
+                throw new RpcException(new Status(StatusCode.InvalidArgument, "Request must contain signed pre-key ID."));
+            }
+            var nowTimestamp = DateTimeOffset.Now;
+            var timestamp = payload.TimestampUtc.ToDateTimeOffset();
+            if (timestamp > nowTimestamp.AddSeconds(1) || timestamp < nowTimestamp.AddSeconds(-30))
+            {
+                throw new RpcException(new Status(StatusCode.InvalidArgument, "Request timestamp is too far in the future or the past."));
+            }
+            if(payload.ExpiresUtc.ToDateTimeOffset() < timestamp)
+            {
+                throw new RpcException(new Status(StatusCode.InvalidArgument, "Request expiration is before the timestamp."));
+            }
+
+            if (!payload.SignedPreKey.HasPublicKey || !payload.SignedPreKey.HasSignature)
+            {
+                throw new RpcException(new Status(StatusCode.InvalidArgument, "Request must contain signed pre-key."));
+            }
+
+            var signedPreKeyBytes = payload.SignedPreKey.PublicKey.ToByteArray();
+            var signedPreKeySignature = new CryptoSignature(payload.SignedPreKey.Signature.ToByteArray());
+            if(!_signingService.Verify(signedPreKeyBytes,
+                   signedPreKeySignature,
+                   new PublicKey(identitySigningKeyBytes)))
+            {
+                throw new RpcException(new Status(StatusCode.InvalidArgument, "Invalid pre-key signature."));
+            }
+
+            // Look up the peer by their public identity agreement key.
+            var remoteIdentitySigningKeyBytes = identitySigningKeyBytes;
+            var networkIdentitySigningKey = new DirectMessagePublicKey(remoteIdentitySigningKeyBytes);
+            var connnectionInfo =
+                await _peerConnectionRepository.GetByDirectMessage(networkIdentitySigningKey);
+
+            if (connnectionInfo is null)
+            {
+                throw new RpcException(new Status(StatusCode.NotFound, "Peer connection info not found."));
+            }
+
+            var networkPeerId = new NetworkPeerId(connnectionInfo.Id.Value);
+                
+            var peer = await _peerRepository.GetByIdAsync(new IdentityPeerId(networkPeerId.Value));
+            if (peer is null)
+            {
+                throw new RpcException(new Status(StatusCode.PermissionDenied, "Could not determine peer from signing key."));
+            }
+            var peerId = peer.Id;
+            var signedPreKeyId = new Guid(payload.SignedPreKey.Id.ToByteArray());
+            
+            var domainBundles = new List<Percolator.Cryptography.PreKeyBundle>();
+            foreach (var oneTimePreKey in payload.OneTimePreKeys)
+            {
+                if (oneTimePreKey is null || !oneTimePreKey.HasId || !oneTimePreKey.HasPublicKey)
+                {
+                    throw new RpcException(new Status(StatusCode.InvalidArgument, "Request must contain one-time pre-key."));
+                }
+
+                if (!oneTimePreKey.HasId)
+                {
+                    throw new RpcException(new Status(StatusCode.InvalidArgument, "Request must contain one-time pre-key ID."));
+                }
+                var oneTimePreKeyId = new Guid(oneTimePreKey.Id.ToByteArray());
+                
+                var domainBundle = new Percolator.Cryptography.PreKeyBundle(
+                    new RatchetIdentityKey(identitySigningKeyBytes),
+                    signedPreKeyId,
+                    new PreKey(signedPreKeyBytes),  
+                    signedPreKeySignature,
+                    oneTimePreKeyId,
+                    new OneTimeKey( oneTimePreKey.PublicKey.ToByteArray()),
+                    payload.ExpiresUtc.ToDateTime()
+                );
+                
+                domainBundles.Add(domainBundle);
+            }
+
+            if (domainBundles.Count == 0)
+            {
+                throw new RpcException(new Status(StatusCode.InvalidArgument, "No valid bundles were provided."));
+            }
+
+            await _bundleRepository.StoreBundlesAsync(new Percolator.Cryptography.Primitives.PeerId(peerId.Value), domainBundles);
+            _logger.LogInformation("Successfully stored {BundleCount} pre-key bundles for peer {PeerId}", domainBundles.Count, peerId);
+
+            return new SubmitPreKeyBundleResponse { Version = 1 };
         }
 
         public override async Task<DeliverOpaqueMessageResponse> DeliverOpaqueMessage(DeliverOpaqueMessageRequest request, ServerCallContext context)
