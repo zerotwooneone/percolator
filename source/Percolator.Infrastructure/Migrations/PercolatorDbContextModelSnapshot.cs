@@ -17,6 +17,23 @@ namespace Percolator.Infrastructure.Migrations
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "9.0.8");
 
+            modelBuilder.Entity("Percolator.Dht.DhtNode", b =>
+                {
+                    b.Property<byte[]>("Id")
+                        .HasColumnType("BLOB");
+
+                    b.Property<string>("EndPoint")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("LastSeenUtc")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("DhtNodes");
+                });
+
             modelBuilder.Entity("Percolator.Identity.Peer", b =>
                 {
                     b.Property<Guid>("Id")

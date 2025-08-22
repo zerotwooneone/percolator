@@ -19,6 +19,9 @@ using Percolator.Application.Network;
 using Percolator.Application.Sessions;
 using Percolator.Cryptography;
 using Percolator.Infrastructure;
+using Percolator.Infrastructure.Chat;
+using Percolator.Infrastructure.Cryptography;
+using Percolator.Infrastructure.Dht;
 using Percolator.Infrastructure.Identity;
 using Percolator.Network;
 using Percolator.Node;
@@ -107,6 +110,7 @@ async Task HostCommandHandler(InvocationContext context)
     tempServices.AddInfrastructureServices(tempConfig);
     tempServices.AddIdentityInfrastructure();
     tempServices.AddApplicationServices(tempConfig);
+    tempServices.AddDhtInfrastructure();
     ServiceProvider tempServiceProvider = tempServices.BuildServiceProvider();
 
     try
@@ -164,6 +168,7 @@ async Task HostCommandHandler(InvocationContext context)
         builder.Services.AddInfrastructureServices(builder.Configuration);
         builder.Services.AddIdentityInfrastructure();
         builder.Services.AddApplicationServices(builder.Configuration);
+        builder.Services.AddDhtInfrastructure();
 
         WebApplication app = builder.Build();
 
@@ -305,7 +310,7 @@ static ServiceProvider CreateServiceProvider()
     services.AddInfrastructureServices(config);
     services.AddIdentityInfrastructure();
     services.AddApplicationServices(config);
-    
+    services.AddDhtInfrastructure();
     services.AddHttpClient("percolator-grpc", client =>
     {
         client.DefaultRequestVersion = HttpVersion.Version20;

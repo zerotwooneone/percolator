@@ -1,5 +1,8 @@
 using Microsoft.EntityFrameworkCore;
 using Percolator.Identity;
+using System.Net;
+using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
+using Percolator.Dht;
 
 namespace Percolator.Infrastructure.Persistence;
 
@@ -13,6 +16,7 @@ public class PercolatorDbContext : DbContext
     public DbSet<PeerIdentityKeyDbo> PeerIdentityKeys { get; set; } = null!;
     public DbSet<SignedPreKeyDbo> SignedPreKeys { get; set; } = null!;
     public DbSet<OneTimePreKeyDbo> OneTimePreKeys { get; set; } = null!;
+    public DbSet<DhtNode> DhtNodes { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -61,6 +65,16 @@ public class PercolatorDbContext : DbContext
                 .WithMany(p => p.OneTimePreKeys)
                 .HasForeignKey(d => d.PeerIdentityKeyId)
                 .IsRequired();
+        });
+
+        modelBuilder.Entity<DhtNode>(builder =>
+        {
+            builder.HasKey(e => e.Id);
+            builder.Property(e => e.Id)
+                .HasConversion(new ValueConverter<NodeId, byte[]>(v => v.Value, v => new NodeId(v)));
+
+            builder.Property(e => e.EndPoint)
+                .HasConversion(new DnsEndPointValueConverter());
         });
     }
 }
