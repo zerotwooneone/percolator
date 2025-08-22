@@ -8,7 +8,10 @@ using Percolator.Application.Network;
 using Percolator.Application.PeerDiscovery;
 using Percolator.Application.RateLimiting;
 using Percolator.Application.Sessions;
+using Percolator.Dht;
 using Percolator.Identity;
+using MediatR;
+using Percolator.Dht.Messages;
 
 namespace Percolator.Application;
 
@@ -32,7 +35,11 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IIdentityOrchestrator, IdentityOrchestrator>();
 
         services.AddChatServices();
-        services.AddChatServices();
+
+        services.AddMediatR(cfg =>
+        {
+            cfg.RegisterServicesFromAssembly(typeof(PingRequest).Assembly);
+        });
 
         return services;
     }

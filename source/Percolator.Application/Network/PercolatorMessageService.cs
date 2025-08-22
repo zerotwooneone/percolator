@@ -1,6 +1,7 @@
 using System.Net;
 using Grpc.Core;
 using Microsoft.Extensions.Logging;
+using MediatR;
 using Percolator.Application.KeyExchange;
 using Percolator.Application.Sessions;
 using Percolator.Contracts;
@@ -40,6 +41,7 @@ namespace Percolator.Application.Network
         private readonly IPreKeyBundleRepository _bundleRepository;
         private readonly ISigningService _signingService;
         private readonly IPeerTrustManager _peerTrustManager;
+        private readonly IMediator _mediator;
 
         public PercolatorMessageService(
             ILogger<PercolatorMessageService> logger, 
@@ -52,7 +54,8 @@ namespace Percolator.Application.Network
             IX3DHManager x3DhManager,
             IPreKeyBundleRepository bundleRepository,
             ISigningService signingService,
-            IPeerTrustManager peerTrustManager)
+            IPeerTrustManager peerTrustManager,
+            IMediator mediator)
         {
             _logger = logger;
             _activeIdentityContext = activeIdentityContext;
@@ -65,6 +68,7 @@ namespace Percolator.Application.Network
             _bundleRepository = bundleRepository;
             _signingService = signingService;
             _peerTrustManager = peerTrustManager;
+            _mediator = mediator;
         }
 
         public override async Task<EstablishDirectSessionResponse> EstablishDirectSession(EstablishDirectSessionRequest request, ServerCallContext context)
@@ -428,21 +432,15 @@ namespace Percolator.Application.Network
 
         public override async Task<DeliverOpaqueMessageResponse> DeliverOpaqueMessage(DeliverOpaqueMessageRequest request, ServerCallContext context)
         {
-            _logger.LogWarning("Received opaque message for session {SessionId} as {PeerName}:{PeerId}", request.SessionId, _activeIdentityContext.Identity?.Name, _activeIdentityContext.Identity?.Id);
-
+            _logger.LogInformation("Received request to deliver an opaque message");
             try
             {
-                var conversationId = new SessionId(Guid.Parse(request.SessionId));
+                var sessionId = new SessionId(Guid.Parse(request.SessionId));
 
                 // Create a SessionRatchetMessage from the payload bytes
                 var payload = request.Payload.ToByteArray();
                 var sessionRatchetMessage = new SessionRatchetMessage(payload);
-
-                // Add diagnostic logging for the received payload
-                _logger.LogInformation("Received message payload with hash: {PayloadHash}, length: {PayloadLength}",
-                    Convert.ToBase64String(System.Security.Cryptography.SHA256.HashData(payload)),
-                    payload.Length);
-
+                
                 // Optional: Check version if needed
                 try 
                 {
@@ -460,7 +458,7 @@ namespace Percolator.Application.Network
                 }
 
                 // Decrypt the message to get the Protobuf-serialized InternalEnvelope
-                var plaintext = await _sessionManager.ReceiveMessageAsync(conversationId, sessionRatchetMessage);
+                var plaintext = await _sessionManager.ReceiveMessageAsync(sessionId, sessionRatchetMessage);
                 if (plaintext is null)
                 {
                     _logger.LogWarning("Decryption resulted in null plaintext for session {SessionId}. This may be a skipped message.", request.SessionId);
@@ -476,14 +474,17 @@ namespace Percolator.Application.Network
                     case InternalEnvelope.ApplicationPayloadOneofCase.ChatEnvelope:
                         HandleChatEnvelope(internalEnvelope.ChatEnvelope);
                         break;
-                    // Other cases like FileShare, Dht, etc., would be handled here.
+                    case InternalEnvelope.ApplicationPayloadOneofCase.DhtEnvelope:
+                        
+                        await HandleDhtMessageAsync(internalEnvelope.DhtEnvelope, sessionId);
+                        break;
                     default:
-                        _logger.LogWarning("Received unhandled application payload type: {PayloadType}", internalEnvelope.ApplicationPayloadCase);
+                        _logger.LogWarning("Received unhandled internal envelope type: {EnvelopeType}", internalEnvelope.ApplicationPayloadCase);
                         break;
                 }
 
 
-                return new DeliverOpaqueMessageResponse { Version = 1 };
+                return new DeliverOpaqueMessageResponse();
             }
             catch (Exception ex)
             {
@@ -505,6 +506,37 @@ namespace Percolator.Application.Network
                 // Handle other chat message types
                 default:
                     _logger.LogWarning("Received unhandled chat message type: {MessageType}", chatEnvelope.MessageCase);
+                    break;
+            }
+        }
+
+        private async Task HandleDhtMessageAsync(DhtEnvelope dhtEnvelope, SessionId sessionId)
+        {
+            var remotePeerId = await _sessionManager.GetRemotePeerIdFromDirectMessage(sessionId);
+            var connectionInfo = await _peerConnectionRepository.GetByIdAsync(new NetworkPeerId(remotePeerId.Value));
+            if (connectionInfo?.GrpcEndPoints.FirstOrDefault() is null)
+            {
+                _logger.LogWarning("Could not find connection info for peer {PeerId} to handle DHT message", remotePeerId);
+                return;
+            }
+            if (connectionInfo.IdentitySigningKey is null)
+            {
+                _logger.LogWarning("Could not find identity signing key for peer {PeerId} to handle DHT message", remotePeerId);
+                return;
+            }
+            var endpoint = connectionInfo.GrpcEndPoints.First().EndPoint;
+
+            switch (dhtEnvelope.MessageCase)
+            {
+                case DhtEnvelope.MessageOneofCase.PingRequest:
+                    await _mediator.Send(new Dht.Messages.PingRequest(new Dht.NodeId(connectionInfo.IdentitySigningKey.Value), endpoint));
+                    break;
+                case DhtEnvelope.MessageOneofCase.None:
+                case DhtEnvelope.MessageOneofCase.FindNodeRequest:
+                case DhtEnvelope.MessageOneofCase.FindNodeResponse:
+                case DhtEnvelope.MessageOneofCase.PingResponse:
+                default:
+                    _logger.LogWarning("Received unhandled DHT message type: {MessageType}", dhtEnvelope.MessageCase);
                     break;
             }
         }

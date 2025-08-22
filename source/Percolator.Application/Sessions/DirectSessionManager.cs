@@ -254,8 +254,17 @@ public class DirectSessionManager : IDirectSessionManager
         }
     }
 
+    public async Task<PeerId> GetRemotePeerIdFromDirectMessage(SessionId sessionId)
+    {
+        var conversation = await _conversationRepository.GetByIdAsync(new Chat.ValueObjects.ConversationId(sessionId.Value));
+        if (conversation is null)
+            throw new InvalidOperationException($"Conversation with id {sessionId} not found");
+        return await GetRemotePeerIdFromDirectMessage(conversation);
+    }
+
     private async Task<Percolator.Identity.PeerId> GetRemotePeerIdFromDirectMessage(Conversation conversation)
     {
+        
         if (_activeIdentityContext.Identity is null)
             throw new InvalidOperationException("Identity context not loaded");
 
