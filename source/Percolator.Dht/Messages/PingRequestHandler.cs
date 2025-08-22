@@ -19,6 +19,11 @@ public class PingRequestHandler : IRequestHandler<PingRequest, PingResponse>
             var newNode = new DhtNode(request.SenderId, request.SenderEndPoint, DateTimeOffset.UtcNow);
             await _repository.AddAsync(newNode);
         }
+        else
+        {
+            existingNode.Update(request.SenderEndPoint);
+            await _repository.UpdateAsync(existingNode);
+        }
 
         return new PingResponse();
     }

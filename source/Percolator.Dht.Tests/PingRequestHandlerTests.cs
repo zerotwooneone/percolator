@@ -58,4 +58,30 @@ public class PingRequestHandlerTests
         capturedNode!.Id.Should().Be(request.SenderId);
         capturedNode.EndPoint.Should().Be(request.SenderEndPoint);
     }
+
+    [Test]
+    public async Task Handle_WhenNodeExists_UpdatesNodeInRepository()
+    {
+        // Arrange
+        var request = _fixture.Create<PingRequest>();
+        var existingNode = new DhtNode(request.SenderId, _fixture.Create<DnsEndPoint>(), DateTimeOffset.UtcNow.AddHours(-1));
+        var originalLastSeen = existingNode.LastSeenUtc;
+        DhtNode? capturedNode = null;
+
+        _mockRepository.Setup(r => r.GetAsync(request.SenderId))
+            .ReturnsAsync(existingNode);
+
+        _mockRepository.Setup(r => r.UpdateAsync(It.IsAny<DhtNode>()))
+            .Callback<DhtNode>(node => capturedNode = node)
+            .Returns(Task.CompletedTask);
+
+        // Act
+        await _sut.Handle(request, CancellationToken.None);
+
+        // Assert
+        _mockRepository.Verify(r => r.UpdateAsync(It.IsAny<DhtNode>()), Times.Once);
+        capturedNode.Should().NotBeNull();
+        capturedNode!.EndPoint.Should().Be(request.SenderEndPoint);
+        capturedNode.LastSeenUtc.Should().BeAfter(originalLastSeen);
+    }
 }
