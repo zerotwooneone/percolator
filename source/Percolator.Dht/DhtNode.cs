@@ -5,17 +5,17 @@ namespace Percolator.Dht;
 public class DhtNode
 {
     public NodeId Id { get; }
-    public IPEndPoint EndPoint { get; private set; }
+    public DnsEndPoint EndPoint { get; private set; }
     public DateTimeOffset LastSeenUtc { get; private set; }
 
-    public DhtNode(NodeId id, IPEndPoint endPoint, DateTimeOffset lastSeenUtc)
+    public DhtNode(NodeId id, DnsEndPoint endPoint, DateTimeOffset lastSeenUtc)
     {
         Id = id;
         EndPoint = endPoint;
         LastSeenUtc = lastSeenUtc;
     }
 
-    public void Update(IPEndPoint newEndPoint)
+    public void Update(DnsEndPoint newEndPoint)
     {
         EndPoint = newEndPoint;
         LastSeenUtc = DateTimeOffset.UtcNow;
