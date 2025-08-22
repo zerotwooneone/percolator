@@ -1,7 +1,6 @@
 syntax = "proto3";
 
 import "google/protobuf/timestamp.proto";
-import "messaging.proto"; // For reusing the PreKeyBundle message.
 
 package percolator.contracts;
 
@@ -14,7 +13,6 @@ message InternalEnvelope {
     ChatEnvelope chat_envelope = 1;
     FileShareEnvelope file_share_envelope = 2;
     DhtEnvelope dht_envelope = 3;
-    MailboxEnvelope mailbox_envelope = 4;
   }
 }
 
@@ -107,25 +105,29 @@ message Manifest {
 // === 3. DHT Peer Discovery Application ===
 
 message DhtEnvelope {
+  optional uint32 version = 1;
   oneof message {
-    FindNodeRequest find_node_request = 1;
-    FindNodeResponse find_node_response = 2;
-    PingRequest ping_request = 3;
-    PingResponse ping_response = 4;
+    FindNodeRequest find_node_request = 2;
+    FindNodeResponse find_node_response = 3;
+    PingRequest ping_request = 4;
+    PingResponse ping_response = 5;
   }
 }
 
 message FindNodeRequest {
-  bytes target_peer_id = 1;
+  optional uint32 version = 1;
+  optional bytes target_peer_id = 2;
 }
 
 message NodeInfo {
-  bytes peer_id = 1;
-  string address = 2;
+  optional uint32 version = 1;
+  optional bytes peer_id = 2;
+  optional string address = 3;
 }
 
 message FindNodeResponse {
-  repeated NodeInfo closer_peers = 1;
+  optional uint32 version = 1;
+  repeated NodeInfo closer_peers = 2;
 }
 
 message PingRequest {}
@@ -133,32 +135,7 @@ message PingResponse {}
 
 // === 4. Asynchronous Message Mailbox Application ===
 
-message MailboxEnvelope {
-  oneof message {
-    StorePreKeyBundleRequest store_prekey_bundle_request = 1;
-    StorePreKeyBundleResponse store_prekey_bundle_response = 2;
-    GetPreKeyBundleRequest get_prekey_bundle_request = 3;
-    GetPreKeyBundleResponse get_prekey_bundle_response = 4;
-    StoreOpaqueMessageRequest store_opaque_message_request = 5;
-    StoreOpaqueMessageResponse store_opaque_message_response = 6;
-    GetOpaqueMessagesRequest get_opaque_messages_request = 7;
-    GetOpaqueMessagesResponse get_opaque_messages_response = 8;
-    DeleteMessagesRequest delete_messages_request = 9;
-    DeleteMessagesResponse delete_messages_response = 10;
-  }
-}
 
-message StorePreKeyBundleRequest {
-  PreKeyBundle bundle = 1;
-}
-message StorePreKeyBundleResponse {}
-
-message GetPreKeyBundleRequest {
-  bytes target_peer_id = 1;
-}
-message GetPreKeyBundleResponse {
-  PreKeyBundle bundle = 1;
-}
 
 message StoreOpaqueMessageRequest {
   bytes recipient_peer_id = 1;
