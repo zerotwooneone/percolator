@@ -4,6 +4,6 @@ public interface IDhtNodeRepository
 {
     Task AddAsync(DhtNode node);
     Task<DhtNode?> GetAsync(NodeId nodeId);
-    Task<IEnumerable<DhtNode>> GetClosestNodesAsync(NodeId targetId, int count);
+    Task<IEnumerable<DhtNode>> GetAllAsync(CancellationToken cancellationToken = default);
     Task UpdateAsync(DhtNode node);
 }

@@ -30,13 +30,8 @@ public class SqliteDhtNodeRepository : IDhtNodeRepository
         await _context.SaveChangesAsync();
     }
 
-    public async Task<IEnumerable<DhtNode>> GetClosestNodesAsync(NodeId targetId, int count)
+    public async Task<IEnumerable<DhtNode>> GetAllAsync(CancellationToken cancellationToken = default)
     {
-        // TODO: Implement XOR metric for finding closest nodes.
-        // For now, returning nodes ordered by their ID.
-        return await _context.DhtNodes
-            .OrderBy(n => n.Id)
-            .Take(count)
-            .ToListAsync();
+        return await _context.DhtNodes.ToListAsync(cancellationToken);
     }
 }
