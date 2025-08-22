@@ -160,8 +160,10 @@ public class DirectSessionManager : IDirectSessionManager
             var conversation = await _conversationRepository.GetByIdAsync(new Chat.ValueObjects.ConversationId(conversationId.Value));
             if (conversation is null)
                 throw new InvalidOperationException($"Conversation with id {conversationId} not found");
+            //todo: remove unused
             var remotePeerId = await GetRemotePeerIdFromDirectMessage(conversation);
 
+            //todo: this seems circular. do we need to create this session id?
             var sessionId = new SessionId(conversationId.Value);
             _logger.LogInformation("Receive message for conversation {ConversationId}. SessionId: {SessionId}", conversationId, sessionId);
 
