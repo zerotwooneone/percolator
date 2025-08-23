@@ -27,6 +27,7 @@ using Percolator.Network;
 using Percolator.Node;
 using ChatConversationId = Percolator.Chat.ValueObjects.ConversationId;
 using PeerId = Percolator.Identity.PeerId;
+using Percolator.Application.Dht;
 
 var rootCommand = new RootCommand("Percolator Node: A secure peer-to-peer communication tool.");
 
@@ -82,12 +83,28 @@ tlsDebugCommand.AddArgument(new Argument<string>("host", "The host to connect to
 tlsDebugCommand.AddArgument(new Argument<int>("port", "The port to connect to."));
 rootCommand.AddCommand(tlsDebugCommand);
 
+// *** DHT Probe Command ***
+var targetIdentityOption = new Option<string>(new[] { "--target-identity", "-i" }, "The target identity name at the remote peer.")
+{
+    IsRequired = true
+};
+var selfIdentityOption = new Option<string>(new[] { "--self" }, getDefaultValue: () => "default", description: "The local identity to use (defaults to 'default').");
+
+var dhtProbeCommand = new Command("dht-probe", "Send a DHT Ping then FindNode against a peer endpoint using hashed local identity signing key.")
+{
+    endpointArgument,
+    targetIdentityOption,
+    selfIdentityOption
+};
+rootCommand.AddCommand(dhtProbeCommand);
+
 // --- Command Handlers ---
 
 hostCommand.SetHandler(HostCommandHandler);
 connectCommand.SetHandler(ConnectCommandHandler);
 sendCommand.SetHandler(SendCommandHandler);
 tlsDebugCommand.SetHandler(TlsDebugCommandHandler);
+dhtProbeCommand.SetHandler(DhtProbeCommandHandler);
 
 // --- Run Application ---
 return await rootCommand.InvokeAsync(args);
@@ -194,6 +211,113 @@ async Task HostCommandHandler(InvocationContext context)
     finally
     {
         await tempServiceProvider.DisposeAsync();
+    }
+}
+
+async Task DhtProbeCommandHandler(InvocationContext context)
+{
+    var endpointString = context.ParseResult.GetValueForArgument(endpointArgument);
+    var targetIdentity = context.ParseResult.GetValueForOption(targetIdentityOption);
+    var selfIdentity = context.ParseResult.GetValueForOption(selfIdentityOption);
+    var cancellationToken = context.GetCancellationToken();
+
+    if (!TryParseEndpoint(endpointString, out var endpoint))
+    {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine($"Invalid endpoint format: {endpointString}");
+        Console.ResetColor();
+        return;
+    }
+
+    var services = CreateServiceProvider();
+    await using var serviceScope = services.CreateAsyncScope();
+    var serviceProvider = serviceScope.ServiceProvider;
+
+    try
+    {
+        var identityOrchestrator = serviceProvider.GetRequiredService<IIdentityOrchestrator>();
+        await identityOrchestrator.LoadOrCreateIdentityAsync(selfIdentity!, cancellationToken);
+
+        // Ensure a Peer and PeerConnection exist for the target identity at the specified endpoint
+        var peerRepository = serviceProvider.GetRequiredService<Percolator.Identity.IPeerRepository>();
+        var peerConnectionRepository = serviceProvider.GetRequiredService<Percolator.Network.IPeerConnectionRepository>();
+
+        var existingPeer = await peerRepository.GetByNameAsync(targetIdentity!);
+        if (existingPeer is null)
+        {
+            // Create a minimal peer record so transport can resolve a PeerId
+            var newPeer = new Percolator.Identity.Peer(new PeerId(Guid.NewGuid()), targetIdentity!);
+            await peerRepository.AddAsync(newPeer);
+
+            var netPeerId = new Percolator.Network.PeerId(newPeer.Id.Value);
+            var now = DateTimeOffset.UtcNow;
+            var peerConnection = new Percolator.Network.PeerConnection(
+                netPeerId,
+                identitySigningKey: null, // unknown until handshake completes
+                grpcEndPoints: new[] { new GrpcEndPoint(endpoint!, now) },
+                tlsCertificates: Array.Empty<Percolator.Network.TlsCertificate>(),
+                lastSeen: now);
+            await peerConnectionRepository.SaveAsync(peerConnection);
+        }
+        else
+        {
+            var netPeerId = new Percolator.Network.PeerId(existingPeer.Id.Value);
+            var peerConnection = await peerConnectionRepository.GetByIdAsync(netPeerId);
+            if (peerConnection is null)
+            {
+                var now = DateTimeOffset.UtcNow;
+                var newConn = new Percolator.Network.PeerConnection(
+                    netPeerId,
+                    identitySigningKey: null,
+                    grpcEndPoints: new[] { new GrpcEndPoint(endpoint!, now) },
+                    tlsCertificates: Array.Empty<Percolator.Network.TlsCertificate>(),
+                    lastSeen: now);
+                await peerConnectionRepository.SaveAsync(newConn);
+            }
+            else
+            {
+                // Ensure the endpoint is present
+                if (!peerConnection.GrpcEndPoints.Any(e => e.EndPoint.Host.Equals(endpoint!.Host, StringComparison.OrdinalIgnoreCase) && e.EndPoint.Port == endpoint.Port))
+                {
+                    peerConnection.AddGrpcEndPoint(new GrpcEndPoint(endpoint!, DateTimeOffset.UtcNow));
+                    await peerConnectionRepository.SaveAsync(peerConnection);
+                }
+            }
+        }
+
+        var orchestrator = serviceProvider.GetRequiredService<IDhtProbeOrchestrator>();
+        Console.WriteLine($"Probing {endpoint} with self='{selfIdentity}', target='{targetIdentity}'...");
+        var response = await orchestrator.ProbeAsync(endpoint!, targetIdentity!, selfIdentity, cancellationToken);
+
+        var peers = response?.CloserPeers ?? new Google.Protobuf.Collections.RepeatedField<Percolator.Contracts.NodeInfo>();
+        if (peers.Count == 0)
+        {
+            Console.ForegroundColor = ConsoleColor.Yellow;
+            Console.WriteLine("No closer peers were returned.");
+            Console.ResetColor();
+            return;
+        }
+
+        Console.ForegroundColor = ConsoleColor.Green;
+        Console.WriteLine($"Returned {peers.Count} peers:");
+        Console.ResetColor();
+        foreach (var p in peers)
+        {
+            var idB64 = p.HasPeerId ? Convert.ToBase64String(p.PeerId.ToByteArray()) : "<none>";
+            Console.WriteLine($"- {p.Address}  id={idB64}");
+        }
+    }
+    catch (NotImplementedException)
+    {
+        Console.ForegroundColor = ConsoleColor.Yellow;
+        Console.WriteLine("DHT probe logic not implemented yet (green phase pending). CLI skeleton is wired.");
+        Console.ResetColor();
+    }
+    catch (Exception ex)
+    {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine($"An error occurred while probing: {ex.Message}");
+        Console.ResetColor();
     }
 }
 

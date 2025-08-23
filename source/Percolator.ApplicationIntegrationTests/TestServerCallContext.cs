@@ -6,15 +6,23 @@ namespace Percolator.ApplicationIntegrationTests;
 public class TestServerCallContext : ServerCallContext
 {
     private readonly CancellationToken _cancellationToken;
+    private readonly string _peer;
 
     public TestServerCallContext(CancellationToken cancellationToken = default)
     {
         _cancellationToken = cancellationToken;
+        _peer = "ipv4:localhost:0";
+    }
+
+    public TestServerCallContext(string peer, CancellationToken cancellationToken = default)
+    {
+        _cancellationToken = cancellationToken;
+        _peer = peer;
     }
 
     protected override string MethodCore => "MethodName";
     protected override string HostCore => "HostName";
-    protected override string PeerCore => "PeerName";
+    protected override string PeerCore => _peer;
     protected override DateTime DeadlineCore => DateTime.UtcNow.AddHours(1);
     protected override Metadata RequestHeadersCore => new Metadata();
     protected override CancellationToken CancellationTokenCore => _cancellationToken;
@@ -33,3 +41,4 @@ public class TestServerCallContext : ServerCallContext
         return Task.CompletedTask;
     }
 }
+

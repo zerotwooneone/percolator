@@ -56,6 +56,15 @@ public class MessageServiceTests
             new NullLogger<MessageService>(),
             _activeIdentityContext,
             _mockSessionStore.Object);
+
+        // Default transport behavior for tests: return a response when sending
+        _mockTransportService
+            .Setup(t => t.SendMessageAsync(
+                It.IsAny<IdentityPeerId>(),
+                It.IsAny<ChatConversationId>(),
+                It.IsAny<SessionRatchetMessage>(),
+                It.IsAny<System.Threading.CancellationToken>()))
+            .ReturnsAsync(new Percolator.Contracts.DeliverOpaqueMessageResponse { Version = 1 });
     }
 
     [TearDown]
@@ -120,6 +129,7 @@ public class MessageServiceTests
         _mockTransportService.Verify(t => t.SendMessageAsync(
             It.IsAny<IdentityPeerId>(),
             It.IsAny<ChatConversationId>(),
-            It.IsAny<SessionRatchetMessage>()), Times.Once);
+            It.IsAny<SessionRatchetMessage>(),
+            It.IsAny<System.Threading.CancellationToken>()), Times.Once);
     }
 }

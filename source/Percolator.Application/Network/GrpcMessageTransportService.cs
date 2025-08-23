@@ -10,6 +10,7 @@ using Percolator.Chat.ValueObjects;
 using Percolator.Cryptography;
 using Google.Protobuf;
 using System.Net.Http;
+using System.Net;
 
 namespace Percolator.Application.Network;
 
@@ -19,33 +20,31 @@ public class GrpcMessageTransportService : IMessageTransportService
     private readonly ILogger<GrpcMessageTransportService> _logger;
     private readonly IPeerRepository _peerRepository;
     private readonly IPeerConnectionRepository _peerConnectionRepository;
-    private readonly SharedCertificateManager _certificateManager;
     private readonly IHttpClientFactory _httpClientFactory;
 
     public GrpcMessageTransportService(
         ILogger<GrpcMessageTransportService> logger,
         IPeerRepository peerRepository,
         IPeerConnectionRepository peerConnectionRepository,
-        SharedCertificateManager certificateManager,
         IHttpClientFactory httpClientFactory)
     {
         _logger = logger;
         _peerRepository = peerRepository;
         _peerConnectionRepository = peerConnectionRepository;
-        _certificateManager = certificateManager;
         _httpClientFactory = httpClientFactory;
     }
 
-    public async Task SendMessageAsync(
+    public async Task<DeliverOpaqueMessageResponse> SendMessageAsync(
         IdentityPeerId recipientPeerId, 
         ConversationId conversationId,
-        SessionRatchetMessage message)
+        SessionRatchetMessage message,
+        CancellationToken cancellationToken = default)
     {
         var peer = await _peerRepository.GetByIdAsync(recipientPeerId);
         if (peer is null)
         {
             _logger.LogError("Could not find peer with ID {PeerId}", recipientPeerId);
-            return;
+            throw new InvalidOperationException($"Peer not found: {recipientPeerId}");
         }
 
         var networkPeerId = new NetworkPeerId(peer.Id.Value);
@@ -83,12 +82,13 @@ public class GrpcMessageTransportService : IMessageTransportService
                 
             _logger.LogInformation("Sending message to {RecipientPeerId} for conversation {ConversationId}",
                 recipientPeerId, conversationId);
-            var response = await client.DeliverOpaqueMessageAsync(request);
+            var response = await client.DeliverOpaqueMessageAsync(request, cancellationToken: cancellationToken);
             _logger.LogInformation("Message sent successfully to {RecipientPeerId}. Response version: {Version}",
                 recipientPeerId, response.Version);
 
             peerConnection.UpdateLastSeen(endPoint, DateTime.UtcNow);
             await _peerConnectionRepository.SaveAsync(peerConnection);
+            return response;
         }
         catch (InvalidProtocolBufferException ex)
         {
@@ -148,4 +148,5 @@ public class GrpcMessageTransportService : IMessageTransportService
             }
         });
     }
+
 }

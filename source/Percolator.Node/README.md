@@ -132,6 +132,33 @@ Upon success, the command will output a unique `Conversation ID` for use in futu
 
 ---
 
+### `dht-probe`
+
+Sends a DHT Ping to a target peer, followed by a FindNode request. The FindNode `nodeId` is computed as the cryptographic hash of the local node's `ActiveIdentityContext.Keys.IdentitySigningKey`.
+
+-   `<endpoint>` (Required): Target peer endpoint as `host:port` (e.g., `localhost:5000`).
+-   `--identity` / `-i` (Required): The identity name of the target peer. This is used to label/trust the remote peer (note: unlike other commands where `-i` is your local identity, here `-i` specifies the target's identity name).
+-   `--self` (Optional): The name of your local identity. Defaults to `default` if not provided.
+
+Behavior:
+-   Establishes a secure session to the target (Trust On First Use if needed) using the provided `<endpoint>` and `-i` target identity name.
+-   Sends a DHT `Ping`.
+-   Computes `nodeId = Hash(ActiveIdentityContext.Keys.IdentitySigningKey)` and sends a DHT `FindNode(nodeId)`.
+-   Prints any returned nodes from the `FindNodeResponse`.
+
+**Example:**
+```bash
+dotnet run --project .\Percolator.Node\ -- dht-probe localhost:5000 -i Alice --self Bob
+```
+
+This will:
+- Connect to `Alice` at `localhost:5000` (TOFU if first time).
+- Send a DHT `Ping`.
+- Compute the local Bob nodeId from Bob's identity signing key, and send a DHT `FindNode(nodeId)`.
+- Print any closer nodes returned by Alice.
+
+---
+
 ## Guidance for AI Assistants
 
 *   **`System.CommandLine` Version**: The project is standardized on `System.CommandLine` version `2.0.0-beta4`. Do not upgrade to newer pre-release versions or introduce the `System.CommandLine.Hosting` package, as this led to significant instability and breaking changes.

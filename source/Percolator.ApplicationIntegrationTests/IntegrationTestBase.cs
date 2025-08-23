@@ -21,6 +21,8 @@ using Percolator.Application.Identity;
 using System.Threading;
 using Percolator.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using System.Security.Cryptography.X509Certificates;
+using System.Security.Cryptography;
 
 namespace Percolator.ApplicationIntegrationTests;
 
@@ -30,6 +32,7 @@ public abstract class IntegrationTestBase
     protected IHost? SenderHost { get; set; }
     protected IHost? ReceiverHost { get; set; }
     protected TestLoggerProvider LoggerProvider { get; private set; }
+    protected X509Certificate2? TestClientCertificate { get; private set; }
 
     [SetUp]
     public virtual async Task SetUpAsync()
@@ -37,6 +40,10 @@ public abstract class IntegrationTestBase
         TestContext.WriteLine("SetUp: Starting setup process.");
         LoggerProvider = new TestLoggerProvider();
         TestContext.WriteLine("SetUp: TestLoggerProvider created.");
+        // Create a self-signed test certificate for client auth simulation
+        var req = new CertificateRequest("CN=Percolator.TestClient", ECDsa.Create(ECCurve.NamedCurves.nistP256), HashAlgorithmName.SHA256);
+        req.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.DigitalSignature, false));
+        TestClientCertificate = req.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddYears(1));
         await Task.CompletedTask;
     }
 
@@ -70,6 +77,11 @@ public abstract class IntegrationTestBase
             TestContext.WriteLine("TearDown: Disposing LoggerProvider.");
             LoggerProvider.Dispose();
             LoggerProvider = null;
+        }
+
+        if (TestClientCertificate != null)
+        {
+            TestClientCertificate.Dispose();
         }
         
         TestContext.WriteLine("TearDown: Teardown process complete.");
@@ -141,6 +153,15 @@ public abstract class IntegrationTestBase
                 {
                     // Configure endpoints like in MessageListenerService
                     app.UseRouting();
+                    // Inject a fake client certificate into the HttpContext so server can read it
+                    app.Use(async (ctx, next) =>
+                    {
+                        if (TestClientCertificate != null)
+                        {
+                            ctx.Connection.ClientCertificate = TestClientCertificate;
+                        }
+                        await next();
+                    });
                     
                     // Map the PercolatorMessageService to the gRPC endpoint
                     app.UseEndpoints(endpoints => {

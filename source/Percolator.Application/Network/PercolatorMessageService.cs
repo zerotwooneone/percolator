@@ -25,6 +25,7 @@ using PreKeyBundle = Percolator.Contracts.PreKeyBundle;
 using Percolator.Cryptography.Primitives;
 using ISigningService = Percolator.Cryptography.ISigningService;
 using PublicKey = Percolator.Cryptography.PublicKey;
+using DhtDomain = Percolator.Dht;
 
 namespace Percolator.Application.Network
 {
@@ -493,7 +494,7 @@ namespace Percolator.Application.Network
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error processing opaque message for session {SessionId} - ex:{Exception}", request.SessionId, ex);
-                throw new RpcException(new Status(StatusCode.Internal, "Error processing message."));
+                throw new RpcException(new Status(StatusCode.Internal, $"Error processing message. {ex}"));
             }
         }
 
@@ -535,23 +536,25 @@ namespace Percolator.Application.Network
             switch (dhtEnvelope.MessageCase)
             {
                 case DhtEnvelope.MessageOneofCase.PingRequest:
-                    await _mediator.Send(new Dht.Messages.PingRequest(new Dht.NodeId(connectionInfo.IdentitySigningKey.Value), endpoint));
+                    await _mediator.Send(new DhtDomain.Messages.PingRequest(new DhtDomain.NodeId(connectionInfo.IdentitySigningKey.Value), endpoint));
                     break;
                 case DhtEnvelope.MessageOneofCase.FindNodeRequest:
-                    var findNodeResponse = await _mediator.Send(new Dht.Messages.FindNodeRequest(new Dht.NodeId(dhtEnvelope.FindNodeRequest.TargetPeerId.ToByteArray())));
-                    var responseEnvelope = new DhtEnvelope
+                    var findNodeResponse = await _mediator.Send(new DhtDomain.Messages.FindNodeRequest(new DhtDomain.NodeId(dhtEnvelope.FindNodeRequest.TargetPeerId.ToByteArray())));
+                    var responseEnvelope = new InternalEnvelope
                     {
-                        FindNodeResponse = new Contracts.FindNodeResponse()
+                        DhtEnvelope = new DhtEnvelope
+                        {
+                            FindNodeResponse = new Contracts.FindNodeResponse()
+                        }
                     };
-                    responseEnvelope.FindNodeResponse.CloserPeers.AddRange(findNodeResponse.CloserNodes.Select(n =>
+                    responseEnvelope.DhtEnvelope.FindNodeResponse.CloserPeers.AddRange(findNodeResponse.CloserNodes.Select(n =>
                         new NodeInfo
                         {
                             PeerId = ByteString.CopyFrom(n.Id.Value),
                             Address = n.EndPoint.ToString()
                         }));
 
-                    var internalEnvelope = new InternalEnvelope { DhtEnvelope = dhtEnvelope };
-                    return internalEnvelope;
+                    return responseEnvelope;
                 case DhtEnvelope.MessageOneofCase.None:
                 case DhtEnvelope.MessageOneofCase.FindNodeResponse:
                 case DhtEnvelope.MessageOneofCase.PingResponse:

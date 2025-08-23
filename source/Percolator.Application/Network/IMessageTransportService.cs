@@ -1,10 +1,16 @@
 using Percolator.Identity;
 using Percolator.Chat.ValueObjects;
 using Percolator.Cryptography;
+using System.Net;
+using Percolator.Contracts;
 
 namespace Percolator.Application.Network;
 
 public interface IMessageTransportService
 {
-    Task SendMessageAsync(PeerId recipientPeerId, ConversationId conversationId, SessionRatchetMessage message);
+    Task<DeliverOpaqueMessageResponse> SendMessageAsync(
+        PeerId recipientPeerId,
+        ConversationId conversationId,
+        SessionRatchetMessage message,
+        CancellationToken cancellationToken = default);
 }
