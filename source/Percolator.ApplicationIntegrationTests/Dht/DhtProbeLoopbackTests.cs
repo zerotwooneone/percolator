@@ -66,7 +66,7 @@ public class DhtProbeLoopbackTests : IntegrationTestBase
             .Setup(s => s.ReceiveMessageAsync(sessionId, It.IsAny<Percolator.Cryptography.SessionRatchetMessage>()))
             .ReturnsAsync(() =>
             {
-                var req = new FindNodeRequest { TargetPeerId = ByteString.CopyFrom(Guid.NewGuid().ToByteArray()) };
+                var req = new FindNodeRequest { TargetPeerId = ByteString.CopyFrom(SHA256.HashData(Guid.NewGuid().ToByteArray())) };
                 var env = new InternalEnvelope { DhtEnvelope = new DhtEnvelope { FindNodeRequest = req } };
                 return new Percolator.Cryptography.Plaintext(env.ToByteArray());
             });
@@ -74,7 +74,7 @@ public class DhtProbeLoopbackTests : IntegrationTestBase
         // Server DHT returns nodes
         var closer = new List<DhtNode>
         {
-            new(new(Guid.NewGuid().ToByteArray()), new DnsEndPoint("localhost", 59001), DateTimeOffset.UtcNow)
+            new(new(SHA256.HashData(Guid.NewGuid().ToByteArray())), new DnsEndPoint("localhost", 59001), DateTimeOffset.UtcNow)
         };
         serverDhtRepo.Setup(r => r.GetAllAsync(It.IsAny<CancellationToken>())).ReturnsAsync(closer);
 
@@ -160,7 +160,7 @@ public class DhtProbeLoopbackTests : IntegrationTestBase
         var orchestrator = clientHost.Services.GetRequiredService<IDhtProbeOrchestrator>();
 
         // Act
-        var result = await orchestrator.FindNodeAsync(new DnsEndPoint("localhost", 5555), "remote", Guid.NewGuid().ToByteArray());
+        var result = await orchestrator.FindNodeAsync(new DnsEndPoint("localhost", 5555), "remote", SHA256.HashData(Guid.NewGuid().ToByteArray()));
 
         // Assert
         result.Should().NotBeNull();

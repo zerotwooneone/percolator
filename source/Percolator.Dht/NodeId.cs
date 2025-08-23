@@ -7,9 +7,11 @@ public record NodeId : ByteArrayRecord
 {
     public NodeId(byte[] value) : base(value)
     {
-        if (value.Length == 0)
+        if (value.Length != 32)
         {
-            throw new ArgumentException("Node ID cannot be empty.", nameof(value));
+            throw new ArgumentException(
+                "Invalid NodeId length. Expected 32 bytes (SHA-256 digest of the peer's public signing key in SubjectPublicKeyInfo format).",
+                nameof(value));
         }
     }
 

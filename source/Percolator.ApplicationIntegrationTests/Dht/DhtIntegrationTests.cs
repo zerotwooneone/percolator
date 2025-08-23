@@ -134,7 +134,7 @@ public class DhtIntegrationTests : IntegrationTestBase
 
         var remotePeerId = new Percolator.Identity.PeerId(Guid.NewGuid());
         var sessionId = new Percolator.Cryptography.SessionId(Guid.NewGuid());
-        var targetId = new NodeId(Guid.NewGuid().ToByteArray());
+        var targetId = new NodeId(SHA256.HashData(Guid.NewGuid().ToByteArray()));
 
         // 1. Mock the session manager to decrypt the message
         var findNodeRequestProto = new Contracts.FindNodeRequest { TargetPeerId = ByteString.CopyFrom(targetId.Value) };
@@ -162,8 +162,8 @@ public class DhtIntegrationTests : IntegrationTestBase
         // 4. Mock the DHT repository to return a list of closer nodes
         var closerNodes = new List<DhtNode>
         {
-            new(new(Guid.NewGuid().ToByteArray()), new DnsEndPoint("localhost", 5001), System.DateTimeOffset.UtcNow),
-            new(new(Guid.NewGuid().ToByteArray()), new DnsEndPoint("localhost", 5002), System.DateTimeOffset.UtcNow)
+            new(new(SHA256.HashData(Guid.NewGuid().ToByteArray())), new DnsEndPoint("localhost", 5001), System.DateTimeOffset.UtcNow),
+            new(new(SHA256.HashData(Guid.NewGuid().ToByteArray())), new DnsEndPoint("localhost", 5002), System.DateTimeOffset.UtcNow)
         };
         dhtNodeRepoMock.Setup(r => r.GetAllAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(closerNodes);
