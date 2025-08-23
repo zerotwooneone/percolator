@@ -42,6 +42,9 @@ public static class ServiceCollectionExtensions
 
         services.AddMediatR(cfg =>
         {
+            // Scan current Application assembly for handlers (e.g., EstablishDirectSessionHandler)
+            cfg.RegisterServicesFromAssembly(typeof(ServiceCollectionExtensions).Assembly);
+            // Also include DHT assembly where request/notification handlers live
             cfg.RegisterServicesFromAssembly(typeof(PingRequest).Assembly);
         });
 

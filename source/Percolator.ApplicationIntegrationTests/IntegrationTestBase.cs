@@ -111,7 +111,8 @@ public abstract class IntegrationTestBase
                     { "Percolator:DataDirectoryPath", Path.Combine(Path.GetTempPath(), $"PercolatorIntegrationTest_{hostType}_{Guid.NewGuid()}") },
                     { "Percolator:LocalDevelopmentMode", "true" },
                     { "Percolator:Port", port.ToString() },
-                    {"Percolator:Cryptography:EnableCryptographicMaterialLogging", "true"}
+                    {"Percolator:Cryptography:EnableCryptographicMaterialLogging", "true"},
+                    {"PeerDiscovery:Enabled", "false"}
                 });
             })
             .ConfigureServices((context, services) =>

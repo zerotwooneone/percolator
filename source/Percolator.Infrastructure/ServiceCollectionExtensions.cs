@@ -2,6 +2,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Percolator.Infrastructure.Chat;
 using Percolator.Infrastructure.Cryptography;
+using Percolator.Infrastructure.Dht;
 using Percolator.Infrastructure.Identity;
 using Percolator.Infrastructure.Sessions;
 using Percolator.Infrastructure.Network;
@@ -26,6 +27,7 @@ public static class ServiceCollectionExtensions
         services.AddSessionsInfrastructure();
         services.AddIdentityInfrastructure();
         services.AddNetworkInfrastructure();
+        services.AddDhtInfrastructure();
         services.AddCryptographyInfrastructure();
 
         return services;

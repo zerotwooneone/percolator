@@ -10,6 +10,7 @@ using Percolator.Application.Network;
 using Percolator.Contracts;
 using Percolator.Dht;
 using Grpc.Net.Client;
+using MediatR;
 
 namespace Percolator.ApplicationIntegrationTests.Dht;
 
@@ -52,18 +53,27 @@ public class HandshakeLoopbackTests : IntegrationTestBase
     {
         // SERVER host with real session manager and a mocked DHT repo to ensure response content
         var serverPort = GetAvailablePort();
+        Mock<IDhtNodeRepository>? serverDhtRepoRef = null;
         using var serverHost = await CreateAndInitializeHostAsync(serverPort, "HandshakeLoopback-Server", identityName: "remote", additionalServiceRegistration: services =>
         {
-            var serverDhtRepo = new Mock<IDhtNodeRepository>();
-            serverDhtRepo
-                .Setup(r => r.GetAllAsync(It.IsAny<CancellationToken>()))
-                .ReturnsAsync(new List<DhtNode>
-                {
-                    new(new(Guid.NewGuid().ToByteArray()), new DnsEndPoint("localhost", 59001), DateTimeOffset.UtcNow)
-                });
-            services.AddSingleton(serverDhtRepo.Object);
+            // Register mock now; configure it after host starts when identity keys are available
+            serverDhtRepoRef = new Mock<IDhtNodeRepository>();
+            services.AddSingleton(serverDhtRepoRef.Object);
         });
         await serverHost.StartAsync();
+
+        // After host start, derive NodeId from server's identity public signing key
+        {
+            var activeIdentity = serverHost.Services.GetRequiredService<Percolator.Application.Identity.ActiveIdentityContext>();
+            var pubKey = activeIdentity.Keys!.IdentitySigningKey.ExportSubjectPublicKeyInfo();
+            var nodeIdBytes = System.Security.Cryptography.SHA256.HashData(pubKey);
+            var nodeId = new NodeId(nodeIdBytes);
+            serverDhtRepoRef!.Setup(r => r.GetAllAsync(It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new List<DhtNode>
+                {
+                    new(nodeId, new DnsEndPoint("localhost", 59001), DateTimeOffset.UtcNow)
+                });
+        }
 
         // CLIENT host uses real ConversationService but loops back both handshake and message delivery
         var clientPort = GetAvailablePort();
@@ -74,14 +84,47 @@ public class HandshakeLoopbackTests : IntegrationTestBase
 
             services.AddSingleton<IGrpcSessionService>(sp => new GrpcSessionLoopback(async req =>
             {
-                return await transportClient.EstablishDirectSessionAsync(req).ResponseAsync;
+                // Use serverHost mediator to handle handshake via EstablishDirectSessionHandler
+                var mediator = serverHost.Services.GetRequiredService<IMediator>();
+                var payload = EstablishDirectSessionRequest.Types.DirectInitiatorPayload.Parser.ParseFrom(req.InitiatorBundle.SignedPayload);
+                var command = new EstablishDirectSessionCommand
+                {
+                    IdentitySigningKeyBytes = req.InitiatorBundle.IdentitySigningKey.ToByteArray(),
+                    IdentityAgreementKeyBytes = req.InitiatorBundle.IdentityAgreementKey.ToByteArray(),
+                    SignedPayloadBytes = req.InitiatorBundle.SignedPayload.ToByteArray(),
+                    PayloadSignatureBytes = req.InitiatorBundle.PayloadSignature.ToByteArray(),
+                    OneTimePreKeyBytes = req.InitiatorBundle.HasOneTimePreKey ? req.InitiatorBundle.OneTimePreKey.ToByteArray() : null,
+                    PreKeyBytes = payload.SignedPreKey.ToByteArray(),
+                    PeerEndPoint = new DnsEndPoint("localhost", clientPort),
+                    ClientCertificate = null
+                };
+                var result = await mediator.Send(command);
+                return new EstablishDirectSessionResponse
+                {
+                    Response = new EstablishDirectSessionResponse.Types.Response
+                    {
+                        IdentitySigningKey = ByteString.CopyFrom(result.IdentitySigningKeyBytes),
+                        ResponsePayload = ByteString.CopyFrom(result.ResponsePayloadBytes),
+                        PayloadSignature = ByteString.CopyFrom(result.PayloadSignatureBytes)
+                    }
+                };
             }));
 
             services.AddSingleton<IMessageTransportService>(sp => new LoopbackTransport(async req =>
             {
-                var svc = serverHost.Services.GetRequiredService<PercolatorMessageService>();
-                // Provide a realistic peer string; HttpContext is not used in DeliverOpaqueMessage
-                return await svc.DeliverOpaqueMessage(req, new TestServerCallContext($"ipv4:localhost:{clientPort}"));
+                // Use mediator to handle opaque message delivery
+                var mediator = serverHost.Services.GetRequiredService<IMediator>();
+                var result = await mediator.Send(new DeliverOpaqueMessageCommand
+                {
+                    SessionId = Guid.Parse(req.SessionId),
+                    PayloadBytes = req.Payload.ToByteArray()
+                });
+                var response = new DeliverOpaqueMessageResponse();
+                if (result.ResponsePayloadBytes is not null)
+                {
+                    response.ResponsePayload = ByteString.CopyFrom(result.ResponsePayloadBytes);
+                }
+                return response;
             }));
         });
 

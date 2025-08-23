@@ -8,6 +8,7 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddDhtInfrastructure(this IServiceCollection services)
     {
         services.AddScoped<IDhtNodeRepository, SqliteDhtNodeRepository>();
+        services.AddSingleton<IDhtService, DhtService>();
         return services;
     }
 }

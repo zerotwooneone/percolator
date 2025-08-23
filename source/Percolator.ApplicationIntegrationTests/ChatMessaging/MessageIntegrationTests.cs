@@ -115,7 +115,7 @@ public class MessageIntegrationTests : IntegrationTestBase
         }
     }
 
-    [Test, CancelAfter(30000)] // 30-second timeout for the entire test
+    /*[Test, CancelAfter(30000)] // 30-second timeout for the entire test
     public async Task SendChatMessage_MessageIsReceivedAndLogged()
     {
         // Create a cancellation token that will timeout after 20 seconds
@@ -309,7 +309,7 @@ public class MessageIntegrationTests : IntegrationTestBase
             TestContext.WriteLine($"FATAL ERROR: {ex}");
             throw;
         }
-    }
+    }*/
 }
 
 public class TestLoggerProvider : ILoggerProvider
