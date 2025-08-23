@@ -205,7 +205,7 @@ public class DirectSessionManager : IDirectSessionManager
         }
     }
 
-    public async Task<(Percolator.Identity.PeerId remotePeerId, SessionRatchetMessage encryptedMessage)?> EncryptMessageAsync(
+    public async Task<(Percolator.Identity.PeerId remotePeerId, SessionRatchetMessage encryptedMessage)> EncryptMessageAsync(
         SessionId conversationId, 
         Plaintext plaintext)
     {
@@ -226,7 +226,7 @@ public class DirectSessionManager : IDirectSessionManager
             var sessionState = await _sessionStore.GetSessionStateAsync(sessionId);
             if (sessionState == null)
             {
-                return null;
+                throw new InvalidOperationException($"Double Ratchet session state for conversation {conversationId} not found.");
             }
             
             if (_cryptographyOptions.Value.EnableCryptographicMaterialLogging)

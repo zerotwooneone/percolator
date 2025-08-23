@@ -1,6 +1,8 @@
 using System.Net;
 using System.Security.Cryptography;
+using FluentAssertions;
 using Google.Protobuf;
+using Grpc.Core;
 using MediatR;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -43,7 +45,7 @@ public class DhtIntegrationTests : IntegrationTestBase
         var peerTrustManagerMock = new Mock<IPeerTrustManager>();
 
         var port = GetAvailablePort();
-        using var host = CreateHost(port, "DhtTest", services =>
+        using var host = CreateHost(port, "DhtTest",  services =>
         {
             services.AddSingleton(dhtRepositoryMock.Object);
             services.AddSingleton(sessionManagerMock.Object);
@@ -98,7 +100,7 @@ public class DhtIntegrationTests : IntegrationTestBase
         dhtRepositoryMock.Setup(r => r.GetAsync(nodeId)).ReturnsAsync(() => (DhtNode?)null);
 
         // Act
-        await messageService.DeliverOpaqueMessage(request, Mock.Of<Grpc.Core.ServerCallContext>());
+        await messageService.DeliverOpaqueMessage(request, new TestServerCallContext());
 
         // Assert: Verify the repository was called by the MediatR handler
         dhtRepositoryMock.Verify(r => r.GetAsync(It.Is<NodeId>(n => n.Value.SequenceEqual(remoteSigningKey.Value))), Times.Once);
@@ -106,5 +108,83 @@ public class DhtIntegrationTests : IntegrationTestBase
             n.Id.Value.SequenceEqual(remoteSigningKey.Value) &&
             n.EndPoint.Equals(remoteEndpoint)
             )), Times.Once);
+    }
+
+    [Test]
+    public async Task DeliverOpaqueMessage_WhenReceivesFindNodeRequest_ShouldReturnCloserNodesInResponsePayload()
+    {
+        // Arrange
+        var dhtNodeRepoMock = new Mock<IDhtNodeRepository>();
+        var sessionManagerMock = new Mock<IDirectSessionManager>();
+        var peerConnectionRepoMock = new Mock<IPeerConnectionRepository>();
+
+        var port = GetAvailablePort();
+        using var host = CreateHost(port, "DhtTest", services =>
+        {
+            services.AddSingleton(dhtNodeRepoMock.Object);
+            services.AddSingleton(sessionManagerMock.Object);
+            services.AddSingleton(peerConnectionRepoMock.Object);
+            services.AddSingleton<IDhtService, DhtService>();
+            services.AddSingleton(new Mock<IConversationRepository>().Object);
+            services.AddMediatR(cfg =>
+                cfg.RegisterServicesFromAssembly(typeof(Percolator.Dht.Messages.FindNodeRequest).Assembly));
+        });
+
+        var messageService = host.Services.GetRequiredService<PercolatorMessageService>();
+
+        var remotePeerId = new Percolator.Identity.PeerId(Guid.NewGuid());
+        var sessionId = new Percolator.Cryptography.SessionId(Guid.NewGuid());
+        var targetId = new NodeId(Guid.NewGuid().ToByteArray());
+
+        // 1. Mock the session manager to decrypt the message
+        var findNodeRequestProto = new Contracts.FindNodeRequest { TargetPeerId = ByteString.CopyFrom(targetId.Value) };
+        var dhtEnvelope = new DhtEnvelope { FindNodeRequest = findNodeRequestProto };
+        var internalEnvelope = new InternalEnvelope { DhtEnvelope = dhtEnvelope };
+
+        sessionManagerMock.Setup(s => s.ReceiveMessageAsync(It.Is<SessionId>(sid => sid == sessionId), It.IsAny<SessionRatchetMessage>()))
+            .ReturnsAsync(new Plaintext(internalEnvelope.ToByteArray()));
+
+        // 2. Mock the session manager to return the remote peer's ID
+        sessionManagerMock.Setup(s => s.GetRemotePeerIdFromDirectMessage(sessionId))
+            .ReturnsAsync(remotePeerId);
+
+        // 3. Mock the peer connection repository to return connection info for the remote peer
+        var networkPeerId = new NetworkPeerId(remotePeerId.Value);
+        var connectionInfo = new PeerConnection(
+            networkPeerId,
+            new DirectMessagePublicKey(SHA256.HashData(Guid.NewGuid().ToByteArray())),
+            new List<GrpcEndPoint> { new(new DnsEndPoint("localhost", 5000), System.DateTimeOffset.UtcNow) },
+            System.Array.Empty<TlsCertificate>(),
+            System.DateTimeOffset.UtcNow);
+        peerConnectionRepoMock.Setup(r => r.GetByIdAsync(networkPeerId))
+            .ReturnsAsync(connectionInfo);
+
+        // 4. Mock the DHT repository to return a list of closer nodes
+        var closerNodes = new List<DhtNode>
+        {
+            new(new(Guid.NewGuid().ToByteArray()), new DnsEndPoint("localhost", 5001), System.DateTimeOffset.UtcNow),
+            new(new(Guid.NewGuid().ToByteArray()), new DnsEndPoint("localhost", 5002), System.DateTimeOffset.UtcNow)
+        };
+        dhtNodeRepoMock.Setup(r => r.GetAllAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(closerNodes);
+
+        // 5. Mock the session manager's encryption call for the response
+        var expectedResponsePayload = new SessionRatchetMessage(Guid.NewGuid().ToByteArray());
+        sessionManagerMock.Setup(s => s.EncryptMessageAsync(sessionId, It.IsAny<Plaintext>()))
+            .ReturnsAsync((new Percolator.Identity.PeerId(Guid.NewGuid()), expectedResponsePayload));
+
+        var request = new DeliverOpaqueMessageRequest
+        {
+            SessionId = sessionId.Value.ToString(),
+            Payload = ByteString.CopyFrom(new byte[1]) // Ciphertext content doesn't matter for this test
+        };
+
+        // Act
+        var response = await messageService.DeliverOpaqueMessage(request, new TestServerCallContext());
+
+        // Assert
+        response.Should().NotBeNull();
+        response.HasResponsePayload.Should().BeTrue();
+        response.ResponsePayload.ToByteArray().Should().BeEquivalentTo(expectedResponsePayload.Value);
     }
 }

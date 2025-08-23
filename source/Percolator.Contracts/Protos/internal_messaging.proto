@@ -132,29 +132,3 @@ message FindNodeResponse {
 
 message PingRequest {}
 message PingResponse {}
-
-// === 4. Asynchronous Message Mailbox Application ===
-
-
-
-message StoreOpaqueMessageRequest {
-  bytes recipient_peer_id = 1;
-  bytes opaque_message = 2;
-}
-message StoreOpaqueMessageResponse {}
-
-message GetOpaqueMessagesRequest {}
-
-message StoredMessage {
-  bytes message_id = 1; // A unique identifier for the stored message.
-  bytes opaque_message = 2;
-}
-
-message GetOpaqueMessagesResponse {
-  repeated StoredMessage messages = 1;
-}
-
-message DeleteMessagesRequest {
-  repeated bytes message_ids = 1;
-}
-message DeleteMessagesResponse {}

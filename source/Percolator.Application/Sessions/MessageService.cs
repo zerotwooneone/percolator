@@ -84,13 +84,8 @@ public class MessageService : IMessageService
         var plaintext = new Plaintext(internalEnvelope.ToByteArray());
 
         // Encrypt message using Double Ratchet
-        var encryptResult = await _sessionManager.EncryptMessageAsync(new SessionId(conversationId.Value), plaintext);
-        if (encryptResult == null)
-        {
-            throw new InvalidOperationException($"Failed to encrypt message. Conversation {conversationId} not found.");
-        }
-
-        var (remotePeerId, encryptedMessage) = encryptResult.Value;
+        var (remotePeerId, encryptedMessage) = await _sessionManager.EncryptMessageAsync(new SessionId(conversationId.Value), plaintext);
+        
         var identityRemotePeerId = new IdentityPeerId(remotePeerId.Value);
 
         // Send encrypted message using gRPC

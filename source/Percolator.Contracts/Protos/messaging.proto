@@ -157,6 +157,7 @@ message DeliverOpaqueMessageRequest {
 message DeliverOpaqueMessageResponse {
     optional uint32 version = 1;
     optional google.protobuf.Timestamp retry_after_utc = 2;
+    optional bytes response_payload = 3;
 }
 
 // Request to submit a new pre-key bundle to the server.

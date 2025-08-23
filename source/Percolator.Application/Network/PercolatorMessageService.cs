@@ -40,7 +40,6 @@ namespace Percolator.Application.Network
         private readonly IX3DHManager _x3DhManager;
         private readonly IPreKeyBundleRepository _bundleRepository;
         private readonly ISigningService _signingService;
-        private readonly IPeerTrustManager _peerTrustManager;
         private readonly IMediator _mediator;
 
         public PercolatorMessageService(
@@ -54,7 +53,6 @@ namespace Percolator.Application.Network
             IX3DHManager x3DhManager,
             IPreKeyBundleRepository bundleRepository,
             ISigningService signingService,
-            IPeerTrustManager peerTrustManager,
             IMediator mediator)
         {
             _logger = logger;
@@ -67,7 +65,6 @@ namespace Percolator.Application.Network
             _x3DhManager = x3DhManager;
             _bundleRepository = bundleRepository;
             _signingService = signingService;
-            _peerTrustManager = peerTrustManager;
             _mediator = mediator;
         }
 
@@ -467,6 +464,7 @@ namespace Percolator.Application.Network
 
                 // Deserialize the InternalEnvelope
                 var internalEnvelope = InternalEnvelope.Parser.ParseFrom(plaintext.Value);
+                InternalEnvelope? responseEnvelope = null;
 
                 // Dispatch based on the application payload
                 switch (internalEnvelope.ApplicationPayloadCase)
@@ -476,7 +474,7 @@ namespace Percolator.Application.Network
                         break;
                     case InternalEnvelope.ApplicationPayloadOneofCase.DhtEnvelope:
                         
-                        await HandleDhtMessageAsync(internalEnvelope.DhtEnvelope, sessionId);
+                        responseEnvelope = await HandleDhtMessageAsync(internalEnvelope.DhtEnvelope, sessionId);
                         break;
                     default:
                         _logger.LogWarning("Received unhandled internal envelope type: {EnvelopeType}", internalEnvelope.ApplicationPayloadCase);
@@ -484,7 +482,13 @@ namespace Percolator.Application.Network
                 }
 
 
-                return new DeliverOpaqueMessageResponse();
+                var response = new DeliverOpaqueMessageResponse();
+                if (responseEnvelope is not null)
+                {
+                    var responsePayload = await EncryptResponseEnvelope(sessionId, responseEnvelope);
+                    response.ResponsePayload = ByteString.CopyFrom(responsePayload);
+                }
+                return response;
             }
             catch (Exception ex)
             {
@@ -510,20 +514,22 @@ namespace Percolator.Application.Network
             }
         }
 
-        private async Task HandleDhtMessageAsync(DhtEnvelope dhtEnvelope, SessionId sessionId)
+        private async Task<InternalEnvelope> HandleDhtMessageAsync(DhtEnvelope dhtEnvelope, SessionId sessionId)
         {
             var remotePeerId = await _sessionManager.GetRemotePeerIdFromDirectMessage(sessionId);
             var connectionInfo = await _peerConnectionRepository.GetByIdAsync(new NetworkPeerId(remotePeerId.Value));
             if (connectionInfo?.GrpcEndPoints.FirstOrDefault() is null)
             {
                 _logger.LogWarning("Could not find connection info for peer {PeerId} to handle DHT message", remotePeerId);
-                return;
+                return null;
             }
             if (connectionInfo.IdentitySigningKey is null)
             {
                 _logger.LogWarning("Could not find identity signing key for peer {PeerId} to handle DHT message", remotePeerId);
-                return;
+                return null;
             }
+            
+            //todo: get most recently used endpoint
             var endpoint = connectionInfo.GrpcEndPoints.First().EndPoint;
 
             switch (dhtEnvelope.MessageCase)
@@ -531,14 +537,38 @@ namespace Percolator.Application.Network
                 case DhtEnvelope.MessageOneofCase.PingRequest:
                     await _mediator.Send(new Dht.Messages.PingRequest(new Dht.NodeId(connectionInfo.IdentitySigningKey.Value), endpoint));
                     break;
-                case DhtEnvelope.MessageOneofCase.None:
                 case DhtEnvelope.MessageOneofCase.FindNodeRequest:
+                    var findNodeResponse = await _mediator.Send(new Dht.Messages.FindNodeRequest(new Dht.NodeId(dhtEnvelope.FindNodeRequest.TargetPeerId.ToByteArray())));
+                    var responseEnvelope = new DhtEnvelope
+                    {
+                        FindNodeResponse = new Contracts.FindNodeResponse()
+                    };
+                    responseEnvelope.FindNodeResponse.CloserPeers.AddRange(findNodeResponse.CloserNodes.Select(n =>
+                        new NodeInfo
+                        {
+                            PeerId = ByteString.CopyFrom(n.Id.Value),
+                            Address = n.EndPoint.ToString()
+                        }));
+
+                    var internalEnvelope = new InternalEnvelope { DhtEnvelope = dhtEnvelope };
+                    return internalEnvelope;
+                case DhtEnvelope.MessageOneofCase.None:
                 case DhtEnvelope.MessageOneofCase.FindNodeResponse:
                 case DhtEnvelope.MessageOneofCase.PingResponse:
                 default:
                     _logger.LogWarning("Received unhandled DHT message type: {MessageType}", dhtEnvelope.MessageCase);
                     break;
             }
+
+            return null;
+        }
+
+        private async Task<byte[]> EncryptResponseEnvelope(SessionId sessionId, InternalEnvelope internalEnvelope)
+        {
+            var plaintext = new Plaintext(internalEnvelope.ToByteArray());
+            var (_, ratchetMessage) = await _sessionManager.EncryptMessageAsync(sessionId, plaintext);
+
+            return ratchetMessage.Value;
         }
     }
 }
