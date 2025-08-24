@@ -3,7 +3,6 @@ using Microsoft.Extensions.Options;
 using Moq;
 using Percolator.Infrastructure;
 using Percolator.Infrastructure.Security;
-using System.IO;
 
 namespace Percolator.InfrastructureTests.Security
 {

@@ -9,8 +9,6 @@ using NetworkPeerId = Percolator.Network.PeerId;
 using Percolator.Chat.ValueObjects;
 using Percolator.Cryptography;
 using Google.Protobuf;
-using System.Net.Http;
-using System.Net;
 
 namespace Percolator.Application.Network;
 

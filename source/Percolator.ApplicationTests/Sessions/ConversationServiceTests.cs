@@ -21,11 +21,9 @@ using Percolator.Network;
 using NetworkPeerId = Percolator.Network.PeerId;
 using ChatConversation = Percolator.Chat.Conversation;
 using ChatConversationId = Percolator.Chat.ValueObjects.ConversationId;
-using ContractsPreKeyBundle = Percolator.Contracts.PreKeyBundle;
 using IdentityPeerId = Percolator.Identity.PeerId;
 using RatchetIdentityKey = Percolator.Cryptography.RatchetIdentityKey;
 using RatchetEphemeralKey = Percolator.Cryptography.RatchetEphemeralKey;
-using Signature = Percolator.Cryptography.Signature;
 
 namespace Percolator.ApplicationTests.Sessions;
 

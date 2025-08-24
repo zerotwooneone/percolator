@@ -3,10 +3,8 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using NUnit.Framework;
-using System;
 using System.Net;
 using System.Net.Sockets;
-using System.Threading.Tasks;
 
 namespace Percolator.ApplicationIntegrationTests.ChatMessaging
 {

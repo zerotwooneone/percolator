@@ -1,9 +1,7 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
-using NUnit.Framework;
 using Percolator.Identity;
 using Percolator.Infrastructure.Identity;
-using System.Threading.Tasks;
 using Percolator.Infrastructure.Persistence;
 
 namespace Percolator.InfrastructureTests.Identity;

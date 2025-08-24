@@ -1,4 +1,3 @@
-using System.Threading;
 using Grpc.Core;
 
 namespace Percolator.ApplicationIntegrationTests;

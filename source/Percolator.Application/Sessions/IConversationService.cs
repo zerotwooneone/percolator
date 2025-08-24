@@ -1,6 +1,5 @@
 using System.Net;
 using Percolator.Chat.ValueObjects;
-using Percolator.Identity;
 
 namespace Percolator.Application.Sessions;
 

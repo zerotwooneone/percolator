@@ -1,8 +1,6 @@
 using Percolator.Cryptography;
-using System;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using static Percolator.Cryptography.DoubleRatchetSession;
 
 namespace Percolator.Infrastructure.Cryptography;
 

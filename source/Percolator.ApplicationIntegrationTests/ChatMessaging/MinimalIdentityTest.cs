@@ -4,20 +4,13 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 using NUnit.Framework;
 using Percolator.Application.Identity;
-using Percolator.Cryptography;
 using Percolator.Identity;
 using Percolator.Infrastructure;
 using Percolator.Infrastructure.Identity;
-using System;
-using System.Collections.Generic;
-using System.IO;
 using System.Net;
 using System.Net.Sockets;
-using System.Threading;
-using System.Threading.Tasks;
 
 namespace Percolator.ApplicationIntegrationTests.ChatMessaging
 {

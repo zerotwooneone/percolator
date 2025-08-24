@@ -1,4 +1,3 @@
-using System.Net;
 using System.Security.Cryptography;
 using Google.Protobuf;
 using MediatR;
@@ -10,7 +9,6 @@ using Percolator.Chat;
 using Percolator.Chat.ValueObjects;
 using Percolator.Contracts;
 using Percolator.Cryptography;
-using Percolator.Cryptography.Primitives;
 using Percolator.Identity;
 using Percolator.Network;
 using ChatConversation = Percolator.Chat.Conversation;

@@ -2,7 +2,6 @@ using System.Net;
 using FluentAssertions;
 using Google.Protobuf;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
 using Moq;
 using NUnit.Framework;
 using Percolator.Application.Cli;

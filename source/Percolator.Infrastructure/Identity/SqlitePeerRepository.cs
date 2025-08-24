@@ -1,7 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Percolator.Identity;
 using Percolator.Infrastructure.Persistence;
-using System.Threading.Tasks;
 
 namespace Percolator.Infrastructure.Identity;
 

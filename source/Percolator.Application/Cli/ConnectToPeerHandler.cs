@@ -1,4 +1,3 @@
-using System.Net;
 using MediatR;
 using Percolator.Application.Sessions;
 using Percolator.Chat.ValueObjects;

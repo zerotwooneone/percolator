@@ -1,9 +1,7 @@
 using Microsoft.Extensions.Logging;
 using Percolator.Application.Configuration;
 using Percolator.Identity;
-using System.Security.Cryptography;
 using Microsoft.Extensions.Options;
-using Percolator.Network;
 
 namespace Percolator.Application.Identity;
 

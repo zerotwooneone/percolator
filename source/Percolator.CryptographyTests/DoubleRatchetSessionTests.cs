@@ -1,7 +1,6 @@
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using NUnit.Framework;
 using Percolator.Cryptography;
 using System.Security.Cryptography;
 using System.Text;

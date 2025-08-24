@@ -1,6 +1,5 @@
 using System.Security.Cryptography;
 using FluentAssertions;
-using Google.Protobuf;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Percolator.Application.Identity;
@@ -8,8 +7,6 @@ using Percolator.Application.KeyExchange;
 using Percolator.Cryptography;
 using Percolator.Identity;
 using Percolator.Identity.Model;
-using ContractsPreKeyBundle = Percolator.Contracts.PreKeyBundle;
-using CryptoPreKeyBundle = Percolator.Cryptography.PreKeyBundle;
 
 namespace Percolator.ApplicationTests.KeyExchange;
 

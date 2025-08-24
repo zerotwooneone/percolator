@@ -1,8 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Design;
-using Microsoft.Extensions.Configuration;
 using SQLitePCL;
-using System.IO;
 using Microsoft.Data.Sqlite;
 
 namespace Percolator.Infrastructure.Persistence

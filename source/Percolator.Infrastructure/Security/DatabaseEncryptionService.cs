@@ -1,8 +1,6 @@
-using System.IO;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Extensions.Options;
-using Percolator.Infrastructure;
 
 namespace Percolator.Infrastructure.Security
 {

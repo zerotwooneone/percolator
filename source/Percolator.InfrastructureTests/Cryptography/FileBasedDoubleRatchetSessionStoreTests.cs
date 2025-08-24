@@ -4,7 +4,6 @@ using Microsoft.Extensions.Options;
 using Moq;
 using Percolator.Cryptography;
 using Percolator.Infrastructure.Cryptography;
-using NUnit.Framework;
 using Percolator.Identity;
 using Percolator.Infrastructure;
 

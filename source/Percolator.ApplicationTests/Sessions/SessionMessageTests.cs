@@ -1,10 +1,8 @@
 using System.Security.Cryptography;
 using System.Text;
 using FluentAssertions;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Console;
-using Microsoft.Extensions.Logging.Debug;
 using Microsoft.Extensions.Options;
 using Moq;
 using Percolator.Application.Identity;
@@ -19,11 +17,8 @@ using ChatParticipantId = Percolator.Chat.ValueObjects.ParticipantId;
 using CryptoSharedSecret = Percolator.Cryptography.SharedSecret;
 using CryptoRatchetIdentityKey = Percolator.Cryptography.RatchetIdentityKey;
 using CryptoRatchetEphemeralKey = Percolator.Cryptography.RatchetEphemeralKey;
-using CryptoPrivateAgreementKey = Percolator.Cryptography.PrivateAgreementKey;
 using CryptoPrivatePreKey = Percolator.Cryptography.PrivatePreKey;
 using CryptoPrivateOneTimeKey = Percolator.Cryptography.PrivateOneTimeKey;
-using CryptoPreKey = Percolator.Cryptography.PreKey;
-using CryptoPreKeyBundle = Percolator.Cryptography.PreKeyBundle;
 
 namespace Percolator.ApplicationTests.Sessions;
 

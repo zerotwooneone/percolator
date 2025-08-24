@@ -6,7 +6,6 @@ using Percolator.Identity;
 using Percolator.Infrastructure.Persistence;
 using Percolator.Infrastructure.Security;
 using SQLitePCL;
-using System.IO;
 
 namespace Percolator.Infrastructure.Identity
 {

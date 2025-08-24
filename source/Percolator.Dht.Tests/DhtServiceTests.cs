@@ -1,11 +1,7 @@
 using Moq;
 using NUnit.Framework;
-using Percolator.Dht.Primitives;
-using System.Collections.Generic;
-using System.Linq;
 using System.Net;
 using System.Security.Cryptography;
-using System.Threading.Tasks;
 
 namespace Percolator.Dht.Tests;
 

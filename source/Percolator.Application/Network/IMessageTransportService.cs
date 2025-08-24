@@ -1,7 +1,6 @@
 using Percolator.Identity;
 using Percolator.Chat.ValueObjects;
 using Percolator.Cryptography;
-using System.Net;
 using Percolator.Contracts;
 
 namespace Percolator.Application.Network;

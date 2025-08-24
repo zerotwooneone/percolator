@@ -4,7 +4,6 @@ using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using NUnit.Framework;
 using Percolator.Cryptography;
 
 namespace Percolator.CryptographyTests

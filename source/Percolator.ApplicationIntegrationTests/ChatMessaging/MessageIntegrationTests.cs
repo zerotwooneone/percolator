@@ -1,25 +1,9 @@
-using System.Net;
-using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using NUnit.Framework;
-using Percolator.Application;
 using Percolator.Application.Identity;
-using Percolator.Application.Network;
-using Percolator.Application.Sessions;
-using Percolator.Chat;
-using Percolator.Cryptography;
-using Percolator.Identity;
-using Percolator.Infrastructure;
-using Percolator.Infrastructure.Identity;
-using static NUnit.Framework.Assert;
 using System.Collections.Concurrent;
-using Percolator.Network;
-using NetworkPeerId = Percolator.Network.PeerId;
 
 namespace Percolator.ApplicationIntegrationTests.ChatMessaging;
 
