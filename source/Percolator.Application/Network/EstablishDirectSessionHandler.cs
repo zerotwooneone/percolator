@@ -117,20 +117,13 @@ namespace Percolator.Application.Network
             var sharedSecret = _x3dhOrchestrator.InitiateHandshake(prekeyBundle, ephemeralKey);
             _logger.LogInformation("X3DH handshake processed successfully as Initiator");
 
-            // Associate or create peer record
-            var connnectionInfo = await _peerConnectionRepository.GetByDirectMessage(networkIdentitySigningKey);
-            if (connnectionInfo is null)
-            {
-                throw new InvalidOperationException("Peer connection info not found.");
-            }
-
-            var networkPeerId = new NetworkPeerId(connnectionInfo.Id.Value);
-            var peer = await _peerRepository.GetByIdAsync(new IdentityPeerId(networkPeerId.Value));
+            var identityPeerId = new IdentityPeerId(peerConnectionInfo.Id.Value);
+            var peer = await _peerRepository.GetByIdAsync(identityPeerId);
             if (peer is null)
             {
                 _logger.LogInformation("Peer with key hash {KeyHash} is unknown. Creating a new peer record", Convert.ToBase64String(request.IdentitySigningKeyBytes));
                 var newPeerName = $"Peer-{Convert.ToBase64String(request.IdentitySigningKeyBytes)}";
-                peer = new IdentityPeer(new IdentityPeerId(connnectionInfo.Id.Value), newPeerName);
+                peer = new IdentityPeer(identityPeerId, newPeerName);
                 await _peerRepository.AddAsync(peer);
             }
 
@@ -161,7 +154,7 @@ namespace Percolator.Application.Network
                 var cryptoSessionId = new SessionId(conversation.Id.Value);
                 await _sessionManager.EstablishSessionAsInitiatorAsync(
                     cryptoSessionId,
-                    new IdentityPeerId(peer.Id.Value),
+                    identityPeerId,
                     remoteIdentityKey,
                     new RatchetEphemeralKey(request.PreKeyBytes),
                     sharedSecret,
