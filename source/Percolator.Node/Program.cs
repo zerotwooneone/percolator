@@ -28,6 +28,8 @@ using Percolator.Node;
 using ChatConversationId = Percolator.Chat.ValueObjects.ConversationId;
 using PeerId = Percolator.Identity.PeerId;
 using Percolator.Application.Dht;
+using Microsoft.Extensions.Options;
+using Percolator.Application.Configuration;
 
 var rootCommand = new RootCommand("Percolator Node: A secure peer-to-peer communication tool.");
 
@@ -38,15 +40,15 @@ var identityOption = new Option<string>(
     description: "The name of the identity to use.");
 
 // *** Host Command ***
-var portOption = new Option<int>(
+var portOption = new Option<int?>(
     new[] { "--port", "-p" },
-    getDefaultValue: () => 5000,
-    description: "The port to listen on.");
+    description: "Optional port to listen on (overrides appsettings for this run)."
+);
 
 var hostCommand = new Command("host", "Starts the node, listens for peers, and hosts the gRPC service.")
 {
-    portOption,
-    identityOption
+    identityOption,
+    portOption
 };
 rootCommand.AddCommand(hostCommand);
 
@@ -114,20 +116,27 @@ return await rootCommand.InvokeAsync(args);
 async Task HostCommandHandler(InvocationContext context)
 {
     CancellationToken cancellationToken = context.GetCancellationToken();
-    int port = context.ParseResult.GetValueForOption(portOption);
     string? identityName = context.ParseResult.GetValueForOption(identityOption);
-    int grpcPort = port + 1; // unified gRPC port
 
     // Step 1: Build a temporary service provider to get services needed for startup.
     var tempServices = new ServiceCollection();
 
-    IConfigurationRoot tempConfig = new ConfigurationBuilder()
-        .AddNode()
-        .AddInMemoryCollection(new Dictionary<string, string?>
+    var tempConfigBuilder = new ConfigurationBuilder()
+        .AddJsonFile("appsettings.json", optional: true)
+        .AddNode();
+
+    int? overridePort = context.ParseResult.GetValueForOption(portOption);
+    if (overridePort.HasValue)
+    {
+        // Override Node:Port and compute Transport:GrpcPort = port + 1 for this process
+        tempConfigBuilder.AddInMemoryCollection(new Dictionary<string, string?>
         {
-            ["Transport:GrpcPort"] = grpcPort.ToString()
-        })
-        .Build();
+            ["Node:Port"] = overridePort.Value.ToString(),
+            ["Transport:GrpcPort"] = (overridePort.Value + 1).ToString()
+        });
+    }
+
+    IConfigurationRoot tempConfig = tempConfigBuilder.Build();
     tempServices.AddLogging(builder => builder
         .AddConsole()
         .AddSimpleConsole(opt=>opt.TimestampFormat = "[yyyy-MM-dd HH:mm:ss.fff] "));
@@ -141,6 +150,10 @@ async Task HostCommandHandler(InvocationContext context)
     {
         // Get a logger for startup information
         var logger = tempServiceProvider.GetRequiredService<ILogger<Program>>();
+        var nodeOptions = tempServiceProvider.GetRequiredService<IOptions<NodeOptions>>().Value;
+        var transportOptions = tempServiceProvider.GetRequiredService<IOptions<TransportOptions>>().Value;
+        int port = nodeOptions.Port;
+        int grpcPort = transportOptions.GrpcPort;
         
         // Get the shared certificate manager
         var certificateManager = tempServiceProvider.GetRequiredService<SharedCertificateManager>();
@@ -168,7 +181,7 @@ async Task HostCommandHandler(InvocationContext context)
             tempServiceProvider.GetRequiredService<ILogger<MessageListenerService>>(),
             tempServiceProvider,
             certificateManager,
-            grpcPort);
+            tempServiceProvider.GetRequiredService<IOptions<TransportOptions>>());
             
         await messageListenerService.StartAsync(cancellationToken);
         logger.LogInformation("MessageListenerService started on port {Port}", grpcPort);
@@ -177,11 +190,16 @@ async Task HostCommandHandler(InvocationContext context)
         WebApplicationBuilder builder = WebApplication.CreateBuilder();
 
         builder.Configuration
-            .AddNode()
-            .AddInMemoryCollection(new Dictionary<string, string?>
+            .AddJsonFile("appsettings.json", optional: true)
+            .AddNode();
+        if (overridePort.HasValue)
+        {
+            builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
             {
+                ["Node:Port"] = port.ToString(),
                 ["Transport:GrpcPort"] = grpcPort.ToString()
             });
+        }
         builder.WebHost.UseKestrel(options =>
         {
             // Configure HTTPS endpoint with HTTP/2 only on the main port
@@ -436,7 +454,10 @@ async Task SendCommandHandler(InvocationContext context)
 static ServiceProvider CreateServiceProvider()
 {
     var services = new ServiceCollection();
-    var config = new ConfigurationBuilder().AddNode().Build();
+    var config = new ConfigurationBuilder()
+        .AddJsonFile("appsettings.json", optional: true)
+        .AddNode()
+        .Build();
 
     services.AddLogging(builder => builder
         .AddConsole()

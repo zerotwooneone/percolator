@@ -6,4 +6,5 @@ public class NodeOptions
 
     public string? IdentityName { get; set; }
     public string? IdentityNickname { get; set; }
+    public int Port { get; set; }
 }

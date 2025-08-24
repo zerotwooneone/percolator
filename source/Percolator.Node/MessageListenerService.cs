@@ -8,6 +8,8 @@ using Microsoft.Extensions.Configuration;
 using Percolator.Application;
 using Percolator.Infrastructure;
 using Percolator.Application.Network;
+using Microsoft.Extensions.Options;
+using Percolator.Application.Configuration;
 
 namespace Percolator.Node
 {
@@ -17,21 +19,22 @@ namespace Percolator.Node
         private readonly IServiceProvider _serviceProvider;
         private readonly SharedCertificateManager _certificateManager;
         private IWebHost? _host;
-        private int _port;
+        private readonly IOptions<TransportOptions> _transportOptions;
 
         public MessageListenerService(ILogger<MessageListenerService> logger, 
             IServiceProvider serviceProvider, 
             SharedCertificateManager certificateManager,
-            int port)
+            IOptions<TransportOptions> transportOptions)
         {
             _logger = logger;
             _serviceProvider = serviceProvider;
             _certificateManager = certificateManager;
-            _port = port;
+            _transportOptions = transportOptions;
         }
 
         public Task StartAsync(CancellationToken cancellationToken)
         {
+            int _port = _transportOptions.Value.GrpcPort;
             _logger.LogInformation("Starting MessageListenerService on port {Port}...", _port);
 
             try
@@ -141,11 +144,8 @@ namespace Percolator.Node
                         
                         // Register all application and infrastructure services
                         IConfigurationRoot tempConfig = new ConfigurationBuilder()
+                            .AddJsonFile("appsettings.json", optional: true)
                             .AddNode()
-                            .AddInMemoryCollection(new Dictionary<string, string?>
-                            {
-                                ["Transport:GrpcPort"] = _port.ToString()
-                            })
                             .Build();
                         
                         _logger.LogInformation("Registering application and infrastructure services for gRPC host");
