@@ -102,7 +102,6 @@ namespace Percolator.Application.Network
                     peerConnectionInfo.UpdateLastSeen(grpcEndPoint, timestamp);
                 }
             }
-            await _peerConnectionRepository.SaveAsync(peerConnectionInfo);
 
             // Derive shared secret (Initiator)
             _logger.LogInformation("Processing X3DH handshake with initiator bundle. Examining bundle properties...");
@@ -126,6 +125,9 @@ namespace Percolator.Application.Network
                 peer = new IdentityPeer(identityPeerId, newPeerName);
                 await _peerRepository.AddAsync(peer);
             }
+
+            // Now that the Peer exists, persist/update the PeerConnection
+            await _peerConnectionRepository.SaveAsync(peerConnectionInfo);
 
             // Create conversation (channel) if absent and establish session
             var channelId = new ChannelId(networkIdentitySigningKey.Value);
