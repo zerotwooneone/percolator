@@ -5,7 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Moq;
 using NUnit.Framework;
-using Percolator.Application.Dht;
+using Percolator.Application.Cli;
 using Percolator.Application.Network;
 using Percolator.Contracts;
 using Percolator.Dht;
@@ -128,10 +128,11 @@ public class HandshakeLoopbackTests : IntegrationTestBase
             }));
         });
 
-        var orchestrator = clientHost.Services.GetRequiredService<IDhtProbeOrchestrator>();
+        var mediator = clientHost.Services.GetRequiredService<IMediator>();
 
-        // Act: null targetPeerId to force orchestrator to hash ActiveIdentityContext key
-        var result = await orchestrator.FindNodeAsync(new DnsEndPoint("localhost", 5555), "remote", targetPeerId: null);
+        // Act: DhtProbe via MediatR (handler hashes ActiveIdentityContext key when target not provided)
+        var endpoint = new DnsEndPoint("localhost", 5555);
+        var result = await mediator.Send(new DhtProbeCommand(endpoint, "remote", SelfIdentityName: null), CancellationToken.None);
 
         // Assert
         result.Should().NotBeNull();

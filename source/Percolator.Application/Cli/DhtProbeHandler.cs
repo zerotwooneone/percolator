@@ -1,93 +1,64 @@
 using System.Net;
-using System.Threading;
-using System.Threading.Tasks;
-using Percolator.Contracts;
 using Google.Protobuf;
+using MediatR;
 using Microsoft.Extensions.Logging;
-using Percolator.Application.Sessions;
-using Percolator.Cryptography;
 using Percolator.Application.Identity;
 using Percolator.Application.Network;
+using Percolator.Application.Sessions;
 using Percolator.Chat.ValueObjects;
+using Percolator.Contracts;
+using Percolator.Cryptography;
 
-namespace Percolator.Application.Dht;
+namespace Percolator.Application.Cli;
 
-public interface IDhtProbeOrchestrator
-{
-    Task<FindNodeResponse> ProbeAsync(DnsEndPoint targetEndpoint, string targetIdentityName, string? selfIdentityName = null, CancellationToken cancellationToken = default);
-
-    Task PingAsync(DnsEndPoint targetEndpoint, string targetIdentityName, CancellationToken cancellationToken = default);
-
-    Task<FindNodeResponse> FindNodeAsync(DnsEndPoint targetEndpoint, string targetIdentityName, byte[]? targetPeerId = null, CancellationToken cancellationToken = default);
-}
-
-public class DhtProbeOrchestrator : IDhtProbeOrchestrator
+public class DhtProbeHandler : IRequestHandler<DhtProbeCommand, FindNodeResponse>
 {
     private readonly IConversationService _conversationService;
     private readonly IDirectSessionManager _sessionManager;
     private readonly IMessageTransportService _transport;
-    private readonly ILogger<DhtProbeOrchestrator> _logger;
     private readonly ActiveIdentityContext _activeIdentityContext;
+    private readonly ILogger<DhtProbeHandler> _logger;
 
-    public DhtProbeOrchestrator(
+    public DhtProbeHandler(
         IConversationService conversationService,
         IDirectSessionManager sessionManager,
         IMessageTransportService transport,
-        ILogger<DhtProbeOrchestrator> logger,
-        ActiveIdentityContext activeIdentityContext)
+        ActiveIdentityContext activeIdentityContext,
+        ILogger<DhtProbeHandler> logger)
     {
         _conversationService = conversationService;
         _sessionManager = sessionManager;
         _transport = transport;
-        _logger = logger;
         _activeIdentityContext = activeIdentityContext;
+        _logger = logger;
     }
 
-    public async Task<FindNodeResponse> ProbeAsync(DnsEndPoint targetEndpoint, string targetIdentityName, string? selfIdentityName = null, CancellationToken cancellationToken = default)
+    public async Task<FindNodeResponse> Handle(DhtProbeCommand request, CancellationToken cancellationToken)
     {
-        await PingAsync(targetEndpoint, targetIdentityName, cancellationToken);
-        return await FindNodeAsync(targetEndpoint, targetIdentityName, targetPeerId: null, cancellationToken);
-    }
+        // 1) Ensure conversation by connecting (TOFU etc handled by ConversationService)
+        var conversationId = await _conversationService.CreateDirectConversationAsync(request.Endpoint, request.TargetIdentityName);
 
-    public async Task PingAsync(DnsEndPoint targetEndpoint, string targetIdentityName, CancellationToken cancellationToken = default)
-    {
-        var conversationId = await EnsureConversationAsync(targetEndpoint, targetIdentityName);
-        var envelope = new InternalEnvelope
+        // 2) Send Ping (fire-and-forget)
+        var pingEnvelope = new InternalEnvelope
         {
             DhtEnvelope = new DhtEnvelope { PingRequest = new PingRequest() }
         };
-        await SendFireAndForgetAsync(conversationId, envelope, cancellationToken);
-    }
+        await SendFireAndForgetAsync(conversationId, pingEnvelope, cancellationToken);
 
-    public async Task<FindNodeResponse> FindNodeAsync(DnsEndPoint targetEndpoint, string targetIdentityName, byte[]? targetPeerId = null, CancellationToken cancellationToken = default)
-    {
-        var conversationId = await EnsureConversationAsync(targetEndpoint, targetIdentityName);
-
-        // Determine target node id
-        byte[] nodeIdBytes;
-        if (targetPeerId is not null)
-        {
-            nodeIdBytes = targetPeerId;
-        }
-        else
-        {
-            if (_activeIdentityContext.Keys?.IdentitySigningKey is null)
-            {
-                throw new InvalidOperationException("Active identity signing key not loaded.");
-            }
-            var signingKeySpki = _activeIdentityContext.Keys.IdentitySigningKey.ExportSubjectPublicKeyInfo();
-            nodeIdBytes = System.Security.Cryptography.SHA256.HashData(signingKeySpki);
-        }
-
-        var findNodeRequest = new Percolator.Contracts.FindNodeRequest
-        {
-            TargetPeerId = ByteString.CopyFrom(nodeIdBytes)
-        };
+        // 3) Build FindNode with target peer id (use self hashed signing key if unspecified)
+        var targetPeerId = GetTargetPeerIdBytes();
         var findNodeEnvelope = new InternalEnvelope
         {
-            DhtEnvelope = new DhtEnvelope { FindNodeRequest = findNodeRequest }
+            DhtEnvelope = new DhtEnvelope
+            {
+                FindNodeRequest = new FindNodeRequest
+                {
+                    TargetPeerId = ByteString.CopyFrom(targetPeerId)
+                }
+            }
         };
 
+        // 4) Send and receive response, decrypt and parse
         var response = await SendAndReceiveAsync(conversationId, findNodeEnvelope, cancellationToken);
         if (!response.HasResponsePayload)
         {
@@ -116,15 +87,19 @@ public class DhtProbeOrchestrator : IDhtProbeOrchestrator
             return new FindNodeResponse();
         }
         return dhtResp.FindNodeResponse ?? new FindNodeResponse();
+
+        byte[] GetTargetPeerIdBytes()
+        {
+            // Prefer hashing our active identity's signing key (SPKI) when available
+            if (_activeIdentityContext.Keys?.IdentitySigningKey is null)
+            {
+                throw new InvalidOperationException("Active identity signing key not loaded.");
+            }
+            var signingKeySpki = _activeIdentityContext.Keys.IdentitySigningKey.ExportSubjectPublicKeyInfo();
+            return System.Security.Cryptography.SHA256.HashData(signingKeySpki);
+        }
     }
 
-    private async Task<ConversationId> EnsureConversationAsync(DnsEndPoint endpoint, string remotePeerName)
-        => await _conversationService.CreateDirectConversationAsync(endpoint, remotePeerName);
-
-    /// <summary>
-    /// Encrypts and sends an envelope using repository-resolved peer connection via SendMessageAsync.
-    /// Use this for fire-and-forget operations like Ping where no immediate response payload is needed.
-    /// </summary>
     private async Task SendFireAndForgetAsync(ConversationId conversationId, InternalEnvelope envelope, CancellationToken cancellationToken)
     {
         var plaintext = new Plaintext(envelope.ToByteArray());
@@ -141,4 +116,3 @@ public class DhtProbeOrchestrator : IDhtProbeOrchestrator
         return await _transport.SendMessageAsync(new Percolator.Identity.PeerId(remotePeerId.Value), conversationId, ratchetMessage, cancellationToken);
     }
 }
-

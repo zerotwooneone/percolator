@@ -125,7 +125,9 @@ namespace Percolator.Application.Network
             {
                 //todo: avoid sending mediatR requests from mediatR handlers
                 case DhtEnvelope.MessageOneofCase.PingRequest:
-                    await _mediator.Send(new Percolator.Dht.Messages.PingRequest(new Percolator.Dht.NodeId(connectionInfo.IdentitySigningKey.Value), endpoint), ct);
+                    // NodeId is defined as SHA-256 digest of the peer's SPKI signing key bytes (32 bytes)
+                    var nodeIdBytes = System.Security.Cryptography.SHA256.HashData(connectionInfo.IdentitySigningKey.Value);
+                    await _mediator.Send(new Percolator.Dht.Messages.PingRequest(new Percolator.Dht.NodeId(nodeIdBytes), endpoint), ct);
                     break;
                 case DhtEnvelope.MessageOneofCase.FindNodeRequest:
                     var findNodeResponse = await _mediator.Send(new Percolator.Dht.Messages.FindNodeRequest(new Percolator.Dht.NodeId(dhtEnvelope.FindNodeRequest.TargetPeerId.ToByteArray())), ct);

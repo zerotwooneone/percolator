@@ -13,7 +13,6 @@ using Percolator.Dht;
 using Percolator.Identity;
 using MediatR;
 using Percolator.Dht.Messages;
-using Percolator.Application.Dht;
 
 namespace Percolator.Application;
 
@@ -38,9 +37,6 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IIdentityOrchestrator, IdentityOrchestrator>();
 
         services.AddChatServices();
-
-        // DHT probe orchestrator for CLI probe command
-        services.AddSingleton<IDhtProbeOrchestrator, DhtProbeOrchestrator>();
 
         services.AddMediatR(cfg =>
         {

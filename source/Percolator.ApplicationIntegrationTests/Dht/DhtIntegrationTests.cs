@@ -96,16 +96,17 @@ public class DhtIntegrationTests : IntegrationTestBase
             Payload = ByteString.CopyFrom(ciphertext.Value) 
         };
         
-        var nodeId = new NodeId(remoteSigningKey.Value);
+        // Production derives NodeId as SHA-256 of the signing key bytes (SPKI). Reflect that here.
+        var nodeId = new NodeId(SHA256.HashData(remoteSigningKey.Value));
         dhtRepositoryMock.Setup(r => r.GetAsync(nodeId)).ReturnsAsync(() => (DhtNode?)null);
 
         // Act
         await messageService.DeliverOpaqueMessage(request, new TestServerCallContext());
 
         // Assert: Verify the repository was called by the MediatR handler
-        dhtRepositoryMock.Verify(r => r.GetAsync(It.Is<NodeId>(n => n.Value.SequenceEqual(remoteSigningKey.Value))), Times.Once);
+        dhtRepositoryMock.Verify(r => r.GetAsync(It.Is<NodeId>(n => n.Value.SequenceEqual(SHA256.HashData(remoteSigningKey.Value)))), Times.Once);
         dhtRepositoryMock.Verify(r => r.AddAsync(It.Is<DhtNode>(n => 
-            n.Id.Value.SequenceEqual(remoteSigningKey.Value) &&
+            n.Id.Value.SequenceEqual(SHA256.HashData(remoteSigningKey.Value)) &&
             n.EndPoint.Equals(remoteEndpoint)
             )), Times.Once);
     }

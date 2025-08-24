@@ -2,11 +2,12 @@ using System.Net;
 using System.Security.Cryptography;
 using FluentAssertions;
 using Google.Protobuf;
+using MediatR;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Moq;
 using NUnit.Framework;
-using Percolator.Application.Dht;
+using Percolator.Application.Cli;
 using Percolator.Application.Identity;
 using Percolator.Application.KeyExchange;
 using Percolator.Application.Network;
@@ -144,7 +145,7 @@ public class DhtProbeLoopbackTests : IntegrationTestBase
             });
 
         // Build client host, wiring loopback transport to server's message service
-        using var clientHost = CreateHost(GetAvailablePort(), "LoopbackDht-Client", services =>
+        using var clientHost = await CreateAndInitializeHostAsync(GetAvailablePort(), "LoopbackDht-Client", identityName: "local", services =>
         {
             services.AddSingleton<IConversationService>(clientConversationService.Object);
             services.AddSingleton(clientSessionManager.Object);
@@ -154,13 +155,13 @@ public class DhtProbeLoopbackTests : IntegrationTestBase
                 var svc = serverHost.Services.GetRequiredService<PercolatorMessageService>();
                 return await svc.DeliverOpaqueMessage(req, new TestServerCallContext());
             }));
-            services.AddSingleton<IDhtProbeOrchestrator, DhtProbeOrchestrator>();
         });
 
-        var orchestrator = clientHost.Services.GetRequiredService<IDhtProbeOrchestrator>();
+        var mediator = clientHost.Services.GetRequiredService<IMediator>();
 
         // Act
-        var result = await orchestrator.FindNodeAsync(new DnsEndPoint("localhost", 5555), "remote", SHA256.HashData(Guid.NewGuid().ToByteArray()));
+        var endpoint = new DnsEndPoint("localhost", 5555);
+        var result = await mediator.Send(new DhtProbeCommand(endpoint, "remote", SelfIdentityName: null), CancellationToken.None);
 
         // Assert
         result.Should().NotBeNull();

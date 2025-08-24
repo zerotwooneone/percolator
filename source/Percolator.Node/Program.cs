@@ -16,20 +16,17 @@ using Microsoft.EntityFrameworkCore;
 using Percolator.Application;
 using Percolator.Application.Identity;
 using Percolator.Application.Network;
-using Percolator.Application.Sessions;
-using Percolator.Cryptography;
 using Percolator.Infrastructure;
-using Percolator.Infrastructure.Chat;
-using Percolator.Infrastructure.Cryptography;
 using Percolator.Infrastructure.Dht;
 using Percolator.Infrastructure.Identity;
 using Percolator.Network;
 using Percolator.Node;
 using ChatConversationId = Percolator.Chat.ValueObjects.ConversationId;
 using PeerId = Percolator.Identity.PeerId;
-using Percolator.Application.Dht;
 using Microsoft.Extensions.Options;
 using Percolator.Application.Configuration;
+using MediatR;
+using Percolator.Application.Cli;
 
 var rootCommand = new RootCommand("Percolator Node: A secure peer-to-peer communication tool.");
 
@@ -314,9 +311,9 @@ async Task DhtProbeCommandHandler(InvocationContext context)
             }
         }
 
-        var orchestrator = serviceProvider.GetRequiredService<IDhtProbeOrchestrator>();
+        var mediator = serviceProvider.GetRequiredService<IMediator>();
         Console.WriteLine($"Probing {endpoint} with self='{selfIdentity}', target='{targetIdentity}'...");
-        var response = await orchestrator.ProbeAsync(endpoint!, targetIdentity!, selfIdentity, cancellationToken);
+        var response = await mediator.Send(new DhtProbeCommand(endpoint!, targetIdentity!, selfIdentity), cancellationToken);
 
         var peers = response?.CloserPeers ?? new Google.Protobuf.Collections.RepeatedField<Percolator.Contracts.NodeInfo>();
         if (peers.Count == 0)
@@ -373,9 +370,9 @@ async Task ConnectCommandHandler(InvocationContext context)
     {
         var identityOrchestrator = serviceProvider.GetRequiredService<IIdentityOrchestrator>();
         await identityOrchestrator.LoadOrCreateIdentityAsync(identityName!, cancellationToken);
-        
-        var conversationService = serviceProvider.GetRequiredService<IConversationService>();
-        var conversationId = await conversationService.CreateDirectConversationAsync(endpoint, peerName!);
+
+        var mediator = serviceProvider.GetRequiredService<IMediator>();
+        var conversationId = await mediator.Send(new ConnectToPeerCommand(endpoint, peerName!), cancellationToken);
 
         Console.ForegroundColor = ConsoleColor.Green;
         Console.WriteLine($"Successfully connected to {peerName} and created conversation {conversationId.Value}");
@@ -410,8 +407,7 @@ async Task SendCommandHandler(InvocationContext context)
         var logger = serviceProvider.GetRequiredService<ILogger<Program>>();
         var activeIdentityContext = serviceProvider.GetRequiredService<ActiveIdentityContext>();
         logger.LogInformation("Sending with Identity: {IdentityName}:{PeerId}", identityName, activeIdentityContext.Identity!.Id);
-        var conversationService = serviceProvider.GetRequiredService<IConversationService>();
-        var messageService = serviceProvider.GetRequiredService<IMessageService>();
+        var mediator = serviceProvider.GetRequiredService<IMediator>();
 
         ChatConversationId conversationId;
        
@@ -432,15 +428,10 @@ async Task SendCommandHandler(InvocationContext context)
             return;
         }
         
-        conversationId = await conversationService.CreateDirectConversationAsync(endpoint, peerName);
-        Console.ForegroundColor = ConsoleColor.Cyan;
-        Console.WriteLine($"Established new conversation {conversationId.Value} with {peerName}");
-        Console.ResetColor();
-
-        await messageService.SendDirectMessageAsync(conversationId, message);
-
+        conversationId = await mediator.Send(new SendMessageCommand(endpoint, peerName, message), cancellationToken);
+        
         Console.ForegroundColor = ConsoleColor.Green;
-        Console.WriteLine("Message sent successfully.");
+        Console.WriteLine($"Message sent successfully.  conversation {conversationId.Value} with {peerName}");
         Console.ResetColor();
     }
     catch (Exception ex)
