@@ -63,35 +63,47 @@ namespace Percolator.Application.Sessions
             _transportOptions = transportOptions;
         }
 
-        public async Task<ConversationId> CreateDirectConversationAsync(
-            DnsEndPoint endpoint, 
+        
+
+        public async Task<ConversationId?> GetExistingDirectConversationAsync(
+            DnsEndPoint endpoint,
             string remotePeerName)
         {
             var remotePeer = await _peerRepository.GetByNameAsync(remotePeerName);
             if (remotePeer == null)
             {
                 _logger.LogInformation("Didn't find peer {PeerName}", remotePeerName);
+                return null;
             }
-            else {
-                var peerConnection = await _peerConnectionRepository.GetByIdAsync(new NetworkPeerId(remotePeer.Id.Value));
-                if (peerConnection is null)
-                {
-                    _logger.LogInformation("Didn't find connection info for Peer {PeerName} with ID {PeerId}", remotePeerName, remotePeer.Id.Value);
-                }
-                if (peerConnection is {IdentitySigningKey: not null})
-                {
-                    var conversation = await _conversationRepository.GetByChannelIdAsync(new ChannelId(peerConnection.IdentitySigningKey.Value));
-                    if (conversation == null)
-                    {
-                        _logger.LogInformation("Didn't find direct conversation with {PeerName} with channel ID {ChannelId}", remotePeerName, Convert.ToBase64String(peerConnection.IdentitySigningKey.Value));
-                    }
-                    else {
-                        _logger.LogInformation("Existing conversation with {PeerName} found. Reusing conversation {ConversationId}", remotePeerName, conversation.Id.Value);
-                        // The session already exists, so just return the ID.
-                        return conversation.Id;
-                    }
-                }
+
+            var peerConnection = await _peerConnectionRepository.GetByIdAsync(new NetworkPeerId(remotePeer.Id.Value));
+            if (peerConnection is null)
+            {
+                _logger.LogInformation("Didn't find connection info for Peer {PeerName} with ID {PeerId}", remotePeerName, remotePeer.Id.Value);
+                return null;
             }
+
+            if (peerConnection is { IdentitySigningKey: not null })
+            {
+                var conversation = await _conversationRepository.GetByChannelIdAsync(new ChannelId(peerConnection.IdentitySigningKey.Value));
+                if (conversation == null)
+                {
+                    _logger.LogInformation("Didn't find direct conversation with {PeerName} with channel ID {ChannelId}", remotePeerName, Convert.ToBase64String(peerConnection.IdentitySigningKey.Value));
+                    return null;
+                }
+
+                _logger.LogInformation("Existing conversation with {PeerName} found. Reusing conversation {ConversationId}", remotePeerName, conversation.Id.Value);
+                return conversation.Id;
+            }
+
+            return null;
+        }
+
+        public async Task<ConversationId> CreateNewDirectConversationAsync(
+            DnsEndPoint endpoint,
+            string remotePeerName)
+        {
+            var remotePeer = await _peerRepository.GetByNameAsync(remotePeerName);
             try
             {
                 _logger.LogInformation("Creating direct conversation with {PeerName} at {Endpoint}", remotePeerName,
@@ -111,7 +123,7 @@ namespace Percolator.Application.Sessions
                     _activeIdentityContext.Keys.SignedPreKey.PublicKey.ExportSubjectPublicKeyInfo();
                 var directPayload = new EstablishDirectSessionRequest.Types.DirectInitiatorPayload
                 {
-                    CallbackPort = (uint) _transportOptions.Value.GrpcPort,
+                    CallbackPort = (uint)_transportOptions.Value.GrpcPort,
                     SignedPreKey = ByteString.CopyFrom(signedPreKeyPublicBytes)
                 };
 
@@ -125,7 +137,6 @@ namespace Percolator.Application.Sessions
                     "Initiating handshake with keys - SignedPreKey length: {Length}, Signature length: {SigLength}",
                     signedPreKeyPublicBytes.Length, signedPayloadBytes.Value.Length);
 
-                
                 var request = new EstablishDirectSessionRequest
                 {
                     InitiatorBundle = new ContractsPreKeyBundle
@@ -148,7 +159,7 @@ namespace Percolator.Application.Sessions
                 {
                     //todo: handle not until
                     throw new InvalidOperationException($"Invalid response type:{message.MessageCase}");
-                } 
+                }
                 var response = message.Response!;
                 _logger.LogInformation("Received session response from peer");
 
@@ -159,11 +170,11 @@ namespace Percolator.Application.Sessions
                 {
                     throw new InvalidOperationException("Invalid signature in response.");
                 }
-                var responderPayload =EstablishDirectSessionResponse.Types.ResponsePayload.Parser.ParseFrom(response.ResponsePayload.ToByteArray());
-                
+                var responderPayload = EstablishDirectSessionResponse.Types.ResponsePayload.Parser.ParseFrom(response.ResponsePayload.ToByteArray());
+
                 var handshakeResult = _orchestrator.CompleteHandshake(
-                    new RatchetIdentityKey(response.IdentitySigningKey.ToByteArray()), 
-                    new RatchetEphemeralKey( responderPayload.EphemeralKey.ToByteArray()),
+                    new RatchetIdentityKey(response.IdentitySigningKey.ToByteArray()),
+                    new RatchetEphemeralKey(responderPayload.EphemeralKey.ToByteArray()),
                     oneTimePreKey
                 );
                 _logger.LogInformation("Handshake completed locally as Responder");

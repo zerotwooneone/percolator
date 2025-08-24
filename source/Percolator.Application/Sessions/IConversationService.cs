@@ -9,10 +9,17 @@ namespace Percolator.Application.Sessions;
 public interface IConversationService
 {
     /// <summary>
-    /// Creates a new direct conversation with a remote peer by connecting to the specified host and port.
+    /// Attempts to locate an existing direct conversation for the given remote peer.
+    /// Returns null if not found.
     /// </summary>
-    /// <returns>The unique ID of the direct conversation.</returns>
-    Task<ConversationId> CreateDirectConversationAsync(
-        DnsEndPoint endpoint, 
+    Task<ConversationId?> GetExistingDirectConversationAsync(
+        DnsEndPoint endpoint,
+        string remotePeerName);
+
+    /// <summary>
+    /// Creates a new direct conversation (and establishes cryptographic session) with the remote peer.
+    /// </summary>
+    Task<ConversationId> CreateNewDirectConversationAsync(
+        DnsEndPoint endpoint,
         string remotePeerName);
 }

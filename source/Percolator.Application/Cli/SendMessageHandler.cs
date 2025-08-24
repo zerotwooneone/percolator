@@ -17,7 +17,8 @@ public class SendMessageHandler : IRequestHandler<SendMessageCommand, Conversati
 
     public async Task<ConversationId> Handle(SendMessageCommand request, CancellationToken cancellationToken)
     {
-        var conversationId = await _conversationService.CreateDirectConversationAsync(request.Endpoint, request.RemotePeerName);
+        var existing = await _conversationService.GetExistingDirectConversationAsync(request.Endpoint, request.RemotePeerName);
+        var conversationId = existing ?? await _conversationService.CreateNewDirectConversationAsync(request.Endpoint, request.RemotePeerName);
         await _messageService.SendDirectMessageAsync(conversationId, request.Content);
         return conversationId;
     }

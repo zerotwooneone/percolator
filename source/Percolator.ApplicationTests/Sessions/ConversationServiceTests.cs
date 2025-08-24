@@ -82,7 +82,7 @@ public class ConversationServiceTests
     }
 
     [Test]
-    public async Task CreateDirectConversationAsync_WhenPeerExists_EstablishesSessionAndCreatesConversation()
+    public async Task CreateDirectConversation_WhenPeerExists_EstablishesSessionAndCreatesConversation()
     {
         // Arrange
         var endpoint = new DnsEndPoint("localhost", 5001);
@@ -187,7 +187,7 @@ public class ConversationServiceTests
             .Returns(Task.CompletedTask);
 
         // Act
-        var result = await _service.CreateDirectConversationAsync(endpoint, peerName);
+        var result = await _service.CreateNewDirectConversationAsync(endpoint, peerName);
 
         // Assert
         Assert.That(result, Is.Not.EqualTo(default(ChatConversationId)));
@@ -206,7 +206,7 @@ public class ConversationServiceTests
     }
 
     [Test]
-    public async Task CreateDirectConversationAsync_WhenPeerDoesNotExist_CreatesNewPeerAndConversation()
+    public async Task CreateDirectConversation_WhenPeerDoesNotExist_CreatesNewPeerAndConversation()
     {
         // Arrange
         var endpoint = new DnsEndPoint("localhost", 5001);
@@ -304,7 +304,7 @@ public class ConversationServiceTests
             .Returns(Task.CompletedTask);
 
         // Act
-        var result = await _service.CreateDirectConversationAsync(endpoint, peerName);
+        var result = await _service.CreateNewDirectConversationAsync(endpoint, peerName);
         
         // Assert
         Assert.That(result, Is.Not.EqualTo(default(ChatConversationId)));
@@ -343,7 +343,7 @@ public class ConversationServiceTests
     }
 
     [Test]
-    public async Task CreateDirectConversationAsync_WhenGrpcServiceThrows_PropagatesException()
+    public async Task CreateDirectConversation_WhenGrpcServiceThrows_PropagatesException()
     {
         // Arrange
         var endpoint = new DnsEndPoint("localhost", 5001);
@@ -369,7 +369,7 @@ public class ConversationServiceTests
 
         // Act & Assert
         var exception = Assert.ThrowsAsync<InvalidOperationException>(
-            async () => await _service.CreateDirectConversationAsync(endpoint, peerName));
+            async () => await _service.CreateNewDirectConversationAsync(endpoint, peerName));
             
         Assert.That(exception, Is.SameAs(expectedError));
         

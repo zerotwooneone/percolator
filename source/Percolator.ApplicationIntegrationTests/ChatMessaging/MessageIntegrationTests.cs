@@ -147,7 +147,7 @@ public class MessageIntegrationTests : IntegrationTestBase
             try
             {
                 // This will create the peer, peer connection, conversation, and establish the session
-                var conversationId = await conversationService.CreateDirectConversationAsync(
+                var conversationId = await conversationService.CreateNewDirectConversationAsync(
                     receiverEndpoint, 
                     "receiver"
                 );

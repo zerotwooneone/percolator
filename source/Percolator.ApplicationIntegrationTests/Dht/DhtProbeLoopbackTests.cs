@@ -117,7 +117,7 @@ public class DhtProbeLoopbackTests : IntegrationTestBase
         var clientConversationService = new Mock<IConversationService>();
 
         clientConversationService
-            .Setup(s => s.CreateDirectConversationAsync(It.IsAny<DnsEndPoint>(), It.IsAny<string>()))
+            .Setup(s => s.GetExistingDirectConversationAsync(It.IsAny<DnsEndPoint>(), It.IsAny<string>()))
             .ReturnsAsync(conversationId);
 
         // Client encrypts request

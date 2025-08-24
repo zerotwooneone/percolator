@@ -15,6 +15,7 @@ public class ConnectToPeerHandler : IRequestHandler<ConnectToPeerCommand, Conver
 
     public async Task<ConversationId> Handle(ConnectToPeerCommand request, CancellationToken cancellationToken)
     {
-        return await _conversationService.CreateDirectConversationAsync(request.Endpoint, request.RemotePeerName);
+        var existing = await _conversationService.GetExistingDirectConversationAsync(request.Endpoint, request.RemotePeerName);
+        return existing ?? await _conversationService.CreateNewDirectConversationAsync(request.Endpoint, request.RemotePeerName);
     }
 }

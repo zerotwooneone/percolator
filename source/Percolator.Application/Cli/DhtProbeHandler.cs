@@ -35,7 +35,8 @@ public class DhtProbeHandler : IRequestHandler<DhtProbeCommand, FindNodeResponse
     public async Task<FindNodeResponse> Handle(DhtProbeCommand request, CancellationToken cancellationToken)
     {
         // 1) Ensure conversation by connecting (TOFU etc handled by ConversationService)
-        var conversationId = await _conversationService.CreateDirectConversationAsync(request.Endpoint, request.TargetIdentityName);
+        var existing = await _conversationService.GetExistingDirectConversationAsync(request.Endpoint, request.TargetIdentityName);
+        var conversationId = existing ?? await _conversationService.CreateNewDirectConversationAsync(request.Endpoint, request.TargetIdentityName);
 
         // 2) Send Ping (fire-and-forget)
         var pingEnvelope = new InternalEnvelope
