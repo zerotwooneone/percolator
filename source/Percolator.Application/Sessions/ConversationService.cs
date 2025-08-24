@@ -1,4 +1,6 @@
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using Percolator.Application.Configuration;
 using Percolator.Application.Network;
 using Percolator.Chat;
 using Percolator.Contracts;
@@ -33,6 +35,7 @@ namespace Percolator.Application.Sessions
         private readonly IGrpcSessionService _grpcSessionService;
         private readonly IX3DHManager _x3DhManager;
         private readonly IPeerConnectionRepository _peerConnectionRepository;
+        private readonly IOptions<TransportOptions> _transportOptions;
 
         public ConversationService(
             ILogger<ConversationService> logger,
@@ -44,7 +47,8 @@ namespace Percolator.Application.Sessions
             ActiveIdentityContext activeIdentityContext,
             IGrpcSessionService grpcSessionService, 
             IX3DHManager x3DhManager, 
-            IPeerConnectionRepository peerConnectionRepository)
+            IPeerConnectionRepository peerConnectionRepository,
+            IOptions<TransportOptions> transportOptions)
         {
             _logger = logger;
             _orchestrator = orchestrator;
@@ -56,6 +60,7 @@ namespace Percolator.Application.Sessions
             _grpcSessionService = grpcSessionService;
             _x3DhManager = x3DhManager;
             _peerConnectionRepository = peerConnectionRepository;
+            _transportOptions = transportOptions;
         }
 
         public async Task<ConversationId> CreateDirectConversationAsync(
@@ -106,8 +111,7 @@ namespace Percolator.Application.Sessions
                     _activeIdentityContext.Keys.SignedPreKey.PublicKey.ExportSubjectPublicKeyInfo();
                 var directPayload = new EstablishDirectSessionRequest.Types.DirectInitiatorPayload
                 {
-                    //todo: get from config
-                    CallbackPort = 52382,
+                    CallbackPort = (uint) _transportOptions.Value.GrpcPort,
                     SignedPreKey = ByteString.CopyFrom(signedPreKeyPublicBytes)
                 };
 
@@ -168,6 +172,37 @@ namespace Percolator.Application.Sessions
                 if (remotePeer == null)
                 {
                     remotePeer = await CreatePeerAsync(remotePeerName, handshakeResult.ResponderBundle, endpoint);
+                }
+                else
+                {
+                    // Upsert connection details even when the peer already existed
+                    var netPeerId = new NetworkPeerId(remotePeer.Id.Value);
+                    var peerConnection = await _peerConnectionRepository.GetByIdAsync(netPeerId);
+                    if (peerConnection is null)
+                    {
+                        var now = DateTimeOffset.UtcNow;
+                        peerConnection = new PeerConnection(
+                            netPeerId,
+                            new DirectMessagePublicKey(handshakeResult.ResponderBundle.IdentitySigningKey.Value),
+                            new List<GrpcEndPoint> { new(endpoint, now) },
+                            Array.Empty<TlsCertificate>(),
+                            now);
+                        await _peerConnectionRepository.SaveAsync(peerConnection);
+                    }
+                    else
+                    {
+                        // Ensure identity key and endpoint are populated
+                        if (peerConnection.IdentitySigningKey is null ||
+                            !peerConnection.IdentitySigningKey.Value.SequenceEqual(handshakeResult.ResponderBundle.IdentitySigningKey.Value))
+                        {
+                            peerConnection.SetDirectMessagePublicKey(new DirectMessagePublicKey(handshakeResult.ResponderBundle.IdentitySigningKey.Value));
+                        }
+                        if (!peerConnection.GrpcEndPoints.Any(e => e.EndPoint.Host.Equals(endpoint.Host, StringComparison.OrdinalIgnoreCase) && e.EndPoint.Port == endpoint.Port))
+                        {
+                            peerConnection.AddGrpcEndPoint(new GrpcEndPoint(endpoint, DateTimeOffset.UtcNow));
+                        }
+                        await _peerConnectionRepository.SaveAsync(peerConnection);
+                    }
                 }
 
                 // Create a new conversation

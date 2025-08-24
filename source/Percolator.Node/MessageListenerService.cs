@@ -140,7 +140,13 @@ namespace Percolator.Node
                         });
                         
                         // Register all application and infrastructure services
-                        IConfigurationRoot tempConfig = new ConfigurationBuilder().AddNode().Build();
+                        IConfigurationRoot tempConfig = new ConfigurationBuilder()
+                            .AddNode()
+                            .AddInMemoryCollection(new Dictionary<string, string?>
+                            {
+                                ["Transport:GrpcPort"] = _port.ToString()
+                            })
+                            .Build();
                         
                         _logger.LogInformation("Registering application and infrastructure services for gRPC host");
                         

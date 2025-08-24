@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Percolator.Application.Configuration;
 using Percolator.Application.Apps.Chat;
 using Percolator.Application.Cryptography;
 using Percolator.Application.Identity;
@@ -22,6 +23,7 @@ public static class ServiceCollectionExtensions
         IConfiguration configuration)
     {
         // Register services from each of the application layers
+        services.Configure<TransportOptions>(configuration.GetSection(TransportOptions.SectionName));
         services.AddCryptographyServices(configuration);
         services.AddIdentityServices();
         services.AddKeyExchangeServices();

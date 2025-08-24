@@ -116,11 +116,18 @@ async Task HostCommandHandler(InvocationContext context)
     CancellationToken cancellationToken = context.GetCancellationToken();
     int port = context.ParseResult.GetValueForOption(portOption);
     string? identityName = context.ParseResult.GetValueForOption(identityOption);
+    int grpcPort = port + 1; // unified gRPC port
 
     // Step 1: Build a temporary service provider to get services needed for startup.
     var tempServices = new ServiceCollection();
-    
-    IConfigurationRoot tempConfig = new ConfigurationBuilder().AddNode().Build();
+
+    IConfigurationRoot tempConfig = new ConfigurationBuilder()
+        .AddNode()
+        .AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Transport:GrpcPort"] = grpcPort.ToString()
+        })
+        .Build();
     tempServices.AddLogging(builder => builder
         .AddConsole()
         .AddSimpleConsole(opt=>opt.TimestampFormat = "[yyyy-MM-dd HH:mm:ss.fff] "));
@@ -157,7 +164,6 @@ async Task HostCommandHandler(InvocationContext context)
         
         // Configure and start the message listener service using our shared certificate
         logger.LogInformation("Starting MessageListenerService with shared certificate...");
-        int grpcPort = port + 1; // We use port + 1 for gRPC service
         var messageListenerService = new MessageListenerService(
             tempServiceProvider.GetRequiredService<ILogger<MessageListenerService>>(),
             tempServiceProvider,
@@ -170,7 +176,12 @@ async Task HostCommandHandler(InvocationContext context)
         // Step 3: Configure and build the main application using the pre-fetched certificate.
         WebApplicationBuilder builder = WebApplication.CreateBuilder();
 
-        builder.Configuration.AddNode();
+        builder.Configuration
+            .AddNode()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Transport:GrpcPort"] = grpcPort.ToString()
+            });
         builder.WebHost.UseKestrel(options =>
         {
             // Configure HTTPS endpoint with HTTP/2 only on the main port

@@ -7,6 +7,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
+using Percolator.Application.Configuration;
 using Percolator.Application.Identity;
 using Percolator.Application.KeyExchange;
 using Percolator.Application.Network;
@@ -77,7 +78,8 @@ public class ConversationServiceTests
             _activeIdentityContext,
             _mockGrpcSessionService.Object, 
             new X3DHManager(NullLogger<X3DHManager>.Instance, Options.Create(new CryptographyOptions())), 
-            _mockPeerConnectionRepository.Object
+            _mockPeerConnectionRepository.Object,
+            Options.Create(new TransportOptions { GrpcPort = 52382 })
         );
     }
 
