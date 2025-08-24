@@ -261,56 +261,11 @@ async Task DhtProbeCommandHandler(InvocationContext context)
 
     try
     {
+        // Ensure local identity is loaded; handler will use ActiveIdentityContext
         var identityOrchestrator = serviceProvider.GetRequiredService<IIdentityOrchestrator>();
         await identityOrchestrator.LoadOrCreateIdentityAsync(selfIdentity!, cancellationToken);
 
-        // Ensure a Peer and PeerConnection exist for the target identity at the specified endpoint
-        var peerRepository = serviceProvider.GetRequiredService<Percolator.Identity.IPeerRepository>();
-        var peerConnectionRepository = serviceProvider.GetRequiredService<Percolator.Network.IPeerConnectionRepository>();
-
-        var existingPeer = await peerRepository.GetByNameAsync(targetIdentity!);
-        if (existingPeer is null)
-        {
-            // Create a minimal peer record so transport can resolve a PeerId
-            var newPeer = new Percolator.Identity.Peer(new PeerId(Guid.NewGuid()), targetIdentity!);
-            await peerRepository.AddAsync(newPeer);
-
-            var netPeerId = new Percolator.Network.PeerId(newPeer.Id.Value);
-            var now = DateTimeOffset.UtcNow;
-            var peerConnection = new Percolator.Network.PeerConnection(
-                netPeerId,
-                identitySigningKey: null, // unknown until handshake completes
-                grpcEndPoints: new[] { new GrpcEndPoint(endpoint!, now) },
-                tlsCertificates: Array.Empty<Percolator.Network.TlsCertificate>(),
-                lastSeen: now);
-            await peerConnectionRepository.SaveAsync(peerConnection);
-        }
-        else
-        {
-            var netPeerId = new Percolator.Network.PeerId(existingPeer.Id.Value);
-            var peerConnection = await peerConnectionRepository.GetByIdAsync(netPeerId);
-            if (peerConnection is null)
-            {
-                var now = DateTimeOffset.UtcNow;
-                var newConn = new Percolator.Network.PeerConnection(
-                    netPeerId,
-                    identitySigningKey: null,
-                    grpcEndPoints: new[] { new GrpcEndPoint(endpoint!, now) },
-                    tlsCertificates: Array.Empty<Percolator.Network.TlsCertificate>(),
-                    lastSeen: now);
-                await peerConnectionRepository.SaveAsync(newConn);
-            }
-            else
-            {
-                // Ensure the endpoint is present
-                if (!peerConnection.GrpcEndPoints.Any(e => e.EndPoint.Host.Equals(endpoint!.Host, StringComparison.OrdinalIgnoreCase) && e.EndPoint.Port == endpoint.Port))
-                {
-                    peerConnection.AddGrpcEndPoint(new GrpcEndPoint(endpoint!, DateTimeOffset.UtcNow));
-                    await peerConnectionRepository.SaveAsync(peerConnection);
-                }
-            }
-        }
-
+        // Delegate probing to MediatR handler which will resolve required services
         var mediator = serviceProvider.GetRequiredService<IMediator>();
         Console.WriteLine($"Probing {endpoint} with self='{selfIdentity}', target='{targetIdentity}'...");
         var response = await mediator.Send(new DhtProbeCommand(endpoint!, targetIdentity!, selfIdentity), cancellationToken);
