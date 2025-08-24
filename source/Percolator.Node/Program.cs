@@ -333,12 +333,6 @@ async Task DhtProbeCommandHandler(InvocationContext context)
             Console.WriteLine($"- {p.Address}  id={idB64}");
         }
     }
-    catch (NotImplementedException)
-    {
-        Console.ForegroundColor = ConsoleColor.Yellow;
-        Console.WriteLine("DHT probe logic not implemented yet (green phase pending). CLI skeleton is wired.");
-        Console.ResetColor();
-    }
     catch (Exception ex)
     {
         Console.ForegroundColor = ConsoleColor.Red;
