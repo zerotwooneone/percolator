@@ -96,7 +96,7 @@ public class DirectSessionManager : IDirectSessionManager
 
     public async Task EstablishSessionAsResponderAsync(
         SessionId conversationId, 
-        Percolator.Identity.PeerId remotePeerId, 
+        PeerId remotePeerId, 
         RatchetIdentityKey remoteIdentityKey,
         RatchetEphemeralKey remoteRatchetPublicKey,
         ECDiffieHellman privateKeyUsedInHandshake,
@@ -143,7 +143,7 @@ public class DirectSessionManager : IDirectSessionManager
     }
 
     public async Task<Plaintext?> ReceiveMessageAsync(
-        SessionId conversationId, 
+        SessionId sessionId, 
         SessionRatchetMessage encryptedMessage)
     {
         if (_activeIdentityContext.Identity is null || _activeIdentityContext.Keys is null)
@@ -152,25 +152,21 @@ public class DirectSessionManager : IDirectSessionManager
         }
 
         // Ensure only one message is processed at a time for a given conversation to prevent race conditions.
-        var semaphore = _sessionLocks.GetOrAdd(conversationId, new SemaphoreSlim(1, 1));
+        var semaphore = _sessionLocks.GetOrAdd(sessionId, new SemaphoreSlim(1, 1));
         await semaphore.WaitAsync();
 
         try
         {
-            var conversation = await _conversationRepository.GetByIdAsync(new Chat.ValueObjects.ConversationId(conversationId.Value));
+            var conversation = await _conversationRepository.GetByIdAsync(new Chat.ValueObjects.ConversationId(sessionId.Value));
             if (conversation is null)
-                throw new InvalidOperationException($"Conversation with id {conversationId} not found");
-            //todo: remove unused
-            var remotePeerId = await GetRemotePeerIdFromDirectMessage(conversation);
-
-            //todo: this seems circular. do we need to create this session id?
-            var sessionId = new SessionId(conversationId.Value);
-            _logger.LogInformation("Receive message for conversation {ConversationId}. SessionId: {SessionId}", conversationId, sessionId);
+                throw new InvalidOperationException($"Conversation with id {sessionId} not found");
+            
+            _logger.LogInformation("Receive message for conversation {ConversationId}. SessionId: {SessionId}", sessionId, sessionId);
 
             var sessionState = await _sessionStore.GetSessionStateAsync(sessionId);
             if (sessionState == null)
             {
-                throw new InvalidOperationException($"Double Ratchet session state for conversation {conversationId} not found.");
+                throw new InvalidOperationException($"Double Ratchet session state for conversation {sessionId} not found.");
             }
 
             if (_cryptographyOptions.Value.EnableCryptographicMaterialLogging)
@@ -205,7 +201,7 @@ public class DirectSessionManager : IDirectSessionManager
         }
     }
 
-    public async Task<(Percolator.Identity.PeerId remotePeerId, SessionRatchetMessage encryptedMessage)> EncryptMessageAsync(
+    public async Task<SessionRatchetMessage> EncryptMessageAsync(
         SessionId conversationId, 
         Plaintext plaintext)
     {
@@ -218,8 +214,7 @@ public class DirectSessionManager : IDirectSessionManager
             var conversation = await _conversationRepository.GetByIdAsync(new Chat.ValueObjects.ConversationId(conversationId.Value));
             if (conversation is null)
                 throw new InvalidOperationException($"Conversation with id {conversationId} not found");
-            var remotePeerId = await GetRemotePeerIdFromDirectMessage(conversation);
-
+            
             var sessionId = new SessionId(conversationId.Value);
             _logger.LogInformation("Encrypt message for conversation {ConversationId}. SessionId: {SessionId}", conversationId, sessionId);
             
@@ -246,20 +241,12 @@ public class DirectSessionManager : IDirectSessionManager
             // Save the updated state
             await _sessionStore.SetSessionStateAsync(sessionId, session.GetState());
 
-            return (remotePeerId, encryptedMessage);
+            return encryptedMessage;
         }
         finally
         {
             semaphore.Release();
         }
-    }
-
-    public async Task<PeerId> GetRemotePeerIdFromDirectMessage(SessionId sessionId)
-    {
-        var conversation = await _conversationRepository.GetByIdAsync(new Chat.ValueObjects.ConversationId(sessionId.Value));
-        if (conversation is null)
-            throw new InvalidOperationException($"Conversation with id {sessionId} not found");
-        return await GetRemotePeerIdFromDirectMessage(conversation);
     }
 
     private async Task<Percolator.Identity.PeerId> GetRemotePeerIdFromDirectMessage(Conversation conversation)

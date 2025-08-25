@@ -158,7 +158,7 @@ public class SessionMessageTests
         var encryptedBytes = new byte[] { 1, 2, 3, 4, 5 }; // Dummy encrypted data
 
         // Act: Alice encrypts a message
-        var (_, encryptedResult) = await _aliceManager.EncryptMessageAsync(conversationId, new Plaintext(originalBytes));
+        var encryptedResult = await _aliceManager.EncryptMessageAsync(conversationId, new Plaintext(originalBytes));
 
         // Act: Bob decrypts the message
         var decryptedBytes = await _bobManager.ReceiveMessageAsync(conversationId, encryptedResult);

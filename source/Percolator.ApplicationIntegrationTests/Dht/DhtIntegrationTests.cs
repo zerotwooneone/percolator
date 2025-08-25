@@ -29,6 +29,7 @@ public class DhtIntegrationTests : IntegrationTestBase
         var dhtRepositoryMock = new Mock<IDhtNodeRepository>();
         var sessionManagerMock = new Mock<IDirectSessionManager>();
         var peerConnectionRepoMock = new Mock<IPeerConnectionRepository>();
+        var remotePeerResolverMock = new Mock<IRemotePeerResolver>();
 
         // Mocks for unused dependencies to allow the host to build
         var x3dhOrchestratorMock = new Mock<IX3DHOrchestrator>();
@@ -42,16 +43,17 @@ public class DhtIntegrationTests : IntegrationTestBase
         var port = GetAvailablePort();
         using var host = CreateHost(port, "DhtTest",  services =>
         {
-            services.AddSingleton(dhtRepositoryMock.Object);
-            services.AddSingleton(sessionManagerMock.Object);
-            services.AddSingleton(peerConnectionRepoMock.Object);
-            services.AddSingleton(x3dhOrchestratorMock.Object);
-            services.AddSingleton(conversationRepoMock.Object);
-            services.AddSingleton(peerRepoMock.Object);
-            services.AddSingleton(x3dhManagerMock.Object);
-            services.AddSingleton(bundleRepoMock.Object);
-            services.AddSingleton(signingServiceMock.Object);
-            services.AddSingleton(peerTrustManagerMock.Object);
+            services.AddSingleton<IDhtNodeRepository>(dhtRepositoryMock.Object);
+            services.AddSingleton<IDirectSessionManager>(sessionManagerMock.Object);
+            services.AddSingleton<IPeerConnectionRepository>(peerConnectionRepoMock.Object);
+            services.AddSingleton<IRemotePeerResolver>(remotePeerResolverMock.Object);
+            services.AddSingleton<IX3DHOrchestrator>(x3dhOrchestratorMock.Object);
+            services.AddSingleton<IConversationRepository>(conversationRepoMock.Object);
+            services.AddSingleton<IPeerRepository>(peerRepoMock.Object);
+            services.AddSingleton<IX3DHManager>(x3dhManagerMock.Object);
+            services.AddSingleton<IPreKeyBundleRepository>(bundleRepoMock.Object);
+            services.AddSingleton<Percolator.Cryptography.ISigningService>(signingServiceMock.Object);
+            services.AddSingleton<IPeerTrustManager>(peerTrustManagerMock.Object);
             services.AddMediatR(cfg => 
                 cfg.RegisterServicesFromAssembly(typeof(Percolator.Dht.Messages.PingRequest).Assembly));
         });
@@ -70,8 +72,8 @@ public class DhtIntegrationTests : IntegrationTestBase
         sessionManagerMock.Setup(s => s.ReceiveMessageAsync(sessionId, It.IsAny<SessionRatchetMessage>()))
             .Returns(Task.FromResult<Plaintext?>(new Plaintext(internalEnvelope.ToByteArray())));
 
-        // 2. Mock the session manager to return the peer ID
-        sessionManagerMock.Setup(s => s.GetRemotePeerIdFromDirectMessage(sessionId))
+        // 2. Mock the remote peer resolver to return the peer ID
+        remotePeerResolverMock.Setup(r => r.ResolveFromSession(sessionId))
             .ReturnsAsync(remotePeerId);
 
         // 3. Mock the peer connection repository to return connection info
@@ -140,10 +142,6 @@ public class DhtIntegrationTests : IntegrationTestBase
         sessionManagerMock.Setup(s => s.ReceiveMessageAsync(It.Is<SessionId>(sid => sid == sessionId), It.IsAny<SessionRatchetMessage>()))
             .ReturnsAsync(new Plaintext(internalEnvelope.ToByteArray()));
 
-        // 2. Mock the session manager to return the remote peer's ID
-        sessionManagerMock.Setup(s => s.GetRemotePeerIdFromDirectMessage(sessionId))
-            .ReturnsAsync(remotePeerId);
-
         // 3. Mock the peer connection repository to return connection info for the remote peer
         var networkPeerId = new NetworkPeerId(remotePeerId.Value);
         var connectionInfo = new PeerConnection(
@@ -167,7 +165,7 @@ public class DhtIntegrationTests : IntegrationTestBase
         // 5. Mock the session manager's encryption call for the response
         var expectedResponsePayload = new SessionRatchetMessage(Guid.NewGuid().ToByteArray());
         sessionManagerMock.Setup(s => s.EncryptMessageAsync(sessionId, It.IsAny<Plaintext>()))
-            .ReturnsAsync((new Percolator.Identity.PeerId(Guid.NewGuid()), expectedResponsePayload));
+            .ReturnsAsync(expectedResponsePayload);
 
         var request = new DeliverOpaqueMessageRequest
         {

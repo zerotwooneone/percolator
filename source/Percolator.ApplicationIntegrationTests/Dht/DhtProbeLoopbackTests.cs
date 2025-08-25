@@ -55,6 +55,7 @@ public class DhtProbeLoopbackTests : IntegrationTestBase
         var serverSessionManager = new Mock<IDirectSessionManager>();
         var serverDhtRepo = new Mock<IDhtNodeRepository>();
         var serverPeerConnRepo = new Mock<IPeerConnectionRepository>();
+        var serverRemotePeerResolver = new Mock<IRemotePeerResolver>();
 
         // Shared identifiers between client and server for the same conversation
         var conversationId = Percolator.Chat.ValueObjects.ConversationId.NewId();
@@ -79,23 +80,26 @@ public class DhtProbeLoopbackTests : IntegrationTestBase
 
         // Server Encrypt response
         var responseCipher = new Percolator.Cryptography.SessionRatchetMessage(Guid.NewGuid().ToByteArray());
-        var serverRemotePeerId = new Percolator.Identity.PeerId(Guid.NewGuid());
         serverSessionManager
             .Setup(s => s.EncryptMessageAsync(sessionId, It.IsAny<Percolator.Cryptography.Plaintext>()))
-            .ReturnsAsync((serverRemotePeerId, responseCipher));
+            .ReturnsAsync(responseCipher);
 
-        // Server maps remote sender to a peer connection
-        serverSessionManager
-            .Setup(s => s.GetRemotePeerIdFromDirectMessage(sessionId))
-            .ReturnsAsync(new Percolator.Identity.PeerId(Guid.NewGuid()));
+        // Server maps remote sender to a peer connection via resolver
+        var serverNetworkPeerGuid = Guid.NewGuid();
+        serverRemotePeerResolver
+            .Setup(r => r.ResolveFromSession(sessionId))
+            .ReturnsAsync(new Percolator.Identity.PeerId(serverNetworkPeerGuid));
         serverPeerConnRepo
             .Setup(r => r.GetByIdAsync(It.IsAny<NetworkPeerId>()))
-            .ReturnsAsync(new PeerConnection(
-                new NetworkPeerId(Guid.NewGuid()),
-                new DirectMessagePublicKey(SHA256.HashData(Guid.NewGuid().ToByteArray())),
-                new[] { new GrpcEndPoint(new DnsEndPoint("localhost", 59001), DateTimeOffset.UtcNow) },
-                Array.Empty<TlsCertificate>(),
-                DateTimeOffset.UtcNow));
+            .ReturnsAsync((NetworkPeerId pid) =>
+                pid.Value == serverNetworkPeerGuid
+                    ? new PeerConnection(
+                        new NetworkPeerId(serverNetworkPeerGuid),
+                        new DirectMessagePublicKey(SHA256.HashData(Guid.NewGuid().ToByteArray())),
+                        new[] { new GrpcEndPoint(new DnsEndPoint("localhost", 59001), DateTimeOffset.UtcNow) },
+                        Array.Empty<TlsCertificate>(),
+                        DateTimeOffset.UtcNow)
+                    : null);
 
         using var serverHost = CreateHost(GetAvailablePort(), "LoopbackDht-Server", services =>
         {
@@ -104,6 +108,7 @@ public class DhtProbeLoopbackTests : IntegrationTestBase
             services.AddSingleton(new Mock<IConversationRepository>().Object);
             services.AddSingleton(new Mock<IPeerRepository>().Object);
             services.AddSingleton<IPeerConnectionRepository>(serverPeerConnRepo.Object);
+            services.AddSingleton(serverRemotePeerResolver.Object);
             services.AddSingleton<IDhtService, DhtService>();
             services.AddSingleton(new Mock<IX3DHOrchestrator>().Object);
             services.AddSingleton(new Mock<IX3DHManager>().Object);
@@ -117,15 +122,14 @@ public class DhtProbeLoopbackTests : IntegrationTestBase
         var clientConversationService = new Mock<IConversationService>();
 
         clientConversationService
-            .Setup(s => s.GetExistingDirectConversationAsync(It.IsAny<DnsEndPoint>(), It.IsAny<string>()))
+            .Setup(s => s.GetExistingDirectConversationAsync(It.IsAny<Peer>()))
             .ReturnsAsync(conversationId);
 
         // Client encrypts request
-        var clientRemotePeerId = new Percolator.Identity.PeerId(Guid.NewGuid());
         var clientRequestCipher = new Percolator.Cryptography.SessionRatchetMessage(Guid.NewGuid().ToByteArray());
         clientSessionManager
             .Setup(s => s.EncryptMessageAsync(sessionId, It.IsAny<Percolator.Cryptography.Plaintext>()))
-            .ReturnsAsync((clientRemotePeerId, clientRequestCipher));
+            .ReturnsAsync(clientRequestCipher);
 
         // Client decrypts response to internal FindNodeResponse envelope
         clientSessionManager
@@ -147,6 +151,11 @@ public class DhtProbeLoopbackTests : IntegrationTestBase
         {
             services.AddSingleton<IConversationService>(clientConversationService.Object);
             services.AddSingleton(clientSessionManager.Object);
+            // DhtProbeHandler now depends on IPeerRepository; provide a simple mock returning a Peer by name
+            var clientPeerRepo = new Mock<IPeerRepository>();
+            clientPeerRepo.Setup(r => r.GetByNameAsync(It.IsAny<string>()))
+                .ReturnsAsync((string name) => new Peer(new Percolator.Identity.PeerId(Guid.NewGuid()), name));
+            services.AddSingleton(clientPeerRepo.Object);
             services.AddMediatR(cfg => cfg.RegisterServicesFromAssembly(typeof(Percolator.Dht.Messages.FindNodeRequest).Assembly));
             services.AddSingleton<IMessageTransportService>(sp => new LoopbackTransport(async req =>
             {

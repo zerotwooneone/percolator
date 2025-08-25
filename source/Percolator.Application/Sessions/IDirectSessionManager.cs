@@ -37,7 +37,6 @@ public interface IDirectSessionManager
     /// <summary>
     /// Encrypts an outgoing message.
     /// </summary>
-    Task<(Percolator.Identity.PeerId remotePeerId, SessionRatchetMessage encryptedMessage)> EncryptMessageAsync(Percolator.Cryptography.SessionId conversationId, Plaintext plaintext);
+    Task<SessionRatchetMessage> EncryptMessageAsync(Percolator.Cryptography.SessionId conversationId, Plaintext plaintext);
 
-    Task<PeerId> GetRemotePeerIdFromDirectMessage(SessionId sessionId);
 }

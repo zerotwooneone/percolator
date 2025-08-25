@@ -71,7 +71,6 @@ public class ConversationServiceTests
             _mockX3dhOrchestrator.Object,
             _mockDirectSessionManager.Object,
             _mockConversationRepository.Object,
-            _mockPeerRepository.Object,
             _mockOneTimeKeyProvider.Object,
             _activeIdentityContext,
             _mockGrpcSessionService.Object, 
@@ -86,11 +85,10 @@ public class ConversationServiceTests
     {
         // Arrange
         var endpoint = new DnsEndPoint("localhost", 5001);
-        var peerName = "test-peer";
-        var peer = new Peer(new IdentityPeerId(Guid.NewGuid()), peerName);
+        var peer = new Peer(new IdentityPeerId(Guid.NewGuid()), "test-peer");
 
         // Setup peer repository to return the existing peer
-        _mockPeerRepository.Setup(r => r.GetByNameAsync(peerName)).ReturnsAsync(peer);
+        _mockPeerRepository.Setup(r => r.GetByNameAsync(peer.Name)).ReturnsAsync(peer);
         _mockPeerRepository.Setup(r => r.GetByIdAsync(It.Is<IdentityPeerId>(id => id.Value == peer.Id.Value))).ReturnsAsync(peer);
 
         // Create valid crypto materials for the mock response
@@ -187,11 +185,11 @@ public class ConversationServiceTests
             .Returns(Task.CompletedTask);
 
         // Act
-        var result = await _service.CreateNewDirectConversationAsync(endpoint, peerName);
+        var result = await _service.CreateNewDirectConversationAsync(endpoint, peer);
 
         // Assert
         Assert.That(result, Is.Not.EqualTo(default(ChatConversationId)));
-        _mockConversationRepository.Verify(r => r.AddAsync(It.Is<ChatConversation>(c => c.Name == peerName)), Times.Once);
+        _mockConversationRepository.Verify(r => r.AddAsync(It.Is<ChatConversation>(c => c.Name == peer.Name)), Times.Once);
         _mockDirectSessionManager.Verify(m => m.EstablishSessionAsResponderAsync(
             It.IsAny<Percolator.Cryptography.SessionId>(), 
             It.IsAny<IdentityPeerId>(), 
@@ -212,9 +210,7 @@ public class ConversationServiceTests
         var endpoint = new DnsEndPoint("localhost", 5001);
         var peerName = "new-peer";
         var sessionId = Guid.Parse("43e97c9d-5d15-466f-8d0e-4ed1ab1bb7be");
-        
-        // Setup peer repository to return null (peer does not exist)
-        _mockPeerRepository.Setup(r => r.GetByNameAsync(peerName)).ReturnsAsync((Peer)null);
+        var peer = new Peer(new IdentityPeerId(Guid.NewGuid()), peerName);
         
         // Create valid crypto materials for the mock response
         using var remoteSigningKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
@@ -239,10 +235,6 @@ public class ConversationServiceTests
         _mockGrpcSessionService.Setup(s => s.EstablishDirectSessionAsync(It.IsAny<DnsEndPoint>(), It.IsAny<EstablishDirectSessionRequest>()))
             .ReturnsAsync(grpcResponse);
 
-        // Setup peer repository AddAsync to succeed
-        _mockPeerRepository.Setup(r => r.AddAsync(It.IsAny<Peer>()))
-            .Returns(Task.CompletedTask);
-            
         // Setup peer connection repository
         _mockPeerConnectionRepository
             .Setup(r => r.SaveAsync(It.IsAny<PeerConnection>()))
@@ -291,12 +283,6 @@ public class ConversationServiceTests
                 It.IsAny<ECDiffieHellman>()))
             .Returns(Task.CompletedTask);
 
-        // Capture the peer that gets created
-        Peer capturedPeer = null;
-        _mockPeerRepository.Setup(r => r.AddAsync(It.IsAny<Peer>()))
-            .Callback<Peer>(p => capturedPeer = p)
-            .Returns(Task.CompletedTask);
-            
         // Capture the conversation that gets created
         ChatConversation capturedConversation = null;
         _mockConversationRepository.Setup(r => r.AddAsync(It.IsAny<ChatConversation>()))
@@ -304,16 +290,11 @@ public class ConversationServiceTests
             .Returns(Task.CompletedTask);
 
         // Act
-        var result = await _service.CreateNewDirectConversationAsync(endpoint, peerName);
+        var result = await _service.CreateNewDirectConversationAsync(endpoint, peer);
         
         // Assert
         Assert.That(result, Is.Not.EqualTo(default(ChatConversationId)));
         Assert.That(result.Value, Is.EqualTo(sessionId));
-        
-        // Verify peer was created with expected name
-        _mockPeerRepository.Verify(r => r.AddAsync(It.Is<Peer>(p => p.Name == peerName)), Times.Once);
-        Assert.That(capturedPeer, Is.Not.Null);
-        Assert.That(capturedPeer.Name, Is.EqualTo(peerName));
         
         // Verify peer connection was saved
         _mockPeerConnectionRepository.Verify(r => r.SaveAsync(It.IsAny<PeerConnection>()), Times.Once);
@@ -348,6 +329,7 @@ public class ConversationServiceTests
         // Arrange
         var endpoint = new DnsEndPoint("localhost", 5001);
         var peerName = "test-peer";
+        var peer = new Peer(new IdentityPeerId(Guid.NewGuid()), peerName);
         
         // Setup peer repository
         _mockPeerRepository.Setup(r => r.GetByNameAsync(peerName))
@@ -369,7 +351,7 @@ public class ConversationServiceTests
 
         // Act & Assert
         var exception = Assert.ThrowsAsync<InvalidOperationException>(
-            async () => await _service.CreateNewDirectConversationAsync(endpoint, peerName));
+            async () => await _service.CreateNewDirectConversationAsync(endpoint, peer));
             
         Assert.That(exception, Is.SameAs(expectedError));
         

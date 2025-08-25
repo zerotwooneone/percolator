@@ -37,7 +37,7 @@ public class SqlitePeerConnectionRepository : IPeerConnectionRepository
             .Include(p => p.GrpcEndPoints)
             .Include(p => p.TlsCertificates)
             .FirstOrDefaultAsync(p => p.PeerId == idPeerId);
-
+        //todo: enforce limits on the number of endpoints and certificates
         if (existing is null)
         {
             var newDbo = new PeerConnectionDbo

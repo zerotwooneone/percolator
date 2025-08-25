@@ -239,6 +239,18 @@ public class DoubleRatchetSession : IDisposable
         var headerTuple = (ourPublicKey, _sendingCounter, _previousChainLength);
         var associatedData = SessionRatchetMessage.GetAssociatedData(headerTuple, new byte[0]);
 
+        if (_cryptographyOptions.EnableCryptographicMaterialLogging)
+        {
+            _logger.LogInformation("Encrypt header - RatchetKey: {RatchetKey}, Counter: {Counter}, PreviousChainLength: {PreviousChainLength}",
+                Convert.ToBase64String(ourPublicKey.Value),
+                _sendingCounter,
+                _previousChainLength);
+            _logger.LogInformation("Encrypt associated data: {AssociatedData}",
+                Convert.ToBase64String(associatedData));
+            _logger.LogInformation("Encrypt message key: {MessageKey}",
+                Convert.ToBase64String(messageKey));
+        }
+
         // Encrypt the plaintext.
         var ciphertext = CryptoUtils.EncryptAesGcm(plaintext.Value, messageKey, associatedData);
 
@@ -356,6 +368,8 @@ public class DoubleRatchetSession : IDisposable
                     header.PreviousChainLength);
                 _logger.LogInformation("Decryption associated data : {AssociatedData}", 
                     Convert.ToBase64String(associatedData));
+                _logger.LogInformation("Decryption message key (again) : {MessageKey}",
+                    Convert.ToBase64String(messageKey));
             }
                 
             var decryptedBytes = CryptoUtils.DecryptAesGcm(ciphertext.Value, messageKey, associatedData);

@@ -154,7 +154,7 @@ public class DirectSessionManagerTests
         
         // Act: Alice encrypts a message for Bob
         var aliceMessage = new Plaintext(System.Text.Encoding.UTF8.GetBytes("Hello from Alice!"));
-        var (_, aliceEncrypted) = await _aliceSessionManager.EncryptMessageAsync(_sessionId, aliceMessage);
+        var aliceEncrypted = await _aliceSessionManager.EncryptMessageAsync(_sessionId, aliceMessage);
         
         // Act: Bob receives Alice's message
         var bobDecrypted = await _bobSessionManager.ReceiveMessageAsync(_sessionId, aliceEncrypted);
@@ -166,7 +166,7 @@ public class DirectSessionManagerTests
             
         // Act: Bob sends a response to Alice
         var bobMessage = new Plaintext(System.Text.Encoding.UTF8.GetBytes("Hello from Bob!"));
-        var (_, bobEncrypted) = await _bobSessionManager.EncryptMessageAsync(_sessionId, bobMessage);
+        var bobEncrypted = await _bobSessionManager.EncryptMessageAsync(_sessionId, bobMessage);
         
         // Act: Alice receives Bob's message
         var aliceDecrypted = await _aliceSessionManager.ReceiveMessageAsync(_sessionId, bobEncrypted);
@@ -195,7 +195,7 @@ public class DirectSessionManagerTests
 
         // Act & Assert: Bob (responder) sends the first message to Alice
         var bobMessage = new Plaintext(System.Text.Encoding.UTF8.GetBytes("Hello from Bob!"));
-        var (_, bobEncrypted) = await _bobSessionManager.EncryptMessageAsync(_sessionId, bobMessage);
+        var bobEncrypted = await _bobSessionManager.EncryptMessageAsync(_sessionId, bobMessage);
         var aliceDecrypted = await _aliceSessionManager.ReceiveMessageAsync(_sessionId, bobEncrypted);
 
         Assert.That(aliceDecrypted, Is.Not.Null, "Alice should decrypt Bob's message successfully");
@@ -203,7 +203,7 @@ public class DirectSessionManagerTests
 
         // Act & Assert: Alice (initiator) sends a reply to Bob
         var aliceMessage = new Plaintext(System.Text.Encoding.UTF8.GetBytes("Hello from Alice!"));
-        var (_, aliceEncrypted) = await _aliceSessionManager.EncryptMessageAsync(_sessionId, aliceMessage);
+        var aliceEncrypted = await _aliceSessionManager.EncryptMessageAsync(_sessionId, aliceMessage);
         var bobDecrypted = await _bobSessionManager.ReceiveMessageAsync(_sessionId, aliceEncrypted);
 
         Assert.That(bobDecrypted, Is.Not.Null, "Bob should decrypt Alice's message successfully");
@@ -229,11 +229,11 @@ public class DirectSessionManagerTests
         for (int i = 1; i <= 3; i++)
         {
             var aliceMessage = new Plaintext(System.Text.Encoding.UTF8.GetBytes($"Alice message {i}"));
-            var (_, aliceEncrypted) = await _aliceSessionManager.EncryptMessageAsync(_sessionId, aliceMessage);
+            var aliceEncrypted = await _aliceSessionManager.EncryptMessageAsync(_sessionId, aliceMessage);
             await _bobSessionManager.ReceiveMessageAsync(_sessionId, aliceEncrypted);
 
             var bobMessage = new Plaintext(System.Text.Encoding.UTF8.GetBytes($"Bob message {i}"));
-            var (_, bobEncrypted) = await _bobSessionManager.EncryptMessageAsync(_sessionId, bobMessage);
+            var bobEncrypted = await _bobSessionManager.EncryptMessageAsync(_sessionId, bobMessage);
             await _aliceSessionManager.ReceiveMessageAsync(_sessionId, bobEncrypted);
         }
         
@@ -250,13 +250,13 @@ public class DirectSessionManagerTests
         
         // Act: Alice sends three messages to Bob
         var aliceMsg1 = new Plaintext(System.Text.Encoding.UTF8.GetBytes("Message 1"));
-        var (_, encryptedMsg1) = await _aliceSessionManager.EncryptMessageAsync(_sessionId, aliceMsg1);
+        var encryptedMsg1 = await _aliceSessionManager.EncryptMessageAsync(_sessionId, aliceMsg1);
 
         var aliceMsg2 = new Plaintext(System.Text.Encoding.UTF8.GetBytes("Message 2"));
-        var (_, encryptedMsg2) = await _aliceSessionManager.EncryptMessageAsync(_sessionId, aliceMsg2);
+        var encryptedMsg2 = await _aliceSessionManager.EncryptMessageAsync(_sessionId, aliceMsg2);
 
         var aliceMsg3 = new Plaintext(System.Text.Encoding.UTF8.GetBytes("Message 3"));
-        var (_, encryptedMsg3) = await _aliceSessionManager.EncryptMessageAsync(_sessionId, aliceMsg3);
+        var encryptedMsg3 = await _aliceSessionManager.EncryptMessageAsync(_sessionId, aliceMsg3);
 
         // Act: Bob receives them out of order (3, then 1, then 2)
         var decryptedMsg3 = await _bobSessionManager.ReceiveMessageAsync(_sessionId, encryptedMsg3);

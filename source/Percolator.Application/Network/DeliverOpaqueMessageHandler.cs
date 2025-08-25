@@ -14,17 +14,20 @@ namespace Percolator.Application.Network
         private readonly IDirectSessionManager _sessionManager;
         private readonly IPeerConnectionRepository _peerConnectionRepository;
         private readonly IMediator _mediator;
+        private readonly IRemotePeerResolver _remotePeerResolver;
 
         public DeliverOpaqueMessageHandler(
             ILogger<DeliverOpaqueMessageHandler> logger,
             IDirectSessionManager sessionManager,
             IPeerConnectionRepository peerConnectionRepository,
-            IMediator mediator)
+            IMediator mediator,
+            IRemotePeerResolver remotePeerResolver)
         {
             _logger = logger;
             _sessionManager = sessionManager;
             _peerConnectionRepository = peerConnectionRepository;
             _mediator = mediator;
+            _remotePeerResolver = remotePeerResolver;
         }
 
         public async Task<DeliverOpaqueMessageResult> Handle(DeliverOpaqueMessageCommand request, CancellationToken cancellationToken)
@@ -102,7 +105,9 @@ namespace Percolator.Application.Network
 
         private async Task<InternalEnvelope?> HandleDhtMessageAsync(DhtEnvelope dhtEnvelope, SessionId sessionId, CancellationToken ct)
         {
-            var remotePeerId = await _sessionManager.GetRemotePeerIdFromDirectMessage(sessionId);
+            // Resolve the remote peer deterministically from the session's conversation
+            var remotePeerId = await _remotePeerResolver.ResolveFromSession(sessionId);
+            _logger.LogInformation("Resolved remote peer {PeerId} for session {SessionId}", remotePeerId, sessionId);
             var connectionInfo = await _peerConnectionRepository.GetByIdAsync(new Percolator.Network.PeerId(remotePeerId.Value));
             if (connectionInfo?.GrpcEndPoints.FirstOrDefault() is null)
             {
@@ -116,6 +121,7 @@ namespace Percolator.Application.Network
             }
 
             var endpoint = connectionInfo.GrpcEndPoints.First().EndPoint;
+            _logger.LogInformation("Using endpoint {Endpoint} for peer {PeerId}", endpoint, remotePeerId);
 
             switch (dhtEnvelope.MessageCase)
             {
@@ -153,7 +159,7 @@ namespace Percolator.Application.Network
         private async Task<byte[]> EncryptResponseEnvelope(SessionId sessionId, InternalEnvelope internalEnvelope)
         {
             var plaintext = new Plaintext(internalEnvelope.ToByteArray());
-            var (_, ratchetMessage) = await _sessionManager.EncryptMessageAsync(sessionId, plaintext);
+            var ratchetMessage = await _sessionManager.EncryptMessageAsync(sessionId, plaintext);
             return ratchetMessage.Value;
         }
     }

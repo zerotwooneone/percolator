@@ -29,7 +29,6 @@ namespace Percolator.Application.Sessions
         private readonly IX3DHOrchestrator _orchestrator;
         private readonly IDirectSessionManager _sessionManager;
         private readonly IConversationRepository _conversationRepository;
-        private readonly IPeerRepository _peerRepository;
         private readonly IOneTimeKeyProvider _oneTimeKeyProvider;
         private readonly ActiveIdentityContext _activeIdentityContext;
         private readonly IGrpcSessionService _grpcSessionService;
@@ -42,7 +41,6 @@ namespace Percolator.Application.Sessions
             IX3DHOrchestrator orchestrator,
             IDirectSessionManager sessionManager,
             IConversationRepository conversationRepository,
-            IPeerRepository peerRepository,
             IOneTimeKeyProvider oneTimeKeyProvider,
             ActiveIdentityContext activeIdentityContext,
             IGrpcSessionService grpcSessionService, 
@@ -54,7 +52,6 @@ namespace Percolator.Application.Sessions
             _orchestrator = orchestrator;
             _sessionManager = sessionManager;
             _conversationRepository = conversationRepository;
-            _peerRepository = peerRepository;
             _oneTimeKeyProvider = oneTimeKeyProvider;
             _activeIdentityContext = activeIdentityContext;
             _grpcSessionService = grpcSessionService;
@@ -63,23 +60,13 @@ namespace Percolator.Application.Sessions
             _transportOptions = transportOptions;
         }
 
-        
-
         public async Task<ConversationId?> GetExistingDirectConversationAsync(
-            DnsEndPoint endpoint,
-            string remotePeerName)
+            Peer remotePeer)
         {
-            var remotePeer = await _peerRepository.GetByNameAsync(remotePeerName);
-            if (remotePeer == null)
-            {
-                _logger.LogInformation("Didn't find peer {PeerName}", remotePeerName);
-                return null;
-            }
-
             var peerConnection = await _peerConnectionRepository.GetByIdAsync(new NetworkPeerId(remotePeer.Id.Value));
             if (peerConnection is null)
             {
-                _logger.LogInformation("Didn't find connection info for Peer {PeerName} with ID {PeerId}", remotePeerName, remotePeer.Id.Value);
+                _logger.LogInformation("Didn't find connection info for Peer {PeerName} with ID {PeerId}", remotePeer.Name, remotePeer.Id.Value);
                 return null;
             }
 
@@ -88,11 +75,11 @@ namespace Percolator.Application.Sessions
                 var conversation = await _conversationRepository.GetByChannelIdAsync(new ChannelId(peerConnection.IdentitySigningKey.Value));
                 if (conversation == null)
                 {
-                    _logger.LogInformation("Didn't find direct conversation with {PeerName} with channel ID {ChannelId}", remotePeerName, Convert.ToBase64String(peerConnection.IdentitySigningKey.Value));
+                    _logger.LogInformation("Didn't find direct conversation with {PeerName} with channel ID {ChannelId}", remotePeer.Name, Convert.ToBase64String(peerConnection.IdentitySigningKey.Value));
                     return null;
                 }
 
-                _logger.LogInformation("Existing conversation with {PeerName} found. Reusing conversation {ConversationId}", remotePeerName, conversation.Id.Value);
+                _logger.LogInformation("Existing conversation with {PeerName} found. Reusing conversation {ConversationId}", remotePeer.Name, conversation.Id.Value);
                 return conversation.Id;
             }
 
@@ -101,16 +88,13 @@ namespace Percolator.Application.Sessions
 
         public async Task<ConversationId> CreateNewDirectConversationAsync(
             DnsEndPoint endpoint,
-            string remotePeerName)
+            Peer remotePeer)
         {
-            var remotePeer = await _peerRepository.GetByNameAsync(remotePeerName);
+            
             try
             {
-                _logger.LogInformation("Creating direct conversation with {PeerName} at {Endpoint}", remotePeerName,
+                _logger.LogInformation("Creating direct conversation with {PeerName} at {Endpoint}", remotePeer.Name,
                     endpoint);
-
-                // Create ephemeral key for this handshake
-                var oneTimePreKey = _oneTimeKeyProvider.PopOneTimeKey();
 
                 // Verify identity and keys are available
                 if (_activeIdentityContext.Identity == null || _activeIdentityContext.Keys == null)
@@ -137,6 +121,7 @@ namespace Percolator.Application.Sessions
                     "Initiating handshake with keys - SignedPreKey length: {Length}, Signature length: {SigLength}",
                     signedPreKeyPublicBytes.Length, signedPayloadBytes.Value.Length);
 
+                var oneTimePreKey = _oneTimeKeyProvider.PopOneTimeKey();
                 var request = new EstablishDirectSessionRequest
                 {
                     InitiatorBundle = new ContractsPreKeyBundle
@@ -178,42 +163,34 @@ namespace Percolator.Application.Sessions
                     oneTimePreKey
                 );
                 _logger.LogInformation("Handshake completed locally as Responder");
-
-                // Get or create the peer
-                if (remotePeer == null)
+                
+                // Upsert connection details even when the peer already existed
+                var netPeerId = new NetworkPeerId(remotePeer.Id.Value);
+                var peerConnection = await _peerConnectionRepository.GetByIdAsync(netPeerId);
+                if (peerConnection is null)
                 {
-                    remotePeer = await CreatePeerAsync(remotePeerName, handshakeResult.ResponderBundle, endpoint);
+                    var now = DateTimeOffset.UtcNow;
+                    peerConnection = new PeerConnection(
+                        netPeerId,
+                        new DirectMessagePublicKey(handshakeResult.ResponderBundle.IdentitySigningKey.Value),
+                        new List<GrpcEndPoint> { new(endpoint, now) },
+                        Array.Empty<TlsCertificate>(),
+                        now);
+                    await _peerConnectionRepository.SaveAsync(peerConnection);
                 }
                 else
                 {
-                    // Upsert connection details even when the peer already existed
-                    var netPeerId = new NetworkPeerId(remotePeer.Id.Value);
-                    var peerConnection = await _peerConnectionRepository.GetByIdAsync(netPeerId);
-                    if (peerConnection is null)
+                    // Ensure identity key and endpoint are populated
+                    if (peerConnection.IdentitySigningKey is null ||
+                        !peerConnection.IdentitySigningKey.Value.SequenceEqual(handshakeResult.ResponderBundle.IdentitySigningKey.Value))
                     {
-                        var now = DateTimeOffset.UtcNow;
-                        peerConnection = new PeerConnection(
-                            netPeerId,
-                            new DirectMessagePublicKey(handshakeResult.ResponderBundle.IdentitySigningKey.Value),
-                            new List<GrpcEndPoint> { new(endpoint, now) },
-                            Array.Empty<TlsCertificate>(),
-                            now);
-                        await _peerConnectionRepository.SaveAsync(peerConnection);
+                        peerConnection.SetDirectMessagePublicKey(new DirectMessagePublicKey(handshakeResult.ResponderBundle.IdentitySigningKey.Value));
                     }
-                    else
+                    if (!peerConnection.GrpcEndPoints.Any(e => e.EndPoint.Host.Equals(endpoint.Host, StringComparison.OrdinalIgnoreCase) && e.EndPoint.Port == endpoint.Port))
                     {
-                        // Ensure identity key and endpoint are populated
-                        if (peerConnection.IdentitySigningKey is null ||
-                            !peerConnection.IdentitySigningKey.Value.SequenceEqual(handshakeResult.ResponderBundle.IdentitySigningKey.Value))
-                        {
-                            peerConnection.SetDirectMessagePublicKey(new DirectMessagePublicKey(handshakeResult.ResponderBundle.IdentitySigningKey.Value));
-                        }
-                        if (!peerConnection.GrpcEndPoints.Any(e => e.EndPoint.Host.Equals(endpoint.Host, StringComparison.OrdinalIgnoreCase) && e.EndPoint.Port == endpoint.Port))
-                        {
-                            peerConnection.AddGrpcEndPoint(new GrpcEndPoint(endpoint, DateTimeOffset.UtcNow));
-                        }
-                        await _peerConnectionRepository.SaveAsync(peerConnection);
+                        peerConnection.AddGrpcEndPoint(new GrpcEndPoint(endpoint, DateTimeOffset.UtcNow));
                     }
+                    await _peerConnectionRepository.SaveAsync(peerConnection);
                 }
 
                 // Create a new conversation
@@ -222,7 +199,7 @@ namespace Percolator.Application.Sessions
                     new ChannelId(handshakeResult.ResponderBundle.IdentitySigningKey.Value),
                     new List<ChatParticipantId> { new(_activeIdentityContext.Identity!.Id), new(remotePeer.Id.Value) },
                     new List<Message>(),
-                    remotePeerName);
+                    remotePeer.Name);
 
                 _logger.LogInformation("Creating conversation {ConversationId} with channel ID {ChannelId}", conversation.Id.Value, Convert.ToBase64String(conversation.ChannelId.Value));
                 await _conversationRepository.AddAsync(conversation);
@@ -244,24 +221,9 @@ namespace Percolator.Application.Sessions
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to establish direct conversation with {PeerName}", remotePeerName);
+                _logger.LogError(ex, "Failed to establish direct conversation with {PeerName}", remotePeer.Name);
                 throw;
             }
-        }
-
-        private async Task<Peer> CreatePeerAsync(string name, X3dPreKeyBundle preKeyBundle, DnsEndPoint endpoint)
-        {
-            var newPeer = new IdentityPeer(new IdentityPeerId(Guid.NewGuid()), name);
-            await _peerRepository.AddAsync(newPeer);
-            var networkPeerId = new NetworkPeerId(newPeer.Id.Value);
-            var timeStamp=DateTime.UtcNow;
-            var peerConnection = new PeerConnection(
-                networkPeerId, 
-                new DirectMessagePublicKey( preKeyBundle.IdentitySigningKey.Value), 
-                new List<GrpcEndPoint>{new GrpcEndPoint(endpoint,timeStamp)},
-                new List<TlsCertificate>(),timeStamp);
-            await _peerConnectionRepository.SaveAsync(peerConnection);
-            return newPeer;
         }
     }
 }

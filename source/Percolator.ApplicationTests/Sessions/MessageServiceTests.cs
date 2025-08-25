@@ -123,7 +123,7 @@ public class MessageServiceTests
         _mockSessionStore.Setup(s => s.GetSessionStateAsync(sessionId)).ReturnsAsync(dummySessionState);
 
         // Act
-        await _messageService.SendDirectMessageAsync(conversationId, "Hello");
+        await _messageService.SendDirectMessageAsync(conversationId, "Hello",remotePeerId);
 
         // Assert
         _mockTransportService.Verify(t => t.SendMessageAsync(

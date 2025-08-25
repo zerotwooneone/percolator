@@ -43,7 +43,8 @@ public class MessageService : IMessageService
 
     public async Task SendDirectMessageAsync(
         ChatConversationId conversationId, 
-        string content)
+        string content,
+        IdentityPeerId remotePeerId)
     {
         if (_activeIdentityContext.Identity is null)
         {
@@ -84,13 +85,11 @@ public class MessageService : IMessageService
         var plaintext = new Plaintext(internalEnvelope.ToByteArray());
 
         // Encrypt message using Double Ratchet
-        var (remotePeerId, encryptedMessage) = await _sessionManager.EncryptMessageAsync(new SessionId(conversationId.Value), plaintext);
+        var encryptedMessage = await _sessionManager.EncryptMessageAsync(new SessionId(conversationId.Value), plaintext);
         
-        var identityRemotePeerId = new IdentityPeerId(remotePeerId.Value);
-
         // Send encrypted message using gRPC
         await _transportService.SendMessageAsync(
-            identityRemotePeerId,
+            remotePeerId,
             conversationId,
             encryptedMessage);
         
