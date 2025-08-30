@@ -10,6 +10,7 @@ using IdentityPeerId = Percolator.Identity.PeerId;
 using Percolator.Contracts;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
+using Percolator.Network;
 
 namespace Percolator.Application.Sessions;
 
@@ -24,6 +25,7 @@ public class MessageService : IMessageService
     private readonly ILogger<MessageService> _logger;
     private readonly ActiveIdentityContext _activeIdentityContext;
     private readonly IDoubleRatchetSessionStore _sessionStore;
+    private readonly IDirectSessionRepository _directSessionRepository;
 
     public MessageService(
         IDirectSessionManager sessionManager,
@@ -31,7 +33,8 @@ public class MessageService : IMessageService
         IConversationRepository conversationRepository,
         ILogger<MessageService> logger,
         ActiveIdentityContext activeIdentityContext,
-        IDoubleRatchetSessionStore sessionStore)
+        IDoubleRatchetSessionStore sessionStore,
+        IDirectSessionRepository directSessionRepository)
     {
         _sessionManager = sessionManager;
         _transportService = transportService;
@@ -39,6 +42,7 @@ public class MessageService : IMessageService
         _logger = logger;
         _activeIdentityContext = activeIdentityContext;
         _sessionStore = sessionStore;
+        _directSessionRepository = directSessionRepository;
     }
 
     public async Task SendDirectMessageAsync(
@@ -94,7 +98,7 @@ public class MessageService : IMessageService
             encryptedMessage);
         
         // Record message in local conversation
-        var senderParticipantId = new ChatParticipantId(_activeIdentityContext.Identity.Id);
+        var selfParticipantId = new ChatParticipantId(_activeIdentityContext.Identity.Id);
         var remoteParticipantId = new ChatParticipantId(remotePeerId.Value);
         
         // Get or create conversation
@@ -106,22 +110,22 @@ public class MessageService : IMessageService
             conversation = new Conversation(
                 conversationId,
                 new ChannelId(sessionState.TheirIdentityPublicKey.Value), // Generate a new channel ID for this conversation
-                new List<ChatParticipantId> { senderParticipantId, remoteParticipantId },
+                new List<ChatParticipantId> { selfParticipantId, remoteParticipantId },
                 new List<Message>(),
                 null // No name for direct conversations
             );
             
             // Add the message to the conversation
             _logger.LogInformation("Adding message to NEW conversation {ConversationId} with channel ID {ChannelId}", conversationId, Convert.ToBase64String(sessionState.TheirIdentityPublicKey.Value));
-            conversation.AddMessage(senderParticipantId, content);
+            conversation.AddMessage(selfParticipantId, content);
             await _conversationRepository.AddAsync(conversation);
         }
         else
         {
-            conversation.AddMessage(senderParticipantId, content);
+            conversation.AddMessage(selfParticipantId, content);
             _logger.LogInformation("Adding message to conversation {ConversationId} with channel ID {ChannelId}", conversationId, Convert.ToBase64String(sessionState.TheirIdentityPublicKey.Value));
             await _conversationRepository.UpdateAsync(conversation);
         }
-        
+        await _directSessionRepository.UpsertAsync(new Percolator.Network.PeerId(remoteParticipantId.Value), new DirectSessionId(conversation.Id.Value));
     }
 }

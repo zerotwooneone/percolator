@@ -10,6 +10,7 @@ using Percolator.Chat.ValueObjects;
 using Percolator.Cryptography;
 using Percolator.Identity;
 using Percolator.Identity.Model;
+using Percolator.Network;
 using ChatConversationId = Percolator.Chat.ValueObjects.ConversationId;
 using IdentityPeerId = Percolator.Identity.PeerId;
 using ChatParticipantId = Percolator.Chat.ValueObjects.ParticipantId;
@@ -27,6 +28,7 @@ public class MessageServiceTests
     private DirectSessionManager _sessionManager = null!;
     private MessageService _messageService = null!;
     private IOptions<CryptographyOptions> _options = null!;
+    private Mock<IDirectSessionRepository> _mockDirectSessionRepository;
 
     [SetUp]
     public void SetUp()
@@ -37,6 +39,7 @@ public class MessageServiceTests
         _activeIdentityContext = new ActiveIdentityContext();
         _mockSessionStore = new Mock<IDoubleRatchetSessionStore>();
         _options = Options.Create(new CryptographyOptions());
+        _mockDirectSessionRepository = new Mock<IDirectSessionRepository>();
 
         // Create a logger factory for DirectSessionManager
         var loggerFactory = new NullLoggerFactory();
@@ -55,7 +58,8 @@ public class MessageServiceTests
             _mockConversationRepository.Object,
             new NullLogger<MessageService>(),
             _activeIdentityContext,
-            _mockSessionStore.Object);
+            _mockSessionStore.Object,
+            _mockDirectSessionRepository.Object);
 
         // Default transport behavior for tests: return a response when sending
         _mockTransportService

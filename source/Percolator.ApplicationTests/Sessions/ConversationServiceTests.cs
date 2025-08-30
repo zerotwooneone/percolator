@@ -42,6 +42,7 @@ public class ConversationServiceTests
     private ILogger<ConversationService> _testLogger;
     private ActiveIdentityContext _activeIdentityContext;
     private ConversationService _service;
+    private Mock<IDirectSessionRepository> _mockDirectSessionRepository;
 
     [SetUp]
     public void Setup()
@@ -55,6 +56,7 @@ public class ConversationServiceTests
         _mockPeerTrustManager = new Mock<IPeerTrustManager>();
         _mockTlsHandshakeService = new Mock<ITlsHandshakeService>();
         _mockGrpcSessionService = new Mock<IGrpcSessionService>();
+        _mockDirectSessionRepository = new Mock<IDirectSessionRepository>();
         _testLogger = NullLogger<ConversationService>.Instance;
         _activeIdentityContext = new ActiveIdentityContext
         {
@@ -76,7 +78,8 @@ public class ConversationServiceTests
             _mockGrpcSessionService.Object, 
             new X3DHManager(NullLogger<X3DHManager>.Instance, Options.Create(new CryptographyOptions())), 
             _mockPeerConnectionRepository.Object,
-            Options.Create(new TransportOptions { GrpcPort = 52382 })
+            Options.Create(new TransportOptions { GrpcPort = 52382 }),
+            _mockDirectSessionRepository.Object
         );
     }
 

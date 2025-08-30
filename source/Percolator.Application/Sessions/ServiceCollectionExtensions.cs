@@ -9,7 +9,6 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IDirectSessionManager, DirectSessionManager>();
         services.AddSingleton<IConversationService, ConversationService>();
         services.AddSingleton<IMessageService, MessageService>();
-        services.AddSingleton<IRemotePeerResolver, RemotePeerResolver>();
 
         return services;
     }

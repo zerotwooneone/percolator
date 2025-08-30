@@ -29,7 +29,7 @@ public class DhtIntegrationTests : IntegrationTestBase
         var dhtRepositoryMock = new Mock<IDhtNodeRepository>();
         var sessionManagerMock = new Mock<IDirectSessionManager>();
         var peerConnectionRepoMock = new Mock<IPeerConnectionRepository>();
-        var remotePeerResolverMock = new Mock<IRemotePeerResolver>();
+        var directSessionRepoMock = new Mock<IDirectSessionRepository>();
 
         // Mocks for unused dependencies to allow the host to build
         var x3dhOrchestratorMock = new Mock<IX3DHOrchestrator>();
@@ -46,7 +46,7 @@ public class DhtIntegrationTests : IntegrationTestBase
             services.AddSingleton<IDhtNodeRepository>(dhtRepositoryMock.Object);
             services.AddSingleton<IDirectSessionManager>(sessionManagerMock.Object);
             services.AddSingleton<IPeerConnectionRepository>(peerConnectionRepoMock.Object);
-            services.AddSingleton<IRemotePeerResolver>(remotePeerResolverMock.Object);
+            services.AddSingleton<IDirectSessionRepository>(directSessionRepoMock.Object);
             services.AddSingleton<IX3DHOrchestrator>(x3dhOrchestratorMock.Object);
             services.AddSingleton<IConversationRepository>(conversationRepoMock.Object);
             services.AddSingleton<IPeerRepository>(peerRepoMock.Object);
@@ -72,9 +72,9 @@ public class DhtIntegrationTests : IntegrationTestBase
         sessionManagerMock.Setup(s => s.ReceiveMessageAsync(sessionId, It.IsAny<SessionRatchetMessage>()))
             .Returns(Task.FromResult<Plaintext?>(new Plaintext(internalEnvelope.ToByteArray())));
 
-        // 2. Mock the remote peer resolver to return the peer ID
-        remotePeerResolverMock.Setup(r => r.ResolveFromSession(sessionId))
-            .ReturnsAsync(remotePeerId);
+        // 2. Mock the direct session repository to map session to remote peer
+        directSessionRepoMock.Setup(r => r.GetBySessionIdAsync(new DirectSessionId(sessionId.Value)))
+            .ReturnsAsync(new DirectSession(new NetworkPeerId(remotePeerId.Value), new DirectSessionId(sessionId.Value)));
 
         // 3. Mock the peer connection repository to return connection info
         var networkPeerId = new NetworkPeerId(remotePeerId.Value);
@@ -115,6 +115,7 @@ public class DhtIntegrationTests : IntegrationTestBase
         var dhtNodeRepoMock = new Mock<IDhtNodeRepository>();
         var sessionManagerMock = new Mock<IDirectSessionManager>();
         var peerConnectionRepoMock = new Mock<IPeerConnectionRepository>();
+        var directSessionRepoMock = new Mock<IDirectSessionRepository>();
 
         var port = GetAvailablePort();
         using var host = CreateHost(port, "DhtTest", services =>
@@ -122,6 +123,7 @@ public class DhtIntegrationTests : IntegrationTestBase
             services.AddSingleton(dhtNodeRepoMock.Object);
             services.AddSingleton(sessionManagerMock.Object);
             services.AddSingleton(peerConnectionRepoMock.Object);
+            services.AddSingleton(directSessionRepoMock.Object);
             services.AddSingleton<IDhtService, DhtService>();
             services.AddSingleton(new Mock<IConversationRepository>().Object);
             services.AddMediatR(cfg =>
@@ -141,6 +143,10 @@ public class DhtIntegrationTests : IntegrationTestBase
 
         sessionManagerMock.Setup(s => s.ReceiveMessageAsync(It.Is<SessionId>(sid => sid == sessionId), It.IsAny<SessionRatchetMessage>()))
             .ReturnsAsync(new Plaintext(internalEnvelope.ToByteArray()));
+
+        // 2. Mock the direct session repository to map session to remote peer
+        directSessionRepoMock.Setup(r => r.GetBySessionIdAsync(new DirectSessionId(sessionId.Value)))
+            .ReturnsAsync(new DirectSession(new NetworkPeerId(remotePeerId.Value), new DirectSessionId(sessionId.Value)));
 
         // 3. Mock the peer connection repository to return connection info for the remote peer
         var networkPeerId = new NetworkPeerId(remotePeerId.Value);

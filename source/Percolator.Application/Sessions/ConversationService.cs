@@ -35,6 +35,7 @@ namespace Percolator.Application.Sessions
         private readonly IX3DHManager _x3DhManager;
         private readonly IPeerConnectionRepository _peerConnectionRepository;
         private readonly IOptions<TransportOptions> _transportOptions;
+        private readonly IDirectSessionRepository _directSessionRepository;
 
         public ConversationService(
             ILogger<ConversationService> logger,
@@ -46,7 +47,8 @@ namespace Percolator.Application.Sessions
             IGrpcSessionService grpcSessionService, 
             IX3DHManager x3DhManager, 
             IPeerConnectionRepository peerConnectionRepository,
-            IOptions<TransportOptions> transportOptions)
+            IOptions<TransportOptions> transportOptions,
+            IDirectSessionRepository directSessionRepository)
         {
             _logger = logger;
             _orchestrator = orchestrator;
@@ -58,6 +60,7 @@ namespace Percolator.Application.Sessions
             _x3DhManager = x3DhManager;
             _peerConnectionRepository = peerConnectionRepository;
             _transportOptions = transportOptions;
+            _directSessionRepository = directSessionRepository;
         }
 
         public async Task<ConversationId?> GetExistingDirectConversationAsync(
@@ -213,6 +216,9 @@ namespace Percolator.Application.Sessions
                         .ResponderPrivateKeyUsed, // The specific one of OUR (Bob's) private keys that was used
                     new SharedSecret(handshakeResult.SharedSecret.Value)
                 );
+
+                // Persist mapping from conversation/session to remote peer for future routing
+                await _directSessionRepository.UpsertAsync(new NetworkPeerId(remotePeer.Id.Value), new DirectSessionId(conversation.Id.Value));
 
                 _logger.LogInformation("Successfully established session and created conversation {ConversationId}",
                     conversation.Id);

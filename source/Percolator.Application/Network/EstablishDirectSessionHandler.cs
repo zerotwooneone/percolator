@@ -31,6 +31,7 @@ namespace Percolator.Application.Network
         private readonly IPeerRepository _peerRepository;
         private readonly IPeerConnectionRepository _peerConnectionRepository;
         private readonly IX3DHManager _x3DhManager;
+        private readonly IDirectSessionRepository _directSessionRepository;
 
         public EstablishDirectSessionHandler(
             ILogger<EstablishDirectSessionHandler> logger,
@@ -40,7 +41,8 @@ namespace Percolator.Application.Network
             IConversationRepository conversationRepository,
             IPeerRepository peerRepository,
             IPeerConnectionRepository peerConnectionRepository,
-            IX3DHManager x3DhManager)
+            IX3DHManager x3DhManager,
+            IDirectSessionRepository directSessionRepository)
         {
             _logger = logger;
             _activeIdentityContext = activeIdentityContext;
@@ -50,6 +52,7 @@ namespace Percolator.Application.Network
             _peerRepository = peerRepository;
             _peerConnectionRepository = peerConnectionRepository;
             _x3DhManager = x3DhManager;
+            _directSessionRepository = directSessionRepository;
         }
 
         public async Task<EstablishDirectSessionResult> Handle(EstablishDirectSessionCommand request, CancellationToken cancellationToken)
@@ -117,13 +120,13 @@ namespace Percolator.Application.Network
             _logger.LogInformation("X3DH handshake processed successfully as Initiator");
 
             var identityPeerId = new IdentityPeerId(peerConnectionInfo.Id.Value);
-            var peer = await _peerRepository.GetByIdAsync(identityPeerId);
-            if (peer is null)
+            var remotePeer = await _peerRepository.GetByIdAsync(identityPeerId);
+            if (remotePeer is null)
             {
                 _logger.LogInformation("Peer with key hash {KeyHash} is unknown. Creating a new peer record", Convert.ToBase64String(request.IdentitySigningKeyBytes));
                 var newPeerName = $"Peer-{Convert.ToBase64String(request.IdentitySigningKeyBytes)}";
-                peer = new IdentityPeer(identityPeerId, newPeerName);
-                await _peerRepository.AddAsync(peer);
+                remotePeer = new IdentityPeer(identityPeerId, newPeerName);
+                await _peerRepository.AddAsync(remotePeer);
             }
 
             // Now that the Peer exists, persist/update the PeerConnection
@@ -138,7 +141,7 @@ namespace Percolator.Application.Network
                 var participants = new List<ChatParticipantId>
                 {
                     new(_activeIdentityContext.Identity.Id),
-                    new(peer.Id.Value)
+                    new(remotePeer.Id.Value)
                 };
 
                 _logger.LogInformation("Creating new conversation with participants  {Participants} channel ID {ChannelId}", string.Join(", ", participants), Convert.ToBase64String(channelId.Value));
@@ -148,10 +151,11 @@ namespace Percolator.Application.Network
                     channelId,
                     participants,
                     new List<Message>(),
-                    peer.Name);
+                    remotePeer.Name);
 
+                await _directSessionRepository.UpsertAsync(new NetworkPeerId(remotePeer.Id.Value), new DirectSessionId(conversation.Id.Value));
                 await _conversationRepository.AddAsync(conversation);
-                _logger.LogInformation("Created new conversation with peer {PeerName}", peer.Name);
+                _logger.LogInformation("Created new conversation with peer {PeerName}", remotePeer.Name);
 
                 var cryptoSessionId = new SessionId(conversation.Id.Value);
                 await _sessionManager.EstablishSessionAsInitiatorAsync(
@@ -161,7 +165,7 @@ namespace Percolator.Application.Network
                     new RatchetEphemeralKey(request.PreKeyBytes),
                     sharedSecret,
                     ephemeralKey);
-                _logger.LogInformation("Successfully established session {SessionId} with peer {PeerId}", conversation.Id, peer.Id);
+                _logger.LogInformation("Successfully established session {SessionId} with peer {PeerId}", conversation.Id, remotePeer.Id);
             }
 
             // Build response payload and sign

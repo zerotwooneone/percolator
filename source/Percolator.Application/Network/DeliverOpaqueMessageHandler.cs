@@ -14,20 +14,20 @@ namespace Percolator.Application.Network
         private readonly IDirectSessionManager _sessionManager;
         private readonly IPeerConnectionRepository _peerConnectionRepository;
         private readonly IMediator _mediator;
-        private readonly IRemotePeerResolver _remotePeerResolver;
+        private readonly IDirectSessionRepository _directSessionRepository;
 
         public DeliverOpaqueMessageHandler(
             ILogger<DeliverOpaqueMessageHandler> logger,
             IDirectSessionManager sessionManager,
             IPeerConnectionRepository peerConnectionRepository,
             IMediator mediator,
-            IRemotePeerResolver remotePeerResolver)
+            IDirectSessionRepository directSessionRepository)
         {
             _logger = logger;
             _sessionManager = sessionManager;
             _peerConnectionRepository = peerConnectionRepository;
             _mediator = mediator;
-            _remotePeerResolver = remotePeerResolver;
+            _directSessionRepository = directSessionRepository;
         }
 
         public async Task<DeliverOpaqueMessageResult> Handle(DeliverOpaqueMessageCommand request, CancellationToken cancellationToken)
@@ -37,20 +37,6 @@ namespace Percolator.Application.Network
             {
                 var sessionId = new SessionId(request.SessionId);
                 var sessionRatchetMessage = new SessionRatchetMessage(request.PayloadBytes);
-
-                // Optional: version sniffing
-                try
-                {
-                    var protoMessage = Contracts.RatchetMessage.Parser.ParseFrom(request.PayloadBytes);
-                    if (protoMessage.Version > 1)
-                    {
-                        _logger.LogWarning("Received message with newer version {Version} than supported (1)", protoMessage.Version);
-                    }
-                }
-                catch (Google.Protobuf.InvalidProtocolBufferException ex)
-                {
-                    _logger.LogDebug(ex, "Payload not parseable as RatchetMessage; may be legacy frame");
-                }
 
                 var plaintext = await _sessionManager.ReceiveMessageAsync(sessionId, sessionRatchetMessage);
                 if (plaintext is null)
@@ -75,13 +61,14 @@ namespace Percolator.Application.Network
                         break;
                 }
 
-                if (responseEnvelope is not null)
+                if (responseEnvelope is null)
                 {
-                    var responseBytes = await EncryptResponseEnvelope(sessionId, responseEnvelope);
-                    return new DeliverOpaqueMessageResult { ResponsePayloadBytes = responseBytes };
+                    return new DeliverOpaqueMessageResult();
                 }
 
-                return new DeliverOpaqueMessageResult();
+                var responseBytes = await EncryptResponseEnvelope(sessionId, responseEnvelope);
+                return new DeliverOpaqueMessageResult { ResponsePayloadBytes = responseBytes };
+
             }
             catch (Exception ex)
             {
@@ -105,10 +92,16 @@ namespace Percolator.Application.Network
 
         private async Task<InternalEnvelope?> HandleDhtMessageAsync(DhtEnvelope dhtEnvelope, SessionId sessionId, CancellationToken ct)
         {
-            // Resolve the remote peer deterministically from the session's conversation
-            var remotePeerId = await _remotePeerResolver.ResolveFromSession(sessionId);
+            // Resolve the remote peer from the direct session mapping
+            var directSession = await _directSessionRepository.GetBySessionIdAsync(new DirectSessionId(sessionId.Value));
+            if (directSession is null)
+            {
+                _logger.LogWarning("No direct session mapping found for session {SessionId}", sessionId);
+                return null;
+            }
+            var remotePeerId = directSession.RemotePeerId;
             _logger.LogInformation("Resolved remote peer {PeerId} for session {SessionId}", remotePeerId, sessionId);
-            var connectionInfo = await _peerConnectionRepository.GetByIdAsync(new Percolator.Network.PeerId(remotePeerId.Value));
+            var connectionInfo = await _peerConnectionRepository.GetByIdAsync(remotePeerId);
             if (connectionInfo?.GrpcEndPoints.FirstOrDefault() is null)
             {
                 _logger.LogWarning("Could not find connection info for peer {PeerId} to handle DHT message", remotePeerId);

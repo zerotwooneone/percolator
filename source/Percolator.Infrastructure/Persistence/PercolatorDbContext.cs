@@ -20,6 +20,7 @@ public class PercolatorDbContext : DbContext
     public DbSet<PeerConnectionDbo> PeerConnections { get; set; } = null!;
     public DbSet<GrpcEndPointDbo> GrpcEndPoints { get; set; } = null!;
     public DbSet<TlsCertificateDbo> TlsCertificates { get; set; } = null!;
+    public DbSet<DirectSessionDbo> DirectSessions { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -32,6 +33,27 @@ public class PercolatorDbContext : DbContext
 
             entity.Property(e => e.Name).IsRequired();
             entity.HasIndex(e => e.Name).IsUnique();
+        });
+
+        // DirectSession
+        modelBuilder.Entity<DirectSessionDbo>(entity =>
+        {
+            entity.ToTable("DirectSession");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id)
+                .ValueGeneratedOnAdd();
+            entity.Property(e => e.RemotePeerId)
+                .HasConversion(v => v.Value, v => new PeerId(v))
+                .IsRequired();
+            entity.Property(e => e.SessionId)
+                .IsRequired();
+            entity.HasIndex(e => e.RemotePeerId).IsUnique();
+            entity.HasIndex(e => e.SessionId).IsUnique();
+            entity.HasOne<PeerConnectionDbo>()
+                .WithOne()
+                .HasForeignKey<DirectSessionDbo>(e => e.RemotePeerId)
+                .OnDelete(DeleteBehavior.Cascade)
+                .IsRequired();
         });
 
         modelBuilder.Entity<PeerIdentityKeyDbo>(entity =>

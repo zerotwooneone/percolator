@@ -172,11 +172,12 @@ public abstract class IntegrationTestBase
     {
         var host = CreateHost(port, hostType, additionalServiceRegistration);
 
-        // Apply EF Core migrations to ensure the database is up-to-date
+        // Create a clean database directly from the model (tests shouldn't depend on migrations)
         using (var scope = host.Services.CreateScope())
         {
             var dbContext = scope.ServiceProvider.GetRequiredService<PercolatorDbContext>();
-            await dbContext.Database.MigrateAsync();
+            await dbContext.Database.EnsureDeletedAsync();
+            await dbContext.Database.EnsureCreatedAsync();
         }
 
         using (var scope = host.Services.CreateScope())

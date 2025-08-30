@@ -9,6 +9,7 @@ public static class ServiceCollectionExtensions
     {
         services.AddSingleton<IPeerConnectionRepository, SqlitePeerConnectionRepository>();
         services.AddSingleton<ITrustedPeerStore, FileBasedTrustedPeerStore>();
+        services.AddSingleton<IDirectSessionRepository, SqliteDirectSessionRepository>();
         return services;
     }
 }
