@@ -23,6 +23,9 @@ public class PercolatorDbContext : DbContext
     public DbSet<DirectSessionDbo> DirectSessions { get; set; } = null!;
     public DbSet<DoubleRatchetSessionDbo> DoubleRatchetSessions { get; set; } = null!;
     public DbSet<SkippedMessageKeyDbo> SkippedMessageKeys { get; set; } = null!;
+    public DbSet<ConversationDbo> Conversations { get; set; } = null!;
+    public DbSet<MessageDbo> Messages { get; set; } = null!;
+    public DbSet<ConversationParticipantDbo> ConversationParticipants { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -192,6 +195,52 @@ public class PercolatorDbContext : DbContext
             entity.Property(e => e.MessageNumber).IsRequired();
             entity.Property(e => e.MessageKey).IsRequired();
             entity.HasIndex(e => new { e.SessionId, e.RatchetKey, e.MessageNumber }).IsUnique();
+        });
+
+        // Conversations
+        modelBuilder.Entity<ConversationDbo>(entity =>
+        {
+            entity.ToTable("Conversations");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedNever();
+            entity.Property(e => e.ChannelId).IsRequired();
+            entity.Property(e => e.CreatedAt).IsRequired();
+            entity.Property(e => e.UpdatedAt).IsRequired();
+            entity.HasIndex(e => e.ChannelId).IsUnique();
+
+            entity.HasMany(e => e.Messages)
+                .WithOne(m => m.Conversation)
+                .HasForeignKey(m => m.ConversationId)
+                .IsRequired()
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasMany(e => e.Participants)
+                .WithOne(p => p.Conversation)
+                .HasForeignKey(p => p.ConversationId)
+                .IsRequired()
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // Messages
+        modelBuilder.Entity<MessageDbo>(entity =>
+        {
+            entity.ToTable("Messages");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedNever();
+            entity.Property(e => e.ConversationId).IsRequired();
+            entity.Property(e => e.SenderId).IsRequired();
+            entity.Property(e => e.Body).IsRequired();
+            entity.Property(e => e.SentAt).IsRequired();
+            entity.HasIndex(e => new { e.ConversationId, e.SentAt });
+        });
+
+        // ConversationParticipants (composite key)
+        modelBuilder.Entity<ConversationParticipantDbo>(entity =>
+        {
+            entity.ToTable("ConversationParticipants");
+            entity.HasKey(e => new { e.ConversationId, e.ParticipantId });
+            entity.Property(e => e.ConversationId).IsRequired();
+            entity.Property(e => e.ParticipantId).IsRequired();
         });
     }
 }
