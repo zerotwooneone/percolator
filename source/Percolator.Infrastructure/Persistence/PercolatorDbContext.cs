@@ -21,6 +21,8 @@ public class PercolatorDbContext : DbContext
     public DbSet<GrpcEndPointDbo> GrpcEndPoints { get; set; } = null!;
     public DbSet<TlsCertificateDbo> TlsCertificates { get; set; } = null!;
     public DbSet<DirectSessionDbo> DirectSessions { get; set; } = null!;
+    public DbSet<DoubleRatchetSessionDbo> DoubleRatchetSessions { get; set; } = null!;
+    public DbSet<SkippedMessageKeyDbo> SkippedMessageKeys { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -150,6 +152,46 @@ public class PercolatorDbContext : DbContext
             entity.Property(e => e.RawData).IsRequired();
             entity.Property(e => e.RawDataHash).IsRequired();
             entity.HasIndex(e => e.RawDataHash);
+        });
+
+        // DoubleRatchetSession
+        modelBuilder.Entity<DoubleRatchetSessionDbo>(entity =>
+        {
+            entity.ToTable("DoubleRatchetSessions");
+            entity.HasKey(e => e.SessionId);
+            entity.Property(e => e.SessionId)
+                .ValueGeneratedNever();
+
+            entity.Property(e => e.RootKey).IsRequired();
+            entity.Property(e => e.RatchetFlag).IsRequired();
+            entity.Property(e => e.SendingChainKey);
+            entity.Property(e => e.ReceivingChainKey);
+            entity.Property(e => e.SendingCounter).IsRequired();
+            entity.Property(e => e.ReceivingCounter).IsRequired();
+            entity.Property(e => e.PreviousChainLength).IsRequired();
+            entity.Property(e => e.TheirDhRatchetPublicKey);
+            entity.Property(e => e.DhRatchetPrivateKey);
+            entity.Property(e => e.TheirIdentityPublicKey).IsRequired();
+            entity.Property(e => e.UpdatedAt).IsRequired();
+
+            entity.HasMany(e => e.SkippedMessageKeys)
+                .WithOne(k => k.Session)
+                .HasForeignKey(k => k.SessionId)
+                .IsRequired()
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasIndex(e => e.UpdatedAt);
+        });
+
+        // SkippedMessageKey (surrogate PK with uniqueness constraint)
+        modelBuilder.Entity<SkippedMessageKeyDbo>(entity =>
+        {
+            entity.ToTable("SkippedMessageKeys");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.RatchetKey).IsRequired();
+            entity.Property(e => e.MessageNumber).IsRequired();
+            entity.Property(e => e.MessageKey).IsRequired();
+            entity.HasIndex(e => new { e.SessionId, e.RatchetKey, e.MessageNumber }).IsUnique();
         });
     }
 }
