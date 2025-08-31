@@ -6,6 +6,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "SolutionFolder", "SolutionF
 		..\test-grpc-connection.ps1 = ..\test-grpc-connection.ps1
 		..\test-dht-probe.ps1 = ..\test-dht-probe.ps1
 		..\test-dht-probe-with-log.ps1 = ..\test-dht-probe-with-log.ps1
+		plan.md = plan.md
 	EndProjectSection
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Cryptography", "Cryptography", "{D3EFBBDF-641F-4849-8BCB-BFAA7DEA0447}"

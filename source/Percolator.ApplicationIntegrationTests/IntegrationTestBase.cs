@@ -27,6 +27,7 @@ public abstract class IntegrationTestBase
     protected IHost? ReceiverHost { get; set; }
     protected TestLoggerProvider LoggerProvider { get; private set; }
     protected X509Certificate2? TestClientCertificate { get; private set; }
+    private readonly List<string> _createdStoragePaths = new();
 
     [SetUp]
     public virtual async Task SetUpAsync()
@@ -83,6 +84,23 @@ public abstract class IntegrationTestBase
         // Final garbage collection to release any resources
         GC.Collect();
         GC.WaitForPendingFinalizers();
+
+        // Cleanup temp storage directories created for this test run
+        foreach (var dir in _createdStoragePaths)
+        {
+            try
+            {
+                if (Directory.Exists(dir))
+                {
+                    Directory.Delete(dir, recursive: true);
+                }
+            }
+            catch (Exception ex)
+            {
+                TestContext.WriteLine($"Warning: Failed to delete temp directory '{dir}': {ex.Message}");
+            }
+        }
+        _createdStoragePaths.Clear();
     }
 
     protected int GetAvailablePort()
@@ -97,12 +115,19 @@ public abstract class IntegrationTestBase
 
     protected virtual IHost CreateHost(int port, string hostType, Action<IServiceCollection>? additionalServiceRegistration = null)
     {
+        var storagePath = Path.Combine(Path.GetTempPath(), $"PercolatorIntegrationTest_{hostType}_{Guid.NewGuid()}");
+        _createdStoragePaths.Add(storagePath);
+
         var hostBuilder = new HostBuilder()
             .ConfigureAppConfiguration((context, config) =>
             {
                 config.AddInMemoryCollection(new Dictionary<string, string?>
                 {
-                    { "Percolator:DataDirectoryPath", Path.Combine(Path.GetTempPath(), $"PercolatorIntegrationTest_{hostType}_{Guid.NewGuid()}") },
+                    // NOTE: Infrastructure reads Storage:Path (see Percolator.Infrastructure.Identity.ServiceCollectionExtensions)
+                    // Ensure a unique DB directory per host
+                    { "Storage:Path", storagePath },
+                    // Legacy/other configs (kept for completeness; not used by EF)
+                    { "Percolator:DataDirectoryPath", storagePath },
                     { "Percolator:LocalDevelopmentMode", "true" },
                     { "Percolator:Port", port.ToString() },
                     {"Percolator:Cryptography:EnableCryptographicMaterialLogging", "true"},

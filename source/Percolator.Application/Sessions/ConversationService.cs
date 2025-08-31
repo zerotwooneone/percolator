@@ -63,38 +63,33 @@ namespace Percolator.Application.Sessions
             _directSessionRepository = directSessionRepository;
         }
 
-        public async Task<ConversationId?> GetExistingDirectConversationAsync(
+        public async Task<DirectSessionId?> GetExistingDirectConversationAsync(
             Peer remotePeer)
         {
-            var peerConnection = await _peerConnectionRepository.GetByIdAsync(new NetworkPeerId(remotePeer.Id.Value));
-            if (peerConnection is null)
+            if (_activeIdentityContext.Identity is null)
             {
-                _logger.LogInformation("Didn't find connection info for Peer {PeerName} with ID {PeerId}", remotePeer.Name, remotePeer.Id.Value);
+                _logger.LogError("No active identity available");
                 return null;
             }
 
-            if (peerConnection is { IdentitySigningKey: not null })
-            {
-                if (_activeIdentityContext.Identity is null)
-                {
-                    _logger.LogError("No active identity available");
-                    return null;
-                }
-                var conversation = await _conversationRepository.GetByChannelIdAsync(new ChannelId(peerConnection.IdentitySigningKey.Value), _activeIdentityContext.Identity.SelfIdentityId);
-                if (conversation == null)
-                {
-                    _logger.LogInformation("Didn't find direct conversation with {PeerName} with channel ID {ChannelId}", remotePeer.Name, Convert.ToBase64String(peerConnection.IdentitySigningKey.Value));
-                    return null;
-                }
+            // IDirectSessionRepository is the source of truth for mapping a remote peer to a direct session
+            var mapping = await _directSessionRepository.GetByRemotePeerIdAsync(
+                new NetworkPeerId(remotePeer.Id.Value),
+                _activeIdentityContext.Identity.SelfIdentityId);
 
-                _logger.LogInformation("Existing conversation with {PeerName} found. Reusing conversation {ConversationId}", remotePeer.Name, conversation.Id.Value);
-                return conversation.Id;
+            if (mapping is null)
+            {
+                _logger.LogInformation("No existing direct session mapping found for peer {PeerName} ({PeerId})",
+                    remotePeer.Name, remotePeer.Id.Value);
+                return null;
             }
 
-            return null;
+            _logger.LogInformation("Existing direct session with {PeerName} found. Reusing session {SessionId}",
+                remotePeer.Name, mapping.SessionId.Value);
+            return mapping.SessionId;
         }
 
-        public async Task<ConversationId> CreateNewDirectConversationAsync(
+        public async Task<DirectSessionId> CreateNewDirectConversationAsync(
             DnsEndPoint endpoint,
             Peer remotePeer)
         {
@@ -165,6 +160,7 @@ namespace Percolator.Application.Sessions
                 }
                 var responderPayload = EstablishDirectSessionResponse.Types.ResponsePayload.Parser.ParseFrom(response.ResponsePayload.ToByteArray());
 
+                var directSessionId = new DirectSessionId(Guid.Parse(responderPayload.SessionId));
                 var handshakeResult = _orchestrator.CompleteHandshake(
                     new RatchetIdentityKey(response.IdentitySigningKey.ToByteArray()),
                     new RatchetEphemeralKey(responderPayload.EphemeralKey.ToByteArray()),
@@ -203,7 +199,7 @@ namespace Percolator.Application.Sessions
 
                 // Create a new conversation
                 var conversation = new ChatConversation(
-                    new ChatConversationId(Guid.Parse(responderPayload.SessionId)),
+                    new ChatConversationId(directSessionId.Value),
                     new ChannelId(handshakeResult.ResponderBundle.IdentitySigningKey.Value),
                     new List<ChatParticipantId> { new(_activeIdentityContext.Identity!.Id), new(remotePeer.Id.Value) },
                     new List<Message>(),
@@ -223,12 +219,12 @@ namespace Percolator.Application.Sessions
                 );
 
                 // Persist mapping from conversation/session to remote peer for future routing
-                await _directSessionRepository.UpsertAsync(new NetworkPeerId(remotePeer.Id.Value), new DirectSessionId(conversation.Id.Value), _activeIdentityContext.Identity.SelfIdentityId);
+                await _directSessionRepository.UpsertAsync(new NetworkPeerId(remotePeer.Id.Value), directSessionId, _activeIdentityContext.Identity.SelfIdentityId);
 
                 _logger.LogInformation("Successfully established session and created conversation {ConversationId}",
                     conversation.Id);
 
-                return conversation.Id;
+                return directSessionId;
             }
             catch (Exception ex)
             {

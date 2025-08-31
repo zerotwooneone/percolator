@@ -14,6 +14,7 @@ using Percolator.Network;
 using ChatConversationId = Percolator.Chat.ValueObjects.ConversationId;
 using IdentityPeerId = Percolator.Identity.PeerId;
 using ChatParticipantId = Percolator.Chat.ValueObjects.ParticipantId;
+using DirectSessionId = Percolator.Network.DirectSessionId;
 
 namespace Percolator.ApplicationTests.Sessions;
 
@@ -65,7 +66,7 @@ public class MessageServiceTests
         _mockTransportService
             .Setup(t => t.SendMessageAsync(
                 It.IsAny<IdentityPeerId>(),
-                It.IsAny<ChatConversationId>(),
+                It.IsAny<DirectSessionId>(),
                 It.IsAny<SessionRatchetMessage>(),
                 It.IsAny<System.Threading.CancellationToken>()))
             .ReturnsAsync(new Percolator.Contracts.DeliverOpaqueMessageResponse { Version = 1 });
@@ -90,13 +91,13 @@ public class MessageServiceTests
 
         
         var remotePeerId = new IdentityPeerId(Guid.NewGuid());
-        var conversationId = new ChatConversationId(Guid.NewGuid());
+        var directSessionId = new DirectSessionId(Guid.NewGuid());
         var participants = new[]
         {
             new ChatParticipantId(localIdentity.Id),
             new ChatParticipantId(remotePeerId.Value)
         };
-        var conversation = new Conversation(conversationId, new ChannelId(remotePeerId.Value.ToByteArray()), participants.ToList(), new List<Message>());
+        var conversation = new Conversation(new ChatConversationId(directSessionId.Value), new ChannelId(remotePeerId.Value.ToByteArray()), participants.ToList(), new List<Message>());
         
         // Create a valid dummy session state with proper cryptographic keys
         // Generate proper EC keys using nistP256 curve as used in the actual implementation
@@ -119,20 +120,20 @@ public class MessageServiceTests
             SkippedMessageKeys = new Dictionary<SkippedMessageKeyIdentifier, byte[]>()
         };
 
-        _mockConversationRepository.Setup(r => r.GetByIdAsync(It.Is<ChatConversationId>(c => c.Value == conversationId.Value), It.IsAny<int>()))
+        _mockConversationRepository.Setup(r => r.GetByIdAsync(It.Is<ChatConversationId>(c => c.Value == directSessionId.Value), It.IsAny<int>()))
             .ReturnsAsync(conversation);
 
         // Create the SessionId to match how MessageService creates it (directly from conversationId.Value)
-        var sessionId = new SessionId(conversationId.Value);
+        var sessionId = new SessionId(directSessionId.Value);
         _mockSessionStore.Setup(s => s.GetSessionStateAsync(sessionId)).ReturnsAsync(dummySessionState);
 
         // Act
-        await _messageService.SendDirectMessageAsync(conversationId, "Hello",remotePeerId);
+        await _messageService.SendDirectMessageAsync(directSessionId, "Hello", remotePeerId);
 
         // Assert
         _mockTransportService.Verify(t => t.SendMessageAsync(
             It.IsAny<IdentityPeerId>(),
-            It.IsAny<ChatConversationId>(),
+            It.IsAny<DirectSessionId>(),
             It.IsAny<SessionRatchetMessage>(),
             It.IsAny<System.Threading.CancellationToken>()), Times.Once);
     }

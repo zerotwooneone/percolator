@@ -21,6 +21,7 @@ using Percolator.Network;
 using NetworkPeerId = Percolator.Network.PeerId;
 using ChatConversation = Percolator.Chat.Conversation;
 using ChatConversationId = Percolator.Chat.ValueObjects.ConversationId;
+using DirectSessionId = Percolator.Network.DirectSessionId;
 using IdentityPeerId = Percolator.Identity.PeerId;
 using RatchetIdentityKey = Percolator.Cryptography.RatchetIdentityKey;
 using RatchetEphemeralKey = Percolator.Cryptography.RatchetEphemeralKey;
@@ -191,7 +192,7 @@ public class ConversationServiceTests
         var result = await _service.CreateNewDirectConversationAsync(endpoint, peer);
 
         // Assert
-        Assert.That(result, Is.Not.EqualTo(default(ChatConversationId)));
+        Assert.That(result, Is.Not.EqualTo(default(DirectSessionId)));
         _mockConversationRepository.Verify(r => r.AddAsync(It.Is<ChatConversation>(c => c.Name == peer.Name), It.IsAny<int>()), Times.Once);
         _mockDirectSessionManager.Verify(m => m.EstablishSessionAsResponderAsync(
             It.IsAny<Percolator.Cryptography.SessionId>(), 
@@ -296,7 +297,7 @@ public class ConversationServiceTests
         var result = await _service.CreateNewDirectConversationAsync(endpoint, peer);
         
         // Assert
-        Assert.That(result, Is.Not.EqualTo(default(ChatConversationId)));
+        Assert.That(result, Is.Not.EqualTo(default(DirectSessionId)));
         Assert.That(result.Value, Is.EqualTo(sessionId));
         
         // Verify peer connection was saved

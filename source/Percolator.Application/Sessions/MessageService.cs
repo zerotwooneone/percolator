@@ -46,7 +46,7 @@ public class MessageService : IMessageService
     }
 
     public async Task SendDirectMessageAsync(
-        ChatConversationId conversationId, 
+        DirectSessionId directSessionId, 
         string content,
         IdentityPeerId remotePeerId)
     {
@@ -55,18 +55,18 @@ public class MessageService : IMessageService
             throw new InvalidOperationException("Identity context not loaded");
         }
         var selfIdentityId = _activeIdentityContext.Identity.SelfIdentityId;
-        var sessionId = new SessionId(conversationId.Value);
+        var sessionId = new SessionId(directSessionId.Value);
         var sessionState = await _sessionStore.GetSessionStateAsync(sessionId);
         if (sessionState == null)
         {
-            throw new InvalidOperationException($"Double Ratchet session state for conversation {conversationId} not found.");
+            throw new InvalidOperationException($"Double Ratchet session state for conversation {directSessionId} not found.");
         }
 
         if (sessionState.TheirIdentityPublicKey == null)
         {
-            throw new InvalidOperationException($"Double Ratchet session state for conversation {conversationId} does not have their identity public key. There is no channel id for this conversation.");
+            throw new InvalidOperationException($"Double Ratchet session state for conversation {directSessionId} does not have their identity public key. There is no channel id for this conversation.");
         }
-        _logger.LogInformation("Sending message to conversation {ConversationId}", conversationId);
+        _logger.LogInformation("Sending message to conversation {ConversationId}", directSessionId);
        
         // Create a proper InternalEnvelope with a ChatEnvelope containing a TextMessage
         var textMessage = new TextMessage
@@ -90,12 +90,12 @@ public class MessageService : IMessageService
         var plaintext = new Plaintext(internalEnvelope.ToByteArray());
 
         // Encrypt message using Double Ratchet
-        var encryptedMessage = await _sessionManager.EncryptMessageAsync(new SessionId(conversationId.Value), plaintext);
+        var encryptedMessage = await _sessionManager.EncryptMessageAsync(sessionId, plaintext);
         
         // Send encrypted message using gRPC
         await _transportService.SendMessageAsync(
             remotePeerId,
-            conversationId,
+            directSessionId,
             encryptedMessage);
         
         // Record message in local conversation
@@ -103,6 +103,7 @@ public class MessageService : IMessageService
         var remoteParticipantId = new ChatParticipantId(remotePeerId.Value);
         
         // Get or create conversation
+        var conversationId = new ChatConversationId(directSessionId.Value);
         var conversation = await _conversationRepository.GetByIdAsync(conversationId, selfIdentityId);
         if (conversation == null)
         {

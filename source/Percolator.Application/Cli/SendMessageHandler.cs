@@ -2,10 +2,12 @@ using MediatR;
 using Percolator.Application.Sessions;
 using Percolator.Chat.ValueObjects;
 using Percolator.Identity;
+using Percolator.Network;
+using PeerId = Percolator.Identity.PeerId;
 
 namespace Percolator.Application.Cli;
 
-public class SendMessageHandler : IRequestHandler<SendMessageCommand, ConversationId>
+public class SendMessageHandler : IRequestHandler<SendMessageCommand, DirectSessionId>
 {
     private readonly IConversationService _conversationService;
     private readonly IMessageService _messageService;
@@ -21,7 +23,7 @@ public class SendMessageHandler : IRequestHandler<SendMessageCommand, Conversati
         _peerRepository = peerRepository;
     }
 
-    public async Task<ConversationId> Handle(SendMessageCommand request, CancellationToken cancellationToken)
+    public async Task<DirectSessionId> Handle(SendMessageCommand request, CancellationToken cancellationToken)
     {
         var remotePeer = await _peerRepository.GetByNameAsync(request.RemotePeerName);
         if (remotePeer == null)
@@ -30,8 +32,8 @@ public class SendMessageHandler : IRequestHandler<SendMessageCommand, Conversati
             await _peerRepository.AddAsync(remotePeer);
         }
         var existing = await _conversationService.GetExistingDirectConversationAsync(remotePeer);
-        var conversationId = existing ?? await _conversationService.CreateNewDirectConversationAsync(request.Endpoint, remotePeer);
-        await _messageService.SendDirectMessageAsync(conversationId, request.Content, remotePeer.Id);
-        return conversationId;
+        var directSessionId = existing ?? await _conversationService.CreateNewDirectConversationAsync(request.Endpoint, remotePeer);
+        await _messageService.SendDirectMessageAsync(directSessionId, request.Content, remotePeer.Id);
+        return directSessionId;
     }
 }

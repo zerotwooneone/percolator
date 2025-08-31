@@ -34,7 +34,7 @@ public class GrpcMessageTransportService : IMessageTransportService
 
     public async Task<DeliverOpaqueMessageResponse> SendMessageAsync(
         IdentityPeerId recipientPeerId, 
-        ConversationId conversationId,
+        DirectSessionId directSessionId,
         SessionRatchetMessage message,
         CancellationToken cancellationToken = default)
     {
@@ -69,7 +69,7 @@ public class GrpcMessageTransportService : IMessageTransportService
             var request = new DeliverOpaqueMessageRequest
             {
                 Version = 1,
-                SessionId = conversationId.Value.ToString(),
+                SessionId = directSessionId.Value.ToString(),
                 Payload = ByteString.CopyFrom(message.Value)
             };
 
@@ -79,7 +79,7 @@ public class GrpcMessageTransportService : IMessageTransportService
                 message.Value.Length);
                 
             _logger.LogInformation("Sending message to {RecipientPeerId} for conversation {ConversationId}",
-                recipientPeerId, conversationId);
+                recipientPeerId, directSessionId);
             var response = await client.DeliverOpaqueMessageAsync(request, cancellationToken: cancellationToken);
             _logger.LogInformation("Message sent successfully to {RecipientPeerId}. Response version: {Version}",
                 recipientPeerId, response.Version);
@@ -96,7 +96,7 @@ public class GrpcMessageTransportService : IMessageTransportService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to send message to {RecipientPeerId} for conversation {ConversationId}",
-                recipientPeerId, conversationId);
+                recipientPeerId, directSessionId);
             throw;
         }
     }

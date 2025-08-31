@@ -1,7 +1,8 @@
-using Percolator.Identity;
 using Percolator.Chat.ValueObjects;
 using Percolator.Cryptography;
 using Percolator.Contracts;
+using Percolator.Network;
+using PeerId = Percolator.Identity.PeerId;
 
 namespace Percolator.Application.Network;
 
@@ -9,7 +10,7 @@ public interface IMessageTransportService
 {
     Task<DeliverOpaqueMessageResponse> SendMessageAsync(
         PeerId recipientPeerId,
-        ConversationId conversationId,
+        DirectSessionId directSessionId,
         SessionRatchetMessage message,
         CancellationToken cancellationToken = default);
 }

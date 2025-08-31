@@ -8,6 +8,8 @@ using Percolator.Chat.ValueObjects;
 using Percolator.Contracts;
 using Percolator.Cryptography;
 using Percolator.Identity;
+using Percolator.Network;
+using PeerId = Percolator.Identity.PeerId;
 
 namespace Percolator.Application.Cli;
 
@@ -47,14 +49,14 @@ public class DhtProbeHandler : IRequestHandler<DhtProbeCommand, FindNodeResponse
         
         // 1) Ensure conversation by connecting (TOFU etc handled by ConversationService)
         var existing = await _conversationService.GetExistingDirectConversationAsync(remotePeer);
-        var conversationId = existing ?? await _conversationService.CreateNewDirectConversationAsync(request.Endpoint, remotePeer);
+        var directSessionId = existing ?? await _conversationService.CreateNewDirectConversationAsync(request.Endpoint, remotePeer);
 
         // 2) Send Ping (fire-and-forget)
         var pingEnvelope = new InternalEnvelope
         {
             DhtEnvelope = new DhtEnvelope { PingRequest = new PingRequest() }
         };
-        await SendAndReceiveAsync(conversationId, pingEnvelope,remotePeer.Id, cancellationToken);
+        await SendAndReceiveAsync(directSessionId, pingEnvelope,remotePeer.Id, cancellationToken);
 
 
         // 3) Build FindNode with target peer id (use self hashed signing key if unspecified)
@@ -71,7 +73,7 @@ public class DhtProbeHandler : IRequestHandler<DhtProbeCommand, FindNodeResponse
         };
 
         // 4) Send and receive response, decrypt and parse
-        var response = await SendAndReceiveAsync(conversationId, findNodeEnvelope, remotePeer.Id, cancellationToken);
+        var response = await SendAndReceiveAsync(directSessionId, findNodeEnvelope, remotePeer.Id, cancellationToken);
         if (!response.HasResponsePayload)
         {
             _logger.LogInformation("No response payload returned for FindNode.");
@@ -79,7 +81,7 @@ public class DhtProbeHandler : IRequestHandler<DhtProbeCommand, FindNodeResponse
         }
 
         var respRatchet = new SessionRatchetMessage(response.ResponsePayload.ToByteArray());
-        var plaintext = await _sessionManager.ReceiveMessageAsync(new SessionId(conversationId.Value), respRatchet);
+        var plaintext = await _sessionManager.ReceiveMessageAsync(new SessionId(directSessionId.Value), respRatchet);
         if (plaintext is null)
         {
             _logger.LogWarning("Could not decrypt FindNode response payload.");
@@ -113,14 +115,14 @@ public class DhtProbeHandler : IRequestHandler<DhtProbeCommand, FindNodeResponse
     }
 
     private async Task<DeliverOpaqueMessageResponse> SendAndReceiveAsync(
-        ConversationId conversationId, 
+        DirectSessionId directSessionId, 
         InternalEnvelope envelope, 
         PeerId remotePeerId, 
         CancellationToken cancellationToken)
     {
         var plaintext = new Plaintext(envelope.ToByteArray());
-        var ratchetMessage = await _sessionManager.EncryptMessageAsync(new SessionId(conversationId.Value), plaintext);
+        var ratchetMessage = await _sessionManager.EncryptMessageAsync(new SessionId(directSessionId.Value), plaintext);
         _logger.LogInformation("DHT probe sending (with response) to peer {PeerId}", remotePeerId);
-        return await _transport.SendMessageAsync(remotePeerId, conversationId, ratchetMessage, cancellationToken);
+        return await _transport.SendMessageAsync(remotePeerId, directSessionId, ratchetMessage, cancellationToken);
     }
 }

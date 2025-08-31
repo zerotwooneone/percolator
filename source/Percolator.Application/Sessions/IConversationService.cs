@@ -1,6 +1,7 @@
 using System.Net;
 using Percolator.Chat.ValueObjects;
 using Percolator.Identity;
+using Percolator.Network;
 
 namespace Percolator.Application.Sessions;
 
@@ -13,13 +14,13 @@ public interface IConversationService
     /// Attempts to locate an existing direct conversation for the given remote peer.
     /// Returns null if not found.
     /// </summary>
-    Task<ConversationId?> GetExistingDirectConversationAsync(
+    Task<DirectSessionId?> GetExistingDirectConversationAsync(
         Peer remotePeer);
 
     /// <summary>
     /// Creates a new direct conversation (and establishes cryptographic session) with the remote peer.
     /// </summary>
-    Task<ConversationId> CreateNewDirectConversationAsync(
+    Task<DirectSessionId> CreateNewDirectConversationAsync(
         DnsEndPoint endpoint,
         Peer remotePeer);
 }

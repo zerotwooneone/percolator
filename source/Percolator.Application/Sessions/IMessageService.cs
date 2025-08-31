@@ -1,12 +1,13 @@
 using Percolator.Chat.ValueObjects;
-using Percolator.Identity;
+using Percolator.Network;
+using PeerId = Percolator.Identity.PeerId;
 
 namespace Percolator.Application.Sessions;
 
 public interface IMessageService
 {
     Task SendDirectMessageAsync(
-        ConversationId conversationId, 
+        DirectSessionId directSessionId, 
         string content,
         PeerId remotePeerId);
 }

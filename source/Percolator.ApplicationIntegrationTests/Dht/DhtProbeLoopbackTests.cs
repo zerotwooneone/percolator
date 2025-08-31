@@ -70,13 +70,13 @@ public class DhtProbeLoopbackTests : IntegrationTestBase
 
         public async Task<DeliverOpaqueMessageResponse> SendMessageAsync(
             Percolator.Identity.PeerId recipientPeerId,
-            Percolator.Chat.ValueObjects.ConversationId conversationId,
+            Percolator.Network.DirectSessionId directSessionId,
             Percolator.Cryptography.SessionRatchetMessage message,
             CancellationToken cancellationToken = default)
         {
             var request = new DeliverOpaqueMessageRequest
             {
-                SessionId = conversationId.Value.ToString(),
+                SessionId = directSessionId.Value.ToString(),
                 Payload = ByteString.CopyFrom(message.Value)
             };
 
@@ -94,9 +94,9 @@ public class DhtProbeLoopbackTests : IntegrationTestBase
         var serverPeerConnRepo = new Mock<IPeerConnectionRepository>();
         var serverDirectSessionRepo = new Mock<IDirectSessionRepository>();
 
-        // Shared identifiers between client and server for the same conversation
-        var conversationId = Percolator.Chat.ValueObjects.ConversationId.NewId();
-        var sessionId = new SessionId(conversationId.Value);
+        // Shared identifiers between client and server for the same direct session
+        var directSessionId = new Percolator.Network.DirectSessionId(Guid.NewGuid());
+        var sessionId = new SessionId(directSessionId.Value);
 
         // Server Receive: decrypt incoming request to Dht FindNode
         serverSessionManager
@@ -169,7 +169,7 @@ public class DhtProbeLoopbackTests : IntegrationTestBase
 
         clientConversationService
             .Setup(s => s.GetExistingDirectConversationAsync(It.IsAny<Peer>()))
-            .ReturnsAsync(conversationId);
+            .ReturnsAsync(directSessionId);
 
         // Client encrypts request: return an InternalEnvelope with Dht FindNodeRequest directly as bytes
         var findReq = new FindNodeRequest { TargetPeerId = Google.Protobuf.ByteString.CopyFrom(Guid.NewGuid().ToByteArray()) };

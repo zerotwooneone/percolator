@@ -358,8 +358,6 @@ async Task SendCommandHandler(InvocationContext context)
         logger.LogInformation("Sending with Identity: {IdentityName}:{PeerId}", identityName, activeIdentityContext.Identity!.Id);
         var mediator = serviceProvider.GetRequiredService<IMediator>();
 
-        ChatConversationId conversationId;
-       
         if (string.IsNullOrEmpty(endpointString) || string.IsNullOrEmpty(peerName))
         {
             Console.ForegroundColor = ConsoleColor.Red;
@@ -377,10 +375,10 @@ async Task SendCommandHandler(InvocationContext context)
             return;
         }
         
-        conversationId = await mediator.Send(new SendMessageCommand(endpoint, peerName, message), cancellationToken);
+        var directSessionId = await mediator.Send(new SendMessageCommand(endpoint, peerName, message), cancellationToken);
         
         Console.ForegroundColor = ConsoleColor.Green;
-        Console.WriteLine($"Message sent successfully.  conversation {conversationId.Value} with {peerName}");
+        Console.WriteLine($"Message sent successfully.  direct session {directSessionId.Value} with {peerName}");
         Console.ResetColor();
     }
     catch (Exception ex)

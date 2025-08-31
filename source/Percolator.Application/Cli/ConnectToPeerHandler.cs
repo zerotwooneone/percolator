@@ -2,10 +2,12 @@ using MediatR;
 using Percolator.Application.Sessions;
 using Percolator.Chat.ValueObjects;
 using Percolator.Identity;
+using Percolator.Network;
+using PeerId = Percolator.Identity.PeerId;
 
 namespace Percolator.Application.Cli;
 
-public class ConnectToPeerHandler : IRequestHandler<ConnectToPeerCommand, ConversationId>
+public class ConnectToPeerHandler : IRequestHandler<ConnectToPeerCommand, DirectSessionId>
 {
     private readonly IConversationService _conversationService;
     private readonly IPeerRepository _peerRepository;
@@ -18,7 +20,7 @@ public class ConnectToPeerHandler : IRequestHandler<ConnectToPeerCommand, Conver
         _peerRepository = peerRepository;
     }
 
-    public async Task<ConversationId> Handle(ConnectToPeerCommand request, CancellationToken cancellationToken)
+    public async Task<DirectSessionId> Handle(ConnectToPeerCommand request, CancellationToken cancellationToken)
     {
         var remotePeer = await _peerRepository.GetByNameAsync(request.RemotePeerName);
         if (remotePeer == null)
