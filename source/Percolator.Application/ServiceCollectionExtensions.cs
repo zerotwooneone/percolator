@@ -32,7 +32,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ActiveIdentityContext>();
         services.AddSingleton<ISelfIdentityProvider>(s => s.GetRequiredService<ActiveIdentityContext>());
 
-        services.AddSingleton<IIdentityOrchestrator, IdentityOrchestrator>();
+        services.AddScoped<IIdentityOrchestrator, IdentityOrchestrator>();
 
         services.AddChatServices();
 
