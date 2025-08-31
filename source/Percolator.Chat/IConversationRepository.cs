@@ -4,8 +4,8 @@ namespace Percolator.Chat;
 
 public interface IConversationRepository
 {
-    Task<Conversation?> GetByIdAsync(ConversationId id);
-    Task<Conversation?> GetByChannelIdAsync(ChannelId id);
-    Task AddAsync(Conversation conversation);
-    Task UpdateAsync(Conversation conversation);
+    Task<Conversation?> GetByIdAsync(ConversationId id, int selfIdentityId);
+    Task<Conversation?> GetByChannelIdAsync(ChannelId id, int selfIdentityId);
+    Task AddAsync(Conversation conversation, int selfIdentityId);
+    Task UpdateAsync(Conversation conversation, int selfIdentityId);
 }

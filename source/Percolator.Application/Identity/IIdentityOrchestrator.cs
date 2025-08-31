@@ -2,5 +2,5 @@ namespace Percolator.Application.Identity;
 
 public interface IIdentityOrchestrator
 {
-    Task LoadOrCreateIdentityAsync(string identityName, CancellationToken cancellationToken);
+    Task ResolveIdentityAsync(string identityName, CancellationToken cancellationToken);
 }

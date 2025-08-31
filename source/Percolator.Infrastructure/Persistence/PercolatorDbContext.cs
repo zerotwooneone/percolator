@@ -26,6 +26,8 @@ public class PercolatorDbContext : DbContext
     public DbSet<ConversationDbo> Conversations { get; set; } = null!;
     public DbSet<MessageDbo> Messages { get; set; } = null!;
     public DbSet<ConversationParticipantDbo> ConversationParticipants { get; set; } = null!;
+    public DbSet<SelfIdentityDbo> SelfIdentities { get; set; } = null!;
+    public DbSet<SelfIdentityKnownPeerDbo> SelfIdentityKnownPeers { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -40,6 +42,34 @@ public class PercolatorDbContext : DbContext
             entity.HasIndex(e => e.Name).IsUnique();
         });
 
+        // SelfIdentity
+        modelBuilder.Entity<SelfIdentityDbo>(entity =>
+        {
+            entity.ToTable("SelfIdentity");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedOnAdd();
+            entity.Property(e => e.PeerId).IsRequired();
+            entity.Property(e => e.Name).IsRequired();
+            entity.HasIndex(e => e.Name).IsUnique();
+            entity.HasIndex(e => e.PeerId); // non-unique
+        });
+
+        // SelfIdentityKnownPeer
+        modelBuilder.Entity<SelfIdentityKnownPeerDbo>(entity =>
+        {
+            entity.ToTable("SelfIdentityKnownPeer");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedOnAdd();
+            entity.Property(e => e.SelfIdentityId).IsRequired();
+            entity.Property(e => e.PeerId).IsRequired();
+            entity.HasIndex(e => new { e.SelfIdentityId, e.PeerId }).IsUnique();
+            entity.HasOne<SelfIdentityDbo>()
+                .WithMany()
+                .HasForeignKey(e => e.SelfIdentityId)
+                .OnDelete(DeleteBehavior.Cascade)
+                .IsRequired();
+        });
+
         // DirectSession
         modelBuilder.Entity<DirectSessionDbo>(entity =>
         {
@@ -52,11 +82,19 @@ public class PercolatorDbContext : DbContext
                 .IsRequired();
             entity.Property(e => e.SessionId)
                 .IsRequired();
-            entity.HasIndex(e => e.RemotePeerId).IsUnique();
-            entity.HasIndex(e => e.SessionId).IsUnique();
+            entity.Property(e => e.SelfIdentityId)
+                .IsRequired();
+            // Non-unique helper indexes for common lookups
+            entity.HasIndex(e => new { e.SelfIdentityId, e.RemotePeerId });
+            entity.HasIndex(e => new { e.SelfIdentityId, e.SessionId });
             entity.HasOne<PeerConnectionDbo>()
-                .WithOne()
-                .HasForeignKey<DirectSessionDbo>(e => e.RemotePeerId)
+                .WithMany()
+                .HasForeignKey(e => e.RemotePeerId)
+                .OnDelete(DeleteBehavior.Cascade)
+                .IsRequired();
+            entity.HasOne<SelfIdentityDbo>()
+                .WithMany()
+                .HasForeignKey(e => e.SelfIdentityId)
                 .OnDelete(DeleteBehavior.Cascade)
                 .IsRequired();
         });
@@ -204,9 +242,16 @@ public class PercolatorDbContext : DbContext
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).ValueGeneratedNever();
             entity.Property(e => e.ChannelId).IsRequired();
+            entity.Property(e => e.SelfIdentityId).IsRequired();
             entity.Property(e => e.CreatedAt).IsRequired();
             entity.Property(e => e.UpdatedAt).IsRequired();
-            entity.HasIndex(e => e.ChannelId).IsUnique();
+            // Non-unique composite index to speed lookups per identity
+            entity.HasIndex(e => new { e.SelfIdentityId, e.ChannelId });
+            entity.HasOne<SelfIdentityDbo>()
+                .WithMany()
+                .HasForeignKey(e => e.SelfIdentityId)
+                .OnDelete(DeleteBehavior.Cascade)
+                .IsRequired();
 
             entity.HasMany(e => e.Messages)
                 .WithOne(m => m.Conversation)

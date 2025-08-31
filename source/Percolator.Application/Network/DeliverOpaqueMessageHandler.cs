@@ -2,6 +2,7 @@ using Google.Protobuf;
 using MediatR;
 using Microsoft.Extensions.Logging;
 using Percolator.Application.Sessions;
+using Percolator.Application.Identity;
 using Percolator.Contracts;
 using Percolator.Cryptography;
 using Percolator.Network;
@@ -15,19 +16,22 @@ namespace Percolator.Application.Network
         private readonly IPeerConnectionRepository _peerConnectionRepository;
         private readonly IMediator _mediator;
         private readonly IDirectSessionRepository _directSessionRepository;
+        private readonly ActiveIdentityContext _activeIdentityContext;
 
         public DeliverOpaqueMessageHandler(
             ILogger<DeliverOpaqueMessageHandler> logger,
             IDirectSessionManager sessionManager,
             IPeerConnectionRepository peerConnectionRepository,
             IMediator mediator,
-            IDirectSessionRepository directSessionRepository)
+            IDirectSessionRepository directSessionRepository,
+            ActiveIdentityContext activeIdentityContext)
         {
             _logger = logger;
             _sessionManager = sessionManager;
             _peerConnectionRepository = peerConnectionRepository;
             _mediator = mediator;
             _directSessionRepository = directSessionRepository;
+            _activeIdentityContext = activeIdentityContext;
         }
 
         public async Task<DeliverOpaqueMessageResult> Handle(DeliverOpaqueMessageCommand request, CancellationToken cancellationToken)
@@ -92,8 +96,13 @@ namespace Percolator.Application.Network
 
         private async Task<InternalEnvelope?> HandleDhtMessageAsync(DhtEnvelope dhtEnvelope, SessionId sessionId, CancellationToken ct)
         {
+            if (_activeIdentityContext.Identity is null)
+            {
+                _logger.LogError("No active identity available");
+                return null;
+            }
             // Resolve the remote peer from the direct session mapping
-            var directSession = await _directSessionRepository.GetBySessionIdAsync(new DirectSessionId(sessionId.Value));
+            var directSession = await _directSessionRepository.GetBySessionIdAsync(new DirectSessionId(sessionId.Value), _activeIdentityContext.Identity.SelfIdentityId);
             if (directSession is null)
             {
                 _logger.LogWarning("No direct session mapping found for session {SessionId}", sessionId);

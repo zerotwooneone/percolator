@@ -54,6 +54,7 @@ public class MessageService : IMessageService
         {
             throw new InvalidOperationException("Identity context not loaded");
         }
+        var selfIdentityId = _activeIdentityContext.Identity.SelfIdentityId;
         var sessionId = new SessionId(conversationId.Value);
         var sessionState = await _sessionStore.GetSessionStateAsync(sessionId);
         if (sessionState == null)
@@ -102,7 +103,7 @@ public class MessageService : IMessageService
         var remoteParticipantId = new ChatParticipantId(remotePeerId.Value);
         
         // Get or create conversation
-        var conversation = await _conversationRepository.GetByIdAsync(conversationId);
+        var conversation = await _conversationRepository.GetByIdAsync(conversationId, selfIdentityId);
         if (conversation == null)
         {
             // Create a new conversation if it doesn't exist
@@ -118,14 +119,14 @@ public class MessageService : IMessageService
             // Add the message to the conversation
             _logger.LogInformation("Adding message to NEW conversation {ConversationId} with channel ID {ChannelId}", conversationId, Convert.ToBase64String(sessionState.TheirIdentityPublicKey.Value));
             conversation.AddMessage(selfParticipantId, content);
-            await _conversationRepository.AddAsync(conversation);
+            await _conversationRepository.AddAsync(conversation, selfIdentityId);
         }
         else
         {
             conversation.AddMessage(selfParticipantId, content);
             _logger.LogInformation("Adding message to conversation {ConversationId} with channel ID {ChannelId}", conversationId, Convert.ToBase64String(sessionState.TheirIdentityPublicKey.Value));
-            await _conversationRepository.UpdateAsync(conversation);
+            await _conversationRepository.UpdateAsync(conversation, selfIdentityId);
         }
-        await _directSessionRepository.UpsertAsync(new Percolator.Network.PeerId(remoteParticipantId.Value), new DirectSessionId(conversation.Id.Value));
+        await _directSessionRepository.UpsertAsync(new Percolator.Network.PeerId(remoteParticipantId.Value), new DirectSessionId(conversation.Id.Value), selfIdentityId);
     }
 }

@@ -13,6 +13,7 @@ using Percolator.Contracts;
 using Percolator.Cryptography;
 using Percolator.Dht;
 using Percolator.Identity;
+using Percolator.Identity.Model;
 using Percolator.Network;
 using SessionId = Percolator.Cryptography.SessionId;
 using NetworkPeerId = Percolator.Network.PeerId;
@@ -54,6 +55,11 @@ public class DhtIntegrationTests : IntegrationTestBase
             services.AddSingleton<IPreKeyBundleRepository>(bundleRepoMock.Object);
             services.AddSingleton<Percolator.Cryptography.ISigningService>(signingServiceMock.Object);
             services.AddSingleton<IPeerTrustManager>(peerTrustManagerMock.Object);
+            // Ensure ActiveIdentityContext has an identity with SelfIdentityId set
+            services.AddSingleton(new Percolator.Application.Identity.ActiveIdentityContext
+            {
+                Identity = new IdentityRecord(Guid.NewGuid(), "Test") { SelfIdentityId = 1 }
+            });
             services.AddMediatR(cfg => 
                 cfg.RegisterServicesFromAssembly(typeof(Percolator.Dht.Messages.PingRequest).Assembly));
         });
@@ -73,7 +79,7 @@ public class DhtIntegrationTests : IntegrationTestBase
             .Returns(Task.FromResult<Plaintext?>(new Plaintext(internalEnvelope.ToByteArray())));
 
         // 2. Mock the direct session repository to map session to remote peer
-        directSessionRepoMock.Setup(r => r.GetBySessionIdAsync(new DirectSessionId(sessionId.Value)))
+        directSessionRepoMock.Setup(r => r.GetBySessionIdAsync(new DirectSessionId(sessionId.Value), It.IsAny<int>()))
             .ReturnsAsync(new DirectSession(new NetworkPeerId(remotePeerId.Value), new DirectSessionId(sessionId.Value)));
 
         // 3. Mock the peer connection repository to return connection info
@@ -126,6 +132,11 @@ public class DhtIntegrationTests : IntegrationTestBase
             services.AddSingleton(directSessionRepoMock.Object);
             services.AddSingleton<IDhtService, DhtService>();
             services.AddSingleton(new Mock<IConversationRepository>().Object);
+            // Ensure ActiveIdentityContext has an identity with SelfIdentityId set
+            services.AddSingleton(new Percolator.Application.Identity.ActiveIdentityContext
+            {
+                Identity = new IdentityRecord(Guid.NewGuid(), "Test") { SelfIdentityId = 1 }
+            });
             services.AddMediatR(cfg =>
                 cfg.RegisterServicesFromAssembly(typeof(Percolator.Dht.Messages.FindNodeRequest).Assembly));
         });
@@ -145,7 +156,7 @@ public class DhtIntegrationTests : IntegrationTestBase
             .ReturnsAsync(new Plaintext(internalEnvelope.ToByteArray()));
 
         // 2. Mock the direct session repository to map session to remote peer
-        directSessionRepoMock.Setup(r => r.GetBySessionIdAsync(new DirectSessionId(sessionId.Value)))
+        directSessionRepoMock.Setup(r => r.GetBySessionIdAsync(new DirectSessionId(sessionId.Value), It.IsAny<int>()))
             .ReturnsAsync(new DirectSession(new NetworkPeerId(remotePeerId.Value), new DirectSessionId(sessionId.Value)));
 
         // 3. Mock the peer connection repository to return connection info for the remote peer

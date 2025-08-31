@@ -69,7 +69,7 @@ public class SessionMessageTests
         _aliceEphemeral = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         _aliceIdentity = new ActiveIdentityContext
         {
-            Identity = new IdentityRecord(Guid.NewGuid(), "Alice"),
+            Identity = new IdentityRecord(Guid.NewGuid(), "Alice") { SelfIdentityId = 1 },
             Keys = new X3dhKeys(
                 ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
                 ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
@@ -79,7 +79,7 @@ public class SessionMessageTests
 
         _bobIdentity = new ActiveIdentityContext
         {
-            Identity = new IdentityRecord(Guid.NewGuid(), "Bob"),
+            Identity = new IdentityRecord(Guid.NewGuid(), "Bob") { SelfIdentityId = 1 },
             Keys = new X3dhKeys(
                 ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
                 ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
@@ -87,7 +87,7 @@ public class SessionMessageTests
             )
         };
         
-        // Create managers with real loggers for diagnostic output - using the correct 5-parameter constructor
+        // Create managers with real loggers for diagnostic output
         _aliceManager = new DirectSessionManager(
             _aliceSessionStore,
             _mockConversationRepo.Object,
@@ -149,7 +149,7 @@ public class SessionMessageTests
         // Arrange: Mock the conversation repository to allow the manager to resolve the remote peer ID.
         var participants = new List<ChatParticipantId> { new(alicePeerId.Value), new(bobPeerId.Value) };
         var chatConversation = new Conversation(new ChatConversationId(conversationId.Value), new ChannelId(new byte[64]), participants, new List<Message>(), "Test Convo");
-        _mockConversationRepo.Setup(r => r.GetByIdAsync(It.IsAny<ChatConversationId>()))
+        _mockConversationRepo.Setup(r => r.GetByIdAsync(It.IsAny<ChatConversationId>(), It.IsAny<int>()))
             .ReturnsAsync(chatConversation);
 
         // Arrange: Mock the protocol to correctly link the output of the encryption mock with the input of the decryption mock

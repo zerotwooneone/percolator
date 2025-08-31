@@ -158,7 +158,7 @@ async Task HostCommandHandler(InvocationContext context)
         // Load identity for other features (but not for TLS)
         IIdentityOrchestrator tempIdentityOrchestrator = tempServiceProvider.GetRequiredService<IIdentityOrchestrator>();
         ActiveIdentityContext tempActiveIdentityContext = tempServiceProvider.GetRequiredService<ActiveIdentityContext>();
-        await tempIdentityOrchestrator.LoadOrCreateIdentityAsync(identityName!, cancellationToken);
+        await tempIdentityOrchestrator.ResolveIdentityAsync(identityName!, cancellationToken);
         
         string publicKeyB64 = Convert.ToBase64String(tempActiveIdentityContext.Keys!.IdentitySigningKey.ExportSubjectPublicKeyInfo());
 
@@ -225,7 +225,7 @@ async Task HostCommandHandler(InvocationContext context)
         // Step 4: Manually initialize the identity *again* using the main service provider
         // to ensure the ActiveIdentityContext is correct for the running application.
         IIdentityOrchestrator identityOrchestrator = app.Services.GetRequiredService<IIdentityOrchestrator>();
-        await identityOrchestrator.LoadOrCreateIdentityAsync(identityName!, cancellationToken);
+        await identityOrchestrator.ResolveIdentityAsync(identityName!, cancellationToken);
 
         // Initialize the in-memory peer trust store
         var peerTrustManager = app.Services.GetRequiredService<IPeerTrustManager>();
@@ -263,7 +263,7 @@ async Task DhtProbeCommandHandler(InvocationContext context)
     {
         // Ensure local identity is loaded; handler will use ActiveIdentityContext
         var identityOrchestrator = serviceProvider.GetRequiredService<IIdentityOrchestrator>();
-        await identityOrchestrator.LoadOrCreateIdentityAsync(selfIdentity!, cancellationToken);
+        await identityOrchestrator.ResolveIdentityAsync(selfIdentity!, cancellationToken);
 
         // Delegate probing to MediatR handler which will resolve required services
         var mediator = serviceProvider.GetRequiredService<IMediator>();
@@ -318,7 +318,7 @@ async Task ConnectCommandHandler(InvocationContext context)
     try
     {
         var identityOrchestrator = serviceProvider.GetRequiredService<IIdentityOrchestrator>();
-        await identityOrchestrator.LoadOrCreateIdentityAsync(identityName!, cancellationToken);
+        await identityOrchestrator.ResolveIdentityAsync(identityName!, cancellationToken);
 
         var mediator = serviceProvider.GetRequiredService<IMediator>();
         var conversationId = await mediator.Send(new ConnectToPeerCommand(endpoint, peerName!), cancellationToken);
@@ -351,7 +351,7 @@ async Task SendCommandHandler(InvocationContext context)
     try
     {
         var identityOrchestrator = serviceProvider.GetRequiredService<IIdentityOrchestrator>();
-        await identityOrchestrator.LoadOrCreateIdentityAsync(identityName!, cancellationToken);
+        await identityOrchestrator.ResolveIdentityAsync(identityName!, cancellationToken);
 
         var logger = serviceProvider.GetRequiredService<ILogger<Program>>();
         var activeIdentityContext = serviceProvider.GetRequiredService<ActiveIdentityContext>();

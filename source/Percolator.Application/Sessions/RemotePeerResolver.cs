@@ -27,11 +27,11 @@ public class RemotePeerResolver : IRemotePeerResolver
     public async Task<PeerId> ResolveFromSession(SessionId sessionId)
     {
         var convId = new Percolator.Chat.ValueObjects.ConversationId(sessionId.Value);
-        var conversation = await _conversationRepository.GetByIdAsync(convId)
-            ?? throw new InvalidOperationException($"Conversation with id {sessionId} not found");
-
         if (_activeIdentityContext.Identity is null)
             throw new InvalidOperationException("Identity context not loaded");
+
+        var conversation = await _conversationRepository.GetByIdAsync(convId, _activeIdentityContext.Identity.SelfIdentityId)
+            ?? throw new InvalidOperationException($"Conversation with id {sessionId} not found");
 
         if (conversation.Participants.Count != 2)
         {

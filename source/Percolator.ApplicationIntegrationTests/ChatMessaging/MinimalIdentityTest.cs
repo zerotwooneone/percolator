@@ -4,6 +4,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Moq;
 using NUnit.Framework;
 using Percolator.Application.Identity;
 using Percolator.Identity;
@@ -11,6 +12,8 @@ using Percolator.Infrastructure;
 using Percolator.Infrastructure.Identity;
 using System.Net;
 using System.Net.Sockets;
+using MediatR;
+using Percolator.Infrastructure.Persistence;
 
 namespace Percolator.ApplicationIntegrationTests.ChatMessaging
 {
@@ -61,15 +64,24 @@ namespace Percolator.ApplicationIntegrationTests.ChatMessaging
                         // Identity services - using the actual implementations from the Identity namespace
                         services.AddSingleton<ActiveIdentityContext>();
                         services.AddSingleton<ISelfIdentityProvider>(s=> s.GetRequiredService<ActiveIdentityContext>());
-                        services.AddSingleton<IIdentityOrchestrator, IdentityOrchestrator>();
-                        services.AddSingleton<IIdentityStore, FileSystemIdentityStore>();
-                        services.AddSingleton<IIdentityService, PersistentIdentityService>();
+                        services.AddScoped<IIdentityOrchestrator, IdentityOrchestrator>();
                         services.AddSingleton<IOneTimeKeyProvider, InMemoryOneTimeKeyProvider>();
                         services.AddSingleton<ICredentialService, CredentialService>();
                         services.AddSingleton<IKeyManagementService, PersistentKeyManagementService>();
+                        // Use real infrastructure-backed identity repository and db context
+                        services.AddIdentityInfrastructure();
+
+                        // Register MediatR for Application assembly so CLI handlers are available
+                        services.AddMediatR(cfg =>
+                        {
+                            cfg.RegisterServicesFromAssembly(typeof(Percolator.Application.ServiceCollectionExtensions).Assembly);
+                        });
                         
                         // Add configuration
                         services.AddSingleton<IConfiguration>(configuration);
+                        // Provide NodeOptions
+                        services.AddOptions<Percolator.Application.Configuration.NodeOptions>()
+                            .Configure(_ => { });
                         
                         // Add storage options required by PersistentKeyManagementService
                         services.AddOptions<StorageOptions>()
@@ -108,8 +120,19 @@ namespace Percolator.ApplicationIntegrationTests.ChatMessaging
                 // Create a cancellation token with a short timeout
                 using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
                 
+                // Ensure database schema exists
+                using (var scope = host.Services.CreateScope())
+                {
+                    var db = scope.ServiceProvider.GetRequiredService<PercolatorDbContext>();
+                    await db.Database.EnsureCreatedAsync();
+                }
+                
+                // Ensure identity exists first using CLI command via Mediator
+                var mediator = host.Services.GetRequiredService<IMediator>();
+                await mediator.Send(new Percolator.Application.Cli.CreateSelfIdentityCommand("test-identity", null));
+
                 TestContext.WriteLine("Loading or creating identity");
-                await identityOrchestrator.LoadOrCreateIdentityAsync("test-identity", cts.Token);
+                await identityOrchestrator.ResolveIdentityAsync("test-identity", cts.Token);
                 TestContext.WriteLine("Identity created successfully");
                 
                 // Verify that the identity is accessible through the context

@@ -134,7 +134,7 @@ namespace Percolator.Application.Network
 
             // Create conversation (channel) if absent and establish session
             var channelId = new ChannelId(networkIdentitySigningKey.Value);
-            var conversation = await _conversationRepository.GetByChannelIdAsync(channelId);
+            var conversation = await _conversationRepository.GetByChannelIdAsync(channelId, _activeIdentityContext.Identity!.SelfIdentityId);
 
             if (conversation is null)
             {
@@ -153,8 +153,8 @@ namespace Percolator.Application.Network
                     new List<Message>(),
                     remotePeer.Name);
 
-                await _directSessionRepository.UpsertAsync(new NetworkPeerId(remotePeer.Id.Value), new DirectSessionId(conversation.Id.Value));
-                await _conversationRepository.AddAsync(conversation);
+                await _directSessionRepository.UpsertAsync(new NetworkPeerId(remotePeer.Id.Value), new DirectSessionId(conversation.Id.Value), _activeIdentityContext.Identity!.SelfIdentityId);
+                await _conversationRepository.AddAsync(conversation, _activeIdentityContext.Identity!.SelfIdentityId);
                 _logger.LogInformation("Created new conversation with peer {PeerName}", remotePeer.Name);
 
                 var cryptoSessionId = new SessionId(conversation.Id.Value);

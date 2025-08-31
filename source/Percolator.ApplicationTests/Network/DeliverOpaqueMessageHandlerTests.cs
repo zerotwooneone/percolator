@@ -10,6 +10,7 @@ using MediatR;
 using Microsoft.Extensions.Logging;
 using Moq;
 using NUnit.Framework;
+using Percolator.Application.Identity;
 using Percolator.Application.Network;
 using Percolator.Application.Sessions;
 using Percolator.Contracts;
@@ -48,7 +49,11 @@ public class DeliverOpaqueMessageHandlerTests
         mediator = new Mock<IMediator>(MockBehavior.Strict);
         directRepo = new Mock<IDirectSessionRepository>(MockBehavior.Strict);
         var logger = Mock.Of<ILogger<DeliverOpaqueMessageHandler>>();
-        return new DeliverOpaqueMessageHandler(logger, sessionMgr.Object, peerRepo.Object, mediator.Object, directRepo.Object);
+        var active = new ActiveIdentityContext
+        {
+            Identity = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "Test", null) { SelfIdentityId = 1 }
+        };
+        return new DeliverOpaqueMessageHandler(logger, sessionMgr.Object, peerRepo.Object, mediator.Object, directRepo.Object, active);
     }
 
     [Test]
@@ -82,7 +87,7 @@ public class DeliverOpaqueMessageHandlerTests
 
         sessionMgr.Setup(s => s.ReceiveMessageAsync(It.Is<SessionId>(x => x.Value == sessionId), It.IsAny<SessionRatchetMessage>()))
             .ReturnsAsync(plain);
-        directRepo.Setup(r => r.GetBySessionIdAsync(new DirectSessionId(sessionId))).ReturnsAsync((DirectSession?)null);
+        directRepo.Setup(r => r.GetBySessionIdAsync(new DirectSessionId(sessionId), It.IsAny<int>())).ReturnsAsync((DirectSession?)null);
 
         var cmd = new DeliverOpaqueMessageCommand { SessionId = sessionId, PayloadBytes = plain.Value };
         var result = await handler.Handle(cmd, CancellationToken.None);
@@ -109,7 +114,7 @@ public class DeliverOpaqueMessageHandlerTests
         sessionMgr.Setup(s => s.ReceiveMessageAsync(It.Is<SessionId>(x => x.Value == sessionId), It.IsAny<SessionRatchetMessage>()))
             .ReturnsAsync(plain);
 
-        directRepo.Setup(r => r.GetBySessionIdAsync(new DirectSessionId(sessionId)))
+        directRepo.Setup(r => r.GetBySessionIdAsync(new DirectSessionId(sessionId), It.IsAny<int>()))
             .ReturnsAsync(new DirectSession(new Percolator.Network.PeerId(remotePeerId), new DirectSessionId(sessionId)));
 
         var endpoint = new GrpcEndPoint(new DnsEndPoint("127.0.0.1", 5001), DateTimeOffset.UtcNow);
@@ -145,7 +150,7 @@ public class DeliverOpaqueMessageHandlerTests
         sessionMgr.Setup(s => s.ReceiveMessageAsync(It.Is<SessionId>(x => x.Value == sessionId), It.IsAny<SessionRatchetMessage>()))
             .ReturnsAsync(plain);
 
-        directRepo.Setup(r => r.GetBySessionIdAsync(new DirectSessionId(sessionId)))
+        directRepo.Setup(r => r.GetBySessionIdAsync(new DirectSessionId(sessionId), It.IsAny<int>()))
             .ReturnsAsync(new DirectSession(new Percolator.Network.PeerId(remotePeerId), new DirectSessionId(sessionId)));
 
         var endpoint = new GrpcEndPoint(new System.Net.DnsEndPoint("127.0.0.1", 5001), DateTimeOffset.UtcNow);

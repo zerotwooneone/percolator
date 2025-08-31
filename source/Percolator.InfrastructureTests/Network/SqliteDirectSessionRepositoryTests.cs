@@ -25,6 +25,12 @@ public class SqliteDirectSessionRepositoryTests
 
         var ctx = new PercolatorDbContext(options);
         ctx.Database.EnsureCreated();
+        // Seed default SelfIdentity required by repository scoping
+        if (!ctx.SelfIdentities.Any())
+        {
+            ctx.SelfIdentities.Add(new SelfIdentityDbo { Id = 1, PeerId = Guid.NewGuid(), Name = "default" });
+            ctx.SaveChanges();
+        }
         return ctx;
     }
 
@@ -33,8 +39,8 @@ public class SqliteDirectSessionRepositoryTests
     {
         var (ctx, _, dsr, peerId) = await CreateRepos();
         var sessionId = Guid.NewGuid();
-        await dsr.UpsertAsync(peerId, new DirectSessionId(sessionId));
-        var ds = await dsr.GetByRemotePeerIdAsync(peerId);
+        await dsr.UpsertAsync(peerId, new DirectSessionId(sessionId), 1);
+        var ds = await dsr.GetByRemotePeerIdAsync(peerId, 1);
         ds.Should().NotBeNull();
         ds!.RemotePeerId.Value.Should().Be(peerId.Value);
         ds.SessionId.Value.Should().Be(sessionId);
@@ -45,15 +51,15 @@ public class SqliteDirectSessionRepositoryTests
     {
         var (ctx, _, dsr, peerId) = await CreateRepos();
         var sessionId = Guid.NewGuid();
-        await dsr.UpsertAsync(peerId, new DirectSessionId(sessionId));
+        await dsr.UpsertAsync(peerId, new DirectSessionId(sessionId), 1);
         
-        await dsr.DeleteByRemotePeerIdAsync(peerId);
-        (await dsr.GetByRemotePeerIdAsync(peerId)).Should().BeNull();
-        (await dsr.GetBySessionIdAsync(new DirectSessionId(sessionId))).Should().BeNull();
+        await dsr.DeleteByRemotePeerIdAsync(peerId, 1);
+        (await dsr.GetByRemotePeerIdAsync(peerId, 1)).Should().BeNull();
+        (await dsr.GetBySessionIdAsync(new DirectSessionId(sessionId), 1)).Should().BeNull();
 
         // Idempotent
-        await dsr.DeleteByRemotePeerIdAsync(peerId);
-        (await dsr.GetByRemotePeerIdAsync(peerId)).Should().BeNull();
+        await dsr.DeleteByRemotePeerIdAsync(peerId, 1);
+        (await dsr.GetByRemotePeerIdAsync(peerId, 1)).Should().BeNull();
     }
 
     [Test]
@@ -75,13 +81,13 @@ public class SqliteDirectSessionRepositoryTests
 
         var sA = Guid.NewGuid();
         var sB = Guid.NewGuid();
-        await dsr.UpsertAsync(peerA, new DirectSessionId(sA));
-        await dsr.UpsertAsync(peerB, new DirectSessionId(sB));
+        await dsr.UpsertAsync(peerA, new DirectSessionId(sA), 1);
+        await dsr.UpsertAsync(peerB, new DirectSessionId(sB), 1);
 
-        (await dsr.GetByRemotePeerIdAsync(peerA))!.SessionId.Value.Should().Be(sA);
-        (await dsr.GetByRemotePeerIdAsync(peerB))!.SessionId.Value.Should().Be(sB);
-        (await dsr.GetBySessionIdAsync(new DirectSessionId(sA)))!.RemotePeerId.Value.Should().Be(peerA.Value);
-        (await dsr.GetBySessionIdAsync(new DirectSessionId(sB)))!.RemotePeerId.Value.Should().Be(peerB.Value);
+        (await dsr.GetByRemotePeerIdAsync(peerA, 1))!.SessionId.Value.Should().Be(sA);
+        (await dsr.GetByRemotePeerIdAsync(peerB, 1))!.SessionId.Value.Should().Be(sB);
+        (await dsr.GetBySessionIdAsync(new DirectSessionId(sA), 1))!.RemotePeerId.Value.Should().Be(peerA.Value);
+        (await dsr.GetBySessionIdAsync(new DirectSessionId(sB), 1))!.RemotePeerId.Value.Should().Be(peerB.Value);
     }
     private static async Task<(PercolatorDbContext Ctx, SqlitePeerConnectionRepository Pcr, SqliteDirectSessionRepository Dsr, PeerId PeerId)> CreateRepos()
     {
@@ -103,7 +109,7 @@ public class SqliteDirectSessionRepositoryTests
     {
         var (ctx, _, dsr, _) = await CreateRepos();
         var unknown = Guid.NewGuid();
-        var result = await dsr.GetBySessionIdAsync(new DirectSessionId(unknown));
+        var result = await dsr.GetBySessionIdAsync(new DirectSessionId(unknown), 1);
         result.Should().BeNull();
     }
 
@@ -112,8 +118,8 @@ public class SqliteDirectSessionRepositoryTests
     {
         var (ctx, _, dsr, peerId) = await CreateRepos();
         var sessionId = Guid.NewGuid();
-        await dsr.UpsertAsync(peerId, new DirectSessionId(sessionId));
-        var ds = await dsr.GetBySessionIdAsync(new DirectSessionId(sessionId));
+        await dsr.UpsertAsync(peerId, new DirectSessionId(sessionId), 1);
+        var ds = await dsr.GetBySessionIdAsync(new DirectSessionId(sessionId), 1);
         ds.Should().NotBeNull();
         ds!.RemotePeerId.Value.Should().Be(peerId.Value);
         ds.SessionId.Value.Should().Be(sessionId);
@@ -125,10 +131,10 @@ public class SqliteDirectSessionRepositoryTests
         var (ctx, _, dsr, peerId) = await CreateRepos();
         var s1 = Guid.NewGuid();
         var s2 = Guid.NewGuid();
-        await dsr.UpsertAsync(peerId, new DirectSessionId(s1));
-        await dsr.UpsertAsync(peerId, new DirectSessionId(s2));
-        (await dsr.GetBySessionIdAsync(new DirectSessionId(s1))).Should().BeNull();
-        var ds = await dsr.GetBySessionIdAsync(new DirectSessionId(s2));
+        await dsr.UpsertAsync(peerId, new DirectSessionId(s1), 1);
+        await dsr.UpsertAsync(peerId, new DirectSessionId(s2), 1);
+        (await dsr.GetBySessionIdAsync(new DirectSessionId(s1), 1)).Should().BeNull();
+        var ds = await dsr.GetBySessionIdAsync(new DirectSessionId(s2), 1);
         ds.Should().NotBeNull();
         ds!.RemotePeerId.Value.Should().Be(peerId.Value);
         ds.SessionId.Value.Should().Be(s2);
@@ -139,12 +145,12 @@ public class SqliteDirectSessionRepositoryTests
     {
         var (ctx, _, dsr, peerId) = await CreateRepos();
         var s = Guid.NewGuid();
-        await dsr.UpsertAsync(peerId, new DirectSessionId(s));
+        await dsr.UpsertAsync(peerId, new DirectSessionId(s), 1);
         // Delete peer (which cascades to PeerConnection and should cascade to DirectSession as well)
         var peer = await ctx.Peers.FindAsync(new Percolator.Identity.PeerId(peerId.Value));
         ctx.Peers.Remove(peer!);
         await ctx.SaveChangesAsync();
-        var result = await dsr.GetBySessionIdAsync(new DirectSessionId(s));
+        var result = await dsr.GetBySessionIdAsync(new DirectSessionId(s), 1);
         result.Should().BeNull();
     }
 }

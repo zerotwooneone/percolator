@@ -80,7 +80,7 @@ public class MessageServiceTests
     public async Task SendDirectMessageAsync_WithValidSession_ShouldSucceed()
     {
         // Arrange
-        var localIdentity = new IdentityRecord(Guid.NewGuid(), "Local Identity");
+        var localIdentity = new IdentityRecord(Guid.NewGuid(), "Local Identity") { SelfIdentityId = 1 };
         var localKeys = new X3dhKeys(
             ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
             ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
@@ -119,7 +119,7 @@ public class MessageServiceTests
             SkippedMessageKeys = new Dictionary<SkippedMessageKeyIdentifier, byte[]>()
         };
 
-        _mockConversationRepository.Setup(r => r.GetByIdAsync(It.Is<ChatConversationId>(c => c.Value == conversationId.Value)))
+        _mockConversationRepository.Setup(r => r.GetByIdAsync(It.Is<ChatConversationId>(c => c.Value == conversationId.Value), It.IsAny<int>()))
             .ReturnsAsync(conversation);
 
         // Create the SessionId to match how MessageService creates it (directly from conversationId.Value)

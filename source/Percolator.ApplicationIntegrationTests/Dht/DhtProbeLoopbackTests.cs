@@ -124,7 +124,7 @@ public class DhtProbeLoopbackTests : IntegrationTestBase
         // Server maps remote sender via direct session repository
         var serverNetworkPeerGuid = Guid.NewGuid();
         serverDirectSessionRepo
-            .Setup(r => r.GetBySessionIdAsync(new DirectSessionId(sessionId.Value)))
+            .Setup(r => r.GetBySessionIdAsync(new DirectSessionId(sessionId.Value), It.IsAny<int>()))
             .ReturnsAsync(new DirectSession(new NetworkPeerId(serverNetworkPeerGuid), new DirectSessionId(sessionId.Value)));
         serverPeerConnRepo
             .Setup(r => r.GetByIdAsync(It.IsAny<NetworkPeerId>()))

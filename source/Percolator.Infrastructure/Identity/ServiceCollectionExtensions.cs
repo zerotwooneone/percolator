@@ -2,6 +2,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
+using Percolator.Application.Identity;
 using Percolator.Identity;
 using Percolator.Infrastructure.Persistence;
 using Percolator.Infrastructure.Security;
@@ -18,10 +19,9 @@ namespace Percolator.Infrastructure.Identity
 
             services.AddSingleton<IDatabaseEncryptionService, DatabaseEncryptionService>();
 
-            services.AddSingleton<IIdentityStore, FileSystemIdentityStore>();
             services.AddSingleton<IKeyManagementService, PersistentKeyManagementService>();
-            services.AddSingleton<IIdentityService, PersistentIdentityService>();
-            services.AddSingleton<IPeerRepository, SqlitePeerRepository>();
+            services.AddScoped<IPeerRepository, SqlitePeerRepository>();
+            services.AddScoped<ISelfIdentityRepository, SqliteSelfIdentityRepository>();
 
             services.AddDbContext<PercolatorDbContext>((provider, options) =>
             {

@@ -11,60 +11,62 @@ namespace Percolator.Infrastructure.Chat;
 public sealed class SqliteConversationRepository : IConversationRepository
 {
     private readonly PercolatorDbContext _db;
-
+    
     public SqliteConversationRepository(PercolatorDbContext db)
     {
         _db = db;
     }
 
-    public async Task<Conversation?> GetByIdAsync(ConversationId id)
+    public async Task<Conversation?> GetByIdAsync(ConversationId id, int selfIdentityId)
     {
         var dbo = await _db.Conversations
             .AsNoTracking()
             .Include(c => c.Participants)
             .Include(c => c.Messages)
-            .FirstOrDefaultAsync(c => c.Id == id.Value);
+            .FirstOrDefaultAsync(c => c.Id == id.Value && c.SelfIdentityId == selfIdentityId);
         return dbo is null ? null : ToDomain(dbo);
     }
 
-    public async Task<Conversation?> GetByChannelIdAsync(ChannelId id)
+    public async Task<Conversation?> GetByChannelIdAsync(ChannelId id, int selfIdentityId)
     {
         var channel = id.Value;
         var dbo = await _db.Conversations
             .AsNoTracking()
             .Include(c => c.Participants)
             .Include(c => c.Messages)
-            .FirstOrDefaultAsync(c => c.ChannelId == channel);
+            .FirstOrDefaultAsync(c => c.ChannelId == channel && c.SelfIdentityId == selfIdentityId);
         return dbo is null ? null : ToDomain(dbo);
     }
 
-    public async Task AddAsync(Conversation conversation)
+    public async Task AddAsync(Conversation conversation, int selfIdentityId)
     {
         var now = DateTimeOffset.UtcNow;
         var dbo = ToDbo(conversation);
         dbo.CreatedAt = now;
         dbo.UpdatedAt = now;
+        dbo.SelfIdentityId = selfIdentityId;
 
         _db.Conversations.Add(dbo);
         await _db.SaveChangesAsync();
     }
 
-    public async Task UpdateAsync(Conversation conversation)
+    public async Task UpdateAsync(Conversation conversation, int selfIdentityId)
     {
         var existing = await _db.Conversations
             .Include(c => c.Participants)
             .Include(c => c.Messages)
-            .FirstOrDefaultAsync(c => c.Id == conversation.Id.Value);
+            .FirstOrDefaultAsync(c => c.Id == conversation.Id.Value && c.SelfIdentityId == selfIdentityId);
         if (existing is null)
         {
             // If not found, treat as add
-            await AddAsync(conversation);
+            await AddAsync(conversation, selfIdentityId);
             return;
         }
 
         existing.Name = conversation.Name;
         existing.ChannelId = conversation.ChannelId.Value; // should be stable but updating is harmless due to unique index
         existing.UpdatedAt = DateTimeOffset.UtcNow;
+        existing.SelfIdentityId = selfIdentityId;
 
         // Replace participants
         _db.ConversationParticipants.RemoveRange(existing.Participants);
@@ -135,3 +137,4 @@ public sealed class SqliteConversationRepository : IConversationRepository
         return dbo;
     }
 }
+

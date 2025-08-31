@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using FluentAssertions;
+using Google.Protobuf;
 using Percolator.Cryptography;
 
 namespace Percolator.CryptographyTests;
@@ -69,7 +70,7 @@ public class SessionRatchetMessageTests
 
         // Act & Assert - This should throw when trying to parse the protobuf data
         var message = new SessionRatchetMessage(invalidData);
-        Assert.Throws<Google.Protobuf.InvalidProtocolBufferException>(() => message.GetHeader());
+        Assert.Throws<InvalidProtocolBufferException>(() => message.GetHeader());
     }
 
     [Test]

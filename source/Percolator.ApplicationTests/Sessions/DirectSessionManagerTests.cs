@@ -68,9 +68,8 @@ public class DirectSessionManagerTests
         // Create a real ActiveIdentityContext instance instead of a mock
         _aliceIdentityContext = new ActiveIdentityContext();
         // Set properties directly
-        _aliceIdentityContext.Identity = new IdentityRecord(_alicePeerId.Value, "Alice");
+        _aliceIdentityContext.Identity = new IdentityRecord(_alicePeerId.Value, "Alice") { SelfIdentityId = 1 };
         _aliceIdentityContext.Keys = _aliceKeys;
-        
         _aliceSessionManager = new DirectSessionManager(
             _aliceSessionStore.Object,
             _aliceConversationRepository.Object,
@@ -93,9 +92,8 @@ public class DirectSessionManagerTests
         // Create a real ActiveIdentityContext instance instead of a mock
         _bobIdentityContext = new ActiveIdentityContext();
         // Set properties directly
-        _bobIdentityContext.Identity = new IdentityRecord(_bobPeerId.Value, "Bob");
+        _bobIdentityContext.Identity = new IdentityRecord(_bobPeerId.Value, "Bob") { SelfIdentityId = 1 };
         _bobIdentityContext.Keys = _bobKeys;
-        
         _bobSessionManager = new DirectSessionManager(
             _bobSessionStore.Object,
             _bobConversationRepository.Object,
@@ -222,8 +220,10 @@ public class DirectSessionManagerTests
         await EstablishSessionsAsync();
         
         // Assert: Initial state verification
-        Assert.That(_aliceSessionState.PreviousChainLength, Is.EqualTo(0), "Alice's initial previous chain length should be 0");
-        Assert.That(_bobSessionState.PreviousChainLength, Is.EqualTo(0), "Bob's initial previous chain length should be 0");
+        Assert.That(_aliceSessionState, Is.Not.Null);
+        Assert.That(_bobSessionState, Is.Not.Null);
+        Assert.That(_aliceSessionState!.PreviousChainLength, Is.EqualTo(0), "Alice's initial previous chain length should be 0");
+        Assert.That(_bobSessionState!.PreviousChainLength, Is.EqualTo(0), "Bob's initial previous chain length should be 0");
             
         // Act & Assert: Multiple rounds of message exchanges
         for (int i = 1; i <= 3; i++)
@@ -264,9 +264,12 @@ public class DirectSessionManagerTests
         var decryptedMsg2 = await _bobSessionManager.ReceiveMessageAsync(_sessionId, encryptedMsg2);
 
         // Assert
-        Assert.That(System.Text.Encoding.UTF8.GetString(decryptedMsg1.Value), Is.EqualTo("Message 1"));
-        Assert.That(System.Text.Encoding.UTF8.GetString(decryptedMsg2.Value), Is.EqualTo("Message 2"));
-        Assert.That(System.Text.Encoding.UTF8.GetString(decryptedMsg3.Value), Is.EqualTo("Message 3"));
+        Assert.That(decryptedMsg1, Is.Not.Null);
+        Assert.That(decryptedMsg2, Is.Not.Null);
+        Assert.That(decryptedMsg3, Is.Not.Null);
+        Assert.That(System.Text.Encoding.UTF8.GetString(decryptedMsg1!.Value), Is.EqualTo("Message 1"));
+        Assert.That(System.Text.Encoding.UTF8.GetString(decryptedMsg2!.Value), Is.EqualTo("Message 2"));
+        Assert.That(System.Text.Encoding.UTF8.GetString(decryptedMsg3!.Value), Is.EqualTo("Message 3"));
     }
     
     private async Task EstablishSessionsAsync()
@@ -287,8 +290,8 @@ public class DirectSessionManagerTests
             new ChannelId(Guid.NewGuid().ToByteArray()),
             new List<ParticipantId> { new(_alicePeerId.Value), new(_bobPeerId.Value) },
             new List<Message>());
-        _aliceConversationRepository.Setup(x => x.GetByIdAsync(It.IsAny<ConversationId>())).ReturnsAsync(aliceConversation);
-        _bobConversationRepository.Setup(x => x.GetByIdAsync(It.IsAny<ConversationId>())).ReturnsAsync(bobConversation);
+        _aliceConversationRepository.Setup(x => x.GetByIdAsync(It.IsAny<ConversationId>(), It.IsAny<int>())).ReturnsAsync(aliceConversation);
+        _bobConversationRepository.Setup(x => x.GetByIdAsync(It.IsAny<ConversationId>(), It.IsAny<int>())).ReturnsAsync(bobConversation);
 
         await _aliceSessionManager.EstablishSessionAsInitiatorAsync(_sessionId, _bobPeerId, bobIdentityKeyPublic, bobPreKeyPublic, sharedSecret, _aliceEphemeral);
         await _bobSessionManager.EstablishSessionAsResponderAsync(_sessionId, _alicePeerId, aliceIdentityKeyPublic, aliceEphemeralKeyPublic, _bobKeys.SignedPreKey, sharedSecret);

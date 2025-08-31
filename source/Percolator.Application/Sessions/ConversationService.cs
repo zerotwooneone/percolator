@@ -75,7 +75,12 @@ namespace Percolator.Application.Sessions
 
             if (peerConnection is { IdentitySigningKey: not null })
             {
-                var conversation = await _conversationRepository.GetByChannelIdAsync(new ChannelId(peerConnection.IdentitySigningKey.Value));
+                if (_activeIdentityContext.Identity is null)
+                {
+                    _logger.LogError("No active identity available");
+                    return null;
+                }
+                var conversation = await _conversationRepository.GetByChannelIdAsync(new ChannelId(peerConnection.IdentitySigningKey.Value), _activeIdentityContext.Identity.SelfIdentityId);
                 if (conversation == null)
                 {
                     _logger.LogInformation("Didn't find direct conversation with {PeerName} with channel ID {ChannelId}", remotePeer.Name, Convert.ToBase64String(peerConnection.IdentitySigningKey.Value));
@@ -205,7 +210,7 @@ namespace Percolator.Application.Sessions
                     remotePeer.Name);
 
                 _logger.LogInformation("Creating conversation {ConversationId} with channel ID {ChannelId}", conversation.Id.Value, Convert.ToBase64String(conversation.ChannelId.Value));
-                await _conversationRepository.AddAsync(conversation);
+                await _conversationRepository.AddAsync(conversation, _activeIdentityContext.Identity.SelfIdentityId);
 
                 await _sessionManager.EstablishSessionAsResponderAsync(
                     new SessionId(conversation.Id.Value),
@@ -218,7 +223,7 @@ namespace Percolator.Application.Sessions
                 );
 
                 // Persist mapping from conversation/session to remote peer for future routing
-                await _directSessionRepository.UpsertAsync(new NetworkPeerId(remotePeer.Id.Value), new DirectSessionId(conversation.Id.Value));
+                await _directSessionRepository.UpsertAsync(new NetworkPeerId(remotePeer.Id.Value), new DirectSessionId(conversation.Id.Value), _activeIdentityContext.Identity.SelfIdentityId);
 
                 _logger.LogInformation("Successfully established session and created conversation {ConversationId}",
                     conversation.Id);

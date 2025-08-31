@@ -157,7 +157,9 @@ public class DirectSessionManager : IDirectSessionManager
 
         try
         {
-            var conversation = await _conversationRepository.GetByIdAsync(new Chat.ValueObjects.ConversationId(sessionId.Value));
+            if (_activeIdentityContext.Identity is null)
+                throw new InvalidOperationException("Identity context not loaded");
+            var conversation = await _conversationRepository.GetByIdAsync(new Chat.ValueObjects.ConversationId(sessionId.Value), _activeIdentityContext.Identity.SelfIdentityId);
             if (conversation is null)
                 throw new InvalidOperationException($"Conversation with id {sessionId} not found");
             
@@ -211,7 +213,9 @@ public class DirectSessionManager : IDirectSessionManager
 
         try
         {
-            var conversation = await _conversationRepository.GetByIdAsync(new Chat.ValueObjects.ConversationId(conversationId.Value));
+            if (_activeIdentityContext.Identity is null)
+                throw new InvalidOperationException("Identity context not loaded");
+            var conversation = await _conversationRepository.GetByIdAsync(new Chat.ValueObjects.ConversationId(conversationId.Value), _activeIdentityContext.Identity.SelfIdentityId);
             if (conversation is null)
                 throw new InvalidOperationException($"Conversation with id {conversationId} not found");
             

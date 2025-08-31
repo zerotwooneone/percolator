@@ -182,8 +182,12 @@ public abstract class IntegrationTestBase
 
         using (var scope = host.Services.CreateScope())
         {
+            // Ensure the self identity exists in the repository (and keys exist) before loading
+            var mediator = scope.ServiceProvider.GetRequiredService<MediatR.IMediator>();
+            await mediator.Send(new Percolator.Application.Cli.CreateSelfIdentityCommand(identityName, null));
+
             var identityOrchestrator = scope.ServiceProvider.GetRequiredService<IIdentityOrchestrator>();
-            await identityOrchestrator.LoadOrCreateIdentityAsync(identityName, CancellationToken.None);
+            await identityOrchestrator.ResolveIdentityAsync(identityName, CancellationToken.None);
         }
         return host;
     }

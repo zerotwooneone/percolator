@@ -24,6 +24,12 @@ public class SqliteConversationRepositoryTests
             .Options;
         var ctx = new PercolatorDbContext(options);
         ctx.Database.EnsureCreated();
+        // Seed default SelfIdentity required by repository scoping
+        if (!ctx.SelfIdentities.Any())
+        {
+            ctx.SelfIdentities.Add(new SelfIdentityDbo { Id = 1, PeerId = Guid.NewGuid(), Name = "default" });
+            ctx.SaveChanges();
+        }
         return ctx;
     }
 
@@ -46,8 +52,8 @@ public class SqliteConversationRepositoryTests
         var repo = new SqliteConversationRepository(ctx);
         var c = NewConversation();
 
-        await repo.AddAsync(c);
-        var loaded = await repo.GetByIdAsync(c.Id);
+        await repo.AddAsync(c, 1);
+        var loaded = await repo.GetByIdAsync(c.Id, 1);
 
         loaded.Should().NotBeNull();
         loaded!.Id.Value.Should().Be(c.Id.Value);
@@ -65,8 +71,8 @@ public class SqliteConversationRepositoryTests
         var repo = new SqliteConversationRepository(ctx);
         var c = NewConversation();
 
-        await repo.AddAsync(c);
-        var loaded = await repo.GetByChannelIdAsync(c.ChannelId);
+        await repo.AddAsync(c, 1);
+        var loaded = await repo.GetByChannelIdAsync(c.ChannelId, 1);
 
         loaded.Should().NotBeNull();
         loaded!.Id.Value.Should().Be(c.Id.Value);
@@ -78,7 +84,7 @@ public class SqliteConversationRepositoryTests
         var ctx = CreateDbContext(out _);
         var repo = new SqliteConversationRepository(ctx);
         var c = NewConversation();
-        await repo.AddAsync(c);
+        await repo.AddAsync(c, 1);
 
         // Create an updated conversation with different participants and messages
         var p3 = ParticipantId.NewId();
@@ -87,8 +93,8 @@ public class SqliteConversationRepositoryTests
         updated.AddMessage(p3, "new1");
         updated.AddMessage(p4, "new2");
 
-        await repo.UpdateAsync(updated);
-        var loaded = await repo.GetByIdAsync(c.Id);
+        await repo.UpdateAsync(updated, 1);
+        var loaded = await repo.GetByIdAsync(c.Id, 1);
 
         loaded!.Name.Should().Be("updated");
         loaded.Participants.Select(p => p.Value).Should().BeEquivalentTo(new[] { p3.Value, p4.Value });
@@ -103,8 +109,8 @@ public class SqliteConversationRepositoryTests
         var c1 = NewConversation();
         var c2 = new Conversation(ConversationId.NewId(), c1.ChannelId, c1.Participants, c1.Messages, "dup");
 
-        await repo.AddAsync(c1);
-        Func<Task> act = async () => await repo.AddAsync(c2);
+        await repo.AddAsync(c1, 1);
+        Func<Task> act = async () => await repo.AddAsync(c2, 1);
         await act.Should().ThrowAsync<InvalidOperationException>();
     }
 }
