@@ -342,8 +342,8 @@ async Task<int> DhtProbeCommandHandler(InvocationContext context)
         Console.ForegroundColor = ConsoleColor.Red;
         Console.WriteLine($"An error occurred while probing: {ex.Message}");
         Console.ResetColor();
+        return 500; 
     }
-    return 999; 
 }
 
 async Task ConnectCommandHandler(InvocationContext context)
