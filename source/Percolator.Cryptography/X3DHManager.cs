@@ -115,7 +115,7 @@ public class X3DHManager : IX3DHManager
         // --- DH1 ---
         if (_options.EnableCryptographicMaterialLogging)
         {
-            _logger.LogWarning("RESPONDER DH1 INPUTS: signedPreKeyEcdh={signedPreKeyEcdh}, remoteIdentityKey={remoteIdentityKey}",
+            _logger.LogInformation("RESPONDER DH1 INPUTS: signedPreKeyEcdh={signedPreKeyEcdh}, remoteIdentityKey={remoteIdentityKey}",
                 Convert.ToBase64String(signedPreKeyEcdh.PublicKey.ExportSubjectPublicKeyInfo()),
                 Convert.ToBase64String(remoteIdentityKey.Value));
         }
@@ -123,14 +123,14 @@ public class X3DHManager : IX3DHManager
         var dh1 = signedPreKeyEcdh.DeriveKeyFromHash(remoteIdentityKey.ToEcdhPublicKey(), HashAlgorithmName.SHA256);
         if (_options.EnableCryptographicMaterialLogging)
         {
-            _logger.LogWarning("RESPONDER DH1={Secret}",
+            _logger.LogInformation("RESPONDER DH1={Secret}",
                 Convert.ToBase64String(dh1));
         }
 
         // --- DH2 ---
         if (_options.EnableCryptographicMaterialLogging)
         {
-            _logger.LogWarning("RESPONDER DH2 INPUTS: identitySigningKeyEcdh={identitySigningKeyEcdh}, remoteEphemeralKey={remoteEphemeralKey}",
+            _logger.LogInformation("RESPONDER DH2 INPUTS: identitySigningKeyEcdh={identitySigningKeyEcdh}, remoteEphemeralKey={remoteEphemeralKey}",
                 Convert.ToBase64String(
                     identitySigningKeyEcdh.PublicKey.ExportSubjectPublicKeyInfo()),
                 Convert.ToBase64String(remoteEphemeralKey.Value));
@@ -140,14 +140,14 @@ public class X3DHManager : IX3DHManager
             HashAlgorithmName.SHA256);
         if (_options.EnableCryptographicMaterialLogging)
         {
-            _logger.LogWarning("RESPONDER DH2={Secret}",
+            _logger.LogInformation("RESPONDER DH2={Secret}",
                 Convert.ToBase64String(dh2));
         }
 
         // --- DH3 ---
         if (_options.EnableCryptographicMaterialLogging)
         {
-            _logger.LogWarning("RESPONDER DH3 INPUTS: signedPreKeyEcdh={signedPreKeyEcdh}, remoteEphemeralKey={remoteEphemeralKey}",
+            _logger.LogInformation("RESPONDER DH3 INPUTS: signedPreKeyEcdh={signedPreKeyEcdh}, remoteEphemeralKey={remoteEphemeralKey}",
                 Convert.ToBase64String(signedPreKeyEcdh.PublicKey.ExportSubjectPublicKeyInfo()),
                 Convert.ToBase64String(remoteEphemeralKey.Value));
         }
@@ -155,7 +155,7 @@ public class X3DHManager : IX3DHManager
         var dh3 = signedPreKeyEcdh.DeriveKeyFromHash(remoteEphemeralKey.ToEcdhPublicKey(), HashAlgorithmName.SHA256);
         if (_options.EnableCryptographicMaterialLogging)
         {
-            _logger.LogWarning("RESPONDER DH3={Secret}",
+            _logger.LogInformation("RESPONDER DH3={Secret}",
                 Convert.ToBase64String(dh3));
         }
 
@@ -168,7 +168,7 @@ public class X3DHManager : IX3DHManager
             // --- DH4 ---
             if (_options.EnableCryptographicMaterialLogging)
             {
-                _logger.LogWarning("RESPONDER DH4 INPUTS: oneTimePreKeyEcdh={oneTimePreKeyEcdh}, remoteEphemeralKey={remoteEphemeralKey}",
+                _logger.LogInformation("RESPONDER DH4 INPUTS: oneTimePreKeyEcdh={oneTimePreKeyEcdh}, remoteEphemeralKey={remoteEphemeralKey}",
                     Convert.ToBase64String(oneTimePreKeyEcdh.PublicKey.ExportSubjectPublicKeyInfo()),
                     Convert.ToBase64String(remoteEphemeralKey.Value));
             }
@@ -176,7 +176,7 @@ public class X3DHManager : IX3DHManager
             dh4 = oneTimePreKeyEcdh.DeriveKeyFromHash(remoteEphemeralKey.ToEcdhPublicKey(), HashAlgorithmName.SHA256);
             if (_options.EnableCryptographicMaterialLogging)
             {
-                _logger.LogWarning("RESPONDER DH4={Secret}",
+                _logger.LogInformation("RESPONDER DH4={Secret}",
                     Convert.ToBase64String(dh4));
             }
         }
@@ -186,7 +186,7 @@ public class X3DHManager : IX3DHManager
 
         if (_options.EnableCryptographicMaterialLogging)
         {
-            _logger.LogWarning("X3DH responder final shared secret : {Secret}",
+            _logger.LogInformation("X3DH responder final shared secret : {Secret}",
                 Convert.ToBase64String(kdfResult));
         }
 
