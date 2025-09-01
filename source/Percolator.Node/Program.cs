@@ -288,7 +288,7 @@ async Task HostCommandHandler(InvocationContext context)
     }
 }
 
-async Task DhtProbeCommandHandler(InvocationContext context)
+async Task<int> DhtProbeCommandHandler(InvocationContext context)
 {
     var endpointString = context.ParseResult.GetValueForArgument(endpointArgument);
     var targetIdentity = context.ParseResult.GetValueForOption(targetIdentityOption);
@@ -300,7 +300,7 @@ async Task DhtProbeCommandHandler(InvocationContext context)
         Console.ForegroundColor = ConsoleColor.Red;
         Console.WriteLine($"Invalid endpoint format: {endpointString}");
         Console.ResetColor();
-        return;
+        return 400;
     }
 
     var services = CreateServiceProvider();
@@ -324,7 +324,7 @@ async Task DhtProbeCommandHandler(InvocationContext context)
             Console.ForegroundColor = ConsoleColor.Yellow;
             Console.WriteLine("No closer peers were returned.");
             Console.ResetColor();
-            return;
+            return 0;
         }
 
         Console.ForegroundColor = ConsoleColor.Green;
@@ -335,6 +335,7 @@ async Task DhtProbeCommandHandler(InvocationContext context)
             var idB64 = p.HasPeerId ? Convert.ToBase64String(p.PeerId.ToByteArray()) : "<none>";
             Console.WriteLine($"- {p.Address}  id={idB64}");
         }
+        return 0;
     }
     catch (Exception ex)
     {
@@ -342,6 +343,7 @@ async Task DhtProbeCommandHandler(InvocationContext context)
         Console.WriteLine($"An error occurred while probing: {ex.Message}");
         Console.ResetColor();
     }
+    return 999; 
 }
 
 async Task ConnectCommandHandler(InvocationContext context)

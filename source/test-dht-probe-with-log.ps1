@@ -68,11 +68,32 @@ function Invoke-PercolatorSync {
 }
 
 function Invoke-With-Retry {
-    param([string[]]$CmdArgs, [int]$Retries, [int]$DelayMs)
+    param(
+        [string[]]$CmdArgs,
+        [int]$Retries,
+        [int]$DelayMs,
+        [string]$Name,
+        [string]$LogDir
+    )
     for ($i=0; $i -lt $Retries; $i++) {
-        Write-Host ("Attempt {0}/{1}: percolator {2}" -f ($i+1), $Retries, ($CmdArgs -join ' ')) -ForegroundColor DarkGray
-        $ec = Invoke-PercolatorSync -CmdArgs $CmdArgs
-        if ($ec -eq 0) { return 0 }
+        $attempt = $i + 1
+        Write-Host ("Attempt {0}/{1}: percolator {2}" -f $attempt, $Retries, ($CmdArgs -join ' ')) -ForegroundColor DarkGray
+
+        # Build arguments and log path for this attempt
+        $dotnetArgs = @($nodeDll) + $CmdArgs
+        $attemptLog = Join-Path $LogDir ("{0}_{1}_attempt{2}.log" -f $Name, $timestamp, $attempt)
+        Write-Host ("exec: dotnet {0}" -f ($dotnetArgs -join ' ')) -ForegroundColor DarkGray
+
+        # Execute and tee stdout+stderr to the attempt log
+        & dotnet @dotnetArgs *>&1 | Tee-Object -FilePath $attemptLog | Out-Null
+        $ec = $LASTEXITCODE
+        if ($ec -eq 0) {
+            Write-Host ("Success. Output captured: {0}" -f $attemptLog) -ForegroundColor DarkGreen
+            return 0
+        }
+        else {
+            Write-Host ("Failed with exit code {0}. Output captured: {1}" -f $ec, $attemptLog) -ForegroundColor DarkYellow
+        }
         Start-Sleep -Milliseconds $DelayMs
     }
     return 1
@@ -92,14 +113,16 @@ Write-Host "Host log: $hostLog" -ForegroundColor DarkCyan
 Start-Sleep -Seconds 4
 
 try {
-    $endpoint = "localhost:$Port"
+    # The host listens HTTP on $Port and gRPC on ($Port + 1). Probe needs the gRPC endpoint.
+    $grpcPort = $Port + 1
+    $endpoint = "localhost:$grpcPort"
 
     Write-Host "Alice probing Host (expect empty nearest list)..." -ForegroundColor Yellow
-    $ec = Invoke-With-Retry -CmdArgs @("dht-probe", $endpoint, "--target-identity", "host", "--selfIdentity", "alice") -Retries $Retries -DelayMs $RetryDelayMs
+    $ec = Invoke-With-Retry -CmdArgs @("dht-probe", $endpoint, "--target-identity", "host", "--selfIdentity", "alice") -Retries $Retries -DelayMs $RetryDelayMs -Name "alice_dht_probe" -LogDir $LogDir
     if ($ec -ne 0) { throw "Alice probe failed after $Retries attempts" }
 
     Write-Host "Bob probing Host (expect nearest to include Alice)..." -ForegroundColor Yellow
-    $ec = Invoke-With-Retry -CmdArgs @("dht-probe", $endpoint, "--target-identity", "host", "--selfIdentity", "bob") -Retries $Retries -DelayMs $RetryDelayMs
+    $ec = Invoke-With-Retry -CmdArgs @("dht-probe", $endpoint, "--target-identity", "host", "--selfIdentity", "bob") -Retries $Retries -DelayMs $RetryDelayMs -Name "bob_dht_probe" -LogDir $LogDir
     if ($ec -ne 0) { throw "Bob probe failed after $Retries attempts" }
 }
 finally {
