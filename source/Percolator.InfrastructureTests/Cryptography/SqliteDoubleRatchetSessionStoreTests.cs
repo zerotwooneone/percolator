@@ -25,6 +25,9 @@ public class SqliteDoubleRatchetSessionStoreTests
             .Options;
         var ctx = new PercolatorDbContext(options);
         ctx.Database.EnsureCreated();
+        // Seed a SelfIdentity required by DoubleRatchetSessions FK
+        ctx.SelfIdentities.Add(new SelfIdentityDbo { Name = "test", PeerId = Guid.NewGuid() });
+        ctx.SaveChanges();
         return ctx;
     }
 
@@ -69,9 +72,10 @@ public class SqliteDoubleRatchetSessionStoreTests
         var store = new SqliteDoubleRatchetSessionStore(ctx, NullLogger<SqliteDoubleRatchetSessionStore>.Instance);
         var sessionId = SessionId.NewId();
         var state = CreateTestSessionState();
+        var selfIdentityId = await ctx.SelfIdentities.Select(s => s.Id).FirstAsync();
 
-        await store.SetSessionStateAsync(sessionId, state);
-        var loaded = await store.GetSessionStateAsync(sessionId);
+        await store.SetSessionStateAsync(sessionId, state, selfIdentityId);
+        var loaded = await store.GetSessionStateAsync(sessionId, selfIdentityId);
 
         loaded.Should().NotBeNull();
         loaded!.RootKey!.Value.Should().BeEquivalentTo(state.RootKey!.Value);
@@ -98,14 +102,15 @@ public class SqliteDoubleRatchetSessionStoreTests
         var ctx = CreateDbContext(out var _);
         var store = new SqliteDoubleRatchetSessionStore(ctx, NullLogger<SqliteDoubleRatchetSessionStore>.Instance);
         var sessionId = SessionId.NewId();
+        var selfIdentityId = await ctx.SelfIdentities.Select(s => s.Id).FirstAsync();
 
         var s1 = CreateTestSessionState();
-        await store.SetSessionStateAsync(sessionId, s1);
+        await store.SetSessionStateAsync(sessionId, s1, selfIdentityId);
 
         var s2 = CreateTestSessionState();
-        await store.SetSessionStateAsync(sessionId, s2);
+        await store.SetSessionStateAsync(sessionId, s2, selfIdentityId);
 
-        var loaded = await store.GetSessionStateAsync(sessionId);
+        var loaded = await store.GetSessionStateAsync(sessionId, selfIdentityId);
         loaded!.RootKey!.Value.Should().BeEquivalentTo(s2.RootKey!.Value);
     }
 }

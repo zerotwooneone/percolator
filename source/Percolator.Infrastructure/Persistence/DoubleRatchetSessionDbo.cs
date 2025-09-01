@@ -7,6 +7,9 @@ public class DoubleRatchetSessionDbo
 {
     public Guid SessionId { get; set; }
 
+    // Partitioning scope
+    public int SelfIdentityId { get; set; }
+
     // Core state
     public byte[] RootKey { get; set; } = Array.Empty<byte>();
     public bool RatchetFlag { get; set; }

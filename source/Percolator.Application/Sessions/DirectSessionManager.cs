@@ -90,7 +90,9 @@ public class DirectSessionManager : IDirectSessionManager
             }
         }
         
-        await _sessionStore.SetSessionStateAsync(sessionId, state);
+        if (_activeIdentityContext.Identity is null)
+            throw new InvalidOperationException("Identity context not loaded");
+        await _sessionStore.SetSessionStateAsync(sessionId, state, _activeIdentityContext.Identity.SelfIdentityId);
         _sessionLocks.TryAdd(conversationId, new SemaphoreSlim(1, 1));
     }
 
@@ -138,7 +140,9 @@ public class DirectSessionManager : IDirectSessionManager
                 Convert.ToBase64String(state.DhRatchetPrivateKey.Value));
         }
         
-        await _sessionStore.SetSessionStateAsync(sessionId, state);
+        if (_activeIdentityContext.Identity is null)
+            throw new InvalidOperationException("Identity context not loaded");
+        await _sessionStore.SetSessionStateAsync(sessionId, state, _activeIdentityContext.Identity.SelfIdentityId);
         _sessionLocks.TryAdd(conversationId, new SemaphoreSlim(1, 1));
     }
 
@@ -165,7 +169,7 @@ public class DirectSessionManager : IDirectSessionManager
             
             _logger.LogInformation("Receive message for conversation {ConversationId}. SessionId: {SessionId}", sessionId, sessionId);
 
-            var sessionState = await _sessionStore.GetSessionStateAsync(sessionId);
+            var sessionState = await _sessionStore.GetSessionStateAsync(sessionId, _activeIdentityContext.Identity.SelfIdentityId);
             if (sessionState == null)
             {
                 throw new InvalidOperationException($"Double Ratchet session state for conversation {sessionId} not found.");
@@ -186,7 +190,7 @@ public class DirectSessionManager : IDirectSessionManager
             var decryptedPlaintext = session.Decrypt(encryptedMessage);
 
             // Save the updated state
-            await _sessionStore.SetSessionStateAsync(sessionId, session.GetState());
+            await _sessionStore.SetSessionStateAsync(sessionId, session.GetState(), _activeIdentityContext.Identity.SelfIdentityId);
 
             if (decryptedPlaintext is null)
             {
@@ -222,7 +226,7 @@ public class DirectSessionManager : IDirectSessionManager
             var sessionId = new SessionId(conversationId.Value);
             _logger.LogInformation("Encrypt message for conversation {ConversationId}. SessionId: {SessionId}", conversationId, sessionId);
             
-            var sessionState = await _sessionStore.GetSessionStateAsync(sessionId);
+            var sessionState = await _sessionStore.GetSessionStateAsync(sessionId, _activeIdentityContext.Identity.SelfIdentityId);
             if (sessionState == null)
             {
                 throw new InvalidOperationException($"Double Ratchet session state for conversation {conversationId} not found.");
@@ -243,7 +247,7 @@ public class DirectSessionManager : IDirectSessionManager
             var encryptedMessage = session.Encrypt(plaintext);
 
             // Save the updated state
-            await _sessionStore.SetSessionStateAsync(sessionId, session.GetState());
+            await _sessionStore.SetSessionStateAsync(sessionId, session.GetState(), _activeIdentityContext.Identity.SelfIdentityId);
 
             return encryptedMessage;
         }

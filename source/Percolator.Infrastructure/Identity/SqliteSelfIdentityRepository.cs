@@ -34,6 +34,29 @@ namespace Percolator.Infrastructure.Identity
             var dbo = await _db.SelfIdentities.AsNoTracking().FirstOrDefaultAsync(x => x.Name == name);
             return dbo is null ? null : Map(dbo);
         }
+        
+        public async Task<SelfIdentityDto?> GetByNameWithFallbackAsync(string name, string fallbackName)
+        {
+            if (string.IsNullOrWhiteSpace(fallbackName))
+            {
+                return await GetByNameAsync(name);
+            }
+            var identityDbos = await _db.SelfIdentities.AsNoTracking()
+                .Where(x => x.Name == name || x.Name == fallbackName).ToListAsync();
+            if (identityDbos.Count == 0)
+            {
+                return null;
+            }
+            var target = identityDbos.FirstOrDefault(x => x.Name == name) ?? 
+                         identityDbos.FirstOrDefault(x => x.Name == fallbackName);
+            if (target is null)
+            {
+                return null;
+            }
+            return Map(target);
+        }
+        
+        //Task<SelfIdentityDto?> GetByNameWithFallbackAsync(string name, string fallbackName)
 
         public async Task<IReadOnlyList<SelfIdentityDto>> ListAsync()
         {

@@ -29,6 +29,7 @@ using MediatR;
 using Percolator.Application.Cli;
 
 var rootCommand = new RootCommand("Percolator Node: A secure peer-to-peer communication tool.");
+const string defaultIdentityName = "default";
 
 // *** Common Options ***
 var identityOption = new Option<string>(
@@ -158,7 +159,7 @@ async Task HostCommandHandler(InvocationContext context)
         // Load identity for other features (but not for TLS)
         IIdentityOrchestrator tempIdentityOrchestrator = tempServiceProvider.GetRequiredService<IIdentityOrchestrator>();
         ActiveIdentityContext tempActiveIdentityContext = tempServiceProvider.GetRequiredService<ActiveIdentityContext>();
-        await tempIdentityOrchestrator.ResolveIdentityAsync(identityName!, cancellationToken);
+        await tempIdentityOrchestrator.ResolveIdentityAsync(identityName!, cancellationToken, defaultIdentityName);
         
         string publicKeyB64 = Convert.ToBase64String(tempActiveIdentityContext.Keys!.IdentitySigningKey.ExportSubjectPublicKeyInfo());
 
@@ -215,17 +216,34 @@ async Task HostCommandHandler(InvocationContext context)
 
         WebApplication app = builder.Build();
 
-        // Apply database migrations on startup
+        // Apply database migrations conditionally based on environment
         using (var scope = app.Services.CreateScope())
         {
             var dbContext = scope.ServiceProvider.GetRequiredService<Percolator.Infrastructure.Persistence.PercolatorDbContext>();
-            await dbContext.Database.MigrateAsync(cancellationToken);
+            var hostEnv = scope.ServiceProvider.GetRequiredService<IHostEnvironment>();
+            if (hostEnv.IsDevelopment())
+            {
+                // In Development, apply migrations automatically for convenience
+                await dbContext.Database.MigrateAsync(cancellationToken);
+            }
+            else
+            {
+                // In non-Development, fail fast if schema is not up to date
+                var pending = await dbContext.Database.GetPendingMigrationsAsync(cancellationToken);
+                if (pending.Any())
+                {
+                    throw new InvalidOperationException(
+                        "Database schema is out of date. Pending migrations detected: " +
+                        string.Join(", ", pending) +
+                        ". Please run EF migrations (e.g., 'dotnet ef database update') before starting the node.");
+                }
+            }
         }
 
         // Step 4: Manually initialize the identity *again* using the main service provider
         // to ensure the ActiveIdentityContext is correct for the running application.
         IIdentityOrchestrator identityOrchestrator = app.Services.GetRequiredService<IIdentityOrchestrator>();
-        await identityOrchestrator.ResolveIdentityAsync(identityName!, cancellationToken);
+        await identityOrchestrator.ResolveIdentityAsync(identityName!, cancellationToken, defaultIdentityName);
 
         // Initialize the in-memory peer trust store
         var peerTrustManager = app.Services.GetRequiredService<IPeerTrustManager>();
@@ -263,7 +281,7 @@ async Task DhtProbeCommandHandler(InvocationContext context)
     {
         // Ensure local identity is loaded; handler will use ActiveIdentityContext
         var identityOrchestrator = serviceProvider.GetRequiredService<IIdentityOrchestrator>();
-        await identityOrchestrator.ResolveIdentityAsync(selfIdentity!, cancellationToken);
+        await identityOrchestrator.ResolveIdentityAsync(selfIdentity!, cancellationToken, defaultIdentityName);
 
         // Delegate probing to MediatR handler which will resolve required services
         var mediator = serviceProvider.GetRequiredService<IMediator>();
@@ -318,7 +336,7 @@ async Task ConnectCommandHandler(InvocationContext context)
     try
     {
         var identityOrchestrator = serviceProvider.GetRequiredService<IIdentityOrchestrator>();
-        await identityOrchestrator.ResolveIdentityAsync(identityName!, cancellationToken);
+        await identityOrchestrator.ResolveIdentityAsync(identityName!, cancellationToken, defaultIdentityName);
 
         var mediator = serviceProvider.GetRequiredService<IMediator>();
         var conversationId = await mediator.Send(new ConnectToPeerCommand(endpoint, peerName!), cancellationToken);
@@ -351,7 +369,7 @@ async Task SendCommandHandler(InvocationContext context)
     try
     {
         var identityOrchestrator = serviceProvider.GetRequiredService<IIdentityOrchestrator>();
-        await identityOrchestrator.ResolveIdentityAsync(identityName!, cancellationToken);
+        await identityOrchestrator.ResolveIdentityAsync(identityName!, cancellationToken, defaultIdentityName);
 
         var logger = serviceProvider.GetRequiredService<ILogger<Program>>();
         var activeIdentityContext = serviceProvider.GetRequiredService<ActiveIdentityContext>();

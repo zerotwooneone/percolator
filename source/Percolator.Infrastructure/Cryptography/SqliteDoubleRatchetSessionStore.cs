@@ -20,12 +20,12 @@ public sealed class SqliteDoubleRatchetSessionStore : IDoubleRatchetSessionStore
         _logger = logger;
     }
 
-    public async Task<DoubleRatchetSession.DoubleRatchetSessionState?> GetSessionStateAsync(SessionId sessionId)
+    public async Task<DoubleRatchetSession.DoubleRatchetSessionState?> GetSessionStateAsync(SessionId sessionId, int selfIdentityId)
     {
         var dbo = await _db.DoubleRatchetSessions
             .AsNoTracking()
             .Include(s => s.SkippedMessageKeys)
-            .FirstOrDefaultAsync(s => s.SessionId == sessionId.Value);
+            .FirstOrDefaultAsync(s => s.SessionId == sessionId.Value && s.SelfIdentityId == selfIdentityId);
 
         if (dbo is null)
         {
@@ -57,21 +57,23 @@ public sealed class SqliteDoubleRatchetSessionStore : IDoubleRatchetSessionStore
         return state;
     }
 
-    public async Task SetSessionStateAsync(SessionId sessionId, DoubleRatchetSession.DoubleRatchetSessionState sessionState)
+    public async Task SetSessionStateAsync(SessionId sessionId, DoubleRatchetSession.DoubleRatchetSessionState sessionState, int selfIdentityId)
     {
         var dbo = await _db.DoubleRatchetSessions
             .Include(s => s.SkippedMessageKeys)
-            .FirstOrDefaultAsync(s => s.SessionId == sessionId.Value);
+            .FirstOrDefaultAsync(s => s.SessionId == sessionId.Value && s.SelfIdentityId == selfIdentityId);
 
         if (dbo is null)
         {
             dbo = new DoubleRatchetSessionDbo
             {
-                SessionId = sessionId.Value
+                SessionId = sessionId.Value,
+                SelfIdentityId = selfIdentityId
             };
             _db.DoubleRatchetSessions.Add(dbo);
         }
 
+        dbo.SelfIdentityId = selfIdentityId;
         dbo.RootKey = sessionState.RootKey!.Value;
         dbo.RatchetFlag = sessionState.RatchetFlag;
         dbo.SendingChainKey = sessionState.SendingChainKey?.Value;
@@ -92,6 +94,7 @@ public sealed class SqliteDoubleRatchetSessionStore : IDoubleRatchetSessionStore
             dbo.SkippedMessageKeys.Add(new SkippedMessageKeyDbo
             {
                 SessionId = sessionId.Value,
+                SelfIdentityId = selfIdentityId,
                 RatchetKey = identifier.RatchetKey.Value,
                 MessageNumber = identifier.MessageNumber,
                 MessageKey = kvp.Value

@@ -203,6 +203,8 @@ public class PercolatorDbContext : DbContext
             entity.Property(e => e.SessionId)
                 .ValueGeneratedNever();
 
+            entity.Property(e => e.SelfIdentityId).IsRequired();
+            entity.HasAlternateKey(e => new { e.SessionId, e.SelfIdentityId });
             entity.Property(e => e.RootKey).IsRequired();
             entity.Property(e => e.RatchetFlag).IsRequired();
             entity.Property(e => e.SendingChainKey);
@@ -217,11 +219,17 @@ public class PercolatorDbContext : DbContext
 
             entity.HasMany(e => e.SkippedMessageKeys)
                 .WithOne(k => k.Session)
-                .HasForeignKey(k => k.SessionId)
+                .HasForeignKey(k => new { k.SessionId, k.SelfIdentityId })
+                .HasPrincipalKey(e => new { e.SessionId, e.SelfIdentityId })
                 .IsRequired()
                 .OnDelete(DeleteBehavior.Cascade);
 
-            entity.HasIndex(e => e.UpdatedAt);
+            entity.HasIndex(e => new { e.SelfIdentityId, e.UpdatedAt });
+            entity.HasOne<SelfIdentityDbo>()
+                .WithMany()
+                .HasForeignKey(e => e.SelfIdentityId)
+                .OnDelete(DeleteBehavior.Cascade)
+                .IsRequired();
         });
 
         // SkippedMessageKey (surrogate PK with uniqueness constraint)
@@ -232,7 +240,8 @@ public class PercolatorDbContext : DbContext
             entity.Property(e => e.RatchetKey).IsRequired();
             entity.Property(e => e.MessageNumber).IsRequired();
             entity.Property(e => e.MessageKey).IsRequired();
-            entity.HasIndex(e => new { e.SessionId, e.RatchetKey, e.MessageNumber }).IsUnique();
+            entity.Property(e => e.SelfIdentityId).IsRequired();
+            entity.HasIndex(e => new { e.SelfIdentityId, e.SessionId, e.RatchetKey, e.MessageNumber }).IsUnique();
         });
 
         // Conversations

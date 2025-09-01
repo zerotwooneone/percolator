@@ -9,14 +9,16 @@ public interface IDoubleRatchetSessionStore
     /// Retrieves the session state for a given session ID.
     /// </summary>
     /// <param name="sessionId">The unique identifier for the session (typically a GUID).</param>
+    /// <param name="selfIdentityId">The active SelfIdentity scope.</param>
     /// <returns>The session state, or null if not found.</returns>
-    Task<DoubleRatchetSession.DoubleRatchetSessionState?> GetSessionStateAsync(SessionId sessionId);
+    Task<DoubleRatchetSession.DoubleRatchetSessionState?> GetSessionStateAsync(SessionId sessionId, int selfIdentityId);
 
     /// <summary>
     /// Saves the session state for a given session ID.
     /// </summary>
     /// <param name="sessionId">The unique identifier for the session.</param>
     /// <param name="sessionState">The session state to save.</param>
+    /// <param name="selfIdentityId">The active SelfIdentity scope.</param>
     /// <returns>A task representing the asynchronous operation.</returns>
-    Task SetSessionStateAsync(SessionId sessionId, DoubleRatchetSession.DoubleRatchetSessionState sessionState);
+    Task SetSessionStateAsync(SessionId sessionId, DoubleRatchetSession.DoubleRatchetSessionState sessionState, int selfIdentityId);
 }

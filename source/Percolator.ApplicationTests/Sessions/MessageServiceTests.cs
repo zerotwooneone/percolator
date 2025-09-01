@@ -125,7 +125,7 @@ public class MessageServiceTests
 
         // Create the SessionId to match how MessageService creates it (directly from conversationId.Value)
         var sessionId = new SessionId(directSessionId.Value);
-        _mockSessionStore.Setup(s => s.GetSessionStateAsync(sessionId)).ReturnsAsync(dummySessionState);
+        _mockSessionStore.Setup(s => s.GetSessionStateAsync(sessionId, localIdentity.SelfIdentityId)).ReturnsAsync(dummySessionState);
 
         // Act
         await _messageService.SendDirectMessageAsync(directSessionId, "Hello", remotePeerId);

@@ -103,8 +103,8 @@ public class DirectSessionManagerTests
             _options);
             
         // Setup session store mocks to use class-level state variables
-        _aliceSessionStore.Setup(x => x.SetSessionStateAsync(It.IsAny<SessionId>(), It.IsAny<DoubleRatchetSession.DoubleRatchetSessionState>()))
-            .Callback<SessionId, DoubleRatchetSession.DoubleRatchetSessionState>((sessionId, state) => 
+        _aliceSessionStore.Setup(x => x.SetSessionStateAsync(It.IsAny<SessionId>(), It.IsAny<DoubleRatchetSession.DoubleRatchetSessionState>(), It.IsAny<int>()))
+            .Callback<SessionId, DoubleRatchetSession.DoubleRatchetSessionState, int>((sessionId, state, selfIdentityId) => 
             {
                 if (sessionId == _sessionId)
                 {
@@ -112,8 +112,8 @@ public class DirectSessionManagerTests
                 }
             })
             .Returns(Task.CompletedTask);
-        _bobSessionStore.Setup(x => x.SetSessionStateAsync(It.IsAny<SessionId>(), It.IsAny<DoubleRatchetSession.DoubleRatchetSessionState>()))
-            .Callback<SessionId, DoubleRatchetSession.DoubleRatchetSessionState>((sessionId, state) => 
+        _bobSessionStore.Setup(x => x.SetSessionStateAsync(It.IsAny<SessionId>(), It.IsAny<DoubleRatchetSession.DoubleRatchetSessionState>(), It.IsAny<int>()))
+            .Callback<SessionId, DoubleRatchetSession.DoubleRatchetSessionState, int>((sessionId, state, selfIdentityId) => 
             {
                 if (sessionId == _sessionId)
                 {
@@ -121,10 +121,10 @@ public class DirectSessionManagerTests
                 }
             })
             .Returns(Task.CompletedTask);
-            
-        _aliceSessionStore.Setup(x => x.GetSessionStateAsync(It.IsAny<SessionId>()))
+        
+        _aliceSessionStore.Setup(x => x.GetSessionStateAsync(It.IsAny<SessionId>(), It.IsAny<int>()))
             .ReturnsAsync(() => _aliceSessionState);
-        _bobSessionStore.Setup(x => x.GetSessionStateAsync(It.IsAny<SessionId>()))
+        _bobSessionStore.Setup(x => x.GetSessionStateAsync(It.IsAny<SessionId>(), It.IsAny<int>()))
             .ReturnsAsync(() => _bobSessionState);
     }
 

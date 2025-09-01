@@ -28,7 +28,7 @@ public class IdentityOrchestrator : IIdentityOrchestrator
         _activeIdentityContext = activeIdentityContext;
     }
 
-    public async Task ResolveIdentityAsync(string identityName, CancellationToken cancellationToken)
+    public async Task ResolveIdentityAsync(string identityName, CancellationToken cancellationToken, string? fallbackIdentityName=null)
     {
         if (string.IsNullOrEmpty(identityName))
         {
@@ -36,7 +36,7 @@ public class IdentityOrchestrator : IIdentityOrchestrator
         }
 
         // Resolve and assign SelfIdentityId for scoping
-        var dto = await _selfIdentityRepository.GetByNameAsync(identityName);
+        var dto = await _selfIdentityRepository.GetByNameWithFallbackAsync(identityName, fallbackIdentityName??String.Empty);
         if (dto is null)
         {
             throw new InvalidOperationException($"Identity {identityName} not found");

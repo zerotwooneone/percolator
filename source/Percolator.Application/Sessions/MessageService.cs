@@ -56,7 +56,7 @@ public class MessageService : IMessageService
         }
         var selfIdentityId = _activeIdentityContext.Identity.SelfIdentityId;
         var sessionId = new SessionId(directSessionId.Value);
-        var sessionState = await _sessionStore.GetSessionStateAsync(sessionId);
+        var sessionState = await _sessionStore.GetSessionStateAsync(sessionId, selfIdentityId);
         if (sessionState == null)
         {
             throw new InvalidOperationException($"Double Ratchet session state for conversation {directSessionId} not found.");
