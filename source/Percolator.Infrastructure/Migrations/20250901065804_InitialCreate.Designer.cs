@@ -11,8 +11,8 @@ using Percolator.Infrastructure.Persistence;
 namespace Percolator.Infrastructure.Migrations
 {
     [DbContext(typeof(PercolatorDbContext))]
-    [Migration("20250830051514_AddConversationTables")]
-    partial class AddConversationTables
+    [Migration("20250901065804_InitialCreate")]
+    partial class InitialCreate
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -69,13 +69,15 @@ namespace Percolator.Infrastructure.Migrations
                     b.Property<string>("Name")
                         .HasColumnType("TEXT");
 
+                    b.Property<int>("SelfIdentityId")
+                        .HasColumnType("INTEGER");
+
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
 
-                    b.HasIndex("ChannelId")
-                        .IsUnique();
+                    b.HasIndex("SelfIdentityId", "ChannelId");
 
                     b.ToTable("Conversations", (string)null);
                 });
@@ -102,16 +104,19 @@ namespace Percolator.Infrastructure.Migrations
                     b.Property<Guid>("RemotePeerId")
                         .HasColumnType("TEXT");
 
+                    b.Property<int>("SelfIdentityId")
+                        .HasColumnType("INTEGER");
+
                     b.Property<Guid>("SessionId")
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
 
-                    b.HasIndex("RemotePeerId")
-                        .IsUnique();
+                    b.HasIndex("RemotePeerId");
 
-                    b.HasIndex("SessionId")
-                        .IsUnique();
+                    b.HasIndex("SelfIdentityId", "RemotePeerId");
+
+                    b.HasIndex("SelfIdentityId", "SessionId");
 
                     b.ToTable("DirectSession", (string)null);
                 });
@@ -140,6 +145,9 @@ namespace Percolator.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("BLOB");
 
+                    b.Property<int>("SelfIdentityId")
+                        .HasColumnType("INTEGER");
+
                     b.Property<byte[]>("SendingChainKey")
                         .HasColumnType("BLOB");
 
@@ -158,7 +166,7 @@ namespace Percolator.Infrastructure.Migrations
 
                     b.HasKey("SessionId");
 
-                    b.HasIndex("UpdatedAt");
+                    b.HasIndex("SelfIdentityId", "UpdatedAt");
 
                     b.ToTable("DoubleRatchetSessions", (string)null);
                 });
@@ -271,6 +279,49 @@ namespace Percolator.Infrastructure.Migrations
                     b.ToTable("PeerIdentityKeys");
                 });
 
+            modelBuilder.Entity("Percolator.Infrastructure.Persistence.SelfIdentityDbo", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("PeerId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Name")
+                        .IsUnique();
+
+                    b.HasIndex("PeerId");
+
+                    b.ToTable("SelfIdentity", (string)null);
+                });
+
+            modelBuilder.Entity("Percolator.Infrastructure.Persistence.SelfIdentityKnownPeerDbo", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("PeerId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("SelfIdentityId")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SelfIdentityId", "PeerId")
+                        .IsUnique();
+
+                    b.ToTable("SelfIdentityKnownPeer", (string)null);
+                });
+
             modelBuilder.Entity("Percolator.Infrastructure.Persistence.SignedPreKeyDbo", b =>
                 {
                     b.Property<string>("Id")
@@ -311,12 +362,17 @@ namespace Percolator.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("BLOB");
 
+                    b.Property<int>("SelfIdentityId")
+                        .HasColumnType("INTEGER");
+
                     b.Property<Guid>("SessionId")
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
 
-                    b.HasIndex("SessionId", "RatchetKey", "MessageNumber")
+                    b.HasIndex("SessionId", "SelfIdentityId");
+
+                    b.HasIndex("SelfIdentityId", "SessionId", "RatchetKey", "MessageNumber")
                         .IsUnique();
 
                     b.ToTable("SkippedMessageKeys", (string)null);
@@ -348,6 +404,15 @@ namespace Percolator.Infrastructure.Migrations
                     b.ToTable("TlsCertificates");
                 });
 
+            modelBuilder.Entity("Percolator.Infrastructure.Persistence.ConversationDbo", b =>
+                {
+                    b.HasOne("Percolator.Infrastructure.Persistence.SelfIdentityDbo", null)
+                        .WithMany()
+                        .HasForeignKey("SelfIdentityId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Percolator.Infrastructure.Persistence.ConversationParticipantDbo", b =>
                 {
                     b.HasOne("Percolator.Infrastructure.Persistence.ConversationDbo", "Conversation")
@@ -362,8 +427,23 @@ namespace Percolator.Infrastructure.Migrations
             modelBuilder.Entity("Percolator.Infrastructure.Persistence.DirectSessionDbo", b =>
                 {
                     b.HasOne("Percolator.Infrastructure.Persistence.PeerConnectionDbo", null)
-                        .WithOne()
-                        .HasForeignKey("Percolator.Infrastructure.Persistence.DirectSessionDbo", "RemotePeerId")
+                        .WithMany()
+                        .HasForeignKey("RemotePeerId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Percolator.Infrastructure.Persistence.SelfIdentityDbo", null)
+                        .WithMany()
+                        .HasForeignKey("SelfIdentityId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Percolator.Infrastructure.Persistence.DoubleRatchetSessionDbo", b =>
+                {
+                    b.HasOne("Percolator.Infrastructure.Persistence.SelfIdentityDbo", null)
+                        .WithMany()
+                        .HasForeignKey("SelfIdentityId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });
@@ -421,6 +501,15 @@ namespace Percolator.Infrastructure.Migrations
                     b.Navigation("Peer");
                 });
 
+            modelBuilder.Entity("Percolator.Infrastructure.Persistence.SelfIdentityKnownPeerDbo", b =>
+                {
+                    b.HasOne("Percolator.Infrastructure.Persistence.SelfIdentityDbo", null)
+                        .WithMany()
+                        .HasForeignKey("SelfIdentityId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Percolator.Infrastructure.Persistence.SignedPreKeyDbo", b =>
                 {
                     b.HasOne("Percolator.Infrastructure.Persistence.PeerIdentityKeyDbo", "PeerIdentityKey")
@@ -436,7 +525,8 @@ namespace Percolator.Infrastructure.Migrations
                 {
                     b.HasOne("Percolator.Infrastructure.Persistence.DoubleRatchetSessionDbo", "Session")
                         .WithMany("SkippedMessageKeys")
-                        .HasForeignKey("SessionId")
+                        .HasForeignKey("SessionId", "SelfIdentityId")
+                        .HasPrincipalKey("SessionId", "SelfIdentityId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 

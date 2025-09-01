@@ -7,7 +7,7 @@ public static class ServiceCollectionExtensions
 {
     public static IServiceCollection AddChatInfrastructure(this IServiceCollection services)
     {
-        services.AddSingleton<IConversationRepository, SqliteConversationRepository>();
+        services.AddScoped<IConversationRepository, SqliteConversationRepository>();
         return services;
     }
 }

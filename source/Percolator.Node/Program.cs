@@ -32,10 +32,10 @@ var rootCommand = new RootCommand("Percolator Node: A secure peer-to-peer commun
 const string defaultIdentityName = "default";
 
 // *** Common Options ***
-var identityOption = new Option<string>(
-    new[] { "--identity", "-i" },
+var selfIdentityOption = new Option<string>(
+    new[] { "--selfIdentity" },
     getDefaultValue: () => "default",
-    description: "The name of the identity to use.");
+    description: "The name of the local identity to use (defaults to 'default').");
 
 // *** Host Command ***
 var portOption = new Option<int?>(
@@ -45,7 +45,7 @@ var portOption = new Option<int?>(
 
 var hostCommand = new Command("host", "Starts the node, listens for peers, and hosts the gRPC service.")
 {
-    identityOption,
+    selfIdentityOption,
     portOption
 };
 rootCommand.AddCommand(hostCommand);
@@ -58,7 +58,7 @@ var connectCommand = new Command("connect", "Connect to a peer and establish a s
 {
     endpointArgument,
     peerNameOption,
-    identityOption
+    selfIdentityOption
 };
 rootCommand.AddCommand(connectCommand);
 
@@ -73,7 +73,7 @@ var sendCommand = new Command("send", "Send a message to a peer.")
     messageArgument,
     endpointOption,
     peerNameOption,
-    identityOption
+    selfIdentityOption
 };
 rootCommand.AddCommand(sendCommand);
 
@@ -88,7 +88,6 @@ var targetIdentityOption = new Option<string>(new[] { "--target-identity", "-i" 
 {
     IsRequired = true
 };
-var selfIdentityOption = new Option<string>(new[] { "--self" }, getDefaultValue: () => "default", description: "The local identity to use (defaults to 'default').");
 
 var dhtProbeCommand = new Command("dht-probe", "Send a DHT Ping then FindNode against a peer endpoint using hashed local identity signing key.")
 {
@@ -98,6 +97,49 @@ var dhtProbeCommand = new Command("dht-probe", "Send a DHT Ping then FindNode ag
 };
 rootCommand.AddCommand(dhtProbeCommand);
 
+// *** Create Identity Command ***
+var nameOption = new Option<string>(new[] { "--name" }, description: "Name of the identity to create")
+{
+    IsRequired = true
+};
+var createPeerIdOption = new Option<Guid?>(new[] { "--peer-id" }, description: "Optional PeerId to assign to the identity (defaults to a new GUID)");
+
+var createIdentityCommand = new Command("create-identity", "Creates a local self identity and its key material (idempotent).")
+{
+    nameOption,
+    createPeerIdOption
+};
+rootCommand.AddCommand(createIdentityCommand);
+
+// Define handlers before registration
+
+async Task CreateIdentityCommandHandler(InvocationContext context)
+{
+    var name = context.ParseResult.GetValueForOption(nameOption);
+    var peerId = context.ParseResult.GetValueForOption(createPeerIdOption);
+    var cancellationToken = context.GetCancellationToken();
+
+    var services = CreateServiceProvider();
+    await using var serviceScope = services.CreateAsyncScope();
+    var serviceProvider = serviceScope.ServiceProvider;
+
+    try
+    {
+        var mediator = serviceProvider.GetRequiredService<IMediator>();
+        var id = await mediator.Send(new CreateSelfIdentityCommand(name!, peerId), cancellationToken);
+
+        Console.ForegroundColor = ConsoleColor.Green;
+        Console.WriteLine($"Identity '{name}' ensured. SelfIdentityId={id}");
+        Console.ResetColor();
+    }
+    catch (Exception ex)
+    {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine($"An error occurred while creating identity: {ex.Message}");
+        Console.ResetColor();
+    }
+}
+
 // --- Command Handlers ---
 
 hostCommand.SetHandler(HostCommandHandler);
@@ -105,6 +147,7 @@ connectCommand.SetHandler(ConnectCommandHandler);
 sendCommand.SetHandler(SendCommandHandler);
 tlsDebugCommand.SetHandler(TlsDebugCommandHandler);
 dhtProbeCommand.SetHandler(DhtProbeCommandHandler);
+createIdentityCommand.SetHandler(CreateIdentityCommandHandler);
 
 // --- Run Application ---
 return await rootCommand.InvokeAsync(args);
@@ -114,7 +157,7 @@ return await rootCommand.InvokeAsync(args);
 async Task HostCommandHandler(InvocationContext context)
 {
     CancellationToken cancellationToken = context.GetCancellationToken();
-    string? identityName = context.ParseResult.GetValueForOption(identityOption);
+    string? identityName = context.ParseResult.GetValueForOption(selfIdentityOption);
 
     // Step 1: Build a temporary service provider to get services needed for startup.
     var tempServices = new ServiceCollection();
@@ -134,6 +177,7 @@ async Task HostCommandHandler(InvocationContext context)
         });
     }
 
+
     IConfigurationRoot tempConfig = tempConfigBuilder.Build();
     tempServices.AddLogging(builder => builder
         .AddConsole()
@@ -146,6 +190,9 @@ async Task HostCommandHandler(InvocationContext context)
 
     try
     {
+        // Ensure database schema is up to date BEFORE resolving identity using the temp provider
+        await EnsureMigrationsAsync(tempServiceProvider, cancellationToken);
+
         // Get a logger for startup information
         var logger = tempServiceProvider.GetRequiredService<ILogger<Program>>();
         var nodeOptions = tempServiceProvider.GetRequiredService<IOptions<NodeOptions>>().Value;
@@ -217,37 +264,20 @@ async Task HostCommandHandler(InvocationContext context)
         WebApplication app = builder.Build();
 
         // Apply database migrations conditionally based on environment
-        using (var scope = app.Services.CreateScope())
-        {
-            var dbContext = scope.ServiceProvider.GetRequiredService<Percolator.Infrastructure.Persistence.PercolatorDbContext>();
-            var hostEnv = scope.ServiceProvider.GetRequiredService<IHostEnvironment>();
-            if (hostEnv.IsDevelopment())
-            {
-                // In Development, apply migrations automatically for convenience
-                await dbContext.Database.MigrateAsync(cancellationToken);
-            }
-            else
-            {
-                // In non-Development, fail fast if schema is not up to date
-                var pending = await dbContext.Database.GetPendingMigrationsAsync(cancellationToken);
-                if (pending.Any())
-                {
-                    throw new InvalidOperationException(
-                        "Database schema is out of date. Pending migrations detected: " +
-                        string.Join(", ", pending) +
-                        ". Please run EF migrations (e.g., 'dotnet ef database update') before starting the node.");
-                }
-            }
-        }
+        await EnsureMigrationsAsync(app.Services, cancellationToken);
 
-        // Step 4: Manually initialize the identity *again* using the main service provider
+        // Step 4: Manually initialize the identity *again* using a scope from the main service provider
         // to ensure the ActiveIdentityContext is correct for the running application.
-        IIdentityOrchestrator identityOrchestrator = app.Services.GetRequiredService<IIdentityOrchestrator>();
-        await identityOrchestrator.ResolveIdentityAsync(identityName!, cancellationToken, defaultIdentityName);
+        using (var mainScope = app.Services.CreateScope())
+        {
+            var sp = mainScope.ServiceProvider;
+            var identityOrchestrator = sp.GetRequiredService<IIdentityOrchestrator>();
+            await identityOrchestrator.ResolveIdentityAsync(identityName!, cancellationToken, defaultIdentityName);
 
-        // Initialize the in-memory peer trust store
-        var peerTrustManager = app.Services.GetRequiredService<IPeerTrustManager>();
-        peerTrustManager.Initialize();
+            // Initialize the in-memory peer trust store
+            var peerTrustManager = sp.GetRequiredService<IPeerTrustManager>();
+            peerTrustManager.Initialize();
+        }
 
         await app.RunAsync(cancellationToken);
 
@@ -318,7 +348,7 @@ async Task ConnectCommandHandler(InvocationContext context)
 {
     var endpointString = context.ParseResult.GetValueForArgument(endpointArgument);
     var peerName = context.ParseResult.GetValueForOption(peerNameOption);
-    var identityName = context.ParseResult.GetValueForOption(identityOption);
+    var identityName = context.ParseResult.GetValueForOption(selfIdentityOption);
     var cancellationToken = context.GetCancellationToken();
 
     if (!TryParseEndpoint(endpointString, out var endpoint))
@@ -359,7 +389,7 @@ async Task SendCommandHandler(InvocationContext context)
     var message = context.ParseResult.GetValueForArgument(messageArgument);
     var endpointString = context.ParseResult.GetValueForOption(endpointOption);
     var peerName = context.ParseResult.GetValueForOption(peerNameOption);
-    var identityName = context.ParseResult.GetValueForOption(identityOption);
+    var identityName = context.ParseResult.GetValueForOption(selfIdentityOption);
     var cancellationToken = context.GetCancellationToken();
 
     var services = CreateServiceProvider();
@@ -404,6 +434,44 @@ async Task SendCommandHandler(InvocationContext context)
         Console.ForegroundColor = ConsoleColor.Red;
         Console.WriteLine($"An error occurred while sending the message: {ex.Message}");
         Console.ResetColor();
+    }
+}
+
+static async Task EnsureMigrationsAsync(IServiceProvider serviceProvider, CancellationToken cancellationToken)
+{
+    using var scope = serviceProvider.CreateScope();
+    var dbContext = scope.ServiceProvider.GetRequiredService<Percolator.Infrastructure.Persistence.PercolatorDbContext>();
+    var hostEnv = scope.ServiceProvider.GetService<IHostEnvironment>();
+    var aspnetEnv = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
+
+    // Prefer IHostEnvironment if available; fallback to env var if not
+    var isDevelopment = hostEnv?.IsDevelopment() ?? string.Equals(aspnetEnv, "Development", StringComparison.OrdinalIgnoreCase);
+
+    if (isDevelopment)
+    {
+        try
+        {
+            await dbContext.Database.MigrateAsync(cancellationToken);
+        }
+        catch (InvalidOperationException ex) when (ex.Message.Contains("PendingModelChangesWarning", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                "EF Core detected pending model changes that are not captured by any migration. " +
+                "Add a new migration, then update the database. For example:\n" +
+                "  dotnet ef migrations add SyncModel -p .\\Percolator.Infrastructure\\Percolator.Infrastructure.csproj -s .\\Percolator.Node\\Percolator.Node.csproj --context Percolator.Infrastructure.Persistence.PercolatorDbContext\n" +
+                "  dotnet ef database update -p .\\Percolator.Infrastructure\\Percolator.Infrastructure.csproj -s .\\Percolator.Node\\Percolator.Node.csproj\n", ex);
+        }
+    }
+    else
+    {
+        var pending = await dbContext.Database.GetPendingMigrationsAsync(cancellationToken);
+        if (pending.Any())
+        {
+            throw new InvalidOperationException(
+                "Database schema is out of date. Pending migrations detected: " +
+                string.Join(", ", pending) +
+                ". Please run EF migrations (e.g., 'dotnet ef database update') before starting the node.");
+        }
     }
 }
 
@@ -516,7 +584,10 @@ static ServiceProvider CreateServiceProvider()
         return handler;
     });
 
-    return services.BuildServiceProvider();
+    var sp = services.BuildServiceProvider();
+    // Centralized migration gate; synchronous wait is acceptable during startup
+    EnsureMigrationsAsync(sp, CancellationToken.None).GetAwaiter().GetResult();
+    return sp;
 }
 
 bool TryParseEndpoint(string? text, [NotNullWhen(true)] out DnsEndPoint? endpoint)

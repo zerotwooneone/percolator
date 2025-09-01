@@ -6,9 +6,9 @@ public static class ServiceCollectionExtensions
 {
     public static IServiceCollection AddSessionServices(this IServiceCollection services)
     {
-        services.AddSingleton<IDirectSessionManager, DirectSessionManager>();
-        services.AddSingleton<IConversationService, ConversationService>();
-        services.AddSingleton<IMessageService, MessageService>();
+        services.AddScoped<IDirectSessionManager, DirectSessionManager>();
+        services.AddScoped<IConversationService, ConversationService>();
+        services.AddScoped<IMessageService, MessageService>();
 
         return services;
     }

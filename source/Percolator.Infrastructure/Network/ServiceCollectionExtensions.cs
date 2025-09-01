@@ -7,9 +7,9 @@ public static class ServiceCollectionExtensions
 {
     public static IServiceCollection AddNetworkInfrastructure(this IServiceCollection services)
     {
-        services.AddSingleton<IPeerConnectionRepository, SqlitePeerConnectionRepository>();
+        services.AddScoped<IPeerConnectionRepository, SqlitePeerConnectionRepository>();
         services.AddSingleton<ITrustedPeerStore, FileBasedTrustedPeerStore>();
-        services.AddSingleton<IDirectSessionRepository, SqliteDirectSessionRepository>();
+        services.AddScoped<IDirectSessionRepository, SqliteDirectSessionRepository>();
         return services;
     }
 }

@@ -142,6 +142,9 @@ namespace Percolator.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("BLOB");
 
+                    b.Property<int>("SelfIdentityId")
+                        .HasColumnType("INTEGER");
+
                     b.Property<byte[]>("SendingChainKey")
                         .HasColumnType("BLOB");
 
@@ -160,7 +163,7 @@ namespace Percolator.Infrastructure.Migrations
 
                     b.HasKey("SessionId");
 
-                    b.HasIndex("UpdatedAt");
+                    b.HasIndex("SelfIdentityId", "UpdatedAt");
 
                     b.ToTable("DoubleRatchetSessions", (string)null);
                 });
@@ -356,12 +359,17 @@ namespace Percolator.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("BLOB");
 
+                    b.Property<int>("SelfIdentityId")
+                        .HasColumnType("INTEGER");
+
                     b.Property<Guid>("SessionId")
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
 
-                    b.HasIndex("SessionId", "RatchetKey", "MessageNumber")
+                    b.HasIndex("SessionId", "SelfIdentityId");
+
+                    b.HasIndex("SelfIdentityId", "SessionId", "RatchetKey", "MessageNumber")
                         .IsUnique();
 
                     b.ToTable("SkippedMessageKeys", (string)null);
@@ -421,6 +429,15 @@ namespace Percolator.Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("Percolator.Infrastructure.Persistence.SelfIdentityDbo", null)
+                        .WithMany()
+                        .HasForeignKey("SelfIdentityId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Percolator.Infrastructure.Persistence.DoubleRatchetSessionDbo", b =>
+                {
                     b.HasOne("Percolator.Infrastructure.Persistence.SelfIdentityDbo", null)
                         .WithMany()
                         .HasForeignKey("SelfIdentityId")
@@ -505,7 +522,8 @@ namespace Percolator.Infrastructure.Migrations
                 {
                     b.HasOne("Percolator.Infrastructure.Persistence.DoubleRatchetSessionDbo", "Session")
                         .WithMany("SkippedMessageKeys")
-                        .HasForeignKey("SessionId")
+                        .HasForeignKey("SessionId", "SelfIdentityId")
+                        .HasPrincipalKey("SessionId", "SelfIdentityId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 

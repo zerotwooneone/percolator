@@ -108,7 +108,7 @@ public static class ServiceCollectionExtensions
             services.AddHostedService<PeerDiscoveryHostedService>();
         }
 
-        services.AddSingleton<IMessageTransportService, GrpcMessageTransportService>();
+        services.AddScoped<IMessageTransportService, GrpcMessageTransportService>();
         services.AddSingleton<PercolatorMessageService>();
         services.AddSingleton<IPeerDiscoveryHandler, PeerDiscoveryHandler>();
 

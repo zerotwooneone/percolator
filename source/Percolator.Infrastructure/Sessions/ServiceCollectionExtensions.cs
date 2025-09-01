@@ -8,7 +8,7 @@ public static class ServiceCollectionExtensions
 {
     public static IServiceCollection AddSessionsInfrastructure(this IServiceCollection services)
     {
-        services.AddSingleton<IDoubleRatchetSessionStore, SqliteDoubleRatchetSessionStore>();
+        services.AddScoped<IDoubleRatchetSessionStore, SqliteDoubleRatchetSessionStore>();
         return services;
     }
 }
