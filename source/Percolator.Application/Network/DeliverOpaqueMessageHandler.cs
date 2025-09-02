@@ -40,6 +40,24 @@ namespace Percolator.Application.Network
             try
             {
                 var sessionId = new SessionId(request.SessionId);
+                var directSession = await _directSessionRepository.GetBySessionIdAsync(new DirectSessionId(sessionId.Value), _activeIdentityContext.Identity.SelfIdentityId);
+                if (directSession is null)
+                {
+                    throw new InvalidOperationException($"No direct session mapping found for session {sessionId}");
+                }
+                var remotePeerId = directSession.RemotePeerId;
+                _logger.LogInformation("Resolved remote peer {PeerId} for session {SessionId}", remotePeerId, directSession.SessionId);
+                var connectionInfo = await _peerConnectionRepository.GetByIdAsync(remotePeerId);
+                if (connectionInfo?.GrpcEndPoints.FirstOrDefault() is null)
+                {
+                    _logger.LogWarning("Could not find connection info for peer {PeerId} to handle opaque message", remotePeerId);
+                    return new DeliverOpaqueMessageResult();
+                }
+                
+                //todo: find a better way to find the current endpoint
+                var endpoint = connectionInfo.GrpcEndPoints.First();
+                _logger.LogInformation("Using endpoint {Endpoint} for peer {PeerId}", endpoint, remotePeerId);
+                
                 var sessionRatchetMessage = new SessionRatchetMessage(request.PayloadBytes);
 
                 var plaintext = await _sessionManager.ReceiveMessageAsync(sessionId, sessionRatchetMessage);
@@ -51,6 +69,9 @@ namespace Percolator.Application.Network
 
                 var internalEnvelope = InternalEnvelope.Parser.ParseFrom(plaintext.Value);
                 InternalEnvelope? responseEnvelope = null;
+                
+                connectionInfo.UpdateLastSeen(endpoint, DateTimeOffset.UtcNow);
+                await _peerConnectionRepository.SaveAsync(connectionInfo);
 
                 switch (internalEnvelope.ApplicationPayloadCase)
                 {
@@ -58,7 +79,7 @@ namespace Percolator.Application.Network
                         HandleChatEnvelope(internalEnvelope.ChatEnvelope);
                         break;
                     case InternalEnvelope.ApplicationPayloadOneofCase.DhtEnvelope:
-                        responseEnvelope = await HandleDhtMessageAsync(internalEnvelope.DhtEnvelope, sessionId, cancellationToken);
+                        responseEnvelope = await HandleDhtMessageAsync(internalEnvelope.DhtEnvelope, connectionInfo, endpoint, cancellationToken);
                         break;
                     default:
                         _logger.LogWarning("Received unhandled internal envelope type: {EnvelopeType}", internalEnvelope.ApplicationPayloadCase);
@@ -94,7 +115,7 @@ namespace Percolator.Application.Network
             }
         }
 
-        private async Task<InternalEnvelope?> HandleDhtMessageAsync(DhtEnvelope dhtEnvelope, SessionId sessionId, CancellationToken ct)
+        private async Task<InternalEnvelope?> HandleDhtMessageAsync(DhtEnvelope dhtEnvelope, PeerConnection peerConnection, GrpcEndPoint endPoint, CancellationToken ct)
         {
             if (_activeIdentityContext.Identity is null)
             {
@@ -102,38 +123,22 @@ namespace Percolator.Application.Network
                 return null;
             }
             // Resolve the remote peer from the direct session mapping
-            var directSession = await _directSessionRepository.GetBySessionIdAsync(new DirectSessionId(sessionId.Value), _activeIdentityContext.Identity.SelfIdentityId);
-            if (directSession is null)
-            {
-                _logger.LogWarning("No direct session mapping found for session {SessionId}", sessionId);
-                return null;
-            }
-            var remotePeerId = directSession.RemotePeerId;
-            _logger.LogInformation("Resolved remote peer {PeerId} for session {SessionId}", remotePeerId, sessionId);
-            var connectionInfo = await _peerConnectionRepository.GetByIdAsync(remotePeerId);
-            if (connectionInfo?.GrpcEndPoints.FirstOrDefault() is null)
-            {
-                _logger.LogWarning("Could not find connection info for peer {PeerId} to handle DHT message", remotePeerId);
-                return null;
-            }
-            if (connectionInfo.IdentitySigningKey is null)
-            {
-                _logger.LogWarning("Could not find identity signing key for peer {PeerId} to handle DHT message", remotePeerId);
-                return null;
-            }
-
-            var endpoint = connectionInfo.GrpcEndPoints.First().EndPoint;
-            _logger.LogInformation("Using endpoint {Endpoint} for peer {PeerId}", endpoint, remotePeerId);
 
             switch (dhtEnvelope.MessageCase)
             {
                 //todo: avoid sending mediatR requests from mediatR handlers
                 case DhtEnvelope.MessageOneofCase.PingRequest:
+                    if (peerConnection.IdentitySigningKey is null)
+                    {
+                        _logger.LogWarning("Could not find identity signing key for peer {PeerId} to handle DHT message", peerConnection.Id);
+                        return null;
+                    }
                     // NodeId is defined as SHA-256 digest of the peer's SPKI signing key bytes (32 bytes)
-                    var nodeIdBytes = System.Security.Cryptography.SHA256.HashData(connectionInfo.IdentitySigningKey.Value);
-                    await _mediator.Send(new Percolator.Dht.Messages.PingRequest(new Percolator.Dht.NodeId(nodeIdBytes), endpoint), ct);
+                    var nodeIdBytes = System.Security.Cryptography.SHA256.HashData(peerConnection.IdentitySigningKey.Value);
+                    await _mediator.Send(new Percolator.Dht.Messages.PingRequest(new Percolator.Dht.NodeId(nodeIdBytes), endPoint.EndPoint), ct);
                     break;
                 case DhtEnvelope.MessageOneofCase.FindNodeRequest:
+                    //todo: prevent finding nodes if the peer has not given us prekey bundles
                     var findNodeResponse = await _mediator.Send(new Percolator.Dht.Messages.FindNodeRequest(new Percolator.Dht.NodeId(dhtEnvelope.FindNodeRequest.TargetPeerId.ToByteArray())), ct);
                     var responseEnvelope = new InternalEnvelope
                     {

@@ -61,6 +61,16 @@ public class DeliverOpaqueMessageHandlerTests
     {
         var handler = CreateHandler(out var sessionMgr, out var peerRepo, out var mediator, out var directRepo);
         var sessionId = Guid.NewGuid();
+
+        // Arrange: direct session mapping and a peer connection are resolved before decryption
+        var remotePeerId = Guid.NewGuid();
+        directRepo.Setup(r => r.GetBySessionIdAsync(new DirectSessionId(sessionId), It.IsAny<int>()))
+            .ReturnsAsync(new DirectSession(new Percolator.Network.PeerId(remotePeerId), new DirectSessionId(sessionId)));
+        var endpoint = new GrpcEndPoint(new DnsEndPoint("127.0.0.1", 5001), DateTimeOffset.UtcNow);
+        peerRepo.Setup(p => p.GetByIdAsync(It.Is<Percolator.Network.PeerId>(id => id.Value == remotePeerId)))
+            .ReturnsAsync(new PeerConnection(new Percolator.Network.PeerId(remotePeerId), new DirectMessagePublicKey(RandomBytes(32)), new[] { endpoint }, Array.Empty<TlsCertificate>(), DateTimeOffset.UtcNow));
+
+        // Decryption yields null -> handler returns empty result
         var cmd = new DeliverOpaqueMessageCommand { SessionId = sessionId, PayloadBytes = RandomBytes(48) };
         sessionMgr.Setup(s => s.ReceiveMessageAsync(It.Is<SessionId>(x => x.Value == sessionId), It.IsAny<SessionRatchetMessage>()))
             .ReturnsAsync((Plaintext?)null);
@@ -69,34 +79,24 @@ public class DeliverOpaqueMessageHandlerTests
 
         result.ResponsePayloadBytes.Should().BeNull();
         sessionMgr.VerifyAll();
-        mediator.VerifyNoOtherCalls();
-        peerRepo.VerifyNoOtherCalls();
-        directRepo.VerifyNoOtherCalls();
+        directRepo.VerifyAll();
+        peerRepo.VerifyAll();
     }
 
     [Test]
-    public async Task Returns_empty_when_direct_session_mapping_missing()
+    public void Throws_when_direct_session_mapping_missing()
     {
         var handler = CreateHandler(out var sessionMgr, out var peerRepo, out var mediator, out var directRepo);
         var sessionId = Guid.NewGuid();
 
-        var (_, plain) = MakeRatchetAndPlain(BuildEnvelope(env =>
-        {
-            env.DhtEnvelope = new DhtEnvelope { PingRequest = new PingRequest() };
-        }).Bytes);
+        // The handler now checks direct session mapping before attempting decryption and throws if missing
+        directRepo.Setup(r => r.GetBySessionIdAsync(new DirectSessionId(sessionId), It.IsAny<int>()))
+            .ReturnsAsync((DirectSession?)null);
 
-        sessionMgr.Setup(s => s.ReceiveMessageAsync(It.Is<SessionId>(x => x.Value == sessionId), It.IsAny<SessionRatchetMessage>()))
-            .ReturnsAsync(plain);
-        directRepo.Setup(r => r.GetBySessionIdAsync(new DirectSessionId(sessionId), It.IsAny<int>())).ReturnsAsync((DirectSession?)null);
+        var cmd = new DeliverOpaqueMessageCommand { SessionId = sessionId, PayloadBytes = RandomBytes(16) };
+        Assert.ThrowsAsync<InvalidOperationException>(async () => await handler.Handle(cmd, CancellationToken.None));
 
-        var cmd = new DeliverOpaqueMessageCommand { SessionId = sessionId, PayloadBytes = plain.Value };
-        var result = await handler.Handle(cmd, CancellationToken.None);
-
-        result.ResponsePayloadBytes.Should().BeNull();
         directRepo.VerifyAll();
-        sessionMgr.VerifyAll();
-        mediator.VerifyNoOtherCalls();
-        peerRepo.VerifyNoOtherCalls();
     }
 
     [Test]
@@ -121,6 +121,12 @@ public class DeliverOpaqueMessageHandlerTests
         var identityKey = new DirectMessagePublicKey(RandomBytes(32));
         peerRepo.Setup(p => p.GetByIdAsync(It.Is<Percolator.Network.PeerId>(id => id.Value == remotePeerId)))
             .ReturnsAsync(new PeerConnection(new Percolator.Network.PeerId(remotePeerId), identityKey, new[] { endpoint }, Array.Empty<TlsCertificate>(), DateTimeOffset.UtcNow));
+        // Handler updates LastSeen and persists the connection
+        peerRepo.Setup(p => p.SaveAsync(It.IsAny<PeerConnection>())).Returns(Task.CompletedTask);
+        // Handler updates LastSeen and persists the connection
+        peerRepo.Setup(p => p.SaveAsync(It.IsAny<PeerConnection>())).Returns(Task.CompletedTask);
+        // Handler updates LastSeen and persists the connection
+        peerRepo.Setup(p => p.SaveAsync(It.IsAny<PeerConnection>())).Returns(Task.CompletedTask);
 
         mediator.Setup(m => m.Send(It.IsAny<Percolator.Dht.Messages.PingRequest>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new Percolator.Dht.Messages.PingResponse());
@@ -132,6 +138,8 @@ public class DeliverOpaqueMessageHandlerTests
         mediator.Verify(m => m.Send(It.Is<Percolator.Dht.Messages.PingRequest>(req => req.SenderEndPoint == endpoint.EndPoint), It.IsAny<CancellationToken>()), Times.Once);
         sessionMgr.VerifyAll();
         peerRepo.VerifyAll();
+        // Updated handler updates LastSeen and saves connection info
+        peerRepo.Verify(p => p.SaveAsync(It.IsAny<PeerConnection>()), Times.Once);
         directRepo.VerifyAll();
     }
 
@@ -157,6 +165,8 @@ public class DeliverOpaqueMessageHandlerTests
         var identityKey = new DirectMessagePublicKey(RandomBytes(32));
         peerRepo.Setup(p => p.GetByIdAsync(It.Is<Percolator.Network.PeerId>(id => id.Value == remotePeerId)))
             .ReturnsAsync(new PeerConnection(new Percolator.Network.PeerId(remotePeerId), identityKey, new[] { endpoint }, Array.Empty<TlsCertificate>(), DateTimeOffset.UtcNow));
+        // Handler updates LastSeen and persists the connection
+        peerRepo.Setup(p => p.SaveAsync(It.IsAny<PeerConnection>())).Returns(Task.CompletedTask);
 
         mediator.Setup(m => m.Send(It.IsAny<Percolator.Dht.Messages.FindNodeRequest>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new Percolator.Dht.Messages.FindNodeResponse(Array.Empty<Percolator.Dht.DhtNode>()));
@@ -173,6 +183,8 @@ public class DeliverOpaqueMessageHandlerTests
 
         sessionMgr.VerifyAll();
         peerRepo.VerifyAll();
+        // Updated handler updates LastSeen and saves connection info
+        peerRepo.Verify(p => p.SaveAsync(It.IsAny<PeerConnection>()), Times.Once);
         directRepo.VerifyAll();
         mediator.VerifyAll();
     }
