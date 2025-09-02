@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Percolator.Infrastructure.Persistence;
 
@@ -10,9 +11,11 @@ using Percolator.Infrastructure.Persistence;
 namespace Percolator.Infrastructure.Migrations
 {
     [DbContext(typeof(PercolatorDbContext))]
-    partial class PercolatorDbContextModelSnapshot : ModelSnapshot
+    [Migration("20250902012402_CompositeConversationKey")]
+    partial class CompositeConversationKey
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "9.0.8");
@@ -128,9 +131,6 @@ namespace Percolator.Infrastructure.Migrations
                     b.Property<Guid>("SessionId")
                         .HasColumnType("TEXT");
 
-                    b.Property<int>("SelfIdentityId")
-                        .HasColumnType("INTEGER");
-
                     b.Property<byte[]>("DhRatchetPrivateKey")
                         .HasColumnType("BLOB");
 
@@ -150,6 +150,9 @@ namespace Percolator.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("BLOB");
 
+                    b.Property<int>("SelfIdentityId")
+                        .HasColumnType("INTEGER");
+
                     b.Property<byte[]>("SendingChainKey")
                         .HasColumnType("BLOB");
 
@@ -166,7 +169,7 @@ namespace Percolator.Infrastructure.Migrations
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("TEXT");
 
-                    b.HasKey("SessionId", "SelfIdentityId");
+                    b.HasKey("SessionId");
 
                     b.HasIndex("SelfIdentityId", "UpdatedAt");
 
@@ -531,6 +534,7 @@ namespace Percolator.Infrastructure.Migrations
                     b.HasOne("Percolator.Infrastructure.Persistence.DoubleRatchetSessionDbo", "Session")
                         .WithMany("SkippedMessageKeys")
                         .HasForeignKey("SessionId", "SelfIdentityId")
+                        .HasPrincipalKey("SessionId", "SelfIdentityId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 

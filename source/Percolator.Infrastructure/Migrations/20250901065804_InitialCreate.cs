@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -102,7 +102,7 @@ namespace Percolator.Infrastructure.Migrations
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PK_Conversations", x => x.Id);
+                    table.PrimaryKey("PK_Conversations", x => new { x.Id, x.SelfIdentityId });
                     table.ForeignKey(
                         name: "FK_Conversations_SelfIdentity_SelfIdentityId",
                         column: x => x.SelfIdentityId,
@@ -275,16 +275,17 @@ namespace Percolator.Infrastructure.Migrations
                 columns: table => new
                 {
                     ConversationId = table.Column<Guid>(type: "TEXT", nullable: false),
-                    ParticipantId = table.Column<Guid>(type: "TEXT", nullable: false)
+                    ParticipantId = table.Column<Guid>(type: "TEXT", nullable: false),
+                    SelfIdentityId = table.Column<int>(type: "INTEGER", nullable: false)
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PK_ConversationParticipants", x => new { x.ConversationId, x.ParticipantId });
+                    table.PrimaryKey("PK_ConversationParticipants", x => new { x.ConversationId, x.ParticipantId, x.SelfIdentityId });
                     table.ForeignKey(
-                        name: "FK_ConversationParticipants_Conversations_ConversationId",
-                        column: x => x.ConversationId,
+                        name: "FK_ConversationParticipants_Conversations_ConversationId_SelfIdentityId",
+                        columns: x => new { x.ConversationId, x.SelfIdentityId },
                         principalTable: "Conversations",
-                        principalColumn: "Id",
+                        principalColumns: new[] { "Id", "SelfIdentityId" },
                         onDelete: ReferentialAction.Cascade);
                 });
 
@@ -294,6 +295,7 @@ namespace Percolator.Infrastructure.Migrations
                 {
                     Id = table.Column<Guid>(type: "TEXT", nullable: false),
                     ConversationId = table.Column<Guid>(type: "TEXT", nullable: false),
+                    SelfIdentityId = table.Column<int>(type: "INTEGER", nullable: false),
                     SenderId = table.Column<Guid>(type: "TEXT", nullable: false),
                     Body = table.Column<string>(type: "TEXT", nullable: false),
                     SentAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false)
@@ -302,10 +304,10 @@ namespace Percolator.Infrastructure.Migrations
                 {
                     table.PrimaryKey("PK_Messages", x => x.Id);
                     table.ForeignKey(
-                        name: "FK_Messages_Conversations_ConversationId",
-                        column: x => x.ConversationId,
+                        name: "FK_Messages_Conversations_ConversationId_SelfIdentityId",
+                        columns: x => new { x.ConversationId, x.SelfIdentityId },
                         principalTable: "Conversations",
-                        principalColumn: "Id",
+                        principalColumns: new[] { "Id", "SelfIdentityId" },
                         onDelete: ReferentialAction.Cascade);
                 });
 
@@ -363,9 +365,9 @@ namespace Percolator.Infrastructure.Migrations
                 column: "PeerId");
 
             migrationBuilder.CreateIndex(
-                name: "IX_Messages_ConversationId_SentAt",
+                name: "IX_Messages_ConversationId_SelfIdentityId_SentAt",
                 table: "Messages",
-                columns: new[] { "ConversationId", "SentAt" });
+                columns: new[] { "ConversationId", "SelfIdentityId", "SentAt" });
 
             migrationBuilder.CreateIndex(
                 name: "IX_OneTimePreKeys_PeerIdentityKeyId",

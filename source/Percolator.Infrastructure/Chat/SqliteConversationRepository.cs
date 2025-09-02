@@ -41,7 +41,7 @@ public sealed class SqliteConversationRepository : IConversationRepository
     public async Task AddAsync(Conversation conversation, int selfIdentityId)
     {
         var now = DateTimeOffset.UtcNow;
-        var dbo = ToDbo(conversation);
+        var dbo = ToDbo(conversation, selfIdentityId);
         dbo.CreatedAt = now;
         dbo.UpdatedAt = now;
         dbo.SelfIdentityId = selfIdentityId;
@@ -107,7 +107,7 @@ public sealed class SqliteConversationRepository : IConversationRepository
         return new Conversation(new ConversationId(dbo.Id), new ChannelId(dbo.ChannelId), participants, messages, dbo.Name);
     }
 
-    private static ConversationDbo ToDbo(Conversation conversation)
+    private static ConversationDbo ToDbo(Conversation conversation, int selfIdentityId)
     {
         var dbo = new ConversationDbo
         {
@@ -120,7 +120,8 @@ public sealed class SqliteConversationRepository : IConversationRepository
             dbo.Participants.Add(new ConversationParticipantDbo
             {
                 ConversationId = conversation.Id.Value,
-                ParticipantId = p.Value
+                ParticipantId = p.Value,
+                SelfIdentityId = selfIdentityId
             });
         }
         foreach (var m in conversation.Messages)
@@ -129,6 +130,7 @@ public sealed class SqliteConversationRepository : IConversationRepository
             {
                 Id = m.Id.Value,
                 ConversationId = conversation.Id.Value,
+                SelfIdentityId = selfIdentityId,
                 SenderId = m.SenderId.Value,
                 Body = m.Content,
                 SentAt = m.Timestamp
