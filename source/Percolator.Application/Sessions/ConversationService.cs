@@ -123,7 +123,7 @@ namespace Percolator.Application.Sessions
                 _logger.LogDebug(
                     "Initiating handshake with keys - SignedPreKey length: {Length}, Signature length: {SigLength}",
                     signedPreKeyPublicBytes.Length, signedPayloadBytes.Value.Length);
-
+                
                 var oneTimePreKey = _oneTimeKeyProvider.PopOneTimeKey();
                 var request = new EstablishDirectSessionRequest
                 {
@@ -196,17 +196,24 @@ namespace Percolator.Application.Sessions
                     }
                     await _peerConnectionRepository.SaveAsync(peerConnection);
                 }
+                // Persist mapping from conversation/session to remote peer for future routing
+                await _directSessionRepository.UpsertAsync(new NetworkPeerId(remotePeer.Id.Value), directSessionId, _activeIdentityContext.Identity.SelfIdentityId);
 
                 // Create a new conversation
-                var conversation = new ChatConversation(
-                    new ChatConversationId(directSessionId.Value),
-                    new ChannelId(handshakeResult.ResponderBundle.IdentitySigningKey.Value),
-                    new List<ChatParticipantId> { new(_activeIdentityContext.Identity!.Id), new(remotePeer.Id.Value) },
-                    new List<Message>(),
-                    remotePeer.Name);
-
-                _logger.LogInformation("Creating conversation {ConversationId} with channel ID {ChannelId}", conversation.Id.Value, Convert.ToBase64String(conversation.ChannelId.Value));
-                await _conversationRepository.AddAsync(conversation, _activeIdentityContext.Identity.SelfIdentityId);
+                var conversationId = new ChatConversationId(directSessionId.Value);
+                var conversation = await _conversationRepository.GetByIdAsync(conversationId, _activeIdentityContext.Identity.SelfIdentityId);
+                if (conversation == null)
+                {
+                    conversation = new ChatConversation(
+                        conversationId,
+                        new ChannelId(handshakeResult.ResponderBundle.IdentitySigningKey.Value),
+                        new List<ChatParticipantId>
+                            {new(_activeIdentityContext.Identity.Id), new(remotePeer.Id.Value)},
+                        new List<Message>(),
+                        remotePeer.Name);
+                    _logger.LogInformation("Creating conversation {ConversationId} with channel ID {ChannelId}", conversation.Id.Value, Convert.ToBase64String(conversation.ChannelId.Value));
+                    await _conversationRepository.AddAsync(conversation, _activeIdentityContext.Identity.SelfIdentityId);
+                }
 
                 await _sessionManager.EstablishSessionAsResponderAsync(
                     new SessionId(conversation.Id.Value),
@@ -217,9 +224,6 @@ namespace Percolator.Application.Sessions
                         .ResponderPrivateKeyUsed, // The specific one of OUR (Bob's) private keys that was used
                     new SharedSecret(handshakeResult.SharedSecret.Value)
                 );
-
-                // Persist mapping from conversation/session to remote peer for future routing
-                await _directSessionRepository.UpsertAsync(new NetworkPeerId(remotePeer.Id.Value), directSessionId, _activeIdentityContext.Identity.SelfIdentityId);
 
                 _logger.LogInformation("Successfully established session and created conversation {ConversationId}",
                     conversation.Id);

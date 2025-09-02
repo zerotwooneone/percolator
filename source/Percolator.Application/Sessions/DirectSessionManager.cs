@@ -97,7 +97,7 @@ public class DirectSessionManager : IDirectSessionManager
     }
 
     public async Task EstablishSessionAsResponderAsync(
-        SessionId conversationId, 
+        SessionId sessionId, 
         PeerId remotePeerId, 
         RatchetIdentityKey remoteIdentityKey,
         RatchetEphemeralKey remoteRatchetPublicKey,
@@ -121,8 +121,7 @@ public class DirectSessionManager : IDirectSessionManager
             sessionLogger,
             _cryptographyOptions);
 
-        var sessionId = new SessionId(conversationId.Value);
-        _logger.LogInformation("Establish session as responder for conversation {ConversationId}. SessionId: {SessionId}", conversationId, sessionId);
+        _logger.LogInformation("Establish session as responder for conversation {ConversationId}. SessionId: {SessionId}", sessionId, sessionId);
         
         // Get state and store it
         var state = session.GetState();
@@ -143,7 +142,7 @@ public class DirectSessionManager : IDirectSessionManager
         if (_activeIdentityContext.Identity is null)
             throw new InvalidOperationException("Identity context not loaded");
         await _sessionStore.SetSessionStateAsync(sessionId, state, _activeIdentityContext.Identity.SelfIdentityId);
-        _sessionLocks.TryAdd(conversationId, new SemaphoreSlim(1, 1));
+        _sessionLocks.TryAdd(sessionId, new SemaphoreSlim(1, 1));
     }
 
     public async Task<Plaintext?> ReceiveMessageAsync(

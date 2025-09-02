@@ -447,7 +447,8 @@ static async Task EnsureMigrationsAsync(IServiceProvider serviceProvider, Cancel
     var aspnetEnv = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
 
     // Prefer IHostEnvironment if available; fallback to env var if not
-    var isDevelopment = hostEnv?.IsDevelopment() ?? string.Equals(aspnetEnv, "Development", StringComparison.OrdinalIgnoreCase);
+    //todo: fix hostEnv
+    var isDevelopment = true; //;hostEnv?.IsDevelopment() ?? string.Equals(aspnetEnv, "Development", StringComparison.OrdinalIgnoreCase);
 
     if (isDevelopment)
     {

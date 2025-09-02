@@ -22,7 +22,7 @@ public interface IDirectSessionManager
     /// Establishes a new Double Ratchet session as the responder.
     /// </summary>
     Task EstablishSessionAsResponderAsync(
-        Percolator.Cryptography.SessionId conversationId, 
+        Percolator.Cryptography.SessionId sessionId, 
         Percolator.Identity.PeerId remotePeerId, 
         RatchetIdentityKey remoteIdentityKey,
         RatchetEphemeralKey remoteRatchetPublicKey,

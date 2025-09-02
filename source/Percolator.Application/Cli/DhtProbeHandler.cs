@@ -40,16 +40,23 @@ public class DhtProbeHandler : IRequestHandler<DhtProbeCommand, FindNodeResponse
 
     public async Task<FindNodeResponse> Handle(DhtProbeCommand request, CancellationToken cancellationToken)
     {
-        var remotePeer = await _peerRepository.GetByNameAsync(request.TargetIdentityName);
-        if (remotePeer == null)
+        var existingPeer = await _peerRepository.GetByNameAsync(request.TargetIdentityName);
+        Peer remotePeer;
+        if (existingPeer == null)
         {
             remotePeer = new Peer(PeerId.NewId(), request.TargetIdentityName);
             await _peerRepository.AddAsync(remotePeer);
         }
+        else
+        {
+            remotePeer = existingPeer;
+        }
         
         // 1) Ensure conversation by connecting (TOFU etc handled by ConversationService)
-        var existing = await _conversationService.GetExistingDirectConversationAsync(remotePeer);
-        var directSessionId = existing ?? await _conversationService.CreateNewDirectConversationAsync(request.Endpoint, remotePeer);
+        var existingDirectConversationAsync = existingPeer == null 
+            ? null 
+            : await _conversationService.GetExistingDirectConversationAsync(remotePeer);
+        var directSessionId = existingDirectConversationAsync ?? await _conversationService.CreateNewDirectConversationAsync(request.Endpoint, remotePeer);
 
         // 2) Send Ping (fire-and-forget)
         var pingEnvelope = new InternalEnvelope
