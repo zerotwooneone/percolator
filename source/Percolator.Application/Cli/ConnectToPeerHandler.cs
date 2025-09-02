@@ -30,6 +30,6 @@ public class ConnectToPeerHandler : IRequestHandler<ConnectToPeerCommand, Direct
             
         }
         var existing = await _conversationService.GetExistingDirectConversationAsync(remotePeer);
-        return existing ?? await _conversationService.CreateNewDirectConversationAsync(request.Endpoint, remotePeer);
+        return existing ?? await _conversationService.CreateNewDirectSessionAsync(request.Endpoint, remotePeer);
     }
 }

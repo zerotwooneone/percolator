@@ -12,7 +12,7 @@ public interface IDirectSessionManager
     /// <summary>
     /// Establishes a new Double Ratchet session as the initiator.
     /// </summary>
-    Task EstablishSessionAsInitiatorAsync(SessionId conversationId,
+    Task EstablishSessionAsInitiatorAsync(SessionId sessionId,
         PeerId remotePeerId,
         RatchetIdentityKey remoteIdentityKey,
         RatchetEphemeralKey remoteRatchetKey,
@@ -37,6 +37,6 @@ public interface IDirectSessionManager
     /// <summary>
     /// Encrypts an outgoing message.
     /// </summary>
-    Task<SessionRatchetMessage> EncryptMessageAsync(Percolator.Cryptography.SessionId conversationId, Plaintext plaintext);
+    Task<SessionRatchetMessage> EncryptMessageAsync(Percolator.Cryptography.SessionId sessionId, Plaintext plaintext);
 
 }

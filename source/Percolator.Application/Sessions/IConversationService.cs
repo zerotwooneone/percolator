@@ -20,7 +20,7 @@ public interface IConversationService
     /// <summary>
     /// Creates a new direct conversation (and establishes cryptographic session) with the remote peer.
     /// </summary>
-    Task<DirectSessionId> CreateNewDirectConversationAsync(
+    Task<DirectSessionId> CreateNewDirectSessionAsync(
         DnsEndPoint endpoint,
         Peer remotePeer);
 }

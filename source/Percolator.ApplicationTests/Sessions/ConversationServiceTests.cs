@@ -35,7 +35,6 @@ public class ConversationServiceTests
     private Mock<IX3DHOrchestrator> _mockX3dhOrchestrator;
     private Mock<IDirectSessionManager> _mockDirectSessionManager;
     private Mock<IOneTimeKeyProvider> _mockOneTimeKeyProvider;
-    private Mock<IConversationRepository> _mockConversationRepository;
     private Mock<IPeerConnectionRepository> _mockPeerConnectionRepository;
     private Mock<IPeerTrustManager> _mockPeerTrustManager;
     private Mock<ITlsHandshakeService> _mockTlsHandshakeService;
@@ -52,7 +51,6 @@ public class ConversationServiceTests
         _mockX3dhOrchestrator = new Mock<IX3DHOrchestrator>();
         _mockDirectSessionManager = new Mock<IDirectSessionManager>();
         _mockOneTimeKeyProvider = new Mock<IOneTimeKeyProvider>();
-        _mockConversationRepository = new Mock<IConversationRepository>();
         _mockPeerConnectionRepository = new Mock<IPeerConnectionRepository>();
         _mockPeerTrustManager = new Mock<IPeerTrustManager>();
         _mockTlsHandshakeService = new Mock<ITlsHandshakeService>();
@@ -73,7 +71,6 @@ public class ConversationServiceTests
             _testLogger,
             _mockX3dhOrchestrator.Object,
             _mockDirectSessionManager.Object,
-            _mockConversationRepository.Object,
             _mockOneTimeKeyProvider.Object,
             _activeIdentityContext,
             _mockGrpcSessionService.Object, 
@@ -172,11 +169,6 @@ public class ConversationServiceTests
             .Setup(m => m.AddTrustedPeer(It.IsAny<X509Certificate2>()))
             .Returns(Task.CompletedTask);
             
-        // Setup conversation repository
-        _mockConversationRepository
-            .Setup(r => r.AddAsync(It.IsAny<ChatConversation>(), It.IsAny<int>()))
-            .Returns(Task.CompletedTask);
-            
         // Setup direct session manager
         _mockDirectSessionManager
             .Setup(m => m.EstablishSessionAsInitiatorAsync(
@@ -189,11 +181,10 @@ public class ConversationServiceTests
             .Returns(Task.CompletedTask);
 
         // Act
-        var result = await _service.CreateNewDirectConversationAsync(endpoint, peer);
+        var result = await _service.CreateNewDirectSessionAsync(endpoint, peer);
 
         // Assert
         Assert.That(result, Is.Not.EqualTo(default(DirectSessionId)));
-        _mockConversationRepository.Verify(r => r.AddAsync(It.Is<ChatConversation>(c => c.Name == peer.Name), It.IsAny<int>()), Times.Once);
         _mockDirectSessionManager.Verify(m => m.EstablishSessionAsResponderAsync(
             It.IsAny<Percolator.Cryptography.SessionId>(), 
             It.IsAny<IdentityPeerId>(), 
@@ -271,11 +262,6 @@ public class ConversationServiceTests
             .Setup(p => p.PopOneTimeKey())
             .Returns(oneTimeKey);
             
-        // Setup conversation repository
-        _mockConversationRepository
-            .Setup(r => r.AddAsync(It.IsAny<ChatConversation>(), It.IsAny<int>()))
-            .Returns(Task.CompletedTask);
-            
         // Setup direct session manager
         _mockDirectSessionManager
             .Setup(m => m.EstablishSessionAsInitiatorAsync(
@@ -286,15 +272,9 @@ public class ConversationServiceTests
                 It.IsAny<CryptoSharedSecret>(), 
                 It.IsAny<ECDiffieHellman>()))
             .Returns(Task.CompletedTask);
-
-        // Capture the conversation that gets created
-        ChatConversation? capturedConversation = null;
-        _mockConversationRepository.Setup(r => r.AddAsync(It.IsAny<ChatConversation>(), It.IsAny<int>()))
-            .Callback<ChatConversation, int>((c, _) => capturedConversation = c)
-            .Returns(Task.CompletedTask);
-
+    
         // Act
-        var result = await _service.CreateNewDirectConversationAsync(endpoint, peer);
+        var result = await _service.CreateNewDirectSessionAsync(endpoint, peer);
         
         // Assert
         Assert.That(result, Is.Not.EqualTo(default(DirectSessionId)));
@@ -302,13 +282,6 @@ public class ConversationServiceTests
         
         // Verify peer connection was saved
         _mockPeerConnectionRepository.Verify(r => r.SaveAsync(It.IsAny<PeerConnection>()), Times.Once);
-        
-        // Verify conversation was created with expected participants
-        _mockConversationRepository.Verify(r => r.AddAsync(It.IsAny<ChatConversation>(), It.IsAny<int>()), Times.Once);
-        Assert.That(capturedConversation, Is.Not.Null);
-        Assert.That(capturedConversation!.Id.Value, Is.EqualTo(sessionId));
-        Assert.That(capturedConversation.Name, Is.EqualTo(peerName));
-        Assert.That(capturedConversation.Participants, Has.Count.EqualTo(2));
         
         // Verify session was established
         _mockDirectSessionManager.Verify(m => m.EstablishSessionAsResponderAsync(
@@ -356,15 +329,12 @@ public class ConversationServiceTests
         // Act & Assert
         await Task.Yield(); // ensure method contains an await to avoid CS1998
         var exception = Assert.ThrowsAsync<InvalidOperationException>(
-            async () => await _service.CreateNewDirectConversationAsync(endpoint, peer));
+            async () => await _service.CreateNewDirectSessionAsync(endpoint, peer));
             
         Assert.That(exception, Is.SameAs(expectedError));
         
         // Verify peer was not created
         _mockPeerRepository.Verify(r => r.AddAsync(It.IsAny<Peer>()), Times.Never);
-        
-        // Verify conversation was not created
-        _mockConversationRepository.Verify(r => r.AddAsync(It.IsAny<ChatConversation>(), It.IsAny<int>()), Times.Never);
         
         // Verify session was not established
         _mockDirectSessionManager.Verify(m => m.EstablishSessionAsInitiatorAsync(

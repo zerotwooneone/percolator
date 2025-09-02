@@ -22,7 +22,6 @@ namespace Percolator.ApplicationTests.Sessions;
 public class MessageServiceTests
 {
     private Mock<IConversationRepository> _mockConversationRepository = null!;
-    private Mock<IPeerRepository> _mockPeerRepository = null!;
     private Mock<IMessageTransportService> _mockTransportService = null!;
     private Mock<IDoubleRatchetSessionStore> _mockSessionStore = null!;
     private ActiveIdentityContext _activeIdentityContext = null!;
@@ -35,7 +34,6 @@ public class MessageServiceTests
     public void SetUp()
     {
         _mockConversationRepository = new Mock<IConversationRepository>();
-        _mockPeerRepository = new Mock<IPeerRepository>();
         _mockTransportService = new Mock<IMessageTransportService>();
         _activeIdentityContext = new ActiveIdentityContext();
         _mockSessionStore = new Mock<IDoubleRatchetSessionStore>();
@@ -47,7 +45,6 @@ public class MessageServiceTests
 
         _sessionManager = new DirectSessionManager(
             _mockSessionStore.Object,
-            _mockConversationRepository.Object,
             _activeIdentityContext,
             new NullLogger<DirectSessionManager>(),
             loggerFactory,

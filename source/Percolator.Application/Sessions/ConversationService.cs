@@ -28,7 +28,6 @@ namespace Percolator.Application.Sessions
         private readonly ILogger<ConversationService> _logger;
         private readonly IX3DHOrchestrator _orchestrator;
         private readonly IDirectSessionManager _sessionManager;
-        private readonly IConversationRepository _conversationRepository;
         private readonly IOneTimeKeyProvider _oneTimeKeyProvider;
         private readonly ActiveIdentityContext _activeIdentityContext;
         private readonly IGrpcSessionService _grpcSessionService;
@@ -41,7 +40,6 @@ namespace Percolator.Application.Sessions
             ILogger<ConversationService> logger,
             IX3DHOrchestrator orchestrator,
             IDirectSessionManager sessionManager,
-            IConversationRepository conversationRepository,
             IOneTimeKeyProvider oneTimeKeyProvider,
             ActiveIdentityContext activeIdentityContext,
             IGrpcSessionService grpcSessionService, 
@@ -53,7 +51,6 @@ namespace Percolator.Application.Sessions
             _logger = logger;
             _orchestrator = orchestrator;
             _sessionManager = sessionManager;
-            _conversationRepository = conversationRepository;
             _oneTimeKeyProvider = oneTimeKeyProvider;
             _activeIdentityContext = activeIdentityContext;
             _grpcSessionService = grpcSessionService;
@@ -89,7 +86,7 @@ namespace Percolator.Application.Sessions
             return mapping.SessionId;
         }
 
-        public async Task<DirectSessionId> CreateNewDirectConversationAsync(
+        public async Task<DirectSessionId> CreateNewDirectSessionAsync(
             DnsEndPoint endpoint,
             Peer remotePeer)
         {
@@ -171,9 +168,9 @@ namespace Percolator.Application.Sessions
                 // Upsert connection details even when the peer already existed
                 var netPeerId = new NetworkPeerId(remotePeer.Id.Value);
                 var peerConnection = await _peerConnectionRepository.GetByIdAsync(netPeerId);
+                var now = DateTimeOffset.UtcNow;
                 if (peerConnection is null)
                 {
-                    var now = DateTimeOffset.UtcNow;
                     peerConnection = new PeerConnection(
                         netPeerId,
                         new DirectMessagePublicKey(handshakeResult.ResponderBundle.IdentitySigningKey.Value),
@@ -190,33 +187,22 @@ namespace Percolator.Application.Sessions
                     {
                         peerConnection.SetDirectMessagePublicKey(new DirectMessagePublicKey(handshakeResult.ResponderBundle.IdentitySigningKey.Value));
                     }
-                    if (!peerConnection.GrpcEndPoints.Any(e => e.EndPoint.Host.Equals(endpoint.Host, StringComparison.OrdinalIgnoreCase) && e.EndPoint.Port == endpoint.Port))
+                    var existingEndpoint = peerConnection.GrpcEndPoints.FirstOrDefault(e => e.EndPoint.Host.Equals(endpoint.Host, StringComparison.OrdinalIgnoreCase) && e.EndPoint.Port == endpoint.Port);
+                    if (existingEndpoint is null)
                     {
-                        peerConnection.AddGrpcEndPoint(new GrpcEndPoint(endpoint, DateTimeOffset.UtcNow));
+                        peerConnection.AddGrpcEndPoint(new GrpcEndPoint(endpoint, now));
+                    }
+                    else
+                    {
+                        peerConnection.UpdateLastSeen(existingEndpoint,now);
                     }
                     await _peerConnectionRepository.SaveAsync(peerConnection);
                 }
                 // Persist mapping from conversation/session to remote peer for future routing
                 await _directSessionRepository.UpsertAsync(new NetworkPeerId(remotePeer.Id.Value), directSessionId, _activeIdentityContext.Identity.SelfIdentityId);
-
-                // Create a new conversation
-                var conversationId = new ChatConversationId(directSessionId.Value);
-                var conversation = await _conversationRepository.GetByIdAsync(conversationId, _activeIdentityContext.Identity.SelfIdentityId);
-                if (conversation == null)
-                {
-                    conversation = new ChatConversation(
-                        conversationId,
-                        new ChannelId(handshakeResult.ResponderBundle.IdentitySigningKey.Value),
-                        new List<ChatParticipantId>
-                            {new(_activeIdentityContext.Identity.Id), new(remotePeer.Id.Value)},
-                        new List<Message>(),
-                        remotePeer.Name);
-                    _logger.LogInformation("Creating conversation {ConversationId} with channel ID {ChannelId}", conversation.Id.Value, Convert.ToBase64String(conversation.ChannelId.Value));
-                    await _conversationRepository.AddAsync(conversation, _activeIdentityContext.Identity.SelfIdentityId);
-                }
-
+                
                 await _sessionManager.EstablishSessionAsResponderAsync(
-                    new SessionId(conversation.Id.Value),
+                    new SessionId(directSessionId.Value),
                     new Percolator.Identity.PeerId(remotePeer.Id.Value),
                     handshakeResult.ResponderBundle.IdentitySigningKey, // Alice's Public Identity Key
                     new RatchetEphemeralKey(responderPayload.EphemeralKey.ToByteArray()), // Alice's Public Ratchet Key
@@ -225,8 +211,8 @@ namespace Percolator.Application.Sessions
                     new SharedSecret(handshakeResult.SharedSecret.Value)
                 );
 
-                _logger.LogInformation("Successfully established session and created conversation {ConversationId}",
-                    conversation.Id);
+                _logger.LogInformation("Successfully established session and created session {DirectSessionId}",
+                    directSessionId);
 
                 return directSessionId;
             }

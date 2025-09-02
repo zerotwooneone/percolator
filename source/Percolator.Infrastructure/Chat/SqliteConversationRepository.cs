@@ -27,17 +27,6 @@ public sealed class SqliteConversationRepository : IConversationRepository
         return dbo is null ? null : ToDomain(dbo);
     }
 
-    public async Task<Conversation?> GetByChannelIdAsync(ChannelId id, int selfIdentityId)
-    {
-        var channel = id.Value;
-        var dbo = await _db.Conversations
-            .AsNoTracking()
-            .Include(c => c.Participants)
-            .Include(c => c.Messages)
-            .FirstOrDefaultAsync(c => c.ChannelId == channel && c.SelfIdentityId == selfIdentityId);
-        return dbo is null ? null : ToDomain(dbo);
-    }
-
     public async Task AddAsync(Conversation conversation, int selfIdentityId)
     {
         var now = DateTimeOffset.UtcNow;

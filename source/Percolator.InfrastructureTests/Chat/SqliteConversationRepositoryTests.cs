@@ -65,20 +65,6 @@ public class SqliteConversationRepositoryTests
     }
 
     [Test]
-    public async Task GetByChannelId_returns_conversation()
-    {
-        var ctx = CreateDbContext(out _);
-        var repo = new SqliteConversationRepository(ctx);
-        var c = NewConversation();
-
-        await repo.AddAsync(c, 1);
-        var loaded = await repo.GetByChannelIdAsync(c.ChannelId, 1);
-
-        loaded.Should().NotBeNull();
-        loaded!.Id.Value.Should().Be(c.Id.Value);
-    }
-
-    [Test]
     public async Task Update_replaces_participants_and_messages()
     {
         var ctx = CreateDbContext(out _);

@@ -56,7 +56,7 @@ public class DhtProbeHandler : IRequestHandler<DhtProbeCommand, FindNodeResponse
         var existingDirectConversationAsync = existingPeer == null 
             ? null 
             : await _conversationService.GetExistingDirectConversationAsync(remotePeer);
-        var directSessionId = existingDirectConversationAsync ?? await _conversationService.CreateNewDirectConversationAsync(request.Endpoint, remotePeer);
+        var directSessionId = existingDirectConversationAsync ?? await _conversationService.CreateNewDirectSessionAsync(request.Endpoint, remotePeer);
 
         // 2) Send Ping (fire-and-forget)
         var pingEnvelope = new InternalEnvelope

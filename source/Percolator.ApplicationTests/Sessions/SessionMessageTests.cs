@@ -27,7 +27,6 @@ public class SessionMessageTests
 {
     private IDoubleRatchetSessionStore _aliceSessionStore = null!;
     private IDoubleRatchetSessionStore _bobSessionStore = null!;
-    private Mock<IConversationRepository> _mockConversationRepo = null!;
     private DirectSessionManager _aliceManager = null!;
     private DirectSessionManager _bobManager = null!;
     private ActiveIdentityContext _aliceIdentity = null!;
@@ -41,8 +40,6 @@ public class SessionMessageTests
     {
         _aliceSessionStore = new FakeDoubleRatchetSessionStore();
         _bobSessionStore = new FakeDoubleRatchetSessionStore();
-
-        _mockConversationRepo = new Mock<IConversationRepository>();
 
         // Create a logger factory with console and debug providers for diagnostics
         _loggerFactory = LoggerFactory.Create(builder =>
@@ -90,7 +87,6 @@ public class SessionMessageTests
         // Create managers with real loggers for diagnostic output
         _aliceManager = new DirectSessionManager(
             _aliceSessionStore,
-            _mockConversationRepo.Object,
             _aliceIdentity,
             _loggerFactory.CreateLogger<DirectSessionManager>(),
             _loggerFactory,
@@ -98,7 +94,6 @@ public class SessionMessageTests
         
         _bobManager = new DirectSessionManager(
             _bobSessionStore, 
-            _mockConversationRepo.Object,
             _bobIdentity,
             _loggerFactory.CreateLogger<DirectSessionManager>(),
             _loggerFactory,
@@ -145,13 +140,7 @@ public class SessionMessageTests
         bobHandshakeKey.ImportECPrivateKey(_bobIdentity.Keys!.SignedPreKey.ExportECPrivateKey(), out _);
         
         await _bobManager.EstablishSessionAsResponderAsync(conversationId, alicePeerId, aliceIdentityKey, aliceEphemeralKey, bobHandshakeKey, new CryptoSharedSecret(bobSharedSecret.Value));
-
-        // Arrange: Mock the conversation repository to allow the manager to resolve the remote peer ID.
-        var participants = new List<ChatParticipantId> { new(alicePeerId.Value), new(bobPeerId.Value) };
-        var chatConversation = new Conversation(new ChatConversationId(conversationId.Value), new ChannelId(new byte[64]), participants, new List<Message>(), "Test Convo");
-        _mockConversationRepo.Setup(r => r.GetByIdAsync(It.IsAny<ChatConversationId>(), It.IsAny<int>()))
-            .ReturnsAsync(chatConversation);
-
+        
         // Arrange: Mock the protocol to correctly link the output of the encryption mock with the input of the decryption mock
         var originalMessage = "This is a super secret message.";
         var originalBytes = Encoding.UTF8.GetBytes(originalMessage);

@@ -15,7 +15,6 @@ namespace Percolator.Application.Sessions;
 public class DirectSessionManager : IDirectSessionManager
 {
     private readonly IDoubleRatchetSessionStore _sessionStore;
-    private readonly IConversationRepository _conversationRepository;
     private readonly ActiveIdentityContext _activeIdentityContext;
     private readonly ILogger<DirectSessionManager> _logger;
     private readonly ILoggerFactory _loggerFactory;
@@ -24,21 +23,20 @@ public class DirectSessionManager : IDirectSessionManager
 
     public DirectSessionManager(
         IDoubleRatchetSessionStore sessionStore,
-        IConversationRepository conversationRepository,
         ActiveIdentityContext activeIdentityContext,
         ILogger<DirectSessionManager> logger,
         ILoggerFactory loggerFactory,
         IOptions<CryptographyOptions> cryptographyOptions)
     {
         _sessionStore = sessionStore;
-        _conversationRepository = conversationRepository;
         _activeIdentityContext = activeIdentityContext;
         _logger = logger;
         _loggerFactory = loggerFactory;
         _cryptographyOptions = cryptographyOptions;
     }
 
-    public async Task EstablishSessionAsInitiatorAsync(SessionId conversationId,
+    public async Task EstablishSessionAsInitiatorAsync(
+        SessionId sessionId,
         PeerId remotePeerId,
         RatchetIdentityKey remoteIdentityKey,
         RatchetEphemeralKey remoteRatchetKey,
@@ -65,8 +63,7 @@ public class DirectSessionManager : IDirectSessionManager
             sessionLogger,
             _cryptographyOptions);
 
-        var sessionId = new SessionId(conversationId.Value);
-        _logger.LogInformation("Establish session as initiator for conversation {ConversationId}. SessionId: {SessionId}", conversationId, sessionId);
+        _logger.LogInformation("Establish session as initiator for session {SessionId}. ", sessionId);
         
         // Get state and store it
         var state = session.GetState();
@@ -93,7 +90,7 @@ public class DirectSessionManager : IDirectSessionManager
         if (_activeIdentityContext.Identity is null)
             throw new InvalidOperationException("Identity context not loaded");
         await _sessionStore.SetSessionStateAsync(sessionId, state, _activeIdentityContext.Identity.SelfIdentityId);
-        _sessionLocks.TryAdd(conversationId, new SemaphoreSlim(1, 1));
+        _sessionLocks.TryAdd(sessionId, new SemaphoreSlim(1, 1));
     }
 
     public async Task EstablishSessionAsResponderAsync(
@@ -121,7 +118,7 @@ public class DirectSessionManager : IDirectSessionManager
             sessionLogger,
             _cryptographyOptions);
 
-        _logger.LogInformation("Establish session as responder for conversation {ConversationId}. SessionId: {SessionId}", sessionId, sessionId);
+        _logger.LogInformation("Establish session as responder for SessionId: {SessionId}", sessionId);
         
         // Get state and store it
         var state = session.GetState();
@@ -154,7 +151,7 @@ public class DirectSessionManager : IDirectSessionManager
             throw new InvalidOperationException("No active identity found to receive message.");
         }
 
-        // Ensure only one message is processed at a time for a given conversation to prevent race conditions.
+        // Ensure only one message is processed at a time for a given session to prevent race conditions.
         var semaphore = _sessionLocks.GetOrAdd(sessionId, new SemaphoreSlim(1, 1));
         await semaphore.WaitAsync();
 
@@ -162,16 +159,12 @@ public class DirectSessionManager : IDirectSessionManager
         {
             if (_activeIdentityContext.Identity is null)
                 throw new InvalidOperationException("Identity context not loaded");
-            var conversation = await _conversationRepository.GetByIdAsync(new Chat.ValueObjects.ConversationId(sessionId.Value), _activeIdentityContext.Identity.SelfIdentityId);
-            if (conversation is null)
-                throw new InvalidOperationException($"Conversation with id {sessionId} not found");
-            
-            _logger.LogInformation("Receive message for conversation {ConversationId}. SessionId: {SessionId}", sessionId, sessionId);
+            _logger.LogInformation("Receive message for SessionId: {SessionId}", sessionId);
 
             var sessionState = await _sessionStore.GetSessionStateAsync(sessionId, _activeIdentityContext.Identity.SelfIdentityId);
             if (sessionState == null)
             {
-                throw new InvalidOperationException($"Double Ratchet session state for conversation {sessionId} not found.");
+                throw new InvalidOperationException($"Double Ratchet session state for session {sessionId} not found.");
             }
 
             if (_cryptographyOptions.Value.EnableCryptographicMaterialLogging)
@@ -207,28 +200,24 @@ public class DirectSessionManager : IDirectSessionManager
     }
 
     public async Task<SessionRatchetMessage> EncryptMessageAsync(
-        SessionId conversationId, 
+        SessionId sessionId, 
         Plaintext plaintext)
     {
-        // Ensure only one message is processed at a time for a given conversation to prevent race conditions.
-        var semaphore = _sessionLocks.GetOrAdd(conversationId, new SemaphoreSlim(1, 1));
+        // Ensure only one message is processed at a time for a given session to prevent race conditions.
+        var semaphore = _sessionLocks.GetOrAdd(sessionId, new SemaphoreSlim(1, 1));
         await semaphore.WaitAsync();
 
         try
         {
             if (_activeIdentityContext.Identity is null)
                 throw new InvalidOperationException("Identity context not loaded");
-            var conversation = await _conversationRepository.GetByIdAsync(new Chat.ValueObjects.ConversationId(conversationId.Value), _activeIdentityContext.Identity.SelfIdentityId);
-            if (conversation is null)
-                throw new InvalidOperationException($"Conversation with id {conversationId} not found");
             
-            var sessionId = new SessionId(conversationId.Value);
-            _logger.LogInformation("Encrypt message for conversation {ConversationId}. SessionId: {SessionId}", conversationId, sessionId);
+            _logger.LogInformation("Encrypt message for SessionId: {SessionId}", sessionId);
             
             var sessionState = await _sessionStore.GetSessionStateAsync(sessionId, _activeIdentityContext.Identity.SelfIdentityId);
             if (sessionState == null)
             {
-                throw new InvalidOperationException($"Double Ratchet session state for conversation {conversationId} not found.");
+                throw new InvalidOperationException($"Double Ratchet session state for session {sessionId} not found.");
             }
             
             if (_cryptographyOptions.Value.EnableCryptographicMaterialLogging)
@@ -254,16 +243,5 @@ public class DirectSessionManager : IDirectSessionManager
         {
             semaphore.Release();
         }
-    }
-
-    private async Task<Percolator.Identity.PeerId> GetRemotePeerIdFromDirectMessage(Conversation conversation)
-    {
-        
-        if (_activeIdentityContext.Identity is null)
-            throw new InvalidOperationException("Identity context not loaded");
-
-        var localPeerId = _activeIdentityContext.Identity.Id;
-        var remotePeerId = conversation.Participants.First(p => p.Value != localPeerId);
-        return new Percolator.Identity.PeerId(remotePeerId.Value);
     }
 }

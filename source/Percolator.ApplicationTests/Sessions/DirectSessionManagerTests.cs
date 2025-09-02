@@ -20,8 +20,6 @@ public class DirectSessionManagerTests
 {
     // Alice (initiator) components
     private Mock<IDoubleRatchetSessionStore> _aliceSessionStore = null!;
-    private Mock<IConversationRepository> _aliceConversationRepository = null!;
-    private Mock<IPeerRepository> _alicePeerRepository = null!;
     private ActiveIdentityContext _aliceIdentityContext = null!;
     private DirectSessionManager _aliceSessionManager = null!;
     private X3dhKeys _aliceKeys = null!;
@@ -29,7 +27,6 @@ public class DirectSessionManagerTests
     
     // Bob (responder) components
     private Mock<IDoubleRatchetSessionStore> _bobSessionStore = null!;
-    private Mock<IConversationRepository> _bobConversationRepository = null!;
     private Mock<IPeerRepository> _bobPeerRepository = null!;
     private ActiveIdentityContext _bobIdentityContext = null!;
     private DirectSessionManager _bobSessionManager = null!;
@@ -62,8 +59,6 @@ public class DirectSessionManagerTests
             _aliceEphemeral);
             
         _aliceSessionStore = new Mock<IDoubleRatchetSessionStore>();
-        _aliceConversationRepository = new Mock<IConversationRepository>();
-        _alicePeerRepository = new Mock<IPeerRepository>();
         
         // Create a real ActiveIdentityContext instance instead of a mock
         _aliceIdentityContext = new ActiveIdentityContext();
@@ -72,7 +67,6 @@ public class DirectSessionManagerTests
         _aliceIdentityContext.Keys = _aliceKeys;
         _aliceSessionManager = new DirectSessionManager(
             _aliceSessionStore.Object,
-            _aliceConversationRepository.Object,
             _aliceIdentityContext,
             _loggerFactory.CreateLogger<DirectSessionManager>(),
             _loggerFactory,
@@ -86,7 +80,6 @@ public class DirectSessionManagerTests
             ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256));
             
         _bobSessionStore = new Mock<IDoubleRatchetSessionStore>();
-        _bobConversationRepository = new Mock<IConversationRepository>();
         _bobPeerRepository = new Mock<IPeerRepository>();
         
         // Create a real ActiveIdentityContext instance instead of a mock
@@ -96,7 +89,6 @@ public class DirectSessionManagerTests
         _bobIdentityContext.Keys = _bobKeys;
         _bobSessionManager = new DirectSessionManager(
             _bobSessionStore.Object,
-            _bobConversationRepository.Object,
             _bobIdentityContext,
             _loggerFactory.CreateLogger<DirectSessionManager>(),
             _loggerFactory,
@@ -279,20 +271,7 @@ public class DirectSessionManagerTests
         var bobPreKeyPublic = new RatchetEphemeralKey(_bobKeys.SignedPreKey.ExportSubjectPublicKeyInfo());
         var aliceIdentityKeyPublic = new RatchetIdentityKey(_aliceKeys.IdentityAgreementKey.ExportSubjectPublicKeyInfo());
         var aliceEphemeralKeyPublic = new RatchetEphemeralKey(_aliceKeys.SignedPreKey.ExportSubjectPublicKeyInfo());
-
-        var aliceConversation = new Conversation(
-            new ConversationId(_sessionId.Value),
-            new ChannelId(Guid.NewGuid().ToByteArray()),
-            new List<ParticipantId> { new(_alicePeerId.Value), new(_bobPeerId.Value) },
-            new List<Message>());
-        var bobConversation = new Conversation(
-            new ConversationId(_sessionId.Value),
-            new ChannelId(Guid.NewGuid().ToByteArray()),
-            new List<ParticipantId> { new(_alicePeerId.Value), new(_bobPeerId.Value) },
-            new List<Message>());
-        _aliceConversationRepository.Setup(x => x.GetByIdAsync(It.IsAny<ConversationId>(), It.IsAny<int>())).ReturnsAsync(aliceConversation);
-        _bobConversationRepository.Setup(x => x.GetByIdAsync(It.IsAny<ConversationId>(), It.IsAny<int>())).ReturnsAsync(bobConversation);
-
+        
         await _aliceSessionManager.EstablishSessionAsInitiatorAsync(_sessionId, _bobPeerId, bobIdentityKeyPublic, bobPreKeyPublic, sharedSecret, _aliceEphemeral);
         await _bobSessionManager.EstablishSessionAsResponderAsync(_sessionId, _alicePeerId, aliceIdentityKeyPublic, aliceEphemeralKeyPublic, _bobKeys.SignedPreKey, sharedSecret);
 
