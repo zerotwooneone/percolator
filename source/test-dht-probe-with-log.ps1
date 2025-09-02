@@ -101,8 +101,8 @@ function Invoke-With-Retry {
 
 Write-Host "Ensuring identities (idempotent)..." -ForegroundColor Cyan
 Invoke-PercolatorSync -CmdArgs @("create-identity", "--name", "host") | Out-Null
-Invoke-PercolatorSync -CmdArgs @("create-identity", "--name", "alice") | Out-Null
-Invoke-PercolatorSync -CmdArgs @("create-identity", "--name", "bob") | Out-Null
+Invoke-PercolatorSync -CmdArgs @("create-identity", "--name", "alice", "--dbFile", "alice.db") | Out-Null
+Invoke-PercolatorSync -CmdArgs @("create-identity", "--name", "bob", "--dbFile", "bob.db") | Out-Null
 
 Write-Host "Starting host with logging..." -ForegroundColor Cyan
 $hostRun = Start-Logged -Name "host" -CmdArgs @("host", "--selfIdentity", "host", "--port", "$Port")
@@ -118,11 +118,11 @@ try {
     $endpoint = "localhost:$grpcPort"
 
     Write-Host "Alice probing Host (expect empty nearest list)..." -ForegroundColor Yellow
-    $ec = Invoke-With-Retry -CmdArgs @("dht-probe", $endpoint, "--target-identity", "host", "--selfIdentity", "alice") -Retries $Retries -DelayMs $RetryDelayMs -Name "alice_dht_probe" -LogDir $LogDir
+    $ec = Invoke-With-Retry -CmdArgs @("dht-probe", $endpoint, "--target-identity", "host", "--selfIdentity", "alice", "--dbFile", "alice.db") -Retries $Retries -DelayMs $RetryDelayMs -Name "alice_dht_probe" -LogDir $LogDir
     if ($ec -ne 0) { throw "Alice probe failed after $Retries attempts" }
 
     Write-Host "Bob probing Host (expect nearest to include Alice)..." -ForegroundColor Yellow
-    $ec = Invoke-With-Retry -CmdArgs @("dht-probe", $endpoint, "--target-identity", "host", "--selfIdentity", "bob") -Retries $Retries -DelayMs $RetryDelayMs -Name "bob_dht_probe" -LogDir $LogDir
+    $ec = Invoke-With-Retry -CmdArgs @("dht-probe", $endpoint, "--target-identity", "host", "--selfIdentity", "bob", "--dbFile", "bob.db") -Retries $Retries -DelayMs $RetryDelayMs -Name "bob_dht_probe" -LogDir $LogDir
     if ($ec -ne 0) { throw "Bob probe failed after $Retries attempts" }
 }
 finally {

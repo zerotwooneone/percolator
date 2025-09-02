@@ -1,5 +1,6 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Percolator.Application.Identity;
@@ -27,12 +28,16 @@ namespace Percolator.Infrastructure.Identity
             {
                 var storageOptions = provider.GetRequiredService<IOptions<StorageOptions>>().Value;
                 var encryptionService = provider.GetRequiredService<IDatabaseEncryptionService>();
+                var configuration = provider.GetRequiredService<IConfiguration>();
 
                 // Ensure the data directory exists
                 Directory.CreateDirectory(storageOptions.Path);
 
                 var password = encryptionService.GetDatabasePassword();
-                var dbPath = Path.Combine(storageOptions.Path, "percolator.db");
+                var configuredFileName = configuration["Percolator:DatabaseFileName"];
+                // Default to percolator.db if not set; ensure only a file name is used
+                var dbFileName = string.IsNullOrWhiteSpace(configuredFileName) ? "percolator.db" : Path.GetFileName(configuredFileName);
+                var dbPath = Path.Combine(storageOptions.Path, dbFileName);
 
                 var connectionString = new SqliteConnectionStringBuilder
                 {

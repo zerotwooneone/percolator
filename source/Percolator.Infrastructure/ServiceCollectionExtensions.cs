@@ -13,6 +13,8 @@ public static class ServiceCollectionExtensions
 {
     public static IServiceCollection AddInfrastructureServices(this IServiceCollection services, IConfiguration configuration)
     {
+        // Ensure IConfiguration is available from DI
+        services.AddSingleton(configuration);
         services.AddOptions<StorageOptions>()
             .Bind(configuration.GetSection(StorageOptions.SectionName))
             .Configure(options =>

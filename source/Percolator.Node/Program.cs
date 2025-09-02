@@ -37,6 +37,12 @@ var selfIdentityOption = new Option<string>(
     getDefaultValue: () => "default",
     description: "The name of the local identity to use (defaults to 'default').");
 
+// Optional DB filename override
+var dbFileOption = new Option<string>(
+    new[] { "--dbFile" },
+    description: "Optional database filename to use instead of 'percolator.db' (filename only, combined with Storage:Path)."
+);
+
 // *** Host Command ***
 var portOption = new Option<int?>(
     new[] { "--port", "-p" },
@@ -46,7 +52,8 @@ var portOption = new Option<int?>(
 var hostCommand = new Command("host", "Starts the node, listens for peers, and hosts the gRPC service.")
 {
     selfIdentityOption,
-    portOption
+    portOption,
+    dbFileOption
 };
 rootCommand.AddCommand(hostCommand);
 
@@ -93,7 +100,8 @@ var dhtProbeCommand = new Command("dht-probe", "Send a DHT Ping then FindNode ag
 {
     endpointArgument,
     targetIdentityOption,
-    selfIdentityOption
+    selfIdentityOption,
+    dbFileOption
 };
 rootCommand.AddCommand(dhtProbeCommand);
 
@@ -107,7 +115,8 @@ var createPeerIdOption = new Option<Guid?>(new[] { "--peer-id" }, description: "
 var createIdentityCommand = new Command("create-identity", "Creates a local self identity and its key material (idempotent).")
 {
     nameOption,
-    createPeerIdOption
+    createPeerIdOption,
+    dbFileOption
 };
 rootCommand.AddCommand(createIdentityCommand);
 
@@ -117,9 +126,23 @@ async Task CreateIdentityCommandHandler(InvocationContext context)
 {
     var name = context.ParseResult.GetValueForOption(nameOption);
     var peerId = context.ParseResult.GetValueForOption(createPeerIdOption);
+    var dbFile = context.ParseResult.GetValueForOption(dbFileOption);
     var cancellationToken = context.GetCancellationToken();
 
-    var services = CreateServiceProvider();
+    // Build configuration with optional dbFile override
+    var configBuilder = new ConfigurationBuilder()
+        .AddJsonFile("appsettings.json", optional: true)
+        .AddNode();
+    if (!string.IsNullOrWhiteSpace(dbFile))
+    {
+        configBuilder.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Percolator:DatabaseFileName"] = dbFile
+        });
+    }
+    var config = configBuilder.Build();
+
+    var services = CreateServiceProvider(config);
     await using var serviceScope = services.CreateAsyncScope();
     var serviceProvider = serviceScope.ServiceProvider;
 
@@ -158,6 +181,7 @@ async Task HostCommandHandler(InvocationContext context)
 {
     CancellationToken cancellationToken = context.GetCancellationToken();
     string? identityName = context.ParseResult.GetValueForOption(selfIdentityOption);
+    string? dbFile = context.ParseResult.GetValueForOption(dbFileOption);
 
     // Step 1: Build a temporary service provider to get services needed for startup.
     var tempServices = new ServiceCollection();
@@ -177,6 +201,15 @@ async Task HostCommandHandler(InvocationContext context)
         });
     }
 
+
+    // Apply optional db file override to temp config as well so migrations/identity resolution use it
+    if (!string.IsNullOrWhiteSpace(dbFile))
+    {
+        tempConfigBuilder.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Percolator:DatabaseFileName"] = dbFile
+        });
+    }
 
     IConfigurationRoot tempConfig = tempConfigBuilder.Build();
     tempServices.AddLogging(builder => builder
@@ -202,21 +235,17 @@ async Task HostCommandHandler(InvocationContext context)
         
         // Get the shared certificate manager
         var certificateManager = tempServiceProvider.GetRequiredService<SharedCertificateManager>();
-        
-        // Load identity for other features (but not for TLS)
-        IIdentityOrchestrator tempIdentityOrchestrator = tempServiceProvider.GetRequiredService<IIdentityOrchestrator>();
-        ActiveIdentityContext tempActiveIdentityContext = tempServiceProvider.GetRequiredService<ActiveIdentityContext>();
-        await tempIdentityOrchestrator.ResolveIdentityAsync(identityName!, cancellationToken, defaultIdentityName);
-        
-        string publicKeyB64 = Convert.ToBase64String(tempActiveIdentityContext.Keys!.IdentitySigningKey.ExportSubjectPublicKeyInfo());
+
+        // Use MediatR to resolve identity and compute public key
+        var mediator = tempServiceProvider.GetRequiredService<IMediator>();
+        var startupInfo = await mediator.Send(new HostCommand(identityName!), cancellationToken);
+        var publicKeyB64 = startupInfo.PublicKeyB64;
 
         // For simplicity in a local dev environment, we'll use localhost.
-        // A more advanced implementation might try to discover the local network IP.
-        InvitationLink invitationLink = new InvitationLink("localhost", port, publicKeyB64);
-
+        // Print a simple invitation string
         Console.ForegroundColor = ConsoleColor.Green;
         Console.WriteLine($"Host started successfully.");
-        Console.WriteLine($"Invitation Link: {invitationLink}");
+        Console.WriteLine($"Invitation: host=localhost port={port} key={publicKeyB64}");
         Console.ResetColor();
         Console.WriteLine("Share this link with peers who want to connect.");
         
@@ -243,6 +272,13 @@ async Task HostCommandHandler(InvocationContext context)
             {
                 ["Node:Port"] = port.ToString(),
                 ["Transport:GrpcPort"] = grpcPort.ToString()
+            });
+        }
+        if (!string.IsNullOrWhiteSpace(dbFile))
+        {
+            builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Percolator:DatabaseFileName"] = dbFile
             });
         }
         builder.WebHost.UseKestrel(options =>
@@ -293,6 +329,7 @@ async Task<int> DhtProbeCommandHandler(InvocationContext context)
     var endpointString = context.ParseResult.GetValueForArgument(endpointArgument);
     var targetIdentity = context.ParseResult.GetValueForOption(targetIdentityOption);
     var selfIdentity = context.ParseResult.GetValueForOption(selfIdentityOption);
+    var dbFile = context.ParseResult.GetValueForOption(dbFileOption);
     var cancellationToken = context.GetCancellationToken();
 
     if (!TryParseEndpoint(endpointString, out var endpoint))
@@ -303,7 +340,20 @@ async Task<int> DhtProbeCommandHandler(InvocationContext context)
         return 400;
     }
 
-    var services = CreateServiceProvider();
+    // Build configuration with optional dbFile override
+    var configBuilder = new ConfigurationBuilder()
+        .AddJsonFile("appsettings.json", optional: true)
+        .AddNode();
+    if (!string.IsNullOrWhiteSpace(dbFile))
+    {
+        configBuilder.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Percolator:DatabaseFileName"] = dbFile
+        });
+    }
+    var probeConfig = configBuilder.Build();
+
+    var services = CreateServiceProvider(probeConfig);
     await using var serviceScope = services.CreateAsyncScope();
     var serviceProvider = serviceScope.ServiceProvider;
 
@@ -478,10 +528,10 @@ static async Task EnsureMigrationsAsync(IServiceProvider serviceProvider, Cancel
     }
 }
 
-static ServiceProvider CreateServiceProvider()
+static ServiceProvider CreateServiceProvider(IConfiguration? configuration = null)
 {
     var services = new ServiceCollection();
-    var config = new ConfigurationBuilder()
+    var config = configuration ?? new ConfigurationBuilder()
         .AddJsonFile("appsettings.json", optional: true)
         .AddNode()
         .Build();
@@ -498,35 +548,24 @@ static ServiceProvider CreateServiceProvider()
     {
         client.DefaultRequestVersion = HttpVersion.Version20;
         client.DefaultVersionPolicy = HttpVersionPolicy.RequestVersionOrLower;
-        // Base address is not set here as it will be different for each peer
     })
     .ConfigurePrimaryHttpMessageHandler(() =>
     {
-        // Create a logger factory and logger instance that can be used within this scope
         var loggerFactory = services.BuildServiceProvider().GetRequiredService<ILoggerFactory>();
         var logger = loggerFactory.CreateLogger<Program>();
-        
         var handler = new SocketsHttpHandler
         {
-            PooledConnectionIdleTimeout = TimeSpan.FromMinutes(10), // Longer timeout for idle connections
+            PooledConnectionIdleTimeout = TimeSpan.FromMinutes(10),
             KeepAlivePingDelay = TimeSpan.FromSeconds(30),
             KeepAlivePingTimeout = TimeSpan.FromSeconds(30),
             EnableMultipleHttp2Connections = true,
-            ConnectTimeout = TimeSpan.FromSeconds(20), // Longer connection timeout
-            ResponseDrainTimeout = TimeSpan.FromSeconds(5), // More time to drain responses
-            
-            // Explicitly control connection pooling to prevent premature disposal
-            PooledConnectionLifetime = TimeSpan.FromMinutes(30), // Longer connection lifetime
-            
+            ConnectTimeout = TimeSpan.FromSeconds(20),
+            ResponseDrainTimeout = TimeSpan.FromSeconds(5),
+            PooledConnectionLifetime = TimeSpan.FromMinutes(30),
             SslOptions = new SslClientAuthenticationOptions
             {
-                // Explicitly enable TLS 1.2 and 1.3
                 EnabledSslProtocols = SslProtocols.Tls12 | SslProtocols.Tls13,
-                
-                // Disable certificate revocation checking during debugging
                 CertificateRevocationCheckMode = X509RevocationMode.NoCheck,
-                
-                // Use the custom certificate validation callback
                 RemoteCertificateValidationCallback = (sender, certificate, chain, sslPolicyErrors) =>
                 {
                     if (certificate == null)
@@ -534,61 +573,35 @@ static ServiceProvider CreateServiceProvider()
                         logger.LogError("CLIENT: No certificate provided by the server");
                         return false;
                     }
-
                     var cert = new X509Certificate2(certificate);
                     logger.LogInformation("CLIENT: TLS Certificate Validation: Subject={Subject}, Issuer={Issuer}, PolicyErrors={PolicyErrors}",
                         cert.Subject, cert.Issuer, sslPolicyErrors);
-                    
                     logger.LogInformation("CLIENT: Certificate details - Thumbprint={Thumbprint}, NotBefore={NotBefore}, NotAfter={NotAfter}",
                         cert.Thumbprint, cert.NotBefore, cert.NotAfter);
-
-                    // If there are policy errors, log details to help diagnose
                     if (sslPolicyErrors != SslPolicyErrors.None)
                     {
                         logger.LogWarning("CLIENT: Certificate validation errors: {Errors}", sslPolicyErrors);
-                        
                         if ((sslPolicyErrors & SslPolicyErrors.RemoteCertificateChainErrors) != 0 && chain != null)
                         {
                             for (int i = 0; i < chain.ChainStatus.Length; i++)
                             {
-                                logger.LogWarning("CLIENT: Chain error {Index}: {Status}, {Information}", 
-                                    i, chain.ChainStatus[i].Status, chain.ChainStatus[i].StatusInformation);
+                                logger.LogWarning("CLIENT: Chain error {Index}: {Status}, {Information}", i, chain.ChainStatus[i].Status, chain.ChainStatus[i].StatusInformation);
                             }
                         }
                     }
-
-                    // TEMPORARY FOR DEBUGGING: Accept any certificate to diagnose TOFU mechanism
                     logger.LogWarning("CLIENT: TEMPORARY DEBUG MODE: Accepting all certificates for TOFU debugging");
                     return true;
-
-                    // In production, we'd use the peer trust manager:
-                    // return peerTrustManager.IsTrusted(certificate);
                 },
-                
-                // Client certificates will be selected by the callback
-                LocalCertificateSelectionCallback = (sender, targetHost, localCertificates, remoteCertificate, acceptableIssuers) =>
-                {
-                    logger.LogInformation("CLIENT: TLS Client Certificate Selection: Host={Host}, RemoteCertSubject={RemoteSubject}, LocalCerts={LocalCertCount}",
-                        targetHost, 
-                        remoteCertificate?.Subject ?? "null",
-                        localCertificates?.Count ?? 0);
-                    
-                    // For now, return null (no client certificate)
-                    // Later, we'll add client certificate selection logic
-                    return null;
-                }
+                LocalCertificateSelectionCallback = (sender, targetHost, localCertificates, remoteCertificate, acceptableIssuers) => null
             },
-            // Increase timeouts to prevent premature connection closure
             AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate,
-            UseCookies = false, // gRPC doesn't need cookies
-            MaxConnectionsPerServer = 100 // Allow more concurrent connections
+            UseCookies = false,
+            MaxConnectionsPerServer = 100
         };
-        
         return handler;
     });
 
     var sp = services.BuildServiceProvider();
-    // Centralized migration gate; synchronous wait is acceptable during startup
     EnsureMigrationsAsync(sp, CancellationToken.None).GetAwaiter().GetResult();
     return sp;
 }
