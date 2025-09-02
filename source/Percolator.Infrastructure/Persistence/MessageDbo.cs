@@ -6,7 +6,6 @@ public class MessageDbo
 {
     public Guid Id { get; set; }
     public Guid ConversationId { get; set; }
-    public int SelfIdentityId { get; set; }
 
     public Guid SenderId { get; set; }
     public string Body { get; set; } = string.Empty;

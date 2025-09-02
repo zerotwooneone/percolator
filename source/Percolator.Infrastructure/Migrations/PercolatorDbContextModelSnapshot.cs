@@ -56,9 +56,6 @@ namespace Percolator.Infrastructure.Migrations
                     b.Property<Guid>("Id")
                         .HasColumnType("TEXT");
 
-                    b.Property<int>("SelfIdentityId")
-                        .HasColumnType("INTEGER");
-
                     b.Property<byte[]>("ChannelId")
                         .IsRequired()
                         .HasColumnType("BLOB");
@@ -69,10 +66,13 @@ namespace Percolator.Infrastructure.Migrations
                     b.Property<string>("Name")
                         .HasColumnType("TEXT");
 
+                    b.Property<int>("SelfIdentityId")
+                        .HasColumnType("INTEGER");
+
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("TEXT");
 
-                    b.HasKey("Id", "SelfIdentityId");
+                    b.HasKey("Id");
 
                     b.HasIndex("SelfIdentityId", "ChannelId");
 
@@ -87,12 +87,7 @@ namespace Percolator.Infrastructure.Migrations
                     b.Property<Guid>("ParticipantId")
                         .HasColumnType("TEXT");
 
-                    b.Property<int>("SelfIdentityId")
-                        .HasColumnType("INTEGER");
-
-                    b.HasKey("ConversationId", "ParticipantId", "SelfIdentityId");
-
-                    b.HasIndex("ConversationId", "SelfIdentityId");
+                    b.HasKey("ConversationId", "ParticipantId");
 
                     b.ToTable("ConversationParticipants", (string)null);
                 });
@@ -128,9 +123,6 @@ namespace Percolator.Infrastructure.Migrations
                     b.Property<Guid>("SessionId")
                         .HasColumnType("TEXT");
 
-                    b.Property<int>("SelfIdentityId")
-                        .HasColumnType("INTEGER");
-
                     b.Property<byte[]>("DhRatchetPrivateKey")
                         .HasColumnType("BLOB");
 
@@ -150,6 +142,9 @@ namespace Percolator.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("BLOB");
 
+                    b.Property<int>("SelfIdentityId")
+                        .HasColumnType("INTEGER");
+
                     b.Property<byte[]>("SendingChainKey")
                         .HasColumnType("BLOB");
 
@@ -166,7 +161,7 @@ namespace Percolator.Infrastructure.Migrations
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("TEXT");
 
-                    b.HasKey("SessionId", "SelfIdentityId");
+                    b.HasKey("SessionId");
 
                     b.HasIndex("SelfIdentityId", "UpdatedAt");
 
@@ -211,9 +206,6 @@ namespace Percolator.Infrastructure.Migrations
                     b.Property<Guid>("ConversationId")
                         .HasColumnType("TEXT");
 
-                    b.Property<int>("SelfIdentityId")
-                        .HasColumnType("INTEGER");
-
                     b.Property<Guid>("SenderId")
                         .HasColumnType("TEXT");
 
@@ -222,7 +214,7 @@ namespace Percolator.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("ConversationId", "SelfIdentityId", "SentAt");
+                    b.HasIndex("ConversationId", "SentAt");
 
                     b.ToTable("Messages", (string)null);
                 });
@@ -422,7 +414,7 @@ namespace Percolator.Infrastructure.Migrations
                 {
                     b.HasOne("Percolator.Infrastructure.Persistence.ConversationDbo", "Conversation")
                         .WithMany("Participants")
-                        .HasForeignKey("ConversationId", "SelfIdentityId")
+                        .HasForeignKey("ConversationId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
@@ -468,7 +460,7 @@ namespace Percolator.Infrastructure.Migrations
                 {
                     b.HasOne("Percolator.Infrastructure.Persistence.ConversationDbo", "Conversation")
                         .WithMany("Messages")
-                        .HasForeignKey("ConversationId", "SelfIdentityId")
+                        .HasForeignKey("ConversationId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
@@ -531,6 +523,7 @@ namespace Percolator.Infrastructure.Migrations
                     b.HasOne("Percolator.Infrastructure.Persistence.DoubleRatchetSessionDbo", "Session")
                         .WithMany("SkippedMessageKeys")
                         .HasForeignKey("SessionId", "SelfIdentityId")
+                        .HasPrincipalKey("SessionId", "SelfIdentityId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
