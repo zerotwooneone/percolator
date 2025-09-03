@@ -9,7 +9,7 @@ namespace Percolator.Application.Identity;
 /// Holds the details of the currently active identity for the running node.
 /// This context is populated at startup and treated as read-only thereafter.
 /// </summary>
-public class ActiveIdentityContext :ISelfParticipantIdProvider, ISelfIdentityProvider
+public class ActiveIdentityContext :ISelfParticipantIdProvider
 {
     public IdentityRecord? Identity { get; internal set; }
     public X3dhKeys? Keys { get; internal set; }
@@ -21,14 +21,5 @@ public class ActiveIdentityContext :ISelfParticipantIdProvider, ISelfIdentityPro
             throw new InvalidOperationException("Identity not loaded for chat participant.");
         }
         return new ChatParticipantId(Identity.Id);
-    }
-
-    PeerId ISelfIdentityProvider.Get()
-    {
-        if (Identity is null)
-        {
-            throw new InvalidOperationException("Identity not loaded for identity provider.");
-        }
-        return new PeerId(Identity.Id);
     }
 }
