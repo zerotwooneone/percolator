@@ -6,6 +6,7 @@ using Percolator.Application.Identity;
 using Percolator.Contracts;
 using Percolator.Cryptography;
 using Percolator.Network;
+using Percolator.Prekey.Handlers;
 
 namespace Percolator.Application.Network
 {
@@ -32,6 +33,72 @@ namespace Percolator.Application.Network
             _mediator = mediator;
             _directSessionRepository = directSessionRepository;
             _activeIdentityContext = activeIdentityContext;
+        }
+
+        private async Task HandlePrekeyEnvelopeAsync(PrekeyEnvelope prekeyEnvelope, CancellationToken ct)
+        {
+            switch (prekeyEnvelope.MessageCase)
+            {
+                case PrekeyEnvelope.MessageOneofCase.SubmitPreKeyBundleRequest:
+                    var upload = prekeyEnvelope.SubmitPreKeyBundleRequest;
+                    if (!upload.HasIdentityKey)
+                    {
+                        throw new InvalidOperationException("Identity key is required");
+                    }
+                    if (!upload.HasSignedPreKeyId)
+                    {
+                        throw new InvalidOperationException("Signed pre-key ID is required");
+                    }
+                    if (!upload.HasSignedPreKey)
+                    {
+                        throw new InvalidOperationException("Signed pre-key is required");
+                    }
+                    if (!upload.HasPreKeySignature)
+                    {
+                        throw new InvalidOperationException("Pre-key signature is required");
+                    }
+
+                    if (upload.OneTimePreKeys.Count == 0)
+                    {
+                        throw new InvalidOperationException("At least one one-time pre-key is required");
+                    }
+                    const int maxBundles = 100;
+                    if(upload.OneTimePreKeys.Count > maxBundles)
+                    {
+                        throw new InvalidOperationException($"Too many one-time pre-keys. Maximum is {maxBundles}");
+                    }
+                    foreach (var oneTimePreKey in upload.OneTimePreKeys)
+                    {
+                        if (!oneTimePreKey.HasId)
+                        {
+                            throw new InvalidOperationException("One-time pre-key is required");
+                        }
+
+                        if (!oneTimePreKey.HasPublicKey)
+                        {
+                            throw new InvalidOperationException("One-time pre-key public key is required");
+                        }
+                    }
+                    if (upload.ExpiresUtc.ToDateTimeOffset() < DateTimeOffset.Now)
+                    {
+                        throw new InvalidOperationException("Pre-key bundle has expired");
+                    }
+                    var cmd = new SubmitPreKeyBundleCommand
+                    {
+                        PublicSigningKey = upload.IdentityKey.ToByteArray(),
+                        SignedPreKeyId = new Guid(upload.SignedPreKeyId.ToByteArray()),
+                        SignedPreKey = upload.SignedPreKey.ToByteArray(),
+                        PreKeySignature = upload.PreKeySignature.ToByteArray(),
+                        OneTimePreKeys = upload.OneTimePreKeys.Select(x => new SubmitPreKeyBundleCommand.OneTimePreKey(
+                            new Guid(x.Id.ToByteArray()), x.PublicKey.ToByteArray())).ToList(),
+                        Expires = upload.ExpiresUtc.ToDateTimeOffset()
+                    };
+                    await _mediator.Send(cmd, ct);
+                    break;
+                default:
+                    _logger.LogWarning("Received unhandled prekey message type: {MessageType}", prekeyEnvelope.MessageCase);
+                    break;
+            }
         }
 
         public async Task<DeliverOpaqueMessageResult> Handle(DeliverOpaqueMessageCommand request, CancellationToken cancellationToken)
@@ -80,6 +147,9 @@ namespace Percolator.Application.Network
                         break;
                     case InternalEnvelope.ApplicationPayloadOneofCase.DhtEnvelope:
                         responseEnvelope = await HandleDhtMessageAsync(internalEnvelope.DhtEnvelope, connectionInfo, endpoint, cancellationToken);
+                        break;
+                    case InternalEnvelope.ApplicationPayloadOneofCase.PrekeyEnvelope:
+                        await HandlePrekeyEnvelopeAsync(internalEnvelope.PrekeyEnvelope, cancellationToken);
                         break;
                     default:
                         _logger.LogWarning("Received unhandled internal envelope type: {EnvelopeType}", internalEnvelope.ApplicationPayloadCase);

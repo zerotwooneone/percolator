@@ -22,10 +22,6 @@ service TransportService {
     // Establishes a new secure pairwise session with the node.
     // This is the entry point for the cryptographic handshake.
     rpc EstablishDirectSession(EstablishDirectSessionRequest) returns (EstablishDirectSessionResponse);
-
-    // Submits a new pre-key bundle for the calling peer.
-    // This allows peers to refresh their keys for asynchronous communication.
-    rpc SubmitPreKeyBundle(SubmitPreKeyBundleRequest) returns (SubmitPreKeyBundleResponse);
 }
 
 // Represents the public cryptographic materials needed to establish a secure session.
@@ -158,45 +154,6 @@ message DeliverOpaqueMessageResponse {
     optional uint32 version = 1;
     optional google.protobuf.Timestamp retry_after_utc = 2;
     optional bytes response_payload = 3;
-}
-
-// Request to submit a new pre-key bundle to the server.
-message SubmitPreKeyBundleRequest {
-    
-    message PreKeyUploadPayload {
-      message OneTimePreKey {
-        optional uint32 version = 1;
-        optional bytes id = 2;
-
-        optional bytes public_key = 3;
-      }
-
-      message SignedPreKey {
-        optional uint32 version = 1;
-        optional bytes id = 2;
-
-        optional bytes public_key = 3;
-
-        optional bytes signature = 4;
-      }
-      optional uint32 version = 1;      
-
-      optional SignedPreKey signed_pre_key = 2;
-
-      repeated OneTimePreKey one_time_pre_keys = 3;
-
-      optional google.protobuf.Timestamp timestampUtc = 4;
-      optional google.protobuf.Timestamp expiresUtc = 5;
-    }
-    optional uint32 version = 1;
-    optional bytes identity_key = 2;
-    optional bytes signed_payload =3;  
-    optional bytes signature = 4;
-}
-
-// Response for the pre-key bundle submission.
-message SubmitPreKeyBundleResponse {
-    optional uint32 version = 1;    
 }
 
 // Defines the structured format for a ratchet message used in Double Ratchet encryption.

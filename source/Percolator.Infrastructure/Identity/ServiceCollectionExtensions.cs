@@ -23,6 +23,7 @@ namespace Percolator.Infrastructure.Identity
             services.AddSingleton<IKeyManagementService, PersistentKeyManagementService>();
             services.AddScoped<IPeerRepository, SqlitePeerRepository>();
             services.AddScoped<ISelfIdentityRepository, SqliteSelfIdentityRepository>();
+            services.AddScoped<IPeerPublicSigningKeyStore, SqlitePeerPublicSigningKeyStore>();
 
             services.AddDbContext<PercolatorDbContext>((provider, options) =>
             {

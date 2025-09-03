@@ -13,6 +13,7 @@ message InternalEnvelope {
     ChatEnvelope chat_envelope = 1;
     FileShareEnvelope file_share_envelope = 2;
     DhtEnvelope dht_envelope = 3;
+    PrekeyEnvelope prekey_envelope = 4;
   }
 }
 
@@ -132,3 +133,41 @@ message FindNodeResponse {
 
 message PingRequest {}
 message PingResponse {}
+
+// === 4. Pre-key Exchange Application ===
+
+message PrekeyEnvelope {
+  optional uint32 version = 1;
+  oneof message {
+    SubmitPreKeyBundleRequest submit_pre_key_bundle_request = 2;
+  }
+}
+
+// Request to submit a new pre-key bundle to the server.
+message SubmitPreKeyBundleRequest {
+  message OneTimePreKey {
+    optional uint32 version = 1;
+    optional bytes id = 2;
+
+    optional bytes public_key = 3;
+  }
+  
+  optional uint32 version = 1;
+
+  optional bytes identity_key = 2;
+
+  optional bytes signed_pre_key_id = 3;
+
+  optional bytes signed_pre_key = 4;
+
+  optional bytes pre_key_signature = 5;
+
+  repeated OneTimePreKey one_time_pre_keys = 6;
+
+  optional google.protobuf.Timestamp expiresUtc = 7;
+}
+
+// Response for the pre-key bundle submission.
+message SubmitPreKeyBundleResponse {
+  optional uint32 version = 1;
+}

@@ -7,6 +7,7 @@
     <ProjectReference Include="..\Percolator.Dht\Percolator.Dht.csproj" />
     <ProjectReference Include="..\Percolator.Identity\Percolator.Identity.csproj" />
     <ProjectReference Include="..\Percolator.Network\Percolator.Network.csproj" />
+    <ProjectReference Include="..\Percolator.Prekey\Percolator.Prekey.csproj" />
   </ItemGroup>
 
   <ItemGroup>

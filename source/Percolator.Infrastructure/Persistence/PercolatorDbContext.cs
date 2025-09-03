@@ -16,6 +16,7 @@ public class PercolatorDbContext : DbContext
     public DbSet<PeerIdentityKeyDbo> PeerIdentityKeys { get; set; } = null!;
     public DbSet<SignedPreKeyDbo> SignedPreKeys { get; set; } = null!;
     public DbSet<OneTimePreKeyDbo> OneTimePreKeys { get; set; } = null!;
+    public DbSet<PeerPublicSigningKeyDbo> PeerPublicSigningKeys { get; set; } = null!;
     public DbSet<DhtNode> DhtNodes { get; set; } = null!;
     public DbSet<PeerConnectionDbo> PeerConnections { get; set; } = null!;
     public DbSet<GrpcEndPointDbo> GrpcEndPoints { get; set; } = null!;
@@ -110,6 +111,24 @@ public class PercolatorDbContext : DbContext
                 .WithMany()
                 .HasForeignKey(d => d.PeerId)
                 .IsRequired();
+        });
+
+        modelBuilder.Entity<PeerPublicSigningKeyDbo>(entity =>
+        {
+            entity.ToTable("PeerPublicSigningKeys");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.PeerId)
+                .HasConversion(v => v.Value, v => new PeerId(v))
+                .IsRequired();
+            entity.Property(e => e.PublicKey).IsRequired();
+            entity.Property(e => e.PublicKeyHash).IsRequired();
+            entity.Property(e => e.ActiveAtUtc).IsRequired();
+            // ExpiredAtUtc nullable
+
+            entity.HasIndex(e => e.PeerId);
+            entity.HasIndex(e => e.PublicKeyHash).IsUnique();
+            entity.HasIndex(e => new { e.PeerId, e.ActiveAtUtc });
+            entity.HasIndex(e => new { e.PeerId, e.ExpiredAtUtc });
         });
 
         modelBuilder.Entity<SignedPreKeyDbo>(entity =>

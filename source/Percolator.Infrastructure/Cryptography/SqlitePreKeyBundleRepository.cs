@@ -26,7 +26,7 @@ public class SqlitePreKeyBundleRepository : IPreKeyBundleRepository
             var identityKeyDbo = await _context.PeerIdentityKeys
                 .Include(ik => ik.SignedPreKeys)
                 .Include(ik => ik.OneTimePreKeys)
-                .FirstOrDefaultAsync(ik => ik.Peer.Id.Value == peerId.Value);
+                .FirstOrDefaultAsync(ik => ik.PeerId.Value == peerId.Value);
 
             if (identityKeyDbo is null)
             {
@@ -69,40 +69,64 @@ public class SqlitePreKeyBundleRepository : IPreKeyBundleRepository
 
     public async Task StoreBundlesAsync(CryptographyPeerId peerId, IEnumerable<PreKeyBundle> bundles)
     {
+        // Contract: replace any existing bundles for the peer with the provided bundle atomically.
         // Since we are moving to a hierarchical model, we expect one 'bundle' which contains all the keys.
         var bundle = bundles.Single();
 
-        var peer = await _context.Peers.FirstOrDefaultAsync(p => p.Id.Value == peerId.Value);
-        if (peer is null)
+        await using var transaction = await _context.Database.BeginTransactionAsync();
+        try
         {
-            throw new InvalidOperationException($"Peer {peerId} not found.");
-        }
-
-        var identityKey = new PeerIdentityKeyDbo
-        {
-            Peer = peer,
-            PublicKey = bundle.IdentitySigningKey.Value,
-        };
-
-        // The current PreKeyBundle doesn't support multiple signed/one-time keys.
-        // We'll add the single signed pre-key and the optional one-time pre-key.
-        identityKey.SignedPreKeys.Add(new SignedPreKeyDbo
-        {
-            Id = bundle.SignedPreKeyId.ToString(),
-            PublicKey = bundle.SignedPreKey.Value,
-            Signature = bundle.SignedPreKeySignature.Value,
-        });
-
-        if (bundle.OneTimePreKey is not null && bundle.OneTimePreKeyId is not null)
-        {
-            identityKey.OneTimePreKeys.Add(new OneTimePreKeyDbo
+            var peer = await _context.Peers.FirstOrDefaultAsync(p => p.Id.Value == peerId.Value);
+            if (peer is null)
             {
-                Id = bundle.OneTimePreKeyId.ToString(),
-                PublicKey = bundle.OneTimePreKey.Value,
-            });
-        }
+                throw new InvalidOperationException($"Peer {peerId} not found.");
+            }
 
-        _context.PeerIdentityKeys.Add(identityKey);
-        await _context.SaveChangesAsync();
+            // Remove any existing identity key and its related pre-keys for this peer
+            var existing = await _context.PeerIdentityKeys
+                .Include(ik => ik.SignedPreKeys)
+                .Include(ik => ik.OneTimePreKeys)
+                .FirstOrDefaultAsync(ik => ik.PeerId.Value == peerId.Value);
+
+            if (existing is not null)
+            {
+                _context.PeerIdentityKeys.Remove(existing); // required FKs will cascade delete children
+                await _context.SaveChangesAsync();
+            }
+
+            var identityKey = new PeerIdentityKeyDbo
+            {
+                Peer = peer,
+                PublicKey = bundle.IdentitySigningKey.Value,
+            };
+
+            // The current PreKeyBundle doesn't support multiple signed/one-time keys.
+            // We'll add the single signed pre-key and the optional one-time pre-key.
+            identityKey.SignedPreKeys.Add(new SignedPreKeyDbo
+            {
+                Id = bundle.SignedPreKeyId.ToString(),
+                PublicKey = bundle.SignedPreKey.Value,
+                Signature = bundle.SignedPreKeySignature.Value,
+            });
+
+            if (bundle.OneTimePreKey is not null && bundle.OneTimePreKeyId is not null)
+            {
+                identityKey.OneTimePreKeys.Add(new OneTimePreKeyDbo
+                {
+                    Id = bundle.OneTimePreKeyId.ToString(),
+                    PublicKey = bundle.OneTimePreKey.Value,
+                });
+            }
+
+            _context.PeerIdentityKeys.Add(identityKey);
+            await _context.SaveChangesAsync();
+            await transaction.CommitAsync();
+        }
+        catch
+        {
+            await transaction.RollbackAsync();
+            throw;
+        }
     }
 }
+

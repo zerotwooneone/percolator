@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using MediatR;
 using Percolator.Contracts;
 using Google.Protobuf;
+using Percolator.Prekey.Handlers;
 
 namespace Percolator.Application.Network
 {
@@ -63,19 +64,6 @@ namespace Percolator.Application.Network
                     PayloadSignature = ByteString.CopyFrom(result.PayloadSignatureBytes)
                 }
             };
-        }
-
-        public override async Task<SubmitPreKeyBundleResponse> SubmitPreKeyBundle(SubmitPreKeyBundleRequest request, ServerCallContext context)
-        {
-            var command = new SubmitPreKeyBundleCommand
-            {
-                IdentityKeyBytes = request.IdentityKey.ToByteArray(),
-                SignedPayloadBytes = request.SignedPayload.ToByteArray(),
-                SignatureBytes = request.Signature.ToByteArray()
-            };
-
-            await _mediator.Send(command, context.CancellationToken);
-            return new SubmitPreKeyBundleResponse { Version = 1 };
         }
 
         public override async Task<DeliverOpaqueMessageResponse> DeliverOpaqueMessage(DeliverOpaqueMessageRequest request, ServerCallContext context)

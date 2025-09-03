@@ -43,7 +43,7 @@ public record PreKeyBundle
     /// <summary>
     /// The optional date when this bundle expires and should no longer be used.
     /// </summary>
-    public DateTime? ExpirationDateUtc { get; }
+    public DateTimeOffset? ExpirationDateUtc { get; }
 
     public PreKeyBundle(
         RatchetIdentityKey identitySigningKey,
@@ -52,7 +52,7 @@ public record PreKeyBundle
         Signature signedPreKeySignature,
         Guid? oneTimePreKeyId,
         OneTimeKey? oneTimePreKey,
-        DateTime? expirationDateUtc = null)
+        DateTimeOffset? expirationDateUtc = null)
     {
         IdentitySigningKey = identitySigningKey;
         SignedPreKeyId = signedPreKeyId;

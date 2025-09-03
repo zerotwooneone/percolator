@@ -27,6 +27,7 @@ using Microsoft.Extensions.Options;
 using Percolator.Application.Configuration;
 using MediatR;
 using Percolator.Application.Cli;
+using Percolator.Prekey.DependencyInjection;
 
 var rootCommand = new RootCommand("Percolator Node: A secure peer-to-peer communication tool.");
 const string defaultIdentityName = "default";
@@ -218,6 +219,7 @@ async Task HostCommandHandler(InvocationContext context)
     tempServices.AddInfrastructureServices(tempConfig);
     tempServices.AddIdentityInfrastructure();
     tempServices.AddApplicationServices(tempConfig);
+    tempServices.AddPrekey();
     tempServices.AddDhtInfrastructure();
     ServiceProvider tempServiceProvider = tempServices.BuildServiceProvider();
 
@@ -295,6 +297,7 @@ async Task HostCommandHandler(InvocationContext context)
         builder.Services.AddInfrastructureServices(builder.Configuration);
         builder.Services.AddIdentityInfrastructure();
         builder.Services.AddApplicationServices(builder.Configuration);
+        builder.Services.AddPrekey();
         builder.Services.AddDhtInfrastructure();
 
         WebApplication app = builder.Build();
