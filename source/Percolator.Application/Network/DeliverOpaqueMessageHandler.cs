@@ -35,7 +35,8 @@ namespace Percolator.Application.Network
             _activeIdentityContext = activeIdentityContext;
         }
 
-        private async Task<SubmitPreKeyBundleResponse> HandlePrekeyEnvelopeAsync(PrekeyEnvelope prekeyEnvelope, CancellationToken ct)
+        private async Task<SubmitPreKeyBundleResponse> HandlePrekeyEnvelopeAsync(PrekeyEnvelope prekeyEnvelope,
+            PeerId remotePeerId, CancellationToken ct)
         {
             switch (prekeyEnvelope.MessageCase)
             {
@@ -91,7 +92,8 @@ namespace Percolator.Application.Network
                         PreKeySignature = upload.PreKeySignature.ToByteArray(),
                         OneTimePreKeys = upload.OneTimePreKeys.Select(x => new SubmitPreKeyBundleCommand.OneTimePreKey(
                             new Guid(x.Id.ToByteArray()), x.PublicKey.ToByteArray())).ToList(),
-                        Expires = upload.ExpiresUtc.ToDateTimeOffset()
+                        Expires = upload.ExpiresUtc.ToDateTimeOffset(),
+                        RemotePeerId = remotePeerId
                     };
                     await _mediator.Send(cmd, ct);
                     break;
@@ -151,7 +153,7 @@ namespace Percolator.Application.Network
                         responseEnvelope = await HandleDhtMessageAsync(internalEnvelope.DhtEnvelope, connectionInfo, endpoint, cancellationToken);
                         break;
                     case InternalEnvelope.ApplicationPayloadOneofCase.PrekeyEnvelope:
-                        var response = await HandlePrekeyEnvelopeAsync(internalEnvelope.PrekeyEnvelope, cancellationToken);
+                        var response = await HandlePrekeyEnvelopeAsync(internalEnvelope.PrekeyEnvelope, connectionInfo.Id, cancellationToken);
                         responseEnvelope = new InternalEnvelope { SubmitPreKeyBundleResponse = response };
                         break;
                     default:

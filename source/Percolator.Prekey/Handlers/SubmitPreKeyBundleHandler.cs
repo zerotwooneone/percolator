@@ -14,7 +14,6 @@ namespace Percolator.Prekey.Handlers
         private readonly ILogger<SubmitPreKeyBundleHandler> _logger;
         private readonly Percolator.Cryptography.ISigningService _signingService;
         private readonly IPreKeyBundleRepository _bundleRepository;
-        private readonly IPeerConnectionRepository _peerConnectionRepository;
         private readonly IPeerRepository _peerRepository;
         private readonly IPeerPublicSigningKeyStore _publicKeyStore;
 
@@ -22,14 +21,12 @@ namespace Percolator.Prekey.Handlers
             ILogger<SubmitPreKeyBundleHandler> logger,
             Percolator.Cryptography.ISigningService signingService,
             IPreKeyBundleRepository bundleRepository,
-            IPeerConnectionRepository peerConnectionRepository,
             IPeerRepository peerRepository,
             IPeerPublicSigningKeyStore publicKeyStore)
         {
             _logger = logger;
             _signingService = signingService;
             _bundleRepository = bundleRepository;
-            _peerConnectionRepository = peerConnectionRepository;
             _peerRepository = peerRepository;
             _publicKeyStore = publicKeyStore;
         }
@@ -44,22 +41,12 @@ namespace Percolator.Prekey.Handlers
             }
 
             var remoteIdentitySigningKeyBytes = request.PublicSigningKey;
-            var networkIdentitySigningKey = new DirectMessagePublicKey(remoteIdentitySigningKeyBytes);
-            var connectionInfo = await _peerConnectionRepository.GetByPublicKey(networkIdentitySigningKey);
-            if (connectionInfo is null)
-            {
-                throw new InvalidOperationException("Peer connection info not found.");
-            }
 
-            var peer = await _peerRepository.GetByIdAsync(new Percolator.Identity.PeerId(connectionInfo.Id.Value));
-            if (peer is null)
-            {
-                throw new InvalidOperationException("Could not determine peer from signing key.");
-            }
-
+            var identityPeerId = new Percolator.Identity.PeerId(request.RemotePeerId.Value);
+            
             var publicKeyHash = SHA256.HashData(remoteIdentitySigningKeyBytes);
             var nowTimestamp = DateTimeOffset.UtcNow;
-            await _publicKeyStore.ActivateIfChangedAsync(peer.Id, remoteIdentitySigningKeyBytes, publicKeyHash, nowTimestamp, cancellationToken);
+            await _publicKeyStore.ActivateIfChangedAsync(identityPeerId, remoteIdentitySigningKeyBytes, publicKeyHash, nowTimestamp, cancellationToken);
 
             var signedPreKeyId = request.SignedPreKeyId;
             var domainBundles = new List<Percolator.Cryptography.PreKeyBundle>();
@@ -84,8 +71,8 @@ namespace Percolator.Prekey.Handlers
                 throw new InvalidOperationException("No valid pre-key bundles provided.");
             }
 
-            await _bundleRepository.StoreBundlesAsync(new Percolator.Cryptography.Primitives.PeerId(peer.Id.Value), domainBundles);
-            _logger.LogInformation("Stored {Count} pre-key bundles for peer {PeerId}", domainBundles.Count, peer.Id);
+            await _bundleRepository.StoreBundlesAsync(new Percolator.Cryptography.Primitives.PeerId(request.RemotePeerId.Value), domainBundles);
+            _logger.LogInformation("Stored {Count} pre-key bundles for peer {PeerId}", domainBundles.Count, request.RemotePeerId);
             return Unit.Value;
         }
     }
