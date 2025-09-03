@@ -30,8 +30,7 @@ public static class ServiceCollectionExtensions
         services.AddRateLimiting();
         
         services.AddSingleton<ActiveIdentityContext>();
-        services.AddSingleton<ISelfIdentityProvider>(s => s.GetRequiredService<ActiveIdentityContext>());
-
+        
         services.AddScoped<IIdentityOrchestrator, IdentityOrchestrator>();
 
         services.AddChatServices();
