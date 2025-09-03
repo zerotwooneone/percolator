@@ -37,8 +37,8 @@ public class CreateSelfIdentityHandler : IRequestHandler<CreateSelfIdentityComma
         var keys = await _keyManagementService.GetKeysAsync(request.Name);
         if (keys is null)
         {
-            await _keyManagementService.CreateKeysAsync(request.Name);
-            _logger.LogInformation("Created keys for identity '{Name}' (SelfIdentityId={Id}, PeerId={PeerId})", request.Name, id, peerId);
+            keys =await _keyManagementService.CreateKeysAsync(request.Name);
+            _logger.LogInformation("Created keys for identity '{Name}' (SelfIdentityId={Id}, PeerId={PeerId}, PublicKey={PublicKey})", request.Name, id, peerId, keys.IdentitySigningKey.ExportSubjectPublicKeyInfo());
         }
         else
         {
