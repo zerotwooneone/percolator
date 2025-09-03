@@ -92,7 +92,7 @@ public class SqlitePeerConnectionRepositoryTests
         await repo.SaveAsync(new PeerConnection(peerB, null, Array.Empty<GrpcEndPoint>(), new[] { certB }, now));
 
         // Act
-        var byDm = await repo.GetByDirectMessage(dmA);
+        var byDm = await repo.GetByPublicKey(dmA);
         var byCert = await repo.GetByTlsCertificateAsync(certB);
 
         // Assert

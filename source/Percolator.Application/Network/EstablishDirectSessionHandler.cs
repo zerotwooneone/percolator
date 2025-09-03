@@ -77,7 +77,7 @@ namespace Percolator.Application.Network
             var networkIdentitySigningKey = new DirectMessagePublicKey(request.IdentitySigningKeyBytes);
             var timestamp = DateTimeOffset.Now;
 
-            var existingPeerConnectionInfo = await _peerConnectionRepository.GetByDirectMessage(networkIdentitySigningKey);
+            var existingPeerConnectionInfo = await _peerConnectionRepository.GetByPublicKey(networkIdentitySigningKey);
             NetworkPeerId networkPeerId;
             PeerConnection peerConnectionInfo;
             if (existingPeerConnectionInfo is null)

@@ -45,7 +45,7 @@ namespace Percolator.Prekey.Handlers
 
             var remoteIdentitySigningKeyBytes = request.PublicSigningKey;
             var networkIdentitySigningKey = new DirectMessagePublicKey(remoteIdentitySigningKeyBytes);
-            var connectionInfo = await _peerConnectionRepository.GetByDirectMessage(networkIdentitySigningKey);
+            var connectionInfo = await _peerConnectionRepository.GetByPublicKey(networkIdentitySigningKey);
             if (connectionInfo is null)
             {
                 throw new InvalidOperationException("Peer connection info not found.");

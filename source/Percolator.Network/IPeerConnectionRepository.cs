@@ -18,7 +18,7 @@ public interface IPeerConnectionRepository
     /// <param name="peerConnection">The peer connection object to save.</param>
     Task SaveAsync(PeerConnection peerConnection);
 
-    Task<PeerConnection?> GetByDirectMessage(DirectMessagePublicKey directMessagePublicKey);
+    Task<PeerConnection?> GetByPublicKey(DirectMessagePublicKey directMessagePublicKey);
 
     /// <summary>
     /// Gets a peer connection by their TLS certificate.

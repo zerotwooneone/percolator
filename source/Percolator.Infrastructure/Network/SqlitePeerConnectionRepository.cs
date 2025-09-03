@@ -94,7 +94,7 @@ public class SqlitePeerConnectionRepository : IPeerConnectionRepository
         await _context.SaveChangesAsync();
     }
 
-    public async Task<PeerConnection?> GetByDirectMessage(DirectMessagePublicKey directMessagePublicKey)
+    public async Task<PeerConnection?> GetByPublicKey(DirectMessagePublicKey directMessagePublicKey)
     {
         var dbo = await _context.PeerConnections
             .AsNoTracking()
