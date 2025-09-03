@@ -35,7 +35,7 @@ namespace Percolator.Application.Network
             _activeIdentityContext = activeIdentityContext;
         }
 
-        private async Task HandlePrekeyEnvelopeAsync(PrekeyEnvelope prekeyEnvelope, CancellationToken ct)
+        private async Task<SubmitPreKeyBundleResponse> HandlePrekeyEnvelopeAsync(PrekeyEnvelope prekeyEnvelope, CancellationToken ct)
         {
             switch (prekeyEnvelope.MessageCase)
             {
@@ -99,6 +99,8 @@ namespace Percolator.Application.Network
                     _logger.LogWarning("Received unhandled prekey message type: {MessageType}", prekeyEnvelope.MessageCase);
                     break;
             }
+
+            return new SubmitPreKeyBundleResponse();
         }
 
         public async Task<DeliverOpaqueMessageResult> Handle(DeliverOpaqueMessageCommand request, CancellationToken cancellationToken)
@@ -149,7 +151,8 @@ namespace Percolator.Application.Network
                         responseEnvelope = await HandleDhtMessageAsync(internalEnvelope.DhtEnvelope, connectionInfo, endpoint, cancellationToken);
                         break;
                     case InternalEnvelope.ApplicationPayloadOneofCase.PrekeyEnvelope:
-                        await HandlePrekeyEnvelopeAsync(internalEnvelope.PrekeyEnvelope, cancellationToken);
+                        var response = await HandlePrekeyEnvelopeAsync(internalEnvelope.PrekeyEnvelope, cancellationToken);
+                        responseEnvelope = new InternalEnvelope { SubmitPreKeyBundleResponse = response };
                         break;
                     default:
                         _logger.LogWarning("Received unhandled internal envelope type: {EnvelopeType}", internalEnvelope.ApplicationPayloadCase);
