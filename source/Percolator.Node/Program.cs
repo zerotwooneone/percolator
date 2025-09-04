@@ -28,6 +28,8 @@ using Percolator.Application.Configuration;
 using MediatR;
 using Percolator.Application.Cli;
 using Percolator.Prekey.DependencyInjection;
+using Percolator.MessageQueue.DependencyInjection;
+using Percolator.Infrastructure.MessageQueue;
 
 var rootCommand = new RootCommand("Percolator Node: A secure peer-to-peer communication tool.");
 const string defaultIdentityName = "default";
@@ -295,6 +297,8 @@ async Task HostCommandHandler(InvocationContext context)
     tempServices.AddApplicationServices(tempConfig);
     tempServices.AddPrekey();
     tempServices.AddDhtInfrastructure();
+    tempServices.AddMessageQueue();
+    tempServices.AddMessageQueueInfrastructure();
     ServiceProvider tempServiceProvider = tempServices.BuildServiceProvider();
 
     try
@@ -373,6 +377,8 @@ async Task HostCommandHandler(InvocationContext context)
         builder.Services.AddApplicationServices(builder.Configuration);
         builder.Services.AddPrekey();
         builder.Services.AddDhtInfrastructure();
+        builder.Services.AddMessageQueue();
+        builder.Services.AddMessageQueueInfrastructure();
 
         WebApplication app = builder.Build();
 

@@ -27,6 +27,7 @@ public class PercolatorDbContext : DbContext
     public DbSet<ConversationDbo> Conversations { get; set; } = null!;
     public DbSet<MessageDbo> Messages { get; set; } = null!;
     public DbSet<ConversationParticipantDbo> ConversationParticipants { get; set; } = null!;
+    public DbSet<MessageQueueItemDbo> MessageQueueItems { get; set; } = null!;
     public DbSet<SelfIdentityDbo> SelfIdentities { get; set; } = null!;
     public DbSet<SelfIdentityKnownPeerDbo> SelfIdentityKnownPeers { get; set; } = null!;
     public DbSet<SelfIdentityKeysDbo> SelfIdentityKeys { get; set; } = null!;
@@ -331,6 +332,22 @@ public class PercolatorDbContext : DbContext
             entity.HasKey(e => new { e.ConversationId, e.ParticipantId });
             entity.Property(e => e.ConversationId).IsRequired();
             entity.Property(e => e.ParticipantId).IsRequired();
+        });
+
+        // MessageQueue
+        modelBuilder.Entity<MessageQueueItemDbo>(entity =>
+        {
+            entity.ToTable("MessageQueue");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedOnAdd();
+            entity.Property(e => e.RecipientPeerId)
+                .HasConversion(v => v.Value, v => new PeerId(v))
+                .IsRequired();
+            entity.Property(e => e.Blob).IsRequired();
+            entity.Property(e => e.EnqueuedAtUtc).IsRequired();
+            entity.HasIndex(e => e.EnqueuedAtUtc);
+            entity.HasIndex(e => e.RecipientPeerId);
+            entity.HasIndex(e => new { e.RecipientPeerId, e.EnqueuedAtUtc });
         });
     }
 }

@@ -16,6 +16,9 @@ message InternalEnvelope {
     PrekeyEnvelope prekey_envelope = 4;
     SubmitPreKeyBundleResponse submit_pre_key_bundle_response = 5;
     GetPreKeyBundleResponse get_pre_key_bundle_response = 6;
+    MessageQueueEnvelope message_queue_envelope = 7;
+    EnqueueOpaqueMessageResponse enqueue_opaque_message_response = 8;
+    FetchQueuedMessagesResponse fetch_queued_messages_response = 9;
   }
 }
 
@@ -199,4 +202,50 @@ message GetPreKeyBundleResponse {
   oneof message{
     PreKeyBundle pre_key_bundle = 2;  
   };
+}
+
+// === 5. Message Queue Application ===
+
+message MessageQueueEnvelope {
+  optional uint32 version = 1;
+  oneof message {
+    EnqueueOpaqueMessageRequest enqueue_opaque_message_request = 2;
+    FetchQueuedMessagesRequest fetch_queued_messages_request = 3;
+  }
+}
+
+// Request to enqueue an opaque message for a recipient identified by public key hash (PKH).
+message EnqueueOpaqueMessageRequest {
+  optional uint32 version = 1;
+  // SHA-256 of the recipient's identity signing public key bytes (SPKI)
+  optional bytes recipient_public_key_hash = 2;
+  // Opaque encrypted blob (double ratchet ciphertext). Max size enforced by application.
+  optional bytes message_blob = 3;
+}
+
+// Response for enqueue operation. Placed at top-level InternalEnvelope.
+message EnqueueOpaqueMessageResponse {
+  optional uint32 version = 1;
+  // True when the message was accepted into the queue. False when rejected (e.g., limits exceeded or unknown PKH).
+  optional bool accepted = 2;
+  // If not accepted, a brief error string suitable for logs/diagnostics.
+  optional string error = 3;
+  // Optional counts for observability (may be omitted by implementations).
+  optional uint32 recipient_queued_count = 4;
+  optional uint32 total_queued_count = 5;
+}
+
+// Request to fetch queued opaque messages for the requesting peer.
+// The identity of the requester is derived from the active DirectSession; no fields needed.
+message FetchQueuedMessagesRequest {
+  optional uint32 version = 1;
+  // Optional maximum number of messages to fetch in one batch; server may cap this value.
+  optional uint32 max_count = 2;
+}
+
+// Response containing zero or more opaque message blobs destined for the requester.
+// Placed at top-level InternalEnvelope.
+message FetchQueuedMessagesResponse {
+  optional uint32 version = 1;
+  repeated bytes messages = 2;
 }

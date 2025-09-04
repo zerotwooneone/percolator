@@ -14,6 +14,7 @@
     <ProjectReference Include="..\Percolator.Identity\Percolator.Identity.csproj" />
     <ProjectReference Include="..\Percolator.Network\Percolator.Network.csproj" />
     <ProjectReference Include="..\Percolator.Cryptography\Percolator.Cryptography.csproj" />
+    <ProjectReference Include="..\Percolator.MessageQueue\Percolator.MessageQueue.csproj" />
   </ItemGroup>
 
   <ItemGroup>

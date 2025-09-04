@@ -7,6 +7,7 @@ using Percolator.Contracts;
 using Percolator.Cryptography;
 using Percolator.Network;
 using Percolator.Prekey.Handlers;
+using Percolator.MessageQueue.Commands;
 
 namespace Percolator.Application.Network
 {
@@ -155,6 +156,49 @@ namespace Percolator.Application.Network
                     case InternalEnvelope.ApplicationPayloadOneofCase.PrekeyEnvelope:
                         var response = await HandlePrekeyEnvelopeAsync(internalEnvelope.PrekeyEnvelope, connectionInfo.Id, cancellationToken);
                         responseEnvelope = new InternalEnvelope { SubmitPreKeyBundleResponse = response };
+                        break;
+                    case InternalEnvelope.ApplicationPayloadOneofCase.MessageQueueEnvelope:
+                        switch (internalEnvelope.MessageQueueEnvelope.MessageCase)
+                        {
+                            case MessageQueueEnvelope.MessageOneofCase.EnqueueOpaqueMessageRequest:
+                                var mqReq = internalEnvelope.MessageQueueEnvelope.EnqueueOpaqueMessageRequest;
+                                var enqueueResult = await _mediator.Send(new EnqueueOpaqueMessageCommand(
+                                    mqReq.RecipientPublicKeyHash.ToByteArray(),
+                                    mqReq.MessageBlob.ToByteArray()
+                                ), cancellationToken);
+
+                                var enqueueResponse = new EnqueueOpaqueMessageResponse
+                                {
+                                    Accepted = enqueueResult.Accepted
+                                };
+                                if (!string.IsNullOrEmpty(enqueueResult.Error))
+                                {
+                                    enqueueResponse.Error = "Could not enqueue."; //enqueueResult.Error;
+                                }
+
+                                responseEnvelope = new InternalEnvelope { EnqueueOpaqueMessageResponse = enqueueResponse };
+                                break;
+                            case MessageQueueEnvelope.MessageOneofCase.FetchQueuedMessagesRequest:
+                                var fetchReq = internalEnvelope.MessageQueueEnvelope.FetchQueuedMessagesRequest;
+                                // Default and cap max count
+                                int requestedMax = fetchReq.HasMaxCount ? (int)fetchReq.MaxCount : 100;
+                                requestedMax = Math.Clamp(requestedMax, 1, 500);
+
+                                var fetchResult = await _mediator.Send(
+                                    new FetchQueuedMessagesQuery(new Percolator.Identity.PeerId(remotePeerId.Value), requestedMax),
+                                    cancellationToken);
+
+                                var fetchResp = new FetchQueuedMessagesResponse
+                                {
+                                };
+                                fetchResp.Messages.AddRange(fetchResult.Messages.Select(ByteString.CopyFrom));
+
+                                responseEnvelope = new InternalEnvelope { FetchQueuedMessagesResponse = fetchResp };
+                                break;
+                            default:
+                                _logger.LogWarning("Received unhandled MessageQueue message type: {MessageType}", internalEnvelope.MessageQueueEnvelope.MessageCase);
+                                break;
+                        }
                         break;
                     default:
                         _logger.LogWarning("Received unhandled internal envelope type: {EnvelopeType}", internalEnvelope.ApplicationPayloadCase);
