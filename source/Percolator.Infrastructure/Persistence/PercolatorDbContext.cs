@@ -29,6 +29,7 @@ public class PercolatorDbContext : DbContext
     public DbSet<ConversationParticipantDbo> ConversationParticipants { get; set; } = null!;
     public DbSet<SelfIdentityDbo> SelfIdentities { get; set; } = null!;
     public DbSet<SelfIdentityKnownPeerDbo> SelfIdentityKnownPeers { get; set; } = null!;
+    public DbSet<SelfIdentityKeysDbo> SelfIdentityKeys { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -53,6 +54,23 @@ public class PercolatorDbContext : DbContext
             entity.Property(e => e.Name).IsRequired();
             entity.HasIndex(e => e.Name).IsUnique();
             entity.HasIndex(e => e.PeerId); // non-unique
+        });
+
+        // SelfIdentityKeys (one-to-one with SelfIdentity)
+        modelBuilder.Entity<SelfIdentityKeysDbo>(entity =>
+        {
+            entity.ToTable("SelfIdentityKeys");
+            entity.HasKey(e => e.SelfIdentityId);
+            entity.Property(e => e.SelfIdentityId).ValueGeneratedNever();
+            entity.Property(e => e.IdentitySigningKey).IsRequired();
+            entity.Property(e => e.IdentityAgreementKey).IsRequired();
+            entity.Property(e => e.SignedPreKey).IsRequired();
+
+            entity.HasOne<SelfIdentityDbo>()
+                .WithOne(i => i.Keys)
+                .HasForeignKey<SelfIdentityKeysDbo>(k => k.SelfIdentityId)
+                .OnDelete(DeleteBehavior.Cascade)
+                .IsRequired();
         });
 
         // SelfIdentityKnownPeer

@@ -169,7 +169,6 @@ async Task CreateIdentityCommandHandler(InvocationContext context)
 hostCommand.SetHandler(HostCommandHandler);
 connectCommand.SetHandler(ConnectCommandHandler);
 sendCommand.SetHandler(SendCommandHandler);
-tlsDebugCommand.SetHandler(TlsDebugCommandHandler);
 dhtProbeCommand.SetHandler(DhtProbeCommandHandler);
 createIdentityCommand.SetHandler(CreateIdentityCommandHandler);
 
@@ -636,39 +635,4 @@ bool TryParseEndpoint(string? text, [NotNullWhen(true)] out DnsEndPoint? endpoin
 
     endpoint = new DnsEndPoint(host, port);
     return true;
-}
-
-async Task TlsDebugCommandHandler(InvocationContext context)
-{
-    var host = (string)context.ParseResult.GetValueForArgument(tlsDebugCommand.Arguments[0]);
-    var port = (int)context.ParseResult.GetValueForArgument(tlsDebugCommand.Arguments[1]);
-
-    var serviceProvider = CreateServiceProvider(); // No identity needed for basic test
-    var logger = serviceProvider.GetRequiredService<ILogger<Program>>();
-    
-    Console.WriteLine("Starting TLS connectivity test...");
-    var endpoint = new DnsEndPoint(host, port);
-    
-    // First run a basic TLS test
-    await TlsDebugger.TestTlsHandshake(endpoint, logger);
-    
-    // If we have an active identity, try a mutual TLS test
-    try 
-    {
-        var activeIdentity = serviceProvider.GetRequiredService<ActiveIdentityContext>();
-        if (activeIdentity.Identity != null)
-        {
-            var certService = serviceProvider.GetRequiredService<ITlsCertificateService>();
-            var cert = await certService.GetOrCreateTlsCertificateAsync(
-                activeIdentity.Identity.Name,
-                activeIdentity.Keys!.IdentitySigningKey.ExportSubjectPublicKeyInfo());
-                        
-            Console.WriteLine("Testing mutual TLS with client certificate...");
-            await TlsDebugger.TestMutualTlsHandshake(endpoint, cert, logger);
-        }
-    }
-    catch (Exception ex)
-    {
-        logger.LogError(ex, "Failed to run mutual TLS test");
-    }
 }

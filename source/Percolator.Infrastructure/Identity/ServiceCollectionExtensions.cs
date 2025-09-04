@@ -19,8 +19,9 @@ namespace Percolator.Infrastructure.Identity
             Batteries.Init();
 
             services.AddSingleton<IDatabaseEncryptionService, DatabaseEncryptionService>();
-
-            services.AddSingleton<IKeyManagementService, PersistentKeyManagementService>();
+            
+            // Store for X3DH keys bound to SelfIdentityId
+            services.AddScoped<ISelfIdentityKeysStore, SqliteSelfIdentityKeysStore>();
             services.AddScoped<IPeerRepository, SqlitePeerRepository>();
             services.AddScoped<ISelfIdentityRepository, SqliteSelfIdentityRepository>();
             services.AddScoped<IPeerPublicSigningKeyStore, SqlitePeerPublicSigningKeyStore>();

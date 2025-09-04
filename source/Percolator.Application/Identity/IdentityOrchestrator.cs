@@ -3,25 +3,26 @@ using Percolator.Application.Configuration;
 using Percolator.Identity;
 using Microsoft.Extensions.Options;
 using Percolator.Identity.Model;
+using System.Security.Cryptography;
 
 namespace Percolator.Application.Identity;
 
 public class IdentityOrchestrator : IIdentityOrchestrator
 {
-    private readonly IKeyManagementService _keyManagementService;
+    private readonly ISelfIdentityKeysStore _keysStore;
     private readonly ISelfIdentityRepository _selfIdentityRepository;
     private readonly ILogger<IdentityOrchestrator> _logger;
     private readonly NodeOptions _options;
     private readonly ActiveIdentityContext _activeIdentityContext;
 
     public IdentityOrchestrator(
-        IKeyManagementService keyManagementService,
+        ISelfIdentityKeysStore keysStore,
         ISelfIdentityRepository selfIdentityRepository,
         ILogger<IdentityOrchestrator> logger,
         IOptions<NodeOptions> options,
         ActiveIdentityContext activeIdentityContext)
     {
-        _keyManagementService = keyManagementService;
+        _keysStore = keysStore;
         _selfIdentityRepository = selfIdentityRepository;
         _logger = logger;
         _options = options.Value;
@@ -41,8 +42,19 @@ public class IdentityOrchestrator : IIdentityOrchestrator
         {
             throw new InvalidOperationException($"Identity {identityName} not found");
         }
-        var keys = await _keyManagementService.GetKeysAsync(dto.Name);
-        var identity = new IdentityRecord(dto.PeerId, identityName, dto.Name)  with { SelfIdentityId = dto?.Id ?? 1 };
+        var selfId = dto.Id;
+        var keys = await _keysStore.LoadAsync(selfId, cancellationToken);
+        if (keys is null)
+        {
+            // Generate new X3DH keys and persist
+            var ikSigning = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+            var ikAgreement = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+            var spk = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+            keys = new X3dhKeys(ikSigning, ikAgreement, spk);
+            await _keysStore.SaveAsync(selfId, keys, cancellationToken);
+            _logger.LogInformation("Generated and saved new X3DH keys for identity {IdentityName} (SelfIdentityId={SelfIdentityId})", identityName, selfId);
+        }
+        var identity = new IdentityRecord(dto.PeerId, identityName, dto.Name)  with { SelfIdentityId = selfId };
 
         _activeIdentityContext.Identity = identity;
         _activeIdentityContext.Keys = keys;
