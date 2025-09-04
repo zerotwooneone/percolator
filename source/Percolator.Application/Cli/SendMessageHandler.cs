@@ -31,7 +31,7 @@ public class SendMessageHandler : IRequestHandler<SendMessageCommand, DirectSess
             remotePeer = new Peer(PeerId.NewId(), request.RemotePeerName);
             await _peerRepository.AddAsync(remotePeer);
         }
-        var existing = await _conversationService.GetExistingDirectConversationAsync(remotePeer);
+        var existing = await _conversationService.GetExistingDirectSessionAsync(remotePeer);
         var directSessionId = existing ?? await _conversationService.CreateNewDirectSessionAsync(request.Endpoint, remotePeer);
         await _messageService.SendDirectMessageAsync(directSessionId, request.Content, remotePeer.Id);
         return directSessionId;

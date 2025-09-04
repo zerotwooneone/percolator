@@ -168,7 +168,7 @@ public class DhtProbeLoopbackTests : IntegrationTestBase
         var clientConversationService = new Mock<IConversationService>();
 
         clientConversationService
-            .Setup(s => s.GetExistingDirectConversationAsync(It.IsAny<Peer>()))
+            .Setup(s => s.GetExistingDirectSessionAsync(It.IsAny<Peer>()))
             .ReturnsAsync(directSessionId);
 
         // Client encrypts request: return an InternalEnvelope with Dht FindNodeRequest directly as bytes

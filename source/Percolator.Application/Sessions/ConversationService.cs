@@ -60,7 +60,7 @@ namespace Percolator.Application.Sessions
             _directSessionRepository = directSessionRepository;
         }
 
-        public async Task<DirectSessionId?> GetExistingDirectConversationAsync(
+        public async Task<DirectSessionId?> GetExistingDirectSessionAsync(
             Peer remotePeer)
         {
             if (_activeIdentityContext.Identity is null)

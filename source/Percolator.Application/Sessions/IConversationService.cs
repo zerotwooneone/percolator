@@ -14,7 +14,7 @@ public interface IConversationService
     /// Attempts to locate an existing direct conversation for the given remote peer.
     /// Returns null if not found.
     /// </summary>
-    Task<DirectSessionId?> GetExistingDirectConversationAsync(
+    Task<DirectSessionId?> GetExistingDirectSessionAsync(
         Peer remotePeer);
 
     /// <summary>

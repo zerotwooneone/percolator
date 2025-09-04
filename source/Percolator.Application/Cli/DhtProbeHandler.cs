@@ -55,7 +55,7 @@ public class DhtProbeHandler : IRequestHandler<DhtProbeCommand, FindNodeResponse
         // 1) Ensure conversation by connecting (TOFU etc handled by ConversationService)
         var existingDirectConversationAsync = existingPeer == null 
             ? null 
-            : await _conversationService.GetExistingDirectConversationAsync(remotePeer);
+            : await _conversationService.GetExistingDirectSessionAsync(remotePeer);
         var directSessionId = existingDirectConversationAsync ?? await _conversationService.CreateNewDirectSessionAsync(request.Endpoint, remotePeer);
 
         // 2) Send Ping (fire-and-forget)

@@ -106,6 +106,20 @@ var dhtProbeCommand = new Command("dht-probe", "Send a DHT Ping then FindNode ag
 };
 rootCommand.AddCommand(dhtProbeCommand);
 
+// *** Submit Prekeys Command ***
+var prekeyCountOption = new Option<int>(new[] { "--count" }, () => 5, "Number of one-time prekeys to include (default 5)");
+var prekeyExpiresDaysOption = new Option<int>(new[] { "--expires-days" }, () => 365, "Days until expiration from now (default 365)");
+
+var submitPrekeysCommand = new Command("submit-prekeys", "Generate and submit a signed prekey and multiple one-time prekeys to a peer.")
+{
+    targetIdentityOption,
+    selfIdentityOption,
+    dbFileOption,
+    prekeyCountOption,
+    prekeyExpiresDaysOption
+};
+rootCommand.AddCommand(submitPrekeysCommand);
+
 // *** Create Identity Command ***
 var nameOption = new Option<string>(new[] { "--name" }, description: "Name of the identity to create")
 {
@@ -141,6 +155,7 @@ async Task CreateIdentityCommandHandler(InvocationContext context)
             ["Percolator:DatabaseFileName"] = dbFile
         });
     }
+    
     var config = configBuilder.Build();
 
     var services = CreateServiceProvider(config);
@@ -171,11 +186,71 @@ connectCommand.SetHandler(ConnectCommandHandler);
 sendCommand.SetHandler(SendCommandHandler);
 dhtProbeCommand.SetHandler(DhtProbeCommandHandler);
 createIdentityCommand.SetHandler(CreateIdentityCommandHandler);
+submitPrekeysCommand.SetHandler(SubmitPrekeysCommandHandler);
 
 // --- Run Application ---
 return await rootCommand.InvokeAsync(args);
 
 // --- Handler Implementations ---
+
+async Task<int> SubmitPrekeysCommandHandler(InvocationContext context)
+{
+    var targetIdentity = context.ParseResult.GetValueForOption(targetIdentityOption);
+    var selfIdentity = context.ParseResult.GetValueForOption(selfIdentityOption);
+    var dbFile = context.ParseResult.GetValueForOption(dbFileOption);
+    var count = context.ParseResult.GetValueForOption(prekeyCountOption);
+    var expiresDays = context.ParseResult.GetValueForOption(prekeyExpiresDaysOption);
+    var cancellationToken = context.GetCancellationToken();
+
+    // Build configuration with optional dbFile override
+    var configBuilder = new ConfigurationBuilder()
+        .AddJsonFile("appsettings.json", optional: true)
+        .AddNode();
+    if (!string.IsNullOrWhiteSpace(dbFile))
+    {
+        configBuilder.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Percolator:DatabaseFileName"] = dbFile
+        });
+    }
+    var cfg = configBuilder.Build();
+
+    var services = CreateServiceProvider(cfg);
+    await using var serviceScope = services.CreateAsyncScope();
+    var serviceProvider = serviceScope.ServiceProvider;
+
+    try
+    {
+        var identityOrchestrator = serviceProvider.GetRequiredService<IIdentityOrchestrator>();
+        await identityOrchestrator.ResolveIdentityAsync(selfIdentity!, cancellationToken, defaultIdentityName);
+
+        var mediator = serviceProvider.GetRequiredService<IMediator>();
+        var expiresUtc = DateTimeOffset.UtcNow.AddDays(expiresDays);
+        Console.WriteLine($"Submitting prekeys to {targetIdentity} for (count={count}, expires={expiresUtc:u})...");
+        var rc = await mediator.Send(new Percolator.Application.Cli.SubmitPreKeysCommand(targetIdentity!, count, expiresUtc), cancellationToken);
+
+        if (rc == 0)
+        {
+            Console.ForegroundColor = ConsoleColor.Green;
+            Console.WriteLine("Prekeys submitted successfully.");
+            Console.ResetColor();
+        }
+        else
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine($"Submit prekeys failed with code {rc}.");
+            Console.ResetColor();
+        }
+        return rc;
+    }
+    catch (Exception ex)
+    {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine($"An error occurred while submitting prekeys: {ex.Message}");
+        Console.ResetColor();
+        return 500;
+    }
+}
 
 async Task HostCommandHandler(InvocationContext context)
 {
