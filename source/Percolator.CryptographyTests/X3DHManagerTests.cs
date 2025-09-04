@@ -17,7 +17,6 @@ public class X3DHManagerTests
         // --- Generate keys for both parties ---
         // Alice (initiator)
         using var aliceIdentitySigningKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        using var aliceIdentityAgreementKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         using var aliceEphemeralKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
 
         // Bob (responder)
