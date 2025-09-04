@@ -268,12 +268,12 @@ public class DirectSessionManagerTests
     {
         var sharedSecret = new SharedSecret(new byte[32]);
         var bobIdentityKeyPublic = new RatchetIdentityKey(_bobKeys.IdentityAgreementKey.ExportSubjectPublicKeyInfo());
-        var bobPreKeyPublic = new RatchetEphemeralKey(_bobKeys.SignedPreKey.ExportSubjectPublicKeyInfo());
+        var bobPreKeyPublic = new PreKey(_bobKeys.SignedPreKey.ExportSubjectPublicKeyInfo());
         var aliceIdentityKeyPublic = new RatchetIdentityKey(_aliceKeys.IdentityAgreementKey.ExportSubjectPublicKeyInfo());
-        var aliceEphemeralKeyPublic = new RatchetEphemeralKey(_aliceKeys.SignedPreKey.ExportSubjectPublicKeyInfo());
+        var aliceEphemeralKeyPublic = new PreKey(_aliceKeys.SignedPreKey.ExportSubjectPublicKeyInfo());
         
-        await _aliceSessionManager.EstablishSessionAsInitiatorAsync(_sessionId, _bobPeerId, bobIdentityKeyPublic, bobPreKeyPublic, sharedSecret, _aliceEphemeral);
-        await _bobSessionManager.EstablishSessionAsResponderAsync(_sessionId, _alicePeerId, aliceIdentityKeyPublic, aliceEphemeralKeyPublic, _bobKeys.SignedPreKey, sharedSecret);
+        await _aliceSessionManager.EstablishSessionAsInitiatorAsync(_sessionId, bobIdentityKeyPublic, bobPreKeyPublic, sharedSecret, _aliceEphemeral);
+        await _bobSessionManager.EstablishSessionAsResponderAsync(_sessionId, aliceIdentityKeyPublic, aliceEphemeralKeyPublic, _bobKeys.SignedPreKey, sharedSecret);
 
         Assert.That(_aliceSessionState, Is.Not.Null);
         Assert.That(_bobSessionState, Is.Not.Null);

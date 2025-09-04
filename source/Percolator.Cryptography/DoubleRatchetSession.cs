@@ -16,7 +16,7 @@ public class DoubleRatchetSession : IDisposable
     private ulong _receivingCounter;
     private ulong _previousChainLength;
     private ECDiffieHellman? _dhRatchetKey;
-    private RatchetEphemeralKey? _remoteRatchetKey;
+    private PreKey? _remotePreKeyKey;
     private readonly Dictionary<SkippedMessageKeyIdentifier, byte[]> _skippedMessageKeys = new();
     private readonly RatchetIdentityKey _remoteIdentityPublicKey;
     private readonly ILogger<DoubleRatchetSession> _logger;
@@ -30,7 +30,7 @@ public class DoubleRatchetSession : IDisposable
     internal ulong SendingCounter => _sendingCounter;
     internal ulong ReceivingCounter => _receivingCounter;
     internal ulong PreviousChainLength => _previousChainLength;
-    internal RatchetEphemeralKey? RemoteRatchetKey => _remoteRatchetKey;
+    internal PreKey? RemotePreKeyKey => _remotePreKeyKey;
     internal RatchetIdentityKey RemoteIdentityPublicKey => _remoteIdentityPublicKey;
     internal IReadOnlyDictionary<SkippedMessageKeyIdentifier, byte[]> SkippedMessageKeys => _skippedMessageKeys;
     internal CryptographyOptions CryptographyOptions => _cryptographyOptions;
@@ -65,7 +65,7 @@ public class DoubleRatchetSession : IDisposable
         _sendingCounter = state.SendingCounter;
         _receivingCounter = state.ReceivingCounter;
         _previousChainLength = state.PreviousChainLength;
-        _remoteRatchetKey = state.TheirDhRatchetPublicKey;
+        _remotePreKeyKey = state.TheirDhRatchetPublicKey;
         if (state.DhRatchetPrivateKey is not null)
         {
             _dhRatchetKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
@@ -81,7 +81,7 @@ public class DoubleRatchetSession : IDisposable
     public static DoubleRatchetSession AsInitiator(
         SharedSecret sharedSecret,
         RatchetIdentityKey remoteIdentityPublicKey,
-        RatchetEphemeralKey remoteRatchetPublicKey,
+        PreKey remotePreKey,
         ECDiffieHellman localEphemeralKey,
         ILogger<DoubleRatchetSession> logger,
         IOptions<CryptographyOptions> cryptographyOptions)
@@ -96,7 +96,7 @@ public class DoubleRatchetSession : IDisposable
         session._rootKey = new RootKey(sharedSecret.Value);
 
         // 2. Store the public keys of the remote party (the responder).
-        session._remoteRatchetKey = remoteRatchetPublicKey;
+        session._remotePreKeyKey = remotePreKey;
 
         // 3. Initialize all counters and flags to their default starting state.
         //    No messages have been sent or received, and no ratchet has occurred yet.
@@ -123,7 +123,7 @@ public class DoubleRatchetSession : IDisposable
     public static DoubleRatchetSession AsResponder(
         SharedSecret sharedSecret, 
         RatchetIdentityKey remoteIdentityPublicKey,  
-        RatchetEphemeralKey remoteRatchetPublicKey, 
+        PreKey remotePreKey, 
         ECDiffieHellman localRatchetKey,
         ILogger<DoubleRatchetSession> logger,
         IOptions<CryptographyOptions> cryptographyOptions)
@@ -135,7 +135,7 @@ public class DoubleRatchetSession : IDisposable
         
         // Set the local ratchet key provided by the caller
         session._dhRatchetKey = localRatchetKey;
-        session._remoteRatchetKey = remoteRatchetPublicKey;
+        session._remotePreKeyKey = remotePreKey;
 
         if (cryptographyOptions.Value.EnableCryptographicMaterialLogging)
         {
@@ -178,7 +178,7 @@ public class DoubleRatchetSession : IDisposable
             ReceivingCounter = _receivingCounter,
             PreviousChainLength = _previousChainLength,
             SkippedMessageKeys = _skippedMessageKeys,
-            TheirDhRatchetPublicKey = _remoteRatchetKey,
+            TheirDhRatchetPublicKey = _remotePreKeyKey,
             DhRatchetPrivateKey = _dhRatchetKey is not null ? new PrivateEphemeralKey(_dhRatchetKey.ExportECPrivateKey()) : null,
             TheirIdentityPublicKey = _remoteIdentityPublicKey
         };
@@ -186,7 +186,7 @@ public class DoubleRatchetSession : IDisposable
 
     private void PerformSendingRatchet()
     {
-        if (_remoteRatchetKey is null)
+        if (_remotePreKeyKey is null)
             throw new InvalidOperationException("Cannot perform sender ratchet: Remote ratchet key is not available.");
 
         _logger.LogInformation("Performing sender's DH ratchet step.");
@@ -202,7 +202,7 @@ public class DoubleRatchetSession : IDisposable
 
         // Perform DH with our new private key and the other party's public key.
         using var remoteKeyHandle = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        remoteKeyHandle.ImportSubjectPublicKeyInfo(_remoteRatchetKey.Value, out _);
+        remoteKeyHandle.ImportSubjectPublicKeyInfo(_remotePreKeyKey.Value, out _);
         var dhSecret = _dhRatchetKey.DeriveKeyMaterial(remoteKeyHandle.PublicKey);
 
         // Derive the new Root Key and Sending Chain Key from the DH secret.
@@ -235,7 +235,7 @@ public class DoubleRatchetSession : IDisposable
             new ChainKey(CryptoUtils.KDF(null, _sendingChainKey.Value, "ratchet-chain-kdf", CryptoUtils.KeySize));
 
         // Create the header with our current ratchet public key and counters.
-        var ourPublicKey = new RatchetEphemeralKey(_dhRatchetKey!.PublicKey.ExportSubjectPublicKeyInfo());
+        var ourPublicKey = new PreKey(_dhRatchetKey!.PublicKey.ExportSubjectPublicKeyInfo());
         var headerTuple = (ourPublicKey, _sendingCounter, _previousChainLength);
         var associatedData = SessionRatchetMessage.GetAssociatedData(headerTuple, new byte[0]);
 
@@ -275,7 +275,7 @@ public class DoubleRatchetSession : IDisposable
         if (_cryptographyOptions.EnableCryptographicMaterialLogging)
         {
             _logger.LogInformation("Decrypting message with header: RatchetKey hash={RatchetKey}", 
-                Convert.ToBase64String(header.RatchetKey.Value));
+                Convert.ToBase64String(header.PreKey.Value));
         }
         // Log message details for debugging
         _logger.LogDebug("Decrypting message with header: Counter={Counter}, PreviousChainLength={PreviousChainLength}, Current state: SendingCounter={SendingCounter}, ReceivingCounter={ReceivingCounter}, MyPreviousChainLength={MyPreviousChainLength}", 
@@ -286,10 +286,10 @@ public class DoubleRatchetSession : IDisposable
             _previousChainLength);
         
         // First check if this is a message that we have skipped
-        if (TryGetSkippedMessageKey(header.RatchetKey, header.Counter, out var skippedMessageKey))
+        if (TryGetSkippedMessageKey(header.PreKey, header.Counter, out var skippedMessageKey))
         {
             // Get associated data using tuple header format
-            var tupleHeader = (header.RatchetKey, header.Counter, header.PreviousChainLength);
+            var tupleHeader = (PreKey: header.PreKey, header.Counter, header.PreviousChainLength);
             var associatedData = SessionRatchetMessage.GetAssociatedData(tupleHeader, new byte[0]);
                 
             // Decrypt using the skipped message key
@@ -299,7 +299,7 @@ public class DoubleRatchetSession : IDisposable
 
         // Determine if the message is from a new chain (indicated by a new ratchet key)
         // or from the current receiving chain
-        bool isFromNewChain = _remoteRatchetKey is null || !_remoteRatchetKey.Equals(header.RatchetKey);
+        bool isFromNewChain = _remotePreKeyKey is null || !_remotePreKeyKey.Equals(header.PreKey);
 
         _logger.LogDebug("Message is from {ChainType} chain. Message counter={Counter}, Our receiving counter={ReceivingCounter}", 
             isFromNewChain ? "new" : "current", header.Counter, _receivingCounter);
@@ -322,7 +322,7 @@ public class DoubleRatchetSession : IDisposable
             _logger.LogDebug("Set our previous chain length to {PreviousChainLength} (our sending counter)", _previousChainLength);
             
             // CRITICAL FIX: Perform the DH ratchet with the new ratchet key
-            DoDhRatchet(header.RatchetKey);
+            DoDhRatchet(header.PreKey);
 
             if (_cryptographyOptions.EnableCryptographicMaterialLogging)
             {
@@ -363,7 +363,7 @@ public class DoubleRatchetSession : IDisposable
             {
                 // Log detailed header and associated data information
                 _logger.LogInformation("Decryption header - RatchetKey : {RatchetKey}, Counter: {Counter}, PreviousChainLength: {PreviousChainLength}", 
-                    Convert.ToBase64String(header.RatchetKey.Value),
+                    Convert.ToBase64String(header.PreKey.Value),
                     header.Counter,
                     header.PreviousChainLength);
                 _logger.LogInformation("Decryption associated data : {AssociatedData}", 
@@ -382,16 +382,16 @@ public class DoubleRatchetSession : IDisposable
         }
     }
 
-    private bool TryGetSkippedMessageKey(RatchetEphemeralKey ratchetKey, ulong counter, out byte[] messageKey)
+    private bool TryGetSkippedMessageKey(PreKey preKey, ulong counter, out byte[] messageKey)
     {
-        var key = new SkippedMessageKeyIdentifier(ratchetKey, counter);
+        var key = new SkippedMessageKeyIdentifier(preKey, counter);
         if (_skippedMessageKeys.TryGetValue(key, out messageKey))
         {
             _skippedMessageKeys.Remove(key);
             if (_cryptographyOptions.EnableCryptographicMaterialLogging)
             {
                 _logger.LogInformation("Using skipped message key for ratchet key  {RatchetKey} and counter {Counter}", 
-                    Convert.ToBase64String(ratchetKey.Value), counter);
+                    Convert.ToBase64String(preKey.Value), counter);
             }
             return true;
         }
@@ -417,7 +417,7 @@ public class DoubleRatchetSession : IDisposable
             var messageKey = CryptoUtils.KDF(null, _receivingChainKey.Value, "message-key-kdf", CryptoUtils.KeySize);
             
             // Create a tuple key with the current ratchet key and counter
-            var key = new SkippedMessageKeyIdentifier(_remoteRatchetKey!, _receivingCounter);
+            var key = new SkippedMessageKeyIdentifier(_remotePreKeyKey!, _receivingCounter);
             _skippedMessageKeys[key] = messageKey;
             
             // Prevent memory attacks by limiting the number of skipped messages
@@ -435,17 +435,17 @@ public class DoubleRatchetSession : IDisposable
         }
     }
 
-    private void DoDhRatchet(RatchetEphemeralKey remoteRatchetKey)
+    private void DoDhRatchet(PreKey remotePreKey)
     {
         _logger.LogInformation("DoDhRatchet - Performing receiver's ratchet step.");
 
         // Update the remote ratchet key we've received from the other party.
-        _remoteRatchetKey = remoteRatchetKey;
+        _remotePreKeyKey = remotePreKey;
 
         // Perform a single DH calculation using our CURRENT private ratchet key
         // and the new remote public key from the message header.
         using var remoteKeyHandle = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        remoteKeyHandle.ImportSubjectPublicKeyInfo(remoteRatchetKey.Value, out _);
+        remoteKeyHandle.ImportSubjectPublicKeyInfo(remotePreKey.Value, out _);
 
         // _dhRatchetKey is our current key pair.
         var dhSecret = _dhRatchetKey!.DeriveKeyMaterial(remoteKeyHandle.PublicKey);
@@ -499,7 +499,7 @@ public class DoubleRatchetSession : IDisposable
         public ulong PreviousChainLength { get; set; }
         public Dictionary<SkippedMessageKeyIdentifier, byte[]> SkippedMessageKeys { get; set; } = new();
         public RatchetIdentityKey? TheirIdentityPublicKey { get; set; }
-        public RatchetEphemeralKey? TheirDhRatchetPublicKey { get; set; }
+        public PreKey? TheirDhRatchetPublicKey { get; set; }
         public PrivateEphemeralKey? DhRatchetPrivateKey { get; set; }
         public bool RatchetFlag { get; set; }
     }

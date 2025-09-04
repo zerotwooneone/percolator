@@ -112,7 +112,7 @@ public class MessageServiceTests
             SendingCounter = 0,
             ReceivingCounter = 0,
             TheirIdentityPublicKey = new RatchetIdentityKey(remotePublicKeyBytes),
-            TheirDhRatchetPublicKey = new RatchetEphemeralKey(dhPublicKeyBytes),
+            TheirDhRatchetPublicKey = new PreKey(dhPublicKeyBytes),
             DhRatchetPrivateKey = new PrivateEphemeralKey(dhPrivateKeyBytes),
             SkippedMessageKeys = new Dictionary<SkippedMessageKeyIdentifier, byte[]>()
         };

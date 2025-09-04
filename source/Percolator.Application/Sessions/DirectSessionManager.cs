@@ -37,9 +37,8 @@ public class DirectSessionManager : IDirectSessionManager
 
     public async Task EstablishSessionAsInitiatorAsync(
         SessionId sessionId,
-        PeerId remotePeerId,
         RatchetIdentityKey remoteIdentityKey,
-        RatchetEphemeralKey remoteRatchetKey,
+        PreKey preKey,
         SharedSecret sharedSecret, 
         ECDiffieHellman localEphemeralKey)
     {
@@ -49,7 +48,7 @@ public class DirectSessionManager : IDirectSessionManager
         if (_cryptographyOptions.Value.EnableCryptographicMaterialLogging)
         {
             _logger.LogInformation("Initiator establishing session with remote ratchet key : {RemoteRatchetKey}, shared secret : {SharedSecret}", 
-                Convert.ToBase64String(remoteRatchetKey.Value),
+                Convert.ToBase64String(preKey.Value),
                 Convert.ToBase64String(sharedSecret.Value));
         }
         
@@ -58,7 +57,7 @@ public class DirectSessionManager : IDirectSessionManager
         var session = DoubleRatchetSession.AsInitiator(
             sharedSecret,
             remoteIdentityKey,
-            remoteRatchetKey,
+            preKey,
             localEphemeralKey,
             sessionLogger,
             _cryptographyOptions);
@@ -95,9 +94,8 @@ public class DirectSessionManager : IDirectSessionManager
 
     public async Task EstablishSessionAsResponderAsync(
         SessionId sessionId, 
-        PeerId remotePeerId, 
         RatchetIdentityKey remoteIdentityKey,
-        RatchetEphemeralKey remoteRatchetPublicKey,
+        PreKey remotePreKey,
         ECDiffieHellman privateKeyUsedInHandshake,
         SharedSecret sharedSecret)
     {
@@ -113,7 +111,7 @@ public class DirectSessionManager : IDirectSessionManager
         var session = DoubleRatchetSession.AsResponder(
             sharedSecret,
             remoteIdentityKey,
-            remoteRatchetPublicKey,
+            remotePreKey,
             privateKeyUsedInHandshake,
             sessionLogger,
             _cryptographyOptions);

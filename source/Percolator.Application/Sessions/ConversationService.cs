@@ -203,9 +203,8 @@ namespace Percolator.Application.Sessions
                 
                 await _sessionManager.EstablishSessionAsResponderAsync(
                     new SessionId(directSessionId.Value),
-                    new Percolator.Identity.PeerId(remotePeer.Id.Value),
                     handshakeResult.ResponderBundle.IdentitySigningKey, // Alice's Public Identity Key
-                    new RatchetEphemeralKey(responderPayload.EphemeralKey.ToByteArray()), // Alice's Public Ratchet Key
+                    new PreKey(responderPayload.EphemeralKey.ToByteArray()), // Alice's Public Ratchet Key
                     handshakeResult
                         .ResponderPrivateKeyUsed, // The specific one of OUR (Bob's) private keys that was used
                     new SharedSecret(handshakeResult.SharedSecret.Value)

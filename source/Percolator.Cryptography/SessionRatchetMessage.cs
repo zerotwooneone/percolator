@@ -14,7 +14,7 @@ public record SessionRatchetMessage(byte[] Value) : ByteArrayRecord(Value)
     /// Creates a SessionRatchetMessage from domain components.
     /// </summary>
     public static SessionRatchetMessage Create(
-        RatchetEphemeralKey ratchetKey,
+        PreKey ratchetKey,
         ulong counter,
         ulong previousChainLength,
         Ciphertext ciphertext)
@@ -39,7 +39,7 @@ public record SessionRatchetMessage(byte[] Value) : ByteArrayRecord(Value)
     /// <summary>
     /// Extracts the header information from the serialized message.
     /// </summary>
-    public (RatchetEphemeralKey RatchetKey, ulong Counter, ulong PreviousChainLength) GetHeader()
+    public (PreKey PreKey, ulong Counter, ulong PreviousChainLength) GetHeader()
     {
         var protoMessage = Contracts.RatchetMessage.Parser.ParseFrom(Value);
         if (protoMessage.Header == null)
@@ -48,7 +48,7 @@ public record SessionRatchetMessage(byte[] Value) : ByteArrayRecord(Value)
         }
         
         return (
-            new RatchetEphemeralKey(protoMessage.Header.RatchetKey.ToByteArray()),
+            new PreKey(protoMessage.Header.RatchetKey.ToByteArray()),
             protoMessage.Header.Counter,
             protoMessage.Header.PreviousChainLength
         );
@@ -80,7 +80,7 @@ public record SessionRatchetMessage(byte[] Value) : ByteArrayRecord(Value)
         // The order and format must be identical for both sender and receiver.
         using var stream = new MemoryStream();
         using var writer = new BinaryWriter(stream);
-        writer.Write(header.RatchetKey.Value);
+        writer.Write(header.PreKey.Value);
         writer.Write(header.Counter);
         writer.Write(header.PreviousChainLength);
         return stream.ToArray();
@@ -89,13 +89,13 @@ public record SessionRatchetMessage(byte[] Value) : ByteArrayRecord(Value)
     /// <summary>
     /// Gets the associated data for AEAD encryption/decryption.
     /// </summary>
-    public static byte[] GetAssociatedData((RatchetEphemeralKey RatchetKey, ulong Counter, ulong PreviousChainLength) header, byte[] additionalData)
+    public static byte[] GetAssociatedData((PreKey PreKey, ulong Counter, ulong PreviousChainLength) header, byte[] additionalData)
     {
         // It is critical that this serialization is stable and canonical.
         // The order and format must be identical for both sender and receiver.
         using var stream = new MemoryStream();
         using var writer = new BinaryWriter(stream);
-        writer.Write(header.RatchetKey.Value);
+        writer.Write(header.PreKey.Value);
         writer.Write(header.Counter);
         writer.Write(header.PreviousChainLength);
         writer.Write(additionalData);

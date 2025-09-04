@@ -173,9 +173,8 @@ public class ConversationServiceTests
         _mockDirectSessionManager
             .Setup(m => m.EstablishSessionAsInitiatorAsync(
                 It.IsAny<Percolator.Cryptography.SessionId>(), 
-                It.IsAny<IdentityPeerId>(), 
-                It.IsAny<RatchetIdentityKey>(), 
-                It.IsAny<RatchetEphemeralKey>(), 
+                 It.IsAny<RatchetIdentityKey>(), 
+                It.IsAny<PreKey>(), 
                 It.IsAny<CryptoSharedSecret>(), 
                 It.IsAny<ECDiffieHellman>()))
             .Returns(Task.CompletedTask);
@@ -187,9 +186,8 @@ public class ConversationServiceTests
         Assert.That(result, Is.Not.EqualTo(default(DirectSessionId)));
         _mockDirectSessionManager.Verify(m => m.EstablishSessionAsResponderAsync(
             It.IsAny<Percolator.Cryptography.SessionId>(), 
-            It.IsAny<IdentityPeerId>(), 
             It.IsAny<RatchetIdentityKey>(), 
-            It.IsAny<RatchetEphemeralKey>(),
+            It.IsAny<PreKey>(),
             It.IsAny<ECDiffieHellman>(), 
             It.IsAny<CryptoSharedSecret>()), Times.Once);
         
@@ -266,9 +264,8 @@ public class ConversationServiceTests
         _mockDirectSessionManager
             .Setup(m => m.EstablishSessionAsInitiatorAsync(
                 It.IsAny<Percolator.Cryptography.SessionId>(), 
-                It.IsAny<IdentityPeerId>(), 
-                It.IsAny<RatchetIdentityKey>(), 
-                It.IsAny<RatchetEphemeralKey>(), 
+                 It.IsAny<RatchetIdentityKey>(), 
+                It.IsAny<PreKey>(), 
                 It.IsAny<CryptoSharedSecret>(), 
                 It.IsAny<ECDiffieHellman>()))
             .Returns(Task.CompletedTask);
@@ -286,9 +283,8 @@ public class ConversationServiceTests
         // Verify session was established
         _mockDirectSessionManager.Verify(m => m.EstablishSessionAsResponderAsync(
             It.Is<Percolator.Cryptography.SessionId>(id => id.Value == sessionId),
-            It.IsAny<IdentityPeerId>(), 
             It.IsAny<RatchetIdentityKey>(), 
-            It.IsAny<RatchetEphemeralKey>(), 
+            It.IsAny<PreKey>(), 
             It.IsAny<ECDiffieHellman>(),
             It.Is<CryptoSharedSecret>(s => s.Value.SequenceEqual(handshakeResponse.SharedSecret.Value))),
             Times.Once);
@@ -339,9 +335,8 @@ public class ConversationServiceTests
         // Verify session was not established
         _mockDirectSessionManager.Verify(m => m.EstablishSessionAsInitiatorAsync(
             It.IsAny<Percolator.Cryptography.SessionId>(),
-            It.IsAny<IdentityPeerId>(),
             It.IsAny<RatchetIdentityKey>(),
-            It.IsAny<RatchetEphemeralKey>(),
+            It.IsAny<PreKey>(),
             It.IsAny<CryptoSharedSecret>(), 
             It.IsAny<ECDiffieHellman>()),
             Times.Never);

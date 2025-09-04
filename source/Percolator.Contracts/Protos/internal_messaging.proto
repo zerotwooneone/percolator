@@ -15,6 +15,7 @@ message InternalEnvelope {
     DhtEnvelope dht_envelope = 3;
     PrekeyEnvelope prekey_envelope = 4;
     SubmitPreKeyBundleResponse submit_pre_key_bundle_response = 5;
+    GetPreKeyBundleResponse get_pre_key_bundle_response = 6;
   }
 }
 
@@ -141,6 +142,7 @@ message PrekeyEnvelope {
   optional uint32 version = 1;
   oneof message {
     SubmitPreKeyBundleRequest submit_pre_key_bundle_request = 2;
+    GetPreKeyBundleRequest get_pre_key_bundle_request = 3;
   }
 }
 
@@ -171,4 +173,30 @@ message SubmitPreKeyBundleRequest {
 // Response for the pre-key bundle submission.
 message SubmitPreKeyBundleResponse {
   optional uint32 version = 1;
+}
+
+// Request a pre-key bundle by the recipient's public key hash (PKH).
+message GetPreKeyBundleRequest {
+  optional uint32 version = 1;
+  // SHA-256 of the recipient's identity signing public key bytes (SPKI)
+  optional bytes public_key_hash = 2;
+}
+
+// Response carrying the pre-key bundle for the requested PKH.
+message GetPreKeyBundleResponse {
+  message PreKeyBundle {
+    optional uint32 version = 1;
+    optional bytes one_time_key_id = 2;
+    optional bytes one_time_key = 3;
+    optional bytes identity_key = 4;
+    optional bytes signed_pre_key_id = 5;
+    optional bytes signed_pre_key = 6;
+    optional bytes pre_key_signature = 7;
+  }
+
+  optional uint32 version = 1;
+  
+  oneof message{
+    PreKeyBundle pre_key_bundle = 2;  
+  };
 }

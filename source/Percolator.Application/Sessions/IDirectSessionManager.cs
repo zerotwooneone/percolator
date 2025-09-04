@@ -13,9 +13,8 @@ public interface IDirectSessionManager
     /// Establishes a new Double Ratchet session as the initiator.
     /// </summary>
     Task EstablishSessionAsInitiatorAsync(SessionId sessionId,
-        PeerId remotePeerId,
         RatchetIdentityKey remoteIdentityKey,
-        RatchetEphemeralKey remoteRatchetKey,
+        PreKey preKey,
         SharedSecret sharedSecret, ECDiffieHellman localEphemeralKey);
 
     /// <summary>
@@ -23,9 +22,8 @@ public interface IDirectSessionManager
     /// </summary>
     Task EstablishSessionAsResponderAsync(
         Percolator.Cryptography.SessionId sessionId, 
-        Percolator.Identity.PeerId remotePeerId, 
         RatchetIdentityKey remoteIdentityKey,
-        RatchetEphemeralKey remoteRatchetPublicKey,
+        PreKey remotePreKey,
         ECDiffieHellman privateKeyUsedInHandshake,
         SharedSecret sharedSecret);
 

@@ -112,10 +112,11 @@ namespace Percolator.Application.Network
             _logger.LogInformation("Processing X3DH handshake with initiator bundle. Examining bundle properties...");
             var ephemeralKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
 
+            var remotePreKey = new PreKey(request.PreKeyBytes);
             var prekeyBundle = new X3dPreKeyBundle(
                 remoteIdentityKey,
                 new RatchetAgreementKey(request.IdentityAgreementKeyBytes),
-                new PreKey(request.PreKeyBytes),
+                remotePreKey,
                 request.OneTimePreKeyBytes is not null ? new OneTimeKey(request.OneTimePreKeyBytes) : null);
 
             var sharedSecret = _x3dhOrchestrator.InitiateHandshake(prekeyBundle, ephemeralKey);
@@ -148,9 +149,8 @@ namespace Percolator.Application.Network
             var cryptoSessionId = new SessionId(directSessionId.Value);
             await _sessionManager.EstablishSessionAsInitiatorAsync(
                 cryptoSessionId,
-                identityPeerId,
                 remoteIdentityKey,
-                new RatchetEphemeralKey(request.PreKeyBytes),
+                remotePreKey,
                 sharedSecret,
                 ephemeralKey);
             _logger.LogInformation("Successfully established session {SessionId} with peer {PeerId}", cryptoSessionId, remotePeer.Id);

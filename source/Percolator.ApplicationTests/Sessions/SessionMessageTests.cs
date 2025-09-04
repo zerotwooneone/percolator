@@ -122,10 +122,9 @@ public class SessionMessageTests
         var conversationId = new SessionId(Guid.NewGuid());
         var bobPeerId = new PeerId(_bobIdentity.Identity!.Id);
         var bobIdentityKey = new CryptoRatchetIdentityKey(_bobIdentity.Keys!.IdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo());
-        var bobRatchetKey = new CryptoRatchetEphemeralKey(_bobIdentity.Keys!.SignedPreKey.PublicKey.ExportSubjectPublicKeyInfo());
+        var bobRatchetKey = new PreKey(_bobIdentity.Keys!.SignedPreKey.PublicKey.ExportSubjectPublicKeyInfo());
         await _aliceManager.EstablishSessionAsInitiatorAsync(
             conversationId, 
-            bobPeerId, 
             bobIdentityKey, 
             bobRatchetKey, 
             new CryptoSharedSecret(aliceSharedSecret.Value), 
@@ -133,13 +132,13 @@ public class SessionMessageTests
 
         var alicePeerId = new PeerId(_aliceIdentity.Identity!.Id);
         var aliceIdentityKey = new CryptoRatchetIdentityKey(_aliceIdentity.Keys!.IdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo());
-        var aliceEphemeralKey = new CryptoRatchetEphemeralKey(_aliceIdentity.Keys.SignedPreKey.PublicKey.ExportSubjectPublicKeyInfo());
+        var aliceEphemeralKey = new PreKey(_aliceIdentity.Keys.SignedPreKey.PublicKey.ExportSubjectPublicKeyInfo());
         
         // Create the ECDiffieHellman key using Bob's SignedPreKey that was used in the handshake
         using var bobHandshakeKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         bobHandshakeKey.ImportECPrivateKey(_bobIdentity.Keys!.SignedPreKey.ExportECPrivateKey(), out _);
         
-        await _bobManager.EstablishSessionAsResponderAsync(conversationId, alicePeerId, aliceIdentityKey, aliceEphemeralKey, bobHandshakeKey, new CryptoSharedSecret(bobSharedSecret.Value));
+        await _bobManager.EstablishSessionAsResponderAsync(conversationId, aliceIdentityKey, aliceEphemeralKey, bobHandshakeKey, new CryptoSharedSecret(bobSharedSecret.Value));
         
         // Arrange: Mock the protocol to correctly link the output of the encryption mock with the input of the decryption mock
         var originalMessage = "This is a super secret message.";
