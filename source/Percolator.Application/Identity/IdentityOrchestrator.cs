@@ -48,9 +48,8 @@ public class IdentityOrchestrator : IIdentityOrchestrator
         {
             // Generate new X3DH keys and persist
             var ikSigning = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-            var ikAgreement = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
             var spk = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-            keys = new X3dhKeys(ikSigning, ikAgreement, spk);
+            keys = new X3dhKeys(ikSigning, spk);
             await _keysStore.SaveAsync(selfId, keys, cancellationToken);
             _logger.LogInformation("Generated and saved new X3DH keys for identity {IdentityName} (SelfIdentityId={SelfIdentityId})", identityName, selfId);
         }

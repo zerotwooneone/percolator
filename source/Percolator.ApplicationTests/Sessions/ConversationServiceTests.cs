@@ -62,7 +62,6 @@ public class ConversationServiceTests
             Identity = new IdentityRecord(Guid.NewGuid(), "Test Identity") { SelfIdentityId = 1 },
             Keys = new X3dhKeys(
                 ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
-                ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
                 ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256)
             )
         };
@@ -141,7 +140,6 @@ public class ConversationServiceTests
         var dummyBundle = new X3dPreKeyBundle
         (
             new RatchetIdentityKey(new byte[32]),
-            new RatchetAgreementKey(new byte[32]),
             new PreKey(new byte[32]),
             new OneTimeKey(new byte[32])
         );
@@ -238,7 +236,6 @@ public class ConversationServiceTests
         var dummyBundle = new X3dPreKeyBundle
         (
             ratchetIdentityKey,
-            new RatchetAgreementKey(new byte[32]),
             new PreKey(new byte[32]),
             new OneTimeKey(new byte[32])
         );

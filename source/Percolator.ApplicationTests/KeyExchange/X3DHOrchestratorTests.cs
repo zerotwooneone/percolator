@@ -21,7 +21,6 @@ public class X3DHOrchestratorTests : IDisposable
 
     // Remote keys
     private ECDiffieHellman _remoteIdentitySigningKey = null!;
-    private ECDiffieHellman _remoteIdentityAgreementKey = null!;
     private ECDiffieHellman _remoteSignedPreKey = null!;
     private ECDiffieHellman _remoteOneTimePreKey = null!;
 
@@ -35,9 +34,8 @@ public class X3DHOrchestratorTests : IDisposable
         // Local keys setup
         var localIdentity = new IdentityRecord(Guid.NewGuid(), "Local Identity");
         var localIdentitySigningKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        var localIdentityAgreementKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var localSignedPreKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        _localKeys = new X3dhKeys(localIdentitySigningKey, localIdentityAgreementKey, localSignedPreKey);
+        _localKeys = new X3dhKeys(localIdentitySigningKey, localSignedPreKey);
         
         // Set properties directly instead of using LoadKeys method
         _activeIdentityContext.Identity = localIdentity;
@@ -45,7 +43,6 @@ public class X3DHOrchestratorTests : IDisposable
 
         // Remote keys setup
         _remoteIdentitySigningKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        _remoteIdentityAgreementKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         _remoteSignedPreKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         _remoteOneTimePreKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
 
@@ -59,10 +56,8 @@ public class X3DHOrchestratorTests : IDisposable
     {
         // Dispose individual keys in _localKeys
         _localKeys?.IdentitySigningKey.Dispose();
-        _localKeys?.IdentityAgreementKey.Dispose();
         _localKeys?.SignedPreKey.Dispose();
         _remoteIdentitySigningKey?.Dispose();
-        _remoteIdentityAgreementKey?.Dispose();
         _remoteSignedPreKey?.Dispose();
         _remoteOneTimePreKey?.Dispose();
     }
@@ -76,7 +71,6 @@ public class X3DHOrchestratorTests : IDisposable
         var remoteBundle = new X3dPreKeyBundle
         (
             new RatchetIdentityKey(remoteIdentitySigningKeyBytes),
-            new RatchetAgreementKey(_remoteIdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
             new PreKey(remoteSignedPreKeyBytes),
             new OneTimeKey(_remoteOneTimePreKey.PublicKey.ExportSubjectPublicKeyInfo())
         );
@@ -119,7 +113,6 @@ public class X3DHOrchestratorTests : IDisposable
         var remoteBundle = new X3dPreKeyBundle
         (
             new RatchetIdentityKey(remoteIdentitySigningKeyBytes),
-            new RatchetAgreementKey(_remoteIdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
             new PreKey(remoteSignedPreKeyBytes),
             null // OneTimePreKey intentionally omitted
         );
@@ -198,7 +191,6 @@ public class X3DHOrchestratorTests : IDisposable
         result.Should().NotBeNull();
         result.SharedSecret.Value.Should().BeEquivalentTo(expectedSharedSecret.Value);
         result.ResponderBundle.Should().NotBeNull();
-        result.ResponderBundle.IdentityAgreementKey.Should().NotBeNull();
         result.ResponderBundle.IdentitySigningKey.Should().NotBeNull();
     }
     

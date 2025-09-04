@@ -44,7 +44,6 @@ namespace Percolator.Application.Network
             var command = new EstablishDirectSessionCommand
             {
                 IdentitySigningKeyBytes = request.InitiatorBundle.IdentitySigningKey.ToByteArray(),
-                IdentityAgreementKeyBytes = request.InitiatorBundle.IdentityAgreementKey.ToByteArray(),
                 SignedPayloadBytes = request.InitiatorBundle.SignedPayload.ToByteArray(),
                 PayloadSignatureBytes = request.InitiatorBundle.PayloadSignature.ToByteArray(),
                 OneTimePreKeyBytes = request.InitiatorBundle.HasOneTimePreKey ? request.InitiatorBundle.OneTimePreKey.ToByteArray() : null,

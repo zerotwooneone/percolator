@@ -47,7 +47,6 @@ public class SelfIdentityCascadeDeleteTests
             {
                 SelfIdentityId = self.Id,
                 IdentitySigningKey = new byte[] { 1, 2, 3 },
-                IdentityAgreementKey = new byte[] { 4, 5, 6 },
                 SignedPreKey = new byte[] { 7, 8, 9 }
             };
             setup.SelfIdentityKeys.Add(keys);

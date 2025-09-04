@@ -115,7 +115,6 @@ namespace Percolator.Application.Network
             var remotePreKey = new PreKey(request.PreKeyBytes);
             var prekeyBundle = new X3dPreKeyBundle(
                 remoteIdentityKey,
-                new RatchetAgreementKey(request.IdentityAgreementKeyBytes),
                 remotePreKey,
                 request.OneTimePreKeyBytes is not null ? new OneTimeKey(request.OneTimePreKeyBytes) : null);
 

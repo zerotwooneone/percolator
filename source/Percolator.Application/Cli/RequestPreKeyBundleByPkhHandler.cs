@@ -132,7 +132,6 @@ public class RequestPreKeyBundleByPkhHandler : IRequestHandler<RequestPreKeyBund
 
     private async Task PerformHandshake(
         RatchetIdentityKey remoteIdentityKey, 
-        RatchetAgreementKey remoteAgreementKey,
         PreKey remotePreKey,
         OneTimeKey? remoteOneTimePreKey)
     {
@@ -140,7 +139,6 @@ public class RequestPreKeyBundleByPkhHandler : IRequestHandler<RequestPreKeyBund
 
         var prekeyBundle = new X3dPreKeyBundle(
             remoteIdentityKey,
-            remoteAgreementKey,
             remotePreKey,
             remoteOneTimePreKey);
         

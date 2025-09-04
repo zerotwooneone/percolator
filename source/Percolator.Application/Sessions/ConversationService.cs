@@ -126,8 +126,6 @@ namespace Percolator.Application.Sessions
                 {
                     InitiatorBundle = new ContractsPreKeyBundle
                     {
-                        IdentityAgreementKey = Google.Protobuf.ByteString.CopyFrom(_activeIdentityContext.Keys
-                            .IdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
                         SignedPayload = signedPayload,
                         IdentitySigningKey = Google.Protobuf.ByteString.CopyFrom(_activeIdentityContext.Keys
                             .IdentitySigningKey.ExportSubjectPublicKeyInfo()),

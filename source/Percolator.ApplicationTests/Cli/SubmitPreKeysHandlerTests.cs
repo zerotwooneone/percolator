@@ -46,10 +46,9 @@ public class SubmitPreKeysHandlerTests
         var selfPeerId = Guid.NewGuid();
         var identity = new Percolator.Identity.Model.IdentityRecord(selfPeerId, "self") { SelfIdentityId = 1 };
         var ikSigning = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        var ikAgreement = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var spk = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         _activeIdentity.Identity = identity;
-        _activeIdentity.Keys = new X3dhKeys(ikSigning, ikAgreement, spk);
+        _activeIdentity.Keys = new X3dhKeys(ikSigning, spk);
 
         // Arrange peer and session
         var remotePeerId = new Percolator.Identity.PeerId(Guid.NewGuid());
@@ -118,7 +117,6 @@ public class SubmitPreKeysHandlerTests
         var identity = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "self") { SelfIdentityId = 1 };
         _activeIdentity.Identity = identity;
         _activeIdentity.Keys = new X3dhKeys(
-            ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
             ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
             ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256));
 

@@ -55,7 +55,6 @@ public class DirectSessionManagerTests
         _aliceEphemeral = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         _aliceKeys = new X3dhKeys(
             ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
-            ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
             _aliceEphemeral);
             
         _aliceSessionStore = new Mock<IDoubleRatchetSessionStore>();
@@ -75,7 +74,6 @@ public class DirectSessionManagerTests
         // Generate Bob's identity and keys
         _bobPeerId = new Identity.PeerId(Guid.NewGuid());
         _bobKeys = new X3dhKeys(
-            ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
             ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
             ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256));
             
@@ -267,9 +265,9 @@ public class DirectSessionManagerTests
     private async Task EstablishSessionsAsync()
     {
         var sharedSecret = new SharedSecret(new byte[32]);
-        var bobIdentityKeyPublic = new RatchetIdentityKey(_bobKeys.IdentityAgreementKey.ExportSubjectPublicKeyInfo());
+        var bobIdentityKeyPublic = new RatchetIdentityKey(_bobKeys.IdentitySigningKey.ExportSubjectPublicKeyInfo());
         var bobPreKeyPublic = new PreKey(_bobKeys.SignedPreKey.ExportSubjectPublicKeyInfo());
-        var aliceIdentityKeyPublic = new RatchetIdentityKey(_aliceKeys.IdentityAgreementKey.ExportSubjectPublicKeyInfo());
+        var aliceIdentityKeyPublic = new RatchetIdentityKey(_aliceKeys.IdentitySigningKey.ExportSubjectPublicKeyInfo());
         var aliceEphemeralKeyPublic = new PreKey(_aliceKeys.SignedPreKey.ExportSubjectPublicKeyInfo());
         
         await _aliceSessionManager.EstablishSessionAsInitiatorAsync(_sessionId, bobIdentityKeyPublic, bobPreKeyPublic, sharedSecret, _aliceEphemeral);

@@ -25,12 +25,10 @@ public class SqliteSelfIdentityKeysStore : ISelfIdentityKeysStore
 
         var ikSigning = ECDiffieHellman.Create();
         ikSigning.ImportECPrivateKey(dbo.IdentitySigningKey, out _);
-        var ikAgreement = ECDiffieHellman.Create();
-        ikAgreement.ImportECPrivateKey(dbo.IdentityAgreementKey, out _);
         var spk = ECDiffieHellman.Create();
         spk.ImportECPrivateKey(dbo.SignedPreKey, out _);
 
-        return new X3dhKeys(ikSigning, ikAgreement, spk);
+        return new X3dhKeys(ikSigning, spk);
     }
 
     public async Task SaveAsync(int selfIdentityId, X3dhKeys keys, CancellationToken cancellationToken = default)
@@ -39,7 +37,6 @@ public class SqliteSelfIdentityKeysStore : ISelfIdentityKeysStore
             .FirstOrDefaultAsync(k => k.SelfIdentityId == selfIdentityId, cancellationToken);
 
         var ikSigningBytes = keys.IdentitySigningKey.ExportECPrivateKey();
-        var ikAgreementBytes = keys.IdentityAgreementKey.ExportECPrivateKey();
         var spkBytes = keys.SignedPreKey.ExportECPrivateKey();
 
         if (dbo is null)
@@ -48,7 +45,6 @@ public class SqliteSelfIdentityKeysStore : ISelfIdentityKeysStore
             {
                 SelfIdentityId = selfIdentityId,
                 IdentitySigningKey = ikSigningBytes,
-                IdentityAgreementKey = ikAgreementBytes,
                 SignedPreKey = spkBytes,
             };
             _db.SelfIdentityKeys.Add(dbo);
@@ -56,7 +52,6 @@ public class SqliteSelfIdentityKeysStore : ISelfIdentityKeysStore
         else
         {
             dbo.IdentitySigningKey = ikSigningBytes;
-            dbo.IdentityAgreementKey = ikAgreementBytes;
             dbo.SignedPreKey = spkBytes;
         }
 

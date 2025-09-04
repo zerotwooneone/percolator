@@ -7,7 +7,6 @@ namespace Percolator.Application.Network
     public sealed class EstablishDirectSessionCommand : IRequest<EstablishDirectSessionResult>
     {
         public required byte[] IdentitySigningKeyBytes { get; init; }
-        public required byte[] IdentityAgreementKeyBytes { get; init; }
         public required byte[] SignedPayloadBytes { get; init; }
         public required byte[] PayloadSignatureBytes { get; init; }
         public byte[]? OneTimePreKeyBytes { get; init; }

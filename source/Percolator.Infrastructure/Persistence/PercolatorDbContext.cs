@@ -63,7 +63,6 @@ public class PercolatorDbContext : DbContext
             entity.HasKey(e => e.SelfIdentityId);
             entity.Property(e => e.SelfIdentityId).ValueGeneratedNever();
             entity.Property(e => e.IdentitySigningKey).IsRequired();
-            entity.Property(e => e.IdentityAgreementKey).IsRequired();
             entity.Property(e => e.SignedPreKey).IsRequired();
 
             entity.HasOne<SelfIdentityDbo>()

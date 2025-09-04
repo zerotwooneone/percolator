@@ -32,7 +32,7 @@ public class X3DHOrchestrator : IX3DHOrchestrator
         {
             _logger.LogDebug("Starting handshake with remote bundle. SignedPreKey length: {Length}, IdentityKey length: {IdentityLength}",
                 remotePreKeyBundle.SignedPreKey.Value.Length,
-                remotePreKeyBundle.IdentityAgreementKey.Value.Length);
+                remotePreKeyBundle.IdentitySigningKey.Value.Length);
                 
             if (remotePreKeyBundle.OneTimePreKey != null)
             {
@@ -67,7 +67,6 @@ public class X3DHOrchestrator : IX3DHOrchestrator
         if (_activeIdentityContext.Keys is not
             {
                 IdentitySigningKey: var identitySigningKey,
-                IdentityAgreementKey: var identityAgreementKey,
                 SignedPreKey: var signedPreKey
             })
         {
@@ -105,7 +104,6 @@ public class X3DHOrchestrator : IX3DHOrchestrator
             : new OneTimeKey(oneTimePreKey.PublicKey.ExportSubjectPublicKeyInfo());
         var responderBundle = new X3dPreKeyBundle(
                 new RatchetIdentityKey(identitySigningKey.ExportSubjectPublicKeyInfo()),
-                new RatchetAgreementKey(identityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
                 new PreKey(signedPreKey.PublicKey.ExportSubjectPublicKeyInfo()),
                 oneTimeKey
             );

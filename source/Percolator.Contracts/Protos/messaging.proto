@@ -29,14 +29,13 @@ service TransportService {
 message PreKeyBundle {
     // The protocol version.
     optional uint32 version = 1;
-    optional bytes identity_agreement_key = 2; // The public identity key for DH agreement.
-    optional bytes signed_payload = 3;
-    optional bytes payload_signature = 4;
-    optional bytes one_time_pre_key = 5;
+    optional bytes signed_payload = 2;
+    optional bytes payload_signature = 3;
+    optional bytes one_time_pre_key = 4;
     // The public part of the peer's long-term identity signing key (ECDsa).
-    optional bytes identity_signing_key = 6;
+    optional bytes identity_signing_key = 5;
     // The date and time when this bundle expires.
-    optional google.protobuf.Timestamp expiration_date_utc = 7;
+    optional google.protobuf.Timestamp expiration_date_utc = 6;
 }
 
 message EstablishSessionRequest {

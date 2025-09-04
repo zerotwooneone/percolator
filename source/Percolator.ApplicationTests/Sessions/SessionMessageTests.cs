@@ -69,7 +69,6 @@ public class SessionMessageTests
             Identity = new IdentityRecord(Guid.NewGuid(), "Alice") { SelfIdentityId = 1 },
             Keys = new X3dhKeys(
                 ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
-                ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
                 _aliceEphemeral
             )
         };
@@ -78,7 +77,6 @@ public class SessionMessageTests
         {
             Identity = new IdentityRecord(Guid.NewGuid(), "Bob") { SelfIdentityId = 1 },
             Keys = new X3dhKeys(
-                ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
                 ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
                 ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256)
             )
@@ -121,7 +119,7 @@ public class SessionMessageTests
         // Arrange: Use the shared secret to establish a double ratchet session
         var conversationId = new SessionId(Guid.NewGuid());
         var bobPeerId = new PeerId(_bobIdentity.Identity!.Id);
-        var bobIdentityKey = new CryptoRatchetIdentityKey(_bobIdentity.Keys!.IdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo());
+        var bobIdentityKey = new CryptoRatchetIdentityKey(_bobIdentity.Keys!.IdentitySigningKey.PublicKey.ExportSubjectPublicKeyInfo());
         var bobRatchetKey = new PreKey(_bobIdentity.Keys!.SignedPreKey.PublicKey.ExportSubjectPublicKeyInfo());
         await _aliceManager.EstablishSessionAsInitiatorAsync(
             conversationId, 
@@ -131,7 +129,7 @@ public class SessionMessageTests
             _aliceEphemeral);
 
         var alicePeerId = new PeerId(_aliceIdentity.Identity!.Id);
-        var aliceIdentityKey = new CryptoRatchetIdentityKey(_aliceIdentity.Keys!.IdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo());
+        var aliceIdentityKey = new CryptoRatchetIdentityKey(_aliceIdentity.Keys!.IdentitySigningKey.PublicKey.ExportSubjectPublicKeyInfo());
         var aliceEphemeralKey = new PreKey(_aliceIdentity.Keys.SignedPreKey.PublicKey.ExportSubjectPublicKeyInfo());
         
         // Create the ECDiffieHellman key using Bob's SignedPreKey that was used in the handshake
@@ -162,19 +160,17 @@ public class SessionMessageTests
         var x3dhManager = new X3DHManager(_loggerFactory.CreateLogger<X3DHManager>(), _options);
 
         // Alice (initiator) keys
-        var aliceIdentityKey = _aliceIdentity.Keys!.IdentityAgreementKey;
+        var aliceIdentityKey = _aliceIdentity.Keys!.IdentitySigningKey;
         var aliceEphemeralKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
 
         // Bob (responder) keys
         var bobIdentitySigningKey = _bobIdentity.Keys!.IdentitySigningKey;
-        var bobIdentityAgreementKey = _bobIdentity.Keys!.IdentityAgreementKey;
         var bobSignedPreKey = _bobIdentity.Keys!.SignedPreKey;
         var bobOneTimePreKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         
         // Alice receives Bob's pre-key bundle
         var bobPreKeyBundle = new X3dPreKeyBundle(
             new RatchetIdentityKey( bobIdentitySigningKey.ExportSubjectPublicKeyInfo()),
-            new RatchetAgreementKey(bobIdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
             new PreKey( bobSignedPreKey.PublicKey.ExportSubjectPublicKeyInfo()),
             new OneTimeKey( bobOneTimePreKey.PublicKey.ExportSubjectPublicKeyInfo())
         );
