@@ -104,14 +104,18 @@ public class X3DHManager : IX3DHManager
         return new SharedSecret(kdfResult);
     }
 
-    public SharedSecret RespondToHandshake(RatchetIdentityKey remoteIdentityKey, RatchetEphemeralKey remoteEphemeralKey,
-        RatchetIdentityKey identitySigningKey, PrivatePreKey signedPreKey, PrivateOneTimeKey? oneTimePreKey)
+    public SharedSecret RespondToHandshake(
+        RatchetIdentityKey remoteIdentityKey, 
+        RatchetEphemeralKey remoteEphemeralKey,
+        RatchetIdentityKey selfIdentitySigningKey, 
+        PrivatePreKey selfPreKey, 
+        PrivateOneTimeKey? selfOneTimePreKey)
     {
         using var identitySigningKeyEcdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        identitySigningKeyEcdh.ImportECPrivateKey(identitySigningKey.Value, out _);
+        identitySigningKeyEcdh.ImportECPrivateKey(selfIdentitySigningKey.Value, out _);
 
         using var signedPreKeyEcdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        signedPreKeyEcdh.ImportECPrivateKey(signedPreKey.Value, out _);
+        signedPreKeyEcdh.ImportECPrivateKey(selfPreKey.Value, out _);
         // --- DH1 ---
         if (_options.EnableCryptographicMaterialLogging)
         {
@@ -160,10 +164,10 @@ public class X3DHManager : IX3DHManager
         }
 
         var dh4 = Array.Empty<byte>();
-        if (oneTimePreKey is not null)
+        if (selfOneTimePreKey is not null)
         {
             using var oneTimePreKeyEcdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-            oneTimePreKeyEcdh.ImportECPrivateKey(oneTimePreKey.Value, out _);
+            oneTimePreKeyEcdh.ImportECPrivateKey(selfOneTimePreKey.Value, out _);
 
             // --- DH4 ---
             if (_options.EnableCryptographicMaterialLogging)

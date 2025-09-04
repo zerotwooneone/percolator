@@ -22,7 +22,6 @@ public class X3DHManagerTests
 
         // Bob (responder)
         using var bobIdentitySigningKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        using var bobIdentityAgreementKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         using var bobSignedPreKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         using var bobOneTimePreKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
 
@@ -31,7 +30,6 @@ public class X3DHManagerTests
         
         var bobPreKeyBundle = new X3dPreKeyBundle(
             new RatchetIdentityKey(bobIdentitySigningKey.ExportSubjectPublicKeyInfo()),
-            new RatchetAgreementKey( bobIdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
             new PreKey(bobSignedPreKeyPublicKey.Value),
             new OneTimeKey(bobOneTimePreKey.ExportSubjectPublicKeyInfo())
             );
@@ -97,7 +95,6 @@ public class X3DHManagerTests
         using var aliceEphemeralKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         
         using var bobIdentitySigningKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        using var bobIdentityAgreementKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         using var bobSignedPreKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
 
         // Bob creates pre-key bundle without one-time pre-key
@@ -105,7 +102,6 @@ public class X3DHManagerTests
         
         var bobPreKeyBundle = new X3dPreKeyBundle(
             new RatchetIdentityKey(bobIdentitySigningKey.ExportSubjectPublicKeyInfo()),
-            new RatchetAgreementKey( bobIdentityAgreementKey.PublicKey.ExportSubjectPublicKeyInfo()),
             new PreKey(bobSignedPreKeyPublicKey.Value),
             null // No one-time pre-key
         );

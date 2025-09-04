@@ -1,5 +1,0 @@
-using Percolator.Cryptography.Primitives;
-
-namespace Percolator.Cryptography;
-
-public record MessageKey(byte[] Value) : ByteArrayRecord(Value);
