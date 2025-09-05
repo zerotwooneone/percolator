@@ -8,6 +8,7 @@ public class ConversationDbo
     public Guid Id { get; set; }
     public byte[] ChannelId { get; set; } = Array.Empty<byte>();
     public string? Name { get; set; }
+    public Guid? GroupConversationGuid { get; set; }
     public int SelfIdentityId { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }

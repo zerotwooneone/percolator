@@ -42,36 +42,62 @@ public sealed class ChatConversationResolver : IConversationResolver
             var selfIdentity = await _db.SelfIdentities.AsNoTracking().FirstOrDefaultAsync(i => i.Id == selfIdentityId, cancellationToken)
                 ?? throw new InvalidOperationException($"SelfIdentity not found for id {selfIdentityId}.");
 
-            var remotePeerId = session.RemotePeerId; // value object PeerId
+            // First try mapping table: (SelfIdentityId, DirectSessionId) -> ConversationId
+            var mapping = await _db.DirectSessionConversations
+                .AsNoTracking()
+                .FirstOrDefaultAsync(m => m.SelfIdentityId == selfIdentityId && m.DirectSessionId == sessionGuid, cancellationToken);
 
-            // Deterministic channel id for 1:1 conversation based on ordered participant pair
-            var channelId = ComputeDirectChannelId(new PeerId(selfIdentity.PeerId), remotePeerId);
-
-            // Try to load existing conversation for this identity+channel
-            var convo = await _db.Conversations
-                .Include(c => c.Participants)
-                .Include(c => c.Messages)
-                .FirstOrDefaultAsync(c => c.SelfIdentityId == selfIdentityId && c.ChannelId == channelId, cancellationToken);
+            ConversationDbo? convo = null;
+            if (mapping is not null)
+            {
+                convo = await _db.Conversations
+                    .Include(c => c.Participants)
+                    .Include(c => c.Messages)
+                    .FirstOrDefaultAsync(c => c.Id == mapping.ConversationId && c.SelfIdentityId == selfIdentityId, cancellationToken);
+            }
 
             if (convo is null)
             {
-                // Create new conversation with both participants
-                convo = new ConversationDbo
+                var remotePeerId = session.RemotePeerId; // value object PeerId
+
+                // Deterministic channel id for 1:1 conversation based on ordered participant pair
+                var channelId = ComputeDirectChannelId(new PeerId(selfIdentity.PeerId), remotePeerId);
+
+                // Try to load existing conversation for this identity+channel
+                convo = await _db.Conversations
+                    .Include(c => c.Participants)
+                    .Include(c => c.Messages)
+                    .FirstOrDefaultAsync(c => c.SelfIdentityId == selfIdentityId && c.ChannelId == channelId, cancellationToken);
+
+                if (convo is null)
                 {
-                    Id = Guid.NewGuid(),
-                    ChannelId = channelId,
-                    Name = null,
+                    // Create new conversation with both participants
+                    convo = new ConversationDbo
+                    {
+                        Id = Guid.NewGuid(),
+                        ChannelId = channelId,
+                        Name = null,
+                        SelfIdentityId = selfIdentityId,
+                        CreatedAt = DateTimeOffset.UtcNow,
+                        UpdatedAt = DateTimeOffset.UtcNow,
+                    };
+
+                    var p1 = new ConversationParticipantDbo { ConversationId = convo.Id, ParticipantId = selfIdentity.PeerId };
+                    var p2 = new ConversationParticipantDbo { ConversationId = convo.Id, ParticipantId = remotePeerId.Value };
+                    convo.Participants.Add(p1);
+                    convo.Participants.Add(p2);
+
+                    _db.Conversations.Add(convo);
+                }
+
+                // Ensure mapping exists now that we have a conversation id
+                var newMap = new DirectSessionConversationDbo
+                {
                     SelfIdentityId = selfIdentityId,
-                    CreatedAt = DateTimeOffset.UtcNow,
-                    UpdatedAt = DateTimeOffset.UtcNow,
+                    DirectSessionId = sessionGuid,
+                    ConversationId = convo.Id
                 };
-
-                var p1 = new ConversationParticipantDbo { ConversationId = convo.Id, ParticipantId = selfIdentity.PeerId };
-                var p2 = new ConversationParticipantDbo { ConversationId = convo.Id, ParticipantId = remotePeerId.Value };
-                convo.Participants.Add(p1);
-                convo.Participants.Add(p2);
-
-                _db.Conversations.Add(convo);
+                _db.DirectSessionConversations.Add(newMap);
                 await _db.SaveChangesAsync(cancellationToken);
             }
 

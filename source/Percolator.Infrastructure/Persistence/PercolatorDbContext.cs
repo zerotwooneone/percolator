@@ -27,6 +27,7 @@ public class PercolatorDbContext : DbContext
     public DbSet<ConversationDbo> Conversations { get; set; } = null!;
     public DbSet<MessageDbo> Messages { get; set; } = null!;
     public DbSet<ConversationParticipantDbo> ConversationParticipants { get; set; } = null!;
+    public DbSet<DirectSessionConversationDbo> DirectSessionConversations { get; set; } = null!;
     public DbSet<MessageQueueItemDbo> MessageQueueItems { get; set; } = null!;
     public DbSet<SelfIdentityDbo> SelfIdentities { get; set; } = null!;
     public DbSet<SelfIdentityKnownPeerDbo> SelfIdentityKnownPeers { get; set; } = null!;
@@ -214,6 +215,17 @@ public class PercolatorDbContext : DbContext
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
+        // DirectSessionConversation mapping
+        modelBuilder.Entity<DirectSessionConversationDbo>(entity =>
+        {
+            entity.ToTable("DirectSessionConversations");
+            entity.HasKey(e => new { e.SelfIdentityId, e.DirectSessionId });
+            entity.Property(e => e.SelfIdentityId).IsRequired();
+            entity.Property(e => e.DirectSessionId).IsRequired();
+            entity.Property(e => e.ConversationId).IsRequired();
+            entity.HasIndex(e => new { e.SelfIdentityId, e.ConversationId }).IsUnique();
+        });
+
         modelBuilder.Entity<GrpcEndPointDbo>(entity =>
         {
             entity.HasKey(e => e.Id);
@@ -291,10 +303,13 @@ public class PercolatorDbContext : DbContext
             entity.Property(e => e.Id).ValueGeneratedNever();
             entity.Property(e => e.ChannelId).IsRequired();
             entity.Property(e => e.SelfIdentityId).IsRequired();
+            entity.Property(e => e.GroupConversationGuid);
             entity.Property(e => e.CreatedAt).IsRequired();
             entity.Property(e => e.UpdatedAt).IsRequired();
             // Non-unique composite index to speed lookups per identity
             entity.HasIndex(e => new { e.SelfIdentityId, e.ChannelId });
+            // Ensure only one conversation per self identity per group guid (when present)
+            entity.HasIndex(e => new { e.SelfIdentityId, e.GroupConversationGuid }).IsUnique();
             entity.HasOne<SelfIdentityDbo>()
                 .WithMany()
                 .HasForeignKey(e => e.SelfIdentityId)
