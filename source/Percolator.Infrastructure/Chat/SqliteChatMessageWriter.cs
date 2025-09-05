@@ -117,7 +117,8 @@ public sealed class SqliteChatMessageWriter : IChatMessageWriter
             ConversationId = conversationId.Value,
             MessageGuid = messageId.Value,
             ReaderId = readerId,
-            SentAt = sentAt
+            SentAt = sentAt,
+            Conversation = convo
         });
 
         try
@@ -176,7 +177,8 @@ public sealed class SqliteChatMessageWriter : IChatMessageWriter
             MessageGuid = messageId.Value,
             ReactorId = reactorId,
             Emoji = emoji,
-            SentAt = sentAt
+            SentAt = sentAt,
+            Conversation = convo
         });
 
         try
