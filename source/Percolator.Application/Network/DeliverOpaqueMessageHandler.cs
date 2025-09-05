@@ -8,6 +8,9 @@ using Percolator.Cryptography;
 using Percolator.Network;
 using Percolator.Prekey.Handlers;
 using Percolator.MessageQueue.Commands;
+using Percolator.Chat.App;
+using Percolator.Chat.App.Commands;
+using Percolator.Chat.ValueObjects;
 
 namespace Percolator.Application.Network
 {
@@ -148,7 +151,7 @@ namespace Percolator.Application.Network
                 switch (internalEnvelope.ApplicationPayloadCase)
                 {
                     case InternalEnvelope.ApplicationPayloadOneofCase.ChatEnvelope:
-                        HandleChatEnvelope(internalEnvelope.ChatEnvelope);
+                        await HandleChatEnvelopeAsync(internalEnvelope.ChatEnvelope, directSession.SessionId, cancellationToken);
                         break;
                     case InternalEnvelope.ApplicationPayloadOneofCase.DhtEnvelope:
                         responseEnvelope = await HandleDhtMessageAsync(internalEnvelope.DhtEnvelope, connectionInfo, endpoint, cancellationToken);
@@ -221,12 +224,31 @@ namespace Percolator.Application.Network
             }
         }
 
-        private void HandleChatEnvelope(ChatEnvelope chatEnvelope)
+        private async Task HandleChatEnvelopeAsync(ChatEnvelope chatEnvelope, DirectSessionId directSessionId, CancellationToken ct)
         {
             switch (chatEnvelope.MessageCase)
             {
                 case ChatEnvelope.MessageOneofCase.TextMessage:
-                    _logger.LogInformation("Received Text Message: {Content}", chatEnvelope.TextMessage.Content);
+                    var text = chatEnvelope.TextMessage;
+                    // Sanity checks (Application layer): ensure required fields are present and valid
+                    if (text.MessageId == null || text.MessageId.Length == 0)
+                    {
+                        throw new InvalidOperationException("TextMessage.message_id is required.");
+                    }
+                    if (text.MessageId.Length != 16)
+                    {
+                        throw new InvalidOperationException("TextMessage.message_id must be 16 bytes (GUID).");
+                    }
+
+                    var lookupKey = ConversationLookupKey.ForDirectSession(directSessionId.Value);
+                    var messageId = new MessageId(new Guid(text.MessageId.ToByteArray()));
+                    var sentTs = text.SentTimestampUtc.ToDateTimeOffset();
+                    await _mediator.Send(new PostTextMessageCommand(
+                        lookupKey,
+                        messageId,
+                        text.Content,
+                        sentTs
+                    ), ct);
                     break;
                 default:
                     _logger.LogWarning("Received unhandled chat message type: {MessageType}", chatEnvelope.MessageCase);
