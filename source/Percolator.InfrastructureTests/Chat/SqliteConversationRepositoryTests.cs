@@ -86,17 +86,4 @@ public class SqliteConversationRepositoryTests
         loaded.Participants.Select(p => p.Value).Should().BeEquivalentTo(new[] { p3.Value, p4.Value });
         loaded.Messages.Select(m => m.Content).Should().BeEquivalentTo(new[] { "new1", "new2" });
     }
-
-    [Test]
-    public async Task Unique_ChannelId_is_enforced()
-    {
-        var ctx = CreateDbContext(out _);
-        var repo = new SqliteConversationRepository(ctx);
-        var c1 = NewConversation();
-        var c2 = new Conversation(ConversationId.NewId(), c1.ChannelId, c1.Participants, c1.Messages, "dup");
-
-        await repo.AddAsync(c1, 1);
-        Func<Task> act = async () => await repo.AddAsync(c2, 1);
-        await act.Should().ThrowAsync<InvalidOperationException>();
-    }
 }

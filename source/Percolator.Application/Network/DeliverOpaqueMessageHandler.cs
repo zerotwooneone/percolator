@@ -250,6 +250,49 @@ namespace Percolator.Application.Network
                         sentTs
                     ), ct);
                     break;
+                case ChatEnvelope.MessageOneofCase.ReadReceipt:
+                    var rr = chatEnvelope.ReadReceipt;
+                    if (rr.MessageId == null || rr.MessageId.Length == 0)
+                    {
+                        throw new InvalidOperationException("ReadReceipt.message_id is required.");
+                    }
+                    if (rr.MessageId.Length != 16)
+                    {
+                        throw new InvalidOperationException("ReadReceipt.message_id must be 16 bytes (GUID).");
+                    }
+                    var rrLookup = ConversationLookupKey.ForDirectSession(directSessionId.Value);
+                    var rrMessageId = new MessageId(new Guid(rr.MessageId.ToByteArray()));
+                    var rrTs = rr.SentTimestampUtc.ToDateTimeOffset();
+                    await _mediator.Send(new PostReadReceiptCommand(
+                        rrLookup,
+                        rrMessageId,
+                        rrTs
+                    ), ct);
+                    break;
+                case ChatEnvelope.MessageOneofCase.EmojiAnnotation:
+                    var em = chatEnvelope.EmojiAnnotation;
+                    if (em.MessageId == null || em.MessageId.Length == 0)
+                    {
+                        throw new InvalidOperationException("EmojiAnnotation.message_id is required.");
+                    }
+                    if (em.MessageId.Length != 16)
+                    {
+                        throw new InvalidOperationException("EmojiAnnotation.message_id must be 16 bytes (GUID).");
+                    }
+                    if (string.IsNullOrWhiteSpace(em.Emoji))
+                    {
+                        throw new InvalidOperationException("EmojiAnnotation.emoji is required.");
+                    }
+                    var emLookup = ConversationLookupKey.ForDirectSession(directSessionId.Value);
+                    var emMessageId = new MessageId(new Guid(em.MessageId.ToByteArray()));
+                    var emTs = em.SentTimestampUtc.ToDateTimeOffset();
+                    await _mediator.Send(new PostEmojiAnnotationCommand(
+                        emLookup,
+                        emMessageId,
+                        em.Emoji,
+                        emTs
+                    ), ct);
+                    break;
                 default:
                     _logger.LogWarning("Received unhandled chat message type: {MessageType}", chatEnvelope.MessageCase);
                     break;

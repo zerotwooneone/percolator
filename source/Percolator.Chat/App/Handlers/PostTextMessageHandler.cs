@@ -1,14 +1,17 @@
 using MediatR;
+using Percolator.Chat.App;
 
 namespace Percolator.Chat.App.Commands;
 
 public sealed class PostTextMessageHandler : IRequestHandler<PostTextMessageCommand>
 {
     private readonly IConversationResolver _resolver;
+    private readonly IChatMessageWriter _writer;
 
-    public PostTextMessageHandler(IConversationResolver resolver)
+    public PostTextMessageHandler(IConversationResolver resolver, IChatMessageWriter writer)
     {
         _resolver = resolver;
+        _writer = writer;
     }
 
     public async Task Handle(PostTextMessageCommand request, CancellationToken cancellationToken)
@@ -19,8 +22,13 @@ public sealed class PostTextMessageHandler : IRequestHandler<PostTextMessageComm
         // Resolve conversation context (implementation will be provided in Infrastructure later)
         var resolution = await _resolver.ResolveAsync(request.LookupKey, cancellationToken);
 
-        // TODO: Persist message with idempotency at Infrastructure level.
-        // For now, no-op domain mutation to keep build green until repository and schema are ready.
-        _ = resolution;
+        // Persist text message with DB-enforced idempotency (UNIQUE ConversationId+MessageGuid)
+        await _writer.AddTextMessageAsync(
+            resolution.Conversation.Id,
+            resolution.SelfIdentityId,
+            request.Content,
+            request.MessageId,
+            request.SentTimestampUtc,
+            cancellationToken);
     }
 }

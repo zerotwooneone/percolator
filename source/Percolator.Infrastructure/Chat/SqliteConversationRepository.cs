@@ -74,8 +74,8 @@ public sealed class SqliteConversationRepository : IConversationRepository
         {
             existing.Messages.Add(new MessageDbo
             {
-                Id = m.Id.Value,
                 ConversationId = existing.Id,
+                MessageGuid = m.Id.Value,
                 SenderId = m.SenderId.Value,
                 Body = m.Content,
                 SentAt = m.Timestamp
@@ -91,7 +91,7 @@ public sealed class SqliteConversationRepository : IConversationRepository
         var participants = dbo.Participants.Select(p => new ParticipantId(p.ParticipantId)).ToList();
         var messages = dbo.Messages
             .OrderBy(m => m.SentAt)
-            .Select(m => new Message(new MessageId(m.Id), new ParticipantId(m.SenderId), m.Body, m.SentAt))
+            .Select(m => new Message(new MessageId(m.MessageGuid), new ParticipantId(m.SenderId), m.Body, m.SentAt))
             .ToList();
         return new Conversation(new ConversationId(dbo.Id), new ChannelId(dbo.ChannelId), participants, messages, dbo.Name);
     }
@@ -116,8 +116,8 @@ public sealed class SqliteConversationRepository : IConversationRepository
         {
             dbo.Messages.Add(new MessageDbo
             {
-                Id = m.Id.Value,
                 ConversationId = conversation.Id.Value,
+                MessageGuid = m.Id.Value,
                 SenderId = m.SenderId.Value,
                 Body = m.Content,
                 SentAt = m.Timestamp

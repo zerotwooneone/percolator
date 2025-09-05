@@ -31,6 +31,8 @@ public class PercolatorDbContext : DbContext
     public DbSet<SelfIdentityDbo> SelfIdentities { get; set; } = null!;
     public DbSet<SelfIdentityKnownPeerDbo> SelfIdentityKnownPeers { get; set; } = null!;
     public DbSet<SelfIdentityKeysDbo> SelfIdentityKeys { get; set; } = null!;
+    public DbSet<ReadReceiptDbo> ReadReceipts { get; set; } = null!;
+    public DbSet<EmojiReactionDbo> EmojiReactions { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -317,12 +319,14 @@ public class PercolatorDbContext : DbContext
         {
             entity.ToTable("Messages");
             entity.HasKey(e => e.Id);
-            entity.Property(e => e.Id).ValueGeneratedNever();
+            entity.Property(e => e.Id).ValueGeneratedOnAdd();
             entity.Property(e => e.ConversationId).IsRequired();
+            entity.Property(e => e.MessageGuid).IsRequired();
             entity.Property(e => e.SenderId).IsRequired();
             entity.Property(e => e.Body).IsRequired();
             entity.Property(e => e.SentAt).IsRequired();
             entity.HasIndex(e => new { e.ConversationId, e.SentAt });
+            entity.HasIndex(e => new { e.ConversationId, e.MessageGuid }).IsUnique();
         });
 
         // ConversationParticipants (composite key)
@@ -332,6 +336,43 @@ public class PercolatorDbContext : DbContext
             entity.HasKey(e => new { e.ConversationId, e.ParticipantId });
             entity.Property(e => e.ConversationId).IsRequired();
             entity.Property(e => e.ParticipantId).IsRequired();
+        });
+
+        // ReadReceipts
+        modelBuilder.Entity<ReadReceiptDbo>(entity =>
+        {
+            entity.ToTable("ReadReceipts");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedOnAdd();
+            entity.Property(e => e.ConversationId).IsRequired();
+            entity.Property(e => e.MessageGuid).IsRequired();
+            entity.Property(e => e.ReaderId).IsRequired();
+            entity.Property(e => e.SentAt).IsRequired();
+            entity.HasIndex(e => new { e.ConversationId, e.MessageGuid, e.ReaderId }).IsUnique();
+            entity.HasOne<ConversationDbo>()
+                .WithMany()
+                .HasForeignKey(e => e.ConversationId)
+                .OnDelete(DeleteBehavior.Cascade)
+                .IsRequired();
+        });
+
+        // EmojiReactions
+        modelBuilder.Entity<EmojiReactionDbo>(entity =>
+        {
+            entity.ToTable("EmojiReactions");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedOnAdd();
+            entity.Property(e => e.ConversationId).IsRequired();
+            entity.Property(e => e.MessageGuid).IsRequired();
+            entity.Property(e => e.ReactorId).IsRequired();
+            entity.Property(e => e.Emoji).IsRequired();
+            entity.Property(e => e.SentAt).IsRequired();
+            entity.HasIndex(e => new { e.ConversationId, e.MessageGuid, e.ReactorId, e.Emoji }).IsUnique();
+            entity.HasOne<ConversationDbo>()
+                .WithMany()
+                .HasForeignKey(e => e.ConversationId)
+                .OnDelete(DeleteBehavior.Cascade)
+                .IsRequired();
         });
 
         // MessageQueue

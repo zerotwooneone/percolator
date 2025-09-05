@@ -2,16 +2,12 @@ using System;
 
 namespace Percolator.Infrastructure.Persistence;
 
-public class MessageDbo
+public sealed class ReadReceiptDbo
 {
     public int Id { get; set; }
     public Guid ConversationId { get; set; }
-
-    // Domain MessageId for idempotency
     public Guid MessageGuid { get; set; }
-
-    public Guid SenderId { get; set; }
-    public string Body { get; set; } = string.Empty;
+    public Guid ReaderId { get; set; }
     public DateTimeOffset SentAt { get; set; }
 
     public ConversationDbo Conversation { get; set; } = null!;
