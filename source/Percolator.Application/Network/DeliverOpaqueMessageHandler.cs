@@ -226,6 +226,15 @@ namespace Percolator.Application.Network
 
         private async Task HandleChatEnvelopeAsync(ChatEnvelope chatEnvelope, DirectSessionId directSessionId, CancellationToken ct)
         {
+            ConversationLookupKey BuildLookupKeyForGroupOrDirect(Guid? groupGuid)
+            {
+                if (groupGuid.HasValue)
+                {
+                    return ConversationLookupKey.ForGroup(groupGuid.Value);
+                }
+                return ConversationLookupKey.ForDirectSession(directSessionId.Value);
+            }
+
             switch (chatEnvelope.MessageCase)
             {
                 case ChatEnvelope.MessageOneofCase.TextMessage:
@@ -239,8 +248,16 @@ namespace Percolator.Application.Network
                     {
                         throw new InvalidOperationException("TextMessage.message_id must be 16 bytes (GUID).");
                     }
-
-                    var lookupKey = ConversationLookupKey.ForDirectSession(directSessionId.Value);
+                    Guid? groupGuid = null;
+                    if (text.HasGroupConversationGuid)
+                    {
+                        if (text.GroupConversationGuid.Length != 16)
+                        {
+                            throw new InvalidOperationException("TextMessage.group_conversation_guid must be 16 bytes (GUID) when present.");
+                        }
+                        groupGuid = new Guid(text.GroupConversationGuid.ToByteArray());
+                    }
+                    var lookupKey = BuildLookupKeyForGroupOrDirect(groupGuid);
                     var messageId = new MessageId(new Guid(text.MessageId.ToByteArray()));
                     var sentTs = text.SentTimestampUtc.ToDateTimeOffset();
                     await _mediator.Send(new PostTextMessageCommand(
@@ -260,7 +277,16 @@ namespace Percolator.Application.Network
                     {
                         throw new InvalidOperationException("ReadReceipt.message_id must be 16 bytes (GUID).");
                     }
-                    var rrLookup = ConversationLookupKey.ForDirectSession(directSessionId.Value);
+                    Guid? rrGroupGuid = null;
+                    if (rr.HasGroupConversationGuid)
+                    {
+                        if (rr.GroupConversationGuid.Length != 16)
+                        {
+                            throw new InvalidOperationException("ReadReceipt.group_conversation_guid must be 16 bytes (GUID) when present.");
+                        }
+                        rrGroupGuid = new Guid(rr.GroupConversationGuid.ToByteArray());
+                    }
+                    var rrLookup = BuildLookupKeyForGroupOrDirect(rrGroupGuid);
                     var rrMessageId = new MessageId(new Guid(rr.MessageId.ToByteArray()));
                     var rrTs = rr.SentTimestampUtc.ToDateTimeOffset();
                     await _mediator.Send(new PostReadReceiptCommand(
@@ -283,7 +309,16 @@ namespace Percolator.Application.Network
                     {
                         throw new InvalidOperationException("EmojiAnnotation.emoji is required.");
                     }
-                    var emLookup = ConversationLookupKey.ForDirectSession(directSessionId.Value);
+                    Guid? emGroupGuid = null;
+                    if (em.HasGroupConversationGuid)
+                    {
+                        if (em.GroupConversationGuid.Length != 16)
+                        {
+                            throw new InvalidOperationException("EmojiAnnotation.group_conversation_guid must be 16 bytes (GUID) when present.");
+                        }
+                        emGroupGuid = new Guid(em.GroupConversationGuid.ToByteArray());
+                    }
+                    var emLookup = BuildLookupKeyForGroupOrDirect(emGroupGuid);
                     var emMessageId = new MessageId(new Guid(em.MessageId.ToByteArray()));
                     var emTs = em.SentTimestampUtc.ToDateTimeOffset();
                     await _mediator.Send(new PostEmojiAnnotationCommand(
@@ -291,6 +326,34 @@ namespace Percolator.Application.Network
                         emMessageId,
                         em.Emoji,
                         emTs
+                    ), ct);
+                    break;
+                case ChatEnvelope.MessageOneofCase.DeliveredReceipt:
+                    var dr = chatEnvelope.DeliveredReceipt;
+                    if (dr.MessageId == null || dr.MessageId.Length == 0)
+                    {
+                        throw new InvalidOperationException("DeliveredReceipt.message_id is required.");
+                    }
+                    if (dr.MessageId.Length != 16)
+                    {
+                        throw new InvalidOperationException("DeliveredReceipt.message_id must be 16 bytes (GUID).");
+                    }
+                    Guid? drGroupGuid = null;
+                    if (dr.HasGroupConversationGuid)
+                    {
+                        if (dr.GroupConversationGuid.Length != 16)
+                        {
+                            throw new InvalidOperationException("DeliveredReceipt.group_conversation_guid must be 16 bytes (GUID) when present.");
+                        }
+                        drGroupGuid = new Guid(dr.GroupConversationGuid.ToByteArray());
+                    }
+                    var drLookup = BuildLookupKeyForGroupOrDirect(drGroupGuid);
+                    var drMessageId = new MessageId(new Guid(dr.MessageId.ToByteArray()));
+                    var drTs = dr.SentTimestampUtc.ToDateTimeOffset();
+                    await _mediator.Send(new PostDeliveredReceiptCommand(
+                        drLookup,
+                        drMessageId,
+                        drTs
                     ), ct);
                     break;
                 default:

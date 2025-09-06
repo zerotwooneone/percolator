@@ -78,6 +78,66 @@ public sealed class SqliteChatMessageWriter : IChatMessageWriter
         }
     }
 
+    public async Task AddDeliveredReceiptAsync(
+        ConversationId conversationId,
+        int selfIdentityId,
+        MessageId messageId,
+        DateTimeOffset deliveredAt,
+        CancellationToken cancellationToken)
+    {
+        // Ensure conversation and determine recipientId (mirror logic from read receipts)
+        var convo = await _db.Conversations
+            .Include(c => c.Participants)
+            .FirstOrDefaultAsync(c => c.Id == conversationId.Value && c.SelfIdentityId == selfIdentityId, cancellationToken)
+            ?? throw new InvalidOperationException($"Conversation {conversationId} not found for selfIdentityId={selfIdentityId}.");
+
+        var selfIdentity = await _db.SelfIdentities
+            .AsNoTracking()
+            .FirstOrDefaultAsync(i => i.Id == selfIdentityId, cancellationToken)
+            ?? throw new InvalidOperationException($"SelfIdentity not found for id {selfIdentityId}.");
+
+        var recipientId = convo.Participants
+            .Select(p => p.ParticipantId)
+            .FirstOrDefault(p => p != selfIdentity.PeerId);
+        if (recipientId == Guid.Empty)
+        {
+            recipientId = selfIdentity.PeerId;
+        }
+
+        // Idempotency check
+        var exists = await _db.DeliveredReceipts
+            .AsNoTracking()
+            .AnyAsync(r => r.ConversationId == conversationId.Value && r.MessageGuid == messageId.Value && r.RecipientId == recipientId, cancellationToken);
+        if (exists)
+        {
+            return;
+        }
+
+        _db.DeliveredReceipts.Add(new DeliveredReceiptDbo
+        {
+            ConversationId = conversationId.Value,
+            MessageGuid = messageId.Value,
+            RecipientId = recipientId,
+            DeliveredAt = deliveredAt,
+            Conversation = convo
+        });
+
+        try
+        {
+            await _db.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException)
+        {
+            var nowExists = await _db.DeliveredReceipts
+                .AsNoTracking()
+                .AnyAsync(r => r.ConversationId == conversationId.Value && r.MessageGuid == messageId.Value && r.RecipientId == recipientId, cancellationToken);
+            if (!nowExists)
+            {
+                throw;
+            }
+        }
+    }
+
     public async Task AddReadReceiptAsync(
         ConversationId conversationId,
         int selfIdentityId,

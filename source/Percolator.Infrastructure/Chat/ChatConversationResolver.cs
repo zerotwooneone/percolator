@@ -113,11 +113,103 @@ public sealed class ChatConversationResolver : IConversationResolver
 
         if (lookupKey.PublicKeyHash is not null)
         {
-            throw new NotSupportedException("PKH-based conversation resolution not yet implemented.");
+            // Enforce a single local identity context for PKH path
+            var identities = await _db.SelfIdentities.AsNoTracking().ToListAsync(cancellationToken);
+            if (identities.Count != 1)
+            {
+                throw new InvalidOperationException("PKH resolution requires exactly one local self identity.");
+            }
+            var selfIdentity = identities[0];
+
+            // Resolve remote peer from PKH
+            var pkhBytes = lookupKey.PublicKeyHash.Value;
+            var remoteKey = await _db.PeerPublicSigningKeys
+                .AsNoTracking()
+                .Where(k => k.PublicKeyHash == pkhBytes && k.ExpiredAtUtc == null)
+                .OrderByDescending(k => k.ActiveAtUtc)
+                .FirstOrDefaultAsync(cancellationToken);
+            if (remoteKey is null)
+            {
+                throw new InvalidOperationException("No active peer signing key found for provided PKH.");
+            }
+
+            var channelId = ComputeDirectChannelId(new PeerId(selfIdentity.PeerId), remoteKey.PeerId);
+
+            // Find or create the conversation for this self identity and channel
+            var convo = await _db.Conversations
+                .Include(c => c.Participants)
+                .Include(c => c.Messages)
+                .FirstOrDefaultAsync(c => c.SelfIdentityId == selfIdentity.Id && c.ChannelId == channelId, cancellationToken);
+
+            if (convo is null)
+            {
+                convo = new ConversationDbo
+                {
+                    Id = Guid.NewGuid(),
+                    ChannelId = channelId,
+                    Name = null,
+                    SelfIdentityId = selfIdentity.Id,
+                    CreatedAt = DateTimeOffset.UtcNow,
+                    UpdatedAt = DateTimeOffset.UtcNow,
+                };
+
+                var p1 = new ConversationParticipantDbo { ConversationId = convo.Id, ParticipantId = selfIdentity.PeerId };
+                var p2 = new ConversationParticipantDbo { ConversationId = convo.Id, ParticipantId = remoteKey.PeerId.Value };
+                convo.Participants.Add(p1);
+                convo.Participants.Add(p2);
+
+                _db.Conversations.Add(convo);
+                await _db.SaveChangesAsync(cancellationToken);
+            }
+
+            var participants = convo.Participants.Select(p => new ParticipantId(p.ParticipantId)).ToList();
+            var messages = convo.Messages
+                .OrderBy(m => m.SentAt)
+                .Select(m => new Message(new MessageId(m.MessageGuid), new ParticipantId(m.SenderId), m.Body, m.SentAt))
+                .ToList();
+            var domain = new Conversation(new ConversationId(convo.Id), new ChannelId(convo.ChannelId), participants, messages, convo.Name);
+            return new ConversationResolution(domain, selfIdentity.Id);
         }
         if (lookupKey.GroupConversationGuid.HasValue)
         {
-            throw new NotSupportedException("Group GUID-based conversation resolution not yet implemented.");
+            var identities = await _db.SelfIdentities.AsNoTracking().ToListAsync(cancellationToken);
+            if (identities.Count != 1)
+            {
+                throw new InvalidOperationException("Group resolution requires exactly one local self identity.");
+            }
+            var selfIdentity = identities[0];
+
+            var groupGuid = lookupKey.GroupConversationGuid.Value;
+
+            var convo = await _db.Conversations
+                .Include(c => c.Participants)
+                .Include(c => c.Messages)
+                .FirstOrDefaultAsync(c => c.SelfIdentityId == selfIdentity.Id && c.GroupConversationGuid == groupGuid, cancellationToken);
+
+            if (convo is null)
+            {
+                // Create a new group conversation; participants may be populated later by group membership events
+                convo = new ConversationDbo
+                {
+                    Id = Guid.NewGuid(),
+                    ChannelId = ComputeGroupChannelId(groupGuid),
+                    Name = null,
+                    GroupConversationGuid = groupGuid,
+                    SelfIdentityId = selfIdentity.Id,
+                    CreatedAt = DateTimeOffset.UtcNow,
+                    UpdatedAt = DateTimeOffset.UtcNow,
+                };
+                _db.Conversations.Add(convo);
+                await _db.SaveChangesAsync(cancellationToken);
+            }
+
+            var participants = convo.Participants.Select(p => new ParticipantId(p.ParticipantId)).ToList();
+            var messages = convo.Messages
+                .OrderBy(m => m.SentAt)
+                .Select(m => new Message(new MessageId(m.MessageGuid), new ParticipantId(m.SenderId), m.Body, m.SentAt))
+                .ToList();
+            var domain = new Conversation(new ConversationId(convo.Id), new ChannelId(convo.ChannelId), participants, messages, convo.Name);
+            return new ConversationResolution(domain, selfIdentity.Id);
         }
 
         throw new InvalidOperationException("Invalid routing key state.");
@@ -130,6 +222,12 @@ public sealed class ChatConversationResolver : IConversationResolver
         var g2 = b.Value;
         var (left, right) = g1.CompareTo(g2) <= 0 ? (g1, g2) : (g2, g1);
         var input = $"direct:{left:D}:{right:D}";
+        return SHA256.HashData(Encoding.UTF8.GetBytes(input));
+    }
+
+    private static byte[] ComputeGroupChannelId(Guid groupGuid)
+    {
+        var input = $"group:{groupGuid:D}";
         return SHA256.HashData(Encoding.UTF8.GetBytes(input));
     }
 }

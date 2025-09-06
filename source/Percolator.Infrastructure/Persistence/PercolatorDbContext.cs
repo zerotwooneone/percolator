@@ -34,6 +34,7 @@ public class PercolatorDbContext : DbContext
     public DbSet<SelfIdentityKeysDbo> SelfIdentityKeys { get; set; } = null!;
     public DbSet<ReadReceiptDbo> ReadReceipts { get; set; } = null!;
     public DbSet<EmojiReactionDbo> EmojiReactions { get; set; } = null!;
+    public DbSet<DeliveredReceiptDbo> DeliveredReceipts { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -364,6 +365,24 @@ public class PercolatorDbContext : DbContext
             entity.Property(e => e.ReaderId).IsRequired();
             entity.Property(e => e.SentAt).IsRequired();
             entity.HasIndex(e => new { e.ConversationId, e.MessageGuid, e.ReaderId }).IsUnique();
+            entity.HasOne<ConversationDbo>()
+                .WithMany()
+                .HasForeignKey(e => e.ConversationId)
+                .OnDelete(DeleteBehavior.Cascade)
+                .IsRequired();
+        });
+
+        // DeliveredReceipts
+        modelBuilder.Entity<DeliveredReceiptDbo>(entity =>
+        {
+            entity.ToTable("DeliveredReceipts");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedOnAdd();
+            entity.Property(e => e.ConversationId).IsRequired();
+            entity.Property(e => e.MessageGuid).IsRequired();
+            entity.Property(e => e.RecipientId).IsRequired();
+            entity.Property(e => e.DeliveredAt).IsRequired();
+            entity.HasIndex(e => new { e.ConversationId, e.MessageGuid, e.RecipientId }).IsUnique();
             entity.HasOne<ConversationDbo>()
                 .WithMany()
                 .HasForeignKey(e => e.ConversationId)

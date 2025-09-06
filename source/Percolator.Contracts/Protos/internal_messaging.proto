@@ -25,6 +25,7 @@ message InternalEnvelope {
 // === 1. Rich Text Chat Application ===
 
 message ChatEnvelope {
+  optional uint32 version = 100; // Top-level version for chat envelope
   oneof message {
     TextMessage text_message = 1;
     ReadReceipt read_receipt = 2;
@@ -33,6 +34,7 @@ message ChatEnvelope {
     UpdateGroupInfoRequest update_group_info_request = 5;
     GroupMembershipChangedNotification group_membership_changed_notification = 6;
     GroupInfoChangedNotification group_info_changed_notification = 7;
+    DeliveredReceipt delivered_receipt = 8;
   }
 }
 
@@ -41,12 +43,16 @@ message TextMessage {
   optional bytes author_identity_key = 2; // Required for group messages.
   google.protobuf.Timestamp sent_timestamp_utc = 3;
   string content = 4;
+  // Optional GroupConversationGuid (GUID bytes) for group routing
+  optional bytes group_conversation_guid = 5;
 }
 
 message ReadReceipt {
   bytes message_id = 1; // The ID of the message being acknowledged.
   optional bytes author_identity_key = 2; // Who is acknowledging the message.
   google.protobuf.Timestamp sent_timestamp_utc = 3;
+  // Optional GroupConversationGuid (GUID bytes) for group routing
+  optional bytes group_conversation_guid = 4;
 }
 
 message EmojiAnnotation {
@@ -54,6 +60,17 @@ message EmojiAnnotation {
   optional bytes author_identity_key = 2; // Who is adding the annotation.
   google.protobuf.Timestamp sent_timestamp_utc = 3;
   string emoji = 4; // The emoji character, e.g., "👍".
+  // Optional GroupConversationGuid (GUID bytes) for group routing
+  optional bytes group_conversation_guid = 5;
+}
+
+// Delivery receipt acknowledging that a message was delivered (distinct from read)
+message DeliveredReceipt {
+  bytes message_id = 1; // The ID of the message being acknowledged as delivered.
+  optional bytes author_identity_key = 2; // Who is acknowledging delivery (for group contexts).
+  google.protobuf.Timestamp sent_timestamp_utc = 3;
+  // Optional GroupConversationGuid (GUID bytes) for group routing
+  optional bytes group_conversation_guid = 4;
 }
 
 // Group Management Messages
@@ -61,11 +78,15 @@ message UpdateGroupMembershipRequest {
   repeated bytes members_to_add = 1;
   repeated bytes members_to_remove = 2;
   bool leave_group = 3; // Set to true if the sender is leaving the group.
+  // The group to which this update applies
+  optional bytes group_conversation_guid = 4;
 }
 
 message UpdateGroupInfoRequest {
   optional string new_group_name = 1;
   optional bytes new_group_avatar = 2; // Raw image data for the avatar.
+  // The group to which this update applies
+  optional bytes group_conversation_guid = 3;
 }
 
 // Group Notification Messages
@@ -75,6 +96,8 @@ message GroupMembershipChangedNotification {
   repeated bytes removed_members = 3;
   optional bytes member_who_left = 4;
   google.protobuf.Timestamp change_timestamp_utc = 5;
+  // The group to which this notification applies
+  optional bytes group_conversation_guid = 6;
 }
 
 message GroupInfoChangedNotification {
@@ -82,6 +105,8 @@ message GroupInfoChangedNotification {
   optional string new_group_name = 2;
   optional bytes new_group_avatar = 3;
   google.protobuf.Timestamp change_timestamp_utc = 4;
+  // The group to which this notification applies
+  optional bytes group_conversation_guid = 5;
 }
 
 // === 2. File Sharing Application ===

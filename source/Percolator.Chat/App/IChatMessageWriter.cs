@@ -19,6 +19,13 @@ public interface IChatMessageWriter
         DateTimeOffset sentAt,
         CancellationToken cancellationToken);
 
+    Task AddDeliveredReceiptAsync(
+        ConversationId conversationId,
+        int selfIdentityId,
+        MessageId messageId,
+        DateTimeOffset deliveredAt,
+        CancellationToken cancellationToken);
+
     Task AddEmojiAnnotationAsync(
         ConversationId conversationId,
         int selfIdentityId,
