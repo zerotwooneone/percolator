@@ -250,6 +250,68 @@ namespace Percolator.Application.Network
                 }
             }
 
+            // Local handler for group membership updates
+            async Task HandleUpdateGroupMembershipAsync(UpdateGroupMembershipRequest ugr)
+            {
+                if (!ugr.HasGroupConversationGuid)
+                {
+                    throw new InvalidOperationException("UpdateGroupMembershipRequest.group_conversation_guid is required.");
+                }
+                if (ugr.GroupConversationGuid.Length != 16)
+                {
+                    throw new InvalidOperationException("UpdateGroupMembershipRequest.group_conversation_guid must be 16 bytes (GUID).");
+                }
+
+                var groupGuid = new Guid(ugr.GroupConversationGuid.ToByteArray());
+                var lookup = BuildLookupKey(groupGuid, null);
+
+                var toAdd = new List<Percolator.Chat.ValueObjects.ParticipantId>(ugr.MembersToAdd.Count);
+                foreach (var b in ugr.MembersToAdd)
+                {
+                    if (b.Length != 16)
+                    {
+                        throw new InvalidOperationException("UpdateGroupMembershipRequest.members_to_add must be GUID bytes (16).");
+                    }
+                    toAdd.Add(new Percolator.Chat.ValueObjects.ParticipantId(new Guid(b.ToByteArray())));
+                }
+
+                var toRemove = new List<Percolator.Chat.ValueObjects.ParticipantId>(ugr.MembersToRemove.Count);
+                foreach (var b in ugr.MembersToRemove)
+                {
+                    if (b.Length != 16)
+                    {
+                        throw new InvalidOperationException("UpdateGroupMembershipRequest.members_to_remove must be GUID bytes (16).");
+                    }
+                    toRemove.Add(new Percolator.Chat.ValueObjects.ParticipantId(new Guid(b.ToByteArray())));
+                }
+
+                await _mediator.Send(new UpdateGroupMembershipCommand(
+                    lookup,
+                    toAdd,
+                    toRemove,
+                    ugr.LeaveGroup
+                ), ct);
+            }
+
+            // Local handler for group info updates
+            async Task HandleUpdateGroupInfoAsync(UpdateGroupInfoRequest ugi)
+            {
+                if (!ugi.HasGroupConversationGuid)
+                {
+                    throw new InvalidOperationException("UpdateGroupInfoRequest.group_conversation_guid is required.");
+                }
+                if (ugi.GroupConversationGuid.Length != 16)
+                {
+                    throw new InvalidOperationException("UpdateGroupInfoRequest.group_conversation_guid must be 16 bytes (GUID).");
+                }
+
+                var groupGuid = new Guid(ugi.GroupConversationGuid.ToByteArray());
+                var lookup = BuildLookupKey(groupGuid, null);
+                var newName = ugi.HasNewGroupName ? ugi.NewGroupName : null;
+
+                await _mediator.Send(new UpdateGroupInfoCommand(lookup, newName), ct);
+            }
+
             switch (chatEnvelope.MessageCase)
             {
                 case ChatEnvelope.MessageOneofCase.TextMessage:
@@ -372,6 +434,12 @@ namespace Percolator.Application.Network
                         em.Emoji,
                         emTs
                     ), ct);
+                    break;
+                case ChatEnvelope.MessageOneofCase.UpdateGroupMembershipRequest:
+                    await HandleUpdateGroupMembershipAsync(chatEnvelope.UpdateGroupMembershipRequest);
+                    break;
+                case ChatEnvelope.MessageOneofCase.UpdateGroupInfoRequest:
+                    await HandleUpdateGroupInfoAsync(chatEnvelope.UpdateGroupInfoRequest);
                     break;
                 case ChatEnvelope.MessageOneofCase.DeliveredReceipt:
                     var dr = chatEnvelope.DeliveredReceipt;
