@@ -56,8 +56,9 @@ public class UpdateGroupMembershipHandlerTests
             .Callback<Conversation, int>((c, _) =>
             {
                 c.Participants.Should().Contain(p1);
-                c.Participants.Should().Contain(self).And.Contain(toAdd);
+                c.Participants.Should().Contain(toAdd);
                 c.Participants.Should().NotContain(toRemove);
+                c.Participants.Should().NotContain(self);
             });
 
         var handler = new UpdateGroupMembershipHandler(_resolver.Object, _repository.Object, _selfProvider.Object);

@@ -27,24 +27,29 @@ public sealed class UpdateGroupMembershipHandler : IRequestHandler<UpdateGroupMe
         var resolution = await _resolver.ResolveAsync(request.LookupKey, cancellationToken);
         var conversation = resolution.Conversation;
 
-        // Apply removals first
-        foreach (var p in request.Remove)
-        {
-            // If participant not present, domain will throw; this is intended to surface invalid ops
-            conversation.RemoveParticipant(p);
-        }
-
-        // Apply additions
+        // Apply additions first to avoid violating the minimum participants invariant
         foreach (var p in request.Add)
         {
             conversation.AddParticipant(p);
         }
 
-        // Apply leave (remove self)
+        // Apply removals (ignore non-existent participants)
+        foreach (var p in request.Remove)
+        {
+            if (conversation.Participants.Contains(p))
+            {
+                conversation.RemoveParticipant(p);
+            }
+        }
+
+        // Apply leave (remove self) last
         if (request.Leave)
         {
             var self = _selfProvider.Get();
-            conversation.RemoveParticipant(self);
+            if (conversation.Participants.Contains(self))
+            {
+                conversation.RemoveParticipant(self);
+            }
         }
 
         await _repository.UpdateAsync(conversation, resolution.SelfIdentityId);
