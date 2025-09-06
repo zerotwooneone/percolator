@@ -27,7 +27,6 @@ public class PostEmojiAnnotationHandlerTests
         var participants = new[] { new ParticipantId(Guid.NewGuid()), new ParticipantId(Guid.NewGuid()) };
         return new Conversation(
             new ConversationId(Guid.NewGuid()),
-            new ChannelId(Guid.NewGuid().ToByteArray()),
             participants,
             Array.Empty<Message>(),
             null);

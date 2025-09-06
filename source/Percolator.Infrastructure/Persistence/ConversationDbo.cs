@@ -6,7 +6,6 @@ namespace Percolator.Infrastructure.Persistence;
 public class ConversationDbo
 {
     public Guid Id { get; set; }
-    public byte[] ChannelId { get; set; } = Array.Empty<byte>();
     public string? Name { get; set; }
     public Guid? GroupConversationGuid { get; set; }
     public int SelfIdentityId { get; set; }

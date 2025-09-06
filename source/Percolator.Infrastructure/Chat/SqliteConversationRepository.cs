@@ -53,7 +53,6 @@ public sealed class SqliteConversationRepository : IConversationRepository
         }
 
         existing.Name = conversation.Name;
-        existing.ChannelId = conversation.ChannelId.Value; // should be stable but updating is harmless due to unique index
         existing.UpdatedAt = DateTimeOffset.UtcNow;
         existing.SelfIdentityId = selfIdentityId;
 
@@ -145,7 +144,7 @@ public sealed class SqliteConversationRepository : IConversationRepository
             .OrderBy(m => m.SentAt)
             .Select(m => new Message(new MessageId(m.MessageGuid), new ParticipantId(m.SenderId), m.Body, m.SentAt))
             .ToList();
-        return new Conversation(new ConversationId(dbo.Id), new ChannelId(dbo.ChannelId), participants, messages, dbo.Name);
+        return new Conversation(new ConversationId(dbo.Id), participants, messages, dbo.Name);
     }
 
     private static ConversationDbo ToDbo(Conversation conversation)
@@ -153,7 +152,6 @@ public sealed class SqliteConversationRepository : IConversationRepository
         var dbo = new ConversationDbo
         {
             Id = conversation.Id.Value,
-            ChannelId = conversation.ChannelId.Value,
             Name = conversation.Name
         };
         foreach (var p in conversation.Participants)

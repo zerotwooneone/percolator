@@ -302,13 +302,10 @@ public class PercolatorDbContext : DbContext
             entity.ToTable("Conversations");
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).ValueGeneratedNever();
-            entity.Property(e => e.ChannelId).IsRequired();
             entity.Property(e => e.SelfIdentityId).IsRequired();
             entity.Property(e => e.GroupConversationGuid);
             entity.Property(e => e.CreatedAt).IsRequired();
             entity.Property(e => e.UpdatedAt).IsRequired();
-            // Non-unique composite index to speed lookups per identity
-            entity.HasIndex(e => new { e.SelfIdentityId, e.ChannelId });
             // Ensure only one conversation per self identity per group guid (when present)
             entity.HasIndex(e => new { e.SelfIdentityId, e.GroupConversationGuid }).IsUnique();
             entity.HasOne<SelfIdentityDbo>()

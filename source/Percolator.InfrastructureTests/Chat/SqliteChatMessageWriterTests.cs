@@ -43,7 +43,6 @@ public class SqliteChatMessageWriterTests
         ctx.Conversations.Add(new ConversationDbo
         {
             Id = conversationId,
-            ChannelId = Guid.NewGuid().ToByteArray(),
             Name = "chat",
             SelfIdentityId = selfIdentityId,
             CreatedAt = DateTimeOffset.UtcNow,

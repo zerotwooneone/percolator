@@ -37,10 +37,9 @@ public class SqliteConversationRepositoryTests
     private static Conversation NewConversation()
     {
         var id = ConversationId.NewId();
-        var channelId = new ChannelId(Guid.NewGuid().ToByteArray());
         var p1 = ParticipantId.NewId();
         var p2 = ParticipantId.NewId();
-        var conv = new Conversation(id, channelId, new[] { p1, p2 }, Enumerable.Empty<Message>(), "chat");
+        var conv = new Conversation(id, new[] { p1, p2 }, Enumerable.Empty<Message>(), "chat");
         conv.AddMessage(p1, "hello");
         conv.AddMessage(p2, "world");
         return conv;
@@ -59,7 +58,6 @@ public class SqliteConversationRepositoryTests
         ctx.Conversations.Add(new ConversationDbo
         {
             Id = convId,
-            ChannelId = Guid.NewGuid().ToByteArray(),
             Name = "group",
             SelfIdentityId = 1,
             GroupConversationGuid = groupGuid,
@@ -100,7 +98,6 @@ public class SqliteConversationRepositoryTests
         ctx.Conversations.Add(new ConversationDbo
         {
             Id = convId,
-            ChannelId = Guid.NewGuid().ToByteArray(),
             Name = "direct",
             SelfIdentityId = 1,
             GroupConversationGuid = null,
@@ -138,7 +135,6 @@ public class SqliteConversationRepositoryTests
         ctx.Conversations.Add(new ConversationDbo
         {
             Id = convId,
-            ChannelId = Guid.NewGuid().ToByteArray(),
             Name = "direct",
             SelfIdentityId = 1,
             CreatedAt = DateTimeOffset.UtcNow,
@@ -156,7 +152,6 @@ public class SqliteConversationRepositoryTests
         ctx.Conversations.Add(new ConversationDbo
         {
             Id = newConvId,
-            ChannelId = Guid.NewGuid().ToByteArray(),
             Name = "direct2",
             SelfIdentityId = 1,
             CreatedAt = DateTimeOffset.UtcNow,
@@ -179,7 +174,6 @@ public class SqliteConversationRepositoryTests
         ctx.Conversations.Add(new ConversationDbo
         {
             Id = convId,
-            ChannelId = Guid.NewGuid().ToByteArray(),
             Name = "direct",
             SelfIdentityId = 1,
             CreatedAt = DateTimeOffset.UtcNow,
@@ -206,7 +200,7 @@ public class SqliteConversationRepositoryTests
 
         loaded.Should().NotBeNull();
         loaded!.Id.Value.Should().Be(c.Id.Value);
-        loaded.ChannelId.Value.Should().BeEquivalentTo(c.ChannelId.Value);
+        // ChannelId removed from domain; ensure other fields match
         loaded.Name.Should().Be(c.Name);
         loaded.Participants.Select(p => p.Value).Should().BeEquivalentTo(c.Participants.Select(p => p.Value));
         loaded.Messages.Select(m => (m.Id.Value, m.SenderId.Value, m.Content)).Should()
@@ -224,7 +218,7 @@ public class SqliteConversationRepositoryTests
         // Create an updated conversation with different participants and messages
         var p3 = ParticipantId.NewId();
         var p4 = ParticipantId.NewId();
-        var updated = new Conversation(c.Id, c.ChannelId, new[] { p3, p4 }, Enumerable.Empty<Message>(), "updated");
+        var updated = new Conversation(c.Id, new[] { p3, p4 }, Enumerable.Empty<Message>(), "updated");
         updated.AddMessage(p3, "new1");
         updated.AddMessage(p4, "new2");
 

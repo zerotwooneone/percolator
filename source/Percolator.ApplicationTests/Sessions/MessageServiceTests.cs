@@ -93,7 +93,7 @@ public class MessageServiceTests
             new ChatParticipantId(localIdentity.Id),
             new ChatParticipantId(remotePeerId.Value)
         };
-        var conversation = new Conversation(new ChatConversationId(directSessionId.Value), new ChannelId(remotePeerId.Value.ToByteArray()), participants.ToList(), new List<Message>());
+        var conversation = new Conversation(new ChatConversationId(directSessionId.Value), participants.ToList(), new List<Message>());
         
         // Create a valid dummy session state with proper cryptographic keys
         // Generate proper EC keys using nistP256 curve as used in the actual implementation

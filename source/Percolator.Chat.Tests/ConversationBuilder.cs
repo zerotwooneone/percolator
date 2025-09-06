@@ -7,7 +7,6 @@ internal class ConversationBuilder
 {
     private readonly IFixture _fixture = new Fixture();
     private ConversationId _id;
-    private ChannelId _channelId;
     private List<ParticipantId> _participants;
     private List<Message> _messages;
     private string? _name;
@@ -15,7 +14,6 @@ internal class ConversationBuilder
     public ConversationBuilder()
     {
         _id = _fixture.Create<ConversationId>();
-        _channelId = _fixture.Create<ChannelId>();
         _participants = _fixture.CreateMany<ParticipantId>(2).ToList();
         _messages = new List<Message>();
         _name = null;
@@ -53,6 +51,6 @@ internal class ConversationBuilder
 
     public Conversation Build()
     {
-        return new Conversation(_id, _channelId, _participants, _messages, _name);
+        return new Conversation(_id, _participants, _messages, _name);
     }
 }

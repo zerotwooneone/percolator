@@ -59,15 +59,13 @@ public sealed class ChatConversationResolver : IConversationResolver
             if (convo is null)
             {
                 var remotePeerId = session.RemotePeerId; // value object PeerId
-
-                // Deterministic channel id for 1:1 conversation based on ordered participant pair
-                var channelId = ComputeDirectChannelId(new PeerId(selfIdentity.PeerId), remotePeerId);
-
-                // Try to load existing conversation for this identity+channel
+                // Try to load existing direct conversation for this identity by participant pair
                 convo = await _db.Conversations
                     .Include(c => c.Participants)
                     .Include(c => c.Messages)
-                    .FirstOrDefaultAsync(c => c.SelfIdentityId == selfIdentityId && c.ChannelId == channelId, cancellationToken);
+                    .Where(c => c.SelfIdentityId == selfIdentityId && c.GroupConversationGuid == null)
+                    .Where(c => c.Participants.Any(p => p.ParticipantId == selfIdentity.PeerId) && c.Participants.Any(p => p.ParticipantId == remotePeerId.Value))
+                    .FirstOrDefaultAsync(cancellationToken);
 
                 if (convo is null)
                 {
@@ -75,7 +73,6 @@ public sealed class ChatConversationResolver : IConversationResolver
                     convo = new ConversationDbo
                     {
                         Id = Guid.NewGuid(),
-                        ChannelId = channelId,
                         Name = null,
                         SelfIdentityId = selfIdentityId,
                         CreatedAt = DateTimeOffset.UtcNow,
@@ -107,7 +104,7 @@ public sealed class ChatConversationResolver : IConversationResolver
                 .OrderBy(m => m.SentAt)
                 .Select(m => new Message(new MessageId(m.MessageGuid), new ParticipantId(m.SenderId), m.Body, m.SentAt))
                 .ToList();
-            var domain = new Conversation(new ConversationId(convo.Id), new ChannelId(convo.ChannelId), participants, messages, convo.Name);
+            var domain = new Conversation(new ConversationId(convo.Id), participants, messages, convo.Name);
             return new ConversationResolution(domain, selfIdentityId);
         }
 
@@ -133,20 +130,19 @@ public sealed class ChatConversationResolver : IConversationResolver
                 throw new InvalidOperationException("No active peer signing key found for provided PKH.");
             }
 
-            var channelId = ComputeDirectChannelId(new PeerId(selfIdentity.PeerId), remoteKey.PeerId);
-
-            // Find or create the conversation for this self identity and channel
+            // Find or create the conversation for this self identity by participant pair
             var convo = await _db.Conversations
                 .Include(c => c.Participants)
                 .Include(c => c.Messages)
-                .FirstOrDefaultAsync(c => c.SelfIdentityId == selfIdentity.Id && c.ChannelId == channelId, cancellationToken);
+                .Where(c => c.SelfIdentityId == selfIdentity.Id && c.GroupConversationGuid == null)
+                .Where(c => c.Participants.Any(p => p.ParticipantId == selfIdentity.PeerId) && c.Participants.Any(p => p.ParticipantId == remoteKey.PeerId.Value))
+                .FirstOrDefaultAsync(cancellationToken);
 
             if (convo is null)
             {
                 convo = new ConversationDbo
                 {
                     Id = Guid.NewGuid(),
-                    ChannelId = channelId,
                     Name = null,
                     SelfIdentityId = selfIdentity.Id,
                     CreatedAt = DateTimeOffset.UtcNow,
@@ -167,7 +163,7 @@ public sealed class ChatConversationResolver : IConversationResolver
                 .OrderBy(m => m.SentAt)
                 .Select(m => new Message(new MessageId(m.MessageGuid), new ParticipantId(m.SenderId), m.Body, m.SentAt))
                 .ToList();
-            var domain = new Conversation(new ConversationId(convo.Id), new ChannelId(convo.ChannelId), participants, messages, convo.Name);
+            var domain = new Conversation(new ConversationId(convo.Id), participants, messages, convo.Name);
             return new ConversationResolution(domain, selfIdentity.Id);
         }
         if (lookupKey.GroupConversationGuid.HasValue)
@@ -192,7 +188,6 @@ public sealed class ChatConversationResolver : IConversationResolver
                 convo = new ConversationDbo
                 {
                     Id = Guid.NewGuid(),
-                    ChannelId = ComputeGroupChannelId(groupGuid),
                     Name = null,
                     GroupConversationGuid = groupGuid,
                     SelfIdentityId = selfIdentity.Id,
@@ -208,26 +203,10 @@ public sealed class ChatConversationResolver : IConversationResolver
                 .OrderBy(m => m.SentAt)
                 .Select(m => new Message(new MessageId(m.MessageGuid), new ParticipantId(m.SenderId), m.Body, m.SentAt))
                 .ToList();
-            var domain = new Conversation(new ConversationId(convo.Id), new ChannelId(convo.ChannelId), participants, messages, convo.Name);
+            var domain = new Conversation(new ConversationId(convo.Id), participants, messages, convo.Name);
             return new ConversationResolution(domain, selfIdentity.Id);
         }
 
         throw new InvalidOperationException("Invalid routing key state.");
-    }
-
-    private static byte[] ComputeDirectChannelId(PeerId a, PeerId b)
-    {
-        // Order the pair to ensure symmetry
-        var g1 = a.Value;
-        var g2 = b.Value;
-        var (left, right) = g1.CompareTo(g2) <= 0 ? (g1, g2) : (g2, g1);
-        var input = $"direct:{left:D}:{right:D}";
-        return SHA256.HashData(Encoding.UTF8.GetBytes(input));
-    }
-
-    private static byte[] ComputeGroupChannelId(Guid groupGuid)
-    {
-        var input = $"group:{groupGuid:D}";
-        return SHA256.HashData(Encoding.UTF8.GetBytes(input));
     }
 }

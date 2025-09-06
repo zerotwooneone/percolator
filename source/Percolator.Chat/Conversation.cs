@@ -9,13 +9,11 @@ public class Conversation
     private readonly List<Message> _messages = new();
 
     public ConversationId Id { get; }
-    public ChannelId ChannelId { get; private set; }
     public IReadOnlyList<ParticipantId> Participants => new ReadOnlyCollection<ParticipantId>(_participants);
     public IReadOnlyList<Message> Messages => _messages;
     public string? Name { get; private set; }
 
     public Conversation(ConversationId id,
-        ChannelId channelId, 
         IEnumerable<ParticipantId> participants,
         IEnumerable<Message> messages, 
         string? name = null)
@@ -34,7 +32,6 @@ public class Conversation
         Id = id;
         _participants.AddRange(participantList);
         Name = name;
-        ChannelId = channelId;
         _messages = messages.ToList();
     }
 

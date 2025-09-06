@@ -64,7 +64,7 @@ public class MessageService : IMessageService
 
         if (sessionState.TheirIdentityPublicKey == null)
         {
-            throw new InvalidOperationException($"Double Ratchet session state for conversation {directSessionId} does not have their identity public key. There is no channel id for this conversation.");
+            throw new InvalidOperationException($"Double Ratchet session state for conversation {directSessionId} does not have their identity public key.");
         }
         _logger.LogInformation("Sending message to conversation {ConversationId}", directSessionId);
        
@@ -111,21 +111,20 @@ public class MessageService : IMessageService
             _logger.LogInformation("Creating new conversation {ConversationId}", conversationId);
             conversation = new Conversation(
                 conversationId,
-                new ChannelId(sessionState.TheirIdentityPublicKey.Value), // Generate a new channel ID for this conversation
                 new List<ChatParticipantId> { selfParticipantId, remoteParticipantId },
                 new List<Message>(),
                 null // No name for direct conversations
             );
             
             // Add the message to the conversation
-            _logger.LogInformation("Adding message to NEW conversation {ConversationId} with channel ID {ChannelId}", conversationId, Convert.ToBase64String(sessionState.TheirIdentityPublicKey.Value));
+            _logger.LogInformation("Adding message to NEW conversation {ConversationId}", conversationId);
             conversation.AddMessage(selfParticipantId, content);
             await _conversationRepository.AddAsync(conversation, selfIdentityId);
         }
         else
         {
             conversation.AddMessage(selfParticipantId, content);
-            _logger.LogInformation("Adding message to conversation {ConversationId} with channel ID {ChannelId}", conversationId, Convert.ToBase64String(sessionState.TheirIdentityPublicKey.Value));
+            _logger.LogInformation("Adding message to conversation {ConversationId}", conversationId);
             await _conversationRepository.UpdateAsync(conversation, selfIdentityId);
         }
         await _directSessionRepository.UpsertAsync(new Percolator.Network.PeerId(remoteParticipantId.Value), new DirectSessionId(conversation.Id.Value), selfIdentityId);
