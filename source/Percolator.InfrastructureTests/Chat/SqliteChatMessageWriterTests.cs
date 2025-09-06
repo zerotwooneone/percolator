@@ -30,6 +30,7 @@ public class SqliteChatMessageWriterTests
             ctx.SelfIdentities.Add(new SelfIdentityDbo { Id = 1, PeerId = Guid.NewGuid(), Name = "default" });
             ctx.SaveChanges();
         }
+
         return ctx;
     }
 
@@ -61,6 +62,24 @@ public class SqliteChatMessageWriterTests
         ctx.SaveChanges();
 
         return (new ConversationId(conversationId), otherPeerId);
+    }
+
+    [Test]
+    public async Task AddDeliveredReceipt_is_idempotent_per_recipient_and_message()
+    {
+        var ctx = CreateDbContext(out var conn);
+        await using var _ = conn;
+        var (conversationId, _) = SeedConversation(ctx, 1);
+        var writer = new SqliteChatMessageWriter(ctx);
+        var messageId = new MessageId(Guid.NewGuid());
+        var deliveredAt = DateTimeOffset.UtcNow;
+        var ct = CancellationToken.None;
+
+        await writer.AddDeliveredReceiptAsync(conversationId, 1, messageId, deliveredAt, ct);
+        await writer.AddDeliveredReceiptAsync(conversationId, 1, messageId, deliveredAt, ct);
+
+        var count = await ctx.DeliveredReceipts.CountAsync(r => r.ConversationId == conversationId.Value && r.MessageGuid == messageId.Value);
+        count.Should().Be(1);
     }
 
     [Test]

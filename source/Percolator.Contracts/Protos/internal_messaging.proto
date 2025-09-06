@@ -45,6 +45,8 @@ message TextMessage {
   string content = 4;
   // Optional GroupConversationGuid (GUID bytes) for group routing
   optional bytes group_conversation_guid = 5;
+  // Optional Public Key Hash (PKH, 32 bytes) for 1:1 routing when no direct session exists (e.g., queued delivery)
+  optional bytes public_key_hash = 6;
 }
 
 message ReadReceipt {
@@ -53,6 +55,8 @@ message ReadReceipt {
   google.protobuf.Timestamp sent_timestamp_utc = 3;
   // Optional GroupConversationGuid (GUID bytes) for group routing
   optional bytes group_conversation_guid = 4;
+  // Optional PKH for 1:1 routing when no direct session exists
+  optional bytes public_key_hash = 5;
 }
 
 message EmojiAnnotation {
@@ -62,6 +66,8 @@ message EmojiAnnotation {
   string emoji = 4; // The emoji character, e.g., "👍".
   // Optional GroupConversationGuid (GUID bytes) for group routing
   optional bytes group_conversation_guid = 5;
+  // Optional PKH for 1:1 routing when no direct session exists
+  optional bytes public_key_hash = 6;
 }
 
 // Delivery receipt acknowledging that a message was delivered (distinct from read)
@@ -71,6 +77,8 @@ message DeliveredReceipt {
   google.protobuf.Timestamp sent_timestamp_utc = 3;
   // Optional GroupConversationGuid (GUID bytes) for group routing
   optional bytes group_conversation_guid = 4;
+  // Optional PKH for 1:1 routing when no direct session exists
+  optional bytes public_key_hash = 5;
 }
 
 // Group Management Messages

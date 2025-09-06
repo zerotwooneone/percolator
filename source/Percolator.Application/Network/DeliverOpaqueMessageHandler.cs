@@ -226,13 +226,28 @@ namespace Percolator.Application.Network
 
         private async Task HandleChatEnvelopeAsync(ChatEnvelope chatEnvelope, DirectSessionId directSessionId, CancellationToken ct)
         {
-            ConversationLookupKey BuildLookupKeyForGroupOrDirect(Guid? groupGuid)
+            ConversationLookupKey BuildLookupKey(Guid? groupGuid, byte[]? pkh)
             {
                 if (groupGuid.HasValue)
                 {
                     return ConversationLookupKey.ForGroup(groupGuid.Value);
                 }
+                if (pkh is not null && pkh.Length > 0)
+                {
+                    return ConversationLookupKey.ForPublicKeyHash(Pkh.FromBytes(pkh));
+                }
                 return ConversationLookupKey.ForDirectSession(directSessionId.Value);
+            }
+
+            static void ValidateRoutingHints(Guid? groupGuid, byte[]? pkh, string context)
+            {
+                int count = 0;
+                if (groupGuid.HasValue) count++;
+                if (pkh is not null && pkh.Length > 0) count++;
+                if (count > 1)
+                {
+                    throw new InvalidOperationException($"{context}: exactly one of group_conversation_guid or public_key_hash may be present.");
+                }
             }
 
             switch (chatEnvelope.MessageCase)
@@ -257,7 +272,17 @@ namespace Percolator.Application.Network
                         }
                         groupGuid = new Guid(text.GroupConversationGuid.ToByteArray());
                     }
-                    var lookupKey = BuildLookupKeyForGroupOrDirect(groupGuid);
+                    byte[]? pkh = null;
+                    if (text.HasPublicKeyHash)
+                    {
+                        if (text.PublicKeyHash.Length != 32)
+                        {
+                            throw new InvalidOperationException("TextMessage.public_key_hash must be 32 bytes (SHA-256) when present.");
+                        }
+                        pkh = text.PublicKeyHash.ToByteArray();
+                    }
+                    ValidateRoutingHints(groupGuid, pkh, "TextMessage");
+                    var lookupKey = BuildLookupKey(groupGuid, pkh);
                     var messageId = new MessageId(new Guid(text.MessageId.ToByteArray()));
                     var sentTs = text.SentTimestampUtc.ToDateTimeOffset();
                     await _mediator.Send(new PostTextMessageCommand(
@@ -286,7 +311,17 @@ namespace Percolator.Application.Network
                         }
                         rrGroupGuid = new Guid(rr.GroupConversationGuid.ToByteArray());
                     }
-                    var rrLookup = BuildLookupKeyForGroupOrDirect(rrGroupGuid);
+                    byte[]? rrPkh = null;
+                    if (rr.HasPublicKeyHash)
+                    {
+                        if (rr.PublicKeyHash.Length != 32)
+                        {
+                            throw new InvalidOperationException("ReadReceipt.public_key_hash must be 32 bytes (SHA-256) when present.");
+                        }
+                        rrPkh = rr.PublicKeyHash.ToByteArray();
+                    }
+                    ValidateRoutingHints(rrGroupGuid, rrPkh, "ReadReceipt");
+                    var rrLookup = BuildLookupKey(rrGroupGuid, rrPkh);
                     var rrMessageId = new MessageId(new Guid(rr.MessageId.ToByteArray()));
                     var rrTs = rr.SentTimestampUtc.ToDateTimeOffset();
                     await _mediator.Send(new PostReadReceiptCommand(
@@ -318,7 +353,17 @@ namespace Percolator.Application.Network
                         }
                         emGroupGuid = new Guid(em.GroupConversationGuid.ToByteArray());
                     }
-                    var emLookup = BuildLookupKeyForGroupOrDirect(emGroupGuid);
+                    byte[]? emPkh = null;
+                    if (em.HasPublicKeyHash)
+                    {
+                        if (em.PublicKeyHash.Length != 32)
+                        {
+                            throw new InvalidOperationException("EmojiAnnotation.public_key_hash must be 32 bytes (SHA-256) when present.");
+                        }
+                        emPkh = em.PublicKeyHash.ToByteArray();
+                    }
+                    ValidateRoutingHints(emGroupGuid, emPkh, "EmojiAnnotation");
+                    var emLookup = BuildLookupKey(emGroupGuid, emPkh);
                     var emMessageId = new MessageId(new Guid(em.MessageId.ToByteArray()));
                     var emTs = em.SentTimestampUtc.ToDateTimeOffset();
                     await _mediator.Send(new PostEmojiAnnotationCommand(
@@ -347,7 +392,17 @@ namespace Percolator.Application.Network
                         }
                         drGroupGuid = new Guid(dr.GroupConversationGuid.ToByteArray());
                     }
-                    var drLookup = BuildLookupKeyForGroupOrDirect(drGroupGuid);
+                    byte[]? drPkh = null;
+                    if (dr.HasPublicKeyHash)
+                    {
+                        if (dr.PublicKeyHash.Length != 32)
+                        {
+                            throw new InvalidOperationException("DeliveredReceipt.public_key_hash must be 32 bytes (SHA-256) when present.");
+                        }
+                        drPkh = dr.PublicKeyHash.ToByteArray();
+                    }
+                    ValidateRoutingHints(drGroupGuid, drPkh, "DeliveredReceipt");
+                    var drLookup = BuildLookupKey(drGroupGuid, drPkh);
                     var drMessageId = new MessageId(new Guid(dr.MessageId.ToByteArray()));
                     var drTs = dr.SentTimestampUtc.ToDateTimeOffset();
                     await _mediator.Send(new PostDeliveredReceiptCommand(

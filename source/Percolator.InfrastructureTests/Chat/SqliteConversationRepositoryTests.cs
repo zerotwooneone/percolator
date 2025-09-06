@@ -30,6 +30,7 @@ public class SqliteConversationRepositoryTests
             ctx.SelfIdentities.Add(new SelfIdentityDbo { Id = 1, PeerId = Guid.NewGuid(), Name = "default" });
             ctx.SaveChanges();
         }
+
         return ctx;
     }
 
@@ -43,6 +44,154 @@ public class SqliteConversationRepositoryTests
         conv.AddMessage(p1, "hello");
         conv.AddMessage(p2, "world");
         return conv;
+    }
+
+    [Test]
+    public async Task GetByGroupGuidAsync_returns_group_conversation()
+    {
+        var ctx = CreateDbContext(out _);
+        var repo = new SqliteConversationRepository(ctx);
+
+        var groupGuid = Guid.NewGuid();
+        var convId = Guid.NewGuid();
+        var self = ctx.SelfIdentities.Single(si => si.Id == 1);
+
+        ctx.Conversations.Add(new ConversationDbo
+        {
+            Id = convId,
+            ChannelId = Guid.NewGuid().ToByteArray(),
+            Name = "group",
+            SelfIdentityId = 1,
+            GroupConversationGuid = groupGuid,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        });
+        ctx.ConversationParticipants.Add(new ConversationParticipantDbo { ConversationId = convId, ParticipantId = self.PeerId });
+        ctx.ConversationParticipants.Add(new ConversationParticipantDbo { ConversationId = convId, ParticipantId = Guid.NewGuid() });
+        ctx.SaveChanges();
+
+        var loaded = await repo.GetByGroupGuidAsync(groupGuid, 1);
+        loaded.Should().NotBeNull();
+        loaded!.Id.Value.Should().Be(convId);
+    }
+
+    [Test]
+    public async Task GetByGroupGuidAsync_returns_null_for_nonexistent_group_guid()
+    {
+        var ctx = CreateDbContext(out _);
+        var repo = new SqliteConversationRepository(ctx);
+
+        var groupGuid = Guid.NewGuid();
+
+        var loaded = await repo.GetByGroupGuidAsync(groupGuid, 1);
+        loaded.Should().BeNull();
+    }
+
+    [Test]
+    public async Task GetByParticipantPairAsync_returns_direct_conversation()
+    {
+        var ctx = CreateDbContext(out _);
+        var repo = new SqliteConversationRepository(ctx);
+
+        var convId = Guid.NewGuid();
+        var self = ctx.SelfIdentities.Single(si => si.Id == 1);
+        var other = Guid.NewGuid();
+
+        ctx.Conversations.Add(new ConversationDbo
+        {
+            Id = convId,
+            ChannelId = Guid.NewGuid().ToByteArray(),
+            Name = "direct",
+            SelfIdentityId = 1,
+            GroupConversationGuid = null,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        });
+        ctx.ConversationParticipants.Add(new ConversationParticipantDbo { ConversationId = convId, ParticipantId = self.PeerId });
+        ctx.ConversationParticipants.Add(new ConversationParticipantDbo { ConversationId = convId, ParticipantId = other });
+        ctx.SaveChanges();
+
+        var loaded = await repo.GetByParticipantPairAsync(1, other);
+        loaded.Should().NotBeNull();
+        loaded!.Id.Value.Should().Be(convId);
+    }
+
+    [Test]
+    public async Task GetByParticipantPairAsync_returns_null_for_nonexistent_participant_pair()
+    {
+        var ctx = CreateDbContext(out _);
+        var repo = new SqliteConversationRepository(ctx);
+
+        var other = Guid.NewGuid();
+
+        var loaded = await repo.GetByParticipantPairAsync(1, other);
+        loaded.Should().BeNull();
+    }
+
+    [Test]
+    public async Task UpsertDirectSessionMappingAsync_inserts_and_updates_mapping()
+    {
+        var ctx = CreateDbContext(out _);
+        var repo = new SqliteConversationRepository(ctx);
+
+        var convId = Guid.NewGuid();
+        ctx.Conversations.Add(new ConversationDbo
+        {
+            Id = convId,
+            ChannelId = Guid.NewGuid().ToByteArray(),
+            Name = "direct",
+            SelfIdentityId = 1,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        });
+        ctx.SaveChanges();
+
+        var sessionId = Guid.NewGuid();
+        await repo.UpsertDirectSessionMappingAsync(1, sessionId, new ConversationId(convId));
+
+        var mapping = await ctx.DirectSessionConversations.AsNoTracking().SingleAsync(m => m.SelfIdentityId == 1 && m.DirectSessionId == sessionId);
+        mapping.ConversationId.Should().Be(convId);
+
+        var newConvId = Guid.NewGuid();
+        ctx.Conversations.Add(new ConversationDbo
+        {
+            Id = newConvId,
+            ChannelId = Guid.NewGuid().ToByteArray(),
+            Name = "direct2",
+            SelfIdentityId = 1,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        });
+        ctx.SaveChanges();
+
+        await repo.UpsertDirectSessionMappingAsync(1, sessionId, new ConversationId(newConvId));
+        var updated = await ctx.DirectSessionConversations.AsNoTracking().SingleAsync(m => m.SelfIdentityId == 1 && m.DirectSessionId == sessionId);
+        updated.ConversationId.Should().Be(newConvId);
+    }
+
+    [Test]
+    public async Task UpsertDirectSessionMappingAsync_inserts_mapping_for_nonexistent_session_id()
+    {
+        var ctx = CreateDbContext(out _);
+        var repo = new SqliteConversationRepository(ctx);
+
+        var convId = Guid.NewGuid();
+        ctx.Conversations.Add(new ConversationDbo
+        {
+            Id = convId,
+            ChannelId = Guid.NewGuid().ToByteArray(),
+            Name = "direct",
+            SelfIdentityId = 1,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        });
+        ctx.SaveChanges();
+
+        var sessionId = Guid.NewGuid();
+        await repo.UpsertDirectSessionMappingAsync(1, sessionId, new ConversationId(convId));
+
+        var mapping = await ctx.DirectSessionConversations.AsNoTracking().SingleAsync(m => m.SelfIdentityId == 1 && m.DirectSessionId == sessionId);
+        mapping.ConversationId.Should().Be(convId);
     }
 
     [Test]

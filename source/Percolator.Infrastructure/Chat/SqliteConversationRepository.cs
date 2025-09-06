@@ -86,6 +86,58 @@ public sealed class SqliteConversationRepository : IConversationRepository
         await _db.SaveChangesAsync();
     }
 
+    public async Task<Conversation?> GetByGroupGuidAsync(Guid groupConversationGuid, int selfIdentityId)
+    {
+        var dbo = await _db.Conversations
+            .AsNoTracking()
+            .Include(c => c.Participants)
+            .Include(c => c.Messages)
+            .FirstOrDefaultAsync(c => c.SelfIdentityId == selfIdentityId && c.GroupConversationGuid == groupConversationGuid);
+
+        return dbo is null ? null : ToDomain(dbo);
+    }
+
+    public async Task<Conversation?> GetByParticipantPairAsync(int selfIdentityId, Guid otherPeerId)
+    {
+        // Load self identity to obtain the local peer id
+        var self = await _db.SelfIdentities.AsNoTracking().FirstOrDefaultAsync(i => i.Id == selfIdentityId)
+            ?? throw new InvalidOperationException($"SelfIdentity not found for id {selfIdentityId}.");
+
+        // Find a direct (non-group) conversation for this self identity that contains both participants
+        var dbo = await _db.Conversations
+            .Include(c => c.Participants)
+            .Include(c => c.Messages)
+            .Where(c => c.SelfIdentityId == selfIdentityId && c.GroupConversationGuid == null)
+            .Where(c => c.Participants.Any(p => p.ParticipantId == self.PeerId) && c.Participants.Any(p => p.ParticipantId == otherPeerId))
+            .AsNoTracking()
+            .FirstOrDefaultAsync();
+
+        return dbo is null ? null : ToDomain(dbo);
+    }
+
+    public async Task UpsertDirectSessionMappingAsync(int selfIdentityId, Guid directSessionId, ConversationId conversationId)
+    {
+        var existingMap = await _db.DirectSessionConversations
+            .FirstOrDefaultAsync(m => m.SelfIdentityId == selfIdentityId && m.DirectSessionId == directSessionId);
+
+        if (existingMap is null)
+        {
+            _db.DirectSessionConversations.Add(new DirectSessionConversationDbo
+            {
+                SelfIdentityId = selfIdentityId,
+                DirectSessionId = directSessionId,
+                ConversationId = conversationId.Value
+            });
+        }
+        else
+        {
+            existingMap.ConversationId = conversationId.Value;
+            _db.DirectSessionConversations.Update(existingMap);
+        }
+
+        await _db.SaveChangesAsync();
+    }
+
     private static Conversation ToDomain(ConversationDbo dbo)
     {
         var participants = dbo.Participants.Select(p => new ParticipantId(p.ParticipantId)).ToList();
