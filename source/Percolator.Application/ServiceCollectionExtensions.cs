@@ -9,7 +9,7 @@ using Percolator.Application.Network;
 using Percolator.Application.PeerDiscovery;
 using Percolator.Application.RateLimiting;
 using Percolator.Application.Sessions;
-using Percolator.Identity;
+using Percolator.Chat.App.Commands;
 using Percolator.Dht.Messages;
 
 namespace Percolator.Application;
@@ -41,6 +41,8 @@ public static class ServiceCollectionExtensions
             cfg.RegisterServicesFromAssembly(typeof(ServiceCollectionExtensions).Assembly);
             // Also include DHT assembly where request/notification handlers live
             cfg.RegisterServicesFromAssembly(typeof(PingRequest).Assembly);
+            // Include Chat handlers assembly (Percolator.Chat)
+            cfg.RegisterServicesFromAssembly(typeof(PostTextMessageHandler).Assembly);
         });
 
         return services;
