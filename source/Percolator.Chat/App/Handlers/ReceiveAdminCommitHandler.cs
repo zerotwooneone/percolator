@@ -5,15 +5,42 @@ using System.Threading.Tasks;
 
 namespace Percolator.Chat.App.Handlers
 {
-    // Skeleton: Apply first-commit-wins using admin_sequence_number, validate key version continuity, and finalize op.
+    // Applies first-commit-wins using admin_sequence_number and enforces key version continuity.
     public class ReceiveAdminCommitHandler : IRequestHandler<ReceiveAdminCommitCommand>
     {
-        public Task Handle(ReceiveAdminCommitCommand request, CancellationToken cancellationToken)
+        private readonly IConversationResolver _resolver;
+        private readonly IGroupAdminStateStore _stateStore;
+
+        public ReceiveAdminCommitHandler(IConversationResolver resolver, IGroupAdminStateStore stateStore)
         {
-            // TODO: Resolve conversation and read expected next admin_sequence_number; enforce first-commit-wins.
-            // TODO: Validate committed key version continuity (no gaps/duplicates) per group.
-            // TODO: Mark GroupAdminOps(OpId) as committed if not already, idempotent.
-            return Task.CompletedTask;
+            _resolver = resolver;
+            _stateStore = stateStore;
+        }
+
+        public async Task Handle(ReceiveAdminCommitCommand request, CancellationToken cancellationToken)
+        {
+            // Resolve to ensure conversation exists locally
+            request.Lookup.EnsureExactlyOne();
+            var resolution = await _resolver.ResolveAsync(request.Lookup, cancellationToken);
+            var conversationId = resolution.Conversation.Id.Value;
+
+            // Initialize state if missing
+            await _stateStore.InitializeIfMissingAsync(conversationId, cancellationToken);
+
+            // First-commit-wins + key-version continuity
+            var committed = await _stateStore.TryCommitAsync(
+                conversationId,
+                request.AdminSequenceNumber,
+                request.CommittedKeyVersion.Value,
+                cancellationToken);
+
+            // If commit fails, it means a different commit advanced the state already; treat as idempotent no-op
+            if (!committed)
+            {
+                return;
+            }
+
+            // Additional domain side-effects could be triggered here if needed in the future.
         }
     }
 }

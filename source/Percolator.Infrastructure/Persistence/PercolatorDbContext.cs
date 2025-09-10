@@ -37,6 +37,7 @@ public class PercolatorDbContext : DbContext
     public DbSet<DeliveredReceiptDbo> DeliveredReceipts { get; set; } = null!;
     public DbSet<GroupAdminKeyDbo> GroupAdminKeys { get; set; } = null!;
     public DbSet<GroupAdminOpDbo> GroupAdminOps { get; set; } = null!;
+    public DbSet<GroupAdminStateDbo> GroupAdminStates { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -153,6 +154,16 @@ public class PercolatorDbContext : DbContext
             entity.HasIndex(e => e.PublicKeyHash).IsUnique();
             entity.HasIndex(e => new { e.PeerId, e.ActiveAtUtc });
             entity.HasIndex(e => new { e.PeerId, e.ExpiredAtUtc });
+        });
+
+        // GroupAdminStates
+        modelBuilder.Entity<GroupAdminStateDbo>(entity =>
+        {
+            entity.ToTable("GroupAdminStates");
+            entity.HasKey(e => e.ConversationId);
+            entity.Property(e => e.ConversationId).ValueGeneratedNever();
+            entity.Property(e => e.NextAdminSequenceNumber).IsRequired();
+            entity.Property(e => e.LastCommittedKeyVersion).IsRequired();
         });
 
         modelBuilder.Entity<SignedPreKeyDbo>(entity =>

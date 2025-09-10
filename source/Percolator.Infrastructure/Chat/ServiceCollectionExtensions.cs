@@ -1,7 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using Percolator.Chat;
 using Percolator.Chat.App;
-using Percolator.Chat.App;
 using Percolator.Infrastructure.Chat;
 
 namespace Percolator.Infrastructure.Chat;
@@ -15,6 +14,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IChatMessageWriter, SqliteChatMessageWriter>();
         services.AddScoped<IGroupAdminKeyStore, SqliteGroupAdminKeyStore>();
         services.AddScoped<IGroupAdminOpStore, SqliteGroupAdminOpStore>();
+        services.AddScoped<IGroupAdminStateStore, SqliteGroupAdminStateStore>();
         return services;
     }
 }
