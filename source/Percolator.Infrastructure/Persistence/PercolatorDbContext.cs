@@ -38,6 +38,7 @@ public class PercolatorDbContext : DbContext
     public DbSet<GroupAdminKeyDbo> GroupAdminKeys { get; set; } = null!;
     public DbSet<GroupAdminOpDbo> GroupAdminOps { get; set; } = null!;
     public DbSet<GroupAdminStateDbo> GroupAdminStates { get; set; } = null!;
+    public DbSet<GroupManagerStateDbo> GroupManagerStates { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -164,6 +165,17 @@ public class PercolatorDbContext : DbContext
             entity.Property(e => e.ConversationId).ValueGeneratedNever();
             entity.Property(e => e.NextAdminSequenceNumber).IsRequired();
             entity.Property(e => e.LastCommittedKeyVersion).IsRequired();
+        });
+
+        // GroupManagerStates
+        modelBuilder.Entity<GroupManagerStateDbo>(entity =>
+        {
+            entity.ToTable("GroupManagerStates");
+            entity.HasKey(e => e.ConversationId);
+            entity.Property(e => e.ConversationId).ValueGeneratedNever();
+            entity.Property(e => e.StateBlob).IsRequired();
+            entity.Property(e => e.UpdatedAtUtc).IsRequired();
+            entity.HasIndex(e => e.UpdatedAtUtc);
         });
 
         modelBuilder.Entity<SignedPreKeyDbo>(entity =>

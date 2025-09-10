@@ -11,6 +11,8 @@ public static class ServiceCollectionExtensions
     {
         services.AddSingleton<ISelfParticipantIdProvider>(s=> s.GetRequiredService<ActiveIdentityContext>());
         services.AddScoped<IGroupKeyOperations, GroupKeyOperations>();
+        services.AddSingleton<IGroupManagerResolver, DefaultGroupManagerResolver>();
+        services.AddScoped<ITransportKeyResolver, DefaultTransportKeyResolver>();
 
         return services;
     }

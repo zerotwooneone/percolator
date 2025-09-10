@@ -12,6 +12,7 @@ using Percolator.Chat.App;
 using Percolator.Chat.App.Commands;
 using Percolator.Chat.ValueObjects;
 using Percolator.Chat.Primitives;
+using Percolator.Application.Apps.Chat;
 
 namespace Percolator.Application.Network
 {
@@ -571,7 +572,7 @@ namespace Percolator.Application.Network
                         newName2,
                         newAvatar2,
                         signature,
-                        sao.Payload.ToByteArray()
+                        CanonicalPayload.ForAdminOperation(sao.Payload)
                     ), ct);
                     break;
 

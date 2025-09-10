@@ -222,5 +222,22 @@ namespace Percolator.Cryptography
             }
             GC.SuppressFinalize(this);
         }
+
+        // DDD-compliant API: import/activate a new group key version for this group
+        // without exposing raw byte arrays from the Cryptography domain.
+        public void ImportKey(GroupKeyVersionC version, GroupKeyMaterial material)
+        {
+            if (material.Value is null || material.Value.Length == 0)
+            {
+                throw new ArgumentException("GroupKeyMaterial must not be empty.", nameof(material));
+            }
+
+            // Reinitialize the SenderKeySession with the externally provided key material.
+            // Preserve current group context (GroupId-derived context bytes)
+            var groupContext = Encoding.UTF8.GetBytes(GroupId);
+            GroupSession.Dispose();
+            GroupSession = new SenderKeySession(material.Value, groupContext);
+            // Note: Version tracking is handled at higher layers; this manager focuses on key material.
+        }
     }
 }
