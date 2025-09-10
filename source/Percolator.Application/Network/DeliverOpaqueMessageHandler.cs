@@ -11,6 +11,7 @@ using Percolator.MessageQueue.Commands;
 using Percolator.Chat.App;
 using Percolator.Chat.App.Commands;
 using Percolator.Chat.ValueObjects;
+using Percolator.Chat.Primitives;
 
 namespace Percolator.Application.Network
 {
@@ -479,6 +480,187 @@ namespace Percolator.Application.Network
                         drTs
                     ), ct);
                     break;
+                case ChatEnvelope.MessageOneofCase.SignedAdminOperation:
+                    var sao = chatEnvelope.SignedAdminOperation;
+                    if (sao == null || sao.Payload == null || !sao.HasSignature)
+                    {
+                        throw new InvalidOperationException("SignedAdminOperation.payload and signature are required.");
+                    }
+                    if (!sao.Payload.HasGroupConversationGuid || sao.Payload.GroupConversationGuid.Length != 16)
+                    {
+                        throw new InvalidOperationException("SignedAdminOperation.payload.group_conversation_guid must be 16 bytes (GUID).");
+                    }
+                    if (!sao.Payload.HasOpId || sao.Payload.OpId.Length != 16)
+                    {
+                        throw new InvalidOperationException("SignedAdminOperation.payload.op_id must be 16 bytes (GUID).");
+                    }
+                    var saoGroup = new Guid(sao.Payload.GroupConversationGuid.ToByteArray());
+                    var saoLookup = BuildLookupKey(saoGroup, null);
+
+                    // Common fields
+                    var opId = new Guid(sao.Payload.OpId.ToByteArray());
+                    var sentUtc = sao.Payload.SentTimestampUtc.ToDateTimeOffset();
+                    ulong? adminSeq = sao.Payload.HasAdminSequenceNumber ? sao.Payload.AdminSequenceNumber : null;
+
+                    // Map variant-specific data
+                    AdminOperationKind kind;
+                    AdminPublicKey? grantee = null;
+                    List<Percolator.Chat.ValueObjects.ParticipantId>? add = null;
+                    List<Percolator.Chat.ValueObjects.ParticipantId>? remove = null;
+                    bool? leave = null;
+                    string? newName2 = null;
+                    Percolator.Chat.Primitives.GroupAvatar? newAvatar2 = null;
+
+                    switch (sao.Payload.OperationCase)
+                    {
+                        case AdminOperationPayload.OperationOneofCase.GrantAdmin:
+                            kind = AdminOperationKind.GrantAdmin;
+                            if (!sao.Payload.GrantAdmin.HasGranteePublicKey)
+                                throw new InvalidOperationException("GrantAdmin.grantee_public_key is required.");
+                            grantee = new AdminPublicKey(sao.Payload.GrantAdmin.GranteePublicKey.ToByteArray());
+                            break;
+                        case AdminOperationPayload.OperationOneofCase.RevokeAdmin:
+                            kind = AdminOperationKind.RevokeAdmin;
+                            if (!sao.Payload.RevokeAdmin.HasGranteePublicKey)
+                                throw new InvalidOperationException("RevokeAdmin.grantee_public_key is required.");
+                            grantee = new AdminPublicKey(sao.Payload.RevokeAdmin.GranteePublicKey.ToByteArray());
+                            break;
+                        case AdminOperationPayload.OperationOneofCase.UpdateGroupMembership:
+                            kind = AdminOperationKind.UpdateGroupMembership;
+                            add = new List<Percolator.Chat.ValueObjects.ParticipantId>(sao.Payload.UpdateGroupMembership.MembersToAdd.Count);
+                            foreach (var b in sao.Payload.UpdateGroupMembership.MembersToAdd)
+                            {
+                                if (b.Length != 16) throw new InvalidOperationException("members_to_add must be 16-byte GUIDs");
+                                add.Add(new Percolator.Chat.ValueObjects.ParticipantId(new Guid(b.ToByteArray())));
+                            }
+                            remove = new List<Percolator.Chat.ValueObjects.ParticipantId>(sao.Payload.UpdateGroupMembership.MembersToRemove.Count);
+                            foreach (var b in sao.Payload.UpdateGroupMembership.MembersToRemove)
+                            {
+                                if (b.Length != 16) throw new InvalidOperationException("members_to_remove must be 16-byte GUIDs");
+                                remove.Add(new Percolator.Chat.ValueObjects.ParticipantId(new Guid(b.ToByteArray())));
+                            }
+                            leave = sao.Payload.UpdateGroupMembership.HasLeaveGroup ? sao.Payload.UpdateGroupMembership.LeaveGroup : (bool?)null;
+                            break;
+                        case AdminOperationPayload.OperationOneofCase.UpdateGroupInfo:
+                            kind = AdminOperationKind.UpdateGroupInfo;
+                            if (sao.Payload.UpdateGroupInfo.HasNewGroupName)
+                            {
+                                newName2 = sao.Payload.UpdateGroupInfo.NewGroupName;
+                            }
+                            if (sao.Payload.UpdateGroupInfo.HasNewGroupAvatar)
+                            {
+                                newAvatar2 = new Percolator.Chat.Primitives.GroupAvatar(sao.Payload.UpdateGroupInfo.NewGroupAvatar.ToByteArray());
+                            }
+                            break;
+                        default:
+                            throw new InvalidOperationException($"Unsupported admin operation variant: {sao.Payload.OperationCase}");
+                    }
+
+                    var signature = new AdminSignature(sao.Signature.ToByteArray());
+
+                    await _mediator.Send(new ApplySignedAdminOperationCommand(
+                        saoLookup,
+                        opId,
+                        sentUtc,
+                        adminSeq,
+                        kind,
+                        grantee,
+                        add,
+                        remove,
+                        leave,
+                        newName2,
+                        newAvatar2,
+                        signature,
+                        sao.Payload.ToByteArray()
+                    ), ct);
+                    break;
+
+                case ChatEnvelope.MessageOneofCase.KeyAdoptionConfirmation:
+                    var kac = chatEnvelope.KeyAdoptionConfirmation;
+                    if (kac == null || !kac.HasGroupConversationGuid || kac.GroupConversationGuid.Length != 16)
+                    {
+                        throw new InvalidOperationException("SignedKeyAdoptionConfirmation.group_conversation_guid must be 16 bytes (GUID).");
+                    }
+                    if (!kac.HasKeyVersion)
+                    {
+                        throw new InvalidOperationException("SignedKeyAdoptionConfirmation.key_version is required.");
+                    }
+                    if (!kac.HasAdopterIdentityKey || kac.AdopterIdentityKey.Length == 0)
+                    {
+                        throw new InvalidOperationException("SignedKeyAdoptionConfirmation.adopter_identity_key is required.");
+                    }
+                    if (!kac.HasSignature || kac.Signature.Length == 0)
+                    {
+                        throw new InvalidOperationException("SignedKeyAdoptionConfirmation.signature is required.");
+                    }
+                    var kacGroup = new Guid(kac.GroupConversationGuid.ToByteArray());
+                    var kacLookup = BuildLookupKey(kacGroup, null);
+                    await _mediator.Send(new ReceiveKeyAdoptionConfirmationCommand(
+                        kacLookup,
+                        new GroupKeyVersion(kac.KeyVersion),
+                        new IdentityPublicKey(kac.AdopterIdentityKey.ToByteArray()),
+                        kac.SentTimestampUtc.ToDateTimeOffset(),
+                        kac.Signature.ToByteArray()
+                    ), ct);
+                    break;
+
+                case ChatEnvelope.MessageOneofCase.AdminCommitOperation:
+                    var aco = chatEnvelope.AdminCommitOperation;
+                    if (aco == null || !aco.HasGroupConversationGuid || aco.GroupConversationGuid.Length != 16)
+                    {
+                        throw new InvalidOperationException("SignedAdminCommitOperation.group_conversation_guid must be 16 bytes (GUID).");
+                    }
+                    if (!aco.HasOpId || aco.OpId.Length != 16)
+                    {
+                        throw new InvalidOperationException("SignedAdminCommitOperation.op_id must be 16 bytes (GUID).");
+                    }
+                    if (!aco.HasCommittedKeyVersion)
+                    {
+                        throw new InvalidOperationException("SignedAdminCommitOperation.committed_key_version is required.");
+                    }
+                    if (!aco.HasSignature || aco.Signature.Length == 0)
+                    {
+                        throw new InvalidOperationException("SignedAdminCommitOperation.signature is required.");
+                    }
+                    if (!aco.HasAdminSequenceNumber)
+                    {
+                        throw new InvalidOperationException("SignedAdminCommitOperation.admin_sequence_number is required.");
+                    }
+                    var acoGroup = new Guid(aco.GroupConversationGuid.ToByteArray());
+                    var acoLookup = BuildLookupKey(acoGroup, null);
+                    await _mediator.Send(new ReceiveAdminCommitCommand(
+                        acoLookup,
+                        new Guid(aco.OpId.ToByteArray()),
+                        new GroupKeyVersion(aco.CommittedKeyVersion),
+                        aco.SentTimestampUtc.ToDateTimeOffset(),
+                        aco.AdminSequenceNumber,
+                        aco.Signature.ToByteArray()
+                    ), ct);
+                    break;
+
+                case ChatEnvelope.MessageOneofCase.KeyDistribution:
+                    var kd = chatEnvelope.KeyDistribution;
+                    if (kd == null || !kd.HasGroupConversationGuid || kd.GroupConversationGuid.Length != 16)
+                    {
+                        throw new InvalidOperationException("KeyDistributionPayload.group_conversation_guid must be 16 bytes (GUID).");
+                    }
+                    if (!kd.HasKeyVersion)
+                    {
+                        throw new InvalidOperationException("KeyDistributionPayload.key_version is required.");
+                    }
+                    if (!kd.HasEncryptedGroupKeyForRecipient || kd.EncryptedGroupKeyForRecipient.Length == 0)
+                    {
+                        throw new InvalidOperationException("KeyDistributionPayload.encrypted_group_key_for_recipient is required.");
+                    }
+                    var kdGroup = new Guid(kd.GroupConversationGuid.ToByteArray());
+                    var kdLookup = BuildLookupKey(kdGroup, null);
+                    await _mediator.Send(new ReceiveKeyDistributionCommand(
+                        kdLookup,
+                        new GroupKeyVersion(kd.KeyVersion),
+                        new EncryptedGroupKey(kd.EncryptedGroupKeyForRecipient.ToByteArray())
+                    ), ct);
+                    break;
+
                 default:
                     _logger.LogWarning("Received unhandled chat message type: {MessageType}", chatEnvelope.MessageCase);
                     break;

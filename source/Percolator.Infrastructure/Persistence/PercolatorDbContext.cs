@@ -35,6 +35,8 @@ public class PercolatorDbContext : DbContext
     public DbSet<ReadReceiptDbo> ReadReceipts { get; set; } = null!;
     public DbSet<EmojiReactionDbo> EmojiReactions { get; set; } = null!;
     public DbSet<DeliveredReceiptDbo> DeliveredReceipts { get; set; } = null!;
+    public DbSet<GroupAdminKeyDbo> GroupAdminKeys { get; set; } = null!;
+    public DbSet<GroupAdminOpDbo> GroupAdminOps { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -340,6 +342,32 @@ public class PercolatorDbContext : DbContext
             entity.Property(e => e.SentAt).IsRequired();
             entity.HasIndex(e => new { e.ConversationId, e.SentAt });
             entity.HasIndex(e => new { e.ConversationId, e.MessageGuid }).IsUnique();
+        });
+
+        // GroupAdminKeys
+        modelBuilder.Entity<GroupAdminKeyDbo>(entity =>
+        {
+            entity.ToTable("GroupAdminKeys");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedOnAdd();
+            entity.Property(e => e.ConversationId).IsRequired();
+            entity.Property(e => e.AdminPublicKeySpki).IsRequired();
+            entity.Property(e => e.AddedAtUtc).IsRequired();
+            // RevokedAtUtc is nullable
+            entity.HasIndex(e => new { e.ConversationId, e.AddedAtUtc });
+            entity.HasIndex(e => new { e.ConversationId, e.RevokedAtUtc });
+        });
+
+        // GroupAdminOps
+        modelBuilder.Entity<GroupAdminOpDbo>(entity =>
+        {
+            entity.ToTable("GroupAdminOps");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedOnAdd();
+            entity.Property(e => e.ConversationId).IsRequired();
+            entity.Property(e => e.OpId).IsRequired();
+            entity.Property(e => e.AppliedAtUtc).IsRequired();
+            entity.HasIndex(e => new { e.ConversationId, e.OpId }).IsUnique();
         });
 
         // ConversationParticipants (composite key)

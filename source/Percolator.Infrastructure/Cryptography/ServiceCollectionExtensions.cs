@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using Percolator.Cryptography;
+using Percolator.Chat.App;
 
 namespace Percolator.Infrastructure.Cryptography;
 
@@ -9,6 +10,7 @@ public static class ServiceCollectionExtensions
     {
         services.AddSingleton<ICertificateFactory, FileBasedCertificateFactory>();
         services.AddScoped<IPreKeyBundleRepository, SqlitePreKeyBundleRepository>();
+        services.AddScoped<IAdminSignatureVerifier, AdminSignatureVerifier>();
         return services;
     }
 }

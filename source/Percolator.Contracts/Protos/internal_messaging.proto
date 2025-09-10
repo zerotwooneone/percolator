@@ -35,6 +35,11 @@ message ChatEnvelope {
     GroupMembershipChangedNotification group_membership_changed_notification = 6;
     GroupInfoChangedNotification group_info_changed_notification = 7;
     DeliveredReceipt delivered_receipt = 8;
+    // New administrative and key-rotation messages
+    SignedAdminOperation signed_admin_operation = 9;
+    SignedKeyAdoptionConfirmation key_adoption_confirmation = 10;
+    SignedAdminCommitOperation admin_commit_operation = 11;
+    KeyDistributionPayload key_distribution = 12; // sent 1:1 from acting admin to each member
   }
 }
 
@@ -95,6 +100,102 @@ message UpdateGroupInfoRequest {
   optional bytes new_group_avatar = 2; // Raw image data for the avatar.
   // The group to which this update applies
   optional bytes group_conversation_guid = 3;
+}
+
+// =============================
+// Administrative Control Plane
+// =============================
+
+// Unsigned payload describing a single administrative operation. The signature is carried in SignedAdminOperation.
+message AdminOperationPayload {
+  optional uint32 version = 100;
+  optional bytes group_conversation_guid = 1; // GUID (16 bytes)
+  optional bytes op_id = 2; // GUID (16 bytes) idempotency
+  google.protobuf.Timestamp sent_timestamp_utc = 3;
+  // Optional sequencing to aid fork/conflict resolution
+  optional uint64 admin_sequence_number = 4;
+
+  oneof operation {
+    GrantAdmin grant_admin = 10;
+    RevokeAdmin revoke_admin = 11;
+    UpdateGroupMembershipPayload update_group_membership = 12;
+    UpdateGroupInfoPayload update_group_info = 13;
+  }
+}
+
+message GrantAdmin {
+  optional uint32 version = 100;
+  optional bytes grantee_public_key = 1; // SPKI bytes
+}
+
+message RevokeAdmin {
+  optional uint32 version = 100;
+  optional bytes grantee_public_key = 1; // SPKI bytes
+}
+
+message UpdateGroupMembershipPayload {
+  optional uint32 version = 100;
+  repeated bytes members_to_add = 1;    // each 16-byte participant guid
+  repeated bytes members_to_remove = 2; // each 16-byte participant guid
+  optional bool leave_group = 3;
+}
+
+message UpdateGroupInfoPayload {
+  optional uint32 version = 100;
+  optional string new_group_name = 1;
+  optional bytes new_group_avatar = 2;
+}
+
+message SignedAdminOperation {
+  optional uint32 version = 100;
+  optional AdminOperationPayload payload = 1; // The canonical bytes to sign are payload.ToByteArray()
+  optional bytes signature = 2; // Signature by an admin key (ECDSA P-256 + SHA-256 over payload bytes)
+}
+
+// History entries used for newcomer replay/validation
+message AdminHistoryEntry {
+  optional uint32 version = 100;
+  optional AdminOperationPayload payload = 1;
+  optional bytes signature = 2;
+  optional bytes signer_public_key = 3; // SPKI bytes (redundant but aids audit)
+}
+
+message AdminHistoryBundle {
+  optional uint32 version = 100;
+  repeated AdminHistoryEntry entries = 1; // Ordered from genesis to present
+}
+
+// =============================
+// Key Rotation Plane (client-orchestrated)
+// =============================
+
+// Sent 1:1 by the acting admin to each member. Contains the per-recipient encrypted group key.
+message KeyDistributionPayload {
+  optional uint32 version = 100;
+  optional bytes group_conversation_guid = 1; // 16 bytes
+  optional uint32 key_version = 2; // Monotonic per-group version number
+  optional bytes encrypted_group_key_for_recipient = 3; // opaque ciphertext
+}
+
+// Sent by each member back to the acting admin, acknowledging adoption of key_version.
+message SignedKeyAdoptionConfirmation {
+  optional uint32 version = 100;
+  optional bytes group_conversation_guid = 1; // 16 bytes
+  optional uint32 key_version = 2;
+  optional bytes adopter_identity_key = 3; // SPKI of adopter identity (or domain-specific identifier)
+  google.protobuf.Timestamp sent_timestamp_utc = 4;
+  optional bytes signature = 5; // Signature by adopter over the confirmation payload
+}
+
+// Broadcast by the acting admin after collecting all confirmations, finalizing the admin op.
+message SignedAdminCommitOperation {
+  optional uint32 version = 100;
+  optional bytes group_conversation_guid = 1; // 16 bytes
+  optional bytes op_id = 2; // AdminOperationPayload.op_id being committed
+  optional uint32 committed_key_version = 3;
+  google.protobuf.Timestamp sent_timestamp_utc = 4;
+  optional bytes signature = 5; // Signature by acting admin over commit payload
+  optional uint64 admin_sequence_number = 6; // monotonic per-group sequence for first-commit-wins
 }
 
 // Group Notification Messages
