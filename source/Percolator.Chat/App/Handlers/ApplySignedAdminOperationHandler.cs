@@ -17,6 +17,7 @@ namespace Percolator.Chat.App.Handlers
         private readonly IGroupAdminKeyStore _adminKeyStore;
         private readonly IGroupAdminOpStore _adminOpStore;
         private readonly IAdminSignatureVerifier _signatureVerifier;
+        private readonly IMediator _mediator;
 
         public ApplySignedAdminOperationHandler(
             IConversationResolver resolver,
@@ -24,7 +25,8 @@ namespace Percolator.Chat.App.Handlers
             ISelfParticipantIdProvider selfProvider,
             IGroupAdminKeyStore adminKeyStore,
             IGroupAdminOpStore adminOpStore,
-            IAdminSignatureVerifier signatureVerifier)
+            IAdminSignatureVerifier signatureVerifier,
+            IMediator mediator)
         {
             _resolver = resolver;
             _repository = repository;
@@ -32,6 +34,7 @@ namespace Percolator.Chat.App.Handlers
             _adminKeyStore = adminKeyStore;
             _adminOpStore = adminOpStore;
             _signatureVerifier = signatureVerifier;
+            _mediator = mediator;
         }
 
         public async Task Handle(ApplySignedAdminOperationCommand request, CancellationToken cancellationToken)
@@ -117,6 +120,8 @@ namespace Percolator.Chat.App.Handlers
                         }
                     }
                     await _repository.UpdateAsync(conversation, resolution.SelfIdentityId);
+                    // Notify application layer to consider distributing a new group key version
+                    await _mediator.Publish(new GroupMembershipChangedNotification(conversation.Id.Value), cancellationToken);
                     break;
 
                 case AdminOperationKind.UpdateGroupInfo:

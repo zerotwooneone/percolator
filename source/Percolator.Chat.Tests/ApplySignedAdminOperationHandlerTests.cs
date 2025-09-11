@@ -10,6 +10,7 @@ using Percolator.Chat.App;
 using Percolator.Chat.App.Commands;
 using Percolator.Chat.App.Handlers;
 using Percolator.Chat.ValueObjects;
+using MediatR;
 
 namespace Percolator.Chat.Tests;
 
@@ -22,6 +23,7 @@ public class ApplySignedAdminOperationHandlerTests
     private Mock<IGroupAdminKeyStore> _adminKeyStore = null!;
     private Mock<IGroupAdminOpStore> _adminOpStore = null!;
     private Mock<IAdminSignatureVerifier> _sigVerifier = null!;
+    private Mock<IMediator> _mediator = null!;
 
     private static Conversation MakeConversation(out ParticipantId p1, out ParticipantId p2)
     {
@@ -39,10 +41,11 @@ public class ApplySignedAdminOperationHandlerTests
         _adminKeyStore = new Mock<IGroupAdminKeyStore>(MockBehavior.Strict);
         _adminOpStore = new Mock<IGroupAdminOpStore>(MockBehavior.Strict);
         _sigVerifier = new Mock<IAdminSignatureVerifier>(MockBehavior.Strict);
+        _mediator = new Mock<IMediator>(MockBehavior.Strict);
     }
 
     private ApplySignedAdminOperationHandler CreateHandler()
-        => new ApplySignedAdminOperationHandler(_resolver.Object, _repository.Object, _selfProvider.Object, _adminKeyStore.Object, _adminOpStore.Object, _sigVerifier.Object);
+        => new ApplySignedAdminOperationHandler(_resolver.Object, _repository.Object, _selfProvider.Object, _adminKeyStore.Object, _adminOpStore.Object, _sigVerifier.Object, _mediator.Object);
 
     [Test]
     public async Task ValidSignature_GrantAdmin_AddsKey()

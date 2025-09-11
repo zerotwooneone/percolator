@@ -32,6 +32,9 @@ public static class ServiceCollectionExtensions
         services.AddDhtInfrastructure();
         services.AddCryptographyInfrastructure();
 
+        // Security/adapters
+        services.AddScoped<Percolator.Application.Apps.Chat.IAtRestKeyProvider, Percolator.Infrastructure.Security.AtRestKeyProvider>();
+
         return services;
     }
 }

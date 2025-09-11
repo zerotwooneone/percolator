@@ -8,5 +8,6 @@ namespace Percolator.Application.Apps.Chat
     public interface ITransportKeyResolver
     {
         Task<byte[]?> GetAeadKeyAsync(Guid conversationId, CancellationToken ct);
+        Task<byte[]?> GetAeadKeyAsync(Guid conversationId, Guid remotePeerId, CancellationToken ct);
     }
 }

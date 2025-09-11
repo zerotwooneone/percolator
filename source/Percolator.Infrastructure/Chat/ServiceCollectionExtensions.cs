@@ -2,6 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Percolator.Chat;
 using Percolator.Chat.App;
 using Percolator.Infrastructure.Chat;
+using Percolator.Application.Apps.Chat;
 
 namespace Percolator.Infrastructure.Chat;
 
@@ -15,6 +16,8 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IGroupAdminKeyStore, SqliteGroupAdminKeyStore>();
         services.AddScoped<IGroupAdminOpStore, SqliteGroupAdminOpStore>();
         services.AddScoped<IGroupAdminStateStore, SqliteGroupAdminStateStore>();
+        services.AddScoped<IGroupManagerStateStore, SqliteGroupManagerStateStore>();
+        services.AddScoped<IDirectSessionConversationLookup, SqliteDirectSessionConversationLookup>();
         return services;
     }
 }

@@ -17,12 +17,16 @@ namespace Percolator.Application.Apps.Chat
         private readonly ILogger<GroupKeyOperations> _logger;
         private readonly IGroupManagerResolver _resolver;
         private readonly ITransportKeyResolver _transportKeyResolver;
+        private readonly IGroupManagerStateStore _gmStateStore;
+        private readonly IAtRestKeyProvider _atRestKeyProvider;
 
-        public GroupKeyOperations(ILogger<GroupKeyOperations> logger, IGroupManagerResolver resolver, ITransportKeyResolver transportKeyResolver)
+        public GroupKeyOperations(ILogger<GroupKeyOperations> logger, IGroupManagerResolver resolver, ITransportKeyResolver transportKeyResolver, IGroupManagerStateStore gmStateStore, IAtRestKeyProvider atRestKeyProvider)
         {
             _logger = logger;
             _resolver = resolver;
             _transportKeyResolver = transportKeyResolver;
+            _gmStateStore = gmStateStore;
+            _atRestKeyProvider = atRestKeyProvider;
         }
 
         public async Task ImportGroupKeyAsync(Guid conversationId, GroupKeyVersion version, EncryptedGroupKey encryptedKey, CancellationToken ct)
@@ -80,6 +84,11 @@ namespace Percolator.Application.Apps.Chat
                 var verC = new GroupKeyVersionC(version.Value);
                 manager.ImportKey(verC, material);
                 _logger.LogInformation("[GroupKeyOperations] Imported group key v{Version} for conversation {ConversationId} (len={Len})", version.Value, conversationId, plaintext.Length);
+
+                // Persist updated GroupManager state
+                var masterKey = await _atRestKeyProvider.GetMasterKeyAsync(ct);
+                var stateBlob = manager.SaveState(masterKey);
+                await _gmStateStore.SaveAsync(conversationId, stateBlob, DateTimeOffset.UtcNow, ct);
             }
             catch (CryptographicException ex)
             {

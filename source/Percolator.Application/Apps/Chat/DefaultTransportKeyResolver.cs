@@ -18,5 +18,11 @@ namespace Percolator.Application.Apps.Chat
             _logger.LogDebug("[DefaultTransportKeyResolver] No AEAD key for conversation {ConversationId}", conversationId);
             return Task.FromResult<byte[]?>(null);
         }
+
+        public Task<byte[]?> GetAeadKeyAsync(Guid conversationId, Guid remotePeerId, CancellationToken ct)
+        {
+            _logger.LogDebug("[DefaultTransportKeyResolver] No AEAD key for conversation {ConversationId} and peer {PeerId}", conversationId, remotePeerId);
+            return Task.FromResult<byte[]?>(null);
+        }
     }
 }
