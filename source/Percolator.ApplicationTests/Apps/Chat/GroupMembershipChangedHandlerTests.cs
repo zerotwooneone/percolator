@@ -15,6 +15,7 @@ using Percolator.Cryptography;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Percolator.MessageQueue.Commands;
+using Percolator.Identity.Model;
 
 namespace Percolator.ApplicationTests.Apps.Chat
 {
@@ -47,6 +48,64 @@ namespace Percolator.ApplicationTests.Apps.Chat
             _pkh = new Mock<IRecipientPkhResolver>(MockBehavior.Strict);
             _active = new ActiveIdentityContext();
             _loggerFactory = LoggerFactory.Create(b=>{});
+        }
+
+        [Test]
+        public async Task Handle_Skips_Recipient_When_AEAD_Missing()
+        {
+            var convoId = Guid.NewGuid();
+            var p1 = new ParticipantId(Guid.NewGuid());
+            var p2 = new ParticipantId(Guid.NewGuid());
+            var conversation = new Conversation(new ConversationId(convoId), new List<ParticipantId>{p1,p2}, new List<Message>(), name: null);
+            _self.Setup(s => s.Get()).Returns(p1);
+            _repo.Setup(r => r.GetByIdAsync(new ConversationId(convoId), It.IsAny<int>())).ReturnsAsync(conversation);
+            _active.Identity = new IdentityRecord(p1.Value, "self") { SelfIdentityId = 1 };
+
+            var gm = new GroupManager(ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256), _loggerFactory, Options.Create(new CryptographyOptions()));
+            _gmResolver.Setup(r => r.TryGet(convoId, out gm)).Returns(true);
+
+            _adminState.Setup(a => a.GetAsync(convoId, It.IsAny<CancellationToken>())).ReturnsAsync(new GroupAdminState(0,0));
+            _atRest.Setup(a => a.GetMasterKeyAsync(It.IsAny<CancellationToken>())).ReturnsAsync(RandomNumberGenerator.GetBytes(32));
+            _gmState.Setup(s => s.SaveAsync(convoId, It.IsAny<byte[]>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+
+            // AEAD missing for p2
+            _transport.Setup(t => t.GetAeadKeyAsync(convoId, p2.Value, It.IsAny<CancellationToken>())).ReturnsAsync((byte[]?)null);
+
+            // Allow PKH resolution to return null for any participant (strict mock placation)
+            _pkh.Setup(x => x.GetActivePkhAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync((byte[]?)null);
+            // No enqueue should happen in this scenario
+            var sut = CreateSut();
+            await sut.Handle(new GroupMembershipChangedNotification(convoId), CancellationToken.None);
+
+            _mediator.Verify(m => m.Send(It.IsAny<EnqueueOpaqueMessageCommand>(), It.IsAny<CancellationToken>()), Times.Never());
+        }
+
+        [Test]
+        public async Task Handle_Skips_Recipient_When_Pkh_Missing()
+        {
+            var convoId = Guid.NewGuid();
+            var p1 = new ParticipantId(Guid.NewGuid());
+            var p2 = new ParticipantId(Guid.NewGuid());
+            var conversation = new Conversation(new ConversationId(convoId), new List<ParticipantId>{p1,p2}, new List<Message>(), name: null);
+            _self.Setup(s => s.Get()).Returns(p1);
+            _repo.Setup(r => r.GetByIdAsync(new ConversationId(convoId), It.IsAny<int>())).ReturnsAsync(conversation);
+
+            var gm = new GroupManager(ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256), _loggerFactory, Options.Create(new CryptographyOptions()));
+            _gmResolver.Setup(r => r.TryGet(convoId, out gm)).Returns(true);
+
+            _adminState.Setup(a => a.GetAsync(convoId, It.IsAny<CancellationToken>())).ReturnsAsync(new GroupAdminState(0,0));
+            _atRest.Setup(a => a.GetMasterKeyAsync(It.IsAny<CancellationToken>())).ReturnsAsync(RandomNumberGenerator.GetBytes(32));
+            _gmState.Setup(s => s.SaveAsync(convoId, It.IsAny<byte[]>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+
+            // AEAD for any recipient (self is skipped; p2 will be processed)
+            _transport.Setup(t => t.GetAeadKeyAsync(convoId, It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync(RandomNumberGenerator.GetBytes(32));
+            // Allow PKH resolution to return null for any participant
+            _pkh.Setup(x => x.GetActivePkhAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync((byte[]?)null);
+
+            var sut = CreateSut();
+            await sut.Handle(new GroupMembershipChangedNotification(convoId), CancellationToken.None);
+
+            _mediator.Verify(m => m.Send(It.IsAny<EnqueueOpaqueMessageCommand>(), It.IsAny<CancellationToken>()), Times.Never());
         }
 
         [TearDown]

@@ -7,6 +7,7 @@ using Percolator.Chat.App;
 using Percolator.Chat.Primitives;
 using Percolator.Chat.ValueObjects;
 using Percolator.Cryptography;
+using MediatR;
 
 namespace Percolator.Application.Apps.Chat
 {
@@ -19,14 +20,16 @@ namespace Percolator.Application.Apps.Chat
         private readonly ITransportKeyResolver _transportKeyResolver;
         private readonly IGroupManagerStateStore _gmStateStore;
         private readonly IAtRestKeyProvider _atRestKeyProvider;
+        private readonly IMediator _mediator;
 
-        public GroupKeyOperations(ILogger<GroupKeyOperations> logger, IGroupManagerResolver resolver, ITransportKeyResolver transportKeyResolver, IGroupManagerStateStore gmStateStore, IAtRestKeyProvider atRestKeyProvider)
+        public GroupKeyOperations(ILogger<GroupKeyOperations> logger, IGroupManagerResolver resolver, ITransportKeyResolver transportKeyResolver, IGroupManagerStateStore gmStateStore, IAtRestKeyProvider atRestKeyProvider, IMediator mediator)
         {
             _logger = logger;
             _resolver = resolver;
             _transportKeyResolver = transportKeyResolver;
             _gmStateStore = gmStateStore;
             _atRestKeyProvider = atRestKeyProvider;
+            _mediator = mediator;
         }
 
         public async Task ImportGroupKeyAsync(Guid conversationId, GroupKeyVersion version, EncryptedGroupKey encryptedKey, CancellationToken ct)
@@ -89,6 +92,9 @@ namespace Percolator.Application.Apps.Chat
                 var masterKey = await _atRestKeyProvider.GetMasterKeyAsync(ct);
                 var stateBlob = manager.SaveState(masterKey);
                 await _gmStateStore.SaveAsync(conversationId, stateBlob, DateTimeOffset.UtcNow, ct);
+
+                // Notify application that this node adopted key version successfully
+                await _mediator.Publish(new KeyVersionAdoptedNotification(conversationId, (uint)version.Value), ct);
             }
             catch (CryptographicException ex)
             {

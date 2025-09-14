@@ -11,6 +11,7 @@ using Percolator.Chat.ValueObjects;
 using Percolator.Chat;
 using Percolator.Chat.Primitives;
 using Percolator.Cryptography;
+using MediatR;
 
 namespace Percolator.ApplicationTests.Apps.Chat
 {
@@ -23,6 +24,7 @@ namespace Percolator.ApplicationTests.Apps.Chat
         private Mock<ITransportKeyResolver> _transport = null!;
         private Mock<IGroupManagerStateStore> _stateStore = null!;
         private Mock<IAtRestKeyProvider> _atRest = null!;
+        private Mock<IMediator> _mediator = null!;
 
         [SetUp]
         public void SetUp()
@@ -33,6 +35,7 @@ namespace Percolator.ApplicationTests.Apps.Chat
             _transport = new Mock<ITransportKeyResolver>(MockBehavior.Strict);
             _stateStore = new Mock<IGroupManagerStateStore>(MockBehavior.Strict);
             _atRest = new Mock<IAtRestKeyProvider>(MockBehavior.Strict);
+            _mediator = new Mock<IMediator>(MockBehavior.Strict);
         }
 
         [TearDown]
@@ -42,7 +45,7 @@ namespace Percolator.ApplicationTests.Apps.Chat
         }
 
         private GroupKeyOperations CreateSut()
-            => new GroupKeyOperations(_logger, _resolver.Object, _transport.Object, _stateStore.Object, _atRest.Object);
+            => new GroupKeyOperations(_logger, _resolver.Object, _transport.Object, _stateStore.Object, _atRest.Object, _mediator.Object);
 
         [Test]
         public async Task ImportGroupKeyAsync_NoManager_NoThrow()
@@ -86,8 +89,14 @@ namespace Percolator.ApplicationTests.Apps.Chat
             var plaintext = RandomNumberGenerator.GetBytes(32);
             var env = MakeEnvelopeBytes(plaintext, aeadKey);
 
+            // Expect a publish on success
+            _mediator.Setup(m => m.Publish(It.IsAny<INotification>(), It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
+
             var sut = CreateSut();
             await sut.ImportGroupKeyAsync(convoId, new GroupKeyVersion(3), new EncryptedGroupKey(env), CancellationToken.None);
+
+            _mediator.Verify(m => m.Publish(It.IsAny<KeyVersionAdoptedNotification>(), It.IsAny<CancellationToken>()), Times.Once);
         }
 
         private static GroupManager MakeGroupManager()
