@@ -8,4 +8,5 @@ public class GroupAdminOpDbo
     public Guid ConversationId { get; set; }
     public Guid OpId { get; set; }
     public DateTimeOffset AppliedAtUtc { get; set; }
+    public Guid? ActingAdminPeerId { get; set; }
 }

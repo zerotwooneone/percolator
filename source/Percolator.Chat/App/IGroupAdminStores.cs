@@ -19,5 +19,6 @@ namespace Percolator.Chat.App
     {
         // Returns true if inserted; false if duplicate (idempotent)
         Task<bool> TryAddAsync(Guid conversationId, Guid opId, DateTimeOffset appliedAtUtc, CancellationToken ct);
+        Task SetActingAdminAsync(Guid conversationId, Guid opId, Guid actingAdminPeerId, CancellationToken ct);
     }
 }

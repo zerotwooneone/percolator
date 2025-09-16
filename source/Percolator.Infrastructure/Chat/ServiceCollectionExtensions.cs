@@ -18,6 +18,8 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IGroupAdminStateStore, SqliteGroupAdminStateStore>();
         services.AddScoped<IGroupManagerStateStore, SqliteGroupManagerStateStore>();
         services.AddScoped<IDirectSessionConversationLookup, SqliteDirectSessionConversationLookup>();
+        services.AddScoped<IActingAdminResolver, SqliteActingAdminResolver>();
+        services.AddScoped<IKeyAdoptionStore, SqliteKeyAdoptionStore>();
         return services;
     }
 }

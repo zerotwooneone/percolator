@@ -120,6 +120,9 @@ namespace Percolator.Chat.App.Handlers
                         }
                     }
                     await _repository.UpdateAsync(conversation, resolution.SelfIdentityId);
+                    // Record acting admin for this membership-changing op to aid confirmation routing
+                    var acting = _selfProvider.Get();
+                    await _adminOpStore.SetActingAdminAsync(conversationId, request.OpId, acting.Value, cancellationToken);
                     // Notify application layer to consider distributing a new group key version
                     await _mediator.Publish(new GroupMembershipChangedNotification(conversation.Id.Value), cancellationToken);
                     break;

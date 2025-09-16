@@ -36,5 +36,17 @@ namespace Percolator.Infrastructure.Chat
                 throw;
             }
         }
+
+        public async Task SetActingAdminAsync(Guid conversationId, Guid opId, Guid actingAdminPeerId, CancellationToken ct)
+        {
+            var row = await _db.GroupAdminOps.FirstOrDefaultAsync(x => x.ConversationId == conversationId && x.OpId == opId, ct);
+            if (row is null)
+            {
+                // No-op if op wasn't recorded (should not happen if TryAddAsync was called earlier)
+                return;
+            }
+            row.ActingAdminPeerId = actingAdminPeerId;
+            await _db.SaveChangesAsync(ct);
+        }
     }
 }

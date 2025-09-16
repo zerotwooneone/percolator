@@ -39,6 +39,7 @@ public class PercolatorDbContext : DbContext
     public DbSet<GroupAdminOpDbo> GroupAdminOps { get; set; } = null!;
     public DbSet<GroupAdminStateDbo> GroupAdminStates { get; set; } = null!;
     public DbSet<GroupManagerStateDbo> GroupManagerStates { get; set; } = null!;
+    public DbSet<KeyAdoptionConfirmationDbo> KeyAdoptionConfirmations { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -391,6 +392,20 @@ public class PercolatorDbContext : DbContext
             entity.Property(e => e.OpId).IsRequired();
             entity.Property(e => e.AppliedAtUtc).IsRequired();
             entity.HasIndex(e => new { e.ConversationId, e.OpId }).IsUnique();
+        });
+
+        // KeyAdoptionConfirmations
+        modelBuilder.Entity<KeyAdoptionConfirmationDbo>(entity =>
+        {
+            entity.ToTable("KeyAdoptionConfirmations");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedOnAdd();
+            entity.Property(e => e.ConversationId).IsRequired();
+            entity.Property(e => e.KeyVersion).IsRequired();
+            entity.Property(e => e.AdopterIdentityKey).IsRequired();
+            entity.Property(e => e.Signature).IsRequired();
+            entity.Property(e => e.SentAtUtc).IsRequired();
+            entity.HasIndex(e => new { e.ConversationId, e.KeyVersion, e.SentAtUtc });
         });
 
         // ConversationParticipants (composite key)
