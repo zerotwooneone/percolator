@@ -69,9 +69,14 @@ public class SqlitePreKeyBundleRepository : IPreKeyBundleRepository
 
     public async Task StoreBundlesAsync(CryptographyPeerId peerId, IEnumerable<PreKeyBundle> bundles)
     {
-        // Contract: replace any existing bundles for the peer with the provided bundle atomically.
-        // Since we are moving to a hierarchical model, we expect one 'bundle' which contains all the keys.
-        var bundle = bundles.Single();
+        // Contract: replace any existing identity key and pre-keys with provided set atomically.
+        // Aggregate: Use first bundle's IdentitySigningKey + SignedPreKey as canonical;
+        // add all provided OneTimePreKeys (when present) from the sequence.
+        if (bundles is null) throw new ArgumentNullException(nameof(bundles));
+        var bundleList = bundles.ToList();
+        if (bundleList.Count == 0) throw new InvalidOperationException("No pre-key bundles provided.")
+;
+        var first = bundleList[0];
 
         await using var transaction = await _context.Database.BeginTransactionAsync();
         try
@@ -97,24 +102,25 @@ public class SqlitePreKeyBundleRepository : IPreKeyBundleRepository
             var identityKey = new PeerIdentityKeyDbo
             {
                 Peer = peer,
-                PublicKey = bundle.IdentitySigningKey.Value,
+                PublicKey = first.IdentitySigningKey.Value,
             };
 
-            // The current PreKeyBundle doesn't support multiple signed/one-time keys.
-            // We'll add the single signed pre-key and the optional one-time pre-key.
+            // Add the canonical signed pre-key from the first bundle
             identityKey.SignedPreKeys.Add(new SignedPreKeyDbo
             {
-                Id = bundle.SignedPreKeyId.ToString(),
-                PublicKey = bundle.SignedPreKey.Value,
-                Signature = bundle.SignedPreKeySignature.Value,
+                Id = first.SignedPreKeyId.ToString(),
+                PublicKey = first.SignedPreKey.Value,
+                Signature = first.SignedPreKeySignature.Value,
             });
 
-            if (bundle.OneTimePreKey is not null && bundle.OneTimePreKeyId is not null)
+            // Add all one-time pre-keys present across bundles
+            foreach (var b in bundleList)
             {
+                if (b.OneTimePreKey is null || b.OneTimePreKeyId is null) continue;
                 identityKey.OneTimePreKeys.Add(new OneTimePreKeyDbo
                 {
-                    Id = bundle.OneTimePreKeyId.ToString(),
-                    PublicKey = bundle.OneTimePreKey.Value,
+                    Id = b.OneTimePreKeyId.ToString(),
+                    PublicKey = b.OneTimePreKey.Value,
                 });
             }
 

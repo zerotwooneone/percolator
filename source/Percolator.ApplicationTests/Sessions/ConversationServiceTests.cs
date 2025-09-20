@@ -43,6 +43,7 @@ public class ConversationServiceTests
     private ActiveIdentityContext _activeIdentityContext;
     private ConversationService _service;
     private Mock<IDirectSessionRepository> _mockDirectSessionRepository;
+    private Mock<IPeerPublicSigningKeyStore> _mockPkhStore;
 
     [SetUp]
     public void Setup()
@@ -56,6 +57,7 @@ public class ConversationServiceTests
         _mockTlsHandshakeService = new Mock<ITlsHandshakeService>();
         _mockGrpcSessionService = new Mock<IGrpcSessionService>();
         _mockDirectSessionRepository = new Mock<IDirectSessionRepository>();
+        _mockPkhStore = new Mock<IPeerPublicSigningKeyStore>();
         _testLogger = NullLogger<ConversationService>.Instance;
         _activeIdentityContext = new ActiveIdentityContext
         {
@@ -76,7 +78,8 @@ public class ConversationServiceTests
             new X3DHManager(NullLogger<X3DHManager>.Instance, Options.Create(new CryptographyOptions())), 
             _mockPeerConnectionRepository.Object,
             Options.Create(new TransportOptions { GrpcPort = 52382 }),
-            _mockDirectSessionRepository.Object
+            _mockDirectSessionRepository.Object,
+            _mockPkhStore.Object
         );
     }
 
@@ -192,6 +195,16 @@ public class ConversationServiceTests
         // Verify that our services were called correctly
         _mockTlsHandshakeService.Verify(s => s.CaptureCertificateAsync(It.IsAny<DnsEndPoint>()), Times.Never);
         _mockGrpcSessionService.Verify(s => s.EstablishDirectSessionAsync(It.IsAny<DnsEndPoint>(), It.IsAny<EstablishDirectSessionRequest>()), Times.Once);
+
+        // Verify PKH upsert occurred using the responder's identity key from the handshake result
+        var expectedSpki = handshakeResponse.ResponderBundle.IdentitySigningKey.Value;
+        var expectedPkh = SHA256.HashData(expectedSpki);
+        _mockPkhStore.Verify(s => s.ActivateIfChangedAsync(
+            It.Is<IdentityPeerId>(id => id.Value == peer.Id.Value),
+            It.Is<byte[]>(pk => Convert.ToBase64String(pk) == Convert.ToBase64String(expectedSpki)),
+            It.Is<byte[]>(pkh => Convert.ToBase64String(pkh) == Convert.ToBase64String(expectedPkh)),
+            It.IsAny<DateTimeOffset>(),
+            It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Test]

@@ -31,6 +31,7 @@ namespace Percolator.Application.Network
         private readonly IPeerConnectionRepository _peerConnectionRepository;
         private readonly IX3DHManager _x3DhManager;
         private readonly IDirectSessionRepository _directSessionRepository;
+        private readonly IPeerPublicSigningKeyStore _pkhStore;
 
         public EstablishDirectSessionHandler(
             ILogger<EstablishDirectSessionHandler> logger,
@@ -40,7 +41,8 @@ namespace Percolator.Application.Network
             IPeerRepository peerRepository,
             IPeerConnectionRepository peerConnectionRepository,
             IX3DHManager x3DhManager,
-            IDirectSessionRepository directSessionRepository)
+            IDirectSessionRepository directSessionRepository,
+            IPeerPublicSigningKeyStore pkhStore)
         {
             _logger = logger;
             _activeIdentityContext = activeIdentityContext;
@@ -50,6 +52,7 @@ namespace Percolator.Application.Network
             _peerConnectionRepository = peerConnectionRepository;
             _x3DhManager = x3DhManager;
             _directSessionRepository = directSessionRepository;
+            _pkhStore = pkhStore;
         }
 
         public async Task<EstablishDirectSessionResult> Handle(EstablishDirectSessionCommand request, CancellationToken cancellationToken)
@@ -131,6 +134,11 @@ namespace Percolator.Application.Network
                 await _peerRepository.AddAsync(remotePeer);
             }
 
+            // Handshake-side identity mapping: bind PKH -> this peer id (idempotent if already bound to same peer)
+            var initiatorSpki = request.IdentitySigningKeyBytes;
+            var initiatorPkh = SHA256.HashData(initiatorSpki);
+            await _pkhStore.ActivateIfChangedAsync(remotePeer.Id, initiatorSpki, initiatorPkh, DateTimeOffset.UtcNow, cancellationToken);
+
             // Now that the Peer exists, persist/update the PeerConnection
             await _peerConnectionRepository.SaveAsync(peerConnectionInfo);
 
@@ -153,6 +161,11 @@ namespace Percolator.Application.Network
                 sharedSecret,
                 ephemeralKey);
             _logger.LogInformation("Successfully established session {SessionId} with peer {PeerId}", cryptoSessionId, remotePeer.Id);
+
+            // Upsert PKH -> Peer mapping immediately after establishing session (initiator side)
+            var establishedSpki = remoteIdentityKey.Value;
+            var establishedPkh = SHA256.HashData(establishedSpki);
+            await _pkhStore.ActivateIfChangedAsync(remotePeer.Id, establishedSpki, establishedPkh, DateTimeOffset.UtcNow, cancellationToken);
 
             // Build response payload and sign
             var responsePayload = new EstablishDirectSessionResponse.Types.ResponsePayload

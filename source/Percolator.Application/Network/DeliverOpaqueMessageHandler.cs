@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using Google.Protobuf;
 using MediatR;
 using Microsoft.Extensions.Logging;
@@ -7,12 +8,16 @@ using Percolator.Contracts;
 using Percolator.Cryptography;
 using Percolator.Network;
 using Percolator.Prekey.Handlers;
+using Percolator.Identity;
 using Percolator.MessageQueue.Commands;
 using Percolator.Chat.App;
 using Percolator.Chat.App.Commands;
 using Percolator.Chat.ValueObjects;
 using Percolator.Chat.Primitives;
 using Percolator.Application.Apps.Chat;
+using CryptoPeerId = Percolator.Cryptography.Primitives.PeerId;
+using IdentityPeerId = Percolator.Identity.PeerId;
+using NetworkPeerId = Percolator.Network.PeerId;
 
 namespace Percolator.Application.Network
 {
@@ -42,7 +47,7 @@ namespace Percolator.Application.Network
         }
 
         private async Task<SubmitPreKeyBundleResponse> HandlePrekeyEnvelopeAsync(PrekeyEnvelope prekeyEnvelope,
-            PeerId remotePeerId, CancellationToken ct)
+            NetworkPeerId remotePeerId, CancellationToken ct)
         {
             switch (prekeyEnvelope.MessageCase)
             {

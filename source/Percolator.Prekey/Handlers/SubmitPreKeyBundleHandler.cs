@@ -71,7 +71,7 @@ namespace Percolator.Prekey.Handlers
                 throw new InvalidOperationException("No valid pre-key bundles provided.");
             }
 
-            await _bundleRepository.StoreBundlesAsync(new Percolator.Cryptography.Primitives.PeerId(request.RemotePeerId.Value), domainBundles);
+            await _bundleRepository.StoreBundlesAsync(new Percolator.Cryptography.Primitives.PeerId(identityPeerId.Value), domainBundles);
             _logger.LogInformation("Stored {Count} pre-key bundles for peer {PeerId}", domainBundles.Count, request.RemotePeerId);
             return Unit.Value;
         }

@@ -18,10 +18,15 @@ public class SqlitePeerPublicSigningKeyStore : IPeerPublicSigningKeyStore
         await using var tx = await _db.Database.BeginTransactionAsync(ct);
         try
         {
-            var active = await _db.PeerPublicSigningKeys
-                .Where(x => x.PeerId.Value == peerId.Value && x.ExpiredAtUtc == null)
+            // SQLite provider cannot translate ORDER BY over DateTimeOffset here reliably.
+            // Materialize then order in-memory to get the latest active row.
+            var activeRows = await _db.PeerPublicSigningKeys
+                .Where(x => x.PeerId == peerId && x.ExpiredAtUtc == null)
+                .AsNoTracking()
+                .ToListAsync(ct);
+            var active = activeRows
                 .OrderByDescending(x => x.ActiveAtUtc)
-                .FirstOrDefaultAsync(ct);
+                .FirstOrDefault();
 
             if (active is not null && active.PublicKeyHash.SequenceEqual(publicKeyHash))
             {
@@ -60,7 +65,7 @@ public class SqlitePeerPublicSigningKeyStore : IPeerPublicSigningKeyStore
     {
         var row = await _db.PeerPublicSigningKeys
             .AsNoTracking()
-            .FirstOrDefaultAsync(x => x.PublicKeyHash == publicKeyHash, ct);
+            .FirstOrDefaultAsync(x => x.PublicKeyHash.SequenceEqual(publicKeyHash), ct);
         return row is null ? null : row.PeerId;
     }
 }

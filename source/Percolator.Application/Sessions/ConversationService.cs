@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using System.Security.Cryptography;
 using Microsoft.Extensions.Options;
 using Percolator.Application.Configuration;
 using Percolator.Application.Network;
@@ -35,6 +36,7 @@ namespace Percolator.Application.Sessions
         private readonly IPeerConnectionRepository _peerConnectionRepository;
         private readonly IOptions<TransportOptions> _transportOptions;
         private readonly IDirectSessionRepository _directSessionRepository;
+        private readonly IPeerPublicSigningKeyStore _pkhStore;
 
         public ConversationService(
             ILogger<ConversationService> logger,
@@ -46,7 +48,8 @@ namespace Percolator.Application.Sessions
             IX3DHManager x3DhManager, 
             IPeerConnectionRepository peerConnectionRepository,
             IOptions<TransportOptions> transportOptions,
-            IDirectSessionRepository directSessionRepository)
+            IDirectSessionRepository directSessionRepository,
+            IPeerPublicSigningKeyStore pkhStore)
         {
             _logger = logger;
             _orchestrator = orchestrator;
@@ -58,6 +61,7 @@ namespace Percolator.Application.Sessions
             _peerConnectionRepository = peerConnectionRepository;
             _transportOptions = transportOptions;
             _directSessionRepository = directSessionRepository;
+            _pkhStore = pkhStore;
         }
 
         public async Task<DirectSessionId?> GetExistingDirectSessionAsync(
@@ -207,6 +211,11 @@ namespace Percolator.Application.Sessions
                         .ResponderPrivateKeyUsed, // The specific one of OUR (Bob's) private keys that was used
                     new SharedSecret(handshakeResult.SharedSecret.Value)
                 );
+
+                // Upsert PKH -> Peer mapping now that the session is established (responder side)
+                var spki = handshakeResult.ResponderBundle.IdentitySigningKey.Value;
+                var pkh = SHA256.HashData(spki);
+                await _pkhStore.ActivateIfChangedAsync(new IdentityPeerId(remotePeer.Id.Value), spki, pkh, DateTimeOffset.UtcNow);
 
                 _logger.LogInformation("Successfully established session and created session {DirectSessionId}",
                     directSessionId);

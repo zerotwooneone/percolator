@@ -25,9 +25,8 @@ public class ConnectToPeerHandler : IRequestHandler<ConnectToPeerCommand, Direct
         var remotePeer = await _peerRepository.GetByNameAsync(request.RemotePeerName);
         if (remotePeer == null)
         {
-            remotePeer = new Peer(PeerId.NewId(), request.RemotePeerName);
-            await _peerRepository.AddAsync(remotePeer);
-            
+            throw new InvalidOperationException(
+                $"Unknown remote peer name '{request.RemotePeerName}'. Provision this peer by SPKI first using SetPeerNameByPublicKeyCommand before connecting.");
         }
         var existing = await _conversationService.GetExistingDirectSessionAsync(remotePeer);
         return existing ?? await _conversationService.CreateNewDirectSessionAsync(request.Endpoint, remotePeer);
