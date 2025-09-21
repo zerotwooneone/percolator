@@ -15,6 +15,7 @@ using Percolator.Chat.App.Commands;
 using Percolator.Chat.ValueObjects;
 using Percolator.Chat.Primitives;
 using Percolator.Application.Apps.Chat;
+using Percolator.Application.Network.Handshake;
 using CryptoPeerId = Percolator.Cryptography.Primitives.PeerId;
 using IdentityPeerId = Percolator.Identity.PeerId;
 using NetworkPeerId = Percolator.Network.PeerId;
@@ -209,6 +210,11 @@ namespace Percolator.Application.Network
                                 _logger.LogWarning("Received unhandled MessageQueue message type: {MessageType}", internalEnvelope.MessageQueueEnvelope.MessageCase);
                                 break;
                         }
+                        break;
+                    case InternalEnvelope.ApplicationPayloadOneofCase.RelayOpaqueEnvelope:
+                        // Forward opaque payload to client-side processor; do not parse here.
+                        var relay = internalEnvelope.RelayOpaqueEnvelope;
+                        await _mediator.Send(new ProcessRelayedOpaquePayloadCommand(relay.OpaquePayload.ToByteArray()), cancellationToken);
                         break;
                     default:
                         _logger.LogWarning("Received unhandled internal envelope type: {EnvelopeType}", internalEnvelope.ApplicationPayloadCase);

@@ -19,6 +19,8 @@ message InternalEnvelope {
     MessageQueueEnvelope message_queue_envelope = 7;
     EnqueueOpaqueMessageResponse enqueue_opaque_message_response = 8;
     FetchQueuedMessagesResponse fetch_queued_messages_response = 9;
+    // Host relay wrapper carrying inner opaque payload + logical sender identity
+    RelayOpaqueEnvelope relay_opaque_envelope = 10;
   }
 }
 
@@ -382,4 +384,13 @@ message FetchQueuedMessagesRequest {
 message FetchQueuedMessagesResponse {
   optional uint32 version = 1;
   repeated bytes messages = 2;
+}
+
+// === 6. Host Relay Wrapper ===
+// The Host uses this to deliver an inner opaque payload on behalf of the logical sender to the destination.
+message RelayOpaqueEnvelope {
+  optional uint32 version = 100;
+  // Privacy-preserving: host does not include or persist sender identity here.
+  // The exact opaque payload intended for the destination (e.g., an InternalEnvelope bytes)
+  optional bytes opaque_payload = 1;
 }
