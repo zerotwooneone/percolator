@@ -5,6 +5,7 @@ using Moq;
 using Percolator.Application.Identity;
 using Percolator.Application.Network;
 using Percolator.Application.Sessions;
+using Percolator.Application.Network;
 using Percolator.Chat;
 using Percolator.Chat.ValueObjects;
 using Percolator.Cryptography;
@@ -43,12 +44,14 @@ public class MessageServiceTests
         // Create a logger factory for DirectSessionManager
         var loggerFactory = new NullLoggerFactory();
 
+        var ratchetLookup = new Moq.Mock<IRatchetKeySessionLookup>();
         _sessionManager = new DirectSessionManager(
             _mockSessionStore.Object,
             _activeIdentityContext,
             new NullLogger<DirectSessionManager>(),
             loggerFactory,
-            _options);
+            _options,
+            ratchetLookup.Object);
 
         _messageService = new MessageService(
             _sessionManager,

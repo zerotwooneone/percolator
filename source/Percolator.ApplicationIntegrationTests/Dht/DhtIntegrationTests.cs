@@ -10,6 +10,7 @@ using Percolator.Application.Network;
 using Percolator.Application.Sessions;
 using Percolator.Chat;
 using Percolator.Contracts;
+using Percolator.Application.Network;
 using Percolator.Cryptography;
 using Percolator.Dht;
 using Percolator.Identity;
@@ -41,6 +42,18 @@ public class DhtIntegrationTests : IntegrationTestBase
         var signingServiceMock = new Mock<Percolator.Cryptography.ISigningService>();
         var peerTrustManagerMock = new Mock<IPeerTrustManager>();
 
+        // Build a valid ratchet payload header and register a lookup mock that resolves it
+        var sessionId = new Percolator.Cryptography.SessionId(Guid.NewGuid());
+        var headerKey = SHA256.HashData(Guid.NewGuid().ToByteArray());
+        var ratchetPayload = new RatchetMessage
+        {
+            Header = new RatchetHeader
+            {
+                RatchetKey = ByteString.CopyFrom(headerKey),
+                Counter = 0
+            },
+            Ciphertext = ByteString.CopyFrom(new byte[] { 1, 2, 3 })
+        };
         var port = GetAvailablePort();
         using var host = CreateHost(port, "DhtTest",  services =>
         {
@@ -48,6 +61,13 @@ public class DhtIntegrationTests : IntegrationTestBase
             services.AddSingleton<IDirectSessionManager>(sessionManagerMock.Object);
             services.AddSingleton<IPeerConnectionRepository>(peerConnectionRepoMock.Object);
             services.AddSingleton<IDirectSessionRepository>(directSessionRepoMock.Object);
+            // Fast-path lookup resolves our header key
+            var ratchetLookup = new Moq.Mock<IRatchetKeySessionLookup>();
+            ratchetLookup.Setup(l => l.TryResolveAsync(It.Is<byte[]>(b => b.SequenceEqual(headerKey)), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new DirectSessionId(sessionId.Value));
+            ratchetLookup.Setup(l => l.UpsertAsync(It.IsAny<DirectSessionId>(), It.IsAny<int>(), It.IsAny<byte[]>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
+            services.AddSingleton<IRatchetKeySessionLookup>(ratchetLookup.Object);
             services.AddSingleton<IX3DHOrchestrator>(x3dhOrchestratorMock.Object);
             services.AddSingleton<IConversationRepository>(conversationRepoMock.Object);
             services.AddSingleton<IPeerRepository>(peerRepoMock.Object);
@@ -69,7 +89,6 @@ public class DhtIntegrationTests : IntegrationTestBase
         var remotePeerId = new Percolator.Identity.PeerId(Guid.NewGuid());
         var remoteSigningKey = new DirectMessagePublicKey(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes("remote-peer")));
         var remoteEndpoint = new DnsEndPoint("localhost", 1234);
-        var sessionId = new Percolator.Cryptography.SessionId(Guid.NewGuid());
 
         // 1. Mock the session manager to decrypt the message
         var dhtEnvelope = new DhtEnvelope { PingRequest = new Contracts.PingRequest() };
@@ -95,8 +114,7 @@ public class DhtIntegrationTests : IntegrationTestBase
 
         var request = new DeliverOpaqueMessageRequest
         {
-            SessionId = sessionId.Value.ToString(),
-            Payload = ByteString.CopyFrom(ciphertext.Value) 
+            Payload = ByteString.CopyFrom(ratchetPayload.ToByteArray())
         };
         
         // Production derives NodeId as SHA-256 of the signing key bytes (SPKI). Reflect that here.
@@ -122,7 +140,19 @@ public class DhtIntegrationTests : IntegrationTestBase
         var sessionManagerMock = new Mock<IDirectSessionManager>();
         var peerConnectionRepoMock = new Mock<IPeerConnectionRepository>();
         var directSessionRepoMock = new Mock<IDirectSessionRepository>();
+        var sessionId = new Percolator.Cryptography.SessionId(Guid.NewGuid());
 
+        // Build a valid ratchet payload header and register a lookup mock that resolves it
+        var headerKey2 = SHA256.HashData(Guid.NewGuid().ToByteArray());
+        var ratchetPayload2 = new RatchetMessage
+        {
+            Header = new RatchetHeader
+            {
+                RatchetKey = ByteString.CopyFrom(headerKey2),
+                Counter = 0
+            },
+            Ciphertext = ByteString.CopyFrom(new byte[] { 7, 8, 9 })
+        };
         var port = GetAvailablePort();
         using var host = CreateHost(port, "DhtTest", services =>
         {
@@ -137,6 +167,13 @@ public class DhtIntegrationTests : IntegrationTestBase
             {
                 Identity = new IdentityRecord(Guid.NewGuid(), "Test") { SelfIdentityId = 1 }
             });
+            // Fast-path lookup resolves our header key
+            var ratchetLookup2 = new Moq.Mock<IRatchetKeySessionLookup>();
+            ratchetLookup2.Setup(l => l.TryResolveAsync(It.Is<byte[]>(b => b.SequenceEqual(headerKey2)), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new DirectSessionId(sessionId.Value));
+            ratchetLookup2.Setup(l => l.UpsertAsync(It.IsAny<DirectSessionId>(), It.IsAny<int>(), It.IsAny<byte[]>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
+            services.AddSingleton<IRatchetKeySessionLookup>(ratchetLookup2.Object);
             services.AddMediatR(cfg =>
                 cfg.RegisterServicesFromAssembly(typeof(Percolator.Dht.Messages.FindNodeRequest).Assembly));
         });
@@ -144,7 +181,6 @@ public class DhtIntegrationTests : IntegrationTestBase
         var messageService = host.Services.GetRequiredService<PercolatorMessageService>();
 
         var remotePeerId = new Percolator.Identity.PeerId(Guid.NewGuid());
-        var sessionId = new Percolator.Cryptography.SessionId(Guid.NewGuid());
         var targetId = new NodeId(SHA256.HashData(Guid.NewGuid().ToByteArray()));
 
         // 1. Mock the session manager to decrypt the message
@@ -186,8 +222,7 @@ public class DhtIntegrationTests : IntegrationTestBase
 
         var request = new DeliverOpaqueMessageRequest
         {
-            SessionId = sessionId.Value.ToString(),
-            Payload = ByteString.CopyFrom(new byte[1]) // Ciphertext content doesn't matter for this test
+            Payload = ByteString.CopyFrom(ratchetPayload2.ToByteArray())
         };
 
         // Act

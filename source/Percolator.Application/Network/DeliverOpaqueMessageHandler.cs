@@ -30,6 +30,7 @@ namespace Percolator.Application.Network
         private readonly IMediator _mediator;
         private readonly IDirectSessionRepository _directSessionRepository;
         private readonly ActiveIdentityContext _activeIdentityContext;
+        private readonly IRatchetKeySessionLookup _ratchetLookup;
 
         public DeliverOpaqueMessageHandler(
             ILogger<DeliverOpaqueMessageHandler> logger,
@@ -37,7 +38,8 @@ namespace Percolator.Application.Network
             IPeerConnectionRepository peerConnectionRepository,
             IMediator mediator,
             IDirectSessionRepository directSessionRepository,
-            ActiveIdentityContext activeIdentityContext)
+            ActiveIdentityContext activeIdentityContext,
+            IRatchetKeySessionLookup ratchetLookup)
         {
             _logger = logger;
             _sessionManager = sessionManager;
@@ -45,6 +47,7 @@ namespace Percolator.Application.Network
             _mediator = mediator;
             _directSessionRepository = directSessionRepository;
             _activeIdentityContext = activeIdentityContext;
+            _ratchetLookup = ratchetLookup;
         }
 
         private async Task<SubmitPreKeyBundleResponse> HandlePrekeyEnvelopeAsync(PrekeyEnvelope prekeyEnvelope,
@@ -119,14 +122,52 @@ namespace Percolator.Application.Network
 
         public async Task<DeliverOpaqueMessageResult> Handle(DeliverOpaqueMessageCommand request, CancellationToken cancellationToken)
         {
-            _logger.LogInformation("Processing opaque message for session {SessionId}", request.SessionId);
+            _logger.LogInformation("Processing opaque message (session inferred from ratchet header)");
             try
             {
-                var sessionId = new SessionId(request.SessionId);
-                var directSession = await _directSessionRepository.GetBySessionIdAsync(new DirectSessionId(sessionId.Value), _activeIdentityContext.Identity.SelfIdentityId);
+                // Parse and infer session from ratchet header key
+                var sessionRatchetMessage = new SessionRatchetMessage(request.PayloadBytes);
+                // Infer session by ratchet header key (PreKey)
+                var header = sessionRatchetMessage.GetHeader();
+                var ratchetKey = header.PreKey.Value;
+                var resolvedDirectSessionId = await _ratchetLookup.TryResolveAsync(ratchetKey, _activeIdentityContext.Identity!.SelfIdentityId, cancellationToken);
+                Plaintext? plaintext;
+                SessionId inferredSessionId;
+                DirectSessionId nonNullDirectSessionId;
+                if (resolvedDirectSessionId is not null)
+                {
+                    // Fast path
+                    nonNullDirectSessionId = resolvedDirectSessionId.Value;
+                    inferredSessionId = new SessionId(nonNullDirectSessionId.Value);
+                    _logger.LogDebug("Fast-path lookup hit for ratchet header key; inferred session {SessionId}", inferredSessionId);
+                    plaintext = await _sessionManager.ReceiveMessageAsync(inferredSessionId, sessionRatchetMessage);
+                }
+                else
+                {
+                    // Slow path: trial decrypt to infer session
+                    _logger.LogWarning("Fast-path lookup MISS for ratchet header key; attempting slow-path inference");
+                    var inferResult = await _sessionManager.TryInferAndReceiveAsync(sessionRatchetMessage, cancellationToken)
+                        ?? throw new InvalidOperationException("Unable to resolve session by ratchet header key or slow-path inference");
+                    inferredSessionId = inferResult.sessionId;
+                    plaintext = inferResult.plaintext;
+                    _logger.LogInformation("Slow-path inference SUCCEEDED; inferred session {SessionId}", inferredSessionId);
+                    // We still need a DirectSessionId for repository lookups; derive from inferredSessionId
+                    nonNullDirectSessionId = new DirectSessionId(inferredSessionId.Value);
+                }
+                if (plaintext is null)
+                {
+                    _logger.LogWarning("Decryption resulted in null plaintext for session {SessionId}. This may be a skipped message.", inferredSessionId);
+                    return new DeliverOpaqueMessageResult();
+                }
+
+                // Keep ratchet-key index fresh for fast lookups
+                await _ratchetLookup.UpsertAsync(nonNullDirectSessionId, _activeIdentityContext.Identity!.SelfIdentityId, ratchetKey, DateTimeOffset.UtcNow, cancellationToken);
+
+                // Now that we have the inferred session, resolve the remote peer/connection info
+                var directSession = await _directSessionRepository.GetBySessionIdAsync(nonNullDirectSessionId, _activeIdentityContext.Identity.SelfIdentityId);
                 if (directSession is null)
                 {
-                    throw new InvalidOperationException($"No direct session mapping found for session {sessionId}");
+                    throw new InvalidOperationException($"No direct session mapping found for session {inferredSessionId}");
                 }
                 var remotePeerId = directSession.RemotePeerId;
                 _logger.LogInformation("Resolved remote peer {PeerId} for session {SessionId}", remotePeerId, directSession.SessionId);
@@ -136,19 +177,10 @@ namespace Percolator.Application.Network
                     _logger.LogWarning("Could not find connection info for peer {PeerId} to handle opaque message", remotePeerId);
                     return new DeliverOpaqueMessageResult();
                 }
-                
+
                 //todo: find a better way to find the current endpoint
                 var endpoint = connectionInfo.GrpcEndPoints.First();
                 _logger.LogInformation("Using endpoint {Endpoint} for peer {PeerId}", endpoint, remotePeerId);
-                
-                var sessionRatchetMessage = new SessionRatchetMessage(request.PayloadBytes);
-
-                var plaintext = await _sessionManager.ReceiveMessageAsync(sessionId, sessionRatchetMessage);
-                if (plaintext is null)
-                {
-                    _logger.LogWarning("Decryption resulted in null plaintext for session {SessionId}. This may be a skipped message.", request.SessionId);
-                    return new DeliverOpaqueMessageResult();
-                }
 
                 var internalEnvelope = InternalEnvelope.Parser.ParseFrom(plaintext.Value);
                 InternalEnvelope? responseEnvelope = null;
@@ -226,13 +258,13 @@ namespace Percolator.Application.Network
                     return new DeliverOpaqueMessageResult();
                 }
 
-                var responseBytes = await EncryptResponseEnvelope(sessionId, responseEnvelope);
+                var responseBytes = await EncryptResponseEnvelope(inferredSessionId, responseEnvelope);
                 return new DeliverOpaqueMessageResult { ResponsePayloadBytes = responseBytes };
 
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error processing opaque message for session {SessionId}", request.SessionId);
+                _logger.LogError(ex, "Error processing opaque message (session inferred from ratchet header)");
                 throw;
             }
         }

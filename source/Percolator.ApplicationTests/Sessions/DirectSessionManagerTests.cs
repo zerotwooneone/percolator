@@ -5,6 +5,7 @@ using Microsoft.Extensions.Options;
 using Moq;
 using Percolator.Application.Identity;
 using Percolator.Application.Sessions;
+using Percolator.Application.Network;
 using Percolator.Chat;
 using Percolator.Chat.ValueObjects;
 using Percolator.Cryptography;
@@ -64,12 +65,14 @@ public class DirectSessionManagerTests
         // Set properties directly
         _aliceIdentityContext.Identity = new IdentityRecord(_alicePeerId.Value, "Alice") { SelfIdentityId = 1 };
         _aliceIdentityContext.Keys = _aliceKeys;
+        var aliceRatchetLookup = new Mock<IRatchetKeySessionLookup>();
         _aliceSessionManager = new DirectSessionManager(
             _aliceSessionStore.Object,
             _aliceIdentityContext,
             _loggerFactory.CreateLogger<DirectSessionManager>(),
             _loggerFactory,
-            _options);
+            _options,
+            aliceRatchetLookup.Object);
             
         // Generate Bob's identity and keys
         _bobPeerId = new Identity.PeerId(Guid.NewGuid());
@@ -85,12 +88,14 @@ public class DirectSessionManagerTests
         // Set properties directly
         _bobIdentityContext.Identity = new IdentityRecord(_bobPeerId.Value, "Bob") { SelfIdentityId = 1 };
         _bobIdentityContext.Keys = _bobKeys;
+        var bobRatchetLookup = new Mock<IRatchetKeySessionLookup>();
         _bobSessionManager = new DirectSessionManager(
             _bobSessionStore.Object,
             _bobIdentityContext,
             _loggerFactory.CreateLogger<DirectSessionManager>(),
             _loggerFactory,
-            _options);
+            _options,
+            bobRatchetLookup.Object);
             
         // Setup session store mocks to use class-level state variables
         _aliceSessionStore.Setup(x => x.SetSessionStateAsync(It.IsAny<SessionId>(), It.IsAny<DoubleRatchetSession.DoubleRatchetSessionState>(), It.IsAny<int>()))

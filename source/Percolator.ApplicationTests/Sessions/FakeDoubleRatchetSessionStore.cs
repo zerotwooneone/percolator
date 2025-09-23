@@ -18,5 +18,16 @@ namespace Percolator.ApplicationTests.Sessions
             _sessions[(selfIdentityId, sessionId)] = sessionState;
             return Task.CompletedTask;
         }
+
+        public Task<IReadOnlyList<SessionId>> GetAllSessionIdsAsync(int selfIdentityId)
+        {
+            var result = _sessions.Keys
+                .Where(k => k.selfIdentityId == selfIdentityId)
+                .Select(k => k.sessionId)
+                .Distinct()
+                .ToList()
+                .AsReadOnly();
+            return Task.FromResult((IReadOnlyList<SessionId>)result);
+        }
     }
 }

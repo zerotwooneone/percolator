@@ -37,4 +37,9 @@ public interface IDirectSessionManager
     /// </summary>
     Task<SessionRatchetMessage> EncryptMessageAsync(Percolator.Cryptography.SessionId sessionId, Plaintext plaintext);
 
+    /// <summary>
+    /// Slow path: attempts to infer the correct session by trial decrypt when fast header-key lookup misses.
+    /// Returns the matched session id and plaintext if a match is found; otherwise null.
+    /// </summary>
+    Task<(Percolator.Cryptography.SessionId sessionId, Plaintext? plaintext)?> TryInferAndReceiveAsync(SessionRatchetMessage encryptedMessage, CancellationToken cancellationToken);
 }

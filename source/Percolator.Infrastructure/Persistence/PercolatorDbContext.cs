@@ -322,6 +322,26 @@ public class PercolatorDbContext : DbContext
             entity.HasIndex(e => new { e.SelfIdentityId, e.SessionId, e.RatchetKey, e.MessageNumber }).IsUnique();
         });
 
+        // RatchetKeyIndex: fast lookup from (SelfIdentityId, RatchetPublicKey) -> DirectSessionId
+        modelBuilder.Entity<RatchetKeyIndexDbo>(entity =>
+        {
+            entity.ToTable("RatchetKeyIndex");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.SelfIdentityId).IsRequired();
+            entity.Property(e => e.DirectSessionId).IsRequired();
+            entity.Property(e => e.RatchetPublicKey).IsRequired();
+            entity.Property(e => e.UpdatedAtUtc).IsRequired();
+            entity.HasIndex(e => new { e.SelfIdentityId, e.RatchetPublicKey }).IsUnique();
+
+            // FK to DoubleRatchetSessionDbo (alternate key SessionId + SelfIdentityId)
+            entity.HasOne(e => e.Session)
+                .WithMany()
+                .HasForeignKey(e => new { e.DirectSessionId, e.SelfIdentityId })
+                .HasPrincipalKey((DoubleRatchetSessionDbo s) => new { s.SessionId, s.SelfIdentityId })
+                .OnDelete(DeleteBehavior.Cascade)
+                .IsRequired();
+        });
+
         // Conversations
         modelBuilder.Entity<ConversationDbo>(entity =>
         {

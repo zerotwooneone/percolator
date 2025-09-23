@@ -18,6 +18,35 @@ public class SqlitePeerPublicSigningKeyStore : IPeerPublicSigningKeyStore
         await using var tx = await _db.Database.BeginTransactionAsync(ct);
         try
         {
+            // Check if any row exists with this hash (for any peer). If so, avoid inserting a duplicate.
+            var anyByHash = await _db.PeerPublicSigningKeys
+                .Where(x => x.PublicKeyHash.SequenceEqual(publicKeyHash))
+                .FirstOrDefaultAsync(ct);
+            if (anyByHash is not null)
+            {
+                if (anyByHash.PeerId == peerId)
+                {
+                    // Same peer: ensure it's active
+                    if (anyByHash.ExpiredAtUtc is null)
+                    {
+                        await tx.CommitAsync(ct);
+                        return;
+                    }
+                    await _db.PeerPublicSigningKeys
+                        .Where(x => x.Id == anyByHash.Id)
+                        .ExecuteUpdateAsync(setters => setters
+                            .SetProperty(x => x.ExpiredAtUtc, (DateTimeOffset?)null)
+                            .SetProperty(x => x.ActiveAtUtc, nowUtc)
+                            .SetProperty(x => x.PublicKey, publicKeySpki), ct);
+                    await tx.CommitAsync(ct);
+                    return;
+                }
+
+                // Different peer already owns this key. Treat as idempotent no-op to respect uniqueness.
+                await tx.CommitAsync(ct);
+                return;
+            }
+
             // SQLite provider cannot translate ORDER BY over DateTimeOffset here reliably.
             // Materialize then order in-memory to get the latest active row.
             var activeRows = await _db.PeerPublicSigningKeys
@@ -37,9 +66,10 @@ public class SqlitePeerPublicSigningKeyStore : IPeerPublicSigningKeyStore
 
             if (active is not null)
             {
-                active.ExpiredAtUtc = nowUtc;
-                _db.PeerPublicSigningKeys.Update(active);
-                await _db.SaveChangesAsync(ct);
+                await _db.PeerPublicSigningKeys
+                    .Where(x => x.Id == active.Id)
+                    .ExecuteUpdateAsync(setters => setters
+                        .SetProperty(x => x.ExpiredAtUtc, nowUtc), ct);
             }
 
             var dbo = new PeerPublicSigningKeyDbo

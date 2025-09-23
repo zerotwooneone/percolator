@@ -7,6 +7,7 @@ using Microsoft.Extensions.Options;
 using Moq;
 using Percolator.Application.Identity;
 using Percolator.Application.Sessions;
+using Percolator.Application.Network;
 using Percolator.Chat;
 using Percolator.Chat.ValueObjects;
 using Percolator.Cryptography;
@@ -83,19 +84,23 @@ public class SessionMessageTests
         };
         
         // Create managers with real loggers for diagnostic output
+        var aliceRatchetLookup = new Moq.Mock<IRatchetKeySessionLookup>();
         _aliceManager = new DirectSessionManager(
             _aliceSessionStore,
             _aliceIdentity,
             _loggerFactory.CreateLogger<DirectSessionManager>(),
             _loggerFactory,
-            _options);
+            _options,
+            aliceRatchetLookup.Object);
         
+        var bobRatchetLookup = new Moq.Mock<IRatchetKeySessionLookup>();
         _bobManager = new DirectSessionManager(
             _bobSessionStore, 
             _bobIdentity,
             _loggerFactory.CreateLogger<DirectSessionManager>(),
             _loggerFactory,
-            _options);
+            _options,
+            bobRatchetLookup.Object);
     }
 
     [TearDown]

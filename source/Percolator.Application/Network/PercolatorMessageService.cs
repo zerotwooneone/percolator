@@ -69,7 +69,6 @@ namespace Percolator.Application.Network
         {
             var command = new DeliverOpaqueMessageCommand
             {
-                SessionId = Guid.Parse(request.SessionId),
                 PayloadBytes = request.Payload.ToByteArray()
             };
 

@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Percolator.Chat;
+using Percolator.Application.Network;
 using Percolator.Cryptography;
 using Percolator.Identity;
 
@@ -20,19 +21,22 @@ public class DirectSessionManager : IDirectSessionManager
     private readonly ILoggerFactory _loggerFactory;
     private readonly IOptions<CryptographyOptions> _cryptographyOptions;
     private readonly ConcurrentDictionary<SessionId, SemaphoreSlim> _sessionLocks = new();
+    private readonly IRatchetKeySessionLookup _ratchetLookup;
 
     public DirectSessionManager(
         IDoubleRatchetSessionStore sessionStore,
         ActiveIdentityContext activeIdentityContext,
         ILogger<DirectSessionManager> logger,
         ILoggerFactory loggerFactory,
-        IOptions<CryptographyOptions> cryptographyOptions)
+        IOptions<CryptographyOptions> cryptographyOptions,
+        IRatchetKeySessionLookup ratchetLookup)
     {
         _sessionStore = sessionStore;
         _activeIdentityContext = activeIdentityContext;
         _logger = logger;
         _loggerFactory = loggerFactory;
         _cryptographyOptions = cryptographyOptions;
+        _ratchetLookup = ratchetLookup;
     }
 
     public async Task EstablishSessionAsInitiatorAsync(
@@ -182,6 +186,14 @@ public class DirectSessionManager : IDirectSessionManager
             // Save the updated state
             await _sessionStore.SetSessionStateAsync(sessionId, session.GetState(), _activeIdentityContext.Identity.SelfIdentityId);
 
+            // Centralize ratchet-key index upsert on successful decrypt
+            if (decryptedPlaintext is not null)
+            {
+                var header = encryptedMessage.GetHeader();
+                var ratchetKey = header.PreKey.Value;
+                await _ratchetLookup.UpsertAsync(new Percolator.Network.DirectSessionId(sessionId.Value), _activeIdentityContext.Identity!.SelfIdentityId, ratchetKey, DateTimeOffset.UtcNow, CancellationToken.None);
+            }
+
             if (decryptedPlaintext is null)
             {
                 // This can happen if the message was a skipped message that was already processed.
@@ -241,5 +253,54 @@ public class DirectSessionManager : IDirectSessionManager
         {
             semaphore.Release();
         }
+    }
+
+    public async Task<(SessionId sessionId, Plaintext? plaintext)?> TryInferAndReceiveAsync(SessionRatchetMessage encryptedMessage, CancellationToken cancellationToken)
+    {
+        if (_activeIdentityContext.Identity is null)
+            throw new InvalidOperationException("Identity context not loaded");
+
+        var selfIdentityId = _activeIdentityContext.Identity.SelfIdentityId;
+        var header = encryptedMessage.GetHeader();
+        var ratchetKey = header.PreKey.Value;
+
+        // Enumerate all known sessions for this identity and attempt trial decrypt
+        var sessionIds = await _sessionStore.GetAllSessionIdsAsync(selfIdentityId);
+        foreach (var sid in sessionIds)
+        {
+            // Load state
+            var state = await _sessionStore.GetSessionStateAsync(sid, selfIdentityId);
+            if (state is null)
+            {
+                continue;
+            }
+
+            var sessionLogger = _loggerFactory.CreateLogger<DoubleRatchetSession>();
+            using var session = new DoubleRatchetSession(state, sessionLogger, _cryptographyOptions);
+
+            // Trial decrypt
+            Plaintext? pt = null;
+            try
+            {
+                pt = session.Decrypt(encryptedMessage);
+            }
+            catch
+            {
+                // Any cryptographic exception means this session is not a match; continue
+            }
+
+            if (pt is not null)
+            {
+                // Persist updated state
+                await _sessionStore.SetSessionStateAsync(sid, session.GetState(), selfIdentityId);
+
+                // Upsert ratchet-key index mapping to keep the fast-path fresh
+                await _ratchetLookup.UpsertAsync(new Percolator.Network.DirectSessionId(sid.Value), selfIdentityId, ratchetKey, DateTimeOffset.UtcNow, CancellationToken.None);
+
+                return (sid, pt);
+            }
+        }
+
+        return null;
     }
 }

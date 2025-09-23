@@ -142,7 +142,6 @@ message CreateGroupSessionResponse {
 // Request to deliver an opaque message to a session.
 message DeliverOpaqueMessageRequest {
     optional uint32 version = 1;
-    optional string session_id = 2;
     // The opaque, encrypted message payload. The transport service has no
     // knowledge of the contents of this payload.
     optional bytes payload = 3;

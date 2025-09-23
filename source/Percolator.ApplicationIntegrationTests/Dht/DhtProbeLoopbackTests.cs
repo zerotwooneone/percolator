@@ -76,7 +76,6 @@ public class DhtProbeLoopbackTests : IntegrationTestBase
         {
             var request = new DeliverOpaqueMessageRequest
             {
-                SessionId = directSessionId.Value.ToString(),
                 Payload = ByteString.CopyFrom(message.Value)
             };
 
@@ -211,7 +210,6 @@ public class DhtProbeLoopbackTests : IntegrationTestBase
                 var handler = serverHost.Services.GetRequiredService<IRequestHandler<DeliverOpaqueMessageCommand, DeliverOpaqueMessageResult>>();
                 var cmd = new DeliverOpaqueMessageCommand
                 {
-                    SessionId = Guid.Parse(req.SessionId),
                     PayloadBytes = req.Payload.ToByteArray()
                 };
                 var result = await handler.Handle(cmd, CancellationToken.None);

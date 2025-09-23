@@ -103,4 +103,14 @@ public sealed class SqliteDoubleRatchetSessionStore : IDoubleRatchetSessionStore
 
         await _db.SaveChangesAsync();
     }
+
+    public async Task<IReadOnlyList<SessionId>> GetAllSessionIdsAsync(int selfIdentityId)
+    {
+        var ids = await _db.DoubleRatchetSessions
+            .AsNoTracking()
+            .Where(s => s.SelfIdentityId == selfIdentityId)
+            .Select(s => s.SessionId)
+            .ToListAsync();
+        return ids.Select(id => new SessionId(id)).ToList();
+    }
 }

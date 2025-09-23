@@ -69,7 +69,6 @@ public class GrpcMessageTransportService : IMessageTransportService
             var request = new DeliverOpaqueMessageRequest
             {
                 Version = 1,
-                SessionId = directSessionId.Value.ToString(),
                 Payload = ByteString.CopyFrom(message.Value)
             };
 

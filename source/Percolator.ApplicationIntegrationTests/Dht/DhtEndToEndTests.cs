@@ -60,7 +60,6 @@ public class DhtEndToEndTests : IntegrationTestBase
             var mediator = _hostProvider.GetRequiredService<IMediator>();
             var cmd = new DeliverOpaqueMessageCommand
             {
-                SessionId = directSessionId.Value,
                 PayloadBytes = message.Value
             };
             var result = await mediator.Send(cmd, cancellationToken);

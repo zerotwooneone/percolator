@@ -21,4 +21,9 @@ public interface IDoubleRatchetSessionStore
     /// <param name="selfIdentityId">The active SelfIdentity scope.</param>
     /// <returns>A task representing the asynchronous operation.</returns>
     Task SetSessionStateAsync(SessionId sessionId, DoubleRatchetSession.DoubleRatchetSessionState sessionState, int selfIdentityId);
+
+    /// <summary>
+    /// Enumerates all session IDs scoped to the given SelfIdentity.
+    /// </summary>
+    Task<IReadOnlyList<SessionId>> GetAllSessionIdsAsync(int selfIdentityId);
 }
