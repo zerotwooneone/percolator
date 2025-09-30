@@ -149,9 +149,26 @@ message DeliverOpaqueMessageRequest {
 
 // An empty response to acknowledge the message delivery request.
 message DeliverOpaqueMessageResponse {
+    message Never {
+        optional uint32 version = 1;
+    }
+    message NotUntil {
+        optional uint32 version = 1;
+        optional google.protobuf.Timestamp retry_after_utc = 2;
+    }
+    message Payload {
+      optional uint32 version = 1;
+      optional bytes response_payload = 3;
+    }
+
+
     optional uint32 version = 1;
-    optional google.protobuf.Timestamp retry_after_utc = 2;
-    optional bytes response_payload = 3;
+    oneof result {
+        Never never = 2;
+        NotUntil not_until = 3;
+        // application specific response that is opaque to the transport layer
+        Payload response_payload = 4;
+    }
 }
 
 // Defines the structured format for a ratchet message used in Double Ratchet encryption.

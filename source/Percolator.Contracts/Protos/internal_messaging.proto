@@ -21,6 +21,8 @@ message InternalEnvelope {
     FetchQueuedMessagesResponse fetch_queued_messages_response = 9;
     // Host relay wrapper carrying inner opaque payload + logical sender identity
     RelayOpaqueEnvelope relay_opaque_envelope = 10;
+    // Initiator's unsigned hello (Signal-style plausible deniability)
+    HandshakeInitiatorHello handshake_initiator_hello = 11;
   }
 }
 
@@ -393,4 +395,27 @@ message RelayOpaqueEnvelope {
   // Privacy-preserving: host does not include or persist sender identity here.
   // The exact opaque payload intended for the destination (e.g., an InternalEnvelope bytes)
   optional bytes opaque_payload = 1;
+}
+
+// === 7. Opaque Handshake (Signal-style) ===
+// Unsigned initiator hello with plausible deniability. The responder authenticates implicitly via X3DH.
+message HandshakeInitiatorHello {
+  optional uint32 version = 1;
+  // Initiator identity (SPKI bytes)
+  optional bytes initiator_identity_key_spki = 2;
+  // Initiator ephemeral ECDH public key (SPKI bytes)
+  optional bytes initiator_ephemeral_key_spki = 3;
+  // References into responder's pre-key store, obtained out-of-band before handshake
+  optional bytes signed_pre_key_id = 4;
+  optional bytes one_time_pre_key_id = 5;
+}
+
+//only ever sent over an encrypted x3dh channel
+message HandshakeResponderHello {
+  // Wrapper fields
+  optional uint32 version = 1;
+  // Identity key of the responder, repeated here and inside the signed payload for binding
+  optional bytes responder_ephemeral_key = 2;
+  // Responder-chosen identifier for the direct session (string mirrors prior session_id usage)
+  optional string direct_session_id = 3;
 }

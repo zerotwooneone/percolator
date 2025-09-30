@@ -81,13 +81,15 @@ public class DhtProbeHandler : IRequestHandler<DhtProbeCommand, FindNodeResponse
 
         // 4) Send and receive response, decrypt and parse
         var response = await SendAndReceiveAsync(directSessionId, findNodeEnvelope, remotePeer.Id, cancellationToken);
-        if (!response.HasResponsePayload)
+        if (response.ResultCase != DeliverOpaqueMessageResponse.ResultOneofCase.ResponsePayload
+            || response.ResponsePayload is null
+            || !response.ResponsePayload.HasResponsePayload)
         {
             _logger.LogInformation("No response payload returned for FindNode.");
             return new FindNodeResponse();
         }
 
-        var respRatchet = new SessionRatchetMessage(response.ResponsePayload.ToByteArray());
+        var respRatchet = new SessionRatchetMessage(response.ResponsePayload.ResponsePayload.ToByteArray());
         var plaintext = await _sessionManager.ReceiveMessageAsync(new SessionId(directSessionId.Value), respRatchet);
         if (plaintext is null)
         {

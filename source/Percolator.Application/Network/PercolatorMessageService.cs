@@ -73,12 +73,16 @@ namespace Percolator.Application.Network
             };
 
             var result = await _mediator.Send(command, context.CancellationToken);
-            var response = new DeliverOpaqueMessageResponse();
+            var resp = new DeliverOpaqueMessageResponse { Version = 1 };
             if (result.ResponsePayloadBytes is not null)
             {
-                response.ResponsePayload = ByteString.CopyFrom(result.ResponsePayloadBytes);
+                resp.ResponsePayload = new DeliverOpaqueMessageResponse.Types.Payload
+                {
+                    Version = 1,
+                    ResponsePayload = ByteString.CopyFrom(result.ResponsePayloadBytes)
+                };
             }
-            return response;
+            return resp;
         }
     }
 }

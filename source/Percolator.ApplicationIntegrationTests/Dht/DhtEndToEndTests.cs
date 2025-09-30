@@ -66,7 +66,11 @@ public class DhtEndToEndTests : IntegrationTestBase
             var response = new DeliverOpaqueMessageResponse();
             if (result.ResponsePayloadBytes is not null)
             {
-                response.ResponsePayload = ByteString.CopyFrom(result.ResponsePayloadBytes);
+                response.ResponsePayload = new DeliverOpaqueMessageResponse.Types.Payload
+                {
+                    Version = 1,
+                    ResponsePayload = ByteString.CopyFrom(result.ResponsePayloadBytes)
+                };
             }
             return response;
         }

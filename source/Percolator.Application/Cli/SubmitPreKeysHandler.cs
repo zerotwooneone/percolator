@@ -117,12 +117,14 @@ public class SubmitPreKeysHandler : IRequestHandler<SubmitPreKeysCommand, int>
         var deliverResp = await SendAndReceiveAsync(existingSessionId.Value, internalEnvelope, existingPeer.Id, cancellationToken);
         
         // 5) Expect empty ack or response payload; if response payload exists, decrypt to check type
-        if (!deliverResp.HasResponsePayload)
+        if (deliverResp.ResultCase != DeliverOpaqueMessageResponse.ResultOneofCase.ResponsePayload 
+            || deliverResp.ResponsePayload is null 
+            || !deliverResp.ResponsePayload.HasResponsePayload)
         {
             throw new InvalidOperationException("No response payload returned.");
         }
-        
-        var respCipher = new SessionRatchetMessage(deliverResp.ResponsePayload.ToByteArray());
+
+        var respCipher = new SessionRatchetMessage(deliverResp.ResponsePayload.ResponsePayload.ToByteArray());
         var respPlain = await _sessionManager.ReceiveMessageAsync(new SessionId(existingSessionId.Value.Value), respCipher);
         if (respPlain is null)
         {

@@ -80,7 +80,11 @@ public class SubmitPreKeysHandlerTests
             .ReturnsAsync(new DeliverOpaqueMessageResponse
             {
                 Version = 1,
-                ResponsePayload = ByteString.CopyFrom(responseBytes)
+                ResponsePayload = new DeliverOpaqueMessageResponse.Types.Payload
+                {
+                    Version = 1,
+                    ResponsePayload = ByteString.CopyFrom(responseBytes)
+                }
             });
 
         _sessionManager

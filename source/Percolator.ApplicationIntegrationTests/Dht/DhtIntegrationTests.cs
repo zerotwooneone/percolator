@@ -230,7 +230,9 @@ public class DhtIntegrationTests : IntegrationTestBase
 
         // Assert
         response.Should().NotBeNull();
-        response.HasResponsePayload.Should().BeTrue();
-        response.ResponsePayload.ToByteArray().Should().BeEquivalentTo(expectedResponsePayload.Value);
+        response.ResultCase.Should().Be(DeliverOpaqueMessageResponse.ResultOneofCase.ResponsePayload);
+        response.ResponsePayload.Should().NotBeNull();
+        response.ResponsePayload.HasResponsePayload.Should().BeTrue();
+        response.ResponsePayload.ResponsePayload.ToByteArray().Should().BeEquivalentTo(expectedResponsePayload.Value);
     }
 }
