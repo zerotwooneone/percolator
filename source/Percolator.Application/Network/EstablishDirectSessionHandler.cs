@@ -153,6 +153,9 @@ namespace Percolator.Application.Network
                 _logger.LogInformation("Upserted session with peer {PeerName} with session {SessionId}", remotePeer.Name, directSessionId);
             }
             
+            //todo: extend sessionManager.EstablishSessionAsInitiatorAsync to accept an optional PlainText payload that gets encrypted as the first session message
+            // this message will contain the session ID and the ephemeral key we used to create the session.
+            // The return type of the message should be SessionRatchetMessage
             var cryptoSessionId = new SessionId(directSessionId.Value);
             await _sessionManager.EstablishSessionAsInitiatorAsync(
                 cryptoSessionId,
@@ -167,11 +170,6 @@ namespace Percolator.Application.Network
             var establishedPkh = SHA256.HashData(establishedSpki);
             await _pkhStore.ActivateIfChangedAsync(remotePeer.Id, establishedSpki, establishedPkh, DateTimeOffset.UtcNow, cancellationToken);
 
-            //todo: the initiator must send an encrypted message using the new session we just created.
-            // The first message must contain the session ID and the ephemeral key we used to create the session.
-            // The first message may also contain application specific information.
-            
-            // Build response payload and sign
             var responsePayload = new EstablishDirectSessionResponse.Types.ResponsePayload
             {
                 EphemeralKey = ByteString.CopyFrom(ephemeralKey.PublicKey.ExportSubjectPublicKeyInfo()),
