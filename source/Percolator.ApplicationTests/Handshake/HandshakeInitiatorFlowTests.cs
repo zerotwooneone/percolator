@@ -210,7 +210,6 @@ public class HandshakeInitiatorFlowTests
                 {
                     Version = 1,
                     DirectSessionId = expectedSid.Value.ToString(),
-                    ResponderEphemeralKey = ByteString.CopyFrom(new byte[] { 0x01 })
                 };
                 var pt = new Plaintext(hello.ToByteArray());
                 var sid = getSid(pt);
@@ -270,7 +269,6 @@ public class HandshakeInitiatorFlowTests
                 {
                     Version = 1,
                     DirectSessionId = expectedSid.Value.ToString(),
-                    ResponderEphemeralKey = ByteString.CopyFrom(new byte[] { 0x02 })
                 };
                 var pt = new Plaintext(hello.ToByteArray());
                 var sid = getSid(pt);

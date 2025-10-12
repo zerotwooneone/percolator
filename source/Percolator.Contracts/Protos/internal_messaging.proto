@@ -418,7 +418,6 @@ message HandshakeInitiatorHello {
 message HandshakeResponderHello {
   // Wrapper fields
   optional uint32 version = 1;
-  optional bytes responder_ephemeral_key = 2;
   // Responder-chosen identifier for the direct session (string mirrors prior session_id usage)
   optional string direct_session_id = 3;
   // Required encrypted opaque payload to the initiator which includes the session id. The session id must only appear inside this encrypted payload.

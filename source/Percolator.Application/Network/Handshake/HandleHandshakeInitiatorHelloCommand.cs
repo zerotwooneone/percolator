@@ -112,12 +112,10 @@ namespace Percolator.Application.Network.Handshake
 
             _logger.LogInformation("Responder established session {SessionId}", directSessionId.Value);
 
-            // Build a minimal responder hello (session id + ephemeral key placeholder)
-            using var responderRatchet = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+            // Build a minimal responder hello (session id only)
             var responderHello = new HandshakeResponderHello
             {
                 Version = 1,
-                ResponderEphemeralKey = ByteString.CopyFrom(responderRatchet.PublicKey.ExportSubjectPublicKeyInfo()),
                 DirectSessionId = directSessionId.Value.ToString()
             };
 
