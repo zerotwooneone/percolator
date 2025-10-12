@@ -35,6 +35,7 @@ public class PercolatorDbContext : DbContext
     public DbSet<ReadReceiptDbo> ReadReceipts { get; set; } = null!;
     public DbSet<EmojiReactionDbo> EmojiReactions { get; set; } = null!;
     public DbSet<DeliveredReceiptDbo> DeliveredReceipts { get; set; } = null!;
+    public DbSet<PreHandshakeSessionDbo> PreHandshakeSessions { get; set; } = null!;
     public DbSet<GroupAdminKeyDbo> GroupAdminKeys { get; set; } = null!;
     public DbSet<GroupAdminOpDbo> GroupAdminOps { get; set; } = null!;
     public DbSet<GroupAdminStateDbo> GroupAdminStates { get; set; } = null!;
@@ -52,6 +53,27 @@ public class PercolatorDbContext : DbContext
 
             entity.Property(e => e.Name).IsRequired();
             entity.HasIndex(e => e.Name).IsUnique();
+        });
+
+        // PreHandshakeSessions
+        modelBuilder.Entity<PreHandshakeSessionDbo>(entity =>
+        {
+            entity.ToTable("PreHandshakeSessions");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedOnAdd();
+            entity.Property(e => e.SelfIdentityId).IsRequired();
+            entity.Property(e => e.LocalRequestId).IsRequired();
+            entity.Property(e => e.RecipientPublicKeyHash);
+            entity.Property(e => e.InitiatorEphemeralPrivateKey).IsRequired();
+            entity.Property(e => e.InitialRootKey).IsRequired();
+            entity.Property(e => e.CreatedAtUtc).IsRequired();
+            entity.Property(e => e.ExpiresAtUtc);
+            entity.Property(e => e.RemoteIdentityKeySpki).IsRequired();
+
+            entity.HasIndex(e => e.SelfIdentityId);
+            entity.HasIndex(e => new { e.SelfIdentityId, e.ExpiresAtUtc });
+            entity.HasIndex(e => new { e.SelfIdentityId, e.RecipientPublicKeyHash });
+            entity.HasIndex(e => new { e.SelfIdentityId, e.LocalRequestId }).IsUnique();
         });
 
         // SelfIdentity

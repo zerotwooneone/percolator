@@ -1,5 +1,7 @@
+using System;
 using System.Threading;
 using System.Threading.Tasks;
+using Percolator.Cryptography;
 using Percolator.Network;
 
 namespace Percolator.Application.Network
@@ -9,8 +11,8 @@ namespace Percolator.Application.Network
     /// </summary>
     public interface IRatchetKeySessionLookup
     {
-        Task<DirectSessionId?> TryResolveAsync(byte[] ratchetPublicKey, int selfIdentityId, CancellationToken cancellationToken);
+        Task<DirectSessionId?> TryResolveAsync(PreKey ratchetPublicKey, int selfIdentityId, CancellationToken cancellationToken);
 
-        Task UpsertAsync(DirectSessionId sessionId, int selfIdentityId, byte[] ratchetPublicKey, DateTimeOffset updatedAtUtc, CancellationToken cancellationToken);
+        Task UpsertAsync(DirectSessionId sessionId, int selfIdentityId, PreKey ratchetPublicKey, DateTimeOffset updatedAtUtc, CancellationToken cancellationToken);
     }
 }

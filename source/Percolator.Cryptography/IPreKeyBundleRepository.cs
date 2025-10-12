@@ -24,4 +24,12 @@ public interface IPreKeyBundleRepository
     /// A <see cref="PreKeyBundle"/> for the peer, or null if no valid bundle is available.
     /// </returns>
     Task<PreKeyBundle?> PopBundleAsync(PeerId peerId);
+
+    /// <summary>
+    /// Atomically retrieves and removes a specific pre-key bundle for a peer by identifiers.
+    /// If <paramref name="oneTimePreKeyId"/> is provided, that exact one-time key must be consumed.
+    /// Otherwise, any available one-time key for the peer may be consumed as long as the signed pre-key id matches.
+    /// Returns null if no matching bundle is available.
+    /// </summary>
+    Task<PreKeyBundle?> TryPopBundleAsync(PeerId peerId, Guid signedPreKeyId, Guid? oneTimePreKeyId);
 }

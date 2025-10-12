@@ -19,6 +19,17 @@ namespace Percolator.ApplicationTests.Sessions;
 [TestFixture]
 public class DirectSessionManagerTests
 {
+    private sealed class FakePreHandshakeStore : Percolator.Application.Network.Handshake.IPreHandshakeSessionStore
+    {
+        public Task SaveAsync(Percolator.Application.Network.Handshake.PreHandshakeRecord record, CancellationToken cancellationToken) => Task.CompletedTask;
+        public async IAsyncEnumerable<Percolator.Application.Network.Handshake.PreHandshakeRecord> EnumeratePendingAsync(int selfIdentityId, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+        {
+            await Task.CompletedTask;
+            yield break;
+        }
+        public Task DeleteAsync(long recordId, int selfIdentityId, CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task PurgeExpiredAsync(int selfIdentityId, CancellationToken cancellationToken) => Task.CompletedTask;
+    }
     // Alice (initiator) components
     private Mock<IDoubleRatchetSessionStore> _aliceSessionStore = null!;
     private ActiveIdentityContext _aliceIdentityContext = null!;
@@ -72,7 +83,8 @@ public class DirectSessionManagerTests
             _loggerFactory.CreateLogger<DirectSessionManager>(),
             _loggerFactory,
             _options,
-            aliceRatchetLookup.Object);
+            aliceRatchetLookup.Object,
+            new FakePreHandshakeStore());
             
         // Generate Bob's identity and keys
         _bobPeerId = new Identity.PeerId(Guid.NewGuid());
@@ -95,7 +107,8 @@ public class DirectSessionManagerTests
             _loggerFactory.CreateLogger<DirectSessionManager>(),
             _loggerFactory,
             _options,
-            bobRatchetLookup.Object);
+            bobRatchetLookup.Object,
+            new FakePreHandshakeStore());
             
         // Setup session store mocks to use class-level state variables
         _aliceSessionStore.Setup(x => x.SetSessionStateAsync(It.IsAny<SessionId>(), It.IsAny<DoubleRatchetSession.DoubleRatchetSessionState>(), It.IsAny<int>()))

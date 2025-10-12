@@ -7,6 +7,7 @@ using Percolator.Chat;
 using Percolator.Application.Network;
 using Percolator.Cryptography;
 using Percolator.Identity;
+using Percolator.Application.Network.Handshake;
 
 namespace Percolator.Application.Sessions;
 
@@ -22,6 +23,7 @@ public class DirectSessionManager : IDirectSessionManager
     private readonly IOptions<CryptographyOptions> _cryptographyOptions;
     private readonly ConcurrentDictionary<SessionId, SemaphoreSlim> _sessionLocks = new();
     private readonly IRatchetKeySessionLookup _ratchetLookup;
+    private readonly IPreHandshakeSessionStore _preHandshakeStore;
 
     public DirectSessionManager(
         IDoubleRatchetSessionStore sessionStore,
@@ -29,7 +31,8 @@ public class DirectSessionManager : IDirectSessionManager
         ILogger<DirectSessionManager> logger,
         ILoggerFactory loggerFactory,
         IOptions<CryptographyOptions> cryptographyOptions,
-        IRatchetKeySessionLookup ratchetLookup)
+        IRatchetKeySessionLookup ratchetLookup,
+        IPreHandshakeSessionStore preHandshakeStore)
     {
         _sessionStore = sessionStore;
         _activeIdentityContext = activeIdentityContext;
@@ -37,6 +40,119 @@ public class DirectSessionManager : IDirectSessionManager
         _loggerFactory = loggerFactory;
         _cryptographyOptions = cryptographyOptions;
         _ratchetLookup = ratchetLookup;
+        _preHandshakeStore = preHandshakeStore;
+    }
+
+    public Task<(SessionId sessionId, TEnvelop envelop)> CompleteHandshakeAsync<TEnvelop>(
+        SessionRatchetMessage encryptedMessage,
+        Func<Plaintext, TEnvelop> getEnvelope,
+        Func<TEnvelop, SessionId> getSessionId,
+        CancellationToken cancellationToken)
+    {
+        if (_activeIdentityContext.Identity is null)
+            throw new InvalidOperationException("Identity context not loaded");
+
+        return CompleteAsync(encryptedMessage, getEnvelope, getSessionId, cancellationToken);
+    }
+
+    private async Task<(SessionId sessionId, TEnvelop envelop)> CompleteAsync<TEnvelop>(
+        SessionRatchetMessage encryptedMessage,
+        Func<Plaintext, TEnvelop> getEnvelope,
+        Func<TEnvelop, SessionId> getSessionId,
+        CancellationToken cancellationToken)
+    {
+        var selfId = _activeIdentityContext.Identity!.SelfIdentityId;
+        var header = encryptedMessage.GetHeader();
+
+        // Fast-path: try resolve header pre-key to session
+        var resolved = await _ratchetLookup.TryResolveAsync(header.PreKey, selfId, cancellationToken).ConfigureAwait(false);
+
+        Plaintext? plaintext = null;
+        SessionId sid;
+
+        if (resolved is not null)
+        {
+            sid = new SessionId(resolved.Value.Value);
+            plaintext = await ReceiveMessageAsync(sid, encryptedMessage).ConfigureAwait(false);
+            if (plaintext is null)
+                throw new InvalidOperationException("CompleteHandshakeAsync: decryption failed on fast-path session.");
+        }
+        else
+        {
+            // Slow-path: iterate Pending pre-handshake entries and attempt decrypt per candidate.
+            await foreach (var record in _preHandshakeStore.EnumeratePendingAsync(selfId, cancellationToken))
+            {
+                // Reconstruct initiator ephemeral key used during pre-handshake
+                using var eph = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+                eph.ImportECPrivateKey(record.InitiatorEphemeralPrivateKey, out _);
+                var remoteId = new RatchetIdentityKey(record.RemoteIdentityKeySpki!);
+
+                var sessionLogger = _loggerFactory.CreateLogger<DoubleRatchetSession>();
+                // Rehydrate session state to the exact point after initiator encryption
+                var restoredState = new DoubleRatchetSession.DoubleRatchetSessionState
+                {
+                    RootKey = new RootKey(record.InitialRootKey),
+                    RatchetFlag = false,
+                    SendingChainKey = null,
+                    ReceivingChainKey = null,
+                    SendingCounter = 0,
+                    ReceivingCounter = 0,
+                    PreviousChainLength = 0,
+                    // For responder hello, theirDhRatchetPublicKey will be taken from the incoming header during decrypt
+                    TheirDhRatchetPublicKey = null,
+                    DhRatchetPrivateKey = new PrivateEphemeralKey(record.InitiatorEphemeralPrivateKey),
+                    TheirIdentityPublicKey = remoteId
+                };
+
+                using var temp = new DoubleRatchetSession(restoredState, sessionLogger, _cryptographyOptions);
+
+                try
+                {
+                    var pt = temp.Decrypt(encryptedMessage);
+                    var env = getEnvelope(pt);
+                    var resolvedSessionId = getSessionId(env);
+
+                    // Persist established session state for the resolved session id
+                    var finalizedState = temp.GetState();
+                    if (_activeIdentityContext.Identity is null)
+                        throw new InvalidOperationException("Identity context not loaded");
+                    await _sessionStore.SetSessionStateAsync(resolvedSessionId, finalizedState, _activeIdentityContext.Identity.SelfIdentityId).ConfigureAwait(false);
+                    _sessionLocks.TryAdd(resolvedSessionId, new SemaphoreSlim(1, 1));
+
+                    // upsert fast-path mapping and return
+                    await _ratchetLookup.UpsertAsync(
+                        new Percolator.Network.DirectSessionId(resolvedSessionId.Value),
+                        selfId,
+                        header.PreKey,
+                        DateTimeOffset.UtcNow,
+                        cancellationToken).ConfigureAwait(false);
+
+                    // delete matched pending pre-handshake record now that session is finalized
+                    await _preHandshakeStore.DeleteAsync(record.Id, selfId, cancellationToken).ConfigureAwait(false);
+
+                    return (resolvedSessionId, env);
+                }
+                catch (CryptographicException)
+                {
+                    // Not a match; continue to next candidate
+                }
+            }
+
+            throw new InvalidOperationException("CompleteHandshakeAsync: unable to resolve session via fast or slow path.");
+        }
+
+        var envelope = getEnvelope(plaintext);
+        var sessionId = getSessionId(envelope);
+
+        // Upsert ratchet header key -> session mapping to keep fast-path warm
+        await _ratchetLookup.UpsertAsync(
+            new Percolator.Network.DirectSessionId(sessionId.Value),
+            selfId,
+            header.PreKey,
+            DateTimeOffset.UtcNow,
+            cancellationToken).ConfigureAwait(false);
+
+        return (sessionId, envelope);
     }
 
     public async Task EstablishSessionAsInitiatorAsync(
@@ -190,8 +306,7 @@ public class DirectSessionManager : IDirectSessionManager
             if (decryptedPlaintext is not null)
             {
                 var header = encryptedMessage.GetHeader();
-                var ratchetKey = header.PreKey.Value;
-                await _ratchetLookup.UpsertAsync(new Percolator.Network.DirectSessionId(sessionId.Value), _activeIdentityContext.Identity!.SelfIdentityId, ratchetKey, DateTimeOffset.UtcNow, CancellationToken.None);
+                await _ratchetLookup.UpsertAsync(new Percolator.Network.DirectSessionId(sessionId.Value), _activeIdentityContext.Identity!.SelfIdentityId, header.PreKey, DateTimeOffset.UtcNow, CancellationToken.None);
             }
 
             if (decryptedPlaintext is null)
@@ -262,7 +377,6 @@ public class DirectSessionManager : IDirectSessionManager
 
         var selfIdentityId = _activeIdentityContext.Identity.SelfIdentityId;
         var header = encryptedMessage.GetHeader();
-        var ratchetKey = header.PreKey.Value;
 
         // Enumerate all known sessions for this identity and attempt trial decrypt
         var sessionIds = await _sessionStore.GetAllSessionIdsAsync(selfIdentityId);
@@ -295,12 +409,75 @@ public class DirectSessionManager : IDirectSessionManager
                 await _sessionStore.SetSessionStateAsync(sid, session.GetState(), selfIdentityId);
 
                 // Upsert ratchet-key index mapping to keep the fast-path fresh
-                await _ratchetLookup.UpsertAsync(new Percolator.Network.DirectSessionId(sid.Value), selfIdentityId, ratchetKey, DateTimeOffset.UtcNow, CancellationToken.None);
+                await _ratchetLookup.UpsertAsync(new Percolator.Network.DirectSessionId(sid.Value), selfIdentityId, header.PreKey, DateTimeOffset.UtcNow, CancellationToken.None);
 
                 return (sid, pt);
             }
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Persists an initiator intent (pre-handshake Pending record) without a session id.
+    /// Stores minimal material required to complete handshake on responder hello.
+    /// </summary>
+    public async Task<SessionRatchetMessage?> EstablishSessionAsInitiatorAsync(
+        byte[] recipientPublicKeyHash,
+        Guid signedPreKeyId,
+        Guid? oneTimePreKeyId,
+        RatchetIdentityKey remoteIdentityKey,
+        PreKey remotePreKey,
+        SharedSecret sharedSecret,
+        ECDiffieHellman initiatorEphemeral,
+        Plaintext? initialPlaintext,
+        CancellationToken cancellationToken)
+    {
+        if (_activeIdentityContext.Identity is null)
+            throw new InvalidOperationException("Identity context not loaded");
+
+
+        // Build a temporary initiator session to capture initial state and optionally encrypt the first message.
+
+        var sessionLogger = _loggerFactory.CreateLogger<DoubleRatchetSession>();
+        using var temp = DoubleRatchetSession.AsInitiator(
+            sharedSecret,
+            remoteIdentityKey,
+            remotePreKey,
+            initiatorEphemeral,
+            sessionLogger,
+            _cryptographyOptions);
+
+        SessionRatchetMessage? firstMessage = null;
+        if (initialPlaintext is not null)
+        {
+            firstMessage = temp.Encrypt(initialPlaintext);
+        }
+
+        // Capture a minimal session state snapshot required for responder slow-path decryption
+        var state = temp.GetState();
+        if (state.DhRatchetPrivateKey is null)
+        {
+            throw new InvalidOperationException("Initiator pre-handshake snapshot must include DhRatchetPrivateKey for slow-path completion.");
+        }
+
+        if (state.RootKey is null)
+            throw new InvalidOperationException("Initiator pre-handshake snapshot must include InitialRootKey.");
+
+        var record = new PreHandshakeRecord(
+            Id: 0,
+            SelfIdentityId: _activeIdentityContext.Identity.SelfIdentityId,
+            RecipientPublicKeyHash: recipientPublicKeyHash,
+            LocalRequestId: Guid.NewGuid(),
+            InitiatorEphemeralPrivateKey: state.DhRatchetPrivateKey.Value,
+            InitialRootKey: state.RootKey.Value,
+            CreatedAtUtc: DateTimeOffset.UtcNow,
+            ExpiresAtUtc: null,
+            RemoteIdentityKeySpki: remoteIdentityKey.Value);
+
+        await _preHandshakeStore.SaveAsync(record, cancellationToken);
+        _logger.LogInformation("Saved initiator pre-handshake intent for recipient PKH length {Len}", recipientPublicKeyHash?.Length ?? 0);
+
+        return firstMessage;
     }
 }

@@ -6,6 +6,8 @@ using Percolator.Infrastructure.Dht;
 using Percolator.Infrastructure.Identity;
 using Percolator.Infrastructure.Sessions;
 using Percolator.Infrastructure.Network;
+using Percolator.Application.Network.Handshake;
+using Percolator.Infrastructure.Network.Handshake;
 
 namespace Percolator.Infrastructure;
 
@@ -34,6 +36,9 @@ public static class ServiceCollectionExtensions
 
         // Security/adapters
         services.AddScoped<Percolator.Application.Apps.Chat.IAtRestKeyProvider, Percolator.Infrastructure.Security.AtRestKeyProvider>();
+
+        // Handshake pre-session store
+        services.AddScoped<IPreHandshakeSessionStore, PreHandshakeSessionStore>();
 
         return services;
     }

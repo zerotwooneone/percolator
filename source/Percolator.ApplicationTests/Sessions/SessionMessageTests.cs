@@ -26,6 +26,17 @@ namespace Percolator.ApplicationTests.Sessions;
 [TestFixture]
 public class SessionMessageTests
 {
+    private sealed class FakePreHandshakeStore : Percolator.Application.Network.Handshake.IPreHandshakeSessionStore
+    {
+        public Task SaveAsync(Percolator.Application.Network.Handshake.PreHandshakeRecord record, CancellationToken cancellationToken) => Task.CompletedTask;
+        public async IAsyncEnumerable<Percolator.Application.Network.Handshake.PreHandshakeRecord> EnumeratePendingAsync(int selfIdentityId, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+        {
+            await Task.CompletedTask;
+            yield break;
+        }
+        public Task DeleteAsync(long recordId, int selfIdentityId, CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task PurgeExpiredAsync(int selfIdentityId, CancellationToken cancellationToken) => Task.CompletedTask;
+    }
     private IDoubleRatchetSessionStore _aliceSessionStore = null!;
     private IDoubleRatchetSessionStore _bobSessionStore = null!;
     private DirectSessionManager _aliceManager = null!;
@@ -91,7 +102,8 @@ public class SessionMessageTests
             _loggerFactory.CreateLogger<DirectSessionManager>(),
             _loggerFactory,
             _options,
-            aliceRatchetLookup.Object);
+            aliceRatchetLookup.Object,
+            new FakePreHandshakeStore());
         
         var bobRatchetLookup = new Moq.Mock<IRatchetKeySessionLookup>();
         _bobManager = new DirectSessionManager(
@@ -100,7 +112,8 @@ public class SessionMessageTests
             _loggerFactory.CreateLogger<DirectSessionManager>(),
             _loggerFactory,
             _options,
-            bobRatchetLookup.Object);
+            bobRatchetLookup.Object,
+            new FakePreHandshakeStore());
     }
 
     [TearDown]

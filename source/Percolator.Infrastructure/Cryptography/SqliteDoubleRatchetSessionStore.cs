@@ -113,4 +113,43 @@ public sealed class SqliteDoubleRatchetSessionStore : IDoubleRatchetSessionStore
             .ToListAsync();
         return ids.Select(id => new SessionId(id)).ToList();
     }
+
+    public async Task<DoubleRatchetSession.DoubleRatchetSessionState?> FindByRemoteRatchetKeyAsync(PreKey remoteRatchetKey, int selfIdentityId)
+    {
+        var session = await _db.DoubleRatchetSessions
+            .AsNoTracking()
+            .Include(s => s.SkippedMessageKeys)
+            .FirstOrDefaultAsync(s => s.SelfIdentityId == selfIdentityId && 
+                                   s.TheirDhRatchetPublicKey != null && 
+                                   s.TheirDhRatchetPublicKey.SequenceEqual(remoteRatchetKey.Value));
+
+        if (session is null)
+        {
+            _logger.LogDebug("No DoubleRatchet session found for remote ratchet key");
+            return null;
+        }
+
+        var state = new DoubleRatchetSession.DoubleRatchetSessionState
+        {
+            RootKey = new RootKey(session.RootKey),
+            RatchetFlag = session.RatchetFlag,
+            SendingChainKey = session.SendingChainKey is null ? null : new ChainKey(session.SendingChainKey),
+            ReceivingChainKey = session.ReceivingChainKey is null ? null : new ChainKey(session.ReceivingChainKey),
+            SendingCounter = session.SendingCounter,
+            ReceivingCounter = session.ReceivingCounter,
+            PreviousChainLength = session.PreviousChainLength,
+            TheirDhRatchetPublicKey = new PreKey(session.TheirDhRatchetPublicKey!),
+            DhRatchetPrivateKey = session.DhRatchetPrivateKey is null ? null : new PrivateEphemeralKey(session.DhRatchetPrivateKey),
+            TheirIdentityPublicKey = new RatchetIdentityKey(session.TheirIdentityPublicKey)
+        };
+
+        // Rehydrate skipped message keys
+        foreach (var k in session.SkippedMessageKeys)
+        {
+            var id = new SkippedMessageKeyIdentifier(new PreKey(k.RatchetKey), k.MessageNumber);
+            state.SkippedMessageKeys[id] = k.MessageKey;
+        }
+
+        return state;
+    }
 }

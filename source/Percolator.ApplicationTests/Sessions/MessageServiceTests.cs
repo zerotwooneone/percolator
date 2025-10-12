@@ -22,6 +22,17 @@ namespace Percolator.ApplicationTests.Sessions;
 [TestFixture]
 public class MessageServiceTests
 {
+    private sealed class FakePreHandshakeStore : Percolator.Application.Network.Handshake.IPreHandshakeSessionStore
+    {
+        public Task SaveAsync(Percolator.Application.Network.Handshake.PreHandshakeRecord record, CancellationToken cancellationToken) => Task.CompletedTask;
+        public async IAsyncEnumerable<Percolator.Application.Network.Handshake.PreHandshakeRecord> EnumeratePendingAsync(int selfIdentityId, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+        {
+            await Task.CompletedTask;
+            yield break;
+        }
+        public Task DeleteAsync(long recordId, int selfIdentityId, CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task PurgeExpiredAsync(int selfIdentityId, CancellationToken cancellationToken) => Task.CompletedTask;
+    }
     private Mock<IConversationRepository> _mockConversationRepository = null!;
     private Mock<IMessageTransportService> _mockTransportService = null!;
     private Mock<IDoubleRatchetSessionStore> _mockSessionStore = null!;
@@ -51,7 +62,8 @@ public class MessageServiceTests
             new NullLogger<DirectSessionManager>(),
             loggerFactory,
             _options,
-            ratchetLookup.Object);
+            ratchetLookup.Object,
+            new FakePreHandshakeStore());
 
         _messageService = new MessageService(
             _sessionManager,

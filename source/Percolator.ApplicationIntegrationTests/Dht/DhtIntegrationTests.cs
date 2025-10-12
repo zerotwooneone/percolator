@@ -63,9 +63,10 @@ public class DhtIntegrationTests : IntegrationTestBase
             services.AddSingleton<IDirectSessionRepository>(directSessionRepoMock.Object);
             // Fast-path lookup resolves our header key
             var ratchetLookup = new Moq.Mock<IRatchetKeySessionLookup>();
-            ratchetLookup.Setup(l => l.TryResolveAsync(It.Is<byte[]>(b => b.SequenceEqual(headerKey)), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            var preKey = new PreKey(headerKey);
+            ratchetLookup.Setup(l => l.TryResolveAsync(It.Is<PreKey>(p => p.Value.SequenceEqual(headerKey)), It.IsAny<int>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new DirectSessionId(sessionId.Value));
-            ratchetLookup.Setup(l => l.UpsertAsync(It.IsAny<DirectSessionId>(), It.IsAny<int>(), It.IsAny<byte[]>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            ratchetLookup.Setup(l => l.UpsertAsync(It.IsAny<DirectSessionId>(), It.IsAny<int>(), It.IsAny<PreKey>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
                 .Returns(Task.CompletedTask);
             services.AddSingleton<IRatchetKeySessionLookup>(ratchetLookup.Object);
             services.AddSingleton<IX3DHOrchestrator>(x3dhOrchestratorMock.Object);
@@ -169,9 +170,10 @@ public class DhtIntegrationTests : IntegrationTestBase
             });
             // Fast-path lookup resolves our header key
             var ratchetLookup2 = new Moq.Mock<IRatchetKeySessionLookup>();
-            ratchetLookup2.Setup(l => l.TryResolveAsync(It.Is<byte[]>(b => b.SequenceEqual(headerKey2)), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            var preKey2 = new PreKey(headerKey2);
+            ratchetLookup2.Setup(l => l.TryResolveAsync(It.Is<PreKey>(p => p.Value.SequenceEqual(headerKey2)), It.IsAny<int>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new DirectSessionId(sessionId.Value));
-            ratchetLookup2.Setup(l => l.UpsertAsync(It.IsAny<DirectSessionId>(), It.IsAny<int>(), It.IsAny<byte[]>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            ratchetLookup2.Setup(l => l.UpsertAsync(It.IsAny<DirectSessionId>(), It.IsAny<int>(), It.IsAny<PreKey>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
                 .Returns(Task.CompletedTask);
             services.AddSingleton<IRatchetKeySessionLookup>(ratchetLookup2.Object);
             services.AddMediatR(cfg =>

@@ -19,10 +19,12 @@ message InternalEnvelope {
     MessageQueueEnvelope message_queue_envelope = 7;
     EnqueueOpaqueMessageResponse enqueue_opaque_message_response = 8;
     FetchQueuedMessagesResponse fetch_queued_messages_response = 9;
-    // Host relay wrapper carrying inner opaque payload + logical sender identity
+    // Host relay wrapper carrying inner opaque payload
     RelayOpaqueEnvelope relay_opaque_envelope = 10;
     // Initiator's unsigned hello (Signal-style plausible deniability)
     HandshakeInitiatorHello handshake_initiator_hello = 11;
+    // Responder's opaque hello containing responder ephemeral and direct session id
+    HandshakeResponderHello handshake_responder_hello = 12;
   }
 }
 
@@ -408,14 +410,17 @@ message HandshakeInitiatorHello {
   // References into responder's pre-key store, obtained out-of-band before handshake
   optional bytes signed_pre_key_id = 4;
   optional bytes one_time_pre_key_id = 5;
+  // Optional encrypted opaque payload to the recipient (e.g., first message)
+  optional bytes encrypted_payload = 6;
 }
 
 //only ever sent over an encrypted x3dh channel
 message HandshakeResponderHello {
   // Wrapper fields
   optional uint32 version = 1;
-  // Identity key of the responder, repeated here and inside the signed payload for binding
   optional bytes responder_ephemeral_key = 2;
   // Responder-chosen identifier for the direct session (string mirrors prior session_id usage)
   optional string direct_session_id = 3;
+  // Required encrypted opaque payload to the initiator which includes the session id. The session id must only appear inside this encrypted payload.
+  optional bytes encrypted_payload = 4;
 }

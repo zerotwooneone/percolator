@@ -31,7 +31,7 @@ namespace Percolator.Application.Network
         private readonly IDirectSessionRepository _directSessionRepository;
         private readonly ActiveIdentityContext _activeIdentityContext;
         private readonly IRatchetKeySessionLookup _ratchetLookup;
-
+        
         public DeliverOpaqueMessageHandler(
             ILogger<DeliverOpaqueMessageHandler> logger,
             IDirectSessionManager sessionManager,
@@ -129,7 +129,7 @@ namespace Percolator.Application.Network
                 var sessionRatchetMessage = new SessionRatchetMessage(request.PayloadBytes);
                 // Infer session by ratchet header key (PreKey)
                 var header = sessionRatchetMessage.GetHeader();
-                var ratchetKey = header.PreKey.Value;
+                var ratchetKey = header.PreKey;
                 var resolvedDirectSessionId = await _ratchetLookup.TryResolveAsync(ratchetKey, _activeIdentityContext.Identity!.SelfIdentityId, cancellationToken);
                 Plaintext? plaintext;
                 SessionId inferredSessionId;
@@ -200,6 +200,28 @@ namespace Percolator.Application.Network
                         var response = await HandlePrekeyEnvelopeAsync(internalEnvelope.PrekeyEnvelope, connectionInfo.Id, cancellationToken);
                         responseEnvelope = new InternalEnvelope { SubmitPreKeyBundleResponse = response };
                         break;
+                    case InternalEnvelope.ApplicationPayloadOneofCase.HandshakeInitiatorHello:
+                    {
+                        var hello = internalEnvelope.HandshakeInitiatorHello;
+                        var spki = hello.InitiatorIdentityKeySpki.ToByteArray();
+                        var eph = hello.InitiatorEphemeralKeySpki.ToByteArray();
+                        var spkId = new Guid(hello.SignedPreKeyId.ToByteArray());
+                        Guid? otkId = hello.HasOneTimePreKeyId ? new Guid(hello.OneTimePreKeyId.ToByteArray()) : (Guid?)null;
+
+                        var resultEnv = await _mediator.Send(
+                            new Percolator.Application.Network.Handshake.HandleHandshakeInitiatorHelloCommand(
+                                spki,
+                                eph,
+                                spkId,
+                                otkId,
+                                new IdentityPeerId(remotePeerId.Value)),
+                            cancellationToken);
+                        if (resultEnv is not null)
+                        {
+                            responseEnvelope = resultEnv;
+                        }
+                        break;
+                    }
                     case InternalEnvelope.ApplicationPayloadOneofCase.MessageQueueEnvelope:
                         switch (internalEnvelope.MessageQueueEnvelope.MessageCase)
                         {

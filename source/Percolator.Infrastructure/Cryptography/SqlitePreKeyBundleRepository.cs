@@ -139,5 +139,72 @@ public class SqlitePreKeyBundleRepository : IPreKeyBundleRepository
             throw;
         }
     }
+
+    public async Task<PreKeyBundle?> TryPopBundleAsync(CryptographyPeerId peerId, Guid signedPreKeyId, Guid? oneTimePreKeyId)
+    {
+        await using var transaction = await _context.Database.BeginTransactionAsync();
+
+        try
+        {
+            // Load identity + keys for this peer
+            var identityKeyDbo = await _context.PeerIdentityKeys
+                .Include(ik => ik.SignedPreKeys)
+                .Include(ik => ik.OneTimePreKeys)
+                .FirstOrDefaultAsync(ik => ik.PeerId.Value == peerId.Value);
+
+            if (identityKeyDbo is null)
+            {
+                await transaction.RollbackAsync();
+                return null;
+            }
+
+            var spk = identityKeyDbo.SignedPreKeys.FirstOrDefault(k => k.Id == signedPreKeyId.ToString());
+            if (spk is null)
+            {
+                await transaction.RollbackAsync();
+                return null; // signed pre-key id mismatch
+            }
+
+            OneTimePreKeyDbo? otkDbo;
+            if (oneTimePreKeyId.HasValue)
+            {
+                var otkId = oneTimePreKeyId.Value.ToString();
+                otkDbo = identityKeyDbo.OneTimePreKeys.FirstOrDefault(k => k.Id == otkId);
+                if (otkDbo is null)
+                {
+                    await transaction.RollbackAsync();
+                    return null; // requested OTK not available
+                }
+            }
+            else
+            {
+                otkDbo = identityKeyDbo.OneTimePreKeys.FirstOrDefault();
+            }
+
+            var bundle = new PreKeyBundle(
+                new RatchetIdentityKey(identityKeyDbo.PublicKey),
+                signedPreKeyId,
+                new PreKey(spk.PublicKey),
+                new Signature(spk.Signature),
+                otkDbo is not null ? Guid.Parse(otkDbo.Id) : null,
+                otkDbo is not null ? new OneTimeKey(otkDbo.PublicKey) : null
+            );
+
+            // Remove the used one-time key if any
+            if (otkDbo is not null)
+            {
+                _context.OneTimePreKeys.Remove(otkDbo);
+                await _context.SaveChangesAsync();
+            }
+
+            await transaction.CommitAsync();
+            return bundle;
+        }
+        catch
+        {
+            await transaction.RollbackAsync();
+            throw;
+        }
+    }
 }
 

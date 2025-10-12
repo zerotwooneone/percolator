@@ -167,6 +167,10 @@ namespace Percolator.Application.Network
             var establishedPkh = SHA256.HashData(establishedSpki);
             await _pkhStore.ActivateIfChangedAsync(remotePeer.Id, establishedSpki, establishedPkh, DateTimeOffset.UtcNow, cancellationToken);
 
+            //todo: the initiator must send an encrypted message using the new session we just created.
+            // The first message must contain the session ID and the ephemeral key we used to create the session.
+            // The first message may also contain application specific information.
+            
             // Build response payload and sign
             var responsePayload = new EstablishDirectSessionResponse.Types.ResponsePayload
             {
