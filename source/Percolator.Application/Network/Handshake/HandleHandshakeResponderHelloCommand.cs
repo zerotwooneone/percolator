@@ -2,10 +2,13 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using MediatR;
+using Google.Protobuf;
+using Percolator.Contracts;
 using Microsoft.Extensions.Logging;
 using Percolator.Application.Identity;
 using Percolator.Application.Sessions;
 using Percolator.Cryptography;
+using Percolator.Network;
 
 namespace Percolator.Application.Network.Handshake
 {
@@ -51,22 +54,20 @@ namespace Percolator.Application.Network.Handshake
             var directSessionId = await _ratchetLookup.TryResolveAsync(header.PreKey, _active.Identity.SelfIdentityId, cancellationToken);
             if (directSessionId is null)
             {
-                // Slow-path: iterate Pending pre-handshake entries and attempt decrypt
-                await foreach (var record in _preHandshakeStore.EnumeratePendingAsync(_active.Identity.SelfIdentityId, cancellationToken))
-                {
-                    var inferred = await _sessions.TryInferAndReceiveAsync(ratchetMessage, cancellationToken);
-                    if (inferred is not null)
+                // Delegate slow-path finalize to the session manager. It will persist the session, upsert the ratchet index,
+                // and delete the matching prehandshake record if found.
+                var (sid, pt) = await _sessions.CompleteHandshakeAsync(
+                    ratchetMessage,
+                    pt =>
                     {
-                        // Upsert ratchet header key -> session mapping and cleanup pre-handshake record
-                        await _ratchetLookup.UpsertAsync(new Percolator.Network.DirectSessionId(inferred.Value.sessionId.Value), _active.Identity.SelfIdentityId, header.PreKey, DateTimeOffset.UtcNow, cancellationToken);
-                        await _preHandshakeStore.DeleteAsync(record.Id, _active.Identity.SelfIdentityId, cancellationToken);
-                        _logger.LogInformation("Responder hello slow-path succeeded for session {SessionId}", inferred.Value.sessionId.Value);
-                        //todo: need to create and store the session
-                        return;
-                    }
-                }
-
-                throw new InvalidOperationException("Responder hello: unable to resolve session via fast or slow path.");
+                        var hello = HandshakeResponderHello.Parser.ParseFrom(pt.Value);
+                        if (hello.Version != 1 || string.IsNullOrWhiteSpace(hello.DirectSessionId))
+                            throw new InvalidOperationException("Responder hello missing required fields.");
+                        return new SessionId(Guid.Parse(hello.DirectSessionId));
+                    },
+                    cancellationToken);
+                directSessionId = new Percolator.Network.DirectSessionId(sid.Value);
+                _logger.LogInformation("Responder hello slow-path succeeded for session {SessionId}", sid.Value);
             }
 
             // Decrypt using explicit session (fast-path)

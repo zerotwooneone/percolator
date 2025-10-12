@@ -47,10 +47,6 @@ public class DirectSessionManager : IDirectSessionManager
         _preHandshakeStore = preHandshakeStore;
     }
 
-    /// <summary>
-    /// Convenience overload of <see cref="CompleteHandshakeAsync{TEnvelop}(SessionRatchetMessage, Func{Plaintext, TEnvelop}, Func{TEnvelop, SessionId}, CancellationToken)"/>
-    /// that returns the plaintext envelope directly.
-    /// </summary>
     public async Task<(SessionId sessionId, Plaintext plaintext)> CompleteHandshakeAsync(
         SessionRatchetMessage encryptedMessage,
         Func<Plaintext, SessionId> getSessionId,
@@ -59,8 +55,6 @@ public class DirectSessionManager : IDirectSessionManager
         var result = await CompleteAsync(encryptedMessage, pt => pt, getSessionId, cancellationToken).ConfigureAwait(false);
         return (result.sessionId, result.envelop);
     }
-
-    
 
     private async Task<(SessionId sessionId, TEnvelop envelop)> CompleteAsync<TEnvelop>(
         SessionRatchetMessage encryptedMessage,

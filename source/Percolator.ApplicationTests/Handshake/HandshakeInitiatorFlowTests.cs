@@ -18,6 +18,8 @@ using System.Linq;
 using Percolator.Application.KeyExchange;
 using Percolator.Application.Network;
 using Percolator.Network;
+using Google.Protobuf;
+using Percolator.Contracts;
 
 namespace Percolator.ApplicationTests.Handshake;
 
@@ -102,6 +104,11 @@ public class HandshakeInitiatorFlowTests
             RemotePreKeySpki: remotePreKeySpki,
             InitiatorPayload: new byte[] { 9, 9 });
 
+        // Since handler will now decrypt after finalize, set up decrypt to succeed
+        sessions
+            .Setup(s => s.ReceiveMessageAsync(It.IsAny<SessionId>(), It.IsAny<SessionRatchetMessage>()))
+            .ReturnsAsync(new Plaintext(new byte[] { 0xCD }));
+
         // Act
         await handler.Handle(cmd, CancellationToken.None);
 
@@ -165,7 +172,7 @@ public class HandshakeInitiatorFlowTests
     }
 
     [Test]
-    public void HandleHandshakeResponderHello_FastPathMiss_ThrowsUntilSlowPathImplemented()
+    public async Task HandleHandshakeResponderHello_FastPathMiss_UsesSlowPathComplete()
     {
         // Arrange
         var identity = new IdentityRecord(Guid.NewGuid(), "self") { SelfIdentityId = 5 };
@@ -193,7 +200,93 @@ public class HandshakeInitiatorFlowTests
         var payload = SessionRatchetMessage.Create(pk, 1, 0, new Ciphertext(new byte[] { 0xD1 })).Value;
         var cmd = new HandleHandshakeResponderHelloCommand(payload);
 
-        // Act + Assert
-        Assert.ThrowsAsync<InvalidOperationException>(() => handler.Handle(cmd, CancellationToken.None));
+        // Setup CompleteHandshakeAsync to return a session id parsed from HandshakeResponderHello
+        var expectedSid = new SessionId(Guid.NewGuid());
+        sessions
+            .Setup(s => s.CompleteHandshakeAsync(It.IsAny<SessionRatchetMessage>(), It.IsAny<Func<Plaintext, SessionId>>(), It.IsAny<CancellationToken>()))
+            .Returns<SessionRatchetMessage, Func<Plaintext, SessionId>, CancellationToken>((msg, getSid, ct) =>
+            {
+                var hello = new HandshakeResponderHello
+                {
+                    Version = 1,
+                    DirectSessionId = expectedSid.Value.ToString(),
+                    ResponderEphemeralKey = ByteString.CopyFrom(new byte[] { 0x01 })
+                };
+                var pt = new Plaintext(hello.ToByteArray());
+                var sid = getSid(pt);
+                return Task.FromResult((sid, pt));
+            });
+
+        // Since handler will now decrypt after finalize, set up decrypt to succeed
+        sessions
+            .Setup(s => s.ReceiveMessageAsync(It.IsAny<SessionId>(), It.IsAny<SessionRatchetMessage>()))
+            .ReturnsAsync(new Plaintext(new byte[] { 0xAB }));
+
+        // Act: should succeed via slow-path finalize
+        await handler.Handle(cmd, CancellationToken.None);
+
+        // Verify slow-path CompleteHandshakeAsync was invoked
+        sessions.Verify(s => s.CompleteHandshakeAsync(It.IsAny<SessionRatchetMessage>(), It.IsAny<Func<Plaintext, SessionId>>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Test]
+    public async Task HandleHandshakeResponderHello_SlowPath_ParsesResponderHelloAndExtractsSessionId()
+    {
+        // Arrange active identity
+        var identity = new IdentityRecord(Guid.NewGuid(), "self") { SelfIdentityId = 9 };
+        var active = new ActiveIdentityContext { Identity = identity };
+
+        var sessions = new Mock<IDirectSessionManager>(MockBehavior.Strict);
+        var lookup = new Mock<IRatchetKeySessionLookup>(MockBehavior.Strict);
+        lookup
+            .Setup(l => l.TryResolveAsync(It.IsAny<PreKey>(), identity.SelfIdentityId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((DirectSessionId?)null);
+
+        var preStore = new Mock<IPreHandshakeSessionStore>(MockBehavior.Strict);
+        preStore
+            .Setup(s => s.EnumeratePendingAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .Returns((int _, CancellationToken __) => EmptyPreHandshake());
+
+        var handler = new HandleHandshakeResponderHelloHandler(
+            new NullLogger<HandleHandshakeResponderHelloHandler>(),
+            sessions.Object,
+            active,
+            lookup.Object,
+            preStore.Object);
+
+        // Build a valid ratchet message header; contents don't matter for this unit test since CompleteHandshakeAsync is mocked
+        var pk = new PreKey(new byte[] { 0xE1 });
+        var payload = SessionRatchetMessage.Create(pk, 1, 0, new Ciphertext(new byte[] { 0xF1 })).Value;
+        var cmd = new HandleHandshakeResponderHelloCommand(payload);
+
+        // Expected session id to be embedded in HandshakeResponderHello protobuf
+        var expectedSid = new SessionId(Guid.NewGuid());
+
+        sessions
+            .Setup(s => s.CompleteHandshakeAsync(It.IsAny<SessionRatchetMessage>(), It.IsAny<Func<Plaintext, SessionId>>(), It.IsAny<CancellationToken>()))
+            .Returns<SessionRatchetMessage, Func<Plaintext, SessionId>, CancellationToken>((msg, getSid, ct) =>
+            {
+                var hello = new HandshakeResponderHello
+                {
+                    Version = 1,
+                    DirectSessionId = expectedSid.Value.ToString(),
+                    ResponderEphemeralKey = ByteString.CopyFrom(new byte[] { 0x02 })
+                };
+                var pt = new Plaintext(hello.ToByteArray());
+                var sid = getSid(pt);
+                Assert.That(sid.Value, Is.EqualTo(expectedSid.Value), "Parsed SessionId should match expected");
+                return Task.FromResult((sid, pt));
+            });
+
+        // Since handler will now decrypt after finalize, set up decrypt to succeed
+        sessions
+            .Setup(s => s.ReceiveMessageAsync(It.IsAny<SessionId>(), It.IsAny<SessionRatchetMessage>()))
+            .ReturnsAsync(new Plaintext(new byte[] { 0xEF }));
+
+        // Act
+        await handler.Handle(cmd, CancellationToken.None);
+
+        // Assert that slow-path was used and session id parsed
+        sessions.Verify(s => s.CompleteHandshakeAsync(It.IsAny<SessionRatchetMessage>(), It.IsAny<Func<Plaintext, SessionId>>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 }
