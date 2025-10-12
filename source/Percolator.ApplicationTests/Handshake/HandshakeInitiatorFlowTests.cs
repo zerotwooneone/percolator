@@ -229,6 +229,155 @@ public class HandshakeInitiatorFlowTests
     }
 
     [Test]
+    public async Task ComposeInitiatorHello_InitialMessage_Receivable_After_Responder_Establishes()
+    {
+        // Arrange initiator active identity with keys
+        var initiatorIdentity = new IdentityRecord(Guid.NewGuid(), "initiator") { SelfIdentityId = 11 };
+        using var ik = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        using var spk = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        var initiatorActive = new ActiveIdentityContext { Identity = initiatorIdentity, Keys = new X3dhKeys(ik, spk) };
+
+        // Inputs for compose
+        var recipientPkh = SHA256.HashData(ik.PublicKey.ExportSubjectPublicKeyInfo());
+        var remoteIdentitySpki = ik.PublicKey.ExportSubjectPublicKeyInfo();
+        var remotePreKeySpki = spk.PublicKey.ExportSubjectPublicKeyInfo();
+        var spkId = Guid.NewGuid();
+        Guid? otkId = null;
+
+        // Mocks: X3DH returns a shared secret
+        var x3dh = new Mock<IX3DHOrchestrator>();
+        x3dh.Setup(x => x.InitiateHandshake(It.IsAny<Percolator.Cryptography.X3dPreKeyBundle>(), It.IsAny<ECDiffieHellman>()))
+            .Returns(new SharedSecret(new byte[] { 0x11, 0x22, 0x33 }));
+
+        // Prepare a first ratchet message as if produced by initiator establish
+        var preKeyForHeader = new PreKey(new byte[] { 0xA5 });
+        var expectedFirstPlaintext = new Plaintext(new byte[] { 0xDE, 0xAD });
+        var firstMessage = SessionRatchetMessage.Create(preKeyForHeader, 1, 0, new Ciphertext(new byte[] { 0xBE, 0xEF }));
+
+        // Sessions mock: initiator establish returns first message; responder receive returns expected plaintext after establish
+        var sessions = new Mock<IDirectSessionManager>(MockBehavior.Strict);
+        sessions.Setup(s => s.EstablishSessionAsInitiatorAsync(
+                It.IsAny<byte[]>(),
+                It.IsAny<Guid>(),
+                It.IsAny<Guid?>(),
+                It.IsAny<RatchetIdentityKey>(),
+                It.IsAny<PreKey>(),
+                It.IsAny<SharedSecret>(),
+                It.IsAny<ECDiffieHellman>(),
+                It.IsAny<Plaintext?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(firstMessage);
+
+        // Compose handler under test
+        var composeHandler = new ComposeAndEnqueueInitiatorHelloHandler(
+            new NullLogger<ComposeAndEnqueueInitiatorHelloHandler>(),
+            initiatorActive,
+            x3dh.Object,
+            new Mock<IMediator>().Object,
+            sessions.Object);
+
+        var composeCmd = new ComposeAndEnqueueInitiatorHelloCommand(
+            RecipientPublicKeyHash: recipientPkh,
+            RemoteIdentityKeySpki: remoteIdentitySpki,
+            SignedPreKeyId: spkId,
+            OneTimePreKeyId: otkId,
+            RemotePreKeySpki: remotePreKeySpki,
+            InitiatorPayload: expectedFirstPlaintext.Value);
+
+        // Act: Compose (produces initiator hello and first message via session manager)
+        await composeHandler.Handle(composeCmd, CancellationToken.None);
+
+        // Arrange responder side handler and inputs
+        var responderIdentity = new IdentityRecord(Guid.NewGuid(), "responder") { SelfIdentityId = 22 };
+        var responderActive = new ActiveIdentityContext { Identity = responderIdentity };
+        var pkhStore = new Mock<IPeerPublicSigningKeyStore>(MockBehavior.Strict);
+        pkhStore
+            .Setup(p => p.ActivateIfChangedAsync(It.IsAny<Percolator.Identity.PeerId?>(), It.IsAny<byte[]>(), It.IsAny<byte[]>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        var preKeyRepo = new Mock<IPreKeyBundleRepository>(MockBehavior.Strict);
+        preKeyRepo
+            .Setup(r => r.TryPopBundleAsync(It.IsAny<Percolator.Cryptography.Primitives.PeerId>(), It.IsAny<Guid>(), It.IsAny<Guid?>()))
+            .ReturnsAsync(() => new Percolator.Cryptography.PreKeyBundle(
+                identitySigningKey: new RatchetIdentityKey(ik.PublicKey.ExportSubjectPublicKeyInfo()),
+                signedPreKeyId: spkId,
+                signedPreKey: new PreKey(spk.PublicKey.ExportSubjectPublicKeyInfo()),
+                signedPreKeySignature: new Percolator.Cryptography.Signature(new byte[]{0x01}),
+                oneTimePreKeyId: null,
+                oneTimePreKey: null));
+        var directRepo = new Mock<IDirectSessionRepository>(MockBehavior.Strict);
+        directRepo
+            .Setup(r => r.GetByRemotePeerIdAsync(It.IsAny<Percolator.Network.PeerId>(), responderIdentity.SelfIdentityId))
+            .ReturnsAsync((DirectSession?)null);
+        directRepo
+            .Setup(r => r.UpsertAsync(It.IsAny<Percolator.Network.PeerId>(), It.IsAny<DirectSessionId>(), responderIdentity.SelfIdentityId))
+            .Returns(Task.CompletedTask);
+
+        // Sessions mock for responder establish and subsequent receive
+        sessions
+            .Setup(s => s.EstablishSessionAsResponderAsync(
+                It.IsAny<SessionId>(),
+                It.IsAny<RatchetIdentityKey>(),
+                It.IsAny<PreKey>(),
+                It.IsAny<ECDiffieHellman>(),
+                It.IsAny<SharedSecret>()))
+            .Returns(Task.CompletedTask);
+
+        // After responder establishes, it should be able to receive the first message using the established session id
+        sessions
+            .Setup(s => s.ReceiveMessageAsync(It.IsAny<SessionId>(), It.Is<SessionRatchetMessage>(m => m.Value.SequenceEqual(firstMessage.Value))))
+            .ReturnsAsync(expectedFirstPlaintext);
+
+        var initiatorHelloHandler = new HandleHandshakeInitiatorHelloHandler(
+            new NullLogger<HandleHandshakeInitiatorHelloHandler>(),
+            x3dh.Object,
+            pkhStore.Object,
+            preKeyRepo.Object,
+            directRepo.Object,
+            sessions.Object,
+            responderActive);
+
+        // Provide a valid CompleteHandshake response so handler can proceed
+        using var responderPriv = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        x3dh
+            .Setup(o => o.CompleteHandshake(
+                It.IsAny<RatchetIdentityKey>(),
+                It.IsAny<RatchetEphemeralKey>(),
+                It.IsAny<ECDiffieHellman?>()))
+            .Returns(new HandshakeResponse(
+                SharedSecret: new SharedSecret(new byte[] { 0x44, 0x55 }),
+                ResponderBundle: new X3dPreKeyBundle(
+                    IdentitySigningKey: new RatchetIdentityKey(ik.PublicKey.ExportSubjectPublicKeyInfo()),
+                    SignedPreKey: new PreKey(spk.PublicKey.ExportSubjectPublicKeyInfo()),
+                    OneTimePreKey: null),
+                ResponderPrivateKeyUsed: responderPriv));
+
+        var cmd = new HandleHandshakeInitiatorHelloCommand(
+            InitiatorIdentityKeySpki: remoteIdentitySpki,
+            InitiatorEphemeralKeySpki: remotePreKeySpki,
+            SignedPreKeyId: spkId,
+            OneTimePreKeyId: otkId,
+            RemotePeerId: null);
+
+        // Act: responder handles initiator hello and establishes responder session
+        var envelope = await initiatorHelloHandler.Handle(cmd, CancellationToken.None);
+        Assert.That(envelope, Is.Not.Null);
+        Assert.That(envelope!.HandshakeResponderHello, Is.Not.Null);
+        var directSessionGuid = Guid.Parse(envelope.HandshakeResponderHello.DirectSessionId);
+
+        // Assert: now recipient can receive the first message with that session id
+        var pt = await sessions.Object.ReceiveMessageAsync(new SessionId(directSessionGuid), firstMessage);
+        Assert.That(pt!.Value, Is.EqualTo(expectedFirstPlaintext.Value));
+
+        // Verify establishment occurred for the derived session id
+        sessions.Verify(s => s.EstablishSessionAsResponderAsync(
+            It.Is<SessionId>(sid => sid.Value == directSessionGuid),
+            It.IsAny<RatchetIdentityKey>(),
+            It.IsAny<PreKey>(),
+            It.IsAny<ECDiffieHellman>(),
+            It.IsAny<SharedSecret>()), Times.Once);
+    }
+
+    [Test]
     public async Task HandleHandshakeResponderHello_SlowPath_ParsesResponderHelloAndExtractsSessionId()
     {
         // Arrange active identity
