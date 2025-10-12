@@ -270,12 +270,8 @@ namespace Percolator.ApplicationTests.Handshake
             var sidBytes = sessionId.Value.ToByteArray();
             var responderHello = bobDsm.EncryptMessageAsync(sessionId, new Plaintext(sidBytes)).GetAwaiter().GetResult();
 
-            // Envelope helpers
-            (SessionId SessionId, Plaintext Pt) getEnv(Plaintext pt) => (new SessionId(new Guid(pt.Value)), pt);
-            SessionId getSid((SessionId SessionId, Plaintext Pt) env) => env.SessionId;
-
             // Act
-            var result = aliceDsm.CompleteHandshakeAsync(responderHello, getEnv, getSid, CancellationToken.None).GetAwaiter().GetResult();
+            var result = aliceDsm.CompleteHandshakeAsync(responderHello, pt => new SessionId(new Guid(pt.Value)), CancellationToken.None).GetAwaiter().GetResult();
 
             // Assert
             Assert.That(result.sessionId.Value, Is.EqualTo(sessionId.Value));
@@ -335,9 +331,7 @@ namespace Percolator.ApplicationTests.Handshake
 
             var sidBytes = sessionId.Value.ToByteArray();
             var responderHello = await bobDsm.EncryptMessageAsync(sessionId, new Plaintext(sidBytes));
-            (SessionId SessionId, Plaintext Pt) getEnv(Plaintext pt) => (new SessionId(new Guid(pt.Value)), pt);
-            SessionId getSid((SessionId SessionId, Plaintext Pt) env) => env.SessionId;
-            var finalizeResult = await aliceDsm.CompleteHandshakeAsync(responderHello, getEnv, getSid, CancellationToken.None);
+            var finalizeResult = await aliceDsm.CompleteHandshakeAsync(responderHello, pt => new SessionId(new Guid(pt.Value)), CancellationToken.None);
             var establishedSid = finalizeResult.sessionId;
 
             // Act: Bob sends to Alice
@@ -371,7 +365,7 @@ namespace Percolator.ApplicationTests.Handshake
 
             // A random message that won't decrypt with any state
             var bogus = new SessionRatchetMessage(new byte[]{1,2,3,4,5,6});
-            Assert.Catch<Exception>(() => dsm.CompleteHandshakeAsync(bogus, pt => (new SessionId(Guid.NewGuid()), pt), env => env.Item1, CancellationToken.None).GetAwaiter().GetResult());
+            Assert.Catch<Exception>(() => dsm.CompleteHandshakeAsync(bogus, pt => new SessionId(Guid.NewGuid()), CancellationToken.None).GetAwaiter().GetResult());
         }
 
         [Test]
@@ -402,7 +396,7 @@ namespace Percolator.ApplicationTests.Handshake
 
             // Corrupt message payload so decrypt fails for all candidates
             var corrupted = new SessionRatchetMessage(new byte[]{0xFF,0xEE,0xDD});
-            Assert.Catch<Exception>(() => dsm.CompleteHandshakeAsync(corrupted, pt => (new SessionId(Guid.NewGuid()), pt), env => env.Item1, CancellationToken.None).GetAwaiter().GetResult());
+            Assert.Catch<Exception>(() => dsm.CompleteHandshakeAsync(corrupted, pt => new SessionId(Guid.NewGuid()), CancellationToken.None).GetAwaiter().GetResult());
             ratchetLookup.VerifyNoOtherCalls();
         }
     }

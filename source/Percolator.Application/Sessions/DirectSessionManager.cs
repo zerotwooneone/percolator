@@ -12,7 +12,11 @@ using Percolator.Application.Network.Handshake;
 namespace Percolator.Application.Sessions;
 
 /// <summary>
-/// Manages Double Ratchet sessions for direct messaging, working directly with cryptography primitives.
+/// Manages Double Ratchet sessions for direct messaging.
+/// Provides two establishment flows:
+/// - Direct: caller supplies a <see cref="SessionId"/> and keys to create sessions on both sides.
+/// - Prehandshake: caller saves an initiator intent and later completes it on responder hello.
+/// Thread safety: per-session concurrency is controlled via an internal semaphore per <see cref="SessionId"/>.
 /// </summary>
 public class DirectSessionManager : IDirectSessionManager
 {
@@ -43,17 +47,20 @@ public class DirectSessionManager : IDirectSessionManager
         _preHandshakeStore = preHandshakeStore;
     }
 
-    public Task<(SessionId sessionId, TEnvelop envelop)> CompleteHandshakeAsync<TEnvelop>(
+    /// <summary>
+    /// Convenience overload of <see cref="CompleteHandshakeAsync{TEnvelop}(SessionRatchetMessage, Func{Plaintext, TEnvelop}, Func{TEnvelop, SessionId}, CancellationToken)"/>
+    /// that returns the plaintext envelope directly.
+    /// </summary>
+    public async Task<(SessionId sessionId, Plaintext plaintext)> CompleteHandshakeAsync(
         SessionRatchetMessage encryptedMessage,
-        Func<Plaintext, TEnvelop> getEnvelope,
-        Func<TEnvelop, SessionId> getSessionId,
+        Func<Plaintext, SessionId> getSessionId,
         CancellationToken cancellationToken)
     {
-        if (_activeIdentityContext.Identity is null)
-            throw new InvalidOperationException("Identity context not loaded");
-
-        return CompleteAsync(encryptedMessage, getEnvelope, getSessionId, cancellationToken);
+        var result = await CompleteAsync(encryptedMessage, pt => pt, getSessionId, cancellationToken).ConfigureAwait(false);
+        return (result.sessionId, result.envelop);
     }
+
+    
 
     private async Task<(SessionId sessionId, TEnvelop envelop)> CompleteAsync<TEnvelop>(
         SessionRatchetMessage encryptedMessage,
@@ -155,6 +162,10 @@ public class DirectSessionManager : IDirectSessionManager
         return (sessionId, envelope);
     }
 
+    /// <summary>
+    /// Establishes a direct initiator session for the given <see cref="SessionId"/>.
+    /// Use this when both sides coordinate a session id out-of-band (no prehandshake).
+    /// </summary>
     public async Task EstablishSessionAsInitiatorAsync(
         SessionId sessionId,
         RatchetIdentityKey remoteIdentityKey,
@@ -212,6 +223,10 @@ public class DirectSessionManager : IDirectSessionManager
         _sessionLocks.TryAdd(sessionId, new SemaphoreSlim(1, 1));
     }
 
+    /// <summary>
+    /// Establishes a direct responder session for the given <see cref="SessionId"/>.
+    /// Use with the initiator's identity public key and ephemeral public key.
+    /// </summary>
     public async Task EstablishSessionAsResponderAsync(
         SessionId sessionId, 
         RatchetIdentityKey remoteIdentityKey,
@@ -260,6 +275,10 @@ public class DirectSessionManager : IDirectSessionManager
         _sessionLocks.TryAdd(sessionId, new SemaphoreSlim(1, 1));
     }
 
+    /// <summary>
+    /// Receives and decrypts a message for an established <see cref="SessionId"/>.
+    /// Updates session state and upserts the ratchet index mapping upon success.
+    /// </summary>
     public async Task<Plaintext?> ReceiveMessageAsync(
         SessionId sessionId, 
         SessionRatchetMessage encryptedMessage)
@@ -324,6 +343,9 @@ public class DirectSessionManager : IDirectSessionManager
         }
     }
 
+    /// <summary>
+    /// Encrypts a message within an established <see cref="SessionId"/> and persists updated state.
+    /// </summary>
     public async Task<SessionRatchetMessage> EncryptMessageAsync(
         SessionId sessionId, 
         Plaintext plaintext)
@@ -370,6 +392,10 @@ public class DirectSessionManager : IDirectSessionManager
         }
     }
 
+    /// <summary>
+    /// Attempts to infer the target session among all known sessions by trial-decrypting.
+    /// Returns null if none match; on success returns the matched <see cref="SessionId"/> and plaintext.
+    /// </summary>
     public async Task<(SessionId sessionId, Plaintext? plaintext)?> TryInferAndReceiveAsync(SessionRatchetMessage encryptedMessage, CancellationToken cancellationToken)
     {
         if (_activeIdentityContext.Identity is null)
@@ -419,8 +445,8 @@ public class DirectSessionManager : IDirectSessionManager
     }
 
     /// <summary>
-    /// Persists an initiator intent (pre-handshake Pending record) without a session id.
-    /// Stores minimal material required to complete handshake on responder hello.
+    /// Saves an initiator prehandshake intent and optionally encrypts the first message.
+    /// Use with <see cref="CompleteHandshakeAsync{TEnvelop}(SessionRatchetMessage, Func{Plaintext, TEnvelop}, Func{TEnvelop, SessionId}, CancellationToken)"/> to finalize later.
     /// </summary>
     public async Task<SessionRatchetMessage?> EstablishSessionAsInitiatorAsync(
         byte[] recipientPublicKeyHash,

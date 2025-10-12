@@ -44,9 +44,10 @@ public interface IDirectSessionManager
     Task<(Percolator.Cryptography.SessionId sessionId, Plaintext? plaintext)?> TryInferAndReceiveAsync(SessionRatchetMessage encryptedMessage, CancellationToken cancellationToken);
     
     /// <summary>
-    /// Completes a pre-handshake session establishment by decrypting the encrypted message and extracting the session id and envelope. The session is created and stored.
+    /// Completes a pre-handshake session establishment by decrypting the responder hello and extracting the session id from the plaintext.
+    /// The session is created, stored, and the matched prehandshake record is removed.
     /// </summary>
-    Task<(Percolator.Cryptography.SessionId sessionId, TEnvelop envelop)> CompleteHandshakeAsync<TEnvelop>(SessionRatchetMessage encryptedMessage,Func<Plaintext, TEnvelop> getEnvelope, Func<TEnvelop, SessionId> getSessionId, CancellationToken cancellationToken);
+    Task<(Percolator.Cryptography.SessionId sessionId, Plaintext plaintext)> CompleteHandshakeAsync(SessionRatchetMessage encryptedMessage, Func<Plaintext, SessionId> getSessionId, CancellationToken cancellationToken);
 
     /// <summary>
     /// Persists an initiator intent (pre-handshake Pending record) without a session id.
