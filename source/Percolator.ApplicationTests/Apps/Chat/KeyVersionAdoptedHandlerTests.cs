@@ -20,6 +20,9 @@ namespace Percolator.ApplicationTests.Apps.Chat
         private Mock<IRecipientPkhResolver> _pkh = null!;
         private Mock<IActingAdminResolver> _acting = null!;
         private Microsoft.Extensions.Logging.ILoggerFactory _loggerFactory = null!;
+        private Percolator.Application.Identity.ActiveIdentityContext _active = null!;
+        private Mock<Percolator.Application.Sessions.IDirectSessionManager> _sessions = null!;
+        private Mock<IDirectSessionRepository> _directRepo = null!;
 
         [SetUp]
         public void SetUp()
@@ -29,6 +32,9 @@ namespace Percolator.ApplicationTests.Apps.Chat
             _pkh = new Mock<IRecipientPkhResolver>(MockBehavior.Strict);
             _acting = new Mock<IActingAdminResolver>(MockBehavior.Strict);
             _loggerFactory = Microsoft.Extensions.Logging.LoggerFactory.Create(b=>{});
+            _active = new Percolator.Application.Identity.ActiveIdentityContext { Identity = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "self") { SelfIdentityId = 1 } };
+            _sessions = new Mock<Percolator.Application.Sessions.IDirectSessionManager>(MockBehavior.Strict);
+            _directRepo = new Mock<IDirectSessionRepository>(MockBehavior.Strict);
         }
 
         [TearDown]
@@ -40,7 +46,7 @@ namespace Percolator.ApplicationTests.Apps.Chat
         private KeyVersionAdoptedHandler CreateSut()
         {
             var logger = NullLogger<KeyVersionAdoptedHandler>.Instance;
-            return new KeyVersionAdoptedHandler(logger, _mediator.Object, _signing.Object, new Percolator.Application.Identity.ActiveIdentityContext(), _pkh.Object, _acting.Object);
+            return new KeyVersionAdoptedHandler(logger, _mediator.Object, _signing.Object, _active, _pkh.Object, _acting.Object, _sessions.Object, _directRepo.Object);
         }
 
         [Test]
@@ -53,20 +59,24 @@ namespace Percolator.ApplicationTests.Apps.Chat
 
             var pub = new PublicKey(new byte[]{ 1,2,3 });
             _signing.Setup(s => s.GetActivePublicKey()).Returns(pub);
-            _signing.Setup(s => s.Sign(It.IsAny<Payload>())).Returns(new Signature(new byte[]{ 9,9 }));
-
             var pkh = new byte[32];
             _pkh.Setup(p => p.GetActivePkhAsync(adminPeer, It.IsAny<CancellationToken>())).ReturnsAsync(pkh);
+            _signing.Setup(s => s.Sign(It.IsAny<Payload>())).Returns(new Signature(new byte[]{ 9,9 }));
+
+            // Session lookup + encrypt path
+            var directId = new Percolator.Network.DirectSessionId(Guid.NewGuid());
+            _directRepo.Setup(r => r.GetByRemotePeerIdAsync(It.IsAny<Percolator.Network.PeerId>(), It.IsAny<int>()))
+                .ReturnsAsync(new Percolator.Network.DirectSession(new Percolator.Network.PeerId(adminPeer), directId));
+            _sessions.Setup(s => s.EncryptMessageAsync(It.IsAny<Percolator.Cryptography.SessionId>(), It.IsAny<Percolator.Cryptography.Plaintext>()))
+                .ReturnsAsync(Percolator.Cryptography.SessionRatchetMessage.Create(new Percolator.Cryptography.PreKey(new byte[]{1}), 0, 0, new Percolator.Cryptography.Ciphertext(new byte[]{2})));
 
             _mediator.Setup(m => m.Send(It.IsAny<EnqueueOpaqueMessageCommand>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new Percolator.MessageQueue.Results.EnqueueOpaqueMessageResult(true, null));
-
             var sut = CreateSut();
             await sut.Handle(new KeyVersionAdoptedNotification(convoId, keyVersion), CancellationToken.None);
 
             _mediator.Verify(m => m.Send(It.IsAny<EnqueueOpaqueMessageCommand>(), It.IsAny<CancellationToken>()), Times.Once);
         }
-
         [Test]
         public async Task Skips_When_Admin_Pkh_Missing()
         {

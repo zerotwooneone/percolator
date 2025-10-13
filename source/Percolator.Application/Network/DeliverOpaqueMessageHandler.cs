@@ -184,6 +184,27 @@ namespace Percolator.Application.Network
 
                 var internalEnvelope = InternalEnvelope.Parser.ParseFrom(plaintext.Value);
                 InternalEnvelope? responseEnvelope = null;
+
+                // Pre-filter allowed cases for this handler
+                static bool IsAllowedCase(InternalEnvelope.ApplicationPayloadOneofCase c) => c is
+                    InternalEnvelope.ApplicationPayloadOneofCase.ChatEnvelope or
+                    InternalEnvelope.ApplicationPayloadOneofCase.DhtEnvelope or
+                    InternalEnvelope.ApplicationPayloadOneofCase.PrekeyEnvelope or
+                    InternalEnvelope.ApplicationPayloadOneofCase.MessageQueueEnvelope or
+                    InternalEnvelope.ApplicationPayloadOneofCase.RelayOpaqueEnvelope or
+                    InternalEnvelope.ApplicationPayloadOneofCase.SubmitPreKeyBundleResponse or
+                    InternalEnvelope.ApplicationPayloadOneofCase.GetPreKeyBundleResponse or
+                    InternalEnvelope.ApplicationPayloadOneofCase.EnqueueOpaqueMessageResponse or
+                    InternalEnvelope.ApplicationPayloadOneofCase.FetchQueuedMessagesResponse;
+
+                if (!IsAllowedCase(internalEnvelope.ApplicationPayloadCase))
+                {
+                    _logger.LogWarning("InternalEnvelope case {Case} not allowed in DeliverOpaque path", internalEnvelope.ApplicationPayloadCase);
+                    return new DeliverOpaqueMessageResult();
+                }
+
+                var ctx = new SessionContext(inferredSessionId.Value, _activeIdentityContext.Identity!.SelfIdentityId, directSession.RemotePeerId.Value);
+                await _mediator.Send(new ProcessInternalEnvelopeCommand(internalEnvelope, ctx), cancellationToken);
                 
                 connectionInfo.UpdateLastSeen(endpoint, DateTimeOffset.UtcNow);
                 await _peerConnectionRepository.SaveAsync(connectionInfo);
@@ -200,28 +221,6 @@ namespace Percolator.Application.Network
                         var response = await HandlePrekeyEnvelopeAsync(internalEnvelope.PrekeyEnvelope, connectionInfo.Id, cancellationToken);
                         responseEnvelope = new InternalEnvelope { SubmitPreKeyBundleResponse = response };
                         break;
-                    case InternalEnvelope.ApplicationPayloadOneofCase.HandshakeInitiatorHello:
-                    {
-                        var hello = internalEnvelope.HandshakeInitiatorHello;
-                        var spki = hello.InitiatorIdentityKeySpki.ToByteArray();
-                        var eph = hello.InitiatorEphemeralKeySpki.ToByteArray();
-                        var spkId = new Guid(hello.SignedPreKeyId.ToByteArray());
-                        Guid? otkId = hello.HasOneTimePreKeyId ? new Guid(hello.OneTimePreKeyId.ToByteArray()) : (Guid?)null;
-
-                        var resultEnv = await _mediator.Send(
-                            new Percolator.Application.Network.Handshake.HandleHandshakeInitiatorHelloCommand(
-                                spki,
-                                eph,
-                                spkId,
-                                otkId,
-                                new IdentityPeerId(remotePeerId.Value)),
-                            cancellationToken);
-                        if (resultEnv is not null)
-                        {
-                            responseEnvelope = resultEnv;
-                        }
-                        break;
-                    }
                     case InternalEnvelope.ApplicationPayloadOneofCase.MessageQueueEnvelope:
                         switch (internalEnvelope.MessageQueueEnvelope.MessageCase)
                         {
@@ -282,11 +281,47 @@ namespace Percolator.Application.Network
 
                 var responseBytes = await EncryptResponseEnvelope(inferredSessionId, responseEnvelope);
                 return new DeliverOpaqueMessageResult { ResponsePayloadBytes = responseBytes };
-
             }
-            catch (Exception ex)
+            catch (Exception drEx)
             {
-                _logger.LogError(ex, "Error processing opaque message (session inferred from ratchet header)");
+                // Fallback: this payload may be a plaintext HandshakeInitiatorHello (bootstrap before DR exists).
+                try
+                {
+                    var hello = HandshakeInitiatorHello.Parser.ParseFrom(request.PayloadBytes);
+                    if (hello is not null && hello.HasInitiatorIdentityKeySpki && hello.HasInitiatorEphemeralKeySpki && hello.HasSignedPreKeyId)
+                    {
+                        var spki = hello.InitiatorIdentityKeySpki.ToByteArray();
+                        var eph = hello.InitiatorEphemeralKeySpki.ToByteArray();
+                        var spkId = new Guid(hello.SignedPreKeyId.ToByteArray());
+                        Guid? otkId = hello.HasOneTimePreKeyId ? new Guid(hello.OneTimePreKeyId.ToByteArray()) : (Guid?)null;
+
+                        var resultEnv = await _mediator.Send(
+                            new Percolator.Application.Network.Handshake.HandleHandshakeInitiatorHelloCommand(
+                                spki,
+                                eph,
+                                spkId,
+                                otkId,
+                                null,
+                                hello.HasEncryptedPayload ? hello.EncryptedPayload.ToByteArray() : null),
+                            cancellationToken);
+
+                        if (resultEnv is null || resultEnv.ApplicationPayloadCase != InternalEnvelope.ApplicationPayloadOneofCase.HandshakeResponderHello)
+                        {
+                            return new DeliverOpaqueMessageResult();
+                        }
+
+                        var responderHello = resultEnv.HandshakeResponderHello;
+                        var directSessionGuid = Guid.Parse(responderHello.DirectSessionId);
+                        var inferredSessionId = new SessionId(directSessionGuid);
+                        var responseBytes = await EncryptResponseEnvelope(inferredSessionId, resultEnv);
+                        return new DeliverOpaqueMessageResult { ResponsePayloadBytes = responseBytes };
+                    }
+                }
+                catch
+                {
+                    // Not a valid HandshakeInitiatorHello either; rethrow original DR exception for observability.
+                }
+                _logger.LogError(drEx, "Error processing opaque message (DR path), and payload was not a valid HandshakeInitiatorHello");
                 throw;
             }
         }

@@ -99,11 +99,8 @@ namespace Percolator.Application.Network.Handshake
                 hello.EncryptedPayload = ByteString.CopyFrom(ratchetMessage.Value);
             }
 
-            var env = new InternalEnvelope { HandshakeInitiatorHello = hello };
-            var blob = env.ToByteArray();
-
-            // Enqueue via MQ to recipient PKH
-            await _mediator.Send(new EnqueueOpaqueMessageCommand(request.RecipientPublicKeyHash, blob), cancellationToken);
+            // Enqueue standalone hello (plaintext bootstrap) via MQ to recipient PKH
+            await _mediator.Send(new EnqueueOpaqueMessageCommand(request.RecipientPublicKeyHash, hello.ToByteArray()), cancellationToken);
 
             _logger.LogInformation("Enqueued HandshakeInitiatorHello to recipient PKH");
         }

@@ -24,7 +24,8 @@ namespace Percolator.Application.Network.Handshake
         byte[] InitiatorEphemeralKeySpki,
         Guid SignedPreKeyId,
         Guid? OneTimePreKeyId,
-        IdentityPeerId? RemotePeerId) : IRequest<InternalEnvelope?>;
+        IdentityPeerId? RemotePeerId,
+        byte[]? EncryptedPayload) : IRequest<InternalEnvelope?>;
 
     internal class HandleHandshakeInitiatorHelloHandler : IRequestHandler<HandleHandshakeInitiatorHelloCommand, InternalEnvelope?>
     {
@@ -35,6 +36,7 @@ namespace Percolator.Application.Network.Handshake
         private readonly IDirectSessionRepository _directRepo;
         private readonly IDirectSessionManager _sessionManager;
         private readonly ActiveIdentityContext _active;
+        private readonly IMediator _mediator;
 
         public HandleHandshakeInitiatorHelloHandler(
             ILogger<HandleHandshakeInitiatorHelloHandler> logger,
@@ -43,7 +45,8 @@ namespace Percolator.Application.Network.Handshake
             IPreKeyBundleRepository preKeyRepo,
             IDirectSessionRepository directRepo,
             IDirectSessionManager sessionManager,
-            ActiveIdentityContext active)
+            ActiveIdentityContext active,
+            IMediator mediator)
         {
             _logger = logger;
             _x3dh = x3dh;
@@ -52,6 +55,7 @@ namespace Percolator.Application.Network.Handshake
             _directRepo = directRepo;
             _sessionManager = sessionManager;
             _active = active;
+            _mediator = mediator;
         }
 
         public async Task<InternalEnvelope?> Handle(HandleHandshakeInitiatorHelloCommand request, CancellationToken cancellationToken)
@@ -111,6 +115,20 @@ namespace Percolator.Application.Network.Handshake
                 hs.SharedSecret);
 
             _logger.LogInformation("Responder established session {SessionId}", directSessionId.Value);
+
+            // If initiator included an encrypted initial payload, decrypt it via the newly established session
+            if (request.EncryptedPayload is not null && request.EncryptedPayload.Length > 0)
+            {
+                var ratchetMessage = new SessionRatchetMessage(request.EncryptedPayload);
+                var pt = await _sessionManager.ReceiveMessageAsync(new SessionId(directSessionId.Value), ratchetMessage);
+                if (pt is not null)
+                {
+                    var inner = InternalEnvelope.Parser.ParseFrom(pt.Value);
+                    // Optional: common logging/context step
+                    var ctx = new Percolator.Application.Network.SessionContext(directSessionId.Value, _active.Identity.SelfIdentityId, request.RemotePeerId?.Value);
+                    await _mediator.Send(new Percolator.Application.Network.ProcessInternalEnvelopeCommand(inner, ctx), cancellationToken);
+                }
+            }
 
             // Build a minimal responder hello (session id only)
             var responderHello = new HandshakeResponderHello

@@ -71,7 +71,8 @@ namespace Percolator.Application.Network.Handshake
             }
 
             // Decrypt using explicit session (fast-path)
-            var plaintext = await _sessions.ReceiveMessageAsync(new SessionId(directSessionId.Value.Value), ratchetMessage);
+            var resolvedSid = new SessionId(directSessionId.Value.Value);
+            var plaintext = await _sessions.ReceiveMessageAsync(resolvedSid, ratchetMessage);
             if (plaintext is null)
             {
                 throw new InvalidOperationException("Responder hello: unable to decrypt with resolved session.");

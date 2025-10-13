@@ -334,7 +334,8 @@ public class HandshakeInitiatorFlowTests
             preKeyRepo.Object,
             directRepo.Object,
             sessions.Object,
-            responderActive);
+            responderActive,
+            new Mock<IMediator>().Object);
 
         // Provide a valid CompleteHandshake response so handler can proceed
         using var responderPriv = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
@@ -356,7 +357,8 @@ public class HandshakeInitiatorFlowTests
             InitiatorEphemeralKeySpki: remotePreKeySpki,
             SignedPreKeyId: spkId,
             OneTimePreKeyId: otkId,
-            RemotePeerId: null);
+            RemotePeerId: null,
+            EncryptedPayload: null);
 
         // Act: responder handles initiator hello and establishes responder session
         var envelope = await initiatorHelloHandler.Handle(cmd, CancellationToken.None);

@@ -14,6 +14,8 @@ using System.Security.Cryptography;
 using Percolator.Cryptography;
 using Percolator.MessageQueue.Commands;
 using ChatMembershipChanged = Percolator.Chat.App.GroupMembershipChangedNotification;
+using Percolator.Application.Sessions;
+using Percolator.Network;
 
 namespace Percolator.Application.Apps.Chat
 {
@@ -31,6 +33,8 @@ namespace Percolator.Application.Apps.Chat
         private readonly IGroupManagerStateStore _gmStateStore;
         private readonly IAtRestKeyProvider _atRestKeyProvider;
         private readonly IRecipientPkhResolver _recipientPkhResolver;
+        private readonly IDirectSessionManager _sessions;
+        private readonly IDirectSessionRepository _directSessionRepository;
 
         public GroupMembershipChangedHandler(
             ILogger<GroupMembershipChangedHandler> logger,
@@ -43,7 +47,9 @@ namespace Percolator.Application.Apps.Chat
             IGroupAdminStateStore adminStateStore,
             IGroupManagerStateStore gmStateStore,
             IAtRestKeyProvider atRestKeyProvider,
-            IRecipientPkhResolver recipientPkhResolver)
+            IRecipientPkhResolver recipientPkhResolver,
+            IDirectSessionManager sessions,
+            IDirectSessionRepository directSessionRepository)
         {
             _logger = logger;
             _conversationRepository = conversationRepository;
@@ -56,14 +62,21 @@ namespace Percolator.Application.Apps.Chat
             _gmStateStore = gmStateStore;
             _atRestKeyProvider = atRestKeyProvider;
             _recipientPkhResolver = recipientPkhResolver;
+            _sessions = sessions;
+            _directSessionRepository = directSessionRepository;
         }
 
         public async Task Handle(ChatMembershipChanged notification, CancellationToken cancellationToken)
         {
+            if (_activeIdentityContext.Identity is null)
+            {
+                _logger.LogWarning("[GroupMembershipChanged] No active identity");
+                return;
+            }
             // Resolve conversation
             var self = _selfProvider.Get();
-            var selfIdentityId = _activeIdentityContext.Identity?.SelfIdentityId ?? 0;
-            var convo = await _conversationRepository.GetByIdAsync(new ConversationId(notification.ConversationId), selfIdentityId: selfIdentityId);
+            var selfIdentityId = _activeIdentityContext.Identity?.SelfIdentityId;
+            var convo = await _conversationRepository.GetByIdAsync(new ConversationId(notification.ConversationId), selfIdentityId: selfIdentityId.Value);
             if (convo is null)
             {
                 _logger.LogWarning("[GroupMembershipChanged] Conversation {ConversationId} not found", notification.ConversationId);
@@ -147,7 +160,16 @@ namespace Percolator.Application.Apps.Chat
                     _logger.LogWarning("[GroupMembershipChanged] No PKH for recipient {Participant}", participant.Value);
                     continue;
                 }
-                await _mediator.Send(new EnqueueOpaqueMessageCommand(pkh, messageBlob), cancellationToken);
+                // Resolve recipient session with host and encrypt the envelope into a DR message for the recipient
+                var recipientPeerId = new Percolator.Network.PeerId(participant.Value);
+                var direct = await _directSessionRepository.GetByRemotePeerIdAsync(recipientPeerId, selfIdentityId.Value);
+                if (direct is null)
+                {
+                    _logger.LogWarning("[GroupMembershipChanged] No direct session with recipient {Participant}; skipping enqueue.", participant.Value);
+                    continue;
+                }
+                var dr = await _sessions.EncryptMessageAsync(new SessionId(direct.SessionId.Value), new Percolator.Cryptography.Plaintext(messageBlob));
+                await _mediator.Send(new EnqueueOpaqueMessageCommand(pkh, dr.Value), cancellationToken);
             }
         }
     }

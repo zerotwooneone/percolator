@@ -1,13 +1,13 @@
 syntax = "proto3";
 
 import "google/protobuf/timestamp.proto";
-
 package percolator.contracts;
 
 option csharp_namespace = "Percolator.Contracts";
 
 // The top-level generic envelope for all internal, post-decryption messages.
-// It uses a two-level dispatch system: first by application, then by message type.
+// Note: HandshakeInitiatorHello is NOT carried inside InternalEnvelope.
+// It is a standalone message used to bootstrap X3DH before a direct session exists.
 message InternalEnvelope {
   oneof application_payload {
     ChatEnvelope chat_envelope = 1;
@@ -21,8 +21,6 @@ message InternalEnvelope {
     FetchQueuedMessagesResponse fetch_queued_messages_response = 9;
     // Host relay wrapper carrying inner opaque payload
     RelayOpaqueEnvelope relay_opaque_envelope = 10;
-    // Initiator's unsigned hello (Signal-style plausible deniability)
-    HandshakeInitiatorHello handshake_initiator_hello = 11;
     // Responder's opaque hello containing responder ephemeral and direct session id
     HandshakeResponderHello handshake_responder_hello = 12;
   }
@@ -419,7 +417,5 @@ message HandshakeResponderHello {
   // Wrapper fields
   optional uint32 version = 1;
   // Responder-chosen identifier for the direct session (string mirrors prior session_id usage)
-  optional string direct_session_id = 3;
-  // Required encrypted opaque payload to the initiator which includes the session id. The session id must only appear inside this encrypted payload.
-  optional bytes encrypted_payload = 4;
+  optional string direct_session_id = 2;
 }

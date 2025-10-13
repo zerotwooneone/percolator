@@ -4,9 +4,12 @@ using System.Threading.Tasks;
 using Google.Protobuf;
 using MediatR;
 using Microsoft.Extensions.Logging;
+using Percolator.Application.Identity;
 using Percolator.Contracts;
 using Percolator.Identity;
 using Percolator.MessageQueue.Commands;
+using Percolator.Application.Sessions;
+using Percolator.Cryptography;
 
 namespace Percolator.Application.Network.Handshake
 {
@@ -18,16 +21,22 @@ namespace Percolator.Application.Network.Handshake
     {
         private readonly ILogger<ProcessRelayedOpaquePayloadHandler> _logger;
         private readonly IMediator _mediator;
-        private readonly IPeerPublicSigningKeyStore _pkhStore;
+        private readonly IDirectSessionManager _sessions;
+        private readonly Percolator.Application.Network.IRatchetKeySessionLookup _ratchetLookup;
+        private readonly ActiveIdentityContext _active;
 
         public ProcessRelayedOpaquePayloadHandler(
             ILogger<ProcessRelayedOpaquePayloadHandler> logger,
             IMediator mediator,
-            IPeerPublicSigningKeyStore pkhStore)
+            IDirectSessionManager sessions,
+            Percolator.Application.Network.IRatchetKeySessionLookup ratchetLookup,
+            ActiveIdentityContext active)
         {
             _logger = logger;
             _mediator = mediator;
-            _pkhStore = pkhStore;
+            _sessions = sessions;
+            _ratchetLookup = ratchetLookup;
+            _active = active;
         }
 
         public async Task Handle(ProcessRelayedOpaquePayloadCommand request, CancellationToken cancellationToken)
@@ -38,77 +47,58 @@ namespace Percolator.Application.Network.Handshake
             {
                 return;
             }
+            // The relayed payload is a DR SessionRatchetMessage opaque to the host. Decrypt via fast/slow path to obtain an InternalEnvelope.
+            if (_active.Identity is null)
+            {
+                throw new InvalidOperationException("Active identity not loaded.");
+            }
+
+            var ratchetMessage = new SessionRatchetMessage(request.OpaquePayload);
+            var header = ratchetMessage.GetHeader();
+
+            // Fast path: resolve session by ratchet header key
+            var directSessionId = await _ratchetLookup.TryResolveAsync(header.PreKey, _active.Identity.SelfIdentityId, cancellationToken);
+
+            Plaintext? plaintext;
+            SessionId sid;
+            if (directSessionId is not null)
+            {
+                sid = new SessionId(directSessionId.Value.Value);
+                plaintext = await _sessions.ReceiveMessageAsync(sid, ratchetMessage);
+            }
+            else
+            {
+                // Slow path: infer session and decrypt (may also handle initial pre-key messages)
+                var result = await _sessions.TryInferAndReceiveAsync(ratchetMessage, cancellationToken);
+                if (result is null)
+                {
+                    throw new InvalidOperationException("Failed to infer session and decrypt relayed DR message");
+                }
+                sid = result.Value.sessionId;
+                plaintext = result.Value.plaintext;
+            }
+
+            if (plaintext is null)
+            {
+                _logger.LogWarning("Relayed DR message could not be decrypted");
+                return;
+            }
 
             InternalEnvelope inner;
             try
             {
-                inner = InternalEnvelope.Parser.ParseFrom(request.OpaquePayload);
+                inner = InternalEnvelope.Parser.ParseFrom(plaintext.Value);
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to parse inner InternalEnvelope from relayed payload");
+                _logger.LogWarning(ex, "Decrypted relayed payload was not a valid InternalEnvelope");
                 return;
             }
 
-            switch (inner.ApplicationPayloadCase)
-            {
-                case InternalEnvelope.ApplicationPayloadOneofCase.HandshakeInitiatorHello:
-                {
-                    var hello = inner.HandshakeInitiatorHello;
-                    // minimally validate proto has required fields
-                    if (!hello.HasInitiatorIdentityKeySpki || !hello.HasInitiatorEphemeralKeySpki || !hello.HasSignedPreKeyId)
-                    {
-                        _logger.LogWarning("Relayed HandshakeInitiatorHello missing required fields");
-                        return;
-                    }
-
-                    // Resolve optional peer id via PKH if available
-                    PeerId? remotePeerId = null;
-                    try
-                    {
-                        var pkh = System.Security.Cryptography.SHA256.HashData(hello.InitiatorIdentityKeySpki.ToByteArray());
-                        remotePeerId = await _pkhStore.GetPeerIdByPublicKeyHashAsync(pkh, cancellationToken);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogDebug(ex, "PKH lookup failed for relayed hello (non-fatal)");
-                    }
-
-                    var spki = hello.InitiatorIdentityKeySpki.ToByteArray();
-                    var eph = hello.InitiatorEphemeralKeySpki.ToByteArray();
-                    var spkId = new Guid(hello.SignedPreKeyId.ToByteArray());
-                    Guid? otkId = hello.HasOneTimePreKeyId ? new Guid(hello.OneTimePreKeyId.ToByteArray()) : (Guid?)null;
-
-                    // Delegate to dedicated handler to establish session and build responder hello
-                    var responderEnvelope = await _mediator.Send(new HandleHandshakeInitiatorHelloCommand(spki, eph, spkId, otkId, remotePeerId), cancellationToken);
-                    if (responderEnvelope is not null)
-                    {
-                        // Enqueue responder hello back to the initiator via host using MQ (durable)
-                        var recipientPkh = System.Security.Cryptography.SHA256.HashData(spki);
-                        var blob = responderEnvelope.ToByteArray();
-                        await _mediator.Send(new EnqueueOpaqueMessageCommand(recipientPkh, blob), cancellationToken);
-                    }
-                    return;
-                }
-                case InternalEnvelope.ApplicationPayloadOneofCase.HandshakeResponderHello:
-                {
-                    var hello = inner.HandshakeResponderHello;
-                    // Only EncryptedPayload is required; session identification will be inferred via ratchet header.
-                    if (!hello.HasEncryptedPayload || hello.EncryptedPayload.IsEmpty)
-                    {
-                        _logger.LogWarning("Relayed HandshakeResponderHello missing required fields");
-                        return;
-                    }
-
-                    await _mediator.Send(new HandleHandshakeResponderHelloCommand(
-                        hello.EncryptedPayload.ToByteArray()
-                    ), cancellationToken);
-                    return;
-                }
-                default:
-                    _logger.LogWarning("Relayed payload has unknown payload case. type: {Type}", inner.ApplicationPayloadCase);
-                    return;
-            }
+            await _mediator.Send(new Percolator.Application.Network.ProcessInternalEnvelopeCommand(
+                inner,
+                new Percolator.Application.Network.SessionContext(sid.Value, _active.Identity.SelfIdentityId, null)
+            ), cancellationToken);
         }
     }
 }

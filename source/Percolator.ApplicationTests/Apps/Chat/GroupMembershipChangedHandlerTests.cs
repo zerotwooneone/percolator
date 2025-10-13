@@ -16,6 +16,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Percolator.MessageQueue.Commands;
 using Percolator.Identity.Model;
+using Percolator.Network;
 
 namespace Percolator.ApplicationTests.Apps.Chat
 {
@@ -33,6 +34,8 @@ namespace Percolator.ApplicationTests.Apps.Chat
         private Mock<IAtRestKeyProvider> _atRest = null!;
         private Mock<IRecipientPkhResolver> _pkh = null!;
         private ILoggerFactory _loggerFactory = null!;
+        private Mock<Percolator.Application.Sessions.IDirectSessionManager> _sessions = null!;
+        private Mock<IDirectSessionRepository> _directRepo = null!;
 
         [SetUp]
         public void SetUp()
@@ -48,6 +51,8 @@ namespace Percolator.ApplicationTests.Apps.Chat
             _pkh = new Mock<IRecipientPkhResolver>(MockBehavior.Strict);
             _active = new ActiveIdentityContext();
             _loggerFactory = LoggerFactory.Create(b=>{});
+            _sessions = new Mock<Percolator.Application.Sessions.IDirectSessionManager>(MockBehavior.Strict);
+            _directRepo = new Mock<IDirectSessionRepository>(MockBehavior.Strict);
         }
 
         [Test]
@@ -128,7 +133,9 @@ namespace Percolator.ApplicationTests.Apps.Chat
                 _adminState.Object,
                 _gmState.Object,
                 _atRest.Object,
-                _pkh.Object);
+                _pkh.Object,
+                _sessions.Object,
+                _directRepo.Object);
         }
 
         [Test]
@@ -141,6 +148,8 @@ namespace Percolator.ApplicationTests.Apps.Chat
             var conversation = new Conversation(new ConversationId(convoId), new List<ParticipantId>{p1,p2}, new List<Message>(), name: null);
             _self.Setup(s => s.Get()).Returns(p1); // mark p1 as self participant id for semantics
             _repo.Setup(r => r.GetByIdAsync(new ConversationId(convoId), It.IsAny<int>())).ReturnsAsync(conversation);
+            // Active identity is required by handler
+            _active.Identity = new IdentityRecord(p1.Value, "self") { SelfIdentityId = 1 };
 
             // GroupManager available
             var gm = new GroupManager(ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256), _loggerFactory, Options.Create(new CryptographyOptions()));
@@ -163,6 +172,15 @@ namespace Percolator.ApplicationTests.Apps.Chat
             _pkh.Setup(x => x.GetActivePkhAsync(p1.Value, It.IsAny<CancellationToken>())).ReturnsAsync(pkhBytes1);
             _pkh.Setup(x => x.GetActivePkhAsync(p2.Value, It.IsAny<CancellationToken>())).ReturnsAsync(pkhBytes2);
 
+            // Direct session must exist for recipient p2, and encryption must succeed
+            var directSessionId = new DirectSessionId(Guid.NewGuid());
+            _directRepo
+                .Setup(r => r.GetByRemotePeerIdAsync(new Percolator.Network.PeerId(p2.Value), _active.Identity.SelfIdentityId))
+                .ReturnsAsync(new DirectSession(new Percolator.Network.PeerId(p2.Value), directSessionId));
+            _sessions
+                .Setup(s => s.EncryptMessageAsync(new SessionId(directSessionId.Value), It.IsAny<Percolator.Cryptography.Plaintext>()))
+                .ReturnsAsync(new SessionRatchetMessage(RandomNumberGenerator.GetBytes(64)));
+
             // Mediator should enqueue twice
             _mediator
                 .Setup(m => m.Send(It.IsAny<EnqueueOpaqueMessageCommand>(), It.IsAny<CancellationToken>()))
@@ -174,11 +192,13 @@ namespace Percolator.ApplicationTests.Apps.Chat
             await sut.Handle(new GroupMembershipChangedNotification(convoId), CancellationToken.None);
 
             // Assert
-            _repo.VerifyAll();
+            _repo.Verify(r => r.GetByIdAsync(new ConversationId(convoId), It.IsAny<int>()), Times.AtLeastOnce());
             _gmResolver.VerifyAll();
             _adminState.VerifyAll();
             _gmState.VerifyAll();
-            _pkh.VerifyAll();
+            // PKH should be resolved for non-self (p2) and not for self (p1)
+            _pkh.Verify(x => x.GetActivePkhAsync(p2.Value, It.IsAny<CancellationToken>()), Times.AtLeastOnce());
+            _pkh.Verify(x => x.GetActivePkhAsync(p1.Value, It.IsAny<CancellationToken>()), Times.Never());
             _mediator.Verify(m => m.Send(It.IsAny<EnqueueOpaqueMessageCommand>(), It.IsAny<CancellationToken>()), Times.AtLeastOnce());
         }
     }

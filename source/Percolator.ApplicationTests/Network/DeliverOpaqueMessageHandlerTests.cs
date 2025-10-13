@@ -31,6 +31,50 @@ public class DeliverOpaqueMessageHandlerTests
         return (env, env.ToByteArray());
     }
 
+    [Test]
+    public async Task PlaintextHello_fallback_establishes_and_returns_encrypted_responder()
+    {
+        var handler = CreateHandler(out var sessionMgr, out var peerRepo, out var mediator, out var directRepo, out var ratchetLookup);
+
+        // Build a minimal, valid HandshakeInitiatorHello protobuf
+        using var ik = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        using var eph = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        var hello = new HandshakeInitiatorHello
+        {
+            Version = 1,
+            InitiatorIdentityKeySpki = ByteString.CopyFrom(ik.ExportSubjectPublicKeyInfo()),
+            InitiatorEphemeralKeySpki = ByteString.CopyFrom(eph.ExportSubjectPublicKeyInfo()),
+            SignedPreKeyId = ByteString.CopyFrom(Guid.NewGuid().ToByteArray()),
+        };
+        var helloBytes = hello.ToByteArray();
+
+        // Mediator should return an InternalEnvelope with HandshakeResponderHello containing a new session id
+        var responderSessionId = Guid.NewGuid();
+        mediator.Setup(m => m.Send(It.IsAny<Percolator.Application.Network.Handshake.HandleHandshakeInitiatorHelloCommand>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new InternalEnvelope
+            {
+                HandshakeResponderHello = new HandshakeResponderHello
+                {
+                    Version = 1,
+                    DirectSessionId = responderSessionId.ToString()
+                }
+            });
+
+        // Encrypt the responder envelope when handler prepares the response
+        var expectedCipher = RandomBytes(64);
+        sessionMgr.Setup(s => s.EncryptMessageAsync(It.Is<SessionId>(sid => sid.Value == responderSessionId), It.IsAny<Plaintext>()))
+            .ReturnsAsync(new SessionRatchetMessage(expectedCipher));
+
+        var cmd = new DeliverOpaqueMessageCommand { PayloadBytes = helloBytes };
+        var result = await handler.Handle(cmd, CancellationToken.None);
+
+        result.ResponsePayloadBytes.Should().NotBeNull();
+        result.ResponsePayloadBytes!.Should().BeEquivalentTo(expectedCipher);
+
+        mediator.Verify(m => m.Send(It.IsAny<Percolator.Application.Network.Handshake.HandleHandshakeInitiatorHelloCommand>(), It.IsAny<CancellationToken>()), Times.Once);
+        sessionMgr.VerifyAll();
+    }
+
     private static byte[] RandomBytes(int len = 32) => RandomNumberGenerator.GetBytes(len);
 
     [Test]
@@ -106,7 +150,6 @@ public class DeliverOpaqueMessageHandlerTests
             Header = new RatchetHeader
             {
                 RatchetKey = ByteString.CopyFrom(headerKeyBytes),
-                Counter = 0,
                 PreviousChainLength = 0
             },
             Ciphertext = ByteString.CopyFrom(ciphertext)
@@ -131,6 +174,9 @@ public class DeliverOpaqueMessageHandlerTests
         {
             Identity = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "Test", null) { SelfIdentityId = 1 }
         };
+        // Common setup: handler now emits a ProcessInternalEnvelopeCommand for logging/context
+        mediator.Setup(m => m.Send(It.IsAny<IRequest<InternalEnvelope>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new InternalEnvelope());
         return new DeliverOpaqueMessageHandler(logger, sessionMgr.Object, peerRepo.Object, mediator.Object, directRepo.Object, active, ratchetLookup.Object);
     }
 
