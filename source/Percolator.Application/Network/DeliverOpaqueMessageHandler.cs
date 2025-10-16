@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Collections.Generic;
 using Google.Protobuf;
 using MediatR;
 using Microsoft.Extensions.Logging;
@@ -8,10 +9,7 @@ using Percolator.Contracts;
 using Percolator.Cryptography;
 using Percolator.Network;
 using Percolator.Prekey.Handlers;
-using Percolator.Identity;
 using Percolator.Application.Network.Handshake;
-using CryptoPeerId = Percolator.Cryptography.Primitives.PeerId;
-using IdentityPeerId = Percolator.Identity.PeerId;
 using NetworkPeerId = Percolator.Network.PeerId;
 
 namespace Percolator.Application.Network
@@ -25,6 +23,20 @@ namespace Percolator.Application.Network
         private readonly IDirectSessionRepository _directSessionRepository;
         private readonly ActiveIdentityContext _activeIdentityContext;
         private readonly IRatchetKeySessionLookup _ratchetLookup;
+        // Centralized allowlist to avoid drift with documentation and tests.
+        private static readonly HashSet<InternalEnvelope.ApplicationPayloadOneofCase> AllowedCases = new()
+        {
+            InternalEnvelope.ApplicationPayloadOneofCase.ChatEnvelope,
+            InternalEnvelope.ApplicationPayloadOneofCase.FileShareEnvelope,
+            InternalEnvelope.ApplicationPayloadOneofCase.DhtEnvelope,
+            InternalEnvelope.ApplicationPayloadOneofCase.PrekeyEnvelope,
+            InternalEnvelope.ApplicationPayloadOneofCase.MessageQueueEnvelope,
+            InternalEnvelope.ApplicationPayloadOneofCase.RelayOpaqueEnvelope,
+            InternalEnvelope.ApplicationPayloadOneofCase.SubmitPreKeyBundleResponse,
+            InternalEnvelope.ApplicationPayloadOneofCase.GetPreKeyBundleResponse,
+            InternalEnvelope.ApplicationPayloadOneofCase.EnqueueOpaqueMessageResponse,
+            InternalEnvelope.ApplicationPayloadOneofCase.FetchQueuedMessagesResponse
+        };
 
         public DeliverOpaqueMessageHandler(
             ILogger<DeliverOpaqueMessageHandler> logger,
@@ -140,18 +152,7 @@ namespace Percolator.Application.Network
                 var internalEnvelope = InternalEnvelope.Parser.ParseFrom(plaintext.Value);
                 InternalEnvelope? responseEnvelope = null;
 
-                static bool IsAllowedCase(InternalEnvelope.ApplicationPayloadOneofCase c) => c is
-                    InternalEnvelope.ApplicationPayloadOneofCase.ChatEnvelope or
-                    InternalEnvelope.ApplicationPayloadOneofCase.DhtEnvelope or
-                    InternalEnvelope.ApplicationPayloadOneofCase.PrekeyEnvelope or
-                    InternalEnvelope.ApplicationPayloadOneofCase.MessageQueueEnvelope or
-                    InternalEnvelope.ApplicationPayloadOneofCase.RelayOpaqueEnvelope or
-                    InternalEnvelope.ApplicationPayloadOneofCase.SubmitPreKeyBundleResponse or
-                    InternalEnvelope.ApplicationPayloadOneofCase.GetPreKeyBundleResponse or
-                    InternalEnvelope.ApplicationPayloadOneofCase.EnqueueOpaqueMessageResponse or
-                    InternalEnvelope.ApplicationPayloadOneofCase.FetchQueuedMessagesResponse;
-
-                if (!IsAllowedCase(internalEnvelope.ApplicationPayloadCase))
+                if (!AllowedCases.Contains(internalEnvelope.ApplicationPayloadCase))
                 {
                     _logger.LogWarning("InternalEnvelope case {Case} not allowed in DeliverOpaque path", internalEnvelope.ApplicationPayloadCase);
                     return new DeliverOpaqueMessageResult();
@@ -213,7 +214,7 @@ namespace Percolator.Application.Network
                         var spkId = new Guid(hello.SignedPreKeyId.ToByteArray());
                         Guid? otkId = hello.HasOneTimePreKeyId ? new Guid(hello.OneTimePreKeyId.ToByteArray()) : (Guid?)null;
 
-                        var resultEnv = await _mediator.Send(
+                        var responderBytes = await _mediator.Send(
                             new Percolator.Application.Network.Handshake.HandleHandshakeInitiatorHelloCommand(
                                 spki,
                                 eph,
@@ -223,16 +224,12 @@ namespace Percolator.Application.Network
                                 hello.HasEncryptedPayload ? hello.EncryptedPayload.ToByteArray() : null),
                             cancellationToken);
 
-                        if (resultEnv is null || resultEnv.ApplicationPayloadCase != InternalEnvelope.ApplicationPayloadOneofCase.HandshakeResponderHello)
+                        if (responderBytes is null || responderBytes.Length == 0)
                         {
                             return new DeliverOpaqueMessageResult();
                         }
 
-                        var responderHello = resultEnv.HandshakeResponderHello;
-                        var directSessionGuid = Guid.Parse(responderHello.DirectSessionId);
-                        var inferredSessionId = new SessionId(directSessionGuid);
-                        var responseBytes = await EncryptResponseEnvelope(inferredSessionId, resultEnv);
-                        return new DeliverOpaqueMessageResult { ResponsePayloadBytes = responseBytes };
+                        return new DeliverOpaqueMessageResult { ResponsePayloadBytes = responderBytes };
                     }
                 }
                 catch

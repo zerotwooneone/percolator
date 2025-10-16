@@ -42,6 +42,7 @@ namespace Percolator.Application.Network
             var env = request.Envelope;
             _logger.LogDebug("Processing InternalEnvelope with case {Case}", env.ApplicationPayloadCase);
 
+            // DHT handling
             if (env.ApplicationPayloadCase == InternalEnvelope.ApplicationPayloadOneofCase.DhtEnvelope)
             {
                 var dht = env.DhtEnvelope;
@@ -54,6 +55,24 @@ namespace Percolator.Application.Network
                         return null;
                     }
 
+                    var req = new Percolator.Dht.Messages.FindNodeRequest(new NodeId(target));
+                    var resp = await _mediator.Send(req, cancellationToken);
+
+                    var outResp = new Contracts.FindNodeResponse();
+                    foreach (var node in resp.CloserNodes)
+                    {
+                        outResp.CloserPeers.Add(new Contracts.NodeInfo
+                        {
+                            PeerId = ByteString.CopyFrom(node.Id.Value),
+                            Address = $"{node.EndPoint.Host}:{node.EndPoint.Port}"
+                        });
+                    }
+                    return new InternalEnvelope { DhtEnvelope = new Contracts.DhtEnvelope { FindNodeResponse = outResp } };
+                }
+                return null;
+            }
+
+            // Chat handling
             if (env.ApplicationPayloadCase == InternalEnvelope.ApplicationPayloadOneofCase.ChatEnvelope)
             {
                 var chat = env.ChatEnvelope;
@@ -79,7 +98,8 @@ namespace Percolator.Application.Network
                                 throw new InvalidOperationException("TextMessage.public_key_hash must be 32 bytes (SHA-256).");
                             pkh = text.PublicKeyHash.ToByteArray();
                         }
-                        // Build lookup key: group or PKH or fall back to direct session
+                        if (groupGuid.HasValue && pkh is not null)
+                            throw new InvalidOperationException("TextMessage must not set both group_conversation_guid and public_key_hash.");
                         ConversationLookupKey lookup = groupGuid.HasValue
                             ? ConversationLookupKey.ForGroup(groupGuid.Value)
                             : (pkh is not null && pkh.Length > 0)
@@ -111,6 +131,8 @@ namespace Percolator.Application.Network
                                 throw new InvalidOperationException("ReadReceipt.public_key_hash must be 32 bytes (SHA-256).");
                             pkh = rr.PublicKeyHash.ToByteArray();
                         }
+                        if (groupGuid.HasValue && pkh is not null)
+                            throw new InvalidOperationException("ReadReceipt must not set both group_conversation_guid and public_key_hash.");
                         var lookup = groupGuid.HasValue
                             ? ConversationLookupKey.ForGroup(groupGuid.Value)
                             : (pkh is not null && pkh.Length > 0)
@@ -144,6 +166,8 @@ namespace Percolator.Application.Network
                                 throw new InvalidOperationException("EmojiAnnotation.public_key_hash must be 32 bytes (SHA-256).");
                             pkh = em.PublicKeyHash.ToByteArray();
                         }
+                        if (groupGuid.HasValue && pkh is not null)
+                            throw new InvalidOperationException("EmojiAnnotation must not set both group_conversation_guid and public_key_hash.");
                         var lookup = groupGuid.HasValue
                             ? ConversationLookupKey.ForGroup(groupGuid.Value)
                             : (pkh is not null && pkh.Length > 0)
@@ -175,6 +199,8 @@ namespace Percolator.Application.Network
                                 throw new InvalidOperationException("DeliveredReceipt.public_key_hash must be 32 bytes (SHA-256).");
                             pkh = dr.PublicKeyHash.ToByteArray();
                         }
+                        if (groupGuid.HasValue && pkh is not null)
+                            throw new InvalidOperationException("DeliveredReceipt must not set both group_conversation_guid and public_key_hash.");
                         var lookup = groupGuid.HasValue
                             ? ConversationLookupKey.ForGroup(groupGuid.Value)
                             : (pkh is not null && pkh.Length > 0)
@@ -382,23 +408,10 @@ namespace Percolator.Application.Network
                         return null;
                 }
             }
-                    var req = new Percolator.Dht.Messages.FindNodeRequest(new NodeId(target));
-                    var resp = await _mediator.Send(req, cancellationToken);
 
-                    var outResp = new Contracts.FindNodeResponse();
-                    foreach (var node in resp.CloserNodes)
-                    {
-                        outResp.CloserPeers.Add(new Contracts.NodeInfo
-                        {
-                            PeerId = ByteString.CopyFrom(node.Id.Value),
-                            Address = $"{node.EndPoint.Host}:{node.EndPoint.Port}"
-                        });
-                    }
-                    return new InternalEnvelope { DhtEnvelope = new Contracts.DhtEnvelope { FindNodeResponse = outResp } };
-                }
-                return null;
-            }
+            // Handshake responder hello removed: responder message is a DR plaintext ResponderInnerHello, handled outside orchestrator.
 
+            // MQ handling
             if (env.ApplicationPayloadCase == InternalEnvelope.ApplicationPayloadOneofCase.MessageQueueEnvelope)
             {
                 var mq = env.MessageQueueEnvelope;
@@ -425,11 +438,9 @@ namespace Percolator.Application.Network
                     case MessageQueueEnvelope.MessageOneofCase.FetchQueuedMessagesRequest:
                     {
                         var req = mq.FetchQueuedMessagesRequest;
-                        // Default and cap max count as in current application logic
                         int requestedMax = req.HasMaxCount ? (int)req.MaxCount : 100;
                         requestedMax = Math.Clamp(requestedMax, 1, 500);
 
-                        // Remote peer must be present in context to fetch their queue
                         if (request.Context.RemotePeerGuid is null)
                         {
                             _logger.LogWarning("FetchQueuedMessagesRequest missing RemotePeerGuid in context");

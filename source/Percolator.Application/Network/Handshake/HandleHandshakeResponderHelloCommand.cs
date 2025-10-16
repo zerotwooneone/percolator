@@ -60,10 +60,12 @@ namespace Percolator.Application.Network.Handshake
                     ratchetMessage,
                     pt =>
                     {
-                        var hello = HandshakeResponderHello.Parser.ParseFrom(pt.Value);
-                        if (hello.Version != 1 || string.IsNullOrWhiteSpace(hello.DirectSessionId))
-                            throw new InvalidOperationException("Responder hello missing required fields.");
-                        return new SessionId(Guid.Parse(hello.DirectSessionId));
+                        var inner = ResponderInnerHello.Parser.ParseFrom(pt.Value);
+                        if (!inner.HasVersion || inner.Version != 1)
+                            throw new InvalidOperationException("Responder inner payload version invalid.");
+                        if (!inner.HasDirectSessionId || string.IsNullOrWhiteSpace(inner.DirectSessionId))
+                            throw new InvalidOperationException("Responder inner payload missing direct_session_id.");
+                        return new SessionId(Guid.Parse(inner.DirectSessionId));
                     },
                     cancellationToken);
                 directSessionId = new Percolator.Network.DirectSessionId(sid.Value);

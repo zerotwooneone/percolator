@@ -21,8 +21,6 @@ message InternalEnvelope {
     FetchQueuedMessagesResponse fetch_queued_messages_response = 9;
     // Host relay wrapper carrying inner opaque payload
     RelayOpaqueEnvelope relay_opaque_envelope = 10;
-    // Responder's opaque hello containing responder ephemeral and direct session id
-    HandshakeResponderHello handshake_responder_hello = 12;
   }
 }
 
@@ -412,10 +410,8 @@ message HandshakeInitiatorHello {
   optional bytes encrypted_payload = 6;
 }
 
-//only ever sent over an encrypted x3dh channel
-message HandshakeResponderHello {
-  // Wrapper fields
+// Preferred encrypted inner payload for HandshakeResponderHello
+message ResponderInnerHello {
   optional uint32 version = 1;
-  // Responder-chosen identifier for the direct session (string mirrors prior session_id usage)
   optional string direct_session_id = 2;
 }

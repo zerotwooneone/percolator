@@ -26,6 +26,139 @@ namespace Percolator.ApplicationTests.Network
         }
 
         [Test]
+        public void TextMessage_throws_when_both_group_and_pkh_set()
+        {
+            var mediator = new Mock<IMediator>(MockBehavior.Loose);
+            var sut = CreateSut(mediator);
+
+            var msg = new TextMessage
+            {
+                MessageId = Google.Protobuf.ByteString.CopyFrom(Guid.NewGuid().ToByteArray()),
+                Content = "x",
+                SentTimestampUtc = Timestamp.FromDateTime(DateTime.UtcNow),
+                GroupConversationGuid = Google.Protobuf.ByteString.CopyFrom(Guid.NewGuid().ToByteArray()),
+                PublicKeyHash = Google.Protobuf.ByteString.CopyFrom(new byte[32])
+            };
+            var env = new InternalEnvelope { ChatEnvelope = new ChatEnvelope { TextMessage = msg } };
+            var ctx = new SessionContext(Guid.NewGuid(), 1, null);
+
+            Assert.ThrowsAsync<InvalidOperationException>(() => sut.Handle(new ProcessInternalEnvelopeCommand(env, ctx), CancellationToken.None));
+        }
+
+        [Test]
+        public void ReadReceipt_throws_when_both_group_and_pkh_set()
+        {
+            var mediator = new Mock<IMediator>(MockBehavior.Loose);
+            var sut = CreateSut(mediator);
+
+            var rr = new ReadReceipt
+            {
+                MessageId = Google.Protobuf.ByteString.CopyFrom(Guid.NewGuid().ToByteArray()),
+                SentTimestampUtc = Timestamp.FromDateTime(DateTime.UtcNow),
+                GroupConversationGuid = Google.Protobuf.ByteString.CopyFrom(Guid.NewGuid().ToByteArray()),
+                PublicKeyHash = Google.Protobuf.ByteString.CopyFrom(new byte[32])
+            };
+            var env = new InternalEnvelope { ChatEnvelope = new ChatEnvelope { ReadReceipt = rr } };
+            var ctx = new SessionContext(Guid.NewGuid(), 1, null);
+
+            Assert.ThrowsAsync<InvalidOperationException>(() => sut.Handle(new ProcessInternalEnvelopeCommand(env, ctx), CancellationToken.None));
+        }
+
+        [Test]
+        public void EmojiAnnotation_throws_when_both_group_and_pkh_set()
+        {
+            var mediator = new Mock<IMediator>(MockBehavior.Loose);
+            var sut = CreateSut(mediator);
+
+            var em = new EmojiAnnotation
+            {
+                MessageId = Google.Protobuf.ByteString.CopyFrom(Guid.NewGuid().ToByteArray()),
+                Emoji = ":)",
+                SentTimestampUtc = Timestamp.FromDateTime(DateTime.UtcNow),
+                GroupConversationGuid = Google.Protobuf.ByteString.CopyFrom(Guid.NewGuid().ToByteArray()),
+                PublicKeyHash = Google.Protobuf.ByteString.CopyFrom(new byte[32])
+            };
+            var env = new InternalEnvelope { ChatEnvelope = new ChatEnvelope { EmojiAnnotation = em } };
+            var ctx = new SessionContext(Guid.NewGuid(), 1, null);
+
+            Assert.ThrowsAsync<InvalidOperationException>(() => sut.Handle(new ProcessInternalEnvelopeCommand(env, ctx), CancellationToken.None));
+        }
+
+        [Test]
+        public void DeliveredReceipt_throws_when_both_group_and_pkh_set()
+        {
+            var mediator = new Mock<IMediator>(MockBehavior.Loose);
+            var sut = CreateSut(mediator);
+
+            var dr = new DeliveredReceipt
+            {
+                MessageId = Google.Protobuf.ByteString.CopyFrom(Guid.NewGuid().ToByteArray()),
+                SentTimestampUtc = Timestamp.FromDateTime(DateTime.UtcNow),
+                GroupConversationGuid = Google.Protobuf.ByteString.CopyFrom(Guid.NewGuid().ToByteArray()),
+                PublicKeyHash = Google.Protobuf.ByteString.CopyFrom(new byte[32])
+            };
+            var env = new InternalEnvelope { ChatEnvelope = new ChatEnvelope { DeliveredReceipt = dr } };
+            var ctx = new SessionContext(Guid.NewGuid(), 1, null);
+
+            Assert.ThrowsAsync<InvalidOperationException>(() => sut.Handle(new ProcessInternalEnvelopeCommand(env, ctx), CancellationToken.None));
+        }
+
+        [Test]
+        public async Task FindNodeRequest_zero_results_returns_empty_list()
+        {
+            var mediator = new Mock<IMediator>(MockBehavior.Strict);
+            mediator
+                .Setup(m => m.Send(It.IsAny<DhtMessages.FindNodeRequest>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new DhtMessages.FindNodeResponse(Array.Empty<Percolator.Dht.DhtNode>()));
+
+            var sut = CreateSut(mediator);
+
+            var contractsReq = new Percolator.Contracts.FindNodeRequest
+            {
+                TargetPeerId = Google.Protobuf.ByteString.CopyFrom(new byte[32])
+            };
+            var env = new InternalEnvelope { DhtEnvelope = new DhtEnvelope { FindNodeRequest = contractsReq } };
+            var ctx = new SessionContext(null, 1, null);
+
+            var result = await sut.Handle(new ProcessInternalEnvelopeCommand(env, ctx), CancellationToken.None);
+            Assert.That(result, Is.Not.Null);
+            Assert.That(result!.DhtEnvelope.FindNodeResponse.CloserPeers.Count, Is.EqualTo(0));
+            mediator.VerifyAll();
+        }
+
+        [Test]
+        public async Task FindNodeRequest_multiple_results_maps_all()
+        {
+            var mediator = new Mock<IMediator>(MockBehavior.Strict);
+            var nodeId = new NodeId(new byte[32]);
+            var dns1 = new DnsEndPoint("10.0.0.1", 1234);
+            var dns2 = new DnsEndPoint("10.0.0.2", 5678);
+            var nodes = new[]
+            {
+                new Percolator.Dht.DhtNode(nodeId, dns1, DateTimeOffset.UtcNow),
+                new Percolator.Dht.DhtNode(nodeId, dns2, DateTimeOffset.UtcNow)
+            };
+            mediator
+                .Setup(m => m.Send(It.IsAny<DhtMessages.FindNodeRequest>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new DhtMessages.FindNodeResponse(nodes));
+
+            var sut = CreateSut(mediator);
+            var contractsReq = new Percolator.Contracts.FindNodeRequest
+            {
+                TargetPeerId = Google.Protobuf.ByteString.CopyFrom(new byte[32])
+            };
+            var env = new InternalEnvelope { DhtEnvelope = new DhtEnvelope { FindNodeRequest = contractsReq } };
+            var ctx = new SessionContext(null, 1, null);
+
+            var result = await sut.Handle(new ProcessInternalEnvelopeCommand(env, ctx), CancellationToken.None);
+            Assert.That(result, Is.Not.Null);
+            Assert.That(result!.DhtEnvelope.FindNodeResponse.CloserPeers.Count, Is.EqualTo(2));
+            Assert.That(result.DhtEnvelope.FindNodeResponse.CloserPeers[0].Address, Is.EqualTo("10.0.0.1:1234"));
+            Assert.That(result.DhtEnvelope.FindNodeResponse.CloserPeers[1].Address, Is.EqualTo("10.0.0.2:5678"));
+            mediator.VerifyAll();
+        }
+
+        [Test]
         public async Task Chat_ReadReceipt_is_dispatched_and_returns_null()
         {
             var mediator = new Mock<IMediator>(MockBehavior.Strict);

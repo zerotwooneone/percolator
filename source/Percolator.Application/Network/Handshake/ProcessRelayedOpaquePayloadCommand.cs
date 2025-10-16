@@ -10,6 +10,7 @@ using Percolator.Identity;
 using Percolator.MessageQueue.Commands;
 using Percolator.Application.Sessions;
 using Percolator.Cryptography;
+using System.Collections.Generic;
 
 namespace Percolator.Application.Network.Handshake
 {
@@ -24,6 +25,20 @@ namespace Percolator.Application.Network.Handshake
         private readonly IDirectSessionManager _sessions;
         private readonly Percolator.Application.Network.IRatchetKeySessionLookup _ratchetLookup;
         private readonly ActiveIdentityContext _active;
+
+        private static readonly HashSet<InternalEnvelope.ApplicationPayloadOneofCase> AllowedCases = new()
+        {
+            InternalEnvelope.ApplicationPayloadOneofCase.ChatEnvelope,
+            InternalEnvelope.ApplicationPayloadOneofCase.FileShareEnvelope,
+            InternalEnvelope.ApplicationPayloadOneofCase.DhtEnvelope,
+            InternalEnvelope.ApplicationPayloadOneofCase.PrekeyEnvelope,
+            InternalEnvelope.ApplicationPayloadOneofCase.MessageQueueEnvelope,
+            InternalEnvelope.ApplicationPayloadOneofCase.RelayOpaqueEnvelope,
+            InternalEnvelope.ApplicationPayloadOneofCase.SubmitPreKeyBundleResponse,
+            InternalEnvelope.ApplicationPayloadOneofCase.GetPreKeyBundleResponse,
+            InternalEnvelope.ApplicationPayloadOneofCase.EnqueueOpaqueMessageResponse,
+            InternalEnvelope.ApplicationPayloadOneofCase.FetchQueuedMessagesResponse
+        };
 
         public ProcessRelayedOpaquePayloadHandler(
             ILogger<ProcessRelayedOpaquePayloadHandler> logger,
@@ -92,6 +107,12 @@ namespace Percolator.Application.Network.Handshake
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Decrypted relayed payload was not a valid InternalEnvelope");
+                return;
+            }
+
+            if (!AllowedCases.Contains(inner.ApplicationPayloadCase))
+            {
+                _logger.LogWarning("Relayed InternalEnvelope case {Case} not allowed; dropping", inner.ApplicationPayloadCase);
                 return;
             }
 

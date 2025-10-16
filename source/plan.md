@@ -34,9 +34,6 @@
     - `EnqueueOpaqueMessageRequest` → `EnqueueOpaqueMessageResponse`.
     - `FetchQueuedMessagesRequest` → `FetchQueuedMessagesResponse`.
   - Confirm `DeliverOpaqueMessageHandler` detects a non-null orchestrator response and encrypts early-response bytes (already coded), and that it logs Chat/MQ as no-op locally otherwise.
-- **[NEXT] Cleanup and telemetry**
-  - Remove any lingering dead code paths or unused using statements in `DeliverOpaqueMessageHandler`.
-  - Add lightweight counters/logs: counts of orchestrated Chat variants; DHT FindNode requests; MQ requests.
 - **[NEXT] Handshake relay alignment**
   - Validate `ProcessRelayedOpaquePayloadCommand` flows are consistent with the central orchestrator model. Ensure relayed inner `InternalEnvelope` uses the same orchestrator routing and allowed-case constraints.
 - **[NEXT] Documentation sync**
@@ -63,9 +60,8 @@
     - If orchestrator returns a response envelope (e.g., DHT FindNode or MQ), encrypt and return early bytes.
     - Otherwise, DHT `PingRequest`, Prekey submit, and Relay are handled locally in transport.
   - `Percolator.Application/Network/Handshake/HandleHandshakeResponderHelloCommand.cs`
-    - After finalize + decrypt, parse `InternalEnvelope`
-    - Pre-filter to allow only `HandshakeResponderHello`; reject otherwise
-    - Optionally call the orchestrator for uniform logging/context
+    - After finalize + decrypt of the responder ratchet message, parse ResponderInnerHello directly from plaintext (no InternalEnvelope).
+      Validate version and required fields, then complete handshake.
   - `Percolator.Application/Network/Handshake/ProcessRelayedOpaquePayloadCommand.cs`
     - Parse inner `InternalEnvelope` from relay bytes
     - Pre-filter to the restricted set for relay (e.g., `HandshakeInitiatorHello` and any explicitly permitted app envelopes)
@@ -101,24 +97,17 @@
     - Optional: send `ProcessInternalEnvelopeCommand` with a `SessionContext` where `SessionId` may be null (pre-session), `SelfIdentityId` populated, and `RemotePeerGuid` if resolvable.
 
 #### 16.3.2 Allowed cases per call site (initial policy)
-- **DeliverOpaqueMessageHandler**: `ChatEnvelope`, `FileShareEnvelope`, `DhtEnvelope`, `PrekeyEnvelope`, `MessageQueueEnvelope`, `RelayOpaqueEnvelope`, plus response envelopes mentioned above.
-- **HandleHandshakeResponderHelloHandler**: `HandshakeResponderHello` only.
-- **ProcessRelayedOpaquePayloadCommand**: Decrypts DR-only relayed payloads into an `InternalEnvelope` and processes normal application envelopes. It does not handle `HandshakeInitiatorHello` (which is not carried inside `InternalEnvelope`).
+- DeliverOpaqueMessageHandler: ChatEnvelope, FileShareEnvelope, DhtEnvelope, PrekeyEnvelope, MessageQueueEnvelope, RelayOpaqueEnvelope, plus response envelopes mentioned above.
+-  Responder finalize is not an InternalEnvelope case; it is handled as a ratchet message carrying ResponderInnerHello.
+-  ProcessRelayedOpaquePayloadCommand: Decrypts DR-only relayed payloads into an InternalEnvelope and processes normal application envelopes. It does not handle HandshakeInitiatorHello (which is not carried inside InternalEnvelope).
 
 #### 16.3.2.a Opaque relay policy exception (authoritative)
 - All `EnqueueOpaqueMessageCommand` payloads MUST be Double Ratchet ciphertext (DR bytes), making messages opaque to the Host.
 - **Single exception**: `HandshakeInitiatorHello` is sent as a plaintext, standalone protobuf (not inside `InternalEnvelope`). This is required to bootstrap X3DH before a direct session exists.
 - Implications:
-  - Responder hello and all subsequent traffic MUST be sent as DR bytes containing an `InternalEnvelope` after session establishment.
+  - Responder hello and all subsequent traffic MUST be sent as DR bytes whose plaintext is ResponderInnerHello (not an InternalEnvelope).
   - No other plaintext payloads are permitted via `EnqueueOpaqueMessageCommand`.
 
-#### 16.3.3 Telemetry and logging
-- Add debug logs at pre-filter decision points with the envelope case and minimal session context (avoid sensitive payloads/keys).
-- Consider counters:
-  - `internal_envelope_allowed_total{handler,case}`
-  - `internal_envelope_rejected_total{handler,case}`
-  - `internal_envelope_unrecognized_total{handler}`
-- Optional structured logging scope per handler: `{ EnvelopeCase, SelfIdentityId, SessionId?, RemotePeerGuid? }`.
 
 #### 16.3.4 TDD tasks (Red → Green → Refactor)
 - Unit tests per handler asserting:
@@ -351,7 +340,7 @@ Implementation status (completed)
   - Alice constructs an inner `InternalEnvelope { handshake_initiator_hello }` and sends it to the Host via queue/relay.
   - The Host delivers the inner opaque payload to Bob over the Bob↔Host session (e.g., via `RelayOpaqueEnvelope` or queued delivery).
   - On Bob’s node, after decrypting Bob↔Host, the inner payload is processed locally by `ProcessRelayedOpaquePayloadHandler` which parses `InternalEnvelope` and, when it contains `handshake_initiator_hello`, completes the responder-side handshake and establishes Alice↔Bob session.
-  - The responder’s hello back to Alice can be relayed asynchronously via the Host using the same mechanism (no new proto types required). This reply is optional to bootstrap if the initiator can infer success by subsequent traffic; otherwise we enqueue/relay an `InternalEnvelope { handshake_responder_hello }` back to Alice.
+  - the responder’s hello back to Alice is a ratchet message whose plaintext is ResponderInnerHello (no InternalEnvelope). It can be relayed asynchronously via the Host using the same mechanism.
 
 #### 16.0.a Pre-handshake store and envelope choices (finalized)
 - **Pre-handshake retention**: User-controlled retention and cleanup policy. No automatic purge in the store by default; retention is driven by user configuration or explicit purge commands.
@@ -410,11 +399,6 @@ Known temporary excludes / follow-ups
       - `bytes payload_signature`
       - `bytes one_time_pre_key_spki` (optional)
       - `google.protobuf.Timestamp sent_timestamp_utc`
-    - `HandshakeResponderHello` (responder → initiator):
-      - `bytes identity_key_spki`
-      - `bytes response_payload` (opaque protobuf struct containing responder’s ephemeral material and any session parameters)
-      - `bytes payload_signature`
-      - `google.protobuf.Timestamp sent_timestamp_utc`
   - Backward compatibility: add version fields where necessary; keep envelope self-describing.
 
   16.2.a Encrypted inner payload schemas (Protobuf; all fields optional)
@@ -425,7 +409,6 @@ Known temporary excludes / follow-ups
     message ResponderInnerHello {
       optional uint32 version = 1;
       optional string direct_session_id = 2;
-      optional bytes responder_ephemeral_key_spki = 3;
     }
     ```
   - Notes:
@@ -444,26 +427,15 @@ Known temporary excludes / follow-ups
     - Surface success to the caller (e.g., a Mediator command response or notification).
 
 - Transport and routing:
-  - The handshake messages are normal opaque internal messages riding the same `DeliverOpaqueMessage` flow.
-  - After decryption, `InternalEnvelope` is dispatched locally.
+  - The initiator hello is a standalone protobuf; the responder message is a DR ratchet message whose plaintext is ResponderInnerHello. After decryption of normal application traffic, InternalEnvelope is dispatched locally.
   - For host-relay, `ProcessRelayedOpaquePayloadHandler` parses the inner `InternalEnvelope` bytes and invokes responder-handshake logic when it finds `handshake_initiator_hello`.
   - No new public gRPC endpoints needed; reuse existing.
 
 - Security model (current scope):
   - Keys exchanged are SPKI-encoded.
-  - No signatures, canonicalization, timestamps, or nonce-based replay protection in this phase.
+  - No signatures, no canonicalization, timestamps, or nonce-based replay protection in this phase.
   - Trust boundary: peers are discovered by public key; names are advisory labels stored in Identity.
   - Logs: do not persist raw keys or PII; only note handshake outcomes.
-
-- Canonicalization for signatures (protobuf-based):
-  - Deterministic serialization: when computing the bytes-to-sign, serialize the handshake message with deterministic protobuf encoding to fix field and map ordering across runtimes.
-  - Signed fields:
-    - HandshakeInitiatorHello: `version`, `identity_key_spki`, `signed_pre_key_spki`, optional `one_time_pre_key_spki` (if present), and `sent_timestamp_utc`; optional `nonce` if adopted.
-    - HandshakeResponderHello: `version`, `identity_key_spki`, deterministically serialized `response_payload`, and `sent_timestamp_utc`; optional `nonce` mirroring the initiator if adopted.
-  - Unknown fields: clear/ignore unknown fields prior to signing and verification to avoid signature drift.
-  - Optional fields: if unset, they are omitted and not part of the signature; if present, they must be included and serialized deterministically.
-  - Timestamp normalization: use `google.protobuf.Timestamp` as-is; verifier enforces a bounded skew window (e.g., ±2 minutes). Do not transform/truncate between sign and verify.
-  - Response payload: if `response_payload` is a nested message, serialize that nested message deterministically first, then include its bytes in the responder hello before signing.
 
 #### 16.2.b Error semantics
 - Validation/signature failures: silently drop (no response) to avoid oracle or amplification vectors.
@@ -531,7 +503,6 @@ Idempotency rules and state transitions
 - Inner `ResponderSessionDescriptor` (Sessions-domain owned; deterministically serialized):
   - `version` (uint32)
   - `direct_session_id` (string or bytes) — responder-chosen identifier for the direct session
-  - `responder_ephemeral_key_spki` (bytes)
   - Optional `ratchet_seed_material` (bytes) — if the Sessions domain wishes to pass seed material
   - Optional `policy` submessage with fields like `max_skip` (uint32), `replay_window_seconds` (uint32)
 
@@ -557,7 +528,7 @@ Idempotency rules and state transitions
     3) **Bob completes + decrypts first message**: On Bob’s node, use [EstablishSessionAsResponderAsync(...)](cci:1://file:///C:/Users/squir/source/repos/percolator/source/Percolator.Application/Sessions/DirectSessionManager.cs:206:4-252:5) to create the responder DR session, then [ReceiveMessageAsync(sessionId, firstMessage)](cci:1://file:///C:/Users/squir/source/repos/percolator/source/Percolator.Application/Sessions/DirectSessionManager.cs:255:4-317:5).
         - Assert: decrypted plaintext matches.
         - Assert: ratchet-key index upsert occurs on decrypt.
-    4) **Responder hello back to Alice**: Build an inner `ResponderInnerHello { version, direct_session_id, responder_ephemeral_key_spki }`, encrypt it to Alice as `SessionRatchetMessage`.
+    4) **Responder hello back to Alice**: Build an inner `ResponderInnerHello { version, direct_session_id }`, encrypt it to Alice as `SessionRatchetMessage`.
     5) **Alice completes (slow-path)**: Call [CompleteHandshakeAsync(encryptedResponderHello, getEnvelope, getSessionId, ct)](cci:1://file:///C:/Users/squir/source/repos/percolator/source/Percolator.Application/Sessions/DirectSessionManager.cs:45:4-55:5).
         - Assert: iterates [IPreHandshakeSessionStore.EnumeratePendingAsync](cci:1://file:///C:/Users/squir/source/repos/percolator/source/Percolator.Infrastructure/Network/Handshake/PreHandshakeSessionStore.cs:45:8-76:9), reconstructs temporary DR session from the stored state, decrypts, extracts session id, upserts ratchet-key mapping, and returns `(sessionId, envelope)`.
         - Assert: Orchestrator deletes the matched pre-handshake record (handler-level responsibility).

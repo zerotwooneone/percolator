@@ -18,16 +18,16 @@ using NetworkPeerId = Percolator.Network.PeerId;
 namespace Percolator.Application.Network.Handshake
 {
     // Handles a HandshakeInitiatorHello arriving at this node (acting as responder).
-    // If ProduceResponderHello is true, returns an InternalEnvelope with handshake_responder_hello for inline response.
+    // Returns encrypted ratchet message bytes containing a ResponderInnerHello payload for inline response.
     public record HandleHandshakeInitiatorHelloCommand(
         byte[] InitiatorIdentityKeySpki,
         byte[] InitiatorEphemeralKeySpki,
         Guid SignedPreKeyId,
         Guid? OneTimePreKeyId,
         IdentityPeerId? RemotePeerId,
-        byte[]? EncryptedPayload) : IRequest<InternalEnvelope?>;
+        byte[]? EncryptedPayload) : IRequest<byte[]?>;
 
-    internal class HandleHandshakeInitiatorHelloHandler : IRequestHandler<HandleHandshakeInitiatorHelloCommand, InternalEnvelope?>
+    internal class HandleHandshakeInitiatorHelloHandler : IRequestHandler<HandleHandshakeInitiatorHelloCommand, byte[]?>
     {
         private readonly ILogger<HandleHandshakeInitiatorHelloHandler> _logger;
         private readonly IX3DHOrchestrator _x3dh;
@@ -58,7 +58,7 @@ namespace Percolator.Application.Network.Handshake
             _mediator = mediator;
         }
 
-        public async Task<InternalEnvelope?> Handle(HandleHandshakeInitiatorHelloCommand request, CancellationToken cancellationToken)
+        public async Task<byte[]?> Handle(HandleHandshakeInitiatorHelloCommand request, CancellationToken cancellationToken)
         {
             var remoteIdentityKey = new RatchetIdentityKey(request.InitiatorIdentityKeySpki);
             var remoteEphemeralKey = new RatchetEphemeralKey(request.InitiatorEphemeralKeySpki);
@@ -119,25 +119,26 @@ namespace Percolator.Application.Network.Handshake
             // If initiator included an encrypted initial payload, decrypt it via the newly established session
             if (request.EncryptedPayload is not null && request.EncryptedPayload.Length > 0)
             {
-                var ratchetMessage = new SessionRatchetMessage(request.EncryptedPayload);
-                var pt = await _sessionManager.ReceiveMessageAsync(new SessionId(directSessionId.Value), ratchetMessage);
-                if (pt is not null)
+                var initPayload = new SessionRatchetMessage(request.EncryptedPayload);
+                var initPt = await _sessionManager.ReceiveMessageAsync(new SessionId(directSessionId.Value), initPayload);
+                if (initPt is not null)
                 {
-                    var inner = InternalEnvelope.Parser.ParseFrom(pt.Value);
+                    var initInner = InternalEnvelope.Parser.ParseFrom(initPt.Value);
                     // Optional: common logging/context step
                     var ctx = new Percolator.Application.Network.SessionContext(directSessionId.Value, _active.Identity.SelfIdentityId, request.RemotePeerId?.Value);
-                    await _mediator.Send(new Percolator.Application.Network.ProcessInternalEnvelopeCommand(inner, ctx), cancellationToken);
+                    await _mediator.Send(new Percolator.Application.Network.ProcessInternalEnvelopeCommand(initInner, ctx), cancellationToken);
                 }
             }
 
-            // Build a minimal responder hello (session id only)
-            var responderHello = new HandshakeResponderHello
+            // Build inner responder payload and encrypt it over the newly established session
+            var responderInner = new ResponderInnerHello
             {
                 Version = 1,
                 DirectSessionId = directSessionId.Value.ToString()
             };
-
-            return new InternalEnvelope { HandshakeResponderHello = responderHello };
+            var responderPt = new Plaintext(responderInner.ToByteArray());
+            var rm = await _sessionManager.EncryptMessageAsync(new SessionId(directSessionId.Value), responderPt);
+            return rm.Value;
         }
     }
 }
