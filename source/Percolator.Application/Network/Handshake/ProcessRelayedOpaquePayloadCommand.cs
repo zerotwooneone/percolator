@@ -115,6 +115,7 @@ namespace Percolator.Application.Network.Handshake
                 _logger.LogWarning("Relayed InternalEnvelope case {Case} not allowed; dropping", inner.ApplicationPayloadCase);
                 return;
             }
+            _logger.LogDebug("Relayed InternalEnvelope allowed case {Case}; delegating to orchestrator", inner.ApplicationPayloadCase);
 
             await _mediator.Send(new Percolator.Application.Network.ProcessInternalEnvelopeCommand(
                 inner,

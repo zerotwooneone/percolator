@@ -26,6 +26,115 @@ namespace Percolator.ApplicationTests.Network
         }
 
         [Test]
+        public void EmojiAnnotation_throws_when_invalid_public_key_hash_length()
+        {
+            var mediator = new Mock<IMediator>(MockBehavior.Loose);
+            var sut = CreateSut(mediator);
+
+            var em = new EmojiAnnotation
+            {
+                MessageId = Google.Protobuf.ByteString.CopyFrom(Guid.NewGuid().ToByteArray()),
+                Emoji = ":)",
+                SentTimestampUtc = Timestamp.FromDateTime(DateTime.UtcNow),
+                PublicKeyHash = Google.Protobuf.ByteString.CopyFrom(new byte[31]) // invalid
+            };
+            var env = new InternalEnvelope { ChatEnvelope = new ChatEnvelope { EmojiAnnotation = em } };
+            var ctx = new SessionContext(Guid.NewGuid(), 1, null);
+
+            Assert.ThrowsAsync<InvalidOperationException>(() => sut.Handle(new ProcessInternalEnvelopeCommand(env, ctx), CancellationToken.None));
+        }
+
+        [Test]
+        public void EmojiAnnotation_throws_when_message_id_missing()
+        {
+            var mediator = new Mock<IMediator>(MockBehavior.Loose);
+            var sut = CreateSut(mediator);
+
+            var em = new EmojiAnnotation
+            {
+                // MessageId omitted
+                Emoji = ":)",
+                SentTimestampUtc = Timestamp.FromDateTime(DateTime.UtcNow)
+            };
+            var env = new InternalEnvelope { ChatEnvelope = new ChatEnvelope { EmojiAnnotation = em } };
+            var ctx = new SessionContext(Guid.NewGuid(), 1, null);
+
+            Assert.ThrowsAsync<InvalidOperationException>(() => sut.Handle(new ProcessInternalEnvelopeCommand(env, ctx), CancellationToken.None));
+        }
+
+        [Test]
+        public void DeliveredReceipt_throws_when_invalid_public_key_hash_length()
+        {
+            var mediator = new Mock<IMediator>(MockBehavior.Loose);
+            var sut = CreateSut(mediator);
+
+            var dr = new DeliveredReceipt
+            {
+                MessageId = Google.Protobuf.ByteString.CopyFrom(Guid.NewGuid().ToByteArray()),
+                SentTimestampUtc = Timestamp.FromDateTime(DateTime.UtcNow),
+                PublicKeyHash = Google.Protobuf.ByteString.CopyFrom(new byte[31]) // invalid
+            };
+            var env = new InternalEnvelope { ChatEnvelope = new ChatEnvelope { DeliveredReceipt = dr } };
+            var ctx = new SessionContext(Guid.NewGuid(), 1, null);
+
+            Assert.ThrowsAsync<InvalidOperationException>(() => sut.Handle(new ProcessInternalEnvelopeCommand(env, ctx), CancellationToken.None));
+        }
+
+        [Test]
+        public void DeliveredReceipt_throws_when_message_id_missing()
+        {
+            var mediator = new Mock<IMediator>(MockBehavior.Loose);
+            var sut = CreateSut(mediator);
+
+            var dr = new DeliveredReceipt
+            {
+                // MessageId omitted
+                SentTimestampUtc = Timestamp.FromDateTime(DateTime.UtcNow)
+            };
+            var env = new InternalEnvelope { ChatEnvelope = new ChatEnvelope { DeliveredReceipt = dr } };
+            var ctx = new SessionContext(Guid.NewGuid(), 1, null);
+
+            Assert.ThrowsAsync<InvalidOperationException>(() => sut.Handle(new ProcessInternalEnvelopeCommand(env, ctx), CancellationToken.None));
+        }
+
+        [Test]
+        public void TextMessage_throws_when_invalid_public_key_hash_length()
+        {
+            var mediator = new Mock<IMediator>(MockBehavior.Loose);
+            var sut = CreateSut(mediator);
+
+            var msg = new TextMessage
+            {
+                MessageId = Google.Protobuf.ByteString.CopyFrom(Guid.NewGuid().ToByteArray()),
+                Content = "x",
+                SentTimestampUtc = Timestamp.FromDateTime(DateTime.UtcNow),
+                PublicKeyHash = Google.Protobuf.ByteString.CopyFrom(new byte[31]) // invalid length
+            };
+            var env = new InternalEnvelope { ChatEnvelope = new ChatEnvelope { TextMessage = msg } };
+            var ctx = new SessionContext(Guid.NewGuid(), 1, null);
+
+            Assert.ThrowsAsync<InvalidOperationException>(() => sut.Handle(new ProcessInternalEnvelopeCommand(env, ctx), CancellationToken.None));
+        }
+
+        [Test]
+        public void TextMessage_throws_when_message_id_missing_or_invalid_length()
+        {
+            var mediator = new Mock<IMediator>(MockBehavior.Loose);
+            var sut = CreateSut(mediator);
+
+            var msg = new TextMessage
+            {
+                // MessageId intentionally omitted (null) to trigger validation
+                Content = "x",
+                SentTimestampUtc = Timestamp.FromDateTime(DateTime.UtcNow)
+            };
+            var env = new InternalEnvelope { ChatEnvelope = new ChatEnvelope { TextMessage = msg } };
+            var ctx = new SessionContext(Guid.NewGuid(), 1, null);
+
+            Assert.ThrowsAsync<InvalidOperationException>(() => sut.Handle(new ProcessInternalEnvelopeCommand(env, ctx), CancellationToken.None));
+        }
+
+        [Test]
         public void TextMessage_throws_when_both_group_and_pkh_set()
         {
             var mediator = new Mock<IMediator>(MockBehavior.Loose);

@@ -150,6 +150,7 @@ namespace Percolator.Application.Network
                 _logger.LogInformation("Using endpoint {Endpoint} for peer {PeerId}", endpoint, remotePeerId);
 
                 var internalEnvelope = InternalEnvelope.Parser.ParseFrom(plaintext.Value);
+                _logger.LogDebug("Parsed InternalEnvelope with case {Case}", internalEnvelope.ApplicationPayloadCase);
                 InternalEnvelope? responseEnvelope = null;
 
                 if (!AllowedCases.Contains(internalEnvelope.ApplicationPayloadCase))
@@ -157,6 +158,7 @@ namespace Percolator.Application.Network
                     _logger.LogWarning("InternalEnvelope case {Case} not allowed in DeliverOpaque path", internalEnvelope.ApplicationPayloadCase);
                     return new DeliverOpaqueMessageResult();
                 }
+                _logger.LogDebug("Allowed InternalEnvelope case {Case}; dispatching to orchestrator/transport path", internalEnvelope.ApplicationPayloadCase);
 
                 var ctx = new SessionContext(inferredSessionId.Value, _activeIdentityContext.Identity!.SelfIdentityId, directSession.RemotePeerId.Value);
                 var processed = await _mediator.Send(new ProcessInternalEnvelopeCommand(internalEnvelope, ctx), cancellationToken);
