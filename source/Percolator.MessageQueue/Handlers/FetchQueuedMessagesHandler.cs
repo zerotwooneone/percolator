@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using Percolator.MessageQueue.Abstractions;
 using Percolator.MessageQueue.Commands;
 using Percolator.MessageQueue.Results;
+using System.Linq;
 
 namespace Percolator.MessageQueue.Handlers;
 
@@ -22,7 +23,8 @@ public class FetchQueuedMessagesHandler : IRequestHandler<FetchQueuedMessagesQue
     public async Task<FetchQueuedMessagesResult> Handle(FetchQueuedMessagesQuery request, CancellationToken cancellationToken)
     {
         var max = request.MaxCount <= 0 ? 100 : Math.Min(request.MaxCount, 500);
-        var blobs = await _repository.FetchAndDeleteAsync(request.RecipientPeerId, max, cancellationToken);
+        var items = await _repository.FetchAsync(request.RecipientPeerId, max, cancellationToken);
+        var blobs = items.Select(x => x.Blob).ToList();
         return new FetchQueuedMessagesResult(blobs);
     }
 }

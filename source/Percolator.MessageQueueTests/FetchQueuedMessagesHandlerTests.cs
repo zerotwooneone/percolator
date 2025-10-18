@@ -23,8 +23,8 @@ public class FetchQueuedMessagesHandlerTests
         var sut = new FetchQueuedMessagesHandler(logger.Object, repo.Object);
         var peerId = PeerId.NewId();
 
-        repo.Setup(r => r.FetchAndDeleteAsync(peerId, 100, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Array.Empty<byte[]>());
+        repo.Setup(r => r.FetchAsync(peerId, 100, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<(Guid, byte[])>());
 
         var result = await sut.Handle(new FetchQueuedMessagesQuery(peerId, 0), CancellationToken.None);
 
@@ -40,8 +40,8 @@ public class FetchQueuedMessagesHandlerTests
         var sut = new FetchQueuedMessagesHandler(logger.Object, repo.Object);
         var peerId = PeerId.NewId();
 
-        repo.Setup(r => r.FetchAndDeleteAsync(peerId, 500, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Array.Empty<byte[]>());
+        repo.Setup(r => r.FetchAsync(peerId, 500, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<(Guid, byte[])>());
 
         var result = await sut.Handle(new FetchQueuedMessagesQuery(peerId, 10_000), CancellationToken.None);
 
@@ -59,8 +59,8 @@ public class FetchQueuedMessagesHandlerTests
         var msg1 = new byte[] { 0x01, 0x02 };
         var msg2 = new byte[] { 0x03 };
 
-        repo.Setup(r => r.FetchAndDeleteAsync(peerId, 2, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new[] { msg1, msg2 });
+        repo.Setup(r => r.FetchAsync(peerId, 2, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { (Guid.NewGuid(), msg1), (Guid.NewGuid(), msg2) });
 
         var result = await sut.Handle(new FetchQueuedMessagesQuery(peerId, 2), CancellationToken.None);
 

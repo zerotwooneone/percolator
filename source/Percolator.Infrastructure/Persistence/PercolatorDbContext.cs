@@ -520,6 +520,7 @@ public class PercolatorDbContext : DbContext
             entity.ToTable("MessageQueue");
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).ValueGeneratedOnAdd();
+            entity.Property(e => e.AckId).IsRequired();
             entity.Property(e => e.RecipientPeerId)
                 .HasConversion(v => v.Value, v => new PeerId(v))
                 .IsRequired();
@@ -528,6 +529,7 @@ public class PercolatorDbContext : DbContext
             entity.HasIndex(e => e.EnqueuedAtUtc);
             entity.HasIndex(e => e.RecipientPeerId);
             entity.HasIndex(e => new { e.RecipientPeerId, e.EnqueuedAtUtc });
+            entity.HasIndex(e => e.AckId).IsUnique();
         });
     }
 }

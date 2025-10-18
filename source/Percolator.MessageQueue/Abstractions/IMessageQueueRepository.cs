@@ -14,10 +14,13 @@ public interface IMessageQueueRepository
         byte[] messageBlob,
         CancellationToken cancellationToken);
 
-    // Fetch up to maxCount oldest messages for the specified recipient and delete them atomically.
-    // Returns the blobs in enqueue order (oldest first).
-    Task<IReadOnlyList<byte[]>> FetchAndDeleteAsync(
+    // Fetch up to maxCount oldest messages for the specified recipient WITHOUT deleting them.
+    // Returns (AckId, Blob) pairs in enqueue order (oldest first).
+    Task<IReadOnlyList<(Guid AckId, byte[] Blob)>> FetchAsync(
         PeerId recipientPeerId,
         int maxCount,
         CancellationToken cancellationToken);
+
+    // Idempotent delete by AckId; returns true if a row was deleted, false if not found.
+    Task<bool> DeleteByAckIdAsync(Guid ackId, CancellationToken cancellationToken);
 }

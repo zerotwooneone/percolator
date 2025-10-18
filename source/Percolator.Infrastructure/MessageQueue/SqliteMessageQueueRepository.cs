@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Percolator.Identity;
 using Percolator.Infrastructure.Persistence;
 using Percolator.MessageQueue.Abstractions;
+using System.Linq;
 
 namespace Percolator.Infrastructure.MessageQueue;
 
@@ -47,6 +48,7 @@ public class SqliteMessageQueueRepository : IMessageQueueRepository
 
             var item = new MessageQueueItemDbo
             {
+                AckId = Guid.NewGuid(),
                 RecipientPeerId = recipientPeerId,
                 Blob = messageBlob,
                 EnqueuedAtUtc = DateTimeOffset.UtcNow
@@ -73,43 +75,36 @@ public class SqliteMessageQueueRepository : IMessageQueueRepository
         return (uint)cnt;
     }
 
-    public async Task<IReadOnlyList<byte[]>> FetchAndDeleteAsync(PeerId recipientPeerId, int maxCount, CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<(Guid AckId, byte[] Blob)>> FetchAsync(PeerId recipientPeerId, int maxCount, CancellationToken cancellationToken)
     {
         if (maxCount <= 0)
         {
-            return Array.Empty<byte[]>();
+            return Array.Empty<(Guid, byte[])>();
         }
 
-        // Cap batch size to a reasonable upper bound
         var take = Math.Min(maxCount, 500);
 
-        await using var tx = await _db.Database.BeginTransactionAsync(cancellationToken);
-        try
+        var items = await _db.MessageQueueItems
+            .Where(x => x.RecipientPeerId.Value == recipientPeerId.Value)
+            .OrderBy(x => x.EnqueuedAtUtc)
+            .Take(take)
+            .Select(x => new { x.AckId, x.Blob })
+            .ToListAsync(cancellationToken);
+
+        return items
+            .Select(x => (x.AckId, x.Blob))
+            .ToList();
+    }
+
+    public async Task<bool> DeleteByAckIdAsync(Guid ackId, CancellationToken cancellationToken)
+    {
+        var row = await _db.MessageQueueItems.FirstOrDefaultAsync(x => x.AckId == ackId, cancellationToken);
+        if (row is null)
         {
-            var items = await _db.MessageQueueItems
-                .Where(x => x.RecipientPeerId.Value == recipientPeerId.Value)
-                .OrderBy(x => x.EnqueuedAtUtc)
-                .Take(take)
-                .ToListAsync(cancellationToken);
-
-            if (items.Count == 0)
-            {
-                await tx.CommitAsync(cancellationToken);
-                return Array.Empty<byte[]>();
-            }
-
-            var blobs = items.Select(i => i.Blob).ToList();
-
-            _db.MessageQueueItems.RemoveRange(items);
-            await _db.SaveChangesAsync(cancellationToken);
-            await tx.CommitAsync(cancellationToken);
-
-            return blobs;
+            return false;
         }
-        catch
-        {
-            await tx.RollbackAsync(cancellationToken);
-            throw;
-        }
+        _db.MessageQueueItems.Remove(row);
+        await _db.SaveChangesAsync(cancellationToken);
+        return true;
     }
 }
