@@ -1,8 +1,8 @@
 
 Red–Green–Refactor strategy
-- Red: write failing unit/integration tests that assume no `session_id` in the request and verify that the server can route/decrypt solely via ratchet header key lookup.
+- Red: write failing unit tests and focus on creating the best possible interfaces. The build must succeed, but we expect new tests to fail at this point.
 - Green: implement the minimal changes to pass tests (contracts, minimal lookup, handler change).
-- Refactor: clean code, indexes, and naming without changing behavior; tests remain passing.
+- Refactor: clean up the code, check to make sure business logic is sound, anticipate edge cases, and naming without changing behavior; tests remain passing.
 
 - Two-step session inference (fast/slow path) for ratchet key misses
   - Rationale: In rare cases (e.g., a DH ratchet step that advances the remote header key before our index updates), the fast indexed lookup by header key may miss. We must still be able to correctly identify the session without any peer-supplied identifiers.
