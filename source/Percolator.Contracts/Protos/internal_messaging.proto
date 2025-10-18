@@ -393,6 +393,8 @@ message RelayOpaqueEnvelope {
   // Privacy-preserving: host does not include or persist sender identity here.
   // The exact opaque payload intended for the destination (e.g., an InternalEnvelope bytes)
   optional bytes opaque_payload = 1;
+  // Host-assigned GUID (16 bytes) used for idempotent acknowledgment
+  optional bytes message_ack_id = 2;
 }
 
 // === 7. Opaque Handshake (Signal-style) ===
@@ -414,4 +416,12 @@ message HandshakeInitiatorHello {
 message ResponderInnerHello {
   optional uint32 version = 1;
   optional string direct_session_id = 2;
+}
+
+// RPC-level acknowledgment for a relayed opaque message. Returned as the plaintext of the
+// DeliverOpaqueMessage RPC response (not wrapped inside InternalEnvelope).
+message RelayOpaqueResponse {
+  optional uint32 version = 1;
+  // Echo of the host-assigned message_ack_id (GUID bytes)
+  optional bytes message_ack_id = 2;
 }

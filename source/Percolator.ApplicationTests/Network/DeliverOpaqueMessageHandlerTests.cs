@@ -16,70 +16,133 @@ using Percolator.Identity;
 using Percolator.Application.Network;
 using Percolator.Application.Sessions;
 using Percolator.Contracts;
-using Percolator.Cryptography;
 using Percolator.Network;
+using Percolator.Cryptography;
 
 namespace Percolator.ApplicationTests.Network;
 
 [TestFixture]
-public class DeliverOpaqueMessageHandlerTests
-{
-    private static (InternalEnvelope Envelope, byte[] Bytes) BuildEnvelope(Action<InternalEnvelope> configure)
+    public class DeliverOpaqueMessageHandlerTests
     {
-        var env = new InternalEnvelope();
-        configure(env);
-        return (env, env.ToByteArray());
-    }
-
-    [Test]
-    public async Task RelayOpaqueEnvelope_dispatches_to_relays_and_returns_empty()
-    {
-        var handler = CreateHandler(out var sessionMgr, out var peerRepo, out var mediator, out var directRepo, out var ratchetLookup);
-        var sessionId = Guid.NewGuid();
-        var remotePeerId = Guid.NewGuid();
-
-        // Build a valid ratchet payload with RelayOpaqueEnvelope
-        var headerKeyBytes = RandomBytes(32);
-        var headerKey = new PreKey(headerKeyBytes);
-        var innerOpaque = RandomBytes(24);
-        var plain = new Plaintext(new InternalEnvelope
+        private static (InternalEnvelope Envelope, byte[] Bytes) BuildEnvelope(Action<InternalEnvelope> configure)
         {
-            RelayOpaqueEnvelope = new RelayOpaqueEnvelope { OpaquePayload = Google.Protobuf.ByteString.CopyFrom(innerOpaque) }
-        }.ToByteArray());
-        var payloadBytes = BuildRatchetPayload(headerKey.Value, plain.Value);
+            var env = new InternalEnvelope();
+            configure(env);
+            return (env, env.ToByteArray());
+        }
 
-        // Resolve and decrypt
-        ratchetLookup.Setup(l => l.TryResolveAsync(It.Is<PreKey>(p => p.Value.SequenceEqual(headerKey.Value)), It.IsAny<int>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new DirectSessionId(sessionId));
-        sessionMgr.Setup(s => s.ReceiveMessageAsync(It.Is<SessionId>(x => x.Value == sessionId), It.IsAny<SessionRatchetMessage>()))
-            .ReturnsAsync(plain);
+        [Test]
+        public async Task RelayOpaqueEnvelope_dispatches_to_relays_and_returns_empty()
+        {
+            var handler = CreateHandler(out var sessionMgr, out var peerRepo, out var mediator, out var directRepo, out var ratchetLookup);
+            var sessionId = Guid.NewGuid();
+            var remotePeerId = Guid.NewGuid();
 
-        // Map session and peer
-        directRepo.Setup(r => r.GetBySessionIdAsync(new DirectSessionId(sessionId), It.IsAny<int>()))
-            .ReturnsAsync(new DirectSession(new Percolator.Network.PeerId(remotePeerId), new DirectSessionId(sessionId)));
-        var endpoint = new GrpcEndPoint(new System.Net.DnsEndPoint("127.0.0.1", 5055), DateTimeOffset.UtcNow);
-        var identityKey = new DirectMessagePublicKey(RandomBytes(32));
-        peerRepo.Setup(p => p.GetByIdAsync(It.Is<Percolator.Network.PeerId>(id => id.Value == remotePeerId)))
-            .ReturnsAsync(new PeerConnection(new Percolator.Network.PeerId(remotePeerId), identityKey, new[] { endpoint }, Array.Empty<TlsCertificate>(), DateTimeOffset.UtcNow));
-        peerRepo.Setup(p => p.SaveAsync(It.IsAny<PeerConnection>())).Returns(Task.CompletedTask);
+            // Build a valid ratchet payload with RelayOpaqueEnvelope
+            var headerKeyBytes = RandomBytes(32);
+            var headerKey = new PreKey(headerKeyBytes);
+            var innerOpaque = RandomBytes(24);
+            var plain = new Plaintext(new InternalEnvelope
+            {
+                RelayOpaqueEnvelope = new RelayOpaqueEnvelope { OpaquePayload = Google.Protobuf.ByteString.CopyFrom(innerOpaque) }
+            }.ToByteArray());
+            var payloadBytes = BuildRatchetPayload(headerKey.Value, plain.Value);
 
-        // Orchestrator: expect relay processor to be invoked
-        mediator.Setup(m => m.Send(It.IsAny<Percolator.Application.Network.Handshake.ProcessRelayedOpaquePayloadCommand>(), It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
+            // Resolve and decrypt
+            ratchetLookup.Setup(l => l.TryResolveAsync(It.Is<PreKey>(p => p.Value.SequenceEqual(headerKey.Value)), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new DirectSessionId(sessionId));
+            sessionMgr.Setup(s => s.ReceiveMessageAsync(It.Is<SessionId>(x => x.Value == sessionId), It.IsAny<SessionRatchetMessage>()))
+                .ReturnsAsync(plain);
 
-        // Allow index upsert after decrypt
-        ratchetLookup.Setup(l => l.UpsertAsync(new DirectSessionId(sessionId), It.IsAny<int>(), It.IsAny<PreKey>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
+            // Map session and peer
+            directRepo.Setup(r => r.GetBySessionIdAsync(new DirectSessionId(sessionId), It.IsAny<int>()))
+                .ReturnsAsync(new DirectSession(new Percolator.Network.PeerId(remotePeerId), new DirectSessionId(sessionId)));
+            var endpoint = new GrpcEndPoint(new System.Net.DnsEndPoint("127.0.0.1", 5055), DateTimeOffset.UtcNow);
+            var identityKey = new DirectMessagePublicKey(RandomBytes(32));
+            peerRepo.Setup(p => p.GetByIdAsync(It.Is<Percolator.Network.PeerId>(id => id.Value == remotePeerId)))
+                .ReturnsAsync(new PeerConnection(new Percolator.Network.PeerId(remotePeerId), identityKey, new[] { endpoint }, Array.Empty<TlsCertificate>(), DateTimeOffset.UtcNow));
+            peerRepo.Setup(p => p.SaveAsync(It.IsAny<PeerConnection>())).Returns(Task.CompletedTask);
 
-        var cmd = new DeliverOpaqueMessageCommand { PayloadBytes = payloadBytes };
-        var result = await handler.Handle(cmd, CancellationToken.None);
+            // Orchestrator: expect relay processor to be invoked
+            mediator.Setup(m => m.Send(It.IsAny<Percolator.Application.Network.Handshake.ProcessRelayedOpaquePayloadCommand>(), It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
 
-        result.ResponsePayloadBytes.Should().BeNull();
-        mediator.Verify(m => m.Send(It.IsAny<Percolator.Application.Network.Handshake.ProcessRelayedOpaquePayloadCommand>(), It.IsAny<CancellationToken>()), Times.Once);
-        sessionMgr.VerifyAll();
-        peerRepo.VerifyAll();
-        directRepo.VerifyAll();
-    }
+            // Allow index upsert after decrypt
+            ratchetLookup.Setup(l => l.UpsertAsync(new DirectSessionId(sessionId), It.IsAny<int>(), It.IsAny<PreKey>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
+
+            var cmd = new DeliverOpaqueMessageCommand { PayloadBytes = payloadBytes };
+            var result = await handler.Handle(cmd, CancellationToken.None);
+
+            result.ResponsePayloadBytes.Should().BeNull();
+            mediator.Verify(m => m.Send(It.IsAny<Percolator.Application.Network.Handshake.ProcessRelayedOpaquePayloadCommand>(), It.IsAny<CancellationToken>()), Times.Once);
+            sessionMgr.VerifyAll();
+            peerRepo.VerifyAll();
+            directRepo.VerifyAll();
+        }
+
+        [Test]
+        public async Task RelayOpaqueEnvelope_with_AckId_returns_encrypted_ack_response()
+        {
+            var handler = CreateHandler(out var sessionMgr, out var peerRepo, out var mediator, out var directRepo, out var ratchetLookup);
+            var sessionId = Guid.NewGuid();
+            var remotePeerId = Guid.NewGuid();
+
+            // Header key and inner opaque
+            var headerKeyBytes = RandomBytes(32);
+            var headerKey = new PreKey(headerKeyBytes);
+            var innerOpaque = RandomBytes(24);
+            var ackId = Guid.NewGuid();
+
+            // Build envelope with RelayOpaqueEnvelope including MessageAckId
+            var plain = new Plaintext(new InternalEnvelope
+            {
+                RelayOpaqueEnvelope = new RelayOpaqueEnvelope
+                {
+                    OpaquePayload = ByteString.CopyFrom(innerOpaque),
+                    MessageAckId = ByteString.CopyFrom(ackId.ToByteArray())
+                }
+            }.ToByteArray());
+            var payloadBytes = BuildRatchetPayload(headerKey.Value, plain.Value);
+
+            // Fast-path resolve and decrypt
+            ratchetLookup.Setup(l => l.TryResolveAsync(It.Is<PreKey>(p => p.Value.SequenceEqual(headerKey.Value)), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new DirectSessionId(sessionId));
+            sessionMgr.Setup(s => s.ReceiveMessageAsync(It.Is<SessionId>(x => x.Value == sessionId), It.IsAny<SessionRatchetMessage>()))
+                .ReturnsAsync(plain);
+
+            // Session mapping and peer info
+            directRepo.Setup(r => r.GetBySessionIdAsync(new DirectSessionId(sessionId), It.IsAny<int>()))
+                .ReturnsAsync(new DirectSession(new Percolator.Network.PeerId(remotePeerId), new DirectSessionId(sessionId)));
+            var endpoint = new GrpcEndPoint(new System.Net.DnsEndPoint("127.0.0.1", 6060), DateTimeOffset.UtcNow);
+            peerRepo.Setup(p => p.GetByIdAsync(It.Is<Percolator.Network.PeerId>(id => id.Value == remotePeerId)))
+                .ReturnsAsync(new PeerConnection(new Percolator.Network.PeerId(remotePeerId), new DirectMessagePublicKey(RandomBytes(32)), new[] { endpoint }, Array.Empty<TlsCertificate>(), DateTimeOffset.UtcNow));
+            peerRepo.Setup(p => p.SaveAsync(It.IsAny<PeerConnection>())).Returns(Task.CompletedTask);
+
+            // Orchestrator invoked for relay inner processing
+            mediator.Setup(m => m.Send(It.IsAny<Percolator.Application.Network.Handshake.ProcessRelayedOpaquePayloadCommand>(), It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
+
+            // Upsert after decrypt
+            ratchetLookup.Setup(l => l.UpsertAsync(new DirectSessionId(sessionId), It.IsAny<int>(), It.IsAny<PreKey>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
+
+            // Expect encryption of RelayOpaqueResponse
+            var expectedAckCipher = RandomBytes(64);
+            sessionMgr.Setup(s => s.EncryptMessageAsync(It.Is<SessionId>(x => x.Value == sessionId), It.IsAny<Plaintext>()))
+                .ReturnsAsync(new SessionRatchetMessage(expectedAckCipher));
+
+            var cmd = new DeliverOpaqueMessageCommand { PayloadBytes = payloadBytes };
+            var result = await handler.Handle(cmd, CancellationToken.None);
+
+            result.ResponsePayloadBytes.Should().NotBeNull();
+            result.ResponsePayloadBytes!.Should().BeEquivalentTo(expectedAckCipher);
+
+            mediator.Verify(m => m.Send(It.IsAny<Percolator.Application.Network.Handshake.ProcessRelayedOpaquePayloadCommand>(), It.IsAny<CancellationToken>()), Times.Once);
+            peerRepo.VerifyAll();
+            directRepo.VerifyAll();
+            sessionMgr.VerifyAll();
+        }
 
     [Test]
     public async Task MQ_Enqueue_request_results_in_early_encrypted_response()
@@ -98,6 +161,7 @@ public class DeliverOpaqueMessageHandlerTests
                 MessageBlob = ByteString.CopyFrom(RandomBytes(24))
             }
         };
+
         var env = new InternalEnvelope { MessageQueueEnvelope = mqReq };
         var plain = new Plaintext(env.ToByteArray());
         var payloadBytes = BuildRatchetPayload(headerKey.Value, plain.Value);

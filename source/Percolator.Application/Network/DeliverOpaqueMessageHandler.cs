@@ -190,9 +190,18 @@ namespace Percolator.Application.Network
                     case InternalEnvelope.ApplicationPayloadOneofCase.RelayOpaqueEnvelope:
                         var relay = internalEnvelope.RelayOpaqueEnvelope;
                         await _mediator.Send(new ProcessRelayedOpaquePayloadCommand(relay.OpaquePayload.ToByteArray()), cancellationToken);
-                        break;
-                    default:
-                        _logger.LogWarning("Received unhandled internal envelope type: {EnvelopeType}", internalEnvelope.ApplicationPayloadCase);
+                        // If host supplied an AckId, return an RPC-level RelayOpaqueResponse encrypted to the session
+                        if (relay.HasMessageAckId)
+                        {
+                            var ack = new RelayOpaqueResponse
+                            {
+                                Version = 1,
+                                MessageAckId = relay.MessageAckId
+                            };
+                            var ackPlain = new Plaintext(ack.ToByteArray());
+                            var ackCipher = await _sessionManager.EncryptMessageAsync(inferredSessionId, ackPlain);
+                            return new DeliverOpaqueMessageResult { ResponsePayloadBytes = ackCipher.Value };
+                        }
                         break;
                 }
 
@@ -200,7 +209,6 @@ namespace Percolator.Application.Network
                 {
                     return new DeliverOpaqueMessageResult();
                 }
-
                 var responseBytes = await EncryptResponseEnvelope(inferredSessionId, responseEnvelope);
                 return new DeliverOpaqueMessageResult { ResponsePayloadBytes = responseBytes };
             }
