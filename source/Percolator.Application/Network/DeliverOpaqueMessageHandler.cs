@@ -23,6 +23,7 @@ namespace Percolator.Application.Network
         private readonly IDirectSessionRepository _directSessionRepository;
         private readonly ActiveIdentityContext _activeIdentityContext;
         private readonly IRatchetKeySessionLookup _ratchetLookup;
+        private readonly RelayOrchestrator _relayOrchestrator;
         // Centralized allowlist to avoid drift with documentation and tests.
         private static readonly HashSet<InternalEnvelope.ApplicationPayloadOneofCase> AllowedCases = new()
         {
@@ -34,8 +35,7 @@ namespace Percolator.Application.Network
             InternalEnvelope.ApplicationPayloadOneofCase.RelayOpaqueEnvelope,
             InternalEnvelope.ApplicationPayloadOneofCase.SubmitPreKeyBundleResponse,
             InternalEnvelope.ApplicationPayloadOneofCase.GetPreKeyBundleResponse,
-            InternalEnvelope.ApplicationPayloadOneofCase.EnqueueOpaqueMessageResponse,
-            InternalEnvelope.ApplicationPayloadOneofCase.FetchQueuedMessagesResponse
+            InternalEnvelope.ApplicationPayloadOneofCase.EnqueueOpaqueMessageResponse
         };
 
         public DeliverOpaqueMessageHandler(
@@ -45,7 +45,8 @@ namespace Percolator.Application.Network
             IMediator mediator,
             IDirectSessionRepository directSessionRepository,
             ActiveIdentityContext activeIdentityContext,
-            IRatchetKeySessionLookup ratchetLookup)
+            IRatchetKeySessionLookup ratchetLookup,
+            RelayOrchestrator relayOrchestrator)
         {
             _logger = logger;
             _sessionManager = sessionManager;
@@ -54,6 +55,7 @@ namespace Percolator.Application.Network
             _directSessionRepository = directSessionRepository;
             _activeIdentityContext = activeIdentityContext;
             _ratchetLookup = ratchetLookup;
+            _relayOrchestrator = relayOrchestrator;
         }
 
         private async Task<SubmitPreKeyBundleResponse> HandlePrekeyEnvelopeAsync(PrekeyEnvelope prekeyEnvelope,
@@ -165,6 +167,20 @@ namespace Percolator.Application.Network
 
                 connectionInfo.UpdateLastSeen(endpoint, DateTimeOffset.UtcNow);
                 await _peerConnectionRepository.SaveAsync(connectionInfo);
+
+                // Signal: peer online. Attempt relay of queued messages one-by-one until empty or first failure.
+                try
+                {
+                    var identityPeerId = new Percolator.Identity.PeerId(remotePeerId.Value);
+                    while (await _relayOrchestrator.RelayNextAsync(identityPeerId, cancellationToken))
+                    {
+                        // continue while acked
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Relay loop stopped due to failure; will resume on next online signal for {PeerId}", remotePeerId);
+                }
 
                 if (processed is not null)
                 {

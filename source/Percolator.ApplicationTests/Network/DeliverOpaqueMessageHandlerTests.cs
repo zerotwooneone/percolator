@@ -395,7 +395,14 @@ namespace Percolator.ApplicationTests.Network;
         // Common setup: orchestrator delegation returns null by default (no early response)
         mediator.Setup(m => m.Send(It.IsAny<ProcessInternalEnvelopeCommand>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((InternalEnvelope?)null);
-        return new DeliverOpaqueMessageHandler(logger, sessionMgr.Object, peerRepo.Object, mediator.Object, directRepo.Object, active, ratchetLookup.Object);
+        // Relay orchestrator: queue empty so loop is a no-op in tests
+        var mqRepo = new Mock<Percolator.MessageQueue.Abstractions.IMessageQueueRepository>(MockBehavior.Strict);
+        mqRepo.Setup(r => r.FetchAsync(It.IsAny<Percolator.Identity.PeerId>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<(Guid, byte[])>());
+        var transport = new Mock<IMessageTransportService>(MockBehavior.Strict);
+        var relayLogger = Mock.Of<ILogger<RelayOrchestrator>>();
+        var relay = new RelayOrchestrator(relayLogger, mqRepo.Object, directRepo.Object, sessionMgr.Object, transport.Object, active);
+        return new DeliverOpaqueMessageHandler(logger, sessionMgr.Object, peerRepo.Object, mediator.Object, directRepo.Object, active, ratchetLookup.Object, relay);
     }
 
     [Test]

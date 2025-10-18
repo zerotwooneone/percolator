@@ -6,6 +6,7 @@ using Percolator.Infrastructure.Dht;
 using Percolator.Infrastructure.Identity;
 using Percolator.Infrastructure.Sessions;
 using Percolator.Infrastructure.Network;
+using Percolator.Infrastructure.MessageQueue;
 using Percolator.Application.Network.Handshake;
 using Percolator.Infrastructure.Network.Handshake;
 
@@ -33,6 +34,7 @@ public static class ServiceCollectionExtensions
         services.AddNetworkInfrastructure();
         services.AddDhtInfrastructure();
         services.AddCryptographyInfrastructure();
+        services.AddMessageQueueInfrastructure();
 
         // Security/adapters
         services.AddScoped<Percolator.Application.Apps.Chat.IAtRestKeyProvider, Percolator.Infrastructure.Security.AtRestKeyProvider>();

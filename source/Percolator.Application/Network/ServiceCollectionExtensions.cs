@@ -112,6 +112,9 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<PercolatorMessageService>();
         services.AddSingleton<IPeerDiscoveryHandler, PeerDiscoveryHandler>();
 
+        // Relay orchestrator for queued messages ACK flow
+        services.AddSingleton<RelayOrchestrator>();
+
         return services;
     }
 }
