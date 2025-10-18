@@ -62,13 +62,24 @@ namespace Percolator.Application.Network.Handshake
             {
                 return;
             }
-            // The relayed payload is a DR SessionRatchetMessage opaque to the host. Decrypt via fast/slow path to obtain an InternalEnvelope.
+            // First attempt: treat as a DR SessionRatchetMessage opaque to the host.
             if (_active.Identity is null)
             {
                 throw new InvalidOperationException("Active identity not loaded.");
             }
 
-            var ratchetMessage = new SessionRatchetMessage(request.OpaquePayload);
+            SessionRatchetMessage ratchetMessage;
+            try
+            {
+                ratchetMessage = new SessionRatchetMessage(request.OpaquePayload);
+            }
+            catch
+            {
+                // Not a valid ratchet message; attempt plaintext HandshakeInitiatorHello fallback
+                await TryHandlePlaintextHelloAsync(request.OpaquePayload, cancellationToken);
+                return;
+            }
+
             var header = ratchetMessage.GetHeader();
 
             // Fast path: resolve session by ratchet header key
@@ -87,7 +98,9 @@ namespace Percolator.Application.Network.Handshake
                 var result = await _sessions.TryInferAndReceiveAsync(ratchetMessage, cancellationToken);
                 if (result is null)
                 {
-                    throw new InvalidOperationException("Failed to infer session and decrypt relayed DR message");
+                    // Fallback: raw payload might be a plaintext HandshakeInitiatorHello
+                    await TryHandlePlaintextHelloAsync(request.OpaquePayload, cancellationToken);
+                    return;
                 }
                 sid = result.Value.sessionId;
                 plaintext = result.Value.plaintext;
@@ -95,7 +108,8 @@ namespace Percolator.Application.Network.Handshake
 
             if (plaintext is null)
             {
-                _logger.LogWarning("Relayed DR message could not be decrypted");
+                _logger.LogWarning("Relayed DR message could not be decrypted; attempting plaintext HandshakeInitiatorHello fallback");
+                await TryHandlePlaintextHelloAsync(request.OpaquePayload, cancellationToken);
                 return;
             }
 
@@ -106,7 +120,8 @@ namespace Percolator.Application.Network.Handshake
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Decrypted relayed payload was not a valid InternalEnvelope");
+                _logger.LogWarning(ex, "Decrypted relayed payload was not a valid InternalEnvelope; attempting plaintext HandshakeInitiatorHello fallback");
+                await TryHandlePlaintextHelloAsync(request.OpaquePayload, cancellationToken);
                 return;
             }
 
@@ -121,6 +136,35 @@ namespace Percolator.Application.Network.Handshake
                 inner,
                 new Percolator.Application.Network.SessionContext(sid.Value, _active.Identity.SelfIdentityId, null)
             ), cancellationToken);
+        }
+
+        private async Task TryHandlePlaintextHelloAsync(byte[] payload, CancellationToken cancellationToken)
+        {
+            try
+            {
+                var hello = HandshakeInitiatorHello.Parser.ParseFrom(payload);
+                if (hello is not null && hello.HasInitiatorIdentityKeySpki && hello.HasInitiatorEphemeralKeySpki && hello.HasSignedPreKeyId)
+                {
+                    var spki = hello.InitiatorIdentityKeySpki.ToByteArray();
+                    var eph = hello.InitiatorEphemeralKeySpki.ToByteArray();
+                    var spkId = new Guid(hello.SignedPreKeyId.ToByteArray());
+                    Guid? otkId = hello.HasOneTimePreKeyId ? new Guid(hello.OneTimePreKeyId.ToByteArray()) : (Guid?)null;
+
+                    await _mediator.Send(
+                        new HandleHandshakeInitiatorHelloCommand(
+                            spki,
+                            eph,
+                            spkId,
+                            otkId,
+                            null,
+                            hello.HasEncryptedPayload ? hello.EncryptedPayload.ToByteArray() : null),
+                        cancellationToken);
+                }
+            }
+            catch
+            {
+                // Not a valid hello; ignore
+            }
         }
     }
 }
