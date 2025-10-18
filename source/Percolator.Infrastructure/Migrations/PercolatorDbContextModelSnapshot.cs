@@ -436,6 +436,9 @@ namespace Percolator.Infrastructure.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT");
 
+                    b.Property<Guid>("AckId")
+                        .HasColumnType("TEXT");
+
                     b.Property<byte[]>("Blob")
                         .IsRequired()
                         .HasColumnType("BLOB");
@@ -447,6 +450,9 @@ namespace Percolator.Infrastructure.Migrations
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("AckId")
+                        .IsUnique();
 
                     b.HasIndex("EnqueuedAtUtc");
 
@@ -551,20 +557,27 @@ namespace Percolator.Infrastructure.Migrations
                     b.ToTable("PeerPublicSigningKeys", (string)null);
                 });
 
-            modelBuilder.Entity("Percolator.Infrastructure.Persistence.PendingInitiatorHandshakeDbo", b =>
+            modelBuilder.Entity("Percolator.Infrastructure.Persistence.PreHandshakeSessionDbo", b =>
                 {
-                    b.Property<int>("Id")
+                    b.Property<long>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
                     b.Property<DateTimeOffset>("CreatedAtUtc")
                         .HasColumnType("TEXT");
 
-                    b.Property<byte[]>("LocalEphemeralPrivateKeyPkcs8")
+                    b.Property<DateTimeOffset?>("ExpiresAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<byte[]>("InitialRootKey")
                         .IsRequired()
                         .HasColumnType("BLOB");
 
-                    b.Property<Guid?>("OneTimePreKeyId")
+                    b.Property<byte[]>("InitiatorEphemeralPrivateKey")
+                        .IsRequired()
+                        .HasColumnType("BLOB");
+
+                    b.Property<Guid>("LocalRequestId")
                         .HasColumnType("TEXT");
 
                     b.Property<byte[]>("RecipientPublicKeyHash")
@@ -575,27 +588,21 @@ namespace Percolator.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("BLOB");
 
-                    b.Property<byte[]>("RemotePreKeySpki")
-                        .IsRequired()
-                        .HasColumnType("BLOB");
-
                     b.Property<int>("SelfIdentityId")
                         .HasColumnType("INTEGER");
 
-                    b.Property<byte[]>("SharedSecret")
-                        .IsRequired()
-                        .HasColumnType("BLOB");
-
-                    b.Property<Guid>("SignedPreKeyId")
-                        .HasColumnType("TEXT");
-
                     b.HasKey("Id");
+
+                    b.HasIndex("SelfIdentityId");
+
+                    b.HasIndex("SelfIdentityId", "ExpiresAtUtc");
+
+                    b.HasIndex("SelfIdentityId", "LocalRequestId")
+                        .IsUnique();
 
                     b.HasIndex("SelfIdentityId", "RecipientPublicKeyHash");
 
-                    b.HasIndex("SelfIdentityId", "SignedPreKeyId", "OneTimePreKeyId");
-
-                    b.ToTable("PendingInitiatorHandshake", (string)null);
+                    b.ToTable("PreHandshakeSessions", (string)null);
                 });
 
             modelBuilder.Entity("Percolator.Infrastructure.Persistence.RatchetKeyIndexDbo", b =>
