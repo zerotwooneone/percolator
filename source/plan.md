@@ -28,32 +28,25 @@ Non-functional contract (Signal-like):
 - FIFO per destination device; preserve enqueue order on delivery.
 - Best-effort immediate delivery if recipient is online; otherwise enqueue.
 
-### 1 Handle relayed plaintext HandshakeInitiatorHello
-We need to add a fallback handler to ProcessRelayedOpaquePayloadHandler- if the peer fails to decrypt the payload as ratchet message then we should attempt to parse it as a HandshakeInitiatorHello
+### 1 Handle relayed plaintext HandshakeInitiatorHello (Completed)
+Implemented fallback in `Percolator.Application/Network/Handshake/ProcessRelayedOpaquePayloadCommand.cs` and in `DeliverOpaqueMessageHandler.cs` to parse plaintext `HandshakeInitiatorHello` when DR parsing/decryption fails and dispatch `HandleHandshakeInitiatorHelloCommand`.
 
-### 2 Relayed message wrapper
-The host should include a host-specific message id (guid) to RelayOpaqueEnvelope (source\Percolator.Contracts\Protos\internal_messaging.proto) when sending relayed messages to peers.
-This will require adding a new AckId column to MessageQueueItemDbo because we do not want to expose our internal queue id to peers.
-A peer, upon receiving a relay message should attempt to respond with a ratchet message for the host whose payload is a new RelayOpaqueResponse which contains the Message Ack Id.
-The host, when receiving a RelayOpaqueResponse, should attempt to delete the Acknowledged message.
-This will require a new DB migration. There is no need handle existing databases, a new sqlite file will be created. Message Ack Id is required and not null.
-Messages should be attempted to be sent directly to the peer, and if that fails then the message should be queued.
-RelayOpaqueResponse will not be a part of InternalEnvelope - instead this will be the payload in a ratchet message to the host. The response will be returned as a return from the grpc method delivering the message as a payload inside the ratchet message.
-The ack is purely the synchronous return of the DeliverOpaqueMessage RPC.
-If relay message delivery fails, we should stop sending queued messages until the next signal the peer is online.
-Replay/double-ack handling: deleting by AckId should be idempotent; unknown acks are logged and ignored.
+### 2 Relayed message wrapper (Completed)
+- Proto already contains `RelayOpaqueEnvelope` and `RelayOpaqueResponse` in `Percolator.Contracts/Protos/internal_messaging.proto`.
+- DB `AckId` implemented in infra repo: `Percolator.Infrastructure/MessageQueue/SqliteMessageQueueRepository.cs` with `TryEnqueueAsync` (AckId), `FetchAsync`, `DeleteByAckIdAsync`.
+- Orchestration implemented in `Percolator.Application/Network/RelayOrchestrator.cs`: builds `RelayOpaqueEnvelope` with `MessageAckId`, encrypts/sends, decrypts `RelayOpaqueResponse`, validates AckId, deletes by AckId.
+- Host replies with encrypted `RelayOpaqueResponse` in `DeliverOpaqueMessageHandler.cs` when `RelayOpaqueEnvelope` has `message_ack_id`.
 
-#### 2.1 Relay for offline peers
-We need to replace the existing catch-up behavior with one in which the host begins to relay messages queued (one by one) for a peer as soon as the peer comes online. This allows the peer to acknowledge each message as a return value to the proto method. 
-The host will then handle the RelayOpaqueResponse and delete the corresponding message.
-We should no longer need FetchAndDeleteAsync after this change, remove this method.
-A peer coming online can be generalized when an internal envelope is handled from the peer. From the host perspective, we should handle the internal envelope as a signal that the peer is online.
+#### 2.1 Relay for offline peers (Completed)
+- After any valid `InternalEnvelope` is processed in `DeliverOpaqueMessageHandler.cs`, a loop calls `_relayOrchestrator.RelayNextAsync(...)` until the queue is empty or a failure occurs, acting as the "peer online" drain.
+- Immediate per-enqueue relay attempt is also triggered via `TryRelayNextForPeerCommand` from chat dispatch handlers.
 
 ### 3 Chat
 
-#### 3.2 Message Queue
-Add code path for TextMessage, ReadReceipt, EmojiAnnotation, DeliveredReceipt, SignedAdminOperation, and SignedAdminCommitOperation to be delivered over message queue
-Messages should be queued immediately and then attempted to be delivered directly - if direct delivery is acked then delete the queued message after the ack.
+#### 3.2 Message Queue (Completed)
+- MQ dispatch paths implemented for `TextMessage`, `ReadReceipt`, `EmojiAnnotation`, `DeliveredReceipt`, `SignedAdminOperation`, `SignedAdminCommitOperation` in `Percolator.Application/Apps/Chat/Handlers/`.
+- Chat post handlers publish events excluding self in `Percolator.Chat/App/Handlers/`.
+- Queue-first + immediate relay is live; ack-driven delete handled by the relay wrapper (see section 2).
 
 ### 17 Correct Phase 2 test order (fix Phase2_Prekeys_Dht_And_Sessions_Establish)
     1) Alice↔Host connect; mutual naming by SPKI; Alice probes DHT (0 nodes); Alice publishes prekeys.
