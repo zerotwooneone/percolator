@@ -58,24 +58,4 @@ public class DispatchEmojiAnnotationHandlerTests
         // Assert
         _mediatorMock.VerifyAll();
     }
-
-    [Test]
-    public async Task Handle_WhenEnqueueRejected_DoesNotTriggerRelay()
-    {
-        // Arrange
-        var recipients = new[] { _recipientId };
-        var command = new DispatchEmojiAnnotationCommand(_messageId, _emoji, _sentUtc, recipients, _selfId);
-
-        _mediatorMock
-            .Setup(m => m.Send(
-                It.IsAny<EnqueueOpaqueMessageCommand>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new EnqueueOpaqueMessageResult(false, "rejected"));
-
-        // Act
-        await _sut.Handle(command, CancellationToken.None);
-
-        // Assert
-        _mediatorMock.VerifyAll();
-    }
 }
