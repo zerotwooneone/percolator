@@ -28,25 +28,6 @@ Non-functional contract (Signal-like):
 - FIFO per destination device; preserve enqueue order on delivery.
 - Best-effort immediate delivery if recipient is online; otherwise enqueue.
 
-### 1 Handle relayed plaintext HandshakeInitiatorHello (Completed)
-Implemented fallback in `Percolator.Application/Network/Handshake/ProcessRelayedOpaquePayloadCommand.cs` and in `DeliverOpaqueMessageHandler.cs` to parse plaintext `HandshakeInitiatorHello` when DR parsing/decryption fails and dispatch `HandleHandshakeInitiatorHelloCommand`.
-
-### 2 Relayed message wrapper (Completed)
-- Proto already contains `RelayOpaqueEnvelope` and `RelayOpaqueResponse` in `Percolator.Contracts/Protos/internal_messaging.proto`.
-- DB `AckId` implemented in infra repo: `Percolator.Infrastructure/MessageQueue/SqliteMessageQueueRepository.cs` with `TryEnqueueAsync` (AckId), `FetchAsync`, `DeleteByAckIdAsync`.
-- Orchestration implemented in `Percolator.Application/Network/RelayOrchestrator.cs`: builds `RelayOpaqueEnvelope` with `MessageAckId`, encrypts/sends, decrypts `RelayOpaqueResponse`, validates AckId, deletes by AckId.
-- Host replies with encrypted `RelayOpaqueResponse` in `DeliverOpaqueMessageHandler.cs` when `RelayOpaqueEnvelope` has `message_ack_id`.
-
-#### 2.1 Relay for offline peers (Completed)
-- After any valid `InternalEnvelope` is processed in `DeliverOpaqueMessageHandler.cs`, a loop calls `_relayOrchestrator.RelayNextAsync(...)` until the queue is empty or a failure occurs, acting as the "peer online" drain.
-- Immediate per-enqueue relay attempt is also triggered via `TryRelayNextForPeerCommand` from chat dispatch handlers.
-
-### 3 Chat
-
-#### 3.2 Message Queue (Completed)
-- MQ dispatch paths implemented for `TextMessage`, `ReadReceipt`, `EmojiAnnotation`, `DeliveredReceipt`, `SignedAdminOperation`, `SignedAdminCommitOperation` in `Percolator.Application/Apps/Chat/Handlers/`.
-- Chat post handlers publish events excluding self in `Percolator.Chat/App/Handlers/`.
-- Queue-first + immediate relay is live; ack-driven delete handled by the relay wrapper (see section 2).
 
 ### 17 Correct Phase 2 test order (fix Phase2_Prekeys_Dht_And_Sessions_Establish)
     1) Alice↔Host connect; mutual naming by SPKI; Alice probes DHT (0 nodes); Alice publishes prekeys.
