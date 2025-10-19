@@ -70,6 +70,9 @@ public class DispatchTextMessageHandlerTests
 
         // Assert
         _mediatorMock.VerifyAll();
+        _mediatorMock.Verify(m => m.Send(
+            It.Is<Percolator.Application.Network.TryRelayNextForPeerCommand>(c => c.RecipientPeerId.Equals(_recipientId)),
+            It.IsAny<CancellationToken>()), Times.Once);
         _transportMock.Verify(t => t.SendMessageAsync(
             It.IsAny<PeerId>(),
             It.IsAny<DirectSessionId>(),

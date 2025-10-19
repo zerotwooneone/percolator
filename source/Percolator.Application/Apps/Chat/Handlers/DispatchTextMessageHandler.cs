@@ -91,6 +91,10 @@ public sealed class DispatchTextMessageHandler : IRequestHandler<DispatchTextMes
                 return;
             }
 
+            // Best-effort: immediately try to relay the just-enqueued message to the recipient.
+            // This uses the RelayOrchestrator's AckId-based flow and deletes on ack.
+            await _mediator.Send(new Percolator.Application.Network.TryRelayNextForPeerCommand(recipientId), cancellationToken);
+
             // Try to get a direct session for immediate delivery
             // Note: We need to provide the selfIdentityId, but it's not available here
             // This suggests we need to modify the interface or the way we handle sessions
