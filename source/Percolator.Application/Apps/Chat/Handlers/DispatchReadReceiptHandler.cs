@@ -16,8 +16,6 @@ public sealed class DispatchReadReceiptHandler : IRequestHandler<DispatchReadRec
 
     public DispatchReadReceiptHandler(
         IMediator mediator,
-        IMessageTransportService transportService,
-        IDirectSessionRepository sessionRepository,
         ILogger<DispatchReadReceiptHandler> logger)
     {
         _mediator = mediator ?? throw new ArgumentNullException(nameof(mediator));
