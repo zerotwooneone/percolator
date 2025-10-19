@@ -2,9 +2,11 @@ using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
 using Moq;
+using MediatR;
 using Percolator.Chat;
 using Percolator.Chat.App;
 using Percolator.Chat.App.Commands;
+using Percolator.Chat.Events;
 using Percolator.Chat.ValueObjects;
 
 namespace Percolator.Chat.Tests;
@@ -14,12 +16,16 @@ public class PostReadReceiptHandlerTests
 {
     private Mock<IConversationResolver> _resolver = null!;
     private Mock<IChatMessageWriter> _writer = null!;
+    private Mock<IPublisher> _publisher = null!;
+    private Mock<ISelfIdentityProvider> _selfIdentity = null!;
 
     [SetUp]
     public void SetUp()
     {
         _resolver = new Mock<IConversationResolver>(MockBehavior.Strict);
         _writer = new Mock<IChatMessageWriter>(MockBehavior.Strict);
+        _publisher = new Mock<IPublisher>(MockBehavior.Loose);
+        _selfIdentity = new Mock<ISelfIdentityProvider>(MockBehavior.Strict);
     }
 
     private static Conversation MakeConversation()
@@ -50,7 +56,16 @@ public class PostReadReceiptHandlerTests
             .Setup(w => w.AddReadReceiptAsync(convo.Id, selfIdentityId, messageId, sentAt, It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
-        var handler = new PostReadReceiptHandler(_resolver.Object, _writer.Object);
+        // Mock self identity provider to return a peerId matching one of participants for exclusion
+        _selfIdentity
+            .Setup(s => s.GetPeerIdAsync(selfIdentityId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(convo.Participants.First().Value);
+
+        _publisher
+            .Setup(p => p.Publish(It.IsAny<ReadReceiptPostedEvent>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        var handler = new PostReadReceiptHandler(_resolver.Object, _writer.Object, _publisher.Object, _selfIdentity.Object);
         var cmd = new PostReadReceiptCommand(lookup, messageId, sentAt);
 
         // Act
@@ -59,6 +74,7 @@ public class PostReadReceiptHandlerTests
         // Assert
         _resolver.VerifyAll();
         _writer.VerifyAll();
+        _publisher.Verify(p => p.Publish(It.IsAny<ReadReceiptPostedEvent>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Test]
@@ -67,7 +83,7 @@ public class PostReadReceiptHandlerTests
         // Arrange
         var lookup = new ConversationLookupKey(Guid.NewGuid(), new Pkh(new byte[32]), null);
         var messageId = new MessageId(Guid.NewGuid());
-        var handler = new PostReadReceiptHandler(_resolver.Object, _writer.Object);
+        var handler = new PostReadReceiptHandler(_resolver.Object, _writer.Object, _publisher.Object, _selfIdentity.Object);
         var cmd = new PostReadReceiptCommand(lookup, messageId, DateTimeOffset.UtcNow);
 
         // Act
