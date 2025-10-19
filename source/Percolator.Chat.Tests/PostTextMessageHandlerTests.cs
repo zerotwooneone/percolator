@@ -1,11 +1,13 @@
 using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
+using MediatR;
 using Moq;
 using Percolator.Chat;
 using Percolator.Chat.App;
 using Percolator.Chat.App.Commands;
 using Percolator.Chat.ValueObjects;
+using Percolator.Chat.Events;
 
 namespace Percolator.Chat.Tests;
 
@@ -14,12 +16,16 @@ public class PostTextMessageHandlerTests
 {
     private Mock<IConversationResolver> _resolver = null!;
     private Mock<IChatMessageWriter> _writer = null!;
+    private Mock<IPublisher> _publisher = null!;
+    private Mock<ISelfIdentityProvider> _selfIdentityProvider = null!;
 
     [SetUp]
     public void SetUp()
     {
         _resolver = new Mock<IConversationResolver>(MockBehavior.Strict);
         _writer = new Mock<IChatMessageWriter>(MockBehavior.Strict);
+        _publisher = new Mock<IPublisher>(MockBehavior.Loose);
+        _selfIdentityProvider = new Mock<ISelfIdentityProvider>(MockBehavior.Strict);
     }
 
     private static Conversation MakeConversation()
@@ -51,7 +57,24 @@ public class PostTextMessageHandlerTests
             .Setup(w => w.AddTextMessageAsync(convo.Id, selfIdentityId, content, messageId, sentAt, It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
-        var handler = new PostTextMessageHandler(_resolver.Object, _writer.Object);
+        _publisher
+            .Setup(p => p.Publish(It.IsAny<Percolator.Chat.Events.TextMessagePostedEvent>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        // Some MediatR versions may route through the non-generic overload
+        _publisher
+            .Setup(p => p.Publish(It.IsAny<object>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        _selfIdentityProvider
+            .Setup(p => p.GetPeerIdAsync(selfIdentityId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Guid.NewGuid());
+
+        var handler = new PostTextMessageHandler(
+            _resolver.Object, 
+            _writer.Object,
+            _publisher.Object,
+            _selfIdentityProvider.Object);
         var cmd = new PostTextMessageCommand(lookup, messageId, content, sentAt);
 
         // Act
@@ -60,6 +83,7 @@ public class PostTextMessageHandlerTests
         // Assert
         _resolver.VerifyAll();
         _writer.VerifyAll();
+        _publisher.Verify(p => p.Publish(It.IsAny<TextMessagePostedEvent>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Test]
@@ -68,7 +92,11 @@ public class PostTextMessageHandlerTests
         // Arrange
         var lookup = new ConversationLookupKey(null, null, null);
         var messageId = new MessageId(Guid.NewGuid());
-        var handler = new PostTextMessageHandler(_resolver.Object, _writer.Object);
+        var handler = new PostTextMessageHandler(
+            _resolver.Object, 
+            _writer.Object,
+            _publisher.Object,
+            _selfIdentityProvider.Object);
         var cmd = new PostTextMessageCommand(lookup, messageId, "x", DateTimeOffset.UtcNow);
 
         // Act
