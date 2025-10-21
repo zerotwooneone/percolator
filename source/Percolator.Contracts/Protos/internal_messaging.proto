@@ -24,11 +24,25 @@ message InternalEnvelope {
   }
 }
 
+// Explicit group creation prior to any administrative operations.
+message CreateGroup {
+  optional uint32 version = 100;
+  // GUID (16 bytes) chosen by the creator to identify the group across peers
+  optional bytes group_conversation_guid = 1;
+  // Initial participant identity public keys (SPKI bytes). Include the creator's identity key as well.
+  repeated bytes initial_participant_identity_keys = 2;
+  // Optional human-readable name
+  optional string name = 3;
+  // Explicit creator identity key (SPKI bytes). Used to seed the initial admin key on all nodes.
+  optional bytes creator_identity_key = 4;
+}
+
 // === 1. Rich Text Chat Application ===
 
 message ChatEnvelope {
   optional uint32 version = 100; // Top-level version for chat envelope
   oneof message {
+    CreateGroup create_group = 13; // explicit group creation before any admin ops
     TextMessage text_message = 1;
     ReadReceipt read_receipt = 2;
     EmojiAnnotation emoji_annotation = 3;

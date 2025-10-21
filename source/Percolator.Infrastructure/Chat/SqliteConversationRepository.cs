@@ -17,6 +17,40 @@ public sealed class SqliteConversationRepository : IConversationRepository
         _db = db;
     }
 
+    public async Task CreateGroupAsync(Guid groupConversationGuid, int selfIdentityId, IEnumerable<ParticipantId> initialParticipants, string? name)
+    {
+        // If already exists, no-op
+        var existing = await _db.Conversations
+            .Include(c => c.Participants)
+            .FirstOrDefaultAsync(c => c.SelfIdentityId == selfIdentityId && c.GroupConversationGuid == groupConversationGuid);
+        if (existing is not null)
+        {
+            return;
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var convoId = Guid.NewGuid();
+        var dbo = new ConversationDbo
+        {
+            Id = convoId,
+            Name = name,
+            GroupConversationGuid = groupConversationGuid,
+            SelfIdentityId = selfIdentityId,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+        foreach (var p in initialParticipants)
+        {
+            dbo.Participants.Add(new ConversationParticipantDbo
+            {
+                ConversationId = convoId,
+                ParticipantId = p.Value
+            });
+        }
+        _db.Conversations.Add(dbo);
+        await _db.SaveChangesAsync();
+    }
+
     public async Task<Conversation?> GetByIdAsync(ConversationId id, int selfIdentityId)
     {
         var dbo = await _db.Conversations

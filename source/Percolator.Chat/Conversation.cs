@@ -19,11 +19,11 @@ public class Conversation
         string? name = null)
     {
         var participantList = participants.ToList();
+        // Enforce minimum of 2 participants and no duplicates
         if (participantList.Count < 2)
         {
             throw new ArgumentException("A conversation must have at least two participants.", nameof(participants));
         }
-
         if (participantList.Distinct().Count() != participantList.Count)
         {
             throw new ArgumentException("A conversation cannot have duplicate participants.", nameof(participants));

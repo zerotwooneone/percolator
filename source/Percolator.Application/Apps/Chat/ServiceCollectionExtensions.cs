@@ -13,6 +13,8 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IGroupKeyOperations, GroupKeyOperations>();
         services.AddSingleton<IGroupManagerResolver, PersistentGroupManagerResolver>();
         services.AddScoped<ITransportKeyResolver, TransportKeyResolver>();
+        services.AddTransient<IAdminOperationDispatcher, AdminOperationDispatcher>();
+        services.AddTransient<IAdminOperationSigner, AdminOperationSigner>();
 
         return services;
     }

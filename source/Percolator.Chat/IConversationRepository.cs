@@ -11,6 +11,9 @@ public interface IConversationRepository
     // Look up a conversation by its GroupConversationGuid for a given self identity
     Task<Conversation?> GetByGroupGuidAsync(Guid groupConversationGuid, int selfIdentityId);
 
+    // Explicitly create a group conversation with a specific GroupConversationGuid and initial participants
+    Task CreateGroupAsync(Guid groupConversationGuid, int selfIdentityId, IEnumerable<ParticipantId> initialParticipants, string? name);
+
     // Look up a direct 1:1 conversation by participant pair (self identity's peer and the other peer)
     Task<Conversation?> GetByParticipantPairAsync(int selfIdentityId, Guid otherPeerId);
 

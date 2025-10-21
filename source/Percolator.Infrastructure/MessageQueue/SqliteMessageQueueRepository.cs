@@ -35,10 +35,10 @@ public class SqliteMessageQueueRepository : IMessageQueueRepository
                 return (false, await CountRecipientAsync(recipientPeerId, cancellationToken), (uint)totalCount);
             }
 
-            // Per-recipient count
-            var recipientCount = await _db.MessageQueueItems
-                .Where(x => x.RecipientPeerId.Value == recipientPeerId.Value)
-                .CountAsync(cancellationToken);
+            // Per-recipient count (client-side filter due to EF translation limitations on value objects)
+            var recipientCount = _db.MessageQueueItems
+                .AsEnumerable()
+                .Count(x => x.RecipientPeerId.Value == recipientPeerId.Value);
 
             if (recipientCount >= PerRecipientMaxQueued)
             {
@@ -69,9 +69,9 @@ public class SqliteMessageQueueRepository : IMessageQueueRepository
 
     private async Task<uint> CountRecipientAsync(PeerId peerId, CancellationToken ct)
     {
-        var cnt = await _db.MessageQueueItems
-            .Where(x => x.RecipientPeerId.Value == peerId.Value)
-            .CountAsync(ct);
+        var cnt = _db.MessageQueueItems
+            .AsEnumerable()
+            .Count(x => x.RecipientPeerId.Value == peerId.Value);
         return (uint)cnt;
     }
 
@@ -84,12 +84,15 @@ public class SqliteMessageQueueRepository : IMessageQueueRepository
 
         var take = Math.Min(maxCount, 500);
 
-        var items = await _db.MessageQueueItems
+        var all = await _db.MessageQueueItems
+            .AsNoTracking()
+            .ToListAsync(cancellationToken);
+        var items = all
             .Where(x => x.RecipientPeerId.Value == recipientPeerId.Value)
             .OrderBy(x => x.EnqueuedAtUtc)
             .Take(take)
             .Select(x => new { x.AckId, x.Blob })
-            .ToListAsync(cancellationToken);
+            .ToList();
 
         return items
             .Select(x => (x.AckId, x.Blob))

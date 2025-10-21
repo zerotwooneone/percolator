@@ -22,7 +22,8 @@ namespace Percolator.ApplicationTests.Network
         private static ProcessInternalEnvelopeHandler CreateSut(Mock<IMediator> mediatorMock)
         {
             var logger = NullLogger<ProcessInternalEnvelopeHandler>.Instance;
-            return new ProcessInternalEnvelopeHandler(logger, mediatorMock.Object);
+            var adminOps = new Moq.Mock<Percolator.Chat.App.IAdminOperations>(MockBehavior.Loose);
+            return new ProcessInternalEnvelopeHandler(logger, mediatorMock.Object, adminOps.Object);
         }
 
         [Test]
@@ -295,14 +296,12 @@ namespace Percolator.ApplicationTests.Network
         }
 
         [Test]
-        public async Task Chat_SignedAdminOperation_is_dispatched_and_returns_null()
+        public async Task Chat_SignedAdminOperation_is_applied_locally_and_returns_null()
         {
-            var mediator = new Mock<IMediator>(MockBehavior.Strict);
-            mediator
-                .Setup(m => m.Send(It.IsAny<ApplySignedAdminOperationCommand>(), It.IsAny<CancellationToken>()))
-                .Returns(Task.CompletedTask);
-
-            var sut = CreateSut(mediator);
+            var mediator = new Mock<IMediator>(MockBehavior.Loose);
+            var logger = NullLogger<ProcessInternalEnvelopeHandler>.Instance;
+            var adminOps = new Mock<Percolator.Chat.App.IAdminOperations>(MockBehavior.Loose);
+            var sut = new ProcessInternalEnvelopeHandler(logger, mediator.Object, adminOps.Object);
 
             var groupId = Guid.NewGuid();
             var opId = Guid.NewGuid();

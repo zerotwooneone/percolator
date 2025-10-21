@@ -20,6 +20,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IDirectSessionConversationLookup, SqliteDirectSessionConversationLookup>();
         services.AddScoped<IActingAdminResolver, SqliteActingAdminResolver>();
         services.AddScoped<IKeyAdoptionStore, SqliteKeyAdoptionStore>();
+        services.AddScoped<Percolator.Chat.App.IAdminOperations, Percolator.Chat.App.Services.AdminOperations>();
         return services;
     }
 }

@@ -31,10 +31,12 @@ namespace Percolator.Application.Network
     {
         private readonly ILogger<ProcessInternalEnvelopeHandler> _logger;
         private readonly IMediator _mediator;
-        public ProcessInternalEnvelopeHandler(ILogger<ProcessInternalEnvelopeHandler> logger, IMediator mediator)
+        private readonly Percolator.Chat.App.IAdminOperations _adminOps;
+        public ProcessInternalEnvelopeHandler(ILogger<ProcessInternalEnvelopeHandler> logger, IMediator mediator, Percolator.Chat.App.IAdminOperations adminOps)
         {
             _logger = logger;
             _mediator = mediator;
+            _adminOps = adminOps;
         }
 
         public async Task<InternalEnvelope?> Handle(ProcessInternalEnvelopeCommand request, CancellationToken cancellationToken)
@@ -78,6 +80,33 @@ namespace Percolator.Application.Network
                 var chat = env.ChatEnvelope;
                 switch (chat.MessageCase)
                 {
+                    case ChatEnvelope.MessageOneofCase.CreateGroup:
+                    {
+                        var cg = chat.CreateGroup;
+                        if (cg == null || !cg.HasGroupConversationGuid || cg.GroupConversationGuid.Length != 16)
+                            throw new InvalidOperationException("CreateGroup.group_conversation_guid must be 16 bytes (GUID).");
+                        var groupGuid = new Guid(cg.GroupConversationGuid.ToByteArray());
+
+                        if (!cg.HasCreatorIdentityKey || cg.CreatorIdentityKey == null || cg.CreatorIdentityKey.Length == 0)
+                            throw new InvalidOperationException("CreateGroup.creator_identity_key is required and must be non-empty.");
+
+                        _logger.LogInformation("[CreateGroup] Received on SelfIdentityId={SelfIdentityId} GroupGuid={GroupGuid} Name='{Name}' Keys={Count} HasCreatorKey={HasCreator}", request.Context.SelfIdentityId, groupGuid, cg.HasName ? cg.Name : null, cg.InitialParticipantIdentityKeys.Count, cg.HasCreatorIdentityKey);
+
+                        var spkis = new List<byte[]>();
+                        foreach (var bs in cg.InitialParticipantIdentityKeys)
+                        {
+                            if (bs == null || bs.Length == 0) continue;
+                            spkis.Add(bs.ToByteArray());
+                        }
+                        await _mediator.Send(new CreateGroupFromIdentityKeysCommand(
+                            request.Context.SelfIdentityId,
+                            groupGuid,
+                            spkis,
+                            cg.HasName ? cg.Name : null,
+                            cg.CreatorIdentityKey.ToByteArray()
+                        ), cancellationToken);
+                        return null;
+                    }
                     case ChatEnvelope.MessageOneofCase.TextMessage:
                     {
                         var text = chat.TextMessage;
@@ -229,7 +258,6 @@ namespace Percolator.Application.Network
                         var sentUtc = sao.Payload.SentTimestampUtc.ToDateTimeOffset();
                         ulong? adminSeq = sao.Payload.HasAdminSequenceNumber ? sao.Payload.AdminSequenceNumber : null;
 
-                        AdminOperationKind kind;
                         AdminPublicKey? grantee = null;
                         List<Percolator.Chat.ValueObjects.ParticipantId>? add = null;
                         List<Percolator.Chat.ValueObjects.ParticipantId>? remove = null;
@@ -240,19 +268,16 @@ namespace Percolator.Application.Network
                         switch (sao.Payload.OperationCase)
                         {
                             case AdminOperationPayload.OperationOneofCase.GrantAdmin:
-                                kind = AdminOperationKind.GrantAdmin;
                                 if (!sao.Payload.GrantAdmin.HasGranteePublicKey)
                                     throw new InvalidOperationException("GrantAdmin.grantee_public_key is required.");
                                 grantee = new AdminPublicKey(sao.Payload.GrantAdmin.GranteePublicKey.ToByteArray());
                                 break;
                             case AdminOperationPayload.OperationOneofCase.RevokeAdmin:
-                                kind = AdminOperationKind.RevokeAdmin;
                                 if (!sao.Payload.RevokeAdmin.HasGranteePublicKey)
                                     throw new InvalidOperationException("RevokeAdmin.grantee_public_key is required.");
                                 grantee = new AdminPublicKey(sao.Payload.RevokeAdmin.GranteePublicKey.ToByteArray());
                                 break;
                             case AdminOperationPayload.OperationOneofCase.UpdateGroupMembership:
-                                kind = AdminOperationKind.UpdateGroupMembership;
                                 add = new List<Percolator.Chat.ValueObjects.ParticipantId>();
                                 foreach (var b in sao.Payload.UpdateGroupMembership.MembersToAdd)
                                 {
@@ -268,7 +293,6 @@ namespace Percolator.Application.Network
                                 leave = sao.Payload.UpdateGroupMembership.HasLeaveGroup ? sao.Payload.UpdateGroupMembership.LeaveGroup : (bool?)null;
                                 break;
                             case AdminOperationPayload.OperationOneofCase.UpdateGroupInfo:
-                                kind = AdminOperationKind.UpdateGroupInfo;
                                 newName2 = sao.Payload.UpdateGroupInfo.HasNewGroupName ? sao.Payload.UpdateGroupInfo.NewGroupName : null;
                                 if (sao.Payload.UpdateGroupInfo.HasNewGroupAvatar)
                                 {
@@ -279,22 +303,32 @@ namespace Percolator.Application.Network
                                 throw new InvalidOperationException($"Unsupported admin operation variant: {sao.Payload.OperationCase}");
                         }
 
-                        var signature = new AdminSignature(sao.Signature.ToByteArray());
-                        await _mediator.Send(new ApplySignedAdminOperationCommand(
-                            lookup,
-                            opId,
-                            sentUtc,
-                            adminSeq,
-                            kind,
-                            grantee,
-                            add,
-                            remove,
-                            leave,
-                            newName2,
-                            newAvatar2,
-                            signature,
-                            CanonicalPayload.ForAdminOperation(sao.Payload)
-                        ), cancellationToken);
+                        var signatureBytes = sao.Signature.ToByteArray();
+                        var payloadBytes = CanonicalPayload.ForAdminOperation(sao.Payload);
+                        // Dispatch to domain ops based on actual payload operation
+                        var opCase = sao.Payload.OperationCase;
+                        if (opCase == AdminOperationPayload.OperationOneofCase.GrantAdmin)
+                        {
+                            if (grantee is null) throw new InvalidOperationException("GrantAdmin requires grantee");
+                            await _adminOps.GrantAdminAsync(lookup, opId, sentUtc, grantee.Value, signatureBytes, payloadBytes, cancellationToken);
+                        }
+                        else if (opCase == AdminOperationPayload.OperationOneofCase.RevokeAdmin)
+                        {
+                            if (grantee is null) throw new InvalidOperationException("RevokeAdmin requires grantee");
+                            await _adminOps.RevokeAdminAsync(lookup, opId, sentUtc, grantee.Value, signatureBytes, payloadBytes, cancellationToken);
+                        }
+                        else if (opCase == AdminOperationPayload.OperationOneofCase.UpdateGroupMembership)
+                        {
+                            await _adminOps.UpdateGroupMembershipAsync(lookup, opId, sentUtc, add, remove, leave, signatureBytes, payloadBytes, cancellationToken);
+                        }
+                        else if (opCase == AdminOperationPayload.OperationOneofCase.UpdateGroupInfo)
+                        {
+                            await _adminOps.UpdateGroupInfoAsync(lookup, opId, sentUtc, newName2, null, signatureBytes, payloadBytes, cancellationToken);
+                        }
+                        else
+                        {
+                            throw new InvalidOperationException($"Unsupported admin operation variant: {opCase}");
+                        }
                         return null;
                     }
                     case ChatEnvelope.MessageOneofCase.KeyAdoptionConfirmation:

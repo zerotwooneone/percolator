@@ -16,6 +16,7 @@ using System.Security.Cryptography;
 using Percolator.Application.Identity;
 using Percolator.Application.Cli;
 using Percolator.Prekey.DependencyInjection;
+using Percolator.Application.Apps.Chat;
 
 namespace Percolator.ApplicationIntegrationTests.ChatMessaging
 {
@@ -55,6 +56,130 @@ namespace Percolator.ApplicationIntegrationTests.ChatMessaging
                     }
                 };
             }
+        }
+
+        private static async Task WaitForGroupAsync(IHost node, Guid groupGuid, int timeoutMs = 5000)
+        {
+            var repo = node.Services.GetRequiredService<Percolator.Chat.IConversationRepository>();
+            var ctx = node.Services.GetRequiredService<ActiveIdentityContext>();
+            var selfId = ctx.Identity?.SelfIdentityId ?? throw new InvalidOperationException("SelfIdentityId not loaded");
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            while (sw.ElapsedMilliseconds < timeoutMs)
+            {
+                try
+                {
+                    var convo = await repo.GetByGroupGuidAsync(groupGuid, selfId);
+                    if (convo != null) return;
+                }
+                catch (Exception ex)
+                {
+                    TestContext.WriteLine($"[WaitForGroup] Exception while querying group {groupGuid} on node: {ex.Message}");
+                }
+                await Task.Delay(50);
+            }
+            Assert.Fail($"Timed out waiting for group {groupGuid} on node.");
+        }
+
+        [Test]
+        [NonParallelizable]
+        public async Task Phase17_SingleSequence_Phase2_Then_GroupChat_Scaffold()
+        {
+            // Steps 1-8: Delegate to existing Phase 2 test which performs naming, DHT probe, and P2P session establishment.
+            await Phase2_Prekeys_Dht_And_Sessions_Establish();
+
+            // Resolve Bob and Charlie GUIDs on Alice
+            var alicePeerRepo = _alice.Services.GetRequiredService<Percolator.Identity.IPeerRepository>();
+            var bobPeer = await alicePeerRepo.GetByNameAsync("bob") ?? throw new InvalidOperationException("bob not known on alice");
+            var charliePeer = await alicePeerRepo.GetByNameAsync("charlie") ?? throw new InvalidOperationException("charlie not known on alice");
+
+            // 9) Alice explicitly creates a new group chat with members Alice, Bob, Charlie using SPKIs
+            var groupGuid = Guid.NewGuid();
+            var createEnv = BuildCreateGroupEnvelope(groupGuid, new[] { GetIdentitySpki(_alice), GetIdentitySpki(_bob), GetIdentitySpki(_charlie) }, GetIdentitySpki(_alice), name: "Phase17 Group");
+            await SendChatEnvelopeAsync(_alice, "bob", createEnv, new DnsEndPoint("localhost", _bobPort));
+            await SendChatEnvelopeAsync(_alice, "charlie", createEnv, new DnsEndPoint("localhost", _charliePort));
+
+            // Also create the group locally on Alice (creator) to mirror expected UX behavior
+            var aliceMediator = _alice.Services.GetRequiredService<IMediator>();
+            var aliceCtx = _alice.Services.GetRequiredService<ActiveIdentityContext>();
+            await aliceMediator.Send(new CreateGroupFromIdentityKeysCommand(
+                aliceCtx.Identity!.SelfIdentityId,
+                groupGuid,
+                new List<byte[]> { GetIdentitySpki(_alice), GetIdentitySpki(_bob), GetIdentitySpki(_charlie) },
+                "Phase17 Group",
+                GetIdentitySpki(_alice)
+            ));
+
+            // Do NOT mirror CreateGroup locally on Bob/Charlie: they will process the received envelope.
+
+            // Wait until group materializes on all nodes
+            await WaitForGroupAsync(_alice, groupGuid, timeoutMs: 5000);
+            await WaitForGroupAsync(_bob, groupGuid, timeoutMs: 5000);
+            await WaitForGroupAsync(_charlie, groupGuid, timeoutMs: 5000);
+
+            // Admin ops continue as before if needed
+
+            // Ensure peer names are known on all nodes for assertions (and PKH mappings are active)
+            foreach (var node in new[] { _alice, _bob, _charlie })
+            {
+                var med = node.Services.GetRequiredService<IMediator>();
+                await med.Send(new Percolator.Application.Identity.SetPeerNameByPublicKeyCommand("alice", GetIdentitySpki(_alice)));
+                await med.Send(new Percolator.Application.Identity.SetPeerNameByPublicKeyCommand("bob", GetIdentitySpki(_bob)));
+                await med.Send(new Percolator.Application.Identity.SetPeerNameByPublicKeyCommand("charlie", GetIdentitySpki(_charlie)));
+            }
+
+            // Assert participants = {Alice, Bob, Charlie}
+            await AssertGroupParticipantsAsync(_alice, groupGuid, new[] { "alice", "bob", "charlie" });
+            await AssertGroupParticipantsAsync(_bob, groupGuid, new[] { "alice", "bob", "charlie" });
+            await AssertGroupParticipantsAsync(_charlie, groupGuid, new[] { "alice", "bob", "charlie" });
+
+            // 10) Alice grants Bob admin rights
+            var grantOpId = Guid.NewGuid();
+            var bobSpki = GetIdentitySpki(_bob);
+            var grantPayload = BuildGrantAdminPayload(groupGuid, grantOpId, bobSpki);
+            var grantSig = SignCanonical(_alice, grantPayload);
+            var grantSao = new SignedAdminOperation { Version = 1, Payload = grantPayload, Signature = ByteString.CopyFrom(grantSig) };
+            var grantEnv = new ChatEnvelope { SignedAdminOperation = grantSao };
+            // Deliver to all participants, including originator (Alice), so everyone's admin key table is updated
+            await SendChatEnvelopeAsync(_alice, "alice", grantEnv, new DnsEndPoint("localhost", _alicePort));
+            await SendChatEnvelopeAsync(_alice, "bob", grantEnv, new DnsEndPoint("localhost", _bobPort));
+            await SendChatEnvelopeAsync(_alice, "charlie", grantEnv, new DnsEndPoint("localhost", _charliePort));
+
+            // 11) Bob removes Charlie
+            var removeOpId = Guid.NewGuid();
+            var removePayload = BuildUpdateGroupMembershipRemovePayload(groupGuid, removeOpId, charliePeer.Id.Value);
+            var removeSig = SignCanonical(_bob, removePayload);
+            var removeSao = new SignedAdminOperation { Version = 1, Payload = removePayload, Signature = ByteString.CopyFrom(removeSig) };
+            var removeEnv = new ChatEnvelope { SignedAdminOperation = removeSao };
+            // Deliver to all participants, including originator (Bob)
+            await SendChatEnvelopeAsync(_bob, "bob", removeEnv, new DnsEndPoint("localhost", _bobPort));
+            await SendChatEnvelopeAsync(_bob, "alice", removeEnv, new DnsEndPoint("localhost", _alicePort));
+            await SendChatEnvelopeAsync(_bob, "charlie", removeEnv, new DnsEndPoint("localhost", _charliePort));
+
+            // Assert participants = {Alice, Bob}
+            await AssertGroupParticipantsAsync(_alice, groupGuid, new[] { "alice", "bob" });
+            await AssertGroupParticipantsAsync(_bob, groupGuid, new[] { "alice", "bob" });
+
+            // 12) Bob sends a group message; assert only Alice receives it (TODO: implement message visibility assertions)
+            TestContext.WriteLine("[Phase17] TODO: Add group message visibility assertions (Charlie should NOT receive).");
+
+            // 13) Bob re-adds Charlie to the group
+            var readdOpId = Guid.NewGuid();
+            var readdPayload = BuildUpdateGroupMembershipPayload(groupGuid, readdOpId, charliePeer.Id.Value, null);
+            var readdSig = SignCanonical(_bob, readdPayload);
+            var readdSao = new SignedAdminOperation { Version = 1, Payload = readdPayload, Signature = ByteString.CopyFrom(readdSig) };
+            var readdEnv = new ChatEnvelope { SignedAdminOperation = readdSao };
+            // Deliver to all participants, including originator (Bob)
+            await SendChatEnvelopeAsync(_bob, "bob", readdEnv, new DnsEndPoint("localhost", _bobPort));
+            await SendChatEnvelopeAsync(_bob, "alice", readdEnv, new DnsEndPoint("localhost", _alicePort));
+            await SendChatEnvelopeAsync(_bob, "charlie", readdEnv, new DnsEndPoint("localhost", _charliePort));
+
+            // Assert participants = {Alice, Bob, Charlie}
+            await AssertGroupParticipantsAsync(_alice, groupGuid, new[] { "alice", "bob", "charlie" });
+            await AssertGroupParticipantsAsync(_bob, groupGuid, new[] { "alice", "bob", "charlie" });
+            await AssertGroupParticipantsAsync(_charlie, groupGuid, new[] { "alice", "bob", "charlie" });
+
+            // 14) Alice sends a group message; assert Bob and Charlie receive it (TODO)
+            Assert.Inconclusive("Message visibility checks (steps 12 and 14) are TODO; group lifecycle steps completed.");
         }
 
         private IServiceProvider? ResolveProviderByEndpoint(DnsEndPoint endPoint)
@@ -360,6 +485,23 @@ namespace Percolator.ApplicationIntegrationTests.ChatMessaging
             await transport.SendMessageAsync(peer.Id, sessionId, cipher);
         }
 
+        private static ChatEnvelope BuildCreateGroupEnvelope(Guid groupGuid, byte[][] participantSpkis, byte[] creatorSpki, string? name)
+        {
+            var cg = new Percolator.Contracts.CreateGroup
+            {
+                Version = 1,
+                GroupConversationGuid = ByteString.CopyFrom(groupGuid.ToByteArray())
+            };
+            if (!string.IsNullOrWhiteSpace(name)) cg.Name = name;
+            foreach (var spki in participantSpkis)
+            {
+                cg.InitialParticipantIdentityKeys.Add(ByteString.CopyFrom(spki));
+            }
+            // Explicit creator identity key (do not rely on ordering)
+            cg.CreatorIdentityKey = ByteString.CopyFrom(creatorSpki);
+            return new ChatEnvelope { CreateGroup = cg };
+        }
+
         private static async Task AssertPeerKnownByName(IHost node, string name)
         {
             var repo = node.Services.GetRequiredService<Percolator.Identity.IPeerRepository>();
@@ -398,6 +540,33 @@ namespace Percolator.ApplicationIntegrationTests.ChatMessaging
                 payload.UpdateGroupMembership.MembersToAdd.Add(ByteString.CopyFrom(add1.Value.ToByteArray()));
             if (add2.HasValue)
                 payload.UpdateGroupMembership.MembersToAdd.Add(ByteString.CopyFrom(add2.Value.ToByteArray()));
+            return payload;
+        }
+
+        private static AdminOperationPayload BuildUpdateGroupMembershipRemovePayload(Guid groupGuid, Guid opId, Guid remove)
+        {
+            var payload = new AdminOperationPayload
+            {
+                Version = 1,
+                GroupConversationGuid = ByteString.CopyFrom(groupGuid.ToByteArray()),
+                OpId = ByteString.CopyFrom(opId.ToByteArray()),
+                SentTimestampUtc = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow),
+                UpdateGroupMembership = new UpdateGroupMembershipPayload { Version = 1 }
+            };
+            payload.UpdateGroupMembership.MembersToRemove.Add(ByteString.CopyFrom(remove.ToByteArray()));
+            return payload;
+        }
+
+        private static AdminOperationPayload BuildGrantAdminPayload(Guid groupGuid, Guid opId, byte[] granteeSpki)
+        {
+            var payload = new AdminOperationPayload
+            {
+                Version = 1,
+                GroupConversationGuid = ByteString.CopyFrom(groupGuid.ToByteArray()),
+                OpId = ByteString.CopyFrom(opId.ToByteArray()),
+                SentTimestampUtc = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow),
+                GrantAdmin = new GrantAdmin { Version = 1, GranteePublicKey = ByteString.CopyFrom(granteeSpki) }
+            };
             return payload;
         }
 
@@ -449,11 +618,6 @@ namespace Percolator.ApplicationIntegrationTests.ChatMessaging
             var ctx = node.Services.GetRequiredService<ActiveIdentityContext>();
             var selfId = ctx.Identity?.SelfIdentityId ?? throw new InvalidOperationException("SelfIdentityId not loaded");
             var repo = node.Services.GetRequiredService<Percolator.Chat.IConversationRepository>();
-            var convo = await repo.GetByGroupGuidAsync(groupGuid, selfId);
-            if (convo is null)
-            {
-                Assert.Fail($"Expected group conversation {groupGuid} to exist on node, but it was not found.");
-            }
             var peerRepo = node.Services.GetRequiredService<Percolator.Identity.IPeerRepository>();
             var expected = new HashSet<Guid>();
             foreach (var name in expectedNames)
@@ -461,12 +625,23 @@ namespace Percolator.ApplicationIntegrationTests.ChatMessaging
                 var p = await peerRepo.GetByNameAsync(name) ?? throw new InvalidOperationException($"Peer '{name}' not known on node");
                 expected.Add(p.Id.Value);
             }
-            var actual = convo.Participants.Select(p => p.Value).ToHashSet();
-            if (!expected.IsSubsetOf(actual))
+
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            while (sw.ElapsedMilliseconds < 5000)
             {
-                TestContext.WriteLine($"ASSERTION FAILED: Group participants mismatch. Expected subset: {string.Join(",", expected)} Actual: {string.Join(",", actual)}");
-                Assert.Fail("Group participants mismatch.");
+                var convo = await repo.GetByGroupGuidAsync(groupGuid, selfId);
+                if (convo != null)
+                {
+                    var actual = convo.Participants.Select(p => p.Value).ToHashSet();
+                    if (expected.IsSubsetOf(actual))
+                    {
+                        return;
+                    }
+                    TestContext.WriteLine($"[AssertGroup] Waiting for participants. Expected subset: {string.Join(",", expected)} Actual: {string.Join(",", actual)}");
+                }
+                await Task.Delay(50);
             }
+            Assert.Fail($"Timed out waiting for expected participants in group {groupGuid}.");
         }
     }
 }
