@@ -29,8 +29,9 @@ namespace Percolator.ApplicationTests.Apps.Chat
             var selfProvider = new Mock<ISelfParticipantIdProvider>(MockBehavior.Strict);
             var transport = new Mock<IMessageTransportService>();
             var adminOps = new Mock<Percolator.Chat.App.IAdminOperations>(MockBehavior.Strict);
-            var dispatcher = new Mock<IAdminOperationDispatcher>(MockBehavior.Strict);
+            var dispatcher = new Mock<IAdminOperationDispatcher>(MockBehavior.Loose);
             var signer = new Mock<IAdminOperationSigner>(MockBehavior.Strict);
+            var seq = new Mock<Percolator.Chat.App.IAdminSequenceProvider>(MockBehavior.Strict);
 
             // Repo returns a conversation with two participants: self and one other
             var selfPid = new Percolator.Chat.ValueObjects.ParticipantId(Guid.NewGuid());
@@ -59,8 +60,8 @@ namespace Percolator.ApplicationTests.Apps.Chat
                 cmd.GroupConversationGuid,
                 It.IsAny<Guid>(),
                 It.IsAny<DateTimeOffset>(),
-                null,
-                cmd.GranteeSpki,
+                It.IsAny<ulong?>(),
+                It.IsAny<byte[]>(),
                 It.IsAny<byte[]>(),
                 It.Is<IReadOnlyList<Percolator.Identity.PeerId>>(l => l.Count == 2),
                 It.IsAny<CancellationToken>()))
@@ -68,6 +69,7 @@ namespace Percolator.ApplicationTests.Apps.Chat
 
             signer.Setup(s => s.SignGrantAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<DateTimeOffset>(), It.IsAny<byte[]>(), It.IsAny<ulong?>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((Array.Empty<byte>(), new byte[] { 1 }));
+            seq.Setup(s => s.NextAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync(1UL);
             var sut = new GrantGroupAdminHandler(
                 mediator.Object,
                 convoRepo.Object,
@@ -75,7 +77,8 @@ namespace Percolator.ApplicationTests.Apps.Chat
                 transport.Object,
                 adminOps.Object,
                 dispatcher.Object,
-                signer.Object);
+                signer.Object,
+                seq.Object);
 
             // Act
             Func<Task> act = () => sut.Handle(cmd, CancellationToken.None);
@@ -93,8 +96,9 @@ namespace Percolator.ApplicationTests.Apps.Chat
             var selfProvider = new Mock<ISelfParticipantIdProvider>(MockBehavior.Strict);
             var transport = new Mock<IMessageTransportService>();
             var adminOps = new Mock<Percolator.Chat.App.IAdminOperations>(MockBehavior.Strict);
-            var dispatcher = new Mock<IAdminOperationDispatcher>(MockBehavior.Strict);
+            var dispatcher = new Mock<IAdminOperationDispatcher>(MockBehavior.Loose);
             var signer = new Mock<IAdminOperationSigner>(MockBehavior.Strict);
+            var seq = new Mock<Percolator.Chat.App.IAdminSequenceProvider>(MockBehavior.Strict);
 
             var cmd = new RevokeGroupAdminAppCommand(1, Guid.NewGuid(), new byte[] { 9 });
 
@@ -124,8 +128,8 @@ namespace Percolator.ApplicationTests.Apps.Chat
                 cmd.GroupConversationGuid,
                 It.IsAny<Guid>(),
                 It.IsAny<DateTimeOffset>(),
-                null,
-                cmd.GranteeSpki,
+                It.IsAny<ulong?>(),
+                It.IsAny<byte[]>(),
                 It.IsAny<byte[]>(),
                 It.Is<IReadOnlyList<Percolator.Identity.PeerId>>(l => l.Count == 2),
                 It.IsAny<CancellationToken>()))
@@ -133,7 +137,8 @@ namespace Percolator.ApplicationTests.Apps.Chat
 
             signer.Setup(s => s.SignRevokeAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<DateTimeOffset>(), It.IsAny<byte[]>(), It.IsAny<ulong?>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((Array.Empty<byte>(), new byte[] { 1 }));
-            var sut = new RevokeGroupAdminHandler(mediator.Object, convoRepo.Object, selfProvider.Object, transport.Object, adminOps.Object, dispatcher.Object, signer.Object);
+            seq.Setup(s => s.NextAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync(2UL);
+            var sut = new RevokeGroupAdminHandler(mediator.Object, convoRepo.Object, selfProvider.Object, transport.Object, adminOps.Object, dispatcher.Object, signer.Object, seq.Object);
 
             // Act
             Func<Task> act = () => sut.Handle(cmd, CancellationToken.None);
@@ -153,8 +158,9 @@ namespace Percolator.ApplicationTests.Apps.Chat
             var selfProvider = new Mock<ISelfParticipantIdProvider>(MockBehavior.Strict);
             var transport = new Mock<IMessageTransportService>();
             var adminOps = new Mock<Percolator.Chat.App.IAdminOperations>(MockBehavior.Strict);
-            var dispatcher = new Mock<IAdminOperationDispatcher>(MockBehavior.Strict);
+            var dispatcher = new Mock<IAdminOperationDispatcher>(MockBehavior.Loose);
             var signer = new Mock<IAdminOperationSigner>(MockBehavior.Strict);
+            var seq = new Mock<Percolator.Chat.App.IAdminSequenceProvider>(MockBehavior.Strict);
 
             var cmd = new GrantGroupAdminAppCommand(1, Guid.NewGuid(), new byte[] { 1 });
 
@@ -184,7 +190,7 @@ namespace Percolator.ApplicationTests.Apps.Chat
                 cmd.GroupConversationGuid,
                 It.IsAny<Guid>(),
                 It.IsAny<DateTimeOffset>(),
-                null,
+                It.IsAny<ulong?>(),
                 cmd.GranteeSpki,
                 It.IsAny<byte[]>(),
                 It.Is<IReadOnlyList<Percolator.Identity.PeerId>>(l => l.Count == 2),
@@ -193,6 +199,7 @@ namespace Percolator.ApplicationTests.Apps.Chat
 
             signer.Setup(s => s.SignGrantAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<DateTimeOffset>(), It.IsAny<byte[]>(), It.IsAny<ulong?>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((Array.Empty<byte>(), new byte[] { 1 }));
+            seq.Setup(s => s.NextAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync(5UL);
             var sut = new GrantGroupAdminHandler(
                 mediator.Object,
                 convoRepo.Object,
@@ -200,7 +207,8 @@ namespace Percolator.ApplicationTests.Apps.Chat
                 transport.Object,
                 adminOps.Object,
                 dispatcher.Object,
-                signer.Object);
+                signer.Object,
+                seq.Object);
 
             // Act
             Func<Task> act = () => sut.Handle(cmd, CancellationToken.None);
@@ -221,6 +229,7 @@ namespace Percolator.ApplicationTests.Apps.Chat
             var adminOps = new Mock<Percolator.Chat.App.IAdminOperations>(MockBehavior.Strict);
             var dispatcher = new Mock<IAdminOperationDispatcher>();
             var signer = new Mock<IAdminOperationSigner>(MockBehavior.Strict);
+            var seq = new Mock<Percolator.Chat.App.IAdminSequenceProvider>(MockBehavior.Strict);
 
             var cmd = new GrantGroupAdminAppCommand(1, Guid.NewGuid(), new byte[] { 1 });
 
@@ -248,6 +257,7 @@ namespace Percolator.ApplicationTests.Apps.Chat
 
             signer.Setup(s => s.SignGrantAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<DateTimeOffset>(), It.IsAny<byte[]>(), It.IsAny<ulong?>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((Array.Empty<byte>(), new byte[] { 1 }));
+            seq.Setup(s => s.NextAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync(6UL);
             var sut = new GrantGroupAdminHandler(
                 mediator.Object,
                 convoRepo.Object,
@@ -255,7 +265,8 @@ namespace Percolator.ApplicationTests.Apps.Chat
                 transport.Object,
                 adminOps.Object,
                 dispatcher.Object,
-                signer.Object);
+                signer.Object,
+                seq.Object);
 
             // Act
             Func<Task> act = () => sut.Handle(cmd, CancellationToken.None);
@@ -281,7 +292,8 @@ namespace Percolator.ApplicationTests.Apps.Chat
                 Mock.Of<IMessageTransportService>(),
                 Mock.Of<Percolator.Chat.App.IAdminOperations>(),
                 Mock.Of<IAdminOperationDispatcher>(),
-                Mock.Of<IAdminOperationSigner>()
+                Mock.Of<IAdminOperationSigner>(),
+                Mock.Of<Percolator.Chat.App.IAdminSequenceProvider>()
             );
 
             // Act
@@ -309,7 +321,8 @@ namespace Percolator.ApplicationTests.Apps.Chat
                 Mock.Of<IMessageTransportService>(),
                 Mock.Of<Percolator.Chat.App.IAdminOperations>(),
                 Mock.Of<IAdminOperationDispatcher>(),
-                Mock.Of<IAdminOperationSigner>()
+                Mock.Of<IAdminOperationSigner>(),
+                Mock.Of<Percolator.Chat.App.IAdminSequenceProvider>()
             );
 
             // Act
@@ -335,7 +348,8 @@ namespace Percolator.ApplicationTests.Apps.Chat
                 Mock.Of<IMessageTransportService>(),
                 Mock.Of<Percolator.Chat.App.IAdminOperations>(),
                 Mock.Of<IAdminOperationDispatcher>(),
-                Mock.Of<IAdminOperationSigner>()
+                Mock.Of<IAdminOperationSigner>(),
+                Mock.Of<Percolator.Chat.App.IAdminSequenceProvider>()
             );
 
             // Act
@@ -361,7 +375,8 @@ namespace Percolator.ApplicationTests.Apps.Chat
                 Mock.Of<IMessageTransportService>(),
                 Mock.Of<Percolator.Chat.App.IAdminOperations>(),
                 Mock.Of<IAdminOperationDispatcher>(),
-                Mock.Of<IAdminOperationSigner>()
+                Mock.Of<IAdminOperationSigner>(),
+                Mock.Of<Percolator.Chat.App.IAdminSequenceProvider>()
             );
 
             // Act
@@ -369,6 +384,88 @@ namespace Percolator.ApplicationTests.Apps.Chat
 
             // Assert (Red: expect InvalidOperationException in Green)
             await act.Should().ThrowAsync<InvalidOperationException>();
+        }
+
+        [Test]
+        public async Task AdminSequence_Is_Monotonic_Per_Group_On_Grant()
+        {
+            // Arrange
+            var mediator = new Mock<IMediator>();
+            var convoRepo = new Mock<IConversationRepository>(MockBehavior.Strict);
+            var selfProvider = new Mock<ISelfParticipantIdProvider>(MockBehavior.Strict);
+            var transport = new Mock<IMessageTransportService>();
+            var adminOps = new Mock<Percolator.Chat.App.IAdminOperations>(MockBehavior.Strict);
+            var dispatcher = new Mock<IAdminOperationDispatcher>(MockBehavior.Loose);
+            var signer = new Mock<IAdminOperationSigner>(MockBehavior.Strict);
+            var seq = new Mock<Percolator.Chat.App.IAdminSequenceProvider>(MockBehavior.Strict);
+
+            var groupId = Guid.NewGuid();
+            var cmd1 = new GrantGroupAdminAppCommand(1, groupId, new byte[] { 1 });
+            var cmd2 = new GrantGroupAdminAppCommand(1, groupId, new byte[] { 1 });
+
+            var selfPid = new Percolator.Chat.ValueObjects.ParticipantId(Guid.NewGuid());
+            var otherPid = new Percolator.Chat.ValueObjects.ParticipantId(Guid.NewGuid());
+            var convo = new Conversation(
+                id: new Percolator.Chat.ValueObjects.ConversationId(Guid.NewGuid()),
+                participants: new[] { selfPid, otherPid },
+                messages: Array.Empty<Message>()
+            );
+            convoRepo.Setup(r => r.GetByGroupGuidAsync(groupId, 1)).ReturnsAsync(convo);
+            selfProvider.Setup(p => p.Get()).Returns(selfPid);
+
+            adminOps.Setup(a => a.GrantAdminAsync(
+                It.IsAny<Percolator.Chat.App.ConversationLookupKey>(),
+                It.IsAny<Guid>(),
+                It.IsAny<DateTimeOffset>(),
+                It.IsAny<Percolator.Chat.ValueObjects.AdminPublicKey>(),
+                It.IsAny<byte[]>(),
+                It.IsAny<byte[]>(),
+                It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
+
+            signer.Setup(s => s.SignGrantAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<DateTimeOffset>(), It.IsAny<byte[]>(), It.IsAny<ulong?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((Array.Empty<byte>(), new byte[] { 5 }));
+
+            var seqSetup = seq.SetupSequence(s => s.NextAsync(groupId, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(1UL)
+                .ReturnsAsync(2UL);
+
+            var sut = new GrantGroupAdminHandler(
+                mediator.Object,
+                convoRepo.Object,
+                selfProvider.Object,
+                transport.Object,
+                adminOps.Object,
+                dispatcher.Object,
+                signer.Object,
+                seq.Object);
+
+            // Act
+            await sut.Handle(cmd1, CancellationToken.None);
+            await sut.Handle(cmd2, CancellationToken.None);
+
+            // Assert
+            dispatcher.Verify(d => d.DispatchGrantAdminAsync(
+                It.IsAny<Percolator.Identity.PeerId>(),
+                groupId,
+                It.IsAny<Guid>(),
+                It.IsAny<DateTimeOffset>(),
+                It.Is<ulong?>(u => u == 1UL),
+                It.IsAny<byte[]>(),
+                It.IsAny<byte[]>(),
+                It.IsAny<IReadOnlyList<Percolator.Identity.PeerId>>(),
+                It.IsAny<CancellationToken>()), Times.AtLeastOnce);
+
+            dispatcher.Verify(d => d.DispatchGrantAdminAsync(
+                It.IsAny<Percolator.Identity.PeerId>(),
+                groupId,
+                It.IsAny<Guid>(),
+                It.IsAny<DateTimeOffset>(),
+                It.Is<ulong?>(u => u == 2UL),
+                It.IsAny<byte[]>(),
+                It.IsAny<byte[]>(),
+                It.IsAny<IReadOnlyList<Percolator.Identity.PeerId>>(),
+                It.IsAny<CancellationToken>()), Times.AtLeastOnce);
         }
     }
 }

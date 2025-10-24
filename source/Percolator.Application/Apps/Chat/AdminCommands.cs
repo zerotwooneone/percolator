@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using MediatR;
+using System.Linq;
 
 namespace Percolator.Application.Apps.Chat
 {
@@ -42,6 +43,7 @@ namespace Percolator.Application.Apps.Chat
         private readonly Percolator.Chat.App.IAdminOperations _adminOps;
         private readonly IAdminOperationDispatcher _dispatcher;
         private readonly IAdminOperationSigner _signer;
+        private readonly Percolator.Chat.App.IAdminSequenceProvider _sequenceProvider;
 
         public GrantGroupAdminHandler(
             MediatR.IMediator mediator,
@@ -50,7 +52,8 @@ namespace Percolator.Application.Apps.Chat
             Percolator.Application.Network.IMessageTransportService transport,
             Percolator.Chat.App.IAdminOperations adminOps,
             IAdminOperationDispatcher dispatcher,
-            IAdminOperationSigner signer)
+            IAdminOperationSigner signer,
+            Percolator.Chat.App.IAdminSequenceProvider sequenceProvider)
         {
             _mediator = mediator;
             _conversations = conversations;
@@ -59,6 +62,7 @@ namespace Percolator.Application.Apps.Chat
             _adminOps = adminOps;
             _dispatcher = dispatcher;
             _signer = signer;
+            _sequenceProvider = sequenceProvider;
         }
         public Task Handle(GrantGroupAdminAppCommand request, CancellationToken cancellationToken)
         {
@@ -68,7 +72,8 @@ namespace Percolator.Application.Apps.Chat
             var now = DateTimeOffset.UtcNow;
             var opId = Guid.NewGuid();
 
-            var signTask = _signer.SignGrantAsync(request.GroupConversationGuid, opId, now, request.GranteeSpki, null, cancellationToken);
+            var seqTask = _sequenceProvider.NextAsync(request.GroupConversationGuid, cancellationToken);
+            var signTask = seqTask.ContinueWith(t => _signer.SignGrantAsync(request.GroupConversationGuid, opId, now, request.GranteeSpki, t.Result, cancellationToken), cancellationToken).Unwrap();
             var grantee = new Percolator.Chat.ValueObjects.AdminPublicKey(request.GranteeSpki);
 
             return signTask.ContinueWith(t =>
@@ -88,12 +93,13 @@ namespace Percolator.Application.Apps.Chat
                     .ToList();
 
                 var (_, signature2) = await signTask;
+                var adminSeq = await seqTask;
                 await _dispatcher.DispatchGrantAdminAsync(
                     senderPeerId,
                     request.GroupConversationGuid,
                     opId,
                     now,
-                    adminSequenceNumber: null,
+                    adminSequenceNumber: adminSeq,
                     granteePublicKeySpki: request.GranteeSpki,
                     signature: signature2,
                     recipientPeerIds: recipients,
@@ -111,6 +117,7 @@ namespace Percolator.Application.Apps.Chat
         private readonly Percolator.Chat.App.IAdminOperations _adminOps;
         private readonly IAdminOperationDispatcher _dispatcher;
         private readonly IAdminOperationSigner _signer;
+        private readonly Percolator.Chat.App.IAdminSequenceProvider _sequenceProvider;
 
         public RevokeGroupAdminHandler(
             MediatR.IMediator mediator,
@@ -119,7 +126,8 @@ namespace Percolator.Application.Apps.Chat
             Percolator.Application.Network.IMessageTransportService transport,
             Percolator.Chat.App.IAdminOperations adminOps,
             IAdminOperationDispatcher dispatcher,
-            IAdminOperationSigner signer)
+            IAdminOperationSigner signer,
+            Percolator.Chat.App.IAdminSequenceProvider sequenceProvider)
         {
             _mediator = mediator;
             _conversations = conversations;
@@ -128,6 +136,7 @@ namespace Percolator.Application.Apps.Chat
             _adminOps = adminOps;
             _dispatcher = dispatcher;
             _signer = signer;
+            _sequenceProvider = sequenceProvider;
         }
         public Task Handle(RevokeGroupAdminAppCommand request, CancellationToken cancellationToken)
         {
@@ -138,7 +147,8 @@ namespace Percolator.Application.Apps.Chat
             var now = DateTimeOffset.UtcNow;
             var opId = Guid.NewGuid();
 
-            var signTask = _signer.SignRevokeAsync(request.GroupConversationGuid, opId, now, request.GranteeSpki, null, cancellationToken);
+            var seqTask = _sequenceProvider.NextAsync(request.GroupConversationGuid, cancellationToken);
+            var signTask = seqTask.ContinueWith(t => _signer.SignRevokeAsync(request.GroupConversationGuid, opId, now, request.GranteeSpki, t.Result, cancellationToken), cancellationToken).Unwrap();
             var grantee = new Percolator.Chat.ValueObjects.AdminPublicKey(request.GranteeSpki);
 
             return signTask.ContinueWith(t =>
@@ -158,12 +168,13 @@ namespace Percolator.Application.Apps.Chat
                         .ToList();
 
                     var (_, signature2) = await signTask;
+                    var adminSeq = await seqTask;
                     await _dispatcher.DispatchRevokeAdminAsync(
                         senderPeerId,
                         request.GroupConversationGuid,
                         opId,
                         now,
-                        adminSequenceNumber: null,
+                        adminSequenceNumber: adminSeq,
                         granteePublicKeySpki: request.GranteeSpki,
                         signature: signature2,
                         recipientPeerIds: recipients,
@@ -181,6 +192,7 @@ namespace Percolator.Application.Apps.Chat
         private readonly Percolator.Chat.App.IAdminOperations _adminOps;
         private readonly IAdminOperationDispatcher _dispatcher;
         private readonly IAdminOperationSigner _signer;
+        private readonly Percolator.Chat.App.IAdminSequenceProvider _sequenceProvider;
 
         public UpdateGroupMembershipHandler(
             MediatR.IMediator mediator,
@@ -189,7 +201,8 @@ namespace Percolator.Application.Apps.Chat
             Percolator.Application.Network.IMessageTransportService transport,
             Percolator.Chat.App.IAdminOperations adminOps,
             IAdminOperationDispatcher dispatcher,
-            IAdminOperationSigner signer)
+            IAdminOperationSigner signer,
+            Percolator.Chat.App.IAdminSequenceProvider sequenceProvider)
         {
             _mediator = mediator;
             _conversations = conversations;
@@ -198,6 +211,7 @@ namespace Percolator.Application.Apps.Chat
             _adminOps = adminOps;
             _dispatcher = dispatcher;
             _signer = signer;
+            _sequenceProvider = sequenceProvider;
         }
         public Task Handle(UpdateGroupMembershipAppCommand request, CancellationToken cancellationToken)
         {
@@ -208,7 +222,8 @@ namespace Percolator.Application.Apps.Chat
             IReadOnlyList<Percolator.Chat.ValueObjects.ParticipantId>? add = request.MembersToAdd?.Select(id => new Percolator.Chat.ValueObjects.ParticipantId(id)).ToList();
             IReadOnlyList<Percolator.Chat.ValueObjects.ParticipantId>? remove = request.MembersToRemove?.Select(id => new Percolator.Chat.ValueObjects.ParticipantId(id)).ToList();
 
-            var signTask = _signer.SignUpdateMembershipAsync(request.GroupConversationGuid, opId, now, request.MembersToAdd, request.MembersToRemove, request.LeaveGroup, null, cancellationToken);
+            var seqTask = _sequenceProvider.NextAsync(request.GroupConversationGuid, cancellationToken);
+            var signTask = seqTask.ContinueWith(t => _signer.SignUpdateMembershipAsync(request.GroupConversationGuid, opId, now, request.MembersToAdd, request.MembersToRemove, request.LeaveGroup, t.Result, cancellationToken), cancellationToken).Unwrap();
 
             return signTask.ContinueWith(t =>
             {
@@ -227,12 +242,13 @@ namespace Percolator.Application.Apps.Chat
                         .ToList();
 
                     var (payloadBytes2, signature2) = await signTask;
+                    var adminSeq = await seqTask;
                     await _dispatcher.DispatchUpdateGroupMembershipAsync(
                         senderPeerId,
                         request.GroupConversationGuid,
                         opId,
                         now,
-                        adminSequenceNumber: null,
+                        adminSequenceNumber: adminSeq,
                         membersToAdd: request.MembersToAdd,
                         membersToRemove: request.MembersToRemove,
                         leaveGroup: request.LeaveGroup,
@@ -252,6 +268,7 @@ namespace Percolator.Application.Apps.Chat
         private readonly Percolator.Chat.App.IAdminOperations _adminOps;
         private readonly IAdminOperationDispatcher _dispatcher;
         private readonly IAdminOperationSigner _signer;
+        private readonly Percolator.Chat.App.IAdminSequenceProvider _sequenceProvider;
 
         public UpdateGroupInfoHandler(
             MediatR.IMediator mediator,
@@ -260,7 +277,8 @@ namespace Percolator.Application.Apps.Chat
             Percolator.Application.Network.IMessageTransportService transport,
             Percolator.Chat.App.IAdminOperations adminOps,
             IAdminOperationDispatcher dispatcher,
-            IAdminOperationSigner signer)
+            IAdminOperationSigner signer,
+            Percolator.Chat.App.IAdminSequenceProvider sequenceProvider)
         {
             _mediator = mediator;
             _conversations = conversations;
@@ -269,6 +287,7 @@ namespace Percolator.Application.Apps.Chat
             _adminOps = adminOps;
             _dispatcher = dispatcher;
             _signer = signer;
+            _sequenceProvider = sequenceProvider;
         }
         public Task Handle(UpdateGroupInfoAppCommand request, CancellationToken cancellationToken)
         {
@@ -276,7 +295,8 @@ namespace Percolator.Application.Apps.Chat
             var now = DateTimeOffset.UtcNow;
             var opId = Guid.NewGuid();
 
-            var signTask = _signer.SignUpdateInfoAsync(request.GroupConversationGuid, opId, now, request.NewGroupName, null, null, cancellationToken);
+            var seqTask = _sequenceProvider.NextAsync(request.GroupConversationGuid, cancellationToken);
+            var signTask = seqTask.ContinueWith(t => _signer.SignUpdateInfoAsync(request.GroupConversationGuid, opId, now, request.NewGroupName, null, t.Result, cancellationToken), cancellationToken).Unwrap();
 
             return signTask.ContinueWith(t =>
             {
@@ -295,12 +315,13 @@ namespace Percolator.Application.Apps.Chat
                         .ToList();
 
                     var (payloadBytes2, signature2) = await signTask;
+                    var adminSeq = await seqTask;
                     await _dispatcher.DispatchUpdateGroupInfoAsync(
                         senderPeerId,
                         request.GroupConversationGuid,
                         opId,
                         now,
-                        adminSequenceNumber: null,
+                        adminSequenceNumber: adminSeq,
                         newGroupName: request.NewGroupName,
                         newGroupAvatar: null,
                         signature: signature2,
