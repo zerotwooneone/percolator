@@ -28,6 +28,55 @@ Non-functional contract (Signal-like):
 - FIFO per destination device; preserve enqueue order on delivery.
 - Best-effort immediate delivery if recipient is online; otherwise enqueue.
 
+### 1 Command plan to drive Step 17 via MediatR (user-facing GUI/CLI)
+- **Identity/peer setup (existing)**
+  - `CreateSelfIdentityCommand(name, passphrase?)` (exists) — create self identities for Host, Alice, Bob, Charlie.
+  - `SetPeerNameByPublicKeyCommand(name, spki)` (exists) — mutual naming by SPKI on each node for host and peers.
+
+- **DHT (existing, may extend)**
+  - `DhtProbeCommand(endpoint, targetName, SelfIdentityName?)` (exists) — use for “findNode”. It returns discovered peers (PKHs). If needed, extend the response shape for richer UI feedback.
+  - New: `DhtFindNodeCommand(hostEndpoint)` — user-facing alias over `DhtProbeCommand` that normalizes discovered PKHs for UI consumption.
+  - New: `DhtPingCommand(targetNameOrEndpoint)` — user-facing ping that triggers the online presence check; this should implicitly cause the internal envelope queue to be pumped by the receiver when they are online.
+
+- **Prekeys (existing)**
+  - `SubmitPreKeysCommand(targetPeerName, OneTimeKeyCount, ExpiresUtc)` (exists) — Alice/Bob publish prekey bundles to Host.
+  - `Percolator.Prekey.GetPreKeyBundleQuery(peerPkh)` (exists) — Host-side query used by request flow.
+  - `RequestPreKeyBundleByPkhCommand(hostEndpoint, targetPkh)` (exists) — client command to retrieve target’s prekey bundle from Host.
+
+- **Message queue relay (internal, not user-facing)**
+  - Internals like `EnqueueOpaqueMessageCommand`, `FetchQueuedMessagesQuery`, `TryRelayNextForPeerCommand` remain internal implementation details and are not exposed as user commands.
+
+- **Handshake (existing building blocks, propose new orchestration)**
+  - Building blocks (exist):
+    - `ComposeAndEnqueueInitiatorHelloCommand(hostEndpoint, targetPkh)` — compose initiator hello and enqueue via Host (exists).
+    - `HandleHandshakeInitiatorHelloCommand(payload)` (exists) — receiver path.
+    - `HandleHandshakeResponderHelloCommand(payload)` (exists) — initiator path after responder reply.
+    - `ProcessRelayedOpaquePayloadCommand(payload)` (exists) — generic opaque inbound processing.
+  - New orchestration (to add):
+    - `InitiateHandshakeViaHostCommand(hostEndpoint, targetPkh)` — one-shot command on Bob/Charlie that:
+      1) Requests Alice/Bob prekey bundle from Host.
+      2) Composes InitiatorHello using that bundle.
+      3) Enqueues opaque InitiatorHello to Host MQ for delivery to target PKH.
+
+- **Direct session mapping (existing)**
+  - `EstablishDirectSessionCommand` (exists) — used by gRPC path; for MQ-based path, DR sessions are established implicitly by handshake handlers and stored via session store.
+
+- **Group operations (existing app-level commands)**
+  - `CreateGroupFromIdentityKeysCommand(selfIdentityId, groupGuid, participantSpkis[], name, creatorSpki)` (exists) — Alice creates group with Bob+Charlie.
+  - `GrantGroupAdminAppCommand(selfIdentityId, groupGuid, granteeSpki)` (exists) — Alice grants Bob admin.
+  - `UpdateGroupMembershipAppCommand(selfIdentityId, groupGuid, membersToAdd[], membersToRemove[], leaveGroup?)` (exists) — Bob removes/rehydrates Charlie.
+  - `UpdateGroupInfoAppCommand(selfIdentityId, groupGuid, newName)` (exists) — optional.
+
+- **Group key distribution/adoption (existing)**
+  - Distribution flows through MQ inside admin handlers; recipients process via `ReceiveKeyDistributionCommand` (exists) which calls `GroupKeyOperations.ImportGroupKeyAsync`.
+  - Optional test signal: subscribe to `KeyVersionAdoptedNotification` (exists) to await adoption per node.
+
+- **New user-facing helpers (to add)**
+  - `DhtFindNodeCommand(hostEndpoint)` — friendly “find node” UX wrapping `DhtProbeCommand`.
+  - `DhtPingCommand(targetNameOrEndpoint)` — user-visible ping that also serves as a natural trigger for online checks.
+
+These commands allow a new integration test to: (1) set names; (2) DHT probe; (3) publish prekeys; (4) drive opaque handshakes via Host MQ using a single orchestration command per initiator; (5) create and mutate groups; (6) assert key adoption and participant sets — all without direct gRPC calls, only MediatR application commands.
+
 ### 17 Correct Phase 2 test order (fix Phase2_Prekeys_Dht_And_Sessions_Establish)
     1) Alice↔Host connect; mutual naming by SPKI; Alice probes DHT (0 nodes); Alice publishes prekeys.
     2) Bob↔Host connect; mutual naming by SPKI; Bob probes DHT and discovers Alice’s PKH.
