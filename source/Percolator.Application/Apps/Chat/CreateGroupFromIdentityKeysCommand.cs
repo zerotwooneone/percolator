@@ -62,6 +62,9 @@ namespace Percolator.Application.Apps.Chat
                 }
                 index++;
             }
+            // Deduplicate participants by PeerId
+            participants = participants.Distinct().ToList();
+
             if (participants.Count < 2)
             {
                 _logger.LogWarning("[CreateGroup] Aborting group creation. Resolved participants = {Count} (< 2).", participants.Count);
