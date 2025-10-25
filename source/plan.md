@@ -34,8 +34,7 @@ Non-functional contract (Signal-like):
   - `SetPeerNameByPublicKeyCommand(name, spki)` (exists) — mutual naming by SPKI on each node for host and peers.
 
 - **DHT (existing, may extend)**
-  - `DhtProbeCommand(endpoint, targetName, SelfIdentityName?)` (exists) — use for “findNode”. It returns discovered peers (PKHs). If needed, extend the response shape for richer UI feedback.
-  - New: `DhtFindNodeCommand(hostEndpoint)` — user-facing alias over `DhtProbeCommand` that normalizes discovered PKHs for UI consumption.
+  - `DhtProbeCommand(endpoint, targetName, SelfIdentityName?)` (exists) — use directly for “findNode”. It returns discovered peers (PKHs). If needed, extend the response shape for richer UI feedback.
   - New: `DhtPingCommand(targetNameOrEndpoint)` — user-facing ping that triggers the online presence check; this should implicitly cause the internal envelope queue to be pumped by the receiver when they are online.
 
 - **Prekeys (existing)**
@@ -72,7 +71,6 @@ Non-functional contract (Signal-like):
   - Optional test signal: subscribe to `KeyVersionAdoptedNotification` (exists) to await adoption per node.
 
 - **New user-facing helpers (to add)**
-  - `DhtFindNodeCommand(hostEndpoint)` — friendly “find node” UX wrapping `DhtProbeCommand`.
   - `DhtPingCommand(targetNameOrEndpoint)` — user-visible ping that also serves as a natural trigger for online checks.
 
 These commands allow a new integration test to: (1) set names; (2) DHT probe; (3) publish prekeys; (4) drive opaque handshakes via Host MQ using a single orchestration command per initiator; (5) create and mutate groups; (6) assert key adoption and participant sets — all without direct gRPC calls, only MediatR application commands.
