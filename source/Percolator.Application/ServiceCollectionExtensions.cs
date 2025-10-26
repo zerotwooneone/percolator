@@ -43,6 +43,10 @@ public static class ServiceCollectionExtensions
             cfg.RegisterServicesFromAssembly(typeof(PingRequest).Assembly);
             // Include Chat handlers assembly (Percolator.Chat)
             cfg.RegisterServicesFromAssembly(typeof(PostTextMessageHandler).Assembly);
+            // Include Prekey handlers assembly (Percolator.Prekey)
+            cfg.RegisterServicesFromAssembly(typeof(Percolator.Prekey.Handlers.SubmitPreKeyBundleHandler).Assembly);
+            // Include MessageQueue handlers assembly (Percolator.MessageQueue)
+            cfg.RegisterServicesFromAssembly(typeof(Percolator.MessageQueue.Handlers.EnqueueOpaqueMessageHandler).Assembly);
         });
 
         return services;

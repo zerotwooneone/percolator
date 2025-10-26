@@ -15,6 +15,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ITransportKeyResolver, TransportKeyResolver>();
         services.AddTransient<IAdminOperationDispatcher, AdminOperationDispatcher>();
         services.AddTransient<IAdminOperationSigner, AdminOperationSigner>();
+        services.AddScoped<IAdminSequenceProvider, AdminSequenceProvider>();
 
         return services;
     }

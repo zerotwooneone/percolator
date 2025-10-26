@@ -20,13 +20,12 @@ public class SqlitePreKeyBundleRepository : IPreKeyBundleRepository
 
         try
         {
-            var oneTimePreKey = await _context.OneTimePreKeys
-                .FirstOrDefaultAsync(k => k.PeerIdentityKey.PeerId.Value == peerId.Value);
-
-            var identityKeyDbo = await _context.PeerIdentityKeys
+            // Load identity + children in memory, then filter locally to avoid Sqlite translation issues
+            var identityKeyList = await _context.PeerIdentityKeys
                 .Include(ik => ik.SignedPreKeys)
                 .Include(ik => ik.OneTimePreKeys)
-                .FirstOrDefaultAsync(ik => ik.PeerId.Value == peerId.Value);
+                .ToListAsync();
+            var identityKeyDbo = identityKeyList.FirstOrDefault(ik => ik.PeerId.Value == peerId.Value);
 
             if (identityKeyDbo is null)
             {
@@ -41,12 +40,14 @@ public class SqlitePreKeyBundleRepository : IPreKeyBundleRepository
                 return null; // A bundle must have a signed pre-key
             }
 
+            var oneTimePreKey = identityKeyDbo.OneTimePreKeys.FirstOrDefault();
+
             var bundle = new PreKeyBundle(
                 new RatchetIdentityKey(identityKeyDbo.PublicKey),
                 Guid.Parse(signedPreKey.Id),
                 new PreKey(signedPreKey.PublicKey),
                 new Signature(signedPreKey.Signature),
-                oneTimePreKey is not null ? Guid.Parse(oneTimePreKey.Id): null,
+                oneTimePreKey is not null ? Guid.Parse(oneTimePreKey.Id) : null,
                 oneTimePreKey is not null ? new OneTimeKey(oneTimePreKey.PublicKey) : null
             );
 

@@ -58,7 +58,7 @@ namespace Percolator.Application.Network
             _relayOrchestrator = relayOrchestrator;
         }
 
-        private async Task<SubmitPreKeyBundleResponse> HandlePrekeyEnvelopeAsync(PrekeyEnvelope prekeyEnvelope,
+        private async Task<InternalEnvelope?> HandlePrekeyEnvelopeAsync(PrekeyEnvelope prekeyEnvelope,
             NetworkPeerId remotePeerId, CancellationToken ct)
         {
             switch (prekeyEnvelope.MessageCase)
@@ -91,13 +91,37 @@ namespace Percolator.Application.Network
                         RemotePeerId = remotePeerId
                     };
                     await _mediator.Send(cmd, ct);
-                    break;
+                    return new InternalEnvelope { SubmitPreKeyBundleResponse = new SubmitPreKeyBundleResponse { Version = 1 } };
+                case PrekeyEnvelope.MessageOneofCase.GetPreKeyBundleRequest:
+                    var getReq = prekeyEnvelope.GetPreKeyBundleRequest;
+                    if (!getReq.HasPublicKeyHash) throw new InvalidOperationException("PublicKeyHash is required");
+                    var bundle = await _mediator.Send(new Percolator.Prekey.Handlers.GetPreKeyBundleQuery
+                    {
+                        TargetPublicSigningKeyHash = getReq.PublicKeyHash.ToByteArray()
+                    }, ct);
+                    var resp = new GetPreKeyBundleResponse { Version = 1 };
+                    if (bundle is not null)
+                    {
+                        var msg = new GetPreKeyBundleResponse.Types.PreKeyBundle
+                        {
+                            Version = 1,
+                            IdentityKey = ByteString.CopyFrom(bundle.IdentitySigningKey.Value),
+                            SignedPreKeyId = ByteString.CopyFrom(bundle.SignedPreKeyId.ToByteArray()),
+                            SignedPreKey = ByteString.CopyFrom(bundle.SignedPreKey.Value),
+                            PreKeySignature = ByteString.CopyFrom(bundle.SignedPreKeySignature.Value)
+                        };
+                        if (bundle.OneTimePreKey is not null)
+                        {
+                            msg.OneTimeKeyId = ByteString.CopyFrom(bundle.OneTimePreKeyId!.Value.ToByteArray());
+                            msg.OneTimeKey = ByteString.CopyFrom(bundle.OneTimePreKey.Value);
+                        }
+                        resp.PreKeyBundle = msg;
+                    }
+                    return new InternalEnvelope { GetPreKeyBundleResponse = resp };
                 default:
                     _logger.LogWarning("Received unhandled prekey message type: {MessageType}", prekeyEnvelope.MessageCase);
-                    break;
+                    return null;
             }
-
-            return new SubmitPreKeyBundleResponse();
         }
 
         public async Task<DeliverOpaqueMessageResult> Handle(DeliverOpaqueMessageCommand request, CancellationToken cancellationToken)
@@ -197,8 +221,7 @@ namespace Percolator.Application.Network
                         responseEnvelope = await HandleDhtMessageAsync(internalEnvelope.DhtEnvelope, connectionInfo, endpoint, cancellationToken);
                         break;
                     case InternalEnvelope.ApplicationPayloadOneofCase.PrekeyEnvelope:
-                        var response = await HandlePrekeyEnvelopeAsync(internalEnvelope.PrekeyEnvelope, connectionInfo.Id, cancellationToken);
-                        responseEnvelope = new InternalEnvelope { SubmitPreKeyBundleResponse = response };
+                        responseEnvelope = await HandlePrekeyEnvelopeAsync(internalEnvelope.PrekeyEnvelope, connectionInfo.Id, cancellationToken);
                         break;
                     case InternalEnvelope.ApplicationPayloadOneofCase.MessageQueueEnvelope:
                         _logger.LogDebug("MessageQueueEnvelope handled by orchestrator; no-op in transport handler");
