@@ -186,6 +186,20 @@ public class Phase17CommandsOnlyTests : IntegrationTestBase
                 new List<byte[]> { aliceSpki, bobSpki, charlieSpki },
                 "P17 Group",
                 aliceSpki));
+
+            // Assert: conversation exists and participants include Bob and Charlie (total 3)
+            var convoRepo = aliceScope.ServiceProvider.GetRequiredService<Percolator.Chat.IConversationRepository>();
+            var peerRepo = aliceScope.ServiceProvider.GetRequiredService<Percolator.Identity.IPeerRepository>();
+            var convo = await convoRepo.GetByGroupGuidAsync(groupGuid, ctx.Identity!.SelfIdentityId);
+            convo.Should().NotBeNull("group conversation should be created for Alice");
+            var bobPeer = await peerRepo.GetByNameAsync("bob");
+            var charliePeer = await peerRepo.GetByNameAsync("charlie");
+            bobPeer.Should().NotBeNull();
+            charliePeer.Should().NotBeNull();
+            var participantIds = convo!.Participants.Select(p => p.Value).ToHashSet();
+            participantIds.Should().HaveCount(3);
+            participantIds.Should().Contain(bobPeer!.Id.Value);
+            participantIds.Should().Contain(charliePeer!.Id.Value);
         }
 
         // 10) Alice grants Bob admin
@@ -196,6 +210,29 @@ public class Phase17CommandsOnlyTests : IntegrationTestBase
                 ctx.Identity!.SelfIdentityId,
                 groupGuid,
                 bobSpki));
+
+            // Assert: admin set contains Alice (creator) and Bob (grantee)
+            var convoRepo2 = aliceScope2.ServiceProvider.GetRequiredService<Percolator.Chat.IConversationRepository>();
+            var adminKeyStore = aliceScope2.ServiceProvider.GetRequiredService<Percolator.Chat.App.IGroupAdminKeyStore>();
+            var peerRepo2 = aliceScope2.ServiceProvider.GetRequiredService<Percolator.Identity.IPeerRepository>();
+
+            var convo2 = await convoRepo2.GetByGroupGuidAsync(groupGuid, ctx.Identity!.SelfIdentityId);
+            convo2.Should().NotBeNull();
+
+            var adminKeys = await adminKeyStore.GetKeysAsync(convo2!.Id.Value, CancellationToken.None);
+            adminKeys.Should().NotBeNull();
+
+            // Resolve expected admin public keys (SPKIs)
+            var aliceSpkiExpected = GetSpki(alice);
+            var bobSpkiExpected = bobSpki;
+
+            var spkis = adminKeys
+                .Where(k => k.RevokedAtUtc is null)
+                .Select(k => Convert.ToBase64String(k.PublicKey.Bytes))
+                .ToHashSet();
+
+            spkis.Should().Contain(Convert.ToBase64String(aliceSpkiExpected));
+            spkis.Should().Contain(Convert.ToBase64String(bobSpkiExpected));
         }
 
         // 11) Bob removes Charlie
