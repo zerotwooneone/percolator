@@ -122,6 +122,7 @@ public class Phase17CommandsOnlyTests : IntegrationTestBase
         var charlieMed = charlie.Services.GetRequiredService<IMediator>();
 
         // Helper SPKIs and PKHs
+        var hostSpki = GetSpki(host);
         var aliceSpki = GetSpki(alice);
         var bobSpki = GetSpki(bob);
         var charlieSpki = GetSpki(charlie);
@@ -129,7 +130,7 @@ public class Phase17CommandsOnlyTests : IntegrationTestBase
         var bobPkh = GetPkhFromSpki(bobSpki);
 
         // 1) Alice↔Host connect; mutual naming; Alice probes DHT (0 nodes); Alice publishes prekeys.
-        await aliceMed.Send(new Percolator.Application.Identity.SetPeerNameByPublicKeyCommand("host", GetSpki(host)));
+        await aliceMed.Send(new Percolator.Application.Identity.SetPeerNameByPublicKeyCommand("host", hostSpki));
         await aliceMed.Send(new ConnectToPeerCommand(hostEp, "host"));
         var find0 = await aliceMed.Send(new DhtProbeCommand(hostEp, "host", null));
         find0.Should().NotBeNull();
@@ -137,7 +138,7 @@ public class Phase17CommandsOnlyTests : IntegrationTestBase
         await aliceMed.Send(new SubmitPreKeysCommand("host", OneTimeKeyCount: 5, ExpiresUtc: DateTimeOffset.UtcNow.AddHours(1)));
 
         // 2) Bob↔Host connect; mutual naming; Bob probes and discovers Alice’s PKH.
-        await bobMed.Send(new Percolator.Application.Identity.SetPeerNameByPublicKeyCommand("host", GetSpki(host)));
+        await bobMed.Send(new Percolator.Application.Identity.SetPeerNameByPublicKeyCommand("host", hostSpki));
         await bobMed.Send(new ConnectToPeerCommand(hostEp, "host"));
         var findBob = await bobMed.Send(new DhtProbeCommand(hostEp, "host", null));
         findBob.Should().NotBeNull();
@@ -151,7 +152,7 @@ public class Phase17CommandsOnlyTests : IntegrationTestBase
         await bobMed.Send(new SubmitPreKeysCommand("host", OneTimeKeyCount: 5, ExpiresUtc: DateTimeOffset.UtcNow.AddHours(1)));
 
         // 5) Charlie↔Host connect; mutual naming by SPKI.
-        await charlieMed.Send(new Percolator.Application.Identity.SetPeerNameByPublicKeyCommand("host", GetSpki(host)));
+        await charlieMed.Send(new Percolator.Application.Identity.SetPeerNameByPublicKeyCommand("host", hostSpki));
         await charlieMed.Send(new ConnectToPeerCommand(hostEp, "host"));
 
         // 6) Charlie probes DHT and discovers both Alice and Bob
