@@ -58,9 +58,9 @@ namespace Percolator.Application.Network.Handshake
             
             // Generate ephemeral and initiate X3DH
             using var eph = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+            var ephSpki = eph.PublicKey.ExportSubjectPublicKeyInfo();
             var remotePreKey = new PreKey(request.RemotePreKeySpki);
-            var otk = request.OneTimePreKeyId.HasValue ? new OneTimeKey(Array.Empty<byte>()) : null; // OTK public key not required in hello
-            var bundle = new X3dPreKeyBundle(remoteId, remotePreKey, otk);
+            var bundle = new X3dPreKeyBundle(remoteId, remotePreKey, OneTimePreKey:null);// OTK public key not required in hello
             var shared = _x3dh.InitiateHandshake(bundle, eph);
                 
             _logger.LogInformation("Established new initiator prehandshake for remote identity {RemoteIdentityKey}", 
@@ -85,7 +85,7 @@ namespace Percolator.Application.Network.Handshake
             {
                 Version = 1,
                 InitiatorIdentityKeySpki = ByteString.CopyFrom(_active.Keys.IdentitySigningKey.ExportSubjectPublicKeyInfo()),
-                InitiatorEphemeralKeySpki = ByteString.CopyFrom(eph.PublicKey.ExportSubjectPublicKeyInfo()),
+                InitiatorEphemeralKeySpki = ByteString.CopyFrom(ephSpki),
                 SignedPreKeyId = ByteString.CopyFrom(request.SignedPreKeyId.ToByteArray()),
             };
             if (request.OneTimePreKeyId.HasValue)
