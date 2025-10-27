@@ -96,6 +96,16 @@ These commands allow a new integration test to: (1) set names; (2) DHT probe; (3
     - Host enqueue: send `InternalEnvelope` with `MessageQueueEnvelope.enqueue_opaque_message_request` to host; host persists and later relays using `RelayOpaqueEnvelope`.
   - Test guidance: after Client A enqueues for Client B on host, have Client B call `DhtPingCommand("host")` to flush delivery.
 
+- **Implemented**
+  - Introduced a single-recipient API: `IRemoteEnvelopeSender.SendChatEnvelopeToPeerAsync(ChatEnvelope, RecipientRoute)`.
+  - `RemoteEnvelopeSender` now:
+    - Sends via Direct Session when available.
+    - Falls back to host by sending `MessageQueueEnvelope.enqueue_opaque_message_request` inside an `InternalEnvelope` to the peer named `host`, when recipient PKH is provided.
+  - `CreateGroupFromIdentityKeysHandler` now dispatches per-recipient using the sender and passes each recipient’s PKH (derived from SPKI) to enable host enqueue fallback.
+  - `AdminOperationDispatcher` now delegates per-recipient dispatch to `IRemoteEnvelopeSender`.
+    - To support host enqueue for admin ops, extended `IPeerPublicSigningKeyStore` with `GetPublicKeyHashByPeerIdAsync(PeerId)` and used it to supply PKH per recipient.
+  - Phase 17 integration test updated to call `DhtPingCommand("host")` on recipients after Alice creates the group to flush queued deliveries.
+
 - **Immediate refactor**
   - Update command handlers to use the sender utility instead of referencing queue commands directly. For `CreateGroupFromIdentityKeysCommand`, dispatch `ChatEnvelope.create_group` via the utility with per-recipient routing. Admin operations already use an application dispatcher that performs enqueue-and-relay; it can delegate to the same utility for consistency.
 
