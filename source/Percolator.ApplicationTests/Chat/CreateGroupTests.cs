@@ -23,6 +23,12 @@ using Percolator.Application.Network;
         private sealed class CapturingMediator : MediatR.IMediator
         {
             public object? LastRequest { get; private set; }
+
+internal sealed class NoopSender : IRemoteEnvelopeSender
+{
+    public Task SendChatEnvelopeToPeerAsync(ChatEnvelope chatEnvelope, RecipientRoute recipient, CancellationToken ct = default)
+        => Task.CompletedTask;
+}
             public Task<TResponse> Send<TResponse>(MediatR.IRequest<TResponse> request, CancellationToken cancellationToken = default)
             {
                 LastRequest = request;
@@ -123,7 +129,7 @@ using Percolator.Application.Network;
         {
             var store = new StubKeyStore();
             var repo = new CapturingConversationRepo();
-            var handler = new CreateGroupFromIdentityKeysHandler(new NullLogger<CreateGroupFromIdentityKeysHandler>(), store, repo, new NoopAdminKeyStore());
+            var handler = new CreateGroupFromIdentityKeysHandler(new NullLogger<CreateGroupFromIdentityKeysHandler>(), store, repo, new NoopAdminKeyStore(), new NoopSender());
 
             var groupGuid = Guid.NewGuid();
             var selfId = 77;
@@ -141,7 +147,7 @@ using Percolator.Application.Network;
         {
             var store = new StubKeyStore();
             var repo = new CapturingConversationRepo();
-            var handler = new CreateGroupFromIdentityKeysHandler(new NullLogger<CreateGroupFromIdentityKeysHandler>(), store, repo, new NoopAdminKeyStore());
+            var handler = new CreateGroupFromIdentityKeysHandler(new NullLogger<CreateGroupFromIdentityKeysHandler>(), store, repo, new NoopAdminKeyStore(), new NoopSender());
 
             var groupGuid = Guid.NewGuid();
             var selfId = 88;
@@ -159,3 +165,9 @@ using Percolator.Application.Network;
         }
     }
 }
+
+    internal sealed class NoopSender : IRemoteEnvelopeSender
+    {
+        public Task SendChatEnvelopeToPeerAsync(ChatEnvelope chatEnvelope, RecipientRoute recipient, CancellationToken ct = default)
+            => Task.CompletedTask;
+    }

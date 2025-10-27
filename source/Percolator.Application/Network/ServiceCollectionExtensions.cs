@@ -115,6 +115,9 @@ public static class ServiceCollectionExtensions
         // Relay orchestrator for queued messages ACK flow
         services.AddSingleton<RelayOrchestrator>();
 
+        // Application-layer envelope sender
+        services.AddTransient<IRemoteEnvelopeSender, RemoteEnvelopeSender>();
+
         return services;
     }
 }

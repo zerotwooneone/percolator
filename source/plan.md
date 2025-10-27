@@ -72,8 +72,90 @@ Non-functional contract (Signal-like):
 
 - **New user-facing helpers (to add)**
   - `DhtPingCommand(targetNameOrEndpoint)` — user-visible ping that also serves as a natural trigger for online checks.
+    - Test guidance: when Client A enqueues messages for Client B on the host, have Client B call `DhtPingCommand("host")` to trigger the host to pump B's pending enqueued messages.
 
 These commands allow a new integration test to: (1) set names; (2) DHT probe; (3) publish prekeys; (4) drive opaque handshakes via Host MQ using a single orchestration command per initiator; (5) create and mutate groups; (6) assert key adoption and participant sets — all without direct gRPC calls, only MediatR application commands.
+
+### 2 Application-layer sender utility and routing corrections
+- **Problem**: Client handlers (e.g., `CreateGroupFromIdentityKeysHandler`) must not call host-side commands like `EnqueueOpaqueMessageCommand` directly. That command is part of the host’s store-and-forward queue. Clients should either send directly over an established Direct Session or ask the host to enqueue by sending a protobuf `MessageQueueEnvelope.enqueue_opaque_message_request` within an `InternalEnvelope`.
+
+- **Solution**: Add a small application-layer sender utility used by commands in Step 1 to deliver per-recipient messages.
+  - Name: `IRemoteEnvelopeSender` (app-layer interface) with implementation `RemoteEnvelopeSender`.
+  - Responsibilities per recipient:
+    - Build the inner `InternalEnvelope` (e.g., `ChatEnvelope.create_group`, `SignedAdminOperation`, etc.).
+    - Try direct delivery when a Direct Session exists (encrypt with session and send via `IMessageTransportService`).
+    - If no session, build `InternalEnvelope.message_queue_envelope.enqueue_opaque_message_request` pointing at the host, carrying the ciphertext and recipient PKH (SHA-256 of SPKI) for store-and-forward.
+    - Exclude self and infrastructure peers from recipients.
+    - Idempotency: rely on message-specific keys (e.g., `group_conversation_guid`, `op_id`, or `message_id`) to avoid duplicates on receiver.
+  - Collaborators:
+    - `IDirectSessionRepository` / `IDirectSessionManager` (to detect session and encrypt per recipient).
+    - `IPeerPublicSigningKeyStore` (resolve PKH from SPKI when needed).
+    - `IMessageTransportService` (send DR ciphertext to peer or host).
+  - Transport mapping:
+    - Direct: send DR-ciphertext of `InternalEnvelope` to recipient.
+    - Host enqueue: send `InternalEnvelope` with `MessageQueueEnvelope.enqueue_opaque_message_request` to host; host persists and later relays using `RelayOpaqueEnvelope`.
+  - Test guidance: after Client A enqueues for Client B on host, have Client B call `DhtPingCommand("host")` to flush delivery.
+
+- **Immediate refactor**
+  - Update command handlers to use the sender utility instead of referencing queue commands directly. For `CreateGroupFromIdentityKeysCommand`, dispatch `ChatEnvelope.create_group` via the utility with per-recipient routing. Admin operations already use an application dispatcher that performs enqueue-and-relay; it can delegate to the same utility for consistency.
+
+### 3 Revisit Step 1 commands: remote-peer notifications (protobuf wrappers/messages)
+- **Envelope rules (default for app messages)**
+  - Build `InternalEnvelope` with `chat_envelope` for chat/admin payloads.
+  - Encrypt per recipient using the active DirectSession to produce opaque ciphertext.
+  - When relaying via host, wrap ciphertext in `RelayOpaqueEnvelope.opaque_payload`.
+  - Timestamps are UTC (`google.protobuf.Timestamp` from `DateTimeOffset.UtcNow`). GUIDs are serialized as 16 bytes.
+
+- **Routing rules**
+  - Prefer direct-session delivery. If no session exists, enqueue via host using recipient PKH (SHA-256 of SPKI) where supported by the command.
+  - Exclude self and infrastructure peers from recipient lists (implementation detail in app layer).
+  - Test guidance: delivery observation pattern — after enqueuing messages for other clients, those other clients should call `DhtPingCommand("host")` to prompt the host to deliver their pending queue.
+
+- **Command-by-command mapping**
+  - CreateGroupFromIdentityKeysCommand
+    - Notify all initial members (excluding self/infra):
+      - `InternalEnvelope.chat_envelope.create_group` (`CreateGroup`)
+        - `group_conversation_guid`, `initial_participant_identity_keys`, `name`, `creator_identity_key`.
+      - Idempotency key: `group_conversation_guid` per recipient.
+
+  - GrantGroupAdminAppCommand
+    - Control-plane broadcast to all current members:
+      - `InternalEnvelope.chat_envelope.signed_admin_operation` (`SignedAdminOperation`)
+        - `payload.group_conversation_guid`, `payload.op_id`, `payload.sent_timestamp_utc`, `payload.admin_sequence_number`.
+        - `payload.operation.grant_admin.grantee_public_key`.
+        - `signature` over `payload.ToByteArray()` by admin key.
+    - Per-recipient follow-up (acting admin to each member):
+      - `InternalEnvelope.chat_envelope.key_distribution` (`KeyDistributionPayload`).
+    - Finalization broadcast after confirmations:
+      - `InternalEnvelope.chat_envelope.admin_commit_operation` (`SignedAdminCommitOperation`).
+
+  - UpdateGroupMembershipAppCommand
+    - Control-plane broadcast to all current members:
+      - `InternalEnvelope.chat_envelope.signed_admin_operation.payload.operation.update_group_membership`
+        - `members_to_add` (participant GUID bytes), `members_to_remove` (GUID bytes), `leave_group`.
+
+  - UpdateGroupInfoAppCommand
+    - Control-plane broadcast to all current members:
+      - `InternalEnvelope.chat_envelope.signed_admin_operation.payload.operation.update_group_info`
+        - `new_group_name`, `new_group_avatar`.
+
+  - InitiateHandshakeViaHostCommand (orchestrates opaque handshake)
+    - Outbound from initiator to target (via host relay):
+      - Standalone `HandshakeInitiatorHello` (NOT wrapped in `InternalEnvelope`).
+      - Carried inside `RelayOpaqueEnvelope.opaque_payload` over the relay transport.
+    - Responder’s inner reply (preferred form) after session established:
+      - Application payloads resume using `InternalEnvelope` with appropriate inner messages.
+
+  - DhtPingCommand (presence/health; not a state change notification)
+    - `InternalEnvelope.dht_envelope.ping_request` / `ping_response`.
+
+  - Prekey commands (server-bound; not peer notifications)
+    - `SubmitPreKeyBundleRequest` / `GetPreKeyBundleRequest` via `PrekeyEnvelope` to host; no direct peer notification.
+
+- **Idempotency and ordering**
+  - Group creation: dedupe on `(group_conversation_guid)` per recipient.
+  - Admin ops: dedupe on `payload.op_id`; enforce per-recipient send order: operation → key distribution → commit.
+  - Text messages (when used): dedupe on `TextMessage.message_id`.
 
 ### 17 Correct Phase 2 test order (fix Phase2_Prekeys_Dht_And_Sessions_Establish)
     1) Alice↔Host connect; mutual naming by SPKI; Alice probes DHT (0 nodes); Alice publishes prekeys.

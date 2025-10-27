@@ -188,6 +188,10 @@ public class Phase17CommandsOnlyTests : IntegrationTestBase
                 "P17 Group",
                 aliceSpki));
 
+            // Trigger host pump for OTHER clients (Bob, Charlie) to receive enqueued CreateGroup notifications
+            await bobMed.Send(new DhtPingCommand("host"));
+            await charlieMed.Send(new DhtPingCommand("host"));
+
             // Assert: conversation exists and participants include Bob and Charlie (total 3)
             var convoRepo = aliceScope.ServiceProvider.GetRequiredService<Percolator.Chat.IConversationRepository>();
             var peerRepo = aliceScope.ServiceProvider.GetRequiredService<Percolator.Identity.IPeerRepository>();

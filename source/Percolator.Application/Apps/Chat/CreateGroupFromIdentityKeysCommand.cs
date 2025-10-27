@@ -9,6 +9,9 @@ using Percolator.Chat;
 using Percolator.Chat.ValueObjects;
 using Percolator.Chat.App;
 using Percolator.Identity;
+using Google.Protobuf;
+using Percolator.Contracts;
+using Percolator.Application.Network;
 
 namespace Percolator.Application.Apps.Chat
 {
@@ -26,14 +29,17 @@ namespace Percolator.Application.Apps.Chat
         private readonly IPeerPublicSigningKeyStore _keyStore;
         private readonly IConversationRepository _conversations;
         private readonly IGroupAdminKeyStore _adminKeys;
+        private readonly IRemoteEnvelopeSender _sender;
 
-        public CreateGroupFromIdentityKeysHandler(ILogger<CreateGroupFromIdentityKeysHandler> logger, IPeerPublicSigningKeyStore keyStore, IConversationRepository conversations, IGroupAdminKeyStore adminKeys)
+        public CreateGroupFromIdentityKeysHandler(ILogger<CreateGroupFromIdentityKeysHandler> logger, IPeerPublicSigningKeyStore keyStore, IConversationRepository conversations, IGroupAdminKeyStore adminKeys, IRemoteEnvelopeSender sender)
         {
             _logger = logger;
             _keyStore = keyStore;
             _conversations = conversations;
             _adminKeys = adminKeys;
+            _sender = sender;
         }
+
 
         public async Task Handle(CreateGroupFromIdentityKeysCommand request, CancellationToken cancellationToken)
         {
@@ -41,6 +47,7 @@ namespace Percolator.Application.Apps.Chat
                 throw new InvalidOperationException("CreateGroup.creator_identity_key is required and must be non-empty.");
             _logger.LogInformation("[CreateGroup] SelfIdentityId={SelfIdentityId} GroupGuid={GroupGuid} SPKIs={Count} Name='{Name}'", request.SelfIdentityId, request.GroupConversationGuid, request.ParticipantIdentityKeysSpki?.Count ?? 0, request.Name);
             var participants = new List<ParticipantId>();
+            var recipientPeerIds = new List<Percolator.Identity.PeerId>();
             int index = 0;
             foreach (var spki in request.ParticipantIdentityKeysSpki)
             {
@@ -58,6 +65,11 @@ namespace Percolator.Application.Apps.Chat
                 else
                 {
                     participants.Add(new ParticipantId(peerId.Value));
+                    // Exclude creator/self from recipients by SPKI match
+                    if (!spki.SequenceEqual(request.CreatorIdentityKeySpki))
+                    {
+                        recipientPeerIds.Add(new Percolator.Identity.PeerId(peerId.Value));
+                    }
                     _logger.LogDebug("[CreateGroup] SPKI[{Index}] -> PeerId={PeerId}", index, peerId.Value);
                 }
                 index++;
@@ -90,6 +102,51 @@ namespace Percolator.Application.Apps.Chat
             {
                 _logger.LogWarning(ex, "[CreateGroup] Failed seeding creator admin key for group {GroupGuid}", request.GroupConversationGuid);
             }
+
+            // Build CreateGroup internal envelope to notify initial members via direct sessions
+            var createGroup = new CreateGroup
+            {
+                Version = 100,
+                GroupConversationGuid = ByteString.CopyFrom(request.GroupConversationGuid.ToByteArray()),
+                Name = request.Name ?? string.Empty,
+                CreatorIdentityKey = ByteString.CopyFrom(request.CreatorIdentityKeySpki)
+            };
+            foreach (var spki in request.ParticipantIdentityKeysSpki)
+            {
+                if (spki is null || spki.Length == 0) continue;
+                createGroup.InitialParticipantIdentityKeys.Add(ByteString.CopyFrom(spki));
+            }
+
+            var env = new InternalEnvelope
+            {
+                ChatEnvelope = new ChatEnvelope
+                {
+                    Version = 100,
+                    CreateGroup = createGroup
+                }
+            };
+            // Exclude creator/self from recipients by SPKI; include recipient PKH for host-enqueue fallback
+            foreach (var spki in request.ParticipantIdentityKeysSpki)
+            {
+                if (spki is null || spki.Length == 0) continue;
+                if (spki.SequenceEqual(request.CreatorIdentityKeySpki)) continue;
+                byte[] pkh;
+                using (var sha = SHA256.Create())
+                {
+                    pkh = sha.ComputeHash(spki);
+                }
+                var peerId = await _keyStore.GetPeerIdByPublicKeyHashAsync(pkh, cancellationToken);
+                if (peerId is null) continue;
+                var pid = new Percolator.Identity.PeerId(peerId.Value);
+                var route = new RecipientRoute(pid, pkh);
+                await _sender.SendChatEnvelopeToPeerAsync(env.ChatEnvelope, route, cancellationToken);
+            }
         }
+    }
+
+    internal sealed class NullRemoteEnvelopeSender : IRemoteEnvelopeSender
+    {
+        public Task SendChatEnvelopeToPeerAsync(ChatEnvelope chatEnvelope, RecipientRoute recipient, CancellationToken ct = default)
+            => Task.CompletedTask;
     }
 }
