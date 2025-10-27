@@ -8,6 +8,8 @@ using MediatR;
 using Microsoft.Extensions.Logging;
 using Percolator.Contracts;
 using Percolator.Identity; // PeerId
+using Percolator.Application.Network;
+using Percolator.Identity;
 
 namespace Percolator.Application.Apps.Chat
 {
@@ -15,11 +17,15 @@ namespace Percolator.Application.Apps.Chat
     {
         private readonly IMediator _mediator;
         private readonly ILogger<AdminOperationDispatcher> _logger;
+        private readonly IRemoteEnvelopeSender _sender;
+        private readonly IPeerPublicSigningKeyStore _keyStore;
 
-        public AdminOperationDispatcher(IMediator mediator, ILogger<AdminOperationDispatcher> logger)
+        public AdminOperationDispatcher(IMediator mediator, ILogger<AdminOperationDispatcher> logger, IRemoteEnvelopeSender sender, IPeerPublicSigningKeyStore keyStore)
         {
             _mediator = mediator ?? throw new ArgumentNullException(nameof(mediator));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _sender = sender ?? throw new ArgumentNullException(nameof(sender));
+            _keyStore = keyStore ?? throw new ArgumentNullException(nameof(keyStore));
         }
 
         public Task DispatchGrantAdminAsync(
@@ -146,34 +152,19 @@ namespace Percolator.Application.Apps.Chat
                 }
             };
 
-            var bytes = envelope.ToByteArray();
-
-            var tasks = recipients
-                .Where(pid => pid != senderPeerId)
-                .Select(pid => ProcessRecipientAsync(pid, bytes, ct));
-
-            await Task.WhenAll(tasks);
-        }
-
-        private async Task ProcessRecipientAsync(PeerId recipientId, byte[] envelopeBytes, CancellationToken ct)
-        {
-            try
+            // Send to each recipient via RemoteEnvelopeSender (direct session preferred; host-enqueue fallback if available)
+            foreach (var pid in recipients.Where(pid => pid != senderPeerId))
             {
-                var recipientKeyHash = recipientId.Value.ToByteArray();
-                var enqueueResult = await _mediator.Send(
-                    new Percolator.MessageQueue.Commands.EnqueueOpaqueMessageCommand(recipientKeyHash, envelopeBytes), ct);
-
-                if (!enqueueResult.Accepted)
+                try
                 {
-                    _logger.LogError("Failed to enqueue admin op for recipient {RecipientId}", recipientId);
-                    return;
+                    // Resolve latest active PKH for enqueue fallback
+                    byte[]? pkh = await _keyStore.GetPublicKeyHashByPeerIdAsync(pid, ct);
+                    await _sender.SendChatEnvelopeToPeerAsync(envelope.ChatEnvelope, new RecipientRoute(pid, pkh), ct);
                 }
-
-                await _mediator.Send(new Percolator.Application.Network.TryRelayNextForPeerCommand(recipientId), ct);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error processing admin op for recipient {RecipientId}", recipientId);
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error dispatching admin op {OpId} to {RecipientId}", opId, pid);
+                }
             }
         }
     }

@@ -98,4 +98,17 @@ public class SqlitePeerPublicSigningKeyStore : IPeerPublicSigningKeyStore
             .FirstOrDefaultAsync(x => x.PublicKeyHash.SequenceEqual(publicKeyHash), ct);
         return row is null ? null : row.PeerId;
     }
+
+    public async Task<byte[]?> GetPublicKeyHashByPeerIdAsync(PeerId peerId, CancellationToken ct = default)
+    {
+        // Materialize then order to ensure we pick the most recent active key
+        var activeRows = await _db.PeerPublicSigningKeys
+            .Where(x => x.PeerId == peerId && x.ExpiredAtUtc == null)
+            .AsNoTracking()
+            .ToListAsync(ct);
+        var latest = activeRows
+            .OrderByDescending(x => x.ActiveAtUtc)
+            .FirstOrDefault();
+        return latest?.PublicKeyHash;
+    }
 }

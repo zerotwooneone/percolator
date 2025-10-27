@@ -69,6 +69,17 @@ internal sealed class NoopSender : IRemoteEnvelopeSender
                     _map.TryGetValue(Convert.ToBase64String(publicKeyHash), out var id);
                     return Task.FromResult<PeerId?>(id);
                 }
+                public Task<byte[]?> GetPublicKeyHashByPeerIdAsync(PeerId peerId, CancellationToken cancellationToken)
+                {
+                    foreach (var kvp in _map)
+                    {
+                        if (kvp.Value.Equals(peerId))
+                        {
+                            return Task.FromResult<byte[]?>(Convert.FromBase64String(kvp.Key));
+                        }
+                    }
+                    return Task.FromResult<byte[]?>(null);
+                }
             }
 
             private sealed class NoopAdminKeyStore : IGroupAdminKeyStore
