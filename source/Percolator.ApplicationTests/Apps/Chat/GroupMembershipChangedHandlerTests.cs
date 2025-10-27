@@ -14,9 +14,9 @@ using Percolator.Chat.ValueObjects;
 using Percolator.Cryptography;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using Percolator.MessageQueue.Commands;
 using Percolator.Identity.Model;
 using Percolator.Network;
+using Percolator.Application.Network;
 
 namespace Percolator.ApplicationTests.Apps.Chat
 {
@@ -34,8 +34,7 @@ namespace Percolator.ApplicationTests.Apps.Chat
         private Mock<IAtRestKeyProvider> _atRest = null!;
         private Mock<IRecipientPkhResolver> _pkh = null!;
         private ILoggerFactory _loggerFactory = null!;
-        private Mock<Percolator.Application.Sessions.IDirectSessionManager> _sessions = null!;
-        private Mock<IDirectSessionRepository> _directRepo = null!;
+        private Mock<IRemoteEnvelopeSender> _sender = null!;
 
         [SetUp]
         public void SetUp()
@@ -51,8 +50,7 @@ namespace Percolator.ApplicationTests.Apps.Chat
             _pkh = new Mock<IRecipientPkhResolver>(MockBehavior.Strict);
             _active = new ActiveIdentityContext();
             _loggerFactory = LoggerFactory.Create(b=>{});
-            _sessions = new Mock<Percolator.Application.Sessions.IDirectSessionManager>(MockBehavior.Strict);
-            _directRepo = new Mock<IDirectSessionRepository>(MockBehavior.Strict);
+            _sender = new Mock<IRemoteEnvelopeSender>(MockBehavior.Strict);
         }
 
         [Test]
@@ -78,11 +76,11 @@ namespace Percolator.ApplicationTests.Apps.Chat
 
             // Allow PKH resolution to return null for any participant (strict mock placation)
             _pkh.Setup(x => x.GetActivePkhAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync((byte[]?)null);
-            // No enqueue should happen in this scenario
+            // No send should happen in this scenario
             var sut = CreateSut();
             await sut.Handle(new GroupMembershipChangedNotification(convoId), CancellationToken.None);
 
-            _mediator.Verify(m => m.Send(It.IsAny<EnqueueOpaqueMessageCommand>(), It.IsAny<CancellationToken>()), Times.Never());
+            _sender.Verify(s => s.SendChatEnvelopeToPeerAsync(It.IsAny<Percolator.Contracts.ChatEnvelope>(), It.IsAny<RecipientRoute>(), It.IsAny<CancellationToken>()), Times.Never());
         }
 
         [Test]
@@ -110,7 +108,7 @@ namespace Percolator.ApplicationTests.Apps.Chat
             var sut = CreateSut();
             await sut.Handle(new GroupMembershipChangedNotification(convoId), CancellationToken.None);
 
-            _mediator.Verify(m => m.Send(It.IsAny<EnqueueOpaqueMessageCommand>(), It.IsAny<CancellationToken>()), Times.Never());
+            _sender.Verify(s => s.SendChatEnvelopeToPeerAsync(It.IsAny<Percolator.Contracts.ChatEnvelope>(), It.IsAny<RecipientRoute>(), It.IsAny<CancellationToken>()), Times.Never());
         }
 
         [TearDown]
@@ -134,8 +132,7 @@ namespace Percolator.ApplicationTests.Apps.Chat
                 _gmState.Object,
                 _atRest.Object,
                 _pkh.Object,
-                _sessions.Object,
-                _directRepo.Object);
+                _sender.Object);
         }
 
         [Test]
@@ -172,19 +169,14 @@ namespace Percolator.ApplicationTests.Apps.Chat
             _pkh.Setup(x => x.GetActivePkhAsync(p1.Value, It.IsAny<CancellationToken>())).ReturnsAsync(pkhBytes1);
             _pkh.Setup(x => x.GetActivePkhAsync(p2.Value, It.IsAny<CancellationToken>())).ReturnsAsync(pkhBytes2);
 
-            // Direct session must exist for recipient p2, and encryption must succeed
-            var directSessionId = new DirectSessionId(Guid.NewGuid());
-            _directRepo
-                .Setup(r => r.GetByRemotePeerIdAsync(new Percolator.Network.PeerId(p2.Value), _active.Identity.SelfIdentityId))
-                .ReturnsAsync(new DirectSession(new Percolator.Network.PeerId(p2.Value), directSessionId));
-            _sessions
-                .Setup(s => s.EncryptMessageAsync(new SessionId(directSessionId.Value), It.IsAny<Percolator.Cryptography.Plaintext>()))
-                .ReturnsAsync(new SessionRatchetMessage(RandomNumberGenerator.GetBytes(64)));
-
-            // Mediator should enqueue twice
-            _mediator
-                .Setup(m => m.Send(It.IsAny<EnqueueOpaqueMessageCommand>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync(new Percolator.MessageQueue.Results.EnqueueOpaqueMessageResult(true, null));
+            // Sender should be called for non-self participant(s)
+            _sender
+                .Setup(s => s.SendChatEnvelopeToPeerAsync(
+                    It.IsAny<Percolator.Contracts.ChatEnvelope>(),
+                    It.Is<RecipientRoute>(r => r.PeerId.Value == p2.Value),
+                    It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask)
+                .Verifiable();
 
             var sut = CreateSut();
 
@@ -199,7 +191,7 @@ namespace Percolator.ApplicationTests.Apps.Chat
             // PKH should be resolved for non-self (p2) and not for self (p1)
             _pkh.Verify(x => x.GetActivePkhAsync(p2.Value, It.IsAny<CancellationToken>()), Times.AtLeastOnce());
             _pkh.Verify(x => x.GetActivePkhAsync(p1.Value, It.IsAny<CancellationToken>()), Times.Never());
-            _mediator.Verify(m => m.Send(It.IsAny<EnqueueOpaqueMessageCommand>(), It.IsAny<CancellationToken>()), Times.AtLeastOnce());
+            _sender.Verify();
         }
     }
 }

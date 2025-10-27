@@ -6,9 +6,9 @@ using MediatR;
 using Moq;
 using NUnit.Framework;
 using Percolator.Application.Apps.Chat;
-using Percolator.MessageQueue.Commands;
 using Percolator.Network;
 using Microsoft.Extensions.Logging.Abstractions;
+using Percolator.Application.Network;
 
 namespace Percolator.ApplicationTests.Apps.Chat
 {
@@ -21,8 +21,7 @@ namespace Percolator.ApplicationTests.Apps.Chat
         private Mock<IActingAdminResolver> _acting = null!;
         private Microsoft.Extensions.Logging.ILoggerFactory _loggerFactory = null!;
         private Percolator.Application.Identity.ActiveIdentityContext _active = null!;
-        private Mock<Percolator.Application.Sessions.IDirectSessionManager> _sessions = null!;
-        private Mock<IDirectSessionRepository> _directRepo = null!;
+        private Mock<IRemoteEnvelopeSender> _sender = null!;
 
         [SetUp]
         public void SetUp()
@@ -33,8 +32,7 @@ namespace Percolator.ApplicationTests.Apps.Chat
             _acting = new Mock<IActingAdminResolver>(MockBehavior.Strict);
             _loggerFactory = Microsoft.Extensions.Logging.LoggerFactory.Create(b=>{});
             _active = new Percolator.Application.Identity.ActiveIdentityContext { Identity = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "self") { SelfIdentityId = 1 } };
-            _sessions = new Mock<Percolator.Application.Sessions.IDirectSessionManager>(MockBehavior.Strict);
-            _directRepo = new Mock<IDirectSessionRepository>(MockBehavior.Strict);
+            _sender = new Mock<IRemoteEnvelopeSender>(MockBehavior.Strict);
         }
 
         [TearDown]
@@ -46,7 +44,7 @@ namespace Percolator.ApplicationTests.Apps.Chat
         private KeyVersionAdoptedHandler CreateSut()
         {
             var logger = NullLogger<KeyVersionAdoptedHandler>.Instance;
-            return new KeyVersionAdoptedHandler(logger, _mediator.Object, _signing.Object, _active, _pkh.Object, _acting.Object, _sessions.Object, _directRepo.Object);
+            return new KeyVersionAdoptedHandler(logger, _mediator.Object, _signing.Object, _active, _pkh.Object, _acting.Object, _sender.Object);
         }
 
         [Test]
@@ -63,22 +61,19 @@ namespace Percolator.ApplicationTests.Apps.Chat
             _pkh.Setup(p => p.GetActivePkhAsync(adminPeer, It.IsAny<CancellationToken>())).ReturnsAsync(pkh);
             _signing.Setup(s => s.Sign(It.IsAny<Payload>())).Returns(new Signature(new byte[]{ 9,9 }));
 
-            // Session lookup + encrypt path
-            var directId = new Percolator.Network.DirectSessionId(Guid.NewGuid());
-            _directRepo.Setup(r => r.GetByRemotePeerIdAsync(It.IsAny<Percolator.Network.PeerId>(), It.IsAny<int>()))
-                .ReturnsAsync(new Percolator.Network.DirectSession(new Percolator.Network.PeerId(adminPeer), directId));
-            _sessions.Setup(s => s.EncryptMessageAsync(It.IsAny<Percolator.Cryptography.SessionId>(), It.IsAny<Percolator.Cryptography.Plaintext>()))
-                .ReturnsAsync(Percolator.Cryptography.SessionRatchetMessage.Create(new Percolator.Cryptography.PreKey(new byte[]{1}), 0, 0, new Percolator.Cryptography.Ciphertext(new byte[]{2})));
-
-            _mediator.Setup(m => m.Send(It.IsAny<EnqueueOpaqueMessageCommand>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync(new Percolator.MessageQueue.Results.EnqueueOpaqueMessageResult(true, null));
+            _sender
+                .Setup(s => s.SendChatEnvelopeToPeerAsync(
+                    It.IsAny<Percolator.Contracts.ChatEnvelope>(),
+                    It.Is<RecipientRoute>(r => r.PeerId.Value == adminPeer),
+                    It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask)
+                .Verifiable();
             var sut = CreateSut();
             await sut.Handle(new KeyVersionAdoptedNotification(convoId, keyVersion), CancellationToken.None);
-
-            _mediator.Verify(m => m.Send(It.IsAny<EnqueueOpaqueMessageCommand>(), It.IsAny<CancellationToken>()), Times.Once);
+            _sender.Verify();
         }
         [Test]
-        public async Task Skips_When_Admin_Pkh_Missing()
+        public async Task Sends_Using_Fallback_When_Admin_Pkh_Missing()
         {
             var convoId = Guid.NewGuid();
             var keyVersion = 3u;
@@ -91,10 +86,17 @@ namespace Percolator.ApplicationTests.Apps.Chat
 
             _pkh.Setup(p => p.GetActivePkhAsync(adminPeer, It.IsAny<CancellationToken>())).ReturnsAsync((byte[]?)null);
 
+            _sender
+                .Setup(s => s.SendChatEnvelopeToPeerAsync(
+                    It.IsAny<Percolator.Contracts.ChatEnvelope>(),
+                    It.Is<RecipientRoute>(r => r.PeerId.Value == adminPeer && r.PublicKeyHash == null),
+                    It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask)
+                .Verifiable();
+
             var sut = CreateSut();
             await sut.Handle(new KeyVersionAdoptedNotification(convoId, keyVersion), CancellationToken.None);
-
-            _mediator.Verify(m => m.Send(It.IsAny<EnqueueOpaqueMessageCommand>(), It.IsAny<CancellationToken>()), Times.Never);
+            _sender.Verify();
         }
     }
 }

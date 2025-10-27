@@ -2,19 +2,24 @@ using Google.Protobuf;
 using MediatR;
 using Microsoft.Extensions.Logging;
 using Percolator.Contracts;
-using Percolator.MessageQueue.Commands;
 using PeerId = Percolator.Identity.PeerId;
+using Percolator.Application.Network;
+using Percolator.Identity;
 
 namespace Percolator.Application.Apps.Chat;
 
 public sealed class DispatchEmojiAnnotationHandler : IRequestHandler<DispatchEmojiAnnotationCommand>
 {
     private readonly IMediator _mediator;
+    private readonly IRemoteEnvelopeSender _sender;
+    private readonly IPeerPublicSigningKeyStore _keyStore;
     private readonly ILogger<DispatchEmojiAnnotationHandler> _logger;
 
-    public DispatchEmojiAnnotationHandler(IMediator mediator, ILogger<DispatchEmojiAnnotationHandler> logger)
+    public DispatchEmojiAnnotationHandler(IMediator mediator, IRemoteEnvelopeSender sender, IPeerPublicSigningKeyStore keyStore, ILogger<DispatchEmojiAnnotationHandler> logger)
     {
         _mediator = mediator ?? throw new ArgumentNullException(nameof(mediator));
+        _sender = sender ?? throw new ArgumentNullException(nameof(sender));
+        _keyStore = keyStore ?? throw new ArgumentNullException(nameof(keyStore));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -27,46 +32,29 @@ public sealed class DispatchEmojiAnnotationHandler : IRequestHandler<DispatchEmo
             return;
         }
 
-        var envelope = new InternalEnvelope
+        var chat = new ChatEnvelope
         {
-            ChatEnvelope = new ChatEnvelope
+            EmojiAnnotation = new EmojiAnnotation
             {
-                EmojiAnnotation = new EmojiAnnotation
-                {
-                    MessageId = ByteString.CopyFrom(request.MessageId.ToByteArray()),
-                    Emoji = request.Emoji,
-                    SentTimestampUtc = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTime(request.SentTimestampUtc),
-                    PublicKeyHash = ByteString.CopyFrom(new byte[32])
-                }
+                MessageId = ByteString.CopyFrom(request.MessageId.ToByteArray()),
+                Emoji = request.Emoji,
+                SentTimestampUtc = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTime(request.SentTimestampUtc)
             }
         };
-        var envelopeBytes = envelope.ToByteArray();
 
         var tasks = request.RecipientPeerIds
             .Where(pid => pid != request.SenderPeerId)
-            .Select(pid => ProcessRecipientAsync(pid, envelopeBytes, cancellationToken));
+            .Select(pid => ProcessRecipientAsync(pid, chat, cancellationToken));
 
         await Task.WhenAll(tasks);
     }
 
-    private async Task ProcessRecipientAsync(PeerId recipientId, byte[] envelopeBytes, CancellationToken cancellationToken)
+    private async Task ProcessRecipientAsync(PeerId recipientId, ChatEnvelope chat, CancellationToken cancellationToken)
     {
         try
         {
-            var recipientKeyHash = recipientId.Value.ToByteArray();
-            var enqueueResult = await _mediator.Send(
-                new EnqueueOpaqueMessageCommand(
-                    recipientKeyHash,
-                    envelopeBytes),
-                cancellationToken);
-
-            if (!enqueueResult.Accepted)
-            {
-                _logger.LogError("Failed to enqueue emoji annotation for recipient {RecipientId}", recipientId);
-                return;
-            }
-
-            await _mediator.Send(new Percolator.Application.Network.TryRelayNextForPeerCommand(recipientId), cancellationToken);
+            byte[]? pkh = await _keyStore.GetPublicKeyHashByPeerIdAsync(recipientId, cancellationToken);
+            await _sender.SendChatEnvelopeToPeerAsync(chat, new RecipientRoute(recipientId, pkh), cancellationToken);
         }
         catch (Exception ex)
         {

@@ -3,22 +3,27 @@ using MediatR;
 using Microsoft.Extensions.Logging;
 using Percolator.Application.Network;
 using Percolator.Contracts;
-using Percolator.MessageQueue.Commands;
-using Percolator.Network;
 using PeerId = Percolator.Identity.PeerId;
+using Percolator.Identity;
 
 namespace Percolator.Application.Apps.Chat;
 
 public sealed class DispatchReadReceiptHandler : IRequestHandler<DispatchReadReceiptCommand>
 {
     private readonly IMediator _mediator;
+    private readonly IRemoteEnvelopeSender _sender;
+    private readonly IPeerPublicSigningKeyStore _keyStore;
     private readonly ILogger<DispatchReadReceiptHandler> _logger;
 
     public DispatchReadReceiptHandler(
         IMediator mediator,
+        IRemoteEnvelopeSender sender,
+        IPeerPublicSigningKeyStore keyStore,
         ILogger<DispatchReadReceiptHandler> logger)
     {
         _mediator = mediator ?? throw new ArgumentNullException(nameof(mediator));
+        _sender = sender ?? throw new ArgumentNullException(nameof(sender));
+        _keyStore = keyStore ?? throw new ArgumentNullException(nameof(keyStore));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -31,45 +36,28 @@ public sealed class DispatchReadReceiptHandler : IRequestHandler<DispatchReadRec
             return;
         }
 
-        var envelope = new InternalEnvelope
+        var chat = new ChatEnvelope
         {
-            ChatEnvelope = new ChatEnvelope
+            ReadReceipt = new ReadReceipt
             {
-                ReadReceipt = new ReadReceipt
-                {
-                    MessageId = ByteString.CopyFrom(request.MessageId.ToByteArray()),
-                    SentTimestampUtc = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTime(request.SentTimestampUtc),
-                    PublicKeyHash = ByteString.CopyFrom(new byte[32])
-                }
+                MessageId = ByteString.CopyFrom(request.MessageId.ToByteArray()),
+                SentTimestampUtc = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTime(request.SentTimestampUtc)
             }
         };
-        var envelopeBytes = envelope.ToByteArray();
 
         var tasks = request.RecipientPeerIds
             .Where(pid => pid != request.SenderPeerId)
-            .Select(pid => ProcessRecipientAsync(pid, envelopeBytes, cancellationToken));
+            .Select(pid => ProcessRecipientAsync(pid, chat, cancellationToken));
 
         await Task.WhenAll(tasks);
     }
 
-    private async Task ProcessRecipientAsync(PeerId recipientId, byte[] envelopeBytes, CancellationToken cancellationToken)
+    private async Task ProcessRecipientAsync(PeerId recipientId, ChatEnvelope chat, CancellationToken cancellationToken)
     {
         try
         {
-            var recipientKeyHash = recipientId.Value.ToByteArray();
-            var enqueueResult = await _mediator.Send(
-                new EnqueueOpaqueMessageCommand(
-                    recipientKeyHash,
-                    envelopeBytes),
-                cancellationToken);
-
-            if (!enqueueResult.Accepted)
-            {
-                _logger.LogError("Failed to enqueue read receipt for recipient {RecipientId}", recipientId);
-                return;
-            }
-
-            await _mediator.Send(new Percolator.Application.Network.TryRelayNextForPeerCommand(recipientId), cancellationToken);
+            byte[]? pkh = await _keyStore.GetPublicKeyHashByPeerIdAsync(recipientId, cancellationToken);
+            await _sender.SendChatEnvelopeToPeerAsync(chat, new RecipientRoute(recipientId, pkh), cancellationToken);
         }
         catch (Exception ex)
         {

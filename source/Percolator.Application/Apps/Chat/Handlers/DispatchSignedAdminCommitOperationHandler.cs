@@ -2,21 +2,26 @@ using Google.Protobuf;
 using MediatR;
 using Microsoft.Extensions.Logging;
 using Percolator.Contracts;
-using Percolator.MessageQueue.Commands;
 using System;
 using System.Linq;
 using PeerId = Percolator.Identity.PeerId;
+using Percolator.Application.Network;
+using Percolator.Identity;
 
 namespace Percolator.Application.Apps.Chat;
 
 public sealed class DispatchSignedAdminCommitOperationHandler : IRequestHandler<DispatchSignedAdminCommitOperationCommand>
 {
     private readonly IMediator _mediator;
+    private readonly IRemoteEnvelopeSender _sender;
+    private readonly IPeerPublicSigningKeyStore _keyStore;
     private readonly ILogger<DispatchSignedAdminCommitOperationHandler> _logger;
 
-    public DispatchSignedAdminCommitOperationHandler(IMediator mediator, ILogger<DispatchSignedAdminCommitOperationHandler> logger)
+    public DispatchSignedAdminCommitOperationHandler(IMediator mediator, IRemoteEnvelopeSender sender, IPeerPublicSigningKeyStore keyStore, ILogger<DispatchSignedAdminCommitOperationHandler> logger)
     {
         _mediator = mediator ?? throw new ArgumentNullException(nameof(mediator));
+        _sender = sender ?? throw new ArgumentNullException(nameof(sender));
+        _keyStore = keyStore ?? throw new ArgumentNullException(nameof(keyStore));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -40,39 +45,25 @@ public sealed class DispatchSignedAdminCommitOperationHandler : IRequestHandler<
         if (request.AdminSequenceNumber.HasValue)
             commit.AdminSequenceNumber = request.AdminSequenceNumber.Value;
 
-        var envelope = new InternalEnvelope
+        var chat = new ChatEnvelope
         {
-            ChatEnvelope = new ChatEnvelope
-            {
-                Version = 1,
-                AdminCommitOperation = commit
-            }
+            Version = 1,
+            AdminCommitOperation = commit
         };
-        var bytes = envelope.ToByteArray();
 
         var tasks = request.RecipientPeerIds
             .Where(pid => pid != request.SenderPeerId)
-            .Select(pid => ProcessRecipientAsync(pid, bytes, cancellationToken));
+            .Select(pid => ProcessRecipientAsync(pid, chat, cancellationToken));
 
         await Task.WhenAll(tasks);
     }
 
-    private async Task ProcessRecipientAsync(PeerId recipientId, byte[] envelopeBytes, CancellationToken cancellationToken)
+    private async Task ProcessRecipientAsync(PeerId recipientId, ChatEnvelope chat, CancellationToken cancellationToken)
     {
         try
         {
-            var recipientKeyHash = recipientId.Value.ToByteArray();
-            var enqueueResult = await _mediator.Send(
-                new EnqueueOpaqueMessageCommand(recipientKeyHash, envelopeBytes),
-                cancellationToken);
-
-            if (!enqueueResult.Accepted)
-            {
-                _logger.LogError("Failed to enqueue signed admin commit op for recipient {RecipientId}", recipientId);
-                return;
-            }
-
-            await _mediator.Send(new Percolator.Application.Network.TryRelayNextForPeerCommand(recipientId), cancellationToken);
+            byte[]? pkh = await _keyStore.GetPublicKeyHashByPeerIdAsync(recipientId, cancellationToken);
+            await _sender.SendChatEnvelopeToPeerAsync(chat, new RecipientRoute(recipientId, pkh), cancellationToken);
         }
         catch (Exception ex)
         {

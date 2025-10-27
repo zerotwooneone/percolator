@@ -7,10 +7,8 @@ using MediatR;
 using Microsoft.Extensions.Logging;
 using Percolator.Application.Identity;
 using Percolator.Contracts;
-using Percolator.MessageQueue.Commands;
 using Percolator.Network;
-using Percolator.Application.Sessions;
-using Percolator.Cryptography;
+using Percolator.Application.Network;
 
 namespace Percolator.Application.Apps.Chat
 {
@@ -24,8 +22,7 @@ namespace Percolator.Application.Apps.Chat
         private readonly ActiveIdentityContext _activeIdentityContext;
         private readonly IRecipientPkhResolver _pkhResolver;
         private readonly IActingAdminResolver _actingAdminResolver;
-        private readonly IDirectSessionManager _sessions;
-        private readonly IDirectSessionRepository _directSessionRepository;
+        private readonly IRemoteEnvelopeSender _sender;
 
         public KeyVersionAdoptedHandler(
             ILogger<KeyVersionAdoptedHandler> logger,
@@ -34,8 +31,7 @@ namespace Percolator.Application.Apps.Chat
             ActiveIdentityContext activeIdentityContext,
             IRecipientPkhResolver pkhResolver,
             IActingAdminResolver actingAdminResolver,
-            IDirectSessionManager sessions,
-            IDirectSessionRepository directSessionRepository)
+            IRemoteEnvelopeSender sender)
         {
             _logger = logger;
             _mediator = mediator;
@@ -43,8 +39,7 @@ namespace Percolator.Application.Apps.Chat
             _activeIdentityContext = activeIdentityContext;
             _pkhResolver = pkhResolver;
             _actingAdminResolver = actingAdminResolver;
-            _sessions = sessions;
-            _directSessionRepository = directSessionRepository;
+            _sender = sender;
         }
 
         public async Task Handle(KeyVersionAdoptedNotification notification, CancellationToken ct)
@@ -67,8 +62,7 @@ namespace Percolator.Application.Apps.Chat
                     Signature = ByteString.CopyFrom(signature.Value)
                 }
             };
-            var internalEnvelope = new InternalEnvelope { ChatEnvelope = chat };
-            var messageBytes = internalEnvelope.ToByteArray();
+            // Chat envelope ready for dispatch
 
             var adminPeerId = await _actingAdminResolver.GetActingAdminPeerIdAsync(notification.ConversationId, ct);
             if (adminPeerId is null)
@@ -77,21 +71,8 @@ namespace Percolator.Application.Apps.Chat
                 return;
             }
             var pkh = await _pkhResolver.GetActivePkhAsync(adminPeerId.Value, ct);
-            if (pkh is null)
-            {
-                _logger.LogWarning("[KeyVersionAdoptedHandler] No active PKH for acting admin {PeerId}; skipping.", adminPeerId.Value);
-                return;
-            }
-            // Encrypt the envelope for the acting admin using the host↔recipient session
-            var selfIdentityId = _activeIdentityContext.Identity?.SelfIdentityId ?? 0;
-            var direct = await _directSessionRepository.GetByRemotePeerIdAsync(new PeerId(adminPeerId.Value), selfIdentityId);
-            if (direct is null)
-            {
-                _logger.LogWarning("[KeyVersionAdoptedHandler] No direct session with acting admin {PeerId}; skipping.", adminPeerId.Value);
-                return;
-            }
-            var dr = await _sessions.EncryptMessageAsync(new SessionId(direct.SessionId.Value), new Plaintext(messageBytes));
-            await _mediator.Send(new EnqueueOpaqueMessageCommand(pkh, dr.Value), ct);
+            var route = new RecipientRoute(new Percolator.Identity.PeerId(adminPeerId.Value), pkh);
+            await _sender.SendChatEnvelopeToPeerAsync(chat, route, ct);
         }
 
         private static byte[] BuildCanonicalConfirmationPayload(byte[] conversationGuid, uint keyVersion, byte[] adopterPublicKey)

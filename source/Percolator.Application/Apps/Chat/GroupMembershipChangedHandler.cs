@@ -12,10 +12,9 @@ using Google.Protobuf;
 using Percolator.Contracts;
 using System.Security.Cryptography;
 using Percolator.Cryptography;
-using Percolator.MessageQueue.Commands;
+using Percolator.Application.Network;
+using Percolator.Identity;
 using ChatMembershipChanged = Percolator.Chat.App.GroupMembershipChangedNotification;
-using Percolator.Application.Sessions;
-using Percolator.Network;
 
 namespace Percolator.Application.Apps.Chat
 {
@@ -33,8 +32,7 @@ namespace Percolator.Application.Apps.Chat
         private readonly IGroupManagerStateStore _gmStateStore;
         private readonly IAtRestKeyProvider _atRestKeyProvider;
         private readonly IRecipientPkhResolver _recipientPkhResolver;
-        private readonly IDirectSessionManager _sessions;
-        private readonly IDirectSessionRepository _directSessionRepository;
+        private readonly IRemoteEnvelopeSender _sender;
 
         public GroupMembershipChangedHandler(
             ILogger<GroupMembershipChangedHandler> logger,
@@ -48,8 +46,7 @@ namespace Percolator.Application.Apps.Chat
             IGroupManagerStateStore gmStateStore,
             IAtRestKeyProvider atRestKeyProvider,
             IRecipientPkhResolver recipientPkhResolver,
-            IDirectSessionManager sessions,
-            IDirectSessionRepository directSessionRepository)
+            IRemoteEnvelopeSender sender)
         {
             _logger = logger;
             _conversationRepository = conversationRepository;
@@ -62,8 +59,7 @@ namespace Percolator.Application.Apps.Chat
             _gmStateStore = gmStateStore;
             _atRestKeyProvider = atRestKeyProvider;
             _recipientPkhResolver = recipientPkhResolver;
-            _sessions = sessions;
-            _directSessionRepository = directSessionRepository;
+            _sender = sender;
         }
 
         public async Task Handle(ChatMembershipChanged notification, CancellationToken cancellationToken)
@@ -150,26 +146,11 @@ namespace Percolator.Application.Apps.Chat
                     EncryptedGroupKeyForRecipient = ByteString.CopyFrom(buf)
                 };
                 var chat = new ChatEnvelope { KeyDistribution = payload };
-                var envelope = new InternalEnvelope { ChatEnvelope = chat };
-                var messageBlob = envelope.ToByteArray();
 
-                // Resolve recipient PKH and enqueue
+                // Resolve recipient PKH (for host-enqueue fallback)
                 var pkh = await _recipientPkhResolver.GetActivePkhAsync(participant.Value, cancellationToken);
-                if (pkh is null)
-                {
-                    _logger.LogWarning("[GroupMembershipChanged] No PKH for recipient {Participant}", participant.Value);
-                    continue;
-                }
-                // Resolve recipient session with host and encrypt the envelope into a DR message for the recipient
-                var recipientPeerId = new Percolator.Network.PeerId(participant.Value);
-                var direct = await _directSessionRepository.GetByRemotePeerIdAsync(recipientPeerId, selfIdentityId.Value);
-                if (direct is null)
-                {
-                    _logger.LogWarning("[GroupMembershipChanged] No direct session with recipient {Participant}; skipping enqueue.", participant.Value);
-                    continue;
-                }
-                var dr = await _sessions.EncryptMessageAsync(new SessionId(direct.SessionId.Value), new Percolator.Cryptography.Plaintext(messageBlob));
-                await _mediator.Send(new EnqueueOpaqueMessageCommand(pkh, dr.Value), cancellationToken);
+                var identityPeerId = new Percolator.Identity.PeerId(participant.Value);
+                await _sender.SendChatEnvelopeToPeerAsync(chat, new RecipientRoute(identityPeerId, pkh), cancellationToken);
             }
         }
     }
