@@ -14,18 +14,15 @@ public sealed class PostTextMessageHandler : IRequestHandler<PostTextMessageComm
     private readonly IConversationResolver _resolver;
     private readonly IChatMessageWriter _writer;
     private readonly IPublisher _publisher;
-    private readonly ISelfIdentityProvider _selfIdentityProvider;
 
     public PostTextMessageHandler(
-        IConversationResolver resolver, 
+        IConversationResolver resolver,
         IChatMessageWriter writer,
-        IPublisher publisher,
-        ISelfIdentityProvider selfIdentityProvider)
+        IPublisher publisher)
     {
         _resolver = resolver ?? throw new ArgumentNullException(nameof(resolver));
         _writer = writer ?? throw new ArgumentNullException(nameof(writer));
         _publisher = publisher ?? throw new ArgumentNullException(nameof(publisher));
-        _selfIdentityProvider = selfIdentityProvider ?? throw new ArgumentNullException(nameof(selfIdentityProvider));
     }
 
     public async Task Handle(PostTextMessageCommand request, CancellationToken cancellationToken)
@@ -44,25 +41,17 @@ public sealed class PostTextMessageHandler : IRequestHandler<PostTextMessageComm
             request.MessageId,
             request.SentTimestampUtc,
             cancellationToken);
-
-        // Get the peer ID for the self identity
-        var peerId = await _selfIdentityProvider.GetPeerIdAsync(resolution.SelfIdentityId, cancellationToken);
-        var selfParticipantId = new ParticipantId(peerId);
         
         // Publish an event that the message was posted
         await _publisher.Publish(new TextMessagePostedEvent(
-            resolution.Conversation.Id.Value, // Convert ConversationId to Guid
-            request.MessageId.Value,          // Convert MessageId to Guid
-            resolution.SelfIdentityId,        // Keep as int for the event
+            resolution.Conversation.Id.Value,
+            request.MessageId.Value,
+            resolution.SelfIdentityId,
             resolution.Conversation.Participants
-                .Where(p => p != selfParticipantId)  // Exclude self from recipients
-                .Select(p => p.Value.ToByteArray()   // Convert Guid to byte[]
-                    .Take(8)                        // Take first 8 bytes
-                    .Select((b, i) => (long)b << (i * 8))  // Convert each byte to long with proper bit shifting
-                    .Aggregate((x, y) => x | y))    // Combine bytes into a single long
-                .ToArray(),
+                .Select(p => p.Value)
+                .ToList(),
             request.Content,
-            request.SentTimestampUtc.UtcDateTime),   // Convert DateTimeOffset to DateTime
+            request.SentTimestampUtc.UtcDateTime),
             cancellationToken);
     }
 }

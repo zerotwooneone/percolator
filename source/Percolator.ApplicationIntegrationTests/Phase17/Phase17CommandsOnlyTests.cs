@@ -207,6 +207,64 @@ public class Phase17CommandsOnlyTests : IntegrationTestBase
             participantIds.Should().Contain(charliePeer!.Id.Value);
         }
 
+        // 9a) Alice sends a message, assert Bob and Charlie receive it
+        {
+            var messageId = new Percolator.Chat.ValueObjects.MessageId(Guid.NewGuid());
+            var content = "hello from 9a";
+            var sentAt = DateTimeOffset.UtcNow;
+
+            // Post message on Alice by group lookup
+            await aliceMed.Send(new Percolator.Chat.App.Commands.PostTextMessageCommand(
+                Percolator.Chat.App.ConversationLookupKey.ForGroup(groupGuid),
+                messageId,
+                content,
+                sentAt));
+
+            // Pump deliveries via host
+            await bobMed.Send(new DhtPingCommand("host"));
+            await charlieMed.Send(new DhtPingCommand("host"));
+
+            // Assert Bob has the message
+            using (var bobScope = bob.Services.CreateScope())
+            {
+                var bobCtx = bobScope.ServiceProvider.GetRequiredService<ActiveIdentityContext>();
+                var bobRepo = bobScope.ServiceProvider.GetRequiredService<Percolator.Chat.IConversationRepository>();
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                bool ok = false;
+                while (sw.ElapsedMilliseconds < 5000 && !ok)
+                {
+                    var convo = await bobRepo.GetByGroupGuidAsync(groupGuid, bobCtx.Identity!.SelfIdentityId);
+                    if (convo is not null && convo.Messages.Any(m => m.Id.Value == messageId.Value && m.Content == content))
+                    {
+                        ok = true;
+                        break;
+                    }
+                    await Task.Delay(50);
+                }
+                ok.Should().BeTrue("Bob should persist the group message posted by Alice");
+            }
+
+            // Assert Charlie has the message
+            using (var charlieScope = charlie.Services.CreateScope())
+            {
+                var chCtx = charlieScope.ServiceProvider.GetRequiredService<ActiveIdentityContext>();
+                var chRepo = charlieScope.ServiceProvider.GetRequiredService<Percolator.Chat.IConversationRepository>();
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                bool ok = false;
+                while (sw.ElapsedMilliseconds < 5000 && !ok)
+                {
+                    var convo = await chRepo.GetByGroupGuidAsync(groupGuid, chCtx.Identity!.SelfIdentityId);
+                    if (convo is not null && convo.Messages.Any(m => m.Id.Value == messageId.Value && m.Content == content))
+                    {
+                        ok = true;
+                        break;
+                    }
+                    await Task.Delay(50);
+                }
+                ok.Should().BeTrue("Charlie should persist the group message posted by Alice");
+            }
+        }
+
         // 10) Alice grants Bob admin
         using (var aliceScope2 = alice.Services.CreateScope())
         {

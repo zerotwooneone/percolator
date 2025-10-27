@@ -10,14 +10,12 @@ public sealed class PostEmojiAnnotationHandler : IRequestHandler<PostEmojiAnnota
     private readonly IConversationResolver _resolver;
     private readonly IChatMessageWriter _writer;
     private readonly IPublisher _publisher;
-    private readonly ISelfIdentityProvider _selfIdentityProvider;
 
-    public PostEmojiAnnotationHandler(IConversationResolver resolver, IChatMessageWriter writer, IPublisher publisher, ISelfIdentityProvider selfIdentityProvider)
+    public PostEmojiAnnotationHandler(IConversationResolver resolver, IChatMessageWriter writer, IPublisher publisher)
     {
         _resolver = resolver;
         _writer = writer;
         _publisher = publisher;
-        _selfIdentityProvider = selfIdentityProvider;
     }
 
     public async Task Handle(PostEmojiAnnotationCommand request, CancellationToken cancellationToken)
@@ -32,17 +30,12 @@ public sealed class PostEmojiAnnotationHandler : IRequestHandler<PostEmojiAnnota
             request.SentTimestampUtc,
             cancellationToken);
 
-        // Compute recipients (exclude self)
-        var peerId = await _selfIdentityProvider.GetPeerIdAsync(resolution.SelfIdentityId, cancellationToken);
-        var selfParticipantId = new ParticipantId(peerId);
-
         await _publisher.Publish(new EmojiAnnotationPostedEvent(
             resolution.Conversation.Id.Value,
             request.MessageId.Value,
             request.Emoji,
             resolution.SelfIdentityId,
             resolution.Conversation.Participants
-                .Where(p => p != selfParticipantId)
                 .Select(p => p.Value.ToByteArray()
                     .Take(8)
                     .Select((b, i) => (long)b << (i * 8))

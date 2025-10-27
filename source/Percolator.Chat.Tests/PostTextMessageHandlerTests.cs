@@ -17,7 +17,6 @@ public class PostTextMessageHandlerTests
     private Mock<IConversationResolver> _resolver = null!;
     private Mock<IChatMessageWriter> _writer = null!;
     private Mock<IPublisher> _publisher = null!;
-    private Mock<ISelfIdentityProvider> _selfIdentityProvider = null!;
 
     [SetUp]
     public void SetUp()
@@ -25,7 +24,6 @@ public class PostTextMessageHandlerTests
         _resolver = new Mock<IConversationResolver>(MockBehavior.Strict);
         _writer = new Mock<IChatMessageWriter>(MockBehavior.Strict);
         _publisher = new Mock<IPublisher>(MockBehavior.Loose);
-        _selfIdentityProvider = new Mock<ISelfIdentityProvider>(MockBehavior.Strict);
     }
 
     private static Conversation MakeConversation()
@@ -66,15 +64,10 @@ public class PostTextMessageHandlerTests
             .Setup(p => p.Publish(It.IsAny<object>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
-        _selfIdentityProvider
-            .Setup(p => p.GetPeerIdAsync(selfIdentityId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Guid.NewGuid());
-
         var handler = new PostTextMessageHandler(
             _resolver.Object, 
             _writer.Object,
-            _publisher.Object,
-            _selfIdentityProvider.Object);
+            _publisher.Object);
         var cmd = new PostTextMessageCommand(lookup, messageId, content, sentAt);
 
         // Act
@@ -95,8 +88,7 @@ public class PostTextMessageHandlerTests
         var handler = new PostTextMessageHandler(
             _resolver.Object, 
             _writer.Object,
-            _publisher.Object,
-            _selfIdentityProvider.Object);
+            _publisher.Object);
         var cmd = new PostTextMessageCommand(lookup, messageId, "x", DateTimeOffset.UtcNow);
 
         // Act

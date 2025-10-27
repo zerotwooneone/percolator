@@ -10,29 +10,20 @@ public sealed class PostSignedAdminCommitOperationHandler : IRequestHandler<Post
 {
     private readonly IConversationResolver _resolver;
     private readonly IPublisher _publisher;
-    private readonly ISelfIdentityProvider _selfIdentityProvider;
 
     public PostSignedAdminCommitOperationHandler(
         IConversationResolver resolver,
-        IPublisher publisher,
-        ISelfIdentityProvider selfIdentityProvider)
+        IPublisher publisher)
     {
         _resolver = resolver;
         _publisher = publisher;
-        _selfIdentityProvider = selfIdentityProvider;
     }
 
     public async Task Handle(PostSignedAdminCommitOperationCommand request, CancellationToken cancellationToken)
     {
         request.Lookup.EnsureExactlyOne();
         var resolution = await _resolver.ResolveAsync(request.Lookup, cancellationToken);
-
-        // Compute recipients (exclude self)
-        var peerId = await _selfIdentityProvider.GetPeerIdAsync(resolution.SelfIdentityId, cancellationToken);
-        var selfParticipantId = new ParticipantId(peerId);
-
         var recipientIds = resolution.Conversation.Participants
-            .Where(p => p != selfParticipantId)
             .Select(p => p.Value.ToByteArray()
                 .Take(8)
                 .Select((b, i) => (long)b << (i * 8))

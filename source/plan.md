@@ -176,6 +176,7 @@ These commands allow a new integration test to: (1) set names; (2) DHT probe; (3
     6) Charlie probes DHT and discovers both Alice and Bob (verify both PKHs are visible).
     7) Charlie initiates opaque handshakes to Alice and Bob via MQ (Host relays with `RelayOpaqueEnvelope`), both complete; verify `DirectSession` rows exist Charlie↔Alice and Charlie↔Bob.
     9) Alice creates a new group chat with members Bob and Charlie; assert repository state (conversation created, participants = {Alice, Bob, Charlie}).
+      9a) Alice sends a message, assert Bob and Charlie receive it.
     10) Alice grants Bob admin rights for that group; assert admin set contains Alice and Bob.
     11) Bob removes Charlie from the group; assert participants = {Alice, Bob} and Charlie no longer has access to future group messages.
     12) Bob sends a group message; assert only Alice receives/sees it (Charlie must NOT receive it).

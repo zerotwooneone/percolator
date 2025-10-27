@@ -18,14 +18,12 @@ public class PostSignedAdminCommitOperationHandlerTests
 {
     private Mock<IConversationResolver> _resolver = null!;
     private Mock<IPublisher> _publisher = null!;
-    private Mock<ISelfIdentityProvider> _selfIdentity = null!;
 
     [SetUp]
     public void SetUp()
     {
         _resolver = new Mock<IConversationResolver>(MockBehavior.Strict);
         _publisher = new Mock<IPublisher>(MockBehavior.Loose);
-        _selfIdentity = new Mock<ISelfIdentityProvider>(MockBehavior.Strict);
     }
 
     private static Conversation MakeConversation()
@@ -52,15 +50,11 @@ public class PostSignedAdminCommitOperationHandlerTests
             .Setup(r => r.ResolveAsync(lookup, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ConversationResolution(convo, selfIdentityId));
 
-        _selfIdentity
-            .Setup(s => s.GetPeerIdAsync(selfIdentityId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(convo.Participants.First().Value);
-
         _publisher
             .Setup(p => p.Publish(It.IsAny<SignedAdminCommitOperationPostedEvent>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
-        var handler = new PostSignedAdminCommitOperationHandler(_resolver.Object, _publisher.Object, _selfIdentity.Object);
+        var handler = new PostSignedAdminCommitOperationHandler(_resolver.Object, _publisher.Object);
         var cmd = new PostSignedAdminCommitOperationCommand(
             lookup,
             opId,

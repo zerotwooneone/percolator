@@ -8,23 +8,23 @@ namespace Percolator.Chat.Events
     {
         public Guid ConversationId { get; }
         public Guid MessageId { get; }
-        public long SenderId { get; }
-        public IReadOnlyList<long> RecipientIds { get; }
+        public int SenderSelfIdentityId { get; }
+        public IReadOnlyList<Guid> RecipientPeerIds { get; }
         public string Content { get; }
         public DateTime SentTimestampUtc { get; }
 
         public TextMessagePostedEvent(
             Guid conversationId,
             Guid messageId,
-            long senderId,
-            IReadOnlyList<long> recipientIds,
+            int senderSelfIdentityId,
+            IReadOnlyList<Guid> recipientPeerIds,
             string content,
             DateTime sentTimestampUtc)
         {
             ConversationId = conversationId;
             MessageId = messageId;
-            SenderId = senderId;
-            RecipientIds = recipientIds ?? throw new ArgumentNullException(nameof(recipientIds));
+            SenderSelfIdentityId = senderSelfIdentityId;
+            RecipientPeerIds = recipientPeerIds ?? throw new ArgumentNullException(nameof(recipientPeerIds));
             Content = content ?? throw new ArgumentNullException(nameof(content));
             SentTimestampUtc = sentTimestampUtc;
         }

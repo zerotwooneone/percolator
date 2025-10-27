@@ -17,7 +17,6 @@ public class PostReadReceiptHandlerTests
     private Mock<IConversationResolver> _resolver = null!;
     private Mock<IChatMessageWriter> _writer = null!;
     private Mock<IPublisher> _publisher = null!;
-    private Mock<ISelfIdentityProvider> _selfIdentity = null!;
 
     [SetUp]
     public void SetUp()
@@ -25,7 +24,6 @@ public class PostReadReceiptHandlerTests
         _resolver = new Mock<IConversationResolver>(MockBehavior.Strict);
         _writer = new Mock<IChatMessageWriter>(MockBehavior.Strict);
         _publisher = new Mock<IPublisher>(MockBehavior.Loose);
-        _selfIdentity = new Mock<ISelfIdentityProvider>(MockBehavior.Strict);
     }
 
     private static Conversation MakeConversation()
@@ -56,16 +54,11 @@ public class PostReadReceiptHandlerTests
             .Setup(w => w.AddReadReceiptAsync(convo.Id, selfIdentityId, messageId, sentAt, It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
-        // Mock self identity provider to return a peerId matching one of participants for exclusion
-        _selfIdentity
-            .Setup(s => s.GetPeerIdAsync(selfIdentityId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(convo.Participants.First().Value);
-
         _publisher
             .Setup(p => p.Publish(It.IsAny<ReadReceiptPostedEvent>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
-        var handler = new PostReadReceiptHandler(_resolver.Object, _writer.Object, _publisher.Object, _selfIdentity.Object);
+        var handler = new PostReadReceiptHandler(_resolver.Object, _writer.Object, _publisher.Object);
         var cmd = new PostReadReceiptCommand(lookup, messageId, sentAt);
 
         // Act
@@ -83,7 +76,7 @@ public class PostReadReceiptHandlerTests
         // Arrange
         var lookup = new ConversationLookupKey(Guid.NewGuid(), new Pkh(new byte[32]), null);
         var messageId = new MessageId(Guid.NewGuid());
-        var handler = new PostReadReceiptHandler(_resolver.Object, _writer.Object, _publisher.Object, _selfIdentity.Object);
+        var handler = new PostReadReceiptHandler(_resolver.Object, _writer.Object, _publisher.Object);
         var cmd = new PostReadReceiptCommand(lookup, messageId, DateTimeOffset.UtcNow);
 
         // Act

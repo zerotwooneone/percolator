@@ -10,14 +10,12 @@ public sealed class PostDeliveredReceiptHandler : IRequestHandler<PostDeliveredR
     private readonly IConversationResolver _resolver;
     private readonly IChatMessageWriter _writer;
     private readonly IPublisher _publisher;
-    private readonly ISelfIdentityProvider _selfIdentityProvider;
 
-    public PostDeliveredReceiptHandler(IConversationResolver resolver, IChatMessageWriter writer, IPublisher publisher, ISelfIdentityProvider selfIdentityProvider)
+    public PostDeliveredReceiptHandler(IConversationResolver resolver, IChatMessageWriter writer, IPublisher publisher)
     {
         _resolver = resolver;
         _writer = writer;
         _publisher = publisher;
-        _selfIdentityProvider = selfIdentityProvider;
     }
 
     public async Task Handle(PostDeliveredReceiptCommand request, CancellationToken cancellationToken)
@@ -31,16 +29,11 @@ public sealed class PostDeliveredReceiptHandler : IRequestHandler<PostDeliveredR
             request.DeliveredAtUtc,
             cancellationToken);
 
-        // Compute recipients (exclude self)
-        var peerId = await _selfIdentityProvider.GetPeerIdAsync(resolution.SelfIdentityId, cancellationToken);
-        var selfParticipantId = new ParticipantId(peerId);
-
         await _publisher.Publish(new DeliveredReceiptPostedEvent(
             resolution.Conversation.Id.Value,
             request.MessageId.Value,
             resolution.SelfIdentityId,
             resolution.Conversation.Participants
-                .Where(p => p != selfParticipantId)
                 .Select(p => p.Value.ToByteArray()
                     .Take(8)
                     .Select((b, i) => (long)b << (i * 8))
