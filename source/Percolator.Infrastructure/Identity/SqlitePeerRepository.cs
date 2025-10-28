@@ -24,6 +24,27 @@ public class SqlitePeerRepository : IPeerRepository
         await _context.SaveChangesAsync();
     }
 
+    public async Task AddOrUpdateAsync(Peer peer)
+    {
+        var existingById = await _context.Peers.FirstOrDefaultAsync(p => p.Id == peer.Id);
+        if (existingById is not null)
+        {
+            existingById.Name = peer.Name;
+            await _context.SaveChangesAsync();
+            return;
+        }
+
+        var existingByName = await _context.Peers.FirstOrDefaultAsync(p => p.Name == peer.Name);
+        if (existingByName is not null)
+        {
+            // Keep existing record; no change in Id. Optionally could reconcile IDs if business rules allow.
+            return;
+        }
+
+        _context.Peers.Add(peer);
+        await _context.SaveChangesAsync();
+    }
+
     public async Task RemoveAsync(PeerId peerId)
     {
         var peer = await _context.Peers.FindAsync(peerId);

@@ -262,6 +262,10 @@ public class PercolatorDbContext : DbContext
                 .HasForeignKey(x => x.PeerId)
                 .IsRequired()
                 .OnDelete(DeleteBehavior.Cascade);
+
+            // Optional relay peer id
+            entity.Property(e => e.RelayPeerId)
+                .HasConversion(v => v == null ? (Guid?)null : v.Value, v => v == null ? null : new PeerId(v.Value));
         });
 
         // DirectSessionConversation mapping

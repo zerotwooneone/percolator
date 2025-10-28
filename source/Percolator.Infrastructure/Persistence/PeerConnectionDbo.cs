@@ -17,4 +17,9 @@ public class PeerConnectionDbo
     public ICollection<GrpcEndPointDbo> GrpcEndPoints { get; set; } = new List<GrpcEndPointDbo>();
 
     public ICollection<TlsCertificateDbo> TlsCertificates { get; set; } = new List<TlsCertificateDbo>();
+
+    /// <summary>
+    /// Optional relay peer used to reach this peer (e.g., Host MQ).
+    /// </summary>
+    public PeerId? RelayPeerId { get; set; }
 }

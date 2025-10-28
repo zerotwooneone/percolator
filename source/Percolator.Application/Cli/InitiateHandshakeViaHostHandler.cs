@@ -10,6 +10,7 @@ using Percolator.Application.Sessions;
 using Percolator.Contracts;
 using Percolator.Cryptography;
 using Percolator.Identity;
+using Percolator.Network;
 
 namespace Percolator.Application.Cli;
 
@@ -20,6 +21,8 @@ public sealed class InitiateHandshakeViaHostHandler : IRequestHandler<InitiateHa
     private readonly IDirectSessionManager _sessionManager;
     private readonly IMessageTransportService _transport;
     private readonly IPeerRepository _peerRepository;
+    private readonly IPeerPublicSigningKeyStore _peerPublicSigningKeyStore;
+    private readonly IPeerConnectionRepository _peerConnectionRepository;
     private readonly IMediator _mediator;
 
     public InitiateHandshakeViaHostHandler(
@@ -28,6 +31,8 @@ public sealed class InitiateHandshakeViaHostHandler : IRequestHandler<InitiateHa
         IDirectSessionManager sessionManager,
         IMessageTransportService transport,
         IPeerRepository peerRepository,
+        IPeerPublicSigningKeyStore peerPublicSigningKeyStore,
+        IPeerConnectionRepository peerConnectionRepository,
         IMediator mediator)
     {
         _logger = logger;
@@ -35,6 +40,8 @@ public sealed class InitiateHandshakeViaHostHandler : IRequestHandler<InitiateHa
         _sessionManager = sessionManager;
         _transport = transport;
         _peerRepository = peerRepository;
+        _peerPublicSigningKeyStore = peerPublicSigningKeyStore;
+        _peerConnectionRepository = peerConnectionRepository;
         _mediator = mediator;
     }
 
@@ -48,6 +55,38 @@ public sealed class InitiateHandshakeViaHostHandler : IRequestHandler<InitiateHa
             ?? throw new InvalidOperationException($"Peer '{request.HostPeerName}' not found.");
         var hostSession = await _conversationService.GetExistingDirectSessionAsync(hostPeer)
             ?? throw new InvalidOperationException("Direct session to Host not found. Establish a session before initiating handshake.");
+
+        // Ensure a Peer exists for the target (by PKH) and record a relay connection via Host
+        var targetPeerId = await _peerPublicSigningKeyStore.GetPeerIdByPublicKeyHashAsync(request.TargetPublicKeyHash, cancellationToken);
+        var displayName = request.PeerName ?? Convert.ToHexString(request.TargetPublicKeyHash);
+        Percolator.Identity.Peer peer;
+        if (targetPeerId is null)
+        {
+            peer = new Percolator.Identity.Peer(Percolator.Identity.PeerId.NewId(), displayName);
+        }
+        else
+        {
+            peer = await _peerRepository.GetByIdAsync(targetPeerId) ?? new Percolator.Identity.Peer(targetPeerId, displayName);
+            // Preserve existing name if present, otherwise set display name
+            if (string.IsNullOrWhiteSpace(peer.Name))
+            {
+                peer = new Percolator.Identity.Peer(peer.Id, displayName);
+            }
+        }
+        await _peerRepository.AddOrUpdateAsync(peer);
+
+        // Upsert PeerConnection with Host as RelayPeerId
+        var netPeerId = new Percolator.Network.PeerId(peer.Id.Value);
+        var connection = await _peerConnectionRepository.GetByIdAsync(netPeerId);
+        if (connection is null)
+        {
+            connection = new PeerConnection(netPeerId, identitySigningKey: null, grpcEndPoints: Array.Empty<GrpcEndPoint>(), tlsCertificates: Array.Empty<TlsCertificate>(), lastSeen: DateTimeOffset.UtcNow, relayPeerId: new Percolator.Network.PeerId(hostPeer.Id.Value));
+        }
+        else
+        {
+            connection.SetRelayPeer(new Percolator.Network.PeerId(hostPeer.Id.Value));
+        }
+        await _peerConnectionRepository.SaveAsync(connection);
 
         // 1) Request pre-key bundle for target PKH from Host
         var getReq = new InternalEnvelope

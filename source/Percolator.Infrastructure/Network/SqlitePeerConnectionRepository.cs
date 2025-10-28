@@ -45,6 +45,7 @@ public class SqlitePeerConnectionRepository : IPeerConnectionRepository
                 PeerId = idPeerId,
                 DirectMessagePublicKey = peerConnection.IdentitySigningKey?.Value,
                 LastSeen = peerConnection.LastSeen,
+                RelayPeerId = peerConnection.RelayPeerId is null ? null : new IdPeerId(peerConnection.RelayPeerId.Value),
                 GrpcEndPoints = peerConnection.GrpcEndPoints
                     .Select(e => new GrpcEndPointDbo
                     {
@@ -68,6 +69,7 @@ public class SqlitePeerConnectionRepository : IPeerConnectionRepository
         {
             existing.DirectMessagePublicKey = peerConnection.IdentitySigningKey?.Value;
             existing.LastSeen = peerConnection.LastSeen;
+            existing.RelayPeerId = peerConnection.RelayPeerId is null ? null : new IdPeerId(peerConnection.RelayPeerId.Value);
 
             // Replace children for simplicity
             _context.GrpcEndPoints.RemoveRange(existing.GrpcEndPoints);
@@ -149,6 +151,7 @@ public class SqlitePeerConnectionRepository : IPeerConnectionRepository
             .Select(c => new TlsCertificate(c.RawData))
             .ToList();
 
-        return new PeerConnection(netPeerId, dm, endpoints, certs, dbo.LastSeen);
+        var relay = dbo.RelayPeerId is null ? (NetPeerId?)null : new NetPeerId(dbo.RelayPeerId.Value);
+        return new PeerConnection(netPeerId, dm, endpoints, certs, dbo.LastSeen, relay);
     }
 }

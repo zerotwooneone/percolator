@@ -32,18 +32,25 @@ public class PeerConnection
     /// </summary>
     public DateTimeOffset LastSeen { get; private set; }
 
+    /// <summary>
+    /// When using a relay, indicates which peer (e.g., Host) should be used to reach this peer.
+    /// </summary>
+    public PeerId? RelayPeerId { get; private set; }
+
     public PeerConnection(
         PeerId id,
         DirectMessagePublicKey? identitySigningKey,
         IEnumerable<GrpcEndPoint> grpcEndPoints,
         IReadOnlyList<TlsCertificate> tlsCertificates,
-        DateTimeOffset lastSeen)
+        DateTimeOffset lastSeen,
+        PeerId? relayPeerId = null)
     {
         Id = id;
         IdentitySigningKey = identitySigningKey;
         _grpcEndPoints = grpcEndPoints.ToList();
         TlsCertificates = tlsCertificates;
         LastSeen = lastSeen;
+        RelayPeerId = relayPeerId;
     }
     
     //todo: add methods to modify the peer connection
@@ -62,5 +69,10 @@ public class PeerConnection
     public void SetDirectMessagePublicKey(DirectMessagePublicKey directMessagePublicKey)
     {
         IdentitySigningKey = directMessagePublicKey;
+    }
+
+    public void SetRelayPeer(PeerId relayPeerId)
+    {
+        RelayPeerId = relayPeerId;
     }
 }
