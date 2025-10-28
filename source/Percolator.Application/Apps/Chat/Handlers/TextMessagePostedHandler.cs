@@ -38,8 +38,10 @@ namespace Percolator.Application.Apps.Chat.Handlers
 
             try
             {
-                // Map recipient and sender peer IDs directly (already Guids)
+                // Map recipient and sender peer IDs directly (already Guids) and exclude self
+                var selfPeerGuid = _active.Identity!.Id;
                 var recipientIds = notification.RecipientPeerIds
+                    .Where(g => g != selfPeerGuid)
                     .Select(g => new PeerId(g))
                     .ToList();
 

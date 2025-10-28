@@ -12,6 +12,7 @@ using Percolator.Application.Identity;
 using Percolator.Application.Network;
 using Percolator.Application.Sessions;
 using Percolator.Contracts;
+using System.Collections.Concurrent;
 
 namespace Percolator.ApplicationIntegrationTests.Phase17;
 
@@ -50,10 +51,10 @@ public class Phase17CommandsOnlyTests : IntegrationTestBase
         }
     }
 
-    private sealed class LoopbackTransport : IMessageTransportService
+    private sealed class ClientToHostTransport : IMessageTransportService
     {
         private readonly IServiceProvider _hostProvider;
-        public LoopbackTransport(IServiceProvider hostProvider) => _hostProvider = hostProvider;
+        public ClientToHostTransport(IServiceProvider hostProvider) => _hostProvider = hostProvider;
 
         public async Task<DeliverOpaqueMessageResponse> SendMessageAsync(
             Percolator.Identity.PeerId recipientPeerId,
@@ -64,7 +65,46 @@ public class Phase17CommandsOnlyTests : IntegrationTestBase
             var mediator = _hostProvider.GetRequiredService<IMediator>();
             var cmd = new DeliverOpaqueMessageCommand { PayloadBytes = message.Value };
             var result = await mediator.Send(cmd, cancellationToken);
-            var response = new DeliverOpaqueMessageResponse();
+            var response = new DeliverOpaqueMessageResponse { Version = 1 };
+            if (result.ResponsePayloadBytes is not null)
+            {
+                response.ResponsePayload = new DeliverOpaqueMessageResponse.Types.Payload
+                {
+                    Version = 1,
+                    ResponsePayload = ByteString.CopyFrom(result.ResponsePayloadBytes)
+                };
+            }
+            return response;
+        }
+    }
+
+    private sealed class HostRelayTransport : IMessageTransportService
+    {
+        private readonly ConcurrentDictionary<Guid, IServiceProvider> _routes;
+        public HostRelayTransport(ConcurrentDictionary<Guid, IServiceProvider> routes)
+        {
+            _routes = routes;
+        }
+
+        public void AddRoute(Guid peerId, IServiceProvider provider)
+        {
+            _routes[peerId] = provider;
+        }
+
+        public async Task<DeliverOpaqueMessageResponse> SendMessageAsync(
+            Percolator.Identity.PeerId recipientPeerId,
+            Percolator.Network.DirectSessionId directSessionId,
+            Percolator.Cryptography.SessionRatchetMessage message,
+            CancellationToken cancellationToken = default)
+        {
+            if (!_routes.TryGetValue(recipientPeerId.Value, out var provider))
+            {
+                throw new InvalidOperationException($"No route registered for recipient {recipientPeerId.Value}");
+            }
+            var mediator = provider.GetRequiredService<IMediator>();
+            var cmd = new DeliverOpaqueMessageCommand { PayloadBytes = message.Value };
+            var result = await mediator.Send(cmd, cancellationToken);
+            var response = new DeliverOpaqueMessageResponse { Version = 1 };
             if (result.ResponsePayloadBytes is not null)
             {
                 response.ResponsePayload = new DeliverOpaqueMessageResponse.Types.Payload
@@ -91,29 +131,59 @@ public class Phase17CommandsOnlyTests : IntegrationTestBase
     {
         // Build Host
         var hostPort = GetAvailablePort();
-        using var host = await CreateAndInitializeHostAsync(hostPort, "P17-Host", identityName: "host");
+        var hostRoutes = new ConcurrentDictionary<Guid, IServiceProvider>();
+        using var host = await CreateAndInitializeHostAsync(hostPort, "P17-Host", identityName: "host", additionalServiceRegistration: services =>
+        {
+            services.RemoveAll<IMessageTransportService>();
+            services.AddSingleton<IMessageTransportService>(sp => new HostRelayTransport(hostRoutes));
+        });
 
         // Build Alice with loopback to Host
         var alicePort = GetAvailablePort();
         using var alice = await CreateAndInitializeHostAsync(alicePort, "P17-Alice", identityName: "alice", additionalServiceRegistration: services =>
         {
             services.Replace(ServiceDescriptor.Singleton<IGrpcSessionService>(sp => new GrpcSessionLoopback(host.Services)));
-            services.Replace(ServiceDescriptor.Singleton<IMessageTransportService>(sp => new LoopbackTransport(host.Services)));
+            services.RemoveAll<IMessageTransportService>();
+            services.AddSingleton<IMessageTransportService>(sp => new ClientToHostTransport(host.Services));
         });
         // Build Bob with loopback to Host
         var bobPort = GetAvailablePort();
         using var bob = await CreateAndInitializeHostAsync(bobPort, "P17-Bob", identityName: "bob", additionalServiceRegistration: services =>
         {
             services.Replace(ServiceDescriptor.Singleton<IGrpcSessionService>(sp => new GrpcSessionLoopback(host.Services)));
-            services.Replace(ServiceDescriptor.Singleton<IMessageTransportService>(sp => new LoopbackTransport(host.Services)));
+            services.RemoveAll<IMessageTransportService>();
+            services.AddSingleton<IMessageTransportService>(sp => new ClientToHostTransport(host.Services));
         });
         // Build Charlie with loopback to Host
         var charliePort = GetAvailablePort();
         using var charlie = await CreateAndInitializeHostAsync(charliePort, "P17-Charlie", identityName: "charlie", additionalServiceRegistration: services =>
         {
             services.Replace(ServiceDescriptor.Singleton<IGrpcSessionService>(sp => new GrpcSessionLoopback(host.Services)));
-            services.Replace(ServiceDescriptor.Singleton<IMessageTransportService>(sp => new LoopbackTransport(host.Services)));
+            services.RemoveAll<IMessageTransportService>();
+            services.AddSingleton<IMessageTransportService>(sp => new ClientToHostTransport(host.Services));
         });
+
+        // Configure host relay routes: map recipient PeerId -> recipient service provider
+        Guid alicePeerGuid, bobPeerGuid, charliePeerGuid;
+        using (var s = alice.Services.CreateScope())
+        {
+            var ctx = s.ServiceProvider.GetRequiredService<ActiveIdentityContext>();
+            alicePeerGuid = ctx.Identity!.Id;
+        }
+        using (var s = bob.Services.CreateScope())
+        {
+            var ctx = s.ServiceProvider.GetRequiredService<ActiveIdentityContext>();
+            bobPeerGuid = ctx.Identity!.Id;
+        }
+        using (var s = charlie.Services.CreateScope())
+        {
+            var ctx = s.ServiceProvider.GetRequiredService<ActiveIdentityContext>();
+            charliePeerGuid = ctx.Identity!.Id;
+        }
+        var hostTransport = (HostRelayTransport)host.Services.GetRequiredService<IMessageTransportService>();
+        hostTransport.AddRoute(alicePeerGuid, alice.Services);
+        hostTransport.AddRoute(bobPeerGuid, bob.Services);
+        hostTransport.AddRoute(charliePeerGuid, charlie.Services);
 
         var hostEp = new DnsEndPoint("localhost", hostPort);
 
