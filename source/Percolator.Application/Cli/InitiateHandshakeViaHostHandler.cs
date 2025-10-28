@@ -1,4 +1,5 @@
 using System;
+using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
 using Google.Protobuf;
@@ -135,6 +136,11 @@ public sealed class InitiateHandshakeViaHostHandler : IRequestHandler<InitiateHa
             ? new Guid(bundleMsg.SignedPreKeyId.ToByteArray())
             : throw new InvalidOperationException("SignedPreKeyId missing in bundle.");
         Guid? oneTimePreKeyId = bundleMsg.HasOneTimeKeyId ? new Guid(bundleMsg.OneTimeKeyId.ToByteArray()) : (Guid?)null;
+
+        // Bind PKH -> PeerId on initiator now that we have the remote SPKI, then upsert peer
+        var pkh = SHA256.HashData(remoteIdentitySpki);
+        await _peerPublicSigningKeyStore.ActivateIfChangedAsync(peer.Id, remoteIdentitySpki, pkh, DateTimeOffset.UtcNow, cancellationToken);
+        await _peerRepository.AddOrUpdateAsync(peer);
 
         await _mediator.Send(new ComposeAndEnqueueInitiatorHelloCommand(
             RecipientPublicKeyHash: request.TargetPublicKeyHash,

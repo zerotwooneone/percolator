@@ -36,6 +36,8 @@ namespace Percolator.Application.Network.Handshake
         private readonly IDirectSessionRepository _directRepo;
         private readonly IDirectSessionManager _sessionManager;
         private readonly ActiveIdentityContext _active;
+        private readonly IPeerRepository _peerRepository;
+        private readonly IPeerConnectionRepository _peerConnectionRepository;
         private readonly IMediator _mediator;
 
         public HandleHandshakeInitiatorHelloHandler(
@@ -46,6 +48,8 @@ namespace Percolator.Application.Network.Handshake
             IDirectSessionRepository directRepo,
             IDirectSessionManager sessionManager,
             ActiveIdentityContext active,
+            IPeerRepository peerRepository,
+            IPeerConnectionRepository peerConnectionRepository,
             IMediator mediator)
         {
             _logger = logger;
@@ -55,6 +59,8 @@ namespace Percolator.Application.Network.Handshake
             _directRepo = directRepo;
             _sessionManager = sessionManager;
             _active = active;
+            _peerRepository = peerRepository;
+            _peerConnectionRepository = peerConnectionRepository;
             _mediator = mediator;
         }
 
@@ -63,13 +69,10 @@ namespace Percolator.Application.Network.Handshake
             var remoteIdentityKey = new RatchetIdentityKey(request.InitiatorIdentityKeySpki);
             var remoteEphemeralKey = new RatchetEphemeralKey(request.InitiatorEphemeralKeySpki);
 
-            // PKH mapping idempotent activation
+            // Prepare PKH from initiator identity key; defer persistence until handshake success
             var spki = remoteIdentityKey.Value;
             var pkh = SHA256.HashData(spki);
-            if (request.RemotePeerId is not null)
-            {
-                await _pkhStore.ActivateIfChangedAsync(request.RemotePeerId, spki, pkh, DateTimeOffset.UtcNow, cancellationToken);
-            }
+            var resolvedRemotePeerId = request.RemotePeerId ?? IdentityPeerId.NewId();
 
             // Pop matching bundle by ids when provided
             var signedPreKeyId = request.SignedPreKeyId;
@@ -115,6 +118,18 @@ namespace Percolator.Application.Network.Handshake
                 hs.SharedSecret);
 
             _logger.LogInformation("Responder established session {SessionId}", directSessionId.Value);
+
+            // Persist identity artifacts only after successful session establishment
+            var displayName = Convert.ToHexString(pkh);
+            await _peerRepository.AddOrUpdateAsync(new Peer(resolvedRemotePeerId, displayName));
+            await _pkhStore.ActivateIfChangedAsync(resolvedRemotePeerId, spki, pkh, DateTimeOffset.UtcNow, cancellationToken);
+            var netPeerId = new NetworkPeerId(resolvedRemotePeerId.Value);
+            var existingConn = await _peerConnectionRepository.GetByIdAsync(netPeerId);
+            if (existingConn is null)
+            {
+                var conn = new PeerConnection(netPeerId, identitySigningKey: null, grpcEndPoints: Array.Empty<GrpcEndPoint>(), tlsCertificates: Array.Empty<TlsCertificate>(), lastSeen: DateTimeOffset.UtcNow);
+                await _peerConnectionRepository.SaveAsync(conn);
+            }
 
             // If initiator included an encrypted initial payload, decrypt it via the newly established session
             if (request.EncryptedPayload is not null && request.EncryptedPayload.Length > 0)
