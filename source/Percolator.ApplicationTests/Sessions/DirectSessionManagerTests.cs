@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Linq;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -36,6 +37,7 @@ public class DirectSessionManagerTests
     private DirectSessionManager _aliceSessionManager = null!;
     private X3dhKeys _aliceKeys = null!;
     private Identity.PeerId _alicePeerId = null!;
+    private Mock<IRatchetKeySessionLookup> _aliceRatchetLookup = null!;
     
     // Bob (responder) components
     private Mock<IDoubleRatchetSessionStore> _bobSessionStore = null!;
@@ -44,6 +46,7 @@ public class DirectSessionManagerTests
     private DirectSessionManager _bobSessionManager = null!;
     private X3dhKeys _bobKeys = null!;
     private Identity.PeerId _bobPeerId = null!;
+    private Mock<IRatchetKeySessionLookup> _bobRatchetLookup = null!;
     
     // Shared components
     private SessionId _sessionId = null!;
@@ -76,14 +79,14 @@ public class DirectSessionManagerTests
         // Set properties directly
         _aliceIdentityContext.Identity = new IdentityRecord(_alicePeerId.Value, "Alice") { SelfIdentityId = 1 };
         _aliceIdentityContext.Keys = _aliceKeys;
-        var aliceRatchetLookup = new Mock<IRatchetKeySessionLookup>();
+        _aliceRatchetLookup = new Mock<IRatchetKeySessionLookup>(MockBehavior.Loose);
         _aliceSessionManager = new DirectSessionManager(
             _aliceSessionStore.Object,
             _aliceIdentityContext,
             _loggerFactory.CreateLogger<DirectSessionManager>(),
             _loggerFactory,
             _options,
-            aliceRatchetLookup.Object,
+            _aliceRatchetLookup.Object,
             new FakePreHandshakeStore());
             
         // Generate Bob's identity and keys
@@ -100,14 +103,14 @@ public class DirectSessionManagerTests
         // Set properties directly
         _bobIdentityContext.Identity = new IdentityRecord(_bobPeerId.Value, "Bob") { SelfIdentityId = 1 };
         _bobIdentityContext.Keys = _bobKeys;
-        var bobRatchetLookup = new Mock<IRatchetKeySessionLookup>();
+        _bobRatchetLookup = new Mock<IRatchetKeySessionLookup>(MockBehavior.Loose);
         _bobSessionManager = new DirectSessionManager(
             _bobSessionStore.Object,
             _bobIdentityContext,
             _loggerFactory.CreateLogger<DirectSessionManager>(),
             _loggerFactory,
             _options,
-            bobRatchetLookup.Object,
+            _bobRatchetLookup.Object,
             new FakePreHandshakeStore());
             
         // Setup session store mocks to use class-level state variables
@@ -147,40 +150,58 @@ public class DirectSessionManagerTests
     {
         // Arrange
         await EstablishSessionsAsync();
-        
+
         // Record initial states
         var aliceInitialRootKey = _aliceStates[_sessionId].RootKey;
         var bobInitialRootKey = _bobStates[_sessionId].RootKey;
-        
+
         // Act: Alice encrypts a message for Bob
         var aliceMessage = new Plaintext(System.Text.Encoding.UTF8.GetBytes("Hello from Alice!"));
         var aliceEncrypted = await _aliceSessionManager.EncryptMessageAsync(_sessionId, aliceMessage);
-        
+
         // Act: Bob receives Alice's message
         var bobDecrypted = await _bobSessionManager.ReceiveMessageAsync(_sessionId, aliceEncrypted);
-        
+
         // Assert
         Assert.That(bobDecrypted, Is.Not.Null, "Message should be decrypted successfully");
-        Assert.That(System.Text.Encoding.UTF8.GetString(bobDecrypted.Value), Is.EqualTo("Hello from Alice!"), 
+        Assert.That(System.Text.Encoding.UTF8.GetString(bobDecrypted!.Value), Is.EqualTo("Hello from Alice!"),
             "Decrypted message should match original plaintext");
-            
+
+        // Verify Bob upserts ratchet lookup with exact header key
+        var aliceHeader = aliceEncrypted.GetHeader();
+        _bobRatchetLookup.Verify(l => l.UpsertAsync(
+            It.Is<Percolator.Network.DirectSessionId>(d => d.Value == _sessionId.Value),
+            It.IsAny<int>(),
+            It.Is<PreKey>(k => k.Value.SequenceEqual(aliceHeader.PreKey.Value)),
+            It.IsAny<DateTimeOffset>(),
+            It.IsAny<CancellationToken>()), Times.Once);
+
         // Act: Bob sends a response to Alice
         var bobMessage = new Plaintext(System.Text.Encoding.UTF8.GetBytes("Hello from Bob!"));
         var bobEncrypted = await _bobSessionManager.EncryptMessageAsync(_sessionId, bobMessage);
-        
+
         // Act: Alice receives Bob's message
         var aliceDecrypted = await _aliceSessionManager.ReceiveMessageAsync(_sessionId, bobEncrypted);
-        
+
         // Assert
         Assert.That(aliceDecrypted, Is.Not.Null, "Message should be decrypted successfully");
-        Assert.That(System.Text.Encoding.UTF8.GetString(aliceDecrypted.Value), Is.EqualTo("Hello from Bob!"), 
+        Assert.That(System.Text.Encoding.UTF8.GetString(aliceDecrypted!.Value), Is.EqualTo("Hello from Bob!"),
             "Decrypted message should match original plaintext");
-            
-        Assert.That(_aliceStates[_sessionId].RootKey, Is.Not.EqualTo(aliceInitialRootKey), 
+
+        // Verify Alice upserts ratchet lookup with exact header key
+        var bobHeader = bobEncrypted.GetHeader();
+        _aliceRatchetLookup.Verify(l => l.UpsertAsync(
+            It.Is<Percolator.Network.DirectSessionId>(d => d.Value == _sessionId.Value),
+            It.IsAny<int>(),
+            It.Is<PreKey>(k => k.Value.SequenceEqual(bobHeader.PreKey.Value)),
+            It.IsAny<DateTimeOffset>(),
+            It.IsAny<CancellationToken>()), Times.Once);
+
+        Assert.That(_aliceStates[_sessionId].RootKey, Is.Not.EqualTo(aliceInitialRootKey),
             "Alice's root key should have changed after ratchet");
-        Assert.That(_bobStates[_sessionId].RootKey, Is.Not.EqualTo(bobInitialRootKey), 
+        Assert.That(_bobStates[_sessionId].RootKey, Is.Not.EqualTo(bobInitialRootKey),
             "Bob's root key should have changed after ratchet");
-        
+
         // Looser checks: ensure counters advanced and previous chain lengths are valid (implementation-flexible)
         Assert.That(_aliceStates[_sessionId].SendingCounter, Is.GreaterThanOrEqualTo(1));
         Assert.That(_bobStates[_sessionId].ReceivingCounter, Is.GreaterThanOrEqualTo(1));
