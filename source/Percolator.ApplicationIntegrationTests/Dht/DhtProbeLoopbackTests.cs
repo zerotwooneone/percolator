@@ -204,7 +204,7 @@ public class DhtProbeLoopbackTests : IntegrationTestBase
             clientPeerRepo.Setup(r => r.GetByNameAsync(It.IsAny<string>()))
                 .ReturnsAsync((string name) => new Peer(new Percolator.Identity.PeerId(Guid.NewGuid()), name));
             services.Replace(ServiceDescriptor.Singleton<IPeerRepository>(sp => clientPeerRepo.Object));
-            services.AddMediatR(cfg => cfg.RegisterServicesFromAssembly(typeof(Percolator.Dht.Messages.FindNodeRequest).Assembly));
+            services.AddMediatR(cfg => cfg.RegisterServicesFromAssembly(typeof(Percolator.Dht.Messages.PingRequest).Assembly));
             services.AddSingleton<IMessageTransportService>(sp => new LoopbackTransport(async req =>
             {
                 var handler = serverHost.Services.GetRequiredService<IRequestHandler<DeliverOpaqueMessageCommand, DeliverOpaqueMessageResult>>();

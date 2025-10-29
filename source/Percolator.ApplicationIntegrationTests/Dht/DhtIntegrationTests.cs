@@ -171,19 +171,20 @@ public class DhtIntegrationTests : IntegrationTestBase
             // Fast-path lookup resolves our header key
             var ratchetLookup2 = new Moq.Mock<IRatchetKeySessionLookup>();
             var preKey2 = new PreKey(headerKey2);
-            ratchetLookup2.Setup(l => l.TryResolveAsync(It.Is<PreKey>(p => p.Value.SequenceEqual(headerKey2)), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            ratchetLookup2
+                .Setup(l => l.TryResolveAsync(It.Is<PreKey>(p => p.Value.SequenceEqual(headerKey2)), It.IsAny<int>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new DirectSessionId(sessionId.Value));
-            ratchetLookup2.Setup(l => l.UpsertAsync(It.IsAny<DirectSessionId>(), It.IsAny<int>(), It.IsAny<PreKey>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            ratchetLookup2
+                .Setup(l => l.UpsertAsync(It.IsAny<DirectSessionId>(), It.IsAny<int>(), It.IsAny<PreKey>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
                 .Returns(Task.CompletedTask);
             services.AddSingleton<IRatchetKeySessionLookup>(ratchetLookup2.Object);
             services.AddMediatR(cfg =>
-                cfg.RegisterServicesFromAssembly(typeof(Percolator.Dht.Messages.FindNodeRequest).Assembly));
+                cfg.RegisterServicesFromAssembly(typeof(Percolator.Dht.Messages.PingRequest).Assembly));
         });
 
-        var messageService = host.Services.GetRequiredService<PercolatorMessageService>();
-
-        var remotePeerId = new Percolator.Identity.PeerId(Guid.NewGuid());
+        // Prepare inputs for this test scope
         var targetId = new NodeId(SHA256.HashData(Guid.NewGuid().ToByteArray()));
+        var remotePeerId = new Percolator.Identity.PeerId(Guid.NewGuid());
 
         // 1. Mock the session manager to decrypt the message
         var findNodeRequestProto = new Contracts.FindNodeRequest { TargetPeerId = ByteString.CopyFrom(targetId.Value) };
@@ -227,7 +228,8 @@ public class DhtIntegrationTests : IntegrationTestBase
             Payload = ByteString.CopyFrom(ratchetPayload2.ToByteArray())
         };
 
-        // Act
+        // Resolve service and Act
+        var messageService = host.Services.GetRequiredService<PercolatorMessageService>();
         var response = await messageService.DeliverOpaqueMessage(request, new TestServerCallContext());
 
         // Assert

@@ -10,7 +10,7 @@ using NUnit.Framework;
 using Percolator.Application.Network;
 using Percolator.Contracts;
 using Percolator.Dht;
-using DhtMessages = Percolator.Dht.Messages;
+using Moq;
 using Percolator.Chat.App.Commands;
 using Percolator.Application.Apps.Chat;
 using Google.Protobuf.WellKnownTypes;
@@ -23,7 +23,8 @@ namespace Percolator.ApplicationTests.Network
         {
             var logger = NullLogger<ProcessInternalEnvelopeHandler>.Instance;
             var adminOps = new Moq.Mock<Percolator.Chat.App.IAdminOperations>(MockBehavior.Loose);
-            return new ProcessInternalEnvelopeHandler(logger, mediatorMock.Object, adminOps.Object);
+            var dht = new Moq.Mock<Percolator.Dht.IDhtService>(MockBehavior.Loose);
+            return new ProcessInternalEnvelopeHandler(logger, mediatorMock.Object, adminOps.Object, dht.Object);
         }
 
         [Test]
@@ -216,12 +217,14 @@ namespace Percolator.ApplicationTests.Network
         [Test]
         public async Task FindNodeRequest_zero_results_returns_empty_list()
         {
-            var mediator = new Mock<IMediator>(MockBehavior.Strict);
-            mediator
-                .Setup(m => m.Send(It.IsAny<DhtMessages.FindNodeRequest>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync(new DhtMessages.FindNodeResponse(Array.Empty<Percolator.Dht.DhtNode>()));
+            var mediator = new Mock<IMediator>(MockBehavior.Loose);
+            var dht = new Mock<Percolator.Dht.IDhtService>(MockBehavior.Strict);
+            dht.Setup(s => s.GetClosestNodesAsync(It.IsAny<NodeId>(), It.IsAny<CancellationToken>()))
+               .ReturnsAsync(Array.Empty<Percolator.Dht.DhtNode>());
 
-            var sut = CreateSut(mediator);
+            var logger = NullLogger<ProcessInternalEnvelopeHandler>.Instance;
+            var adminOps = new Moq.Mock<Percolator.Chat.App.IAdminOperations>(MockBehavior.Loose);
+            var sut = new ProcessInternalEnvelopeHandler(logger, mediator.Object, adminOps.Object, dht.Object);
 
             var contractsReq = new Percolator.Contracts.FindNodeRequest
             {
@@ -233,13 +236,13 @@ namespace Percolator.ApplicationTests.Network
             var result = await sut.Handle(new ProcessInternalEnvelopeCommand(env, ctx), CancellationToken.None);
             Assert.That(result, Is.Not.Null);
             Assert.That(result!.DhtEnvelope.FindNodeResponse.CloserPeers.Count, Is.EqualTo(0));
-            mediator.VerifyAll();
+            dht.VerifyAll();
         }
 
         [Test]
         public async Task FindNodeRequest_multiple_results_maps_all()
         {
-            var mediator = new Mock<IMediator>(MockBehavior.Strict);
+            var mediator = new Mock<IMediator>(MockBehavior.Loose);
             var nodeId = new NodeId(new byte[32]);
             var dns1 = new DnsEndPoint("10.0.0.1", 1234);
             var dns2 = new DnsEndPoint("10.0.0.2", 5678);
@@ -248,11 +251,13 @@ namespace Percolator.ApplicationTests.Network
                 new Percolator.Dht.DhtNode(nodeId, dns1, DateTimeOffset.UtcNow),
                 new Percolator.Dht.DhtNode(nodeId, dns2, DateTimeOffset.UtcNow)
             };
-            mediator
-                .Setup(m => m.Send(It.IsAny<DhtMessages.FindNodeRequest>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync(new DhtMessages.FindNodeResponse(nodes));
+            var dht = new Mock<Percolator.Dht.IDhtService>(MockBehavior.Strict);
+            dht.Setup(s => s.GetClosestNodesAsync(It.IsAny<NodeId>(), It.IsAny<CancellationToken>()))
+               .ReturnsAsync(nodes);
 
-            var sut = CreateSut(mediator);
+            var logger = NullLogger<ProcessInternalEnvelopeHandler>.Instance;
+            var adminOps = new Moq.Mock<Percolator.Chat.App.IAdminOperations>(MockBehavior.Loose);
+            var sut = new ProcessInternalEnvelopeHandler(logger, mediator.Object, adminOps.Object, dht.Object);
             var contractsReq = new Percolator.Contracts.FindNodeRequest
             {
                 TargetPeerId = Google.Protobuf.ByteString.CopyFrom(new byte[32])
@@ -301,7 +306,7 @@ namespace Percolator.ApplicationTests.Network
             var mediator = new Mock<IMediator>(MockBehavior.Loose);
             var logger = NullLogger<ProcessInternalEnvelopeHandler>.Instance;
             var adminOps = new Mock<Percolator.Chat.App.IAdminOperations>(MockBehavior.Loose);
-            var sut = new ProcessInternalEnvelopeHandler(logger, mediator.Object, adminOps.Object);
+            var sut = new ProcessInternalEnvelopeHandler(logger, mediator.Object, adminOps.Object, new Mock<Percolator.Dht.IDhtService>().Object);
 
             var groupId = Guid.NewGuid();
             var opId = Guid.NewGuid();
@@ -473,18 +478,20 @@ namespace Percolator.ApplicationTests.Network
         [Test]
         public async Task FindNodeRequest_returns_response_envelope()
         {
-            var mediator = new Mock<IMediator>(MockBehavior.Strict);
+            var mediator = new Mock<IMediator>(MockBehavior.Loose);
 
-            // Arrange DHT mediator response
+            // Arrange DHT service response
             var nodeId = new NodeId(new byte[] { 1,2,3,4, 5,6,7,8, 9,10,11,12, 13,14,15,16,
                                                   17,18,19,20, 21,22,23,24, 25,26,27,28, 29,30,31,32 });
             var dns = new DnsEndPoint("127.0.0.1", 3030);
             var dhtNode = new DhtNode(nodeId, dns, DateTimeOffset.UtcNow);
-            mediator
-                .Setup(m => m.Send(It.IsAny<DhtMessages.FindNodeRequest>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync(new DhtMessages.FindNodeResponse(new[] { dhtNode }));
+            var dht = new Mock<Percolator.Dht.IDhtService>(MockBehavior.Strict);
+            dht.Setup(s => s.GetClosestNodesAsync(It.IsAny<NodeId>(), It.IsAny<CancellationToken>()))
+               .ReturnsAsync(new[] { dhtNode });
 
-            var sut = CreateSut(mediator);
+            var logger = NullLogger<ProcessInternalEnvelopeHandler>.Instance;
+            var adminOps = new Mock<Percolator.Chat.App.IAdminOperations>(MockBehavior.Loose);
+            var sut = new ProcessInternalEnvelopeHandler(logger, mediator.Object, adminOps.Object, dht.Object);
 
             // Build InternalEnvelope with DHT FindNodeRequest
             var contractsReq = new Percolator.Contracts.FindNodeRequest
@@ -507,7 +514,7 @@ namespace Percolator.ApplicationTests.Network
             Assert.That(result.DhtEnvelope.FindNodeResponse.CloserPeers.Count, Is.EqualTo(1));
             Assert.That(result.DhtEnvelope.FindNodeResponse.CloserPeers[0].Address, Is.EqualTo("127.0.0.1:3030"));
 
-            mediator.VerifyAll();
+            dht.VerifyAll();
         }
 
         [Test]

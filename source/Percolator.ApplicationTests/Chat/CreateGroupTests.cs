@@ -109,7 +109,7 @@ internal sealed class NoopSender : IRemoteEnvelopeSender
         public async Task ProcessInternalEnvelope_CreateGroup_DispatchesCommandWithSelfIdentity()
         {
             var mediator = new CapturingMediator();
-            var handler = new ProcessInternalEnvelopeHandler(new NullLogger<ProcessInternalEnvelopeHandler>(), mediator, new Moq.Mock<Percolator.Chat.App.IAdminOperations>().Object);
+            var handler = new ProcessInternalEnvelopeHandler(new NullLogger<ProcessInternalEnvelopeHandler>(), mediator, new Moq.Mock<Percolator.Chat.App.IAdminOperations>().Object, new Moq.Mock<Percolator.Dht.IDhtService>().Object);
 
             var groupGuid = Guid.NewGuid();
             var cg = new CreateGroup

@@ -5,7 +5,6 @@ using System.Threading.Tasks;
 using MediatR;
 using Microsoft.Extensions.Logging;
 using Percolator.Contracts;
-using Percolator.Dht.Messages;
 using Percolator.Dht;
 using Google.Protobuf;
 using Percolator.MessageQueue.Commands;
@@ -32,11 +31,13 @@ namespace Percolator.Application.Network
         private readonly ILogger<ProcessInternalEnvelopeHandler> _logger;
         private readonly IMediator _mediator;
         private readonly Percolator.Chat.App.IAdminOperations _adminOps;
-        public ProcessInternalEnvelopeHandler(ILogger<ProcessInternalEnvelopeHandler> logger, IMediator mediator, Percolator.Chat.App.IAdminOperations adminOps)
+        private readonly IDhtService _dhtService;
+        public ProcessInternalEnvelopeHandler(ILogger<ProcessInternalEnvelopeHandler> logger, IMediator mediator, Percolator.Chat.App.IAdminOperations adminOps, IDhtService dhtService)
         {
             _logger = logger;
             _mediator = mediator;
             _adminOps = adminOps;
+            _dhtService = dhtService;
         }
 
         public async Task<InternalEnvelope?> Handle(ProcessInternalEnvelopeCommand request, CancellationToken cancellationToken)
@@ -57,11 +58,10 @@ namespace Percolator.Application.Network
                         return null;
                     }
 
-                    var req = new Percolator.Dht.Messages.FindNodeRequest(new NodeId(target));
-                    var resp = await _mediator.Send(req, cancellationToken);
+                    var closerNodes = await _dhtService.GetClosestNodesAsync(new NodeId(target), cancellationToken);
 
                     var outResp = new Contracts.FindNodeResponse();
-                    foreach (var node in resp.CloserNodes)
+                    foreach (var node in closerNodes)
                     {
                         outResp.CloserPeers.Add(new Contracts.NodeInfo
                         {
