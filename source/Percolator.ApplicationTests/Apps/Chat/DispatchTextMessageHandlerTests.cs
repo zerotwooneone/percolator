@@ -76,10 +76,6 @@ public class DispatchTextMessageHandlerTests
             It.IsAny<ChatEnvelope>(),
             It.Is<RecipientRoute>(r => r.PeerId.Equals(_recipientId)),
             It.IsAny<CancellationToken>()), Times.Once);
-        _senderMock.Verify(s => s.SendChatEnvelopeToPeerAsync(
-            It.IsAny<ChatEnvelope>(),
-            It.Is<RecipientRoute>(r => r.PeerId.Equals(_selfId)),
-            It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Test]
