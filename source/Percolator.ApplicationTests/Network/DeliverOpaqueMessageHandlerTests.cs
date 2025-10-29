@@ -63,9 +63,9 @@ namespace Percolator.ApplicationTests.Network;
                 .ReturnsAsync(new PeerConnection(new Percolator.Network.PeerId(remotePeerId), identityKey, new[] { endpoint }, Array.Empty<TlsCertificate>(), DateTimeOffset.UtcNow));
             peerRepo.Setup(p => p.SaveAsync(It.IsAny<PeerConnection>())).Returns(Task.CompletedTask);
 
-            // Orchestrator: expect relay processor to be invoked
-            mediator.Setup(m => m.Send(It.IsAny<Percolator.Application.Network.Handshake.ProcessRelayedOpaquePayloadCommand>(), It.IsAny<CancellationToken>()))
-                .Returns(Task.CompletedTask);
+            // Orchestrator: envelope is delegated to ProcessInternalEnvelopeCommand
+            mediator.Setup(m => m.Send(It.IsAny<ProcessInternalEnvelopeCommand>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((InternalEnvelope?)null);
 
             // Allow index upsert after decrypt
             ratchetLookup.Setup(l => l.UpsertAsync(new DirectSessionId(sessionId), It.IsAny<int>(), It.IsAny<PreKey>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
@@ -75,14 +75,14 @@ namespace Percolator.ApplicationTests.Network;
             var result = await handler.Handle(cmd, CancellationToken.None);
 
             result.ResponsePayloadBytes.Should().BeNull();
-            mediator.Verify(m => m.Send(It.IsAny<Percolator.Application.Network.Handshake.ProcessRelayedOpaquePayloadCommand>(), It.IsAny<CancellationToken>()), Times.Once);
+            mediator.Verify(m => m.Send(It.IsAny<ProcessInternalEnvelopeCommand>(), It.IsAny<CancellationToken>()), Times.Once);
             sessionMgr.VerifyAll();
             peerRepo.VerifyAll();
             directRepo.VerifyAll();
         }
 
         [Test]
-        public async Task RelayOpaqueEnvelope_with_AckId_returns_encrypted_ack_response()
+        public async Task RelayOpaqueEnvelope_with_AckId_is_delegated_and_returns_empty()
         {
             var handler = CreateHandler(out var sessionMgr, out var peerRepo, out var mediator, out var directRepo, out var ratchetLookup);
             var sessionId = Guid.NewGuid();
@@ -119,26 +119,22 @@ namespace Percolator.ApplicationTests.Network;
                 .ReturnsAsync(new PeerConnection(new Percolator.Network.PeerId(remotePeerId), new DirectMessagePublicKey(RandomBytes(32)), new[] { endpoint }, Array.Empty<TlsCertificate>(), DateTimeOffset.UtcNow));
             peerRepo.Setup(p => p.SaveAsync(It.IsAny<PeerConnection>())).Returns(Task.CompletedTask);
 
-            // Orchestrator invoked for relay inner processing
-            mediator.Setup(m => m.Send(It.IsAny<Percolator.Application.Network.Handshake.ProcessRelayedOpaquePayloadCommand>(), It.IsAny<CancellationToken>()))
-                .Returns(Task.CompletedTask);
+            // Orchestrator invoked via ProcessInternalEnvelopeCommand (no early response expected)
+            mediator.Setup(m => m.Send(It.IsAny<ProcessInternalEnvelopeCommand>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((InternalEnvelope?)null);
 
             // Upsert after decrypt
             ratchetLookup.Setup(l => l.UpsertAsync(new DirectSessionId(sessionId), It.IsAny<int>(), It.IsAny<PreKey>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
                 .Returns(Task.CompletedTask);
 
-            // Expect encryption of RelayOpaqueResponse
-            var expectedAckCipher = RandomBytes(64);
-            sessionMgr.Setup(s => s.EncryptMessageAsync(It.Is<SessionId>(x => x.Value == sessionId), It.IsAny<Plaintext>()))
-                .ReturnsAsync(new SessionRatchetMessage(expectedAckCipher));
+            // No early response is produced anymore for Relay Ack at transport level
 
             var cmd = new DeliverOpaqueMessageCommand { PayloadBytes = payloadBytes };
             var result = await handler.Handle(cmd, CancellationToken.None);
 
-            result.ResponsePayloadBytes.Should().NotBeNull();
-            result.ResponsePayloadBytes!.Should().BeEquivalentTo(expectedAckCipher);
+            result.ResponsePayloadBytes.Should().BeNull();
 
-            mediator.Verify(m => m.Send(It.IsAny<Percolator.Application.Network.Handshake.ProcessRelayedOpaquePayloadCommand>(), It.IsAny<CancellationToken>()), Times.Once);
+            mediator.Verify(m => m.Send(It.IsAny<ProcessInternalEnvelopeCommand>(), It.IsAny<CancellationToken>()), Times.Once);
             peerRepo.VerifyAll();
             directRepo.VerifyAll();
             sessionMgr.VerifyAll();
@@ -327,9 +323,9 @@ namespace Percolator.ApplicationTests.Network;
             .ReturnsAsync(new PeerConnection(new Percolator.Network.PeerId(remotePeerId), new DirectMessagePublicKey(RandomBytes(32)), new[] { endpoint }, Array.Empty<TlsCertificate>(), DateTimeOffset.UtcNow));
         peerRepo.Setup(p => p.SaveAsync(It.IsAny<PeerConnection>())).Returns(Task.CompletedTask);
 
-        // Mediator responds to Ping
-        mediator.Setup(m => m.Send(It.IsAny<Percolator.Dht.Messages.PingRequest>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new Percolator.Dht.Messages.PingResponse());
+        // Orchestrator receives Ping via ProcessInternalEnvelopeCommand
+        mediator.Setup(m => m.Send(It.IsAny<ProcessInternalEnvelopeCommand>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((InternalEnvelope?)null);
 
         // Allow index upsert in handler
         ratchetLookup.Setup(l => l.UpsertAsync(new DirectSessionId(sessionId), It.IsAny<int>(), It.IsAny<PreKey>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
@@ -339,7 +335,7 @@ namespace Percolator.ApplicationTests.Network;
         var result = await handler.Handle(cmd, CancellationToken.None);
 
         result.ResponsePayloadBytes.Should().BeNull();
-        mediator.Verify(m => m.Send(It.IsAny<Percolator.Dht.Messages.PingRequest>(), It.IsAny<CancellationToken>()), Times.Once);
+        mediator.Verify(m => m.Send(It.IsAny<ProcessInternalEnvelopeCommand>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Test]
@@ -503,7 +499,7 @@ namespace Percolator.ApplicationTests.Network;
         var result = await handler.Handle(cmd, CancellationToken.None);
 
         result.ResponsePayloadBytes.Should().BeNull();
-        mediator.Verify(m => m.Send(It.Is<Percolator.Dht.Messages.PingRequest>(req => req.SenderEndPoint == endpoint.EndPoint), It.IsAny<CancellationToken>()), Times.Once);
+        mediator.Verify(m => m.Send(It.IsAny<ProcessInternalEnvelopeCommand>(), It.IsAny<CancellationToken>()), Times.Once);
         sessionMgr.VerifyAll();
         peerRepo.VerifyAll();
         // Updated handler updates LastSeen and saves connection info

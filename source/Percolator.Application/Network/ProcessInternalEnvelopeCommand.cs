@@ -6,14 +6,18 @@ using MediatR;
 using Microsoft.Extensions.Logging;
 using Percolator.Contracts;
 using Percolator.Dht;
+using Percolator.Prekey.Handlers;
 using Google.Protobuf;
 using Percolator.MessageQueue.Commands;
-using Percolator.Identity;
+using Percolator.Network;
 using Percolator.Chat.ValueObjects;
 using Percolator.Chat.App.Commands;
 using Percolator.Chat.App;
 using Percolator.Chat.Primitives;
 using Percolator.Application.Apps.Chat;
+using Percolator.Application.Network.Handshake;
+using Percolator.Network;
+using PeerId = Percolator.Identity.PeerId;
 
 namespace Percolator.Application.Network
 {
@@ -32,12 +36,14 @@ namespace Percolator.Application.Network
         private readonly IMediator _mediator;
         private readonly Percolator.Chat.App.IAdminOperations _adminOps;
         private readonly IDhtService _dhtService;
-        public ProcessInternalEnvelopeHandler(ILogger<ProcessInternalEnvelopeHandler> logger, IMediator mediator, Percolator.Chat.App.IAdminOperations adminOps, IDhtService dhtService)
+        private readonly IPeerConnectionRepository _peerConnectionRepository;
+        public ProcessInternalEnvelopeHandler(ILogger<ProcessInternalEnvelopeHandler> logger, IMediator mediator, Percolator.Chat.App.IAdminOperations adminOps, IDhtService dhtService, IPeerConnectionRepository peerConnectionRepository)
         {
             _logger = logger;
             _mediator = mediator;
             _adminOps = adminOps;
             _dhtService = dhtService;
+            _peerConnectionRepository = peerConnectionRepository;
         }
 
         public async Task<InternalEnvelope?> Handle(ProcessInternalEnvelopeCommand request, CancellationToken cancellationToken)
@@ -71,6 +77,103 @@ namespace Percolator.Application.Network
                     }
                     return new InternalEnvelope { DhtEnvelope = new Contracts.DhtEnvelope { FindNodeResponse = outResp } };
                 }
+                else if (dht.PingRequest is not null)
+                {
+                    // Compute NodeId from remote peer's signing key
+                    if (request.Context.RemotePeerGuid is null)
+                    {
+                        _logger.LogWarning("PingRequest received without RemotePeerGuid in context");
+                        return null;
+                    }
+                    var remotePeerId = new Percolator.Network.PeerId(request.Context.RemotePeerGuid.Value);
+                    var conn = await _peerConnectionRepository.GetByIdAsync(remotePeerId);
+                    if (conn?.IdentitySigningKey is null)
+                    {
+                        _logger.LogWarning("No signing key for remote peer {PeerId} to handle PingRequest", remotePeerId);
+                        return null;
+                    }
+                    var nodeIdBytes = System.Security.Cryptography.SHA256.HashData(conn.IdentitySigningKey.Value);
+                    await _mediator.Send(new Percolator.Dht.Messages.PingRequest(new NodeId(nodeIdBytes), conn.GrpcEndPoints.First().EndPoint), cancellationToken);
+                    return null;
+                }
+                return null;
+            }
+
+            // Prekey handling
+            if (env.ApplicationPayloadCase == InternalEnvelope.ApplicationPayloadOneofCase.PrekeyEnvelope)
+            {
+                var pre = env.PrekeyEnvelope;
+                switch (pre.MessageCase)
+                {
+                    case PrekeyEnvelope.MessageOneofCase.SubmitPreKeyBundleRequest:
+                    {
+                        var upload = pre.SubmitPreKeyBundleRequest;
+                        if (!upload.HasIdentityKey) throw new InvalidOperationException("Identity key is required");
+                        if (!upload.HasSignedPreKeyId) throw new InvalidOperationException("Signed pre-key ID is required");
+                        if (!upload.HasSignedPreKey) throw new InvalidOperationException("Signed pre-key is required");
+                        if (!upload.HasPreKeySignature) throw new InvalidOperationException("Pre-key signature is required");
+                        if (upload.OneTimePreKeys.Count == 0) throw new InvalidOperationException("At least one one-time pre-key is required");
+                        const int maxBundles = 100;
+                        if (upload.OneTimePreKeys.Count > maxBundles) throw new InvalidOperationException($"Too many one-time pre-keys. Maximum is {maxBundles}");
+                        foreach (var ot in upload.OneTimePreKeys)
+                        {
+                            if (!ot.HasId) throw new InvalidOperationException("One-time pre-key is required");
+                            if (!ot.HasPublicKey) throw new InvalidOperationException("One-time pre-key public key is required");
+                        }
+                        if (upload.ExpiresUtc.ToDateTimeOffset() < DateTimeOffset.Now) throw new InvalidOperationException("Pre-key bundle has expired");
+
+                        var cmd = new SubmitPreKeyBundleCommand
+                        {
+                            PublicSigningKey = upload.IdentityKey.ToByteArray(),
+                            SignedPreKeyId = new Guid(upload.SignedPreKeyId.ToByteArray()),
+                            SignedPreKey = upload.SignedPreKey.ToByteArray(),
+                            PreKeySignature = upload.PreKeySignature.ToByteArray(),
+                            OneTimePreKeys = upload.OneTimePreKeys.Select(x => new SubmitPreKeyBundleCommand.OneTimePreKey(new Guid(x.Id.ToByteArray()), x.PublicKey.ToByteArray())).ToList(),
+                            Expires = upload.ExpiresUtc.ToDateTimeOffset(),
+                            RemotePeerId = new Percolator.Network.PeerId(request.Context.RemotePeerGuid ?? Guid.Empty)
+                        };
+                        await _mediator.Send(cmd, cancellationToken);
+                        return new InternalEnvelope { SubmitPreKeyBundleResponse = new SubmitPreKeyBundleResponse { Version = 1 } };
+                    }
+                    case PrekeyEnvelope.MessageOneofCase.GetPreKeyBundleRequest:
+                    {
+                        var getReq = pre.GetPreKeyBundleRequest;
+                        if (!getReq.HasPublicKeyHash) throw new InvalidOperationException("PublicKeyHash is required");
+                        var bundle = await _mediator.Send(new GetPreKeyBundleQuery
+                        {
+                            TargetPublicSigningKeyHash = getReq.PublicKeyHash.ToByteArray()
+                        }, cancellationToken);
+                        var resp = new GetPreKeyBundleResponse { Version = 1 };
+                        if (bundle is not null)
+                        {
+                            var msg = new GetPreKeyBundleResponse.Types.PreKeyBundle
+                            {
+                                Version = 1,
+                                IdentityKey = Google.Protobuf.ByteString.CopyFrom(bundle.IdentitySigningKey.Value),
+                                SignedPreKeyId = Google.Protobuf.ByteString.CopyFrom(bundle.SignedPreKeyId.ToByteArray()),
+                                SignedPreKey = Google.Protobuf.ByteString.CopyFrom(bundle.SignedPreKey.Value),
+                                PreKeySignature = Google.Protobuf.ByteString.CopyFrom(bundle.SignedPreKeySignature.Value)
+                            };
+                            if (bundle.OneTimePreKey is not null)
+                            {
+                                msg.OneTimeKeyId = Google.Protobuf.ByteString.CopyFrom(bundle.OneTimePreKeyId!.Value.ToByteArray());
+                                msg.OneTimeKey = Google.Protobuf.ByteString.CopyFrom(bundle.OneTimePreKey.Value);
+                            }
+                            resp.PreKeyBundle = msg;
+                        }
+                        return new InternalEnvelope { GetPreKeyBundleResponse = resp };
+                    }
+                    default:
+                        _logger.LogWarning("Unhandled PrekeyEnvelope type: {Type}", pre.MessageCase);
+                        return null;
+                }
+            }
+
+            // RelayOpaque handling (processing only; RPC-level ack is handled in DeliverOpaqueMessageHandler)
+            if (env.ApplicationPayloadCase == InternalEnvelope.ApplicationPayloadOneofCase.RelayOpaqueEnvelope)
+            {
+                var relay = env.RelayOpaqueEnvelope;
+                await _mediator.Send(new ProcessRelayedOpaquePayloadCommand(relay.OpaquePayload.ToByteArray()), cancellationToken);
                 return null;
             }
 

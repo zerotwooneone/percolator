@@ -211,39 +211,7 @@ namespace Percolator.Application.Network
                     var earlyBytes = await EncryptResponseEnvelope(inferredSessionId, processed);
                     return new DeliverOpaqueMessageResult { ResponsePayloadBytes = earlyBytes };
                 }
-
-                switch (internalEnvelope.ApplicationPayloadCase)
-                {
-                    case InternalEnvelope.ApplicationPayloadOneofCase.ChatEnvelope:
-                        _logger.LogDebug("ChatEnvelope handled by orchestrator; no-op in transport handler");
-                        break;
-                    case InternalEnvelope.ApplicationPayloadOneofCase.DhtEnvelope:
-                        responseEnvelope = await HandleDhtMessageAsync(internalEnvelope.DhtEnvelope, connectionInfo, endpoint, cancellationToken);
-                        break;
-                    case InternalEnvelope.ApplicationPayloadOneofCase.PrekeyEnvelope:
-                        responseEnvelope = await HandlePrekeyEnvelopeAsync(internalEnvelope.PrekeyEnvelope, connectionInfo.Id, cancellationToken);
-                        break;
-                    case InternalEnvelope.ApplicationPayloadOneofCase.MessageQueueEnvelope:
-                        _logger.LogDebug("MessageQueueEnvelope handled by orchestrator; no-op in transport handler");
-                        break;
-                    case InternalEnvelope.ApplicationPayloadOneofCase.RelayOpaqueEnvelope:
-                        var relay = internalEnvelope.RelayOpaqueEnvelope;
-                        await _mediator.Send(new ProcessRelayedOpaquePayloadCommand(relay.OpaquePayload.ToByteArray()), cancellationToken);
-                        // If host supplied an AckId, return an RPC-level RelayOpaqueResponse encrypted to the session
-                        if (relay.HasMessageAckId)
-                        {
-                            var ack = new RelayOpaqueResponse
-                            {
-                                Version = 1,
-                                MessageAckId = relay.MessageAckId
-                            };
-                            var ackPlain = new Plaintext(ack.ToByteArray());
-                            var ackCipher = await _sessionManager.EncryptMessageAsync(inferredSessionId, ackPlain);
-                            return new DeliverOpaqueMessageResult { ResponsePayloadBytes = ackCipher.Value };
-                        }
-                        break;
-                }
-
+                
                 if (responseEnvelope is null)
                 {
                     return new DeliverOpaqueMessageResult();
@@ -288,37 +256,6 @@ namespace Percolator.Application.Network
                 throw;
             }
         }
-
-        private async Task<InternalEnvelope?> HandleDhtMessageAsync(DhtEnvelope dhtEnvelope, PeerConnection peerConnection, GrpcEndPoint endPoint, CancellationToken ct)
-        {
-            if (_activeIdentityContext.Identity is null)
-            {
-                _logger.LogError("No active identity available");
-                return null;
-            }
-
-            switch (dhtEnvelope.MessageCase)
-            {
-                case DhtEnvelope.MessageOneofCase.PingRequest:
-                    if (peerConnection.IdentitySigningKey is null)
-                    {
-                        _logger.LogWarning("Could not find identity signing key for peer {PeerId} to handle DHT message", peerConnection.Id);
-                        return null;
-                    }
-                    var nodeIdBytes = SHA256.HashData(peerConnection.IdentitySigningKey.Value);
-                    await _mediator.Send(new Percolator.Dht.Messages.PingRequest(new Percolator.Dht.NodeId(nodeIdBytes), endPoint.EndPoint), ct);
-                    break;
-                case DhtEnvelope.MessageOneofCase.FindNodeRequest:
-                    // Centralized in ProcessInternalEnvelopeHandler; no-op here.
-                    break;
-                default:
-                    _logger.LogWarning("Received unhandled DHT message type: {MessageType}", dhtEnvelope.MessageCase);
-                    break;
-            }
-
-            return null;
-        }
-
         private async Task<byte[]> EncryptResponseEnvelope(SessionId sessionId, InternalEnvelope internalEnvelope)
         {
             var plaintext = new Plaintext(internalEnvelope.ToByteArray());
