@@ -38,19 +38,16 @@ namespace Percolator.Application.Apps.Chat.Handlers
 
             try
             {
-                // Map recipient and sender peer IDs directly (already Guids) and exclude self
-                var selfPeerGuid = _active.Identity!.Id;
+                // Map recipient peer IDs (already Guids)
                 var recipientIds = notification.RecipientPeerIds
-                    .Where(g => g != selfPeerGuid)
                     .Select(g => new PeerId(g))
                     .ToList();
 
-                // Resolve sender from active identity (must match provided self identity id)
+                // Sanity check the active identity context matches the provided self identity id
                 if (_active.Identity is null || _active.Identity.SelfIdentityId != notification.SenderSelfIdentityId)
                 {
                     throw new InvalidOperationException($"Active identity not loaded or mismatched (expected {notification.SenderSelfIdentityId})");
                 }
-                var senderId = new PeerId(_active.Identity.Id);
 
                 // Send the command with app-level fields (no Contracts dependency)
                 await _mediator.Send(
@@ -58,8 +55,7 @@ namespace Percolator.Application.Apps.Chat.Handlers
                         notification.MessageId,
                         notification.Content,
                         notification.SentTimestampUtc,
-                        recipientIds,
-                        senderId),
+                        recipientIds),
                     cancellationToken);
 
                 _logger.LogInformation("Dispatched message {MessageId} to {RecipientCount} recipients",

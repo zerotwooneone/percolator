@@ -52,7 +52,7 @@ public class DispatchTextMessageHandlerTests
     {
         // Arrange
         var recipients = new[] { _recipientId };
-        var command = new DispatchTextMessageCommand(_messageId, _content, _sentUtc, recipients, _selfId);
+        var command = new DispatchTextMessageCommand(_messageId, _content, _sentUtc, recipients);
 
         _keyStoreMock
             .Setup(k => k.GetPublicKeyHashByPeerIdAsync(_recipientId, It.IsAny<CancellationToken>()))
@@ -72,24 +72,41 @@ public class DispatchTextMessageHandlerTests
         await _sut.Handle(command, CancellationToken.None);
 
         // Assert
-        _senderMock.Verify();
+        _senderMock.Verify(s => s.SendChatEnvelopeToPeerAsync(
+            It.IsAny<ChatEnvelope>(),
+            It.Is<RecipientRoute>(r => r.PeerId.Equals(_recipientId)),
+            It.IsAny<CancellationToken>()), Times.Once);
+        _senderMock.Verify(s => s.SendChatEnvelopeToPeerAsync(
+            It.IsAny<ChatEnvelope>(),
+            It.Is<RecipientRoute>(r => r.PeerId.Equals(_selfId)),
+            It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Test]
-    public async Task Handle_SkipsSelfAndOnlySendsToOthers()
+    public async Task Handle_SendsToAllRecipients_IncludingSelf_WhenPresent()
     {
         // Arrange
         var recipients = new[] { _recipientId, _selfId };
-        var command = new DispatchTextMessageCommand(_messageId, _content, _sentUtc, recipients, _selfId);
+        var command = new DispatchTextMessageCommand(_messageId, _content, _sentUtc, recipients);
 
         _keyStoreMock
             .Setup(k => k.GetPublicKeyHashByPeerIdAsync(_recipientId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((byte[]?)null);
+        _keyStoreMock
+            .Setup(k => k.GetPublicKeyHashByPeerIdAsync(_selfId, It.IsAny<CancellationToken>()))
             .ReturnsAsync((byte[]?)null);
 
         _senderMock
             .Setup(s => s.SendChatEnvelopeToPeerAsync(
                 It.IsAny<ChatEnvelope>(),
                 It.Is<RecipientRoute>(r => r.PeerId.Equals(_recipientId)),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask)
+            .Verifiable();
+        _senderMock
+            .Setup(s => s.SendChatEnvelopeToPeerAsync(
+                It.IsAny<ChatEnvelope>(),
+                It.Is<RecipientRoute>(r => r.PeerId.Equals(_selfId)),
                 It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask)
             .Verifiable();

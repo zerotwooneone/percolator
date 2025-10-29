@@ -7,6 +7,5 @@ public sealed record DispatchTextMessageCommand(
     Guid MessageId,
     string Content,
     DateTime SentTimestampUtc,
-    IReadOnlyList<PeerId> RecipientPeerIds,
-    PeerId SenderPeerId
+    IReadOnlyList<PeerId> RecipientPeerIds
 ) : IRequest;

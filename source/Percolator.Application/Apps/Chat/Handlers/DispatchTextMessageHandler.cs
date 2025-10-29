@@ -55,7 +55,7 @@ public sealed class DispatchTextMessageHandler : IRequestHandler<DispatchTextMes
         };
 
         // Process each recipient sequentially (preserve per-recipient ordering if needed)
-        foreach (var peerId in request.RecipientPeerIds.Where(pid => pid != request.SenderPeerId))
+        foreach (var peerId in request.RecipientPeerIds)
         {
             await ProcessRecipientAsync(peerId, chatEnvelope, cancellationToken);
         }
