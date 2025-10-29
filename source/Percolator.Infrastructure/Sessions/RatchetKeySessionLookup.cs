@@ -21,7 +21,7 @@ namespace Percolator.Infrastructure.Sessions
 
         public async Task<DirectSessionId?> TryResolveAsync(PreKey ratchetPublicKey, int selfIdentityId, CancellationToken cancellationToken)
         {
-            var row = await _db.Set<RatchetKeyIndexDbo>()
+            var row = await _db.RatchetKeyIndex
                 .AsNoTracking()
                 .Where(r => r.SelfIdentityId == selfIdentityId && r.RatchetPublicKey.SequenceEqual(ratchetPublicKey.Value))
                 .Select(r => new { r.DirectSessionId })
@@ -32,7 +32,7 @@ namespace Percolator.Infrastructure.Sessions
 
         public async Task UpsertAsync(DirectSessionId sessionId, int selfIdentityId, PreKey ratchetPublicKey, DateTimeOffset updatedAtUtc, CancellationToken cancellationToken)
         {
-            var set = _db.Set<RatchetKeyIndexDbo>();
+            var set = _db.RatchetKeyIndex;
             var existing = await set
                 .Where(r => r.SelfIdentityId == selfIdentityId && r.RatchetPublicKey.SequenceEqual(ratchetPublicKey.Value))
                 .FirstOrDefaultAsync(cancellationToken);

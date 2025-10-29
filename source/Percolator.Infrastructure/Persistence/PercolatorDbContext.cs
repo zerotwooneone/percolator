@@ -24,6 +24,7 @@ public class PercolatorDbContext : DbContext
     public DbSet<DirectSessionDbo> DirectSessions { get; set; } = null!;
     public DbSet<DoubleRatchetSessionDbo> DoubleRatchetSessions { get; set; } = null!;
     public DbSet<SkippedMessageKeyDbo> SkippedMessageKeys { get; set; } = null!;
+    public DbSet<RatchetKeyIndexDbo> RatchetKeyIndex { get; set; } = null!;
     public DbSet<ConversationDbo> Conversations { get; set; } = null!;
     public DbSet<MessageDbo> Messages { get; set; } = null!;
     public DbSet<ConversationParticipantDbo> ConversationParticipants { get; set; } = null!;
