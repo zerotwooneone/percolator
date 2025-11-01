@@ -137,9 +137,6 @@ public class HandshakeInitiatorFlowTests
         var payload = SessionRatchetMessage.Create(pk, 1, 0, new Ciphertext(new byte[] { 0xB1 })).Value;
 
         var sessions = new Mock<IDirectSessionManager>(MockBehavior.Loose);
-        sessions
-            .Setup(s => s.ReceiveMessageAsync(It.IsAny<SessionId>(), It.IsAny<SessionRatchetMessage>()))
-            .ReturnsAsync(new Plaintext(new byte[] { 0xAA }));
 
         var lookup = new Mock<IRatchetKeySessionLookup>(MockBehavior.Strict);
         var resolvedSession = new DirectSessionId(Guid.NewGuid());
@@ -167,8 +164,9 @@ public class HandshakeInitiatorFlowTests
         // Verify fast-path lookup via ratchet header was used
         lookup.Verify(l => l.TryResolveAsync(It.IsAny<PreKey>(), identity.SelfIdentityId, It.IsAny<CancellationToken>()), Times.Once);
 
-        // Verify decrypt called with resolved session
-        sessions.Verify(s => s.ReceiveMessageAsync(It.Is<SessionId>(sid => sid.Value != Guid.Empty), It.IsAny<SessionRatchetMessage>()), Times.Once);
+        // Verify session manager was NOT called on fast-path
+        sessions.Verify(s => s.ReceiveMessageAsync(It.IsAny<SessionId>(), It.IsAny<SessionRatchetMessage>()), Times.Never);
+        sessions.Verify(s => s.CompleteHandshakeAsync(It.IsAny<SessionRatchetMessage>(), It.IsAny<Func<Plaintext, SessionId>>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Test]

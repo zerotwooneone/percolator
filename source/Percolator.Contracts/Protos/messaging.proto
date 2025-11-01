@@ -1,6 +1,7 @@
 syntax = "proto3";
 
 import "google/protobuf/timestamp.proto";
+import "internal_messaging.proto";
 
 package percolator.contracts;
 
@@ -38,6 +39,8 @@ message PreKeyBundle {
     optional google.protobuf.Timestamp expiration_date_utc = 6;
 }
 
+// The request to establish a new secure pairwise session with the node.
+// This is the entry point when the remote peer has our prekey bundle
 message EstablishSessionRequest {
     optional uint32 version = 1;
 
@@ -98,15 +101,17 @@ message EstablishDirectSessionResponse {
     message ResponsePayload {
         optional uint32 version = 1;
 
-        optional bytes ephemeral_key = 3;
+        // The plaintext inner payload to be carried inside the X3DH ratchet message
+        // returned in Response.ratchet_message
+        optional InternalEnvelope inner_envelope = 2;
         optional string session_id = 4;
     }
     message Response {
         optional uint32 version = 1;
 
         optional bytes identity_signing_key = 2;
-        optional bytes response_payload = 3;
-        optional bytes payload_signature = 4;
+        // An X3DH ratchet message; its payload is the bytes of ResponsePayload; the header contains the remote ephemeral key
+        optional bytes ratchet_message = 3;
     }
     message NotBefore {
         // The protocol version.

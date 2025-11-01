@@ -95,6 +95,12 @@ namespace Percolator.ApplicationTests.Network
                 It.IsAny<SharedSecret>(),
                 It.IsAny<ECDiffieHellman>())).Returns(Task.CompletedTask);
 
+            // Mocks: encrypt initial responder payload into a ratchet message
+            sessionManager.Setup(s => s.EncryptMessageAsync(
+                    It.IsAny<SessionId>(),
+                    It.IsAny<Plaintext>()))
+                .ReturnsAsync(new SessionRatchetMessage(RandomNumberGenerator.GetBytes(64)));
+
             // PeerConnection creation path (no existing record)
             peerConnRepo.Setup(r => r.GetByPublicKey(It.IsAny<DirectMessagePublicKey>()))
                 .ReturnsAsync((PeerConnection?)null);
@@ -112,12 +118,6 @@ namespace Percolator.ApplicationTests.Network
                 .ReturnsAsync((DirectSession?)null);
             directRepo.Setup(r => r.UpsertAsync(It.IsAny<Percolator.Network.PeerId>(), It.IsAny<DirectSessionId>(), It.IsAny<int>()))
                 .Returns(Task.CompletedTask);
-
-            // Mock SignPreKey used for response creation
-            x3dhManager.Setup(m => m.SignPreKey(
-                    It.IsAny<ECDiffieHellman>(),
-                    It.IsAny<PreKey>()))
-                .Returns(new CryptoSignature(RandomNumberGenerator.GetBytes(64)));
 
             // Expect PKH activation using the created identity peer id and initiator SPKI
             pkhStore.Setup(s => s.ActivateIfChangedAsync(
@@ -147,7 +147,8 @@ namespace Percolator.ApplicationTests.Network
             Assert.That(result, Is.Not.Null);
             Assert.That(result.ResponsePayloadBytes, Is.Not.Null);
             Assert.That(result.IdentitySigningKeyBytes, Is.Not.Null);
-            Assert.That(result.PayloadSignatureBytes, Is.Not.Null);
+            Assert.That(result.RemoteEphemeralKeyBytes, Is.Not.Null);
+            Assert.That(result.RatchetMessageBytes, Is.Not.Null);
 
             pkhStore.Verify();
 

@@ -51,12 +51,12 @@ namespace Percolator.Application.Network.Handshake
             var header = ratchetMessage.GetHeader();
 
             // Fast-path: resolve session by ratchet header key (expected to miss on first responder message)
-            var directSessionId = await _ratchetLookup.TryResolveAsync(header.PreKey, _active.Identity.SelfIdentityId, cancellationToken);
+            var directSessionId = await _ratchetLookup.TryResolveAsync(header.PreKey, _active.Identity.SelfIdentityId, cancellationToken).ConfigureAwait(false);
             if (directSessionId is null)
             {
                 // Delegate slow-path finalize to the session manager. It will persist the session, upsert the ratchet index,
                 // and delete the matching prehandshake record if found.
-                var (sid, pt) = await _sessions.CompleteHandshakeAsync(
+                var (sid, plaintext) = await _sessions.CompleteHandshakeAsync(
                     ratchetMessage,
                     pt =>
                     {
@@ -67,17 +67,9 @@ namespace Percolator.Application.Network.Handshake
                             throw new InvalidOperationException("Responder inner payload missing direct_session_id.");
                         return new SessionId(Guid.Parse(inner.DirectSessionId));
                     },
-                    cancellationToken);
+                    cancellationToken).ConfigureAwait(false);
                 directSessionId = new Percolator.Network.DirectSessionId(sid.Value);
                 _logger.LogInformation("Responder hello slow-path succeeded for session {SessionId}", sid.Value);
-            }
-
-            // Decrypt using explicit session (fast-path)
-            var resolvedSid = new SessionId(directSessionId.Value.Value);
-            var plaintext = await _sessions.ReceiveMessageAsync(resolvedSid, ratchetMessage);
-            if (plaintext is null)
-            {
-                throw new InvalidOperationException("Responder hello: unable to decrypt with resolved session.");
             }
 
             _logger.LogInformation("Successfully processed responder hello for session {SessionId}", directSessionId.Value.Value);

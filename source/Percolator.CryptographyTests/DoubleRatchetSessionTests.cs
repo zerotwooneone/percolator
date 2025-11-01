@@ -60,6 +60,50 @@ namespace Percolator.CryptographyTests
                 _options);
         }
 
+        [Test]
+        public void Decrypt_FirstInbound_WhenResponderSeededWithHeaderKey_ShouldSucceed_RedUntilOptionB()
+        {
+            // Arrange: simulate reverse-signal timing — initiator encrypts first, then responder is constructed
+            var logger = new NullLogger<DoubleRatchetSession>();
+            var options = Options.Create(new CryptographyOptions());
+
+            using var aliceIdentity = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+            using var bobIdentity = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+            using var bobRatchetKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+            using var aliceEphemeral = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+
+            var sharedSecret = new SharedSecret(aliceIdentity.DeriveKeyMaterial(bobIdentity.PublicKey));
+            var bobIdentityKey = new RatchetIdentityKey(bobIdentity.PublicKey.ExportSubjectPublicKeyInfo());
+            var bobInitialPreKey = new PreKey(bobRatchetKey.PublicKey.ExportSubjectPublicKeyInfo());
+
+            // Initiator (Alice) builds session and encrypts first message
+            using var alice = DoubleRatchetSession.AsInitiator(
+                sharedSecret,
+                bobIdentityKey,
+                bobInitialPreKey,
+                aliceEphemeral,
+                logger,
+                options);
+
+            var firstPlaintext = new Plaintext(Encoding.UTF8.GetBytes("reverse-signal first"));
+            var firstMessage = alice.Encrypt(firstPlaintext);
+            var header = firstMessage.GetHeader();
+
+            // Responder (Bob) is constructed AFTER receiving first message and is seeded with the header ratchet key
+            using var bob = DoubleRatchetSession.AsResponder(
+                sharedSecret,
+                new RatchetIdentityKey(aliceIdentity.PublicKey.ExportSubjectPublicKeyInfo()),
+                header.PreKey, // Seed with header key (causes current implementation to skip ratchet)
+                bobRatchetKey,
+                logger,
+                options);
+
+            // Act: attempt to decrypt Alice's first message
+            // Expected: should succeed (Option B will make this pass). Current code will FAIL (no ratchet, receivingChainKey null).
+            var decrypted = bob.Decrypt(firstMessage);
+            Encoding.UTF8.GetString(decrypted.Value).Should().Be("reverse-signal first");
+        }
+
         [TearDown]
         public void TearDown()
         {

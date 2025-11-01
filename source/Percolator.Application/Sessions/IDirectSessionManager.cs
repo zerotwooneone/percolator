@@ -28,6 +28,19 @@ public interface IDirectSessionManager
         SharedSecret sharedSecret);
 
     /// <summary>
+    /// Establishes a new Double Ratchet session as the responder by decrypting the responder's first message.
+    /// The method extracts the SessionId from the decrypted plaintext using the provided selector, persists the session state,
+    /// upserts the ratchet index mapping, and returns the resolved SessionId together with the plaintext.
+    /// </summary>
+    Task<(Percolator.Cryptography.SessionId sessionId, Plaintext plaintext)> EstablishSessionAsResponderAsync(
+        SessionRatchetMessage firstMessage,
+        Func<Plaintext, Percolator.Cryptography.SessionId> getSessionId,
+        RatchetIdentityKey remoteIdentityKey,
+        PreKey remotePreKey,
+        ECDiffieHellman privateKeyUsedInHandshake,
+        SharedSecret sharedSecret);
+
+    /// <summary>
     /// Receives and decrypts an incoming message.
     /// </summary>
     Task<Plaintext?> ReceiveMessageAsync(Percolator.Cryptography.SessionId conversationId, SessionRatchetMessage encryptedMessage);

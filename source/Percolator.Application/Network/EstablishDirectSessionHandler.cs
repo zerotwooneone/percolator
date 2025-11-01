@@ -80,7 +80,7 @@ namespace Percolator.Application.Network
             var networkIdentitySigningKey = new DirectMessagePublicKey(request.IdentitySigningKeyBytes);
             var timestamp = DateTimeOffset.Now;
 
-            var existingPeerConnectionInfo = await _peerConnectionRepository.GetByPublicKey(networkIdentitySigningKey);
+            var existingPeerConnectionInfo = await _peerConnectionRepository.GetByPublicKey(networkIdentitySigningKey).ConfigureAwait(false);
             NetworkPeerId networkPeerId;
             PeerConnection peerConnectionInfo;
             if (existingPeerConnectionInfo is null)
@@ -125,31 +125,31 @@ namespace Percolator.Application.Network
             _logger.LogInformation("X3DH handshake processed successfully as Initiator");
 
             var identityPeerId = new IdentityPeerId(peerConnectionInfo.Id.Value);
-            var remotePeer = await _peerRepository.GetByIdAsync(identityPeerId);
+            var remotePeer = await _peerRepository.GetByIdAsync(identityPeerId).ConfigureAwait(false);
             if (remotePeer is null)
             {
                 _logger.LogInformation("Peer with key hash {KeyHash} is unknown. Creating a new peer record", Convert.ToBase64String(request.IdentitySigningKeyBytes));
                 var newPeerName = $"Peer-{Convert.ToBase64String(request.IdentitySigningKeyBytes)}";
                 remotePeer = new IdentityPeer(identityPeerId, newPeerName);
-                await _peerRepository.AddAsync(remotePeer);
+                await _peerRepository.AddAsync(remotePeer).ConfigureAwait(false);
             }
 
             // Handshake-side identity mapping: bind PKH -> this peer id (idempotent if already bound to same peer)
             var initiatorSpki = request.IdentitySigningKeyBytes;
             var initiatorPkh = SHA256.HashData(initiatorSpki);
-            await _pkhStore.ActivateIfChangedAsync(remotePeer.Id, initiatorSpki, initiatorPkh, DateTimeOffset.UtcNow, cancellationToken);
+            await _pkhStore.ActivateIfChangedAsync(remotePeer.Id, initiatorSpki, initiatorPkh, DateTimeOffset.UtcNow, cancellationToken).ConfigureAwait(false);
 
             // Now that the Peer exists, persist/update the PeerConnection
-            await _peerConnectionRepository.SaveAsync(peerConnectionInfo);
+            await _peerConnectionRepository.SaveAsync(peerConnectionInfo).ConfigureAwait(false);
 
             var existingDirectSession =
                 await _directSessionRepository.GetByRemotePeerIdAsync(networkPeerId,
-                    _activeIdentityContext.Identity.SelfIdentityId);
+                    _activeIdentityContext.Identity.SelfIdentityId).ConfigureAwait(false);
             var directSessionId = existingDirectSession?.SessionId 
                                   ?? new DirectSessionId(Guid.NewGuid());
             if (existingDirectSession is null)
             {
-                await _directSessionRepository.UpsertAsync(networkPeerId, directSessionId, _activeIdentityContext.Identity!.SelfIdentityId);
+                await _directSessionRepository.UpsertAsync(networkPeerId, directSessionId, _activeIdentityContext.Identity!.SelfIdentityId).ConfigureAwait(false);
                 _logger.LogInformation("Upserted session with peer {PeerName} with session {SessionId}", remotePeer.Name, directSessionId);
             }
             
@@ -162,28 +162,33 @@ namespace Percolator.Application.Network
                 remoteIdentityKey,
                 remotePreKey,
                 sharedSecret,
-                ephemeralKey);
+                ephemeralKey).ConfigureAwait(false);
             _logger.LogInformation("Successfully established session {SessionId} with peer {PeerId}", cryptoSessionId, remotePeer.Id);
 
             // Upsert PKH -> Peer mapping immediately after establishing session (initiator side)
             var establishedSpki = remoteIdentityKey.Value;
             var establishedPkh = SHA256.HashData(establishedSpki);
-            await _pkhStore.ActivateIfChangedAsync(remotePeer.Id, establishedSpki, establishedPkh, DateTimeOffset.UtcNow, cancellationToken);
+            await _pkhStore.ActivateIfChangedAsync(remotePeer.Id, establishedSpki, establishedPkh, DateTimeOffset.UtcNow, cancellationToken).ConfigureAwait(false);
 
+            // Build responder payload carrying the allocated session id and optional inner envelope
             var responsePayload = new EstablishDirectSessionResponse.Types.ResponsePayload
             {
-                EphemeralKey = ByteString.CopyFrom(ephemeralKey.PublicKey.ExportSubjectPublicKeyInfo()),
                 SessionId = directSessionId.ToString()
             }.ToByteString();
 
-            var signedPayloadBytes = _x3DhManager.SignPreKey(_activeIdentityContext.Keys.IdentitySigningKey, new PreKey(responsePayload.ToByteArray()));
+            // Encrypt the response payload as an initial X3DH ratchet message for the initiator
+            var ratchetMessage = await _sessionManager.EncryptMessageAsync(
+                cryptoSessionId,
+                new Plaintext(responsePayload.ToByteArray()))
+                .ConfigureAwait(false);
 
             return new EstablishDirectSessionResult
             {
                 SessionId = directSessionId.ToString(),
                 ResponsePayloadBytes = responsePayload.ToByteArray(),
                 IdentitySigningKeyBytes = _activeIdentityContext.Keys.IdentitySigningKey.ExportSubjectPublicKeyInfo(),
-                PayloadSignatureBytes = signedPayloadBytes.Value
+                RemoteEphemeralKeyBytes = ephemeralKey.PublicKey.ExportSubjectPublicKeyInfo(),
+                RatchetMessageBytes = ratchetMessage.Value
             };
         }
     }

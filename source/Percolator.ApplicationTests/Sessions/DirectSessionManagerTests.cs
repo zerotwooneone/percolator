@@ -269,6 +269,59 @@ public class DirectSessionManagerTests
     }
     
     [Test]
+    public async Task ResponderOverload_EstablishesSymmetricSession_WithInitiatorFirstMessage()
+    {
+        // Arrange: prepare X3DH-agreed materials
+        var sharedSecret = new SharedSecret(new byte[32]);
+        var bobIdentityKeyPublic = new RatchetIdentityKey(_bobKeys.IdentitySigningKey.ExportSubjectPublicKeyInfo());
+        var bobPreKeyPublic = new PreKey(_bobKeys.SignedPreKey.ExportSubjectPublicKeyInfo());
+        var aliceIdentityKeyPublic = new RatchetIdentityKey(_aliceKeys.IdentitySigningKey.ExportSubjectPublicKeyInfo());
+
+        // Capture Alice's ephemeral public key before constructing the initiator session (it may take ownership and dispose)
+        var aliceEphemeralPublicSpki = _aliceEphemeral.PublicKey.ExportSubjectPublicKeyInfo();
+
+        // Construct Alice (initiator) DR session in-memory using her ephemeral
+        var initiatorLogger = _loggerFactory.CreateLogger<DoubleRatchetSession>();
+        using var aliceInitiator = DoubleRatchetSession.AsInitiator(
+            sharedSecret,
+            bobIdentityKeyPublic,
+            bobPreKeyPublic,
+            _aliceEphemeral,
+            initiatorLogger,
+            _options);
+
+        // Embed the session id in plaintext so responder can extract it
+        var sid = new SessionId(Guid.NewGuid());
+        var firstPayload = new Plaintext(System.Text.Encoding.UTF8.GetBytes(sid.Value.ToString()));
+        var firstMessage = aliceInitiator.Encrypt(firstPayload);
+
+        // Act: Bob (responder) establishes by decrypting Alice's first message
+        SessionId GetSessionId(Plaintext pt) => new SessionId(Guid.Parse(System.Text.Encoding.UTF8.GetString(pt.Value)));
+        var (resolvedSid, ptOut) = await _bobSessionManager.EstablishSessionAsResponderAsync(
+            firstMessage,
+            GetSessionId,
+            aliceIdentityKeyPublic,
+            new PreKey(aliceEphemeralPublicSpki),
+            _bobKeys.SignedPreKey,
+            sharedSecret);
+
+        // Assert: session id round-trips and plaintext matches
+        Assert.That(resolvedSid.Value, Is.EqualTo(sid.Value));
+        Assert.That(System.Text.Encoding.UTF8.GetString(ptOut.Value), Is.EqualTo(sid.Value.ToString()));
+
+        // Assert: responder session persisted
+        Assert.That(_bobStates.ContainsKey(resolvedSid), Is.True);
+
+        // Act: Bob encrypts a reply and Alice decrypts via her initiator session
+        var replyPt = new Plaintext(System.Text.Encoding.UTF8.GetBytes("ack-from-bob"));
+        var reply = await _bobSessionManager.EncryptMessageAsync(resolvedSid, replyPt);
+        var aliceDecrypted = aliceInitiator.Decrypt(reply);
+
+        // Assert: symmetry holds
+        Assert.That(System.Text.Encoding.UTF8.GetString(aliceDecrypted.Value), Is.EqualTo("ack-from-bob"));
+    }
+    
+    [Test]
     public async Task OutOfOrderMessages_AreHandledCorrectly()
     {
         // Arrange

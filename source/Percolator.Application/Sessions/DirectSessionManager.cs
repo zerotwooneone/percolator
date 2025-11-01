@@ -56,6 +56,59 @@ public class DirectSessionManager : IDirectSessionManager
         return (result.sessionId, result.envelop);
     }
 
+    public async Task<(SessionId sessionId, Plaintext plaintext)> EstablishSessionAsResponderAsync(
+        SessionRatchetMessage firstMessage,
+        Func<Plaintext, SessionId> getSessionId,
+        RatchetIdentityKey remoteIdentityKey,
+        PreKey remotePreKey,
+        ECDiffieHellman privateKeyUsedInHandshake,
+        SharedSecret sharedSecret)
+    {
+        if (_activeIdentityContext.Identity is null)
+            throw new InvalidOperationException("Identity context not loaded");
+
+        var selfId = _activeIdentityContext.Identity.SelfIdentityId;
+
+        // Build responder session and decrypt the first message to learn the SessionId
+        var sessionLogger = _loggerFactory.CreateLogger<DoubleRatchetSession>();
+        using var responder = DoubleRatchetSession.AsResponder(
+            sharedSecret,
+            remoteIdentityKey,
+            remotePreKey,
+            privateKeyUsedInHandshake,
+            sessionLogger,
+            _cryptographyOptions);
+
+        var plaintext = responder.Decrypt(firstMessage);
+        var sessionId = getSessionId(plaintext);
+
+        // Persist responder session state
+        var state = responder.GetState();
+        if (state.RootKey != null && _cryptographyOptions.Value.EnableCryptographicMaterialLogging)
+        {
+            _logger.LogInformation("Responder session root key : {RootKey}", 
+                Convert.ToBase64String(state.RootKey.Value));
+        }
+        if (state.DhRatchetPrivateKey != null && _cryptographyOptions.Value.EnableCryptographicMaterialLogging)
+        {
+            _logger.LogInformation("Responder session stored local ratchet private key hash: {StoredRatchetPrivateKeyHash}", 
+                Convert.ToBase64String(state.DhRatchetPrivateKey.Value));
+        }
+        await _sessionStore.SetSessionStateAsync(sessionId, state, selfId).ConfigureAwait(false);
+        _sessionLocks.TryAdd(sessionId, new SemaphoreSlim(1, 1));
+
+        // Warm fast-path ratchet index
+        var header = firstMessage.GetHeader();
+        await _ratchetLookup.UpsertAsync(
+            new Percolator.Network.DirectSessionId(sessionId.Value),
+            selfId,
+            header.PreKey,
+            DateTimeOffset.UtcNow,
+            CancellationToken.None).ConfigureAwait(false);
+
+        return (sessionId, plaintext);
+    }
+
     private async Task<(SessionId sessionId, TEnvelop envelop)> CompleteAsync<TEnvelop>(
         SessionRatchetMessage encryptedMessage,
         Func<Plaintext, TEnvelop> getEnvelope,
@@ -81,7 +134,7 @@ public class DirectSessionManager : IDirectSessionManager
         else
         {
             // Slow-path: iterate Pending pre-handshake entries and attempt decrypt per candidate.
-            await foreach (var record in _preHandshakeStore.EnumeratePendingAsync(selfId, cancellationToken))
+            await foreach (var record in _preHandshakeStore.EnumeratePendingAsync(selfId, cancellationToken).ConfigureAwait(false))
             {
                 // Reconstruct initiator ephemeral key used during pre-handshake
                 using var eph = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
@@ -213,7 +266,7 @@ public class DirectSessionManager : IDirectSessionManager
         
         if (_activeIdentityContext.Identity is null)
             throw new InvalidOperationException("Identity context not loaded");
-        await _sessionStore.SetSessionStateAsync(sessionId, state, _activeIdentityContext.Identity.SelfIdentityId);
+        await _sessionStore.SetSessionStateAsync(sessionId, state, _activeIdentityContext.Identity.SelfIdentityId).ConfigureAwait(false);
         _sessionLocks.TryAdd(sessionId, new SemaphoreSlim(1, 1));
     }
 
@@ -228,6 +281,8 @@ public class DirectSessionManager : IDirectSessionManager
         ECDiffieHellman privateKeyUsedInHandshake,
         SharedSecret sharedSecret)
     {
+        if (_activeIdentityContext.Identity is null)
+            throw new InvalidOperationException("Identity context not loaded");
         if (_cryptographyOptions.Value.EnableCryptographicMaterialLogging)
         {
             _logger.LogInformation("Responder establishing session with provided key : {LocalRatchetKey}, shared secret : {SharedSecret}", 
@@ -263,9 +318,8 @@ public class DirectSessionManager : IDirectSessionManager
                 Convert.ToBase64String(state.DhRatchetPrivateKey.Value));
         }
         
-        if (_activeIdentityContext.Identity is null)
-            throw new InvalidOperationException("Identity context not loaded");
-        await _sessionStore.SetSessionStateAsync(sessionId, state, _activeIdentityContext.Identity.SelfIdentityId);
+        
+        await _sessionStore.SetSessionStateAsync(sessionId, state, _activeIdentityContext.Identity.SelfIdentityId).ConfigureAwait(false);
         _sessionLocks.TryAdd(sessionId, new SemaphoreSlim(1, 1));
     }
 
@@ -284,7 +338,7 @@ public class DirectSessionManager : IDirectSessionManager
 
         // Ensure only one message is processed at a time for a given session to prevent race conditions.
         var semaphore = _sessionLocks.GetOrAdd(sessionId, new SemaphoreSlim(1, 1));
-        await semaphore.WaitAsync();
+        await semaphore.WaitAsync().ConfigureAwait(false);
 
         try
         {
@@ -292,7 +346,7 @@ public class DirectSessionManager : IDirectSessionManager
                 throw new InvalidOperationException("Identity context not loaded");
             _logger.LogInformation("Receive message for SessionId: {SessionId}", sessionId);
 
-            var sessionState = await _sessionStore.GetSessionStateAsync(sessionId, _activeIdentityContext.Identity.SelfIdentityId);
+            var sessionState = await _sessionStore.GetSessionStateAsync(sessionId, _activeIdentityContext.Identity.SelfIdentityId).ConfigureAwait(false);
             if (sessionState == null)
             {
                 throw new InvalidOperationException($"Double Ratchet session state for session {sessionId} not found.");
@@ -313,13 +367,13 @@ public class DirectSessionManager : IDirectSessionManager
             var decryptedPlaintext = session.Decrypt(encryptedMessage);
 
             // Save the updated state
-            await _sessionStore.SetSessionStateAsync(sessionId, session.GetState(), _activeIdentityContext.Identity.SelfIdentityId);
+            await _sessionStore.SetSessionStateAsync(sessionId, session.GetState(), _activeIdentityContext.Identity.SelfIdentityId).ConfigureAwait(false);
 
             // Centralize ratchet-key index upsert on successful decrypt
             if (decryptedPlaintext is not null)
             {
                 var header = encryptedMessage.GetHeader();
-                await _ratchetLookup.UpsertAsync(new Percolator.Network.DirectSessionId(sessionId.Value), _activeIdentityContext.Identity!.SelfIdentityId, header.PreKey, DateTimeOffset.UtcNow, CancellationToken.None);
+                await _ratchetLookup.UpsertAsync(new Percolator.Network.DirectSessionId(sessionId.Value), _activeIdentityContext.Identity!.SelfIdentityId, header.PreKey, DateTimeOffset.UtcNow, CancellationToken.None).ConfigureAwait(false);
             }
 
             if (decryptedPlaintext is null)
@@ -346,7 +400,7 @@ public class DirectSessionManager : IDirectSessionManager
     {
         // Ensure only one message is processed at a time for a given session to prevent race conditions.
         var semaphore = _sessionLocks.GetOrAdd(sessionId, new SemaphoreSlim(1, 1));
-        await semaphore.WaitAsync();
+        await semaphore.WaitAsync().ConfigureAwait(false);
 
         try
         {
@@ -355,7 +409,7 @@ public class DirectSessionManager : IDirectSessionManager
             
             _logger.LogInformation("Encrypt message for SessionId: {SessionId}", sessionId);
             
-            var sessionState = await _sessionStore.GetSessionStateAsync(sessionId, _activeIdentityContext.Identity.SelfIdentityId);
+            var sessionState = await _sessionStore.GetSessionStateAsync(sessionId, _activeIdentityContext.Identity.SelfIdentityId).ConfigureAwait(false);
             if (sessionState == null)
             {
                 throw new InvalidOperationException($"Double Ratchet session state for session {sessionId} not found.");
@@ -376,7 +430,7 @@ public class DirectSessionManager : IDirectSessionManager
             var encryptedMessage = session.Encrypt(plaintext);
 
             // Save the updated state
-            await _sessionStore.SetSessionStateAsync(sessionId, session.GetState(), _activeIdentityContext.Identity.SelfIdentityId);
+            await _sessionStore.SetSessionStateAsync(sessionId, session.GetState(), _activeIdentityContext.Identity.SelfIdentityId).ConfigureAwait(false);
 
             return encryptedMessage;
         }
@@ -399,11 +453,11 @@ public class DirectSessionManager : IDirectSessionManager
         var header = encryptedMessage.GetHeader();
 
         // Enumerate all known sessions for this identity and attempt trial decrypt
-        var sessionIds = await _sessionStore.GetAllSessionIdsAsync(selfIdentityId);
+        var sessionIds = await _sessionStore.GetAllSessionIdsAsync(selfIdentityId).ConfigureAwait(false);
         foreach (var sid in sessionIds)
         {
             // Load state
-            var state = await _sessionStore.GetSessionStateAsync(sid, selfIdentityId);
+            var state = await _sessionStore.GetSessionStateAsync(sid, selfIdentityId).ConfigureAwait(false);
             if (state is null)
             {
                 continue;
@@ -426,10 +480,10 @@ public class DirectSessionManager : IDirectSessionManager
             if (pt is not null)
             {
                 // Persist updated state
-                await _sessionStore.SetSessionStateAsync(sid, session.GetState(), selfIdentityId);
+                await _sessionStore.SetSessionStateAsync(sid, session.GetState(), selfIdentityId).ConfigureAwait(false);
 
                 // Upsert ratchet-key index mapping to keep the fast-path fresh
-                await _ratchetLookup.UpsertAsync(new Percolator.Network.DirectSessionId(sid.Value), selfIdentityId, header.PreKey, DateTimeOffset.UtcNow, CancellationToken.None);
+                await _ratchetLookup.UpsertAsync(new Percolator.Network.DirectSessionId(sid.Value), selfIdentityId, header.PreKey, DateTimeOffset.UtcNow, CancellationToken.None).ConfigureAwait(false);
 
                 return (sid, pt);
             }
@@ -495,7 +549,7 @@ public class DirectSessionManager : IDirectSessionManager
             ExpiresAtUtc: null,
             RemoteIdentityKeySpki: remoteIdentityKey.Value);
 
-        await _preHandshakeStore.SaveAsync(record, cancellationToken);
+        await _preHandshakeStore.SaveAsync(record, cancellationToken).ConfigureAwait(false);
         _logger.LogInformation("Saved initiator pre-handshake intent for recipient PKH length {Len}", recipientPublicKeyHash?.Length ?? 0);
 
         return firstMessage;

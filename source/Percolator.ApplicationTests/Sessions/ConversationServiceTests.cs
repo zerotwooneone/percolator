@@ -79,7 +79,9 @@ public class ConversationServiceTests
             _mockPeerConnectionRepository.Object,
             Options.Create(new TransportOptions { GrpcPort = 52382 }),
             _mockDirectSessionRepository.Object,
-            _mockPkhStore.Object
+            _mockPkhStore.Object,
+            NullLoggerFactory.Instance,
+            Options.Create(new CryptographyOptions())
         );
     }
 
@@ -97,21 +99,48 @@ public class ConversationServiceTests
         // Create valid crypto materials for the mock response
         using var remoteSigningKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         using var remoteEphemeralKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        // Prepare handshake response inputs first so we can build a decryptable ratchet message
+        var dummyBundle = new X3dPreKeyBundle
+        (
+            new RatchetIdentityKey(remoteSigningKey.ExportSubjectPublicKeyInfo()),
+            new PreKey(remoteEphemeralKey.PublicKey.ExportSubjectPublicKeyInfo()),
+            new OneTimeKey(new byte[32])
+        );
+        var sharedSecret = new CryptoSharedSecret(new byte[32]);
+        // IMPORTANT: Use the same private key that pairs with remoteEphemeralKey.PublicKey
+        var responderPrivate = remoteEphemeralKey;
+        var handshakeResponse = new HandshakeResponse(sharedSecret, dummyBundle, responderPrivate);
+        _mockX3dhOrchestrator
+            .Setup(o => o.CompleteHandshake(
+                It.IsAny<RatchetIdentityKey>(), 
+                It.IsAny<RatchetEphemeralKey>(),
+                It.IsAny<ECDiffieHellman>()))
+            .Returns(handshakeResponse);
+
+        // Build ResponsePayload bytes with only session_id
         var responsePayload = new EstablishDirectSessionResponse.Types.ResponsePayload
         {
-            EphemeralKey = ByteString.CopyFrom(remoteEphemeralKey.PublicKey.ExportSubjectPublicKeyInfo()),
             SessionId = Guid.NewGuid().ToString(),
-        };
-        var responsePayloadBytes = responsePayload.ToByteString();
-        var signature = remoteSigningKey.SignData(responsePayloadBytes.ToByteArray(), HashAlgorithmName.SHA256);
-        
+        }.ToByteString();
+
+        // Encrypt payload as an initiator to create a ratchet message decryptable by responder
+        using var initiatorEphemeral = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        var sessionLogger = NullLoggerFactory.Instance.CreateLogger<DoubleRatchetSession>();
+        using var initiator = DoubleRatchetSession.AsInitiator(
+            sharedSecret,
+            new RatchetIdentityKey(remoteSigningKey.ExportSubjectPublicKeyInfo()),
+            new PreKey(remoteEphemeralKey.PublicKey.ExportSubjectPublicKeyInfo()),
+            initiatorEphemeral,
+            sessionLogger,
+            Options.Create(new CryptographyOptions()));
+        var ratchetMessage = initiator.Encrypt(new Plaintext(responsePayload.ToByteArray()));
+
         var grpcResponse = new EstablishDirectSessionResponse
         {
             Response = new EstablishDirectSessionResponse.Types.Response
             {
                 IdentitySigningKey = ByteString.CopyFrom(remoteSigningKey.ExportSubjectPublicKeyInfo()),
-                ResponsePayload =  responsePayloadBytes,
-                PayloadSignature = ByteString.CopyFrom(signature)
+                RatchetMessage = ByteString.CopyFrom(ratchetMessage.Value)
             }
         };
         _mockGrpcSessionService.Setup(s => s.EstablishDirectSessionAsync(It.IsAny<DnsEndPoint>(), It.IsAny<EstablishDirectSessionRequest>()))
@@ -139,24 +168,7 @@ public class ConversationServiceTests
             .Setup(r => r.SaveAsync(It.IsAny<PeerConnection>()))
             .Returns(Task.CompletedTask);
 
-        // Setup X3DH orchestrator to return a shared secret
-        var dummyBundle = new X3dPreKeyBundle
-        (
-            new RatchetIdentityKey(new byte[32]),
-            new PreKey(new byte[32]),
-            new OneTimeKey(new byte[32])
-        );
-        var handshakeResponse = new HandshakeResponse(
-            new CryptoSharedSecret(new byte[32]),
-            dummyBundle,
-            ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256)
-        );
-        _mockX3dhOrchestrator
-            .Setup(o => o.CompleteHandshake(
-                It.IsAny<RatchetIdentityKey>(), 
-                It.IsAny<RatchetEphemeralKey>(),
-                It.IsAny<ECDiffieHellman>()))
-            .Returns(handshakeResponse);
+        // X3DH orchestrator already setup above for this test
 
         // Setup the one-time key provider to return a key
         var oneTimeKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
@@ -180,16 +192,39 @@ public class ConversationServiceTests
                 It.IsAny<ECDiffieHellman>()))
             .Returns(Task.CompletedTask);
 
+        // New overload: Establish session as responder by decrypting first message (first test)
+        _mockDirectSessionManager
+            .Setup(m => m.EstablishSessionAsResponderAsync(
+                It.IsAny<SessionRatchetMessage>(),
+                It.IsAny<Func<Plaintext, Percolator.Cryptography.SessionId>>(),
+                It.IsAny<RatchetIdentityKey>(),
+                It.IsAny<PreKey>(),
+                It.IsAny<ECDiffieHellman>(),
+                It.IsAny<CryptoSharedSecret>()))
+            .ReturnsAsync((SessionRatchetMessage msg,
+                            Func<Plaintext, Percolator.Cryptography.SessionId> getSessionId,
+                            RatchetIdentityKey _,
+                            PreKey __,
+                            ECDiffieHellman ___,
+                            CryptoSharedSecret ____) 
+                =>
+                {
+                    var pt = new Plaintext(responsePayload.ToByteArray());
+                    var sid = getSessionId(pt);
+                    return (sid, pt);
+                });
+
         // Act
         var result = await _service.CreateNewDirectSessionAsync(endpoint, peer);
 
         // Assert
         Assert.That(result, Is.Not.EqualTo(default(DirectSessionId)));
         _mockDirectSessionManager.Verify(m => m.EstablishSessionAsResponderAsync(
-            It.IsAny<Percolator.Cryptography.SessionId>(), 
-            It.IsAny<RatchetIdentityKey>(), 
+            It.IsAny<SessionRatchetMessage>(),
+            It.IsAny<Func<Plaintext, Percolator.Cryptography.SessionId>>(),
+            It.IsAny<RatchetIdentityKey>(),
             It.IsAny<PreKey>(),
-            It.IsAny<ECDiffieHellman>(), 
+            It.IsAny<ECDiffieHellman>(),
             It.IsAny<CryptoSharedSecret>()), Times.Once);
         
         // Verify that our services were called correctly
@@ -217,23 +252,47 @@ public class ConversationServiceTests
         var peer = new Peer(new IdentityPeerId(Guid.NewGuid()), peerName);
         
         // Create valid crypto materials for the mock response
-        using var remoteSigningKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
-        using var remoteEphemeralKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        var responsePayload = new EstablishDirectSessionResponse.Types.ResponsePayload
+        using var remoteSigningKey2 = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        using var remoteEphemeralKey2 = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+
+        var sharedSecret2 = new CryptoSharedSecret(new byte[32]);
+        var dummyBundle2 = new X3dPreKeyBundle(
+            new RatchetIdentityKey(remoteSigningKey2.ExportSubjectPublicKeyInfo()),
+            new PreKey(remoteEphemeralKey2.PublicKey.ExportSubjectPublicKeyInfo()),
+            new OneTimeKey(new byte[32])
+        );
+        // IMPORTANT: Use the same private key that pairs with remoteEphemeralKey2.PublicKey
+        var responderPrivate2 = remoteEphemeralKey2;
+        var handshakeResponse2 = new HandshakeResponse(sharedSecret2, dummyBundle2, responderPrivate2);
+        _mockX3dhOrchestrator
+            .Setup(o => o.CompleteHandshake(
+                It.IsAny<RatchetIdentityKey>(), 
+                It.IsAny<RatchetEphemeralKey>(),
+                It.IsAny<ECDiffieHellman>()))
+            .Returns(handshakeResponse2);
+
+        var responsePayload2 = new EstablishDirectSessionResponse.Types.ResponsePayload
         {
-            EphemeralKey = ByteString.CopyFrom(remoteEphemeralKey.PublicKey.ExportSubjectPublicKeyInfo()),
             SessionId = sessionId.ToString(),
-        };
-        var responsePayloadBytes = responsePayload.ToByteString();
-        var signature = remoteSigningKey.SignData(responsePayloadBytes.ToByteArray(), HashAlgorithmName.SHA256);
+        }.ToByteString();
+
+        using var initiatorEphemeral2 = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        var sessionLogger2 = NullLoggerFactory.Instance.CreateLogger<DoubleRatchetSession>();
+        using var initiator2 = DoubleRatchetSession.AsInitiator(
+            sharedSecret2,
+            new RatchetIdentityKey(remoteSigningKey2.ExportSubjectPublicKeyInfo()),
+            new PreKey(remoteEphemeralKey2.PublicKey.ExportSubjectPublicKeyInfo()),
+            initiatorEphemeral2,
+            sessionLogger2,
+            Options.Create(new CryptographyOptions()));
+        var ratchetMessage2 = initiator2.Encrypt(new Plaintext(responsePayload2.ToByteArray()));
 
         var grpcResponse = new EstablishDirectSessionResponse
         {
             Response = new EstablishDirectSessionResponse.Types.Response
             {
-                IdentitySigningKey = ByteString.CopyFrom(remoteSigningKey.ExportSubjectPublicKeyInfo()),
-                ResponsePayload =  responsePayloadBytes,
-                PayloadSignature = ByteString.CopyFrom(signature)
+                IdentitySigningKey = ByteString.CopyFrom(remoteSigningKey2.ExportSubjectPublicKeyInfo()),
+                RatchetMessage = ByteString.CopyFrom(ratchetMessage2.Value)
             }
         };
         _mockGrpcSessionService.Setup(s => s.EstablishDirectSessionAsync(It.IsAny<DnsEndPoint>(), It.IsAny<EstablishDirectSessionRequest>()))
@@ -245,24 +304,13 @@ public class ConversationServiceTests
             .Returns(Task.CompletedTask);
 
         // Setup X3DH orchestrator to return a shared secret
-        var ratchetIdentityKey = new RatchetIdentityKey(new byte[32]);
-        var dummyBundle = new X3dPreKeyBundle
-        (
-            ratchetIdentityKey,
-            new PreKey(new byte[32]),
-            new OneTimeKey(new byte[32])
-        );
-        var handshakeResponse = new HandshakeResponse(
-            new CryptoSharedSecret(new byte[32]),
-            dummyBundle,
-            ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256)
-        );
+        // Important: Do not override the matching handshake response; ensure the orchestrator returns handshakeResponse2
         _mockX3dhOrchestrator
             .Setup(o => o.CompleteHandshake(
                 It.IsAny<RatchetIdentityKey>(), 
                 It.IsAny<RatchetEphemeralKey>(),
                 It.IsAny<ECDiffieHellman>()))
-            .Returns(handshakeResponse);
+            .Returns(handshakeResponse2);
 
         // Setup the one-time key provider to return a key
         using var oneTimeKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
@@ -279,7 +327,28 @@ public class ConversationServiceTests
                 It.IsAny<CryptoSharedSecret>(), 
                 It.IsAny<ECDiffieHellman>()))
             .Returns(Task.CompletedTask);
-    
+        
+        // New overload: Establish session as responder by decrypting first message (second test)
+        _mockDirectSessionManager
+            .Setup(m => m.EstablishSessionAsResponderAsync(
+                It.IsAny<SessionRatchetMessage>(),
+                It.IsAny<Func<Plaintext, Percolator.Cryptography.SessionId>>(),
+                It.IsAny<RatchetIdentityKey>(),
+                It.IsAny<PreKey>(),
+                It.IsAny<ECDiffieHellman>(),
+                It.IsAny<CryptoSharedSecret>()))
+            .ReturnsAsync((SessionRatchetMessage msg,
+                            Func<Plaintext, Percolator.Cryptography.SessionId> getSessionId,
+                            RatchetIdentityKey _,
+                            PreKey __,
+                            ECDiffieHellman ___,
+                            CryptoSharedSecret ____) =>
+            {
+                var pt = new Plaintext(responsePayload2.ToByteArray());
+                var sid = getSessionId(pt);
+                return (sid, pt);
+            });
+        
         // Act
         var result = await _service.CreateNewDirectSessionAsync(endpoint, peer);
         
@@ -292,11 +361,12 @@ public class ConversationServiceTests
         
         // Verify session was established
         _mockDirectSessionManager.Verify(m => m.EstablishSessionAsResponderAsync(
-            It.Is<Percolator.Cryptography.SessionId>(id => id.Value == sessionId),
+            It.IsAny<SessionRatchetMessage>(),
+            It.IsAny<Func<Plaintext, Percolator.Cryptography.SessionId>>(),
             It.IsAny<RatchetIdentityKey>(), 
             It.IsAny<PreKey>(), 
             It.IsAny<ECDiffieHellman>(),
-            It.Is<CryptoSharedSecret>(s => s.Value.SequenceEqual(handshakeResponse.SharedSecret.Value))),
+            It.Is<CryptoSharedSecret>(s => s.Value.SequenceEqual(handshakeResponse2.SharedSecret.Value))),
             Times.Once);
             
         // Verify gRPC service was called

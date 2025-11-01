@@ -20,6 +20,7 @@ namespace Percolator.Application.Network
         public required string SessionId { get; init; }
         public required byte[] ResponsePayloadBytes { get; init; }
         public required byte[] IdentitySigningKeyBytes { get; init; }
-        public required byte[] PayloadSignatureBytes { get; init; }
+        public required byte[] RemoteEphemeralKeyBytes { get; init; }
+        public required byte[] RatchetMessageBytes { get; init; }
     }
 }

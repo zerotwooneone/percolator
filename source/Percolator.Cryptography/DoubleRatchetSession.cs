@@ -299,7 +299,9 @@ public class DoubleRatchetSession : IDisposable
 
         // Determine if the message is from a new chain (indicated by a new ratchet key)
         // or from the current receiving chain
-        bool isFromNewChain = _remotePreKeyKey is null || !_remotePreKeyKey.Equals(header.PreKey);
+        // Treat first inbound as new chain if we have no receiving chain yet,
+        // even when the header key equals the stored remote pre-key.
+        bool isFromNewChain = _receivingChainKey is null || _remotePreKeyKey is null || !_remotePreKeyKey.Equals(header.PreKey);
 
         _logger.LogDebug("Message is from {ChainType} chain. Message counter={Counter}, Our receiving counter={ReceivingCounter}", 
             isFromNewChain ? "new" : "current", header.Counter, _receivingCounter);
