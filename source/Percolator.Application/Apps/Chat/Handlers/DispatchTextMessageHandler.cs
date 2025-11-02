@@ -50,7 +50,7 @@ public sealed class DispatchTextMessageHandler : IRequestHandler<DispatchTextMes
             {
                 MessageId = ByteString.CopyFrom(request.MessageId.ToByteArray()),
                 Content = request.Content,
-                SentTimestampUtc = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTime(request.SentTimestampUtc)
+                SentTimestampUtc = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTimeOffset(request.SentTimestampUtc)
             }
         };
 
