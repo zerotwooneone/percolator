@@ -1,13 +1,17 @@
+using System;
 using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
 using MediatR;
 using Moq;
+using Percolator.Application.Apps.Chat.Handlers;
+using Percolator.Application.Network;
 using Percolator.Chat;
 using Percolator.Chat.App;
 using Percolator.Chat.App.Commands;
 using Percolator.Chat.ValueObjects;
 using Percolator.Chat.Events;
+using Percolator.Contracts;
 
 namespace Percolator.Chat.Tests;
 
@@ -17,6 +21,7 @@ public class PostTextMessageHandlerTests
     private Mock<IConversationResolver> _resolver = null!;
     private Mock<IChatMessageWriter> _writer = null!;
     private Mock<IPublisher> _publisher = null!;
+    private Mock<IRemoteEnvelopeSender> _sender = null!;
 
     [SetUp]
     public void SetUp()
@@ -24,6 +29,7 @@ public class PostTextMessageHandlerTests
         _resolver = new Mock<IConversationResolver>(MockBehavior.Strict);
         _writer = new Mock<IChatMessageWriter>(MockBehavior.Strict);
         _publisher = new Mock<IPublisher>(MockBehavior.Loose);
+        _sender = new Mock<IRemoteEnvelopeSender>(MockBehavior.Loose);
     }
 
     private static Conversation MakeConversation()
@@ -56,7 +62,12 @@ public class PostTextMessageHandlerTests
             .Returns(Task.CompletedTask);
 
         _publisher
-            .Setup(p => p.Publish(It.IsAny<Percolator.Chat.Events.TextMessagePostedEvent>(), It.IsAny<CancellationToken>()))
+            .Setup(p => p.Publish(It.IsAny<TextMessagePostedEvent>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        // Allow network send fan-out via IRemoteEnvelopeSender to proceed without affecting assertions
+        _sender
+            .Setup(s => s.SendChatEnvelopeToPeerAsync(It.IsAny<Percolator.Contracts.ChatEnvelope>(), It.IsAny<RecipientRoute>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
         // Some MediatR versions may route through the non-generic overload
@@ -65,8 +76,9 @@ public class PostTextMessageHandlerTests
             .Returns(Task.CompletedTask);
 
         var handler = new PostTextMessageHandler(
-            _resolver.Object, 
+            _resolver.Object,
             _writer.Object,
+            _sender.Object,
             _publisher.Object);
         var cmd = new PostTextMessageCommand(lookup, messageId, content, sentAt);
 
@@ -86,8 +98,9 @@ public class PostTextMessageHandlerTests
         var lookup = new ConversationLookupKey(null, null, null);
         var messageId = new MessageId(Guid.NewGuid());
         var handler = new PostTextMessageHandler(
-            _resolver.Object, 
+            _resolver.Object,
             _writer.Object,
+            _sender.Object,
             _publisher.Object);
         var cmd = new PostTextMessageCommand(lookup, messageId, "x", DateTimeOffset.UtcNow);
 

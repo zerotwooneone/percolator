@@ -2,6 +2,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Percolator.Application.Configuration;
 using Percolator.Application.Apps.Chat;
+using Percolator.Application.Apps.Chat.Handlers;
 using Percolator.Application.Cryptography;
 using Percolator.Application.Identity;
 using Percolator.Application.KeyExchange;

@@ -6,6 +6,6 @@ namespace Percolator.Application.Apps.Chat;
 public sealed record DispatchTextMessageCommand(
     Guid MessageId,
     string Content,
-    DateTime SentTimestampUtc,
+    DateTimeOffset SentTimestampUtc,
     IReadOnlyList<PeerId> RecipientPeerIds
 ) : IRequest;
