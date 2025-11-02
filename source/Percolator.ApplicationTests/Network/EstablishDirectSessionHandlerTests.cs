@@ -56,7 +56,7 @@ namespace Percolator.ApplicationTests.Network
             var signedPayload = new EstablishDirectSessionRequest.Types.DirectInitiatorPayload
             {
                 CallbackPort = 5001,
-                SignedPreKey = ByteString.CopyFrom(preKeyBytes)
+                ResponderEphemeralKey = ByteString.CopyFrom(preKeyBytes)
             }.ToByteString();
 
             // Signature over payload by initiator (value not verified by mock)

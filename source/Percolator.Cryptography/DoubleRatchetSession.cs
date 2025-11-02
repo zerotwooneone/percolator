@@ -10,6 +10,7 @@ public class DoubleRatchetSession : IDisposable
 
     private RootKey _rootKey;
     private bool _ratchetFlag = false; 
+    private bool _isFirstRatchet = false;
     private ChainKey? _sendingChainKey;
     private ChainKey? _receivingChainKey;
     private ulong _sendingCounter;
@@ -84,7 +85,7 @@ public class DoubleRatchetSession : IDisposable
     public static DoubleRatchetSession AsInitiator(
         SharedSecret sharedSecret,
         RatchetIdentityKey remoteIdentityPublicKey,
-        RatchetEphemeralKey remotePreKey,
+        RatchetEphemeralKey remoteEphemeralKey,
         ECDiffieHellman localEphemeralKey,
         ILogger<DoubleRatchetSession> logger,
         IOptions<CryptographyOptions> cryptographyOptions)
@@ -99,7 +100,7 @@ public class DoubleRatchetSession : IDisposable
         session._rootKey = new RootKey(sharedSecret.Value);
 
         // 2. Store the public keys of the remote party (the responder).
-        session._remotePreKeyKey = remotePreKey;
+        session._remotePreKeyKey = remoteEphemeralKey;
 
         // 3. Initialize all counters and flags to their default starting state.
         //    No messages have been sent or received, and no ratchet has occurred yet.
@@ -139,6 +140,7 @@ public class DoubleRatchetSession : IDisposable
         // Set the local ratchet key provided by the caller
         session._dhRatchetKey = localRatchetKey;
         session._remotePreKeyKey = remotePreKey;
+        session._isFirstRatchet = true;
 
         if (cryptographyOptions.Value.EnableCryptographicMaterialLogging)
         {
@@ -503,9 +505,16 @@ public class DoubleRatchetSession : IDisposable
                 Convert.ToBase64String(_receivingChainKey.Value));
         }
 
-        // We also need to generate a new key pair for OUR next message, but we don't use it yet.
-        _dhRatchetKey.Dispose(); // Dispose of the old key pair.
-        _dhRatchetKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        // if (!_isFirstRatchet)
+        // {
+            _dhRatchetKey.Dispose(); // Dispose of the old key pair.
+            _dhRatchetKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        // }
+        // else
+        // {
+        //     // This was the first ratchet, so we now flip the flag.
+        //     _isFirstRatchet = false;
+        // }
 
         // Reset the receiving counter for this new chain.
         _receivingCounter = 0;

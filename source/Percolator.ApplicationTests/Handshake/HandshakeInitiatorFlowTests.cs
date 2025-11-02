@@ -361,7 +361,7 @@ public class HandshakeInitiatorFlowTests
                 SharedSecret: new SharedSecret(new byte[] { 0x44, 0x55 }),
                 ResponderBundle: new X3dPreKeyBundle(
                     IdentitySigningKey: new RatchetIdentityKey(ik.PublicKey.ExportSubjectPublicKeyInfo()),
-                    SignedPreKey: new RatchetEphemeralKey(spk.PublicKey.ExportSubjectPublicKeyInfo()),
+                    EphemeralKey: new RatchetEphemeralKey(spk.PublicKey.ExportSubjectPublicKeyInfo()),
                     OneTimePreKey: null),
                 ResponderPrivateKeyUsed: responderPriv));
 

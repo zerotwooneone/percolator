@@ -23,15 +23,16 @@ public class DhtEndToEndTests : IntegrationTestBase
 
         public async Task<EstablishDirectSessionResponse> EstablishDirectSessionAsync(DnsEndPoint endpoint, EstablishDirectSessionRequest request)
         {
+            // Forward the request into the host process via MediatR to exercise application behavior only
             var mediator = _hostProvider.GetRequiredService<IMediator>();
-            var payload = EstablishDirectSessionRequest.Types.DirectInitiatorPayload.Parser.ParseFrom(request.InitiatorBundle.SignedPayload);
+            var payload = EstablishDirectSessionRequest.Types.DirectInitiatorPayload.Parser.ParseFrom(request.ResponderBundle.SignedPayload);
             var command = new EstablishDirectSessionCommand
             {
-                IdentitySigningKeyBytes = request.InitiatorBundle.IdentitySigningKey.ToByteArray(),
-                SignedPayloadBytes = request.InitiatorBundle.SignedPayload.ToByteArray(),
-                PayloadSignatureBytes = request.InitiatorBundle.PayloadSignature.ToByteArray(),
-                OneTimePreKeyBytes = request.InitiatorBundle.HasOneTimePreKey ? request.InitiatorBundle.OneTimePreKey.ToByteArray() : null,
-                PreKeyBytes = payload.SignedPreKey.ToByteArray(),
+                IdentitySigningKeyBytes = request.ResponderBundle.IdentitySigningKey.ToByteArray(),
+                SignedPayloadBytes = request.ResponderBundle.SignedPayload.ToByteArray(),
+                PayloadSignatureBytes = request.ResponderBundle.PayloadSignature.ToByteArray(),
+                OneTimePreKeyBytes = request.ResponderBundle.HasOneTimePreKey ? request.ResponderBundle.OneTimePreKey.ToByteArray() : null,
+                PreKeyBytes = payload.ResponderEphemeralKey.ToByteArray(),
                 PeerEndPoint = endpoint,
                 ClientCertificate = null
             };
@@ -59,6 +60,7 @@ public class DhtEndToEndTests : IntegrationTestBase
             Percolator.Cryptography.SessionRatchetMessage message,
             CancellationToken cancellationToken = default)
         {
+            // Deliver the opaque DR message to the host via MediatR
             var mediator = _hostProvider.GetRequiredService<IMediator>();
             var cmd = new DeliverOpaqueMessageCommand
             {
@@ -89,6 +91,7 @@ public class DhtEndToEndTests : IntegrationTestBase
         var alicePort = GetAvailablePort();
         using var alice = await CreateAndInitializeHostAsync(alicePort, "DhtE2E-Alice", identityName: "alice", additionalServiceRegistration: services =>
         {
+            // Replace network-facing services with loopback fakes targeting the host
             services.Replace(ServiceDescriptor.Singleton<IGrpcSessionService>(sp => new GrpcSessionLoopback(host.Services)));
             services.Replace(ServiceDescriptor.Singleton<IMessageTransportService>(sp => new LoopbackTransport(host.Services)));
         });
@@ -108,26 +111,37 @@ public class DhtEndToEndTests : IntegrationTestBase
 
         // Register target peer name "host" on Alice and Bob using the host's SPKI
         var hostSpki = GetSpki(host);
+        Console.WriteLine($"Host SPKI: {hostSpki}");
+        var aliceSpki = GetSpki(alice);
+        Console.WriteLine($"Alice SPKI: {aliceSpki}");
+        var bobSpki = GetSpki(bob);
+        Console.WriteLine($"Bob SPKI: {bobSpki}");
+        
         await aliceMediator.Send(new SetPeerNameByPublicKeyCommand("host", hostSpki));
         await bobMediator.Send(new SetPeerNameByPublicKeyCommand("host", hostSpki));
 
-        // Act 1: Alice probes Host (Ping + FindNode) -> expect initially no peers
+        Console.WriteLine($"about to sent Alice probe");
+        // Act 1: Alice probes Host (Ping + FindNode) -> expect initially no peers or empty list
         var aliceProbe1 = await aliceMediator.Send(new DhtProbeCommand(hostEndpoint, "host", SelfIdentityName: null));
 
+        Console.WriteLine($"about to sent Bob probe");
         // Act 2: Bob probes Host (this will at least Ping; Host should record Bob)
         var bobProbe = await bobMediator.Send(new DhtProbeCommand(hostEndpoint, "host", SelfIdentityName: null));
 
+        Console.WriteLine($"about to sent Alice 2nd probe");
         // Act 3: Alice probes Host again; Host should now return peers (including Bob)
         var aliceProbe2 = await aliceMediator.Send(new DhtProbeCommand(hostEndpoint, "host", SelfIdentityName: null));
 
-        // Assert
+        // Assert (intentionally loose to avoid brittleness)
         aliceProbe1.Should().NotBeNull();
+        aliceProbe1.CloserPeers.Should().NotBeNull();
         aliceProbe1.CloserPeers.Count.Should().BeGreaterThanOrEqualTo(0); // allow 0 at first
 
         bobProbe.Should().NotBeNull();
-        // no strict assertion on bobProbe content; it may or may not include entries depending on Host state
+        bobProbe.CloserPeers.Should().NotBeNull();
 
         aliceProbe2.Should().NotBeNull();
+        aliceProbe2.CloserPeers.Should().NotBeNull();
         aliceProbe2.CloserPeers.Count.Should().BeGreaterThan(0);
     }
 

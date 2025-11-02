@@ -31,7 +31,7 @@ public class X3DHOrchestrator : IX3DHOrchestrator
         try
         {
             _logger.LogDebug("Starting handshake with remote bundle. SignedPreKey length: {Length}, IdentityKey length: {IdentityLength}",
-                remotePreKeyBundle.SignedPreKey.Value.Length,
+                remotePreKeyBundle.EphemeralKey.Value.Length,
                 remotePreKeyBundle.IdentitySigningKey.Value.Length);
                 
             if (remotePreKeyBundle.OneTimePreKey != null)

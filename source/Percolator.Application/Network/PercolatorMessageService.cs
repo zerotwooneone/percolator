@@ -24,7 +24,7 @@ namespace Percolator.Application.Network
         public override async Task<EstablishDirectSessionResponse> EstablishDirectSession(EstablishDirectSessionRequest request, ServerCallContext context)
         {
             // Map Protobuf to app command
-            var payload = EstablishDirectSessionRequest.Types.DirectInitiatorPayload.Parser.ParseFrom(request.InitiatorBundle.SignedPayload);
+            var payload = EstablishDirectSessionRequest.Types.DirectInitiatorPayload.Parser.ParseFrom(request.ResponderBundle.SignedPayload);
             if (!payload.HasCallbackPort || payload.CallbackPort < 1024 || payload.CallbackPort > 65535)
             {
                 throw new RpcException(new Status(StatusCode.FailedPrecondition, $"Invalid callback port: {payload.CallbackPort}"));
@@ -43,11 +43,11 @@ namespace Percolator.Application.Network
 
             var command = new EstablishDirectSessionCommand
             {
-                IdentitySigningKeyBytes = request.InitiatorBundle.IdentitySigningKey.ToByteArray(),
-                SignedPayloadBytes = request.InitiatorBundle.SignedPayload.ToByteArray(),
-                PayloadSignatureBytes = request.InitiatorBundle.PayloadSignature.ToByteArray(),
-                OneTimePreKeyBytes = request.InitiatorBundle.HasOneTimePreKey ? request.InitiatorBundle.OneTimePreKey.ToByteArray() : null,
-                PreKeyBytes = payload.SignedPreKey.ToByteArray(),
+                IdentitySigningKeyBytes = request.ResponderBundle.IdentitySigningKey.ToByteArray(),
+                SignedPayloadBytes = request.ResponderBundle.SignedPayload.ToByteArray(),
+                PayloadSignatureBytes = request.ResponderBundle.PayloadSignature.ToByteArray(),
+                OneTimePreKeyBytes = request.ResponderBundle.HasOneTimePreKey ? request.ResponderBundle.OneTimePreKey.ToByteArray() : null,
+                PreKeyBytes = payload.ResponderEphemeralKey.ToByteArray(),
                 ClientCertificate = clientCertificate,
                 PeerEndPoint = peerEndPoint
             };

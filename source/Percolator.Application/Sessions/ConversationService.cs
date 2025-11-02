@@ -120,7 +120,7 @@ namespace Percolator.Application.Sessions
                 var directPayload = new EstablishDirectSessionRequest.Types.DirectInitiatorPayload
                 {
                     CallbackPort = (uint)_transportOptions.Value.GrpcPort,
-                    SignedPreKey = ByteString.CopyFrom(signedPreKeyPublicBytes)
+                    ResponderEphemeralKey = ByteString.CopyFrom(signedPreKeyPublicBytes)
                 };
 
                 var signedPayload = directPayload.ToByteString();
@@ -136,7 +136,7 @@ namespace Percolator.Application.Sessions
                 var oneTimePreKey = _oneTimeKeyProvider.PopOneTimeKey();
                 var request = new EstablishDirectSessionRequest
                 {
-                    InitiatorBundle = new ContractsPreKeyBundle
+                    ResponderBundle = new ContractsPreKeyBundle
                     {
                         SignedPayload = signedPayload,
                         IdentitySigningKey = Google.Protobuf.ByteString.CopyFrom(_activeIdentityContext.Keys
@@ -214,7 +214,7 @@ namespace Percolator.Application.Sessions
                     firstMessage,
                     GetSessionId,
                     new RatchetIdentityKey(response.InitiatorIdentityKey.ToByteArray()),
-                    new RatchetEphemeralKey(initiatorEphemeralKey),
+                    new RatchetEphemeralKey(response.InitiatorEphemeralKey.ToByteArray()),
                     handshakeResult.ResponderPrivateKeyUsed,
                     new SharedSecret(handshakeResult.SharedSecret.Value)
                 ).ConfigureAwait(false);

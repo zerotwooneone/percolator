@@ -27,14 +27,14 @@ public class Phase17CommandsOnlyTests : IntegrationTestBase
         public async Task<EstablishDirectSessionResponse> EstablishDirectSessionAsync(DnsEndPoint endpoint, EstablishDirectSessionRequest request)
         {
             var mediator = _hostProvider.GetRequiredService<IMediator>();
-            var payload = EstablishDirectSessionRequest.Types.DirectInitiatorPayload.Parser.ParseFrom(request.InitiatorBundle.SignedPayload);
+            var payload = EstablishDirectSessionRequest.Types.DirectInitiatorPayload.Parser.ParseFrom(request.ResponderBundle.SignedPayload);
             var cmd = new EstablishDirectSessionCommand
             {
-                IdentitySigningKeyBytes = request.InitiatorBundle.IdentitySigningKey.ToByteArray(),
-                SignedPayloadBytes = request.InitiatorBundle.SignedPayload.ToByteArray(),
-                PayloadSignatureBytes = request.InitiatorBundle.PayloadSignature.ToByteArray(),
-                OneTimePreKeyBytes = request.InitiatorBundle.HasOneTimePreKey ? request.InitiatorBundle.OneTimePreKey.ToByteArray() : null,
-                PreKeyBytes = payload.SignedPreKey.ToByteArray(),
+                IdentitySigningKeyBytes = request.ResponderBundle.IdentitySigningKey.ToByteArray(),
+                SignedPayloadBytes = request.ResponderBundle.SignedPayload.ToByteArray(),
+                PayloadSignatureBytes = request.ResponderBundle.PayloadSignature.ToByteArray(),
+                OneTimePreKeyBytes = request.ResponderBundle.HasOneTimePreKey ? request.ResponderBundle.OneTimePreKey.ToByteArray() : null,
+                PreKeyBytes = payload.ResponderEphemeralKey.ToByteArray(),
                 PeerEndPoint = endpoint,
                 ClientCertificate = null
             };

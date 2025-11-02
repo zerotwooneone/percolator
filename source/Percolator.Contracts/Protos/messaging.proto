@@ -85,15 +85,15 @@ message EstablishDirectSessionRequest {
     message DirectInitiatorPayload {
         optional uint32 version = 1;
         // The public part of the ephemeral key for this handshake.
-        optional bytes signed_pre_key = 2;
+        optional bytes responder_ephemeral_key = 2;
 
         // The port the peer is listening on for a direct connection.
         optional uint32 callback_port = 3;
     }
     // The protocol version.
     optional uint32 version = 1;
-    // The initiator's pre-key bundle.
-    optional PreKeyBundle initiator_bundle = 2;
+    // The responder's pre-key bundle.
+    optional PreKeyBundle responder_bundle = 2;
 }
 
 message EstablishDirectSessionResponse {

@@ -34,14 +34,14 @@ namespace Percolator.ApplicationIntegrationTests.ChatMessaging
                 // Route to the destination node determined by the endpoint
                 var provider = _resolver(endpoint) ?? throw new InvalidOperationException($"No destination for endpoint {endpoint}");
                 var mediator = provider.GetRequiredService<IMediator>();
-                var payload = EstablishDirectSessionRequest.Types.DirectInitiatorPayload.Parser.ParseFrom(request.InitiatorBundle.SignedPayload);
+                var payload = EstablishDirectSessionRequest.Types.DirectInitiatorPayload.Parser.ParseFrom(request.ResponderBundle.SignedPayload);
                 var command = new EstablishDirectSessionCommand
                 {
-                    IdentitySigningKeyBytes = request.InitiatorBundle.IdentitySigningKey.ToByteArray(),
-                    SignedPayloadBytes = request.InitiatorBundle.SignedPayload.ToByteArray(),
-                    PayloadSignatureBytes = request.InitiatorBundle.PayloadSignature.ToByteArray(),
-                    OneTimePreKeyBytes = request.InitiatorBundle.HasOneTimePreKey ? request.InitiatorBundle.OneTimePreKey.ToByteArray() : null,
-                    PreKeyBytes = payload.SignedPreKey.ToByteArray(),
+                    IdentitySigningKeyBytes = request.ResponderBundle.IdentitySigningKey.ToByteArray(),
+                    SignedPayloadBytes = request.ResponderBundle.SignedPayload.ToByteArray(),
+                    PayloadSignatureBytes = request.ResponderBundle.PayloadSignature.ToByteArray(),
+                    OneTimePreKeyBytes = request.ResponderBundle.HasOneTimePreKey ? request.ResponderBundle.OneTimePreKey.ToByteArray() : null,
+                    PreKeyBytes = payload.ResponderEphemeralKey.ToByteArray(),
                     PeerEndPoint = endpoint,
                     ClientCertificate = null
                 };

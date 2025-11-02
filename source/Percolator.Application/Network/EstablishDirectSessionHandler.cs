@@ -114,7 +114,6 @@ namespace Percolator.Application.Network
             // Derive shared secret (Initiator)
             _logger.LogInformation("Processing X3DH handshake with initiator bundle. Examining bundle properties...");
             var ephemeralKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-
             var remotePreKey = new RatchetEphemeralKey(request.PreKeyBytes);
             var prekeyBundle = new X3dPreKeyBundle(
                 remoteIdentityKey,
@@ -157,10 +156,13 @@ namespace Percolator.Application.Network
             // this message will contain the session ID and the ephemeral key we used to create the session.
             // The return type of the message should be SessionRatchetMessage
             var cryptoSessionId = new SessionId(directSessionId.Value);
+            var remoteEpemeral = request.OneTimePreKeyBytes is null
+                ? new RatchetEphemeralKey(request.PreKeyBytes)
+                : new RatchetEphemeralKey(request.OneTimePreKeyBytes);
             await _sessionManager.EstablishSessionAsInitiatorAsync(
                 cryptoSessionId,
                 remoteIdentityKey,
-                remotePreKey,
+                remoteEpemeral,
                 sharedSecret,
                 ephemeralKey).ConfigureAwait(false);
             _logger.LogInformation("Successfully established session {SessionId} with peer {PeerId}", cryptoSessionId, remotePeer.Id);
