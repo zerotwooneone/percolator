@@ -6,11 +6,11 @@ namespace Percolator.Application.Network
 {
     public sealed class EstablishDirectSessionCommand : IRequest<EstablishDirectSessionResult>
     {
-        public required byte[] IdentitySigningKeyBytes { get; init; }
+        public required byte[] RemoteIdentityKeyBytes { get; init; }
         public required byte[] SignedPayloadBytes { get; init; }
         public required byte[] PayloadSignatureBytes { get; init; }
         public byte[]? OneTimePreKeyBytes { get; init; }
-        public required byte[] PreKeyBytes { get; init; }
+        public required byte[] RemoteEphemeral { get; init; }
         public X509Certificate2? ClientCertificate { get; init; }
         public required DnsEndPoint PeerEndPoint { get; init; }
     }

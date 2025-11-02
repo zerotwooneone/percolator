@@ -64,11 +64,11 @@ namespace Percolator.ApplicationTests.Network
 
             var cmd = new EstablishDirectSessionCommand
             {
-                IdentitySigningKeyBytes = initiatorSpki,
+                RemoteIdentityKeyBytes = initiatorSpki,
                 SignedPayloadBytes = signedPayload.ToByteArray(),
                 PayloadSignatureBytes = payloadSig,
                 OneTimePreKeyBytes = null,
-                PreKeyBytes = preKeyBytes,
+                RemoteEphemeral = preKeyBytes,
                 ClientCertificate = null,
                 PeerEndPoint = new DnsEndPoint("127.0.0.1", 5001)
             };

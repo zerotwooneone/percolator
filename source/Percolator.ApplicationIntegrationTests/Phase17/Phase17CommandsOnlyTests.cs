@@ -30,11 +30,11 @@ public class Phase17CommandsOnlyTests : IntegrationTestBase
             var payload = EstablishDirectSessionRequest.Types.DirectInitiatorPayload.Parser.ParseFrom(request.ResponderBundle.SignedPayload);
             var cmd = new EstablishDirectSessionCommand
             {
-                IdentitySigningKeyBytes = request.ResponderBundle.IdentitySigningKey.ToByteArray(),
+                RemoteIdentityKeyBytes = request.ResponderBundle.IdentitySigningKey.ToByteArray(),
                 SignedPayloadBytes = request.ResponderBundle.SignedPayload.ToByteArray(),
                 PayloadSignatureBytes = request.ResponderBundle.PayloadSignature.ToByteArray(),
                 OneTimePreKeyBytes = request.ResponderBundle.HasOneTimePreKey ? request.ResponderBundle.OneTimePreKey.ToByteArray() : null,
-                PreKeyBytes = payload.ResponderEphemeralKey.ToByteArray(),
+                RemoteEphemeral = payload.ResponderEphemeralKey.ToByteArray(),
                 PeerEndPoint = endpoint,
                 ClientCertificate = null
             };

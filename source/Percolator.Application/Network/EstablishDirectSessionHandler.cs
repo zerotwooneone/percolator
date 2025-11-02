@@ -65,7 +65,7 @@ namespace Percolator.Application.Network
             }
 
             // Build identity/signature inputs
-            var remoteIdentityKey = new RatchetIdentityKey(request.IdentitySigningKeyBytes);
+            var remoteIdentityKey = new RatchetIdentityKey(request.RemoteIdentityKeyBytes);
             var requestPayloadSignature = new CryptoSignature(request.PayloadSignatureBytes);
             var requestPayload = new PreKey(request.SignedPayloadBytes);
 
@@ -77,7 +77,7 @@ namespace Percolator.Application.Network
             _logger.LogDebug("Signature verification successful");
 
             // Persist/update peer connection info based on endpoint
-            var networkIdentitySigningKey = new DirectMessagePublicKey(request.IdentitySigningKeyBytes);
+            var networkIdentitySigningKey = new DirectMessagePublicKey(request.RemoteIdentityKeyBytes);
             var timestamp = DateTimeOffset.Now;
 
             var existingPeerConnectionInfo = await _peerConnectionRepository.GetByPublicKey(networkIdentitySigningKey).ConfigureAwait(false);
@@ -114,7 +114,7 @@ namespace Percolator.Application.Network
             // Derive shared secret (Initiator)
             _logger.LogInformation("Processing X3DH handshake with initiator bundle. Examining bundle properties...");
             var ephemeralKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-            var remotePreKey = new RatchetEphemeralKey(request.PreKeyBytes);
+            var remotePreKey = new RatchetEphemeralKey(request.RemoteEphemeral);
             var prekeyBundle = new X3dPreKeyBundle(
                 remoteIdentityKey,
                 remotePreKey,
@@ -127,14 +127,14 @@ namespace Percolator.Application.Network
             var remotePeer = await _peerRepository.GetByIdAsync(identityPeerId).ConfigureAwait(false);
             if (remotePeer is null)
             {
-                _logger.LogInformation("Peer with key hash {KeyHash} is unknown. Creating a new peer record", Convert.ToBase64String(request.IdentitySigningKeyBytes));
-                var newPeerName = $"Peer-{Convert.ToBase64String(request.IdentitySigningKeyBytes)}";
+                _logger.LogInformation("Peer with key hash {KeyHash} is unknown. Creating a new peer record", Convert.ToBase64String(request.RemoteIdentityKeyBytes));
+                var newPeerName = $"Peer-{Convert.ToBase64String(request.RemoteIdentityKeyBytes)}";
                 remotePeer = new IdentityPeer(identityPeerId, newPeerName);
                 await _peerRepository.AddAsync(remotePeer).ConfigureAwait(false);
             }
 
             // Handshake-side identity mapping: bind PKH -> this peer id (idempotent if already bound to same peer)
-            var initiatorSpki = request.IdentitySigningKeyBytes;
+            var initiatorSpki = request.RemoteIdentityKeyBytes;
             var initiatorPkh = SHA256.HashData(initiatorSpki);
             await _pkhStore.ActivateIfChangedAsync(remotePeer.Id, initiatorSpki, initiatorPkh, DateTimeOffset.UtcNow, cancellationToken).ConfigureAwait(false);
 
@@ -157,7 +157,7 @@ namespace Percolator.Application.Network
             // The return type of the message should be SessionRatchetMessage
             var cryptoSessionId = new SessionId(directSessionId.Value);
             var remoteEphemeral = request.OneTimePreKeyBytes is null
-                ? new RatchetEphemeralKey(request.PreKeyBytes)
+                ? new RatchetEphemeralKey(request.RemoteEphemeral)
                 : new RatchetEphemeralKey(request.OneTimePreKeyBytes);
             await _sessionManager.EstablishSessionAsInitiatorAsync(
                 cryptoSessionId,
