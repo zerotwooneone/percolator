@@ -8,7 +8,6 @@ public static class ServiceCollectionExtensions
     {
         services.AddScoped<IDirectSessionManager, DirectSessionManager>();
         services.AddScoped<IConversationService, ConversationService>();
-        services.AddScoped<IMessageService, MessageService>();
 
         return services;
     }

@@ -1,5 +1,6 @@
 using Google.Protobuf;
 using MediatR;
+using Percolator.Application.Identity;
 using Percolator.Application.Network;
 using Percolator.Application.Sessions;
 using Percolator.Chat.App;
@@ -15,17 +16,20 @@ public sealed class PostTextMessageHandler : IRequestHandler<PostTextMessageComm
     private readonly IChatMessageWriter _writer;
     private readonly IRemoteEnvelopeSender _sender;
     private readonly IPublisher _publisher;
+    private readonly ActiveIdentityContext _active;
 
     public PostTextMessageHandler(
         IConversationResolver resolver,
         IChatMessageWriter writer,
         IRemoteEnvelopeSender sender,
-        IPublisher publisher)
+        IPublisher publisher,
+        ActiveIdentityContext active)
     {
         _resolver = resolver ?? throw new ArgumentNullException(nameof(resolver));
         _writer = writer ?? throw new ArgumentNullException(nameof(writer));
         _sender = sender ?? throw new ArgumentNullException(nameof(sender));
         _publisher = publisher ?? throw new ArgumentNullException(nameof(publisher));
+        _active = active ?? throw new ArgumentNullException(nameof(active));
     }
 
     public async Task Handle(PostTextMessageCommand request, CancellationToken cancellationToken)
@@ -55,6 +59,12 @@ public sealed class PostTextMessageHandler : IRequestHandler<PostTextMessageComm
         if (request.LookupKey.GroupConversationGuid.HasValue)
         {
             chatEnvelope.TextMessage.GroupConversationGuid = ByteString.CopyFrom(request.LookupKey.GroupConversationGuid.Value.ToByteArray());
+            // For group messages, include the author's identity key (SPKI) when available
+            var spki = _active.Keys?.IdentitySigningKey?.ExportSubjectPublicKeyInfo();
+            if (spki is not null)
+            {
+                chatEnvelope.TextMessage.AuthorIdentityKey = ByteString.CopyFrom(spki);
+            }
         }
 
         var tasks = resolution.Conversation.Participants

@@ -116,6 +116,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<RelayOrchestrator>();
 
         // Application-layer envelope sender
+        services.AddSingleton<IMessageService, MessageService>();
         services.AddTransient<IRemoteEnvelopeSender, RemoteEnvelopeSender>();
 
         return services;

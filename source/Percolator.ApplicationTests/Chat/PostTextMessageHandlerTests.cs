@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using FluentAssertions;
 using MediatR;
 using Moq;
+using Percolator.Application.Identity;
 using Percolator.Application.Apps.Chat.Handlers;
 using Percolator.Application.Network;
 using Percolator.Chat;
@@ -22,6 +23,7 @@ public class PostTextMessageHandlerTests
     private Mock<IChatMessageWriter> _writer = null!;
     private Mock<IPublisher> _publisher = null!;
     private Mock<IRemoteEnvelopeSender> _sender = null!;
+    private ActiveIdentityContext _active = null!;
 
     [SetUp]
     public void SetUp()
@@ -30,6 +32,7 @@ public class PostTextMessageHandlerTests
         _writer = new Mock<IChatMessageWriter>(MockBehavior.Strict);
         _publisher = new Mock<IPublisher>(MockBehavior.Loose);
         _sender = new Mock<IRemoteEnvelopeSender>(MockBehavior.Loose);
+        _active = new ActiveIdentityContext();
     }
 
     private static Conversation MakeConversation()
@@ -79,7 +82,8 @@ public class PostTextMessageHandlerTests
             _resolver.Object,
             _writer.Object,
             _sender.Object,
-            _publisher.Object);
+            _publisher.Object,
+            _active);
         var cmd = new PostTextMessageCommand(lookup, messageId, content, sentAt);
 
         // Act
@@ -101,7 +105,8 @@ public class PostTextMessageHandlerTests
             _resolver.Object,
             _writer.Object,
             _sender.Object,
-            _publisher.Object);
+            _publisher.Object,
+            _active);
         var cmd = new PostTextMessageCommand(lookup, messageId, "x", DateTimeOffset.UtcNow);
 
         // Act

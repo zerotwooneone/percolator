@@ -4,6 +4,7 @@ using MediatR;
 using Microsoft.Extensions.Logging;
 using Google.Protobuf;
 using Percolator.Application.Sessions;
+using Percolator.Application.Network;
 using Percolator.Contracts;
 using Percolator.Cryptography;
 using Percolator.Identity;
@@ -42,7 +43,7 @@ public sealed class DhtPingHandler : IRequestHandler<DhtPingCommand, Unit>
             DhtEnvelope = new DhtEnvelope { PingRequest = new PingRequest() }
         };
         _logger.LogInformation("Sending DHT Ping to peer {PeerId}", peer.Id);
-        await _messageService.SendDirectMessageAsync(direct, env, peer.Id, cancellationToken).ConfigureAwait(false);
+        await _messageService.SendMessageAsync(env, peer.Id, cancellationToken).ConfigureAwait(false);
         return Unit.Value;
     }
 }
