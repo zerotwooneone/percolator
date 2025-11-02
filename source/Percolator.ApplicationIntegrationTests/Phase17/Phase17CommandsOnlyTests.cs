@@ -53,8 +53,15 @@ public class Phase17CommandsOnlyTests : IntegrationTestBase
 
     private sealed class ClientToHostTransport : IMessageTransportService
     {
+        private readonly IServiceProvider _clientProvider;
         private readonly IServiceProvider _hostProvider;
-        public ClientToHostTransport(IServiceProvider hostProvider) => _hostProvider = hostProvider;
+        private readonly string _hostName;
+        public ClientToHostTransport(IServiceProvider clientProvider, IServiceProvider hostProvider, string hostName)
+        {
+            _clientProvider = clientProvider;
+            _hostProvider = hostProvider;
+            _hostName = hostName;
+        }
 
         public async Task<DeliverOpaqueMessageResponse> SendMessageAsync(
             Percolator.Identity.PeerId recipientPeerId,
@@ -62,6 +69,13 @@ public class Phase17CommandsOnlyTests : IntegrationTestBase
             Percolator.Cryptography.SessionRatchetMessage message,
             CancellationToken cancellationToken = default)
         {
+            // Only allow client->host traffic in this test. Determine the Host peerId as seen by this client.
+            var clientPeerRepo = _clientProvider.GetRequiredService<Percolator.Identity.IPeerRepository>();
+            var clientViewOfHost = await clientPeerRepo.GetByNameAsync(_hostName);
+            if (clientViewOfHost is null || recipientPeerId.Value != clientViewOfHost.Id.Value)
+            {
+                throw new InvalidOperationException("Direct client-to-client delivery is disabled for this scenario; use relay via Host.");
+            }
             var mediator = _hostProvider.GetRequiredService<IMediator>();
             var cmd = new DeliverOpaqueMessageCommand { PayloadBytes = message.Value };
             var result = await mediator.Send(cmd, cancellationToken);
@@ -144,7 +158,7 @@ public class Phase17CommandsOnlyTests : IntegrationTestBase
         {
             services.Replace(ServiceDescriptor.Singleton<IGrpcSessionService>(sp => new GrpcSessionLoopback(host.Services)));
             services.RemoveAll<IMessageTransportService>();
-            services.AddSingleton<IMessageTransportService>(sp => new ClientToHostTransport(host.Services));
+            services.AddSingleton<IMessageTransportService>(sp => new ClientToHostTransport(sp, host.Services, "host"));
         });
         // Build Bob with loopback to Host
         var bobPort = GetAvailablePort();
@@ -152,7 +166,7 @@ public class Phase17CommandsOnlyTests : IntegrationTestBase
         {
             services.Replace(ServiceDescriptor.Singleton<IGrpcSessionService>(sp => new GrpcSessionLoopback(host.Services)));
             services.RemoveAll<IMessageTransportService>();
-            services.AddSingleton<IMessageTransportService>(sp => new ClientToHostTransport(host.Services));
+            services.AddSingleton<IMessageTransportService>(sp => new ClientToHostTransport(sp, host.Services, "host"));
         });
         // Build Charlie with loopback to Host
         var charliePort = GetAvailablePort();
@@ -160,7 +174,7 @@ public class Phase17CommandsOnlyTests : IntegrationTestBase
         {
             services.Replace(ServiceDescriptor.Singleton<IGrpcSessionService>(sp => new GrpcSessionLoopback(host.Services)));
             services.RemoveAll<IMessageTransportService>();
-            services.AddSingleton<IMessageTransportService>(sp => new ClientToHostTransport(host.Services));
+            services.AddSingleton<IMessageTransportService>(sp => new ClientToHostTransport(sp, host.Services, "host"));
         });
 
         // Configure host relay routes: map recipient PeerId -> recipient service provider
@@ -228,6 +242,10 @@ public class Phase17CommandsOnlyTests : IntegrationTestBase
         // 6) Charlie probes DHT and discovers both Alice and Bob
         var findCharlie = await charlieMed.Send(new DhtProbeCommand(hostEp, "host", null));
         findCharlie.Should().NotBeNull();
+        //expect host, alice, and bob
+        findCharlie.CloserPeers.Should()
+            .Contain(p=>p.PeerId.ToByteArray().SequenceEqual(alicePkh))
+            .And.Contain(p=>p.PeerId.ToByteArray().SequenceEqual(bobPkh));
 
         // 7) Charlie initiates opaque handshakes to Alice and Bob via MQ; verify sessions exist
         await charlieMed.Send(new InitiateHandshakeViaHostCommand("host", alicePkh));
@@ -239,7 +257,8 @@ public class Phase17CommandsOnlyTests : IntegrationTestBase
         using (var scope = charlie.Services.CreateScope())
         {
             var peerRepo = scope.ServiceProvider.GetRequiredService<Percolator.Identity.IPeerRepository>();
-            var alicePeer = await peerRepo.GetByNameAsync("host"); // host is the MQ relay, but sessions are 1:1 between peers; minimal assert via non-null commands above
+            var charliesHostPeer = await peerRepo.GetByNameAsync("host"); // host is the MQ relay, but sessions are 1:1 between peers; minimal assert via non-null commands above
+            charliesHostPeer.Should().NotBeNull();
         }
 
         // 9) Alice creates group with Bob+Charlie
@@ -261,6 +280,7 @@ public class Phase17CommandsOnlyTests : IntegrationTestBase
             // Trigger host pump for OTHER clients (Bob, Charlie) to receive enqueued CreateGroup notifications
             await bobMed.Send(new DhtPingCommand("host"));
             await charlieMed.Send(new DhtPingCommand("host"));
+            await aliceMed.Send(new DhtPingCommand("host"));
 
             // Assert: conversation exists and participants include Bob and Charlie (total 3)
             var convoRepo = aliceScope.ServiceProvider.GetRequiredService<Percolator.Chat.IConversationRepository>();
