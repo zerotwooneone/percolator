@@ -199,6 +199,12 @@ public class DhtProbeLoopbackTests : IntegrationTestBase
             services.Replace(ServiceDescriptor.Singleton<IConversationService>(sp => clientConversationService.Object));
             services.RemoveAll<IDirectSessionManager>();
             services.AddSingleton<IDirectSessionManager>(clientSessionManager.Object);
+            // Ensure MessageService can resolve an existing direct session without hitting a real store
+            var clientDirectSessionRepo = new Mock<IDirectSessionRepository>();
+            clientDirectSessionRepo
+                .Setup(r => r.GetByRemotePeerIdAsync(It.IsAny<Network.PeerId>(), It.IsAny<int>()))
+                .ReturnsAsync(new DirectSession(new NetworkPeerId(Guid.NewGuid()), directSessionId));
+            services.Replace(ServiceDescriptor.Singleton<IDirectSessionRepository>(sp => clientDirectSessionRepo.Object));
             // DhtProbeHandler now depends on IPeerRepository; provide a simple mock returning a Peer by name
             var clientPeerRepo = new Mock<IPeerRepository>();
             clientPeerRepo.Setup(r => r.GetByNameAsync(It.IsAny<string>()))
