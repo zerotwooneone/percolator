@@ -57,7 +57,9 @@ public class GrpcMessageTransportService : IMessageTransportService
             throw new InvalidOperationException($"No gRPC endpoints found for peer {peer.Id}. Cannot send message.");
         }
 
-        //todo: we should loop over all the connections and try to send the message to all of them sequentially
+        //todo: use peerConnection.RelayPeerId to attempt a relay if direct send fails
+        
+        //todo: loop over all the connections and try to send the message to all of them sequentially
         var endPoint = peerConnection.GrpcEndPoints[0];
 
         // Use the endpoint as the client key, not the peer ID

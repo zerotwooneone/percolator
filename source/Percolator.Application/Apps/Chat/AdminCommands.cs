@@ -36,29 +36,23 @@ namespace Percolator.Application.Apps.Chat
 
     internal sealed class GrantGroupAdminHandler : IRequestHandler<GrantGroupAdminAppCommand>
     {
-        private readonly MediatR.IMediator _mediator;
         private readonly Percolator.Chat.IConversationRepository _conversations;
         private readonly Percolator.Chat.ISelfParticipantIdProvider _selfProvider;
-        private readonly Percolator.Application.Network.IMessageTransportService _transport;
         private readonly Percolator.Chat.App.IAdminOperations _adminOps;
         private readonly IAdminOperationDispatcher _dispatcher;
         private readonly IAdminOperationSigner _signer;
         private readonly Percolator.Chat.App.IAdminSequenceProvider _sequenceProvider;
 
         public GrantGroupAdminHandler(
-            MediatR.IMediator mediator,
             Percolator.Chat.IConversationRepository conversations,
             Percolator.Chat.ISelfParticipantIdProvider selfProvider,
-            Percolator.Application.Network.IMessageTransportService transport,
             Percolator.Chat.App.IAdminOperations adminOps,
             IAdminOperationDispatcher dispatcher,
             IAdminOperationSigner signer,
             Percolator.Chat.App.IAdminSequenceProvider sequenceProvider)
         {
-            _mediator = mediator;
             _conversations = conversations;
             _selfProvider = selfProvider;
-            _transport = transport;
             _adminOps = adminOps;
             _dispatcher = dispatcher;
             _signer = signer;
@@ -110,29 +104,23 @@ namespace Percolator.Application.Apps.Chat
 
     internal sealed class RevokeGroupAdminHandler : IRequestHandler<RevokeGroupAdminAppCommand>
     {
-        private readonly MediatR.IMediator _mediator;
         private readonly Percolator.Chat.IConversationRepository _conversations;
         private readonly Percolator.Chat.ISelfParticipantIdProvider _selfProvider;
-        private readonly Percolator.Application.Network.IMessageTransportService _transport;
         private readonly Percolator.Chat.App.IAdminOperations _adminOps;
         private readonly IAdminOperationDispatcher _dispatcher;
         private readonly IAdminOperationSigner _signer;
         private readonly Percolator.Chat.App.IAdminSequenceProvider _sequenceProvider;
 
         public RevokeGroupAdminHandler(
-            MediatR.IMediator mediator,
             Percolator.Chat.IConversationRepository conversations,
             Percolator.Chat.ISelfParticipantIdProvider selfProvider,
-            Percolator.Application.Network.IMessageTransportService transport,
             Percolator.Chat.App.IAdminOperations adminOps,
             IAdminOperationDispatcher dispatcher,
             IAdminOperationSigner signer,
             Percolator.Chat.App.IAdminSequenceProvider sequenceProvider)
         {
-            _mediator = mediator;
             _conversations = conversations;
             _selfProvider = selfProvider;
-            _transport = transport;
             _adminOps = adminOps;
             _dispatcher = dispatcher;
             _signer = signer;
@@ -185,10 +173,8 @@ namespace Percolator.Application.Apps.Chat
 
     internal sealed class UpdateGroupMembershipHandler : IRequestHandler<UpdateGroupMembershipAppCommand>
     {
-        private readonly MediatR.IMediator _mediator;
         private readonly Percolator.Chat.IConversationRepository _conversations;
         private readonly Percolator.Chat.ISelfParticipantIdProvider _selfProvider;
-        private readonly Percolator.Application.Network.IMessageTransportService _transport;
         private readonly Percolator.Chat.App.IAdminOperations _adminOps;
         private readonly IAdminOperationDispatcher _dispatcher;
         private readonly IAdminOperationSigner _signer;
@@ -198,16 +184,13 @@ namespace Percolator.Application.Apps.Chat
             MediatR.IMediator mediator,
             Percolator.Chat.IConversationRepository conversations,
             Percolator.Chat.ISelfParticipantIdProvider selfProvider,
-            Percolator.Application.Network.IMessageTransportService transport,
             Percolator.Chat.App.IAdminOperations adminOps,
             IAdminOperationDispatcher dispatcher,
             IAdminOperationSigner signer,
             Percolator.Chat.App.IAdminSequenceProvider sequenceProvider)
         {
-            _mediator = mediator;
             _conversations = conversations;
             _selfProvider = selfProvider;
-            _transport = transport;
             _adminOps = adminOps;
             _dispatcher = dispatcher;
             _signer = signer;
@@ -261,29 +244,23 @@ namespace Percolator.Application.Apps.Chat
 
     internal sealed class UpdateGroupInfoHandler : IRequestHandler<UpdateGroupInfoAppCommand>
     {
-        private readonly MediatR.IMediator _mediator;
         private readonly Percolator.Chat.IConversationRepository _conversations;
         private readonly Percolator.Chat.ISelfParticipantIdProvider _selfProvider;
-        private readonly Percolator.Application.Network.IMessageTransportService _transport;
         private readonly Percolator.Chat.App.IAdminOperations _adminOps;
         private readonly IAdminOperationDispatcher _dispatcher;
         private readonly IAdminOperationSigner _signer;
         private readonly Percolator.Chat.App.IAdminSequenceProvider _sequenceProvider;
 
         public UpdateGroupInfoHandler(
-            MediatR.IMediator mediator,
             Percolator.Chat.IConversationRepository conversations,
             Percolator.Chat.ISelfParticipantIdProvider selfProvider,
-            Percolator.Application.Network.IMessageTransportService transport,
             Percolator.Chat.App.IAdminOperations adminOps,
             IAdminOperationDispatcher dispatcher,
             IAdminOperationSigner signer,
             Percolator.Chat.App.IAdminSequenceProvider sequenceProvider)
         {
-            _mediator = mediator;
             _conversations = conversations;
             _selfProvider = selfProvider;
-            _transport = transport;
             _adminOps = adminOps;
             _dispatcher = dispatcher;
             _signer = signer;

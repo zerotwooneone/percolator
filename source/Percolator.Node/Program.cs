@@ -557,12 +557,15 @@ async Task SendCommandHandler(InvocationContext context)
             Console.ResetColor();
             return;
         }
-        
-        var directSessionId = await mediator.Send(new SendMessageCommand(endpoint, peerName, message), cancellationToken);
-        
-        Console.ForegroundColor = ConsoleColor.Green;
-        Console.WriteLine($"Message sent successfully.  direct session {directSessionId.Value} with {peerName}");
+
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine("This is not implemented!");
         Console.ResetColor();
+        
+        
+        // Console.ForegroundColor = ConsoleColor.Green;
+        // Console.WriteLine($"Message sent successfully.  direct session {directSessionId.Value} with {peerName}");
+        // Console.ResetColor();
     }
     catch (Exception ex)
     {

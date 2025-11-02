@@ -11,122 +11,63 @@ using Percolator.Contracts;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Percolator.Network;
-
 namespace Percolator.Application.Sessions;
 
 /// <summary>
 /// Provides messaging services for the application, working directly with cryptography primitives.
 /// </summary>
-public class MessageService : IMessageService
-{
+    public class MessageService : IMessageService
+    {
     private readonly IDirectSessionManager _sessionManager;
     private readonly IMessageTransportService _transportService;
-    private readonly IConversationRepository _conversationRepository;
     private readonly ILogger<MessageService> _logger;
     private readonly ActiveIdentityContext _activeIdentityContext;
-    private readonly IDoubleRatchetSessionStore _sessionStore;
-    private readonly IDirectSessionRepository _directSessionRepository;
 
     public MessageService(
         IDirectSessionManager sessionManager,
         IMessageTransportService transportService,
-        IConversationRepository conversationRepository,
         ILogger<MessageService> logger,
-        ActiveIdentityContext activeIdentityContext,
-        IDoubleRatchetSessionStore sessionStore,
-        IDirectSessionRepository directSessionRepository)
+        ActiveIdentityContext activeIdentityContext)
     {
         _sessionManager = sessionManager;
         _transportService = transportService;
-        _conversationRepository = conversationRepository;
         _logger = logger;
         _activeIdentityContext = activeIdentityContext;
-        _sessionStore = sessionStore;
-        _directSessionRepository = directSessionRepository;
+        
     }
 
     public async Task SendDirectMessageAsync(
-        DirectSessionId directSessionId, 
-        string content,
-        IdentityPeerId remotePeerId)
+        DirectSessionId directSessionId,
+        InternalEnvelope envelope,
+        IdentityPeerId remotePeerId,
+        CancellationToken cancellationToken = default)
     {
         if (_activeIdentityContext.Identity is null)
         {
             throw new InvalidOperationException("Identity context not loaded");
         }
-        var selfIdentityId = _activeIdentityContext.Identity.SelfIdentityId;
         var sessionId = new SessionId(directSessionId.Value);
-        var sessionState = await _sessionStore.GetSessionStateAsync(sessionId, selfIdentityId);
-        if (sessionState == null)
-        {
-            throw new InvalidOperationException($"Double Ratchet session state for conversation {directSessionId} not found.");
-        }
+        var plaintext = new Plaintext(envelope.ToByteArray());
+        var encrypted = await _sessionManager.EncryptMessageAsync(sessionId, plaintext).ConfigureAwait(false);
+        //todo: lookup peer connection and attempt relay if direct fails
+        await _transportService.SendMessageAsync(remotePeerId, directSessionId, encrypted, cancellationToken).ConfigureAwait(false);
+    }
 
-        if (sessionState.TheirIdentityPublicKey == null)
+    public async Task<Percolator.Contracts.DeliverOpaqueMessageResponse> SendDirectEnvelopeWithResponseAsync(
+        DirectSessionId directSessionId,
+        InternalEnvelope envelope,
+        IdentityPeerId remotePeerId,
+        CancellationToken cancellationToken = default)
+    {
+        if (_activeIdentityContext.Identity is null)
         {
-            throw new InvalidOperationException($"Double Ratchet session state for conversation {directSessionId} does not have their identity public key.");
+            throw new InvalidOperationException("Identity context not loaded");
         }
-        _logger.LogInformation("Sending message to conversation {ConversationId}", directSessionId);
-       
-        // Create a proper InternalEnvelope with a ChatEnvelope containing a TextMessage
-        var textMessage = new TextMessage
-        {
-            MessageId = ByteString.CopyFrom(Guid.NewGuid().ToByteArray()),
-            SentTimestampUtc = Timestamp.FromDateTime(DateTime.UtcNow),
-            Content = content
-        };
-        
-        var chatEnvelope = new ChatEnvelope
-        {
-            TextMessage = textMessage
-        };
-        
-        var internalEnvelope = new InternalEnvelope
-        {
-            ChatEnvelope = chatEnvelope
-        };
-        
-        // Convert the protobuf message to plaintext bytes
-        var plaintext = new Plaintext(internalEnvelope.ToByteArray());
-
-        // Encrypt message using Double Ratchet
-        var encryptedMessage = await _sessionManager.EncryptMessageAsync(sessionId, plaintext);
-        
-        // Send encrypted message using gRPC
-        await _transportService.SendMessageAsync(
-            remotePeerId,
-            directSessionId,
-            encryptedMessage);
-        
-        // Record message in local conversation
-        var selfParticipantId = new ChatParticipantId(_activeIdentityContext.Identity.Id);
-        var remoteParticipantId = new ChatParticipantId(remotePeerId.Value);
-        
-        // Get or create conversation
-        var conversationId = new ChatConversationId(directSessionId.Value);
-        var conversation = await _conversationRepository.GetByIdAsync(conversationId, selfIdentityId);
-        if (conversation == null)
-        {
-            // Create a new conversation if it doesn't exist
-            _logger.LogInformation("Creating new conversation {ConversationId}", conversationId);
-            conversation = new Conversation(
-                conversationId,
-                new List<ChatParticipantId> { selfParticipantId, remoteParticipantId },
-                new List<Message>(),
-                null // No name for direct conversations
-            );
-            
-            // Add the message to the conversation
-            _logger.LogInformation("Adding message to NEW conversation {ConversationId}", conversationId);
-            conversation.AddMessage(selfParticipantId, content);
-            await _conversationRepository.AddAsync(conversation, selfIdentityId);
-        }
-        else
-        {
-            conversation.AddMessage(selfParticipantId, content);
-            _logger.LogInformation("Adding message to conversation {ConversationId}", conversationId);
-            await _conversationRepository.UpdateAsync(conversation, selfIdentityId);
-        }
-        await _directSessionRepository.UpsertAsync(new Percolator.Network.PeerId(remoteParticipantId.Value), new DirectSessionId(conversation.Id.Value), selfIdentityId);
+        var sessionId = new SessionId(directSessionId.Value);
+        var plaintext = new Plaintext(envelope.ToByteArray());
+        var encrypted = await _sessionManager.EncryptMessageAsync(sessionId, plaintext).ConfigureAwait(false);
+        //todo: lookup peer connection and attempt relay if direct fails
+        var response = await _transportService.SendMessageAsync(remotePeerId, directSessionId, encrypted, cancellationToken).ConfigureAwait(false);
+        return response;
     }
 }

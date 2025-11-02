@@ -24,10 +24,8 @@ namespace Percolator.ApplicationTests.Apps.Chat
                 GroupConversationGuid: Guid.NewGuid(),
                 GranteeSpki: new byte[] { 1, 2, 3 }
             );
-            var mediator = new Mock<IMediator>();
             var convoRepo = new Mock<IConversationRepository>(MockBehavior.Strict);
             var selfProvider = new Mock<ISelfParticipantIdProvider>(MockBehavior.Strict);
-            var transport = new Mock<IMessageTransportService>();
             var adminOps = new Mock<Percolator.Chat.App.IAdminOperations>(MockBehavior.Strict);
             var dispatcher = new Mock<IAdminOperationDispatcher>(MockBehavior.Loose);
             var signer = new Mock<IAdminOperationSigner>(MockBehavior.Strict);
@@ -71,10 +69,8 @@ namespace Percolator.ApplicationTests.Apps.Chat
                 .ReturnsAsync((Array.Empty<byte>(), new byte[] { 1 }));
             seq.Setup(s => s.NextAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync(1UL);
             var sut = new GrantGroupAdminHandler(
-                mediator.Object,
                 convoRepo.Object,
                 selfProvider.Object,
-                transport.Object,
                 adminOps.Object,
                 dispatcher.Object,
                 signer.Object,
@@ -91,10 +87,8 @@ namespace Percolator.ApplicationTests.Apps.Chat
         public async Task RevokeGroupAdmin_AppliesLocally_And_Dispatches()
         {
             // Arrange
-            var mediator = new Mock<IMediator>();
             var convoRepo = new Mock<IConversationRepository>(MockBehavior.Strict);
             var selfProvider = new Mock<ISelfParticipantIdProvider>(MockBehavior.Strict);
-            var transport = new Mock<IMessageTransportService>();
             var adminOps = new Mock<Percolator.Chat.App.IAdminOperations>(MockBehavior.Strict);
             var dispatcher = new Mock<IAdminOperationDispatcher>(MockBehavior.Loose);
             var signer = new Mock<IAdminOperationSigner>(MockBehavior.Strict);
@@ -138,7 +132,7 @@ namespace Percolator.ApplicationTests.Apps.Chat
             signer.Setup(s => s.SignRevokeAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<DateTimeOffset>(), It.IsAny<byte[]>(), It.IsAny<ulong?>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((Array.Empty<byte>(), new byte[] { 1 }));
             seq.Setup(s => s.NextAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync(2UL);
-            var sut = new RevokeGroupAdminHandler(mediator.Object, convoRepo.Object, selfProvider.Object, transport.Object, adminOps.Object, dispatcher.Object, signer.Object, seq.Object);
+            var sut = new RevokeGroupAdminHandler(convoRepo.Object, selfProvider.Object, adminOps.Object, dispatcher.Object, signer.Object, seq.Object);
 
             // Act
             Func<Task> act = () => sut.Handle(cmd, CancellationToken.None);
@@ -153,10 +147,8 @@ namespace Percolator.ApplicationTests.Apps.Chat
         public async Task GrantGroupAdmin_Uses_Dispatcher()
         {
             // Arrange
-            var mediator = new Mock<IMediator>();
             var convoRepo = new Mock<IConversationRepository>(MockBehavior.Strict);
             var selfProvider = new Mock<ISelfParticipantIdProvider>(MockBehavior.Strict);
-            var transport = new Mock<IMessageTransportService>();
             var adminOps = new Mock<Percolator.Chat.App.IAdminOperations>(MockBehavior.Strict);
             var dispatcher = new Mock<IAdminOperationDispatcher>(MockBehavior.Loose);
             var signer = new Mock<IAdminOperationSigner>(MockBehavior.Strict);
@@ -201,10 +193,8 @@ namespace Percolator.ApplicationTests.Apps.Chat
                 .ReturnsAsync((Array.Empty<byte>(), new byte[] { 1 }));
             seq.Setup(s => s.NextAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync(5UL);
             var sut = new GrantGroupAdminHandler(
-                mediator.Object,
                 convoRepo.Object,
                 selfProvider.Object,
-                transport.Object,
                 adminOps.Object,
                 dispatcher.Object,
                 signer.Object,
@@ -215,17 +205,14 @@ namespace Percolator.ApplicationTests.Apps.Chat
 
             // Assert
             await act.Should().NotThrowAsync();
-            mediator.VerifyAll();
         }
 
         [Test]
         public async Task GrantGroupAdmin_Calls_DomainApply()
         {
             // Arrange
-            var mediator = new Mock<IMediator>();
             var convoRepo = new Mock<IConversationRepository>(MockBehavior.Strict);
             var selfProvider = new Mock<ISelfParticipantIdProvider>(MockBehavior.Strict);
-            var transport = new Mock<IMessageTransportService>();
             var adminOps = new Mock<Percolator.Chat.App.IAdminOperations>(MockBehavior.Strict);
             var dispatcher = new Mock<IAdminOperationDispatcher>();
             var signer = new Mock<IAdminOperationSigner>(MockBehavior.Strict);
@@ -259,10 +246,8 @@ namespace Percolator.ApplicationTests.Apps.Chat
                 .ReturnsAsync((Array.Empty<byte>(), new byte[] { 1 }));
             seq.Setup(s => s.NextAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync(6UL);
             var sut = new GrantGroupAdminHandler(
-                mediator.Object,
                 convoRepo.Object,
                 selfProvider.Object,
-                transport.Object,
                 adminOps.Object,
                 dispatcher.Object,
                 signer.Object,
@@ -273,7 +258,6 @@ namespace Percolator.ApplicationTests.Apps.Chat
 
             // Assert (Red: will fail until handler calls mediator.Send with ApplySignedAdminOperationCommand)
             await act.Should().NotThrowAsync();
-            mediator.VerifyAll();
         }
 
         [Test]
@@ -286,10 +270,8 @@ namespace Percolator.ApplicationTests.Apps.Chat
                 GranteeSpki: new byte[] { 1, 2, 3 }
             );
             var sut = new RevokeGroupAdminHandler(
-                Mock.Of<IMediator>(),
                 Mock.Of<IConversationRepository>(),
                 Mock.Of<ISelfParticipantIdProvider>(),
-                Mock.Of<IMessageTransportService>(),
                 Mock.Of<Percolator.Chat.App.IAdminOperations>(),
                 Mock.Of<IAdminOperationDispatcher>(),
                 Mock.Of<IAdminOperationSigner>(),
@@ -318,7 +300,6 @@ namespace Percolator.ApplicationTests.Apps.Chat
                 Mock.Of<IMediator>(),
                 Mock.Of<IConversationRepository>(),
                 Mock.Of<ISelfParticipantIdProvider>(),
-                Mock.Of<IMessageTransportService>(),
                 Mock.Of<Percolator.Chat.App.IAdminOperations>(),
                 Mock.Of<IAdminOperationDispatcher>(),
                 Mock.Of<IAdminOperationSigner>(),
@@ -342,10 +323,8 @@ namespace Percolator.ApplicationTests.Apps.Chat
                 NewGroupName: "New Name"
             );
             var sut = new UpdateGroupInfoHandler(
-                Mock.Of<IMediator>(),
                 Mock.Of<IConversationRepository>(),
                 Mock.Of<ISelfParticipantIdProvider>(),
-                Mock.Of<IMessageTransportService>(),
                 Mock.Of<Percolator.Chat.App.IAdminOperations>(),
                 Mock.Of<IAdminOperationDispatcher>(),
                 Mock.Of<IAdminOperationSigner>(),
@@ -369,10 +348,8 @@ namespace Percolator.ApplicationTests.Apps.Chat
                 GranteeSpki: Array.Empty<byte>()
             );
             var sut = new GrantGroupAdminHandler(
-                Mock.Of<IMediator>(),
                 Mock.Of<IConversationRepository>(),
                 Mock.Of<ISelfParticipantIdProvider>(),
-                Mock.Of<IMessageTransportService>(),
                 Mock.Of<Percolator.Chat.App.IAdminOperations>(),
                 Mock.Of<IAdminOperationDispatcher>(),
                 Mock.Of<IAdminOperationSigner>(),
@@ -431,10 +408,8 @@ namespace Percolator.ApplicationTests.Apps.Chat
                 .ReturnsAsync(2UL);
 
             var sut = new GrantGroupAdminHandler(
-                mediator.Object,
                 convoRepo.Object,
                 selfProvider.Object,
-                transport.Object,
                 adminOps.Object,
                 dispatcher.Object,
                 signer.Object,

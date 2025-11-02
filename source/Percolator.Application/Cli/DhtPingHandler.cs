@@ -4,7 +4,6 @@ using MediatR;
 using Microsoft.Extensions.Logging;
 using Google.Protobuf;
 using Percolator.Application.Sessions;
-using Percolator.Application.Network;
 using Percolator.Contracts;
 using Percolator.Cryptography;
 using Percolator.Identity;
@@ -15,21 +14,18 @@ public sealed class DhtPingHandler : IRequestHandler<DhtPingCommand, Unit>
 {
     private readonly ILogger<DhtPingHandler> _logger;
     private readonly IConversationService _conversationService;
-    private readonly IDirectSessionManager _sessionManager;
-    private readonly IMessageTransportService _transport;
+    private readonly IMessageService _messageService;
     private readonly IPeerRepository _peerRepository;
 
     public DhtPingHandler(
         ILogger<DhtPingHandler> logger,
         IConversationService conversationService,
-        IDirectSessionManager sessionManager,
-        IMessageTransportService transport,
+        IMessageService messageService,
         IPeerRepository peerRepository)
     {
         _logger = logger;
         _conversationService = conversationService;
-        _sessionManager = sessionManager;
-        _transport = transport;
+        _messageService = messageService;
         _peerRepository = peerRepository;
     }
 
@@ -45,10 +41,8 @@ public sealed class DhtPingHandler : IRequestHandler<DhtPingCommand, Unit>
         {
             DhtEnvelope = new DhtEnvelope { PingRequest = new PingRequest() }
         };
-        var plaintext = new Plaintext(env.ToByteArray());
-        var ratchet = await _sessionManager.EncryptMessageAsync(new SessionId(direct.Value), plaintext);
         _logger.LogInformation("Sending DHT Ping to peer {PeerId}", peer.Id);
-        await _transport.SendMessageAsync(peer.Id, direct, ratchet, cancellationToken);
+        await _messageService.SendDirectMessageAsync(direct, env, peer.Id, cancellationToken).ConfigureAwait(false);
         return Unit.Value;
     }
 }

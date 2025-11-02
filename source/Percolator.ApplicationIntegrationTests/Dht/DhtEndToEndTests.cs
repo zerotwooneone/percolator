@@ -4,8 +4,10 @@ using Google.Protobuf;
 using MediatR;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 using NUnit.Framework;
 using Percolator.Application.Cli;
+using Percolator.Application.Identity;
 using Percolator.Application.Network;
 using Percolator.Contracts;
 
@@ -104,6 +106,11 @@ public class DhtEndToEndTests : IntegrationTestBase
 
         var hostEndpoint = new DnsEndPoint("localhost", hostPort);
 
+        // Register target peer name "host" on Alice and Bob using the host's SPKI
+        var hostSpki = GetSpki(host);
+        await aliceMediator.Send(new SetPeerNameByPublicKeyCommand("host", hostSpki));
+        await bobMediator.Send(new SetPeerNameByPublicKeyCommand("host", hostSpki));
+
         // Act 1: Alice probes Host (Ping + FindNode) -> expect initially no peers
         var aliceProbe1 = await aliceMediator.Send(new DhtProbeCommand(hostEndpoint, "host", SelfIdentityName: null));
 
@@ -122,5 +129,12 @@ public class DhtEndToEndTests : IntegrationTestBase
 
         aliceProbe2.Should().NotBeNull();
         aliceProbe2.CloserPeers.Count.Should().BeGreaterThan(0);
+    }
+
+    private static byte[] GetSpki(IHost host)
+    {
+        using var scope = host.Services.CreateScope();
+        var ctx = scope.ServiceProvider.GetRequiredService<ActiveIdentityContext>();
+        return ctx.Keys!.IdentitySigningKey.ExportSubjectPublicKeyInfo();
     }
 }

@@ -161,9 +161,10 @@ namespace Percolator.Application.Sessions
                 var firstMessage = new SessionRatchetMessage(response.RatchetMessage.ToByteArray());
                 var header = firstMessage.GetHeader();
 
+                var initiatorEphemeralKey = response.InitiatorEphemeralKey.ToByteArray();
                 var handshakeResult = _orchestrator.CompleteHandshake(
                     new RatchetIdentityKey(response.InitiatorIdentityKey.ToByteArray()),
-                    new RatchetEphemeralKey(response.InitiatorEphemeralKey.ToByteArray()),
+                    new RatchetEphemeralKey(initiatorEphemeralKey),
                     oneTimePreKey
                 );
                 
@@ -214,7 +215,7 @@ namespace Percolator.Application.Sessions
                     firstMessage,
                     GetSessionId,
                     new RatchetIdentityKey(response.InitiatorIdentityKey.ToByteArray()),
-                    header.PreKey,
+                    new PreKey(initiatorEphemeralKey),
                     handshakeResult.ResponderPrivateKeyUsed,
                     new SharedSecret(handshakeResult.SharedSecret.Value)
                 ).ConfigureAwait(false);

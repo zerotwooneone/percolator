@@ -17,22 +17,21 @@ public class DhtProbeHandler : IRequestHandler<DhtProbeCommand, FindNodeResponse
 {
     private readonly IConversationService _conversationService;
     private readonly IDirectSessionManager _sessionManager;
-    private readonly IMessageTransportService _transport;
+    private readonly IMessageService _messageService;
     private readonly ActiveIdentityContext _activeIdentityContext;
     private readonly ILogger<DhtProbeHandler> _logger;
     private readonly IPeerRepository _peerRepository;
-
     public DhtProbeHandler(
         IConversationService conversationService,
         IDirectSessionManager sessionManager,
-        IMessageTransportService transport,
+        IMessageService messageService,
         ActiveIdentityContext activeIdentityContext,
         ILogger<DhtProbeHandler> logger,
         IPeerRepository peerRepository)
     {
         _conversationService = conversationService;
         _sessionManager = sessionManager;
-        _transport = transport;
+        _messageService = messageService;
         _activeIdentityContext = activeIdentityContext;
         _logger = logger;
         _peerRepository = peerRepository;
@@ -40,30 +39,23 @@ public class DhtProbeHandler : IRequestHandler<DhtProbeCommand, FindNodeResponse
 
     public async Task<FindNodeResponse> Handle(DhtProbeCommand request, CancellationToken cancellationToken)
     {
-        var existingPeer = await _peerRepository.GetByNameAsync(request.TargetIdentityName);
-        Peer remotePeer;
-        if (existingPeer == null)
+        var existingPeer = await _peerRepository.GetByNameAsync(request.TargetIdentityName).ConfigureAwait(false);
+        if (existingPeer is null)
         {
-            remotePeer = new Peer(PeerId.NewId(), request.TargetIdentityName);
-            await _peerRepository.AddAsync(remotePeer);
+            throw new InvalidOperationException($"Unknown peer name '{request.TargetIdentityName}'. Use SetPeerNameByPublicKeyCommand first.");
         }
-        else
-        {
-            remotePeer = existingPeer;
-        }
+        var remotePeer = existingPeer;
         
         // 1) Ensure conversation by connecting (TOFU etc handled by ConversationService)
-        var existingDirectConversationAsync = existingPeer == null 
-            ? null 
-            : await _conversationService.GetExistingDirectSessionAsync(remotePeer);
-        var directSessionId = existingDirectConversationAsync ?? await _conversationService.CreateNewDirectSessionAsync(request.Endpoint, remotePeer);
+        var existingDirectConversationAsync = await _conversationService.GetExistingDirectSessionAsync(remotePeer).ConfigureAwait(false);
+        var directSessionId = existingDirectConversationAsync ?? await _conversationService.CreateNewDirectSessionAsync(request.Endpoint, remotePeer).ConfigureAwait(false);
 
         // 2) Send Ping (fire-and-forget)
         var pingEnvelope = new InternalEnvelope
         {
             DhtEnvelope = new DhtEnvelope { PingRequest = new PingRequest() }
         };
-        await SendAndReceiveAsync(directSessionId, pingEnvelope,remotePeer.Id, cancellationToken);
+        await _messageService.SendDirectMessageAsync(directSessionId, pingEnvelope, remotePeer.Id, cancellationToken).ConfigureAwait(false);
 
 
         // 3) Build FindNode with target peer id (use self hashed signing key if unspecified)
@@ -80,7 +72,7 @@ public class DhtProbeHandler : IRequestHandler<DhtProbeCommand, FindNodeResponse
         };
 
         // 4) Send and receive response, decrypt and parse
-        var response = await SendAndReceiveAsync(directSessionId, findNodeEnvelope, remotePeer.Id, cancellationToken);
+        var response = await _messageService.SendDirectEnvelopeWithResponseAsync(directSessionId, findNodeEnvelope, remotePeer.Id, cancellationToken).ConfigureAwait(false);
         if (response.ResultCase != DeliverOpaqueMessageResponse.ResultOneofCase.ResponsePayload
             || response.ResponsePayload is null
             || !response.ResponsePayload.HasResponsePayload)
@@ -90,7 +82,7 @@ public class DhtProbeHandler : IRequestHandler<DhtProbeCommand, FindNodeResponse
         }
 
         var respRatchet = new SessionRatchetMessage(response.ResponsePayload.ResponsePayload.ToByteArray());
-        var plaintext = await _sessionManager.ReceiveMessageAsync(new SessionId(directSessionId.Value), respRatchet);
+        var plaintext = await _sessionManager.ReceiveMessageAsync(new SessionId(directSessionId.Value), respRatchet).ConfigureAwait(false);
         if (plaintext is null)
         {
             _logger.LogWarning("Could not decrypt FindNode response payload.");
@@ -121,17 +113,5 @@ public class DhtProbeHandler : IRequestHandler<DhtProbeCommand, FindNodeResponse
             var signingKeySpki = _activeIdentityContext.Keys.IdentitySigningKey.ExportSubjectPublicKeyInfo();
             return System.Security.Cryptography.SHA256.HashData(signingKeySpki);
         }
-    }
-
-    private async Task<DeliverOpaqueMessageResponse> SendAndReceiveAsync(
-        DirectSessionId directSessionId, 
-        InternalEnvelope envelope, 
-        PeerId remotePeerId, 
-        CancellationToken cancellationToken)
-    {
-        var plaintext = new Plaintext(envelope.ToByteArray());
-        var ratchetMessage = await _sessionManager.EncryptMessageAsync(new SessionId(directSessionId.Value), plaintext);
-        _logger.LogInformation("DHT probe sending (with response) to peer {PeerId}", remotePeerId);
-        return await _transport.SendMessageAsync(remotePeerId, directSessionId, ratchetMessage, cancellationToken);
     }
 }

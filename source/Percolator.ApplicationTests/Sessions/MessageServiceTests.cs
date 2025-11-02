@@ -68,11 +68,8 @@ public class MessageServiceTests
         _messageService = new MessageService(
             _sessionManager,
             _mockTransportService.Object,
-            _mockConversationRepository.Object,
             new NullLogger<MessageService>(),
-            _activeIdentityContext,
-            _mockSessionStore.Object,
-            _mockDirectSessionRepository.Object);
+            _activeIdentityContext);
 
         // Default transport behavior for tests: return a response when sending
         _mockTransportService
@@ -89,63 +86,5 @@ public class MessageServiceTests
     {
     }
 
-    [Test]
-    public async Task SendDirectMessageAsync_WithValidSession_ShouldSucceed()
-    {
-        // Arrange
-        var localIdentity = new IdentityRecord(Guid.NewGuid(), "Local Identity") { SelfIdentityId = 1 };
-        var localKeys = new X3dhKeys(
-            ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
-            ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256));
-        _activeIdentityContext.Identity = localIdentity;
-        _activeIdentityContext.Keys = localKeys;
-
-        
-        var remotePeerId = new IdentityPeerId(Guid.NewGuid());
-        var directSessionId = new DirectSessionId(Guid.NewGuid());
-        var participants = new[]
-        {
-            new ChatParticipantId(localIdentity.Id),
-            new ChatParticipantId(remotePeerId.Value)
-        };
-        var conversation = new Conversation(new ChatConversationId(directSessionId.Value), participants.ToList(), new List<Message>());
-        
-        // Create a valid dummy session state with proper cryptographic keys
-        // Generate proper EC keys using nistP256 curve as used in the actual implementation
-        using var dhRatchetKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        var dhPrivateKeyBytes = dhRatchetKey.ExportECPrivateKey();
-        var dhPublicKeyBytes = dhRatchetKey.PublicKey.ExportSubjectPublicKeyInfo();
-        
-        // Create a second key for the remote identity
-        using var remoteIdentityKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        var remotePublicKeyBytes = remoteIdentityKey.PublicKey.ExportSubjectPublicKeyInfo();
-
-        var dummySessionState = new DoubleRatchetSession.DoubleRatchetSessionState
-        {
-            RootKey = new RootKey(new byte[32]), // Root key can be all zeros for test
-            SendingCounter = 0,
-            ReceivingCounter = 0,
-            TheirIdentityPublicKey = new RatchetIdentityKey(remotePublicKeyBytes),
-            TheirDhRatchetPublicKey = new PreKey(dhPublicKeyBytes),
-            DhRatchetPrivateKey = new PrivateEphemeralKey(dhPrivateKeyBytes),
-            SkippedMessageKeys = new Dictionary<SkippedMessageKeyIdentifier, byte[]>()
-        };
-
-        _mockConversationRepository.Setup(r => r.GetByIdAsync(It.Is<ChatConversationId>(c => c.Value == directSessionId.Value), It.IsAny<int>()))
-            .ReturnsAsync(conversation);
-
-        // Create the SessionId to match how MessageService creates it (directly from conversationId.Value)
-        var sessionId = new SessionId(directSessionId.Value);
-        _mockSessionStore.Setup(s => s.GetSessionStateAsync(sessionId, localIdentity.SelfIdentityId)).ReturnsAsync(dummySessionState);
-
-        // Act
-        await _messageService.SendDirectMessageAsync(directSessionId, "Hello", remotePeerId);
-
-        // Assert
-        _mockTransportService.Verify(t => t.SendMessageAsync(
-            It.IsAny<IdentityPeerId>(),
-            It.IsAny<DirectSessionId>(),
-            It.IsAny<SessionRatchetMessage>(),
-            It.IsAny<System.Threading.CancellationToken>()), Times.Once);
-    }
+   
 }

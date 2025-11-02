@@ -153,13 +153,13 @@ public class ConversationServiceTests
                 It.IsAny<ECDiffieHellman>()))
             .Returns(handshakeResponse);
 
-        // Expectation 2: EstablishSessionAsResponderAsync must be called with remotePreKey = header.PreKey
+        // Expectation 2: EstablishSessionAsResponderAsync must be called with remotePreKey = InitiatorEphemeralKey (from response)
         _mockDirectSessionManager
             .Setup(m => m.EstablishSessionAsResponderAsync(
                 It.IsAny<SessionRatchetMessage>(),
                 It.IsAny<Func<Plaintext, Percolator.Cryptography.SessionId>>(),
                 It.IsAny<RatchetIdentityKey>(),
-                It.Is<PreKey>(pk => pk.Value.SequenceEqual(header.PreKey.Value)),
+                It.Is<PreKey>(pk => pk.Value.SequenceEqual(initiatorEphemeralSpki)),
                 It.IsAny<ECDiffieHellman>(),
                 It.Is<CryptoSharedSecret>(s => s.Value.SequenceEqual(sharedSecret.Value))))
             .ReturnsAsync((SessionRatchetMessage msg,
