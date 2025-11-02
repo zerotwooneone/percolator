@@ -101,7 +101,6 @@ message EstablishDirectSessionResponse {
     message ResponsePayload {
         optional uint32 version = 1;
 
-        // The plaintext inner payload to be carried inside the X3DH ratchet message
         // returned in Response.ratchet_message
         optional InternalEnvelope inner_envelope = 2;
         optional string session_id = 4;
@@ -109,16 +108,19 @@ message EstablishDirectSessionResponse {
     message Response {
         optional uint32 version = 1;
 
-        optional bytes identity_signing_key = 2;
-        // An X3DH ratchet message; its payload is the bytes of ResponsePayload; the header contains the remote ephemeral key
+        // initiator's identity signing key (SPKI)
+        optional bytes initiator_identity_key = 2;
+        // The initiator's first Double Ratchet message to the responder. The header contains the ratchet DH public key.
         optional bytes ratchet_message = 3;
+        // Initiator's X3DH ephemeral public key used to derive the shared secret (for responder to complete X3DH)
+        optional bytes initiator_ephemeral_key = 4;
     }
-    message NotBefore {
-        // The protocol version.
-        optional uint32 version = 1;
-        // If the request is rejected, this field may be set to indicate when the client should try again.
-        optional google.protobuf.Timestamp retry_after_utc = 2;
-    }
+  message NotBefore {
+    // The protocol version.
+    optional uint32 version = 1;
+    // If the request is rejected, this field may be set to indicate when the client should try again.
+    optional google.protobuf.Timestamp retry_after_utc = 2;
+  }
 
     // The protocol version.
     optional uint32 version = 1;

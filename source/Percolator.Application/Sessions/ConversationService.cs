@@ -162,8 +162,8 @@ namespace Percolator.Application.Sessions
                 var header = firstMessage.GetHeader();
 
                 var handshakeResult = _orchestrator.CompleteHandshake(
-                    new RatchetIdentityKey(response.IdentitySigningKey.ToByteArray()),
-                    new RatchetEphemeralKey(header.PreKey.Value),
+                    new RatchetIdentityKey(response.InitiatorIdentityKey.ToByteArray()),
+                    new RatchetEphemeralKey(response.InitiatorEphemeralKey.ToByteArray()),
                     oneTimePreKey
                 );
                 
@@ -213,7 +213,7 @@ namespace Percolator.Application.Sessions
                 var (cryptoSessionId, plaintext) = await _sessionManager.EstablishSessionAsResponderAsync(
                     firstMessage,
                     GetSessionId,
-                    new RatchetIdentityKey(response.IdentitySigningKey.ToByteArray()),
+                    new RatchetIdentityKey(response.InitiatorIdentityKey.ToByteArray()),
                     header.PreKey,
                     handshakeResult.ResponderPrivateKeyUsed,
                     new SharedSecret(handshakeResult.SharedSecret.Value)

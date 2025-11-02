@@ -58,8 +58,9 @@ namespace Percolator.Application.Network
             {
                 Response = new EstablishDirectSessionResponse.Types.Response
                 {
-                    IdentitySigningKey = ByteString.CopyFrom(result.IdentitySigningKeyBytes),
-                    RatchetMessage = ByteString.CopyFrom(result.RatchetMessageBytes)
+                    InitiatorIdentityKey = ByteString.CopyFrom(result.IdentitySigningKeyBytes),
+                    RatchetMessage = ByteString.CopyFrom(result.RatchetMessageBytes),
+                    InitiatorEphemeralKey = ByteString.CopyFrom(result.RemoteEphemeralKeyBytes)
                 }
             };
         }
