@@ -159,7 +159,6 @@ namespace Percolator.Application.Sessions
                 _logger.LogInformation("Received session response from peer");
                 
                 var firstMessage = new SessionRatchetMessage(response.RatchetMessage.ToByteArray());
-                var header = firstMessage.GetHeader();
 
                 var initiatorEphemeralKey = response.InitiatorEphemeralKey.ToByteArray();
                 var handshakeResult = _orchestrator.CompleteHandshake(
