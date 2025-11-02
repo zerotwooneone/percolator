@@ -78,7 +78,7 @@ namespace Percolator.Application.Network.Handshake
                 shared,
                 eph,
                 initialPlaintext,
-                cancellationToken);
+                cancellationToken).ConfigureAwait(false);
 
             // Compose initiator hello
             var hello = new HandshakeInitiatorHello
@@ -100,7 +100,7 @@ namespace Percolator.Application.Network.Handshake
             }
 
             // Enqueue standalone hello (plaintext bootstrap) via MQ to recipient PKH
-            await _mediator.Send(new EnqueueOpaqueMessageCommand(request.RecipientPublicKeyHash, hello.ToByteArray()), cancellationToken);
+            await _mediator.Send(new EnqueueOpaqueMessageCommand(request.RecipientPublicKeyHash, hello.ToByteArray()), cancellationToken).ConfigureAwait(false);
 
             _logger.LogInformation("Enqueued HandshakeInitiatorHello to recipient PKH");
         }

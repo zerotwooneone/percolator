@@ -31,10 +31,10 @@ public sealed class DhtPingHandler : IRequestHandler<DhtPingCommand, Unit>
 
     public async Task<Unit> Handle(DhtPingCommand request, CancellationToken cancellationToken)
     {
-        var peer = await _peerRepository.GetByNameAsync(request.TargetPeerName)
+        var peer = await _peerRepository.GetByNameAsync(request.TargetPeerName).ConfigureAwait(false)
             ?? throw new InvalidOperationException($"Peer '{request.TargetPeerName}' not found.");
 
-        var direct = await _conversationService.GetExistingDirectSessionAsync(peer)
+        var direct = await _conversationService.GetExistingDirectSessionAsync(peer).ConfigureAwait(false)
             ?? throw new InvalidOperationException("Direct session not found. Establish a session before DHT ping.");
 
         var env = new InternalEnvelope

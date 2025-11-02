@@ -52,13 +52,13 @@ public sealed class InitiateHandshakeViaHostHandler : IRequestHandler<InitiateHa
             throw new ArgumentException("TargetPublicKeyHash must be provided.", nameof(request.TargetPublicKeyHash));
 
         // Resolve Host and ensure an existing direct session to Host
-        var hostPeer = await _peerRepository.GetByNameAsync(request.HostPeerName)
+        var hostPeer = await _peerRepository.GetByNameAsync(request.HostPeerName).ConfigureAwait(false)
             ?? throw new InvalidOperationException($"Peer '{request.HostPeerName}' not found.");
-        var hostSession = await _conversationService.GetExistingDirectSessionAsync(hostPeer)
+        var hostSession = await _conversationService.GetExistingDirectSessionAsync(hostPeer).ConfigureAwait(false)
             ?? throw new InvalidOperationException("Direct session to Host not found. Establish a session before initiating handshake.");
 
         // Ensure a Peer exists for the target (by PKH) and record a relay connection via Host
-        var targetPeerId = await _peerPublicSigningKeyStore.GetPeerIdByPublicKeyHashAsync(request.TargetPublicKeyHash, cancellationToken);
+        var targetPeerId = await _peerPublicSigningKeyStore.GetPeerIdByPublicKeyHashAsync(request.TargetPublicKeyHash, cancellationToken).ConfigureAwait(false);
         var displayName = request.PeerName ?? Convert.ToHexString(request.TargetPublicKeyHash);
         Percolator.Identity.Peer peer;
         if (targetPeerId is null)
@@ -67,18 +67,18 @@ public sealed class InitiateHandshakeViaHostHandler : IRequestHandler<InitiateHa
         }
         else
         {
-            peer = await _peerRepository.GetByIdAsync(targetPeerId) ?? new Percolator.Identity.Peer(targetPeerId, displayName);
+            peer = await _peerRepository.GetByIdAsync(targetPeerId).ConfigureAwait(false) ?? new Percolator.Identity.Peer(targetPeerId, displayName);
             // Preserve existing name if present, otherwise set display name
             if (string.IsNullOrWhiteSpace(peer.Name))
             {
                 peer = new Percolator.Identity.Peer(peer.Id, displayName);
             }
         }
-        await _peerRepository.AddOrUpdateAsync(peer);
+        await _peerRepository.AddOrUpdateAsync(peer).ConfigureAwait(false);
 
         // Upsert PeerConnection with Host as RelayPeerId
         var netPeerId = new Percolator.Network.PeerId(peer.Id.Value);
-        var connection = await _peerConnectionRepository.GetByIdAsync(netPeerId);
+        var connection = await _peerConnectionRepository.GetByIdAsync(netPeerId).ConfigureAwait(false);
         if (connection is null)
         {
             connection = new PeerConnection(netPeerId, identitySigningKey: null, grpcEndPoints: Array.Empty<GrpcEndPoint>(), tlsCertificates: Array.Empty<TlsCertificate>(), lastSeen: DateTimeOffset.UtcNow, relayPeerId: new Percolator.Network.PeerId(hostPeer.Id.Value));
@@ -87,7 +87,7 @@ public sealed class InitiateHandshakeViaHostHandler : IRequestHandler<InitiateHa
         {
             connection.SetRelayPeer(new Percolator.Network.PeerId(hostPeer.Id.Value));
         }
-        await _peerConnectionRepository.SaveAsync(connection);
+        await _peerConnectionRepository.SaveAsync(connection).ConfigureAwait(false);
 
         // 1) Request pre-key bundle for target PKH from Host
         var getReq = new InternalEnvelope
@@ -105,9 +105,9 @@ public sealed class InitiateHandshakeViaHostHandler : IRequestHandler<InitiateHa
 
         var plaintext = new Plaintext(getReq.ToByteArray());
         var cryptoHostSessionId = new SessionId(hostSession.Value);
-        var ratchetMessage = await _sessionManager.EncryptMessageAsync(cryptoHostSessionId, plaintext);
+        var ratchetMessage = await _sessionManager.EncryptMessageAsync(cryptoHostSessionId, plaintext).ConfigureAwait(false);
         _logger.LogInformation("Requesting pre-key bundle for PKH via Host {PeerId}", hostPeer.Id);
-        var deliverResp = await _transport.SendMessageAsync(hostPeer.Id, hostSession, ratchetMessage, cancellationToken);
+        var deliverResp = await _transport.SendMessageAsync(hostPeer.Id, hostSession, ratchetMessage, cancellationToken).ConfigureAwait(false);
 
         if (deliverResp.ResultCase != DeliverOpaqueMessageResponse.ResultOneofCase.ResponsePayload
             || deliverResp.ResponsePayload is null
@@ -117,7 +117,7 @@ public sealed class InitiateHandshakeViaHostHandler : IRequestHandler<InitiateHa
         }
 
         var respCipher = new SessionRatchetMessage(deliverResp.ResponsePayload.ResponsePayload.ToByteArray());
-        var respPlain = await _sessionManager.ReceiveMessageAsync(cryptoHostSessionId, respCipher)
+        var respPlain = await _sessionManager.ReceiveMessageAsync(cryptoHostSessionId, respCipher).ConfigureAwait(false)
             ?? throw new InvalidOperationException("Could not decrypt GetPreKeyBundle response payload.");
 
         var internalResp = InternalEnvelope.Parser.ParseFrom(respPlain.Value);
@@ -139,8 +139,8 @@ public sealed class InitiateHandshakeViaHostHandler : IRequestHandler<InitiateHa
 
         // Bind PKH -> PeerId on initiator now that we have the remote SPKI, then upsert peer
         var pkh = SHA256.HashData(remoteIdentitySpki);
-        await _peerPublicSigningKeyStore.ActivateIfChangedAsync(peer.Id, remoteIdentitySpki, pkh, DateTimeOffset.UtcNow, cancellationToken);
-        await _peerRepository.AddOrUpdateAsync(peer);
+        await _peerPublicSigningKeyStore.ActivateIfChangedAsync(peer.Id, remoteIdentitySpki, pkh, DateTimeOffset.UtcNow, cancellationToken).ConfigureAwait(false);
+        await _peerRepository.AddOrUpdateAsync(peer).ConfigureAwait(false);
 
         await _mediator.Send(new ComposeAndEnqueueInitiatorHelloCommand(
             RecipientPublicKeyHash: request.TargetPublicKeyHash,
@@ -149,7 +149,7 @@ public sealed class InitiateHandshakeViaHostHandler : IRequestHandler<InitiateHa
             OneTimePreKeyId: oneTimePreKeyId,
             RemotePreKeySpki: remoteSignedPreKeySpki,
             InitiatorPayload: request.InitiatorPayload
-        ), cancellationToken);
+        ), cancellationToken).ConfigureAwait(false);
 
         _logger.LogInformation("Initiator Hello enqueued via Host MQ for PKH target.");
         return Unit.Value;

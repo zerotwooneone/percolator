@@ -56,7 +56,7 @@ public class RelayOrchestrator
         }
         var selfIdentityId = _active.Identity.SelfIdentityId;
         // Fetch one queued item (AckId, Blob)
-        var items = await _queue.FetchAsync(recipientPeerId, 1, ct);
+        var items = await _queue.FetchAsync(recipientPeerId, 1, ct).ConfigureAwait(false);
         if (items.Count == 0)
         {
             return false;
@@ -65,7 +65,7 @@ public class RelayOrchestrator
         var (ackId, blob) = items[0];
 
         // Resolve a direct session to the peer
-        var session = await _directSessions.GetByRemotePeerIdAsync(new NetworkPeerId(recipientPeerId.Value), selfIdentityId);
+        var session = await _directSessions.GetByRemotePeerIdAsync(new NetworkPeerId(recipientPeerId.Value), selfIdentityId).ConfigureAwait(false);
         if (session is null)
         {
             throw new InvalidOperationException($"No direct session for peer {recipientPeerId} to relay message {ackId}");
@@ -84,8 +84,8 @@ public class RelayOrchestrator
 
         // Encrypt and send
         var plaintext = new Plaintext(env.ToByteArray());
-        var cipher = await _sessionManager.EncryptMessageAsync(sessionId, plaintext);
-        var response = await _transport.SendMessageAsync(recipientPeerId, directSessionId, cipher, ct);
+        var cipher = await _sessionManager.EncryptMessageAsync(sessionId, plaintext).ConfigureAwait(false);
+        var response = await _transport.SendMessageAsync(recipientPeerId, directSessionId, cipher, ct).ConfigureAwait(false);
 
         // Expect RPC-level response payload (DR-ciphertext)
         if (response.ResultCase != DeliverOpaqueMessageResponse.ResultOneofCase.ResponsePayload ||
@@ -96,7 +96,7 @@ public class RelayOrchestrator
 
         // Decrypt response payload as RelayOpaqueResponse
         var ackCipher = new SessionRatchetMessage(response.ResponsePayload.ResponsePayload.ToByteArray());
-        var ackPlain = await _sessionManager.ReceiveMessageAsync(sessionId, ackCipher);
+        var ackPlain = await _sessionManager.ReceiveMessageAsync(sessionId, ackCipher).ConfigureAwait(false);
         if (ackPlain is null)
         {
             throw new InvalidOperationException("Failed to decrypt RelayOpaqueResponse");
@@ -115,7 +115,7 @@ public class RelayOrchestrator
         }
 
         // Idempotent delete by AckId
-        await _queue.DeleteByAckIdAsync(ackId, ct);
+        await _queue.DeleteByAckIdAsync(ackId, ct).ConfigureAwait(false);
         return true;
     }
 }

@@ -55,14 +55,14 @@ public class SubmitPreKeysHandler : IRequestHandler<SubmitPreKeysCommand, int>
             throw new InvalidOperationException("Active identity not loaded.");
         }
         
-        var existingPeer = await _peerRepository.GetByNameAsync(request.TargetPeerName);
+        var existingPeer = await _peerRepository.GetByNameAsync(request.TargetPeerName).ConfigureAwait(false);
         if (existingPeer == null)
         {
             throw new InvalidOperationException("Peer not found.");
         }
         
         // 1) Ensure/establish direct session with target peer
-        var existingSessionId = await _conversationService.GetExistingDirectSessionAsync(existingPeer);
+        var existingSessionId = await _conversationService.GetExistingDirectSessionAsync(existingPeer).ConfigureAwait(false);
         if (existingSessionId is null)
         {
             throw new InvalidOperationException("Direct session not found.");
@@ -114,7 +114,7 @@ public class SubmitPreKeysHandler : IRequestHandler<SubmitPreKeysCommand, int>
 
         // 4) Encrypt and send
         var cryptoPeerId = new CryptoPeerId(existingPeer.Id.Value);
-        var deliverResp = await SendAndReceiveAsync(existingSessionId.Value, internalEnvelope, existingPeer.Id, cancellationToken);
+        var deliverResp = await SendAndReceiveAsync(existingSessionId.Value, internalEnvelope, existingPeer.Id, cancellationToken).ConfigureAwait(false);
         
         // 5) Expect empty ack or response payload; if response payload exists, decrypt to check type
         if (deliverResp.ResultCase != DeliverOpaqueMessageResponse.ResultOneofCase.ResponsePayload 
@@ -125,7 +125,7 @@ public class SubmitPreKeysHandler : IRequestHandler<SubmitPreKeysCommand, int>
         }
 
         var respCipher = new SessionRatchetMessage(deliverResp.ResponsePayload.ResponsePayload.ToByteArray());
-        var respPlain = await _sessionManager.ReceiveMessageAsync(new SessionId(existingSessionId.Value.Value), respCipher);
+        var respPlain = await _sessionManager.ReceiveMessageAsync(new SessionId(existingSessionId.Value.Value), respCipher).ConfigureAwait(false);
         if (respPlain is null)
         {
             _logger.LogWarning("Could not decrypt SubmitPreKeyBundle response payload.");
@@ -148,8 +148,8 @@ public class SubmitPreKeysHandler : IRequestHandler<SubmitPreKeysCommand, int>
         CancellationToken cancellationToken)
     {
         var plaintext = new Plaintext(envelope.ToByteArray());
-        var ratchetMessage = await _sessionManager.EncryptMessageAsync(new SessionId(directSessionId.Value), plaintext);
+        var ratchetMessage = await _sessionManager.EncryptMessageAsync(new SessionId(directSessionId.Value), plaintext).ConfigureAwait(false);
         _logger.LogInformation("DHT probe sending (with response) to peer {PeerId}", remotePeerId);
-        return await _transport.SendMessageAsync(remotePeerId, directSessionId, ratchetMessage, cancellationToken);
+        return await _transport.SendMessageAsync(remotePeerId, directSessionId, ratchetMessage, cancellationToken).ConfigureAwait(false);
     }
 }

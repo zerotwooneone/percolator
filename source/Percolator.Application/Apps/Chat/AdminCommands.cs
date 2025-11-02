@@ -77,7 +77,7 @@ namespace Percolator.Application.Apps.Chat
             }, cancellationToken).Unwrap()
             .ContinueWith(async _ =>
             {
-                var convo = await _conversations.GetByGroupGuidAsync(request.GroupConversationGuid, request.SelfIdentityId);
+                var convo = await _conversations.GetByGroupGuidAsync(request.GroupConversationGuid, request.SelfIdentityId).ConfigureAwait(false);
                 if (convo is null) return;
 
                 var senderParticipant = _selfProvider.Get();
@@ -86,8 +86,8 @@ namespace Percolator.Application.Apps.Chat
                     .Select(p => new Percolator.Identity.PeerId(p.Value))
                     .ToList();
 
-                var (_, signature2) = await signTask;
-                var adminSeq = await seqTask;
+                var (_, signature2) = await signTask.ConfigureAwait(false);
+                var adminSeq = await seqTask.ConfigureAwait(false);
                 await _dispatcher.DispatchGrantAdminAsync(
                     senderPeerId,
                     request.GroupConversationGuid,
@@ -97,7 +97,7 @@ namespace Percolator.Application.Apps.Chat
                     granteePublicKeySpki: request.GranteeSpki,
                     signature: signature2,
                     recipientPeerIds: recipients,
-                    ct: cancellationToken);
+                    ct: cancellationToken).ConfigureAwait(false);
             }, cancellationToken).Unwrap();
         }
     }
@@ -146,7 +146,7 @@ namespace Percolator.Application.Apps.Chat
             }, cancellationToken).Unwrap()
                 .ContinueWith(async _ =>
                 {
-                    var convo = await _conversations.GetByGroupGuidAsync(request.GroupConversationGuid, request.SelfIdentityId);
+                    var convo = await _conversations.GetByGroupGuidAsync(request.GroupConversationGuid, request.SelfIdentityId).ConfigureAwait(false);
                     if (convo is null) return;
 
                     var senderParticipant = _selfProvider.Get();
@@ -155,8 +155,8 @@ namespace Percolator.Application.Apps.Chat
                         .Select(p => new Percolator.Identity.PeerId(p.Value))
                         .ToList();
 
-                    var (_, signature2) = await signTask;
-                    var adminSeq = await seqTask;
+                    var (_, signature2) = await signTask.ConfigureAwait(false);
+                    var adminSeq = await seqTask.ConfigureAwait(false);
                     await _dispatcher.DispatchRevokeAdminAsync(
                         senderPeerId,
                         request.GroupConversationGuid,
@@ -166,7 +166,7 @@ namespace Percolator.Application.Apps.Chat
                         granteePublicKeySpki: request.GranteeSpki,
                         signature: signature2,
                         recipientPeerIds: recipients,
-                        ct: cancellationToken);
+                        ct: cancellationToken).ConfigureAwait(false);
                 }, cancellationToken).Unwrap();
         }
     }
@@ -215,7 +215,7 @@ namespace Percolator.Application.Apps.Chat
             }, cancellationToken).Unwrap()
                 .ContinueWith(async _ =>
                 {
-                    var convo = await _conversations.GetByGroupGuidAsync(request.GroupConversationGuid, request.SelfIdentityId);
+                    var convo = await _conversations.GetByGroupGuidAsync(request.GroupConversationGuid, request.SelfIdentityId).ConfigureAwait(false);
                     if (convo is null) return;
 
                     var senderParticipant = _selfProvider.Get();
@@ -224,8 +224,8 @@ namespace Percolator.Application.Apps.Chat
                         .Select(p => new Percolator.Identity.PeerId(p.Value))
                         .ToList();
 
-                    var (payloadBytes2, signature2) = await signTask;
-                    var adminSeq = await seqTask;
+                    var (payloadBytes2, signature2) = await signTask.ConfigureAwait(false);
+                    var adminSeq = await seqTask.ConfigureAwait(false);
                     await _dispatcher.DispatchUpdateGroupMembershipAsync(
                         senderPeerId,
                         request.GroupConversationGuid,
@@ -237,7 +237,7 @@ namespace Percolator.Application.Apps.Chat
                         leaveGroup: request.LeaveGroup,
                         signature: signature2,
                         recipientPeerIds: recipients,
-                        ct: cancellationToken);
+                        ct: cancellationToken).ConfigureAwait(false);
                 }, cancellationToken).Unwrap();
         }
     }
@@ -282,7 +282,7 @@ namespace Percolator.Application.Apps.Chat
             }, cancellationToken).Unwrap()
                 .ContinueWith(async _ =>
                 {
-                    var convo = await _conversations.GetByGroupGuidAsync(request.GroupConversationGuid, request.SelfIdentityId);
+                    var convo = await _conversations.GetByGroupGuidAsync(request.GroupConversationGuid, request.SelfIdentityId).ConfigureAwait(false);
                     if (convo is null) return;
 
                     var senderParticipant = _selfProvider.Get();
@@ -291,8 +291,8 @@ namespace Percolator.Application.Apps.Chat
                         .Select(p => new Percolator.Identity.PeerId(p.Value))
                         .ToList();
 
-                    var (payloadBytes2, signature2) = await signTask;
-                    var adminSeq = await seqTask;
+                    var (payloadBytes2, signature2) = await signTask.ConfigureAwait(false);
+                    var adminSeq = await seqTask.ConfigureAwait(false);
                     await _dispatcher.DispatchUpdateGroupInfoAsync(
                         senderPeerId,
                         request.GroupConversationGuid,
@@ -303,7 +303,7 @@ namespace Percolator.Application.Apps.Chat
                         newGroupAvatar: null,
                         signature: signature2,
                         recipientPeerIds: recipients,
-                        ct: cancellationToken);
+                        ct: cancellationToken).ConfigureAwait(false);
                 }, cancellationToken).Unwrap();
         }
     }

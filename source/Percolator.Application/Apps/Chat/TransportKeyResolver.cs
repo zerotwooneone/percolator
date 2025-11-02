@@ -36,14 +36,14 @@ namespace Percolator.Application.Apps.Chat
             }
 
             var selfIdentityId = _activeIdentityContext.Identity.SelfIdentityId;
-            var directSessionId = await _conversationLookup.GetDirectSessionIdAsync(conversationId, selfIdentityId, ct);
+            var directSessionId = await _conversationLookup.GetDirectSessionIdAsync(conversationId, selfIdentityId, ct).ConfigureAwait(false);
             if (directSessionId is null)
             {
                 _logger.LogWarning("[TransportKeyResolver] No direct session found for conversation {ConversationId}", conversationId);
                 return null;
             }
 
-            var state = await _sessionStore.GetSessionStateAsync(new SessionId(directSessionId.Value), selfIdentityId);
+            var state = await _sessionStore.GetSessionStateAsync(new SessionId(directSessionId.Value), selfIdentityId).ConfigureAwait(false);
             if (state is null || state.RootKey is null)
             {
                 _logger.LogWarning("[TransportKeyResolver] No session state/root key for direct session {SessionId}", directSessionId);
@@ -64,15 +64,15 @@ namespace Percolator.Application.Apps.Chat
             }
 
             var selfIdentityId = _activeIdentityContext.Identity.SelfIdentityId;
-            var directSessionId = await _conversationLookup.GetDirectSessionIdAsync(conversationId, selfIdentityId, remotePeerId, ct)
-                                  ?? await _conversationLookup.GetDirectSessionIdAsync(conversationId, selfIdentityId, ct);
+            var directSessionId = await _conversationLookup.GetDirectSessionIdAsync(conversationId, selfIdentityId, remotePeerId, ct).ConfigureAwait(false)
+                                  ?? await _conversationLookup.GetDirectSessionIdAsync(conversationId, selfIdentityId, ct).ConfigureAwait(false);
             if (directSessionId is null)
             {
                 _logger.LogWarning("[TransportKeyResolver] No direct session found for conversation {ConversationId} and peer {PeerId}", conversationId, remotePeerId);
                 return null;
             }
 
-            var state = await _sessionStore.GetSessionStateAsync(new SessionId(directSessionId.Value), selfIdentityId);
+            var state = await _sessionStore.GetSessionStateAsync(new SessionId(directSessionId.Value), selfIdentityId).ConfigureAwait(false);
             if (state is null || state.RootKey is null)
             {
                 _logger.LogWarning("[TransportKeyResolver] No session state/root key for direct session {SessionId}", directSessionId);

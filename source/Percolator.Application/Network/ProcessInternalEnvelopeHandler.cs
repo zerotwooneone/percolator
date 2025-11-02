@@ -50,7 +50,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                     return null;
                 }
 
-                var closerNodes = await _dhtService.GetClosestNodesAsync(new NodeId(target), cancellationToken);
+                var closerNodes = await _dhtService.GetClosestNodesAsync(new NodeId(target), cancellationToken).ConfigureAwait(false);
 
                 var outResp = new Contracts.FindNodeResponse();
                 foreach (var node in closerNodes)
@@ -72,14 +72,14 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                     return null;
                 }
                 var remotePeerId = new Percolator.Network.PeerId(request.Context.RemotePeerGuid.Value);
-                var conn = await _peerConnectionRepository.GetByIdAsync(remotePeerId);
+                var conn = await _peerConnectionRepository.GetByIdAsync(remotePeerId).ConfigureAwait(false);
                 if (conn?.IdentitySigningKey is null)
                 {
                     _logger.LogWarning("No signing key for remote peer {PeerId} to handle PingRequest", remotePeerId);
                     return null;
                 }
                 var nodeIdBytes = System.Security.Cryptography.SHA256.HashData(conn.IdentitySigningKey.Value);
-                await _mediator.Send(new Percolator.Dht.Messages.PingRequest(new NodeId(nodeIdBytes), conn.GrpcEndPoints.First().EndPoint), cancellationToken);
+                await _mediator.Send(new Percolator.Dht.Messages.PingRequest(new NodeId(nodeIdBytes), conn.GrpcEndPoints.First().EndPoint), cancellationToken).ConfigureAwait(false);
                 return null;
             }
             return null;
@@ -118,7 +118,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                         Expires = upload.ExpiresUtc.ToDateTimeOffset(),
                         RemotePeerId = new Percolator.Network.PeerId(request.Context.RemotePeerGuid ?? Guid.Empty)
                     };
-                    await _mediator.Send(cmd, cancellationToken);
+                    await _mediator.Send(cmd, cancellationToken).ConfigureAwait(false);
                     return new InternalEnvelope { SubmitPreKeyBundleResponse = new SubmitPreKeyBundleResponse { Version = 1 } };
                 }
                 case PrekeyEnvelope.MessageOneofCase.GetPreKeyBundleRequest:
@@ -128,7 +128,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                     var bundle = await _mediator.Send(new GetPreKeyBundleQuery
                     {
                         TargetPublicSigningKeyHash = getReq.PublicKeyHash.ToByteArray()
-                    }, cancellationToken);
+                    }, cancellationToken).ConfigureAwait(false);
                     var resp = new GetPreKeyBundleResponse { Version = 1 };
                     if (bundle is not null)
                     {
@@ -159,7 +159,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
         if (env.ApplicationPayloadCase == InternalEnvelope.ApplicationPayloadOneofCase.RelayOpaqueEnvelope)
         {
             var relay = env.RelayOpaqueEnvelope;
-            await _mediator.Send(new ProcessRelayedOpaquePayloadCommand(relay.OpaquePayload.ToByteArray()), cancellationToken);
+            await _mediator.Send(new ProcessRelayedOpaquePayloadCommand(relay.OpaquePayload.ToByteArray()), cancellationToken).ConfigureAwait(false);
             return null;
         }
 
@@ -193,7 +193,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                         spkis,
                         cg.HasName ? cg.Name : null,
                         cg.CreatorIdentityKey.ToByteArray()
-                    ), cancellationToken);
+                    ), cancellationToken).ConfigureAwait(false);
                     return null;
                 }
                 case ChatEnvelope.MessageOneofCase.TextMessage:
@@ -226,7 +226,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
 
                     var messageId = new MessageId(new Guid(text.MessageId.ToByteArray()));
                     var sentTs = text.SentTimestampUtc.ToDateTimeOffset();
-                    await _mediator.Send(new PostTextMessageCommand(lookup, messageId, text.Content, sentTs), cancellationToken);
+                    await _mediator.Send(new PostTextMessageCommand(lookup, messageId, text.Content, sentTs), cancellationToken).ConfigureAwait(false);
                     return null;
                 }
                 case ChatEnvelope.MessageOneofCase.ReadReceipt:
@@ -259,7 +259,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
 
                     var messageId = new MessageId(new Guid(rr.MessageId.ToByteArray()));
                     var ts = rr.SentTimestampUtc.ToDateTimeOffset();
-                    await _mediator.Send(new PostReadReceiptCommand(lookup, messageId, ts), cancellationToken);
+                    await _mediator.Send(new PostReadReceiptCommand(lookup, messageId, ts), cancellationToken).ConfigureAwait(false);
                     return null;
                 }
                 case ChatEnvelope.MessageOneofCase.EmojiAnnotation:
@@ -294,7 +294,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
 
                     var messageId = new MessageId(new Guid(em.MessageId.ToByteArray()));
                     var ts = em.SentTimestampUtc.ToDateTimeOffset();
-                    await _mediator.Send(new PostEmojiAnnotationCommand(lookup, messageId, em.Emoji, ts), cancellationToken);
+                    await _mediator.Send(new PostEmojiAnnotationCommand(lookup, messageId, em.Emoji, ts), cancellationToken).ConfigureAwait(false);
                     return null;
                 }
                 case ChatEnvelope.MessageOneofCase.DeliveredReceipt:
@@ -327,7 +327,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
 
                     var messageId = new MessageId(new Guid(dr.MessageId.ToByteArray()));
                     var ts = dr.SentTimestampUtc.ToDateTimeOffset();
-                    await _mediator.Send(new PostDeliveredReceiptCommand(lookup, messageId, ts), cancellationToken);
+                    await _mediator.Send(new PostDeliveredReceiptCommand(lookup, messageId, ts), cancellationToken).ConfigureAwait(false);
                     return null;
                 }
                 case ChatEnvelope.MessageOneofCase.SignedAdminOperation:
@@ -399,20 +399,20 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                     if (opCase == AdminOperationPayload.OperationOneofCase.GrantAdmin)
                     {
                         if (grantee is null) throw new InvalidOperationException("GrantAdmin requires grantee");
-                        await _adminOps.GrantAdminAsync(lookup, opId, sentUtc, grantee.Value, signatureBytes, payloadBytes, cancellationToken);
+                        await _adminOps.GrantAdminAsync(lookup, opId, sentUtc, grantee.Value, signatureBytes, payloadBytes, cancellationToken).ConfigureAwait(false);
                     }
                     else if (opCase == AdminOperationPayload.OperationOneofCase.RevokeAdmin)
                     {
                         if (grantee is null) throw new InvalidOperationException("RevokeAdmin requires grantee");
-                        await _adminOps.RevokeAdminAsync(lookup, opId, sentUtc, grantee.Value, signatureBytes, payloadBytes, cancellationToken);
+                        await _adminOps.RevokeAdminAsync(lookup, opId, sentUtc, grantee.Value, signatureBytes, payloadBytes, cancellationToken).ConfigureAwait(false);
                     }
                     else if (opCase == AdminOperationPayload.OperationOneofCase.UpdateGroupMembership)
                     {
-                        await _adminOps.UpdateGroupMembershipAsync(lookup, opId, sentUtc, add, remove, leave, signatureBytes, payloadBytes, cancellationToken);
+                        await _adminOps.UpdateGroupMembershipAsync(lookup, opId, sentUtc, add, remove, leave, signatureBytes, payloadBytes, cancellationToken).ConfigureAwait(false);
                     }
                     else if (opCase == AdminOperationPayload.OperationOneofCase.UpdateGroupInfo)
                     {
-                        await _adminOps.UpdateGroupInfoAsync(lookup, opId, sentUtc, newName2, null, signatureBytes, payloadBytes, cancellationToken);
+                        await _adminOps.UpdateGroupInfoAsync(lookup, opId, sentUtc, newName2, null, signatureBytes, payloadBytes, cancellationToken).ConfigureAwait(false);
                     }
                     else
                     {
@@ -440,7 +440,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                         new IdentityPublicKey(kac.AdopterIdentityKey.ToByteArray()),
                         kac.SentTimestampUtc.ToDateTimeOffset(),
                         kac.Signature.ToByteArray()
-                    ), cancellationToken);
+                    ), cancellationToken).ConfigureAwait(false);
                     return null;
                 }
                 case ChatEnvelope.MessageOneofCase.AdminCommitOperation:
@@ -466,7 +466,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                         aco.SentTimestampUtc.ToDateTimeOffset(),
                         aco.AdminSequenceNumber,
                         aco.Signature.ToByteArray()
-                    ), cancellationToken);
+                    ), cancellationToken).ConfigureAwait(false);
                     return null;
                 }
                 case ChatEnvelope.MessageOneofCase.KeyDistribution:
@@ -485,7 +485,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                         lookup,
                         new GroupKeyVersion(kd.KeyVersion),
                         new EncryptedGroupKey(kd.EncryptedGroupKeyForRecipient.ToByteArray())
-                    ), cancellationToken);
+                    ), cancellationToken).ConfigureAwait(false);
                     return null;
                 }
                 case ChatEnvelope.MessageOneofCase.UpdateGroupMembershipRequest:
@@ -511,7 +511,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                         toRemove.Add(new Percolator.Chat.ValueObjects.ParticipantId(new Guid(b.ToByteArray())));
                     }
 
-                    await _mediator.Send(new UpdateGroupMembershipCommand(lookup, toAdd, toRemove, ugr.LeaveGroup), cancellationToken);
+                    await _mediator.Send(new UpdateGroupMembershipCommand(lookup, toAdd, toRemove, ugr.LeaveGroup), cancellationToken).ConfigureAwait(false);
                     return null;
                 }
                 case ChatEnvelope.MessageOneofCase.UpdateGroupInfoRequest:
@@ -524,7 +524,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                     var groupGuid = new Guid(ugi.GroupConversationGuid.ToByteArray());
                     var lookup = ConversationLookupKey.ForGroup(groupGuid);
                     var newName = ugi.HasNewGroupName ? ugi.NewGroupName : null;
-                    await _mediator.Send(new UpdateGroupInfoCommand(lookup, newName), cancellationToken);
+                    await _mediator.Send(new UpdateGroupInfoCommand(lookup, newName), cancellationToken).ConfigureAwait(false);
                     return null;
                 }
                 default:
@@ -546,7 +546,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                     var enqueueResult = await _mediator.Send(new EnqueueOpaqueMessageCommand(
                         req.RecipientPublicKeyHash.ToByteArray(),
                         req.MessageBlob.ToByteArray()
-                    ), cancellationToken);
+                    ), cancellationToken).ConfigureAwait(false);
 
                     var resp = new EnqueueOpaqueMessageResponse
                     {
@@ -571,7 +571,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                     }
                     var fetchResult = await _mediator.Send(
                         new FetchQueuedMessagesQuery(new PeerId(request.Context.RemotePeerGuid.Value), requestedMax),
-                        cancellationToken);
+                        cancellationToken).ConfigureAwait(false);
 
                     var resp = new FetchQueuedMessagesResponse();
                     resp.Messages.AddRange(fetchResult.Messages.Select(ByteString.CopyFrom));

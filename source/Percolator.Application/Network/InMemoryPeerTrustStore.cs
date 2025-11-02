@@ -83,7 +83,7 @@ public class InMemoryPeerTrustStore : IPeerTrustManager
 
     public async Task AddTrustedPeer(X509Certificate2 certificate)
     {
-        await AddTrustedPeerInternal(certificate);
+        await AddTrustedPeerInternal(certificate).ConfigureAwait(false);
     }
     
     private async Task AddTrustedPeerInternal(X509Certificate2 certificate)
@@ -106,7 +106,7 @@ public class InMemoryPeerTrustStore : IPeerTrustManager
 
         if (_trustedHashes.TryAdd(publicKeyHash, 0))
         {
-            await _trustedPeerStore.AddAsync(publicKeyHash);
+            await _trustedPeerStore.AddAsync(publicKeyHash).ConfigureAwait(false);
             _logger.LogInformation("Added new trusted peer with public key hash {Hash}", Convert.ToHexString(hash));
         }
     }

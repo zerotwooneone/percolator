@@ -57,7 +57,7 @@ public sealed class DispatchTextMessageHandler : IRequestHandler<DispatchTextMes
         // Process each recipient sequentially (preserve per-recipient ordering if needed)
         foreach (var peerId in request.RecipientPeerIds)
         {
-            await ProcessRecipientAsync(peerId, chatEnvelope, cancellationToken);
+            await ProcessRecipientAsync(peerId, chatEnvelope, cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -69,9 +69,9 @@ public sealed class DispatchTextMessageHandler : IRequestHandler<DispatchTextMes
         try
         {
             // Resolve PKH for host-enqueue fallback when no direct session exists
-            byte[]? pkh = await _keyStore.GetPublicKeyHashByPeerIdAsync(recipientId, cancellationToken);
+            byte[]? pkh = await _keyStore.GetPublicKeyHashByPeerIdAsync(recipientId, cancellationToken).ConfigureAwait(false);
             var route = new RecipientRoute(recipientId, pkh);
-            await _sender.SendChatEnvelopeToPeerAsync(chatEnvelope, route, cancellationToken);
+            await _sender.SendChatEnvelopeToPeerAsync(chatEnvelope, route, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex)
         {

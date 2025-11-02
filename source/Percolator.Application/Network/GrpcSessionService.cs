@@ -37,7 +37,7 @@ namespace Percolator.Application.Network
             DnsEndPoint endpoint, 
             EstablishDirectSessionRequest request)
         {
-            return await Inner_EstablishSession(endpoint, request);
+            return await Inner_EstablishSession(endpoint, request).ConfigureAwait(false);
         }
 
         private async Task<EstablishDirectSessionResponse> Inner_EstablishSession(
@@ -51,7 +51,7 @@ namespace Percolator.Application.Network
                 _logger.LogInformation("Establishing session with {Endpoint}", endpoint);
 
                 // Clean up any existing resources if they exist
-                await CleanupConnectionResourcesAsync(connectionKey);
+                await CleanupConnectionResourcesAsync(connectionKey).ConfigureAwait(false);
                 
                 // Determine if we're connecting to localhost
                 bool isLocalConnection = endpoint.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase) || 
@@ -188,7 +188,7 @@ namespace Percolator.Application.Network
                     _logger.LogInformation("Initial channel state: {State}", connectivityState);
                     
                     // This will force a connection attempt
-                    await channel.ConnectAsync();
+                    await channel.ConnectAsync().ConfigureAwait(false);
                     
                     _logger.LogInformation("Successfully connected to gRPC server at {Uri}", uri);
                 }
@@ -265,7 +265,7 @@ namespace Percolator.Application.Network
             {
                 try 
                 {
-                    await channel.ShutdownAsync();
+                    await channel.ShutdownAsync().ConfigureAwait(false);
                     _logger.LogInformation("Cleaned up existing channel for {ConnectionKey}", connectionKey);
                 }
                 catch (Exception ex)

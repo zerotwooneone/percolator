@@ -56,19 +56,19 @@ public class RequestPreKeyBundleByPkhHandler : IRequestHandler<RequestPreKeyBund
         {
             throw new ArgumentException("PublicKeyHash must be provided.", nameof(request.PublicKeyHash));
         }
-        var existingRemotePeerId = await _peerPublicSigningKeyStore.GetPeerIdByPublicKeyHashAsync(request.PublicKeyHash, cancellationToken);
+        var existingRemotePeerId = await _peerPublicSigningKeyStore.GetPeerIdByPublicKeyHashAsync(request.PublicKeyHash, cancellationToken).ConfigureAwait(false);
         if (existingRemotePeerId is not null)
         {
             _logger.LogWarning("Peer with public key hash {PublicKeyHash} already exists. Performing handshake anyway...", request.PublicKeyHash);
         }
 
-        var hostPeer = await _peerRepository.GetByNameAsync(request.TargetPeerName);
+        var hostPeer = await _peerRepository.GetByNameAsync(request.TargetPeerName).ConfigureAwait(false);
         if (hostPeer is null)
         {
             throw new InvalidOperationException("Peer not found.");
         }
 
-        var directHostSessionId = await _conversationService.GetExistingDirectSessionAsync(hostPeer);
+        var directHostSessionId = await _conversationService.GetExistingDirectSessionAsync(hostPeer).ConfigureAwait(false);
         if (directHostSessionId is null)
         {
             throw new InvalidOperationException("Direct session not found.");
@@ -90,9 +90,9 @@ public class RequestPreKeyBundleByPkhHandler : IRequestHandler<RequestPreKeyBund
         // Encrypt and send
         var plaintext = new Plaintext(internalEnvelope.ToByteArray());
         var cryptoHostSessionId = new SessionId(directHostSessionId.Value.Value);
-        var ratchetMessage = await _sessionManager.EncryptMessageAsync(cryptoHostSessionId, plaintext);
+        var ratchetMessage = await _sessionManager.EncryptMessageAsync(cryptoHostSessionId, plaintext).ConfigureAwait(false);
         _logger.LogInformation("Requesting pre-key bundle from peer {PeerId}", hostPeer.Id);
-        var deliverResp = await _transport.SendMessageAsync(hostPeer.Id, directHostSessionId.Value, ratchetMessage, cancellationToken);
+        var deliverResp = await _transport.SendMessageAsync(hostPeer.Id, directHostSessionId.Value, ratchetMessage, cancellationToken).ConfigureAwait(false);
 
         if (deliverResp.ResultCase != DeliverOpaqueMessageResponse.ResultOneofCase.ResponsePayload
             || deliverResp.ResponsePayload is null
@@ -102,7 +102,7 @@ public class RequestPreKeyBundleByPkhHandler : IRequestHandler<RequestPreKeyBund
         }
 
         var respCipher = new SessionRatchetMessage(deliverResp.ResponsePayload.ResponsePayload.ToByteArray());
-        var respPlain = await _sessionManager.ReceiveMessageAsync(cryptoHostSessionId, respCipher);
+        var respPlain = await _sessionManager.ReceiveMessageAsync(cryptoHostSessionId, respCipher).ConfigureAwait(false);
         if (respPlain is null)
         {
             throw new InvalidOperationException("Could not decrypt GetPreKeyBundle response payload.");
@@ -152,6 +152,6 @@ public class RequestPreKeyBundleByPkhHandler : IRequestHandler<RequestPreKeyBund
             remoteIdentityKey,
             remotePreKey,
             sharedSecret,
-            ephemeralKey);
+            ephemeralKey).ConfigureAwait(false);
     }
 }

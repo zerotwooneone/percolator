@@ -23,7 +23,7 @@ public class RemovePeerOnPeerExpiredHandler : INotificationHandler<PeerExpiredNo
         _logger.LogInformation("- Peer expired: {Endpoint}", networkPeer.GrpcEndpoint);
 
         var identityPeerId = new PeerId(networkPeer.Id.Value);
-        await _peerRepository.RemoveAsync(identityPeerId);
-        await _connectionManager.RemovePeer(identityPeerId);
+        await _peerRepository.RemoveAsync(identityPeerId).ConfigureAwait(false);
+        await _connectionManager.RemovePeer(identityPeerId).ConfigureAwait(false);
     }
 }

@@ -90,7 +90,7 @@ namespace Percolator.Application.Network
                         Expires = upload.ExpiresUtc.ToDateTimeOffset(),
                         RemotePeerId = remotePeerId
                     };
-                    await _mediator.Send(cmd, ct);
+                    await _mediator.Send(cmd, ct).ConfigureAwait(false);
                     return new InternalEnvelope { SubmitPreKeyBundleResponse = new SubmitPreKeyBundleResponse { Version = 1 } };
                 case PrekeyEnvelope.MessageOneofCase.GetPreKeyBundleRequest:
                     var getReq = prekeyEnvelope.GetPreKeyBundleRequest;
@@ -98,7 +98,7 @@ namespace Percolator.Application.Network
                     var bundle = await _mediator.Send(new Percolator.Prekey.Handlers.GetPreKeyBundleQuery
                     {
                         TargetPublicSigningKeyHash = getReq.PublicKeyHash.ToByteArray()
-                    }, ct);
+                    }, ct).ConfigureAwait(false);
                     var resp = new GetPreKeyBundleResponse { Version = 1 };
                     if (bundle is not null)
                     {
@@ -132,7 +132,7 @@ namespace Percolator.Application.Network
                 var sessionRatchetMessage = new SessionRatchetMessage(request.PayloadBytes);
                 var header = sessionRatchetMessage.GetHeader();
                 var ratchetKey = header.PreKey;
-                var resolvedDirectSessionId = await _ratchetLookup.TryResolveAsync(ratchetKey, _activeIdentityContext.Identity!.SelfIdentityId, cancellationToken);
+                var resolvedDirectSessionId = await _ratchetLookup.TryResolveAsync(ratchetKey, _activeIdentityContext.Identity!.SelfIdentityId, cancellationToken).ConfigureAwait(false);
                 Plaintext? plaintext;
                 SessionId inferredSessionId;
                 DirectSessionId nonNullDirectSessionId;
@@ -141,12 +141,12 @@ namespace Percolator.Application.Network
                     nonNullDirectSessionId = resolvedDirectSessionId.Value;
                     inferredSessionId = new SessionId(nonNullDirectSessionId.Value);
                     _logger.LogDebug("Fast-path lookup hit for ratchet header key; inferred session {SessionId}", inferredSessionId);
-                    plaintext = await _sessionManager.ReceiveMessageAsync(inferredSessionId, sessionRatchetMessage);
+                    plaintext = await _sessionManager.ReceiveMessageAsync(inferredSessionId, sessionRatchetMessage).ConfigureAwait(false);
                 }
                 else
                 {
                     _logger.LogWarning("Fast-path lookup MISS for ratchet header key; attempting slow-path inference");
-                    var inferResult = await _sessionManager.TryInferAndReceiveAsync(sessionRatchetMessage, cancellationToken)
+                    var inferResult = await _sessionManager.TryInferAndReceiveAsync(sessionRatchetMessage, cancellationToken).ConfigureAwait(false)
                         ?? throw new InvalidOperationException("Unable to resolve session by ratchet header key or slow-path inference");
                     inferredSessionId = inferResult.sessionId;
                     plaintext = inferResult.plaintext;
@@ -159,13 +159,13 @@ namespace Percolator.Application.Network
                     return new DeliverOpaqueMessageResult();
                 }
 
-                await _ratchetLookup.UpsertAsync(nonNullDirectSessionId, _activeIdentityContext.Identity!.SelfIdentityId, ratchetKey, DateTimeOffset.UtcNow, cancellationToken);
+                await _ratchetLookup.UpsertAsync(nonNullDirectSessionId, _activeIdentityContext.Identity!.SelfIdentityId, ratchetKey, DateTimeOffset.UtcNow, cancellationToken).ConfigureAwait(false);
 
-                var directSession = await _directSessionRepository.GetBySessionIdAsync(nonNullDirectSessionId, _activeIdentityContext.Identity.SelfIdentityId)
+                var directSession = await _directSessionRepository.GetBySessionIdAsync(nonNullDirectSessionId, _activeIdentityContext.Identity.SelfIdentityId).ConfigureAwait(false)
                     ?? throw new InvalidOperationException($"No direct session mapping found for session {inferredSessionId}");
                 var remotePeerId = directSession.RemotePeerId;
                 _logger.LogInformation("Resolved remote peer {PeerId} for session {SessionId}", remotePeerId, directSession.SessionId);
-                var connectionInfo = await _peerConnectionRepository.GetByIdAsync(remotePeerId);
+                var connectionInfo = await _peerConnectionRepository.GetByIdAsync(remotePeerId).ConfigureAwait(false);
                 if (connectionInfo?.GrpcEndPoints.FirstOrDefault() is null)
                 {
                     _logger.LogWarning("Could not find connection info for peer {PeerId} to handle opaque message", remotePeerId);
@@ -187,16 +187,16 @@ namespace Percolator.Application.Network
                 _logger.LogDebug("Allowed InternalEnvelope case {Case}; dispatching to orchestrator/transport path", internalEnvelope.ApplicationPayloadCase);
 
                 var ctx = new SessionContext(inferredSessionId.Value, _activeIdentityContext.Identity!.SelfIdentityId, directSession.RemotePeerId.Value);
-                var processed = await _mediator.Send(new ProcessInternalEnvelopeCommand(internalEnvelope, ctx), cancellationToken);
+                var processed = await _mediator.Send(new ProcessInternalEnvelopeCommand(internalEnvelope, ctx), cancellationToken).ConfigureAwait(false);
 
                 connectionInfo.UpdateLastSeen(endpoint, DateTimeOffset.UtcNow);
-                await _peerConnectionRepository.SaveAsync(connectionInfo);
+                await _peerConnectionRepository.SaveAsync(connectionInfo).ConfigureAwait(false);
 
                 // Signal: peer online. Attempt relay of queued messages one-by-one until empty or first failure.
                 try
                 {
                     var identityPeerId = new Percolator.Identity.PeerId(remotePeerId.Value);
-                    while (await _relayOrchestrator.RelayNextAsync(identityPeerId, cancellationToken))
+                    while (await _relayOrchestrator.RelayNextAsync(identityPeerId, cancellationToken).ConfigureAwait(false))
                     {
                         // continue while acked
                     }
@@ -208,7 +208,7 @@ namespace Percolator.Application.Network
 
                 if (processed is not null)
                 {
-                    var earlyBytes = await EncryptResponseEnvelope(inferredSessionId, processed);
+                    var earlyBytes = await EncryptResponseEnvelope(inferredSessionId, processed).ConfigureAwait(false);
                     return new DeliverOpaqueMessageResult { ResponsePayloadBytes = earlyBytes };
                 }
                 
@@ -216,7 +216,7 @@ namespace Percolator.Application.Network
                 {
                     return new DeliverOpaqueMessageResult();
                 }
-                var responseBytes = await EncryptResponseEnvelope(inferredSessionId, responseEnvelope);
+                var responseBytes = await EncryptResponseEnvelope(inferredSessionId, responseEnvelope).ConfigureAwait(false);
                 return new DeliverOpaqueMessageResult { ResponsePayloadBytes = responseBytes };
             }
             catch (Exception drEx)
@@ -239,7 +239,7 @@ namespace Percolator.Application.Network
                                 otkId,
                                 null,
                                 hello.HasEncryptedPayload ? hello.EncryptedPayload.ToByteArray() : null),
-                            cancellationToken);
+                            cancellationToken).ConfigureAwait(false);
 
                         if (responderBytes is null || responderBytes.Length == 0)
                         {
@@ -259,7 +259,7 @@ namespace Percolator.Application.Network
         private async Task<byte[]> EncryptResponseEnvelope(SessionId sessionId, InternalEnvelope internalEnvelope)
         {
             var plaintext = new Plaintext(internalEnvelope.ToByteArray());
-            var ratchetMessage = await _sessionManager.EncryptMessageAsync(sessionId, plaintext);
+            var ratchetMessage = await _sessionManager.EncryptMessageAsync(sessionId, plaintext).ConfigureAwait(false);
             return ratchetMessage.Value;
         }
     }

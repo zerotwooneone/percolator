@@ -38,7 +38,7 @@ public class GrpcMessageTransportService : IMessageTransportService
         SessionRatchetMessage message,
         CancellationToken cancellationToken = default)
     {
-        var peer = await _peerRepository.GetByIdAsync(recipientPeerId);
+        var peer = await _peerRepository.GetByIdAsync(recipientPeerId).ConfigureAwait(false);
         if (peer is null)
         {
             _logger.LogError("Could not find peer with ID {PeerId}", recipientPeerId);
@@ -46,7 +46,7 @@ public class GrpcMessageTransportService : IMessageTransportService
         }
 
         var networkPeerId = new NetworkPeerId(peer.Id.Value);
-        var peerConnection = await _peerConnectionRepository.GetByIdAsync(networkPeerId);
+        var peerConnection = await _peerConnectionRepository.GetByIdAsync(networkPeerId).ConfigureAwait(false);
         if (peerConnection is null)
         {
             throw new InvalidOperationException($"No connection info found for peer {peer.Id}. Cannot send message.");
@@ -84,7 +84,7 @@ public class GrpcMessageTransportService : IMessageTransportService
                 recipientPeerId, response.Version);
 
             peerConnection.UpdateLastSeen(endPoint, DateTime.UtcNow);
-            await _peerConnectionRepository.SaveAsync(peerConnection);
+            await _peerConnectionRepository.SaveAsync(peerConnection).ConfigureAwait(false);
             return response;
         }
         catch (InvalidProtocolBufferException ex)

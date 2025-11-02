@@ -84,7 +84,7 @@ namespace Percolator.Application.Network.Handshake
                 throw new InvalidOperationException("Active identity not loaded.");
             }
             var selfCryptoPeerId = new Percolator.Cryptography.Primitives.PeerId(_active.Identity.Id);
-            var bundle = await _preKeyRepo.TryPopBundleAsync(selfCryptoPeerId, signedPreKeyId, oneTimePreKeyId);
+            var bundle = await _preKeyRepo.TryPopBundleAsync(selfCryptoPeerId, signedPreKeyId, oneTimePreKeyId).ConfigureAwait(false);
             if (bundle is null)
             {
                 _logger.LogWarning("No matching pre-key bundle available (spkId={Spk}, otkId={Otk})", signedPreKeyId, oneTimePreKeyId);
@@ -98,11 +98,11 @@ namespace Percolator.Application.Network.Handshake
             DirectSessionId directSessionId;
             if (request.RemotePeerId is not null)
             {
-                var existing = await _directRepo.GetByRemotePeerIdAsync(new NetworkPeerId(request.RemotePeerId.Value), _active.Identity.SelfIdentityId);
+                var existing = await _directRepo.GetByRemotePeerIdAsync(new NetworkPeerId(request.RemotePeerId.Value), _active.Identity.SelfIdentityId).ConfigureAwait(false);
                 directSessionId = existing?.SessionId ?? new DirectSessionId(Guid.NewGuid());
                 if (existing is null)
                 {
-                    await _directRepo.UpsertAsync(new NetworkPeerId(request.RemotePeerId.Value), directSessionId, _active.Identity.SelfIdentityId);
+                    await _directRepo.UpsertAsync(new NetworkPeerId(request.RemotePeerId.Value), directSessionId, _active.Identity.SelfIdentityId).ConfigureAwait(false);
                 }
             }
             else
@@ -115,33 +115,33 @@ namespace Percolator.Application.Network.Handshake
                 remoteIdentityKey,
                 new RatchetEphemeralKey(remoteEphemeralKey.Value),
                 hs.ResponderPrivateKeyUsed,
-                hs.SharedSecret);
+                hs.SharedSecret).ConfigureAwait(false);
 
             _logger.LogInformation("Responder established session {SessionId}", directSessionId.Value);
 
             // Persist identity artifacts only after successful session establishment
             var displayName = Convert.ToHexString(pkh);
-            await _peerRepository.AddOrUpdateAsync(new Peer(resolvedRemotePeerId, displayName));
-            await _pkhStore.ActivateIfChangedAsync(resolvedRemotePeerId, spki, pkh, DateTimeOffset.UtcNow, cancellationToken);
+            await _peerRepository.AddOrUpdateAsync(new Peer(resolvedRemotePeerId, displayName)).ConfigureAwait(false);
+            await _pkhStore.ActivateIfChangedAsync(resolvedRemotePeerId, spki, pkh, DateTimeOffset.UtcNow, cancellationToken).ConfigureAwait(false);
             var netPeerId = new NetworkPeerId(resolvedRemotePeerId.Value);
-            var existingConn = await _peerConnectionRepository.GetByIdAsync(netPeerId);
+            var existingConn = await _peerConnectionRepository.GetByIdAsync(netPeerId).ConfigureAwait(false);
             if (existingConn is null)
             {
                 var conn = new PeerConnection(netPeerId, identitySigningKey: null, grpcEndPoints: Array.Empty<GrpcEndPoint>(), tlsCertificates: Array.Empty<TlsCertificate>(), lastSeen: DateTimeOffset.UtcNow);
-                await _peerConnectionRepository.SaveAsync(conn);
+                await _peerConnectionRepository.SaveAsync(conn).ConfigureAwait(false);
             }
 
             // If initiator included an encrypted initial payload, decrypt it via the newly established session
             if (request.EncryptedPayload is not null && request.EncryptedPayload.Length > 0)
             {
                 var initPayload = new SessionRatchetMessage(request.EncryptedPayload);
-                var initPt = await _sessionManager.ReceiveMessageAsync(new SessionId(directSessionId.Value), initPayload);
+                var initPt = await _sessionManager.ReceiveMessageAsync(new SessionId(directSessionId.Value), initPayload).ConfigureAwait(false);
                 if (initPt is not null)
                 {
                     var initInner = InternalEnvelope.Parser.ParseFrom(initPt.Value);
                     // Optional: common logging/context step
                     var ctx = new Percolator.Application.Network.SessionContext(directSessionId.Value, _active.Identity.SelfIdentityId, request.RemotePeerId?.Value);
-                    await _mediator.Send(new Percolator.Application.Network.ProcessInternalEnvelopeCommand(initInner, ctx), cancellationToken);
+                    await _mediator.Send(new Percolator.Application.Network.ProcessInternalEnvelopeCommand(initInner, ctx), cancellationToken).ConfigureAwait(false);
                 }
             }
 
@@ -152,7 +152,7 @@ namespace Percolator.Application.Network.Handshake
                 DirectSessionId = directSessionId.Value.ToString()
             };
             var responderPt = new Plaintext(responderInner.ToByteArray());
-            var rm = await _sessionManager.EncryptMessageAsync(new SessionId(directSessionId.Value), responderPt);
+            var rm = await _sessionManager.EncryptMessageAsync(new SessionId(directSessionId.Value), responderPt).ConfigureAwait(false);
             return rm.Value;
         }
     }

@@ -72,7 +72,7 @@ namespace Percolator.Application.Apps.Chat
             // Resolve conversation
             var self = _selfProvider.Get();
             var selfIdentityId = _activeIdentityContext.Identity?.SelfIdentityId;
-            var convo = await _conversationRepository.GetByIdAsync(new ConversationId(notification.ConversationId), selfIdentityId: selfIdentityId.Value);
+            var convo = await _conversationRepository.GetByIdAsync(new ConversationId(notification.ConversationId), selfIdentityId: selfIdentityId.Value).ConfigureAwait(false);
             if (convo is null)
             {
                 _logger.LogWarning("[GroupMembershipChanged] Conversation {ConversationId} not found", notification.ConversationId);
@@ -87,15 +87,15 @@ namespace Percolator.Application.Apps.Chat
             }
 
             // Determine next key version
-            var adminState = await _adminStateStore.GetAsync(notification.ConversationId, cancellationToken);
+            var adminState = await _adminStateStore.GetAsync(notification.ConversationId, cancellationToken).ConfigureAwait(false);
             var nextVersion = (adminState?.LastCommittedKeyVersion ?? 0) + 1;
 
             // Generate fresh group key material and import locally (acting admin sets the key first)
             var newKey = RandomNumberGenerator.GetBytes(CryptoUtils.KeySize);
             manager.ImportKey(new GroupKeyVersionC(nextVersion), new GroupKeyMaterial(newKey));
-            var masterKey = await _atRestKeyProvider.GetMasterKeyAsync(cancellationToken);
+            var masterKey = await _atRestKeyProvider.GetMasterKeyAsync(cancellationToken).ConfigureAwait(false);
             var stateBlob = manager.SaveState(masterKey);
-            await _gmStateStore.SaveAsync(notification.ConversationId, stateBlob, DateTimeOffset.UtcNow, cancellationToken);
+            await _gmStateStore.SaveAsync(notification.ConversationId, stateBlob, DateTimeOffset.UtcNow, cancellationToken).ConfigureAwait(false);
 
             // Build and send per-member KeyDistributionPayload
             foreach (var participant in convo.Participants)
@@ -105,7 +105,7 @@ namespace Percolator.Application.Apps.Chat
                     continue;
 
                 // Resolve transport AEAD key for this recipient
-                var aeadKey = await _transportKeyResolver.GetAeadKeyAsync(notification.ConversationId, participant.Value, cancellationToken);
+                var aeadKey = await _transportKeyResolver.GetAeadKeyAsync(notification.ConversationId, participant.Value, cancellationToken).ConfigureAwait(false);
                 if (aeadKey is null)
                 {
                     _logger.LogWarning("[GroupMembershipChanged] No AEAD key for recipient {Participant} in conversation {ConversationId}", participant.Value, notification.ConversationId);
@@ -148,9 +148,9 @@ namespace Percolator.Application.Apps.Chat
                 var chat = new ChatEnvelope { KeyDistribution = payload };
 
                 // Resolve recipient PKH (for host-enqueue fallback)
-                var pkh = await _recipientPkhResolver.GetActivePkhAsync(participant.Value, cancellationToken);
+                var pkh = await _recipientPkhResolver.GetActivePkhAsync(participant.Value, cancellationToken).ConfigureAwait(false);
                 var identityPeerId = new Percolator.Identity.PeerId(participant.Value);
-                await _sender.SendChatEnvelopeToPeerAsync(chat, new RecipientRoute(identityPeerId, pkh), cancellationToken);
+                await _sender.SendChatEnvelopeToPeerAsync(chat, new RecipientRoute(identityPeerId, pkh), cancellationToken).ConfigureAwait(false);
             }
         }
     }

@@ -69,7 +69,7 @@ namespace Percolator.Application.Apps.Chat
             }
 
             // Resolve transport AEAD key (per-recipient) from Double Ratchet/session
-            var aeadKey = await _transportKeyResolver.GetAeadKeyAsync(conversationId, ct);
+            var aeadKey = await _transportKeyResolver.GetAeadKeyAsync(conversationId, ct).ConfigureAwait(false);
             if (aeadKey is null || (aeadKey.Length != 16 && aeadKey.Length != 32))
             {
                 _logger.LogWarning("[GroupKeyOperations] Missing/invalid AEAD key for conversation {ConversationId}; cannot decrypt key v{Version}", conversationId, version.Value);
@@ -89,12 +89,12 @@ namespace Percolator.Application.Apps.Chat
                 _logger.LogInformation("[GroupKeyOperations] Imported group key v{Version} for conversation {ConversationId} (len={Len})", version.Value, conversationId, plaintext.Length);
 
                 // Persist updated GroupManager state
-                var masterKey = await _atRestKeyProvider.GetMasterKeyAsync(ct);
+                var masterKey = await _atRestKeyProvider.GetMasterKeyAsync(ct).ConfigureAwait(false);
                 var stateBlob = manager.SaveState(masterKey);
-                await _gmStateStore.SaveAsync(conversationId, stateBlob, DateTimeOffset.UtcNow, ct);
+                await _gmStateStore.SaveAsync(conversationId, stateBlob, DateTimeOffset.UtcNow, ct).ConfigureAwait(false);
 
                 // Notify application that this node adopted key version successfully
-                await _mediator.Publish(new KeyVersionAdoptedNotification(conversationId, (uint)version.Value), ct);
+                await _mediator.Publish(new KeyVersionAdoptedNotification(conversationId, (uint)version.Value), ct).ConfigureAwait(false);
             }
             catch (CryptographicException ex)
             {

@@ -43,7 +43,7 @@ namespace Percolator.Application.Apps.Chat.Handlers
                 senderPeerId,
                 notification.Signature,
                 notification.AdminSequenceNumber
-            ), cancellationToken);
+            ), cancellationToken).ConfigureAwait(false);
         }
     }
 }

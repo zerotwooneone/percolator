@@ -31,7 +31,7 @@ public class TlsHandshakeService : ITlsHandshakeService
         try
         {
             // Capture the certificate using a fresh TCP connection and SSL stream
-            X509Certificate2? remoteCert = await PerformTlsHandshakeAndCaptureAsync(endpoint);
+            X509Certificate2? remoteCert = await PerformTlsHandshakeAndCaptureAsync(endpoint).ConfigureAwait(false);
             
             if (remoteCert != null)
             {
@@ -73,12 +73,12 @@ public class TlsHandshakeService : ITlsHandshakeService
             
             // Connect to the endpoint with a timeout
             var connectTask = tcpClient.ConnectAsync(endpoint.Host, endpoint.Port);
-            if (await Task.WhenAny(connectTask, Task.Delay(5000)) != connectTask)
+            if (await Task.WhenAny(connectTask, Task.Delay(5000)).ConfigureAwait(false) != connectTask)
             {
                 throw new TimeoutException($"Connection to {endpoint} timed out after 5 seconds");
             }
             
-            await connectTask; // Ensure any exceptions are propagated
+            await connectTask.ConfigureAwait(false); // Ensure any exceptions are propagated
             
             _logger.LogInformation("TCP connection established to {Endpoint}", endpoint);
             
@@ -133,7 +133,7 @@ public class TlsHandshakeService : ITlsHandshakeService
                     EnabledSslProtocols = SslProtocols.Tls12 | SslProtocols.Tls13,
                     CertificateRevocationCheckMode = X509RevocationMode.NoCheck,
                     EncryptionPolicy = EncryptionPolicy.RequireEncryption
-                });
+                }).ConfigureAwait(false);
             
             _logger.LogInformation("TLS handshake successful with {Endpoint}, Protocol: {Protocol}", 
                 endpoint, sslStream.SslProtocol.ToString());

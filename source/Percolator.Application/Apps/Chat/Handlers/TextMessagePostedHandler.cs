@@ -56,7 +56,7 @@ namespace Percolator.Application.Apps.Chat.Handlers
                         notification.Content,
                         notification.SentTimestampUtc,
                         recipientIds),
-                    cancellationToken);
+                    cancellationToken).ConfigureAwait(false);
 
                 _logger.LogInformation("Dispatched message {MessageId} to {RecipientCount} recipients",
                     notification.MessageId, recipientIds.Count);

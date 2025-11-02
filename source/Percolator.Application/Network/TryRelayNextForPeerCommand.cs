@@ -23,7 +23,7 @@ namespace Percolator.Application.Network
             // Best-effort: attempt a single relay; let orchestrator throw to stop outer loops elsewhere.
             try
             {
-                await _relay.RelayNextAsync(request.RecipientPeerId, cancellationToken);
+                await _relay.RelayNextAsync(request.RecipientPeerId, cancellationToken).ConfigureAwait(false);
             }
             catch
             {

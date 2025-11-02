@@ -46,15 +46,15 @@ public sealed class DispatchEmojiAnnotationHandler : IRequestHandler<DispatchEmo
             .Where(pid => pid != request.SenderPeerId)
             .Select(pid => ProcessRecipientAsync(pid, chat, cancellationToken));
 
-        await Task.WhenAll(tasks);
+        await Task.WhenAll(tasks).ConfigureAwait(false);
     }
 
     private async Task ProcessRecipientAsync(PeerId recipientId, ChatEnvelope chat, CancellationToken cancellationToken)
     {
         try
         {
-            byte[]? pkh = await _keyStore.GetPublicKeyHashByPeerIdAsync(recipientId, cancellationToken);
-            await _sender.SendChatEnvelopeToPeerAsync(chat, new RecipientRoute(recipientId, pkh), cancellationToken);
+            byte[]? pkh = await _keyStore.GetPublicKeyHashByPeerIdAsync(recipientId, cancellationToken).ConfigureAwait(false);
+            await _sender.SendChatEnvelopeToPeerAsync(chat, new RecipientRoute(recipientId, pkh), cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex)
         {

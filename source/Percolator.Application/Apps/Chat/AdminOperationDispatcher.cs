@@ -158,8 +158,8 @@ namespace Percolator.Application.Apps.Chat
                 try
                 {
                     // Resolve latest active PKH for enqueue fallback
-                    byte[]? pkh = await _keyStore.GetPublicKeyHashByPeerIdAsync(pid, ct);
-                    await _sender.SendChatEnvelopeToPeerAsync(envelope.ChatEnvelope, new RecipientRoute(pid, pkh), ct);
+                    byte[]? pkh = await _keyStore.GetPublicKeyHashByPeerIdAsync(pid, ct).ConfigureAwait(false);
+                    await _sender.SendChatEnvelopeToPeerAsync(envelope.ChatEnvelope, new RecipientRoute(pid, pkh), ct).ConfigureAwait(false);
                 }
                 catch (Exception ex)
                 {

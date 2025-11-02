@@ -33,13 +33,13 @@ public class CreateSelfIdentityHandler : IRequestHandler<CreateSelfIdentityComma
         }
 
         var peerId = request.PeerId ?? Guid.NewGuid();
-        var id = await _selfIdentityRepository.CreateAsync(peerId, request.Name);
+        var id = await _selfIdentityRepository.CreateAsync(peerId, request.Name).ConfigureAwait(false);
 
         // Generate and persist X3DH keys for the new self identity
         var ikSigning = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var spk = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var keys = new X3dhKeys(ikSigning, spk);
-        await _keysStore.SaveAsync(id, keys, cancellationToken);
+        await _keysStore.SaveAsync(id, keys, cancellationToken).ConfigureAwait(false);
         _logger.LogInformation("Created keys for identity '{Name}' (SelfIdentityId={Id}, PeerId={PeerId}, PublicKey={PublicKey})", request.Name, id, peerId, Convert.ToBase64String(keys.IdentitySigningKey.ExportSubjectPublicKeyInfo()));
 
         return id;

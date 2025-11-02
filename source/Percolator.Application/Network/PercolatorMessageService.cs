@@ -39,7 +39,7 @@ namespace Percolator.Application.Network
             var peerEndPoint = new DnsEndPoint(peerGrpcEnpointParts[0], (int)payload.CallbackPort);
 
             // HttpContext for client certificate (may be null in tests)
-            var clientCertificate = await context.GetHttpContext().Connection.GetClientCertificateAsync();
+            var clientCertificate = await context.GetHttpContext().Connection.GetClientCertificateAsync().ConfigureAwait(false);
 
             var command = new EstablishDirectSessionCommand
             {
@@ -52,7 +52,7 @@ namespace Percolator.Application.Network
                 PeerEndPoint = peerEndPoint
             };
 
-            var result = await _mediator.Send(command, context.CancellationToken);
+            var result = await _mediator.Send(command, context.CancellationToken).ConfigureAwait(false);
 
             return new EstablishDirectSessionResponse
             {
@@ -72,7 +72,7 @@ namespace Percolator.Application.Network
                 PayloadBytes = request.Payload.ToByteArray()
             };
 
-            var result = await _mediator.Send(command, context.CancellationToken);
+            var result = await _mediator.Send(command, context.CancellationToken).ConfigureAwait(false);
             var resp = new DeliverOpaqueMessageResponse { Version = 1 };
             if (result.ResponsePayloadBytes is not null)
             {

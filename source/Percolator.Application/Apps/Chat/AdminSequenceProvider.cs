@@ -28,15 +28,15 @@ namespace Percolator.Application.Apps.Chat
         {
             // Resolve the local conversation row for this self identity
             var selfIdentityId = _activeIdentityContext.Identity!.SelfIdentityId;
-            var convo = await _conversations.GetByGroupGuidAsync(groupConversationGuid, selfIdentityId);
+            var convo = await _conversations.GetByGroupGuidAsync(groupConversationGuid, selfIdentityId).ConfigureAwait(false);
             if (convo is null)
             {
                 throw new InvalidOperationException("Group conversation not found for current identity.");
             }
 
             // Ensure admin state row exists, then read current next sequence without mutating it.
-            await _adminStateStore.InitializeIfMissingAsync(convo.Id.Value, ct);
-            var state = await _adminStateStore.GetAsync(convo.Id.Value, ct);
+            await _adminStateStore.InitializeIfMissingAsync(convo.Id.Value, ct).ConfigureAwait(false);
+            var state = await _adminStateStore.GetAsync(convo.Id.Value, ct).ConfigureAwait(false);
             if (state is null)
             {
                 throw new InvalidOperationException("Failed to load group admin state.");

@@ -58,7 +58,7 @@ namespace Percolator.Application.Apps.Chat
                 {
                     pkh = sha.ComputeHash(spki);
                 }
-                var peerId = await _keyStore.GetPeerIdByPublicKeyHashAsync(pkh, cancellationToken);
+                var peerId = await _keyStore.GetPeerIdByPublicKeyHashAsync(pkh, cancellationToken).ConfigureAwait(false);
                 if (peerId is null)
                 {
                     _logger.LogWarning("[CreateGroupConversation] SPKI[{Index}] did not resolve to a known PeerId (pkh={Pkh})", index, Convert.ToBase64String(pkh));
@@ -74,16 +74,16 @@ namespace Percolator.Application.Apps.Chat
                 throw new InvalidOperationException("A group conversation must have at least two resolved participants.");
 
             // Create group
-            await _conversations.CreateGroupAsync(request.GroupConversationGuid, request.SelfIdentityId, participants, request.Name);
+            await _conversations.CreateGroupAsync(request.GroupConversationGuid, request.SelfIdentityId, participants, request.Name).ConfigureAwait(false);
 
             // Read back conversation id
-            var convo = await _conversations.GetByGroupGuidAsync(request.GroupConversationGuid, request.SelfIdentityId);
+            var convo = await _conversations.GetByGroupGuidAsync(request.GroupConversationGuid, request.SelfIdentityId).ConfigureAwait(false);
             if (convo is null)
                 throw new InvalidOperationException("Conversation not found immediately after creation.");
 
             // Seed creator admin key
             var now = DateTimeOffset.UtcNow;
-            await _adminKeys.AddKeyAsync(convo.Id.Value, new Percolator.Chat.ValueObjects.AdminPublicKey(request.CreatorIdentityKeySpki), now, cancellationToken);
+            await _adminKeys.AddKeyAsync(convo.Id.Value, new Percolator.Chat.ValueObjects.AdminPublicKey(request.CreatorIdentityKeySpki), now, cancellationToken).ConfigureAwait(false);
         }
     }
 }

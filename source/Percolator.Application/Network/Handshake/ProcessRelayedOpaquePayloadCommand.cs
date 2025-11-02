@@ -76,30 +76,30 @@ namespace Percolator.Application.Network.Handshake
             catch
             {
                 // Not a valid ratchet message; attempt plaintext HandshakeInitiatorHello fallback
-                await TryHandlePlaintextHelloAsync(request.OpaquePayload, cancellationToken);
+                await TryHandlePlaintextHelloAsync(request.OpaquePayload, cancellationToken).ConfigureAwait(false);
                 return;
             }
 
             var header = ratchetMessage.GetHeader();
 
             // Fast path: resolve session by ratchet header key
-            var directSessionId = await _ratchetLookup.TryResolveAsync(header.PreKey, _active.Identity.SelfIdentityId, cancellationToken);
+            var directSessionId = await _ratchetLookup.TryResolveAsync(header.PreKey, _active.Identity.SelfIdentityId, cancellationToken).ConfigureAwait(false);
 
             Plaintext? plaintext;
             SessionId sid;
             if (directSessionId is not null)
             {
                 sid = new SessionId(directSessionId.Value.Value);
-                plaintext = await _sessions.ReceiveMessageAsync(sid, ratchetMessage);
+                plaintext = await _sessions.ReceiveMessageAsync(sid, ratchetMessage).ConfigureAwait(false);
             }
             else
             {
                 // Slow path: infer session and decrypt (may also handle initial pre-key messages)
-                var result = await _sessions.TryInferAndReceiveAsync(ratchetMessage, cancellationToken);
+                var result = await _sessions.TryInferAndReceiveAsync(ratchetMessage, cancellationToken).ConfigureAwait(false);
                 if (result is null)
                 {
                     // Fallback: raw payload might be a plaintext HandshakeInitiatorHello
-                    await TryHandlePlaintextHelloAsync(request.OpaquePayload, cancellationToken);
+                    await TryHandlePlaintextHelloAsync(request.OpaquePayload, cancellationToken).ConfigureAwait(false);
                     return;
                 }
                 sid = result.Value.sessionId;
@@ -109,7 +109,7 @@ namespace Percolator.Application.Network.Handshake
             if (plaintext is null)
             {
                 _logger.LogWarning("Relayed DR message could not be decrypted; attempting plaintext HandshakeInitiatorHello fallback");
-                await TryHandlePlaintextHelloAsync(request.OpaquePayload, cancellationToken);
+                await TryHandlePlaintextHelloAsync(request.OpaquePayload, cancellationToken).ConfigureAwait(false);
                 return;
             }
 
@@ -121,7 +121,7 @@ namespace Percolator.Application.Network.Handshake
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Decrypted relayed payload was not a valid InternalEnvelope; attempting plaintext HandshakeInitiatorHello fallback");
-                await TryHandlePlaintextHelloAsync(request.OpaquePayload, cancellationToken);
+                await TryHandlePlaintextHelloAsync(request.OpaquePayload, cancellationToken).ConfigureAwait(false);
                 return;
             }
 
@@ -135,7 +135,7 @@ namespace Percolator.Application.Network.Handshake
             await _mediator.Send(new Percolator.Application.Network.ProcessInternalEnvelopeCommand(
                 inner,
                 new Percolator.Application.Network.SessionContext(sid.Value, _active.Identity.SelfIdentityId, null)
-            ), cancellationToken);
+            ), cancellationToken).ConfigureAwait(false);
         }
 
         private async Task TryHandlePlaintextHelloAsync(byte[] payload, CancellationToken cancellationToken)
@@ -158,7 +158,7 @@ namespace Percolator.Application.Network.Handshake
                             otkId,
                             null,
                             hello.HasEncryptedPayload ? hello.EncryptedPayload.ToByteArray() : null),
-                        cancellationToken);
+                        cancellationToken).ConfigureAwait(false);
                 }
             }
             catch

@@ -64,15 +64,15 @@ namespace Percolator.Application.Apps.Chat
             };
             // Chat envelope ready for dispatch
 
-            var adminPeerId = await _actingAdminResolver.GetActingAdminPeerIdAsync(notification.ConversationId, ct);
+            var adminPeerId = await _actingAdminResolver.GetActingAdminPeerIdAsync(notification.ConversationId, ct).ConfigureAwait(false);
             if (adminPeerId is null)
             {
                 _logger.LogWarning("[KeyVersionAdoptedHandler] Acting admin unresolved for conversation {ConversationId}; skipping confirmation send.", notification.ConversationId);
                 return;
             }
-            var pkh = await _pkhResolver.GetActivePkhAsync(adminPeerId.Value, ct);
+            var pkh = await _pkhResolver.GetActivePkhAsync(adminPeerId.Value, ct).ConfigureAwait(false);
             var route = new RecipientRoute(new Percolator.Identity.PeerId(adminPeerId.Value), pkh);
-            await _sender.SendChatEnvelopeToPeerAsync(chat, route, ct);
+            await _sender.SendChatEnvelopeToPeerAsync(chat, route, ct).ConfigureAwait(false);
         }
 
         private static byte[] BuildCanonicalConfirmationPayload(byte[] conversationGuid, uint keyVersion, byte[] adopterPublicKey)

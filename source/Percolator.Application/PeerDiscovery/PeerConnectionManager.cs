@@ -25,7 +25,7 @@ public class PeerConnectionManager : IPeerConnectionManager
 
     public async Task<TransportService.TransportServiceClient> GetTransportClient(IdentityPeerId peerId)
     {
-        var connectionInfo = await _peerConnectionRepository.GetByIdAsync(new NetworkPeerId(peerId.Value));
+        var connectionInfo = await _peerConnectionRepository.GetByIdAsync(new NetworkPeerId(peerId.Value)).ConfigureAwait(false);
         if (connectionInfo is null)
         {
             throw new ArgumentException($"No connection info found for peer with ID '{peerId}'.", nameof(peerId));
@@ -63,7 +63,7 @@ public class PeerConnectionManager : IPeerConnectionManager
 
     public async Task RemovePeer(IdentityPeerId peerId)
     {
-        var connectionInfo = await _peerConnectionRepository.GetByIdAsync(new NetworkPeerId(peerId.Value));
+        var connectionInfo = await _peerConnectionRepository.GetByIdAsync(new NetworkPeerId(peerId.Value)).ConfigureAwait(false);
         if (connectionInfo is null)
         {
             _logger.LogWarning("Attempted to remove a peer with no connection info: ID '{PeerId}'.", peerId);

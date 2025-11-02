@@ -49,25 +49,25 @@ namespace Percolator.Application.Network
             try
             {
                 // Prefer existing direct session
-                var ds = await _sessions.GetByRemotePeerIdAsync(new Percolator.Network.PeerId(recipient.PeerId.Value), _active.Identity!.SelfIdentityId);
+                var ds = await _sessions.GetByRemotePeerIdAsync(new Percolator.Network.PeerId(recipient.PeerId.Value), _active.Identity!.SelfIdentityId).ConfigureAwait(false);
                 if (ds is null)
                 {
                     _logger.LogWarning("No direct session to {PeerId}; attempting host enqueue fallback if possible", recipient.PeerId);
-                    await TryHostEnqueueAsync(recipient, plaintext, null, ct);
+                    await TryHostEnqueueAsync(recipient, plaintext, null, ct).ConfigureAwait(false);
                     return;
                 }
 
                 var sessionId = new SessionId(ds.SessionId.Value);
                 var directSessionId = new DirectSessionId(ds.SessionId.Value);
-                var cipher = await _sessionManager.EncryptMessageAsync(sessionId, plaintext);
+                var cipher = await _sessionManager.EncryptMessageAsync(sessionId, plaintext).ConfigureAwait(false);
                 try
                 {
-                    await _transport.SendMessageAsync(recipient.PeerId, directSessionId, cipher, ct);
+                    await _transport.SendMessageAsync(recipient.PeerId, directSessionId, cipher, ct).ConfigureAwait(false);
                 }
                 catch (Exception sendEx)
                 {
                     _logger.LogWarning(sendEx, "Direct send failed to {PeerId}; attempting host enqueue fallback if possible", recipient.PeerId);
-                    await TryHostEnqueueAsync(recipient, plaintext, cipher, ct);
+                    await TryHostEnqueueAsync(recipient, plaintext, cipher, ct).ConfigureAwait(false);
                 }
             }
             catch (Exception ex)
@@ -87,14 +87,14 @@ namespace Percolator.Application.Network
                 }
 
                 // We need a session to the host to send the enqueue request
-                var host = await _peers.GetByNameAsync("host");
+                var host = await _peers.GetByNameAsync("host").ConfigureAwait(false);
                 if (host is null)
                 {
                     _logger.LogDebug("Host peer not found; cannot enqueue on behalf of {PeerId}", recipient.PeerId);
                     return;
                 }
                 var hostPeerId = new Percolator.Identity.PeerId(host.Id.Value);
-                var hostDs = await _sessions.GetByRemotePeerIdAsync(new Percolator.Network.PeerId(hostPeerId.Value), _active.Identity!.SelfIdentityId);
+                var hostDs = await _sessions.GetByRemotePeerIdAsync(new Percolator.Network.PeerId(hostPeerId.Value), _active.Identity!.SelfIdentityId).ConfigureAwait(false);
                 if (hostDs is null)
                 {
                     _logger.LogDebug("No direct session to host; cannot enqueue on behalf of {PeerId}", recipient.PeerId);
@@ -110,14 +110,14 @@ namespace Percolator.Application.Network
                 else
                 {
                     // Attempt to encrypt to recipient; if still no session, bail.
-                    var ds = await _sessions.GetByRemotePeerIdAsync(new Percolator.Network.PeerId(recipient.PeerId.Value), _active.Identity!.SelfIdentityId);
+                    var ds = await _sessions.GetByRemotePeerIdAsync(new Percolator.Network.PeerId(recipient.PeerId.Value), _active.Identity!.SelfIdentityId).ConfigureAwait(false);
                     if (ds is null)
                     {
                         _logger.LogDebug("Cannot produce DR ciphertext for {PeerId}; enqueue aborted", recipient.PeerId);
                         return;
                     }
                     var sid = new SessionId(ds.SessionId.Value);
-                    var tmpCipher = await _sessionManager.EncryptMessageAsync(sid, plaintext);
+                    var tmpCipher = await _sessionManager.EncryptMessageAsync(sid, plaintext).ConfigureAwait(false);
                     blobBytes = tmpCipher.Value;
                 }
 
@@ -139,8 +139,8 @@ namespace Percolator.Application.Network
                 var hostPlain = new Plaintext(toHost.ToByteArray());
                 var hostSessionId = new SessionId(hostDs.SessionId.Value);
                 var hostDirectSessionId = new DirectSessionId(hostDs.SessionId.Value);
-                var hostCipher = await _sessionManager.EncryptMessageAsync(hostSessionId, hostPlain);
-                await _transport.SendMessageAsync(hostPeerId, hostDirectSessionId, hostCipher, ct);
+                var hostCipher = await _sessionManager.EncryptMessageAsync(hostSessionId, hostPlain).ConfigureAwait(false);
+                await _transport.SendMessageAsync(hostPeerId, hostDirectSessionId, hostCipher, ct).ConfigureAwait(false);
             }
             catch (Exception ex)
             {

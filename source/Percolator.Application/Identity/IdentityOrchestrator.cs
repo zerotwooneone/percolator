@@ -37,20 +37,20 @@ public class IdentityOrchestrator : IIdentityOrchestrator
         }
 
         // Resolve and assign SelfIdentityId for scoping
-        var dto = await _selfIdentityRepository.GetByNameWithFallbackAsync(identityName, fallbackIdentityName??String.Empty);
+        var dto = await _selfIdentityRepository.GetByNameWithFallbackAsync(identityName, fallbackIdentityName??String.Empty).ConfigureAwait(false);
         if (dto is null)
         {
             throw new InvalidOperationException($"Identity {identityName} not found");
         }
         var selfId = dto.Id;
-        var keys = await _keysStore.LoadAsync(selfId, cancellationToken);
+        var keys = await _keysStore.LoadAsync(selfId, cancellationToken).ConfigureAwait(false);
         if (keys is null)
         {
             // Generate new X3DH keys and persist
             var ikSigning = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
             var spk = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
             keys = new X3dhKeys(ikSigning, spk);
-            await _keysStore.SaveAsync(selfId, keys, cancellationToken);
+            await _keysStore.SaveAsync(selfId, keys, cancellationToken).ConfigureAwait(false);
             _logger.LogInformation("Generated and saved new X3DH keys for identity {IdentityName} (SelfIdentityId={SelfIdentityId})", identityName, selfId);
         }
         var identity = new IdentityRecord(dto.PeerId, identityName, dto.Name)  with { SelfIdentityId = selfId };

@@ -30,7 +30,7 @@ public class RemotePeerResolver : IRemotePeerResolver
         if (_activeIdentityContext.Identity is null)
             throw new InvalidOperationException("Identity context not loaded");
 
-        var conversation = await _conversationRepository.GetByIdAsync(convId, _activeIdentityContext.Identity.SelfIdentityId)
+        var conversation = await _conversationRepository.GetByIdAsync(convId, _activeIdentityContext.Identity.SelfIdentityId).ConfigureAwait(false)
             ?? throw new InvalidOperationException($"Conversation with id {sessionId} not found");
 
         if (conversation.Participants.Count != 2)

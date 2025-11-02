@@ -26,7 +26,7 @@ public sealed class HostCommandHandler : IRequestHandler<HostCommand, HostStartu
     public async Task<HostStartupInfo> Handle(HostCommand request, CancellationToken cancellationToken)
     {
         // Ensure identity is resolved and keys are loaded
-        await _identityOrchestrator.ResolveIdentityAsync(request.SelfIdentityName, cancellationToken, fallbackIdentityName: "default");
+        await _identityOrchestrator.ResolveIdentityAsync(request.SelfIdentityName, cancellationToken, fallbackIdentityName: "default").ConfigureAwait(false);
 
         if (_activeIdentityContext.Keys?.IdentitySigningKey is null)
         {

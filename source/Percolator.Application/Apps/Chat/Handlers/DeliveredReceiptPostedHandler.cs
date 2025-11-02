@@ -39,7 +39,7 @@ namespace Percolator.Application.Apps.Chat.Handlers
                 notification.SentTimestampUtc,
                 recipientPeerIds,
                 senderPeerId
-            ), cancellationToken);
+            ), cancellationToken).ConfigureAwait(false);
         }
     }
 }

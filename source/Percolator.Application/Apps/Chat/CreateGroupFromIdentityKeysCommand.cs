@@ -57,7 +57,7 @@ namespace Percolator.Application.Apps.Chat
                 {
                     pkh = sha.ComputeHash(spki);
                 }
-                var peerId = await _keyStore.GetPeerIdByPublicKeyHashAsync(pkh, cancellationToken);
+                var peerId = await _keyStore.GetPeerIdByPublicKeyHashAsync(pkh, cancellationToken).ConfigureAwait(false);
                 if (peerId is null)
                 {
                     _logger.LogWarning("[CreateGroup] SPKI[{Index}] did not resolve to a known PeerId (pkh={Pkh})", index, Convert.ToBase64String(pkh));
@@ -83,11 +83,11 @@ namespace Percolator.Application.Apps.Chat
                 return;
             }
             _logger.LogInformation("[CreateGroup] Creating group with {Count} participants.", participants.Count);
-            await _conversations.CreateGroupAsync(request.GroupConversationGuid, request.SelfIdentityId, participants, request.Name);
+            await _conversations.CreateGroupAsync(request.GroupConversationGuid, request.SelfIdentityId, participants, request.Name).ConfigureAwait(false);
 
             // Seed initial admin key so that subsequent admin ops can be validated.
             // Only the creator should be admin initially.
-            var convo = await _conversations.GetByGroupGuidAsync(request.GroupConversationGuid, request.SelfIdentityId);
+            var convo = await _conversations.GetByGroupGuidAsync(request.GroupConversationGuid, request.SelfIdentityId).ConfigureAwait(false);
             if (convo is null)
             {
                 _logger.LogWarning("[CreateGroup] Conversation not found immediately after creation for group {GroupGuid}", request.GroupConversationGuid);
@@ -95,7 +95,7 @@ namespace Percolator.Application.Apps.Chat
             }
             try
             {
-                await _adminKeys.AddKeyAsync(convo.Id.Value, new AdminPublicKey(request.CreatorIdentityKeySpki), DateTimeOffset.UtcNow, cancellationToken);
+                await _adminKeys.AddKeyAsync(convo.Id.Value, new AdminPublicKey(request.CreatorIdentityKeySpki), DateTimeOffset.UtcNow, cancellationToken).ConfigureAwait(false);
                 _logger.LogInformation("[CreateGroup] Seeded initial admin key (creator) for group {GroupGuid}.", request.GroupConversationGuid);
             }
             catch (Exception ex)
@@ -135,11 +135,11 @@ namespace Percolator.Application.Apps.Chat
                 {
                     pkh = sha.ComputeHash(spki);
                 }
-                var peerId = await _keyStore.GetPeerIdByPublicKeyHashAsync(pkh, cancellationToken);
+                var peerId = await _keyStore.GetPeerIdByPublicKeyHashAsync(pkh, cancellationToken).ConfigureAwait(false);
                 if (peerId is null) continue;
                 var pid = new Percolator.Identity.PeerId(peerId.Value);
                 var route = new RecipientRoute(pid, pkh);
-                await _sender.SendChatEnvelopeToPeerAsync(env.ChatEnvelope, route, cancellationToken);
+                await _sender.SendChatEnvelopeToPeerAsync(env.ChatEnvelope, route, cancellationToken).ConfigureAwait(false);
             }
         }
     }
