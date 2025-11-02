@@ -106,7 +106,6 @@ namespace Percolator.Application.Apps.Chat
             // Build CreateGroup internal envelope to notify initial members via direct sessions
             var createGroup = new CreateGroup
             {
-                Version = 100,
                 GroupConversationGuid = ByteString.CopyFrom(request.GroupConversationGuid.ToByteArray()),
                 Name = request.Name ?? string.Empty,
                 CreatorIdentityKey = ByteString.CopyFrom(request.CreatorIdentityKeySpki)
@@ -121,7 +120,6 @@ namespace Percolator.Application.Apps.Chat
             {
                 ChatEnvelope = new ChatEnvelope
                 {
-                    Version = 100,
                     CreateGroup = createGroup
                 }
             };
