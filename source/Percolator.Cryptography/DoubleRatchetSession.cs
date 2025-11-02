@@ -57,7 +57,10 @@ public class DoubleRatchetSession : IDisposable
         _cryptographyOptions = options.Value;
     }
 
-    public DoubleRatchetSession(DoubleRatchetSessionState state, ILogger<DoubleRatchetSession> logger, IOptions<CryptographyOptions> options)
+    public DoubleRatchetSession(
+        DoubleRatchetSessionState state, 
+        ILogger<DoubleRatchetSession> logger, 
+        IOptions<CryptographyOptions> options)
     {
         _rootKey = state.RootKey ?? throw new ArgumentNullException(nameof(state.RootKey));
         _sendingChainKey = state.SendingChainKey;
@@ -229,10 +232,20 @@ public class DoubleRatchetSession : IDisposable
             PerformSendingRatchet();
         }
 
-        // Now, derive keys and encrypt as usual from the current sending chain.
-        var messageKey = CryptoUtils.KDF(null, _sendingChainKey!.Value, "message-key-kdf", CryptoUtils.KeySize);
-        _sendingChainKey =
-            new ChainKey(CryptoUtils.KDF(null, _sendingChainKey.Value, "ratchet-chain-kdf", CryptoUtils.KeySize));
+        // 1. Derive BOTH the message key and the *next* chain key in ONE call.
+        //    We need 64 bytes total (32 for the key, 32 for the next chain).
+        var kdfResult = CryptoUtils.KDF(
+            null, 
+            _sendingChainKey!.Value, 
+            "message-and-chain-kdf", // Use a single, consistent "info" string
+            CryptoUtils.KeySize * 2);
+
+        // 2. The first 32 bytes are the MessageKey for this message.
+        var messageKey = kdfResult[..CryptoUtils.KeySize];
+
+        // 3. The next 32 bytes become the *new* SendingChainKey for the *next* message.
+        //    This advances the ratchet.
+        _sendingChainKey = new ChainKey(kdfResult[CryptoUtils.KeySize..]);
 
         // Create the header with our current ratchet public key and counters.
         var ourPublicKey = new RatchetEphemeralKey(_dhRatchetKey!.PublicKey.ExportSubjectPublicKeyInfo());
@@ -342,8 +355,16 @@ public class DoubleRatchetSession : IDisposable
             throw new InvalidOperationException("Receiving chain key is null.");
         }
 
-        // Derive the message key
-        var messageKey = CryptoUtils.KDF(null, _receivingChainKey.Value, "message-key-kdf", CryptoUtils.KeySize);
+        // 1. Derive BOTH the message key and the *next* chain key in ONE call.
+//    We need 64 bytes total (32 for the key, 32 for the next chain).
+        var kdfResult = CryptoUtils.KDF(
+            null, 
+            _receivingChainKey!.Value, 
+            "message-and-chain-kdf", // A single, consistent "info" string
+            CryptoUtils.KeySize * 2);
+
+// 2. The first 32 bytes are the MessageKey for this message.
+        var messageKey = kdfResult[..CryptoUtils.KeySize];
 
         if (_cryptographyOptions.EnableCryptographicMaterialLogging)
         {
@@ -351,8 +372,9 @@ public class DoubleRatchetSession : IDisposable
                 Convert.ToBase64String(messageKey));
         }
 
-        // Advance the receiving chain key
-        _receivingChainKey = new ChainKey(CryptoUtils.KDF(null, _receivingChainKey.Value, "ratchet-chain-kdf", CryptoUtils.KeySize));
+        // 3. The next 32 bytes become the *new* ReceivingChainKey for the *next* message.
+        //    This correctly advances the ratchet.
+        _receivingChainKey = new ChainKey(kdfResult[CryptoUtils.KeySize..]);
         _receivingCounter++;
 
         _logger.LogDebug("After decryption: Receiving counter now {ReceivingCounter}", _receivingCounter);
@@ -415,10 +437,17 @@ public class DoubleRatchetSession : IDisposable
         // Skip enough message keys to get to the target counter
         while (_receivingCounter < until)
         {
-            // Store the skipped message key for future use
-            var messageKey = CryptoUtils.KDF(null, _receivingChainKey.Value, "message-key-kdf", CryptoUtils.KeySize);
-            
-            // Create a tuple key with the current ratchet key and counter
+            // 1. Derive BOTH the message key and the *next* chain key in ONE call.
+            var kdfResult = CryptoUtils.KDF(
+                null, 
+                _receivingChainKey!.Value, 
+                "message-and-chain-kdf", // Must match the "info" string in Encrypt/Decrypt
+                CryptoUtils.KeySize * 2);
+
+            // 2. The first 32 bytes are the MessageKey for this skipped message.
+            var messageKey = kdfResult[..CryptoUtils.KeySize];
+
+            // 3. Store the skipped key
             var key = new SkippedMessageKeyIdentifier(_remotePreKeyKey!, _receivingCounter);
             _skippedMessageKeys[key] = messageKey;
             
@@ -432,7 +461,7 @@ public class DoubleRatchetSession : IDisposable
             }
 
             // Advance the receiving chain key
-            _receivingChainKey = new ChainKey(CryptoUtils.KDF(null, _receivingChainKey.Value, "ratchet-chain-kdf", CryptoUtils.KeySize));
+            _receivingChainKey = new ChainKey(kdfResult[CryptoUtils.KeySize..]);
             _receivingCounter++;
         }
     }
