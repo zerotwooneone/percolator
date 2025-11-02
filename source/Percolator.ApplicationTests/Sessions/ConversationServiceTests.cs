@@ -102,7 +102,7 @@ public class ConversationServiceTests
         var sharedSecret = new CryptoSharedSecret(new byte[32]);
         var dummyBundle = new X3dPreKeyBundle(
             new RatchetIdentityKey(responderIdentity.ExportSubjectPublicKeyInfo()),
-            new PreKey(responderSignedPreKey.PublicKey.ExportSubjectPublicKeyInfo()),
+            new RatchetEphemeralKey(responderSignedPreKey.PublicKey.ExportSubjectPublicKeyInfo()),
             new OneTimeKey(new byte[32])
         );
 
@@ -122,12 +122,11 @@ public class ConversationServiceTests
         using var initiatorSession = DoubleRatchetSession.AsInitiator(
             sharedSecret,
             new RatchetIdentityKey(responderIdentity.ExportSubjectPublicKeyInfo()),
-            new PreKey(responderSignedPreKey.PublicKey.ExportSubjectPublicKeyInfo()),
+            new RatchetEphemeralKey(responderSignedPreKey.PublicKey.ExportSubjectPublicKeyInfo()),
             initiatorEphemeralForX3DH,
             drLogger,
             Options.Create(new CryptographyOptions()));
         var firstRatchetMessage = initiatorSession.Encrypt(new Plaintext(responsePayload.ToByteArray()));
-        var header = firstRatchetMessage.GetHeader();
 
         // Build gRPC response with InitiatorIdentityKey and InitiatorEphemeralKey (X3DH initiator ephemeral)
         var grpcResponse = new EstablishDirectSessionResponse
@@ -159,7 +158,7 @@ public class ConversationServiceTests
                 It.IsAny<SessionRatchetMessage>(),
                 It.IsAny<Func<Plaintext, Percolator.Cryptography.SessionId>>(),
                 It.IsAny<RatchetIdentityKey>(),
-                It.Is<PreKey>(pk => pk.Value.SequenceEqual(initiatorEphemeralSpki)),
+                It.Is<RatchetEphemeralKey>(pk => pk.Value.SequenceEqual(initiatorEphemeralSpki)),
                 It.IsAny<ECDiffieHellman>(),
                 It.Is<CryptoSharedSecret>(s => s.Value.SequenceEqual(sharedSecret.Value))))
             .ReturnsAsync((SessionRatchetMessage msg,
@@ -180,10 +179,6 @@ public class ConversationServiceTests
 
         // Act
         await _service.CreateNewDirectSessionAsync(endpoint, peer);
-
-        // Assert: verification is enforced by the Moq setups above.
-        // Current ConversationService incorrectly uses header.PreKey for CompleteHandshake,
-        // so this test should FAIL until we wire X3DH to use response.RemoteEphemeralKey.
     }
 
     [Test]
@@ -204,7 +199,7 @@ public class ConversationServiceTests
         var dummyBundle = new X3dPreKeyBundle
         (
             new RatchetIdentityKey(remoteSigningKey.ExportSubjectPublicKeyInfo()),
-            new PreKey(remoteEphemeralKey.PublicKey.ExportSubjectPublicKeyInfo()),
+            new RatchetEphemeralKey(remoteEphemeralKey.PublicKey.ExportSubjectPublicKeyInfo()),
             new OneTimeKey(new byte[32])
         );
         var sharedSecret = new CryptoSharedSecret(new byte[32]);
@@ -230,7 +225,7 @@ public class ConversationServiceTests
         using var initiator = DoubleRatchetSession.AsInitiator(
             sharedSecret,
             new RatchetIdentityKey(remoteSigningKey.ExportSubjectPublicKeyInfo()),
-            new PreKey(remoteEphemeralKey.PublicKey.ExportSubjectPublicKeyInfo()),
+            new RatchetEphemeralKey(remoteEphemeralKey.PublicKey.ExportSubjectPublicKeyInfo()),
             initiatorEphemeral,
             sessionLogger,
             Options.Create(new CryptographyOptions()));
@@ -288,7 +283,7 @@ public class ConversationServiceTests
             .Setup(m => m.EstablishSessionAsInitiatorAsync(
                 It.IsAny<Percolator.Cryptography.SessionId>(), 
                  It.IsAny<RatchetIdentityKey>(), 
-                It.IsAny<PreKey>(), 
+                It.IsAny<RatchetEphemeralKey>(), 
                 It.IsAny<CryptoSharedSecret>(), 
                 It.IsAny<ECDiffieHellman>()))
             .Returns(Task.CompletedTask);
@@ -299,7 +294,7 @@ public class ConversationServiceTests
                 It.IsAny<SessionRatchetMessage>(),
                 It.IsAny<Func<Plaintext, Percolator.Cryptography.SessionId>>(),
                 It.IsAny<RatchetIdentityKey>(),
-                It.IsAny<PreKey>(),
+                It.IsAny<RatchetEphemeralKey>(),
                 It.IsAny<ECDiffieHellman>(),
                 It.IsAny<CryptoSharedSecret>()))
             .ReturnsAsync((SessionRatchetMessage msg,
@@ -324,7 +319,7 @@ public class ConversationServiceTests
             It.IsAny<SessionRatchetMessage>(),
             It.IsAny<Func<Plaintext, Percolator.Cryptography.SessionId>>(),
             It.IsAny<RatchetIdentityKey>(),
-            It.IsAny<PreKey>(),
+            It.IsAny<RatchetEphemeralKey>(),
             It.IsAny<ECDiffieHellman>(),
             It.IsAny<CryptoSharedSecret>()), Times.Once);
         
@@ -359,7 +354,7 @@ public class ConversationServiceTests
         var sharedSecret2 = new CryptoSharedSecret(new byte[32]);
         var dummyBundle2 = new X3dPreKeyBundle(
             new RatchetIdentityKey(remoteSigningKey2.ExportSubjectPublicKeyInfo()),
-            new PreKey(remoteEphemeralKey2.PublicKey.ExportSubjectPublicKeyInfo()),
+            new RatchetEphemeralKey(remoteEphemeralKey2.PublicKey.ExportSubjectPublicKeyInfo()),
             new OneTimeKey(new byte[32])
         );
         // IMPORTANT: Use the same private key that pairs with remoteEphemeralKey2.PublicKey
@@ -382,7 +377,7 @@ public class ConversationServiceTests
         using var initiator2 = DoubleRatchetSession.AsInitiator(
             sharedSecret2,
             new RatchetIdentityKey(remoteSigningKey2.ExportSubjectPublicKeyInfo()),
-            new PreKey(remoteEphemeralKey2.PublicKey.ExportSubjectPublicKeyInfo()),
+            new RatchetEphemeralKey(remoteEphemeralKey2.PublicKey.ExportSubjectPublicKeyInfo()),
             initiatorEphemeral2,
             sessionLogger2,
             Options.Create(new CryptographyOptions()));
@@ -424,7 +419,7 @@ public class ConversationServiceTests
             .Setup(m => m.EstablishSessionAsInitiatorAsync(
                 It.IsAny<Percolator.Cryptography.SessionId>(), 
                  It.IsAny<RatchetIdentityKey>(), 
-                It.IsAny<PreKey>(), 
+                It.IsAny<RatchetEphemeralKey>(), 
                 It.IsAny<CryptoSharedSecret>(), 
                 It.IsAny<ECDiffieHellman>()))
             .Returns(Task.CompletedTask);
@@ -435,7 +430,7 @@ public class ConversationServiceTests
                 It.IsAny<SessionRatchetMessage>(),
                 It.IsAny<Func<Plaintext, Percolator.Cryptography.SessionId>>(),
                 It.IsAny<RatchetIdentityKey>(),
-                It.IsAny<PreKey>(),
+                It.IsAny<RatchetEphemeralKey>(),
                 It.IsAny<ECDiffieHellman>(),
                 It.IsAny<CryptoSharedSecret>()))
             .ReturnsAsync((SessionRatchetMessage msg,
@@ -465,7 +460,7 @@ public class ConversationServiceTests
             It.IsAny<SessionRatchetMessage>(),
             It.IsAny<Func<Plaintext, Percolator.Cryptography.SessionId>>(),
             It.IsAny<RatchetIdentityKey>(), 
-            It.IsAny<PreKey>(), 
+            It.IsAny<RatchetEphemeralKey>(), 
             It.IsAny<ECDiffieHellman>(),
             It.Is<CryptoSharedSecret>(s => s.Value.SequenceEqual(handshakeResponse2.SharedSecret.Value))),
             Times.Once);
@@ -517,7 +512,7 @@ public class ConversationServiceTests
         _mockDirectSessionManager.Verify(m => m.EstablishSessionAsInitiatorAsync(
             It.IsAny<Percolator.Cryptography.SessionId>(),
             It.IsAny<RatchetIdentityKey>(),
-            It.IsAny<PreKey>(),
+            It.IsAny<RatchetEphemeralKey>(),
             It.IsAny<CryptoSharedSecret>(), 
             It.IsAny<ECDiffieHellman>()),
             Times.Never);

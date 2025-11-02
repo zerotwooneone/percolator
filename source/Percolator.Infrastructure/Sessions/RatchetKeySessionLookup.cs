@@ -19,7 +19,7 @@ namespace Percolator.Infrastructure.Sessions
             _db = db;
         }
 
-        public async Task<DirectSessionId?> TryResolveAsync(PreKey ratchetPublicKey, int selfIdentityId, CancellationToken cancellationToken)
+        public async Task<DirectSessionId?> TryResolveAsync(RatchetEphemeralKey ratchetPublicKey, int selfIdentityId, CancellationToken cancellationToken)
         {
             var row = await _db.RatchetKeyIndex
                 .AsNoTracking()
@@ -30,7 +30,7 @@ namespace Percolator.Infrastructure.Sessions
             return row is null ? (DirectSessionId?)null : new DirectSessionId(row.DirectSessionId);
         }
 
-        public async Task UpsertAsync(DirectSessionId sessionId, int selfIdentityId, PreKey ratchetPublicKey, DateTimeOffset updatedAtUtc, CancellationToken cancellationToken)
+        public async Task UpsertAsync(DirectSessionId sessionId, int selfIdentityId, RatchetEphemeralKey ratchetPublicKey, DateTimeOffset updatedAtUtc, CancellationToken cancellationToken)
         {
             var set = _db.RatchetKeyIndex;
             var existing = await set

@@ -104,7 +104,7 @@ public class X3DHOrchestrator : IX3DHOrchestrator
             : new OneTimeKey(oneTimePreKey.PublicKey.ExportSubjectPublicKeyInfo());
         var responderBundle = new X3dPreKeyBundle(
                 new RatchetIdentityKey(identitySigningKey.ExportSubjectPublicKeyInfo()),
-                new PreKey(signedPreKey.PublicKey.ExportSubjectPublicKeyInfo()),
+                new RatchetEphemeralKey(signedPreKey.PublicKey.ExportSubjectPublicKeyInfo()),
                 oneTimeKey
             );
 

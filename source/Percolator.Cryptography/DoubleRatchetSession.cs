@@ -16,7 +16,7 @@ public class DoubleRatchetSession : IDisposable
     private ulong _receivingCounter;
     private ulong _previousChainLength;
     private ECDiffieHellman? _dhRatchetKey;
-    private PreKey? _remotePreKeyKey;
+    private RatchetEphemeralKey? _remotePreKeyKey;
     private readonly Dictionary<SkippedMessageKeyIdentifier, byte[]> _skippedMessageKeys = new();
     private readonly RatchetIdentityKey _remoteIdentityPublicKey;
     private readonly ILogger<DoubleRatchetSession> _logger;
@@ -30,7 +30,7 @@ public class DoubleRatchetSession : IDisposable
     internal ulong SendingCounter => _sendingCounter;
     internal ulong ReceivingCounter => _receivingCounter;
     internal ulong PreviousChainLength => _previousChainLength;
-    internal PreKey? RemotePreKeyKey => _remotePreKeyKey;
+    internal RatchetEphemeralKey? RemotePreKeyKey => _remotePreKeyKey;
     internal RatchetIdentityKey RemoteIdentityPublicKey => _remoteIdentityPublicKey;
     internal IReadOnlyDictionary<SkippedMessageKeyIdentifier, byte[]> SkippedMessageKeys => _skippedMessageKeys;
     internal CryptographyOptions CryptographyOptions => _cryptographyOptions;
@@ -81,7 +81,7 @@ public class DoubleRatchetSession : IDisposable
     public static DoubleRatchetSession AsInitiator(
         SharedSecret sharedSecret,
         RatchetIdentityKey remoteIdentityPublicKey,
-        PreKey remotePreKey,
+        RatchetEphemeralKey remotePreKey,
         ECDiffieHellman localEphemeralKey,
         ILogger<DoubleRatchetSession> logger,
         IOptions<CryptographyOptions> cryptographyOptions)
@@ -123,7 +123,7 @@ public class DoubleRatchetSession : IDisposable
     public static DoubleRatchetSession AsResponder(
         SharedSecret sharedSecret, 
         RatchetIdentityKey remoteIdentityPublicKey,  
-        PreKey remotePreKey, 
+        RatchetEphemeralKey remotePreKey, 
         ECDiffieHellman localRatchetKey,
         ILogger<DoubleRatchetSession> logger,
         IOptions<CryptographyOptions> cryptographyOptions)
@@ -235,7 +235,7 @@ public class DoubleRatchetSession : IDisposable
             new ChainKey(CryptoUtils.KDF(null, _sendingChainKey.Value, "ratchet-chain-kdf", CryptoUtils.KeySize));
 
         // Create the header with our current ratchet public key and counters.
-        var ourPublicKey = new PreKey(_dhRatchetKey!.PublicKey.ExportSubjectPublicKeyInfo());
+        var ourPublicKey = new RatchetEphemeralKey(_dhRatchetKey!.PublicKey.ExportSubjectPublicKeyInfo());
         var headerTuple = (ourPublicKey, _sendingCounter, _previousChainLength);
         var associatedData = SessionRatchetMessage.GetAssociatedData(headerTuple, new byte[0]);
 
@@ -384,7 +384,7 @@ public class DoubleRatchetSession : IDisposable
         }
     }
 
-    private bool TryGetSkippedMessageKey(PreKey preKey, ulong counter, out byte[] messageKey)
+    private bool TryGetSkippedMessageKey(RatchetEphemeralKey preKey, ulong counter, out byte[] messageKey)
     {
         var key = new SkippedMessageKeyIdentifier(preKey, counter);
         if (_skippedMessageKeys.TryGetValue(key, out messageKey))
@@ -437,7 +437,7 @@ public class DoubleRatchetSession : IDisposable
         }
     }
 
-    private void DoDhRatchet(PreKey remotePreKey)
+    private void DoDhRatchet(RatchetEphemeralKey remotePreKey)
     {
         _logger.LogInformation("DoDhRatchet - Performing receiver's ratchet step.");
 
@@ -501,7 +501,7 @@ public class DoubleRatchetSession : IDisposable
         public ulong PreviousChainLength { get; set; }
         public Dictionary<SkippedMessageKeyIdentifier, byte[]> SkippedMessageKeys { get; set; } = new();
         public RatchetIdentityKey? TheirIdentityPublicKey { get; set; }
-        public PreKey? TheirDhRatchetPublicKey { get; set; }
+        public RatchetEphemeralKey? TheirDhRatchetPublicKey { get; set; }
         public PrivateEphemeralKey? DhRatchetPrivateKey { get; set; }
         public bool RatchetFlag { get; set; }
     }

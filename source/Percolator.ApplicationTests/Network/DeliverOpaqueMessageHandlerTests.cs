@@ -49,7 +49,7 @@ namespace Percolator.ApplicationTests.Network;
             var payloadBytes = BuildRatchetPayload(headerKey.Value, plain.Value);
 
             // Resolve and decrypt
-            ratchetLookup.Setup(l => l.TryResolveAsync(It.Is<PreKey>(p => p.Value.SequenceEqual(headerKey.Value)), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            ratchetLookup.Setup(l => l.TryResolveAsync(It.Is<RatchetEphemeralKey>(p => p.Value.SequenceEqual(headerKey.Value)), It.IsAny<int>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new DirectSessionId(sessionId));
             sessionMgr.Setup(s => s.ReceiveMessageAsync(It.Is<SessionId>(x => x.Value == sessionId), It.IsAny<SessionRatchetMessage>()))
                 .ReturnsAsync(plain);
@@ -68,7 +68,7 @@ namespace Percolator.ApplicationTests.Network;
                 .ReturnsAsync((InternalEnvelope?)null);
 
             // Allow index upsert after decrypt
-            ratchetLookup.Setup(l => l.UpsertAsync(new DirectSessionId(sessionId), It.IsAny<int>(), It.IsAny<PreKey>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            ratchetLookup.Setup(l => l.UpsertAsync(new DirectSessionId(sessionId), It.IsAny<int>(), It.IsAny<RatchetEphemeralKey>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
                 .Returns(Task.CompletedTask);
 
             var cmd = new DeliverOpaqueMessageCommand { PayloadBytes = payloadBytes };
@@ -106,7 +106,7 @@ namespace Percolator.ApplicationTests.Network;
             var payloadBytes = BuildRatchetPayload(headerKey.Value, plain.Value);
 
             // Fast-path resolve and decrypt
-            ratchetLookup.Setup(l => l.TryResolveAsync(It.Is<PreKey>(p => p.Value.SequenceEqual(headerKey.Value)), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            ratchetLookup.Setup(l => l.TryResolveAsync(It.Is<RatchetEphemeralKey>(p => p.Value.SequenceEqual(headerKey.Value)), It.IsAny<int>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new DirectSessionId(sessionId));
             sessionMgr.Setup(s => s.ReceiveMessageAsync(It.Is<SessionId>(x => x.Value == sessionId), It.IsAny<SessionRatchetMessage>()))
                 .ReturnsAsync(plain);
@@ -124,7 +124,7 @@ namespace Percolator.ApplicationTests.Network;
                 .ReturnsAsync((InternalEnvelope?)null);
 
             // Upsert after decrypt
-            ratchetLookup.Setup(l => l.UpsertAsync(new DirectSessionId(sessionId), It.IsAny<int>(), It.IsAny<PreKey>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            ratchetLookup.Setup(l => l.UpsertAsync(new DirectSessionId(sessionId), It.IsAny<int>(), It.IsAny<RatchetEphemeralKey>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
                 .Returns(Task.CompletedTask);
 
             // No early response is produced anymore for Relay Ack at transport level
@@ -163,7 +163,7 @@ namespace Percolator.ApplicationTests.Network;
         var payloadBytes = BuildRatchetPayload(headerKey.Value, plain.Value);
 
         // Ratchet resolves and decrypt
-        ratchetLookup.Setup(l => l.TryResolveAsync(It.Is<PreKey>(p => p.Value.SequenceEqual(headerKey.Value)), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+        ratchetLookup.Setup(l => l.TryResolveAsync(It.Is<RatchetEphemeralKey>(p => p.Value.SequenceEqual(headerKey.Value)), It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new DirectSessionId(sessionId));
         sessionMgr.Setup(s => s.ReceiveMessageAsync(It.Is<SessionId>(x => x.Value == sessionId), It.IsAny<SessionRatchetMessage>()))
             .ReturnsAsync(plain);
@@ -188,7 +188,7 @@ namespace Percolator.ApplicationTests.Network;
             .ReturnsAsync(new SessionRatchetMessage(encrypted));
 
         // Upsert index
-        ratchetLookup.Setup(l => l.UpsertAsync(new DirectSessionId(sessionId), It.IsAny<int>(), It.IsAny<PreKey>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+        ratchetLookup.Setup(l => l.UpsertAsync(new DirectSessionId(sessionId), It.IsAny<int>(), It.IsAny<RatchetEphemeralKey>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
         var cmd = new DeliverOpaqueMessageCommand { PayloadBytes = payloadBytes };
@@ -217,7 +217,7 @@ namespace Percolator.ApplicationTests.Network;
         var payloadBytes = BuildRatchetPayload(headerKey.Value, plain.Value);
 
         // Ratchet resolves
-        ratchetLookup.Setup(l => l.TryResolveAsync(It.Is<PreKey>(p => p.Value.SequenceEqual(headerKey.Value)), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+        ratchetLookup.Setup(l => l.TryResolveAsync(It.Is<RatchetEphemeralKey>(p => p.Value.SequenceEqual(headerKey.Value)), It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new DirectSessionId(sessionId));
 
         // Decrypt
@@ -243,7 +243,7 @@ namespace Percolator.ApplicationTests.Network;
             .ReturnsAsync(new SessionRatchetMessage(encrypted));
 
         // Upsert index
-        ratchetLookup.Setup(l => l.UpsertAsync(new DirectSessionId(sessionId), It.IsAny<int>(), It.IsAny<PreKey>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+        ratchetLookup.Setup(l => l.UpsertAsync(new DirectSessionId(sessionId), It.IsAny<int>(), It.IsAny<RatchetEphemeralKey>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
         var cmd = new DeliverOpaqueMessageCommand { PayloadBytes = payloadBytes };
@@ -307,7 +307,7 @@ namespace Percolator.ApplicationTests.Network;
         var payloadBytes = BuildRatchetPayload(headerKey.Value, plaintext.Value);
 
         // Fast path miss
-        ratchetLookup.Setup(l => l.TryResolveAsync(It.Is<PreKey>(p => p.Value.SequenceEqual(headerKey.Value)), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+        ratchetLookup.Setup(l => l.TryResolveAsync(It.Is<RatchetEphemeralKey>(p => p.Value.SequenceEqual(headerKey.Value)), It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((DirectSessionId?)null);
 
         // Slow path hit
@@ -328,7 +328,7 @@ namespace Percolator.ApplicationTests.Network;
             .ReturnsAsync((InternalEnvelope?)null);
 
         // Allow index upsert in handler
-        ratchetLookup.Setup(l => l.UpsertAsync(new DirectSessionId(sessionId), It.IsAny<int>(), It.IsAny<PreKey>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+        ratchetLookup.Setup(l => l.UpsertAsync(new DirectSessionId(sessionId), It.IsAny<int>(), It.IsAny<RatchetEphemeralKey>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
         var cmd = new DeliverOpaqueMessageCommand { PayloadBytes = payloadBytes };
@@ -346,7 +346,7 @@ namespace Percolator.ApplicationTests.Network;
         var payloadBytes = BuildRatchetPayload(headerKey.Value, RandomBytes(16));
 
         // Fast path miss
-        ratchetLookup.Setup(l => l.TryResolveAsync(It.Is<PreKey>(p => p.Value.SequenceEqual(headerKey.Value)), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+        ratchetLookup.Setup(l => l.TryResolveAsync(It.Is<RatchetEphemeralKey>(p => p.Value.SequenceEqual(headerKey.Value)), It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((DirectSessionId?)null);
             
         // Slow path miss
@@ -409,10 +409,10 @@ namespace Percolator.ApplicationTests.Network;
 
         // Arrange ratchet lookup to resolve inferred session from header key
         var headerKey = new PreKey(RandomBytes(32));
-        ratchetLookup.Setup(l => l.TryResolveAsync(It.Is<PreKey>(p => p.Value.SequenceEqual(headerKey.Value)), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+        ratchetLookup.Setup(l => l.TryResolveAsync(It.Is<RatchetEphemeralKey>(p => p.Value.SequenceEqual(headerKey.Value)), It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new DirectSessionId(sessionId));
         // Allow index upsert even if we return early on null plaintext (handler upserts after successful decrypt only; this is defensive)
-        ratchetLookup.Setup(l => l.UpsertAsync(new DirectSessionId(sessionId), It.IsAny<int>(), It.IsAny<PreKey>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+        ratchetLookup.Setup(l => l.UpsertAsync(new DirectSessionId(sessionId), It.IsAny<int>(), It.IsAny<RatchetEphemeralKey>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
         // Decryption yields null -> handler returns empty result before mapping/peer lookups
@@ -434,7 +434,7 @@ namespace Percolator.ApplicationTests.Network;
 
         // Build a valid ratchet payload and resolve session via ratchet lookup
         var headerKey = new PreKey(RandomBytes(32));
-        ratchetLookup.Setup(l => l.TryResolveAsync(It.Is<PreKey>(p => p.Value.SequenceEqual(headerKey.Value)), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+        ratchetLookup.Setup(l => l.TryResolveAsync(It.Is<RatchetEphemeralKey>(p => p.Value.SequenceEqual(headerKey.Value)), It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new DirectSessionId(sessionId));
 
         // Cause direct session mapping lookup to fail so handler throws
@@ -447,7 +447,7 @@ namespace Percolator.ApplicationTests.Network;
             .ReturnsAsync(plain);
 
         // Allow index upsert after decrypt
-        ratchetLookup.Setup(l => l.UpsertAsync(new DirectSessionId(sessionId), It.IsAny<int>(), It.IsAny<PreKey>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+        ratchetLookup.Setup(l => l.UpsertAsync(new DirectSessionId(sessionId), It.IsAny<int>(), It.IsAny<RatchetEphemeralKey>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
         var cmd = new DeliverOpaqueMessageCommand { PayloadBytes = BuildRatchetPayload(headerKey.Value, plain.Value) };
@@ -488,11 +488,11 @@ namespace Percolator.ApplicationTests.Network;
             .ReturnsAsync(new Percolator.Dht.Messages.PingResponse());
 
         // Ratchet lookup resolves inferred session id
-        ratchetLookup.Setup(l => l.TryResolveAsync(It.Is<PreKey>(p => p.Value.SequenceEqual(headerKey.Value)), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+        ratchetLookup.Setup(l => l.TryResolveAsync(It.Is<RatchetEphemeralKey>(p => p.Value.SequenceEqual(headerKey.Value)), It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new DirectSessionId(sessionId));
 
         // Allow index upsert after decrypt
-        ratchetLookup.Setup(l => l.UpsertAsync(new DirectSessionId(sessionId), It.IsAny<int>(), It.IsAny<PreKey>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+        ratchetLookup.Setup(l => l.UpsertAsync(new DirectSessionId(sessionId), It.IsAny<int>(), It.IsAny<RatchetEphemeralKey>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
         var cmd = new DeliverOpaqueMessageCommand { PayloadBytes = BuildRatchetPayload(headerKey.Value, plain.Value) };
@@ -547,11 +547,11 @@ namespace Percolator.ApplicationTests.Network;
             .ReturnsAsync(orchestratorResp);
 
         // Ratchet lookup resolves inferred session id
-        ratchetLookup.Setup(l => l.TryResolveAsync(It.Is<PreKey>(p => p.Value.SequenceEqual(headerKey.Value)), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+        ratchetLookup.Setup(l => l.TryResolveAsync(It.Is<RatchetEphemeralKey>(p => p.Value.SequenceEqual(headerKey.Value)), It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new DirectSessionId(sessionId));
 
         // Allow index upsert after encrypt path
-        ratchetLookup.Setup(l => l.UpsertAsync(new DirectSessionId(sessionId), It.IsAny<int>(), It.IsAny<PreKey>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+        ratchetLookup.Setup(l => l.UpsertAsync(new DirectSessionId(sessionId), It.IsAny<int>(), It.IsAny<RatchetEphemeralKey>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
         var encryptedBytes = RandomBytes(80);
@@ -588,7 +588,7 @@ namespace Percolator.ApplicationTests.Network;
         var payloadBytes = BuildRatchetPayload(headerKey.Value, plain.Value);
 
         // Ratchet resolves and decrypt succeeds
-        ratchetLookup.Setup(l => l.TryResolveAsync(It.Is<PreKey>(p => p.Value.SequenceEqual(headerKey.Value)), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+        ratchetLookup.Setup(l => l.TryResolveAsync(It.Is<RatchetEphemeralKey>(p => p.Value.SequenceEqual(headerKey.Value)), It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new DirectSessionId(sessionId));
         sessionMgr.Setup(s => s.ReceiveMessageAsync(It.Is<SessionId>(x => x.Value == sessionId), It.IsAny<SessionRatchetMessage>()))
             .ReturnsAsync(plain);
@@ -602,7 +602,7 @@ namespace Percolator.ApplicationTests.Network;
         peerRepo.Setup(p => p.SaveAsync(It.IsAny<PeerConnection>())).Returns(Task.CompletedTask);
 
         // Upsert after decrypt is allowed
-        ratchetLookup.Setup(l => l.UpsertAsync(new DirectSessionId(sessionId), It.IsAny<int>(), It.IsAny<PreKey>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+        ratchetLookup.Setup(l => l.UpsertAsync(new DirectSessionId(sessionId), It.IsAny<int>(), It.IsAny<RatchetEphemeralKey>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
         var cmd = new DeliverOpaqueMessageCommand { PayloadBytes = payloadBytes };

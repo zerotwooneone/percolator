@@ -29,7 +29,7 @@ public class X3DHManagerTests
         
         var bobPreKeyBundle = new X3dPreKeyBundle(
             new RatchetIdentityKey(bobIdentitySigningKey.ExportSubjectPublicKeyInfo()),
-            new PreKey(bobSignedPreKeyPublicKey.Value),
+            new RatchetEphemeralKey(bobSignedPreKeyPublicKey.Value),
             new OneTimeKey(bobOneTimePreKey.ExportSubjectPublicKeyInfo())
             );
 
@@ -101,7 +101,7 @@ public class X3DHManagerTests
         
         var bobPreKeyBundle = new X3dPreKeyBundle(
             new RatchetIdentityKey(bobIdentitySigningKey.ExportSubjectPublicKeyInfo()),
-            new PreKey(bobSignedPreKeyPublicKey.Value),
+            new RatchetEphemeralKey(bobSignedPreKeyPublicKey.Value),
             null // No one-time pre-key
         );
 

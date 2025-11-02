@@ -172,7 +172,7 @@ public class DirectSessionManagerTests
         _bobRatchetLookup.Verify(l => l.UpsertAsync(
             It.Is<Percolator.Network.DirectSessionId>(d => d.Value == _sessionId.Value),
             It.IsAny<int>(),
-            It.Is<PreKey>(k => k.Value.SequenceEqual(aliceHeader.PreKey.Value)),
+            It.Is<RatchetEphemeralKey>(k => k.Value.SequenceEqual(aliceHeader.PreKey.Value)),
             It.IsAny<DateTimeOffset>(),
             It.IsAny<CancellationToken>()), Times.Once);
 
@@ -193,7 +193,7 @@ public class DirectSessionManagerTests
         _aliceRatchetLookup.Verify(l => l.UpsertAsync(
             It.Is<Percolator.Network.DirectSessionId>(d => d.Value == _sessionId.Value),
             It.IsAny<int>(),
-            It.Is<PreKey>(k => k.Value.SequenceEqual(bobHeader.PreKey.Value)),
+            It.Is<RatchetEphemeralKey>(k => k.Value.SequenceEqual(bobHeader.PreKey.Value)),
             It.IsAny<DateTimeOffset>(),
             It.IsAny<CancellationToken>()), Times.Once);
 
@@ -274,7 +274,7 @@ public class DirectSessionManagerTests
         // Arrange: prepare X3DH-agreed materials
         var sharedSecret = new SharedSecret(new byte[32]);
         var bobIdentityKeyPublic = new RatchetIdentityKey(_bobKeys.IdentitySigningKey.ExportSubjectPublicKeyInfo());
-        var bobPreKeyPublic = new PreKey(_bobKeys.SignedPreKey.ExportSubjectPublicKeyInfo());
+        var bobPreKeyPublic = new RatchetEphemeralKey(_bobKeys.SignedPreKey.ExportSubjectPublicKeyInfo());
         var aliceIdentityKeyPublic = new RatchetIdentityKey(_aliceKeys.IdentitySigningKey.ExportSubjectPublicKeyInfo());
 
         // Capture Alice's ephemeral public key before constructing the initiator session (it may take ownership and dispose)
@@ -301,7 +301,7 @@ public class DirectSessionManagerTests
             firstMessage,
             GetSessionId,
             aliceIdentityKeyPublic,
-            new PreKey(aliceEphemeralPublicSpki),
+            new RatchetEphemeralKey(aliceEphemeralPublicSpki),
             _bobKeys.SignedPreKey,
             sharedSecret);
 
@@ -355,9 +355,9 @@ public class DirectSessionManagerTests
     {
         var sharedSecret = new SharedSecret(new byte[32]);
         var bobIdentityKeyPublic = new RatchetIdentityKey(_bobKeys.IdentitySigningKey.ExportSubjectPublicKeyInfo());
-        var bobPreKeyPublic = new PreKey(_bobKeys.SignedPreKey.ExportSubjectPublicKeyInfo());
+        var bobPreKeyPublic = new RatchetEphemeralKey(_bobKeys.SignedPreKey.ExportSubjectPublicKeyInfo());
         var aliceIdentityKeyPublic = new RatchetIdentityKey(_aliceKeys.IdentitySigningKey.ExportSubjectPublicKeyInfo());
-        var aliceEphemeralKeyPublic = new PreKey(_aliceKeys.SignedPreKey.ExportSubjectPublicKeyInfo());
+        var aliceEphemeralKeyPublic = new RatchetEphemeralKey(_aliceKeys.SignedPreKey.ExportSubjectPublicKeyInfo());
         
         await _aliceSessionManager.EstablishSessionAsInitiatorAsync(_sessionId, bobIdentityKeyPublic, bobPreKeyPublic, sharedSecret, _aliceEphemeral);
         await _bobSessionManager.EstablishSessionAsResponderAsync(_sessionId, aliceIdentityKeyPublic, aliceEphemeralKeyPublic, _bobKeys.SignedPreKey, sharedSecret);

@@ -214,7 +214,7 @@ namespace Percolator.Application.Sessions
                     firstMessage,
                     GetSessionId,
                     new RatchetIdentityKey(response.InitiatorIdentityKey.ToByteArray()),
-                    new PreKey(initiatorEphemeralKey),
+                    new RatchetEphemeralKey(initiatorEphemeralKey),
                     handshakeResult.ResponderPrivateKeyUsed,
                     new SharedSecret(handshakeResult.SharedSecret.Value)
                 ).ConfigureAwait(false);

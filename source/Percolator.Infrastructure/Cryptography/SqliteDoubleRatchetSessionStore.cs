@@ -42,7 +42,7 @@ public sealed class SqliteDoubleRatchetSessionStore : IDoubleRatchetSessionStore
             SendingCounter = dbo.SendingCounter,
             ReceivingCounter = dbo.ReceivingCounter,
             PreviousChainLength = dbo.PreviousChainLength,
-            TheirDhRatchetPublicKey = dbo.TheirDhRatchetPublicKey is null ? null : new PreKey(dbo.TheirDhRatchetPublicKey),
+            TheirDhRatchetPublicKey = dbo.TheirDhRatchetPublicKey is null ? null : new RatchetEphemeralKey(dbo.TheirDhRatchetPublicKey),
             DhRatchetPrivateKey = dbo.DhRatchetPrivateKey is null ? null : new PrivateEphemeralKey(dbo.DhRatchetPrivateKey),
             TheirIdentityPublicKey = new RatchetIdentityKey(dbo.TheirIdentityPublicKey)
         };
@@ -50,7 +50,7 @@ public sealed class SqliteDoubleRatchetSessionStore : IDoubleRatchetSessionStore
         // Rehydrate skipped message keys
         foreach (var k in dbo.SkippedMessageKeys)
         {
-            var id = new SkippedMessageKeyIdentifier(new PreKey(k.RatchetKey), k.MessageNumber);
+            var id = new SkippedMessageKeyIdentifier(new RatchetEphemeralKey(k.RatchetKey), k.MessageNumber);
             state.SkippedMessageKeys[id] = k.MessageKey;
         }
 
@@ -138,7 +138,7 @@ public sealed class SqliteDoubleRatchetSessionStore : IDoubleRatchetSessionStore
             SendingCounter = session.SendingCounter,
             ReceivingCounter = session.ReceivingCounter,
             PreviousChainLength = session.PreviousChainLength,
-            TheirDhRatchetPublicKey = new PreKey(session.TheirDhRatchetPublicKey!),
+            TheirDhRatchetPublicKey = new RatchetEphemeralKey(session.TheirDhRatchetPublicKey!),
             DhRatchetPrivateKey = session.DhRatchetPrivateKey is null ? null : new PrivateEphemeralKey(session.DhRatchetPrivateKey),
             TheirIdentityPublicKey = new RatchetIdentityKey(session.TheirIdentityPublicKey)
         };
@@ -146,7 +146,7 @@ public sealed class SqliteDoubleRatchetSessionStore : IDoubleRatchetSessionStore
         // Rehydrate skipped message keys
         foreach (var k in session.SkippedMessageKeys)
         {
-            var id = new SkippedMessageKeyIdentifier(new PreKey(k.RatchetKey), k.MessageNumber);
+            var id = new SkippedMessageKeyIdentifier(new RatchetEphemeralKey(k.RatchetKey), k.MessageNumber);
             state.SkippedMessageKeys[id] = k.MessageKey;
         }
 

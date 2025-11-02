@@ -11,8 +11,8 @@ namespace Percolator.Application.Network
     /// </summary>
     public interface IRatchetKeySessionLookup
     {
-        Task<DirectSessionId?> TryResolveAsync(PreKey ratchetPublicKey, int selfIdentityId, CancellationToken cancellationToken);
+        Task<DirectSessionId?> TryResolveAsync(RatchetEphemeralKey ratchetPublicKey, int selfIdentityId, CancellationToken cancellationToken);
 
-        Task UpsertAsync(DirectSessionId sessionId, int selfIdentityId, PreKey ratchetPublicKey, DateTimeOffset updatedAtUtc, CancellationToken cancellationToken);
+        Task UpsertAsync(DirectSessionId sessionId, int selfIdentityId, RatchetEphemeralKey ratchetPublicKey, DateTimeOffset updatedAtUtc, CancellationToken cancellationToken);
     }
 }

@@ -56,18 +56,18 @@ public class HandshakeInitiatorFlowTests
                 It.IsAny<Guid>(),
                 It.IsAny<Guid?>(),
                 It.IsAny<RatchetIdentityKey>(),
-                It.IsAny<PreKey>(),
+                It.IsAny<RatchetEphemeralKey>(),
                 It.IsAny<SharedSecret>(),
                 It.IsAny<ECDiffieHellman>(),
                 It.IsAny<Plaintext?>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(SessionRatchetMessage.Create(new PreKey(new byte[]{0xEF}), 0, 0, new Ciphertext(new byte[]{0xEE})));
+            .ReturnsAsync(SessionRatchetMessage.Create(new RatchetEphemeralKey(new byte[]{0xEF}), 0, 0, new Ciphertext(new byte[]{0xEE})));
             
         var sessionStore = new Mock<IDoubleRatchetSessionStore>(MockBehavior.Strict);
         sessionStore.Setup(s => s.FindByRemoteRatchetKeyAsync(
                 It.IsAny<PreKey>(),
                 It.IsAny<int>()))
-            .ReturnsAsync((PreKey key, int _) => 
+            .ReturnsAsync((RatchetEphemeralKey key, int _) => 
                 new DoubleRatchetSession.DoubleRatchetSessionState
                 {
                     TheirDhRatchetPublicKey = key
@@ -118,7 +118,7 @@ public class HandshakeInitiatorFlowTests
             It.Is<Guid>(g => g == spkId),
             It.Is<Guid?>(g => g == otkId),
             It.Is<RatchetIdentityKey>(k => k.Value.SequenceEqual(remoteIdentitySpki)),
-            It.Is<PreKey>(k => k.Value.SequenceEqual(remotePreKeySpki)),
+            It.Is<RatchetEphemeralKey>(k => k.Value.SequenceEqual(remotePreKeySpki)),
             It.Is<SharedSecret>(sh => sh.Value.SequenceEqual(new byte[] { 1, 2, 3 })),
             It.IsAny<ECDiffieHellman>(),
             It.Is<Plaintext?>(pt => pt != null),
@@ -133,7 +133,7 @@ public class HandshakeInitiatorFlowTests
         var active = new ActiveIdentityContext { Identity = identity };
 
         // Build a valid ratchet message payload
-        var pk = new PreKey(new byte[] { 0xA1 });
+        var pk = new RatchetEphemeralKey(new byte[] { 0xA1 });
         var payload = SessionRatchetMessage.Create(pk, 1, 0, new Ciphertext(new byte[] { 0xB1 })).Value;
 
         var sessions = new Mock<IDirectSessionManager>(MockBehavior.Loose);
@@ -141,7 +141,7 @@ public class HandshakeInitiatorFlowTests
         var lookup = new Mock<IRatchetKeySessionLookup>(MockBehavior.Strict);
         var resolvedSession = new DirectSessionId(Guid.NewGuid());
         lookup
-            .Setup(l => l.TryResolveAsync(It.IsAny<PreKey>(), identity.SelfIdentityId, It.IsAny<CancellationToken>()))
+            .Setup(l => l.TryResolveAsync(It.IsAny<RatchetEphemeralKey>(), identity.SelfIdentityId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(resolvedSession);
 
         var preStore = new Mock<IPreHandshakeSessionStore>(MockBehavior.Strict);
@@ -162,7 +162,7 @@ public class HandshakeInitiatorFlowTests
         await handler.Handle(cmd, CancellationToken.None);
 
         // Verify fast-path lookup via ratchet header was used
-        lookup.Verify(l => l.TryResolveAsync(It.IsAny<PreKey>(), identity.SelfIdentityId, It.IsAny<CancellationToken>()), Times.Once);
+        lookup.Verify(l => l.TryResolveAsync(It.IsAny<RatchetEphemeralKey>(), identity.SelfIdentityId, It.IsAny<CancellationToken>()), Times.Once);
 
         // Verify session manager was NOT called on fast-path
         sessions.Verify(s => s.ReceiveMessageAsync(It.IsAny<SessionId>(), It.IsAny<SessionRatchetMessage>()), Times.Never);
@@ -179,7 +179,7 @@ public class HandshakeInitiatorFlowTests
         var sessions = new Mock<IDirectSessionManager>(MockBehavior.Loose);
         var lookup = new Mock<IRatchetKeySessionLookup>(MockBehavior.Strict);
         lookup
-            .Setup(l => l.TryResolveAsync(It.IsAny<PreKey>(), identity.SelfIdentityId, It.IsAny<CancellationToken>()))
+            .Setup(l => l.TryResolveAsync(It.IsAny<RatchetEphemeralKey>(), identity.SelfIdentityId, It.IsAny<CancellationToken>()))
             .ReturnsAsync((DirectSessionId?)null);
 
         var preStore = new Mock<IPreHandshakeSessionStore>(MockBehavior.Strict);
@@ -194,7 +194,7 @@ public class HandshakeInitiatorFlowTests
             preStore.Object);
 
         // Valid message but lookup will miss
-        var pk = new PreKey(new byte[] { 0xC1 });
+        var pk = new RatchetEphemeralKey(new byte[] { 0xC1 });
         var payload = SessionRatchetMessage.Create(pk, 1, 0, new Ciphertext(new byte[] { 0xD1 })).Value;
         var cmd = new HandleHandshakeResponderHelloCommand(payload);
 
@@ -248,7 +248,7 @@ public class HandshakeInitiatorFlowTests
             .Returns(new SharedSecret(new byte[] { 0x11, 0x22, 0x33 }));
 
         // Prepare a first ratchet message as if produced by initiator establish
-        var preKeyForHeader = new PreKey(new byte[] { 0xA5 });
+        var preKeyForHeader = new RatchetEphemeralKey(new byte[] { 0xA5 });
         var expectedFirstPlaintext = new Plaintext(new byte[] { 0xDE, 0xAD });
         var firstMessage = SessionRatchetMessage.Create(preKeyForHeader, 1, 0, new Ciphertext(new byte[] { 0xBE, 0xEF }));
 
@@ -259,7 +259,7 @@ public class HandshakeInitiatorFlowTests
                 It.IsAny<Guid>(),
                 It.IsAny<Guid?>(),
                 It.IsAny<RatchetIdentityKey>(),
-                It.IsAny<PreKey>(),
+                It.IsAny<RatchetEphemeralKey>(),
                 It.IsAny<SharedSecret>(),
                 It.IsAny<ECDiffieHellman>(),
                 It.IsAny<Plaintext?>(),
@@ -315,7 +315,7 @@ public class HandshakeInitiatorFlowTests
             .Setup(s => s.EstablishSessionAsResponderAsync(
                 It.IsAny<SessionId>(),
                 It.IsAny<RatchetIdentityKey>(),
-                It.IsAny<PreKey>(),
+                It.IsAny<RatchetEphemeralKey>(),
                 It.IsAny<ECDiffieHellman>(),
                 It.IsAny<SharedSecret>()))
             .Returns(Task.CompletedTask);
@@ -361,7 +361,7 @@ public class HandshakeInitiatorFlowTests
                 SharedSecret: new SharedSecret(new byte[] { 0x44, 0x55 }),
                 ResponderBundle: new X3dPreKeyBundle(
                     IdentitySigningKey: new RatchetIdentityKey(ik.PublicKey.ExportSubjectPublicKeyInfo()),
-                    SignedPreKey: new PreKey(spk.PublicKey.ExportSubjectPublicKeyInfo()),
+                    SignedPreKey: new RatchetEphemeralKey(spk.PublicKey.ExportSubjectPublicKeyInfo()),
                     OneTimePreKey: null),
                 ResponderPrivateKeyUsed: responderPriv));
 
@@ -384,7 +384,7 @@ public class HandshakeInitiatorFlowTests
         sessions.Verify(s => s.EstablishSessionAsResponderAsync(
             It.IsAny<SessionId>(),
             It.IsAny<RatchetIdentityKey>(),
-            It.IsAny<PreKey>(),
+            It.IsAny<RatchetEphemeralKey>(),
             It.IsAny<ECDiffieHellman>(),
             It.IsAny<SharedSecret>()), Times.Once);
     }
@@ -399,7 +399,7 @@ public class HandshakeInitiatorFlowTests
         var sessions = new Mock<IDirectSessionManager>(MockBehavior.Strict);
         var lookup = new Mock<IRatchetKeySessionLookup>(MockBehavior.Strict);
         lookup
-            .Setup(l => l.TryResolveAsync(It.IsAny<PreKey>(), identity.SelfIdentityId, It.IsAny<CancellationToken>()))
+            .Setup(l => l.TryResolveAsync(It.IsAny<RatchetEphemeralKey>(), identity.SelfIdentityId, It.IsAny<CancellationToken>()))
             .ReturnsAsync((DirectSessionId?)null);
 
         var preStore = new Mock<IPreHandshakeSessionStore>(MockBehavior.Strict);
@@ -415,7 +415,7 @@ public class HandshakeInitiatorFlowTests
             preStore.Object);
 
         // Build a valid ratchet message header; contents don't matter for this unit test since CompleteHandshakeAsync is mocked
-        var pk = new PreKey(new byte[] { 0xE1 });
+        var pk = new RatchetEphemeralKey(new byte[] { 0xE1 });
         var payload = SessionRatchetMessage.Create(pk, 1, 0, new Ciphertext(new byte[] { 0xF1 })).Value;
         var cmd = new HandleHandshakeResponderHelloCommand(payload);
 

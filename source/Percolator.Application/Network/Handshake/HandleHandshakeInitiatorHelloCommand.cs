@@ -113,7 +113,7 @@ namespace Percolator.Application.Network.Handshake
             await _sessionManager.EstablishSessionAsResponderAsync(
                 new SessionId(directSessionId.Value),
                 remoteIdentityKey,
-                new PreKey(remoteEphemeralKey.Value),
+                new RatchetEphemeralKey(remoteEphemeralKey.Value),
                 hs.ResponderPrivateKeyUsed,
                 hs.SharedSecret);
 

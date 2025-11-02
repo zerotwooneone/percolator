@@ -68,7 +68,7 @@ public class CryptoBoundaryTests
         var aliceSession = DoubleRatchetSession.AsInitiator(
             sharedSecret,
             new RatchetIdentityKey(bobIdentity.PublicKey.ExportSubjectPublicKeyInfo()),
-            new PreKey(bobEphemeral.PublicKey.ExportSubjectPublicKeyInfo()),
+            new RatchetEphemeralKey(bobEphemeral.PublicKey.ExportSubjectPublicKeyInfo()),
             ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
             _logger,
             _options);
@@ -76,7 +76,7 @@ public class CryptoBoundaryTests
         var bobSession = DoubleRatchetSession.AsResponder(
             sharedSecret,
             new RatchetIdentityKey(aliceIdentity.PublicKey.ExportSubjectPublicKeyInfo()),
-            new PreKey(aliceIdentity.PublicKey.ExportSubjectPublicKeyInfo()),
+            new RatchetEphemeralKey(aliceIdentity.PublicKey.ExportSubjectPublicKeyInfo()),
             bobEphemeral,
             _logger,
             _options);
@@ -135,7 +135,7 @@ public class CryptoBoundaryTests
     {
         // Arrange
         using var keyPair = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        var ratchetKey = new PreKey(keyPair.PublicKey.ExportSubjectPublicKeyInfo());
+        var ratchetKey = new RatchetEphemeralKey(keyPair.PublicKey.ExportSubjectPublicKeyInfo());
         ulong counter = 1;
         var emptyCiphertext = new Ciphertext(Array.Empty<byte>());
 

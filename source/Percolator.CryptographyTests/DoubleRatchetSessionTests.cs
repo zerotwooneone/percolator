@@ -19,7 +19,7 @@ namespace Percolator.CryptographyTests
         private DoubleRatchetSession _bobSession;
         private SharedSecret _sharedSecret;
         private RatchetIdentityKey _bobIdentityKey;
-        private PreKey _bobPreKey;
+        private RatchetEphemeralKey _bobPreKey;
         private ILogger<DoubleRatchetSession> _logger;
         private ECDiffieHellman _aliceEphemeral;
         private IOptions<CryptographyOptions> _options;
@@ -39,7 +39,7 @@ namespace Percolator.CryptographyTests
             _sharedSecret = new SharedSecret(_aliceIdentity.DeriveKeyMaterial(_bobIdentity.PublicKey));
 
             _bobIdentityKey = new RatchetIdentityKey(_bobIdentity.PublicKey.ExportSubjectPublicKeyInfo());
-            _bobPreKey = new PreKey(_bobRatchetKey.PublicKey.ExportSubjectPublicKeyInfo());
+            _bobPreKey = new RatchetEphemeralKey(_bobRatchetKey.PublicKey.ExportSubjectPublicKeyInfo());
 
             _aliceEphemeral= ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
             
@@ -54,7 +54,7 @@ namespace Percolator.CryptographyTests
             _bobSession = DoubleRatchetSession.AsResponder(
                 _sharedSecret,
                 new RatchetIdentityKey(_aliceIdentity.PublicKey.ExportSubjectPublicKeyInfo()),
-                new PreKey(_aliceEphemeral.PublicKey.ExportSubjectPublicKeyInfo()),
+                new RatchetEphemeralKey(_aliceEphemeral.PublicKey.ExportSubjectPublicKeyInfo()),
                 _bobRatchetKey,
                 _logger,
                 _options);
@@ -74,7 +74,7 @@ namespace Percolator.CryptographyTests
 
             var sharedSecret = new SharedSecret(aliceIdentity.DeriveKeyMaterial(bobIdentity.PublicKey));
             var bobIdentityKey = new RatchetIdentityKey(bobIdentity.PublicKey.ExportSubjectPublicKeyInfo());
-            var bobInitialPreKey = new PreKey(bobRatchetKey.PublicKey.ExportSubjectPublicKeyInfo());
+            var bobInitialPreKey = new RatchetEphemeralKey(bobRatchetKey.PublicKey.ExportSubjectPublicKeyInfo());
 
             // Initiator (Alice) builds session and encrypts first message
             using var alice = DoubleRatchetSession.AsInitiator(
@@ -264,7 +264,7 @@ namespace Percolator.CryptographyTests
             using var aliceSession = DoubleRatchetSession.AsInitiator(
                 sharedSecret,
                 new RatchetIdentityKey(bobIdentityPublicKeyBytes),
-                new PreKey(bobRatchetKeyPublicBytes),
+                new RatchetEphemeralKey(bobRatchetKeyPublicBytes),
                 aliceEphemeral,
                 _logger,
                 _options
@@ -278,7 +278,7 @@ namespace Percolator.CryptographyTests
             using var bobSession = DoubleRatchetSession.AsResponder(
                 sharedSecret,
                 new RatchetIdentityKey(aliceIdentityPublicKeyBytes),
-                new PreKey(aliceIdentity.PublicKey.ExportSubjectPublicKeyInfo()),
+                new RatchetEphemeralKey(aliceIdentity.PublicKey.ExportSubjectPublicKeyInfo()),
                 importedBobRatchetKey,
                 _logger,
                 _options

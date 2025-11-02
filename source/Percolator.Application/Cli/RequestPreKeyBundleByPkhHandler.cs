@@ -134,7 +134,7 @@ public class RequestPreKeyBundleByPkhHandler : IRequestHandler<RequestPreKeyBund
 
     private async Task PerformHandshake(
         RatchetIdentityKey remoteIdentityKey, 
-        PreKey remotePreKey,
+        RatchetEphemeralKey remotePreKey,
         OneTimeKey? remoteOneTimePreKey)
     {
         var ephemeralKey = _oneTimeKeyProvider.PopOneTimeKey()!;

@@ -47,10 +47,10 @@ namespace Percolator.ApplicationTests.Handshake
 
         private sealed class FakeRatchetLookup : IRatchetKeySessionLookup
         {
-            public Task<Percolator.Network.DirectSessionId?> TryResolveAsync(PreKey ratchetPublicKey, int selfIdentityId, CancellationToken ct)
+            public Task<Percolator.Network.DirectSessionId?> TryResolveAsync(RatchetEphemeralKey ratchetPublicKey, int selfIdentityId, CancellationToken ct)
                 => Task.FromResult<Percolator.Network.DirectSessionId?>(null);
 
-            public Task UpsertAsync(Percolator.Network.DirectSessionId sessionId, int selfIdentityId, PreKey ratchetPublicKey, DateTimeOffset updatedAtUtc, CancellationToken ct)
+            public Task UpsertAsync(Percolator.Network.DirectSessionId sessionId, int selfIdentityId, RatchetEphemeralKey ratchetPublicKey, DateTimeOffset updatedAtUtc, CancellationToken ct)
                 => Task.CompletedTask;
         }
 
@@ -107,7 +107,7 @@ namespace Percolator.ApplicationTests.Handshake
             using var initEph = System.Security.Cryptography.ECDiffieHellman.Create(System.Security.Cryptography.ECCurve.NamedCurves.nistP256);
             var initEphPub = initEph.PublicKey.ExportSubjectPublicKeyInfo();
             var remoteIdKey = new RatchetIdentityKey(initEph.PublicKey.ExportSubjectPublicKeyInfo());
-            var remotePreKey = new PreKey(initEph.PublicKey.ExportSubjectPublicKeyInfo());
+            var remotePreKey = new RatchetEphemeralKey(initEph.PublicKey.ExportSubjectPublicKeyInfo());
             var shared = new SharedSecret(new byte[32]);
 
             var recipientPkh = new byte[] { 0x01 };
@@ -168,7 +168,7 @@ namespace Percolator.ApplicationTests.Handshake
 
             // Alice encrypts to Bob: use Bob's identity pubkey and Bob's signed-pre-key pubkey
             var remoteIdKey = new RatchetIdentityKey(bobActive.Keys!.IdentitySigningKey.PublicKey.ExportSubjectPublicKeyInfo());
-            var remotePreKey = new PreKey(bobSpk.PublicKey.ExportSubjectPublicKeyInfo());
+            var remotePreKey = new RatchetEphemeralKey(bobSpk.PublicKey.ExportSubjectPublicKeyInfo());
             var shared = new SharedSecret(new byte[32]);
 
             // Alice initiates pre-handshake with initial message
@@ -190,7 +190,7 @@ namespace Percolator.ApplicationTests.Handshake
             var sessionId = new SessionId(Guid.NewGuid());
             // For responder, remoteIdentityKey should be Alice's identity pubkey, and remotePreKey should be Alice's ephemeral pubkey
             var responderRemoteId = new RatchetIdentityKey(aliceActive.Keys!.IdentitySigningKey.PublicKey.ExportSubjectPublicKeyInfo());
-            var responderRemotePreKey = new PreKey(initEphPub);
+            var responderRemotePreKey = new RatchetEphemeralKey(initEphPub);
             await bobDsm.EstablishSessionAsResponderAsync(sessionId, remoteIdentityKey: responderRemoteId, remotePreKey: responderRemotePreKey, privateKeyUsedInHandshake: bobSpk, sharedSecret: shared);
 
             // Bob tries to infer and receive without knowing sid
@@ -210,12 +210,12 @@ namespace Percolator.ApplicationTests.Handshake
 
             // Expect one upsert
             ratchetLookup
-                .Setup(x => x.UpsertAsync(Moq.It.IsAny<Percolator.Network.DirectSessionId>(), Moq.It.IsAny<int>(), Moq.It.IsAny<PreKey>(), Moq.It.IsAny<DateTimeOffset>(), Moq.It.IsAny<CancellationToken>()))
+                .Setup(x => x.UpsertAsync(Moq.It.IsAny<Percolator.Network.DirectSessionId>(), Moq.It.IsAny<int>(), Moq.It.IsAny<RatchetEphemeralKey>(), Moq.It.IsAny<DateTimeOffset>(), Moq.It.IsAny<CancellationToken>()))
                 .Returns(Task.CompletedTask)
                 .Verifiable();
             // Allow resolver to be invoked and return null for slow-path finalize
             ratchetLookup
-                .Setup(x => x.TryResolveAsync(Moq.It.IsAny<PreKey>(), Moq.It.IsAny<int>(), Moq.It.IsAny<CancellationToken>()))
+                .Setup(x => x.TryResolveAsync(Moq.It.IsAny<RatchetEphemeralKey>(), Moq.It.IsAny<int>(), Moq.It.IsAny<CancellationToken>()))
                 .Returns(Task.FromResult<Percolator.Network.DirectSessionId?>(null));
 
             var aliceActive = new ActiveIdentityContext
@@ -243,7 +243,7 @@ namespace Percolator.ApplicationTests.Handshake
             var initEphPubFinalize = initEph.PublicKey.ExportSubjectPublicKeyInfo();
             // Alice encrypts to Bob: use Bob's identity pubkey and Bob's signed-pre-key pubkey
             var remoteIdKey = new RatchetIdentityKey(bobActive.Keys!.IdentitySigningKey.PublicKey.ExportSubjectPublicKeyInfo());
-            var remotePreKey = new PreKey(bobSpk.PublicKey.ExportSubjectPublicKeyInfo());
+            var remotePreKey = new RatchetEphemeralKey(bobSpk.PublicKey.ExportSubjectPublicKeyInfo());
             var shared = new SharedSecret(new byte[32]);
 
             // Alice saves pre-handshake (no initial plaintext)
@@ -263,7 +263,7 @@ namespace Percolator.ApplicationTests.Handshake
             var bobDsm = new DirectSessionManager(bobStore, bobActive, loggerFactory.CreateLogger<DirectSessionManager>(), loggerFactory, options, ratchetLookup.Object, preHandshake);
             var sessionId = new SessionId(Guid.NewGuid());
             var responderRemoteId2 = new RatchetIdentityKey(aliceActive.Keys!.IdentitySigningKey.PublicKey.ExportSubjectPublicKeyInfo());
-            var responderRemotePreKey2 = new PreKey(initEphPubFinalize);
+            var responderRemotePreKey2 = new RatchetEphemeralKey(initEphPubFinalize);
             bobDsm.EstablishSessionAsResponderAsync(sessionId, remoteIdentityKey: responderRemoteId2, remotePreKey: responderRemotePreKey2, privateKeyUsedInHandshake: bobSpk, sharedSecret: shared).GetAwaiter().GetResult();
 
             // Bob encrypts a plaintext that encodes sessionId, to serve as responder hello
@@ -314,7 +314,7 @@ namespace Percolator.ApplicationTests.Handshake
             using var bobSpk = System.Security.Cryptography.ECDiffieHellman.Create(System.Security.Cryptography.ECCurve.NamedCurves.nistP256);
             // Alice encrypts to Bob: use Bob's identity pubkey and Bob's signed-pre-key pubkey
             var remoteIdKey = new RatchetIdentityKey(bobActive.Keys!.IdentitySigningKey.PublicKey.ExportSubjectPublicKeyInfo());
-            var remotePreKey = new PreKey(bobSpk.PublicKey.ExportSubjectPublicKeyInfo());
+            var remotePreKey = new RatchetEphemeralKey(bobSpk.PublicKey.ExportSubjectPublicKeyInfo());
             var shared = new SharedSecret(new byte[32]);
 
             var first = await aliceDsm.EstablishSessionAsInitiatorAsync(new byte[]{0x01}, Guid.Empty, null, remoteIdKey, remotePreKey, shared, initEph, new Plaintext(new byte[]{0xAA}), CancellationToken.None);
@@ -323,7 +323,7 @@ namespace Percolator.ApplicationTests.Handshake
             // Bob establishes responder session before trying to infer/decrypt Alice's first message
             var sessionId = new SessionId(Guid.NewGuid());
             var responderRemoteId3 = new RatchetIdentityKey(aliceActive.Keys!.IdentitySigningKey.PublicKey.ExportSubjectPublicKeyInfo());
-            var responderRemotePreKey3 = new PreKey(initEphPub2);
+            var responderRemotePreKey3 = new RatchetEphemeralKey(initEphPub2);
             await bobDsm.EstablishSessionAsResponderAsync(sessionId, responderRemoteId3, responderRemotePreKey3, bobSpk, shared);
 
             var inferred = await bobDsm.TryInferAndReceiveAsync(first!, CancellationToken.None);
@@ -390,7 +390,7 @@ namespace Percolator.ApplicationTests.Handshake
             // Save a pending record
             using var eph = System.Security.Cryptography.ECDiffieHellman.Create(System.Security.Cryptography.ECCurve.NamedCurves.nistP256);
             var remoteIdKey = new RatchetIdentityKey(eph.PublicKey.ExportSubjectPublicKeyInfo());
-            var remotePreKey = new PreKey(eph.PublicKey.ExportSubjectPublicKeyInfo());
+            var remotePreKey = new RatchetEphemeralKey(eph.PublicKey.ExportSubjectPublicKeyInfo());
             var shared = new SharedSecret(new byte[32]);
             dsm.EstablishSessionAsInitiatorAsync(new byte[]{0x9A}, Guid.Empty, null, remoteIdKey, remotePreKey, shared, eph, null, CancellationToken.None).GetAwaiter().GetResult();
 

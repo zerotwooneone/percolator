@@ -12,7 +12,7 @@ public class SkippedMessageKeyIdentifier : IEquatable<SkippedMessageKeyIdentifie
     /// <summary>
     /// The ephemeral ratchet key associated with the message.
     /// </summary>
-    public PreKey RatchetKey { get; }
+    public RatchetEphemeralKey RatchetKey { get; }
     
     /// <summary>
     /// The message number.
@@ -22,7 +22,7 @@ public class SkippedMessageKeyIdentifier : IEquatable<SkippedMessageKeyIdentifie
     /// <summary>
     /// Creates a new skipped message key identifier.
     /// </summary>
-    public SkippedMessageKeyIdentifier(PreKey ratchetKey, ulong messageNumber)
+    public SkippedMessageKeyIdentifier(RatchetEphemeralKey ratchetKey, ulong messageNumber)
     {
         RatchetKey = ratchetKey ?? throw new ArgumentNullException(nameof(ratchetKey));
         MessageNumber = messageNumber;

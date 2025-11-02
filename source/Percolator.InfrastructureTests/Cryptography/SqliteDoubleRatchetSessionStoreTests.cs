@@ -58,10 +58,10 @@ public class SqliteDoubleRatchetSessionStoreTests
             ReceivingCounter = 3,
             PreviousChainLength = 42,
             TheirIdentityPublicKey = new RatchetIdentityKey(idPub),
-            TheirDhRatchetPublicKey = new PreKey(dhPub),
+            TheirDhRatchetPublicKey = new RatchetEphemeralKey(dhPub),
             DhRatchetPrivateKey = new PrivateEphemeralKey(dhPriv)
         };
-        state.SkippedMessageKeys[new SkippedMessageKeyIdentifier(new PreKey(dhPub), 5)] = msgKey;
+        state.SkippedMessageKeys[new SkippedMessageKeyIdentifier(new RatchetEphemeralKey(dhPub), 5)] = msgKey;
         return state;
     }
 

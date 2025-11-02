@@ -91,7 +91,7 @@ namespace Percolator.ApplicationTests.Network
             sessionManager.Setup(s => s.EstablishSessionAsInitiatorAsync(
                 It.IsAny<SessionId>(),
                 It.IsAny<RatchetIdentityKey>(),
-                It.IsAny<PreKey>(),
+                It.IsAny<RatchetEphemeralKey>(),
                 It.IsAny<SharedSecret>(),
                 It.IsAny<ECDiffieHellman>())).Returns(Task.CompletedTask);
 
@@ -155,7 +155,7 @@ namespace Percolator.ApplicationTests.Network
             sessionManager.Verify(s => s.EstablishSessionAsInitiatorAsync(
                 It.IsAny<SessionId>(),
                 It.IsAny<RatchetIdentityKey>(),
-                It.IsAny<PreKey>(),
+                It.IsAny<RatchetEphemeralKey>(),
                 It.IsAny<SharedSecret>(),
                 It.IsAny<ECDiffieHellman>()), Times.Once);
         }

@@ -65,7 +65,7 @@ namespace Percolator.CryptographyTests
             var sessionToAlice = DoubleRatchetSession.AsInitiator(
                 sharedSecretAlice, 
                 new RatchetIdentityKey(_aliceIdentity.PublicKey.ExportSubjectPublicKeyInfo()), 
-                new PreKey(_aliceRatchet.PublicKey.ExportSubjectPublicKeyInfo()),
+                new RatchetEphemeralKey(_aliceRatchet.PublicKey.ExportSubjectPublicKeyInfo()),
                 ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
                 _sessionLogger,
                 _options);
@@ -74,7 +74,7 @@ namespace Percolator.CryptographyTests
             var sessionToBob = DoubleRatchetSession.AsInitiator(
                 sharedSecretBob, 
                 new RatchetIdentityKey(_bobIdentity.PublicKey.ExportSubjectPublicKeyInfo()), 
-                new PreKey(_bobRatchet.PublicKey.ExportSubjectPublicKeyInfo()),
+                new RatchetEphemeralKey(_bobRatchet.PublicKey.ExportSubjectPublicKeyInfo()),
                 ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
                 _sessionLogger,
                 _options);
@@ -87,7 +87,7 @@ namespace Percolator.CryptographyTests
             using var sessionFromAlice = DoubleRatchetSession.AsResponder(
                 sharedSecretAlice, 
                 new RatchetIdentityKey(_creatorIdentity.PublicKey.ExportSubjectPublicKeyInfo()), 
-                new PreKey(_creatorIdentity.PublicKey.ExportSubjectPublicKeyInfo()),
+                new RatchetEphemeralKey(_creatorIdentity.PublicKey.ExportSubjectPublicKeyInfo()),
                 _aliceRatchet,
                 _sessionLogger,
                 _options);
@@ -96,7 +96,7 @@ namespace Percolator.CryptographyTests
             using var sessionFromBob = DoubleRatchetSession.AsResponder(
                 sharedSecretBob, 
                 new RatchetIdentityKey(_creatorIdentity.PublicKey.ExportSubjectPublicKeyInfo()), 
-                new PreKey(_creatorIdentity.PublicKey.ExportSubjectPublicKeyInfo()),
+                new RatchetEphemeralKey(_creatorIdentity.PublicKey.ExportSubjectPublicKeyInfo()),
                 _bobRatchet,
                 _sessionLogger,
                 _options);
@@ -149,7 +149,7 @@ namespace Percolator.CryptographyTests
             var sessionToAlice = DoubleRatchetSession.AsInitiator(
                 sharedSecret, 
                 new RatchetIdentityKey(_aliceIdentity.PublicKey.ExportSubjectPublicKeyInfo()), 
-                new PreKey(_aliceRatchet.PublicKey.ExportSubjectPublicKeyInfo()),
+                new RatchetEphemeralKey(_aliceRatchet.PublicKey.ExportSubjectPublicKeyInfo()),
                 ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
                 _sessionLogger,
                 _options);
@@ -177,7 +177,7 @@ namespace Percolator.CryptographyTests
             var sessionFromAlice = DoubleRatchetSession.AsResponder(
                 sharedSecret, 
                 new RatchetIdentityKey(_creatorIdentity.PublicKey.ExportSubjectPublicKeyInfo()), 
-                new PreKey(_creatorIdentity.PublicKey.ExportSubjectPublicKeyInfo()),
+                new RatchetEphemeralKey(_creatorIdentity.PublicKey.ExportSubjectPublicKeyInfo()),
                 _aliceRatchet,
                 _sessionLogger,
                 _options);
@@ -197,7 +197,7 @@ namespace Percolator.CryptographyTests
             var sessionToAlice = DoubleRatchetSession.AsInitiator(
                 sharedSecret, 
                 new RatchetIdentityKey(_aliceIdentity.PublicKey.ExportSubjectPublicKeyInfo()), 
-                new PreKey(_aliceRatchet.PublicKey.ExportSubjectPublicKeyInfo()),
+                new RatchetEphemeralKey(_aliceRatchet.PublicKey.ExportSubjectPublicKeyInfo()),
                 ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
                 _sessionLogger,
                 _options);
@@ -205,7 +205,7 @@ namespace Percolator.CryptographyTests
             var sessionFromAlice = DoubleRatchetSession.AsResponder(
                 sharedSecret, 
                 new RatchetIdentityKey(_creatorIdentity.PublicKey.ExportSubjectPublicKeyInfo()), 
-                new PreKey(_creatorIdentity.PublicKey.ExportSubjectPublicKeyInfo()),
+                new RatchetEphemeralKey(_creatorIdentity.PublicKey.ExportSubjectPublicKeyInfo()),
                 _aliceRatchet,
                 _sessionLogger,
                 _options);
@@ -216,7 +216,7 @@ namespace Percolator.CryptographyTests
             var sessionToBobForAlice = DoubleRatchetSession.AsInitiator(
                 sharedSecretBob, 
                 new RatchetIdentityKey(_bobIdentity.PublicKey.ExportSubjectPublicKeyInfo()), 
-                new PreKey(_bobRatchet.PublicKey.ExportSubjectPublicKeyInfo()),
+                new RatchetEphemeralKey(_bobRatchet.PublicKey.ExportSubjectPublicKeyInfo()),
                 ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
                 _sessionLogger,
                 _options);
@@ -248,7 +248,7 @@ namespace Percolator.CryptographyTests
             var sessionToBobForA = DoubleRatchetSession.AsInitiator(
                 sharedSecretA, 
                 new RatchetIdentityKey(_bobIdentity.PublicKey.ExportSubjectPublicKeyInfo()), 
-                new PreKey(_bobRatchet.PublicKey.ExportSubjectPublicKeyInfo()),
+                new RatchetEphemeralKey(_bobRatchet.PublicKey.ExportSubjectPublicKeyInfo()),
                 ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
                 _sessionLogger,
                 _options);
@@ -256,7 +256,7 @@ namespace Percolator.CryptographyTests
             using var sessionFromBobForA = DoubleRatchetSession.AsResponder(
                 sharedSecretA, 
                 new RatchetIdentityKey(_creatorIdentity.PublicKey.ExportSubjectPublicKeyInfo()), 
-                new PreKey(_creatorIdentity.PublicKey.ExportSubjectPublicKeyInfo()),
+                new RatchetEphemeralKey(_creatorIdentity.PublicKey.ExportSubjectPublicKeyInfo()),
                 _bobRatchet,
                 _sessionLogger,
                 _options);
@@ -268,7 +268,7 @@ namespace Percolator.CryptographyTests
             var sessionToBobForB = DoubleRatchetSession.AsInitiator(
                 sharedSecretB, 
                 new RatchetIdentityKey(_bobIdentity.PublicKey.ExportSubjectPublicKeyInfo()), 
-                new PreKey(bobRatchetB.PublicKey.ExportSubjectPublicKeyInfo()),
+                new RatchetEphemeralKey(bobRatchetB.PublicKey.ExportSubjectPublicKeyInfo()),
                 ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
                 _sessionLogger,
                 _options);
@@ -276,7 +276,7 @@ namespace Percolator.CryptographyTests
             using var sessionFromBobForB = DoubleRatchetSession.AsResponder(
                 sharedSecretB, 
                 new RatchetIdentityKey(_creatorIdentity.PublicKey.ExportSubjectPublicKeyInfo()), 
-                new PreKey(_creatorIdentity.PublicKey.ExportSubjectPublicKeyInfo()),
+                new RatchetEphemeralKey(_creatorIdentity.PublicKey.ExportSubjectPublicKeyInfo()),
                 bobRatchetB,
                 _sessionLogger,
                 _options);
@@ -289,7 +289,7 @@ namespace Percolator.CryptographyTests
             var sessionToDummy = DoubleRatchetSession.AsInitiator(
                 sharedSecretDummy, 
                 new RatchetIdentityKey(dummyIdentity.PublicKey.ExportSubjectPublicKeyInfo()), 
-                new PreKey(dummyRatchet.PublicKey.ExportSubjectPublicKeyInfo()),
+                new RatchetEphemeralKey(dummyRatchet.PublicKey.ExportSubjectPublicKeyInfo()),
                 ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
                 _sessionLogger,
                 _options);
@@ -320,7 +320,7 @@ namespace Percolator.CryptographyTests
             var sessionToAlice = DoubleRatchetSession.AsInitiator(
                 new SharedSecret(_creatorIdentity.DeriveKeyMaterial(_aliceIdentity.PublicKey)),
                 new RatchetIdentityKey(_aliceIdentity.PublicKey.ExportSubjectPublicKeyInfo()),
-                new PreKey(_aliceRatchet.PublicKey.ExportSubjectPublicKeyInfo()),
+                new RatchetEphemeralKey(_aliceRatchet.PublicKey.ExportSubjectPublicKeyInfo()),
             ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
                 _sessionLogger,
                 _options);
@@ -330,7 +330,7 @@ namespace Percolator.CryptographyTests
             var sessionFromAlice = DoubleRatchetSession.AsResponder(
                 new SharedSecret(_creatorIdentity.DeriveKeyMaterial(_aliceIdentity.PublicKey)),
                 new RatchetIdentityKey(_creatorIdentity.PublicKey.ExportSubjectPublicKeyInfo()),
-                new PreKey(_creatorIdentity.PublicKey.ExportSubjectPublicKeyInfo()),
+                new RatchetEphemeralKey(_creatorIdentity.PublicKey.ExportSubjectPublicKeyInfo()),
                 _aliceRatchet,
                 _sessionLogger,
                 _options);

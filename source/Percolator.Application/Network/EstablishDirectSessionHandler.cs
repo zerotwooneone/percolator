@@ -115,7 +115,7 @@ namespace Percolator.Application.Network
             _logger.LogInformation("Processing X3DH handshake with initiator bundle. Examining bundle properties...");
             var ephemeralKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
 
-            var remotePreKey = new PreKey(request.PreKeyBytes);
+            var remotePreKey = new RatchetEphemeralKey(request.PreKeyBytes);
             var prekeyBundle = new X3dPreKeyBundle(
                 remoteIdentityKey,
                 remotePreKey,

@@ -71,7 +71,7 @@ public class X3DHOrchestratorTests : IDisposable
         var remoteBundle = new X3dPreKeyBundle
         (
             new RatchetIdentityKey(remoteIdentitySigningKeyBytes),
-            new PreKey(remoteSignedPreKeyBytes),
+            new RatchetEphemeralKey(remoteSignedPreKeyBytes),
             new OneTimeKey(_remoteOneTimePreKey.PublicKey.ExportSubjectPublicKeyInfo())
         );
 
@@ -113,7 +113,7 @@ public class X3DHOrchestratorTests : IDisposable
         var remoteBundle = new X3dPreKeyBundle
         (
             new RatchetIdentityKey(remoteIdentitySigningKeyBytes),
-            new PreKey(remoteSignedPreKeyBytes),
+            new RatchetEphemeralKey(remoteSignedPreKeyBytes),
             null // OneTimePreKey intentionally omitted
         );
 

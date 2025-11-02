@@ -14,7 +14,7 @@ public interface IDirectSessionManager
     /// </summary>
     Task EstablishSessionAsInitiatorAsync(SessionId sessionId,
         RatchetIdentityKey remoteIdentityKey,
-        PreKey preKey,
+        RatchetEphemeralKey preKey,
         SharedSecret sharedSecret, ECDiffieHellman localEphemeralKey);
 
     /// <summary>
@@ -23,7 +23,7 @@ public interface IDirectSessionManager
     Task EstablishSessionAsResponderAsync(
         Percolator.Cryptography.SessionId sessionId, 
         RatchetIdentityKey remoteIdentityKey,
-        PreKey remotePreKey,
+        RatchetEphemeralKey remotePreKey,
         ECDiffieHellman privateKeyUsedInHandshake,
         SharedSecret sharedSecret);
 
@@ -36,7 +36,7 @@ public interface IDirectSessionManager
         SessionRatchetMessage firstMessage,
         Func<Plaintext, Percolator.Cryptography.SessionId> getSessionId,
         RatchetIdentityKey remoteIdentityKey,
-        PreKey remotePreKey,
+        RatchetEphemeralKey remotePreKey,
         ECDiffieHellman privateKeyUsedInHandshake,
         SharedSecret sharedSecret);
 
@@ -71,7 +71,7 @@ public interface IDirectSessionManager
         Guid signedPreKeyId,
         Guid? oneTimePreKeyId,
         RatchetIdentityKey remoteIdentityKey,
-        PreKey remotePreKey,
+        RatchetEphemeralKey remotePreKey,
         SharedSecret sharedSecret,
         ECDiffieHellman initiatorEphemeral,
         Plaintext? initialPlaintext,

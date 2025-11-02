@@ -13,7 +13,7 @@ public class SessionRatchetMessageTests
     {
         // Arrange
         using var keyPair = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        var ratchetKey = new PreKey(keyPair.PublicKey.ExportSubjectPublicKeyInfo());
+        var ratchetKey = new RatchetEphemeralKey(keyPair.PublicKey.ExportSubjectPublicKeyInfo());
         ulong counter = 42;
         ulong previousChainLength = 10;
         byte[] data = "Encrypted data"u8.ToArray();
@@ -36,7 +36,7 @@ public class SessionRatchetMessageTests
     {
         // Arrange
         using var keyPair = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        var ratchetKey = new PreKey(keyPair.PublicKey.ExportSubjectPublicKeyInfo());
+        var ratchetKey = new RatchetEphemeralKey(keyPair.PublicKey.ExportSubjectPublicKeyInfo());
         ulong counter = 123;
         ulong previousChainLength = 50;
         var ciphertext = new Ciphertext(RandomNumberGenerator.GetBytes(64));
@@ -78,7 +78,7 @@ public class SessionRatchetMessageTests
     {
         // Arrange
         using var keyPair = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        var ratchetKey = new PreKey(keyPair.PublicKey.ExportSubjectPublicKeyInfo());
+        var ratchetKey = new RatchetEphemeralKey(keyPair.PublicKey.ExportSubjectPublicKeyInfo());
         var message = SessionRatchetMessage.Create(
             ratchetKey, 
             1,

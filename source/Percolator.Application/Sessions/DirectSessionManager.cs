@@ -60,7 +60,7 @@ public class DirectSessionManager : IDirectSessionManager
         SessionRatchetMessage firstMessage,
         Func<Plaintext, SessionId> getSessionId,
         RatchetIdentityKey remoteIdentityKey,
-        PreKey remotePreKey,
+        RatchetEphemeralKey remotePreKey,
         ECDiffieHellman privateKeyUsedInHandshake,
         SharedSecret sharedSecret)
     {
@@ -216,7 +216,7 @@ public class DirectSessionManager : IDirectSessionManager
     public async Task EstablishSessionAsInitiatorAsync(
         SessionId sessionId,
         RatchetIdentityKey remoteIdentityKey,
-        PreKey preKey,
+        RatchetEphemeralKey preKey,
         SharedSecret sharedSecret, 
         ECDiffieHellman localEphemeralKey)
     {
@@ -277,7 +277,7 @@ public class DirectSessionManager : IDirectSessionManager
     public async Task EstablishSessionAsResponderAsync(
         SessionId sessionId, 
         RatchetIdentityKey remoteIdentityKey,
-        PreKey remotePreKey,
+        RatchetEphemeralKey remotePreKey,
         ECDiffieHellman privateKeyUsedInHandshake,
         SharedSecret sharedSecret)
     {
@@ -501,7 +501,7 @@ public class DirectSessionManager : IDirectSessionManager
         Guid signedPreKeyId,
         Guid? oneTimePreKeyId,
         RatchetIdentityKey remoteIdentityKey,
-        PreKey remotePreKey,
+        RatchetEphemeralKey remotePreKey,
         SharedSecret sharedSecret,
         ECDiffieHellman initiatorEphemeral,
         Plaintext? initialPlaintext,
