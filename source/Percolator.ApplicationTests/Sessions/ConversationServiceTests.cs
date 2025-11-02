@@ -164,7 +164,7 @@ public class ConversationServiceTests
             .ReturnsAsync((SessionRatchetMessage msg,
                            Func<Plaintext, Percolator.Cryptography.SessionId> getSessionId,
                            RatchetIdentityKey _,
-                           PreKey __,
+                           RatchetEphemeralKey __,
                            ECDiffieHellman ___,
                            CryptoSharedSecret ____) =>
             {
@@ -300,7 +300,7 @@ public class ConversationServiceTests
             .ReturnsAsync((SessionRatchetMessage msg,
                             Func<Plaintext, Percolator.Cryptography.SessionId> getSessionId,
                             RatchetIdentityKey _,
-                            PreKey __,
+                            RatchetEphemeralKey __,
                             ECDiffieHellman ___,
                             CryptoSharedSecret ____) 
                 =>
@@ -436,7 +436,7 @@ public class ConversationServiceTests
             .ReturnsAsync((SessionRatchetMessage msg,
                             Func<Plaintext, Percolator.Cryptography.SessionId> getSessionId,
                             RatchetIdentityKey _,
-                            PreKey __,
+                            RatchetEphemeralKey __,
                             ECDiffieHellman ___,
                             CryptoSharedSecret ____) =>
             {
