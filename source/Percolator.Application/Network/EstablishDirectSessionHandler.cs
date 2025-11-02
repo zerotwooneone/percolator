@@ -156,13 +156,13 @@ namespace Percolator.Application.Network
             // this message will contain the session ID and the ephemeral key we used to create the session.
             // The return type of the message should be SessionRatchetMessage
             var cryptoSessionId = new SessionId(directSessionId.Value);
-            var remoteEpemeral = request.OneTimePreKeyBytes is null
+            var remoteEphemeral = request.OneTimePreKeyBytes is null
                 ? new RatchetEphemeralKey(request.PreKeyBytes)
                 : new RatchetEphemeralKey(request.OneTimePreKeyBytes);
             await _sessionManager.EstablishSessionAsInitiatorAsync(
                 cryptoSessionId,
                 remoteIdentityKey,
-                remoteEpemeral,
+                remoteEphemeral,
                 sharedSecret,
                 ephemeralKey).ConfigureAwait(false);
             _logger.LogInformation("Successfully established session {SessionId} with peer {PeerId}", cryptoSessionId, remotePeer.Id);
