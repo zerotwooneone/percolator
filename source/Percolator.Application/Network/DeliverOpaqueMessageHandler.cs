@@ -199,6 +199,7 @@ namespace Percolator.Application.Network
                     while (await _relayOrchestrator.RelayNextAsync(identityPeerId, cancellationToken).ConfigureAwait(false))
                     {
                         // continue while acked
+                        int x = 0;
                     }
                 }
                 catch (Exception ex)

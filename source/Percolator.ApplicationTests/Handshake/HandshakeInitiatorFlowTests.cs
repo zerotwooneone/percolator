@@ -89,20 +89,20 @@ public class HandshakeInitiatorFlowTests
             .Setup(s => s.SaveAsync(It.IsAny<PreHandshakeRecord>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
-        var handler = new ComposeAndEnqueueInitiatorHelloHandler(
-            new NullLogger<ComposeAndEnqueueInitiatorHelloHandler>(),
+        var msgSvc = new Moq.Mock<IMessageService>(Moq.MockBehavior.Strict);
+        msgSvc
+            .Setup(s => s.SendMessageAsync(
+                It.IsAny<InternalEnvelope>(),
+                It.IsAny<Percolator.Identity.PeerId>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(SendResult.Success("Relay", new[] { "Relay" }, 1));
+
+        var service = new InitiatorHelloService(
+            new NullLogger<InitiatorHelloService>(),
             active,
             x3dh.Object,
-            new Mock<IMediator>().Object,
-            sessions.Object);
-
-        var cmd = new ComposeAndEnqueueInitiatorHelloCommand(
-            RecipientPublicKeyHash: recipientPkh,
-            RemoteIdentityKeySpki: remoteIdentitySpki,
-            SignedPreKeyId: spkId,
-            OneTimePreKeyId: otkId,
-            RemotePreKeySpki: remotePreKeySpki,
-            InitiatorPayload: new byte[] { 9, 9 });
+            sessions.Object,
+            msgSvc.Object);
 
         // Since handler will now decrypt after finalize, set up decrypt to succeed
         sessions
@@ -110,7 +110,15 @@ public class HandshakeInitiatorFlowTests
             .ReturnsAsync(new Plaintext(new byte[] { 0xCD }));
 
         // Act
-        await handler.Handle(cmd, CancellationToken.None);
+        await service.SendInitiatorHelloViaHostAsync(
+            recipientPublicKeyHash: recipientPkh,
+            remoteIdentityKeySpki: remoteIdentitySpki,
+            signedPreKeyId: spkId,
+            oneTimePreKeyId: otkId,
+            remotePreKeySpki: remotePreKeySpki,
+            hostPeerId: new Percolator.Identity.PeerId(Guid.NewGuid()),
+            initiatorPayload: new byte[] { 9, 9 },
+            cancellationToken: CancellationToken.None);
 
         // Verify initiator intent persisted and optional payload encryption requested
         sessions.Verify(s => s.EstablishSessionAsInitiatorAsync(
@@ -122,6 +130,12 @@ public class HandshakeInitiatorFlowTests
             It.Is<SharedSecret>(sh => sh.Value.SequenceEqual(new byte[] { 1, 2, 3 })),
             It.IsAny<ECDiffieHellman>(),
             It.Is<Plaintext?>(pt => pt != null),
+            It.IsAny<CancellationToken>()), Times.Once);
+
+        // Verify it attempted to send via host
+        msgSvc.Verify(s => s.SendMessageAsync(
+            It.IsAny<InternalEnvelope>(),
+            It.IsAny<Percolator.Identity.PeerId>(),
             It.IsAny<CancellationToken>()), Times.Once);
     }
 
@@ -266,24 +280,32 @@ public class HandshakeInitiatorFlowTests
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(firstMessage);
 
-        // Compose handler under test
-        var composeHandler = new ComposeAndEnqueueInitiatorHelloHandler(
-            new NullLogger<ComposeAndEnqueueInitiatorHelloHandler>(),
+        // Service under test
+        var msgSvc2 = new Moq.Mock<IMessageService>(Moq.MockBehavior.Strict);
+        msgSvc2
+            .Setup(s => s.SendMessageAsync(
+                It.IsAny<InternalEnvelope>(),
+                It.IsAny<Percolator.Identity.PeerId>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(SendResult.Success("Relay", new[] { "Relay" }, 1));
+
+        var initiatorService = new InitiatorHelloService(
+            new NullLogger<InitiatorHelloService>(),
             initiatorActive,
             x3dh.Object,
-            new Mock<IMediator>().Object,
-            sessions.Object);
-
-        var composeCmd = new ComposeAndEnqueueInitiatorHelloCommand(
-            RecipientPublicKeyHash: recipientPkh,
-            RemoteIdentityKeySpki: remoteIdentitySpki,
-            SignedPreKeyId: spkId,
-            OneTimePreKeyId: otkId,
-            RemotePreKeySpki: remotePreKeySpki,
-            InitiatorPayload: expectedFirstPlaintext.Value);
+            sessions.Object,
+            msgSvc2.Object);
 
         // Act: Compose (produces initiator hello and first message via session manager)
-        await composeHandler.Handle(composeCmd, CancellationToken.None);
+        await initiatorService.SendInitiatorHelloViaHostAsync(
+            recipientPublicKeyHash: recipientPkh,
+            remoteIdentityKeySpki: remoteIdentitySpki,
+            signedPreKeyId: spkId,
+            oneTimePreKeyId: otkId,
+            remotePreKeySpki: remotePreKeySpki,
+            hostPeerId: new Percolator.Identity.PeerId(Guid.NewGuid()),
+            initiatorPayload: expectedFirstPlaintext.Value,
+            cancellationToken: CancellationToken.None);
 
         // Arrange responder side handler and inputs
         var responderIdentity = new IdentityRecord(Guid.NewGuid(), "responder") { SelfIdentityId = 22 };

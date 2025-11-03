@@ -117,6 +117,7 @@ public static class ServiceCollectionExtensions
 
         // Application-layer envelope sender
         services.AddSingleton<IMessageService, MessageService>();
+        services.AddSingleton<Handshake.IInitiatorHelloService, Handshake.InitiatorHelloService>();
         services.AddTransient<IRemoteEnvelopeSender, RemoteEnvelopeSender>();
 
         return services;

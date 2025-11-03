@@ -9,53 +9,50 @@ using Percolator.Application.Network;
 using Percolator.Application.Network.Handshake;
 using Percolator.Application.Sessions;
 using Percolator.Contracts;
-using Percolator.Cryptography;
 using Percolator.Identity;
 using Percolator.Network;
+using Percolator.Cryptography;
 
 namespace Percolator.Application.Cli;
 
-public sealed class InitiateHandshakeViaHostHandler : IRequestHandler<InitiateHandshakeViaHostCommand, Unit>
-{
-    private readonly ILogger<InitiateHandshakeViaHostHandler> _logger;
-    private readonly IConversationService _conversationService;
-    private readonly IDirectSessionManager _sessionManager;
-    private readonly IMessageTransportService _transport;
-    private readonly IPeerRepository _peerRepository;
-    private readonly IPeerPublicSigningKeyStore _peerPublicSigningKeyStore;
-    private readonly IPeerConnectionRepository _peerConnectionRepository;
-    private readonly IMediator _mediator;
-
-    public InitiateHandshakeViaHostHandler(
-        ILogger<InitiateHandshakeViaHostHandler> logger,
-        IConversationService conversationService,
-        IDirectSessionManager sessionManager,
-        IMessageTransportService transport,
-        IPeerRepository peerRepository,
-        IPeerPublicSigningKeyStore peerPublicSigningKeyStore,
-        IPeerConnectionRepository peerConnectionRepository,
-        IMediator mediator)
+    public sealed class InitiateHandshakeViaHostHandler : IRequestHandler<InitiateHandshakeViaHostCommand, Unit>
     {
-        _logger = logger;
-        _conversationService = conversationService;
-        _sessionManager = sessionManager;
-        _transport = transport;
-        _peerRepository = peerRepository;
-        _peerPublicSigningKeyStore = peerPublicSigningKeyStore;
-        _peerConnectionRepository = peerConnectionRepository;
-        _mediator = mediator;
-    }
+        private readonly ILogger<InitiateHandshakeViaHostHandler> _logger;
+        private readonly IConversationService _conversationService;
+        private readonly IDirectSessionManager _sessionManager;
+        private readonly IMessageTransportService _transport;
+        private readonly IPeerRepository _peerRepository;
+        private readonly IPeerPublicSigningKeyStore _peerPublicSigningKeyStore;
+        private readonly IPeerConnectionRepository _peerConnectionRepository;
+        private readonly Percolator.Application.Network.Handshake.IInitiatorHelloService _initiatorHelloService;
 
-    public async Task<Unit> Handle(InitiateHandshakeViaHostCommand request, CancellationToken cancellationToken)
-    {
-        if (request.TargetPublicKeyHash is null || request.TargetPublicKeyHash.Length == 0)
-            throw new ArgumentException("TargetPublicKeyHash must be provided.", nameof(request.TargetPublicKeyHash));
+        public InitiateHandshakeViaHostHandler(
+            ILogger<InitiateHandshakeViaHostHandler> logger,
+            IConversationService conversationService,
+            IDirectSessionManager sessionManager,
+            IMessageTransportService transport,
+            IPeerRepository peerRepository,
+            IPeerPublicSigningKeyStore peerPublicSigningKeyStore,
+            IPeerConnectionRepository peerConnectionRepository,
+            Percolator.Application.Network.Handshake.IInitiatorHelloService initiatorHelloService)
+        {
+            _logger = logger;
+            _conversationService = conversationService;
+            _sessionManager = sessionManager;
+            _transport = transport;
+            _peerRepository = peerRepository;
+            _peerPublicSigningKeyStore = peerPublicSigningKeyStore;
+            _peerConnectionRepository = peerConnectionRepository;
+            _initiatorHelloService = initiatorHelloService;
+        }
 
-        // Resolve Host and ensure an existing direct session to Host
-        var hostPeer = await _peerRepository.GetByNameAsync(request.HostPeerName).ConfigureAwait(false)
-            ?? throw new InvalidOperationException($"Peer '{request.HostPeerName}' not found.");
-        var hostSession = await _conversationService.GetExistingDirectSessionAsync(hostPeer).ConfigureAwait(false)
-            ?? throw new InvalidOperationException("Direct session to Host not found. Establish a session before initiating handshake.");
+        public async Task<Unit> Handle(InitiateHandshakeViaHostCommand request, CancellationToken cancellationToken)
+        {
+            // Resolve Host and ensure an existing direct session to Host
+            var hostPeer = await _peerRepository.GetByNameAsync(request.HostPeerName).ConfigureAwait(false)
+                ?? throw new InvalidOperationException($"Peer '{request.HostPeerName}' not found.");
+            var hostSession = await _conversationService.GetExistingDirectSessionAsync(hostPeer).ConfigureAwait(false)
+                ?? throw new InvalidOperationException("Direct session to Host not found. Establish a session before initiating handshake.");
 
         // Ensure a Peer exists for the target (by PKH) and record a relay connection via Host
         var targetPeerId = await _peerPublicSigningKeyStore.GetPeerIdByPublicKeyHashAsync(request.TargetPublicKeyHash, cancellationToken).ConfigureAwait(false);
@@ -126,7 +123,7 @@ public sealed class InitiateHandshakeViaHostHandler : IRequestHandler<InitiateHa
         var bundleMsg = internalResp.GetPreKeyBundleResponse?.PreKeyBundle
             ?? throw new InvalidOperationException("No pre-key bundle found in response.");
 
-        // 2) Orchestrate Initiator Hello enqueue via existing command
+        // 2) Orchestrate Initiator Hello enqueue to Host via service
         var remoteIdentitySpki = bundleMsg.IdentityKey?.ToByteArray() ?? Array.Empty<byte>();
         var remoteSignedPreKeySpki = bundleMsg.SignedPreKey?.ToByteArray() ?? Array.Empty<byte>();
         if (remoteIdentitySpki.Length == 0 || remoteSignedPreKeySpki.Length == 0)
@@ -144,14 +141,15 @@ public sealed class InitiateHandshakeViaHostHandler : IRequestHandler<InitiateHa
         connection.SetDirectMessagePublicKey(new DirectMessagePublicKey(remoteIdentitySpki));
         await _peerConnectionRepository.SaveAsync(connection).ConfigureAwait(false);
 
-        await _mediator.Send(new ComposeAndEnqueueInitiatorHelloCommand(
-            RecipientPublicKeyHash: request.TargetPublicKeyHash,
-            RemoteIdentityKeySpki: remoteIdentitySpki,
-            SignedPreKeyId: signedPreKeyId,
-            OneTimePreKeyId: oneTimePreKeyId,
-            RemotePreKeySpki: remoteSignedPreKeySpki,
-            InitiatorPayload: request.InitiatorPayload
-        ), cancellationToken).ConfigureAwait(false);
+        await _initiatorHelloService.SendInitiatorHelloViaHostAsync(
+            recipientPublicKeyHash: request.TargetPublicKeyHash,
+            remoteIdentityKeySpki: remoteIdentitySpki,
+            signedPreKeyId: signedPreKeyId,
+            oneTimePreKeyId: oneTimePreKeyId,
+            remotePreKeySpki: remoteSignedPreKeySpki,
+            hostPeerId: new Percolator.Identity.PeerId(hostPeer.Id.Value),
+            initiatorPayload: request.InitiatorPayload,
+            cancellationToken: cancellationToken).ConfigureAwait(false);
 
         _logger.LogInformation("Initiator Hello enqueued via Host MQ for PKH target.");
         return Unit.Value;
