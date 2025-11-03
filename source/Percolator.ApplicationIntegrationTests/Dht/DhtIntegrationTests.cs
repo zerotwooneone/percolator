@@ -16,6 +16,7 @@ using Percolator.Dht;
 using Percolator.Identity;
 using Percolator.Identity.Model;
 using Percolator.Network;
+using Percolator.MessageQueue.Abstractions;
 using SessionId = Percolator.Cryptography.SessionId;
 using NetworkPeerId = Percolator.Network.PeerId;
 
@@ -61,6 +62,8 @@ public class DhtIntegrationTests : IntegrationTestBase
             services.AddSingleton<IDirectSessionManager>(sessionManagerMock.Object);
             services.AddSingleton<IPeerConnectionRepository>(peerConnectionRepoMock.Object);
             services.AddSingleton<IDirectSessionRepository>(directSessionRepoMock.Object);
+            // MQ service required by ProcessInternalEnvelopeHandler constructor
+            services.AddSingleton<IMessageQueueService>(new Mock<IMessageQueueService>().Object);
             // Fast-path lookup resolves our header key
             var ratchetLookup = new Moq.Mock<IRatchetKeySessionLookup>();
             var preKey = new PreKey(headerKey);
@@ -163,6 +166,8 @@ public class DhtIntegrationTests : IntegrationTestBase
             services.AddSingleton(directSessionRepoMock.Object);
             services.AddSingleton<IDhtService, DhtService>();
             services.AddSingleton(new Mock<IConversationRepository>().Object);
+            // MQ service required by ProcessInternalEnvelopeHandler constructor
+            services.AddSingleton<IMessageQueueService>(new Mock<IMessageQueueService>().Object);
             // Ensure ActiveIdentityContext has an identity with SelfIdentityId set
             services.AddSingleton(new Percolator.Application.Identity.ActiveIdentityContext
             {

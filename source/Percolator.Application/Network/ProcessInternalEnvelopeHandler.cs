@@ -2,14 +2,15 @@ using Google.Protobuf;
 using MediatR;
 using Microsoft.Extensions.Logging;
 using Percolator.Application.Apps.Chat;
-using Percolator.Application.Network.Handshake;
 using Percolator.Chat.App;
 using Percolator.Chat.App.Commands;
 using Percolator.Chat.Primitives;
 using Percolator.Chat.ValueObjects;
 using Percolator.Contracts;
 using Percolator.Dht;
+using Percolator.Application.Network.Handshake;
 using Percolator.MessageQueue.Commands;
+using Percolator.MessageQueue.Abstractions;
 using Percolator.Network;
 using Percolator.Prekey.Handlers;
 using PeerId = Percolator.Identity.PeerId;
@@ -23,13 +24,15 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
     private readonly Percolator.Chat.App.IAdminOperations _adminOps;
     private readonly IDhtService _dhtService;
     private readonly IPeerConnectionRepository _peerConnectionRepository;
-    public ProcessInternalEnvelopeHandler(ILogger<ProcessInternalEnvelopeHandler> logger, IMediator mediator, Percolator.Chat.App.IAdminOperations adminOps, IDhtService dhtService, IPeerConnectionRepository peerConnectionRepository)
+    private readonly IMessageQueueService _mqService;
+    public ProcessInternalEnvelopeHandler(ILogger<ProcessInternalEnvelopeHandler> logger, IMediator mediator, Percolator.Chat.App.IAdminOperations adminOps, IDhtService dhtService, IPeerConnectionRepository peerConnectionRepository, IMessageQueueService mqService)
     {
         _logger = logger;
         _mediator = mediator;
         _adminOps = adminOps;
         _dhtService = dhtService;
         _peerConnectionRepository = peerConnectionRepository;
+        _mqService = mqService;
     }
 
     public async Task<InternalEnvelope?> Handle(ProcessInternalEnvelopeCommand request, CancellationToken cancellationToken)
@@ -543,10 +546,10 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                 case MessageQueueEnvelope.MessageOneofCase.EnqueueOpaqueMessageRequest:
                 {
                     var req = mq.EnqueueOpaqueMessageRequest;
-                    var enqueueResult = await _mediator.Send(new EnqueueOpaqueMessageCommand(
+                    var enqueueResult = await _mqService.EnqueueOpaqueAsync(
                         req.RecipientPublicKeyHash.ToByteArray(),
-                        req.MessageBlob.ToByteArray()
-                    ), cancellationToken).ConfigureAwait(false);
+                        req.MessageBlob.ToByteArray(),
+                        cancellationToken).ConfigureAwait(false);
 
                     var resp = new EnqueueOpaqueMessageResponse
                     {

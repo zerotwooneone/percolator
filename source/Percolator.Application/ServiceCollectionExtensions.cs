@@ -46,8 +46,8 @@ public static class ServiceCollectionExtensions
             cfg.RegisterServicesFromAssembly(typeof(PostTextMessageHandler).Assembly);
             // Include Prekey handlers assembly (Percolator.Prekey)
             cfg.RegisterServicesFromAssembly(typeof(Percolator.Prekey.Handlers.SubmitPreKeyBundleHandler).Assembly);
-            // Include MessageQueue handlers assembly (Percolator.MessageQueue)
-            cfg.RegisterServicesFromAssembly(typeof(Percolator.MessageQueue.Handlers.EnqueueOpaqueMessageHandler).Assembly);
+            // Include MessageQueue assembly (Percolator.MessageQueue) without referencing removed handler type
+            cfg.RegisterServicesFromAssembly(typeof(Percolator.MessageQueue.DependencyInjection.ServiceCollectionExtensions).Assembly);
         });
 
         return services;

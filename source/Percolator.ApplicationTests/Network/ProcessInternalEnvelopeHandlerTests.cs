@@ -25,7 +25,8 @@ namespace Percolator.ApplicationTests.Network
             var adminOps = new Moq.Mock<Percolator.Chat.App.IAdminOperations>(MockBehavior.Loose);
             var dht = new Moq.Mock<Percolator.Dht.IDhtService>(MockBehavior.Loose);
             var peerConn = new Moq.Mock<Percolator.Network.IPeerConnectionRepository>(MockBehavior.Loose);
-            return new ProcessInternalEnvelopeHandler(logger, mediatorMock.Object, adminOps.Object, dht.Object, peerConn.Object);
+            var mq = new Moq.Mock<Percolator.MessageQueue.Abstractions.IMessageQueueService>(MockBehavior.Loose);
+            return new ProcessInternalEnvelopeHandler(logger, mediatorMock.Object, adminOps.Object, dht.Object, peerConn.Object, mq.Object);
         }
 
         [Test]
@@ -226,7 +227,8 @@ namespace Percolator.ApplicationTests.Network
             var logger = NullLogger<ProcessInternalEnvelopeHandler>.Instance;
             var adminOps = new Moq.Mock<Percolator.Chat.App.IAdminOperations>(MockBehavior.Loose);
             var peerConn = new Moq.Mock<Percolator.Network.IPeerConnectionRepository>(MockBehavior.Loose);
-            var sut = new ProcessInternalEnvelopeHandler(logger, mediator.Object, adminOps.Object, dht.Object, peerConn.Object);
+            var mq = new Moq.Mock<Percolator.MessageQueue.Abstractions.IMessageQueueService>(MockBehavior.Loose);
+            var sut = new ProcessInternalEnvelopeHandler(logger, mediator.Object, adminOps.Object, dht.Object, peerConn.Object, mq.Object);
 
             var contractsReq = new Percolator.Contracts.FindNodeRequest
             {
@@ -260,7 +262,8 @@ namespace Percolator.ApplicationTests.Network
             var logger = NullLogger<ProcessInternalEnvelopeHandler>.Instance;
             var adminOps = new Moq.Mock<Percolator.Chat.App.IAdminOperations>(MockBehavior.Loose);
             var peerConn = new Moq.Mock<Percolator.Network.IPeerConnectionRepository>(MockBehavior.Loose);
-            var sut = new ProcessInternalEnvelopeHandler(logger, mediator.Object, adminOps.Object, dht.Object, peerConn.Object);
+            var mq = new Moq.Mock<Percolator.MessageQueue.Abstractions.IMessageQueueService>(MockBehavior.Loose);
+            var sut = new ProcessInternalEnvelopeHandler(logger, mediator.Object, adminOps.Object, dht.Object, peerConn.Object, mq.Object);
             var contractsReq = new Percolator.Contracts.FindNodeRequest
             {
                 TargetPeerId = Google.Protobuf.ByteString.CopyFrom(new byte[32])
@@ -309,7 +312,8 @@ namespace Percolator.ApplicationTests.Network
             var mediator = new Mock<IMediator>(MockBehavior.Loose);
             var logger = NullLogger<ProcessInternalEnvelopeHandler>.Instance;
             var adminOps = new Mock<Percolator.Chat.App.IAdminOperations>(MockBehavior.Loose);
-            var sut = new ProcessInternalEnvelopeHandler(logger, mediator.Object, adminOps.Object, new Mock<Percolator.Dht.IDhtService>().Object, new Mock<Percolator.Network.IPeerConnectionRepository>().Object);
+            var mq2 = new Moq.Mock<Percolator.MessageQueue.Abstractions.IMessageQueueService>(MockBehavior.Loose);
+            var sut = new ProcessInternalEnvelopeHandler(logger, mediator.Object, adminOps.Object, new Mock<Percolator.Dht.IDhtService>().Object, new Mock<Percolator.Network.IPeerConnectionRepository>().Object, mq2.Object);
 
             var groupId = Guid.NewGuid();
             var opId = Guid.NewGuid();
@@ -495,7 +499,8 @@ namespace Percolator.ApplicationTests.Network
             var logger = NullLogger<ProcessInternalEnvelopeHandler>.Instance;
             var adminOps = new Mock<Percolator.Chat.App.IAdminOperations>(MockBehavior.Loose);
             var peerConn = new Mock<Percolator.Network.IPeerConnectionRepository>(MockBehavior.Loose);
-            var sut = new ProcessInternalEnvelopeHandler(logger, mediator.Object, adminOps.Object, dht.Object, peerConn.Object);
+            var mq4 = new Moq.Mock<Percolator.MessageQueue.Abstractions.IMessageQueueService>(MockBehavior.Loose);
+            var sut = new ProcessInternalEnvelopeHandler(logger, mediator.Object, adminOps.Object, dht.Object, peerConn.Object, mq4.Object);
 
             // Build InternalEnvelope with DHT FindNodeRequest
             var contractsReq = new Percolator.Contracts.FindNodeRequest

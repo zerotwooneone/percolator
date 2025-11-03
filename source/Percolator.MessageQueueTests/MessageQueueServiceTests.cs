@@ -7,33 +7,31 @@ using Moq;
 using NUnit.Framework;
 using Percolator.Identity;
 using Percolator.MessageQueue.Abstractions;
-using Percolator.MessageQueue.Commands;
-using Percolator.MessageQueue.Handlers;
+using Percolator.MessageQueue;
 
 namespace Percolator.MessageQueueTests;
 
 [TestFixture]
-public class EnqueueOpaqueMessageHandlerTests
+public class MessageQueueServiceTests
 {
-    private Mock<ILogger<EnqueueOpaqueMessageHandler>> _logger = null!;
+    private Mock<ILogger<MessageQueueService>> _logger = null!;
     private Mock<IPeerPublicSigningKeyStore> _keyStore = null!;
     private Mock<IMessageQueueRepository> _repo = null!;
-    private EnqueueOpaqueMessageHandler _sut = null!;
+    private MessageQueueService _sut = null!;
 
     [SetUp]
     public void SetUp()
     {
-        _logger = new Mock<ILogger<EnqueueOpaqueMessageHandler>>();
+        _logger = new Mock<ILogger<MessageQueueService>>();
         _keyStore = new Mock<IPeerPublicSigningKeyStore>(MockBehavior.Strict);
         _repo = new Mock<IMessageQueueRepository>(MockBehavior.Strict);
-        _sut = new EnqueueOpaqueMessageHandler(_logger.Object, _keyStore.Object, _repo.Object);
+        _sut = new MessageQueueService(_logger.Object, _keyStore.Object, _repo.Object);
     }
 
     [Test]
     public async Task Returns_error_when_recipient_pkh_is_null()
     {
-        var cmd = new EnqueueOpaqueMessageCommand(null!, new byte[] { 0x01 });
-        var result = await _sut.Handle(cmd, CancellationToken.None);
+        var result = await _sut.EnqueueOpaqueAsync(null!, new byte[] { 0x01 }, CancellationToken.None);
         result.Accepted.Should().BeFalse();
         result.Error.Should().Be("recipient_public_key_hash is required");
         _keyStore.VerifyNoOtherCalls();
@@ -43,8 +41,7 @@ public class EnqueueOpaqueMessageHandlerTests
     [Test]
     public async Task Returns_error_when_recipient_pkh_is_empty()
     {
-        var cmd = new EnqueueOpaqueMessageCommand(Array.Empty<byte>(), new byte[] { 0x01 });
-        var result = await _sut.Handle(cmd, CancellationToken.None);
+        var result = await _sut.EnqueueOpaqueAsync(Array.Empty<byte>(), new byte[] { 0x01 }, CancellationToken.None);
         result.Accepted.Should().BeFalse();
         result.Error.Should().Be("recipient_public_key_hash is required");
         _keyStore.VerifyNoOtherCalls();
@@ -54,8 +51,7 @@ public class EnqueueOpaqueMessageHandlerTests
     [Test]
     public async Task Returns_error_when_message_blob_is_null()
     {
-        var cmd = new EnqueueOpaqueMessageCommand(new byte[32], null!);
-        var result = await _sut.Handle(cmd, CancellationToken.None);
+        var result = await _sut.EnqueueOpaqueAsync(new byte[32], null!, CancellationToken.None);
         result.Accepted.Should().BeFalse();
         result.Error.Should().Be("message_blob is required");
         _keyStore.VerifyNoOtherCalls();
@@ -65,8 +61,7 @@ public class EnqueueOpaqueMessageHandlerTests
     [Test]
     public async Task Returns_error_when_message_blob_is_empty()
     {
-        var cmd = new EnqueueOpaqueMessageCommand(new byte[32], Array.Empty<byte>());
-        var result = await _sut.Handle(cmd, CancellationToken.None);
+        var result = await _sut.EnqueueOpaqueAsync(new byte[32], Array.Empty<byte>(), CancellationToken.None);
         result.Accepted.Should().BeFalse();
         result.Error.Should().Be("message_blob is required");
         _keyStore.VerifyNoOtherCalls();
@@ -76,11 +71,10 @@ public class EnqueueOpaqueMessageHandlerTests
     [Test]
     public async Task Returns_error_when_message_blob_exceeds_limit()
     {
-        var tooBig = new byte[EnqueueOpaqueMessageHandler.MaxBlobBytes + 1];
-        var cmd = new EnqueueOpaqueMessageCommand(new byte[32], tooBig);
-        var result = await _sut.Handle(cmd, CancellationToken.None);
+        var tooBig = new byte[MessageQueueService.MaxBlobBytes + 1];
+        var result = await _sut.EnqueueOpaqueAsync(new byte[32], tooBig, CancellationToken.None);
         result.Accepted.Should().BeFalse();
-        result.Error.Should().Be($"message_blob exceeds {EnqueueOpaqueMessageHandler.MaxBlobBytes} bytes");
+        result.Error.Should().Be($"message_blob exceeds {MessageQueueService.MaxBlobBytes} bytes");
         _keyStore.VerifyNoOtherCalls();
         _repo.VerifyNoOtherCalls();
     }
@@ -93,8 +87,7 @@ public class EnqueueOpaqueMessageHandlerTests
         _keyStore.Setup(k => k.GetPeerIdByPublicKeyHashAsync(pkh, It.IsAny<CancellationToken>()))
                  .ReturnsAsync((PeerId?)null);
 
-        var cmd = new EnqueueOpaqueMessageCommand(pkh, blob);
-        var result = await _sut.Handle(cmd, CancellationToken.None);
+        var result = await _sut.EnqueueOpaqueAsync(pkh, blob, CancellationToken.None);
 
         result.Accepted.Should().BeFalse();
         result.Error.Should().Be("unknown recipient_public_key_hash");
@@ -113,8 +106,7 @@ public class EnqueueOpaqueMessageHandlerTests
         _repo.Setup(r => r.TryEnqueueAsync(peerId, blob, It.IsAny<CancellationToken>()))
              .ReturnsAsync((false, 10u, 100u));
 
-        var cmd = new EnqueueOpaqueMessageCommand(pkh, blob);
-        var result = await _sut.Handle(cmd, CancellationToken.None);
+        var result = await _sut.EnqueueOpaqueAsync(pkh, blob, CancellationToken.None);
 
         result.Accepted.Should().BeFalse();
         result.Error.Should().Be("queue limits exceeded or rejected by policy");
@@ -133,8 +125,7 @@ public class EnqueueOpaqueMessageHandlerTests
         _repo.Setup(r => r.TryEnqueueAsync(peerId, blob, It.IsAny<CancellationToken>()))
              .ReturnsAsync((true, 11u, 101u));
 
-        var cmd = new EnqueueOpaqueMessageCommand(pkh, blob);
-        var result = await _sut.Handle(cmd, CancellationToken.None);
+        var result = await _sut.EnqueueOpaqueAsync(pkh, blob, CancellationToken.None);
 
         result.Accepted.Should().BeTrue();
         result.Error.Should().BeNull();

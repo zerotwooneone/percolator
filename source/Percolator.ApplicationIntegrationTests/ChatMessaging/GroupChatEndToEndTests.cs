@@ -8,6 +8,7 @@ using Grpc.Core;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Moq;
 using NUnit.Framework;
 using Percolator.Application.Network;
 using Percolator.Contracts;
@@ -17,6 +18,7 @@ using Percolator.Application.Identity;
 using Percolator.Application.Cli;
 using Percolator.Prekey.DependencyInjection;
 using Percolator.Application.Apps.Chat;
+using Percolator.MessageQueue.Abstractions;
 
 namespace Percolator.ApplicationIntegrationTests.ChatMessaging
 {
@@ -220,6 +222,8 @@ namespace Percolator.ApplicationIntegrationTests.ChatMessaging
             _host = await CreateAndInitializeHostAsync(_hostPort, "GroupE2E-Host", identityName: "host", additionalServiceRegistration: services =>
             {
                 services.AddPrekey();
+                // Provide MQ service required by ProcessInternalEnvelopeHandler
+                services.TryAddSingleton<IMessageQueueService>(new Mock<IMessageQueueService>().Object);
             });
 
             // Build Alice with multi-node loopback (routes by recipient peer)
@@ -227,6 +231,7 @@ namespace Percolator.ApplicationIntegrationTests.ChatMessaging
             _alice = await CreateAndInitializeHostAsync(_alicePort, "GroupE2E-Alice", identityName: "alice", additionalServiceRegistration: services =>
             {
                 services.AddPrekey();
+                services.TryAddSingleton<IMessageQueueService>(new Mock<IMessageQueueService>().Object);
                 services.Replace(ServiceDescriptor.Singleton<IGrpcSessionService>(sp => new GrpcSessionLoopback(ResolveProviderByEndpoint)));
                 services.Replace(ServiceDescriptor.Singleton<IMessageTransportService>(sp => new MultiNodeLoopbackTransport(sp, ResolveProviderByName)));
             });
@@ -236,6 +241,7 @@ namespace Percolator.ApplicationIntegrationTests.ChatMessaging
             _bob = await CreateAndInitializeHostAsync(_bobPort, "GroupE2E-Bob", identityName: "bob", additionalServiceRegistration: services =>
             {
                 services.AddPrekey();
+                services.TryAddSingleton<IMessageQueueService>(new Mock<IMessageQueueService>().Object);
                 services.Replace(ServiceDescriptor.Singleton<IGrpcSessionService>(sp => new GrpcSessionLoopback(ResolveProviderByEndpoint)));
                 services.Replace(ServiceDescriptor.Singleton<IMessageTransportService>(sp => new MultiNodeLoopbackTransport(sp, ResolveProviderByName)));
             });
@@ -245,6 +251,7 @@ namespace Percolator.ApplicationIntegrationTests.ChatMessaging
             _charlie = await CreateAndInitializeHostAsync(_charliePort, "GroupE2E-Charlie", identityName: "charlie", additionalServiceRegistration: services =>
             {
                 services.AddPrekey();
+                services.TryAddSingleton<IMessageQueueService>(new Mock<IMessageQueueService>().Object);
                 services.Replace(ServiceDescriptor.Singleton<IGrpcSessionService>(sp => new GrpcSessionLoopback(ResolveProviderByEndpoint)));
                 services.Replace(ServiceDescriptor.Singleton<IMessageTransportService>(sp => new MultiNodeLoopbackTransport(sp, ResolveProviderByName)));
             });
