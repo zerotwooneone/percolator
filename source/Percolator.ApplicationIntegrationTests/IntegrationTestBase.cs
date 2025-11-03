@@ -17,6 +17,7 @@ using Percolator.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using System.Security.Cryptography.X509Certificates;
 using System.Security.Cryptography;
+using Percolator.MessageQueue.DependencyInjection;
 
 namespace Percolator.ApplicationIntegrationTests;
 
@@ -155,6 +156,7 @@ public abstract class IntegrationTestBase
                 services.AddInfrastructureServices(context.Configuration);
                 services.AddIdentityInfrastructure();
                 services.AddApplicationServices(context.Configuration);
+                services.AddMessageQueue();
                 // Add additional services if needed
                 additionalServiceRegistration?.Invoke(services);
             })
