@@ -141,6 +141,8 @@ public sealed class InitiateHandshakeViaHostHandler : IRequestHandler<InitiateHa
         var pkh = SHA256.HashData(remoteIdentitySpki);
         await _peerPublicSigningKeyStore.ActivateIfChangedAsync(peer.Id, remoteIdentitySpki, pkh, DateTimeOffset.UtcNow, cancellationToken).ConfigureAwait(false);
         await _peerRepository.AddOrUpdateAsync(peer).ConfigureAwait(false);
+        connection.SetDirectMessagePublicKey(new DirectMessagePublicKey(remoteIdentitySpki));
+        await _peerConnectionRepository.SaveAsync(connection).ConfigureAwait(false);
 
         await _mediator.Send(new ComposeAndEnqueueInitiatorHelloCommand(
             RecipientPublicKeyHash: request.TargetPublicKeyHash,
