@@ -228,8 +228,9 @@ public class Phase17CommandsOnlyTests : IntegrationTestBase
         findBob.Should().NotBeNull();
 
         // 3) Bob initiates opaque handshake to Alice via Host (one command)
-        await bobMed.Send(new InitiateHandshakeViaHostCommand("host", alicePkh));
+        await bobMed.Send(new InitiateHandshakeViaHostCommand("host", alicePkh,PeerName:"alice"));
         // Trigger online pump via ping
+        await aliceMed.Send(new DhtPingCommand("host"));
         await bobMed.Send(new DhtPingCommand("host"));
 
         // 4) Bob publishes his prekey bundle to Host.
@@ -248,8 +249,8 @@ public class Phase17CommandsOnlyTests : IntegrationTestBase
             .And.Contain(p=>p.PeerId.ToByteArray().SequenceEqual(bobPkh));
 
         // 7) Charlie initiates opaque handshakes to Alice and Bob via MQ; verify sessions exist
-        await charlieMed.Send(new InitiateHandshakeViaHostCommand("host", alicePkh));
-        await charlieMed.Send(new InitiateHandshakeViaHostCommand("host", bobPkh));
+        await charlieMed.Send(new InitiateHandshakeViaHostCommand("host", alicePkh, PeerName:"alice"));
+        await charlieMed.Send(new InitiateHandshakeViaHostCommand("host", bobPkh, PeerName:"bob"));
         await charlieMed.Send(new DhtPingCommand("host"));
 
         // Verify sessions exist (Charlie <-> Alice, Charlie <-> Bob) from Charlie side
