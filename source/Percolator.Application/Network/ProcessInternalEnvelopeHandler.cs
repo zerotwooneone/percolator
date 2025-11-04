@@ -11,6 +11,7 @@ using Percolator.Dht;
 using Percolator.Application.Network.Handshake;
 using Percolator.MessageQueue.Commands;
 using Percolator.MessageQueue.Abstractions;
+using Percolator.MessageQueue.Primitives;
 using Percolator.Network;
 using Percolator.Prekey.Handlers;
 using PeerId = Percolator.Identity.PeerId;
@@ -162,8 +163,13 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
         if (env.ApplicationPayloadCase == InternalEnvelope.ApplicationPayloadOneofCase.RelayOpaqueEnvelope)
         {
             var relay = env.RelayOpaqueEnvelope;
-            await _mediator.Send(new ProcessRelayedOpaquePayloadCommand(relay.OpaquePayload.ToByteArray()), cancellationToken).ConfigureAwait(false);
-            return null;
+            var response = await _mediator.Send(new ProcessRelayedOpaquePayloadCommand(new Payload(relay.OpaquePayload.ToByteArray()),AckId.FromBytes(relay.MessageAckId.ToByteArray())), cancellationToken).ConfigureAwait(false);
+            return new InternalEnvelope{RelayOpaqueResponse = new RelayOpaqueResponse
+            {
+                MessageAckId = response.AckId is null
+                ? ByteString.Empty 
+                : ByteString.CopyFrom(response.AckId.Value.ToByteArray()) 
+            }};
         }
 
         // Chat handling

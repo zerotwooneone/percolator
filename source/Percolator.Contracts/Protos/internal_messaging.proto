@@ -21,6 +21,7 @@ message InternalEnvelope {
     FetchQueuedMessagesResponse fetch_queued_messages_response = 9;
     // Host relay wrapper carrying inner opaque payload
     RelayOpaqueEnvelope relay_opaque_envelope = 10;
+    RelayOpaqueResponse relay_opaque_response =11;
   }
 }
 
