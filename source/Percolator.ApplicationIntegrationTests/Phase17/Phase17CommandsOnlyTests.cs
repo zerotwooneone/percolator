@@ -13,6 +13,10 @@ using Percolator.Application.Network;
 using Percolator.Application.Sessions;
 using Percolator.Contracts;
 using System.Collections.Concurrent;
+using Percolator.Identity;
+using Percolator.Infrastructure.Persistence;
+using Percolator.Network;
+using PeerId = Percolator.Identity.PeerId;
 
 namespace Percolator.ApplicationIntegrationTests.Phase17;
 
@@ -91,16 +95,21 @@ public class Phase17CommandsOnlyTests : IntegrationTestBase
             return response;
         }
     }
-
+    
     private sealed class HostRelayTransport : IMessageTransportService
     {
-        private readonly ConcurrentDictionary<Guid, IServiceProvider> _routes;
-        public HostRelayTransport(ConcurrentDictionary<Guid, IServiceProvider> routes)
+        private readonly ConcurrentDictionary<Identity.PeerId, IServiceProvider> _routes;
+        private readonly IServiceProvider _hostProvider;
+
+        public HostRelayTransport(
+            ConcurrentDictionary<Identity.PeerId, IServiceProvider> routes,
+            IServiceProvider hostProvider)
         {
             _routes = routes;
+            _hostProvider = hostProvider;
         }
 
-        public void AddRoute(Guid peerId, IServiceProvider provider)
+        public void AddRoute(Identity.PeerId peerId, IServiceProvider provider)
         {
             _routes[peerId] = provider;
         }
@@ -111,7 +120,7 @@ public class Phase17CommandsOnlyTests : IntegrationTestBase
             Percolator.Cryptography.SessionRatchetMessage message,
             CancellationToken cancellationToken = default)
         {
-            if (!_routes.TryGetValue(recipientPeerId.Value, out var provider))
+            if (!_routes.TryGetValue(recipientPeerId, out var provider))
             {
                 throw new InvalidOperationException($"No route registered for recipient {recipientPeerId.Value}");
             }
@@ -129,6 +138,24 @@ public class Phase17CommandsOnlyTests : IntegrationTestBase
             }
             return response;
         }
+
+        public async Task<PeerId> GetPeerIdFromHost(byte[] publicKeyBytes)
+        {
+            var connectionRepo = _hostProvider.GetRequiredService<IPeerConnectionRepository>();
+            var connection = await connectionRepo.GetByPublicKey(new DirectMessagePublicKey(publicKeyBytes));
+            if (connection is not null)
+            {
+                return new PeerId(connection.Id.Value);
+            }
+            var pubKeyRepo = _hostProvider.GetRequiredService<IPeerPublicSigningKeyStore>();
+            using var sha = SHA256.Create();
+            var pubKeyRec = await pubKeyRepo.GetPeerIdByPublicKeyHashAsync(sha.ComputeHash(publicKeyBytes));
+            if (pubKeyRec is not null)
+            {
+                return pubKeyRec;
+            }
+            throw new InvalidOperationException($"No peer registered for public key {publicKeyBytes}");
+        }
     }
 
     private static byte[] GetSpki(IHost host)
@@ -145,11 +172,11 @@ public class Phase17CommandsOnlyTests : IntegrationTestBase
     {
         // Build Host
         var hostPort = GetAvailablePort();
-        var hostRoutes = new ConcurrentDictionary<Guid, IServiceProvider>();
+        var hostRoutes = new ConcurrentDictionary<PeerId, IServiceProvider>();
         using var host = await CreateAndInitializeHostAsync(hostPort, "P17-Host", identityName: "host", additionalServiceRegistration: services =>
         {
             services.RemoveAll<IMessageTransportService>();
-            services.AddSingleton<IMessageTransportService>(sp => new HostRelayTransport(hostRoutes));
+            services.AddSingleton<IMessageTransportService>(sp => new HostRelayTransport(hostRoutes, services.BuildServiceProvider()));
         });
 
         // Build Alice with loopback to Host
@@ -195,10 +222,7 @@ public class Phase17CommandsOnlyTests : IntegrationTestBase
             charliePeerGuid = ctx.Identity!.Id;
         }
         var hostTransport = (HostRelayTransport)host.Services.GetRequiredService<IMessageTransportService>();
-        hostTransport.AddRoute(alicePeerGuid, alice.Services);
-        hostTransport.AddRoute(bobPeerGuid, bob.Services);
-        hostTransport.AddRoute(charliePeerGuid, charlie.Services);
-
+        
         var hostEp = new DnsEndPoint("localhost", hostPort);
 
         var aliceMed = alice.Services.GetRequiredService<IMediator>();
@@ -226,6 +250,13 @@ public class Phase17CommandsOnlyTests : IntegrationTestBase
         await bobMed.Send(new ConnectToPeerCommand(hostEp, "host"));
         var findBob = await bobMed.Send(new DhtProbeCommand(hostEp, "host", null));
         findBob.Should().NotBeNull();
+        
+        await charlieMed.Send(new Percolator.Application.Identity.SetPeerNameByPublicKeyCommand("host", hostSpki));
+        await charlieMed.Send(new ConnectToPeerCommand(hostEp, "host"));
+        
+        hostTransport.AddRoute(await hostTransport.GetPeerIdFromHost(aliceSpki), alice.Services);
+        hostTransport.AddRoute(await hostTransport.GetPeerIdFromHost(bobSpki),bob.Services);
+        hostTransport.AddRoute(await hostTransport.GetPeerIdFromHost(charlieSpki), charlie.Services);
 
         // 3) Bob initiates opaque handshake to Alice via Host (one command)
         await bobMed.Send(new InitiateHandshakeViaHostCommand("host", alicePkh,PeerName:"alice"));
@@ -237,8 +268,8 @@ public class Phase17CommandsOnlyTests : IntegrationTestBase
         await bobMed.Send(new SubmitPreKeysCommand("host", OneTimeKeyCount: 5, ExpiresUtc: DateTimeOffset.UtcNow.AddHours(1)));
 
         // 5) Charlie↔Host connect; mutual naming by SPKI.
-        await charlieMed.Send(new Percolator.Application.Identity.SetPeerNameByPublicKeyCommand("host", hostSpki));
-        await charlieMed.Send(new ConnectToPeerCommand(hostEp, "host"));
+        
+        
 
         // 6) Charlie probes DHT and discovers both Alice and Bob
         var findCharlie = await charlieMed.Send(new DhtProbeCommand(hostEp, "host", null));
