@@ -303,7 +303,15 @@ public class DirectSessionManager : IDirectSessionManager
         _logger.LogInformation("Establish session as responder for SessionId: {SessionId}", sessionId);
         
         // Get state and store it
-        var state = session.GetState();
+        DoubleRatchetSession.DoubleRatchetSessionState state;
+        try
+        {
+            state = session.GetState();
+        }
+        catch (Exception e)
+        {
+            throw;
+        }
         
         // Log state properties to verify consistency
         if (state.RootKey != null && _cryptographyOptions.Value.EnableCryptographicMaterialLogging)

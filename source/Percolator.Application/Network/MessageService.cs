@@ -10,6 +10,7 @@ using Percolator.Contracts;
 using Percolator.Cryptography;
 using Percolator.Identity;
 using Percolator.Network;
+using PeerId = Percolator.Identity.PeerId;
 
 namespace Percolator.Application.Network
 {
@@ -22,6 +23,7 @@ namespace Percolator.Application.Network
         private readonly ActiveIdentityContext _active;
         private readonly Percolator.Identity.IPeerRepository _peers;
         private readonly IPeerPublicSigningKeyStore _keyStore;
+        private readonly IPeerConnectionRepository _peerConnectionRepository;
 
         public MessageService(
             ILogger<MessageService> logger,
@@ -30,7 +32,8 @@ namespace Percolator.Application.Network
             IMessageTransportService transport,
             ActiveIdentityContext active,
             Percolator.Identity.IPeerRepository peers,
-            IPeerPublicSigningKeyStore keyStore)
+            IPeerPublicSigningKeyStore keyStore,
+            IPeerConnectionRepository peerConnectionRepository)
         {
             _logger = logger;
             _sessions = sessions;
@@ -39,6 +42,7 @@ namespace Percolator.Application.Network
             _active = active;
             _peers = peers;
             _keyStore = keyStore;
+            _peerConnectionRepository = peerConnectionRepository;
         }
 
         public async Task<(SendResult Result, Percolator.Contracts.DeliverOpaqueMessageResponse? Response)> SendMessageWithResponseAsync(
@@ -57,7 +61,7 @@ namespace Percolator.Application.Network
                 if (ds is null)
                 {
                     attempted.Add("Relay");
-                    await TryHostEnqueueAsync(recipientPeerId, envelope, null, ct).ConfigureAwait(false);
+                    await TryRelayEnqueueAsync(recipientPeerId, envelope, null, ct).ConfigureAwait(false);
                     return (SendResult.Success("Relay", attempted.ToArray(), attempts: 1), null);
                 }
 
@@ -71,9 +75,9 @@ namespace Percolator.Application.Network
                 }
                 catch (Exception sendEx)
                 {
-                    _logger.LogDebug(sendEx, "Direct send failed to {PeerId}; attempting host enqueue if possible", recipientPeerId);
+                    _logger.LogDebug(sendEx, "Direct send failed to {PeerId}; attempting relay enqueue if possible", recipientPeerId);
                     attempted.Add("Relay");
-                    await TryHostEnqueueAsync(recipientPeerId, envelope, cipher, ct).ConfigureAwait(false);
+                    await TryRelayEnqueueAsync(recipientPeerId, envelope, cipher, ct).ConfigureAwait(false);
                     return (SendResult.Success("Relay", attempted.ToArray(), attempts: 2), null);
                 }
             }
@@ -81,6 +85,45 @@ namespace Percolator.Application.Network
             {
                 _logger.LogWarning(ex, "Failed sending envelope to {PeerId}", recipientPeerId);
                 return (SendResult.Failure(attempted.ToArray(), attempts: attempted.Count, lastError: ex), null);
+            }
+        }
+
+        public async Task<SendResult> SendPreEncryptedAsync(Percolator.Identity.PeerId recipientPeerId, SessionRatchetMessage cipher, CancellationToken ct = default)
+        {
+            if (_active.Identity is null)
+                throw new InvalidOperationException("Active identity not initialized");
+
+            var attempted = new System.Collections.Generic.List<string>();
+            try
+            {
+                attempted.Add("Direct");
+                var ds = await _sessions.GetByRemotePeerIdAsync(new Percolator.Network.PeerId(recipientPeerId.Value), _active.Identity!.SelfIdentityId).ConfigureAwait(false);
+                if (ds is null)
+                {
+                    attempted.Add("Relay");
+                    // We already have a DR ciphertext targeting the recipient
+                    await TryRelayEnqueueAsync(recipientPeerId, new InternalEnvelope(), cipher, ct).ConfigureAwait(false);
+                    return SendResult.Success("Relay", attempted.ToArray(), attempts: 1);
+                }
+
+                var directSessionId = new DirectSessionId(ds.SessionId.Value);
+                try
+                {
+                    await _transport.SendMessageAsync(recipientPeerId, directSessionId, cipher, ct).ConfigureAwait(false);
+                    return SendResult.Success("Direct", attempted.ToArray(), attempts: 1);
+                }
+                catch (Exception sendEx)
+                {
+                    _logger.LogDebug(sendEx, "Direct send (pre-encrypted) failed to {PeerId}; attempting relay enqueue if possible", recipientPeerId);
+                    attempted.Add("Relay");
+                    await TryRelayEnqueueAsync(recipientPeerId, new InternalEnvelope(), cipher, ct).ConfigureAwait(false);
+                    return SendResult.Success("Relay", attempted.ToArray(), attempts: 2);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed sending pre-encrypted message to {PeerId}", recipientPeerId);
+                return SendResult.Failure(attempted.ToArray(), attempts: attempted.Count, lastError: ex);
             }
         }
 
@@ -99,7 +142,7 @@ namespace Percolator.Application.Network
                 {
                     // No direct session, attempt relay if possible
                     attempted.Add("Relay");
-                    await TryHostEnqueueAsync(recipientPeerId, envelope, null, ct).ConfigureAwait(false);
+                    await TryRelayEnqueueAsync(recipientPeerId, envelope, null, ct).ConfigureAwait(false);
                     return SendResult.Success("Relay", attempted.ToArray(), attempts: 1);
                 }
 
@@ -113,9 +156,9 @@ namespace Percolator.Application.Network
                 }
                 catch (Exception sendEx)
                 {
-                    _logger.LogDebug(sendEx, "Direct send failed to {PeerId}; attempting host enqueue if possible", recipientPeerId);
+                    _logger.LogDebug(sendEx, "Direct send failed to {PeerId}; attempting relay enqueue if possible", recipientPeerId);
                     attempted.Add("Relay");
-                    await TryHostEnqueueAsync(recipientPeerId, envelope, cipher, ct).ConfigureAwait(false);
+                    await TryRelayEnqueueAsync(recipientPeerId, envelope, cipher, ct).ConfigureAwait(false);
                     return SendResult.Success("Relay", attempted.ToArray(), attempts: 2);
                 }
             }
@@ -126,30 +169,36 @@ namespace Percolator.Application.Network
             }
         }
 
-        private async Task TryHostEnqueueAsync(Percolator.Identity.PeerId recipientPeerId, InternalEnvelope envelope, SessionRatchetMessage? recipientCipher, CancellationToken ct)
+        private async Task TryRelayEnqueueAsync(Percolator.Identity.PeerId recipientPeerId, InternalEnvelope envelope, SessionRatchetMessage? recipientCipher, CancellationToken ct)
         {
             try
             {
                 // Resolve recipient PKH from store
-                var pkh = await _keyStore.GetPublicKeyHashByPeerIdAsync(recipientPeerId, ct).ConfigureAwait(false);
-                if (pkh is null || pkh.Length == 0)
+                var connection = await _peerConnectionRepository.GetByIdAsync(new Percolator.Network.PeerId(recipientPeerId.Value)).ConfigureAwait(false);
+                if (connection is null || connection.RelayPeerId is null)
                 {
-                    _logger.LogDebug("Cannot enqueue to host for {PeerId}: missing recipient PKH", recipientPeerId);
+                    _logger.LogDebug("Peer connection not found for {PeerId}", recipientPeerId);
                     return;
                 }
 
-                // We need a session to the host to send the enqueue request
-                var host = await _peers.GetByNameAsync("host").ConfigureAwait(false);
-                if (host is null)
+                var pkh = await _keyStore.GetPublicKeyHashByPeerIdAsync(recipientPeerId, ct).ConfigureAwait(false);
+                if (pkh is null)
                 {
-                    _logger.LogDebug("Host peer not found; cannot enqueue on behalf of {PeerId}", recipientPeerId);
+                    _logger.LogDebug("Recipient PKH not found for {PeerId}", recipientPeerId);
                     return;
                 }
-                var hostPeerId = new Percolator.Identity.PeerId(host.Id.Value);
-                var hostDs = await _sessions.GetByRemotePeerIdAsync(new Percolator.Network.PeerId(hostPeerId.Value), _active.Identity!.SelfIdentityId).ConfigureAwait(false);
-                if (hostDs is null)
+
+                // We need a session to the relay to send the enqueue request
+                var relayPeer = await _peers.GetByIdAsync(new PeerId(connection.RelayPeerId.Value)).ConfigureAwait(false);
+                if (relayPeer is null)
                 {
-                    _logger.LogDebug("No direct session to host; cannot enqueue on behalf of {PeerId}", recipientPeerId);
+                    _logger.LogDebug("Relay peer not found; cannot enqueue on behalf of {PeerId}", recipientPeerId);
+                    return;
+                }
+                var relaySession = await _sessions.GetByRemotePeerIdAsync(new Percolator.Network.PeerId(relayPeer.Id.Value), _active.Identity!.SelfIdentityId).ConfigureAwait(false);
+                if (relaySession is null)
+                {
+                    _logger.LogDebug("No direct session to relay; cannot enqueue on behalf of {PeerId}", recipientPeerId);
                     return;
                 }
 
@@ -178,7 +227,7 @@ namespace Percolator.Application.Network
                     RecipientPublicKeyHash = ByteString.CopyFrom(pkh),
                     MessageBlob = ByteString.CopyFrom(blobBytes)
                 };
-                var toHost = new InternalEnvelope
+                var toRelay = new InternalEnvelope
                 {
                     MessageQueueEnvelope = new MessageQueueEnvelope
                     {
@@ -187,15 +236,15 @@ namespace Percolator.Application.Network
                     }
                 };
 
-                var hostPlain = new Plaintext(toHost.ToByteArray());
-                var hostSessionId = new SessionId(hostDs.SessionId.Value);
-                var hostDirectSessionId = new DirectSessionId(hostDs.SessionId.Value);
-                var hostCipher = await _sessionManager.EncryptMessageAsync(hostSessionId, hostPlain).ConfigureAwait(false);
-                await _transport.SendMessageAsync(hostPeerId, hostDirectSessionId, hostCipher, ct).ConfigureAwait(false);
+                var relayPlain = new Plaintext(toRelay.ToByteArray());
+                var relaySessionId = new SessionId(relaySession.SessionId.Value);
+                var relayDirectSessionId = new DirectSessionId(relaySession.SessionId.Value);
+                var relayCipher = await _sessionManager.EncryptMessageAsync(relaySessionId, relayPlain).ConfigureAwait(false);
+                await _transport.SendMessageAsync(relayPeer.Id, relayDirectSessionId, relayCipher, ct).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Host enqueue fallback failed for {PeerId}", recipientPeerId);
+                _logger.LogWarning(ex, "Relay enqueue fallback failed for {PeerId}", recipientPeerId);
             }
         }
     }

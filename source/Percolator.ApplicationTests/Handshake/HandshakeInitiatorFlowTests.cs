@@ -314,16 +314,14 @@ public class HandshakeInitiatorFlowTests
         pkhStore
             .Setup(p => p.ActivateIfChangedAsync(It.IsAny<Percolator.Identity.PeerId?>(), It.IsAny<byte[]>(), It.IsAny<byte[]>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
-        var preKeyRepo = new Mock<IPreKeyBundleRepository>(MockBehavior.Strict);
-        preKeyRepo
-            .Setup(r => r.TryPopBundleAsync(It.IsAny<Percolator.Cryptography.Primitives.PeerId>(), It.IsAny<Guid>(), It.IsAny<Guid?>()))
-            .ReturnsAsync(() => new Percolator.Cryptography.PreKeyBundle(
-                identitySigningKey: new RatchetIdentityKey(ik.PublicKey.ExportSubjectPublicKeyInfo()),
-                signedPreKeyId: spkId,
-                signedPreKey: new PreKey(spk.PublicKey.ExportSubjectPublicKeyInfo()),
-                signedPreKeySignature: new Percolator.Cryptography.Signature(new byte[]{0x01}),
-                oneTimePreKeyId: null,
-                oneTimePreKey: null));
+        var selfPreRepo = new Mock<ISelfPreKeyBundleRepository>(MockBehavior.Strict);
+        var spkPriv = spk.ExportECPrivateKey();
+        var spkSpki = spk.ExportSubjectPublicKeyInfo();
+        var signature = new byte[]{0x01};
+        var expires = DateTimeOffset.UtcNow.AddDays(7);
+        selfPreRepo
+            .Setup(r => r.TryGetSignedPreKeyAsync(It.IsAny<int>(), spkId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((spkPriv, spkSpki, signature, expires));
         var directRepo = new Mock<IDirectSessionRepository>(MockBehavior.Strict);
         directRepo
             .Setup(r => r.GetByRemotePeerIdAsync(It.IsAny<Percolator.Network.PeerId>(), responderIdentity.SelfIdentityId))
@@ -359,7 +357,7 @@ public class HandshakeInitiatorFlowTests
             new NullLogger<HandleHandshakeInitiatorHelloHandler>(),
             x3dh.Object,
             pkhStore.Object,
-            preKeyRepo.Object,
+            selfPreRepo.Object,
             directRepo.Object,
             sessions.Object,
             responderActive,

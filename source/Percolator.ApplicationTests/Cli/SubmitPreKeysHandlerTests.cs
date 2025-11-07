@@ -27,6 +27,7 @@ public class SubmitPreKeysHandlerTests
     private Mock<IMessageTransportService> _transport = null!;
     private Mock<IPeerRepository> _peerRepository = null!;
     private Mock<IOneTimeKeyProvider> _oneTimeKeyProvider = null!;
+    private Mock<Percolator.Application.KeyExchange.ISelfPreKeyBundleRepository> _selfPreKeyRepo = null!;
 
     [SetUp]
     public void SetUp()
@@ -37,6 +38,7 @@ public class SubmitPreKeysHandlerTests
         _transport = new Mock<IMessageTransportService>();
         _peerRepository = new Mock<IPeerRepository>();
         _oneTimeKeyProvider = new Mock<IOneTimeKeyProvider>();
+        _selfPreKeyRepo = new Mock<Percolator.Application.KeyExchange.ISelfPreKeyBundleRepository>();
     }
 
     [Test]
@@ -99,7 +101,8 @@ public class SubmitPreKeysHandlerTests
             _transport.Object,
             _activeIdentity,
             _peerRepository.Object,
-            _oneTimeKeyProvider.Object);
+            _oneTimeKeyProvider.Object,
+            _selfPreKeyRepo.Object);
 
         var cmd = new SubmitPreKeysCommand(
             TargetPeerName: "bob",
@@ -131,7 +134,8 @@ public class SubmitPreKeysHandlerTests
             _transport.Object,
             _activeIdentity,
             _peerRepository.Object,
-            _oneTimeKeyProvider.Object);
+            _oneTimeKeyProvider.Object,
+            _selfPreKeyRepo.Object);
 
         var cmd = new SubmitPreKeysCommand(
             TargetPeerName: "bob",

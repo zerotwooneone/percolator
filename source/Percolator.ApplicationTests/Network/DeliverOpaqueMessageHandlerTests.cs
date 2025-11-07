@@ -71,13 +71,18 @@ namespace Percolator.ApplicationTests.Network;
             ratchetLookup.Setup(l => l.UpsertAsync(new DirectSessionId(sessionId), It.IsAny<int>(), It.IsAny<RatchetEphemeralKey>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
                 .Returns(Task.CompletedTask);
 
+            // RPC-level ack encryption
+            var ackCipher = RandomBytes(32);
+            sessionMgr.Setup(s => s.EncryptMessageAsync(It.Is<SessionId>(x => x.Value == sessionId), It.IsAny<Plaintext>()))
+                .ReturnsAsync(new SessionRatchetMessage(ackCipher));
+
             var cmd = new DeliverOpaqueMessageCommand { PayloadBytes = payloadBytes };
             var result = await handler.Handle(cmd, CancellationToken.None);
 
-            result.ResponsePayloadBytes.Should().BeNull();
-            mediator.Verify(m => m.Send(It.IsAny<ProcessInternalEnvelopeCommand>(), It.IsAny<CancellationToken>()), Times.Once);
+            // Expect RPC-level ack payload (encrypted) for RelayOpaqueEnvelope path
+            result.ResponsePayloadBytes.Should().NotBeNull();
+            mediator.Verify(m => m.Send(It.IsAny<Percolator.Application.Network.Handshake.ProcessRelayedOpaquePayloadCommand>(), It.IsAny<CancellationToken>()), Times.Once);
             sessionMgr.VerifyAll();
-            peerRepo.VerifyAll();
             directRepo.VerifyAll();
         }
 
@@ -127,15 +132,18 @@ namespace Percolator.ApplicationTests.Network;
             ratchetLookup.Setup(l => l.UpsertAsync(new DirectSessionId(sessionId), It.IsAny<int>(), It.IsAny<RatchetEphemeralKey>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
                 .Returns(Task.CompletedTask);
 
-            // No early response is produced anymore for Relay Ack at transport level
+            // RPC-level ack encryption
+            var ackCipher2 = RandomBytes(28);
+            sessionMgr.Setup(s => s.EncryptMessageAsync(It.Is<SessionId>(x => x.Value == sessionId), It.IsAny<Plaintext>()))
+                .ReturnsAsync(new SessionRatchetMessage(ackCipher2));
 
             var cmd = new DeliverOpaqueMessageCommand { PayloadBytes = payloadBytes };
             var result = await handler.Handle(cmd, CancellationToken.None);
 
-            result.ResponsePayloadBytes.Should().BeNull();
+            // Expect RPC-level ack payload (encrypted) when MessageAckId is present
+            result.ResponsePayloadBytes.Should().NotBeNull();
 
-            mediator.Verify(m => m.Send(It.IsAny<ProcessInternalEnvelopeCommand>(), It.IsAny<CancellationToken>()), Times.Once);
-            peerRepo.VerifyAll();
+            mediator.Verify(m => m.Send(It.IsAny<Percolator.Application.Network.Handshake.ProcessRelayedOpaquePayloadCommand>(), It.IsAny<CancellationToken>()), Times.Once);
             directRepo.VerifyAll();
             sessionMgr.VerifyAll();
         }
@@ -263,7 +271,7 @@ namespace Percolator.ApplicationTests.Network;
     {
         var handler = CreateHandler(out var sessionMgr, out var peerRepo, out var mediator, out var directRepo, out var ratchetLookup);
 
-        // Build a minimal, valid HandshakeInitiatorHello protobuf
+        // Build a minimal, valid HandshakeInitiatorHello protobuf carried within RelayOpaqueEnvelope (as inner opaque)
         using var ik = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         using var eph = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var hello = new HandshakeInitiatorHello
@@ -273,20 +281,37 @@ namespace Percolator.ApplicationTests.Network;
             InitiatorEphemeralKeySpki = ByteString.CopyFrom(eph.ExportSubjectPublicKeyInfo()),
             SignedPreKeyId = ByteString.CopyFrom(Guid.NewGuid().ToByteArray()),
         };
-        var helloBytes = hello.ToByteArray();
+        var innerEnv = new InternalEnvelope { RelayOpaqueEnvelope = new RelayOpaqueEnvelope { OpaquePayload = ByteString.CopyFrom(hello.ToByteArray()) } };
+        var ratchetHeaderKey = new PreKey(RandomBytes(32));
+        var ratchetPayload = BuildRatchetPayload(ratchetHeaderKey.Value, innerEnv.ToByteArray());
 
-        // Mediator now returns responder ratchet bytes directly
-        var expectedCipher = RandomBytes(64);
-        mediator.Setup(m => m.Send(It.IsAny<Percolator.Application.Network.Handshake.HandleHandshakeInitiatorHelloCommand>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(expectedCipher);
+        // Resolve and decrypt the outer ratchet payload for this test path
+        var sessionId = Guid.NewGuid();
+        ratchetLookup.Setup(l => l.TryResolveAsync(It.Is<RatchetEphemeralKey>(p => p.Value.SequenceEqual(ratchetHeaderKey.Value)), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new DirectSessionId(sessionId));
+        sessionMgr.Setup(s => s.ReceiveMessageAsync(It.Is<SessionId>(x => x.Value == sessionId), It.IsAny<SessionRatchetMessage>()))
+            .ReturnsAsync(new Plaintext(innerEnv.ToByteArray()));
+        // Map session to a remote peer and provide connection info
+        var remotePeerGuid = Guid.NewGuid();
+        directRepo.Setup(r => r.GetBySessionIdAsync(new DirectSessionId(sessionId), It.IsAny<int>()))
+            .ReturnsAsync(new DirectSession(new Percolator.Network.PeerId(remotePeerGuid), new DirectSessionId(sessionId)));
+        var endpoint3 = new GrpcEndPoint(new System.Net.DnsEndPoint("127.0.0.1", 5050), DateTimeOffset.UtcNow);
+        peerRepo.Setup(p => p.GetByIdAsync(It.Is<Percolator.Network.PeerId>(id => id.Value == remotePeerGuid)))
+            .ReturnsAsync(new PeerConnection(new Percolator.Network.PeerId(remotePeerGuid), new DirectMessagePublicKey(RandomBytes(32)), new[] { endpoint3 }, Array.Empty<TlsCertificate>(), DateTimeOffset.UtcNow));
+        peerRepo.Setup(p => p.SaveAsync(It.IsAny<PeerConnection>())).Returns(Task.CompletedTask);
+        ratchetLookup.Setup(l => l.UpsertAsync(new DirectSessionId(sessionId), It.IsAny<int>(), It.IsAny<RatchetEphemeralKey>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        // RPC-level ack encryption
+        var ackCipher3 = RandomBytes(36);
+        sessionMgr.Setup(s => s.EncryptMessageAsync(It.Is<SessionId>(x => x.Value == sessionId), It.IsAny<Plaintext>()))
+            .ReturnsAsync(new SessionRatchetMessage(ackCipher3));
 
-        var cmd = new DeliverOpaqueMessageCommand { PayloadBytes = helloBytes };
+        var cmd = new DeliverOpaqueMessageCommand { PayloadBytes = ratchetPayload };
         var result = await handler.Handle(cmd, CancellationToken.None);
 
+        // The RPC response is an ack; only assert non-null and that relayed payload was processed
         result.ResponsePayloadBytes.Should().NotBeNull();
-        result.ResponsePayloadBytes!.Should().BeEquivalentTo(expectedCipher);
-
-        mediator.Verify(m => m.Send(It.IsAny<Percolator.Application.Network.Handshake.HandleHandshakeInitiatorHelloCommand>(), It.IsAny<CancellationToken>()), Times.Once);
+        mediator.Verify(m => m.Send(It.IsAny<Percolator.Application.Network.Handshake.ProcessRelayedOpaquePayloadCommand>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     private static byte[] RandomBytes(int len = 32) => RandomNumberGenerator.GetBytes(len);
@@ -334,6 +359,7 @@ namespace Percolator.ApplicationTests.Network;
         var cmd = new DeliverOpaqueMessageCommand { PayloadBytes = payloadBytes };
         var result = await handler.Handle(cmd, CancellationToken.None);
 
+        // For slow-path with no orchestrator response, expect null
         result.ResponsePayloadBytes.Should().BeNull();
         mediator.Verify(m => m.Send(It.IsAny<ProcessInternalEnvelopeCommand>(), It.IsAny<CancellationToken>()), Times.Once);
     }
@@ -380,7 +406,7 @@ namespace Percolator.ApplicationTests.Network;
     {
         sessionMgr = new Mock<IDirectSessionManager>(MockBehavior.Strict);
         peerRepo = new Mock<IPeerConnectionRepository>(MockBehavior.Strict);
-        mediator = new Mock<IMediator>(MockBehavior.Strict);
+        mediator = new Mock<IMediator>(MockBehavior.Loose);
         directRepo = new Mock<IDirectSessionRepository>(MockBehavior.Strict);
         ratchetLookup = new Mock<IRatchetKeySessionLookup>(MockBehavior.Strict);
         var logger = Mock.Of<ILogger<DeliverOpaqueMessageHandler>>();

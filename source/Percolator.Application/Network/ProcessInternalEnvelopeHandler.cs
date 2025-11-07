@@ -163,13 +163,8 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
         if (env.ApplicationPayloadCase == InternalEnvelope.ApplicationPayloadOneofCase.RelayOpaqueEnvelope)
         {
             var relay = env.RelayOpaqueEnvelope;
-            var response = await _mediator.Send(new ProcessRelayedOpaquePayloadCommand(new Payload(relay.OpaquePayload.ToByteArray()),AckId.FromBytes(relay.MessageAckId.ToByteArray())), cancellationToken).ConfigureAwait(false);
-            return new InternalEnvelope{RelayOpaqueResponse = new RelayOpaqueResponse
-            {
-                MessageAckId = response.AckId is null
-                ? ByteString.Empty 
-                : ByteString.CopyFrom(response.AckId.Value.ToByteArray()) 
-            }};
+            await _mediator.Send(new ProcessRelayedOpaquePayloadCommand(new Payload(relay.OpaquePayload.ToByteArray()))).ConfigureAwait(false);
+            return null;
         }
 
         // Chat handling

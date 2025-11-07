@@ -38,6 +38,7 @@ public class MessageServiceTests
     private Mock<IDirectSessionRepository> _mockDirectSessionRepository = null!;
     private Mock<IPeerRepository> _mockPeerRepository = null!;
     private Mock<IPeerPublicSigningKeyStore> _mockKeyStore = null!;
+    private Mock<IPeerConnectionRepository> _mockPeerConnectionRepository = null!;
 
     [SetUp]
     public void SetUp()
@@ -50,6 +51,7 @@ public class MessageServiceTests
         _mockDirectSessionRepository = new Mock<IDirectSessionRepository>();
         _mockPeerRepository = new Mock<IPeerRepository>();
         _mockKeyStore = new Mock<IPeerPublicSigningKeyStore>();
+        _mockPeerConnectionRepository = new Mock<IPeerConnectionRepository>();
 
         // Create a logger factory for DirectSessionManager
         var loggerFactory = new NullLoggerFactory();
@@ -71,7 +73,8 @@ public class MessageServiceTests
             _mockTransportService.Object,
             _activeIdentityContext,
             _mockPeerRepository.Object,
-            _mockKeyStore.Object);
+            _mockKeyStore.Object,
+            _mockPeerConnectionRepository.Object);
 
         // Default transport behavior for tests: return a response when sending
         _mockTransportService

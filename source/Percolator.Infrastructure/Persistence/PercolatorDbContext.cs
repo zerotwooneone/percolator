@@ -33,6 +33,8 @@ public class PercolatorDbContext : DbContext
     public DbSet<SelfIdentityDbo> SelfIdentities { get; set; } = null!;
     public DbSet<SelfIdentityKnownPeerDbo> SelfIdentityKnownPeers { get; set; } = null!;
     public DbSet<SelfIdentityKeysDbo> SelfIdentityKeys { get; set; } = null!;
+    public DbSet<SelfPreKeySignedDbo> SelfPreKeySigned { get; set; } = null!;
+    public DbSet<SelfOneTimePreKeyDbo> SelfOneTimePreKeys { get; set; } = null!;
     public DbSet<ReadReceiptDbo> ReadReceipts { get; set; } = null!;
     public DbSet<EmojiReactionDbo> EmojiReactions { get; set; } = null!;
     public DbSet<DeliveredReceiptDbo> DeliveredReceipts { get; set; } = null!;
@@ -54,6 +56,44 @@ public class PercolatorDbContext : DbContext
 
             entity.Property(e => e.Name).IsRequired();
             entity.HasIndex(e => e.Name).IsUnique();
+        });
+
+        // SelfPreKeySigned
+        modelBuilder.Entity<SelfPreKeySignedDbo>(entity =>
+        {
+            entity.ToTable("SelfPreKeySigned");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedOnAdd();
+            entity.Property(e => e.SelfIdentityId).IsRequired();
+            entity.Property(e => e.SignedPreKeyId).IsRequired();
+            entity.Property(e => e.SignedPreKeyPrivate).IsRequired();
+            entity.Property(e => e.SignedPreKeyPublicSpki).IsRequired();
+            entity.Property(e => e.PreKeySignature).IsRequired();
+            entity.Property(e => e.ExpiresUtc).IsRequired();
+            entity.HasIndex(e => new { e.SelfIdentityId, e.SignedPreKeyId }).IsUnique();
+            entity.HasOne<SelfIdentityDbo>()
+                .WithMany()
+                .HasForeignKey(e => e.SelfIdentityId)
+                .OnDelete(DeleteBehavior.Cascade)
+                .IsRequired();
+        });
+
+        // SelfOneTimePreKey
+        modelBuilder.Entity<SelfOneTimePreKeyDbo>(entity =>
+        {
+            entity.ToTable("SelfOneTimePreKeys");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedOnAdd();
+            entity.Property(e => e.SelfIdentityId).IsRequired();
+            entity.Property(e => e.OneTimePreKeyId).IsRequired();
+            entity.Property(e => e.OneTimePreKeyPrivate).IsRequired();
+            entity.Property(e => e.OneTimePreKeyPublicSpki).IsRequired();
+            entity.HasIndex(e => new { e.SelfIdentityId, e.OneTimePreKeyId }).IsUnique();
+            entity.HasOne<SelfIdentityDbo>()
+                .WithMany()
+                .HasForeignKey(e => e.SelfIdentityId)
+                .OnDelete(DeleteBehavior.Cascade)
+                .IsRequired();
         });
 
         // PreHandshakeSessions

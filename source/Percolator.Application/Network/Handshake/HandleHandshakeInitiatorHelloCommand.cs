@@ -18,33 +18,34 @@ using NetworkPeerId = Percolator.Network.PeerId;
 namespace Percolator.Application.Network.Handshake
 {
     // Handles a HandshakeInitiatorHello arriving at this node (acting as responder).
-    // Returns encrypted ratchet message bytes containing a ResponderInnerHello payload for inline response.
+    // Returns responder output including the pre-encrypted ratchet message containing ResponderInnerHello and the resolved RemotePeerId.
     public record HandleHandshakeInitiatorHelloCommand(
         byte[] InitiatorIdentityKeySpki,
         byte[] InitiatorEphemeralKeySpki,
         Guid SignedPreKeyId,
         Guid? OneTimePreKeyId,
         IdentityPeerId? RemotePeerId,
-        byte[]? EncryptedPayload) : IRequest<byte[]?>;
+        byte[]? EncryptedPayload) : IRequest<HandleHandshakeInitiatorHelloResult?>;
 
-    internal class HandleHandshakeInitiatorHelloHandler : IRequestHandler<HandleHandshakeInitiatorHelloCommand, byte[]?>
+    public sealed record HandleHandshakeInitiatorHelloResult(IdentityPeerId RemotePeerId, SessionRatchetMessage Cipher);
+
+    internal class HandleHandshakeInitiatorHelloHandler : IRequestHandler<HandleHandshakeInitiatorHelloCommand, HandleHandshakeInitiatorHelloResult?>
     {
         private readonly ILogger<HandleHandshakeInitiatorHelloHandler> _logger;
         private readonly IX3DHOrchestrator _x3dh;
         private readonly IPeerPublicSigningKeyStore _pkhStore;
-        private readonly IPreKeyBundleRepository _preKeyRepo;
+        private readonly ISelfPreKeyBundleRepository _selfPreKeyRepo;
         private readonly IDirectSessionRepository _directRepo;
         private readonly IDirectSessionManager _sessionManager;
         private readonly ActiveIdentityContext _active;
         private readonly IPeerRepository _peerRepository;
         private readonly IPeerConnectionRepository _peerConnectionRepository;
         private readonly IMediator _mediator;
-
         public HandleHandshakeInitiatorHelloHandler(
             ILogger<HandleHandshakeInitiatorHelloHandler> logger,
             IX3DHOrchestrator x3dh,
             IPeerPublicSigningKeyStore pkhStore,
-            IPreKeyBundleRepository preKeyRepo,
+            ISelfPreKeyBundleRepository selfPreKeyRepo,
             IDirectSessionRepository directRepo,
             IDirectSessionManager sessionManager,
             ActiveIdentityContext active,
@@ -55,7 +56,7 @@ namespace Percolator.Application.Network.Handshake
             _logger = logger;
             _x3dh = x3dh;
             _pkhStore = pkhStore;
-            _preKeyRepo = preKeyRepo;
+            _selfPreKeyRepo = selfPreKeyRepo;
             _directRepo = directRepo;
             _sessionManager = sessionManager;
             _active = active;
@@ -64,7 +65,7 @@ namespace Percolator.Application.Network.Handshake
             _mediator = mediator;
         }
 
-        public async Task<byte[]?> Handle(HandleHandshakeInitiatorHelloCommand request, CancellationToken cancellationToken)
+        public async Task<HandleHandshakeInitiatorHelloResult?> Handle(HandleHandshakeInitiatorHelloCommand request, CancellationToken cancellationToken)
         {
             var remoteIdentityKey = new RatchetIdentityKey(request.InitiatorIdentityKeySpki);
             var remoteEphemeralKey = new RatchetEphemeralKey(request.InitiatorEphemeralKeySpki);
@@ -78,21 +79,42 @@ namespace Percolator.Application.Network.Handshake
             var signedPreKeyId = request.SignedPreKeyId;
             Guid? oneTimePreKeyId = request.OneTimePreKeyId;
 
-            // Use our own peer for bundle store (responder owns bundles)
+            // Use our own identity for local self-prekey store (responder owns private pre-keys)
             if (_active.Identity is null)
             {
                 throw new InvalidOperationException("Active identity not loaded.");
             }
-            var selfCryptoPeerId = new Percolator.Cryptography.Primitives.PeerId(_active.Identity.Id);
-            var bundle = await _preKeyRepo.TryPopBundleAsync(selfCryptoPeerId, signedPreKeyId, oneTimePreKeyId).ConfigureAwait(false);
-            if (bundle is null)
+            // Validate SPK exists locally; consume OTK if referenced
+            var spk = await _selfPreKeyRepo.TryGetSignedPreKeyAsync(_active.Identity.SelfIdentityId, signedPreKeyId, cancellationToken).ConfigureAwait(false);
+            if (spk is null)
             {
-                _logger.LogWarning("No matching pre-key bundle available (spkId={Spk}, otkId={Otk})", signedPreKeyId, oneTimePreKeyId);
+                _logger.LogWarning("Responder SPK not found for id {SpkId}", signedPreKeyId);
                 return null;
+            }
+            ECDiffieHellman? localOneTime = null;
+            try
+            {
+                if (oneTimePreKeyId.HasValue)
+                {
+                    var otkPriv = await _selfPreKeyRepo.TryPopOneTimePreKeyPrivateAsync(_active.Identity.SelfIdentityId, oneTimePreKeyId.Value, cancellationToken).ConfigureAwait(false);
+                    if (otkPriv is null)
+                    {
+                        _logger.LogWarning("Responder OTK not available for id {OtkId}", oneTimePreKeyId);
+                        return null;
+                    }
+                    localOneTime = ECDiffieHellman.Create();
+                    localOneTime.ImportECPrivateKey(otkPriv, out _);
+                }
+            }
+            catch
+            {
+                localOneTime?.Dispose();
+                throw;
             }
 
             // Complete X3DH (responder). Private OTK retrieval not surfaced here; pass null to use SPK path if needed.
-            var hs = _x3dh.CompleteHandshake(remoteIdentityKey, remoteEphemeralKey, localOneTimePreKey: null);
+            var hs = _x3dh.CompleteHandshake(remoteIdentityKey, remoteEphemeralKey, localOneTimePreKey: localOneTime);
+            localOneTime?.Dispose();
 
             // Upsert or create direct session mapping
             DirectSessionId directSessionId;
@@ -153,7 +175,8 @@ namespace Percolator.Application.Network.Handshake
             };
             var responderPt = new Plaintext(responderInner.ToByteArray());
             var rm = await _sessionManager.EncryptMessageAsync(new SessionId(directSessionId.Value), responderPt).ConfigureAwait(false);
-            return rm.Value;
+
+            return new HandleHandshakeInitiatorHelloResult(resolvedRemotePeerId, rm);
         }
     }
 }

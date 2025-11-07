@@ -9,6 +9,7 @@ using Percolator.Infrastructure.Network;
 using Percolator.Infrastructure.MessageQueue;
 using Percolator.Application.Network.Handshake;
 using Percolator.Infrastructure.Network.Handshake;
+using Percolator.Application.KeyExchange;
 
 namespace Percolator.Infrastructure;
 
@@ -41,6 +42,9 @@ public static class ServiceCollectionExtensions
 
         // Handshake pre-session store
         services.AddScoped<IPreHandshakeSessionStore, PreHandshakeSessionStore>();
+
+        // Self pre-key storage (local private keys) now backed by Sqlite
+        services.AddScoped<ISelfPreKeyBundleRepository, Cryptography.SqliteSelfPreKeyBundleRepository>();
 
         return services;
     }
