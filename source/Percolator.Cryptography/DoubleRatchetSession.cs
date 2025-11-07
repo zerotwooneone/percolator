@@ -113,7 +113,10 @@ public class DoubleRatchetSession : IDisposable
         //    the first call to the Encrypt() method.
         session._sendingChainKey = null;
         session._receivingChainKey = null;
-        session._dhRatchetKey = localEphemeralKey;
+        // Import the provided ephemeral key into a new handle owned by this session
+        var ephClone = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        ephClone.ImportECPrivateKey(localEphemeralKey.ExportECPrivateKey(), out _);
+        session._dhRatchetKey = ephClone;
 
         if (cryptographyOptions.Value.EnableCryptographicMaterialLogging)
         {
@@ -137,8 +140,10 @@ public class DoubleRatchetSession : IDisposable
         // Create Double Ratchet session with shared secret
         var session = new DoubleRatchetSession(sharedSecret, remoteIdentityPublicKey, logger, cryptographyOptions);
         
-        // Set the local ratchet key provided by the caller
-        session._dhRatchetKey = localRatchetKey;
+        // Set the local ratchet key by importing into a new handle owned by this session
+        var respClone = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        respClone.ImportECPrivateKey(localRatchetKey.ExportECPrivateKey(), out _);
+        session._dhRatchetKey = respClone;
         session._remotePreKeyKey = remotePreKey;
         session._isFirstRatchet = true;
 

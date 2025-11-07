@@ -113,8 +113,8 @@ namespace Percolator.Application.Network.Handshake
             }
 
             // Complete X3DH (responder). Private OTK retrieval not surfaced here; pass null to use SPK path if needed.
+            // IMPORTANT: do not dispose localOneTime yet; session establishment needs to clone/use the key first.
             var hs = _x3dh.CompleteHandshake(remoteIdentityKey, remoteEphemeralKey, localOneTimePreKey: localOneTime);
-            localOneTime?.Dispose();
 
             // Upsert or create direct session mapping
             DirectSessionId directSessionId;
@@ -138,6 +138,9 @@ namespace Percolator.Application.Network.Handshake
                 new RatchetEphemeralKey(remoteEphemeralKey.Value),
                 hs.ResponderPrivateKeyUsed,
                 hs.SharedSecret).ConfigureAwait(false);
+
+            // Now it is safe to dispose the temporary one-time ECDH key, if it was used.
+            localOneTime?.Dispose();
 
             _logger.LogInformation("Responder established session {SessionId}", directSessionId.Value);
 
