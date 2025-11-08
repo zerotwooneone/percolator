@@ -192,7 +192,10 @@ namespace Percolator.Application.Network
                 {
                     var relay = internalEnvelope.RelayOpaqueEnvelope;
                     // Process the inner opaque payload (this may establish sessions and send responder msg via MessageService)
-                    await _mediator.Send(new ProcessRelayedOpaquePayloadCommand(new Payload(relay.OpaquePayload.ToByteArray())), cancellationToken).ConfigureAwait(false);
+                    await _mediator.Send(new ProcessRelayedOpaquePayloadCommand(
+                        new Payload(relay.OpaquePayload.ToByteArray()),
+                        // Relay host is the remote peer for this direct session (Host as known by this node)
+                        new Percolator.Identity.PeerId(directSession.RemotePeerId.Value)), cancellationToken).ConfigureAwait(false);
 
                     // Build RPC-level RelayOpaqueResponse (not wrapped inside InternalEnvelope)
                     var ack = new RelayOpaqueResponse
@@ -219,7 +222,6 @@ namespace Percolator.Application.Network
                     while (await _relayOrchestrator.RelayNextAsync(identityPeerId, cancellationToken).ConfigureAwait(false))
                     {
                         // continue while acked
-                        int x = 0;
                     }
                 }
                 catch (Exception ex)

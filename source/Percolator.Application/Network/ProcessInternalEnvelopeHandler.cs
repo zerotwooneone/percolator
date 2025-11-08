@@ -103,6 +103,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                     if (!upload.HasSignedPreKey) throw new InvalidOperationException("Signed pre-key is required");
                     if (!upload.HasPreKeySignature) throw new InvalidOperationException("Pre-key signature is required");
                     if (upload.OneTimePreKeys.Count == 0) throw new InvalidOperationException("At least one one-time pre-key is required");
+                    if(request.Context.RemotePeerGuid is null) throw new InvalidOperationException($"{nameof(request)} must have a {nameof(ProcessInternalEnvelopeCommand.Context.RemotePeerGuid)}");
                     const int maxBundles = 100;
                     if (upload.OneTimePreKeys.Count > maxBundles) throw new InvalidOperationException($"Too many one-time pre-keys. Maximum is {maxBundles}");
                     foreach (var ot in upload.OneTimePreKeys)
@@ -120,7 +121,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                         PreKeySignature = upload.PreKeySignature.ToByteArray(),
                         OneTimePreKeys = upload.OneTimePreKeys.Select(x => new SubmitPreKeyBundleCommand.OneTimePreKey(new Guid(x.Id.ToByteArray()), x.PublicKey.ToByteArray())).ToList(),
                         Expires = upload.ExpiresUtc.ToDateTimeOffset(),
-                        RemotePeerId = new Percolator.Network.PeerId(request.Context.RemotePeerGuid ?? Guid.Empty)
+                        RemotePeerId = new Percolator.Network.PeerId(request.Context.RemotePeerGuid.Value)
                     };
                     await _mediator.Send(cmd, cancellationToken).ConfigureAwait(false);
                     return new InternalEnvelope { SubmitPreKeyBundleResponse = new SubmitPreKeyBundleResponse { Version = 1 } };
@@ -162,8 +163,10 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
         // RelayOpaque handling (processing only; RPC-level ack is handled in DeliverOpaqueMessageHandler)
         if (env.ApplicationPayloadCase == InternalEnvelope.ApplicationPayloadOneofCase.RelayOpaqueEnvelope)
         {
+            if(request.Context.RemotePeerGuid is null) throw new InvalidOperationException($"{nameof(request)} must have a {nameof(ProcessInternalEnvelopeCommand.Context.RemotePeerGuid)}");
+            var relayPeerId = new Percolator.Identity.PeerId(request.Context.RemotePeerGuid.Value);
             var relay = env.RelayOpaqueEnvelope;
-            await _mediator.Send(new ProcessRelayedOpaquePayloadCommand(new Payload(relay.OpaquePayload.ToByteArray()))).ConfigureAwait(false);
+            await _mediator.Send(new ProcessRelayedOpaquePayloadCommand(new Payload(relay.OpaquePayload.ToByteArray()), relayPeerId)).ConfigureAwait(false);
             return null;
         }
 

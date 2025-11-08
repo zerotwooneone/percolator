@@ -281,7 +281,13 @@ public class Phase17CommandsOnlyTests : IntegrationTestBase
 
         // 7) Charlie initiates opaque handshakes to Alice and Bob via MQ; verify sessions exist
         await charlieMed.Send(new InitiateHandshakeViaHostCommand("host", alicePkh, PeerName:"alice"));
+        //pump messages to alice and charlie
+        await aliceMed.Send(new DhtPingCommand("host"));
+        await charlieMed.Send(new DhtPingCommand("host"));
+        
         await charlieMed.Send(new InitiateHandshakeViaHostCommand("host", bobPkh, PeerName:"bob"));
+        //pump messages to bob and charlie
+        await bobMed.Send(new DhtPingCommand("host"));
         await charlieMed.Send(new DhtPingCommand("host"));
 
         // Verify sessions exist (Charlie <-> Alice, Charlie <-> Bob) from Charlie side

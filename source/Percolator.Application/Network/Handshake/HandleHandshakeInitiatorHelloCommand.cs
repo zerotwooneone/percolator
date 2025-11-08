@@ -25,7 +25,8 @@ namespace Percolator.Application.Network.Handshake
         Guid SignedPreKeyId,
         Guid? OneTimePreKeyId,
         IdentityPeerId? RemotePeerId,
-        byte[]? EncryptedPayload) : IRequest<HandleHandshakeInitiatorHelloResult?>;
+        byte[]? EncryptedPayload,
+        IdentityPeerId? RelayHostPeerId = null) : IRequest<HandleHandshakeInitiatorHelloResult?>;
 
     public sealed record HandleHandshakeInitiatorHelloResult(IdentityPeerId RemotePeerId, SessionRatchetMessage Cipher);
 
@@ -152,8 +153,34 @@ namespace Percolator.Application.Network.Handshake
             var existingConn = await _peerConnectionRepository.GetByIdAsync(netPeerId).ConfigureAwait(false);
             if (existingConn is null)
             {
-                var conn = new PeerConnection(netPeerId, identitySigningKey: null, grpcEndPoints: Array.Empty<GrpcEndPoint>(), tlsCertificates: Array.Empty<TlsCertificate>(), lastSeen: DateTimeOffset.UtcNow);
+                // Create connection and set relay if provided
+                PeerConnection conn;
+                if (request.RelayHostPeerId is not null)
+                {
+                    conn = new PeerConnection(
+                        netPeerId,
+                        identitySigningKey: null,
+                        grpcEndPoints: Array.Empty<GrpcEndPoint>(),
+                        tlsCertificates: Array.Empty<TlsCertificate>(),
+                        lastSeen: DateTimeOffset.UtcNow,
+                        relayPeerId: new NetworkPeerId(request.RelayHostPeerId.Value));
+                }
+                else
+                {
+                    conn = new PeerConnection(
+                        netPeerId,
+                        identitySigningKey: null,
+                        grpcEndPoints: Array.Empty<GrpcEndPoint>(),
+                        tlsCertificates: Array.Empty<TlsCertificate>(),
+                        lastSeen: DateTimeOffset.UtcNow);
+                }
                 await _peerConnectionRepository.SaveAsync(conn).ConfigureAwait(false);
+            }
+            else if (request.RelayHostPeerId is not null)
+            {
+                // Upsert relay association on existing connection
+                existingConn.SetRelayPeer(new NetworkPeerId(request.RelayHostPeerId.Value));
+                await _peerConnectionRepository.SaveAsync(existingConn).ConfigureAwait(false);
             }
 
             // If initiator included an encrypted initial payload, decrypt it via the newly established session
