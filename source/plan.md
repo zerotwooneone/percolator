@@ -1,20 +1,46 @@
+## Current Plan (Immediate → Medium-term)
 
+- **[Immediate: Fix Phase17 relay path]**
+  1. In `Percolator.Application/Network/Handshake/HandleHandshakeInitiatorHelloCommand.cs`, after Alice establishes a DR session to Bob, set Bob→Host relay association on Alice:
+     - Load or create `PeerConnection` for Bob.
+     - Set `RelayPeerId = HostPeerId` via `peerConnection.SetRelayPeer(hostPeerId)`.
+     - Save via `IPeerConnectionRepository.SaveAsync(...)`.
+  2. Ensure Alice has a DR session to Host before attempting relay enqueue during message pump.
+  3. Keep `MessageService.TryRelayEnqueueAsync(...)` failure reasons clean: expected routing misses return `(false, null)`, unexpected exceptions return `(false, ex)`.
+
+- **[Short-term: Diagnostics and tests]**
+  4. Add structured logs to identify which guard fails in relay enqueue (no connection, no relay, no PKH, no relay session, no recipient session).
+  5. Extend Phase17 tests to assert Bob→Host relay is set on Alice after processing relayed hello and before sending responder hello.
+
+- **[Network domain refactor (staged)]**
+  6. Introduce Network-level send model:
+     - `NetworkPayload` (wraps bytes), `SendStrategy` (DirectOnly, DirectThenRelay), `SendOutcome` (with reason codes).
+     - `INetworkSender.SendAsync(peerId, payload, strategy, constraints, ct)` in `Percolator.Network`.
+  7. Add routing abstractions:
+     - `IRelayRoutingService` (resolve/persist relay associations), `IRoutePlanner` (build ordered routes), `ISendExecutor` (attempt routes with timeouts/backoff).
+  8. Provide host discovery context for Application:
+     - `IConnectedHostContext` exposing current Host `PeerId` for the node.
+  9. Migrate Application send paths to use `INetworkSender`; deprecate inline relay fallback in `MessageService`.
+  10. Add repository methods as needed: `IPeerConnectionRepository.SetRelayAsync(...)`, `GetRelayAsync(...)`.
+
+---
 
 ## 17 Correct Phase 2 test order (fix Phase2_Prekeys_Dht_And_Sessions_Establish)
-    1) Alice↔Host connect; mutual naming by SPKI; Alice probes DHT (0 nodes); Alice publishes prekeys.
-    2) Bob↔Host connect; mutual naming by SPKI; Bob probes DHT and discovers Alice’s PKH.
-    3) Bob enqueues opaque handshake initiator envelope to Alice’s PKH; assert Alice responds and Bob completes the session establishment over opaque messages.
-    4) Bob publishes his prekey bundle to Host.
-    5) Charlie↔Host connect; mutual naming by SPKI.
-    6) Charlie probes DHT and discovers both Alice and Bob (verify both PKHs are visible).
-    7) Charlie initiates opaque handshakes to Alice and Bob via MQ (Host relays with `RelayOpaqueEnvelope`), both complete; verify `DirectSession` rows exist Charlie↔Alice and Charlie↔Bob.
-    8) Alice creates a new group chat with members Bob and Charlie; assert repository state (conversation created, participants = {Alice, Bob, Charlie}).
-      8a) Alice sends a message, assert Bob and Charlie receive it.
-    9) Alice grants Bob admin rights for that group; assert admin set contains Alice and Bob.
-    10) Bob removes Charlie from the group; assert participants = {Alice, Bob} and Charlie no longer has access to future group messages.
-    11) Bob sends a group message; assert only Alice receives/sees it (Charlie must NOT receive it).
-    12) Bob re-adds Charlie to the group; assert participants = {Alice, Bob, Charlie} and key distribution state updated.
-    13) Alice sends a group message; assert both Bob and Charlie receive it.
+    1) Alice↔Host connect; mutual naming by SPKI; Alice probes DHT (0 nodes); 
+    2) Alice publishes prekeys to host.
+    3) Bob↔Host connect; mutual naming by SPKI; Bob probes DHT and discovers Alice’s PKH.
+    4) Bob enqueues opaque handshake initiator envelope to Alice’s PKH; assert Alice responds and Bob completes the session establishment over opaque messages.
+    5) Bob publishes his prekey bundles to Host.
+    6) Charlie↔Host connect; mutual naming by SPKI.
+    7) Charlie probes DHT and discovers both Alice and Bob (verify both PKHs are visible).
+    8) Charlie initiates opaque handshakes to Alice and Bob via MQ (Host relays with `RelayOpaqueEnvelope`), both complete; verify `DirectSession` rows exist Charlie↔Alice and Charlie↔Bob.
+    9) Alice creates a new group chat with members Bob and Charlie; assert repository state (conversation created, participants = {Alice, Bob, Charlie}).
+      9a) Alice sends a message, assert Bob and Charlie receive it.
+    10) Alice grants Bob admin rights for that group; assert admin set contains Alice and Bob.
+    11) Bob removes Charlie from the group; assert participants = {Alice, Bob} and Charlie no longer has access to future group messages.
+    12) Bob sends a group message; assert only Alice receives/sees it (Charlie must NOT receive it).
+    13) Bob re-adds Charlie to the group; assert participants = {Alice, Bob, Charlie} and key distribution state updated.
+    14) Alice sends a group message; assert both Bob and Charlie receive it.
 
 ## Notes for AI
 
