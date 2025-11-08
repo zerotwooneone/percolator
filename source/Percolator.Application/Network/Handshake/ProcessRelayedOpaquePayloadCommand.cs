@@ -128,9 +128,12 @@ namespace Percolator.Application.Network.Handshake
                 }
                 // Send the pre-encrypted responder hello to the initiator using direct-first, relay-fallback
                 var send = await _messageService.SendPreEncryptedAsync(hsResult.RemotePeerId, hsResult.Cipher, cancellationToken).ConfigureAwait(false);
-                _logger.LogInformation("Handshake responder message sent via {Path}", send.Path);
-
-                return ProcessRelayedOpaquePayloadResponse.Success;
+                _logger.LogInformation("Handshake responder message attempted via {Path}", send.Path);
+                if (send.Success)
+                {
+                    return ProcessRelayedOpaquePayloadResponse.Success;
+                }
+                return ProcessRelayedOpaquePayloadResponse.Failure;
             }
 
             // Fast path: resolve session by ratchet header key
@@ -214,7 +217,11 @@ namespace Percolator.Application.Network.Handshake
                         return ProcessRelayedOpaquePayloadResponse.Failure;
                     }
                     var send = await _messageService.SendPreEncryptedAsync(hsResult.RemotePeerId, hsResult.Cipher, cancellationToken).ConfigureAwait(false);
-                    _logger.LogInformation("Handshake responder message sent via {Path}", send.Path);
+                    _logger.LogInformation("Handshake responder message attempted via {Path}", send.Path);
+                    if (!send.Success)
+                    {
+                        return ProcessRelayedOpaquePayloadResponse.Failure;
+                    }
                 }
             }
             catch

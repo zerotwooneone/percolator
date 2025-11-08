@@ -63,7 +63,7 @@ public class InitiatorHelloServiceTests
                 It.Is<Percolator.Identity.PeerId>(p => p.Value == hostPeerId.Value),
                 It.IsAny<CancellationToken>()))
             .Callback<InternalEnvelope, Percolator.Identity.PeerId, CancellationToken>((env, _, __) => captured = env)
-            .ReturnsAsync(SendResult.Success("Relay", new[] { "Relay" }, 1));
+            .ReturnsAsync(SendResult.CreateSuccess("Relay", new[] { "Relay" }, 1));
 
         var service = new InitiatorHelloService(
             new NullLogger<InitiatorHelloService>(),

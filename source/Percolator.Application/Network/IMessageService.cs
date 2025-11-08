@@ -20,17 +20,19 @@ namespace Percolator.Application.Network
         public int Attempts { get; }
         public int Retries { get; }
         public System.Exception? LastError { get; }
+        public bool Success { get; }
 
-        private SendResult(string path, string[] attemptedPaths, int attempts, int retries, System.Exception? lastError)
+        private SendResult(string path, string[] attemptedPaths, int attempts, int retries, System.Exception? lastError, bool success)
         {
             Path = path;
             AttemptedPaths = attemptedPaths;
             Attempts = attempts;
             Retries = retries;
             LastError = lastError;
+            Success = success;
         }
 
-        public static SendResult Success(string path, string[] attemptedPaths, int attempts) => new(path, attemptedPaths, attempts, 0, null);
-        public static SendResult Failure(string[] attemptedPaths, int attempts, System.Exception lastError) => new("None", attemptedPaths, attempts, 0, lastError);
+        public static SendResult CreateSuccess(string path, string[] attemptedPaths, int attempts) => new(path, attemptedPaths, attempts, 0, null, true);
+        public static SendResult CreateFailure(string[] attemptedPaths, int attempts, System.Exception? lastError) => new("None", attemptedPaths, attempts, 0, lastError,false);
     }
 }

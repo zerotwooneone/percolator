@@ -1,7 +1,3 @@
-using System;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
 using Google.Protobuf;
 using Microsoft.Extensions.Logging;
 using Percolator.Application.Identity;
@@ -21,7 +17,7 @@ namespace Percolator.Application.Network
         private readonly IDirectSessionManager _sessionManager;
         private readonly IMessageTransportService _transport;
         private readonly ActiveIdentityContext _active;
-        private readonly Percolator.Identity.IPeerRepository _peers;
+        private readonly IPeerRepository _peers;
         private readonly IPeerPublicSigningKeyStore _keyStore;
         private readonly IPeerConnectionRepository _peerConnectionRepository;
 
@@ -31,7 +27,7 @@ namespace Percolator.Application.Network
             IDirectSessionManager sessionManager,
             IMessageTransportService transport,
             ActiveIdentityContext active,
-            Percolator.Identity.IPeerRepository peers,
+            IPeerRepository peers,
             IPeerPublicSigningKeyStore keyStore,
             IPeerConnectionRepository peerConnectionRepository)
         {
@@ -45,15 +41,15 @@ namespace Percolator.Application.Network
             _peerConnectionRepository = peerConnectionRepository;
         }
 
-        public async Task<(SendResult Result, Percolator.Contracts.DeliverOpaqueMessageResponse? Response)> SendMessageWithResponseAsync(
+        public async Task<(SendResult Result, DeliverOpaqueMessageResponse? Response)> SendMessageWithResponseAsync(
             InternalEnvelope envelope,
-            Percolator.Identity.PeerId recipientPeerId,
+            PeerId recipientPeerId,
             CancellationToken ct = default)
         {
             if (_active.Identity is null)
                 throw new InvalidOperationException("Active identity not initialized");
 
-            var attempted = new System.Collections.Generic.List<string>();
+            var attempted = new List<string>();
             try
             {
                 attempted.Add("Direct");
@@ -61,8 +57,12 @@ namespace Percolator.Application.Network
                 if (ds is null)
                 {
                     attempted.Add("Relay");
-                    await TryRelayEnqueueAsync(recipientPeerId, envelope, null, ct).ConfigureAwait(false);
-                    return (SendResult.Success("Relay", attempted.ToArray(), attempts: 1), null);
+                    var tryRelayResult = await TryRelayEnqueueAsync(recipientPeerId, envelope, null, ct).ConfigureAwait(false);
+                    if(tryRelayResult.Success)
+                    {
+                        return (SendResult.CreateSuccess("Relay", attempted.ToArray(), attempts: 1), null);
+                    }
+                    return (SendResult.CreateFailure(attempted.ToArray(), attempts: attempted.Count, lastError: tryRelayResult.LastError), null);
                 }
 
                 var sessionId = new SessionId(ds.SessionId.Value);
@@ -71,29 +71,34 @@ namespace Percolator.Application.Network
                 try
                 {
                     var resp = await _transport.SendMessageAsync(recipientPeerId, directSessionId, cipher, ct).ConfigureAwait(false);
-                    return (SendResult.Success("Direct", attempted.ToArray(), attempts: 1), resp);
+                    return (SendResult.CreateSuccess("Direct", attempted.ToArray(), attempts: 1), resp);
                 }
                 catch (Exception sendEx)
                 {
                     _logger.LogDebug(sendEx, "Direct send failed to {PeerId}; attempting relay enqueue if possible", recipientPeerId);
                     attempted.Add("Relay");
-                    await TryRelayEnqueueAsync(recipientPeerId, envelope, cipher, ct).ConfigureAwait(false);
-                    return (SendResult.Success("Relay", attempted.ToArray(), attempts: 2), null);
+                    var tryRelayEnqueueResult = await TryRelayEnqueueAsync(recipientPeerId, envelope, cipher, ct).ConfigureAwait(false);
+                    if(tryRelayEnqueueResult.Success)
+                    {
+                        return (SendResult.CreateSuccess("Relay", attempted.ToArray(), attempts: 2), null);
+                    }
+                    return (SendResult.CreateFailure(attempted.ToArray(), attempts: attempted.Count, lastError: tryRelayEnqueueResult.LastError), null);
                 }
             }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Failed sending envelope to {PeerId}", recipientPeerId);
-                return (SendResult.Failure(attempted.ToArray(), attempts: attempted.Count, lastError: ex), null);
+                return (SendResult.CreateFailure(attempted.ToArray(), attempts: attempted.Count, lastError: ex), null);
             }
+            return (SendResult.CreateFailure(attempted.ToArray(), attempts: attempted.Count, lastError: new InvalidOperationException("all attempts to send failed")), null);
         }
 
-        public async Task<SendResult> SendPreEncryptedAsync(Percolator.Identity.PeerId recipientPeerId, SessionRatchetMessage cipher, CancellationToken ct = default)
+        public async Task<SendResult> SendPreEncryptedAsync(PeerId recipientPeerId, SessionRatchetMessage cipher, CancellationToken ct = default)
         {
             if (_active.Identity is null)
                 throw new InvalidOperationException("Active identity not initialized");
 
-            var attempted = new System.Collections.Generic.List<string>();
+            var attempted = new List<string>();
             try
             {
                 attempted.Add("Direct");
@@ -101,38 +106,48 @@ namespace Percolator.Application.Network
                 if (ds is null)
                 {
                     attempted.Add("Relay");
+                    
                     // We already have a DR ciphertext targeting the recipient
-                    await TryRelayEnqueueAsync(recipientPeerId, new InternalEnvelope(), cipher, ct).ConfigureAwait(false);
-                    return SendResult.Success("Relay", attempted.ToArray(), attempts: 1);
+                    var tryRelayEnqueueResult = await TryRelayEnqueueAsync(recipientPeerId, new InternalEnvelope(), cipher, ct).ConfigureAwait(false);
+                    if(tryRelayEnqueueResult.Success)
+                    {
+                        return SendResult.CreateSuccess("Relay", attempted.ToArray(), attempts: 1);
+                    }
+                    return SendResult.CreateFailure(attempted.ToArray(), attempts: attempted.Count, lastError: tryRelayEnqueueResult.LastError);
                 }
 
                 var directSessionId = new DirectSessionId(ds.SessionId.Value);
                 try
                 {
                     await _transport.SendMessageAsync(recipientPeerId, directSessionId, cipher, ct).ConfigureAwait(false);
-                    return SendResult.Success("Direct", attempted.ToArray(), attempts: 1);
+                    return SendResult.CreateSuccess("Direct", attempted.ToArray(), attempts: 1);
                 }
                 catch (Exception sendEx)
                 {
                     _logger.LogDebug(sendEx, "Direct send (pre-encrypted) failed to {PeerId}; attempting relay enqueue if possible", recipientPeerId);
                     attempted.Add("Relay");
-                    await TryRelayEnqueueAsync(recipientPeerId, new InternalEnvelope(), cipher, ct).ConfigureAwait(false);
-                    return SendResult.Success("Relay", attempted.ToArray(), attempts: 2);
+                    var tryRelayEnqueueResult = await TryRelayEnqueueAsync(recipientPeerId, new InternalEnvelope(), cipher, ct).ConfigureAwait(false);
+                    if(tryRelayEnqueueResult.Success)
+                    {
+                        return SendResult.CreateSuccess("Relay", attempted.ToArray(), attempts: 2);
+                    }
+                    return SendResult.CreateFailure(attempted.ToArray(), attempts: attempted.Count, lastError: tryRelayEnqueueResult.LastError);
                 }
             }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Failed sending pre-encrypted message to {PeerId}", recipientPeerId);
-                return SendResult.Failure(attempted.ToArray(), attempts: attempted.Count, lastError: ex);
+                return SendResult.CreateFailure(attempted.ToArray(), attempts: attempted.Count, lastError: ex);
             }
+            return SendResult.CreateFailure(attempted.ToArray(), attempts: attempted.Count, lastError: new InvalidOperationException("all attempts to send preencrypted failed"));
         }
 
-        public async Task<SendResult> SendMessageAsync(InternalEnvelope envelope, Percolator.Identity.PeerId recipientPeerId, CancellationToken ct = default)
+        public async Task<SendResult> SendMessageAsync(InternalEnvelope envelope, PeerId recipientPeerId, CancellationToken ct = default)
         {
             if (_active.Identity is null)
                 throw new InvalidOperationException("Active identity not initialized");
 
-            var attempted = new System.Collections.Generic.List<string>();
+            var attempted = new List<string>();
             try
             {
                 attempted.Add("Direct");
@@ -142,8 +157,12 @@ namespace Percolator.Application.Network
                 {
                     // No direct session, attempt relay if possible
                     attempted.Add("Relay");
-                    await TryRelayEnqueueAsync(recipientPeerId, envelope, null, ct).ConfigureAwait(false);
-                    return SendResult.Success("Relay", attempted.ToArray(), attempts: 1);
+                    var tryRelayEnqueueResult = await TryRelayEnqueueAsync(recipientPeerId, envelope, null, ct).ConfigureAwait(false);
+                    if(tryRelayEnqueueResult.Success)
+                    {
+                        return SendResult.CreateSuccess("Relay", attempted.ToArray(), attempts: 1);
+                    }
+                    return SendResult.CreateFailure(attempted.ToArray(), attempts: attempted.Count, lastError: tryRelayEnqueueResult.LastError);
                 }
 
                 var sessionId = new SessionId(ds.SessionId.Value);
@@ -152,24 +171,28 @@ namespace Percolator.Application.Network
                 try
                 {
                     await _transport.SendMessageAsync(recipientPeerId, directSessionId, cipher, ct).ConfigureAwait(false);
-                    return SendResult.Success("Direct", attempted.ToArray(), attempts: 1);
+                    return SendResult.CreateSuccess("Direct", attempted.ToArray(), attempts: 1);
                 }
                 catch (Exception sendEx)
                 {
                     _logger.LogDebug(sendEx, "Direct send failed to {PeerId}; attempting relay enqueue if possible", recipientPeerId);
                     attempted.Add("Relay");
-                    await TryRelayEnqueueAsync(recipientPeerId, envelope, cipher, ct).ConfigureAwait(false);
-                    return SendResult.Success("Relay", attempted.ToArray(), attempts: 2);
+                    var tryRelayEnqueueResult = await TryRelayEnqueueAsync(recipientPeerId, envelope, cipher, ct).ConfigureAwait(false);
+                    if(tryRelayEnqueueResult.Success)
+                    {
+                        return SendResult.CreateSuccess("Relay", attempted.ToArray(), attempts: 2);
+                    }
+                    return SendResult.CreateFailure(attempted.ToArray(), attempts: attempted.Count, lastError: tryRelayEnqueueResult.LastError);
                 }
             }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Failed sending envelope to {PeerId}", recipientPeerId);
-                return SendResult.Failure(attempted.ToArray(), attempts: attempted.Count, lastError: ex);
+                return SendResult.CreateFailure(attempted.ToArray(), attempts: attempted.Count, lastError: ex);
             }
         }
 
-        private async Task TryRelayEnqueueAsync(Percolator.Identity.PeerId recipientPeerId, InternalEnvelope envelope, SessionRatchetMessage? recipientCipher, CancellationToken ct)
+        private async Task<(bool Success, Exception? LastError)> TryRelayEnqueueAsync(PeerId recipientPeerId, InternalEnvelope envelope, SessionRatchetMessage? recipientCipher, CancellationToken ct)
         {
             try
             {
@@ -178,14 +201,14 @@ namespace Percolator.Application.Network
                 if (connection is null || connection.RelayPeerId is null)
                 {
                     _logger.LogDebug("Peer connection not found for {PeerId}", recipientPeerId);
-                    return;
+                    return (false, null);
                 }
 
                 var pkh = await _keyStore.GetPublicKeyHashByPeerIdAsync(recipientPeerId, ct).ConfigureAwait(false);
                 if (pkh is null)
                 {
                     _logger.LogDebug("Recipient PKH not found for {PeerId}", recipientPeerId);
-                    return;
+                    return (false, null);
                 }
 
                 // We need a session to the relay to send the enqueue request
@@ -193,13 +216,13 @@ namespace Percolator.Application.Network
                 if (relayPeer is null)
                 {
                     _logger.LogDebug("Relay peer not found; cannot enqueue on behalf of {PeerId}", recipientPeerId);
-                    return;
+                    return (false, null);
                 }
                 var relaySession = await _sessions.GetByRemotePeerIdAsync(new Percolator.Network.PeerId(relayPeer.Id.Value), _active.Identity!.SelfIdentityId).ConfigureAwait(false);
                 if (relaySession is null)
                 {
                     _logger.LogDebug("No direct session to relay; cannot enqueue on behalf of {PeerId}", recipientPeerId);
-                    return;
+                    return (false, null);
                 }
 
                 byte[] blobBytes;
@@ -214,7 +237,7 @@ namespace Percolator.Application.Network
                     if (ds is null)
                     {
                         _logger.LogDebug("Cannot produce DR ciphertext for {PeerId}; enqueue aborted", recipientPeerId);
-                        return;
+                        return (false, null);
                     }
                     var sid = new SessionId(ds.SessionId.Value);
                     var tmpCipher = await _sessionManager.EncryptMessageAsync(sid, new Plaintext(envelope.ToByteArray())).ConfigureAwait(false);
@@ -245,7 +268,10 @@ namespace Percolator.Application.Network
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Relay enqueue fallback failed for {PeerId}", recipientPeerId);
+                return (false, ex);
             }
+
+            return (true, null);
         }
     }
 }

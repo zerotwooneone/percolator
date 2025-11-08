@@ -95,7 +95,7 @@ public class HandshakeInitiatorFlowTests
                 It.IsAny<InternalEnvelope>(),
                 It.IsAny<Percolator.Identity.PeerId>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(SendResult.Success("Relay", new[] { "Relay" }, 1));
+            .ReturnsAsync(SendResult.CreateSuccess("Relay", new[] { "Relay" }, 1));
 
         var service = new InitiatorHelloService(
             new NullLogger<InitiatorHelloService>(),
@@ -287,7 +287,7 @@ public class HandshakeInitiatorFlowTests
                 It.IsAny<InternalEnvelope>(),
                 It.IsAny<Percolator.Identity.PeerId>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(SendResult.Success("Relay", new[] { "Relay" }, 1));
+            .ReturnsAsync(SendResult.CreateSuccess("Relay", new[] { "Relay" }, 1));
 
         var initiatorService = new InitiatorHelloService(
             new NullLogger<InitiatorHelloService>(),
