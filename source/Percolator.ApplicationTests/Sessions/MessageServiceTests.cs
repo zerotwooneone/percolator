@@ -11,6 +11,7 @@ using Percolator.Cryptography;
 using Percolator.Identity;
 using Percolator.Identity.Model;
 using Percolator.Network;
+using Percolator.Network.Messaging;
 
 namespace Percolator.ApplicationTests.Sessions;
 
@@ -39,6 +40,7 @@ public class MessageServiceTests
     private Mock<IPeerRepository> _mockPeerRepository = null!;
     private Mock<IPeerPublicSigningKeyStore> _mockKeyStore = null!;
     private Mock<IPeerConnectionRepository> _mockPeerConnectionRepository = null!;
+    private Mock<INetworkSender> _mockNetworkSender = null!;
 
     [SetUp]
     public void SetUp()
@@ -52,6 +54,7 @@ public class MessageServiceTests
         _mockPeerRepository = new Mock<IPeerRepository>();
         _mockKeyStore = new Mock<IPeerPublicSigningKeyStore>();
         _mockPeerConnectionRepository = new Mock<IPeerConnectionRepository>();
+        _mockNetworkSender = new Mock<INetworkSender>();
 
         // Create a logger factory for DirectSessionManager
         var loggerFactory = new NullLoggerFactory();
@@ -70,20 +73,24 @@ public class MessageServiceTests
             new NullLogger<MessageService>(),
             _mockDirectSessionRepository.Object,
             _sessionManager,
-            _mockTransportService.Object,
             _activeIdentityContext,
-            _mockPeerRepository.Object,
-            _mockKeyStore.Object,
-            _mockPeerConnectionRepository.Object);
+            _mockNetworkSender.Object);
 
         // Default transport behavior for tests: return a response when sending
-        _mockTransportService
-            .Setup(t => t.SendMessageAsync(
-                It.IsAny<Percolator.Identity.PeerId>(),
-                It.IsAny<Percolator.Network.DirectSessionId>(),
-                It.IsAny<SessionRatchetMessage>(),
-                It.IsAny<System.Threading.CancellationToken>()))
-            .ReturnsAsync(new Percolator.Contracts.DeliverOpaqueMessageResponse { Version = 1 });
+        _mockNetworkSender
+            .Setup(s => s.SendAsync(
+                It.IsAny<Percolator.Network.PeerId>(),
+                It.IsAny<NetworkPayload>(),
+                It.IsAny<SendStrategy>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SendOutcome
+            {
+                Success = true,
+                Path = "Direct",
+                AttemptedPaths = new[] { "Direct" },
+                Attempts = 1,
+                ResponsePayload = null
+            });
     }
 
     [TearDown]
