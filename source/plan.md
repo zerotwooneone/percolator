@@ -1,29 +1,37 @@
-## Current Plan (Immediate → Medium-term)
+## Current Plan (Identity DDD Refactor)
 
-- **[Immediate: Fix Phase17 relay path]**
-  1. In `Percolator.Application/Network/Handshake/HandleHandshakeInitiatorHelloCommand.cs`, after Alice establishes a DR session to Bob, set Bob→Host relay association on Alice:
-     - Load or create `PeerConnection` for Bob.
-     - Set `RelayPeerId = HostPeerId` via `peerConnection.SetRelayPeer(hostPeerId)`.
-     - Save via `IPeerConnectionRepository.SaveAsync(...)`.
-  2. Ensure Alice has a DR session to Host before attempting relay enqueue during message pump.
-  3. Keep `MessageService.TryRelayEnqueueAsync(...)` failure reasons clean: expected routing misses return `(false, null)`, unexpected exceptions return `(false, ex)`.
+1) Model PeerIdentity aggregate in `Percolator.Identity/Model/PeerIdentity.cs`.
+   - Fields: `PeerId` (immutable), optional `DisplayName`, key history, single active key, trust state, timestamps.
+   - Methods: `SetDisplayName`, `AddKey`, `ActivateKey`, `RevokeKey`, `Verify`.
+   - Invariants: at most one active, non-expired key; cannot activate expired/revoked.
+  1b) Verification and trust (user-driven support).
+   - Allow UI to mark a peer as verified based on out-of-band/manual checks (e.g., QR/SAS/voice) via `Verify(OutOfBand|Manual)`.
+   - Bind verification to the active key fingerprint; key rotations require re-verification of the new fingerprint.
+   - Persist a `VerificationRecord` (method, fingerprint, verifiedAt, verifiedBy, optional note, validity window).
+   - Derive `TrustState` from the active key’s verification; provide `Distrust/Unverify` operations.
+   - Emit domain events: `PeerVerified`, `PeerDistrusted` for projections/telemetry.
+  1a) Additional Identity features to implement.
+   - Key validity windows: support not-before and future expires-at; enforce single active key at any time and overlap rules.
+   - Key rotation scheduling: allow staging next key with future activation; zero-downtime rotation.
+   - Key lifecycle management: track Created/Active/Expired/Revoked with revoke reasons and audit trail.
+   - Public Key Hash (PKH) convenience: store/derive fingerprint for active key; expose `ActiveKeyHash` and lookup by hash.
+   - Name/alias management: validation rules and (optional) uniqueness if `GetByNameAsync` is intended to be unique.
+   - Repository queries: add `FindByPublicKeyHashAsync` and, if needed, queries by `TrustState`.
+2) Introduce value objects in `Percolator.Identity/Model/`.
+   - `IdentityKey` (SPKI, hash/fingerprint, notBefore, expiresAt, revokedAt), `TrustState`, `DisplayName`.
+3) Revise `Percolator.Identity/IPeerRepository.cs` to persist/reconstitute `PeerIdentity`.
+   - API: `GetByIdAsync`, `GetByNameAsync`, `FindByPublicKeyHashAsync`, `SaveAsync` (with concurrency token).
+4) Infrastructure mapping and migration.
+   - Map DBOs <-> aggregate; No migration/backfill for existing peers;
+   - Implement as adapter/read model sourced from `PeerIdentity` (hash/SPKI lookups), fed by domain events.
+6) Refactor app handlers to depend on aggregate behavior, not DBOs.
+   - `InitiateHandshakeViaHostHandler`, `HandleHandshakeInitiatorHelloHandler`, and related identity updates.
+7) Tests: domain + application.
+   - Domain tests for key rotation, single active key, revoke/verify invariants.
+   - App tests for observable behavior with repository mocked by aggregate, not DBO shape.
+8) Telemetry, docs, and developer guidance.
+   - Structured events for key rotations/trust; update docs and examples to new repository API.
 
-- **[Short-term: Diagnostics and tests]**
-  4. Add structured logs to identify which guard fails in relay enqueue (no connection, no relay, no PKH, no relay session, no recipient session).
-  5. Extend Phase17 tests to assert Bob→Host relay is set on Alice after processing relayed hello and before sending responder hello.
-
-- **[Network domain refactor (staged)]**
-  6. Introduce Network-level send model:
-     - `NetworkPayload` (wraps bytes), `SendStrategy` (DirectOnly, DirectThenRelay), `SendOutcome` (with reason codes).
-     - `INetworkSender.SendAsync(peerId, payload, strategy, constraints, ct)` in `Percolator.Network`.
-  7. Add routing abstractions:
-     - `IRelayRoutingService` (resolve/persist relay associations), `IRoutePlanner` (build ordered routes), `ISendExecutor` (attempt routes with timeouts/backoff).
-  8. Provide host discovery context for Application:
-     - `IConnectedHostContext` exposing current Host `PeerId` for the node.
-  9. Migrate Application send paths to use `INetworkSender`; deprecate inline relay fallback in `MessageService`.
-  10. Add repository methods as needed: `IPeerConnectionRepository.SetRelayAsync(...)`, `GetRelayAsync(...)`.
-
----
 
 ## 17 Correct Phase 2 test order (fix Phase2_Prekeys_Dht_And_Sessions_Establish)
     1) Alice↔Host connect; mutual naming by SPKI; Alice probes DHT (0 nodes); 
