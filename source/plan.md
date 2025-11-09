@@ -19,18 +19,52 @@
    - Repository queries: add `FindByPublicKeyHashAsync` and, if needed, queries by `TrustState`.
 2) Introduce value objects in `Percolator.Identity/Model/`.
    - `IdentityKey` (SPKI, hash/fingerprint, notBefore, expiresAt, revokedAt), `TrustState`, `DisplayName`.
-3) Revise `Percolator.Identity/IPeerRepository.cs` to persist/reconstitute `PeerIdentity`.
-   - API: `GetByIdAsync`, `GetByNameAsync`, `FindByPublicKeyHashAsync`, `SaveAsync` (with concurrency token).
+3) Implement a Sqlite-backed `IPeerIdentityRepository` using `PercolatorDbContext` (fresh DB).
+   - API: `GetByIdAsync`, `GetByNameAsync`, `FindByPublicKeyHashAsync`, `SaveAsync` (optimistic concurrency `Version`).
+   - Repository class (infra): `Percolator.Infrastructure/Repositories/SqlitePeerIdentityRepository.cs` using EF Core.
+   - EF entities (new tables; do not reuse old identity tables):
+     - `PeerIdentityDbo` (table `PeerIdentities`):
+       - Columns: `PeerId (PK, Guid)`, `Name (nvarchar, unique)`, `Version (int, row version)`, `CreatedAtUtc`, `UpdatedAtUtc`.
+       - Indexes: `IX_PeerIdentities_Name` unique.
+     - `PeerIdentityKeyDbo_V2` (table `PeerIdentityKeys_V2`):
+       - Invariant: only one key active at a given time; enforce in app + useful index `(PeerId, NotBeforeUtc)`, `(PeerId, ExpiresAtUtc)`.
+       - Indexes: `IX_PeerIdentityKeys_V2_Fingerprint` unique; `IX_PeerIdentityKeys_V2_PeerId`.
+     - `PeerVerificationDbo` (table `PeerVerifications`):
+       - Columns: `Id (PK)`, `PeerId (FK)`, `Fingerprint (blob)`, `Method (int)`, `VerifiedAtUtc`, `VerifiedBy (nvarchar)`, `Note (nvarchar, nullable)`, `NotBeforeUtc (nullable)`, `ExpiresAtUtc (nullable)`.
+       - Indexes: `(PeerId, Fingerprint)`, `(Fingerprint)`.
+   - `PercolatorDbContext` schema (fresh):
+     - Define `DbSet<PeerIdentityDbo> PeerIdentities` (authoritative peer catalog from day 1).
+     - Define `DbSet<PeerIdentityKeyDbo_V2>` and `DbSet<PeerVerificationDbo>` with indexes.
+     - All tables that previously referenced `Peers(Id)` will reference `PeerIdentities(PeerId)` from the start (e.g., `PeerConnection.PeerId`, `GrpcEndPoints.PeerId`, `TlsCertificates.PeerId`, `MessageQueue.RecipientPeerId`).
+   - Migration plan:
+     - Initial migration creates PeerIdentities, PeerIdentityKeys_V2, PeerVerifications, and sets FKs for dependent tables to `PeerIdentities(PeerId)`.
+   - Optimistic concurrency:
+     - Map `PeerIdentity.Version` to an int column. On `SaveAsync`, compare and increment; throw on mismatch.
+   - Lookups required by app:
+     - `FindByPublicKeyHashAsync(byte[] fingerprint)` backed by `PeerIdentityKeys_V2.Fingerprint` unique index.
+     - `GetByNameAsync(DisplayName)` backed by `PeerIdentities.Name` unique index.
+     - Introduce `IPeerIdentityRepository` in application layer and refactor consumers to depend on it.
+     - Provide a temporary shim adapter `PeerRepositoryShim : IPeerRepository` that queries the new tables to satisfy legacy code paths while refactors proceed.
+     - Gate handler cutover with a feature flag: new handlers use `IPeerIdentityRepository`; old paths continue until removed.
+     - Remove the shim and legacy tables once all usages of `IPeerRepository` are eliminated.
+   - Deletion checkpoints (do not delete until conditions are met):
+     - InMemory repo: Delete `Percolator.Identity/InMemoryPeerIdentityRepository.cs` AFTER Sqlite repo is wired in DI, and all unit tests/integration tests run green against the EF repo or appropriate mocks.
+     - Legacy repository: Delete `Percolator.Identity/IPeerRepository.cs` and its implementations AFTER all consumers are migrated to `IPeerIdentityRepository` and the shim is removed.
 4) Infrastructure mapping and migration.
    - Map DBOs <-> aggregate; No migration/backfill for existing peers;
    - Implement as adapter/read model sourced from `PeerIdentity` (hash/SPKI lookups), fed by domain events.
+
+5) Cleanup: remove legacy repository and tables via migration (no data preservation needed).
+   - Drop tables: Create a migration that DROPs `Peers`, `PeerIdentityKeys` (legacy), and `PeerPublicSigningKeys` (if not used).
+   - Ensure all FKs in dependent tables already reference `PeerIdentities(PeerId)` from initial schema.
+   - Remove repository: Delete `Percolator.Identity/IPeerRepository.cs` and all implementations in infra once the Sqlite `IPeerIdentityRepository` is wired and all consumers migrated.
+
 6) Refactor app handlers to depend on aggregate behavior, not DBOs.
    - `InitiateHandshakeViaHostHandler`, `HandleHandshakeInitiatorHelloHandler`, and related identity updates.
 7) Tests: domain + application.
    - Domain tests for key rotation, single active key, revoke/verify invariants.
    - App tests for observable behavior with repository mocked by aggregate, not DBO shape.
-8) Telemetry, docs, and developer guidance.
-   - Structured events for key rotations/trust; update docs and examples to new repository API.
+   - update docs and examples to new repository API.
 
 
 ## 17 Correct Phase 2 test order (fix Phase2_Prekeys_Dht_And_Sessions_Establish)
