@@ -140,6 +140,35 @@ public class SqlitePeerConnectionRepository : IPeerConnectionRepository
         await _context.SaveChangesAsync();
     }
 
+    public async Task SetRelayAsync(PeerId target, PeerId relayPeerId)
+    {
+        var idTarget = new IdPeerId(target.Value);
+        var dbo = await _context.PeerConnections.FirstOrDefaultAsync(p => p.PeerId == idTarget);
+        if (dbo is null)
+        {
+            dbo = new PeerConnectionDbo
+            {
+                PeerId = idTarget,
+                RelayPeerId = new IdPeerId(relayPeerId.Value),
+                LastSeen = DateTimeOffset.UtcNow
+            };
+            _context.PeerConnections.Add(dbo);
+        }
+        else
+        {
+            dbo.RelayPeerId = new IdPeerId(relayPeerId.Value);
+        }
+        await _context.SaveChangesAsync();
+    }
+
+    public async Task<PeerId?> GetRelayAsync(PeerId target)
+    {
+        var idTarget = new IdPeerId(target.Value);
+        var dbo = await _context.PeerConnections.AsNoTracking().FirstOrDefaultAsync(p => p.PeerId == idTarget);
+        if (dbo?.RelayPeerId is null) return null;
+        return new PeerId(dbo.RelayPeerId.Value);
+    }
+
     private static PeerConnection ToDomain(PeerConnectionDbo dbo)
     {
         var netPeerId = new NetPeerId(dbo.PeerId.Value);

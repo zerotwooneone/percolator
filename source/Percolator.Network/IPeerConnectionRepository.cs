@@ -33,4 +33,14 @@ public interface IPeerConnectionRepository
     /// <param name="peerId">The ID of the peer.</param>
     /// <param name="publicKey">The direct message public key to update.</param>
     Task UpdateDirectMessagePublicKeyAsync(PeerId peerId, DirectMessagePublicKey publicKey);
+
+    /// <summary>
+    /// Sets or updates the relay association for a target peer.
+    /// </summary>
+    Task SetRelayAsync(PeerId target, PeerId relayPeerId);
+
+    /// <summary>
+    /// Gets the configured relay peer for a target, if any.
+    /// </summary>
+    Task<PeerId?> GetRelayAsync(PeerId target);
 }

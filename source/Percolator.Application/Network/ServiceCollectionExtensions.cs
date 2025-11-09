@@ -4,6 +4,7 @@ using Percolator.Application.Configuration;
 using Percolator.Application.PeerDiscovery;
 using Percolator.Network;
 using Microsoft.Extensions.Logging;
+using Percolator.Network.Messaging;
 
 namespace Percolator.Application.Network;
 
@@ -114,6 +115,13 @@ public static class ServiceCollectionExtensions
 
         // Relay orchestrator for queued messages ACK flow
         services.AddSingleton<RelayOrchestrator>();
+
+        // Network messaging strategy services
+        services.AddSingleton<IRelayTopology, DefaultRelayTopology>();
+        services.AddSingleton<IRoutePlanner, DefaultRoutePlanner>();
+        services.AddSingleton<ITransportPort, NetworkTransportPortAdapter>();
+        services.AddSingleton<ISendExecutor, DefaultSendExecutor>();
+        services.AddSingleton<INetworkSender, DefaultNetworkSender>();
 
         // Application-layer envelope sender
         services.AddSingleton<IMessageService, MessageService>();
