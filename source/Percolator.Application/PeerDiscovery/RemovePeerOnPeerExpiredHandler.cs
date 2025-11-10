@@ -8,13 +8,11 @@ public class RemovePeerOnPeerExpiredHandler : INotificationHandler<PeerExpiredNo
 {
     private readonly ILogger<RemovePeerOnPeerExpiredHandler> _logger;
     private readonly IPeerConnectionManager _connectionManager;
-    private readonly IPeerRepository _peerRepository;
 
-    public RemovePeerOnPeerExpiredHandler(ILogger<RemovePeerOnPeerExpiredHandler> logger, IPeerConnectionManager connectionManager, IPeerRepository peerRepository)
+    public RemovePeerOnPeerExpiredHandler(ILogger<RemovePeerOnPeerExpiredHandler> logger, IPeerConnectionManager connectionManager)
     {
         _logger = logger;
         _connectionManager = connectionManager;
-        _peerRepository = peerRepository;
     }
 
     public async Task Handle(PeerExpiredNotification notification, CancellationToken cancellationToken)
@@ -23,7 +21,6 @@ public class RemovePeerOnPeerExpiredHandler : INotificationHandler<PeerExpiredNo
         _logger.LogInformation("- Peer expired: {Endpoint}", networkPeer.GrpcEndpoint);
 
         var identityPeerId = new PeerId(networkPeer.Id.Value);
-        await _peerRepository.RemoveAsync(identityPeerId).ConfigureAwait(false);
         await _connectionManager.RemovePeer(identityPeerId).ConfigureAwait(false);
     }
 }

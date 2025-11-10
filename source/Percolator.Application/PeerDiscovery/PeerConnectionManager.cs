@@ -13,13 +13,11 @@ public class PeerConnectionManager : IPeerConnectionManager
 {
     private readonly ConcurrentDictionary<string, GrpcChannel> _channels = new();
     private readonly ILogger<PeerConnectionManager> _logger;
-    private readonly IPeerRepository _peerRepository;
     private readonly IPeerConnectionRepository _peerConnectionRepository;
 
-    public PeerConnectionManager(ILogger<PeerConnectionManager> logger, IPeerRepository peerRepository, IPeerConnectionRepository peerConnectionRepository)
+    public PeerConnectionManager(ILogger<PeerConnectionManager> logger, IPeerConnectionRepository peerConnectionRepository)
     {
         _logger = logger;
-        _peerRepository = peerRepository;
         _peerConnectionRepository = peerConnectionRepository;
     }
 

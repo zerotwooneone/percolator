@@ -129,12 +129,13 @@ namespace Percolator.ApplicationTests.Network
                 .Returns(Task.CompletedTask)
                 .Verifiable();
 
+            var identityAdapter = new PeerIdentityRepositoryAdapter(peerRepo.Object);
             var handler = new EstablishDirectSessionHandler(
                 logger,
                 active,
                 x3dhOrchestrator.Object,
                 sessionManager.Object,
-                peerRepo.Object,
+                identityAdapter,
                 peerConnRepo.Object,
                 x3dhManager.Object,
                 directRepo.Object,

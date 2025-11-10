@@ -10,6 +10,7 @@ using Percolator.Application.Sessions;
 using Percolator.Contracts;
 using Percolator.Cryptography;
 using Percolator.Identity;
+using Percolator.Identity.Model;
 using Percolator.Network;
 using Percolator.Application.KeyExchange;
 using CryptoPeerId = Percolator.Cryptography.Primitives.PeerId;
@@ -24,7 +25,7 @@ public class SubmitPreKeysHandler : IRequestHandler<SubmitPreKeysCommand, int>
     private readonly IDirectSessionManager _sessionManager;
     private readonly IMessageTransportService _transport;
     private readonly ActiveIdentityContext _activeIdentity;
-    private readonly IPeerRepository _peerRepository;
+    private readonly IPeerIdentityRepository _peerIdentityRepository;
     private readonly IOneTimeKeyProvider _oneTimeKeyProvider;
     private readonly ISelfPreKeyBundleRepository _selfPreKeyRepo;
 
@@ -34,7 +35,7 @@ public class SubmitPreKeysHandler : IRequestHandler<SubmitPreKeysCommand, int>
         IDirectSessionManager sessionManager,
         IMessageTransportService transport,
         ActiveIdentityContext activeIdentity,
-        IPeerRepository peerRepository,
+        IPeerIdentityRepository peerIdentityRepository,
         IOneTimeKeyProvider oneTimeKeyProvider,
         ISelfPreKeyBundleRepository selfPreKeyRepo)
     {
@@ -43,7 +44,7 @@ public class SubmitPreKeysHandler : IRequestHandler<SubmitPreKeysCommand, int>
         _sessionManager = sessionManager;
         _transport = transport;
         _activeIdentity = activeIdentity;
-        _peerRepository = peerRepository;
+        _peerIdentityRepository = peerIdentityRepository;
         _oneTimeKeyProvider = oneTimeKeyProvider;
         _selfPreKeyRepo = selfPreKeyRepo;
     }
@@ -59,11 +60,12 @@ public class SubmitPreKeysHandler : IRequestHandler<SubmitPreKeysCommand, int>
             throw new InvalidOperationException("Active identity not loaded.");
         }
         
-        var existingPeer = await _peerRepository.GetByNameAsync(request.TargetPeerName).ConfigureAwait(false);
-        if (existingPeer == null)
+        var identity = await _peerIdentityRepository.GetByNameAsync(new DisplayName(request.TargetPeerName)).ConfigureAwait(false);
+        if (identity == null)
         {
             throw new InvalidOperationException("Peer not found.");
         }
+        var existingPeer = new Peer(identity.Id, identity.DisplayName?.Value ?? request.TargetPeerName);
         
         // 1) Ensure/establish direct session with target peer
         var existingSessionId = await _conversationService.GetExistingDirectSessionAsync(existingPeer).ConfigureAwait(false);

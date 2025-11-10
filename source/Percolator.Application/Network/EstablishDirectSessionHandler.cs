@@ -10,6 +10,7 @@ using Percolator.Chat.ValueObjects;
 using Percolator.Contracts;
 using Percolator.Cryptography;
 using Percolator.Identity;
+using Percolator.Identity.Model;
 using Percolator.Network;
 using ChatConversation = Percolator.Chat.Conversation;
 using ChatConversationId = Percolator.Chat.ValueObjects.ConversationId;
@@ -27,7 +28,7 @@ namespace Percolator.Application.Network
         private readonly ActiveIdentityContext _activeIdentityContext;
         private readonly IX3DHOrchestrator _x3dhOrchestrator;
         private readonly IDirectSessionManager _sessionManager;
-        private readonly IPeerRepository _peerRepository;
+        private readonly IPeerIdentityRepository _peerIdentityRepository;
         private readonly IPeerConnectionRepository _peerConnectionRepository;
         private readonly IX3DHManager _x3DhManager;
         private readonly IDirectSessionRepository _directSessionRepository;
@@ -38,7 +39,7 @@ namespace Percolator.Application.Network
             ActiveIdentityContext activeIdentityContext,
             IX3DHOrchestrator x3dhOrchestrator,
             IDirectSessionManager sessionManager,
-            IPeerRepository peerRepository,
+            IPeerIdentityRepository peerIdentityRepository,
             IPeerConnectionRepository peerConnectionRepository,
             IX3DHManager x3DhManager,
             IDirectSessionRepository directSessionRepository,
@@ -48,7 +49,7 @@ namespace Percolator.Application.Network
             _activeIdentityContext = activeIdentityContext;
             _x3dhOrchestrator = x3dhOrchestrator;
             _sessionManager = sessionManager;
-            _peerRepository = peerRepository;
+            _peerIdentityRepository = peerIdentityRepository;
             _peerConnectionRepository = peerConnectionRepository;
             _x3DhManager = x3DhManager;
             _directSessionRepository = directSessionRepository;
@@ -124,19 +125,20 @@ namespace Percolator.Application.Network
             _logger.LogInformation("X3DH handshake processed successfully as Initiator");
 
             var identityPeerId = new IdentityPeerId(peerConnectionInfo.Id.Value);
-            var remotePeer = await _peerRepository.GetByIdAsync(identityPeerId).ConfigureAwait(false);
-            if (remotePeer is null)
+            var identity = await _peerIdentityRepository.GetByIdAsync(identityPeerId).ConfigureAwait(false);
+            if (identity is null)
             {
-                _logger.LogInformation("Peer with key hash {KeyHash} is unknown. Creating a new peer record", Convert.ToBase64String(request.RemoteIdentityKeyBytes));
+                _logger.LogInformation("Peer with key hash {KeyHash} is unknown. Creating a new peer identity", Convert.ToBase64String(request.RemoteIdentityKeyBytes));
                 var newPeerName = $"Peer-{Convert.ToBase64String(request.RemoteIdentityKeyBytes)}";
-                remotePeer = new IdentityPeer(identityPeerId, newPeerName);
-                await _peerRepository.AddAsync(remotePeer).ConfigureAwait(false);
+                identity = new PeerIdentity(identityPeerId);
+                identity.SetDisplayName(new DisplayName(newPeerName));
+                await _peerIdentityRepository.SaveAsync(identity).ConfigureAwait(false);
             }
 
             // Handshake-side identity mapping: bind PKH -> this peer id (idempotent if already bound to same peer)
             var initiatorSpki = request.RemoteIdentityKeyBytes;
             var initiatorPkh = SHA256.HashData(initiatorSpki);
-            await _pkhStore.ActivateIfChangedAsync(remotePeer.Id, initiatorSpki, initiatorPkh, DateTimeOffset.UtcNow, cancellationToken).ConfigureAwait(false);
+            await _pkhStore.ActivateIfChangedAsync(identity.Id, initiatorSpki, initiatorPkh, DateTimeOffset.UtcNow, cancellationToken).ConfigureAwait(false);
 
             // Now that the Peer exists, persist/update the PeerConnection
             await _peerConnectionRepository.SaveAsync(peerConnectionInfo).ConfigureAwait(false);
@@ -149,7 +151,7 @@ namespace Percolator.Application.Network
             if (existingDirectSession is null)
             {
                 await _directSessionRepository.UpsertAsync(networkPeerId, directSessionId, _activeIdentityContext.Identity!.SelfIdentityId).ConfigureAwait(false);
-                _logger.LogInformation("Upserted session with peer {PeerName} with session {SessionId}", remotePeer.Name, directSessionId);
+                _logger.LogInformation("Upserted session with peer {PeerName} with session {SessionId}", identity.DisplayName?.Value ?? identity.Id.Value.ToString(), directSessionId);
             }
             
             var cryptoSessionId = new SessionId(directSessionId.Value);
@@ -162,12 +164,12 @@ namespace Percolator.Application.Network
                 remoteEphemeral,
                 sharedSecret,
                 ephemeralKey).ConfigureAwait(false);
-            _logger.LogInformation("Successfully established session {SessionId} with peer {PeerId}", cryptoSessionId, remotePeer.Id);
+            _logger.LogInformation("Successfully established session {SessionId} with peer {PeerId}", cryptoSessionId, identity.Id);
 
             // Upsert PKH -> Peer mapping immediately after establishing session (initiator side)
             var establishedSpki = remoteIdentityKey.Value;
             var establishedPkh = SHA256.HashData(establishedSpki);
-            await _pkhStore.ActivateIfChangedAsync(remotePeer.Id, establishedSpki, establishedPkh, DateTimeOffset.UtcNow, cancellationToken).ConfigureAwait(false);
+            await _pkhStore.ActivateIfChangedAsync(identity.Id, establishedSpki, establishedPkh, DateTimeOffset.UtcNow, cancellationToken).ConfigureAwait(false);
 
             // Build responder payload carrying the allocated session id and optional inner envelope
             var responsePayload = new EstablishDirectSessionResponse.Types.ResponsePayload
