@@ -74,8 +74,8 @@ public class Phase17CommandsOnlyTests : IntegrationTestBase
             CancellationToken cancellationToken = default)
         {
             // Only allow client->host traffic in this test. Determine the Host peerId as seen by this client.
-            var clientPeerRepo = _clientProvider.GetRequiredService<Percolator.Identity.IPeerRepository>();
-            var clientViewOfHost = await clientPeerRepo.GetByNameAsync(_hostName);
+            var clientPeerRepo = _clientProvider.GetRequiredService<Percolator.Identity.IPeerIdentityRepository>();
+            var clientViewOfHost = await clientPeerRepo.GetByNameAsync(new Percolator.Identity.Model.DisplayName(_hostName), CancellationToken.None);
             if (clientViewOfHost is null || recipientPeerId.Value != clientViewOfHost.Id.Value)
             {
                 throw new InvalidOperationException("Direct client-to-client delivery is disabled for this scenario; use relay via Host.");
@@ -295,8 +295,8 @@ public class Phase17CommandsOnlyTests : IntegrationTestBase
         var convSvcCharlie = charlie.Services.GetRequiredService<IConversationService>();
         using (var scope = charlie.Services.CreateScope())
         {
-            var peerRepo = scope.ServiceProvider.GetRequiredService<Percolator.Identity.IPeerRepository>();
-            var charliesHostPeer = await peerRepo.GetByNameAsync("host"); // host is the MQ relay, but sessions are 1:1 between peers; minimal assert via non-null commands above
+            var peerRepo = scope.ServiceProvider.GetRequiredService<Percolator.Identity.IPeerIdentityRepository>();
+            var charliesHostPeer = await peerRepo.GetByNameAsync(new Percolator.Identity.Model.DisplayName("host"), CancellationToken.None); // host is the MQ relay, but sessions are 1:1 between peers; minimal assert via non-null commands above
             charliesHostPeer.Should().NotBeNull();
         }
 
@@ -323,11 +323,11 @@ public class Phase17CommandsOnlyTests : IntegrationTestBase
 
             // Assert: conversation exists and participants include Bob and Charlie (total 3)
             var convoRepo = aliceScope.ServiceProvider.GetRequiredService<Percolator.Chat.IConversationRepository>();
-            var peerRepo = aliceScope.ServiceProvider.GetRequiredService<Percolator.Identity.IPeerRepository>();
+            var peerRepo = aliceScope.ServiceProvider.GetRequiredService<Percolator.Identity.IPeerIdentityRepository>();
             var convo = await convoRepo.GetByGroupGuidAsync(groupGuid, ctx.Identity!.SelfIdentityId);
             convo.Should().NotBeNull("group conversation should be created for Alice");
-            var bobPeer = await peerRepo.GetByNameAsync("bob");
-            var charliePeer = await peerRepo.GetByNameAsync("charlie");
+            var bobPeer = await peerRepo.GetByNameAsync(new Percolator.Identity.Model.DisplayName("bob"), CancellationToken.None);
+            var charliePeer = await peerRepo.GetByNameAsync(new Percolator.Identity.Model.DisplayName("charlie"), CancellationToken.None);
             bobPeer.Should().NotBeNull();
             charliePeer.Should().NotBeNull();
             var participantIds = convo!.Participants.Select(p => p.Value).ToHashSet();
@@ -406,7 +406,7 @@ public class Phase17CommandsOnlyTests : IntegrationTestBase
             // Assert: admin set contains Alice (creator) and Bob (grantee)
             var convoRepo2 = aliceScope2.ServiceProvider.GetRequiredService<Percolator.Chat.IConversationRepository>();
             var adminKeyStore = aliceScope2.ServiceProvider.GetRequiredService<Percolator.Chat.App.IGroupAdminKeyStore>();
-            var peerRepo2 = aliceScope2.ServiceProvider.GetRequiredService<Percolator.Identity.IPeerRepository>();
+            var peerRepo2 = aliceScope2.ServiceProvider.GetRequiredService<Percolator.Identity.IPeerIdentityRepository>();
 
             var convo2 = await convoRepo2.GetByGroupGuidAsync(groupGuid, ctx.Identity!.SelfIdentityId);
             convo2.Should().NotBeNull();
@@ -431,8 +431,8 @@ public class Phase17CommandsOnlyTests : IntegrationTestBase
         using (var bobScope = bob.Services.CreateScope())
         {
             var ctx = bobScope.ServiceProvider.GetRequiredService<ActiveIdentityContext>();
-            var bobPeerRepo = bobScope.ServiceProvider.GetRequiredService<Percolator.Identity.IPeerRepository>();
-            var charliePeerOnBob = await bobPeerRepo.GetByNameAsync("charlie");
+            var bobPeerRepo = bobScope.ServiceProvider.GetRequiredService<Percolator.Identity.IPeerIdentityRepository>();
+            var charliePeerOnBob = await bobPeerRepo.GetByNameAsync(new Percolator.Identity.Model.DisplayName("charlie"), CancellationToken.None);
             if (charliePeerOnBob is not null)
             {
                 await bobMed.Send(new Percolator.Application.Apps.Chat.UpdateGroupMembershipAppCommand(
@@ -452,8 +452,8 @@ public class Phase17CommandsOnlyTests : IntegrationTestBase
         using (var bobScope2 = bob.Services.CreateScope())
         {
             var ctx = bobScope2.ServiceProvider.GetRequiredService<ActiveIdentityContext>();
-            var bobPeerRepo = bobScope2.ServiceProvider.GetRequiredService<Percolator.Identity.IPeerRepository>();
-            var charliePeerOnBob = await bobPeerRepo.GetByNameAsync("charlie");
+            var bobPeerRepo = bobScope2.ServiceProvider.GetRequiredService<Percolator.Identity.IPeerIdentityRepository>();
+            var charliePeerOnBob = await bobPeerRepo.GetByNameAsync(new Percolator.Identity.Model.DisplayName("charlie"), CancellationToken.None);
             if (charliePeerOnBob is not null)
             {
                 await bobMed.Send(new Percolator.Application.Apps.Chat.UpdateGroupMembershipAppCommand(

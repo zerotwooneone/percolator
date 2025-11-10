@@ -22,7 +22,6 @@ namespace Percolator.Infrastructure.Identity
             
             // Store for X3DH keys bound to SelfIdentityId
             services.AddScoped<ISelfIdentityKeysStore, SqliteSelfIdentityKeysStore>();
-            services.AddScoped<IPeerRepository, PeerRepositoryShim>();
             services.AddScoped<IPeerIdentityRepository, Percolator.Infrastructure.Repositories.SqlitePeerIdentityRepository>();
             services.AddScoped<ISelfIdentityRepository, SqliteSelfIdentityRepository>();
             services.AddScoped<IPeerPublicSigningKeyStore, SqlitePeerPublicSigningKeyStore>();

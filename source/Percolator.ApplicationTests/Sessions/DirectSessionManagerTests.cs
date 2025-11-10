@@ -41,7 +41,6 @@ public class DirectSessionManagerTests
     
     // Bob (responder) components
     private Mock<IDoubleRatchetSessionStore> _bobSessionStore = null!;
-    private Mock<IPeerRepository> _bobPeerRepository = null!;
     private ActiveIdentityContext _bobIdentityContext = null!;
     private DirectSessionManager _bobSessionManager = null!;
     private X3dhKeys _bobKeys = null!;
@@ -96,7 +95,6 @@ public class DirectSessionManagerTests
             ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256));
             
         _bobSessionStore = new Mock<IDoubleRatchetSessionStore>();
-        _bobPeerRepository = new Mock<IPeerRepository>();
         
         // Create a real ActiveIdentityContext instance instead of a mock
         _bobIdentityContext = new ActiveIdentityContext();

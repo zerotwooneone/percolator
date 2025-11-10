@@ -40,7 +40,7 @@ public sealed class InMemoryPeerIdentityRepository : IPeerIdentityRepository
         _byId.AddOrUpdate(peer.Id.Value,
             addValueFactory: _ =>
             {
-                peer.SetVersionForTesting(1);
+                peer.SetVersionFromPersistence(1);
                 Index(peer);
                 return peer;
             },
@@ -48,7 +48,7 @@ public sealed class InMemoryPeerIdentityRepository : IPeerIdentityRepository
             {
                 if (peer.Version != existing.Version)
                     throw new InvalidOperationException("Concurrency conflict saving PeerIdentity.");
-                peer.SetVersionForTesting(existing.Version + 1);
+                peer.SetVersionFromPersistence(existing.Version + 1);
                 // Update indices if name or active key changed
                 Index(peer);
                 return peer;

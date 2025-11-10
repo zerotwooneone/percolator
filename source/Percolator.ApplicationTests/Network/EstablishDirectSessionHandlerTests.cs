@@ -42,7 +42,7 @@ namespace Percolator.ApplicationTests.Network
 
             var x3dhOrchestrator = new Mock<IX3DHOrchestrator>(MockBehavior.Strict);
             var sessionManager = new Mock<IDirectSessionManager>(MockBehavior.Strict);
-            var peerRepo = new Mock<IPeerRepository>(MockBehavior.Strict);
+            var peerIdentityRepo = new Mock<Percolator.Identity.IPeerIdentityRepository>(MockBehavior.Strict);
             var peerConnRepo = new Mock<IPeerConnectionRepository>(MockBehavior.Strict);
             var x3dhManager = new Mock<IX3DHManager>(MockBehavior.Strict);
             var directRepo = new Mock<IDirectSessionRepository>(MockBehavior.Strict);
@@ -107,13 +107,10 @@ namespace Percolator.ApplicationTests.Network
             peerConnRepo.Setup(r => r.SaveAsync(It.IsAny<PeerConnection>()))
                 .Returns(Task.CompletedTask);
 
-            // Identity peer creation path (no existing peer) and adapter save path
-            peerRepo.Setup(r => r.GetByIdAsync(It.IsAny<Percolator.Identity.PeerId>()))
-                .ReturnsAsync((Peer?)null);
-            // Adapter prefers AddOrUpdateAsync; support both for strict mock
-            peerRepo.Setup(r => r.AddOrUpdateAsync(It.IsAny<Peer>()))
-                .Returns(Task.CompletedTask);
-            peerRepo.Setup(r => r.AddAsync(It.IsAny<Peer>()))
+            // Identity peer creation path (no existing identity) and save path
+            peerIdentityRepo.Setup(r => r.GetByIdAsync(It.IsAny<Percolator.Identity.PeerId>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((Percolator.Identity.Model.PeerIdentity?)null);
+            peerIdentityRepo.Setup(r => r.SaveAsync(It.IsAny<Percolator.Identity.Model.PeerIdentity>(), It.IsAny<CancellationToken>()))
                 .Returns(Task.CompletedTask);
 
             // DirectSession upsert
@@ -132,13 +129,12 @@ namespace Percolator.ApplicationTests.Network
                 .Returns(Task.CompletedTask)
                 .Verifiable();
 
-            var identityAdapter = new PeerIdentityRepositoryAdapter(peerRepo.Object);
             var handler = new EstablishDirectSessionHandler(
                 logger,
                 active,
                 x3dhOrchestrator.Object,
                 sessionManager.Object,
-                identityAdapter,
+                peerIdentityRepo.Object,
                 peerConnRepo.Object,
                 x3dhManager.Object,
                 directRepo.Object,

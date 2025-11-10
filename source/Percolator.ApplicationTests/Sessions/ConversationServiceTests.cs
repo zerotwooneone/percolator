@@ -31,7 +31,6 @@ namespace Percolator.ApplicationTests.Sessions;
 [TestFixture]
 public class ConversationServiceTests
 {
-    private Mock<IPeerRepository> _mockPeerRepository;
     private Mock<IX3DHOrchestrator> _mockX3dhOrchestrator;
     private Mock<IDirectSessionManager> _mockDirectSessionManager;
     private Mock<IOneTimeKeyProvider> _mockOneTimeKeyProvider;
@@ -48,7 +47,6 @@ public class ConversationServiceTests
     [SetUp]
     public void Setup()
     {
-        _mockPeerRepository = new Mock<IPeerRepository>();
         _mockX3dhOrchestrator = new Mock<IX3DHOrchestrator>();
         _mockDirectSessionManager = new Mock<IDirectSessionManager>();
         _mockOneTimeKeyProvider = new Mock<IOneTimeKeyProvider>();
@@ -188,9 +186,6 @@ public class ConversationServiceTests
         var endpoint = new DnsEndPoint("localhost", 5001);
         var peer = new Peer(new IdentityPeerId(Guid.NewGuid()), "test-peer");
 
-        // Setup peer repository to return the existing peer
-        _mockPeerRepository.Setup(r => r.GetByNameAsync(peer.Name)).ReturnsAsync(peer);
-        _mockPeerRepository.Setup(r => r.GetByIdAsync(It.Is<IdentityPeerId>(id => id.Value == peer.Id.Value))).ReturnsAsync(peer);
 
         // Create valid crypto materials for the mock response
         using var remoteSigningKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
@@ -480,9 +475,6 @@ public class ConversationServiceTests
         var peerName = "test-peer";
         var peer = new Peer(new IdentityPeerId(Guid.NewGuid()), peerName);
         
-        // Setup peer repository
-        _mockPeerRepository.Setup(r => r.GetByNameAsync(peerName))
-            .ReturnsAsync((Peer)null!);
             
         // Setup one-time key provider
         using var oneTimeKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
@@ -505,8 +497,7 @@ public class ConversationServiceTests
             
         Assert.That(exception, Is.SameAs(expectedError));
         
-        // Verify peer was not created
-        _mockPeerRepository.Verify(r => r.AddAsync(It.IsAny<Peer>()), Times.Never);
+        // Verify peer was not created (no peer repository dependency anymore)
         
         // Verify session was not established
         _mockDirectSessionManager.Verify(m => m.EstablishSessionAsInitiatorAsync(

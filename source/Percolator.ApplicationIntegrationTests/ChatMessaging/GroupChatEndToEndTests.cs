@@ -156,16 +156,16 @@ namespace Percolator.ApplicationIntegrationTests.ChatMessaging
                     // Prefer cached route by session id (most accurate transport behavior)
                     if (!_sessionRoutes.TryGetValue(directSessionId.Value, out var targetProvider))
                     {
-                        // Resolve recipient name on the SENDER node, then map name -> destination provider
-                        var peerRepo = _senderProvider.GetRequiredService<Percolator.Identity.IPeerRepository>();
-                        var peer = await peerRepo.GetByIdAsync(new Percolator.Identity.PeerId(recipientPeerId.Value));
-                        if (peer is null)
+                        // Resolve recipient identity on the SENDER node, then map name -> destination provider
+                        var identityRepo = _senderProvider.GetRequiredService<Percolator.Identity.IPeerIdentityRepository>();
+                        var identity = await identityRepo.GetByIdAsync(new Percolator.Identity.PeerId(recipientPeerId.Value), CancellationToken.None);
+                        if (identity is null || identity.DisplayName is null)
                         {
-                            TestContext.WriteLine($"[Loopback] Unknown recipient peer {recipientPeerId.Value} on sender; attempting by name lookup failed.");
-                            throw new InvalidOperationException($"Unknown recipient peer {recipientPeerId.Value} on sender");
+                            TestContext.WriteLine($"[Loopback] Unknown recipient identity {recipientPeerId.Value} on sender; cannot route by name.");
+                            throw new InvalidOperationException($"Unknown recipient identity {recipientPeerId.Value} on sender");
                         }
-                        targetProvider = _nameToProvider(peer.Name)
-                            ?? throw new InvalidOperationException($"No target provider found for peer name '{peer.Name}'");
+                        targetProvider = _nameToProvider(identity.DisplayName.Value)
+                            ?? throw new InvalidOperationException($"No target provider found for peer name '{identity.DisplayName.Value}'");
                         _sessionRoutes[directSessionId.Value] = targetProvider;
                     }
 
@@ -407,8 +407,9 @@ namespace Percolator.ApplicationIntegrationTests.ChatMessaging
             // Retry loop to handle rare ratchet header inference races on receiver
             var sessionManager = sender.Services.GetRequiredService<Percolator.Application.Sessions.IDirectSessionManager>();
             var transport = sender.Services.GetRequiredService<Percolator.Application.Network.IMessageTransportService>();
-            var peerRepo = sender.Services.GetRequiredService<Percolator.Identity.IPeerRepository>();
-            var peer = await peerRepo.GetByNameAsync(recipientName) ?? throw new InvalidOperationException($"Unknown peer name {recipientName}");
+            var identityRepo = sender.Services.GetRequiredService<Percolator.Identity.IPeerIdentityRepository>();
+            var peerIdentity = await identityRepo.GetByNameAsync(new Percolator.Identity.Model.DisplayName(recipientName), CancellationToken.None)
+                ?? throw new InvalidOperationException($"Unknown peer name {recipientName}");
             var internalEnvelope = new Percolator.Contracts.InternalEnvelope { ChatEnvelope = envelope };
             var plaintext = new Percolator.Cryptography.Plaintext(internalEnvelope.ToByteArray());
 
@@ -419,7 +420,7 @@ namespace Percolator.ApplicationIntegrationTests.ChatMessaging
                 {
                     var sessionId = await EnsureDirectSessionAsync(sender, recipientName, recipientEndpoint);
                     var cipher = await sessionManager.EncryptMessageAsync(new Percolator.Cryptography.SessionId(sessionId.Value), plaintext);
-                    await transport.SendMessageAsync(peer.Id, sessionId, cipher);
+                    await transport.SendMessageAsync(peerIdentity.Id, sessionId, cipher);
                     return;
                 }
                 catch (Exception ex)
@@ -450,8 +451,8 @@ namespace Percolator.ApplicationIntegrationTests.ChatMessaging
 
         private static async Task AssertPeerKnownByName(IHost node, string name)
         {
-            var repo = node.Services.GetRequiredService<Percolator.Identity.IPeerRepository>();
-            var peer = await repo.GetByNameAsync(name);
+            var repo = node.Services.GetRequiredService<Percolator.Identity.IPeerIdentityRepository>();
+            var peer = await repo.GetByNameAsync(new Percolator.Identity.Model.DisplayName(name), CancellationToken.None);
             if (peer is null)
             {
                 TestContext.WriteLine($"ASSERTION FAILED: Peer '{name}' not found on node.");
@@ -462,8 +463,10 @@ namespace Percolator.ApplicationIntegrationTests.ChatMessaging
         private static async Task AssertSessionExists(IHost sender, string remoteName)
         {
             var convSvc = sender.Services.GetRequiredService<Percolator.Application.Sessions.IConversationService>();
-            var repo = sender.Services.GetRequiredService<Percolator.Identity.IPeerRepository>();
-            var peer = await repo.GetByNameAsync(remoteName) ?? throw new InvalidOperationException($"Peer '{remoteName}' not found on sender.");
+            var identityRepo = sender.Services.GetRequiredService<Percolator.Identity.IPeerIdentityRepository>();
+            var peerIdentity = await identityRepo.GetByNameAsync(new Percolator.Identity.Model.DisplayName(remoteName), CancellationToken.None) 
+                ?? throw new InvalidOperationException($"Peer '{remoteName}' not found on sender.");
+            var peer = new Percolator.Identity.Peer(peerIdentity.Id, remoteName);
             var existing = await convSvc.GetExistingDirectSessionAsync(peer);
             if (existing is null)
             {
@@ -533,9 +536,11 @@ namespace Percolator.ApplicationIntegrationTests.ChatMessaging
             await Phase2_Prekeys_Dht_And_Sessions_Establish();
 
             // Resolve Bob and Charlie participant GUIDs on Alice
-            var alicePeerRepo = _alice.Services.GetRequiredService<Percolator.Identity.IPeerRepository>();
-            var bobPeer = await alicePeerRepo.GetByNameAsync("bob") ?? throw new InvalidOperationException("bob not known on alice");
-            var charliePeer = await alicePeerRepo.GetByNameAsync("charlie") ?? throw new InvalidOperationException("charlie not known on alice");
+            var aliceIdentityRepo = _alice.Services.GetRequiredService<Percolator.Identity.IPeerIdentityRepository>();
+            var bobPeer = await aliceIdentityRepo.GetByNameAsync(new Percolator.Identity.Model.DisplayName("bob"), CancellationToken.None) 
+                ?? throw new InvalidOperationException("bob not known on alice");
+            var charliePeer = await aliceIdentityRepo.GetByNameAsync(new Percolator.Identity.Model.DisplayName("charlie"), CancellationToken.None) 
+                ?? throw new InvalidOperationException("charlie not known on alice");
 
             var groupGuid = Guid.NewGuid();
             var opId = Guid.NewGuid();
@@ -564,11 +569,12 @@ namespace Percolator.ApplicationIntegrationTests.ChatMessaging
             var ctx = node.Services.GetRequiredService<ActiveIdentityContext>();
             var selfId = ctx.Identity?.SelfIdentityId ?? throw new InvalidOperationException("SelfIdentityId not loaded");
             var repo = node.Services.GetRequiredService<Percolator.Chat.IConversationRepository>();
-            var peerRepo = node.Services.GetRequiredService<Percolator.Identity.IPeerRepository>();
+            var peerRepo = node.Services.GetRequiredService<Percolator.Identity.IPeerIdentityRepository>();
             var expected = new HashSet<Guid>();
             foreach (var name in expectedNames)
             {
-                var p = await peerRepo.GetByNameAsync(name) ?? throw new InvalidOperationException($"Peer '{name}' not known on node");
+                var p = await peerRepo.GetByNameAsync(new Percolator.Identity.Model.DisplayName(name), CancellationToken.None) 
+                    ?? throw new InvalidOperationException($"Peer '{name}' not known on node");
                 expected.Add(p.Id.Value);
             }
 

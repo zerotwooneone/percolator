@@ -345,15 +345,16 @@ public class HandshakeInitiatorFlowTests
             .Setup(s => s.ReceiveMessageAsync(It.IsAny<SessionId>(), It.IsAny<SessionRatchetMessage>()))
             .ReturnsAsync(expectedFirstPlaintext);
 
-        var peerRepo = new Mock<IPeerRepository>(MockBehavior.Strict);
-        peerRepo.Setup(r => r.AddOrUpdateAsync(It.IsAny<Peer>())).Returns(Task.CompletedTask);
-        peerRepo.Setup(r => r.GetByIdAsync(It.IsAny<Percolator.Identity.PeerId>())).ReturnsAsync((Peer?)null);
+        var peerIdentityRepo = new Mock<Percolator.Identity.IPeerIdentityRepository>(MockBehavior.Strict);
+        peerIdentityRepo.Setup(r => r.GetByIdAsync(It.IsAny<Percolator.Identity.PeerId>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Percolator.Identity.Model.PeerIdentity?)null);
+        peerIdentityRepo.Setup(r => r.SaveAsync(It.IsAny<Percolator.Identity.Model.PeerIdentity>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
 
         var connRepo = new Mock<IPeerConnectionRepository>(MockBehavior.Strict);
         connRepo.Setup(r => r.GetByIdAsync(It.IsAny<Percolator.Network.PeerId>())).ReturnsAsync((PeerConnection?)null);
         connRepo.Setup(r => r.SaveAsync(It.IsAny<PeerConnection>())).Returns(Task.CompletedTask);
 
-        var identityAdapter = new PeerIdentityRepositoryAdapter(peerRepo.Object);
         var initiatorHelloHandler = new HandleHandshakeInitiatorHelloHandler(
             new NullLogger<HandleHandshakeInitiatorHelloHandler>(),
             x3dh.Object,
@@ -362,7 +363,7 @@ public class HandshakeInitiatorFlowTests
             directRepo.Object,
             sessions.Object,
             responderActive,
-            identityAdapter,
+            peerIdentityRepo.Object,
             connRepo.Object,
             new Mock<IMediator>().Object);
 

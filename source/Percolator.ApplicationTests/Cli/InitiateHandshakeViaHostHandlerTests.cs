@@ -29,17 +29,17 @@ public class InitiateHandshakeViaHostHandlerTests
         var conversation = new Mock<IConversationService>(MockBehavior.Strict);
         var sessionManager = new Mock<IDirectSessionManager>(MockBehavior.Strict);
         var transport = new Mock<IMessageTransportService>(MockBehavior.Strict);
-        var peerRepo = new Mock<IPeerRepository>(MockBehavior.Strict);
+        var peerIdentityRepo = new Mock<Percolator.Identity.IPeerIdentityRepository>(MockBehavior.Strict);
         var pkhStore = new Mock<IPeerPublicSigningKeyStore>(MockBehavior.Strict);
         var connRepo = new Mock<IPeerConnectionRepository>(MockBehavior.Strict);
         var initiatorService = new Mock<IInitiatorHelloService>(MockBehavior.Strict);
 
         // Host peer setup
         var hostPeerGuid = Guid.NewGuid();
-        var hostPeer = new Percolator.Identity.Peer(new Percolator.Identity.PeerId(hostPeerGuid), "host");
-        peerRepo.Setup(r => r.GetByNameAsync("host")).ReturnsAsync(hostPeer);
-        // Adapter may call GetByIdAsync; return null by default
-        peerRepo.Setup(r => r.GetByIdAsync(It.IsAny<Percolator.Identity.PeerId>())).ReturnsAsync((Percolator.Identity.Peer?)null);
+        var hostPeerIdentity = new Percolator.Identity.Model.PeerIdentity(new Percolator.Identity.PeerId(hostPeerGuid));
+        hostPeerIdentity.SetDisplayName("host");
+        peerIdentityRepo.Setup(r => r.GetByNameAsync(It.IsAny<Percolator.Identity.Model.DisplayName>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Percolator.Identity.Model.DisplayName dn, CancellationToken _) => dn.Value == "host" ? hostPeerIdentity : null);
 
         // Direct session to host exists
         var hostDirectSession = new Percolator.Network.DirectSessionId(Guid.NewGuid());
@@ -71,7 +71,7 @@ public class InitiateHandshakeViaHostHandlerTests
 
         // Transport returns a response payload (cipher bytes)
         transport
-            .Setup(t => t.SendMessageAsync(hostPeer.Id, hostDirectSession, It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()))
+            .Setup(t => t.SendMessageAsync(hostPeerIdentity.Id, hostDirectSession, It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new DeliverOpaqueMessageResponse
             {
                 Version = 1,
@@ -97,7 +97,7 @@ public class InitiateHandshakeViaHostHandlerTests
                 It.IsAny<DateTimeOffset>(),
                 It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
-        peerRepo.Setup(r => r.AddOrUpdateAsync(It.IsAny<Percolator.Identity.Peer>())).Returns(Task.CompletedTask);
+        peerIdentityRepo.Setup(r => r.SaveAsync(It.IsAny<Percolator.Identity.Model.PeerIdentity>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
 
         // Connection repo paths
         connRepo.Setup(r => r.GetByIdAsync(It.IsAny<Percolator.Network.PeerId>()))
@@ -118,13 +118,12 @@ public class InitiateHandshakeViaHostHandlerTests
                 It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
-        var identityAdapter = new Percolator.Application.Identity.PeerIdentityRepositoryAdapter(peerRepo.Object);
         var handler = new InitiateHandshakeViaHostHandler(
             logger,
             conversation.Object,
             sessionManager.Object,
             transport.Object,
-            identityAdapter,
+            peerIdentityRepo.Object,
             pkhStore.Object,
             connRepo.Object,
             initiatorService.Object);

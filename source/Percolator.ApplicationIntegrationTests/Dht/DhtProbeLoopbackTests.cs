@@ -167,7 +167,6 @@ public class DhtProbeLoopbackTests : IntegrationTestBase
             services.AddTransient<IRequestHandler<DeliverOpaqueMessageCommand, DeliverOpaqueMessageResult>, FakeDeliverOpaqueMessageHandler>();
             services.Replace(ServiceDescriptor.Singleton<IDhtNodeRepository>(sp => serverDhtRepo.Object));
             services.Replace(ServiceDescriptor.Singleton<IConversationRepository>(sp => new Mock<IConversationRepository>().Object));
-            services.Replace(ServiceDescriptor.Singleton<IPeerRepository>(sp => new Mock<IPeerRepository>().Object));
             services.Replace(ServiceDescriptor.Singleton<IPeerConnectionRepository>(sp => serverPeerConnRepo.Object));
             services.Replace(ServiceDescriptor.Singleton<IDirectSessionRepository>(sp => serverDirectSessionRepo.Object));
             services.AddSingleton<IDhtService, DhtService>();

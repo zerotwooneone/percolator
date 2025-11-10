@@ -25,7 +25,6 @@ public class SubmitPreKeysHandlerTests
     private Mock<IConversationService> _conversationService = null!;
     private Mock<IDirectSessionManager> _sessionManager = null!;
     private Mock<IMessageTransportService> _transport = null!;
-    private Mock<IPeerRepository> _peerRepository = null!;
     private Mock<Percolator.Identity.IPeerIdentityRepository> _peerIdentityRepository = null!;
     private Mock<IOneTimeKeyProvider> _oneTimeKeyProvider = null!;
     private Mock<Percolator.Application.KeyExchange.ISelfPreKeyBundleRepository> _selfPreKeyRepo = null!;
@@ -37,7 +36,6 @@ public class SubmitPreKeysHandlerTests
         _conversationService = new Mock<IConversationService>();
         _sessionManager = new Mock<IDirectSessionManager>();
         _transport = new Mock<IMessageTransportService>();
-        _peerRepository = new Mock<IPeerRepository>();
         _peerIdentityRepository = new Mock<Percolator.Identity.IPeerIdentityRepository>();
         _oneTimeKeyProvider = new Mock<IOneTimeKeyProvider>();
         _selfPreKeyRepo = new Mock<Percolator.Application.KeyExchange.ISelfPreKeyBundleRepository>();
@@ -57,7 +55,6 @@ public class SubmitPreKeysHandlerTests
         // Arrange peer and session
         var remotePeerId = new Percolator.Identity.PeerId(Guid.NewGuid());
         var remotePeer = new Peer(remotePeerId, "bob");
-        _peerRepository.Setup(r => r.GetByNameAsync("bob")).ReturnsAsync(remotePeer);
         _peerIdentityRepository
             .Setup(r => r.GetByNameAsync(It.IsAny<Percolator.Identity.Model.DisplayName>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Percolator.Identity.Model.DisplayName dn, CancellationToken _) =>
@@ -138,14 +135,13 @@ public class SubmitPreKeysHandlerTests
             ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
             ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256));
 
-        var identityAdapter = new PeerIdentityRepositoryAdapter(_peerRepository.Object);
         var handler = new SubmitPreKeysHandler(
             new NullLogger<SubmitPreKeysHandler>(),
             _conversationService.Object,
             _sessionManager.Object,
             _transport.Object,
             _activeIdentity,
-            identityAdapter,
+            _peerIdentityRepository.Object,
             _oneTimeKeyProvider.Object,
             _selfPreKeyRepo.Object);
 

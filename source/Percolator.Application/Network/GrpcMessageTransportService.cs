@@ -16,18 +16,15 @@ public class GrpcMessageTransportService : IMessageTransportService
 {
     private readonly ConcurrentDictionary<string, TransportService.TransportServiceClient> _clients = new();
     private readonly ILogger<GrpcMessageTransportService> _logger;
-    private readonly IPeerRepository _peerRepository;
     private readonly IPeerConnectionRepository _peerConnectionRepository;
     private readonly IHttpClientFactory _httpClientFactory;
 
     public GrpcMessageTransportService(
         ILogger<GrpcMessageTransportService> logger,
-        IPeerRepository peerRepository,
         IPeerConnectionRepository peerConnectionRepository,
         IHttpClientFactory httpClientFactory)
     {
         _logger = logger;
-        _peerRepository = peerRepository;
         _peerConnectionRepository = peerConnectionRepository;
         _httpClientFactory = httpClientFactory;
     }
@@ -38,23 +35,17 @@ public class GrpcMessageTransportService : IMessageTransportService
         SessionRatchetMessage message,
         CancellationToken cancellationToken = default)
     {
-        var peer = await _peerRepository.GetByIdAsync(recipientPeerId).ConfigureAwait(false);
-        if (peer is null)
-        {
-            _logger.LogError("Could not find peer with ID {PeerId}", recipientPeerId);
-            throw new InvalidOperationException($"Peer not found: {recipientPeerId}");
-        }
-
-        var networkPeerId = new NetworkPeerId(peer.Id.Value);
+        // Use the recipient identity's GUID directly to address the network peer
+        var networkPeerId = new NetworkPeerId(recipientPeerId.Value);
         var peerConnection = await _peerConnectionRepository.GetByIdAsync(networkPeerId).ConfigureAwait(false);
         if (peerConnection is null)
         {
-            throw new InvalidOperationException($"No connection info found for peer {peer.Id}. Cannot send message.");
+            throw new InvalidOperationException($"No connection info found for peer {recipientPeerId}. Cannot send message.");
         }
 
         if (peerConnection.GrpcEndPoints.Count == 0)
         {
-            throw new InvalidOperationException($"No gRPC endpoints found for peer {peer.Id}. Cannot send message.");
+            throw new InvalidOperationException($"No gRPC endpoints found for peer {recipientPeerId}. Cannot send message.");
         }
 
         //todo: loop over all the connections and try to send the message to all of them sequentially

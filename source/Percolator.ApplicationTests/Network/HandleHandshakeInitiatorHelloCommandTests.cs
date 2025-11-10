@@ -29,7 +29,7 @@ public class HandleHandshakeInitiatorHelloCommandTests
         var directRepo = new Mock<IDirectSessionRepository>(MockBehavior.Strict);
         var sessionMgr = new Mock<IDirectSessionManager>(MockBehavior.Strict);
         var active = new ActiveIdentityContext { Identity = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "me", null) { SelfIdentityId = 1 } };
-        var peerRepo = new Mock<IPeerRepository>(MockBehavior.Strict);
+        var peerIdentityRepo = new Mock<Percolator.Identity.IPeerIdentityRepository>(MockBehavior.Strict);
         var connRepo = new Mock<IPeerConnectionRepository>(MockBehavior.Strict);
         var mediator = new Mock<MediatR.IMediator>(MockBehavior.Loose);
 
@@ -57,10 +57,11 @@ public class HandleHandshakeInitiatorHelloCommandTests
         sessionMgr.Setup(m => m.EncryptMessageAsync(It.IsAny<SessionId>(), It.IsAny<Plaintext>()))
             .ReturnsAsync(new SessionRatchetMessage(new byte[] { 0x01 }));
 
-        // Persist identity artifacts
-        peerRepo.Setup(p => p.AddOrUpdateAsync(It.IsAny<Peer>())).Returns(Task.CompletedTask);
-        // Adapter may call GetByIdAsync; return null by default
-        peerRepo.Setup(r => r.GetByIdAsync(It.IsAny<Percolator.Identity.PeerId>())).ReturnsAsync((Peer?)null);
+        // Persist identity artifacts via identity repository
+        peerIdentityRepo.Setup(r => r.GetByIdAsync(It.IsAny<Percolator.Identity.PeerId>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Percolator.Identity.Model.PeerIdentity?)null);
+        peerIdentityRepo.Setup(r => r.SaveAsync(It.IsAny<Percolator.Identity.Model.PeerIdentity>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
         pkhStore.Setup(k => k.ActivateIfChangedAsync(It.IsAny<Percolator.Identity.PeerId>(), spki, It.IsAny<byte[]>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
         // No existing connection; SaveAsync should get relay set
@@ -68,8 +69,7 @@ public class HandleHandshakeInitiatorHelloCommandTests
         PeerConnection? saved = null;
         connRepo.Setup(r => r.SaveAsync(It.IsAny<PeerConnection>())).Callback<PeerConnection>(pc => saved = pc).Returns(Task.CompletedTask);
 
-        var identityAdapter = new PeerIdentityRepositoryAdapter(peerRepo.Object);
-        var sut = new HandleHandshakeInitiatorHelloHandler(logger, x3dh.Object, pkhStore.Object, selfPre.Object, directRepo.Object, sessionMgr.Object, active, identityAdapter, connRepo.Object, mediator.Object);
+        var sut = new HandleHandshakeInitiatorHelloHandler(logger, x3dh.Object, pkhStore.Object, selfPre.Object, directRepo.Object, sessionMgr.Object, active, peerIdentityRepo.Object, connRepo.Object, mediator.Object);
         var cmd = new HandleHandshakeInitiatorHelloCommand(spki, eph, spkId, null, null, null, RelayHostPeerId: relayHost);
         _ = await sut.Handle(cmd, CancellationToken.None);
 
@@ -87,7 +87,7 @@ public class HandleHandshakeInitiatorHelloCommandTests
         var directRepo = new Mock<IDirectSessionRepository>(MockBehavior.Strict);
         var sessionMgr = new Mock<IDirectSessionManager>(MockBehavior.Strict);
         var active = new ActiveIdentityContext { Identity = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "me", null) { SelfIdentityId = 1 } };
-        var peerRepo = new Mock<IPeerRepository>(MockBehavior.Strict);
+        var peerIdentityRepo = new Mock<Percolator.Identity.IPeerIdentityRepository>(MockBehavior.Strict);
         var connRepo = new Mock<IPeerConnectionRepository>(MockBehavior.Strict);
         var mediator = new Mock<MediatR.IMediator>(MockBehavior.Loose);
 
@@ -106,7 +106,8 @@ public class HandleHandshakeInitiatorHelloCommandTests
             .Returns(Task.CompletedTask);
         sessionMgr.Setup(m => m.EncryptMessageAsync(It.IsAny<SessionId>(), It.IsAny<Plaintext>()))
             .ReturnsAsync(new SessionRatchetMessage(new byte[] { 0x02 }));
-        peerRepo.Setup(p => p.AddOrUpdateAsync(It.IsAny<Peer>())).Returns(Task.CompletedTask);
+        peerIdentityRepo.Setup(r => r.SaveAsync(It.IsAny<Percolator.Identity.Model.PeerIdentity>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
         pkhStore.Setup(k => k.ActivateIfChangedAsync(It.IsAny<Percolator.Identity.PeerId>(), spki, It.IsAny<byte[]>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
@@ -114,11 +115,11 @@ public class HandleHandshakeInitiatorHelloCommandTests
         var existing = new PeerConnection(remoteNetPeer, identitySigningKey: null, grpcEndPoints: Array.Empty<GrpcEndPoint>(), tlsCertificates: Array.Empty<TlsCertificate>(), lastSeen: DateTimeOffset.UtcNow);
         connRepo.Setup(r => r.GetByIdAsync(It.IsAny<Percolator.Network.PeerId>())).ReturnsAsync(existing);
         connRepo.Setup(r => r.SaveAsync(existing)).Returns(Task.CompletedTask);
-        // Adapter may call GetByIdAsync; return null by default
-        peerRepo.Setup(r => r.GetByIdAsync(It.IsAny<Percolator.Identity.PeerId>())).ReturnsAsync((Peer?)null);
+        // Adapter removed; identity repo GetByIdAsync returns null by default
+        peerIdentityRepo.Setup(r => r.GetByIdAsync(It.IsAny<Percolator.Identity.PeerId>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Percolator.Identity.Model.PeerIdentity?)null);
 
-        var identityAdapter2 = new PeerIdentityRepositoryAdapter(peerRepo.Object);
-        var sut = new HandleHandshakeInitiatorHelloHandler(logger, x3dh.Object, pkhStore.Object, selfPre.Object, directRepo.Object, sessionMgr.Object, active, identityAdapter2, connRepo.Object, mediator.Object);
+        var sut = new HandleHandshakeInitiatorHelloHandler(logger, x3dh.Object, pkhStore.Object, selfPre.Object, directRepo.Object, sessionMgr.Object, active, peerIdentityRepo.Object, connRepo.Object, mediator.Object);
         var cmd = new HandleHandshakeInitiatorHelloCommand(spki, eph, spkId, null, null, null, RelayHostPeerId: relayHost);
         _ = await sut.Handle(cmd, CancellationToken.None);
 

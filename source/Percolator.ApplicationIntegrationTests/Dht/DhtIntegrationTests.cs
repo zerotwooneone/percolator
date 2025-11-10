@@ -37,7 +37,6 @@ public class DhtIntegrationTests : IntegrationTestBase
         // Mocks for unused dependencies to allow the host to build
         var x3dhOrchestratorMock = new Mock<IX3DHOrchestrator>();
         var conversationRepoMock = new Mock<IConversationRepository>();
-        var peerRepoMock = new Mock<IPeerRepository>();
         var x3dhManagerMock = new Mock<IX3DHManager>();
         var bundleRepoMock = new Mock<IPreKeyBundleRepository>();
         var signingServiceMock = new Mock<Percolator.Cryptography.ISigningService>();
@@ -74,7 +73,6 @@ public class DhtIntegrationTests : IntegrationTestBase
             services.AddSingleton<IRatchetKeySessionLookup>(ratchetLookup.Object);
             services.AddSingleton<IX3DHOrchestrator>(x3dhOrchestratorMock.Object);
             services.AddSingleton<IConversationRepository>(conversationRepoMock.Object);
-            services.AddSingleton<IPeerRepository>(peerRepoMock.Object);
             services.AddSingleton<IX3DHManager>(x3dhManagerMock.Object);
             services.AddSingleton<IPreKeyBundleRepository>(bundleRepoMock.Object);
             services.AddSingleton<Percolator.Cryptography.ISigningService>(signingServiceMock.Object);

@@ -14,20 +14,17 @@ namespace Percolator.Prekey.Handlers
         private readonly ILogger<SubmitPreKeyBundleHandler> _logger;
         private readonly Percolator.Cryptography.ISigningService _signingService;
         private readonly IPreKeyBundleRepository _bundleRepository;
-        private readonly IPeerRepository _peerRepository;
         private readonly IPeerPublicSigningKeyStore _publicKeyStore;
 
         public SubmitPreKeyBundleHandler(
             ILogger<SubmitPreKeyBundleHandler> logger,
             Percolator.Cryptography.ISigningService signingService,
             IPreKeyBundleRepository bundleRepository,
-            IPeerRepository peerRepository,
             IPeerPublicSigningKeyStore publicKeyStore)
         {
             _logger = logger;
             _signingService = signingService;
             _bundleRepository = bundleRepository;
-            _peerRepository = peerRepository;
             _publicKeyStore = publicKeyStore;
         }
 

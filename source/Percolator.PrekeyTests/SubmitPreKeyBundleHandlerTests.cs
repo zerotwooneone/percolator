@@ -19,7 +19,6 @@ public class SubmitPreKeyBundleHandlerTests
 {
     private Mock<Percolator.Cryptography.ISigningService> _signingService = null!;
     private Mock<IPreKeyBundleRepository> _bundleRepository = null!;
-    private Mock<IPeerRepository> _peerRepository = null!; // not used by handler currently
     private Mock<IPeerPublicSigningKeyStore> _publicKeyStore = null!;
 
     private SubmitPreKeyBundleHandler _sut = null!;
@@ -29,14 +28,12 @@ public class SubmitPreKeyBundleHandlerTests
     {
         _signingService = new Mock<Percolator.Cryptography.ISigningService>();
         _bundleRepository = new Mock<IPreKeyBundleRepository>();
-        _peerRepository = new Mock<IPeerRepository>();
         _publicKeyStore = new Mock<IPeerPublicSigningKeyStore>();
 
         _sut = new SubmitPreKeyBundleHandler(
             Microsoft.Extensions.Logging.Abstractions.NullLogger<SubmitPreKeyBundleHandler>.Instance,
             _signingService.Object,
             _bundleRepository.Object,
-            _peerRepository.Object,
             _publicKeyStore.Object);
     }
 
