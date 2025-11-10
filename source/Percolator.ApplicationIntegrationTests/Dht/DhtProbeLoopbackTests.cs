@@ -27,14 +27,7 @@ public sealed class FakeDeliverOpaqueMessageHandler : IRequestHandler<DeliverOpa
 {
     public Task<DeliverOpaqueMessageResult> Handle(DeliverOpaqueMessageCommand request, CancellationToken cancellationToken)
     {
-        // Interpret payload bytes directly as InternalEnvelope
-        var env = InternalEnvelope.Parser.ParseFrom(request.PayloadBytes);
-        if (env.DhtEnvelope?.FindNodeRequest == null)
-        {
-            // No-op
-            return Task.FromResult(new DeliverOpaqueMessageResult());
-        }
-
+        // Always respond with a FindNodeResponse containing a dummy node
         var resp = new InternalEnvelope
         {
             DhtEnvelope = new DhtEnvelope
@@ -53,6 +46,34 @@ public sealed class FakeDeliverOpaqueMessageHandler : IRequestHandler<DeliverOpa
         {
             ResponsePayloadBytes = resp.ToByteArray()
         });
+    }
+}
+
+// Fake network sender that synchronously invokes the server's DeliverOpaqueMessage handler
+public sealed class FakeNetworkSender : Percolator.Network.Messaging.INetworkSender
+{
+    private readonly IServiceProvider _serverProvider;
+    public FakeNetworkSender(IServiceProvider serverProvider) => _serverProvider = serverProvider;
+
+    public async Task<Percolator.Network.Messaging.SendOutcome> SendAsync(
+        Percolator.Network.PeerId target,
+        Percolator.Network.Messaging.NetworkPayload payload,
+        Percolator.Network.Messaging.SendStrategy strategy,
+        CancellationToken ct = default)
+    {
+        var handler = _serverProvider.GetRequiredService<IRequestHandler<DeliverOpaqueMessageCommand, DeliverOpaqueMessageResult>>();
+        var cmd = new DeliverOpaqueMessageCommand { PayloadBytes = payload.Value.ToArray() };
+        var result = await handler.Handle(cmd, ct);
+        return new Percolator.Network.Messaging.SendOutcome
+        {
+            Success = true,
+            Path = "Direct",
+            AttemptedPaths = new[] { "Direct" },
+            Attempts = 1,
+            ResponsePayload = result.ResponsePayloadBytes is null
+                ? null
+                : new Percolator.Network.Messaging.NetworkPayload(result.ResponsePayloadBytes)
+        };
     }
 }
 
@@ -205,31 +226,21 @@ public class DhtProbeLoopbackTests : IntegrationTestBase
                 .Setup(r => r.GetByRemotePeerIdAsync(It.IsAny<Network.PeerId>(), It.IsAny<int>()))
                 .ReturnsAsync(new DirectSession(new NetworkPeerId(Guid.NewGuid()), directSessionId));
             services.Replace(ServiceDescriptor.Singleton<IDirectSessionRepository>(sp => clientDirectSessionRepo.Object));
-            // DhtProbeHandler now depends on IPeerRepository; provide a simple mock returning a Peer by name
-            var clientPeerRepo = new Mock<IPeerRepository>();
-            clientPeerRepo.Setup(r => r.GetByNameAsync(It.IsAny<string>()))
-                .ReturnsAsync((string name) => new Peer(new Percolator.Identity.PeerId(Guid.NewGuid()), name));
-            services.Replace(ServiceDescriptor.Singleton<IPeerRepository>(sp => clientPeerRepo.Object));
+            // DhtProbeHandler depends on IPeerIdentityRepository; provide a mock that resolves any name
+            var clientPeerIdentityRepo = new Mock<Percolator.Identity.IPeerIdentityRepository>();
+            clientPeerIdentityRepo
+                .Setup(r => r.GetByNameAsync(It.IsAny<Percolator.Identity.Model.DisplayName>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((Percolator.Identity.Model.DisplayName dn, CancellationToken _) =>
+                {
+                    var pid = new Percolator.Identity.PeerId(Guid.NewGuid());
+                    var id = new Percolator.Identity.Model.PeerIdentity(pid);
+                    id.SetDisplayName(dn);
+                    return id;
+                });
+            services.Replace(ServiceDescriptor.Singleton<Percolator.Identity.IPeerIdentityRepository>(sp => clientPeerIdentityRepo.Object));
             services.AddMediatR(cfg => cfg.RegisterServicesFromAssembly(typeof(Percolator.Dht.Messages.PingRequest).Assembly));
-            services.AddSingleton<IMessageTransportService>(sp => new LoopbackTransport(async req =>
-            {
-                var handler = serverHost.Services.GetRequiredService<IRequestHandler<DeliverOpaqueMessageCommand, DeliverOpaqueMessageResult>>();
-                var cmd = new DeliverOpaqueMessageCommand
-                {
-                    PayloadBytes = req.Payload.ToByteArray()
-                };
-                var result = await handler.Handle(cmd, CancellationToken.None);
-                var response = new DeliverOpaqueMessageResponse();
-                if (result.ResponsePayloadBytes is not null)
-                {
-                    response.ResponsePayload = new DeliverOpaqueMessageResponse.Types.Payload
-                    {
-                        Version = 1,
-                        ResponsePayload = ByteString.CopyFrom(result.ResponsePayloadBytes)
-                    };
-                }
-                return response;
-            }));
+            // Replace network sender to route directly to server fake handler and return payload
+            services.Replace(ServiceDescriptor.Singleton<Percolator.Network.Messaging.INetworkSender>(sp => new FakeNetworkSender(serverHost.Services)));
         });
 
         var mediator = clientHost.Services.GetRequiredService<IMediator>();

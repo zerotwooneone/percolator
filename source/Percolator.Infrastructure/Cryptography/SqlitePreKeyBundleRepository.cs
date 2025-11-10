@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Percolator.Cryptography;
 using Percolator.Infrastructure.Persistence;
+using Percolator.Identity;
 using CryptographyPeerId = Percolator.Cryptography.Primitives.PeerId;
 
 namespace Percolator.Infrastructure.Cryptography;
@@ -88,7 +89,18 @@ public class SqlitePreKeyBundleRepository : IPreKeyBundleRepository
             var peer = peers.FirstOrDefault(p => p.Id.Value == peerId.Value);
             if (peer is null)
             {
-                throw new InvalidOperationException($"Peer {peerId} not found.");
+                // Transitional backfill: resolve from authoritative PeerIdentities and create legacy Peer row
+                var identity = await _context.PeerIdentities.AsNoTracking()
+                    .FirstOrDefaultAsync(pi => pi.PeerId == peerId.Value);
+                if (identity is null)
+                {
+                    throw new InvalidOperationException($"Peer {peerId} not found.");
+                }
+
+                var legacy = new Peer(new Percolator.Identity.PeerId(identity.PeerId), identity.Name ?? identity.PeerId.ToString());
+                _context.Peers.Add(legacy);
+                await _context.SaveChangesAsync();
+                peer = legacy;
             }
 
             // Remove any existing identity key and its related pre-keys for this peer
