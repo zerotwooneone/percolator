@@ -8,6 +8,7 @@ using Percolator.Application.Network;
 using Percolator.Contracts;
 using Percolator.Cryptography;
 using Percolator.Identity;
+using Percolator.Identity.Model;
 
 namespace Percolator.Application.Cli;
 
@@ -16,24 +17,26 @@ public sealed class DhtPingHandler : IRequestHandler<DhtPingCommand, Unit>
     private readonly ILogger<DhtPingHandler> _logger;
     private readonly IConversationService _conversationService;
     private readonly IMessageService _messageService;
-    private readonly IPeerRepository _peerRepository;
+    private readonly IPeerIdentityRepository _peerIdentityRepository;
 
     public DhtPingHandler(
         ILogger<DhtPingHandler> logger,
         IConversationService conversationService,
         IMessageService messageService,
-        IPeerRepository peerRepository)
+        IPeerIdentityRepository peerIdentityRepository)
     {
         _logger = logger;
         _conversationService = conversationService;
         _messageService = messageService;
-        _peerRepository = peerRepository;
+        _peerIdentityRepository = peerIdentityRepository;
     }
 
     public async Task<Unit> Handle(DhtPingCommand request, CancellationToken cancellationToken)
     {
-        var peer = await _peerRepository.GetByNameAsync(request.TargetPeerName).ConfigureAwait(false)
+        var identity = await _peerIdentityRepository.GetByNameAsync(new DisplayName(request.TargetPeerName)).ConfigureAwait(false)
             ?? throw new InvalidOperationException($"Peer '{request.TargetPeerName}' not found.");
+        // Bridge to legacy Peer for ConversationService
+        var peer = new Peer(identity.Id, identity.DisplayName?.Value ?? request.TargetPeerName);
 
         var direct = await _conversationService.GetExistingDirectSessionAsync(peer).ConfigureAwait(false)
             ?? throw new InvalidOperationException("Direct session not found. Establish a session before DHT ping.");

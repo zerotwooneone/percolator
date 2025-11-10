@@ -8,6 +8,7 @@ using Percolator.Chat.ValueObjects;
 using Percolator.Contracts;
 using Percolator.Cryptography;
 using Percolator.Identity;
+using Percolator.Identity.Model;
 using Percolator.Network;
 using PeerId = Percolator.Identity.PeerId;
 
@@ -20,31 +21,31 @@ public class DhtProbeHandler : IRequestHandler<DhtProbeCommand, FindNodeResponse
     private readonly IMessageService _messageService;
     private readonly ActiveIdentityContext _activeIdentityContext;
     private readonly ILogger<DhtProbeHandler> _logger;
-    private readonly IPeerRepository _peerRepository;
+    private readonly IPeerIdentityRepository _peerIdentityRepository;
     public DhtProbeHandler(
         IConversationService conversationService,
         IDirectSessionManager sessionManager,
         IMessageService messageService,
         ActiveIdentityContext activeIdentityContext,
         ILogger<DhtProbeHandler> logger,
-        IPeerRepository peerRepository)
+        IPeerIdentityRepository peerIdentityRepository)
     {
         _conversationService = conversationService;
         _sessionManager = sessionManager;
         _messageService = messageService;
         _activeIdentityContext = activeIdentityContext;
         _logger = logger;
-        _peerRepository = peerRepository;
+        _peerIdentityRepository = peerIdentityRepository;
     }
 
     public async Task<FindNodeResponse> Handle(DhtProbeCommand request, CancellationToken cancellationToken)
     {
-        var existingPeer = await _peerRepository.GetByNameAsync(request.TargetIdentityName).ConfigureAwait(false);
-        if (existingPeer is null)
+        var identity = await _peerIdentityRepository.GetByNameAsync(new DisplayName(request.TargetIdentityName)).ConfigureAwait(false);
+        if (identity is null)
         {
             throw new InvalidOperationException($"Unknown peer name '{request.TargetIdentityName}'. Use SetPeerNameByPublicKeyCommand first.");
         }
-        var remotePeer = existingPeer;
+        var remotePeer = new Peer(identity.Id, identity.DisplayName?.Value ?? request.TargetIdentityName);
         
         // 1) Ensure conversation by connecting (TOFU etc handled by ConversationService)
         var existingDirectConversationAsync = await _conversationService.GetExistingDirectSessionAsync(remotePeer).ConfigureAwait(false);

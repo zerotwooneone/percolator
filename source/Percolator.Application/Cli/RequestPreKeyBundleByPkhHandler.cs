@@ -8,6 +8,7 @@ using Percolator.Application.Sessions;
 using Percolator.Contracts;
 using Percolator.Cryptography;
 using Percolator.Identity;
+using Percolator.Identity.Model;
 using Percolator.Network;
 using IdentityPeerId = Percolator.Identity.PeerId;
 
@@ -20,7 +21,7 @@ public class RequestPreKeyBundleByPkhHandler : IRequestHandler<RequestPreKeyBund
     private readonly IDirectSessionManager _sessionManager;
     private readonly IMessageTransportService _transport;
     private readonly ActiveIdentityContext _activeIdentity;
-    private readonly IPeerRepository _peerRepository;
+    private readonly IPeerIdentityRepository _peerIdentityRepository;
     private readonly IDirectSessionManager _directSessionManager;
     private readonly IPeerPublicSigningKeyStore _peerPublicSigningKeyStore;
     private readonly IOneTimeKeyProvider _oneTimeKeyProvider;
@@ -32,7 +33,7 @@ public class RequestPreKeyBundleByPkhHandler : IRequestHandler<RequestPreKeyBund
         IDirectSessionManager sessionManager,
         IMessageTransportService transport,
         ActiveIdentityContext activeIdentity,
-        IPeerRepository peerRepository,
+        IPeerIdentityRepository peerIdentityRepository,
         IDirectSessionManager directSessionManager,
         IPeerPublicSigningKeyStore peerPublicSigningKeyStore,
         IOneTimeKeyProvider oneTimeKeyProvider,
@@ -43,7 +44,7 @@ public class RequestPreKeyBundleByPkhHandler : IRequestHandler<RequestPreKeyBund
         _sessionManager = sessionManager;
         _transport = transport;
         _activeIdentity = activeIdentity;
-        _peerRepository = peerRepository;
+        _peerIdentityRepository = peerIdentityRepository;
         _directSessionManager = directSessionManager;
         _peerPublicSigningKeyStore = peerPublicSigningKeyStore;
         _oneTimeKeyProvider = oneTimeKeyProvider;
@@ -62,11 +63,12 @@ public class RequestPreKeyBundleByPkhHandler : IRequestHandler<RequestPreKeyBund
             _logger.LogWarning("Peer with public key hash {PublicKeyHash} already exists. Performing handshake anyway...", request.PublicKeyHash);
         }
 
-        var hostPeer = await _peerRepository.GetByNameAsync(request.TargetPeerName).ConfigureAwait(false);
-        if (hostPeer is null)
+        var hostIdentity = await _peerIdentityRepository.GetByNameAsync(new DisplayName(request.TargetPeerName)).ConfigureAwait(false);
+        if (hostIdentity is null)
         {
             throw new InvalidOperationException("Peer not found.");
         }
+        var hostPeer = new Peer(hostIdentity.Id, hostIdentity.DisplayName?.Value ?? request.TargetPeerName);
 
         var directHostSessionId = await _conversationService.GetExistingDirectSessionAsync(hostPeer).ConfigureAwait(false);
         if (directHostSessionId is null)
