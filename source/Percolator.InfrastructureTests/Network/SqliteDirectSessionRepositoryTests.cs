@@ -7,6 +7,7 @@ using Microsoft.EntityFrameworkCore;
 using NUnit.Framework;
 using Percolator.Infrastructure.Network;
 using Percolator.Infrastructure.Persistence;
+using Percolator.Infrastructure.Identity;
 using Percolator.Network;
 
 namespace Percolator.InfrastructureTests.Network;
@@ -72,8 +73,8 @@ public class SqliteDirectSessionRepositoryTests
         var peerA = Percolator.Network.PeerId.NewId();
         var peerB = Percolator.Network.PeerId.NewId();
 
-        ctx.Peers.Add(new Percolator.Identity.Peer(new Percolator.Identity.PeerId(peerA.Value), "peer-a"));
-        ctx.Peers.Add(new Percolator.Identity.Peer(new Percolator.Identity.PeerId(peerB.Value), "peer-b"));
+        ctx.PeerIdentities.Add(new PeerIdentityDbo { PeerId = peerA.Value, Name = "peer-a", Version = 0, CreatedAtUtc = DateTimeOffset.UtcNow, UpdatedAtUtc = DateTimeOffset.UtcNow });
+        ctx.PeerIdentities.Add(new PeerIdentityDbo { PeerId = peerB.Value, Name = "peer-b", Version = 0, CreatedAtUtc = DateTimeOffset.UtcNow, UpdatedAtUtc = DateTimeOffset.UtcNow });
         await ctx.SaveChangesAsync();
 
         await pcr.SaveAsync(new PeerConnection(peerA, new DirectMessagePublicKey(RandomNumberGenerator.GetBytes(32)), Array.Empty<GrpcEndPoint>(), Array.Empty<TlsCertificate>(), DateTimeOffset.UtcNow));
@@ -97,7 +98,7 @@ public class SqliteDirectSessionRepositoryTests
 
         // Ensure Peer and PeerConnection exist for FK
         var peerId = PeerId.NewId();
-        ctx.Peers.Add(new Percolator.Identity.Peer(new Percolator.Identity.PeerId(peerId.Value), "peer-a"));
+        ctx.PeerIdentities.Add(new PeerIdentityDbo { PeerId = peerId.Value, Name = "peer-a", Version = 0, CreatedAtUtc = DateTimeOffset.UtcNow, UpdatedAtUtc = DateTimeOffset.UtcNow });
         await ctx.SaveChangesAsync();
         var now = DateTimeOffset.UtcNow;
         await pcr.SaveAsync(new PeerConnection(peerId, new DirectMessagePublicKey(RandomNumberGenerator.GetBytes(32)), Array.Empty<GrpcEndPoint>(), Array.Empty<TlsCertificate>(), now));
@@ -146,9 +147,9 @@ public class SqliteDirectSessionRepositoryTests
         var (ctx, _, dsr, peerId) = await CreateRepos();
         var s = Guid.NewGuid();
         await dsr.UpsertAsync(peerId, new DirectSessionId(s), 1);
-        // Delete peer (which cascades to PeerConnection and should cascade to DirectSession as well)
-        var peer = await ctx.Peers.FindAsync(new Percolator.Identity.PeerId(peerId.Value));
-        ctx.Peers.Remove(peer!);
+        // Delete peer identity (which cascades to PeerConnection and should cascade to DirectSession as well)
+        var peer = await ctx.PeerIdentities.FindAsync(peerId.Value);
+        ctx.PeerIdentities.Remove(peer!);
         await ctx.SaveChangesAsync();
         var result = await dsr.GetBySessionIdAsync(new DirectSessionId(s), 1);
         result.Should().BeNull();
