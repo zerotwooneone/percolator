@@ -29,6 +29,14 @@ public class SqlitePeerConnectionRepository : IPeerConnectionRepository
 
     public async Task SaveAsync(PeerConnection peerConnection)
     {
+        // Ensure principal (PeerIdentity) exists for FK
+        var principal = await _context.PeerIdentities.AsNoTracking()
+            .FirstOrDefaultAsync(p => p.PeerId == peerConnection.Id.Value);
+        if (principal is null)
+        {
+            throw new InvalidOperationException($"PeerIdentity not found for PeerId={peerConnection.Id.Value}. Seed or create the identity before saving PeerConnection.");
+        }
+
         var existing = await _context.PeerConnections
             .Include(p => p.GrpcEndPoints)
             .Include(p => p.TlsCertificates)
