@@ -58,13 +58,13 @@ public sealed class ChatConversationResolver : IConversationResolver
 
             if (convo is null)
             {
-                var remotePeerId = session.RemotePeerId; // value object PeerId
+                var remotePeerId = session.RemotePeerId; // Guid RemotePeerId
                 // Try to load existing direct conversation for this identity by participant pair
                 convo = await _db.Conversations
                     .Include(c => c.Participants)
                     .Include(c => c.Messages)
                     .Where(c => c.SelfIdentityId == selfIdentityId && c.GroupConversationGuid == null)
-                    .Where(c => c.Participants.Any(p => p.ParticipantId == selfIdentity.PeerId) && c.Participants.Any(p => p.ParticipantId == remotePeerId.Value))
+                    .Where(c => c.Participants.Any(p => p.ParticipantId == selfIdentity.PeerId) && c.Participants.Any(p => p.ParticipantId == remotePeerId))
                     .FirstOrDefaultAsync(cancellationToken);
 
                 if (convo is null)
@@ -80,7 +80,7 @@ public sealed class ChatConversationResolver : IConversationResolver
                     };
 
                     var p1 = new ConversationParticipantDbo { ConversationId = convo.Id, ParticipantId = selfIdentity.PeerId };
-                    var p2 = new ConversationParticipantDbo { ConversationId = convo.Id, ParticipantId = remotePeerId.Value };
+                    var p2 = new ConversationParticipantDbo { ConversationId = convo.Id, ParticipantId = remotePeerId };
                     convo.Participants.Add(p1);
                     convo.Participants.Add(p2);
 

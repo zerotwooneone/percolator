@@ -221,7 +221,6 @@ public class PercolatorDbContext : DbContext
             entity.Property(e => e.Id)
                 .ValueGeneratedOnAdd();
             entity.Property(e => e.RemotePeerId)
-                .HasConversion(v => v.Value, v => new PeerId(v))
                 .IsRequired();
             entity.Property(e => e.SessionId)
                 .IsRequired();
@@ -332,13 +331,13 @@ public class PercolatorDbContext : DbContext
         {
             entity.HasKey(e => e.PeerId);
             entity.Property(e => e.PeerId)
-                .HasConversion(v => v.Value, v => new PeerId(v))
                 .ValueGeneratedNever();
 
             entity.Property(e => e.DirectMessagePublicKey);
             entity.HasIndex(e => e.DirectMessagePublicKey);
 
-            entity.HasOne<Peer>()
+            // Repoint FK to authoritative identity catalog
+            entity.HasOne<PeerIdentityDbo>()
                 .WithOne()
                 .HasForeignKey<PeerConnectionDbo>(e => e.PeerId)
                 .OnDelete(DeleteBehavior.Cascade)
@@ -357,8 +356,7 @@ public class PercolatorDbContext : DbContext
                 .OnDelete(DeleteBehavior.Cascade);
 
             // Optional relay peer id
-            entity.Property(e => e.RelayPeerId)
-                .HasConversion(v => v == null ? (Guid?)null : v.Value, v => v == null ? null : new PeerId(v.Value));
+            // RelayPeerId is Guid? now; no conversion needed
         });
 
         // DirectSessionConversation mapping
@@ -375,8 +373,7 @@ public class PercolatorDbContext : DbContext
         modelBuilder.Entity<GrpcEndPointDbo>(entity =>
         {
             entity.HasKey(e => e.Id);
-            entity.Property(e => e.PeerId)
-                .HasConversion(v => v.Value, v => new PeerId(v));
+            entity.Property(e => e.PeerId);
             entity.Property(e => e.Host).IsRequired();
             entity.Property(e => e.Port).IsRequired();
             entity.Property(e => e.LastSeen).IsRequired();
@@ -385,8 +382,7 @@ public class PercolatorDbContext : DbContext
         modelBuilder.Entity<TlsCertificateDbo>(entity =>
         {
             entity.HasKey(e => e.Id);
-            entity.Property(e => e.PeerId)
-                .HasConversion(v => v.Value, v => new PeerId(v));
+            entity.Property(e => e.PeerId);
             entity.Property(e => e.RawData).IsRequired();
             entity.Property(e => e.RawDataHash).IsRequired();
             entity.HasIndex(e => e.RawDataHash);

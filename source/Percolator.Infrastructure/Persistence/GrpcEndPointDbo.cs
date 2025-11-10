@@ -1,6 +1,5 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
-using Percolator.Identity;
 
 namespace Percolator.Infrastructure.Persistence;
 
@@ -10,7 +9,7 @@ public class GrpcEndPointDbo
     [DatabaseGenerated(DatabaseGeneratedOption.Identity)]
     public int Id { get; set; }
 
-    public PeerId PeerId { get; set; } = null!;
+    public Guid PeerId { get; set; }
 
     public string Host { get; set; } = string.Empty;
 

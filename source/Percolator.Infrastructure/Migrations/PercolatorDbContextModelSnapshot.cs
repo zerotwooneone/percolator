@@ -51,6 +51,108 @@ namespace Percolator.Infrastructure.Migrations
                     b.ToTable("Peers");
                 });
 
+            modelBuilder.Entity("Percolator.Infrastructure.Identity.PeerIdentityDbo", b =>
+                {
+                    b.Property<Guid>("PeerId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("PeerId");
+
+                    b.HasIndex("Name")
+                        .IsUnique();
+
+                    b.ToTable("PeerIdentities", (string)null);
+                });
+
+            modelBuilder.Entity("Percolator.Infrastructure.Identity.PeerIdentityKeyDbo_V2", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset>("ExpiresAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<byte[]>("Fingerprint")
+                        .IsRequired()
+                        .HasColumnType("BLOB");
+
+                    b.Property<DateTimeOffset>("NotBeforeUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("PeerId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<byte[]>("PublicKeySpki")
+                        .IsRequired()
+                        .HasColumnType("BLOB");
+
+                    b.Property<DateTimeOffset?>("RevokedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Fingerprint")
+                        .IsUnique();
+
+                    b.HasIndex("PeerId");
+
+                    b.ToTable("PeerIdentityKeys_V2", (string)null);
+                });
+
+            modelBuilder.Entity("Percolator.Infrastructure.Identity.PeerVerificationDbo", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset?>("ExpiresAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<byte[]>("Fingerprint")
+                        .IsRequired()
+                        .HasColumnType("BLOB");
+
+                    b.Property<int>("Method")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset?>("NotBeforeUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Note")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("PeerId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("VerifiedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("VerifiedBy")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Fingerprint");
+
+                    b.HasIndex("PeerId", "Fingerprint");
+
+                    b.ToTable("PeerVerifications", (string)null);
+                });
+
             modelBuilder.Entity("Percolator.Infrastructure.Persistence.ConversationDbo", b =>
                 {
                     b.Property<Guid>("Id")
@@ -874,6 +976,26 @@ namespace Percolator.Infrastructure.Migrations
                     b.ToTable("TlsCertificates");
                 });
 
+            modelBuilder.Entity("Percolator.Infrastructure.Identity.PeerIdentityKeyDbo_V2", b =>
+                {
+                    b.HasOne("Percolator.Infrastructure.Identity.PeerIdentityDbo", "Peer")
+                        .WithMany("Keys")
+                        .HasForeignKey("PeerId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Peer");
+                });
+
+            modelBuilder.Entity("Percolator.Infrastructure.Identity.PeerVerificationDbo", b =>
+                {
+                    b.HasOne("Percolator.Infrastructure.Identity.PeerIdentityDbo", null)
+                        .WithMany("Verifications")
+                        .HasForeignKey("PeerId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Percolator.Infrastructure.Persistence.ConversationDbo", b =>
                 {
                     b.HasOne("Percolator.Infrastructure.Persistence.SelfIdentityDbo", null)
@@ -987,7 +1109,7 @@ namespace Percolator.Infrastructure.Migrations
 
             modelBuilder.Entity("Percolator.Infrastructure.Persistence.PeerConnectionDbo", b =>
                 {
-                    b.HasOne("Percolator.Identity.Peer", null)
+                    b.HasOne("Percolator.Infrastructure.Identity.PeerIdentityDbo", null)
                         .WithOne()
                         .HasForeignKey("Percolator.Infrastructure.Persistence.PeerConnectionDbo", "PeerId")
                         .OnDelete(DeleteBehavior.Cascade)
@@ -1102,6 +1224,13 @@ namespace Percolator.Infrastructure.Migrations
                         .IsRequired();
 
                     b.Navigation("PeerConnection");
+                });
+
+            modelBuilder.Entity("Percolator.Infrastructure.Identity.PeerIdentityDbo", b =>
+                {
+                    b.Navigation("Keys");
+
+                    b.Navigation("Verifications");
                 });
 
             modelBuilder.Entity("Percolator.Infrastructure.Persistence.ConversationDbo", b =>

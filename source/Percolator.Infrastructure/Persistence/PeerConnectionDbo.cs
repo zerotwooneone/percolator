@@ -1,6 +1,5 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
-using Percolator.Identity;
 
 namespace Percolator.Infrastructure.Persistence;
 
@@ -8,7 +7,7 @@ public class PeerConnectionDbo
 {
     [Key]
     [DatabaseGenerated(DatabaseGeneratedOption.None)]
-    public PeerId PeerId { get; set; } = null!; // PK and FK to Peers.Id
+    public Guid PeerId { get; set; } // PK and FK to PeerIdentities.PeerId
 
     public byte[]? DirectMessagePublicKey { get; set; }
 
@@ -21,5 +20,5 @@ public class PeerConnectionDbo
     /// <summary>
     /// Optional relay peer used to reach this peer (e.g., Host MQ).
     /// </summary>
-    public PeerId? RelayPeerId { get; set; }
+    public Guid? RelayPeerId { get; set; }
 }

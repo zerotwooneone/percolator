@@ -114,10 +114,56 @@ Red–Green–Refactor strategy
 - No permanent storage; messages are deleted immediately after ack
 - FIFO per destination device; preserve enqueue order on delivery.
 - Best-effort immediate delivery if recipient is online; otherwise enqueue.
-- Idempotency: consumers must treat duplicate MessageId as no-op; send path may be at-least-once.
 - Backpressure: define max in flight per peer; when exceeded, prefer enqueue to host relay with explicit SendResult indicating backpressure.
 
 ### Reverse Signal Example
 This project already implements the Signal protocol model - peer A aquires a prekey bundle for peer B. Peer A (known as the x3dh inviter) performs the x3dh handshake using the prekey bundle and sends keys to peer B (possibly relayed through an intermediary). Peer B (known as the x3dh responder) then completes the handshake with peer A's keys and responds with a ratchet message containing the shared session id. 
 
 However, this project also already implements a reverse Signal model where peer A (known as the reverse-signal requestor) sends their prekey bundle to Peer B (possibly relayed through an intermediary) as a request. Peer B (known as the x3dh initiator, and the reverse-signal acceptor) then initiates the handshake with peer A's keys and responds to the request with a custom message containing the handshake keys and a ratchet message containing the shared session id. Alice (known as the x3dh responder) then completes the handshake with peer B's keys. 
+
+---
+
+## Cleanup Plan (Cutover Finalization)
+
+Goal: Remove legacy `IPeerRepository` and legacy tables; eliminate transitional backfill; ensure all FKs point to `PeerIdentities`.
+
+### A) Prereqs (status)
+- All Application consumers use `IPeerIdentityRepository` (handlers refactored). [Done]
+- Transitional adapter for tests present: `Percolator.Application/Identity/PeerIdentityRepositoryAdapter.cs`. [Present]
+- Transitional backfill exists in `EstablishDirectSessionHandler.cs` to satisfy FK from `PeerConnections` → `Peers`. [Present]
+
+### B) Migration: Repoint FKs to PeerIdentities and drop legacy tables
+1. Update EF model if needed so `PeerConnections.PeerId` FK targets `PeerIdentities(PeerId)`.
+   - Verify `Percolator.Infrastructure/Persistence/PercolatorDbContext.cs` sets FK for `PeerConnectionDbo.PeerId` to `PeerIdentities`.
+   - If currently mapped to `Peers`, change the relationship to the `PeerIdentities` entity.
+2. Add EF Core migration (name: `MovePeerConnectionsToPeerIdentities`).
+   - In `Up`:
+     - Drop existing FK constraint from `PeerConnections.PeerId` to `Peers.Id`.
+     - Create FK from `PeerConnections.PeerId` to `PeerIdentities.PeerId` (cascade: NoAction).
+   - In `Down`:
+     - Recreate FK to `Peers` (for rollback symmetry).
+3. Verify and repoint any other tables still referencing `Peers`:
+   - `GrpcEndPoints.PeerId`, `TlsCertificates.PeerId`, `DirectSessions.PeerId` (if any).
+   - Ensure they point to `PeerIdentities.PeerId`.
+4. Add cleanup migration (name: `DropLegacyPeerTables`).
+   - Drop tables: `Peers`, legacy `PeerIdentityKeys` (obsolete), `PeerPublicSigningKeys` (if not used anymore).
+
+### C) Code cleanup (after migrations applied and tests green)
+1. Remove transitional backfill in `Percolator.Application/Network/EstablishDirectSessionHandler.cs`:
+   - Delete `_legacyPeerRepository` field/ctor param and the `AddOrUpdateAsync(legacyPeer)` call.
+2. Remove `PeerIdentityRepositoryAdapter` and usages in tests; mock `IPeerIdentityRepository` directly.
+3. Remove `IPeerRepository` and its implementations, and DI registrations (including `PeerRepositoryShim`).
+4. Search and delete any remaining references to `Peers` DBOs.
+
+### D) Verification steps
+- Build solution and run:
+  - `dotnet test ./Percolator.ApplicationTests -v minimal`
+  - `dotnet test ./Percolator.ApplicationIntegrationTests -v minimal`
+- Smoke run for DHT ping/probe and handshake flows.
+
+### E) Rollback considerations
+- Keep `Down` methods in migrations to restore FKs to `Peers` and recreate the dropped tables if needed (dev-only safety).
+
+### F) Notes
+- Database is assumed fresh; no data migration required.
+- The FK change makes the backfill unnecessary; remove it immediately after the migration lands and tests pass.

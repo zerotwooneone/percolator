@@ -21,26 +21,26 @@ public sealed class SqliteDirectSessionRepository : IDirectSessionRepository
         var dbo = await _db.DirectSessions
             .AsNoTracking()
             .FirstOrDefaultAsync(x => x.SessionId == sessionId.Value && x.SelfIdentityId == selfIdentityId);
-        return dbo is null ? null : new DirectSession(new PeerId(dbo.RemotePeerId.Value), new DirectSessionId(dbo.SessionId));
+        return dbo is null ? null : new DirectSession(new PeerId(dbo.RemotePeerId), new DirectSessionId(dbo.SessionId));
     }
 
     public async Task<DirectSession?> GetByRemotePeerIdAsync(PeerId remotePeerId, int selfIdentityId)
     {
         var dbo = await _db.DirectSessions
             .AsNoTracking()
-            .FirstOrDefaultAsync(x => x.RemotePeerId == new Percolator.Identity.PeerId(remotePeerId.Value) && x.SelfIdentityId == selfIdentityId);
-        return dbo is null ? null : new DirectSession(new PeerId(dbo.RemotePeerId.Value), new DirectSessionId(dbo.SessionId));
+            .FirstOrDefaultAsync(x => x.RemotePeerId == remotePeerId.Value && x.SelfIdentityId == selfIdentityId);
+        return dbo is null ? null : new DirectSession(new PeerId(dbo.RemotePeerId), new DirectSessionId(dbo.SessionId));
     }
 
     public async Task UpsertAsync(PeerId remotePeerId, DirectSessionId sessionId, int selfIdentityId)
     {
         var existing = await _db.DirectSessions
-            .FirstOrDefaultAsync(x => x.RemotePeerId == new Percolator.Identity.PeerId(remotePeerId.Value) && x.SelfIdentityId == selfIdentityId);
+            .FirstOrDefaultAsync(x => x.RemotePeerId == remotePeerId.Value && x.SelfIdentityId == selfIdentityId);
         if (existing is null)
         {
             _db.DirectSessions.Add(new DirectSessionDbo
             {
-                RemotePeerId = new Percolator.Identity.PeerId(remotePeerId.Value),
+                RemotePeerId = remotePeerId.Value,
                 SessionId = sessionId.Value,
                 SelfIdentityId = selfIdentityId
             });
@@ -57,7 +57,7 @@ public sealed class SqliteDirectSessionRepository : IDirectSessionRepository
     public async Task DeleteByRemotePeerIdAsync(PeerId remotePeerId, int selfIdentityId)
     {
         var existing = await _db.DirectSessions
-            .FirstOrDefaultAsync(x => x.RemotePeerId == new Percolator.Identity.PeerId(remotePeerId.Value) && x.SelfIdentityId == selfIdentityId);
+            .FirstOrDefaultAsync(x => x.RemotePeerId == remotePeerId.Value && x.SelfIdentityId == selfIdentityId);
         if (existing != null)
         {
             _db.DirectSessions.Remove(existing);
