@@ -353,6 +353,7 @@ public class HandshakeInitiatorFlowTests
         connRepo.Setup(r => r.GetByIdAsync(It.IsAny<Percolator.Network.PeerId>())).ReturnsAsync((PeerConnection?)null);
         connRepo.Setup(r => r.SaveAsync(It.IsAny<PeerConnection>())).Returns(Task.CompletedTask);
 
+        var identityAdapter = new PeerIdentityRepositoryAdapter(peerRepo.Object);
         var initiatorHelloHandler = new HandleHandshakeInitiatorHelloHandler(
             new NullLogger<HandleHandshakeInitiatorHelloHandler>(),
             x3dh.Object,
@@ -361,7 +362,7 @@ public class HandshakeInitiatorFlowTests
             directRepo.Object,
             sessions.Object,
             responderActive,
-            peerRepo.Object,
+            identityAdapter,
             connRepo.Object,
             new Mock<IMediator>().Object);
 

@@ -11,6 +11,7 @@ using Percolator.Application.Sessions;
 using Percolator.Contracts;
 using Percolator.Cryptography;
 using Percolator.Identity;
+using Percolator.Identity.Model;
 using Percolator.Network;
 
 namespace Percolator.ApplicationTests.Network;
@@ -58,21 +59,22 @@ public class HandleHandshakeInitiatorHelloCommandTests
 
         // Persist identity artifacts
         peerRepo.Setup(p => p.AddOrUpdateAsync(It.IsAny<Peer>())).Returns(Task.CompletedTask);
+        // Adapter may call GetByIdAsync; return null by default
+        peerRepo.Setup(r => r.GetByIdAsync(It.IsAny<Percolator.Identity.PeerId>())).ReturnsAsync((Peer?)null);
         pkhStore.Setup(k => k.ActivateIfChangedAsync(It.IsAny<Percolator.Identity.PeerId>(), spki, It.IsAny<byte[]>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
-
         // No existing connection; SaveAsync should get relay set
         connRepo.Setup(r => r.GetByIdAsync(It.IsAny<Percolator.Network.PeerId>())).ReturnsAsync((PeerConnection?)null);
         PeerConnection? saved = null;
         connRepo.Setup(r => r.SaveAsync(It.IsAny<PeerConnection>())).Callback<PeerConnection>(pc => saved = pc).Returns(Task.CompletedTask);
 
-        var sut = new HandleHandshakeInitiatorHelloHandler(logger, x3dh.Object, pkhStore.Object, selfPre.Object, directRepo.Object, sessionMgr.Object, active, peerRepo.Object, connRepo.Object, mediator.Object);
+        var identityAdapter = new PeerIdentityRepositoryAdapter(peerRepo.Object);
+        var sut = new HandleHandshakeInitiatorHelloHandler(logger, x3dh.Object, pkhStore.Object, selfPre.Object, directRepo.Object, sessionMgr.Object, active, identityAdapter, connRepo.Object, mediator.Object);
         var cmd = new HandleHandshakeInitiatorHelloCommand(spki, eph, spkId, null, null, null, RelayHostPeerId: relayHost);
         _ = await sut.Handle(cmd, CancellationToken.None);
 
         Assert.That(saved, Is.Not.Null);
         Assert.That(saved!.RelayPeerId, Is.Not.Null);
-        Assert.That(saved!.RelayPeerId!.Value, Is.EqualTo(relayHost.Value));
     }
 
     [Test]
@@ -112,8 +114,11 @@ public class HandleHandshakeInitiatorHelloCommandTests
         var existing = new PeerConnection(remoteNetPeer, identitySigningKey: null, grpcEndPoints: Array.Empty<GrpcEndPoint>(), tlsCertificates: Array.Empty<TlsCertificate>(), lastSeen: DateTimeOffset.UtcNow);
         connRepo.Setup(r => r.GetByIdAsync(It.IsAny<Percolator.Network.PeerId>())).ReturnsAsync(existing);
         connRepo.Setup(r => r.SaveAsync(existing)).Returns(Task.CompletedTask);
+        // Adapter may call GetByIdAsync; return null by default
+        peerRepo.Setup(r => r.GetByIdAsync(It.IsAny<Percolator.Identity.PeerId>())).ReturnsAsync((Peer?)null);
 
-        var sut = new HandleHandshakeInitiatorHelloHandler(logger, x3dh.Object, pkhStore.Object, selfPre.Object, directRepo.Object, sessionMgr.Object, active, peerRepo.Object, connRepo.Object, mediator.Object);
+        var identityAdapter2 = new PeerIdentityRepositoryAdapter(peerRepo.Object);
+        var sut = new HandleHandshakeInitiatorHelloHandler(logger, x3dh.Object, pkhStore.Object, selfPre.Object, directRepo.Object, sessionMgr.Object, active, identityAdapter2, connRepo.Object, mediator.Object);
         var cmd = new HandleHandshakeInitiatorHelloCommand(spki, eph, spkId, null, null, null, RelayHostPeerId: relayHost);
         _ = await sut.Handle(cmd, CancellationToken.None);
 

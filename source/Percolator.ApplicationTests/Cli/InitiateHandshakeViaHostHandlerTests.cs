@@ -13,6 +13,7 @@ using Percolator.Application.Sessions;
 using Percolator.Contracts;
 using Percolator.Cryptography;
 using Percolator.Identity;
+using Percolator.Identity.Model;
 using Percolator.Network;
 
 namespace Percolator.ApplicationTests.Cli;
@@ -37,10 +38,13 @@ public class InitiateHandshakeViaHostHandlerTests
         var hostPeerGuid = Guid.NewGuid();
         var hostPeer = new Percolator.Identity.Peer(new Percolator.Identity.PeerId(hostPeerGuid), "host");
         peerRepo.Setup(r => r.GetByNameAsync("host")).ReturnsAsync(hostPeer);
+        // Adapter may call GetByIdAsync; return null by default
+        peerRepo.Setup(r => r.GetByIdAsync(It.IsAny<Percolator.Identity.PeerId>())).ReturnsAsync((Percolator.Identity.Peer?)null);
 
         // Direct session to host exists
         var hostDirectSession = new Percolator.Network.DirectSessionId(Guid.NewGuid());
-        conversation.Setup(c => c.GetExistingDirectSessionAsync(hostPeer)).ReturnsAsync(hostDirectSession);
+        conversation.Setup(c => c.GetExistingDirectSessionAsync(It.IsAny<Percolator.Identity.Peer>()))
+            .ReturnsAsync(hostDirectSession);
 
         // Prepare GetPreKeyBundle response
         var remoteIdentitySpki = new byte[] { 1, 2, 3 };
@@ -114,12 +118,13 @@ public class InitiateHandshakeViaHostHandlerTests
                 It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
+        var identityAdapter = new Percolator.Application.Identity.PeerIdentityRepositoryAdapter(peerRepo.Object);
         var handler = new InitiateHandshakeViaHostHandler(
             logger,
             conversation.Object,
             sessionManager.Object,
             transport.Object,
-            peerRepo.Object,
+            identityAdapter,
             pkhStore.Object,
             connRepo.Object,
             initiatorService.Object);

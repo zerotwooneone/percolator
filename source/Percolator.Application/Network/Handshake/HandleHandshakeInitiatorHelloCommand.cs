@@ -11,6 +11,7 @@ using Percolator.Application.Sessions;
 using Percolator.Contracts;
 using Percolator.Cryptography;
 using Percolator.Identity;
+using Percolator.Identity.Model;
 using Percolator.Network;
 using IdentityPeerId = Percolator.Identity.PeerId;
 using NetworkPeerId = Percolator.Network.PeerId;
@@ -39,7 +40,7 @@ namespace Percolator.Application.Network.Handshake
         private readonly IDirectSessionRepository _directRepo;
         private readonly IDirectSessionManager _sessionManager;
         private readonly ActiveIdentityContext _active;
-        private readonly IPeerRepository _peerRepository;
+        private readonly IPeerIdentityRepository _peerIdentityRepository;
         private readonly IPeerConnectionRepository _peerConnectionRepository;
         private readonly IMediator _mediator;
         public HandleHandshakeInitiatorHelloHandler(
@@ -50,7 +51,7 @@ namespace Percolator.Application.Network.Handshake
             IDirectSessionRepository directRepo,
             IDirectSessionManager sessionManager,
             ActiveIdentityContext active,
-            IPeerRepository peerRepository,
+            IPeerIdentityRepository peerIdentityRepository,
             IPeerConnectionRepository peerConnectionRepository,
             IMediator mediator)
         {
@@ -61,7 +62,7 @@ namespace Percolator.Application.Network.Handshake
             _directRepo = directRepo;
             _sessionManager = sessionManager;
             _active = active;
-            _peerRepository = peerRepository;
+            _peerIdentityRepository = peerIdentityRepository;
             _peerConnectionRepository = peerConnectionRepository;
             _mediator = mediator;
         }
@@ -147,7 +148,10 @@ namespace Percolator.Application.Network.Handshake
 
             // Persist identity artifacts only after successful session establishment
             var displayName = Convert.ToHexString(pkh);
-            await _peerRepository.AddOrUpdateAsync(new Peer(resolvedRemotePeerId, displayName)).ConfigureAwait(false);
+            var identity = await _peerIdentityRepository.GetByIdAsync(resolvedRemotePeerId).ConfigureAwait(false)
+                ?? new PeerIdentity(resolvedRemotePeerId);
+            identity.SetDisplayName(new DisplayName(displayName));
+            await _peerIdentityRepository.SaveAsync(identity).ConfigureAwait(false);
             await _pkhStore.ActivateIfChangedAsync(resolvedRemotePeerId, spki, pkh, DateTimeOffset.UtcNow, cancellationToken).ConfigureAwait(false);
             var netPeerId = new NetworkPeerId(resolvedRemotePeerId.Value);
             var existingConn = await _peerConnectionRepository.GetByIdAsync(netPeerId).ConfigureAwait(false);

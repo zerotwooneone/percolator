@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using MediatR;
 using Microsoft.Extensions.Logging;
 using Percolator.Identity;
+using Percolator.Identity.Model;
 
 namespace Percolator.Application.Identity
 {
@@ -14,16 +15,16 @@ namespace Percolator.Application.Identity
     {
         private readonly ILogger<SetPeerNameByPublicKeyHandler> _logger;
         private readonly IPeerPublicSigningKeyStore _keyStore;
-        private readonly IPeerRepository _peerRepository;
+        private readonly IPeerIdentityRepository _peerIdentityRepository;
 
         public SetPeerNameByPublicKeyHandler(
             ILogger<SetPeerNameByPublicKeyHandler> logger,
             IPeerPublicSigningKeyStore keyStore,
-            IPeerRepository peerRepository)
+            IPeerIdentityRepository peerIdentityRepository)
         {
             _logger = logger;
             _keyStore = keyStore;
-            _peerRepository = peerRepository;
+            _peerIdentityRepository = peerIdentityRepository;
         }
 
         public async Task Handle(SetPeerNameByPublicKeyCommand request, CancellationToken cancellationToken)
@@ -37,38 +38,26 @@ namespace Percolator.Application.Identity
 
             // Try to resolve an existing peer by PKH mapping
             var existingPeerId = await _keyStore.GetPeerIdByPublicKeyHashAsync(pkh, cancellationToken).ConfigureAwait(false);
-            Peer? peer = null;
+            PeerIdentity identity;
             if (existingPeerId is not null)
             {
-                peer = await _peerRepository.GetByIdAsync(existingPeerId).ConfigureAwait(false);
-                if (peer is null)
-                {
-                    // Create the peer with the known ID
-                    peer = new Peer(existingPeerId, request.Name);
-                    await _peerRepository.AddAsync(peer).ConfigureAwait(false);
-                }
-                else if (!string.Equals(peer.Name, request.Name, StringComparison.Ordinal))
-                {
-                    // Repository has no update; replace entry with same ID and new name
-                    await _peerRepository.RemoveAsync(existingPeerId).ConfigureAwait(false);
-                    await _peerRepository.AddAsync(new Peer(existingPeerId, request.Name)).ConfigureAwait(false);
-                }
+                identity = await _peerIdentityRepository.GetByIdAsync(existingPeerId).ConfigureAwait(false)
+                    ?? new PeerIdentity(existingPeerId);
+                identity.SetDisplayName(new DisplayName(request.Name));
+                await _peerIdentityRepository.SaveAsync(identity).ConfigureAwait(false);
             }
             else
             {
                 // No mapping yet; create or reuse by name
-                peer = await _peerRepository.GetByNameAsync(request.Name).ConfigureAwait(false);
-                if (peer is null)
-                {
-                    var newId = PeerId.NewId();
-                    peer = new Peer(newId, request.Name);
-                    await _peerRepository.AddAsync(peer).ConfigureAwait(false);
-                }
+                identity = await _peerIdentityRepository.GetByNameAsync(new DisplayName(request.Name)).ConfigureAwait(false)
+                    ?? new PeerIdentity(PeerId.NewId());
+                identity.SetDisplayName(new DisplayName(request.Name));
+                await _peerIdentityRepository.SaveAsync(identity).ConfigureAwait(false);
             }
 
             // Ensure PKH mapping is active for this peer
-            await _keyStore.ActivateIfChangedAsync(peer!.Id, request.IdentitySigningKeySpki, pkh, DateTimeOffset.UtcNow, cancellationToken).ConfigureAwait(false);
-            _logger.LogInformation("Set peer '{Name}' with id {PeerId} by public key (pkh={Pkh})", request.Name, peer.Id.Value, Convert.ToHexString(pkh));
+            await _keyStore.ActivateIfChangedAsync(identity.Id, request.IdentitySigningKeySpki, pkh, DateTimeOffset.UtcNow, cancellationToken).ConfigureAwait(false);
+            _logger.LogInformation("Set peer '{Name}' with id {PeerId} by public key (pkh={Pkh})", request.Name, identity.Id.Value, Convert.ToHexString(pkh));
         }
     }
 }

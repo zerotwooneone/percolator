@@ -10,6 +10,7 @@ using Percolator.Application.Network.Handshake;
 using Percolator.Application.Sessions;
 using Percolator.Contracts;
 using Percolator.Identity;
+using Percolator.Identity.Model;
 using Percolator.Network;
 using Percolator.Cryptography;
 
@@ -21,7 +22,7 @@ namespace Percolator.Application.Cli;
         private readonly IConversationService _conversationService;
         private readonly IDirectSessionManager _sessionManager;
         private readonly IMessageTransportService _transport;
-        private readonly IPeerRepository _peerRepository;
+        private readonly IPeerIdentityRepository _peerIdentityRepository;
         private readonly IPeerPublicSigningKeyStore _peerPublicSigningKeyStore;
         private readonly IPeerConnectionRepository _peerConnectionRepository;
         private readonly Percolator.Application.Network.Handshake.IInitiatorHelloService _initiatorHelloService;
@@ -31,7 +32,7 @@ namespace Percolator.Application.Cli;
             IConversationService conversationService,
             IDirectSessionManager sessionManager,
             IMessageTransportService transport,
-            IPeerRepository peerRepository,
+            IPeerIdentityRepository peerIdentityRepository,
             IPeerPublicSigningKeyStore peerPublicSigningKeyStore,
             IPeerConnectionRepository peerConnectionRepository,
             Percolator.Application.Network.Handshake.IInitiatorHelloService initiatorHelloService)
@@ -40,7 +41,7 @@ namespace Percolator.Application.Cli;
             _conversationService = conversationService;
             _sessionManager = sessionManager;
             _transport = transport;
-            _peerRepository = peerRepository;
+            _peerIdentityRepository = peerIdentityRepository;
             _peerPublicSigningKeyStore = peerPublicSigningKeyStore;
             _peerConnectionRepository = peerConnectionRepository;
             _initiatorHelloService = initiatorHelloService;
@@ -49,8 +50,9 @@ namespace Percolator.Application.Cli;
         public async Task<Unit> Handle(InitiateHandshakeViaHostCommand request, CancellationToken cancellationToken)
         {
             // Resolve Host and ensure an existing direct session to Host
-            var hostPeer = await _peerRepository.GetByNameAsync(request.HostPeerName).ConfigureAwait(false)
+            var hostIdentity = await _peerIdentityRepository.GetByNameAsync(new DisplayName(request.HostPeerName)).ConfigureAwait(false)
                 ?? throw new InvalidOperationException($"Peer '{request.HostPeerName}' not found.");
+            var hostPeer = new Percolator.Identity.Peer(hostIdentity.Id, hostIdentity.DisplayName?.Value ?? request.HostPeerName);
             var hostSession = await _conversationService.GetExistingDirectSessionAsync(hostPeer).ConfigureAwait(false)
                 ?? throw new InvalidOperationException("Direct session to Host not found. Establish a session before initiating handshake.");
 
@@ -60,18 +62,20 @@ namespace Percolator.Application.Cli;
         Percolator.Identity.Peer peer;
         if (targetPeerId is null)
         {
-            peer = new Percolator.Identity.Peer(Percolator.Identity.PeerId.NewId(), displayName);
+            var identity = new PeerIdentity(Percolator.Identity.PeerId.NewId());
+            identity.SetDisplayName(new DisplayName(displayName));
+            await _peerIdentityRepository.SaveAsync(identity).ConfigureAwait(false);
+            peer = new Percolator.Identity.Peer(identity.Id, identity.DisplayName?.Value ?? displayName);
         }
         else
         {
-            peer = await _peerRepository.GetByIdAsync(targetPeerId).ConfigureAwait(false) ?? new Percolator.Identity.Peer(targetPeerId, displayName);
-            // Preserve existing name if present, otherwise set display name
-            if (string.IsNullOrWhiteSpace(peer.Name))
-            {
-                peer = new Percolator.Identity.Peer(peer.Id, displayName);
-            }
+            var identity = await _peerIdentityRepository.GetByIdAsync(targetPeerId).ConfigureAwait(false) ?? new PeerIdentity(targetPeerId);
+            if (identity.DisplayName is null || string.IsNullOrWhiteSpace(identity.DisplayName.Value))
+                identity.SetDisplayName(new DisplayName(displayName));
+            await _peerIdentityRepository.SaveAsync(identity).ConfigureAwait(false);
+            peer = new Percolator.Identity.Peer(identity.Id, identity.DisplayName?.Value ?? displayName);
         }
-        await _peerRepository.AddOrUpdateAsync(peer).ConfigureAwait(false);
+        // identity already saved above
 
         // Upsert PeerConnection with Host as RelayPeerId
         var netPeerId = new Percolator.Network.PeerId(peer.Id.Value);
@@ -137,7 +141,7 @@ namespace Percolator.Application.Cli;
         // Bind PKH -> PeerId on initiator now that we have the remote SPKI, then upsert peer
         var pkh = SHA256.HashData(remoteIdentitySpki);
         await _peerPublicSigningKeyStore.ActivateIfChangedAsync(peer.Id, remoteIdentitySpki, pkh, DateTimeOffset.UtcNow, cancellationToken).ConfigureAwait(false);
-        await _peerRepository.AddOrUpdateAsync(peer).ConfigureAwait(false);
+        // Name was already persisted in identity repo
         connection.SetDirectMessagePublicKey(new DirectMessagePublicKey(remoteIdentitySpki));
         await _peerConnectionRepository.SaveAsync(connection).ConfigureAwait(false);
 
