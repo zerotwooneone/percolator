@@ -15,7 +15,6 @@ using Percolator.Network;
 using ChatConversation = Percolator.Chat.Conversation;
 using ChatConversationId = Percolator.Chat.ValueObjects.ConversationId;
 using ChatParticipantId = Percolator.Chat.ValueObjects.ParticipantId;
-using IdentityPeer = Percolator.Identity.Peer;
 using IdentityPeerId = Percolator.Identity.PeerId;
 using NetworkPeerId = Percolator.Network.PeerId;
 using CryptoSignature = Percolator.Cryptography.Signature;
@@ -29,7 +28,6 @@ namespace Percolator.Application.Network
         private readonly IX3DHOrchestrator _x3dhOrchestrator;
         private readonly IDirectSessionManager _sessionManager;
         private readonly IPeerIdentityRepository _peerIdentityRepository;
-        private readonly IPeerRepository _legacyPeerRepository;
         private readonly IPeerConnectionRepository _peerConnectionRepository;
         private readonly IX3DHManager _x3DhManager;
         private readonly IDirectSessionRepository _directSessionRepository;
@@ -41,7 +39,6 @@ namespace Percolator.Application.Network
             IX3DHOrchestrator x3dhOrchestrator,
             IDirectSessionManager sessionManager,
             IPeerIdentityRepository peerIdentityRepository,
-            IPeerRepository legacyPeerRepository,
             IPeerConnectionRepository peerConnectionRepository,
             IX3DHManager x3DhManager,
             IDirectSessionRepository directSessionRepository,
@@ -52,7 +49,6 @@ namespace Percolator.Application.Network
             _x3dhOrchestrator = x3dhOrchestrator;
             _sessionManager = sessionManager;
             _peerIdentityRepository = peerIdentityRepository;
-            _legacyPeerRepository = legacyPeerRepository;
             _peerConnectionRepository = peerConnectionRepository;
             _x3DhManager = x3DhManager;
             _directSessionRepository = directSessionRepository;
@@ -139,9 +135,7 @@ namespace Percolator.Application.Network
                 identity.SetDisplayName(new DisplayName(newPeerName));
                 await _peerIdentityRepository.SaveAsync(identity).ConfigureAwait(false);
             }
-            // Backfill legacy Peers row to satisfy FK from PeerConnections during transition
-            var legacyPeer = new IdentityPeer(identity.Id, identity.DisplayName?.Value ?? identity.Id.Value.ToString());
-            await _legacyPeerRepository.AddOrUpdateAsync(legacyPeer).ConfigureAwait(false);
+            // No legacy backfill needed: PeerConnections now FK to PeerIdentities
 
             // Handshake-side identity mapping: bind PKH -> this peer id (idempotent if already bound to same peer)
             var initiatorSpki = request.RemoteIdentityKeyBytes;

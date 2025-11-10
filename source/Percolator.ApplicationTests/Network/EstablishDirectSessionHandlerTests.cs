@@ -107,9 +107,12 @@ namespace Percolator.ApplicationTests.Network
             peerConnRepo.Setup(r => r.SaveAsync(It.IsAny<PeerConnection>()))
                 .Returns(Task.CompletedTask);
 
-            // Identity peer creation path (no existing peer)
+            // Identity peer creation path (no existing peer) and adapter save path
             peerRepo.Setup(r => r.GetByIdAsync(It.IsAny<Percolator.Identity.PeerId>()))
                 .ReturnsAsync((Peer?)null);
+            // Adapter prefers AddOrUpdateAsync; support both for strict mock
+            peerRepo.Setup(r => r.AddOrUpdateAsync(It.IsAny<Peer>()))
+                .Returns(Task.CompletedTask);
             peerRepo.Setup(r => r.AddAsync(It.IsAny<Peer>()))
                 .Returns(Task.CompletedTask);
 
@@ -136,7 +139,6 @@ namespace Percolator.ApplicationTests.Network
                 x3dhOrchestrator.Object,
                 sessionManager.Object,
                 identityAdapter,
-                peerRepo.Object,
                 peerConnRepo.Object,
                 x3dhManager.Object,
                 directRepo.Object,

@@ -57,7 +57,8 @@ public class SubmitPreKeysHandlerTests
         var remotePeer = new Peer(remotePeerId, "bob");
         _peerRepository.Setup(r => r.GetByNameAsync("bob")).ReturnsAsync(remotePeer);
         var directSessionId = new DirectSessionId(Guid.NewGuid());
-        _conversationService.Setup(s => s.GetExistingDirectSessionAsync(remotePeer))
+        _conversationService
+            .Setup(s => s.GetExistingDirectSessionAsync(It.IsAny<Peer>()))
             .ReturnsAsync(directSessionId);
 
         // One-time key provider returns fresh keys for signed pre-key and N one-time keys
