@@ -136,6 +136,7 @@ namespace Percolator.ApplicationTests.Network
                 x3dhOrchestrator.Object,
                 sessionManager.Object,
                 identityAdapter,
+                peerRepo.Object,
                 peerConnRepo.Object,
                 x3dhManager.Object,
                 directRepo.Object,

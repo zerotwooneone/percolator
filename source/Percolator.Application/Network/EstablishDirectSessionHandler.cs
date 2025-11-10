@@ -29,6 +29,7 @@ namespace Percolator.Application.Network
         private readonly IX3DHOrchestrator _x3dhOrchestrator;
         private readonly IDirectSessionManager _sessionManager;
         private readonly IPeerIdentityRepository _peerIdentityRepository;
+        private readonly IPeerRepository _legacyPeerRepository;
         private readonly IPeerConnectionRepository _peerConnectionRepository;
         private readonly IX3DHManager _x3DhManager;
         private readonly IDirectSessionRepository _directSessionRepository;
@@ -40,6 +41,7 @@ namespace Percolator.Application.Network
             IX3DHOrchestrator x3dhOrchestrator,
             IDirectSessionManager sessionManager,
             IPeerIdentityRepository peerIdentityRepository,
+            IPeerRepository legacyPeerRepository,
             IPeerConnectionRepository peerConnectionRepository,
             IX3DHManager x3DhManager,
             IDirectSessionRepository directSessionRepository,
@@ -50,6 +52,7 @@ namespace Percolator.Application.Network
             _x3dhOrchestrator = x3dhOrchestrator;
             _sessionManager = sessionManager;
             _peerIdentityRepository = peerIdentityRepository;
+            _legacyPeerRepository = legacyPeerRepository;
             _peerConnectionRepository = peerConnectionRepository;
             _x3DhManager = x3DhManager;
             _directSessionRepository = directSessionRepository;
@@ -129,11 +132,16 @@ namespace Percolator.Application.Network
             if (identity is null)
             {
                 _logger.LogInformation("Peer with key hash {KeyHash} is unknown. Creating a new peer identity", Convert.ToBase64String(request.RemoteIdentityKeyBytes));
-                var newPeerName = $"Peer-{Convert.ToBase64String(request.RemoteIdentityKeyBytes)}";
+                var pkhForName = SHA256.HashData(request.RemoteIdentityKeyBytes);
+                var hex = Convert.ToHexString(pkhForName);
+                var newPeerName = $"Peer-{hex.Substring(0, Math.Min(12, hex.Length))}";
                 identity = new PeerIdentity(identityPeerId);
                 identity.SetDisplayName(new DisplayName(newPeerName));
                 await _peerIdentityRepository.SaveAsync(identity).ConfigureAwait(false);
             }
+            // Backfill legacy Peers row to satisfy FK from PeerConnections during transition
+            var legacyPeer = new IdentityPeer(identity.Id, identity.DisplayName?.Value ?? identity.Id.Value.ToString());
+            await _legacyPeerRepository.AddOrUpdateAsync(legacyPeer).ConfigureAwait(false);
 
             // Handshake-side identity mapping: bind PKH -> this peer id (idempotent if already bound to same peer)
             var initiatorSpki = request.RemoteIdentityKeyBytes;

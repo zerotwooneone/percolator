@@ -94,13 +94,14 @@ public class SubmitPreKeysHandlerTests
             .ReturnsAsync(new Plaintext(responseBytes));
 
         // Act
+        var identityAdapter = new PeerIdentityRepositoryAdapter(_peerRepository.Object);
         var handler = new SubmitPreKeysHandler(
             new NullLogger<SubmitPreKeysHandler>(),
             _conversationService.Object,
             _sessionManager.Object,
             _transport.Object,
             _activeIdentity,
-            _peerRepository.Object,
+            identityAdapter,
             _oneTimeKeyProvider.Object,
             _selfPreKeyRepo.Object);
 
@@ -127,13 +128,14 @@ public class SubmitPreKeysHandlerTests
             ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
             ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256));
 
+        var identityAdapter = new PeerIdentityRepositoryAdapter(_peerRepository.Object);
         var handler = new SubmitPreKeysHandler(
             new NullLogger<SubmitPreKeysHandler>(),
             _conversationService.Object,
             _sessionManager.Object,
             _transport.Object,
             _activeIdentity,
-            _peerRepository.Object,
+            identityAdapter,
             _oneTimeKeyProvider.Object,
             _selfPreKeyRepo.Object);
 
