@@ -114,6 +114,7 @@ Red–Green–Refactor strategy
 - No permanent storage; messages are deleted immediately after ack
 - FIFO per destination device; preserve enqueue order on delivery.
 - Best-effort immediate delivery if recipient is online; otherwise enqueue.
+- Idempotency: consumers must treat duplicate MessageId as no-op; send path may be at-least-once.
 - Backpressure: define max in flight per peer; when exceeded, prefer enqueue to host relay with explicit SendResult indicating backpressure.
 
 ### Reverse Signal Example
@@ -154,6 +155,7 @@ Goal: Remove legacy `IPeerRepository` and legacy tables; eliminate transitional 
 2. Remove `PeerIdentityRepositoryAdapter` and usages in tests; mock `IPeerIdentityRepository` directly.
 3. Remove `IPeerRepository` and its implementations, and DI registrations (including `PeerRepositoryShim`).
 4. Search and delete any remaining references to `Peers` DBOs.
+5. Delete `Percolator.Identity/InMemoryPeerIdentityRepository.cs`
 
 ### D) Verification steps
 - Build solution and run:
