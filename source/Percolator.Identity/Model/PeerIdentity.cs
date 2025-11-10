@@ -134,8 +134,8 @@ public sealed class PeerIdentity
         _domainEvents.Add(new PeerDistrustedEvent(Id, reason, now));
     }
 
-    // Testing hook used by repository tests to simulate stale writers
-    internal void SetVersionForTesting(int version) => Version = version;
+    // Apply version from persistence (used by repositories)
+    public void SetVersionFromPersistence(int version) => Version = version;
 }
 
 public sealed record PeerVerifiedEvent(PeerId PeerId, byte[] Fingerprint, VerificationMethod Method, DateTimeOffset VerifiedAt, string? VerifiedBy);

@@ -3,6 +3,7 @@ using Percolator.Identity;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Percolator.Dht;
 using Percolator.Infrastructure.Persistence;
+using Percolator.Infrastructure.Identity;
 
 namespace Percolator.Infrastructure.Persistence;
 
@@ -13,6 +14,9 @@ public class PercolatorDbContext : DbContext
     }
 
     public DbSet<Peer> Peers { get; set; } = null!;
+    public DbSet<PeerIdentityDbo> PeerIdentities { get; set; } = null!;
+    public DbSet<PeerIdentityKeyDbo_V2> PeerIdentityKeys_V2 { get; set; } = null!;
+    public DbSet<PeerVerificationDbo> PeerVerifications { get; set; } = null!;
     public DbSet<PeerIdentityKeyDbo> PeerIdentityKeys { get; set; } = null!;
     public DbSet<SignedPreKeyDbo> SignedPreKeys { get; set; } = null!;
     public DbSet<OneTimePreKeyDbo> OneTimePreKeys { get; set; } = null!;
@@ -56,6 +60,54 @@ public class PercolatorDbContext : DbContext
 
             entity.Property(e => e.Name).IsRequired();
             entity.HasIndex(e => e.Name).IsUnique();
+        });
+
+        // PeerIdentities (authoritative peer catalog for identity aggregate)
+        modelBuilder.Entity<PeerIdentityDbo>(entity =>
+        {
+            entity.ToTable("PeerIdentities");
+            entity.HasKey(e => e.PeerId);
+            entity.Property(e => e.PeerId).ValueGeneratedNever();
+            entity.Property(e => e.Name).IsRequired();
+            entity.Property(e => e.Version).IsRequired();
+            entity.Property(e => e.CreatedAtUtc).IsRequired();
+            entity.Property(e => e.UpdatedAtUtc).IsRequired();
+            entity.HasIndex(e => e.Name).IsUnique();
+            entity.HasMany(e => e.Keys)
+                .WithOne(k => k.Peer)
+                .HasForeignKey(k => k.PeerId)
+                .IsRequired()
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasMany(e => e.Verifications)
+                .WithOne()
+                .HasForeignKey(v => v.PeerId)
+                .IsRequired()
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<PeerIdentityKeyDbo_V2>(entity =>
+        {
+            entity.ToTable("PeerIdentityKeys_V2");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.PeerId).IsRequired();
+            entity.Property(e => e.PublicKeySpki).IsRequired();
+            entity.Property(e => e.Fingerprint).IsRequired();
+            entity.Property(e => e.NotBeforeUtc).IsRequired();
+            entity.Property(e => e.ExpiresAtUtc).IsRequired();
+            entity.HasIndex(e => e.PeerId);
+            entity.HasIndex(e => e.Fingerprint).IsUnique();
+        });
+
+        modelBuilder.Entity<PeerVerificationDbo>(entity =>
+        {
+            entity.ToTable("PeerVerifications");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.PeerId).IsRequired();
+            entity.Property(e => e.Fingerprint).IsRequired();
+            entity.Property(e => e.Method).IsRequired();
+            entity.Property(e => e.VerifiedAtUtc).IsRequired();
+            entity.HasIndex(e => new { e.PeerId, e.Fingerprint });
+            entity.HasIndex(e => e.Fingerprint);
         });
 
         // SelfPreKeySigned

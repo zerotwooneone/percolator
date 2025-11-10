@@ -63,7 +63,7 @@ public class PeerIdentityRepositoryTests
         var stale = new PeerIdentity(id.Id);
         stale.AddKey(Bytes(2), now, now.AddDays(2), now);
         // Set same version as first save to simulate stale writer
-        stale.SetVersionForTesting(v1);
+        stale.SetVersionFromPersistence(v1);
 
         // First, a valid second save with fresh copy should succeed
         await repo.SaveAsync(fresh!);
