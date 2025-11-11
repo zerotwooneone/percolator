@@ -26,7 +26,7 @@ public class SqlitePreKeyBundleRepository : IPreKeyBundleRepository
                 .Include(ik => ik.SignedPreKeys)
                 .Include(ik => ik.OneTimePreKeys)
                 .ToListAsync();
-            var identityKeyDbo = identityKeyList.FirstOrDefault(ik => ik.PeerId.Value == peerId.Value);
+            var identityKeyDbo = identityKeyList.FirstOrDefault(ik => ik.PeerId == peerId.Value);
 
             if (identityKeyDbo is null)
             {
@@ -83,24 +83,12 @@ public class SqlitePreKeyBundleRepository : IPreKeyBundleRepository
         await using var transaction = await _context.Database.BeginTransactionAsync();
         try
         {
-            // EF Sqlite struggles to translate value-object property access (p.Id.Value) in queries.
-            // Materialize peers then compare by Guid locally to avoid translation issues.
-            var peers = await _context.Peers.AsNoTracking().ToListAsync();
-            var peer = peers.FirstOrDefault(p => p.Id.Value == peerId.Value);
-            if (peer is null)
+            // Resolve peer existence via authoritative PeerIdentities catalog
+            var identity = await _context.PeerIdentities.AsNoTracking()
+                .FirstOrDefaultAsync(pi => pi.PeerId == peerId.Value);
+            if (identity is null)
             {
-                // Transitional backfill: resolve from authoritative PeerIdentities and create legacy Peer row
-                var identity = await _context.PeerIdentities.AsNoTracking()
-                    .FirstOrDefaultAsync(pi => pi.PeerId == peerId.Value);
-                if (identity is null)
-                {
-                    throw new InvalidOperationException($"Peer {peerId} not found.");
-                }
-
-                var legacy = new Peer(new Percolator.Identity.PeerId(identity.PeerId), identity.Name ?? identity.PeerId.ToString());
-                _context.Peers.Add(legacy);
-                await _context.SaveChangesAsync();
-                peer = legacy;
+                throw new InvalidOperationException($"Peer {peerId} not found.");
             }
 
             // Remove any existing identity key and its related pre-keys for this peer
@@ -109,7 +97,7 @@ public class SqlitePreKeyBundleRepository : IPreKeyBundleRepository
                 .Include(ik => ik.OneTimePreKeys)
                 .AsNoTracking()
                 .ToListAsync();
-            var existing = identityKeys.FirstOrDefault(ik => ik.PeerId.Value == peerId.Value);
+            var existing = identityKeys.FirstOrDefault(ik => ik.PeerId == peerId.Value);
 
             if (existing is not null)
             {
@@ -119,7 +107,7 @@ public class SqlitePreKeyBundleRepository : IPreKeyBundleRepository
 
             var identityKey = new PeerIdentityKeyDbo
             {
-                PeerId = peer.Id,
+                PeerId = peerId.Value,
                 PublicKey = first.IdentitySigningKey.Value,
             };
 
@@ -163,7 +151,7 @@ public class SqlitePreKeyBundleRepository : IPreKeyBundleRepository
             var identityKeyDbo = await _context.PeerIdentityKeys
                 .Include(ik => ik.SignedPreKeys)
                 .Include(ik => ik.OneTimePreKeys)
-                .FirstOrDefaultAsync(ik => ik.PeerId.Value == peerId.Value);
+                .FirstOrDefaultAsync(ik => ik.PeerId == peerId.Value);
 
             if (identityKeyDbo is null)
             {

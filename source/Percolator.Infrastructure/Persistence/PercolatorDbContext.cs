@@ -13,7 +13,6 @@ public class PercolatorDbContext : DbContext
     {
     }
 
-    public DbSet<Peer> Peers { get; set; } = null!;
     public DbSet<PeerIdentityDbo> PeerIdentities { get; set; } = null!;
     public DbSet<PeerIdentityKeyDbo_V2> PeerIdentityKeys_V2 { get; set; } = null!;
     public DbSet<PeerVerificationDbo> PeerVerifications { get; set; } = null!;
@@ -51,16 +50,10 @@ public class PercolatorDbContext : DbContext
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
-        modelBuilder.Entity<Peer>(entity =>
-        {
-            entity.HasKey(e => e.Id);
-            entity.Property(e => e.Id)
-                .HasConversion(peerId => peerId.Value, value => new PeerId(value))
-                .ValueGeneratedNever();
+        // Ensure EF does not try to map legacy domain type 'Peer'
+        modelBuilder.Ignore<Percolator.Identity.Peer>();
 
-            entity.Property(e => e.Name).IsRequired();
-            entity.HasIndex(e => e.Name).IsUnique();
-        });
+        // Legacy Peers table removed; authoritative catalog is PeerIdentities
 
         // PeerIdentities (authoritative peer catalog for identity aggregate)
         modelBuilder.Entity<PeerIdentityDbo>(entity =>
@@ -245,12 +238,13 @@ public class PercolatorDbContext : DbContext
         {
             entity.HasKey(e => e.Id);
             entity.Property(e => e.PublicKey).IsRequired();
-            entity.Property(e => e.PeerId)
-                .HasConversion(peerId => peerId.Value, value => new PeerId(value));
+            entity.Property(e => e.PeerId);
 
-            entity.HasOne(d => d.Peer)
+            // FK to authoritative peer identity catalog
+            entity.HasOne<PeerIdentityDbo>()
                 .WithMany()
                 .HasForeignKey(d => d.PeerId)
+                .OnDelete(DeleteBehavior.Cascade)
                 .IsRequired();
         });
 
