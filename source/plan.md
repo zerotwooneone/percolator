@@ -55,9 +55,10 @@
    - Implement as adapter/read model sourced from `PeerIdentity` (hash/SPKI lookups), fed by domain events.
 
 5) Cleanup: remove legacy repository and tables via migration (no data preservation needed).
-   - Drop tables: Create a migration that DROPs `Peers`, `PeerIdentityKeys` (legacy), and `PeerPublicSigningKeys` (if not used).
-   - Ensure all FKs in dependent tables already reference `PeerIdentities(PeerId)` from initial schema.
-   - Remove repository: Delete `Percolator.Identity/IPeerRepository.cs` and all implementations in infra once the Sqlite `IPeerIdentityRepository` is wired and all consumers migrated.
+   - Drop tables: `Peers` only (done). Keep `PeerIdentityKeys` and its child tables (`SignedPreKey`, `OneTimePreKey`) since they serve X3DH prekey distribution and are orthogonal to identity V2.
+   - Keep `PeerPublicSigningKeys` while `IPeerPublicSigningKeyStore` remains in use.
+   - Ensure all FKs in dependent tables reference `PeerIdentities(PeerId)` (current schema does).
+   - Remove repository: Delete `Percolator.Identity/IPeerRepository.cs` and all implementations in infra once all consumers are migrated to `IPeerIdentityRepository` (if any remain). 
 
 6) Refactor app handlers to depend on aggregate behavior, not DBOs.
    - `InitiateHandshakeViaHostHandler`, `HandleHandshakeInitiatorHelloHandler`, and related identity updates.
@@ -147,7 +148,7 @@ Goal: Remove legacy `IPeerRepository` and legacy tables; eliminate transitional 
    - `GrpcEndPoints.PeerId`, `TlsCertificates.PeerId`, `DirectSessions.PeerId` (if any).
    - Ensure they point to `PeerIdentities.PeerId`.
 4. Add cleanup migration (name: `DropLegacyPeerTables`).
-   - Drop tables: `Peers`, legacy `PeerIdentityKeys` (obsolete), `PeerPublicSigningKeys` (if not used anymore).
+   - Drop tables: `Peers` (done). Do NOT drop `PeerIdentityKeys`/`SignedPreKey`/`OneTimePreKey` (still used for X3DH). Keep `PeerPublicSigningKeys` until the PKH store is refactored or removed.
 
 ### C) Code cleanup (after migrations applied and tests green)
 1. Remove transitional backfill in `Percolator.Application/Network/EstablishDirectSessionHandler.cs`:
