@@ -1,80 +1,85 @@
+using System.Linq;
 using System.Net;
 using Percolator.Network.ValueObjects;
 
 namespace Percolator.Network;
 
 /// <summary>
-/// Represents a discovered peer on the network.
+/// Authoritative provisional peer discovered on the network before identity binding.
 /// </summary>
 public class DiscoveredPeer
 {
-    /// <summary>
-    /// A unique identifier for the peer session.
-    /// </summary>
-    public PeerId Id { get; }
+    public DiscoveryKey DiscoveryKey { get; }
+    public PublicKeyHash? PublicKeyHash { get; private set; }
+    public DateTimeOffset FirstSeenUtc { get; private set; }
+    public DateTimeOffset LastSeenUtc { get; private set; }
+    public DiscoverySource Source { get; private set; }
+    public double Confidence { get; private set; }
 
-    /// <summary>
-    /// The IP address where the peer's gRPC service is listening.
-    /// </summary>
-    public IPEndPoint GrpcEndpoint { get; }
+    public List<GrpcEndPoint> Endpoints { get; } = new();
 
-    /// <summary>
-    /// The unique, stable identifier for the peer, derived from its public key.
-    /// </summary>
-    public PublicKeyHash PublicKeyHash { get; }
+    // Promotion state
+    public bool IsPromoted { get; private set; }
+    public PeerId? BoundPeerId { get; private set; }
+    public DateTimeOffset? PromotedAtUtc { get; private set; }
 
-    /// <summary>
-    /// The last time a broadcast was received from this peer.
-    /// </summary>
-    public DateTime LastSeenUtc { get; set; }
-
-    public DiscoveredPeer(PeerId id, IPAddress ipAddress, int port, PublicKeyHash publicKeyHash)
+    private DiscoveredPeer(DiscoveryKey key, PublicKeyHash? pkh, DateTimeOffset now)
     {
-        Id = id;
-        GrpcEndpoint = new IPEndPoint(ipAddress, port);
-        PublicKeyHash = publicKeyHash;
-        LastSeenUtc = DateTime.UtcNow;
+        DiscoveryKey = key;
+        PublicKeyHash = pkh;
+        FirstSeenUtc = now;
+        LastSeenUtc = now;
+        Source = DiscoverySource.Cache;
+        Confidence = 0.0;
     }
 
-    public override string ToString()
-    {
-        return GrpcEndpoint.ToString();
-    }
-
-    public override bool Equals(object? obj)
-    {
-        return obj is DiscoveredPeer other && PublicKeyHash.Equals(other.PublicKeyHash);
-    }
-
-    public override int GetHashCode()
-    {
-        return PublicKeyHash.GetHashCode();
-    }
-
-    public static bool operator ==(DiscoveredPeer? left, DiscoveredPeer? right)
-    {
-        if (left is null)
-        {
-            return right is null;
-        }
-        return left.Equals(right);
-    }
-
-    public static bool operator !=(DiscoveredPeer? left, DiscoveredPeer? right) => !(left == right);
+    public static DiscoveredPeer Create(DiscoveryKey key, PublicKeyHash? pkh, DateTimeOffset now)
+        => new DiscoveredPeer(key, pkh, now);
 
     public void RecordDiscovery(DiscoverySource source, DateTimeOffset now)
     {
-        if (now.UtcDateTime > LastSeenUtc)
+        Source = source;
+        if (now > LastSeenUtc)
         {
-            LastSeenUtc = now.UtcDateTime;
+            LastSeenUtc = now;
         }
+        // simple confidence bump for now
+        Confidence = Math.Min(1.0, Confidence + 0.1);
     }
 
     public void ObserveEndpoint(GrpcEndPoint endpoint, DateTimeOffset now)
     {
-        if (now.UtcDateTime > LastSeenUtc)
+        var idx = Endpoints.FindIndex(e => e.EndPoint.Host == endpoint.EndPoint.Host && e.EndPoint.Port == endpoint.EndPoint.Port);
+        var observed = new GrpcEndPoint(endpoint.EndPoint, now);
+        if (idx < 0)
         {
-            LastSeenUtc = now.UtcDateTime;
+            Endpoints.Add(observed);
         }
+        else
+        {
+            var existing = Endpoints[idx];
+            var newer = now > existing.LastSeen ? observed : existing;
+            Endpoints[idx] = newer;
+        }
+
+        if (now > LastSeenUtc)
+        {
+            LastSeenUtc = now;
+        }
+    }
+
+    public PeerRoutingProfile PromoteToRoutingProfile(PeerId id, DateTimeOffset promotedAt)
+    {
+        var prp = new PeerRoutingProfile();
+        prp.BindIdentity(id);
+        foreach (var ep in Endpoints)
+        {
+            prp.AddGrpcEndPoint(ep, ep.LastSeen);
+        }
+
+        IsPromoted = true;
+        BoundPeerId = id;
+        PromotedAtUtc = promotedAt;
+        return prp;
     }
 }

@@ -47,6 +47,13 @@ public class PercolatorDbContext : DbContext
     public DbSet<GroupAdminStateDbo> GroupAdminStates { get; set; } = null!;
     public DbSet<GroupManagerStateDbo> GroupManagerStates { get; set; } = null!;
     public DbSet<KeyAdoptionConfirmationDbo> KeyAdoptionConfirmations { get; set; } = null!;
+    // New Network domain persistence (PeerRoutingProfile)
+    public DbSet<PeerRoutingProfileDbo> PeerRoutingProfiles { get; set; } = null!;
+    public DbSet<GrpcEndPointRoutingDbo> PeerRoutingGrpcEndPoints { get; set; } = null!;
+    public DbSet<RelayLinkDbo> PeerRoutingRelays { get; set; } = null!;
+    public DbSet<TlsCertificateRoutingDbo> PeerRoutingTlsCertificates { get; set; } = null!;
+    public DbSet<DiscoveredPeerDbo> DiscoveredPeers { get; set; } = null!;
+    public DbSet<DiscoveredPeerEndpointDbo> DiscoveredPeerEndpoints { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -617,6 +624,95 @@ public class PercolatorDbContext : DbContext
             entity.HasIndex(e => e.RecipientPeerId);
             entity.HasIndex(e => new { e.RecipientPeerId, e.EnqueuedAtUtc });
             entity.HasIndex(e => e.AckId).IsUnique();
+        });
+
+        // PeerRoutingProfile (new Network domain schema)
+        modelBuilder.Entity<PeerRoutingProfileDbo>(entity =>
+        {
+            entity.ToTable("PeerRoutingProfiles");
+            entity.HasKey(e => e.PeerId);
+            entity.Property(e => e.PeerId).ValueGeneratedNever();
+            entity.Property(e => e.DirectMessagePublicKey);
+            entity.Property(e => e.ReachabilityStatus).IsRequired();
+            entity.Property(e => e.ReachabilityLastChangeUtc);
+        });
+
+        modelBuilder.Entity<GrpcEndPointRoutingDbo>(entity =>
+        {
+            entity.ToTable("PeerRoutingGrpcEndPoints");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.PeerId).IsRequired();
+            entity.Property(e => e.Host).IsRequired();
+            entity.Property(e => e.Port).IsRequired();
+            entity.Property(e => e.LastSeenUtc).IsRequired();
+            entity.HasIndex(e => new { e.PeerId, e.Host, e.Port }).IsUnique();
+            entity.HasOne<PeerRoutingProfileDbo>()
+                .WithMany()
+                .HasForeignKey(e => e.PeerId)
+                .OnDelete(DeleteBehavior.Cascade)
+                .IsRequired();
+        });
+
+        modelBuilder.Entity<RelayLinkDbo>(entity =>
+        {
+            entity.ToTable("PeerRoutingRelays");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.PeerId).IsRequired();
+            entity.Property(e => e.RelayPeerId).IsRequired();
+            entity.Property(e => e.LastSeenUtc).IsRequired();
+            entity.HasIndex(e => new { e.PeerId, e.RelayPeerId }).IsUnique();
+            entity.HasOne<PeerRoutingProfileDbo>()
+                .WithMany()
+                .HasForeignKey(e => e.PeerId)
+                .OnDelete(DeleteBehavior.Cascade)
+                .IsRequired();
+        });
+
+        modelBuilder.Entity<TlsCertificateRoutingDbo>(entity =>
+        {
+            entity.ToTable("PeerRoutingTlsCertificates");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.PeerId).IsRequired();
+            entity.Property(e => e.RawData).IsRequired();
+            entity.Property(e => e.RawDataHash).IsRequired();
+            entity.Property(e => e.AddedAtUtc).IsRequired();
+            entity.HasIndex(e => e.RawDataHash);
+            entity.HasOne<PeerRoutingProfileDbo>()
+                .WithMany()
+                .HasForeignKey(e => e.PeerId)
+                .OnDelete(DeleteBehavior.Cascade)
+                .IsRequired();
+        });
+
+        modelBuilder.Entity<DiscoveredPeerDbo>(entity =>
+        {
+            entity.ToTable("DiscoveredPeers");
+            entity.HasKey(e => e.DiscoveryKey);
+            entity.Property(e => e.DiscoveryKey).IsRequired();
+            entity.Property(e => e.PublicKeyHash);
+            entity.Property(e => e.FirstSeenUtc).IsRequired();
+            entity.Property(e => e.LastSeenUtc).IsRequired();
+            entity.Property(e => e.Source).IsRequired();
+            entity.Property(e => e.Confidence).IsRequired();
+            entity.Property(e => e.BoundPeerId);
+            entity.HasIndex(e => e.PublicKeyHash);
+        });
+
+        modelBuilder.Entity<DiscoveredPeerEndpointDbo>(entity =>
+        {
+            entity.ToTable("DiscoveredPeerEndpoints");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.DiscoveryKey).IsRequired();
+            entity.Property(e => e.Host).IsRequired();
+            entity.Property(e => e.Port).IsRequired();
+            entity.Property(e => e.FirstSeenUtc).IsRequired();
+            entity.Property(e => e.LastSeenUtc).IsRequired();
+            entity.HasIndex(e => new { e.DiscoveryKey, e.Host, e.Port }).IsUnique();
+            entity.HasOne<DiscoveredPeerDbo>()
+                .WithMany()
+                .HasForeignKey(e => e.DiscoveryKey)
+                .OnDelete(DeleteBehavior.Cascade)
+                .IsRequired();
         });
     }
 }

@@ -13,6 +13,7 @@ public sealed class PeerRoutingProfile
     public List<TlsCertificate> Certificates { get; } = new();
     public Reachability Reachability { get; private set; } = new();
     public List<RelayLink> Relays { get; } = new();
+    public IdentityPublicKey? IdentityPublicKey { get; private set; }
 
     public PeerRoutingProfile()
     {
@@ -62,9 +63,17 @@ public sealed class PeerRoutingProfile
         }
     }
 
+    public void SetIdentityPublicKey(IdentityPublicKey key)
+    {
+        IdentityPublicKey = key;
+    }
+
     public void MergeDiscovered(DiscoveredPeer provisional)
     {
-        // Minimal merge for now: ensure no throw; future: merge endpoints and timestamps
+        foreach (var ep in provisional.Endpoints)
+        {
+            AddGrpcEndPoint(ep, ep.LastSeen);
+        }
     }
 
     public void AddOrRefreshRelay(PeerId relayPeerId, DateTimeOffset now)

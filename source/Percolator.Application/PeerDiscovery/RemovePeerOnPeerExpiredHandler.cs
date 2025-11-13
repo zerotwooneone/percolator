@@ -18,9 +18,8 @@ public class RemovePeerOnPeerExpiredHandler : INotificationHandler<PeerExpiredNo
     public async Task Handle(PeerExpiredNotification notification, CancellationToken cancellationToken)
     {
         var networkPeer = notification.DiscoveredPeer;
-        _logger.LogInformation("- Peer expired: {Endpoint}", networkPeer.GrpcEndpoint);
-
-        var identityPeerId = new PeerId(networkPeer.Id.Value);
-        await _connectionManager.RemovePeer(identityPeerId).ConfigureAwait(false);
+        _logger.LogInformation("- Peer expired: discovery_key={DiscoveryKey}", networkPeer.DiscoveryKey.Value);
+        // At discovery stage we don't have a bound PeerId. No removal from connection manager.
+        await Task.CompletedTask;
     }
 }

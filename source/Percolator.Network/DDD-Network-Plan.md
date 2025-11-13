@@ -93,7 +93,7 @@
 - `IPeerRoutingProfileRepository` (replace current with rich aggregate methods):
   - `Task<PeerRoutingProfile?> GetByIdAsync(PeerId id)`
   - `Task UpsertAsync(PeerRoutingProfile aggregate)`
-  - `Task<PeerRoutingProfile?> GetByPublicKeyAsync(DirectMessagePublicKey pk)`
+  - `Task<PeerRoutingProfile?> GetByPublicKeyAsync(IdentityPublicKey pk)`
   - `Task<IEnumerable<PeerRoutingProfile>> GetStaleAsync(DateTimeOffset threshold)`
 - `IDiscoveredPeerRepository` (new):
   - `Task<DiscoveredPeer?> GetByDiscoveryKeyAsync(DiscoveryKey key)`
@@ -244,7 +244,105 @@ Note: These are domain ports; infrastructure repos (EF/Sqlite, caching) will liv
 - Green
   - Implement EF models/mappings/tables for new domain; implement repository methods; add basic repository tests against a temp DB file.
   - Build + run tests (green).
-- Refactor: indexes/constraints and code cleanup → build + run tests.
+  - Refactor: indexes/constraints and code cleanup → build + run tests.
+
+### Step 7a: Entity and Persistence Modeling (Authoritative)
+- Objective: design the best-fit entity models and persistence schema without being constrained by legacy data. No migration required; we will create new tables optimized for the domain.
+
+- Entities and Value Objects (authoritative definition)
+  - PeerRoutingProfile (Aggregate)
+    - Identity: `PeerId`
+    - Fields
+      - `IdentityPublicKey` (bytes; nullable until known)
+      - `ReachabilityStatus` (enum int), `ReachabilityLastChangeUtc` (utc)
+      - Endpoints: many `GrpcEndPoint { Host, Port, LastSeenUtc, FirstSeenUtc }`
+      - Relays: many `RelayLink { RelayPeerId, LastSeenUtc }`
+      - Certificates: many `TlsCertificate { RawData, RawDataHash, AddedAtUtc }`
+    - Invariants
+      - Unique by `PeerId`
+      - Endpoints unique per `(PeerId, Host, Port)`
+      - Relays unique per `(PeerId, RelayPeerId)`
+      - Certificates de-duplicated by `RawDataHash`
+    - Queries
+      - `GetByIdAsync(PeerId)`
+      - `GetByPublicKeyAsync(IdentityPublicKey)`
+      - `GetStaleAsync(threshold)` based on `ReachabilityLastChangeUtc` and/or endpoint freshness
+
+  - DiscoveredPeer (Entity)
+    - Identity: `DiscoveryKey` (VO)
+    - Fields
+      - `PublicKeyHash` (nullable until available)
+      - `FirstSeenUtc`, `LastSeenUtc`
+      - `Source` (DiscoverySource), `Confidence` (double/VO)
+      - `PromotedAtUtc` (nullable), `BoundPeerId` (nullable)
+      - Observed endpoints: many `DiscoveredPeerEndpoint { Host, Port, FirstSeenUtc, LastSeenUtc }`
+      - Backoff metadata (optional future): attempts, lastFailureAt, nextEligibleAt
+    - Invariants
+      - Unique by `DiscoveryKey`
+      - Endpoints unique per `(DiscoveryKey, Host, Port)`
+      - When `BoundPeerId` is set, promotion is irreversible; `PromotedAtUtc` must be populated
+    - Queries
+      - `GetByDiscoveryKeyAsync(DiscoveryKey)`
+      - `GetByPublicKeyHashAsync(PublicKeyHash)`
+      - `GetCandidatesAsync(seenSince)` ordered by recency/confidence
+      - `PromoteToRoutingProfileAsync` creates/merges into `PeerRoutingProfile`, sets `BoundPeerId`, `PromotedAtUtc`
+
+- Database schema (proposed)
+  - Table: `PeerRoutingProfiles`
+    - PK: `PeerId` (GUID)
+    - Columns: `IdentityPublicKey` (BLOB, null), `ReachabilityStatus` (INT, not null), `ReachabilityLastChangeUtc` (DATETIME, null)
+    - Indexes: `IX_PeerRoutingProfiles_IdentityPublicKey` (non-unique) for reverse lookup
+  - Table: `PeerRoutingEndpoints`
+    - PK: `Id` (INTEGER)
+    - Columns: `PeerId` (GUID, FK→PeerRoutingProfiles), `Host` (TEXT), `Port` (INT), `FirstSeenUtc` (DATETIME), `LastSeenUtc` (DATETIME)
+    - Unique: `(PeerId, Host, Port)`
+    - On delete: cascade
+  - Table: `PeerRoutingRelays`
+    - PK: `Id` (INTEGER)
+    - Columns: `PeerId` (GUID, FK), `RelayPeerId` (GUID), `LastSeenUtc` (DATETIME)
+    - Unique: `(PeerId, RelayPeerId)`
+    - On delete: cascade
+  - Table: `PeerRoutingCertificates`
+    - PK: `Id` (INTEGER)
+    - Columns: `PeerId` (GUID, FK), `RawData` (BLOB), `RawDataHash` (BLOB), `AddedAtUtc` (DATETIME)
+    - Index: `RawDataHash` (non-unique or unique if desired)
+    - On delete: cascade
+  - Table: `DiscoveredPeers`
+    - PK: `DiscoveryKey` (TEXT)
+    - Columns: `PublicKeyHash` (BLOB, null), `FirstSeenUtc` (DATETIME), `LastSeenUtc` (DATETIME), `Source` (INT), `Confidence` (REAL), `BoundPeerId` (GUID, null), `PromotedAtUtc` (DATETIME, null)
+    - Indexes: `PublicKeyHash` (non-unique), `BoundPeerId` (non-unique)
+  - Table: `DiscoveredPeerEndpoints`
+    - PK: `Id` (INTEGER)
+    - Columns: `DiscoveryKey` (TEXT, FK→DiscoveredPeers), `Host` (TEXT), `Port` (INT), `FirstSeenUtc` (DATETIME), `LastSeenUtc` (DATETIME)
+    - Unique: `(DiscoveryKey, Host, Port)`
+    - On delete: cascade
+
+- Repository behaviors
+  - Upsert semantics
+    - Merge endpoints/relays/certificates by natural keys; update timestamps if newer
+    - For DiscoveredPeer, accumulate endpoints and update `LastSeenUtc`; do not drop historical candidates prematurely
+  - Promotion
+    - `PromoteToRoutingProfileAsync` copies freshest observed endpoints and certificate presence into `PeerRoutingProfile`, sets `BoundPeerId` and `PromotedAtUtc` on `DiscoveredPeer`
+  - Stale queries
+    - `GetStaleAsync` uses `ReachabilityLastChangeUtc` and endpoint freshness thresholds
+
+- Notes
+  - This design intentionally separates provisional observations (DiscoveredPeers) from authoritative routing (PeerRoutingProfile)
+  - No data migration: create new tables and cut over; legacy tables can be dropped in Step 9
+
+#### Step 7a Implementation Status
+- Implemented (domain):
+  - DiscoveredPeer authoritative model (DiscoveryKey identity, endpoint accumulation, promotion)
+  - PeerRoutingProfile merge behavior and IdentityPublicKey support
+- Implemented (infrastructure):
+  - Repositories: SqliteDiscoveredPeerRepository and SqlitePeerRoutingProfileRepository
+  - Persistence: DiscoveredPeers, DiscoveredPeerEndpoints, PeerRoutingProfiles, PeerRoutingGrpcEndPoints, PeerRoutingRelays, PeerRoutingTlsCertificates
+  - Behaviors: upsert/merge for endpoints, relays; certificate rotation replace+hydrate; stale and candidate queries (client-side filtering where SQLite limits apply)
+- Tests: Domain and Infra tests cover promotion, merges, endpoint freshness, relays, certificate rotation, and queries.
+- Remaining Nice-to-haves:
+  - De-duplicate certificates on RawDataHash at DB-level (unique index optional)
+  - Add pruning windows and policies in repositories (configurable thresholds)
+  - Add RoutePlanner service tests once Step 6 is executed
 
 ### Step 8: Update application call sites
 - Scope: switch call sites to new domain APIs (see list in the plan) and map transport errors to `DeliveryOutcome`.

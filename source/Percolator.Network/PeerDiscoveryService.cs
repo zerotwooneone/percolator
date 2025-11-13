@@ -6,6 +6,7 @@ using System.Security;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Percolator.Contracts;
+using Percolator.Network.ValueObjects;
 
 namespace Percolator.Network;
 
@@ -158,16 +159,21 @@ public class PeerDiscoveryService : IDisposable, IPeerDiscoveryService
                 // 7. Extract peer info
                 var discoveredIp = result.RemoteEndPoint.Address;
                 var discoveredPort = protoPayload.Port;
+                var now = DateTimeOffset.UtcNow;
+                var dkey = new DiscoveryKey($"seed:{discoveredIp}:{discoveredPort}");
+                var peer = DiscoveredPeer.Create(dkey, publicKeyHash, now);
+                var observed = new GrpcEndPoint(new DnsEndPoint(discoveredIp.ToString(), discoveredPort), now);
+                peer.ObserveEndpoint(observed, now);
 
-                var peer = new DiscoveredPeer(PeerId.NewId(), discoveredIp, discoveredPort, publicKeyHash);
                 if (_peers.TryAdd(publicKeyHash, peer))
                 {
-                    _logger.LogInformation("Discovered new peer {PeerEndpoint} with ID {PeerId}", peer.GrpcEndpoint, BitConverter.ToString(publicKeyHash.Value));
+                    _logger.LogInformation("Discovered new peer {PeerEndpoint} pkh={Pkh}", $"{discoveredIp}:{discoveredPort}", BitConverter.ToString(publicKeyHash.Value));
                     await _handler.HandlePeerDiscoveredAsync(peer);
                 }
                 else if (_peers.TryGetValue(publicKeyHash, out var existingPeer))
                 {
-                    existingPeer.LastSeenUtc = DateTime.UtcNow;
+                    existingPeer.RecordDiscovery(DiscoverySource.SelfReported, now);
+                    existingPeer.ObserveEndpoint(observed, now);
                 }
             }
             catch (SecurityException ex)
@@ -190,12 +196,12 @@ public class PeerDiscoveryService : IDisposable, IPeerDiscoveryService
         while (!token.IsCancellationRequested)
         { 
             await Task.Delay(_config.PeerExpiration / 2, token);
-            var expiredPeers = _peers.Where(p => (DateTime.UtcNow - p.Value.LastSeenUtc) > _config.PeerExpiration).ToList();
+            var expiredPeers = _peers.Where(p => (DateTime.UtcNow - p.Value.LastSeenUtc.UtcDateTime) > _config.PeerExpiration).ToList();
             foreach (var expiredPeer in expiredPeers)
             {
                 if (_peers.TryRemove(expiredPeer.Key, out var removedPeer))
                 {
-                    _logger.LogInformation("Peer {PeerEndpoint} expired and was removed.", removedPeer.GrpcEndpoint);
+                    _logger.LogInformation("Peer expired and was removed. discovery_key={DiscoveryKey}", removedPeer.DiscoveryKey.Value);
                     await _handler.HandlePeerExpiredAsync(removedPeer);
                 }
             }

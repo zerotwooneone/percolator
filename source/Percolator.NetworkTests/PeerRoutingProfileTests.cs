@@ -67,7 +67,9 @@ public class PeerRoutingProfileTests
     public void MergeDiscovered_DoesNotThrow()
     {
         var profile = new PeerRoutingProfile();
-        var dp = new DiscoveredPeer(PeerId.NewId(), IPAddress.Loopback, 5000, new PublicKeyHash(new byte[32]));
+        var dk = new DiscoveryKey("seed:127.0.0.1:5000");
+        var dp = DiscoveredPeer.Create(dk, new PublicKeyHash(new byte[32]), DateTimeOffset.UtcNow);
+        dp.ObserveEndpoint(new GrpcEndPoint(new DnsEndPoint("127.0.0.1", 5000), DateTimeOffset.UtcNow), DateTimeOffset.UtcNow);
         profile.Invoking(p => p.MergeDiscovered(dp)).Should().NotThrow();
     }
 }

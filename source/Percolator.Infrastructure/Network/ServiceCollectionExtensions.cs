@@ -10,6 +10,9 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IPeerConnectionRepository, SqlitePeerConnectionRepository>();
         services.AddSingleton<ITrustedPeerStore, FileBasedTrustedPeerStore>();
         services.AddScoped<IDirectSessionRepository, SqliteDirectSessionRepository>();
+        // New Network domain repositories
+        services.AddScoped<IPeerRoutingProfileRepository, SqlitePeerRoutingProfileRepository>();
+        services.AddScoped<IDiscoveredPeerRepository, SqliteDiscoveredPeerRepository>();
         return services;
     }
 }

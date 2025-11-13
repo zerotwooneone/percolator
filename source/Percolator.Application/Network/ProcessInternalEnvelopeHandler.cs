@@ -444,7 +444,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                     await _mediator.Send(new ReceiveKeyAdoptionConfirmationCommand(
                         lookup,
                         new GroupKeyVersion(kac.KeyVersion),
-                        new IdentityPublicKey(kac.AdopterIdentityKey.ToByteArray()),
+                        new Percolator.Chat.ValueObjects.IdentityPublicKey(kac.AdopterIdentityKey.ToByteArray()),
                         kac.SentTimestampUtc.ToDateTimeOffset(),
                         kac.Signature.ToByteArray()
                     ), cancellationToken).ConfigureAwait(false);

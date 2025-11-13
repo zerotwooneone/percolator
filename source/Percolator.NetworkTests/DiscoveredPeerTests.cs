@@ -1,7 +1,7 @@
 using FluentAssertions;
 using Percolator.Network;
+using Percolator.Network.ValueObjects;
 using System.Net;
-using System.Security.Cryptography;
 
 namespace Percolator.NetworkTests;
 
@@ -9,61 +9,20 @@ namespace Percolator.NetworkTests;
 public class DiscoveredPeerTests
 {
     [Test]
-    public void Equals_WithSamePublicKeyHash_ShouldBeTrue()
+    public void Create_and_ObserveEndpoint_sets_properties()
     {
-        // Arrange
-        var hashBytes = SHA256.HashData("key1"u8.ToArray());
-        var publicKeyHash = new PublicKeyHash(hashBytes);
+        var dk = new DiscoveryKey("seed:127.0.0.1:1234");
+        var pkh = new PublicKeyHash(new byte[32]);
+        var now = DateTimeOffset.UtcNow;
 
-        // Create two peers with the same public key hash but different endpoints and session IDs
-        var peer1 = new DiscoveredPeer(PeerId.NewId(), IPAddress.Parse("127.0.0.1"), 1234, publicKeyHash);
-        var peer2 = new DiscoveredPeer(PeerId.NewId(), IPAddress.Parse("192.168.1.1"), 5678, publicKeyHash);
+        var peer = DiscoveredPeer.Create(dk, pkh, now);
+        peer.DiscoveryKey.Should().Be(dk);
+        peer.PublicKeyHash.Should().Be(pkh);
+        peer.FirstSeenUtc.Should().BeCloseTo(now, TimeSpan.FromSeconds(1));
+        peer.LastSeenUtc.Should().BeCloseTo(now, TimeSpan.FromSeconds(1));
 
-        // Act & Assert: They should be considered the same peer because their identity is the same.
-        peer1.Should().Be(peer2);
-        (peer1 == peer2).Should().BeTrue();
-        (peer1 != peer2).Should().BeFalse();
-        peer1.GetHashCode().Should().Be(peer2.GetHashCode());
-    }
-
-    [Test]
-    public void Equals_WithDifferentPublicKeyHash_ShouldBeFalse()
-    {
-        // Arrange
-        var hashBytes1 = SHA256.HashData("key1"u8.ToArray());
-        var publicKeyHash1 = new PublicKeyHash(hashBytes1);
-
-        var hashBytes2 = SHA256.HashData("key2"u8.ToArray());
-        var publicKeyHash2 = new PublicKeyHash(hashBytes2);
-
-        // Create two peers with different public key hashes but the same endpoint
-        var peer1 = new DiscoveredPeer(PeerId.NewId(), IPAddress.Parse("127.0.0.1"), 1234, publicKeyHash1);
-        var peer2 = new DiscoveredPeer(PeerId.NewId(), IPAddress.Parse("127.0.0.1"), 1234, publicKeyHash2);
-
-        // Act & Assert: They should be considered different peers.
-        peer1.Should().NotBe(peer2);
-        (peer1 != peer2).Should().BeTrue();
-        (peer1 == peer2).Should().BeFalse();
-    }
-
-    [Test]
-    public void Constructor_ShouldSetPropertiesCorrectly()
-    {
-        // Arrange
-        var id = PeerId.NewId();
-        var ipAddress = IPAddress.Parse("127.0.0.1");
-        var port = 1234;
-        var hashBytes = SHA256.HashData("key"u8.ToArray());
-        var publicKeyHash = new PublicKeyHash(hashBytes);
-
-        // Act
-        var peer = new DiscoveredPeer(id, ipAddress, port, publicKeyHash);
-
-        // Assert
-        peer.Id.Should().Be(id);
-        peer.GrpcEndpoint.Address.Should().Be(ipAddress);
-        peer.GrpcEndpoint.Port.Should().Be(port);
-        peer.PublicKeyHash.Should().Be(publicKeyHash);
-        peer.LastSeenUtc.Should().BeCloseTo(DateTime.UtcNow, TimeSpan.FromSeconds(1));
+        var ep = new GrpcEndPoint(new DnsEndPoint("127.0.0.1", 1234), now);
+        peer.ObserveEndpoint(ep, now);
+        peer.Endpoints.Should().ContainSingle(e => e.EndPoint.Host == "127.0.0.1" && e.EndPoint.Port == 1234);
     }
 }
