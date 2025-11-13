@@ -115,7 +115,7 @@ Note: These are domain ports; infrastructure repos (EF/Sqlite, caching) will liv
 - Network promotes/merges: `DiscoveredPeer.PromoteToRoutingProfile(PeerId)` and/or `PeerRoutingProfile.BindIdentity(PeerId)` then `PeerRoutingProfile.MergeDiscovered(...)`.
 - Repository invariants ensure one `PeerRoutingProfile` per `PeerId`; collisions merge provisional data and discard duplicates.
 
-## Phased Implementation Plan (no shims/in-memory)
+## Phased Implementation Plan 
 1) Foundation (types only)
 - Create new VOs: `Reachability`, `EndpointFreshness`, `DiscoverySource`, `Confidence`, `RelayRoute`, `DiscoveryKey`.
 - Tighten existing VOs (`GrpcEndPoint`, `DirectMessagePublicKey`, `PublicKeyHash`) with validation and equality semantics (if any gaps).
@@ -191,6 +191,75 @@ Note: These are domain ports; infrastructure repos (EF/Sqlite, caching) will liv
   - Schema: columns/tables superseded by new tables (e.g., legacy `PeerConnections`, `DirectSessions`, `RelayPeerId` columns).
   - DI: registrations for legacy repositories/services.
 
+## Execution Plan (AI-sized TDD steps)
+- No shims or in-memory repositories. Each step follows Red-Green-Refactor with explicit build/test gates.
+
+### Step 1: Core Value Objects (batch A)
+- Scope: `EndpointFreshness`, `Reachability`, `RelayLink`, `RelayPolicy`, `FreshnessPolicy`, `ReachabilityPolicy`.
+- Red
+  - Generate VO stubs and unit tests covering equality, validation, decay/threshold rules, and basic state transitions.
+  - Build solution; fix compiler errors only.
+  - Run tests; confirm failures (red) due to stubs.
+- Green
+  - Implement minimal behavior to satisfy tests.
+  - Build; run tests; ensure all pass (green).
+- Refactor
+  - Improve clarity and remove duplication.
+  - Build; run tests.
+
+### Step 2: Delivery/Backoff Signals (batch B)
+- Scope: `DeliveryOutcome`, `DeliveryFailureReason`, `BackoffState`, `RetryBudget`, `CertificatePresence`, optional `SelectionTrace`.
+- Red: stubs + tests (mapping and invariants) → build → run tests (red).
+- Green: implement minimal behavior → build + run tests (green).
+- Refactor: tidy → build + run tests.
+
+### Step 3: DiscoveredPeer (provisional identity)
+- Scope: entity with `RecordDiscovery`, `ObserveEndpoint`, `PromoteToRoutingProfile(PeerId)`.
+- Red: entity stub + tests for discovery accumulation, confidence updates, and promotion contract → build → run tests (red).
+- Green: implement behavior → build + run tests (green).
+- Refactor: tidy invariants/logical duplication → build + run tests.
+
+### Step 4: PeerRoutingProfile (basics)
+- Scope: `AddGrpcEndPoint`, `UpdateLastSeen`, `RotateCertificates`, `BindIdentity`, `MergeDiscovered`, `RecordReachability` (direct outcomes only).
+- Red: aggregate stub + tests for rules/invariants/events → build → run tests (red).
+- Green: implement behavior → build + run tests (green).
+- Refactor: tidy → build + run tests.
+
+### Step 5: PeerRoutingProfile (relays and pruning)
+- Scope: `AddOrRefreshRelay`, `RemoveRelay`, `PruneStaleRelays`; relay freshness interplay with policies.
+- Red → build → run tests (red).
+- Green → build + run tests (green).
+- Refactor → build + run tests.
+
+### Step 6: RoutePlanner service
+- Scope: deterministic selection using endpoint/relay freshness, reachability, certificate presence, and policies; emits optional `SelectionTrace`.
+- Red → build → run tests (red).
+- Green → build + run tests (green).
+- Refactor → build + run tests.
+
+### Step 7: Repository ports and Infrastructure tables
+- Scope: define ports `IPeerRoutingProfileRepository`, `IDiscoveredPeerRepository` (domain); implement EF/Sqlite repositories and schema in Infrastructure.
+- Red
+  - Add interfaces and infra stubs with compile-only tests ensuring ports are referenced (no runtime DB needed yet) → build → run tests (expected red if behavior tests assert persistence).
+- Green
+  - Implement EF models/mappings/tables for new domain; implement repository methods; add basic repository tests against a temp DB file.
+  - Build + run tests (green).
+- Refactor: indexes/constraints and code cleanup → build + run tests.
+
+### Step 8: Update application call sites
+- Scope: switch call sites to new domain APIs (see list in the plan) and map transport errors to `DeliveryOutcome`.
+- Red
+  - Update usage to new types/methods; adjust tests to assert interactions; build; fix compiler errors.
+  - Run tests; confirm red where behavior not yet wired.
+- Green
+  - Wire integration with repositories and `RoutePlanner`; adapt handlers to record reachability and apply policies.
+  - Build + run tests (green).
+- Refactor: simplify orchestration; ensure Network domain owns routing rules → build + run tests.
+
+### Step 9: Cleanup (code + schema)
+- Scope: remove legacy code and drop legacy tables (per Cleanup sections). No data migration; use a new SQLite DB file.
+- Execute removals and create EF migration(s) to drop tables/columns.
+- Build; run tests; smoke test with TLS default (TOFU) and dev override.
 Legacy items to remove after Network domain cutover
 - Code (Network/Application)
   - Percolator.Infrastructure/Network/SqlitePeerConnectionRepository.cs
