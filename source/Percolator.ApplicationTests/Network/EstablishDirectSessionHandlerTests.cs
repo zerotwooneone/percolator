@@ -47,6 +47,7 @@ namespace Percolator.ApplicationTests.Network
             var x3dhManager = new Mock<IX3DHManager>(MockBehavior.Strict);
             var directRepo = new Mock<IDirectSessionRepository>(MockBehavior.Strict);
             var pkhStore = new Mock<IPeerPublicSigningKeyStore>(MockBehavior.Strict);
+            var profileRepo = new Mock<IPeerRoutingProfileRepository>(MockBehavior.Loose);
 
             // Build request with initiator bundle
             var initiatorIdentity = ECDsa.Create(ECCurve.NamedCurves.nistP256);
@@ -138,7 +139,8 @@ namespace Percolator.ApplicationTests.Network
                 peerConnRepo.Object,
                 x3dhManager.Object,
                 directRepo.Object,
-                pkhStore.Object);
+                pkhStore.Object,
+                profileRepo.Object);
 
             // Act
             var result = await handler.Handle(cmd, CancellationToken.None);

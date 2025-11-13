@@ -12,6 +12,7 @@ using Percolator.Cryptography;
 using Percolator.Identity;
 using Percolator.Identity.Model;
 using Percolator.Network;
+using Percolator.Network.ValueObjects;
 using ChatConversation = Percolator.Chat.Conversation;
 using ChatConversationId = Percolator.Chat.ValueObjects.ConversationId;
 using ChatParticipantId = Percolator.Chat.ValueObjects.ParticipantId;
@@ -32,6 +33,7 @@ namespace Percolator.Application.Network
         private readonly IX3DHManager _x3DhManager;
         private readonly IDirectSessionRepository _directSessionRepository;
         private readonly IPeerPublicSigningKeyStore _pkhStore;
+        private readonly IPeerRoutingProfileRepository _peerRoutingProfileRepository;
 
         public EstablishDirectSessionHandler(
             ILogger<EstablishDirectSessionHandler> logger,
@@ -42,7 +44,8 @@ namespace Percolator.Application.Network
             IPeerConnectionRepository peerConnectionRepository,
             IX3DHManager x3DhManager,
             IDirectSessionRepository directSessionRepository,
-            IPeerPublicSigningKeyStore pkhStore)
+            IPeerPublicSigningKeyStore pkhStore,
+            IPeerRoutingProfileRepository peerRoutingProfileRepository)
         {
             _logger = logger;
             _activeIdentityContext = activeIdentityContext;
@@ -53,6 +56,7 @@ namespace Percolator.Application.Network
             _x3DhManager = x3DhManager;
             _directSessionRepository = directSessionRepository;
             _pkhStore = pkhStore;
+            _peerRoutingProfileRepository = peerRoutingProfileRepository;
         }
 
         public async Task<EstablishDirectSessionResult> Handle(EstablishDirectSessionCommand request, CancellationToken cancellationToken)
@@ -185,7 +189,7 @@ namespace Percolator.Application.Network
                 new Plaintext(responsePayload.ToByteArray()))
                 .ConfigureAwait(false);
 
-            return new EstablishDirectSessionResult
+            var result = new EstablishDirectSessionResult
             {
                 SessionId = directSessionId.ToString(),
                 ResponsePayloadBytes = responsePayload.ToByteArray(),
@@ -193,6 +197,23 @@ namespace Percolator.Application.Network
                 RemoteEphemeralKeyBytes = ephemeralKey.PublicKey.ExportSubjectPublicKeyInfo(),
                 RatchetMessageBytes = ratchetMessage.Value
             };
+
+            // Record reachability as Online in the domain routing profile (if present)
+            try
+            {
+                var profile = await _peerRoutingProfileRepository.GetByIdAsync(networkPeerId, cancellationToken).ConfigureAwait(false);
+                if (profile is not null)
+                {
+                    profile.RecordReachability(ReachabilityStatus.Online, DateTimeOffset.UtcNow);
+                    await _peerRoutingProfileRepository.UpsertAsync(profile, cancellationToken).ConfigureAwait(false);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to record reachability Online for {PeerId}", networkPeerId);
+            }
+
+            return result;
         }
     }
 }
