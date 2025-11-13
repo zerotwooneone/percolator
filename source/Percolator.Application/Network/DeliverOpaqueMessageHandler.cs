@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Net;
 using System.Collections.Generic;
 using Google.Protobuf;
 using MediatR;
@@ -24,6 +25,8 @@ namespace Percolator.Application.Network
         private readonly ActiveIdentityContext _activeIdentityContext;
         private readonly IRatchetKeySessionLookup _ratchetLookup;
         private readonly RelayOrchestrator _relayOrchestrator;
+        private readonly IPeerRoutingProfileRepository _profileRepository;
+        private readonly IProfileRoutePlanner _routePlanner;
         // Centralized allowlist to avoid drift with documentation and tests.
         private static readonly HashSet<InternalEnvelope.ApplicationPayloadOneofCase> AllowedCases = new()
         {
@@ -46,7 +49,9 @@ namespace Percolator.Application.Network
             IDirectSessionRepository directSessionRepository,
             ActiveIdentityContext activeIdentityContext,
             IRatchetKeySessionLookup ratchetLookup,
-            RelayOrchestrator relayOrchestrator)
+            RelayOrchestrator relayOrchestrator,
+            IPeerRoutingProfileRepository profileRepository,
+            IProfileRoutePlanner routePlanner)
         {
             _logger = logger;
             _sessionManager = sessionManager;
@@ -56,6 +61,8 @@ namespace Percolator.Application.Network
             _activeIdentityContext = activeIdentityContext;
             _ratchetLookup = ratchetLookup;
             _relayOrchestrator = relayOrchestrator;
+            _profileRepository = profileRepository;
+            _routePlanner = routePlanner;
         }
 
         private async Task<InternalEnvelope?> HandlePrekeyEnvelopeAsync(PrekeyEnvelope prekeyEnvelope,
@@ -164,15 +171,32 @@ namespace Percolator.Application.Network
                     ?? throw new InvalidOperationException($"No direct session mapping found for session {inferredSessionId}");
                 var remotePeerId = directSession.RemotePeerId;
                 _logger.LogInformation("Resolved remote peer {PeerId} for session {SessionId}", remotePeerId, directSession.SessionId);
-                var connectionInfo = await _peerConnectionRepository.GetByIdAsync(remotePeerId).ConfigureAwait(false);
-                if (connectionInfo?.GrpcEndPoints.FirstOrDefault() is null)
+                // Prefer domain routing profile with RoutePlanner selection; fall back to legacy connection repo
+                DnsEndPoint? endpoint = null;
+                GrpcEndPoint legacySelectedEndpoint = default;
+                PeerConnection? legacyConnectionInfo = null;
+                var profile = await _profileRepository.GetByIdAsync(remotePeerId, cancellationToken).ConfigureAwait(false);
+                if (profile is not null)
                 {
-                    _logger.LogWarning("Could not find connection info for peer {PeerId} to handle opaque message", remotePeerId);
-                    return new DeliverOpaqueMessageResult();
+                    var selection = _routePlanner.SelectRoute(profile);
+                    if (selection.Relay is null)
+                    {
+                        endpoint = selection.Endpoint.EndPoint;
+                        _logger.LogInformation("Using domain-planned endpoint {Endpoint} for peer {PeerId}", endpoint, remotePeerId);
+                    }
                 }
-
-                var endpoint = connectionInfo.GrpcEndPoints.First();
-                _logger.LogInformation("Using endpoint {Endpoint} for peer {PeerId}", endpoint, remotePeerId);
+                if (endpoint is null)
+                {
+                    legacyConnectionInfo = await _peerConnectionRepository.GetByIdAsync(remotePeerId).ConfigureAwait(false);
+                    if (legacyConnectionInfo?.GrpcEndPoints.FirstOrDefault() is null)
+                    {
+                        _logger.LogWarning("Could not find connection info for peer {PeerId} to handle opaque message", remotePeerId);
+                        return new DeliverOpaqueMessageResult();
+                    }
+                    legacySelectedEndpoint = legacyConnectionInfo.GrpcEndPoints.First();
+                    endpoint = legacySelectedEndpoint.EndPoint;
+                    _logger.LogInformation("Using legacy endpoint {Endpoint} for peer {PeerId}", endpoint, remotePeerId);
+                }
 
                 var internalEnvelope = InternalEnvelope.Parser.ParseFrom(plaintext.Value);
                 _logger.LogDebug("Parsed InternalEnvelope with case {Case}", internalEnvelope.ApplicationPayloadCase);
@@ -212,8 +236,11 @@ namespace Percolator.Application.Network
 
                 var processed = await _mediator.Send(new ProcessInternalEnvelopeCommand(internalEnvelope, ctx), cancellationToken).ConfigureAwait(false);
 
-                connectionInfo.UpdateLastSeen(endpoint, DateTimeOffset.UtcNow);
-                await _peerConnectionRepository.SaveAsync(connectionInfo).ConfigureAwait(false);
+                if (legacyConnectionInfo is not null && legacyConnectionInfo.GrpcEndPoints.Count > 0)
+                {
+                    legacyConnectionInfo.UpdateLastSeen(legacySelectedEndpoint, DateTimeOffset.UtcNow);
+                    await _peerConnectionRepository.SaveAsync(legacyConnectionInfo).ConfigureAwait(false);
+                }
 
                 // Signal: peer online. Attempt relay of queued messages one-by-one until empty or first failure.
                 try

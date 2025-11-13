@@ -9,6 +9,7 @@ using NetworkPeerId = Percolator.Network.PeerId;
 using Percolator.Chat.ValueObjects;
 using Percolator.Cryptography;
 using Google.Protobuf;
+using System.Net;
 
 namespace Percolator.Application.Network;
 
@@ -17,16 +18,22 @@ public class GrpcMessageTransportService : IMessageTransportService
     private readonly ConcurrentDictionary<string, TransportService.TransportServiceClient> _clients = new();
     private readonly ILogger<GrpcMessageTransportService> _logger;
     private readonly IPeerConnectionRepository _peerConnectionRepository;
+    private readonly IPeerRoutingProfileRepository _profileRepository;
+    private readonly IProfileRoutePlanner _routePlanner;
     private readonly IHttpClientFactory _httpClientFactory;
 
     public GrpcMessageTransportService(
         ILogger<GrpcMessageTransportService> logger,
         IPeerConnectionRepository peerConnectionRepository,
-        IHttpClientFactory httpClientFactory)
+        IHttpClientFactory httpClientFactory,
+        IPeerRoutingProfileRepository profileRepository,
+        IProfileRoutePlanner routePlanner)
     {
         _logger = logger;
         _peerConnectionRepository = peerConnectionRepository;
         _httpClientFactory = httpClientFactory;
+        _profileRepository = profileRepository;
+        _routePlanner = routePlanner;
     }
 
     public async Task<DeliverOpaqueMessageResponse> SendMessageAsync(
@@ -37,19 +44,30 @@ public class GrpcMessageTransportService : IMessageTransportService
     {
         // Use the recipient identity's GUID directly to address the network peer
         var networkPeerId = new NetworkPeerId(recipientPeerId.Value);
-        var peerConnection = await _peerConnectionRepository.GetByIdAsync(networkPeerId).ConfigureAwait(false);
-        if (peerConnection is null)
+        // Prefer domain routing profile + planner
+        GrpcEndPoint? endPoint = null;
+        var profile = await _profileRepository.GetByIdAsync(networkPeerId, cancellationToken).ConfigureAwait(false);
+        if (profile is not null)
         {
-            throw new InvalidOperationException($"No connection info found for peer {recipientPeerId}. Cannot send message.");
+            var selection = _routePlanner.SelectRoute(profile);
+            if (selection.Relay is null)
+            {
+                endPoint = selection.Endpoint;
+                _logger.LogInformation("Planner selected endpoint {Endpoint} for {Peer}", endPoint, recipientPeerId);
+            }
         }
-
-        if (peerConnection.GrpcEndPoints.Count == 0)
+        if (endPoint is null)
         {
-            throw new InvalidOperationException($"No gRPC endpoints found for peer {recipientPeerId}. Cannot send message.");
+            var peerConnection = await _peerConnectionRepository.GetByIdAsync(networkPeerId).ConfigureAwait(false)
+                ?? throw new InvalidOperationException($"No connection info found for peer {recipientPeerId}. Cannot send message.");
+            if (peerConnection.GrpcEndPoints.Count == 0)
+            {
+                throw new InvalidOperationException($"No gRPC endpoints found for peer {recipientPeerId}. Cannot send message.");
+            }
+            //todo: loop over connections sequentially
+            endPoint = peerConnection.GrpcEndPoints[0];
+            _logger.LogInformation("Falling back to legacy endpoint {Endpoint} for {Peer}", endPoint, recipientPeerId);
         }
-
-        //todo: loop over all the connections and try to send the message to all of them sequentially
-        var endPoint = peerConnection.GrpcEndPoints[0];
 
         // Use the endpoint as the client key, not the peer ID
         var clientKey = $"{endPoint.EndPoint.Host}:{endPoint.EndPoint.Port}";
@@ -74,8 +92,7 @@ public class GrpcMessageTransportService : IMessageTransportService
             _logger.LogInformation("Message sent successfully to {RecipientPeerId}. Response version: {Version}",
                 recipientPeerId, response.Version);
 
-            peerConnection.UpdateLastSeen(endPoint, DateTime.UtcNow);
-            await _peerConnectionRepository.SaveAsync(peerConnection).ConfigureAwait(false);
+            // Legacy last-seen update retained only for legacy path; planner path relies on domain repo updates elsewhere
             return response;
         }
         catch (InvalidProtocolBufferException ex)

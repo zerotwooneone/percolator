@@ -38,6 +38,8 @@ public static class ServiceCollectionExtensions
         // Register our network communication services
         services.AddSingleton<ITlsHandshakeService, TlsHandshakeService>();
         services.AddSingleton<IGrpcSessionService, GrpcSessionService>();
+        // Domain-level route planner for PeerRoutingProfile selection
+        services.AddSingleton<IProfileRoutePlanner, SimpleRoutePlanner>();
 
         // Register a named HttpClient with simplified TLS validation logic using shared certificate
         services.AddHttpClient("percolator-grpc", (serviceProvider, client) =>

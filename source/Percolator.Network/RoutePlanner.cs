@@ -5,13 +5,21 @@ using Percolator.Network.ValueObjects;
 
 namespace Percolator.Network;
 
-public sealed class SimpleRoutePlanner
+public sealed class SimpleRoutePlanner : IProfileRoutePlanner
 {
     public RouteSelection SelectRoute(PeerRoutingProfile profile)
     {
+        // Default policies: use a 1-day prune cutoff; reachability policy default
+        var freshness = new Percolator.Network.ValueObjects.FreshnessPolicy(TimeSpan.FromHours(12), TimeSpan.FromDays(1));
+        var reachability = new Percolator.Network.ValueObjects.ReachabilityPolicy();
+        return SelectRoute(profile, freshness, reachability);
+    }
+
+    public RouteSelection SelectRoute(PeerRoutingProfile profile, Percolator.Network.ValueObjects.FreshnessPolicy freshness, Percolator.Network.ValueObjects.ReachabilityPolicy reachability)
+    {
         if (profile is null) throw new ArgumentNullException(nameof(profile));
         var now = DateTimeOffset.UtcNow;
-        var veryStaleCutoff = TimeSpan.FromDays(1);
+        var veryStaleCutoff = freshness.PruneAfter;
 
         var endpointsEligible = Enumerable.Empty<GrpcEndPoint>();
         if (profile.Reachability.Status != ReachabilityStatus.Offline)

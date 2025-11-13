@@ -109,4 +109,92 @@ public class RoutePlanner_AuthoritativeTests
         result.Relay.Should().NotBeNull();
         result.Relay!.RelayPeerId.Should().Be(relayFresh);
     }
+
+    [Test]
+    public void Respects_configurable_freshness_policy_PruneAfter()
+    {
+        var profile = new PeerRoutingProfile();
+        var now = DateTimeOffset.UtcNow;
+        // Endpoint older than pruneAfter
+        profile.AddGrpcEndPoint(new GrpcEndPoint(new DnsEndPoint("stale", 9200), now.AddHours(-3)), now.AddHours(-3));
+        // Fresh relay
+        var relayFresh = PeerId.NewId();
+        profile.AddOrRefreshRelay(relayFresh, now);
+
+        var planner = new SimpleRoutePlanner();
+        var freshness = new Percolator.Network.ValueObjects.FreshnessPolicy(TimeSpan.FromHours(1), TimeSpan.FromHours(2));
+        var reachability = new Percolator.Network.ValueObjects.ReachabilityPolicy();
+
+        var result = planner.SelectRoute(profile, freshness, reachability);
+
+        result.Relay.Should().NotBeNull();
+        result.Relay!.RelayPeerId.Should().Be(relayFresh);
+    }
+
+    [Test]
+    public void Respects_reachability_policy_offline_excludes_endpoints()
+    {
+        var profile = new PeerRoutingProfile();
+        var now = DateTimeOffset.UtcNow;
+        profile.AddGrpcEndPoint(new GrpcEndPoint(new DnsEndPoint("host", 9300), now), now);
+        // mark offline
+        profile.RecordReachability(ReachabilityStatus.Offline, now);
+        var relayFresh = PeerId.NewId();
+        profile.AddOrRefreshRelay(relayFresh, now);
+
+        var planner = new SimpleRoutePlanner();
+        var freshness = new Percolator.Network.ValueObjects.FreshnessPolicy(TimeSpan.FromMinutes(30), TimeSpan.FromHours(2));
+        var reachability = new Percolator.Network.ValueObjects.ReachabilityPolicy();
+
+        var result = planner.SelectRoute(profile, freshness, reachability);
+
+        result.Relay.Should().NotBeNull();
+        result.Relay!.RelayPeerId.Should().Be(relayFresh);
+    }
+
+    [Test]
+    public void Prefers_endpoint_over_relay_when_both_eligible()
+    {
+        var profile = new PeerRoutingProfile();
+        var now = DateTimeOffset.UtcNow;
+        profile.AddGrpcEndPoint(new GrpcEndPoint(new DnsEndPoint("direct", 9400), now), now);
+        var relay = PeerId.NewId();
+        profile.AddOrRefreshRelay(relay, now);
+
+        var planner = new SimpleRoutePlanner();
+        var result = planner.SelectRoute(profile);
+
+        result.Endpoint.EndPoint.Host.Should().Be("direct");
+        result.Relay.Should().BeNull();
+    }
+
+    [Test]
+    public void Deterministic_with_mixed_candidates()
+    {
+        var profile = new PeerRoutingProfile();
+        var t = DateTimeOffset.UtcNow;
+        // two endpoints, tie on freshness => host order
+        profile.AddGrpcEndPoint(new GrpcEndPoint(new DnsEndPoint("a", 5000), t), t);
+        profile.AddGrpcEndPoint(new GrpcEndPoint(new DnsEndPoint("b", 5000), t), t);
+        // relays present but should be ignored since endpoints exist
+        profile.AddOrRefreshRelay(PeerId.NewId(), t);
+        profile.AddOrRefreshRelay(PeerId.NewId(), t);
+
+        var planner = new SimpleRoutePlanner();
+        var result = planner.SelectRoute(profile);
+
+        result.Endpoint.EndPoint.Host.Should().Be("a");
+        result.Relay.Should().BeNull();
+    }
+
+    [Test]
+    public void Throws_when_no_candidates()
+    {
+        var profile = new PeerRoutingProfile();
+        var planner = new SimpleRoutePlanner();
+
+        var act = () => planner.SelectRoute(profile);
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("No endpoints or relays available to route.");
+    }
 }

@@ -483,7 +483,9 @@ namespace Percolator.ApplicationTests.Network;
         var transport = new Mock<IMessageTransportService>(MockBehavior.Strict);
         var relayLogger = Mock.Of<ILogger<RelayOrchestrator>>();
         var relay = new RelayOrchestrator(relayLogger, mqRepo.Object, directRepo.Object, sessionMgr.Object, transport.Object, active);
-        return new DeliverOpaqueMessageHandler(logger, sessionMgr.Object, peerRepo.Object, mediator.Object, directRepo.Object, active, ratchetLookup.Object, relay);
+        var profileRepo = new Mock<IPeerRoutingProfileRepository>(MockBehavior.Loose);
+        var routePlanner = new Mock<IProfileRoutePlanner>(MockBehavior.Loose);
+        return new DeliverOpaqueMessageHandler(logger, sessionMgr.Object, peerRepo.Object, mediator.Object, directRepo.Object, active, ratchetLookup.Object, relay, profileRepo.Object, routePlanner.Object);
     }
 
     [Test]

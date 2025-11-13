@@ -77,6 +77,12 @@ public class DhtIntegrationTests : IntegrationTestBase
             services.AddSingleton<IPreKeyBundleRepository>(bundleRepoMock.Object);
             services.AddSingleton<Percolator.Cryptography.ISigningService>(signingServiceMock.Object);
             services.AddSingleton<IPeerTrustManager>(peerTrustManagerMock.Object);
+            // Avoid querying real DB tables from domain planner repo during tests
+            var profileRepoMock = new Moq.Mock<IPeerRoutingProfileRepository>(Moq.MockBehavior.Loose);
+            profileRepoMock.Setup(r => r.GetByIdAsync(It.IsAny<NetworkPeerId>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((PeerRoutingProfile?)null);
+            services.AddSingleton<IPeerRoutingProfileRepository>(profileRepoMock.Object);
+            services.AddSingleton<IProfileRoutePlanner>(new Moq.Mock<IProfileRoutePlanner>(Moq.MockBehavior.Loose).Object);
             // Ensure ActiveIdentityContext has an identity with SelfIdentityId set
             services.AddSingleton(new Percolator.Application.Identity.ActiveIdentityContext
             {
@@ -181,6 +187,12 @@ public class DhtIntegrationTests : IntegrationTestBase
                 .Setup(l => l.UpsertAsync(It.IsAny<DirectSessionId>(), It.IsAny<int>(), It.IsAny<RatchetEphemeralKey>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
                 .Returns(Task.CompletedTask);
             services.AddSingleton<IRatchetKeySessionLookup>(ratchetLookup2.Object);
+            // Avoid querying real DB tables from domain planner repo during tests
+            var profileRepoMock2 = new Moq.Mock<IPeerRoutingProfileRepository>(Moq.MockBehavior.Loose);
+            profileRepoMock2.Setup(r => r.GetByIdAsync(It.IsAny<NetworkPeerId>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((PeerRoutingProfile?)null);
+            services.AddSingleton<IPeerRoutingProfileRepository>(profileRepoMock2.Object);
+            services.AddSingleton<IProfileRoutePlanner>(new Moq.Mock<IProfileRoutePlanner>(Moq.MockBehavior.Loose).Object);
             services.AddMediatR(cfg =>
                 cfg.RegisterServicesFromAssembly(typeof(Percolator.Dht.Messages.PingRequest).Assembly));
         });

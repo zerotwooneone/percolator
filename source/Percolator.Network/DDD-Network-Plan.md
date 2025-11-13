@@ -175,7 +175,7 @@ Note: These are domain ports; infrastructure repos (EF/Sqlite, caching) will liv
 - Entities: `DiscoveredPeer`.
 - Value Objects: `Reachability`, `EndpointFreshness`, `RelayLink`, `DiscoverySource`, `Confidence`, `RelayRoute`, `DiscoveryKey`.
 - Domain Ports: `IPeerRoutingProfileRepository` (enriched), `IDiscoveredPeerRepository` (new), `ITrustedPeerStore` (confirm placement).
-- Domain Services: `RoutePlanner`.
+  - Domain Services: `RoutePlanner` (`SimpleRoutePlanner` implementing `IProfileRoutePlanner`).
 
 ## Post-Definition Cleanup Plan
 - After defining and implementing the new Network domain objects and their persistence (Infrastructure mappings/tables), remove legacy artifacts:
@@ -342,7 +342,7 @@ Note: These are domain ports; infrastructure repos (EF/Sqlite, caching) will liv
 - Remaining Nice-to-haves:
   - De-duplicate certificates on RawDataHash at DB-level (unique index optional)
   - Add pruning windows and policies in repositories (configurable thresholds)
-  - Add RoutePlanner service tests once Step 6 is executed
+  - RoutePlanner policies can be exposed via configuration for injection
 
 ### Step 8: Update application call sites
 - Scope: switch call sites to new domain APIs (see list in the plan) and map transport errors to `DeliveryOutcome`.
@@ -350,7 +350,7 @@ Note: These are domain ports; infrastructure repos (EF/Sqlite, caching) will liv
   - Update usage to new types/methods; adjust tests to assert interactions; build; fix compiler errors.
   - Run tests; confirm red where behavior not yet wired.
 - Green
-  - Wire integration with repositories and `RoutePlanner`; adapt handlers to record reachability and apply policies.
+  - Wire integration with repositories and `RoutePlanner` (`IProfileRoutePlanner` in code); adapt handlers to record reachability and apply policies.
   - Build + run tests (green).
 - Refactor: simplify orchestration; ensure Network domain owns routing rules → build + run tests.
 
