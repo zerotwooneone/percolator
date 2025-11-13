@@ -1,4 +1,5 @@
 using System.Net;
+using Percolator.Network.ValueObjects;
 
 namespace Percolator.Network;
 
@@ -60,4 +61,20 @@ public class DiscoveredPeer
     }
 
     public static bool operator !=(DiscoveredPeer? left, DiscoveredPeer? right) => !(left == right);
+
+    public void RecordDiscovery(DiscoverySource source, DateTimeOffset now)
+    {
+        if (now.UtcDateTime > LastSeenUtc)
+        {
+            LastSeenUtc = now.UtcDateTime;
+        }
+    }
+
+    public void ObserveEndpoint(GrpcEndPoint endpoint, DateTimeOffset now)
+    {
+        if (now.UtcDateTime > LastSeenUtc)
+        {
+            LastSeenUtc = now.UtcDateTime;
+        }
+    }
 }
