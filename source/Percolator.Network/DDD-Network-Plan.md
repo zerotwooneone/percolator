@@ -385,3 +385,28 @@ Legacy items to remove after Network domain cutover
   - Remove old repo registrations for IPeerConnectionRepository and IDirectSessionRepository when the new ports land:
   - Replace with IPeerRoutingProfileRepository and IDiscoveredPeerRepository registrations
   - Remove any transient services that only existed to bridge legacy concepts
+- Consider application layer delete/cleanup option now that DirectSession no longer cascade-deletes with PeerConnection
+
+#### Audited remaining IPeerConnectionRepository references (to remove or replace)
+- Percolator.Application/Cli/InitiateHandshakeViaHostHandler.cs
+  - Replace reads/writes with `IPeerRoutingProfileRepository` and `IProfileRoutePlanner` (or remove if not needed post-cutover).
+- Percolator.Application/Network/GrpcMessageTransportService.cs
+  - Drop field/constructor param; use `IPeerRoutingProfileRepository` + `IProfileRoutePlanner` exclusively for endpoint selection.
+- Percolator.Application/Network/Handshake/HandleHandshakeInitiatorHelloCommand.cs
+  - Remove dependency; use `IPeerIdentityRepository` and write routing info via `IPeerRoutingProfileRepository` if needed.
+- Percolator.Application/Network/ProcessInternalEnvelopeHandler.cs
+  - Remove constructor param/field; DHT Ping path already uses `IPeerRoutingProfileRepository`.
+- Percolator.Application/PeerDiscovery/PeerConnectionManager.cs
+  - Legacy transport cache tied to PeerConnections; delete or refactor to consume routing profiles.
+- Percolator.Application/Sessions/ConversationService.cs
+  - Remove dependency; use routing profiles for any endpoint lookup; ensure tests updated.
+- Percolator.Network/Messaging/RelayTopology.cs
+  - Legacy planner topology over PeerConnections; delete after planner/profile cutover.
+- Percolator.Network/Messaging/RoutePlanner.cs
+  - Legacy route planner; delete in favor of `IProfileRoutePlanner` (SimpleRoutePlanner).
+- Percolator.Infrastructure/Network/ServiceCollectionExtensions.cs
+  - Remove registration: `services.AddScoped<IPeerConnectionRepository, SqlitePeerConnectionRepository>();`.
+- Percolator.Infrastructure/Network/SqlitePeerConnectionRepository.cs
+  - Delete file and related mappings once all references are removed.
+- Percolator.Network/IPeerConnectionRepository.cs
+  - Delete interface after all consumers are removed.

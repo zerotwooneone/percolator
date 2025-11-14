@@ -114,8 +114,8 @@ internal sealed class NoopSender : IRemoteEnvelopeSender
                 mediator,
                 new Moq.Mock<Percolator.Chat.App.IAdminOperations>().Object,
                 new Moq.Mock<Percolator.Dht.IDhtService>().Object,
-                new Moq.Mock<Percolator.Network.IPeerConnectionRepository>().Object,
-                new Moq.Mock<Percolator.MessageQueue.Abstractions.IMessageQueueService>().Object);
+                new Moq.Mock<Percolator.MessageQueue.Abstractions.IMessageQueueService>().Object,
+                new Moq.Mock<Percolator.Network.IPeerRoutingProfileRepository>().Object);
 
             var groupGuid = Guid.NewGuid();
             var cg = new CreateGroup

@@ -2,16 +2,18 @@ namespace Percolator.Network.Messaging;
 
 public sealed class DefaultRelayTopology : IRelayTopology
 {
-    private readonly IPeerConnectionRepository _peerConnections;
+    private readonly IPeerRoutingProfileRepository _profiles;
 
-    public DefaultRelayTopology(IPeerConnectionRepository peerConnections)
+    public DefaultRelayTopology(IPeerRoutingProfileRepository profiles)
     {
-        _peerConnections = peerConnections;
+        _profiles = profiles;
     }
 
     public async Task<PeerId?> GetRelayForAsync(PeerId target, CancellationToken ct = default)
     {
-        // Persisted association lookup (returns null if not configured)
-        return await _peerConnections.GetRelayAsync(target).ConfigureAwait(false);
+        // Read routing profile; return first configured relay if present
+        var profile = await _profiles.GetByIdAsync(target, ct).ConfigureAwait(false);
+        var relay = profile?.Relays.FirstOrDefault();
+        return relay is null ? null : relay.RelayPeerId;
     }
 }

@@ -7,7 +7,6 @@ public static class ServiceCollectionExtensions
 {
     public static IServiceCollection AddNetworkInfrastructure(this IServiceCollection services)
     {
-        services.AddScoped<IPeerConnectionRepository, SqlitePeerConnectionRepository>();
         services.AddSingleton<ITrustedPeerStore, FileBasedTrustedPeerStore>();
         services.AddScoped<IDirectSessionRepository, SqliteDirectSessionRepository>();
         // New Network domain repositories

@@ -24,7 +24,7 @@ namespace Percolator.Application.Cli;
         private readonly IMessageTransportService _transport;
         private readonly IPeerIdentityRepository _peerIdentityRepository;
         private readonly IPeerPublicSigningKeyStore _peerPublicSigningKeyStore;
-        private readonly IPeerConnectionRepository _peerConnectionRepository;
+        private readonly IPeerRoutingProfileRepository _profileRepository;
         private readonly Percolator.Application.Network.Handshake.IInitiatorHelloService _initiatorHelloService;
 
         public InitiateHandshakeViaHostHandler(
@@ -34,7 +34,7 @@ namespace Percolator.Application.Cli;
             IMessageTransportService transport,
             IPeerIdentityRepository peerIdentityRepository,
             IPeerPublicSigningKeyStore peerPublicSigningKeyStore,
-            IPeerConnectionRepository peerConnectionRepository,
+            IPeerRoutingProfileRepository profileRepository,
             Percolator.Application.Network.Handshake.IInitiatorHelloService initiatorHelloService)
         {
             _logger = logger;
@@ -43,7 +43,7 @@ namespace Percolator.Application.Cli;
             _transport = transport;
             _peerIdentityRepository = peerIdentityRepository;
             _peerPublicSigningKeyStore = peerPublicSigningKeyStore;
-            _peerConnectionRepository = peerConnectionRepository;
+            _profileRepository = profileRepository;
             _initiatorHelloService = initiatorHelloService;
         }
 
@@ -77,18 +77,16 @@ namespace Percolator.Application.Cli;
         }
         // identity already saved above
 
-        // Upsert PeerConnection with Host as RelayPeerId
+        // Upsert routing profile with Host recorded as a relay link
         var netPeerId = new Percolator.Network.PeerId(peer.Id.Value);
-        var connection = await _peerConnectionRepository.GetByIdAsync(netPeerId).ConfigureAwait(false);
-        if (connection is null)
+        var profile = await _profileRepository.GetByIdAsync(netPeerId, cancellationToken).ConfigureAwait(false)
+            ?? new PeerRoutingProfile();
+        if (profile.Id is null)
         {
-            connection = new PeerConnection(netPeerId, identitySigningKey: null, grpcEndPoints: Array.Empty<GrpcEndPoint>(), tlsCertificates: Array.Empty<TlsCertificate>(), lastSeen: DateTimeOffset.UtcNow, relayPeerId: new Percolator.Network.PeerId(hostPeer.Id.Value));
+            profile.BindIdentity(netPeerId);
         }
-        else
-        {
-            connection.SetRelayPeer(new Percolator.Network.PeerId(hostPeer.Id.Value));
-        }
-        await _peerConnectionRepository.SaveAsync(connection).ConfigureAwait(false);
+        profile.AddOrRefreshRelay(new Percolator.Network.PeerId(hostPeer.Id.Value), DateTimeOffset.UtcNow);
+        await _profileRepository.UpsertAsync(profile, cancellationToken).ConfigureAwait(false);
 
         // 1) Request pre-key bundle for target PKH from Host
         var getReq = new InternalEnvelope
@@ -138,12 +136,12 @@ namespace Percolator.Application.Cli;
             : throw new InvalidOperationException("SignedPreKeyId missing in bundle.");
         Guid? oneTimePreKeyId = bundleMsg.HasOneTimeKeyId ? new Guid(bundleMsg.OneTimeKeyId.ToByteArray()) : (Guid?)null;
 
-        // Bind PKH -> PeerId on initiator now that we have the remote SPKI, then upsert peer
+        // Bind PKH -> PeerId on initiator now that we have the remote SPKI, then upsert routing profile
         var pkh = SHA256.HashData(remoteIdentitySpki);
         await _peerPublicSigningKeyStore.ActivateIfChangedAsync(peer.Id, remoteIdentitySpki, pkh, DateTimeOffset.UtcNow, cancellationToken).ConfigureAwait(false);
         // Name was already persisted in identity repo
-        connection.SetDirectMessagePublicKey(new DirectMessagePublicKey(remoteIdentitySpki));
-        await _peerConnectionRepository.SaveAsync(connection).ConfigureAwait(false);
+        profile.SetIdentityPublicKey(new Percolator.Network.ValueObjects.IdentityPublicKey(remoteIdentitySpki));
+        await _profileRepository.UpsertAsync(profile, cancellationToken).ConfigureAwait(false);
 
         await _initiatorHelloService.SendInitiatorHelloViaHostAsync(
             recipientPublicKeyHash: request.TargetPublicKeyHash,

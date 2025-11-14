@@ -35,7 +35,7 @@ namespace Percolator.Application.Sessions
         private readonly ActiveIdentityContext _activeIdentityContext;
         private readonly IGrpcSessionService _grpcSessionService;
         private readonly IX3DHManager _x3DhManager;
-        private readonly IPeerConnectionRepository _peerConnectionRepository;
+        private readonly IPeerRoutingProfileRepository _profileRepository;
         private readonly IOptions<TransportOptions> _transportOptions;
         private readonly IDirectSessionRepository _directSessionRepository;
         private readonly IPeerPublicSigningKeyStore _pkhStore;
@@ -50,7 +50,7 @@ namespace Percolator.Application.Sessions
             ActiveIdentityContext activeIdentityContext,
             IGrpcSessionService grpcSessionService, 
             IX3DHManager x3DhManager, 
-            IPeerConnectionRepository peerConnectionRepository,
+            IPeerRoutingProfileRepository profileRepository,
             IOptions<TransportOptions> transportOptions,
             IDirectSessionRepository directSessionRepository,
             IPeerPublicSigningKeyStore pkhStore,
@@ -64,7 +64,7 @@ namespace Percolator.Application.Sessions
             _activeIdentityContext = activeIdentityContext;
             _grpcSessionService = grpcSessionService;
             _x3DhManager = x3DhManager;
-            _peerConnectionRepository = peerConnectionRepository;
+            _profileRepository = profileRepository;
             _transportOptions = transportOptions;
             _directSessionRepository = directSessionRepository;
             _pkhStore = pkhStore;
@@ -169,39 +169,27 @@ namespace Percolator.Application.Sessions
                 
                 _logger.LogInformation("Handshake completed locally as Responder");
                 
-                // upsert connection details even when the peer already existed
+                // Upsert routing profile details even when the peer already existed
                 var netPeerId = new NetworkPeerId(remotePeer.Id.Value);
-                var peerConnection = await _peerConnectionRepository.GetByIdAsync(netPeerId).ConfigureAwait(false);
+                var profile = await _profileRepository.GetByIdAsync(netPeerId).ConfigureAwait(false)
+                    ?? new PeerRoutingProfile();
                 var now = DateTimeOffset.UtcNow;
-                if (peerConnection is null)
+                if (profile.Id is null)
                 {
-                    peerConnection = new PeerConnection(
-                        netPeerId,
-                        new DirectMessagePublicKey(handshakeResult.ResponderBundle.IdentitySigningKey.Value),
-                        new List<GrpcEndPoint> { new(endpoint, now) },
-                        Array.Empty<TlsCertificate>(),
-                        now);
-                    await _peerConnectionRepository.SaveAsync(peerConnection).ConfigureAwait(false);
+                    profile.BindIdentity(netPeerId);
+                }
+                // Ensure identity key and endpoint are populated
+                profile.SetIdentityPublicKey(new Percolator.Network.ValueObjects.IdentityPublicKey(handshakeResult.ResponderBundle.IdentitySigningKey.Value));
+                var existingEndpoint = profile.Endpoints.FirstOrDefault(e => e.EndPoint.Host.Equals(endpoint.Host, StringComparison.OrdinalIgnoreCase) && e.EndPoint.Port == endpoint.Port);
+                if (existingEndpoint is null)
+                {
+                    profile.AddGrpcEndPoint(new GrpcEndPoint(endpoint, now), now);
                 }
                 else
                 {
-                    // Ensure identity key and endpoint are populated
-                    if (peerConnection.IdentitySigningKey is null ||
-                        !peerConnection.IdentitySigningKey.Value.SequenceEqual(handshakeResult.ResponderBundle.IdentitySigningKey.Value))
-                    {
-                        peerConnection.SetDirectMessagePublicKey(new DirectMessagePublicKey(handshakeResult.ResponderBundle.IdentitySigningKey.Value));
-                    }
-                    var existingEndpoint = peerConnection.GrpcEndPoints.FirstOrDefault(e => e.EndPoint.Host.Equals(endpoint.Host, StringComparison.OrdinalIgnoreCase) && e.EndPoint.Port == endpoint.Port);
-                    if (existingEndpoint is null)
-                    {
-                        peerConnection.AddGrpcEndPoint(new GrpcEndPoint(endpoint, now));
-                    }
-                    else
-                    {
-                        peerConnection.UpdateLastSeen(existingEndpoint,now);
-                    }
-                    await _peerConnectionRepository.SaveAsync(peerConnection).ConfigureAwait(false);
+                    profile.UpdateLastSeen(existingEndpoint, now);
                 }
+                await _profileRepository.UpsertAsync(profile).ConfigureAwait(false);
 
                 SessionId GetSessionId(Plaintext pt)
                 {

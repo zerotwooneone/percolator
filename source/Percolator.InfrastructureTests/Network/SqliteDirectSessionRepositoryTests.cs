@@ -38,7 +38,7 @@ public class SqliteDirectSessionRepositoryTests
     [Test]
     public async Task GetByRemotePeerId_roundtrips()
     {
-        var (ctx, _, dsr, peerId) = await CreateRepos();
+        var (ctx, dsr, peerId) = await CreateRepos();
         var sessionId = Guid.NewGuid();
         await dsr.UpsertAsync(peerId, new DirectSessionId(sessionId), 1);
         var ds = await dsr.GetByRemotePeerIdAsync(peerId, 1);
@@ -50,7 +50,7 @@ public class SqliteDirectSessionRepositoryTests
     [Test]
     public async Task DeleteByRemotePeerId_removes_mapping_and_is_idempotent()
     {
-        var (ctx, _, dsr, peerId) = await CreateRepos();
+        var (ctx, dsr, peerId) = await CreateRepos();
         var sessionId = Guid.NewGuid();
         await dsr.UpsertAsync(peerId, new DirectSessionId(sessionId), 1);
         
@@ -67,7 +67,6 @@ public class SqliteDirectSessionRepositoryTests
     public async Task Multiple_peers_have_isolated_sessions()
     {
         var ctx = CreateDbContext(out var _);
-        var pcr = new SqlitePeerConnectionRepository(ctx);
         var dsr = new SqliteDirectSessionRepository(ctx);
 
         var peerA = Percolator.Network.PeerId.NewId();
@@ -77,8 +76,7 @@ public class SqliteDirectSessionRepositoryTests
         ctx.PeerIdentities.Add(new PeerIdentityDbo { PeerId = peerB.Value, Name = "peer-b", Version = 0, CreatedAtUtc = DateTimeOffset.UtcNow, UpdatedAtUtc = DateTimeOffset.UtcNow });
         await ctx.SaveChangesAsync();
 
-        await pcr.SaveAsync(new PeerConnection(peerA, new DirectMessagePublicKey(RandomNumberGenerator.GetBytes(32)), Array.Empty<GrpcEndPoint>(), Array.Empty<TlsCertificate>(), DateTimeOffset.UtcNow));
-        await pcr.SaveAsync(new PeerConnection(peerB, new DirectMessagePublicKey(RandomNumberGenerator.GetBytes(32)), Array.Empty<GrpcEndPoint>(), Array.Empty<TlsCertificate>(), DateTimeOffset.UtcNow));
+        // Seed identity rows only; DirectSession repo doesn't require PeerConnection rows
 
         var sA = Guid.NewGuid();
         var sB = Guid.NewGuid();
@@ -90,25 +88,22 @@ public class SqliteDirectSessionRepositoryTests
         (await dsr.GetBySessionIdAsync(new DirectSessionId(sA), 1))!.RemotePeerId.Value.Should().Be(peerA.Value);
         (await dsr.GetBySessionIdAsync(new DirectSessionId(sB), 1))!.RemotePeerId.Value.Should().Be(peerB.Value);
     }
-    private static async Task<(PercolatorDbContext Ctx, SqlitePeerConnectionRepository Pcr, SqliteDirectSessionRepository Dsr, PeerId PeerId)> CreateRepos()
+    private static async Task<(PercolatorDbContext Ctx, SqliteDirectSessionRepository Dsr, PeerId PeerId)> CreateRepos()
     {
         var ctx = CreateDbContext(out var _);
-        var pcr = new SqlitePeerConnectionRepository(ctx);
         var dsr = new SqliteDirectSessionRepository(ctx);
 
         // Ensure Peer and PeerConnection exist for FK
         var peerId = PeerId.NewId();
         ctx.PeerIdentities.Add(new PeerIdentityDbo { PeerId = peerId.Value, Name = "peer-a", Version = 0, CreatedAtUtc = DateTimeOffset.UtcNow, UpdatedAtUtc = DateTimeOffset.UtcNow });
         await ctx.SaveChangesAsync();
-        var now = DateTimeOffset.UtcNow;
-        await pcr.SaveAsync(new PeerConnection(peerId, new DirectMessagePublicKey(RandomNumberGenerator.GetBytes(32)), Array.Empty<GrpcEndPoint>(), Array.Empty<TlsCertificate>(), now));
-        return (ctx, pcr, dsr, peerId);
+        return (ctx, dsr, peerId);
     }
 
     [Test]
     public async Task GetBySessionId_returns_null_for_unknown()
     {
-        var (ctx, _, dsr, _) = await CreateRepos();
+        var (ctx, dsr, _) = await CreateRepos();
         var unknown = Guid.NewGuid();
         var result = await dsr.GetBySessionIdAsync(new DirectSessionId(unknown), 1);
         result.Should().BeNull();
@@ -117,7 +112,7 @@ public class SqliteDirectSessionRepositoryTests
     [Test]
     public async Task Upsert_and_GetBySessionId_roundtrips()
     {
-        var (ctx, _, dsr, peerId) = await CreateRepos();
+        var (ctx, dsr, peerId) = await CreateRepos();
         var sessionId = Guid.NewGuid();
         await dsr.UpsertAsync(peerId, new DirectSessionId(sessionId), 1);
         var ds = await dsr.GetBySessionIdAsync(new DirectSessionId(sessionId), 1);
@@ -129,7 +124,7 @@ public class SqliteDirectSessionRepositoryTests
     [Test]
     public async Task Upsert_overwrites_for_same_peer()
     {
-        var (ctx, _, dsr, peerId) = await CreateRepos();
+        var (ctx, dsr, peerId) = await CreateRepos();
         var s1 = Guid.NewGuid();
         var s2 = Guid.NewGuid();
         await dsr.UpsertAsync(peerId, new DirectSessionId(s1), 1);
@@ -139,19 +134,5 @@ public class SqliteDirectSessionRepositoryTests
         ds.Should().NotBeNull();
         ds!.RemotePeerId.Value.Should().Be(peerId.Value);
         ds.SessionId.Value.Should().Be(s2);
-    }
-
-    [Test]
-    public async Task Cascade_delete_removes_direct_session()
-    {
-        var (ctx, _, dsr, peerId) = await CreateRepos();
-        var s = Guid.NewGuid();
-        await dsr.UpsertAsync(peerId, new DirectSessionId(s), 1);
-        // Delete peer identity (which cascades to PeerConnection and should cascade to DirectSession as well)
-        var peer = await ctx.PeerIdentities.FindAsync(peerId.Value);
-        ctx.PeerIdentities.Remove(peer!);
-        await ctx.SaveChangesAsync();
-        var result = await dsr.GetBySessionIdAsync(new DirectSessionId(s), 1);
-        result.Should().BeNull();
     }
 }

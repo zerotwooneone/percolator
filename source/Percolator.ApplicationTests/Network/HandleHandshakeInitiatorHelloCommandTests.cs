@@ -30,7 +30,7 @@ public class HandleHandshakeInitiatorHelloCommandTests
         var sessionMgr = new Mock<IDirectSessionManager>(MockBehavior.Strict);
         var active = new ActiveIdentityContext { Identity = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "me", null) { SelfIdentityId = 1 } };
         var peerIdentityRepo = new Mock<Percolator.Identity.IPeerIdentityRepository>(MockBehavior.Strict);
-        var connRepo = new Mock<IPeerConnectionRepository>(MockBehavior.Strict);
+        var profileRepo = new Mock<IPeerRoutingProfileRepository>(MockBehavior.Loose);
         var mediator = new Mock<MediatR.IMediator>(MockBehavior.Loose);
 
         // Inputs
@@ -64,17 +64,17 @@ public class HandleHandshakeInitiatorHelloCommandTests
             .Returns(Task.CompletedTask);
         pkhStore.Setup(k => k.ActivateIfChangedAsync(It.IsAny<Percolator.Identity.PeerId>(), spki, It.IsAny<byte[]>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
-        // No existing connection; SaveAsync should get relay set
-        connRepo.Setup(r => r.GetByIdAsync(It.IsAny<Percolator.Network.PeerId>())).ReturnsAsync((PeerConnection?)null);
-        PeerConnection? saved = null;
-        connRepo.Setup(r => r.SaveAsync(It.IsAny<PeerConnection>())).Callback<PeerConnection>(pc => saved = pc).Returns(Task.CompletedTask);
+        // No existing profile; UpsertAsync should be called with relay set
+        profileRepo.Setup(r => r.GetByIdAsync(It.IsAny<Percolator.Network.PeerId>(), It.IsAny<CancellationToken>())).ReturnsAsync((PeerRoutingProfile?)null);
+        PeerRoutingProfile? saved = null;
+        profileRepo.Setup(r => r.UpsertAsync(It.IsAny<PeerRoutingProfile>(), It.IsAny<CancellationToken>())).Callback<PeerRoutingProfile, CancellationToken>((p, _) => saved = p).Returns(Task.CompletedTask);
 
-        var sut = new HandleHandshakeInitiatorHelloHandler(logger, x3dh.Object, pkhStore.Object, selfPre.Object, directRepo.Object, sessionMgr.Object, active, peerIdentityRepo.Object, connRepo.Object, mediator.Object);
+        var sut = new HandleHandshakeInitiatorHelloHandler(logger, x3dh.Object, pkhStore.Object, selfPre.Object, directRepo.Object, sessionMgr.Object, active, peerIdentityRepo.Object, profileRepo.Object, mediator.Object);
         var cmd = new HandleHandshakeInitiatorHelloCommand(spki, eph, spkId, null, null, null, RelayHostPeerId: relayHost);
         _ = await sut.Handle(cmd, CancellationToken.None);
 
         Assert.That(saved, Is.Not.Null);
-        Assert.That(saved!.RelayPeerId, Is.Not.Null);
+        Assert.That(saved!.Relays.Count, Is.EqualTo(1));
     }
 
     [Test]
@@ -88,7 +88,7 @@ public class HandleHandshakeInitiatorHelloCommandTests
         var sessionMgr = new Mock<IDirectSessionManager>(MockBehavior.Strict);
         var active = new ActiveIdentityContext { Identity = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "me", null) { SelfIdentityId = 1 } };
         var peerIdentityRepo = new Mock<Percolator.Identity.IPeerIdentityRepository>(MockBehavior.Strict);
-        var connRepo = new Mock<IPeerConnectionRepository>(MockBehavior.Strict);
+        var profileRepo = new Mock<IPeerRoutingProfileRepository>(MockBehavior.Loose);
         var mediator = new Mock<MediatR.IMediator>(MockBehavior.Loose);
 
         var spki = new byte[] { 1 };
@@ -112,18 +112,19 @@ public class HandleHandshakeInitiatorHelloCommandTests
             .Returns(Task.CompletedTask);
 
         var remoteNetPeer = new Percolator.Network.PeerId(Guid.NewGuid());
-        var existing = new PeerConnection(remoteNetPeer, identitySigningKey: null, grpcEndPoints: Array.Empty<GrpcEndPoint>(), tlsCertificates: Array.Empty<TlsCertificate>(), lastSeen: DateTimeOffset.UtcNow);
-        connRepo.Setup(r => r.GetByIdAsync(It.IsAny<Percolator.Network.PeerId>())).ReturnsAsync(existing);
-        connRepo.Setup(r => r.SaveAsync(existing)).Returns(Task.CompletedTask);
+        var existing = new PeerRoutingProfile();
+        existing.BindIdentity(remoteNetPeer);
+        profileRepo.Setup(r => r.GetByIdAsync(It.IsAny<Percolator.Network.PeerId>(), It.IsAny<CancellationToken>())).ReturnsAsync(existing);
+        profileRepo.Setup(r => r.UpsertAsync(existing, It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
         // Adapter removed; identity repo GetByIdAsync returns null by default
         peerIdentityRepo.Setup(r => r.GetByIdAsync(It.IsAny<Percolator.Identity.PeerId>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Percolator.Identity.Model.PeerIdentity?)null);
 
-        var sut = new HandleHandshakeInitiatorHelloHandler(logger, x3dh.Object, pkhStore.Object, selfPre.Object, directRepo.Object, sessionMgr.Object, active, peerIdentityRepo.Object, connRepo.Object, mediator.Object);
+        var sut = new HandleHandshakeInitiatorHelloHandler(logger, x3dh.Object, pkhStore.Object, selfPre.Object, directRepo.Object, sessionMgr.Object, active, peerIdentityRepo.Object, profileRepo.Object, mediator.Object);
         var cmd = new HandleHandshakeInitiatorHelloCommand(spki, eph, spkId, null, null, null, RelayHostPeerId: relayHost);
         _ = await sut.Handle(cmd, CancellationToken.None);
 
-        Assert.That(existing.RelayPeerId, Is.Not.Null);
-        Assert.That(existing.RelayPeerId!.Value, Is.EqualTo(relayHost.Value));
+        Assert.That(existing.Relays.Count, Is.EqualTo(1));
+        Assert.That(existing.Relays[0].RelayPeerId.Value, Is.EqualTo(relayHost.Value));
     }
 }

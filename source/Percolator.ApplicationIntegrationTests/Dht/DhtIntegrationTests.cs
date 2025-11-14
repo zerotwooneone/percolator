@@ -31,7 +31,6 @@ public class DhtIntegrationTests : IntegrationTestBase
         // Arrange
         var dhtRepositoryMock = new Mock<IDhtNodeRepository>();
         var sessionManagerMock = new Mock<IDirectSessionManager>();
-        var peerConnectionRepoMock = new Mock<IPeerConnectionRepository>();
         var directSessionRepoMock = new Mock<IDirectSessionRepository>();
 
         // Mocks for unused dependencies to allow the host to build
@@ -59,7 +58,6 @@ public class DhtIntegrationTests : IntegrationTestBase
         {
             services.AddSingleton<IDhtNodeRepository>(dhtRepositoryMock.Object);
             services.AddSingleton<IDirectSessionManager>(sessionManagerMock.Object);
-            services.AddSingleton<IPeerConnectionRepository>(peerConnectionRepoMock.Object);
             services.AddSingleton<IDirectSessionRepository>(directSessionRepoMock.Object);
             // MQ service required by ProcessInternalEnvelopeHandler constructor
             services.AddSingleton<IMessageQueueService>(new Mock<IMessageQueueService>().Object);
@@ -79,10 +77,18 @@ public class DhtIntegrationTests : IntegrationTestBase
             services.AddSingleton<IPeerTrustManager>(peerTrustManagerMock.Object);
             // Avoid querying real DB tables from domain planner repo during tests
             var profileRepoMock = new Moq.Mock<IPeerRoutingProfileRepository>(Moq.MockBehavior.Loose);
-            profileRepoMock.Setup(r => r.GetByIdAsync(It.IsAny<NetworkPeerId>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync((PeerRoutingProfile?)null);
+            profileRepoMock
+                .Setup(r => r.GetByIdAsync(It.IsAny<NetworkPeerId>(), It.IsAny<CancellationToken>()))
+                .Returns<NetworkPeerId, CancellationToken>((pid, ct) =>
+                {
+                    var profile = new PeerRoutingProfile();
+                    profile.BindIdentity(pid);
+                    var now = DateTimeOffset.UtcNow;
+                    profile.AddGrpcEndPoint(new GrpcEndPoint(new DnsEndPoint("localhost", 5001), now), now);
+                    return Task.FromResult<PeerRoutingProfile?>(profile);
+                });
             services.AddSingleton<IPeerRoutingProfileRepository>(profileRepoMock.Object);
-            services.AddSingleton<IProfileRoutePlanner>(new Moq.Mock<IProfileRoutePlanner>(Moq.MockBehavior.Loose).Object);
+            // Use the application-registered SimpleRoutePlanner
             // Ensure ActiveIdentityContext has an identity with SelfIdentityId set
             services.AddSingleton(new Percolator.Application.Identity.ActiveIdentityContext
             {
@@ -109,16 +115,7 @@ public class DhtIntegrationTests : IntegrationTestBase
         directSessionRepoMock.Setup(r => r.GetBySessionIdAsync(new DirectSessionId(sessionId.Value), It.IsAny<int>()))
             .ReturnsAsync(new DirectSession(new NetworkPeerId(remotePeerId.Value), new DirectSessionId(sessionId.Value)));
 
-        // 3. Mock the peer connection repository to return connection info
-        var networkPeerId = new NetworkPeerId(remotePeerId.Value);
-        var connectionInfo = new PeerConnection(
-            networkPeerId,
-            remoteSigningKey,
-            new[] { new GrpcEndPoint(remoteEndpoint, System.DateTimeOffset.UtcNow) },
-            System.Array.Empty<TlsCertificate>(),
-            System.DateTimeOffset.UtcNow);
-        peerConnectionRepoMock.Setup(r => r.GetByIdAsync(networkPeerId))
-            .Returns(Task.FromResult<PeerConnection?>(connectionInfo));
+        // 3. Provide routing profile repo/planner mocks in host setup above; no legacy connection repo
 
         var request = new DeliverOpaqueMessageRequest
         {
@@ -146,7 +143,6 @@ public class DhtIntegrationTests : IntegrationTestBase
         // Arrange
         var dhtNodeRepoMock = new Mock<IDhtNodeRepository>();
         var sessionManagerMock = new Mock<IDirectSessionManager>();
-        var peerConnectionRepoMock = new Mock<IPeerConnectionRepository>();
         var directSessionRepoMock = new Mock<IDirectSessionRepository>();
         var sessionId = new Percolator.Cryptography.SessionId(Guid.NewGuid());
 
@@ -166,7 +162,7 @@ public class DhtIntegrationTests : IntegrationTestBase
         {
             services.AddSingleton(dhtNodeRepoMock.Object);
             services.AddSingleton(sessionManagerMock.Object);
-            services.AddSingleton(peerConnectionRepoMock.Object);
+            
             services.AddSingleton(directSessionRepoMock.Object);
             services.AddSingleton<IDhtService, DhtService>();
             services.AddSingleton(new Mock<IConversationRepository>().Object);
@@ -189,10 +185,18 @@ public class DhtIntegrationTests : IntegrationTestBase
             services.AddSingleton<IRatchetKeySessionLookup>(ratchetLookup2.Object);
             // Avoid querying real DB tables from domain planner repo during tests
             var profileRepoMock2 = new Moq.Mock<IPeerRoutingProfileRepository>(Moq.MockBehavior.Loose);
-            profileRepoMock2.Setup(r => r.GetByIdAsync(It.IsAny<NetworkPeerId>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync((PeerRoutingProfile?)null);
+            profileRepoMock2
+                .Setup(r => r.GetByIdAsync(It.IsAny<NetworkPeerId>(), It.IsAny<CancellationToken>()))
+                .Returns<NetworkPeerId, CancellationToken>((pid, ct) =>
+                {
+                    var profile = new PeerRoutingProfile();
+                    profile.BindIdentity(pid);
+                    var now = DateTimeOffset.UtcNow;
+                    profile.AddGrpcEndPoint(new GrpcEndPoint(new DnsEndPoint("localhost", 5002), now), now);
+                    return Task.FromResult<PeerRoutingProfile?>(profile);
+                });
             services.AddSingleton<IPeerRoutingProfileRepository>(profileRepoMock2.Object);
-            services.AddSingleton<IProfileRoutePlanner>(new Moq.Mock<IProfileRoutePlanner>(Moq.MockBehavior.Loose).Object);
+            
             services.AddMediatR(cfg =>
                 cfg.RegisterServicesFromAssembly(typeof(Percolator.Dht.Messages.PingRequest).Assembly));
         });
@@ -213,16 +217,7 @@ public class DhtIntegrationTests : IntegrationTestBase
         directSessionRepoMock.Setup(r => r.GetBySessionIdAsync(new DirectSessionId(sessionId.Value), It.IsAny<int>()))
             .ReturnsAsync(new DirectSession(new NetworkPeerId(remotePeerId.Value), new DirectSessionId(sessionId.Value)));
 
-        // 3. Mock the peer connection repository to return connection info for the remote peer
-        var networkPeerId = new NetworkPeerId(remotePeerId.Value);
-        var connectionInfo = new PeerConnection(
-            networkPeerId,
-            new DirectMessagePublicKey(SHA256.HashData(Guid.NewGuid().ToByteArray())),
-            new List<GrpcEndPoint> { new(new DnsEndPoint("localhost", 5000), System.DateTimeOffset.UtcNow) },
-            System.Array.Empty<TlsCertificate>(),
-            System.DateTimeOffset.UtcNow);
-        peerConnectionRepoMock.Setup(r => r.GetByIdAsync(networkPeerId))
-            .ReturnsAsync(connectionInfo);
+        // 3. No legacy connection repo; routing profile repo/planner mocks provided in host setup
 
         // 4. Mock the DHT repository to return a list of closer nodes
         var closerNodes = new List<DhtNode>

@@ -43,7 +43,6 @@ namespace Percolator.ApplicationTests.Network
             var x3dhOrchestrator = new Mock<IX3DHOrchestrator>(MockBehavior.Strict);
             var sessionManager = new Mock<IDirectSessionManager>(MockBehavior.Strict);
             var peerIdentityRepo = new Mock<Percolator.Identity.IPeerIdentityRepository>(MockBehavior.Strict);
-            var peerConnRepo = new Mock<IPeerConnectionRepository>(MockBehavior.Strict);
             var x3dhManager = new Mock<IX3DHManager>(MockBehavior.Strict);
             var directRepo = new Mock<IDirectSessionRepository>(MockBehavior.Strict);
             var pkhStore = new Mock<IPeerPublicSigningKeyStore>(MockBehavior.Strict);
@@ -102,11 +101,6 @@ namespace Percolator.ApplicationTests.Network
                     It.IsAny<Plaintext>()))
                 .ReturnsAsync(new SessionRatchetMessage(RandomNumberGenerator.GetBytes(64)));
 
-            // PeerConnection creation path (no existing record)
-            peerConnRepo.Setup(r => r.GetByPublicKey(It.IsAny<DirectMessagePublicKey>()))
-                .ReturnsAsync((PeerConnection?)null);
-            peerConnRepo.Setup(r => r.SaveAsync(It.IsAny<PeerConnection>()))
-                .Returns(Task.CompletedTask);
 
             // Identity peer creation path (no existing identity) and save path
             peerIdentityRepo.Setup(r => r.GetByIdAsync(It.IsAny<Percolator.Identity.PeerId>(), It.IsAny<CancellationToken>()))
@@ -136,7 +130,6 @@ namespace Percolator.ApplicationTests.Network
                 x3dhOrchestrator.Object,
                 sessionManager.Object,
                 peerIdentityRepo.Object,
-                peerConnRepo.Object,
                 x3dhManager.Object,
                 directRepo.Object,
                 pkhStore.Object,

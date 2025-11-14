@@ -34,7 +34,7 @@ public class ConversationServiceTests
     private Mock<IX3DHOrchestrator> _mockX3dhOrchestrator;
     private Mock<IDirectSessionManager> _mockDirectSessionManager;
     private Mock<IOneTimeKeyProvider> _mockOneTimeKeyProvider;
-    private Mock<IPeerConnectionRepository> _mockPeerConnectionRepository;
+    private Mock<IPeerRoutingProfileRepository> _mockProfileRepository;
     private Mock<IPeerTrustManager> _mockPeerTrustManager;
     private Mock<ITlsHandshakeService> _mockTlsHandshakeService;
     private Mock<IGrpcSessionService> _mockGrpcSessionService;
@@ -50,7 +50,7 @@ public class ConversationServiceTests
         _mockX3dhOrchestrator = new Mock<IX3DHOrchestrator>();
         _mockDirectSessionManager = new Mock<IDirectSessionManager>();
         _mockOneTimeKeyProvider = new Mock<IOneTimeKeyProvider>();
-        _mockPeerConnectionRepository = new Mock<IPeerConnectionRepository>();
+        _mockProfileRepository = new Mock<IPeerRoutingProfileRepository>(MockBehavior.Loose);
         _mockPeerTrustManager = new Mock<IPeerTrustManager>();
         _mockTlsHandshakeService = new Mock<ITlsHandshakeService>();
         _mockGrpcSessionService = new Mock<IGrpcSessionService>();
@@ -74,7 +74,7 @@ public class ConversationServiceTests
             _activeIdentityContext,
             _mockGrpcSessionService.Object, 
             new X3DHManager(NullLogger<X3DHManager>.Instance, Options.Create(new CryptographyOptions())), 
-            _mockPeerConnectionRepository.Object,
+            _mockProfileRepository.Object,
             Options.Create(new TransportOptions { GrpcPort = 52382 }),
             _mockDirectSessionRepository.Object,
             _mockPkhStore.Object,
@@ -237,26 +237,9 @@ public class ConversationServiceTests
         _mockGrpcSessionService.Setup(s => s.EstablishDirectSessionAsync(It.IsAny<DnsEndPoint>(), It.IsAny<EstablishDirectSessionRequest>()))
             .ReturnsAsync(grpcResponse);
         
-        // Create a mock peer connection
-        var peerConnection = new PeerConnection(
-            new NetworkPeerId(peer.Id.Value),
-            new DirectMessagePublicKey(new byte[32]), // Valid DirectMessagePublicKey
-            new[] { new GrpcEndPoint(endpoint, DateTimeOffset.UtcNow) },
-            new[] { new TlsCertificate(new byte[100]) }, // Mock certificate
-            DateTimeOffset.UtcNow
-        );
-        
-        // Setup peer connection repository to return the connection when asked
-        _mockPeerConnectionRepository
-            .Setup(r => r.GetByTlsCertificateAsync(It.IsAny<TlsCertificate>()))
-            .ReturnsAsync(peerConnection);
-        
-        _mockPeerConnectionRepository
-            .Setup(r => r.UpdateDirectMessagePublicKeyAsync(It.IsAny<NetworkPeerId>(), It.IsAny<DirectMessagePublicKey>()))
-            .Returns(Task.CompletedTask);
-
-        _mockPeerConnectionRepository
-            .Setup(r => r.SaveAsync(It.IsAny<PeerConnection>()))
+        // Setup profile repository Upsert to succeed
+        _mockProfileRepository
+            .Setup(r => r.UpsertAsync(It.IsAny<PeerRoutingProfile>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
         // X3DH orchestrator already setup above for this test
@@ -389,10 +372,7 @@ public class ConversationServiceTests
         _mockGrpcSessionService.Setup(s => s.EstablishDirectSessionAsync(It.IsAny<DnsEndPoint>(), It.IsAny<EstablishDirectSessionRequest>()))
             .ReturnsAsync(grpcResponse);
 
-        // Setup peer connection repository
-        _mockPeerConnectionRepository
-            .Setup(r => r.SaveAsync(It.IsAny<PeerConnection>()))
-            .Returns(Task.CompletedTask);
+        // Profile upserts are configured above; no legacy connection repo
 
         // Setup X3DH orchestrator to return a shared secret
         // Important: Do not override the matching handshake response; ensure the orchestrator returns handshakeResponse2
@@ -447,8 +427,8 @@ public class ConversationServiceTests
         Assert.That(result, Is.Not.EqualTo(default(DirectSessionId)));
         Assert.That(result.Value, Is.EqualTo(sessionId));
         
-        // Verify peer connection was saved
-        _mockPeerConnectionRepository.Verify(r => r.SaveAsync(It.IsAny<PeerConnection>()), Times.Once);
+        // Verify routing profile upsert occurred
+        _mockProfileRepository.Verify(r => r.UpsertAsync(It.IsAny<PeerRoutingProfile>(), It.IsAny<CancellationToken>()), Times.Once);
         
         // Verify session was established
         _mockDirectSessionManager.Verify(m => m.EstablishSessionAsResponderAsync(

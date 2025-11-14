@@ -24,16 +24,16 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
     private readonly IMediator _mediator;
     private readonly Percolator.Chat.App.IAdminOperations _adminOps;
     private readonly IDhtService _dhtService;
-    private readonly IPeerConnectionRepository _peerConnectionRepository;
+    private readonly IPeerRoutingProfileRepository _profileRepository;
     private readonly IMessageQueueService _mqService;
-    public ProcessInternalEnvelopeHandler(ILogger<ProcessInternalEnvelopeHandler> logger, IMediator mediator, Percolator.Chat.App.IAdminOperations adminOps, IDhtService dhtService, IPeerConnectionRepository peerConnectionRepository, IMessageQueueService mqService)
+    public ProcessInternalEnvelopeHandler(ILogger<ProcessInternalEnvelopeHandler> logger, IMediator mediator, Percolator.Chat.App.IAdminOperations adminOps, IDhtService dhtService, IMessageQueueService mqService, IPeerRoutingProfileRepository profileRepository)
     {
         _logger = logger;
         _mediator = mediator;
         _adminOps = adminOps;
         _dhtService = dhtService;
-        _peerConnectionRepository = peerConnectionRepository;
         _mqService = mqService;
+        _profileRepository = profileRepository;
     }
 
     public async Task<InternalEnvelope?> Handle(ProcessInternalEnvelopeCommand request, CancellationToken cancellationToken)
@@ -76,14 +76,22 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                     return null;
                 }
                 var remotePeerId = new Percolator.Network.PeerId(request.Context.RemotePeerGuid.Value);
-                var conn = await _peerConnectionRepository.GetByIdAsync(remotePeerId).ConfigureAwait(false);
-                if (conn?.IdentitySigningKey is null)
+                var profile = await _profileRepository.GetByIdAsync(remotePeerId, cancellationToken).ConfigureAwait(false);
+                if (profile is null || profile.IdentityPublicKey is null)
                 {
-                    _logger.LogWarning("No signing key for remote peer {PeerId} to handle PingRequest", remotePeerId);
+                    _logger.LogWarning("No routing profile or signing key for remote peer {PeerId} to handle PingRequest", remotePeerId);
                     return null;
                 }
-                var nodeIdBytes = System.Security.Cryptography.SHA256.HashData(conn.IdentitySigningKey.Value);
-                await _mediator.Send(new Percolator.Dht.Messages.PingRequest(new NodeId(nodeIdBytes), conn.GrpcEndPoints.First().EndPoint), cancellationToken).ConfigureAwait(false);
+                var freshest = profile.Endpoints
+                    .OrderByDescending(e => e.LastSeen)
+                    .FirstOrDefault();
+                if (freshest.EndPoint == null)
+                {
+                    _logger.LogWarning("No endpoints in routing profile for remote peer {PeerId} to handle PingRequest", remotePeerId);
+                    return null;
+                }
+                var nodeIdBytes = System.Security.Cryptography.SHA256.HashData(profile.IdentityPublicKey.Value);
+                await _mediator.Send(new Percolator.Dht.Messages.PingRequest(new NodeId(nodeIdBytes), freshest.EndPoint), cancellationToken).ConfigureAwait(false);
                 return null;
             }
             return null;

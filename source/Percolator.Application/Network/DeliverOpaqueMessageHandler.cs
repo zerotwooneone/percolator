@@ -19,7 +19,6 @@ namespace Percolator.Application.Network
     {
         private readonly ILogger<DeliverOpaqueMessageHandler> _logger;
         private readonly IDirectSessionManager _sessionManager;
-        private readonly IPeerConnectionRepository _peerConnectionRepository;
         private readonly IMediator _mediator;
         private readonly IDirectSessionRepository _directSessionRepository;
         private readonly ActiveIdentityContext _activeIdentityContext;
@@ -44,7 +43,6 @@ namespace Percolator.Application.Network
         public DeliverOpaqueMessageHandler(
             ILogger<DeliverOpaqueMessageHandler> logger,
             IDirectSessionManager sessionManager,
-            IPeerConnectionRepository peerConnectionRepository,
             IMediator mediator,
             IDirectSessionRepository directSessionRepository,
             ActiveIdentityContext activeIdentityContext,
@@ -55,7 +53,6 @@ namespace Percolator.Application.Network
         {
             _logger = logger;
             _sessionManager = sessionManager;
-            _peerConnectionRepository = peerConnectionRepository;
             _mediator = mediator;
             _directSessionRepository = directSessionRepository;
             _activeIdentityContext = activeIdentityContext;
@@ -171,10 +168,8 @@ namespace Percolator.Application.Network
                     ?? throw new InvalidOperationException($"No direct session mapping found for session {inferredSessionId}");
                 var remotePeerId = directSession.RemotePeerId;
                 _logger.LogInformation("Resolved remote peer {PeerId} for session {SessionId}", remotePeerId, directSession.SessionId);
-                // Prefer domain routing profile with RoutePlanner selection; fall back to legacy connection repo
+                // Prefer domain routing profile with RoutePlanner selection
                 DnsEndPoint? endpoint = null;
-                GrpcEndPoint legacySelectedEndpoint = default;
-                PeerConnection? legacyConnectionInfo = null;
                 var profile = await _profileRepository.GetByIdAsync(remotePeerId, cancellationToken).ConfigureAwait(false);
                 if (profile is not null)
                 {
@@ -187,15 +182,8 @@ namespace Percolator.Application.Network
                 }
                 if (endpoint is null)
                 {
-                    legacyConnectionInfo = await _peerConnectionRepository.GetByIdAsync(remotePeerId).ConfigureAwait(false);
-                    if (legacyConnectionInfo?.GrpcEndPoints.FirstOrDefault() is null)
-                    {
-                        _logger.LogWarning("Could not find connection info for peer {PeerId} to handle opaque message", remotePeerId);
-                        return new DeliverOpaqueMessageResult();
-                    }
-                    legacySelectedEndpoint = legacyConnectionInfo.GrpcEndPoints.First();
-                    endpoint = legacySelectedEndpoint.EndPoint;
-                    _logger.LogInformation("Using legacy endpoint {Endpoint} for peer {PeerId}", endpoint, remotePeerId);
+                    _logger.LogWarning("No route available for peer {PeerId}; skipping opaque message processing side-effects", remotePeerId);
+                    return new DeliverOpaqueMessageResult();
                 }
 
                 var internalEnvelope = InternalEnvelope.Parser.ParseFrom(plaintext.Value);
@@ -236,11 +224,6 @@ namespace Percolator.Application.Network
 
                 var processed = await _mediator.Send(new ProcessInternalEnvelopeCommand(internalEnvelope, ctx), cancellationToken).ConfigureAwait(false);
 
-                if (legacyConnectionInfo is not null && legacyConnectionInfo.GrpcEndPoints.Count > 0)
-                {
-                    legacyConnectionInfo.UpdateLastSeen(legacySelectedEndpoint, DateTimeOffset.UtcNow);
-                    await _peerConnectionRepository.SaveAsync(legacyConnectionInfo).ConfigureAwait(false);
-                }
 
                 // Signal: peer online. Attempt relay of queued messages one-by-one until empty or first failure.
                 try

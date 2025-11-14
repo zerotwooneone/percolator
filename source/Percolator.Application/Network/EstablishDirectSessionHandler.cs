@@ -29,7 +29,6 @@ namespace Percolator.Application.Network
         private readonly IX3DHOrchestrator _x3dhOrchestrator;
         private readonly IDirectSessionManager _sessionManager;
         private readonly IPeerIdentityRepository _peerIdentityRepository;
-        private readonly IPeerConnectionRepository _peerConnectionRepository;
         private readonly IX3DHManager _x3DhManager;
         private readonly IDirectSessionRepository _directSessionRepository;
         private readonly IPeerPublicSigningKeyStore _pkhStore;
@@ -41,7 +40,6 @@ namespace Percolator.Application.Network
             IX3DHOrchestrator x3dhOrchestrator,
             IDirectSessionManager sessionManager,
             IPeerIdentityRepository peerIdentityRepository,
-            IPeerConnectionRepository peerConnectionRepository,
             IX3DHManager x3DhManager,
             IDirectSessionRepository directSessionRepository,
             IPeerPublicSigningKeyStore pkhStore,
@@ -52,7 +50,6 @@ namespace Percolator.Application.Network
             _x3dhOrchestrator = x3dhOrchestrator;
             _sessionManager = sessionManager;
             _peerIdentityRepository = peerIdentityRepository;
-            _peerConnectionRepository = peerConnectionRepository;
             _x3DhManager = x3DhManager;
             _directSessionRepository = directSessionRepository;
             _pkhStore = pkhStore;
@@ -80,40 +77,9 @@ namespace Percolator.Application.Network
             }
             _logger.LogDebug("Signature verification successful");
 
-            // Persist/update peer connection info based on endpoint
+            // Determine timestamps and build values
             var networkIdentitySigningKey = new DirectMessagePublicKey(request.RemoteIdentityKeyBytes);
             var timestamp = DateTimeOffset.Now;
-
-            var existingPeerConnectionInfo = await _peerConnectionRepository.GetByPublicKey(networkIdentitySigningKey).ConfigureAwait(false);
-            NetworkPeerId networkPeerId;
-            PeerConnection peerConnectionInfo;
-            if (existingPeerConnectionInfo is null)
-            {
-                _logger.LogWarning("No connection info found for peer {DirectMessagePublicKey}. Creating a new connection record", Convert.ToBase64String(networkIdentitySigningKey.Value));
-                var grpcEndPoint = new GrpcEndPoint(request.PeerEndPoint, timestamp);
-                networkPeerId = new NetworkPeerId(Guid.NewGuid());
-                peerConnectionInfo = new PeerConnection(
-                    networkPeerId,
-                    networkIdentitySigningKey,
-                    new[] { grpcEndPoint },
-                    new List<TlsCertificate>(),
-                    timestamp);
-            }
-            else
-            {
-                networkPeerId = existingPeerConnectionInfo.Id;
-                var grpcEndPoint = existingPeerConnectionInfo.GrpcEndPoints.FirstOrDefault(e => e.EndPoint.Equals(request.PeerEndPoint));
-                if (grpcEndPoint is null)
-                {
-                    _logger.LogWarning("No gRPC endpoints found for peer {DirectMessagePublicKey}. Adding a new one", Convert.ToBase64String(networkIdentitySigningKey.Value));
-                    existingPeerConnectionInfo.AddGrpcEndPoint(new GrpcEndPoint(request.PeerEndPoint, timestamp));
-                }
-                else
-                {
-                    existingPeerConnectionInfo.UpdateLastSeen(grpcEndPoint, timestamp);
-                }
-                peerConnectionInfo = existingPeerConnectionInfo;
-            }
 
             // Derive shared secret (Initiator)
             _logger.LogInformation("Processing X3DH handshake with initiator bundle. Examining bundle properties...");
@@ -127,7 +93,9 @@ namespace Percolator.Application.Network
             var sharedSecret = _x3dhOrchestrator.InitiateHandshake(prekeyBundle, ephemeralKey);
             _logger.LogInformation("X3DH handshake processed successfully as Initiator");
 
-            var identityPeerId = new IdentityPeerId(peerConnectionInfo.Id.Value);
+            // Identity domain owns PeerId minting. If identity not found, mint a new IdentityPeerId here (Identity domain responsibility) and create it.
+            // Then, NetworkPeerId is derived from IdentityPeerId to keep ids aligned across domains.
+            var identityPeerId = new IdentityPeerId(Guid.NewGuid());
             var identity = await _peerIdentityRepository.GetByIdAsync(identityPeerId).ConfigureAwait(false);
             if (identity is null)
             {
@@ -146,8 +114,18 @@ namespace Percolator.Application.Network
             var initiatorPkh = SHA256.HashData(initiatorSpki);
             await _pkhStore.ActivateIfChangedAsync(identity.Id, initiatorSpki, initiatorPkh, DateTimeOffset.UtcNow, cancellationToken).ConfigureAwait(false);
 
-            // Now that the Peer exists, persist/update the PeerConnection
-            await _peerConnectionRepository.SaveAsync(peerConnectionInfo).ConfigureAwait(false);
+            // Mirror routing data into the Network domain's authoritative profile
+            var networkPeerId = new NetworkPeerId(identity.Id.Value);
+            var profile = await _peerRoutingProfileRepository.GetByIdAsync(networkPeerId, cancellationToken).ConfigureAwait(false)
+                          ?? new PeerRoutingProfile();
+            if (profile.Id is null)
+            {
+                profile.BindIdentity(networkPeerId);
+            }
+            profile.SetIdentityPublicKey(new Percolator.Network.ValueObjects.IdentityPublicKey(networkIdentitySigningKey.Value));
+            profile.AddGrpcEndPoint(new GrpcEndPoint(request.PeerEndPoint, timestamp), timestamp);
+            profile.RecordReachability(ReachabilityStatus.Online, timestamp);
+            await _peerRoutingProfileRepository.UpsertAsync(profile, cancellationToken).ConfigureAwait(false);
 
             var existingDirectSession =
                 await _directSessionRepository.GetByRemotePeerIdAsync(networkPeerId,
@@ -201,12 +179,8 @@ namespace Percolator.Application.Network
             // Record reachability as Online in the domain routing profile (if present)
             try
             {
-                var profile = await _peerRoutingProfileRepository.GetByIdAsync(networkPeerId, cancellationToken).ConfigureAwait(false);
-                if (profile is not null)
-                {
-                    profile.RecordReachability(ReachabilityStatus.Online, DateTimeOffset.UtcNow);
-                    await _peerRoutingProfileRepository.UpsertAsync(profile, cancellationToken).ConfigureAwait(false);
-                }
+                profile.RecordReachability(ReachabilityStatus.Online, DateTimeOffset.UtcNow);
+                await _peerRoutingProfileRepository.UpsertAsync(profile, cancellationToken).ConfigureAwait(false);
             }
             catch (Exception ex)
             {

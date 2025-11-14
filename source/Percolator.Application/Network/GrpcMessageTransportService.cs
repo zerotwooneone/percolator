@@ -17,20 +17,17 @@ public class GrpcMessageTransportService : IMessageTransportService
 {
     private readonly ConcurrentDictionary<string, TransportService.TransportServiceClient> _clients = new();
     private readonly ILogger<GrpcMessageTransportService> _logger;
-    private readonly IPeerConnectionRepository _peerConnectionRepository;
     private readonly IPeerRoutingProfileRepository _profileRepository;
     private readonly IProfileRoutePlanner _routePlanner;
     private readonly IHttpClientFactory _httpClientFactory;
 
     public GrpcMessageTransportService(
         ILogger<GrpcMessageTransportService> logger,
-        IPeerConnectionRepository peerConnectionRepository,
         IHttpClientFactory httpClientFactory,
         IPeerRoutingProfileRepository profileRepository,
         IProfileRoutePlanner routePlanner)
     {
         _logger = logger;
-        _peerConnectionRepository = peerConnectionRepository;
         _httpClientFactory = httpClientFactory;
         _profileRepository = profileRepository;
         _routePlanner = routePlanner;
@@ -58,15 +55,7 @@ public class GrpcMessageTransportService : IMessageTransportService
         }
         if (endPoint is null)
         {
-            var peerConnection = await _peerConnectionRepository.GetByIdAsync(networkPeerId).ConfigureAwait(false)
-                ?? throw new InvalidOperationException($"No connection info found for peer {recipientPeerId}. Cannot send message.");
-            if (peerConnection.GrpcEndPoints.Count == 0)
-            {
-                throw new InvalidOperationException($"No gRPC endpoints found for peer {recipientPeerId}. Cannot send message.");
-            }
-            //todo: loop over connections sequentially
-            endPoint = peerConnection.GrpcEndPoints[0];
-            _logger.LogInformation("Falling back to legacy endpoint {Endpoint} for {Peer}", endPoint, recipientPeerId);
+            throw new InvalidOperationException($"No route available for peer {recipientPeerId}. Cannot send message.");
         }
 
         // Use the endpoint as the client key, not the peer ID

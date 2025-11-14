@@ -4,12 +4,12 @@ namespace Percolator.Network.Messaging;
 
 public sealed class DefaultRoutePlanner : IRoutePlanner
 {
-    private readonly IPeerConnectionRepository _peerConnections;
+    private readonly IPeerRoutingProfileRepository _profiles;
     private readonly IRelayTopology _relayTopology;
 
-    public DefaultRoutePlanner(IPeerConnectionRepository peerConnections, IRelayTopology relayTopology)
+    public DefaultRoutePlanner(IPeerRoutingProfileRepository profiles, IRelayTopology relayTopology)
     {
-        _peerConnections = peerConnections;
+        _profiles = profiles;
         _relayTopology = relayTopology;
     }
 
@@ -20,8 +20,8 @@ public sealed class DefaultRoutePlanner : IRoutePlanner
         // Direct route available?
         try
         {
-            var conn = await _peerConnections.GetByIdAsync(target).ConfigureAwait(false);
-            if (conn?.GrpcEndPoints.Count > 0)
+            var profile = await _profiles.GetByIdAsync(target).ConfigureAwait(false);
+            if (profile?.Endpoints.Count > 0)
             {
                 plan.Add("Direct");
             }

@@ -38,7 +38,6 @@ public class MessageServiceTests
     private IOptions<CryptographyOptions> _options = null!;
     private Mock<IDirectSessionRepository> _mockDirectSessionRepository = null!;
     private Mock<IPeerPublicSigningKeyStore> _mockKeyStore = null!;
-    private Mock<IPeerConnectionRepository> _mockPeerConnectionRepository = null!;
     private Mock<INetworkSender> _mockNetworkSender = null!;
 
     [SetUp]
@@ -51,7 +50,6 @@ public class MessageServiceTests
         _options = Options.Create(new CryptographyOptions());
         _mockDirectSessionRepository = new Mock<IDirectSessionRepository>();
         _mockKeyStore = new Mock<IPeerPublicSigningKeyStore>();
-        _mockPeerConnectionRepository = new Mock<IPeerConnectionRepository>();
         _mockNetworkSender = new Mock<INetworkSender>();
 
         // Create a logger factory for DirectSessionManager

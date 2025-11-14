@@ -229,11 +229,7 @@ public class PercolatorDbContext : DbContext
             // Non-unique helper indexes for common lookups
             entity.HasIndex(e => new { e.SelfIdentityId, e.RemotePeerId });
             entity.HasIndex(e => new { e.SelfIdentityId, e.SessionId });
-            entity.HasOne<PeerConnectionDbo>()
-                .WithMany()
-                .HasForeignKey(e => e.RemotePeerId)
-                .OnDelete(DeleteBehavior.Cascade)
-                .IsRequired();
+            // TEMP: remove FK to PeerConnections during Network domain cutover; keep logical reference only
             entity.HasOne<SelfIdentityDbo>()
                 .WithMany()
                 .HasForeignKey(e => e.SelfIdentityId)

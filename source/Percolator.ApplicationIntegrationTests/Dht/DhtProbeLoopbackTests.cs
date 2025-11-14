@@ -111,7 +111,6 @@ public class DhtProbeLoopbackTests : IntegrationTestBase
         // SERVER HOST (remote process)
         var serverSessionManager = new Mock<IDirectSessionManager>();
         var serverDhtRepo = new Mock<IDhtNodeRepository>();
-        var serverPeerConnRepo = new Mock<IPeerConnectionRepository>();
         var serverDirectSessionRepo = new Mock<IDirectSessionRepository>();
 
         // Shared identifiers between client and server for the same direct session
@@ -146,17 +145,11 @@ public class DhtProbeLoopbackTests : IntegrationTestBase
         serverDirectSessionRepo
             .Setup(r => r.GetBySessionIdAsync(new DirectSessionId(sessionId.Value), It.IsAny<int>()))
             .ReturnsAsync(new DirectSession(new NetworkPeerId(serverNetworkPeerGuid), new DirectSessionId(sessionId.Value)));
-        serverPeerConnRepo
-            .Setup(r => r.GetByIdAsync(It.IsAny<NetworkPeerId>()))
-            .ReturnsAsync((NetworkPeerId pid) =>
-                pid.Value == serverNetworkPeerGuid
-                    ? new PeerConnection(
-                        new NetworkPeerId(serverNetworkPeerGuid),
-                        new DirectMessagePublicKey(SHA256.HashData(Guid.NewGuid().ToByteArray())),
-                        new[] { new GrpcEndPoint(new DnsEndPoint("localhost", 59001), DateTimeOffset.UtcNow) },
-                        Array.Empty<TlsCertificate>(),
-                        DateTimeOffset.UtcNow)
-                    : null);
+        // Provide routing profile repo/planner for server
+        var serverProfileRepo = new Mock<IPeerRoutingProfileRepository>(MockBehavior.Loose);
+        serverProfileRepo.Setup(r => r.GetByIdAsync(It.IsAny<NetworkPeerId>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((PeerRoutingProfile?)null);
+        var serverPlanner = new Mock<IProfileRoutePlanner>(MockBehavior.Loose);
 
         using var serverHost = CreateHost(GetAvailablePort(), "LoopbackDht-Server", services =>
         {
@@ -167,7 +160,8 @@ public class DhtProbeLoopbackTests : IntegrationTestBase
             services.AddTransient<IRequestHandler<DeliverOpaqueMessageCommand, DeliverOpaqueMessageResult>, FakeDeliverOpaqueMessageHandler>();
             services.Replace(ServiceDescriptor.Singleton<IDhtNodeRepository>(sp => serverDhtRepo.Object));
             services.Replace(ServiceDescriptor.Singleton<IConversationRepository>(sp => new Mock<IConversationRepository>().Object));
-            services.Replace(ServiceDescriptor.Singleton<IPeerConnectionRepository>(sp => serverPeerConnRepo.Object));
+            services.Replace(ServiceDescriptor.Singleton<IPeerRoutingProfileRepository>(sp => serverProfileRepo.Object));
+            services.Replace(ServiceDescriptor.Singleton<IProfileRoutePlanner>(sp => serverPlanner.Object));
             services.Replace(ServiceDescriptor.Singleton<IDirectSessionRepository>(sp => serverDirectSessionRepo.Object));
             services.AddSingleton<IDhtService, DhtService>();
             services.Replace(ServiceDescriptor.Singleton<IX3DHOrchestrator>(sp => new Mock<IX3DHOrchestrator>().Object));

@@ -41,7 +41,7 @@ namespace Percolator.Application.Network.Handshake
         private readonly IDirectSessionManager _sessionManager;
         private readonly ActiveIdentityContext _active;
         private readonly IPeerIdentityRepository _peerIdentityRepository;
-        private readonly IPeerConnectionRepository _peerConnectionRepository;
+        private readonly IPeerRoutingProfileRepository _profileRepository;
         private readonly IMediator _mediator;
         public HandleHandshakeInitiatorHelloHandler(
             ILogger<HandleHandshakeInitiatorHelloHandler> logger,
@@ -52,7 +52,7 @@ namespace Percolator.Application.Network.Handshake
             IDirectSessionManager sessionManager,
             ActiveIdentityContext active,
             IPeerIdentityRepository peerIdentityRepository,
-            IPeerConnectionRepository peerConnectionRepository,
+            IPeerRoutingProfileRepository profileRepository,
             IMediator mediator)
         {
             _logger = logger;
@@ -63,7 +63,7 @@ namespace Percolator.Application.Network.Handshake
             _sessionManager = sessionManager;
             _active = active;
             _peerIdentityRepository = peerIdentityRepository;
-            _peerConnectionRepository = peerConnectionRepository;
+            _profileRepository = profileRepository;
             _mediator = mediator;
         }
 
@@ -154,38 +154,19 @@ namespace Percolator.Application.Network.Handshake
             await _peerIdentityRepository.SaveAsync(identity).ConfigureAwait(false);
             await _pkhStore.ActivateIfChangedAsync(resolvedRemotePeerId, spki, pkh, DateTimeOffset.UtcNow, cancellationToken).ConfigureAwait(false);
             var netPeerId = new NetworkPeerId(resolvedRemotePeerId.Value);
-            var existingConn = await _peerConnectionRepository.GetByIdAsync(netPeerId).ConfigureAwait(false);
-            if (existingConn is null)
+            var profile = await _profileRepository.GetByIdAsync(netPeerId, cancellationToken).ConfigureAwait(false)
+                ?? new PeerRoutingProfile();
+            if (profile.Id is null)
             {
-                // Create connection and set relay if provided
-                PeerConnection conn;
-                if (request.RelayHostPeerId is not null)
-                {
-                    conn = new PeerConnection(
-                        netPeerId,
-                        identitySigningKey: null,
-                        grpcEndPoints: Array.Empty<GrpcEndPoint>(),
-                        tlsCertificates: Array.Empty<TlsCertificate>(),
-                        lastSeen: DateTimeOffset.UtcNow,
-                        relayPeerId: new NetworkPeerId(request.RelayHostPeerId.Value));
-                }
-                else
-                {
-                    conn = new PeerConnection(
-                        netPeerId,
-                        identitySigningKey: null,
-                        grpcEndPoints: Array.Empty<GrpcEndPoint>(),
-                        tlsCertificates: Array.Empty<TlsCertificate>(),
-                        lastSeen: DateTimeOffset.UtcNow);
-                }
-                await _peerConnectionRepository.SaveAsync(conn).ConfigureAwait(false);
+                profile.BindIdentity(netPeerId);
             }
-            else if (request.RelayHostPeerId is not null)
+            if (request.RelayHostPeerId is not null)
             {
-                // Upsert relay association on existing connection
-                existingConn.SetRelayPeer(new NetworkPeerId(request.RelayHostPeerId.Value));
-                await _peerConnectionRepository.SaveAsync(existingConn).ConfigureAwait(false);
+                profile.AddOrRefreshRelay(new NetworkPeerId(request.RelayHostPeerId.Value), DateTimeOffset.UtcNow);
             }
+            // Persist initiator identity public key into routing profile
+            profile.SetIdentityPublicKey(new Percolator.Network.ValueObjects.IdentityPublicKey(spki));
+            await _profileRepository.UpsertAsync(profile, cancellationToken).ConfigureAwait(false);
 
             // If initiator included an encrypted initial payload, decrypt it via the newly established session
             if (request.EncryptedPayload is not null && request.EncryptedPayload.Length > 0)

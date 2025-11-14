@@ -15,11 +15,14 @@ public class NetworkMessagingTests
     [Test]
     public async Task RoutePlanner_DirectOnly_When_EndpointsExist_Returns_Direct()
     {
-        var repo = new Mock<IPeerConnectionRepository>();
+        var repo = new Mock<IPeerRoutingProfileRepository>();
         var topo = new Mock<IRelayTopology>();
         var peer = new PeerId(Guid.NewGuid());
-        repo.Setup(r => r.GetByIdAsync(peer))
-            .ReturnsAsync(new PeerConnection(peer, identitySigningKey: null, grpcEndPoints: new[] { new GrpcEndPoint(new System.Net.DnsEndPoint("localhost", 1234), DateTimeOffset.UtcNow) }, tlsCertificates: Array.Empty<TlsCertificate>(), lastSeen: DateTimeOffset.UtcNow));
+        var profile = new PeerRoutingProfile();
+        profile.BindIdentity(peer);
+        profile.AddGrpcEndPoint(new GrpcEndPoint(new System.Net.DnsEndPoint("localhost", 1234), DateTimeOffset.UtcNow), DateTimeOffset.UtcNow);
+        repo.Setup(r => r.GetByIdAsync(peer, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(profile);
         var sut = new DefaultRoutePlanner(repo.Object, topo.Object);
 
         var plan = await sut.PlanAsync(peer, SendStrategy.DirectOnly, CancellationToken.None);
@@ -30,11 +33,11 @@ public class NetworkMessagingTests
     [Test]
     public async Task RoutePlanner_DirectThenRelay_When_NoDirect_WithRelay_Returns_RelayOnly()
     {
-        var repo = new Mock<IPeerConnectionRepository>();
+        var repo = new Mock<IPeerRoutingProfileRepository>();
         var topo = new Mock<IRelayTopology>();
         var peer = new PeerId(Guid.NewGuid());
         var relay = new PeerId(Guid.NewGuid());
-        repo.Setup(r => r.GetByIdAsync(peer)).ReturnsAsync((PeerConnection?)null);
+        repo.Setup(r => r.GetByIdAsync(peer, It.IsAny<CancellationToken>())).ReturnsAsync((PeerRoutingProfile?)null);
         topo.Setup(t => t.GetRelayForAsync(peer, It.IsAny<CancellationToken>())).ReturnsAsync(relay);
         var sut = new DefaultRoutePlanner(repo.Object, topo.Object);
 

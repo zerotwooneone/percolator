@@ -33,10 +33,10 @@ public class SqlitePeerConnectionRepositoryTests
     }
 
     [Test]
-    public async Task Save_and_Get_roundtrip_stores_endpoints_and_certs()
+    public async Task Upsert_and_Get_roundtrip_stores_endpoints_and_key()
     {
         using var ctx = CreateDbContext(out var conn);
-        var repo = new SqlitePeerConnectionRepository(ctx);
+        var repo = new SqlitePeerRoutingProfileRepository(ctx);
 
         // Arrange: ensure PeerIdentity exists to satisfy FK
         var peerId = Percolator.Network.PeerId.NewId();
@@ -44,39 +44,28 @@ public class SqlitePeerConnectionRepositoryTests
         await ctx.SaveChangesAsync();
 
         var now = DateTimeOffset.UtcNow;
-        var pc = new PeerConnection(
-            peerId,
-            new DirectMessagePublicKey(RandomNumberGenerator.GetBytes(32)),
-            new[]
-            {
-                new GrpcEndPoint(new DnsEndPoint("127.0.0.1", 5001), now),
-                new GrpcEndPoint(new DnsEndPoint("localhost", 5002), now.AddMinutes(-5))
-            },
-            new[]
-            {
-                new TlsCertificate(RandomNumberGenerator.GetBytes(64)),
-                new TlsCertificate(RandomNumberGenerator.GetBytes(64))
-            },
-            now
-        );
+        var profile = new PeerRoutingProfile();
+        profile.BindIdentity(peerId);
+        profile.SetIdentityPublicKey(new Percolator.Network.ValueObjects.IdentityPublicKey(RandomNumberGenerator.GetBytes(32)));
+        profile.AddGrpcEndPoint(new GrpcEndPoint(new DnsEndPoint("127.0.0.1", 5001), now), now);
+        profile.AddGrpcEndPoint(new GrpcEndPoint(new DnsEndPoint("localhost", 5002), now.AddMinutes(-5)), now.AddMinutes(-5));
 
         // Act
-        await repo.SaveAsync(pc);
+        await repo.UpsertAsync(profile);
         var loaded = await repo.GetByIdAsync(peerId);
 
         // Assert
         loaded.Should().NotBeNull();
-        loaded!.Id.Should().Be(pc.Id);
-        loaded.IdentitySigningKey!.Value.Should().BeEquivalentTo(pc.IdentitySigningKey!.Value);
-        loaded.GrpcEndPoints.Should().HaveCount(2);
-        loaded.TlsCertificates.Should().HaveCount(2);
+        loaded!.Id.Should().Be(profile.Id);
+        loaded.IdentityPublicKey!.Value.Should().BeEquivalentTo(profile.IdentityPublicKey!.Value);
+        loaded.Endpoints.Should().HaveCount(2);
     }
 
     [Test]
-    public async Task Lookup_by_direct_message_and_tls_certificate_returns_expected()
+    public async Task GetById_returns_expected_profile()
     {
         using var ctx = CreateDbContext(out var conn);
-        var repo = new SqlitePeerConnectionRepository(ctx);
+        var repo = new SqlitePeerRoutingProfileRepository(ctx);
 
         // Arrange peer identities
         var peerA = Percolator.Network.PeerId.NewId();
@@ -85,21 +74,20 @@ public class SqlitePeerConnectionRepositoryTests
         ctx.PeerIdentities.Add(new PeerIdentityDbo { PeerId = peerB.Value, Name = "B", Version = 0, CreatedAtUtc = DateTimeOffset.UtcNow, UpdatedAtUtc = DateTimeOffset.UtcNow });
         await ctx.SaveChangesAsync();
 
-        var dmA = new DirectMessagePublicKey(RandomNumberGenerator.GetBytes(32));
-        var certB = new TlsCertificate(RandomNumberGenerator.GetBytes(64));
         var now = DateTimeOffset.UtcNow;
-
-        await repo.SaveAsync(new PeerConnection(peerA, dmA, Array.Empty<GrpcEndPoint>(), Array.Empty<TlsCertificate>(), now));
-        await repo.SaveAsync(new PeerConnection(peerB, null, Array.Empty<GrpcEndPoint>(), new[] { certB }, now));
+        var profileA = new PeerRoutingProfile(); profileA.BindIdentity(peerA); profileA.SetIdentityPublicKey(new Percolator.Network.ValueObjects.IdentityPublicKey(RandomNumberGenerator.GetBytes(32))); profileA.AddGrpcEndPoint(new GrpcEndPoint(new DnsEndPoint("localhost", 5001), now), now);
+        var profileB = new PeerRoutingProfile(); profileB.BindIdentity(peerB); profileB.AddGrpcEndPoint(new GrpcEndPoint(new DnsEndPoint("localhost", 5002), now), now);
+        await repo.UpsertAsync(profileA);
+        await repo.UpsertAsync(profileB);
 
         // Act
-        var byDm = await repo.GetByPublicKey(dmA);
-        var byCert = await repo.GetByTlsCertificateAsync(certB);
+        var byIdA = await repo.GetByIdAsync(peerA);
+        var byIdB = await repo.GetByIdAsync(peerB);
 
         // Assert
-        byDm.Should().NotBeNull();
-        byDm!.Id.Should().Be(peerA);
-        byCert.Should().NotBeNull();
-        byCert!.Id.Should().Be(peerB);
+        byIdA.Should().NotBeNull();
+        byIdA!.Id.Should().Be(peerA);
+        byIdB.Should().NotBeNull();
+        byIdB!.Id.Should().Be(peerB);
     }
 }

@@ -351,9 +351,11 @@ public class HandshakeInitiatorFlowTests
         peerIdentityRepo.Setup(r => r.SaveAsync(It.IsAny<Percolator.Identity.Model.PeerIdentity>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
-        var connRepo = new Mock<IPeerConnectionRepository>(MockBehavior.Strict);
-        connRepo.Setup(r => r.GetByIdAsync(It.IsAny<Percolator.Network.PeerId>())).ReturnsAsync((PeerConnection?)null);
-        connRepo.Setup(r => r.SaveAsync(It.IsAny<PeerConnection>())).Returns(Task.CompletedTask);
+        var profileRepo = new Mock<IPeerRoutingProfileRepository>(MockBehavior.Loose);
+        profileRepo.Setup(r => r.GetByIdAsync(It.IsAny<Percolator.Network.PeerId>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((PeerRoutingProfile?)null);
+        profileRepo.Setup(r => r.UpsertAsync(It.IsAny<PeerRoutingProfile>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
 
         var initiatorHelloHandler = new HandleHandshakeInitiatorHelloHandler(
             new NullLogger<HandleHandshakeInitiatorHelloHandler>(),
@@ -364,7 +366,7 @@ public class HandshakeInitiatorFlowTests
             sessions.Object,
             responderActive,
             peerIdentityRepo.Object,
-            connRepo.Object,
+            profileRepo.Object,
             new Mock<IMediator>().Object);
 
         // Handler will encrypt ResponderInnerHello over the new session; return any bytes

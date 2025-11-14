@@ -31,7 +31,7 @@ public class InitiateHandshakeViaHostHandlerTests
         var transport = new Mock<IMessageTransportService>(MockBehavior.Strict);
         var peerIdentityRepo = new Mock<Percolator.Identity.IPeerIdentityRepository>(MockBehavior.Strict);
         var pkhStore = new Mock<IPeerPublicSigningKeyStore>(MockBehavior.Strict);
-        var connRepo = new Mock<IPeerConnectionRepository>(MockBehavior.Strict);
+        var profileRepo = new Mock<IPeerRoutingProfileRepository>(MockBehavior.Loose);
         var initiatorService = new Mock<IInitiatorHelloService>(MockBehavior.Strict);
 
         // Host peer setup
@@ -99,10 +99,10 @@ public class InitiateHandshakeViaHostHandlerTests
             .Returns(Task.CompletedTask);
         peerIdentityRepo.Setup(r => r.SaveAsync(It.IsAny<Percolator.Identity.Model.PeerIdentity>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
 
-        // Connection repo paths
-        connRepo.Setup(r => r.GetByIdAsync(It.IsAny<Percolator.Network.PeerId>()))
-            .ReturnsAsync((PeerConnection?)null);
-        connRepo.Setup(r => r.SaveAsync(It.IsAny<PeerConnection>()))
+        // Profile repo paths
+        profileRepo.Setup(r => r.GetByIdAsync(It.IsAny<Percolator.Network.PeerId>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((PeerRoutingProfile?)null);
+        profileRepo.Setup(r => r.UpsertAsync(It.IsAny<PeerRoutingProfile>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
         // Expect initiator service to be called with host peer id and parsed bundle
@@ -125,7 +125,7 @@ public class InitiateHandshakeViaHostHandlerTests
             transport.Object,
             peerIdentityRepo.Object,
             pkhStore.Object,
-            connRepo.Object,
+            profileRepo.Object,
             initiatorService.Object);
 
         var targetPkh = new byte[] { 0x99 };

@@ -141,12 +141,7 @@ public class Phase17CommandsOnlyTests : IntegrationTestBase
 
         public async Task<PeerId> GetPeerIdFromHost(byte[] publicKeyBytes)
         {
-            var connectionRepo = _hostProvider.GetRequiredService<IPeerConnectionRepository>();
-            var connection = await connectionRepo.GetByPublicKey(new DirectMessagePublicKey(publicKeyBytes));
-            if (connection is not null)
-            {
-                return new PeerId(connection.Id.Value);
-            }
+            // Resolve by PKH only (legacy PeerConnection repo removed)
             var pubKeyRepo = _hostProvider.GetRequiredService<IPeerPublicSigningKeyStore>();
             using var sha = SHA256.Create();
             var pubKeyRec = await pubKeyRepo.GetPeerIdByPublicKeyHashAsync(sha.ComputeHash(publicKeyBytes));
@@ -154,7 +149,7 @@ public class Phase17CommandsOnlyTests : IntegrationTestBase
             {
                 return pubKeyRec;
             }
-            throw new InvalidOperationException($"No peer registered for public key {publicKeyBytes}");
+            throw new InvalidOperationException($"No peer registered for public key {Convert.ToBase64String(publicKeyBytes)}");
         }
     }
 
