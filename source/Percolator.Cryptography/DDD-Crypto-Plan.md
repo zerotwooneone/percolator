@@ -415,13 +415,18 @@ Next: Phase 4 – Application-Layer Migration Plan
   - Deliverable: Behavior-complete `PendingSession` + tests.
 
  - **Step 5: SecureSession behaviors (Encrypt/Decrypt with ratchet framing)**
-  - Red: Tests for counter monotonicity, AD enforcement, skipped-keys retrieval, `TouchLastUsed()` updates.
-  - Green: Implement via `SessionCrypto` port. API should be explicit about framing: return/consume a ratchet-framed message (e.g., `SessionRatchetMessage`) rather than a bare `Ciphertext` where appropriate. Update state immutably and persist via repository.
+  - Red: Tests for
+    - Counter monotonicity, AD enforcement, skipped-keys retrieval, `TouchLastUsed()` updates.
+    - Initiator vs Responder first-message asymmetry:
+      - Initiator first-send performs a DH ratchet before first `Encrypt` and emits correct header.
+      - Responder decrypts the first inbound message, advances receiving chain, then persists finalized state.
+    - First-message envelope carries rendezvous payload (e.g., `SessionId`) enabling responder mapping.
+  - Green: Implement via `SessionCrypto` port. API explicit about framing: return/consume a ratchet-framed message (e.g., `SessionRatchetMessage`) rather than a bare `Ciphertext` where appropriate. Update state immutably and persist via repository.
   - Refactor: Remove duplication, improve error messages, tune invariants.
   - Deliverable: `SecureSession` behavior + tests.
 
-- **Step 6: Domain services (HandshakePlanner, SessionCrypto port)**
-  - Red: Planner tests validate signature/key compatibility paths and failure cases using crypto stubs.
+ - **Step 6: Domain services (HandshakePlanner, SessionCrypto port)**
+  - Red: Planner tests validate initiator vs responder paths for X3DH, including DH1/DH2/DH3 and optional DH4 (one-time pre-key); signature verification and failure cases using crypto stubs.
   - Green: Implement pure planner; define `SessionCrypto` interface aligned with existing utils. Provide an adapter implementation that reuses `X3DHManager` and `CryptoUtils`. No secret logging inside the domain; any diagnostics live in adapters at the Application layer.
   - Refactor: Streamline method names and DTOs.
   - Deliverable: Services + tests.
@@ -442,8 +447,13 @@ Next: Phase 4 – Application-Layer Migration Plan
   - Ensure `GroupManager` continues to serialize/deserialize member session state using new VO/DBO mappers if type names change.
   - Align any ratchet message framing names if they diverge (e.g., `SessionRatchetMessage`).
 
-- **Step 8: Application services integration (HandshakeService, SecureMessagingService)**
-  - Red: Tests for user journeys (standard outbound, inbound manual approval, inbound auto-approval) exercising services via ports. Use real adapters where practical, and minimal stubs only for external systems (network, clock, random).
+ - **Step 8: Application services integration (HandshakeService, SecureMessagingService)**
+  - Red: Tests for user journeys exercising services via ports:
+    - Standard outbound initiation (initiator path).
+    - Reverse-signal sender: `CreateInvitation(PeerId)` creates an invitation and (optionally) enqueues via outbox.
+    - Reverse-signal receiver: `PendingSession.FromInvitation(...)` then `ApproveAndRespond(...)` decrypts first inbound, finalizes session (persist), and enqueues response.
+    - Inbound auto-approval per policy.
+    - Use real adapters where practical; minimal stubs only for network/clock/random.
   - Green: Implement orchestrators; ensure side-effects: outbox enqueue, notifications, repo updates.
   - Refactor: Split methods if needed, remove duplication.
   - Deliverable: Services integrated at the app layer with tests.
@@ -459,6 +469,11 @@ Next: Phase 4 – Application-Layer Migration Plan
   - Green: Wire adapters to existing transport/envelope without leaking crypto domain internals.
   - Refactor: Improve boundaries, logging at app layer only.
   - Deliverable: E2E paths green; no runtime flags. Roll back via Git if needed.
+
+- **Step 10a: Group crypto alignment (compatibility and naming)**
+  - Red: Tests validate GroupManager save/restore flows with new VO constraints; verify re-key flows; ensure no raw `byte[]` in public APIs except agreed exceptions.
+  - Green: Align naming/framing (e.g., if `SessionRatchetMessage` references appear), add VO/DBO mappers for group state; keep domain free of secret logging.
+  - Refactor: Consolidate serialization boundaries, confirm compatibility with sender-key logic, and update docs/glossary if needed.
 
 - **Step 11: Rollout and cleanup**
   - Red: Contract/backward-compat tests comparing legacy vs new behavior on golden vectors.
