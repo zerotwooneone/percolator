@@ -125,7 +125,6 @@ public static class ServiceCollectionExtensions
         services.AddTransient<IRemoteEnvelopeSender, RemoteEnvelopeSender>();
 
         // Register domain Network.Messaging components required by MessageService
-        services.AddSingleton<Percolator.Network.Messaging.IRoutePlanner, Percolator.Network.Messaging.DefaultRoutePlanner>();
         services.AddSingleton<Percolator.Network.Messaging.IRelayTopology, Percolator.Network.Messaging.DefaultRelayTopology>();
         services.AddSingleton<Percolator.Network.Messaging.ITransportPort, NetworkTransportPortAdapter>();
         services.AddSingleton<Percolator.Network.Messaging.ISendExecutor, Percolator.Network.Messaging.DefaultSendExecutor>();

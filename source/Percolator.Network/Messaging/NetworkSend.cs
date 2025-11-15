@@ -51,11 +51,6 @@ public interface INetworkSender
 }
 
 // Route planning and relay topology abstractions (to be implemented by Application or Infrastructure layers)
-public interface IRoutePlanner
-{
-    Task<IReadOnlyList<string>> PlanAsync(PeerId target, SendStrategy strategy, CancellationToken ct = default);
-}
-
 public interface IRelayTopology
 {
     Task<PeerId?> GetRelayForAsync(PeerId target, CancellationToken ct = default);
