@@ -21,9 +21,7 @@ public class PercolatorDbContext : DbContext
     public DbSet<OneTimePreKeyDbo> OneTimePreKeys { get; set; } = null!;
     public DbSet<PeerPublicSigningKeyDbo> PeerPublicSigningKeys { get; set; } = null!;
     public DbSet<DhtNode> DhtNodes { get; set; } = null!;
-    public DbSet<PeerConnectionDbo> PeerConnections { get; set; } = null!;
-    public DbSet<GrpcEndPointDbo> GrpcEndPoints { get; set; } = null!;
-    public DbSet<TlsCertificateDbo> TlsCertificates { get; set; } = null!;
+    
     public DbSet<DirectSessionDbo> DirectSessions { get; set; } = null!;
     public DbSet<DoubleRatchetSessionDbo> DoubleRatchetSessions { get; set; } = null!;
     public DbSet<SkippedMessageKeyDbo> SkippedMessageKeys { get; set; } = null!;
@@ -323,38 +321,7 @@ public class PercolatorDbContext : DbContext
                 .HasConversion(new DnsEndPointValueConverter());
         });
 
-        // PeerConnection and children
-        modelBuilder.Entity<PeerConnectionDbo>(entity =>
-        {
-            entity.HasKey(e => e.PeerId);
-            entity.Property(e => e.PeerId)
-                .ValueGeneratedNever();
-
-            entity.Property(e => e.DirectMessagePublicKey);
-            entity.HasIndex(e => e.DirectMessagePublicKey);
-
-            // Repoint FK to authoritative identity catalog
-            entity.HasOne<PeerIdentityDbo>()
-                .WithOne()
-                .HasForeignKey<PeerConnectionDbo>(e => e.PeerId)
-                .OnDelete(DeleteBehavior.Cascade)
-                .IsRequired();
-
-            entity.HasMany(e => e.GrpcEndPoints)
-                .WithOne(x => x.PeerConnection)
-                .HasForeignKey(x => x.PeerId)
-                .IsRequired()
-                .OnDelete(DeleteBehavior.Cascade);
-
-            entity.HasMany(e => e.TlsCertificates)
-                .WithOne(x => x.PeerConnection)
-                .HasForeignKey(x => x.PeerId)
-                .IsRequired()
-                .OnDelete(DeleteBehavior.Cascade);
-
-            // Optional relay peer id
-            // RelayPeerId is Guid? now; no conversion needed
-        });
+        
 
         // DirectSessionConversation mapping
         modelBuilder.Entity<DirectSessionConversationDbo>(entity =>
@@ -367,23 +334,9 @@ public class PercolatorDbContext : DbContext
             entity.HasIndex(e => new { e.SelfIdentityId, e.ConversationId }).IsUnique();
         });
 
-        modelBuilder.Entity<GrpcEndPointDbo>(entity =>
-        {
-            entity.HasKey(e => e.Id);
-            entity.Property(e => e.PeerId);
-            entity.Property(e => e.Host).IsRequired();
-            entity.Property(e => e.Port).IsRequired();
-            entity.Property(e => e.LastSeen).IsRequired();
-        });
+        
 
-        modelBuilder.Entity<TlsCertificateDbo>(entity =>
-        {
-            entity.HasKey(e => e.Id);
-            entity.Property(e => e.PeerId);
-            entity.Property(e => e.RawData).IsRequired();
-            entity.Property(e => e.RawDataHash).IsRequired();
-            entity.HasIndex(e => e.RawDataHash);
-        });
+        
 
         // DoubleRatchetSession
         modelBuilder.Entity<DoubleRatchetSessionDbo>(entity =>
