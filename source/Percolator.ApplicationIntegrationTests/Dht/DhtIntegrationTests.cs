@@ -53,6 +53,8 @@ public class DhtIntegrationTests : IntegrationTestBase
             },
             Ciphertext = ByteString.CopyFrom(new byte[] { 1, 2, 3 })
         };
+        var remoteSigningKey = new DirectMessagePublicKey(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes("remote-peer")));
+        var remoteEndpoint = new DnsEndPoint("localhost", 1234);
         var port = GetAvailablePort();
         using var host = CreateHost(port, "DhtTest",  services =>
         {
@@ -84,7 +86,8 @@ public class DhtIntegrationTests : IntegrationTestBase
                     var profile = new PeerRoutingProfile();
                     profile.BindIdentity(pid);
                     var now = DateTimeOffset.UtcNow;
-                    profile.AddGrpcEndPoint(new GrpcEndPoint(new DnsEndPoint("localhost", 5001), now), now);
+                    profile.AddGrpcEndPoint(new GrpcEndPoint(remoteEndpoint, now), now);
+                    profile.SetIdentityPublicKey(new Percolator.Network.ValueObjects.IdentityPublicKey(remoteSigningKey.Value));
                     return Task.FromResult<PeerRoutingProfile?>(profile);
                 });
             services.AddSingleton<IPeerRoutingProfileRepository>(profileRepoMock.Object);
@@ -101,8 +104,6 @@ public class DhtIntegrationTests : IntegrationTestBase
         var messageService = host.Services.GetRequiredService<PercolatorMessageService>();
 
         var remotePeerId = new Percolator.Identity.PeerId(Guid.NewGuid());
-        var remoteSigningKey = new DirectMessagePublicKey(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes("remote-peer")));
-        var remoteEndpoint = new DnsEndPoint("localhost", 1234);
 
         // 1. Mock the session manager to decrypt the message
         var dhtEnvelope = new DhtEnvelope { PingRequest = new Contracts.PingRequest() };
