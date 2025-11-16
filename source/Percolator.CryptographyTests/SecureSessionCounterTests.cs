@@ -1,0 +1,38 @@
+using System;
+using FluentAssertions;
+using NUnit.Framework;
+using Percolator.Cryptography;
+using Percolator.Cryptography.Primitives;
+
+namespace Percolator.CryptographyTests;
+
+file sealed class TestClock7 : IClock
+{
+    public DateTimeOffset UtcNow { get; set; } = DateTimeOffset.Parse("2025-08-02T00:00:00Z");
+}
+
+[TestFixture]
+public class SecureSessionCounterTests
+{
+    [Test]
+    public void Encrypt_Increments_Message_Counter_Monotonically()
+    {
+        var clock = new TestClock7();
+        var s = SecureSession.Create(
+            SessionId.NewId(),
+            PeerId.NewId(),
+            new ProtocolVersion(1),
+            new RatchetState(new RootKey(new byte[32]), null, 0, null, 0, 0, null, null, 1000),
+            clock);
+
+        var m1 = s.Encrypt(new Plaintext(new byte[] { 1 }), clock);
+        var m2 = s.Encrypt(new Plaintext(new byte[] { 2 }), clock);
+
+        var (_, c1, _) = m1.GetHeader();
+        var (_, c2, _) = m2.GetHeader();
+
+        c1.Should().BeLessThan(c2);
+        c1.Should().Be(0UL);
+        c2.Should().Be(1UL);
+    }
+}

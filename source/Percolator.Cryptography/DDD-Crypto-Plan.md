@@ -141,6 +141,9 @@ Anti‑patterns to avoid:
 - **Domain services (pure, stateless)**
   - `HandshakePlanner`: validates invitations/pre-key bundles (sig verification, key formats, protocol compatibility), and determines required inputs for session establishment.
   - `SessionCrypto`: interface grouping crypto operations used by aggregates (X3DH key agreement, Double Ratchet steps, sign/verify). Implementations adapt the existing utility code.
+  - `InboundMessageResolver`: resolves an inbound `SessionRatchetMessage` to a `SessionId` via fast/slow path:
+    - Fast path: `IRatchetKeyIndex.TryResolveAsync(header.PreKey)` -> `SessionId?`
+    - Slow path: enumerate candidate sessions and attempt `SecureSession.Decrypt(...)` until one succeeds; on success, persist updated state and `IRatchetKeyIndex.UpsertAsync`.
 
 - **Application services (orchestrators)**
   - `HandshakeService`:
@@ -153,6 +156,8 @@ Anti‑patterns to avoid:
 - **Repositories (ports)**
   - `ISessionRepository` (SecureSession persistence)
   - `IPendingSessionRepository` (PendingSession persistence)
+  - `IRatchetKeyIndex` (fast-path header public key -> `SessionId` mapping)
+  - `ISessionCatalog` (enumeration port for slow-path; adapter scopes to current self-identity)
   - Optionally reuse Network domain identity storage for `PeerIdentity` (via a cross-domain port), rather than introducing a new repository here.
 
 - **Integration boundaries (ports)**
@@ -254,7 +259,7 @@ Next: Phase 2 – New Implementation Plan
     - Repositories operate within a scoped SelfIdentity context provided by the Application layer; do not hardwire identity concerns into the Cryptography domain.
 
 - **Ports**
-  - `ICryptoPrimitives`, `IKeyStore`, `IOutbox`, `INotification`, `IClock`, `IRandom`
+  - `ICryptoPrimitives`, `IKeyStore`, `IRatchetKeyIndex`, `ISessionCatalog`, `IOutbox`, `INotification`, `IClock`, `IRandom`
 
 - **Testing plan**
   - Unit tests for: PendingSession transitions (approve/auto/reject/expire), SecureSession invariants (encrypt/decrypt, counter monotonicity), HandshakePlanner validation.
@@ -425,6 +430,14 @@ Next: Phase 4 – Application-Layer Migration Plan
   - Refactor: Remove duplication, improve error messages, tune invariants.
   - Deliverable: `SecureSession` behavior + tests.
 
+  - Slow-path inbound resolution (domain-level)
+    - Red: `InboundMessageResolver` tests
+      - Fast path: resolves `SessionId` by `IRatchetKeyIndex.TryResolveAsync(header.PreKey)` and decrypts via loaded `SecureSession`.
+      - Slow path: when fast path misses, enumerates candidate sessions (via `ISessionCatalog` or repo enumeration) and attempts `SecureSession.Decrypt` until one succeeds; persists updated state; upserts `IRatchetKeyIndex` for the new header key.
+      - Returns `(SessionId, Plaintext)` on success; null on miss.
+    - Green: Implement resolver using domain ports only; no logging or app concerns.
+    - Refactor: Tune iteration order and guard rails (max candidates/time budget) as needed.
+
  - **Step 6: Domain services (HandshakePlanner, SessionCrypto port)**
   - Red: Planner tests validate initiator vs responder paths for X3DH, including DH1/DH2/DH3 and optional DH4 (one-time pre-key); signature verification and failure cases using crypto stubs.
   - Green: Implement pure planner; define `SessionCrypto` interface aligned with existing utils. Provide an adapter implementation that reuses `X3DHManager` and `CryptoUtils`. No secret logging inside the domain; any diagnostics live in adapters at the Application layer.
@@ -442,6 +455,7 @@ Next: Phase 4 – Application-Layer Migration Plan
   - `IDoubleRatchetSessionStore` -> `ISessionRepository` (scoped through Application).
   - `X3dPreKeyBundle` -> canonical `PreKeyBundle` (use adapters during transition).
   - Direct calls to `X3DHManager`/`CryptoUtils` -> `SessionCrypto` adapter via domain services.
+  - `IRatchetKeySessionLookup` (Application) -> `IRatchetKeyIndex` (Cryptography domain) used by `InboundMessageResolver`.
 
   Group crypto compatibility (follow-up mini-phase):
   - Ensure `GroupManager` continues to serialize/deserialize member session state using new VO/DBO mappers if type names change.
@@ -485,6 +499,7 @@ Next: Phase 4 – Application-Layer Migration Plan
 - Percolator.Application.Sessions:
   - `DirectSessionManager` (replace with orchestrator that calls domain `SecureSession` and repos; remove direct `DoubleRatchetSession` usage and state surgery)
   - `IDirectSessionManager` (redefine as thin orchestrator or remove if redundant)
+  - `IDirectSessionManager.TryInferAndReceiveAsync` (moved to domain `InboundMessageResolver` fast/slow path)
   - `ConversationService` cryptographic logic (move handshake/session establishment and decrypt-first-message into domain services; keep routing, transport calls, and notifications only)
 - Percolator.Application.KeyExchange:
   - `X3DHOrchestrator`, `IX3DHOrchestrator` (replace with `SessionCrypto` adapter implementation wired via Application/Infrastructure)
@@ -492,6 +507,10 @@ Next: Phase 4 – Application-Layer Migration Plan
   - `HandshakeResponse` (superseded by domain `HandshakeResponse` VO)
 - Replace usages of `IDoubleRatchetSessionStore` with domain `ISessionRepository` (scoped by Application)
 - Remove direct references to `X3DHManager` and `CryptoUtils` from Application code; route through domain ports (`SessionCrypto`, `HandshakePlanner`).
+ - Percolator.Application.Network:
+   - `IRatchetKeySessionLookup` (replace with domain `IRatchetKeyIndex`; maintain a thin adapter during cut-over)
+ - Percolator.Infrastructure.Sessions:
+   - `RatchetKeySessionLookup` (re-implement as adapter for `IRatchetKeyIndex`; return `SessionId` instead of `DirectSessionId` in domain; Application adapter handles `DirectSessionId` mapping)
 
 ---
 
