@@ -10,6 +10,7 @@ public static class ServiceCollectionExtensions
     {
         services.AddScoped<IDoubleRatchetSessionStore, SqliteDoubleRatchetSessionStore>();
         services.AddScoped<Percolator.Application.Network.IRatchetKeySessionLookup, RatchetKeySessionLookup>();
+        services.AddScoped<IRatchetKeyIndex, RatchetKeyIndexAdapter>();
         return services;
     }
 }
