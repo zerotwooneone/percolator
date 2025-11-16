@@ -9,7 +9,6 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddSessionsInfrastructure(this IServiceCollection services)
     {
         services.AddScoped<IDoubleRatchetSessionStore, SqliteDoubleRatchetSessionStore>();
-        services.AddScoped<Percolator.Application.Network.IRatchetKeySessionLookup, RatchetKeySessionLookup>();
         services.AddScoped<IRatchetKeyIndex, RatchetKeyIndexAdapter>();
         return services;
     }

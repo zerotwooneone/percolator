@@ -37,7 +37,7 @@ public class DirectSessionManagerTests
     private DirectSessionManager _aliceSessionManager = null!;
     private X3dhKeys _aliceKeys = null!;
     private Identity.PeerId _alicePeerId = null!;
-    private Mock<IRatchetKeySessionLookup> _aliceRatchetLookup = null!;
+    private Mock<IRatchetKeyIndex> _aliceRatchetLookup = null!;
     
     // Bob (responder) components
     private Mock<IDoubleRatchetSessionStore> _bobSessionStore = null!;
@@ -45,7 +45,7 @@ public class DirectSessionManagerTests
     private DirectSessionManager _bobSessionManager = null!;
     private X3dhKeys _bobKeys = null!;
     private Identity.PeerId _bobPeerId = null!;
-    private Mock<IRatchetKeySessionLookup> _bobRatchetLookup = null!;
+    private Mock<IRatchetKeyIndex> _bobRatchetLookup = null!;
     
     // Shared components
     private SessionId _sessionId = null!;
@@ -78,7 +78,7 @@ public class DirectSessionManagerTests
         // Set properties directly
         _aliceIdentityContext.Identity = new IdentityRecord(_alicePeerId.Value, "Alice") { SelfIdentityId = 1 };
         _aliceIdentityContext.Keys = _aliceKeys;
-        _aliceRatchetLookup = new Mock<IRatchetKeySessionLookup>(MockBehavior.Loose);
+        _aliceRatchetLookup = new Mock<IRatchetKeyIndex>(MockBehavior.Loose);
         _aliceSessionManager = new DirectSessionManager(
             _aliceSessionStore.Object,
             _aliceIdentityContext,
@@ -101,7 +101,7 @@ public class DirectSessionManagerTests
         // Set properties directly
         _bobIdentityContext.Identity = new IdentityRecord(_bobPeerId.Value, "Bob") { SelfIdentityId = 1 };
         _bobIdentityContext.Keys = _bobKeys;
-        _bobRatchetLookup = new Mock<IRatchetKeySessionLookup>(MockBehavior.Loose);
+        _bobRatchetLookup = new Mock<IRatchetKeyIndex>(MockBehavior.Loose);
         _bobSessionManager = new DirectSessionManager(
             _bobSessionStore.Object,
             _bobIdentityContext,
@@ -168,8 +168,7 @@ public class DirectSessionManagerTests
         // Verify Bob upserts ratchet lookup with exact header key
         var aliceHeader = aliceEncrypted.GetHeader();
         _bobRatchetLookup.Verify(l => l.UpsertAsync(
-            It.Is<Percolator.Network.DirectSessionId>(d => d.Value == _sessionId.Value),
-            It.IsAny<int>(),
+            It.Is<SessionId>(s => s.Value == _sessionId.Value),
             It.Is<RatchetEphemeralKey>(k => k.Value.SequenceEqual(aliceHeader.PreKey.Value)),
             It.IsAny<DateTimeOffset>(),
             It.IsAny<CancellationToken>()), Times.Once);
@@ -189,8 +188,7 @@ public class DirectSessionManagerTests
         // Verify Alice upserts ratchet lookup with exact header key
         var bobHeader = bobEncrypted.GetHeader();
         _aliceRatchetLookup.Verify(l => l.UpsertAsync(
-            It.Is<Percolator.Network.DirectSessionId>(d => d.Value == _sessionId.Value),
-            It.IsAny<int>(),
+            It.Is<SessionId>(s => s.Value == _sessionId.Value),
             It.Is<RatchetEphemeralKey>(k => k.Value.SequenceEqual(bobHeader.PreKey.Value)),
             It.IsAny<DateTimeOffset>(),
             It.IsAny<CancellationToken>()), Times.Once);

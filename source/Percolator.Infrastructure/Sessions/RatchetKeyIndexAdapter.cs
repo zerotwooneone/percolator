@@ -5,16 +5,19 @@ using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
 using Percolator.Cryptography;
 using Percolator.Infrastructure.Persistence;
+using Percolator.Application.Identity;
 
 namespace Percolator.Infrastructure.Sessions;
 
 internal sealed class RatchetKeyIndexAdapter : IRatchetKeyIndex
 {
     private readonly PercolatorDbContext _db;
+    private readonly ActiveIdentityContext _active;
 
-    public RatchetKeyIndexAdapter(PercolatorDbContext db)
+    public RatchetKeyIndexAdapter(PercolatorDbContext db, ActiveIdentityContext active)
     {
         _db = db;
+        _active = active;
     }
 
     public async Task<SessionId?> TryResolveAsync(RatchetEphemeralKey headerPublicKey, CancellationToken cancellationToken = default)
@@ -33,6 +36,9 @@ internal sealed class RatchetKeyIndexAdapter : IRatchetKeyIndex
     public async Task UpsertAsync(SessionId sessionId, RatchetEphemeralKey headerPublicKey, DateTimeOffset updatedAtUtc, CancellationToken cancellationToken = default)
     {
         var set = _db.RatchetKeyIndex;
+        // Scope by current active self identity
+        var selfIdentityId = _active.Identity!.SelfIdentityId;
+
         var existing = await set
             // EF Core can translate byte[] equality to BLOB comparison for SQLite
             .Where(r => r.RatchetPublicKey == headerPublicKey.Value)
@@ -43,8 +49,7 @@ internal sealed class RatchetKeyIndexAdapter : IRatchetKeyIndex
         {
             await set.AddAsync(new RatchetKeyIndexDbo
             {
-                // SelfIdentity scoping is handled at a higher level for this adapter; set to 0 by default here
-                SelfIdentityId = 0,
+                SelfIdentityId = selfIdentityId,
                 DirectSessionId = sessionId.Value,
                 RatchetPublicKey = headerPublicKey.Value,
                 UpdatedAtUtc = updatedAtUtc

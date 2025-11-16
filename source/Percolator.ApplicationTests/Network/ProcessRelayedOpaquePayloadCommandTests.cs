@@ -22,7 +22,7 @@ public class ProcessRelayedOpaquePayloadCommandTests
         var logger = Microsoft.Extensions.Logging.Abstractions.NullLogger<ProcessRelayedOpaquePayloadHandler>.Instance;
         var mediator = new Mock<IMediator>(MockBehavior.Strict);
         var sessions = new Mock<IDirectSessionManager>(MockBehavior.Strict);
-        var lookup = new Mock<Percolator.Application.Network.IRatchetKeySessionLookup>(MockBehavior.Strict);
+        var lookup = new Mock<IRatchetKeyIndex>(MockBehavior.Strict);
         var active = new ActiveIdentityContext { Identity = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "t", null) { SelfIdentityId = 1 } };
         var msgSvc = new Mock<Percolator.Application.Network.IMessageService>(MockBehavior.Strict);
 

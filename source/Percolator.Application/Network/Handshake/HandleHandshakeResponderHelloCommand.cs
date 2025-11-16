@@ -22,14 +22,14 @@ namespace Percolator.Application.Network.Handshake
         private readonly ILogger<HandleHandshakeResponderHelloHandler> _logger;
         private readonly IDirectSessionManager _sessions;
         private readonly ActiveIdentityContext _active;
-        private readonly Percolator.Application.Network.IRatchetKeySessionLookup _ratchetLookup;
+        private readonly IRatchetKeyIndex _ratchetLookup;
         private readonly IPreHandshakeSessionStore _preHandshakeStore;
 
         public HandleHandshakeResponderHelloHandler(
             ILogger<HandleHandshakeResponderHelloHandler> logger,
             IDirectSessionManager sessions,
             ActiveIdentityContext active,
-            Percolator.Application.Network.IRatchetKeySessionLookup ratchetLookup,
+            IRatchetKeyIndex ratchetLookup,
             IPreHandshakeSessionStore preHandshakeStore)
         {
             _logger = logger;
@@ -51,8 +51,9 @@ namespace Percolator.Application.Network.Handshake
             var header = ratchetMessage.GetHeader();
 
             // Fast-path: resolve session by ratchet header key (expected to miss on first responder message)
-            var directSessionId = await _ratchetLookup.TryResolveAsync(header.PreKey, _active.Identity.SelfIdentityId, cancellationToken).ConfigureAwait(false);
-            if (directSessionId is null)
+            var sessionId = await _ratchetLookup.TryResolveAsync(header.PreKey, cancellationToken).ConfigureAwait(false);
+            Percolator.Network.DirectSessionId directSessionId;
+            if (sessionId is null)
             {
                 // Delegate slow-path finalize to the session manager. It will persist the session, upsert the ratchet index,
                 // and delete the matching prehandshake record if found.
@@ -71,8 +72,12 @@ namespace Percolator.Application.Network.Handshake
                 directSessionId = new Percolator.Network.DirectSessionId(sid.Value);
                 _logger.LogInformation("Responder hello slow-path succeeded for session {SessionId}", sid.Value);
             }
+            else
+            {
+                directSessionId = new Percolator.Network.DirectSessionId(sessionId.Value);
+            }
 
-            _logger.LogInformation("Successfully processed responder hello for session {SessionId}", directSessionId.Value.Value);
+            _logger.LogInformation("Successfully processed responder hello for session {SessionId}", directSessionId.Value);
         }
     }
 }

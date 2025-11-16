@@ -152,10 +152,10 @@ public class HandshakeInitiatorFlowTests
 
         var sessions = new Mock<IDirectSessionManager>(MockBehavior.Loose);
 
-        var lookup = new Mock<IRatchetKeySessionLookup>(MockBehavior.Strict);
-        var resolvedSession = new DirectSessionId(Guid.NewGuid());
+        var lookup = new Mock<IRatchetKeyIndex>(MockBehavior.Strict);
+        var resolvedSession = new SessionId(Guid.NewGuid());
         lookup
-            .Setup(l => l.TryResolveAsync(It.IsAny<RatchetEphemeralKey>(), identity.SelfIdentityId, It.IsAny<CancellationToken>()))
+            .Setup(l => l.TryResolveAsync(It.IsAny<RatchetEphemeralKey>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(resolvedSession);
 
         var preStore = new Mock<IPreHandshakeSessionStore>(MockBehavior.Strict);
@@ -176,7 +176,7 @@ public class HandshakeInitiatorFlowTests
         await handler.Handle(cmd, CancellationToken.None);
 
         // Verify fast-path lookup via ratchet header was used
-        lookup.Verify(l => l.TryResolveAsync(It.IsAny<RatchetEphemeralKey>(), identity.SelfIdentityId, It.IsAny<CancellationToken>()), Times.Once);
+        lookup.Verify(l => l.TryResolveAsync(It.IsAny<RatchetEphemeralKey>(), It.IsAny<CancellationToken>()), Times.Once);
 
         // Verify session manager was NOT called on fast-path
         sessions.Verify(s => s.ReceiveMessageAsync(It.IsAny<SessionId>(), It.IsAny<SessionRatchetMessage>()), Times.Never);
@@ -191,10 +191,10 @@ public class HandshakeInitiatorFlowTests
         var active = new ActiveIdentityContext { Identity = identity };
 
         var sessions = new Mock<IDirectSessionManager>(MockBehavior.Loose);
-        var lookup = new Mock<IRatchetKeySessionLookup>(MockBehavior.Strict);
+        var lookup = new Mock<IRatchetKeyIndex>(MockBehavior.Strict);
         lookup
-            .Setup(l => l.TryResolveAsync(It.IsAny<RatchetEphemeralKey>(), identity.SelfIdentityId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync((DirectSessionId?)null);
+            .Setup(l => l.TryResolveAsync(It.IsAny<RatchetEphemeralKey>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((SessionId?)null);
 
         var preStore = new Mock<IPreHandshakeSessionStore>(MockBehavior.Strict);
         preStore
@@ -421,10 +421,10 @@ public class HandshakeInitiatorFlowTests
         var active = new ActiveIdentityContext { Identity = identity };
 
         var sessions = new Mock<IDirectSessionManager>(MockBehavior.Strict);
-        var lookup = new Mock<IRatchetKeySessionLookup>(MockBehavior.Strict);
+        var lookup = new Mock<IRatchetKeyIndex>(MockBehavior.Strict);
         lookup
-            .Setup(l => l.TryResolveAsync(It.IsAny<RatchetEphemeralKey>(), identity.SelfIdentityId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync((DirectSessionId?)null);
+            .Setup(l => l.TryResolveAsync(It.IsAny<RatchetEphemeralKey>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((SessionId?)null);
 
         var preStore = new Mock<IPreHandshakeSessionStore>(MockBehavior.Strict);
         preStore

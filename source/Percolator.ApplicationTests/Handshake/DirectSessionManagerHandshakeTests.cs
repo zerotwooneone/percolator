@@ -45,15 +45,6 @@ namespace Percolator.ApplicationTests.Handshake
             }
         }
 
-        private sealed class FakeRatchetLookup : IRatchetKeySessionLookup
-        {
-            public Task<Percolator.Network.DirectSessionId?> TryResolveAsync(RatchetEphemeralKey ratchetPublicKey, int selfIdentityId, CancellationToken ct)
-                => Task.FromResult<Percolator.Network.DirectSessionId?>(null);
-
-            public Task UpsertAsync(Percolator.Network.DirectSessionId sessionId, int selfIdentityId, RatchetEphemeralKey ratchetPublicKey, DateTimeOffset updatedAtUtc, CancellationToken ct)
-                => Task.CompletedTask;
-        }
-
         private sealed class CapturingPreHandshakeStore : IPreHandshakeSessionStore
         {
             public PreHandshakeRecord? LastSaved;
@@ -89,7 +80,7 @@ namespace Percolator.ApplicationTests.Handshake
         {
             var sessionStore = new FakeSessionStore();
             var preHandshake = new CapturingPreHandshakeStore();
-            var ratchetLookup = new FakeRatchetLookup();
+            var ratchetLookup = new Moq.Mock<IRatchetKeyIndex>(Moq.MockBehavior.Loose).Object;
 
             var active = new ActiveIdentityContext
             {
@@ -136,7 +127,7 @@ namespace Percolator.ApplicationTests.Handshake
             var aliceStore = new FakeSessionStore();
             var bobStore = new FakeSessionStore();
             var preHandshake = new CapturingPreHandshakeStore();
-            var ratchetLookup = new FakeRatchetLookup();
+            var ratchetLookup = new Moq.Mock<IRatchetKeyIndex>(Moq.MockBehavior.Loose).Object;
 
             // Alice identity context
             var aliceActive = new ActiveIdentityContext
@@ -206,17 +197,17 @@ namespace Percolator.ApplicationTests.Handshake
             // Arrange
             var aliceStore = new FakeSessionStore();
             var preHandshake = new CapturingPreHandshakeStore();
-            var ratchetLookup = new Moq.Mock<IRatchetKeySessionLookup>(Moq.MockBehavior.Strict);
+            var ratchetLookup = new Moq.Mock<IRatchetKeyIndex>(Moq.MockBehavior.Strict);
 
             // Expect one upsert
             ratchetLookup
-                .Setup(x => x.UpsertAsync(Moq.It.IsAny<Percolator.Network.DirectSessionId>(), Moq.It.IsAny<int>(), Moq.It.IsAny<RatchetEphemeralKey>(), Moq.It.IsAny<DateTimeOffset>(), Moq.It.IsAny<CancellationToken>()))
+                .Setup(x => x.UpsertAsync(Moq.It.IsAny<SessionId>(), Moq.It.IsAny<RatchetEphemeralKey>(), Moq.It.IsAny<DateTimeOffset>(), Moq.It.IsAny<CancellationToken>()))
                 .Returns(Task.CompletedTask)
                 .Verifiable();
             // Allow resolver to be invoked and return null for slow-path finalize
             ratchetLookup
-                .Setup(x => x.TryResolveAsync(Moq.It.IsAny<RatchetEphemeralKey>(), Moq.It.IsAny<int>(), Moq.It.IsAny<CancellationToken>()))
-                .Returns(Task.FromResult<Percolator.Network.DirectSessionId?>(null));
+                .Setup(x => x.TryResolveAsync(Moq.It.IsAny<RatchetEphemeralKey>(), Moq.It.IsAny<CancellationToken>()))
+                .Returns(Task.FromResult<SessionId?>(null));
 
             var aliceActive = new ActiveIdentityContext
             {
@@ -285,7 +276,7 @@ namespace Percolator.ApplicationTests.Handshake
         {
             // Arrange: create DSMs and pre-handshake
             var preHandshake = new CapturingPreHandshakeStore();
-            var ratchetLookup = new FakeRatchetLookup();
+            var ratchetLookup = new Moq.Mock<IRatchetKeyIndex>(Moq.MockBehavior.Loose).Object;
             var loggerFactory = LoggerFactory.Create(b => { });
             var options = Options.Create(new CryptographyOptions());
 
@@ -350,7 +341,7 @@ namespace Percolator.ApplicationTests.Handshake
         {
             // Arrange: Alice has no pending records
             var emptyStore = new CapturingPreHandshakeStore();
-            var ratchetLookup = new FakeRatchetLookup();
+            var ratchetLookup = new Moq.Mock<IRatchetKeyIndex>(Moq.MockBehavior.Loose).Object;
             var loggerFactory = LoggerFactory.Create(b => { });
             var options = Options.Create(new CryptographyOptions());
             var aliceActive = new ActiveIdentityContext
@@ -373,7 +364,7 @@ namespace Percolator.ApplicationTests.Handshake
         {
             // Arrange
             var preHandshake = new CapturingPreHandshakeStore();
-            var ratchetLookup = new Moq.Mock<IRatchetKeySessionLookup>(Moq.MockBehavior.Strict);
+            var ratchetLookup = new Moq.Mock<IRatchetKeyIndex>(Moq.MockBehavior.Strict);
             // No upsert should occur
             var loggerFactory = LoggerFactory.Create(b => { });
             var options = Options.Create(new CryptographyOptions());

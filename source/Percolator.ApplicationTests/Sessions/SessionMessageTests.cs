@@ -95,7 +95,7 @@ public class SessionMessageTests
         };
         
         // Create managers with real loggers for diagnostic output
-        var aliceRatchetLookup = new Moq.Mock<IRatchetKeySessionLookup>();
+        var aliceRatchetLookup = new Moq.Mock<IRatchetKeyIndex>();
         _aliceManager = new DirectSessionManager(
             _aliceSessionStore,
             _aliceIdentity,
@@ -105,7 +105,7 @@ public class SessionMessageTests
             aliceRatchetLookup.Object,
             new FakePreHandshakeStore());
         
-        var bobRatchetLookup = new Moq.Mock<IRatchetKeySessionLookup>();
+        var bobRatchetLookup = new Moq.Mock<IRatchetKeyIndex>();
         _bobManager = new DirectSessionManager(
             _bobSessionStore, 
             _bobIdentity,

@@ -63,14 +63,14 @@ public class DhtIntegrationTests : IntegrationTestBase
             services.AddSingleton<IDirectSessionRepository>(directSessionRepoMock.Object);
             // MQ service required by ProcessInternalEnvelopeHandler constructor
             services.AddSingleton<IMessageQueueService>(new Mock<IMessageQueueService>().Object);
-            // Fast-path lookup resolves our header key
-            var ratchetLookup = new Moq.Mock<IRatchetKeySessionLookup>();
+            // Fast-path lookup resolves our header key via domain index
+            var ratchetLookup = new Moq.Mock<IRatchetKeyIndex>();
             var preKey = new PreKey(headerKey);
-            ratchetLookup.Setup(l => l.TryResolveAsync(It.Is<RatchetEphemeralKey>(p => p.Value.SequenceEqual(headerKey)), It.IsAny<int>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync(new DirectSessionId(sessionId.Value));
-            ratchetLookup.Setup(l => l.UpsertAsync(It.IsAny<DirectSessionId>(), It.IsAny<int>(), It.IsAny<RatchetEphemeralKey>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            ratchetLookup.Setup(l => l.TryResolveAsync(It.Is<RatchetEphemeralKey>(p => p.Value.SequenceEqual(headerKey)), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(sessionId);
+            ratchetLookup.Setup(l => l.UpsertAsync(It.Is<SessionId>(s => s.Value == sessionId.Value), It.IsAny<RatchetEphemeralKey>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
                 .Returns(Task.CompletedTask);
-            services.AddSingleton<IRatchetKeySessionLookup>(ratchetLookup.Object);
+            services.AddSingleton<IRatchetKeyIndex>(ratchetLookup.Object);
             services.AddSingleton<IX3DHOrchestrator>(x3dhOrchestratorMock.Object);
             services.AddSingleton<IConversationRepository>(conversationRepoMock.Object);
             services.AddSingleton<IX3DHManager>(x3dhManagerMock.Object);
@@ -174,16 +174,16 @@ public class DhtIntegrationTests : IntegrationTestBase
             {
                 Identity = new IdentityRecord(Guid.NewGuid(), "Test") { SelfIdentityId = 1 }
             });
-            // Fast-path lookup resolves our header key
-            var ratchetLookup2 = new Moq.Mock<IRatchetKeySessionLookup>();
+            // Fast-path lookup resolves our header key via domain index
+            var ratchetLookup2 = new Moq.Mock<IRatchetKeyIndex>();
             var preKey2 = new PreKey(headerKey2);
             ratchetLookup2
-                .Setup(l => l.TryResolveAsync(It.Is<RatchetEphemeralKey>(p => p.Value.SequenceEqual(headerKey2)), It.IsAny<int>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync(new DirectSessionId(sessionId.Value));
+                .Setup(l => l.TryResolveAsync(It.Is<RatchetEphemeralKey>(p => p.Value.SequenceEqual(headerKey2)), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(sessionId);
             ratchetLookup2
-                .Setup(l => l.UpsertAsync(It.IsAny<DirectSessionId>(), It.IsAny<int>(), It.IsAny<RatchetEphemeralKey>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+                .Setup(l => l.UpsertAsync(It.Is<SessionId>(s => s.Value == sessionId.Value), It.IsAny<RatchetEphemeralKey>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
                 .Returns(Task.CompletedTask);
-            services.AddSingleton<IRatchetKeySessionLookup>(ratchetLookup2.Object);
+            services.AddSingleton<IRatchetKeyIndex>(ratchetLookup2.Object);
             // Avoid querying real DB tables from domain planner repo during tests
             var profileRepoMock2 = new Moq.Mock<IPeerRoutingProfileRepository>(Moq.MockBehavior.Loose);
             profileRepoMock2

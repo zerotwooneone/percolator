@@ -31,7 +31,7 @@ namespace Percolator.Application.Network.Handshake
         private readonly ILogger<ProcessRelayedOpaquePayloadHandler> _logger;
         private readonly IMediator _mediator;
         private readonly IDirectSessionManager _sessions;
-        private readonly Percolator.Application.Network.IRatchetKeySessionLookup _ratchetLookup;
+        private readonly IRatchetKeyIndex _ratchetLookup;
         private readonly ActiveIdentityContext _active;
         private readonly IMessageService _messageService;
 
@@ -53,7 +53,7 @@ namespace Percolator.Application.Network.Handshake
             ILogger<ProcessRelayedOpaquePayloadHandler> logger,
             IMediator mediator,
             IDirectSessionManager sessions,
-            Percolator.Application.Network.IRatchetKeySessionLookup ratchetLookup,
+            IRatchetKeyIndex ratchetLookup,
             ActiveIdentityContext active,
             IMessageService messageService)
         {
@@ -138,13 +138,13 @@ namespace Percolator.Application.Network.Handshake
             }
 
             // Fast path: resolve session by ratchet header key
-            var directSessionId = await _ratchetLookup.TryResolveAsync(header.PreKey, _active.Identity.SelfIdentityId, cancellationToken).ConfigureAwait(false);
+            var resolvedSessionId = await _ratchetLookup.TryResolveAsync(header.PreKey, cancellationToken).ConfigureAwait(false);
 
             Plaintext? plaintext;
             SessionId sid;
-            if (directSessionId is not null)
+            if (resolvedSessionId is not null)
             {
-                sid = new SessionId(directSessionId.Value.Value);
+                sid = resolvedSessionId; // IRatchetKeyIndex returns Cryptography.SessionId (reference type)
                 plaintext = await _sessions.ReceiveMessageAsync(sid, ratchetMessage).ConfigureAwait(false);
             }
             else

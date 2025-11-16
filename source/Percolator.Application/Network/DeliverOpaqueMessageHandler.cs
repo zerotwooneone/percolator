@@ -22,7 +22,7 @@ namespace Percolator.Application.Network
         private readonly IMediator _mediator;
         private readonly IDirectSessionRepository _directSessionRepository;
         private readonly ActiveIdentityContext _activeIdentityContext;
-        private readonly IRatchetKeySessionLookup _ratchetLookup;
+        private readonly IRatchetKeyIndex _ratchetLookup;
         private readonly RelayOrchestrator _relayOrchestrator;
         private readonly IPeerRoutingProfileRepository _profileRepository;
         private readonly IProfileRoutePlanner _routePlanner;
@@ -46,7 +46,7 @@ namespace Percolator.Application.Network
             IMediator mediator,
             IDirectSessionRepository directSessionRepository,
             ActiveIdentityContext activeIdentityContext,
-            IRatchetKeySessionLookup ratchetLookup,
+            IRatchetKeyIndex ratchetLookup,
             RelayOrchestrator relayOrchestrator,
             IPeerRoutingProfileRepository profileRepository,
             IProfileRoutePlanner routePlanner)
@@ -135,14 +135,14 @@ namespace Percolator.Application.Network
                 var sessionRatchetMessage = new SessionRatchetMessage(request.PayloadBytes);
                 var header = sessionRatchetMessage.GetHeader();
                 var ratchetKey = header.PreKey;
-                var resolvedDirectSessionId = await _ratchetLookup.TryResolveAsync(ratchetKey, _activeIdentityContext.Identity!.SelfIdentityId, cancellationToken).ConfigureAwait(false);
+                var resolvedSessionId = await _ratchetLookup.TryResolveAsync(ratchetKey, cancellationToken).ConfigureAwait(false);
                 Plaintext? plaintext;
                 SessionId inferredSessionId;
                 DirectSessionId nonNullDirectSessionId;
-                if (resolvedDirectSessionId is not null)
+                if (resolvedSessionId is not null)
                 {
-                    nonNullDirectSessionId = resolvedDirectSessionId.Value;
-                    inferredSessionId = new SessionId(nonNullDirectSessionId.Value);
+                    inferredSessionId = resolvedSessionId;
+                    nonNullDirectSessionId = new DirectSessionId(inferredSessionId.Value);
                     _logger.LogDebug("Fast-path lookup hit for ratchet header key; inferred session {SessionId}", inferredSessionId);
                     plaintext = await _sessionManager.ReceiveMessageAsync(inferredSessionId, sessionRatchetMessage).ConfigureAwait(false);
                 }
@@ -162,7 +162,7 @@ namespace Percolator.Application.Network
                     return new DeliverOpaqueMessageResult();
                 }
 
-                await _ratchetLookup.UpsertAsync(nonNullDirectSessionId, _activeIdentityContext.Identity!.SelfIdentityId, ratchetKey, DateTimeOffset.UtcNow, cancellationToken).ConfigureAwait(false);
+                await _ratchetLookup.UpsertAsync(inferredSessionId, ratchetKey, DateTimeOffset.UtcNow, cancellationToken).ConfigureAwait(false);
 
                 var directSession = await _directSessionRepository.GetBySessionIdAsync(nonNullDirectSessionId, _activeIdentityContext.Identity.SelfIdentityId).ConfigureAwait(false)
                     ?? throw new InvalidOperationException($"No direct session mapping found for session {inferredSessionId}");

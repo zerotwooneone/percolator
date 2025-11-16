@@ -55,7 +55,7 @@ public class MessageServiceTests
         // Create a logger factory for DirectSessionManager
         var loggerFactory = new NullLoggerFactory();
 
-        var ratchetLookup = new Moq.Mock<IRatchetKeySessionLookup>();
+        var ratchetLookup = new Moq.Mock<IRatchetKeyIndex>();
         _sessionManager = new DirectSessionManager(
             _mockSessionStore.Object,
             _activeIdentityContext,

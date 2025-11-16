@@ -26,7 +26,7 @@ public class DirectSessionManager : IDirectSessionManager
     private readonly ILoggerFactory _loggerFactory;
     private readonly IOptions<CryptographyOptions> _cryptographyOptions;
     private readonly ConcurrentDictionary<SessionId, SemaphoreSlim> _sessionLocks = new();
-    private readonly IRatchetKeySessionLookup _ratchetLookup;
+    private readonly IRatchetKeyIndex _ratchetLookup;
     private readonly IPreHandshakeSessionStore _preHandshakeStore;
 
     public DirectSessionManager(
@@ -35,7 +35,7 @@ public class DirectSessionManager : IDirectSessionManager
         ILogger<DirectSessionManager> logger,
         ILoggerFactory loggerFactory,
         IOptions<CryptographyOptions> cryptographyOptions,
-        IRatchetKeySessionLookup ratchetLookup,
+        IRatchetKeyIndex ratchetLookup,
         IPreHandshakeSessionStore preHandshakeStore)
     {
         _sessionStore = sessionStore;
@@ -100,8 +100,7 @@ public class DirectSessionManager : IDirectSessionManager
         // Warm fast-path ratchet index
         var header = firstMessage.GetHeader();
         await _ratchetLookup.UpsertAsync(
-            new Percolator.Network.DirectSessionId(sessionId.Value),
-            selfId,
+            sessionId,
             header.PreKey,
             DateTimeOffset.UtcNow,
             CancellationToken.None).ConfigureAwait(false);
@@ -119,14 +118,14 @@ public class DirectSessionManager : IDirectSessionManager
         var header = encryptedMessage.GetHeader();
 
         // Fast-path: try resolve header pre-key to session
-        var resolved = await _ratchetLookup.TryResolveAsync(header.PreKey, selfId, cancellationToken).ConfigureAwait(false);
+        var resolved = await _ratchetLookup.TryResolveAsync(header.PreKey, cancellationToken).ConfigureAwait(false);
 
         Plaintext? plaintext = null;
         SessionId sid;
 
         if (resolved is not null)
         {
-            sid = new SessionId(resolved.Value.Value);
+            sid = resolved;
             plaintext = await ReceiveMessageAsync(sid, encryptedMessage).ConfigureAwait(false);
             if (plaintext is null)
                 throw new InvalidOperationException("CompleteHandshakeAsync: decryption failed on fast-path session.");
@@ -175,8 +174,7 @@ public class DirectSessionManager : IDirectSessionManager
 
                     // upsert fast-path mapping and return
                     await _ratchetLookup.UpsertAsync(
-                        new Percolator.Network.DirectSessionId(resolvedSessionId.Value),
-                        selfId,
+                        resolvedSessionId,
                         header.PreKey,
                         DateTimeOffset.UtcNow,
                         cancellationToken).ConfigureAwait(false);
@@ -200,8 +198,7 @@ public class DirectSessionManager : IDirectSessionManager
 
         // Upsert ratchet header key -> session mapping to keep fast-path warm
         await _ratchetLookup.UpsertAsync(
-            new Percolator.Network.DirectSessionId(sessionId.Value),
-            selfId,
+            sessionId,
             header.PreKey,
             DateTimeOffset.UtcNow,
             cancellationToken).ConfigureAwait(false);
@@ -374,7 +371,7 @@ public class DirectSessionManager : IDirectSessionManager
             if (decryptedPlaintext is not null)
             {
                 var header = encryptedMessage.GetHeader();
-                await _ratchetLookup.UpsertAsync(new Percolator.Network.DirectSessionId(sessionId.Value), _activeIdentityContext.Identity!.SelfIdentityId, header.PreKey, DateTimeOffset.UtcNow, CancellationToken.None).ConfigureAwait(false);
+                await _ratchetLookup.UpsertAsync(sessionId, header.PreKey, DateTimeOffset.UtcNow, CancellationToken.None).ConfigureAwait(false);
             }
 
             if (decryptedPlaintext is null)
@@ -484,7 +481,7 @@ public class DirectSessionManager : IDirectSessionManager
                 await _sessionStore.SetSessionStateAsync(sid, session.GetState(), selfIdentityId).ConfigureAwait(false);
 
                 // Upsert ratchet-key index mapping to keep the fast-path fresh
-                await _ratchetLookup.UpsertAsync(new Percolator.Network.DirectSessionId(sid.Value), selfIdentityId, header.PreKey, DateTimeOffset.UtcNow, CancellationToken.None).ConfigureAwait(false);
+                await _ratchetLookup.UpsertAsync(sid, header.PreKey, DateTimeOffset.UtcNow, CancellationToken.None).ConfigureAwait(false);
 
                 return (sid, pt);
             }
