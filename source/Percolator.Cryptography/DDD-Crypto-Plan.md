@@ -514,5 +514,35 @@ Next: Phase 4 – Application-Layer Migration Plan
 
 ---
 
-Status: Phases 1–4 drafted. Roadmap with TDD steps added. Implement via compile-time cut-over; no feature flags.
+## Step 12: Identity-scoped repository alignment (EF Core)
 
+- **Objective**
+  - Ensure all repositories/adapters touching tables keyed by `SelfIdentityId` operate within an identity-scoped DbContext (via `ActiveIdentityContext`) and respect strict global filters.
+
+- **Tables with `SelfIdentityId` (from PercolatorDbContext)**
+  - SelfPreKeySigned (`SelfPreKeySignedDbo`)
+  - SelfOneTimePreKeys (`SelfOneTimePreKeyDbo`)
+  - PreHandshakeSessions (`PreHandshakeSessionDbo`)
+  - SelfIdentityKeys (`SelfIdentityKeysDbo`)
+  - SelfIdentityKnownPeer (`SelfIdentityKnownPeerDbo`)
+  - DirectSession (`DirectSessionDbo`)
+  - DoubleRatchetSessions (`DoubleRatchetSessionDbo`)
+  - SkippedMessageKeys (`SkippedMessageKeyDbo`)
+  - RatchetKeyIndex (`RatchetKeyIndexDbo`)
+  - Conversations (`ConversationDbo`)
+  - DirectSessionConversations (`DirectSessionConversationDbo`)
+
+- **Actions**
+  - Update DI: `PercolatorDbContext` constructor receives `ActiveIdentityContext`; global filters applied for per-identity entities.
+  - Repos/adapters for the above entities should:
+    - Avoid passing/guessing `SelfIdentityId`; obtain identity from `ActiveIdentityContext` and rely on global filters.
+    - Use strict filtering semantics (no results when active identity is unset).
+  - Tests: construct DbContext with `ActiveIdentityContext` and seed `SelfIdentityDbo` matching the test `SelfIdentityId`.
+  - Migration review: confirm indexes on `(SelfIdentityId, ...)` remain appropriate after scoping.
+
+- **Deliverable**
+  - All identity-scoped repositories consistently use the scoped DbContext; integration tests green.
+
+---
+
+Status: Phases 1–4 drafted. Roadmap with TDD steps added. Implement via compile-time cut-over; no feature flags.

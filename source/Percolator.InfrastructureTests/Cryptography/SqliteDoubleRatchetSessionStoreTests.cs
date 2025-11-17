@@ -7,26 +7,32 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using NUnit.Framework;
+using Percolator.Application.Identity;
 using Percolator.Cryptography;
 using Percolator.Infrastructure.Cryptography;
 using Percolator.Infrastructure.Persistence;
+using Percolator.Identity.Model;
 
 namespace Percolator.InfrastructureTests.Cryptography;
 
 [TestFixture]
 public class SqliteDoubleRatchetSessionStoreTests
 {
-    private static PercolatorDbContext CreateDbContext(out SqliteConnection connection)
+    private static PercolatorDbContext CreateDbContext(out SqliteConnection connection, int selfIdentityId)
     {
         connection = new SqliteConnection("DataSource=:memory:");
         connection.Open();
         var options = new DbContextOptionsBuilder<PercolatorDbContext>()
             .UseSqlite(connection)
             .Options;
-        var ctx = new PercolatorDbContext(options);
+        var active = new ActiveIdentityContext
+        {
+            Identity = new IdentityRecord(Guid.NewGuid(), "test") { SelfIdentityId = selfIdentityId }
+        };
+        var ctx = new PercolatorDbContext(options, active);
         ctx.Database.EnsureCreated();
         // Seed a SelfIdentity required by DoubleRatchetSessions FK
-        ctx.SelfIdentities.Add(new SelfIdentityDbo { Name = "test", PeerId = Guid.NewGuid() });
+        ctx.SelfIdentities.Add(new SelfIdentityDbo { Id = selfIdentityId, Name = "test", PeerId = Guid.NewGuid() });
         ctx.SaveChanges();
         return ctx;
     }
@@ -68,7 +74,7 @@ public class SqliteDoubleRatchetSessionStoreTests
     [Test]
     public async Task Set_and_Get_roundtrips_state()
     {
-        var ctx = CreateDbContext(out var _);
+        var ctx = CreateDbContext(out var _, selfIdentityId: 1);
         var store = new SqliteDoubleRatchetSessionStore(ctx, NullLogger<SqliteDoubleRatchetSessionStore>.Instance);
         var sessionId = SessionId.NewId();
         var state = CreateTestSessionState();
@@ -99,7 +105,7 @@ public class SqliteDoubleRatchetSessionStoreTests
     [Test]
     public async Task Set_overwrites_state_for_same_session()
     {
-        var ctx = CreateDbContext(out var _);
+        var ctx = CreateDbContext(out var _, selfIdentityId: 2);
         var store = new SqliteDoubleRatchetSessionStore(ctx, NullLogger<SqliteDoubleRatchetSessionStore>.Instance);
         var sessionId = SessionId.NewId();
         var selfIdentityId = await ctx.SelfIdentities.Select(s => s.Id).FirstAsync();

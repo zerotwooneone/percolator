@@ -22,10 +22,11 @@ internal sealed class RatchetKeyIndexAdapter : IRatchetKeyIndex
 
     public async Task<SessionId?> TryResolveAsync(RatchetEphemeralKey headerPublicKey, CancellationToken cancellationToken = default)
     {
+        var selfIdentityId = _active.Identity!.SelfIdentityId;
         var row = await _db.RatchetKeyIndex
             .AsNoTracking()
             // EF Core can translate byte[] equality to BLOB comparison for SQLite
-            .Where(r => r.RatchetPublicKey == headerPublicKey.Value)
+            .Where(r => r.SelfIdentityId == selfIdentityId && r.RatchetPublicKey == headerPublicKey.Value)
             .Select(r => new { r.DirectSessionId })
             .FirstOrDefaultAsync(cancellationToken)
             .ConfigureAwait(false);

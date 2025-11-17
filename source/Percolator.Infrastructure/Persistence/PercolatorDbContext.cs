@@ -3,14 +3,22 @@ using Percolator.Identity;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Percolator.Dht;
 using Percolator.Infrastructure.Persistence;
+using Percolator.Application.Identity;
 using Percolator.Infrastructure.Identity;
 
 namespace Percolator.Infrastructure.Persistence;
 
 public class PercolatorDbContext : DbContext
 {
+    private readonly ActiveIdentityContext? _active;
+
     public PercolatorDbContext(DbContextOptions<PercolatorDbContext> options) : base(options)
     {
+    }
+
+    public PercolatorDbContext(DbContextOptions<PercolatorDbContext> options, ActiveIdentityContext active) : base(options)
+    {
+        _active = active;
     }
 
     public DbSet<PeerIdentityDbo> PeerIdentities { get; set; } = null!;
@@ -373,6 +381,9 @@ public class PercolatorDbContext : DbContext
                 .HasForeignKey(e => e.SelfIdentityId)
                 .OnDelete(DeleteBehavior.Cascade)
                 .IsRequired();
+
+            // Global filter: only return rows for the active self identity (null active/identity matches nothing)
+            entity.HasQueryFilter(e => _active != null && _active.Identity != null && e.SelfIdentityId == _active.Identity.SelfIdentityId);
         });
 
         // SkippedMessageKey (surrogate PK with uniqueness constraint)
@@ -405,6 +416,9 @@ public class PercolatorDbContext : DbContext
                 .HasPrincipalKey((DoubleRatchetSessionDbo s) => new { s.SessionId, s.SelfIdentityId })
                 .OnDelete(DeleteBehavior.Cascade)
                 .IsRequired();
+
+            // Global filter: only return rows for the active self identity (null active/identity matches nothing)
+            entity.HasQueryFilter(e => _active != null && _active.Identity != null && e.SelfIdentityId == _active.Identity.SelfIdentityId);
         });
 
         // Conversations
