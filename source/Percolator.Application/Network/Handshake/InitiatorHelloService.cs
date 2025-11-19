@@ -54,18 +54,7 @@ internal sealed class InitiatorHelloService : IInitiatorHelloService
         var bundle = new X3dPreKeyBundle(remoteId, remotePreKey, OneTimePreKey: null);
         var shared = _x3dh.InitiateHandshake(bundle, eph);
 
-        // Optional encrypted payload carrying the first opaque message
-        var initialPlaintext = initiatorPayload is { Length: > 0 } ? new Plaintext(initiatorPayload) : null;
-        var ratchetMessage = await _sessions.EstablishSessionAsInitiatorAsync(
-            recipientPublicKeyHash,
-            signedPreKeyId,
-            oneTimePreKeyId,
-            remoteId,
-            remotePreKey,
-            shared,
-            eph,
-            initialPlaintext,
-            cancellationToken).ConfigureAwait(false);
+        // Do not pre-establish a session here; responder hello will finalize and assign the session id
 
         // Compose initiator hello
         var hello = new HandshakeInitiatorHello
@@ -79,10 +68,7 @@ internal sealed class InitiatorHelloService : IInitiatorHelloService
         {
             hello.OneTimePreKeyId = ByteString.CopyFrom(oneTimePreKeyId.Value.ToByteArray());
         }
-        if (ratchetMessage is not null)
-        {
-            hello.EncryptedPayload = ByteString.CopyFrom(ratchetMessage.Value);
-        }
+        // No encrypted payload attached in the hello; responder will send first message
 
         // Wrap as MQ enqueue request to Host
         var mqReq = new EnqueueOpaqueMessageRequest

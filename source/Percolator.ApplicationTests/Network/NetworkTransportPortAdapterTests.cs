@@ -26,7 +26,7 @@ public class NetworkTransportPortAdapterTests
         var logger = Mock.Of<Microsoft.Extensions.Logging.ILogger<NetworkTransportPortAdapter>>();
         var transport = new Mock<IMessageTransportService>(MockBehavior.Strict);
         var sessions = new Mock<IDirectSessionRepository>(MockBehavior.Strict);
-        var mgr = new Mock<IDirectSessionManager>(MockBehavior.Strict);
+        var secure = new Mock<Percolator.Application.Services.ISecureMessagingService>(MockBehavior.Strict);
         var keyStore = new Mock<IPeerPublicSigningKeyStore>(MockBehavior.Strict);
         var active = MakeActive();
 
@@ -34,7 +34,7 @@ public class NetworkTransportPortAdapterTests
         var dsid = new DirectSessionId(Guid.NewGuid());
         sessions.Setup(s => s.GetByRemotePeerIdAsync(target, 1)).ReturnsAsync(new DirectSession(target, dsid));
         var cipher = new SessionRatchetMessage(new byte[] {1,2});
-        mgr.Setup(m => m.EncryptMessageAsync(It.IsAny<SessionId>(), It.IsAny<Plaintext>()))
+        secure.Setup(s => s.EncryptAsync(It.IsAny<SessionId>(), It.IsAny<Plaintext>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(cipher);
 
         var resp = new DeliverOpaqueMessageResponse
@@ -49,7 +49,7 @@ public class NetworkTransportPortAdapterTests
         transport.Setup(t => t.SendMessageAsync(new Percolator.Identity.PeerId(target.Value), dsid, It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(resp);
 
-        var sut = new NetworkTransportPortAdapter(logger, transport.Object, sessions.Object, mgr.Object, active, keyStore.Object);
+        var sut = new NetworkTransportPortAdapter(logger, transport.Object, sessions.Object, secure.Object, active, keyStore.Object);
         var outcome = await sut.SendDirectAsync(target, new NetworkPayload(new byte[] { 0xAA }), CancellationToken.None);
 
         Assert.That(outcome.Ok, Is.True);
@@ -63,14 +63,14 @@ public class NetworkTransportPortAdapterTests
         var logger = Mock.Of<Microsoft.Extensions.Logging.ILogger<NetworkTransportPortAdapter>>();
         var transport = new Mock<IMessageTransportService>(MockBehavior.Loose);
         var sessions = new Mock<IDirectSessionRepository>(MockBehavior.Strict);
-        var mgr = new Mock<IDirectSessionManager>(MockBehavior.Loose);
+        var secure = new Mock<Percolator.Application.Services.ISecureMessagingService>(MockBehavior.Loose);
         var keyStore = new Mock<IPeerPublicSigningKeyStore>(MockBehavior.Loose);
         var active = MakeActive();
 
         var target = new Percolator.Network.PeerId(Guid.NewGuid());
         sessions.Setup(s => s.GetByRemotePeerIdAsync(target, 1)).ReturnsAsync((DirectSession?)null);
 
-        var sut = new NetworkTransportPortAdapter(logger, transport.Object, sessions.Object, mgr.Object, active, keyStore.Object);
+        var sut = new NetworkTransportPortAdapter(logger, transport.Object, sessions.Object, secure.Object, active, keyStore.Object);
         var outcome = await sut.SendDirectAsync(target, new NetworkPayload(new byte[] { 1 }), CancellationToken.None);
 
         Assert.That(outcome.Ok, Is.False);
@@ -83,7 +83,7 @@ public class NetworkTransportPortAdapterTests
         var logger = Mock.Of<Microsoft.Extensions.Logging.ILogger<NetworkTransportPortAdapter>>();
         var transport = new Mock<IMessageTransportService>(MockBehavior.Loose);
         var sessions = new Mock<IDirectSessionRepository>(MockBehavior.Strict);
-        var mgr = new Mock<IDirectSessionManager>(MockBehavior.Loose);
+        var secure = new Mock<Percolator.Application.Services.ISecureMessagingService>(MockBehavior.Loose);
         var keyStore = new Mock<IPeerPublicSigningKeyStore>(MockBehavior.Loose);
         var active = MakeActive();
 
@@ -91,7 +91,7 @@ public class NetworkTransportPortAdapterTests
         var target = new Percolator.Network.PeerId(Guid.NewGuid());
         sessions.Setup(s => s.GetByRemotePeerIdAsync(relay, 1)).ReturnsAsync((DirectSession?)null);
 
-        var sut = new NetworkTransportPortAdapter(logger, transport.Object, sessions.Object, mgr.Object, active, keyStore.Object);
+        var sut = new NetworkTransportPortAdapter(logger, transport.Object, sessions.Object, secure.Object, active, keyStore.Object);
         var outcome = await sut.SendViaRelayAsync(relay, target, new NetworkPayload(new byte[] { 1 }), CancellationToken.None);
 
         Assert.That(outcome.Ok, Is.False);
@@ -104,7 +104,7 @@ public class NetworkTransportPortAdapterTests
         var logger = Mock.Of<Microsoft.Extensions.Logging.ILogger<NetworkTransportPortAdapter>>();
         var transport = new Mock<IMessageTransportService>(MockBehavior.Strict);
         var sessions = new Mock<IDirectSessionRepository>(MockBehavior.Strict);
-        var mgr = new Mock<IDirectSessionManager>(MockBehavior.Strict);
+        var secure = new Mock<Percolator.Application.Services.ISecureMessagingService>(MockBehavior.Strict);
         var keyStore = new Mock<IPeerPublicSigningKeyStore>(MockBehavior.Strict);
         var active = MakeActive();
 
@@ -116,7 +116,7 @@ public class NetworkTransportPortAdapterTests
             .ReturnsAsync(new byte[] { 5, 5, 5 });
 
         var relayCipher = new SessionRatchetMessage(new byte[] { 7 });
-        mgr.Setup(m => m.EncryptMessageAsync(It.IsAny<SessionId>(), It.IsAny<Plaintext>()))
+        secure.Setup(s => s.EncryptAsync(It.IsAny<SessionId>(), It.IsAny<Plaintext>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(relayCipher);
 
         var resp = new DeliverOpaqueMessageResponse
@@ -131,7 +131,7 @@ public class NetworkTransportPortAdapterTests
         transport.Setup(t => t.SendMessageAsync(new Percolator.Identity.PeerId(relay.Value), rsid, relayCipher, It.IsAny<CancellationToken>()))
             .ReturnsAsync(resp);
 
-        var sut = new NetworkTransportPortAdapter(logger, transport.Object, sessions.Object, mgr.Object, active, keyStore.Object);
+        var sut = new NetworkTransportPortAdapter(logger, transport.Object, sessions.Object, secure.Object, active, keyStore.Object);
         var outcome = await sut.SendViaRelayAsync(relay, target, new NetworkPayload(new byte[] { 1,2,3 }), CancellationToken.None);
 
         Assert.That(outcome.Ok, Is.True);

@@ -10,6 +10,7 @@ using NUnit.Framework;
 using Percolator.Application.Cli;
 using Percolator.Application.Identity;
 using Percolator.Application.Network;
+using Percolator.Application.Services;
 using Percolator.Application.Sessions;
 using Percolator.Contracts;
 using Percolator.Cryptography;
@@ -23,6 +24,7 @@ public class SubmitPreKeysHandlerTests
 {
     private ActiveIdentityContext _activeIdentity = null!;
     private Mock<IConversationService> _conversationService = null!;
+    private Mock<ISecureMessagingService> _secureSvc;
     private Mock<IDirectSessionManager> _sessionManager = null!;
     private Mock<IMessageTransportService> _transport = null!;
     private Mock<Percolator.Identity.IPeerIdentityRepository> _peerIdentityRepository = null!;
@@ -39,6 +41,7 @@ public class SubmitPreKeysHandlerTests
         _peerIdentityRepository = new Mock<Percolator.Identity.IPeerIdentityRepository>();
         _oneTimeKeyProvider = new Mock<IOneTimeKeyProvider>();
         _selfPreKeyRepo = new Mock<Percolator.Application.KeyExchange.ISelfPreKeyBundleRepository>();
+        _secureSvc = new Mock<ISecureMessagingService>(MockBehavior.Strict);
     }
 
     [Test]
@@ -72,9 +75,9 @@ public class SubmitPreKeysHandlerTests
         _oneTimeKeyProvider.Setup(p => p.PopOneTimeKey())
             .Returns(() => ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256));
 
-        // Session manager encrypt returns a dummy ratchet message
-        _sessionManager
-            .Setup(m => m.EncryptMessageAsync(new SessionId(directSessionId.Value), It.IsAny<Plaintext>()))
+        // Secure messaging encrypt returns a dummy ratchet message
+        _secureSvc
+            .Setup(s => s.EncryptAsync(It.IsAny<SessionId>(), It.IsAny<Plaintext>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SessionRatchetMessage(new byte[] { 1, 2, 3 }));
 
         // Build a fake response envelope bytes (SubmitPreKeyBundleResponse)
@@ -84,7 +87,7 @@ public class SubmitPreKeysHandlerTests
         };
         var responseBytes = responseEnvelope.ToByteArray();
 
-        // Transport returns a response payload (opaque); the session manager will "decrypt" it
+        // Transport returns a response payload (opaque); the secure messaging service will decrypt it
         _transport
             .Setup(t => t.SendMessageAsync(remotePeerId, directSessionId, It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new DeliverOpaqueMessageResponse
@@ -97,9 +100,9 @@ public class SubmitPreKeysHandlerTests
                 }
             });
 
-        _sessionManager
-            .Setup(m => m.ReceiveMessageAsync(new SessionId(directSessionId.Value), It.IsAny<SessionRatchetMessage>()))
-            .ReturnsAsync(new Plaintext(responseBytes));
+        _secureSvc
+            .Setup(s => s.DecryptInboundAsync(It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((new SessionId(directSessionId.Value), new Plaintext(responseBytes)));
 
         // Act
         var handler = new SubmitPreKeysHandler(
@@ -110,7 +113,8 @@ public class SubmitPreKeysHandlerTests
             _activeIdentity,
             _peerIdentityRepository.Object,
             _oneTimeKeyProvider.Object,
-            _selfPreKeyRepo.Object);
+            _selfPreKeyRepo.Object,
+            _secureSvc.Object);
 
         var cmd = new SubmitPreKeysCommand(
             TargetPeerName: "bob",
@@ -122,7 +126,7 @@ public class SubmitPreKeysHandlerTests
         // Assert
         rc.Should().Be(0);
         _transport.Verify(t => t.SendMessageAsync(remotePeerId, directSessionId, It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()), Times.Once);
-        _sessionManager.Verify(m => m.ReceiveMessageAsync(new SessionId(directSessionId.Value), It.IsAny<SessionRatchetMessage>()), Times.Once);
+        _secureSvc.Verify(s => s.DecryptInboundAsync(It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Test]
@@ -143,7 +147,8 @@ public class SubmitPreKeysHandlerTests
             _activeIdentity,
             _peerIdentityRepository.Object,
             _oneTimeKeyProvider.Object,
-            _selfPreKeyRepo.Object);
+            _selfPreKeyRepo.Object,
+            _secureSvc.Object);
 
         var cmd = new SubmitPreKeysCommand(
             TargetPeerName: "bob",

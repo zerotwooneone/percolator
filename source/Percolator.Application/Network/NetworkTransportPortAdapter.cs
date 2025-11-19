@@ -2,6 +2,7 @@ using Google.Protobuf;
 using Microsoft.Extensions.Logging;
 using Percolator.Application.Identity;
 using Percolator.Application.Sessions;
+using Percolator.Application.Services;
 using Percolator.Contracts;
 using Percolator.Cryptography;
 using Percolator.Identity;
@@ -17,7 +18,7 @@ public sealed class NetworkTransportPortAdapter : ITransportPort
     private readonly ILogger<NetworkTransportPortAdapter> _logger;
     private readonly IMessageTransportService _transport;
     private readonly IDirectSessionRepository _sessions;
-    private readonly IDirectSessionManager _sessionManager;
+    private readonly ISecureMessagingService _secureMessaging;
     private readonly ActiveIdentityContext _active;
     private readonly IPeerPublicSigningKeyStore _keyStore;
 
@@ -25,14 +26,14 @@ public sealed class NetworkTransportPortAdapter : ITransportPort
         ILogger<NetworkTransportPortAdapter> logger,
         IMessageTransportService transport,
         IDirectSessionRepository sessions,
-        IDirectSessionManager sessionManager,
+        ISecureMessagingService secureMessaging,
         ActiveIdentityContext active,
         IPeerPublicSigningKeyStore keyStore)
     {
         _logger = logger;
         _transport = transport;
         _sessions = sessions;
-        _sessionManager = sessionManager;
+        _secureMessaging = secureMessaging;
         _active = active;
         _keyStore = keyStore;
     }
@@ -94,7 +95,7 @@ public sealed class NetworkTransportPortAdapter : ITransportPort
             var relayPlain = new Plaintext(toRelay.ToByteArray());
             var relaySessionId = new SessionId(relaySession.SessionId.Value);
             var relayDirectSessionId = new DirectSessionId(relaySession.SessionId.Value);
-            var relayCipher = await _sessionManager.EncryptMessageAsync(relaySessionId, relayPlain).ConfigureAwait(false);
+            var relayCipher = await _secureMessaging.EncryptAsync(relaySessionId, relayPlain, ct).ConfigureAwait(false);
             var resp = await _transport.SendMessageAsync(new Percolator.Identity.PeerId(relay.Value), relayDirectSessionId, relayCipher, ct).ConfigureAwait(false);
             if (resp?.ResponsePayload is not null)
             {

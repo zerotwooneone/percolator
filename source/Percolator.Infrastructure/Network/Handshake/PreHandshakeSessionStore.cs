@@ -26,7 +26,8 @@ namespace Percolator.Infrastructure.Network.Handshake
                 SelfIdentityId = record.SelfIdentityId,
                 RecipientPublicKeyHash = record.RecipientPublicKeyHash,
                 LocalRequestId = record.LocalRequestId,
-                InitiatorEphemeralPrivateKey = record.InitiatorEphemeralPrivateKey,
+                // Do not persist initiator ephemeral private key (security: discard after IRK derivation)
+                InitiatorEphemeralPrivateKey = null,
                 InitialRootKey = record.InitialRootKey,
                 CreatedAtUtc = record.CreatedAtUtc,
                 ExpiresAtUtc = record.ExpiresAtUtc,
@@ -54,7 +55,8 @@ namespace Percolator.Infrastructure.Network.Handshake
                     SelfIdentityId: x.SelfIdentityId,
                     RecipientPublicKeyHash: x.RecipientPublicKeyHash ?? Array.Empty<byte>(),
                     LocalRequestId: x.LocalRequestId,
-                    InitiatorEphemeralPrivateKey: x.InitiatorEphemeralPrivateKey,
+                    // Never expose or rely on persisted ephemeral private key
+                    InitiatorEphemeralPrivateKey: Array.Empty<byte>(),
                     InitialRootKey: x.InitialRootKey,
                     CreatedAtUtc: x.CreatedAtUtc,
                     ExpiresAtUtc: x.ExpiresAtUtc,

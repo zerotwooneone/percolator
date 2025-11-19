@@ -472,6 +472,16 @@ Next: Phase 4 – Application-Layer Migration Plan
   - Refactor: Split methods if needed, remove duplication.
   - Deliverable: Services integrated at the app layer with tests.
 
+  - Sub-step: Cutover inbound decryption call sites
+    - Replace usages of `DirectSessionManager.ReceiveMessageAsync(SessionId, SessionRatchetMessage)` with Application composition over domain `ISecureMessagingService.DecryptInboundAsync` (fast/slow path) that does not require a known session id.
+    - References to update:
+      - Percolator.ApplicationIntegrationTests/Dht/DhtProbeLoopbackTests.cs
+      - Percolator.ApplicationIntegrationTests/Dht/DhtIntegrationTests.cs
+      - Percolator.ApplicationTests/Handshake/HandshakeInitiatorFlowTests.cs
+      - Percolator.ApplicationTests/Handshake/DirectSessionManagerHandshakeTests.cs
+      - Percolator.ApplicationTests/Sessions/SessionMessageTests.cs
+      - Percolator.ApplicationTests/Sessions/DirectSessionManagerTests.cs
+
 - **Step 9: Persistence (EF Core) and migrations for new tables**
   - Red: Integration tests exercise repos via EF Sqlite file DB matching schemas above; ensure encryption/password path remains intact.
   - Green: Implement EF entities/DBOs, mappings, migrations; wire DI registrations.
@@ -538,11 +548,222 @@ Next: Phase 4 – Application-Layer Migration Plan
     - Avoid passing/guessing `SelfIdentityId`; obtain identity from `ActiveIdentityContext` and rely on global filters.
     - Use strict filtering semantics (no results when active identity is unset).
   - Tests: construct DbContext with `ActiveIdentityContext` and seed `SelfIdentityDbo` matching the test `SelfIdentityId`.
-  - Migration review: confirm indexes on `(SelfIdentityId, ...)` remain appropriate after scoping.
+  - Migration review: confirm indexes exist for identity + remote SPKI hash + created_at.
 
 - **Deliverable**
   - All identity-scoped repositories consistently use the scoped DbContext; integration tests green.
 
 ---
 
+## Amendment: Step 8 Alignment with Signal Session-Flow (Design Only)
+
+Objective
+ - Align the cutover with the documented session-flow and Signal/X3DH practices without changing code yet.
+
+Scope
+ - This section updates the plan only. Follow-up steps will implement the changes.
+
+Design Decisions
+ - Responder assigns the `session_id`. The initiator must not derive or assign it.
+ - Initiator’s ephemeral private key is not persisted. It is discarded immediately after deriving the Initial Root Key (IRK).
+ - Pre-handshake persistence stores only the encrypted IRK and the remote identity key reference.
+ - Pre-handshake lookup/indexing: by remote identity key SPKI hash and timestamp. Do not use correlation IDs.
+
+API Direction (to be applied in the next steps)
+ - Replace the initiator establish API with a finalize API that does not require the initiator’s ephemeral private key:
+   - Add: `FinalizeAsInitiatorAsync(SessionId sessionId, RatchetIdentityKey responderIdentityKey, SharedSecret initialRootKey, RatchetEphemeralKey responderPublicRatchetKey)`.
+   - Remove: `EstablishSessionAsInitiatorAsync(SessionId, ..., ECDiffieHellman localEphemeralKey)`.
+ - Keep responder establish API; responder generates/uses `session_id` and has the private key used in handshake.
+ - Messaging remains in `ISecureMessagingService`; DSM is lifecycle-only.
+
+Orchestration (no code changes yet)
+ - InitiatorHelloService: derive IRK via X3DH; save short-lived prehandshake record with IRK and remote identity key hash only.
+ - HandleHandshakeResponderHello: decrypt first inbound ratchet message; read responder-assigned `session_id`; resolve prehandshake by remote identity key; call DSM finalize API with IRK and header `public_ratchet_key`; delete prehandshake record.
+
+Storage & Security
+ - Encrypt IRK at rest in prehandshake store; Already done, Sqlite db is encrypted at rest.
+ - Do not persist initiator ephemeral private key in any flow.
+ - Index prehandshake records by (SelfIdentityId, RemoteIdentityKeySpkiHash, CreatedAtUtc).
+
+Migration Notes (later step)
+ - If a schema currently stores the initiator ephemeral private key, schedule its removal.
+ - Ensure indexes exist for identity + remote SPKI hash + created_at.
+
+Test Plan (later step)
+ - Update tests to mock `FinalizeAsInitiatorAsync` instead of initiator establish; ensure session id is obtained from the responder’s message payload.
+
 Status: Phases 1–4 drafted. Roadmap with TDD steps added. Implement via compile-time cut-over; no feature flags.
+
+---
+
+## Deviation Audit and Remediation Plan (vs session-flow.md)
+
+Purpose
+- Provide a stepwise audit and remediation roadmap to realign the current codebase to the session-flow design without making code changes yet. Each step lists audit commands/files, expected deviations, and the planned remediation to include in subsequent implementation steps.
+
+Conventions
+- Audit = research the current code with targeted search/read.
+- Remediation = planned changes to bring code in line with session-flow.md and the Step 8 Amendment.
+
+Step A1: Messaging ownership and DSM boundaries
+- Audit
+  - Search for usages of `IDirectSessionManager` in Application and tests to confirm no encrypt/decrypt responsibilities remain.
+  - Verify all message crypto goes through `ISecureMessagingService` (`EncryptAsync`, `DecryptInboundAsync`).
+  - Files: `Percolator.Application.Services.SecureMessagingService`, `NetworkTransportPortAdapter`, `MessageService`, tests under `ApplicationTests` and `IntegrationTests`.
+- Likely deviations
+  - Legacy calls to DSM encrypt/decrypt in tests or adapters.
+- Remediation
+  - Plan to replace residual DSM crypto calls with `ISecureMessagingService` in Step 8 execution PRs.
+
+Step A2: Initiator ephemeral private key persistence
+- Audit
+  - Inspect `IPreHandshakeSessionStore` implementations and DB schemas for fields storing initiator ephemeral private key.
+  - Files: `Percolator.Application.Network.Handshake.IPreHandshakeSessionStore` and Infrastructure store(s).
+- Likely deviations
+  - Prehandshake record includes `InitiatorEphemeralPrivateKey`.
+- Remediation
+  - Plan schema/DTO cleanup to drop the ephemeral private key and keep only IRK + remote identity SPKI hash + timestamps. Update save/load paths accordingly.
+
+Step A3: Session ID assignment and usage
+- Audit
+  - Search for places where initiator generates or assigns `SessionId` before responder hello.
+  - Files: `InitiatorHelloService`, `HandleHandshakeResponderHelloCommand`, any handshake orchestrators, tests.
+- Likely deviations
+  - Initiator generates `SessionId` and calls DSM establish (now removed or lingering in tests).
+- Remediation
+  - Plan to enforce responder-assigned `session_id` only. Initiator must finalize after decrypting responder’s first message and reading session_id.
+
+Step A4: DSM API shape
+- Audit
+  - Confirm `IDirectSessionManager` still exposes initiator establishment with `ECDiffieHellman localEphemeralKey` and `SessionId` requirement.
+  - File: `Percolator.Application.Sessions.IDirectSessionManager.cs` and `DirectSessionManager.cs`.
+- Likely deviations
+  - Current DSM requires initiator’s ephemeral private key and pre-known session id.
+- Remediation
+  - Plan to remove initiator establish API and add `FinalizeAsInitiatorAsync(SessionId, RatchetIdentityKey, SharedSecret, RatchetEphemeralKey)` per Amendment.
+
+Step A5: Double Ratchet initializer assumptions
+- Audit
+  - Review how initiator-side DR session is created in `DirectSessionManager` (`DoubleRatchetSession.AsInitiator` path) and whether it depends on initiator’s ephemeral private key at finalize time.
+  - File: `DirectSessionManager.cs` and crypto constructors/usages referenced.
+- Likely deviations
+  - DR init path expects ephemeral private key even on initiator finalize.
+- Remediation
+  - Plan to add/route an initializer that accepts IRK + responder `public_ratchet_key` for initiator finalize; no ephemeral private key needed.
+
+Step A6: Prehandshake record indexing and lookup
+- Audit
+  - Verify how `HandleHandshakeResponderHelloCommand` locates prehandshake state (by remote identity SPKI hash and timestamp).
+  - Files: `HandleHandshakeResponderHelloCommand.cs`, `IPreHandshakeSessionStore`.
+- Likely deviations
+  - Use of correlation ids or ad-hoc matching not based on SPKI hash.
+- Remediation
+  - Plan lookup strictly by (SelfIdentityId, RemoteIdentityKeySpkiHash) with recent-first ordering; avoid correlation IDs.
+
+Step A7: Responder establishment and first message
+- Audit
+  - Ensure responder path establishes session immediately on hello handling and emits the first ratchet message carrying the responder’s next `public_ratchet_key`.
+  - Files: responder establishment handlers/services; protobuf `RatchetHeader` usage.
+- Likely deviations
+  - Mixed responsibilities between handler and DSM; session id propagation not strictly from responder.
+- Remediation
+  - Plan clear separation: responder establishes with private key + shared secret, assigns `session_id`, and first message contains header `public_ratchet_key` for initiator finalize.
+
+Step A8: Inbound resolution fast/slow path parity
+- Audit
+  - Confirm `InboundMessageResolver` is used by `ISecureMessagingService` and properly updates `IRatchetKeyIndex` on slow-path success.
+  - Files: `SecureMessagingService.cs`, `InboundMessageResolver.cs`.
+- Likely deviations
+  - None (looks aligned), but verify index upsert and repository update calls.
+- Remediation
+  - Plan tests to validate index upsert on slow/fast path and no logging of secrets.
+
+Step A9: Protobuf envelopes and presence/versioning
+- Audit
+  - Verify responder hello inner payload includes the responder-assigned `session_id`. Check optional/version fields conform to protobuf guidelines.
+  - Files: contracts for `ResponderInnerHello`/`DecryptedPayload` in `Percolator.Contracts`.
+- Likely deviations
+  - Missing `session_id` or presence/version markers.
+- Remediation
+  - Plan contract adjustments to include `session_id` in the encrypted payload and add top-level `version` + optional fields as per guideline.
+
+Step A10: Logging and secrets
+- Audit
+  - Search for any logging of keys, IRK, or `session_id` in Application/Domain (DSM currently has debug logging flags).
+  - Files: `DirectSessionManager.cs`, handlers, services.
+- Likely deviations
+  - Conditional logging of cryptographic material when a debug flag is enabled.
+- Remediation
+  - Plan to confine any crypto material logging to tightly controlled dev-only code paths at the Application layer, never the domain; scrub `session_id` from logs.
+
+Deliverable
+- A tracked checklist of audits A1–A10 with outcomes and PRs for remediations, executed during Step 8/9 implementation without introducing behavior regressions. This keeps us aligned with session-flow.md and the Step 8 Amendment.
+
+### Initial Audit Outcomes (A1–A10)
+- A1 Messaging ownership: Aligned. `ISecureMessagingService` used; no DSM encrypt/decrypt calls found.
+- A2 Ephemeral private key persistence: Deviates. `PreHandshakeSessionStore` persists `InitiatorEphemeralPrivateKey`.
+- A3 Session ID: Aligned for initiator side (parses responder `direct_session_id`); Network still mints `DirectSessionId` which is orthogonal.
+- A4 DSM API: Deviates. Initiator establish requires `ECDiffieHellman` and pre-known `SessionId`.
+- A5 DR initializer: Likely deviates. Initiator path expects ephemeral private key.
+- A6 Prehandshake lookup: Partially aligned; presence of `LocalRequestId` suggests potential correlation reliance.
+- A7 Responder path: Needs focused audit next (ensure first-message header carries ratchet key and session established).
+- A8 Inbound resolution: Aligned; resolver updates index on success.
+- A9 Protobuf presence/versioning: Aligned for `ResponderInnerHello`.
+- A10 Logging hygiene: Deviates. DSM logs sensitive material under debug flag.
+
+### Remediation Steps (Planned)
+- R1 Remove initiator ephemeral private key from prehandshake schema/DTOs
+  - Update `PreHandshakeRecord`, `PreHandshakeSessionDbo`, `PreHandshakeSessionStore` to drop `InitiatorEphemeralPrivateKey`.
+  - Keep only IRK, remote identity SPKI (and/or SPKI hash), timestamps; ensure at-rest encryption remains.
+
+- R2 Correct DSM API for initiator path
+  - Remove `EstablishSessionAsInitiatorAsync(SessionId, ..., ECDiffieHellman localEphemeralKey)`.
+  - Add `FinalizeAsInitiatorAsync(SessionId sessionId, RatchetIdentityKey responderIdentityKey, SharedSecret initialRootKey, RatchetEphemeralKey responderPublicRatchetKey)`.
+
+- R3 Add initiator finalize initializer in Double Ratchet
+  - Provide/init path that accepts IRK + responder `public_ratchet_key` without initiator ephemeral private key.
+  - Update DSM implementation to use this initializer during finalize.
+
+- R4 Enforce prehandshake lookup by SPKI hash + timestamp
+  - Adjust handler logic to resolve by `(SelfIdentityId, RemoteIdentityKeySpkiHash)` with recency ordering; avoid correlation IDs.
+
+- R5 Responder establishment alignment
+  - Audit and, if needed, adjust responder flow to establish immediately, assign `session_id`, and emit first ratchet message with header `public_ratchet_key`.
+
+- R6 Logging hygiene
+  - Remove/redact logging of shared secrets, IRK, ratchet private keys, and `session_id` from DSM. Restrict any diagnostics to safe, app-layer-only paths.
+  - Logging of crypto secrets can be enabled by CryptographyOptions.EnableCryptographicMaterialLogging - which is meant for development debugging
+
+- R7 Resolver parity tests
+  - Add tests ensuring `IRatchetKeyIndex.UpsertAsync` and repo `UpdateAsync` occur on both fast and slow paths; no secret logs.
+
+- R8 Schema updates (breaking-change-first staging)
+  - Intent: Surface compiler errors early to drive a rigorous staged cutover toward session-flow.
+  - Actions (EF Core / DB):
+    - Remove `InitiatorEphemeralPrivateKey` from `PreHandshakeSessionDbo` and the underlying table via a migration.
+    - Ensure indexes exist for `(SelfIdentityId, RemoteIdentityKeySpkiHash, CreatedAtUtc)` on prehandshake table.
+    - If absent, add columns needed for SPKI hash and backfill or compute on write.
+    - Validate at-rest encryption remains enabled for the database.
+  - Actions (DTOs/Adapters):
+    - Update `PreHandshakeRecord` and any mappers to drop the ephemeral private key field.
+  - Staging order:
+    1) Apply the migration and compile (expect compile errors in places that referenced the removed field/DBO members).
+    2) Fix compile by implementing R1 (already applied at code level) and updating any lingering references.
+    3) Proceed to R2–R5 wiring changes, then R6–R7 tests.
+
+### Reverse-Signal (RS) Audit and Remediation Steps
+- RS1 Invitation persistence and privacy
+  - Audit: Ensure `SentInvitations`/`PendingInvitations` only persist exactly what's required. If an OTK private key must be retained, encrypt at rest and apply strict TTL/purge.
+  - Remediation: Enforce at-rest encryption (already done via encrypted SQLite). Add TTL purge and tests verifying timely deletion.
+
+- RS2 Role inversion correctness (acceptor initiates, inviter finalizes)
+  - Audit: In the invite-accept path, confirm the acceptor performs X3DH as initiator and sends the first Double Ratchet message with header `public_ratchet_key`.
+  - Remediation: Ensure responder-side establishment runs immediately, assigns `session_id`, and emits the message with correct header fields.
+
+- RS3 Inviter finalize path
+  - Audit: On inviter side, verify finalize uses IRK (or equivalent derivation) + responder header `public_ratchet_key` and decrypts an inner payload carrying the responder-assigned `session_id`.
+  - Remediation: Wire DSM `FinalizeAsInitiatorAsync` for the inviter finalize path; delete invitation record on success.
+
+- RS4 Protobuf presence/versioning for invites
+  - Audit: Check `InviteHandshakeRequest/Response` messages include top-level `version` and that the encrypted inner payload includes `session_id` where required.
+  - Remediation: Adjust contracts if fields are missing; keep optional fields consistent with protobuf best practices.

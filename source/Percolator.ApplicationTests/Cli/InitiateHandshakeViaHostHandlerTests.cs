@@ -10,6 +10,7 @@ using Percolator.Application.Cli;
 using Percolator.Application.Network;
 using Percolator.Application.Network.Handshake;
 using Percolator.Application.Sessions;
+using Percolator.Application.Services;
 using Percolator.Contracts;
 using Percolator.Cryptography;
 using Percolator.Identity;
@@ -29,6 +30,7 @@ public class InitiateHandshakeViaHostHandlerTests
         var conversation = new Mock<IConversationService>(MockBehavior.Strict);
         var sessionManager = new Mock<IDirectSessionManager>(MockBehavior.Strict);
         var transport = new Mock<IMessageTransportService>(MockBehavior.Strict);
+        var secure = new Mock<ISecureMessagingService>(MockBehavior.Strict);
         var peerIdentityRepo = new Mock<Percolator.Identity.IPeerIdentityRepository>(MockBehavior.Strict);
         var pkhStore = new Mock<IPeerPublicSigningKeyStore>(MockBehavior.Strict);
         var profileRepo = new Mock<IPeerRoutingProfileRepository>(MockBehavior.Loose);
@@ -64,9 +66,9 @@ public class InitiateHandshakeViaHostHandlerTests
         };
         var respEnvelope = new InternalEnvelope { GetPreKeyBundleResponse = bundle };
 
-        // Encrypt to host (request)
-        sessionManager
-            .Setup(s => s.EncryptMessageAsync(It.IsAny<SessionId>(), It.IsAny<Plaintext>()))
+        // Encrypt to host (request) via secure service
+        secure
+            .Setup(s => s.EncryptAsync(It.IsAny<SessionId>(), It.IsAny<Plaintext>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SessionRatchetMessage(new byte[] { 0xAB }));
 
         // Transport returns a response payload (cipher bytes)
@@ -82,10 +84,10 @@ public class InitiateHandshakeViaHostHandlerTests
                 }
             });
 
-        // Decrypt the response into our InternalEnvelope
-        sessionManager
-            .Setup(s => s.ReceiveMessageAsync(It.IsAny<SessionId>(), It.IsAny<SessionRatchetMessage>()))
-            .ReturnsAsync(new Plaintext(respEnvelope.ToByteArray()));
+        // Decrypt the response into our InternalEnvelope via SecureMessagingService
+        secure
+            .Setup(s => s.DecryptInboundAsync(It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((new SessionId(Guid.NewGuid()), new Plaintext(respEnvelope.ToByteArray())));
 
         // Target PKH unknown -> create/update new peer and activate PKH mapping
         pkhStore.Setup(s => s.GetPeerIdByPublicKeyHashAsync(It.IsAny<byte[]>(), It.IsAny<CancellationToken>()))
@@ -122,6 +124,7 @@ public class InitiateHandshakeViaHostHandlerTests
             logger,
             conversation.Object,
             sessionManager.Object,
+            secure.Object,
             transport.Object,
             peerIdentityRepo.Object,
             pkhStore.Object,

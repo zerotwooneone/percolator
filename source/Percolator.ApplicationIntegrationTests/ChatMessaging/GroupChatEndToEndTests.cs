@@ -406,6 +406,7 @@ namespace Percolator.ApplicationIntegrationTests.ChatMessaging
         {
             // Retry loop to handle rare ratchet header inference races on receiver
             var sessionManager = sender.Services.GetRequiredService<Percolator.Application.Sessions.IDirectSessionManager>();
+            var secure = sender.Services.GetRequiredService<Percolator.Application.Services.ISecureMessagingService>();
             var transport = sender.Services.GetRequiredService<Percolator.Application.Network.IMessageTransportService>();
             var identityRepo = sender.Services.GetRequiredService<Percolator.Identity.IPeerIdentityRepository>();
             var peerIdentity = await identityRepo.GetByNameAsync(new Percolator.Identity.Model.DisplayName(recipientName), CancellationToken.None)
@@ -419,7 +420,7 @@ namespace Percolator.ApplicationIntegrationTests.ChatMessaging
                 try
                 {
                     var sessionId = await EnsureDirectSessionAsync(sender, recipientName, recipientEndpoint);
-                    var cipher = await sessionManager.EncryptMessageAsync(new Percolator.Cryptography.SessionId(sessionId.Value), plaintext);
+                    var cipher = await secure.EncryptAsync(new Percolator.Cryptography.SessionId(sessionId.Value), plaintext, CancellationToken.None);
                     await transport.SendMessageAsync(peerIdentity.Id, sessionId, cipher);
                     return;
                 }

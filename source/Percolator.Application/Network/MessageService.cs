@@ -2,6 +2,7 @@ using Google.Protobuf;
 using Microsoft.Extensions.Logging;
 using Percolator.Application.Identity;
 using Percolator.Application.Sessions;
+using Percolator.Application.Services;
 using Percolator.Contracts;
 using Percolator.Cryptography;
 using Percolator.Identity;
@@ -15,20 +16,20 @@ namespace Percolator.Application.Network
     {
         private readonly ILogger<MessageService> _logger;
         private readonly IDirectSessionRepository _sessions;
-        private readonly IDirectSessionManager _sessionManager;
+        private readonly ISecureMessagingService _secureMessaging;
         private readonly ActiveIdentityContext _active;
         private readonly INetworkSender _networkSender;
 
         public MessageService(
             ILogger<MessageService> logger,
             IDirectSessionRepository sessions,
-            IDirectSessionManager sessionManager,
+            ISecureMessagingService secureMessaging,
             ActiveIdentityContext active,
             INetworkSender networkSender)
         {
             _logger = logger;
             _sessions = sessions;
-            _sessionManager = sessionManager;
+            _secureMessaging = secureMessaging;
             _active = active;
             _networkSender = networkSender;
         }
@@ -49,7 +50,7 @@ namespace Percolator.Application.Network
             }
 
             var sessionId = new SessionId(ds.SessionId.Value);
-            var cipher = await _sessionManager.EncryptMessageAsync(sessionId, new Plaintext(envelope.ToByteArray())).ConfigureAwait(false);
+            var cipher = await _secureMessaging.EncryptAsync(sessionId, new Plaintext(envelope.ToByteArray()), ct).ConfigureAwait(false);
 
             var outcome = await _networkSender
                 .SendAsync(new Percolator.Network.PeerId(recipientPeerId.Value), new NetworkPayload(cipher.Value), SendStrategy.DirectThenRelay, ct)
@@ -107,7 +108,7 @@ namespace Percolator.Application.Network
             }
 
             var sessionId = new SessionId(ds.SessionId.Value);
-            var cipher = await _sessionManager.EncryptMessageAsync(sessionId, new Plaintext(envelope.ToByteArray())).ConfigureAwait(false);
+            var cipher = await _secureMessaging.EncryptAsync(sessionId, new Plaintext(envelope.ToByteArray()), ct).ConfigureAwait(false);
             var outcome = await _networkSender
                 .SendAsync(new Percolator.Network.PeerId(recipientPeerId.Value), new NetworkPayload(cipher.Value), SendStrategy.DirectThenRelay, ct)
                 .ConfigureAwait(false);

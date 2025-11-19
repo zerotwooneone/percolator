@@ -22,6 +22,7 @@ public class ProcessRelayedOpaquePayloadCommandTests
         var logger = Microsoft.Extensions.Logging.Abstractions.NullLogger<ProcessRelayedOpaquePayloadHandler>.Instance;
         var mediator = new Mock<IMediator>(MockBehavior.Strict);
         var sessions = new Mock<IDirectSessionManager>(MockBehavior.Strict);
+        var secure = new Mock<Percolator.Application.Services.ISecureMessagingService>(MockBehavior.Strict);
         var lookup = new Mock<IRatchetKeyIndex>(MockBehavior.Strict);
         var active = new ActiveIdentityContext { Identity = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "t", null) { SelfIdentityId = 1 } };
         var msgSvc = new Mock<Percolator.Application.Network.IMessageService>(MockBehavior.Strict);
@@ -50,7 +51,7 @@ public class ProcessRelayedOpaquePayloadCommandTests
         msgSvc.Setup(s => s.SendPreEncryptedAsync(It.IsAny<Percolator.Identity.PeerId>(), It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(Percolator.Application.Network.SendResult.CreateSuccess("Direct", new[] { "Direct" }, 1));
 
-        var sut = new ProcessRelayedOpaquePayloadHandler(logger, mediator.Object, sessions.Object, lookup.Object, active, msgSvc.Object);
+        var sut = new ProcessRelayedOpaquePayloadHandler(logger, mediator.Object, sessions.Object, secure.Object, lookup.Object, active, msgSvc.Object);
         var result = await sut.Handle(new ProcessRelayedOpaquePayloadCommand(payload, relayHost), CancellationToken.None);
 
         Assert.That(result.WasSuccess, Is.True);

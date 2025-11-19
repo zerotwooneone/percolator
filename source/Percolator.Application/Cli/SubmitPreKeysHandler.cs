@@ -7,6 +7,7 @@ using Microsoft.Extensions.Logging;
 using Percolator.Application.Identity;
 using Percolator.Application.Network;
 using Percolator.Application.Sessions;
+using Percolator.Application.Services;
 using Percolator.Contracts;
 using Percolator.Cryptography;
 using Percolator.Identity;
@@ -28,6 +29,7 @@ public class SubmitPreKeysHandler : IRequestHandler<SubmitPreKeysCommand, int>
     private readonly IPeerIdentityRepository _peerIdentityRepository;
     private readonly IOneTimeKeyProvider _oneTimeKeyProvider;
     private readonly ISelfPreKeyBundleRepository _selfPreKeyRepo;
+    private readonly ISecureMessagingService _secureMessaging;
 
     public SubmitPreKeysHandler(
         ILogger<SubmitPreKeysHandler> logger,
@@ -37,7 +39,8 @@ public class SubmitPreKeysHandler : IRequestHandler<SubmitPreKeysCommand, int>
         ActiveIdentityContext activeIdentity,
         IPeerIdentityRepository peerIdentityRepository,
         IOneTimeKeyProvider oneTimeKeyProvider,
-        ISelfPreKeyBundleRepository selfPreKeyRepo)
+        ISelfPreKeyBundleRepository selfPreKeyRepo,
+        ISecureMessagingService secureMessaging)
     {
         _logger = logger;
         _conversationService = conversationService;
@@ -47,6 +50,7 @@ public class SubmitPreKeysHandler : IRequestHandler<SubmitPreKeysCommand, int>
         _peerIdentityRepository = peerIdentityRepository;
         _oneTimeKeyProvider = oneTimeKeyProvider;
         _selfPreKeyRepo = selfPreKeyRepo;
+        _secureMessaging = secureMessaging;
     }
 
     public async Task<int> Handle(SubmitPreKeysCommand request, CancellationToken cancellationToken)
@@ -140,7 +144,8 @@ public class SubmitPreKeysHandler : IRequestHandler<SubmitPreKeysCommand, int>
         }
 
         var respCipher = new SessionRatchetMessage(deliverResp.ResponsePayload.ResponsePayload.ToByteArray());
-        var respPlain = await _sessionManager.ReceiveMessageAsync(new SessionId(existingSessionId.Value.Value), respCipher).ConfigureAwait(false);
+        var resolved = await _secureMessaging.DecryptInboundAsync(respCipher, cancellationToken).ConfigureAwait(false);
+        var respPlain = resolved?.plaintext;
         if (respPlain is null)
         {
             _logger.LogWarning("Could not decrypt SubmitPreKeyBundle response payload.");
@@ -163,7 +168,7 @@ public class SubmitPreKeysHandler : IRequestHandler<SubmitPreKeysCommand, int>
         CancellationToken cancellationToken)
     {
         var plaintext = new Plaintext(envelope.ToByteArray());
-        var ratchetMessage = await _sessionManager.EncryptMessageAsync(new SessionId(directSessionId.Value), plaintext).ConfigureAwait(false);
+        var ratchetMessage = await _secureMessaging.EncryptAsync(new SessionId(directSessionId.Value), plaintext, cancellationToken).ConfigureAwait(false);
         _logger.LogInformation("DHT probe sending (with response) to peer {PeerId}", remotePeerId);
         return await _transport.SendMessageAsync(remotePeerId, directSessionId, ratchetMessage, cancellationToken).ConfigureAwait(false);
     }

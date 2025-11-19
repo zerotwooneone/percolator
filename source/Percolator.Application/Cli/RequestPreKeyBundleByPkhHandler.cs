@@ -5,6 +5,7 @@ using Percolator.Application.Identity;
 using Percolator.Application.KeyExchange;
 using Percolator.Application.Network;
 using Percolator.Application.Sessions;
+using Percolator.Application.Services;
 using Percolator.Contracts;
 using Percolator.Cryptography;
 using Percolator.Identity;
@@ -19,6 +20,7 @@ public class RequestPreKeyBundleByPkhHandler : IRequestHandler<RequestPreKeyBund
     private readonly ILogger<RequestPreKeyBundleByPkhHandler> _logger;
     private readonly IConversationService _conversationService;
     private readonly IDirectSessionManager _sessionManager;
+    private readonly ISecureMessagingService _secureMessaging;
     private readonly IMessageTransportService _transport;
     private readonly ActiveIdentityContext _activeIdentity;
     private readonly IPeerIdentityRepository _peerIdentityRepository;
@@ -31,6 +33,7 @@ public class RequestPreKeyBundleByPkhHandler : IRequestHandler<RequestPreKeyBund
         ILogger<RequestPreKeyBundleByPkhHandler> logger,
         IConversationService conversationService,
         IDirectSessionManager sessionManager,
+        ISecureMessagingService secureMessaging,
         IMessageTransportService transport,
         ActiveIdentityContext activeIdentity,
         IPeerIdentityRepository peerIdentityRepository,
@@ -42,6 +45,7 @@ public class RequestPreKeyBundleByPkhHandler : IRequestHandler<RequestPreKeyBund
         _logger = logger;
         _conversationService = conversationService;
         _sessionManager = sessionManager;
+        _secureMessaging = secureMessaging;
         _transport = transport;
         _activeIdentity = activeIdentity;
         _peerIdentityRepository = peerIdentityRepository;
@@ -92,7 +96,7 @@ public class RequestPreKeyBundleByPkhHandler : IRequestHandler<RequestPreKeyBund
         // Encrypt and send
         var plaintext = new Plaintext(internalEnvelope.ToByteArray());
         var cryptoHostSessionId = new SessionId(directHostSessionId.Value.Value);
-        var ratchetMessage = await _sessionManager.EncryptMessageAsync(cryptoHostSessionId, plaintext).ConfigureAwait(false);
+        var ratchetMessage = await _secureMessaging.EncryptAsync(cryptoHostSessionId, plaintext, cancellationToken).ConfigureAwait(false);
         _logger.LogInformation("Requesting pre-key bundle from peer {PeerId}", hostPeer.Id);
         var deliverResp = await _transport.SendMessageAsync(hostPeer.Id, directHostSessionId.Value, ratchetMessage, cancellationToken).ConfigureAwait(false);
 
@@ -104,7 +108,8 @@ public class RequestPreKeyBundleByPkhHandler : IRequestHandler<RequestPreKeyBund
         }
 
         var respCipher = new SessionRatchetMessage(deliverResp.ResponsePayload.ResponsePayload.ToByteArray());
-        var respPlain = await _sessionManager.ReceiveMessageAsync(cryptoHostSessionId, respCipher).ConfigureAwait(false);
+        var resolved = await _secureMessaging.DecryptInboundAsync(respCipher, cancellationToken).ConfigureAwait(false);
+        var respPlain = resolved?.plaintext;
         if (respPlain is null)
         {
             throw new InvalidOperationException("Could not decrypt GetPreKeyBundle response payload.");

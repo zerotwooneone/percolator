@@ -1,0 +1,12 @@
+using System.Threading;
+using System.Threading.Tasks;
+using Percolator.Cryptography;
+using Percolator.Cryptography.Primitives;
+
+namespace Percolator.Application.Services;
+
+public interface ISecureMessagingService
+{
+    Task<SessionRatchetMessage> EncryptAsync(SessionId sessionId, Plaintext plaintext, CancellationToken cancellationToken = default);
+    Task<(SessionId sessionId, Plaintext plaintext)?> DecryptInboundAsync(SessionRatchetMessage message, CancellationToken cancellationToken = default);
+}

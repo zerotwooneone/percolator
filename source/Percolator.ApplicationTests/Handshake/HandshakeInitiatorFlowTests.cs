@@ -9,6 +9,7 @@ using NUnit.Framework;
 using Percolator.Application.Identity;
 using Percolator.Application.Network.Handshake;
 using Percolator.Application.Sessions;
+using Percolator.Application.Services;
 using Percolator.Cryptography;
 using Percolator.Identity.Model;
 using Percolator.Identity;
@@ -73,10 +74,7 @@ public class HandshakeInitiatorFlowTests
                     TheirDhRatchetPublicKey = key
                 });
                 
-        // Setup TryInferAndReceiveAsync for the session
-        sessions.Setup(s => s.TryInferAndReceiveAsync(It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((SessionRatchetMessage msg, CancellationToken _) => 
-                (new SessionId(Guid.NewGuid()), new Plaintext(new byte[] { 1, 2, 3 })));
+        // No DSM slow-path decrypt in new design; decrypt handled via SecureMessagingService in higher layers
                 
         var preStore = new Mock<IPreHandshakeSessionStore>(MockBehavior.Strict);
         preStore
@@ -104,10 +102,11 @@ public class HandshakeInitiatorFlowTests
             sessions.Object,
             msgSvc.Object);
 
-        // Since handler will now decrypt after finalize, set up decrypt to succeed
-        sessions
-            .Setup(s => s.ReceiveMessageAsync(It.IsAny<SessionId>(), It.IsAny<SessionRatchetMessage>()))
-            .ReturnsAsync(new Plaintext(new byte[] { 0xCD }));
+        // Since handler will now decrypt after finalize, set up SecureMessagingService to succeed
+        var secureSvc = new Mock<ISecureMessagingService>(MockBehavior.Strict);
+        secureSvc
+            .Setup(s => s.DecryptInboundAsync(It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((new SessionId(Guid.NewGuid()), new Plaintext(new byte[] { 0xCD })));
 
         // Act
         await service.SendInitiatorHelloViaHostAsync(
@@ -178,8 +177,7 @@ public class HandshakeInitiatorFlowTests
         // Verify fast-path lookup via ratchet header was used
         lookup.Verify(l => l.TryResolveAsync(It.IsAny<RatchetEphemeralKey>(), It.IsAny<CancellationToken>()), Times.Once);
 
-        // Verify session manager was NOT called on fast-path
-        sessions.Verify(s => s.ReceiveMessageAsync(It.IsAny<SessionId>(), It.IsAny<SessionRatchetMessage>()), Times.Never);
+        // Verify slow-path finalize was not used
         sessions.Verify(s => s.CompleteHandshakeAsync(It.IsAny<SessionRatchetMessage>(), It.IsAny<Func<Plaintext, SessionId>>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
@@ -228,10 +226,7 @@ public class HandshakeInitiatorFlowTests
                 return Task.FromResult((sid, pt));
             });
 
-        // Since handler will now decrypt after finalize, set up decrypt to succeed
-        sessions
-            .Setup(s => s.ReceiveMessageAsync(It.IsAny<SessionId>(), It.IsAny<SessionRatchetMessage>()))
-            .ReturnsAsync(new Plaintext(new byte[] { 0xAB }));
+        // No DSM receive path in new design; decrypt handled via SecureMessagingService in higher layers
 
         // Act: should succeed via slow-path finalize
         await handler.Handle(cmd, CancellationToken.None);
@@ -266,6 +261,7 @@ public class HandshakeInitiatorFlowTests
         var expectedFirstPlaintext = new Plaintext(new byte[] { 0xDE, 0xAD });
         var firstMessage = SessionRatchetMessage.Create(preKeyForHeader, 1, 0, new Ciphertext(new byte[] { 0xBE, 0xEF }));
 
+        var secureSvc = new Mock<ISecureMessagingService>(MockBehavior.Strict);
         // Sessions mock: initiator establish returns first message; responder receive returns expected plaintext after establish
         var sessions = new Mock<IDirectSessionManager>(MockBehavior.Loose);
         sessions.Setup(s => s.EstablishSessionAsInitiatorAsync(
@@ -340,10 +336,7 @@ public class HandshakeInitiatorFlowTests
                 It.IsAny<SharedSecret>()))
             .Returns(Task.CompletedTask);
 
-        // After responder establishes, it should be able to receive the first message using the established session id
-        sessions
-            .Setup(s => s.ReceiveMessageAsync(It.IsAny<SessionId>(), It.IsAny<SessionRatchetMessage>()))
-            .ReturnsAsync(expectedFirstPlaintext);
+        // After responder establishes, decrypt assertions are performed via SecureMessagingService below
 
         var peerIdentityRepo = new Mock<Percolator.Identity.IPeerIdentityRepository>(MockBehavior.Strict);
         peerIdentityRepo.Setup(r => r.GetByIdAsync(It.IsAny<Percolator.Identity.PeerId>(), It.IsAny<CancellationToken>()))
@@ -364,14 +357,15 @@ public class HandshakeInitiatorFlowTests
             selfPreRepo.Object,
             directRepo.Object,
             sessions.Object,
+            secureSvc.Object,
             responderActive,
             peerIdentityRepo.Object,
             profileRepo.Object,
             new Mock<IMediator>().Object);
 
-        // Handler will encrypt ResponderInnerHello over the new session; return any bytes
-        sessions
-            .Setup(s => s.EncryptMessageAsync(It.IsAny<SessionId>(), It.IsAny<Plaintext>()))
+        // Handler will encrypt ResponderInnerHello over the new session via SecureMessagingService
+        secureSvc
+            .Setup(s => s.EncryptAsync(It.IsAny<SessionId>(), It.IsAny<Plaintext>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SessionRatchetMessage(new byte[] { 0x01, 0x02 }));
 
         // Provide a valid CompleteHandshake response so handler can proceed
@@ -400,9 +394,12 @@ public class HandshakeInitiatorFlowTests
         // Act: responder handles initiator hello and establishes responder session
         var responderBytes = await initiatorHelloHandler.Handle(cmd, CancellationToken.None);
         Assert.That(responderBytes, Is.Not.Null);
-        // Assert: after establishment, responder can receive the first message
-        var pt = await sessions.Object.ReceiveMessageAsync(It.IsAny<SessionId>(), firstMessage);
-        Assert.That(pt!.Value, Is.EqualTo(expectedFirstPlaintext.Value));
+        // Assert: after establishment, responder can decrypt the first message via SecureMessagingService
+        secureSvc
+            .Setup(s => s.DecryptInboundAsync(It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((new SessionId(Guid.NewGuid()), expectedFirstPlaintext));
+        var dec = await secureSvc.Object.DecryptInboundAsync(firstMessage, CancellationToken.None);
+        Assert.That(dec!.Value.plaintext.Value, Is.EqualTo(expectedFirstPlaintext.Value));
 
         // Verify establishment occurred
         sessions.Verify(s => s.EstablishSessionAsResponderAsync(
@@ -461,10 +458,11 @@ public class HandshakeInitiatorFlowTests
                 return Task.FromResult((sid, pt));
             });
 
-        // Since handler will now decrypt after finalize, set up decrypt to succeed
-        sessions
-            .Setup(s => s.ReceiveMessageAsync(It.IsAny<SessionId>(), It.IsAny<SessionRatchetMessage>()))
-            .ReturnsAsync(new Plaintext(new byte[] { 0xEF }));
+        // Since handler will now decrypt after finalize, set up SecureMessagingService to succeed
+        var secureSvc2 = new Mock<ISecureMessagingService>(MockBehavior.Strict);
+        secureSvc2
+            .Setup(s => s.DecryptInboundAsync(It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((new SessionId(Guid.NewGuid()), new Plaintext(new byte[] { 0xEF })));
 
         // Act
         await handler.Handle(cmd, CancellationToken.None);

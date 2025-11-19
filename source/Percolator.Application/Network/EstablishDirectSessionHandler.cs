@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using Percolator.Application.Identity;
 using Percolator.Application.KeyExchange;
 using Percolator.Application.Sessions;
+using Percolator.Application.Services;
 using Percolator.Chat;
 using Percolator.Chat.ValueObjects;
 using Percolator.Contracts;
@@ -28,6 +29,7 @@ namespace Percolator.Application.Network
         private readonly ActiveIdentityContext _activeIdentityContext;
         private readonly IX3DHOrchestrator _x3dhOrchestrator;
         private readonly IDirectSessionManager _sessionManager;
+        private readonly ISecureMessagingService _secureMessaging;
         private readonly IPeerIdentityRepository _peerIdentityRepository;
         private readonly IX3DHManager _x3DhManager;
         private readonly IDirectSessionRepository _directSessionRepository;
@@ -39,6 +41,7 @@ namespace Percolator.Application.Network
             ActiveIdentityContext activeIdentityContext,
             IX3DHOrchestrator x3dhOrchestrator,
             IDirectSessionManager sessionManager,
+            ISecureMessagingService secureMessaging,
             IPeerIdentityRepository peerIdentityRepository,
             IX3DHManager x3DhManager,
             IDirectSessionRepository directSessionRepository,
@@ -49,6 +52,7 @@ namespace Percolator.Application.Network
             _activeIdentityContext = activeIdentityContext;
             _x3dhOrchestrator = x3dhOrchestrator;
             _sessionManager = sessionManager;
+            _secureMessaging = secureMessaging;
             _peerIdentityRepository = peerIdentityRepository;
             _x3DhManager = x3DhManager;
             _directSessionRepository = directSessionRepository;
@@ -162,7 +166,7 @@ namespace Percolator.Application.Network
             }.ToByteString();
 
             // Encrypt the response payload as an initial X3DH ratchet message for the initiator
-            var ratchetMessage = await _sessionManager.EncryptMessageAsync(
+            var ratchetMessage = await _secureMessaging.EncryptAsync(
                 cryptoSessionId,
                 new Plaintext(responsePayload.ToByteArray()))
                 .ConfigureAwait(false);

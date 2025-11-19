@@ -31,6 +31,7 @@ public class DhtIntegrationTests : IntegrationTestBase
         // Arrange
         var dhtRepositoryMock = new Mock<IDhtNodeRepository>();
         var sessionManagerMock = new Mock<IDirectSessionManager>();
+        var secureSvcMock = new Mock<Percolator.Application.Services.ISecureMessagingService>();
         var directSessionRepoMock = new Mock<IDirectSessionRepository>();
 
         // Mocks for unused dependencies to allow the host to build
@@ -61,6 +62,7 @@ public class DhtIntegrationTests : IntegrationTestBase
             services.AddSingleton<IDhtNodeRepository>(dhtRepositoryMock.Object);
             services.AddSingleton<IDirectSessionManager>(sessionManagerMock.Object);
             services.AddSingleton<IDirectSessionRepository>(directSessionRepoMock.Object);
+            services.AddSingleton<Percolator.Application.Services.ISecureMessagingService>(secureSvcMock.Object);
             // MQ service required by ProcessInternalEnvelopeHandler constructor
             services.AddSingleton<IMessageQueueService>(new Mock<IMessageQueueService>().Object);
             // Fast-path lookup resolves our header key via domain index
@@ -105,12 +107,13 @@ public class DhtIntegrationTests : IntegrationTestBase
 
         var remotePeerId = new Percolator.Identity.PeerId(Guid.NewGuid());
 
-        // 1. Mock the session manager to decrypt the message
+        // 1. Mock inbound decrypt via SecureMessagingService to return the expected InternalEnvelope
         var dhtEnvelope = new DhtEnvelope { PingRequest = new Contracts.PingRequest() };
         var internalEnvelope = new InternalEnvelope { DhtEnvelope = dhtEnvelope };
         var ciphertext = new Ciphertext(new byte[1]); // Content doesn't matter
-        sessionManagerMock.Setup(s => s.ReceiveMessageAsync(sessionId, It.IsAny<SessionRatchetMessage>()))
-            .Returns(Task.FromResult<Plaintext?>(new Plaintext(internalEnvelope.ToByteArray())));
+        secureSvcMock
+            .Setup(s => s.DecryptInboundAsync(It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((sessionId, new Plaintext(internalEnvelope.ToByteArray())));
 
         // 2. Mock the direct session repository to map session to remote peer
         directSessionRepoMock.Setup(r => r.GetBySessionIdAsync(new DirectSessionId(sessionId.Value), It.IsAny<int>()))
@@ -144,6 +147,7 @@ public class DhtIntegrationTests : IntegrationTestBase
         // Arrange
         var dhtNodeRepoMock = new Mock<IDhtNodeRepository>();
         var sessionManagerMock = new Mock<IDirectSessionManager>();
+        var secureSvcMock = new Mock<Percolator.Application.Services.ISecureMessagingService>();
         var directSessionRepoMock = new Mock<IDirectSessionRepository>();
         var sessionId = new Percolator.Cryptography.SessionId(Guid.NewGuid());
 
@@ -163,6 +167,7 @@ public class DhtIntegrationTests : IntegrationTestBase
         {
             services.AddSingleton(dhtNodeRepoMock.Object);
             services.AddSingleton(sessionManagerMock.Object);
+            services.AddSingleton<Percolator.Application.Services.ISecureMessagingService>(secureSvcMock.Object);
             
             services.AddSingleton(directSessionRepoMock.Object);
             services.AddSingleton<IDhtService, DhtService>();
@@ -206,13 +211,13 @@ public class DhtIntegrationTests : IntegrationTestBase
         var targetId = new NodeId(SHA256.HashData(Guid.NewGuid().ToByteArray()));
         var remotePeerId = new Percolator.Identity.PeerId(Guid.NewGuid());
 
-        // 1. Mock the session manager to decrypt the message
+        // 1. Mock inbound decrypt via SecureMessagingService for FindNodeRequest
         var findNodeRequestProto = new Contracts.FindNodeRequest { TargetPeerId = ByteString.CopyFrom(targetId.Value) };
         var dhtEnvelope = new DhtEnvelope { FindNodeRequest = findNodeRequestProto };
         var internalEnvelope = new InternalEnvelope { DhtEnvelope = dhtEnvelope };
-
-        sessionManagerMock.Setup(s => s.ReceiveMessageAsync(It.Is<SessionId>(sid => sid == sessionId), It.IsAny<SessionRatchetMessage>()))
-            .ReturnsAsync(new Plaintext(internalEnvelope.ToByteArray()));
+        secureSvcMock
+            .Setup(s => s.DecryptInboundAsync(It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((sessionId, new Plaintext(internalEnvelope.ToByteArray())));
 
         // 2. Mock the direct session repository to map session to remote peer
         directSessionRepoMock.Setup(r => r.GetBySessionIdAsync(new DirectSessionId(sessionId.Value), It.IsAny<int>()))
@@ -229,9 +234,9 @@ public class DhtIntegrationTests : IntegrationTestBase
         dhtNodeRepoMock.Setup(r => r.GetAllAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(closerNodes);
 
-        // 5. Mock the session manager's encryption call for the response
+        // 5. Mock the secure service's encryption call for the response
         var expectedResponsePayload = new SessionRatchetMessage(Guid.NewGuid().ToByteArray());
-        sessionManagerMock.Setup(s => s.EncryptMessageAsync(sessionId, It.IsAny<Plaintext>()))
+        secureSvcMock.Setup(s => s.EncryptAsync(sessionId, It.IsAny<Plaintext>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(expectedResponsePayload);
 
         var request = new DeliverOpaqueMessageRequest

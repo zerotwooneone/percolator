@@ -26,16 +26,51 @@ namespace Percolator.ApplicationTests.Sessions;
 [TestFixture]
 public class SessionMessageTests
 {
-    private sealed class FakePreHandshakeStore : Percolator.Application.Network.Handshake.IPreHandshakeSessionStore
+    
+    
+    private async Task<SessionRatchetMessage> EncryptViaStoreAsync(
+        IDoubleRatchetSessionStore store,
+        ActiveIdentityContext identity,
+        SessionId sessionId,
+        Plaintext plaintext)
     {
-        public Task SaveAsync(Percolator.Application.Network.Handshake.PreHandshakeRecord record, CancellationToken cancellationToken) => Task.CompletedTask;
-        public async IAsyncEnumerable<Percolator.Application.Network.Handshake.PreHandshakeRecord> EnumeratePendingAsync(int selfIdentityId, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+        if (identity.Identity is null) throw new InvalidOperationException("Identity context not loaded");
+        var state = await store.GetSessionStateAsync(sessionId, identity.Identity.SelfIdentityId).ConfigureAwait(false)
+            ?? throw new InvalidOperationException("Session state not found");
+        var sessionLogger = _loggerFactory.CreateLogger<DoubleRatchetSession>();
+        using var session = new DoubleRatchetSession(state, sessionLogger, _options);
+        var cipher = session.Encrypt(plaintext);
+        await store.SetSessionStateAsync(sessionId, session.GetState(), identity.Identity.SelfIdentityId).ConfigureAwait(false);
+        return cipher;
+    }
+
+    private async Task<Plaintext> TryInferAndDecryptViaStoreAsync(
+        IDoubleRatchetSessionStore store,
+        ActiveIdentityContext identity,
+        SessionRatchetMessage encrypted,
+        CancellationToken ct)
+    {
+        if (identity.Identity is null) throw new InvalidOperationException("Identity context not loaded");
+        var selfId = identity.Identity.SelfIdentityId;
+        var sessionIds = await store.GetAllSessionIdsAsync(selfId).ConfigureAwait(false);
+        foreach (var sid in sessionIds)
         {
-            await Task.CompletedTask;
-            yield break;
+            var state = await store.GetSessionStateAsync(sid, selfId).ConfigureAwait(false);
+            if (state is null) continue;
+            var sessionLogger = _loggerFactory.CreateLogger<DoubleRatchetSession>();
+            using var session = new DoubleRatchetSession(state, sessionLogger, _options);
+            try
+            {
+                var pt = session.Decrypt(encrypted);
+                await store.SetSessionStateAsync(sid, session.GetState(), selfId).ConfigureAwait(false);
+                return pt;
+            }
+            catch
+            {
+                // ignore and continue trying other sessions
+            }
         }
-        public Task DeleteAsync(long recordId, int selfIdentityId, CancellationToken cancellationToken) => Task.CompletedTask;
-        public Task PurgeExpiredAsync(int selfIdentityId, CancellationToken cancellationToken) => Task.CompletedTask;
+        throw new InvalidOperationException("No matching session could decrypt the message");
     }
     private IDoubleRatchetSessionStore _aliceSessionStore = null!;
     private IDoubleRatchetSessionStore _bobSessionStore = null!;
@@ -95,25 +130,19 @@ public class SessionMessageTests
         };
         
         // Create managers with real loggers for diagnostic output
-        var aliceRatchetLookup = new Moq.Mock<IRatchetKeyIndex>();
         _aliceManager = new DirectSessionManager(
             _aliceSessionStore,
             _aliceIdentity,
             _loggerFactory.CreateLogger<DirectSessionManager>(),
             _loggerFactory,
-            _options,
-            aliceRatchetLookup.Object,
-            new FakePreHandshakeStore());
+            _options);
         
-        var bobRatchetLookup = new Moq.Mock<IRatchetKeyIndex>();
         _bobManager = new DirectSessionManager(
             _bobSessionStore, 
             _bobIdentity,
             _loggerFactory.CreateLogger<DirectSessionManager>(),
             _loggerFactory,
-            _options,
-            bobRatchetLookup.Object,
-            new FakePreHandshakeStore());
+            _options);
     }
 
     [TearDown]
@@ -161,11 +190,11 @@ public class SessionMessageTests
         var originalBytes = Encoding.UTF8.GetBytes(originalMessage);
         var encryptedBytes = new byte[] { 1, 2, 3, 4, 5 }; // Dummy encrypted data
 
-        // Act: Alice encrypts a message
-        var encryptedResult = await _aliceManager.EncryptMessageAsync(conversationId, new Plaintext(originalBytes));
+        // Act: Alice encrypts a message using stored session state directly
+        var encryptedResult = await EncryptViaStoreAsync(_aliceSessionStore, _aliceIdentity, conversationId, new Plaintext(originalBytes));
 
-        // Act: Bob decrypts the message
-        var decryptedBytes = await _bobManager.ReceiveMessageAsync(conversationId, encryptedResult);
+        // Act: Bob decrypts the message by inferring the correct session using stored state
+        var decryptedBytes = await TryInferAndDecryptViaStoreAsync(_bobSessionStore, _bobIdentity, encryptedResult, CancellationToken.None);
 
         // Assert: The decrypted message matches the original
         decryptedBytes.Should().NotBeNull();

@@ -111,20 +111,21 @@ public class DhtProbeLoopbackTests : IntegrationTestBase
         // SERVER HOST (remote process)
         var serverSessionManager = new Mock<IDirectSessionManager>();
         var serverDhtRepo = new Mock<IDhtNodeRepository>();
+        var serverSecureSvc = new Mock<Percolator.Application.Services.ISecureMessagingService>();
         var serverDirectSessionRepo = new Mock<IDirectSessionRepository>();
 
         // Shared identifiers between client and server for the same direct session
         var directSessionId = new Percolator.Network.DirectSessionId(Guid.NewGuid());
         var sessionId = new SessionId(directSessionId.Value);
 
-        // Server Receive: decrypt incoming request to Dht FindNode
-        serverSessionManager
-            .Setup(s => s.ReceiveMessageAsync(It.IsAny<SessionId>(), It.IsAny<Percolator.Cryptography.SessionRatchetMessage>()))
+        // Server Receive: if used, decrypt inbound via SecureMessagingService
+        serverSecureSvc
+            .Setup(s => s.DecryptInboundAsync(It.IsAny<Percolator.Cryptography.SessionRatchetMessage>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(() =>
             {
                 var req = new FindNodeRequest { TargetPeerId = ByteString.CopyFrom(SHA256.HashData(Guid.NewGuid().ToByteArray())) };
                 var env = new InternalEnvelope { DhtEnvelope = new DhtEnvelope { FindNodeRequest = req } };
-                return new Percolator.Cryptography.Plaintext(env.ToByteArray());
+                return (new SessionId(Guid.NewGuid()), new Percolator.Cryptography.Plaintext(env.ToByteArray()));
             });
 
         // Server DHT returns nodes
@@ -136,8 +137,8 @@ public class DhtProbeLoopbackTests : IntegrationTestBase
 
         // Server Encrypt response (bypassed by fake handler, but keep stub)
         var responseCipher = new Percolator.Cryptography.SessionRatchetMessage(Guid.NewGuid().ToByteArray());
-        serverSessionManager
-            .Setup(s => s.EncryptMessageAsync(It.IsAny<SessionId>(), It.IsAny<Percolator.Cryptography.Plaintext>()))
+        serverSecureSvc
+            .Setup(s => s.EncryptAsync(It.IsAny<SessionId>(), It.IsAny<Percolator.Cryptography.Plaintext>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(responseCipher);
 
         // Server maps remote sender via direct session repository
@@ -158,6 +159,7 @@ public class DhtProbeLoopbackTests : IntegrationTestBase
             services.RemoveAll<DeliverOpaqueMessageHandler>();
             services.RemoveAll<IRequestHandler<DeliverOpaqueMessageCommand, DeliverOpaqueMessageResult>>();
             services.AddTransient<IRequestHandler<DeliverOpaqueMessageCommand, DeliverOpaqueMessageResult>, FakeDeliverOpaqueMessageHandler>();
+            services.Replace(ServiceDescriptor.Singleton<Percolator.Application.Services.ISecureMessagingService>(sp => serverSecureSvc.Object));
             services.Replace(ServiceDescriptor.Singleton<IDhtNodeRepository>(sp => serverDhtRepo.Object));
             services.Replace(ServiceDescriptor.Singleton<IConversationRepository>(sp => new Mock<IConversationRepository>().Object));
             services.Replace(ServiceDescriptor.Singleton<IPeerRoutingProfileRepository>(sp => serverProfileRepo.Object));
@@ -178,6 +180,7 @@ public class DhtProbeLoopbackTests : IntegrationTestBase
 
         // CLIENT HOST (local process running orchestrator)
         var clientSessionManager = new Mock<IDirectSessionManager>();
+        var clientSecureSvc = new Mock<Percolator.Application.Services.ISecureMessagingService>();
         var clientConversationService = new Mock<IConversationService>();
 
         clientConversationService
@@ -188,13 +191,13 @@ public class DhtProbeLoopbackTests : IntegrationTestBase
         var findReq = new FindNodeRequest { TargetPeerId = Google.Protobuf.ByteString.CopyFrom(Guid.NewGuid().ToByteArray()) };
         var clientReqEnvelope = new InternalEnvelope { DhtEnvelope = new DhtEnvelope { FindNodeRequest = findReq } };
         var clientRequestCipher = new Percolator.Cryptography.SessionRatchetMessage(clientReqEnvelope.ToByteArray());
-        clientSessionManager
-            .Setup(s => s.EncryptMessageAsync(It.IsAny<SessionId>(), It.IsAny<Percolator.Cryptography.Plaintext>()))
+        clientSecureSvc
+            .Setup(s => s.EncryptAsync(It.IsAny<SessionId>(), It.IsAny<Percolator.Cryptography.Plaintext>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(clientRequestCipher);
 
-        // Client decrypts response to internal FindNodeResponse envelope
-        clientSessionManager
-            .Setup(s => s.ReceiveMessageAsync(It.IsAny<SessionId>(), It.IsAny<Percolator.Cryptography.SessionRatchetMessage>()))
+        // Client decrypts response to internal FindNodeResponse envelope via SecureMessagingService
+        clientSecureSvc
+            .Setup(s => s.DecryptInboundAsync(It.IsAny<Percolator.Cryptography.SessionRatchetMessage>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(() =>
             {
                 var resp = new FindNodeResponse();
@@ -204,7 +207,7 @@ public class DhtProbeLoopbackTests : IntegrationTestBase
                     Address = "localhost:59001"
                 });
                 var env = new InternalEnvelope { DhtEnvelope = new DhtEnvelope { FindNodeResponse = resp } };
-                return new Percolator.Cryptography.Plaintext(env.ToByteArray());
+                return (new SessionId(Guid.NewGuid()), new Percolator.Cryptography.Plaintext(env.ToByteArray()));
             });
 
         // Build client host, wiring loopback transport to server's message service
@@ -213,6 +216,7 @@ public class DhtProbeLoopbackTests : IntegrationTestBase
             services.Replace(ServiceDescriptor.Singleton<IConversationService>(sp => clientConversationService.Object));
             services.RemoveAll<IDirectSessionManager>();
             services.AddSingleton<IDirectSessionManager>(clientSessionManager.Object);
+            services.Replace(ServiceDescriptor.Singleton<Percolator.Application.Services.ISecureMessagingService>(sp => clientSecureSvc.Object));
             // Ensure MessageService can resolve an existing direct session without hitting a real store
             var clientDirectSessionRepo = new Mock<IDirectSessionRepository>();
             clientDirectSessionRepo

@@ -9,6 +9,7 @@ using Percolator.Contracts;
 using Percolator.Identity;
 using Percolator.MessageQueue.Commands;
 using Percolator.Application.Sessions;
+using Percolator.Application.Services;
 using Percolator.Cryptography;
 using System.Collections.Generic;
 using Percolator.MessageQueue.Primitives;
@@ -31,6 +32,7 @@ namespace Percolator.Application.Network.Handshake
         private readonly ILogger<ProcessRelayedOpaquePayloadHandler> _logger;
         private readonly IMediator _mediator;
         private readonly IDirectSessionManager _sessions;
+        private readonly ISecureMessagingService _secureMessaging;
         private readonly IRatchetKeyIndex _ratchetLookup;
         private readonly ActiveIdentityContext _active;
         private readonly IMessageService _messageService;
@@ -53,6 +55,7 @@ namespace Percolator.Application.Network.Handshake
             ILogger<ProcessRelayedOpaquePayloadHandler> logger,
             IMediator mediator,
             IDirectSessionManager sessions,
+            ISecureMessagingService secureMessaging,
             IRatchetKeyIndex ratchetLookup,
             ActiveIdentityContext active,
             IMessageService messageService)
@@ -60,6 +63,7 @@ namespace Percolator.Application.Network.Handshake
             _logger = logger;
             _mediator = mediator;
             _sessions = sessions;
+            _secureMessaging = secureMessaging;
             _ratchetLookup = ratchetLookup;
             _active = active;
             _messageService = messageService;
@@ -137,28 +141,15 @@ namespace Percolator.Application.Network.Handshake
                 return ProcessRelayedOpaquePayloadResponse.Failure;
             }
 
-            // Fast path: resolve session by ratchet header key
-            var resolvedSessionId = await _ratchetLookup.TryResolveAsync(header.PreKey, cancellationToken).ConfigureAwait(false);
-
-            Plaintext? plaintext;
-            SessionId sid;
-            if (resolvedSessionId is not null)
+            // Fast/slow path via SecureMessagingService
+            var resolved = await _secureMessaging.DecryptInboundAsync(ratchetMessage, cancellationToken).ConfigureAwait(false);
+            if (resolved is null)
             {
-                sid = resolvedSessionId; // IRatchetKeyIndex returns Cryptography.SessionId (reference type)
-                plaintext = await _sessions.ReceiveMessageAsync(sid, ratchetMessage).ConfigureAwait(false);
+                // Fallback: raw payload might be a plaintext HandshakeInitiatorHello
+                return await TryHandlePlaintextHelloAsync(request.OpaquePayload, request.RelayHostPeerId, cancellationToken).ConfigureAwait(false);
             }
-            else
-            {
-                // Slow path: infer session and decrypt (may also handle initial pre-key messages)
-                var result = await _sessions.TryInferAndReceiveAsync(ratchetMessage, cancellationToken).ConfigureAwait(false);
-                if (result is null)
-                {
-                    // Fallback: raw payload might be a plaintext HandshakeInitiatorHello
-                    return await TryHandlePlaintextHelloAsync(request.OpaquePayload, request.RelayHostPeerId, cancellationToken).ConfigureAwait(false);
-                }
-                sid = result.Value.sessionId;
-                plaintext = result.Value.plaintext;
-            }
+            var sid = resolved.Value.sessionId;
+            var plaintext = resolved.Value.plaintext;
 
             if (plaintext is null)
             {

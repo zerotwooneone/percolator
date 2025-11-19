@@ -8,6 +8,7 @@ using Microsoft.Extensions.Logging;
 using Percolator.Application.Network;
 using Percolator.Application.Network.Handshake;
 using Percolator.Application.Sessions;
+using Percolator.Application.Services;
 using Percolator.Contracts;
 using Percolator.Identity;
 using Percolator.Identity.Model;
@@ -21,6 +22,7 @@ namespace Percolator.Application.Cli;
         private readonly ILogger<InitiateHandshakeViaHostHandler> _logger;
         private readonly IConversationService _conversationService;
         private readonly IDirectSessionManager _sessionManager;
+        private readonly ISecureMessagingService _secureMessaging;
         private readonly IMessageTransportService _transport;
         private readonly IPeerIdentityRepository _peerIdentityRepository;
         private readonly IPeerPublicSigningKeyStore _peerPublicSigningKeyStore;
@@ -31,6 +33,7 @@ namespace Percolator.Application.Cli;
             ILogger<InitiateHandshakeViaHostHandler> logger,
             IConversationService conversationService,
             IDirectSessionManager sessionManager,
+            ISecureMessagingService secureMessaging,
             IMessageTransportService transport,
             IPeerIdentityRepository peerIdentityRepository,
             IPeerPublicSigningKeyStore peerPublicSigningKeyStore,
@@ -40,6 +43,7 @@ namespace Percolator.Application.Cli;
             _logger = logger;
             _conversationService = conversationService;
             _sessionManager = sessionManager;
+            _secureMessaging = secureMessaging;
             _transport = transport;
             _peerIdentityRepository = peerIdentityRepository;
             _peerPublicSigningKeyStore = peerPublicSigningKeyStore;
@@ -104,7 +108,7 @@ namespace Percolator.Application.Cli;
 
         var plaintext = new Plaintext(getReq.ToByteArray());
         var cryptoHostSessionId = new SessionId(hostSession.Value);
-        var ratchetMessage = await _sessionManager.EncryptMessageAsync(cryptoHostSessionId, plaintext).ConfigureAwait(false);
+        var ratchetMessage = await _secureMessaging.EncryptAsync(cryptoHostSessionId, plaintext, cancellationToken).ConfigureAwait(false);
         _logger.LogInformation("Requesting pre-key bundle for PKH via Host {PeerId}", hostPeer.Id);
         var deliverResp = await _transport.SendMessageAsync(hostPeer.Id, hostSession, ratchetMessage, cancellationToken).ConfigureAwait(false);
 
@@ -116,8 +120,9 @@ namespace Percolator.Application.Cli;
         }
 
         var respCipher = new SessionRatchetMessage(deliverResp.ResponsePayload.ResponsePayload.ToByteArray());
-        var respPlain = await _sessionManager.ReceiveMessageAsync(cryptoHostSessionId, respCipher).ConfigureAwait(false)
+        var resolved = await _secureMessaging.DecryptInboundAsync(respCipher, cancellationToken).ConfigureAwait(false)
             ?? throw new InvalidOperationException("Could not decrypt GetPreKeyBundle response payload.");
+        var respPlain = resolved.plaintext;
 
         var internalResp = InternalEnvelope.Parser.ParseFrom(respPlain.Value);
         if (internalResp.ApplicationPayloadCase != InternalEnvelope.ApplicationPayloadOneofCase.GetPreKeyBundleResponse)

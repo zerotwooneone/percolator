@@ -5,6 +5,7 @@ using Google.Protobuf;
 using MediatR;
 using Microsoft.Extensions.Logging;
 using Percolator.Application.Sessions;
+using Percolator.Application.Services;
 using Percolator.Application.Identity;
 using Percolator.Contracts;
 using Percolator.Cryptography;
@@ -26,6 +27,7 @@ namespace Percolator.Application.Network
         private readonly RelayOrchestrator _relayOrchestrator;
         private readonly IPeerRoutingProfileRepository _profileRepository;
         private readonly IProfileRoutePlanner _routePlanner;
+        private readonly ISecureMessagingService _secureMessaging;
         // Centralized allowlist to avoid drift with documentation and tests.
         private static readonly HashSet<InternalEnvelope.ApplicationPayloadOneofCase> AllowedCases = new()
         {
@@ -49,7 +51,8 @@ namespace Percolator.Application.Network
             IRatchetKeyIndex ratchetLookup,
             RelayOrchestrator relayOrchestrator,
             IPeerRoutingProfileRepository profileRepository,
-            IProfileRoutePlanner routePlanner)
+            IProfileRoutePlanner routePlanner,
+            ISecureMessagingService secureMessaging)
         {
             _logger = logger;
             _sessionManager = sessionManager;
@@ -60,6 +63,7 @@ namespace Percolator.Application.Network
             _relayOrchestrator = relayOrchestrator;
             _profileRepository = profileRepository;
             _routePlanner = routePlanner;
+            _secureMessaging = secureMessaging;
         }
 
         private async Task<InternalEnvelope?> HandlePrekeyEnvelopeAsync(PrekeyEnvelope prekeyEnvelope,
@@ -135,27 +139,11 @@ namespace Percolator.Application.Network
                 var sessionRatchetMessage = new SessionRatchetMessage(request.PayloadBytes);
                 var header = sessionRatchetMessage.GetHeader();
                 var ratchetKey = header.PreKey;
-                var resolvedSessionId = await _ratchetLookup.TryResolveAsync(ratchetKey, cancellationToken).ConfigureAwait(false);
-                Plaintext? plaintext;
-                SessionId inferredSessionId;
-                DirectSessionId nonNullDirectSessionId;
-                if (resolvedSessionId is not null)
-                {
-                    inferredSessionId = resolvedSessionId;
-                    nonNullDirectSessionId = new DirectSessionId(inferredSessionId.Value);
-                    _logger.LogDebug("Fast-path lookup hit for ratchet header key; inferred session {SessionId}", inferredSessionId);
-                    plaintext = await _sessionManager.ReceiveMessageAsync(inferredSessionId, sessionRatchetMessage).ConfigureAwait(false);
-                }
-                else
-                {
-                    _logger.LogWarning("Fast-path lookup MISS for ratchet header key; attempting slow-path inference");
-                    var inferResult = await _sessionManager.TryInferAndReceiveAsync(sessionRatchetMessage, cancellationToken).ConfigureAwait(false)
-                        ?? throw new InvalidOperationException("Unable to resolve session by ratchet header key or slow-path inference");
-                    inferredSessionId = inferResult.sessionId;
-                    plaintext = inferResult.plaintext;
-                    _logger.LogInformation("Slow-path inference SUCCEEDED; inferred session {SessionId}", inferredSessionId);
-                    nonNullDirectSessionId = new DirectSessionId(inferredSessionId.Value);
-                }
+                var resolved = await _secureMessaging.DecryptInboundAsync(sessionRatchetMessage, cancellationToken).ConfigureAwait(false)
+                    ?? throw new InvalidOperationException("Unable to resolve and decrypt inbound ratchet message");
+                var inferredSessionId = resolved.sessionId;
+                var plaintext = resolved.plaintext;
+                var nonNullDirectSessionId = new DirectSessionId(inferredSessionId.Value);
                 if (plaintext is null)
                 {
                     _logger.LogWarning("Decryption resulted in null plaintext for session {SessionId}. This may be a skipped message.", inferredSessionId);
@@ -217,7 +205,7 @@ namespace Percolator.Application.Network
                     };
                     // Encrypt ack bytes directly as RPC response payload
                     var ackPlain = new Plaintext(ack.ToByteArray());
-                    var ackCipher = await _sessionManager.EncryptMessageAsync(inferredSessionId, ackPlain).ConfigureAwait(false);
+                    var ackCipher = await _secureMessaging.EncryptAsync(inferredSessionId, ackPlain, cancellationToken).ConfigureAwait(false);
                     var ackBytes = ackCipher.Value;
                     return new DeliverOpaqueMessageResult { ResponsePayloadBytes = ackBytes };
                 }
@@ -256,7 +244,7 @@ namespace Percolator.Application.Network
         private async Task<byte[]> EncryptResponseEnvelope(SessionId sessionId, InternalEnvelope internalEnvelope)
         {
             var plaintext = new Plaintext(internalEnvelope.ToByteArray());
-            var ratchetMessage = await _sessionManager.EncryptMessageAsync(sessionId, plaintext).ConfigureAwait(false);
+            var ratchetMessage = await _secureMessaging.EncryptAsync(sessionId, plaintext).ConfigureAwait(false);
             return ratchetMessage.Value;
         }
     }

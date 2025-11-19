@@ -150,26 +150,15 @@ public class ConversationServiceTests
                 It.IsAny<ECDiffieHellman>()))
             .Returns(handshakeResponse);
 
-        // Expectation 2: EstablishSessionAsResponderAsync must be called with remotePreKey = InitiatorEphemeralKey (from response)
+        // Expectation 2: EstablishSessionAsResponderAsync        // Establish as responder using non-decrypting overload with provided session id
         _mockDirectSessionManager
             .Setup(m => m.EstablishSessionAsResponderAsync(
-                It.IsAny<SessionRatchetMessage>(),
-                It.IsAny<Func<Plaintext, Percolator.Cryptography.SessionId>>(),
+                It.IsAny<Percolator.Cryptography.SessionId>(),
                 It.IsAny<RatchetIdentityKey>(),
                 It.Is<RatchetEphemeralKey>(pk => pk.Value.SequenceEqual(initiatorEphemeralSpki)),
                 It.IsAny<ECDiffieHellman>(),
                 It.Is<CryptoSharedSecret>(s => s.Value.SequenceEqual(sharedSecret.Value))))
-            .ReturnsAsync((SessionRatchetMessage msg,
-                           Func<Plaintext, Percolator.Cryptography.SessionId> getSessionId,
-                           RatchetIdentityKey _,
-                           RatchetEphemeralKey __,
-                           ECDiffieHellman ___,
-                           CryptoSharedSecret ____) =>
-            {
-                var pt = new Plaintext(responsePayload.ToByteArray());
-                var sid = getSessionId(pt);
-                return (sid, pt);
-            });
+            .Returns(Task.CompletedTask);
 
         // One-time key provider: return a key to complete handshake
         using var oneTimeKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
@@ -266,27 +255,15 @@ public class ConversationServiceTests
                 It.IsAny<ECDiffieHellman>()))
             .Returns(Task.CompletedTask);
 
-        // New overload: Establish session as responder by decrypting first message (first test)
+        // Establish as responder using non-decrypting overload
         _mockDirectSessionManager
             .Setup(m => m.EstablishSessionAsResponderAsync(
-                It.IsAny<SessionRatchetMessage>(),
-                It.IsAny<Func<Plaintext, Percolator.Cryptography.SessionId>>(),
+                It.IsAny<Percolator.Cryptography.SessionId>(),
                 It.IsAny<RatchetIdentityKey>(),
                 It.IsAny<RatchetEphemeralKey>(),
                 It.IsAny<ECDiffieHellman>(),
                 It.IsAny<CryptoSharedSecret>()))
-            .ReturnsAsync((SessionRatchetMessage msg,
-                            Func<Plaintext, Percolator.Cryptography.SessionId> getSessionId,
-                            RatchetIdentityKey _,
-                            RatchetEphemeralKey __,
-                            ECDiffieHellman ___,
-                            CryptoSharedSecret ____) 
-                =>
-                {
-                    var pt = new Plaintext(responsePayload.ToByteArray());
-                    var sid = getSessionId(pt);
-                    return (sid, pt);
-                });
+            .Returns(Task.CompletedTask);
 
         // Act
         var result = await _service.CreateNewDirectSessionAsync(endpoint, peer);
@@ -294,8 +271,7 @@ public class ConversationServiceTests
         // Assert
         Assert.That(result, Is.Not.EqualTo(default(DirectSessionId)));
         _mockDirectSessionManager.Verify(m => m.EstablishSessionAsResponderAsync(
-            It.IsAny<SessionRatchetMessage>(),
-            It.IsAny<Func<Plaintext, Percolator.Cryptography.SessionId>>(),
+            It.IsAny<Percolator.Cryptography.SessionId>(),
             It.IsAny<RatchetIdentityKey>(),
             It.IsAny<RatchetEphemeralKey>(),
             It.IsAny<ECDiffieHellman>(),
@@ -399,26 +375,14 @@ public class ConversationServiceTests
                 It.IsAny<ECDiffieHellman>()))
             .Returns(Task.CompletedTask);
         
-        // New overload: Establish session as responder by decrypting first message (second test)
         _mockDirectSessionManager
             .Setup(m => m.EstablishSessionAsResponderAsync(
-                It.IsAny<SessionRatchetMessage>(),
-                It.IsAny<Func<Plaintext, Percolator.Cryptography.SessionId>>(),
+                It.IsAny<Percolator.Cryptography.SessionId>(),
                 It.IsAny<RatchetIdentityKey>(),
                 It.IsAny<RatchetEphemeralKey>(),
                 It.IsAny<ECDiffieHellman>(),
-                It.IsAny<CryptoSharedSecret>()))
-            .ReturnsAsync((SessionRatchetMessage msg,
-                            Func<Plaintext, Percolator.Cryptography.SessionId> getSessionId,
-                            RatchetIdentityKey _,
-                            RatchetEphemeralKey __,
-                            ECDiffieHellman ___,
-                            CryptoSharedSecret ____) =>
-            {
-                var pt = new Plaintext(responsePayload2.ToByteArray());
-                var sid = getSessionId(pt);
-                return (sid, pt);
-            });
+                It.Is<CryptoSharedSecret>(s => s.Value.SequenceEqual(handshakeResponse2.SharedSecret.Value))))
+            .Returns(Task.CompletedTask);
         
         // Act
         var result = await _service.CreateNewDirectSessionAsync(endpoint, peer);
@@ -432,8 +396,7 @@ public class ConversationServiceTests
         
         // Verify session was established
         _mockDirectSessionManager.Verify(m => m.EstablishSessionAsResponderAsync(
-            It.IsAny<SessionRatchetMessage>(),
-            It.IsAny<Func<Plaintext, Percolator.Cryptography.SessionId>>(),
+            It.IsAny<Percolator.Cryptography.SessionId>(),
             It.IsAny<RatchetIdentityKey>(), 
             It.IsAny<RatchetEphemeralKey>(), 
             It.IsAny<ECDiffieHellman>(),

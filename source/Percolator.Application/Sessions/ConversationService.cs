@@ -191,23 +191,19 @@ namespace Percolator.Application.Sessions
                 }
                 await _profileRepository.UpsertAsync(profile).ConfigureAwait(false);
 
-                SessionId GetSessionId(Plaintext pt)
-                {
-                    var responderPayload = EstablishDirectSessionResponse.Types.ResponsePayload.Parser.ParseFrom(pt.Value);
-                    var directSessionId = new DirectSessionId(Guid.Parse(responderPayload.SessionId));
-                    return new SessionId(directSessionId.Value);
-                }
-                
-                var (cryptoSessionId, plaintext) = await _sessionManager.EstablishSessionAsResponderAsync(
-                    firstMessage,
-                    GetSessionId,
+                // Determine or allocate a DirectSessionId mapping for this peer
+                var existingDirectSession = await _directSessionRepository.GetByRemotePeerIdAsync(netPeerId, _activeIdentityContext.Identity.SelfIdentityId).ConfigureAwait(false);
+                var directSessionId = existingDirectSession?.SessionId ?? new DirectSessionId(Guid.NewGuid());
+
+                // Establish responder session using the non-decrypting overload with our mapped directSessionId
+                var cryptoSessionId = new SessionId(directSessionId.Value);
+                await _sessionManager.EstablishSessionAsResponderAsync(
+                    cryptoSessionId,
                     new RatchetIdentityKey(response.InitiatorIdentityKey.ToByteArray()),
                     new RatchetEphemeralKey(response.InitiatorEphemeralKey.ToByteArray()),
                     handshakeResult.ResponderPrivateKeyUsed,
                     new SharedSecret(handshakeResult.SharedSecret.Value)
                 ).ConfigureAwait(false);
-                
-                var directSessionId = new DirectSessionId(cryptoSessionId.Value);
                 // Persist mapping from conversation/session to remote peer for future routing
                 await _directSessionRepository.UpsertAsync(new NetworkPeerId(remotePeer.Id.Value), directSessionId, _activeIdentityContext.Identity.SelfIdentityId).ConfigureAwait(false);
 

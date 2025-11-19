@@ -8,6 +8,7 @@ using Microsoft.Extensions.Logging;
 using Percolator.Application.Identity;
 using Percolator.Application.KeyExchange;
 using Percolator.Application.Sessions;
+using Percolator.Application.Services;
 using Percolator.Contracts;
 using Percolator.Cryptography;
 using Percolator.Identity;
@@ -39,6 +40,7 @@ namespace Percolator.Application.Network.Handshake
         private readonly ISelfPreKeyBundleRepository _selfPreKeyRepo;
         private readonly IDirectSessionRepository _directRepo;
         private readonly IDirectSessionManager _sessionManager;
+        private readonly ISecureMessagingService _secureMessaging;
         private readonly ActiveIdentityContext _active;
         private readonly IPeerIdentityRepository _peerIdentityRepository;
         private readonly IPeerRoutingProfileRepository _profileRepository;
@@ -50,6 +52,7 @@ namespace Percolator.Application.Network.Handshake
             ISelfPreKeyBundleRepository selfPreKeyRepo,
             IDirectSessionRepository directRepo,
             IDirectSessionManager sessionManager,
+            ISecureMessagingService secureMessaging,
             ActiveIdentityContext active,
             IPeerIdentityRepository peerIdentityRepository,
             IPeerRoutingProfileRepository profileRepository,
@@ -61,6 +64,7 @@ namespace Percolator.Application.Network.Handshake
             _selfPreKeyRepo = selfPreKeyRepo;
             _directRepo = directRepo;
             _sessionManager = sessionManager;
+            _secureMessaging = secureMessaging;
             _active = active;
             _peerIdentityRepository = peerIdentityRepository;
             _profileRepository = profileRepository;
@@ -172,7 +176,8 @@ namespace Percolator.Application.Network.Handshake
             if (request.EncryptedPayload is not null && request.EncryptedPayload.Length > 0)
             {
                 var initPayload = new SessionRatchetMessage(request.EncryptedPayload);
-                var initPt = await _sessionManager.ReceiveMessageAsync(new SessionId(directSessionId.Value), initPayload).ConfigureAwait(false);
+                var resolved = await _secureMessaging.DecryptInboundAsync(initPayload, cancellationToken).ConfigureAwait(false);
+                var initPt = resolved?.plaintext;
                 if (initPt is not null)
                 {
                     var initInner = InternalEnvelope.Parser.ParseFrom(initPt.Value);
@@ -189,7 +194,7 @@ namespace Percolator.Application.Network.Handshake
                 DirectSessionId = directSessionId.Value.ToString()
             };
             var responderPt = new Plaintext(responderInner.ToByteArray());
-            var rm = await _sessionManager.EncryptMessageAsync(new SessionId(directSessionId.Value), responderPt).ConfigureAwait(false);
+            var rm = await _secureMessaging.EncryptAsync(new SessionId(directSessionId.Value), responderPt, cancellationToken).ConfigureAwait(false);
 
             return new HandleHandshakeInitiatorHelloResult(resolvedRemotePeerId, rm);
         }

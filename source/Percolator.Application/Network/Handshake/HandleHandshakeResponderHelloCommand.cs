@@ -21,6 +21,7 @@ namespace Percolator.Application.Network.Handshake
     {
         private readonly ILogger<HandleHandshakeResponderHelloHandler> _logger;
         private readonly IDirectSessionManager _sessions;
+        private readonly Percolator.Application.Services.ISecureMessagingService _secure;
         private readonly ActiveIdentityContext _active;
         private readonly IRatchetKeyIndex _ratchetLookup;
         private readonly IPreHandshakeSessionStore _preHandshakeStore;
@@ -28,12 +29,14 @@ namespace Percolator.Application.Network.Handshake
         public HandleHandshakeResponderHelloHandler(
             ILogger<HandleHandshakeResponderHelloHandler> logger,
             IDirectSessionManager sessions,
+            Percolator.Application.Services.ISecureMessagingService secure,
             ActiveIdentityContext active,
             IRatchetKeyIndex ratchetLookup,
             IPreHandshakeSessionStore preHandshakeStore)
         {
             _logger = logger;
             _sessions = sessions;
+            _secure = secure;
             _active = active;
             _ratchetLookup = ratchetLookup;
             _preHandshakeStore = preHandshakeStore;
@@ -55,22 +58,18 @@ namespace Percolator.Application.Network.Handshake
             Percolator.Network.DirectSessionId directSessionId;
             if (sessionId is null)
             {
-                // Delegate slow-path finalize to the session manager. It will persist the session, upsert the ratchet index,
-                // and delete the matching prehandshake record if found.
-                var (sid, plaintext) = await _sessions.CompleteHandshakeAsync(
-                    ratchetMessage,
-                    pt =>
-                    {
-                        var inner = ResponderInnerHello.Parser.ParseFrom(pt.Value);
-                        if (!inner.HasVersion || inner.Version != 1)
-                            throw new InvalidOperationException("Responder inner payload version invalid.");
-                        if (!inner.HasDirectSessionId || string.IsNullOrWhiteSpace(inner.DirectSessionId))
-                            throw new InvalidOperationException("Responder inner payload missing direct_session_id.");
-                        return new SessionId(Guid.Parse(inner.DirectSessionId));
-                    },
-                    cancellationToken).ConfigureAwait(false);
+                var decrypt = await _secure.DecryptInboundAsync(ratchetMessage, cancellationToken).ConfigureAwait(false)
+                    ?? throw new InvalidOperationException("Unable to decrypt responder hello");
+                var plaintext = decrypt.plaintext;
+                var inner = ResponderInnerHello.Parser.ParseFrom(plaintext.Value);
+                if (!inner.HasVersion || inner.Version != 1)
+                    throw new InvalidOperationException("Responder inner payload version invalid.");
+                if (!inner.HasDirectSessionId || string.IsNullOrWhiteSpace(inner.DirectSessionId))
+                    throw new InvalidOperationException("Responder inner payload missing direct_session_id.");
+                var sid = new SessionId(Guid.Parse(inner.DirectSessionId));
+                // Session establishment will be finalized by higher-level handshake orchestration using pre-handshake state.
                 directSessionId = new Percolator.Network.DirectSessionId(sid.Value);
-                _logger.LogInformation("Responder hello slow-path succeeded for session {SessionId}", sid.Value);
+                _logger.LogInformation("Responder hello slow-path parsed direct_session_id {SessionId}", sid.Value);
             }
             else
             {

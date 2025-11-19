@@ -8,6 +8,7 @@ using Percolator.Application.Identity;
 using Percolator.Application.KeyExchange;
 using Percolator.Application.Network.Handshake;
 using Percolator.Application.Sessions;
+using Percolator.Application.Services;
 using Percolator.Contracts;
 using Percolator.Cryptography;
 using Percolator.Identity;
@@ -28,6 +29,7 @@ public class HandleHandshakeInitiatorHelloCommandTests
         var selfPre = new Mock<ISelfPreKeyBundleRepository>(MockBehavior.Strict);
         var directRepo = new Mock<IDirectSessionRepository>(MockBehavior.Strict);
         var sessionMgr = new Mock<IDirectSessionManager>(MockBehavior.Strict);
+        var secure = new Mock<ISecureMessagingService>(MockBehavior.Strict);
         var active = new ActiveIdentityContext { Identity = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "me", null) { SelfIdentityId = 1 } };
         var peerIdentityRepo = new Mock<Percolator.Identity.IPeerIdentityRepository>(MockBehavior.Strict);
         var profileRepo = new Mock<IPeerRoutingProfileRepository>(MockBehavior.Loose);
@@ -53,8 +55,8 @@ public class HandleHandshakeInitiatorHelloCommandTests
         // Session establishment
         sessionMgr.Setup(m => m.EstablishSessionAsResponderAsync(It.IsAny<SessionId>(), It.IsAny<RatchetIdentityKey>(), It.IsAny<RatchetEphemeralKey>(), It.IsAny<ECDiffieHellman>(), It.IsAny<SharedSecret>()))
             .Returns(Task.CompletedTask);
-        // Handler encrypts responder inner hello
-        sessionMgr.Setup(m => m.EncryptMessageAsync(It.IsAny<SessionId>(), It.IsAny<Plaintext>()))
+        // Handler encrypts responder inner hello via SecureMessagingService
+        secure.Setup(s => s.EncryptAsync(It.IsAny<SessionId>(), It.IsAny<Plaintext>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SessionRatchetMessage(new byte[] { 0x01 }));
 
         // Persist identity artifacts via identity repository
@@ -69,7 +71,7 @@ public class HandleHandshakeInitiatorHelloCommandTests
         PeerRoutingProfile? saved = null;
         profileRepo.Setup(r => r.UpsertAsync(It.IsAny<PeerRoutingProfile>(), It.IsAny<CancellationToken>())).Callback<PeerRoutingProfile, CancellationToken>((p, _) => saved = p).Returns(Task.CompletedTask);
 
-        var sut = new HandleHandshakeInitiatorHelloHandler(logger, x3dh.Object, pkhStore.Object, selfPre.Object, directRepo.Object, sessionMgr.Object, active, peerIdentityRepo.Object, profileRepo.Object, mediator.Object);
+        var sut = new HandleHandshakeInitiatorHelloHandler(logger, x3dh.Object, pkhStore.Object, selfPre.Object, directRepo.Object, sessionMgr.Object, secure.Object, active, peerIdentityRepo.Object, profileRepo.Object, mediator.Object);
         var cmd = new HandleHandshakeInitiatorHelloCommand(spki, eph, spkId, null, null, null, RelayHostPeerId: relayHost);
         _ = await sut.Handle(cmd, CancellationToken.None);
 
@@ -86,6 +88,7 @@ public class HandleHandshakeInitiatorHelloCommandTests
         var selfPre = new Mock<ISelfPreKeyBundleRepository>(MockBehavior.Strict);
         var directRepo = new Mock<IDirectSessionRepository>(MockBehavior.Strict);
         var sessionMgr = new Mock<IDirectSessionManager>(MockBehavior.Strict);
+        var secure = new Mock<ISecureMessagingService>(MockBehavior.Strict);
         var active = new ActiveIdentityContext { Identity = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "me", null) { SelfIdentityId = 1 } };
         var peerIdentityRepo = new Mock<Percolator.Identity.IPeerIdentityRepository>(MockBehavior.Strict);
         var profileRepo = new Mock<IPeerRoutingProfileRepository>(MockBehavior.Loose);
@@ -104,7 +107,7 @@ public class HandleHandshakeInitiatorHelloCommandTests
             .Returns(new HandshakeResponse(new SharedSecret(new byte[]{2}), bundle3, ecdh3));
         sessionMgr.Setup(m => m.EstablishSessionAsResponderAsync(It.IsAny<SessionId>(), It.IsAny<RatchetIdentityKey>(), It.IsAny<RatchetEphemeralKey>(), It.IsAny<ECDiffieHellman>(), It.IsAny<SharedSecret>()))
             .Returns(Task.CompletedTask);
-        sessionMgr.Setup(m => m.EncryptMessageAsync(It.IsAny<SessionId>(), It.IsAny<Plaintext>()))
+        secure.Setup(s => s.EncryptAsync(It.IsAny<SessionId>(), It.IsAny<Plaintext>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SessionRatchetMessage(new byte[] { 0x02 }));
         peerIdentityRepo.Setup(r => r.SaveAsync(It.IsAny<Percolator.Identity.Model.PeerIdentity>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
@@ -120,7 +123,7 @@ public class HandleHandshakeInitiatorHelloCommandTests
         peerIdentityRepo.Setup(r => r.GetByIdAsync(It.IsAny<Percolator.Identity.PeerId>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Percolator.Identity.Model.PeerIdentity?)null);
 
-        var sut = new HandleHandshakeInitiatorHelloHandler(logger, x3dh.Object, pkhStore.Object, selfPre.Object, directRepo.Object, sessionMgr.Object, active, peerIdentityRepo.Object, profileRepo.Object, mediator.Object);
+        var sut = new HandleHandshakeInitiatorHelloHandler(logger, x3dh.Object, pkhStore.Object, selfPre.Object, directRepo.Object, sessionMgr.Object, secure.Object, active, peerIdentityRepo.Object, profileRepo.Object, mediator.Object);
         var cmd = new HandleHandshakeInitiatorHelloCommand(spki, eph, spkId, null, null, null, RelayHostPeerId: relayHost);
         _ = await sut.Handle(cmd, CancellationToken.None);
 

@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using Percolator.Application.Services;
 
 namespace Percolator.Application.Sessions;
 
@@ -8,6 +9,8 @@ public static class ServiceCollectionExtensions
     {
         services.AddScoped<IDirectSessionManager, DirectSessionManager>();
         services.AddScoped<IConversationService, ConversationService>();
+        services.AddScoped<IHandshakeService, HandshakeService>();
+        services.AddScoped<ISecureMessagingService, SecureMessagingService>();
 
         return services;
     }

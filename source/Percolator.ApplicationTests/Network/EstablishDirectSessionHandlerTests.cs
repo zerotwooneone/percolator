@@ -43,6 +43,7 @@ namespace Percolator.ApplicationTests.Network
             var x3dhOrchestrator = new Mock<IX3DHOrchestrator>(MockBehavior.Strict);
             var sessionManager = new Mock<IDirectSessionManager>(MockBehavior.Strict);
             var peerIdentityRepo = new Mock<Percolator.Identity.IPeerIdentityRepository>(MockBehavior.Strict);
+            var secure = new Mock<Percolator.Application.Services.ISecureMessagingService>(MockBehavior.Strict);
             var x3dhManager = new Mock<IX3DHManager>(MockBehavior.Strict);
             var directRepo = new Mock<IDirectSessionRepository>(MockBehavior.Strict);
             var pkhStore = new Mock<IPeerPublicSigningKeyStore>(MockBehavior.Strict);
@@ -95,10 +96,11 @@ namespace Percolator.ApplicationTests.Network
                 It.IsAny<SharedSecret>(),
                 It.IsAny<ECDiffieHellman>())).Returns(Task.CompletedTask);
 
-            // Mocks: encrypt initial responder payload into a ratchet message
-            sessionManager.Setup(s => s.EncryptMessageAsync(
+            // Mocks: encrypt initial responder payload into a ratchet message via secure service
+            secure.Setup(s => s.EncryptAsync(
                     It.IsAny<SessionId>(),
-                    It.IsAny<Plaintext>()))
+                    It.IsAny<Plaintext>(),
+                    It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new SessionRatchetMessage(RandomNumberGenerator.GetBytes(64)));
 
 
@@ -129,6 +131,7 @@ namespace Percolator.ApplicationTests.Network
                 active,
                 x3dhOrchestrator.Object,
                 sessionManager.Object,
+                secure.Object,
                 peerIdentityRepo.Object,
                 x3dhManager.Object,
                 directRepo.Object,

@@ -28,52 +28,12 @@ public interface IDirectSessionManager
         SharedSecret sharedSecret);
 
     /// <summary>
-    /// Establishes a new Double Ratchet session as the responder by decrypting the responder's first message.
-    /// The method extracts the SessionId from the decrypted plaintext using the provided selector, persists the session state,
-    /// upserts the ratchet index mapping, and returns the resolved SessionId together with the plaintext.
+    /// Finalizes an initiator session using the Initial Root Key and the responder's first header ratchet key.
+    /// Responder assigns the session id; initiator must not derive it.
     /// </summary>
-    Task<(Percolator.Cryptography.SessionId sessionId, Plaintext plaintext)> EstablishSessionAsResponderAsync(
-        SessionRatchetMessage firstMessage,
-        Func<Plaintext, Percolator.Cryptography.SessionId> getSessionId,
-        RatchetIdentityKey remoteIdentityKey,
-        RatchetEphemeralKey remotePreKey,
-        ECDiffieHellman privateKeyUsedInHandshake,
-        SharedSecret sharedSecret);
-
-    /// <summary>
-    /// Receives and decrypts an incoming message.
-    /// </summary>
-    Task<Plaintext?> ReceiveMessageAsync(Percolator.Cryptography.SessionId conversationId, SessionRatchetMessage encryptedMessage);
-
-    /// <summary>
-    /// Encrypts an outgoing message.
-    /// </summary>
-    Task<SessionRatchetMessage> EncryptMessageAsync(Percolator.Cryptography.SessionId sessionId, Plaintext plaintext);
-
-    /// <summary>
-    /// Slow path: attempts to infer the correct session by trial decrypt when fast header-key lookup misses.
-    /// Returns the matched session id and plaintext if a match is found; otherwise null.
-    /// </summary>
-    Task<(Percolator.Cryptography.SessionId sessionId, Plaintext? plaintext)?> TryInferAndReceiveAsync(SessionRatchetMessage encryptedMessage, CancellationToken cancellationToken);
-    
-    /// <summary>
-    /// Completes a pre-handshake session establishment by decrypting the responder hello and extracting the session id from the plaintext.
-    /// The session is created, stored, and the matched prehandshake record is removed.
-    /// </summary>
-    Task<(Percolator.Cryptography.SessionId sessionId, Plaintext plaintext)> CompleteHandshakeAsync(SessionRatchetMessage encryptedMessage, Func<Plaintext, SessionId> getSessionId, CancellationToken cancellationToken);
-
-    /// <summary>
-    /// Persists an initiator intent (pre-handshake Pending record) without a session id.
-    /// Stores minimal material required to complete handshake on responder hello.
-    /// </summary>
-    Task<SessionRatchetMessage?> EstablishSessionAsInitiatorAsync(
-        byte[] recipientPublicKeyHash,
-        Guid signedPreKeyId,
-        Guid? oneTimePreKeyId,
-        RatchetIdentityKey remoteIdentityKey,
-        RatchetEphemeralKey remotePreKey,
-        SharedSecret sharedSecret,
-        ECDiffieHellman initiatorEphemeral,
-        Plaintext? initialPlaintext,
-        CancellationToken cancellationToken);
+    Task FinalizeAsInitiatorAsync(
+        SessionId sessionId,
+        RatchetIdentityKey responderIdentityKey,
+        SharedSecret initialRootKey,
+        RatchetEphemeralKey responderPublicRatchetKey);
 }

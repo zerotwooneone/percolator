@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using Percolator.Application.Identity;
 using Percolator.Application.Network;
 using Percolator.Application.Sessions;
+using Percolator.Application.Services;
 using Percolator.Chat.ValueObjects;
 using Percolator.Contracts;
 using Percolator.Cryptography;
@@ -18,6 +19,7 @@ public class DhtProbeHandler : IRequestHandler<DhtProbeCommand, FindNodeResponse
 {
     private readonly IConversationService _conversationService;
     private readonly IDirectSessionManager _sessionManager;
+    private readonly ISecureMessagingService _secureMessaging;
     private readonly IMessageService _messageService;
     private readonly ActiveIdentityContext _activeIdentityContext;
     private readonly ILogger<DhtProbeHandler> _logger;
@@ -25,6 +27,7 @@ public class DhtProbeHandler : IRequestHandler<DhtProbeCommand, FindNodeResponse
     public DhtProbeHandler(
         IConversationService conversationService,
         IDirectSessionManager sessionManager,
+        ISecureMessagingService secureMessaging,
         IMessageService messageService,
         ActiveIdentityContext activeIdentityContext,
         ILogger<DhtProbeHandler> logger,
@@ -32,6 +35,7 @@ public class DhtProbeHandler : IRequestHandler<DhtProbeCommand, FindNodeResponse
     {
         _conversationService = conversationService;
         _sessionManager = sessionManager;
+        _secureMessaging = secureMessaging;
         _messageService = messageService;
         _activeIdentityContext = activeIdentityContext;
         _logger = logger;
@@ -84,7 +88,8 @@ public class DhtProbeHandler : IRequestHandler<DhtProbeCommand, FindNodeResponse
         }
 
         var respRatchet = new SessionRatchetMessage(response.ResponsePayload.ResponsePayload.ToByteArray());
-        var plaintext = await _sessionManager.ReceiveMessageAsync(new SessionId(directSessionId.Value), respRatchet).ConfigureAwait(false);
+        var resolved = await _secureMessaging.DecryptInboundAsync(respRatchet, cancellationToken).ConfigureAwait(false);
+        var plaintext = resolved?.plaintext;
         if (plaintext is null)
         {
             _logger.LogWarning("Could not decrypt FindNode response payload.");

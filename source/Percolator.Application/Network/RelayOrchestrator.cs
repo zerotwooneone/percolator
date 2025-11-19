@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using Google.Protobuf;
 using Microsoft.Extensions.Logging;
 using Percolator.Application.Sessions;
+using Percolator.Application.Services;
 using Percolator.Application.Identity;
 using Percolator.Contracts;
 using Percolator.Cryptography;
@@ -24,6 +25,7 @@ public class RelayOrchestrator
     private readonly IMessageQueueRepository _queue;
     private readonly IDirectSessionRepository _directSessions;
     private readonly IDirectSessionManager _sessionManager;
+    private readonly ISecureMessagingService _secureMessaging;
     private readonly IMessageTransportService _transport;
     private readonly ActiveIdentityContext _active;
 
@@ -32,6 +34,7 @@ public class RelayOrchestrator
         IMessageQueueRepository queue,
         IDirectSessionRepository directSessions,
         IDirectSessionManager sessionManager,
+        ISecureMessagingService secureMessaging,
         IMessageTransportService transport,
         ActiveIdentityContext active)
     {
@@ -39,6 +42,7 @@ public class RelayOrchestrator
         _queue = queue;
         _directSessions = directSessions;
         _sessionManager = sessionManager;
+        _secureMessaging = secureMessaging;
         _transport = transport;
         _active = active;
     }
@@ -84,7 +88,7 @@ public class RelayOrchestrator
 
         // Encrypt and send
         var plaintext = new Plaintext(env.ToByteArray());
-        var cipher = await _sessionManager.EncryptMessageAsync(sessionId, plaintext).ConfigureAwait(false);
+        var cipher = await _secureMessaging.EncryptAsync(sessionId, plaintext, ct).ConfigureAwait(false);
         var response = await _transport.SendMessageAsync(recipientPeerId, directSessionId, cipher, ct).ConfigureAwait(false);
 
         // Expect RPC-level response payload (DR-ciphertext)
@@ -96,7 +100,8 @@ public class RelayOrchestrator
 
         // Decrypt response payload as RelayOpaqueResponse
         var ackCipher = new SessionRatchetMessage(response.ResponsePayload.ResponsePayload.ToByteArray());
-        var ackPlain = await _sessionManager.ReceiveMessageAsync(sessionId, ackCipher).ConfigureAwait(false);
+        var resolved = await _secureMessaging.DecryptInboundAsync(ackCipher, ct).ConfigureAwait(false);
+        var ackPlain = resolved?.plaintext;
         if (ackPlain is null)
         {
             throw new InvalidOperationException("Failed to decrypt RelayOpaqueResponse");

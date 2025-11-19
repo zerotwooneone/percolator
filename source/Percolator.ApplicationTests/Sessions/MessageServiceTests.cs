@@ -33,12 +33,12 @@ public class MessageServiceTests
     private Mock<IMessageTransportService> _mockTransportService = null!;
     private Mock<IDoubleRatchetSessionStore> _mockSessionStore = null!;
     private ActiveIdentityContext _activeIdentityContext = null!;
-    private DirectSessionManager _sessionManager = null!;
     private MessageService _messageService = null!;
     private IOptions<CryptographyOptions> _options = null!;
     private Mock<IDirectSessionRepository> _mockDirectSessionRepository = null!;
     private Mock<IPeerPublicSigningKeyStore> _mockKeyStore = null!;
     private Mock<INetworkSender> _mockNetworkSender = null!;
+    private Mock<Percolator.Application.Services.ISecureMessagingService> _mockSecure = null!;
 
     [SetUp]
     public void SetUp()
@@ -51,24 +51,12 @@ public class MessageServiceTests
         _mockDirectSessionRepository = new Mock<IDirectSessionRepository>();
         _mockKeyStore = new Mock<IPeerPublicSigningKeyStore>();
         _mockNetworkSender = new Mock<INetworkSender>();
-
-        // Create a logger factory for DirectSessionManager
-        var loggerFactory = new NullLoggerFactory();
-
-        var ratchetLookup = new Moq.Mock<IRatchetKeyIndex>();
-        _sessionManager = new DirectSessionManager(
-            _mockSessionStore.Object,
-            _activeIdentityContext,
-            new NullLogger<DirectSessionManager>(),
-            loggerFactory,
-            _options,
-            ratchetLookup.Object,
-            new FakePreHandshakeStore());
+        _mockSecure = new Mock<Percolator.Application.Services.ISecureMessagingService>();
 
         _messageService = new MessageService(
             new NullLogger<MessageService>(),
             _mockDirectSessionRepository.Object,
-            _sessionManager,
+            _mockSecure.Object,
             _activeIdentityContext,
             _mockNetworkSender.Object);
 
