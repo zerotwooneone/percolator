@@ -11,6 +11,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ICertificateFactory, FileBasedCertificateFactory>();
         services.AddScoped<IPreKeyBundleRepository, SqlitePreKeyBundleRepository>();
         services.AddScoped<IAdminSignatureVerifier, AdminSignatureVerifier>();
+        services.AddScoped<IPendingSessionRepository, SqlitePendingSessionRepository>();
         return services;
     }
 }

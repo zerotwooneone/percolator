@@ -4,8 +4,10 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Percolator.Application.Identity;
+using Percolator.Application.Apps.Chat;
 using Percolator.Identity;
 using Percolator.Infrastructure.Persistence;
+using Percolator.Infrastructure.Repositories;
 using Percolator.Infrastructure.Security;
 using SQLitePCL;
 
@@ -22,10 +24,10 @@ namespace Percolator.Infrastructure.Identity
             
             // Store for X3DH keys bound to SelfIdentityId
             services.AddScoped<ISelfIdentityKeysStore, SqliteSelfIdentityKeysStore>();
-            services.AddScoped<IPeerIdentityRepository, Percolator.Infrastructure.Repositories.SqlitePeerIdentityRepository>();
+            services.AddScoped<IPeerIdentityRepository, SqlitePeerIdentityRepository>();
             services.AddScoped<ISelfIdentityRepository, SqliteSelfIdentityRepository>();
             services.AddScoped<IPeerPublicSigningKeyStore, SqlitePeerPublicSigningKeyStore>();
-            services.AddScoped<Percolator.Application.Apps.Chat.IRecipientPkhResolver, SqliteRecipientPkhResolver>();
+            services.AddScoped<IRecipientPkhResolver, SqliteRecipientPkhResolver>();
 
             services.AddDbContext<PercolatorDbContext>((provider, options) =>
             {

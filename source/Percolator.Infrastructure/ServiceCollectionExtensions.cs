@@ -10,6 +10,8 @@ using Percolator.Infrastructure.MessageQueue;
 using Percolator.Application.Network.Handshake;
 using Percolator.Infrastructure.Network.Handshake;
 using Percolator.Application.KeyExchange;
+using Percolator.Application.Apps.Chat;
+using Percolator.Infrastructure.Security;
 
 namespace Percolator.Infrastructure;
 
@@ -38,7 +40,7 @@ public static class ServiceCollectionExtensions
         services.AddMessageQueueInfrastructure();
 
         // Security/adapters
-        services.AddScoped<Percolator.Application.Apps.Chat.IAtRestKeyProvider, Percolator.Infrastructure.Security.AtRestKeyProvider>();
+        services.AddScoped<IAtRestKeyProvider, AtRestKeyProvider>();
 
         // Handshake pre-session store
         services.AddScoped<IPreHandshakeSessionStore, PreHandshakeSessionStore>();

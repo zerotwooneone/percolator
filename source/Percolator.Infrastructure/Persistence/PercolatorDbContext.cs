@@ -5,6 +5,7 @@ using Percolator.Dht;
 using Percolator.Infrastructure.Persistence;
 using Percolator.Application.Identity;
 using Percolator.Infrastructure.Identity;
+using Percolator.Infrastructure.Cryptography;
 
 namespace Percolator.Infrastructure.Persistence;
 
@@ -48,6 +49,7 @@ public class PercolatorDbContext : DbContext
     public DbSet<EmojiReactionDbo> EmojiReactions { get; set; } = null!;
     public DbSet<DeliveredReceiptDbo> DeliveredReceipts { get; set; } = null!;
     public DbSet<PreHandshakeSessionDbo> PreHandshakeSessions { get; set; } = null!;
+    public DbSet<PendingSessionDbo> PendingSessions { get; set; } = null!;
     public DbSet<GroupAdminKeyDbo> GroupAdminKeys { get; set; } = null!;
     public DbSet<GroupAdminOpDbo> GroupAdminOps { get; set; } = null!;
     public DbSet<GroupAdminStateDbo> GroupAdminStates { get; set; } = null!;
@@ -64,9 +66,7 @@ public class PercolatorDbContext : DbContext
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         // Ensure EF does not try to map legacy domain type 'Peer'
-        modelBuilder.Ignore<Percolator.Identity.Peer>();
-
-        // Legacy Peers table removed; authoritative catalog is PeerIdentities
+        modelBuilder.Ignore<global::Percolator.Identity.Peer>();
 
         // PeerIdentities (authoritative peer catalog for identity aggregate)
         modelBuilder.Entity<PeerIdentityDbo>(entity =>
