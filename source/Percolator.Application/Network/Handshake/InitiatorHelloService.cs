@@ -14,21 +14,21 @@ internal sealed class InitiatorHelloService : IInitiatorHelloService
     private readonly ILogger<InitiatorHelloService> _logger;
     private readonly ActiveIdentityContext _active;
     private readonly IX3DHOrchestrator _x3dh;
-    private readonly IDirectSessionManager _sessions;
     private readonly IMessageService _messageService;
+    private readonly IPreHandshakeSessionStore _preHandshake;
 
     public InitiatorHelloService(
         ILogger<InitiatorHelloService> logger,
         ActiveIdentityContext active,
         IX3DHOrchestrator x3dh,
-        IDirectSessionManager sessions,
-        IMessageService messageService)
+        IMessageService messageService,
+        IPreHandshakeSessionStore preHandshake)
     {
         _logger = logger;
         _active = active;
         _x3dh = x3dh;
-        _sessions = sessions;
         _messageService = messageService;
+        _preHandshake = preHandshake;
     }
 
     public async Task SendInitiatorHelloViaHostAsync(
@@ -55,6 +55,21 @@ internal sealed class InitiatorHelloService : IInitiatorHelloService
         var shared = _x3dh.InitiateHandshake(bundle, eph);
 
         // Do not pre-establish a session here; responder hello will finalize and assign the session id
+
+        // Persist minimal prehandshake state (IRK + remote identity SPKI), ordered by recency
+        if (_active.Identity is null)
+            throw new InvalidOperationException("Active identity not loaded.");
+        var rec = new PreHandshakeRecord(
+            Id: 0,
+            SelfIdentityId: _active.Identity.SelfIdentityId,
+            RecipientPublicKeyHash: recipientPublicKeyHash,
+            LocalRequestId: Guid.NewGuid(),
+            InitiatorEphemeralPrivateKey: Array.Empty<byte>(),
+            InitialRootKey: shared.Value,
+            CreatedAtUtc: DateTimeOffset.UtcNow,
+            ExpiresAtUtc: DateTimeOffset.UtcNow.AddHours(1),
+            RemoteIdentityKeySpki: remoteIdentityKeySpki);
+        await _preHandshake.SaveAsync(rec, cancellationToken).ConfigureAwait(false);
 
         // Compose initiator hello
         var hello = new HandshakeInitiatorHello

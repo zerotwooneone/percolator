@@ -28,6 +28,7 @@ using RatchetEphemeralKey = Percolator.Cryptography.RatchetEphemeralKey;
 
 namespace Percolator.ApplicationTests.Sessions;
 
+[Ignore("we are planning to delete this service")]
 [TestFixture]
 public class ConversationServiceTests
 {

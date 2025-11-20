@@ -139,10 +139,14 @@ namespace Percolator.Application.Network
                 var sessionRatchetMessage = new SessionRatchetMessage(request.PayloadBytes);
                 var header = sessionRatchetMessage.GetHeader();
                 var ratchetKey = header.PreKey;
-                var resolved = await _secureMessaging.DecryptInboundAsync(sessionRatchetMessage, cancellationToken).ConfigureAwait(false)
-                    ?? throw new InvalidOperationException("Unable to resolve and decrypt inbound ratchet message");
-                var inferredSessionId = resolved.sessionId;
-                var plaintext = resolved.plaintext;
+                var resolved = await _secureMessaging.DecryptInboundAsync(sessionRatchetMessage, cancellationToken).ConfigureAwait(false);
+                if (resolved is null)
+                {
+                    _logger.LogWarning("Decrypt returned null; returning empty result without side-effects");
+                    return new DeliverOpaqueMessageResult();
+                }
+                var inferredSessionId = resolved.Value.sessionId;
+                var plaintext = resolved.Value.plaintext;
                 var nonNullDirectSessionId = new DirectSessionId(inferredSessionId.Value);
                 if (plaintext is null)
                 {

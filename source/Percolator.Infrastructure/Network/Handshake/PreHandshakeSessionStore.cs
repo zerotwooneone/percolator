@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
 using Percolator.Application.Network.Handshake;
 using Percolator.Infrastructure.Persistence;
+using System.Security.Cryptography;
 
 namespace Percolator.Infrastructure.Network.Handshake
 {
@@ -19,19 +20,48 @@ namespace Percolator.Infrastructure.Network.Handshake
             _db = db;
         }
 
+        public async Task<PreHandshakeRecord?> TryGetMostRecentAsync(int selfIdentityId, CancellationToken cancellationToken)
+        {
+            var now = DateTimeOffset.UtcNow;
+            var x = await _db.PreHandshakeSessions
+                .AsNoTracking()
+                .Where(r => r.SelfIdentityId == selfIdentityId && (r.ExpiresAtUtc == null || r.ExpiresAtUtc > now))
+                .OrderByDescending(r => r.CreatedAtUtc)
+                .FirstOrDefaultAsync(cancellationToken)
+                .ConfigureAwait(false);
+            if (x is null) return null;
+            return new PreHandshakeRecord(
+                Id: x.Id,
+                SelfIdentityId: x.SelfIdentityId,
+                RecipientPublicKeyHash: x.RecipientPublicKeyHash ?? Array.Empty<byte>(),
+                LocalRequestId: x.LocalRequestId,
+                InitiatorEphemeralPrivateKey: Array.Empty<byte>(),
+                InitialRootKey: x.InitialRootKey,
+                CreatedAtUtc: x.CreatedAtUtc,
+                ExpiresAtUtc: x.ExpiresAtUtc,
+                RemoteIdentityKeySpki: x.RemoteIdentityKeySpki
+            );
+        }
+
         public async Task SaveAsync(PreHandshakeRecord record, CancellationToken cancellationToken)
         {
+            // Compute SPKI hash for indexing if provided
+            byte[]? spkiHash = null;
+            if (record.RemoteIdentityKeySpki is { Length: > 0 })
+            {
+                using var sha = SHA256.Create();
+                spkiHash = sha.ComputeHash(record.RemoteIdentityKeySpki);
+            }
             var dbo = new PreHandshakeSessionDbo
             {
                 SelfIdentityId = record.SelfIdentityId,
                 RecipientPublicKeyHash = record.RecipientPublicKeyHash,
                 LocalRequestId = record.LocalRequestId,
-                // Do not persist initiator ephemeral private key (security: discard after IRK derivation)
-                InitiatorEphemeralPrivateKey = null,
                 InitialRootKey = record.InitialRootKey,
                 CreatedAtUtc = record.CreatedAtUtc,
                 ExpiresAtUtc = record.ExpiresAtUtc,
                 RemoteIdentityKeySpki = record.RemoteIdentityKeySpki,
+                RemoteIdentityKeySpkiHash = spkiHash,
             };
             // Note: Id is ValueGeneratedOnAdd; do not set it here so SQLite AUTOINCREMENT assigns it.
             _db.PreHandshakeSessions.Add(dbo);
@@ -55,7 +85,7 @@ namespace Percolator.Infrastructure.Network.Handshake
                     SelfIdentityId: x.SelfIdentityId,
                     RecipientPublicKeyHash: x.RecipientPublicKeyHash ?? Array.Empty<byte>(),
                     LocalRequestId: x.LocalRequestId,
-                    // Never expose or rely on persisted ephemeral private key
+                    // Initiator ephemeral private key is no longer persisted
                     InitiatorEphemeralPrivateKey: Array.Empty<byte>(),
                     InitialRootKey: x.InitialRootKey,
                     CreatedAtUtc: x.CreatedAtUtc,

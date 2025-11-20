@@ -493,9 +493,6 @@ namespace Percolator.ApplicationTests.Network;
         var headerKey = new PreKey(RandomBytes(32));
         ratchetLookup.Setup(l => l.TryResolveAsync(It.Is<RatchetEphemeralKey>(p => p.Value.SequenceEqual(headerKey.Value)), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SessionId(sessionId));
-        // Allow index upsert even if we return early on null plaintext (handler upserts after successful decrypt only; this is defensive)
-        ratchetLookup.Setup(l => l.UpsertAsync(It.Is<SessionId>(s => s.Value == sessionId), It.IsAny<RatchetEphemeralKey>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
 
         // Decryption yields null -> handler returns empty result before mapping/peer lookups
         var cmd = new DeliverOpaqueMessageCommand { PayloadBytes = BuildRatchetPayload(headerKey.Value, RandomBytes(48)) };
@@ -505,6 +502,13 @@ namespace Percolator.ApplicationTests.Network;
         var result = await handler.Handle(cmd, CancellationToken.None);
 
         result.ResponsePayloadBytes.Should().BeNull();
+        // No orchestrator dispatch should occur when decrypt returns null
+        mediator.Verify(m => m.Send(It.IsAny<ProcessInternalEnvelopeCommand>(), It.IsAny<CancellationToken>()), Times.Never);
+        mediator.Verify(m => m.Send(It.IsAny<Percolator.Application.Network.Handshake.ProcessRelayedOpaquePayloadCommand>(), It.IsAny<CancellationToken>()), Times.Never);
+        // No index upsert when decrypt fails
+        ratchetLookup.Verify(l => l.UpsertAsync(It.IsAny<SessionId>(), It.IsAny<RatchetEphemeralKey>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()), Times.Never);
+        // No direct session mapping lookups should occur
+        directRepo.VerifyNoOtherCalls();
         sessionMgr.VerifyAll();
     }
 

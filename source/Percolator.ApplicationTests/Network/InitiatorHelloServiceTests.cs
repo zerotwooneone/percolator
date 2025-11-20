@@ -42,19 +42,13 @@ public class InitiatorHelloServiceTests
         x3dh.Setup(x => x.InitiateHandshake(It.IsAny<X3dPreKeyBundle>(), It.IsAny<ECDiffieHellman>()))
             .Returns(new SharedSecret(new byte[] { 1, 2, 3 }));
 
-        var sessions = new Mock<IDirectSessionManager>(MockBehavior.Loose);
-        sessions.Setup(s => s.EstablishSessionAsInitiatorAsync(
-                It.IsAny<byte[]>(),
-                It.IsAny<Guid>(),
-                It.IsAny<Guid?>(),
-                It.IsAny<RatchetIdentityKey>(),
-                It.IsAny<RatchetEphemeralKey>(),
-                It.IsAny<SharedSecret>(),
-                It.IsAny<ECDiffieHellman>(),
-                It.IsAny<Plaintext?>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(SessionRatchetMessage.Create(new RatchetEphemeralKey(new byte[]{0xEF}), 0, 0, new Ciphertext(new byte[]{0xEE})));
-
+        var preHandshakeStore = new Mock<IPreHandshakeSessionStore>(MockBehavior.Strict);
+        PreHandshakeRecord? capturedPre = null;
+        preHandshakeStore
+            .Setup(s => s.SaveAsync(It.IsAny<PreHandshakeRecord>(), It.IsAny<CancellationToken>()))
+            .Callback<PreHandshakeRecord, CancellationToken>((r, _) => capturedPre = r)
+            .Returns(Task.CompletedTask);
+        
         InternalEnvelope? captured = null;
         var msgSvc = new Mock<IMessageService>(MockBehavior.Strict);
         msgSvc
@@ -69,8 +63,8 @@ public class InitiatorHelloServiceTests
             new NullLogger<InitiatorHelloService>(),
             active,
             x3dh.Object,
-            sessions.Object,
-            msgSvc.Object);
+            msgSvc.Object,
+            preHandshakeStore.Object);
 
         // Act
         await service.SendInitiatorHelloViaHostAsync(
@@ -83,17 +77,12 @@ public class InitiatorHelloServiceTests
             initiatorPayload: initiatorPayload,
             cancellationToken: CancellationToken.None);
 
-        // Assert: DR establish requested with provided parameters
-        sessions.Verify(s => s.EstablishSessionAsInitiatorAsync(
-            It.Is<byte[]>(pkh => pkh.SequenceEqual(recipientPkh)),
-            It.Is<Guid>(g => g == spkId),
-            It.Is<Guid?>(g => g == otkId),
-            It.Is<RatchetIdentityKey>(k => k.Value.SequenceEqual(remoteIdentitySpki)),
-            It.Is<RatchetEphemeralKey>(k => k.Value.SequenceEqual(remotePreKeySpki)),
-            It.Is<SharedSecret>(sh => sh.Value.SequenceEqual(new byte[] { 1, 2, 3 })),
-            It.IsAny<ECDiffieHellman>(),
-            It.Is<Plaintext?>(pt => pt != null),
-            It.IsAny<CancellationToken>()), Times.Once);
+        // Assert: prehandshake persisted with IRK and remote identity SPKI
+        Assert.That(capturedPre, Is.Not.Null);
+        Assert.That(capturedPre!.SelfIdentityId, Is.EqualTo(identity.SelfIdentityId));
+        Assert.That(capturedPre!.RecipientPublicKeyHash, Is.EqualTo(recipientPkh));
+        Assert.That(capturedPre!.InitialRootKey, Is.EqualTo(new byte[] { 1, 2, 3 }));
+        Assert.That(capturedPre!.RemoteIdentityKeySpki, Is.EqualTo(remoteIdentitySpki));
 
         // Assert: sent an MQ enqueue to host
         Assert.That(captured, Is.Not.Null);
@@ -105,5 +94,6 @@ public class InitiatorHelloServiceTests
         Assert.That(mq.EnqueueOpaqueMessageRequest.HasMessageBlob, Is.True);
 
         msgSvc.VerifyAll();
+        preHandshakeStore.VerifyAll();
     }
 }

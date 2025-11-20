@@ -163,16 +163,17 @@ public class PercolatorDbContext : DbContext
             entity.Property(e => e.SelfIdentityId).IsRequired();
             entity.Property(e => e.LocalRequestId).IsRequired();
             entity.Property(e => e.RecipientPublicKeyHash);
-            entity.Property(e => e.InitiatorEphemeralPrivateKey).IsRequired();
             entity.Property(e => e.InitialRootKey).IsRequired();
             entity.Property(e => e.CreatedAtUtc).IsRequired();
             entity.Property(e => e.ExpiresAtUtc);
             entity.Property(e => e.RemoteIdentityKeySpki).IsRequired();
+            entity.Property(e => e.RemoteIdentityKeySpkiHash);
 
             entity.HasIndex(e => e.SelfIdentityId);
             entity.HasIndex(e => new { e.SelfIdentityId, e.ExpiresAtUtc });
             entity.HasIndex(e => new { e.SelfIdentityId, e.RecipientPublicKeyHash });
             entity.HasIndex(e => new { e.SelfIdentityId, e.LocalRequestId }).IsUnique();
+            entity.HasIndex(e => new { e.SelfIdentityId, e.RemoteIdentityKeySpkiHash, e.CreatedAtUtc });
         });
 
         // SelfIdentity

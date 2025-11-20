@@ -122,14 +122,29 @@ public class DirectSessionManager : IDirectSessionManager
     /// <summary>
     /// R2: Initiator finalize stub. Will be implemented to initialize from IRK + responder header public ratchet key.
     /// </summary>
-    public Task FinalizeAsInitiatorAsync(
+    public async Task FinalizeAsInitiatorAsync(
         SessionId sessionId,
         RatchetIdentityKey responderIdentityKey,
         SharedSecret initialRootKey,
         RatchetEphemeralKey responderPublicRatchetKey)
     {
-        // Placeholder implementation to keep the cutover compiling; handler wiring will call this in a later step.
-        throw new NotSupportedException("FinalizeAsInitiatorAsync is not yet implemented during staged cutover.");
+        if (_activeIdentityContext.Identity is null)
+            throw new InvalidOperationException("Identity context not loaded");
+
+        // Create a Double Ratchet session as initiator using the Initial Root Key (from X3DH) and the responder's header ratchet key.
+        var sessionLogger = _loggerFactory.CreateLogger<DoubleRatchetSession>();
+
+        using var generatedLocalEphemeral = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        var session = DoubleRatchetSession.AsInitiator(
+            initialRootKey,
+            responderIdentityKey,
+            responderPublicRatchetKey,
+            generatedLocalEphemeral,
+            sessionLogger,
+            _cryptographyOptions);
+
+        var state = session.GetState();
+        await _sessionStore.SetSessionStateAsync(sessionId, state, _activeIdentityContext.Identity.SelfIdentityId).ConfigureAwait(false);
+        _sessionLocks.TryAdd(sessionId, new SemaphoreSlim(1, 1));
     }
-    
 }

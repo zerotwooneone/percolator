@@ -4,6 +4,7 @@ using Microsoft.Extensions.Options;
 using Moq;
 using Percolator.Application.Identity;
 using Percolator.Application.Network;
+using Percolator.Application.Network.Handshake;
 using Percolator.Application.Sessions;
 using Percolator.Chat;
 using Percolator.Chat.ValueObjects;
@@ -26,6 +27,12 @@ public class MessageServiceTests
             await Task.CompletedTask;
             yield break;
         }
+
+        public async Task<PreHandshakeRecord?> TryGetMostRecentAsync(int selfIdentityId, CancellationToken cancellationToken)
+        {
+            throw new NotImplementedException();
+        }
+
         public Task DeleteAsync(long recordId, int selfIdentityId, CancellationToken cancellationToken) => Task.CompletedTask;
         public Task PurgeExpiredAsync(int selfIdentityId, CancellationToken cancellationToken) => Task.CompletedTask;
     }

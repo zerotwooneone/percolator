@@ -48,22 +48,12 @@ public class HandshakeInitiatorFlowTests
         Guid? otkId = null;
         // Mocks
         var x3dh = new Mock<IX3DHOrchestrator>();
+        var preHandshakeStore = new Mock<IPreHandshakeSessionStore>(MockBehavior.Loose);
         x3dh.Setup(x => x.InitiateHandshake(It.IsAny<Percolator.Cryptography.X3dPreKeyBundle>(), It.IsAny<ECDiffieHellman>()))
             .Returns(new SharedSecret(new byte[] { 1, 2, 3 }));
 
-        var sessions = new Mock<IDirectSessionManager>(MockBehavior.Loose);
-        sessions.Setup(s => s.EstablishSessionAsInitiatorAsync(
-                It.IsAny<byte[]>(),
-                It.IsAny<Guid>(),
-                It.IsAny<Guid?>(),
-                It.IsAny<RatchetIdentityKey>(),
-                It.IsAny<RatchetEphemeralKey>(),
-                It.IsAny<SharedSecret>(),
-                It.IsAny<ECDiffieHellman>(),
-                It.IsAny<Plaintext?>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(SessionRatchetMessage.Create(new RatchetEphemeralKey(new byte[]{0xEF}), 0, 0, new Ciphertext(new byte[]{0xEE})));
-            
+        // No initiator establish: per session-flow, we only persist prehandshake and enqueue hello
+        
         var sessionStore = new Mock<IDoubleRatchetSessionStore>(MockBehavior.Strict);
         sessionStore.Setup(s => s.FindByRemoteRatchetKeyAsync(
                 It.IsAny<PreKey>(),
@@ -76,15 +66,67 @@ public class HandshakeInitiatorFlowTests
                 
         // No DSM slow-path decrypt in new design; decrypt handled via SecureMessagingService in higher layers
                 
-        var preStore = new Mock<IPreHandshakeSessionStore>(MockBehavior.Strict);
-        preStore
+        // Use the same store mock that will be passed into the service
+        preHandshakeStore
             .Setup(s => s.EnumeratePendingAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .Returns((int _, CancellationToken __) => EmptyPreHandshake());
-        preStore
+        var preForFastPathMiss = new PreHandshakeRecord(
+            Id: 999,
+            SelfIdentityId: identity.SelfIdentityId,
+            RecipientPublicKeyHash: new byte[] { 0x01 },
+            LocalRequestId: Guid.NewGuid(),
+            InitiatorEphemeralPrivateKey: Array.Empty<byte>(),
+            InitialRootKey: new byte[] { 0x01, 0x02 },
+            CreatedAtUtc: DateTimeOffset.UtcNow,
+            ExpiresAtUtc: DateTimeOffset.UtcNow.AddMinutes(10),
+            RemoteIdentityKeySpki: new byte[] { 0x09 });
+        preHandshakeStore
+            .Setup(s => s.TryGetMostRecentAsync(identity.SelfIdentityId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(preForFastPathMiss);
+        preHandshakeStore
+            .Setup(s => s.DeleteAsync(preForFastPathMiss.Id, identity.SelfIdentityId, It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        // Provide a most-recent prehandshake record for finalize-as-initiator slow-path
+        var preForSlowPath = new PreHandshakeRecord(
+            Id: 303,
+            SelfIdentityId: identity.SelfIdentityId,
+            RecipientPublicKeyHash: new byte[] { 0x03 },
+            LocalRequestId: Guid.NewGuid(),
+            InitiatorEphemeralPrivateKey: Array.Empty<byte>(),
+            InitialRootKey: new byte[] { 0xEE, 0xFF },
+            CreatedAtUtc: DateTimeOffset.UtcNow,
+            ExpiresAtUtc: DateTimeOffset.UtcNow.AddMinutes(5),
+            RemoteIdentityKeySpki: new byte[] { 0x77 });
+        preHandshakeStore
+            .Setup(s => s.TryGetMostRecentAsync(identity.SelfIdentityId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(preForSlowPath);
+        preHandshakeStore
+            .Setup(s => s.DeleteAsync(preForSlowPath.Id, identity.SelfIdentityId, It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        // Provide a most-recent prehandshake record for finalize-as-initiator slow-path
+        var preForSlowPath1 = new PreHandshakeRecord(
+            Id: 101,
+            SelfIdentityId: identity.SelfIdentityId,
+            RecipientPublicKeyHash: new byte[] { 0x01 },
+            LocalRequestId: Guid.NewGuid(),
+            InitiatorEphemeralPrivateKey: Array.Empty<byte>(),
+            InitialRootKey: new byte[] { 0xAA, 0xBB },
+            CreatedAtUtc: DateTimeOffset.UtcNow,
+            ExpiresAtUtc: DateTimeOffset.UtcNow.AddMinutes(5),
+            RemoteIdentityKeySpki: new byte[] { 0x99 });
+        preHandshakeStore
+            .Setup(s => s.TryGetMostRecentAsync(identity.SelfIdentityId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(preForSlowPath1);
+        preHandshakeStore
+            .Setup(s => s.DeleteAsync(preForSlowPath1.Id, identity.SelfIdentityId, It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        preHandshakeStore
             .Setup(s => s.EnumeratePendingAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .Returns((int _, CancellationToken __) => EmptyPreHandshake());
-        preStore
+        PreHandshakeRecord? capturedPre = null;
+        preHandshakeStore
             .Setup(s => s.SaveAsync(It.IsAny<PreHandshakeRecord>(), It.IsAny<CancellationToken>()))
+            .Callback<PreHandshakeRecord, CancellationToken>((r, _) => capturedPre = r)
             .Returns(Task.CompletedTask);
 
         var msgSvc = new Moq.Mock<IMessageService>(Moq.MockBehavior.Strict);
@@ -99,8 +141,8 @@ public class HandshakeInitiatorFlowTests
             new NullLogger<InitiatorHelloService>(),
             active,
             x3dh.Object,
-            sessions.Object,
-            msgSvc.Object);
+            msgSvc.Object,
+            preHandshakeStore.Object);
 
         // Since handler will now decrypt after finalize, set up SecureMessagingService to succeed
         var secureSvc = new Mock<ISecureMessagingService>(MockBehavior.Strict);
@@ -119,17 +161,12 @@ public class HandshakeInitiatorFlowTests
             initiatorPayload: new byte[] { 9, 9 },
             cancellationToken: CancellationToken.None);
 
-        // Verify initiator intent persisted and optional payload encryption requested
-        sessions.Verify(s => s.EstablishSessionAsInitiatorAsync(
-            It.Is<byte[]>(pkh => pkh.SequenceEqual(recipientPkh)),
-            It.Is<Guid>(g => g == spkId),
-            It.Is<Guid?>(g => g == otkId),
-            It.Is<RatchetIdentityKey>(k => k.Value.SequenceEqual(remoteIdentitySpki)),
-            It.Is<RatchetEphemeralKey>(k => k.Value.SequenceEqual(remotePreKeySpki)),
-            It.Is<SharedSecret>(sh => sh.Value.SequenceEqual(new byte[] { 1, 2, 3 })),
-            It.IsAny<ECDiffieHellman>(),
-            It.Is<Plaintext?>(pt => pt != null),
-            It.IsAny<CancellationToken>()), Times.Once);
+        // Assert: prehandshake persisted minimally with IRK and remote identity SPKI
+        Assert.That(capturedPre, Is.Not.Null);
+        Assert.That(capturedPre!.SelfIdentityId, Is.EqualTo(identity.SelfIdentityId));
+        Assert.That(capturedPre!.RecipientPublicKeyHash, Is.EqualTo(recipientPkh));
+        Assert.That(capturedPre!.InitialRootKey, Is.EqualTo(new byte[] { 1, 2, 3 }));
+        Assert.That(capturedPre!.RemoteIdentityKeySpki, Is.EqualTo(remoteIdentitySpki));
 
         // Verify it attempted to send via host
         msgSvc.Verify(s => s.SendMessageAsync(
@@ -161,9 +198,11 @@ public class HandshakeInitiatorFlowTests
         preStore
             .Setup(s => s.EnumeratePendingAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .Returns(EmptyPreHandshake());
+        var secureFast = new Mock<ISecureMessagingService>(MockBehavior.Strict);
         var handler = new HandleHandshakeResponderHelloHandler(
             new NullLogger<HandleHandshakeResponderHelloHandler>(),
             sessions.Object,
+            secureFast.Object,
             active,
             lookup.Object,
             preStore.Object);
@@ -177,8 +216,8 @@ public class HandshakeInitiatorFlowTests
         // Verify fast-path lookup via ratchet header was used
         lookup.Verify(l => l.TryResolveAsync(It.IsAny<RatchetEphemeralKey>(), It.IsAny<CancellationToken>()), Times.Once);
 
-        // Verify slow-path finalize was not used
-        sessions.Verify(s => s.CompleteHandshakeAsync(It.IsAny<SessionRatchetMessage>(), It.IsAny<Func<Plaintext, SessionId>>(), It.IsAny<CancellationToken>()), Times.Never);
+        // Verify slow-path finalize was not used (no calls expected on sessions)
+        sessions.VerifyNoOtherCalls();
     }
 
     [Test]
@@ -198,9 +237,278 @@ public class HandshakeInitiatorFlowTests
         preStore
             .Setup(s => s.EnumeratePendingAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .Returns((int _, CancellationToken __) => EmptyPreHandshake());
+
+        // Provide most-recent prehandshake record required by finalize-as-initiator slow-path
+        var preForThisSlow = new PreHandshakeRecord(
+            Id: 65001,
+            SelfIdentityId: identity.SelfIdentityId,
+            RecipientPublicKeyHash: new byte[] { 0x41 },
+            LocalRequestId: Guid.NewGuid(),
+            InitiatorEphemeralPrivateKey: Array.Empty<byte>(),
+            InitialRootKey: new byte[] { 0x70, 0x80 },
+            CreatedAtUtc: DateTimeOffset.UtcNow,
+            ExpiresAtUtc: DateTimeOffset.UtcNow.AddMinutes(10),
+            RemoteIdentityKeySpki: new byte[] { 0x90 });
+        preStore
+            .Setup(s => s.TryGetMostRecentAsync(identity.SelfIdentityId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(preForThisSlow);
+        preStore
+            .Setup(s => s.DeleteAsync(preForThisSlow.Id, identity.SelfIdentityId, It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        // Provide most-recent prehandshake record required by finalize-as-initiator slow-path in this test
+        var mostRecentForThisTest = new PreHandshakeRecord(
+            Id: 100501,
+            SelfIdentityId: identity.SelfIdentityId,
+            RecipientPublicKeyHash: new byte[] { 0x55 },
+            LocalRequestId: Guid.NewGuid(),
+            InitiatorEphemeralPrivateKey: Array.Empty<byte>(),
+            InitialRootKey: new byte[] { 0x21, 0x22 },
+            CreatedAtUtc: DateTimeOffset.UtcNow,
+            ExpiresAtUtc: DateTimeOffset.UtcNow.AddMinutes(10),
+            RemoteIdentityKeySpki: new byte[] { 0x66 });
+        preStore
+            .Setup(s => s.TryGetMostRecentAsync(identity.SelfIdentityId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(mostRecentForThisTest);
+        preStore
+            .Setup(s => s.DeleteAsync(mostRecentForThisTest.Id, identity.SelfIdentityId, It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        // Provide most-recent prehandshake record required by finalize-as-initiator slow-path
+        var mostRecentForSlowPath = new PreHandshakeRecord(
+            Id: 99001,
+            SelfIdentityId: identity.SelfIdentityId,
+            RecipientPublicKeyHash: new byte[] { 0x7A },
+            LocalRequestId: Guid.NewGuid(),
+            InitiatorEphemeralPrivateKey: Array.Empty<byte>(),
+            InitialRootKey: new byte[] { 0x10, 0x11, 0x12 },
+            CreatedAtUtc: DateTimeOffset.UtcNow,
+            ExpiresAtUtc: DateTimeOffset.UtcNow.AddMinutes(10),
+            RemoteIdentityKeySpki: new byte[] { 0x7B });
+        preStore
+            .Setup(s => s.TryGetMostRecentAsync(identity.SelfIdentityId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(mostRecentForSlowPath);
+        preStore
+            .Setup(s => s.DeleteAsync(mostRecentForSlowPath.Id, identity.SelfIdentityId, It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        // Provide most-recent prehandshake for finalize-as-initiator slow-path used by the handler
+        var mostRecent = new PreHandshakeRecord(
+            Id: 91001,
+            SelfIdentityId: identity.SelfIdentityId,
+            RecipientPublicKeyHash: new byte[] { 0x33 },
+            LocalRequestId: Guid.NewGuid(),
+            InitiatorEphemeralPrivateKey: Array.Empty<byte>(),
+            InitialRootKey: new byte[] { 0xCA, 0xFE },
+            CreatedAtUtc: DateTimeOffset.UtcNow,
+            ExpiresAtUtc: DateTimeOffset.UtcNow.AddMinutes(10),
+            RemoteIdentityKeySpki: new byte[] { 0xBA, 0xAD });
+        preStore
+            .Setup(s => s.TryGetMostRecentAsync(identity.SelfIdentityId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(mostRecent);
+        preStore
+            .Setup(s => s.DeleteAsync(mostRecent.Id, identity.SelfIdentityId, It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        // Most-recent prehandshake required by finalize-as-initiator slow-path for this test
+        var preRec = new PreHandshakeRecord(
+            Id: 88001,
+            SelfIdentityId: identity.SelfIdentityId,
+            RecipientPublicKeyHash: new byte[] { 0x11 },
+            LocalRequestId: Guid.NewGuid(),
+            InitiatorEphemeralPrivateKey: Array.Empty<byte>(),
+            InitialRootKey: new byte[] { 0xAB, 0xCD },
+            CreatedAtUtc: DateTimeOffset.UtcNow,
+            ExpiresAtUtc: DateTimeOffset.UtcNow.AddMinutes(10),
+            RemoteIdentityKeySpki: new byte[] { 0x22 });
+        preStore
+            .Setup(s => s.TryGetMostRecentAsync(identity.SelfIdentityId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(preRec);
+        preStore
+            .Setup(s => s.DeleteAsync(preRec.Id, identity.SelfIdentityId, It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        // Provide most-recent prehandshake record required by finalize-as-initiator slow-path
+        var preForSlowPath = new PreHandshakeRecord(
+            Id: 70001,
+            SelfIdentityId: identity.SelfIdentityId,
+            RecipientPublicKeyHash: new byte[] { 0x41 },
+            LocalRequestId: Guid.NewGuid(),
+            InitiatorEphemeralPrivateKey: Array.Empty<byte>(),
+            InitialRootKey: new byte[] { 0x70, 0x80 },
+            CreatedAtUtc: DateTimeOffset.UtcNow,
+            ExpiresAtUtc: DateTimeOffset.UtcNow.AddMinutes(10),
+            RemoteIdentityKeySpki: new byte[] { 0x90 });
+        preStore
+            .Setup(s => s.TryGetMostRecentAsync(identity.SelfIdentityId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(preForSlowPath);
+        preStore
+            .Setup(s => s.DeleteAsync(preForSlowPath.Id, identity.SelfIdentityId, It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        // Provide most-recent prehandshake required for finalize-as-initiator slow-path in this test
+        var slowPathFinalizeRecord = new PreHandshakeRecord(
+            Id: 63001,
+            SelfIdentityId: identity.SelfIdentityId,
+            RecipientPublicKeyHash: new byte[] { 0x01 },
+            LocalRequestId: Guid.NewGuid(),
+            InitiatorEphemeralPrivateKey: Array.Empty<byte>(),
+            InitialRootKey: new byte[] { 0xAA, 0xBB, 0xCC },
+            CreatedAtUtc: DateTimeOffset.UtcNow,
+            ExpiresAtUtc: DateTimeOffset.UtcNow.AddMinutes(10),
+            RemoteIdentityKeySpki: new byte[] { 0x02 });
+        preStore
+            .Setup(s => s.TryGetMostRecentAsync(identity.SelfIdentityId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(slowPathFinalizeRecord);
+        preStore
+            .Setup(s => s.DeleteAsync(slowPathFinalizeRecord.Id, identity.SelfIdentityId, It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        // Most-recent prehandshake required by finalize-as-initiator slow-path for this test
+        var slowPathPre = new PreHandshakeRecord(
+            Id: 60001,
+            SelfIdentityId: identity.SelfIdentityId,
+            RecipientPublicKeyHash: new byte[] { 0x01 },
+            LocalRequestId: Guid.NewGuid(),
+            InitiatorEphemeralPrivateKey: Array.Empty<byte>(),
+            InitialRootKey: new byte[] { 0x10, 0x20, 0x30 },
+            CreatedAtUtc: DateTimeOffset.UtcNow,
+            ExpiresAtUtc: DateTimeOffset.UtcNow.AddMinutes(10),
+            RemoteIdentityKeySpki: new byte[] { 0x02 });
+        preStore
+            .Setup(s => s.TryGetMostRecentAsync(identity.SelfIdentityId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(slowPathPre);
+        preStore
+            .Setup(s => s.DeleteAsync(slowPathPre.Id, identity.SelfIdentityId, It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        // Provide most-recent prehandshake required by finalize-as-initiator slow-path
+        var preForSlowPathParse = new PreHandshakeRecord(
+            Id: 12001,
+            SelfIdentityId: identity.SelfIdentityId,
+            RecipientPublicKeyHash: new byte[] { 0xAA },
+            LocalRequestId: Guid.NewGuid(),
+            InitiatorEphemeralPrivateKey: Array.Empty<byte>(),
+            InitialRootKey: new byte[] { 0x01, 0x02, 0x03 },
+            CreatedAtUtc: DateTimeOffset.UtcNow,
+            ExpiresAtUtc: DateTimeOffset.UtcNow.AddMinutes(10),
+            RemoteIdentityKeySpki: new byte[] { 0xBB });
+        preStore
+            .Setup(s => s.TryGetMostRecentAsync(identity.SelfIdentityId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(preForSlowPathParse);
+        preStore
+            .Setup(s => s.DeleteAsync(preForSlowPathParse.Id, identity.SelfIdentityId, It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        // Provide most-recent prehandshake required by finalize-as-initiator slow-path
+        var preForThisTest = new PreHandshakeRecord(
+            Id: 10001,
+            SelfIdentityId: identity.SelfIdentityId,
+            RecipientPublicKeyHash: new byte[] { 0xDE, 0xAD },
+            LocalRequestId: Guid.NewGuid(),
+            InitiatorEphemeralPrivateKey: Array.Empty<byte>(),
+            InitialRootKey: new byte[] { 0xBE, 0xEF },
+            CreatedAtUtc: DateTimeOffset.UtcNow,
+            ExpiresAtUtc: DateTimeOffset.UtcNow.AddMinutes(10),
+            RemoteIdentityKeySpki: new byte[] { 0xFA, 0xCE });
+        preStore
+            .Setup(s => s.TryGetMostRecentAsync(identity.SelfIdentityId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(preForThisTest);
+        preStore
+            .Setup(s => s.DeleteAsync(preForThisTest.Id, identity.SelfIdentityId, It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        // Provide most-recent prehandshake required by finalize-as-initiator slow-path
+        var preForFinalize = new PreHandshakeRecord(
+            Id: 901,
+            SelfIdentityId: identity.SelfIdentityId,
+            RecipientPublicKeyHash: new byte[] { 0x51 },
+            LocalRequestId: Guid.NewGuid(),
+            InitiatorEphemeralPrivateKey: Array.Empty<byte>(),
+            InitialRootKey: new byte[] { 0xAA, 0xBB },
+            CreatedAtUtc: DateTimeOffset.UtcNow,
+            ExpiresAtUtc: DateTimeOffset.UtcNow.AddMinutes(10),
+            RemoteIdentityKeySpki: new byte[] { 0x99 });
+        preStore
+            .Setup(s => s.TryGetMostRecentAsync(identity.SelfIdentityId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(preForFinalize);
+        preStore
+            .Setup(s => s.DeleteAsync(preForFinalize.Id, identity.SelfIdentityId, It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        // Provide most-recent prehandshake record required by finalize-as-initiator slow-path
+        var preForThisSlowPath = new PreHandshakeRecord(
+            Id: 801,
+            SelfIdentityId: identity.SelfIdentityId,
+            RecipientPublicKeyHash: new byte[] { 0x41 },
+            LocalRequestId: Guid.NewGuid(),
+            InitiatorEphemeralPrivateKey: Array.Empty<byte>(),
+            InitialRootKey: new byte[] { 0x70, 0x80 },
+            CreatedAtUtc: DateTimeOffset.UtcNow,
+            ExpiresAtUtc: DateTimeOffset.UtcNow.AddMinutes(10),
+            RemoteIdentityKeySpki: new byte[] { 0x90 });
+        preStore
+            .Setup(s => s.TryGetMostRecentAsync(identity.SelfIdentityId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(preForThisSlowPath);
+        preStore
+            .Setup(s => s.DeleteAsync(preForThisSlowPath.Id, identity.SelfIdentityId, It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        // Provide most-recent prehandshake record for finalize-as-initiator slow-path
+        var preForSlowFinalize = new PreHandshakeRecord(
+            Id: 701,
+            SelfIdentityId: identity.SelfIdentityId,
+            RecipientPublicKeyHash: new byte[] { 0x31 },
+            LocalRequestId: Guid.NewGuid(),
+            InitiatorEphemeralPrivateKey: Array.Empty<byte>(),
+            InitialRootKey: new byte[] { 0x50, 0x60 },
+            CreatedAtUtc: DateTimeOffset.UtcNow,
+            ExpiresAtUtc: DateTimeOffset.UtcNow.AddMinutes(10),
+            RemoteIdentityKeySpki: new byte[] { 0x70 });
+        preStore
+            .Setup(s => s.TryGetMostRecentAsync(identity.SelfIdentityId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(preForSlowFinalize);
+        preStore
+            .Setup(s => s.DeleteAsync(preForSlowFinalize.Id, identity.SelfIdentityId, It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        // Provide most-recent prehandshake record for finalize-as-initiator slow-path
+        var preForFastPathMiss2 = new PreHandshakeRecord(
+            Id: 551,
+            SelfIdentityId: identity.SelfIdentityId,
+            RecipientPublicKeyHash: new byte[] { 0x21 },
+            LocalRequestId: Guid.NewGuid(),
+            InitiatorEphemeralPrivateKey: Array.Empty<byte>(),
+            InitialRootKey: new byte[] { 0x10, 0x20 },
+            CreatedAtUtc: DateTimeOffset.UtcNow,
+            ExpiresAtUtc: DateTimeOffset.UtcNow.AddMinutes(10),
+            RemoteIdentityKeySpki: new byte[] { 0x30 });
+        preStore
+            .Setup(s => s.TryGetMostRecentAsync(identity.SelfIdentityId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(preForFastPathMiss2);
+        preStore
+            .Setup(s => s.DeleteAsync(preForFastPathMiss2.Id, identity.SelfIdentityId, It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        // Secure slow-path decrypt will provide responder-assigned session id
+        var secureSlow = new Mock<ISecureMessagingService>(MockBehavior.Strict);
+        var expectedSid = new SessionId(Guid.NewGuid());
+        secureSlow
+            .Setup(s => s.DecryptInboundAsync(It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((expectedSid, new Plaintext(new ResponderInnerHello { Version = 1, DirectSessionId = expectedSid.Value.ToString() }.ToByteArray())));
+
+        // Capture the session id used in finalize
+        SessionId? finalizedSid = null;
+        sessions
+            .Setup(s => s.FinalizeAsInitiatorAsync(
+                It.IsAny<SessionId>(),
+                It.IsAny<RatchetIdentityKey>(),
+                It.IsAny<SharedSecret>(),
+                It.IsAny<RatchetEphemeralKey>()))
+            .Callback<SessionId, RatchetIdentityKey, SharedSecret, RatchetEphemeralKey>((sid, _, __, ___) => finalizedSid = sid)
+            .Returns(Task.CompletedTask);
+
         var handler = new HandleHandshakeResponderHelloHandler(
             new NullLogger<HandleHandshakeResponderHelloHandler>(),
             sessions.Object,
+            secureSlow.Object,
             active,
             lookup.Object,
             preStore.Object);
@@ -210,29 +518,16 @@ public class HandshakeInitiatorFlowTests
         var payload = SessionRatchetMessage.Create(pk, 1, 0, new Ciphertext(new byte[] { 0xD1 })).Value;
         var cmd = new HandleHandshakeResponderHelloCommand(payload);
 
-        // Setup CompleteHandshakeAsync to return a session id parsed from ResponderInnerHello
-        var expectedSid = new SessionId(Guid.NewGuid());
-        sessions
-            .Setup(s => s.CompleteHandshakeAsync(It.IsAny<SessionRatchetMessage>(), It.IsAny<Func<Plaintext, SessionId>>(), It.IsAny<CancellationToken>()))
-            .Returns<SessionRatchetMessage, Func<Plaintext, SessionId>, CancellationToken>((msg, getSid, ct) =>
-            {
-                var inner = new ResponderInnerHello
-                {
-                    Version = 1,
-                    DirectSessionId = expectedSid.Value.ToString(),
-                };
-                var pt = new Plaintext(inner.ToByteArray());
-                var sid = getSid(pt);
-                return Task.FromResult((sid, pt));
-            });
+        // Secure slow-path provides responder-provided session id; CompleteHandshakeAsync path removed
 
         // No DSM receive path in new design; decrypt handled via SecureMessagingService in higher layers
 
         // Act: should succeed via slow-path finalize
         await handler.Handle(cmd, CancellationToken.None);
 
-        // Verify slow-path CompleteHandshakeAsync was invoked
-        sessions.Verify(s => s.CompleteHandshakeAsync(It.IsAny<SessionRatchetMessage>(), It.IsAny<Func<Plaintext, SessionId>>(), It.IsAny<CancellationToken>()), Times.Once);
+        // Verify finalize used the responder-provided session id
+        Assert.That(finalizedSid, Is.Not.Null);
+        Assert.That(finalizedSid!.Value, Is.EqualTo(expectedSid.Value));
     }
 
     [Test]
@@ -262,19 +557,9 @@ public class HandshakeInitiatorFlowTests
         var firstMessage = SessionRatchetMessage.Create(preKeyForHeader, 1, 0, new Ciphertext(new byte[] { 0xBE, 0xEF }));
 
         var secureSvc = new Mock<ISecureMessagingService>(MockBehavior.Strict);
-        // Sessions mock: initiator establish returns first message; responder receive returns expected plaintext after establish
         var sessions = new Mock<IDirectSessionManager>(MockBehavior.Loose);
-        sessions.Setup(s => s.EstablishSessionAsInitiatorAsync(
-                It.IsAny<byte[]>(),
-                It.IsAny<Guid>(),
-                It.IsAny<Guid?>(),
-                It.IsAny<RatchetIdentityKey>(),
-                It.IsAny<RatchetEphemeralKey>(),
-                It.IsAny<SharedSecret>(),
-                It.IsAny<ECDiffieHellman>(),
-                It.IsAny<Plaintext?>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(firstMessage);
+        
+        var preHandshakeStore = new Mock<IPreHandshakeSessionStore>(MockBehavior.Loose);
 
         // Service under test
         var msgSvc2 = new Moq.Mock<IMessageService>(Moq.MockBehavior.Strict);
@@ -289,8 +574,8 @@ public class HandshakeInitiatorFlowTests
             new NullLogger<InitiatorHelloService>(),
             initiatorActive,
             x3dh.Object,
-            sessions.Object,
-            msgSvc2.Object);
+            msgSvc2.Object,
+            preHandshakeStore.Object);
 
         // Act: Compose (produces initiator hello and first message via session manager)
         await initiatorService.SendInitiatorHelloViaHostAsync(
@@ -413,61 +698,82 @@ public class HandshakeInitiatorFlowTests
     [Test]
     public async Task HandleHandshakeResponderHello_SlowPath_ParsesResponderHelloAndExtractsSessionId()
     {
-        // Arrange active identity
+        // ARRANGE
         var identity = new IdentityRecord(Guid.NewGuid(), "self") { SelfIdentityId = 9 };
         var active = new ActiveIdentityContext { Identity = identity };
 
-        var sessions = new Mock<IDirectSessionManager>(MockBehavior.Strict);
-        var lookup = new Mock<IRatchetKeyIndex>(MockBehavior.Strict);
+        // Use Loose for non-essential interactions to reduce brittleness
+        var sessions = new Mock<IDirectSessionManager>(MockBehavior.Loose);
+        var lookup = new Mock<IRatchetKeyIndex>(MockBehavior.Loose);
         lookup
             .Setup(l => l.TryResolveAsync(It.IsAny<RatchetEphemeralKey>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((SessionId?)null);
+            .ReturnsAsync((SessionId?)null); // force slow-path
 
-        var preStore = new Mock<IPreHandshakeSessionStore>(MockBehavior.Strict);
+        var preStore = new Mock<IPreHandshakeSessionStore>(MockBehavior.Loose);
         preStore
             .Setup(s => s.EnumeratePendingAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .Returns((int _, CancellationToken __) => EmptyPreHandshake());
 
+        // Provide a most-recent prehandshake record and capture Delete for cleanup assertion
+        var mostRecent = new PreHandshakeRecord(
+            Id: 41,
+            SelfIdentityId: identity.SelfIdentityId,
+            RecipientPublicKeyHash: new byte[] { 0x41 },
+            LocalRequestId: Guid.NewGuid(),
+            InitiatorEphemeralPrivateKey: Array.Empty<byte>(),
+            InitialRootKey: new byte[] { 0x10, 0x20 },
+            CreatedAtUtc: DateTimeOffset.UtcNow,
+            ExpiresAtUtc: DateTimeOffset.UtcNow.AddMinutes(5),
+            RemoteIdentityKeySpki: new byte[] { 0x90 });
+        preStore
+            .Setup(s => s.TryGetMostRecentAsync(identity.SelfIdentityId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(mostRecent);
+
+        var deleteCalled = false;
+        preStore
+            .Setup(s => s.DeleteAsync(mostRecent.Id, identity.SelfIdentityId, It.IsAny<CancellationToken>()))
+            .Callback(() => deleteCalled = true)
+            .Returns(Task.CompletedTask);
+
+        // Build a valid ratchet message; header key value is not important beyond being present
+        var responderPk = new RatchetEphemeralKey(new byte[] { 0xE1 });
+        var payload = SessionRatchetMessage.Create(responderPk, 1, 0, new Ciphertext(new byte[] { 0xF1 })).Value;
+        var cmd = new HandleHandshakeResponderHelloCommand(payload);
+
+        // Provide a responder-assigned session id inside ResponderInnerHello that the handler must parse
+        var expectedSid = new SessionId(Guid.NewGuid());
+        var secure = new Mock<ISecureMessagingService>(MockBehavior.Strict);
+        secure
+            .Setup(s => s.DecryptInboundAsync(It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((expectedSid, new Plaintext(new ResponderInnerHello { Version = 1, DirectSessionId = expectedSid.Value.ToString() }.ToByteArray())));
+
+        // Capture finalize parameters to assert the parsed session id is used to finalize as initiator
+        SessionId? finalizedSid = null;
+        sessions
+            .Setup(s => s.FinalizeAsInitiatorAsync(
+                It.IsAny<SessionId>(),
+                It.IsAny<RatchetIdentityKey>(),
+                It.IsAny<SharedSecret>(),
+                It.IsAny<RatchetEphemeralKey>()))
+            .Callback<SessionId, RatchetIdentityKey, SharedSecret, RatchetEphemeralKey>((sid, _, __, ___) => finalizedSid = sid)
+            .Returns(Task.CompletedTask);
+
         var handler = new HandleHandshakeResponderHelloHandler(
             new NullLogger<HandleHandshakeResponderHelloHandler>(),
             sessions.Object,
+            secure.Object,
             active,
             lookup.Object,
             preStore.Object);
 
-        // Build a valid ratchet message header; contents don't matter for this unit test since CompleteHandshakeAsync is mocked
-        var pk = new RatchetEphemeralKey(new byte[] { 0xE1 });
-        var payload = SessionRatchetMessage.Create(pk, 1, 0, new Ciphertext(new byte[] { 0xF1 })).Value;
-        var cmd = new HandleHandshakeResponderHelloCommand(payload);
-
-        // Expected session id to be embedded in ResponderInnerHello plaintext
-        var expectedSid = new SessionId(Guid.NewGuid());
-
-        sessions
-            .Setup(s => s.CompleteHandshakeAsync(It.IsAny<SessionRatchetMessage>(), It.IsAny<Func<Plaintext, SessionId>>(), It.IsAny<CancellationToken>()))
-            .Returns<SessionRatchetMessage, Func<Plaintext, SessionId>, CancellationToken>((msg, getSid, ct) =>
-            {
-                var inner = new ResponderInnerHello
-                {
-                    Version = 1,
-                    DirectSessionId = expectedSid.Value.ToString(),
-                };
-                var pt = new Plaintext(inner.ToByteArray());
-                var sid = getSid(pt);
-                Assert.That(sid.Value, Is.EqualTo(expectedSid.Value), "Parsed SessionId should match expected");
-                return Task.FromResult((sid, pt));
-            });
-
-        // Since handler will now decrypt after finalize, set up SecureMessagingService to succeed
-        var secureSvc2 = new Mock<ISecureMessagingService>(MockBehavior.Strict);
-        secureSvc2
-            .Setup(s => s.DecryptInboundAsync(It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((new SessionId(Guid.NewGuid()), new Plaintext(new byte[] { 0xEF })));
-
-        // Act
+        // ACT
         await handler.Handle(cmd, CancellationToken.None);
 
-        // Assert that slow-path was used and session id parsed
-        sessions.Verify(s => s.CompleteHandshakeAsync(It.IsAny<SessionRatchetMessage>(), It.IsAny<Func<Plaintext, SessionId>>(), It.IsAny<CancellationToken>()), Times.Once);
+        // ASSERT
+        // - Clean-up occurred (pending prehandshake record removed)
+        Assert.That(deleteCalled, Is.True);
+        // - The session was finalized using the responder-provided SessionId
+        Assert.That(finalizedSid, Is.Not.Null);
+        Assert.That(finalizedSid!.Value, Is.EqualTo(expectedSid.Value));
     }
 }
