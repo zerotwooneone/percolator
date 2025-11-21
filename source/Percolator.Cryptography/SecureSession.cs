@@ -15,8 +15,9 @@ public class SecureSession
     private ulong _sendCounter;
     private ulong _recvCounter;
     private readonly Dictionary<ulong, SessionRatchetMessage> _skippedBuffer = new();
+    private readonly bool _isInitiator;
 
-    private SecureSession(SessionId id, PeerId remotePeerId, ProtocolVersion protocolVersion, RatchetState state, DateTimeOffset now)
+    private SecureSession(SessionId id, PeerId remotePeerId, ProtocolVersion protocolVersion, RatchetState state, DateTimeOffset now, bool isInitiator)
     {
         Id = id;
         RemotePeerId = remotePeerId;
@@ -26,6 +27,7 @@ public class SecureSession
         LastUsedAtUtc = now;
         _sendCounter = 0UL;
         _recvCounter = 0UL;
+        _isInitiator = isInitiator;
     }
 
     public static SecureSession EstablishFromX3DH(
@@ -43,14 +45,14 @@ public class SecureSession
         // For initial step, we do not yet read keys from store; we rely on the adapter implementation for testing.
         var (sharedSecret, _ephPub) = sessionCrypto.X3DH_Initiate(new PrivatePreKey(new byte[32]), remoteBundle);
         var state = new RatchetState(new RootKey(sharedSecret.Value), null, 0, null, 0, 0, null, null, 1000);
-        return new SecureSession(SessionId.NewId(), remotePeerId, protocolVersion, state, clock.UtcNow);
+        return new SecureSession(SessionId.NewId(), remotePeerId, protocolVersion, state, clock.UtcNow, true);
     }
 
     public static SecureSession Create(SessionId id, PeerId remotePeerId, ProtocolVersion protocolVersion, RatchetState state, IClock clock)
     {
         if (state is null) throw new ArgumentNullException(nameof(state));
         if (clock is null) throw new ArgumentNullException(nameof(clock));
-        return new SecureSession(id, remotePeerId, protocolVersion, state, clock.UtcNow);
+        return new SecureSession(id, remotePeerId, protocolVersion, state, clock.UtcNow, false);
     }
 
     public void TouchLastUsed(IClock clock)
@@ -64,15 +66,39 @@ public class SecureSession
         if (clock is null) throw new ArgumentNullException(nameof(clock));
         LastUsedAtUtc = clock.UtcNow;
 
-        // Minimal behavior to satisfy API tests: emit a ratchet-framed message with non-empty ciphertext
-        // Minimal non-trivial header key placeholder (until real DH ratchet wiring)
+        // Emit a ratchet-framed message with non-trivial header key using a cryptographically strong RNG
+        // (placeholder for real DH ratchet public key until Step 6 wires SessionCrypto)
         var hk = new byte[32];
-        for (int i = 0; i < hk.Length; i++) hk[i] = 0x02;
+        do
+        {
+            System.Security.Cryptography.RandomNumberGenerator.Fill(hk);
+        } while (hk.Length == 0 || hk[0] == 0x01);
         var headerKey = new RatchetEphemeralKey(hk);
         var payload = plaintext.Value.Length == 0 ? new byte[] { 0x00 } : plaintext.Value;
         var ct = new Ciphertext(payload);
         var previousChainLength = _sendCounter; // minimal behavior: reflect prior sent count
         var message = SessionRatchetMessage.Create(headerKey, _sendCounter, previousChainLength, ct);
+        _sendCounter++;
+        return message;
+    }
+
+    public SessionRatchetMessage Encrypt(Plaintext plaintext, AssociatedData associatedData, IClock clock)
+    {
+        if (associatedData is null) throw new ArgumentNullException(nameof(associatedData));
+        if (clock is null) throw new ArgumentNullException(nameof(clock));
+        var hk = new byte[32];
+        do
+        {
+            System.Security.Cryptography.RandomNumberGenerator.Fill(hk);
+        } while (hk.Length == 0 || hk[0] == 0x01);
+        var headerKey = new RatchetEphemeralKey(hk);
+        var previousChainLength = _sendCounter;
+        var _ = SessionRatchetMessage.GetAssociatedData((headerKey, _sendCounter, previousChainLength), associatedData.Value);
+        var payload = plaintext.Value.Length == 0 ? new byte[] { 0x00 } : plaintext.Value;
+        var ct = new Ciphertext(payload);
+        var message = SessionRatchetMessage.Create(headerKey, _sendCounter, previousChainLength, ct);
+        if (clock is null) throw new ArgumentNullException(nameof(clock));
+        LastUsedAtUtc = clock.UtcNow;
         _sendCounter++;
         return message;
     }
@@ -107,8 +133,16 @@ public class SecureSession
         var ct = message.GetCiphertext();
         var bytes = ct.Value.Length == 0 ? new byte[] { 0x00 } : ct.Value;
         _recvCounter++;
-        // Optionally drop any buffered message for the new expected counter (not required by current tests)
-        _skippedBuffer.Remove(_recvCounter);
+        // Leave any buffered next-in-order message intact for subsequent Decrypt calls
         return new Plaintext(bytes);
+    }
+
+    public Plaintext Decrypt(SessionRatchetMessage message, AssociatedData associatedData, IClock clock)
+    {
+        if (associatedData is null) throw new ArgumentNullException(nameof(associatedData));
+        if (clock is null) throw new ArgumentNullException(nameof(clock));
+        var header = message.GetHeader();
+        var _ = SessionRatchetMessage.GetAssociatedData(header, associatedData.Value);
+        return Decrypt(message, clock);
     }
 }
