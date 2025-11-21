@@ -10,6 +10,7 @@ using Percolator.Application.Network;
 using Percolator.Application.PeerDiscovery;
 using Percolator.Application.RateLimiting;
 using Percolator.Application.Sessions;
+using Percolator.Application.ReverseSignal;
 using Percolator.Chat.App.Commands;
 using Percolator.Dht.Messages;
 
@@ -35,6 +36,9 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IIdentityOrchestrator, IdentityOrchestrator>();
 
         services.AddChatServices();
+
+        services.AddScoped<ReverseSignalInvitationService>();
+        services.AddScoped<ReverseSignalAcceptService>();
 
         services.AddMediatR(cfg =>
         {
