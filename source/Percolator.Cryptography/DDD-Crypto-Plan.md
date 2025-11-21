@@ -422,10 +422,10 @@ Next: Phase 4 – Application-Layer Migration Plan
  - **Step 5: SecureSession behaviors (Encrypt/Decrypt with ratchet framing)**
   - Red: Tests for
     - Counter monotonicity, AD enforcement, skipped-keys retrieval, `TouchLastUsed()` updates.
-    - Initiator vs Responder first-message asymmetry:
-      - Initiator first-send performs a DH ratchet before first `Encrypt` and emits correct header.
+    - Initiator vs Responder first-message asymmetry (per session-flow):
+      - Initiator first-send performs a DH ratchet before first `Encrypt` and emits the header `public_ratchet_key`.
       - Responder decrypts the first inbound message, advances receiving chain, then persists finalized state.
-    - First-message envelope carries rendezvous payload (e.g., `SessionId`) enabling responder mapping.
+    - First responder message’s decrypted inner payload MUST include the responder-assigned `session_id` (per session-flow). The initiator never derives a session id.
   - Green: Implement via `SessionCrypto` port. API explicit about framing: return/consume a ratchet-framed message (e.g., `SessionRatchetMessage`) rather than a bare `Ciphertext` where appropriate. Update state immutably and persist via repository.
   - Refactor: Remove duplication, improve error messages, tune invariants.
   - Deliverable: `SecureSession` behavior + tests.
@@ -462,18 +462,21 @@ Next: Phase 4 – Application-Layer Migration Plan
   - Align any ratchet message framing names if they diverge (e.g., `SessionRatchetMessage`).
 
  - **Step 8: Application services integration (HandshakeService, SecureMessagingService)**
-  - Red: Tests for user journeys exercising services via ports:
-    - Standard outbound initiation (initiator path).
-    - Reverse-signal sender: `CreateInvitation(PeerId)` creates an invitation and (optionally) enqueues via outbox.
-    - Reverse-signal receiver: `PendingSession.FromInvitation(...)` then `ApproveAndRespond(...)` decrypts first inbound, finalizes session (persist), and enqueues response.
+  - Red: Tests for user journeys exercising services via ports (aligned to session-flow):
+    - Standard outbound initiation (initiator path):
+      - Fetch pre-key bundle, derive IRK, persist a short‑lived prehandshake record containing only the encrypted IRK and the remote identity key SPKI hash; DO NOT persist the initiator’s ephemeral private key.
+      - Send initiator hello/pre-key message if applicable.
+      - On first responder ratchet message, decrypt inner payload to obtain the responder-assigned `session_id`; finalize the initiator session and delete the prehandshake record.
+    - Reverse-signal sender: `CreateInvitation(PeerId)` creates an invitation (minimal metadata) and may enqueue via outbox.
+    - Reverse-signal receiver: upon accept, act as responder immediately, establish and send the first ratchet message; inviter finalizes using the decrypted inner payload’s `session_id`.
     - Inbound auto-approval per policy.
     - Use real adapters where practical; minimal stubs only for network/clock/random.
-  - Green: Implement orchestrators; ensure side-effects: outbox enqueue, notifications, repo updates.
+  - Green: Implement orchestrators; ensure side-effects per session-flow: outbox enqueue, notifications, repo updates; prehandshake TTL/purge and index on `(SelfIdentityId, RemoteIdentityKeySpkiHash, CreatedAtUtc)`.
   - Refactor: Split methods if needed, remove duplication.
   - Deliverable: Services integrated at the app layer with tests.
 
   - Sub-step: Cutover inbound decryption call sites
-    - Replace usages of `DirectSessionManager.ReceiveMessageAsync(SessionId, SessionRatchetMessage)` with Application composition over domain `ISecureMessagingService.DecryptInboundAsync` (fast/slow path) that does not require a known session id.
+    - Replace usages of `DirectSessionManager.ReceiveMessageAsync(SessionId, SessionRatchetMessage)` with Application composition over domain `ISecureMessagingService.DecryptInboundAsync` (fast/slow path) that does not require a known session id; initiator finalize path must parse `session_id` from the responder’s inner payload and use the responder’s header `public_ratchet_key`.
     - References to update:
       - Percolator.ApplicationIntegrationTests/Dht/DhtProbeLoopbackTests.cs
       - Percolator.ApplicationIntegrationTests/Dht/DhtIntegrationTests.cs
