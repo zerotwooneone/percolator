@@ -18,11 +18,13 @@ public class SecureSessionDhAsymmetryTests
     public void Initiator_First_Encrypt_Uses_NonTrivial_HeaderKey()
     {
         var clock = new TestClock10();
+        var crypto = new AeadSessionCrypto();
         var s = SecureSession.Create(
             SessionId.NewId(),
             PeerId.NewId(),
             new ProtocolVersion(1),
             new RatchetState(new RootKey(new byte[32]), null, 0, null, 0, 0, null, null, 1000),
+            crypto,
             clock);
 
         var msg = s.Encrypt(new Plaintext(new byte[] { 0x01 }), clock);

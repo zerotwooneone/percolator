@@ -74,7 +74,8 @@ public class InboundMessageResolverTests
         var peer = PeerId.NewId();
         var version = new ProtocolVersion(1);
         var state = new RatchetState(new RootKey(new byte[32]), null, 0, null, 0, 0, null, null, 1000);
-        return SecureSession.Create(id, peer, version, state, clock);
+        var crypto = new AeadSessionCrypto();
+        return SecureSession.Create(id, peer, version, state, crypto, clock);
     }
 
     [Test]
@@ -91,7 +92,9 @@ public class InboundMessageResolverTests
         var session = MakeSession(sid, clock);
         await repo.AddAsync(session);
 
-        var msg = SessionRatchetMessage.Create(new RatchetEphemeralKey(new byte[] { 9 }), 0, 0, new Ciphertext(new byte[] { 1 }));
+        // Create a sender session to produce a valid framed message
+        var sender = MakeSession(SessionId.NewId(), clock);
+        var msg = sender.Encrypt(new Plaintext(new byte[] { 1 }), clock);
         var result = await resolver.ResolveAsync(msg, clock, CancellationToken.None);
 
         result.Should().NotBeNull();
@@ -117,7 +120,9 @@ public class InboundMessageResolverTests
         await repo.AddAsync(MakeSession(sid1, clock));
         await repo.AddAsync(MakeSession(sid2, clock));
 
-        var msg = SessionRatchetMessage.Create(new RatchetEphemeralKey(new byte[] { 7 }), 0, 0, new Ciphertext(new byte[] { 2 }));
+        // Sender produces a real framed message
+        var sender2 = MakeSession(SessionId.NewId(), clock);
+        var msg = sender2.Encrypt(new Plaintext(new byte[] { 2 }), clock);
 
         var result = await resolver.ResolveAsync(msg, clock, CancellationToken.None);
 

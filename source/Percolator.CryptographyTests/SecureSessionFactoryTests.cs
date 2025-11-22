@@ -21,8 +21,13 @@ file sealed class DummySessionCrypto : ISessionCrypto
         return (new SharedSecret(new byte[32]), new RatchetEphemeralKey(new byte[] { 0xEE }));
     }
 
-    public (Ciphertext Ciphertext, RatchetState NewState) DR_Encrypt(RatchetState state, Plaintext pt, AssociatedData ad)
-        => (new Ciphertext(new byte[] { 0x01 }), state);
+    public (Ciphertext Ciphertext, RatchetEphemeralKey HeaderKey, RatchetState NewState) DR_Encrypt(
+        RatchetState state,
+        Plaintext pt,
+        AssociatedData ad,
+        ulong counter,
+        ulong previousChainLength)
+        => (new Ciphertext(new byte[] { 0x01 }), new RatchetEphemeralKey(new byte[] { 0x02 }), state);
 
     public (Plaintext Plaintext, RatchetState NewState) DR_Decrypt(RatchetState state, SessionRatchetMessage framed, AssociatedData ad)
         => (new Plaintext(new byte[] { 0x01 }), state);

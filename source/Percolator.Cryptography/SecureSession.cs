@@ -16,8 +16,9 @@ public class SecureSession
     private ulong _recvCounter;
     private readonly Dictionary<ulong, SessionRatchetMessage> _skippedBuffer = new();
     private readonly bool _isInitiator;
+    private readonly ISessionCrypto _crypto;
 
-    private SecureSession(SessionId id, PeerId remotePeerId, ProtocolVersion protocolVersion, RatchetState state, DateTimeOffset now, bool isInitiator)
+    private SecureSession(SessionId id, PeerId remotePeerId, ProtocolVersion protocolVersion, RatchetState state, ISessionCrypto crypto, DateTimeOffset now, bool isInitiator)
     {
         Id = id;
         RemotePeerId = remotePeerId;
@@ -28,6 +29,7 @@ public class SecureSession
         _sendCounter = 0UL;
         _recvCounter = 0UL;
         _isInitiator = isInitiator;
+        _crypto = crypto;
     }
 
     public static SecureSession EstablishFromX3DH(
@@ -45,15 +47,18 @@ public class SecureSession
         // For initial step, we do not yet read keys from store; we rely on the adapter implementation for testing.
         var (sharedSecret, _ephPub) = sessionCrypto.X3DH_Initiate(new PrivatePreKey(new byte[32]), remoteBundle);
         var state = new RatchetState(new RootKey(sharedSecret.Value), null, 0, null, 0, 0, null, null, 1000);
-        return new SecureSession(SessionId.NewId(), remotePeerId, protocolVersion, state, clock.UtcNow, true);
+        return new SecureSession(SessionId.NewId(), remotePeerId, protocolVersion, state, sessionCrypto, clock.UtcNow, true);
     }
 
-    public static SecureSession Create(SessionId id, PeerId remotePeerId, ProtocolVersion protocolVersion, RatchetState state, IClock clock)
+    public static SecureSession Create(SessionId id, PeerId remotePeerId, ProtocolVersion protocolVersion, RatchetState state, ISessionCrypto sessionCrypto, IClock clock)
     {
         if (state is null) throw new ArgumentNullException(nameof(state));
         if (clock is null) throw new ArgumentNullException(nameof(clock));
-        return new SecureSession(id, remotePeerId, protocolVersion, state, clock.UtcNow, false);
+        if (sessionCrypto is null) throw new ArgumentNullException(nameof(sessionCrypto));
+        return new SecureSession(id, remotePeerId, protocolVersion, state, sessionCrypto, clock.UtcNow, false);
     }
+
+    
 
     public void TouchLastUsed(IClock clock)
     {
@@ -65,84 +70,57 @@ public class SecureSession
     {
         if (clock is null) throw new ArgumentNullException(nameof(clock));
         LastUsedAtUtc = clock.UtcNow;
-
-        // Emit a ratchet-framed message with non-trivial header key using a cryptographically strong RNG
-        // (placeholder for real DH ratchet public key until Step 6 wires SessionCrypto)
-        var hk = new byte[32];
-        do
-        {
-            System.Security.Cryptography.RandomNumberGenerator.Fill(hk);
-        } while (hk.Length == 0 || hk[0] == 0x01);
-        var headerKey = new RatchetEphemeralKey(hk);
-        var payload = plaintext.Value.Length == 0 ? new byte[] { 0x00 } : plaintext.Value;
-        var ct = new Ciphertext(payload);
-        var previousChainLength = _sendCounter; // minimal behavior: reflect prior sent count
-        var message = SessionRatchetMessage.Create(headerKey, _sendCounter, previousChainLength, ct);
+        var previousChainLength = _sendCounter;
+        var (ct, headerKey, newState) = _crypto.DR_Encrypt(State, plaintext, new AssociatedData(Array.Empty<byte>()), _sendCounter, previousChainLength);
+        var msg = SessionRatchetMessage.Create(headerKey, _sendCounter, previousChainLength, ct);
         _sendCounter++;
-        return message;
+        return msg;
     }
 
     public SessionRatchetMessage Encrypt(Plaintext plaintext, AssociatedData associatedData, IClock clock)
     {
         if (associatedData is null) throw new ArgumentNullException(nameof(associatedData));
         if (clock is null) throw new ArgumentNullException(nameof(clock));
-        var hk = new byte[32];
-        do
-        {
-            System.Security.Cryptography.RandomNumberGenerator.Fill(hk);
-        } while (hk.Length == 0 || hk[0] == 0x01);
-        var headerKey = new RatchetEphemeralKey(hk);
-        var previousChainLength = _sendCounter;
-        var _ = SessionRatchetMessage.GetAssociatedData((headerKey, _sendCounter, previousChainLength), associatedData.Value);
-        var payload = plaintext.Value.Length == 0 ? new byte[] { 0x00 } : plaintext.Value;
-        var ct = new Ciphertext(payload);
-        var message = SessionRatchetMessage.Create(headerKey, _sendCounter, previousChainLength, ct);
-        if (clock is null) throw new ArgumentNullException(nameof(clock));
         LastUsedAtUtc = clock.UtcNow;
+        var previousChainLength = _sendCounter;
+        var (ct, headerKey, newState) = _crypto.DR_Encrypt(State, plaintext, associatedData, _sendCounter, previousChainLength);
+        var msg = SessionRatchetMessage.Create(headerKey, _sendCounter, previousChainLength, ct);
         _sendCounter++;
-        return message;
+        return msg;
     }
 
     public Plaintext Decrypt(SessionRatchetMessage message, IClock clock)
     {
         if (clock is null) throw new ArgumentNullException(nameof(clock));
         LastUsedAtUtc = clock.UtcNow;
-
-        // Minimal AD/header validation: require non-empty header ratchet key
         var (preKey, ctr, _) = message.GetHeader();
-        if (preKey.Value.Length == 0)
-            throw new ArgumentException("Invalid ratchet header key.", nameof(message));
-
         if (ctr > _recvCounter)
         {
-            // Buffer out-of-order for later
             if (_skippedBuffer.Count >= State.SkippedKeyLimit)
                 throw new InvalidOperationException("Skipped-key buffer limit reached.");
             _skippedBuffer[ctr] = message;
-            // Return a benign plaintext (no-op) to satisfy non-throwing contract in tests
             return new Plaintext(Array.Empty<byte>());
         }
-        else if (ctr < _recvCounter)
-        {
-            // Already processed or buffered; allow re-processing only if now in-order
-            if (ctr != _recvCounter)
-                throw new InvalidOperationException("Out-of-order or duplicate message.");
-        }
-
-        // Minimal behavior to satisfy API tests: echo back ciphertext as plaintext
-        var ct = message.GetCiphertext();
-        var bytes = ct.Value.Length == 0 ? new byte[] { 0x00 } : ct.Value;
+        var (pt, newState) = _crypto.DR_Decrypt(State, message, new AssociatedData(Array.Empty<byte>()));
         _recvCounter++;
-        // Leave any buffered next-in-order message intact for subsequent Decrypt calls
-        return new Plaintext(bytes);
+        return pt;
     }
 
     public Plaintext Decrypt(SessionRatchetMessage message, AssociatedData associatedData, IClock clock)
     {
         if (associatedData is null) throw new ArgumentNullException(nameof(associatedData));
         if (clock is null) throw new ArgumentNullException(nameof(clock));
-        var header = message.GetHeader();
-        var _ = SessionRatchetMessage.GetAssociatedData(header, associatedData.Value);
-        return Decrypt(message, clock);
+        LastUsedAtUtc = clock.UtcNow;
+        var (preKey, ctr, _) = message.GetHeader();
+        if (ctr > _recvCounter)
+        {
+            if (_skippedBuffer.Count >= State.SkippedKeyLimit)
+                throw new InvalidOperationException("Skipped-key buffer limit reached.");
+            _skippedBuffer[ctr] = message;
+            return new Plaintext(Array.Empty<byte>());
+        }
+        var (pt, newState) = _crypto.DR_Decrypt(State, message, associatedData);
+        _recvCounter++;
+        return pt;
     }
 }

@@ -18,11 +18,13 @@ public class SecureSessionSkippedKeyLimitTests
     public void Buffer_Limit_Enforced_On_OutOfOrder_Messages()
     {
         var clock = new TestClock14();
+        var crypto = new AeadSessionCrypto();
         var s = SecureSession.Create(
             SessionId.NewId(),
             PeerId.NewId(),
             new ProtocolVersion(1),
             new RatchetState(new RootKey(new byte[32]), null, 0, null, 0, 0, null, null, skippedKeyLimit: 1),
+            crypto,
             clock);
 
         // First out-of-order (counter 1) is buffered

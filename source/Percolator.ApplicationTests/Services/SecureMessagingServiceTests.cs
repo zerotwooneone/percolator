@@ -30,11 +30,13 @@ public class SecureMessagingServiceTests
 
         // Seed a session
         var clock = new TestClock();
+        var crypto = new AeadSessionCrypto();
         var session = SecureSession.Create(
             SessionId.NewId(),
             new PeerId(Guid.NewGuid()),
             new ProtocolVersion(1),
             new RatchetState(new RootKey(new byte[32]), null, 0, null, 0, 0, null, null, 1000),
+            crypto,
             clock);
         await repo.AddAsync(session);
 

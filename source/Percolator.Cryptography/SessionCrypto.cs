@@ -7,8 +7,13 @@ public interface ISessionCrypto
         PrivatePreKey localIdentityPrivate,
         PreKeyBundle remoteBundle);
 
-    // Double Ratchet primitives (shape for future steps)
-    (Ciphertext Ciphertext, RatchetState NewState) DR_Encrypt(RatchetState state, Plaintext pt, AssociatedData ad);
+    // Double Ratchet primitives: encryption must bind to header via AD and use counter for nonce
+    (Ciphertext Ciphertext, RatchetEphemeralKey HeaderKey, RatchetState NewState) DR_Encrypt(
+        RatchetState state,
+        Plaintext pt,
+        AssociatedData ad,
+        ulong counter,
+        ulong previousChainLength);
     (Plaintext Plaintext, RatchetState NewState) DR_Decrypt(RatchetState state, SessionRatchetMessage framed, AssociatedData ad);
 
     // Signature verification (bundle validation)

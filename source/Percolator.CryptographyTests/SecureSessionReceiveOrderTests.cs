@@ -18,11 +18,13 @@ public class SecureSessionReceiveOrderTests
     public void Decrypt_Does_Not_Throw_On_OutOfOrder_Receive_When_Buffering_Enabled()
     {
         var clock = new TestClock11();
+        var crypto = new AeadSessionCrypto();
         var s = SecureSession.Create(
             SessionId.NewId(),
             PeerId.NewId(),
             new ProtocolVersion(1),
             new RatchetState(new RootKey(new byte[32]), null, 0, null, 0, 0, null, null, 1000),
+            crypto,
             clock);
 
         // Simulate receiving a future counter (2) before 0 or 1

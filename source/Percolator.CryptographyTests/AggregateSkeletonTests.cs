@@ -23,7 +23,8 @@ public class AggregateSkeletonTests
         var version = new ProtocolVersion(1);
         var state = new RatchetState(new RootKey(new byte[32]), null, 0, null, 0, 0, null, null, 1000);
 
-        var s = SecureSession.Create(id, peer, version, state, clock);
+        var crypto = new AeadSessionCrypto();
+        var s = SecureSession.Create(id, peer, version, state, crypto, clock);
 
         s.Id.Should().Be(id);
         s.RemotePeerId.Should().Be(peer);
@@ -40,8 +41,10 @@ public class AggregateSkeletonTests
         var id = SessionId.NewId();
         var peer = PeerId.NewId();
         var version = new ProtocolVersion(1);
-        Assert.Throws<ArgumentNullException>(() => SecureSession.Create(id, peer, version, null!, clock));
-        Assert.Throws<ArgumentNullException>(() => SecureSession.Create(id, peer, version, new RatchetState(new RootKey(new byte[32]), null, 0, null, 0, 0, null, null, 1000), null!));
+        var crypto = new AeadSessionCrypto();
+        Assert.Throws<ArgumentNullException>(() => SecureSession.Create(id, peer, version, null!, crypto, clock));
+        Assert.Throws<ArgumentNullException>(() => SecureSession.Create(id, peer, version, new RatchetState(new RootKey(new byte[32]), null, 0, null, 0, 0, null, null, 1000), crypto, null!));
+        Assert.Throws<ArgumentNullException>(() => SecureSession.Create(id, peer, version, new RatchetState(new RootKey(new byte[32]), null, 0, null, 0, 0, null, null, 1000), null!, clock));
     }
 
     [Test]

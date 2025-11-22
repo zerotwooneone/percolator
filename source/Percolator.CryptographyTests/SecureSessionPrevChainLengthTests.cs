@@ -18,11 +18,13 @@ public class SecureSessionPrevChainLengthTests
     public void Second_Encrypt_Sets_PrevChainLength_To_Previous_Send_Count()
     {
         var clock = new TestClock9();
+        var crypto = new AeadSessionCrypto();
         var s = SecureSession.Create(
             SessionId.NewId(),
             PeerId.NewId(),
             new ProtocolVersion(1),
             new RatchetState(new RootKey(new byte[32]), null, 0, null, 0, 0, null, null, 1000),
+            crypto,
             clock);
 
         var first = s.Encrypt(new Plaintext(new byte[] { 1 }), clock);

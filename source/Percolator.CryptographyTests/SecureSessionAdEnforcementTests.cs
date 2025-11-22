@@ -18,23 +18,32 @@ public class SecureSessionAdEnforcementTests
     public void Decrypt_Throws_On_Tampered_HeaderKey()
     {
         var clock = new TestClock8();
-        var s = SecureSession.Create(
+        var crypto = new AeadSessionCrypto();
+        var receiver = SecureSession.Create(
             SessionId.NewId(),
             PeerId.NewId(),
             new ProtocolVersion(1),
             new RatchetState(new RootKey(new byte[32]), null, 0, null, 0, 0, null, null, 1000),
+            crypto,
+            clock);
+        var sender = SecureSession.Create(
+            SessionId.NewId(),
+            PeerId.NewId(),
+            new ProtocolVersion(1),
+            new RatchetState(new RootKey(new byte[32]), null, 0, null, 0, 0, null, null, 1000),
+            crypto,
             clock);
 
-        var ct = new Ciphertext(new byte[] { 0x11 });
-        var good = SessionRatchetMessage.Create(new RatchetEphemeralKey(new byte[] { 0xAA }), 0, 0, ct);
+        var good = sender.Encrypt(new Plaintext(new byte[] { 0x11 }), clock);
 
         // Sanity: non-tampered decrypt succeeds
-        var pt = s.Decrypt(good, clock);
+        var pt = receiver.Decrypt(good, clock);
         pt.Value.Should().NotBeNull();
 
         // Tamper header: empty ratchet key is invalid
-        var tampered = SessionRatchetMessage.Create(new RatchetEphemeralKey(Array.Empty<byte>()), 0, 0, ct);
-        Action act = () => s.Decrypt(tampered, clock);
+        var (hdr, ctr, prev) = good.GetHeader();
+        var tampered = SessionRatchetMessage.Create(new RatchetEphemeralKey(Array.Empty<byte>()), ctr, prev, good.GetCiphertext());
+        Action act = () => receiver.Decrypt(tampered, clock);
         act.Should().Throw<ArgumentException>();
     }
 }

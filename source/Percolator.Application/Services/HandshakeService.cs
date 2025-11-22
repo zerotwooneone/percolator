@@ -37,7 +37,8 @@ public sealed class HandshakeService : IHandshakeService
             dhRatchetPrivateKey: null,
             skippedKeyLimit: 1000);
 
-        var session = SecureSession.Create(sessionId, peerId, proto, state, clock);
+        var crypto = new AeadSessionCrypto();
+        var session = SecureSession.Create(sessionId, peerId, proto, state, crypto, clock);
 
         SessionRatchetMessage? initial = null;
         if (initialMessage is not null)

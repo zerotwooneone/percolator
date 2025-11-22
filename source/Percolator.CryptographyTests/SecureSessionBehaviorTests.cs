@@ -20,7 +20,8 @@ public class SecureSessionBehaviorTests
         var peer = PeerId.NewId();
         var version = new ProtocolVersion(1);
         var state = new RatchetState(new RootKey(new byte[32]), null, 0, null, 0, 0, null, null, 1000);
-        return SecureSession.Create(id, peer, version, state, clock);
+        var crypto = new AeadSessionCrypto();
+        return SecureSession.Create(id, peer, version, state, crypto, clock);
     }
 
     [Test]
@@ -48,16 +49,17 @@ public class SecureSessionBehaviorTests
     {
         // Arrange
         var clock = new TestClock4();
-        var session = CreateBaselineSession(clock);
-        var headerKey = new RatchetEphemeralKey(new byte[] { 5, 6, 7 });
-        var framed = SessionRatchetMessage.Create(headerKey, 0, 0, new Ciphertext(new byte[] { 9, 9 }));
+        var receiver = CreateBaselineSession(clock);
+        var sender = CreateBaselineSession(clock);
+        var expected = new Plaintext(new byte[] { 9, 9, 9 });
+        var framed = sender.Encrypt(expected, clock);
         clock.UtcNow = clock.UtcNow.AddMinutes(1);
 
         // Act
-        var pt = session.Decrypt(framed, clock);
+        var pt = receiver.Decrypt(framed, clock);
 
         // Assert
         pt.Value.Should().NotBeNull();
-        session.LastUsedAtUtc.Should().Be(clock.UtcNow);
+        receiver.LastUsedAtUtc.Should().Be(clock.UtcNow);
     }
 }

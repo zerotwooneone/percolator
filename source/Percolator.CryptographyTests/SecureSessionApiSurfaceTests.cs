@@ -18,20 +18,21 @@ public class SecureSessionApiSurfaceTests
     public void Encrypt_And_Decrypt_Methods_Are_Invokable_And_Return_Results()
     {
         var clock = new TestClock3();
+        var crypto = new AeadSessionCrypto();
         var s = SecureSession.Create(
             SessionId.NewId(),
             PeerId.NewId(),
             new ProtocolVersion(1),
             new RatchetState(new RootKey(new byte[32]), null, 0, null, 0, 0, null, null, 1000),
+            crypto,
             clock);
 
         var encrypted = s.Encrypt(new Plaintext(new byte[] { 1 }), clock);
         encrypted.Should().NotBeNull();
         encrypted.GetCiphertext().Value.Should().NotBeNull();
 
-        // Construct a minimal ratchet-framed message (empty payload) for API presence
-        var msg = SessionRatchetMessage.Create(new RatchetEphemeralKey(new byte[1]) , 0, 0, new Ciphertext(Array.Empty<byte>()));
-        var decrypted = s.Decrypt(msg, clock);
+        // Decrypt a real message produced by the session (sanity)
+        var decrypted = s.Decrypt(encrypted, clock);
         decrypted.Value.Should().NotBeNull();
     }
 
@@ -39,11 +40,13 @@ public class SecureSessionApiSurfaceTests
     public void TouchLastUsed_Updates_Timestamp()
     {
         var clock = new TestClock3();
+        var crypto = new AeadSessionCrypto();
         var s = SecureSession.Create(
             SessionId.NewId(),
             PeerId.NewId(),
             new ProtocolVersion(1),
             new RatchetState(new RootKey(new byte[32]), null, 0, null, 0, 0, null, null, 1000),
+            crypto,
             clock);
 
         var created = s.CreatedAtUtc;
