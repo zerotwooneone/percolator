@@ -4,7 +4,7 @@ using Microsoft.Extensions.Logging;
 using Percolator.Application.Identity;
 using Percolator.Application.KeyExchange;
 using Percolator.Application.Network;
-using Percolator.Application.Sessions;
+using Percolator.Application.Services;
 using Percolator.Application.Services;
 using Percolator.Contracts;
 using Percolator.Cryptography;
@@ -18,7 +18,7 @@ namespace Percolator.Application.Cli;
 public class RequestPreKeyBundleByPkhHandler : IRequestHandler<RequestPreKeyBundleByPkhCommand, Unit>
 {
     private readonly ILogger<RequestPreKeyBundleByPkhHandler> _logger;
-    private readonly IConversationService _conversationService;
+    private readonly IDirectSessionLocator _directSessionLocator;
     private readonly ISecureMessagingService _secureMessaging;
     private readonly IMessageTransportService _transport;
     private readonly ActiveIdentityContext _activeIdentity;
@@ -28,7 +28,7 @@ public class RequestPreKeyBundleByPkhHandler : IRequestHandler<RequestPreKeyBund
 
     public RequestPreKeyBundleByPkhHandler(
         ILogger<RequestPreKeyBundleByPkhHandler> logger,
-        IConversationService conversationService,
+        IDirectSessionLocator directSessionLocator,
         ISecureMessagingService secureMessaging,
         IMessageTransportService transport,
         ActiveIdentityContext activeIdentity,
@@ -37,7 +37,7 @@ public class RequestPreKeyBundleByPkhHandler : IRequestHandler<RequestPreKeyBund
         IOneTimeKeyProvider oneTimeKeyProvider)
     {
         _logger = logger;
-        _conversationService = conversationService;
+        _directSessionLocator = directSessionLocator;
         _secureMessaging = secureMessaging;
         _transport = transport;
         _activeIdentity = activeIdentity;
@@ -65,7 +65,11 @@ public class RequestPreKeyBundleByPkhHandler : IRequestHandler<RequestPreKeyBund
         }
         var hostPeer = new Peer(hostIdentity.Id, hostIdentity.DisplayName?.Value ?? request.TargetPeerName);
 
-        var directHostSessionId = await _conversationService.GetExistingDirectSessionAsync(hostPeer).ConfigureAwait(false);
+        if (_activeIdentity.Identity is null)
+        {
+            throw new InvalidOperationException("Active identity not loaded.");
+        }
+        var directHostSessionId = await _directSessionLocator.GetAsync(hostPeer.Id, _activeIdentity.Identity.SelfIdentityId, cancellationToken).ConfigureAwait(false);
         if (directHostSessionId is null)
         {
             throw new InvalidOperationException("Direct session not found.");

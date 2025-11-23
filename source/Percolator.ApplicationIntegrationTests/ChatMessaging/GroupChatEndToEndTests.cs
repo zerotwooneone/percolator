@@ -19,6 +19,7 @@ using Percolator.Application.Cli;
 using Percolator.Prekey.DependencyInjection;
 using Percolator.Application.Apps.Chat;
 using Percolator.MessageQueue.Abstractions;
+using Percolator.Application.Services;
 
 namespace Percolator.ApplicationIntegrationTests.ChatMessaging
 {
@@ -462,12 +463,16 @@ namespace Percolator.ApplicationIntegrationTests.ChatMessaging
 
         private static async Task AssertSessionExists(IHost sender, string remoteName)
         {
-            var convSvc = sender.Services.GetRequiredService<Percolator.Application.Sessions.IConversationService>();
+            var locator = sender.Services.GetRequiredService<IDirectSessionLocator>();
             var identityRepo = sender.Services.GetRequiredService<Percolator.Identity.IPeerIdentityRepository>();
-            var peerIdentity = await identityRepo.GetByNameAsync(new Percolator.Identity.Model.DisplayName(remoteName), CancellationToken.None) 
+            var active = sender.Services.GetRequiredService<Percolator.Application.Identity.ActiveIdentityContext>();
+            var peerIdentity = await identityRepo.GetByNameAsync(new Percolator.Identity.Model.DisplayName(remoteName), CancellationToken.None)
                 ?? throw new InvalidOperationException($"Peer '{remoteName}' not found on sender.");
-            var peer = new Percolator.Identity.Peer(peerIdentity.Id, remoteName);
-            var existing = await convSvc.GetExistingDirectSessionAsync(peer);
+            if (active.Identity is null)
+            {
+                throw new InvalidOperationException("Active identity not loaded on sender.");
+            }
+            var existing = await locator.GetAsync(peerIdentity.Id, active.Identity.SelfIdentityId, CancellationToken.None);
             if (existing is null)
             {
                 TestContext.WriteLine($"ASSERTION FAILED: No direct session found from sender to '{remoteName}'.");

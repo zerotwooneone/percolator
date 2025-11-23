@@ -11,7 +11,7 @@ using Percolator.Application.Cli;
 using Percolator.Application.Identity;
 using Percolator.Application.Network;
 using Percolator.Application.Services;
-using Percolator.Application.Sessions;
+using Percolator.Application.Services;
 using Percolator.Contracts;
 using Percolator.Cryptography;
 using Percolator.Identity;
@@ -23,7 +23,7 @@ namespace Percolator.ApplicationTests.Cli;
 public class SubmitPreKeysHandlerTests
 {
     private ActiveIdentityContext _activeIdentity = null!;
-    private Mock<IConversationService> _conversationService = null!;
+    private Mock<IDirectSessionLocator> _directSessionLocator = null!;
     private Mock<ISecureMessagingService> _secureSvc;
     private Mock<IMessageTransportService> _transport = null!;
     private Mock<Percolator.Identity.IPeerIdentityRepository> _peerIdentityRepository = null!;
@@ -34,7 +34,7 @@ public class SubmitPreKeysHandlerTests
     public void SetUp()
     {
         _activeIdentity = new ActiveIdentityContext();
-        _conversationService = new Mock<IConversationService>();
+        _directSessionLocator = new Mock<IDirectSessionLocator>();
         _transport = new Mock<IMessageTransportService>();
         _peerIdentityRepository = new Mock<Percolator.Identity.IPeerIdentityRepository>();
         _oneTimeKeyProvider = new Mock<IOneTimeKeyProvider>();
@@ -65,8 +65,8 @@ public class SubmitPreKeysHandlerTests
                 return id;
             });
         var directSessionId = new DirectSessionId(Guid.NewGuid());
-        _conversationService
-            .Setup(s => s.GetExistingDirectSessionAsync(It.IsAny<Peer>()))
+        _directSessionLocator
+            .Setup(s => s.GetAsync(It.IsAny<Percolator.Identity.PeerId>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(directSessionId);
 
         // One-time key provider returns fresh keys for signed pre-key and N one-time keys
@@ -105,7 +105,7 @@ public class SubmitPreKeysHandlerTests
         // Act
         var handler = new SubmitPreKeysHandler(
             new NullLogger<SubmitPreKeysHandler>(),
-            _conversationService.Object,
+            _directSessionLocator.Object,
             _transport.Object,
             _activeIdentity,
             _peerIdentityRepository.Object,
@@ -138,7 +138,7 @@ public class SubmitPreKeysHandlerTests
 
         var handler = new SubmitPreKeysHandler(
             new NullLogger<SubmitPreKeysHandler>(),
-            _conversationService.Object,
+            _directSessionLocator.Object,
             _transport.Object,
             _activeIdentity,
             _peerIdentityRepository.Object,

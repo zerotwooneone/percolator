@@ -574,6 +574,133 @@ Next: Phase 4 – Application-Layer Migration Plan
   - Refactor: Split methods if needed, remove duplication.
   - Deliverable: Services integrated at the app layer with tests.
 
+  - **Step 8a: Prepare to delete ConversationService (and its tests)**
+    - Purpose
+      - Remove the legacy monolith `ConversationService` by migrating its call sites to DDD-aligned services without shims or no-op placeholders.
+      - Do NOT use MediatR for low-level protocol steps (X3DH/DR). Reserve MediatR only for high-level user actions.
+    - Responsibilities to replace
+      - Session lookup/mapping (remote peer -> `DirectSessionId`) scoped by self-identity
+      - Outbound session establishment (standard initiator path)
+      - Transport round-trips for initial session request/response (gRPC)
+      - First-message decrypt/finalize (initiator) and persist
+    - Replacement services/ports
+      - `IDirectSessionRepository` (Network) via a thin app adapter if needed for self-identity scoping (name: `IDirectSessionLocator`)
+      - `IHandshakeService` for session establishment using crypto-domain types (`CryptoPeerId`, `SessionId`, `SessionRatchetMessage`)
+      - `ISecureMessagingService` for encrypt/decrypt and ratchet state progression
+      - `IGrpcSessionService` for the gRPC establish-session round-trip
+      - Explicit type aliases where multiple PeerId types exist: `CryptoPeerId`, `IdentityPeerId`, `NetworkPeerId`
+    - Call sites to migrate (replace `IConversationService` usage)
+      - `Percolator.Application.Cli.ConnectToPeerHandler`
+      - `Percolator.Application.Cli.DhtProbeHandler`
+      - `Percolator.Application.Cli.DhtPingHandler`
+      - `Percolator.Application.Cli.InitiateHandshakeViaHostHandler`
+      - `Percolator.Application.Cli.RequestPreKeyBundleByPkhHandler`
+      - `Percolator.Application.Cli.SubmitPreKeysHandler`
+      - Tests under `Percolator.ApplicationTests` that mock `IConversationService`
+    - Migration plan (TDD)
+      1. Add `IDirectSessionLocator` (app service) with tests
+         - `Task<DirectSessionId?> GetAsync(NetworkPeerId remote, int selfIdentityId, CancellationToken ct)`
+         - Tests: returns existing id; returns null when missing
+      2. Update CLI handlers listed above
+         - Replace `GetExistingDirectSessionAsync` with `IDirectSessionLocator`
+         - When a new session is required, call `IHandshakeService` directly (no MediatR), then persist mapping via `IDirectSessionRepository`
+         - Keep transport use (`IGrpcSessionService`, `IMessageTransportService`) as-is
+         - Tests: reuse session when present; establish via handshake and persist when missing
+      3. Replace initiator finalize paths to use `ISecureMessagingService` for decrypting first responder message and commit the finalized session id
+      4. Delete `ConversationService`, `IConversationService`, DI registration, and all `ConversationService` tests
+    - Per-callsite migration details (flows, required ports, test matrix)
+      - ConnectToPeerHandler
+        - Flow
+          1) Resolve `IdentityPeerId` from name via `IPeerIdentityRepository`
+          2) Use `IDirectSessionLocator.GetAsync(NetworkPeerId, selfIdentityId)`
+          3) If missing: call `IHandshakeService.InitiateStandardHandshake(CryptoPeerId)` -> `(SessionId, SessionRatchetMessage? initial)`
+          4) Persist mapping via `IDirectSessionRepository.UpsertAsync(NetworkPeerId, DirectSessionId, selfIdentityId)`
+          5) Return `DirectSessionId`
+        - Tests
+          - Reuses existing session
+          - Establishes new session, persists mapping, returns new id
+          - Errors: missing identity, handshake failure -> throws
+        - Ports
+          - `IPeerIdentityRepository`, `IDirectSessionLocator`, `IHandshakeService`, `IDirectSessionRepository`
+      - DhtProbeHandler
+        - Flow
+          1) Resolve remote peer via `IPeerIdentityRepository`
+          2) Ensure direct session id via locator or establish via `IHandshakeService` as above
+          3) Build `InternalEnvelope` (PingRequest)
+          4) Use `IMessageService.SendMessageAsync(envelope, IdentityPeerId)` (no response expected)
+        - Tests
+          - Sends ping over existing session
+          - Establishes missing session and then sends
+          - Error when identity or keys are missing
+        - Ports
+          - `IPeerIdentityRepository`, `IDirectSessionLocator`, `IHandshakeService`, `IMessageService`
+      - DhtPingHandler
+        - Flow (no auto-establish in current behavior):
+          1) Resolve remote peer
+          2) Require existing `DirectSessionId` from locator; if null, throw (preserve behavior)
+          3) Build Ping envelope; call `IMessageService.SendMessageAsync`
+        - Tests
+          - Happy path sends ping
+          - Throws when direct session not found
+        - Ports
+          - `IPeerIdentityRepository`, `IDirectSessionLocator`, `IMessageService`
+      - InitiateHandshakeViaHostHandler
+        - Flow
+          1) Ensure direct session to Host via locator (throw if missing, preserve behavior)
+          2) Get target PKH pre-key bundle via Host (encrypt/send via `ISecureMessagingService` + `IMessageTransportService`)
+          3) Validate bundle fields; activate PKH via `IPeerPublicSigningKeyStore`
+          4) Upsert routing profile with identity public key
+          5) Enqueue initiator hello via `IInitiatorHelloService` (existing service)
+        - Tests
+          - Retrieves bundle and enqueues hello via host
+          - Fails when host session missing, bundle malformed, or decrypt fails
+        - Ports
+          - `IDirectSessionLocator`, `ISecureMessagingService`, `IMessageTransportService`, `IPeerPublicSigningKeyStore`, `IPeerRoutingProfileRepository`, `IInitiatorHelloService`
+      - RequestPreKeyBundleByPkhHandler
+        - Flow
+          1) Resolve Host identity and require existing direct session via locator (throw if missing)
+          2) Build GetPreKeyBundle request envelope
+          3) Encrypt via `ISecureMessagingService`, send via `IMessageTransportService`
+          4) Decrypt response via `ISecureMessagingService`, validate type and fields
+          5) (Handshake will be performed by higher-level flow; this handler returns after fetch)
+        - Tests
+          - Happy path fetches bundle and returns Unit
+          - Errors on missing host session, no response payload, or decrypt failure
+        - Ports
+          - `IDirectSessionLocator`, `ISecureMessagingService`, `IMessageTransportService`
+      - SubmitPreKeysHandler
+        - Flow
+          1) Resolve target via `IPeerIdentityRepository`
+          2) Require existing direct session via `IDirectSessionLocator` (no auto-establish). Throw if null
+          3) Generate and persist signed pre-key and N one-time keys via `ISelfPreKeyBundleRepository`
+          4) Build `SubmitPreKeyBundleRequest` in `InternalEnvelope`
+          5) Encrypt via `ISecureMessagingService` and send via `IMessageTransportService`
+          6) Decrypt response and verify `SubmitPreKeyBundleResponse`
+          7) Return 0 on success; non-zero/throw on contract violations
+        - Tests
+          - Happy path returns 0; transport/send invoked once; decrypt invoked once
+          - Throws on zero count
+          - Throws on missing direct session
+          - Returns error/non-zero or throws on unexpected response type or decrypt failure (align with current behavior)
+        - Ports
+          - `IDirectSessionLocator`, `ISelfPreKeyBundleRepository`, `ISecureMessagingService`, `IMessageTransportService`, `IPeerIdentityRepository`
+    - Error handling and contracts
+      - Preserve current behavior where some handlers require an existing direct session and do not auto-establish (DhtPingHandler, RequestPreKeyBundleByPkhHandler)
+      - For flows that may establish (ConnectToPeerHandler, DhtProbeHandler), propagate `InvalidOperationException` with meaningful messages on failure
+      - Unit tests assert thrown exceptions and messages where applicable (contracts-first)
+    - Acceptance criteria (Step 8a complete)
+      - All listed call sites compile and tests pass using `IDirectSessionLocator`, `IHandshakeService`, `ISecureMessagingService`, and `IMessageTransportService`
+      - `ConversationService` and `IConversationService` removed; DI updated; no references remain
+      - Tests cover: reuse vs establish, transport send, decrypt/validate response, and failure cases per handler contract
+    - DI changes
+      - Remove registration for `IConversationService`
+      - Add registration for `IDirectSessionLocator` (app layer)
+      - Ensure `IHandshakeService`, `ISecureMessagingService`, and `IGrpcSessionService` are already registered
+    - Testing guidelines
+      - Follow `unit-testing.md`: AAA structure; verify observable behavior and side-effects only (e.g., repo upserts, transport calls)
+      - Use loose mocks; avoid ordering assertions unless part of the contract
+      - No shims/no-ops; update call sites and tests as services are introduced
+
   - Sub-step: Cutover inbound decryption call sites
     - Replace usages of `DirectSessionManager.ReceiveMessageAsync(SessionId, SessionRatchetMessage)` with Application composition over domain `ISecureMessagingService.DecryptInboundAsync` (fast/slow path) that does not require a known session id; initiator finalize path must parse `session_id` from the responder’s inner payload and use the responder’s header `public_ratchet_key`.
     - References to update:

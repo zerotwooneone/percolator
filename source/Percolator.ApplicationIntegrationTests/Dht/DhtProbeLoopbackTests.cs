@@ -10,7 +10,7 @@ using NUnit.Framework;
 using Percolator.Application.Cli;
 using Percolator.Application.KeyExchange;
 using Percolator.Application.Network;
-using Percolator.Application.Sessions;
+using Percolator.Application.Services;
 using Percolator.Chat;
 using Percolator.Contracts;
 using Percolator.Cryptography;
@@ -173,10 +173,10 @@ public class DhtProbeLoopbackTests : IntegrationTestBase
 
         // CLIENT HOST (local process running orchestrator)
         var clientSecureSvc = new Mock<Percolator.Application.Services.ISecureMessagingService>();
-        var clientConversationService = new Mock<IConversationService>();
+        var clientSessionLocator = new Mock<IDirectSessionLocator>();
 
-        clientConversationService
-            .Setup(s => s.GetExistingDirectSessionAsync(It.IsAny<Peer>()))
+        clientSessionLocator
+            .Setup(s => s.GetAsync(It.IsAny<Percolator.Identity.PeerId>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(directSessionId);
 
         // Client encrypts request: return an InternalEnvelope with Dht FindNodeRequest directly as bytes
@@ -205,7 +205,7 @@ public class DhtProbeLoopbackTests : IntegrationTestBase
         // Build client host, wiring loopback transport to server's message service
         using var clientHost = await CreateAndInitializeHostAsync(GetAvailablePort(), "LoopbackDht-Client", identityName: "local", services =>
         {
-            services.Replace(ServiceDescriptor.Singleton<IConversationService>(sp => clientConversationService.Object));
+            services.Replace(ServiceDescriptor.Singleton<IDirectSessionLocator>(sp => clientSessionLocator.Object));
             services.Replace(ServiceDescriptor.Singleton<Percolator.Application.Services.ISecureMessagingService>(sp => clientSecureSvc.Object));
             // Ensure MessageService can resolve an existing direct session without hitting a real store
             var clientDirectSessionRepo = new Mock<IDirectSessionRepository>();

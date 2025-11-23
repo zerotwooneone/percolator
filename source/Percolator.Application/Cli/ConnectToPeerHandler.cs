@@ -1,5 +1,6 @@
 using MediatR;
-using Percolator.Application.Sessions;
+using Percolator.Application.Services;
+using Percolator.Application.Identity;
 using Percolator.Chat.ValueObjects;
 using Percolator.Identity;
 using Percolator.Identity.Model;
@@ -10,14 +11,20 @@ namespace Percolator.Application.Cli;
 
 public class ConnectToPeerHandler : IRequestHandler<ConnectToPeerCommand, DirectSessionId>
 {
-    private readonly IConversationService _conversationService;
+    private readonly IDirectSessionLocator _directSessionLocator;
+    private readonly IHandshakeService _handshake;
+    private readonly ActiveIdentityContext _activeIdentityContext;
     private readonly IPeerIdentityRepository _peerIdentityRepository;
 
     public ConnectToPeerHandler(
-        IConversationService conversationService,
+        IDirectSessionLocator directSessionLocator,
+        IHandshakeService handshake,
+        ActiveIdentityContext activeIdentityContext,
         IPeerIdentityRepository peerIdentityRepository)
     {
-        _conversationService = conversationService;
+        _directSessionLocator = directSessionLocator;
+        _handshake = handshake;
+        _activeIdentityContext = activeIdentityContext;
         _peerIdentityRepository = peerIdentityRepository;
     }
 
@@ -29,9 +36,19 @@ public class ConnectToPeerHandler : IRequestHandler<ConnectToPeerCommand, Direct
             throw new InvalidOperationException(
                 $"Unknown remote peer name '{request.RemotePeerName}'. Provision this peer by SPKI first using SetPeerNameByPublicKeyCommand before connecting.");
         }
-        // Bridge: create legacy Peer shape for conversation service until it is refactored
         var remotePeer = new Peer(identity.Id, identity.DisplayName?.Value ?? request.RemotePeerName);
-        var existing = await _conversationService.GetExistingDirectSessionAsync(remotePeer).ConfigureAwait(false);
-        return existing ?? await _conversationService.CreateNewDirectSessionAsync(request.Endpoint, remotePeer).ConfigureAwait(false);
+        if (_activeIdentityContext.Identity is null)
+        {
+            throw new InvalidOperationException("Active identity not loaded.");
+        }
+        var existing = await _directSessionLocator.GetAsync(remotePeer.Id, _activeIdentityContext.Identity.SelfIdentityId, cancellationToken).ConfigureAwait(false);
+        if (existing is not null)
+        {
+            return existing.Value;
+        }
+        // Establish via handshake service (initial message not needed here)
+        var cryptoPeerId = new Percolator.Cryptography.Primitives.PeerId(remotePeer.Id.Value);
+        var (sessionId, _) = await _handshake.InitiateStandardHandshakeAsync(cryptoPeerId, null, cancellationToken).ConfigureAwait(false);
+        return new DirectSessionId(sessionId.Value);
     }
 }

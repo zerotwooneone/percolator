@@ -7,45 +7,49 @@ using MediatR;
 using Microsoft.Extensions.Logging;
 using Percolator.Application.Network;
 using Percolator.Application.Network.Handshake;
-using Percolator.Application.Sessions;
+using Percolator.Application.Services;
 using Percolator.Application.Services;
 using Percolator.Contracts;
 using Percolator.Identity;
 using Percolator.Identity.Model;
 using Percolator.Network;
 using Percolator.Cryptography;
+using Percolator.Application.Identity;
 
 namespace Percolator.Application.Cli;
 
     public sealed class InitiateHandshakeViaHostHandler : IRequestHandler<InitiateHandshakeViaHostCommand, Unit>
     {
         private readonly ILogger<InitiateHandshakeViaHostHandler> _logger;
-        private readonly IConversationService _conversationService;
+        private readonly IDirectSessionLocator _directSessionLocator;
         private readonly ISecureMessagingService _secureMessaging;
         private readonly IMessageTransportService _transport;
         private readonly IPeerIdentityRepository _peerIdentityRepository;
         private readonly IPeerPublicSigningKeyStore _peerPublicSigningKeyStore;
         private readonly IPeerRoutingProfileRepository _profileRepository;
         private readonly Percolator.Application.Network.Handshake.IInitiatorHelloService _initiatorHelloService;
+        private readonly ActiveIdentityContext _activeIdentity;
 
         public InitiateHandshakeViaHostHandler(
             ILogger<InitiateHandshakeViaHostHandler> logger,
-            IConversationService conversationService,
+            IDirectSessionLocator directSessionLocator,
             ISecureMessagingService secureMessaging,
             IMessageTransportService transport,
             IPeerIdentityRepository peerIdentityRepository,
             IPeerPublicSigningKeyStore peerPublicSigningKeyStore,
             IPeerRoutingProfileRepository profileRepository,
-            Percolator.Application.Network.Handshake.IInitiatorHelloService initiatorHelloService)
+            Percolator.Application.Network.Handshake.IInitiatorHelloService initiatorHelloService,
+            ActiveIdentityContext activeIdentity)
         {
             _logger = logger;
-            _conversationService = conversationService;
+            _directSessionLocator = directSessionLocator;
             _secureMessaging = secureMessaging;
             _transport = transport;
             _peerIdentityRepository = peerIdentityRepository;
             _peerPublicSigningKeyStore = peerPublicSigningKeyStore;
             _profileRepository = profileRepository;
             _initiatorHelloService = initiatorHelloService;
+            _activeIdentity = activeIdentity;
         }
 
         public async Task<Unit> Handle(InitiateHandshakeViaHostCommand request, CancellationToken cancellationToken)
@@ -54,7 +58,11 @@ namespace Percolator.Application.Cli;
             var hostIdentity = await _peerIdentityRepository.GetByNameAsync(new DisplayName(request.HostPeerName)).ConfigureAwait(false)
                 ?? throw new InvalidOperationException($"Peer '{request.HostPeerName}' not found.");
             var hostPeer = new Percolator.Identity.Peer(hostIdentity.Id, hostIdentity.DisplayName?.Value ?? request.HostPeerName);
-            var hostSession = await _conversationService.GetExistingDirectSessionAsync(hostPeer).ConfigureAwait(false)
+            if (_activeIdentity.Identity is null)
+            {
+                throw new InvalidOperationException("Active identity not loaded.");
+            }
+            var hostSession = await _directSessionLocator.GetAsync(hostPeer.Id, _activeIdentity.Identity.SelfIdentityId, cancellationToken).ConfigureAwait(false)
                 ?? throw new InvalidOperationException("Direct session to Host not found. Establish a session before initiating handshake.");
 
         // Ensure a Peer exists for the target (by PKH) and record a relay connection via Host

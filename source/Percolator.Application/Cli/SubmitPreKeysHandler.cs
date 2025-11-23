@@ -6,7 +6,6 @@ using MediatR;
 using Microsoft.Extensions.Logging;
 using Percolator.Application.Identity;
 using Percolator.Application.Network;
-using Percolator.Application.Sessions;
 using Percolator.Application.Services;
 using Percolator.Contracts;
 using Percolator.Cryptography;
@@ -22,7 +21,7 @@ namespace Percolator.Application.Cli;
 public class SubmitPreKeysHandler : IRequestHandler<SubmitPreKeysCommand, int>
 {
     private readonly ILogger<SubmitPreKeysHandler> _logger;
-    private readonly IConversationService _conversationService;
+    private readonly IDirectSessionLocator _directSessionLocator;
     private readonly IMessageTransportService _transport;
     private readonly ActiveIdentityContext _activeIdentity;
     private readonly IPeerIdentityRepository _peerIdentityRepository;
@@ -32,7 +31,7 @@ public class SubmitPreKeysHandler : IRequestHandler<SubmitPreKeysCommand, int>
 
     public SubmitPreKeysHandler(
         ILogger<SubmitPreKeysHandler> logger,
-        IConversationService conversationService,
+        IDirectSessionLocator directSessionLocator,
         IMessageTransportService transport,
         ActiveIdentityContext activeIdentity,
         IPeerIdentityRepository peerIdentityRepository,
@@ -41,7 +40,7 @@ public class SubmitPreKeysHandler : IRequestHandler<SubmitPreKeysCommand, int>
         ISecureMessagingService secureMessaging)
     {
         _logger = logger;
-        _conversationService = conversationService;
+        _directSessionLocator = directSessionLocator;
         _transport = transport;
         _activeIdentity = activeIdentity;
         _peerIdentityRepository = peerIdentityRepository;
@@ -68,8 +67,8 @@ public class SubmitPreKeysHandler : IRequestHandler<SubmitPreKeysCommand, int>
         }
         var existingPeer = new Peer(identity.Id, identity.DisplayName?.Value ?? request.TargetPeerName);
         
-        // 1) Ensure/establish direct session with target peer
-        var existingSessionId = await _conversationService.GetExistingDirectSessionAsync(existingPeer).ConfigureAwait(false);
+        // 1) Require existing direct session with target peer (no auto-establish here)
+        var existingSessionId = await _directSessionLocator.GetAsync(existingPeer.Id, _activeIdentity.Identity.SelfIdentityId, cancellationToken).ConfigureAwait(false);
         if (existingSessionId is null)
         {
             throw new InvalidOperationException("Direct session not found.");

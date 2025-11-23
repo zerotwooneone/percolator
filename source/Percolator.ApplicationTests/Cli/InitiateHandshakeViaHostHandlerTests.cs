@@ -9,13 +9,14 @@ using NUnit.Framework;
 using Percolator.Application.Cli;
 using Percolator.Application.Network;
 using Percolator.Application.Network.Handshake;
-using Percolator.Application.Sessions;
+using Percolator.Application.Services;
 using Percolator.Application.Services;
 using Percolator.Contracts;
 using Percolator.Cryptography;
 using Percolator.Identity;
 using Percolator.Identity.Model;
 using Percolator.Network;
+using Percolator.Application.Identity;
 
 namespace Percolator.ApplicationTests.Cli;
 
@@ -27,13 +28,14 @@ public class InitiateHandshakeViaHostHandlerTests
     {
         // Arrange
         var logger = new NullLogger<InitiateHandshakeViaHostHandler>();
-        var conversation = new Mock<IConversationService>(MockBehavior.Strict);
+        var locator = new Mock<IDirectSessionLocator>(MockBehavior.Strict);
         var transport = new Mock<IMessageTransportService>(MockBehavior.Strict);
         var secure = new Mock<ISecureMessagingService>(MockBehavior.Strict);
         var peerIdentityRepo = new Mock<Percolator.Identity.IPeerIdentityRepository>(MockBehavior.Strict);
         var pkhStore = new Mock<IPeerPublicSigningKeyStore>(MockBehavior.Strict);
         var profileRepo = new Mock<IPeerRoutingProfileRepository>(MockBehavior.Loose);
         var initiatorService = new Mock<IInitiatorHelloService>(MockBehavior.Strict);
+        var active = new ActiveIdentityContext();
 
         // Host peer setup
         var hostPeerGuid = Guid.NewGuid();
@@ -44,7 +46,8 @@ public class InitiateHandshakeViaHostHandlerTests
 
         // Direct session to host exists
         var hostDirectSession = new Percolator.Network.DirectSessionId(Guid.NewGuid());
-        conversation.Setup(c => c.GetExistingDirectSessionAsync(It.IsAny<Percolator.Identity.Peer>()))
+        active.Identity = new IdentityRecord(Guid.NewGuid(), "self") { SelfIdentityId = 1 };
+        locator.Setup(s => s.GetAsync(It.IsAny<Percolator.Identity.PeerId>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(hostDirectSession);
 
         // Prepare GetPreKeyBundle response
@@ -121,13 +124,14 @@ public class InitiateHandshakeViaHostHandlerTests
 
         var handler = new InitiateHandshakeViaHostHandler(
             logger,
-            conversation.Object,
+            locator.Object,
             secure.Object,
             transport.Object,
             peerIdentityRepo.Object,
             pkhStore.Object,
             profileRepo.Object,
-            initiatorService.Object);
+            initiatorService.Object,
+            active);
 
         var targetPkh = new byte[] { 0x99 };
         var cmd = new InitiateHandshakeViaHostCommand("host", targetPkh, PeerName: "alice", InitiatorPayload: null);

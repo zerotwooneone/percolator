@@ -2,8 +2,8 @@ using Google.Protobuf;
 using MediatR;
 using Microsoft.Extensions.Logging;
 using Percolator.Application.Identity;
+using Percolator.Application.KeyExchange;
 using Percolator.Application.Network;
-using Percolator.Application.Sessions;
 using Percolator.Application.Services;
 using Percolator.Chat.ValueObjects;
 using Percolator.Contracts;
@@ -17,21 +17,24 @@ namespace Percolator.Application.Cli;
 
 public class DhtProbeHandler : IRequestHandler<DhtProbeCommand, FindNodeResponse>
 {
-    private readonly IConversationService _conversationService;
+    private readonly IDirectSessionLocator _directSessionLocator;
+    private readonly IHandshakeService _handshake;
     private readonly ISecureMessagingService _secureMessaging;
     private readonly IMessageService _messageService;
     private readonly ActiveIdentityContext _activeIdentityContext;
     private readonly ILogger<DhtProbeHandler> _logger;
     private readonly IPeerIdentityRepository _peerIdentityRepository;
     public DhtProbeHandler(
-        IConversationService conversationService,
+        IDirectSessionLocator directSessionLocator,
+        IHandshakeService handshake,
         ISecureMessagingService secureMessaging,
         IMessageService messageService,
         ActiveIdentityContext activeIdentityContext,
         ILogger<DhtProbeHandler> logger,
         IPeerIdentityRepository peerIdentityRepository)
     {
-        _conversationService = conversationService;
+        _directSessionLocator = directSessionLocator;
+        _handshake = handshake;
         _secureMessaging = secureMessaging;
         _messageService = messageService;
         _activeIdentityContext = activeIdentityContext;
@@ -47,10 +50,18 @@ public class DhtProbeHandler : IRequestHandler<DhtProbeCommand, FindNodeResponse
             throw new InvalidOperationException($"Unknown peer name '{request.TargetIdentityName}'. Use SetPeerNameByPublicKeyCommand first.");
         }
         var remotePeer = new Peer(identity.Id, identity.DisplayName?.Value ?? request.TargetIdentityName);
-        
-        // 1) Ensure conversation by connecting (TOFU etc handled by ConversationService)
-        var existingDirectConversationAsync = await _conversationService.GetExistingDirectSessionAsync(remotePeer).ConfigureAwait(false);
-        var directSessionId = existingDirectConversationAsync ?? await _conversationService.CreateNewDirectSessionAsync(request.Endpoint, remotePeer).ConfigureAwait(false);
+        if (_activeIdentityContext.Identity is null)
+        {
+            throw new InvalidOperationException("Active identity not loaded.");
+        }
+        // 1) Ensure direct session (reuse or establish via handshake)
+        var directSessionId = await _directSessionLocator.GetAsync(remotePeer.Id, _activeIdentityContext.Identity.SelfIdentityId, cancellationToken).ConfigureAwait(false);
+        if (directSessionId is null)
+        {
+            var cryptoPeerId = new Percolator.Cryptography.Primitives.PeerId(remotePeer.Id.Value);
+            var (sessionId, _) = await _handshake.InitiateStandardHandshakeAsync(cryptoPeerId, null, cancellationToken).ConfigureAwait(false);
+            directSessionId = new DirectSessionId(sessionId.Value);
+        }
 
         // 2) Send Ping (fire-and-forget)
         var pingEnvelope = new InternalEnvelope

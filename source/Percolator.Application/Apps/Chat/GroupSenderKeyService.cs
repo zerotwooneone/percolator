@@ -8,9 +8,26 @@ namespace Percolator.Application.Apps.Chat
 {
     internal class GroupSenderKeyService : IGroupSenderKeyService
     {
-        public Task ImportSenderKeyAsync(Guid conversationId, GroupKeyVersion keyVersion, EncryptedGroupKey encryptedKey, CancellationToken cancellationToken)
+        private readonly IGroupSenderKeyRepository _repository;
+        private readonly IEnvelopeCrypto _crypto;
+
+        public GroupSenderKeyService(IGroupSenderKeyRepository repository, IEnvelopeCrypto crypto)
         {
-            throw new NotSupportedException("Sender key distribution cutover pending (Step 7b).");
+            _repository = repository;
+            _crypto = crypto;
+        }
+
+        public async Task ImportSenderKeyAsync(Guid conversationId, GroupKeyVersion keyVersion, EncryptedGroupKey encryptedKey, CancellationToken cancellationToken)
+        {
+            if (conversationId == Guid.Empty) throw new ArgumentException("conversationId must not be empty", nameof(conversationId));
+            // idempotent check
+            if (await _repository.ExistsAsync(conversationId, keyVersion, cancellationToken).ConfigureAwait(false))
+            {
+                return;
+            }
+
+            var (chainKey, signingKey) = await _crypto.DecryptAsync(conversationId, encryptedKey, cancellationToken).ConfigureAwait(false);
+            await _repository.UpsertAsync(conversationId, keyVersion, chainKey, signingKey, cancellationToken).ConfigureAwait(false);
         }
     }
 }
