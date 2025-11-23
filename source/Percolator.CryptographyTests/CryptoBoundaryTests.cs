@@ -50,8 +50,9 @@ public class CryptoBoundaryTests
         var clock = new TestClock3();
         var crypto = new AeadSessionCrypto();
         var root = new RootKey(new byte[32]);
-        var alice = SecureSession.Create(SessionId.NewId(), PeerId.NewId(), new ProtocolVersion(1), new RatchetState(root, null, 0, null, 0, 0, null, null, 1000), crypto, clock);
-        var bob = SecureSession.Create(SessionId.NewId(), PeerId.NewId(), new ProtocolVersion(1), new RatchetState(root, null, 0, null, 0, 0, null, null, 1000), crypto, clock);
+        var (initiator, responder) = CryptoTestBootstrap.CreatePairedStates(root);
+        var alice = SecureSession.Create(SessionId.NewId(), PeerId.NewId(), new ProtocolVersion(1), initiator, crypto, clock);
+        var bob = SecureSession.Create(SessionId.NewId(), PeerId.NewId(), new ProtocolVersion(1), responder, crypto, clock);
 
         // Act - Encrypt and decrypt an empty message
         var emptyPlaintext = new Plaintext(Array.Empty<byte>());

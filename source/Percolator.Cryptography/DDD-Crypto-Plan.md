@@ -711,6 +711,79 @@ Next: Phase 4 – Application-Layer Migration Plan
       - Percolator.ApplicationTests/Sessions/SessionMessageTests.cs
       - Percolator.ApplicationTests/Sessions/DirectSessionManagerTests.cs
 
+### Step 8b: Crypto service decomposition and TDD hardening
+
+- **Objective**
+  - Decompose `ISessionCrypto` responsibilities into smaller units that improve testability, align tightly with session-flow.md, and avoid application-layer duplication. Implement concrete classes and tests using TDD per unit-testing.md.
+
+- **New Interfaces (Cryptography domain)**
+  - `IX3dhDeriver`
+    - Derives the Initial Root Key (IRK) for initiator/responder flows.
+    - Inputs: IK/EPK private for local side, IK/SPK/OPK public for remote side.
+    - Output: 32-byte IRK and initiator ephemeral public (for initiator path).
+    - Suggested signature(s):
+      - Initiator: `(SharedSecret irk, RatchetEphemeralKey initiatorEphemeralPublic) DeriveInitiator(RatchetIdentityKey remoteIk, PreKey remoteSpk, OneTimeKey? remoteOtk, PrivatePreKey localIkPriv)`
+      - Responder: `SharedSecret DeriveResponder(RatchetIdentityKey initiatorIk, RatchetEphemeralKey initiatorEk, PrivatePreKey localIkPriv, PrivatePreKey localSpkPriv, PrivatePreKey? localOtkPriv)`
+  - `IPreKeyBundleValidator`
+    - Validates bundle shape, SPK signature, freshness/expiry.
+    - Suggested signature(s):
+      - `void Validate(PreKeyBundle bundle)` (throws on invalid)
+  - `IRatchetEngine`
+    - Encapsulates Double Ratchet transitions (encrypt/decrypt), chain key advancement, DH ratchet step.
+    - Suggested signature(s):
+      - `(
+          Ciphertext ct,
+          RatchetEphemeralKey headerKey,
+          RatchetState newState
+        ) Encrypt(RatchetState state, Plaintext pt, AssociatedData ad, ulong counter)`
+      - `(
+          Plaintext pt,
+          RatchetState newState
+        ) Decrypt(RatchetState state, SessionRatchetMessage framed, AssociatedData ad)`
+      - `RatchetState DhRatchetingStep(RatchetState state, RatchetEphemeralKey remotePublic)`
+  - `ISecureRandom`
+    - RNG abstraction used for ephemeral key generation and random nonces (where applicable).
+    - Suggested signature(s): `void Fill(byte[] buffer)`; `byte[] GetBytes(int count)`
+  - `IKeyProtector`
+    - Encrypt-at-rest for IRK/session material (thin port over CryptoUtils methods).
+    - Suggested signature(s):
+      - `byte[] Protect(byte[] masterKey, byte[] data, byte[]? ad = null)`
+      - `byte[] Unprotect(byte[] masterKey, byte[] payload, byte[]? ad = null)`
+  - `IEphemeralKeyFactory`, `IAssociatedDataSerializer` if test pain emerges.
+  - `IEphemeralKeyFactory` signatures: `PrivateEphemeralKey Create(); RatchetEphemeralKey ToPublic(PrivateEphemeralKey priv)`
+  - `IAssociatedDataSerializer` signatures: `byte[] SerializeHeader(RatchetEphemeralKey key, ulong counter, ulong prevLen); byte[] SerializeWithAd((RatchetEphemeralKey, ulong, ulong) header, byte[] ad)`
+
+- **Implementations**
+  - `AeadSessionCrypto` delegates to:
+    - `IX3dhDeriver` for X3DH_Initiate (return `(SharedSecret, RatchetEphemeralKey)`).
+    - `IRatchetEngine` for DR_Encrypt/DR_Decrypt (returns `(Ciphertext, HeaderKey, NewState)` / `(Plaintext, NewState)`).
+    - `IPreKeyBundleValidator` for SPK signature and expiry.
+    - `ISecureRandom` for any randomness (kept minimal).
+    - `IKeyProtector` for at-rest operations used by repositories (where applicable).
+
+- **TDD Plan**
+  - Red: Add focused tests
+    - X3DH
+      - `X3DH_Initiate_WithInvalidSignature_Throws` (already added).
+      - `X3DH_Initiate_Derives_IRK_And_Returns_Ephemeral` (vector-less: asserts 32-byte IRK and non-empty SPKI).
+      - `DeriveResponder_Mirrors_Initiator_On_Valid_Inputs` (IRK equality property test using same key inputs).
+    - Double Ratchet
+      - `EncryptDecrypt_WithSameAssociatedData_Roundtrips` (already in place, ensure chain keys initialized).
+      - `Decrypt_WithDifferentAssociatedData_Throws` (auth failure).
+      - `Decrypt_WithTamperedCiphertext_Throws`.
+      - `DhRatchetingStep_Updates_RootKey_And_Resets_ReceivingChain`
+  - Green: Implement minimal logic in `IX3dhDeriver`, `IRatchetEngine` and wire into `AeadSessionCrypto`.
+  - Refactor: Improve cohesion; ensure no key material is logged; zeroize temporaries where feasible.
+
+- **Acceptance Criteria**
+  - Tests in `Percolator.CryptographyTests` pass for X3DH and DR flows.
+  - `AeadSessionCrypto` contains no ad-hoc randomness outside `ISecureRandom` and uses stable AD serialization.
+  - No duplication of crypto interfaces in Application. Application calls domain interfaces only.
+
+- **Follow-ups**
+  - Add golden test vectors when available.
+  - Integrate with `SecureSession`/`InboundMessageResolver` and repositories for end-to-end behaviors.
+
 - **Step 9: Persistence (EF Core) and migrations for new tables**
   - Red: Integration tests exercise repos via EF Sqlite file DB matching schemas above; ensure encryption/password path remains intact.
   - Green: Implement EF entities/DBOs, mappings, migrations; wire DI registrations.

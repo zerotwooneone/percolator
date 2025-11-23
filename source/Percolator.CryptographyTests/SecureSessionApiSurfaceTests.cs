@@ -19,20 +19,17 @@ public class SecureSessionApiSurfaceTests
     {
         var clock = new TestClock3();
         var crypto = new AeadSessionCrypto();
-        var s = SecureSession.Create(
-            SessionId.NewId(),
-            PeerId.NewId(),
-            new ProtocolVersion(1),
-            new RatchetState(new RootKey(new byte[32]), null, 0, null, 0, 0, null, null, 1000),
-            crypto,
-            clock);
+        var root = new RootKey(new byte[32]);
+        var (initiator, responder) = CryptoTestBootstrap.CreatePairedStates(root);
+        var sender = SecureSession.Create(SessionId.NewId(), PeerId.NewId(), new ProtocolVersion(1), initiator, crypto, clock);
+        var receiver = SecureSession.Create(SessionId.NewId(), PeerId.NewId(), new ProtocolVersion(1), responder, crypto, clock);
 
-        var encrypted = s.Encrypt(new Plaintext(new byte[] { 1 }), clock);
+        var encrypted = sender.Encrypt(new Plaintext(new byte[] { 1 }), clock);
         encrypted.Should().NotBeNull();
         encrypted.GetCiphertext().Value.Should().NotBeNull();
 
-        // Decrypt a real message produced by the session (sanity)
-        var decrypted = s.Decrypt(encrypted, clock);
+        // Decrypt a real message produced by the peer session (sanity)
+        var decrypted = receiver.Decrypt(encrypted, clock);
         decrypted.Value.Should().NotBeNull();
     }
 
@@ -45,7 +42,7 @@ public class SecureSessionApiSurfaceTests
             SessionId.NewId(),
             PeerId.NewId(),
             new ProtocolVersion(1),
-            new RatchetState(new RootKey(new byte[32]), null, 0, null, 0, 0, null, null, 1000),
+            CryptoTestBootstrap.CreateBootstrappedState(new RootKey(new byte[32])),
             crypto,
             clock);
 

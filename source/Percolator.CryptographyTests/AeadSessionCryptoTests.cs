@@ -13,7 +13,7 @@ public class AeadSessionCryptoTests
     public void EncryptDecrypt_WithSameAssociatedData_Roundtrips()
     {
         var crypto = new AeadSessionCrypto();
-        var state = new RatchetState(new RootKey(new byte[32]), null, 0, null, 0, 0, null, null, 1000);
+        var state = new RatchetState(new RootKey(new byte[32]), new ChainKey(new byte[32]), 0, new ChainKey(new byte[32]), 0, 0, null, null, 1000);
         var pt = new Plaintext(new byte[] { 0x10, 0x20 });
         var ad = new AssociatedData(new byte[] { 0xAA, 0xBB });
         ulong ctr = 5;
@@ -30,7 +30,7 @@ public class AeadSessionCryptoTests
     public void Decrypt_WithDifferentAssociatedData_Throws()
     {
         var crypto = new AeadSessionCrypto();
-        var state = new RatchetState(new RootKey(new byte[32]), null, 0, null, 0, 0, null, null, 1000);
+        var state = new RatchetState(new RootKey(new byte[32]), new ChainKey(new byte[32]), 0, new ChainKey(new byte[32]), 0, 0, null, null, 1000);
         var pt = new Plaintext(new byte[] { 0x10, 0x20 });
         var ad = new AssociatedData(new byte[] { 0xAA, 0xBB });
         var badAd = new AssociatedData(new byte[] { 0xCC, 0xDD });
@@ -48,7 +48,7 @@ public class AeadSessionCryptoTests
     public void Decrypt_WithEmptyHeaderKey_Throws()
     {
         var crypto = new AeadSessionCrypto();
-        var state = new RatchetState(new RootKey(new byte[32]), null, 0, null, 0, 0, null, null, 1000);
+        var state = new RatchetState(new RootKey(new byte[32]), new ChainKey(new byte[32]), 0, new ChainKey(new byte[32]), 0, 0, null, null, 1000);
         var pt = new Plaintext(new byte[] { 0x01 });
         var ad = new AssociatedData(Array.Empty<byte>());
         ulong ctr = 0;
@@ -66,7 +66,7 @@ public class AeadSessionCryptoTests
     public void Decrypt_WithTamperedCiphertext_Throws()
     {
         var crypto = new AeadSessionCrypto();
-        var state = new RatchetState(new RootKey(new byte[32]), null, 0, null, 0, 0, null, null, 1000);
+        var state = new RatchetState(new RootKey(new byte[32]), new ChainKey(new byte[32]), 0, new ChainKey(new byte[32]), 0, 0, null, null, 1000);
         var pt = new Plaintext(new byte[] { 0x42, 0x43, 0x44 });
         var ad = new AssociatedData(new byte[] { 0xAA });
         ulong ctr = 2;

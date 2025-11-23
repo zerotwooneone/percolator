@@ -69,11 +69,10 @@ file sealed class FakeRepo : ISessionRepository
 [TestFixture]
 public class InboundMessageResolverTests
 {
-    private static SecureSession MakeSession(SessionId id, IClock clock)
+    private static SecureSession MakeSession(SessionId id, RatchetState state, IClock clock)
     {
         var peer = PeerId.NewId();
         var version = new ProtocolVersion(1);
-        var state = new RatchetState(new RootKey(new byte[32]), null, 0, null, 0, 0, null, null, 1000);
         var crypto = new AeadSessionCrypto();
         return SecureSession.Create(id, peer, version, state, crypto, clock);
     }
@@ -89,11 +88,13 @@ public class InboundMessageResolverTests
 
         var sid = SessionId.NewId();
         index.Resolved = sid;
-        var session = MakeSession(sid, clock);
-        await repo.AddAsync(session);
+        var root = new RootKey(new byte[32]);
+        var (initiator, responder) = CryptoTestBootstrap.CreatePairedStates(root);
+        var receiver = MakeSession(sid, responder, clock);
+        await repo.AddAsync(receiver);
 
         // Create a sender session to produce a valid framed message
-        var sender = MakeSession(SessionId.NewId(), clock);
+        var sender = MakeSession(SessionId.NewId(), initiator, clock);
         var msg = sender.Encrypt(new Plaintext(new byte[] { 1 }), clock);
         var result = await resolver.ResolveAsync(msg, clock, CancellationToken.None);
 
@@ -117,11 +118,13 @@ public class InboundMessageResolverTests
         catalog.Sessions.Add(sid1);
         catalog.Sessions.Add(sid2);
 
-        await repo.AddAsync(MakeSession(sid1, clock));
-        await repo.AddAsync(MakeSession(sid2, clock));
+        var root = new RootKey(new byte[32]);
+        var (initiator, responder) = CryptoTestBootstrap.CreatePairedStates(root);
+        await repo.AddAsync(MakeSession(sid1, responder, clock));
+        await repo.AddAsync(MakeSession(sid2, responder, clock));
 
         // Sender produces a real framed message
-        var sender2 = MakeSession(SessionId.NewId(), clock);
+        var sender2 = MakeSession(SessionId.NewId(), initiator, clock);
         var msg = sender2.Encrypt(new Plaintext(new byte[] { 2 }), clock);
 
         var result = await resolver.ResolveAsync(msg, clock, CancellationToken.None);

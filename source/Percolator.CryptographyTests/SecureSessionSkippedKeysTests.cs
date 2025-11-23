@@ -19,20 +19,10 @@ public class SecureSessionSkippedKeysTests
     {
         var clock = new TestClock13();
         var crypto = new AeadSessionCrypto();
-        var receiver = SecureSession.Create(
-            SessionId.NewId(),
-            PeerId.NewId(),
-            new ProtocolVersion(1),
-            new RatchetState(new RootKey(new byte[32]), null, 0, null, 0, 0, null, null, 1000),
-            crypto,
-            clock);
-        var sender = SecureSession.Create(
-            SessionId.NewId(),
-            PeerId.NewId(),
-            new ProtocolVersion(1),
-            new RatchetState(new RootKey(new byte[32]), null, 0, null, 0, 0, null, null, 1000),
-            crypto,
-            clock);
+        var root = new RootKey(new byte[32]);
+        var (initiator, responder) = CryptoTestBootstrap.CreatePairedStates(root);
+        var receiver = SecureSession.Create(SessionId.NewId(), PeerId.NewId(), new ProtocolVersion(1), responder, crypto, clock);
+        var sender = SecureSession.Create(SessionId.NewId(), PeerId.NewId(), new ProtocolVersion(1), initiator, crypto, clock);
 
         // Receive counter 1 before 0 -> should NOT throw (buffer it)
         // Produce two messages, where m0 has counter 0 and m1 has counter 1

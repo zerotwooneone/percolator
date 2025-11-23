@@ -14,7 +14,7 @@ public class AeadSessionCryptoHeaderTests
     public void DR_Encrypt_Emits_Valid_P256_SPKI_HeaderKey()
     {
         var crypto = new AeadSessionCrypto();
-        var state = new RatchetState(new RootKey(new byte[32]), null, 0, null, 0, 0, null, null, 1000);
+        var state = CryptoTestBootstrap.CreateBootstrappedState(new RootKey(new byte[32]));
         var ad = new AssociatedData(Array.Empty<byte>());
         var pt = new Plaintext(new byte[] { 0x10 });
 
@@ -36,8 +36,8 @@ public class AeadSessionCryptoHeaderTests
     {
         var clock = new TestClock_FirstHeaders();
         var crypto = new AeadSessionCrypto();
-        var initiator = SecureSession.Create(SessionId.NewId(), PeerId.NewId(), new ProtocolVersion(1), new RatchetState(new RootKey(new byte[32]), null, 0, null, 0, 0, null, null, 1000), crypto, clock);
-        var responder = SecureSession.Create(SessionId.NewId(), PeerId.NewId(), new ProtocolVersion(1), new RatchetState(new RootKey(new byte[32]), null, 0, null, 0, 0, null, null, 1000), crypto, clock);
+        var initiator = SecureSession.Create(SessionId.NewId(), PeerId.NewId(), new ProtocolVersion(1), CryptoTestBootstrap.CreateBootstrappedState(new RootKey(new byte[32])), crypto, clock);
+        var responder = SecureSession.Create(SessionId.NewId(), PeerId.NewId(), new ProtocolVersion(1), CryptoTestBootstrap.CreateBootstrappedState(new RootKey(new byte[32])), crypto, clock);
 
         var mInit = initiator.Encrypt(new Plaintext(new byte[] { 0x01 }), clock);
         var mResp = responder.Encrypt(new Plaintext(new byte[] { 0x02 }), clock);

@@ -9,7 +9,8 @@ public class SecureSession
     public SessionId Id { get; }
     public PeerId RemotePeerId { get; }
     public ProtocolVersion ProtocolVersion { get; }
-    public RatchetState State { get; }
+    private RatchetState _state;
+    public RatchetState State => _state;
     public DateTimeOffset CreatedAtUtc { get; }
     public DateTimeOffset LastUsedAtUtc { get; private set; }
     private ulong _sendCounter;
@@ -23,7 +24,7 @@ public class SecureSession
         Id = id;
         RemotePeerId = remotePeerId;
         ProtocolVersion = protocolVersion;
-        State = state;
+        _state = state;
         CreatedAtUtc = now;
         LastUsedAtUtc = now;
         _sendCounter = 0UL;
@@ -58,8 +59,6 @@ public class SecureSession
         return new SecureSession(id, remotePeerId, protocolVersion, state, sessionCrypto, clock.UtcNow, false);
     }
 
-    
-
     public void TouchLastUsed(IClock clock)
     {
         if (clock is null) throw new ArgumentNullException(nameof(clock));
@@ -71,8 +70,9 @@ public class SecureSession
         if (clock is null) throw new ArgumentNullException(nameof(clock));
         LastUsedAtUtc = clock.UtcNow;
         var previousChainLength = _sendCounter;
-        var (ct, headerKey, newState) = _crypto.DR_Encrypt(State, plaintext, new AssociatedData(Array.Empty<byte>()), _sendCounter, previousChainLength);
+        var (ct, headerKey, newState) = _crypto.DR_Encrypt(_state, plaintext, new AssociatedData(Array.Empty<byte>()), _sendCounter, previousChainLength);
         var msg = SessionRatchetMessage.Create(headerKey, _sendCounter, previousChainLength, ct);
+        _state = newState;
         _sendCounter++;
         return msg;
     }
@@ -83,8 +83,9 @@ public class SecureSession
         if (clock is null) throw new ArgumentNullException(nameof(clock));
         LastUsedAtUtc = clock.UtcNow;
         var previousChainLength = _sendCounter;
-        var (ct, headerKey, newState) = _crypto.DR_Encrypt(State, plaintext, associatedData, _sendCounter, previousChainLength);
+        var (ct, headerKey, newState) = _crypto.DR_Encrypt(_state, plaintext, associatedData, _sendCounter, previousChainLength);
         var msg = SessionRatchetMessage.Create(headerKey, _sendCounter, previousChainLength, ct);
+        _state = newState;
         _sendCounter++;
         return msg;
     }
@@ -96,7 +97,7 @@ public class SecureSession
         var (preKey, ctr, _) = message.GetHeader();
         if (ctr > _recvCounter)
         {
-            if (_skippedBuffer.Count >= State.SkippedKeyLimit)
+            if (_skippedBuffer.Count >= _state.SkippedKeyLimit)
                 throw new InvalidOperationException("Skipped-key buffer limit reached.");
             _skippedBuffer[ctr] = message;
             return new Plaintext(Array.Empty<byte>());
@@ -108,8 +109,9 @@ public class SecureSession
         Plaintext pt;
         try
         {
-            var r = _crypto.DR_Decrypt(State, message, new AssociatedData(Array.Empty<byte>()));
+            var r = _crypto.DR_Decrypt(_state, message, new AssociatedData(Array.Empty<byte>()));
             pt = r.Plaintext;
+            _state = r.NewState;
         }
         catch (Exception)
         {
@@ -127,7 +129,7 @@ public class SecureSession
         var (preKey, ctr, _) = message.GetHeader();
         if (ctr > _recvCounter)
         {
-            if (_skippedBuffer.Count >= State.SkippedKeyLimit)
+            if (_skippedBuffer.Count >= _state.SkippedKeyLimit)
                 throw new InvalidOperationException("Skipped-key buffer limit reached.");
             _skippedBuffer[ctr] = message;
             return new Plaintext(Array.Empty<byte>());
@@ -139,8 +141,9 @@ public class SecureSession
         Plaintext pt;
         try
         {
-            var r = _crypto.DR_Decrypt(State, message, associatedData);
+            var r = _crypto.DR_Decrypt(_state, message, associatedData);
             pt = r.Plaintext;
+            _state = r.NewState;
         }
         catch (Exception)
         {

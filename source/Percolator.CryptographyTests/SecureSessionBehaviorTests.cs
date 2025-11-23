@@ -19,7 +19,7 @@ public class SecureSessionBehaviorTests
         var id = SessionId.NewId();
         var peer = PeerId.NewId();
         var version = new ProtocolVersion(1);
-        var state = new RatchetState(new RootKey(new byte[32]), null, 0, null, 0, 0, null, null, 1000);
+        var state = CryptoTestBootstrap.CreateBootstrappedState(new RootKey(new byte[32]));
         var crypto = new AeadSessionCrypto();
         return SecureSession.Create(id, peer, version, state, crypto, clock);
     }
@@ -49,8 +49,10 @@ public class SecureSessionBehaviorTests
     {
         // Arrange
         var clock = new TestClock4();
-        var receiver = CreateBaselineSession(clock);
-        var sender = CreateBaselineSession(clock);
+        var root = new RootKey(new byte[32]);
+        var (initiator, responder) = CryptoTestBootstrap.CreatePairedStates(root);
+        var receiver = SecureSession.Create(SessionId.NewId(), PeerId.NewId(), new ProtocolVersion(1), responder, new AeadSessionCrypto(), clock);
+        var sender = SecureSession.Create(SessionId.NewId(), PeerId.NewId(), new ProtocolVersion(1), initiator, new AeadSessionCrypto(), clock);
         var expected = new Plaintext(new byte[] { 9, 9, 9 });
         var framed = sender.Encrypt(expected, clock);
         clock.UtcNow = clock.UtcNow.AddMinutes(1);
