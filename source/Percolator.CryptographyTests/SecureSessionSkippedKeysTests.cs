@@ -35,10 +35,9 @@ public class SecureSessionSkippedKeysTests
             clock);
 
         // Receive counter 1 before 0 -> should NOT throw (buffer it)
-        var m1 = sender.Encrypt(new Plaintext(new byte[] { 0xAA }), clock);
-        // Simulate out-of-order by first encrypting another message so sender's counter advances;
-        // but we will deliver m1 (counter 0) before m0 below
+        // Produce two messages, where m0 has counter 0 and m1 has counter 1
         var m0 = sender.Encrypt(new Plaintext(new byte[] { 0x01 }), clock);
+        var m1 = sender.Encrypt(new Plaintext(new byte[] { 0xAA }), clock);
         Action actOutOfOrder = () => receiver.Decrypt(m1, clock);
         actOutOfOrder.Should().NotThrow(); // RED currently: we throw
 

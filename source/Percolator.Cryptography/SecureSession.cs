@@ -101,7 +101,20 @@ public class SecureSession
             _skippedBuffer[ctr] = message;
             return new Plaintext(Array.Empty<byte>());
         }
-        var (pt, newState) = _crypto.DR_Decrypt(State, message, new AssociatedData(Array.Empty<byte>()));
+        if (ctr < _recvCounter)
+        {
+            throw new InvalidOperationException("Replay detected.");
+        }
+        Plaintext pt;
+        try
+        {
+            var r = _crypto.DR_Decrypt(State, message, new AssociatedData(Array.Empty<byte>()));
+            pt = r.Plaintext;
+        }
+        catch (Exception)
+        {
+            throw new InvalidOperationException("Malformed or unauthentic frame.");
+        }
         _recvCounter++;
         return pt;
     }
@@ -119,7 +132,20 @@ public class SecureSession
             _skippedBuffer[ctr] = message;
             return new Plaintext(Array.Empty<byte>());
         }
-        var (pt, newState) = _crypto.DR_Decrypt(State, message, associatedData);
+        if (ctr < _recvCounter)
+        {
+            throw new InvalidOperationException("Replay detected.");
+        }
+        Plaintext pt;
+        try
+        {
+            var r = _crypto.DR_Decrypt(State, message, associatedData);
+            pt = r.Plaintext;
+        }
+        catch (Exception)
+        {
+            throw new InvalidOperationException("Malformed or unauthentic frame.");
+        }
         _recvCounter++;
         return pt;
     }

@@ -6,18 +6,18 @@ using Percolator.Cryptography.Primitives;
 
 namespace Percolator.CryptographyTests;
 
-file sealed class TestClock8 : IClock
+file sealed class TestClock_Malformed : IClock
 {
-    public DateTimeOffset UtcNow { get; set; } = DateTimeOffset.Parse("2025-08-03T00:00:00Z");
+    public DateTimeOffset UtcNow { get; set; } = DateTimeOffset.Parse("2025-08-10T00:00:00Z");
 }
 
 [TestFixture]
-public class SecureSessionAdEnforcementTests
+public class SecureSessionMalformedFrameTests
 {
     [Test]
-    public void Decrypt_Throws_On_Tampered_HeaderKey()
+    public void Decrypt_Throws_On_Truncated_Ciphertext()
     {
-        var clock = new TestClock8();
+        var clock = new TestClock_Malformed();
         var crypto = new AeadSessionCrypto();
         var receiver = SecureSession.Create(
             SessionId.NewId(),
@@ -34,16 +34,11 @@ public class SecureSessionAdEnforcementTests
             crypto,
             clock);
 
-        var good = sender.Encrypt(new Plaintext(new byte[] { 0x11 }), clock);
-
-        // Tamper header: empty ratchet key is invalid (test first to avoid replay)
+        var good = sender.Encrypt(new Plaintext(new byte[] { 0x21, 0x22, 0x23 }), clock);
         var (hdr, ctr, prev) = good.GetHeader();
-        var tampered = SessionRatchetMessage.Create(new RatchetEphemeralKey(Array.Empty<byte>()), ctr, prev, good.GetCiphertext());
+        var tampered = SessionRatchetMessage.Create(hdr, ctr, prev, new Ciphertext(new byte[] { 0x01 }));
+
         Action act = () => receiver.Decrypt(tampered, clock);
         act.Should().Throw<InvalidOperationException>();
-
-        // Sanity: non-tampered decrypt then succeeds
-        var pt = receiver.Decrypt(good, clock);
-        pt.Value.Should().NotBeNull();
     }
 }
