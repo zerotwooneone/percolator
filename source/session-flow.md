@@ -200,3 +200,116 @@
  - Sanitize logs; never log keys or session ids.
  - TTL/purge for pre-handshake stores and invite stores (minutes/hours).
  - Defensive parsing/versioning on all protobufs.
+
+# Part 4: The X3DH Handshake (Initiator Logic)
+
+The Initiator (Alice) is responsible for calculating the initial **Shared Secret (SK)**. This secret becomes the "Root Key" for the Double Ratchet session. Alice performs this calculation using her own keys and the pre-keys she fetched from the server for Bob.
+
+### 4.1. Required Keys
+Alice collects the following keys to begin the calculation:
+
+* **$IK_A$:** Alice's Identity Key (Private).
+* **$EK_A$:** Alice's Ephemeral Key (Private). *Generated specifically for this handshake.*
+* **$IK_B$:** Bob's Identity Key (Public). *From bundle.*
+* **$SPK_B$:** Bob's Signed Pre-Key (Public). *From bundle.*
+* **$OPK_B$:** Bob's One-Time Pre-Key (Public). *From bundle (Optional, but recommended).*
+
+### 4.2. The Diffie-Hellman Operations
+Alice calculates the shared secret by mixing these keys using Elliptic Curve Diffie-Hellman (ECDH).
+
+
+
+1.  **DH1 = $DH(IK_A, SPK_B)$**: Mutual authentication component.
+2.  **DH2 = $DH(EK_A, IK_B)$**: Authorizes the ephemeral session.
+3.  **DH3 = $DH(EK_A, SPK_B)$**: Binds the ephemeral key to the signed pre-key.
+4.  **DH4 = $DH(EK_A, OPK_B)$**: *Only if OPK exists.* Provides Forward Secrecy.
+
+### 4.3. Key Derivation (KDF)
+The final Shared Secret ($SK$) is derived by concatenating the results and passing them through a Key Derivation Function (HKDF).
+
+$$SK = HKDF( \text{pad} || DH1 || DH2 || DH3 || DH4 )$$
+
+*Note: If using Curve25519, a specific byte sequence of `0xFF` is often prepended as padding.*
+
+---
+
+# Part 5: The X3DH Handshake (Responder Logic)
+
+The Responder (Bob) calculates the **same** Shared Secret ($SK$) upon receiving Alice's initial message. Bob does not know the secret exists until he receives the message header containing Alice's public keys.
+
+### 5.1. Required Keys
+Bob retrieves the following from his storage and the incoming message header:
+
+* **$IK_B$:** Bob's Identity Key (Private).
+* **$SPK_B$:** Bob's Signed Pre-Key (Private). *Identified by ID in the header.*
+* **$OPK_B$:** Bob's One-Time Pre-Key (Private). *Identified by ID in the header.*
+* **$IK_A$:** Alice's Identity Key (Public). *From message header.*
+* **$EK_A$:** Alice's Ephemeral Key (Public). *From message header.*
+
+### 5.2. The Mirror Calculation
+Bob performs the exact same ECDH operations, but using the corresponding private keys on his side.
+
+1.  **DH1 = $DH(SPK_B, IK_A)$**
+2.  **DH2 = $DH(IK_B, EK_A)$**
+3.  **DH3 = $DH(SPK_B, EK_A)$**
+4.  **DH4 = $DH(OPK_B, EK_A)$**
+
+### 5.3. Result
+Bob runs the same KDF:
+$$SK = HKDF( \text{pad} || DH1 || DH2 || DH3 || DH4 )$$
+
+If successful, Bob's $SK$ will match Alice's $SK$ byte-for-byte. This $SK$ is immediately promoted to be the **Root Key** of the new session.
+
+---
+
+# Part 6: Sending Messages (The Double Ratchet)
+
+Once the session is established (Root Key initialized), sending a message involves "ratcheting" the keys forward. This ensures that every message has a unique encryption key.
+
+
+
+### 6.1. The Chain Key KDF (Symmetric Ratchet)
+Every session has a **Sending Chain Key**. To send a message:
+
+1.  **Input:** Current Sending Chain Key.
+2.  **KDF Output:** The KDF produces 64 bytes (if using 32-byte keys).
+ * **Bytes 0-31:** Become the **Message Key**.
+ * **Bytes 32-63:** Become the **Next Chain Key**.
+
+### 6.2. Encryption
+1.  **Encrypt:** The payload is encrypted using AES-GCM (or similar AEAD) with the **Message Key**.
+2.  **Update State:** The old Chain Key is deleted and replaced by the *Next Chain Key*.
+3.  **Header:** The sender includes their current **Ratchet Public Key** in the header.
+
+### 6.3. The DH Ratchet (Updates Root Key)
+If the sender receives a reply with a *new* Ratchet Key from the other party, a DH Ratchet step occurs **before** the Symmetric step above.
+1.  Generate new ephemeral keypair.
+2.  $DH_{out} = DH(NewPair_{priv}, Remote_{pub})$.
+3.  Derive new **Root Key** and new **Sending Chain Key** from $DH_{out}$.
+
+---
+
+# Part 7: Receiving Messages (Decryption)
+
+When a client receives a `RatchetMessage`, it must derive the specific key used to encrypt that specific message.
+
+### 7.1. Determining the Path
+The client reads the **Ratchet Public Key** from the unencrypted header.
+* **Same Key:** If the key matches the current remote key, use the **Symmetric Ratchet** (Fast Path).
+* **New Key:** If the key is different, perform a **DH Ratchet** (Slow Path).
+
+### 7.2. DH Ratchet (If New Key Detected)
+1.  $DH_{in} = DH(MyRatchet_{priv}, HeaderKey_{pub})$.
+2.  Use KDF to update the **Root Key**.
+3.  Derive a new **Receiving Chain Key**.
+
+### 7.3. Symmetric Ratchet (Deriving the Message Key)
+Using the current **Receiving Chain Key**:
+1.  Run KDF to output 64 bytes.
+2.  **Bytes 0-31:** The **Message Key** for this message.
+3.  **Bytes 32-63:** The **Next Receiving Chain Key**.
+
+### 7.4. Decryption
+The client uses the derived **Message Key** to decrypt the payload.
+* **Success:** The message is readable. The *Next Receiving Chain Key* is saved. The Message Key is deleted.
+* **Failure:** The state is rolled back (transactional).
