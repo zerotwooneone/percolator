@@ -31,7 +31,6 @@ namespace Percolator.Application.Network.Handshake
     {
         private readonly ILogger<ProcessRelayedOpaquePayloadHandler> _logger;
         private readonly IMediator _mediator;
-        private readonly IDirectSessionManager _sessions;
         private readonly ISecureMessagingService _secureMessaging;
         private readonly IRatchetKeyIndex _ratchetLookup;
         private readonly ActiveIdentityContext _active;
@@ -54,7 +53,6 @@ namespace Percolator.Application.Network.Handshake
         public ProcessRelayedOpaquePayloadHandler(
             ILogger<ProcessRelayedOpaquePayloadHandler> logger,
             IMediator mediator,
-            IDirectSessionManager sessions,
             ISecureMessagingService secureMessaging,
             IRatchetKeyIndex ratchetLookup,
             ActiveIdentityContext active,
@@ -62,7 +60,6 @@ namespace Percolator.Application.Network.Handshake
         {
             _logger = logger;
             _mediator = mediator;
-            _sessions = sessions;
             _secureMessaging = secureMessaging;
             _ratchetLookup = ratchetLookup;
             _active = active;

@@ -24,7 +24,6 @@ public class RelayOrchestrator
     private readonly ILogger<RelayOrchestrator> _logger;
     private readonly IMessageQueueRepository _queue;
     private readonly IDirectSessionRepository _directSessions;
-    private readonly IDirectSessionManager _sessionManager;
     private readonly ISecureMessagingService _secureMessaging;
     private readonly IMessageTransportService _transport;
     private readonly ActiveIdentityContext _active;
@@ -33,7 +32,6 @@ public class RelayOrchestrator
         ILogger<RelayOrchestrator> logger,
         IMessageQueueRepository queue,
         IDirectSessionRepository directSessions,
-        IDirectSessionManager sessionManager,
         ISecureMessagingService secureMessaging,
         IMessageTransportService transport,
         ActiveIdentityContext active)
@@ -41,7 +39,6 @@ public class RelayOrchestrator
         _logger = logger;
         _queue = queue;
         _directSessions = directSessions;
-        _sessionManager = sessionManager;
         _secureMessaging = secureMessaging;
         _transport = transport;
         _active = active;

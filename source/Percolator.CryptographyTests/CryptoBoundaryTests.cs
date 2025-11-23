@@ -1,23 +1,14 @@
 using System.Security.Cryptography;
 using FluentAssertions;
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 using Percolator.Cryptography;
+using Percolator.Cryptography.Primitives;
 
 namespace Percolator.CryptographyTests;
 
 [TestFixture]
 public class CryptoBoundaryTests
 {
-    private ILogger<DoubleRatchetSession> _logger;
-    private IOptions<CryptographyOptions> _options;
-
-    [SetUp]
-    public void Setup()
-    {
-        _logger = new NullLogger<DoubleRatchetSession>();
-        _options = Options.Create(new CryptographyOptions());
-    }
+    
 
     [Test]
     public void EncryptDecryptAesGcm_WithEmptyMessage_ShouldSucceed()
@@ -53,38 +44,19 @@ public class CryptoBoundaryTests
     }
 
     [Test]
-    public void DoubleRatchetSession_WithEmptyMessage_ShouldRoundtripSuccessfully()
+    public void SecureSession_WithEmptyMessage_ShouldRoundtripSuccessfully()
     {
         // Arrange
-        // Create two sessions for Alice and Bob
-        using var aliceIdentity = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        using var bobIdentity = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        using var bobEphemeral = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-
-        // Derive a shared secret (in a real scenario, this would come from X3DH)
-        var sharedSecret = new SharedSecret(aliceIdentity.DeriveKeyMaterial(bobIdentity.PublicKey));
-
-        // Create sessions
-        var aliceSession = DoubleRatchetSession.AsInitiator(
-            sharedSecret,
-            new RatchetIdentityKey(bobIdentity.PublicKey.ExportSubjectPublicKeyInfo()),
-            new RatchetEphemeralKey(bobEphemeral.PublicKey.ExportSubjectPublicKeyInfo()),
-            ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
-            _logger,
-            _options);
-
-        var bobSession = DoubleRatchetSession.AsResponder(
-            sharedSecret,
-            new RatchetIdentityKey(aliceIdentity.PublicKey.ExportSubjectPublicKeyInfo()),
-            new RatchetEphemeralKey(aliceIdentity.PublicKey.ExportSubjectPublicKeyInfo()),
-            bobEphemeral,
-            _logger,
-            _options);
+        var clock = new TestClock3();
+        var crypto = new AeadSessionCrypto();
+        var root = new RootKey(new byte[32]);
+        var alice = SecureSession.Create(SessionId.NewId(), PeerId.NewId(), new ProtocolVersion(1), new RatchetState(root, null, 0, null, 0, 0, null, null, 1000), crypto, clock);
+        var bob = SecureSession.Create(SessionId.NewId(), PeerId.NewId(), new ProtocolVersion(1), new RatchetState(root, null, 0, null, 0, 0, null, null, 1000), crypto, clock);
 
         // Act - Encrypt and decrypt an empty message
         var emptyPlaintext = new Plaintext(Array.Empty<byte>());
-        var message = aliceSession.Encrypt(emptyPlaintext);
-        var decrypted = bobSession.Decrypt(message);
+        var message = alice.Encrypt(emptyPlaintext, clock);
+        var decrypted = bob.Decrypt(message, clock);
 
         // Assert
         decrypted.Value.Should().BeEmpty();

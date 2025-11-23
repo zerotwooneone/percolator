@@ -21,7 +21,6 @@ namespace Percolator.Application.Cli;
     {
         private readonly ILogger<InitiateHandshakeViaHostHandler> _logger;
         private readonly IConversationService _conversationService;
-        private readonly IDirectSessionManager _sessionManager;
         private readonly ISecureMessagingService _secureMessaging;
         private readonly IMessageTransportService _transport;
         private readonly IPeerIdentityRepository _peerIdentityRepository;
@@ -32,7 +31,6 @@ namespace Percolator.Application.Cli;
         public InitiateHandshakeViaHostHandler(
             ILogger<InitiateHandshakeViaHostHandler> logger,
             IConversationService conversationService,
-            IDirectSessionManager sessionManager,
             ISecureMessagingService secureMessaging,
             IMessageTransportService transport,
             IPeerIdentityRepository peerIdentityRepository,
@@ -42,7 +40,6 @@ namespace Percolator.Application.Cli;
         {
             _logger = logger;
             _conversationService = conversationService;
-            _sessionManager = sessionManager;
             _secureMessaging = secureMessaging;
             _transport = transport;
             _peerIdentityRepository = peerIdentityRepository;

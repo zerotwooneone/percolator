@@ -13,20 +13,17 @@ internal sealed class InitiatorHelloService : IInitiatorHelloService
 {
     private readonly ILogger<InitiatorHelloService> _logger;
     private readonly ActiveIdentityContext _active;
-    private readonly IX3DHOrchestrator _x3dh;
     private readonly IMessageService _messageService;
     private readonly IPreHandshakeSessionStore _preHandshake;
 
     public InitiatorHelloService(
         ILogger<InitiatorHelloService> logger,
         ActiveIdentityContext active,
-        IX3DHOrchestrator x3dh,
         IMessageService messageService,
         IPreHandshakeSessionStore preHandshake)
     {
         _logger = logger;
         _active = active;
-        _x3dh = x3dh;
         _messageService = messageService;
         _preHandshake = preHandshake;
     }
@@ -52,7 +49,8 @@ internal sealed class InitiatorHelloService : IInitiatorHelloService
         var ephSpki = eph.PublicKey.ExportSubjectPublicKeyInfo();
         var remotePreKey = new RatchetEphemeralKey(remotePreKeySpki);
         var bundle = new X3dPreKeyBundle(remoteId, remotePreKey, OneTimePreKey: null);
-        var shared = _x3dh.InitiateHandshake(bundle, eph);
+        var shared = new SharedSecret(Array.Empty<byte>());
+        throw new NotSupportedException("Initiator hello cutover pending (Step 8): replace legacy InitiateHandshake");
 
         // Do not pre-establish a session here; responder hello will finalize and assign the session id
 

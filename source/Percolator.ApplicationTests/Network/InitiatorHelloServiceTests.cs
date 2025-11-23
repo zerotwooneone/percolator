@@ -38,10 +38,6 @@ public class InitiatorHelloServiceTests
         var initiatorPayload = new byte[] { 0x42 };
 
         // Mocks
-        var x3dh = new Mock<IX3DHOrchestrator>();
-        x3dh.Setup(x => x.InitiateHandshake(It.IsAny<X3dPreKeyBundle>(), It.IsAny<ECDiffieHellman>()))
-            .Returns(new SharedSecret(new byte[] { 1, 2, 3 }));
-
         var preHandshakeStore = new Mock<IPreHandshakeSessionStore>(MockBehavior.Strict);
         PreHandshakeRecord? capturedPre = null;
         preHandshakeStore
@@ -62,7 +58,6 @@ public class InitiatorHelloServiceTests
         var service = new InitiatorHelloService(
             new NullLogger<InitiatorHelloService>(),
             active,
-            x3dh.Object,
             msgSvc.Object,
             preHandshakeStore.Object);
 

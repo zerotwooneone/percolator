@@ -6,7 +6,7 @@ using Percolator.Cryptography.Primitives;
 
 namespace Percolator.CryptographyTests;
 
-file sealed class TestClock3 : IClock
+public sealed class TestClock3 : IClock
 {
     public DateTimeOffset UtcNow { get; set; } = DateTimeOffset.Parse("2025-06-01T10:00:00Z");
 }

@@ -444,22 +444,121 @@ Next: Phase 4 – Application-Layer Migration Plan
   - Refactor: Streamline method names and DTOs.
   - Deliverable: Services + tests.
 
-- **Step 7: Cut-over: delete legacy crypto paths and fix compile to adopt new domain**
+  - **Step 7: Cut-over: delete legacy crypto paths and fix compile to adopt new domain**
   - Red: Identify all compile-time usages of legacy crypto/session code (search references). Create a todo list of broken call sites.
   - Green: Delete legacy paths and fix compile errors by replacing call sites with the new domain/services and ports. Keep behavior surface the same at the app boundary.
   - Refactor: Remove dead code and obsolete adapters; ensure exception types and nullability are consistent.
   - Deliverable: Legacy code removed; solution compiles with new domain abstractions wired.
 
+  ### Step 7b: Application cut-over inventory and plan (compile without legacy)
+
+  - Purpose
+    - Replace all remaining usages of legacy classes/interfaces removed during Step 7 with the new DDD model entry points. No shims or no-ops; we either refactor to the new services or remove and replace the old components.
+
+  - Broken classes (from build + grep)
+    - Percolator.Application/KeyExchange
+      - X3DHOrchestrator (uses IX3DHManager)
+    - Percolator.Application/Network
+      - EstablishDirectSessionHandler (uses IX3DHManager)
+    - Percolator.Application/Sessions
+      - ConversationService (uses IX3DHManager)
+      - DirectSessionManager (uses IDoubleRatchetSessionStore)
+    - Percolator.Application/Apps/Chat
+      - TransportKeyResolver (uses IDoubleRatchetSessionStore)
+      - IGroupManagerResolver (references legacy GroupManager)
+      - DefaultGroupManagerResolver (references legacy GroupManager)
+      - PersistentGroupManagerResolver (references legacy GroupManager)
+      - GroupKeyOperations (references legacy GroupManager)
+
+  - Cut-over plan per class
+    - X3DHOrchestrator
+      - Replace with HandshakeService (Step 8) that orchestrates PendingSession/SecureSession using SessionCrypto port.
+      - Action: Delete X3DHOrchestrator; update call sites to use IHandshakeService.
+    - EstablishDirectSessionHandler
+      - Replace IX3DHManager usage with IHandshakeService.InitiateStandardHandshake(peerId,...).
+      - Action: Refactor handler to depend on IHandshakeService; remove IX3DHManager.
+    - ConversationService
+      - Split responsibilities: handshake flows -> IHandshakeService; message send/recv -> ISecureMessagingService.
+      - Action: Refactor to depend on the two services; remove direct IX3DHManager/DR usage.
+    - DirectSessionManager
+      - Superseded by ISecureMessagingService and InboundMessageResolver (domain-level fast/slow path).
+      - Action: Remove class; update callers to ISecureMessagingService and the inbound resolver path.
+    - TransportKeyResolver
+      - Superseded by IRatchetKeyIndex + InboundMessageResolver.
+      - Action: Remove; wire inbound decryption through resolver.
+    - IGroupManagerResolver / DefaultGroupManagerResolver / PersistentGroupManagerResolver / GroupKeyOperations
+      - Replace legacy GroupManager with PrivateGroup aggregate; persistence via normalized tables (GroupManagerStates columnar, GroupMembers, SenderKeys) added in Step 7a.
+      - Action: Introduce an Application adapter over the new DBOs (e.g., IPrivateGroupRepository in Application using Infrastructure DbContext) and expose minimal operations needed by Chat app (create group, emit/apply changes, read state). Delete legacy resolvers and operations; update call sites to use the new adapter that composes PrivateGroup aggregate methods.
+
+  - DI and persistence adjustments
+    - Remove DI registrations for deleted legacy stores/services (done for blob repos in 7a).
+    - Add DI for new services in Step 8 (IHandshakeService, ISecureMessagingService) and repositories (ISessionRepository, IPendingSessionRepository, IRatchetKeyIndex) when implemented.
+
+  - Migration note
+    - EF migration for the new group tables is deferred until the Application builds (tracked as Step 7c).
+
+  - Exit criteria for 7b
+    - Percolator.Application compiles with legacy classes removed and updated to the new service boundaries, even if some services are not yet implemented (they will be provided in Step 8). No shims/no-ops introduced.
+
   Replacement mapping during cut-over:
   - `DoubleRatchetSession` exposure in app code -> `SecureSession` aggregate behavior via repositories.
-  - `IDoubleRatchetSessionStore` -> `ISessionRepository` (scoped through Application).
-  - `X3dPreKeyBundle` -> canonical `PreKeyBundle` (use adapters during transition).
+  - `IDoubleRatchetSessionStore` -> `ISessionRepository` (scoped through Application)
+  - `X3dPreKeyBundle` -> canonical `PreKeyBundle` (use adapters during transition)
   - Direct calls to `X3DHManager`/`CryptoUtils` -> `SessionCrypto` adapter via domain services.
   - `IRatchetKeySessionLookup` (Application) -> `IRatchetKeyIndex` (Cryptography domain) used by `InboundMessageResolver`.
 
-  Group crypto compatibility (follow-up mini-phase):
-  - Ensure `GroupManager` continues to serialize/deserialize member session state using new VO/DBO mappers if type names change.
-  - Align any ratchet message framing names if they diverge (e.g., `SessionRatchetMessage`).
+  Group management cut-over (added in Step 7a work):
+  - Replace legacy `GroupManager` with `PrivateGroup` aggregate and signed membership change flows.
+  - Persistence port `IPrivateGroupStateStore` defined in Cryptography; Infrastructure implementation `SqlitePrivateGroupStateStore` registered in DI.
+  - Plan a DB migration if schema changes are needed for group state storage (see 7a/10a Infra: SQLite repository & migration).
+  - Application layer will orchestrate distribution of group changes over pairwise `SecureSession` (to be wired in Step 8), but compile fixes begin here by removing legacy references and adding DI wiring.
+
+  Application build fixes to complete Step 7:
+  - Remove remaining references to legacy `GroupManager`/`DoubleRatchetSession` in `Percolator.Application`.
+  - Inject and use `IPrivateGroupStateStore` via Infrastructure DI.
+  - Ensure `AddInfrastructureServices` includes `AddCryptographyInfrastructure` so `SqlitePrivateGroupStateStore` is available.
+  - Update any application workflows that previously depended on legacy group/session code to the new domain entry points (pending Step 8 orchestration where needed) so the solution compiles.
+
+ - **Step 7a: Group management (Signal-style) planning and TDD roadmap**
+  - Context
+    - We will replace the legacy `GroupManager` that depended on `DoubleRatchetSession` with a DDD-aligned design based on Signal private groups. See `group-management.md` for protocol behavior and persistence model.
+    - Control-plane messages (invites, membership changes, rekeys) are delivered 1:1 over pairwise `SecureSession`. Data-plane for group payloads uses a `SenderKeySession`-style primitive.
+  - Scope for this step
+    - Planning and test scaffolding only; implementation begins after Step 7 build is green.
+  - TDD milestones (large but independent chunks)
+    1) Red: Genesis/Invitation Roundtrip
+       - Creator creates a group (GroupId, MasterKey, initial state) and emits a signed invite payload.
+       - Member accepts: verifies signature, initializes local aggregate state and SenderKey material.
+       - Transport simulated via `SecureSession` Encrypt/Decrypt between creator and member.
+    2) Green: Minimal implementation to pass genesis/invitation tests
+       - New aggregate `PrivateGroup` (or `GroupManagerV2`) with:
+         - CreateGroup, CreateInvitePayload, AcceptInvite.
+         - Serialization (Save/Load) using at-rest crypto via `CryptoUtils`.
+    3) Red: Add Member change
+       - Admin emits signed AddMember command (sequence increment).
+       - Recipients verify admin role and apply change deterministically.
+    4) Green: Implement AddMember flow
+       - Command VO + signature verification + state mutation.
+    5) Red: Remove Member + Sender Key Rotation
+       - Admin emits RemoveMember; recipients apply state.
+       - Admin generates new sender key material and distributes only to remaining members via pairwise `SecureSession`.
+       - Ensure removed member cannot decrypt subsequent group messages.
+    6) Green: Implement Remove + rotation
+       - Rotation primitive and distribution payload; local replacement of sender key material.
+    7) Red: Sequencing and replay rules
+       - SequenceNumber monotonic; out-of-order buffering or rejection policy covered by tests.
+    8) Green: Enforce sequence and idempotency
+    9) Red: Save/Load state roundtrip
+      - Persist group metadata, members, action log (optional), sender keys (mine and theirs).
+    10) Green: Implement persistence mappers (domain->DBO) (can stub during initial unit tests, full EF integration in Step 9)
+    10a) Infra: SQLite repository & migration
+      - Implement a Sqlite `IPrivateGroupStateStore` backed by existing `GroupManagerStates` (or new table if needed).
+      - Create and apply an EF Core migration if schema changes are required to support new fields.
+      - Wire DI registration and add an integration test to verify Save/Get roundtrip using a temp SQLite DB.
+  - Deliverables
+    - New DDD group management aggregate and value objects.
+    - Tests for invite, add/remove, rekey, sequencing, and state persistence (unit-level; EF integration later).
+    - No dependency on legacy `DoubleRatchetSession`.
 
  - **Step 8: Application services integration (HandshakeService, SecureMessagingService)**
   - Red: Tests for user journeys exercising services via ports (aligned to session-flow):

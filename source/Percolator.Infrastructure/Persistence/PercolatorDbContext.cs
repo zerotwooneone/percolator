@@ -62,6 +62,8 @@ public class PercolatorDbContext : DbContext
     public DbSet<TlsCertificateRoutingDbo> PeerRoutingTlsCertificates { get; set; } = null!;
     public DbSet<DiscoveredPeerDbo> DiscoveredPeers { get; set; } = null!;
     public DbSet<DiscoveredPeerEndpointDbo> DiscoveredPeerEndpoints { get; set; } = null!;
+    public DbSet<GroupMemberDbo> GroupMembers { get; set; } = null!;
+    public DbSet<SenderKeyDbo> SenderKeys { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -286,15 +288,55 @@ public class PercolatorDbContext : DbContext
             entity.Property(e => e.LastCommittedKeyVersion).IsRequired();
         });
 
-        // GroupManagerStates
+        // GroupManagerStates (columnar)
         modelBuilder.Entity<GroupManagerStateDbo>(entity =>
         {
             entity.ToTable("GroupManagerStates");
             entity.HasKey(e => e.ConversationId);
             entity.Property(e => e.ConversationId).ValueGeneratedNever();
-            entity.Property(e => e.StateBlob).IsRequired();
+            entity.Property(e => e.GroupId).IsRequired();
+            entity.Property(e => e.SequenceNumber).IsRequired();
+            entity.Property(e => e.Title);
+            entity.Property(e => e.CreatedAtUtc).IsRequired();
+            entity.Property(e => e.IsActive).IsRequired();
             entity.Property(e => e.UpdatedAtUtc).IsRequired();
+            entity.HasIndex(e => e.GroupId);
             entity.HasIndex(e => e.UpdatedAtUtc);
+        });
+
+        // GroupMembers
+        modelBuilder.Entity<GroupMemberDbo>(entity =>
+        {
+            entity.ToTable("GroupMembers");
+            entity.HasKey(e => new { e.ConversationId, e.MemberSpkiHash });
+            entity.Property(e => e.ConversationId).IsRequired();
+            entity.Property(e => e.MemberSpki).IsRequired();
+            entity.Property(e => e.MemberSpkiHash).IsRequired();
+            entity.Property(e => e.Role).IsRequired();
+            entity.Property(e => e.JoinedAtSequence).IsRequired();
+            entity.HasOne<GroupManagerStateDbo>()
+                .WithMany()
+                .HasForeignKey(e => e.ConversationId)
+                .OnDelete(DeleteBehavior.Cascade)
+                .IsRequired();
+            entity.HasIndex(e => e.ConversationId);
+        });
+
+        // SenderKeys
+        modelBuilder.Entity<SenderKeyDbo>(entity =>
+        {
+            entity.ToTable("SenderKeys");
+            entity.HasKey(e => new { e.ConversationId, e.SenderPeerId });
+            entity.Property(e => e.ConversationId).IsRequired();
+            entity.Property(e => e.SenderPeerId).IsRequired();
+            entity.Property(e => e.ChainKey).IsRequired();
+            entity.Property(e => e.SigningKey).IsRequired();
+            entity.HasOne<GroupManagerStateDbo>()
+                .WithMany()
+                .HasForeignKey(e => e.ConversationId)
+                .OnDelete(DeleteBehavior.Cascade)
+                .IsRequired();
+            entity.HasIndex(e => e.ConversationId);
         });
 
         modelBuilder.Entity<SignedPreKeyDbo>(entity =>

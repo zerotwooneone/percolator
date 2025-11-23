@@ -23,7 +23,6 @@ public class SubmitPreKeysHandler : IRequestHandler<SubmitPreKeysCommand, int>
 {
     private readonly ILogger<SubmitPreKeysHandler> _logger;
     private readonly IConversationService _conversationService;
-    private readonly IDirectSessionManager _sessionManager;
     private readonly IMessageTransportService _transport;
     private readonly ActiveIdentityContext _activeIdentity;
     private readonly IPeerIdentityRepository _peerIdentityRepository;
@@ -34,7 +33,6 @@ public class SubmitPreKeysHandler : IRequestHandler<SubmitPreKeysCommand, int>
     public SubmitPreKeysHandler(
         ILogger<SubmitPreKeysHandler> logger,
         IConversationService conversationService,
-        IDirectSessionManager sessionManager,
         IMessageTransportService transport,
         ActiveIdentityContext activeIdentity,
         IPeerIdentityRepository peerIdentityRepository,
@@ -44,7 +42,6 @@ public class SubmitPreKeysHandler : IRequestHandler<SubmitPreKeysCommand, int>
     {
         _logger = logger;
         _conversationService = conversationService;
-        _sessionManager = sessionManager;
         _transport = transport;
         _activeIdentity = activeIdentity;
         _peerIdentityRepository = peerIdentityRepository;

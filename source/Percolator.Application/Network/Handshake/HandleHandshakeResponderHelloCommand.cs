@@ -20,7 +20,6 @@ namespace Percolator.Application.Network.Handshake
     internal class HandleHandshakeResponderHelloHandler : IRequestHandler<HandleHandshakeResponderHelloCommand>
     {
         private readonly ILogger<HandleHandshakeResponderHelloHandler> _logger;
-        private readonly IDirectSessionManager _sessions;
         private readonly Percolator.Application.Services.ISecureMessagingService _secure;
         private readonly ActiveIdentityContext _active;
         private readonly IRatchetKeyIndex _ratchetLookup;
@@ -28,14 +27,12 @@ namespace Percolator.Application.Network.Handshake
 
         public HandleHandshakeResponderHelloHandler(
             ILogger<HandleHandshakeResponderHelloHandler> logger,
-            IDirectSessionManager sessions,
             Percolator.Application.Services.ISecureMessagingService secure,
             ActiveIdentityContext active,
             IRatchetKeyIndex ratchetLookup,
             IPreHandshakeSessionStore preHandshakeStore)
         {
             _logger = logger;
-            _sessions = sessions;
             _secure = secure;
             _active = active;
             _ratchetLookup = ratchetLookup;
@@ -68,13 +65,8 @@ namespace Percolator.Application.Network.Handshake
                     throw new InvalidOperationException("Responder inner payload missing direct_session_id.");
                 var sid = new SessionId(Guid.Parse(inner.DirectSessionId));
 
-                // Finalize initiator using the most recent prehandshake record
-                var rec = await _preHandshakeStore.TryGetMostRecentAsync(_active.Identity.SelfIdentityId, cancellationToken).ConfigureAwait(false)
-                    ?? throw new InvalidOperationException("No prehandshake record found to finalize initiator session.");
-                var responderIdentity = new RatchetIdentityKey(rec.RemoteIdentityKeySpki);
-                var irk = new SharedSecret(rec.InitialRootKey);
-                await _sessions.FinalizeAsInitiatorAsync(sid, responderIdentity, irk, header.PreKey).ConfigureAwait(false);
-                await _preHandshakeStore.DeleteAsync(rec.Id, _active.Identity.SelfIdentityId, cancellationToken).ConfigureAwait(false);
+                // Finalize initiator using the most recent prehandshake record (to be implemented in Step 8)
+                throw new NotSupportedException("Initiator finalize cutover pending (Step 8): replace legacy FinalizeAsInitiatorAsync");
 
                 directSessionId = new Percolator.Network.DirectSessionId(sid.Value);
                 _logger.LogInformation("Responder hello slow-path parsed and finalized direct_session_id {SessionId}", sid.Value);

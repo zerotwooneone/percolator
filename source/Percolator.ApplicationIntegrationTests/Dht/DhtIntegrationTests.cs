@@ -30,14 +30,11 @@ public class DhtIntegrationTests : IntegrationTestBase
     {
         // Arrange
         var dhtRepositoryMock = new Mock<IDhtNodeRepository>();
-        var sessionManagerMock = new Mock<IDirectSessionManager>();
         var secureSvcMock = new Mock<Percolator.Application.Services.ISecureMessagingService>();
         var directSessionRepoMock = new Mock<IDirectSessionRepository>();
 
         // Mocks for unused dependencies to allow the host to build
-        var x3dhOrchestratorMock = new Mock<IX3DHOrchestrator>();
         var conversationRepoMock = new Mock<IConversationRepository>();
-        var x3dhManagerMock = new Mock<IX3DHManager>();
         var bundleRepoMock = new Mock<IPreKeyBundleRepository>();
         var signingServiceMock = new Mock<Percolator.Cryptography.ISigningService>();
         var peerTrustManagerMock = new Mock<IPeerTrustManager>();
@@ -60,7 +57,6 @@ public class DhtIntegrationTests : IntegrationTestBase
         using var host = CreateHost(port, "DhtTest",  services =>
         {
             services.AddSingleton<IDhtNodeRepository>(dhtRepositoryMock.Object);
-            services.AddSingleton<IDirectSessionManager>(sessionManagerMock.Object);
             services.AddSingleton<IDirectSessionRepository>(directSessionRepoMock.Object);
             services.AddSingleton<Percolator.Application.Services.ISecureMessagingService>(secureSvcMock.Object);
             // MQ service required by ProcessInternalEnvelopeHandler constructor
@@ -73,9 +69,7 @@ public class DhtIntegrationTests : IntegrationTestBase
             ratchetLookup.Setup(l => l.UpsertAsync(It.Is<SessionId>(s => s.Value == sessionId.Value), It.IsAny<RatchetEphemeralKey>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
                 .Returns(Task.CompletedTask);
             services.AddSingleton<IRatchetKeyIndex>(ratchetLookup.Object);
-            services.AddSingleton<IX3DHOrchestrator>(x3dhOrchestratorMock.Object);
             services.AddSingleton<IConversationRepository>(conversationRepoMock.Object);
-            services.AddSingleton<IX3DHManager>(x3dhManagerMock.Object);
             services.AddSingleton<IPreKeyBundleRepository>(bundleRepoMock.Object);
             services.AddSingleton<Percolator.Cryptography.ISigningService>(signingServiceMock.Object);
             services.AddSingleton<IPeerTrustManager>(peerTrustManagerMock.Object);
@@ -146,7 +140,6 @@ public class DhtIntegrationTests : IntegrationTestBase
     {
         // Arrange
         var dhtNodeRepoMock = new Mock<IDhtNodeRepository>();
-        var sessionManagerMock = new Mock<IDirectSessionManager>();
         var secureSvcMock = new Mock<Percolator.Application.Services.ISecureMessagingService>();
         var directSessionRepoMock = new Mock<IDirectSessionRepository>();
         var sessionId = new Percolator.Cryptography.SessionId(Guid.NewGuid());
@@ -166,7 +159,6 @@ public class DhtIntegrationTests : IntegrationTestBase
         using var host = CreateHost(port, "DhtTest", services =>
         {
             services.AddSingleton(dhtNodeRepoMock.Object);
-            services.AddSingleton(sessionManagerMock.Object);
             services.AddSingleton<Percolator.Application.Services.ISecureMessagingService>(secureSvcMock.Object);
             
             services.AddSingleton(directSessionRepoMock.Object);

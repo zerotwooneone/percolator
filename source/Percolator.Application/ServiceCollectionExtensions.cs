@@ -25,7 +25,6 @@ public static class ServiceCollectionExtensions
         services.Configure<TransportOptions>(configuration.GetSection(TransportOptions.SectionName));
         services.AddCryptographyServices(configuration);
         services.AddIdentityServices();
-        services.AddKeyExchangeServices();
         services.AddNetworkServices(configuration);
         services.AddPeerDiscoveryServices();
         services.AddSessionServices();

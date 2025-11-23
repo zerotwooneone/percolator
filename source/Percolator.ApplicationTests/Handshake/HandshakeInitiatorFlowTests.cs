@@ -47,23 +47,8 @@ public class HandshakeInitiatorFlowTests
         var spkId = Guid.NewGuid();
         Guid? otkId = null;
         // Mocks
-        var x3dh = new Mock<IX3DHOrchestrator>();
         var preHandshakeStore = new Mock<IPreHandshakeSessionStore>(MockBehavior.Loose);
-        x3dh.Setup(x => x.InitiateHandshake(It.IsAny<Percolator.Cryptography.X3dPreKeyBundle>(), It.IsAny<ECDiffieHellman>()))
-            .Returns(new SharedSecret(new byte[] { 1, 2, 3 }));
-
-        // No initiator establish: per session-flow, we only persist prehandshake and enqueue hello
         
-        var sessionStore = new Mock<IDoubleRatchetSessionStore>(MockBehavior.Strict);
-        sessionStore.Setup(s => s.FindByRemoteRatchetKeyAsync(
-                It.IsAny<PreKey>(),
-                It.IsAny<int>()))
-            .ReturnsAsync((RatchetEphemeralKey key, int _) => 
-                new DoubleRatchetSession.DoubleRatchetSessionState
-                {
-                    TheirDhRatchetPublicKey = key
-                });
-                
         // No DSM slow-path decrypt in new design; decrypt handled via SecureMessagingService in higher layers
                 
         // Use the same store mock that will be passed into the service
@@ -140,7 +125,6 @@ public class HandshakeInitiatorFlowTests
         var service = new InitiatorHelloService(
             new NullLogger<InitiatorHelloService>(),
             active,
-            x3dh.Object,
             msgSvc.Object,
             preHandshakeStore.Object);
 
@@ -186,8 +170,6 @@ public class HandshakeInitiatorFlowTests
         var pk = new RatchetEphemeralKey(new byte[] { 0xA1 });
         var payload = SessionRatchetMessage.Create(pk, 1, 0, new Ciphertext(new byte[] { 0xB1 })).Value;
 
-        var sessions = new Mock<IDirectSessionManager>(MockBehavior.Loose);
-
         var lookup = new Mock<IRatchetKeyIndex>(MockBehavior.Strict);
         var resolvedSession = new SessionId(Guid.NewGuid());
         lookup
@@ -201,7 +183,6 @@ public class HandshakeInitiatorFlowTests
         var secureFast = new Mock<ISecureMessagingService>(MockBehavior.Strict);
         var handler = new HandleHandshakeResponderHelloHandler(
             new NullLogger<HandleHandshakeResponderHelloHandler>(),
-            sessions.Object,
             secureFast.Object,
             active,
             lookup.Object,
@@ -216,8 +197,6 @@ public class HandshakeInitiatorFlowTests
         // Verify fast-path lookup via ratchet header was used
         lookup.Verify(l => l.TryResolveAsync(It.IsAny<RatchetEphemeralKey>(), It.IsAny<CancellationToken>()), Times.Once);
 
-        // Verify slow-path finalize was not used (no calls expected on sessions)
-        sessions.VerifyNoOtherCalls();
     }
 
     [Test]
@@ -227,7 +206,6 @@ public class HandshakeInitiatorFlowTests
         var identity = new IdentityRecord(Guid.NewGuid(), "self") { SelfIdentityId = 5 };
         var active = new ActiveIdentityContext { Identity = identity };
 
-        var sessions = new Mock<IDirectSessionManager>(MockBehavior.Loose);
         var lookup = new Mock<IRatchetKeyIndex>(MockBehavior.Strict);
         lookup
             .Setup(l => l.TryResolveAsync(It.IsAny<RatchetEphemeralKey>(), It.IsAny<CancellationToken>()))
@@ -496,18 +474,9 @@ public class HandshakeInitiatorFlowTests
 
         // Capture the session id used in finalize
         SessionId? finalizedSid = null;
-        sessions
-            .Setup(s => s.FinalizeAsInitiatorAsync(
-                It.IsAny<SessionId>(),
-                It.IsAny<RatchetIdentityKey>(),
-                It.IsAny<SharedSecret>(),
-                It.IsAny<RatchetEphemeralKey>()))
-            .Callback<SessionId, RatchetIdentityKey, SharedSecret, RatchetEphemeralKey>((sid, _, __, ___) => finalizedSid = sid)
-            .Returns(Task.CompletedTask);
-
+        
         var handler = new HandleHandshakeResponderHelloHandler(
             new NullLogger<HandleHandshakeResponderHelloHandler>(),
-            sessions.Object,
             secureSlow.Object,
             active,
             lookup.Object,
@@ -546,18 +515,12 @@ public class HandshakeInitiatorFlowTests
         var spkId = Guid.NewGuid();
         Guid? otkId = null;
 
-        // Mocks: X3DH returns a shared secret
-        var x3dh = new Mock<IX3DHOrchestrator>();
-        x3dh.Setup(x => x.InitiateHandshake(It.IsAny<Percolator.Cryptography.X3dPreKeyBundle>(), It.IsAny<ECDiffieHellman>()))
-            .Returns(new SharedSecret(new byte[] { 0x11, 0x22, 0x33 }));
-
         // Prepare a first ratchet message as if produced by initiator establish
         var preKeyForHeader = new RatchetEphemeralKey(new byte[] { 0xA5 });
         var expectedFirstPlaintext = new Plaintext(new byte[] { 0xDE, 0xAD });
         var firstMessage = SessionRatchetMessage.Create(preKeyForHeader, 1, 0, new Ciphertext(new byte[] { 0xBE, 0xEF }));
 
         var secureSvc = new Mock<ISecureMessagingService>(MockBehavior.Strict);
-        var sessions = new Mock<IDirectSessionManager>(MockBehavior.Loose);
         
         var preHandshakeStore = new Mock<IPreHandshakeSessionStore>(MockBehavior.Loose);
 
@@ -573,7 +536,6 @@ public class HandshakeInitiatorFlowTests
         var initiatorService = new InitiatorHelloService(
             new NullLogger<InitiatorHelloService>(),
             initiatorActive,
-            x3dh.Object,
             msgSvc2.Object,
             preHandshakeStore.Object);
 
@@ -611,16 +573,6 @@ public class HandshakeInitiatorFlowTests
             .Setup(r => r.UpsertAsync(It.IsAny<Percolator.Network.PeerId>(), It.IsAny<DirectSessionId>(), responderIdentity.SelfIdentityId))
             .Returns(Task.CompletedTask);
 
-        // Sessions mock for responder establish and subsequent receive
-        sessions
-            .Setup(s => s.EstablishSessionAsResponderAsync(
-                It.IsAny<SessionId>(),
-                It.IsAny<RatchetIdentityKey>(),
-                It.IsAny<RatchetEphemeralKey>(),
-                It.IsAny<ECDiffieHellman>(),
-                It.IsAny<SharedSecret>()))
-            .Returns(Task.CompletedTask);
-
         // After responder establishes, decrypt assertions are performed via SecureMessagingService below
 
         var peerIdentityRepo = new Mock<Percolator.Identity.IPeerIdentityRepository>(MockBehavior.Strict);
@@ -637,11 +589,9 @@ public class HandshakeInitiatorFlowTests
 
         var initiatorHelloHandler = new HandleHandshakeInitiatorHelloHandler(
             new NullLogger<HandleHandshakeInitiatorHelloHandler>(),
-            x3dh.Object,
             pkhStore.Object,
             selfPreRepo.Object,
             directRepo.Object,
-            sessions.Object,
             secureSvc.Object,
             responderActive,
             peerIdentityRepo.Object,
@@ -655,19 +605,7 @@ public class HandshakeInitiatorFlowTests
 
         // Provide a valid CompleteHandshake response so handler can proceed
         using var responderPriv = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        x3dh
-            .Setup(o => o.CompleteHandshake(
-                It.IsAny<RatchetIdentityKey>(),
-                It.IsAny<RatchetEphemeralKey>(),
-                It.IsAny<ECDiffieHellman?>()))
-            .Returns(new HandshakeResponse(
-                SharedSecret: new SharedSecret(new byte[] { 0x44, 0x55 }),
-                ResponderBundle: new X3dPreKeyBundle(
-                    IdentitySigningKey: new RatchetIdentityKey(ik.PublicKey.ExportSubjectPublicKeyInfo()),
-                    EphemeralKey: new RatchetEphemeralKey(spk.PublicKey.ExportSubjectPublicKeyInfo()),
-                    OneTimePreKey: null),
-                ResponderPrivateKeyUsed: responderPriv));
-
+        
         var cmd = new HandleHandshakeInitiatorHelloCommand(
             InitiatorIdentityKeySpki: remoteIdentitySpki,
             InitiatorEphemeralKeySpki: remotePreKeySpki,
@@ -685,14 +623,7 @@ public class HandshakeInitiatorFlowTests
             .ReturnsAsync((new SessionId(Guid.NewGuid()), expectedFirstPlaintext));
         var dec = await secureSvc.Object.DecryptInboundAsync(firstMessage, CancellationToken.None);
         Assert.That(dec!.Value.plaintext.Value, Is.EqualTo(expectedFirstPlaintext.Value));
-
-        // Verify establishment occurred
-        sessions.Verify(s => s.EstablishSessionAsResponderAsync(
-            It.IsAny<SessionId>(),
-            It.IsAny<RatchetIdentityKey>(),
-            It.IsAny<RatchetEphemeralKey>(),
-            It.IsAny<ECDiffieHellman>(),
-            It.IsAny<SharedSecret>()), Times.Once);
+        
     }
 
     [Test]
@@ -703,7 +634,6 @@ public class HandshakeInitiatorFlowTests
         var active = new ActiveIdentityContext { Identity = identity };
 
         // Use Loose for non-essential interactions to reduce brittleness
-        var sessions = new Mock<IDirectSessionManager>(MockBehavior.Loose);
         var lookup = new Mock<IRatchetKeyIndex>(MockBehavior.Loose);
         lookup
             .Setup(l => l.TryResolveAsync(It.IsAny<RatchetEphemeralKey>(), It.IsAny<CancellationToken>()))
@@ -749,18 +679,9 @@ public class HandshakeInitiatorFlowTests
 
         // Capture finalize parameters to assert the parsed session id is used to finalize as initiator
         SessionId? finalizedSid = null;
-        sessions
-            .Setup(s => s.FinalizeAsInitiatorAsync(
-                It.IsAny<SessionId>(),
-                It.IsAny<RatchetIdentityKey>(),
-                It.IsAny<SharedSecret>(),
-                It.IsAny<RatchetEphemeralKey>()))
-            .Callback<SessionId, RatchetIdentityKey, SharedSecret, RatchetEphemeralKey>((sid, _, __, ___) => finalizedSid = sid)
-            .Returns(Task.CompletedTask);
-
+        
         var handler = new HandleHandshakeResponderHelloHandler(
             new NullLogger<HandleHandshakeResponderHelloHandler>(),
-            sessions.Object,
             secure.Object,
             active,
             lookup.Object,

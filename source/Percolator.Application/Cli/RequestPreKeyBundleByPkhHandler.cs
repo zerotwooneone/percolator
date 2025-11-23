@@ -19,40 +19,31 @@ public class RequestPreKeyBundleByPkhHandler : IRequestHandler<RequestPreKeyBund
 {
     private readonly ILogger<RequestPreKeyBundleByPkhHandler> _logger;
     private readonly IConversationService _conversationService;
-    private readonly IDirectSessionManager _sessionManager;
     private readonly ISecureMessagingService _secureMessaging;
     private readonly IMessageTransportService _transport;
     private readonly ActiveIdentityContext _activeIdentity;
     private readonly IPeerIdentityRepository _peerIdentityRepository;
-    private readonly IDirectSessionManager _directSessionManager;
     private readonly IPeerPublicSigningKeyStore _peerPublicSigningKeyStore;
     private readonly IOneTimeKeyProvider _oneTimeKeyProvider;
-    private readonly IX3DHOrchestrator _x3DhOrchestrator;
 
     public RequestPreKeyBundleByPkhHandler(
         ILogger<RequestPreKeyBundleByPkhHandler> logger,
         IConversationService conversationService,
-        IDirectSessionManager sessionManager,
         ISecureMessagingService secureMessaging,
         IMessageTransportService transport,
         ActiveIdentityContext activeIdentity,
         IPeerIdentityRepository peerIdentityRepository,
-        IDirectSessionManager directSessionManager,
         IPeerPublicSigningKeyStore peerPublicSigningKeyStore,
-        IOneTimeKeyProvider oneTimeKeyProvider,
-        IX3DHOrchestrator x3DHOrchestrator)
+        IOneTimeKeyProvider oneTimeKeyProvider)
     {
         _logger = logger;
         _conversationService = conversationService;
-        _sessionManager = sessionManager;
         _secureMessaging = secureMessaging;
         _transport = transport;
         _activeIdentity = activeIdentity;
         _peerIdentityRepository = peerIdentityRepository;
-        _directSessionManager = directSessionManager;
         _peerPublicSigningKeyStore = peerPublicSigningKeyStore;
         _oneTimeKeyProvider = oneTimeKeyProvider;
-        _x3DhOrchestrator = x3DHOrchestrator;
     }
 
     public async Task<Unit> Handle(RequestPreKeyBundleByPkhCommand request, CancellationToken cancellationToken)
@@ -144,21 +135,6 @@ public class RequestPreKeyBundleByPkhHandler : IRequestHandler<RequestPreKeyBund
         RatchetEphemeralKey remotePreKey,
         OneTimeKey? remoteOneTimePreKey)
     {
-        var ephemeralKey = _oneTimeKeyProvider.PopOneTimeKey()!;
-
-        var prekeyBundle = new X3dPreKeyBundle(
-            remoteIdentityKey,
-            remotePreKey,
-            remoteOneTimePreKey);
-        
-        var sharedSecret = _x3DhOrchestrator.InitiateHandshake(prekeyBundle, ephemeralKey);
-        
-        var cryptoSessionId = SessionId.NewId();
-        await _sessionManager.EstablishSessionAsInitiatorAsync(
-            cryptoSessionId,
-            remoteIdentityKey,
-            remotePreKey,
-            sharedSecret,
-            ephemeralKey).ConfigureAwait(false);
+        throw new NotSupportedException("Pre-key handshake cutover pending (Step 8): replace legacy InitiateHandshake/EstablishSession");
     }
 }

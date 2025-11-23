@@ -25,7 +25,6 @@ public class SubmitPreKeysHandlerTests
     private ActiveIdentityContext _activeIdentity = null!;
     private Mock<IConversationService> _conversationService = null!;
     private Mock<ISecureMessagingService> _secureSvc;
-    private Mock<IDirectSessionManager> _sessionManager = null!;
     private Mock<IMessageTransportService> _transport = null!;
     private Mock<Percolator.Identity.IPeerIdentityRepository> _peerIdentityRepository = null!;
     private Mock<IOneTimeKeyProvider> _oneTimeKeyProvider = null!;
@@ -36,7 +35,6 @@ public class SubmitPreKeysHandlerTests
     {
         _activeIdentity = new ActiveIdentityContext();
         _conversationService = new Mock<IConversationService>();
-        _sessionManager = new Mock<IDirectSessionManager>();
         _transport = new Mock<IMessageTransportService>();
         _peerIdentityRepository = new Mock<Percolator.Identity.IPeerIdentityRepository>();
         _oneTimeKeyProvider = new Mock<IOneTimeKeyProvider>();
@@ -108,7 +106,6 @@ public class SubmitPreKeysHandlerTests
         var handler = new SubmitPreKeysHandler(
             new NullLogger<SubmitPreKeysHandler>(),
             _conversationService.Object,
-            _sessionManager.Object,
             _transport.Object,
             _activeIdentity,
             _peerIdentityRepository.Object,
@@ -142,7 +139,6 @@ public class SubmitPreKeysHandlerTests
         var handler = new SubmitPreKeysHandler(
             new NullLogger<SubmitPreKeysHandler>(),
             _conversationService.Object,
-            _sessionManager.Object,
             _transport.Object,
             _activeIdentity,
             _peerIdentityRepository.Object,

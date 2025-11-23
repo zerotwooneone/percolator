@@ -19,7 +19,6 @@ namespace Percolator.Application.Network
     public class DeliverOpaqueMessageHandler : IRequestHandler<DeliverOpaqueMessageCommand, DeliverOpaqueMessageResult>
     {
         private readonly ILogger<DeliverOpaqueMessageHandler> _logger;
-        private readonly IDirectSessionManager _sessionManager;
         private readonly IMediator _mediator;
         private readonly IDirectSessionRepository _directSessionRepository;
         private readonly ActiveIdentityContext _activeIdentityContext;
@@ -44,7 +43,6 @@ namespace Percolator.Application.Network
 
         public DeliverOpaqueMessageHandler(
             ILogger<DeliverOpaqueMessageHandler> logger,
-            IDirectSessionManager sessionManager,
             IMediator mediator,
             IDirectSessionRepository directSessionRepository,
             ActiveIdentityContext activeIdentityContext,
@@ -55,7 +53,6 @@ namespace Percolator.Application.Network
             ISecureMessagingService secureMessaging)
         {
             _logger = logger;
-            _sessionManager = sessionManager;
             _mediator = mediator;
             _directSessionRepository = directSessionRepository;
             _activeIdentityContext = activeIdentityContext;

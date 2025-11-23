@@ -29,7 +29,6 @@ namespace Percolator.ApplicationTests.Network
         [Test]
         public async Task FastPath_UsesRatchetIndex_DoesNotFinalize()
         {
-            var sessions = new Mock<IDirectSessionManager>(MockBehavior.Strict);
             var secure = new Mock<ISecureMessagingService>(MockBehavior.Strict);
             var ratchetIndex = new Mock<IRatchetKeyIndex>(MockBehavior.Strict);
             var preStore = new Mock<IPreHandshakeSessionStore>(MockBehavior.Strict);
@@ -42,7 +41,6 @@ namespace Percolator.ApplicationTests.Network
 
             var handler = new HandleHandshakeResponderHelloHandler(
                 new NullLogger<HandleHandshakeResponderHelloHandler>(),
-                sessions.Object,
                 secure.Object,
                 active,
                 ratchetIndex.Object,
@@ -54,14 +52,12 @@ namespace Percolator.ApplicationTests.Network
             await handler.Handle(new HandleHandshakeResponderHelloCommand(payload), CancellationToken.None);
 
             // Verify no finalize or prehandshake access occurred
-            sessions.VerifyNoOtherCalls();
             preStore.VerifyNoOtherCalls();
         }
 
         [Test]
         public async Task SlowPath_FinalizeFromPrehandshake_And_Delete()
         {
-            var sessions = new Mock<IDirectSessionManager>(MockBehavior.Strict);
             var secure = new Mock<ISecureMessagingService>(MockBehavior.Strict);
             var ratchetIndex = new Mock<IRatchetKeyIndex>(MockBehavior.Strict);
             var preStore = new Mock<IPreHandshakeSessionStore>(MockBehavior.Strict);
@@ -93,21 +89,12 @@ namespace Percolator.ApplicationTests.Network
                 .Setup(s => s.TryGetMostRecentAsync(active.Identity!.SelfIdentityId, It.IsAny<CancellationToken>()))
                 .ReturnsAsync(pre);
 
-            sessions
-                .Setup(s => s.FinalizeAsInitiatorAsync(
-                    sid,
-                    It.IsAny<RatchetIdentityKey>(),
-                    It.Is<SharedSecret>(ss => ss.Value.Length == pre.InitialRootKey.Length),
-                    It.IsAny<RatchetEphemeralKey>()))
-                .Returns(Task.CompletedTask);
-
             preStore
                 .Setup(s => s.DeleteAsync(pre.Id, active.Identity!.SelfIdentityId, It.IsAny<CancellationToken>()))
                 .Returns(Task.CompletedTask);
 
             var handler = new HandleHandshakeResponderHelloHandler(
                 new NullLogger<HandleHandshakeResponderHelloHandler>(),
-                sessions.Object,
                 secure.Object,
                 active,
                 ratchetIndex.Object,
@@ -118,7 +105,6 @@ namespace Percolator.ApplicationTests.Network
             var payload2 = SessionRatchetMessage.Create(pk2, 1, 0, new Ciphertext(new byte[] { 0x02 })).Value;
             await handler.Handle(new HandleHandshakeResponderHelloCommand(payload2), CancellationToken.None);
 
-            sessions.VerifyAll();
             preStore.VerifyAll();
         }
     }

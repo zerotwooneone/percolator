@@ -31,25 +31,23 @@ public class RelayOrchestratorTests
     private static (RelayOrchestrator orchestrator,
         Mock<IMessageQueueRepository> queue,
         Mock<IDirectSessionRepository> directSessions,
-        Mock<IDirectSessionManager> sessionMgr,
         Mock<IMessageTransportService> transport,
         Mock<ISecureMessagingService> secureSvc) Create(out ActiveIdentityContext active)
     {
         var logger = Mock.Of<ILogger<RelayOrchestrator>>();
         var queue = new Mock<IMessageQueueRepository>(MockBehavior.Strict);
         var directSessions = new Mock<IDirectSessionRepository>(MockBehavior.Strict);
-        var sessionMgr = new Mock<IDirectSessionManager>(MockBehavior.Strict);
         var transport = new Mock<IMessageTransportService>(MockBehavior.Strict);
         var secureSvc = new Mock<ISecureMessagingService>(MockBehavior.Strict);
         active = Active();
-        var orchestrator = new RelayOrchestrator(logger, queue.Object, directSessions.Object, sessionMgr.Object, secureSvc.Object, transport.Object, active);
-        return (orchestrator, queue, directSessions, sessionMgr, transport, secureSvc);
+        var orchestrator = new RelayOrchestrator(logger, queue.Object, directSessions.Object, secureSvc.Object, transport.Object, active);
+        return (orchestrator, queue, directSessions, transport, secureSvc);
     }
 
     [Test]
     public async Task RelayNextAsync_happy_ack_deletes_and_returns_true()
     {
-        var (orchestrator, queue, directSessions, sessionMgr, transport, secureSvc) = Create(out var active);
+        var (orchestrator, queue, directSessions,  transport, secureSvc) = Create(out var active);
         var peerId = new Percolator.Identity.PeerId(Guid.NewGuid());
         var ackId = Guid.NewGuid();
         var blob = new byte[] { 0x01, 0x02 };
@@ -89,7 +87,6 @@ public class RelayOrchestratorTests
         result.Should().BeTrue();
 
         queue.VerifyAll();
-        sessionMgr.VerifyAll();
         directSessions.VerifyAll();
         transport.VerifyAll();
     }
@@ -97,7 +94,7 @@ public class RelayOrchestratorTests
     [Test]
     public void RelayNextAsync_ack_mismatch_throws()
     {
-        var (orchestrator, queue, directSessions, sessionMgr, transport, secureSvc) = Create(out var active);
+        var (orchestrator, queue, directSessions,  transport, secureSvc) = Create(out var active);
         var peerId = new Percolator.Identity.PeerId(Guid.NewGuid());
         var ackId = Guid.NewGuid();
         var blob = new byte[] { 0x05 };
@@ -135,7 +132,7 @@ public class RelayOrchestratorTests
     [Test]
     public void RelayNextAsync_no_response_payload_throws()
     {
-        var (orchestrator, queue, directSessions, sessionMgr, transport, secureSvc) = Create(out var active);
+        var (orchestrator, queue, directSessions,  transport, secureSvc) = Create(out var active);
         var peerId = new Percolator.Identity.PeerId(Guid.NewGuid());
         var ackId = Guid.NewGuid();
         var blob = new byte[] { 0x07 };
@@ -160,7 +157,7 @@ public class RelayOrchestratorTests
     [Test]
     public async Task RelayNextAsync_empty_queue_returns_false()
     {
-        var (orchestrator, queue, _, __, ___, ____) = Create(out _);
+        var (orchestrator, queue, _, __, ___) = Create(out _);
         var peerId = new Percolator.Identity.PeerId(Guid.NewGuid());
         queue.Setup(q => q.FetchAsync(peerId, 1, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new System.Collections.Generic.List<(Guid, byte[])>());
@@ -172,7 +169,7 @@ public class RelayOrchestratorTests
     [Test]
     public void RelayNextAsync_no_session_throws()
     {
-        var (orchestrator, queue, directSessions, sessionMgr, transport, secureSvc) = Create(out var active);
+        var (orchestrator, queue, directSessions,  transport, secureSvc) = Create(out var active);
         var peerId = new Percolator.Identity.PeerId(Guid.NewGuid());
         var ackId = Guid.NewGuid();
         var blob = new byte[] { 0x09 };

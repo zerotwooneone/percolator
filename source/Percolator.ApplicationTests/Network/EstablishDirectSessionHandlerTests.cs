@@ -40,11 +40,8 @@ namespace Percolator.ApplicationTests.Network
                     SignedPreKey: ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256))
             };
 
-            var x3dhOrchestrator = new Mock<IX3DHOrchestrator>(MockBehavior.Strict);
-            var sessionManager = new Mock<IDirectSessionManager>(MockBehavior.Strict);
             var peerIdentityRepo = new Mock<Percolator.Identity.IPeerIdentityRepository>(MockBehavior.Strict);
             var secure = new Mock<Percolator.Application.Services.ISecureMessagingService>(MockBehavior.Strict);
-            var x3dhManager = new Mock<IX3DHManager>(MockBehavior.Strict);
             var directRepo = new Mock<IDirectSessionRepository>(MockBehavior.Strict);
             var pkhStore = new Mock<IPeerPublicSigningKeyStore>(MockBehavior.Strict);
             var profileRepo = new Mock<IPeerRoutingProfileRepository>(MockBehavior.Loose);
@@ -73,28 +70,6 @@ namespace Percolator.ApplicationTests.Network
                 ClientCertificate = null,
                 PeerEndPoint = new DnsEndPoint("127.0.0.1", 5001)
             };
-
-            // Mocks: signature verification OK
-            x3dhManager.Setup(m => m.VerifySignature(
-                    It.IsAny<RatchetIdentityKey>(),
-                    It.IsAny<PreKey>(),
-                    It.IsAny<CryptoSignature>()))
-                .Returns(true);
-
-            // Mocks: orchestrator yields a shared secret
-            var shared = new SharedSecret(RandomNumberGenerator.GetBytes(32));
-            x3dhOrchestrator.Setup(o => o.InitiateHandshake(
-                    It.IsAny<X3dPreKeyBundle>(),
-                    It.IsAny<ECDiffieHellman>()))
-                .Returns(shared);
-
-            // Mocks: session establishment as initiator
-            sessionManager.Setup(s => s.EstablishSessionAsInitiatorAsync(
-                It.IsAny<SessionId>(),
-                It.IsAny<RatchetIdentityKey>(),
-                It.IsAny<RatchetEphemeralKey>(),
-                It.IsAny<SharedSecret>(),
-                It.IsAny<ECDiffieHellman>())).Returns(Task.CompletedTask);
 
             // Mocks: encrypt initial responder payload into a ratchet message via secure service
             secure.Setup(s => s.EncryptAsync(
@@ -129,11 +104,8 @@ namespace Percolator.ApplicationTests.Network
             var handler = new EstablishDirectSessionHandler(
                 logger,
                 active,
-                x3dhOrchestrator.Object,
-                sessionManager.Object,
                 secure.Object,
                 peerIdentityRepo.Object,
-                x3dhManager.Object,
                 directRepo.Object,
                 pkhStore.Object,
                 profileRepo.Object);
@@ -149,13 +121,6 @@ namespace Percolator.ApplicationTests.Network
             Assert.That(result.RatchetMessageBytes, Is.Not.Null);
 
             pkhStore.Verify();
-
-            sessionManager.Verify(s => s.EstablishSessionAsInitiatorAsync(
-                It.IsAny<SessionId>(),
-                It.IsAny<RatchetIdentityKey>(),
-                It.IsAny<RatchetEphemeralKey>(),
-                It.IsAny<SharedSecret>(),
-                It.IsAny<ECDiffieHellman>()), Times.Once);
         }
     }
 }

@@ -35,7 +35,7 @@ namespace Percolator.ApplicationTests.Network;
         [Test]
         public async Task RelayOpaqueEnvelope_passes_remote_peer_as_RelayHostPeerId()
         {
-            var handler = CreateHandler(out var sessionMgr, out var mediator, out var directRepo, out var ratchetLookup, out var secureSvc);
+            var handler = CreateHandler(out var mediator, out var directRepo, out var ratchetLookup, out var secureSvc);
             var sessionId = Guid.NewGuid();
             var remotePeerId = Guid.NewGuid();
 
@@ -91,7 +91,7 @@ namespace Percolator.ApplicationTests.Network;
         [Test]
         public async Task RelayOpaqueEnvelope_dispatches_to_relays_and_returns_empty()
         {
-            var handler = CreateHandler(out var sessionMgr, out var mediator, out var directRepo, out var ratchetLookup, out var secureSvc);
+            var handler = CreateHandler(out var mediator, out var directRepo, out var ratchetLookup, out var secureSvc);
             var sessionId = Guid.NewGuid();
             var remotePeerId = Guid.NewGuid();
 
@@ -136,14 +136,13 @@ namespace Percolator.ApplicationTests.Network;
             // Expect RPC-level ack payload (encrypted) for RelayOpaqueEnvelope path
             result.ResponsePayloadBytes.Should().NotBeNull();
             mediator.Verify(m => m.Send(It.IsAny<Percolator.Application.Network.Handshake.ProcessRelayedOpaquePayloadCommand>(), It.IsAny<CancellationToken>()), Times.Once);
-            sessionMgr.VerifyAll();
             directRepo.VerifyAll();
         }
 
         [Test]
         public async Task RelayOpaqueEnvelope_with_AckId_is_delegated_and_returns_empty()
         {
-            var handler = CreateHandler(out var sessionMgr, out var mediator, out var directRepo, out var ratchetLookup, out var secureSvc);
+            var handler = CreateHandler(out var mediator, out var directRepo, out var ratchetLookup, out var secureSvc);
             var sessionId = Guid.NewGuid();
             var remotePeerId = Guid.NewGuid();
 
@@ -196,13 +195,12 @@ namespace Percolator.ApplicationTests.Network;
 
             mediator.Verify(m => m.Send(It.IsAny<Percolator.Application.Network.Handshake.ProcessRelayedOpaquePayloadCommand>(), It.IsAny<CancellationToken>()), Times.Once);
             directRepo.VerifyAll();
-            sessionMgr.VerifyAll();
         }
 
     [Test]
     public async Task MQ_Enqueue_request_results_in_early_encrypted_response()
     {
-        var handler = CreateHandler(out var sessionMgr, out var mediator, out var directRepo, out var ratchetLookup, out var secureSvc);
+        var handler = CreateHandler(out var mediator, out var directRepo, out var ratchetLookup, out var secureSvc);
         var sessionId = Guid.NewGuid();
         var remotePeerId = Guid.NewGuid();
 
@@ -253,7 +251,6 @@ namespace Percolator.ApplicationTests.Network;
         result.ResponsePayloadBytes.Should().NotBeNull();
         result.ResponsePayloadBytes!.Should().BeEquivalentTo(encrypted);
 
-        sessionMgr.VerifyAll();
         mediator.Verify(m => m.Send(It.IsAny<ProcessInternalEnvelopeCommand>(), It.IsAny<CancellationToken>()), Times.Once);
         directRepo.VerifyAll();
     }
@@ -261,7 +258,7 @@ namespace Percolator.ApplicationTests.Network;
     [Test]
     public async Task Early_response_from_orchestrator_is_encrypted_and_returned()
     {
-        var handler = CreateHandler(out var sessionMgr, out var mediator, out var directRepo, out var ratchetLookup, out var secureSvc);
+        var handler = CreateHandler(out var mediator, out var directRepo, out var ratchetLookup, out var secureSvc);
         var sessionId = Guid.NewGuid();
         var remotePeerId = Guid.NewGuid();
 
@@ -304,7 +301,6 @@ namespace Percolator.ApplicationTests.Network;
         result.ResponsePayloadBytes.Should().NotBeNull();
         result.ResponsePayloadBytes!.Should().BeEquivalentTo(encrypted);
 
-        sessionMgr.VerifyAll();
         mediator.VerifyAll();
         directRepo.VerifyAll();
     }
@@ -312,7 +308,7 @@ namespace Percolator.ApplicationTests.Network;
     [Test]
     public async Task PlaintextHello_fallback_establishes_and_returns_encrypted_responder()
     {
-        var handler = CreateHandler(out var sessionMgr, out var mediator, out var directRepo, out var ratchetLookup, out var secureSvc);
+        var handler = CreateHandler(out var mediator, out var directRepo, out var ratchetLookup, out var secureSvc);
 
         // Build a minimal, valid HandshakeInitiatorHello protobuf carried within RelayOpaqueEnvelope (as inner opaque)
         using var ik = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
@@ -360,7 +356,7 @@ namespace Percolator.ApplicationTests.Network;
     [Test]
     public async Task SlowPath_succeeds_when_fast_lookup_misses()
     {
-        var handler = CreateHandler(out var sessionMgr, out var mediator, out var directRepo, out var ratchetLookup, out var secureSvc);
+        var handler = CreateHandler(out var mediator, out var directRepo, out var ratchetLookup, out var secureSvc);
         var sessionId = Guid.NewGuid();
 
         // Build a valid ratchet payload with a DHT PingRequest envelope
@@ -405,7 +401,7 @@ namespace Percolator.ApplicationTests.Network;
     [Test]
     public async Task Throws_when_both_fast_and_slow_paths_fail()
     {
-        var handler = CreateHandler(out var sessionMgr, out var mediator, out var directRepo, out var ratchetLookup, out var secureSvc);
+        var handler = CreateHandler(out var mediator, out var directRepo, out var ratchetLookup, out var secureSvc);
         var headerKey = new PreKey(RandomBytes(32));
         var payloadBytes = BuildRatchetPayload(headerKey.Value, RandomBytes(16));
 
@@ -436,13 +432,11 @@ namespace Percolator.ApplicationTests.Network;
     }
 
     private static DeliverOpaqueMessageHandler CreateHandler(
-        out Mock<IDirectSessionManager> sessionMgr,
         out Mock<IMediator> mediator,
         out Mock<IDirectSessionRepository> directRepo,
         out Mock<IRatchetKeyIndex> ratchetLookup,
         out Mock<ISecureMessagingService> secureSvc)
     {
-        sessionMgr = new Mock<IDirectSessionManager>(MockBehavior.Strict);
         mediator = new Mock<IMediator>(MockBehavior.Loose);
         directRepo = new Mock<IDirectSessionRepository>(MockBehavior.Strict);
         ratchetLookup = new Mock<IRatchetKeyIndex>(MockBehavior.Strict);
@@ -461,7 +455,7 @@ namespace Percolator.ApplicationTests.Network;
             .ReturnsAsync(Array.Empty<(Guid, byte[])>());
         var transport = new Mock<IMessageTransportService>(MockBehavior.Strict);
         var relayLogger = Mock.Of<ILogger<RelayOrchestrator>>();
-        var relay = new RelayOrchestrator(relayLogger, mqRepo.Object, directRepo.Object, sessionMgr.Object, secureSvc.Object, transport.Object, active);
+        var relay = new RelayOrchestrator(relayLogger, mqRepo.Object, directRepo.Object, secureSvc.Object, transport.Object, active);
         var profileRepo = new Mock<IPeerRoutingProfileRepository>(MockBehavior.Loose);
         // Always return a profile with a fresh localhost endpoint for any peer id
         profileRepo
@@ -480,13 +474,13 @@ namespace Percolator.ApplicationTests.Network;
             .Setup(p => p.SelectRoute(It.IsAny<PeerRoutingProfile>()))
             .Returns<PeerRoutingProfile>(p => new Percolator.Network.RouteSelection(p.Endpoints.First(), null));
 
-        return new DeliverOpaqueMessageHandler(logger, sessionMgr.Object, mediator.Object, directRepo.Object, active, ratchetLookup.Object, relay, profileRepo.Object, routePlanner.Object, secureSvc.Object);
+        return new DeliverOpaqueMessageHandler(logger, mediator.Object, directRepo.Object, active, ratchetLookup.Object, relay, profileRepo.Object, routePlanner.Object, secureSvc.Object);
     }
 
     [Test]
     public async Task Returns_empty_when_decryption_result_is_null()
     {
-        var handler = CreateHandler(out var sessionMgr, out var mediator, out var directRepo, out var ratchetLookup, out var secureSvc);
+        var handler = CreateHandler(out var mediator, out var directRepo, out var ratchetLookup, out var secureSvc);
         var sessionId = Guid.NewGuid();
 
         // Arrange ratchet lookup to resolve inferred session from header key
@@ -509,13 +503,12 @@ namespace Percolator.ApplicationTests.Network;
         ratchetLookup.Verify(l => l.UpsertAsync(It.IsAny<SessionId>(), It.IsAny<RatchetEphemeralKey>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()), Times.Never);
         // No direct session mapping lookups should occur
         directRepo.VerifyNoOtherCalls();
-        sessionMgr.VerifyAll();
     }
 
     [Test]
     public void Throws_when_direct_session_mapping_missing()
     {
-        var handler = CreateHandler(out var sessionMgr, out var mediator, out var directRepo, out var ratchetLookup, out var secureSvc);
+        var handler = CreateHandler(out var mediator, out var directRepo, out var ratchetLookup, out var secureSvc);
         var sessionId = Guid.NewGuid();
 
         // Build a valid ratchet payload and resolve session via ratchet lookup
@@ -545,7 +538,7 @@ namespace Percolator.ApplicationTests.Network;
     [Test]
     public async Task PingRequest_sends_mediator_and_returns_empty()
     {
-        var handler = CreateHandler(out var sessionMgr, out var mediator, out var directRepo, out var ratchetLookup, out var secureSvc);
+        var handler = CreateHandler(out var mediator, out var directRepo, out var ratchetLookup, out var secureSvc);
         var sessionId = Guid.NewGuid();
         var remotePeerId = Guid.NewGuid();
 
@@ -582,14 +575,13 @@ namespace Percolator.ApplicationTests.Network;
 
         result.ResponsePayloadBytes.Should().BeNull();
         mediator.Verify(m => m.Send(It.IsAny<ProcessInternalEnvelopeCommand>(), It.IsAny<CancellationToken>()), Times.Once);
-        sessionMgr.VerifyAll();
         directRepo.VerifyAll();
     }
 
     [Test]
     public async Task FindNodeRequest_returns_encrypted_response_bytes()
     {
-        var handler = CreateHandler(out var sessionMgr, out var mediator, out var directRepo, out var ratchetLookup, out var secureSvc);
+        var handler = CreateHandler(out var mediator, out var directRepo, out var ratchetLookup, out var secureSvc);
         var sessionId = Guid.NewGuid();
         var remotePeerId = Guid.NewGuid();
 
@@ -639,7 +631,6 @@ namespace Percolator.ApplicationTests.Network;
         result.ResponsePayloadBytes.Should().NotBeNull();
         result.ResponsePayloadBytes!.Should().BeEquivalentTo(encryptedBytes);
 
-        sessionMgr.VerifyAll();
         directRepo.VerifyAll();
         mediator.VerifyAll();
     }
@@ -647,7 +638,7 @@ namespace Percolator.ApplicationTests.Network;
     [Test]
     public async Task Disallowed_empty_envelope_returns_empty_and_does_not_dispatch()
     {
-        var handler = CreateHandler(out var sessionMgr, out var mediator, out var directRepo, out var ratchetLookup, out var secureSvc);
+        var handler = CreateHandler(out var mediator, out var directRepo, out var ratchetLookup, out var secureSvc);
         var sessionId = Guid.NewGuid();
         var remotePeerId = Guid.NewGuid();
 
@@ -680,7 +671,6 @@ namespace Percolator.ApplicationTests.Network;
         // Ensure orchestrator was NOT called due to prefilter rejection
         mediator.Verify(m => m.Send(It.IsAny<ProcessInternalEnvelopeCommand>(), It.IsAny<CancellationToken>()), Times.Never);
 
-        sessionMgr.VerifyAll();
         directRepo.VerifyAll();
     }
 }

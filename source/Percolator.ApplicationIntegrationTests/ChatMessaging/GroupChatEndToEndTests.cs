@@ -405,7 +405,6 @@ namespace Percolator.ApplicationIntegrationTests.ChatMessaging
         private static async Task SendChatEnvelopeAsync(IHost sender, string recipientName, Percolator.Contracts.ChatEnvelope envelope, DnsEndPoint recipientEndpoint)
         {
             // Retry loop to handle rare ratchet header inference races on receiver
-            var sessionManager = sender.Services.GetRequiredService<Percolator.Application.Sessions.IDirectSessionManager>();
             var secure = sender.Services.GetRequiredService<Percolator.Application.Services.ISecureMessagingService>();
             var transport = sender.Services.GetRequiredService<Percolator.Application.Network.IMessageTransportService>();
             var identityRepo = sender.Services.GetRequiredService<Percolator.Identity.IPeerIdentityRepository>();

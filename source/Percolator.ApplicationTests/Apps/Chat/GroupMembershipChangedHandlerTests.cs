@@ -25,8 +25,6 @@ namespace Percolator.ApplicationTests.Apps.Chat
     {
         private Mock<IConversationRepository> _repo = null!;
         private Mock<ISelfParticipantIdProvider> _self = null!;
-        private Mock<IGroupManagerResolver> _gmResolver = null!;
-        private Mock<ITransportKeyResolver> _transport = null!;
         private Mock<IMediator> _mediator = null!;
         private ActiveIdentityContext _active = null!;
         private Mock<IGroupAdminStateStore> _adminState = null!;
@@ -41,8 +39,6 @@ namespace Percolator.ApplicationTests.Apps.Chat
         {
             _repo = new Mock<IConversationRepository>(MockBehavior.Strict);
             _self = new Mock<ISelfParticipantIdProvider>(MockBehavior.Strict);
-            _gmResolver = new Mock<IGroupManagerResolver>(MockBehavior.Strict);
-            _transport = new Mock<ITransportKeyResolver>(MockBehavior.Strict);
             _mediator = new Mock<IMediator>(MockBehavior.Strict);
             _adminState = new Mock<IGroupAdminStateStore>(MockBehavior.Strict);
             _gmState = new Mock<IGroupManagerStateStore>(MockBehavior.Strict);
@@ -64,15 +60,9 @@ namespace Percolator.ApplicationTests.Apps.Chat
             _repo.Setup(r => r.GetByIdAsync(new ConversationId(convoId), It.IsAny<int>())).ReturnsAsync(conversation);
             _active.Identity = new IdentityRecord(p1.Value, "self") { SelfIdentityId = 1 };
 
-            var gm = new GroupManager(ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256), _loggerFactory, Options.Create(new CryptographyOptions()));
-            _gmResolver.Setup(r => r.TryGet(convoId, out gm)).Returns(true);
-
             _adminState.Setup(a => a.GetAsync(convoId, It.IsAny<CancellationToken>())).ReturnsAsync(new GroupAdminState(0,0));
             _atRest.Setup(a => a.GetMasterKeyAsync(It.IsAny<CancellationToken>())).ReturnsAsync(RandomNumberGenerator.GetBytes(32));
             _gmState.Setup(s => s.SaveAsync(convoId, It.IsAny<byte[]>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
-
-            // AEAD missing for p2
-            _transport.Setup(t => t.GetAeadKeyAsync(convoId, p2.Value, It.IsAny<CancellationToken>())).ReturnsAsync((byte[]?)null);
 
             // Allow PKH resolution to return null for any participant (strict mock placation)
             _pkh.Setup(x => x.GetActivePkhAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync((byte[]?)null);
@@ -93,15 +83,10 @@ namespace Percolator.ApplicationTests.Apps.Chat
             _self.Setup(s => s.Get()).Returns(p1);
             _repo.Setup(r => r.GetByIdAsync(new ConversationId(convoId), It.IsAny<int>())).ReturnsAsync(conversation);
 
-            var gm = new GroupManager(ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256), _loggerFactory, Options.Create(new CryptographyOptions()));
-            _gmResolver.Setup(r => r.TryGet(convoId, out gm)).Returns(true);
-
             _adminState.Setup(a => a.GetAsync(convoId, It.IsAny<CancellationToken>())).ReturnsAsync(new GroupAdminState(0,0));
             _atRest.Setup(a => a.GetMasterKeyAsync(It.IsAny<CancellationToken>())).ReturnsAsync(RandomNumberGenerator.GetBytes(32));
             _gmState.Setup(s => s.SaveAsync(convoId, It.IsAny<byte[]>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
 
-            // AEAD for any recipient (self is skipped; p2 will be processed)
-            _transport.Setup(t => t.GetAeadKeyAsync(convoId, It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync(RandomNumberGenerator.GetBytes(32));
             // Allow PKH resolution to return null for any participant
             _pkh.Setup(x => x.GetActivePkhAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync((byte[]?)null);
 
@@ -124,8 +109,6 @@ namespace Percolator.ApplicationTests.Apps.Chat
                 logger,
                 _repo.Object,
                 _self.Object,
-                _gmResolver.Object,
-                _transport.Object,
                 _mediator.Object,
                 _active,
                 _adminState.Object,
@@ -148,20 +131,12 @@ namespace Percolator.ApplicationTests.Apps.Chat
             // Active identity is required by handler
             _active.Identity = new IdentityRecord(p1.Value, "self") { SelfIdentityId = 1 };
 
-            // GroupManager available
-            var gm = new GroupManager(ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256), _loggerFactory, Options.Create(new CryptographyOptions()));
-            _gmResolver.Setup(r => r.TryGet(convoId, out gm)).Returns(true);
-
             // Admin state -> last committed 0 => next = 1
             _adminState.Setup(a => a.GetAsync(convoId, It.IsAny<CancellationToken>())).ReturnsAsync(new GroupAdminState(NextAdminSequenceNumber:0, LastCommittedKeyVersion:0));
 
             // At rest: master key, and save state
             _atRest.Setup(a => a.GetMasterKeyAsync(It.IsAny<CancellationToken>())).ReturnsAsync(RandomNumberGenerator.GetBytes(32));
             _gmState.Setup(s => s.SaveAsync(convoId, It.IsAny<byte[]>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
-
-            // Transport AEAD always available
-            _transport.Setup(t => t.GetAeadKeyAsync(convoId, p1.Value, It.IsAny<CancellationToken>())).ReturnsAsync(RandomNumberGenerator.GetBytes(32));
-            _transport.Setup(t => t.GetAeadKeyAsync(convoId, p2.Value, It.IsAny<CancellationToken>())).ReturnsAsync(RandomNumberGenerator.GetBytes(32));
 
             // Recipient PKH resolves for both
             var pkhBytes1 = RandomNumberGenerator.GetBytes(32);
@@ -185,7 +160,6 @@ namespace Percolator.ApplicationTests.Apps.Chat
 
             // Assert
             _repo.Verify(r => r.GetByIdAsync(new ConversationId(convoId), It.IsAny<int>()), Times.AtLeastOnce());
-            _gmResolver.VerifyAll();
             _adminState.VerifyAll();
             _gmState.VerifyAll();
             // PKH should be resolved for non-self (p2) and not for self (p1)

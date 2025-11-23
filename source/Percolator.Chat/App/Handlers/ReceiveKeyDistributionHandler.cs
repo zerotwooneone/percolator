@@ -5,16 +5,16 @@ using System.Threading.Tasks;
 
 namespace Percolator.Chat.App.Handlers
 {
-    // On recipient, import the encrypted group key via Application adapter (IGroupKeyOperations)
+    // On recipient, import the encrypted group key via Application service (IGroupSenderKeyService)
     public class ReceiveKeyDistributionHandler : IRequestHandler<ReceiveKeyDistributionCommand>
     {
         private readonly IConversationResolver _resolver;
-        private readonly IGroupKeyOperations _groupKeyOps;
-
-        public ReceiveKeyDistributionHandler(IConversationResolver resolver, IGroupKeyOperations groupKeyOps)
+        private readonly Percolator.Application.Apps.Chat.IGroupSenderKeyService _senderKeyService;
+        
+        public ReceiveKeyDistributionHandler(IConversationResolver resolver, Percolator.Application.Apps.Chat.IGroupSenderKeyService senderKeyService)
         {
             _resolver = resolver;
-            _groupKeyOps = groupKeyOps;
+            _senderKeyService = senderKeyService;
         }
 
         public async Task Handle(ReceiveKeyDistributionCommand request, CancellationToken cancellationToken)
@@ -22,8 +22,7 @@ namespace Percolator.Chat.App.Handlers
             request.Lookup.EnsureExactlyOne();
             var resolution = await _resolver.ResolveAsync(request.Lookup, cancellationToken);
             var conversationId = resolution.Conversation.Id.Value;
-
-            await _groupKeyOps.ImportGroupKeyAsync(conversationId, request.KeyVersion, request.EncryptedKey, cancellationToken);
+            await _senderKeyService.ImportSenderKeyAsync(conversationId, request.KeyVersion, request.EncryptedKey, cancellationToken);
         }
     }
 }

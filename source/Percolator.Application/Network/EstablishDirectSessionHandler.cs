@@ -27,11 +27,8 @@ namespace Percolator.Application.Network
     {
         private readonly ILogger<EstablishDirectSessionHandler> _logger;
         private readonly ActiveIdentityContext _activeIdentityContext;
-        private readonly IX3DHOrchestrator _x3dhOrchestrator;
-        private readonly IDirectSessionManager _sessionManager;
         private readonly ISecureMessagingService _secureMessaging;
         private readonly IPeerIdentityRepository _peerIdentityRepository;
-        private readonly IX3DHManager _x3DhManager;
         private readonly IDirectSessionRepository _directSessionRepository;
         private readonly IPeerPublicSigningKeyStore _pkhStore;
         private readonly IPeerRoutingProfileRepository _peerRoutingProfileRepository;
@@ -39,22 +36,16 @@ namespace Percolator.Application.Network
         public EstablishDirectSessionHandler(
             ILogger<EstablishDirectSessionHandler> logger,
             ActiveIdentityContext activeIdentityContext,
-            IX3DHOrchestrator x3dhOrchestrator,
-            IDirectSessionManager sessionManager,
             ISecureMessagingService secureMessaging,
             IPeerIdentityRepository peerIdentityRepository,
-            IX3DHManager x3DhManager,
             IDirectSessionRepository directSessionRepository,
             IPeerPublicSigningKeyStore pkhStore,
             IPeerRoutingProfileRepository peerRoutingProfileRepository)
         {
             _logger = logger;
             _activeIdentityContext = activeIdentityContext;
-            _x3dhOrchestrator = x3dhOrchestrator;
-            _sessionManager = sessionManager;
             _secureMessaging = secureMessaging;
             _peerIdentityRepository = peerIdentityRepository;
-            _x3DhManager = x3DhManager;
             _directSessionRepository = directSessionRepository;
             _pkhStore = pkhStore;
             _peerRoutingProfileRepository = peerRoutingProfileRepository;
@@ -74,28 +65,16 @@ namespace Percolator.Application.Network
             var requestPayloadSignature = new CryptoSignature(request.PayloadSignatureBytes);
             var requestPayload = new PreKey(request.SignedPayloadBytes);
 
-            // Verify the signed pre-key payload
-            if (!_x3DhManager.VerifySignature(remoteIdentityKey, requestPayload, requestPayloadSignature))
-            {
-                throw new CryptographicException("Invalid signature on signed pre-key.");
-            }
-            _logger.LogDebug("Signature verification successful");
+            // TODO: Verify signed pre-key payload via SessionCrypto in Step 8
+            throw new NotSupportedException("Handshake verification cutover pending (Step 8): replace legacy VerifySignature");
 
             // Determine timestamps and build values
             var networkIdentitySigningKey = new DirectMessagePublicKey(request.RemoteIdentityKeyBytes);
             var timestamp = DateTimeOffset.Now;
 
-            // Derive shared secret (Initiator)
-            _logger.LogInformation("Processing X3DH handshake with initiator bundle. Examining bundle properties...");
+            // TODO: Derive shared secret via IHandshakeService.InitiateStandardHandshake
             var ephemeralKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-            var remotePreKey = new RatchetEphemeralKey(request.RemoteEphemeral);
-            var prekeyBundle = new X3dPreKeyBundle(
-                remoteIdentityKey,
-                remotePreKey,
-                request.OneTimePreKeyBytes is not null ? new OneTimeKey(request.OneTimePreKeyBytes) : null);
-
-            var sharedSecret = _x3dhOrchestrator.InitiateHandshake(prekeyBundle, ephemeralKey);
-            _logger.LogInformation("X3DH handshake processed successfully as Initiator");
+            throw new NotSupportedException("Handshake initiation cutover pending (Step 8): replace legacy InitiateHandshake");
 
             // Identity domain owns PeerId minting. If identity not found, mint a new IdentityPeerId here (Identity domain responsibility) and create it.
             // Then, NetworkPeerId is derived from IdentityPeerId to keep ids aligned across domains.
@@ -143,16 +122,8 @@ namespace Percolator.Application.Network
             }
             
             var cryptoSessionId = new SessionId(directSessionId.Value);
-            var remoteEphemeral = request.OneTimePreKeyBytes is null
-                ? new RatchetEphemeralKey(request.RemoteEphemeral)
-                : new RatchetEphemeralKey(request.OneTimePreKeyBytes);
-            await _sessionManager.EstablishSessionAsInitiatorAsync(
-                cryptoSessionId,
-                remoteIdentityKey,
-                remoteEphemeral,
-                sharedSecret,
-                ephemeralKey).ConfigureAwait(false);
-            _logger.LogInformation("Successfully established session {SessionId} with peer {PeerId}", cryptoSessionId, identity.Id);
+            // TODO: Establish session via domain services
+            throw new NotSupportedException("Direct session establish cutover pending (Step 8): replace legacy EstablishSessionAsInitiatorAsync");
 
             // Upsert PKH -> Peer mapping immediately after establishing session (initiator side)
             var establishedSpki = remoteIdentityKey.Value;
@@ -166,10 +137,8 @@ namespace Percolator.Application.Network
             }.ToByteString();
 
             // Encrypt the response payload as an initial X3DH ratchet message for the initiator
-            var ratchetMessage = await _secureMessaging.EncryptAsync(
-                cryptoSessionId,
-                new Plaintext(responsePayload.ToByteArray()))
-                .ConfigureAwait(false);
+            // TODO: Encrypt over new session once established
+            var ratchetMessage = new SessionRatchetMessage(Array.Empty<byte>());
 
             var result = new EstablishDirectSessionResult
             {

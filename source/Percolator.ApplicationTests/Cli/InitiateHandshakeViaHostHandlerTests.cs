@@ -28,7 +28,6 @@ public class InitiateHandshakeViaHostHandlerTests
         // Arrange
         var logger = new NullLogger<InitiateHandshakeViaHostHandler>();
         var conversation = new Mock<IConversationService>(MockBehavior.Strict);
-        var sessionManager = new Mock<IDirectSessionManager>(MockBehavior.Strict);
         var transport = new Mock<IMessageTransportService>(MockBehavior.Strict);
         var secure = new Mock<ISecureMessagingService>(MockBehavior.Strict);
         var peerIdentityRepo = new Mock<Percolator.Identity.IPeerIdentityRepository>(MockBehavior.Strict);
@@ -123,7 +122,6 @@ public class InitiateHandshakeViaHostHandlerTests
         var handler = new InitiateHandshakeViaHostHandler(
             logger,
             conversation.Object,
-            sessionManager.Object,
             secure.Object,
             transport.Object,
             peerIdentityRepo.Object,

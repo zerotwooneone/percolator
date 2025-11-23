@@ -35,11 +35,9 @@ namespace Percolator.Application.Network.Handshake
     internal class HandleHandshakeInitiatorHelloHandler : IRequestHandler<HandleHandshakeInitiatorHelloCommand, HandleHandshakeInitiatorHelloResult?>
     {
         private readonly ILogger<HandleHandshakeInitiatorHelloHandler> _logger;
-        private readonly IX3DHOrchestrator _x3dh;
         private readonly IPeerPublicSigningKeyStore _pkhStore;
         private readonly ISelfPreKeyBundleRepository _selfPreKeyRepo;
         private readonly IDirectSessionRepository _directRepo;
-        private readonly IDirectSessionManager _sessionManager;
         private readonly ISecureMessagingService _secureMessaging;
         private readonly ActiveIdentityContext _active;
         private readonly IPeerIdentityRepository _peerIdentityRepository;
@@ -47,11 +45,9 @@ namespace Percolator.Application.Network.Handshake
         private readonly IMediator _mediator;
         public HandleHandshakeInitiatorHelloHandler(
             ILogger<HandleHandshakeInitiatorHelloHandler> logger,
-            IX3DHOrchestrator x3dh,
             IPeerPublicSigningKeyStore pkhStore,
             ISelfPreKeyBundleRepository selfPreKeyRepo,
             IDirectSessionRepository directRepo,
-            IDirectSessionManager sessionManager,
             ISecureMessagingService secureMessaging,
             ActiveIdentityContext active,
             IPeerIdentityRepository peerIdentityRepository,
@@ -59,11 +55,9 @@ namespace Percolator.Application.Network.Handshake
             IMediator mediator)
         {
             _logger = logger;
-            _x3dh = x3dh;
             _pkhStore = pkhStore;
             _selfPreKeyRepo = selfPreKeyRepo;
             _directRepo = directRepo;
-            _sessionManager = sessionManager;
             _secureMessaging = secureMessaging;
             _active = active;
             _peerIdentityRepository = peerIdentityRepository;
@@ -118,9 +112,8 @@ namespace Percolator.Application.Network.Handshake
                 throw;
             }
 
-            // Complete X3DH (responder). Private OTK retrieval not surfaced here; pass null to use SPK path if needed.
-            // IMPORTANT: do not dispose localOneTime yet; session establishment needs to clone/use the key first.
-            var hs = _x3dh.CompleteHandshake(remoteIdentityKey, remoteEphemeralKey, localOneTimePreKey: localOneTime);
+            // TODO: Complete responder-side handshake via IHandshakeService (Step 8)
+            throw new NotSupportedException("Handshake responder cutover pending (Step 8): replace legacy CompleteHandshake");
 
             // Upsert or create direct session mapping
             DirectSessionId directSessionId;
@@ -138,12 +131,8 @@ namespace Percolator.Application.Network.Handshake
                 directSessionId = new DirectSessionId(Guid.NewGuid());
             }
 
-            await _sessionManager.EstablishSessionAsResponderAsync(
-                new SessionId(directSessionId.Value),
-                remoteIdentityKey,
-                new RatchetEphemeralKey(remoteEphemeralKey.Value),
-                hs.ResponderPrivateKeyUsed,
-                hs.SharedSecret).ConfigureAwait(false);
+            // TODO: Establish responder session via domain services
+            throw new NotSupportedException("Session establish cutover pending (Step 8): replace legacy EstablishSessionAsResponderAsync");
 
             // Now it is safe to dispose the temporary one-time ECDH key, if it was used.
             localOneTime?.Dispose();

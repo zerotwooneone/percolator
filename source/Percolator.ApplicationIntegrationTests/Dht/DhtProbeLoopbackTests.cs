@@ -109,7 +109,6 @@ public class DhtProbeLoopbackTests : IntegrationTestBase
     public async Task FindNode_EndToEnd_UsingLoopbackTransport_ShouldReturnResponse()
     {
         // SERVER HOST (remote process)
-        var serverSessionManager = new Mock<IDirectSessionManager>();
         var serverDhtRepo = new Mock<IDhtNodeRepository>();
         var serverSecureSvc = new Mock<Percolator.Application.Services.ISecureMessagingService>();
         var serverDirectSessionRepo = new Mock<IDirectSessionRepository>();
@@ -154,8 +153,6 @@ public class DhtProbeLoopbackTests : IntegrationTestBase
 
         using var serverHost = CreateHost(GetAvailablePort(), "LoopbackDht-Server", services =>
         {
-            services.RemoveAll<IDirectSessionManager>();
-            services.AddSingleton<IDirectSessionManager>(serverSessionManager.Object);
             services.RemoveAll<DeliverOpaqueMessageHandler>();
             services.RemoveAll<IRequestHandler<DeliverOpaqueMessageCommand, DeliverOpaqueMessageResult>>();
             services.AddTransient<IRequestHandler<DeliverOpaqueMessageCommand, DeliverOpaqueMessageResult>, FakeDeliverOpaqueMessageHandler>();
@@ -166,20 +163,15 @@ public class DhtProbeLoopbackTests : IntegrationTestBase
             services.Replace(ServiceDescriptor.Singleton<IProfileRoutePlanner>(sp => serverPlanner.Object));
             services.Replace(ServiceDescriptor.Singleton<IDirectSessionRepository>(sp => serverDirectSessionRepo.Object));
             services.AddSingleton<IDhtService, DhtService>();
-            services.Replace(ServiceDescriptor.Singleton<IX3DHOrchestrator>(sp => new Mock<IX3DHOrchestrator>().Object));
-            services.Replace(ServiceDescriptor.Singleton<IX3DHManager>(sp => new Mock<IX3DHManager>().Object));
             services.Replace(ServiceDescriptor.Singleton<IPreKeyBundleRepository>(sp => new Mock<IPreKeyBundleRepository>().Object));
             services.Replace(ServiceDescriptor.Singleton<Percolator.Cryptography.ISigningService>(sp => new Mock<Percolator.Cryptography.ISigningService>().Object));
         });
 
         // Verify DI overrides on server
-        var resolvedSm = serverHost.Services.GetRequiredService<IDirectSessionManager>();
-        resolvedSm.Should().BeSameAs(serverSessionManager.Object);
         var resolvedHandler = serverHost.Services.GetRequiredService<IRequestHandler<DeliverOpaqueMessageCommand, DeliverOpaqueMessageResult>>();
         resolvedHandler.Should().BeOfType<FakeDeliverOpaqueMessageHandler>();
 
         // CLIENT HOST (local process running orchestrator)
-        var clientSessionManager = new Mock<IDirectSessionManager>();
         var clientSecureSvc = new Mock<Percolator.Application.Services.ISecureMessagingService>();
         var clientConversationService = new Mock<IConversationService>();
 
@@ -214,8 +206,6 @@ public class DhtProbeLoopbackTests : IntegrationTestBase
         using var clientHost = await CreateAndInitializeHostAsync(GetAvailablePort(), "LoopbackDht-Client", identityName: "local", services =>
         {
             services.Replace(ServiceDescriptor.Singleton<IConversationService>(sp => clientConversationService.Object));
-            services.RemoveAll<IDirectSessionManager>();
-            services.AddSingleton<IDirectSessionManager>(clientSessionManager.Object);
             services.Replace(ServiceDescriptor.Singleton<Percolator.Application.Services.ISecureMessagingService>(sp => clientSecureSvc.Object));
             // Ensure MessageService can resolve an existing direct session without hitting a real store
             var clientDirectSessionRepo = new Mock<IDirectSessionRepository>();

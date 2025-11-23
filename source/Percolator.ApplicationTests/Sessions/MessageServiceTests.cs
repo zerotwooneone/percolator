@@ -38,7 +38,6 @@ public class MessageServiceTests
     }
     private Mock<IConversationRepository> _mockConversationRepository = null!;
     private Mock<IMessageTransportService> _mockTransportService = null!;
-    private Mock<IDoubleRatchetSessionStore> _mockSessionStore = null!;
     private ActiveIdentityContext _activeIdentityContext = null!;
     private MessageService _messageService = null!;
     private IOptions<CryptographyOptions> _options = null!;
@@ -53,7 +52,6 @@ public class MessageServiceTests
         _mockConversationRepository = new Mock<IConversationRepository>();
         _mockTransportService = new Mock<IMessageTransportService>();
         _activeIdentityContext = new ActiveIdentityContext();
-        _mockSessionStore = new Mock<IDoubleRatchetSessionStore>();
         _options = Options.Create(new CryptographyOptions());
         _mockDirectSessionRepository = new Mock<IDirectSessionRepository>();
         _mockKeyStore = new Mock<IPeerPublicSigningKeyStore>();

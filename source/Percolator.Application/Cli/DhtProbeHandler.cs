@@ -18,7 +18,6 @@ namespace Percolator.Application.Cli;
 public class DhtProbeHandler : IRequestHandler<DhtProbeCommand, FindNodeResponse>
 {
     private readonly IConversationService _conversationService;
-    private readonly IDirectSessionManager _sessionManager;
     private readonly ISecureMessagingService _secureMessaging;
     private readonly IMessageService _messageService;
     private readonly ActiveIdentityContext _activeIdentityContext;
@@ -26,7 +25,6 @@ public class DhtProbeHandler : IRequestHandler<DhtProbeCommand, FindNodeResponse
     private readonly IPeerIdentityRepository _peerIdentityRepository;
     public DhtProbeHandler(
         IConversationService conversationService,
-        IDirectSessionManager sessionManager,
         ISecureMessagingService secureMessaging,
         IMessageService messageService,
         ActiveIdentityContext activeIdentityContext,
@@ -34,7 +32,6 @@ public class DhtProbeHandler : IRequestHandler<DhtProbeCommand, FindNodeResponse
         IPeerIdentityRepository peerIdentityRepository)
     {
         _conversationService = conversationService;
-        _sessionManager = sessionManager;
         _secureMessaging = secureMessaging;
         _messageService = messageService;
         _activeIdentityContext = activeIdentityContext;
