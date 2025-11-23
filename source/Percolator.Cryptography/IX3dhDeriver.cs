@@ -2,16 +2,26 @@ namespace Percolator.Cryptography;
 
 public interface IX3dhDeriver
 {
-    (SharedSecret irk, RatchetEphemeralKey initiatorEphemeralPublic) DeriveInitiator(
-        RatchetIdentityKey remoteIk,
-        PreKey remoteSpk,
-        OneTimeKey? remoteOtk,
-        PrivatePreKey localIkPriv);
+    InitiatorResult DeriveInitiator(
+        RatchetIdentityKey remoteIdentityKey,
+        PreKey remoteSignedPreKey,
+        OneTimeKey? remoteOneTimePreKey,
+        PrivatePreKey localIdentityPrivateKey);
 
-    SharedSecret DeriveResponder(
-        RatchetIdentityKey initiatorIk,
-        RatchetEphemeralKey initiatorEk,
-        PrivatePreKey localIkPriv,
-        PrivatePreKey localSpkPriv,
-        PrivatePreKey? localOtkPriv);
+    ResponderResult DeriveResponder(
+        RatchetIdentityKey initiatorIdentityKey,
+        RatchetEphemeralKey initiatorEphemeralKey,
+        PrivatePreKey localIdentityPrivateKey,
+        PrivatePreKey localSignedPreKeyPrivate,
+        PrivatePreKey? localOneTimePreKeyPrivate);
 }
+
+public sealed record InitiatorResult(
+    SharedSecret InitialRootKey,
+    RatchetEphemeralKey InitiatorEphemeralPublicKey,
+    PrivatePreKey InitiatorEphemeralPrivateKey,
+    bool UsedOneTimeKey);
+
+public sealed record ResponderResult(
+    SharedSecret InitialRootKey,
+    bool UsedOneTimeKey);

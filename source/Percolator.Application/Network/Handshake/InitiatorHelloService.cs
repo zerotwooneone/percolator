@@ -6,6 +6,7 @@ using Percolator.Application.KeyExchange;
 using Percolator.Application.Sessions;
 using Percolator.Contracts;
 using Percolator.Cryptography;
+using PreKeyBundle = Percolator.Cryptography.PreKeyBundle;
 
 namespace Percolator.Application.Network.Handshake;
 
@@ -15,17 +16,20 @@ internal sealed class InitiatorHelloService : IInitiatorHelloService
     private readonly ActiveIdentityContext _active;
     private readonly IMessageService _messageService;
     private readonly IPreHandshakeSessionStore _preHandshake;
+    private readonly IX3dhDeriver _x3dh;
 
     public InitiatorHelloService(
         ILogger<InitiatorHelloService> logger,
         ActiveIdentityContext active,
         IMessageService messageService,
-        IPreHandshakeSessionStore preHandshake)
+        IPreHandshakeSessionStore preHandshake,
+        IX3dhDeriver x3dh)
     {
         _logger = logger;
         _active = active;
         _messageService = messageService;
         _preHandshake = preHandshake;
+        _x3dh = x3dh;
     }
 
     public async Task SendInitiatorHelloViaHostAsync(
@@ -44,13 +48,12 @@ internal sealed class InitiatorHelloService : IInitiatorHelloService
         // Build remote bundle used for X3DH initiation
         var remoteId = new RatchetIdentityKey(remoteIdentityKeySpki);
 
-        // Generate ephemeral and initiate X3DH
-        using var eph = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        var ephSpki = eph.PublicKey.ExportSubjectPublicKeyInfo();
-        var remotePreKey = new RatchetEphemeralKey(remotePreKeySpki);
-        var bundle = new X3dPreKeyBundle(remoteId, remotePreKey, OneTimePreKey: null);
-        var shared = new SharedSecret(Array.Empty<byte>());
-        throw new NotSupportedException("Initiator hello cutover pending (Step 8): replace legacy InitiateHandshake");
+        // Derive IRK via X3DH/HKDF using crypto domain deriver
+        var localIkPriv = new PrivatePreKey(_active.Keys.IdentitySigningKey.ExportECPrivateKey());
+        var remoteSpk = new PreKey(remotePreKeySpki);
+        OneTimeKey? remoteOtk = null; // Not supplied by caller here
+        var result = _x3dh.DeriveInitiator(remoteId, remoteSpk, remoteOtk, localIkPriv);
+        var shared = result.InitialRootKey;
 
         // Do not pre-establish a session here; responder hello will finalize and assign the session id
 
@@ -62,8 +65,8 @@ internal sealed class InitiatorHelloService : IInitiatorHelloService
             SelfIdentityId: _active.Identity.SelfIdentityId,
             RecipientPublicKeyHash: recipientPublicKeyHash,
             LocalRequestId: Guid.NewGuid(),
-            InitiatorEphemeralPrivateKey: Array.Empty<byte>(),
-            InitialRootKey: shared.Value,
+            InitiatorEphemeralPrivateKey: result.InitiatorEphemeralPrivateKey.Value,
+            InitialRootKey: result.InitialRootKey.Value,
             CreatedAtUtc: DateTimeOffset.UtcNow,
             ExpiresAtUtc: DateTimeOffset.UtcNow.AddHours(1),
             RemoteIdentityKeySpki: remoteIdentityKeySpki);
@@ -74,7 +77,7 @@ internal sealed class InitiatorHelloService : IInitiatorHelloService
         {
             Version = 1,
             InitiatorIdentityKeySpki = ByteString.CopyFrom(_active.Keys.IdentitySigningKey.ExportSubjectPublicKeyInfo()),
-            InitiatorEphemeralKeySpki = ByteString.CopyFrom(ephSpki),
+            InitiatorEphemeralKeySpki = ByteString.CopyFrom(result.InitiatorEphemeralPublicKey.Value),
             SignedPreKeyId = ByteString.CopyFrom(signedPreKeyId.ToByteArray()),
         };
         if (oneTimePreKeyId.HasValue)

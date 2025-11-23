@@ -10,6 +10,7 @@ using Percolator.Application.Network;
 using Percolator.Application.KeyExchange;
 using Percolator.Application.Network.Handshake;
 using Percolator.Application.Sessions;
+using Percolator.Application.Services;
 using Percolator.Contracts;
 using Percolator.Cryptography;
 using Percolator.Identity;
@@ -55,11 +56,25 @@ public class InitiatorHelloServiceTests
             .Callback<InternalEnvelope, Percolator.Identity.PeerId, CancellationToken>((env, _, __) => captured = env)
             .ReturnsAsync(SendResult.CreateSuccess("Relay", new[] { "Relay" }, 1));
 
+        var x3dh = new Mock<IX3dhDeriver>(MockBehavior.Strict);
+        x3dh
+            .Setup(d => d.DeriveInitiator(
+                It.IsAny<RatchetIdentityKey>(),
+                It.IsAny<PreKey>(),
+                It.IsAny<OneTimeKey?>(),
+                It.IsAny<PrivatePreKey>()))
+            .Returns(new InitiatorResult(
+                new SharedSecret(new byte[] { 1, 2, 3 }),
+                new RatchetEphemeralKey(new byte[] { 0xEE }),
+                new PrivatePreKey(new byte[] { 0xDD }),
+                false));
+
         var service = new InitiatorHelloService(
             new NullLogger<InitiatorHelloService>(),
             active,
             msgSvc.Object,
-            preHandshakeStore.Object);
+            preHandshakeStore.Object,
+            x3dh.Object);
 
         // Act
         await service.SendInitiatorHelloViaHostAsync(

@@ -26,11 +26,14 @@ public sealed class HandshakeService : IHandshakeService
         var clock = new SystemClock();
         var sessionId = SessionId.NewId();
         var proto = new ProtocolVersion(1);
+        var root = new RootKey(new byte[32]);
+        var sendCk = new ChainKey(CryptoUtils.KDF(null, root.Value, "dr-send-init", CryptoUtils.KeySize));
+        var recvCk = new ChainKey(CryptoUtils.KDF(null, root.Value, "dr-recv-init", CryptoUtils.KeySize));
         var state = new RatchetState(
-            new RootKey(new byte[32]),
-            sendingChainKey: null,
+            root,
+            sendingChainKey: sendCk,
             sendingCounter: 0,
-            receivingChainKey: null,
+            receivingChainKey: recvCk,
             receivingCounter: 0,
             previousChainLength: 0,
             remoteRatchetKey: null,
@@ -49,3 +52,4 @@ public sealed class HandshakeService : IHandshakeService
         return Task.FromResult((session.Id, initial));
     }
 }
+

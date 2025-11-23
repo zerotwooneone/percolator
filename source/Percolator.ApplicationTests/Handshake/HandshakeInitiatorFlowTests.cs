@@ -122,11 +122,25 @@ public class HandshakeInitiatorFlowTests
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(SendResult.CreateSuccess("Relay", new[] { "Relay" }, 1));
 
+        var x3dh = new Mock<IX3dhDeriver>(MockBehavior.Strict);
+        x3dh
+            .Setup(d => d.DeriveInitiator(
+                It.IsAny<RatchetIdentityKey>(),
+                It.IsAny<PreKey>(),
+                It.IsAny<OneTimeKey?>(),
+                It.IsAny<PrivatePreKey>()))
+            .Returns(new InitiatorResult(
+                new SharedSecret(new byte[] { 1, 2, 3 }),
+                new RatchetEphemeralKey(new byte[] { 0xEE }),
+                new PrivatePreKey(new byte[] { 0xDD }),
+                false));
+
         var service = new InitiatorHelloService(
             new NullLogger<InitiatorHelloService>(),
             active,
             msgSvc.Object,
-            preHandshakeStore.Object);
+            preHandshakeStore.Object,
+            x3dh.Object);
 
         // Since handler will now decrypt after finalize, set up SecureMessagingService to succeed
         var secureSvc = new Mock<ISecureMessagingService>(MockBehavior.Strict);
@@ -533,11 +547,25 @@ public class HandshakeInitiatorFlowTests
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(SendResult.CreateSuccess("Relay", new[] { "Relay" }, 1));
 
+        var x3dh2 = new Mock<IX3dhDeriver>(MockBehavior.Strict);
+        x3dh2
+            .Setup(d => d.DeriveInitiator(
+                It.IsAny<RatchetIdentityKey>(),
+                It.IsAny<PreKey>(),
+                It.IsAny<OneTimeKey?>(),
+                It.IsAny<PrivatePreKey>()))
+            .Returns(new InitiatorResult(
+                new SharedSecret(new byte[] { 1, 2, 3 }),
+                new RatchetEphemeralKey(new byte[] { 0xEE }),
+                new PrivatePreKey(new byte[] { 0xDD }),
+                false));
+
         var initiatorService = new InitiatorHelloService(
             new NullLogger<InitiatorHelloService>(),
             initiatorActive,
             msgSvc2.Object,
-            preHandshakeStore.Object);
+            preHandshakeStore.Object,
+            x3dh2.Object);
 
         // Act: Compose (produces initiator hello and first message via session manager)
         await initiatorService.SendInitiatorHelloViaHostAsync(
