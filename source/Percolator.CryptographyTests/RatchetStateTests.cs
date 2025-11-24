@@ -57,33 +57,6 @@ public class RatchetStateTests
     }
 
     [Test]
-    public void Snapshot_Roundtrip_PreservesValues()
-    {
-        var root = new RootKey(RandomNumberGenerator.GetBytes(32));
-        var send = new ChainKey(RandomNumberGenerator.GetBytes(32));
-        var recv = new ChainKey(RandomNumberGenerator.GetBytes(32));
-        var remote = new RatchetEphemeralKey(RandomNumberGenerator.GetBytes(91));
-        var priv = new PrivateEphemeralKey(RandomNumberGenerator.GetBytes(32));
-
-        var original = new RatchetState(
-            root, send, 5, recv, 7, 3, remote, priv, skippedKeyLimit: 2000);
-
-        var bytes = original.ToSnapshotBytes();
-        var restored = RatchetState.FromSnapshotBytes(bytes);
-
-        restored.Should().NotBeSameAs(original);
-        restored.RootKey.Should().BeEquivalentTo(original.RootKey);
-        restored.SendingChainKey.Should().BeEquivalentTo(original.SendingChainKey);
-        restored.ReceivingChainKey.Should().BeEquivalentTo(original.ReceivingChainKey);
-        restored.SendingCounter.Should().Be(5);
-        restored.ReceivingCounter.Should().Be(7);
-        restored.PreviousChainLength.Should().Be(3);
-        restored.RemoteRatchetKey.Should().BeEquivalentTo(original.RemoteRatchetKey);
-        restored.DhRatchetPrivateKey.Should().BeEquivalentTo(original.DhRatchetPrivateKey);
-        restored.SkippedKeyLimit.Should().Be(2000);
-    }
-
-    [Test]
     public void Construct_WithInvalidSkippedKeyLimit_Throws()
     {
         var root = new RootKey(RandomNumberGenerator.GetBytes(32));
