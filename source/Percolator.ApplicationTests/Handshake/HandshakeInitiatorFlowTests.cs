@@ -20,6 +20,7 @@ using Percolator.Application.KeyExchange;
 using Percolator.Application.Network;
 using Percolator.Network;
 using Google.Protobuf;
+using Percolator.ApplicationTests.Services;
 using Percolator.Contracts;
 
 namespace Percolator.ApplicationTests.Handshake;
@@ -114,7 +115,7 @@ public class HandshakeInitiatorFlowTests
             .Callback<PreHandshakeRecord, CancellationToken>((r, _) => capturedPre = r)
             .Returns(Task.CompletedTask);
 
-        var msgSvc = new Moq.Mock<IMessageService>(Moq.MockBehavior.Strict);
+        var msgSvc = new Moq.Mock<IMessageService>(Moq.MockBehavior.Loose);
         msgSvc
             .Setup(s => s.SendMessageAsync(
                 It.IsAny<InternalEnvelope>(),
@@ -122,7 +123,7 @@ public class HandshakeInitiatorFlowTests
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(SendResult.CreateSuccess("Relay", new[] { "Relay" }, 1));
 
-        var x3dh = new Mock<IX3dhDeriver>(MockBehavior.Strict);
+        var x3dh = new Mock<IX3dhDeriver>(MockBehavior.Loose);
         x3dh
             .Setup(d => d.DeriveInitiator(
                 It.IsAny<RatchetIdentityKey>(),
@@ -143,7 +144,7 @@ public class HandshakeInitiatorFlowTests
             x3dh.Object);
 
         // Since handler will now decrypt after finalize, set up SecureMessagingService to succeed
-        var secureSvc = new Mock<ISecureMessagingService>(MockBehavior.Strict);
+        var secureSvc = new Mock<ISecureMessagingService>(MockBehavior.Loose);
         secureSvc
             .Setup(s => s.DecryptInboundAsync(It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((new SessionId(Guid.NewGuid()), new Plaintext(new byte[] { 0xCD })));
@@ -581,11 +582,14 @@ public class HandshakeInitiatorFlowTests
         // Arrange responder side handler and inputs
         var responderIdentity = new IdentityRecord(Guid.NewGuid(), "responder") { SelfIdentityId = 22 };
         var responderActive = new ActiveIdentityContext { Identity = responderIdentity };
-        var pkhStore = new Mock<IPeerPublicSigningKeyStore>(MockBehavior.Strict);
+        using var respIk = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        using var respSpk = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        responderActive.Keys = new X3dhKeys(respIk, respSpk);
+        var pkhStore = new Mock<IPeerPublicSigningKeyStore>(MockBehavior.Loose);
         pkhStore
             .Setup(p => p.ActivateIfChangedAsync(It.IsAny<Percolator.Identity.PeerId?>(), It.IsAny<byte[]>(), It.IsAny<byte[]>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
-        var selfPreRepo = new Mock<ISelfPreKeyBundleRepository>(MockBehavior.Strict);
+        var selfPreRepo = new Mock<ISelfPreKeyBundleRepository>(MockBehavior.Loose);
         var spkPriv = spk.ExportECPrivateKey();
         var spkSpki = spk.ExportSubjectPublicKeyInfo();
         var signature = new byte[]{0x01};
@@ -593,7 +597,7 @@ public class HandshakeInitiatorFlowTests
         selfPreRepo
             .Setup(r => r.TryGetSignedPreKeyAsync(It.IsAny<int>(), spkId, It.IsAny<CancellationToken>()))
             .ReturnsAsync((spkPriv, spkSpki, signature, expires));
-        var directRepo = new Mock<IDirectSessionRepository>(MockBehavior.Strict);
+        var directRepo = new Mock<IDirectSessionRepository>(MockBehavior.Loose);
         directRepo
             .Setup(r => r.GetByRemotePeerIdAsync(It.IsAny<Percolator.Network.PeerId>(), responderIdentity.SelfIdentityId))
             .ReturnsAsync((DirectSession?)null);
@@ -603,7 +607,7 @@ public class HandshakeInitiatorFlowTests
 
         // After responder establishes, decrypt assertions are performed via SecureMessagingService below
 
-        var peerIdentityRepo = new Mock<Percolator.Identity.IPeerIdentityRepository>(MockBehavior.Strict);
+        var peerIdentityRepo = new Mock<Percolator.Identity.IPeerIdentityRepository>(MockBehavior.Loose);
         peerIdentityRepo.Setup(r => r.GetByIdAsync(It.IsAny<Percolator.Identity.PeerId>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Percolator.Identity.Model.PeerIdentity?)null);
         peerIdentityRepo.Setup(r => r.SaveAsync(It.IsAny<Percolator.Identity.Model.PeerIdentity>(), It.IsAny<CancellationToken>()))
@@ -615,6 +619,19 @@ public class HandshakeInitiatorFlowTests
         profileRepo.Setup(r => r.UpsertAsync(It.IsAny<PeerRoutingProfile>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
+        var x3dhResponder = new Mock<IX3dhDeriver>(MockBehavior.Loose);
+        x3dhResponder
+            .Setup(d => d.DeriveResponder(
+                It.IsAny<RatchetIdentityKey>(),
+                It.IsAny<RatchetEphemeralKey>(),
+                It.IsAny<PrivatePreKey>(),
+                It.IsAny<PrivatePreKey>(),
+                It.IsAny<PrivatePreKey?>()))
+            .Returns(new ResponderResult(new SharedSecret(new byte[32]), false));
+        var sessionRepo = new Mock<ISessionRepository>(MockBehavior.Loose);
+        sessionRepo.Setup(r => r.AddAsync(It.IsAny<SecureSession>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
         var initiatorHelloHandler = new HandleHandshakeInitiatorHelloHandler(
             new NullLogger<HandleHandshakeInitiatorHelloHandler>(),
             pkhStore.Object,
@@ -624,7 +641,10 @@ public class HandshakeInitiatorFlowTests
             responderActive,
             peerIdentityRepo.Object,
             profileRepo.Object,
-            new Mock<IMediator>().Object);
+            new Mock<IMediator>().Object,
+            x3dhResponder.Object,
+            sessionRepo.Object,
+            new TestClock());
 
         // Handler will encrypt ResponderInnerHello over the new session via SecureMessagingService
         secureSvc

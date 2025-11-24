@@ -29,16 +29,21 @@ public class SecureMessagingServiceTests
         var index = new Mock<IRatchetKeyIndex>(MockBehavior.Loose);
         var catalog = new Mock<ISessionCatalog>(MockBehavior.Loose);
 
-        // Seed sender and receiver sessions with complementary chains
+        // Seed sender and receiver sessions with complementary chains via canonical bootstrap
         var clock = new TestClock();
-        var crypto = new AeadSessionCrypto();
         var root = new RootKey(new byte[32]);
-        var sendCk = new ChainKey(CryptoUtils.KDF(null, root.Value, "dr-send-init", CryptoUtils.KeySize));
-        var recvCk = new ChainKey(CryptoUtils.KDF(null, root.Value, "dr-recv-init", CryptoUtils.KeySize));
-        var senderState = new RatchetState(root, sendCk, 0, recvCk, 0, 0, null, null, 1000);
-        var receiverState = new RatchetState(root, recvCk, 0, sendCk, 0, 0, null, null, 1000);
-        var sender = SecureSession.Create(SessionId.NewId(), new PeerId(Guid.NewGuid()), new ProtocolVersion(1), senderState, crypto, clock);
-        var receiver = SecureSession.Create(SessionId.NewId(), new PeerId(Guid.NewGuid()), new ProtocolVersion(1), receiverState, crypto, clock);
+        var sender = RatchetBootstrap.CreateInitiatorSession(
+            SessionId.NewId(),
+            new PeerId(Guid.NewGuid()),
+            new ProtocolVersion(1),
+            root,
+            clock);
+        var receiver = RatchetBootstrap.CreateResponderSession(
+            SessionId.NewId(),
+            new PeerId(Guid.NewGuid()),
+            new ProtocolVersion(1),
+            root,
+            clock);
         await repo.AddAsync(sender);
         await repo.AddAsync(receiver);
 

@@ -7,24 +7,23 @@ public static class CryptoTestBootstrap
     // Derive initial send/recv chain keys from a root for bootstrap
     public static (ChainKey Send, ChainKey Recv) DeriveInitialChainsFromRoot(RootKey root)
     {
-        var sendCk = new ChainKey(CryptoUtils.KDF(null, root.Value, "dr-send-init", CryptoUtils.KeySize));
-        var recvCk = new ChainKey(CryptoUtils.KDF(null, root.Value, "dr-recv-init", CryptoUtils.KeySize));
-        return (sendCk, recvCk);
+        return RatchetBootstrap.DeriveInitiatorChains(root);
     }
 
     // Create complementary ratchet states for a communicating pair (initiator/responder)
     public static (RatchetState Initiator, RatchetState Responder) CreatePairedStates(RootKey root, int skippedKeyLimit = 1000)
     {
-        var (sendCk, recvCk) = DeriveInitialChainsFromRoot(root);
-        var initiator = new RatchetState(root, sendCk, 0, recvCk, 0, 0, null, null, skippedKeyLimit);
-        var responder = new RatchetState(root, recvCk, 0, sendCk, 0, 0, null, null, skippedKeyLimit);
+        var (iSend, iRecv) = RatchetBootstrap.DeriveInitiatorChains(root);
+        var (rSend, rRecv) = RatchetBootstrap.DeriveResponderChains(root);
+        var initiator = new RatchetState(root, iSend, 0, iRecv, 0, 0, null, null, skippedKeyLimit);
+        var responder = new RatchetState(root, rSend, 0, rRecv, 0, 0, null, null, skippedKeyLimit);
         return (initiator, responder);
     }
 
     // Create a ready state with derived initial chain keys and zeroed counters
     public static RatchetState CreateBootstrappedState(RootKey root, int skippedKeyLimit = 1000)
     {
-        var (sendCk, recvCk) = DeriveInitialChainsFromRoot(root);
+        var (sendCk, recvCk) = RatchetBootstrap.DeriveInitiatorChains(root);
         return new RatchetState(root, sendCk, 0, recvCk, 0, 0, null, null, skippedKeyLimit);
     }
 

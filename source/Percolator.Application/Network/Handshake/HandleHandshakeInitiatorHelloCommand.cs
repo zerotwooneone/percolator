@@ -16,6 +16,7 @@ using Percolator.Identity.Model;
 using Percolator.Network;
 using IdentityPeerId = Percolator.Identity.PeerId;
 using NetworkPeerId = Percolator.Network.PeerId;
+using CryptoPeerId = Percolator.Cryptography.Primitives.PeerId;
 
 namespace Percolator.Application.Network.Handshake
 {
@@ -43,6 +44,10 @@ namespace Percolator.Application.Network.Handshake
         private readonly IPeerIdentityRepository _peerIdentityRepository;
         private readonly IPeerRoutingProfileRepository _profileRepository;
         private readonly IMediator _mediator;
+        private readonly IX3dhDeriver _x3dh;
+        private readonly ISessionRepository _sessions;
+        private readonly IClock _clock;
+
         public HandleHandshakeInitiatorHelloHandler(
             ILogger<HandleHandshakeInitiatorHelloHandler> logger,
             IPeerPublicSigningKeyStore pkhStore,
@@ -52,7 +57,10 @@ namespace Percolator.Application.Network.Handshake
             ActiveIdentityContext active,
             IPeerIdentityRepository peerIdentityRepository,
             IPeerRoutingProfileRepository profileRepository,
-            IMediator mediator)
+            IMediator mediator,
+            IX3dhDeriver x3dh,
+            ISessionRepository sessions,
+            IClock clock)
         {
             _logger = logger;
             _pkhStore = pkhStore;
@@ -63,6 +71,9 @@ namespace Percolator.Application.Network.Handshake
             _peerIdentityRepository = peerIdentityRepository;
             _profileRepository = profileRepository;
             _mediator = mediator;
+            _x3dh = x3dh;
+            _sessions = sessions;
+            _clock = clock;
         }
 
         public async Task<HandleHandshakeInitiatorHelloResult?> Handle(HandleHandshakeInitiatorHelloCommand request, CancellationToken cancellationToken)
@@ -80,7 +91,7 @@ namespace Percolator.Application.Network.Handshake
             Guid? oneTimePreKeyId = request.OneTimePreKeyId;
 
             // Use our own identity for local self-prekey store (responder owns private pre-keys)
-            if (_active.Identity is null)
+            if (_active.Identity is null || _active.Keys is null)
             {
                 throw new InvalidOperationException("Active identity not loaded.");
             }
@@ -91,29 +102,22 @@ namespace Percolator.Application.Network.Handshake
                 _logger.LogWarning("Responder SPK not found for id {SpkId}", signedPreKeyId);
                 return null;
             }
-            ECDiffieHellman? localOneTime = null;
-            try
+            byte[]? localOtkPriv = null;
+            if (oneTimePreKeyId.HasValue)
             {
-                if (oneTimePreKeyId.HasValue)
+                localOtkPriv = await _selfPreKeyRepo.TryPopOneTimePreKeyPrivateAsync(_active.Identity.SelfIdentityId, oneTimePreKeyId.Value, cancellationToken).ConfigureAwait(false);
+                if (localOtkPriv is null)
                 {
-                    var otkPriv = await _selfPreKeyRepo.TryPopOneTimePreKeyPrivateAsync(_active.Identity.SelfIdentityId, oneTimePreKeyId.Value, cancellationToken).ConfigureAwait(false);
-                    if (otkPriv is null)
-                    {
-                        _logger.LogWarning("Responder OTK not available for id {OtkId}", oneTimePreKeyId);
-                        return null;
-                    }
-                    localOneTime = ECDiffieHellman.Create();
-                    localOneTime.ImportECPrivateKey(otkPriv, out _);
+                    _logger.LogWarning("Responder OTK not available for id {OtkId}", oneTimePreKeyId);
+                    return null;
                 }
             }
-            catch
-            {
-                localOneTime?.Dispose();
-                throw;
-            }
 
-            // TODO: Complete responder-side handshake via IHandshakeService (Step 8)
-            throw new NotSupportedException("Handshake responder cutover pending (Step 8): replace legacy CompleteHandshake");
+            // Derive IRK as responder via X3DH
+            var localIkPriv = new PrivatePreKey(_active.Keys.IdentitySigningKey.ExportECPrivateKey());
+            var localSpkPriv = new PrivatePreKey(spk.Value.spkPrivate);
+            PrivatePreKey? localOtk = localOtkPriv is null ? null : new PrivatePreKey(localOtkPriv);
+            var responder = _x3dh.DeriveResponder(remoteIdentityKey, remoteEphemeralKey, localIkPriv, localSpkPriv, localOtk);
 
             // Upsert or create direct session mapping
             DirectSessionId directSessionId;
@@ -131,11 +135,19 @@ namespace Percolator.Application.Network.Handshake
                 directSessionId = new DirectSessionId(Guid.NewGuid());
             }
 
-            // TODO: Establish responder session via domain services
-            throw new NotSupportedException("Session establish cutover pending (Step 8): replace legacy EstablishSessionAsResponderAsync");
+            // Establish responder session with complementary initial chains (canonical bootstrap)
+            var root = new RootKey(responder.InitialRootKey.Value);
+            var sessionId = new SessionId(directSessionId.Value);
+            var session = RatchetBootstrap.CreateResponderSession(
+                sessionId,
+                new CryptoPeerId(resolvedRemotePeerId.Value),
+                new ProtocolVersion(1),
+                root,
+                _clock);
+            await _sessions.AddAsync(session, cancellationToken).ConfigureAwait(false);
 
             // Now it is safe to dispose the temporary one-time ECDH key, if it was used.
-            localOneTime?.Dispose();
+            // localOtkPriv is a byte[]; nothing to dispose
 
             _logger.LogInformation("Responder established session {SessionId}", directSessionId.Value);
 
