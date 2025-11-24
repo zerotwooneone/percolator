@@ -65,11 +65,15 @@ namespace Percolator.Application.Network.Handshake
                     throw new InvalidOperationException("Responder inner payload missing direct_session_id.");
                 var sid = new SessionId(Guid.Parse(inner.DirectSessionId));
 
-                // Finalize initiator using the most recent prehandshake record (to be implemented in Step 8)
-                throw new NotSupportedException("Initiator finalize cutover pending (Step 8): replace legacy FinalizeAsInitiatorAsync");
+                // Delete most recent prehandshake record if present (cleanup responsibility moved here)
+                var mostRecent = await _preHandshakeStore.TryGetMostRecentAsync(_active.Identity.SelfIdentityId, cancellationToken).ConfigureAwait(false);
+                if (mostRecent is not null)
+                {
+                    await _preHandshakeStore.DeleteAsync(mostRecent.Id, _active.Identity.SelfIdentityId, cancellationToken).ConfigureAwait(false);
+                }
 
                 directSessionId = new Percolator.Network.DirectSessionId(sid.Value);
-                _logger.LogInformation("Responder hello slow-path parsed and finalized direct_session_id {SessionId}", sid.Value);
+                _logger.LogInformation("Responder hello slow-path parsed; using responder-provided direct_session_id {SessionId}", sid.Value);
             }
             else
             {

@@ -12,13 +12,16 @@ namespace Percolator.Application.Network
     {
         private readonly ILogger<PercolatorMessageService> _logger;
         private readonly IMediator _mediator;
+        private readonly IEstablishDirectSessionService _establishService;
 
         public PercolatorMessageService(
-            ILogger<PercolatorMessageService> logger, 
-            IMediator mediator)
+            ILogger<PercolatorMessageService> logger,
+            IMediator mediator,
+            IEstablishDirectSessionService establishService)
         {
             _logger = logger;
             _mediator = mediator;
+            _establishService = establishService;
         }
 
         public override async Task<EstablishDirectSessionResponse> EstablishDirectSession(EstablishDirectSessionRequest request, ServerCallContext context)
@@ -52,7 +55,15 @@ namespace Percolator.Application.Network
                 PeerEndPoint = peerEndPoint
             };
 
-            var result = await _mediator.Send(command, context.CancellationToken).ConfigureAwait(false);
+            var result = await _establishService.EstablishAsync(command, context.CancellationToken).ConfigureAwait(false);
+
+            if (result is null)
+            {
+                return new EstablishDirectSessionResponse()
+                {
+                    Never = new EstablishDirectSessionResponse.Types.Never()
+                };
+            }
 
             return new EstablishDirectSessionResponse
             {

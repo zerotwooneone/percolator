@@ -17,8 +17,6 @@ namespace Percolator.Application.Network
 
     public sealed class EstablishDirectSessionResult
     {
-        public required string SessionId { get; init; }
-        public required byte[] ResponsePayloadBytes { get; init; }
         public required byte[] IdentitySigningKeyBytes { get; init; }
         public required byte[] RemoteEphemeralKeyBytes { get; init; }
         public required byte[] RatchetMessageBytes { get; init; }

@@ -124,6 +124,9 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<Handshake.IInitiatorHelloService, Handshake.InitiatorHelloService>();
         services.AddTransient<IRemoteEnvelopeSender, RemoteEnvelopeSender>();
 
+        // Establish direct session flow: service that creates peer/route and enqueues crypto pending session
+        services.AddScoped<IEstablishDirectSessionService, EstablishDirectSessionService>();
+
         // Register domain Network.Messaging components required by MessageService
         services.AddSingleton<Percolator.Network.Messaging.IRelayTopology, Percolator.Network.Messaging.DefaultRelayTopology>();
         services.AddSingleton<Percolator.Network.Messaging.ITransportPort, NetworkTransportPortAdapter>();
