@@ -7,6 +7,7 @@ using Google.Protobuf;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using NUnit.Framework;
+using MediatR;
 using Percolator.Application.Identity;
 using Percolator.Application.Network;
 using Percolator.ApplicationTests.Services;
@@ -53,6 +54,7 @@ namespace Percolator.ApplicationTests.Network
             var profileRepo = new Mock<IPeerRoutingProfileRepository>(MockBehavior.Loose);
             var signing = new Mock<Percolator.Network.ISigningService>(MockBehavior.Loose);
             var pendingRepo = new Mock<IPendingSessionRepository>(MockBehavior.Loose);
+            var mediator = new Mock<IMediator>(MockBehavior.Loose);
             var clock = new TestClock();
 
             // Inputs
@@ -83,7 +85,7 @@ namespace Percolator.ApplicationTests.Network
                 .Returns(Task.CompletedTask)
                 .Verifiable();
 
-            var svc = new EstablishDirectSessionService(logger, active, peerRepo.Object, profileRepo.Object, signing.Object, pendingRepo.Object, clock);
+            var svc = new EstablishDirectSessionService(logger, active, peerRepo.Object, profileRepo.Object, signing.Object, pendingRepo.Object, clock, mediator.Object);
 
             // Act
             var result = await svc.EstablishAsync(cmd, CancellationToken.None);
@@ -93,6 +95,7 @@ namespace Percolator.ApplicationTests.Network
             peerRepo.Verify(r => r.SaveAsync(It.IsAny<PeerIdentity>(), It.IsAny<CancellationToken>()), Times.Once);
             profileRepo.Verify(r => r.UpsertAsync(It.IsAny<PeerRoutingProfile>(), It.IsAny<CancellationToken>()), Times.Once);
             pendingRepo.Verify(r => r.AddAsync(It.IsAny<PendingSession>(), It.IsAny<CancellationToken>()), Times.Once);
+            mediator.Verify(m => m.Publish(It.IsAny<PendingSessionCreatedNotification>(), It.IsAny<CancellationToken>()), Times.Once);
         }
 
         [Test]
@@ -112,6 +115,7 @@ namespace Percolator.ApplicationTests.Network
             var signing = new Mock<Percolator.Network.ISigningService>(MockBehavior.Loose);
             var pendingRepo = new Mock<IPendingSessionRepository>(MockBehavior.Loose);
             var clock = new TestClock();
+            var mediator = new Mock<IMediator>(MockBehavior.Loose);
 
             using var initiatorEcdsa = ECDsa.Create(ECCurve.NamedCurves.nistP256);
             var initiatorSpki = initiatorEcdsa.ExportSubjectPublicKeyInfo();
@@ -125,7 +129,7 @@ namespace Percolator.ApplicationTests.Network
                     It.IsAny<Percolator.Network.PublicKey>()))
                 .Returns(false);
 
-            var svc = new EstablishDirectSessionService(logger, active, peerRepo.Object, profileRepo.Object, signing.Object, pendingRepo.Object, clock);
+            var svc = new EstablishDirectSessionService(logger, active, peerRepo.Object, profileRepo.Object, signing.Object, pendingRepo.Object, clock, mediator.Object);
 
             // Act + Assert
             Assert.ThrowsAsync<CryptographicException>(() => svc.EstablishAsync(cmd, CancellationToken.None));

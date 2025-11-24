@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using Microsoft.Extensions.Logging;
+using MediatR;
 using Percolator.Application.Identity;
 using Percolator.Contracts;
 using Percolator.Cryptography;
@@ -27,6 +28,7 @@ namespace Percolator.Application.Network
         private readonly Percolator.Network.ISigningService _signingService;
         private readonly IPendingSessionRepository _pendingSessions;
         private readonly IClock _clock;
+        private readonly IMediator _mediator;
 
         public EstablishDirectSessionService(
             ILogger<EstablishDirectSessionService> logger,
@@ -35,7 +37,8 @@ namespace Percolator.Application.Network
             IPeerRoutingProfileRepository peerRoutingProfileRepository,
             Percolator.Network.ISigningService signingService,
             IPendingSessionRepository pendingSessions,
-            IClock clock)
+            IClock clock,
+            IMediator mediator)
         {
             _logger = logger;
             _active = active;
@@ -44,6 +47,7 @@ namespace Percolator.Application.Network
             _signingService = signingService;
             _pendingSessions = pendingSessions;
             _clock = clock;
+            _mediator = mediator;
         }
 
         public async Task<EstablishDirectSessionResult?> EstablishAsync(EstablishDirectSessionCommand request, CancellationToken cancellationToken)
@@ -99,6 +103,7 @@ namespace Percolator.Application.Network
                 invitation,
                 _clock);
             await _pendingSessions.AddAsync(pending, cancellationToken).ConfigureAwait(false);
+            await _mediator.Publish(new PendingSessionCreatedNotification(pending.Id), cancellationToken).ConfigureAwait(false);
 
             // For now, as requested, return null (service defers handshake completion)
             return null;
