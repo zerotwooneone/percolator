@@ -105,7 +105,7 @@ namespace Percolator.Application.Network
             await _pendingSessions.AddAsync(pending, cancellationToken).ConfigureAwait(false);
             await _mediator.Publish(new PendingSessionCreatedNotification(pending.Id), cancellationToken).ConfigureAwait(false);
 
-            // For now, as requested, return null (service defers handshake completion)
+            // todo: implement a strategy to automatically accept the request
             return null;
         }
     }
