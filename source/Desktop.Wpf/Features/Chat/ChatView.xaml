@@ -116,7 +116,7 @@
                            SendCommand="{Binding SendCommand}"/>
 
     <!-- Network side panel (mockup-aligned) with slide animation -->
-    <Border Grid.RowSpan="4" HorizontalAlignment="Right" Width="360" Background="#101827" BorderBrush="#243047" BorderThickness="1" Opacity="0" IsHitTestVisible="False">
+    <Border Grid.RowSpan="4" Panel.ZIndex="99" HorizontalAlignment="Right" Width="360" Background="#101827" BorderBrush="#243047" BorderThickness="1" Opacity="0" IsHitTestVisible="True">
       <Border.RenderTransform>
         <TranslateTransform X="360"/>
       </Border.RenderTransform>
@@ -125,7 +125,6 @@
         <Style TargetType="Border">
           <Style.Triggers>
             <DataTrigger Binding="{Binding IsNetworkOpen.Value}" Value="True">
-              <Setter Property="IsHitTestVisible" Value="True"/>
               <DataTrigger.EnterActions>
                 <BeginStoryboard Storyboard="{StaticResource SlideInRightFast}"/>
               </DataTrigger.EnterActions>
@@ -133,10 +132,8 @@
                 <BeginStoryboard Storyboard="{StaticResource SlideOutRightFast}"/>
               </DataTrigger.ExitActions>
             </DataTrigger>
-            <!-- When false, do not animate on entry (startup); just disable hit testing -->
-            <DataTrigger Binding="{Binding IsNetworkOpen.Value}" Value="False">
-              <Setter Property="IsHitTestVisible" Value="False"/>
-            </DataTrigger>
+            <!-- When false, do not animate on entry (startup) -->
+            <DataTrigger Binding="{Binding IsNetworkOpen.Value}" Value="False"/>
           </Style.Triggers>
         </Style>
       </Border.Style>
@@ -164,7 +161,7 @@
         </Border>
 
         <!-- Content -->
-        <ScrollViewer Grid.Row="1">
+        <ScrollViewer Grid.Row="1" Background="Transparent">
           <StackPanel Margin="16">
             <!-- Current Route -->
             <TextBlock Text="CURRENT ROUTE" Foreground="{StaticResource MutedBrush}" FontSize="11"/>
@@ -262,7 +259,7 @@
                     <TextBlock Text="Auto-Discovery" FontWeight="SemiBold"/>
                     <TextBlock Text="Periodically request peers" Foreground="{StaticResource MutedBrush}" FontSize="12"/>
                   </StackPanel>
-                  <ToggleButton Grid.Column="1" Width="42" Height="24"/>
+                  <controls:MatSlideToggle Grid.Column="1" IsChecked="{Binding AutoDiscoveryEnabled.Value, Mode=TwoWay}"/>
                 </Grid>
               </StackPanel>
             </Border>

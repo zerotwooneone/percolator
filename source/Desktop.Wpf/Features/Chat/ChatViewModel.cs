@@ -22,6 +22,7 @@ public sealed class ChatViewModel : ViewModelBase
     public BindableReactiveProperty<bool> IsRelayed { get; }
     public AsyncRelayCommand ToggleNetworkCommand { get; }
     public AsyncRelayCommand CloseNetworkCommand { get; }
+    public BindableReactiveProperty<bool> AutoDiscoveryEnabled { get; }
 
     private readonly ObservableCollection<ChatMessage> _messages = new();
     private string? _sessionId;
@@ -43,6 +44,7 @@ public sealed class ChatViewModel : ViewModelBase
 
         IsNetworkOpen = new BindableReactiveProperty<bool>(false);
         IsRelayed = new BindableReactiveProperty<bool>(false); // seed: direct
+        AutoDiscoveryEnabled = new BindableReactiveProperty<bool>(false);
 
         SendCommand = new AsyncRelayCommand(async _ =>
         {
@@ -82,7 +84,7 @@ public sealed class ChatViewModel : ViewModelBase
 
     protected override void DisposeCore()
     {
-        Disposable.Dispose(MessageInput, CanSend, Title, Initials, IsOnline, IsNetworkOpen, IsRelayed);
+        Disposable.Dispose(MessageInput, CanSend, Title, Initials, IsOnline, IsNetworkOpen, IsRelayed, AutoDiscoveryEnabled);
     }
 
     private static string ComputeInitials(string? name)
