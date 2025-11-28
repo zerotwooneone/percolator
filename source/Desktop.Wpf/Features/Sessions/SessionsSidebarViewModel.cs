@@ -8,6 +8,7 @@ using Desktop.Wpf.Shared.Navigation;
 using Microsoft.Extensions.DependencyInjection;
 using Desktop.Wpf.Features.Chat;
 using System.Collections.Generic;
+using Desktop.Wpf.Features.Self;
 
 namespace Desktop.Wpf.Features.Sessions;
 
@@ -16,6 +17,7 @@ public sealed class SessionsSidebarViewModel : Features.Shell.ViewModelBase
     public BindableReactiveProperty<string> SearchText { get; }
     public ReadOnlyObservableCollection<SessionListItem> Items { get; }
     public BindableReactiveProperty<string?> SelectedSessionId { get; }
+    public SelfIdentity Self { get; }
 
     private readonly ObservableCollection<SessionListItem> _items = new();
 
@@ -24,8 +26,9 @@ public sealed class SessionsSidebarViewModel : Features.Shell.ViewModelBase
     private readonly LinkedList<string> _lru = new();
     private const int ScopeCapacity = 3;
 
-    public SessionsSidebarViewModel(ISessionDirectory directory, INavigationService navigation, IServiceProvider provider)
+    public SessionsSidebarViewModel(ISessionDirectory directory, INavigationService navigation, IServiceProvider provider, SelfIdentity self)
     {
+        Self = self;
         _scopeFactory = provider.GetRequiredService<IServiceScopeFactory>();
         SearchText = new BindableReactiveProperty<string>("");
         SelectedSessionId = new BindableReactiveProperty<string?>(null);

@@ -17,4 +17,8 @@
         <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="10.0.0" />
     </ItemGroup>
 
+    <ItemGroup>
+      <ProjectReference Include="..\Percolator.Application\Percolator.Application.csproj" />
+    </ItemGroup>
+
 </Project>

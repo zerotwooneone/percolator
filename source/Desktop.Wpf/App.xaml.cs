@@ -11,6 +11,7 @@ using Desktop.Wpf.Shared.Navigation;
 using Desktop.Wpf.Features.Shell;
 using R3;
 using Desktop.Wpf.Features.Sessions;
+using Desktop.Wpf.Features.Self;
 
 namespace Desktop.Wpf;
 
@@ -50,6 +51,12 @@ public partial class App : Application
                 services.AddScoped<Desktop.Wpf.Features.Sessions.SessionContext>();
                 services.AddScoped<Desktop.Wpf.Features.Chat.ChatViewModel>();
                 services.AddScoped<Desktop.Wpf.Features.Chat.ChatView>();
+
+                // Self identity
+                services.AddSingleton<SelfIdentity>();
+                services.AddSingleton<Percolator.Application.Identity.ISelfIdentityRepository, Desktop.Wpf.Features.Self.InMemorySelfIdentityRepository>();
+                // Startup views
+                services.AddSingleton<Desktop.Wpf.Features.Shell.NewUserView>();
             })
             .Build();
 
@@ -58,6 +65,8 @@ public partial class App : Application
         var logger = HostInstance.Services.GetRequiredService<ILogger<App>>();
         ObservableSystem.RegisterUnhandledExceptionHandler(ex =>
             logger.LogError(ex, "R3 Unhandled exception"));
+
+        // Self identity loading is orchestrated by ShellViewModel at runtime
 
         // Detect Nerd Font family if available and register as a global resource for icons
         try
@@ -113,5 +122,14 @@ public partial class App : Application
             HostInstance.Dispose();
         }
         base.OnExit(e);
+    }
+
+    private static string ComputeInitials(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return "?";
+        var parts = name.Trim().Split(' ', System.StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 1)
+            return parts[0].Substring(0, System.Math.Min(2, parts[0].Length)).ToUpperInvariant();
+        return (parts[0][0].ToString() + parts[^1][0].ToString()).ToUpperInvariant();
     }
 }

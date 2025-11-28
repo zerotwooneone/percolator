@@ -55,6 +55,24 @@
                     <Border Style="{StaticResource Chip}"><TextBlock Text="P2P" FontSize="12"/></Border>
                 </StackPanel>
             </StackPanel>
+
+            <!-- Loading overlay -->
+            <Grid Background="#B3000000" Visibility="Collapsed">
+                <Grid.Style>
+                    <Style TargetType="Grid">
+                        <Setter Property="Visibility" Value="Collapsed"/>
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsLoading.Value}" Value="True">
+                                <Setter Property="Visibility" Value="Visible"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Grid.Style>
+                <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" TextBlock.TextAlignment="Center" Width="260">
+                    <TextBlock Margin="0,0,0,8" Foreground="{StaticResource MutedBrush}" Text="Loading..."/>
+                    <ProgressBar IsIndeterminate="True" Height="4"/>
+                </StackPanel>
+            </Grid>
         </Grid>
     </Grid>
 </Window>

@@ -17,7 +17,7 @@
       </Grid.ColumnDefinitions>
 
       <!-- Self identity avatar (seeded) -->
-      <controls:InitialsAvatar Grid.Column="0" Diameter="28" CornerRadius="14" Text="OP"/>
+      <controls:InitialsAvatar Grid.Column="0" Diameter="28" CornerRadius="14" Text="{Binding Self.Initials.Value}"/>
 
       <!-- Search input fills -->
       <controls:MatInput Grid.Column="1" Margin="8,0,8,0"
