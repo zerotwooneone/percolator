@@ -1,5 +1,6 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:att="clr-namespace:Desktop.Wpf.Shared.Attached">
   <Style x:Key="BaseWindow" TargetType="Window">
     <Setter Property="Background" Value="{StaticResource SurfaceBrush}"/>
     <Setter Property="Foreground" Value="{StaticResource ForegroundBrush}"/>
@@ -37,26 +38,36 @@
 
   <Style TargetType="TextBox" BasedOn="{StaticResource BaseTextBox}" />
 
-  <!-- Reusable watermark TextBox: bind placeholder text via TextBox.Tag -->
+  <!-- Reusable watermark TextBox: bind placeholder text via att:Placeholder.Text -->
   <Style x:Key="WatermarkTextBox" TargetType="TextBox" BasedOn="{StaticResource BaseTextBox}">
     <Setter Property="Template">
       <Setter.Value>
         <ControlTemplate TargetType="TextBox">
           <Grid>
-            <ScrollViewer x:Name="PART_ContentHost"/>
-            <TextBlock Text="{TemplateBinding Tag}"
+            <Border x:Name="Bd"
+                    Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="{TemplateBinding BorderThickness}"
+                    CornerRadius="6">
+              <ScrollViewer x:Name="PART_ContentHost"/>
+            </Border>
+            <TextBlock x:Name="Watermark"
+                       Text="{Binding RelativeSource={RelativeSource TemplatedParent}, Path=(att:Placeholder.Text)}"
                        Foreground="{StaticResource MutedBrush}"
-                       Margin="6,0,0,0"
+                       Margin="8,0,0,0"
+                       VerticalAlignment="Center"
                        IsHitTestVisible="False"
                        Visibility="Collapsed" />
           </Grid>
           <ControlTemplate.Triggers>
             <Trigger Property="Text" Value="">
-              <Setter TargetName="PART_ContentHost" Property="Opacity" Value="1"/>
-              <Setter Property="Visibility" Value="Visible"/>
+              <Setter TargetName="Watermark" Property="Visibility" Value="Visible"/>
             </Trigger>
             <Trigger Property="Text" Value="{x:Null}">
-              <Setter Property="Visibility" Value="Visible"/>
+              <Setter TargetName="Watermark" Property="Visibility" Value="Visible"/>
+            </Trigger>
+            <Trigger Property="IsEnabled" Value="False">
+              <Setter TargetName="Bd" Property="Opacity" Value="0.6"/>
             </Trigger>
           </ControlTemplate.Triggers>
         </ControlTemplate>
