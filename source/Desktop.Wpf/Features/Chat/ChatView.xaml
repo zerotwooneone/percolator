@@ -121,7 +121,8 @@
       <TextBox x:Name="Composer" Style="{StaticResource WatermarkTextBox}" att:Placeholder.Text="Type a message..."
                MinHeight="36"
                AcceptsReturn="True" TextWrapping="Wrap"
-               PreviewKeyDown="Composer_PreviewKeyDown"
+               att:KeyBehaviors.EnterCommand="{Binding SendCommand}"
+               att:KeyBehaviors.AllowAltEnterNewline="True"
                Text="{Binding MessageInput.Value, UpdateSourceTrigger=PropertyChanged}"/>
     </DockPanel>
   </Grid>
