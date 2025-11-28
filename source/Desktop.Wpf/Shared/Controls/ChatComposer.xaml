@@ -4,32 +4,69 @@
              xmlns:att="clr-namespace:Desktop.Wpf.Shared.Attached"
              xmlns:controls="clr-namespace:Desktop.Wpf.Shared.Controls">
   <Grid>
-    <DockPanel Margin="12" LastChildFill="True">
-      <!-- Right action buttons: emoji, clip, send -->
-      <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">
-        <controls:MatButton IsIcon="True" IsRound="True" Variant="Filled" Margin="8,0,0,0" Command="{Binding EmojiCommand, RelativeSource={RelativeSource AncestorType=UserControl}}">
+    <Border Margin="12" Background="{StaticResource InputBackgroundBrush}" BorderBrush="{StaticResource InputBorderBrush}" BorderThickness="1" CornerRadius="12" Padding="8">
+      <Grid>
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="Auto"/>
+          <ColumnDefinition Width="*"/>
+          <ColumnDefinition Width="Auto"/>
+          <ColumnDefinition Width="Auto"/>
+        </Grid.ColumnDefinitions>
+
+        <!-- Left plus -->
+        <controls:MatButton Grid.Column="0" IsIcon="True" IsRound="True" Variant="Filled" Margin="0,0,8,0"
+                            Command="{Binding PlusCommand, RelativeSource={RelativeSource AncestorType=UserControl}}">
+          <TextBlock Style="{StaticResource IconTextLarge}" Text="{StaticResource IconPlus}"/>
+        </controls:MatButton>
+
+        <!-- Message input in the middle -->
+        <TextBox Grid.Column="1" Style="{StaticResource WatermarkTextBox}" att:Placeholder.Text="Type a message..."
+                 MinHeight="36"
+                 BorderThickness="0"
+                 Background="Transparent"
+                 AcceptsReturn="True" TextWrapping="Wrap"
+                 att:KeyBehaviors.EnterCommand="{Binding SendCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                 att:KeyBehaviors.AllowAltEnterNewline="True"
+                 Text="{Binding Text, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, RelativeSource={RelativeSource AncestorType=UserControl}}"/>
+
+        <!-- Right emoji -->
+        <controls:MatButton Grid.Column="2" IsIcon="True" IsRound="True" Variant="Filled" Margin="8,0,0,0"
+                            Command="{Binding EmojiCommand, RelativeSource={RelativeSource AncestorType=UserControl}}">
           <TextBlock Style="{StaticResource IconTextLarge}" Text="{StaticResource IconSmiley}"/>
         </controls:MatButton>
-        <controls:MatButton IsIcon="True" IsRound="True" Variant="Filled" Margin="8,0,0,0" Command="{Binding ClipCommand, RelativeSource={RelativeSource AncestorType=UserControl}}">
-          <TextBlock Style="{StaticResource IconTextLarge}" Text="{StaticResource IconClip}"/>
-        </controls:MatButton>
-        <controls:MatButton IsIcon="True" IsRound="True" Variant="Outlined" Margin="8,0,0,0"
+
+        <!-- Placeholder space for send when there's no text -->
+        <Border x:Name="SendSpace" Grid.Column="3" Width="40" Height="40" Margin="8,0,0,0" Background="Transparent">
+          <Border.Style>
+            <Style TargetType="Border">
+              <Setter Property="Visibility" Value="Visible"/>
+              <Style.Triggers>
+                <DataTrigger Binding="{Binding CanSend, RelativeSource={RelativeSource AncestorType=UserControl}}" Value="True">
+                  <Setter Property="Visibility" Value="Collapsed"/>
+                </DataTrigger>
+              </Style.Triggers>
+            </Style>
+          </Border.Style>
+        </Border>
+
+        <!-- Right send (shown when can send) - placed over clip -->
+        <controls:MatButton x:Name="SendBtn" Grid.Column="3" IsIcon="True" IsRound="True" Variant="Outlined" Margin="8,0,0,0" Width="40" Height="40"
                             IsEnabled="{Binding CanSend, RelativeSource={RelativeSource AncestorType=UserControl}}"
                             Command="{Binding SendCommand, RelativeSource={RelativeSource AncestorType=UserControl}}">
+          <controls:MatButton.Style>
+            <Style TargetType="controls:MatButton" BasedOn="{StaticResource MatButtonBase}">
+              <Setter Property="Visibility" Value="Collapsed"/>
+              <Style.Triggers>
+                <DataTrigger Binding="{Binding CanSend, RelativeSource={RelativeSource AncestorType=UserControl}}" Value="True">
+                  <Setter Property="Visibility" Value="Visible"/>
+                </DataTrigger>
+              </Style.Triggers>
+            </Style>
+          </controls:MatButton.Style>
           <TextBlock Style="{StaticResource IconTextLarge}" Text="{StaticResource IconSend}"/>
         </controls:MatButton>
-      </StackPanel>
-      <!-- Left plus button -->
-      <controls:MatButton DockPanel.Dock="Left" IsIcon="True" IsRound="True" Variant="Filled" Margin="0,0,8,0" Command="{Binding PlusCommand, RelativeSource={RelativeSource AncestorType=UserControl}}">
-        <TextBlock Style="{StaticResource IconTextLarge}" Text="{StaticResource IconPlus}"/>
-      </controls:MatButton>
-      <!-- Message input -->
-      <TextBox Style="{StaticResource WatermarkTextBox}" att:Placeholder.Text="Type a message..."
-               MinHeight="36"
-               AcceptsReturn="True" TextWrapping="Wrap"
-               att:KeyBehaviors.EnterCommand="{Binding SendCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
-               att:KeyBehaviors.AllowAltEnterNewline="True"
-               Text="{Binding Text, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, RelativeSource={RelativeSource AncestorType=UserControl}}"/>
-    </DockPanel>
+        
+      </Grid>
+    </Border>
   </Grid>
 </UserControl>
