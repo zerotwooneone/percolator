@@ -1,9 +1,14 @@
-﻿<Application x:Class="Desktop.Wpf.App"
+<Application x:Class="Desktop.Wpf.App"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:local="clr-namespace:Desktop.Wpf"
-             StartupUri="MainWindow.xaml">
+             xmlns:local="clr-namespace:Desktop.Wpf">
     <Application.Resources>
-         
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="/Desktop.Wpf;component/Shared/Theme/Colors.xaml" />
+                <ResourceDictionary Source="/Desktop.Wpf;component/Shared/Theme/Typography.xaml" />
+                <ResourceDictionary Source="/Desktop.Wpf;component/Shared/Theme/Styles.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
     </Application.Resources>
 </Application>

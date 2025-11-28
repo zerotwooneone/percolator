@@ -1,0 +1,11 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <Color x:Key="SurfaceColor">#121826</Color>
+  <Color x:Key="SidebarColor">#0F1522</Color>
+  <Color x:Key="AccentColor">#2EC7FF</Color>
+  <SolidColorBrush x:Key="SurfaceBrush" Color="{StaticResource SurfaceColor}"/>
+  <SolidColorBrush x:Key="SidebarBrush" Color="{StaticResource SidebarColor}"/>
+  <SolidColorBrush x:Key="AccentBrush" Color="{StaticResource AccentColor}"/>
+  <SolidColorBrush x:Key="ForegroundBrush" Color="#E6FFFFFF"/>
+  <SolidColorBrush x:Key="MutedBrush" Color="#99FFFFFF"/>
+</ResourceDictionary>
