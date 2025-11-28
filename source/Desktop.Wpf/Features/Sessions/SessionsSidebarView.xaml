@@ -38,13 +38,13 @@
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="Auto"/>
               </Grid.ColumnDefinitions>
-              <controls:InitialsAvatar Diameter="36" CornerRadius="18" Text="{Binding Initials}" IsOnline="{Binding IsOnline}"/>
+              <controls:InitialsAvatar Diameter="36" CornerRadius="18" Text="{Binding Initials.Value}" IsOnline="{Binding IsOnline.Value}"/>
               <StackPanel Grid.Column="1" Margin="10,0,0,0">
-                <TextBlock Text="{Binding DisplayName}"/>
-                <TextBlock Text="{Binding LastMessagePreview}" Foreground="{StaticResource MutedBrush}" FontSize="12"/>
+                <TextBlock Text="{Binding DisplayName.Value}"/>
+                <TextBlock Text="{Binding LastMessagePreview.Value}" Foreground="{StaticResource MutedBrush}" FontSize="12"/>
               </StackPanel>
               <StackPanel Grid.Column="2" Orientation="Vertical" HorizontalAlignment="Right">
-                <TextBlock Text="{Binding TimestampText}" Foreground="{StaticResource MutedBrush}" FontSize="12" HorizontalAlignment="Right"/>
+                <TextBlock Text="{Binding TimestampText.Value}" Foreground="{StaticResource MutedBrush}" FontSize="12" HorizontalAlignment="Right"/>
                 <Border x:Name="UnreadBadge" Background="{StaticResource AccentBrush}" CornerRadius="10" Padding="6,2" Margin="0,6,0,0" Visibility="Collapsed">
                   <Border.Style>
                     <Style TargetType="Border">
@@ -56,7 +56,7 @@
                       </Style.Triggers>
                     </Style>
                   </Border.Style>
-                  <TextBlock Text="{Binding UnreadCount}" Foreground="#001018" FontWeight="SemiBold" FontSize="12"/>
+                  <TextBlock Text="{Binding UnreadCount.Value}" Foreground="#001018" FontWeight="SemiBold" FontSize="12"/>
                 </Border>
               </StackPanel>
             </Grid>

@@ -22,20 +22,20 @@ public sealed class ChatViewModel : Features.Shell.ViewModelBase
     private readonly ObservableCollection<ChatMessage> _messages = new();
     private string? _sessionId;
     private readonly IChatHistory _history;
-    private readonly ISessionDirectory _sessions;
+    private readonly SessionContext _sessionContext;
 
-    public ChatViewModel(IChatHistory history, ISessionDirectory sessions)
+    public ChatViewModel(IChatHistory history, SessionContext sessionContext)
     {
         _history = history;
-        _sessions = sessions;
+        _sessionContext = sessionContext;
 
-        MessageInput = new("");
+        MessageInput = _sessionContext.Draft;
         CanSend = MessageInput.Select(text => !string.IsNullOrWhiteSpace(text)).ToBindableReactiveProperty(false);
         Messages = new ReadOnlyObservableCollection<ChatMessage>(_messages);
-        Title = new BindableReactiveProperty<string>("Secure Chat");
-        Initials = new BindableReactiveProperty<string>("?");
-        IsOnline = new BindableReactiveProperty<bool>(false);
-        Title.Subscribe(t => Initials.Value = ComputeInitials(t));
+        // Header binds to SessionContext
+        Title = _sessionContext.PeerName;
+        Initials = _sessionContext.Initials;
+        IsOnline = _sessionContext.IsOnline;
 
         SendCommand = new AsyncRelayCommand(async _ =>
         {
@@ -58,15 +58,7 @@ public sealed class ChatViewModel : Features.Shell.ViewModelBase
         _messages.Clear();
         var items = await _history.GetMessagesAsync(sessionId, CancellationToken.None);
         foreach (var m in items) _messages.Add(m);
-        try
-        {
-            var all = await _sessions.GetAllAsync(CancellationToken.None);
-            var entry = all.FirstOrDefault(x => x.Id == sessionId);
-            var name = entry?.DisplayName;
-            if (!string.IsNullOrWhiteSpace(name)) Title.Value = name!;
-            IsOnline.Value = entry?.IsOnline ?? false;
-        }
-        catch { }
+        // Session header data is provided by SessionContext (set by navigation scope)
     }
 
     protected override void DisposeCore()

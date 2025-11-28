@@ -46,8 +46,10 @@ public partial class App : Application
                 services.AddSingleton<ISessionDirectory, InMemorySessionDirectory>();
                 services.AddSingleton<SessionsSidebarView>();
                 services.AddSingleton<IChatHistory, InMemoryChatHistory>();
-                services.AddSingleton<Desktop.Wpf.Features.Chat.ChatViewModel>();
-                services.AddSingleton<Desktop.Wpf.Features.Chat.ChatView>();
+                // Per-session scoped chat stack
+                services.AddScoped<Desktop.Wpf.Features.Sessions.SessionContext>();
+                services.AddScoped<Desktop.Wpf.Features.Chat.ChatViewModel>();
+                services.AddScoped<Desktop.Wpf.Features.Chat.ChatView>();
             })
             .Build();
 
