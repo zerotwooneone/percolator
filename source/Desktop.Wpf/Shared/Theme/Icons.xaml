@@ -9,6 +9,10 @@
     <Setter Property="VerticalAlignment" Value="Center"/>
   </Style>
 
+  <Style x:Key="IconTextLarge" TargetType="TextBlock" BasedOn="{StaticResource IconText}">
+    <Setter Property="FontSize" Value="16"/>
+  </Style>
+
   <!-- Glyphs as strings (NerdFont codepoints) -->
   <system:String x:Key="IconSearch">&#xF002;</system:String>
   <system:String x:Key="IconPencil">&#xEA73;</system:String>

@@ -9,6 +9,7 @@
                 <ResourceDictionary Source="/Desktop.Wpf;component/Shared/Theme/Typography.xaml" />
                 <ResourceDictionary Source="/Desktop.Wpf;component/Shared/Theme/Styles.xaml" />
                 <ResourceDictionary Source="/Desktop.Wpf;component/Shared/Theme/Icons.xaml" />
+                <ResourceDictionary Source="/Desktop.Wpf;component/Shared/Controls/MatButton.xaml" />
             </ResourceDictionary.MergedDictionaries>
         </ResourceDictionary>
     </Application.Resources>

@@ -18,4 +18,7 @@
   <SolidColorBrush x:Key="ChipBackgroundBrush" Color="#1A2740"/>
   <!-- Presence colors -->
   <SolidColorBrush x:Key="PresenceOnlineBrush" Color="#29D391"/>
+  <!-- Buttons -->
+  <SolidColorBrush x:Key="ButtonBackgroundBrush" Color="#233044"/>
+  <SolidColorBrush x:Key="ButtonHoverBrush" Color="#1D2A44"/>
 </ResourceDictionary>

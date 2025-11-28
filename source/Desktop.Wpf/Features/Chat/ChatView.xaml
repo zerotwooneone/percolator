@@ -25,9 +25,15 @@
         </StackPanel>
       </StackPanel>
       <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
-        <Button Style="{StaticResource BaseButton}" Width="32" Height="32" Padding="0" Margin="0,0,8,0"><TextBlock Style="{StaticResource IconText}" Text="{StaticResource IconPhone}"/></Button>
-        <Button Style="{StaticResource BaseButton}" Width="32" Height="32" Padding="0" Margin="0,0,8,0"><TextBlock Style="{StaticResource IconText}" Text="{StaticResource IconVideo}"/></Button>
-        <Button Style="{StaticResource BaseButton}" Width="32" Height="32" Padding="0"><TextBlock Style="{StaticResource IconText}" Text="{StaticResource IconKebab}"/></Button>
+        <controls:MatButton IsIcon="True" Variant="Filled" Margin="0,0,8,0">
+          <TextBlock Style="{StaticResource IconTextLarge}" Text="{StaticResource IconPhone}"/>
+        </controls:MatButton>
+        <controls:MatButton IsIcon="True" Variant="Filled" Margin="0,0,8,0">
+          <TextBlock Style="{StaticResource IconTextLarge}" Text="{StaticResource IconVideo}"/>
+        </controls:MatButton>
+        <controls:MatButton IsIcon="True" Variant="Filled">
+          <TextBlock Style="{StaticResource IconTextLarge}" Text="{StaticResource IconKebab}"/>
+        </controls:MatButton>
       </StackPanel>
     </Grid>
 
@@ -101,21 +107,21 @@
     <DockPanel Grid.Row="3" Margin="12" LastChildFill="True">
       <!-- Right action buttons: emoji, clip, send -->
       <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">
-        <Button Style="{StaticResource BaseButton}" Width="36" Height="36" Margin="8,0,0,0" Padding="0">
-          <TextBlock Style="{StaticResource IconText}" Text="{StaticResource IconSmiley}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-        </Button>
-        <Button Style="{StaticResource BaseButton}" Width="36" Height="36" Margin="8,0,0,0" Padding="0">
-          <TextBlock Style="{StaticResource IconText}" Text="{StaticResource IconClip}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-        </Button>
-        <Button Style="{StaticResource BaseButton}" Width="44" Height="36" Margin="8,0,0,0" Padding="0"
-                IsEnabled="{Binding CanSend.Value}" Command="{Binding SendCommand}">
-          <TextBlock Style="{StaticResource IconText}" Text="{StaticResource IconSend}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-        </Button>
+        <controls:MatButton IsIcon="True" Variant="Filled" Margin="8,0,0,0">
+          <TextBlock Style="{StaticResource IconTextLarge}" Text="{StaticResource IconSmiley}"/>
+        </controls:MatButton>
+        <controls:MatButton IsIcon="True" Variant="Filled" Margin="8,0,0,0">
+          <TextBlock Style="{StaticResource IconTextLarge}" Text="{StaticResource IconClip}"/>
+        </controls:MatButton>
+        <controls:MatButton IsIcon="True" Variant="Outlined" Margin="8,0,0,0"
+                            IsEnabled="{Binding CanSend.Value}" Command="{Binding SendCommand}">
+          <TextBlock Style="{StaticResource IconTextLarge}" Text="{StaticResource IconSend}"/>
+        </controls:MatButton>
       </StackPanel>
       <!-- Left plus button -->
-      <Button DockPanel.Dock="Left" Style="{StaticResource BaseButton}" Width="36" Height="36" Margin="0,0,8,0" Padding="0">
-        <TextBlock Style="{StaticResource IconText}" Text="{StaticResource IconPlus}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-      </Button>
+      <controls:MatButton DockPanel.Dock="Left" IsIcon="True" Variant="Filled" Margin="0,0,8,0">
+        <TextBlock Style="{StaticResource IconTextLarge}" Text="{StaticResource IconPlus}"/>
+      </controls:MatButton>
       <!-- Message input -->
       <TextBox x:Name="Composer" Style="{StaticResource WatermarkTextBox}" att:Placeholder.Text="Type a message..."
                MinHeight="36"

@@ -10,7 +10,7 @@
 
   <Style x:Key="BaseButton" TargetType="Button">
     <Setter Property="Foreground" Value="{StaticResource ForegroundBrush}"/>
-    <Setter Property="Background" Value="#233044"/>
+    <Setter Property="Background" Value="{StaticResource ButtonBackgroundBrush}"/>
     <Setter Property="BorderBrush" Value="#32435E"/>
     <Setter Property="BorderThickness" Value="1"/>
     <Setter Property="Padding" Value="10,6"/>
@@ -18,6 +18,58 @@
   </Style>
 
   <Style TargetType="Button" BasedOn="{StaticResource BaseButton}" />
+
+  <!-- Material-like buttons -->
+  <Style x:Key="MatButtonBase" TargetType="Button" BasedOn="{StaticResource BaseButton}">
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="Button">
+          <Border x:Name="Bd" Background="{TemplateBinding Background}"
+                  BorderBrush="{TemplateBinding BorderBrush}"
+                  BorderThickness="{TemplateBinding BorderThickness}"
+                  CornerRadius="6">
+            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+          </Border>
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+              <Setter TargetName="Bd" Property="Background" Value="{StaticResource ButtonHoverBrush}"/>
+            </Trigger>
+            <Trigger Property="IsEnabled" Value="False">
+              <Setter TargetName="Bd" Property="Opacity" Value="0.6"/>
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <Style x:Key="MatButtonFilled" TargetType="Button" BasedOn="{StaticResource MatButtonBase}">
+    <Setter Property="Background" Value="{StaticResource ButtonBackgroundBrush}"/>
+    <Setter Property="BorderBrush" Value="{StaticResource ButtonBackgroundBrush}"/>
+  </Style>
+
+  <Style x:Key="MatButtonOutlined" TargetType="Button" BasedOn="{StaticResource MatButtonBase}">
+    <Setter Property="Background" Value="Transparent"/>
+    <Setter Property="BorderBrush" Value="{StaticResource InputBorderBrush}"/>
+  </Style>
+
+  <!-- Icon buttons: tighter padding, larger icon/text -->
+  <Style x:Key="MatIconButtonBase" TargetType="Button" BasedOn="{StaticResource MatButtonBase}">
+    <Setter Property="Width" Value="36"/>
+    <Setter Property="Height" Value="36"/>
+    <Setter Property="Padding" Value="0"/>
+    <Setter Property="FontSize" Value="16"/>
+  </Style>
+
+  <Style x:Key="MatIconButtonFilled" TargetType="Button" BasedOn="{StaticResource MatIconButtonBase}">
+    <Setter Property="Background" Value="{StaticResource ButtonBackgroundBrush}"/>
+    <Setter Property="BorderBrush" Value="{StaticResource ButtonBackgroundBrush}"/>
+  </Style>
+
+  <Style x:Key="MatIconButtonOutlined" TargetType="Button" BasedOn="{StaticResource MatIconButtonBase}">
+    <Setter Property="Background" Value="Transparent"/>
+    <Setter Property="BorderBrush" Value="{StaticResource InputBorderBrush}"/>
+  </Style>
 
   <!-- Typography and inputs to match mockup: high contrast, muted placeholders -->
   <Style x:Key="BaseTextBlock" TargetType="TextBlock">
