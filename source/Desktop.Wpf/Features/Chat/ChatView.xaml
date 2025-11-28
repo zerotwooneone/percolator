@@ -48,11 +48,11 @@
     </ScrollViewer>
 
     <!-- Composer -->
-    <DockPanel Grid.Row="1" Margin="12" LastChildFill="False">
+    <DockPanel Grid.Row="1" Margin="12" LastChildFill="True">
+      <Button DockPanel.Dock="Right" Content="Send" IsEnabled="{Binding CanSend.Value}" Command="{Binding SendCommand}"/>
       <TextBox Style="{StaticResource WatermarkTextBox}" att:Placeholder.Text="Type a message..."
-               Width="Auto" MinHeight="36" Margin="0,0,8,0"
+               MinHeight="36" Margin="0,0,8,0"
                Text="{Binding MessageInput.Value, UpdateSourceTrigger=PropertyChanged}"/>
-      <Button Content="Send" IsEnabled="{Binding CanSend.Value}" Command="{Binding SendCommand}"/>
     </DockPanel>
   </Grid>
 </UserControl>

@@ -37,6 +37,9 @@ public sealed class ChatViewModel : Features.Shell.ViewModelBase
             _messages.Add(msg);
             MessageInput.Value = string.Empty;
         }, _ => CanSend.Value);
+
+        // Propagate CanSend changes to the command so the button updates
+        CanSend.Subscribe(_ => SendCommand.RaiseCanExecuteChanged());
     }
 
     public async void SetSession(string sessionId)
