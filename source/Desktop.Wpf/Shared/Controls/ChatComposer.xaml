@@ -56,9 +56,37 @@
           <controls:MatButton.Style>
             <Style TargetType="controls:MatButton" BasedOn="{StaticResource MatButtonBase}">
               <Setter Property="Visibility" Value="Collapsed"/>
+              <Setter Property="Opacity" Value="0"/>
+              <Setter Property="RenderTransformOrigin" Value="0.5,0.5"/>
+              <Setter Property="RenderTransform">
+                <Setter.Value>
+                  <ScaleTransform ScaleX="0.85" ScaleY="0.85"/>
+                </Setter.Value>
+              </Setter>
               <Style.Triggers>
                 <DataTrigger Binding="{Binding CanSend, RelativeSource={RelativeSource AncestorType=UserControl}}" Value="True">
                   <Setter Property="Visibility" Value="Visible"/>
+                  <DataTrigger.EnterActions>
+                    <BeginStoryboard>
+                      <Storyboard>
+                        <DoubleAnimation Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.16">
+                          <DoubleAnimation.EasingFunction>
+                            <CubicEase EasingMode="EaseOut"/>
+                          </DoubleAnimation.EasingFunction>
+                        </DoubleAnimation>
+                        <DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)" To="1" Duration="0:0:0.16">
+                          <DoubleAnimation.EasingFunction>
+                            <CubicEase EasingMode="EaseOut"/>
+                          </DoubleAnimation.EasingFunction>
+                        </DoubleAnimation>
+                        <DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleY)" To="1" Duration="0:0:0.16">
+                          <DoubleAnimation.EasingFunction>
+                            <CubicEase EasingMode="EaseOut"/>
+                          </DoubleAnimation.EasingFunction>
+                        </DoubleAnimation>
+                      </Storyboard>
+                    </BeginStoryboard>
+                  </DataTrigger.EnterActions>
                 </DataTrigger>
               </Style.Triggers>
             </Style>
