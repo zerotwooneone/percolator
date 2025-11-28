@@ -17,14 +17,36 @@
       <ListBox.ItemTemplate>
         <DataTemplate>
           <Border Style="{StaticResource BaseBorder}" Margin="12,8,12,0">
-            <DockPanel>
-              <Border Width="36" Height="36" CornerRadius="18" Background="#2EC7FF33"/>
-              <StackPanel Margin="10,0,0,0">
+            <Grid>
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+              </Grid.ColumnDefinitions>
+              <Border Width="36" Height="36" CornerRadius="18" Background="#2EC7FF33">
+                <TextBlock Text="{Binding Initials}" HorizontalAlignment="Center" VerticalAlignment="Center" FontWeight="SemiBold"/>
+              </Border>
+              <StackPanel Grid.Column="1" Margin="10,0,0,0">
                 <TextBlock Text="{Binding DisplayName}"/>
                 <TextBlock Text="{Binding LastMessagePreview}" Foreground="{StaticResource MutedBrush}" FontSize="12"/>
               </StackPanel>
-              <TextBlock Text="{Binding TimestampText}" Foreground="{StaticResource MutedBrush}" FontSize="12" DockPanel.Dock="Right" VerticalAlignment="Top"/>
-            </DockPanel>
+              <StackPanel Grid.Column="2" Orientation="Vertical" HorizontalAlignment="Right">
+                <TextBlock Text="{Binding TimestampText}" Foreground="{StaticResource MutedBrush}" FontSize="12" HorizontalAlignment="Right"/>
+                <Border x:Name="UnreadBadge" Background="{StaticResource AccentBrush}" CornerRadius="10" Padding="6,2" Margin="0,6,0,0" Visibility="Collapsed">
+                  <Border.Style>
+                    <Style TargetType="Border">
+                      <Setter Property="Visibility" Value="Collapsed"/>
+                      <Style.Triggers>
+                        <DataTrigger Binding="{Binding HasUnread}" Value="True">
+                          <Setter Property="Visibility" Value="Visible"/>
+                        </DataTrigger>
+                      </Style.Triggers>
+                    </Style>
+                  </Border.Style>
+                  <TextBlock Text="{Binding UnreadCount}" Foreground="#001018" FontWeight="SemiBold" FontSize="12"/>
+                </Border>
+              </StackPanel>
+            </Grid>
           </Border>
         </DataTemplate>
       </ListBox.ItemTemplate>

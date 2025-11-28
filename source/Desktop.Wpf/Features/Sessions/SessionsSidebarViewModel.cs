@@ -48,6 +48,11 @@ public sealed class SessionsSidebarViewModel : Features.Shell.ViewModelBase
                 navigation.Navigate(chatView);
             });
 
+        // Navigate back to welcome when selection cleared
+        SelectedSessionId
+            .Where(id => string.IsNullOrEmpty(id))
+            .Subscribe(_ => navigation.Navigate(null));
+
         Items = new ReadOnlyObservableCollection<SessionListItem>(_items);
     }
 
