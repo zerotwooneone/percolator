@@ -395,113 +395,24 @@ Next: Phase 4 – Application-Layer Migration Plan
 
 ## Implementation roadmap (AI-sized steps with TDD)
 
-- **Step 1: Define core Value Objects and IDs (no behavior)**
-  - Red: Tests assert creation, equality, and validation of `SessionId`, `PendingSessionId`, `PeerId`, `Plaintext`, `Ciphertext`, `AssociatedData` (no `byte[]` exposure in public API).
-  - Green: Implement minimal records/structs and guards.
-  - Refactor: Remove duplication, ensure naming clarity and serdes helpers if needed.
-  - Deliverable: New VO types in Percolator.Cryptography with unit tests.
 
-- **Step 2: RatchetState VO shape (persistence-ready, immutable operations later)**
-  - Red: Tests for shape, invariants scaffolding (counters non-negative, sizes), and snapshot serialization contract.
-  - Green: Implement data-only VO with basic guards; no crypto yet.
-  - Refactor: Align names with protocol, prepare for transitions.
-  - Deliverable: `RatchetState` and tests.
+1) Step 1 – Core VOs/IDs
+   - Introduced `SessionId`, `PendingSessionId`, `PeerId`, `Plaintext`, `Ciphertext`, `AssociatedData` with guards and tests; avoided exposing raw `byte[]` in public APIs.
 
-- **Step 3: Aggregate skeletons (SecureSession, PendingSession) with invariants only**
-  - Red: Tests ensure aggregates can be constructed with required fields; invalid inputs throw; timestamps set via `IClock`.
-  - Green: Implement constructors/factories without crypto.
-  - Refactor: Extract common validation, add domain events types.
-  - Deliverable: Aggregate classes + invariant tests.
+2) Step 2 – RatchetState shape
+   - Added `RatchetState` as a persistence-ready VO with basic invariants and snapshot contract; no crypto behavior yet.
 
-- **Step 4: PendingSession behaviors (decision workflow)**
-  - Red: State machine tests cover `ApproveAndRespond`, `AutoRespond` policy guard, `Reject`, `Expire` transitions and idempotency.
-  - Green: Implement transitions and return placeholder `HandshakeResponse` using `ICryptoPrimitives` stub.
-  - Refactor: Event emission, clearer result types.
-  - Deliverable: Behavior-complete `PendingSession` + tests.
+3) Step 3 – Aggregate skeletons
+   - Created `SecureSession` and `PendingSession` aggregates with constructor invariants and clocked timestamps; crypto behaviors deferred.
 
- - **Step 5: SecureSession behaviors (Encrypt/Decrypt with ratchet framing)**
-  - Red: Tests for
-    - Counter monotonicity, AD enforcement, skipped-keys retrieval, `TouchLastUsed()` updates.
-    - Initiator vs Responder first-message asymmetry (per session-flow):
-      - Initiator first-send performs a DH ratchet before first `Encrypt` and emits the header `public_ratchet_key`.
-      - Responder decrypts the first inbound message, advances receiving chain, then persists finalized state.
-    - First responder message’s decrypted inner payload MUST include the responder-assigned `session_id` (per session-flow). The initiator never derives a session id.
-  - Green: Implement via `SessionCrypto` port. API explicit about framing: return/consume a ratchet-framed message (e.g., `SessionRatchetMessage`) rather than a bare `Ciphertext` where appropriate. Update state immutably and persist via repository.
-  - Refactor: Remove duplication, improve error messages, tune invariants.
-  - Deliverable: `SecureSession` behavior + tests.
+4) Step 4 – PendingSession behaviors
+   - Implemented decision workflow (`Approve`, `AutoRespond`, `Reject`, `Expire`) returning minimal handshake responses via crypto ports; added tests for state transitions.
 
-  - Slow-path inbound resolution (domain-level)
-    - Red: `InboundMessageResolver` tests
-      - Fast path: resolves `SessionId` by `IRatchetKeyIndex.TryResolveAsync(header.PreKey)` and decrypts via loaded `SecureSession`.
-      - Slow path: when fast path misses, enumerates candidate sessions (via `ISessionCatalog` or repo enumeration) and attempts `SecureSession.Decrypt` until one succeeds; persists updated state; upserts `IRatchetKeyIndex` for the new header key.
-      - Returns `(SessionId, Plaintext)` on success; null on miss.
-    - Green: Implement resolver using domain ports only; no logging or app concerns.
-    - Refactor: Tune iteration order and guard rails (max candidates/time budget) as needed.
+5) Step 5 – SecureSession behaviors
+   - Implemented Double Ratchet `Encrypt/Decrypt` with ratchet framing and AD rules; enforced counters/skipped-keys; documented initiator/responder asymmetry and added inbound resolver tests (fast/slow path).
 
- - **Step 6: Domain services (HandshakePlanner, SessionCrypto port)**
-  - Red: Planner tests validate initiator vs responder paths for X3DH, including DH1/DH2/DH3 and optional DH4 (one-time pre-key); signature verification and failure cases using crypto stubs.
-  - Green: Implement pure planner; define `SessionCrypto` interface aligned with existing utils. Provide an adapter implementation that reuses `X3DHManager` and `CryptoUtils`. No secret logging inside the domain; any diagnostics live in adapters at the Application layer.
-  - Refactor: Streamline method names and DTOs.
-  - Deliverable: Services + tests.
-
-  #### Step 6a: Planner and Crypto adapter cutover plan (Option A only)
-
- - Goals
-   - Centralize handshake validation and crypto under two ports: `IHandshakePlanner` and `ISessionCrypto`.
-   - Extend `ISessionCrypto` to include responder-side X3DH: `X3DH_Respond`.
-   - Migrate initiator and responder call sites to these ports, removing direct usages of `IX3dhDeriver` from application code.
-   - Execute as a small number of large cutover steps. The build may be temporarily broken between substeps.
-
- - Ports (Cryptography)
-   - `IHandshakePlanner` (new)
-     - `void ValidateInitiatorInvitation(HandshakeInvitation inv)`
-     - `void ValidatePreKeyBundle(PreKeyBundle bundle)`
-     - `ResponderPlan PlanResponder(PreKeyBundle bundle, RatchetIdentityKey initiatorIdKey, RatchetEphemeralKey initiatorEph)`
-     - `InitiatorPlan PlanInitiator(PreKeyBundle bundle, RatchetIdentityKey responderIdKey)`
-     - Notes: DTO-only plans (no secrets) describing which DHs/keys are required and whether OTK is present.
-   - `ISessionCrypto` (exists — to be extended)
-     - Existing methods:
-       - `X3DH_Initiate(PrivatePreKey localIdentityPrivate, PreKeyBundle remoteBundle) -> (SharedSecret, RatchetEphemeralKey EphemeralPublic)`
-       - `DR_Encrypt(RatchetState state, Plaintext pt, AssociatedData ad, ulong counter, ulong previousChainLength) -> (Ciphertext, RatchetEphemeralKey HeaderKey, RatchetState NewState)`
-       - `DR_Decrypt(RatchetState state, SessionRatchetMessage framed, AssociatedData ad) -> (Plaintext, RatchetState NewState)`
-       - `VerifySignature(RatchetIdentityKey identityPublic, PreKey signedPreKey, Signature signature) -> bool`
-     - New method to add now (Option A):
-       - `X3DH_Respond(RatchetIdentityKey initiatorId, RatchetEphemeralKey initiatorEph, PrivatePreKey localIdentityPrivate, PrivatePreKey localSpkPrivate, PrivatePreKey? localOtkPrivate) -> SharedSecret`
-
- - Adapters (Application)
-   - `HandshakePlannerAdapter`
-     - Uses `IPreKeyBundleValidator` (and `ISigningService` as needed) to validate inputs and produce plan DTOs.
-   - `SessionCryptoAdapter` (implements `ISessionCrypto`)
-     - `X3DH_Initiate` delegates to `IX3dhDeriver.DeriveInitiator`.
-     - `X3DH_Respond` delegates to `IX3dhDeriver.DeriveResponder`.
-     - `DR_Encrypt`/`DR_Decrypt` wrap existing primitives (`AeadSessionCrypto` / `SecureSession`) consistently with AD and counters.
-     - `VerifySignature` delegates to `IPreKeyBundleValidator` or signing service as appropriate.
-
- - Large cutover steps (performed in order; build may break between steps)
-   1) Define ports and adapter scaffolding
-      - Add `IHandshakePlanner` interface and `HandshakePlannerAdapter` (empty plan DTOs initially if necessary).
-      - Extend `ISessionCrypto` with `X3DH_Respond` signature.
-      - Create `SessionCryptoAdapter` implementing all `ISessionCrypto` methods (can throw `NotImplementedException` only for unreferenced code during this step; next step must implement fully). Register DI.
-
-   2) Implement adapters
-      - Implement `HandshakePlannerAdapter` to validate bundles and produce plans.
-      - Implement `SessionCryptoAdapter.X3DH_Initiate/Respond` using `IX3dhDeriver`. Implement `DR_Encrypt/DR_Decrypt` using existing primitives. Implement `VerifySignature`.
-
-   3) Initiator path cutover
-      - Update `InitiatorHelloService` to use `IHandshakePlanner.ValidatePreKeyBundle/PlanInitiator` and `ISessionCrypto.X3DH_Initiate`.
-      - Update and fix tests accordingly (loose mocks, assert observable effects).
-
-  - DI plan
-    - Register adapters in Application:
-      - `services.AddScoped<IHandshakePlanner, HandshakePlannerAdapter>();`
-      - `services.AddScoped<ISessionCrypto, SessionCryptoAdapter>();`
-    - No DI changes inside Cryptography project; ports/interfaces live there, adapters live in Application.
-
-  - Migration notes
-    - This is a cutover: the build may be broken between large substeps while call sites migrate (InitiatorHelloService, HandleHandshakeInitiatorHello, EstablishDirectSessionService).
-    - Ensure each substep moves us toward Step 6a goals; minimize total generations by batching coherent changes.
-    - Do not persist any new secret material compared to current behavior; maintain initiator prehandshake privacy guarantees.
-    - Avoid logging cryptographic material; validation errors surface via exceptions only.
+6) Step 6 – Domain services (Planner/Crypto)
+   - Centralized handshake logic behind `IHandshakePlanner` and `ISessionCrypto` (including responder-side `X3DH_Respond`); provided adapter implementations used by application services.
 
   - **Step 7: Cut-over: delete legacy crypto paths and fix compile to adopt new domain**
   - Red: Identify all compile-time usages of legacy crypto/session code (search references). Create a todo list of broken call sites.
