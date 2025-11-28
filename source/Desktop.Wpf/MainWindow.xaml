@@ -20,10 +20,9 @@
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
 
-            <!-- Brand header -->
+            <!-- Sidebar header (icon only) -->
             <DockPanel Margin="16,12,16,8">
                 <Border Width="28" Height="28" CornerRadius="14" Background="{StaticResource AccentBrush}"/>
-                <TextBlock Text="Percolator" FontWeight="SemiBold" Margin="8,0,0,0" VerticalAlignment="Center"/>
             </DockPanel>
 
             <!-- Sessions feature host -->
@@ -57,7 +56,7 @@
                     </Style>
                 </StackPanel.Style>
                 <Border Width="120" Height="120" CornerRadius="60" Background="#0E1727" Opacity="0.9">
-                    <TextBlock Text="&#xE72E;" FontFamily="Segoe MDL2 Assets" FontSize="48" VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                    <TextBlock Style="{StaticResource IconText}" Text="{StaticResource IconShield}" FontSize="48" VerticalAlignment="Center" HorizontalAlignment="Center"/>
                 </Border>
                 <TextBlock Style="{StaticResource TitleText}" Margin="0,24,0,8" Text="Percolator Secure"/>
                 <TextBlock Foreground="{StaticResource MutedBrush}">

@@ -49,10 +49,26 @@
 
     <!-- Composer -->
     <DockPanel Grid.Row="1" Margin="12" LastChildFill="True">
-      <Button DockPanel.Dock="Right" Content="Send" IsEnabled="{Binding CanSend.Value}" Command="{Binding SendCommand}"/>
+      <!-- Right action buttons: emoji, clip, send -->
+      <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">
+        <Button Style="{StaticResource BaseButton}" Width="36" Height="36" Margin="8,0,0,0" Padding="0">
+          <TextBlock Style="{StaticResource IconText}" Text="{StaticResource IconSmiley}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+        </Button>
+        <Button Style="{StaticResource BaseButton}" Width="36" Height="36" Margin="8,0,0,0" Padding="0">
+          <TextBlock Style="{StaticResource IconText}" Text="{StaticResource IconClip}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+        </Button>
+        <Button Style="{StaticResource BaseButton}" Width="44" Height="36" Margin="8,0,0,0" Padding="0"
+                IsEnabled="{Binding CanSend.Value}" Command="{Binding SendCommand}">
+          <TextBlock Style="{StaticResource IconText}" Text="{StaticResource IconSend}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+        </Button>
+      </StackPanel>
+      <!-- Left plus button -->
+      <Button DockPanel.Dock="Left" Style="{StaticResource BaseButton}" Width="36" Height="36" Margin="0,0,8,0" Padding="0">
+        <TextBlock Style="{StaticResource IconText}" Text="{StaticResource IconPlus}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+      </Button>
+      <!-- Message input -->
       <TextBox Style="{StaticResource WatermarkTextBox}" att:Placeholder.Text="Type a message..."
-               MinHeight="36" Margin="0,0,8,0"
-               Text="{Binding MessageInput.Value, UpdateSourceTrigger=PropertyChanged}"/>
+               MinHeight="36" Text="{Binding MessageInput.Value, UpdateSourceTrigger=PropertyChanged}"/>
     </DockPanel>
   </Grid>
 </UserControl>

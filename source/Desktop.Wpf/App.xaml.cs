@@ -1,6 +1,8 @@
 using System.Configuration;
 using System.Data;
+using System.Linq;
 using System.Windows;
+using System.Windows.Media;
 using Desktop.Wpf.Features.Chat;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -54,6 +56,47 @@ public partial class App : Application
         var logger = HostInstance.Services.GetRequiredService<ILogger<App>>();
         ObservableSystem.RegisterUnhandledExceptionHandler(ex =>
             logger.LogError(ex, "R3 Unhandled exception"));
+
+        // Detect Nerd Font family if available and register as a global resource for icons
+        try
+        {
+            var preferred = new[]
+            {
+                "FiraCode Nerd Font Mono",
+                "FiraCode Nerd Font",
+                "JetBrainsMono Nerd Font",
+                "CaskaydiaCove Nerd Font",
+                "Hack Nerd Font",
+                "Iosevka Nerd Font"
+            };
+
+            FontFamily? chosen = null;
+            foreach (var fam in Fonts.SystemFontFamilies)
+            {
+                // Source: often the family name; FamilyNames has localized names
+                var candidates = fam.FamilyNames.Select(kv => kv.Value)
+                    .Append(fam.Source)
+                    .Where(s => !string.IsNullOrWhiteSpace(s))
+                    .Select(s => s!.Trim());
+
+                if (candidates.Any(name => preferred.Any(p => name.Equals(p, System.StringComparison.OrdinalIgnoreCase))))
+                {
+                    chosen = fam;
+                    break;
+                }
+            }
+
+            // Fallback to Segoe MDL2 Assets (builtin Windows icon font)
+            var fallback = new FontFamily("Segoe MDL2 Assets");
+            Application.Current.Resources["IconFontFamily"] = chosen ?? fallback;
+
+            logger.LogInformation("Icon font selected: {Font}", (chosen ?? fallback).Source);
+        }
+        catch (System.Exception ex)
+        {
+            logger.LogWarning(ex, "Icon font selection failed; falling back to Segoe MDL2 Assets");
+            Application.Current.Resources["IconFontFamily"] = new FontFamily("Segoe MDL2 Assets");
+        }
 
         var window = HostInstance.Services.GetRequiredService<MainWindow>();
         window.DataContext = HostInstance.Services.GetRequiredService<ShellViewModel>();

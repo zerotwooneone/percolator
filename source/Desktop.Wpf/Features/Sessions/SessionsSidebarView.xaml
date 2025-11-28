@@ -8,10 +8,24 @@
       <RowDefinition Height="*"/>
     </Grid.RowDefinitions>
 
-    <TextBox Style="{StaticResource WatermarkTextBox}"
-             att:Placeholder.Text="Search encrypted logs..."
-             Margin="16,8"
-             Text="{Binding SearchText.Value, UpdateSourceTrigger=PropertyChanged}"/>
+    <Grid Margin="16,8">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="Auto"/>
+        <ColumnDefinition Width="*"/>
+        <ColumnDefinition Width="Auto"/>
+      </Grid.ColumnDefinitions>
+      <!-- Leading search icon -->
+      <TextBlock Grid.Column="0" Style="{StaticResource IconText}" Text="{StaticResource IconSearch}" Margin="8,0,8,0" Opacity="0.8"/>
+      <!-- Search box fills -->
+      <TextBox Grid.Column="1" Style="{StaticResource WatermarkTextBox}"
+               att:Placeholder.Text="Search encrypted logs..."
+               Padding="28,6,8,6"
+               Text="{Binding SearchText.Value, UpdateSourceTrigger=PropertyChanged}"/>
+      <!-- Trailing pencil action -->
+      <Button Grid.Column="2" Style="{StaticResource BaseButton}" Width="32" Height="32" Margin="8,0,0,0" Padding="0">
+        <TextBlock Style="{StaticResource IconText}" Text="{StaticResource IconPencil}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+      </Button>
+    </Grid>
 
     <ListBox Grid.Row="1" ItemsSource="{Binding Items}" SelectedValuePath="Id" SelectedValue="{Binding SelectedSessionId.Value, Mode=TwoWay}">
       <ListBox.ItemTemplate>
