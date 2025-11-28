@@ -17,7 +17,9 @@
         <ColumnDefinition Width="Auto"/>
       </Grid.ColumnDefinitions>
       <StackPanel Orientation="Horizontal">
-        <Border Width="28" Height="28" CornerRadius="14" Background="#2EC7FF33"/>
+        <Border Width="28" Height="28" CornerRadius="14" Background="#2EC7FF33">
+          <TextBlock Text="{Binding Initials.Value}" HorizontalAlignment="Center" VerticalAlignment="Center" FontWeight="SemiBold"/>
+        </Border>
         <StackPanel Margin="10,0,0,0">
           <TextBlock Text="{Binding Title.Value}" FontWeight="SemiBold"/>
           <TextBlock Text="SIGNAL SECURE" Foreground="{StaticResource MutedBrush}" FontSize="12"/>
