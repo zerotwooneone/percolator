@@ -8,7 +8,7 @@
           <Border x:Name="Bd" Background="{TemplateBinding Background}"
                   BorderBrush="{TemplateBinding BorderBrush}"
                   BorderThickness="{TemplateBinding BorderThickness}"
-                  CornerRadius="6">
+                  CornerRadius="{TemplateBinding controls:MatButton.CornerRadius}">
             <ContentPresenter x:Name="Cp" HorizontalAlignment="Center" VerticalAlignment="Center"/>
           </Border>
           <ControlTemplate.Triggers>
@@ -20,10 +20,15 @@
             </Trigger>
             <!-- Icon sizing -->
             <Trigger Property="controls:MatButton.IsIcon" Value="True">
-              <Setter Property="Width" Value="36"/>
-              <Setter Property="Height" Value="36"/>
-              <Setter TargetName="Cp" Property="TextElement.FontSize" Value="16"/>
+              <Setter Property="Width" Value="40"/>
+              <Setter Property="Height" Value="40"/>
+              <Setter Property="Padding" Value="0"/>
+              <Setter TargetName="Cp" Property="TextElement.FontSize" Value="18"/>
               <Setter TargetName="Cp" Property="FrameworkElement.Margin" Value="0"/>
+            </Trigger>
+            <!-- Round shape for icon buttons when requested -->
+            <Trigger Property="controls:MatButton.IsRound" Value="True">
+              <Setter TargetName="Bd" Property="CornerRadius" Value="999"/>
             </Trigger>
             <!-- Variant handling -->
             <Trigger Property="controls:MatButton.Variant" Value="Filled">

@@ -24,4 +24,22 @@ public class MatButton : Button
         get => (MatButtonVariant)GetValue(VariantProperty);
         set => SetValue(VariantProperty, value);
     }
+
+    public static readonly DependencyProperty IsRoundProperty = DependencyProperty.Register(
+        nameof(IsRound), typeof(bool), typeof(MatButton), new PropertyMetadata(false));
+
+    public bool IsRound
+    {
+        get => (bool)GetValue(IsRoundProperty);
+        set => SetValue(IsRoundProperty, value);
+    }
+
+    public static readonly DependencyProperty CornerRadiusProperty = DependencyProperty.Register(
+        nameof(CornerRadius), typeof(CornerRadius), typeof(MatButton), new PropertyMetadata(new CornerRadius(6)));
+
+    public CornerRadius CornerRadius
+    {
+        get => (CornerRadius)GetValue(CornerRadiusProperty);
+        set => SetValue(CornerRadiusProperty, value);
+    }
 }
