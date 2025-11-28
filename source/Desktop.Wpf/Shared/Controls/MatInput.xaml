@@ -2,9 +2,19 @@
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:att="clr-namespace:Desktop.Wpf.Shared.Attached">
-  <Border Background="{StaticResource InputBackgroundBrush}"
+  <Border x:Name="RootBorder" Background="{StaticResource InputBackgroundBrush}"
           BorderBrush="{StaticResource InputBorderBrush}"
           BorderThickness="1" CornerRadius="8" Padding="8">
+    <Border.Style>
+      <Style TargetType="Border">
+        <Setter Property="BorderBrush" Value="{StaticResource InputBorderBrush}"/>
+        <Style.Triggers>
+          <Trigger Property="IsKeyboardFocusWithin" Value="True">
+            <Setter Property="BorderBrush" Value="{StaticResource ButtonHoverBrush}"/>
+          </Trigger>
+        </Style.Triggers>
+      </Style>
+    </Border.Style>
     <Grid>
       <Grid.ColumnDefinitions>
         <ColumnDefinition Width="Auto"/>
@@ -13,9 +23,20 @@
       </Grid.ColumnDefinitions>
 
       <!-- Prefix slot -->
-      <ContentPresenter Grid.Column="0"
+      <ContentPresenter x:Name="PrefixHost" Grid.Column="0"
                         VerticalAlignment="Center"
-                        Content="{Binding Prefix, RelativeSource={RelativeSource AncestorType=UserControl}}"/>
+                        Content="{Binding Prefix, RelativeSource={RelativeSource AncestorType=UserControl}}">
+        <ContentPresenter.Style>
+          <Style TargetType="ContentPresenter">
+            <Setter Property="TextElement.Foreground" Value="{StaticResource MutedBrush}"/>
+            <Style.Triggers>
+              <DataTrigger Binding="{Binding IsKeyboardFocusWithin, RelativeSource={RelativeSource AncestorType=Border}}" Value="True">
+                <Setter Property="TextElement.Foreground" Value="{StaticResource ForegroundBrush}"/>
+              </DataTrigger>
+            </Style.Triggers>
+          </Style>
+        </ContentPresenter.Style>
+      </ContentPresenter>
 
       <!-- Input -->
       <TextBox Grid.Column="1"

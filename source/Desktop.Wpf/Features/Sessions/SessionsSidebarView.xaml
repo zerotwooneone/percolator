@@ -11,7 +11,9 @@
 
     <Grid Margin="16,8">
       <controls:MatInput Text="{Binding SearchText.Value, UpdateSourceTrigger=PropertyChanged}"
-                         Placeholder="Search encrypted logs...">
+                         DebouncedText="{Binding SearchText.Value, Mode=TwoWay}"
+                         DebounceDelay="0:0:0.25"
+                         Placeholder="Search...">
         <controls:MatInput.Prefix>
           <TextBlock Style="{StaticResource IconText}" Text="{StaticResource IconSearch}" Margin="8,0,8,0" Opacity="0.8"/>
         </controls:MatInput.Prefix>
