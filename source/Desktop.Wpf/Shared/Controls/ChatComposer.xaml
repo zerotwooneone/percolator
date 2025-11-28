@@ -1,0 +1,35 @@
+<UserControl x:Class="Desktop.Wpf.Shared.Controls.ChatComposer"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:att="clr-namespace:Desktop.Wpf.Shared.Attached"
+             xmlns:controls="clr-namespace:Desktop.Wpf.Shared.Controls">
+  <Grid>
+    <DockPanel Margin="12" LastChildFill="True">
+      <!-- Right action buttons: emoji, clip, send -->
+      <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">
+        <controls:MatButton IsIcon="True" IsRound="True" Variant="Filled" Margin="8,0,0,0" Command="{Binding EmojiCommand, RelativeSource={RelativeSource AncestorType=UserControl}}">
+          <TextBlock Style="{StaticResource IconTextLarge}" Text="{StaticResource IconSmiley}"/>
+        </controls:MatButton>
+        <controls:MatButton IsIcon="True" IsRound="True" Variant="Filled" Margin="8,0,0,0" Command="{Binding ClipCommand, RelativeSource={RelativeSource AncestorType=UserControl}}">
+          <TextBlock Style="{StaticResource IconTextLarge}" Text="{StaticResource IconClip}"/>
+        </controls:MatButton>
+        <controls:MatButton IsIcon="True" IsRound="True" Variant="Outlined" Margin="8,0,0,0"
+                            IsEnabled="{Binding CanSend, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                            Command="{Binding SendCommand, RelativeSource={RelativeSource AncestorType=UserControl}}">
+          <TextBlock Style="{StaticResource IconTextLarge}" Text="{StaticResource IconSend}"/>
+        </controls:MatButton>
+      </StackPanel>
+      <!-- Left plus button -->
+      <controls:MatButton DockPanel.Dock="Left" IsIcon="True" IsRound="True" Variant="Filled" Margin="0,0,8,0" Command="{Binding PlusCommand, RelativeSource={RelativeSource AncestorType=UserControl}}">
+        <TextBlock Style="{StaticResource IconTextLarge}" Text="{StaticResource IconPlus}"/>
+      </controls:MatButton>
+      <!-- Message input -->
+      <TextBox Style="{StaticResource WatermarkTextBox}" att:Placeholder.Text="Type a message..."
+               MinHeight="36"
+               AcceptsReturn="True" TextWrapping="Wrap"
+               att:KeyBehaviors.EnterCommand="{Binding SendCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+               att:KeyBehaviors.AllowAltEnterNewline="True"
+               Text="{Binding Text, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, RelativeSource={RelativeSource AncestorType=UserControl}}"/>
+    </DockPanel>
+  </Grid>
+</UserControl>

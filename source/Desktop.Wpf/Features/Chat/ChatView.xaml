@@ -104,31 +104,9 @@
     </ScrollViewer>
 
     <!-- Composer -->
-    <DockPanel Grid.Row="3" Margin="12" LastChildFill="True">
-      <!-- Right action buttons: emoji, clip, send -->
-      <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">
-        <controls:MatButton IsIcon="True" IsRound="True" Variant="Filled" Margin="8,0,0,0">
-          <TextBlock Style="{StaticResource IconTextLarge}" Text="{StaticResource IconSmiley}"/>
-        </controls:MatButton>
-        <controls:MatButton IsIcon="True" IsRound="True" Variant="Filled" Margin="8,0,0,0">
-          <TextBlock Style="{StaticResource IconTextLarge}" Text="{StaticResource IconClip}"/>
-        </controls:MatButton>
-        <controls:MatButton IsIcon="True" IsRound="True" Variant="Outlined" Margin="8,0,0,0"
-                            IsEnabled="{Binding CanSend.Value}" Command="{Binding SendCommand}">
-          <TextBlock Style="{StaticResource IconTextLarge}" Text="{StaticResource IconSend}"/>
-        </controls:MatButton>
-      </StackPanel>
-      <!-- Left plus button -->
-      <controls:MatButton DockPanel.Dock="Left" IsIcon="True" IsRound="True" Variant="Filled" Margin="0,0,8,0">
-        <TextBlock Style="{StaticResource IconTextLarge}" Text="{StaticResource IconPlus}"/>
-      </controls:MatButton>
-      <!-- Message input -->
-      <TextBox x:Name="Composer" Style="{StaticResource WatermarkTextBox}" att:Placeholder.Text="Type a message..."
-               MinHeight="36"
-               AcceptsReturn="True" TextWrapping="Wrap"
-               att:KeyBehaviors.EnterCommand="{Binding SendCommand}"
-               att:KeyBehaviors.AllowAltEnterNewline="True"
-               Text="{Binding MessageInput.Value, UpdateSourceTrigger=PropertyChanged}"/>
-    </DockPanel>
+    <controls:ChatComposer Grid.Row="3"
+                           Text="{Binding MessageInput.Value, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                           CanSend="{Binding CanSend.Value}"
+                           SendCommand="{Binding SendCommand}"/>
   </Grid>
 </UserControl>
