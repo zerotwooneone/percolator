@@ -21,6 +21,13 @@ public sealed class InMemoryChatHistory : IChatHistory
         {
             new ChatMessage { Id = "m1", Author = "Morpheus", Text = "Follow the white rabbit.", TimestampText = "Yesterday", IsOwn = false }
         });
+
+        // Mark last outgoing as delivered/read for demo
+        if (_store.TryGetValue("1", out var list) && list.LastOrDefault(m => m.IsOwn) is ChatMessage lastOwn)
+        {
+            lastOwn.IsDelivered.Value = true;
+            lastOwn.IsRead.Value = true;
+        }
     }
 
     public Task<IReadOnlyList<ChatMessage>> GetMessagesAsync(string sessionId, CancellationToken ct)
@@ -33,6 +40,21 @@ public sealed class InMemoryChatHistory : IChatHistory
     {
         var list = _store.GetOrAdd(sessionId, _ => new());
         list.Add(message);
+        // Simulate async delivery/read transitions for own messages
+        if (message.IsOwn)
+        {
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await Task.Delay(500, CancellationToken.None);
+                    message.IsDelivered.Value = true;
+                    await Task.Delay(1000, CancellationToken.None);
+                    message.IsRead.Value = true;
+                }
+                catch { }
+            });
+        }
         return Task.CompletedTask;
     }
 }

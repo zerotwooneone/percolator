@@ -68,7 +68,7 @@
                 <StackPanel>
                   <TextBlock Text="{Binding Text}" TextWrapping="Wrap"/>
                   <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,6,0,0">
-                    <TextBlock x:Name="SingleTick" Style="{StaticResource IconText}" Text="{StaticResource IconCheck}" FontSize="12" Margin="0,0,6,0" Opacity="0.9"/>
+                    <TextBlock x:Name="SingleTick" Style="{StaticResource IconText}" Text="{StaticResource IconCheck}" FontSize="12" Margin="0,0,6,0" Opacity="0.9" Visibility="Collapsed"/>
                     <TextBlock x:Name="DoubleTick" Style="{StaticResource IconText}" Text="{StaticResource IconDoubleCheck}" FontSize="12" Margin="0,0,6,0" Opacity="0.9" Visibility="Collapsed"/>
                     <TextBlock Text="{Binding TimestampText}" Foreground="{StaticResource MutedBrush}" FontSize="11"/>
                   </StackPanel>
@@ -84,6 +84,14 @@
                 <Setter TargetName="SingleTick" Property="UIElement.Visibility" Value="Collapsed"/>
                 <Setter TargetName="DoubleTick" Property="UIElement.Visibility" Value="Visible"/>
               </DataTrigger>
+              <MultiDataTrigger>
+                <MultiDataTrigger.Conditions>
+                  <Condition Binding="{Binding IsDelivered.Value}" Value="True"/>
+                  <Condition Binding="{Binding IsRead.Value}" Value="False"/>
+                </MultiDataTrigger.Conditions>
+                <Setter TargetName="SingleTick" Property="UIElement.Visibility" Value="Visible"/>
+                <Setter TargetName="DoubleTick" Property="UIElement.Visibility" Value="Collapsed"/>
+              </MultiDataTrigger>
             </DataTemplate.Triggers>
           </DataTemplate>
         </ItemsControl.ItemTemplate>
@@ -110,8 +118,11 @@
         <TextBlock Style="{StaticResource IconText}" Text="{StaticResource IconPlus}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
       </Button>
       <!-- Message input -->
-      <TextBox Style="{StaticResource WatermarkTextBox}" att:Placeholder.Text="Type a message..."
-               MinHeight="36" Text="{Binding MessageInput.Value, UpdateSourceTrigger=PropertyChanged}"/>
+      <TextBox x:Name="Composer" Style="{StaticResource WatermarkTextBox}" att:Placeholder.Text="Type a message..."
+               MinHeight="36"
+               AcceptsReturn="True" TextWrapping="Wrap"
+               PreviewKeyDown="Composer_PreviewKeyDown"
+               Text="{Binding MessageInput.Value, UpdateSourceTrigger=PropertyChanged}"/>
     </DockPanel>
   </Grid>
 </UserControl>
