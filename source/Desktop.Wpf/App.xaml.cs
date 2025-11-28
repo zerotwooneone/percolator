@@ -6,6 +6,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Desktop.Wpf.Shared.Navigation;
 using Desktop.Wpf.Features.Shell;
+using R3;
 
 namespace Desktop.Wpf;
 
@@ -40,6 +41,10 @@ public partial class App : Application
             .Build();
 
         HostInstance.Start();
+
+        var logger = HostInstance.Services.GetRequiredService<ILogger<App>>();
+        ObservableSystem.RegisterUnhandledExceptionHandler(ex =>
+            logger.LogError(ex, "R3 Unhandled exception"));
 
         var window = HostInstance.Services.GetRequiredService<MainWindow>();
         window.DataContext = HostInstance.Services.GetRequiredService<ShellViewModel>();
