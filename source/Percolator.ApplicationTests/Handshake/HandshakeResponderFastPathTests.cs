@@ -32,16 +32,13 @@ namespace Percolator.ApplicationTests.Handshake
                 .Setup(l => l.TryResolveAsync(It.IsAny<RatchetEphemeralKey>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(resolved);
 
-            var preStore = new Mock<IPreHandshakeSessionStore>(MockBehavior.Strict);
-
-            var secure = new Mock<ISecureMessagingService>(MockBehavior.Strict);
+            var finalize = new Mock<IInitiatorFinalizeService>(MockBehavior.Strict);
 
             var handler = new HandleHandshakeResponderHelloHandler(
                 new NullLogger<HandleHandshakeResponderHelloHandler>(),
-                secure.Object,
                 active,
                 lookup.Object,
-                preStore.Object);
+                finalize.Object);
 
             var pk = new RatchetEphemeralKey(new byte[] { 0xAA });
             var payload = SessionRatchetMessage.Create(pk, 1, 0, new Ciphertext(new byte[] { 0xBB })).Value;

@@ -45,23 +45,12 @@ namespace Percolator.ApplicationTests.Handshake
                 ExpiresAtUtc: DateTimeOffset.UtcNow.AddMinutes(5),
                 RemoteIdentityKeySpki: new byte[] { 0x90 });
 
-            var preStore = new Mock<IPreHandshakeSessionStore>(MockBehavior.Strict);
-            preStore
-                .Setup(s => s.EnumeratePendingAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
-                .Returns((int _, CancellationToken __) => Empty());
-            preStore
-                .Setup(s => s.TryGetMostRecentAsync(identity.SelfIdentityId, It.IsAny<CancellationToken>()))
-                .ReturnsAsync(mostRecent);
-            preStore
-                .Setup(s => s.DeleteAsync(mostRecent.Id, identity.SelfIdentityId, It.IsAny<CancellationToken>()))
-                .Returns(Task.CompletedTask);
-
             var expectedSid = new SessionId(Guid.NewGuid());
-            var secure = new Mock<ISecureMessagingService>(MockBehavior.Strict);
-            // Serialize ResponderInnerHello directly (it's not inside InternalEnvelope per proto)
-            secure
-                .Setup(s => s.DecryptInboundAsync(It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync(() => {
+            var finalize = new Mock<IInitiatorFinalizeService>(MockBehavior.Strict);
+            finalize
+                .Setup(f => f.TryFinalizeFromFirstResponderAsync(It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(() =>
+                {
                     var inner = new ResponderInnerHello
                     {
                         Version = 1,
@@ -72,10 +61,9 @@ namespace Percolator.ApplicationTests.Handshake
 
             var sut = new HandleHandshakeResponderHelloHandler(
                 new NullLogger<HandleHandshakeResponderHelloHandler>(),
-                secure.Object,
                 active,
                 lookup.Object,
-                preStore.Object);
+                finalize.Object);
 
             var headerPk = new RatchetEphemeralKey(new byte[] { 0xE1 });
             var payload = SessionRatchetMessage.Create(headerPk, 1, 0, new Ciphertext(new byte[] { 0xF1 })).Value;
@@ -85,8 +73,7 @@ namespace Percolator.ApplicationTests.Handshake
             await sut.Handle(cmd, CancellationToken.None);
 
             // Assert
-            secure.Verify(s => s.DecryptInboundAsync(It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()), Times.Once);
-            preStore.Verify(s => s.DeleteAsync(mostRecent.Id, identity.SelfIdentityId, It.IsAny<CancellationToken>()), Times.Once);
+            finalize.Verify(f => f.TryFinalizeFromFirstResponderAsync(It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()), Times.Once);
             lookup.VerifyAll();
         }
     }
