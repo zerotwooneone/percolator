@@ -4,6 +4,9 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using R3;
+using Desktop.Wpf.Shared.Navigation;
+using Microsoft.Extensions.DependencyInjection;
+using Desktop.Wpf.Features.Chat;
 
 namespace Desktop.Wpf.Features.Sessions;
 
@@ -15,7 +18,7 @@ public sealed class SessionsSidebarViewModel : Features.Shell.ViewModelBase
 
     private readonly ObservableCollection<SessionListItem> _items = new();
 
-    public SessionsSidebarViewModel(ISessionDirectory directory)
+    public SessionsSidebarViewModel(ISessionDirectory directory, INavigationService navigation, IServiceProvider provider)
     {
         SearchText = new BindableReactiveProperty<string>("");
         SelectedSessionId = new BindableReactiveProperty<string?>(null);
@@ -31,6 +34,19 @@ public sealed class SessionsSidebarViewModel : Features.Shell.ViewModelBase
             _items.Clear();
             foreach (var i in list) _items.Add(i);
         });
+
+        // Navigate to chat on selection
+        SelectedSessionId
+            .Where(id => !string.IsNullOrEmpty(id))
+            .Subscribe(id =>
+            {
+                var chatView = provider.GetRequiredService<ChatView>();
+                if (chatView.DataContext is ChatViewModel cvm && id is not null)
+                {
+                    cvm.SetSession(id);
+                }
+                navigation.Navigate(chatView);
+            });
 
         Items = new ReadOnlyObservableCollection<SessionListItem>(_items);
     }

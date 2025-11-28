@@ -1,6 +1,7 @@
 using System.Configuration;
 using System.Data;
 using System.Windows;
+using Desktop.Wpf.Features.Chat;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -42,6 +43,9 @@ public partial class App : Application
                 // Features
                 services.AddSingleton<ISessionDirectory, InMemorySessionDirectory>();
                 services.AddSingleton<SessionsSidebarView>();
+                services.AddSingleton<IChatHistory, InMemoryChatHistory>();
+                services.AddSingleton<Desktop.Wpf.Features.Chat.ChatViewModel>();
+                services.AddSingleton<Desktop.Wpf.Features.Chat.ChatView>();
             })
             .Build();
 

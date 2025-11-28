@@ -41,37 +41,36 @@
 
         <!-- Content area -->
         <Grid Grid.Column="1" Background="{StaticResource SurfaceBrush}">
-            <Grid>
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="*"/>
-                </Grid.RowDefinitions>
+            <!-- Dynamic content -->
+            <ContentControl Content="{Binding CurrentView.Value}" />
 
-                <!-- Welcome panel -->
-                <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Width="560" TextBlock.TextAlignment="Center">
-                    <Border Width="120" Height="120" CornerRadius="60" Background="#0E1727" Opacity="0.9">
-                        <TextBlock Text="&#xE72E;" FontFamily="Segoe MDL2 Assets" FontSize="48" VerticalAlignment="Center" HorizontalAlignment="Center"/>
-                    </Border>
-                    <TextBlock Style="{StaticResource TitleText}" Margin="0,24,0,8" Text="Percolator Secure"/>
-                    <TextBlock Foreground="{StaticResource MutedBrush}">
-                        Select a conversation from the sidebar to start messaging. All
-                        connections are end-to-end encrypted and routed through our
-                        secure mesh network.
-                    </TextBlock>
-
-                    <!-- Chips -->
-                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,16,0,0">
-                        <Border CornerRadius="12" Background="#1A2740" Padding="10,4" Margin="4">
-                            <TextBlock Text="AES-256" FontSize="12"/>
-                        </Border>
-                        <Border CornerRadius="12" Background="#1A2740" Padding="10,4" Margin="4">
-                            <TextBlock Text="NO LOGS" FontSize="12"/>
-                        </Border>
-                        <Border CornerRadius="12" Background="#1A2740" Padding="10,4" Margin="4">
-                            <TextBlock Text="P2P" FontSize="12"/>
-                        </Border>
-                    </StackPanel>
+            <!-- Welcome panel (visible when no content) -->
+            <StackPanel x:Name="WelcomePanel" VerticalAlignment="Center" HorizontalAlignment="Center" Width="560" TextBlock.TextAlignment="Center">
+                <StackPanel.Style>
+                    <Style TargetType="StackPanel">
+                        <Setter Property="Visibility" Value="Collapsed"/>
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding CurrentView.Value}" Value="{x:Null}">
+                                <Setter Property="Visibility" Value="Visible"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </StackPanel.Style>
+                <Border Width="120" Height="120" CornerRadius="60" Background="#0E1727" Opacity="0.9">
+                    <TextBlock Text="&#xE72E;" FontFamily="Segoe MDL2 Assets" FontSize="48" VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                </Border>
+                <TextBlock Style="{StaticResource TitleText}" Margin="0,24,0,8" Text="Percolator Secure"/>
+                <TextBlock Foreground="{StaticResource MutedBrush}">
+                    Select a conversation from the sidebar to start messaging. All
+                    connections are end-to-end encrypted and routed through our
+                    secure mesh network.
+                </TextBlock>
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,16,0,0">
+                    <Border Style="{StaticResource Chip}"><TextBlock Text="AES-256" FontSize="12"/></Border>
+                    <Border Style="{StaticResource Chip}"><TextBlock Text="NO LOGS" FontSize="12"/></Border>
+                    <Border Style="{StaticResource Chip}"><TextBlock Text="P2P" FontSize="12"/></Border>
                 </StackPanel>
-            </Grid>
+            </StackPanel>
         </Grid>
     </Grid>
 </Window>
