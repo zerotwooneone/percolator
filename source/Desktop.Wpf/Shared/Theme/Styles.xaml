@@ -63,4 +63,59 @@
       </Setter.Value>
     </Setter>
   </Style>
+
+  <!-- Borders and Chips -->
+  <Style x:Key="BaseBorder" TargetType="Border">
+    <Setter Property="CornerRadius" Value="8"/>
+    <Setter Property="Background" Value="#172134"/>
+    <Setter Property="Padding" Value="12"/>
+  </Style>
+
+  <Style x:Key="Chip" TargetType="Border" BasedOn="{StaticResource BaseBorder}">
+    <Setter Property="CornerRadius" Value="12"/>
+    <Setter Property="Background" Value="#1A2740"/>
+    <Setter Property="Padding" Value="10,4"/>
+    <Setter Property="Margin" Value="4"/>
+  </Style>
+
+  <!-- Lists -->
+  <Style x:Key="BaseListBox" TargetType="ListBox">
+    <Setter Property="BorderThickness" Value="0"/>
+    <Setter Property="Background" Value="Transparent"/>
+  </Style>
+  <Style TargetType="ListBox" BasedOn="{StaticResource BaseListBox}" />
+
+  <Style x:Key="BaseListView" TargetType="ListView">
+    <Setter Property="BorderThickness" Value="0"/>
+    <Setter Property="Background" Value="Transparent"/>
+  </Style>
+  <Style TargetType="ListView" BasedOn="{StaticResource BaseListView}" />
+
+  <Style x:Key="BaseListBoxItem" TargetType="ListBoxItem">
+    <Setter Property="Foreground" Value="{StaticResource ForegroundBrush}"/>
+    <Setter Property="Background" Value="Transparent"/>
+    <Setter Property="Padding" Value="8"/>
+    <Setter Property="Cursor" Value="Hand"/>
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="ListBoxItem">
+          <Border x:Name="bd" Background="{TemplateBinding Background}" CornerRadius="8">
+            <ContentPresenter Margin="4"/>
+          </Border>
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+              <Setter TargetName="bd" Property="Background" Value="#1D2A44"/>
+            </Trigger>
+            <Trigger Property="IsSelected" Value="True">
+              <Setter TargetName="bd" Property="Background" Value="#233044"/>
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+  <Style TargetType="ListBoxItem" BasedOn="{StaticResource BaseListBoxItem}" />
+
+  <Style x:Key="BaseListViewItem" TargetType="ListViewItem" BasedOn="{StaticResource BaseListBoxItem}" />
+  <Style TargetType="ListViewItem" BasedOn="{StaticResource BaseListViewItem}" />
 </ResourceDictionary>

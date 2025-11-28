@@ -27,25 +27,8 @@
                 <TextBlock Text="Percolator" FontWeight="SemiBold" Margin="8,0,0,0" VerticalAlignment="Center"/>
             </DockPanel>
 
-            <!-- Search (watermark) -->
-            <Grid Grid.Row="1" Margin="16,4">
-                <TextBox x:Name="SearchBox"/>
-                <TextBlock Text="Search encrypted logs..." Foreground="{StaticResource MutedBrush}" IsHitTestVisible="False" Margin="6,0,0,0">
-                    <TextBlock.Style>
-                        <Style TargetType="TextBlock">
-                            <Setter Property="Visibility" Value="Collapsed"/>
-                            <Style.Triggers>
-                                <DataTrigger Binding="{Binding Text, ElementName=SearchBox}" Value="{x:Null}">
-                                    <Setter Property="Visibility" Value="Visible"/>
-                                </DataTrigger>
-                                <DataTrigger Binding="{Binding Text, ElementName=SearchBox}" Value="{x:Static sys:String.Empty}">
-                                    <Setter Property="Visibility" Value="Visible"/>
-                                </DataTrigger>
-                            </Style.Triggers>
-                        </Style>
-                    </TextBlock.Style>
-                </TextBlock>
-            </Grid>
+            <!-- Search using reusable watermark style -->
+            <TextBox Grid.Row="1" Margin="16,4" Style="{StaticResource WatermarkTextBox}" Tag="Search encrypted logs..."/>
 
             <!-- Sessions list (placeholder) -->
             <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">

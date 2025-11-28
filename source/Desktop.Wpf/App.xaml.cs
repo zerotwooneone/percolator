@@ -5,6 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Desktop.Wpf.Shared.Navigation;
+using Desktop.Wpf.Features.Shell;
 
 namespace Desktop.Wpf;
 
@@ -33,12 +34,15 @@ public partial class App : Application
                 services.AddSingleton<MainWindow>();
                 // Navigation
                 services.AddSingleton<INavigationService, NavigationService>();
+                // ViewModels
+                services.AddSingleton<ShellViewModel>();
             })
             .Build();
 
         HostInstance.Start();
 
         var window = HostInstance.Services.GetRequiredService<MainWindow>();
+        window.DataContext = HostInstance.Services.GetRequiredService<ShellViewModel>();
         window.Show();
     }
 
