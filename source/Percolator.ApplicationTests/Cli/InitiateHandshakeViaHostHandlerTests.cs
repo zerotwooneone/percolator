@@ -10,7 +10,6 @@ using Percolator.Application.Cli;
 using Percolator.Application.Network;
 using Percolator.Application.Network.Handshake;
 using Percolator.Application.Services;
-using Percolator.Application.Services;
 using Percolator.Contracts;
 using Percolator.Cryptography;
 using Percolator.Identity;
@@ -113,10 +112,13 @@ public class InitiateHandshakeViaHostHandlerTests
         initiatorService
             .Setup(s => s.SendInitiatorHelloViaHostAsync(
                 It.IsAny<byte[]>(),
-                It.Is<byte[]>(b => b != null && b.SequenceEqual(remoteIdentitySpki)),
+                It.Is<Percolator.Cryptography.PreKeyBundle>(b =>
+                    b.IdentitySigningKey.Value.SequenceEqual(remoteIdentitySpki)
+                    && b.SignedPreKeyId == spkId
+                    && b.SignedPreKey.Value.SequenceEqual(remotePreKeySpki)
+                    && b.SignedPreKeySignature.Value != null),
                 It.Is<Guid>(g => g == spkId),
                 It.IsAny<Guid?>(),
-                It.Is<byte[]>(b => b != null && b.SequenceEqual(remotePreKeySpki)),
                 It.Is<Percolator.Identity.PeerId>(p => p.Value == hostPeerGuid),
                 It.IsAny<byte[]>(),
                 It.IsAny<CancellationToken>()))
@@ -141,5 +143,14 @@ public class InitiateHandshakeViaHostHandlerTests
 
         // Assert
         initiatorService.VerifyAll();
+        // Critical side-effects should be invoked
+        pkhStore.Verify(s => s.ActivateIfChangedAsync(
+            It.IsAny<Percolator.Identity.PeerId?>(),
+            It.IsAny<byte[]>(),
+            It.IsAny<byte[]>(),
+            It.IsAny<DateTimeOffset>(),
+            It.IsAny<CancellationToken>()), Times.AtLeastOnce);
+        peerIdentityRepo.Verify(r => r.SaveAsync(It.IsAny<Percolator.Identity.Model.PeerIdentity>(), It.IsAny<CancellationToken>()), Times.AtLeastOnce);
+        profileRepo.Verify(r => r.UpsertAsync(It.IsAny<PeerRoutingProfile>(), It.IsAny<CancellationToken>()), Times.AtLeastOnce);
     }
 }

@@ -11,6 +11,8 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddCryptographyServices(this IServiceCollection services, IConfiguration config)
     {
         services.AddSingleton<ISigningService, EcdsaSigningService>();
+        services.AddSingleton<ISessionCrypto, AeadSessionCrypto>();
+        services.AddScoped<IHandshakePlanner, HandshakePlannerAdapter>();
         
         // Bind the configuration section to the options class
         services.AddOptions<CryptographyOptions>()

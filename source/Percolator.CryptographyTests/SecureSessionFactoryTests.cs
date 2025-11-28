@@ -33,6 +33,14 @@ file sealed class DummySessionCrypto : ISessionCrypto
         => (new Plaintext(new byte[] { 0x01 }), state);
 
     public bool VerifySignature(RatchetIdentityKey identityPublic, PreKey signedPreKey, Signature signature) => true;
+
+    public SharedSecret X3DH_Respond(
+        RatchetIdentityKey initiatorIdentityPublic,
+        RatchetEphemeralKey initiatorEphemeralPublic,
+        PrivatePreKey responderIdentityPrivate,
+        PrivatePreKey responderSignedPreKeyPrivate,
+        PrivatePreKey? responderOneTimePreKeyPrivate)
+        => new SharedSecret(new byte[32]);
 }
 
 [TestFixture]

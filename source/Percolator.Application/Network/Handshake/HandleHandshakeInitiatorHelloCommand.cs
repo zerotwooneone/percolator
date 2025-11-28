@@ -44,7 +44,7 @@ namespace Percolator.Application.Network.Handshake
         private readonly IPeerIdentityRepository _peerIdentityRepository;
         private readonly IPeerRoutingProfileRepository _profileRepository;
         private readonly IMediator _mediator;
-        private readonly IX3dhDeriver _x3dh;
+        private readonly ISessionCrypto _sessionCrypto;
         private readonly ISessionRepository _sessions;
         private readonly IClock _clock;
 
@@ -58,7 +58,7 @@ namespace Percolator.Application.Network.Handshake
             IPeerIdentityRepository peerIdentityRepository,
             IPeerRoutingProfileRepository profileRepository,
             IMediator mediator,
-            IX3dhDeriver x3dh,
+            ISessionCrypto sessionCrypto,
             ISessionRepository sessions,
             IClock clock)
         {
@@ -71,7 +71,7 @@ namespace Percolator.Application.Network.Handshake
             _peerIdentityRepository = peerIdentityRepository;
             _profileRepository = profileRepository;
             _mediator = mediator;
-            _x3dh = x3dh;
+            _sessionCrypto = sessionCrypto;
             _sessions = sessions;
             _clock = clock;
         }
@@ -117,7 +117,7 @@ namespace Percolator.Application.Network.Handshake
             var localIkPriv = new PrivatePreKey(_active.Keys.IdentitySigningKey.ExportECPrivateKey());
             var localSpkPriv = new PrivatePreKey(spk.Value.spkPrivate);
             PrivatePreKey? localOtk = localOtkPriv is null ? null : new PrivatePreKey(localOtkPriv);
-            var responder = _x3dh.DeriveResponder(remoteIdentityKey, remoteEphemeralKey, localIkPriv, localSpkPriv, localOtk);
+            var shared = _sessionCrypto.X3DH_Respond(remoteIdentityKey, remoteEphemeralKey, localIkPriv, localSpkPriv, localOtk);
 
             // Upsert or create direct session mapping
             DirectSessionId directSessionId;
@@ -136,7 +136,7 @@ namespace Percolator.Application.Network.Handshake
             }
 
             // Establish responder session with complementary initial chains (canonical bootstrap)
-            var root = new RootKey(responder.InitialRootKey.Value);
+            var root = new RootKey(shared.Value);
             var sessionId = new SessionId(directSessionId.Value);
             var session = RatchetBootstrap.CreateResponderSession(
                 sessionId,

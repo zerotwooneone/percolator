@@ -5,7 +5,6 @@ using System.Security.Cryptography;
 using Moq;
 using NUnit.Framework;
 using Percolator.Application.Identity;
-using Percolator.Application.KeyExchange;
 using Percolator.Application.Network.Handshake;
 using Percolator.Application.Sessions;
 using Percolator.Application.Services;
@@ -15,6 +14,7 @@ using Percolator.Cryptography;
 using Percolator.Identity;
 using Percolator.Identity.Model;
 using Percolator.Network;
+using Percolator.Application.KeyExchange;
 
 namespace Percolator.ApplicationTests.Network;
 
@@ -65,15 +65,15 @@ public class HandleHandshakeInitiatorHelloCommandTests
         profileRepo.Setup(r => r.GetByIdAsync(It.IsAny<Percolator.Network.PeerId>(), It.IsAny<CancellationToken>())).ReturnsAsync((PeerRoutingProfile?)null);
         PeerRoutingProfile? saved = null;
         profileRepo.Setup(r => r.UpsertAsync(It.IsAny<PeerRoutingProfile>(), It.IsAny<CancellationToken>())).Callback<PeerRoutingProfile, CancellationToken>((p, _) => saved = p).Returns(Task.CompletedTask);
-        // New dependencies for handler
-        var x3dh = new Mock<IX3dhDeriver>(MockBehavior.Loose);
-        x3dh.Setup(d => d.DeriveResponder(
+        // New dependency for handler: ISessionCrypto
+        var sessionCrypto = new Mock<ISessionCrypto>(MockBehavior.Loose);
+        sessionCrypto.Setup(s => s.X3DH_Respond(
                 It.IsAny<RatchetIdentityKey>(),
                 It.IsAny<RatchetEphemeralKey>(),
                 It.IsAny<PrivatePreKey>(),
                 It.IsAny<PrivatePreKey>(),
                 It.IsAny<PrivatePreKey?>()))
-            .Returns(new ResponderResult(new SharedSecret(new byte[32]), false));
+            .Returns(new SharedSecret(new byte[32]));
         var sessionRepo = new Mock<ISessionRepository>(MockBehavior.Loose);
         sessionRepo.Setup(r => r.AddAsync(It.IsAny<SecureSession>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
@@ -88,7 +88,7 @@ public class HandleHandshakeInitiatorHelloCommandTests
             peerIdentityRepo.Object, 
             profileRepo.Object, 
             mediator.Object,
-            x3dh.Object,
+            sessionCrypto.Object,
             sessionRepo.Object,
             new TestClock());
         var cmd = new HandleHandshakeInitiatorHelloCommand(spki, eph, spkId, null, null, null, RelayHostPeerId: relayHost);
@@ -97,6 +97,21 @@ public class HandleHandshakeInitiatorHelloCommandTests
         Assert.That(saved, Is.Not.Null);
         Assert.That(saved!.Relays.Count, Is.EqualTo(1));
         sessionRepo.Verify(r => r.AddAsync(It.IsAny<SecureSession>(), It.IsAny<CancellationToken>()), Times.Once);
+        // Critical side-effects
+        pkhStore.Verify(k => k.ActivateIfChangedAsync(
+            It.IsAny<Percolator.Identity.PeerId>(),
+            It.IsAny<byte[]>(),
+            It.IsAny<byte[]>(),
+            It.IsAny<DateTimeOffset>(),
+            It.IsAny<CancellationToken>()), Times.AtLeastOnce);
+        peerIdentityRepo.Verify(r => r.SaveAsync(It.IsAny<Percolator.Identity.Model.PeerIdentity>(), It.IsAny<CancellationToken>()), Times.AtLeastOnce);
+        profileRepo.Verify(r => r.UpsertAsync(It.IsAny<PeerRoutingProfile>(), It.IsAny<CancellationToken>()), Times.AtLeastOnce);
+        sessionCrypto.Verify(s => s.X3DH_Respond(
+            It.IsAny<RatchetIdentityKey>(),
+            It.IsAny<RatchetEphemeralKey>(),
+            It.IsAny<PrivatePreKey>(),
+            It.IsAny<PrivatePreKey>(),
+            It.IsAny<PrivatePreKey?>()), Times.Once);
     }
 
     [Test]
@@ -138,15 +153,15 @@ public class HandleHandshakeInitiatorHelloCommandTests
         // Adapter removed; identity repo GetByIdAsync returns null by default
         peerIdentityRepo.Setup(r => r.GetByIdAsync(It.IsAny<Percolator.Identity.PeerId>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Percolator.Identity.Model.PeerIdentity?)null);
-        // New dependencies for handler
-        var x3dh = new Mock<IX3dhDeriver>(MockBehavior.Loose);
-        x3dh.Setup(d => d.DeriveResponder(
+        // New dependency for handler: ISessionCrypto
+        var sessionCrypto2 = new Mock<ISessionCrypto>(MockBehavior.Loose);
+        sessionCrypto2.Setup(s => s.X3DH_Respond(
                 It.IsAny<RatchetIdentityKey>(),
                 It.IsAny<RatchetEphemeralKey>(),
                 It.IsAny<PrivatePreKey>(),
                 It.IsAny<PrivatePreKey>(),
                 It.IsAny<PrivatePreKey?>()))
-            .Returns(new ResponderResult(new SharedSecret(new byte[32]), false));
+            .Returns(new SharedSecret(new byte[32]));
         var sessionRepo = new Mock<ISessionRepository>(MockBehavior.Loose);
         sessionRepo.Setup(r => r.AddAsync(It.IsAny<SecureSession>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
@@ -161,7 +176,7 @@ public class HandleHandshakeInitiatorHelloCommandTests
             peerIdentityRepo.Object, 
             profileRepo.Object, 
             mediator.Object,
-            x3dh.Object,
+            sessionCrypto2.Object,
             sessionRepo.Object,
             new TestClock());
         var cmd = new HandleHandshakeInitiatorHelloCommand(spki, eph, spkId, null, null, null, RelayHostPeerId: relayHost);
@@ -170,5 +185,20 @@ public class HandleHandshakeInitiatorHelloCommandTests
         Assert.That(existing.Relays.Count, Is.EqualTo(1));
         Assert.That(existing.Relays[0].RelayPeerId.Value, Is.EqualTo(relayHost.Value));
         sessionRepo.Verify(r => r.AddAsync(It.IsAny<SecureSession>(), It.IsAny<CancellationToken>()), Times.Once);
+        // Critical side-effects
+        pkhStore.Verify(k => k.ActivateIfChangedAsync(
+            It.IsAny<Percolator.Identity.PeerId>(),
+            It.IsAny<byte[]>(),
+            It.IsAny<byte[]>(),
+            It.IsAny<DateTimeOffset>(),
+            It.IsAny<CancellationToken>()), Times.AtLeastOnce);
+        peerIdentityRepo.Verify(r => r.SaveAsync(It.IsAny<Percolator.Identity.Model.PeerIdentity>(), It.IsAny<CancellationToken>()), Times.AtLeastOnce);
+        profileRepo.Verify(r => r.UpsertAsync(It.IsAny<PeerRoutingProfile>(), It.IsAny<CancellationToken>()), Times.AtLeastOnce);
+        sessionCrypto2.Verify(s => s.X3DH_Respond(
+            It.IsAny<RatchetIdentityKey>(),
+            It.IsAny<RatchetEphemeralKey>(),
+            It.IsAny<PrivatePreKey>(),
+            It.IsAny<PrivatePreKey>(),
+            It.IsAny<PrivatePreKey?>()), Times.Once);
     }
 }

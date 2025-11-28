@@ -16,28 +16,30 @@ internal sealed class InitiatorHelloService : IInitiatorHelloService
     private readonly ActiveIdentityContext _active;
     private readonly IMessageService _messageService;
     private readonly IPreHandshakeSessionStore _preHandshake;
-    private readonly IX3dhDeriver _x3dh;
+    private readonly IHandshakePlanner _planner;
+    private readonly ISessionCrypto _sessionCrypto;
 
     public InitiatorHelloService(
         ILogger<InitiatorHelloService> logger,
         ActiveIdentityContext active,
         IMessageService messageService,
         IPreHandshakeSessionStore preHandshake,
-        IX3dhDeriver x3dh)
+        IHandshakePlanner planner,
+        ISessionCrypto sessionCrypto)
     {
         _logger = logger;
         _active = active;
         _messageService = messageService;
         _preHandshake = preHandshake;
-        _x3dh = x3dh;
+        _planner = planner;
+        _sessionCrypto = sessionCrypto;
     }
 
     public async Task SendInitiatorHelloViaHostAsync(
         byte[] recipientPublicKeyHash,
-        byte[] remoteIdentityKeySpki,
+        PreKeyBundle remoteBundle,
         Guid signedPreKeyId,
         Guid? oneTimePreKeyId,
-        byte[] remotePreKeySpki,
         Percolator.Identity.PeerId hostPeerId,
         byte[]? initiatorPayload,
         CancellationToken cancellationToken)
@@ -45,15 +47,14 @@ internal sealed class InitiatorHelloService : IInitiatorHelloService
         if (_active.Keys is null)
             throw new InvalidOperationException("Active identity keys not loaded.");
 
-        // Build remote bundle used for X3DH initiation
-        var remoteId = new RatchetIdentityKey(remoteIdentityKeySpki);
+        // Validate remote bundle and plan
+        _planner.ValidatePreKeyBundle(remoteBundle);
+        var remoteId = remoteBundle.IdentitySigningKey;
 
         // Derive IRK via X3DH/HKDF using crypto domain deriver
         var localIkPriv = new PrivatePreKey(_active.Keys.IdentitySigningKey.ExportECPrivateKey());
-        var remoteSpk = new PreKey(remotePreKeySpki);
-        OneTimeKey? remoteOtk = null; // Not supplied by caller here
-        var result = _x3dh.DeriveInitiator(remoteId, remoteSpk, remoteOtk, localIkPriv);
-        var shared = result.InitialRootKey;
+        var x3 = _sessionCrypto.X3DH_Initiate(localIkPriv, remoteBundle);
+        var shared = x3.SharedSecret;
 
         // Do not pre-establish a session here; responder hello will finalize and assign the session id
 
@@ -65,11 +66,11 @@ internal sealed class InitiatorHelloService : IInitiatorHelloService
             SelfIdentityId: _active.Identity.SelfIdentityId,
             RecipientPublicKeyHash: recipientPublicKeyHash,
             LocalRequestId: Guid.NewGuid(),
-            InitiatorEphemeralPrivateKey: result.InitiatorEphemeralPrivateKey.Value,
-            InitialRootKey: result.InitialRootKey.Value,
+            InitiatorEphemeralPrivateKey: Array.Empty<byte>(),
+            InitialRootKey: shared.Value,
             CreatedAtUtc: DateTimeOffset.UtcNow,
             ExpiresAtUtc: DateTimeOffset.UtcNow.AddHours(1),
-            RemoteIdentityKeySpki: remoteIdentityKeySpki);
+            RemoteIdentityKeySpki: remoteId.Value);
         await _preHandshake.SaveAsync(rec, cancellationToken).ConfigureAwait(false);
 
         // Compose initiator hello
@@ -77,7 +78,7 @@ internal sealed class InitiatorHelloService : IInitiatorHelloService
         {
             Version = 1,
             InitiatorIdentityKeySpki = ByteString.CopyFrom(_active.Keys.IdentitySigningKey.ExportSubjectPublicKeyInfo()),
-            InitiatorEphemeralKeySpki = ByteString.CopyFrom(result.InitiatorEphemeralPublicKey.Value),
+            InitiatorEphemeralKeySpki = ByteString.CopyFrom(x3.EphemeralPublic.Value),
             SignedPreKeyId = ByteString.CopyFrom(signedPreKeyId.ToByteArray()),
         };
         if (oneTimePreKeyId.HasValue)

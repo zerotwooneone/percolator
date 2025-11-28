@@ -7,13 +7,16 @@ using Moq;
 using NUnit.Framework;
 using Percolator.Application.Identity;
 using Percolator.Application.Network;
-using Percolator.Application.KeyExchange;
 using Percolator.Application.Network.Handshake;
 using Percolator.Application.Sessions;
 using Percolator.Application.Services;
 using Percolator.Contracts;
 using Percolator.Cryptography;
 using Percolator.Identity;
+using Percolator.ApplicationTests.TestHelpers;
+
+using CryptoPreKeyBundle = Percolator.Cryptography.PreKeyBundle;
+using CryptoSignature = Percolator.Cryptography.Signature;
 
 namespace Percolator.ApplicationTests.Network;
 
@@ -31,8 +34,8 @@ public class InitiatorHelloServiceTests
 
         // Inputs
         var recipientPkh = SHA256.HashData(ik.PublicKey.ExportSubjectPublicKeyInfo());
-        var remoteIdentitySpki = ik.PublicKey.ExportSubjectPublicKeyInfo();
-        var remotePreKeySpki = spk.PublicKey.ExportSubjectPublicKeyInfo();
+        var remoteIdentitySpki = RatchetDeterministic.RemoteIdentitySpkiA;
+        var remotePreKeySpki = RatchetDeterministic.RemotePreKeySpkiA;
         var spkId = Guid.NewGuid();
         Guid? otkId = null;
         var hostPeerId = new Percolator.Identity.PeerId(Guid.NewGuid());
@@ -56,33 +59,39 @@ public class InitiatorHelloServiceTests
             .Callback<InternalEnvelope, Percolator.Identity.PeerId, CancellationToken>((env, _, __) => captured = env)
             .ReturnsAsync(SendResult.CreateSuccess("Relay", new[] { "Relay" }, 1));
 
-        var x3dh = new Mock<IX3dhDeriver>(MockBehavior.Strict);
-        x3dh
-            .Setup(d => d.DeriveInitiator(
-                It.IsAny<RatchetIdentityKey>(),
-                It.IsAny<PreKey>(),
-                It.IsAny<OneTimeKey?>(),
-                It.IsAny<PrivatePreKey>()))
-            .Returns(new InitiatorResult(
+        var planner = new Mock<IHandshakePlanner>(MockBehavior.Strict);
+        planner.Setup(p => p.ValidatePreKeyBundle(It.IsAny<CryptoPreKeyBundle>()));
+        var sessionCrypto = new Mock<ISessionCrypto>(MockBehavior.Strict);
+        sessionCrypto
+            .Setup(c => c.X3DH_Initiate(It.IsAny<PrivatePreKey>(), It.IsAny<CryptoPreKeyBundle>()))
+            .Returns((PrivatePreKey _, CryptoPreKeyBundle _) => (
                 new SharedSecret(new byte[] { 1, 2, 3 }),
-                new RatchetEphemeralKey(new byte[] { 0xEE }),
-                new PrivatePreKey(new byte[] { 0xDD }),
-                false));
+                new RatchetEphemeralKey(new byte[] { 0xEE })
+            ));
 
         var service = new InitiatorHelloService(
             new NullLogger<InitiatorHelloService>(),
             active,
             msgSvc.Object,
             preHandshakeStore.Object,
-            x3dh.Object);
+            planner.Object,
+            sessionCrypto.Object);
 
         // Act
+        var remoteBundle = new CryptoPreKeyBundle(
+            new RatchetIdentityKey(remoteIdentitySpki),
+            spkId,
+            new PreKey(remotePreKeySpki),
+            new CryptoSignature(new byte[] { 9 }),
+            otkId,
+            null,
+            null);
+
         await service.SendInitiatorHelloViaHostAsync(
             recipientPublicKeyHash: recipientPkh,
-            remoteIdentityKeySpki: remoteIdentitySpki,
+            remoteBundle: remoteBundle,
             signedPreKeyId: spkId,
             oneTimePreKeyId: otkId,
-            remotePreKeySpki: remotePreKeySpki,
             hostPeerId: hostPeerId,
             initiatorPayload: initiatorPayload,
             cancellationToken: CancellationToken.None);
@@ -105,5 +114,7 @@ public class InitiatorHelloServiceTests
 
         msgSvc.VerifyAll();
         preHandshakeStore.VerifyAll();
+        planner.VerifyAll();
+        sessionCrypto.VerifyAll();
     }
 }

@@ -156,4 +156,61 @@ public sealed class AeadSessionCrypto : ISessionCrypto
             return false;
         }
     }
+
+    public SharedSecret X3DH_Respond(
+        RatchetIdentityKey initiatorId,
+        RatchetEphemeralKey initiatorEph,
+        PrivatePreKey localIdentityPrivate,
+        PrivatePreKey localSpkPrivate,
+        PrivatePreKey? localOtkPrivate)
+    {
+        if (initiatorId?.Value is null || initiatorId.Value.Length == 0)
+            throw new ArgumentException("initiator identity key missing", nameof(initiatorId));
+        if (initiatorEph?.Value is null || initiatorEph.Value.Length == 0)
+            throw new ArgumentException("initiator ephemeral key missing", nameof(initiatorEph));
+        if (localIdentityPrivate?.Value is null || localIdentityPrivate.Value.Length == 0)
+            throw new ArgumentException("local identity private key missing", nameof(localIdentityPrivate));
+        if (localSpkPrivate?.Value is null || localSpkPrivate.Value.Length == 0)
+            throw new ArgumentException("local signed pre-key private key missing", nameof(localSpkPrivate));
+
+        // Import local private keys (IK_B, SPK_B, OPK_B?)
+        using var ikB = ECDiffieHellman.Create();
+        ikB.ImportECPrivateKey(localIdentityPrivate.Value, out _);
+        using var spkB = ECDiffieHellman.Create();
+        spkB.ImportECPrivateKey(localSpkPrivate.Value, out _);
+        using var opkB = localOtkPrivate is null ? null : ECDiffieHellman.Create();
+        if (opkB is not null)
+        {
+            opkB!.ImportECPrivateKey(localOtkPrivate!.Value, out _);
+        }
+
+        // Import initiator public keys (IK_A, EK_A)
+        using var ikA = ECDiffieHellman.Create();
+        ikA.ImportSubjectPublicKeyInfo(initiatorId.Value, out _);
+        using var ekA = ECDiffieHellman.Create();
+        ekA.ImportSubjectPublicKeyInfo(initiatorEph.Value, out _);
+
+        // Compute DH tuples from responder perspective
+        var dh1 = spkB.DeriveKeyMaterial(ikA.PublicKey); // DH(SPK_B, IK_A)
+        var dh2 = ikB.DeriveKeyMaterial(ekA.PublicKey);  // DH(IK_B, EK_A)
+        var dh3 = spkB.DeriveKeyMaterial(ekA.PublicKey); // DH(SPK_B, EK_A)
+        byte[]? dh4 = null;
+        if (opkB is not null)
+        {
+            dh4 = opkB!.DeriveKeyMaterial(ekA.PublicKey); // DH(OPK_B, EK_A)
+        }
+
+        // HKDF over concatenated DH values, stable label
+        var concatLen = dh1.Length + dh2.Length + dh3.Length + (dh4?.Length ?? 0);
+        var input = new byte[concatLen];
+        Buffer.BlockCopy(dh1, 0, input, 0, dh1.Length);
+        Buffer.BlockCopy(dh2, 0, input, dh1.Length, dh2.Length);
+        Buffer.BlockCopy(dh3, 0, input, dh1.Length + dh2.Length, dh3.Length);
+        if (dh4 is not null)
+        {
+            Buffer.BlockCopy(dh4, 0, input, dh1.Length + dh2.Length + dh3.Length, dh4.Length);
+        }
+        var irk = CryptoUtils.KDF(null, input, "x3dh", CryptoUtils.KeySize);
+        return new SharedSecret(irk);
+    }
 }

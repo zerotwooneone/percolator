@@ -444,6 +444,65 @@ Next: Phase 4 – Application-Layer Migration Plan
   - Refactor: Streamline method names and DTOs.
   - Deliverable: Services + tests.
 
+  #### Step 6a: Planner and Crypto adapter cutover plan (Option A only)
+
+ - Goals
+   - Centralize handshake validation and crypto under two ports: `IHandshakePlanner` and `ISessionCrypto`.
+   - Extend `ISessionCrypto` to include responder-side X3DH: `X3DH_Respond`.
+   - Migrate initiator and responder call sites to these ports, removing direct usages of `IX3dhDeriver` from application code.
+   - Execute as a small number of large cutover steps. The build may be temporarily broken between substeps.
+
+ - Ports (Cryptography)
+   - `IHandshakePlanner` (new)
+     - `void ValidateInitiatorInvitation(HandshakeInvitation inv)`
+     - `void ValidatePreKeyBundle(PreKeyBundle bundle)`
+     - `ResponderPlan PlanResponder(PreKeyBundle bundle, RatchetIdentityKey initiatorIdKey, RatchetEphemeralKey initiatorEph)`
+     - `InitiatorPlan PlanInitiator(PreKeyBundle bundle, RatchetIdentityKey responderIdKey)`
+     - Notes: DTO-only plans (no secrets) describing which DHs/keys are required and whether OTK is present.
+   - `ISessionCrypto` (exists — to be extended)
+     - Existing methods:
+       - `X3DH_Initiate(PrivatePreKey localIdentityPrivate, PreKeyBundle remoteBundle) -> (SharedSecret, RatchetEphemeralKey EphemeralPublic)`
+       - `DR_Encrypt(RatchetState state, Plaintext pt, AssociatedData ad, ulong counter, ulong previousChainLength) -> (Ciphertext, RatchetEphemeralKey HeaderKey, RatchetState NewState)`
+       - `DR_Decrypt(RatchetState state, SessionRatchetMessage framed, AssociatedData ad) -> (Plaintext, RatchetState NewState)`
+       - `VerifySignature(RatchetIdentityKey identityPublic, PreKey signedPreKey, Signature signature) -> bool`
+     - New method to add now (Option A):
+       - `X3DH_Respond(RatchetIdentityKey initiatorId, RatchetEphemeralKey initiatorEph, PrivatePreKey localIdentityPrivate, PrivatePreKey localSpkPrivate, PrivatePreKey? localOtkPrivate) -> SharedSecret`
+
+ - Adapters (Application)
+   - `HandshakePlannerAdapter`
+     - Uses `IPreKeyBundleValidator` (and `ISigningService` as needed) to validate inputs and produce plan DTOs.
+   - `SessionCryptoAdapter` (implements `ISessionCrypto`)
+     - `X3DH_Initiate` delegates to `IX3dhDeriver.DeriveInitiator`.
+     - `X3DH_Respond` delegates to `IX3dhDeriver.DeriveResponder`.
+     - `DR_Encrypt`/`DR_Decrypt` wrap existing primitives (`AeadSessionCrypto` / `SecureSession`) consistently with AD and counters.
+     - `VerifySignature` delegates to `IPreKeyBundleValidator` or signing service as appropriate.
+
+ - Large cutover steps (performed in order; build may break between steps)
+   1) Define ports and adapter scaffolding
+      - Add `IHandshakePlanner` interface and `HandshakePlannerAdapter` (empty plan DTOs initially if necessary).
+      - Extend `ISessionCrypto` with `X3DH_Respond` signature.
+      - Create `SessionCryptoAdapter` implementing all `ISessionCrypto` methods (can throw `NotImplementedException` only for unreferenced code during this step; next step must implement fully). Register DI.
+
+   2) Implement adapters
+      - Implement `HandshakePlannerAdapter` to validate bundles and produce plans.
+      - Implement `SessionCryptoAdapter.X3DH_Initiate/Respond` using `IX3dhDeriver`. Implement `DR_Encrypt/DR_Decrypt` using existing primitives. Implement `VerifySignature`.
+
+   3) Initiator path cutover
+      - Update `InitiatorHelloService` to use `IHandshakePlanner.ValidatePreKeyBundle/PlanInitiator` and `ISessionCrypto.X3DH_Initiate`.
+      - Update and fix tests accordingly (loose mocks, assert observable effects).
+
+  - DI plan
+    - Register adapters in Application:
+      - `services.AddScoped<IHandshakePlanner, HandshakePlannerAdapter>();`
+      - `services.AddScoped<ISessionCrypto, SessionCryptoAdapter>();`
+    - No DI changes inside Cryptography project; ports/interfaces live there, adapters live in Application.
+
+  - Migration notes
+    - This is a cutover: the build may be broken between large substeps while call sites migrate (InitiatorHelloService, HandleHandshakeInitiatorHello, EstablishDirectSessionService).
+    - Ensure each substep moves us toward Step 6a goals; minimize total generations by batching coherent changes.
+    - Do not persist any new secret material compared to current behavior; maintain initiator prehandshake privacy guarantees.
+    - Avoid logging cryptographic material; validation errors surface via exceptions only.
+
   - **Step 7: Cut-over: delete legacy crypto paths and fix compile to adopt new domain**
   - Red: Identify all compile-time usages of legacy crypto/session code (search references). Create a todo list of broken call sites.
   - Green: Delete legacy paths and fix compile errors by replacing call sites with the new domain/services and ports. Keep behavior surface the same at the app boundary.

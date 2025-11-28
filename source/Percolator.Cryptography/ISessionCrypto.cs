@@ -7,6 +7,14 @@ public interface ISessionCrypto
         PrivatePreKey localIdentityPrivate,
         PreKeyBundle remoteBundle);
 
+    // X3DH responder: derive shared secret given initiator identity + ephemeral and our private material
+    SharedSecret X3DH_Respond(
+        RatchetIdentityKey initiatorId,
+        RatchetEphemeralKey initiatorEph,
+        PrivatePreKey localIdentityPrivate,
+        PrivatePreKey localSpkPrivate,
+        PrivatePreKey? localOtkPrivate);
+
     // Double Ratchet primitives: encryption must bind to header via AD and use counter for nonce
     (Ciphertext Ciphertext, RatchetEphemeralKey HeaderKey, RatchetState NewState) DR_Encrypt(
         RatchetState state,

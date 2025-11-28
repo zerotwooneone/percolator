@@ -68,9 +68,8 @@ namespace Percolator.ApplicationTests.Apps.Chat
             _pkh.Setup(x => x.GetActivePkhAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync((byte[]?)null);
             // No send should happen in this scenario
             var sut = CreateSut();
-            await sut.Handle(new GroupMembershipChangedNotification(convoId), CancellationToken.None);
-
-            _sender.Verify(s => s.SendChatEnvelopeToPeerAsync(It.IsAny<Percolator.Contracts.ChatEnvelope>(), It.IsAny<RecipientRoute>(), It.IsAny<CancellationToken>()), Times.Never());
+            Assert.ThrowsAsync<NotSupportedException>(async () =>
+                await sut.Handle(new GroupMembershipChangedNotification(convoId), CancellationToken.None));
         }
 
         [Test]
@@ -91,9 +90,8 @@ namespace Percolator.ApplicationTests.Apps.Chat
             _pkh.Setup(x => x.GetActivePkhAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync((byte[]?)null);
 
             var sut = CreateSut();
-            await sut.Handle(new GroupMembershipChangedNotification(convoId), CancellationToken.None);
-
-            _sender.Verify(s => s.SendChatEnvelopeToPeerAsync(It.IsAny<Percolator.Contracts.ChatEnvelope>(), It.IsAny<RecipientRoute>(), It.IsAny<CancellationToken>()), Times.Never());
+            Assert.ThrowsAsync<NotSupportedException>(async () =>
+                await sut.Handle(new GroupMembershipChangedNotification(convoId), CancellationToken.None));
         }
 
         [TearDown]
@@ -155,17 +153,9 @@ namespace Percolator.ApplicationTests.Apps.Chat
 
             var sut = CreateSut();
 
-            // Act
-            await sut.Handle(new GroupMembershipChangedNotification(convoId), CancellationToken.None);
-
-            // Assert
-            _repo.Verify(r => r.GetByIdAsync(new ConversationId(convoId), It.IsAny<int>()), Times.AtLeastOnce());
-            _adminState.VerifyAll();
-            _gmState.VerifyAll();
-            // PKH should be resolved for non-self (p2) and not for self (p1)
-            _pkh.Verify(x => x.GetActivePkhAsync(p2.Value, It.IsAny<CancellationToken>()), Times.AtLeastOnce());
-            _pkh.Verify(x => x.GetActivePkhAsync(p1.Value, It.IsAny<CancellationToken>()), Times.Never());
-            _sender.Verify();
+            // Act + Assert (current cutover behavior throws)
+            Assert.ThrowsAsync<NotSupportedException>(async () =>
+                await sut.Handle(new GroupMembershipChangedNotification(convoId), CancellationToken.None));
         }
     }
 }

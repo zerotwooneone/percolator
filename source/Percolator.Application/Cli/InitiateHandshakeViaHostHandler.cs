@@ -138,13 +138,25 @@ namespace Percolator.Application.Cli;
         // 2) Orchestrate Initiator Hello enqueue to Host via service
         var remoteIdentitySpki = bundleMsg.IdentityKey?.ToByteArray() ?? Array.Empty<byte>();
         var remoteSignedPreKeySpki = bundleMsg.SignedPreKey?.ToByteArray() ?? Array.Empty<byte>();
-        if (remoteIdentitySpki.Length == 0 || remoteSignedPreKeySpki.Length == 0)
+        var remotePreKeySignature = bundleMsg.PreKeySignature?.ToByteArray() ?? Array.Empty<byte>();
+        if (remoteIdentitySpki.Length == 0 || remoteSignedPreKeySpki.Length == 0 || remotePreKeySignature.Length == 0)
             throw new InvalidOperationException("Incomplete pre-key bundle returned by Host.");
 
         var signedPreKeyId = bundleMsg.HasSignedPreKeyId
             ? new Guid(bundleMsg.SignedPreKeyId.ToByteArray())
             : throw new InvalidOperationException("SignedPreKeyId missing in bundle.");
         Guid? oneTimePreKeyId = bundleMsg.HasOneTimeKeyId ? new Guid(bundleMsg.OneTimeKeyId.ToByteArray()) : (Guid?)null;
+        OneTimeKey? oneTimePreKey = bundleMsg.HasOneTimeKey ? new OneTimeKey(bundleMsg.OneTimeKey.ToByteArray()) : null;
+
+        // Construct full domain PreKeyBundle for planner/crypto
+        var remoteBundle = new Percolator.Cryptography.PreKeyBundle(
+            identitySigningKey: new RatchetIdentityKey(remoteIdentitySpki),
+            signedPreKeyId: signedPreKeyId,
+            signedPreKey: new PreKey(remoteSignedPreKeySpki),
+            signedPreKeySignature: new Percolator.Cryptography.Signature(remotePreKeySignature),
+            oneTimePreKeyId: oneTimePreKeyId,
+            oneTimePreKey: oneTimePreKey,
+            expirationDateUtc: null);
 
         // Bind PKH -> PeerId on initiator now that we have the remote SPKI, then upsert routing profile
         var pkh = SHA256.HashData(remoteIdentitySpki);
@@ -155,10 +167,9 @@ namespace Percolator.Application.Cli;
 
         await _initiatorHelloService.SendInitiatorHelloViaHostAsync(
             recipientPublicKeyHash: request.TargetPublicKeyHash,
-            remoteIdentityKeySpki: remoteIdentitySpki,
+            remoteBundle: remoteBundle,
             signedPreKeyId: signedPreKeyId,
             oneTimePreKeyId: oneTimePreKeyId,
-            remotePreKeySpki: remoteSignedPreKeySpki,
             hostPeerId: new Percolator.Identity.PeerId(hostPeer.Id.Value),
             initiatorPayload: request.InitiatorPayload,
             cancellationToken: cancellationToken).ConfigureAwait(false);
