@@ -61,7 +61,7 @@
                 <TextBlock Style="{StaticResource TitleText}" Margin="0,24,0,8" Text="Percolator Secure"/>
                 <TextBlock Foreground="{StaticResource MutedBrush}">
                     Select a conversation from the sidebar to start messaging. All
-                    connections are end-to-end encrypted and routed through our
+                    connections are end-to-end encrypted and routed through the
                     secure mesh network.
                 </TextBlock>
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,16,0,0">
