@@ -8,7 +8,8 @@
           <Border x:Name="Bd" Background="{TemplateBinding Background}"
                   BorderBrush="{TemplateBinding BorderBrush}"
                   BorderThickness="{TemplateBinding BorderThickness}"
-                  CornerRadius="{TemplateBinding controls:MatButton.CornerRadius}">
+                  CornerRadius="{TemplateBinding controls:MatButton.CornerRadius}"
+                  Padding="{TemplateBinding Padding}">
             <ContentPresenter x:Name="Cp" HorizontalAlignment="Center" VerticalAlignment="Center"/>
           </Border>
           <ControlTemplate.Triggers>
