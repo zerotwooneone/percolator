@@ -11,6 +11,11 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "SolutionFolder", "SolutionF
 		session-flow.md = session-flow.md
 		unit-testing.md = unit-testing.md
 		group-management.md = group-management.md
+		..\Mockup\Desktop\network.direct.png = ..\Mockup\Desktop\network.direct.png
+		..\Mockup\Desktop\network.relay.png = ..\Mockup\Desktop\network.relay.png
+		..\Mockup\Desktop\chat.png = ..\Mockup\Desktop\chat.png
+		..\Mockup\Desktop\mockup.png = ..\Mockup\Desktop\mockup.png
+		..\Mockup\Desktop\send.png = ..\Mockup\Desktop\send.png
 	EndProjectSection
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Cryptography", "Cryptography", "{D3EFBBDF-641F-4849-8BCB-BFAA7DEA0447}"

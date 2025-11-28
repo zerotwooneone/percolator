@@ -181,4 +181,25 @@
 
   <Style x:Key="BaseListViewItem" TargetType="ListViewItem" BasedOn="{StaticResource BaseListBoxItem}" />
   <Style TargetType="ListViewItem" BasedOn="{StaticResource BaseListViewItem}" />
+
+  <!-- Reusable slide-in/out animations for right-side panels -->
+  <Storyboard x:Key="SlideInRightFast">
+    <DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.X)"
+                     From="360" To="0" Duration="0:0:0.18">
+      <DoubleAnimation.EasingFunction>
+        <CubicEase EasingMode="EaseOut"/>
+      </DoubleAnimation.EasingFunction>
+    </DoubleAnimation>
+    <DoubleAnimation Storyboard.TargetProperty="Opacity" From="0" To="1" Duration="0:0:0.14"/>
+  </Storyboard>
+
+  <Storyboard x:Key="SlideOutRightFast">
+    <DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.X)"
+                     From="0" To="360" Duration="0:0:0.16">
+      <DoubleAnimation.EasingFunction>
+        <CubicEase EasingMode="EaseIn"/>
+      </DoubleAnimation.EasingFunction>
+    </DoubleAnimation>
+    <DoubleAnimation Storyboard.TargetProperty="Opacity" From="1" To="0" Duration="0:0:0.12"/>
+  </Storyboard>
 </ResourceDictionary>

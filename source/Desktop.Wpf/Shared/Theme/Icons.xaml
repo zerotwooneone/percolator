@@ -27,4 +27,14 @@
   <system:String x:Key="IconSmiley">&#xEB54;</system:String>
   <system:String x:Key="IconClip">&#xF0C6;</system:String>
   <system:String x:Key="IconSend">&#xF1D9;</system:String>
+  <!-- Network menu icons -->
+  <system:String x:Key="IconNetwork">&#xEF09;</system:String>
+  <system:String x:Key="IconLatency">&#xF0128;</system:String>
+  <system:String x:Key="IconRefresh">&#xF021;</system:String>
+  <system:String x:Key="IconCopy">&#xF0C5;</system:String>
+  <system:String x:Key="IconWrench">&#xF0AD;</system:String>
+  <system:String x:Key="IconMapMarker">&#xF034E;</system:String>
+  <system:String x:Key="IconTreeGraph">&#xF104A;</system:String>
+  <system:String x:Key="IconCloudLock">&#xF11F1;</system:String>
+  <system:String x:Key="IconRelay">&#xF50F;</system:String>
 </ResourceDictionary>

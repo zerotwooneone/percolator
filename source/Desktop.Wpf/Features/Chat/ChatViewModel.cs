@@ -18,6 +18,10 @@ public sealed class ChatViewModel : ViewModelBase
     public BindableReactiveProperty<string> Initials { get; }
     public BindableReactiveProperty<bool> IsOnline { get; }
     public AsyncRelayCommand SendCommand { get; }
+    public BindableReactiveProperty<bool> IsNetworkOpen { get; }
+    public BindableReactiveProperty<bool> IsRelayed { get; }
+    public AsyncRelayCommand ToggleNetworkCommand { get; }
+    public AsyncRelayCommand CloseNetworkCommand { get; }
 
     private readonly ObservableCollection<ChatMessage> _messages = new();
     private string? _sessionId;
@@ -37,6 +41,9 @@ public sealed class ChatViewModel : ViewModelBase
         Initials = _sessionContext.Initials;
         IsOnline = _sessionContext.IsOnline;
 
+        IsNetworkOpen = new BindableReactiveProperty<bool>(false);
+        IsRelayed = new BindableReactiveProperty<bool>(false); // seed: direct
+
         SendCommand = new AsyncRelayCommand(async _ =>
         {
             if (_sessionId is null) return;
@@ -50,6 +57,18 @@ public sealed class ChatViewModel : ViewModelBase
 
         // Propagate CanSend changes to the command so the button updates
         CanSend.Subscribe(_ => SendCommand.RaiseCanExecuteChanged());
+
+        ToggleNetworkCommand = new AsyncRelayCommand(async _ =>
+        {
+            IsNetworkOpen.Value = !IsNetworkOpen.Value;
+            await Task.CompletedTask;
+        });
+
+        CloseNetworkCommand = new AsyncRelayCommand(async _ =>
+        {
+            IsNetworkOpen.Value = false;
+            await Task.CompletedTask;
+        });
     }
 
     public async void SetSession(string sessionId)
@@ -63,7 +82,7 @@ public sealed class ChatViewModel : ViewModelBase
 
     protected override void DisposeCore()
     {
-        Disposable.Dispose(MessageInput, CanSend, Title, Initials, IsOnline);
+        Disposable.Dispose(MessageInput, CanSend, Title, Initials, IsOnline, IsNetworkOpen, IsRelayed);
     }
 
     private static string ComputeInitials(string? name)

@@ -25,14 +25,20 @@
         </StackPanel>
       </StackPanel>
       <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
+        <!-- Phone -->
         <controls:MatButton IsIcon="True" IsRound="True" Variant="Filled" Margin="0,0,8,0">
           <TextBlock Style="{StaticResource IconTextLarge}" Text="{StaticResource IconPhone}"/>
         </controls:MatButton>
+        <!-- Video -->
         <controls:MatButton IsIcon="True" IsRound="True" Variant="Filled" Margin="0,0,8,0">
           <TextBlock Style="{StaticResource IconTextLarge}" Text="{StaticResource IconVideo}"/>
         </controls:MatButton>
-        <controls:MatButton IsIcon="True" IsRound="True" Variant="Filled">
-          <TextBlock Style="{StaticResource IconTextLarge}" Text="{StaticResource IconKebab}"/>
+        <!-- Vertical separator bar -->
+        <Border Width="1" Height="24" Background="#263246" CornerRadius="1" Margin="0,0,8,0" VerticalAlignment="Center"/>
+        <!-- Network status button toggles side panel -->
+        <controls:MatButton IsIcon="True" IsRound="True" Variant="Filled"
+                            Command="{Binding ToggleNetworkCommand}">
+          <TextBlock Style="{StaticResource IconTextLarge}" Text="{StaticResource IconNetwork}"/>
         </controls:MatButton>
       </StackPanel>
     </Grid>
@@ -108,5 +114,205 @@
                            Text="{Binding MessageInput.Value, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                            CanSend="{Binding CanSend.Value}"
                            SendCommand="{Binding SendCommand}"/>
+
+    <!-- Network side panel (mockup-aligned) with slide animation -->
+    <Border Grid.RowSpan="4" HorizontalAlignment="Right" Width="360" Background="#101827" BorderBrush="#243047" BorderThickness="1" Opacity="0" IsHitTestVisible="False">
+      <Border.RenderTransform>
+        <TranslateTransform X="360"/>
+      </Border.RenderTransform>
+      <!-- No automatic animation on load to avoid flashing; only animate on IsNetworkOpen changes -->
+      <Border.Style>
+        <Style TargetType="Border">
+          <Style.Triggers>
+            <DataTrigger Binding="{Binding IsNetworkOpen.Value}" Value="True">
+              <Setter Property="IsHitTestVisible" Value="True"/>
+              <DataTrigger.EnterActions>
+                <BeginStoryboard Storyboard="{StaticResource SlideInRightFast}"/>
+              </DataTrigger.EnterActions>
+              <DataTrigger.ExitActions>
+                <BeginStoryboard Storyboard="{StaticResource SlideOutRightFast}"/>
+              </DataTrigger.ExitActions>
+            </DataTrigger>
+            <!-- When false, do not animate on entry (startup); just disable hit testing -->
+            <DataTrigger Binding="{Binding IsNetworkOpen.Value}" Value="False">
+              <Setter Property="IsHitTestVisible" Value="False"/>
+            </DataTrigger>
+          </Style.Triggers>
+        </Style>
+      </Border.Style>
+      <Grid>
+        <Grid.RowDefinitions>
+          <RowDefinition Height="Auto"/>
+          <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <!-- Title bar -->
+        <Border Background="#0B1220" Padding="16,12">
+          <Grid>
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="*"/>
+              <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <StackPanel Orientation="Horizontal">
+              <TextBlock Style="{StaticResource IconText}" Text="{StaticResource IconNetwork}" Margin="0,0,8,0"/>
+              <TextBlock Text="Network Graph" FontWeight="SemiBold"/>
+            </StackPanel>
+            <controls:MatButton Grid.Column="1" IsIcon="True" Variant="Filled" Command="{Binding CloseNetworkCommand}">
+              <TextBlock Text="✕"/>
+            </controls:MatButton>
+          </Grid>
+        </Border>
+
+        <!-- Content -->
+        <ScrollViewer Grid.Row="1">
+          <StackPanel Margin="16">
+            <!-- Current Route -->
+            <TextBlock Text="CURRENT ROUTE" Foreground="{StaticResource MutedBrush}" FontSize="11"/>
+            <Border Style="{StaticResource BaseBorder}" Margin="0,8,0,16" Background="#0F1626">
+              <Grid Margin="12">
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="*"/>
+                  <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel>
+                  <TextBlock Text="Status" FontWeight="SemiBold"/>
+                  <TextBlock Text="Connected directly (P2P). Low latency." Foreground="{StaticResource MutedBrush}" FontSize="12">
+                    <TextBlock.Style>
+                      <Style TargetType="TextBlock">
+                        <Style.Triggers>
+                          <DataTrigger Binding="{Binding IsRelayed.Value}" Value="True">
+                            <Setter Property="Text" Value="Routed via encrypted relay node."/>
+                          </DataTrigger>
+                        </Style.Triggers>
+                      </Style>
+                    </TextBlock.Style>
+                  </TextBlock>
+                </StackPanel>
+                <Border Grid.Column="1" CornerRadius="12" Padding="10,4" VerticalAlignment="Center">
+                  <Grid>
+                    <StackPanel x:Name="BadgeDirect" Orientation="Horizontal">
+                      <StackPanel.Style>
+                        <Style TargetType="StackPanel">
+                          <Setter Property="Visibility" Value="Visible"/>
+                          <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsRelayed.Value}" Value="True">
+                              <Setter Property="Visibility" Value="Collapsed"/>
+                            </DataTrigger>
+                          </Style.Triggers>
+                        </Style>
+                      </StackPanel.Style>
+                      <TextBlock Style="{StaticResource IconText}" Text="{StaticResource IconLock}" Margin="0,0,6,0"/>
+                      <TextBlock Text="DIRECT"/>
+                    </StackPanel>
+                    <StackPanel x:Name="BadgeRelayed" Orientation="Horizontal">
+                      <StackPanel.Style>
+                        <Style TargetType="StackPanel">
+                          <Setter Property="Visibility" Value="Collapsed"/>
+                          <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsRelayed.Value}" Value="True">
+                              <Setter Property="Visibility" Value="Visible"/>
+                            </DataTrigger>
+                          </Style.Triggers>
+                        </Style>
+                      </StackPanel.Style>
+                      <TextBlock Style="{StaticResource IconText}" Text="{StaticResource IconCloudLock}" Margin="0,0,6,0"/>
+                      <TextBlock Text="RELAYED"/>
+                    </StackPanel>
+                  </Grid>
+                  <Border.Style>
+                    <Style TargetType="Border">
+                      <Setter Property="Background" Value="#17312A"/>
+                      <Style.Triggers>
+                        <DataTrigger Binding="{Binding IsRelayed.Value}" Value="True">
+                          <Setter Property="Background" Value="#2B2233"/>
+                        </DataTrigger>
+                        <DataTrigger Binding="{Binding IsRelayed.Value}" Value="False">
+                          <Setter Property="Background" Value="#17312A"/>
+                        </DataTrigger>
+                      </Style.Triggers>
+                    </Style>
+                  </Border.Style>
+                </Border>
+              </Grid>
+            </Border>
+
+            <!-- Discovery Settings -->
+            <TextBlock Text="DISCOVERY SETTINGS" Foreground="{StaticResource MutedBrush}" FontSize="11"/>
+            <Border Style="{StaticResource BaseBorder}" Margin="0,8,0,16" Background="#0F1626">
+              <StackPanel Margin="12">
+                <Grid Margin="0,0,0,10">
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                  </Grid.ColumnDefinitions>
+                  <StackPanel>
+                    <TextBlock Text="Find Neighbors" FontWeight="SemiBold"/>
+                    <TextBlock Text="Query this peer for new nodes" Foreground="{StaticResource MutedBrush}" FontSize="12"/>
+                  </StackPanel>
+                  <controls:MatButton Grid.Column="1" IsIcon="True" Variant="Filled">
+                    <TextBlock Style="{StaticResource IconText}" Text="{StaticResource IconRefresh}"/>
+                  </controls:MatButton>
+                </Grid>
+                <Grid>
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                  </Grid.ColumnDefinitions>
+                  <StackPanel>
+                    <TextBlock Text="Auto-Discovery" FontWeight="SemiBold"/>
+                    <TextBlock Text="Periodically request peers" Foreground="{StaticResource MutedBrush}" FontSize="12"/>
+                  </StackPanel>
+                  <ToggleButton Grid.Column="1" Width="42" Height="24"/>
+                </Grid>
+              </StackPanel>
+            </Border>
+
+            <!-- Discovered Peers -->
+            <TextBlock Text="DISCOVERED PEERS" Foreground="{StaticResource MutedBrush}" FontSize="11"/>
+            <StackPanel Margin="0,8,0,12">
+              <!-- Sample peer cards -->
+              <Border Style="{StaticResource BaseBorder}" Background="#0F1626" Margin="0,0,0,8" Padding="12">
+                <Grid>
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                  </Grid.ColumnDefinitions>
+                  <StackPanel>
+                    <StackPanel Orientation="Horizontal">
+                      <Ellipse Width="8" Height="8" Fill="#29D391"/>
+                      <TextBlock Text="0x8F3A-22B1..." Margin="8,0,0,0"/>
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                      <TextBlock Style="{StaticResource IconText}" Text="{StaticResource IconTreeGraph}" Opacity="0.8"/>
+                      <TextBlock Text="Direct Route" Foreground="{StaticResource MutedBrush}" FontSize="12" Margin="6,0,0,0"/>
+                    </StackPanel>
+                  </StackPanel>
+                  <controls:MatButton Grid.Column="1" Variant="Filled">Connect</controls:MatButton>
+                </Grid>
+              </Border>
+              <Border Style="{StaticResource BaseBorder}" Background="#0F1626" Margin="0,0,0,8" Padding="12">
+                <Grid>
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                  </Grid.ColumnDefinitions>
+                  <StackPanel>
+                    <StackPanel Orientation="Horizontal">
+                      <Ellipse Width="8" Height="8" Fill="#FFB020"/>
+                      <TextBlock Text="0x1C9D-44F2..." Margin="8,0,0,0"/>
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                      <TextBlock Style="{StaticResource IconText}" Text="{StaticResource IconCloudLock}" Opacity="0.8"/>
+                      <TextBlock Text="Relayed Route" Foreground="{StaticResource MutedBrush}" FontSize="12" Margin="6,0,0,0"/>
+                    </StackPanel>
+                  </StackPanel>
+                  <controls:MatButton Grid.Column="1" Variant="Filled">Connect</controls:MatButton>
+                </Grid>
+              </Border>
+            </StackPanel>
+          </StackPanel>
+        </ScrollViewer>
+      </Grid>
+    </Border>
   </Grid>
 </UserControl>
