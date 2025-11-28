@@ -5,12 +5,12 @@
   <Style x:Key="IconText" TargetType="TextBlock">
     <Setter Property="FontFamily" Value="{DynamicResource IconFontFamily}"/>
     <Setter Property="Foreground" Value="{StaticResource ForegroundBrush}"/>
-    <Setter Property="FontSize" Value="14"/>
+    <Setter Property="FontSize" Value="24"/>
     <Setter Property="VerticalAlignment" Value="Center"/>
   </Style>
 
-  <Style x:Key="IconTextLarge" TargetType="TextBlock" BasedOn="{StaticResource IconText}">
-    <Setter Property="FontSize" Value="24"/>
+  <Style x:Key="IconTextSmall" TargetType="TextBlock" BasedOn="{StaticResource IconText}">
+    <Setter Property="FontSize" Value="14"/>
   </Style>
 
   <!-- Glyphs as strings (NerdFont codepoints) -->

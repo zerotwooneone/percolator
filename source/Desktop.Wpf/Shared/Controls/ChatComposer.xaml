@@ -16,7 +16,7 @@
         <!-- Left plus -->
         <controls:MatButton Grid.Column="0" IsIcon="True" IsRound="True" Variant="Filled" Margin="0,0,8,0"
                             Command="{Binding PlusCommand, RelativeSource={RelativeSource AncestorType=UserControl}}">
-          <TextBlock Style="{StaticResource IconTextLarge}" Text="{StaticResource IconPlus}"/>
+          <TextBlock Style="{StaticResource IconText}" Text="{StaticResource IconPlus}"/>
         </controls:MatButton>
 
         <!-- Message input in the middle -->
@@ -32,7 +32,7 @@
         <!-- Right emoji -->
         <controls:MatButton Grid.Column="2" IsIcon="True" IsRound="True" Variant="Filled" Margin="8,0,0,0"
                             Command="{Binding EmojiCommand, RelativeSource={RelativeSource AncestorType=UserControl}}">
-          <TextBlock Style="{StaticResource IconTextLarge}" Text="{StaticResource IconSmiley}"/>
+          <TextBlock Style="{StaticResource IconText}" Text="{StaticResource IconSmiley}"/>
         </controls:MatButton>
 
         <!-- Placeholder space for send when there's no text -->
@@ -91,7 +91,7 @@
               </Style.Triggers>
             </Style>
           </controls:MatButton.Style>
-          <TextBlock Style="{StaticResource IconTextLarge}" Text="{StaticResource IconSend}"/>
+          <TextBlock Style="{StaticResource IconText}" Text="{StaticResource IconSend}"/>
         </controls:MatButton>
         
       </Grid>
