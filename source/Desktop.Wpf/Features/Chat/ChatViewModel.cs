@@ -16,6 +16,7 @@ public sealed class ChatViewModel : Features.Shell.ViewModelBase
     public BindableReactiveProperty<bool> CanSend { get; }
     public BindableReactiveProperty<string> Title { get; }
     public BindableReactiveProperty<string> Initials { get; }
+    public BindableReactiveProperty<bool> IsOnline { get; }
     public AsyncRelayCommand SendCommand { get; }
 
     private readonly ObservableCollection<ChatMessage> _messages = new();
@@ -33,6 +34,7 @@ public sealed class ChatViewModel : Features.Shell.ViewModelBase
         Messages = new ReadOnlyObservableCollection<ChatMessage>(_messages);
         Title = new BindableReactiveProperty<string>("Secure Chat");
         Initials = new BindableReactiveProperty<string>("?");
+        IsOnline = new BindableReactiveProperty<bool>(false);
         Title.Subscribe(t => Initials.Value = ComputeInitials(t));
 
         SendCommand = new AsyncRelayCommand(async _ =>
@@ -59,15 +61,17 @@ public sealed class ChatViewModel : Features.Shell.ViewModelBase
         try
         {
             var all = await _sessions.GetAllAsync(CancellationToken.None);
-            var name = all.FirstOrDefault(x => x.Id == sessionId)?.DisplayName;
+            var entry = all.FirstOrDefault(x => x.Id == sessionId);
+            var name = entry?.DisplayName;
             if (!string.IsNullOrWhiteSpace(name)) Title.Value = name!;
+            IsOnline.Value = entry?.IsOnline ?? false;
         }
         catch { }
     }
 
     protected override void DisposeCore()
     {
-        Disposable.Dispose(MessageInput, CanSend, Title, Initials);
+        Disposable.Dispose(MessageInput, CanSend, Title, Initials, IsOnline);
     }
 
     private static string ComputeInitials(string? name)

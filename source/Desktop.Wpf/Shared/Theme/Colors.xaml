@@ -16,4 +16,6 @@
   <SolidColorBrush x:Key="HoverBackgroundBrush" Color="#1D2A44"/>
   <SolidColorBrush x:Key="SelectedBackgroundBrush" Color="#233044"/>
   <SolidColorBrush x:Key="ChipBackgroundBrush" Color="#1A2740"/>
+  <!-- Presence colors -->
+  <SolidColorBrush x:Key="PresenceOnlineBrush" Color="#29D391"/>
 </ResourceDictionary>

@@ -1,7 +1,8 @@
 <UserControl x:Class="Desktop.Wpf.Features.Sessions.SessionsSidebarView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:att="clr-namespace:Desktop.Wpf.Shared.Attached">
+             xmlns:att="clr-namespace:Desktop.Wpf.Shared.Attached"
+             xmlns:controls="clr-namespace:Desktop.Wpf.Shared.Controls">
   <Grid>
     <Grid.RowDefinitions>
       <RowDefinition Height="Auto"/>
@@ -37,9 +38,7 @@
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="Auto"/>
               </Grid.ColumnDefinitions>
-              <Border Width="36" Height="36" CornerRadius="18" Background="#2EC7FF33">
-                <TextBlock Text="{Binding Initials}" HorizontalAlignment="Center" VerticalAlignment="Center" FontWeight="SemiBold"/>
-              </Border>
+              <controls:InitialsAvatar Diameter="36" CornerRadius="18" Text="{Binding Initials}" IsOnline="{Binding IsOnline}"/>
               <StackPanel Grid.Column="1" Margin="10,0,0,0">
                 <TextBlock Text="{Binding DisplayName}"/>
                 <TextBlock Text="{Binding LastMessagePreview}" Foreground="{StaticResource MutedBrush}" FontSize="12"/>

@@ -1,0 +1,19 @@
+<UserControl x:Class="Desktop.Wpf.Shared.Controls.InitialsAvatar"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <UserControl.Resources>
+    <BooleanToVisibilityConverter x:Key="BoolToVis"/>
+  </UserControl.Resources>
+  <Grid>
+    <Border x:Name="Avatar" Width="{Binding Diameter, RelativeSource={RelativeSource AncestorType=UserControl}}"
+            Height="{Binding Diameter, RelativeSource={RelativeSource AncestorType=UserControl}}"
+            CornerRadius="{Binding CornerRadius, RelativeSource={RelativeSource AncestorType=UserControl}}"
+            Background="#2EC7FF33">
+      <TextBlock Text="{Binding Text, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                 HorizontalAlignment="Center" VerticalAlignment="Center" FontWeight="SemiBold"/>
+    </Border>
+    <Ellipse x:Name="PresenceDot" Width="8" Height="8" HorizontalAlignment="Left" VerticalAlignment="Bottom"
+             Margin="2,0,0,2" Fill="{StaticResource PresenceOnlineBrush}" Stroke="#001018" StrokeThickness="1"
+             Visibility="{Binding IsOnline, RelativeSource={RelativeSource AncestorType=UserControl}, Converter={StaticResource BoolToVis}}"/>
+  </Grid>
+</UserControl>

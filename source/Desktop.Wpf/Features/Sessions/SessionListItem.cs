@@ -20,4 +20,5 @@ public sealed class SessionListItem
             return (parts[0][0].ToString() + parts[^1][0].ToString()).ToUpperInvariant();
         }
     }
+    public bool IsOnline { get; init; }
 }
