@@ -4,12 +4,43 @@
              xmlns:att="clr-namespace:Desktop.Wpf.Shared.Attached">
   <Grid>
     <Grid.RowDefinitions>
+      <RowDefinition Height="Auto"/>
+      <RowDefinition Height="Auto"/>
       <RowDefinition Height="*"/>
       <RowDefinition Height="Auto"/>
     </Grid.RowDefinitions>
 
+    <!-- Header -->
+    <Grid Grid.Row="0" Margin="12,8">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="*"/>
+        <ColumnDefinition Width="Auto"/>
+      </Grid.ColumnDefinitions>
+      <StackPanel Orientation="Horizontal">
+        <Border Width="28" Height="28" CornerRadius="14" Background="#2EC7FF33"/>
+        <StackPanel Margin="10,0,0,0">
+          <TextBlock Text="{Binding Title.Value}" FontWeight="SemiBold"/>
+          <TextBlock Text="SIGNAL SECURE" Foreground="{StaticResource MutedBrush}" FontSize="12"/>
+        </StackPanel>
+      </StackPanel>
+      <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
+        <Button Style="{StaticResource BaseButton}" Width="32" Height="32" Padding="0" Margin="0,0,8,0"><TextBlock Style="{StaticResource IconText}" Text="{StaticResource IconPhone}"/></Button>
+        <Button Style="{StaticResource BaseButton}" Width="32" Height="32" Padding="0" Margin="0,0,8,0"><TextBlock Style="{StaticResource IconText}" Text="{StaticResource IconVideo}"/></Button>
+        <Button Style="{StaticResource BaseButton}" Width="32" Height="32" Padding="0"><TextBlock Style="{StaticResource IconText}" Text="{StaticResource IconKebab}"/></Button>
+      </StackPanel>
+    </Grid>
+
+    <!-- Secure chip -->
+    <Border Grid.Row="1" HorizontalAlignment="Center" Background="#1A2740" CornerRadius="16" Padding="10,6" Margin="0,0,0,4">
+      <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+        <Ellipse Width="8" Height="8" Fill="#29D391" VerticalAlignment="Center"/>
+        <TextBlock Style="{StaticResource IconText}" Text="{StaticResource IconLock}" Margin="8,0,4,0" Opacity="0.9"/>
+        <TextBlock Text="END-TO-END ENCRYPTED" Foreground="{StaticResource MutedBrush}" FontSize="12"/>
+      </StackPanel>
+    </Border>
+
     <!-- Messages -->
-    <ScrollViewer x:Name="MessagesScroll" Grid.Row="0" VerticalScrollBarVisibility="Auto">
+    <ScrollViewer x:Name="MessagesScroll" Grid.Row="2" VerticalScrollBarVisibility="Auto">
       <ItemsControl ItemsSource="{Binding Messages}">
         <ItemsControl.ItemsPanel>
           <ItemsPanelTemplate>
@@ -26,13 +57,18 @@
               <Border x:Name="Bubble" Grid.Column="0" Background="#203047" CornerRadius="12" Padding="10" MaxWidth="520">
                 <StackPanel>
                   <TextBlock Text="{Binding Text}" TextWrapping="Wrap"/>
-                  <TextBlock Text="{Binding TimestampText}" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,6,0,0" HorizontalAlignment="Right"/>
+                  <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,6,0,0">
+                    <TextBlock Text="{Binding TimestampText}" Foreground="{StaticResource MutedBrush}" FontSize="11"/>
+                  </StackPanel>
                 </StackPanel>
               </Border>
               <Border x:Name="OwnBubble" Grid.Column="1" Background="#2EC7FF22" CornerRadius="12" Padding="10" MaxWidth="520" Visibility="Collapsed">
                 <StackPanel>
                   <TextBlock Text="{Binding Text}" TextWrapping="Wrap"/>
-                  <TextBlock Text="{Binding TimestampText}" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,6,0,0" HorizontalAlignment="Right"/>
+                  <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,6,0,0">
+                    <TextBlock Style="{StaticResource IconText}" Text="{StaticResource IconCheck}" FontSize="12" Margin="0,0,6,0" Opacity="0.9"/>
+                    <TextBlock Text="{Binding TimestampText}" Foreground="{StaticResource MutedBrush}" FontSize="11"/>
+                  </StackPanel>
                 </StackPanel>
               </Border>
             </Grid>
@@ -48,7 +84,7 @@
     </ScrollViewer>
 
     <!-- Composer -->
-    <DockPanel Grid.Row="1" Margin="12" LastChildFill="True">
+    <DockPanel Grid.Row="3" Margin="12" LastChildFill="True">
       <!-- Right action buttons: emoji, clip, send -->
       <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">
         <Button Style="{StaticResource BaseButton}" Width="36" Height="36" Margin="8,0,0,0" Padding="0">

@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using R3;
 using Desktop.Wpf.Shared.Mvvm;
+using Desktop.Wpf.Features.Sessions;
 
 namespace Desktop.Wpf.Features.Chat;
 
@@ -13,19 +14,23 @@ public sealed class ChatViewModel : Features.Shell.ViewModelBase
     public ReadOnlyObservableCollection<ChatMessage> Messages { get; }
     public BindableReactiveProperty<string> MessageInput { get; }
     public BindableReactiveProperty<bool> CanSend { get; }
+    public BindableReactiveProperty<string> Title { get; }
     public AsyncRelayCommand SendCommand { get; }
 
     private readonly ObservableCollection<ChatMessage> _messages = new();
     private string? _sessionId;
     private readonly IChatHistory _history;
+    private readonly ISessionDirectory _sessions;
 
-    public ChatViewModel(IChatHistory history)
+    public ChatViewModel(IChatHistory history, ISessionDirectory sessions)
     {
         _history = history;
+        _sessions = sessions;
 
         MessageInput = new("");
         CanSend = MessageInput.Select(text => !string.IsNullOrWhiteSpace(text)).ToBindableReactiveProperty(false);
         Messages = new ReadOnlyObservableCollection<ChatMessage>(_messages);
+        Title = new BindableReactiveProperty<string>("Secure Chat");
 
         SendCommand = new AsyncRelayCommand(async _ =>
         {
@@ -48,10 +53,17 @@ public sealed class ChatViewModel : Features.Shell.ViewModelBase
         _messages.Clear();
         var items = await _history.GetMessagesAsync(sessionId, CancellationToken.None);
         foreach (var m in items) _messages.Add(m);
+        try
+        {
+            var all = await _sessions.GetAllAsync(CancellationToken.None);
+            var name = all.FirstOrDefault(x => x.Id == sessionId)?.DisplayName;
+            if (!string.IsNullOrWhiteSpace(name)) Title.Value = name!;
+        }
+        catch { }
     }
 
     protected override void DisposeCore()
     {
-        Disposable.Dispose(MessageInput, CanSend);
+        Disposable.Dispose(MessageInput, CanSend, Title);
     }
 }
