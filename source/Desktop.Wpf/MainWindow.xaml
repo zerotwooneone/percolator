@@ -18,12 +18,7 @@
                 <RowDefinition Height="*"/>
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
-
-            <!-- Sidebar header (icon only) -->
-            <DockPanel Margin="16,12,16,8">
-                <Border Width="28" Height="28" CornerRadius="14" Background="{StaticResource AccentBrush}"/>
-            </DockPanel>
-
+            
             <!-- Sessions feature host -->
             <ContentControl x:Name="SidebarHost" Grid.Row="1" />
         </Grid>
