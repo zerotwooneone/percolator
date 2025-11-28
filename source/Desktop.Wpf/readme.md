@@ -89,6 +89,14 @@ Note that we bind to `.Value` to access the underlying data.
 <Button Command="{Binding SendCommand}" IsEnabled="{Binding CanSend.Value}" />
 ```
 
+### Styling Rule: Base* + Implicit Defaults
+
+- Define a named base style per control type (e.g., `BaseWindow`, `BaseButton`, `BaseTextBlock`, `BaseTextBox`).
+- Create an unnamed implicit style `TargetType="T"` that is `BasedOn="{StaticResource BaseT}"` to apply the base to all controls by default.
+- Specialized styles (e.g., `AccentButton`) should also be `BasedOn` the corresponding base.
+
+This ensures a consistent, easily themeable baseline and mirrors the mockup’s dark, high-contrast design.
+
 ### Test-Driven Development (TDD)
 We follow the **Red, Green, Refactor** cycle strictly.
 1.  **Red:** Write a failing unit test for a specific behavior (e.g., "Message queue should persist to disk on shutdown").

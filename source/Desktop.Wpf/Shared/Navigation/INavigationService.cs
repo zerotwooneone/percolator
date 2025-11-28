@@ -1,10 +1,10 @@
 using System;
-using System.ComponentModel;
+using R3;
 
 namespace Desktop.Wpf.Shared.Navigation;
 
-public interface INavigationService : INotifyPropertyChanged
+public interface INavigationService
 {
-    object? CurrentView { get; }
+    Observable<object?> ViewStream { get; }
     void Navigate(object? view);
 }

@@ -1,30 +1,17 @@
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
+using R3;
 
 namespace Desktop.Wpf.Shared.Navigation;
 
 public sealed class NavigationService : INavigationService
 {
-    private object? _currentView;
-    public object? CurrentView
-    {
-        get => _currentView;
-        private set
-        {
-            if (!ReferenceEquals(_currentView, value))
-            {
-                _currentView = value;
-                OnPropertyChanged();
-            }
-        }
-    }
+    private readonly ReactiveProperty<object?> _current = new(null);
+
+    public Observable<object?> ViewStream => _current;
 
     public void Navigate(object? view)
     {
-        CurrentView = view;
+        _current.OnNext(view);
     }
-
-    public event PropertyChangedEventHandler? PropertyChanged;
-    private void OnPropertyChanged([CallerMemberName] string? name = null)
-        => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
 }

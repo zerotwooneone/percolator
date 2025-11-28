@@ -13,7 +13,54 @@
     <Setter Property="BorderBrush" Value="#32435E"/>
     <Setter Property="BorderThickness" Value="1"/>
     <Setter Property="Padding" Value="10,6"/>
+    <Setter Property="Cursor" Value="Hand"/>
   </Style>
 
   <Style TargetType="Button" BasedOn="{StaticResource BaseButton}" />
+
+  <!-- Typography and inputs to match mockup: high contrast, muted placeholders -->
+  <Style x:Key="BaseTextBlock" TargetType="TextBlock">
+    <Setter Property="Foreground" Value="{StaticResource ForegroundBrush}"/>
+    <Setter Property="TextWrapping" Value="Wrap"/>
+  </Style>
+
+  <Style TargetType="TextBlock" BasedOn="{StaticResource BaseTextBlock}" />
+
+  <Style x:Key="BaseTextBox" TargetType="TextBox">
+    <Setter Property="Foreground" Value="{StaticResource ForegroundBrush}"/>
+    <Setter Property="Background" Value="#1B2333"/>
+    <Setter Property="BorderBrush" Value="#2A3A55"/>
+    <Setter Property="BorderThickness" Value="1"/>
+    <Setter Property="Padding" Value="8,6"/>
+    <Setter Property="CaretBrush" Value="{StaticResource AccentBrush}"/>
+  </Style>
+
+  <Style TargetType="TextBox" BasedOn="{StaticResource BaseTextBox}" />
+
+  <!-- Reusable watermark TextBox: bind placeholder text via TextBox.Tag -->
+  <Style x:Key="WatermarkTextBox" TargetType="TextBox" BasedOn="{StaticResource BaseTextBox}">
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="TextBox">
+          <Grid>
+            <ScrollViewer x:Name="PART_ContentHost"/>
+            <TextBlock Text="{TemplateBinding Tag}"
+                       Foreground="{StaticResource MutedBrush}"
+                       Margin="6,0,0,0"
+                       IsHitTestVisible="False"
+                       Visibility="Collapsed" />
+          </Grid>
+          <ControlTemplate.Triggers>
+            <Trigger Property="Text" Value="">
+              <Setter TargetName="PART_ContentHost" Property="Opacity" Value="1"/>
+              <Setter Property="Visibility" Value="Visible"/>
+            </Trigger>
+            <Trigger Property="Text" Value="{x:Null}">
+              <Setter Property="Visibility" Value="Visible"/>
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
 </ResourceDictionary>
