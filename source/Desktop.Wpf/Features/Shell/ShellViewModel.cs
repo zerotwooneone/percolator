@@ -6,6 +6,7 @@ using R3;
 using Desktop.Wpf.Shared.Navigation;
 using Desktop.Wpf.Features.Self;
 using Desktop.Wpf.Features.Sessions;
+using Desktop.Wpf.Shared.Mvvm;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Desktop.Wpf.Features.Shell;
@@ -63,19 +64,7 @@ public sealed class ShellViewModel : ViewModelBase
             _self.Initials.Value = ComputeInitials(dto.Name);
             _self.Id.Value = dto.Id.ToString();
 
-            // Navigate to first chat by auto-selecting a session
-            var dir = _services.GetRequiredService<ISessionDirectory>();
-            var list = await dir.GetAllAsync(CancellationToken.None);
-            var first = list.FirstOrDefault();
-            if (first is not null)
-            {
-                _sessionsVm.SelectedSessionId.Value = first.Id;
-            }
-            else
-            {
-                // No sessions; show welcome (null content)
-                _navigation.Navigate(null);
-            }
+            _navigation.Navigate(null);
         }
         finally
         {

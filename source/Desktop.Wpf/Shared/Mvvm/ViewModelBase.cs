@@ -1,7 +1,7 @@
 using System;
 using R3;
 
-namespace Desktop.Wpf.Features.Shell;
+namespace Desktop.Wpf.Shared.Mvvm;
 
 public abstract class ViewModelBase : IDisposable
 {

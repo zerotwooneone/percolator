@@ -36,53 +36,72 @@
       </controls:MatButton>
     </Grid>
 
-    <ListBox Grid.Row="1" ItemsSource="{Binding Items}" SelectedValuePath="Id" SelectedValue="{Binding SelectedSessionId.Value, Mode=TwoWay}">
-      <ListBox.ItemTemplate>
-        <DataTemplate>
-          <Border Style="{StaticResource BaseBorder}" Margin="12,8,12,0">
-            <Grid>
-              <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="Auto"/>
-                <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="Auto"/>
-              </Grid.ColumnDefinitions>
-              <controls:InitialsAvatar Diameter="36" CornerRadius="18" Text="{Binding Initials.Value}" IsOnline="{Binding IsOnline.Value}"/>
-              <StackPanel Grid.Column="1" Margin="10,0,0,0">
-                <TextBlock Text="{Binding DisplayName.Value}"/>
-                <TextBlock Text="{Binding LastMessagePreview.Value}" Foreground="{StaticResource MutedBrush}" FontSize="12"/>
-              </StackPanel>
-              <StackPanel Grid.Column="2" Orientation="Vertical" HorizontalAlignment="Right">
-                <TextBlock Text="{Binding TimestampText.Value}" Foreground="{StaticResource MutedBrush}" FontSize="12" HorizontalAlignment="Right"/>
-                <Border x:Name="UnreadBadge" Background="{StaticResource AccentBrush}" CornerRadius="10" Padding="6,2" Margin="0,6,0,0" Visibility="Visible" RenderTransformOrigin="0.5,0.5" HorizontalAlignment="Right">
-                  <Border.RenderTransform>
-                    <ScaleTransform x:Name="BadgeScale" ScaleX="1" ScaleY="1"/>
-                  </Border.RenderTransform>
-                  <Border.Style>
-                    <Style TargetType="Border">
-                      <Setter Property="Visibility" Value="Visible"/>
-                      <Style.Triggers>
-                        <DataTrigger Binding="{Binding UnreadCount.Value}" Value="0">
-                          <Setter Property="Visibility" Value="Collapsed"/>
-                        </DataTrigger>
-                        <!-- Bump animation when count changes -->
-                        <EventTrigger RoutedEvent="Binding.TargetUpdated">
-                          <BeginStoryboard>
-                            <Storyboard>
-                              <DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)" From="1" To="1.15" Duration="0:0:0.08" AutoReverse="True"/>
-                              <DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleY)" From="1" To="1.15" Duration="0:0:0.08" AutoReverse="True"/>
-                            </Storyboard>
-                          </BeginStoryboard>
-                        </EventTrigger>
-                      </Style.Triggers>
-                    </Style>
-                  </Border.Style>
-                  <TextBlock Text="{Binding UnreadDisplay.Value, NotifyOnTargetUpdated=True}" Foreground="#001018" FontWeight="SemiBold" FontSize="12"/>
-                </Border>
-              </StackPanel>
-            </Grid>
-          </Border>
-        </DataTemplate>
-      </ListBox.ItemTemplate>
-    </ListBox>
+    <Grid Grid.Row="1">
+      <ListBox ItemsSource="{Binding Items}" SelectedValuePath="Id" SelectedValue="{Binding SelectedSessionId.Value, Mode=TwoWay}">
+        <ListBox.ItemTemplate>
+          <DataTemplate>
+            <Border Style="{StaticResource BaseBorder}" Margin="12,8,12,0">
+              <Grid>
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="Auto"/>
+                  <ColumnDefinition Width="*"/>
+                  <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <controls:InitialsAvatar Diameter="36" CornerRadius="18" Text="{Binding Initials.Value}" IsOnline="{Binding IsOnline.Value}"/>
+                <StackPanel Grid.Column="1" Margin="10,0,0,0">
+                  <TextBlock Text="{Binding DisplayName.Value}"/>
+                  <TextBlock Text="{Binding LastMessagePreview.Value}" Foreground="{StaticResource MutedBrush}" FontSize="12"/>
+                </StackPanel>
+                <StackPanel Grid.Column="2" Orientation="Vertical" HorizontalAlignment="Right">
+                  <TextBlock Text="{Binding TimestampText.Value}" Foreground="{StaticResource MutedBrush}" FontSize="12" HorizontalAlignment="Right"/>
+                  <Border x:Name="UnreadBadge" Background="{StaticResource AccentBrush}" CornerRadius="10" Padding="6,2" Margin="0,6,0,0" Visibility="Visible" RenderTransformOrigin="0.5,0.5" HorizontalAlignment="Right">
+                    <Border.RenderTransform>
+                      <ScaleTransform x:Name="BadgeScale" ScaleX="1" ScaleY="1"/>
+                    </Border.RenderTransform>
+                    <Border.Style>
+                      <Style TargetType="Border">
+                        <Setter Property="Visibility" Value="Visible"/>
+                        <Style.Triggers>
+                          <DataTrigger Binding="{Binding UnreadCount.Value}" Value="0">
+                            <Setter Property="Visibility" Value="Collapsed"/>
+                          </DataTrigger>
+                          <!-- Bump animation when count changes -->
+                          <EventTrigger RoutedEvent="Binding.TargetUpdated">
+                            <BeginStoryboard>
+                              <Storyboard>
+                                <DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)" From="1" To="1.15" Duration="0:0:0.08" AutoReverse="True"/>
+                                <DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleY)" From="1" To="1.15" Duration="0:0:0.08" AutoReverse="True"/>
+                              </Storyboard>
+                            </BeginStoryboard>
+                          </EventTrigger>
+                        </Style.Triggers>
+                      </Style>
+                    </Border.Style>
+                    <TextBlock Text="{Binding UnreadDisplay.Value, NotifyOnTargetUpdated=True}" Foreground="#001018" FontWeight="SemiBold" FontSize="12"/>
+                  </Border>
+                </StackPanel>
+              </Grid>
+            </Border>
+          </DataTemplate>
+        </ListBox.ItemTemplate>
+      </ListBox>
+      <!-- Loading overlay -->
+      <Grid Background="#B3000000" Visibility="Collapsed">
+        <Grid.Style>
+          <Style TargetType="Grid">
+            <Setter Property="Visibility" Value="Collapsed"/>
+            <Style.Triggers>
+              <DataTrigger Binding="{Binding IsLoading.Value}" Value="True">
+                <Setter Property="Visibility" Value="Visible"/>
+              </DataTrigger>
+            </Style.Triggers>
+          </Style>
+        </Grid.Style>
+        <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" TextBlock.TextAlignment="Center" Width="220">
+          <TextBlock Margin="0,0,0,8" Foreground="{StaticResource MutedBrush}" Text="Loading conversations..."/>
+          <ProgressBar IsIndeterminate="True" Height="4"/>
+        </StackPanel>
+      </Grid>
+    </Grid>
   </Grid>
 </UserControl>

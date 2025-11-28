@@ -9,7 +9,7 @@ namespace Percolator.Application.Identity;
 /// Holds the details of the currently active identity for the running node.
 /// This context is populated at startup and treated as read-only thereafter.
 /// </summary>
-public class ActiveIdentityContext :ISelfParticipantIdProvider
+public class ActiveIdentityContext :ISelfParticipantIdProvider, IActiveIdentityMutator
 {
     public IdentityRecord? Identity { get; internal set; }
     public X3dhKeys? Keys { get; internal set; }
@@ -22,4 +22,15 @@ public class ActiveIdentityContext :ISelfParticipantIdProvider
         }
         return new ChatParticipantId(Identity.Id);
     }
+
+    public void SetActiveIdentity(IdentityRecord identity, X3dhKeys? keys = null)
+    {
+        Identity = identity;
+        Keys = keys;
+    }
+}
+
+public interface IActiveIdentityMutator
+{
+    public void SetActiveIdentity(IdentityRecord identity, X3dhKeys keys);
 }

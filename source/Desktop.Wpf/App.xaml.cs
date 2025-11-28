@@ -44,7 +44,7 @@ public partial class App : Application
                 services.AddSingleton<ShellViewModel>();
                 services.AddSingleton<SessionsSidebarViewModel>();
                 // Features
-                services.AddSingleton<ISessionDirectory, InMemorySessionDirectory>();
+                services.AddSingleton<Percolator.Cryptography.ISessionRepository, Desktop.Wpf.Features.Sessions.InMemorySessionRepository>();
                 services.AddSingleton<SessionsSidebarView>();
                 services.AddSingleton<IChatHistory, InMemoryChatHistory>();
                 // Per-session scoped chat stack
@@ -55,6 +55,9 @@ public partial class App : Application
                 // Self identity
                 services.AddSingleton<SelfIdentity>();
                 services.AddSingleton<Percolator.Application.Identity.ISelfIdentityRepository, Desktop.Wpf.Features.Self.InMemorySelfIdentityRepository>();
+                // Identity repositories (in-memory fakes for desktop)
+                services.AddSingleton<Percolator.Identity.IPeerIdentityRepository, Desktop.Wpf.Features.Identity.InMemoryPeerIdentityRepository>();
+
                 // Startup views
                 services.AddSingleton<Desktop.Wpf.Features.Shell.NewUserView>();
             })

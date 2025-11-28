@@ -9,7 +9,7 @@ using Desktop.Wpf.Features.Sessions;
 
 namespace Desktop.Wpf.Features.Chat;
 
-public sealed class ChatViewModel : Features.Shell.ViewModelBase
+public sealed class ChatViewModel : ViewModelBase
 {
     public ReadOnlyObservableCollection<ChatMessage> Messages { get; }
     public BindableReactiveProperty<string> MessageInput { get; }

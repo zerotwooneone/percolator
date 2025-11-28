@@ -64,6 +64,8 @@ file sealed class FakeRepo : ISessionRepository
         Store[session.Id] = session;
         return Task.CompletedTask;
     }
+    public Task<IReadOnlyList<SecureSession>> GetAllActiveAsync(CancellationToken ct = default)
+        => throw new NotImplementedException();
 }
 
 [TestFixture]
