@@ -20,23 +20,4 @@ public partial class ChatView : UserControl
             };
         }
     }
-
-    private void Composer_PreviewKeyDown(object sender, KeyEventArgs e)
-    {
-        if (e.Key == Key.Enter)
-        {
-            if ((Keyboard.Modifiers & ModifierKeys.Alt) == ModifierKeys.Alt)
-            {
-                // Allow newline
-                return;
-            }
-
-            // Send on Enter when possible
-            if (DataContext is ChatViewModel vm && vm.CanSend.Value)
-            {
-                vm.SendCommand.Execute(null);
-                e.Handled = true; // Prevent newline
-            }
-        }
-    }
 }
