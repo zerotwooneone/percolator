@@ -10,7 +10,18 @@
     </Grid.RowDefinitions>
 
     <Grid Margin="16,8">
-      <controls:MatInput Text="{Binding SearchText.Value, UpdateSourceTrigger=PropertyChanged}"
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="Auto"/>
+        <ColumnDefinition Width="*"/>
+        <ColumnDefinition Width="Auto"/>
+      </Grid.ColumnDefinitions>
+
+      <!-- Self identity avatar (seeded) -->
+      <controls:InitialsAvatar Grid.Column="0" Diameter="28" CornerRadius="14" Text="OP"/>
+
+      <!-- Search input fills -->
+      <controls:MatInput Grid.Column="1" Margin="8,0,8,0"
+                         Text="{Binding SearchText.Value, UpdateSourceTrigger=PropertyChanged}"
                          DebouncedText="{Binding SearchText.Value, Mode=TwoWay}"
                          DebounceDelay="0:0:0.25"
                          Placeholder="Search...">
@@ -18,6 +29,11 @@
           <TextBlock Style="{StaticResource IconText}" Text="{StaticResource IconSearch}" Margin="8,0,8,0" Opacity="0.8"/>
         </controls:MatInput.Prefix>
       </controls:MatInput>
+
+      <!-- Compose/new chat action -->
+      <controls:MatButton Grid.Column="2" IsIcon="True" IsRound="True" Variant="Filled" Width="36" Height="36">
+        <TextBlock Style="{StaticResource IconText}" Text="{StaticResource IconPencil}"/>
+      </controls:MatButton>
     </Grid>
 
     <ListBox Grid.Row="1" ItemsSource="{Binding Items}" SelectedValuePath="Id" SelectedValue="{Binding SelectedSessionId.Value, Mode=TwoWay}">
