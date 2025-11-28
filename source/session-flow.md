@@ -88,11 +88,17 @@
  ### Step 1.4: Alice Finalizes the Session
 
  - Fast-path: Try to match `public_ratchet_key` to an existing session. It will miss (first message).
- - Slow-path: Iterate `PendingSessions`. For each:
-   - Recompute the expected root from stored IRK and the header’s `public_ratchet_key`.
-   - The record that yields a valid initialize/decrypt is the match.
- - Extract `session_id` from the decrypted inner payload.
- - Create a full session record (see Part 3), then delete the pending record.
+ - Slow-path: Iterate all pending records for the active identity (ordered by recency).
+   - For each pending record:
+     - Recompute the expected initial state using the stored IRK and the header’s public_ratchet_key.
+     - Attempt to decrypt the responder’s first ratchet message.
+     - If decrypt succeeds:
+       - Extract session_id from the decrypted inner payload (do not derive).
+       - Create and persist the initiator’s full session using this session_id.
+       - Upsert the ratchet-key index for the header’s public_ratchet_key.
+       - Delete this pending record.
+       - Stop.
+   - If all pending records fail to decrypt, treat as a miss (no state changes).
 
  Privacy/Security
  - Do not derive session IDs. Always use the responder-provided `session_id`.
