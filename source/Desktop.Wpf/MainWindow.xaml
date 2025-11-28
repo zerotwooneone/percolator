@@ -16,7 +16,6 @@
         <Grid Background="{StaticResource SidebarBrush}" Grid.Column="0">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
-                <RowDefinition Height="Auto"/>
                 <RowDefinition Height="*"/>
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
@@ -27,37 +26,11 @@
                 <TextBlock Text="Percolator" FontWeight="SemiBold" Margin="8,0,0,0" VerticalAlignment="Center"/>
             </DockPanel>
 
-            <!-- Search using reusable watermark style -->
-            <TextBox Grid.Row="1" Margin="16,4" Style="{StaticResource WatermarkTextBox}" Tag="Search encrypted logs..."/>
-
-            <!-- Sessions list (placeholder) -->
-            <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
-                <StackPanel>
-                    <Border Margin="12,8,12,0" Background="#172134" CornerRadius="8" Padding="12">
-                        <DockPanel>
-                            <Border Width="36" Height="36" CornerRadius="18" Background="#2EC7FF33"/>
-                            <StackPanel Margin="10,0,0,0">
-                                <TextBlock Text="Sarah Connor"/>
-                                <TextBlock Text="The encryption keys have b…" Foreground="{StaticResource MutedBrush}" FontSize="12"/>
-                            </StackPanel>
-                            <TextBlock Text="10:42 AM" Foreground="{StaticResource MutedBrush}" FontSize="12" DockPanel.Dock="Right" VerticalAlignment="Top"/>
-                        </DockPanel>
-                    </Border>
-                    <Border Margin="12,8,12,0" Background="#172134" CornerRadius="8" Padding="12">
-                        <DockPanel>
-                            <Border Width="36" Height="36" CornerRadius="18" Background="#34D39933"/>
-                            <StackPanel Margin="10,0,0,0">
-                                <TextBlock Text="Neo Anderson"/>
-                                <TextBlock Text="Follow the white rabbit." Foreground="{StaticResource MutedBrush}" FontSize="12"/>
-                            </StackPanel>
-                            <TextBlock Text="Yesterday" Foreground="{StaticResource MutedBrush}" FontSize="12" DockPanel.Dock="Right" VerticalAlignment="Top"/>
-                        </DockPanel>
-                    </Border>
-                </StackPanel>
-            </ScrollViewer>
+            <!-- Sessions feature host -->
+            <ContentControl x:Name="SidebarHost" Grid.Row="1" />
 
             <!-- Footer current user -->
-            <DockPanel Grid.Row="3" Margin="16,8" VerticalAlignment="Bottom">
+            <DockPanel Grid.Row="2" Margin="16,8" VerticalAlignment="Bottom">
                 <Border Width="28" Height="28" CornerRadius="14" Background="#4F46E533"/>
                 <StackPanel Margin="8,0,0,0">
                     <TextBlock Text="Guest User"/>

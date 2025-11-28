@@ -11,7 +11,7 @@
 
   <!-- Palette for controls -->
   <SolidColorBrush x:Key="InputBackgroundBrush" Color="#1B2333"/>
-  <SolidColorBrush x:Key="InputBorderBrush" Color="#2A3A55"/>
+  <SolidColorBrush x:Key="InputBorderBrush" Color="#3C5E8A"/>
   <SolidColorBrush x:Key="CardBackgroundBrush" Color="#172134"/>
   <SolidColorBrush x:Key="HoverBackgroundBrush" Color="#1D2A44"/>
   <SolidColorBrush x:Key="SelectedBackgroundBrush" Color="#233044"/>

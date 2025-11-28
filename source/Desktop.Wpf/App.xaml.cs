@@ -7,6 +7,7 @@ using Microsoft.Extensions.Logging;
 using Desktop.Wpf.Shared.Navigation;
 using Desktop.Wpf.Features.Shell;
 using R3;
+using Desktop.Wpf.Features.Sessions;
 
 namespace Desktop.Wpf;
 
@@ -37,6 +38,10 @@ public partial class App : Application
                 services.AddSingleton<INavigationService, NavigationService>();
                 // ViewModels
                 services.AddSingleton<ShellViewModel>();
+                services.AddSingleton<SessionsSidebarViewModel>();
+                // Features
+                services.AddSingleton<ISessionDirectory, InMemorySessionDirectory>();
+                services.AddSingleton<SessionsSidebarView>();
             })
             .Build();
 
