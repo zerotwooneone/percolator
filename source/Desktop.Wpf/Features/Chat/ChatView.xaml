@@ -68,7 +68,8 @@
                 <StackPanel>
                   <TextBlock Text="{Binding Text}" TextWrapping="Wrap"/>
                   <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,6,0,0">
-                    <TextBlock Style="{StaticResource IconText}" Text="{StaticResource IconCheck}" FontSize="12" Margin="0,0,6,0" Opacity="0.9"/>
+                    <TextBlock x:Name="SingleTick" Style="{StaticResource IconText}" Text="{StaticResource IconCheck}" FontSize="12" Margin="0,0,6,0" Opacity="0.9"/>
+                    <TextBlock x:Name="DoubleTick" Style="{StaticResource IconText}" Text="{StaticResource IconDoubleCheck}" FontSize="12" Margin="0,0,6,0" Opacity="0.9" Visibility="Collapsed"/>
                     <TextBlock Text="{Binding TimestampText}" Foreground="{StaticResource MutedBrush}" FontSize="11"/>
                   </StackPanel>
                 </StackPanel>
@@ -78,6 +79,10 @@
               <DataTrigger Binding="{Binding IsOwn}" Value="True">
                 <Setter TargetName="Bubble" Property="Visibility" Value="Collapsed"/>
                 <Setter TargetName="OwnBubble" Property="Visibility" Value="Visible"/>
+              </DataTrigger>
+              <DataTrigger Binding="{Binding IsRead.Value}" Value="True">
+                <Setter TargetName="SingleTick" Property="UIElement.Visibility" Value="Collapsed"/>
+                <Setter TargetName="DoubleTick" Property="UIElement.Visibility" Value="Visible"/>
               </DataTrigger>
             </DataTemplate.Triggers>
           </DataTemplate>
