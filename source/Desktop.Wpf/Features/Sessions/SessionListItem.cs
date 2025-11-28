@@ -12,5 +12,12 @@ public sealed class SessionListItem
     public BindableReactiveProperty<string> TimestampText { get; } = new("");
     public BindableReactiveProperty<int> UnreadCount { get; } = new(0);
     public bool HasUnread => UnreadCount.Value > 0;
+    // Readable display for badge (caps at 99+)
+    public BindableReactiveProperty<string> UnreadDisplay { get; } = new("0");
     public BindableReactiveProperty<bool> IsOnline { get; } = new(false);
+
+    public SessionListItem()
+    {
+        UnreadCount.Subscribe(c => UnreadDisplay.Value = c > 99 ? "99+" : c.ToString());
+    }
 }

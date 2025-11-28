@@ -45,18 +45,30 @@
               </StackPanel>
               <StackPanel Grid.Column="2" Orientation="Vertical" HorizontalAlignment="Right">
                 <TextBlock Text="{Binding TimestampText.Value}" Foreground="{StaticResource MutedBrush}" FontSize="12" HorizontalAlignment="Right"/>
-                <Border x:Name="UnreadBadge" Background="{StaticResource AccentBrush}" CornerRadius="10" Padding="6,2" Margin="0,6,0,0" Visibility="Collapsed">
+                <Border x:Name="UnreadBadge" Background="{StaticResource AccentBrush}" CornerRadius="10" Padding="6,2" Margin="0,6,0,0" Visibility="Visible" RenderTransformOrigin="0.5,0.5" HorizontalAlignment="Right">
+                  <Border.RenderTransform>
+                    <ScaleTransform x:Name="BadgeScale" ScaleX="1" ScaleY="1"/>
+                  </Border.RenderTransform>
                   <Border.Style>
                     <Style TargetType="Border">
-                      <Setter Property="Visibility" Value="Collapsed"/>
+                      <Setter Property="Visibility" Value="Visible"/>
                       <Style.Triggers>
-                        <DataTrigger Binding="{Binding HasUnread}" Value="True">
-                          <Setter Property="Visibility" Value="Visible"/>
+                        <DataTrigger Binding="{Binding UnreadCount.Value}" Value="0">
+                          <Setter Property="Visibility" Value="Collapsed"/>
                         </DataTrigger>
+                        <!-- Bump animation when count changes -->
+                        <EventTrigger RoutedEvent="Binding.TargetUpdated">
+                          <BeginStoryboard>
+                            <Storyboard>
+                              <DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)" From="1" To="1.15" Duration="0:0:0.08" AutoReverse="True"/>
+                              <DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleY)" From="1" To="1.15" Duration="0:0:0.08" AutoReverse="True"/>
+                            </Storyboard>
+                          </BeginStoryboard>
+                        </EventTrigger>
                       </Style.Triggers>
                     </Style>
                   </Border.Style>
-                  <TextBlock Text="{Binding UnreadCount.Value}" Foreground="#001018" FontWeight="SemiBold" FontSize="12"/>
+                  <TextBlock Text="{Binding UnreadDisplay.Value, NotifyOnTargetUpdated=True}" Foreground="#001018" FontWeight="SemiBold" FontSize="12"/>
                 </Border>
               </StackPanel>
             </Grid>
