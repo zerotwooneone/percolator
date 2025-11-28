@@ -4,7 +4,7 @@
   <!-- Base icon style: uses detected IconFontFamily -->
   <Style x:Key="IconText" TargetType="TextBlock">
     <Setter Property="FontFamily" Value="{DynamicResource IconFontFamily}"/>
-    <Setter Property="Foreground" Value="{StaticResource ForegroundBrush}"/>
+    <Setter Property="Foreground" Value="{StaticResource OnSurfaceBrush}"/>
     <Setter Property="FontSize" Value="24"/>
     <Setter Property="VerticalAlignment" Value="Center"/>
   </Style>

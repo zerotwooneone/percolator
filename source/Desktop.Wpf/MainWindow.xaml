@@ -12,7 +12,7 @@
         </Grid.ColumnDefinitions>
 
         <!-- Sidebar -->
-        <Grid Background="{StaticResource SidebarBrush}" Grid.Column="0">
+        <Grid Background="{StaticResource SurfaceContainerLowBrush}" Grid.Column="0">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="*"/>
@@ -44,7 +44,7 @@
                     <TextBlock Style="{StaticResource IconText}" Text="{StaticResource IconShield}" FontSize="48" VerticalAlignment="Center" HorizontalAlignment="Center"/>
                 </Border>
                 <TextBlock Style="{StaticResource TitleText}" Margin="0,24,0,8" Text="Percolator Secure"/>
-                <TextBlock Foreground="{StaticResource MutedBrush}">
+                <TextBlock Foreground="{StaticResource OnSurfaceVariantBrush}">
                     Select a conversation from the sidebar to start messaging. All
                     connections are end-to-end encrypted and routed through the
                     secure mesh network.
@@ -69,7 +69,7 @@
                     </Style>
                 </Grid.Style>
                 <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" TextBlock.TextAlignment="Center" Width="260">
-                    <TextBlock Margin="0,0,0,8" Foreground="{StaticResource MutedBrush}" Text="Loading..."/>
+                    <TextBlock Margin="0,0,0,8" Foreground="{StaticResource OnSurfaceVariantBrush}" Text="Loading..."/>
                     <ProgressBar IsIndeterminate="True" Height="4"/>
                 </StackPanel>
             </Grid>

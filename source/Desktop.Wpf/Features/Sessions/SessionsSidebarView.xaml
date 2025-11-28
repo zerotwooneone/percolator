@@ -50,11 +50,11 @@
                 <controls:InitialsAvatar Diameter="36" CornerRadius="18" Text="{Binding Initials.Value}" IsOnline="{Binding IsOnline.Value}"/>
                 <StackPanel Grid.Column="1" Margin="10,0,0,0">
                   <TextBlock Text="{Binding DisplayName.Value}"/>
-                  <TextBlock Text="{Binding LastMessagePreview.Value}" Foreground="{StaticResource MutedBrush}" FontSize="12"/>
+                  <TextBlock Text="{Binding LastMessagePreview.Value}" Foreground="{StaticResource OnSurfaceVariantBrush}" FontSize="12"/>
                 </StackPanel>
                 <StackPanel Grid.Column="2" Orientation="Vertical" HorizontalAlignment="Right">
-                  <TextBlock Text="{Binding TimestampText.Value}" Foreground="{StaticResource MutedBrush}" FontSize="12" HorizontalAlignment="Right"/>
-                  <Border x:Name="UnreadBadge" Background="{StaticResource AccentBrush}" CornerRadius="10" Padding="6,2" Margin="0,6,0,0" Visibility="Visible" RenderTransformOrigin="0.5,0.5" HorizontalAlignment="Right">
+                  <TextBlock Text="{Binding TimestampText.Value}" Foreground="{StaticResource OnSurfaceVariantBrush}" FontSize="12" HorizontalAlignment="Right"/>
+                  <Border x:Name="UnreadBadge" Background="{StaticResource PrimaryBrush}" CornerRadius="10" Padding="6,2" Margin="0,6,0,0" Visibility="Visible" RenderTransformOrigin="0.5,0.5" HorizontalAlignment="Right">
                     <Border.RenderTransform>
                       <ScaleTransform x:Name="BadgeScale" ScaleX="1" ScaleY="1"/>
                     </Border.RenderTransform>
@@ -98,7 +98,7 @@
           </Style>
         </Grid.Style>
         <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" TextBlock.TextAlignment="Center" Width="220">
-          <TextBlock Margin="0,0,0,8" Foreground="{StaticResource MutedBrush}" Text="Loading conversations..."/>
+          <TextBlock Margin="0,0,0,8" Foreground="{StaticResource OnSurfaceVariantBrush}" Text="Loading conversations..."/>
           <ProgressBar IsIndeterminate="True" Height="4"/>
         </StackPanel>
       </Grid>

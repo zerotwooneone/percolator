@@ -1,20 +1,15 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                     xmlns:att="clr-namespace:Desktop.Wpf.Shared.Attached">
-  <!-- Slide toggle theme colors -->
-  <SolidColorBrush x:Key="SlideToggleTrackOffBrush" Color="#263246"/>
-  <SolidColorBrush x:Key="SlideToggleTrackOnBrush" Color="#2EC7FF"/>
-  <SolidColorBrush x:Key="SlideToggleKnobOffBrush" Color="#E7EDF9"/>
-  <SolidColorBrush x:Key="SlideToggleKnobOnBrush" Color="#FFFFFF"/>
   <Style x:Key="BaseWindow" TargetType="Window">
     <Setter Property="Background" Value="{StaticResource SurfaceBrush}"/>
-    <Setter Property="Foreground" Value="{StaticResource ForegroundBrush}"/>
+    <Setter Property="Foreground" Value="{StaticResource OnSurfaceBrush}"/>
   </Style>
 
   <Style TargetType="Window" BasedOn="{StaticResource BaseWindow}" />
 
   <Style x:Key="BaseButton" TargetType="Button">
-    <Setter Property="Foreground" Value="{StaticResource ForegroundBrush}"/>
+    <Setter Property="Foreground" Value="{StaticResource OnSurfaceBrush}"/>
     <Setter Property="Background" Value="{StaticResource ButtonBackgroundBrush}"/>
     <Setter Property="BorderBrush" Value="#32435E"/>
     <Setter Property="BorderThickness" Value="1"/>
@@ -78,19 +73,19 @@
 
   <!-- Typography and inputs to match mockup: high contrast, muted placeholders -->
   <Style x:Key="BaseTextBlock" TargetType="TextBlock">
-    <Setter Property="Foreground" Value="{StaticResource ForegroundBrush}"/>
+    <Setter Property="Foreground" Value="{StaticResource OnSurfaceBrush}"/>
     <Setter Property="TextWrapping" Value="Wrap"/>
   </Style>
 
   <Style TargetType="TextBlock" BasedOn="{StaticResource BaseTextBlock}" />
 
   <Style x:Key="BaseTextBox" TargetType="TextBox">
-    <Setter Property="Foreground" Value="{StaticResource ForegroundBrush}"/>
+    <Setter Property="Foreground" Value="{StaticResource OnSurfaceBrush}"/>
     <Setter Property="Background" Value="{StaticResource InputBackgroundBrush}"/>
     <Setter Property="BorderBrush" Value="{StaticResource InputBorderBrush}"/>
     <Setter Property="BorderThickness" Value="1"/>
     <Setter Property="Padding" Value="8,6"/>
-    <Setter Property="CaretBrush" Value="{StaticResource AccentBrush}"/>
+    <Setter Property="CaretBrush" Value="{StaticResource PrimaryBrush}"/>
   </Style>
 
   <Style TargetType="TextBox" BasedOn="{StaticResource BaseTextBox}" />
@@ -110,7 +105,7 @@
             </Border>
             <TextBlock x:Name="Watermark"
                        Text="{Binding RelativeSource={RelativeSource TemplatedParent}, Path=(att:Placeholder.Text)}"
-                       Foreground="{StaticResource MutedBrush}"
+                       Foreground="{StaticResource OnSurfaceVariantBrush}"
                        Margin="8,0,0,0"
                        VerticalAlignment="Center"
                        IsHitTestVisible="False"
@@ -160,7 +155,7 @@
   <Style TargetType="ListView" BasedOn="{StaticResource BaseListView}" />
 
   <Style x:Key="BaseListBoxItem" TargetType="ListBoxItem">
-    <Setter Property="Foreground" Value="{StaticResource ForegroundBrush}"/>
+    <Setter Property="Foreground" Value="{StaticResource OnSurfaceBrush}"/>
     <Setter Property="Background" Value="Transparent"/>
     <Setter Property="Padding" Value="8"/>
     <Setter Property="Cursor" Value="Hand"/>
@@ -172,10 +167,10 @@
           </Border>
           <ControlTemplate.Triggers>
             <Trigger Property="IsMouseOver" Value="True">
-              <Setter TargetName="bd" Property="Background" Value="{StaticResource HoverBackgroundBrush}"/>
+              <Setter TargetName="bd" Property="Background" Value="{StaticResource SurfaceHoverBrush}"/>
             </Trigger>
             <Trigger Property="IsSelected" Value="True">
-              <Setter TargetName="bd" Property="Background" Value="{StaticResource SelectedBackgroundBrush}"/>
+              <Setter TargetName="bd" Property="Background" Value="{StaticResource SurfaceSelectedBrush}"/>
             </Trigger>
           </ControlTemplate.Triggers>
         </ControlTemplate>

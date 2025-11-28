@@ -10,7 +10,7 @@
         <Setter Property="BorderBrush" Value="{StaticResource InputBorderBrush}"/>
         <Style.Triggers>
           <Trigger Property="IsKeyboardFocusWithin" Value="True">
-            <Setter Property="BorderBrush" Value="{StaticResource ButtonHoverBrush}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource SurfaceHoverBrush}"/>
           </Trigger>
         </Style.Triggers>
       </Style>
@@ -28,10 +28,10 @@
                         Content="{Binding Prefix, RelativeSource={RelativeSource AncestorType=UserControl}}">
         <ContentPresenter.Style>
           <Style TargetType="ContentPresenter">
-            <Setter Property="TextElement.Foreground" Value="{StaticResource MutedBrush}"/>
+            <Setter Property="TextElement.Foreground" Value="{StaticResource OnSurfaceVariantBrush}"/>
             <Style.Triggers>
               <DataTrigger Binding="{Binding IsKeyboardFocusWithin, RelativeSource={RelativeSource AncestorType=Border}}" Value="True">
-                <Setter Property="TextElement.Foreground" Value="{StaticResource ForegroundBrush}"/>
+                <Setter Property="TextElement.Foreground" Value="{StaticResource OnSurfaceBrush}"/>
               </DataTrigger>
             </Style.Triggers>
           </Style>
@@ -42,7 +42,7 @@
       <TextBox Grid.Column="1"
                Background="Transparent"
                BorderThickness="0"
-               Foreground="{StaticResource ForegroundBrush}"
+               Foreground="{StaticResource OnSurfaceBrush}"
                att:Placeholder.Text="{Binding Placeholder, RelativeSource={RelativeSource AncestorType=UserControl}}"
                Text="{Binding Text, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, RelativeSource={RelativeSource AncestorType=UserControl}}"/>
 

@@ -6,7 +6,7 @@
   <sys:Double x:Key="FontSizeTitle">20</sys:Double>
   <Style x:Key="BaseTextBlock" TargetType="TextBlock">
     <Setter Property="FontFamily" Value="{StaticResource AppFont}"/>
-    <Setter Property="Foreground" Value="{StaticResource ForegroundBrush}"/>
+    <Setter Property="Foreground" Value="{StaticResource OnSurfaceBrush}"/>
     <Setter Property="FontSize" Value="{StaticResource FontSizeBase}"/>
     <Setter Property="TextWrapping" Value="Wrap"/>
   </Style>

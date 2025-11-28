@@ -10,7 +10,7 @@
                 <TextBlock Text="👤" FontSize="48" VerticalAlignment="Center" HorizontalAlignment="Center"/>
             </Border>
             <TextBlock Style="{StaticResource TitleText}" Margin="0,24,0,8" Text="Welcome"/>
-            <TextBlock Foreground="{StaticResource MutedBrush}">
+            <TextBlock Foreground="{StaticResource OnSurfaceVariantBrush}">
                 No self identity found on this device. Create one to continue.
             </TextBlock>
         </StackPanel>

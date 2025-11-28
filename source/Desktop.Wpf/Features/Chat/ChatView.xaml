@@ -21,7 +21,7 @@
         <controls:InitialsAvatar Diameter="28" CornerRadius="14" Text="{Binding Initials.Value}" IsOnline="{Binding IsOnline.Value}"/>
         <StackPanel Margin="10,0,0,0">
           <TextBlock Text="{Binding Title.Value}" FontWeight="SemiBold"/>
-          <TextBlock Text="SIGNAL SECURE" Foreground="{StaticResource MutedBrush}" FontSize="12"/>
+          <TextBlock Text="SIGNAL SECURE" Foreground="{StaticResource OnSurfaceVariantBrush}" FontSize="12"/>
         </StackPanel>
       </StackPanel>
       <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
@@ -48,7 +48,7 @@
       <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
         <Ellipse Width="8" Height="8" Fill="#29D391" VerticalAlignment="Center"/>
         <TextBlock Style="{StaticResource IconText}" Text="{StaticResource IconLock}" Margin="8,0,4,0" Opacity="0.9"/>
-        <TextBlock Text="END-TO-END ENCRYPTED" Foreground="{StaticResource MutedBrush}" FontSize="12"/>
+        <TextBlock Text="END-TO-END ENCRYPTED" Foreground="{StaticResource OnSurfaceVariantBrush}" FontSize="12"/>
       </StackPanel>
     </Border>
 
@@ -71,7 +71,7 @@
                 <StackPanel>
                   <TextBlock Text="{Binding Text}" TextWrapping="Wrap"/>
                   <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,6,0,0">
-                    <TextBlock Text="{Binding TimestampText}" Foreground="{StaticResource MutedBrush}" FontSize="11"/>
+                    <TextBlock Text="{Binding TimestampText}" Foreground="{StaticResource OnSurfaceVariantBrush}" FontSize="11"/>
                   </StackPanel>
                 </StackPanel>
               </Border>
@@ -81,7 +81,7 @@
                   <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,6,0,0">
                     <TextBlock x:Name="SingleTick" Style="{StaticResource IconText}" Text="{StaticResource IconCheck}" FontSize="12" Margin="0,0,6,0" Opacity="0.9" Visibility="Collapsed"/>
                     <TextBlock x:Name="DoubleTick" Style="{StaticResource IconText}" Text="{StaticResource IconDoubleCheck}" FontSize="12" Margin="0,0,6,0" Opacity="0.9" Visibility="Collapsed"/>
-                    <TextBlock Text="{Binding TimestampText}" Foreground="{StaticResource MutedBrush}" FontSize="11"/>
+                    <TextBlock Text="{Binding TimestampText}" Foreground="{StaticResource OnSurfaceVariantBrush}" FontSize="11"/>
                   </StackPanel>
                 </StackPanel>
               </Border>
@@ -164,7 +164,7 @@
         <ScrollViewer Grid.Row="1" Background="Transparent">
           <StackPanel Margin="16">
             <!-- Current Route -->
-            <TextBlock Text="CURRENT ROUTE" Foreground="{StaticResource MutedBrush}" FontSize="11"/>
+            <TextBlock Text="CURRENT ROUTE" Foreground="{StaticResource OnSurfaceVariantBrush}" FontSize="11"/>
             <Border Style="{StaticResource BaseBorder}" Margin="0,8,0,16" Background="#0F1626">
               <Grid Margin="12">
                 <Grid.ColumnDefinitions>
@@ -173,7 +173,7 @@
                 </Grid.ColumnDefinitions>
                 <StackPanel>
                   <TextBlock Text="Status" FontWeight="SemiBold"/>
-                  <TextBlock Text="Connected directly (P2P). Low latency." Foreground="{StaticResource MutedBrush}" FontSize="12">
+                  <TextBlock Text="Connected directly (P2P). Low latency." Foreground="{StaticResource OnSurfaceVariantBrush}" FontSize="12">
                     <TextBlock.Style>
                       <Style TargetType="TextBlock">
                         <Style.Triggers>
@@ -234,7 +234,7 @@
             </Border>
 
             <!-- Discovery Settings -->
-            <TextBlock Text="DISCOVERY SETTINGS" Foreground="{StaticResource MutedBrush}" FontSize="11"/>
+            <TextBlock Text="DISCOVERY SETTINGS" Foreground="{StaticResource OnSurfaceVariantBrush}" FontSize="11"/>
             <Border Style="{StaticResource BaseBorder}" Margin="0,8,0,16" Background="#0F1626">
               <StackPanel Margin="12">
                 <Grid Margin="0,0,0,10">
@@ -244,7 +244,7 @@
                   </Grid.ColumnDefinitions>
                   <StackPanel>
                     <TextBlock Text="Find Neighbors" FontWeight="SemiBold"/>
-                    <TextBlock Text="Query this peer for new nodes" Foreground="{StaticResource MutedBrush}" FontSize="12"/>
+                    <TextBlock Text="Query this peer for new nodes" Foreground="{StaticResource OnSurfaceVariantBrush}" FontSize="12"/>
                   </StackPanel>
                   <controls:MatButton Grid.Column="1" IsIcon="True" Variant="Filled">
                     <TextBlock Style="{StaticResource IconText}" Text="{StaticResource IconRefresh}"/>
@@ -257,7 +257,7 @@
                   </Grid.ColumnDefinitions>
                   <StackPanel>
                     <TextBlock Text="Auto-Discovery" FontWeight="SemiBold"/>
-                    <TextBlock Text="Periodically request peers" Foreground="{StaticResource MutedBrush}" FontSize="12"/>
+                    <TextBlock Text="Periodically request peers" Foreground="{StaticResource OnSurfaceVariantBrush}" FontSize="12"/>
                   </StackPanel>
                   <controls:MatSlideToggle Grid.Column="1" IsChecked="{Binding AutoDiscoveryEnabled.Value, Mode=TwoWay}"/>
                 </Grid>
@@ -265,7 +265,7 @@
             </Border>
 
             <!-- Discovered Peers -->
-            <TextBlock Text="DISCOVERED PEERS" Foreground="{StaticResource MutedBrush}" FontSize="11"/>
+            <TextBlock Text="DISCOVERED PEERS" Foreground="{StaticResource OnSurfaceVariantBrush}" FontSize="11"/>
             <StackPanel Margin="0,8,0,12">
               <!-- Sample peer cards -->
               <Border Style="{StaticResource BaseBorder}" Background="#0F1626" Margin="0,0,0,8" Padding="12">
@@ -281,7 +281,7 @@
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
                       <TextBlock Style="{StaticResource IconText}" Text="{StaticResource IconTreeGraph}" Opacity="0.8"/>
-                      <TextBlock Text="Direct Route" Foreground="{StaticResource MutedBrush}" FontSize="12" Margin="6,0,0,0"/>
+                      <TextBlock Text="Direct Route" Foreground="{StaticResource OnSurfaceVariantBrush}" FontSize="12" Margin="6,0,0,0"/>
                     </StackPanel>
                   </StackPanel>
                   <controls:MatButton Grid.Column="1" Variant="Filled">Connect</controls:MatButton>
@@ -300,7 +300,7 @@
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
                       <TextBlock Style="{StaticResource IconText}" Text="{StaticResource IconCloudLock}" Opacity="0.8"/>
-                      <TextBlock Text="Relayed Route" Foreground="{StaticResource MutedBrush}" FontSize="12" Margin="6,0,0,0"/>
+                      <TextBlock Text="Relayed Route" Foreground="{StaticResource OnSurfaceVariantBrush}" FontSize="12" Margin="6,0,0,0"/>
                     </StackPanel>
                   </StackPanel>
                   <controls:MatButton Grid.Column="1" Variant="Filled">Connect</controls:MatButton>
