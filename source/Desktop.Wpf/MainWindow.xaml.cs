@@ -15,11 +15,15 @@ namespace Desktop.Wpf;
 /// <summary>
 /// Interaction logic for MainWindow.xaml
 /// </summary>
-public partial class MainWindow : Window
+public partial class MainWindow : Window, ISidebarHost
 {
-    public MainWindow(SessionsSidebarView sessionsSidebar)
+    public MainWindow()
     {
         InitializeComponent();
-        SidebarHost.Content = sessionsSidebar;
+    }
+
+    public void SetSidebar(object? view)
+    {
+        SidebarHost.Content = view;
     }
 }

@@ -1,0 +1,14 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:v="clr-namespace:Desktop.Wpf.Features.Sessions"
+                    xmlns:vmSessions="clr-namespace:Desktop.Wpf.Features.Sessions"
+                    xmlns:vChat="clr-namespace:Desktop.Wpf.Features.Chat"
+                    xmlns:vmChat="clr-namespace:Desktop.Wpf.Features.Chat">
+  <!-- ViewModel -> View mappings -->
+  <DataTemplate DataType="{x:Type vmSessions:SessionsSidebarViewModel}">
+    <v:SessionsSidebarView />
+  </DataTemplate>
+  <DataTemplate DataType="{x:Type vmChat:ChatViewModel}">
+    <vChat:ChatView />
+  </DataTemplate>
+</ResourceDictionary>

@@ -4,9 +4,8 @@ namespace Desktop.Wpf.Features.Sessions;
 
 public partial class SessionsSidebarView : UserControl
 {
-    public SessionsSidebarView(SessionsSidebarViewModel vm)
+    public SessionsSidebarView()
     {
         InitializeComponent();
-        DataContext = vm;
     }
 }

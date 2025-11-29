@@ -5,7 +5,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using R3;
 using Desktop.Wpf.Shared.Navigation;
-using Microsoft.Extensions.DependencyInjection;
 using Desktop.Wpf.Features.Chat;
 using System.Collections.Generic;
 using Desktop.Wpf.Features.Self;
@@ -26,19 +25,16 @@ public sealed class SessionsSidebarViewModel : ViewModelBase
 
     private readonly ObservableCollection<SessionListItem> _items = new();
 
-    private readonly IServiceScopeFactory _scopeFactory;
-    private readonly Dictionary<string, IServiceScope> _scopes = new();
-    private readonly LinkedList<string> _lru = new();
-    private const int ScopeCapacity = 3;
+    private readonly ISessionScopeFactory _sessionFactory;
 
     public SessionsSidebarViewModel(INavigationService navigation,
-                                   IServiceProvider provider,
                                    SelfIdentity self,
                                    ISessionRepository sessions,
-                                   IPeerIdentityRepository peers)
+                                   IPeerIdentityRepository peers,
+                                   ISessionScopeFactory sessionFactory)
     {
         Self = self;
-        _scopeFactory = provider.GetRequiredService<IServiceScopeFactory>();
+        _sessionFactory = sessionFactory;
         SearchText = new BindableReactiveProperty<string>("");
         SelectedSessionId = new BindableReactiveProperty<string?>(null);
         IsLoading = new BindableReactiveProperty<bool>(true);
@@ -57,55 +53,21 @@ public sealed class SessionsSidebarViewModel : ViewModelBase
             foreach (var i in list) _items.Add(i);
         });
 
-        // Navigate to chat on selection using a per-session scope
+        // Navigate to chat on selection using a factory-managed per-session scope
         SelectedSessionId
             .Where(id => !string.IsNullOrEmpty(id))
             .Subscribe(id =>
             {
                 if (id is null) return;
-                if (!_scopes.TryGetValue(id, out var scope))
-                {
-                    scope = _scopeFactory.CreateScope();
-                    _scopes[id] = scope;
-                    _lru.AddFirst(id);
-                    if (_lru.Count > ScopeCapacity)
-                    {
-                        var toEvict = _lru.Last!.Value;
-                        _lru.RemoveLast();
-                        if (_scopes.Remove(toEvict, out var evicted))
-                        {
-                            try { evicted.Dispose(); } catch { }
-                        }
-                    }
-                }
-                else
-                {
-                    // Move to front (most recently used)
-                    var node = _lru.Find(id);
-                    if (node is not null)
-                    {
-                        _lru.Remove(node);
-                        _lru.AddFirst(node);
-                    }
-                }
-
-                var ctx = scope.ServiceProvider.GetRequiredService<Desktop.Wpf.Features.Sessions.SessionContext>();
-                // Populate minimal context from our current list (fallback to directory if needed)
                 var entry = _items.FirstOrDefault(x => x.Id == id);
-                ctx.SetSessionId(id);
-                if (entry is not null)
+                var header = entry is null ? null : new SessionHeader
                 {
-                    ctx.PeerName.Value = entry.DisplayName.Value;
-                    ctx.Initials.Value = entry.Initials.Value;
-                    ctx.IsOnline.Value = entry.IsOnline.Value;
-                }
-
-                var chatView = scope.ServiceProvider.GetRequiredService<ChatView>();
-                if (chatView.DataContext is ChatViewModel cvm)
-                {
-                    cvm.SetSession(id);
-                }
-                navigation.Navigate(chatView);
+                    DisplayName = entry.DisplayName.Value,
+                    Initials = entry.Initials.Value,
+                    IsOnline = entry.IsOnline.Value
+                };
+                var resolved = _sessionFactory.GetOrCreate(id, header);
+                navigation.Navigate(resolved.View);
             });
 
         // Navigate back to welcome when selection cleared

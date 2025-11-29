@@ -60,14 +60,16 @@ public partial class App : Application
 
                 // Views
                 services.AddSingleton<MainWindow>();
+                services.AddSingleton<ISidebarHost>(sp => sp.GetRequiredService<MainWindow>());
                 // Navigation
                 services.AddSingleton<INavigationService, NavigationService>();
                 // ViewModels
                 services.AddSingleton<ShellViewModel>();
-                services.AddSingleton<SessionsSidebarViewModel>();
+                services.AddSingleton<ISessionScopeFactory, SessionScopeFactory>();
+                services.AddScoped<SessionsSidebarViewModel>();
                 // Features
                 services.AddSingleton<Percolator.Cryptography.ISessionRepository, Desktop.Wpf.Features.Sessions.InMemorySessionRepository>();
-                services.AddSingleton<SessionsSidebarView>();
+                services.AddScoped<SessionsSidebarView>();
                 services.AddSingleton<IChatHistory, InMemoryChatHistory>();
                 // Per-session scoped chat stack
                 services.AddScoped<Desktop.Wpf.Features.Sessions.SessionContext>();

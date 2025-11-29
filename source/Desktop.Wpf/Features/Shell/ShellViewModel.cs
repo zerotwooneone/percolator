@@ -8,6 +8,11 @@ using Desktop.Wpf.Features.Self;
 using Desktop.Wpf.Features.Sessions;
 using Desktop.Wpf.Shared.Mvvm;
 using Microsoft.Extensions.DependencyInjection;
+using Percolator.Application.Identity;
+using Percolator.Identity;
+using Percolator.Identity.Model;
+using System.Security.Cryptography;
+using Desktop.Wpf;
 
 namespace Desktop.Wpf.Features.Shell;
 
@@ -21,23 +26,26 @@ public sealed class ShellViewModel : ViewModelBase
     private readonly SelfIdentity _self;
     private readonly SessionsSidebarViewModel _sessionsVm;
     private readonly IServiceProvider _services;
+    private readonly ISidebarHost? _host;
 
     public ShellViewModel(INavigationService navigation,
                           Percolator.Application.Identity.ISelfIdentityRepository repo,
                           SelfIdentity self,
                           SessionsSidebarViewModel sessionsVm,
-                          IServiceProvider services)
+                          IServiceProvider services,
+                          ISidebarHost? host = null)
     {
         _navigation = navigation;
         _repo = repo;
         _self = self;
         _sessionsVm = sessionsVm;
         _services = services;
+        _host = host;
 
         // Bind navigation stream to a bindable read-only property for ContentControl binding later
         CurrentView = navigation.ViewStream
             .ObserveOnCurrentSynchronizationContext()
-            .ToReadOnlyBindableReactiveProperty<object?>(null);
+            .ToReadOnlyBindableReactiveProperty<object?>();
 
         IsLoading = new BindableReactiveProperty<bool>(true);
 
@@ -63,6 +71,27 @@ public sealed class ShellViewModel : ViewModelBase
             _self.DisplayName.Value = dto.Name;
             _self.Initials.Value = ComputeInitials(dto.Name);
             _self.Id.Value = dto.Id.ToString();
+
+            // Create a scoped DI context for identity-bound services and set ActiveIdentity
+            var scopeFactory = _services.GetRequiredService<IServiceScopeFactory>();
+            using var scope = scopeFactory.CreateScope();
+            var mutator = scope.ServiceProvider.GetService<IActiveIdentityMutator>();
+            if (mutator is not null)
+            {
+                var identityRecord = new IdentityRecord(dto.PeerId, dto.Name)
+                {
+                    SelfIdentityId = dto.Id
+                };
+                using var eph = ECDiffieHellman.Create();
+                using var eph2 = ECDiffieHellman.Create();
+                var keys = new X3dhKeys(eph, eph2);
+                mutator.SetActiveIdentity(identityRecord, keys);
+            }
+
+            // Resolve SessionsSidebarViewModel from the scoped provider to ensure it binds to the scoped identity context
+            var sidebarVm = scope.ServiceProvider.GetService<SessionsSidebarViewModel>();
+            if (_host is not null)
+                _host.SetSidebar(sidebarVm);
 
             _navigation.Navigate(null);
         }
