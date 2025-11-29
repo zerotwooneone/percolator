@@ -29,7 +29,25 @@ namespace Percolator.Infrastructure.Identity
             return dbo is null ? null : Map(dbo);
         }
 
-        public async Task<SelfIdentityDto?> GetByNameAsync(string name)
+        public async Task<IReadOnlyList<SelfIdentityDto>> ListAsync()
+        {
+            var items = await _db.SelfIdentities.AsNoTracking().OrderBy(x => x.Id).ToListAsync();
+            return items.Select(Map).ToList();
+        }
+
+        public async Task<int> CreateAsync(Guid peerId, string name)
+        {
+            var dbo = new SelfIdentityDbo
+            {
+                PeerId = peerId,
+                Name = name
+            };
+            _db.SelfIdentities.Add(dbo);
+            await _db.SaveChangesAsync();
+            return dbo.Id;
+        }
+        
+        private async Task<SelfIdentityDto?> GetByNameAsync(string name)
         {
             var dbo = await _db.SelfIdentities.AsNoTracking().FirstOrDefaultAsync(x => x.Name == name);
             return dbo is null ? null : Map(dbo);
@@ -54,51 +72,6 @@ namespace Percolator.Infrastructure.Identity
                 return null;
             }
             return Map(target);
-        }
-        
-        //Task<SelfIdentityDto?> GetByNameWithFallbackAsync(string name, string fallbackName)
-
-        public async Task<IReadOnlyList<SelfIdentityDto>> ListAsync()
-        {
-            var items = await _db.SelfIdentities.AsNoTracking().OrderBy(x => x.Id).ToListAsync();
-            return items.Select(Map).ToList();
-        }
-
-        public async Task<int> CreateAsync(Guid peerId, string name)
-        {
-            var dbo = new SelfIdentityDbo
-            {
-                PeerId = peerId,
-                Name = name
-            };
-            _db.SelfIdentities.Add(dbo);
-            await _db.SaveChangesAsync();
-            return dbo.Id;
-        }
-
-        public async Task<bool> AddKnownPeerAsync(int selfIdentityId, Guid peerId)
-        {
-            var exists = await _db.SelfIdentityKnownPeers.AsNoTracking()
-                .AnyAsync(x => x.SelfIdentityId == selfIdentityId && x.PeerId == peerId);
-            if (exists)
-            {
-                return false;
-            }
-            _db.SelfIdentityKnownPeers.Add(new SelfIdentityKnownPeerDbo
-            {
-                SelfIdentityId = selfIdentityId,
-                PeerId = peerId
-            });
-            await _db.SaveChangesAsync();
-            return true;
-        }
-
-        public async Task<IReadOnlyList<Guid>> ListKnownPeersAsync(int selfIdentityId)
-        {
-            return await _db.SelfIdentityKnownPeers.AsNoTracking()
-                .Where(x => x.SelfIdentityId == selfIdentityId)
-                .Select(x => x.PeerId)
-                .ToListAsync();
         }
 
         private static SelfIdentityDto Map(SelfIdentityDbo dbo)
