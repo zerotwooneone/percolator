@@ -20,7 +20,6 @@
         <controls:InitialsAvatar Diameter="28" CornerRadius="14" Text="{Binding Initials.Value}" IsOnline="{Binding IsOnline.Value}"/>
         <StackPanel Margin="10,0,0,0">
           <TextBlock Text="{Binding Title.Value}" FontWeight="SemiBold"/>
-          <TextBlock Text="SIGNAL SECURE" Foreground="{StaticResource OnSurfaceVariantBrush}" FontSize="12"/>
         </StackPanel>
       </StackPanel>
       <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
