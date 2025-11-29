@@ -1,6 +1,9 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-                    xmlns:att="clr-namespace:Desktop.Wpf.Shared.Attached">
+                    xmlns:att="clr-namespace:Desktop.Wpf.Shared.Attached"
+                    xmlns:system="clr-namespace:System;assembly=System.Runtime">
+  <!-- Focus ring thickness preset -->
+  <Thickness x:Key="FocusRingThickness">1</Thickness>
   <Style x:Key="BaseWindow" TargetType="Window">
     <Setter Property="Background" Value="{StaticResource SurfaceBrush}"/>
     <Setter Property="Foreground" Value="{StaticResource OnSurfaceBrush}"/>
@@ -17,7 +20,31 @@
     <Setter Property="Cursor" Value="Hand"/>
   </Style>
 
-  <Style TargetType="Button" BasedOn="{StaticResource BaseButton}" />
+  <!-- Default Button with focus ring -->
+  <Style TargetType="Button" BasedOn="{StaticResource BaseButton}">
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="Button">
+          <Grid>
+            <Border x:Name="bd" Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="{TemplateBinding BorderThickness}"
+                    CornerRadius="8">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+            <Border x:Name="focus" BorderBrush="{StaticResource OutlineBrush}"
+                    BorderThickness="{StaticResource FocusRingThickness}"
+                    CornerRadius="9" Opacity="0"/>
+          </Grid>
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsKeyboardFocused" Value="True">
+              <Setter TargetName="focus" Property="Opacity" Value="1"/>
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
 
   <!-- Material-like buttons -->
   <Style x:Key="MatButtonBase" TargetType="Button" BasedOn="{StaticResource BaseButton}">

@@ -7,7 +7,7 @@
   <Style x:Key="BaseTextBlock" TargetType="TextBlock">
     <Setter Property="FontFamily" Value="{StaticResource AppFont}"/>
     <Setter Property="Foreground" Value="{StaticResource OnSurfaceBrush}"/>
-    <Setter Property="FontSize" Value="{StaticResource FontSizeBase}"/>
+    <Setter Property="FontSize" Value="{DynamicResource FontSizeBase}"/>
     <Setter Property="TextWrapping" Value="Wrap"/>
   </Style>
 
@@ -15,7 +15,7 @@
 
   <!-- Title/Text variants inspired by mockup -->
   <Style x:Key="TitleText" TargetType="TextBlock" BasedOn="{StaticResource BaseTextBlock}">
-    <Setter Property="FontSize" Value="{StaticResource FontSizeTitle}"/>
+    <Setter Property="FontSize" Value="{DynamicResource FontSizeTitle}"/>
     <Setter Property="FontWeight" Value="SemiBold"/>
   </Style>
 </ResourceDictionary>

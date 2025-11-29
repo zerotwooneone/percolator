@@ -136,6 +136,17 @@ public partial class App : Application
             Application.Current.Resources["IconFontFamily"] = chosen ?? fallback;
 
             logger.LogInformation("Icon font selected: {Font}", (chosen ?? fallback).Source);
+
+            // Apply default typography scaling
+            var scale = uiOptions?.FontScaling ?? 1.0;
+            try
+            {
+                if (Application.Current.Resources["FontSizeBase"] is double baseSize)
+                    Application.Current.Resources["FontSizeBase"] = baseSize * scale;
+                if (Application.Current.Resources["FontSizeTitle"] is double titleSize)
+                    Application.Current.Resources["FontSizeTitle"] = titleSize * scale;
+            }
+            catch { /* ignore scaling errors */ }
         }
         catch (System.Exception ex)
         {
