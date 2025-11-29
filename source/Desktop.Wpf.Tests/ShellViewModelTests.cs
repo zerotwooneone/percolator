@@ -39,15 +39,10 @@ public class ShellViewModelTests
     private static ShellViewModel CreateSut(
         ISelfIdentityRepository repo,
         INavigationService nav,
-        IServiceProvider rootProvider,
-        ISidebarHost host = null)
+        IServiceProvider rootProvider)
     {
         var self = new SelfIdentity();
-        var sessionsRepo = new Mock<Percolator.Cryptography.ISessionRepository>();
-        var peerRepo = new Mock<IPeerIdentityRepository>();
-        var sessionFactory = new Mock<ISessionScopeFactory>();
-        var dummySessions = new SessionsSidebarViewModel(nav, self, sessionsRepo.Object, peerRepo.Object, sessionFactory.Object);
-        return new ShellViewModel(nav, repo, self, dummySessions, rootProvider, host);
+        return new ShellViewModel(nav, repo, self, rootProvider);
     }
 
     [Test]
@@ -91,14 +86,6 @@ public class ShellViewModelTests
         scopedProvider
             .Setup(sp => sp.GetService(typeof(IActiveIdentityMutator)))
             .Returns(scopeMutator.Object);
-        var scopedSelf = new SelfIdentity();
-        var scopedSessionsRepo = new Mock<Percolator.Cryptography.ISessionRepository>();
-        var scopedPeerRepo = new Mock<IPeerIdentityRepository>();
-        var scopedSessionFactory = new Mock<ISessionScopeFactory>();
-        var sessionsVm = new SessionsSidebarViewModel(nav.Object, scopedSelf, scopedSessionsRepo.Object, scopedPeerRepo.Object, scopedSessionFactory.Object);
-        scopedProvider
-            .Setup(sp => sp.GetService(typeof(SessionsSidebarViewModel)))
-            .Returns(sessionsVm);
 
         var scope = new Mock<IServiceScope>();
         scope.SetupGet(s => s.ServiceProvider).Returns(scopedProvider.Object);
@@ -133,17 +120,15 @@ public class ShellViewModelTests
         var scopedSelf = new SelfIdentity();
         var scopedSessionsRepo = new Mock<Percolator.Cryptography.ISessionRepository>();
         var scopedPeerRepo = new Mock<IPeerIdentityRepository>();
-        var scopedSvcProviderForSessions = new Mock<IServiceProvider>();
-        var scopedDummyScope = new Mock<IServiceScope>();
-        scopedDummyScope.SetupGet(s => s.ServiceProvider).Returns(scopedSvcProviderForSessions.Object);
-        var scopedDummyScopeFactory = new Mock<IServiceScopeFactory>();
-        scopedDummyScopeFactory.Setup(f => f.CreateScope()).Returns(scopedDummyScope.Object);
-        scopedSvcProviderForSessions.Setup(sp => sp.GetService(typeof(IServiceScopeFactory))).Returns(scopedDummyScopeFactory.Object);
         var sessionScopeFactoryMock = new Mock<ISessionScopeFactory>();
         var sessionsVm = new SessionsSidebarViewModel(nav.Object, scopedSelf, scopedSessionsRepo.Object, scopedPeerRepo.Object, sessionScopeFactoryMock.Object);
+        var sessionShellVm = new SessionShellViewModel();
         scopedProvider
             .Setup(sp => sp.GetService(typeof(SessionsSidebarViewModel)))
             .Returns(sessionsVm);
+        scopedProvider
+            .Setup(sp => sp.GetService(typeof(SessionShellViewModel)))
+            .Returns(sessionShellVm);
 
         var scope = new Mock<IServiceScope>();
         scope.SetupGet(s => s.ServiceProvider).Returns(scopedProvider.Object);
@@ -163,7 +148,7 @@ public class ShellViewModelTests
     }
 
     [Test]
-    public async Task Resolves_SessionsSidebarViewModel_for_sidebar_from_scoped_provider()
+    public async Task Navigates_to_SessionShell_after_identity_and_resolves_sidebar_from_scope()
     {
         var repo = new Mock<ISelfIdentityRepository>();
         repo.Setup(r => r.GetByIdAsync(It.IsAny<int>()))
@@ -177,15 +162,19 @@ public class ShellViewModelTests
         scopedDummyScope.SetupGet(s => s.ServiceProvider).Returns(scopedProvider.Object);
         var scopedDummyScopeFactory = new Mock<IServiceScopeFactory>();
         scopedDummyScopeFactory.Setup(f => f.CreateScope()).Returns(scopedDummyScope.Object);
-        // Resolve the SessionsSidebarViewModel from the scoped provider
+        // Resolve the SessionShell and SessionsSidebar VMs from the scoped provider
         var scopedSelf = new SelfIdentity();
         var scopedSessionsRepo = new Mock<Percolator.Cryptography.ISessionRepository>();
         var scopedPeerRepo = new Mock<IPeerIdentityRepository>();
         var scopedSessionFactory = new Mock<ISessionScopeFactory>();
         var sessionsVm = new SessionsSidebarViewModel(nav.Object, scopedSelf, scopedSessionsRepo.Object, scopedPeerRepo.Object, scopedSessionFactory.Object);
+        var sessionShellVm = new SessionShellViewModel();
         scopedProvider
             .Setup(sp => sp.GetService(typeof(SessionsSidebarViewModel)))
             .Returns(sessionsVm);
+        scopedProvider
+            .Setup(sp => sp.GetService(typeof(SessionShellViewModel)))
+            .Returns(sessionShellVm);
 
         var scope = new Mock<IServiceScope>();
         scope.SetupGet(s => s.ServiceProvider).Returns(scopedProvider.Object);
@@ -197,63 +186,14 @@ public class ShellViewModelTests
         root.Setup(sp => sp.GetService(typeof(IServiceScopeFactory)))
             .Returns(scopeFactory.Object);
 
-        var host = new Mock<ISidebarHost>();
-        var sut = CreateSut(repo.Object, nav.Object, root.Object, host.Object);
+        var sut = CreateSut(repo.Object, nav.Object, root.Object);
 
         await Task.Delay(50);
 
         scopedProvider.Verify(sp => sp.GetService(typeof(SessionsSidebarViewModel)), Times.AtLeastOnce);
+        scopedProvider.Verify(sp => sp.GetService(typeof(SessionShellViewModel)), Times.AtLeastOnce);
+        nav.Verify(n => n.Navigate(It.Is<object>(o => ReferenceEquals(o, sessionShellVm))), Times.AtLeastOnce);
     }
 
-    [Test]
-    public async Task Sets_sidebar_host_content_with_scoped_view()
-    {
-        var repo = new Mock<ISelfIdentityRepository>();
-        repo.Setup(r => r.GetByIdAsync(It.IsAny<int>()))
-            .ReturnsAsync(new SelfIdentityDto { Id = 11, Name = "Eve" });
-
-        var nav = new Mock<INavigationService>();
-        nav.SetupGet(n => n.ViewStream).Returns(Observable.Empty<object?>());
-
-        var scopedProvider = new Mock<IServiceProvider>();
-        var scopedSvcProviderForSessions = new Mock<IServiceProvider>();
-        var scopedDummyScope = new Mock<IServiceScope>();
-        scopedDummyScope.SetupGet(s => s.ServiceProvider).Returns(scopedSvcProviderForSessions.Object);
-        var scopedDummyScopeFactory = new Mock<IServiceScopeFactory>();
-        scopedDummyScopeFactory.Setup(f => f.CreateScope()).Returns(scopedDummyScope.Object);
-        scopedSvcProviderForSessions.Setup(sp => sp.GetService(typeof(IServiceScopeFactory))).Returns(scopedDummyScopeFactory.Object);
-        // Provide a SessionsSidebarViewModel instance from the scoped provider
-        var scopedSelf = new SelfIdentity();
-        var scopedSessionsRepo = new Mock<Percolator.Cryptography.ISessionRepository>();
-        var scopedPeerRepo = new Mock<IPeerIdentityRepository>();
-        var scopedSessionFactory = new Mock<ISessionScopeFactory>();
-        var sidebarVm = new SessionsSidebarViewModel(nav.Object, scopedSelf, scopedSessionsRepo.Object, scopedPeerRepo.Object, scopedSessionFactory.Object);
-        scopedProvider
-            .Setup(sp => sp.GetService(typeof(SessionsSidebarViewModel)))
-            .Returns(sidebarVm);
-
-        var scope = new Mock<IServiceScope>();
-        scope.SetupGet(s => s.ServiceProvider).Returns(scopedProvider.Object);
-
-        var scopeFactory = new Mock<IServiceScopeFactory>();
-        scopeFactory.Setup(f => f.CreateScope()).Returns(scope.Object);
-
-        var root = new Mock<IServiceProvider>();
-        root.Setup(sp => sp.GetService(typeof(IServiceScopeFactory)))
-            .Returns(scopeFactory.Object);
-
-        var host = new Mock<ISidebarHost>();
-
-        var sut = CreateSut(repo.Object, nav.Object, root.Object, host.Object);
-
-        using (var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2)))
-        {
-            while (sut.IsLoading.Value && !cts.IsCancellationRequested)
-                await Task.Delay(10, cts.Token);
-        }
-
-        scopeFactory.Verify(f => f.CreateScope(), Times.AtLeastOnce);
-        scopedProvider.Verify(sp => sp.GetService(typeof(SessionsSidebarViewModel)), Times.AtLeastOnce);
-        host.Verify(h => h.SetSidebar(It.Is<object>(o => ReferenceEquals(o, sidebarVm))), Times.AtLeastOnce);
-    }
+    // Host-based sidebar test removed; VM-first composition no longer uses ISidebarHost.
 }
