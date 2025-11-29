@@ -112,8 +112,8 @@ Outcome: Demonstrates Generic Host background processing without UI freezes.
 ## Chunk 07 — Configuration and environments
 
 - Add `appsettings.json` with sections:
-  - `Ui: SidebarWidth, Theme`.
-  - `Services: NetworkPolling: IntervalMs`.
+  - `Ui: NerdFont`.
+  - `Services: DhtPolling: IntervalMs`.
 - Bind via `IOptions<T>` and inject into Shell and services.
 - Load `appsettings.Development.json` if present; ensure logging to console/debug.
 
