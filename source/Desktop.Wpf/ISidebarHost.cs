@@ -2,5 +2,5 @@ namespace Desktop.Wpf;
 
 public interface ISidebarHost
 {
-    void SetSidebar(object? view);
+    void SetSidebarViewModel(object? viewModel);
 }

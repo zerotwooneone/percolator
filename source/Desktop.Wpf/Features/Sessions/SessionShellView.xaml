@@ -1,0 +1,20 @@
+<UserControl x:Class="Desktop.Wpf.Features.Sessions.SessionShellView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <Grid>
+    <Grid.ColumnDefinitions>
+      <ColumnDefinition Width="320"/>
+      <ColumnDefinition Width="*"/>
+    </Grid.ColumnDefinitions>
+
+    <!-- Sidebar -->
+    <Border Grid.Column="0" Background="{StaticResource SurfaceContainerLowBrush}">
+      <ContentControl Content="{Binding Sidebar}"/>
+    </Border>
+
+    <!-- Main content host -->
+    <Border Grid.Column="1" Background="{StaticResource SurfaceBrush}">
+      <ContentControl Content="{Binding CurrentContent.Value}"/>
+    </Border>
+  </Grid>
+</UserControl>

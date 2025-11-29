@@ -11,7 +11,7 @@ namespace Desktop.Wpf.Features.Sessions
     public sealed class SessionResolved
     {
         public required SessionContext Context { get; init; }
-        public required object View { get; init; }
+        public required object ViewModel { get; init; }
     }
 
     public sealed class SessionHeader

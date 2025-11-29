@@ -3,8 +3,16 @@
                     xmlns:v="clr-namespace:Desktop.Wpf.Features.Sessions"
                     xmlns:vmSessions="clr-namespace:Desktop.Wpf.Features.Sessions"
                     xmlns:vChat="clr-namespace:Desktop.Wpf.Features.Chat"
-                    xmlns:vmChat="clr-namespace:Desktop.Wpf.Features.Chat">
+                    xmlns:vmChat="clr-namespace:Desktop.Wpf.Features.Chat"
+                    xmlns:vShell="clr-namespace:Desktop.Wpf.Features.Shell"
+                    xmlns:vmShell="clr-namespace:Desktop.Wpf.Features.Shell">
   <!-- ViewModel -> View mappings -->
+  <DataTemplate DataType="{x:Type vmShell:LoadingViewModel}">
+    <vShell:LoadingView />
+  </DataTemplate>
+  <DataTemplate DataType="{x:Type vmSessions:SessionShellViewModel}">
+    <v:SessionShellView />
+  </DataTemplate>
   <DataTemplate DataType="{x:Type vmSessions:SessionsSidebarViewModel}">
     <v:SessionsSidebarView />
   </DataTemplate>

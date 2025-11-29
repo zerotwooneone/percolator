@@ -55,16 +55,13 @@ namespace Desktop.Wpf.Features.Sessions
                 if (header.IsOnline.HasValue) ctx.IsOnline.Value = header.IsOnline.Value;
             }
 
-            var chatView = scope.ServiceProvider.GetRequiredService<ChatView>();
-            if (chatView.DataContext is ChatViewModel cvm)
-            {
-                cvm.SetSession(sessionId);
-            }
+            var chatVm = scope.ServiceProvider.GetRequiredService<ChatViewModel>();
+            chatVm.SetSession(sessionId);
 
             return new SessionResolved
             {
                 Context = ctx,
-                View = chatView
+                ViewModel = chatVm
             };
         }
 

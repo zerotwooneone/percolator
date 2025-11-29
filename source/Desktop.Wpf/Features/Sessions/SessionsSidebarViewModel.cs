@@ -26,6 +26,7 @@ public sealed class SessionsSidebarViewModel : ViewModelBase
     private readonly ObservableCollection<SessionListItem> _items = new();
 
     private readonly ISessionScopeFactory _sessionFactory;
+    private ISessionConductor? _conductor;
 
     public SessionsSidebarViewModel(INavigationService navigation,
                                    SelfIdentity self,
@@ -67,13 +68,22 @@ public sealed class SessionsSidebarViewModel : ViewModelBase
                     IsOnline = entry.IsOnline.Value
                 };
                 var resolved = _sessionFactory.GetOrCreate(id, header);
-                navigation.Navigate(resolved.View);
+                if (_conductor is not null)
+                    _conductor.Show(resolved.ViewModel);
+                else
+                    navigation.Navigate(resolved.ViewModel);
             });
 
         // Navigate back to welcome when selection cleared
         SelectedSessionId
             .Where(id => string.IsNullOrEmpty(id))
-            .Subscribe(_ => navigation.Navigate(null));
+            .Subscribe(_ =>
+            {
+                if (_conductor is not null)
+                    _conductor.Show(null);
+                else
+                    navigation.Navigate(null);
+            });
 
         Items = new ReadOnlyObservableCollection<SessionListItem>(_items);
     }
@@ -171,5 +181,10 @@ public sealed class SessionsSidebarViewModel : ViewModelBase
     protected override void DisposeCore()
     {
         Disposable.Dispose(SearchText, SelectedSessionId);
+    }
+
+    public void SetConductor(ISessionConductor conductor)
+    {
+        _conductor = conductor;
     }
 }

@@ -60,21 +60,19 @@ public partial class App : Application
 
                 // Views
                 services.AddSingleton<MainWindow>();
-                services.AddSingleton<ISidebarHost>(sp => sp.GetRequiredService<MainWindow>());
                 // Navigation
                 services.AddSingleton<INavigationService, NavigationService>();
                 // ViewModels
                 services.AddSingleton<ShellViewModel>();
                 services.AddSingleton<ISessionScopeFactory, SessionScopeFactory>();
                 services.AddScoped<SessionsSidebarViewModel>();
+                services.AddScoped<Desktop.Wpf.Features.Sessions.SessionShellViewModel>();
                 // Features
                 services.AddSingleton<Percolator.Cryptography.ISessionRepository, Desktop.Wpf.Features.Sessions.InMemorySessionRepository>();
-                services.AddScoped<SessionsSidebarView>();
                 services.AddSingleton<IChatHistory, InMemoryChatHistory>();
                 // Per-session scoped chat stack
                 services.AddScoped<Desktop.Wpf.Features.Sessions.SessionContext>();
                 services.AddScoped<Desktop.Wpf.Features.Chat.ChatViewModel>();
-                services.AddScoped<Desktop.Wpf.Features.Chat.ChatView>();
 
                 // Self identity
                 services.AddSingleton<SelfIdentity>();
@@ -159,7 +157,8 @@ public partial class App : Application
         }
 
         var window = HostInstance.Services.GetRequiredService<MainWindow>();
-        window.DataContext = HostInstance.Services.GetRequiredService<ShellViewModel>();
+        var shell = HostInstance.Services.GetRequiredService<ShellViewModel>();
+        window.DataContext = shell;
         window.Show();
     }
 
@@ -171,14 +170,5 @@ public partial class App : Application
             HostInstance.Dispose();
         }
         base.OnExit(e);
-    }
-
-    private static string ComputeInitials(string? name)
-    {
-        if (string.IsNullOrWhiteSpace(name)) return "?";
-        var parts = name.Trim().Split(' ', System.StringSplitOptions.RemoveEmptyEntries);
-        if (parts.Length == 1)
-            return parts[0].Substring(0, System.Math.Min(2, parts[0].Length)).ToUpperInvariant();
-        return (parts[0][0].ToString() + parts[^1][0].ToString()).ToUpperInvariant();
     }
 }

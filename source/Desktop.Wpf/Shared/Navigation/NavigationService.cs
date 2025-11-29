@@ -13,5 +13,6 @@ public sealed class NavigationService : INavigationService
     public void Navigate(object? view)
     {
         _current.OnNext(view);
+        System.Diagnostics.Debug.WriteLine($"[Nav] Navigate -> {view?.GetType().Name ?? "null"}");
     }
 }

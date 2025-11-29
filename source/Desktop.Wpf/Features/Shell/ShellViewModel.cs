@@ -24,23 +24,18 @@ public sealed class ShellViewModel : ViewModelBase
     private readonly INavigationService _navigation;
     private readonly Percolator.Application.Identity.ISelfIdentityRepository _repo;
     private readonly SelfIdentity _self;
-    private readonly SessionsSidebarViewModel _sessionsVm;
     private readonly IServiceProvider _services;
-    private readonly ISidebarHost? _host;
+    private IServiceScope? _identityScope;
 
     public ShellViewModel(INavigationService navigation,
                           Percolator.Application.Identity.ISelfIdentityRepository repo,
                           SelfIdentity self,
-                          SessionsSidebarViewModel sessionsVm,
-                          IServiceProvider services,
-                          ISidebarHost? host = null)
+                          IServiceProvider services)
     {
         _navigation = navigation;
         _repo = repo;
         _self = self;
-        _sessionsVm = sessionsVm;
         _services = services;
-        _host = host;
 
         // Bind navigation stream to a bindable read-only property for ContentControl binding later
         CurrentView = navigation.ViewStream
@@ -48,6 +43,9 @@ public sealed class ShellViewModel : ViewModelBase
             .ToReadOnlyBindableReactiveProperty<object?>();
 
         IsLoading = new BindableReactiveProperty<bool>(true);
+
+        // Show loading screen first
+        _navigation.Navigate(new LoadingViewModel());
 
         // Kick off startup after construction
         _ = StartAsync();
@@ -74,7 +72,9 @@ public sealed class ShellViewModel : ViewModelBase
 
             // Create a scoped DI context for identity-bound services and set ActiveIdentity
             var scopeFactory = _services.GetRequiredService<IServiceScopeFactory>();
-            using var scope = scopeFactory.CreateScope();
+            _identityScope?.Dispose();
+            _identityScope = scopeFactory.CreateScope();
+            var scope = _identityScope;
             var mutator = scope.ServiceProvider.GetService<IActiveIdentityMutator>();
             if (mutator is not null)
             {
@@ -88,12 +88,12 @@ public sealed class ShellViewModel : ViewModelBase
                 mutator.SetActiveIdentity(identityRecord, keys);
             }
 
-            // Resolve SessionsSidebarViewModel from the scoped provider to ensure it binds to the scoped identity context
-            var sidebarVm = scope.ServiceProvider.GetService<SessionsSidebarViewModel>();
-            if (_host is not null)
-                _host.SetSidebar(sidebarVm);
-
-            _navigation.Navigate(null);
+            // Build the SessionShell from the identity-scoped provider
+            var sidebarVm = scope.ServiceProvider.GetRequiredService<SessionsSidebarViewModel>();
+            var sessionShell = scope.ServiceProvider.GetRequiredService<Desktop.Wpf.Features.Sessions.SessionShellViewModel>();
+            sessionShell.Sidebar = sidebarVm;
+            sidebarVm.SetConductor(sessionShell);
+            _navigation.Navigate(sessionShell);
         }
         finally
         {
@@ -103,6 +103,7 @@ public sealed class ShellViewModel : ViewModelBase
 
     protected override void DisposeCore()
     {
+        _identityScope?.Dispose();
         Disposable.Dispose(CurrentView, IsLoading);
     }
 
