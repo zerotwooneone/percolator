@@ -20,6 +20,8 @@ public sealed class ChatViewModel : ViewModelBase
     public AsyncRelayCommand SendCommand { get; }
     public BindableReactiveProperty<bool> IsNetworkOpen { get; }
     public BindableReactiveProperty<bool> IsRelayed { get; }
+    public BindableReactiveProperty<string> RouteIcon { get; }
+    public BindableReactiveProperty<string> RouteText { get; }
     public AsyncRelayCommand ToggleNetworkCommand { get; }
     public AsyncRelayCommand CloseNetworkCommand { get; }
     public BindableReactiveProperty<bool> AutoDiscoveryEnabled { get; }
@@ -44,6 +46,13 @@ public sealed class ChatViewModel : ViewModelBase
 
         IsNetworkOpen = new BindableReactiveProperty<bool>(false);
         IsRelayed = new BindableReactiveProperty<bool>(false); // seed: direct
+        // Route presentation derived from IsRelayed
+        RouteIcon = IsRelayed
+            .Select(relay => relay ? "\uF50F" : "\uF0B45")
+            .ToBindableReactiveProperty("\uF0B45");
+        RouteText = IsRelayed
+            .Select(relay => relay ? "Relayed Route" : "Direct Route")
+            .ToBindableReactiveProperty("Direct Route");
         AutoDiscoveryEnabled = new BindableReactiveProperty<bool>(false);
 
         SendCommand = new AsyncRelayCommand(async _ =>
@@ -84,7 +93,7 @@ public sealed class ChatViewModel : ViewModelBase
 
     protected override void DisposeCore()
     {
-        Disposable.Dispose(MessageInput, CanSend, Title, Initials, IsOnline, IsNetworkOpen, IsRelayed, AutoDiscoveryEnabled);
+        Disposable.Dispose(MessageInput, CanSend, Title, Initials, IsOnline, IsNetworkOpen, IsRelayed, AutoDiscoveryEnabled, RouteIcon, RouteText);
     }
 
     private static string ComputeInitials(string? name)

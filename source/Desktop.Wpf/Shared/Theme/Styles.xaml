@@ -71,13 +71,7 @@
     <Setter Property="BorderBrush" Value="{StaticResource InputBorderBrush}"/>
   </Style>
 
-  <!-- Typography and inputs to match mockup: high contrast, muted placeholders -->
-  <Style x:Key="BaseTextBlock" TargetType="TextBlock">
-    <Setter Property="Foreground" Value="{StaticResource OnSurfaceBrush}"/>
-    <Setter Property="TextWrapping" Value="Wrap"/>
-  </Style>
-
-  <Style TargetType="TextBlock" BasedOn="{StaticResource BaseTextBlock}" />
+  <!-- Typography styles are defined in Typography.xaml -->
 
   <Style x:Key="BaseTextBox" TargetType="TextBox">
     <Setter Property="Foreground" Value="{StaticResource OnSurfaceBrush}"/>

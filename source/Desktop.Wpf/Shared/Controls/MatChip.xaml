@@ -1,0 +1,26 @@
+<UserControl x:Class="Desktop.Wpf.Shared.Controls.MatChip"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <Border Background="{StaticResource SurfaceContainerLowBrush}"
+          CornerRadius="12"
+          Padding="8,4"
+          VerticalAlignment="Center">
+    <Grid MinHeight="24" VerticalAlignment="Center">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="Auto"/>
+        <ColumnDefinition Width="Auto"/>
+      </Grid.ColumnDefinitions>
+      <TextBlock Grid.Column="0"
+                 Text="{Binding Icon, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                 Style="{StaticResource IconTextSmall}"
+                 Opacity="0.9"
+                 Margin="0,0,6,0"
+                 VerticalAlignment="Center"/>
+      <TextBlock Grid.Column="1"
+                 Text="{Binding Text, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                 Foreground="{StaticResource OnSurfaceVariantBrush}"
+                 FontSize="12"
+                 VerticalAlignment="Center"/>
+    </Grid>
+  </Border>
+</UserControl>

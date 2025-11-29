@@ -6,7 +6,6 @@
   <Grid>
     <Grid.RowDefinitions>
       <RowDefinition Height="Auto"/>
-      <RowDefinition Height="Auto"/>
       <RowDefinition Height="*"/>
       <RowDefinition Height="Auto"/>
     </Grid.RowDefinitions>
@@ -43,17 +42,8 @@
       </StackPanel>
     </Grid>
 
-    <!-- Secure chip -->
-    <Border Grid.Row="1" HorizontalAlignment="Center" Background="#1A2740" CornerRadius="16" Padding="10,6" Margin="0,0,0,4">
-      <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-        <Ellipse Width="8" Height="8" Fill="#29D391" VerticalAlignment="Center"/>
-        <TextBlock Style="{StaticResource IconText}" Text="{StaticResource IconLock}" Margin="8,0,4,0" Opacity="0.9"/>
-        <TextBlock Text="END-TO-END ENCRYPTED" Foreground="{StaticResource OnSurfaceVariantBrush}" FontSize="12"/>
-      </StackPanel>
-    </Border>
-
     <!-- Messages -->
-    <ScrollViewer x:Name="MessagesScroll" Grid.Row="2" VerticalScrollBarVisibility="Auto">
+    <ScrollViewer x:Name="MessagesScroll" Grid.Row="1" VerticalScrollBarVisibility="Auto">
       <ItemsControl ItemsSource="{Binding Messages}">
         <ItemsControl.ItemsPanel>
           <ItemsPanelTemplate>
@@ -110,7 +100,7 @@
     </ScrollViewer>
 
     <!-- Composer -->
-    <controls:ChatComposer Grid.Row="3"
+    <controls:ChatComposer Grid.Row="2"
                            Text="{Binding MessageInput.Value, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                            CanSend="{Binding CanSend.Value}"
                            SendCommand="{Binding SendCommand}"/>
@@ -173,7 +163,7 @@
                 </Grid.ColumnDefinitions>
                 <StackPanel>
                   <TextBlock Text="Status" FontWeight="SemiBold"/>
-                  <TextBlock Text="Connected directly (P2P). Low latency." Foreground="{StaticResource OnSurfaceVariantBrush}" FontSize="12">
+                  <TextBlock Text="Connected directly (P2P)." Foreground="{StaticResource OnSurfaceVariantBrush}" FontSize="12">
                     <TextBlock.Style>
                       <Style TargetType="TextBlock">
                         <Style.Triggers>
@@ -187,7 +177,7 @@
                 </StackPanel>
                 <Border Grid.Column="1" CornerRadius="12" Padding="10,4" VerticalAlignment="Center">
                   <Grid>
-                    <StackPanel x:Name="BadgeDirect" Orientation="Horizontal">
+                    <StackPanel Orientation="Horizontal">
                       <StackPanel.Style>
                         <Style TargetType="StackPanel">
                           <Setter Property="Visibility" Value="Visible"/>
@@ -279,10 +269,7 @@
                       <Ellipse Width="8" Height="8" Fill="#29D391"/>
                       <TextBlock Text="0x8F3A-22B1..." Margin="8,0,0,0"/>
                     </StackPanel>
-                    <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
-                      <TextBlock Style="{StaticResource IconText}" Text="{StaticResource IconTreeGraph}" Opacity="0.8"/>
-                      <TextBlock Text="Direct Route" Foreground="{StaticResource OnSurfaceVariantBrush}" FontSize="12" Margin="6,0,0,0"/>
-                    </StackPanel>
+                    <controls:MatChip Icon="{StaticResource IconDirect}" Text="Direct Route"/>
                   </StackPanel>
                   <controls:MatButton Grid.Column="1" Variant="Filled">Connect</controls:MatButton>
                 </Grid>
@@ -298,10 +285,7 @@
                       <Ellipse Width="8" Height="8" Fill="#FFB020"/>
                       <TextBlock Text="0x1C9D-44F2..." Margin="8,0,0,0"/>
                     </StackPanel>
-                    <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
-                      <TextBlock Style="{StaticResource IconText}" Text="{StaticResource IconCloudLock}" Opacity="0.8"/>
-                      <TextBlock Text="Relayed Route" Foreground="{StaticResource OnSurfaceVariantBrush}" FontSize="12" Margin="6,0,0,0"/>
-                    </StackPanel>
+                    <controls:MatChip Icon="{StaticResource IconRelay}" Text="Relayed Route"/>
                   </StackPanel>
                   <controls:MatButton Grid.Column="1" Variant="Filled">Connect</controls:MatButton>
                 </Grid>
