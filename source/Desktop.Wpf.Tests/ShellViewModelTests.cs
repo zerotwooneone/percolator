@@ -37,7 +37,7 @@ public class ShellViewModelTests
     }
 
     private static ShellViewModel CreateSut(
-        ISelfIdentityRepository repo,
+        ISelfIdentityRepositoryOld repo,
         INavigationService nav,
         IServiceProvider rootProvider)
     {
@@ -49,7 +49,7 @@ public class ShellViewModelTests
     public async Task Shows_loading_until_identity_fetch_completes()
     {
         var tcs = new TaskCompletionSource<SelfIdentityDto?>();
-        var repo = new Mock<ISelfIdentityRepository>();
+        var repo = new Mock<ISelfIdentityRepositoryOld>();
         repo.Setup(r => r.GetByIdAsync(It.IsAny<int>())).Returns(tcs.Task);
 
         var nav = new Mock<INavigationService>();
@@ -74,7 +74,7 @@ public class ShellViewModelTests
     [Test]
     public async Task After_identity_resolved_sets_active_identity_in_scoped_context()
     {
-        var repo = new Mock<ISelfIdentityRepository>();
+        var repo = new Mock<ISelfIdentityRepositoryOld>();
         repo.Setup(r => r.GetByIdAsync(It.IsAny<int>()))
             .ReturnsAsync(new SelfIdentityDto { Id = 42, Name = "Bob" });
 
@@ -109,7 +109,7 @@ public class ShellViewModelTests
     [Test]
     public async Task Resolves_SessionsSidebarViewModel_from_scoped_provider()
     {
-        var repo = new Mock<ISelfIdentityRepository>();
+        var repo = new Mock<ISelfIdentityRepositoryOld>();
         repo.Setup(r => r.GetByIdAsync(It.IsAny<int>()))
             .ReturnsAsync(new SelfIdentityDto { Id = 7, Name = "Carol" });
 
@@ -150,7 +150,7 @@ public class ShellViewModelTests
     [Test]
     public async Task Navigates_to_SessionShell_after_identity_and_resolves_sidebar_from_scope()
     {
-        var repo = new Mock<ISelfIdentityRepository>();
+        var repo = new Mock<ISelfIdentityRepositoryOld>();
         repo.Setup(r => r.GetByIdAsync(It.IsAny<int>()))
             .ReturnsAsync(new SelfIdentityDto { Id = 9, Name = "Dora" });
 

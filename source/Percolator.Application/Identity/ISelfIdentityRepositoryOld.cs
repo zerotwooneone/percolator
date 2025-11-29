@@ -4,7 +4,7 @@ using System.Threading.Tasks;
 
 namespace Percolator.Application.Identity
 {
-    public interface ISelfIdentityRepository
+    public interface ISelfIdentityRepositoryOld
     {
         Task<SelfIdentityDto?> GetByIdAsync(int id);
         Task<SelfIdentityDto?> GetByNameWithFallbackAsync(string name, string fallbackName);

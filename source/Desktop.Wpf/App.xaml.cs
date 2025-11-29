@@ -76,7 +76,7 @@ public partial class App : Application
 
                 // Self identity
                 services.AddSingleton<SelfIdentityModel>();
-                services.AddSingleton<Percolator.Application.Identity.ISelfIdentityRepository, Desktop.Wpf.Features.Self.InMemorySelfIdentityRepository>();
+                services.AddSingleton<Percolator.Application.Identity.ISelfIdentityRepositoryOld, Desktop.Wpf.Features.Self.InMemorySelfIdentityRepository>();
                 // Identity repositories (in-memory fakes for desktop)
                 services.AddSingleton<Percolator.Identity.IPeerIdentityRepository, Desktop.Wpf.Features.Identity.InMemoryPeerIdentityRepository>();
 

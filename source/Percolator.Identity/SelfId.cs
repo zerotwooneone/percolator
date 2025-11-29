@@ -8,8 +8,8 @@ public readonly record struct SelfId
 
     public SelfId(int value)
     {
-        if (value <= 0)
-            throw new ArgumentException("SelfId must be a positive integer.", nameof(value));
+        if (value < 0)
+            throw new ArgumentException("SelfId cannot be negative.", nameof(value));
         Value = value;
     }
 

@@ -186,8 +186,14 @@ public class PercolatorDbContext : DbContext
             entity.Property(e => e.Id).ValueGeneratedOnAdd();
             entity.Property(e => e.PeerId).IsRequired();
             entity.Property(e => e.Name).IsRequired();
+            entity.Property(e => e.LastUsedUtc)
+                  .IsRequired()
+                  .HasConversion(
+                      v => v.ToUnixTimeMilliseconds(),
+                      v => DateTimeOffset.FromUnixTimeMilliseconds(v));
             entity.HasIndex(e => e.Name).IsUnique();
             entity.HasIndex(e => e.PeerId); // non-unique
+            entity.HasIndex(e => e.LastUsedUtc);
         });
 
         // SelfIdentityKeys (one-to-one with SelfIdentity)

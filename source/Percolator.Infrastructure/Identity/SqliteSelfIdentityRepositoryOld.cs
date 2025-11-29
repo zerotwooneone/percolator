@@ -8,11 +8,11 @@ using Percolator.Infrastructure.Persistence;
 
 namespace Percolator.Infrastructure.Identity
 {
-    public sealed class SqliteSelfIdentityRepository : ISelfIdentityRepository
+    public sealed class SqliteSelfIdentityRepositoryOld : ISelfIdentityRepositoryOld
     {
         private readonly PercolatorDbContext _db;
 
-        public SqliteSelfIdentityRepository(PercolatorDbContext db)
+        public SqliteSelfIdentityRepositoryOld(PercolatorDbContext db)
         {
             _db = db;
         }

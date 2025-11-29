@@ -22,13 +22,13 @@ public sealed class ShellViewModel : ViewModelBase
     public BindableReactiveProperty<bool> IsLoading { get; }
 
     private readonly INavigationService _navigation;
-    private readonly Percolator.Application.Identity.ISelfIdentityRepository _repo;
+    private readonly Percolator.Application.Identity.ISelfIdentityRepositoryOld _repo;
     private readonly SelfIdentityModel _self;
     private readonly IServiceProvider _services;
     private IServiceScope? _identityScope;
 
     public ShellViewModel(INavigationService navigation,
-                          Percolator.Application.Identity.ISelfIdentityRepository repo,
+                          Percolator.Application.Identity.ISelfIdentityRepositoryOld repo,
                           SelfIdentityModel self,
                           IServiceProvider services)
     {

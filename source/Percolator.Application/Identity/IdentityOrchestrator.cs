@@ -10,14 +10,14 @@ namespace Percolator.Application.Identity;
 public class IdentityOrchestrator : IIdentityOrchestrator
 {
     private readonly ISelfIdentityKeysStore _keysStore;
-    private readonly ISelfIdentityRepository _selfIdentityRepository;
+    private readonly ISelfIdentityRepositoryOld _selfIdentityRepository;
     private readonly ILogger<IdentityOrchestrator> _logger;
     private readonly NodeOptions _options;
     private readonly ActiveIdentityContext _activeIdentityContext;
 
     public IdentityOrchestrator(
         ISelfIdentityKeysStore keysStore,
-        ISelfIdentityRepository selfIdentityRepository,
+        ISelfIdentityRepositoryOld selfIdentityRepository,
         ILogger<IdentityOrchestrator> logger,
         IOptions<NodeOptions> options,
         ActiveIdentityContext activeIdentityContext)

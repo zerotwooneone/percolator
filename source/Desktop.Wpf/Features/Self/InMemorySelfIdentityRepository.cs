@@ -5,7 +5,7 @@ using Percolator.Application.Identity;
 
 namespace Desktop.Wpf.Features.Self;
 
-public sealed class InMemorySelfIdentityRepository : ISelfIdentityRepository
+public sealed class InMemorySelfIdentityRepository : ISelfIdentityRepositoryOld
 {
     private static readonly SelfIdentityDto Dummy = new()
     {

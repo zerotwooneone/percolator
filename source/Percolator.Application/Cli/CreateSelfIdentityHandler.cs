@@ -11,12 +11,12 @@ namespace Percolator.Application.Cli;
 
 public class CreateSelfIdentityHandler : IRequestHandler<CreateSelfIdentityCommand, int>
 {
-    private readonly ISelfIdentityRepository _selfIdentityRepository;
+    private readonly ISelfIdentityRepositoryOld _selfIdentityRepository;
     private readonly ISelfIdentityKeysStore _keysStore;
     private readonly ILogger<CreateSelfIdentityHandler> _logger;
 
     public CreateSelfIdentityHandler(
-        ISelfIdentityRepository selfIdentityRepository,
+        ISelfIdentityRepositoryOld selfIdentityRepository,
         ISelfIdentityKeysStore keysStore,
         ILogger<CreateSelfIdentityHandler> logger)
     {
