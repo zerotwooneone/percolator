@@ -41,7 +41,7 @@ public class ShellViewModelTests
         INavigationService nav,
         IServiceProvider rootProvider)
     {
-        var self = new SelfIdentity();
+        var self = new SelfIdentityModel();
         return new ShellViewModel(nav, repo, self, rootProvider);
     }
 
@@ -117,7 +117,7 @@ public class ShellViewModelTests
         nav.SetupGet(n => n.ViewStream).Returns(Observable.Empty<object?>());
 
         var scopedProvider = new Mock<IServiceProvider>();
-        var scopedSelf = new SelfIdentity();
+        var scopedSelf = new SelfIdentityModel();
         var scopedSessionsRepo = new Mock<Percolator.Cryptography.ISessionRepository>();
         var scopedPeerRepo = new Mock<IPeerIdentityRepository>();
         var sessionScopeFactoryMock = new Mock<ISessionScopeFactory>();
@@ -163,7 +163,7 @@ public class ShellViewModelTests
         var scopedDummyScopeFactory = new Mock<IServiceScopeFactory>();
         scopedDummyScopeFactory.Setup(f => f.CreateScope()).Returns(scopedDummyScope.Object);
         // Resolve the SessionShell and SessionsSidebar VMs from the scoped provider
-        var scopedSelf = new SelfIdentity();
+        var scopedSelf = new SelfIdentityModel();
         var scopedSessionsRepo = new Mock<Percolator.Cryptography.ISessionRepository>();
         var scopedPeerRepo = new Mock<IPeerIdentityRepository>();
         var scopedSessionFactory = new Mock<ISessionScopeFactory>();

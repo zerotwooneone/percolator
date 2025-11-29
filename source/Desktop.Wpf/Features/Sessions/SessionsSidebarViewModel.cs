@@ -20,7 +20,7 @@ public sealed class SessionsSidebarViewModel : ViewModelBase
     public BindableReactiveProperty<string> SearchText { get; }
     public ReadOnlyObservableCollection<SessionListItem> Items { get; }
     public BindableReactiveProperty<string?> SelectedSessionId { get; }
-    public SelfIdentity Self { get; }
+    public SelfIdentityModel Self { get; }
     public BindableReactiveProperty<bool> IsLoading { get; }
 
     private readonly ObservableCollection<SessionListItem> _items = new();
@@ -29,7 +29,7 @@ public sealed class SessionsSidebarViewModel : ViewModelBase
     private ISessionConductor? _conductor;
 
     public SessionsSidebarViewModel(INavigationService navigation,
-                                   SelfIdentity self,
+        SelfIdentityModel self,
                                    ISessionRepository sessions,
                                    IPeerIdentityRepository peers,
                                    ISessionScopeFactory sessionFactory)

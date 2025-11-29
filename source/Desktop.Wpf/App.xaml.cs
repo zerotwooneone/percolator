@@ -75,7 +75,7 @@ public partial class App : Application
                 services.AddScoped<Desktop.Wpf.Features.Chat.ChatViewModel>();
 
                 // Self identity
-                services.AddSingleton<SelfIdentity>();
+                services.AddSingleton<SelfIdentityModel>();
                 services.AddSingleton<Percolator.Application.Identity.ISelfIdentityRepository, Desktop.Wpf.Features.Self.InMemorySelfIdentityRepository>();
                 // Identity repositories (in-memory fakes for desktop)
                 services.AddSingleton<Percolator.Identity.IPeerIdentityRepository, Desktop.Wpf.Features.Identity.InMemoryPeerIdentityRepository>();

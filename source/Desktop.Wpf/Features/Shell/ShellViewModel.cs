@@ -23,13 +23,13 @@ public sealed class ShellViewModel : ViewModelBase
 
     private readonly INavigationService _navigation;
     private readonly Percolator.Application.Identity.ISelfIdentityRepository _repo;
-    private readonly SelfIdentity _self;
+    private readonly SelfIdentityModel _self;
     private readonly IServiceProvider _services;
     private IServiceScope? _identityScope;
 
     public ShellViewModel(INavigationService navigation,
                           Percolator.Application.Identity.ISelfIdentityRepository repo,
-                          SelfIdentity self,
+                          SelfIdentityModel self,
                           IServiceProvider services)
     {
         _navigation = navigation;

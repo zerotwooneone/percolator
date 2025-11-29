@@ -2,7 +2,7 @@ using R3;
 
 namespace Desktop.Wpf.Features.Self;
 
-public sealed class SelfIdentity
+public sealed class SelfIdentityModel
 {
     public BindableReactiveProperty<string> DisplayName { get; } = new("Operator");
     public BindableReactiveProperty<string> Initials { get; } = new("OP");
