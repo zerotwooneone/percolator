@@ -15,10 +15,10 @@
 - **Identity Domain (Percolator.Identity)**
   - Refined `SelfIdentity` aggregate :
     - State:
-      - `SelfId Id` (int)
+      - `SelfId Id` (int, DDD value type)
       - `DisplayName? DisplayName`
       - `IReadOnlyList<IdentityKey> Keys` (reuse `IdentityKey`)
-      - `DateTimeOffset? LastUsedUtc`
+      - `DateTimeOffset LastUsedUtc`
     - Behavior:
       - `SetDisplayName(DisplayName|string)`
       - `AddKey(byte[] spki, DateTimeOffset notBefore, DateTimeOffset expiresAt, DateTimeOffset now)`
@@ -28,10 +28,10 @@
       - `TouchLastUsed(DateTimeOffset when)`
   - Domain repository contract (`ISelfIdentityRepository`):
     - `Task<SelfIdentity?> GetMostRecentAsync()`
-    - `Task<SelfIdentity?> GetByIdAsync(IdentityId id)`
+    - `Task<SelfIdentity?> GetByIdAsync(SelfId id)`
     - `Task<IReadOnlyList<SelfIdentity>> ListAsync()`
     - `Task SaveAsync(SelfIdentity identity)`
-    - Optional factory path: `Task<SelfIdentity> CreateAsync(CreateSelfIdentityParams p)`
+    - no CreateAsync - we need a domain factory, not an infra one. domain factory ensures created self identity always has a key
 - **Infrastructure (Percolator.Infrastructure)**
   - Implements domain `ISelfIdentityRepository` over encrypted SQLite.
   - Manages schema/migrations, encryption, and secure key storage abstractions.
@@ -63,9 +63,10 @@
     - REFACTOR: Consolidate common key-window helpers with `PeerIdentity` if desired (no cross-domain coupling).
 
 - **Chunk 2: Expand DB schema (EF migration)**
-  - Update `Percolator.Infrastructure.Persistence.SelfIdentityDbo` to include `LastUsedUtc` (nullable) and any required fields to support the domain aggregate.
+  - Update `Percolator.Infrastructure.Persistence.SelfIdentityDbo` to include `LastUsedUtc` (non-nullable, no data backfill) and any required fields to support the domain aggregate.
   - Update `PercolatorDbContext` mappings if necessary; generate EF migration to alter the existing SelfIdentity table.
   - Add an index on `LastUsedUtc` for MRU query.
+  - unique constraint on Name
   - Note: Build may be broken between editing DBO/context and adding migration; this is acceptable during the cutover.
   - TDD:
     - RED: Infrastructure test expecting `SelfIdentityDbo` to have `LastUsedUtc` and MRU order via query (integration-style with TestHost/SQLite in-memory or file-based).
