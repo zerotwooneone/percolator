@@ -93,49 +93,51 @@ public partial class App : Application
 
         // Self identity loading is orchestrated by ShellViewModel at runtime
 
-        // Detect Nerd Font family if available and register as a global resource for icons
+        // Configure icon font: try configured Ui.NerdFont first, then embedded; else log error and fall back to Segoe MDL2 Assets
         try
         {
-            // Optional configured preferred font name
             var uiOptions = HostInstance.Services.GetRequiredService<IOptionsMonitor<UiOptions>>().CurrentValue;
 
-            var preferred = new[]
-            {
-                string.IsNullOrWhiteSpace(uiOptions?.NerdFont) ? null : uiOptions!.NerdFont!.Trim(),
-                "FiraCode Nerd Font Mono",
-                "FiraCode Nerd Font",
-                "JetBrainsMono Nerd Font",
-                "CaskaydiaCove Nerd Font",
-                "Hack Nerd Font",
-                "Iosevka Nerd Font"
-            }
-            .Where(s => !string.IsNullOrWhiteSpace(s))
-            .Cast<string>()
-            .ToArray();
+            FontFamily? selected = null;
 
-            FontFamily? chosen = null;
-            foreach (var fam in Fonts.SystemFontFamilies)
+            var configured = uiOptions?.NerdFont?.Trim();
+            if (!string.IsNullOrWhiteSpace(configured))
             {
-                // Source: often the family name; FamilyNames has localized names
-                var candidates = fam.FamilyNames.Select(kv => kv.Value)
-                    .Append(fam.Source)
-                    .Where(s => !string.IsNullOrWhiteSpace(s))
-                    .Select(s => s!.Trim());
+                // Try to match an installed system font by family name
+                selected = Fonts.SystemFontFamilies.FirstOrDefault(fam =>
+                    fam.FamilyNames.Select(kv => kv.Value)
+                       .Append(fam.Source)
+                       .Any(name => string.Equals(name, configured, System.StringComparison.OrdinalIgnoreCase))
+                );
 
-                if (candidates.Any(name => preferred.Any(p => name.Equals(p, System.StringComparison.OrdinalIgnoreCase))))
+                if (selected is not null)
                 {
-                    chosen = fam;
-                    break;
+                    Application.Current.Resources["IconFontFamily"] = selected;
+                    logger.LogInformation("Icon font selected (configured): {Font}", selected.Source);
                 }
             }
 
-            // Fallback to configured or default Segoe MDL2 Assets
-            var fallbackName = uiOptions?.IconFontFallback;
-            if (string.IsNullOrWhiteSpace(fallbackName)) fallbackName = "Segoe MDL2 Assets";
-            var fallback = new FontFamily(fallbackName);
-            Application.Current.Resources["IconFontFamily"] = chosen ?? fallback;
+            if (selected is null)
+            {
+                // Fall back to embedded Nerd Font (pack URI)
+                try
+                {
+                    var embedded = new FontFamily(new Uri("pack://application:,,,/"), "Assets/Fonts/#FiraCode Nerd Font Mono");
+                    selected = embedded;
+                    Application.Current.Resources["IconFontFamily"] = embedded;
+                    logger.LogInformation("Icon font selected (embedded): {Font}", embedded.Source);
+                }
+                catch (System.Exception ex2)
+                {
+                    logger.LogError(ex2, "Failed to load embedded icon font");
+                }
+            }
 
-            logger.LogInformation("Icon font selected: {Font}", (chosen ?? fallback).Source);
+            if (selected is null)
+            {
+                logger.LogError("No icon font available (configured nor embedded). Falling back to Segoe MDL2 Assets to avoid crash.");
+                Application.Current.Resources["IconFontFamily"] = new FontFamily("Segoe MDL2 Assets");
+            }
 
             // Apply default typography scaling
             var scale = uiOptions?.FontScaling ?? 1.0;
@@ -150,7 +152,7 @@ public partial class App : Application
         }
         catch (System.Exception ex)
         {
-            logger.LogWarning(ex, "Icon font selection failed; falling back to Segoe MDL2 Assets");
+            logger.LogError(ex, "Icon font configuration failed unexpectedly");
             Application.Current.Resources["IconFontFamily"] = new FontFamily("Segoe MDL2 Assets");
         }
 

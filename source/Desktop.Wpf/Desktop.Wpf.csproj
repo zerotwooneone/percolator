@@ -18,7 +18,14 @@
     </ItemGroup>
 
     <ItemGroup>
-      <ProjectReference Include="..\Percolator.Application\Percolator.Application.csproj" />
+        <ProjectReference Include="..\Percolator.Application\Percolator.Application.csproj" />
+    </ItemGroup>
+
+    <!-- Embed Nerd Font as resource (linked from repo Assets folder) -->
+    <ItemGroup>
+        <Resource Include="..\..\Assets\Fonts\FiraCodeNerdFontMono-Regular.ttf">
+            <Link>Assets/Fonts/FiraCodeNerdFontMono-Regular.ttf</Link>
+        </Resource>
     </ItemGroup>
 
 </Project>

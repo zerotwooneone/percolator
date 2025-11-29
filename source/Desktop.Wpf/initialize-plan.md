@@ -147,7 +147,6 @@ Outcome: Green tests validating observable behavior (no UI).
 ## Chunk 10 — Packaging and CI hooks
 
 - Embed fonts/icons and mark `Resource` build action.
-- Add `dotnet restore`, `build`, `test` steps to CI (GitHub Actions/YAML placeholder in repo root).
 - Ensure single‑file plan documented in `readme.md` Getting Started uses `dotnet run --project Desktop.Wpf`.
 
 Outcome: Repeatable builds with basic CI and assets packaged.
