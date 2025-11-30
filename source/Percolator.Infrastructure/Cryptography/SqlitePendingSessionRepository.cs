@@ -16,11 +16,16 @@ namespace Percolator.Infrastructure.Cryptography
     {
         private readonly PercolatorDbContext _db;
         private readonly ActiveIdentityContext _active;
+        private readonly IClock _clock;
 
-        public SqlitePendingSessionRepository(PercolatorDbContext db, ActiveIdentityContext active)
+        public SqlitePendingSessionRepository(
+            PercolatorDbContext db, 
+            ActiveIdentityContext active,
+            IClock clock)
         {
             _db = db;
             _active = active;
+            _clock = clock;
         }
 
         public async Task AddAsync(PendingSession pending, CancellationToken cancellationToken = default)
@@ -86,25 +91,19 @@ namespace Percolator.Infrastructure.Cryptography
             }
         }
 
-        private static PendingSession Rehydrate(PendingSessionDbo row)
+        private PendingSession Rehydrate(PendingSessionDbo row)
         {
             var id = new PendingSessionId(row.Id);
             var remote = new PeerId(row.RemotePeerId);
             var ver = new ProtocolVersion(row.ProtocolVersion);
             var invitation = new HandshakeInvitation(row.Invitation);
-            var clock = new SystemClock();
-            var pending = PendingSession.FromInvitation(id, remote, ver, invitation, clock, row.ExpiresAtUtc);
+            var pending = PendingSession.FromInvitation(id, remote, ver, invitation, _clock, row.ExpiresAtUtc);
             // apply stored state if not awaiting-approval
             if (row.State == (int)ApprovalState.Rejected)
             {
                 pending.Reject();
             }
             return pending;
-        }
-
-        private sealed class SystemClock : IClock
-        {
-            public DateTimeOffset UtcNow => DateTimeOffset.UtcNow;
         }
     }
 }

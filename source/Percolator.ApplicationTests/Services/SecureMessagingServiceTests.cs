@@ -50,7 +50,7 @@ public class SecureMessagingServiceTests
         await repo.AddAsync(receiver);
 
         var pt = new Plaintext(new byte[] { 0x10, 0x20 });
-        var svc = new SecureMessagingService(repo, index.Object, catalog.Object);
+        var svc = new SecureMessagingService(repo, index.Object, catalog.Object, new Services.TestClock());
         var msg = await svc.EncryptAsync(sender.Id, pt, CancellationToken.None);
         msg.Should().NotBeNull();
 
