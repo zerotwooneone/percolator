@@ -75,6 +75,7 @@ public class ShellViewModelTests
             await Task.Delay(10, cts.Token);
 
         sut.IsLoading.Value.Should().BeFalse();
+        startupIdentityService.Verify(s => s.ResolveOrCreateAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Test]
@@ -115,6 +116,7 @@ public class ShellViewModelTests
 
         scopeFactory.Verify(f => f.CreateScope(), Times.AtLeastOnce);
         scopeMutator.Verify(m => m.SetActiveIdentity(It.IsAny<IdentityRecord>(), It.IsAny<X3dhKeys>()), Times.AtLeastOnce);
+        startupIdentityService.Verify(s => s.ResolveOrCreateAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Test]
@@ -161,6 +163,7 @@ public class ShellViewModelTests
         await Task.Delay(50);
 
         scopedProvider.Verify(sp => sp.GetService(typeof(SessionsSidebarViewModel)), Times.AtLeastOnce);
+        startupIdentityService.Verify(s => s.ResolveOrCreateAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Test]
