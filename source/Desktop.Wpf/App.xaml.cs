@@ -13,6 +13,9 @@ using Desktop.Wpf.Features.Sessions;
 using Desktop.Wpf.Features.Self;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
+using Percolator.Infrastructure;
+using Microsoft.EntityFrameworkCore;
+using Percolator.Infrastructure.Persistence;
 
 namespace Desktop.Wpf;
 
@@ -58,6 +61,9 @@ public partial class App : Application
                 services.Configure<RelayOptions>(context.Configuration.GetSection("Services:Relay"));
                 services.Configure<LoggingOptions>(context.Configuration.GetSection("Logging"));
 
+                // Core infrastructure (DB, identity, crypto, etc.)
+                services.AddInfrastructureServices(context.Configuration);
+
                 // Views
                 services.AddSingleton<MainWindow>();
                 // Navigation
@@ -76,7 +82,7 @@ public partial class App : Application
 
                 // Self identity
                 services.AddSingleton<SelfIdentityModel>();
-                services.AddSingleton<Percolator.Application.Identity.ISelfIdentityRepositoryOld, Desktop.Wpf.Features.Self.InMemorySelfIdentityRepository>();
+                services.AddSingleton<IStartupIdentityService, StartupIdentityService>();
                 // Identity repositories (in-memory fakes for desktop)
                 services.AddSingleton<Percolator.Identity.IPeerIdentityRepository, Desktop.Wpf.Features.Identity.InMemoryPeerIdentityRepository>();
 
@@ -86,6 +92,13 @@ public partial class App : Application
             .Build();
 
         HostInstance.Start();
+
+        // Ensure database schema is created (apply migrations) before any queries run
+        using (var scope = HostInstance.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<PercolatorDbContext>();
+            db.Database.Migrate();
+        }
 
         var logger = HostInstance.Services.GetRequiredService<ILogger<App>>();
         ObservableSystem.RegisterUnhandledExceptionHandler(ex =>

@@ -37,12 +37,13 @@ public class ShellViewModelTests
     }
 
     private static ShellViewModel CreateSut(
-        ISelfIdentityRepositoryOld repo,
+        ISelfIdentityRepositoryOld selfIdRepro,
         INavigationService nav,
-        IServiceProvider rootProvider)
+        IServiceProvider rootProvider,
+        IStartupIdentityService startupIdentityService)
     {
         var self = new SelfIdentityModel();
-        return new ShellViewModel(nav, repo, self, rootProvider);
+        return new ShellViewModel(nav, selfIdRepro, startupIdentityService, self, rootProvider);
     }
 
     [Test]
@@ -51,6 +52,11 @@ public class ShellViewModelTests
         var tcs = new TaskCompletionSource<SelfIdentityDto?>();
         var repo = new Mock<ISelfIdentityRepositoryOld>();
         repo.Setup(r => r.GetByIdAsync(It.IsAny<int>())).Returns(tcs.Task);
+        var startupIdentityService = new Mock<IStartupIdentityService>();
+        var domain = new SelfIdentity(new SelfId(1));
+        startupIdentityService
+            .Setup(s => s.ResolveOrCreateAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(domain);
 
         var nav = new Mock<INavigationService>();
         nav.SetupGet(n => n.ViewStream).Returns(Observable.Empty<object?>());
@@ -58,7 +64,7 @@ public class ShellViewModelTests
         var root = new Mock<IServiceProvider>();
         // not used in this path
 
-        var sut = CreateSut(repo.Object, nav.Object, root.Object);
+        var sut = CreateSut(repo.Object, nav.Object, root.Object, startupIdentityService.Object);
 
         sut.IsLoading.Value.Should().BeTrue();
 
@@ -77,6 +83,11 @@ public class ShellViewModelTests
         var repo = new Mock<ISelfIdentityRepositoryOld>();
         repo.Setup(r => r.GetByIdAsync(It.IsAny<int>()))
             .ReturnsAsync(new SelfIdentityDto { Id = 42, Name = "Bob" });
+        var startupIdentityService = new Mock<IStartupIdentityService>();
+        var domain = new SelfIdentity(new SelfId(42));
+        startupIdentityService
+            .Setup(s => s.ResolveOrCreateAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(domain);
 
         var nav = new Mock<INavigationService>();
         nav.SetupGet(n => n.ViewStream).Returns(Observable.Empty<object?>());
@@ -97,7 +108,7 @@ public class ShellViewModelTests
         root.Setup(sp => sp.GetService(typeof(IServiceScopeFactory)))
             .Returns(scopeFactory.Object);
 
-        var sut = CreateSut(repo.Object, nav.Object, root.Object);
+        var sut = CreateSut(repo.Object, nav.Object, root.Object, startupIdentityService.Object);
 
         // Allow async startup to run
         await Task.Delay(50);
@@ -112,6 +123,11 @@ public class ShellViewModelTests
         var repo = new Mock<ISelfIdentityRepositoryOld>();
         repo.Setup(r => r.GetByIdAsync(It.IsAny<int>()))
             .ReturnsAsync(new SelfIdentityDto { Id = 7, Name = "Carol" });
+        var startupIdentityService = new Mock<IStartupIdentityService>();
+        var domain = new SelfIdentity(new SelfId(7));
+        startupIdentityService
+            .Setup(s => s.ResolveOrCreateAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(domain);
 
         var nav = new Mock<INavigationService>();
         nav.SetupGet(n => n.ViewStream).Returns(Observable.Empty<object?>());
@@ -140,7 +156,7 @@ public class ShellViewModelTests
         root.Setup(sp => sp.GetService(typeof(IServiceScopeFactory)))
             .Returns(scopeFactory.Object);
 
-        var sut = CreateSut(repo.Object, nav.Object, root.Object);
+        var sut = CreateSut(repo.Object, nav.Object, root.Object, startupIdentityService.Object);
 
         await Task.Delay(50);
 
@@ -153,6 +169,11 @@ public class ShellViewModelTests
         var repo = new Mock<ISelfIdentityRepositoryOld>();
         repo.Setup(r => r.GetByIdAsync(It.IsAny<int>()))
             .ReturnsAsync(new SelfIdentityDto { Id = 9, Name = "Dora" });
+        var startupIdentityService = new Mock<IStartupIdentityService>();
+        var domain = new SelfIdentity(new SelfId(9));
+        startupIdentityService
+            .Setup(s => s.ResolveOrCreateAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(domain);
 
         var nav = new Mock<INavigationService>();
         nav.SetupGet(n => n.ViewStream).Returns(Observable.Empty<object?>());
@@ -186,7 +207,7 @@ public class ShellViewModelTests
         root.Setup(sp => sp.GetService(typeof(IServiceScopeFactory)))
             .Returns(scopeFactory.Object);
 
-        var sut = CreateSut(repo.Object, nav.Object, root.Object);
+        var sut = CreateSut(repo.Object, nav.Object, root.Object, startupIdentityService.Object);
 
         await Task.Delay(50);
 

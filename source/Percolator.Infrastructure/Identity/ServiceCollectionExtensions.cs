@@ -26,6 +26,7 @@ namespace Percolator.Infrastructure.Identity
             services.AddScoped<ISelfIdentityKeysStore, SqliteSelfIdentityKeysStore>();
             services.AddScoped<IPeerIdentityRepository, SqlitePeerIdentityRepository>();
             services.AddScoped<ISelfIdentityRepositoryOld, SqliteSelfIdentityRepositoryOld>();
+            services.AddScoped<ISelfIdentityRepository, SqliteSelfIdentityDomainRepository>();
             services.AddScoped<IPeerPublicSigningKeyStore, SqlitePeerPublicSigningKeyStore>();
             services.AddScoped<IRecipientPkhResolver, SqliteRecipientPkhResolver>();
 

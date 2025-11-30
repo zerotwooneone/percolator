@@ -23,17 +23,20 @@ public sealed class ShellViewModel : ViewModelBase
 
     private readonly INavigationService _navigation;
     private readonly Percolator.Application.Identity.ISelfIdentityRepositoryOld _repo;
+    private readonly IStartupIdentityService _startupIdentity;
     private readonly SelfIdentityModel _self;
     private readonly IServiceProvider _services;
     private IServiceScope? _identityScope;
 
     public ShellViewModel(INavigationService navigation,
                           Percolator.Application.Identity.ISelfIdentityRepositoryOld repo,
+                          IStartupIdentityService startupIdentity,
                           SelfIdentityModel self,
                           IServiceProvider services)
     {
         _navigation = navigation;
         _repo = repo;
+        _startupIdentity = startupIdentity;
         _self = self;
         _services = services;
 
@@ -55,8 +58,10 @@ public sealed class ShellViewModel : ViewModelBase
     {
         try
         {
-            // Simulate multi-identity: try to fetch the active one (hardcoded id=1 for now)
-            var dto = await _repo.GetByIdAsync(1);
+            // Resolve or create the domain identity via startup service
+            var domainIdentity = await _startupIdentity.ResolveOrCreateAsync();
+            // Fetch DTO by resolved id to retrieve PeerId (until DTO usages are removed)
+            var dto = await _repo.GetByIdAsync(domainIdentity.Id.Value);
             if (dto is null)
             {
                 // Navigate to new-user screen
