@@ -24,6 +24,7 @@ public sealed class SessionsSidebarViewModel : ViewModelBase
     public BindableReactiveProperty<bool> IsLoading { get; }
     public BindableReactiveProperty<int> PendingInvitesCount { get; }
     public AsyncRelayCommand IncrementPendingInvitesCommand { get; }
+    public PendingHandshakesMenuViewModel PendingMenu { get; }
 
     private readonly ObservableCollection<SessionListItem> _items = new();
 
@@ -46,6 +47,15 @@ public sealed class SessionsSidebarViewModel : ViewModelBase
         {
             PendingInvitesCount.Value = Math.Max(0, PendingInvitesCount.Value) + 1;
             return Task.CompletedTask;
+        });
+
+        PendingMenu = new PendingHandshakesMenuViewModel();
+        // Demo data to visualize the card; replace with real feed later
+        PendingMenu.PendingHandshakes.Add(new PendingHandshakeItem
+        {
+            DisplayName = "Anon_User_402",
+            Initials = "AU",
+            BundleText = "Bundle: PK-NBM094"
         });
 
         // Load sessions once, then filter locally

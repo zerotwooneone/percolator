@@ -10,6 +10,8 @@
                 <ResourceDictionary Source="/Desktop.Wpf;component/Shared/Theme/Styles.xaml" />
                 <ResourceDictionary Source="/Desktop.Wpf;component/Shared/Theme/Icons.xaml" />
                 <ResourceDictionary Source="/Desktop.Wpf;component/Shared/Controls/MatButton.xaml" />
+                <ResourceDictionary Source="/Desktop.Wpf;component/Shared/Controls/MatMenu.xaml" />
+                <ResourceDictionary Source="/Desktop.Wpf;component/Shared/Controls/PendingHandshakesMenuCard.xaml" />
                 <ResourceDictionary Source="/Desktop.Wpf;component/Shared/Theme/ViewMappings.xaml" />
             </ResourceDictionary.MergedDictionaries>
         </ResourceDictionary>
