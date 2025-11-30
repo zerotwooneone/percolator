@@ -4,7 +4,7 @@
   <UserControl.Resources>
     <BooleanToVisibilityConverter x:Key="BoolToVis"/>
   </UserControl.Resources>
-  <Grid>
+  <Grid MouseLeftButtonUp="OnMouseLeftButtonUp" Cursor="Hand">
     <Border x:Name="Avatar" Width="{Binding Diameter, RelativeSource={RelativeSource AncestorType=UserControl}}"
             Height="{Binding Diameter, RelativeSource={RelativeSource AncestorType=UserControl}}"
             CornerRadius="{Binding CornerRadius, RelativeSource={RelativeSource AncestorType=UserControl}}"

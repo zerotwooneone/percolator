@@ -91,12 +91,31 @@ public class MatButton : Button
 
     private void BeginBadgePulse()
     {
-        // Look for storyboard defined in ControlTemplate
+        // Look for storyboard defined in ControlTemplate and retarget it explicitly to avoid name scope issues
         if (Template is null) return;
         var badge = Template.FindName("BadgeDot", this) as FrameworkElement;
         if (badge == null) return;
-        var sb = this.TryFindResource("BadgePulseStoryboard") as System.Windows.Media.Animation.Storyboard
-                 ?? (Template.FindName("BadgePulseStoryboard", this) as System.Windows.Media.Animation.Storyboard);
-        sb?.Begin(this, true);
+        var resource = this.TryFindResource("BadgePulseStoryboard") as System.Windows.Media.Animation.Storyboard;
+        var sb = resource?.Clone();
+        if (sb == null)
+        {
+            // Fallback: build a simple pulse storyboard programmatically
+            sb = new System.Windows.Media.Animation.Storyboard();
+            var dur = new System.Windows.Duration(System.TimeSpan.FromSeconds(0.15));
+            var easeX = new System.Windows.Media.Animation.DoubleAnimation { From = 1, To = 1.4, Duration = dur, AutoReverse = true, RepeatBehavior = new System.Windows.Media.Animation.RepeatBehavior(2) };
+            var easeY = new System.Windows.Media.Animation.DoubleAnimation { From = 1, To = 1.4, Duration = dur, AutoReverse = true, RepeatBehavior = new System.Windows.Media.Animation.RepeatBehavior(2) };
+            var fade = new System.Windows.Media.Animation.DoubleAnimation { From = 1, To = 0.3, Duration = dur, AutoReverse = true, RepeatBehavior = new System.Windows.Media.Animation.RepeatBehavior(2) };
+            System.Windows.Media.Animation.Storyboard.SetTargetProperty(easeX, new PropertyPath("(UIElement.RenderTransform).(ScaleTransform.ScaleX)"));
+            System.Windows.Media.Animation.Storyboard.SetTargetProperty(easeY, new PropertyPath("(UIElement.RenderTransform).(ScaleTransform.ScaleY)"));
+            System.Windows.Media.Animation.Storyboard.SetTargetProperty(fade, new PropertyPath("Opacity"));
+            sb.Children.Add(fade);
+            sb.Children.Add(easeX);
+            sb.Children.Add(easeY);
+        }
+        foreach (var tl in sb.Children)
+        {
+            System.Windows.Media.Animation.Storyboard.SetTarget(tl, badge);
+        }
+        sb.Begin();
     }
 }

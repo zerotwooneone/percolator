@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 
 namespace Desktop.Wpf.Shared.Controls;
 
@@ -44,5 +45,31 @@ public partial class InitialsAvatar : UserControl
     {
         get => (CornerRadius)GetValue(CornerRadiusProperty);
         set => SetValue(CornerRadiusProperty, value);
+    }
+
+    public static readonly DependencyProperty CommandProperty = DependencyProperty.Register(
+        nameof(Command), typeof(ICommand), typeof(InitialsAvatar), new PropertyMetadata(null));
+
+    public ICommand? Command
+    {
+        get => (ICommand?)GetValue(CommandProperty);
+        set => SetValue(CommandProperty, value);
+    }
+
+    public static readonly DependencyProperty CommandParameterProperty = DependencyProperty.Register(
+        nameof(CommandParameter), typeof(object), typeof(InitialsAvatar), new PropertyMetadata(null));
+
+    public object? CommandParameter
+    {
+        get => GetValue(CommandParameterProperty);
+        set => SetValue(CommandParameterProperty, value);
+    }
+
+    private void OnMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        var cmd = Command;
+        var param = CommandParameter;
+        if (cmd is null) return;
+        if (cmd.CanExecute(param)) cmd.Execute(param);
     }
 }

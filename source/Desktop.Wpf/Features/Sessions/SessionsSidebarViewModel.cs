@@ -22,6 +22,8 @@ public sealed class SessionsSidebarViewModel : ViewModelBase
     public BindableReactiveProperty<string?> SelectedSessionId { get; }
     public SelfIdentityModel Self { get; }
     public BindableReactiveProperty<bool> IsLoading { get; }
+    public BindableReactiveProperty<int> PendingInvitesCount { get; }
+    public AsyncRelayCommand IncrementPendingInvitesCommand { get; }
 
     private readonly ObservableCollection<SessionListItem> _items = new();
 
@@ -39,6 +41,12 @@ public sealed class SessionsSidebarViewModel : ViewModelBase
         SearchText = new BindableReactiveProperty<string>("");
         SelectedSessionId = new BindableReactiveProperty<string?>(null);
         IsLoading = new BindableReactiveProperty<bool>(true);
+        PendingInvitesCount = new BindableReactiveProperty<int>(0);
+        IncrementPendingInvitesCommand = new AsyncRelayCommand(_ =>
+        {
+            PendingInvitesCount.Value = Math.Max(0, PendingInvitesCount.Value) + 1;
+            return Task.CompletedTask;
+        });
 
         // Load sessions once, then filter locally
         _ = LoadAsync(sessions, peers);

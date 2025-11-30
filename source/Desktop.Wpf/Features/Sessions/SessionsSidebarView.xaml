@@ -17,7 +17,8 @@
       </Grid.ColumnDefinitions>
 
       <!-- Self identity avatar (seeded) -->
-      <controls:InitialsAvatar Grid.Column="0" Diameter="28" CornerRadius="14" Text="{Binding Self.Initials.Value}"/>
+      <controls:InitialsAvatar Grid.Column="0" Diameter="28" Text="{Binding Self.Initials.Value}"
+                               Command="{Binding IncrementPendingInvitesCommand}"/>
 
       <!-- Search input fills -->
       <controls:MatInput Grid.Column="1" Margin="8,0,8,0"
@@ -31,8 +32,8 @@
       </controls:MatInput>
 
       <!-- Add peer / new chat action with notification light (dot; pulses on increment) -->
-      <controls:MatButton Grid.Column="2" IsIcon="True" Variant="Filled" Width="36" Height="36"
-                          controls:MatButton.NotificationCount="{Binding PendingInvitesCount}"
+      <controls:MatButton Grid.Column="2" IsIcon="True" Variant="Filled"
+                          NotificationCount="{Binding PendingInvitesCount.Value}"
                           ToolTip="Add peer">
         <TextBlock Style="{StaticResource IconText}" Text="{StaticResource IconUserAdd}"/>
       </controls:MatButton>
