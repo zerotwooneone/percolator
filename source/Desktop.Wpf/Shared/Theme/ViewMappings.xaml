@@ -19,4 +19,7 @@
   <DataTemplate DataType="{x:Type vmChat:ChatViewModel}">
     <vChat:ChatView />
   </DataTemplate>
+  <DataTemplate DataType="{x:Type vmShell:NewUserViewModel}">
+    <vShell:NewUserView />
+  </DataTemplate>
 </ResourceDictionary>

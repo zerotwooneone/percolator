@@ -64,9 +64,9 @@ public sealed class ShellViewModel : ViewModelBase
             var dto = await _repo.GetByIdAsync(domainIdentity.Id);
             if (dto is null)
             {
-                // Navigate to new-user screen
-                var newUser = _services.GetRequiredService<Desktop.Wpf.Features.Shell.NewUserView>();
-                _navigation.Navigate(newUser);
+                // Navigate to new-user screen (VM-first)
+                var newUserVm = _services.GetRequiredService<Desktop.Wpf.Features.Shell.NewUserViewModel>();
+                _navigation.Navigate(newUserVm);
                 return;
             }
 

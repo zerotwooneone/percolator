@@ -93,7 +93,7 @@ public partial class App : Application
                 services.AddSingleton<Percolator.Identity.IPeerIdentityRepository, Desktop.Wpf.Features.Identity.InMemoryPeerIdentityRepository>();
 
                 // Startup views
-                services.AddSingleton<Desktop.Wpf.Features.Shell.NewUserView>();
+                services.AddSingleton<Desktop.Wpf.Features.Shell.NewUserViewModel>();
             })
             .Build();
 
