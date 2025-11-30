@@ -30,9 +30,11 @@
         </controls:MatInput.Prefix>
       </controls:MatInput>
 
-      <!-- Compose/new chat action -->
-      <controls:MatButton Grid.Column="2" IsIcon="True" IsRound="True" Variant="Filled" Width="36" Height="36">
-        <TextBlock Style="{StaticResource IconText}" Text="{StaticResource IconPencil}"/>
+      <!-- Add peer / new chat action with notification light (dot; pulses on increment) -->
+      <controls:MatButton Grid.Column="2" IsIcon="True" Variant="Filled" Width="36" Height="36"
+                          controls:MatButton.NotificationCount="{Binding PendingInvitesCount}"
+                          ToolTip="Add peer">
+        <TextBlock Style="{StaticResource IconText}" Text="{StaticResource IconUserAdd}"/>
       </controls:MatButton>
     </Grid>
 

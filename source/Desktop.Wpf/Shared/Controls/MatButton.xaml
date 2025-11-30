@@ -5,13 +5,36 @@
     <Setter Property="Template">
       <Setter.Value>
         <ControlTemplate TargetType="controls:MatButton">
-          <Border x:Name="Bd" Background="{TemplateBinding Background}"
-                  BorderBrush="{TemplateBinding BorderBrush}"
-                  BorderThickness="{TemplateBinding BorderThickness}"
-                  CornerRadius="{TemplateBinding controls:MatButton.CornerRadius}"
-                  Padding="{TemplateBinding Padding}">
-            <ContentPresenter x:Name="Cp" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-          </Border>
+          <Grid>
+            <Border x:Name="Bd" Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="{TemplateBinding BorderThickness}"
+                    CornerRadius="{TemplateBinding controls:MatButton.CornerRadius}"
+                    Padding="{TemplateBinding Padding}">
+              <ContentPresenter x:Name="Cp" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+            <!-- Notification badge dot in top-right corner -->
+            <Ellipse x:Name="BadgeDot" Width="10" Height="10"
+                     Fill="{StaticResource PrimaryBrush}"
+                     StrokeThickness="0"
+                     HorizontalAlignment="Right" VerticalAlignment="Top"
+                     Margin="0,2,2,0"
+                     Visibility="Collapsed">
+              <Ellipse.RenderTransform>
+                <ScaleTransform x:Name="BadgeScale" ScaleX="1" ScaleY="1" CenterX="0.5" CenterY="0.5"/>
+              </Ellipse.RenderTransform>
+            </Ellipse>
+          </Grid>
+          <ControlTemplate.Resources>
+            <Storyboard x:Key="BadgePulseStoryboard">
+              <DoubleAnimation Storyboard.TargetName="BadgeDot" Storyboard.TargetProperty="Opacity"
+                               From="1" To="0.3" Duration="0:0:0.15" AutoReverse="True" RepeatBehavior="2x"/>
+              <DoubleAnimation Storyboard.TargetName="BadgeDot" Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)"
+                               From="1" To="1.4" Duration="0:0:0.15" AutoReverse="True" RepeatBehavior="2x"/>
+              <DoubleAnimation Storyboard.TargetName="BadgeDot" Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleY)"
+                               From="1" To="1.4" Duration="0:0:0.15" AutoReverse="True" RepeatBehavior="2x"/>
+            </Storyboard>
+          </ControlTemplate.Resources>
           <ControlTemplate.Triggers>
             <Trigger Property="IsMouseOver" Value="True">
               <Setter TargetName="Bd" Property="Background" Value="{StaticResource ButtonHoverBrush}"/>
@@ -30,6 +53,10 @@
             <!-- Round shape for icon buttons when requested -->
             <Trigger Property="controls:MatButton.IsRound" Value="True">
               <Setter TargetName="Bd" Property="CornerRadius" Value="999"/>
+            </Trigger>
+            <!-- Show badge when HasNotification is true -->
+            <Trigger Property="controls:MatButton.HasNotification" Value="True">
+              <Setter TargetName="BadgeDot" Property="Visibility" Value="Visible"/>
             </Trigger>
             <!-- Variant handling -->
             <Trigger Property="controls:MatButton.Variant" Value="Filled">

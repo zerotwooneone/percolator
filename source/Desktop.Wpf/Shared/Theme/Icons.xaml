@@ -38,4 +38,5 @@
   <system:String x:Key="IconCloudLock">&#xF11F1;</system:String>
   <system:String x:Key="IconRelay">&#xF50F;</system:String>
   <system:String x:Key="IconDirect">&#xF0B45;</system:String>
+  <system:String x:Key="IconUserAdd">&#xF234;</system:String>
 </ResourceDictionary>
