@@ -60,7 +60,7 @@ public sealed class InMemorySessionRepository : ISessionRepository
     }
 
     // Minimal clock/crypto/noop types for seeding
-    private sealed class SystemClock : IClock { public DateTimeOffset UtcNow => DateTimeOffset.UtcNow; }
+    
     private sealed class NoopSessionCrypto : ISessionCrypto
     {
         public (SharedSecret SharedSecret, RatchetEphemeralKey EphemeralPublic) X3DH_Initiate(PrivatePreKey localIdentityPrivate, PreKeyBundle remoteBundle) => (new SharedSecret(new byte[32]), new RatchetEphemeralKey(new byte[32]));

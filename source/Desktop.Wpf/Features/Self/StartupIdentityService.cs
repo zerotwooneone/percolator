@@ -1,6 +1,7 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
+using Percolator.Cryptography;
 using Percolator.Identity;
 using Percolator.Identity.Model;
 
@@ -9,12 +10,12 @@ namespace Desktop.Wpf.Features.Self;
 public sealed class StartupIdentityService : IStartupIdentityService
 {
     private readonly ISelfIdentityRepository _repo;
-    private readonly Func<DateTimeOffset> _clock;
+    private readonly IClock _clock;
 
-    public StartupIdentityService(ISelfIdentityRepository repo, Func<DateTimeOffset>? clock = null)
+    public StartupIdentityService(ISelfIdentityRepository repo, IClock clock)
     {
         _repo = repo;
-        _clock = clock ?? (() => DateTimeOffset.UtcNow);
+        _clock = clock;
     }
 
     public async Task<SelfIdentity> ResolveOrCreateAsync(CancellationToken ct = default)
@@ -25,10 +26,10 @@ public sealed class StartupIdentityService : IStartupIdentityService
             return existing;
         }
 
-        var now = _clock();
+        var now = _clock.UtcNow;
         var created = new SelfIdentity(new SelfId(0));
         created.TouchLastUsed(now);
-        await _repo.SaveAsync(created, ct).ConfigureAwait(false);
-        return created;
+        var newId =await _repo.CreateAsync(created, ct).ConfigureAwait(false);
+        return await _repo.GetByIdAsync(newId, ct).ConfigureAwait(false)!;
     }
 }

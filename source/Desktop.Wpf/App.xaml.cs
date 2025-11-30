@@ -15,6 +15,10 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
 using Percolator.Infrastructure;
 using Microsoft.EntityFrameworkCore;
+using Percolator.Application;
+using Percolator.Application.Cryptography;
+using Percolator.Cryptography;
+using Percolator.Infrastructure.Cryptography;
 using Percolator.Infrastructure.Persistence;
 
 namespace Desktop.Wpf;
@@ -63,6 +67,8 @@ public partial class App : Application
 
                 // Core infrastructure (DB, identity, crypto, etc.)
                 services.AddInfrastructureServices(context.Configuration);
+                services.AddApplicationServices(context.Configuration);
+                services.AddScoped<IClock, SystemClock>();
 
                 // Views
                 services.AddSingleton<MainWindow>();

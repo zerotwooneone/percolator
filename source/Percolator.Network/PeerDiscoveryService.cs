@@ -63,6 +63,8 @@ public class PeerDiscoveryService : IDisposable, IPeerDiscoveryService
 
     private async Task BroadcastPresenceAsync(CancellationToken token)
     {
+        // 1. Get the public key
+        var publicKey = _signingService.GetActivePublicKey();
         var broadcastEndpoint = new IPEndPoint(IPAddress.Broadcast, _config.BroadcastPort);
         while (!token.IsCancellationRequested)
         { 
@@ -73,9 +75,6 @@ public class PeerDiscoveryService : IDisposable, IPeerDiscoveryService
                     await Task.Delay(100, token); // prevent tight loop if client is not ready
                     continue;
                 }
-
-                // 1. Get the public key
-                var publicKey = _signingService.GetActivePublicKey();
 
                 // 2. Create the signed payload, including the public key
                 var protoPayload = new DiscoveryPayload
