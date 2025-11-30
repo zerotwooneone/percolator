@@ -32,23 +32,17 @@
       </controls:MatInput>
 
       <!-- Add peer / new chat action with notification light (dot; pulses on increment) -->
-      <controls:MatButton Grid.Column="2" IsIcon="True" Variant="Filled"
-                          NotificationCount="{Binding PendingInvitesCount.Value}"
+      <controls:MatButton x:Name="AddPeerBtn" Grid.Column="2" IsIcon="True" Variant="Filled"
+                          NotificationCount="{Binding PendingMenu.PendingHandshakes.Count}"
                           att:MenuBehaviors.OpenOnLeftClick="True"
                           ToolTip="Add peer">
         <TextBlock Style="{StaticResource IconText}" Text="{StaticResource IconUserAdd}"/>
         <controls:MatButton.ContextMenu>
           <ContextMenu Style="{StaticResource MatContextMenu}"
-                      DataContext="{Binding PlacementTarget.DataContext.PendingMenu, RelativeSource={RelativeSource AncestorType=ContextMenu}}">
-            <MenuItem Style="{StaticResource MatMenuItemCard}">
-              <MenuItem.Header>
-                <ContentPresenter Content="{Binding}" ContentTemplate="{StaticResource PendingHandshakesCard}"/>
-              </MenuItem.Header>
-            </MenuItem>
-            <Separator/>
-            <MenuItem Header="Add contact" Style="{StaticResource MatMenuItem}"/>
-            <MenuItem Header="Invite via link" Style="{StaticResource MatMenuItem}"/>
-            <MenuItem Header="Scan QR" Style="{StaticResource MatMenuItem}"/>
+                      DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
+            <MenuItem Style="{StaticResource MatMenuItemCard}"
+                      Header="{Binding PendingMenu}"
+                      HeaderTemplate="{StaticResource PendingHandshakesCard}"/>
           </ContextMenu>
         </controls:MatButton.ContextMenu>
       </controls:MatButton>

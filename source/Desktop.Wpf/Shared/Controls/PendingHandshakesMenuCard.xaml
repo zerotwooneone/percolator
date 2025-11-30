@@ -3,7 +3,7 @@
                     xmlns:controls="clr-namespace:Desktop.Wpf.Shared.Controls"
                     xmlns:att="clr-namespace:Desktop.Wpf.Shared.Attached">
   <DataTemplate x:Key="PendingHandshakeItemTemplate">
-    <Border Style="{StaticResource BaseBorder}" Margin="0,10,0,0" Padding="8">
+    <Border Style="{StaticResource BaseBorder}" Margin="0,10,0,0" Padding="8" >
       <Grid>
         <Grid.ColumnDefinitions>
           <ColumnDefinition Width="Auto"/>
@@ -18,19 +18,22 @@
               <ColumnDefinition Width="*"/>
               <ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
-            <controls:MatButton Grid.Column="0" Variant="Outlined" Height="28"
+            <controls:MatButton Grid.Column="0" Variant="Outlined" 
                                 Command="{Binding DataContext.AcceptHandshakeCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
                                 CommandParameter="{Binding}"
                                 att:MenuBehaviors.CloseParentOnClick="True">
-              <TextBlock Text="ACCEPT"/>
+              <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                <TextBlock Style="{StaticResource IconText}" Text="{StaticResource IconCircleCheck}" Margin="0,0,6,0"/>
+                <TextBlock Text="ACCEPT" VerticalAlignment="Center"/>
+              </StackPanel>
             </controls:MatButton>
-            <controls:MatButton Grid.Column="1" Margin="10,0,0,0" Variant="Outlined" Height="28"
+            <controls:MatButton Grid.Column="1" Margin="10,0,0,0" Variant="Outlined"
                                 Command="{Binding DataContext.BurnHandshakeCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
                                 CommandParameter="{Binding}"
                                 att:MenuBehaviors.CloseParentOnClick="True">
               <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
-                <TextBlock Text="🔥" Margin="0,0,6,0"/>
-                <TextBlock Text="BURN"/>
+                <TextBlock Style="{StaticResource IconText}" Text="{StaticResource IconFire}" Margin="0,0,6,0"/>
+                <TextBlock Text="BURN" VerticalAlignment="Center"/>
               </StackPanel>
             </controls:MatButton>
           </Grid>
@@ -42,14 +45,7 @@
   <DataTemplate x:Key="PendingHandshakesCard">
     <Border Style="{StaticResource BaseBorder}" Padding="12" Width="260">
       <StackPanel>
-        <Grid>
-          <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="*"/>
-            <ColumnDefinition Width="Auto"/>
-          </Grid.ColumnDefinitions>
-          <TextBlock Text="PENDING HANDSHAKES" Foreground="{StaticResource OnSurfaceVariantBrush}" FontSize="12"/>
-          <TextBlock Grid.Column="1" Text="✕" Opacity="0.6"/>
-        </Grid>
+        <TextBlock Text="PENDING HANDSHAKES" Foreground="{StaticResource OnSurfaceVariantBrush}" FontSize="12"/>
         <ItemsControl ItemsSource="{Binding PendingHandshakes}" ItemTemplate="{StaticResource PendingHandshakeItemTemplate}"/>
       </StackPanel>
     </Border>
