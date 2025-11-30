@@ -1,6 +1,8 @@
+using Percolator.Identity;
+
 namespace Percolator.Application.Identity;
 
 public interface IIdentityOrchestrator
 {
-    Task ResolveIdentityAsync(string identityName, CancellationToken cancellationToken, string? fallbackIdentityName=null);
+    Task ResolveIdentityAsync(SelfId selfId,  CancellationToken cancellationToken);
 }

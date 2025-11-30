@@ -131,6 +131,10 @@ namespace Percolator.Application.Network
 
         public async Task<DeliverOpaqueMessageResult> Handle(DeliverOpaqueMessageCommand request, CancellationToken cancellationToken)
         {
+            if (_activeIdentityContext.Identity == null)
+            {
+                throw new InvalidOperationException("Active identity not loaded.");
+            }
             _logger.LogInformation("Processing opaque message (session inferred from ratchet header)");
             
                 var sessionRatchetMessage = new SessionRatchetMessage(request.PayloadBytes);
@@ -153,7 +157,7 @@ namespace Percolator.Application.Network
 
                 await _ratchetLookup.UpsertAsync(inferredSessionId, ratchetKey, DateTimeOffset.UtcNow, cancellationToken).ConfigureAwait(false);
 
-                var directSession = await _directSessionRepository.GetBySessionIdAsync(nonNullDirectSessionId, _activeIdentityContext.Identity.SelfIdentityId).ConfigureAwait(false)
+                var directSession = await _directSessionRepository.GetBySessionIdAsync(nonNullDirectSessionId, _activeIdentityContext.Identity.SelfIdentityId.Value).ConfigureAwait(false)
                     ?? throw new InvalidOperationException($"No direct session mapping found for session {inferredSessionId}");
                 var remotePeerId = directSession.RemotePeerId;
                 _logger.LogInformation("Resolved remote peer {PeerId} for session {SessionId}", remotePeerId, directSession.SessionId);
@@ -186,7 +190,7 @@ namespace Percolator.Application.Network
                 }
                 _logger.LogDebug("Allowed InternalEnvelope case {Case}; dispatching to orchestrator/transport path", internalEnvelope.ApplicationPayloadCase);
 
-                var ctx = new SessionContext(inferredSessionId.Value, _activeIdentityContext.Identity!.SelfIdentityId, directSession.RemotePeerId.Value);
+                var ctx = new SessionContext(inferredSessionId.Value, _activeIdentityContext.Identity!.SelfIdentityId.Value, directSession.RemotePeerId.Value);
 
                 // Special-case: RelayOpaqueEnvelope requires RPC-level ack response
                 if (internalEnvelope.ApplicationPayloadCase == InternalEnvelope.ApplicationPayloadOneofCase.RelayOpaqueEnvelope)

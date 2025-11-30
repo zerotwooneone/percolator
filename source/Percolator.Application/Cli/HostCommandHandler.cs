@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using MediatR;
 using Microsoft.Extensions.Logging;
 using Percolator.Application.Identity;
+using Percolator.Identity;
 
 namespace Percolator.Application.Cli;
 
@@ -26,7 +27,7 @@ public sealed class HostCommandHandler : IRequestHandler<HostCommand, HostStartu
     public async Task<HostStartupInfo> Handle(HostCommand request, CancellationToken cancellationToken)
     {
         // Ensure identity is resolved and keys are loaded
-        await _identityOrchestrator.ResolveIdentityAsync(request.SelfIdentityName, cancellationToken, fallbackIdentityName: "default").ConfigureAwait(false);
+        await _identityOrchestrator.ResolveIdentityAsync(new SelfId(999), cancellationToken).ConfigureAwait(false);
 
         if (_activeIdentityContext.Keys?.IdentitySigningKey is null)
         {

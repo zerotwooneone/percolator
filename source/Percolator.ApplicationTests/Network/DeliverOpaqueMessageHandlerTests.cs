@@ -444,7 +444,7 @@ namespace Percolator.ApplicationTests.Network;
         var logger = Mock.Of<ILogger<DeliverOpaqueMessageHandler>>();
         var active = new ActiveIdentityContext
         {
-            Identity = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "Test", null) { SelfIdentityId = 1 }
+            Identity = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "Test", null) { SelfIdentityId = new SelfId(1) }
         };
         // Common setup: orchestrator delegation returns null by default (no early response)
         mediator.Setup(m => m.Send(It.IsAny<ProcessInternalEnvelopeCommand>(), It.IsAny<CancellationToken>()))

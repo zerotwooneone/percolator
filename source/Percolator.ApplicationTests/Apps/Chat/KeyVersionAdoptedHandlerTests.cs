@@ -9,6 +9,7 @@ using Percolator.Application.Apps.Chat;
 using Percolator.Network;
 using Microsoft.Extensions.Logging.Abstractions;
 using Percolator.Application.Network;
+using Percolator.Identity;
 
 namespace Percolator.ApplicationTests.Apps.Chat
 {
@@ -31,7 +32,7 @@ namespace Percolator.ApplicationTests.Apps.Chat
             _pkh = new Mock<IRecipientPkhResolver>(MockBehavior.Strict);
             _acting = new Mock<IActingAdminResolver>(MockBehavior.Strict);
             _loggerFactory = Microsoft.Extensions.Logging.LoggerFactory.Create(b=>{});
-            _active = new Percolator.Application.Identity.ActiveIdentityContext { Identity = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "self") { SelfIdentityId = 1 } };
+            _active = new Percolator.Application.Identity.ActiveIdentityContext { Identity = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "self") { SelfIdentityId = new SelfId(1) } };
             _sender = new Mock<IRemoteEnvelopeSender>(MockBehavior.Strict);
         }
 

@@ -9,14 +9,14 @@ using System.Security.Cryptography;
 
 namespace Percolator.Application.Cli;
 
-public class CreateSelfIdentityHandler : IRequestHandler<CreateSelfIdentityCommand, int>
+public class CreateSelfIdentityHandler : IRequestHandler<CreateSelfIdentityCommand, SelfId>
 {
-    private readonly ISelfIdentityRepositoryOld _selfIdentityRepository;
+    private readonly ISelfIdentityRepository _selfIdentityRepository;
     private readonly ISelfIdentityKeysStore _keysStore;
     private readonly ILogger<CreateSelfIdentityHandler> _logger;
 
     public CreateSelfIdentityHandler(
-        ISelfIdentityRepositoryOld selfIdentityRepository,
+        ISelfIdentityRepository selfIdentityRepository,
         ISelfIdentityKeysStore keysStore,
         ILogger<CreateSelfIdentityHandler> logger)
     {
@@ -25,23 +25,27 @@ public class CreateSelfIdentityHandler : IRequestHandler<CreateSelfIdentityComma
         _logger = logger;
     }
 
-    public async Task<int> Handle(CreateSelfIdentityCommand request, CancellationToken cancellationToken)
+    public async Task<SelfId> Handle(CreateSelfIdentityCommand request, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(request.Name))
         {
             throw new ArgumentException("Name is required", nameof(request.Name));
         }
 
-        var peerId = request.PeerId ?? Guid.NewGuid();
-        var id = await _selfIdentityRepository.CreateAsync(peerId, request.Name).ConfigureAwait(false);
-
+        // Create domain identity and persist, capturing generated id
+        var now = DateTimeOffset.UtcNow;
+        var identity = new Percolator.Identity.Model.SelfIdentity(new SelfId(0));
+        identity.SetDisplayName(request.Name);
+        identity.TouchLastUsed(now);
+        var newId = await _selfIdentityRepository.CreateAsync(identity, cancellationToken).ConfigureAwait(false);
+        
         // Generate and persist X3DH keys for the new self identity
         var ikSigning = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var spk = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var keys = new X3dhKeys(ikSigning, spk);
-        await _keysStore.SaveAsync(id, keys, cancellationToken).ConfigureAwait(false);
-        _logger.LogInformation("Created keys for identity '{Name}' (SelfIdentityId={Id}, PeerId={PeerId}, PublicKey={PublicKey})", request.Name, id, peerId, Convert.ToBase64String(keys.IdentitySigningKey.ExportSubjectPublicKeyInfo()));
+        await _keysStore.SaveAsync(newId, keys, cancellationToken).ConfigureAwait(false);
+        _logger.LogInformation("Created keys for identity '{Name}' (SelfIdentityId={Id}, PublicKey={PublicKey})", request.Name, newId, Convert.ToBase64String(keys.IdentitySigningKey.ExportSubjectPublicKeyInfo()));
 
-        return id;
+        return newId;
     }
 }

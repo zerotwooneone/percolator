@@ -17,6 +17,7 @@ using Percolator.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using System.Security.Cryptography.X509Certificates;
 using System.Security.Cryptography;
+using Percolator.Identity;
 using Percolator.MessageQueue.DependencyInjection;
 
 namespace Percolator.ApplicationIntegrationTests;
@@ -211,10 +212,10 @@ public abstract class IntegrationTestBase
         {
             // Ensure the self identity exists in the repository (and keys exist) before loading
             var mediator = scope.ServiceProvider.GetRequiredService<MediatR.IMediator>();
-            await mediator.Send(new Percolator.Application.Cli.CreateSelfIdentityCommand(identityName, null));
+            var selfId = await mediator.Send(new Percolator.Application.Cli.CreateSelfIdentityCommand(identityName, null));
 
             var identityOrchestrator = scope.ServiceProvider.GetRequiredService<IIdentityOrchestrator>();
-            await identityOrchestrator.ResolveIdentityAsync(identityName, CancellationToken.None);
+            await identityOrchestrator.ResolveIdentityAsync(selfId, CancellationToken.None);
         }
         return host;
     }

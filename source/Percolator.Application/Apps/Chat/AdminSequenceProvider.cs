@@ -28,7 +28,7 @@ namespace Percolator.Application.Apps.Chat
         {
             // Resolve the local conversation row for this self identity
             var selfIdentityId = _activeIdentityContext.Identity!.SelfIdentityId;
-            var convo = await _conversations.GetByGroupGuidAsync(groupConversationGuid, selfIdentityId).ConfigureAwait(false);
+            var convo = await _conversations.GetByGroupGuidAsync(groupConversationGuid, selfIdentityId.Value).ConfigureAwait(false);
             if (convo is null)
             {
                 throw new InvalidOperationException("Group conversation not found for current identity.");

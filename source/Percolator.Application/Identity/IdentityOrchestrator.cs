@@ -10,14 +10,14 @@ namespace Percolator.Application.Identity;
 public class IdentityOrchestrator : IIdentityOrchestrator
 {
     private readonly ISelfIdentityKeysStore _keysStore;
-    private readonly ISelfIdentityRepositoryOld _selfIdentityRepository;
+    private readonly ISelfIdentityRepository _selfIdentityRepository;
     private readonly ILogger<IdentityOrchestrator> _logger;
     private readonly NodeOptions _options;
     private readonly ActiveIdentityContext _activeIdentityContext;
 
     public IdentityOrchestrator(
         ISelfIdentityKeysStore keysStore,
-        ISelfIdentityRepositoryOld selfIdentityRepository,
+        ISelfIdentityRepository selfIdentityRepository,
         ILogger<IdentityOrchestrator> logger,
         IOptions<NodeOptions> options,
         ActiveIdentityContext activeIdentityContext)
@@ -29,20 +29,14 @@ public class IdentityOrchestrator : IIdentityOrchestrator
         _activeIdentityContext = activeIdentityContext;
     }
 
-    public async Task ResolveIdentityAsync(string identityName, CancellationToken cancellationToken, string? fallbackIdentityName=null)
+    public async Task ResolveIdentityAsync(SelfId selfId, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrEmpty(identityName))
-        {
-            throw new ArgumentException("Identity name cannot be null or empty.", nameof(identityName));
-        }
-
         // Resolve and assign SelfIdentityId for scoping
-        var dto = await _selfIdentityRepository.GetByNameWithFallbackAsync(identityName, fallbackIdentityName??String.Empty).ConfigureAwait(false);
+        var dto = await _selfIdentityRepository.GetByIdAsync(selfId,cancellationToken).ConfigureAwait(false);
         if (dto is null)
         {
-            throw new InvalidOperationException($"Identity {identityName} not found");
+            throw new InvalidOperationException($"Identity with id {selfId} not found");
         }
-        var selfId = dto.Id;
         var keys = await _keysStore.LoadAsync(selfId, cancellationToken).ConfigureAwait(false);
         if (keys is null)
         {
@@ -51,9 +45,14 @@ public class IdentityOrchestrator : IIdentityOrchestrator
             var spk = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
             keys = new X3dhKeys(ikSigning, spk);
             await _keysStore.SaveAsync(selfId, keys, cancellationToken).ConfigureAwait(false);
-            _logger.LogInformation("Generated and saved new X3DH keys for identity {IdentityName} (SelfIdentityId={SelfIdentityId})", identityName, selfId);
+            _logger.LogInformation("Generated and saved new X3DH keys for identity {IdentityName} (SelfIdentityId={SelfIdentityId})", dto.DisplayName, selfId);
         }
-        var identity = new IdentityRecord(dto.PeerId, identityName, dto.Name)  with { SelfIdentityId = selfId };
+        //todo: figure out what to use for participant id in chat conversations
+        var peerId = Guid.NewGuid();
+        
+        //todo: figure out what name to use
+        var identityName = dto.DisplayName?.Value ?? dto.Id.ToString();
+        var identity = new IdentityRecord(peerId, identityName, null)  with { SelfIdentityId = selfId };
 
         _activeIdentityContext.Identity = identity;
         _activeIdentityContext.Keys = keys;

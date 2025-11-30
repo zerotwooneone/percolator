@@ -432,7 +432,7 @@ public class PercolatorDbContext : DbContext
                 .IsRequired();
 
             // Global filter: only return rows for the active self identity (null active/identity matches nothing)
-            entity.HasQueryFilter(e => _active != null && _active.Identity != null && e.SelfIdentityId == _active.Identity.SelfIdentityId);
+            entity.HasQueryFilter(e => _active != null && _active.Identity != null && e.SelfIdentityId == _active.Identity.SelfIdentityId.Value);
         });
 
         // SkippedMessageKey (surrogate PK with uniqueness constraint)
@@ -467,7 +467,7 @@ public class PercolatorDbContext : DbContext
                 .IsRequired();
 
             // Global filter: only return rows for the active self identity (null active/identity matches nothing)
-            entity.HasQueryFilter(e => _active != null && _active.Identity != null && e.SelfIdentityId == _active.Identity.SelfIdentityId);
+            entity.HasQueryFilter(e => _active != null && _active.Identity != null && e.SelfIdentityId == _active.Identity.SelfIdentityId.Value);
         });
 
         // Conversations

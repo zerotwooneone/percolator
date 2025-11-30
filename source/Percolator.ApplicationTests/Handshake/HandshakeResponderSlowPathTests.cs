@@ -11,6 +11,7 @@ using Percolator.Application.Services;
 using Percolator.Cryptography;
 using Percolator.Contracts;
 using Google.Protobuf;
+using Percolator.Identity;
 
 namespace Percolator.ApplicationTests.Handshake
 {
@@ -26,7 +27,7 @@ namespace Percolator.ApplicationTests.Handshake
         public async Task SlowPath_Decrypts_Parses_And_CleansPending()
         {
             // Arrange
-            var identity = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "self") { SelfIdentityId = 5 };
+            var identity = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "self") { SelfIdentityId = new SelfId(5) };
             var active = new ActiveIdentityContext { Identity = identity };
 
             var lookup = new Mock<IRatchetKeyIndex>(MockBehavior.Strict);
@@ -36,7 +37,7 @@ namespace Percolator.ApplicationTests.Handshake
 
             var mostRecent = new PreHandshakeRecord(
                 Id: 41,
-                SelfIdentityId: identity.SelfIdentityId,
+                SelfIdentityId: identity.SelfIdentityId.Value,
                 RecipientPublicKeyHash: new byte[] { 0x41 },
                 LocalRequestId: Guid.NewGuid(),
                 InitiatorEphemeralPrivateKey: Array.Empty<byte>(),

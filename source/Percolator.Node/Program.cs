@@ -223,10 +223,8 @@ async Task<int> SubmitPrekeysCommandHandler(InvocationContext context)
 
     try
     {
-        var identityOrchestrator = serviceProvider.GetRequiredService<IIdentityOrchestrator>();
-        await identityOrchestrator.ResolveIdentityAsync(selfIdentity!, cancellationToken, defaultIdentityName);
-
         var mediator = serviceProvider.GetRequiredService<IMediator>();
+        await mediator.Send(new HostCommand(selfIdentity!), cancellationToken);
         var expiresUtc = DateTimeOffset.UtcNow.AddDays(expiresDays);
         Console.WriteLine($"Submitting prekeys to {targetIdentity} for (count={count}, expires={expiresUtc:u})...");
         var rc = await mediator.Send(new Percolator.Application.Cli.SubmitPreKeysCommand(targetIdentity!, count, expiresUtc), cancellationToken);
@@ -390,8 +388,8 @@ async Task HostCommandHandler(InvocationContext context)
         using (var mainScope = app.Services.CreateScope())
         {
             var sp = mainScope.ServiceProvider;
-            var identityOrchestrator = sp.GetRequiredService<IIdentityOrchestrator>();
-            await identityOrchestrator.ResolveIdentityAsync(identityName!, cancellationToken, defaultIdentityName);
+            var mediator2 = sp.GetRequiredService<IMediator>();
+            await mediator2.Send(new HostCommand(identityName!), cancellationToken);
 
             // Initialize the in-memory peer trust store
             var peerTrustManager = sp.GetRequiredService<IPeerTrustManager>();
@@ -442,12 +440,11 @@ async Task<int> DhtProbeCommandHandler(InvocationContext context)
 
     try
     {
-        // Ensure local identity is loaded; handler will use ActiveIdentityContext
-        var identityOrchestrator = serviceProvider.GetRequiredService<IIdentityOrchestrator>();
-        await identityOrchestrator.ResolveIdentityAsync(selfIdentity!, cancellationToken, defaultIdentityName);
-
         // Delegate probing to MediatR handler which will resolve required services
         var mediator = serviceProvider.GetRequiredService<IMediator>();
+        
+        mediator.Send(new HostCommand(selfIdentity!), cancellationToken);
+        
         Console.WriteLine($"Probing {endpoint} with self='{selfIdentity}', target='{targetIdentity}'...");
         var response = await mediator.Send(new DhtProbeCommand(endpoint!, targetIdentity!, selfIdentity), cancellationToken);
 
@@ -500,10 +497,9 @@ async Task ConnectCommandHandler(InvocationContext context)
 
     try
     {
-        var identityOrchestrator = serviceProvider.GetRequiredService<IIdentityOrchestrator>();
-        await identityOrchestrator.ResolveIdentityAsync(identityName!, cancellationToken, defaultIdentityName);
-
         var mediator = serviceProvider.GetRequiredService<IMediator>();
+        await mediator.Send(new HostCommand(identityName!), cancellationToken);
+
         var conversationId = await mediator.Send(new ConnectToPeerCommand(endpoint, peerName!), cancellationToken);
 
         Console.ForegroundColor = ConsoleColor.Green;
@@ -533,14 +529,13 @@ async Task SendCommandHandler(InvocationContext context)
 
     try
     {
-        var identityOrchestrator = serviceProvider.GetRequiredService<IIdentityOrchestrator>();
-        await identityOrchestrator.ResolveIdentityAsync(identityName!, cancellationToken, defaultIdentityName);
+        var mediator = serviceProvider.GetRequiredService<IMediator>();
+        await mediator.Send(new HostCommand(identityName!), cancellationToken);
 
         var logger = serviceProvider.GetRequiredService<ILogger<Program>>();
         var activeIdentityContext = serviceProvider.GetRequiredService<ActiveIdentityContext>();
         logger.LogInformation("Sending with Identity: {IdentityName}:{PeerId}", identityName, activeIdentityContext.Identity!.Id);
-        var mediator = serviceProvider.GetRequiredService<IMediator>();
-
+        
         if (string.IsNullOrEmpty(endpointString) || string.IsNullOrEmpty(peerName))
         {
             Console.ForegroundColor = ConsoleColor.Red;

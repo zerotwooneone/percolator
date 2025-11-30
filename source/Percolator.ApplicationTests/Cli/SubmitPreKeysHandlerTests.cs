@@ -47,7 +47,7 @@ public class SubmitPreKeysHandlerTests
     {
         // Arrange identity context
         var selfPeerId = Guid.NewGuid();
-        var identity = new Percolator.Identity.Model.IdentityRecord(selfPeerId, "self") { SelfIdentityId = 1 };
+        var identity = new Percolator.Identity.Model.IdentityRecord(selfPeerId, "self") { SelfIdentityId = new SelfId(1) };
         var ikSigning = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var spk = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         _activeIdentity.Identity = identity;
@@ -130,7 +130,7 @@ public class SubmitPreKeysHandlerTests
     public void Handle_Throws_OnZeroCount()
     {
         // Arrange minimal identity
-        var identity = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "self") { SelfIdentityId = 1 };
+        var identity = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "self") { SelfIdentityId = new SelfId(1) };
         _activeIdentity.Identity = identity;
         _activeIdentity.Keys = new X3dhKeys(
             ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),

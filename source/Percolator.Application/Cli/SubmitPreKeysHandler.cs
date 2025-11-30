@@ -68,7 +68,7 @@ public class SubmitPreKeysHandler : IRequestHandler<SubmitPreKeysCommand, int>
         var existingPeer = new Peer(identity.Id, identity.DisplayName?.Value ?? request.TargetPeerName);
         
         // 1) Require existing direct session with target peer (no auto-establish here)
-        var existingSessionId = await _directSessionLocator.GetAsync(existingPeer.Id, _activeIdentity.Identity.SelfIdentityId, cancellationToken).ConfigureAwait(false);
+        var existingSessionId = await _directSessionLocator.GetAsync(existingPeer.Id, _activeIdentity.Identity.SelfIdentityId.Value, cancellationToken).ConfigureAwait(false);
         if (existingSessionId is null)
         {
             throw new InvalidOperationException("Direct session not found.");
@@ -103,8 +103,8 @@ public class SubmitPreKeysHandler : IRequestHandler<SubmitPreKeysCommand, int>
 
         // 2b) Persist locally for responder use
         var selfId = _activeIdentity.Identity.SelfIdentityId;
-        await _selfPreKeyRepo.SaveSignedPreKeyAsync(selfId, signedPreKeyId, signedPreKeyPriv, signedPreKeySpki, preKeySignature, request.ExpiresUtc, cancellationToken).ConfigureAwait(false);
-        await _selfPreKeyRepo.SaveOneTimePreKeysAsync(selfId, otkPrivs, cancellationToken).ConfigureAwait(false);
+        await _selfPreKeyRepo.SaveSignedPreKeyAsync(selfId.Value, signedPreKeyId, signedPreKeyPriv, signedPreKeySpki, preKeySignature, request.ExpiresUtc, cancellationToken).ConfigureAwait(false);
+        await _selfPreKeyRepo.SaveOneTimePreKeysAsync(selfId.Value, otkPrivs, cancellationToken).ConfigureAwait(false);
 
         // 3) Build protobuf request
         var req = new SubmitPreKeyBundleRequest

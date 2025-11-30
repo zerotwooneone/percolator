@@ -30,7 +30,7 @@ namespace Percolator.Application.Apps.Chat
         public async Task Handle(KeyAdoptionStoredNotification notification, CancellationToken cancellationToken)
         {
             var selfId = _activeIdentityContext.Identity.SelfIdentityId;
-            var conversation = await _conversations.GetByIdAsync(new ConversationId(notification.ConversationId), selfId).ConfigureAwait(false);
+            var conversation = await _conversations.GetByIdAsync(new ConversationId(notification.ConversationId), selfId.Value).ConfigureAwait(false);
             if (conversation is null)
             {
                 _logger.LogWarning("[KeyAdoptionStored] Conversation {ConversationId} not found.", notification.ConversationId);

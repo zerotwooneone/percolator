@@ -45,7 +45,7 @@ namespace Percolator.ApplicationTests.Network
             var logger = new NullLogger<EstablishDirectSessionService>();
             var active = new ActiveIdentityContext
             {
-                Identity = new IdentityRecord(Guid.NewGuid(), "Server") { SelfIdentityId = 7 },
+                Identity = new IdentityRecord(Guid.NewGuid(), "Server") { SelfIdentityId = new SelfId(7) },
                 Keys = new X3dhKeys(
                     IdentitySigningKey: ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
                     SignedPreKey: ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256))
@@ -105,7 +105,7 @@ namespace Percolator.ApplicationTests.Network
             var logger = new NullLogger<EstablishDirectSessionService>();
             var active = new ActiveIdentityContext
             {
-                Identity = new IdentityRecord(Guid.NewGuid(), "Server") { SelfIdentityId = 7 },
+                Identity = new IdentityRecord(Guid.NewGuid(), "Server") { SelfIdentityId = new SelfId(7) },
                 Keys = new X3dhKeys(
                     IdentitySigningKey: ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
                     SignedPreKey: ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256))

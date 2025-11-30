@@ -43,7 +43,7 @@ namespace Percolator.Application.Network
                 throw new InvalidOperationException("Active identity not initialized");
 
             // Require an existing direct session to encrypt the envelope to the recipient.
-            var ds = await _sessions.GetByRemotePeerIdAsync(new Percolator.Network.PeerId(recipientPeerId.Value), _active.Identity!.SelfIdentityId).ConfigureAwait(false);
+            var ds = await _sessions.GetByRemotePeerIdAsync(new Percolator.Network.PeerId(recipientPeerId.Value), _active.Identity!.SelfIdentityId.Value).ConfigureAwait(false);
             if (ds is null)
             {
                 return (SendResult.CreateFailure(Array.Empty<string>(), attempts: 0, lastError: new InvalidOperationException("No direct session to recipient")), null);
@@ -101,7 +101,7 @@ namespace Percolator.Application.Network
                 throw new InvalidOperationException("Active identity not initialized");
 
             // Require an existing direct session to build recipient DR ciphertext
-            var ds = await _sessions.GetByRemotePeerIdAsync(new Percolator.Network.PeerId(recipientPeerId.Value), _active.Identity!.SelfIdentityId).ConfigureAwait(false);
+            var ds = await _sessions.GetByRemotePeerIdAsync(new Percolator.Network.PeerId(recipientPeerId.Value), _active.Identity!.SelfIdentityId.Value).ConfigureAwait(false);
             if (ds is null)
             {
                 return SendResult.CreateFailure(Array.Empty<string>(), attempts: 0, lastError: new InvalidOperationException("No direct session to recipient"));

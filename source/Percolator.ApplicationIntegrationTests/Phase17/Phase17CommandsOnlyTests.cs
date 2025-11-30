@@ -297,7 +297,7 @@ public class Phase17CommandsOnlyTests : IntegrationTestBase
             await aliceMed.Send(new Percolator.Application.Identity.SetPeerNameByPublicKeyCommand("bob", bobSpki));
             await aliceMed.Send(new Percolator.Application.Identity.SetPeerNameByPublicKeyCommand("charlie", charlieSpki));
             await aliceMed.Send(new Percolator.Application.Apps.Chat.CreateGroupFromIdentityKeysCommand(
-                ctx.Identity!.SelfIdentityId,
+                ctx.Identity!.SelfIdentityId.Value,
                 groupGuid,
                 new List<byte[]> { aliceSpki, bobSpki, charlieSpki },
                 "P17 Group",
@@ -311,7 +311,7 @@ public class Phase17CommandsOnlyTests : IntegrationTestBase
             // Assert: conversation exists and participants include Bob and Charlie (total 3)
             var convoRepo = aliceScope.ServiceProvider.GetRequiredService<Percolator.Chat.IConversationRepository>();
             var peerRepo = aliceScope.ServiceProvider.GetRequiredService<Percolator.Identity.IPeerIdentityRepository>();
-            var convo = await convoRepo.GetByGroupGuidAsync(groupGuid, ctx.Identity!.SelfIdentityId);
+            var convo = await convoRepo.GetByGroupGuidAsync(groupGuid, ctx.Identity!.SelfIdentityId.Value);
             convo.Should().NotBeNull("group conversation should be created for Alice");
             var bobPeer = await peerRepo.GetByNameAsync(new Percolator.Identity.Model.DisplayName("bob"), CancellationToken.None);
             var charliePeer = await peerRepo.GetByNameAsync(new Percolator.Identity.Model.DisplayName("charlie"), CancellationToken.None);
@@ -349,7 +349,7 @@ public class Phase17CommandsOnlyTests : IntegrationTestBase
                 bool ok = false;
                 while (sw.ElapsedMilliseconds < 5000 && !ok)
                 {
-                    var convo = await bobRepo.GetByGroupGuidAsync(groupGuid, bobCtx.Identity!.SelfIdentityId);
+                    var convo = await bobRepo.GetByGroupGuidAsync(groupGuid, bobCtx.Identity!.SelfIdentityId.Value);
                     if (convo is not null && convo.Messages.Any(m => m.Id.Value == messageId.Value && m.Content == content))
                     {
                         ok = true;
@@ -369,7 +369,7 @@ public class Phase17CommandsOnlyTests : IntegrationTestBase
                 bool ok = false;
                 while (sw.ElapsedMilliseconds < 5000 && !ok)
                 {
-                    var convo = await chRepo.GetByGroupGuidAsync(groupGuid, chCtx.Identity!.SelfIdentityId);
+                    var convo = await chRepo.GetByGroupGuidAsync(groupGuid, chCtx.Identity!.SelfIdentityId.Value);
                     if (convo is not null && convo.Messages.Any(m => m.Id.Value == messageId.Value && m.Content == content))
                     {
                         ok = true;
@@ -386,7 +386,7 @@ public class Phase17CommandsOnlyTests : IntegrationTestBase
         {
             var ctx = aliceScope2.ServiceProvider.GetRequiredService<ActiveIdentityContext>();
             await aliceMed.Send(new Percolator.Application.Apps.Chat.GrantGroupAdminAppCommand(
-                ctx.Identity!.SelfIdentityId,
+                ctx.Identity!.SelfIdentityId.Value,
                 groupGuid,
                 bobSpki));
 
@@ -395,7 +395,7 @@ public class Phase17CommandsOnlyTests : IntegrationTestBase
             var adminKeyStore = aliceScope2.ServiceProvider.GetRequiredService<Percolator.Chat.App.IGroupAdminKeyStore>();
             var peerRepo2 = aliceScope2.ServiceProvider.GetRequiredService<Percolator.Identity.IPeerIdentityRepository>();
 
-            var convo2 = await convoRepo2.GetByGroupGuidAsync(groupGuid, ctx.Identity!.SelfIdentityId);
+            var convo2 = await convoRepo2.GetByGroupGuidAsync(groupGuid, ctx.Identity!.SelfIdentityId.Value);
             convo2.Should().NotBeNull();
 
             var adminKeys = await adminKeyStore.GetKeysAsync(convo2!.Id.Value, CancellationToken.None);
@@ -423,7 +423,7 @@ public class Phase17CommandsOnlyTests : IntegrationTestBase
             if (charliePeerOnBob is not null)
             {
                 await bobMed.Send(new Percolator.Application.Apps.Chat.UpdateGroupMembershipAppCommand(
-                    ctx.Identity!.SelfIdentityId,
+                    ctx.Identity!.SelfIdentityId.Value,
                     groupGuid,
                     MembersToAdd: null,
                     MembersToRemove: new List<Guid> { charliePeerOnBob.Id.Value },
@@ -444,7 +444,7 @@ public class Phase17CommandsOnlyTests : IntegrationTestBase
             if (charliePeerOnBob is not null)
             {
                 await bobMed.Send(new Percolator.Application.Apps.Chat.UpdateGroupMembershipAppCommand(
-                    ctx.Identity!.SelfIdentityId,
+                    ctx.Identity!.SelfIdentityId.Value,
                     groupGuid,
                     MembersToAdd: new List<Guid> { charliePeerOnBob.Id.Value },
                     MembersToRemove: null,

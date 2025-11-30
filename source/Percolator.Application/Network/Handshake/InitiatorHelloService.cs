@@ -63,7 +63,7 @@ internal sealed class InitiatorHelloService : IInitiatorHelloService
             throw new InvalidOperationException("Active identity not loaded.");
         var rec = new PreHandshakeRecord(
             Id: 0,
-            SelfIdentityId: _active.Identity.SelfIdentityId,
+            SelfIdentityId: _active.Identity.SelfIdentityId.Value,
             RecipientPublicKeyHash: recipientPublicKeyHash,
             LocalRequestId: Guid.NewGuid(),
             InitiatorEphemeralPrivateKey: Array.Empty<byte>(),

@@ -44,7 +44,7 @@ namespace Percolator.Application.Apps.Chat.Handlers
                     .ToList();
 
                 // Sanity check the active identity context matches the provided self identity id
-                if (_active.Identity is null || _active.Identity.SelfIdentityId != notification.SenderSelfIdentityId)
+                if (_active.Identity is null || _active.Identity.SelfIdentityId.Value != notification.SenderSelfIdentityId)
                 {
                     throw new InvalidOperationException($"Active identity not loaded or mismatched (expected {notification.SenderSelfIdentityId})");
                 }

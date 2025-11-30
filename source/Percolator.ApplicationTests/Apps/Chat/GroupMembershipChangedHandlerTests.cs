@@ -17,6 +17,7 @@ using Microsoft.Extensions.Options;
 using Percolator.Identity.Model;
 using Percolator.Network;
 using Percolator.Application.Network;
+using Percolator.Identity;
 
 namespace Percolator.ApplicationTests.Apps.Chat
 {
@@ -58,7 +59,7 @@ namespace Percolator.ApplicationTests.Apps.Chat
             var conversation = new Conversation(new ConversationId(convoId), new List<ParticipantId>{p1,p2}, new List<Message>(), name: null);
             _self.Setup(s => s.Get()).Returns(p1);
             _repo.Setup(r => r.GetByIdAsync(new ConversationId(convoId), It.IsAny<int>())).ReturnsAsync(conversation);
-            _active.Identity = new IdentityRecord(p1.Value, "self") { SelfIdentityId = 1 };
+            _active.Identity = new IdentityRecord(p1.Value, "self") { SelfIdentityId = new SelfId(1) };
 
             _adminState.Setup(a => a.GetAsync(convoId, It.IsAny<CancellationToken>())).ReturnsAsync(new GroupAdminState(0,0));
             _atRest.Setup(a => a.GetMasterKeyAsync(It.IsAny<CancellationToken>())).ReturnsAsync(RandomNumberGenerator.GetBytes(32));
@@ -127,7 +128,7 @@ namespace Percolator.ApplicationTests.Apps.Chat
             _self.Setup(s => s.Get()).Returns(p1); // mark p1 as self participant id for semantics
             _repo.Setup(r => r.GetByIdAsync(new ConversationId(convoId), It.IsAny<int>())).ReturnsAsync(conversation);
             // Active identity is required by handler
-            _active.Identity = new IdentityRecord(p1.Value, "self") { SelfIdentityId = 1 };
+            _active.Identity = new IdentityRecord(p1.Value, "self") { SelfIdentityId = new SelfId(1) };
 
             // Admin state -> last committed 0 => next = 1
             _adminState.Setup(a => a.GetAsync(convoId, It.IsAny<CancellationToken>())).ReturnsAsync(new GroupAdminState(NextAdminSequenceNumber:0, LastCommittedKeyVersion:0));

@@ -45,7 +45,7 @@ namespace Percolator.Application.Network.Handshake
             var header = responderFirst.GetHeader();
             var headerPreKey = header.PreKey;
 
-            await foreach (var pending in _prehandshake.EnumeratePendingAsync(_active.Identity.SelfIdentityId, cancellationToken).ConfigureAwait(false))
+            await foreach (var pending in _prehandshake.EnumeratePendingAsync(_active.Identity.SelfIdentityId.Value, cancellationToken).ConfigureAwait(false))
             {
                 try
                 {
@@ -78,7 +78,7 @@ namespace Percolator.Application.Network.Handshake
 
                     await _sessions.AddAsync(final, cancellationToken).ConfigureAwait(false);
                     await _index.UpsertAsync(sid, headerPreKey, _clock.UtcNow, cancellationToken).ConfigureAwait(false);
-                    await _prehandshake.DeleteAsync(pending.Id, _active.Identity.SelfIdentityId, cancellationToken).ConfigureAwait(false);
+                    await _prehandshake.DeleteAsync(pending.Id, _active.Identity.SelfIdentityId.Value, cancellationToken).ConfigureAwait(false);
 
                     _logger.LogInformation("Initiator finalized session {SessionId} from pending record {PendingId}", sid.Value, pending.Id);
                     return (sid, pt);

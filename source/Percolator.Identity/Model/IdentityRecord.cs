@@ -9,5 +9,5 @@ public record IdentityRecord(Guid Id, string Name, string? Nickname = null)
     /// Integer surrogate key for scoping data per self-identity.
     /// Populated by the application during identity load.
     /// </summary>
-    public int SelfIdentityId { get; init; }
+    public SelfId SelfIdentityId { get; init; }
 }

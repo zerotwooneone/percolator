@@ -29,7 +29,7 @@ public class HandleHandshakeInitiatorHelloCommandTests
         var selfPre = new Mock<ISelfPreKeyBundleRepository>(MockBehavior.Loose);
         var directRepo = new Mock<IDirectSessionRepository>(MockBehavior.Loose);
         var secure = new Mock<ISecureMessagingService>(MockBehavior.Loose);
-        var active = new ActiveIdentityContext { Identity = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "me", null) { SelfIdentityId = 1 } };
+        var active = new ActiveIdentityContext { Identity = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "me", null) { SelfIdentityId = new SelfId(1) } };
         var peerIdentityRepo = new Mock<Percolator.Identity.IPeerIdentityRepository>(MockBehavior.Loose);
         var profileRepo = new Mock<IPeerRoutingProfileRepository>(MockBehavior.Loose);
         var mediator = new Mock<MediatR.IMediator>(MockBehavior.Loose);
@@ -122,7 +122,7 @@ public class HandleHandshakeInitiatorHelloCommandTests
         var selfPre = new Mock<ISelfPreKeyBundleRepository>(MockBehavior.Strict);
         var directRepo = new Mock<IDirectSessionRepository>(MockBehavior.Strict);
         var secure = new Mock<ISecureMessagingService>(MockBehavior.Strict);
-        var active = new ActiveIdentityContext { Identity = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "me", null) { SelfIdentityId = 1 } };
+        var active = new ActiveIdentityContext { Identity = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "me", null) { SelfIdentityId = new SelfId(1) } };
         var peerIdentityRepo = new Mock<Percolator.Identity.IPeerIdentityRepository>(MockBehavior.Strict);
         var profileRepo = new Mock<IPeerRoutingProfileRepository>(MockBehavior.Loose);
         var mediator = new Mock<MediatR.IMediator>(MockBehavior.Loose);

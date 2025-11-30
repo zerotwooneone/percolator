@@ -27,7 +27,7 @@ public class InitiatorHelloServiceTests
     public async Task SendInitiatorHelloViaHostAsync_ComposesHello_EncryptsOptionalPayload_AndSendsMqEnqueue()
     {
         // Arrange active identity with keys
-        var identity = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "self") { SelfIdentityId = 1 };
+        var identity = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "self") { SelfIdentityId = new SelfId(1) };
         using var ik = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         using var spk = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var active = new ActiveIdentityContext { Identity = identity, Keys = new X3dhKeys(ik, spk) };
@@ -98,7 +98,7 @@ public class InitiatorHelloServiceTests
 
         // Assert: prehandshake persisted with IRK and remote identity SPKI
         Assert.That(capturedPre, Is.Not.Null);
-        Assert.That(capturedPre!.SelfIdentityId, Is.EqualTo(identity.SelfIdentityId));
+        Assert.That(capturedPre!.SelfIdentityId, Is.EqualTo(identity.SelfIdentityId.Value));
         Assert.That(capturedPre!.RecipientPublicKeyHash, Is.EqualTo(recipientPkh));
         Assert.That(capturedPre!.InitialRootKey, Is.EqualTo(new byte[] { 1, 2, 3 }));
         Assert.That(capturedPre!.RemoteIdentityKeySpki, Is.EqualTo(remoteIdentitySpki));

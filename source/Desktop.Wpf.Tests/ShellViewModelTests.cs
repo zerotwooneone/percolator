@@ -37,7 +37,7 @@ public class ShellViewModelTests
     }
 
     private static ShellViewModel CreateSut(
-        ISelfIdentityRepositoryOld selfIdRepro,
+        ISelfIdentityRepository selfIdRepro,
         INavigationService nav,
         IServiceProvider rootProvider,
         IStartupIdentityService startupIdentityService)
@@ -49,9 +49,9 @@ public class ShellViewModelTests
     [Test]
     public async Task Shows_loading_until_identity_fetch_completes()
     {
-        var tcs = new TaskCompletionSource<SelfIdentityDto?>();
-        var repo = new Mock<ISelfIdentityRepositoryOld>();
-        repo.Setup(r => r.GetByIdAsync(It.IsAny<int>())).Returns(tcs.Task);
+        var tcs = new TaskCompletionSource<SelfIdentity?>();
+        var repo = new Mock<ISelfIdentityRepository>();
+        repo.Setup(r => r.GetByIdAsync(It.IsAny<SelfId>())).Returns(tcs.Task);
         var startupIdentityService = new Mock<IStartupIdentityService>();
         var domain = new SelfIdentity(new SelfId(1));
         startupIdentityService
@@ -68,7 +68,9 @@ public class ShellViewModelTests
 
         sut.IsLoading.Value.Should().BeTrue();
 
-        tcs.SetResult(new SelfIdentityDto { Id = 1, Name = "Alice" });
+        var loaded = new SelfIdentity(new SelfId(1));
+        loaded.SetDisplayName("Alice");
+        tcs.SetResult(loaded);
         // Wait for state flip
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(1));
         while (sut.IsLoading.Value && !cts.IsCancellationRequested)
@@ -81,9 +83,9 @@ public class ShellViewModelTests
     [Test]
     public async Task After_identity_resolved_sets_active_identity_in_scoped_context()
     {
-        var repo = new Mock<ISelfIdentityRepositoryOld>();
-        repo.Setup(r => r.GetByIdAsync(It.IsAny<int>()))
-            .ReturnsAsync(new SelfIdentityDto { Id = 42, Name = "Bob" });
+        var repo = new Mock<ISelfIdentityRepository>();
+        repo.Setup(r => r.GetByIdAsync(It.IsAny<SelfId>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => { var si = new SelfIdentity(new SelfId(42)); si.SetDisplayName("Bob"); return si; });
         var startupIdentityService = new Mock<IStartupIdentityService>();
         var domain = new SelfIdentity(new SelfId(42));
         startupIdentityService
@@ -122,9 +124,9 @@ public class ShellViewModelTests
     [Test]
     public async Task Resolves_SessionsSidebarViewModel_from_scoped_provider()
     {
-        var repo = new Mock<ISelfIdentityRepositoryOld>();
-        repo.Setup(r => r.GetByIdAsync(It.IsAny<int>()))
-            .ReturnsAsync(new SelfIdentityDto { Id = 7, Name = "Carol" });
+        var repo = new Mock<ISelfIdentityRepository>();
+        repo.Setup(r => r.GetByIdAsync(It.IsAny<SelfId>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => { var si = new SelfIdentity(new SelfId(7)); si.SetDisplayName("Carol"); return si; });
         var startupIdentityService = new Mock<IStartupIdentityService>();
         var domain = new SelfIdentity(new SelfId(7));
         startupIdentityService
@@ -169,9 +171,9 @@ public class ShellViewModelTests
     [Test]
     public async Task Navigates_to_SessionShell_after_identity_and_resolves_sidebar_from_scope()
     {
-        var repo = new Mock<ISelfIdentityRepositoryOld>();
-        repo.Setup(r => r.GetByIdAsync(It.IsAny<int>()))
-            .ReturnsAsync(new SelfIdentityDto { Id = 9, Name = "Dora" });
+        var repo = new Mock<ISelfIdentityRepository>();
+        repo.Setup(r => r.GetByIdAsync(It.IsAny<SelfId>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => { var si = new SelfIdentity(new SelfId(9)); si.SetDisplayName("Dora"); return si; });
         var startupIdentityService = new Mock<IStartupIdentityService>();
         var domain = new SelfIdentity(new SelfId(9));
         startupIdentityService

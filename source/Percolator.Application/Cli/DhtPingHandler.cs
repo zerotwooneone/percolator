@@ -45,7 +45,7 @@ public sealed class DhtPingHandler : IRequestHandler<DhtPingCommand, Unit>
         {
             throw new InvalidOperationException("Active identity not loaded.");
         }
-        var direct = await _directSessionLocator.GetAsync(peer.Id, _activeIdentity.Identity.SelfIdentityId, cancellationToken).ConfigureAwait(false)
+        var direct = await _directSessionLocator.GetAsync(peer.Id, _activeIdentity.Identity.SelfIdentityId.Value, cancellationToken).ConfigureAwait(false)
             ?? throw new InvalidOperationException("Direct session not found. Establish a session before DHT ping.");
 
         var env = new InternalEnvelope

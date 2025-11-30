@@ -174,7 +174,7 @@ namespace Percolator.Application.Network.Handshake
 
             await _mediator.Send(new Percolator.Application.Network.ProcessInternalEnvelopeCommand(
                 inner,
-                new Percolator.Application.Network.SessionContext(sid.Value, _active.Identity.SelfIdentityId, null)
+                new Percolator.Application.Network.SessionContext(sid.Value, _active.Identity.SelfIdentityId.Value, null)
             ), cancellationToken).ConfigureAwait(false);
 
             return ProcessRelayedOpaquePayloadResponse.Success;

@@ -10,6 +10,7 @@ using Percolator.Application.Network.Handshake;
 using Percolator.Application.Sessions;
 using Percolator.Contracts;
 using Percolator.Cryptography;
+using Percolator.Identity;
 
 namespace Percolator.ApplicationTests.Network;
 
@@ -23,7 +24,7 @@ public class ProcessRelayedOpaquePayloadCommandTests
         var mediator = new Mock<IMediator>(MockBehavior.Strict);
         var secure = new Mock<Percolator.Application.Services.ISecureMessagingService>(MockBehavior.Strict);
         var lookup = new Mock<IRatchetKeyIndex>(MockBehavior.Strict);
-        var active = new ActiveIdentityContext { Identity = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "t", null) { SelfIdentityId = 1 } };
+        var active = new ActiveIdentityContext { Identity = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "t", null) { SelfIdentityId = new SelfId(1)} };
         var msgSvc = new Mock<Percolator.Application.Network.IMessageService>(MockBehavior.Strict);
 
         // Build a valid plaintext hello envelope (no DR wrapper)

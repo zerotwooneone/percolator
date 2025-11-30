@@ -66,7 +66,7 @@ public class RelayOrchestrator
         var (ackId, blob) = items[0];
 
         // Resolve a direct session to the peer
-        var session = await _directSessions.GetByRemotePeerIdAsync(new NetworkPeerId(recipientPeerId.Value), selfIdentityId).ConfigureAwait(false);
+        var session = await _directSessions.GetByRemotePeerIdAsync(new NetworkPeerId(recipientPeerId.Value), selfIdentityId.Value).ConfigureAwait(false);
         if (session is null)
         {
             throw new InvalidOperationException($"No direct session for peer {recipientPeerId} to relay message {ackId}");

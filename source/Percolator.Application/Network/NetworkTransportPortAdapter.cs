@@ -43,7 +43,7 @@ public sealed class NetworkTransportPortAdapter : ITransportPort
         try
         {
             if (_active.Identity is null) return (false, Response: null ,SendFailureReason.Unknown, new InvalidOperationException("Active identity not initialized"));
-            var ds = await _sessions.GetByRemotePeerIdAsync(target, _active.Identity.SelfIdentityId).ConfigureAwait(false);
+            var ds = await _sessions.GetByRemotePeerIdAsync(target, _active.Identity.SelfIdentityId.Value).ConfigureAwait(false);
             if (ds is null) return (false, null, SendFailureReason.NoPeerConnection, null);
 
             var directSessionId = new DirectSessionId(ds.SessionId.Value);
@@ -69,7 +69,7 @@ public sealed class NetworkTransportPortAdapter : ITransportPort
         {
             if (_active.Identity is null) return (false, Response: null , SendFailureReason.Unknown, new InvalidOperationException("Active identity not initialized"));
             // Must have a direct session to the relay host
-            var relaySession = await _sessions.GetByRemotePeerIdAsync(relay, _active.Identity.SelfIdentityId).ConfigureAwait(false);
+            var relaySession = await _sessions.GetByRemotePeerIdAsync(relay, _active.Identity.SelfIdentityId.Value).ConfigureAwait(false);
             if (relaySession is null) return (false, null, SendFailureReason.NoRelaySession, null);
 
             // We need recipient PKH to enqueue

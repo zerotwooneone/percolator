@@ -71,7 +71,7 @@ namespace Percolator.ApplicationIntegrationTests.ChatMessaging
             {
                 try
                 {
-                    var convo = await repo.GetByGroupGuidAsync(groupGuid, selfId);
+                    var convo = await repo.GetByGroupGuidAsync(groupGuid, selfId.Value);
                     if (convo != null) return;
                 }
                 catch (Exception ex)
@@ -472,7 +472,7 @@ namespace Percolator.ApplicationIntegrationTests.ChatMessaging
             {
                 throw new InvalidOperationException("Active identity not loaded on sender.");
             }
-            var existing = await locator.GetAsync(peerIdentity.Id, active.Identity.SelfIdentityId, CancellationToken.None);
+            var existing = await locator.GetAsync(peerIdentity.Id, active.Identity.SelfIdentityId.Value, CancellationToken.None);
             if (existing is null)
             {
                 TestContext.WriteLine($"ASSERTION FAILED: No direct session found from sender to '{remoteName}'.");
@@ -586,7 +586,7 @@ namespace Percolator.ApplicationIntegrationTests.ChatMessaging
             var sw = System.Diagnostics.Stopwatch.StartNew();
             while (sw.ElapsedMilliseconds < 5000)
             {
-                var convo = await repo.GetByGroupGuidAsync(groupGuid, selfId);
+                var convo = await repo.GetByGroupGuidAsync(groupGuid, selfId.Value);
                 if (convo != null)
                 {
                     var actual = convo.Participants.Select(p => p.Value).ToHashSet();

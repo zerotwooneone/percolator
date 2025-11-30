@@ -18,7 +18,7 @@ namespace Percolator.ApplicationTests.Network;
 public class NetworkTransportPortAdapterTests
 {
     private ActiveIdentityContext MakeActive()
-        => new ActiveIdentityContext { Identity = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "me", null) { SelfIdentityId = 1 } };
+        => new ActiveIdentityContext { Identity = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "me", null) { SelfIdentityId = new SelfId(1) } };
 
     [Test]
     public async Task Direct_with_session_returns_response_payload_when_present()

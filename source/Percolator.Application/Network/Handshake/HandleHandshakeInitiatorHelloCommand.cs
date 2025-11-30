@@ -96,7 +96,7 @@ namespace Percolator.Application.Network.Handshake
                 throw new InvalidOperationException("Active identity not loaded.");
             }
             // Validate SPK exists locally; consume OTK if referenced
-            var spk = await _selfPreKeyRepo.TryGetSignedPreKeyAsync(_active.Identity.SelfIdentityId, signedPreKeyId, cancellationToken).ConfigureAwait(false);
+            var spk = await _selfPreKeyRepo.TryGetSignedPreKeyAsync(_active.Identity.SelfIdentityId.Value, signedPreKeyId, cancellationToken).ConfigureAwait(false);
             if (spk is null)
             {
                 _logger.LogWarning("Responder SPK not found for id {SpkId}", signedPreKeyId);
@@ -105,7 +105,7 @@ namespace Percolator.Application.Network.Handshake
             byte[]? localOtkPriv = null;
             if (oneTimePreKeyId.HasValue)
             {
-                localOtkPriv = await _selfPreKeyRepo.TryPopOneTimePreKeyPrivateAsync(_active.Identity.SelfIdentityId, oneTimePreKeyId.Value, cancellationToken).ConfigureAwait(false);
+                localOtkPriv = await _selfPreKeyRepo.TryPopOneTimePreKeyPrivateAsync(_active.Identity.SelfIdentityId.Value, oneTimePreKeyId.Value, cancellationToken).ConfigureAwait(false);
                 if (localOtkPriv is null)
                 {
                     _logger.LogWarning("Responder OTK not available for id {OtkId}", oneTimePreKeyId);
@@ -123,11 +123,11 @@ namespace Percolator.Application.Network.Handshake
             DirectSessionId directSessionId;
             if (request.RemotePeerId is not null)
             {
-                var existing = await _directRepo.GetByRemotePeerIdAsync(new NetworkPeerId(request.RemotePeerId.Value), _active.Identity.SelfIdentityId).ConfigureAwait(false);
+                var existing = await _directRepo.GetByRemotePeerIdAsync(new NetworkPeerId(request.RemotePeerId.Value), _active.Identity.SelfIdentityId.Value).ConfigureAwait(false);
                 directSessionId = existing?.SessionId ?? new DirectSessionId(Guid.NewGuid());
                 if (existing is null)
                 {
-                    await _directRepo.UpsertAsync(new NetworkPeerId(request.RemotePeerId.Value), directSessionId, _active.Identity.SelfIdentityId).ConfigureAwait(false);
+                    await _directRepo.UpsertAsync(new NetworkPeerId(request.RemotePeerId.Value), directSessionId, _active.Identity.SelfIdentityId.Value).ConfigureAwait(false);
                 }
             }
             else
@@ -183,7 +183,7 @@ namespace Percolator.Application.Network.Handshake
                 {
                     var initInner = InternalEnvelope.Parser.ParseFrom(initPt.Value);
                     // Optional: common logging/context step
-                    var ctx = new Percolator.Application.Network.SessionContext(directSessionId.Value, _active.Identity.SelfIdentityId, request.RemotePeerId?.Value);
+                    var ctx = new Percolator.Application.Network.SessionContext(directSessionId.Value, _active.Identity.SelfIdentityId.Value, request.RemotePeerId?.Value);
                     await _mediator.Send(new Percolator.Application.Network.ProcessInternalEnvelopeCommand(initInner, ctx), cancellationToken).ConfigureAwait(false);
                 }
             }

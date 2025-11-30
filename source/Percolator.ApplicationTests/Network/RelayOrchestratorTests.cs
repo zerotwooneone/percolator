@@ -12,8 +12,10 @@ using Percolator.Application.Services;
 using Percolator.Application.Sessions;
 using Percolator.Contracts;
 using Percolator.Cryptography;
+using Percolator.Identity;
 using Percolator.MessageQueue.Abstractions;
 using Percolator.Network;
+using PeerId = Percolator.Network.PeerId;
 
 namespace Percolator.ApplicationTests.Network;
 
@@ -24,7 +26,7 @@ public class RelayOrchestratorTests
     {
         return new ActiveIdentityContext
         {
-            Identity = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "Test", null) { SelfIdentityId = 1 }
+            Identity = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "Test", null) { SelfIdentityId = new SelfId(1) }
         };
     }
 
@@ -58,7 +60,7 @@ public class RelayOrchestratorTests
 
         queue.Setup(q => q.FetchAsync(peerId, 1, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new System.Collections.Generic.List<(Guid, byte[])> { (ackId, blob) });
-        directSessions.Setup(d => d.GetByRemotePeerIdAsync(networkPeerId, active.Identity!.SelfIdentityId))
+        directSessions.Setup(d => d.GetByRemotePeerIdAsync(networkPeerId, active.Identity!.SelfIdentityId.Value))
             .ReturnsAsync(new DirectSession(networkPeerId, directSessionId));
         secureSvc.Setup(s => s.EncryptAsync(sessionId, It.IsAny<Plaintext>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SessionRatchetMessage(new byte[] { 0xAA }));
@@ -105,7 +107,7 @@ public class RelayOrchestratorTests
 
         queue.Setup(q => q.FetchAsync(peerId, 1, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new System.Collections.Generic.List<(Guid, byte[])> { (ackId, blob) });
-        directSessions.Setup(d => d.GetByRemotePeerIdAsync(networkPeerId, active.Identity!.SelfIdentityId))
+        directSessions.Setup(d => d.GetByRemotePeerIdAsync(networkPeerId, active.Identity!.SelfIdentityId.Value))
             .ReturnsAsync(new DirectSession(networkPeerId, directSessionId));
         secureSvc.Setup(s => s.EncryptAsync(sessionId, It.IsAny<Plaintext>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SessionRatchetMessage(new byte[] { 0xAA }));
@@ -142,7 +144,7 @@ public class RelayOrchestratorTests
 
         queue.Setup(q => q.FetchAsync(peerId, 1, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new System.Collections.Generic.List<(Guid, byte[])> { (ackId, blob) });
-        directSessions.Setup(d => d.GetByRemotePeerIdAsync(networkPeerId, active.Identity!.SelfIdentityId))
+        directSessions.Setup(d => d.GetByRemotePeerIdAsync(networkPeerId, active.Identity!.SelfIdentityId.Value))
             .ReturnsAsync(new DirectSession(networkPeerId, directSessionId));
         secureSvc.Setup(s => s.EncryptAsync(It.IsAny<SessionId>(), It.IsAny<Plaintext>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SessionRatchetMessage(new byte[] { 0xAA }));
@@ -177,7 +179,7 @@ public class RelayOrchestratorTests
 
         queue.Setup(q => q.FetchAsync(peerId, 1, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new System.Collections.Generic.List<(Guid, byte[])> { (ackId, blob) });
-        directSessions.Setup(d => d.GetByRemotePeerIdAsync(networkPeerId, active.Identity!.SelfIdentityId))
+        directSessions.Setup(d => d.GetByRemotePeerIdAsync(networkPeerId, active.Identity!.SelfIdentityId.Value))
             .ReturnsAsync((DirectSession?)null);
 
         Assert.ThrowsAsync<InvalidOperationException>(async () => await orchestrator.RelayNextAsync(peerId, CancellationToken.None));

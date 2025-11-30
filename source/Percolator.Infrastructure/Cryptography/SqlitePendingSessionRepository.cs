@@ -29,7 +29,7 @@ namespace Percolator.Infrastructure.Cryptography
             var dbo = new PendingSessionDbo
             {
                 Id = pending.Id.Value,
-                SelfIdentityId = _active.Identity.SelfIdentityId,
+                SelfIdentityId = _active.Identity.SelfIdentityId.Value,
                 RemotePeerId = pending.RemotePeerId.Value,
                 ProtocolVersion = pending.ProtocolVersion.Value,
                 Invitation = pending.Invitation.Value,

@@ -12,6 +12,7 @@ using Percolator.Application.Services;
 using Percolator.ApplicationTests.TestHelpers;
 using Percolator.Cryptography;
 using Percolator.Contracts;
+using Percolator.Identity;
 
 namespace Percolator.ApplicationTests.Handshake
 {
@@ -22,7 +23,7 @@ namespace Percolator.ApplicationTests.Handshake
         public async Task SendInitiatorHello_PersistsPreHandshake_And_EnqueuesToHost()
         {
             // Arrange
-            var identity = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "self") { SelfIdentityId = 1 };
+            var identity = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "self") { SelfIdentityId = new SelfId(1) };
             var active = new ActiveIdentityContext { Identity = identity };
             using var ik = System.Security.Cryptography.ECDiffieHellman.Create(System.Security.Cryptography.ECCurve.NamedCurves.nistP256);
             using var spk = System.Security.Cryptography.ECDiffieHellman.Create(System.Security.Cryptography.ECCurve.NamedCurves.nistP256);
@@ -81,7 +82,7 @@ namespace Percolator.ApplicationTests.Handshake
 
             // Assert
             Assert.That(saved, Is.Not.Null);
-            Assert.That(saved!.SelfIdentityId, Is.EqualTo(identity.SelfIdentityId));
+            Assert.That(saved!.SelfIdentityId, Is.EqualTo(identity.SelfIdentityId.Value));
             Assert.That(saved!.RecipientPublicKeyHash, Is.EqualTo(recipientPkh));
             Assert.That(saved!.InitialRootKey, Is.EqualTo(new byte[] { 1, 2, 3 }));
 

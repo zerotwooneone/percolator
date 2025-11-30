@@ -55,7 +55,7 @@ public class DhtProbeHandler : IRequestHandler<DhtProbeCommand, FindNodeResponse
             throw new InvalidOperationException("Active identity not loaded.");
         }
         // 1) Ensure direct session (reuse or establish via handshake)
-        var directSessionId = await _directSessionLocator.GetAsync(remotePeer.Id, _activeIdentityContext.Identity.SelfIdentityId, cancellationToken).ConfigureAwait(false);
+        var directSessionId = await _directSessionLocator.GetAsync(remotePeer.Id, _activeIdentityContext.Identity.SelfIdentityId.Value, cancellationToken).ConfigureAwait(false);
         if (directSessionId is null)
         {
             var cryptoPeerId = new Percolator.Cryptography.Primitives.PeerId(remotePeer.Id.Value);

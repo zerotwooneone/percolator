@@ -11,6 +11,7 @@ using Percolator.Application.Sessions;
 using Percolator.Application.Services;
 using Percolator.Contracts;
 using Percolator.Cryptography;
+using Percolator.Identity;
 
 namespace Percolator.ApplicationTests.Network
 {
@@ -30,7 +31,7 @@ namespace Percolator.ApplicationTests.Network
         public async Task FastPath_UsesRatchetIndex_DoesNotFinalize()
         {
             var ratchetIndex = new Mock<IRatchetKeyIndex>(MockBehavior.Strict);
-            var active = new ActiveIdentityContext { Identity = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "self") { SelfIdentityId = 1 } };
+            var active = new ActiveIdentityContext { Identity = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "self") { SelfIdentityId = new SelfId(1) } };
 
             var expectedSid = new SessionId(Guid.NewGuid());
             ratchetIndex
@@ -55,7 +56,7 @@ namespace Percolator.ApplicationTests.Network
         public async Task SlowPath_FinalizeFromPrehandshake_And_Delete()
         {
             var ratchetIndex = new Mock<IRatchetKeyIndex>(MockBehavior.Strict);
-            var active = new ActiveIdentityContext { Identity = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "self") { SelfIdentityId = 2 } };
+            var active = new ActiveIdentityContext { Identity = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "self") { SelfIdentityId = new SelfId(2) } };
 
             ratchetIndex
                 .Setup(x => x.TryResolveAsync(It.IsAny<RatchetEphemeralKey>(), It.IsAny<CancellationToken>()))
@@ -71,7 +72,7 @@ namespace Percolator.ApplicationTests.Network
 
             var pre = new PreHandshakeRecord(
                 Id: 42,
-                SelfIdentityId: active.Identity!.SelfIdentityId,
+                SelfIdentityId: active.Identity!.SelfIdentityId.Value,
                 RecipientPublicKeyHash: new byte[] { 1 },
                 LocalRequestId: Guid.NewGuid(),
                 InitiatorEphemeralPrivateKey: Array.Empty<byte>(),

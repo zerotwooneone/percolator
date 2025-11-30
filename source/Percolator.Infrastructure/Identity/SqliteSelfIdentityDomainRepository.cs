@@ -48,19 +48,31 @@ public sealed class SqliteSelfIdentityDomainRepository : ISelfIdentityRepository
         return items.Select(Map).ToList();
     }
 
+    public async Task<SelfId> CreateAsync(SelfIdentity identity, CancellationToken ct = default)
+    {
+        if (identity is null) throw new ArgumentNullException(nameof(identity));
+        if (identity.Id.Value != 0)
+        {
+            throw new InvalidOperationException("CreateAsync requires identity.Id to be 0 (unsaved).");
+        }
+
+        var dbo = new SelfIdentityDbo
+        {
+            PeerId = Guid.NewGuid(),
+            Name = identity.DisplayName?.Value ?? string.Empty,
+            LastUsedUtc = identity.LastUsedUtc
+        };
+        _db.SelfIdentities.Add(dbo);
+        await _db.SaveChangesAsync(ct).ConfigureAwait(false);
+        return new SelfId(dbo.Id);
+    }
+
     public async Task SaveAsync(SelfIdentity identity, CancellationToken ct = default)
     {
         if (identity.Id.Value == 0)
         {
-            // Insert
-            var dbo = new SelfIdentityDbo
-            {
-                PeerId = Guid.NewGuid(),
-                Name = identity.DisplayName?.Value ?? string.Empty,
-                LastUsedUtc = identity.LastUsedUtc
-            };
-            _db.SelfIdentities.Add(dbo);
-            await _db.SaveChangesAsync(ct).ConfigureAwait(false);
+            // Delegate to Create for inserts
+            await CreateAsync(identity, ct).ConfigureAwait(false);
         }
         else
         {

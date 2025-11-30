@@ -62,7 +62,7 @@ namespace Percolator.Application.Cli;
             {
                 throw new InvalidOperationException("Active identity not loaded.");
             }
-            var hostSession = await _directSessionLocator.GetAsync(hostPeer.Id, _activeIdentity.Identity.SelfIdentityId, cancellationToken).ConfigureAwait(false)
+            var hostSession = await _directSessionLocator.GetAsync(hostPeer.Id, _activeIdentity.Identity.SelfIdentityId.Value, cancellationToken).ConfigureAwait(false)
                 ?? throw new InvalidOperationException("Direct session to Host not found. Establish a session before initiating handshake.");
 
         // Ensure a Peer exists for the target (by PKH) and record a relay connection via Host

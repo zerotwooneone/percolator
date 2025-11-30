@@ -91,7 +91,7 @@ public class DhtIntegrationTests : IntegrationTestBase
             // Ensure ActiveIdentityContext has an identity with SelfIdentityId set
             services.AddSingleton(new Percolator.Application.Identity.ActiveIdentityContext
             {
-                Identity = new IdentityRecord(Guid.NewGuid(), "Test") { SelfIdentityId = 1 }
+                Identity = new IdentityRecord(Guid.NewGuid(), "Test") { SelfIdentityId = new SelfId(1) }
             });
             services.AddMediatR(cfg => 
                 cfg.RegisterServicesFromAssembly(typeof(Percolator.Dht.Messages.PingRequest).Assembly));
@@ -169,7 +169,7 @@ public class DhtIntegrationTests : IntegrationTestBase
             // Ensure ActiveIdentityContext has an identity with SelfIdentityId set
             services.AddSingleton(new Percolator.Application.Identity.ActiveIdentityContext
             {
-                Identity = new IdentityRecord(Guid.NewGuid(), "Test") { SelfIdentityId = 1 }
+                Identity = new IdentityRecord(Guid.NewGuid(), "Test") { SelfIdentityId = new SelfId(1) }
             });
             // Fast-path lookup resolves our header key via domain index
             var ratchetLookup2 = new Moq.Mock<IRatchetKeyIndex>();

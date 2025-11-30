@@ -22,14 +22,14 @@ public sealed class ShellViewModel : ViewModelBase
     public BindableReactiveProperty<bool> IsLoading { get; }
 
     private readonly INavigationService _navigation;
-    private readonly Percolator.Application.Identity.ISelfIdentityRepositoryOld _repo;
+    private readonly ISelfIdentityRepository _repo;
     private readonly IStartupIdentityService _startupIdentity;
     private readonly SelfIdentityModel _self;
     private readonly IServiceProvider _services;
     private IServiceScope? _identityScope;
 
     public ShellViewModel(INavigationService navigation,
-                          Percolator.Application.Identity.ISelfIdentityRepositoryOld repo,
+                          ISelfIdentityRepository repo,
                           IStartupIdentityService startupIdentity,
                           SelfIdentityModel self,
                           IServiceProvider services)
@@ -61,7 +61,7 @@ public sealed class ShellViewModel : ViewModelBase
             // Resolve or create the domain identity via startup service
             var domainIdentity = await _startupIdentity.ResolveOrCreateAsync();
             // Fetch DTO by resolved id to retrieve PeerId (until DTO usages are removed)
-            var dto = await _repo.GetByIdAsync(domainIdentity.Id.Value);
+            var dto = await _repo.GetByIdAsync(domainIdentity.Id);
             if (dto is null)
             {
                 // Navigate to new-user screen
@@ -71,8 +71,11 @@ public sealed class ShellViewModel : ViewModelBase
             }
 
             // Populate SelfIdentity model
-            _self.DisplayName.Value = dto.Name;
-            _self.Initials.Value = ComputeInitials(dto.Name);
+            
+            //todo: figure out what to use for display name
+            var displayName = dto.DisplayName?.Value ?? dto.Id.ToString();
+            _self.DisplayName.Value = displayName;
+            _self.Initials.Value = ComputeInitials(displayName);
             _self.Id.Value = dto.Id.ToString();
 
             // Create a scoped DI context for identity-bound services and set ActiveIdentity
@@ -83,7 +86,8 @@ public sealed class ShellViewModel : ViewModelBase
             var mutator = scope.ServiceProvider.GetService<IActiveIdentityMutator>();
             if (mutator is not null)
             {
-                var identityRecord = new IdentityRecord(dto.PeerId, dto.Name)
+                //todo: figure out what to use for peer id
+                var identityRecord = new IdentityRecord(Guid.NewGuid(), displayName)
                 {
                     SelfIdentityId = dto.Id
                 };

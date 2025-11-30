@@ -45,7 +45,7 @@ public class InitiateHandshakeViaHostHandlerTests
 
         // Direct session to host exists
         var hostDirectSession = new Percolator.Network.DirectSessionId(Guid.NewGuid());
-        active.Identity = new IdentityRecord(Guid.NewGuid(), "self") { SelfIdentityId = 1 };
+        active.Identity = new IdentityRecord(Guid.NewGuid(), "self") { SelfIdentityId = new SelfId(1) };
         locator.Setup(s => s.GetAsync(It.IsAny<Percolator.Identity.PeerId>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(hostDirectSession);
 

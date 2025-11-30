@@ -41,7 +41,7 @@ public class ConnectToPeerHandler : IRequestHandler<ConnectToPeerCommand, Direct
         {
             throw new InvalidOperationException("Active identity not loaded.");
         }
-        var existing = await _directSessionLocator.GetAsync(remotePeer.Id, _activeIdentityContext.Identity.SelfIdentityId, cancellationToken).ConfigureAwait(false);
+        var existing = await _directSessionLocator.GetAsync(remotePeer.Id, _activeIdentityContext.Identity.SelfIdentityId.Value, cancellationToken).ConfigureAwait(false);
         if (existing is not null)
         {
             return existing.Value;

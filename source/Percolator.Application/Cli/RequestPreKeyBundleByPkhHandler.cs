@@ -69,7 +69,7 @@ public class RequestPreKeyBundleByPkhHandler : IRequestHandler<RequestPreKeyBund
         {
             throw new InvalidOperationException("Active identity not loaded.");
         }
-        var directHostSessionId = await _directSessionLocator.GetAsync(hostPeer.Id, _activeIdentity.Identity.SelfIdentityId, cancellationToken).ConfigureAwait(false);
+        var directHostSessionId = await _directSessionLocator.GetAsync(hostPeer.Id, _activeIdentity.Identity.SelfIdentityId.Value, cancellationToken).ConfigureAwait(false);
         if (directHostSessionId is null)
         {
             throw new InvalidOperationException("Direct session not found.");

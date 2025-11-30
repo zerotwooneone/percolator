@@ -9,6 +9,7 @@ using Percolator.Application.Network.Handshake;
 using Percolator.Application.Sessions;
 using Percolator.Application.Services;
 using Percolator.Cryptography;
+using Percolator.Identity;
 
 namespace Percolator.ApplicationTests.Handshake
 {
@@ -23,7 +24,7 @@ namespace Percolator.ApplicationTests.Handshake
         public async Task FastPath_UsesRatchetIndexLookup()
         {
             // Arrange
-            var identity = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "self") { SelfIdentityId = 1 };
+            var identity = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "self") { SelfIdentityId = new SelfId(1) };
             var active = new ActiveIdentityContext { Identity = identity };
 
             var lookup = new Mock<IRatchetKeyIndex>(MockBehavior.Strict);
