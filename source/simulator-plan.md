@@ -123,7 +123,7 @@
 
 ## TDD execution plan (large ordered chunks)
 
-Chunk 1 — Chat command/notification API
+(complete) Chunk 1 — Chat command/notification API
 - Red:
   - Unit test: `AddSyntheticPendingHandshakeCommandHandler` publishes `PendingHandshakeAdded` and calls `IPendingSessionRepository.AddAsync` with TTL and protocol.
 - Green:
