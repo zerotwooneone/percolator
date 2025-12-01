@@ -73,6 +73,8 @@ public partial class App : Application
 
                 // Views
                 services.AddSingleton<MainWindow>();
+                services.AddScoped<Desktop.Wpf.Features.Simulator.HandshakeSimulatorWindow>();
+
                 // Navigation
                 services.AddSingleton<INavigationService, NavigationService>();
                 // ViewModels
@@ -80,6 +82,8 @@ public partial class App : Application
                 services.AddSingleton<ISessionScopeFactory, SessionScopeFactory>();
                 services.AddScoped<SessionsSidebarViewModel>();
                 services.AddScoped<Desktop.Wpf.Features.Sessions.SessionShellViewModel>();
+                services.AddScoped<Desktop.Wpf.Features.Simulator.HandshakeSimulatorViewModel>();
+
                 // Features
                 services.AddSingleton<Percolator.Cryptography.ISessionRepository, Desktop.Wpf.Features.Sessions.InMemorySessionRepository>();
                 services.AddSingleton<IChatHistory, InMemoryChatHistory>();

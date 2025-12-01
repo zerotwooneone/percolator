@@ -21,33 +21,33 @@
 
 ## New/extended contracts
 
+### Update (direction change)
+- We are using a Desktop service instead of an application-layer command handler to insert synthetic pending handshakes.
+- Replacement:
+  - PendingHandshakeSimulatorService (Desktop.Wpf) replaces the planned AddSyntheticPendingHandshakeCommand handler.
+  - PendingHandshakeAdded notification (Percolator.Chat) remains the event surface consumed by the UI.
+
 ### Percolator.Cryptography (domain abstractions)
 - Keep `IPendingSessionRepository` as the persistence abstraction.
-- Add `IHandshakeInvitationFactory` (domain‑friendly creation of invitations for testing/dev tools):
+- `IHandshakeInvitationFactory` provides domain‑friendly creation of invitations for testing/dev tools:
   - `HandshakeInvitation CreateSynthetic(PeerId remotePeer, ProtocolVersion ver, byte[]? payload = null);`
   - Rationale: centralize how invitations are formed (even synthetic) and keep encoding rules out of the application/UI.
-- Optional (if not present already): `IProtocolVersionProvider` to supply the current supported protocol version.
+- Note: An interface named `IHandshakeInvitationFactory` currently lives under `Desktop.Wpf.Features.Simulator`. The long‑term destination remains the Cryptography/domain boundary, but the simulator can proceed with the current location.
+- Optional: `IProtocolVersionProvider` to supply the current supported protocol version.
 
 ### Percolator.Chat (application layer)
-- Command: `AddSyntheticPendingHandshakeCommand` (MediatR `IRequest<PendingSessionId>`)
-  - Inputs: `PeerId remotePeer`, optional `DisplayName` (for UI seeding only), optional `byte[] invitationPayload`.
-  - Handler responsibilities:
-    - Resolve: `IHandshakeInvitationFactory`, `IProtocolVersionProvider`, `IPendingSessionRepository`, `IClock`.
-    - Build `HandshakeInvitation` using factory and current protocol version.
-    - Create `PendingSession` via domain factory `PendingSession.FromInvitation(...)` with short TTL (e.g., now+10m).
-    - Persist via `IPendingSessionRepository.AddAsync` (scoped to active identity).
-    - Publish notification `PendingHandshakeAdded`.
-  - Output: `PendingSessionId` (for correlation in UI/tests).
-- Notification: `PendingHandshakeAdded : INotification`
+- Notification: `PendingHandshakeAdded : INotification` (already exists)
   - Payload: `PendingSessionId Id`, `PeerId RemotePeerId`, `DateTimeOffset CreatedAtUtc`, optional `string? DisplayName`.
-- Optional façade for DI clarity: `IPendingHandshakeWriter` (thin wrapper over `IMediator` to send the command). This keeps UI from depending on MediatR directly if desired.
+  - Raised by the Desktop simulator service after persistence to update the UI.
 
 ### Desktop.Wpf (UI)
+- Service: `PendingHandshakeSimulatorService : IPendingHandshakeSimulatorService` (already exists)
+  - Responsibilities: create synthetic invitation via `IHandshakeInvitationFactory`, create/persist `PendingSession`, publish `PendingHandshakeAdded`.
 - Event listener: `PendingHandshakeEventListener : INotificationHandler<PendingHandshakeAdded>`
   - Marshals to UI thread via `IDispatcher` abstraction (wraps WPF `Dispatcher`).
   - Updates `SessionsSidebarViewModel.PendingMenu.PendingHandshakes` (maps basic fields; display name falls back to initials).
 - Utility window: `HandshakeSimulatorWindow` (+ ViewModel)
-  - Inputs: Remote Peer Id (string), optional display name; button bound to a command that calls `IMediator.Send(new AddSyntheticPendingHandshakeCommand(...))`.
+  - Inputs: Remote Peer Id (string), optional display name, optional payload; button bound to a command that calls `IPendingHandshakeSimulatorService.AddSyntheticPendingAsync(...)`.
   - Lives under a dev tools menu or diagnostic entry point; no shipping blockers.
 
 ---
@@ -69,13 +69,13 @@
 
 ## DI and composition
 - Percolator.Chat
-  - Register MediatR for the assembly; register handler + notification types.
-  - Register `IHandshakeInvitationFactory` (implementation can live in Crypto or Chat depending on the boundary preference; prefer Crypto if it encodes domain rules).
-  - Register `IProtocolVersionProvider` (singleton or options‑backed provider).
+  - Register MediatR for the assembly; ensure `PendingHandshakeAdded` is discoverable.
 - Desktop.Wpf
-  - Ensure the host scans Percolator.Chat for MediatR handlers/notifications.
+  - Register `IPendingHandshakeSimulatorService` → `PendingHandshakeSimulatorService`.
+  - Register `IHandshakeInvitationFactory` (current location in Desktop.Wpf; can move to Crypto later) and `IClock`.
+  - Ensure the host scans Percolator.Chat for MediatR notifications.
   - Register `PendingHandshakeEventListener` and `IDispatcher`.
-  - Wire the utility window VM factory into DI so it can resolve `IMediator`.
+  - Wire the utility window VM factory into DI to resolve the simulator service.
 
 ---
 
@@ -92,18 +92,17 @@
 
 ## Deliverables checklist
 - Chat
-  - `AddSyntheticPendingHandshakeCommand` (+ handler)
-  - `PendingHandshakeAdded` (notification)
-  - DI registrations (MediatR, providers, factory)
+  - `PendingHandshakeAdded` (notification) — exists
 - Crypto
-  - `IHandshakeInvitationFactory` (+ default implementation)
-  - `IProtocolVersionProvider` (+ default implementation)
+  - `IHandshakeInvitationFactory` (default impl acceptable to live temporarily in Desktop.Wpf) — interface exists
+  - `IProtocolVersionProvider` (optional)
 - Desktop.Wpf
+  - `PendingHandshakeSimulatorService` (service) — exists
   - `PendingHandshakeEventListener` (+ dispatcher)
-  - `HandshakeSimulatorWindow` (+ VM, command)
+  - `HandshakeSimulatorWindow` (+ VM, command to call simulator service)
   - Menu badge already binds to `PendingMenu.PendingHandshakes.Count`
 - Tests
-  - Handler unit tests
+  - Simulator service unit tests (publishes notification, persists via repo)
   - Listener unit tests (dispatcher)
   - Optional integration (in‑memory DB)
 
@@ -123,12 +122,12 @@
 
 ## TDD execution plan (large ordered chunks)
 
-(complete) Chunk 1 — Chat command/notification API
+Chunk 1 — Simulator service + notification API (updated)
 - Red:
-  - Unit test: `AddSyntheticPendingHandshakeCommandHandler` publishes `PendingHandshakeAdded` and calls `IPendingSessionRepository.AddAsync` with TTL and protocol.
+  - Unit test: `PendingHandshakeSimulatorService` publishes `PendingHandshakeAdded` and calls `IPendingSessionRepository.AddAsync` with TTL and protocol.
 - Green:
-  - Implement handler using `IHandshakeInvitationFactory`, `IProtocolVersionProvider`, `IClock`, `IPendingSessionRepository`, `IMediator`.
-  - Add `PendingHandshakeAdded` notification.
+  - Implement service using `IHandshakeInvitationFactory`, `IClock`, `IPendingSessionRepository`, `IMediator`.
+  - Use `ProtocolVersion(1)` or provider when available.
 - Refactor:
   - Extract small helpers if duplication appears; ensure null/guard clauses covered.
 - Acceptance:
@@ -154,11 +153,11 @@ Chunk 3 — Desktop event listener
 - Acceptance:
   - Test verifies dispatcher usage and collection updated.
 
-Chunk 4 — Utility window + command wiring
+Chunk 4 — Utility window + service wiring (updated)
 - Red:
-  - UI VM test: button command invokes mediator with `AddSyntheticPendingHandshakeCommand` (can be a simple interaction test).
+  - UI VM test: button command invokes `IPendingHandshakeSimulatorService.AddSyntheticPendingAsync` with parsed inputs.
 - Green:
-  - Implement `HandshakeSimulatorWindow` + VM; DI resolves `IMediator` and binds command.
+  - Implement `HandshakeSimulatorWindow` + VM; DI resolves the simulator service and binds the command.
 - Refactor:
   - Polish bindings and validation for PeerId input.
 - Acceptance:
