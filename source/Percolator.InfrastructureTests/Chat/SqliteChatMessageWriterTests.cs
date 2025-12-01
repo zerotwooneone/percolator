@@ -10,6 +10,7 @@ using Percolator.Chat.App;
 using Percolator.Chat.ValueObjects;
 using Percolator.Infrastructure.Chat;
 using Percolator.Infrastructure.Persistence;
+using Percolator.InfrastructureTests.Common;
 
 namespace Percolator.InfrastructureTests.Chat;
 
@@ -23,7 +24,7 @@ public class SqliteChatMessageWriterTests
         var options = new DbContextOptionsBuilder<PercolatorDbContext>()
             .UseSqlite(connection)
             .Options;
-        var ctx = new PercolatorDbContext(options);
+        var ctx = TestDb.NewContext(options, 1);
         ctx.Database.EnsureCreated();
         if (!ctx.SelfIdentities.Any())
         {

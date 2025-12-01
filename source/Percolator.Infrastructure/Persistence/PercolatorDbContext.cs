@@ -136,6 +136,7 @@ public class PercolatorDbContext : DbContext
                 .HasForeignKey(e => e.SelfIdentityId)
                 .OnDelete(DeleteBehavior.Cascade)
                 .IsRequired();
+            entity.HasQueryFilter(e => _active != null && _active.Identity != null && e.SelfIdentityId == _active.Identity.SelfIdentityId.Value);
         });
 
         // SelfOneTimePreKey
@@ -154,6 +155,7 @@ public class PercolatorDbContext : DbContext
                 .HasForeignKey(e => e.SelfIdentityId)
                 .OnDelete(DeleteBehavior.Cascade)
                 .IsRequired();
+            entity.HasQueryFilter(e => _active != null && _active.Identity != null && e.SelfIdentityId == _active.Identity.SelfIdentityId.Value);
         });
 
         // PreHandshakeSessions
@@ -176,6 +178,7 @@ public class PercolatorDbContext : DbContext
             entity.HasIndex(e => new { e.SelfIdentityId, e.RecipientPublicKeyHash });
             entity.HasIndex(e => new { e.SelfIdentityId, e.LocalRequestId }).IsUnique();
             entity.HasIndex(e => new { e.SelfIdentityId, e.RemoteIdentityKeySpkiHash, e.CreatedAtUtc });
+            entity.HasQueryFilter(e => _active != null && _active.Identity != null && e.SelfIdentityId == _active.Identity.SelfIdentityId.Value);
         });
 
         // SelfIdentity
@@ -226,6 +229,7 @@ public class PercolatorDbContext : DbContext
                 .HasForeignKey(e => e.SelfIdentityId)
                 .OnDelete(DeleteBehavior.Cascade)
                 .IsRequired();
+            entity.HasQueryFilter(e => _active != null && _active.Identity != null && e.SelfIdentityId == _active.Identity.SelfIdentityId.Value);
         });
 
         // DirectSession
@@ -250,6 +254,7 @@ public class PercolatorDbContext : DbContext
                 .HasForeignKey(e => e.SelfIdentityId)
                 .OnDelete(DeleteBehavior.Cascade)
                 .IsRequired();
+            entity.HasQueryFilter(e => _active != null && _active.Identity != null && e.SelfIdentityId == _active.Identity.SelfIdentityId.Value);
         });
 
         modelBuilder.Entity<PeerIdentityKeyDbo>(entity =>
@@ -389,6 +394,22 @@ public class PercolatorDbContext : DbContext
             entity.Property(e => e.DirectSessionId).IsRequired();
             entity.Property(e => e.ConversationId).IsRequired();
             entity.HasIndex(e => new { e.SelfIdentityId, e.ConversationId }).IsUnique();
+            entity.HasQueryFilter(e => _active != null && _active.Identity != null && e.SelfIdentityId == _active.Identity.SelfIdentityId.Value);
+        });
+
+        // PendingSessions (Cryptography domain persistence)
+        modelBuilder.Entity<PendingSessionDbo>(entity =>
+        {
+            entity.ToTable("PendingSessions");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.SelfIdentityId).IsRequired();
+            entity.Property(e => e.RemotePeerId).IsRequired();
+            entity.Property(e => e.ProtocolVersion).IsRequired();
+            entity.Property(e => e.Invitation).IsRequired();
+            entity.Property(e => e.State).IsRequired();
+            entity.Property(e => e.CreatedAtUtc).IsRequired();
+            entity.HasIndex(e => new { e.SelfIdentityId, e.RemotePeerId });
+            entity.HasQueryFilter(e => _active != null && _active.Identity != null && e.SelfIdentityId == _active.Identity.SelfIdentityId.Value);
         });
 
         
@@ -445,6 +466,7 @@ public class PercolatorDbContext : DbContext
             entity.Property(e => e.MessageKey).IsRequired();
             entity.Property(e => e.SelfIdentityId).IsRequired();
             entity.HasIndex(e => new { e.SelfIdentityId, e.SessionId, e.RatchetKey, e.MessageNumber }).IsUnique();
+            entity.HasQueryFilter(e => _active != null && _active.Identity != null && e.SelfIdentityId == _active.Identity.SelfIdentityId.Value);
         });
 
         // RatchetKeyIndex: fast lookup from (SelfIdentityId, RatchetPublicKey) -> DirectSessionId
@@ -499,6 +521,7 @@ public class PercolatorDbContext : DbContext
                 .HasForeignKey(p => p.ConversationId)
                 .IsRequired()
                 .OnDelete(DeleteBehavior.Cascade);
+            entity.HasQueryFilter(e => _active != null && _active.Identity != null && e.SelfIdentityId == _active.Identity.SelfIdentityId.Value);
         });
 
         // Messages

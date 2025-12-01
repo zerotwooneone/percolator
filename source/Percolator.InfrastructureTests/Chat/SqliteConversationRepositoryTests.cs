@@ -9,6 +9,7 @@ using Percolator.Chat;
 using Percolator.Chat.ValueObjects;
 using Percolator.Infrastructure.Chat;
 using Percolator.Infrastructure.Persistence;
+using Percolator.InfrastructureTests.Common;
 
 namespace Percolator.InfrastructureTests.Chat;
 
@@ -22,7 +23,7 @@ public class SqliteConversationRepositoryTests
         var options = new DbContextOptionsBuilder<PercolatorDbContext>()
             .UseSqlite(connection)
             .Options;
-        var ctx = new PercolatorDbContext(options);
+        var ctx = TestDb.NewContext(options, 1);
         ctx.Database.EnsureCreated();
         // Seed default SelfIdentity required by repository scoping
         if (!ctx.SelfIdentities.Any())

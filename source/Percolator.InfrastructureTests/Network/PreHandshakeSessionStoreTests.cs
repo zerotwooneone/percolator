@@ -8,19 +8,20 @@ using NUnit.Framework;
 using Percolator.Application.Network.Handshake;
 using Percolator.Infrastructure.Network.Handshake;
 using Percolator.Infrastructure.Persistence;
+using Percolator.InfrastructureTests.Common;
 
 namespace Percolator.InfrastructureTests.Network
 {
     [TestFixture]
     public class PreHandshakeSessionStoreTests
     {
-        private static PercolatorDbContext CreateInMemoryDb()
+        private static PercolatorDbContext CreateInMemoryDb(int? selfIdentityId = 1)
         {
             var options = new DbContextOptionsBuilder<PercolatorDbContext>()
                 .UseInMemoryDatabase(Guid.NewGuid().ToString())
                 .Options;
 
-            var db = new PercolatorDbContext(options);
+            var db = TestDb.NewContext(options, selfIdentityId);
             db.Database.EnsureCreated();
             return db;
         }
@@ -28,7 +29,7 @@ namespace Percolator.InfrastructureTests.Network
         [Test]
         public async Task Save_Then_EnumeratePending_ReturnsRecord()
         {
-            using var db = CreateInMemoryDb();
+            using var db = CreateInMemoryDb(42);
             var store = new PreHandshakeSessionStore(db);
 
             var rec = new PreHandshakeRecord(
@@ -59,7 +60,7 @@ namespace Percolator.InfrastructureTests.Network
         [Test]
         public async Task PurgeExpired_RemovesOnlyExpired()
         {
-            using var db = CreateInMemoryDb();
+            using var db = CreateInMemoryDb(7);
             var store = new PreHandshakeSessionStore(db);
 
             var now = DateTimeOffset.UtcNow;

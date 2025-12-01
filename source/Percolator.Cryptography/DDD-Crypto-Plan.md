@@ -85,87 +85,8 @@ Anti‑patterns to avoid:
 ---
 
 ## Phase 1: Domain Analysis & Model Identification
-
-- **Context and goals**
-  - The current library exposes low-level cryptographic utilities (X3DH, Double Ratchet, signatures) directly to application code, forcing app layers to orchestrate session state and handshake decisions.
-  - We will introduce rich domain aggregates that encapsulate session lifecycle and handshake control, including a pending approval state for inbound (Reverse-Signal) flows.
-
-- **Key user journeys to support**
-  - Standard Outbound Handshake (we fetch peer’s pre-key bundle, initiate session, optionally produce first message).
-  - Reverse-Signal Inbound Handshake (we receive a peer’s bundle as an invitation, initiate locally, then either auto-respond or wait for human approval before sending our response).
-
-- **Core domain additions (summary)**
-  - Aggregates: `SecureSession`, `PendingSession`.
-  - Value Objects: `RatchetState`, `ProtocolVersion`, `Plaintext`, `Ciphertext`, `AssociatedData`, `SessionId`, `PendingSessionId`, `PeerId`, policies (`ApprovalPolicy`, `ExpirationPolicy`, `SkippedKeyPolicy`).
-  - Services (ports): `SessionCrypto`, `HandshakePlanner`.
-  - Repositories: `ISessionRepository`, `IPendingSessionRepository`.
-
-- **Core Aggregates**
-  - **SecureSession (Aggregate Root)**
-    - Identity: `SessionId`.
-    - Purpose: Represents an established, active end-to-end encrypted session with one remote `PeerId`.
-    - Owns: Double Ratchet state (root key, chain keys, counters, header state), protocol version, last-used timestamps.
-    - Invariants:
-      - Ratchet state progresses monotonically (no key/counter regressions).
-      - Replay/ordering checks enforced per protocol guarantees.
-      - Associated Data (AD) rules are consistent for encrypt/decrypt.
-    - Behaviors:
-      - `Encrypt(Plaintext, AssociatedData) -> Ciphertext`
-      - `Decrypt(Ciphertext, AssociatedData) -> Plaintext`
-      - `RotateIfNeeded()`, `TouchLastUsed()` (housekeeping/policy-driven updates)
-    - Factory:
-      - `EstablishFromX3DH(PreKeyBundle, IKeyStore, ICryptoPrimitives)`
-
-  - **PendingSession (Aggregate Root)**
-    - Identity: `PendingSessionId`.
-    - Purpose: Represents a session initialized from a peer’s invitation (inbound bundle) that is awaiting a decision (auto-respond or manual approval), and can be rejected or expired.
-    - State: `AwaitingApproval | Approved | Rejected | AutoResponded`.
-    - Owns: `HandshakeInvitation` (value object), policy snapshot (approval/expiration), timestamps, protocol version.
-    - Behaviors:
-      - `ApproveAndRespond(ICryptoPrimitives, IKeyStore) -> HandshakeResponse`
-      - `AutoRespond(ICryptoPrimitives, IKeyStore) -> HandshakeResponse` (policy-permitting)
-      - `Reject()` (terminal)
-      - `Expire()` (policy-driven terminal)
-    - Domain events (examples): `PendingSessionApproved`, `PendingSessionRejected`, `PendingSessionExpired`.
-
-- **Supporting Entities / Value Objects**
-  - `PeerIdentity` (entity or cross-domain reference): `PeerId`, `IdentityPublicKey`, trust metadata.
-  - `HandshakeInvitation` (VO): serialized inbound pre-key bundle with metadata and protocol version.
-  - `PreKeyBundle` (VO): identity key, signed pre-key, one-time pre-key, signatures, protocol version.
-  - `HandshakeResponse` (VO): our handshake response bundle or the first message to send.
-  - IDs (VO): `SessionId`, `PendingSessionId`, `PeerId`.
-  - Payload VOs: `Plaintext`, `Ciphertext`, `AssociatedData`.
-  - Policies (VOs): `ApprovalPolicy` (e.g., auto-respond allowlist), `ExpirationPolicy` (e.g., TTL for pending).
-  - Crypto state (VO): `RatchetState` (root/chain keys, counters, header params), `SessionKeys` (as needed).
-
-- **Domain services (pure, stateless)**
-  - `HandshakePlanner`: validates invitations/pre-key bundles (sig verification, key formats, protocol compatibility), and determines required inputs for session establishment.
-  - `SessionCrypto`: interface grouping crypto operations used by aggregates (X3DH key agreement, Double Ratchet steps, sign/verify). Implementations adapt the existing utility code.
-  - `InboundMessageResolver`: resolves an inbound `SessionRatchetMessage` to a `SessionId` via fast/slow path:
-    - Fast path: `IRatchetKeyIndex.TryResolveAsync(header.PreKey)` -> `SessionId?`
-    - Slow path: enumerate candidate sessions and attempt `SecureSession.Decrypt(...)` until one succeeds; on success, persist updated state and `IRatchetKeyIndex.UpsertAsync`.
-
-- **Application services (orchestrators)**
-  - `HandshakeService`:
-    - `InitiateFromInvitation(HandshakeInvitation) -> PendingSessionId`
-    - `ApproveSession(PendingSessionId) -> (HandshakeResponse, SessionId)`
-    - `RejectSession(PendingSessionId)`
-    - `InitiateStandardHandshake(PeerId, Plaintext? initialMessage = null) -> (SessionId, Ciphertext? initialCiphertext)`
-  - `SecureMessagingService`: coordinates loading `SecureSession` from persistence and calling `Encrypt/Decrypt`, then saving mutated state.
-
-- **Repositories (ports)**
-  - `ISessionRepository` (SecureSession persistence)
-  - `IPendingSessionRepository` (PendingSession persistence)
-  - `IRatchetKeyIndex` (fast-path header public key -> `SessionId` mapping)
-  - `ISessionCatalog` (enumeration port for slow-path; adapter scopes to current self-identity)
-  - Optionally reuse Network domain identity storage for `PeerIdentity` (via a cross-domain port), rather than introducing a new repository here.
-
-- **Integration boundaries (ports)**
-  - `ICryptoPrimitives` (adaptor for existing crypto util functions)
-  - `IKeyStore` (local identity keys, signed prekey rotation, one-time prekeys)
-  - `IClock`, `IRandom` (testability)
-  - `IOutbox` (to queue handshake responses/messages for transport)
-  - `INotification` (to notify UI about pending approvals)
+ 
+- Summary: Identified journeys (standard outbound, reverse-signal inbound). Defined core aggregates (`SecureSession`, `PendingSession`), essential VOs (IDs, payloads, policies), and ports (`HandshakePlanner`, `SessionCrypto`, repos). Established domain isolation and public-API byte policy.
 
 ---
 
@@ -174,96 +95,8 @@ Next: Phase 2 – New Implementation Plan
 ---
 
 ## Phase 2: New Implementation Plan
-
-- **Aggregate: SecureSession (AR)**
-  - Properties
-    - `SessionId Id`
-    - `PeerId RemotePeerId`
-    - `RatchetState State` (root key, send/recv chains, counters, skipped keys policy)
-    - `int ProtocolVersion`
-    - `DateTimeOffset CreatedAtUtc, LastUsedAtUtc`
-  - Methods
-    - `Ciphertext Encrypt(Plaintext pt, AssociatedData ad)`
-    - `Plaintext Decrypt(Ciphertext ct, AssociatedData ad)`
-    - Internal invariants enforcement: monotonic counters, header validation, skipped-key retrieval, `RotateIfNeeded()`, `TouchLastUsed()`
-  - Factory
-    - `static SecureSession EstablishFromX3DH(PreKeyBundle bundle, IKeyStore store, ICryptoPrimitives crypto)`
-
-- **Aggregate: PendingSession (AR)**
-  - Properties
-    - `PendingSessionId Id`
-    - `PeerId RemotePeerId`
-    - `HandshakeInvitation Invitation`
-    - `ApprovalState State` (AwaitingApproval, Approved, Rejected, AutoResponded)
-    - `int ProtocolVersion`
-    - `DateTimeOffset CreatedAtUtc, ExpiresAtUtc?`
-    - Policy snapshot: `ApprovalPolicy`, `ExpirationPolicy`
-  - Methods
-    - `HandshakeResponse ApproveAndRespond(ICryptoPrimitives crypto, IKeyStore store)`
-    - `HandshakeResponse AutoRespond(ICryptoPrimitives crypto, IKeyStore store)` (guarded by `ApprovalPolicy`)
-    - `void Reject()`
-    - `void Expire(IClock clock)`
-  - Domain events
-    - `PendingSessionApproved`, `PendingSessionRejected`, `PendingSessionExpired`
-  - Factory
-    - `static PendingSession FromInvitation(HandshakeInvitation inv, ApprovalPolicy policy, ExpirationPolicy exp, IClock clock)`
-
-- **Value Objects (implement as records/structs)**
-  - `HandshakeInvitation`, `PreKeyBundle`, `HandshakeResponse`, `Plaintext`, `Ciphertext`, `AssociatedData`, `SessionId`, `PendingSessionId`, `PeerId`, `ProtocolVersion`
-  - Policies: `ApprovalPolicy` (allowlist, trust threshold), `ExpirationPolicy` (TTL), `SkippedKeyPolicy` (e.g., max skipped keys)
-  - `RatchetState` (root/chain keys, counters, header params, skipped store limits governed by `SkippedKeyPolicy`)
-
-- **Domain services (pure)**
-  - `HandshakePlanner`
-    - `ValidateInvitation(HandshakeInvitation inv, ICryptoPrimitives crypto) -> void`
-    - `PlanEstablishment(PreKeyBundle bundle) -> EstablishmentPlan` (inputs required for X3DH)
-  - `SessionCrypto` (ports)
-    - `X3DH_Initiate(localIdPriv, PreKeyBundle bundle) -> (SharedSecret, EphemeralPublic)`
-    - `DR_Encrypt(state, pt, ad) -> (ct, newState)`
-    - `DR_Decrypt(state, ct, ad) -> (pt, newState)`
-    - `VerifySignature(pub, msg, sig) -> bool`
-
-- **Application services (orchestrators)**
-  - `HandshakeService`
-    - `Task<PendingSessionId> InitiateFromInvitation(HandshakeInvitation inv)`
-      - `HandshakePlanner.ValidateInvitation(inv)`
-      - Create `PendingSession.FromInvitation(...)`
-      - `IPendingSessionRepository.AddAsync(pending)`
-      - `INotification.NotifyPendingSessionCreated(pending.Id, pending.RemotePeerId)`
-    - `Task<(HandshakeResponse Response, SessionId Session)> ApproveSession(PendingSessionId id)`
-      - Load pending; `pending.ApproveAndRespond(crypto, keyStore)`
-      - Establish `SecureSession` (either inside `ApproveAndRespond` or here via factory)
-      - `ISessionRepository.AddAsync(session)`; `IPendingSessionRepository.DeleteAsync(id)`
-      - `IOutbox.EnqueueHandshakeResponse(pending.RemotePeerId, response)`
-    - `Task RejectSession(PendingSessionId id)`
-      - Load; `pending.Reject()`; `IPendingSessionRepository.UpdateAsync(pending)`
-    - `Task<(SessionId Session, Ciphertext? Initial)> InitiateStandardHandshake(PeerId peer, Plaintext? firstMessage = null)`
-      - Fetch `PreKeyBundle` from server
-      - `SecureSession.EstablishFromX3DH(...)`
-      - If `firstMessage` present, `Encrypt` and return
-  - `SecureMessagingService`
-    - `Task<Ciphertext> Encrypt(SessionId id, Plaintext pt, AssociatedData ad)`
-    - `Task<Plaintext> Decrypt(SessionId id, Ciphertext ct, AssociatedData ad)`
-
-- **Repositories (interfaces)**
-  - `ISessionRepository`
-    - `Task AddAsync(SecureSession s)`
-    - `Task<SecureSession?> GetAsync(SessionId id)`
-    - `Task UpdateAsync(SecureSession s)`
-  - `IPendingSessionRepository`
-    - `Task AddAsync(PendingSession p)`
-    - `Task<PendingSession?> GetAsync(PendingSessionId id)`
-    - `Task UpdateAsync(PendingSession p)`
-    - `Task DeleteAsync(PendingSessionId id)`
-  - Notes
-    - Repositories operate within a scoped SelfIdentity context provided by the Application layer; do not hardwire identity concerns into the Cryptography domain.
-
-- **Ports**
-  - `ICryptoPrimitives`, `IKeyStore`, `IRatchetKeyIndex`, `ISessionCatalog`, `IOutbox`, `INotification`, `IClock`, `IRandom`
-
-- **Testing plan**
-  - Unit tests for: PendingSession transitions (approve/auto/reject/expire), SecureSession invariants (encrypt/decrypt, counter monotonicity), HandshakePlanner validation.
-  - Integration tests: Standard outbound establishment; inbound invitation with manual approval; inbound with auto-approval per policy.
+ 
+- Summary: Implemented aggregates/VOs with guards and timestamps; added `RatchetState`. Introduced `HandshakePlanner` and `ISessionCrypto` ports (planner has an app adapter). Deferred orchestrators to Application.
 
 ---
 
@@ -272,51 +105,8 @@ Next: Phase 3 – Database Refactoring Plan
 ---
 
 ## Phase 3: Database Refactoring Plan
-
-- **New tables**
-  - Sessions
-    - Stores SecureSession ratchet state and metadata
-    - Example schema (SQLite):
-      ```sqlite
-      CREATE TABLE Sessions (
-        SessionId TEXT NOT NULL PRIMARY KEY,            -- GUID as canonical string
-        RemotePeerId TEXT NOT NULL,
-        ProtocolVersion INTEGER NOT NULL,
-        RootKey BLOB NOT NULL,
-        SendChainKey BLOB NOT NULL,
-        SendCounter INTEGER NOT NULL,
-        RecvChainKey BLOB NOT NULL,
-        RecvCounter INTEGER NOT NULL,
-        AssociatedData BLOB NULL,
-        CreatedAtUtc INTEGER NOT NULL,                  -- Unix epoch millis
-        LastUsedAtUtc INTEGER NOT NULL
-      );
-      CREATE INDEX IX_Sessions_RemotePeerId ON Sessions(RemotePeerId);
-      ```
-  - PendingSessions
-    - Stores PendingSession with serialized invitation and state
-    - Example schema (SQLite):
-      ```sqlite
-      CREATE TABLE PendingSessions (
-        PendingSessionId TEXT NOT NULL PRIMARY KEY,
-        RemotePeerId TEXT NOT NULL,
-        ProtocolVersion INTEGER NOT NULL,
-        Invitation BLOB NOT NULL,
-        State INTEGER NOT NULL, -- 0 AwaitingApproval, 1 Approved, 2 Rejected, 3 AutoResponded
-        CreatedAtUtc INTEGER NOT NULL,                  -- Unix epoch millis
-        ExpiresAtUtc INTEGER NULL
-      );
-      CREATE INDEX IX_PendingSessions_RemotePeerId ON PendingSessions(RemotePeerId);
-      CREATE INDEX IX_PendingSessions_State ON PendingSessions(State);
-      ```
-
-- **Reuse vs new**
-  - If `DirectSessions` already persists DR state for Crypto, consider evolving it to match the `Sessions` schema (rename/augment) instead of creating a parallel table.
-  - Otherwise introduce `Sessions`/`PendingSessions` alongside existing tables.
-
-- **Retirement plan (no data migration in scope)**
-  - Introduce new repos/entities and migrate application code to them.
-  - Mark legacy tables as deprecated; drop them in a later migration once references are removed.
+ 
+- Summary: Sketched `Sessions` and `PendingSessions` schemas. Implemented `SqlitePendingSessionRepository`; sessions persistence/migrations to follow during app integration.
 
 ---
 
@@ -325,94 +115,31 @@ Next: Phase 4 – Application-Layer Migration Plan
 ---
 
 ## Phase 4: Application-Layer Migration Plan
-
-- **Identify call sites**
-  - grep for current crypto utility usage across app services, gRPC handlers, controllers.
-  - Categories: (1) standard outbound initiation, (2) reverse-signal inbound initiation, (3) message encrypt, (4) message decrypt.
-
-- **Migration steps**
-  1. Introduce domain contracts (aggregates, VOs, repositories, ports) with no implementation.
-  2. Implement application services `HandshakeService`, `SecureMessagingService` behind interfaces.
-  3. Cut-over: delete legacy crypto code and fix compiler errors by adopting the new domain and services at each call site.
-  4. Convert callers incrementally; keep each commit compiling with tests green.
-
-- **Before/After examples**
-  - Standard outbound
-    - Before:
-      ```csharp
-      var bundle = await _server.GetPreKeyBundleAsync(peerId);
-      var (secret, ephPub) = CryptoUtils.X3DH(localIdPriv, bundle);
-      var session = CryptoUtils.DoubleRatchet.Init(secret, ...);
-      var firstMsg = CryptoUtils.DoubleRatchet.Encrypt(session, plaintext);
-      // persist session manually, send firstMsg
-      ```
-    - After:
-      ```csharp
-      var (sessionId, initialCipher) = await _handshakeService.InitiateStandardHandshake(peerId, plaintext);
-      await _transport.SendAsync(peerId, initialCipher);
-      ```
-  - Reverse-Signal inbound (manual approval)
-    - Before:
-      ```csharp
-      var (secret, ephPub) = CryptoUtils.X3DH(localIdPriv, invitation.Bundle);
-      var session = CryptoUtils.DoubleRatchet.Init(secret, ...);
-      var response = CryptoUtils.MakeHandshakeResponse(ephPub, ...);
-      await _transport.SendAsync(peerId, response);
-      ```
-    - After:
-      ```csharp
-      var pendingId = await _handshakeService.InitiateFromInvitation(invitation);
-      // UI presents decision
-      var (response, sessionId) = await _handshakeService.ApproveSession(pendingId);
-      await _transport.SendAsync(invitation.PeerId, response);
-      ```
-  - Encrypt/Decrypt
-    - Before:
-      ```csharp
-      var ciphertext = CryptoUtils.DoubleRatchet.Encrypt(session, plaintext);
-      var plaintext = CryptoUtils.DoubleRatchet.Decrypt(session, ciphertext);
-      ```
-    - After:
-      ```csharp
-      var s = await _sessions.GetAsync(sessionId);
-      var ct = s.Encrypt(new Plaintext(bytes), ad);
-      await _sessions.UpdateAsync(s);
-
-      s = await _sessions.GetAsync(sessionId);
-      var pt = s.Decrypt(ct, ad);
-      await _sessions.UpdateAsync(s);
-      ```
-
-- **Telemetry/UX**
-  - Emit events when `PendingSession` is created/approved/rejected.
-  - UI surface to list and act on pending sessions.
-
-- **Testing**
-  - Update unit/integration tests to target new services and aggregates.
-  - Add end-to-end tests for standard and reverse-signal flows (manual/auto approval).
+ 
+- Summary: Cataloged legacy call sites. Defined migration to `HandshakeService` and `SecureMessagingService`, replacing direct crypto usages. Adopt test-first cut-over for outbound/inbound flows and encrypt/decrypt paths.
 
 ---
 
 ## Implementation roadmap (AI-sized steps with TDD)
 
 
-1) Step 1 – Core VOs/IDs
-   - Introduced `SessionId`, `PendingSessionId`, `PeerId`, `Plaintext`, `Ciphertext`, `AssociatedData` with guards and tests; avoided exposing raw `byte[]` in public APIs.
+1) Step 1 — Core VOs/IDs (completed)
+   - Added IDs and payload VOs (`SessionId`, `PendingSessionId`, `PeerId`, `Plaintext`, `Ciphertext`, `AssociatedData`) with guards and tests.
 
-2) Step 2 – RatchetState shape
-   - Added `RatchetState` as a persistence-ready VO with basic invariants and snapshot contract; no crypto behavior yet.
+2) Step 2 — RatchetState (completed)
+   - Introduced a persistence-ready `RatchetState` with basic invariants and snapshot contract.
 
-3) Step 3 – Aggregate skeletons
-   - Created `SecureSession` and `PendingSession` aggregates with constructor invariants and clocked timestamps; crypto behaviors deferred.
+3) Step 3 — Aggregates (completed)
+   - Added `SecureSession` and `PendingSession` skeletons with constructor invariants and clocked timestamps.
 
-4) Step 4 – PendingSession behaviors
-   - Implemented decision workflow (`Approve`, `AutoRespond`, `Reject`, `Expire`) returning minimal handshake responses via crypto ports; added tests for state transitions.
+4) Step 4 — PendingSession behaviors (completed)
+   - Implemented `Approve`, `AutoRespond`, `Reject`, `Expire` minimally and covered with tests.
 
-5) Step 5 – SecureSession behaviors
-   - Implemented Double Ratchet `Encrypt/Decrypt` with ratchet framing and AD rules; enforced counters/skipped-keys; documented initiator/responder asymmetry and added inbound resolver tests (fast/slow path).
+5) Step 5 — SecureSession behaviors (completed)
+   - Implemented baseline `Encrypt/Decrypt` and inbound resolver scaffolding (counters/skipped-keys enforced).
 
-6) Step 6 – Domain services (Planner/Crypto)
-   - Centralized handshake logic behind `IHandshakePlanner` and `ISessionCrypto` (including responder-side `X3DH_Respond`); provided adapter implementations used by application services.
+6) Step 6 — Domain services (completed)
+   - Added `IHandshakePlanner` and `ISessionCrypto` with an application adapter for the planner.
 
   - **Step 7: Cut-over: delete legacy crypto paths and fix compile to adopt new domain**
   - Red: Identify all compile-time usages of legacy crypto/session code (search references). Create a todo list of broken call sites.
@@ -681,147 +408,157 @@ Next: Phase 4 – Application-Layer Migration Plan
       - Percolator.ApplicationTests/Sessions/SessionMessageTests.cs
       - Percolator.ApplicationTests/Sessions/DirectSessionManagerTests.cs
 
-### Step 8b: Crypto service decomposition and TDD hardening
+### TDD Chunks (AI-executable, sequential, technically detailed)
 
-- **Objective**
-  - Decompose `ISessionCrypto` responsibilities into smaller units that improve testability, align tightly with session-flow.md, and avoid application-layer duplication. Implement concrete classes and tests using TDD per unit-testing.md.
+- **Chunk 1 — Identity-scoped EF alignment**
+  - Scope: Ensure all identity-scoped entities are filtered by `ActiveIdentityContext` and no callers pass raw `SelfIdentityId`.
+  - Red (tests):
+    - Create `Percolator.Infrastructure.Tests/Identity/ActiveIdentityFilteringTests.cs`.
+    - Tests:
+      - When `ActiveIdentityContext` is unset, queries on identity-scoped sets return zero rows.
+      - When set to `X`, only rows for `X` are returned; rows for `Y` excluded.
+      - Repos that currently accept `selfIdentityId` ignore the parameter and respect filters.
+  - Green (impl changes):
+    - `Percolator.Infrastructure/Persistence/PercolatorDbContext`:
+      - Inject `ActiveIdentityContext` (singleton or scoped).
+      - Apply `HasQueryFilter(e => e.SelfIdentityId == _active.SelfIdentityId)` to identity-scoped DBOs:
+        - `SelfPreKeySignedDbo`, `SelfOneTimePreKeyDbo`, `PreHandshakeSessionDbo`, `SelfIdentityKeysDbo`, `SelfIdentityKnownPeerDbo`, `DirectSessionDbo`, `DoubleRatchetSessionDbo`, `SkippedMessageKeyDbo`, `RatchetKeyIndexDbo`, `ConversationDbo`, `DirectSessionConversationDbo`.
+    - Remove/obsolete overloads taking explicit `selfIdentityId` in Infrastructure repos; use context instead.
+  - Refactor:
+    - Update DI composition where `PercolatorDbContext` is created to supply `ActiveIdentityContext`.
+    - Replace call sites passing `selfIdentityId` with none; rely on filters.
+  - DI changes:
+    - Ensure `ActiveIdentityContext` is registered scoped and set during user selection/login flows.
+  - Acceptance checks:
+    - All tests in the new test file green.
+    - Manual sanity: app runs; queries reflect current identity switch.
 
-- **New Interfaces (Cryptography domain)**
-  - `IX3dhDeriver`
-    - Derives the Initial Root Key (IRK) for initiator/responder flows.
-    - Inputs: IK/EPK private for local side, IK/SPK/OPK public for remote side.
-    - Output: 32-byte IRK and initiator ephemeral public (for initiator path).
-    - Suggested signature(s):
-      - Initiator: `(SharedSecret irk, RatchetEphemeralKey initiatorEphemeralPublic) DeriveInitiator(RatchetIdentityKey remoteIk, PreKey remoteSpk, OneTimeKey? remoteOtk, PrivatePreKey localIkPriv)`
-      - Responder: `SharedSecret DeriveResponder(RatchetIdentityKey initiatorIk, RatchetEphemeralKey initiatorEk, PrivatePreKey localIkPriv, PrivatePreKey localSpkPriv, PrivatePreKey? localOtkPriv)`
-  - `IPreKeyBundleValidator`
-    - Validates bundle shape, SPK signature, freshness/expiry.
-    - Suggested signature(s):
-      - `void Validate(PreKeyBundle bundle)` (throws on invalid)
-  - `IRatchetEngine`
-    - Encapsulates Double Ratchet transitions (encrypt/decrypt), chain key advancement, DH ratchet step.
-    - Suggested signature(s):
-      - `(
-          Ciphertext ct,
-          RatchetEphemeralKey headerKey,
-          RatchetState newState
-        ) Encrypt(RatchetState state, Plaintext pt, AssociatedData ad, ulong counter)`
-      - `(
-          Plaintext pt,
-          RatchetState newState
-        ) Decrypt(RatchetState state, SessionRatchetMessage framed, AssociatedData ad)`
-      - `RatchetState DhRatchetingStep(RatchetState state, RatchetEphemeralKey remotePublic)`
-  - `ISecureRandom`
-    - RNG abstraction used for ephemeral key generation and random nonces (where applicable).
-    - Suggested signature(s): `void Fill(byte[] buffer)`; `byte[] GetBytes(int count)`
-  - `IKeyProtector`
-    - Encrypt-at-rest for IRK/session material (thin port over CryptoUtils methods).
-    - Suggested signature(s):
-      - `byte[] Protect(byte[] masterKey, byte[] data, byte[]? ad = null)`
-      - `byte[] Unprotect(byte[] masterKey, byte[] payload, byte[]? ad = null)`
-  - `IEphemeralKeyFactory`, `IAssociatedDataSerializer` if test pain emerges.
-  - `IEphemeralKeyFactory` signatures: `PrivateEphemeralKey Create(); RatchetEphemeralKey ToPublic(PrivateEphemeralKey priv)`
-  - `IAssociatedDataSerializer` signatures: `byte[] SerializeHeader(RatchetEphemeralKey key, ulong counter, ulong prevLen); byte[] SerializeWithAd((RatchetEphemeralKey, ulong, ulong) header, byte[] ad)`
+- **Chunk 2 — Sessions persistence (ISessionRepository + EF)**
+  - Scope: Introduce `Sessions` table and repository to persist `SecureSession` aggregate state.
+  - Red (tests):
+    - Create `Percolator.Infrastructure.Tests/Cryptography/SqliteSessionRepositoryTests.cs`.
+    - Tests:
+      - `AddAsync` persists with proper identity scoping; `GetAsync` returns same state.
+      - `UpdateAsync` changes counters/state; `LastUsedAtUtc` progresses.
+      - Rejects cross-identity access due to filters.
+  - Green (impl changes):
+    - Add DBOs under `Percolator.Infrastructure/Persistence/Dbos/Cryptography`:
+      - `SessionDbo` with columns:
+        - `SelfIdentityId int`, `SessionId Guid`, `RemotePeerId Guid`, `ProtocolVersion int`, `RootKey blob`, `SendChainKey blob`, `SendCounter ulong`, `RecvChainKey blob`, `RecvCounter ulong`, `AssociatedData blob?`, `CreatedAtUtc long`, `LastUsedAtUtc long`.
+      - Configure in `PercolatorDbContext` with `HasKey(SessionId, SelfIdentityId)` and indexes on `(SelfIdentityId, RemotePeerId)`.
+    - Mapping helpers:
+      - `SessionMapper`: `SecureSession <-> SessionDbo` (serialize `RatchetState` parts; no secrets logged).
+    - Implement `SqliteSessionRepository : ISessionRepository` in `Percolator.Infrastructure/Cryptography`:
+      - `AddAsync`, `GetAsync`, `UpdateAsync` using DbContext; respect `ActiveIdentityContext`.
+    - Create EF migration `AddSessions` with schema above.
+    - Register repository in Infra DI (e.g., `AddCryptographyInfrastructure`).
+  - Refactor:
+    - Ensure `RatchetState` snapshot serialization is centralized and reused.
+  - Acceptance checks:
+    - Tests green; migration applies; CRUD works in a temp file DB.
 
-- **Implementations**
-  - `AeadSessionCrypto` delegates to:
-    - `IX3dhDeriver` for X3DH_Initiate (return `(SharedSecret, RatchetEphemeralKey)`).
-    - `IRatchetEngine` for DR_Encrypt/DR_Decrypt (returns `(Ciphertext, HeaderKey, NewState)` / `(Plaintext, NewState)`).
-    - `IPreKeyBundleValidator` for SPK signature and expiry.
-    - `ISecureRandom` for any randomness (kept minimal).
-    - `IKeyProtector` for at-rest operations used by repositories (where applicable).
+- **Chunk 3 — Crypto service decomposition**
+  - Scope: Split `ISessionCrypto` internals into smaller ports and provide minimal implementations; wire into `AeadSessionCrypto`.
+  - Red (tests):
+    - New tests in `Percolator.CryptographyTests`:
+      - `IX3dhDeriverTests`: derives 32-byte IRK; initiator returns ephemeral pub; responder matches initiator IRK with shared inputs.
+      - `IRatchetEngineTests`: `Encrypt/Decrypt` roundtrip with same AD; tampered AD fails; tampered ciphertext fails; `DhRatchetingStep` updates root key and resets receiving chain.
+      - `PreKeyBundleValidatorTests`: throws on missing SPK sig or expired timestamp.
+  - Green (impl changes):
+    - Define interfaces in `Percolator.Cryptography`:
+      - `IX3dhDeriver`, `IRatchetEngine`, `IPreKeyBundleValidator`, `ISecureRandom`, optionally `IAssociatedDataSerializer`, `IEphemeralKeyFactory`.
+    - Implement minimal versions in `Percolator.Cryptography` or `Percolator.Infrastructure.Cryptography` (depending on existing patterns):
+      - `X3dhDeriver`, `RatchetEngine`, `PreKeyBundleValidator`, `SecureRandom`.
+    - Update `AeadSessionCrypto` to depend on the new interfaces and delegate work.
+  - Refactor:
+    - Remove duplicated crypto pathways; keep `CryptoUtils` public as agreed but not referenced by Application directly.
+  - Acceptance checks:
+    - All new unit tests pass; `AeadSessionCrypto` compiles with new dependencies.
 
-- **TDD Plan**
-  - Red: Add focused tests
-    - X3DH
-      - `X3DH_Initiate_WithInvalidSignature_Throws` (already added).
-      - `X3DH_Initiate_Derives_IRK_And_Returns_Ephemeral` (vector-less: asserts 32-byte IRK and non-empty SPKI).
-      - `DeriveResponder_Mirrors_Initiator_On_Valid_Inputs` (IRK equality property test using same key inputs).
-    - Double Ratchet
-      - `EncryptDecrypt_WithSameAssociatedData_Roundtrips` (already in place, ensure chain keys initialized).
-      - `Decrypt_WithDifferentAssociatedData_Throws` (auth failure).
-      - `Decrypt_WithTamperedCiphertext_Throws`.
-      - `DhRatchetingStep_Updates_RootKey_And_Resets_ReceivingChain`
-  - Green: Implement minimal logic in `IX3dhDeriver`, `IRatchetEngine` and wire into `AeadSessionCrypto`.
-  - Refactor: Improve cohesion; ensure no key material is logged; zeroize temporaries where feasible.
+- **Chunk 4 — Application services (minimal)**
+  - Scope: Introduce orchestrators for handshakes and messaging at the Application layer.
+  - Red (tests):
+    - In `Percolator.ApplicationTests/Handshake/HandshakeServiceTests.cs`:
+      - `InitiateFromInvitation_AddsPending_PublishesNotification` (if notifications used) or returns id.
+      - `ApproveSession_PersistsSession_DeletesPending_EnqueuesResponse`.
+      - `InitiateStandardHandshake_ReturnsSession_OptionalInitialCipher`.
+    - In `Percolator.ApplicationTests/Sessions/SecureMessagingServiceTests.cs`:
+      - `Encrypt_UpdatesSessionState_Persists`.
+      - `Decrypt_UpdatesSessionState_Persists`.
+  - Green (impl changes):
+    - Create `HandshakeService` and `SecureMessagingService` with interfaces; wire domain ports `ISessionCrypto`, `ISessionRepository`, `IPendingSessionRepository`, `IRatchetKeyIndex`, `IClock`, `IOutbox`.
+    - Ensure identity scoping comes from DI.
+  - Refactor:
+    - Extract mapping DTOs if necessary; avoid leaking domain internals to transport.
+  - Acceptance checks:
+    - All service tests green; DI registrations present in `AddApplicationServices`.
 
-- **Acceptance Criteria**
-  - Tests in `Percolator.CryptographyTests` pass for X3DH and DR flows.
-  - `AeadSessionCrypto` contains no ad-hoc randomness outside `ISecureRandom` and uses stable AD serialization.
-  - No duplication of crypto interfaces in Application. Application calls domain interfaces only.
+- **Chunk 5 — Inbound decrypt resolver cut-over**
+  - Scope: Replace legacy inbound decryption path with Application adapter over domain `InboundMessageResolver`.
+  - Red (tests):
+    - Update existing inbound tests to call `ISecureMessagingService.DecryptInboundAsync` without known session id.
+    - Assert: fast-path uses `IRatchetKeyIndex`; slow-path tries sessions until decrypt succeeds; state persisted.
+  - Green (impl changes):
+    - Implement adapter in Application composing `InboundMessageResolver` + repos.
+    - Replace `DirectSessionManager.ReceiveMessageAsync` usages in code.
+  - Refactor:
+    - Remove unused `DirectSessionManager` entry points (actual deletion postponed to cleanup step).
+  - Acceptance checks:
+    - All updated tests green; no compile references to old receive method.
 
-- **Follow-ups**
-  - Add golden test vectors when available.
-  - Integrate with `SecureSession`/`InboundMessageResolver` and repositories for end-to-end behaviors.
+- **Chunk 6 — Direct session locator + call-site cut-over**
+  - Scope: Replace remaining call sites to use new services and a `IDirectSessionLocator`.
+  - Red (tests):
+    - For each handler (`ConnectToPeerHandler`, `DhtProbeHandler`, `DhtPingHandler`, `RequestPreKeyBundleByPkhHandler`, `SubmitPreKeysHandler`): tests for reuse vs establish flows, error contracts preserved.
+  - Green (impl changes):
+    - Implement `IDirectSessionLocator` in Application (adapter over infra repo mapping Network peer -> SessionId).
+    - Refactor handlers to depend on `IDirectSessionLocator`, `IHandshakeService`, `ISecureMessagingService`.
+  - Refactor:
+    - Update DI registrations; remove `ConversationService` crypto responsibilities.
+  - Acceptance checks:
+    - All handler tests pass; `ConversationService` only routes/coordinates transport (no crypto).
 
-- **Step 9: Persistence (EF Core) and migrations for new tables**
-  - Red: Integration tests exercise repos via EF Sqlite file DB matching schemas above; ensure encryption/password path remains intact.
-  - Green: Implement EF entities/DBOs, mappings, migrations; wire DI registrations.
-  - Refactor: Review indexes, add constraints, clean up migration names.
-  - Deliverable: Working persistence with tests; schema aligned with aggregates.
+- **Chunk 7 — Transport/envelope integration (E2E)**
+  - Scope: End-to-end flows through transport with new services.
+  - Red (tests):
+    - E2E tests for: inbound approval -> outbox enqueue; outbound establish -> initial cipher; simple message roundtrip over `SecureSession`.
+  - Green (impl changes):
+    - Wire `IMessageTransportService` calls in Application after encrypt/decrypt; ensure envelope types unchanged.
+  - Refactor:
+    - Boundary/logging polish; avoid secret logging.
+  - Acceptance checks:
+    - E2E tests green; manual smoke works.
 
-- **Step 10: Transport integration and envelope wiring (Application layer)**
-  - Red: End-to-end tests: approve inbound -> enqueue response; standard outbound -> initial cipher produced; encrypt/decrypt roundtrip.
-  - Green: Wire adapters to existing transport/envelope without leaking crypto domain internals.
-  - Refactor: Improve boundaries, logging at app layer only.
-  - Deliverable: E2E paths green; no runtime flags. Roll back via Git if needed.
+- **Chunk 8 — Rollout and cleanup**
+  - Scope: Parity checks and legacy deletion.
+  - Red (tests):
+    - Back-compat tests comparing old vs new for a curated set of flows.
+  - Green (impl changes):
+    - Remove residual legacy code paths as per inventory below.
+  - Refactor:
+    - Consolidate any adapter/util leftovers; docs update.
+  - Acceptance checks:
+    - Build remains green after deletions; integration tests pass.
 
-- **Step 10a: Group crypto alignment (compatibility and naming)**
-  - Red: Tests validate GroupManager save/restore flows with new VO constraints; verify re-key flows; ensure no raw `byte[]` in public APIs except agreed exceptions.
-  - Green: Align naming/framing (e.g., if `SessionRatchetMessage` references appear), add VO/DBO mappers for group state; keep domain free of secret logging.
-  - Refactor: Consolidate serialization boundaries, confirm compatibility with sender-key logic, and update docs/glossary if needed.
+## Legacy removal inventory and deletion timing (user-executed deletions)
 
-- **Step 11: Rollout and cleanup**
-  - Red: Contract/backward-compat tests comparing legacy vs new behavior on golden vectors.
-  - Green: Remove residual legacy only after parity; use small, compiling commits.
-  - Refactor: Consolidate utils into `SessionCrypto` adapter; keep `CryptoUtils` exception policy intact.
-  - Deliverable: Finalized switchover with safety.
+- **Code (delete when indicated):**
+  - Conversation layer
+    - `ConversationService`, `IConversationService` — delete after Chunk 6 (handlers refactored and tests green).
+  - Sessions (legacy)
+    - `DirectSessionManager`, `IDirectSessionManager`, `TryInferAndReceiveAsync` — delete after Chunk 5 (inbound decrypt cut-over complete).
+  - Key exchange (legacy)
+    - `X3DHOrchestrator`, `IX3DHOrchestrator` — delete after Chunk 4 (HandshakeService in place) and call sites updated in Chunk 6.
+  - Stores/adapters (legacy)
+    - `IDoubleRatchetSessionStore` usages — remove after Chunk 2 (ISessionRepository live) and Chunk 6 cut-over.
+    - `IRatchetKeySessionLookup` (App) and infra implementation — replace with domain `IRatchetKeyIndex` adapter by Chunk 5; delete after tests pass.
+  - Group manager legacy (if present)
+    - Old resolvers/adapters — schedule after transport/E2E stabilization (post Chunk 7).
 
-### Application cleanup (delete/migrate these at the end)
-- Percolator.Application.Sessions:
-  - `DirectSessionManager` (replace with orchestrator that calls domain `SecureSession` and repos; remove direct `DoubleRatchetSession` usage and state surgery)
-  - `IDirectSessionManager` (redefine as thin orchestrator or remove if redundant)
-  - `IDirectSessionManager.TryInferAndReceiveAsync` (moved to domain `InboundMessageResolver` fast/slow path)
-  - `ConversationService` cryptographic logic (move handshake/session establishment and decrypt-first-message into domain services; keep routing, transport calls, and notifications only)
-- Percolator.Application.KeyExchange:
-  - `X3DHOrchestrator`, `IX3DHOrchestrator` (replace with `SessionCrypto` adapter implementation wired via Application/Infrastructure)
-  - `ISelfPreKeyBundleRepository` (use canonical `PreKeyBundle` VO and appropriate domain/Application ports)
-  - `HandshakeResponse` (superseded by domain `HandshakeResponse` VO)
-- Replace usages of `IDoubleRatchetSessionStore` with domain `ISessionRepository` (scoped by Application)
-- Remove direct references to `X3DHManager` and `CryptoUtils` from Application code; route through domain ports (`SessionCrypto`, `HandshakePlanner`).
- - Percolator.Application.Network:
-   - `IRatchetKeySessionLookup` (replace with domain `IRatchetKeyIndex`; maintain a thin adapter during cut-over)
- - Percolator.Infrastructure.Sessions:
-   - `RatchetKeySessionLookup` (re-implement as adapter for `IRatchetKeyIndex`; return `SessionId` instead of `DirectSessionId` in domain; Application adapter handles `DirectSessionId` mapping)
+- **Tables (drop via migration when indicated):**
+  - `DoubleRatchetSessions`, `SkippedMessageKeys` — drop after Chunk 7 once `Sessions` fully replaces state and tests pass.
+  - `DirectSession` — drop after Chunk 6 when locator + repos replace usage.
+  - `Conversations`, `DirectSessionConversations` — drop after Chunk 7 when transport/envelope integration no longer references them.
+  - Keep: `RatchetKeyIndex` (domain uses it), identity-key tables, and pre-key tables.
 
----
-
-## Step 12: Identity-scoped repository alignment (EF Core)
-
-- **Objective**
-  - Ensure all repositories/adapters touching tables keyed by `SelfIdentityId` operate within an identity-scoped DbContext (via `ActiveIdentityContext`) and respect strict global filters.
-
-- **Tables with `SelfIdentityId` (from PercolatorDbContext)**
-  - SelfPreKeySigned (`SelfPreKeySignedDbo`)
-  - SelfOneTimePreKeys (`SelfOneTimePreKeyDbo`)
-  - PreHandshakeSessions (`PreHandshakeSessionDbo`)
-  - SelfIdentityKeys (`SelfIdentityKeysDbo`)
-  - SelfIdentityKnownPeer (`SelfIdentityKnownPeerDbo`)
-  - DirectSession (`DirectSessionDbo`)
-  - DoubleRatchetSessions (`DoubleRatchetSessionDbo`)
-  - SkippedMessageKeys (`SkippedMessageKeyDbo`)
-  - RatchetKeyIndex (`RatchetKeyIndexDbo`)
-  - Conversations (`ConversationDbo`)
-  - DirectSessionConversations (`DirectSessionConversationDbo`)
-
-- **Actions**
-  - Update DI: `PercolatorDbContext` constructor receives `ActiveIdentityContext`; global filters applied for per-identity entities.
-  - Repos/adapters for the above entities should:
-    - Avoid passing/guessing `SelfIdentityId`; obtain identity from `ActiveIdentityContext` and rely on global filters.
-    - Use strict filtering semantics (no results when active identity is unset).
-  - Tests: construct DbContext with `ActiveIdentityContext` and seed `SelfIdentityDbo` matching the test `SelfIdentityId`.
-  - Migration review: confirm indexes exist for identity + remote SPKI hash + created_at.
-
-- **Deliverable**
-  - All identity-scoped repositories consistently use the scoped DbContext; integration tests green.
-
+Note: I will call out in PRs when each deletion point is reached; you can perform the actual removal/migration at those times.

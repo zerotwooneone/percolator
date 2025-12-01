@@ -1,5 +1,6 @@
 using System;
 using System.Security.Cryptography;
+using System.Linq;
 using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.Data.Sqlite;
@@ -9,6 +10,7 @@ using Percolator.Infrastructure.Network;
 using Percolator.Infrastructure.Persistence;
 using Percolator.Infrastructure.Identity;
 using Percolator.Network;
+using Percolator.InfrastructureTests.Common;
 
 namespace Percolator.InfrastructureTests.Network;
 
@@ -24,7 +26,7 @@ public class SqliteDirectSessionRepositoryTests
             .UseSqlite(connection)
             .Options;
 
-        var ctx = new PercolatorDbContext(options);
+        var ctx = TestDb.NewContext(options, 1);
         ctx.Database.EnsureCreated();
         // Seed default SelfIdentity required by repository scoping
         if (!ctx.SelfIdentities.Any())
