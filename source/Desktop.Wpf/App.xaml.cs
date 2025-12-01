@@ -20,6 +20,7 @@ using Percolator.Application.Cryptography;
 using Percolator.Cryptography;
 using Percolator.Infrastructure.Cryptography;
 using Percolator.Infrastructure.Persistence;
+using Desktop.Wpf.Features.Simulator;
 
 namespace Desktop.Wpf;
 
@@ -82,6 +83,7 @@ public partial class App : Application
                 // Features
                 services.AddSingleton<Percolator.Cryptography.ISessionRepository, Desktop.Wpf.Features.Sessions.InMemorySessionRepository>();
                 services.AddSingleton<IChatHistory, InMemoryChatHistory>();
+                services.AddScoped<IPendingHandshakeSimulatorService, PendingHandshakeSimulatorService>();
                 // Per-session scoped chat stack
                 services.AddScoped<Desktop.Wpf.Features.Sessions.SessionContext>();
                 services.AddScoped<Desktop.Wpf.Features.Chat.ChatViewModel>();

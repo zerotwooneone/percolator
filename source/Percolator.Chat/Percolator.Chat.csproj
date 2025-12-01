@@ -12,6 +12,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\Percolator.Cryptography\Percolator.Cryptography.csproj" />
     <ProjectReference Include="..\Percolator.Identity\Percolator.Identity.csproj" />
   </ItemGroup>
 
