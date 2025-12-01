@@ -50,6 +50,7 @@ public class PercolatorDbContext : DbContext
     public DbSet<DeliveredReceiptDbo> DeliveredReceipts { get; set; } = null!;
     public DbSet<PreHandshakeSessionDbo> PreHandshakeSessions { get; set; } = null!;
     public DbSet<PendingSessionDbo> PendingSessions { get; set; } = null!;
+    public DbSet<SessionDbo> Sessions { get; set; } = null!;
     public DbSet<GroupAdminKeyDbo> GroupAdminKeys { get; set; } = null!;
     public DbSet<GroupAdminOpDbo> GroupAdminOps { get; set; } = null!;
     public DbSet<GroupAdminStateDbo> GroupAdminStates { get; set; } = null!;
@@ -91,6 +92,27 @@ public class PercolatorDbContext : DbContext
                 .HasForeignKey(v => v.PeerId)
                 .IsRequired()
                 .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // Sessions (SecureSession persistence)
+        modelBuilder.Entity<SessionDbo>(entity =>
+        {
+            entity.ToTable("Sessions");
+            entity.HasKey(e => new { e.SessionId, e.SelfIdentityId });
+            entity.Property(e => e.SessionId).IsRequired();
+            entity.Property(e => e.SelfIdentityId).IsRequired();
+            entity.Property(e => e.RemotePeerId).IsRequired();
+            entity.Property(e => e.ProtocolVersion).IsRequired();
+            entity.Property(e => e.RootKey).IsRequired();
+            entity.Property(e => e.CreatedAtUtc).IsRequired();
+            entity.Property(e => e.LastUsedAtUtc).IsRequired();
+            entity.HasIndex(e => new { e.SelfIdentityId, e.RemotePeerId });
+            entity.HasOne<SelfIdentityDbo>()
+                .WithMany()
+                .HasForeignKey(e => e.SelfIdentityId)
+                .OnDelete(DeleteBehavior.Cascade)
+                .IsRequired();
+            entity.HasQueryFilter(e => _active != null && _active.Identity != null && e.SelfIdentityId == _active.Identity.SelfIdentityId.Value);
         });
 
         modelBuilder.Entity<PeerIdentityKeyDbo_V2>(entity =>
