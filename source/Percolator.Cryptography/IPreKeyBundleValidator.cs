@@ -12,6 +12,8 @@ public sealed class PreKeyBundleValidator : IPreKeyBundleValidator
     public void Validate(PreKeyBundle bundle)
     {
         if (bundle is null) throw new ArgumentNullException(nameof(bundle));
+        if (bundle.ExpirationDateUtc.HasValue && bundle.ExpirationDateUtc.Value <= DateTimeOffset.UtcNow)
+            throw new CryptographicException("pre-key bundle expired");
         if (bundle.IdentitySigningKey?.Value is null || bundle.IdentitySigningKey.Value.Length == 0)
             throw new CryptographicException("identity signing key missing");
         if (bundle.SignedPreKey?.Value is null || bundle.SignedPreKey.Value.Length == 0)

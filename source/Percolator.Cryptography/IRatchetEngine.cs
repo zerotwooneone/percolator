@@ -19,6 +19,7 @@ public interface IRatchetEngine
 
 public sealed class AeadRatchetEngine : IRatchetEngine
 {
+    private const string DeriveLabel = "dr-send-derive";
     public (Ciphertext ct, RatchetEphemeralKey headerKey, RatchetState newState) Encrypt(
         RatchetState state,
         Plaintext pt,
@@ -29,7 +30,7 @@ public sealed class AeadRatchetEngine : IRatchetEngine
         if (state is null) throw new ArgumentNullException(nameof(state));
         if (state.SendingChainKey is null) throw new InvalidOperationException("sending chain key not initialized");
 
-        var derived = CryptoUtils.KDF(null, state.SendingChainKey.Value, "dr-send-derive", CryptoUtils.KeySize * 2);
+        var derived = CryptoUtils.KDF(null, state.SendingChainKey.Value, DeriveLabel, CryptoUtils.KeySize * 2);
         var messageKey = new byte[CryptoUtils.KeySize];
         var nextChainKey = new byte[CryptoUtils.KeySize];
         Buffer.BlockCopy(derived, 0, messageKey, 0, CryptoUtils.KeySize);
@@ -79,7 +80,7 @@ public sealed class AeadRatchetEngine : IRatchetEngine
         if (preKey.Value.Length == 0) throw new ArgumentException("invalid header key");
         var adBuf = SessionRatchetMessage.GetAssociatedData((preKey, counter, prevLen), ad.Value);
 
-        var derived = CryptoUtils.KDF(null, state.ReceivingChainKey.Value, "dr-recv-derive", CryptoUtils.KeySize * 2);
+        var derived = CryptoUtils.KDF(null, state.ReceivingChainKey.Value, DeriveLabel, CryptoUtils.KeySize * 2);
         var messageKey = new byte[CryptoUtils.KeySize];
         var nextChainKey = new byte[CryptoUtils.KeySize];
         Buffer.BlockCopy(derived, 0, messageKey, 0, CryptoUtils.KeySize);

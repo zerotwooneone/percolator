@@ -15,6 +15,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ISessionRepository, SqliteSessionRepository>();
         services.AddSingleton<IX3dhDeriver, X3dhDeriver>();
         services.AddSingleton<IPreKeyBundleValidator, PreKeyBundleValidator>();
+        services.AddSingleton<IRatchetEngine, AeadRatchetEngine>();
         return services;
     }
 }
