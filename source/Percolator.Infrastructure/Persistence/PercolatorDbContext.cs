@@ -32,8 +32,6 @@ public class PercolatorDbContext : DbContext
     public DbSet<DhtNode> DhtNodes { get; set; } = null!;
     
     public DbSet<DirectSessionDbo> DirectSessions { get; set; } = null!;
-    public DbSet<DoubleRatchetSessionDbo> DoubleRatchetSessions { get; set; } = null!;
-    public DbSet<SkippedMessageKeyDbo> SkippedMessageKeys { get; set; } = null!;
     public DbSet<RatchetKeyIndexDbo> RatchetKeyIndex { get; set; } = null!;
     public DbSet<ConversationDbo> Conversations { get; set; } = null!;
     public DbSet<MessageDbo> Messages { get; set; } = null!;
@@ -434,63 +432,6 @@ public class PercolatorDbContext : DbContext
             entity.HasQueryFilter(e => _active != null && _active.Identity != null && e.SelfIdentityId == _active.Identity.SelfIdentityId.Value);
         });
 
-        
-
-        
-
-        // DoubleRatchetSession
-        modelBuilder.Entity<DoubleRatchetSessionDbo>(entity =>
-        {
-            entity.ToTable("DoubleRatchetSessions");
-            entity.HasKey(e => e.SessionId);
-            entity.Property(e => e.SessionId)
-                .ValueGeneratedNever();
-
-            entity.Property(e => e.SelfIdentityId).IsRequired();
-            entity.HasAlternateKey(e => new { e.SessionId, e.SelfIdentityId });
-            entity.Property(e => e.RootKey).IsRequired();
-            entity.Property(e => e.RatchetFlag).IsRequired();
-            entity.Property(e => e.SendingChainKey);
-            entity.Property(e => e.ReceivingChainKey);
-            entity.Property(e => e.SendingCounter).IsRequired();
-            entity.Property(e => e.ReceivingCounter).IsRequired();
-            entity.Property(e => e.PreviousChainLength).IsRequired();
-            entity.Property(e => e.TheirDhRatchetPublicKey);
-            entity.Property(e => e.DhRatchetPrivateKey);
-            entity.Property(e => e.TheirIdentityPublicKey).IsRequired();
-            entity.Property(e => e.UpdatedAt).IsRequired();
-
-            entity.HasMany(e => e.SkippedMessageKeys)
-                .WithOne(k => k.Session)
-                .HasForeignKey(k => new { k.SessionId, k.SelfIdentityId })
-                .HasPrincipalKey(e => new { e.SessionId, e.SelfIdentityId })
-                .IsRequired()
-                .OnDelete(DeleteBehavior.Cascade);
-
-            entity.HasIndex(e => new { e.SelfIdentityId, e.UpdatedAt });
-            entity.HasOne<SelfIdentityDbo>()
-                .WithMany()
-                .HasForeignKey(e => e.SelfIdentityId)
-                .OnDelete(DeleteBehavior.Cascade)
-                .IsRequired();
-
-            // Global filter: only return rows for the active self identity (null active/identity matches nothing)
-            entity.HasQueryFilter(e => _active != null && _active.Identity != null && e.SelfIdentityId == _active.Identity.SelfIdentityId.Value);
-        });
-
-        // SkippedMessageKey (surrogate PK with uniqueness constraint)
-        modelBuilder.Entity<SkippedMessageKeyDbo>(entity =>
-        {
-            entity.ToTable("SkippedMessageKeys");
-            entity.HasKey(e => e.Id);
-            entity.Property(e => e.RatchetKey).IsRequired();
-            entity.Property(e => e.MessageNumber).IsRequired();
-            entity.Property(e => e.MessageKey).IsRequired();
-            entity.Property(e => e.SelfIdentityId).IsRequired();
-            entity.HasIndex(e => new { e.SelfIdentityId, e.SessionId, e.RatchetKey, e.MessageNumber }).IsUnique();
-            entity.HasQueryFilter(e => _active != null && _active.Identity != null && e.SelfIdentityId == _active.Identity.SelfIdentityId.Value);
-        });
-
         // RatchetKeyIndex: fast lookup from (SelfIdentityId, RatchetPublicKey) -> DirectSessionId
         modelBuilder.Entity<RatchetKeyIndexDbo>(entity =>
         {
@@ -501,14 +442,6 @@ public class PercolatorDbContext : DbContext
             entity.Property(e => e.RatchetPublicKey).IsRequired();
             entity.Property(e => e.UpdatedAtUtc).IsRequired();
             entity.HasIndex(e => new { e.SelfIdentityId, e.RatchetPublicKey }).IsUnique();
-
-            // FK to DoubleRatchetSessionDbo (alternate key SessionId + SelfIdentityId)
-            entity.HasOne(e => e.Session)
-                .WithMany()
-                .HasForeignKey(e => new { e.DirectSessionId, e.SelfIdentityId })
-                .HasPrincipalKey((DoubleRatchetSessionDbo s) => new { s.SessionId, s.SelfIdentityId })
-                .OnDelete(DeleteBehavior.Cascade)
-                .IsRequired();
 
             // Global filter: only return rows for the active self identity (null active/identity matches nothing)
             entity.HasQueryFilter(e => _active != null && _active.Identity != null && e.SelfIdentityId == _active.Identity.SelfIdentityId.Value);

@@ -9,6 +9,4 @@ public class RatchetKeyIndexDbo
     public Guid DirectSessionId { get; set; }
     public byte[] RatchetPublicKey { get; set; } = Array.Empty<byte>();
     public DateTimeOffset UpdatedAtUtc { get; set; }
-
-    public DoubleRatchetSessionDbo Session { get; set; } = null!;
 }
