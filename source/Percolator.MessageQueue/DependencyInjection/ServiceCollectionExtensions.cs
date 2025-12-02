@@ -10,7 +10,7 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddMessageQueue(this IServiceCollection services)
     {
         services.AddMediatR(cfg => cfg.RegisterServicesFromAssembly(typeof(ServiceCollectionExtensions).Assembly));
-        services.AddSingleton<IMessageQueueService, MessageQueueService>();
+        services.AddScoped<IMessageQueueService, MessageQueueService>();
         return services;
     }
 }

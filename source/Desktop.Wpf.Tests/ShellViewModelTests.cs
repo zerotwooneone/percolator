@@ -43,7 +43,8 @@ public class ShellViewModelTests
         IStartupIdentityService startupIdentityService)
     {
         var self = new SelfIdentityModel();
-        return new ShellViewModel(nav, selfIdRepro, startupIdentityService, self, rootProvider);
+        var identityScopeAccessor = new IdentityScopeAccessor();
+        return new ShellViewModel(nav, selfIdRepro, startupIdentityService, self, rootProvider, identityScopeAccessor);
     }
 
     [Test]
@@ -141,7 +142,7 @@ public class ShellViewModelTests
         var scopedSessionsRepo = new Mock<Percolator.Cryptography.ISessionRepository>();
         var scopedPeerRepo = new Mock<IPeerIdentityRepository>();
         var sessionScopeFactoryMock = new Mock<ISessionScopeFactory>();
-        var sessionsVm = new SessionsSidebarViewModel(nav.Object, scopedSelf, scopedSessionsRepo.Object, scopedPeerRepo.Object, sessionScopeFactoryMock.Object);
+        var sessionsVm = new SessionsSidebarViewModel(nav.Object, scopedSelf, scopedSessionsRepo.Object, scopedPeerRepo.Object, sessionScopeFactoryMock.Object, new PendingHandshakesMenuViewModel());
         var sessionShellVm = new SessionShellViewModel();
         scopedProvider
             .Setup(sp => sp.GetService(typeof(SessionsSidebarViewModel)))
@@ -193,7 +194,7 @@ public class ShellViewModelTests
         var scopedSessionsRepo = new Mock<Percolator.Cryptography.ISessionRepository>();
         var scopedPeerRepo = new Mock<IPeerIdentityRepository>();
         var scopedSessionFactory = new Mock<ISessionScopeFactory>();
-        var sessionsVm = new SessionsSidebarViewModel(nav.Object, scopedSelf, scopedSessionsRepo.Object, scopedPeerRepo.Object, scopedSessionFactory.Object);
+        var sessionsVm = new SessionsSidebarViewModel(nav.Object, scopedSelf, scopedSessionsRepo.Object, scopedPeerRepo.Object, scopedSessionFactory.Object, new PendingHandshakesMenuViewModel());
         var sessionShellVm = new SessionShellViewModel();
         scopedProvider
             .Setup(sp => sp.GetService(typeof(SessionsSidebarViewModel)))

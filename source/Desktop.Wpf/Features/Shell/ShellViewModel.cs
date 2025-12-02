@@ -27,18 +27,21 @@ public sealed class ShellViewModel : ViewModelBase
     private readonly SelfIdentityModel _self;
     private readonly IServiceProvider _services;
     private IServiceScope? _identityScope;
+    private readonly IIdentityScopeAccessor _identityScopeAccessor;
 
     public ShellViewModel(INavigationService navigation,
                           ISelfIdentityRepository repo,
                           IStartupIdentityService startupIdentity,
                           SelfIdentityModel self,
-                          IServiceProvider services)
+                          IServiceProvider services,
+                          IIdentityScopeAccessor identityScopeAccessor)
     {
         _navigation = navigation;
         _repo = repo;
         _startupIdentity = startupIdentity;
         _self = self;
         _services = services;
+        _identityScopeAccessor = identityScopeAccessor;
 
         // Bind navigation stream to a bindable read-only property for ContentControl binding later
         CurrentView = navigation.ViewStream
@@ -97,6 +100,9 @@ public sealed class ShellViewModel : ViewModelBase
                 mutator.SetActiveIdentity(identityRecord, keys);
             }
 
+            // Expose identity-scoped provider for other features (e.g., simulator window)
+            _identityScopeAccessor.Current = scope.ServiceProvider;
+
             // Build the SessionShell from the identity-scoped provider
             var sidebarVm = scope.ServiceProvider.GetRequiredService<SessionsSidebarViewModel>();
             var sessionShell = scope.ServiceProvider.GetRequiredService<Desktop.Wpf.Features.Sessions.SessionShellViewModel>();
@@ -112,6 +118,7 @@ public sealed class ShellViewModel : ViewModelBase
 
     protected override void DisposeCore()
     {
+        _identityScopeAccessor.Current = null;
         _identityScope?.Dispose();
         Disposable.Dispose(CurrentView, IsLoading);
     }

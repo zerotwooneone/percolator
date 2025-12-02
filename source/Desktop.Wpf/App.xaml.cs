@@ -1,8 +1,10 @@
 using System.Linq;
 using System.Windows;
 using System.Windows.Media;
+using System.Windows.Input;
 using Desktop.Wpf.Features.Chat;
 using Desktop.Wpf.Shared.Config;
+using Desktop.Wpf.Shared.Windowing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -21,6 +23,7 @@ using Percolator.Cryptography;
 using Percolator.Infrastructure.Cryptography;
 using Percolator.Infrastructure.Persistence;
 using Desktop.Wpf.Features.Simulator;
+using Percolator.MessageQueue.DependencyInjection;
 
 namespace Desktop.Wpf;
 
@@ -70,6 +73,7 @@ public partial class App : Application
                 services.AddInfrastructureServices(context.Configuration);
                 services.AddApplicationServices(context.Configuration);
                 services.AddScoped<IClock, SystemClock>();
+                services.AddMessageQueue();
 
                 // Views
                 services.AddSingleton<MainWindow>();
@@ -78,11 +82,15 @@ public partial class App : Application
                 // Navigation
                 services.AddSingleton<INavigationService, NavigationService>();
                 // ViewModels
-                services.AddSingleton<ShellViewModel>();
+                services.AddScoped<ShellViewModel>();
                 services.AddSingleton<ISessionScopeFactory, SessionScopeFactory>();
                 services.AddScoped<SessionsSidebarViewModel>();
+                services.AddScoped<Desktop.Wpf.Features.Sessions.PendingHandshakesMenuViewModel>();
                 services.AddScoped<Desktop.Wpf.Features.Sessions.SessionShellViewModel>();
                 services.AddScoped<Desktop.Wpf.Features.Simulator.HandshakeSimulatorViewModel>();
+                services.AddScoped<MediatR.INotificationHandler<Percolator.Chat.App.Notifications.PendingHandshakeAdded>, Desktop.Wpf.Features.Sessions.PendingHandshakeEventListener>();
+                services.AddSingleton<Desktop.Wpf.Features.Shell.IIdentityScopeAccessor, Desktop.Wpf.Features.Shell.IdentityScopeAccessor>();
+                services.AddSingleton<IWindowManager, WindowManager>();
 
                 // Features
                 services.AddSingleton<Percolator.Cryptography.ISessionRepository, Desktop.Wpf.Features.Sessions.InMemorySessionRepository>();
@@ -94,7 +102,7 @@ public partial class App : Application
 
                 // Self identity
                 services.AddSingleton<SelfIdentityModel>();
-                services.AddSingleton<IStartupIdentityService, StartupIdentityService>();
+                services.AddScoped<IStartupIdentityService, StartupIdentityService>();
                 // Identity repositories (in-memory fakes for desktop)
                 services.AddSingleton<Percolator.Identity.IPeerIdentityRepository, Desktop.Wpf.Features.Identity.InMemoryPeerIdentityRepository>();
 
@@ -182,18 +190,41 @@ public partial class App : Application
         }
 
         var window = HostInstance.Services.GetRequiredService<MainWindow>();
-        var shell = HostInstance.Services.GetRequiredService<ShellViewModel>();
+        _shellScope = HostInstance.Services.CreateScope();
+        var shell = _shellScope.ServiceProvider.GetRequiredService<ShellViewModel>();
         window.DataContext = shell;
         window.Show();
+
+        // Dev-only: register simulator hotkey (Shift+F6) for a single window instance
+        try
+        {
+            var uiOptions = HostInstance.Services.GetRequiredService<IOptionsMonitor<UiOptions>>().CurrentValue;
+            if (uiOptions.EnableHandshakeSimulator == true)
+            {
+                var windowManager = HostInstance.Services.GetRequiredService<IWindowManager>();
+                window.PreviewKeyDown += (s, ev) =>
+                {
+                    if (ev.Key == Key.F6 && (Keyboard.Modifiers & ModifierKeys.Shift) == ModifierKeys.Shift)
+                    {
+                        ev.Handled = true;
+                        windowManager.Show<Desktop.Wpf.Features.Simulator.HandshakeSimulatorWindow>();
+                    }
+                };
+            }
+        }
+        catch { /* ignore */ }
     }
 
     protected override async void OnExit(ExitEventArgs e)
     {
         if (HostInstance is not null)
         {
+            _shellScope?.Dispose();
             await HostInstance.StopAsync();
             HostInstance.Dispose();
         }
         base.OnExit(e);
     }
+
+    private IServiceScope? _shellScope;
 }

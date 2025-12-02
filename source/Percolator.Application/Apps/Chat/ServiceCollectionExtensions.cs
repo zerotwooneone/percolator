@@ -14,6 +14,7 @@ public static class ServiceCollectionExtensions
         services.AddTransient<IAdminOperationSigner, AdminOperationSigner>();
         services.AddScoped<IAdminSequenceProvider, AdminSequenceProvider>();
         services.AddScoped<IGroupSenderKeyService, GroupSenderKeyService>();
+        services.AddScoped<IEnvelopeCrypto, DummyEnvelopeCrypto>();
 
         return services;
     }

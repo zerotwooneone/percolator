@@ -17,6 +17,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ChatApp.IGroupAdminOpStore, SqliteGroupAdminOpStore>();
         services.AddScoped<ChatApp.IGroupAdminStateStore, SqliteGroupAdminStateStore>();
         services.AddScoped<IGroupManagerStateStore, SqliteGroupManagerStateStore>();
+        services.AddScoped<IGroupSenderKeyRepository, InMemoryGroupSenderKeyRepository>();
         services.AddScoped<IDirectSessionConversationLookup, SqliteDirectSessionConversationLookup>();
         services.AddScoped<IActingAdminResolver, SqliteActingAdminResolver>();
         services.AddScoped<ChatApp.IKeyAdoptionStore, SqliteKeyAdoptionStore>();

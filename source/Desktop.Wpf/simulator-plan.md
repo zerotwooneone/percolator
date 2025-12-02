@@ -163,12 +163,19 @@ Chunk 4 — Utility window + service wiring (updated)
 - Acceptance:
   - Manual: clicking button inserts a pending session; dot increments; card lists item.
 
-Chunk 5 — Integration path (in-memory DB)
-- Red:
-  - Integration test: send command → repository persists row → notification received by listener → collection updated.
-- Green:
-  - Wire test host with in-memory EF DbContext, real factory/provider, and mediator pipeline.
-- Refactor:
-  - Tighten lifetimes; ensure ActiveIdentityContext is seeded.
+Chunk 5 — Dev enablement, hotkey, and real pending list updates (updated)
+- Dev-only enable flag:
+  - Add `Ui:EnableHandshakeSimulator` (bool) to appsettings.Development.json only.
+  - On startup, if flag is true, register a global hotkey and expose a developer menu item; flag is false by default for other environments.
+- Hotkey (Shift+F6):
+  - Wire a global hotkey handler to open the Handshake Simulator.
+  - Ensure a single window instance: focus an existing window if already open; otherwise resolve from DI and show.
+- Replace fake pending behavior on Initials Avatar:
+  - Remove any code injecting synthetic pending handshakes from avatar clicks.
+  - Add a MediatR notification handler wired to `PendingHandshakeAdded` that:
+    - Queries the DB (via `IPendingSessionRepository`) for current pending handshakes scoped to the active identity.
+    - Updates the Add Peer menu’s pending list accordingly (marshal to UI thread via `IDispatcher`).
 - Acceptance:
-  - Test passes and logs show single publish and single UI update.
+  - In Development, pressing Shift+F6 opens or focuses the simulator window.
+  - When simulator adds a pending handshake, the Add Peer menu pending list updates from DB.
+  - No pending injection is triggered by avatar clicks.

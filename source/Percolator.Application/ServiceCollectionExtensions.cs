@@ -38,6 +38,7 @@ public static class ServiceCollectionExtensions
 
         services.AddScoped<ReverseSignalInvitationService>();
         services.AddScoped<ReverseSignalAcceptService>();
+        services.AddScoped<ReverseSignal.PendingSessionPurgeService>();
 
         services.AddMediatR(cfg =>
         {

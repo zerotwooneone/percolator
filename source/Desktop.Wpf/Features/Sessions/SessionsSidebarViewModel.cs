@@ -22,7 +22,6 @@ public sealed class SessionsSidebarViewModel : ViewModelBase
     public BindableReactiveProperty<string?> SelectedSessionId { get; }
     public SelfIdentityModel Self { get; }
     public BindableReactiveProperty<bool> IsLoading { get; }
-    public AsyncRelayCommand IncrementPendingInvitesCommand { get; }
     public PendingHandshakesMenuViewModel PendingMenu { get; }
 
     private readonly ObservableCollection<SessionListItem> _items = new();
@@ -34,25 +33,15 @@ public sealed class SessionsSidebarViewModel : ViewModelBase
         SelfIdentityModel self,
                                    ISessionRepository sessions,
                                    IPeerIdentityRepository peers,
-                                   ISessionScopeFactory sessionFactory)
+                                   ISessionScopeFactory sessionFactory,
+                                   PendingHandshakesMenuViewModel pendingMenu)
     {
         Self = self;
         _sessionFactory = sessionFactory;
         SearchText = new BindableReactiveProperty<string>("");
         SelectedSessionId = new BindableReactiveProperty<string?>(null);
         IsLoading = new BindableReactiveProperty<bool>(true);
-        IncrementPendingInvitesCommand = new AsyncRelayCommand(_ =>
-        {
-            PendingMenu.PendingHandshakes.Add(new PendingHandshakeItem
-            {
-                DisplayName = "Anon_User_402",
-                Initials = "AU",
-                BundleText = "Bundle: PK-NBM094"
-            });
-            return Task.CompletedTask;
-        });
-
-        PendingMenu = new PendingHandshakesMenuViewModel();
+        PendingMenu = pendingMenu;
         
         // Load sessions once, then filter locally
         _ = LoadAsync(sessions, peers);

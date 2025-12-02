@@ -20,6 +20,7 @@
     <ItemGroup>
         <ProjectReference Include="..\Percolator.Application\Percolator.Application.csproj" />
         <ProjectReference Include="..\Percolator.Infrastructure\Percolator.Infrastructure.csproj" />
+        <ProjectReference Include="..\Percolator.Chat\Percolator.Chat.csproj"/>
     </ItemGroup>
 
     <!-- Embed Nerd Font as resource (linked from repo Assets folder) -->

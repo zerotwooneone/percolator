@@ -111,27 +111,28 @@ public static class ServiceCollectionExtensions
         }
 
         services.AddScoped<IMessageTransportService, GrpcMessageTransportService>();
-        services.AddSingleton<PercolatorMessageService>();
+        services.AddScoped<PercolatorMessageService>();
         services.AddSingleton<IPeerDiscoveryHandler, PeerDiscoveryHandler>();
 
         // Relay orchestrator for queued messages ACK flow
-        services.AddSingleton<RelayOrchestrator>();
+        services.AddScoped<RelayOrchestrator>();
 
         // Network messaging strategy services (legacy components removed)
 
         // Application-layer envelope sender
-        services.AddSingleton<IMessageService, MessageService>();
-        services.AddSingleton<Handshake.IInitiatorHelloService, Handshake.InitiatorHelloService>();
+        services.AddScoped<IMessageService, MessageService>();
+        services.AddScoped<Handshake.IInitiatorHelloService, Handshake.InitiatorHelloService>();
+        services.AddScoped<Handshake.IInitiatorFinalizeService, Handshake.InitiatorFinalizeService>();
         services.AddTransient<IRemoteEnvelopeSender, RemoteEnvelopeSender>();
 
         // Establish direct session flow: service that creates peer/route and enqueues crypto pending session
         services.AddScoped<IEstablishDirectSessionService, EstablishDirectSessionService>();
 
         // Register domain Network.Messaging components required by MessageService
-        services.AddSingleton<Percolator.Network.Messaging.IRelayTopology, Percolator.Network.Messaging.DefaultRelayTopology>();
-        services.AddSingleton<Percolator.Network.Messaging.ITransportPort, NetworkTransportPortAdapter>();
-        services.AddSingleton<Percolator.Network.Messaging.ISendExecutor, Percolator.Network.Messaging.DefaultSendExecutor>();
-        services.AddSingleton<Percolator.Network.Messaging.INetworkSender, Percolator.Network.Messaging.DefaultNetworkSender>();
+        services.AddScoped<Percolator.Network.Messaging.IRelayTopology, Percolator.Network.Messaging.DefaultRelayTopology>();
+        services.AddScoped<Percolator.Network.Messaging.ITransportPort, NetworkTransportPortAdapter>();
+        services.AddScoped<Percolator.Network.Messaging.ISendExecutor, Percolator.Network.Messaging.DefaultSendExecutor>();
+        services.AddScoped<Percolator.Network.Messaging.INetworkSender, Percolator.Network.Messaging.DefaultNetworkSender>();
 
         return services;
     }

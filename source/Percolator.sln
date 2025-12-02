@@ -16,6 +16,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "SolutionFolder", "SolutionF
 		..\Mockup\Desktop\chat.png = ..\Mockup\Desktop\chat.png
 		..\Mockup\Desktop\mockup.png = ..\Mockup\Desktop\mockup.png
 		..\Mockup\Desktop\send.png = ..\Mockup\Desktop\send.png
+		group-flow.readme.md = group-flow.readme.md
 	EndProjectSection
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Cryptography", "Cryptography", "{D3EFBBDF-641F-4849-8BCB-BFAA7DEA0447}"

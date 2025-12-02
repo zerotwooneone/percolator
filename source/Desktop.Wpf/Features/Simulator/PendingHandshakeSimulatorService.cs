@@ -20,20 +20,17 @@ public interface IPendingHandshakeSimulatorService
 
 public sealed class PendingHandshakeSimulatorService : IPendingHandshakeSimulatorService
 {
-    private readonly IHandshakeInvitationFactory _invites;
     private readonly IPendingSessionRepository _pendingSessions;
     private readonly IPeerIdentityRepository _peerIdentityRepository;
     private readonly IClock _clock;
     private readonly IMediator _mediator;
 
     public PendingHandshakeSimulatorService(
-        IHandshakeInvitationFactory invites,
         IPendingSessionRepository pendingSessions,
         IPeerIdentityRepository peerIdentityRepository,
         IClock clock,
         IMediator mediator)
     {
-        _invites = invites;
         _pendingSessions = pendingSessions;
         _peerIdentityRepository = peerIdentityRepository;
         _clock = clock;

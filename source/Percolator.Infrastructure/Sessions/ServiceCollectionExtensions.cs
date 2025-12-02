@@ -9,6 +9,7 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddSessionsInfrastructure(this IServiceCollection services)
     {
         services.AddScoped<IRatchetKeyIndex, RatchetKeyIndexAdapter>();
+        services.AddScoped<ISessionCatalog, SessionCatalogAdapter>();
         return services;
     }
 }
