@@ -62,8 +62,8 @@ public sealed class ShellViewModel : ViewModelBase
         OpenHandshakeSimulatorCommand = new AsyncRelayCommand(async _ =>
         {
             // Only show when identity scope is available
-            if (_identityScopeAccessor.Current is null) return;
-            _windowManager.Show<Desktop.Wpf.Features.Simulator.HandshakeSimulatorWindow>();
+            if (_identityScopeAccessor.Current is null) throw new InvalidOperationException("Identity scope not available");
+            _windowManager.ShowFor<Desktop.Wpf.Features.Simulator.HandshakeSimulatorViewModel>();
             await Task.CompletedTask;
         });
 
