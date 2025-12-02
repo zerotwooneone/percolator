@@ -34,8 +34,7 @@ public sealed class WindowManager : IWindowManager
         var provider = _identityScopeAccessor.Current;
         if (provider is null) return false; // Identity not ready yet
 
-        using var scope = provider.GetRequiredService<IServiceScopeFactory>().CreateScope();
-        var window = scope.ServiceProvider.GetRequiredService<TWindow>();
+        var window = provider.GetRequiredService<TWindow>();
         // Track and clean up when closed
         window.Closed += (_, __) =>
         {

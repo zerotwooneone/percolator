@@ -3,6 +3,9 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:shell="clr-namespace:Desktop.Wpf.Features.Shell"
         Title="Percolator Chat" Width="1120" Height="720">
+  <Window.InputBindings>
+    <KeyBinding Modifiers="Shift" Key="F6" Command="{Binding OpenHandshakeSimulatorCommand}" />
+  </Window.InputBindings>
   <Grid Background="{StaticResource SurfaceBrush}">
       <ContentControl Content="{Binding CurrentView.Value}" />
   </Grid>

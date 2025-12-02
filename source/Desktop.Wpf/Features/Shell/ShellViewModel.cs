@@ -13,6 +13,10 @@ using Percolator.Identity;
 using Percolator.Identity.Model;
 using System.Security.Cryptography;
 using Desktop.Wpf;
+using MediatR;
+using System.Windows.Input;
+using Desktop.Wpf.Shared.Windowing;
+using Desktop.Wpf.Shared.Mvvm;
 
 namespace Desktop.Wpf.Features.Shell;
 
@@ -28,13 +32,17 @@ public sealed class ShellViewModel : ViewModelBase
     private readonly IServiceProvider _services;
     private IServiceScope? _identityScope;
     private readonly IIdentityScopeAccessor _identityScopeAccessor;
+    private readonly IWindowManager _windowManager;
+
+    public ICommand OpenHandshakeSimulatorCommand { get; }
 
     public ShellViewModel(INavigationService navigation,
                           ISelfIdentityRepository repo,
                           IStartupIdentityService startupIdentity,
                           SelfIdentityModel self,
                           IServiceProvider services,
-                          IIdentityScopeAccessor identityScopeAccessor)
+                          IIdentityScopeAccessor identityScopeAccessor,
+                          IWindowManager windowManager)
     {
         _navigation = navigation;
         _repo = repo;
@@ -42,6 +50,7 @@ public sealed class ShellViewModel : ViewModelBase
         _self = self;
         _services = services;
         _identityScopeAccessor = identityScopeAccessor;
+        _windowManager = windowManager;
 
         // Bind navigation stream to a bindable read-only property for ContentControl binding later
         CurrentView = navigation.ViewStream
@@ -49,6 +58,14 @@ public sealed class ShellViewModel : ViewModelBase
             .ToReadOnlyBindableReactiveProperty<object?>();
 
         IsLoading = new BindableReactiveProperty<bool>(true);
+
+        OpenHandshakeSimulatorCommand = new AsyncRelayCommand(async _ =>
+        {
+            // Only show when identity scope is available
+            if (_identityScopeAccessor.Current is null) return;
+            _windowManager.Show<Desktop.Wpf.Features.Simulator.HandshakeSimulatorWindow>();
+            await Task.CompletedTask;
+        });
 
         // Show loading screen first
         _navigation.Navigate(new LoadingViewModel());

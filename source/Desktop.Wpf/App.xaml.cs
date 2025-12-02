@@ -191,28 +191,15 @@ public partial class App : Application
 
         var window = HostInstance.Services.GetRequiredService<MainWindow>();
         _shellScope = HostInstance.Services.CreateScope();
+
+        // Make the shell scope available to window manager and others via identity scope accessor
+        var identityScopeAccessor = HostInstance.Services.GetRequiredService<Desktop.Wpf.Features.Shell.IIdentityScopeAccessor>();
+        identityScopeAccessor.Current = _shellScope.ServiceProvider;
+
         var shell = _shellScope.ServiceProvider.GetRequiredService<ShellViewModel>();
         window.DataContext = shell;
         window.Show();
 
-        // Dev-only: register simulator hotkey (Shift+F6) for a single window instance
-        try
-        {
-            var uiOptions = HostInstance.Services.GetRequiredService<IOptionsMonitor<UiOptions>>().CurrentValue;
-            if (uiOptions.EnableHandshakeSimulator == true)
-            {
-                var windowManager = HostInstance.Services.GetRequiredService<IWindowManager>();
-                window.PreviewKeyDown += (s, ev) =>
-                {
-                    if (ev.Key == Key.F6 && (Keyboard.Modifiers & ModifierKeys.Shift) == ModifierKeys.Shift)
-                    {
-                        ev.Handled = true;
-                        windowManager.Show<Desktop.Wpf.Features.Simulator.HandshakeSimulatorWindow>();
-                    }
-                };
-            }
-        }
-        catch { /* ignore */ }
     }
 
     protected override async void OnExit(ExitEventArgs e)
