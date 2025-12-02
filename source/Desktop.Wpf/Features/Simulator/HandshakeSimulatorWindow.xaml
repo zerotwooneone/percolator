@@ -11,10 +11,7 @@
     <TextBlock Grid.Row="1" Grid.Column="0" VerticalAlignment="Center" Margin="0,0,8,8" Text="Display Name:"/>
     <TextBox Grid.Row="1" Grid.Column="1" Margin="0,0,0,8" Text="{Binding DisplayName, UpdateSourceTrigger=PropertyChanged}"/>
 
-    <TextBlock Grid.Row="2" Grid.Column="0" VerticalAlignment="Center" Margin="0,0,8,8" Text="Payload (optional):"/>
-    <TextBox Grid.Row="2" Grid.Column="1" Margin="0,0,0,8" Text="{Binding PayloadText, UpdateSourceTrigger=PropertyChanged}"/>
-
-    <TextBlock Grid.Row="3" Grid.ColumnSpan="2" TextWrapping="Wrap" Foreground="Gray" Text="Enter GUID for PeerId. Payload may be left empty."/>
+    <TextBlock Grid.Row="3" Grid.ColumnSpan="2" TextWrapping="Wrap" Foreground="Gray" Text="Enter GUID for PeerId."/>
 
     <StackPanel Grid.Row="4" Grid.ColumnSpan="2" Orientation="Horizontal" HorizontalAlignment="Right">
       <Button Margin="0,16,8,0" Content="Simulate" Command="{Binding SimulateCommand}"/>
