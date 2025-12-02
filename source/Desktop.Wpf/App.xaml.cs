@@ -90,6 +90,7 @@ public partial class App : Application
                 services.AddScoped<Desktop.Wpf.Features.Simulator.HandshakeSimulatorViewModel>();
                 services.AddScoped<MediatR.INotificationHandler<Percolator.Chat.App.Notifications.PendingHandshakeAdded>, Desktop.Wpf.Features.Sessions.PendingHandshakeEventListener>();
                 services.AddSingleton<Desktop.Wpf.Features.Shell.IIdentityScopeAccessor, Desktop.Wpf.Features.Shell.IdentityScopeAccessor>();
+                services.AddSingleton<Desktop.Wpf.Shared.Windowing.IWindowViewRegistry, Desktop.Wpf.Shared.Windowing.WindowViewRegistry>();
                 services.AddSingleton<IWindowManager, WindowManager>();
 
                 // Features
@@ -195,6 +196,12 @@ public partial class App : Application
         // Make the shell scope available to window manager and others via identity scope accessor
         var identityScopeAccessor = HostInstance.Services.GetRequiredService<Desktop.Wpf.Features.Shell.IIdentityScopeAccessor>();
         identityScopeAccessor.Current = _shellScope.ServiceProvider;
+
+        // Load view mappings from XAML config so WindowManager can resolve VM->Window (fail fast if bad)
+        var registry = _shellScope.ServiceProvider.GetRequiredService<Desktop.Wpf.Shared.Windowing.IWindowViewRegistry>();
+        Desktop.Wpf.Shared.Windowing.WindowViewMappingLoader.LoadFromResource(
+            registry,
+            new Uri("/Desktop.Wpf;component/Shared/Windowing/ViewMappings.xaml", UriKind.Relative));
 
         var shell = _shellScope.ServiceProvider.GetRequiredService<ShellViewModel>();
         window.DataContext = shell;

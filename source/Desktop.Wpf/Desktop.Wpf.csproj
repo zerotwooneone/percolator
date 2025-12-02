@@ -28,6 +28,8 @@
         <Resource Include="..\..\Assets\Fonts\FiraCodeNerdFontMono-Regular.ttf">
             <Link>Assets/Fonts/FiraCodeNerdFontMono-Regular.ttf</Link>
         </Resource>
+        <Page Remove="Shared\Windowing\ViewMappings.xaml" />
+        <Resource Include="Shared\Windowing\ViewMappings.xaml" />
     </ItemGroup>
 
     <!-- Ensure configuration files are copied to output so Host.CreateDefaultBuilder can read them -->

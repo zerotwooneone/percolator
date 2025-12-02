@@ -9,11 +9,13 @@ namespace Desktop.Wpf.Shared.Windowing;
 public sealed class WindowManager : IWindowManager
 {
     private readonly IIdentityScopeAccessor _identityScopeAccessor;
+    private readonly IWindowViewRegistry _registry;
     private readonly ConcurrentDictionary<Type, WeakReference<Window>> _open = new();
 
-    public WindowManager(IIdentityScopeAccessor identityScopeAccessor)
+    public WindowManager(IIdentityScopeAccessor identityScopeAccessor, IWindowViewRegistry registry)
     {
         _identityScopeAccessor = identityScopeAccessor;
+        _registry = registry;
     }
 
     public bool TryActivate<TWindow>() where TWindow : Window
@@ -52,14 +54,12 @@ public sealed class WindowManager : IWindowManager
     public bool ShowFor<TViewModel>() where TViewModel : class
     {
         var provider = _identityScopeAccessor.Current;
-        if (provider is null) return false;
+        if (provider is null)
+            throw new InvalidOperationException("Identity scope is not available. Ensure Shell has initialized and set IIdentityScopeAccessor.Current.");
 
         var vmType = typeof(TViewModel);
-        var windowTypeName = vmType.FullName?.Replace("ViewModel", "Window");
-        if (string.IsNullOrWhiteSpace(windowTypeName)) return false;
-
-        var windowType = vmType.Assembly.GetType(windowTypeName);
-        if (windowType is null || !typeof(Window).IsAssignableFrom(windowType)) return false;
+        if (!_registry.TryGetWindowType(vmType, out var windowType))
+            throw new InvalidOperationException($"No window mapping registered for ViewModel type {vmType.FullName}. Add an entry in ViewMappings.xaml or register programmatically.");
 
         // Try to activate existing window
         if (_open.TryGetValue(windowType, out var wr) && wr.TryGetTarget(out var existing) && existing.IsVisible)
@@ -70,7 +70,11 @@ public sealed class WindowManager : IWindowManager
         }
 
         var vm = provider.GetRequiredService<TViewModel>();
-        var window = (Window)provider.GetRequiredService(windowType);
+        if (vm is null)
+            throw new InvalidOperationException($"Failed to resolve ViewModel {vmType.FullName} from the identity scope.");
+        var windowObj = provider.GetRequiredService(windowType);
+        if (windowObj is not Window window)
+            throw new InvalidOperationException($"Resolved object for {windowType.FullName} is not a Window.");
 
         if (window.DataContext is null)
             window.DataContext = vm;
