@@ -116,11 +116,10 @@ public sealed class ShellViewModel : ViewModelBase
             }
 
             // Expose identity-scoped provider for other features (e.g., simulator window)
-            _identityScopeAccessor.Current = provider;
-
+            
             // Build the SessionShell from the identity-scoped provider
-            var sidebarVm = provider.GetRequiredService<SessionsSidebarViewModel>();
-            var sessionShell = provider.GetRequiredService<Desktop.Wpf.Features.Sessions.SessionShellViewModel>();
+            var sidebarVm = _identityScopeAccessor.Current.GetRequiredService<SessionsSidebarViewModel>();
+            var sessionShell = _identityScopeAccessor.Current.GetRequiredService<Desktop.Wpf.Features.Sessions.SessionShellViewModel>();
             sessionShell.Sidebar = sidebarVm;
             sidebarVm.SetConductor(sessionShell);
             _navigation.Navigate(sessionShell);
