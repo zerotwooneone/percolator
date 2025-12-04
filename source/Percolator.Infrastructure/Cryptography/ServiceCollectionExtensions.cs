@@ -1,6 +1,8 @@
 using Microsoft.Extensions.DependencyInjection;
+using Percolator.Application.Cryptography;
 using Percolator.Cryptography;
 using Percolator.Chat.App;
+using Percolator.Infrastructure.Application;
 
 namespace Percolator.Infrastructure.Cryptography;
 
@@ -13,6 +15,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IAdminSignatureVerifier, AdminSignatureVerifier>();
         services.AddScoped<IPendingSessionRepository, SqlitePendingSessionRepository>();
         services.AddScoped<ISessionRepository, SqliteSessionRepository>();
+        services.AddScoped<IPendingHandshakeQueries, PendingHandshakeQueries>();
         services.AddSingleton<IX3dhDeriver, X3dhDeriver>();
         services.AddSingleton<IPreKeyBundleValidator, PreKeyBundleValidator>();
         services.AddSingleton<IRatchetEngine, AeadRatchetEngine>();

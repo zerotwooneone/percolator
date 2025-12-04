@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Threading.Tasks;
 using Desktop.Wpf.Shared.Mvvm;
+using Percolator.Application.Cryptography;
 using Percolator.Cryptography;
 
 namespace Desktop.Wpf.Features.Sessions;
@@ -20,13 +21,19 @@ public sealed class PendingHandshakesMenuViewModel
     public AsyncRelayCommand AcceptHandshakeCommand { get; }
     public AsyncRelayCommand BurnHandshakeCommand { get; }
 
-    public PendingHandshakesMenuViewModel()
+    public PendingHandshakesMenuViewModel(IPendingSessionRepository pendingSessions)
     {
         AcceptHandshakeCommand = new AsyncRelayCommand(async obj =>
         {
             if (obj is PendingHandshakeItem item)
             {
-                // TODO: hook into application service to accept
+                var pending = await pendingSessions.GetAsync(item.PendingId);
+                if (pending is null)
+                {
+                    PendingHandshakes.Remove(item);
+                    return;
+                }
+                //todo:generate response and send
                 PendingHandshakes.Remove(item);
             }
         });
@@ -34,7 +41,14 @@ public sealed class PendingHandshakesMenuViewModel
         {
             if (obj is PendingHandshakeItem item)
             {
-                // TODO: hook into application service to burn
+                var pending = await pendingSessions.GetAsync(item.PendingId);
+                if (pending is null)
+                {
+                    PendingHandshakes.Remove(item);
+                    return;
+                }
+                pending.Reject();
+                pendingSessions.UpdateAsync(pending);
                 PendingHandshakes.Remove(item);
             }
         });

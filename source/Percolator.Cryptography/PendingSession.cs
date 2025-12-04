@@ -98,4 +98,18 @@ public class PendingSession
             State = ApprovalState.Expired;
         }
     }
+
+    public bool IsExpiredAt(DateTimeOffset clockUtcNow)
+    {
+        if (ExpiresAtUtc is null)
+        {
+            return false;
+        }
+
+        if (State == ApprovalState.Expired)
+        {
+            return true;
+        }
+        return clockUtcNow >= ExpiresAtUtc.Value;
+    }
 }

@@ -9,6 +9,7 @@ using Desktop.Wpf.Features.Chat;
 using System.Collections.Generic;
 using Desktop.Wpf.Features.Self;
 using Desktop.Wpf.Shared.Mvvm;
+using Percolator.Application.Cryptography;
 using Percolator.Cryptography;
 using Percolator.Identity;
 using Percolator.Identity.Model;
@@ -27,6 +28,7 @@ public sealed class SessionsSidebarViewModel : ViewModelBase
     private readonly ObservableCollection<SessionListItem> _items = new();
 
     private readonly ISessionScopeFactory _sessionFactory;
+    private readonly IPendingHandshakeQueries _pendingHandshakeQueries;
     private ISessionConductor? _conductor;
 
     public SessionsSidebarViewModel(INavigationService navigation,
@@ -35,10 +37,12 @@ public sealed class SessionsSidebarViewModel : ViewModelBase
                                    IPeerIdentityRepository peers,
                                    IPendingSessionRepository pendingSessions,
                                    ISessionScopeFactory sessionFactory,
-                                   PendingHandshakesMenuViewModel pendingMenu)
+                                   PendingHandshakesMenuViewModel pendingMenu, 
+        IPendingHandshakeQueries pendingHandshakeQueries)
     {
         Self = self;
         _sessionFactory = sessionFactory;
+        _pendingHandshakeQueries = pendingHandshakeQueries;
         SearchText = new BindableReactiveProperty<string>("");
         SelectedSessionId = new BindableReactiveProperty<string?>(null);
         IsLoading = new BindableReactiveProperty<bool>(true);
@@ -168,15 +172,12 @@ public sealed class SessionsSidebarViewModel : ViewModelBase
             foreach (var sessionListItem in created) _items.Add(sessionListItem);
 
             var pendingItems = new List<PendingHandshakeItem>();
-            await foreach (var pending in pendingSessions.EnumerateAsync(CancellationToken.None).ConfigureAwait(false))
+            await foreach (var pending in _pendingHandshakeQueries.EnumerateOpenAsync(CancellationToken.None).ConfigureAwait(false))
             {
-                var pid = new Percolator.Identity.PeerId(pending.RemotePeerId.Value);
-                var peer = await peers.GetByIdAsync(pid, CancellationToken.None).ConfigureAwait(false);
-                var name = peer?.DisplayName?.Value ?? pid.Value.ToString()[..8];
                 pendingItems.Add(new PendingHandshakeItem
                 {
-                    DisplayName = name,
-                    Initials = ComputeInitials(name),
+                    DisplayName = pending.PeerName,
+                    Initials = ComputeInitials(pending.PeerName),
                     BundleText = $"bundle text",
                     PendingId = pending.Id
                 });
