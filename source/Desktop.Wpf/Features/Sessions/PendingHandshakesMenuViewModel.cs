@@ -1,14 +1,16 @@
 using System.Collections.ObjectModel;
 using System.Threading.Tasks;
 using Desktop.Wpf.Shared.Mvvm;
+using Percolator.Cryptography;
 
 namespace Desktop.Wpf.Features.Sessions;
 
 public sealed class PendingHandshakeItem
 {
-    public string DisplayName { get; set; } = "Anon_User_402";
-    public string Initials { get; set; } = "AU";
-    public string BundleText { get; set; } = "Bundle: PK-NBM094";
+    public string DisplayName { get; set; } = "Unknown";
+    public string Initials { get; set; } = "UK";
+    public string BundleText { get; set; } = "Not Set";
+    public PendingSessionId PendingId { get; set; }
 }
 
 public sealed class PendingHandshakesMenuViewModel
@@ -25,7 +27,6 @@ public sealed class PendingHandshakesMenuViewModel
             if (obj is PendingHandshakeItem item)
             {
                 // TODO: hook into application service to accept
-                await Task.CompletedTask;
                 PendingHandshakes.Remove(item);
             }
         });
@@ -34,7 +35,6 @@ public sealed class PendingHandshakesMenuViewModel
             if (obj is PendingHandshakeItem item)
             {
                 // TODO: hook into application service to burn
-                await Task.CompletedTask;
                 PendingHandshakes.Remove(item);
             }
         });

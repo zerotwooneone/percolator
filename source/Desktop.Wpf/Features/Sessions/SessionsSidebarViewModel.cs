@@ -177,7 +177,8 @@ public sealed class SessionsSidebarViewModel : ViewModelBase
                 {
                     DisplayName = name,
                     Initials = ComputeInitials(name),
-                    BundleText = $"bundle text"
+                    BundleText = $"bundle text",
+                    PendingId = pending.Id
                 });
             }
 

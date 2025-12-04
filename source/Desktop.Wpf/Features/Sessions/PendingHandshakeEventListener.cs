@@ -40,7 +40,8 @@ public sealed class PendingHandshakeEventListener : INotificationHandler<Pending
             {
                 DisplayName = name,
                 Initials = ComputeInitials(name),
-                BundleText = $"bundle text"
+                BundleText = $"bundle text",
+                PendingId = pending.Id
             });
         }
 
