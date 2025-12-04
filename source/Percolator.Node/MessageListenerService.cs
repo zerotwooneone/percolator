@@ -158,7 +158,6 @@ namespace Percolator.Node
                         
                         // Register the main service instances to ensure we use the same instances
                         _logger.LogInformation("Registering shared service instances from main application");
-                        services.AddSingleton<Percolator.Application.Identity.ActiveIdentityContext>(s => mainServiceProvider.GetRequiredService<Percolator.Application.Identity.ActiveIdentityContext>());
                         services.AddSingleton<PercolatorMessageService>(s=>mainServiceProvider.GetRequiredService<PercolatorMessageService>());
                     })
                     .Configure(app =>

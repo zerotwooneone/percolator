@@ -82,40 +82,39 @@ public sealed class ShellViewModel : ViewModelBase
         {
             // Resolve or create the domain identity via startup service
             var domainIdentity = await _startupIdentity.ResolveOrCreateAsync();
-            // Fetch DTO by resolved id to retrieve PeerId (until DTO usages are removed)
-            var dto = await _repo.GetByIdAsync(domainIdentity.Id);
-            if (dto is null)
-            {
-                // Navigate to new-user screen (VM-first)
-                var newUserVm = _identityScopeAccessor.Current.GetRequiredService<Desktop.Wpf.Features.Shell.NewUserViewModel>();
-                _navigation.Navigate(newUserVm);
-                return;
-            }
+            
+            // if (dto is null)
+            // {
+            //     // Navigate to new-user screen (VM-first)
+            //     var newUserVm = _identityScopeAccessor.Current.GetRequiredService<Desktop.Wpf.Features.Shell.NewUserViewModel>();
+            //     _navigation.Navigate(newUserVm);
+            //     return;
+            // }
 
             // Populate SelfIdentity model
             
             //todo: figure out what to use for display name
-            var displayName = dto.DisplayName?.Value ?? dto.Id.ToString();
+            var displayName = domainIdentity.DisplayName?.Value ?? domainIdentity.Id.ToString();
             _self.DisplayName.Value = displayName;
             _self.Initials.Value = ComputeInitials(displayName);
-            _self.Id.Value = dto.Id.ToString();
+            _self.Id.Value = domainIdentity.Id.ToString();
 
             // Use the Shell's provider as the identity-scoped provider and set ActiveIdentity
             var mutator = _identityScopeAccessor.Current.GetService<IActiveIdentityMutator>();
-            if (mutator is not null)
+            if (mutator is null)
             {
-                //todo: figure out what to use for peer id
-                var identityRecord = new IdentityRecord(Guid.NewGuid(), displayName)
-                {
-                    SelfIdentityId = dto.Id
-                };
-                using var eph = ECDiffieHellman.Create();
-                using var eph2 = ECDiffieHellman.Create();
-                var keys = new X3dhKeys(eph, eph2);
-                mutator.SetActiveIdentity(identityRecord, keys);
+                throw new InvalidOperationException("identity context can not be set");
             }
-
-            // Expose identity-scoped provider for other features (e.g., simulator window)
+            
+            //todo: figure out what to use for peer id
+            var identityRecord = new IdentityRecord(Guid.NewGuid(), displayName)
+            {
+                SelfIdentityId = domainIdentity.Id
+            };
+            using var eph = ECDiffieHellman.Create();
+            using var eph2 = ECDiffieHellman.Create();
+            var keys = new X3dhKeys(eph, eph2);
+            mutator.SetActiveIdentity(identityRecord, keys);
             
             // Build the SessionShell from the identity-scoped provider
             var sidebarVm = _identityScopeAccessor.Current.GetRequiredService<SessionsSidebarViewModel>();

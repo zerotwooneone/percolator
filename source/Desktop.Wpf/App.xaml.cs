@@ -2,6 +2,9 @@ using System.Linq;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Input;
+using System;
+using System.Diagnostics;
+using System.Threading.Tasks;
 using Desktop.Wpf.Features.Chat;
 using Desktop.Wpf.Shared.Config;
 using Desktop.Wpf.Shared.Windowing;
@@ -23,6 +26,7 @@ using Percolator.Cryptography;
 using Percolator.Infrastructure.Cryptography;
 using Percolator.Infrastructure.Persistence;
 using Desktop.Wpf.Features.Simulator;
+using MediatR;
 using Percolator.MessageQueue.DependencyInjection;
 
 namespace Desktop.Wpf;
@@ -88,10 +92,10 @@ public partial class App : Application
                 services.AddScoped<Desktop.Wpf.Features.Sessions.PendingHandshakesMenuViewModel>();
                 services.AddScoped<Desktop.Wpf.Features.Sessions.SessionShellViewModel>();
                 services.AddScoped<Desktop.Wpf.Features.Simulator.HandshakeSimulatorViewModel>();
-                services.AddScoped<MediatR.INotificationHandler<Percolator.Chat.App.Notifications.PendingHandshakeAdded>, Desktop.Wpf.Features.Sessions.PendingHandshakeEventListener>();
                 services.AddSingleton<Desktop.Wpf.Features.Shell.IIdentityScopeAccessor, Desktop.Wpf.Features.Shell.IdentityScopeAccessor>();
                 services.AddSingleton<Desktop.Wpf.Shared.Windowing.IWindowViewRegistry, Desktop.Wpf.Shared.Windowing.WindowViewRegistry>();
                 services.AddSingleton<IWindowManager, WindowManager>();
+                services.AddMediatR(cfg => cfg.RegisterServicesFromAssembly(typeof(MainWindow).Assembly));
 
                 // Features
                 services.AddSingleton<Percolator.Cryptography.ISessionRepository, Desktop.Wpf.Features.Sessions.InMemorySessionRepository>();
@@ -125,7 +129,24 @@ public partial class App : Application
         ObservableSystem.RegisterUnhandledExceptionHandler(ex =>
             logger.LogError(ex, "R3 Unhandled exception"));
 
-        // Self identity loading is orchestrated by ShellViewModel at runtime
+        PresentationTraceSources.DataBindingSource.Switch.Level = SourceLevels.Warning;
+        this.DispatcherUnhandledException += (s, exArgs) =>
+        {
+            try { logger.LogError(exArgs.Exception, "DispatcherUnhandledException"); } catch { }
+            //exArgs.Handled = !Debugger.IsAttached;
+        };
+
+        AppDomain.CurrentDomain.UnhandledException += (s, exArgs) =>
+        {
+            var ex = exArgs.ExceptionObject as Exception;
+            try { logger.LogCritical(ex, "AppDomain UnhandledException"); } catch { }
+        };
+
+        TaskScheduler.UnobservedTaskException += (s, exArgs) =>
+        {
+            try { logger.LogError(exArgs.Exception, "TaskScheduler UnobservedTaskException"); } catch { }
+            exArgs.SetObserved();
+        };
 
         // Configure icon font: try configured Ui.NerdFont first, then embedded; else log error and fall back to Segoe MDL2 Assets
         try

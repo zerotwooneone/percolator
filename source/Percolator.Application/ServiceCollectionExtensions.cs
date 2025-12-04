@@ -30,8 +30,6 @@ public static class ServiceCollectionExtensions
         services.AddSessionServices();
         services.AddRateLimiting();
         
-        services.AddSingleton<ActiveIdentityContext>();
-        
         services.AddScoped<IIdentityOrchestrator, IdentityOrchestrator>();
 
         services.AddChatServices();
