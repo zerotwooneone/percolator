@@ -7,10 +7,10 @@ namespace Desktop.Wpf.Features.Sessions;
 
 public sealed class PendingHandshakeItem
 {
-    public string DisplayName { get; set; } = "Unknown";
-    public string Initials { get; set; } = "UK";
+    public required string DisplayName { get; init; } 
+    public required string Initials { get; set; }
     public string BundleText { get; set; } = "Not Set";
-    public PendingSessionId PendingId { get; set; }
+    public required PendingSessionId PendingId { get; init; }
 }
 
 public sealed class PendingHandshakesMenuViewModel

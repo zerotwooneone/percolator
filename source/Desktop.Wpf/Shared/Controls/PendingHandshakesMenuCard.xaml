@@ -19,7 +19,7 @@
               <ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
             <controls:MatButton Grid.Column="0" Variant="Outlined" 
-                                Command="{Binding DataContext.AcceptHandshakeCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                Command="{Binding DataContext.AcceptHandshakeCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
                                 CommandParameter="{Binding}"
                                 att:MenuBehaviors.CloseParentOnClick="True">
               <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
@@ -28,7 +28,7 @@
               </StackPanel>
             </controls:MatButton>
             <controls:MatButton Grid.Column="1" Margin="10,0,0,0" Variant="Outlined"
-                                Command="{Binding DataContext.BurnHandshakeCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                Command="{Binding DataContext.BurnHandshakeCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
                                 CommandParameter="{Binding}"
                                 att:MenuBehaviors.CloseParentOnClick="True">
               <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
