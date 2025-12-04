@@ -33,6 +33,7 @@ public sealed class SessionsSidebarViewModel : ViewModelBase
         SelfIdentityModel self,
                                    ISessionRepository sessions,
                                    IPeerIdentityRepository peers,
+                                   IPendingSessionRepository pendingSessions,
                                    ISessionScopeFactory sessionFactory,
                                    PendingHandshakesMenuViewModel pendingMenu)
     {
@@ -44,7 +45,7 @@ public sealed class SessionsSidebarViewModel : ViewModelBase
         PendingMenu = pendingMenu;
         
         // Load sessions once, then filter locally
-        _ = LoadAsync(sessions, peers);
+        _ = LoadAsync(sessions, peers, pendingSessions);
         var filtered = SearchText
             .Select(text => text?.Trim() ?? "")
             .DistinctUntilChanged()
@@ -99,7 +100,7 @@ public sealed class SessionsSidebarViewModel : ViewModelBase
         return snapshot.Where(x => x.DisplayName.Value.ToLowerInvariant().Contains(text) || (x.LastMessagePreview.Value ?? "").ToLowerInvariant().Contains(text)).ToArray();
     }
 
-    private async Task LoadAsync(ISessionRepository sessions, IPeerIdentityRepository peers)
+    private async Task LoadAsync(ISessionRepository sessions, IPeerIdentityRepository peers, IPendingSessionRepository pendingSessions)
     {
         try
         {
@@ -165,6 +166,24 @@ public sealed class SessionsSidebarViewModel : ViewModelBase
 
             _items.Clear();
             foreach (var sessionListItem in created) _items.Add(sessionListItem);
+
+            var pendingItems = new List<PendingHandshakeItem>();
+            await foreach (var pending in pendingSessions.EnumerateAsync(CancellationToken.None).ConfigureAwait(false))
+            {
+                var pid = new Percolator.Identity.PeerId(pending.RemotePeerId.Value);
+                var peer = await peers.GetByIdAsync(pid, CancellationToken.None).ConfigureAwait(false);
+                var name = peer?.DisplayName?.Value ?? pid.Value.ToString()[..8];
+                pendingItems.Add(new PendingHandshakeItem
+                {
+                    DisplayName = name,
+                    Initials = ComputeInitials(name),
+                    BundleText = $"bundle text"
+                });
+            }
+
+            PendingMenu.PendingHandshakes.Clear();
+            foreach (var it in pendingItems)
+                PendingMenu.PendingHandshakes.Add(it);
         }
         finally
         {

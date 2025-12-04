@@ -40,7 +40,7 @@ public sealed class PendingHandshakeEventListener : INotificationHandler<Pending
             {
                 DisplayName = name,
                 Initials = ComputeInitials(name),
-                BundleText = $"Proto v{pending.ProtocolVersion.Value} • Created {pending.CreatedAtUtc:HH:mm:ss}"
+                BundleText = $"bundle text"
             });
         }
 
