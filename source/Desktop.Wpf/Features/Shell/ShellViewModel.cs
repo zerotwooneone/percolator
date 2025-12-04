@@ -29,7 +29,6 @@ public sealed class ShellViewModel : ViewModelBase
     private readonly ISelfIdentityRepository _repo;
     private readonly IStartupIdentityService _startupIdentity;
     private readonly SelfIdentityModel _self;
-    private readonly IServiceProvider _services;
     private IServiceScope? _identityScope;
     private readonly IIdentityScopeAccessor _identityScopeAccessor;
     private readonly IWindowManager _windowManager;
@@ -40,7 +39,6 @@ public sealed class ShellViewModel : ViewModelBase
                           ISelfIdentityRepository repo,
                           IStartupIdentityService startupIdentity,
                           SelfIdentityModel self,
-                          IServiceProvider services,
                           IIdentityScopeAccessor identityScopeAccessor,
                           IWindowManager windowManager)
     {
@@ -48,9 +46,13 @@ public sealed class ShellViewModel : ViewModelBase
         _repo = repo;
         _startupIdentity = startupIdentity;
         _self = self;
-        _services = services;
         _identityScopeAccessor = identityScopeAccessor;
         _windowManager = windowManager;
+
+        if (_identityScopeAccessor.Current is null)
+        {
+            throw new InvalidOperationException("Identity scope not available");
+        }
 
         // Bind navigation stream to a bindable read-only property for ContentControl binding later
         CurrentView = navigation.ViewStream
@@ -85,7 +87,7 @@ public sealed class ShellViewModel : ViewModelBase
             if (dto is null)
             {
                 // Navigate to new-user screen (VM-first)
-                var newUserVm = _services.GetRequiredService<Desktop.Wpf.Features.Shell.NewUserViewModel>();
+                var newUserVm = _identityScopeAccessor.Current.GetRequiredService<Desktop.Wpf.Features.Shell.NewUserViewModel>();
                 _navigation.Navigate(newUserVm);
                 return;
             }
@@ -98,12 +100,8 @@ public sealed class ShellViewModel : ViewModelBase
             _self.Initials.Value = ComputeInitials(displayName);
             _self.Id.Value = dto.Id.ToString();
 
-            // Create a scoped DI context for identity-bound services and set ActiveIdentity
-            var scopeFactory = _services.GetRequiredService<IServiceScopeFactory>();
-            _identityScope?.Dispose();
-            _identityScope = scopeFactory.CreateScope();
-            var scope = _identityScope;
-            var mutator = scope.ServiceProvider.GetService<IActiveIdentityMutator>();
+            // Use the Shell's provider as the identity-scoped provider and set ActiveIdentity
+            var mutator = _identityScopeAccessor.Current.GetService<IActiveIdentityMutator>();
             if (mutator is not null)
             {
                 //todo: figure out what to use for peer id
@@ -118,11 +116,11 @@ public sealed class ShellViewModel : ViewModelBase
             }
 
             // Expose identity-scoped provider for other features (e.g., simulator window)
-            _identityScopeAccessor.Current = scope.ServiceProvider;
+            _identityScopeAccessor.Current = provider;
 
             // Build the SessionShell from the identity-scoped provider
-            var sidebarVm = scope.ServiceProvider.GetRequiredService<SessionsSidebarViewModel>();
-            var sessionShell = scope.ServiceProvider.GetRequiredService<Desktop.Wpf.Features.Sessions.SessionShellViewModel>();
+            var sidebarVm = provider.GetRequiredService<SessionsSidebarViewModel>();
+            var sessionShell = provider.GetRequiredService<Desktop.Wpf.Features.Sessions.SessionShellViewModel>();
             sessionShell.Sidebar = sidebarVm;
             sidebarVm.SetConductor(sessionShell);
             _navigation.Navigate(sessionShell);
@@ -136,7 +134,6 @@ public sealed class ShellViewModel : ViewModelBase
     protected override void DisposeCore()
     {
         _identityScopeAccessor.Current = null;
-        _identityScope?.Dispose();
         Disposable.Dispose(CurrentView, IsLoading);
     }
 

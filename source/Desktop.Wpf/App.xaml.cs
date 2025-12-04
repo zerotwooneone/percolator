@@ -194,7 +194,7 @@ public partial class App : Application
         _shellScope = HostInstance.Services.CreateScope();
 
         // Make the shell scope available to window manager and others via identity scope accessor
-        var identityScopeAccessor = HostInstance.Services.GetRequiredService<Desktop.Wpf.Features.Shell.IIdentityScopeAccessor>();
+        var identityScopeAccessor = _shellScope.ServiceProvider.GetRequiredService<Desktop.Wpf.Features.Shell.IIdentityScopeAccessor>();
         identityScopeAccessor.Current = _shellScope.ServiceProvider;
 
         // Load view mappings from XAML config so WindowManager can resolve VM->Window (fail fast if bad)
