@@ -1,6 +1,7 @@
 using System;
 using System.Security.Cryptography;
 using FluentAssertions;
+using Moq;
 using NUnit.Framework;
 using Percolator.Cryptography;
 using Percolator.Cryptography.Primitives;
@@ -12,7 +13,6 @@ file sealed class TestClock5 : IClock
     public DateTimeOffset UtcNow { get; set; } = DateTimeOffset.Parse("2025-07-01T00:00:00Z");
 }
 
-file sealed class DummyKeyStore : IKeyStore { }
 
 file sealed class DummySessionCrypto : ISessionCrypto
 {
@@ -63,7 +63,7 @@ public class SecureSessionFactoryTests
             DateTimeOffset.UtcNow.AddDays(1));
 
         // Act
-        var session = SecureSession.EstablishFromX3DH(bundle, new DummyKeyStore(), new DummySessionCrypto(), peer, version, clock);
+        var session = SecureSession.EstablishFromX3DH(bundle, new Mock<IKeyStore>().Object, new DummySessionCrypto(), peer, version, clock);
 
         // Assert
         session.Should().NotBeNull();

@@ -1,5 +1,8 @@
 namespace Percolator.Cryptography;
 
 // Port placeholder for cryptographic operations used by domain aggregates.
-// Intentionally empty for initial TDD steps.
-public interface ICryptoPrimitives { }
+// Expanded via TDD to include handshake response creation.
+public interface ICryptoPrimitives
+{
+    HandshakeResponseMessage CreateHandshakeResponse(HandshakeInvitation invitation, IKeyStore keyStore);
+}

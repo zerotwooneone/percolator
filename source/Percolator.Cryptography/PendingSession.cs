@@ -67,8 +67,9 @@ public class PendingSession
         if (keyStore is null) throw new ArgumentNullException(nameof(keyStore));
         if (State == ApprovalState.Rejected || State == ApprovalState.Expired)
             throw new InvalidOperationException("Cannot approve a rejected or expired pending session.");
+        var response = crypto.CreateHandshakeResponse(Invitation, keyStore);
         State = ApprovalState.Approved;
-        return new HandshakeResponseMessage(new byte[] { 0xA1 });
+        return response;
     }
 
     public HandshakeResponseMessage AutoRespond(ICryptoPrimitives crypto, IKeyStore keyStore)
@@ -79,8 +80,9 @@ public class PendingSession
         if (keyStore is null) throw new ArgumentNullException(nameof(keyStore));
         if (State == ApprovalState.Rejected || State == ApprovalState.Expired)
             throw new InvalidOperationException("Cannot auto-respond a rejected or expired pending session.");
+        var response = crypto.CreateHandshakeResponse(Invitation, keyStore);
         State = ApprovalState.AutoResponded;
-        return new HandshakeResponseMessage(new byte[] { 0xA2 });
+        return response;
     }
 
     public void Reject()

@@ -1,5 +1,6 @@
 using System;
 using FluentAssertions;
+using Moq;
 using NUnit.Framework;
 using Percolator.Cryptography;
 
@@ -13,7 +14,7 @@ public class HandshakePlannerTests
     {
         var planner = new HandshakePlanner();
         var inv = new HandshakeInvitation(Array.Empty<byte>());
-        Assert.Throws<ArgumentException>(() => planner.ValidateInvitation(inv, new DummyCrypto()));
+        Assert.Throws<ArgumentException>(() => planner.ValidateInvitation(inv, new Mock<ICryptoPrimitives>().Object));
     }
 
     [Test]
@@ -31,6 +32,4 @@ public class HandshakePlannerTests
         var plan2 = planner.PlanEstablishment(bundleWithoutOtp);
         plan2.HasOneTimePreKey.Should().BeFalse();
     }
-
-    private sealed class DummyCrypto : ICryptoPrimitives { }
 }

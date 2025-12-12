@@ -1,5 +1,6 @@
 using System;
 using FluentAssertions;
+using Moq;
 using NUnit.Framework;
 using Percolator.Cryptography;
 using Percolator.Cryptography.Primitives;
@@ -11,8 +12,11 @@ file sealed class TestClock2 : IClock
     public DateTimeOffset UtcNow { get; set; } = DateTimeOffset.UtcNow;
 }
 
-file sealed class NoopCrypto : ICryptoPrimitives { }
-file sealed class NoopKeyStore : IKeyStore { }
+file sealed class NoopCrypto : ICryptoPrimitives
+{
+    public HandshakeResponseMessage CreateHandshakeResponse(HandshakeInvitation invitation, IKeyStore keyStore)
+        => new HandshakeResponseMessage(new byte[] { 0xEE });
+}
 
 [TestFixture]
 public class PendingSessionBehaviorTests
@@ -30,10 +34,10 @@ public class PendingSessionBehaviorTests
             clock,
             expiresAtUtc: clock.UtcNow.AddHours(1));
 
-        var resp = pending.ApproveAndRespond(new NoopCrypto(), new NoopKeyStore());
+        var resp = pending.ApproveAndRespond(new NoopCrypto(), new Mock<IKeyStore>().Object);
 
         pending.State.Should().Be(ApprovalState.Approved);
-        resp.Value.Should().NotBeEmpty();
+        resp.Value.Should().Equal(new byte[] { 0xEE });
     }
 
     [Test]
@@ -50,10 +54,10 @@ public class PendingSessionBehaviorTests
             clock,
             expiresAtUtc: clock.UtcNow.AddHours(1));
 
-        var resp = pending.AutoRespond(new NoopCrypto(), new NoopKeyStore());
+        var resp = pending.AutoRespond(new NoopCrypto(), new Mock<IKeyStore>().Object);
 
         pending.State.Should().Be(ApprovalState.AutoResponded);
-        resp.Value.Should().NotBeEmpty();
+        resp.Value.Should().Equal(new byte[] { 0xEE });
     }
 
     [Test]
@@ -70,9 +74,138 @@ public class PendingSessionBehaviorTests
             clock,
             expiresAtUtc: clock.UtcNow.AddHours(1));
 
-        Action act = () => pending.AutoRespond(new NoopCrypto(), new NoopKeyStore());
+        Action act = () => pending.AutoRespond(new NoopCrypto(), new Mock<IKeyStore>().Object);
         act.Should().Throw<InvalidOperationException>();
         pending.State.Should().Be(ApprovalState.AwaitingApproval);
+    }
+
+    [Test]
+    public void ApproveAndRespond_Throws_WhenRejected()
+    {
+        // Arrange
+        var clock = new TestClock2 { UtcNow = DateTimeOffset.Parse("2025-05-01T00:00:00Z") };
+        var pending = PendingSession.FromInvitation(
+            PendingSessionId.NewId(),
+            PeerId.NewId(),
+            new ProtocolVersion(1),
+            new HandshakeInvitation(new byte[] { 1 }),
+            clock,
+            expiresAtUtc: clock.UtcNow.AddMinutes(5));
+        pending.Reject();
+
+        // Act
+        Action act = () => pending.ApproveAndRespond(new NoopCrypto(), new Mock<IKeyStore>().Object);
+
+        // Assert
+        act.Should().Throw<InvalidOperationException>();
+    }
+
+    [Test]
+    public void ApproveAndRespond_Throws_WhenExpired()
+    {
+        // Arrange
+        var clock = new TestClock2 { UtcNow = DateTimeOffset.Parse("2025-05-01T00:00:00Z") };
+        var pending = PendingSession.FromInvitation(
+            PendingSessionId.NewId(),
+            PeerId.NewId(),
+            new ProtocolVersion(1),
+            new HandshakeInvitation(new byte[] { 2 }),
+            clock,
+            expiresAtUtc: clock.UtcNow);
+        pending.Expire(clock);
+
+        // Act
+        Action act = () => pending.ApproveAndRespond(new NoopCrypto(), new Mock<IKeyStore>().Object);
+
+        // Assert
+        act.Should().Throw<InvalidOperationException>();
+    }
+
+    [Test]
+    public void AutoRespond_Throws_WhenRejected_AndPolicyAllows()
+    {
+        // Arrange
+        var clock = new TestClock2 { UtcNow = DateTimeOffset.Parse("2025-05-01T00:00:00Z") };
+        var pending = PendingSession.FromInvitation(
+            PendingSessionId.NewId(),
+            PeerId.NewId(),
+            new ProtocolVersion(1),
+            new HandshakeInvitation(new byte[] { 3 }),
+            new ApprovalPolicy(allowAutoRespond: true),
+            clock,
+            expiresAtUtc: clock.UtcNow.AddHours(1));
+        pending.Reject();
+
+        // Act
+        Action act = () => pending.AutoRespond(new NoopCrypto(), new Mock<IKeyStore>().Object);
+
+        // Assert
+        act.Should().Throw<InvalidOperationException>();
+    }
+
+    [Test]
+    public void AutoRespond_Throws_WhenExpired_AndPolicyAllows()
+    {
+        // Arrange
+        var clock = new TestClock2 { UtcNow = DateTimeOffset.Parse("2025-05-01T00:00:00Z") };
+        var pending = PendingSession.FromInvitation(
+            PendingSessionId.NewId(),
+            PeerId.NewId(),
+            new ProtocolVersion(1),
+            new HandshakeInvitation(new byte[] { 4 }),
+            new ApprovalPolicy(allowAutoRespond: true),
+            clock,
+            expiresAtUtc: clock.UtcNow);
+        pending.Expire(clock);
+
+        // Act
+        Action act = () => pending.AutoRespond(new NoopCrypto(), new Mock<IKeyStore>().Object);
+
+        // Assert
+        act.Should().Throw<InvalidOperationException>();
+    }
+
+    [Test]
+    public void Reject_Throws_WhenAlreadyApproved()
+    {
+        // Arrange
+        var clock = new TestClock2 { UtcNow = DateTimeOffset.Parse("2025-05-01T00:00:00Z") };
+        var pending = PendingSession.FromInvitation(
+            PendingSessionId.NewId(),
+            PeerId.NewId(),
+            new ProtocolVersion(1),
+            new HandshakeInvitation(new byte[] { 5 }),
+            clock,
+            expiresAtUtc: clock.UtcNow.AddHours(1));
+        pending.ApproveAndRespond(new NoopCrypto(), new Mock<IKeyStore>().Object);
+
+        // Act
+        Action act = () => pending.Reject();
+
+        // Assert
+        act.Should().Throw<InvalidOperationException>();
+    }
+
+    [Test]
+    public void Reject_Throws_WhenAlreadyAutoResponded()
+    {
+        // Arrange
+        var clock = new TestClock2 { UtcNow = DateTimeOffset.Parse("2025-05-01T00:00:00Z") };
+        var pending = PendingSession.FromInvitation(
+            PendingSessionId.NewId(),
+            PeerId.NewId(),
+            new ProtocolVersion(1),
+            new HandshakeInvitation(new byte[] { 6 }),
+            new ApprovalPolicy(allowAutoRespond: true),
+            clock,
+            expiresAtUtc: clock.UtcNow.AddHours(1));
+        pending.AutoRespond(new NoopCrypto(), new Mock<IKeyStore>().Object);
+
+        // Act
+        Action act = () => pending.Reject();
+
+        // Assert
+        act.Should().Throw<InvalidOperationException>();
     }
 
     [Test]

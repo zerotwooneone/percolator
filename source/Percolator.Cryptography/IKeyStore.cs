@@ -1,5 +1,9 @@
 namespace Percolator.Cryptography;
 
-// Port placeholder for key management used by domain aggregates.
-// Intentionally minimal for initial TDD steps.
-public interface IKeyStore { }
+// Port for key management used by domain aggregates.
+public interface IKeyStore
+{
+    PrivatePreKey GetIdentityPrivateKey();
+    PrivatePreKey GetSignedPreKeyPrivate(string signedPreKeyId);
+    PrivatePreKey? TryGetOneTimePreKeyPrivate(string oneTimePreKeyId);
+}
