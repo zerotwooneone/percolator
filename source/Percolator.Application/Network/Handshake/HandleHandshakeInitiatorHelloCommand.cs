@@ -40,6 +40,7 @@ namespace Percolator.Application.Network.Handshake
         private readonly ISelfPreKeyBundleRepository _selfPreKeyRepo;
         private readonly IDirectSessionRepository _directRepo;
         private readonly ISecureMessagingService _secureMessaging;
+        private readonly IActiveIdentityAccessor _activeIdentityAccessor;
         private readonly ActiveIdentityContext _active;
         private readonly IPeerIdentityRepository _peerIdentityRepository;
         private readonly IPeerRoutingProfileRepository _profileRepository;
@@ -54,6 +55,7 @@ namespace Percolator.Application.Network.Handshake
             ISelfPreKeyBundleRepository selfPreKeyRepo,
             IDirectSessionRepository directRepo,
             ISecureMessagingService secureMessaging,
+            IActiveIdentityAccessor activeIdentityAccessor,
             ActiveIdentityContext active,
             IPeerIdentityRepository peerIdentityRepository,
             IPeerRoutingProfileRepository profileRepository,
@@ -67,6 +69,7 @@ namespace Percolator.Application.Network.Handshake
             _selfPreKeyRepo = selfPreKeyRepo;
             _directRepo = directRepo;
             _secureMessaging = secureMessaging;
+            _activeIdentityAccessor = activeIdentityAccessor;
             _active = active;
             _peerIdentityRepository = peerIdentityRepository;
             _profileRepository = profileRepository;
@@ -78,6 +81,11 @@ namespace Percolator.Application.Network.Handshake
 
         public async Task<HandleHandshakeInitiatorHelloResult?> Handle(HandleHandshakeInitiatorHelloCommand request, CancellationToken cancellationToken)
         {
+            if (!_activeIdentityAccessor.IsActive)
+            {
+                throw new InvalidOperationException("Active identity not loaded.");
+            }
+
             var remoteIdentityKey = new RatchetIdentityKey(request.InitiatorIdentityKeySpki);
             var remoteEphemeralKey = new RatchetEphemeralKey(request.InitiatorEphemeralKeySpki);
 

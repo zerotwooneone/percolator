@@ -29,6 +29,7 @@ public class HandleHandshakeInitiatorHelloCommandTests
         var selfPre = new Mock<ISelfPreKeyBundleRepository>(MockBehavior.Loose);
         var directRepo = new Mock<IDirectSessionRepository>(MockBehavior.Loose);
         var secure = new Mock<ISecureMessagingService>(MockBehavior.Loose);
+        var activeAccessor = Mock.Of<IActiveIdentityAccessor>(a => a.IsActive == true);
         var active = new ActiveIdentityContext { Identity = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "me", null) { SelfIdentityId = new SelfId(1) } };
         var peerIdentityRepo = new Mock<Percolator.Identity.IPeerIdentityRepository>(MockBehavior.Loose);
         var profileRepo = new Mock<IPeerRoutingProfileRepository>(MockBehavior.Loose);
@@ -84,6 +85,7 @@ public class HandleHandshakeInitiatorHelloCommandTests
             selfPre.Object, 
             directRepo.Object, 
             secure.Object, 
+            activeAccessor,
             active, 
             peerIdentityRepo.Object, 
             profileRepo.Object, 
@@ -122,6 +124,7 @@ public class HandleHandshakeInitiatorHelloCommandTests
         var selfPre = new Mock<ISelfPreKeyBundleRepository>(MockBehavior.Strict);
         var directRepo = new Mock<IDirectSessionRepository>(MockBehavior.Strict);
         var secure = new Mock<ISecureMessagingService>(MockBehavior.Strict);
+        var activeAccessor = Mock.Of<IActiveIdentityAccessor>(a => a.IsActive == true);
         var active = new ActiveIdentityContext { Identity = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "me", null) { SelfIdentityId = new SelfId(1) } };
         var peerIdentityRepo = new Mock<Percolator.Identity.IPeerIdentityRepository>(MockBehavior.Strict);
         var profileRepo = new Mock<IPeerRoutingProfileRepository>(MockBehavior.Loose);
@@ -172,6 +175,7 @@ public class HandleHandshakeInitiatorHelloCommandTests
             selfPre.Object, 
             directRepo.Object, 
             secure.Object, 
+            activeAccessor,
             active, 
             peerIdentityRepo.Object, 
             profileRepo.Object, 

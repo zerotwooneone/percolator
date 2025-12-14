@@ -12,6 +12,7 @@ namespace Percolator.Application.Network.Handshake
     internal sealed class InitiatorFinalizeService : IInitiatorFinalizeService
     {
         private readonly ILogger<InitiatorFinalizeService> _logger;
+        private readonly IActiveIdentityAccessor _activeIdentityAccessor;
         private readonly ActiveIdentityContext _active;
         private readonly IPreHandshakeSessionStore _prehandshake;
         private readonly ISessionRepository _sessions;
@@ -20,6 +21,7 @@ namespace Percolator.Application.Network.Handshake
 
         public InitiatorFinalizeService(
             ILogger<InitiatorFinalizeService> logger,
+            IActiveIdentityAccessor activeIdentityAccessor,
             ActiveIdentityContext active,
             IPreHandshakeSessionStore prehandshake,
             ISessionRepository sessions,
@@ -27,6 +29,7 @@ namespace Percolator.Application.Network.Handshake
             IClock clock)
         {
             _logger = logger;
+            _activeIdentityAccessor = activeIdentityAccessor;
             _active = active;
             _prehandshake = prehandshake;
             _sessions = sessions;
@@ -38,7 +41,7 @@ namespace Percolator.Application.Network.Handshake
             SessionRatchetMessage responderFirst,
             CancellationToken cancellationToken = default)
         {
-            if (_active.Identity is null)
+            if (!_activeIdentityAccessor.IsActive || _active.Identity is null)
                 throw new InvalidOperationException("Active identity not loaded.");
 
             // Header's pre-key used to upsert on success

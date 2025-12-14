@@ -22,6 +22,7 @@ namespace Percolator.Application.Network
     internal sealed class EstablishDirectSessionService : IEstablishDirectSessionService
     {
         private readonly ILogger<EstablishDirectSessionService> _logger;
+        private readonly IActiveIdentityAccessor _activeIdentityAccessor;
         private readonly ActiveIdentityContext _active;
         private readonly IPeerIdentityRepository _peerIdentityRepository;
         private readonly IPeerRoutingProfileRepository _peerRoutingProfileRepository;
@@ -32,6 +33,7 @@ namespace Percolator.Application.Network
 
         public EstablishDirectSessionService(
             ILogger<EstablishDirectSessionService> logger,
+            IActiveIdentityAccessor activeIdentityAccessor,
             ActiveIdentityContext active,
             IPeerIdentityRepository peerIdentityRepository,
             IPeerRoutingProfileRepository peerRoutingProfileRepository,
@@ -41,6 +43,7 @@ namespace Percolator.Application.Network
             IMediator mediator)
         {
             _logger = logger;
+            _activeIdentityAccessor = activeIdentityAccessor;
             _active = active;
             _peerIdentityRepository = peerIdentityRepository;
             _peerRoutingProfileRepository = peerRoutingProfileRepository;
@@ -52,7 +55,7 @@ namespace Percolator.Application.Network
 
         public async Task<EstablishDirectSessionResult?> EstablishAsync(EstablishDirectSessionCommand request, CancellationToken cancellationToken)
         {
-            if (_active.Identity is null || _active.Keys is null)
+            if (!_activeIdentityAccessor.IsActive || _active.Identity is null || _active.Keys is null)
             {
                 _logger.LogError("Local peer identity has not been established. Cannot respond to handshake");
                 throw new InvalidOperationException("Server identity not initialized.");

@@ -14,6 +14,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IOneTimeKeyProvider, InMemoryOneTimeKeyProvider>();
         services.AddSingleton<ActiveIdentityContext>();
         services.AddSingleton<IActiveIdentityMutator>(s => s.GetRequiredService<ActiveIdentityContext>());
+        services.AddSingleton<IActiveIdentityAccessor, ActiveIdentityAccessor>();
         
         // Application-layer orchestrator
         services.AddScoped<IIdentityOrchestrator, IdentityOrchestrator>();

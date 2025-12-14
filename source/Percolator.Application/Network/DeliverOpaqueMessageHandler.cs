@@ -21,6 +21,7 @@ namespace Percolator.Application.Network
         private readonly ILogger<DeliverOpaqueMessageHandler> _logger;
         private readonly IMediator _mediator;
         private readonly IDirectSessionRepository _directSessionRepository;
+        private readonly IActiveIdentityAccessor _activeIdentityAccessor;
         private readonly ActiveIdentityContext _activeIdentityContext;
         private readonly IRatchetKeyIndex _ratchetLookup;
         private readonly RelayOrchestrator _relayOrchestrator;
@@ -45,6 +46,7 @@ namespace Percolator.Application.Network
             ILogger<DeliverOpaqueMessageHandler> logger,
             IMediator mediator,
             IDirectSessionRepository directSessionRepository,
+            IActiveIdentityAccessor activeIdentityAccessor,
             ActiveIdentityContext activeIdentityContext,
             IRatchetKeyIndex ratchetLookup,
             RelayOrchestrator relayOrchestrator,
@@ -55,6 +57,7 @@ namespace Percolator.Application.Network
             _logger = logger;
             _mediator = mediator;
             _directSessionRepository = directSessionRepository;
+            _activeIdentityAccessor = activeIdentityAccessor;
             _activeIdentityContext = activeIdentityContext;
             _ratchetLookup = ratchetLookup;
             _relayOrchestrator = relayOrchestrator;
@@ -131,7 +134,7 @@ namespace Percolator.Application.Network
 
         public async Task<DeliverOpaqueMessageResult> Handle(DeliverOpaqueMessageCommand request, CancellationToken cancellationToken)
         {
-            if (_activeIdentityContext.Identity == null)
+            if (!_activeIdentityAccessor.IsActive || _activeIdentityContext.Identity == null)
             {
                 throw new InvalidOperationException("Active identity not loaded.");
             }

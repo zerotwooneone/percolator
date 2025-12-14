@@ -20,17 +20,20 @@ namespace Percolator.Application.Network.Handshake
     internal class HandleHandshakeResponderHelloHandler : IRequestHandler<HandleHandshakeResponderHelloCommand>
     {
         private readonly ILogger<HandleHandshakeResponderHelloHandler> _logger;
+        private readonly IActiveIdentityAccessor _activeIdentityAccessor;
         private readonly ActiveIdentityContext _active;
         private readonly IRatchetKeyIndex _ratchetLookup;
         private readonly IInitiatorFinalizeService _finalize;
 
         public HandleHandshakeResponderHelloHandler(
             ILogger<HandleHandshakeResponderHelloHandler> logger,
+            IActiveIdentityAccessor activeIdentityAccessor,
             ActiveIdentityContext active,
             IRatchetKeyIndex ratchetLookup,
             IInitiatorFinalizeService finalize)
         {
             _logger = logger;
+            _activeIdentityAccessor = activeIdentityAccessor;
             _active = active;
             _ratchetLookup = ratchetLookup;
             _finalize = finalize;
@@ -38,7 +41,7 @@ namespace Percolator.Application.Network.Handshake
 
         public async Task Handle(HandleHandshakeResponderHelloCommand request, CancellationToken cancellationToken)
         {
-            if (_active.Identity is null)
+            if (!_activeIdentityAccessor.IsActive || _active.Identity is null)
             {
                 throw new InvalidOperationException("Active identity not loaded.");
             }

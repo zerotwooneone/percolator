@@ -26,6 +26,7 @@ namespace Percolator.ApplicationTests.Handshake
             // Arrange
             var identity = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "self") { SelfIdentityId = new SelfId(1) };
             var active = new ActiveIdentityContext { Identity = identity };
+            var activeAccessor = Mock.Of<IActiveIdentityAccessor>(a => a.IsActive == true);
 
             var lookup = new Mock<IRatchetKeyIndex>(MockBehavior.Strict);
             var resolved = new SessionId(Guid.NewGuid());
@@ -37,6 +38,7 @@ namespace Percolator.ApplicationTests.Handshake
 
             var handler = new HandleHandshakeResponderHelloHandler(
                 new NullLogger<HandleHandshakeResponderHelloHandler>(),
+                activeAccessor,
                 active,
                 lookup.Object,
                 finalize.Object);

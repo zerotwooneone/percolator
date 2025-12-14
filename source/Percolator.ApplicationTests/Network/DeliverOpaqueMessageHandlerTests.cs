@@ -446,6 +446,7 @@ namespace Percolator.ApplicationTests.Network;
         {
             Identity = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "Test", null) { SelfIdentityId = new SelfId(1) }
         };
+        var activeAccessor = Mock.Of<IActiveIdentityAccessor>(a => a.IsActive == true);
         // Common setup: orchestrator delegation returns null by default (no early response)
         mediator.Setup(m => m.Send(It.IsAny<ProcessInternalEnvelopeCommand>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((InternalEnvelope?)null);
@@ -474,7 +475,7 @@ namespace Percolator.ApplicationTests.Network;
             .Setup(p => p.SelectRoute(It.IsAny<PeerRoutingProfile>()))
             .Returns<PeerRoutingProfile>(p => new Percolator.Network.RouteSelection(p.Endpoints.First(), null));
 
-        return new DeliverOpaqueMessageHandler(logger, mediator.Object, directRepo.Object, active, ratchetLookup.Object, relay, profileRepo.Object, routePlanner.Object, secureSvc.Object);
+        return new DeliverOpaqueMessageHandler(logger, mediator.Object, directRepo.Object, activeAccessor, active, ratchetLookup.Object, relay, profileRepo.Object, routePlanner.Object, secureSvc.Object);
     }
 
     [Test]

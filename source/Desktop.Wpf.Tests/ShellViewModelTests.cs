@@ -9,7 +9,9 @@ using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using NUnit.Framework;
+using Desktop.Wpf.Shared.Windowing;
 using Percolator.Application.Identity;
+using Percolator.Cryptography;
 using Percolator.Identity;
 using Percolator.Identity.Model;
 using R3;
@@ -39,33 +41,47 @@ public class ShellViewModelTests
     private static ShellViewModel CreateSut(
         ISelfIdentityRepository selfIdRepro,
         INavigationService nav,
-        IServiceProvider rootProvider,
+        IServiceProvider identityProvider,
         IStartupIdentityService startupIdentityService)
     {
         var self = new SelfIdentityModel();
         var identityScopeAccessor = new IdentityScopeAccessor();
-        return new ShellViewModel(nav, selfIdRepro, startupIdentityService, self, rootProvider, identityScopeAccessor);
+        identityScopeAccessor.Current = identityProvider;
+        var windowManager = new Mock<IWindowManager>();
+        return new ShellViewModel(nav, selfIdRepro, startupIdentityService, self, identityScopeAccessor, windowManager.Object);
     }
 
     [Test]
     public async Task Shows_loading_until_identity_fetch_completes()
     {
-        var tcs = new TaskCompletionSource<SelfIdentity?>();
+        var tcs = new TaskCompletionSource<SelfIdentity>();
         var repo = new Mock<ISelfIdentityRepository>();
-        repo.Setup(r => r.GetByIdAsync(It.IsAny<SelfId>())).Returns(tcs.Task);
         var startupIdentityService = new Mock<IStartupIdentityService>();
-        var domain = new SelfIdentity(new SelfId(1));
         startupIdentityService
             .Setup(s => s.ResolveOrCreateAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(domain);
+            .Returns(tcs.Task);
 
         var nav = new Mock<INavigationService>();
         nav.SetupGet(n => n.ViewStream).Returns(Observable.Empty<object?>());
-        
-        var root = new Mock<IServiceProvider>();
-        // not used in this path
 
-        var sut = CreateSut(repo.Object, nav.Object, root.Object, startupIdentityService.Object);
+        var mutator = new Mock<IActiveIdentityMutator>();
+        var sessionsVm = new SessionsSidebarViewModel(
+            nav.Object,
+            new SelfIdentityModel(),
+            Mock.Of<Percolator.Cryptography.ISessionRepository>(),
+            Mock.Of<IPeerIdentityRepository>(),
+            Mock.Of<Percolator.Cryptography.IPendingSessionRepository>(),
+            Mock.Of<ISessionScopeFactory>(),
+            new PendingHandshakesMenuViewModel(Mock.Of<Percolator.Cryptography.IPendingSessionRepository>()),
+            Mock.Of<Percolator.Application.Cryptography.IPendingHandshakeQueries>());
+        var sessionShellVm = new SessionShellViewModel();
+
+        var identityProvider = new Mock<IServiceProvider>();
+        identityProvider.Setup(sp => sp.GetService(typeof(IActiveIdentityMutator))).Returns(mutator.Object);
+        identityProvider.Setup(sp => sp.GetService(typeof(SessionsSidebarViewModel))).Returns(sessionsVm);
+        identityProvider.Setup(sp => sp.GetService(typeof(SessionShellViewModel))).Returns(sessionShellVm);
+
+        var sut = CreateSut(repo.Object, nav.Object, identityProvider.Object, startupIdentityService.Object);
 
         sut.IsLoading.Value.Should().BeTrue();
 
@@ -102,22 +118,24 @@ public class ShellViewModelTests
             .Setup(sp => sp.GetService(typeof(IActiveIdentityMutator)))
             .Returns(scopeMutator.Object);
 
-        var scope = new Mock<IServiceScope>();
-        scope.SetupGet(s => s.ServiceProvider).Returns(scopedProvider.Object);
+        var sessionsVm = new SessionsSidebarViewModel(
+            nav.Object,
+            new SelfIdentityModel(),
+            Mock.Of<Percolator.Cryptography.ISessionRepository>(),
+            Mock.Of<IPeerIdentityRepository>(),
+            Mock.Of<Percolator.Cryptography.IPendingSessionRepository>(),
+            Mock.Of<ISessionScopeFactory>(),
+            new PendingHandshakesMenuViewModel(Mock.Of<Percolator.Cryptography.IPendingSessionRepository>()),
+            Mock.Of<Percolator.Application.Cryptography.IPendingHandshakeQueries>());
+        var sessionShellVm = new SessionShellViewModel();
+        scopedProvider.Setup(sp => sp.GetService(typeof(SessionsSidebarViewModel))).Returns(sessionsVm);
+        scopedProvider.Setup(sp => sp.GetService(typeof(SessionShellViewModel))).Returns(sessionShellVm);
 
-        var scopeFactory = new Mock<IServiceScopeFactory>();
-        scopeFactory.Setup(f => f.CreateScope()).Returns(scope.Object);
-
-        var root = new Mock<IServiceProvider>();
-        root.Setup(sp => sp.GetService(typeof(IServiceScopeFactory)))
-            .Returns(scopeFactory.Object);
-
-        var sut = CreateSut(repo.Object, nav.Object, root.Object, startupIdentityService.Object);
+        var sut = CreateSut(repo.Object, nav.Object, scopedProvider.Object, startupIdentityService.Object);
 
         // Allow async startup to run
         await Task.Delay(50);
 
-        scopeFactory.Verify(f => f.CreateScope(), Times.AtLeastOnce);
         scopeMutator.Verify(m => m.SetActiveIdentity(It.IsAny<IdentityRecord>(), It.IsAny<X3dhKeys>()), Times.AtLeastOnce);
         startupIdentityService.Verify(s => s.ResolveOrCreateAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
@@ -137,12 +155,25 @@ public class ShellViewModelTests
         var nav = new Mock<INavigationService>();
         nav.SetupGet(n => n.ViewStream).Returns(Observable.Empty<object?>());
 
+        var scopeMutator = new Mock<IActiveIdentityMutator>();
         var scopedProvider = new Mock<IServiceProvider>();
+        scopedProvider
+            .Setup(sp => sp.GetService(typeof(IActiveIdentityMutator)))
+            .Returns(scopeMutator.Object);
         var scopedSelf = new SelfIdentityModel();
         var scopedSessionsRepo = new Mock<Percolator.Cryptography.ISessionRepository>();
         var scopedPeerRepo = new Mock<IPeerIdentityRepository>();
         var sessionScopeFactoryMock = new Mock<ISessionScopeFactory>();
-        var sessionsVm = new SessionsSidebarViewModel(nav.Object, scopedSelf, scopedSessionsRepo.Object, scopedPeerRepo.Object, sessionScopeFactoryMock.Object, new PendingHandshakesMenuViewModel());
+        var pendingSessions = new Mock<IPendingSessionRepository>();
+        var sessionsVm = new SessionsSidebarViewModel(
+            nav.Object,
+            scopedSelf,
+            scopedSessionsRepo.Object,
+            scopedPeerRepo.Object,
+            pendingSessions.Object,
+            sessionScopeFactoryMock.Object,
+            new PendingHandshakesMenuViewModel(pendingSessions.Object),
+            Mock.Of<Percolator.Application.Cryptography.IPendingHandshakeQueries>());
         var sessionShellVm = new SessionShellViewModel();
         scopedProvider
             .Setup(sp => sp.GetService(typeof(SessionsSidebarViewModel)))
@@ -161,11 +192,11 @@ public class ShellViewModelTests
         root.Setup(sp => sp.GetService(typeof(IServiceScopeFactory)))
             .Returns(scopeFactory.Object);
 
-        var sut = CreateSut(repo.Object, nav.Object, root.Object, startupIdentityService.Object);
+        var sut = CreateSut(repo.Object, nav.Object, scopedProvider.Object, startupIdentityService.Object);
 
         await Task.Delay(50);
 
-        scopedProvider.Verify(sp => sp.GetService(typeof(SessionsSidebarViewModel)), Times.AtLeastOnce);
+        nav.Verify(n => n.Navigate(It.IsAny<object>()), Times.AtLeastOnce);
         startupIdentityService.Verify(s => s.ResolveOrCreateAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
 
@@ -184,7 +215,11 @@ public class ShellViewModelTests
         var nav = new Mock<INavigationService>();
         nav.SetupGet(n => n.ViewStream).Returns(Observable.Empty<object?>());
 
+        var scopeMutator = new Mock<IActiveIdentityMutator>();
         var scopedProvider = new Mock<IServiceProvider>();
+        scopedProvider
+            .Setup(sp => sp.GetService(typeof(IActiveIdentityMutator)))
+            .Returns(scopeMutator.Object);
         var scopedDummyScope = new Mock<IServiceScope>();
         scopedDummyScope.SetupGet(s => s.ServiceProvider).Returns(scopedProvider.Object);
         var scopedDummyScopeFactory = new Mock<IServiceScopeFactory>();
@@ -194,7 +229,16 @@ public class ShellViewModelTests
         var scopedSessionsRepo = new Mock<Percolator.Cryptography.ISessionRepository>();
         var scopedPeerRepo = new Mock<IPeerIdentityRepository>();
         var scopedSessionFactory = new Mock<ISessionScopeFactory>();
-        var sessionsVm = new SessionsSidebarViewModel(nav.Object, scopedSelf, scopedSessionsRepo.Object, scopedPeerRepo.Object, scopedSessionFactory.Object, new PendingHandshakesMenuViewModel());
+        var pendingSessions = new Mock<IPendingSessionRepository>();
+        var sessionsVm = new SessionsSidebarViewModel(
+            nav.Object,
+            scopedSelf,
+            scopedSessionsRepo.Object,
+            scopedPeerRepo.Object,
+            pendingSessions.Object,
+            scopedSessionFactory.Object,
+            new PendingHandshakesMenuViewModel(pendingSessions.Object),
+            Mock.Of<Percolator.Application.Cryptography.IPendingHandshakeQueries>());
         var sessionShellVm = new SessionShellViewModel();
         scopedProvider
             .Setup(sp => sp.GetService(typeof(SessionsSidebarViewModel)))
@@ -213,12 +257,10 @@ public class ShellViewModelTests
         root.Setup(sp => sp.GetService(typeof(IServiceScopeFactory)))
             .Returns(scopeFactory.Object);
 
-        var sut = CreateSut(repo.Object, nav.Object, root.Object, startupIdentityService.Object);
+        var sut = CreateSut(repo.Object, nav.Object, scopedProvider.Object, startupIdentityService.Object);
 
         await Task.Delay(50);
 
-        scopedProvider.Verify(sp => sp.GetService(typeof(SessionsSidebarViewModel)), Times.AtLeastOnce);
-        scopedProvider.Verify(sp => sp.GetService(typeof(SessionShellViewModel)), Times.AtLeastOnce);
         nav.Verify(n => n.Navigate(It.Is<object>(o => ReferenceEquals(o, sessionShellVm))), Times.AtLeastOnce);
     }
 

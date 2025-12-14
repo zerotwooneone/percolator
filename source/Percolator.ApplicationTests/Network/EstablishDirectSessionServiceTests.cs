@@ -55,6 +55,7 @@ namespace Percolator.ApplicationTests.Network
             var signing = new Mock<Percolator.Network.ISigningService>(MockBehavior.Loose);
             var pendingRepo = new Mock<IPendingSessionRepository>(MockBehavior.Loose);
             var mediator = new Mock<IMediator>(MockBehavior.Loose);
+            var activeAccessor = Mock.Of<IActiveIdentityAccessor>(a => a.IsActive == true);
             var clock = new TestClock();
 
             // Inputs
@@ -85,7 +86,7 @@ namespace Percolator.ApplicationTests.Network
                 .Returns(Task.CompletedTask)
                 .Verifiable();
 
-            var svc = new EstablishDirectSessionService(logger, active, peerRepo.Object, profileRepo.Object, signing.Object, pendingRepo.Object, clock, mediator.Object);
+            var svc = new EstablishDirectSessionService(logger, activeAccessor, active, peerRepo.Object, profileRepo.Object, signing.Object, pendingRepo.Object, clock, mediator.Object);
 
             // Act
             var result = await svc.EstablishAsync(cmd, CancellationToken.None);
@@ -116,6 +117,7 @@ namespace Percolator.ApplicationTests.Network
             var pendingRepo = new Mock<IPendingSessionRepository>(MockBehavior.Loose);
             var clock = new TestClock();
             var mediator = new Mock<IMediator>(MockBehavior.Loose);
+            var activeAccessor = Mock.Of<IActiveIdentityAccessor>(a => a.IsActive == true);
 
             using var initiatorEcdsa = ECDsa.Create(ECCurve.NamedCurves.nistP256);
             var initiatorSpki = initiatorEcdsa.ExportSubjectPublicKeyInfo();
@@ -129,7 +131,7 @@ namespace Percolator.ApplicationTests.Network
                     It.IsAny<Percolator.Network.PublicKey>()))
                 .Returns(false);
 
-            var svc = new EstablishDirectSessionService(logger, active, peerRepo.Object, profileRepo.Object, signing.Object, pendingRepo.Object, clock, mediator.Object);
+            var svc = new EstablishDirectSessionService(logger, activeAccessor, active, peerRepo.Object, profileRepo.Object, signing.Object, pendingRepo.Object, clock, mediator.Object);
 
             // Act + Assert
             Assert.ThrowsAsync<CryptographicException>(() => svc.EstablishAsync(cmd, CancellationToken.None));

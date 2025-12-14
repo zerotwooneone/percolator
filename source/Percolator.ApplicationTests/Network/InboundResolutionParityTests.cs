@@ -32,6 +32,7 @@ namespace Percolator.ApplicationTests.Network
         {
             var ratchetIndex = new Mock<IRatchetKeyIndex>(MockBehavior.Strict);
             var active = new ActiveIdentityContext { Identity = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "self") { SelfIdentityId = new SelfId(1) } };
+            var activeAccessor = Mock.Of<IActiveIdentityAccessor>(a => a.IsActive == true);
 
             var expectedSid = new SessionId(Guid.NewGuid());
             ratchetIndex
@@ -41,6 +42,7 @@ namespace Percolator.ApplicationTests.Network
             var finalize1 = new Moq.Mock<IInitiatorFinalizeService>(Moq.MockBehavior.Strict);
             var handler = new HandleHandshakeResponderHelloHandler(
                 new NullLogger<HandleHandshakeResponderHelloHandler>(),
+                activeAccessor,
                 active,
                 ratchetIndex.Object,
                 finalize1.Object);
@@ -57,6 +59,7 @@ namespace Percolator.ApplicationTests.Network
         {
             var ratchetIndex = new Mock<IRatchetKeyIndex>(MockBehavior.Strict);
             var active = new ActiveIdentityContext { Identity = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "self") { SelfIdentityId = new SelfId(2) } };
+            var activeAccessor = Mock.Of<IActiveIdentityAccessor>(a => a.IsActive == true);
 
             ratchetIndex
                 .Setup(x => x.TryResolveAsync(It.IsAny<RatchetEphemeralKey>(), It.IsAny<CancellationToken>()))
@@ -85,6 +88,7 @@ namespace Percolator.ApplicationTests.Network
 
             var handler = new HandleHandshakeResponderHelloHandler(
                 new NullLogger<HandleHandshakeResponderHelloHandler>(),
+                activeAccessor,
                 active,
                 ratchetIndex.Object,
                 finalize.Object);

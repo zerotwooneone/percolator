@@ -33,6 +33,7 @@ namespace Percolator.Application.Network.Handshake
         private readonly IMediator _mediator;
         private readonly ISecureMessagingService _secureMessaging;
         private readonly IRatchetKeyIndex _ratchetLookup;
+        private readonly IActiveIdentityAccessor _activeIdentityAccessor;
         private readonly ActiveIdentityContext _active;
         private readonly IMessageService _messageService;
 
@@ -55,6 +56,7 @@ namespace Percolator.Application.Network.Handshake
             IMediator mediator,
             ISecureMessagingService secureMessaging,
             IRatchetKeyIndex ratchetLookup,
+            IActiveIdentityAccessor activeIdentityAccessor,
             ActiveIdentityContext active,
             IMessageService messageService)
         {
@@ -62,6 +64,7 @@ namespace Percolator.Application.Network.Handshake
             _mediator = mediator;
             _secureMessaging = secureMessaging;
             _ratchetLookup = ratchetLookup;
+            _activeIdentityAccessor = activeIdentityAccessor;
             _active = active;
             _messageService = messageService;
         }
@@ -75,7 +78,7 @@ namespace Percolator.Application.Network.Handshake
                 return ProcessRelayedOpaquePayloadResponse.Failure;
             }
             // First attempt: treat as a DR SessionRatchetMessage opaque to the host.
-            if (_active.Identity is null)
+            if (!_activeIdentityAccessor.IsActive || _active.Identity is null)
             {
                 throw new InvalidOperationException("Active identity not loaded.");
             }

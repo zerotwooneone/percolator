@@ -34,6 +34,7 @@ public class InitiatorFinalizeServiceTests
     {
         // Arrange
         var active = new ActiveIdentityContext();
+        var activeAccessor = Mock.Of<IActiveIdentityAccessor>(a => a.IsActive == true);
         var self = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "self")
         {
             SelfIdentityId = new SelfId(7)
@@ -90,6 +91,7 @@ public class InitiatorFinalizeServiceTests
 
         var sut = new InitiatorFinalizeService(
             new NullLogger<InitiatorFinalizeService>(),
+            activeAccessor,
             active,
             preStore.Object,
             sessions.Object,
