@@ -13,7 +13,8 @@ This plan is broken into **large chunks** that can be implemented one at a time.
 
 Notes:
 
-- Chunks may temporarily break compilation; the plan prioritizes incremental, AI-friendly steps.
+- Chunks may temporarily break compilation.
+- Do not add placeholder/no-op implementations between chunks (avoid dead code and missed requirements).
 - The Application library is the orchestrator for domain libraries; transport adapters should call explicit application ports.
 
 ---
