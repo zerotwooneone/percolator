@@ -5,6 +5,7 @@ using Percolator.Application.Apps.Chat;
 using Percolator.Application.Apps.Chat.Handlers;
 using Percolator.Application.Cryptography;
 using Percolator.Application.Identity;
+using Percolator.Application.Ingress;
 using Percolator.Application.KeyExchange;
 using Percolator.Application.Network;
 using Percolator.Application.PeerDiscovery;
@@ -25,6 +26,7 @@ public static class ServiceCollectionExtensions
         services.Configure<TransportOptions>(configuration.GetSection(TransportOptions.SectionName));
         services.AddCryptographyServices(configuration);
         services.AddIdentityServices();
+        services.AddIngressServices();
         services.AddNetworkServices(configuration);
         services.AddPeerDiscoveryServices();
         services.AddSessionServices();

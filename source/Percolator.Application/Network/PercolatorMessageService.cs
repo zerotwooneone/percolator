@@ -1,7 +1,9 @@
+using System;
+using System.Linq;
 using System.Net;
 using Grpc.Core;
 using Microsoft.Extensions.Logging;
-using MediatR;
+using Percolator.Application.Ingress;
 using Percolator.Contracts;
 using Google.Protobuf;
 using Percolator.Prekey.Handlers;
@@ -11,16 +13,16 @@ namespace Percolator.Application.Network
     public class PercolatorMessageService : TransportService.TransportServiceBase
     {
         private readonly ILogger<PercolatorMessageService> _logger;
-        private readonly IMediator _mediator;
+        private readonly IMessageIngress _messageIngress;
         private readonly IEstablishDirectSessionService _establishService;
 
         public PercolatorMessageService(
             ILogger<PercolatorMessageService> logger,
-            IMediator mediator,
+            IMessageIngress messageIngress,
             IEstablishDirectSessionService establishService)
         {
             _logger = logger;
-            _mediator = mediator;
+            _messageIngress = messageIngress;
             _establishService = establishService;
         }
 
@@ -78,22 +80,47 @@ namespace Percolator.Application.Network
 
         public override async Task<DeliverOpaqueMessageResponse> DeliverOpaqueMessage(DeliverOpaqueMessageRequest request, ServerCallContext context)
         {
-            var command = new DeliverOpaqueMessageCommand
-            {
-                PayloadBytes = request.Payload.ToByteArray()
-            };
+            var correlationId = context.RequestHeaders
+                .FirstOrDefault(h => string.Equals(h.Key, "x-correlation-id", StringComparison.OrdinalIgnoreCase))
+                ?.Value;
 
-            var result = await _mediator.Send(command, context.CancellationToken).ConfigureAwait(false);
-            var resp = new DeliverOpaqueMessageResponse { Version = 1 };
-            if (result.ResponsePayloadBytes is not null)
+            var ingressPayload = new IngressOpaquePayload(
+                PayloadBytes: request.Payload.ToByteArray(),
+                RemotePeerId: null,
+                TransportPeer: context.Peer,
+                CorrelationId: correlationId);
+
+            var result = await _messageIngress.DeliverOpaqueAsync(ingressPayload, context.CancellationToken).ConfigureAwait(false);
+
+            if (result.Disposition == IngressDisposition.Accepted)
             {
-                resp.ResponsePayload = new DeliverOpaqueMessageResponse.Types.Payload
+                var resp = new DeliverOpaqueMessageResponse { Version = 1 };
+                if (result.ResponseBytes is not null)
+                {
+                    resp.ResponsePayload = new DeliverOpaqueMessageResponse.Types.Payload
+                    {
+                        Version = 1,
+                        ResponsePayload = ByteString.CopyFrom(result.ResponseBytes)
+                    };
+                }
+                return resp;
+            }
+
+            if (result.Disposition == IngressDisposition.Rejected_NotReady)
+            {
+                return new DeliverOpaqueMessageResponse
                 {
                     Version = 1,
-                    ResponsePayload = ByteString.CopyFrom(result.ResponsePayloadBytes)
+                    NotUntil = new DeliverOpaqueMessageResponse.Types.NotUntil { Version = 1 }
                 };
             }
-            return resp;
+
+            if (result.Disposition == IngressDisposition.Rejected_Invalid || result.Disposition == IngressDisposition.Rejected_Unsupported)
+            {
+                throw new RpcException(new Status(StatusCode.InvalidArgument, $"Ingress rejected message: {result.Disposition}"));
+            }
+
+            throw new RpcException(new Status(StatusCode.Internal, $"Ingress failed: {result.Disposition}"));
         }
     }
 }
