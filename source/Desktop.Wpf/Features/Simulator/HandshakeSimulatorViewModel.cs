@@ -1,9 +1,8 @@
 using System;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Input;
-using Percolator.Cryptography.Primitives;
+using Percolator.Application.Ingress;
 
 namespace Desktop.Wpf.Features.Simulator;
 
@@ -27,9 +26,18 @@ public sealed class HandshakeSimulatorViewModel
     {
         try
         {
+            var result = await _sim.AddSyntheticPendingAsync(DisplayName, invitationPayload: null, CancellationToken.None).ConfigureAwait(false);
 
-            var id = await _sim.AddSyntheticPendingAsync( DisplayName, invitationPayload: null, CancellationToken.None).ConfigureAwait(false);
-            Status = $"Added pending handshake: {id.Value}";
+            Status = result.Status switch
+            {
+                PendingHandshakeIngressStatus.Accepted => $"Accepted: {result.PendingSessionId!.Value}",
+                PendingHandshakeIngressStatus.RejectedNotReady => result.NotUntil is null
+                    ? "Rejected: not ready"
+                    : $"Rejected: not ready until {result.NotUntil:O}",
+                PendingHandshakeIngressStatus.RejectedInvalid => $"Rejected: invalid ({result.ErrorMessage})",
+                PendingHandshakeIngressStatus.Failed => $"Failed: {result.ErrorMessage}",
+                _ => "Unknown result"
+            };
         }
         catch (Exception ex)
         {

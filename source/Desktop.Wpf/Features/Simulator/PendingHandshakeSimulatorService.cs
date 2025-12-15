@@ -12,7 +12,7 @@ namespace Desktop.Wpf.Features.Simulator;
 
 public interface IPendingHandshakeSimulatorService
 {
-    Task<PendingSessionId> AddSyntheticPendingAsync(string? displayName = null, byte[]? invitationPayload = null, CancellationToken ct = default);
+    Task<PendingHandshakeIngressResult> AddSyntheticPendingAsync(string? displayName = null, byte[]? invitationPayload = null, CancellationToken ct = default);
 }
 
 public sealed class PendingHandshakeSimulatorService : IPendingHandshakeSimulatorService
@@ -25,7 +25,7 @@ public sealed class PendingHandshakeSimulatorService : IPendingHandshakeSimulato
         _pendingIngress = pendingIngress ?? throw new ArgumentNullException(nameof(pendingIngress));
     }
 
-    public async Task<PendingSessionId> AddSyntheticPendingAsync(string? displayName = null, byte[]? invitationPayload = null, CancellationToken ct = default)
+    public async Task<PendingHandshakeIngressResult> AddSyntheticPendingAsync(string? displayName = null, byte[]? invitationPayload = null, CancellationToken ct = default)
     {
         // Build a realistic HandshakeInitiatorHello per request (fresh keys)
         // Identity key: ECDSA P-256 (SPKI)

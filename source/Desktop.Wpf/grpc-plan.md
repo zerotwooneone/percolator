@@ -44,9 +44,8 @@ Notes:
   - Inventory which repositories and notifications are written today (e.g., pending sessions, peer identities, MediatR notifications) and treat them as outcomes to be produced by ingress, not by the simulator.
 
 - **[1.2] Choose the injection path and make it explicit**
-  - Option A (preferred when feasible): call the gRPC method in-proc (`PercolatorMessageService.DeliverOpaqueMessage`) using a test `ServerCallContext`.
-  - Option B (fallback): call the application port (`IMessageIngress.DeliverOpaqueAsync`) directly.
-  - Document which path is used and why (context/metadata availability, friction of `ServerCallContext`, etc.).
+  - Use the dedicated application port `IPendingHandshakeIngress.CreateFromInitiatorHelloAsync`.
+  - Rationale: simulator handshakes start from a `HandshakeInitiatorHello` and do not fit the `IMessageIngress` “opaque encrypted payload” contract; this keeps the gRPC service as a thin adapter while still exercising the real identity-gated ingress boundary.
 
 - **[1.3] Construct a realistic inbound payload**
   - Build bytes in the same “opaque payload” shape that production ingress expects for handshake-related traffic (e.g., a `HandshakeInitiatorHello` payload when that is a supported inbound form).

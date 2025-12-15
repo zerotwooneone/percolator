@@ -38,7 +38,7 @@ public sealed class PendingHandshakeIngress : IPendingHandshakeIngress
         _mediator = mediator ?? throw new ArgumentNullException(nameof(mediator));
     }
 
-    public async Task<PendingSessionId> CreateFromInitiatorHelloAsync(
+    public async Task<PendingHandshakeIngressResult> CreateFromInitiatorHelloAsync(
         byte[] initiatorHelloBytes,
         string? displayName = null,
         TimeSpan? ttl = null,
@@ -50,12 +50,20 @@ public sealed class PendingHandshakeIngress : IPendingHandshakeIngress
         }
         catch (Exception ex)
         {
-            throw new InvalidOperationException("Active identity not loaded.", ex);
+            return new PendingHandshakeIngressResult(
+                PendingHandshakeIngressStatus.RejectedNotReady,
+                PendingSessionId: null,
+                NotUntil: null,
+                ErrorMessage: ex.Message);
         }
 
         if (initiatorHelloBytes is null || initiatorHelloBytes.Length == 0)
         {
-            throw new InvalidOperationException("initiator hello bytes required");
+            return new PendingHandshakeIngressResult(
+                PendingHandshakeIngressStatus.RejectedInvalid,
+                PendingSessionId: null,
+                NotUntil: null,
+                ErrorMessage: "initiator hello bytes required");
         }
 
         HandshakeInitiatorHello hello;
@@ -65,52 +73,75 @@ public sealed class PendingHandshakeIngress : IPendingHandshakeIngress
         }
         catch (Exception ex)
         {
-            throw new InvalidOperationException("initiator hello bytes were not a valid HandshakeInitiatorHello", ex);
+            return new PendingHandshakeIngressResult(
+                PendingHandshakeIngressStatus.RejectedInvalid,
+                PendingSessionId: null,
+                NotUntil: null,
+                ErrorMessage: ex.Message);
         }
 
         if (!hello.HasInitiatorIdentityKeySpki || !hello.HasInitiatorEphemeralKeySpki || !hello.HasSignedPreKeyId)
         {
-            throw new InvalidOperationException("initiator hello missing required fields");
+            return new PendingHandshakeIngressResult(
+                PendingHandshakeIngressStatus.RejectedInvalid,
+                PendingSessionId: null,
+                NotUntil: null,
+                ErrorMessage: "initiator hello missing required fields");
         }
 
-        var spki = hello.InitiatorIdentityKeySpki.ToByteArray();
-        var pkh = SHA256.HashData(spki);
-        var resolvedPeerId = await _pkhStore.GetPeerIdByPublicKeyHashAsync(pkh, cancellationToken).ConfigureAwait(false);
-
-        PeerIdentity identity;
-        if (resolvedPeerId is not null)
+        try
         {
-            identity = await _peers.GetByIdAsync(resolvedPeerId, cancellationToken).ConfigureAwait(false)
-                       ?? new PeerIdentity(resolvedPeerId);
+            var spki = hello.InitiatorIdentityKeySpki.ToByteArray();
+            var pkh = SHA256.HashData(spki);
+            var resolvedPeerId = await _pkhStore.GetPeerIdByPublicKeyHashAsync(pkh, cancellationToken).ConfigureAwait(false);
+
+            PeerIdentity identity;
+            if (resolvedPeerId is not null)
+            {
+                identity = await _peers.GetByIdAsync(resolvedPeerId, cancellationToken).ConfigureAwait(false)
+                           ?? new PeerIdentity(resolvedPeerId);
+            }
+            else
+            {
+                identity = await _peers.FindByPublicKeyHashAsync(pkh, cancellationToken).ConfigureAwait(false)
+                           ?? new PeerIdentity(Percolator.Identity.PeerId.NewId());
+            }
+
+            if (!string.IsNullOrWhiteSpace(displayName))
+            {
+                identity.SetDisplayName(new DisplayName(displayName));
+            }
+
+            await _peers.SaveAsync(identity, cancellationToken).ConfigureAwait(false);
+            await _pkhStore.ActivateIfChangedAsync(identity.Id, spki, pkh, _clock.UtcNow, cancellationToken).ConfigureAwait(false);
+
+            var remotePeerId = new Percolator.Cryptography.Primitives.PeerId(identity.Id.Value);
+
+            var invitation = new HandshakeInvitation(initiatorHelloBytes);
+            var id = await _invitations.CreatePendingAsync(
+                remotePeerId,
+                new ProtocolVersion(1),
+                invitation,
+                ttl ?? TimeSpan.FromMinutes(10),
+                cancellationToken).ConfigureAwait(false);
+
+            await _mediator.Publish(
+                new PendingHandshakeAdded(id, remotePeerId, _clock.UtcNow, displayName),
+                cancellationToken).ConfigureAwait(false);
+
+            return new PendingHandshakeIngressResult(
+                PendingHandshakeIngressStatus.Accepted,
+                PendingSessionId: id,
+                NotUntil: null,
+                ErrorMessage: null);
         }
-        else
+        catch (Exception ex)
         {
-            identity = await _peers.FindByPublicKeyHashAsync(pkh, cancellationToken).ConfigureAwait(false)
-                       ?? new PeerIdentity(Percolator.Identity.PeerId.NewId());
+            return new PendingHandshakeIngressResult(
+                PendingHandshakeIngressStatus.Failed,
+                PendingSessionId: null,
+                NotUntil: null,
+                ErrorMessage: ex.Message);
         }
-
-        if (!string.IsNullOrWhiteSpace(displayName))
-        {
-            identity.SetDisplayName(new DisplayName(displayName));
-        }
-
-        await _peers.SaveAsync(identity, cancellationToken).ConfigureAwait(false);
-        await _pkhStore.ActivateIfChangedAsync(identity.Id, spki, pkh, _clock.UtcNow, cancellationToken).ConfigureAwait(false);
-
-        var remotePeerId = new Percolator.Cryptography.Primitives.PeerId(identity.Id.Value);
-
-        var invitation = new HandshakeInvitation(initiatorHelloBytes);
-        var id = await _invitations.CreatePendingAsync(
-            remotePeerId,
-            new ProtocolVersion(1),
-            invitation,
-            ttl ?? TimeSpan.FromMinutes(10),
-            cancellationToken).ConfigureAwait(false);
-
-        await _mediator.Publish(
-            new PendingHandshakeAdded(id, remotePeerId, _clock.UtcNow, displayName),
-            cancellationToken).ConfigureAwait(false);
-
-        return id;
     }
 }
