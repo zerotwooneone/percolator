@@ -10,6 +10,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IIngressValidator, OpaquePayloadValidator>();
         services.AddScoped<IIngressPipeline, DefaultIngressPipeline>();
         services.AddScoped<IMessageIngress, MessageIngress>();
+        services.AddScoped<IPendingHandshakeIngress, PendingHandshakeIngress>();
         return services;
     }
 }

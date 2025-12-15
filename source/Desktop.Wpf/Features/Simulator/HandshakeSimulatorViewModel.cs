@@ -17,7 +17,6 @@ public sealed class HandshakeSimulatorViewModel
         SimulateCommand = new AsyncRelayCommand(ExecuteSimulateAsync);
     }
 
-    public string RemotePeerIdText { get; set; } = string.Empty;
     public string? DisplayName { get; set; }
 
     public string? Status { get; private set; }
@@ -28,13 +27,8 @@ public sealed class HandshakeSimulatorViewModel
     {
         try
         {
-            if (!Guid.TryParse(RemotePeerIdText, out var guid))
-            {
-                guid = Guid.NewGuid();
-            }
-            var peer = new PeerId(guid);
 
-            var id = await _sim.AddSyntheticPendingAsync(peer, DisplayName, invitationPayload:null, CancellationToken.None).ConfigureAwait(false);
+            var id = await _sim.AddSyntheticPendingAsync( DisplayName, invitationPayload: null, CancellationToken.None).ConfigureAwait(false);
             Status = $"Added pending handshake: {id.Value}";
         }
         catch (Exception ex)
