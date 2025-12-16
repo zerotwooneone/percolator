@@ -35,7 +35,9 @@ Deliverables:
 
 - Update `session-flow.md` Part 2 wire model:
   - Extend `InviteHandshakeRequest` to include a callback `DnsEndpoint` for the inviter.
-  - Define how this endpoint is validated/sanitized and stored.
+  - Validation and storage rules must account for the existing Network domain routing model (`PeerRoutingProfile`, `RelayLink`):
+    - For a direct invite: interpret and validate the callback `DnsEndpoint` and store it as a `GrpcEndPoint` in the inviter's `PeerRoutingProfile`.
+    - For a relayed invite: do not store an endpoint from the request; instead store/refresh a `RelayLink` in the inviter's `PeerRoutingProfile` based on the relay context.
 - Update the contracts/protos to match the doc.
 
 Required tests:
