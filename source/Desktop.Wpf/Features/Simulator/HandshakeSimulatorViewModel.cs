@@ -2,6 +2,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Input;
+using Desktop.Wpf.Shared.Mvvm;
 using Percolator.Application.Ingress;
 
 namespace Desktop.Wpf.Features.Simulator;
@@ -46,21 +47,3 @@ public sealed class HandshakeSimulatorViewModel
     }
 }
 
-internal sealed class AsyncRelayCommand : ICommand
-{
-    private readonly Func<object?, Task> _execute;
-    private readonly Func<bool>? _canExecute;
-
-    public AsyncRelayCommand(Func<object?, Task> execute, Func<bool>? canExecute = null)
-    {
-        _execute = execute;
-        _canExecute = canExecute;
-    }
-
-    public bool CanExecute(object? parameter) => _canExecute?.Invoke() ?? true;
-
-    public async void Execute(object? parameter) => await _execute(parameter);
-
-    public event EventHandler? CanExecuteChanged;
-    public void RaiseCanExecuteChanged() => CanExecuteChanged?.Invoke(this, EventArgs.Empty);
-}
