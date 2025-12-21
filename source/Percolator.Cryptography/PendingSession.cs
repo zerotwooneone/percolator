@@ -9,28 +9,47 @@ public class PendingSession
     public PeerId RemotePeerId { get; }
     public ProtocolVersion ProtocolVersion { get; }
     public HandshakeInvitation Invitation { get; }
+    public bool IsRelayed { get; }
+    public RatchetIdentityKey? InviterIdentityKey { get; }
+    public string? CallbackEndpointHost { get; }
+    public int? CallbackEndpointPort { get; }
     public ApprovalState State { get; private set; }
     public DateTimeOffset CreatedAtUtc { get; }
     public DateTimeOffset? ExpiresAtUtc { get; }
-    private readonly ApprovalPolicy _policy;
 
     private PendingSession(
         PendingSessionId id,
         PeerId remotePeerId,
         ProtocolVersion protocolVersion,
         HandshakeInvitation invitation,
+        bool isRelayed,
+        RatchetIdentityKey? inviterIdentityKey,
+        string? callbackEndpointHost,
+        int? callbackEndpointPort,
         DateTimeOffset createdAtUtc,
-        DateTimeOffset? expiresAtUtc,
-        ApprovalPolicy? policy = null)
+        DateTimeOffset? expiresAtUtc)
     {
         Id = id;
         RemotePeerId = remotePeerId;
         ProtocolVersion = protocolVersion;
         Invitation = invitation;
+        IsRelayed = isRelayed;
+        InviterIdentityKey = inviterIdentityKey;
+        CallbackEndpointHost = callbackEndpointHost;
+        CallbackEndpointPort = callbackEndpointPort;
         State = ApprovalState.AwaitingApproval;
         CreatedAtUtc = createdAtUtc;
         ExpiresAtUtc = expiresAtUtc;
-        _policy = policy ?? ApprovalPolicy.Default;
+
+        if (CallbackEndpointHost is null ^ CallbackEndpointPort is null)
+        {
+            throw new InvalidOperationException("Callback endpoint host/port must either both be present or both be absent.");
+        }
+
+        if (IsRelayed && CallbackEndpointHost is not null)
+        {
+            throw new InvalidOperationException("Relayed pending sessions cannot store a callback endpoint.");
+        }
     }
 
     public static PendingSession FromInvitation(
@@ -43,22 +62,44 @@ public class PendingSession
     {
         if (invitation is null) throw new ArgumentNullException(nameof(invitation));
         if (clock is null) throw new ArgumentNullException(nameof(clock));
-        return new PendingSession(id, remotePeerId, protocolVersion, invitation, clock.UtcNow, expiresAtUtc);
+        return new PendingSession(
+            id,
+            remotePeerId,
+            protocolVersion,
+            invitation,
+            isRelayed: false,
+            inviterIdentityKey: null,
+            callbackEndpointHost: null,
+            callbackEndpointPort: null,
+            createdAtUtc: clock.UtcNow,
+            expiresAtUtc: expiresAtUtc);
     }
 
-    public static PendingSession FromInvitation(
+    public static PendingSession FromInvitationWithMetadata(
         PendingSessionId id,
         PeerId remotePeerId,
         ProtocolVersion protocolVersion,
         HandshakeInvitation invitation,
-        ApprovalPolicy policy,
+        bool isRelayed,
+        RatchetIdentityKey? inviterIdentityKey,
+        string? callbackEndpointHost,
+        int? callbackEndpointPort,
         IClock clock,
         DateTimeOffset? expiresAtUtc = null)
     {
         if (invitation is null) throw new ArgumentNullException(nameof(invitation));
-        if (policy is null) throw new ArgumentNullException(nameof(policy));
         if (clock is null) throw new ArgumentNullException(nameof(clock));
-        return new PendingSession(id, remotePeerId, protocolVersion, invitation, clock.UtcNow, expiresAtUtc, policy);
+        return new PendingSession(
+            id,
+            remotePeerId,
+            protocolVersion,
+            invitation,
+            isRelayed: isRelayed,
+            inviterIdentityKey: inviterIdentityKey,
+            callbackEndpointHost: callbackEndpointHost,
+            callbackEndpointPort: callbackEndpointPort,
+            createdAtUtc: clock.UtcNow,
+            expiresAtUtc: expiresAtUtc);
     }
 
     public HandshakeResponseMessage ApproveAndRespond(ICryptoPrimitives crypto, IKeyStore keyStore)
@@ -72,9 +113,10 @@ public class PendingSession
         return response;
     }
 
-    public HandshakeResponseMessage AutoRespond(ICryptoPrimitives crypto, IKeyStore keyStore)
+    public HandshakeResponseMessage AutoRespond(ICryptoPrimitives crypto, IKeyStore keyStore, ApprovalPolicy policy)
     {
-        if (!_policy.AllowAutoRespond)
+        if (policy is null) throw new ArgumentNullException(nameof(policy));
+        if (!policy.AllowAutoRespond)
             throw new InvalidOperationException("Auto-respond is not permitted by policy.");
         if (crypto is null) throw new ArgumentNullException(nameof(crypto));
         if (keyStore is null) throw new ArgumentNullException(nameof(keyStore));

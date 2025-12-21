@@ -38,6 +38,10 @@ namespace Percolator.Infrastructure.Cryptography
                 RemotePeerId = pending.RemotePeerId.Value,
                 ProtocolVersion = pending.ProtocolVersion.Value,
                 Invitation = pending.Invitation.Value,
+                IsRelayed = pending.IsRelayed,
+                InviterIdentityKey = pending.InviterIdentityKey?.Value,
+                CallbackEndpointHost = pending.CallbackEndpointHost,
+                CallbackEndpointPort = pending.CallbackEndpointPort,
                 State = (int)pending.State,
                 CreatedAtUtc = pending.CreatedAtUtc,
                 ExpiresAtUtc = pending.ExpiresAtUtc
@@ -97,7 +101,21 @@ namespace Percolator.Infrastructure.Cryptography
             var remote = new PeerId(row.RemotePeerId);
             var ver = new ProtocolVersion(row.ProtocolVersion);
             var invitation = new HandshakeInvitation(row.Invitation);
-            var pending = PendingSession.FromInvitation(id, remote, ver, invitation, _clock, row.ExpiresAtUtc);
+            var inviterKey = row.InviterIdentityKey is null
+                ? null
+                : new RatchetIdentityKey(row.InviterIdentityKey);
+
+            var pending = PendingSession.FromInvitationWithMetadata(
+                id,
+                remote,
+                ver,
+                invitation,
+                isRelayed: row.IsRelayed,
+                inviterIdentityKey: inviterKey,
+                callbackEndpointHost: row.CallbackEndpointHost,
+                callbackEndpointPort: row.CallbackEndpointPort,
+                _clock,
+                row.ExpiresAtUtc);
             // apply stored state if not awaiting-approval
             if (row.State == (int)ApprovalState.Rejected)
             {

@@ -10,8 +10,8 @@ using Percolator.Application.KeyExchange;
 using Percolator.Application.Network;
 using Percolator.Application.PeerDiscovery;
 using Percolator.Application.RateLimiting;
-using Percolator.Application.Sessions;
 using Percolator.Application.ReverseSignal;
+using Percolator.Application.Sessions;
 using Percolator.Chat.App.Commands;
 using Percolator.Dht.Messages;
 
@@ -24,6 +24,7 @@ public static class ServiceCollectionExtensions
     {
         // Register services from each of the application layers
         services.Configure<TransportOptions>(configuration.GetSection(TransportOptions.SectionName));
+        services.Configure<ReverseSignalOptions>(configuration.GetSection(ReverseSignalOptions.SectionName));
         services.AddCryptographyServices(configuration);
         services.AddIdentityServices();
         services.AddIngressServices();
@@ -39,6 +40,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ReverseSignalInvitationService>();
         services.AddScoped<ReverseSignalAcceptService>();
         services.AddScoped<ReverseSignal.PendingSessionPurgeService>();
+        services.AddSingleton<ICallbackEndpointValidator, CallbackEndpointValidator>();
 
         services.AddMediatR(cfg =>
         {

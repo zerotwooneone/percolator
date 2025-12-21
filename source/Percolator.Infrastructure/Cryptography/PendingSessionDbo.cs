@@ -18,6 +18,14 @@ namespace Percolator.Infrastructure.Cryptography
 
         public byte[] Invitation { get; set; } = Array.Empty<byte>();
 
+        public bool IsRelayed { get; set; }
+
+        public byte[]? InviterIdentityKey { get; set; }
+
+        public string? CallbackEndpointHost { get; set; }
+
+        public int? CallbackEndpointPort { get; set; }
+
         public int State { get; set; }
 
         public DateTimeOffset CreatedAtUtc { get; set; }

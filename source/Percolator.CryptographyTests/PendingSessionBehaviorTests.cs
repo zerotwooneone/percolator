@@ -50,11 +50,10 @@ public class PendingSessionBehaviorTests
             PeerId.NewId(),
             new ProtocolVersion(1),
             inv,
-            new ApprovalPolicy(allowAutoRespond: true),
             clock,
             expiresAtUtc: clock.UtcNow.AddHours(1));
 
-        var resp = pending.AutoRespond(new NoopCrypto(), new Mock<IKeyStore>().Object);
+        var resp = pending.AutoRespond(new NoopCrypto(), new Mock<IKeyStore>().Object, new ApprovalPolicy(allowAutoRespond: true));
 
         pending.State.Should().Be(ApprovalState.AutoResponded);
         resp.Value.Should().Equal(new byte[] { 0xEE });
@@ -70,11 +69,10 @@ public class PendingSessionBehaviorTests
             PeerId.NewId(),
             new ProtocolVersion(1),
             inv,
-            new ApprovalPolicy(allowAutoRespond: false),
             clock,
             expiresAtUtc: clock.UtcNow.AddHours(1));
 
-        Action act = () => pending.AutoRespond(new NoopCrypto(), new Mock<IKeyStore>().Object);
+        Action act = () => pending.AutoRespond(new NoopCrypto(), new Mock<IKeyStore>().Object, new ApprovalPolicy(allowAutoRespond: false));
         act.Should().Throw<InvalidOperationException>();
         pending.State.Should().Be(ApprovalState.AwaitingApproval);
     }
@@ -131,13 +129,12 @@ public class PendingSessionBehaviorTests
             PeerId.NewId(),
             new ProtocolVersion(1),
             new HandshakeInvitation(new byte[] { 3 }),
-            new ApprovalPolicy(allowAutoRespond: true),
             clock,
             expiresAtUtc: clock.UtcNow.AddHours(1));
         pending.Reject();
 
         // Act
-        Action act = () => pending.AutoRespond(new NoopCrypto(), new Mock<IKeyStore>().Object);
+        Action act = () => pending.AutoRespond(new NoopCrypto(), new Mock<IKeyStore>().Object, new ApprovalPolicy(allowAutoRespond: true));
 
         // Assert
         act.Should().Throw<InvalidOperationException>();
@@ -153,13 +150,12 @@ public class PendingSessionBehaviorTests
             PeerId.NewId(),
             new ProtocolVersion(1),
             new HandshakeInvitation(new byte[] { 4 }),
-            new ApprovalPolicy(allowAutoRespond: true),
             clock,
             expiresAtUtc: clock.UtcNow);
         pending.Expire(clock);
 
         // Act
-        Action act = () => pending.AutoRespond(new NoopCrypto(), new Mock<IKeyStore>().Object);
+        Action act = () => pending.AutoRespond(new NoopCrypto(), new Mock<IKeyStore>().Object, new ApprovalPolicy(allowAutoRespond: true));
 
         // Assert
         act.Should().Throw<InvalidOperationException>();
@@ -196,10 +192,9 @@ public class PendingSessionBehaviorTests
             PeerId.NewId(),
             new ProtocolVersion(1),
             new HandshakeInvitation(new byte[] { 6 }),
-            new ApprovalPolicy(allowAutoRespond: true),
             clock,
             expiresAtUtc: clock.UtcNow.AddHours(1));
-        pending.AutoRespond(new NoopCrypto(), new Mock<IKeyStore>().Object);
+        pending.AutoRespond(new NoopCrypto(), new Mock<IKeyStore>().Object, new ApprovalPolicy(allowAutoRespond: true));
 
         // Act
         Action act = () => pending.Reject();
