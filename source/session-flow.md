@@ -118,13 +118,35 @@
  ```protobuf
  // Opaque to the transport, but this is the inner invitation content
  message InviteHandshakeRequest {
-   string local_invitation_id = 1; // Alice's correlation id
+   message Inner_PreKeyBundle {
+    uint32 version = 1;
+    
+    bytes alice_signed_pre_key = 2;
+    bytes pre_key_signature =3;
+    optional bytes alice_one_time_pre_key = 4;
+   }
+   message InviteHandshakeRequestPayload {
+     uint32 version = 1;
+     // Hostname or IP literal.
+     string alice_host = 2;
+     uint32 alice_port = 3;
+     Inner_PreKeyBundle alice_pre_key = 4;
+     
+     google.protobuf.Timestamp expires_at_utc = 5;
 
+     //must be unpredictable (GUID). Bob stores seen request_correlation_id until expires_at_utc and rejects duplicates
+     string request_correlation_id = 6; // this handshake's correlation id
+   }
+
+   uint32 version = 1;
    // Alice's Pre-Key Bundle
-   bytes alice_identity_key     = 2;
-   bytes alice_signed_pre_key   = 3;
-   bytes pre_key_signature      = 4;
-   optional bytes alice_one_time_pre_key = 5;
+   bytes alice_identity_key = 2;
+   
+   //always a serialized InviteHandshakeRequestPayload
+   bytes payload = 3;
+   
+   //signed by alice_identity_key
+   bytes payload_signature = 4;
  }
  ```
 
@@ -132,13 +154,18 @@
 
  | Column                     | Type     | Description                                                       |
  | -------------------------- | -------- | ----------------------------------------------------------------- |
- | local_invitation_id        | VARCHAR  | Primary Key. Alice-generated id for correlation.                  |
+ | request_correlation_id        | VARCHAR  | Primary Key. Alice-generated id for correlation.               |
  | target_user_id             | VARCHAR  | Who the invite is for (e.g., Bob).                                |
  | alice_one_time_private_key | BLOB     | Only if an OTK was published; encrypted at rest; short‑lived.     |
  | created_at                 | DATETIME | For cleanup.                                                      |
 
  Security
  - Only persist a one-time key private part if required by implementation; encrypt at rest and purge on response.
+ - parse payload only after verification
+ - verify pre_key_signature using the same alice_identity_key over alice_signed_pre_key
+ - validate host/port under policy (allow_LAN, port range, etc.)
+ - reject if request_correlation_id already seen and not expired
+ - verify payload_signature over raw payload bytes as received
 
  ### Step 2.2: Bob Queues for Approval
 
@@ -148,16 +175,16 @@
 
  | Column               | Type     | Description                                  |
  | -------------------- | -------- | -------------------------------------------- |
- | invitation_id        | VARCHAR  | From `local_invitation_id`.                  |
+ | request_correlation_id | VARCHAR  | From `request_correlation_id`.                  |
  | inviter_identity_key | BLOB     | Alice’s identity key (for UI/verification).  |
- | invitation_blob      | BLOB     | Serialized invite payload.                   |
+ | invitation_blob      | BLOB     | Serialized invite payload. serialized InviteHandshakeRequest  |
  | status               | TEXT     | e.g., “AwaitingUserApproval”.                |
 
  ### Step 2.3: Bob Accepts and Responds
 
  ```protobuf
  message InviteHandshakeResponse {
-   string local_invitation_id = 1;  // Echo back to Alice
+   string request_correlation_id = 1;  // Echo back to Alice
 
    // Bob acts as X3DH initiator now
    bytes bob_identity_key       = 2;
@@ -173,7 +200,7 @@
 
  ### Step 2.4: Alice Finalizes
 
- - Lookup `SentInvitations` by `local_invitation_id`.
+ - Lookup `SentInvitations` by `request_correlation_id`.
  - Complete X3DH on Alice’s side; initialize double ratchet; decrypt `initial_ratchet_message`; retrieve `session_id`.
  - Persist full session (Part 3) and delete `SentInvitations` record.
 
