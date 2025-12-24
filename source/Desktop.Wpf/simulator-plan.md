@@ -1,146 +1,220 @@
+# Desktop.Wpf Simulator Plan — Reverse-Signal Handshake Simulation + Local Approval
 
-# Desktop.Wpf Simulator Plan — Accept Pending Handshake + Relay Support
+Goal: Make the WPF application capable of:
 
-Goal: Wire `AcceptHandshakeCommand` (in `PendingHandshakesMenuViewModel`) so accepting a pending handshake actually **sends a handshake response back to the remote peer**, and extend the simulator + UI to support and visualize **relayed handshakes**.
+- Simulating any number of remote peers sending **reverse-signal** handshake requests into the local node.
+- Displaying those requests as **pending handshakes** requiring explicit user approval (TOFU).
+- Approving a pending handshake which then **sends an `InviteHandshakeResponse`** back to the inviter.
+- Observing outbound network messages (for simulator correlation) **only when a development flag is enabled**.
 
 Non-goals:
 
-- Do not introduce no-op implementations, placeholder logic, or “temporary” in-memory repositories.
-- Do not leave dead code behind. If something must be deleted, I will explicitly call it out for you to delete.
+- Do not introduce placeholder logic or “temporary” in-memory repositories in production paths.
+- Do not leave dead code behind.
 
-Key constraints / invariants (from `session-flow.md`):
+Authoritative protocol model:
 
-- Reverse-signal flow: local user invites; remote user accepts and responds.
-- Acceptance produces an `InviteHandshakeResponse` that must be delivered to the inviter.
-- Relay support: the invite/response may traverse a relay/host; UX should show when a relay path was used.
-- Callback endpoint privacy/integrity: any inviter callback endpoint must be carried only inside the signed payload and must not be derived from transport metadata.
+- The correct reverse-signal model is `session-flow.md` Part 2.
+- Canonical correlation key: `request_correlation_id`.
 
-Open protocol gap:
+Key constraints / invariants:
 
-- Relay-ness must be derived from the context in which the invite arrives (transport path), not encoded into any handshake message fields.
-- Security requirement: on receiving an invite, do not upsert direct endpoints into `PeerRoutingProfile` (avoid routing-profile poisoning / forced-dial). Only upsert routing profile on explicit user acceptance.
+- Reverse-signal flow: remote peer sends `InviteHandshakeRequest`; local user approves; local user sends `InviteHandshakeResponse`.
+- Callback endpoint integrity: inviter callback endpoint MUST be carried only inside the **signed payload** and MUST NOT be derived from transport metadata.
+- Replay/DoS control: `request_correlation_id` must be unpredictable; receiver stores seen IDs until expiry and rejects duplicates.
+- Routing-profile poisoning mitigation: on receiving an invite, do not upsert direct endpoints into `PeerRoutingProfile`. Only upsert routing profile on explicit user acceptance.
+- Relay-ness is a transport-path property and must not be encoded in the handshake message fields.
 
-Code recon findings (current state):
+Unit testing standards:
 
-- There is already an application-level accept path: `ReverseSignalAcceptService.AcceptAsync(PendingSessionId)` and the MediatR entry point `ApprovePendingSessionCommand`.
-- However, the current accept implementation does not follow the Reverse-Signal wire model in `session-flow.md` (it uses `HandshakeInitiatorHello` and a pre-encrypted responder message instead of `InviteHandshakeRequest`/`InviteHandshakeResponse`).
-- Outbound sending already supports direct-first with relay fallback and exposes which path was used.
+- All unit tests must follow `unit-testing.md`.
+- Tests must be behavior-focused (AAA pattern, black-box), avoiding brittle internal interaction assertions.
+
+Compilation constraint:
+
+- Chunks do not need to compile between chunks. Each chunk is intentionally large.
 
 ---
 
-## Chunk 1 — Domain + Persistence: pending handshake metadata (callback endpoint, relay) + validation policy
+## Chunk 1 — Protocol cutover foundations: reverse-signal pending-handshake model + validation + query surface
 
-Intent: Establish the DDD/TDD foundation so later protocol and orchestration work is mechanical and safe.
+Intent: Establish the domain/application foundations required by `session-flow.md` reverse-signal:
+
+- Persist and query pending handshakes with the metadata needed for user verification and later acceptance.
+- Validate callback endpoints under an application policy.
+- Define and enforce the routing-profile mutation boundary.
 
 Deliverables:
 
-- Extend the persisted pending-handshake record (crypto-domain `PendingSession` persisted via `IPendingSessionRepository`) to support additional metadata required by reverse-signal:
-  - callback endpoint (host + port) stored only on the pending record and only when the handshake is direct
-  - a boolean/enum indicating the pending handshake arrived via relay
-  - inviter identity key material suitable for UI verification (store minimal necessary; avoid logging)
+- Extend the persisted pending-handshake record (crypto-domain `PendingSession`) to support reverse-signal requirements:
+  - **`request_correlation_id`** (string) for replay protection and correlation.
+  - **inviter identity key (SPKI)** (bytes) stored for TOFU UI display (fingerprint); keep minimal; never log.
+  - **invitation blob** stored as the full serialized `InviteHandshakeRequest` (outer wrapper).
+  - **expiry**: surface `expires_at_utc` so expiry can be enforced on receipt and acceptance.
+  - **relay indicator** (bool/enum) indicating whether the invite arrived via relay.
+  - **callback endpoint** (host + port) stored only when the invite is direct; MUST be absent for relayed invites.
+
 - Introduce an application-layer endpoint validation policy:
-  - parse host as either DNS hostname or IP address
-  - validate port is in range
-  - add an `allow_LAN` configuration flag:
-    - when `allow_LAN` is false, reject loopback, link-local, and private-range IP targets
-    - when `allow_LAN` is true, allow those targets (still apply port validation and size limits)
+  - parse host as either DNS hostname or IP address.
+  - validate port range.
+  - `allow_LAN` flag controlling loopback/link-local/private ranges.
+
+- use IPendingHandshakeQueries:
+  - must return `PendingSessionId`, inviter display name (or best-effort placeholder), and TOFU identity fingerprint material.
+  - must include `request_correlation_id` and expiry for UI display and debugging.
+
 - Explicit invariant: do not upsert direct endpoints into `PeerRoutingProfile` on invite receipt.
 
-Required tests:
+Required tests (must follow `unit-testing.md`):
 
-- Persistence round-trip tests for the new pending metadata.
+- Persistence round-trip tests for pending metadata.
 - Validation tests for host/port parsing and `allow_LAN` behavior.
 - Invariant test: relayed pending handshakes cannot have a stored callback endpoint.
+- Expiry behavior test: expired pending handshakes are not returned by `EnumerateOpenAsync`.
 
 ---
 
-## Chunk 2 — Wire Mapping + Contracts: reverse-signal request/response representation
+## Chunk 2 — Reverse-signal wire protocol implementation: contracts + ingress mapping (remote peer → local pending)
 
-Intent: Make the wire model explicit and align contracts with the domain without compromising privacy.
+Intent: Make the wire model explicit and implement the *ingress* side of reverse-signal:
+
+- A simulated (or real) remote peer can send `InviteHandshakeRequest` to the local node.
+- The local node verifies and enqueues a pending handshake consistent with `session-flow.md`.
+
+This chunk is where `EstablishDirectSessionRequest` becomes the reverse-signal carrier.
 
 Deliverables:
 
-- Add an explicit mapping section in `session-flow.md` Part 2 describing:
-  - the protocol concepts (`InviteHandshakeRequest`, `InviteHandshakeResponse`)
-  - the concrete carrier types used by this codebase 
-    - EstablishDirectSessionRequest carries InviteHandshakeRequest (outer wrapper + signed payload)
-  - EstablishDirectSessionRequest carries InviteHandshakeRequest (outer wrapper + signed payload)
-- Update protobuf contracts to represent the reverse-signal request/response in a way compatible with the existing crypto flow.
+- Update protobuf contracts (no legacy compatibility):
+  - `EstablishDirectSessionRequest` carries exactly one payload: the serialized `InviteHandshakeRequest`.
+  - Remove any legacy `PreKeyBundle` or `HandshakeInitiatorHello` paths from this RPC.
+  - `EstablishDirectSessionResponse` must support an explicit "queued/accepted for review" acknowledgement (not a crypto response).
 
+- Implement ingress mapping (server-side):
+  - Parse incoming `InviteHandshakeRequest`.
+  - Verify `payload_signature` over raw `payload` bytes using `alice_identity_key`.
+  - Parse `payload` bytes to `InviteHandshakeRequestPayload` only after signature verification.
+  - Verify `pre_key_signature` using the same `alice_identity_key` over `alice_signed_pre_key`.
+  - Validate `alice_host`/`alice_port` under policy.
+  - Enforce expiry and replay protection (`request_correlation_id` dedup).
+  - Enqueue a `PendingSession` and emit the WPF-facing pending-handshake notification.
 
+- Document (in this plan and/or in `session-flow.md`) the relay handling rule:
+  - direct vs relayed is determined by transport context; relayed invites must not populate callback endpoint.
+
+Required tests (must follow `unit-testing.md`):
+
+- Valid invite is queued and produces a pending handshake.
+- Invalid signature rejects without side effects.
+- Duplicate `request_correlation_id` rejects without side effects.
+- Expired invite rejects without side effects.
 ---
 
-## Chunk 3 — Application orchestration: accept pending handshake → upsert routing profile → send response
+## Chunk 3 — Approval orchestration (application): approve pending handshake → upsert routing profile → send `InviteHandshakeResponse`
 
-Intent: Implement the actual reverse-signal acceptance use case behind a single application entry point.
+Intent: Implement the acceptance behavior described in `session-flow.md` and make it the only supported acceptance path.
 
 Deliverables:
 
 - Treat `ApprovePendingSessionCommand` (MediatR) as the primary entry point.
-- Implement a typed result model for acceptance (instead of `bool`) so UI/simulator can distinguish:
-  - `Accepted` (includes send path used: direct vs relay)
+
+- Replace `bool` with a typed result model so WPF and simulator can observe behavior:
+  - `Accepted` (includes send path used: direct vs relay, and echoed `request_correlation_id`)
   - `RejectedNotReady`
   - `RejectedInvalid`
   - `RejectedExpired`
   - `Failed`
-- Add readiness gating: if no active identity, return `RejectedNotReady` and do not send.
-- Enforce routing/profile mutation boundary:
-  - For direct invites: read callback endpoint from the pending record, re-validate under current `allow_LAN` policy, then upsert as a `GrpcEndPoint` in inviter `PeerRoutingProfile`, then send.
-  - For relayed invites: ignore callback endpoint entirely; ensure a `RelayLink` based on transport context; send using normal routing.
+
+- Acceptance implementation:
+  - Load pending by id.
+  - Enforce expiry.
+  - Parse stored invitation blob as `InviteHandshakeRequest`.
+  - Perform X3DH initiator work for the local user (Bob) using Alice’s provided pre-key bundle.
+  - Construct `InviteHandshakeResponse { request_correlation_id, bob_identity_key, bob_x3dh_ephemeral_key, initial_ratchet_message }`.
+  - Enforce routing/profile mutation boundary:
+    - direct invites: re-validate callback endpoint and then upsert endpoint to inviter `PeerRoutingProfile` before sending.
+    - relayed invites: do not use callback endpoint; use relay routing.
+  - Send response to inviter.
+  - Only on successful send: delete pending record.
+
+Deletion point (required):
+
+- Once the new acceptance path is implemented and covered by tests, **DELETE** the non-compliant acceptance flow:
+  - `Percolator.Application.ReverseSignal.ReverseSignalAcceptService.AcceptAsync(...)` logic that parses `HandshakeInitiatorHello` and calls `HandleHandshakeInitiatorHelloCommand`.
+  - Any usage of `SendPreEncryptedAsync` for reverse-signal acceptance.
+  - Any remaining protocol mapping that treats reverse-signal acceptance as “responder hello pre-encrypted”.
 
 Required tests:
 
-- Unit test: not-ready yields `RejectedNotReady` and does not call `IMessageService`.
-- Unit test: direct accept upserts endpoint only after validation and sends.
-- Unit test: relayed accept does not read/use callback endpoint and uses relay routing.
+- Unit test: not-ready yields `RejectedNotReady` and does not send.
+- Unit test: direct accept upserts endpoint only after validation and sends response.
+- Unit test: relayed accept does not read/use callback endpoint.
+- Unit test: successful accept deletes pending.
+- Unit test: send failure keeps pending.
 
 ---
 
-## Chunk 4 — Outbound observability: make sends observable for simulator + diagnostics
+## Chunk 4 — Dev-mode outbound message tap: make outgoing network messages observable to the simulator
 
-Intent: Provide a first-class, app-layer signal for outbound sends so the simulator can correlate and advance state.
+Intent: Allow the simulator to observe outbound messages so it can emulate other peers and validate protocol behavior, while guaranteeing that production builds do not expose sensitive payloads.
 
 Deliverables:
 
 - Introduce an outbound send observer port/event stream.
+
 - Instrument at a choke point:
-  - preferred: inside `INetworkSender`
-  - fallback: inside `MessageService`
-- Observer gating:
-  - The observer is enabled only when a debug/simulator config flag is on; it is off by default.
-  - When enabled, the observer emits the full outbound message payload so the simulator can emulate other peers.
-    - The payload should be provided as raw bytes (or a strongly-typed envelope) without logging.
-    - The observer implementation must not assume payloads are safe to render in UI.
-  - When disabled, no observer events are emitted.
+  - preferred: inside the final network send executor (after route selection).
+  - fallback: inside `MessageService`.
+
+- Observer gating (must be explicit and tested):
+  - Enabled only when a development/simulator config flag is on.
+  - Disabled by default.
+  - When enabled:
+    - emit a structured event with:
+      - destination peer id
+      - transport path used (direct vs relay)
+      - raw bytes payload (no logging)
+      - a safe-to-display summary string that contains no secrets (optional)
+  - When disabled:
+    - emit nothing.
+
+- Simulator usage requirement:
+  - the simulator must be able to subscribe and treat outbound events as “wire traffic” to other simulated peers.
 
 Required tests:
 
-- Unit test: when the observer is enabled, acceptance triggers exactly one observer notification and includes the outbound payload.
-- Unit test: when the observer is disabled, acceptance triggers no observer notifications.
+- Unit test: observer disabled emits nothing.
+- Unit test: observer enabled emits one event with correct payload bytes.
 
 ---
 
-## Chunk 5 — WPF UI wiring: `AcceptHandshakeCommand` uses application orchestration + displays results
+## Chunk 5 — WPF acceptance UX: approve pending handshake via application orchestration and show results
 
-Intent: Make the UI drive the real accept-and-send use case.
+Intent: Ensure the WPF UI does not bypass application orchestration and that acceptance behavior is testable.
 
 Deliverables:
 
 - Update `PendingHandshakesMenuViewModel.AcceptHandshakeCommand` to call `IMediator.Send(new ApprovePendingSessionCommand(...))`.
+
 - Update the WPF-facing item model to show:
   - accepted/rejected status
-  - send path used (`SendResult.Path`)
-  - (when available) relay indicator
+  - send path used (direct vs relay)
+  - `request_correlation_id`
+  - expiry status
+
+Deletion point (required):
+
+- After the new orchestration call is wired, **DELETE** the WPF-side acceptance TODO path that reads `IPendingSessionRepository` directly and locally removes items without sending.
 
 Required tests:
 
-- ViewModel test: accept calls the app entry point and removes item on `Accepted`.
+- ViewModel test: approve sends command and updates item state based on typed result.
 
 ---
 
-## Chunk 6 — Relay UX + local resolution: show relay details without protocol changes
+## Chunk 6 — Relay UX + local resolution: show relay path as a transport property (no protocol changes)
 
-Intent: Keep relay strictly as a transport-path indicator while making it visible in UX.
+Intent: Keep relay strictly as a transport-path indicator while making it visible in UX and simulator.
 
 Deliverables:
 
@@ -154,20 +228,34 @@ Required tests:
 
 ---
 
-## Chunk 7 — Simulator: one-off in-memory session list + relay simulation + outbound correlation
+## Chunk 7 — Simulator: multi-peer state machine + inbound request generation + outbound correlation (dev-mode)
 
-Intent: Dev-only simulator that can generate direct/relayed pending handshakes and observe acceptance sends.
+Intent: Dev-only simulator that can simulate any number of peers, generate inbound reverse-signal invites, approve them locally, and observe outbound responses.
 
 Deliverables:
 
-- Maintain a minimal in-memory simulator session list/state machine.
-- Controls to create direct vs relayed pending handshakes.
-- Subscribe to outbound send observer and advance simulator state.
+- Maintain an in-memory simulator peer list:
+  - Each peer has its own identity keys and pre-keys.
+  - Simulator can add/remove peers dynamically.
+
+- Inbound request generation:
+  - Simulate a remote peer creating a valid `InviteHandshakeRequest` (including:
+    - `alice_identity_key`
+    - signed `payload`
+    - `request_correlation_id`
+    - expiry
+    - endpoint)
+  - Deliver the request to the local node using the real ingress path (preferred) or a dev-only injection port (fallback).
+
+- Outbound correlation:
+  - Subscribe to the dev-mode outbound message tap.
+  - Route outbound `InviteHandshakeResponse` to the matching simulated peer by `request_correlation_id`.
+  - Update simulator state and display “handshake completed” vs failures.
 
 Required tests:
 
-- ViewModel test: creating a simulated relayed handshake produces entries with relay metadata.
-- ViewModel test: outbound observer event advances the correct simulated session.
+- ViewModel test: creating N simulated peers can enqueue N pending handshakes.
+- ViewModel test: outbound observer event is correlated by `request_correlation_id` and advances the correct simulated peer state.
 
 ---
 
@@ -181,6 +269,13 @@ Exit criteria:
 
 ## Potential deletions (you delete; do not leave dead code)
 
-- Delete the current WPF-side TODO path in `PendingHandshakesMenuViewModel` that reads `IPendingSessionRepository` directly for accept.
-- If any simulator-only persistence helpers exist that bypass Application ports, delete them.
+Delete when Chunk 3 + Chunk 5 are complete:
+
+- Delete `ReverseSignalAcceptService.AcceptAsync(...)` handshake-initiator-hello parsing + `SendPreEncryptedAsync` flow.
+- Delete any remaining reverse-signal acceptance code paths that depend on `HandshakeInitiatorHello` or “pre-encrypted responder hello”.
+- Delete the WPF-side TODO accept implementation in `PendingHandshakesMenuViewModel` that reads `IPendingSessionRepository` directly.
+
+Delete when Chunk 2 is complete:
+
+- Delete any legacy/compat request types or branches in `EstablishDirectSessionRequest` that are not `InviteHandshakeRequest`.
 
