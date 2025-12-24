@@ -18,6 +18,8 @@ namespace Percolator.Infrastructure.Cryptography
 
         public byte[] Invitation { get; set; } = Array.Empty<byte>();
 
+        public string? RequestCorrelationId { get; set; }
+
         public bool IsRelayed { get; set; }
 
         public byte[]? InviterIdentityKey { get; set; }

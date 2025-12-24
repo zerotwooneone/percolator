@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using System.Security.Cryptography;
 using Percolator.Application.Cryptography;
 using Percolator.Cryptography;
 using Percolator.Infrastructure.Cryptography;
@@ -35,6 +36,8 @@ public class PendingHandshakeQueries : IPendingHandshakeQueries
                 RemotePeerId = ps.RemotePeerId,
                 // keep raw display name-ish field (primitive or nullable) from DB
                 PeerDisplayName = pi == null ? null : pi.Name,
+                RequestCorrelationId = ps.RequestCorrelationId,
+                InviterIdentityKey = ps.InviterIdentityKey,
                 CreatedAtUtc = ps.CreatedAtUtc,
                 ExpiresAtUtc = ps.ExpiresAtUtc
             };
@@ -47,11 +50,19 @@ public class PendingHandshakeQueries : IPendingHandshakeQueries
             var peerName = row.PeerDisplayName
                            ?? row.RemotePeerId.ToString()[..8];
 
+            string? inviterFingerprintHex = null;
+            if (row.InviterIdentityKey is not null && row.InviterIdentityKey.Length > 0)
+            {
+                inviterFingerprintHex = Convert.ToHexString(SHA256.HashData(row.InviterIdentityKey));
+            }
+
             yield return new PendingHandshake
             {
                 Id = new PendingSessionId(row.Id),
                 RemotePeer = new PeerId(row.RemotePeerId),
                 PeerName = peerName,
+                RequestCorrelationId = row.RequestCorrelationId,
+                InviterFingerprintHex = inviterFingerprintHex,
                 CreatedAtUtc = row.CreatedAtUtc,
                 ExpiresAtUtc = row.ExpiresAtUtc
             };

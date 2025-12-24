@@ -426,6 +426,7 @@ public class PercolatorDbContext : DbContext
             entity.Property(e => e.RemotePeerId).IsRequired();
             entity.Property(e => e.ProtocolVersion).IsRequired();
             entity.Property(e => e.Invitation).IsRequired();
+            entity.Property(e => e.RequestCorrelationId);
             entity.Property(e => e.IsRelayed).IsRequired();
             entity.Property(e => e.InviterIdentityKey);
             entity.Property(e => e.CallbackEndpointHost);

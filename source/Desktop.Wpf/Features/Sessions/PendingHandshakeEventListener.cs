@@ -5,33 +5,29 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using MediatR;
+using Percolator.Application.Network;
 using Percolator.Application.Cryptography;
-using Percolator.Chat.App.Notifications;
-using Percolator.Cryptography;
-using Percolator.Identity;
 
 namespace Desktop.Wpf.Features.Sessions;
 
-public sealed class PendingHandshakeEventListener : INotificationHandler<PendingHandshakeAdded>
+public sealed class PendingHandshakeEventListener :
+    INotificationHandler<PendingSessionCreatedNotification>
 {
-    private readonly IPendingSessionRepository _pendingRepo;
-    private readonly IPeerIdentityRepository _peers;
     private readonly PendingHandshakesMenuViewModel _menu;
     private readonly IPendingHandshakeQueries _pendingHandshakeQueries;
 
     public PendingHandshakeEventListener(
-        IPendingSessionRepository pendingRepo,
-        IPeerIdentityRepository peers,
         PendingHandshakesMenuViewModel menu, 
         IPendingHandshakeQueries pendingHandshakeQueries)
     {
-        _pendingRepo = pendingRepo;
-        _peers = peers;
         _menu = menu;
         _pendingHandshakeQueries = pendingHandshakeQueries;
     }
 
-    public async Task Handle(PendingHandshakeAdded notification, CancellationToken cancellationToken)
+    public async Task Handle(PendingSessionCreatedNotification notification, CancellationToken cancellationToken)
+        => await RefreshAsync(cancellationToken).ConfigureAwait(false);
+
+    private async Task RefreshAsync(CancellationToken cancellationToken)
     {
         var items = new List<PendingHandshakeItem>();
 

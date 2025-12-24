@@ -28,6 +28,22 @@ namespace Percolator.Application.Network
 
         public override async Task<EstablishDirectSessionResponse> EstablishDirectSession(EstablishDirectSessionRequest request, ServerCallContext context)
         {
+            if (request.PayloadCase == EstablishDirectSessionRequest.PayloadOneofCase.InitiatorHello)
+            {
+                await _establishService.QueueInviteAsync(request.InitiatorHello, context.CancellationToken).ConfigureAwait(false);
+                return new EstablishDirectSessionResponse
+                {
+                    Version = 1,
+                    Queued = new EstablishDirectSessionResponse.Types.Queued { Version = 1 }
+                };
+            }
+
+            // Legacy path (existing direct session establishment behavior)
+            if (request.PayloadCase != EstablishDirectSessionRequest.PayloadOneofCase.ResponderBundle)
+            {
+                throw new RpcException(new Status(StatusCode.InvalidArgument, "EstablishDirectSessionRequest payload is required."));
+            }
+
             // Map Protobuf to app command
             var payload = EstablishDirectSessionRequest.Types.DirectInitiatorPayload.Parser.ParseFrom(request.ResponderBundle.SignedPayload);
             if (!payload.HasCallbackPort || payload.CallbackPort < 1024 || payload.CallbackPort > 65535)
@@ -61,16 +77,19 @@ namespace Percolator.Application.Network
 
             if (result is null)
             {
-                return new EstablishDirectSessionResponse()
+                return new EstablishDirectSessionResponse
                 {
+                    Version = 1,
                     Never = new EstablishDirectSessionResponse.Types.Never()
                 };
             }
 
             return new EstablishDirectSessionResponse
             {
+                Version = 1,
                 Response = new EstablishDirectSessionResponse.Types.Response
                 {
+                    Version = 1,
                     InitiatorIdentityKey = ByteString.CopyFrom(result.IdentitySigningKeyBytes),
                     RatchetMessage = ByteString.CopyFrom(result.RatchetMessageBytes),
                     InitiatorEphemeralKey = ByteString.CopyFrom(result.RemoteEphemeralKeyBytes)

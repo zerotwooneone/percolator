@@ -2,6 +2,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Percolator.Application.Configuration;
 using Percolator.Application.PeerDiscovery;
+using Percolator.Application.ReverseSignal;
 using Percolator.Network;
 using Microsoft.Extensions.Logging;
 
@@ -102,6 +103,9 @@ public static class ServiceCollectionExtensions
 
                 return handler;
             });
+
+        services.Configure<ReverseSignalOptions>(configuration.GetSection(ReverseSignalOptions.SectionName));
+        services.AddScoped<ICallbackEndpointValidator, CallbackEndpointValidator>();
 
         // Register the hosted service that runs the discovery (can be disabled in tests)
         var discoveryEnabled = configuration.GetValue<bool>("PeerDiscovery:Enabled", true);

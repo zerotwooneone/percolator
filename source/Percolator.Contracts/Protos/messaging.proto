@@ -92,12 +92,21 @@ message EstablishDirectSessionRequest {
     }
     // The protocol version.
     optional uint32 version = 1;
-    // The responder's pre-key bundle.
-    optional PreKeyBundle responder_bundle = 2;
+
+    oneof payload {
+        // Legacy: existing request shape (used by current tests/flows). Do not use for reverse-signal invite ingress.
+        PreKeyBundle responder_bundle = 2;
+
+        // Reverse-signal invite ingress: initiator hello carries the invite and protected payload.
+        HandshakeInitiatorHello initiator_hello = 3;
+    }
 }
 
 message EstablishDirectSessionResponse {
     message Never {}
+    message Queued {
+        optional uint32 version = 1;
+    }
     message ResponsePayload {
         optional uint32 version = 1;
 
@@ -128,6 +137,7 @@ message EstablishDirectSessionResponse {
         Never never = 2;
         Response response = 3;
         NotBefore not_before = 4;
+        Queued queued = 5;
     }
 }
 

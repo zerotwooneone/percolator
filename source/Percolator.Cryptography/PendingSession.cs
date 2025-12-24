@@ -9,6 +9,7 @@ public class PendingSession
     public PeerId RemotePeerId { get; }
     public ProtocolVersion ProtocolVersion { get; }
     public HandshakeInvitation Invitation { get; }
+    public string? RequestCorrelationId { get; }
     public bool IsRelayed { get; }
     public RatchetIdentityKey? InviterIdentityKey { get; }
     public string? CallbackEndpointHost { get; }
@@ -22,6 +23,7 @@ public class PendingSession
         PeerId remotePeerId,
         ProtocolVersion protocolVersion,
         HandshakeInvitation invitation,
+        string? requestCorrelationId,
         bool isRelayed,
         RatchetIdentityKey? inviterIdentityKey,
         string? callbackEndpointHost,
@@ -33,6 +35,7 @@ public class PendingSession
         RemotePeerId = remotePeerId;
         ProtocolVersion = protocolVersion;
         Invitation = invitation;
+        RequestCorrelationId = requestCorrelationId;
         IsRelayed = isRelayed;
         InviterIdentityKey = inviterIdentityKey;
         CallbackEndpointHost = callbackEndpointHost;
@@ -67,6 +70,7 @@ public class PendingSession
             remotePeerId,
             protocolVersion,
             invitation,
+            requestCorrelationId: null,
             isRelayed: false,
             inviterIdentityKey: null,
             callbackEndpointHost: null,
@@ -80,6 +84,7 @@ public class PendingSession
         PeerId remotePeerId,
         ProtocolVersion protocolVersion,
         HandshakeInvitation invitation,
+        string? requestCorrelationId,
         bool isRelayed,
         RatchetIdentityKey? inviterIdentityKey,
         string? callbackEndpointHost,
@@ -94,6 +99,7 @@ public class PendingSession
             remotePeerId,
             protocolVersion,
             invitation,
+            requestCorrelationId: requestCorrelationId,
             isRelayed: isRelayed,
             inviterIdentityKey: inviterIdentityKey,
             callbackEndpointHost: callbackEndpointHost,

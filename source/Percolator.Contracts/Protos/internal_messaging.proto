@@ -427,6 +427,32 @@ message HandshakeInitiatorHello {
   optional bytes encrypted_payload = 6;
 }
 
+// === 7.1 Reverse-Signal Handshake Payloads (Protected) ===
+// These messages are not exposed to transport metadata. They are intended to be serialized and carried
+// inside end-to-end protected fields (e.g., HandshakeInitiatorHello.encrypted_payload).
+message ReverseSignalCallbackEndpoint {
+  optional uint32 version = 1;
+  // Hostname or IP literal.
+  optional string host = 2;
+  optional uint32 port = 3;
+}
+
+// Protected payload for InviteHandshakeRequest (conceptual) carried by HandshakeInitiatorHello.
+message InviteHandshakeRequestPayload {
+  optional uint32 version = 1;
+  // Inviter-generated correlation id.
+  optional string local_invitation_id = 2;
+  // Inviter callback endpoint used for direct-only response routing.
+  optional ReverseSignalCallbackEndpoint callback_endpoint = 3;
+}
+
+// Protected payload for InviteHandshakeResponse (conceptual) carried by the first responder ratchet message.
+message InviteHandshakeResponsePayload {
+  optional uint32 version = 1;
+  // Echo of the inviter correlation id.
+  optional string local_invitation_id = 2;
+}
+
 // Preferred encrypted inner payload for HandshakeResponderHello
 message ResponderInnerHello {
   optional uint32 version = 1;

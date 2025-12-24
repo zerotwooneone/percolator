@@ -10,6 +10,7 @@ using NUnit.Framework;
 using MediatR;
 using Percolator.Application.Identity;
 using Percolator.Application.Network;
+using Percolator.Application.ReverseSignal;
 using Percolator.ApplicationTests.Services;
 using Percolator.Contracts;
 using Percolator.Cryptography;
@@ -57,6 +58,7 @@ namespace Percolator.ApplicationTests.Network
             var mediator = new Mock<IMediator>(MockBehavior.Loose);
             var activeAccessor = Mock.Of<IActiveIdentityAccessor>(a => a.IsActive == true);
             var clock = new TestClock();
+            var callbackValidator = new Mock<ICallbackEndpointValidator>(MockBehavior.Loose);
 
             // Inputs
             using var initiatorEcdsa = ECDsa.Create(ECCurve.NamedCurves.nistP256);
@@ -86,7 +88,17 @@ namespace Percolator.ApplicationTests.Network
                 .Returns(Task.CompletedTask)
                 .Verifiable();
 
-            var svc = new EstablishDirectSessionService(logger, activeAccessor, active, peerRepo.Object, profileRepo.Object, signing.Object, pendingRepo.Object, clock, mediator.Object);
+            var svc = new EstablishDirectSessionService(
+                logger,
+                activeAccessor,
+                active,
+                peerRepo.Object,
+                profileRepo.Object,
+                signing.Object,
+                pendingRepo.Object,
+                clock,
+                mediator.Object,
+                callbackValidator.Object);
 
             // Act
             var result = await svc.EstablishAsync(cmd, CancellationToken.None);
@@ -118,6 +130,7 @@ namespace Percolator.ApplicationTests.Network
             var clock = new TestClock();
             var mediator = new Mock<IMediator>(MockBehavior.Loose);
             var activeAccessor = Mock.Of<IActiveIdentityAccessor>(a => a.IsActive == true);
+            var callbackValidator = new Mock<ICallbackEndpointValidator>(MockBehavior.Loose);
 
             using var initiatorEcdsa = ECDsa.Create(ECCurve.NamedCurves.nistP256);
             var initiatorSpki = initiatorEcdsa.ExportSubjectPublicKeyInfo();
@@ -131,7 +144,17 @@ namespace Percolator.ApplicationTests.Network
                     It.IsAny<Percolator.Network.PublicKey>()))
                 .Returns(false);
 
-            var svc = new EstablishDirectSessionService(logger, activeAccessor, active, peerRepo.Object, profileRepo.Object, signing.Object, pendingRepo.Object, clock, mediator.Object);
+            var svc = new EstablishDirectSessionService(
+                logger,
+                activeAccessor,
+                active,
+                peerRepo.Object,
+                profileRepo.Object,
+                signing.Object,
+                pendingRepo.Object,
+                clock,
+                mediator.Object,
+                callbackValidator.Object);
 
             // Act + Assert
             Assert.ThrowsAsync<CryptographicException>(() => svc.EstablishAsync(cmd, CancellationToken.None));

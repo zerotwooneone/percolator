@@ -4,8 +4,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using Google.Protobuf;
 using MediatR;
+using Percolator.Application.Network;
 using Percolator.Application.ReverseSignal;
-using Percolator.Chat.App.Notifications;
 using Percolator.Contracts;
 using Percolator.Cryptography;
 using Percolator.Identity;
@@ -125,9 +125,7 @@ public sealed class PendingHandshakeIngress : IPendingHandshakeIngress
                 ttl ?? TimeSpan.FromMinutes(10),
                 cancellationToken).ConfigureAwait(false);
 
-            await _mediator.Publish(
-                new PendingHandshakeAdded(id, remotePeerId, _clock.UtcNow, displayName),
-                cancellationToken).ConfigureAwait(false);
+            await _mediator.Publish(new PendingSessionCreatedNotification(id), cancellationToken).ConfigureAwait(false);
 
             return new PendingHandshakeIngressResult(
                 PendingHandshakeIngressStatus.Accepted,

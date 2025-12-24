@@ -52,6 +52,7 @@ public sealed class SqlitePendingSessionRepositoryTests
             PeerId.NewId(),
             new ProtocolVersion(1),
             new HandshakeInvitation(new byte[] { 1, 2, 3 }),
+            requestCorrelationId: "corr-1",
             isRelayed: false,
             inviterIdentityKey: new RatchetIdentityKey(new byte[] { 9, 9, 9 }),
             callbackEndpointHost: "example.com",
@@ -69,5 +70,6 @@ public sealed class SqlitePendingSessionRepositoryTests
         Assert.That(loaded.InviterIdentityKey!.Value, Is.EqualTo(new byte[] { 9, 9, 9 }));
         Assert.That(loaded.CallbackEndpointHost, Is.EqualTo("example.com"));
         Assert.That(loaded.CallbackEndpointPort, Is.EqualTo(443));
+        Assert.That(loaded.RequestCorrelationId, Is.EqualTo("corr-1"));
     }
 }
