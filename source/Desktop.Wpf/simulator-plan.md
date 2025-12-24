@@ -86,9 +86,9 @@ This chunk is where `EstablishDirectSessionRequest` becomes the reverse-signal c
 Deliverables:
 
 - Update protobuf contracts (no legacy compatibility):
-  - `EstablishDirectSessionRequest` carries exactly one payload: the serialized `InviteHandshakeRequest`.
+  - `EstablishDirectSessionRequest` has a single field that carries the reverse-signal invite, e.g. `bytes invite_handshake_request = ...` containing the serialized `InviteHandshakeRequest` (outer wrapper + signed payload). **No `oneof`. No legacy fields.**
   - Remove any legacy `PreKeyBundle` or `HandshakeInitiatorHello` paths from this RPC.
-  - `EstablishDirectSessionResponse` must support an explicit "queued/accepted for review" acknowledgement (not a crypto response).
+  - `EstablishDirectSessionResponse` acknowledges invite receipt as **queued for approval** (not a crypto handshake response), and must be sufficient for the sender to correlate via `request_correlation_id`.
 
 - Implement ingress mapping (server-side):
   - Parse incoming `InviteHandshakeRequest`.
@@ -97,17 +97,28 @@ Deliverables:
   - Verify `pre_key_signature` using the same `alice_identity_key` over `alice_signed_pre_key`.
   - Validate `alice_host`/`alice_port` under policy.
   - Enforce expiry and replay protection (`request_correlation_id` dedup).
-  - Enqueue a `PendingSession` and emit the WPF-facing pending-handshake notification.
+  - Enqueue a `PendingSession` with:
+    - `InvitationBlob` stored as the full serialized `InviteHandshakeRequest` (outer wrapper), not only the inner `payload`.
+    - `InviterIdentityKey` stored for TOFU UI display.
+    - `request_correlation_id` and `expires_at_utc` persisted for dedup + expiry enforcement.
+
+  - WPF notification bridge (required for UI refresh):
+    - When an invite is successfully queued, publish the exact notification type that WPF listens for: `PendingHandshakeAdded`.
+    - If the application layer already emits a different pending-session notification, add a bridging handler that translates it into `PendingHandshakeAdded`.
 
 - Document (in this plan and/or in `session-flow.md`) the relay handling rule:
-  - direct vs relayed is determined by transport context; relayed invites must not populate callback endpoint.
+  - direct vs relayed is determined by the transport path used to deliver the invite; it is **not** a handshake field.
+  - For relayed invites: persist `IsRelayed = true` and do not store any callback endpoint from the invite (even if present).
+  - For direct invites: persist `IsRelayed = false` and store callback endpoint from the signed payload after validation.
 
 Required tests (must follow `unit-testing.md`):
 
 - Valid invite is queued and produces a pending handshake.
+- Valid invite queues pending handshake and publishes `PendingHandshakeAdded`.
 - Invalid signature rejects without side effects.
 - Duplicate `request_correlation_id` rejects without side effects.
 - Expired invite rejects without side effects.
+
 ---
 
 ## Chunk 3 — Approval orchestration (application): approve pending handshake → upsert routing profile → send `InviteHandshakeResponse`
@@ -160,31 +171,38 @@ Intent: Allow the simulator to observe outbound messages so it can emulate other
 
 Deliverables:
 
-- Introduce an outbound send observer port/event stream.
+- Define a single configuration switch for the entire feature, e.g. `SimulatorWireTapOptions.Enabled` (default `false`).
+- The wire tap must be enabled only when the development/simulator flag is on, and must be disabled by default.
 
-- Instrument at a choke point:
-  - preferred: inside the final network send executor (after route selection).
-  - fallback: inside `MessageService`.
+- Introduce a dev-only outbound wire tap port/event stream (application-level), exposed as an interface such as `IOutboundMessageWireTap`.
 
-- Observer gating (must be explicit and tested):
-  - Enabled only when a development/simulator config flag is on.
-  - Disabled by default.
-  - When enabled:
-    - emit a structured event with:
-      - destination peer id
-      - transport path used (direct vs relay)
-      - raw bytes payload (no logging)
-      - a safe-to-display summary string that contains no secrets (optional)
-  - When disabled:
-    - emit nothing.
+- Instrument exactly once per outbound message at the point where:
+  - the destination `PeerId` is known,
+  - the chosen route (`SendPath`: direct vs relay) is known,
+  - and the final outbound payload bytes are available.
+  Do not emit multiple wire-tap events for internal retries unless you include an explicit attempt counter.
+
+- Wire-tap event contract:
+  - When enabled, emit an `OutboundWireMessage` containing:
+    - destination peer id
+    - transport path used (direct vs relay)
+    - optional `request_correlation_id` (set only when the payload is an `InviteHandshakeResponse` and can be extracted without decrypting anything else)
+    - message type label (e.g., `InviteHandshakeResponse`, `EncryptedEnvelope`)
+    - raw bytes payload (no logging)
+    - payload length
+
+- Security/UX constraints:
+  - The wire tap must not log payload bytes.
+  - The simulator UI must not assume payload bytes are safe to render.
+  - UI should display metadata only (type, correlation id when present, byte length, destination, path).
 
 - Simulator usage requirement:
-  - the simulator must be able to subscribe and treat outbound events as “wire traffic” to other simulated peers.
+  - The simulator must be able to subscribe and treat outbound events as “wire traffic” to other simulated peers.
 
 Required tests:
 
-- Unit test: observer disabled emits nothing.
-- Unit test: observer enabled emits one event with correct payload bytes.
+- Unit test: wire tap disabled emits nothing.
+- Unit test: wire tap enabled emits an event containing the expected payload bytes and destination peer id.
 
 ---
 
