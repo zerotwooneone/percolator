@@ -13,11 +13,10 @@ Key constraints / invariants (from `session-flow.md`):
 - Reverse-signal flow: local user invites; remote user accepts and responds.
 - Acceptance produces an `InviteHandshakeResponse` that must be delivered to the inviter.
 - Relay support: the invite/response may traverse a relay/host; UX should show when a relay path was used.
-- Callback endpoint privacy/integrity: any inviter callback endpoint must be carried only inside the end-to-end protected invitation payload and must not be derived from transport metadata.
+- Callback endpoint privacy/integrity: any inviter callback endpoint must be carried only inside the signed payload and must not be derived from transport metadata.
 
 Open protocol gap:
 
-- `session-flow.md` does not currently specify how the inviter communicates a callback `DnsEndpoint` for the response.
 - Relay-ness must be derived from the context in which the invite arrives (transport path), not encoded into any handshake message fields.
 - Security requirement: on receiving an invite, do not upsert direct endpoints into `PeerRoutingProfile` (avoid routing-profile poisoning / forced-dial). Only upsert routing profile on explicit user acceptance.
 
@@ -63,13 +62,11 @@ Deliverables:
 
 - Add an explicit mapping section in `session-flow.md` Part 2 describing:
   - the protocol concepts (`InviteHandshakeRequest`, `InviteHandshakeResponse`)
-  - the concrete carrier types used by this codebase (e.g., existing handshake carrier + an inner protected payload)
-  - where the callback endpoint lives (only inside the end-to-end protected payload; never in transport metadata)
+  - the concrete carrier types used by this codebase 
+    - EstablishDirectSessionRequest carries InviteHandshakeRequest (outer wrapper + signed payload)
+  - EstablishDirectSessionRequest carries InviteHandshakeRequest (outer wrapper + signed payload)
 - Update protobuf contracts to represent the reverse-signal request/response in a way compatible with the existing crypto flow.
 
-Required tests:
-
-- Contract-level serialization tests for the new reverse-signal request/response and callback endpoint fields.
 
 ---
 
