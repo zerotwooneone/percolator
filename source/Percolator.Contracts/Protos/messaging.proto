@@ -82,24 +82,18 @@ message EstablishSessionResponse {
 }
 
 message EstablishDirectSessionRequest {
-    message DirectInitiatorPayload {
-        optional uint32 version = 1;
-        // The public part of the ephemeral key for this handshake.
-        optional bytes responder_ephemeral_key = 2;
-
-        // The port the peer is listening on for a direct connection.
-        optional uint32 callback_port = 3;
-    }
     // The protocol version.
     optional uint32 version = 1;
 
-    oneof payload {
-        // Legacy: existing request shape (used by current tests/flows). Do not use for reverse-signal invite ingress.
-        PreKeyBundle responder_bundle = 2;
+    // Reverse-signal invite ingress.
+    // Inviter identity key (SPKI bytes)
+    optional bytes inviter_identity_key = 2;
 
-        // Reverse-signal invite ingress: initiator hello carries the invite and protected payload.
-        HandshakeInitiatorHello initiator_hello = 3;
-    }
+    // Always a serialized InviteHandshakeRequestPayload
+    optional bytes payload = 3;
+
+    // Signed by inviter_identity_key over raw payload bytes
+    optional bytes payload_signature = 4;
 }
 
 message EstablishDirectSessionResponse {

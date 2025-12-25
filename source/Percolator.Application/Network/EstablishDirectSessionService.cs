@@ -1,6 +1,7 @@
 using System;
 using System.Security.Cryptography;
 using Google.Protobuf;
+using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.Logging;
 using MediatR;
 using Percolator.Application.Identity;
@@ -10,8 +11,6 @@ using Percolator.Cryptography;
 using Percolator.Cryptography.Primitives;
 using Percolator.Identity;
 using Percolator.Identity.Model;
-using Percolator.Network;
-using Percolator.Network.ValueObjects;
 using PeerId = Percolator.Cryptography.Primitives.PeerId;
 
 namespace Percolator.Application.Network
@@ -21,9 +20,11 @@ namespace Percolator.Application.Network
     /// </summary>
     public interface IEstablishDirectSessionService
     {
-        Task<EstablishDirectSessionResult?> EstablishAsync(EstablishDirectSessionCommand request, CancellationToken cancellationToken);
-
-        Task QueueInviteAsync(HandshakeInitiatorHello initiatorHello, CancellationToken cancellationToken);
+        Task QueueInviteAsync(
+            byte[] inviterIdentityKeySpki,
+            byte[] payloadBytes,
+            byte[] payloadSignatureBytes,
+            CancellationToken cancellationToken);
     }
 
     internal sealed class EstablishDirectSessionService : IEstablishDirectSessionService
@@ -32,7 +33,6 @@ namespace Percolator.Application.Network
         private readonly IActiveIdentityAccessor _activeIdentityAccessor;
         private readonly ActiveIdentityContext _active;
         private readonly IPeerIdentityRepository _peerIdentityRepository;
-        private readonly IPeerRoutingProfileRepository _peerRoutingProfileRepository;
         private readonly Percolator.Network.ISigningService _signingService;
         private readonly IPendingSessionRepository _pendingSessions;
         private readonly IClock _clock;
@@ -44,7 +44,6 @@ namespace Percolator.Application.Network
             IActiveIdentityAccessor activeIdentityAccessor,
             ActiveIdentityContext active,
             IPeerIdentityRepository peerIdentityRepository,
-            IPeerRoutingProfileRepository peerRoutingProfileRepository,
             Percolator.Network.ISigningService signingService,
             IPendingSessionRepository pendingSessions,
             IClock clock,
@@ -55,7 +54,6 @@ namespace Percolator.Application.Network
             _activeIdentityAccessor = activeIdentityAccessor;
             _active = active;
             _peerIdentityRepository = peerIdentityRepository;
-            _peerRoutingProfileRepository = peerRoutingProfileRepository;
             _signingService = signingService;
             _pendingSessions = pendingSessions;
             _clock = clock;
@@ -63,9 +61,26 @@ namespace Percolator.Application.Network
             _callbackEndpointValidator = callbackEndpointValidator;
         }
 
-        public async Task QueueInviteAsync(HandshakeInitiatorHello initiatorHello, CancellationToken cancellationToken)
+        public async Task QueueInviteAsync(
+            byte[] inviterIdentityKeySpki,
+            byte[] payloadBytes,
+            byte[] payloadSignatureBytes,
+            CancellationToken cancellationToken)
         {
-            if (initiatorHello is null) throw new ArgumentNullException(nameof(initiatorHello));
+            if (inviterIdentityKeySpki is null || inviterIdentityKeySpki.Length == 0)
+            {
+                throw new ArgumentException("inviter identity key required", nameof(inviterIdentityKeySpki));
+            }
+
+            if (payloadBytes is null || payloadBytes.Length == 0)
+            {
+                throw new ArgumentException("payload required", nameof(payloadBytes));
+            }
+
+            if (payloadSignatureBytes is null || payloadSignatureBytes.Length == 0)
+            {
+                throw new ArgumentException("payload signature required", nameof(payloadSignatureBytes));
+            }
 
             if (!_activeIdentityAccessor.IsActive || _active.Identity is null || _active.Keys is null)
             {
@@ -73,14 +88,95 @@ namespace Percolator.Application.Network
                 throw new InvalidOperationException("Server identity not initialized.");
             }
 
-            if (!initiatorHello.HasInitiatorIdentityKeySpki)
+            var payloadVerified = _signingService.Verify(
+                new Percolator.Network.Payload(payloadBytes),
+                new Percolator.Network.Signature(payloadSignatureBytes),
+                new Percolator.Network.PublicKey(inviterIdentityKeySpki));
+            if (!payloadVerified)
             {
-                throw new InvalidOperationException("Initiator identity key is required.");
+                throw new InvalidOperationException("handshake payload signature invalid");
+            }
+
+            InviteHandshakeRequestPayload payload;
+            try
+            {
+                payload = InviteHandshakeRequestPayload.Parser.ParseFrom(payloadBytes);
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException(ex.Message);
+            }
+
+            if (!payload.HasRequestCorrelationId || string.IsNullOrWhiteSpace(payload.RequestCorrelationId))
+            {
+                throw new InvalidOperationException("request_correlation_id is required.");
+            }
+
+            if (payload.ExpiresAtUtc is null)
+            {
+                throw new InvalidOperationException("expires_at_utc is required.");
+            }
+
+            var expiresAtUtc = payload.ExpiresAtUtc.ToDateTimeOffset();
+            if (_clock.UtcNow >= expiresAtUtc)
+            {
+                throw new InvalidOperationException("invite is expired.");
+            }
+
+            // Replay/DoS: reject duplicates until expiry
+            await foreach (var existing in _pendingSessions.EnumerateAsync(cancellationToken).ConfigureAwait(false))
+            {
+                if (string.Equals(existing.RequestCorrelationId, payload.RequestCorrelationId, StringComparison.Ordinal))
+                {
+                    if (!existing.IsExpiredAt(_clock.UtcNow))
+                    {
+                        throw new InvalidOperationException("duplicate request_correlation_id");
+                    }
+                }
+            }
+
+            if (!payload.HasInviterHost || string.IsNullOrWhiteSpace(payload.InviterHost))
+            {
+                throw new InvalidOperationException("inviter_host is required.");
+            }
+
+            if (!payload.HasInviterPort)
+            {
+                throw new InvalidOperationException("inviter_port is required.");
+            }
+
+            var validation = _callbackEndpointValidator.Validate(payload.InviterHost, (int)payload.InviterPort);
+            if (!validation.IsValid)
+            {
+                throw new InvalidOperationException(validation.ErrorMessage ?? "Callback endpoint is invalid.");
+            }
+
+            if (payload.InviterPreKey is null)
+            {
+                throw new InvalidOperationException("inviter_pre_key is required.");
+            }
+
+            if (!payload.InviterPreKey.HasInviterSignedPreKey || payload.InviterPreKey.InviterSignedPreKey.Length == 0)
+            {
+                throw new InvalidOperationException("inviter_signed_pre_key is required.");
+            }
+
+            if (!payload.InviterPreKey.HasPreKeySignature || payload.InviterPreKey.PreKeySignature.Length == 0)
+            {
+                throw new InvalidOperationException("pre_key_signature is required.");
+            }
+
+            var preKeyVerified = _signingService.Verify(
+                new Percolator.Network.Payload(payload.InviterPreKey.InviterSignedPreKey.ToByteArray()),
+                new Percolator.Network.Signature(payload.InviterPreKey.PreKeySignature.ToByteArray()),
+                new Percolator.Network.PublicKey(inviterIdentityKeySpki));
+            if (!preKeyVerified)
+            {
+                throw new InvalidOperationException("pre_key_signature invalid");
             }
 
             // Resolve or create peer identity by PKH
-            var initiatorSpki = initiatorHello.InitiatorIdentityKeySpki.ToByteArray();
-            var initiatorPkh = SHA256.HashData(initiatorSpki);
+            var initiatorPkh = SHA256.HashData(inviterIdentityKeySpki);
             var identity = await _peerIdentityRepository.FindByPublicKeyHashAsync(initiatorPkh, cancellationToken).ConfigureAwait(false);
             if (identity is null)
             {
@@ -91,103 +187,34 @@ namespace Percolator.Application.Network
                 await _peerIdentityRepository.SaveAsync(identity, cancellationToken).ConfigureAwait(false);
             }
 
-            // Parse callback endpoint only from the (end-to-end protected) encrypted payload; do not derive from transport metadata.
-            string? callbackHost = null;
-            int? callbackPort = null;
-            if (initiatorHello.HasEncryptedPayload && initiatorHello.EncryptedPayload.Length > 0)
+            // Do not upsert routing profile on invite receipt (TOFU boundary enforced)
+
+            var invitationEnvelope = new EstablishDirectSessionRequest
             {
-                var invitePayload = InviteHandshakeRequestPayload.Parser.ParseFrom(initiatorHello.EncryptedPayload);
-                if (invitePayload.CallbackEndpoint is not null && invitePayload.CallbackEndpoint.HasHost && invitePayload.CallbackEndpoint.HasPort)
-                {
-                    callbackHost = invitePayload.CallbackEndpoint.Host;
-                    callbackPort = (int)invitePayload.CallbackEndpoint.Port;
-
-                    var validation = _callbackEndpointValidator.Validate(callbackHost, callbackPort.Value);
-                    if (!validation.IsValid)
-                    {
-                        throw new InvalidOperationException(validation.ErrorMessage ?? "Callback endpoint is invalid.");
-                    }
-                }
-            }
-
-            var invitationBytes = initiatorHello.ToByteArray();
-            var invitation = new HandshakeInvitation(invitationBytes);
-            var inviterIdentityKey = new RatchetIdentityKey(initiatorSpki);
-            var protocolVersion = initiatorHello.HasVersion ? new ProtocolVersion((int)initiatorHello.Version) : new ProtocolVersion(1);
+                Version = 1,
+                InviterIdentityKey = ByteString.CopyFrom(inviterIdentityKeySpki),
+                Payload = ByteString.CopyFrom(payloadBytes),
+                PayloadSignature = ByteString.CopyFrom(payloadSignatureBytes)
+            };
+            var invitation = new HandshakeInvitation(invitationEnvelope.ToByteArray());
+            var inviterIdentityKey = new RatchetIdentityKey(inviterIdentityKeySpki);
+            var protocolVersion = payload.HasVersion ? new ProtocolVersion((int)payload.Version) : new ProtocolVersion(1);
 
             var pending = PendingSession.FromInvitationWithMetadata(
                 PendingSessionId.NewId(),
                 new PeerId(identity.Id.Value),
                 protocolVersion,
                 invitation,
-                requestCorrelationId: null,
+                requestCorrelationId: payload.RequestCorrelationId,
                 isRelayed: false,
                 inviterIdentityKey: inviterIdentityKey,
-                callbackEndpointHost: callbackHost,
-                callbackEndpointPort: callbackPort,
-                _clock);
+                callbackEndpointHost: payload.InviterHost,
+                callbackEndpointPort: (int)payload.InviterPort,
+                _clock,
+                expiresAtUtc: expiresAtUtc);
 
             await _pendingSessions.AddAsync(pending, cancellationToken).ConfigureAwait(false);
             await _mediator.Publish(new PendingSessionCreatedNotification(pending.Id), cancellationToken).ConfigureAwait(false);
-        }
-
-        public async Task<EstablishDirectSessionResult?> EstablishAsync(EstablishDirectSessionCommand request, CancellationToken cancellationToken)
-        {
-            if (!_activeIdentityAccessor.IsActive || _active.Identity is null || _active.Keys is null)
-            {
-                _logger.LogError("Local peer identity has not been established. Cannot respond to handshake");
-                throw new InvalidOperationException("Server identity not initialized.");
-            }
-
-            // Verify the signed payload (ECDSA P-256 + SHA-256)
-            var verified = _signingService.Verify(
-                new Percolator.Network.Payload(request.SignedPayloadBytes),
-                new Percolator.Network.Signature(request.PayloadSignatureBytes),
-                new Percolator.Network.PublicKey(request.RemoteIdentityKeyBytes));
-            if (!verified)
-            {
-                throw new CryptographicException("handshake payload signature invalid");
-            }
-
-            // Resolve or create peer identity by PKH
-            var initiatorSpki = request.RemoteIdentityKeyBytes;
-            var initiatorPkh = SHA256.HashData(initiatorSpki);
-            var identity = await _peerIdentityRepository.FindByPublicKeyHashAsync(initiatorPkh, cancellationToken).ConfigureAwait(false);
-            if (identity is null)
-            {
-                var newId = Percolator.Identity.PeerId.NewId();
-                var hex = Convert.ToHexString(initiatorPkh);
-                identity = new PeerIdentity(newId);
-                identity.SetDisplayName(new DisplayName($"Peer-{hex.Substring(0, Math.Min(12, hex.Length))}"));
-                await _peerIdentityRepository.SaveAsync(identity, cancellationToken).ConfigureAwait(false);
-            }
-
-            // Mirror routing data into Network profile
-            var networkPeerId = new Percolator.Network.PeerId(identity.Id.Value);
-            var profile = await _peerRoutingProfileRepository.GetByIdAsync(networkPeerId, cancellationToken).ConfigureAwait(false)
-                          ?? new PeerRoutingProfile();
-            if (profile.Id is null)
-            {
-                profile.BindIdentity(networkPeerId);
-            }
-            profile.SetIdentityPublicKey(new Percolator.Network.ValueObjects.IdentityPublicKey(initiatorSpki));
-            profile.AddGrpcEndPoint(new GrpcEndPoint(request.PeerEndPoint, _clock.UtcNow), _clock.UtcNow);
-            profile.RecordReachability(ReachabilityStatus.Online, _clock.UtcNow);
-            await _peerRoutingProfileRepository.UpsertAsync(profile, cancellationToken).ConfigureAwait(false);
-
-            // Enqueue a pending session (no ratchet session created here)
-            var invitation = new HandshakeInvitation(request.SignedPayloadBytes);
-            var pending = PendingSession.FromInvitation(
-                PendingSessionId.NewId(),
-                new Percolator.Cryptography.Primitives.PeerId(identity.Id.Value),
-                new ProtocolVersion(1),
-                invitation,
-                _clock);
-            await _pendingSessions.AddAsync(pending, cancellationToken).ConfigureAwait(false);
-            await _mediator.Publish(new PendingSessionCreatedNotification(pending.Id), cancellationToken).ConfigureAwait(false);
-
-            // todo: implement a strategy to automatically accept the request
-            return null;
         }
     }
 }

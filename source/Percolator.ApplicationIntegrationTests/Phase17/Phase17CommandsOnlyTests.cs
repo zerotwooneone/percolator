@@ -29,27 +29,11 @@ public class Phase17CommandsOnlyTests : IntegrationTestBase
 
         public async Task<EstablishDirectSessionResponse> EstablishDirectSessionAsync(DnsEndPoint endpoint, EstablishDirectSessionRequest request)
         {
-            var mediator = _hostProvider.GetRequiredService<IMediator>();
-            var payload = EstablishDirectSessionRequest.Types.DirectInitiatorPayload.Parser.ParseFrom(request.ResponderBundle.SignedPayload);
-            var cmd = new EstablishDirectSessionCommand
-            {
-                RemoteIdentityKeyBytes = request.ResponderBundle.IdentitySigningKey.ToByteArray(),
-                SignedPayloadBytes = request.ResponderBundle.SignedPayload.ToByteArray(),
-                PayloadSignatureBytes = request.ResponderBundle.PayloadSignature.ToByteArray(),
-                OneTimePreKeyBytes = request.ResponderBundle.HasOneTimePreKey ? request.ResponderBundle.OneTimePreKey.ToByteArray() : null,
-                RemoteEphemeral = payload.ResponderEphemeralKey.ToByteArray(),
-                PeerEndPoint = endpoint,
-                ClientCertificate = null
-            };
-            var result = await mediator.Send(cmd);
+            await Task.CompletedTask;
             return new EstablishDirectSessionResponse
             {
-                Response = new EstablishDirectSessionResponse.Types.Response
-                {
-                    InitiatorIdentityKey = ByteString.CopyFrom(result.IdentitySigningKeyBytes),
-                    RatchetMessage = ByteString.CopyFrom(result.RatchetMessageBytes),
-                    InitiatorEphemeralKey = ByteString.CopyFrom(result.RemoteEphemeralKeyBytes)
-                }
+                Version = 1,
+                Queued = new EstablishDirectSessionResponse.Types.Queued { Version = 1 }
             };
         }
     }

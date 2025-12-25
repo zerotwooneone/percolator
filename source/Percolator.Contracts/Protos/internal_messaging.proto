@@ -437,20 +437,37 @@ message ReverseSignalCallbackEndpoint {
   optional uint32 port = 3;
 }
 
-// Protected payload for InviteHandshakeRequest (conceptual) carried by HandshakeInitiatorHello.
-message InviteHandshakeRequestPayload {
+message InviteHandshakePreKeyBundle {
   optional uint32 version = 1;
-  // Inviter-generated correlation id.
-  optional string local_invitation_id = 2;
-  // Inviter callback endpoint used for direct-only response routing.
-  optional ReverseSignalCallbackEndpoint callback_endpoint = 3;
+
+  optional bytes inviter_signed_pre_key = 2;
+  optional bytes pre_key_signature = 3;
+  optional bytes inviter_one_time_pre_key = 4;
 }
 
-// Protected payload for InviteHandshakeResponse (conceptual) carried by the first responder ratchet message.
-message InviteHandshakeResponsePayload {
+message InviteHandshakeRequestPayload {
   optional uint32 version = 1;
-  // Echo of the inviter correlation id.
-  optional string local_invitation_id = 2;
+
+  optional string inviter_host = 2;
+  optional uint32 inviter_port = 3;
+  optional InviteHandshakePreKeyBundle inviter_pre_key = 4;
+
+  optional google.protobuf.Timestamp expires_at_utc = 5;
+
+  // must be unpredictable (GUID). Receiver stores seen request_correlation_id until expires_at_utc and rejects duplicates.
+  optional string request_correlation_id = 6;
+}
+
+message InviteHandshakeResponse {
+  optional uint32 version = 1;
+  optional string request_correlation_id = 2;
+
+  // Acceptor acts as X3DH initiator now
+  optional bytes acceptor_identity_key = 3;
+  optional bytes acceptor_x3dh_ephemeral_key = 4;
+
+  // First ratchet message (header has the acceptor's next ratchet key)
+  optional bytes initial_ratchet_message = 5;
 }
 
 // Preferred encrypted inner payload for HandshakeResponderHello

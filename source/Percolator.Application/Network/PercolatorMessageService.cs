@@ -1,11 +1,10 @@
 using System;
 using System.Linq;
-using System.Net;
+using Google.Protobuf;
 using Grpc.Core;
 using Microsoft.Extensions.Logging;
 using Percolator.Application.Ingress;
 using Percolator.Contracts;
-using Google.Protobuf;
 using Percolator.Prekey.Handlers;
 
 namespace Percolator.Application.Network
@@ -28,72 +27,39 @@ namespace Percolator.Application.Network
 
         public override async Task<EstablishDirectSessionResponse> EstablishDirectSession(EstablishDirectSessionRequest request, ServerCallContext context)
         {
-            if (request.PayloadCase == EstablishDirectSessionRequest.PayloadOneofCase.InitiatorHello)
+            if (!request.HasInviterIdentityKey || request.InviterIdentityKey.Length == 0)
             {
-                await _establishService.QueueInviteAsync(request.InitiatorHello, context.CancellationToken).ConfigureAwait(false);
-                return new EstablishDirectSessionResponse
-                {
-                    Version = 1,
-                    Queued = new EstablishDirectSessionResponse.Types.Queued { Version = 1 }
-                };
+                throw new RpcException(new Status(StatusCode.InvalidArgument, $"{nameof(EstablishDirectSessionRequest.InviterIdentityKey)} is required."));
             }
 
-            // Legacy path (existing direct session establishment behavior)
-            if (request.PayloadCase != EstablishDirectSessionRequest.PayloadOneofCase.ResponderBundle)
+            if (!request.HasPayload || request.Payload.Length == 0)
             {
-                throw new RpcException(new Status(StatusCode.InvalidArgument, "EstablishDirectSessionRequest payload is required."));
+                throw new RpcException(new Status(StatusCode.InvalidArgument, "payload is required."));
             }
 
-            // Map Protobuf to app command
-            var payload = EstablishDirectSessionRequest.Types.DirectInitiatorPayload.Parser.ParseFrom(request.ResponderBundle.SignedPayload);
-            if (!payload.HasCallbackPort || payload.CallbackPort < 1024 || payload.CallbackPort > 65535)
+            if (!request.HasPayloadSignature || request.PayloadSignature.Length == 0)
             {
-                throw new RpcException(new Status(StatusCode.FailedPrecondition, $"Invalid callback port: {payload.CallbackPort}"));
+                throw new RpcException(new Status(StatusCode.InvalidArgument, "payload_signature is required."));
             }
 
-            // Extract peer endpoint from context.Peer and payload callback port
-            var peerGrpcEnpointParts = context.Peer.Split(':').Skip(1).ToArray();
-            if (peerGrpcEnpointParts.Length != 2)
+            try
             {
-                throw new RpcException(new Status(StatusCode.FailedPrecondition, $"Invalid endpoint: {context.Peer}"));
+                await _establishService.QueueInviteAsync(
+                        request.InviterIdentityKey.ToByteArray(),
+                        request.Payload.ToByteArray(),
+                        request.PayloadSignature.ToByteArray(),
+                        context.CancellationToken)
+                    .ConfigureAwait(false);
             }
-            var peerEndPoint = new DnsEndPoint(peerGrpcEnpointParts[0], (int)payload.CallbackPort);
-
-            // HttpContext for client certificate (may be null in tests)
-            var clientCertificate = await context.GetHttpContext().Connection.GetClientCertificateAsync().ConfigureAwait(false);
-
-            var command = new EstablishDirectSessionCommand
+            catch (Exception ex)
             {
-                RemoteIdentityKeyBytes = request.ResponderBundle.IdentitySigningKey.ToByteArray(),
-                SignedPayloadBytes = request.ResponderBundle.SignedPayload.ToByteArray(),
-                PayloadSignatureBytes = request.ResponderBundle.PayloadSignature.ToByteArray(),
-                OneTimePreKeyBytes = request.ResponderBundle.HasOneTimePreKey ? request.ResponderBundle.OneTimePreKey.ToByteArray() : null,
-                RemoteEphemeral = payload.ResponderEphemeralKey.ToByteArray(),
-                ClientCertificate = clientCertificate,
-                PeerEndPoint = peerEndPoint
-            };
-
-            var result = await _establishService.EstablishAsync(command, context.CancellationToken).ConfigureAwait(false);
-
-            if (result is null)
-            {
-                return new EstablishDirectSessionResponse
-                {
-                    Version = 1,
-                    Never = new EstablishDirectSessionResponse.Types.Never()
-                };
+                throw new RpcException(new Status(StatusCode.InvalidArgument, ex.Message));
             }
 
             return new EstablishDirectSessionResponse
             {
                 Version = 1,
-                Response = new EstablishDirectSessionResponse.Types.Response
-                {
-                    Version = 1,
-                    InitiatorIdentityKey = ByteString.CopyFrom(result.IdentitySigningKeyBytes),
-                    RatchetMessage = ByteString.CopyFrom(result.RatchetMessageBytes),
-                    InitiatorEphemeralKey = ByteString.CopyFrom(result.RemoteEphemeralKeyBytes)
-                }
+                Queued = new EstablishDirectSessionResponse.Types.Queued { Version = 1 }
             };
         }
 

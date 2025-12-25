@@ -7,7 +7,7 @@
 
  Sections
  - Part 1: Standard Flow (Alice initiates; Bob may be offline)
- - Part 2: Reverse-Signal Flow (Alice invites Bob to initiate)
+ - Part 2: Reverse-Signal Flow (Inviter invites Acceptor to initiate)
  - Part 3: Ongoing Session Persistence
 
  ---
@@ -106,107 +106,108 @@
 
  ---
 
- ## Part 2: Reverse-Signal Flow (Alice Invites Bob to Initiate)
+ ## Part 2: Reverse-Signal Flow (Inviter invites Acceptor to initiate)
 
- Alice invites Bob to initiate a session with her. This can be via a relay/host.
+ Alice (the inviter) invites Bob (the acceptor) to initiate a session with her. This can be via a relay/host.
 
- Note
- - Less private than Standard Flow (Alice reveals bundle first). Consider product UX tradeoffs.
+Note
+- Less private than Standard Flow (Alice reveals bundle first). Consider product UX tradeoffs.
 
- ### Step 2.1: Alice Sends Invitation
+### Step 2.1: Inviter Sends Invitation
 
- ```protobuf
- // Opaque to the transport, but this is the inner invitation content
- message InviteHandshakeRequest {
-   message Inner_PreKeyBundle {
-    uint32 version = 1;
-    
-    bytes alice_signed_pre_key = 2;
-    bytes pre_key_signature =3;
-    optional bytes alice_one_time_pre_key = 4;
-   }
-   message InviteHandshakeRequestPayload {
-     uint32 version = 1;
-     // Hostname or IP literal.
-     string alice_host = 2;
-     uint32 alice_port = 3;
-     Inner_PreKeyBundle alice_pre_key = 4;
-     
-     google.protobuf.Timestamp expires_at_utc = 5;
+```protobuf
+// Opaque to the transport. The inviter is the X3DH responder; the acceptor is the X3DH initiator.
+message InviteHandshakePreKeyBundle {
+  uint32 version = 1;
+  bytes inviter_signed_pre_key = 2;
+  bytes pre_key_signature = 3;
+  optional bytes inviter_one_time_pre_key = 4;
+}
 
-     //must be unpredictable (GUID). Bob stores seen request_correlation_id until expires_at_utc and rejects duplicates
-     string request_correlation_id = 6; // this handshake's correlation id
-   }
+message InviteHandshakeRequestPayload {
+  uint32 version = 1;
+  // Hostname or IP literal.
+  string inviter_host = 2;
+  uint32 inviter_port = 3;
+  InviteHandshakePreKeyBundle inviter_pre_key = 4;
+  google.protobuf.Timestamp expires_at_utc = 5;
 
-   uint32 version = 1;
-   // Alice's Pre-Key Bundle
-   bytes alice_identity_key = 2;
-   
-   //always a serialized InviteHandshakeRequestPayload
-   bytes payload = 3;
-   
-   //signed by alice_identity_key
-   bytes payload_signature = 4;
- }
- ```
+  // must be unpredictable (GUID). Acceptor stores seen request_correlation_id until expires_at_utc and rejects duplicates
+  string request_correlation_id = 6;
+}
 
- SQLite (Alice, SentInvitations)
+// RPC ingress request
+message EstablishDirectSessionRequest {
+  uint32 version = 1;
 
- | Column                     | Type     | Description                                                       |
- | -------------------------- | -------- | ----------------------------------------------------------------- |
- | request_correlation_id        | VARCHAR  | Primary Key. Alice-generated id for correlation.               |
- | target_user_id             | VARCHAR  | Who the invite is for (e.g., Bob).                                |
- | alice_one_time_private_key | BLOB     | Only if an OTK was published; encrypted at rest; short‑lived.     |
- | created_at                 | DATETIME | For cleanup.                                                      |
+  // Inviter identity key (SPKI)
+  bytes inviter_identity_key = 2;
 
- Security
- - Only persist a one-time key private part if required by implementation; encrypt at rest and purge on response.
- - parse payload only after verification
- - verify pre_key_signature using the same alice_identity_key over alice_signed_pre_key
- - validate host/port under policy (allow_LAN, port range, etc.)
- - reject if request_correlation_id already seen and not expired
- - verify payload_signature over raw payload bytes as received
+  // always a serialized InviteHandshakeRequestPayload
+  bytes payload = 3;
 
- ### Step 2.2: Bob Queues for Approval
+  // signed by inviter_identity_key over raw payload bytes
+  bytes payload_signature = 4;
+}
+```
 
- Bob receives the invite and awaits explicit consent.
+SQLite (Inviter, SentInvitations)
 
- SQLite (Bob, PendingInvitations)
+| Column                     | Type     | Description                                                       |
+| -------------------------- | -------- | ----------------------------------------------------------------- |
+| request_correlation_id        | VARCHAR  | Primary Key. Inviter-generated id for correlation.               |
+| target_user_id             | VARCHAR  | Who the invite is for (e.g., the acceptor).                                |
+| inviter_one_time_private_key | BLOB     | Only if an OTK was published; encrypted at rest; short‑lived.     |
+| created_at                 | DATETIME | For cleanup.                                                      |
 
- | Column               | Type     | Description                                  |
- | -------------------- | -------- | -------------------------------------------- |
- | request_correlation_id | VARCHAR  | From `request_correlation_id`.                  |
- | inviter_identity_key | BLOB     | Alice’s identity key (for UI/verification).  |
- | invitation_blob      | BLOB     | Serialized invite payload. serialized InviteHandshakeRequest  |
- | status               | TEXT     | e.g., “AwaitingUserApproval”.                |
+Security
+- Only persist a one-time key private part if required by implementation; encrypt at rest and purge on response.
+- parse payload only after verification
+- verify pre_key_signature using the same inviter_identity_key over inviter_signed_pre_key
+- validate host/port under policy (allow_LAN, port range, etc.)
+- reject if request_correlation_id already seen and not expired
+- verify payload_signature over raw payload bytes as received
 
- ### Step 2.3: Bob Accepts and Responds
+### Step 2.2: Acceptor Queues for Approval
 
- ```protobuf
- message InviteHandshakeResponse {
-   string request_correlation_id = 1;  // Echo back to Alice
+Bob (the acceptor) receives the invite and awaits explicit consent.
 
-   // Bob acts as X3DH initiator now
-   bytes bob_identity_key       = 2;
-   bytes bob_x3dh_ephemeral_key = 3;
+SQLite (Acceptor, PendingInvitations)
 
-   // First ratchet message (header has Bob's next ratchet key)
-   bytes initial_ratchet_message = 4;
- }
- ```
+| Column               | Type     | Description                                  |
+| -------------------- | -------- | -------------------------------------------- |
+| request_correlation_id | VARCHAR  | From `request_correlation_id`.                  |
+| inviter_identity_key | BLOB     | Inviter’s identity key (for UI/verification).  |
+| invitation_blob      | BLOB     | Serialized invite payload. serialized EstablishDirectSessionRequest |
+| status               | TEXT     | e.g., “AwaitingUserApproval”.                |
 
- - Bob establishes his side immediately; persists full session (see Part 3).
- - Bob deletes `PendingInvitations` record.
+### Step 2.3: Acceptor Accepts and Responds
 
- ### Step 2.4: Alice Finalizes
+```protobuf
+message InviteHandshakeResponse {
+  string request_correlation_id = 1;  // Echo back to inviter
 
- - Lookup `SentInvitations` by `request_correlation_id`.
- - Complete X3DH on Alice’s side; initialize double ratchet; decrypt `initial_ratchet_message`; retrieve `session_id`.
- - Persist full session (Part 3) and delete `SentInvitations` record.
+  // Acceptor acts as X3DH initiator now
+  bytes acceptor_identity_key       = 2;
+  bytes acceptor_x3dh_ephemeral_key = 3;
 
- ---
+  // First ratchet message (header has the acceptor's next ratchet key)
+  bytes initial_ratchet_message = 4;
+}
+```
 
- ## Part 3: Ongoing Session Persistence (Both Peers)
+- Acceptor establishes their side immediately; persists full session (see Part 3).
+- Acceptor deletes `PendingInvitations` record.
+
+### Step 2.4: Inviter Finalizes
+
+- Lookup `SentInvitations` by `request_correlation_id`.
+- Complete X3DH on inviter side; initialize double ratchet; decrypt `initial_ratchet_message`; retrieve `session_id`.
+- Persist full session (Part 3) and delete `SentInvitations` record.
+
+---
+
+## Part 3: Ongoing Session Persistence (Both Peers)
 
  SQLite (Sessions)
 

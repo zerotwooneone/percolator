@@ -1,9 +1,9 @@
 using System;
-using System.Net;
 using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
 using Google.Protobuf;
+using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using NUnit.Framework;
@@ -16,31 +16,14 @@ using Percolator.Contracts;
 using Percolator.Cryptography;
 using Percolator.Identity;
 using Percolator.Identity.Model;
-using Percolator.Network;
-using Percolator.Network.ValueObjects;
-using PeerId = Percolator.Network.PeerId;
 
 namespace Percolator.ApplicationTests.Network
 {
     [TestFixture]
     public class EstablishDirectSessionServiceTests
     {
-        private static EstablishDirectSessionCommand MakeCommand(byte[] spki, byte[] signedPayload, byte[] signature)
-        {
-            return new EstablishDirectSessionCommand
-            {
-                RemoteIdentityKeyBytes = spki,
-                SignedPayloadBytes = signedPayload,
-                PayloadSignatureBytes = signature,
-                OneTimePreKeyBytes = null,
-                RemoteEphemeral = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256).PublicKey.ExportSubjectPublicKeyInfo(),
-                ClientCertificate = null,
-                PeerEndPoint = new DnsEndPoint("127.0.0.1", 5001)
-            };
-        }
-
         [Test]
-        public async Task EstablishAsync_ValidSignature_CreatesPeerRouteAndEnqueuesPendingSession_ReturnsNull()
+        public async Task QueueInviteAsync_ValidInvite_EnqueuesPendingSession_AndPublishesNotification()
         {
             // Arrange
             var logger = new NullLogger<EstablishDirectSessionService>();
@@ -52,7 +35,6 @@ namespace Percolator.ApplicationTests.Network
                     SignedPreKey: ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256))
             };
             var peerRepo = new Mock<IPeerIdentityRepository>(MockBehavior.Loose);
-            var profileRepo = new Mock<IPeerRoutingProfileRepository>(MockBehavior.Loose);
             var signing = new Mock<Percolator.Network.ISigningService>(MockBehavior.Loose);
             var pendingRepo = new Mock<IPendingSessionRepository>(MockBehavior.Loose);
             var mediator = new Mock<IMediator>(MockBehavior.Loose);
@@ -60,12 +42,27 @@ namespace Percolator.ApplicationTests.Network
             var clock = new TestClock();
             var callbackValidator = new Mock<ICallbackEndpointValidator>(MockBehavior.Loose);
 
-            // Inputs
-            using var initiatorEcdsa = ECDsa.Create(ECCurve.NamedCurves.nistP256);
-            var initiatorSpki = initiatorEcdsa.ExportSubjectPublicKeyInfo();
-            var payload = new byte[] { 0x01, 0x02 };
-            var signature = initiatorEcdsa.SignData(payload, HashAlgorithmName.SHA256);
-            var cmd = MakeCommand(initiatorSpki, payload, signature);
+            // Build InviteHandshakeRequest bytes (signature contents not validated here; Verify is mocked)
+            using var aliceEcdsa = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+            var aliceSpki = aliceEcdsa.ExportSubjectPublicKeyInfo();
+
+            var payload = new InviteHandshakeRequestPayload
+            {
+                Version = 1,
+                InviterHost = "example.com",
+                InviterPort = 443,
+                InviterPreKey = new InviteHandshakePreKeyBundle
+                {
+                    Version = 1,
+                    InviterSignedPreKey = ByteString.CopyFrom(ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256).PublicKey.ExportSubjectPublicKeyInfo()),
+                    PreKeySignature = ByteString.CopyFrom(new byte[] { 1, 2, 3 })
+                },
+                ExpiresAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow.AddMinutes(10)),
+                RequestCorrelationId = "corr-1"
+            };
+
+            var payloadBytes = payload.ToByteArray();
+            var payloadSignatureBytes = new byte[] { 9, 9, 9 };
 
             // Mocks
             signing.Setup(s => s.Verify(
@@ -79,21 +76,21 @@ namespace Percolator.ApplicationTests.Network
             peerRepo.Setup(r => r.SaveAsync(It.IsAny<PeerIdentity>(), It.IsAny<CancellationToken>()))
                 .Returns(Task.CompletedTask);
 
-            profileRepo.Setup(r => r.GetByIdAsync(It.IsAny<PeerId>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync((PeerRoutingProfile?)null);
-            profileRepo.Setup(r => r.UpsertAsync(It.IsAny<PeerRoutingProfile>(), It.IsAny<CancellationToken>()))
-                .Returns(Task.CompletedTask);
+            pendingRepo.Setup(r => r.EnumerateAsync(It.IsAny<CancellationToken>()))
+                .Returns(EmptyPendingAsync());
 
             pendingRepo.Setup(r => r.AddAsync(It.IsAny<PendingSession>(), It.IsAny<CancellationToken>()))
                 .Returns(Task.CompletedTask)
                 .Verifiable();
+
+            callbackValidator.Setup(v => v.Validate(It.IsAny<string>(), It.IsAny<int>()))
+                .Returns(new CallbackEndpointValidationResult(true, null, false, false));
 
             var svc = new EstablishDirectSessionService(
                 logger,
                 activeAccessor,
                 active,
                 peerRepo.Object,
-                profileRepo.Object,
                 signing.Object,
                 pendingRepo.Object,
                 clock,
@@ -101,18 +98,16 @@ namespace Percolator.ApplicationTests.Network
                 callbackValidator.Object);
 
             // Act
-            var result = await svc.EstablishAsync(cmd, CancellationToken.None);
+            await svc.QueueInviteAsync(aliceSpki, payloadBytes, payloadSignatureBytes, CancellationToken.None);
 
             // Assert
-            Assert.That(result, Is.Null, "Service should defer handshake and return null");
             peerRepo.Verify(r => r.SaveAsync(It.IsAny<PeerIdentity>(), It.IsAny<CancellationToken>()), Times.Once);
-            profileRepo.Verify(r => r.UpsertAsync(It.IsAny<PeerRoutingProfile>(), It.IsAny<CancellationToken>()), Times.Once);
             pendingRepo.Verify(r => r.AddAsync(It.IsAny<PendingSession>(), It.IsAny<CancellationToken>()), Times.Once);
             mediator.Verify(m => m.Publish(It.IsAny<PendingSessionCreatedNotification>(), It.IsAny<CancellationToken>()), Times.Once);
         }
 
         [Test]
-        public void EstablishAsync_InvalidSignature_ThrowsCryptoException_AndNoSideEffects()
+        public void QueueInviteAsync_InvalidPayloadSignature_Throws_AndNoSideEffects()
         {
             // Arrange
             var logger = new NullLogger<EstablishDirectSessionService>();
@@ -124,7 +119,6 @@ namespace Percolator.ApplicationTests.Network
                     SignedPreKey: ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256))
             };
             var peerRepo = new Mock<IPeerIdentityRepository>(MockBehavior.Loose);
-            var profileRepo = new Mock<IPeerRoutingProfileRepository>(MockBehavior.Loose);
             var signing = new Mock<Percolator.Network.ISigningService>(MockBehavior.Loose);
             var pendingRepo = new Mock<IPendingSessionRepository>(MockBehavior.Loose);
             var clock = new TestClock();
@@ -132,11 +126,26 @@ namespace Percolator.ApplicationTests.Network
             var activeAccessor = Mock.Of<IActiveIdentityAccessor>(a => a.IsActive == true);
             var callbackValidator = new Mock<ICallbackEndpointValidator>(MockBehavior.Loose);
 
-            using var initiatorEcdsa = ECDsa.Create(ECCurve.NamedCurves.nistP256);
-            var initiatorSpki = initiatorEcdsa.ExportSubjectPublicKeyInfo();
-            var payload = new byte[] { 0xAA, 0xBB };
-            var badSignature = new byte[] { 0x00, 0x01, 0x02 }; // any invalid signature
-            var cmd = MakeCommand(initiatorSpki, payload, badSignature);
+            using var aliceEcdsa = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+            var aliceSpki = aliceEcdsa.ExportSubjectPublicKeyInfo();
+
+            var payload = new InviteHandshakeRequestPayload
+            {
+                Version = 1,
+                InviterHost = "example.com",
+                InviterPort = 443,
+                InviterPreKey = new InviteHandshakePreKeyBundle
+                {
+                    Version = 1,
+                    InviterSignedPreKey = ByteString.CopyFrom(ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256).PublicKey.ExportSubjectPublicKeyInfo()),
+                    PreKeySignature = ByteString.CopyFrom(new byte[] { 1, 2, 3 })
+                },
+                ExpiresAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow.AddMinutes(10)),
+                RequestCorrelationId = "corr-1"
+            };
+
+            var payloadBytes = payload.ToByteArray();
+            var payloadSignatureBytes = new byte[] { 0x00, 0x01, 0x02 };
 
             signing.Setup(s => s.Verify(
                     It.IsAny<Percolator.Network.Payload>(),
@@ -149,7 +158,6 @@ namespace Percolator.ApplicationTests.Network
                 activeAccessor,
                 active,
                 peerRepo.Object,
-                profileRepo.Object,
                 signing.Object,
                 pendingRepo.Object,
                 clock,
@@ -157,12 +165,17 @@ namespace Percolator.ApplicationTests.Network
                 callbackValidator.Object);
 
             // Act + Assert
-            Assert.ThrowsAsync<CryptographicException>(() => svc.EstablishAsync(cmd, CancellationToken.None));
+            Assert.ThrowsAsync<InvalidOperationException>(() => svc.QueueInviteAsync(aliceSpki, payloadBytes, payloadSignatureBytes, CancellationToken.None));
 
             // Verify no side effects when signature invalid
             pendingRepo.Verify(r => r.AddAsync(It.IsAny<PendingSession>(), It.IsAny<CancellationToken>()), Times.Never);
-            profileRepo.Verify(r => r.UpsertAsync(It.IsAny<PeerRoutingProfile>(), It.IsAny<CancellationToken>()), Times.Never);
             peerRepo.Verify(r => r.SaveAsync(It.IsAny<PeerIdentity>(), It.IsAny<CancellationToken>()), Times.Never);
+        }
+
+        private static async IAsyncEnumerable<PendingSession> EmptyPendingAsync()
+        {
+            await Task.CompletedTask;
+            yield break;
         }
     }
 }
