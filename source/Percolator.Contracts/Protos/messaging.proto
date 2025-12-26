@@ -100,6 +100,8 @@ message EstablishDirectSessionResponse {
     message Never {}
     message Queued {
         optional uint32 version = 1;
+        // Echo of InviteHandshakeRequestPayload.request_correlation_id for sender correlation.
+        optional string request_correlation_id = 2;
     }
     message ResponsePayload {
         optional uint32 version = 1;

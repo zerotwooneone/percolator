@@ -38,7 +38,7 @@ namespace Percolator.Infrastructure.Cryptography
                 RemotePeerId = pending.RemotePeerId.Value,
                 ProtocolVersion = pending.ProtocolVersion.Value,
                 Invitation = pending.Invitation.Value,
-                RequestCorrelationId = pending.RequestCorrelationId,
+                RequestCorrelationId = pending.RequestCorrelationId?.ToString(),
                 IsRelayed = pending.IsRelayed,
                 InviterIdentityKey = pending.InviterIdentityKey?.Value,
                 CallbackEndpointHost = pending.CallbackEndpointHost,
@@ -106,12 +106,21 @@ namespace Percolator.Infrastructure.Cryptography
                 ? null
                 : new RatchetIdentityKey(row.InviterIdentityKey);
 
+            if (string.IsNullOrWhiteSpace(row.RequestCorrelationId)
+                || !Guid.TryParse(row.RequestCorrelationId, out var correlationGuid)
+                || correlationGuid == Guid.Empty)
+            {
+                throw new InvalidOperationException("Pending session row has missing/invalid request_correlation_id. Purge outdated pending sessions.");
+            }
+
+            var correlationId = new RequestCorrelationId(correlationGuid);
+
             var pending = PendingSession.FromInvitationWithMetadata(
                 id,
                 remote,
                 ver,
                 invitation,
-                requestCorrelationId: row.RequestCorrelationId,
+                requestCorrelationId: correlationId,
                 isRelayed: row.IsRelayed,
                 inviterIdentityKey: inviterKey,
                 callbackEndpointHost: row.CallbackEndpointHost,

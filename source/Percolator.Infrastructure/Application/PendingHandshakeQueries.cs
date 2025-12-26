@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using System.Security.Cryptography;
 using Percolator.Application.Cryptography;
 using Percolator.Cryptography;
+using Percolator.Cryptography.Primitives;
 using Percolator.Infrastructure.Cryptography;
 using Percolator.Infrastructure.Identity;
 using Percolator.Infrastructure.Persistence;
@@ -50,6 +51,13 @@ public class PendingHandshakeQueries : IPendingHandshakeQueries
             var peerName = row.PeerDisplayName
                            ?? row.RemotePeerId.ToString()[..8];
 
+            if (string.IsNullOrWhiteSpace(row.RequestCorrelationId)
+                || !Guid.TryParse(row.RequestCorrelationId, out var correlationGuid)
+                || correlationGuid == Guid.Empty)
+            {
+                throw new InvalidOperationException("Pending session row has missing/invalid request_correlation_id. Purge outdated pending sessions.");
+            }
+
             string? inviterFingerprintHex = null;
             if (row.InviterIdentityKey is not null && row.InviterIdentityKey.Length > 0)
             {
@@ -61,7 +69,7 @@ public class PendingHandshakeQueries : IPendingHandshakeQueries
                 Id = new PendingSessionId(row.Id),
                 RemotePeer = new PeerId(row.RemotePeerId),
                 PeerName = peerName,
-                RequestCorrelationId = row.RequestCorrelationId,
+                RequestCorrelationId = new RequestCorrelationId(correlationGuid),
                 InviterFingerprintHex = inviterFingerprintHex,
                 CreatedAtUtc = row.CreatedAtUtc,
                 ExpiresAtUtc = row.ExpiresAtUtc

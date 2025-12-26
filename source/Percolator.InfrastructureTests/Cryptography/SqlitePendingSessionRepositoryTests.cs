@@ -7,6 +7,8 @@ using Microsoft.EntityFrameworkCore;
 using NUnit.Framework;
 using Percolator.Application.Identity;
 using Percolator.Cryptography;
+using Percolator.Cryptography;
+using Percolator.Cryptography.Primitives;
 using Percolator.Identity;
 using Percolator.Identity.Model;
 using Percolator.Infrastructure.Cryptography;
@@ -52,7 +54,7 @@ public sealed class SqlitePendingSessionRepositoryTests
             PeerId.NewId(),
             new ProtocolVersion(1),
             new HandshakeInvitation(new byte[] { 1, 2, 3 }),
-            requestCorrelationId: "corr-1",
+            requestCorrelationId: new RequestCorrelationId(Guid.Parse("11111111-1111-1111-1111-111111111111")),
             isRelayed: false,
             inviterIdentityKey: new RatchetIdentityKey(new byte[] { 9, 9, 9 }),
             callbackEndpointHost: "example.com",
@@ -70,6 +72,6 @@ public sealed class SqlitePendingSessionRepositoryTests
         Assert.That(loaded.InviterIdentityKey!.Value, Is.EqualTo(new byte[] { 9, 9, 9 }));
         Assert.That(loaded.CallbackEndpointHost, Is.EqualTo("example.com"));
         Assert.That(loaded.CallbackEndpointPort, Is.EqualTo(443));
-        Assert.That(loaded.RequestCorrelationId, Is.EqualTo("corr-1"));
+        Assert.That(loaded.RequestCorrelationId!.Value, Is.EqualTo(new RequestCorrelationId( Guid.Parse("11111111-1111-1111-1111-111111111111"))));
     }
 }

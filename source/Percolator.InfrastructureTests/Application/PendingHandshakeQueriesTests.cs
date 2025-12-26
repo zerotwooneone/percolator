@@ -11,6 +11,7 @@ using NUnit.Framework;
 using Percolator.Application.Cryptography;
 using Percolator.Application.Identity;
 using Percolator.Cryptography;
+using Percolator.Cryptography.Primitives;
 using Percolator.Identity;
 using Percolator.Identity.Model;
 using Percolator.Infrastructure.Application;
@@ -63,7 +64,7 @@ public sealed class PendingHandshakeQueriesTests
             PeerId.NewId(),
             new ProtocolVersion(1),
             new HandshakeInvitation(new byte[] { 9 }),
-            requestCorrelationId: "expired-1",
+            requestCorrelationId: new RequestCorrelationId(Guid.Parse("33333333-3333-3333-3333-333333333333")),
             isRelayed: false,
             inviterIdentityKey: new RatchetIdentityKey(inviterKeyBytes),
             callbackEndpointHost: "example.com",
@@ -76,7 +77,7 @@ public sealed class PendingHandshakeQueriesTests
             PeerId.NewId(),
             new ProtocolVersion(1),
             new HandshakeInvitation(new byte[] { 8 }),
-            requestCorrelationId: "corr-1",
+            requestCorrelationId: new RequestCorrelationId(Guid.Parse("11111111-1111-1111-1111-111111111111")),
             isRelayed: false,
             inviterIdentityKey: new RatchetIdentityKey(inviterKeyBytes),
             callbackEndpointHost: "example.com",
@@ -97,7 +98,7 @@ public sealed class PendingHandshakeQueriesTests
 
         results.Should().HaveCount(1);
         results[0].Id.Should().Be(open.Id);
-        results[0].RequestCorrelationId.Should().Be("corr-1");
+        results[0].RequestCorrelationId.Value.Should().Be(Guid.Parse("11111111-1111-1111-1111-111111111111"));
         results[0].InviterFingerprintHex.Should().Be(expectedFingerprintHex);
         results[0].ExpiresAtUtc.Should().Be(open.ExpiresAtUtc);
         results[0].PeerName.Should().NotBeNullOrWhiteSpace();

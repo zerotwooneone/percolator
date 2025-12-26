@@ -6,6 +6,7 @@ using Microsoft.Extensions.Logging;
 using Percolator.Application.Ingress;
 using Percolator.Contracts;
 using Percolator.Prekey.Handlers;
+using Percolator.Cryptography.Primitives;
 
 namespace Percolator.Application.Network
 {
@@ -42,9 +43,10 @@ namespace Percolator.Application.Network
                 throw new RpcException(new Status(StatusCode.InvalidArgument, "payload_signature is required."));
             }
 
+            RequestCorrelationId requestCorrelationId;
             try
             {
-                await _establishService.QueueInviteAsync(
+                requestCorrelationId = await _establishService.QueueInviteAsync(
                         request.InviterIdentityKey.ToByteArray(),
                         request.Payload.ToByteArray(),
                         request.PayloadSignature.ToByteArray(),
@@ -59,7 +61,11 @@ namespace Percolator.Application.Network
             return new EstablishDirectSessionResponse
             {
                 Version = 1,
-                Queued = new EstablishDirectSessionResponse.Types.Queued { Version = 1 }
+                Queued = new EstablishDirectSessionResponse.Types.Queued
+                {
+                    Version = 1,
+                    RequestCorrelationId = requestCorrelationId.ToString()
+                }
             };
         }
 

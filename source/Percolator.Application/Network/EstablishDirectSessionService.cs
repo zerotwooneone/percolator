@@ -15,18 +15,6 @@ using PeerId = Percolator.Cryptography.Primitives.PeerId;
 
 namespace Percolator.Application.Network
 {
-    /// <summary>
-    /// Used to create a pending session in the reverse signal flow
-    /// </summary>
-    public interface IEstablishDirectSessionService
-    {
-        Task QueueInviteAsync(
-            byte[] inviterIdentityKeySpki,
-            byte[] payloadBytes,
-            byte[] payloadSignatureBytes,
-            CancellationToken cancellationToken);
-    }
-
     internal sealed class EstablishDirectSessionService : IEstablishDirectSessionService
     {
         private readonly ILogger<EstablishDirectSessionService> _logger;
@@ -61,7 +49,7 @@ namespace Percolator.Application.Network
             _callbackEndpointValidator = callbackEndpointValidator;
         }
 
-        public async Task QueueInviteAsync(
+        public async Task<RequestCorrelationId> QueueInviteAsync(
             byte[] inviterIdentityKeySpki,
             byte[] payloadBytes,
             byte[] payloadSignatureBytes,
@@ -112,6 +100,21 @@ namespace Percolator.Application.Network
                 throw new InvalidOperationException("request_correlation_id is required.");
             }
 
+            RequestCorrelationId requestCorrelationId;
+            try
+            {
+                if (!Guid.TryParse(payload.RequestCorrelationId, out var correlationGuid) || correlationGuid == Guid.Empty)
+                {
+                    throw new InvalidOperationException("request_correlation_id must be a non-empty GUID.");
+                }
+
+                requestCorrelationId = new RequestCorrelationId(correlationGuid);
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException(ex.Message);
+            }
+
             if (payload.ExpiresAtUtc is null)
             {
                 throw new InvalidOperationException("expires_at_utc is required.");
@@ -126,7 +129,8 @@ namespace Percolator.Application.Network
             // Replay/DoS: reject duplicates until expiry
             await foreach (var existing in _pendingSessions.EnumerateAsync(cancellationToken).ConfigureAwait(false))
             {
-                if (string.Equals(existing.RequestCorrelationId, payload.RequestCorrelationId, StringComparison.Ordinal))
+                if (existing.RequestCorrelationId is not null
+                    && existing.RequestCorrelationId == requestCorrelationId)
                 {
                     if (!existing.IsExpiredAt(_clock.UtcNow))
                     {
@@ -205,7 +209,7 @@ namespace Percolator.Application.Network
                 new PeerId(identity.Id.Value),
                 protocolVersion,
                 invitation,
-                requestCorrelationId: payload.RequestCorrelationId,
+                requestCorrelationId: requestCorrelationId,
                 isRelayed: false,
                 inviterIdentityKey: inviterIdentityKey,
                 callbackEndpointHost: payload.InviterHost,
@@ -215,6 +219,8 @@ namespace Percolator.Application.Network
 
             await _pendingSessions.AddAsync(pending, cancellationToken).ConfigureAwait(false);
             await _mediator.Publish(new PendingSessionCreatedNotification(pending.Id), cancellationToken).ConfigureAwait(false);
+
+            return requestCorrelationId;
         }
     }
 }
