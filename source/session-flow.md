@@ -155,13 +155,15 @@ SQLite (Inviter, SentInvitations)
 
 | Column                     | Type     | Description                                                       |
 | -------------------------- | -------- | ----------------------------------------------------------------- |
-| request_correlation_id        | VARCHAR  | Primary Key. Inviter-generated id for correlation.               |
-| target_user_id             | VARCHAR  | Who the invite is for (e.g., the acceptor).                                |
-| inviter_one_time_private_key | BLOB     | Only if an OTK was published; encrypted at rest; short‑lived.     |
+| request_correlation_id     | VARCHAR  | Primary Key. Inviter-generated id for correlation.                |
+| inviter_signed_pre_key_id  | UUID     | Inviter-local id of the signed pre-key used for this invite.      |
+| inviter_one_time_pre_key_id| UUID     | Inviter-local id of the reserved/used OTK (nullable).             |
+| target_peer_id             | UUID     | Who the invite is for (nullable depending on send path).          |
 | created_at                 | DATETIME | For cleanup.                                                      |
+| expires_at_utc             | DATETIME | TTL/expiry for cleanup.                                           |
 
 Security
-- Only persist a one-time key private part if required by implementation; encrypt at rest and purge on response.
+- Do not persist any private key material in SentInvitations.
 - parse payload only after verification
 - verify pre_key_signature using the same inviter_identity_key over inviter_signed_pre_key
 - validate host/port under policy (allow_LAN, port range, etc.)
