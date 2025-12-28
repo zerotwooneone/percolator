@@ -137,6 +137,7 @@ Deliverables:
 
 - Define an explicit OTK state machine (DDD): a one-time pre-key can only be in a small number of states.
 - Repository interface hides implementation details (generate-on-demand vs pre-generated pools).
+- Extend the self-prekey repository API to support correlation-id-based reservation, consumption, purge, and reservation burn.
 
 OTK states (explicit):
 
@@ -161,7 +162,21 @@ Required capabilities:
 - Reserved OTKs awaiting acceptance:
   - When creating a reverse-signal invitation that includes an OTK public key, reserve an OTK by `request_correlation_id` until invite expiry.
   - Reservation must prevent reuse for another invite/handshake.
-  - On expiry or explicit burn, the OTK must transition to a terminal state and be unrecoverable.
+  - On expiry or explicit burn/release, the OTK must transition to a terminal state and be unrecoverable.
+
+Important boundary (inviter-side):
+
+- OTK reservation and release are keyed only by `request_correlation_id`.
+- The *inviter* stores any OTK identifiers (if any exist) locally; the invite payload must not be relied upon as the source of truth.
+- Releasing a reservation must not leak private key material (delete/burn only).
+
+Required API shape (domain interface):
+
+- `ISelfPreKeyBundleRepository` must support:
+  - reserve: `TryReserveOneTimePreKeyAsync(selfIdentityId, requestCorrelationId, reservedUntilUtc, ...)`
+  - consume: `TryConsumeReservedOneTimePreKeyPrivateAsync(selfIdentityId, requestCorrelationId, nowUtc, ...)`
+  - purge: `PurgeExpiredReservedOneTimePreKeysAsync(selfIdentityId, nowUtc, ...)`
+  - burn/release: a correlation-id-based delete that does not return secrets (required by Chunk 4 purge).
 
 Invariants:
 
@@ -183,22 +198,38 @@ Intent: Treat inviter-side invitation tracking as a first-class domain concern.
 
 Deliverables:
 
+- Implement `SentInvitations` as a Cryptography-domain concern:
+  - domain model + repository interface live in `Percolator.Cryptography`.
+  - persistence implementation lives in `Percolator.Infrastructure`.
+
 - Persist `SentInvitations` for reverse-signal invites (inviter side) keyed by `request_correlation_id`.
 - `SentInvitations` stores only the minimal data required to finalize later:
   - `request_correlation_id`
   - `signed_pre_key_id`
-  - optional `one_time_pre_key_id`
+  - optional `one_time_pre_key_id` (inviter-local)
   - `created_at`, `expires_at_utc`
   - target peer identity reference (if available)
 
 - Add explicit purge rules:
   - expired invitations are deleted;
-  - deletion of an invitation triggers release/expiry of any reserved OTK (if still reserved).
+  - deletion of an invitation triggers burn/release of any reserved OTK bound to the same `request_correlation_id` (if still reserved).
 
 Invariants:
 
 - `request_correlation_id` must be unique until expiry.
 - If an OTK is used for an invite, it must be reserved for that invite until acceptance/expiry.
+- Purge/delete must not leave reserved OTKs in a leaked/limbo state.
+
+Required capabilities (domain API shape):
+
+- `ISentInvitationRepository`:
+  - upsert/save by `request_correlation_id`
+  - get/try-get by `request_correlation_id`
+  - enumerate expired by `expires_at_utc`
+  - delete by `request_correlation_id`
+
+- `ISelfPreKeyBundleRepository` (Chunk 3 extension required by this chunk):
+  - add a reservation release/burn API keyed by `request_correlation_id` that deletes reserved key material without returning it.
 
 Required tests:
 
@@ -225,6 +256,16 @@ Deliverables:
 - Update inviter-side domain logic so `SentInvitations` is the sole source of truth for:
   - which signed pre-key id was used
   - which one-time pre-key id was reserved/used (if any)
+
+Clarification (ordering):
+
+- Chunk 4 establishes the inviter-local persistence and purge semantics.
+- Chunk 5 is the contract cutover that removes the last remaining temptation to depend on key IDs in the transmitted invite payload.
+
+Security rationale (explicit):
+
+- The acceptor must be able to complete the protocol using only public key material + signatures + `request_correlation_id`.
+- The inviter uses `SentInvitations` for any local identifier lookups during finalization; IDs are not transmitted.
 
 - Update `session-flow.md` Part 2 to match this design (IDs not transmitted).
 
