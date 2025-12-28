@@ -34,9 +34,17 @@ Compilation constraint:
 
 - Chunks do not need to compile between chunks. Each chunk is intentionally large.
 
+Domain direction note (new):
+
+- One-time pre-keys (OTKs) are modeled as an explicit state machine behind a repository interface.
+- Prefer generating OTKs at the time they are needed, but allow persistence for:
+  - published OTKs (standard signal flow), and
+  - reserved OTKs awaiting reverse-signal acceptance.
+- Avoid secret sprawl: invitation records should store correlation and identifiers, not raw private key bytes, unless a dedicated key store is not present.
+
 ---
 
-## Chunk 1 — Protocol cutover foundations: reverse-signal pending-handshake model + validation + query surface
+## Chunk 1 — Protocol cutover foundations: reverse-signal pending-handshake model + validation + query surface (COMPLETE)
 
 Intent: Establish the domain/application foundations required by `session-flow.md` reverse-signal:
 
@@ -74,7 +82,7 @@ Required tests (must follow `unit-testing.md`):
 
 ---
 
-## Chunk 2 — Reverse-signal wire protocol implementation: contracts + ingress mapping (remote peer → local pending)
+## Chunk 2 — Reverse-signal wire protocol implementation: contracts + ingress mapping (remote peer → local pending) (COMPLETE)
 
 Intent: Make the wire model explicit and implement the *ingress* side of reverse-signal:
 
@@ -121,7 +129,118 @@ Required tests (must follow `unit-testing.md`):
 
 ---
 
-## Chunk 3 — Approval orchestration (application): approve pending handshake → upsert routing profile → send `InviteHandshakeResponse`
+## Chunk 3 — Domain: OTK lifecycle model + reservation semantics (NEW)
+
+Intent: Make OTK handling correct and secure before further protocol/UI work.
+
+Deliverables:
+
+- Define an explicit OTK state machine (DDD): a one-time pre-key can only be in a small number of states.
+- Repository interface hides implementation details (generate-on-demand vs pre-generated pools).
+
+OTK states (explicit):
+
+- `Available`: exists locally, not published, not reserved.
+- `Published`: public portion has been published for the standard Signal flow.
+- `Reserved`: bound to a single `request_correlation_id` until an `expires_at_utc`.
+- `Consumed`: private material has been used to complete X3DH; cannot be reused.
+- `Expired`: reservation/publication window elapsed; key material must be unrecoverable.
+
+Persistence note (initial):
+
+- For now, only `Reserved` and `Published` must be persisted in the database.
+- `Available` generation is on-demand.
+- `Consumed` and `Expired` can be represented as deletions/tombstones as long as invariants remain testable.
+
+Required capabilities:
+
+- Published OTKs:
+  - OTKs that have been published for the standard Signal flow.
+  - Private material exists only as long as required by policy and is protected at rest.
+
+- Reserved OTKs awaiting acceptance:
+  - When creating a reverse-signal invitation that includes an OTK public key, reserve an OTK by `request_correlation_id` until invite expiry.
+  - Reservation must prevent reuse for another invite/handshake.
+  - On expiry or explicit burn, the OTK must transition to a terminal state and be unrecoverable.
+
+Invariants:
+
+- An OTK private key must be consumable at most once.
+- An OTK cannot be used concurrently for multiple invitations.
+- Expiration/purge is mandatory and must be testable.
+
+Required tests:
+
+- Reserving an OTK by `request_correlation_id` prevents re-reservation.
+- Consuming a reserved OTK succeeds once and fails thereafter.
+- Expired reservations are purged and cannot be consumed.
+
+---
+
+## Chunk 4 — Domain: SentInvitations + inviter-side finalization prerequisites (NEW)
+
+Intent: Treat inviter-side invitation tracking as a first-class domain concern.
+
+Deliverables:
+
+- Persist `SentInvitations` for reverse-signal invites (inviter side) keyed by `request_correlation_id`.
+- `SentInvitations` stores only the minimal data required to finalize later:
+  - `request_correlation_id`
+  - `signed_pre_key_id`
+  - optional `one_time_pre_key_id`
+  - `created_at`, `expires_at_utc`
+  - target peer identity reference (if available)
+
+- Add explicit purge rules:
+  - expired invitations are deleted;
+  - deletion of an invitation triggers release/expiry of any reserved OTK (if still reserved).
+
+Invariants:
+
+- `request_correlation_id` must be unique until expiry.
+- If an OTK is used for an invite, it must be reserved for that invite until acceptance/expiry.
+
+Required tests:
+
+- `SentInvitations` upsert/lookup by `request_correlation_id` round-trips correctly.
+- Finalization lookup fails safely when correlation is missing/expired.
+
+- Purge test: expired `SentInvitations` are removed and reserved OTKs are not left in a reservable-but-leaked state.
+
+---
+
+## Chunk 5 — Protocol cutover: pre-key IDs stay inviter-local + contract/doc alignment (NEW)
+
+Intent: Make the privacy/security tradeoff explicit and reflected in the contracts.
+
+Deliverables:
+
+- Decision (locked): pre-key IDs stay inviter-local.
+
+- Update protocol/contracts so `InviteHandshakePreKeyBundle` does NOT include:
+  - `inviter_signed_pre_key_id`
+  - `inviter_one_time_pre_key_id`
+  (the invite still may include the OTK public key bytes when used).
+
+- Update inviter-side domain logic so `SentInvitations` is the sole source of truth for:
+  - which signed pre-key id was used
+  - which one-time pre-key id was reserved/used (if any)
+
+- Update `session-flow.md` Part 2 to match this design (IDs not transmitted).
+
+- Update protobuf contracts and all associated parsing/validation:
+  - ingress must not require ID fields inside the invite payload;
+  - approval/orchestration must not assume IDs are present in received payload;
+  - inviter-side finalization must rely on `SentInvitations` lookups.
+
+Required tests:
+
+- Contract-level tests that ID fields are absent (and no longer required) in invite payloads.
+- Migration/compat note: old records may fail fast and should be purged by developers.
+
+---
+
+## Chunk 6 — Approval orchestration (application): approve pending handshake → upsert routing profile → send `InviteHandshakeResponse` (DOMAIN-FIRST)
 
 Intent: Implement the acceptance behavior described in `session-flow.md` and make it the only supported acceptance path.
 
@@ -140,7 +259,8 @@ Deliverables:
   - Load pending by id.
   - Enforce expiry.
   - Parse stored invitation blob as `InviteHandshakeRequest`.
-  - Perform X3DH initiator work for the local user (Bob) using Alice’s provided pre-key bundle.
+  - Perform X3DH initiator work for the local user (Bob) using the inviter-provided pre-key material (public keys + signatures).
+  - Do not assume any pre-key IDs are present in the invite payload (IDs stay inviter-local).
   - Construct `InviteHandshakeResponse { request_correlation_id, bob_identity_key, bob_x3dh_ephemeral_key, initial_ratchet_message }`.
   - Enforce routing/profile mutation boundary:
     - direct invites: re-validate callback endpoint and then upsert endpoint to inviter `PeerRoutingProfile` before sending.
@@ -165,7 +285,7 @@ Required tests:
 
 ---
 
-## Chunk 4 — Dev-mode outbound message tap: make outgoing network messages observable to the simulator
+## Chunk 7 — Dev-mode outbound message tap: make outgoing network messages observable to the simulator
 
 Intent: Allow the simulator to observe outbound messages so it can emulate other peers and validate protocol behavior, while guaranteeing that production builds do not expose sensitive payloads.
 
@@ -206,7 +326,7 @@ Required tests:
 
 ---
 
-## Chunk 5 — WPF acceptance UX: approve pending handshake via application orchestration and show results
+## Chunk 8 — WPF acceptance UX: approve pending handshake via application orchestration and show results
 
 Intent: Ensure the WPF UI does not bypass application orchestration and that acceptance behavior is testable.
 
@@ -230,7 +350,7 @@ Required tests:
 
 ---
 
-## Chunk 6 — Relay UX + local resolution: show relay path as a transport property (no protocol changes)
+## Chunk 9 — Relay UX + local resolution: show relay path as a transport property (no protocol changes)
 
 Intent: Keep relay strictly as a transport-path indicator while making it visible in UX and simulator.
 
@@ -246,7 +366,7 @@ Required tests:
 
 ---
 
-## Chunk 7 — Simulator: multi-peer state machine + inbound request generation + outbound correlation (dev-mode)
+## Chunk 10 — Simulator: multi-peer state machine + inbound request generation + outbound correlation (dev-mode)
 
 Intent: Dev-only simulator that can simulate any number of peers, generate inbound reverse-signal invites, approve them locally, and observe outbound responses.
 
@@ -257,17 +377,12 @@ Deliverables:
   - Simulator can add/remove peers dynamically.
 
 - Inbound request generation:
-  - Simulate a remote peer creating a valid `InviteHandshakeRequest` (including:
-    - `alice_identity_key`
-    - signed `payload`
-    - `request_correlation_id`
-    - expiry
-    - endpoint)
+  - Simulate a remote peer creating a valid reverse-signal invite.
   - Deliver the request to the local node using the real ingress path (preferred) or a dev-only injection port (fallback).
 
 - Outbound correlation:
   - Subscribe to the dev-mode outbound message tap.
-  - Route outbound `InviteHandshakeResponse` to the matching simulated peer by `request_correlation_id`.
+  - Correlate outbound `InviteHandshakeResponse` by `request_correlation_id`.
   - Update simulator state and display “handshake completed” vs failures.
 
 Required tests:
@@ -287,9 +402,8 @@ Exit criteria:
 
 ## Potential deletions (you delete; do not leave dead code)
 
-Delete when Chunk 3 + Chunk 5 are complete:
+Delete when Chunk 6 + Chunk 8 are complete:
 
-- Delete `ReverseSignalAcceptService.AcceptAsync(...)` handshake-initiator-hello parsing + `SendPreEncryptedAsync` flow.
 - Delete any remaining reverse-signal acceptance code paths that depend on `HandshakeInitiatorHello` or “pre-encrypted responder hello”.
 - Delete the WPF-side TODO accept implementation in `PendingHandshakesMenuViewModel` that reads `IPendingSessionRepository` directly.
 
