@@ -28,6 +28,10 @@ public sealed class SentInvitation
         {
             throw new ArgumentException("signedPreKeyId must be a non-empty GUID.", nameof(signedPreKeyId));
         }
+        if (oneTimePreKeyId.HasValue && oneTimePreKeyId.Value == Guid.Empty)
+        {
+            throw new ArgumentException("oneTimePreKeyId must be null or a non-empty GUID.", nameof(oneTimePreKeyId));
+        }
         if (expiresAtUtc <= createdAtUtc)
         {
             throw new ArgumentException("expiresAtUtc must be greater than createdAtUtc.", nameof(expiresAtUtc));
