@@ -440,13 +440,11 @@ message ReverseSignalCallbackEndpoint {
 message InviteHandshakePreKeyBundle {
   optional uint32 version = 1;
 
-  reserved 2;
-  reserved 5;
 
-  optional bytes inviter_signed_pre_key = 3;
-  optional bytes pre_key_signature = 4;
+  optional bytes inviter_signed_pre_key = 2;
+  optional bytes pre_key_signature = 3;
 
-  optional bytes inviter_one_time_pre_key = 6;
+  optional bytes inviter_one_time_pre_key = 4;
 }
 
 message InviteHandshakeRequestPayload {

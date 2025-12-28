@@ -157,6 +157,8 @@ public partial class App : Application
         using (var scope = HostInstance.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<PercolatorDbContext>();
+            
+            //dev note: change this to db.Database.EnsureCreated(); when using a new db file
             db.Database.Migrate();
         }
 
