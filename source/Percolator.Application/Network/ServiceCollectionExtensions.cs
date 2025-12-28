@@ -107,6 +107,9 @@ public static class ServiceCollectionExtensions
         services.Configure<ReverseSignalOptions>(configuration.GetSection(ReverseSignalOptions.SectionName));
         services.AddScoped<ICallbackEndpointValidator, CallbackEndpointValidator>();
 
+        services.Configure<SimulatorWireTapOptions>(configuration.GetSection(SimulatorWireTapOptions.SectionName));
+        services.AddSingleton<IOutboundMessageWireTap, OutboundMessageWireTap>();
+
         services.AddScoped<IInviteHandshakeResponseDeliveryService, InviteHandshakeResponseDeliveryService>();
 
         // Register the hosted service that runs the discovery (can be disabled in tests)

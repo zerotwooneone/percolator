@@ -19,19 +19,22 @@ namespace Percolator.Application.Network
         private readonly ISecureMessagingService _secureMessaging;
         private readonly ActiveIdentityContext _active;
         private readonly INetworkSender _networkSender;
+        private readonly IOutboundMessageWireTap _wireTap;
 
         public MessageService(
             ILogger<MessageService> logger,
             IDirectSessionRepository sessions,
             ISecureMessagingService secureMessaging,
             ActiveIdentityContext active,
-            INetworkSender networkSender)
+            INetworkSender networkSender,
+            IOutboundMessageWireTap wireTap)
         {
             _logger = logger;
             _sessions = sessions;
             _secureMessaging = secureMessaging;
             _active = active;
             _networkSender = networkSender;
+            _wireTap = wireTap;
         }
 
         public async Task<(SendResult Result, DeliverOpaqueMessageResponse? Response)> SendMessageWithResponseAsync(
@@ -52,9 +55,36 @@ namespace Percolator.Application.Network
             var sessionId = new SessionId(ds.SessionId.Value);
             var cipher = await _secureMessaging.EncryptAsync(sessionId, new Plaintext(envelope.ToByteArray()), ct).ConfigureAwait(false);
 
+            if (_wireTap.Enabled)
+            {
+                if (_wireTap.Mode == SimulatorOutboundMode.SimulateOnly)
+                {
+                    const string sendPath = "Simulated";
+                    _wireTap.Tap(new OutboundWireMessage(
+                        DestinationPeerId: new Percolator.Network.PeerId(recipientPeerId.Value),
+                        SendPath: sendPath,
+                        MessageType: "EncryptedEnvelope",
+                        RequestCorrelationId: null,
+                        PayloadBytes: cipher.Value,
+                        PayloadLength: cipher.Value.Length));
+                    return (SendResult.CreateSuccess(sendPath, new[] { sendPath }, attempts: 0), null);
+                }
+            }
+
             var outcome = await _networkSender
                 .SendAsync(new Percolator.Network.PeerId(recipientPeerId.Value), new NetworkPayload(cipher.Value), SendStrategy.DirectThenRelay, ct)
                 .ConfigureAwait(false);
+
+            if (_wireTap.Enabled)
+            {
+                _wireTap.Tap(new OutboundWireMessage(
+                    DestinationPeerId: new Percolator.Network.PeerId(recipientPeerId.Value),
+                    SendPath: outcome.Path,
+                    MessageType: "EncryptedEnvelope",
+                    RequestCorrelationId: null,
+                    PayloadBytes: cipher.Value,
+                    PayloadLength: cipher.Value.Length));
+            }
 
             if (!outcome.Success)
             {
@@ -83,10 +113,37 @@ namespace Percolator.Application.Network
             if (_active.Identity is null)
                 throw new InvalidOperationException("Active identity not initialized");
 
+            if (_wireTap.Enabled)
+            {
+                if (_wireTap.Mode == SimulatorOutboundMode.SimulateOnly)
+                {
+                    const string sendPath = "Simulated";
+                    _wireTap.Tap(new OutboundWireMessage(
+                        DestinationPeerId: new Percolator.Network.PeerId(recipientPeerId.Value),
+                        SendPath: sendPath,
+                        MessageType: "EncryptedEnvelope",
+                        RequestCorrelationId: null,
+                        PayloadBytes: cipher.Value,
+                        PayloadLength: cipher.Value.Length));
+                    return SendResult.CreateSuccess(sendPath, new[] { sendPath }, attempts: 0);
+                }
+            }
+
             // Use Network domain sender with DirectThenRelay strategy. Payload must be the recipient-targeted DR ciphertext.
             var target = new Percolator.Network.PeerId(recipientPeerId.Value);
             var payload = new NetworkPayload(cipher.Value);
             var outcome = await _networkSender.SendAsync(target, payload, SendStrategy.DirectThenRelay, ct).ConfigureAwait(false);
+
+            if (_wireTap.Enabled)
+            {
+                _wireTap.Tap(new OutboundWireMessage(
+                    DestinationPeerId: target,
+                    SendPath: outcome.Path,
+                    MessageType: "EncryptedEnvelope",
+                    RequestCorrelationId: null,
+                    PayloadBytes: cipher.Value,
+                    PayloadLength: cipher.Value.Length));
+            }
 
             if (outcome.Success)
             {
@@ -109,9 +166,37 @@ namespace Percolator.Application.Network
 
             var sessionId = new SessionId(ds.SessionId.Value);
             var cipher = await _secureMessaging.EncryptAsync(sessionId, new Plaintext(envelope.ToByteArray()), ct).ConfigureAwait(false);
+
+            if (_wireTap.Enabled)
+            {
+                if (_wireTap.Mode == SimulatorOutboundMode.SimulateOnly)
+                {
+                    const string sendPath = "Simulated";
+                    _wireTap.Tap(new OutboundWireMessage(
+                        DestinationPeerId: new Percolator.Network.PeerId(recipientPeerId.Value),
+                        SendPath: sendPath,
+                        MessageType: "EncryptedEnvelope",
+                        RequestCorrelationId: null,
+                        PayloadBytes: cipher.Value,
+                        PayloadLength: cipher.Value.Length));
+                    return SendResult.CreateSuccess(sendPath, new[] { sendPath }, attempts: 0);
+                }
+            }
+
             var outcome = await _networkSender
                 .SendAsync(new Percolator.Network.PeerId(recipientPeerId.Value), new NetworkPayload(cipher.Value), SendStrategy.DirectThenRelay, ct)
                 .ConfigureAwait(false);
+
+            if (_wireTap.Enabled)
+            {
+                _wireTap.Tap(new OutboundWireMessage(
+                    DestinationPeerId: new Percolator.Network.PeerId(recipientPeerId.Value),
+                    SendPath: outcome.Path,
+                    MessageType: "EncryptedEnvelope",
+                    RequestCorrelationId: null,
+                    PayloadBytes: cipher.Value,
+                    PayloadLength: cipher.Value.Length));
+            }
 
             if (outcome.Success)
             {
