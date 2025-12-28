@@ -38,7 +38,7 @@ namespace Percolator.Application.Network
         private readonly IHandshakePlanner _handshakePlanner;
         private readonly ISessionRepository _sessions;
         private readonly IPeerRoutingProfileRepository _profileRepository;
-        private readonly IGrpcSessionService _grpc;
+        private readonly IInviteHandshakeResponseDeliveryService _delivery;
 
         public ApprovePendingSessionHandler(
             ILogger<ApprovePendingSessionHandler> logger,
@@ -51,7 +51,7 @@ namespace Percolator.Application.Network
             IHandshakePlanner handshakePlanner,
             ISessionRepository sessions,
             IPeerRoutingProfileRepository profileRepository,
-            IGrpcSessionService grpc)
+            IInviteHandshakeResponseDeliveryService delivery)
         {
             _logger = logger;
             _activeIdentityAccessor = activeIdentityAccessor;
@@ -63,7 +63,7 @@ namespace Percolator.Application.Network
             _handshakePlanner = handshakePlanner;
             _sessions = sessions;
             _profileRepository = profileRepository;
-            _grpc = grpc;
+            _delivery = delivery;
         }
 
         public async Task<ApprovePendingSessionResult> Handle(ApprovePendingSessionCommand request, CancellationToken cancellationToken)
@@ -122,22 +122,22 @@ namespace Percolator.Application.Network
                 return new ApprovePendingSessionResult.RejectedInvalid();
             }
 
-            if (pending.IsRelayed)
+            DnsEndPoint? directCallbackEndpoint = null;
+            if (!pending.IsRelayed)
             {
-                // Relay delivery path is not implemented yet; do not touch callback endpoint.
-                return new ApprovePendingSessionResult.RejectedNotReady();
-            }
+                if (string.IsNullOrWhiteSpace(pending.CallbackEndpointHost) || pending.CallbackEndpointPort is null)
+                {
+                    return new ApprovePendingSessionResult.RejectedInvalid();
+                }
 
-            if (string.IsNullOrWhiteSpace(pending.CallbackEndpointHost) || pending.CallbackEndpointPort is null)
-            {
-                return new ApprovePendingSessionResult.RejectedInvalid();
-            }
+                // Re-validate callback endpoint boundary before mutating routing profile.
+                var validation = _callbackEndpointValidator.Validate(pending.CallbackEndpointHost, pending.CallbackEndpointPort.Value);
+                if (!validation.IsValid)
+                {
+                    return new ApprovePendingSessionResult.RejectedInvalid();
+                }
 
-            // Re-validate callback endpoint boundary before mutating routing profile.
-            var validation = _callbackEndpointValidator.Validate(pending.CallbackEndpointHost, pending.CallbackEndpointPort.Value);
-            if (!validation.IsValid)
-            {
-                return new ApprovePendingSessionResult.RejectedInvalid();
+                directCallbackEndpoint = new DnsEndPoint(pending.CallbackEndpointHost, pending.CallbackEndpointPort.Value);
             }
 
             if (payload.InviterPreKey is null)
@@ -198,19 +198,22 @@ namespace Percolator.Application.Network
             };
             var initial = session.Encrypt(new Plaintext(inner.ToByteArray()), _clock);
 
-            // Upsert inviter routing profile with the callback endpoint before sending.
             var inviterNetPeerId = new Percolator.Network.PeerId(pending.RemotePeerId.Value);
-            var profile = await _profileRepository.GetByIdAsync(inviterNetPeerId, cancellationToken).ConfigureAwait(false)
-                ?? new PeerRoutingProfile();
-            if (profile.Id is null)
+            if (!pending.IsRelayed)
             {
-                profile.BindIdentity(inviterNetPeerId);
+                // Routing-profile mutation boundary: only on explicit acceptance of a direct invite.
+                var profile = await _profileRepository.GetByIdAsync(inviterNetPeerId, cancellationToken).ConfigureAwait(false)
+                    ?? new PeerRoutingProfile();
+                if (profile.Id is null)
+                {
+                    profile.BindIdentity(inviterNetPeerId);
+                }
+                profile.AddGrpcEndPoint(
+                    new GrpcEndPoint(directCallbackEndpoint!, _clock.UtcNow),
+                    _clock.UtcNow);
+                profile.SetIdentityPublicKey(new IdentityPublicKey(inviterIdentityKeySpki));
+                await _profileRepository.UpsertAsync(profile, cancellationToken).ConfigureAwait(false);
             }
-            profile.AddGrpcEndPoint(
-                new GrpcEndPoint(new DnsEndPoint(pending.CallbackEndpointHost, pending.CallbackEndpointPort.Value), _clock.UtcNow),
-                _clock.UtcNow);
-            profile.SetIdentityPublicKey(new IdentityPublicKey(inviterIdentityKeySpki));
-            await _profileRepository.UpsertAsync(profile, cancellationToken).ConfigureAwait(false);
 
             // Send InviteHandshakeResponse via the new RPC.
             var response = new InviteHandshakeResponse
@@ -222,21 +225,16 @@ namespace Percolator.Application.Network
                 InitialRatchetMessage = ByteString.CopyFrom(initial.Value)
             };
 
-            try
+
+            var delivery = await _delivery.DeliverAsync(inviterNetPeerId, directCallbackEndpoint, response, cancellationToken).ConfigureAwait(false);
+            if (!delivery.Success)
             {
-                _ = await _grpc.DeliverInviteHandshakeResponseAsync(
-                        new DnsEndPoint(pending.CallbackEndpointHost, pending.CallbackEndpointPort.Value),
-                        response)
-                    .ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to send InviteHandshakeResponse for pending session {PendingId}", pending.Id.Value);
-                return new ApprovePendingSessionResult.Failed(ex.Message);
+                _logger.LogWarning(delivery.Error, "Failed to send InviteHandshakeResponse for pending session {PendingId}", pending.Id.Value);
+                return new ApprovePendingSessionResult.Failed(delivery.Error?.Message ?? "Send failed");
             }
 
             await _pending.DeleteAsync(pending.Id, cancellationToken).ConfigureAwait(false);
-            return new ApprovePendingSessionResult.Accepted("direct", pending.RequestCorrelationId.Value);
+            return new ApprovePendingSessionResult.Accepted(delivery.SendPath, pending.RequestCorrelationId.Value);
         }
     }
 }

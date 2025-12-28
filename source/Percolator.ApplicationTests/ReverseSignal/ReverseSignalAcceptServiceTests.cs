@@ -83,7 +83,7 @@ namespace Percolator.ApplicationTests.ReverseSignal
                 Mock.Of<IHandshakePlanner>(),
                 Mock.Of<ISessionRepository>(),
                 Mock.Of<IPeerRoutingProfileRepository>(),
-                Mock.Of<IGrpcSessionService>());
+                Mock.Of<IInviteHandshakeResponseDeliveryService>());
 
             var result = await sut.Handle(new ApprovePendingSessionCommand(PendingSessionId.NewId()), CancellationToken.None);
             result.Should().BeOfType<ApprovePendingSessionResult.RejectedNotReady>();
@@ -137,6 +137,9 @@ namespace Percolator.ApplicationTests.ReverseSignal
             pendingRepo.Setup(r => r.GetAsync(pendingId, It.IsAny<CancellationToken>()))
                 .ReturnsAsync(pending);
 
+            pendingRepo.Setup(r => r.DeleteAsync(pendingId, It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
+
             var callbackValidator = new Mock<ICallbackEndpointValidator>(MockBehavior.Strict);
             callbackValidator.Setup(v => v.Validate("example.com", 7777))
                 .Returns(new CallbackEndpointValidationResult(true, null, false, false));
@@ -161,9 +164,13 @@ namespace Percolator.ApplicationTests.ReverseSignal
             profileRepo.Setup(r => r.UpsertAsync(It.IsAny<PeerRoutingProfile>(), It.IsAny<CancellationToken>()))
                 .Returns(Task.CompletedTask);
 
-            var grpc = new Mock<IGrpcSessionService>(MockBehavior.Strict);
-            grpc.Setup(g => g.DeliverInviteHandshakeResponseAsync(It.IsAny<DnsEndPoint>(), It.IsAny<InviteHandshakeResponse>()))
-                .ThrowsAsync(new Exception("network"));
+            var delivery = new Mock<IInviteHandshakeResponseDeliveryService>(MockBehavior.Strict);
+            delivery.Setup(d => d.DeliverAsync(
+                    It.IsAny<Percolator.Network.PeerId>(),
+                    It.IsAny<DnsEndPoint?>(),
+                    It.IsAny<InviteHandshakeResponse>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new InviteHandshakeResponseDeliveryResult(false, "Direct", new Exception("network")));
 
             var sut = new ApprovePendingSessionHandler(
                 logger,
@@ -176,7 +183,7 @@ namespace Percolator.ApplicationTests.ReverseSignal
                 planner.Object,
                 sessionRepo.Object,
                 profileRepo.Object,
-                grpc.Object);
+                delivery.Object);
 
             var result = await sut.Handle(new ApprovePendingSessionCommand(pendingId), CancellationToken.None);
             result.Should().BeOfType<ApprovePendingSessionResult.Failed>();
@@ -256,9 +263,13 @@ namespace Percolator.ApplicationTests.ReverseSignal
             profileRepo.Setup(r => r.UpsertAsync(It.IsAny<PeerRoutingProfile>(), It.IsAny<CancellationToken>()))
                 .Returns(Task.CompletedTask);
 
-            var grpc = new Mock<IGrpcSessionService>(MockBehavior.Strict);
-            grpc.Setup(g => g.DeliverInviteHandshakeResponseAsync(It.IsAny<DnsEndPoint>(), It.IsAny<InviteHandshakeResponse>()))
-                .ReturnsAsync(new DeliverInviteHandshakeResponseAck { Version = 1 });
+            var delivery = new Mock<IInviteHandshakeResponseDeliveryService>(MockBehavior.Strict);
+            delivery.Setup(d => d.DeliverAsync(
+                    It.IsAny<Percolator.Network.PeerId>(),
+                    It.IsAny<DnsEndPoint?>(),
+                    It.IsAny<InviteHandshakeResponse>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new InviteHandshakeResponseDeliveryResult(true, "Direct"));
 
             var sut = new ApprovePendingSessionHandler(
                 logger,
@@ -271,7 +282,7 @@ namespace Percolator.ApplicationTests.ReverseSignal
                 planner.Object,
                 sessionRepo.Object,
                 profileRepo.Object,
-                grpc.Object);
+                delivery.Object);
 
             var result = await sut.Handle(new ApprovePendingSessionCommand(pendingId), CancellationToken.None);
             result.Should().BeOfType<ApprovePendingSessionResult.Accepted>();
@@ -279,7 +290,7 @@ namespace Percolator.ApplicationTests.ReverseSignal
         }
 
         [Test]
-        public async Task ApprovePendingSession_WhenRelayed_ReturnsRejectedNotReady_AndDoesNotTouchCallbackOrSend()
+        public async Task ApprovePendingSession_WhenRelayed_DoesNotTouchCallbackOrRouting_AndReturnsAccepted()
         {
             var clock = new TestClock ();
             var logger = NullLogger<ApprovePendingSessionHandler>.Instance;
@@ -337,12 +348,31 @@ namespace Percolator.ApplicationTests.ReverseSignal
             pendingRepo.Setup(r => r.GetAsync(pendingId, It.IsAny<CancellationToken>()))
                 .ReturnsAsync(pending);
 
+            pendingRepo.Setup(r => r.DeleteAsync(pendingId, It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
+
             var callbackValidator = new Mock<ICallbackEndpointValidator>(MockBehavior.Strict);
             var planner = new Mock<IHandshakePlanner>(MockBehavior.Strict);
             var sessionCrypto = new Mock<ISessionCrypto>(MockBehavior.Strict);
             var sessionRepo = new Mock<ISessionRepository>(MockBehavior.Strict);
             var profileRepo = new Mock<IPeerRoutingProfileRepository>(MockBehavior.Strict);
-            var grpc = new Mock<IGrpcSessionService>(MockBehavior.Strict);
+
+            planner.Setup(p => p.ValidatePreKeyBundle(It.IsAny<Percolator.Cryptography.PreKeyBundle>()));
+            sessionCrypto.Setup(c => c.X3DH_Initiate(It.IsAny<PrivatePreKey>(), It.IsAny<Percolator.Cryptography.PreKeyBundle>()))
+                .Returns((PrivatePreKey _, Percolator.Cryptography.PreKeyBundle _) => (
+                    new SharedSecret(new byte[32]),
+                    new RatchetEphemeralKey(new byte[32])
+                ));
+            sessionRepo.Setup(r => r.AddAsync(It.IsAny<SecureSession>(), It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
+
+            var delivery = new Mock<IInviteHandshakeResponseDeliveryService>(MockBehavior.Strict);
+            delivery.Setup(d => d.DeliverAsync(
+                    It.IsAny<Percolator.Network.PeerId>(),
+                    It.Is<DnsEndPoint?>(e => e == null),
+                    It.IsAny<InviteHandshakeResponse>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new InviteHandshakeResponseDeliveryResult(true, "Relay:00000000-0000-0000-0000-000000000000"));
 
             var sut = new ApprovePendingSessionHandler(
                 logger,
@@ -355,18 +385,14 @@ namespace Percolator.ApplicationTests.ReverseSignal
                 planner.Object,
                 sessionRepo.Object,
                 profileRepo.Object,
-                grpc.Object);
+                delivery.Object);
 
             var result = await sut.Handle(new ApprovePendingSessionCommand(pendingId), CancellationToken.None);
-            result.Should().BeOfType<ApprovePendingSessionResult.RejectedNotReady>();
+            result.Should().BeOfType<ApprovePendingSessionResult.Accepted>();
 
-            pendingRepo.Verify(r => r.DeleteAsync(It.IsAny<PendingSessionId>(), It.IsAny<CancellationToken>()), Times.Never);
+            pendingRepo.Verify(r => r.DeleteAsync(pendingId, It.IsAny<CancellationToken>()), Times.Once);
             callbackValidator.VerifyNoOtherCalls();
-            planner.VerifyNoOtherCalls();
-            sessionCrypto.VerifyNoOtherCalls();
-            sessionRepo.VerifyNoOtherCalls();
             profileRepo.VerifyNoOtherCalls();
-            grpc.VerifyNoOtherCalls();
         }
     }
 }
