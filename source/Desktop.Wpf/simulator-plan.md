@@ -326,44 +326,49 @@ Required tests:
 
 ---
 
-## Chunk 7 — Dev-mode outbound message tap: make outgoing network messages observable to the simulator
+## Chunk 7 — Dev-mode outbound interception: allow the simulator to emulate remote peers
 
-Intent: Allow the simulator to observe outbound messages so it can emulate other peers and validate protocol behavior, while guaranteeing that production builds do not expose sensitive payloads.
+Intent: The simulator is not a passive observer. It can emulate **any number of remote peers**. To do that, the application must expose a dev-only outbound interception mechanism that can either:
+
+- mirror real outbound sends into the simulator, or
+- bypass the real network and route outbound traffic only into the simulator.
 
 Deliverables:
 
 - Define a single configuration switch for the entire feature, e.g. `SimulatorWireTapOptions.Enabled` (default `false`).
-- The wire tap must be enabled only when the development/simulator flag is on, and must be disabled by default.
+- Add an explicit outbound interception mode, e.g. `SimulatorWireTapOptions.Mode`:
+  - `Mirror`: perform the real send, and also emit a simulator outbound event.
+  - `SimulateOnly`: do not perform the real send; emit a simulator outbound event and treat it as “sent”.
 
-- Introduce a dev-only outbound wire tap port/event stream (application-level), exposed as an interface such as `IOutboundMessageWireTap`.
+- Introduce a dev-only outbound interception port/event stream (application-level), exposed as an interface such as `IOutboundMessageWireTap`.
 
-- Instrument exactly once per outbound message at the point where:
+- Emit exactly once per outbound message at the point where:
   - the destination `PeerId` is known,
   - the chosen route (`SendPath`: direct vs relay) is known,
   - and the final outbound payload bytes are available.
-  Do not emit multiple wire-tap events for internal retries unless you include an explicit attempt counter.
+  The event must be emitted regardless of whether the real send succeeds or fails (when in `Mirror`), so the simulator can remain authoritative for its emulated peers.
 
-- Wire-tap event contract:
+- Event contract:
   - When enabled, emit an `OutboundWireMessage` containing:
     - destination peer id
-    - transport path used (direct vs relay)
+    - transport path used (e.g., `Direct`, `Relay:<peer>`, or `Simulated`)
     - optional `request_correlation_id` (set only when the payload is an `InviteHandshakeResponse` and can be extracted without decrypting anything else)
     - message type label (e.g., `InviteHandshakeResponse`, `EncryptedEnvelope`)
     - raw bytes payload (no logging)
     - payload length
 
 - Security/UX constraints:
-  - The wire tap must not log payload bytes.
+  - The interception mechanism must not log payload bytes.
   - The simulator UI must not assume payload bytes are safe to render.
   - UI should display metadata only (type, correlation id when present, byte length, destination, path).
 
 - Simulator usage requirement:
-  - The simulator must be able to subscribe and treat outbound events as “wire traffic” to other simulated peers.
+  - The simulator must be able to subscribe and treat outbound events as “wire traffic” to emulated peers.
 
 Required tests:
 
-- Unit test: wire tap disabled emits nothing.
-- Unit test: wire tap enabled emits an event containing the expected payload bytes and destination peer id.
+- Unit test: interception disabled emits nothing.
+- Unit test: interception enabled emits an event containing the expected payload bytes and destination peer id.
 
 ---
 
@@ -409,27 +414,34 @@ Required tests:
 
 ## Chunk 10 — Simulator: multi-peer state machine + inbound request generation + outbound correlation (dev-mode)
 
-Intent: Dev-only simulator that can simulate any number of peers, generate inbound reverse-signal invites, approve them locally, and observe outbound responses.
+Intent: Dev-only simulator that can emulate **any number of remote peers**.
+
+The simulator must be able to:
+
+- generate inbound reverse-signal invites “as if” they were produced by those peers, and
+- consume outbound interception events “as if” they were wire traffic destined for those peers.
 
 Deliverables:
 
 - Maintain an in-memory simulator peer list:
-  - Each peer has its own identity keys and pre-keys.
+  - Each simulated peer has its own identity keys and pre-keys.
   - Simulator can add/remove peers dynamically.
 
 - Inbound request generation:
   - Simulate a remote peer creating a valid reverse-signal invite.
-  - Deliver the request to the local node using the real ingress path (preferred) or a dev-only injection port (fallback).
+  - Deliver the request to the local node using the real ingress path.
+  - If the real ingress path is not reachable from the simulator process, introduce a dev-only injection port in the Application layer (explicitly marked dev-only).
 
-- Outbound correlation:
-  - Subscribe to the dev-mode outbound message tap.
+- Outbound correlation (driven by Chunk 7 interception events):
+  - Subscribe to the outbound interception stream.
   - Correlate outbound `InviteHandshakeResponse` by `request_correlation_id`.
-  - Update simulator state and display “handshake completed” vs failures.
+  - Route the event to the correct simulated peer state machine.
+  - In `SimulateOnly` mode, treat the outbound event as the authoritative “delivery” to the simulated peer.
 
 Required tests:
 
 - ViewModel test: creating N simulated peers can enqueue N pending handshakes.
-- ViewModel test: outbound observer event is correlated by `request_correlation_id` and advances the correct simulated peer state.
+- ViewModel test: outbound interception event is correlated by `request_correlation_id` and advances the correct simulated peer state.
 
 ---
 
