@@ -41,6 +41,12 @@ namespace Percolator.ApplicationIntegrationTests.ChatMessaging
                     Queued = new EstablishDirectSessionResponse.Types.Queued { Version = 1 }
                 };
             }
+
+            public async Task<DeliverInviteHandshakeResponseAck> DeliverInviteHandshakeResponseAsync(DnsEndPoint endpoint, InviteHandshakeResponse request)
+            {
+                await Task.CompletedTask;
+                return new DeliverInviteHandshakeResponseAck { Version = 1 };
+            }
         }
 
         private static async Task WaitForGroupAsync(IHost node, Guid groupGuid, int timeoutMs = 5000)

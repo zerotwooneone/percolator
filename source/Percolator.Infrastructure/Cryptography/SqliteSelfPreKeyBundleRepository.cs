@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Security.Cryptography;
 using Microsoft.EntityFrameworkCore;
 using Percolator.Application.KeyExchange;
@@ -91,6 +92,112 @@ internal sealed class SqliteSelfPreKeyBundleRepository : ISelfPreKeyBundleReposi
             await tx.RollbackAsync(ct);
             throw;
         }
+    }
+
+    public async Task<(Guid otkId, byte[] otkPublicSpki)?> TryReserveOneTimePreKeyAsync(
+        int selfIdentityId,
+        Guid requestCorrelationId,
+        DateTimeOffset reservedUntilUtc,
+        CancellationToken ct = default)
+    {
+        await using var tx = await _db.Database.BeginTransactionAsync(ct);
+        try
+        {
+            // Correlation id must be unique while reserved (duplicates rejected)
+            var existingReservation = await _db.SelfOneTimePreKeys.AsNoTracking()
+                .AnyAsync(x => x.SelfIdentityId == selfIdentityId && x.ReservedForRequestCorrelationId == requestCorrelationId, ct);
+            if (existingReservation)
+            {
+                await tx.RollbackAsync(ct);
+                return null;
+            }
+
+            // Find any unreserved OTK
+            var rec = await _db.SelfOneTimePreKeys
+                .FirstOrDefaultAsync(x => x.SelfIdentityId == selfIdentityId && x.ReservedForRequestCorrelationId == null, ct);
+            if (rec is null)
+            {
+                await tx.RollbackAsync(ct);
+                return null;
+            }
+
+            rec.ReservedForRequestCorrelationId = requestCorrelationId;
+            rec.ReservedUntilUtc = reservedUntilUtc;
+            await _db.SaveChangesAsync(ct);
+            await tx.CommitAsync(ct);
+            return (rec.OneTimePreKeyId, rec.OneTimePreKeyPublicSpki);
+        }
+        catch
+        {
+            await tx.RollbackAsync(ct);
+            throw;
+        }
+    }
+
+    public async Task<byte[]?> TryConsumeReservedOneTimePreKeyPrivateAsync(
+        int selfIdentityId,
+        Guid requestCorrelationId,
+        DateTimeOffset nowUtc,
+        CancellationToken ct = default)
+    {
+        await using var tx = await _db.Database.BeginTransactionAsync(ct);
+        try
+        {
+            var rec = await _db.SelfOneTimePreKeys
+                .FirstOrDefaultAsync(x => x.SelfIdentityId == selfIdentityId && x.ReservedForRequestCorrelationId == requestCorrelationId, ct);
+            if (rec is null)
+            {
+                await tx.RollbackAsync(ct);
+                return null;
+            }
+
+            if (rec.ReservedUntilUtc is not null && rec.ReservedUntilUtc.Value <= nowUtc)
+            {
+                // Expired reservation: delete and do not return secrets.
+                _db.SelfOneTimePreKeys.Remove(rec);
+                await _db.SaveChangesAsync(ct);
+                await tx.CommitAsync(ct);
+                return null;
+            }
+
+            var priv = Unprotect(rec.OneTimePreKeyPrivate);
+            _db.SelfOneTimePreKeys.Remove(rec);
+            await _db.SaveChangesAsync(ct);
+            await tx.CommitAsync(ct);
+            return priv;
+        }
+        catch
+        {
+            await tx.RollbackAsync(ct);
+            throw;
+        }
+    }
+
+    public async Task<int> PurgeExpiredReservedOneTimePreKeysAsync(
+        int selfIdentityId,
+        DateTimeOffset nowUtc,
+        CancellationToken ct = default)
+    {
+        // NOTE: EFCore+Sqlite can fail to translate DateTimeOffset comparisons depending on provider/version.
+        // Load reserved candidates for this identity, then perform the time comparison in-memory.
+        var reserved = await _db.SelfOneTimePreKeys
+            .Where(x => x.SelfIdentityId == selfIdentityId
+                        && x.ReservedForRequestCorrelationId != null
+                        && x.ReservedUntilUtc != null)
+            .ToListAsync(ct);
+
+        var expired = reserved
+            .Where(x => x.ReservedUntilUtc!.Value <= nowUtc)
+            .ToList();
+
+        if (expired.Count == 0)
+        {
+            return 0;
+        }
+
+        _db.SelfOneTimePreKeys.RemoveRange(expired);
+        await _db.SaveChangesAsync(ct);
+        return expired.Count;
     }
 
     private static byte[] Protect(byte[] data) => ProtectedData.Protect(data, Entropy, DataProtectionScope.CurrentUser);

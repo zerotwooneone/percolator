@@ -54,6 +54,7 @@ namespace Percolator.ApplicationTests.Network
                 InviterPreKey = new InviteHandshakePreKeyBundle
                 {
                     Version = 1,
+                    InviterSignedPreKeyId = ByteString.CopyFrom(Guid.NewGuid().ToByteArray()),
                     InviterSignedPreKey = ByteString.CopyFrom(ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256).PublicKey.ExportSubjectPublicKeyInfo()),
                     PreKeySignature = ByteString.CopyFrom(new byte[] { 1, 2, 3 })
                 },
@@ -137,6 +138,7 @@ namespace Percolator.ApplicationTests.Network
                 InviterPreKey = new InviteHandshakePreKeyBundle
                 {
                     Version = 1,
+                    InviterSignedPreKeyId = ByteString.CopyFrom(Guid.NewGuid().ToByteArray()),
                     InviterSignedPreKey = ByteString.CopyFrom(ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256).PublicKey.ExportSubjectPublicKeyInfo()),
                     PreKeySignature = ByteString.CopyFrom(new byte[] { 1, 2, 3 })
                 },
@@ -203,6 +205,7 @@ namespace Percolator.ApplicationTests.Network
                 InviterPreKey = new InviteHandshakePreKeyBundle
                 {
                     Version = 1,
+                    InviterSignedPreKeyId = ByteString.CopyFrom(Guid.NewGuid().ToByteArray()),
                     InviterSignedPreKey = ByteString.CopyFrom(ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256).PublicKey.ExportSubjectPublicKeyInfo()),
                     PreKeySignature = ByteString.CopyFrom(new byte[] { 1, 2, 3 })
                 },
@@ -286,6 +289,7 @@ namespace Percolator.ApplicationTests.Network
                 InviterPreKey = new InviteHandshakePreKeyBundle
                 {
                     Version = 1,
+                    InviterSignedPreKeyId = ByteString.CopyFrom(Guid.NewGuid().ToByteArray()),
                     InviterSignedPreKey = ByteString.CopyFrom(ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256).PublicKey.ExportSubjectPublicKeyInfo()),
                     PreKeySignature = ByteString.CopyFrom(new byte[] { 1, 2, 3 })
                 },

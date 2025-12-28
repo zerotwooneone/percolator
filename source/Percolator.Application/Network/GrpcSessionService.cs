@@ -1,4 +1,6 @@
 using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System;
 using System.Net;
 using System.Net.Security;
 using System.Security.Cryptography.X509Certificates;
@@ -38,6 +40,123 @@ namespace Percolator.Application.Network
             EstablishDirectSessionRequest request)
         {
             return await Inner_EstablishSession(endpoint, request).ConfigureAwait(false);
+        }
+
+        public async Task<DeliverInviteHandshakeResponseAck> DeliverInviteHandshakeResponseAsync(
+            DnsEndPoint endpoint,
+            InviteHandshakeResponse request)
+        {
+            string connectionKey = $"{endpoint.Host}:{endpoint.Port}";
+
+            try
+            {
+                _logger.LogInformation("Delivering InviteHandshakeResponse to {Endpoint}", endpoint);
+
+                // Clean up any existing resources if they exist
+                await CleanupConnectionResourcesAsync(connectionKey).ConfigureAwait(false);
+
+                // Determine if we're connecting to localhost
+                bool isLocalConnection = endpoint.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase) ||
+                                         IPAddress.TryParse(endpoint.Host, out var ip) &&
+                                         (IPAddress.IsLoopback(ip) || ip.Equals(IPAddress.Any));
+
+                _logger.LogInformation("Connection to {Endpoint} identified as {ConnectionType}",
+                    endpoint, isLocalConnection ? "local" : "remote");
+
+                SocketsHttpHandler handler;
+                Uri uri;
+
+                if (isLocalConnection)
+                {
+                    handler = new SocketsHttpHandler
+                    {
+                        EnableMultipleHttp2Connections = true,
+                        PooledConnectionIdleTimeout = TimeSpan.FromMinutes(5),
+                        KeepAlivePingTimeout = TimeSpan.FromSeconds(20),
+                        KeepAlivePingDelay = TimeSpan.FromSeconds(60),
+                        ConnectTimeout = TimeSpan.FromSeconds(10)
+                    };
+
+                    uri = new Uri($"http://{endpoint.Host}:{endpoint.Port}");
+                }
+                else
+                {
+                    var sharedCertificate = _certificateManager.GetServerCertificate();
+
+                    if (sharedCertificate == null)
+                    {
+                        _logger.LogError("Failed to get shared certificate");
+                        throw new InvalidOperationException("Failed to get shared certificate");
+                    }
+
+                    _certificates[connectionKey] = sharedCertificate;
+
+                    handler = new SocketsHttpHandler
+                    {
+                        SslOptions = new SslClientAuthenticationOptions
+                        {
+                            ClientCertificates = new X509CertificateCollection { sharedCertificate },
+                            EnabledSslProtocols = System.Security.Authentication.SslProtocols.Tls12 | System.Security.Authentication.SslProtocols.Tls13,
+                            CertificateRevocationCheckMode = X509RevocationMode.NoCheck,
+                            TargetHost = endpoint.Host
+                        },
+                        PooledConnectionIdleTimeout = TimeSpan.FromMinutes(5),
+                        KeepAlivePingTimeout = TimeSpan.FromSeconds(20),
+                        KeepAlivePingDelay = TimeSpan.FromSeconds(60),
+                        EnableMultipleHttp2Connections = true,
+                        ConnectTimeout = TimeSpan.FromSeconds(10)
+                    };
+
+                    handler.SslOptions.ApplicationProtocols = new List<SslApplicationProtocol>
+                    {
+                        SslApplicationProtocol.Http2
+                    };
+
+                    handler.SslOptions.RemoteCertificateValidationCallback = (sender, cert, chain, errors) =>
+                    {
+                        var remoteCert = cert as X509Certificate2;
+                        _certificates[connectionKey] = remoteCert;
+
+                        if (cert == null)
+                        {
+                            _logger.LogWarning("Remote server did not present a certificate");
+                            return false;
+                        }
+
+                        _logger.LogWarning("*** ACCEPTING ANY CERTIFICATE FOR TESTING - INSECURE ***");
+                        return true;
+                    };
+
+                    uri = new Uri($"https://{endpoint.Host}:{endpoint.Port}");
+                }
+
+                var httpClient = new HttpClient(handler)
+                {
+                    Timeout = TimeSpan.FromSeconds(300)
+                };
+                _httpClients[connectionKey] = httpClient;
+
+                var channelOptions = new GrpcChannelOptions
+                {
+                    HttpClient = httpClient,
+                    MaxReceiveMessageSize = 4 * 1024 * 1024,
+                    MaxSendMessageSize = 4 * 1024 * 1024,
+                    DisposeHttpClient = false
+                };
+
+                var channel = GrpcChannel.ForAddress(uri, channelOptions);
+                _channels[connectionKey] = channel;
+
+                var client = new TransportService.TransportServiceClient(channel);
+
+                using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(300));
+                return await client.DeliverInviteHandshakeResponseAsync(request, cancellationToken: cts.Token).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not RpcException)
+            {
+                _logger.LogError(ex, "Failed to deliver InviteHandshakeResponse to {Endpoint}: {ErrorMessage}", endpoint, ex.Message);
+                throw new RpcException(new Status(StatusCode.Unavailable, ex.Message));
+            }
         }
 
         private async Task<EstablishDirectSessionResponse> Inner_EstablishSession(

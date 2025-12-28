@@ -169,7 +169,12 @@ public class PercolatorDbContext : DbContext
             entity.Property(e => e.OneTimePreKeyId).IsRequired();
             entity.Property(e => e.OneTimePreKeyPrivate).IsRequired();
             entity.Property(e => e.OneTimePreKeyPublicSpki).IsRequired();
+            entity.Property(e => e.ReservedForRequestCorrelationId);
+            entity.Property(e => e.ReservedUntilUtc);
             entity.HasIndex(e => new { e.SelfIdentityId, e.OneTimePreKeyId }).IsUnique();
+            entity.HasIndex(e => new { e.SelfIdentityId, e.ReservedForRequestCorrelationId })
+                .IsUnique()
+                .HasFilter("\"ReservedForRequestCorrelationId\" IS NOT NULL");
             entity.HasOne<SelfIdentityDbo>()
                 .WithMany()
                 .HasForeignKey(e => e.SelfIdentityId)

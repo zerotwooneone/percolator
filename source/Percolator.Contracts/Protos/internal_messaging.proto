@@ -440,9 +440,14 @@ message ReverseSignalCallbackEndpoint {
 message InviteHandshakePreKeyBundle {
   optional uint32 version = 1;
 
-  optional bytes inviter_signed_pre_key = 2;
-  optional bytes pre_key_signature = 3;
-  optional bytes inviter_one_time_pre_key = 4;
+  // GUID bytes identifying the inviter's signed pre-key used.
+  optional bytes inviter_signed_pre_key_id = 2;
+  optional bytes inviter_signed_pre_key = 3;
+  optional bytes pre_key_signature = 4;
+
+  // GUID bytes identifying the inviter's one-time pre-key, if provided.
+  optional bytes inviter_one_time_pre_key_id = 5;
+  optional bytes inviter_one_time_pre_key = 6;
 }
 
 message InviteHandshakeRequestPayload {

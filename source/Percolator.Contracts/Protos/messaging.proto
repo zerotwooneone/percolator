@@ -23,6 +23,13 @@ service TransportService {
     // Establishes a new secure pairwise session with the node.
     // This is the entry point for the cryptographic handshake.
     rpc EstablishDirectSession(EstablishDirectSessionRequest) returns (EstablishDirectSessionResponse);
+
+    // Reverse-signal handshake response delivery (inviter receives acceptor's response).
+    rpc DeliverInviteHandshakeResponse(InviteHandshakeResponse) returns (DeliverInviteHandshakeResponseAck);
+}
+
+message DeliverInviteHandshakeResponseAck {
+    optional uint32 version = 1;
 }
 
 // Represents the public cryptographic materials needed to establish a secure session.

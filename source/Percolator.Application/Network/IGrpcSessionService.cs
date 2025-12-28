@@ -18,5 +18,9 @@ namespace Percolator.Application.Network
         Task<EstablishDirectSessionResponse> EstablishDirectSessionAsync(
             DnsEndPoint endpoint, 
             EstablishDirectSessionRequest request);
+
+        Task<DeliverInviteHandshakeResponseAck> DeliverInviteHandshakeResponseAsync(
+            DnsEndPoint endpoint,
+            InviteHandshakeResponse request);
     }
 }

@@ -72,6 +72,6 @@ public sealed class SqlitePendingSessionRepositoryTests
         Assert.That(loaded.InviterIdentityKey!.Value, Is.EqualTo(new byte[] { 9, 9, 9 }));
         Assert.That(loaded.CallbackEndpointHost, Is.EqualTo("example.com"));
         Assert.That(loaded.CallbackEndpointPort, Is.EqualTo(443));
-        Assert.That(loaded.RequestCorrelationId!.Value, Is.EqualTo(new RequestCorrelationId( Guid.Parse("11111111-1111-1111-1111-111111111111"))));
+        Assert.That(loaded.RequestCorrelationId!.Value, Is.EqualTo( new RequestCorrelationId( Guid.Parse("11111111-1111-1111-1111-111111111111"))));
     }
 }

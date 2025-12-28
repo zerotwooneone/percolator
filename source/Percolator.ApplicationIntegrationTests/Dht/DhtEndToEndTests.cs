@@ -30,6 +30,12 @@ public class DhtEndToEndTests : IntegrationTestBase
                 Queued = new EstablishDirectSessionResponse.Types.Queued { Version = 1 }
             };
         }
+
+        public async Task<DeliverInviteHandshakeResponseAck> DeliverInviteHandshakeResponseAsync(DnsEndPoint endpoint, InviteHandshakeResponse request)
+        {
+            await Task.CompletedTask;
+            return new DeliverInviteHandshakeResponseAck { Version = 1 };
+        }
     }
 
     private sealed class LoopbackTransport : IMessageTransportService

@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using System.Threading.Tasks;
 using Google.Protobuf;
 using Grpc.Core;
 using Microsoft.Extensions.Logging;
@@ -112,6 +113,30 @@ namespace Percolator.Application.Network
             }
 
             throw new RpcException(new Status(StatusCode.Internal, $"Ingress failed: {result.Disposition}"));
+        }
+
+        public override Task<DeliverInviteHandshakeResponseAck> DeliverInviteHandshakeResponse(InviteHandshakeResponse request, ServerCallContext context)
+        {
+            if (!request.HasRequestCorrelationId || string.IsNullOrWhiteSpace(request.RequestCorrelationId))
+            {
+                throw new RpcException(new Status(StatusCode.InvalidArgument, "request_correlation_id is required."));
+            }
+            if (!request.HasAcceptorIdentityKey || request.AcceptorIdentityKey.Length == 0)
+            {
+                throw new RpcException(new Status(StatusCode.InvalidArgument, "acceptor_identity_key is required."));
+            }
+            if (!request.HasAcceptorX3DhEphemeralKey || request.AcceptorX3DhEphemeralKey.Length == 0)
+            {
+                throw new RpcException(new Status(StatusCode.InvalidArgument, "acceptor_x3dh_ephemeral_key is required."));
+            }
+            if (!request.HasInitialRatchetMessage || request.InitialRatchetMessage.Length == 0)
+            {
+                throw new RpcException(new Status(StatusCode.InvalidArgument, "initial_ratchet_message is required."));
+            }
+
+            _logger.LogInformation("Received InviteHandshakeResponse for correlation {CorrelationId}", request.RequestCorrelationId);
+
+            return Task.FromResult(new DeliverInviteHandshakeResponseAck { Version = 1 });
         }
     }
 }
