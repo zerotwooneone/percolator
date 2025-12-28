@@ -114,4 +114,30 @@ public sealed class SqliteSelfPreKeyBundleRepositoryReservationTests
         var consumed = await repo.TryConsumeReservedOneTimePreKeyPrivateAsync(1, correlationId, DateTimeOffset.UtcNow, CancellationToken.None);
         consumed.Should().BeNull();
     }
+
+    [Test]
+    public async Task TryBurnReservedOneTimePreKeyAsync_removes_reservation_and_blocks_consumption()
+    {
+        await using var ctx = CreateDbContext(out var conn);
+        await using var _ = conn;
+
+        var repo = new SqliteSelfPreKeyBundleRepository(ctx);
+
+        var otkId = Guid.NewGuid();
+        await repo.SaveOneTimePreKeysAsync(1, new[]
+        {
+            (otkId, new byte[] { 0x11 }, new byte[] { 0x22 })
+        }, CancellationToken.None);
+
+        var correlationId = Guid.NewGuid();
+        var until = DateTimeOffset.UtcNow.AddMinutes(5);
+        var reserved = await repo.TryReserveOneTimePreKeyAsync(1, correlationId, until, CancellationToken.None);
+        reserved.Should().NotBeNull();
+
+        var burned = await repo.TryBurnReservedOneTimePreKeyAsync(1, correlationId, DateTimeOffset.UtcNow, CancellationToken.None);
+        burned.Should().BeTrue();
+
+        var consumed = await repo.TryConsumeReservedOneTimePreKeyPrivateAsync(1, correlationId, DateTimeOffset.UtcNow, CancellationToken.None);
+        consumed.Should().BeNull();
+    }
 }

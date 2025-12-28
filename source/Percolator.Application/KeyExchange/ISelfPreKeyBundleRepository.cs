@@ -33,5 +33,11 @@ namespace Percolator.Application.KeyExchange
             int selfIdentityId,
             DateTimeOffset nowUtc,
             CancellationToken ct = default);
+
+        Task<bool> TryBurnReservedOneTimePreKeyAsync(
+            int selfIdentityId,
+            Guid requestCorrelationId,
+            DateTimeOffset nowUtc,
+            CancellationToken ct = default);
     }
 }

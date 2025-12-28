@@ -48,6 +48,7 @@ public class PercolatorDbContext : DbContext
     public DbSet<DeliveredReceiptDbo> DeliveredReceipts { get; set; } = null!;
     public DbSet<PreHandshakeSessionDbo> PreHandshakeSessions { get; set; } = null!;
     public DbSet<PendingSessionDbo> PendingSessions { get; set; } = null!;
+    public DbSet<SentInvitationDbo> SentInvitations { get; set; } = null!;
     public DbSet<SessionDbo> Sessions { get; set; } = null!;
     public DbSet<GroupAdminKeyDbo> GroupAdminKeys { get; set; } = null!;
     public DbSet<GroupAdminOpDbo> GroupAdminOps { get; set; } = null!;
@@ -439,6 +440,27 @@ public class PercolatorDbContext : DbContext
             entity.Property(e => e.State).IsRequired();
             entity.Property(e => e.CreatedAtUtc).IsRequired();
             entity.HasIndex(e => new { e.SelfIdentityId, e.RemotePeerId });
+            entity.HasQueryFilter(e => _active != null && _active.Identity != null && e.SelfIdentityId == _active.Identity.SelfIdentityId.Value);
+        });
+
+        // SentInvitations (Cryptography domain persistence)
+        modelBuilder.Entity<SentInvitationDbo>(entity =>
+        {
+            entity.ToTable("SentInvitations");
+            entity.HasKey(e => new { e.SelfIdentityId, e.RequestCorrelationId });
+            entity.Property(e => e.SelfIdentityId).IsRequired();
+            entity.Property(e => e.RequestCorrelationId).IsRequired();
+            entity.Property(e => e.SignedPreKeyId).IsRequired();
+            entity.Property(e => e.OneTimePreKeyId);
+            entity.Property(e => e.TargetPeerId);
+            entity.Property(e => e.CreatedAtUtc).IsRequired();
+            entity.Property(e => e.ExpiresAtUtc).IsRequired();
+            entity.HasIndex(e => new { e.SelfIdentityId, e.ExpiresAtUtc });
+            entity.HasOne<SelfIdentityDbo>()
+                .WithMany()
+                .HasForeignKey(e => e.SelfIdentityId)
+                .OnDelete(DeleteBehavior.Cascade)
+                .IsRequired();
             entity.HasQueryFilter(e => _active != null && _active.Identity != null && e.SelfIdentityId == _active.Identity.SelfIdentityId.Value);
         });
 

@@ -1,0 +1,126 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Runtime.CompilerServices;
+using System.Threading;
+using System.Threading.Tasks;
+using Microsoft.EntityFrameworkCore;
+using Percolator.Application.Identity;
+using Percolator.Cryptography;
+using Percolator.Cryptography.Primitives;
+using Percolator.Infrastructure.Persistence;
+
+namespace Percolator.Infrastructure.Cryptography;
+
+internal sealed class SqliteSentInvitationRepository : ISentInvitationRepository
+{
+    private readonly PercolatorDbContext _db;
+    private readonly ActiveIdentityContext _active;
+
+    public SqliteSentInvitationRepository(PercolatorDbContext db, ActiveIdentityContext active)
+    {
+        _db = db;
+        _active = active;
+    }
+
+    public async Task UpsertAsync(SentInvitation invitation, CancellationToken cancellationToken = default)
+    {
+        if (_active.Identity is null) throw new InvalidOperationException("Active identity not loaded.");
+
+        var correlation = invitation.RequestCorrelationId.ToString();
+
+        var existing = await _db.SentInvitations
+            .FirstOrDefaultAsync(x => x.SelfIdentityId == _active.Identity.SelfIdentityId.Value && x.RequestCorrelationId == correlation, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (existing is null)
+        {
+            _db.SentInvitations.Add(new SentInvitationDbo
+            {
+                SelfIdentityId = _active.Identity.SelfIdentityId.Value,
+                RequestCorrelationId = correlation,
+                SignedPreKeyId = invitation.SignedPreKeyId,
+                OneTimePreKeyId = invitation.OneTimePreKeyId,
+                TargetPeerId = invitation.TargetPeerId?.Value,
+                CreatedAtUtc = invitation.CreatedAtUtc,
+                ExpiresAtUtc = invitation.ExpiresAtUtc,
+            });
+        }
+        else
+        {
+            existing.SignedPreKeyId = invitation.SignedPreKeyId;
+            existing.OneTimePreKeyId = invitation.OneTimePreKeyId;
+            existing.TargetPeerId = invitation.TargetPeerId?.Value;
+            existing.CreatedAtUtc = invitation.CreatedAtUtc;
+            existing.ExpiresAtUtc = invitation.ExpiresAtUtc;
+        }
+
+        await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<SentInvitation?> TryGetAsync(RequestCorrelationId requestCorrelationId, CancellationToken cancellationToken = default)
+    {
+        var correlation = requestCorrelationId.ToString();
+        var row = await _db.SentInvitations
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.RequestCorrelationId == correlation, cancellationToken)
+            .ConfigureAwait(false);
+
+        return row is null ? null : Rehydrate(row);
+    }
+
+    public async Task DeleteAsync(RequestCorrelationId requestCorrelationId, CancellationToken cancellationToken = default)
+    {
+        if (_active.Identity is null) throw new InvalidOperationException("Active identity not loaded.");
+
+        var correlation = requestCorrelationId.ToString();
+        var existing = await _db.SentInvitations
+            .FirstOrDefaultAsync(
+                x => x.SelfIdentityId == _active.Identity.SelfIdentityId.Value
+                     && x.RequestCorrelationId == correlation,
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        if (existing is null)
+        {
+            return;
+        }
+
+        _db.SentInvitations.Remove(existing);
+        await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    public async IAsyncEnumerable<SentInvitation> EnumerateExpiredAsync(DateTimeOffset nowUtc, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        // SQLite provider cannot translate some DateTimeOffset comparisons.
+        // Materialize first and then filter in-memory.
+        var candidates = await _db.SentInvitations
+            .AsNoTracking()
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        foreach (var row in candidates.Where(x => x.ExpiresAtUtc <= nowUtc))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            yield return Rehydrate(row);
+        }
+    }
+
+    private static SentInvitation Rehydrate(SentInvitationDbo row)
+    {
+        if (string.IsNullOrWhiteSpace(row.RequestCorrelationId)
+            || !Guid.TryParse(row.RequestCorrelationId, out var correlationGuid)
+            || correlationGuid == Guid.Empty)
+        {
+            throw new InvalidOperationException("Sent invitation row has missing/invalid request_correlation_id. Purge outdated sent invitations.");
+        }
+
+        return new SentInvitation(
+            new RequestCorrelationId(correlationGuid),
+            row.SignedPreKeyId,
+            row.OneTimePreKeyId,
+            row.TargetPeerId.HasValue ? new PeerId(row.TargetPeerId.Value) : null,
+            row.CreatedAtUtc,
+            row.ExpiresAtUtc);
+    }
+}

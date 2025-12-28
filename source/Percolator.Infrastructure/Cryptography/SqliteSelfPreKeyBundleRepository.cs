@@ -200,6 +200,36 @@ internal sealed class SqliteSelfPreKeyBundleRepository : ISelfPreKeyBundleReposi
         return expired.Count;
     }
 
+    public async Task<bool> TryBurnReservedOneTimePreKeyAsync(
+        int selfIdentityId,
+        Guid requestCorrelationId,
+        DateTimeOffset nowUtc,
+        CancellationToken ct = default)
+    {
+        await using var tx = await _db.Database.BeginTransactionAsync(ct);
+        try
+        {
+            var rec = await _db.SelfOneTimePreKeys
+                .FirstOrDefaultAsync(x => x.SelfIdentityId == selfIdentityId && x.ReservedForRequestCorrelationId == requestCorrelationId, ct);
+            if (rec is null)
+            {
+                await tx.RollbackAsync(ct);
+                return false;
+            }
+
+            // Burn/delete without returning private key material.
+            _db.SelfOneTimePreKeys.Remove(rec);
+            await _db.SaveChangesAsync(ct);
+            await tx.CommitAsync(ct);
+            return true;
+        }
+        catch
+        {
+            await tx.RollbackAsync(ct);
+            throw;
+        }
+    }
+
     private static byte[] Protect(byte[] data) => ProtectedData.Protect(data, Entropy, DataProtectionScope.CurrentUser);
     private static byte[] Unprotect(byte[] data) => ProtectedData.Unprotect(data, Entropy, DataProtectionScope.CurrentUser);
 }

@@ -14,6 +14,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IPreKeyBundleRepository, SqlitePreKeyBundleRepository>();
         services.AddScoped<IAdminSignatureVerifier, AdminSignatureVerifier>();
         services.AddScoped<IPendingSessionRepository, SqlitePendingSessionRepository>();
+        services.AddScoped<ISentInvitationRepository, SqliteSentInvitationRepository>();
         services.AddScoped<ISessionRepository, SqliteSessionRepository>();
         services.AddScoped<IPendingHandshakeQueries, PendingHandshakeQueries>();
         services.AddSingleton<IX3dhDeriver, X3dhDeriver>();
