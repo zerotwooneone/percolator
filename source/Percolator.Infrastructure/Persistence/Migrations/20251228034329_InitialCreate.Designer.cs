@@ -8,11 +8,11 @@ using Percolator.Infrastructure.Persistence;
 
 #nullable disable
 
-namespace Percolator.Infrastructure.Percolator.Infrastructure.Persistence.Migrations
+namespace Percolator.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(PercolatorDbContext))]
-    [Migration("20251201055912_DropLegacyDoubleRatchetTables")]
-    partial class DropLegacyDoubleRatchetTables
+    [Migration("20251228034329_InitialCreate")]
+    partial class InitialCreate
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -43,6 +43,12 @@ namespace Percolator.Infrastructure.Percolator.Infrastructure.Persistence.Migrat
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("CallbackEndpointHost")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("CallbackEndpointPort")
+                        .HasColumnType("INTEGER");
+
                     b.Property<DateTimeOffset>("CreatedAtUtc")
                         .HasColumnType("TEXT");
 
@@ -53,10 +59,19 @@ namespace Percolator.Infrastructure.Percolator.Infrastructure.Persistence.Migrat
                         .IsRequired()
                         .HasColumnType("BLOB");
 
+                    b.Property<byte[]>("InviterIdentityKey")
+                        .HasColumnType("BLOB");
+
+                    b.Property<bool>("IsRelayed")
+                        .HasColumnType("INTEGER");
+
                     b.Property<int>("ProtocolVersion")
                         .HasColumnType("INTEGER");
 
                     b.Property<Guid>("RemotePeerId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RequestCorrelationId")
                         .HasColumnType("TEXT");
 
                     b.Property<int>("SelfIdentityId")
@@ -70,6 +85,36 @@ namespace Percolator.Infrastructure.Percolator.Infrastructure.Persistence.Migrat
                     b.HasIndex("SelfIdentityId", "RemotePeerId");
 
                     b.ToTable("PendingSessions", (string)null);
+                });
+
+            modelBuilder.Entity("Percolator.Infrastructure.Cryptography.SentInvitationDbo", b =>
+                {
+                    b.Property<int>("SelfIdentityId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("RequestCorrelationId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("ExpiresAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("OneTimePreKeyId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("SignedPreKeyId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("TargetPeerId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("SelfIdentityId", "RequestCorrelationId");
+
+                    b.HasIndex("SelfIdentityId", "ExpiresAtUtc");
+
+                    b.ToTable("SentInvitations", (string)null);
                 });
 
             modelBuilder.Entity("Percolator.Infrastructure.Identity.PeerIdentityDbo", b =>
@@ -942,6 +987,12 @@ namespace Percolator.Infrastructure.Percolator.Infrastructure.Persistence.Migrat
                         .IsRequired()
                         .HasColumnType("BLOB");
 
+                    b.Property<Guid?>("ReservedForRequestCorrelationId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("ReservedUntilUtc")
+                        .HasColumnType("TEXT");
+
                     b.Property<int>("SelfIdentityId")
                         .HasColumnType("INTEGER");
 
@@ -949,6 +1000,10 @@ namespace Percolator.Infrastructure.Percolator.Infrastructure.Persistence.Migrat
 
                     b.HasIndex("SelfIdentityId", "OneTimePreKeyId")
                         .IsUnique();
+
+                    b.HasIndex("SelfIdentityId", "ReservedForRequestCorrelationId")
+                        .IsUnique()
+                        .HasFilter("\"ReservedForRequestCorrelationId\" IS NOT NULL");
 
                     b.ToTable("SelfOneTimePreKeys", (string)null);
                 });
@@ -1116,6 +1171,15 @@ namespace Percolator.Infrastructure.Percolator.Infrastructure.Persistence.Migrat
                     b.HasIndex("RawDataHash");
 
                     b.ToTable("PeerRoutingTlsCertificates", (string)null);
+                });
+
+            modelBuilder.Entity("Percolator.Infrastructure.Cryptography.SentInvitationDbo", b =>
+                {
+                    b.HasOne("Percolator.Infrastructure.Persistence.SelfIdentityDbo", null)
+                        .WithMany()
+                        .HasForeignKey("SelfIdentityId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Percolator.Infrastructure.Identity.PeerIdentityKeyDbo_V2", b =>
