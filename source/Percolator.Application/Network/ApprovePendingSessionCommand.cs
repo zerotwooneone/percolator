@@ -152,30 +152,14 @@ namespace Percolator.Application.Network
             {
                 return new ApprovePendingSessionResult.RejectedInvalid();
             }
-            if (!payload.InviterPreKey.HasInviterSignedPreKeyId || payload.InviterPreKey.InviterSignedPreKeyId.Length == 0)
-            {
-                return new ApprovePendingSessionResult.RejectedInvalid();
-            }
 
-            Guid signedPreKeyId;
-            try
-            {
-                signedPreKeyId = new Guid(payload.InviterPreKey.InviterSignedPreKeyId.ToByteArray());
-            }
-            catch
-            {
-                return new ApprovePendingSessionResult.RejectedInvalid();
-            }
-
+            // Pre-key IDs are inviter-local and are not transmitted.
+            // The acceptor must complete X3DH using only public key material + signatures.
+            var signedPreKeyId = Guid.Empty;
             Guid? oneTimePreKeyId = null;
             OneTimeKey? oneTimePreKey = null;
             if (payload.InviterPreKey.HasInviterOneTimePreKey && payload.InviterPreKey.InviterOneTimePreKey.Length > 0)
             {
-                if (!payload.InviterPreKey.HasInviterOneTimePreKeyId || payload.InviterPreKey.InviterOneTimePreKeyId.Length == 0)
-                {
-                    return new ApprovePendingSessionResult.RejectedInvalid();
-                }
-                oneTimePreKeyId = new Guid(payload.InviterPreKey.InviterOneTimePreKeyId.ToByteArray());
                 oneTimePreKey = new OneTimeKey(payload.InviterPreKey.InviterOneTimePreKey.ToByteArray());
             }
 

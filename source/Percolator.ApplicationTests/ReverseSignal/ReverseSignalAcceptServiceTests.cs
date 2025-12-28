@@ -118,7 +118,6 @@ namespace Percolator.ApplicationTests.ReverseSignal
                 InviterPreKey = new InviteHandshakePreKeyBundle
                 {
                     Version = 1,
-                    InviterSignedPreKeyId = ByteString.CopyFrom(Guid.NewGuid().ToByteArray()),
                     InviterSignedPreKey = ByteString.CopyFrom(inviterEcdh.ExportSubjectPublicKeyInfo()),
                     PreKeySignature = ByteString.CopyFrom(new byte[] { 1, 2, 3 })
                 }
@@ -212,7 +211,6 @@ namespace Percolator.ApplicationTests.ReverseSignal
                 InviterPreKey = new InviteHandshakePreKeyBundle
                 {
                     Version = 1,
-                    InviterSignedPreKeyId = ByteString.CopyFrom(Guid.NewGuid().ToByteArray()),
                     InviterSignedPreKey = ByteString.CopyFrom(inviterEcdh.ExportSubjectPublicKeyInfo()),
                     PreKeySignature = ByteString.CopyFrom(new byte[] { 1, 2, 3 })
                 }
@@ -308,7 +306,6 @@ namespace Percolator.ApplicationTests.ReverseSignal
                 InviterPreKey = new InviteHandshakePreKeyBundle
                 {
                     Version = 1,
-                    InviterSignedPreKeyId = ByteString.CopyFrom(Guid.NewGuid().ToByteArray()),
                     InviterSignedPreKey = ByteString.CopyFrom(inviterEcdh.ExportSubjectPublicKeyInfo()),
                     PreKeySignature = ByteString.CopyFrom(new byte[] { 1, 2, 3 })
                 }

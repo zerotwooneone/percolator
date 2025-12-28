@@ -160,11 +160,6 @@ namespace Percolator.Application.Network
                 throw new InvalidOperationException("inviter_pre_key is required.");
             }
 
-            if (!payload.InviterPreKey.HasInviterSignedPreKeyId || payload.InviterPreKey.InviterSignedPreKeyId.Length == 0)
-            {
-                throw new InvalidOperationException("inviter_signed_pre_key_id is required.");
-            }
-
             if (!payload.InviterPreKey.HasInviterSignedPreKey || payload.InviterPreKey.InviterSignedPreKey.Length == 0)
             {
                 throw new InvalidOperationException("inviter_signed_pre_key is required.");
@@ -173,14 +168,6 @@ namespace Percolator.Application.Network
             if (!payload.InviterPreKey.HasPreKeySignature || payload.InviterPreKey.PreKeySignature.Length == 0)
             {
                 throw new InvalidOperationException("pre_key_signature is required.");
-            }
-
-            if (payload.InviterPreKey.HasInviterOneTimePreKey && payload.InviterPreKey.InviterOneTimePreKey.Length > 0)
-            {
-                if (!payload.InviterPreKey.HasInviterOneTimePreKeyId || payload.InviterPreKey.InviterOneTimePreKeyId.Length == 0)
-                {
-                    throw new InvalidOperationException("inviter_one_time_pre_key_id is required when inviter_one_time_pre_key is present.");
-                }
             }
 
             var preKeyVerified = _signingService.Verify(
