@@ -26,7 +26,7 @@ using Percolator.ApplicationTests.Services;
 namespace Percolator.ApplicationTests.ReverseSignal
 {
     [TestFixture]
-    public class ReverseSignalAcceptServiceTests
+    public class ApprovePendingSessionCommandTests
     {
         private sealed class ActiveAccessorStub : IActiveIdentityAccessor
         {
