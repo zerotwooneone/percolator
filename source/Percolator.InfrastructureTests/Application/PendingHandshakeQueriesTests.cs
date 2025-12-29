@@ -146,6 +146,14 @@ public sealed class PendingHandshakeQueriesTests
             CreatedAtUtc = clock.UtcNow,
             UpdatedAtUtc = clock.UtcNow
         });
+
+        ctx.PeerRoutingProfiles.Add(new PeerRoutingProfileDbo
+        {
+            PeerId = remotePeerId.Value,
+            ReachabilityStatus = 0,
+            ReachabilityLastChangeUtc = clock.UtcNow,
+            DirectMessagePublicKey = null
+        });
         ctx.PeerRoutingProfiles.Add(new PeerRoutingProfileDbo
         {
             PeerId = relayPeerGuid,

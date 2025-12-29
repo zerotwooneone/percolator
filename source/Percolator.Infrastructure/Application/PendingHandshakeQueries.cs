@@ -61,11 +61,10 @@ public class PendingHandshakeQueries : IPendingHandshakeQueries
             var relayLinks = await _dbContext.PeerRoutingRelays
                 .AsNoTracking()
                 .Where(r => relayedPeerIds.Contains(r.PeerId))
-                .OrderByDescending(r => r.LastSeenUtc)
                 .ToListAsync(cancellationToken)
                 .ConfigureAwait(false);
 
-            foreach (var link in relayLinks)
+            foreach (var link in relayLinks.OrderByDescending(r => r.LastSeenUtc))
             {
                 if (!relayByRemote.ContainsKey(link.PeerId))
                 {
@@ -97,11 +96,10 @@ public class PendingHandshakeQueries : IPendingHandshakeQueries
             var eps = await _dbContext.PeerRoutingGrpcEndPoints
                 .AsNoTracking()
                 .Where(e => relayPeerIds.Contains(e.PeerId))
-                .OrderByDescending(e => e.LastSeenUtc)
                 .ToListAsync(cancellationToken)
                 .ConfigureAwait(false);
 
-            foreach (var ep in eps)
+            foreach (var ep in eps.OrderByDescending(e => e.LastSeenUtc))
             {
                 if (!relayEndpointById.ContainsKey(ep.PeerId))
                 {
