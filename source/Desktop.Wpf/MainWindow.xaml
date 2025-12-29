@@ -6,7 +6,7 @@
   <Window.InputBindings>
     <KeyBinding Modifiers="Shift" Key="F6" Command="{Binding OpenHandshakeSimulatorCommand}" />
   </Window.InputBindings>
-  <Grid Background="{StaticResource SurfaceBrush}">
+  <Grid>
       <ContentControl Content="{Binding CurrentView.Value}" />
   </Grid>
 </Window>
