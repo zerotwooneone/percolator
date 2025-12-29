@@ -102,5 +102,99 @@ public sealed class PendingHandshakeQueriesTests
         results[0].InviterFingerprintHex.Should().Be(expectedFingerprintHex);
         results[0].ExpiresAtUtc.Should().Be(open.ExpiresAtUtc);
         results[0].PeerName.Should().NotBeNullOrWhiteSpace();
+        results[0].IsRelayed.Should().BeFalse();
+        results[0].RelayPeer.Should().BeNull();
+        results[0].RelayPeerName.Should().BeNull();
+        results[0].RelayEndpoint.Should().BeNull();
+    }
+
+    [Test]
+    public async Task EnumerateOpenAsync_Relayed_IncludesRelayMetadata()
+    {
+        var conn = new SqliteConnection("DataSource=:memory:");
+        conn.Open();
+
+        var options = new DbContextOptionsBuilder<PercolatorDbContext>()
+            .UseSqlite(conn)
+            .Options;
+
+        var active = new ActiveIdentityContext();
+        active.SetActiveIdentity(new IdentityRecord(Guid.NewGuid(), "default") { SelfIdentityId = new SelfId(1) }, null);
+
+        var clock = new FixedClock { UtcNow = DateTimeOffset.Parse("2025-05-01T00:00:00Z") };
+
+        await using var ctx = new PercolatorDbContext(options, active);
+        ctx.Database.EnsureCreated();
+
+        if (!ctx.SelfIdentities.Any())
+        {
+            ctx.SelfIdentities.Add(new SelfIdentityDbo { Id = 1, PeerId = Guid.NewGuid(), Name = "default" });
+            ctx.SaveChanges();
+        }
+
+        var repo = new SqlitePendingSessionRepository(ctx, active, clock);
+
+        var remotePeerId = PeerId.NewId();
+        var relayPeerGuid = Guid.Parse("22222222-2222-2222-2222-222222222222");
+        var relayPeerId = new PeerId(relayPeerGuid);
+
+        ctx.PeerIdentities.Add(new PeerIdentityDbo
+        {
+            PeerId = relayPeerGuid,
+            Name = "RelayHost",
+            Version = 1,
+            CreatedAtUtc = clock.UtcNow,
+            UpdatedAtUtc = clock.UtcNow
+        });
+        ctx.PeerRoutingProfiles.Add(new PeerRoutingProfileDbo
+        {
+            PeerId = relayPeerGuid,
+            ReachabilityStatus = 0,
+            ReachabilityLastChangeUtc = clock.UtcNow,
+            DirectMessagePublicKey = null
+        });
+        ctx.PeerRoutingGrpcEndPoints.Add(new GrpcEndPointRoutingDbo
+        {
+            PeerId = relayPeerGuid,
+            Host = "relay.local",
+            Port = 5001,
+            LastSeenUtc = clock.UtcNow
+        });
+        ctx.PeerRoutingRelays.Add(new RelayLinkDbo
+        {
+            PeerId = remotePeerId.Value,
+            RelayPeerId = relayPeerGuid,
+            LastSeenUtc = clock.UtcNow
+        });
+        ctx.SaveChanges();
+
+        var openRelayed = PendingSession.FromInvitationWithMetadata(
+            PendingSessionId.NewId(),
+            remotePeerId,
+            new ProtocolVersion(1),
+            new HandshakeInvitation(new byte[] { 8 }),
+            requestCorrelationId: new RequestCorrelationId(Guid.Parse("11111111-1111-1111-1111-111111111111")),
+            isRelayed: true,
+            inviterIdentityKey: null,
+            callbackEndpointHost: null,
+            callbackEndpointPort: null,
+            clock,
+            expiresAtUtc: clock.UtcNow.AddMinutes(10));
+
+        await repo.AddAsync(openRelayed, CancellationToken.None);
+
+        var queries = new PendingHandshakeQueries(ctx, clock);
+
+        var results = new List<PendingHandshake>();
+        await foreach (var item in queries.EnumerateOpenAsync(CancellationToken.None))
+        {
+            results.Add(item);
+        }
+
+        results.Should().HaveCount(1);
+        results[0].IsRelayed.Should().BeTrue();
+        results[0].RelayPeer.Should().Be(relayPeerId);
+        results[0].RelayPeerName.Should().Be("RelayHost");
+        results[0].RelayEndpoint.Should().Be("relay.local:5001");
     }
 }

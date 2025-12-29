@@ -18,4 +18,9 @@ public record PendingHandshake
     public required string? InviterFingerprintHex;
     public required DateTimeOffset CreatedAtUtc;
     public required DateTimeOffset? ExpiresAtUtc;
+
+    public required bool IsRelayed;
+    public PeerId? RelayPeer;
+    public string? RelayPeerName;
+    public string? RelayEndpoint;
 }

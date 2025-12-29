@@ -19,6 +19,9 @@ public sealed class PendingHandshakeItem
     public string? SendPath { get; set; }
     public string? RequestCorrelationId { get; set; }
     public bool IsExpired { get; set; }
+
+    public bool IsRelayed { get; set; }
+    public string? RelayInfoText { get; set; }
 }
 
 public sealed class PendingHandshakesMenuViewModel

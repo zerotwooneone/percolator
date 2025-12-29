@@ -3,7 +3,7 @@
                     xmlns:controls="clr-namespace:Desktop.Wpf.Shared.Controls"
                     xmlns:att="clr-namespace:Desktop.Wpf.Shared.Attached">
   <DataTemplate x:Key="PendingHandshakeItemTemplate">
-    <Border Style="{StaticResource BaseBorder}" Margin="0,10,0,0" Padding="8" >
+    <Border Style="{StaticResource BaseBorder}" Margin="0,10,0,0" Padding="8" ToolTip="{Binding RelayInfoText}">
       <Grid>
         <Grid.ColumnDefinitions>
           <ColumnDefinition Width="Auto"/>
@@ -13,6 +13,18 @@
         <StackPanel Grid.Column="1" Margin="10,0,0,0">
           <TextBlock Text="{Binding DisplayName}"/>
           <TextBlock Text="{Binding BundleText}" Foreground="{StaticResource OnSurfaceVariantBrush}" FontSize="12"/>
+          <TextBlock Text="{Binding RelayInfoText}" Foreground="{StaticResource OnSurfaceVariantBrush}" FontSize="12">
+            <TextBlock.Style>
+              <Style TargetType="TextBlock">
+                <Setter Property="Visibility" Value="Collapsed"/>
+                <Style.Triggers>
+                  <DataTrigger Binding="{Binding IsRelayed}" Value="True">
+                    <Setter Property="Visibility" Value="Visible"/>
+                  </DataTrigger>
+                </Style.Triggers>
+              </Style>
+            </TextBlock.Style>
+          </TextBlock>
           <Grid Margin="0,10,0,0">
             <Grid.ColumnDefinitions>
               <ColumnDefinition Width="*"/>

@@ -33,12 +33,17 @@ public sealed class PendingHandshakeEventListener :
 
         await foreach (var pending in _pendingHandshakeQueries.EnumerateOpenAsync(cancellationToken).ConfigureAwait(false))
         {
+            var relayText = pending.IsRelayed
+                ? $"Via relay: {pending.RelayPeerName}{(string.IsNullOrWhiteSpace(pending.RelayEndpoint) ? "" : $" ({pending.RelayEndpoint})")}" 
+                : null;
             items.Add(new PendingHandshakeItem
             {
                 DisplayName = pending.PeerName,
                 Initials = ComputeInitials(pending.PeerName),
                 BundleText = $"bundle text",
-                PendingId = pending.Id
+                PendingId = pending.Id,
+                IsRelayed = pending.IsRelayed,
+                RelayInfoText = relayText
             });
         }
 
