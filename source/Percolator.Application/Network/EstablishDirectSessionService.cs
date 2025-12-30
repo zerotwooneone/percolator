@@ -53,6 +53,7 @@ namespace Percolator.Application.Network
             byte[] inviterIdentityKeySpki,
             byte[] payloadBytes,
             byte[] payloadSignatureBytes,
+            bool isRelayed,
             CancellationToken cancellationToken)
         {
             if (inviterIdentityKeySpki is null || inviterIdentityKeySpki.Length == 0)
@@ -149,10 +150,18 @@ namespace Percolator.Application.Network
                 throw new InvalidOperationException("inviter_port is required.");
             }
 
-            var validation = _callbackEndpointValidator.Validate(payload.InviterHost, (int)payload.InviterPort);
-            if (!validation.IsValid)
+            string? callbackHost = null;
+            int? callbackPort = null;
+            if (!isRelayed)
             {
-                throw new InvalidOperationException(validation.ErrorMessage ?? "Callback endpoint is invalid.");
+                var validation = _callbackEndpointValidator.Validate(payload.InviterHost, (int)payload.InviterPort);
+                if (!validation.IsValid)
+                {
+                    throw new InvalidOperationException(validation.ErrorMessage ?? "Callback endpoint is invalid.");
+                }
+
+                callbackHost = payload.InviterHost;
+                callbackPort = (int)payload.InviterPort;
             }
 
             if (payload.InviterPreKey is null)
@@ -210,10 +219,10 @@ namespace Percolator.Application.Network
                 protocolVersion,
                 invitation,
                 requestCorrelationId: requestCorrelationId,
-                isRelayed: false,
+                isRelayed: isRelayed,
                 inviterIdentityKey: inviterIdentityKey,
-                callbackEndpointHost: payload.InviterHost,
-                callbackEndpointPort: (int)payload.InviterPort,
+                callbackEndpointHost: callbackHost,
+                callbackEndpointPort: callbackPort,
                 _clock,
                 expiresAtUtc: expiresAtUtc);
 

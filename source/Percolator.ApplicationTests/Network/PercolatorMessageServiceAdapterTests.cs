@@ -29,8 +29,9 @@ public class PercolatorMessageServiceAdapterTests
 
         var logger = Mock.Of<ILogger<PercolatorMessageService>>();
         var establish = Mock.Of<IEstablishDirectSessionService>();
+        var inviteIngress = Mock.Of<IInviteHandshakeResponseIngress>();
 
-        var sut = new PercolatorMessageService(logger, ingress.Object, establish);
+        var sut = new PercolatorMessageService(logger, ingress.Object, establish, inviteIngress);
 
         var request = new DeliverOpaqueMessageRequest
         {
@@ -69,8 +70,9 @@ public class PercolatorMessageServiceAdapterTests
 
         var logger = Mock.Of<ILogger<PercolatorMessageService>>();
         var establish = Mock.Of<IEstablishDirectSessionService>();
+        var inviteIngress = Mock.Of<IInviteHandshakeResponseIngress>();
 
-        var sut = new PercolatorMessageService(logger, ingress.Object, establish);
+        var sut = new PercolatorMessageService(logger, ingress.Object, establish, inviteIngress);
 
         var request = new DeliverOpaqueMessageRequest
         {

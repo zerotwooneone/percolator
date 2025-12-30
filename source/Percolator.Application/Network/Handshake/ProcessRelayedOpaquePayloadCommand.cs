@@ -5,6 +5,7 @@ using Google.Protobuf;
 using MediatR;
 using Microsoft.Extensions.Logging;
 using Percolator.Application.Identity;
+using Percolator.Application.Network;
 using Percolator.Contracts;
 using Percolator.Identity;
 using Percolator.MessageQueue.Commands;
@@ -32,9 +33,10 @@ namespace Percolator.Application.Network.Handshake
         private readonly ILogger<ProcessRelayedOpaquePayloadHandler> _logger;
         private readonly IMediator _mediator;
         private readonly ISecureMessagingService _secureMessaging;
-        private readonly IRatchetKeyIndex _ratchetLookup;
         private readonly IActiveIdentityAccessor _activeIdentityAccessor;
         private readonly ActiveIdentityContext _active;
+        private readonly IEstablishDirectSessionService _establishDirectSessionService;
+        private readonly IInviteHandshakeResponseIngress _inviteHandshakeResponseIngress;
 
         private static readonly HashSet<InternalEnvelope.ApplicationPayloadOneofCase> AllowedCases = new()
         {
@@ -54,16 +56,18 @@ namespace Percolator.Application.Network.Handshake
             ILogger<ProcessRelayedOpaquePayloadHandler> logger,
             IMediator mediator,
             ISecureMessagingService secureMessaging,
-            IRatchetKeyIndex ratchetLookup,
             IActiveIdentityAccessor activeIdentityAccessor,
-            ActiveIdentityContext active)
+            ActiveIdentityContext active,
+            IEstablishDirectSessionService establishDirectSessionService,
+            IInviteHandshakeResponseIngress inviteHandshakeResponseIngress)
         {
             _logger = logger;
             _mediator = mediator;
             _secureMessaging = secureMessaging;
-            _ratchetLookup = ratchetLookup;
             _activeIdentityAccessor = activeIdentityAccessor;
             _active = active;
+            _establishDirectSessionService = establishDirectSessionService;
+            _inviteHandshakeResponseIngress = inviteHandshakeResponseIngress;
         }
 
         public async Task<ProcessRelayedOpaquePayloadResponse> Handle(ProcessRelayedOpaquePayloadCommand request, CancellationToken cancellationToken)
@@ -87,8 +91,8 @@ namespace Percolator.Application.Network.Handshake
             }
             catch
             {
-                // Not a valid ratchet message
-                return ProcessRelayedOpaquePayloadResponse.Failure;
+                // Not a valid ratchet message: try reverse-signal payload types (still opaque to relay).
+                return await TryHandleReverseSignalPayloadAsync(request.OpaquePayload.Value, cancellationToken).ConfigureAwait(false);
             }
 
             (RatchetEphemeralKey PreKey, ulong Counter, ulong PreviousChainLength) header;
@@ -139,6 +143,54 @@ namespace Percolator.Application.Network.Handshake
             ), cancellationToken).ConfigureAwait(false);
 
             return ProcessRelayedOpaquePayloadResponse.Success;
+        }
+
+        private async Task<ProcessRelayedOpaquePayloadResponse> TryHandleReverseSignalPayloadAsync(byte[] bytes, CancellationToken cancellationToken)
+        {
+            // Reverse-signal invite ingress delivered through dumb relay queue: EstablishDirectSessionRequest bytes.
+            try
+            {
+                var req = EstablishDirectSessionRequest.Parser.ParseFrom(bytes);
+                if (req is not null
+                    && req.HasInviterIdentityKey && req.InviterIdentityKey.Length > 0
+                    && req.HasPayload && req.Payload.Length > 0
+                    && req.HasPayloadSignature && req.PayloadSignature.Length > 0)
+                {
+                    _ = await _establishDirectSessionService.QueueInviteAsync(
+                        req.InviterIdentityKey.ToByteArray(),
+                        req.Payload.ToByteArray(),
+                        req.PayloadSignature.ToByteArray(),
+                        isRelayed: true,
+                        cancellationToken).ConfigureAwait(false);
+
+                    return ProcessRelayedOpaquePayloadResponse.Success;
+                }
+            }
+            catch
+            {
+                // Not an EstablishDirectSessionRequest.
+            }
+
+            // Reverse-signal response delivered through dumb relay queue: InviteHandshakeResponse bytes.
+            try
+            {
+                var resp = InviteHandshakeResponse.Parser.ParseFrom(bytes);
+                if (resp is not null
+                    && resp.HasRequestCorrelationId
+                    && resp.HasAcceptorIdentityKey && resp.AcceptorIdentityKey.Length > 0
+                    && resp.HasAcceptorX3DhEphemeralKey && resp.AcceptorX3DhEphemeralKey.Length > 0
+                    && resp.HasInitialRatchetMessage && resp.InitialRatchetMessage.Length > 0)
+                {
+                    await _inviteHandshakeResponseIngress.HandleAsync(resp, cancellationToken).ConfigureAwait(false);
+                    return ProcessRelayedOpaquePayloadResponse.Success;
+                }
+            }
+            catch
+            {
+                // Not an InviteHandshakeResponse.
+            }
+
+            return ProcessRelayedOpaquePayloadResponse.Failure;
         }
     }
 

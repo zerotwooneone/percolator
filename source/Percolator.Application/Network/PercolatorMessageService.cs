@@ -16,15 +16,18 @@ namespace Percolator.Application.Network
         private readonly ILogger<PercolatorMessageService> _logger;
         private readonly IMessageIngress _messageIngress;
         private readonly IEstablishDirectSessionService _establishService;
+        private readonly IInviteHandshakeResponseIngress _inviteHandshakeResponseIngress;
 
         public PercolatorMessageService(
             ILogger<PercolatorMessageService> logger,
             IMessageIngress messageIngress,
-            IEstablishDirectSessionService establishService)
+            IEstablishDirectSessionService establishService,
+            IInviteHandshakeResponseIngress inviteHandshakeResponseIngress)
         {
             _logger = logger;
             _messageIngress = messageIngress;
             _establishService = establishService;
+            _inviteHandshakeResponseIngress = inviteHandshakeResponseIngress;
         }
 
         public override async Task<EstablishDirectSessionResponse> EstablishDirectSession(EstablishDirectSessionRequest request, ServerCallContext context)
@@ -51,6 +54,7 @@ namespace Percolator.Application.Network
                         request.InviterIdentityKey.ToByteArray(),
                         request.Payload.ToByteArray(),
                         request.PayloadSignature.ToByteArray(),
+                        isRelayed: false,
                         context.CancellationToken)
                     .ConfigureAwait(false);
             }
@@ -115,7 +119,7 @@ namespace Percolator.Application.Network
             throw new RpcException(new Status(StatusCode.Internal, $"Ingress failed: {result.Disposition}"));
         }
 
-        public override Task<DeliverInviteHandshakeResponseAck> DeliverInviteHandshakeResponse(InviteHandshakeResponse request, ServerCallContext context)
+        public override async Task<DeliverInviteHandshakeResponseAck> DeliverInviteHandshakeResponse(InviteHandshakeResponse request, ServerCallContext context)
         {
             if (!request.HasRequestCorrelationId || string.IsNullOrWhiteSpace(request.RequestCorrelationId))
             {
@@ -136,7 +140,8 @@ namespace Percolator.Application.Network
 
             _logger.LogInformation("Received InviteHandshakeResponse for correlation {CorrelationId}", request.RequestCorrelationId);
 
-            return Task.FromResult(new DeliverInviteHandshakeResponseAck { Version = 1 });
+            await _inviteHandshakeResponseIngress.HandleAsync(request, context.CancellationToken).ConfigureAwait(false);
+            return new DeliverInviteHandshakeResponseAck { Version = 1 };
         }
     }
 }

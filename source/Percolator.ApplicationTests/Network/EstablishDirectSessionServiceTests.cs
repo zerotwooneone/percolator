@@ -98,7 +98,7 @@ namespace Percolator.ApplicationTests.Network
                 callbackValidator.Object);
 
             // Act
-            _ = await svc.QueueInviteAsync(aliceSpki, payloadBytes, payloadSignatureBytes, CancellationToken.None);
+            _ = await svc.QueueInviteAsync(aliceSpki, payloadBytes, payloadSignatureBytes, isRelayed: false, CancellationToken.None);
 
             // Assert
             peerRepo.Verify(r => r.SaveAsync(It.IsAny<PeerIdentity>(), It.IsAny<CancellationToken>()), Times.Once);
@@ -165,7 +165,7 @@ namespace Percolator.ApplicationTests.Network
                 callbackValidator.Object);
 
             // Act + Assert
-            Assert.ThrowsAsync<InvalidOperationException>(() => svc.QueueInviteAsync(aliceSpki, payloadBytes, payloadSignatureBytes, CancellationToken.None));
+            Assert.ThrowsAsync<InvalidOperationException>(() => svc.QueueInviteAsync(aliceSpki, payloadBytes, payloadSignatureBytes, isRelayed: false, CancellationToken.None));
 
             // Verify no side effects when signature invalid
             pendingRepo.Verify(r => r.AddAsync(It.IsAny<PendingSession>(), It.IsAny<CancellationToken>()), Times.Never);
@@ -248,7 +248,7 @@ namespace Percolator.ApplicationTests.Network
                 callbackValidator.Object);
 
             // Act + Assert
-            Assert.ThrowsAsync<InvalidOperationException>(() => svc.QueueInviteAsync(inviterSpki, payloadBytes, payloadSignatureBytes, CancellationToken.None));
+            Assert.ThrowsAsync<InvalidOperationException>(() => svc.QueueInviteAsync(inviterSpki, payloadBytes, payloadSignatureBytes, isRelayed: false, CancellationToken.None));
 
             pendingRepo.Verify(r => r.AddAsync(It.IsAny<PendingSession>(), It.IsAny<CancellationToken>()), Times.Never);
             peerRepo.Verify(r => r.SaveAsync(It.IsAny<PeerIdentity>(), It.IsAny<CancellationToken>()), Times.Never);
@@ -319,7 +319,7 @@ namespace Percolator.ApplicationTests.Network
                 callbackValidator.Object);
 
             // Act + Assert
-            Assert.ThrowsAsync<InvalidOperationException>(() => svc.QueueInviteAsync(inviterSpki, payloadBytes, payloadSignatureBytes, CancellationToken.None));
+            Assert.ThrowsAsync<InvalidOperationException>(() => svc.QueueInviteAsync(inviterSpki, payloadBytes, payloadSignatureBytes, isRelayed: false, CancellationToken.None));
 
             pendingRepo.Verify(r => r.AddAsync(It.IsAny<PendingSession>(), It.IsAny<CancellationToken>()), Times.Never);
             peerRepo.Verify(r => r.SaveAsync(It.IsAny<PeerIdentity>(), It.IsAny<CancellationToken>()), Times.Never);

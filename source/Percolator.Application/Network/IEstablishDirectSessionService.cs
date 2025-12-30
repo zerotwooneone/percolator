@@ -11,5 +11,6 @@ public interface IEstablishDirectSessionService
         byte[] inviterIdentityKeySpki,
         byte[] payloadBytes,
         byte[] payloadSignatureBytes,
+        bool isRelayed,
         CancellationToken cancellationToken);
 }

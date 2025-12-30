@@ -112,6 +112,8 @@ public static class ServiceCollectionExtensions
 
         services.AddScoped<IInviteHandshakeResponseDeliveryService, InviteHandshakeResponseDeliveryService>();
 
+        services.AddScoped<IInviteHandshakeResponseIngress, InviteHandshakeResponseIngress>();
+
         // Register the hosted service that runs the discovery (can be disabled in tests)
         var discoveryEnabled = configuration.GetValue<bool>("PeerDiscovery:Enabled", true);
         if (discoveryEnabled)
