@@ -445,6 +445,93 @@ Required tests:
 
 ---
 
+## Chunk 11 — Relay transport correctness: dumb opaque queue for both post-session messages and reverse-signal (no sender retention)
+
+Intent: Make relaying protocol-correct and privacy-preserving:
+
+- The relay is a **dumb forwarder/queue of bytes**.
+- The relay **must not inspect payload bytes** (handshake vs chat must be indistinguishable).
+- The relay **must not retain the sender identity** once bytes are enqueued.
+- Relayed delivery must work for:
+  - post-session messaging (Double Ratchet ciphertext), and
+  - reverse-signal invites and reverse-signal responses.
+
+Problem statement / gap to close:
+
+- Today, we have a relay queue mechanism that can deliver an **opaque blob** to a recipient via the recipient’s existing Host↔Client session:
+  - enqueue request: `Percolator.Contracts.EnqueueOpaqueMessageRequest` (wrapped in `InternalEnvelope.MessageQueueEnvelope`)
+  - host delivery wrapper: `Percolator.Contracts.RelayOpaqueEnvelope`
+  - host ack: `Percolator.Contracts.RelayOpaqueResponse`
+  - relay loop: `Percolator.Application.Network.RelayOrchestrator`
+  - recipient intake: `Percolator.Application.Network.DeliverOpaqueMessageHandler` -> `ProcessRelayedOpaquePayloadCommand`
+
+- The queue persistence already matches the privacy invariant (no sender retention):
+  - repository: `Percolator.MessageQueue.Abstractions.IMessageQueueRepository` stores only `(AckId, RecipientPeerId, Blob, EnqueuedAtUtc)`
+  - DB row: `Percolator.Infrastructure.Persistence.MessageQueueItemDbo` contains **no sender fields**
+
+- The transport already supports "send via relay" as dumb enqueue-to-recipient-by-routing-key:
+  - `Percolator.Application.Network.NetworkTransportPortAdapter.SendViaRelayAsync(...)` resolves recipient PKH via `IPeerPublicSigningKeyStore` and sends an `EnqueueOpaqueMessageRequest` to the relay host.
+
+- The remaining gap is at **recipient intake**:
+  - `ProcessRelayedOpaquePayloadCommand` currently only supports **post-session** payloads (ratchet -> decrypt -> `InternalEnvelope`).
+  - It does not yet support **reverse-signal** payloads delivered as opaque blobs (invite request or invite response).
+
+Design principle (idiomatic DDD):
+
+- **Transport/Relay layer** knows only how to:
+  - accept an opaque blob for a *recipient routing key* (e.g., recipient public key hash / recipient peer id),
+  - store the blob (ack id + bytes), and
+  - later deliver the blob to that recipient over the recipient’s Host↔Client session.
+- **Application layer** owns:
+  - interpreting the blob (ratchet message vs reverse-signal invite vs reverse-signal response),
+  - performing signature verification / replay protection, and
+  - orchestrating persistence and notifications.
+
+Deliverables:
+
+1) Confirm/lock the privacy invariant (already true; keep it true)
+   - Treat `IMessageQueueRepository` and `MessageQueueItemDbo` shape as normative: no sender identity fields.
+   - Ensure any message-queue DTOs/handlers do not persist sender metadata.
+
+2) Make recipient relay intake support reverse-signal bytes (the real missing piece)
+   - Extend `Percolator.Application.Network.Handshake.ProcessRelayedOpaquePayloadCommand` to treat `OpaquePayload` as "unknown bytes" and attempt, in order:
+     - **Ratchet path** (existing): parse as `SessionRatchetMessage`, decrypt, parse `InternalEnvelope`, dispatch.
+     - **Reverse-signal invite path** (NEW): if bytes parse as `Percolator.Contracts.EstablishDirectSessionRequest`, route to the same logic used for direct gRPC `EstablishDirectSession`.
+     - **Reverse-signal response path** (NEW): if bytes parse as `Percolator.Contracts.InviteHandshakeResponse`, route to the same logic used for direct gRPC `DeliverInviteHandshakeResponse`.
+   - These paths must not depend on relay knowing sender identity.
+   - Fail closed for unknown payloads.
+
+3) Unify "direct gRPC" and "relayed opaque" ingress through a single application port per message type
+   - Introduce application-level ingress ports (or reuse existing ones) so both transports call the same entry point:
+     - `EstablishDirectSessionRequest` ingress (invite queued for approval)
+     - `InviteHandshakeResponse` ingress (inviter-side correlation/finalization)
+   - `GrpcSessionService` should call these ports.
+   - `ProcessRelayedOpaquePayloadCommand` should call these same ports.
+
+4) Reverse-signal outbound must be relay-first without handshake-aware relay routing
+   - For responses, `InviteHandshakeResponseDeliveryService` already uses `_transport.SendViaRelayAsync(...)` when direct callback is null.
+   - Extend the inviter-side invite sending so it can also choose `_transport.SendViaRelayAsync(...)` by serializing an `EstablishDirectSessionRequest` as opaque bytes destined to the acceptor PKH.
+   - Confirm `NetworkTransportPortAdapter.SendViaRelayAsync` remains payload-agnostic (it already just enqueues raw bytes).
+
+5) Simulator alignment
+   - Add simulator coverage for the relay path by enqueueing:
+     - `EstablishDirectSessionRequest` bytes via relay enqueue
+     - `InviteHandshakeResponse` bytes via relay enqueue
+   - This validates that relay transport does not need to understand message type.
+
+Required tests (must follow `unit-testing.md`):
+
+- Relay intake test: opaque payload containing a valid `SessionRatchetMessage` is decrypted and dispatched via `ProcessInternalEnvelopeCommand`.
+- Relay intake test: opaque payload containing a valid `EstablishDirectSessionRequest` is processed via the same ingress port as direct gRPC and results in a pending handshake + `PendingHandshakeAdded`.
+- Relay intake test: opaque payload containing a valid `InviteHandshakeResponse` is processed via the same ingress port as direct gRPC (inviter-side handler).
+- Privacy test (persistence): `MessageQueueItemDbo` (and any future replacements) contains no sender identity fields; repository writes do not add any sender metadata.
+
+Deletion point (required):
+
+- Remove any remaining relay paths that depend on plaintext pre-session handshake messages (e.g., `HandshakeInitiatorHello`) once reverse-signal relay is implemented via opaque queue.
+
+---
+
 Exit criteria:
 
 - Accepting a pending handshake produces an outbound send action for `InviteHandshakeResponse` and reports whether it went direct or relay.
