@@ -9,9 +9,9 @@ using Percolator.Contracts;
 using Percolator.Identity;
 using Percolator.MessageQueue.Commands;
 using Percolator.Application.Sessions;
-using Percolator.Application.Services;
 using Percolator.Cryptography;
 using System.Collections.Generic;
+using Percolator.Application.Services;
 using Percolator.MessageQueue.Primitives;
 using Percolator.Network;
 
@@ -35,7 +35,6 @@ namespace Percolator.Application.Network.Handshake
         private readonly IRatchetKeyIndex _ratchetLookup;
         private readonly IActiveIdentityAccessor _activeIdentityAccessor;
         private readonly ActiveIdentityContext _active;
-        private readonly IMessageService _messageService;
 
         private static readonly HashSet<InternalEnvelope.ApplicationPayloadOneofCase> AllowedCases = new()
         {
@@ -57,8 +56,7 @@ namespace Percolator.Application.Network.Handshake
             ISecureMessagingService secureMessaging,
             IRatchetKeyIndex ratchetLookup,
             IActiveIdentityAccessor activeIdentityAccessor,
-            ActiveIdentityContext active,
-            IMessageService messageService)
+            ActiveIdentityContext active)
         {
             _logger = logger;
             _mediator = mediator;
@@ -66,7 +64,6 @@ namespace Percolator.Application.Network.Handshake
             _ratchetLookup = ratchetLookup;
             _activeIdentityAccessor = activeIdentityAccessor;
             _active = active;
-            _messageService = messageService;
         }
 
         public async Task<ProcessRelayedOpaquePayloadResponse> Handle(ProcessRelayedOpaquePayloadCommand request, CancellationToken cancellationToken)
@@ -90,8 +87,8 @@ namespace Percolator.Application.Network.Handshake
             }
             catch
             {
-                // Not a valid ratchet message; attempt plaintext HandshakeInitiatorHello fallback
-                return await TryHandlePlaintextHelloAsync(request.OpaquePayload, request.RelayHostPeerId, cancellationToken).ConfigureAwait(false);
+                // Not a valid ratchet message
+                return ProcessRelayedOpaquePayloadResponse.Failure;
             }
 
             (RatchetEphemeralKey PreKey, ulong Counter, ulong PreviousChainLength) header;
@@ -101,43 +98,6 @@ namespace Percolator.Application.Network.Handshake
             }
             catch (Exception drEx)
             {
-                // Not a valid ratchet message; attempt plaintext HandshakeInitiatorHello fallback
-                var hello = HandshakeInitiatorHello.Parser.ParseFrom(request.OpaquePayload.Value);
-                if (hello is null || !hello.HasInitiatorIdentityKeySpki || !hello.HasInitiatorEphemeralKeySpki ||
-                    !hello.HasSignedPreKeyId)
-                {
-                    _logger.LogError(drEx,
-                        "Error processing opaque message (DR path), and payload was not a valid HandshakeInitiatorHello");
-                    throw;
-                }
-
-                var spki = hello.InitiatorIdentityKeySpki.ToByteArray();
-                var eph = hello.InitiatorEphemeralKeySpki.ToByteArray();
-                var spkId = new Guid(hello.SignedPreKeyId.ToByteArray());
-                Guid? otkId = hello.HasOneTimePreKeyId ? new Guid(hello.OneTimePreKeyId.ToByteArray()) : (Guid?)null;
-
-                var hsResult = await _mediator.Send(
-                    new Percolator.Application.Network.Handshake.HandleHandshakeInitiatorHelloCommand(
-                        spki,
-                        eph,
-                        spkId,
-                        otkId,
-                        null,
-                        hello.HasEncryptedPayload ? hello.EncryptedPayload.ToByteArray() : null,
-                        RelayHostPeerId: request.RelayHostPeerId),
-                    cancellationToken).ConfigureAwait(false);
-
-                if (hsResult is null)
-                {
-                    return ProcessRelayedOpaquePayloadResponse.Failure;
-                }
-                // Send the pre-encrypted responder hello to the initiator using direct-first, relay-fallback
-                var send = await _messageService.SendPreEncryptedAsync(hsResult.RemotePeerId, hsResult.Cipher, cancellationToken).ConfigureAwait(false);
-                _logger.LogInformation("Handshake responder message attempted via {Path}", send.Path);
-                if (send.Success)
-                {
-                    return ProcessRelayedOpaquePayloadResponse.Success;
-                }
                 return ProcessRelayedOpaquePayloadResponse.Failure;
             }
 
@@ -145,16 +105,14 @@ namespace Percolator.Application.Network.Handshake
             var resolved = await _secureMessaging.DecryptInboundAsync(ratchetMessage, cancellationToken).ConfigureAwait(false);
             if (resolved is null)
             {
-                // Fallback: raw payload might be a plaintext HandshakeInitiatorHello
-                return await TryHandlePlaintextHelloAsync(request.OpaquePayload, request.RelayHostPeerId, cancellationToken).ConfigureAwait(false);
+                return ProcessRelayedOpaquePayloadResponse.Failure;
             }
             var sid = resolved.Value.sessionId;
             var plaintext = resolved.Value.plaintext;
 
             if (plaintext is null)
             {
-                _logger.LogWarning("Relayed DR message could not be decrypted; attempting plaintext HandshakeInitiatorHello fallback");
-                return await TryHandlePlaintextHelloAsync(request.OpaquePayload, request.RelayHostPeerId, cancellationToken).ConfigureAwait(false);
+                return ProcessRelayedOpaquePayloadResponse.Failure;
             }
 
             InternalEnvelope inner;
@@ -164,8 +122,8 @@ namespace Percolator.Application.Network.Handshake
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Decrypted relayed payload was not a valid InternalEnvelope; attempting plaintext HandshakeInitiatorHello fallback");
-                return await TryHandlePlaintextHelloAsync(request.OpaquePayload, request.RelayHostPeerId, cancellationToken).ConfigureAwait(false);
+                _logger.LogWarning(ex, "Decrypted relayed payload was not a valid InternalEnvelope; dropping");
+                return ProcessRelayedOpaquePayloadResponse.Failure;
             }
 
             if (!AllowedCases.Contains(inner.ApplicationPayloadCase))
@@ -179,51 +137,6 @@ namespace Percolator.Application.Network.Handshake
                 inner,
                 new Percolator.Application.Network.SessionContext(sid.Value, _active.Identity.SelfIdentityId.Value, null)
             ), cancellationToken).ConfigureAwait(false);
-
-            return ProcessRelayedOpaquePayloadResponse.Success;
-        }
-
-        private async Task<ProcessRelayedOpaquePayloadResponse> TryHandlePlaintextHelloAsync(
-            Payload payload, 
-            Percolator.Identity.PeerId relayHostPeerId, 
-            CancellationToken cancellationToken)
-        {
-            try
-            {
-                var hello = HandshakeInitiatorHello.Parser.ParseFrom(payload.Value);
-                if (hello is not null && hello.HasInitiatorIdentityKeySpki && hello.HasInitiatorEphemeralKeySpki && hello.HasSignedPreKeyId)
-                {
-                    var spki = hello.InitiatorIdentityKeySpki.ToByteArray();
-                    var eph = hello.InitiatorEphemeralKeySpki.ToByteArray();
-                    var spkId = new Guid(hello.SignedPreKeyId.ToByteArray());
-                    Guid? otkId = hello.HasOneTimePreKeyId ? new Guid(hello.OneTimePreKeyId.ToByteArray()) : (Guid?)null;
-
-                    var hsResult = await _mediator.Send(
-                        new HandleHandshakeInitiatorHelloCommand(
-                            spki,
-                            eph,
-                            spkId,
-                            otkId,
-                            null,
-                            hello.HasEncryptedPayload ? hello.EncryptedPayload.ToByteArray() : null,
-                            RelayHostPeerId: relayHostPeerId),
-                        cancellationToken).ConfigureAwait(false);
-                    if (hsResult is null)
-                    {
-                        return ProcessRelayedOpaquePayloadResponse.Failure;
-                    }
-                    var send = await _messageService.SendPreEncryptedAsync(hsResult.RemotePeerId, hsResult.Cipher, cancellationToken).ConfigureAwait(false);
-                    _logger.LogInformation("Handshake responder message attempted via {Path}", send.Path);
-                    if (!send.Success)
-                    {
-                        return ProcessRelayedOpaquePayloadResponse.Failure;
-                    }
-                }
-            }
-            catch
-            {
-                return ProcessRelayedOpaquePayloadResponse.Failure;
-            }
 
             return ProcessRelayedOpaquePayloadResponse.Success;
         }
