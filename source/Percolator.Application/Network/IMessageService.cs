@@ -10,7 +10,6 @@ namespace Percolator.Application.Network
     {
         Task<SendResult> SendMessageAsync(InternalEnvelope envelope, PeerId recipientPeerId, CancellationToken ct = default);
         Task<(SendResult Result, Percolator.Contracts.DeliverOpaqueMessageResponse? Response)> SendMessageWithResponseAsync(InternalEnvelope envelope, PeerId recipientPeerId, CancellationToken ct = default);
-        Task<SendResult> SendPreEncryptedAsync(PeerId recipientPeerId, SessionRatchetMessage cipher, CancellationToken ct = default);
     }
 
     public sealed class SendResult

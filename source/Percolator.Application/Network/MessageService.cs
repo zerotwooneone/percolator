@@ -108,50 +108,6 @@ namespace Percolator.Application.Network
             return (SendResult.CreateSuccess(outcome.Path, outcome.AttemptedPaths.ToArray(), outcome.Attempts), resp);
         }
 
-        public async Task<SendResult> SendPreEncryptedAsync(PeerId recipientPeerId, SessionRatchetMessage cipher, CancellationToken ct = default)
-        {
-            if (_active.Identity is null)
-                throw new InvalidOperationException("Active identity not initialized");
-
-            if (_wireTap.Enabled)
-            {
-                if (_wireTap.Mode == SimulatorOutboundMode.SimulateOnly)
-                {
-                    const string sendPath = "Simulated";
-                    _wireTap.Tap(new OutboundWireMessage(
-                        DestinationPeerId: new Percolator.Network.PeerId(recipientPeerId.Value),
-                        SendPath: sendPath,
-                        MessageType: "EncryptedEnvelope",
-                        RequestCorrelationId: null,
-                        PayloadBytes: cipher.Value,
-                        PayloadLength: cipher.Value.Length));
-                    return SendResult.CreateSuccess(sendPath, new[] { sendPath }, attempts: 0);
-                }
-            }
-
-            // Use Network domain sender with DirectThenRelay strategy. Payload must be the recipient-targeted DR ciphertext.
-            var target = new Percolator.Network.PeerId(recipientPeerId.Value);
-            var payload = new NetworkPayload(cipher.Value);
-            var outcome = await _networkSender.SendAsync(target, payload, SendStrategy.DirectThenRelay, ct).ConfigureAwait(false);
-
-            if (_wireTap.Enabled)
-            {
-                _wireTap.Tap(new OutboundWireMessage(
-                    DestinationPeerId: target,
-                    SendPath: outcome.Path,
-                    MessageType: "EncryptedEnvelope",
-                    RequestCorrelationId: null,
-                    PayloadBytes: cipher.Value,
-                    PayloadLength: cipher.Value.Length));
-            }
-
-            if (outcome.Success)
-            {
-                return SendResult.CreateSuccess(outcome.Path, outcome.AttemptedPaths.ToArray(), attempts: outcome.Attempts);
-            }
-            return SendResult.CreateFailure(outcome.AttemptedPaths.ToArray(), attempts: outcome.Attempts, lastError: outcome.LastError);
-        }
-
         public async Task<SendResult> SendMessageAsync(InternalEnvelope envelope, PeerId recipientPeerId, CancellationToken ct = default)
         {
             if (_active.Identity is null)

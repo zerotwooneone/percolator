@@ -6,7 +6,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
-using Percolator.Application.Ingress;
 using Percolator.Application.Network;
 using Percolator.Contracts;
 using Percolator.Cryptography;
@@ -16,7 +15,7 @@ namespace Desktop.Wpf.Features.Simulator;
 
 public interface IPendingHandshakeSimulatorService
 {
-    Task<PendingHandshakeIngressResult> AddSyntheticPendingAsync(string? displayName = null, byte[]? invitationPayload = null, CancellationToken ct = default);
+    Task<RequestCorrelationId> AddSyntheticPendingAsync(string? displayName = null, CancellationToken ct = default);
 
     Task<IReadOnlyList<RequestCorrelationId>> AddSyntheticPendingsAsync(int count, CancellationToken ct = default);
     IReadOnlyList<SimulatedPeerSnapshot> SnapshotPeers();
@@ -43,7 +42,6 @@ public sealed class PendingHandshakeSimulatorService : IPendingHandshakeSimulato
         public SimulatedPeerState State;
     }
 
-    private readonly IPendingHandshakeIngress _pendingIngress;
     private readonly IEstablishDirectSessionService _establish;
     private readonly IOutboundMessageWireTap _wireTap;
 
@@ -51,45 +49,54 @@ public sealed class PendingHandshakeSimulatorService : IPendingHandshakeSimulato
     private readonly HashSet<string> _seenOutbound = new(StringComparer.Ordinal);
 
     public PendingHandshakeSimulatorService(
-        IPendingHandshakeIngress pendingIngress,
         IEstablishDirectSessionService establish,
         IOutboundMessageWireTap wireTap)
     {
-        _pendingIngress = pendingIngress ?? throw new ArgumentNullException(nameof(pendingIngress));
         _establish = establish ?? throw new ArgumentNullException(nameof(establish));
         _wireTap = wireTap ?? throw new ArgumentNullException(nameof(wireTap));
     }
 
-    public async Task<PendingHandshakeIngressResult> AddSyntheticPendingAsync(string? displayName = null, byte[]? invitationPayload = null, CancellationToken ct = default)
+    public async Task<RequestCorrelationId> AddSyntheticPendingAsync(string? displayName = null, CancellationToken ct = default)
     {
-        // Build a realistic HandshakeInitiatorHello per request (fresh keys)
-        // Identity key: ECDSA P-256 (SPKI)
-        byte[] identitySpki;
-        using (var ecdsa = ECDsa.Create(ECCurve.NamedCurves.nistP256))
-        {
-            identitySpki = ecdsa.ExportSubjectPublicKeyInfo();
-        }
+        var correlation = new RequestCorrelationId(Guid.NewGuid());
 
-        // Ephemeral ratchet key: ECDH P-256 (SPKI)
-        byte[] ephSpki;
-        using (var ecdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256))
-        {
-            ephSpki = ecdh.ExportSubjectPublicKeyInfo();
-        }
+        // Inviter identity key (ECDSA P-256)
+        using var inviterEcdsa = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var inviterSpki = inviterEcdsa.ExportSubjectPublicKeyInfo();
 
-        var hello = new HandshakeInitiatorHello
+        // Signed pre-key bundle: we only need a signed pre-key SPKI + signature
+        using var inviterSignedPreKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        var inviterSignedPreKeySpki = inviterSignedPreKey.PublicKey.ExportSubjectPublicKeyInfo();
+        var preKeySig = inviterEcdsa.SignData(inviterSignedPreKeySpki, HashAlgorithmName.SHA256);
+
+        var payload = new InviteHandshakeRequestPayload
         {
-            InitiatorIdentityKeySpki = ByteString.CopyFrom(identitySpki),
-            InitiatorEphemeralKeySpki = ByteString.CopyFrom(ephSpki),
-            SignedPreKeyId = ByteString.CopyFrom(Guid.NewGuid().ToByteArray())
+            Version = 1,
+            InviterHost = "example.com",
+            InviterPort = 443,
+            ExpiresAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow.AddMinutes(10)),
+            RequestCorrelationId = correlation.ToString(),
+            InviterPreKey = new InviteHandshakePreKeyBundle
+            {
+                Version = 1,
+                InviterSignedPreKey = ByteString.CopyFrom(inviterSignedPreKeySpki),
+                PreKeySignature = ByteString.CopyFrom(preKeySig)
+            }
         };
-        if (invitationPayload is not null && invitationPayload.Length > 0)
-        {
-            hello.EncryptedPayload = ByteString.CopyFrom(invitationPayload);
-        }
 
-        var helloBytes = hello.ToByteArray();
-        return await _pendingIngress.CreateFromInitiatorHelloAsync(helloBytes, displayName, ttl: null, ct).ConfigureAwait(false);
+        var payloadBytes = payload.ToByteArray();
+        var payloadSig = inviterEcdsa.SignData(payloadBytes, HashAlgorithmName.SHA256);
+
+        _ = await _establish.QueueInviteAsync(inviterSpki, payloadBytes, payloadSig, isRelayed: false, ct).ConfigureAwait(false);
+
+        _peersByCorrelation[correlation.Value] = new SimulatedPeer
+        {
+            CorrelationId = correlation,
+            DisplayName = displayName,
+            State = SimulatedPeerState.PendingInvite
+        };
+
+        return correlation;
     }
 
     public async Task<IReadOnlyList<RequestCorrelationId>> AddSyntheticPendingsAsync(int count, CancellationToken ct = default)

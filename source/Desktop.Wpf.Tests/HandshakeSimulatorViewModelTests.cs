@@ -18,12 +18,11 @@ public sealed class HandshakeSimulatorViewModelTests
     {
         private readonly Dictionary<Guid, SimulatedPeerState> _states = new();
 
-        public Task<Percolator.Application.Ingress.PendingHandshakeIngressResult> AddSyntheticPendingAsync(
-            string? displayName = null,
-            byte[]? invitationPayload = null,
-            CancellationToken ct = default)
+        public Task<RequestCorrelationId> AddSyntheticPendingAsync(string? displayName = null, CancellationToken ct = default)
         {
-            throw new NotImplementedException();
+            var id = new RequestCorrelationId(Guid.NewGuid());
+            _states[id.Value] = SimulatedPeerState.PendingInvite;
+            return Task.FromResult(id);
         }
 
         public Task<IReadOnlyList<RequestCorrelationId>> AddSyntheticPendingsAsync(int count, CancellationToken ct = default)

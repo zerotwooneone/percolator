@@ -132,7 +132,6 @@ public static class ServiceCollectionExtensions
 
         // Application-layer envelope sender
         services.AddScoped<IMessageService, MessageService>();
-        services.AddScoped<Handshake.IInitiatorHelloService, Handshake.InitiatorHelloService>();
         services.AddScoped<Handshake.IInitiatorFinalizeService, Handshake.InitiatorFinalizeService>();
         services.AddTransient<IRemoteEnvelopeSender, RemoteEnvelopeSender>();
 
