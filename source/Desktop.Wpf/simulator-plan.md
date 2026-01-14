@@ -2,257 +2,421 @@
 
 This document defines an *implementable* plan for overhauling the WPF simulator.
 
-The simulator’s purpose is to:
-- Drive **reverse-signal** and **relay** scenarios deterministically.
-- Exercise the real Application-layer ingress/commands instead of custom test-only flows.
-- Provide a UI to create peers, initiate/accept/reject handshakes, and send messages.
+## Requirements checklist (must be supported)
 
-## Simulator transport model (critical)
+The simulator must support all of the following scenarios and UI actions:
 
-The simulator is a **network-free driver and observer**.
+### Peer management
+- Add/remove simulated peers.
+- Toggle peer online/offline.
+- Persist simulator state (peers + configuration) across runs.
 
-- The **main node** runs normally and sends messages through the real Application transport abstractions.
-- The simulator **does not intercept or route** outbound transport calls.
-- The simulator **observes outbound messages** (wiretap) to correlate state transitions and to show what the main node attempted to send.
-- When a simulated peer delivers a message *to* the main node, it should call the **real gRPC service entrypoint methods** (or the same Application ingress the gRPC endpoint uses). This keeps the stack “real” except for the physical network.
+### Handshake simulation (must cover both directions)
 
-Implications:
-- We do **not** stand up fake gRPC servers per simulated peer.
-- We do **not** bypass ingress by calling internal repositories directly.
-- Relay behavior is simulated by producing/consuming the **same opaque bytes** that would have flowed through the relay.
-- Outbound sends from the main node to a simulated peer are **observed only** (unless we later add a transport plug-in).
+The simulator must be able to simulate sending and receiving handshake requests for:
+
+- **Signal / standard X3DH flow** (“signal”)
+  - Simulated peer initiates a standard session with main node.
+  - Main node initiates a standard session with simulated peer.
+
+- **Reverse-signal flow**
+  - Simulated peer invites main node to initiate.
+  - Main node invites simulated peer to initiate.
+
+For each of the above, the simulator must support both:
+- **Direct** delivery (gRPC-like ingress, network-free)
+- **Relayed** delivery (opaque bytes via relay, network-free)
+
+### Relay-hosted pre-key store simulation (required for standard Signal/X3DH)
+
+The simulator must support pre-key bundle storage and lookup as part of **relay-capable simulated peers**:
+
+- Any simulated peer may be marked as **relay-capable**.
+- A relay-capable simulated peer hosts a pre-key bundle store keyed by recipient PKH.
+- The pre-key store can hold bundles for:
+  - other simulated peers
+  - the main node
+- The simulator UI must allow copying a simulated peer’s lookup key (PKH) so the main node can initiate a standard handshake with that simulated peer.
+
+### Accept / reject
+- Main node can approve or reject incoming handshake requests.
+- Simulated peer can accept or reject incoming handshake requests.
+
+### Relay simulation
+- Simulate a dumb relay as a queue of opaque bytes keyed only by recipient routing key.
+- Do not persist or attach sender identity to relay queue items.
+
+---
+
+## Simulator transport model
+
+- Baseline model: **network-free driver + observer**.
+  - Simulated peers deliver inbound messages to the main node by calling the same ingress as the gRPC endpoints.
+  - The simulator uses outbound wiretap only for observation.
+
+- Additionally (required for “main node initiates → simulated peer receives”): a **transport plug-in** exists in the simulator runtime to intercept a subset of outbound sends and route them to simulated peers.
+  - No fake gRPC servers.
+  - Does not affect non-simulator execution.
 
 ## Current constraints / ground truth (must match code)
 
-- Simulator should inject inbound handshakes via:
-  - `IEstablishDirectSessionService.QueueInviteAsync(..., isRelayed: false|true, ...)` for reverse-signal invites.
-- Relayed opaque intake supports:
-  - ratchet ciphertext -> `InternalEnvelope`
-  - relayed `EstablishDirectSessionRequest`
-  - relayed `InviteHandshakeResponse`
+- Reverse-signal invite ingress:
+  - `IEstablishDirectSessionService.QueueInviteAsync(..., isRelayed: false|true, ...)`
+- Relay intake ingress:
+  - `ProcessRelayedOpaquePayloadCommand` can parse:
+    - ratchet ciphertext -> `InternalEnvelope`
+    - relayed `EstablishDirectSessionRequest`
+    - relayed `InviteHandshakeResponse`
+
+- Standard (non-reverse) handshake protocol artifacts already present:
+  - Protobuf RPC request/response types exist:
+    - `Percolator.Contracts/Protos/messaging.proto`:
+      - `EstablishSessionRequest`
+      - `EstablishSessionResponse`
+  - Protobuf initiator bootstrap message exists:
+    - `Percolator.Contracts/Protos/internal_messaging.proto`:
+      - `HandshakeInitiatorHello`
+  - Initiator-side finalize path exists (responder’s first ratchet message):
+    - `Percolator.Application/Network/Handshake/HandleHandshakeResponderHelloCommand.cs`
+    - `Percolator.Application/Network/Handshake/InitiatorFinalizeService.cs`
+  - A standard-handshake service stub exists:
+    - `Percolator.Application/Services/IHandshakeService.cs`
+    - `Percolator.Application/Services/HandshakeService.cs` (currently minimal/stub)
+
+- Standard (non-reverse) handshake ingress is NOT currently wired:
+  - `Percolator.Application/Network/PercolatorMessageService.cs` implements:
+    - `EstablishDirectSession` (reverse-signal invite)
+    - `DeliverInviteHandshakeResponse` (reverse-signal response)
+    - `DeliverOpaqueMessage` (post-session + relay wrapper)
+  - It does not currently implement `EstablishSession`.
+  - No Application handler/ingress currently parses `HandshakeInitiatorHello` on inbound.
+
+- Pre-key exchange protobufs already exist (used over an established session today):
+  - `Percolator.Contracts/Protos/internal_messaging.proto`
+    - `PrekeyEnvelope`
+    - `SubmitPreKeyBundleRequest` / `SubmitPreKeyBundleResponse`
+    - `GetPreKeyBundleRequest` / `GetPreKeyBundleResponse`
+    - `GetPreKeyBundleRequest` lookup key is `public_key_hash` (SHA-256 of recipient identity signing public key SPKI)
+  - Reference handlers:
+    - `Percolator.Prekey/Handlers/SubmitPreKeyBundleHandler.cs`
+    - `Percolator.Prekey/Handlers/GetPreKeyBundleHandler.cs`
 
 ## Glossary
 
-- **Main node**: the currently running desktop app instance.
+- **Main node**: the running desktop app instance.
 - **Simulated peer**: a test actor represented in the simulator UI. It does not run its own node process.
-- **Reverse-signal invite**: `EstablishDirectSessionRequest` containing signed `InviteHandshakeRequestPayload`.
-- **Invite response**: `InviteHandshakeResponse` containing the acceptor’s first ratchet message.
-
-## Explicit non-goals (for now)
-
-- No real sockets / no actual network I/O.
-- No real DHT protocol emulation; we simulate “nearest peers” via deterministic lists.
-- No real message delivery receipts until chat message plumbing is in place.
+- **Signal / standard X3DH**: the initiator sends the initial handshake message to the acceptor, and the acceptor responds with their first ratchet message.
+- **Reverse-signal**: the inviter sends a signed invitation which prompts the acceptor to initiate.
+- **Pre-key store (relay-hosted)**: a store hosted by a relay-capable simulated peer where bundles are published and fetched by an out-of-band lookup key (PKH).
 
 ---
 
-# Chunk 0 — Align simulator API surface with current handshake ingress
+## Recommended implementation order
+
+The chunks below are written in a conceptual grouping. The recommended implementation order is:
+
+- Chunk A
+- Chunk B
+- Chunk E
+- Chunk C
+- Chunk D
+- Chunk F
+
+# Chunk A — Simulator shell: peer model, persistence, and UI
 
 ## Goal
-Ensure the simulator uses only the current supported ingress points and compiles cleanly.
+Provide a persisted peer model and a UI that can add/remove peers and drive actions.
 
 ## Work
-- `Desktop.Wpf/Features/Simulator/PendingHandshakeSimulatorService.cs`
-  - Provide:
-    - `Task<RequestCorrelationId> AddSyntheticPendingAsync(string? displayName, CancellationToken ct)`
-    - `Task<IReadOnlyList<RequestCorrelationId>> AddSyntheticPendingsAsync(int count, CancellationToken ct)`
-    - `IReadOnlyList<SimulatedPeerSnapshot> SnapshotPeers()`
-    - `int CorrelateOutboundSnapshot()`
-- `Desktop.Wpf/Features/Simulator/HandshakeSimulatorViewModel.cs`
-  - Use returned `RequestCorrelationId` for status display.
 
-## Done when
-- Desktop.Wpf builds.
-- Desktop.Wpf.Tests builds.
-
----
-
-# Chunk 1 — Define simulator domain model + persistence contract
-
-## Goal
-Persist the simulator state to disk and restore it on startup.
-
-## Data model (serialize as JSON)
-Create `Desktop.Wpf/Features/Simulator/SimulatorState.cs` with DTOs:
-
+### A1) Persisted model
+Create `Desktop.Wpf/Features/Simulator/SimulatorState.cs`:
 - `SimulatorStateDto`
   - `int Version`
   - `List<SimulatedPeerDto> Peers`
   - `List<GroupConversationDto> Groups`
-
 - `SimulatedPeerDto`
-  - `Guid PeerId` (stable simulator identity, not the crypto peer id)
+  - `Guid PeerId`
   - `string? DisplayName`
   - `bool IsOnline`
   - `SimulatedPeerConnectionDto Connection`
-  - `List<Guid> KnownPeerIds` (for “nearest peers” simulation)
-
+  - `List<Guid> KnownPeerIds`
+  - `SimulatedPeerPreKeyStateDto PreKeys`
+  - `SimulatedPeerRelayStateDto Relay`
 - `SimulatedPeerConnectionDto`
   - `ConnectionMode Mode` (`Direct`, `ViaRelay`)
-  - If `Direct`: `string Host`, `int Port`
-  - If `ViaRelay`: `Guid RelayPeerId`
+  - if `Direct`: `string Host`, `int Port`
+  - if `ViaRelay`: `Guid RelayPeerId`
 
-- `GroupConversationDto`
-  - `Guid GroupId`
-  - `string? Name`
-  - `List<Guid> MemberPeerIds` (must include main node + >=2 peers)
+- `SimulatedPeerRelayStateDto`
+  - `bool IsRelayCapable`
+  - `SimulatedRelayOpaqueQueueDto OpaqueQueue`
+  - `SimulatedRelayPreKeyStoreDto PreKeyStore`
 
-## Persistence
+- `SimulatedRelayOpaqueQueueDto`
+  - `int Version`
+  - `List<RelayQueuedBlobDto> Items`
+
+- `RelayQueuedBlobDto`
+  - `byte[] RecipientRoutingKey`
+  - `byte[] OpaqueBytes`
+  - `DateTimeOffset EnqueuedUtc`
+
+- `SimulatedRelayPreKeyStoreDto`
+  - `int Version`
+  - `List<PublishedPreKeyBundleDto> PublishedBundles`
+
+- `PublishedPreKeyBundleDto`
+  - `byte[] RecipientPublicKeyHash` (PKH lookup key)
+  - `Guid LogicalOwnerPeerId` (who this bundle belongs to; may be a simulated peer or the main node)
+  - `byte[] BundleBytes`
+  - `DateTimeOffset ExpiresUtc`
+
+- `SimulatedPeerPreKeyStateDto`
+  - `byte[]? IdentitySigningKeySpki`
+  - `byte[]? SignedPreKeySpki`
+  - `byte[]? SignedPreKeySignature`
+  - `Guid? SignedPreKeyId`
+  - `List<SimulatedOneTimePreKeyDto> OneTimePreKeys`
+  - `DateTimeOffset? ExpiresUtc`
+
+- `SimulatedOneTimePreKeyDto`
+  - `Guid Id`
+  - `byte[] PublicKeySpki`
+
+### A2) Persistence
 Add `ISimulatorStateStore` + `JsonSimulatorStateStore`:
 - Save path: `%AppData%/Percolator/simulator-state.json`
-- Debounce: 250–500ms after last mutation.
+- Debounce: 250–500ms
+
+### A3) UI
+Update simulator UI to support:
+- add/remove peers
+- online/offline toggle
+- display per-peer runtime state
+
+Add Pre-key UI actions per simulated peer:
+- Generate pre-key material for this simulated peer (identity signing key + signed pre-key + N one-time keys).
+- Publish this simulated peer’s bundles to a selected relay-capable peer’s pre-key store.
+- Copy the peer’s lookup key (`PublicKeyHash`) for use in the main node UI.
+
+Add relay-capable peer UI:
+- Toggle `IsRelayCapable`.
+- View opaque relay queue items.
+- View published pre-key bundles (logical owner, PKH, expiry, remaining OTK count).
+- Publish a pre-key bundle on behalf of any simulated peer or the main node.
+
+Host window:
+- `Desktop.Wpf/Features/Simulator/HandshakeSimulatorWindow.xaml`
+
+## Done when
+- You can add/remove peers, toggle online, and state survives restart.
+- You can generate a simulated peer’s pre-key material and copy/paste the lookup key into main node workflows.
 
 ## Tests
-- Unit test: save+load roundtrip yields same DTO.
-- Unit test: debounce collapses rapid consecutive save requests into one write.
+- Save/load roundtrip.
+- Debounce collapses rapid updates.
 
 ---
 
-# Chunk 2 — Implement peer state machine (UI-facing)
+# Chunk B — Core handshake runtime state machine + accept/reject actions
 
 ## Goal
-Each peer has an explicit state machine that drives available actions.
+Make per-peer state transitions explicit and provide accept/reject actions for both main node and simulated peers.
 
-## State definitions
-Create `SimulatedPeerRuntimeState` (not persisted) derived from persisted fields:
+## Work
 
+### B1) Runtime state machine
+Create a runtime state machine that represents:
+- outbound initiation attempts (pending)
+- inbound requests (pending accept/reject)
+- established session
+
+At minimum support these UI-facing states:
 - `Ready`
-  - can send invite to main node.
-- `PendingMainAccept`
-  - peer sent invite; awaiting main node approval.
-- `PendingSimAccept`
-  - main node sent invite; simulated peer must accept/reject.
-- `SessionEstablished`
-  - can send encrypted app messages (future chunk).
+- `OutboundPending` (peer initiated something; awaiting remote result)
+- `InboundPending` (peer received a handshake request; user must accept/reject)
+- `Established`
 - `Offline`
-  - no ingress/egress.
 
-## How transitions occur
-- `Ready -> PendingMainAccept`
-  - when simulator calls `QueueInviteAsync(...)` successfully.
-- `PendingMainAccept -> SessionEstablished`
-  - when outbound wiretap observes `InviteHandshakeResponse` with matching `request_correlation_id` and the simulator treats that as “response delivered”.
-- `PendingMainAccept -> Ready`
-  - if main node rejects/ignores (needs explicit signal; see Questions).
+### B2) Main node accept/reject requires correlation lookup
+Implement `IPendingSessionQueries` in Application layer:
+- `IPendingSessionQueries.TryGetByRequestCorrelationIdAsync(RequestCorrelationId)` -> `PendingSessionId?`
 
-## Tests
-- Unit test: new peer starts `Ready`.
-- Unit test: calling `AddSyntheticPendingAsync` moves peer to `PendingMainAccept`.
-- Unit test: correlating outbound response advances exactly the matching peer.
+Simulator uses this to drive:
+- `ApprovePendingSessionCommand(pendingId)`
+- (if exists) the corresponding reject command, otherwise add an explicit reject command.
+
+### B3) Simulated peer accept/reject
+When the simulated peer receives a handshake request (via transport plug-in or relay fetch injection), the simulator must expose:
+- `Accept`
+- `Reject`
+
+## Done when
+- UI supports accept/reject actions.
+- Main node approval path is deterministic via `IPendingSessionQueries`.
 
 ---
 
-# Chunk 3 — Simulator UI: peer list + add/remove + online toggle
+# Chunk C — Reverse-signal simulation (direct + relayed; both directions)
 
 ## Goal
-Provide a stable UI surface for peer management.
+Support reverse-signal end-to-end in four variants:
+- peer -> main (direct)
+- peer -> main (relayed)
+- main -> peer (direct)
+- main -> peer (relayed)
 
-## UI Requirements
-- List supports:
-  - add peer
-  - remove selected
-  - multi-select
-  - online/offline toggle per peer
-  - display `State` + `RequestCorrelationId` (if pending)
+## Work
 
-## WPF files
-- **question**: which view hosts the simulator? (existing window/page)
-- ViewModels should use `BindableReactiveProperty` for changing props.
-- Styles: use `styles.xaml` base styles.
+### C1) Peer -> main (direct)
+Simulated peer constructs:
+- `InviteHandshakeRequestPayload` + signature
+- `EstablishDirectSessionRequest`
+Deliver via reverse-signal ingress:
+- `IEstablishDirectSessionService.QueueInviteAsync(... isRelayed: false ...)`
 
-## Tests
-- ViewModel test: adding/removing peers updates collection and triggers save.
+Main node approves/rejects via Chunk B.
+
+### C2) Peer -> main (relayed)
+Simulated peer serializes `EstablishDirectSessionRequest` and enqueues it into simulated relay inbox.
+On simulated relay fetch, inject into:
+- `ProcessRelayedOpaquePayloadCommand`
+
+### C3) Main -> peer (direct)
+Requires transport plug-in from Chunk E to deliver outbound invite to simulated peer runtime.
+Simulated peer accept/reject results in `InviteHandshakeResponse` delivered back to main node via the same ingress as gRPC endpoint.
+
+### C4) Main -> peer (relayed)
+Main node sends invite destined for a peer via relay.
+Transport plug-in observes the outbound attempt and enqueues the opaque blob into simulated relay inbox for the target peer.
+Simulated peer fetches, accepts/rejects, and responds (response may also be relayed).
+
+## Done when
+- All four reverse-signal variants can be exercised from the simulator UI.
 
 ---
 
-# Chunk 4 — Handshake actions (main node approval + simulated peer approval)
+# Chunk D — Signal (standard X3DH) simulation (direct + relayed; both directions)
 
 ## Goal
-Wire accept/reject to real Application commands.
+Support standard Signal/X3DH initiation (non-reverse) for:
+- peer -> main (direct + relayed)
+- main -> peer (direct + relayed)
 
-## Main node approval
-- Existing: `ApprovePendingSessionCommand(pendingId)` (already used in `PendingHandshakesMenuViewModel`).
-- Simulator needs a way to map `request_correlation_id` -> `PendingSessionId` for the newly queued invite.
+## Work
 
-### Implementation options
-- Option A (recommended): expose a query service in Application layer:
-  - `IPendingSessionQueries.TryGetByRequestCorrelationIdAsync(RequestCorrelationId)`
-  - returns `PendingSessionId?`
-- Option B: in simulator, listen to `PendingSessionCreatedNotification` + fetch pending record and correlate by inspecting its metadata.
+### D0) Model relay-hosted pre-key stores as the source of pre-key bundles (not peer-to-peer bundle sends)
+Standard Signal/X3DH assumes there is a place to publish/fetch pre-key bundles; in the simulator this is modeled as a **relay-capable simulated peer hosting a pre-key store**.
 
-**Question**: which do you prefer?
+Simulator requirement:
+- The initiator (main node or simulated peer) obtains the recipient pre-key bundle by lookup key (PKH) from a selected relay-capable peer.
+- The simulator treats the PKH as “out-of-band” input, typically obtained via copy/paste from the simulator UI.
 
-## Simulated peer approval (main node initiating)
-This requires the main node to create an invite destined to the simulated peer.
+### D1) Add missing standard-handshake ingress (server-side)
+Implement the gRPC endpoint that exists in the contract but is not yet implemented:
 
-In the current simulator transport model (observer only), the simulator can **observe** the main node attempting to initiate (via outbound wiretap), but it cannot deliver the invite to a simulated peer without adding a transport plug-in.
+- File: `Percolator.Application/Network/PercolatorMessageService.cs`
+  - Add `override Task<EstablishSessionResponse> EstablishSession(EstablishSessionRequest request, ServerCallContext context)`
 
-If we need to support this direction later, we must implement a transport interception layer (a separate chunk) so that outbound `EstablishDirectSessionRequest` messages can be routed into the simulated peer runtime.
+Add a dedicated Application-layer ingress/service for standard handshake so `PercolatorMessageService` stays thin:
+
+- New interface (Application): `IStandardHandshakeIngress`
+  - `Task<EstablishSessionResponse> HandleAsync(EstablishSessionRequest request, CancellationToken ct)`
+  - This will be the sole place that parses/validates `EstablishSessionRequest` and triggers the responder-side handshake.
+
+Responder-side standard handshake bootstrap message:
+
+- Use `HandshakeInitiatorHello` from `internal_messaging.proto` as the initiator’s bootstrap payload.
+- Add parsing/handling of `HandshakeInitiatorHello` in the standard handshake ingress.
+
+Note: the existing `IHandshakeService/HandshakeService` is currently a stub and must be upgraded to perform real X3DH/DR bootstrap.
+
+As part of that upgrade, the standard-handshake implementation must consume a pre-key bundle that was fetched by PKH.
+The pre-key bundle format to use is the one already present in the codebase:
+- `Percolator.Contracts/Protos/internal_messaging.proto` → `GetPreKeyBundleResponse.PreKeyBundle`
+
+### D2) Implement peer -> main standard signal (direct)
+Simulated peer (initiator) calls the real gRPC service method:
+- `TransportService.EstablishSession(EstablishSessionRequest)`
+
+Main node (responder) processes via `PercolatorMessageService.EstablishSession` -> `IStandardHandshakeIngress` and returns `EstablishSessionResponse`.
+
+### D3) Implement peer -> main standard signal (relayed)
+Deliver the initiator bootstrap through the relay as opaque bytes (dumb relay) and inject on simulated “fetch”.
+
+Closed-form constraint from current code:
+- `ProcessRelayedOpaquePayloadCommand` currently treats relayed bytes as:
+  - `SessionRatchetMessage` (post-session)
+  - `EstablishDirectSessionRequest` (reverse-signal invite)
+  - `InviteHandshakeResponse` (reverse-signal response)
+
+Therefore, to support **standard signal over relay**, extend `ProcessRelayedOpaquePayloadCommand` to also recognize:
+- `HandshakeInitiatorHello`
+
+and route it into the new `IStandardHandshakeIngress` (or a dedicated handler) to complete responder-side bootstrap.
+
+### D4) Implement main -> peer standard signal (direct + relayed)
+Main node (initiator) must be able to initiate the standard handshake to a simulated peer.
+
+Precondition (copy/paste workflow):
+- Simulator UI exposes the simulated peer’s `PublicKeyHash` (PKH).
+- Main node uses that PKH as input to fetch the pre-key bundle from a selected relay-capable peer’s pre-key store.
+
+Direct:
+- Transport plug-in (Chunk E) intercepts the outbound `TransportService.EstablishSession` request and delivers it to the simulated peer runtime.
+- Simulated peer processes it and returns `EstablishSessionResponse`.
+
+Relayed:
+- Transport plug-in (Chunk E) intercepts outbound relay enqueue destined for the simulated peer and puts opaque bytes into the relay emulator.
+- Simulated peer fetches, processes `HandshakeInitiatorHello`, and returns the responder’s first ratchet message.
+
+Existing initiator-finalize path to reuse:
+- When the initiator later receives the responder’s first ratchet message through relay, it can be finalized using:
+  - `HandleHandshakeResponderHelloCommand`
+  - `IInitiatorFinalizeService.TryFinalizeFromFirstResponderAsync(...)`
+
+## Done when
+- Standard signal initiation can be simulated in both directions, direct and relayed.
 
 ---
 
-# Chunk 5 — Relay path coverage in simulator
+# Chunk E — Relay emulator + transport plug-in integration
 
 ## Goal
-Allow creating peers whose invites/responses are delivered via relay, and demonstrate that the relay is payload-agnostic.
+Provide a coherent simulator-side relay + outbound interception layer used by Chunks C and D.
 
-## Mechanics
-- Under the **observer + inbound driver** model, the simulator does not intercept the main node’s outbound relay enqueue logic.
-- The simulator emulates the relay only at the boundary where the main node receives “opaque bytes fetched from relay”.
+## Work
 
-- For relayed invite (peer -> main via relay):
-  - the simulated peer constructs a real `EstablishDirectSessionRequest` and serializes it.
-  - the simulator stores the opaque bytes in an in-memory “relay inbox” keyed by the recipient routing key.
-  - when the main node performs a simulated “fetch from relay”, the simulator injects those opaque bytes into the same ingress the real system uses for relay deliveries:
-    - `ProcessRelayedOpaquePayloadCommand`
+### E1) Relay emulator
+Implement an in-memory relay queue:
+- key: recipient routing key
+- value: FIFO list of opaque byte blobs
 
-- For relayed invite response (peer -> main via relay):
-  - the simulated peer constructs a real `InviteHandshakeResponse` and serializes it.
-  - the simulator injects the opaque bytes into `ProcessRelayedOpaquePayloadCommand` on simulated “fetch”.
+Operations:
+- `Enqueue(recipientKey, blob)`
+- `Fetch(recipientKey, max)`
+- `Delete(ackId)` (if modeled)
 
-Notes:
-- The simulator is emulating “relay storage + fetch” in memory; it does not need a persistent relay DB.
-- The simulator must not attach or persist sender identity when delivering relay blobs.
-- Outbound wiretap is used only to observe that the main node attempted relay/direct sends; it is not used to deliver messages.
+### E2) Transport plug-in
+Implement simulator-only interception of outbound messages sufficient to deliver:
+- main -> peer handshake requests (reverse-signal + standard signal)
+- main -> peer relayed blobs (enqueue into simulated relay emulator)
 
-## Tests
-- Unit test: simulated relayed invite drives `QueueInviteAsync(..., isRelayed: true)`.
+## Done when
+- Chunks C and D can rely on a single relay emulator + plug-in.
 
 ---
 
-# Chunk 6 — Conversations + group conversation creation (UI only)
+# Chunk F — Conversations and group creation (real persistence)
 
 ## Goal
-Model “conversation list” containing both direct peer chats and group chats.
+Create and persist conversations/groups driven by simulator actions.
 
-## Requirements
-- Conversation list items:
-  - Peer conversation: one simulated peer + main node
-  - Group conversation: >=2 peers + main node
-- Create group button enabled when selection contains >=2 peers in `SessionEstablished`.
+## Work
+Use existing persistence and commands:
+- `Percolator.Chat.IConversationRepository`
+- `Percolator.Application.Apps.Chat.CreateGroupConversationCommand`
 
-## Open question
-Do group conversations need to be backed by real `ConversationRepository` now, or is UI-only acceptable until messaging is wired?
-
----
-
-# Chunk 7 — Message send + delivery simulation (future)
-
-## Goal
-Allow sending messages in established sessions and simulate delivery + read receipts.
-
-This chunk depends on having:
-- a way for simulator to represent “peer has an established session with main node”, and
-- message persistence + envelope routing.
-
----
-
-# Questions / decisions needed
-
-1) **Mapping correlation -> pending id**: How should the simulator/VM find the `PendingSessionId` corresponding to a `RequestCorrelationId`?
-   - Add `IPendingSessionQueries` (recommended), or wire via notifications?
-
-2) **Do we need “main node initiates invite to simulated peer” now?**
-   - If yes, we must add a transport plug-in (intercept outbound sends and route to simulated peers).
-
-3) **Group chat backing**: UI-only groups for now, or must create real group conversations in persistence?
+## Done when
+- Simulator can create a group conversation from selected established peers and it persists.
