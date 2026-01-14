@@ -14,24 +14,29 @@
 
  ## Part 1: Standard Flow (Alice Initiates with Offline Bob)
 
- Alice sends a pre-key message, then finalizes the session after Bob’s first ratchet message.
+ Bob publishes a pre-key bundle to a pre-key service (relay/server). Alice fetches Bob’s bundle from that service and then sends Bob a pre-key message (initiator hello). Alice finalizes the session after Bob’s first ratchet message.
+
+ Assumptions (standard Signal does not define these):
+ - Alice learns how to locate Bob’s pre-key bundle **out of band** (e.g., she already knows Bob’s identity key fingerprint / service user id / address).
+ - Message delivery of Alice’s pre-key message to Bob can be via a relay/service or direct transport; the cryptographic flow is the same.
 
  ### Step 1.1: Fetch Pre-Key Bundle and Persist Pending Session
 
- Alice fetches Bob’s bundle and derives the Initial Root Key (IRK). Persist a short‑lived pending record.
+ Alice fetches Bob’s published pre-key bundle from a pre-key service/relay and derives the Initial Root Key (IRK). Persist a short‑lived pending record.
 
  ```protobuf
- // Alice asks the server for Bob's keys
+ // Alice asks the pre-key service for Bob's published bundle.
+ // The lookup key (identity key, user id, etc.) is assumed to be obtained out-of-band.
  message GetPreKeyBundleRequest {
-   string remote_user_id = 1;
+   bytes recipient_identity_key = 1;
  }
 
- // The server returns Bob's public keys
+ // The service returns Bob's public keys.
  message GetPreKeyBundleResponse {
-   bytes remote_identity_key = 1;
-   bytes remote_signed_pre_key = 2;
+   bytes recipient_identity_key = 1;
+   bytes recipient_signed_pre_key = 2;
    bytes pre_key_signature = 3;
-   optional bytes remote_one_time_pre_key = 4;
+   optional bytes recipient_one_time_pre_key = 4;
  }
  ```
 
@@ -49,6 +54,8 @@
  - Encrypt IRK at rest, purge pending records aggressively.
 
  ### Step 1.2: Send Pre-Key Message
+
+ Alice sends Bob the “pre-key message” (initiator’s first message) that references Bob’s pre-keys and includes Alice’s identity + ephemeral public keys.
 
  ```protobuf
  // Alice's first message to Bob (the "Pre-Key Message")
