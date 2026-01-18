@@ -136,6 +136,8 @@ public partial class App : Application
                 services.AddSingleton<Percolator.Cryptography.ISessionRepository, Desktop.Wpf.Features.Sessions.InMemorySessionRepository>();
                 services.AddSingleton<IChatHistory, InMemoryChatHistory>();
                 services.AddScoped<IPendingHandshakeSimulatorService, PendingHandshakeSimulatorService>();
+                services.AddSingleton<ISimulatorStateStore, JsonSimulatorStateStore>();
+                services.AddSingleton<ISimulatorStateService, SimulatorStateService>();
                 // Per-session scoped chat stack
                 services.AddScoped<Desktop.Wpf.Features.Sessions.SessionContext>();
                 services.AddScoped<Desktop.Wpf.Features.Chat.ChatViewModel>();
