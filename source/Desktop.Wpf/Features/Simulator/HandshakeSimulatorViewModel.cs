@@ -21,7 +21,8 @@ public sealed class HandshakeSimulatorViewModel : INotifyPropertyChanged
     private string? _status;
     private SimulatedPeerRowViewModel? _selectedPeer;
 
-    public HandshakeSimulatorViewModel(ISimulatorStateService state)
+    public HandshakeSimulatorViewModel(
+        ISimulatorStateService state)
     {
         _state = state;
 

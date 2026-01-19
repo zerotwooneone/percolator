@@ -17,6 +17,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ISentInvitationRepository, SqliteSentInvitationRepository>();
         services.AddScoped<ISessionRepository, SqliteSessionRepository>();
         services.AddScoped<IPendingHandshakeQueries, PendingHandshakeQueries>();
+        services.AddScoped<IPendingSessionQueries, PendingSessionQueries>();
         services.AddSingleton<IX3dhDeriver, X3dhDeriver>();
         services.AddSingleton<IPreKeyBundleValidator, PreKeyBundleValidator>();
         services.AddSingleton<IRatchetEngine, AeadRatchetEngine>();
