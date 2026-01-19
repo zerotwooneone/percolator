@@ -9,4 +9,10 @@ public partial class HandshakeSimulatorWindow : Window
         InitializeComponent();
         DataContext = vm;
     }
+
+    protected override void OnClosed(System.EventArgs e)
+    {
+        (DataContext as System.IDisposable)?.Dispose();
+        base.OnClosed(e);
+    }
 }

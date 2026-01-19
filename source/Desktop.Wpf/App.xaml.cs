@@ -138,7 +138,7 @@ public partial class App : Application
                 services.AddScoped<IPendingHandshakeSimulatorService, PendingHandshakeSimulatorService>();
                 services.AddSingleton<ISimulatorStateStore, JsonSimulatorStateStore>();
                 services.AddSingleton<ISimulatorStateService, SimulatorStateService>();
-                services.AddSingleton<ISimulatorRuntimeStateService, SimulatorRuntimeStateService>();
+                services.AddSingleton<ISimulatedPeerDirectory, SimulatedPeerDirectory>();
                 // Per-session scoped chat stack
                 services.AddScoped<Desktop.Wpf.Features.Sessions.SessionContext>();
                 services.AddScoped<Desktop.Wpf.Features.Chat.ChatViewModel>();
