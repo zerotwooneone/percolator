@@ -20,7 +20,12 @@
         <DataTemplate>
           <DockPanel LastChildFill="False">
             <TextBlock DockPanel.Dock="Left" Width="220" VerticalAlignment="Center" Text="{Binding DisplayText}"/>
+            <TextBlock DockPanel.Dock="Left" Width="140" Margin="12,0,0,0" VerticalAlignment="Center" Text="{Binding RuntimeStateText}"/>
             <Button DockPanel.Dock="Right" Margin="8,0,0,0" Content="Remove" Command="{Binding RemoveCommand}"/>
+            <Button DockPanel.Dock="Right" Margin="8,0,0,0" Content="Clear" Command="{Binding ClearRuntimeStateCommand}"/>
+            <Button DockPanel.Dock="Right" Margin="8,0,0,0" Content="Est" Command="{Binding MarkEstablishedCommand}"/>
+            <Button DockPanel.Dock="Right" Margin="8,0,0,0" Content="In" Command="{Binding MarkInboundPendingCommand}"/>
+            <Button DockPanel.Dock="Right" Margin="8,0,0,0" Content="Out" Command="{Binding MarkOutboundPendingCommand}"/>
             <Button DockPanel.Dock="Right" Margin="8,0,0,0" Content="Relay" Command="{Binding ToggleRelayCapableCommand}"/>
             <Button DockPanel.Dock="Right" Margin="8,0,0,0" Content="Online" Command="{Binding ToggleOnlineCommand}"/>
           </DockPanel>

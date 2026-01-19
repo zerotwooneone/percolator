@@ -14,6 +14,7 @@ namespace Desktop.Wpf.Features.Simulator;
 public sealed class HandshakeSimulatorViewModel : INotifyPropertyChanged
 {
     private readonly ISimulatorStateService _state;
+    private readonly ISimulatorRuntimeStateService _runtime;
     private readonly ObservableCollection<SimulatedPeerRowViewModel> _peers = new();
     private readonly AsyncRelayCommand _removeSelectedPeerCommand;
 
@@ -22,9 +23,11 @@ public sealed class HandshakeSimulatorViewModel : INotifyPropertyChanged
     private SimulatedPeerRowViewModel? _selectedPeer;
 
     public HandshakeSimulatorViewModel(
-        ISimulatorStateService state)
+        ISimulatorStateService state,
+        ISimulatorRuntimeStateService runtime)
     {
         _state = state;
+        _runtime = runtime;
 
         Peers = new ReadOnlyObservableCollection<SimulatedPeerRowViewModel>(_peers);
 
@@ -93,7 +96,7 @@ public sealed class HandshakeSimulatorViewModel : INotifyPropertyChanged
         _peers.Clear();
         foreach (var p in _state.Peers)
         {
-            _peers.Add(new SimulatedPeerRowViewModel(_state, p, RefreshPeers));
+            _peers.Add(new SimulatedPeerRowViewModel(_state, _runtime, p, RefreshPeers));
         }
     }
 
@@ -161,17 +164,23 @@ public sealed class HandshakeSimulatorViewModel : INotifyPropertyChanged
 public sealed class SimulatedPeerRowViewModel
 {
     private readonly ISimulatorStateService _state;
+    private readonly ISimulatorRuntimeStateService _runtime;
     private readonly SimulatedPeerDto _peer;
     private readonly Action _refresh;
 
-    public SimulatedPeerRowViewModel(ISimulatorStateService state, SimulatedPeerDto peer, Action refresh)
+    public SimulatedPeerRowViewModel(ISimulatorStateService state, ISimulatorRuntimeStateService runtime, SimulatedPeerDto peer, Action refresh)
     {
         _state = state;
+        _runtime = runtime;
         _peer = peer;
         _refresh = refresh;
         ToggleOnlineCommand = new AsyncRelayCommand(ExecuteToggleOnlineAsync);
         ToggleRelayCapableCommand = new AsyncRelayCommand(ExecuteToggleRelayCapableAsync);
         RemoveCommand = new AsyncRelayCommand(ExecuteRemoveAsync);
+        MarkOutboundPendingCommand = new AsyncRelayCommand(ExecuteMarkOutboundPendingAsync);
+        MarkInboundPendingCommand = new AsyncRelayCommand(ExecuteMarkInboundPendingAsync);
+        MarkEstablishedCommand = new AsyncRelayCommand(ExecuteMarkEstablishedAsync);
+        ClearRuntimeStateCommand = new AsyncRelayCommand(ExecuteClearRuntimeStateAsync);
     }
 
     public Guid PeerId => _peer.PeerId;
@@ -179,9 +188,24 @@ public sealed class SimulatedPeerRowViewModel
     public bool IsOnline => _peer.IsOnline;
     public bool IsRelayCapable => _peer.Relay.IsRelayCapable;
 
+    public string RuntimeStateText
+    {
+        get
+        {
+            var state = _runtime.Get(_peer.PeerId, _peer.IsOnline);
+            return state.PendingCorrelationId is null
+                ? state.UiState.ToString()
+                : $"{state.UiState} ({state.PendingCorrelationId.Value.ToString()[..8]})";
+        }
+    }
+
     public ICommand ToggleOnlineCommand { get; }
     public ICommand ToggleRelayCapableCommand { get; }
     public ICommand RemoveCommand { get; }
+    public ICommand MarkOutboundPendingCommand { get; }
+    public ICommand MarkInboundPendingCommand { get; }
+    public ICommand MarkEstablishedCommand { get; }
+    public ICommand ClearRuntimeStateCommand { get; }
 
     private async Task ExecuteToggleOnlineAsync(object? _)
     {
@@ -198,7 +222,32 @@ public sealed class SimulatedPeerRowViewModel
     private async Task ExecuteRemoveAsync(object? _)
     {
         await _state.RemovePeerAsync(_peer.PeerId, CancellationToken.None);
+        _runtime.Clear(_peer.PeerId);
         await Application.Current.Dispatcher.InvokeAsync(_refresh);
+    }
+
+    private Task ExecuteMarkOutboundPendingAsync(object? _)
+    {
+        _runtime.MarkOutboundPending(_peer.PeerId, Guid.NewGuid());
+        return Application.Current.Dispatcher.InvokeAsync(_refresh).Task;
+    }
+
+    private Task ExecuteMarkInboundPendingAsync(object? _)
+    {
+        _runtime.MarkInboundPending(_peer.PeerId, Guid.NewGuid());
+        return Application.Current.Dispatcher.InvokeAsync(_refresh).Task;
+    }
+
+    private Task ExecuteMarkEstablishedAsync(object? _)
+    {
+        _runtime.MarkEstablished(_peer.PeerId);
+        return Application.Current.Dispatcher.InvokeAsync(_refresh).Task;
+    }
+
+    private Task ExecuteClearRuntimeStateAsync(object? _)
+    {
+        _runtime.Clear(_peer.PeerId);
+        return Application.Current.Dispatcher.InvokeAsync(_refresh).Task;
     }
 }
 
