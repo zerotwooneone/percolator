@@ -61,7 +61,11 @@ The simulator must support pre-key bundle storage and lookup as part of **relay-
 ## Current constraints / ground truth (must match code)
 
 - Reverse-signal invite ingress:
-  - `IEstablishDirectSessionService.QueueInviteAsync(..., isRelayed: false|true, ...)`
+  - gRPC service method:
+    - `Percolator.Application/Network/PercolatorMessageService.EstablishDirectSession(EstablishDirectSessionRequest, ServerCallContext)`
+    - This calls `IEstablishDirectSessionService.QueueInviteAsync(... isRelayed: false ...)`.
+  - For relayed injection, `ProcessRelayedOpaquePayloadCommand` calls:
+    - `IEstablishDirectSessionService.QueueInviteAsync(... isRelayed: true ...)`
 - Relay intake ingress:
   - `ProcessRelayedOpaquePayloadCommand` can parse:
     - ratchet ciphertext -> `InternalEnvelope`
@@ -269,28 +273,280 @@ Support reverse-signal end-to-end in four variants:
 
 ## Work
 
-### C1) Peer -> main (direct)
-Simulated peer constructs:
-- `InviteHandshakeRequestPayload` + signature
-- `EstablishDirectSessionRequest`
-Deliver via reverse-signal ingress:
-- `IEstablishDirectSessionService.QueueInviteAsync(... isRelayed: false ...)`
+### C0) Key decisions (Option B)
 
-Main node approves/rejects via Chunk B.
+This chunk is implemented using **Option B**:
 
-### C2) Peer -> main (relayed)
-Simulated peer serializes `EstablishDirectSessionRequest` and enqueues it into simulated relay inbox.
-On simulated relay fetch, inject into:
-- `ProcessRelayedOpaquePayloadCommand`
+- The simulator includes a **full simulated-peer runtime** capable of producing a real `InviteHandshakeResponse` with a valid `InitialRatchetMessage`.
+- Simulated peers are **fully persistent**, including **private key material**.
+  - **B1.a**: private keys are persisted in `%AppData%/Percolator/simulator-state.json` (Base64 via `byte[]` JSON serialization).
+  - This is a development-only feature; no encryption-at-rest is performed in this chunk.
 
-### C3) Main -> peer (direct)
-Requires transport plug-in from Chunk E to deliver outbound invite to simulated peer runtime.
-Simulated peer accept/reject results in `InviteHandshakeResponse` delivered back to main node via the same ingress as gRPC endpoint.
+Important code constraints this chunk relies on:
 
-### C4) Main -> peer (relayed)
-Main node sends invite destined for a peer via relay.
-Transport plug-in observes the outbound attempt and enqueues the opaque blob into simulated relay inbox for the target peer.
-Simulated peer fetches, accepts/rejects, and responds (response may also be relayed).
+- Reverse-signal invite ingress:
+  - gRPC service method:
+    - `Percolator.Application/Network/PercolatorMessageService.EstablishDirectSession(EstablishDirectSessionRequest, ServerCallContext)`
+    - This method already exists and calls `IEstablishDirectSessionService.QueueInviteAsync(... isRelayed: false ...)`.
+  - Application ingress used by relayed injection:
+    - `Percolator.Application/Network/IEstablishDirectSessionService.QueueInviteAsync(... isRelayed: true ...)`
+- Relayed opaque intake ingress:
+  - Relayed messages arrive via the normal gRPC surface and are decrypted/unwrapped by the recipient:
+    - `Percolator.Application/Network/PercolatorMessageService.DeliverOpaqueMessage(DeliverOpaqueMessageRequest, ServerCallContext)`
+    - `Percolator.Application/Network/DeliverOpaqueMessageHandler` decrypts the session ciphertext into `InternalEnvelope`.
+    - If the inner payload is `RelayOpaqueEnvelope`, the handler delegates the inner opaque blob to:
+      - `Percolator.Application/Network/Handshake/ProcessRelayedOpaquePayloadCommand`
+        - which can parse `EstablishDirectSessionRequest` and `InviteHandshakeResponse`.
+- Reverse-signal response ingress:
+  - gRPC service method:
+    - `Percolator.Application/Network/PercolatorMessageService.DeliverInviteHandshakeResponse(InviteHandshakeResponse, ServerCallContext)`
+    - This method already exists and calls `IInviteHandshakeResponseIngress.HandleAsync(InviteHandshakeResponse)`.
+
+### C.B1) Persist simulated peer identity key material (private + public)
+
+Goal: each simulated peer must have stable keys across runs so it can:
+
+- Sign `InviteHandshakeRequestPayload` as inviter.
+- Act as acceptor to generate a valid `InviteHandshakeResponse` when it accepts an invite.
+
+Target files:
+
+- `Desktop.Wpf/Features/Simulator/SimulatorState.cs`
+- `Desktop.Wpf/Features/Simulator/SimulatorStateService.cs`
+- `Desktop.Wpf/Features/Simulator/SimulatedPeerDirectory.cs`
+- `Desktop.Wpf/Features/Simulator/SimulatedPeerModel.cs`
+
+Persisted DTO changes (extend `SimulatedPeerDto`):
+
+- `SimulatedPeerReverseSignalKeysDto ReverseSignalKeys`
+  - `byte[] IdentitySigningKeyPrivateKeyPkcs8` (required)
+  - `byte[] IdentitySigningKeySpki` (required)
+
+Notes:
+
+- Use ECDSA P-256.
+- Private key format is **PKCS#8** (from `ECDsa.ExportPkcs8PrivateKey()`).
+- SPKI format is from `ECDsa.ExportSubjectPublicKeyInfo()`.
+- Migration:
+  - If a loaded peer is missing `ReverseSignalKeys`, generate keys and persist on next save.
+
+Done when:
+
+- Existing simulator state loads even if keys are missing (migration/backfill).
+- New peers created in UI get keys persisted.
+- `SimulatedPeerModel` can expose:
+  - `IdentitySigningKeySpki` (public)
+  - internal access to `IdentitySigningKeyPrivateKeyPkcs8` (private)
+
+### C.B2) Implement simulated peer runtime: invite receive + accept/reject + response generation
+
+Goal: simulated peer can receive an inbound reverse-signal invite (direct or relayed), and on accept can produce a **real** `InviteHandshakeResponse` with a valid `InitialRatchetMessage`.
+
+Target files:
+
+- `Desktop.Wpf/Features/Simulator/SimulatedPeerModel.cs`
+- `Desktop.Wpf/Features/Simulator/SimulatedPeerDirectory.cs`
+- New: `Desktop.Wpf/Features/Simulator/SimulatedPeerReverseSignalRuntime.cs` (or similar)
+
+Runtime state added per peer (model-only, not persisted):
+
+- Pending inbound invite:
+  - `RequestCorrelationId` (from payload)
+  - raw bytes of `EstablishDirectSessionRequest` (for relayed path) or its components
+  - source info: direct vs relayed
+- Pending outbound invite (peer->main): correlation id (for UI display)
+
+Inbound invite receive APIs (simulator-side):
+
+- `ReceiveDirectInviteFromMainAsync(simPeerId, EstablishDirectSessionRequest request, CancellationToken ct)`
+- `ReceiveRelayedInviteFromMainAsync(simPeerId, byte[] opaqueBytes, CancellationToken ct)`
+  - called after relay fetch
+
+Accept/reject APIs (simulator-side):
+
+- `AcceptInboundInviteAsync(simPeerId, CancellationToken ct)`
+- `RejectInboundInviteAsync(simPeerId, CancellationToken ct)`
+
+Accept behavior:
+
+- Parse/validate `EstablishDirectSessionRequest` + `InviteHandshakeRequestPayload`.
+- Use the simulated peer’s **persisted identity signing private key**.
+- Produce `InviteHandshakeResponse` where:
+  - `RequestCorrelationId` matches.
+  - `AcceptorIdentityKey` is simulated peer identity SPKI.
+  - `AcceptorX3DhEphemeralKey` and `InitialRatchetMessage` are cryptographically valid.
+
+Response delivery (two paths):
+
+- If invite was **direct**:
+  - deliver response to main node via the gRPC service surface:
+    - `PercolatorMessageService.DeliverInviteHandshakeResponse(response, serverCallContext)`
+    - Use a simulator `ServerCallContext` stub (same pattern as `Percolator.ApplicationTests/Network/PercolatorMessageServiceAdapterTests.cs`).
+- If invite was **relayed**:
+  - serialize `InviteHandshakeResponse` and enqueue to relay emulator for the main node.
+  - on main node “fetch”, simulate relay-host forwarding by calling:
+    - `PercolatorMessageService.DeliverOpaqueMessage(...)`
+    - with a session-encrypted `InternalEnvelope { RelayOpaqueEnvelope { OpaquePayload = <InviteHandshakeResponse bytes> } }`
+
+Done when:
+
+- A simulated peer can show `InboundPending` after receiving an invite.
+- Clicking accept results in `PercolatorMessageService.DeliverInviteHandshakeResponse` (direct) or relay enqueue (relayed).
+- Clicking reject clears pending state and updates runtime state.
+
+### C.B3) Relay emulator for reverse-signal (invites + responses)
+
+Goal: implement a simulator relay queue sufficient for reverse-signal in both directions.
+
+Target files:
+
+- New: `Desktop.Wpf/Features/Simulator/SimulatorRelayEmulator.cs`
+- `Desktop.Wpf/App.xaml.cs` (DI registration)
+- `Desktop.Wpf/Features/Simulator/HandshakeSimulatorViewModel.cs` (UI actions)
+
+Core API:
+
+- `EnqueueToRelayHost(Guid relayHostPeerId, Guid recipientPeerId, byte[] opaqueBytes, string? debugType = null)`
+- `FetchFromRelayHost(Guid relayHostPeerId, Guid recipientPeerId, int max) -> IReadOnlyList<SimulatedRelayItem>`
+
+Injection behavior:
+
+- Relayed delivery must be simulated as a **two-hop** flow:
+  - **Hop 1 (enqueue): source -> relay host**
+    - source encrypts an `InternalEnvelope` containing a `MessageQueueEnvelope.EnqueueOpaqueMessageRequest`.
+    - relay host decrypts it via `PercolatorMessageService.DeliverOpaqueMessage(...)` and persists the opaque blob in its queue.
+  - **Hop 2 (forward): relay host -> recipient**
+    - relay host wraps the queued blob in `InternalEnvelope.RelayOpaqueEnvelope`.
+    - relay host encrypts and forwards it to the recipient via `PercolatorMessageService.DeliverOpaqueMessage(...)`.
+
+This matches the real system model described in `session-flow.md`: the relay host only forwards/wraps **opaque encrypted blobs**, and recipients unwrap/decrypt.
+
+Main node fetch (recipient = main node):
+
+- The relay emulator represents **the relay host's queue**.
+- The simulator must model:
+  - enqueue: (some sender) -> relay host, by delivering a session-encrypted `MessageQueueEnvelope.EnqueueOpaqueMessageRequest` into the relay host via `PercolatorMessageService.DeliverOpaqueMessage(...)`.
+  - forward: relay host -> main node, by delivering a session-encrypted `InternalEnvelope { RelayOpaqueEnvelope { OpaquePayload = blob } }` into the main node via `PercolatorMessageService.DeliverOpaqueMessage(...)`.
+
+Notes:
+
+- In the real system, the relay host may forward via an orchestrator loop (see `Percolator.Application/Network/RelayOrchestrator.cs`).
+- In the simulator, “fetch” is the user-driven equivalent of triggering that forward step.
+
+Simulated peer fetch (recipient = simulated peer):
+
+- This is symmetric to main node fetch.
+- The simulator must model:
+  - enqueue: sender -> relay host (via `PercolatorMessageService.DeliverOpaqueMessage(...)` into the relay host)
+  - forward: relay host -> simulated peer
+
+If/when the simulator implements a peer-side equivalent of `DeliverOpaqueMessage`, it must use the same `RelayOpaqueEnvelope` unwrap behavior.
+Until then, the simulator peer runtime may accept `RelayOpaqueEnvelope.OpaquePayload` bytes directly.
+
+Prerequisites / invariants:
+
+- For the main node to successfully decrypt and unwrap `RelayOpaqueEnvelope`, there must be an established session between:
+  - main node ↔ relay host peer
+  - This is the session used by `ISecureMessagingService` in `DeliverOpaqueMessageHandler`.
+
+- Bi-directional relay requirement:
+  - For a simulated peer to successfully decrypt and unwrap a relayed `RelayOpaqueEnvelope` (if/when the simulator implements a full peer-side `DeliverOpaqueMessage` stack), there must be an established session between:
+    - simulated peer ↔ relay host peer
+  - Until that full stack exists, the simulator peer runtime may accept `RelayOpaqueEnvelope.OpaquePayload` bytes directly, but the relay emulator must still conceptually model:
+    - source -> relay host (enqueue opaque)
+    - relay host -> recipient (session-encrypted `DeliverOpaqueMessage`)
+
+Done when:
+
+- Both invites and responses can be enqueued/fetched.
+- Fetch triggers the correct delivery path:
+  - main side calls `PercolatorMessageService.DeliverOpaqueMessage` and the app unwraps/dispatches internally.
+  - peer side calls simulated peer runtime receive method (or a peer-side equivalent of `DeliverOpaqueMessage` if implemented).
+
+### C.B4) Implement main -> peer reverse-signal initiation (simulator-only)
+
+Goal: allow the main node (desktop app identity) to act as the inviter and send a reverse-signal invite to a simulated peer.
+
+This chunk intentionally does **not** require Application-layer support for “send reverse-signal invite”. The simulator constructs the request directly.
+
+Target files:
+
+- `Desktop.Wpf/Features/Simulator/HandshakeSimulatorViewModel.cs`
+- `Desktop.Wpf/Features/Simulator/SimulatedPeerItemViewModel.cs`
+- New: `Desktop.Wpf/Features/Simulator/MainReverseSignalInviteFactory.cs` (or similar)
+
+Invite construction:
+
+- Build `InviteHandshakeRequestPayload`:
+  - `RequestCorrelationId = Guid.NewGuid().ToString()`
+  - `InviterHost/InviterPort`:
+    - for simulator, use a stable placeholder host/port (e.g. `"simulator"`, `0`) to avoid callback validation issues.
+- Sign payload bytes using the **main node identity signing private key** (from active identity context).
+- Wrap into `EstablishDirectSessionRequest`.
+
+Delivery:
+
+- Direct: call simulated peer runtime receive method.
+- Relayed: enqueue `EstablishDirectSessionRequest.ToByteArray()` into relay emulator for the simulated peer.
+
+Direct-response ingress requirement:
+
+- When the simulated peer accepts a **direct** main->peer invite, it must deliver the resulting `InviteHandshakeResponse` into the main node via:
+  - `PercolatorMessageService.DeliverInviteHandshakeResponse(...)`
+  - not by calling `IInviteHandshakeResponseIngress` directly.
+
+Done when:
+
+- The simulator can cause a simulated peer to enter `InboundPending` from a main->peer invite.
+
+### C.B5) UI: expose all four reverse-signal variants + accept/reject + relay fetch
+
+Goal: all four reverse-signal variants can be exercised from the simulator UI.
+
+Target files:
+
+- `Desktop.Wpf/Features/Simulator/HandshakeSimulatorWindow.xaml`
+- `Desktop.Wpf/Features/Simulator/HandshakeSimulatorViewModel.cs`
+- `Desktop.Wpf/Features/Simulator/SimulatedPeerItemViewModel.cs`
+
+UI actions per peer:
+
+- Peer -> Main:
+  - `Send Reverse Invite (Direct)`
+  - `Send Reverse Invite (Relayed)`
+- Main -> Peer:
+  - `Send Reverse Invite (Direct)`
+  - `Send Reverse Invite (Relayed)`
+- When peer is `InboundPending`:
+  - `Accept`
+  - `Reject`
+
+Additional actions:
+
+- `Fetch relay inbox for main` (deliver via `PercolatorMessageService.DeliverOpaqueMessage` using session-encrypted `RelayOpaqueEnvelope`)
+- `Fetch relay inbox for selected peer` (deliver to simulated peer runtime)
+
+Done when:
+
+- You can trigger all 4 variants and see state transitions / correlation IDs in UI.
+- Accept/reject is available when inbound pending exists.
+
+### C.B6) Tests / smoke coverage
+
+At minimum add/extend Application-layer tests to validate the relayed forwarding behavior via the normal gRPC ingress:
+
+- `Percolator.ApplicationTests/Network/DeliverOpaqueMessageHandlerTests.cs`
+  - Ensure an `InternalEnvelope` with `RelayOpaqueEnvelope` is unwrapped and delegates the inner blob to `ProcessRelayedOpaquePayloadCommand`.
+  - Ensure `RelayHostPeerId` is set correctly (remote peer for the direct session).
+
+If additional coverage is needed for reverse-signal payload parsing:
+
+- `Percolator.ApplicationTests/Network/ProcessRelayedOpaquePayloadCommandTests.cs`
+  - Ensure `EstablishDirectSessionRequest` bytes and `InviteHandshakeResponse` bytes are recognized.
+
+Done when:
+
+- Relayed forwarding (`DeliverOpaqueMessage` -> decrypt -> `RelayOpaqueEnvelope` -> `ProcessRelayedOpaquePayloadCommand`) is covered by tests.
 
 ## Done when
 - All four reverse-signal variants can be exercised from the simulator UI.
