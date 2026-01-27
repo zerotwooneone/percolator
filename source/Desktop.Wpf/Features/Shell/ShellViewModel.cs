@@ -99,22 +99,9 @@ public sealed class ShellViewModel : ViewModelBase
             _self.Initials.Value = ComputeInitials(displayName);
             _self.Id.Value = domainIdentity.Id.ToString();
 
-            // Use the Shell's provider as the identity-scoped provider and set ActiveIdentity
-            var mutator = _identityScopeAccessor.Current.GetService<IActiveIdentityMutator>();
-            if (mutator is null)
-            {
-                throw new InvalidOperationException("identity context can not be set");
-            }
-            
-            //todo: figure out what to use for peer id
-            var identityRecord = new IdentityRecord(Guid.NewGuid(), displayName)
-            {
-                SelfIdentityId = domainIdentity.Id
-            };
-            using var eph = ECDiffieHellman.Create();
-            using var eph2 = ECDiffieHellman.Create();
-            var keys = new X3dhKeys(eph, eph2);
-            mutator.SetActiveIdentity(identityRecord, keys);
+            // Resolve application identity + keys and populate ActiveIdentityContext.
+            var orchestrator = _identityScopeAccessor.Current.GetRequiredService<IIdentityOrchestrator>();
+            await orchestrator.ResolveIdentityAsync(domainIdentity.Id, CancellationToken.None);
             
             // Build the SessionShell from the identity-scoped provider
             var sidebarVm = _identityScopeAccessor.Current.GetRequiredService<SessionsSidebarViewModel>();

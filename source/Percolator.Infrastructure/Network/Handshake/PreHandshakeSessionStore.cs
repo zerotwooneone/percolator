@@ -23,12 +23,15 @@ namespace Percolator.Infrastructure.Network.Handshake
         public async Task<PreHandshakeRecord?> TryGetMostRecentAsync(int selfIdentityId, CancellationToken cancellationToken)
         {
             var now = DateTimeOffset.UtcNow;
-            var x = await _db.PreHandshakeSessions
+            var recent = await _db.PreHandshakeSessions
                 .AsNoTracking()
-                .Where(r => r.SelfIdentityId == selfIdentityId && (r.ExpiresAtUtc == null || r.ExpiresAtUtc > now))
+                .Where(r => r.SelfIdentityId == selfIdentityId)
                 .OrderByDescending(r => r.CreatedAtUtc)
-                .FirstOrDefaultAsync(cancellationToken)
+                .Take(50)
+                .ToListAsync(cancellationToken)
                 .ConfigureAwait(false);
+
+            var x = recent.FirstOrDefault(r => r.ExpiresAtUtc is null || r.ExpiresAtUtc > now);
             if (x is null) return null;
             return new PreHandshakeRecord(
                 Id: x.Id,
@@ -71,15 +74,21 @@ namespace Percolator.Infrastructure.Network.Handshake
         public async IAsyncEnumerable<PreHandshakeRecord> EnumeratePendingAsync(int selfIdentityId, [EnumeratorCancellation] CancellationToken cancellationToken)
         {
             var now = DateTimeOffset.UtcNow;
-            var query = _db.PreHandshakeSessions
+            var recent = await _db.PreHandshakeSessions
                 .AsNoTracking()
-                .Where(x => x.SelfIdentityId == selfIdentityId && (x.ExpiresAtUtc == null || x.ExpiresAtUtc > now))
+                .Where(x => x.SelfIdentityId == selfIdentityId)
                 .OrderByDescending(x => x.CreatedAtUtc)
-                .AsAsyncEnumerable()
-                .WithCancellation(cancellationToken);
+                .Take(200)
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false);
 
-            await foreach (var x in query)
+            foreach (var x in recent)
             {
+                if (x.ExpiresAtUtc is not null && x.ExpiresAtUtc <= now)
+                {
+                    continue;
+                }
+
                 yield return new PreHandshakeRecord(
                     Id: x.Id,
                     SelfIdentityId: x.SelfIdentityId,
@@ -111,10 +120,14 @@ namespace Percolator.Infrastructure.Network.Handshake
         public async Task PurgeExpiredAsync(int selfIdentityId, CancellationToken cancellationToken)
         {
             var now = DateTimeOffset.UtcNow;
-            var expired = await _db.PreHandshakeSessions
-                .Where(x => x.SelfIdentityId == selfIdentityId && x.ExpiresAtUtc != null && x.ExpiresAtUtc <= now)
+            var candidates = await _db.PreHandshakeSessions
+                .Where(x => x.SelfIdentityId == selfIdentityId)
                 .ToListAsync(cancellationToken)
                 .ConfigureAwait(false);
+
+            var expired = candidates
+                .Where(x => x.ExpiresAtUtc is not null && x.ExpiresAtUtc <= now)
+                .ToList();
             if (expired.Count > 0)
             {
                 _db.PreHandshakeSessions.RemoveRange(expired);

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.ObjectModel;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
@@ -27,15 +28,17 @@ public interface ISimulatorStateService
 public sealed class SimulatorStateService : ISimulatorStateService
 {
     private readonly ISimulatorStateStore _store;
+    private readonly ISimulatedPeerKeyFactory _keys;
 
     private readonly ObservableCollection<SimulatedPeerDto> _peers = new();
     public ReadOnlyObservableCollection<SimulatedPeerDto> Peers { get; }
 
     private SimulatorStateDto _state = new();
 
-    public SimulatorStateService(ISimulatorStateStore store)
+    public SimulatorStateService(ISimulatorStateStore store, ISimulatedPeerKeyFactory keys)
     {
         _store = store;
+        _keys = keys;
         Peers = new ReadOnlyObservableCollection<SimulatedPeerDto>(_peers);
     }
 
@@ -44,17 +47,24 @@ public sealed class SimulatorStateService : ISimulatorStateService
         var loaded = await _store.LoadAsync(cancellationToken);
         _state = loaded ?? new SimulatorStateDto { Version = 1 };
 
+        var changed = false;
+
         await InvokeOnUiAsync(() =>
         {
             _peers.Clear();
             foreach (var p in _state.Peers)
             {
                 NormalizePeer(p);
+                changed |= _keys.EnsureReverseSignalKeys(p.ReverseSignalKeys);
                 _peers.Add(p);
             }
         });
 
         if (loaded is null)
+        {
+            await _store.SaveAsync(_state, cancellationToken);
+        }
+        else if (changed)
         {
             await _store.SaveAsync(_state, cancellationToken);
         }
@@ -72,6 +82,7 @@ public sealed class SimulatorStateService : ISimulatorStateService
             Relay = new SimulatedPeerRelayStateDto { IsRelayCapable = false }
         };
         NormalizePeer(peer);
+        _ = _keys.EnsureReverseSignalKeys(peer.ReverseSignalKeys);
 
         _state.Peers.Add(peer);
         await InvokeOnUiAsync(() => _peers.Add(peer));
@@ -163,5 +174,8 @@ public sealed class SimulatorStateService : ISimulatorStateService
         peer.Relay.OpaqueQueue.Items ??= new();
         peer.Relay.PreKeyStore ??= new();
         peer.Relay.PreKeyStore.PublishedBundles ??= new();
+        peer.ReverseSignalKeys ??= new();
     }
+
+    
 }

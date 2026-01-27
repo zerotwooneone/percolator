@@ -51,7 +51,9 @@ public sealed class SimulatedPeerDirectory : ISimulatedPeerDirectory
                 dto.PeerId,
                 dto.DisplayName,
                 dto.IsOnline,
-                dto.Relay.IsRelayCapable);
+                dto.Relay.IsRelayCapable,
+                dto.ReverseSignalKeys.IdentitySigningKeySpki,
+                dto.ReverseSignalKeys.IdentitySigningKeyPrivateKeyEcPrivateKey);
 
             _peers.Add(model);
             _byId[model.PeerId] = model;
@@ -69,7 +71,9 @@ public sealed class SimulatedPeerDirectory : ISimulatedPeerDirectory
             peerId,
             dto?.DisplayName ?? displayName,
             dto?.IsOnline ?? true,
-            dto?.Relay.IsRelayCapable ?? false);
+            dto?.Relay.IsRelayCapable ?? false,
+            dto?.ReverseSignalKeys.IdentitySigningKeySpki ?? Array.Empty<byte>(),
+            dto?.ReverseSignalKeys.IdentitySigningKeyPrivateKeyEcPrivateKey ?? Array.Empty<byte>());
 
         _peers.Add(model);
         _byId[peerId] = model;

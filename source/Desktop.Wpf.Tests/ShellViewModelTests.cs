@@ -113,11 +113,11 @@ public class ShellViewModelTests
         var nav = new Mock<INavigationService>();
         nav.SetupGet(n => n.ViewStream).Returns(Observable.Empty<object?>());
 
-        var scopeMutator = new Mock<IActiveIdentityMutator>();
+        var orchestrator = new Mock<IIdentityOrchestrator>();
         var scopedProvider = new Mock<IServiceProvider>();
         scopedProvider
-            .Setup(sp => sp.GetService(typeof(IActiveIdentityMutator)))
-            .Returns(scopeMutator.Object);
+            .Setup(sp => sp.GetService(typeof(IIdentityOrchestrator)))
+            .Returns(orchestrator.Object);
 
         var sessionsVm = new SessionsSidebarViewModel(
             nav.Object,
@@ -137,7 +137,7 @@ public class ShellViewModelTests
         // Allow async startup to run
         await Task.Delay(50);
 
-        scopeMutator.Verify(m => m.SetActiveIdentity(It.IsAny<IdentityRecord>(), It.IsAny<X3dhKeys>()), Times.AtLeastOnce);
+        orchestrator.Verify(o => o.ResolveIdentityAsync(domain.Id, It.IsAny<CancellationToken>()), Times.Once);
         startupIdentityService.Verify(s => s.ResolveOrCreateAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
 
@@ -216,11 +216,11 @@ public class ShellViewModelTests
         var nav = new Mock<INavigationService>();
         nav.SetupGet(n => n.ViewStream).Returns(Observable.Empty<object?>());
 
-        var scopeMutator = new Mock<IActiveIdentityMutator>();
+        var orchestrator = new Mock<IIdentityOrchestrator>();
         var scopedProvider = new Mock<IServiceProvider>();
         scopedProvider
-            .Setup(sp => sp.GetService(typeof(IActiveIdentityMutator)))
-            .Returns(scopeMutator.Object);
+            .Setup(sp => sp.GetService(typeof(IIdentityOrchestrator)))
+            .Returns(orchestrator.Object);
         var scopedDummyScope = new Mock<IServiceScope>();
         scopedDummyScope.SetupGet(s => s.ServiceProvider).Returns(scopedProvider.Object);
         var scopedDummyScopeFactory = new Mock<IServiceScopeFactory>();

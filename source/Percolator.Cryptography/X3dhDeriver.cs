@@ -5,6 +5,32 @@ namespace Percolator.Cryptography;
 public sealed class X3dhDeriver : IX3dhDeriver
 {
     private const string KdfLabel_X3dh = "x3dh";
+    private static readonly string P256Oid = ECCurve.NamedCurves.nistP256.Oid.Value!;
+
+    private static string GetCurveOid(ECDiffieHellman ecdh)
+    {
+        // On some platforms/providers, KeySize is not reliable (e.g. CNG may report 521).
+        return ecdh.ExportParameters(false).Curve.Oid.Value ?? string.Empty;
+    }
+
+    private static void EnsureP256(string name, ECDiffieHellman ecdh)
+    {
+        var oid = GetCurveOid(ecdh);
+        if (!string.Equals(oid, P256Oid, StringComparison.Ordinal))
+        {
+            throw new CryptographicException($"X3DH expected P-256 for {name} but got curve OID '{oid}'");
+        }
+    }
+
+    private static void EnsureSameCurve(string aName, ECDiffieHellman a, string bName, ECDiffieHellman b)
+    {
+        var aOid = GetCurveOid(a);
+        var bOid = GetCurveOid(b);
+        if (!string.Equals(aOid, bOid, StringComparison.Ordinal))
+        {
+            throw new CryptographicException($"X3DH curve mismatch ({aName}='{aOid}', {bName}='{bOid}')");
+        }
+    }
     public InitiatorResult DeriveInitiator(
         RatchetIdentityKey remoteIdentityKey,
         PreKey remoteSignedPreKey,
@@ -18,13 +44,13 @@ public sealed class X3dhDeriver : IX3dhDeriver
         if (localIdentityPrivateKey?.Value is null || localIdentityPrivateKey.Value.Length == 0)
             throw new CryptographicException("local IK private missing");
 
-        using var ikA = ECDiffieHellman.Create();
+        using var ikA = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         ikA.ImportECPrivateKey(localIdentityPrivateKey.Value, out _);
-        using var ikB = ECDiffieHellman.Create();
+        using var ikB = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         ikB.ImportSubjectPublicKeyInfo(remoteIdentityKey.Value, out _);
-        using var spkB = ECDiffieHellman.Create();
+        using var spkB = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         spkB.ImportSubjectPublicKeyInfo(remoteSignedPreKey.Value, out _);
-        using var opkB = remoteOneTimePreKey is null ? null : ECDiffieHellman.Create();
+        using var opkB = remoteOneTimePreKey is null ? null : ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         if (opkB is not null)
         {
             opkB!.ImportSubjectPublicKeyInfo(remoteOneTimePreKey!.Value, out _);
@@ -33,6 +59,16 @@ public sealed class X3dhDeriver : IX3dhDeriver
         using var ekA = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var ekA_pub_spki = ekA.PublicKey.ExportSubjectPublicKeyInfo();
         var ekA_priv = ekA.ExportECPrivateKey();
+
+        EnsureP256("IK_A", ikA);
+        EnsureP256("IK_B", ikB);
+        EnsureP256("SPK_B", spkB);
+        if (opkB is not null) EnsureP256("OPK_B", opkB);
+        EnsureP256("EK_A", ekA);
+
+        EnsureSameCurve("IK_A", ikA, "SPK_B", spkB);
+        EnsureSameCurve("EK_A", ekA, "IK_B", ikB);
+        EnsureSameCurve("EK_A", ekA, "SPK_B", spkB);
 
         var dh1 = ikA.DeriveKeyMaterial(spkB.PublicKey); // DH(IK_A, SPK_B)
         var dh2 = ekA.DeriveKeyMaterial(ikB.PublicKey);  // DH(EK_A, IK_B)
@@ -77,20 +113,30 @@ public sealed class X3dhDeriver : IX3dhDeriver
         if (localSignedPreKeyPrivate?.Value is null || localSignedPreKeyPrivate.Value.Length == 0)
             throw new CryptographicException("local SPK private missing");
 
-        using var ikB = ECDiffieHellman.Create();
+        using var ikB = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         ikB.ImportECPrivateKey(localIdentityPrivateKey.Value, out _);
-        using var spkB = ECDiffieHellman.Create();
+        using var spkB = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         spkB.ImportECPrivateKey(localSignedPreKeyPrivate.Value, out _);
-        using var otkB = localOneTimePreKeyPrivate is null ? null : ECDiffieHellman.Create();
+        using var otkB = localOneTimePreKeyPrivate is null ? null : ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         if (otkB is not null)
         {
             otkB!.ImportECPrivateKey(localOneTimePreKeyPrivate!.Value, out _);
         }
 
-        using var ikA = ECDiffieHellman.Create();
+        using var ikA = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         ikA.ImportSubjectPublicKeyInfo(initiatorIdentityKey.Value, out _);
-        using var ekA = ECDiffieHellman.Create();
+        using var ekA = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         ekA.ImportSubjectPublicKeyInfo(initiatorEphemeralKey.Value, out _);
+
+        EnsureP256("IK_B", ikB);
+        EnsureP256("SPK_B", spkB);
+        if (otkB is not null) EnsureP256("OTK_B", otkB);
+        EnsureP256("IK_A", ikA);
+        EnsureP256("EK_A", ekA);
+
+        EnsureSameCurve("SPK_B", spkB, "IK_A", ikA);
+        EnsureSameCurve("IK_B", ikB, "EK_A", ekA);
+        EnsureSameCurve("SPK_B", spkB, "EK_A", ekA);
 
         var dh1 = spkB.DeriveKeyMaterial(ikA.PublicKey); // DH(SPK_B, IK_A)
         var dh2 = ikB.DeriveKeyMaterial(ekA.PublicKey);  // DH(IK_B, EK_A)

@@ -5,6 +5,8 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
+using Microsoft.Extensions.Options;
+using Percolator.Application.Configuration;
 using R3;
 
 namespace Desktop.Wpf.Features.Simulator;
@@ -12,19 +14,40 @@ namespace Desktop.Wpf.Features.Simulator;
 public sealed class HandshakeSimulatorViewModel : IDisposable
 {
     private readonly ISimulatedPeerDirectory _directory;
+    private readonly IReverseSignalInviteFactory _inviteFactory;
+    private readonly ISimulatedPeerRuntimeService _peerRuntime;
+    private readonly ISimulatorRelayEmulator _relay;
+    private readonly Percolator.Application.Network.PercolatorMessageService _messageService;
+    private readonly IOptions<TransportOptions> _transportOptions;
+    private readonly Percolator.Application.Identity.ActiveIdentityContext _active;
     private readonly ObservableCollection<SimulatedPeerItemViewModel> _peers = new();
+    private readonly ObservableCollection<RelayPeerOption> _relayOptions = new();
     private DisposableBag _bag;
 
     public HandshakeSimulatorViewModel(
-        ISimulatedPeerDirectory directory)
+        ISimulatedPeerDirectory directory,
+        IReverseSignalInviteFactory inviteFactory,
+        ISimulatedPeerRuntimeService peerRuntime,
+        ISimulatorRelayEmulator relay,
+        Percolator.Application.Network.PercolatorMessageService messageService,
+        IOptions<TransportOptions> transportOptions,
+        Percolator.Application.Identity.ActiveIdentityContext active)
     {
         _directory = directory;
+        _inviteFactory = inviteFactory;
+        _peerRuntime = peerRuntime;
+        _relay = relay;
+        _messageService = messageService;
+        _transportOptions = transportOptions;
+        _active = active;
 
         Peers = new ReadOnlyObservableCollection<SimulatedPeerItemViewModel>(_peers);
+        RelayOptions = new ReadOnlyObservableCollection<RelayPeerOption>(_relayOptions);
 
         NewPeerDisplayName = new BindableReactiveProperty<string?>(null).AddTo(ref _bag);
         Status = new BindableReactiveProperty<string?>(null).AddTo(ref _bag);
         SelectedPeer = new BindableReactiveProperty<SimulatedPeerItemViewModel?>(null).AddTo(ref _bag);
+        SelectedRelayOption = new BindableReactiveProperty<RelayPeerOption?>(null).AddTo(ref _bag);
 
         var addPeerCommand = NewPeerDisplayName
             .Select(name => !string.IsNullOrWhiteSpace(name))
@@ -51,7 +74,11 @@ public sealed class HandshakeSimulatorViewModel : IDisposable
 
     public ReadOnlyObservableCollection<SimulatedPeerItemViewModel> Peers { get; }
 
+    public ReadOnlyObservableCollection<RelayPeerOption> RelayOptions { get; }
+
     public BindableReactiveProperty<SimulatedPeerItemViewModel?> SelectedPeer { get; }
+
+    public BindableReactiveProperty<RelayPeerOption?> SelectedRelayOption { get; }
 
     public ReactiveCommand<Unit> AddPeerCommand { get; }
     public ReactiveCommand<Unit> RemoveSelectedPeerCommand { get; }
@@ -95,8 +122,34 @@ public sealed class HandshakeSimulatorViewModel : IDisposable
         _peers.Clear();
         foreach (var m in _directory.Peers)
         {
-            _peers.Add(new SimulatedPeerItemViewModel(_directory, m));
+            _peers.Add(new SimulatedPeerItemViewModel(
+                _directory,
+                m,
+                _inviteFactory,
+                _peerRuntime,
+                _relay,
+                _messageService,
+                _transportOptions,
+                _active,
+                getSelectedRelayPeerId: () => SelectedRelayOption.Value?.PeerId));
         }
+
+        RebuildRelayOptions();
+    }
+
+    private void RebuildRelayOptions()
+    {
+        var previous = SelectedRelayOption.Value?.PeerId;
+
+        _relayOptions.Clear();
+        _relayOptions.Add(new RelayPeerOption(null, "None (Direct)"));
+        foreach (var p in _peers)
+        {
+            _relayOptions.Add(new RelayPeerOption(p.PeerId, p.DisplayText.Value));
+        }
+
+        SelectedRelayOption.Value = _relayOptions.FirstOrDefault(x => x.PeerId == previous)
+            ?? _relayOptions.FirstOrDefault();
     }
 
     private void HookDirectory()
@@ -127,6 +180,7 @@ public sealed class HandshakeSimulatorViewModel : IDisposable
                 var existing = _peers.FirstOrDefault(x => x.PeerId == oldItem.PeerId);
                 if (existing is null) continue;
                 if (ReferenceEquals(SelectedPeer.Value, existing)) SelectedPeer.Value = null;
+                if (SelectedRelayOption.Value?.PeerId == existing.PeerId) SelectedRelayOption.Value = null;
                 _peers.Remove(existing);
                 existing.Dispose();
             }
@@ -136,9 +190,20 @@ public sealed class HandshakeSimulatorViewModel : IDisposable
         {
             foreach (var newItem in e.NewItems.OfType<SimulatedPeerModel>())
             {
-                _peers.Add(new SimulatedPeerItemViewModel(_directory, newItem));
+                _peers.Add(new SimulatedPeerItemViewModel(
+                    _directory,
+                    newItem,
+                    _inviteFactory,
+                    _peerRuntime,
+                    _relay,
+                    _messageService,
+                    _transportOptions,
+                    _active,
+                    getSelectedRelayPeerId: () => SelectedRelayOption.Value?.PeerId));
             }
         }
+
+        RebuildRelayOptions();
 
         _ = SetStatusOnUiAsync($"Peers: {_peers.Count}");
     }

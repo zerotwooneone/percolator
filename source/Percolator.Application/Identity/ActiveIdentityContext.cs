@@ -1,6 +1,7 @@
 using Percolator.Identity;
 using Percolator.Identity.Model;
 using Percolator.Chat;
+using System.Security.Cryptography;
 using ChatParticipantId = Percolator.Chat.ValueObjects.ParticipantId;
 
 namespace Percolator.Application.Identity;
@@ -25,8 +26,29 @@ public class ActiveIdentityContext :ISelfParticipantIdProvider, IActiveIdentityM
 
     public void SetActiveIdentity(IdentityRecord identity, X3dhKeys? keys = null)
     {
+        if (Keys is not null && keys is not null && !ReferenceEquals(Keys, keys))
+        {
+            Keys.Dispose();
+        }
+
         Identity = identity;
-        Keys = keys;
+
+        if (keys is null)
+        {
+            Keys = null;
+            return;
+        }
+
+        var ikBytes = keys.IdentitySigningKey.ExportECPrivateKey();
+        var spkBytes = keys.SignedPreKey.ExportECPrivateKey();
+
+        var ikClone = ECDiffieHellman.Create();
+        ikClone.ImportECPrivateKey(ikBytes, out _);
+
+        var spkClone = ECDiffieHellman.Create();
+        spkClone.ImportECPrivateKey(spkBytes, out _);
+
+        Keys = new X3dhKeys(ikClone, spkClone);
     }
 }
 

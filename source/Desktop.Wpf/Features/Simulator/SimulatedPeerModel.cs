@@ -11,9 +11,18 @@ public sealed class SimulatedPeerModel : IDisposable
     private readonly ReactiveProperty<bool> _isRelayCapable;
     private readonly ReactiveProperty<SimulatorPeerRuntimeState> _runtimeState;
 
-    public SimulatedPeerModel(Guid peerId, string? displayName, bool isOnline, bool isRelayCapable)
+    public SimulatedPeerModel(
+        Guid peerId,
+        string? displayName,
+        bool isOnline,
+        bool isRelayCapable,
+        byte[] identitySigningKeySpki,
+        byte[] identitySigningKeyPrivateKeyEcPrivateKey)
     {
         PeerId = peerId;
+
+        IdentitySigningKeySpki = identitySigningKeySpki;
+        IdentitySigningKeyPrivateKeyEcPrivateKey = identitySigningKeyPrivateKeyEcPrivateKey;
 
         _displayName = new ReactiveProperty<string?>(NormalizeDisplayName(displayName));
         _isOnline = new ReactiveProperty<bool>(isOnline);
@@ -26,6 +35,9 @@ public sealed class SimulatedPeerModel : IDisposable
     }
 
     public Guid PeerId { get; }
+
+    public byte[] IdentitySigningKeySpki { get; }
+    internal byte[] IdentitySigningKeyPrivateKeyEcPrivateKey { get; }
 
     public ReadOnlyReactiveProperty<string?> DisplayName => _displayName;
     public ReadOnlyReactiveProperty<bool> IsOnline => _isOnline;

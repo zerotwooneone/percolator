@@ -27,6 +27,17 @@ public sealed class SimulatedPeerDto
     public List<Guid> KnownPeerIds { get; set; } = new();
     public SimulatedPeerPreKeyStateDto PreKeys { get; set; } = new();
     public SimulatedPeerRelayStateDto Relay { get; set; } = new();
+    public SimulatedPeerReverseSignalKeysDto ReverseSignalKeys { get; set; } = new();
+}
+
+public sealed class SimulatedPeerReverseSignalKeysDto
+{
+    public int Version { get; set; } = 1;
+
+    // Back-compat only (was introduced briefly). Prefer IdentitySigningKeyPrivateKeyEcPrivateKey.
+    public byte[] IdentitySigningKeyPrivateKeyPkcs8 { get; set; } = Array.Empty<byte>();
+    public byte[] IdentitySigningKeyPrivateKeyEcPrivateKey { get; set; } = Array.Empty<byte>();
+    public byte[] IdentitySigningKeySpki { get; set; } = Array.Empty<byte>();
 }
 
 public enum ConnectionMode
