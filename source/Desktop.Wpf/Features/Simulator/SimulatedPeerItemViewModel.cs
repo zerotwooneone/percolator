@@ -15,7 +15,7 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
 {
     private readonly ISimulatedPeerDirectory _directory;
     private readonly SimulatedPeerModel _model;
-    private readonly IReverseSignalInviteFactory _inviteFactory;
+    private readonly Percolator.Application.Network.IMainReverseSignalInviteFactory _inviteFactory;
     private readonly ISimulatedPeerRuntimeService _peerRuntime;
     private readonly ISimulatorRelayEmulator _relay;
     private readonly Percolator.Application.Network.PercolatorMessageService _messageService;
@@ -29,7 +29,7 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
     public SimulatedPeerItemViewModel(
         ISimulatedPeerDirectory directory,
         SimulatedPeerModel model,
-        IReverseSignalInviteFactory inviteFactory,
+        Percolator.Application.Network.IMainReverseSignalInviteFactory inviteFactory,
         ISimulatedPeerRuntimeService peerRuntime,
         ISimulatorRelayEmulator relay,
         Percolator.Application.Network.PercolatorMessageService messageService,
@@ -57,6 +57,26 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
                 ? state.UiState.ToString()
                 : $"{state.UiState} ({state.PendingCorrelationId.Value.ToString()[..8]})")
             .ToBindableReactiveProperty(_model.RuntimeState.CurrentValue.UiState.ToString())
+            .AddTo(ref _bag);
+
+        ShowMarkOutboundPending = _model.RuntimeState
+            .Select(s => s.UiState != SimulatorPeerUiState.OutboundPending)
+            .ToBindableReactiveProperty(true)
+            .AddTo(ref _bag);
+
+        ShowMarkInboundPending = _model.RuntimeState
+            .Select(s => s.UiState != SimulatorPeerUiState.InboundPending)
+            .ToBindableReactiveProperty(true)
+            .AddTo(ref _bag);
+
+        ShowMarkEstablished = _model.RuntimeState
+            .Select(s => s.UiState != SimulatorPeerUiState.Established)
+            .ToBindableReactiveProperty(true)
+            .AddTo(ref _bag);
+
+        ShowClearRuntimeState = _model.RuntimeState
+            .Select(s => s.UiState != SimulatorPeerUiState.Ready)
+            .ToBindableReactiveProperty(true)
             .AddTo(ref _bag);
 
         var toggleOnline = Observable.Return(true).ToReactiveCommand<Unit>(_ => { });
@@ -135,6 +155,11 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
 
     public BindableReactiveProperty<string> RuntimeStateText { get; }
 
+    public BindableReactiveProperty<bool> ShowMarkOutboundPending { get; }
+    public BindableReactiveProperty<bool> ShowMarkInboundPending { get; }
+    public BindableReactiveProperty<bool> ShowMarkEstablished { get; }
+    public BindableReactiveProperty<bool> ShowClearRuntimeState { get; }
+
     public ReactiveCommand<Unit> ToggleOnlineCommand { get; }
     public ReactiveCommand<Unit> ToggleRelayCapableCommand { get; }
     public ReactiveCommand<Unit> RemoveCommand { get; }
@@ -188,9 +213,11 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
 
         var invite = _inviteFactory.CreateInvite();
 
-        _relay.EnqueueToRelayHost(relayPeerId.Value, _model.PeerId, invite.ToByteArray(), debugType: nameof(EstablishDirectSessionRequest));
+        await _relay.EnqueueToRelayHostAsync(relayPeerId.Value, _model.PeerId, invite.ToByteArray(), debugType: nameof(EstablishDirectSessionRequest), cancellationToken: ct)
+            .ConfigureAwait(false);
 
-        var dequeued = _relay.FetchFromRelayHost(relayPeerId.Value, _model.PeerId, max: 1);
+        var dequeued = await _relay.FetchFromRelayHostAsync(relayPeerId.Value, _model.PeerId, max: 1, cancellationToken: ct)
+            .ConfigureAwait(false);
         if (dequeued.Count == 0)
         {
             return;
@@ -205,7 +232,10 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
             invite: req,
             cancellationToken: ct).ConfigureAwait(false);
 
-        _relay.EnqueueToRelayHost(relayPeerId.Value, inviterPeerId, acceptance.Response.ToByteArray(), debugType: nameof(InviteHandshakeResponse));
+        _sessionToMain = acceptance.SessionId;
+
+        await _relay.EnqueueToRelayHostAsync(relayPeerId.Value, inviterPeerId, acceptance.Response.ToByteArray(), debugType: nameof(InviteHandshakeResponse), cancellationToken: ct)
+            .ConfigureAwait(false);
     }
 
     private async Task ExecuteRelayForwardToMainAsync(System.Threading.CancellationToken ct)
@@ -266,8 +296,7 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
         }
 
         var invite = CreatePeerToMainInvite();
-        _relay.EnqueueToRelayHost(relayPeerId.Value, _active.Identity.Id, invite.ToByteArray(), debugType: nameof(EstablishDirectSessionRequest));
-        return Task.CompletedTask;
+        return _relay.EnqueueToRelayHostAsync(relayPeerId.Value, _active.Identity.Id, invite.ToByteArray(), debugType: nameof(EstablishDirectSessionRequest), cancellationToken: ct);
     }
 
     private EstablishDirectSessionRequest CreatePeerToMainInvite()

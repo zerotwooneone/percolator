@@ -14,7 +14,7 @@ namespace Desktop.Wpf.Features.Simulator;
 public sealed class HandshakeSimulatorViewModel : IDisposable
 {
     private readonly ISimulatedPeerDirectory _directory;
-    private readonly IReverseSignalInviteFactory _inviteFactory;
+    private readonly Percolator.Application.Network.IMainReverseSignalInviteFactory _inviteFactory;
     private readonly ISimulatedPeerRuntimeService _peerRuntime;
     private readonly ISimulatorRelayEmulator _relay;
     private readonly Percolator.Application.Network.PercolatorMessageService _messageService;
@@ -26,7 +26,7 @@ public sealed class HandshakeSimulatorViewModel : IDisposable
 
     public HandshakeSimulatorViewModel(
         ISimulatedPeerDirectory directory,
-        IReverseSignalInviteFactory inviteFactory,
+        Percolator.Application.Network.IMainReverseSignalInviteFactory inviteFactory,
         ISimulatedPeerRuntimeService peerRuntime,
         ISimulatorRelayEmulator relay,
         Percolator.Application.Network.PercolatorMessageService messageService,

@@ -1,6 +1,6 @@
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -16,11 +16,11 @@ public sealed record SimulatedRelayItem(
 
 public interface ISimulatorRelayEmulator
 {
-    void EnqueueToRelayHost(Guid relayHostPeerId, Guid recipientPeerId, byte[] opaqueBytes, string? debugType = null);
+    Task EnqueueToRelayHostAsync(Guid relayHostPeerId, Guid recipientPeerId, byte[] opaqueBytes, string? debugType = null, CancellationToken cancellationToken = default);
 
-    IReadOnlyList<SimulatedRelayItem> FetchFromRelayHost(Guid relayHostPeerId, Guid recipientPeerId, int max);
+    Task<IReadOnlyList<SimulatedRelayItem>> FetchFromRelayHostAsync(Guid relayHostPeerId, Guid recipientPeerId, int max, CancellationToken cancellationToken = default);
 
-    bool DeleteByAckId(Guid relayHostPeerId, Guid recipientPeerId, Guid ackId);
+    Task<bool> DeleteByAckIdAsync(Guid relayHostPeerId, Guid recipientPeerId, Guid ackId, CancellationToken cancellationToken = default);
 
     Task<int> ForwardQueuedToMainAsync(
         Guid relayHostPeerId,
@@ -31,59 +31,62 @@ public interface ISimulatorRelayEmulator
 
 public sealed class SimulatorRelayEmulator : ISimulatorRelayEmulator
 {
-    private readonly ConcurrentDictionary<(Guid relayHostPeerId, Guid recipientPeerId), ConcurrentQueue<SimulatedRelayItem>> _queues = new();
+    private readonly ISimulatorStateService _state;
 
     private readonly ISimulatedPeerRuntimeService _peerRuntime;
     private readonly Percolator.Application.Network.PercolatorMessageService _messageService;
 
     public SimulatorRelayEmulator(
+        ISimulatorStateService state,
         ISimulatedPeerRuntimeService peerRuntime,
         Percolator.Application.Network.PercolatorMessageService messageService)
     {
+        _state = state;
         _peerRuntime = peerRuntime;
         _messageService = messageService;
     }
 
-    public void EnqueueToRelayHost(Guid relayHostPeerId, Guid recipientPeerId, byte[] opaqueBytes, string? debugType = null)
+    public Task EnqueueToRelayHostAsync(
+        Guid relayHostPeerId,
+        Guid recipientPeerId,
+        byte[] opaqueBytes,
+        string? debugType = null,
+        CancellationToken cancellationToken = default)
     {
         if (opaqueBytes is null) throw new ArgumentNullException(nameof(opaqueBytes));
 
-        var queue = _queues.GetOrAdd((relayHostPeerId, recipientPeerId), static _ => new ConcurrentQueue<SimulatedRelayItem>());
-        queue.Enqueue(new SimulatedRelayItem(
-            RelayHostPeerId: relayHostPeerId,
-            RecipientPeerId: recipientPeerId,
-            AckId: Guid.NewGuid(),
-            OpaqueBytes: opaqueBytes,
-            EnqueuedUtc: DateTimeOffset.UtcNow,
-            DebugType: debugType));
+        var routingKey = recipientPeerId.ToByteArray();
+        return _state.EnqueueRelayOpaqueAsync(relayHostPeerId, routingKey, opaqueBytes, debugType, cancellationToken);
     }
 
-    public IReadOnlyList<SimulatedRelayItem> FetchFromRelayHost(Guid relayHostPeerId, Guid recipientPeerId, int max)
+    public async Task<IReadOnlyList<SimulatedRelayItem>> FetchFromRelayHostAsync(
+        Guid relayHostPeerId,
+        Guid recipientPeerId,
+        int max,
+        CancellationToken cancellationToken = default)
     {
-        if (max <= 0) return Array.Empty<SimulatedRelayItem>();
+        var routingKey = recipientPeerId.ToByteArray();
+        var dequeued = await _state.DequeueRelayOpaqueAsync(relayHostPeerId, routingKey, max, cancellationToken).ConfigureAwait(false);
+        if (dequeued.Count == 0) return Array.Empty<SimulatedRelayItem>();
 
-        if (!_queues.TryGetValue((relayHostPeerId, recipientPeerId), out var queue))
-        {
-            return Array.Empty<SimulatedRelayItem>();
-        }
-
-        var list = new List<SimulatedRelayItem>(Math.Min(max, 64));
-        for (var i = 0; i < max; i++)
-        {
-            if (!queue.TryDequeue(out var item))
-            {
-                break;
-            }
-
-            list.Add(item);
-        }
-
-        return list;
+        return dequeued
+            .Select(d => new SimulatedRelayItem(
+                RelayHostPeerId: relayHostPeerId,
+                RecipientPeerId: recipientPeerId,
+                AckId: d.AckId,
+                OpaqueBytes: d.OpaqueBytes,
+                EnqueuedUtc: d.EnqueuedUtc,
+                DebugType: d.DebugType))
+            .ToList();
     }
 
-    public bool DeleteByAckId(Guid relayHostPeerId, Guid recipientPeerId, Guid ackId)
+    public Task<bool> DeleteByAckIdAsync(
+        Guid relayHostPeerId,
+        Guid recipientPeerId,
+        Guid ackId,
+        CancellationToken cancellationToken = default)
     {
-        return false;
+        return _state.DeleteRelayOpaqueByAckIdAsync(relayHostPeerId, ackId, cancellationToken);
     }
 
     public async Task<int> ForwardQueuedToMainAsync(
@@ -99,7 +102,7 @@ public sealed class SimulatorRelayEmulator : ISimulatorRelayEmulator
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var batch = FetchFromRelayHost(relayHostPeerId, recipientPeerId, max: 1);
+            var batch = await FetchFromRelayHostAsync(relayHostPeerId, recipientPeerId, max: 1, cancellationToken).ConfigureAwait(false);
             if (batch.Count == 0)
             {
                 break;

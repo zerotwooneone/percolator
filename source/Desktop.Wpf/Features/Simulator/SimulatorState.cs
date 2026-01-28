@@ -69,9 +69,11 @@ public sealed class SimulatedRelayOpaqueQueueDto
 
 public sealed class RelayQueuedBlobDto
 {
+    public Guid AckId { get; set; }
     public byte[] RecipientRoutingKey { get; set; } = Array.Empty<byte>();
     public byte[] OpaqueBytes { get; set; } = Array.Empty<byte>();
     public DateTimeOffset EnqueuedUtc { get; set; }
+    public string? DebugType { get; set; }
 }
 
 public sealed class SimulatedRelayPreKeyStoreDto

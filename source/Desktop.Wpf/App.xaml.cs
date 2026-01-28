@@ -142,7 +142,6 @@ public partial class App : Application
                 services.AddSingleton<ISimulatedPeerDirectory, SimulatedPeerDirectory>();
                 services.AddScoped<Desktop.Wpf.Features.Simulator.ISimulatorRelayEmulator, Desktop.Wpf.Features.Simulator.SimulatorRelayEmulator>();
                 services.AddScoped<Desktop.Wpf.Features.Simulator.ISimulatedPeerRuntimeService, Desktop.Wpf.Features.Simulator.SimulatedPeerRuntimeService>();
-                services.AddScoped<Desktop.Wpf.Features.Simulator.IReverseSignalInviteFactory, Desktop.Wpf.Features.Simulator.ReverseSignalInviteFactory>();
                 // Per-session scoped chat stack
                 services.AddScoped<Desktop.Wpf.Features.Sessions.SessionContext>();
                 services.AddScoped<Desktop.Wpf.Features.Chat.ChatViewModel>();

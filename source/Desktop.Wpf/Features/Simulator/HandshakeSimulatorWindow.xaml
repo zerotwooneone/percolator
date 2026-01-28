@@ -5,6 +5,9 @@
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize"
         Style="{StaticResource BaseWindow}">
+  <Window.Resources>
+    <BooleanToVisibilityConverter x:Key="BoolToVis" />
+  </Window.Resources>
   <Grid Margin="16" RowDefinitions="Auto,Auto,*,Auto" ColumnDefinitions="*,Auto">
 
     <StackPanel Grid.Row="0" Grid.ColumnSpan="2" Orientation="Horizontal">
@@ -30,6 +33,19 @@
       <ListBox.ItemTemplate>
         <DataTemplate>
           <DockPanel LastChildFill="False">
+            <DockPanel.ContextMenu>
+              <ContextMenu>
+                <MenuItem Header="Advanced">
+                  <MenuItem Header="Toggle Online" Command="{Binding ToggleOnlineCommand}" />
+                  <MenuItem Header="Toggle Relay-Capable" Command="{Binding ToggleRelayCapableCommand}" />
+                  <Separator />
+                  <MenuItem Header="Mark Outbound Pending" Command="{Binding MarkOutboundPendingCommand}" Visibility="{Binding ShowMarkOutboundPending.Value, Converter={StaticResource BoolToVis}}" />
+                  <MenuItem Header="Mark Inbound Pending" Command="{Binding MarkInboundPendingCommand}" Visibility="{Binding ShowMarkInboundPending.Value, Converter={StaticResource BoolToVis}}" />
+                  <MenuItem Header="Mark Established" Command="{Binding MarkEstablishedCommand}" Visibility="{Binding ShowMarkEstablished.Value, Converter={StaticResource BoolToVis}}" />
+                  <MenuItem Header="Clear Runtime State" Command="{Binding ClearRuntimeStateCommand}" Visibility="{Binding ShowClearRuntimeState.Value, Converter={StaticResource BoolToVis}}" />
+                </MenuItem>
+              </ContextMenu>
+            </DockPanel.ContextMenu>
             <TextBlock DockPanel.Dock="Left" Width="220" VerticalAlignment="Center" Text="{Binding DisplayText.Value}"/>
             <TextBlock DockPanel.Dock="Left" Width="140" Margin="12,0,0,0" VerticalAlignment="Center" Text="{Binding RuntimeStateText.Value}"/>
             <Button DockPanel.Dock="Right" Margin="8,0,0,0" Content="Remove" Command="{Binding RemoveCommand}"/>
@@ -38,12 +54,6 @@
             <Button DockPanel.Dock="Right" Margin="8,0,0,0" Content="Inv" Command="{Binding MainInviteDirectCommand}"/>
             <Button DockPanel.Dock="Right" Margin="8,0,0,0" Content="PInvR" Command="{Binding PeerInviteRelayedCommand}"/>
             <Button DockPanel.Dock="Right" Margin="8,0,0,0" Content="PInv" Command="{Binding PeerInviteDirectCommand}"/>
-            <Button DockPanel.Dock="Right" Margin="8,0,0,0" Content="Clear" Command="{Binding ClearRuntimeStateCommand}"/>
-            <Button DockPanel.Dock="Right" Margin="8,0,0,0" Content="Est" Command="{Binding MarkEstablishedCommand}"/>
-            <Button DockPanel.Dock="Right" Margin="8,0,0,0" Content="In" Command="{Binding MarkInboundPendingCommand}"/>
-            <Button DockPanel.Dock="Right" Margin="8,0,0,0" Content="Out" Command="{Binding MarkOutboundPendingCommand}"/>
-            <Button DockPanel.Dock="Right" Margin="8,0,0,0" Content="Relay" Command="{Binding ToggleRelayCapableCommand}"/>
-            <Button DockPanel.Dock="Right" Margin="8,0,0,0" Content="Online" Command="{Binding ToggleOnlineCommand}"/>
           </DockPanel>
         </DataTemplate>
       </ListBox.ItemTemplate>
