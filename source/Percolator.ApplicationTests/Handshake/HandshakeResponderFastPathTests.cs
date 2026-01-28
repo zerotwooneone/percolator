@@ -1,6 +1,7 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
+using Google.Protobuf;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using NUnit.Framework;
@@ -8,6 +9,7 @@ using Percolator.Application.Identity;
 using Percolator.Application.Network.Handshake;
 using Percolator.Application.Sessions;
 using Percolator.Application.Services;
+using Percolator.Contracts;
 using Percolator.Cryptography;
 using Percolator.Identity;
 
@@ -45,7 +47,16 @@ namespace Percolator.ApplicationTests.Handshake
 
             var pk = new RatchetEphemeralKey(new byte[] { 0xAA });
             var payload = SessionRatchetMessage.Create(pk, 1, 0, new Ciphertext(new byte[] { 0xBB })).Value;
-            var cmd = new HandleHandshakeResponderHelloCommand(payload);
+            var resp = new InviteHandshakeResponse
+            {
+                Version = 1,
+                RequestCorrelationId = Guid.NewGuid().ToString(),
+                AcceptorIdentityKey = ByteString.CopyFrom(new byte[] { 0x01 }),          // any non-empty
+                AcceptorX3DhEphemeralKey = ByteString.CopyFrom(new byte[] { 0x02 }),      // any non-empty
+                InitialRatchetMessage = ByteString.CopyFrom(payload)
+            };
+
+            var cmd = new HandleHandshakeResponderHelloCommand(resp);
 
             // Act
             await handler.Handle(cmd, CancellationToken.None);

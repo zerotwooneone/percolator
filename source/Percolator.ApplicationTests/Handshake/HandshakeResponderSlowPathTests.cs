@@ -50,6 +50,9 @@ namespace Percolator.ApplicationTests.Handshake
             var expectedSid = new SessionId(Guid.NewGuid());
             var finalize = new Mock<IInitiatorFinalizeService>(MockBehavior.Strict);
             finalize
+                .Setup(f => f.TryFinalizeFromInviteHandshakeResponseAsync(It.IsAny<InviteHandshakeResponse>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(((SessionId sessionId, Plaintext plaintext)?)null);
+            finalize
                 .Setup(f => f.TryFinalizeFromFirstResponderAsync(It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(() =>
                 {
@@ -70,7 +73,16 @@ namespace Percolator.ApplicationTests.Handshake
 
             var headerPk = new RatchetEphemeralKey(new byte[] { 0xE1 });
             var payload = SessionRatchetMessage.Create(headerPk, 1, 0, new Ciphertext(new byte[] { 0xF1 })).Value;
-            var cmd = new HandleHandshakeResponderHelloCommand(payload);
+            var resp = new InviteHandshakeResponse
+            {
+                Version = 1,
+                RequestCorrelationId = Guid.NewGuid().ToString(),
+                AcceptorIdentityKey = ByteString.CopyFrom(new byte[] { 0x01 }),          // any non-empty
+                AcceptorX3DhEphemeralKey = ByteString.CopyFrom(new byte[] { 0x02 }),      // any non-empty
+                InitialRatchetMessage = ByteString.CopyFrom(payload)
+            };
+
+            var cmd = new HandleHandshakeResponderHelloCommand(resp);
 
             // Act
             await sut.Handle(cmd, CancellationToken.None);

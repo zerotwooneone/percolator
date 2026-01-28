@@ -14,7 +14,7 @@ namespace Percolator.Application.Network.Handshake
 {
     // Finalizes the initiator-side of the X3DH/DR establishment when a HandshakeResponderHello arrives via relay/MQ.
     public record HandleHandshakeResponderHelloCommand(
-        byte[] EncryptedPayload
+        InviteHandshakeResponse Response
     ) : IRequest;
 
     internal class HandleHandshakeResponderHelloHandler : IRequestHandler<HandleHandshakeResponderHelloCommand>
@@ -46,8 +46,18 @@ namespace Percolator.Application.Network.Handshake
                 throw new InvalidOperationException("Active identity not loaded.");
             }
 
+            if (request.Response is null)
+            {
+                throw new InvalidOperationException("InviteHandshakeResponse is required.");
+            }
+
+            if (!request.Response.HasInitialRatchetMessage || request.Response.InitialRatchetMessage.Length == 0)
+            {
+                throw new InvalidOperationException("initial_ratchet_message is required.");
+            }
+
             // Parse the encrypted payload as a SessionRatchetMessage
-            var ratchetMessage = new SessionRatchetMessage(request.EncryptedPayload);
+            var ratchetMessage = new SessionRatchetMessage(request.Response.InitialRatchetMessage.ToByteArray());
             var header = ratchetMessage.GetHeader();
 
             // Fast-path: resolve session by ratchet header key (expected to miss on first responder message)
@@ -55,7 +65,8 @@ namespace Percolator.Application.Network.Handshake
             Percolator.Network.DirectSessionId directSessionId;
             if (sessionId is null)
             {
-                var finalized = await _finalize.TryFinalizeFromFirstResponderAsync(ratchetMessage, cancellationToken).ConfigureAwait(false)
+                var finalized = await _finalize.TryFinalizeFromInviteHandshakeResponseAsync(request.Response, cancellationToken).ConfigureAwait(false)
+                    ?? await _finalize.TryFinalizeFromFirstResponderAsync(ratchetMessage, cancellationToken).ConfigureAwait(false)
                     ?? throw new InvalidOperationException("Unable to finalize initiator session from responder hello");
                 var sid = finalized.sessionId;
                 directSessionId = new Percolator.Network.DirectSessionId(sid.Value);

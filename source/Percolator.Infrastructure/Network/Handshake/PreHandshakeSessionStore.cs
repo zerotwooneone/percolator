@@ -26,10 +26,13 @@ namespace Percolator.Infrastructure.Network.Handshake
             var recent = await _db.PreHandshakeSessions
                 .AsNoTracking()
                 .Where(r => r.SelfIdentityId == selfIdentityId)
-                .OrderByDescending(r => r.CreatedAtUtc)
                 .Take(50)
                 .ToListAsync(cancellationToken)
                 .ConfigureAwait(false);
+
+            recent = recent
+                .OrderByDescending(r => r.CreatedAtUtc)
+                .ToList();
 
             var x = recent.FirstOrDefault(r => r.ExpiresAtUtc is null || r.ExpiresAtUtc > now);
             if (x is null) return null;
@@ -77,10 +80,13 @@ namespace Percolator.Infrastructure.Network.Handshake
             var recent = await _db.PreHandshakeSessions
                 .AsNoTracking()
                 .Where(x => x.SelfIdentityId == selfIdentityId)
-                .OrderByDescending(x => x.CreatedAtUtc)
                 .Take(200)
                 .ToListAsync(cancellationToken)
                 .ConfigureAwait(false);
+
+            recent = recent
+                .OrderByDescending(x => x.CreatedAtUtc)
+                .ToList();
 
             foreach (var x in recent)
             {

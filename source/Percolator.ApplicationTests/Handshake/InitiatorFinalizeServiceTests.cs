@@ -96,7 +96,8 @@ public class InitiatorFinalizeServiceTests
             preStore.Object,
             sessions.Object,
             index.Object,
-            clock);
+            clock,
+            Mock.Of<ISessionCrypto>());
 
         // Act
         var result = await sut.TryFinalizeFromFirstResponderAsync(first, CancellationToken.None);

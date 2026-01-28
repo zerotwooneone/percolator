@@ -102,7 +102,8 @@ namespace Percolator.Application.Network.Handshake
             }
             catch (Exception drEx)
             {
-                return ProcessRelayedOpaquePayloadResponse.Failure;
+                // Not a valid ratchet message header: try reverse-signal payload types (still opaque to relay).
+                return await TryHandleReverseSignalPayloadAsync(request.OpaquePayload.Value, cancellationToken).ConfigureAwait(false);
             }
 
             // Fast/slow path via SecureMessagingService

@@ -31,7 +31,7 @@ internal sealed class InviteHandshakeResponseIngress : IInviteHandshakeResponseI
         }
 
         return _mediator.Send(
-            new HandleHandshakeResponderHelloCommand(response.InitialRatchetMessage.ToByteArray()),
+            new HandleHandshakeResponderHelloCommand(response),
             ct);
     }
 }
