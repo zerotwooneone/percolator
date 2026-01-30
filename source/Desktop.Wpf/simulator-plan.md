@@ -553,6 +553,139 @@ Done when:
 
 ---
 
+# Chunk C.C — Populate reverse-signal callback host/port (direct + relayed)
+
+## Goal
+Ensure all reverse-signal invites contain a valid callback endpoint (host + port) so the acceptor can deliver an `InviteHandshakeResponse` back to the inviter.
+
+This chunk focuses on:
+- Adding a single, consistent source of truth for the inviter’s advertised host.
+- Using `TransportOptions.GrpcPort` as the inviter’s callback port.
+- Updating the existing invite construction code paths to fill these values.
+
+## Scope / message model
+
+The callback endpoint must be embedded in the reverse-signal invite payload:
+
+- `InviteHandshakeRequestPayload`
+  - `inviter_host`
+  - `inviter_port`
+
+No other messages should be updated to carry callback host/port:
+- `InviteHandshakeResponse` remains purely cryptographic + correlation.
+- Relay wrappers (e.g., `RelayOpaqueEnvelope`) remain opaque wrappers.
+
+Note: `ReverseSignalCallbackEndpoint` exists in `internal_messaging.proto` as a wrapper message, but this chunk does not require switching the schema to use it. The goal is to reliably populate the effective callback endpoint in the invite payload.
+
+## Config + host lookup abstraction
+
+Port source:
+- Use `Percolator.Application.Configuration.TransportOptions.GrpcPort`.
+
+Host source:
+- Add an async host lookup abstraction:
+  - `IAdvertisedHostLookup` (or similar)
+    - `Task<string> GetAdvertisedHostAsync(CancellationToken ct = default)`
+
+Initial implementation (simple; can evolve later):
+- Implement `IAdvertisedHostLookup` using configuration only.
+- Add a new config value for the advertised host (exact location is flexible):
+  - extend `TransportOptions` with `AdvertisedHost` (string)
+
+Behavior:
+- If configured host is empty/null, default to `"localhost"`.
+- This is intentionally a placeholder strategy; later iterations may compute the correct LAN/WAN IP or NAT-reachable address.
+
+## Code changes (construction sites)
+
+Update all reverse-signal invite creation paths to set:
+- `payload.InviterHost = await advertisedHostLookup.GetAdvertisedHostAsync(...)`
+- `payload.InviterPort = (uint)transportOptions.GrpcPort` (fallback to 5001 if config is 0, consistent with existing behavior)
+
+Known construction sites:
+
+- Main node inviter (Application layer):
+  - `Percolator.Application/Network/MainReverseSignalInviteFactory.cs`
+    - Update `InviteHandshakeRequestPayload.InviterHost/InviterPort` to use host lookup + `TransportOptions.GrpcPort`.
+
+- Simulated peer inviter (Desktop simulator):
+  - `Desktop.Wpf/Features/Simulator/SimulatedPeerItemViewModel.cs` (`CreatePeerToMainInvite()`)
+    - Update `InviteHandshakeRequestPayload.InviterHost/InviterPort`.
+    - In simulator mode, the host may be a magic loopback address rather than the advertised host (see transport plug-in chunk). This chunk establishes the mechanism; the simulator may supply a simulator-specific `IAdvertisedHostLookup`.
+
+- Simulator main->peer invite factory (Desktop simulator):
+  - `Desktop.Wpf/Features/Simulator/ReverseSignalInviteFactory.cs` (if used for main->peer invite creation)
+    - Update `InviteHandshakeRequestPayload.InviterHost/InviterPort`.
+
+- Any simulator-only handshake generation utilities:
+  - `Desktop.Wpf/Features/Simulator/PendingHandshakeSimulatorService.cs` (if it constructs `InviteHandshakeRequestPayload`)
+    - Update `InviteHandshakeRequestPayload.InviterHost/InviterPort`.
+
+## Validation / done when
+
+- All code paths that construct `InviteHandshakeRequestPayload` populate `InviterHost` and `InviterPort` via the new abstraction IAdvertisedHostLookup and `TransportOptions.GrpcPort`.
+- Reverse-signal invite validation in `Percolator.Application/Network/EstablishDirectSessionService.cs` continues to succeed without special-casing.
+- The host lookup implementation can later be swapped (LAN IP selection, NAT traversal, magic loopback range) without changing the handshake model.
+
+---
+
+# Chunk C.D — Simulator port + loopback addressing for main -> simulated peer outbound routing
+
+## Goal
+Enable the main window to send outbound transport messages to simulated peers reliably, without running additional network servers.
+
+This chunk introduces a simulator-specific destination endpoint model so the main node can target simulated peers and the outbound gRPC clients can short-circuit delivery into the in-process simulator runtime.
+
+## Motivation
+The main node’s outbound transport stack targets peers by `DnsEndPoint` (host + port). In simulator mode, if we use `localhost:<GrpcPort>` for simulated peers, the main node will send messages to itself.
+
+We need a deterministic way to represent “this endpoint is a simulated peer” using only host/port, without expanding endpoint types or adding schemes.
+
+## Config
+Extend `Percolator.Application.Configuration.TransportOptions`:
+- `GrpcPort` (existing): the main node’s gRPC server port.
+- `SimulatorPort` (new): a simulator-only port used as a routing key for simulator-bound outbound messages.
+
+Notes:
+- `SimulatorPort` does not need to be bound to a real socket.
+- It exists to disambiguate simulator destinations from real localhost endpoints.
+
+## Addressing model (magic loopback range)
+Reserve a loopback-only IPv4 range to represent simulated peers:
+- `127.77.0.0/16`
+
+Allocation:
+- Each simulated peer is assigned a stable IP literal within this range.
+- Persist the assigned host in simulator state:
+  - `SimulatedPeerConnectionDto.Host` stores the assigned IP string.
+- Persist the assigned port in simulator state:
+  - `SimulatedPeerConnectionDto.Port` stores `TransportOptions.SimulatorPort`.
+
+## Outbound interception (transport plug-in)
+Implement simulator-only interception for outbound gRPC sends.
+
+Interception rule:
+- If destination `host` parses to an IP in `127.77.0.0/16` and destination `port == SimulatorPort`, route in-process.
+- Otherwise, use the normal gRPC networking path.
+
+Required outbound calls to intercept for Chunk C:
+- Reverse-signal callback delivery:
+  - `TransportService.DeliverInviteHandshakeResponse(InviteHandshakeResponse)`
+- Ongoing secure messaging:
+  - `TransportService.DeliverOpaqueMessage(DeliverOpaqueMessageRequest)`
+
+## Invite creation impact
+When the simulated peer is the inviter (peer -> main reverse-signal), its `InviteHandshakeRequestPayload.InviterHost/InviterPort` must be set to its simulator endpoint:
+- `InviterHost = <assigned 127.77.x.y>`
+- `InviterPort = SimulatorPort`
+
+## Done when
+- The main node can send outbound `DeliverInviteHandshakeResponse` and `DeliverOpaqueMessage` to simulated peers using the simulator endpoints (127.77/16 + `SimulatorPort`).
+- No simulator-bound outbound messages are sent to `localhost:<GrpcPort>`.
+- Non-simulator endpoints continue to use normal gRPC networking unchanged.
+
+---
+
 # Chunk D — Signal (standard X3DH) simulation (direct + relayed; both directions)
 
 ## Goal
