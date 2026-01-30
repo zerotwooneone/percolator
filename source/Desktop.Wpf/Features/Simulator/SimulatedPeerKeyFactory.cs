@@ -21,13 +21,20 @@ public sealed class SimulatedPeerKeyFactory : ISimulatedPeerKeyFactory
                 using var ecdh = ECDiffieHellman.Create();
                 ecdh.ImportECPrivateKey(keys.IdentitySigningKeyPrivateKeyEcPrivateKey, out _);
 
-                using var pub = ECDiffieHellman.Create();
-                pub.ImportSubjectPublicKeyInfo(keys.IdentitySigningKeySpki, out _);
-
-                if (ecdh.KeySize == 256 && pub.KeySize == 256)
+                if (ecdh.KeySize != 256)
                 {
-                    return false;
+                    throw new CryptographicException("Reverse-signal key is not P-256");
                 }
+
+                // Ensure the stored SPKI matches the private key. If it doesn't, overwrite it.
+                var spkiFromPriv = ecdh.ExportSubjectPublicKeyInfo();
+                if (!spkiFromPriv.AsSpan().SequenceEqual(keys.IdentitySigningKeySpki))
+                {
+                    keys.IdentitySigningKeySpki = spkiFromPriv;
+                    return true;
+                }
+
+                return false;
             }
             catch
             {
