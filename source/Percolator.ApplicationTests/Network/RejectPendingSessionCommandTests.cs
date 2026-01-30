@@ -7,6 +7,7 @@ using NUnit.Framework;
 using Percolator.Application.Network;
 using Percolator.ApplicationTests.Services;
 using Percolator.Cryptography;
+using Percolator.Cryptography.Primitives;
 
 namespace Percolator.ApplicationTests.Network;
 
@@ -35,11 +36,16 @@ public sealed class RejectPendingSessionCommandTests
         var pendingRepo = new Mock<IPendingSessionRepository>(MockBehavior.Strict);
         var id = PendingSessionId.NewId();
 
-        var pending = PendingSession.FromInvitation(
+        var pending = PendingSession.FromInvitationWithMetadata(
             id,
             new Percolator.Cryptography.Primitives.PeerId(Guid.NewGuid()),
             new ProtocolVersion(1),
             new HandshakeInvitation(new byte[] { 1, 2, 3 }),
+            requestCorrelationId: new RequestCorrelationId(Guid.NewGuid()),
+            isRelayed: false,
+            inviterIdentityKey: null,
+            callbackEndpointHost: null,
+            callbackEndpointPort: null,
             new TestClock());
 
         pendingRepo.Setup(r => r.GetAsync(id, It.IsAny<CancellationToken>()))

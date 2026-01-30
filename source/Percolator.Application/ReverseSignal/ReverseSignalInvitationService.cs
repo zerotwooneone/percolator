@@ -26,13 +26,18 @@ namespace Percolator.Application.ReverseSignal
         {
             var id = PendingSessionId.NewId();
             var expires = _clock.UtcNow.Add(ttl);
-            var pending = PendingSession.FromInvitation(
+            var pending = PendingSession.FromInvitationWithMetadata(
                 id,
                 remotePeerId,
                 protocolVersion,
                 invitation,
+                requestCorrelationId: new RequestCorrelationId(Guid.NewGuid()),
+                isRelayed: false,
+                inviterIdentityKey: null,
+                callbackEndpointHost: null,
+                callbackEndpointPort: null,
                 _clock,
-                expires);
+                expiresAtUtc: expires);
 
             await _repository.AddAsync(pending, cancellationToken).ConfigureAwait(false);
             return id;

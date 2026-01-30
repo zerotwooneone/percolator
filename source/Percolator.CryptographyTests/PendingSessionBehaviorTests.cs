@@ -26,11 +26,16 @@ public class PendingSessionBehaviorTests
     {
         var clock = new TestClock2 { UtcNow = DateTimeOffset.Parse("2025-05-01T00:00:00Z") };
         var inv = new HandshakeInvitation(new byte[] { 1, 2, 3 });
-        var pending = PendingSession.FromInvitation(
+        var pending = PendingSession.FromInvitationWithMetadata(
             PendingSessionId.NewId(),
             PeerId.NewId(),
             new ProtocolVersion(1),
             inv,
+            requestCorrelationId: new RequestCorrelationId(Guid.NewGuid()),
+            isRelayed: false,
+            inviterIdentityKey: null,
+            callbackEndpointHost: null,
+            callbackEndpointPort: null,
             clock,
             expiresAtUtc: clock.UtcNow.AddHours(1));
 
@@ -45,11 +50,16 @@ public class PendingSessionBehaviorTests
     {
         var clock = new TestClock2 { UtcNow = DateTimeOffset.Parse("2025-05-01T00:00:00Z") };
         var inv = new HandshakeInvitation(new byte[] { 4, 5, 6 });
-        var pending = PendingSession.FromInvitation(
+        var pending = PendingSession.FromInvitationWithMetadata(
             PendingSessionId.NewId(),
             PeerId.NewId(),
             new ProtocolVersion(1),
             inv,
+            requestCorrelationId: new RequestCorrelationId(Guid.NewGuid()),
+            isRelayed: false,
+            inviterIdentityKey: null,
+            callbackEndpointHost: null,
+            callbackEndpointPort: null,
             clock,
             expiresAtUtc: clock.UtcNow.AddHours(1));
 
@@ -64,11 +74,16 @@ public class PendingSessionBehaviorTests
     {
         var clock = new TestClock2 { UtcNow = DateTimeOffset.Parse("2025-05-01T00:00:00Z") };
         var inv = new HandshakeInvitation(new byte[] { 7, 8, 9 });
-        var pending = PendingSession.FromInvitation(
+        var pending = PendingSession.FromInvitationWithMetadata(
             PendingSessionId.NewId(),
             PeerId.NewId(),
             new ProtocolVersion(1),
             inv,
+            requestCorrelationId: new RequestCorrelationId(Guid.NewGuid()),
+            isRelayed: false,
+            inviterIdentityKey: null,
+            callbackEndpointHost: null,
+            callbackEndpointPort: null,
             clock,
             expiresAtUtc: clock.UtcNow.AddHours(1));
 
@@ -82,11 +97,16 @@ public class PendingSessionBehaviorTests
     {
         // Arrange
         var clock = new TestClock2 { UtcNow = DateTimeOffset.Parse("2025-05-01T00:00:00Z") };
-        var pending = PendingSession.FromInvitation(
+        var pending = PendingSession.FromInvitationWithMetadata(
             PendingSessionId.NewId(),
             PeerId.NewId(),
             new ProtocolVersion(1),
             new HandshakeInvitation(new byte[] { 1 }),
+            requestCorrelationId: new RequestCorrelationId(Guid.NewGuid()),
+            isRelayed: false,
+            inviterIdentityKey: null,
+            callbackEndpointHost: null,
+            callbackEndpointPort: null,
             clock,
             expiresAtUtc: clock.UtcNow.AddMinutes(5));
         pending.Reject();
@@ -103,11 +123,16 @@ public class PendingSessionBehaviorTests
     {
         // Arrange
         var clock = new TestClock2 { UtcNow = DateTimeOffset.Parse("2025-05-01T00:00:00Z") };
-        var pending = PendingSession.FromInvitation(
+        var pending = PendingSession.FromInvitationWithMetadata(
             PendingSessionId.NewId(),
             PeerId.NewId(),
             new ProtocolVersion(1),
             new HandshakeInvitation(new byte[] { 2 }),
+            requestCorrelationId: new RequestCorrelationId(Guid.NewGuid()),
+            isRelayed: false,
+            inviterIdentityKey: null,
+            callbackEndpointHost: null,
+            callbackEndpointPort: null,
             clock,
             expiresAtUtc: clock.UtcNow);
         pending.Expire(clock);
@@ -124,11 +149,16 @@ public class PendingSessionBehaviorTests
     {
         // Arrange
         var clock = new TestClock2 { UtcNow = DateTimeOffset.Parse("2025-05-01T00:00:00Z") };
-        var pending = PendingSession.FromInvitation(
+        var pending = PendingSession.FromInvitationWithMetadata(
             PendingSessionId.NewId(),
             PeerId.NewId(),
             new ProtocolVersion(1),
             new HandshakeInvitation(new byte[] { 3 }),
+            requestCorrelationId: new RequestCorrelationId(Guid.NewGuid()),
+            isRelayed: false,
+            inviterIdentityKey: null,
+            callbackEndpointHost: null,
+            callbackEndpointPort: null,
             clock,
             expiresAtUtc: clock.UtcNow.AddHours(1));
         pending.Reject();
@@ -145,11 +175,16 @@ public class PendingSessionBehaviorTests
     {
         // Arrange
         var clock = new TestClock2 { UtcNow = DateTimeOffset.Parse("2025-05-01T00:00:00Z") };
-        var pending = PendingSession.FromInvitation(
+        var pending = PendingSession.FromInvitationWithMetadata(
             PendingSessionId.NewId(),
             PeerId.NewId(),
             new ProtocolVersion(1),
             new HandshakeInvitation(new byte[] { 4 }),
+            requestCorrelationId: new RequestCorrelationId(Guid.NewGuid()),
+            isRelayed: false,
+            inviterIdentityKey: null,
+            callbackEndpointHost: null,
+            callbackEndpointPort: null,
             clock,
             expiresAtUtc: clock.UtcNow);
         pending.Expire(clock);
@@ -166,11 +201,16 @@ public class PendingSessionBehaviorTests
     {
         // Arrange
         var clock = new TestClock2 { UtcNow = DateTimeOffset.Parse("2025-05-01T00:00:00Z") };
-        var pending = PendingSession.FromInvitation(
+        var pending = PendingSession.FromInvitationWithMetadata(
             PendingSessionId.NewId(),
             PeerId.NewId(),
             new ProtocolVersion(1),
             new HandshakeInvitation(new byte[] { 5 }),
+            requestCorrelationId: new RequestCorrelationId(Guid.NewGuid()),
+            isRelayed: false,
+            inviterIdentityKey: null,
+            callbackEndpointHost: null,
+            callbackEndpointPort: null,
             clock,
             expiresAtUtc: clock.UtcNow.AddHours(1));
         pending.ApproveAndRespond(new NoopCrypto(), new Mock<IKeyStore>().Object);
@@ -187,11 +227,16 @@ public class PendingSessionBehaviorTests
     {
         // Arrange
         var clock = new TestClock2 { UtcNow = DateTimeOffset.Parse("2025-05-01T00:00:00Z") };
-        var pending = PendingSession.FromInvitation(
+        var pending = PendingSession.FromInvitationWithMetadata(
             PendingSessionId.NewId(),
             PeerId.NewId(),
             new ProtocolVersion(1),
             new HandshakeInvitation(new byte[] { 6 }),
+            requestCorrelationId: new RequestCorrelationId(Guid.NewGuid()),
+            isRelayed: false,
+            inviterIdentityKey: null,
+            callbackEndpointHost: null,
+            callbackEndpointPort: null,
             clock,
             expiresAtUtc: clock.UtcNow.AddHours(1));
         pending.AutoRespond(new NoopCrypto(), new Mock<IKeyStore>().Object, new ApprovalPolicy(allowAutoRespond: true));
@@ -207,8 +252,17 @@ public class PendingSessionBehaviorTests
     public void Reject_SetsRejected()
     {
         var clock = new TestClock2();
-        var pending = PendingSession.FromInvitation(
-            PendingSessionId.NewId(), PeerId.NewId(), new ProtocolVersion(1), new HandshakeInvitation(new byte[] {1}), clock);
+        var pending = PendingSession.FromInvitationWithMetadata(
+            PendingSessionId.NewId(),
+            PeerId.NewId(),
+            new ProtocolVersion(1),
+            new HandshakeInvitation(new byte[] { 1 }),
+            requestCorrelationId: new RequestCorrelationId(Guid.NewGuid()),
+            isRelayed: false,
+            inviterIdentityKey: null,
+            callbackEndpointHost: null,
+            callbackEndpointPort: null,
+            clock);
         pending.Reject();
         pending.State.Should().Be(ApprovalState.Rejected);
     }
@@ -217,11 +271,16 @@ public class PendingSessionBehaviorTests
     public void Expire_SetsExpired_WhenPast()
     {
         var clock = new TestClock2 { UtcNow = DateTimeOffset.Parse("2025-05-01T00:00:00Z") };
-        var pending = PendingSession.FromInvitation(
+        var pending = PendingSession.FromInvitationWithMetadata(
             PendingSessionId.NewId(),
             PeerId.NewId(),
             new ProtocolVersion(1),
             new HandshakeInvitation(new byte[] { 1 }),
+            requestCorrelationId: new RequestCorrelationId(Guid.NewGuid()),
+            isRelayed: false,
+            inviterIdentityKey: null,
+            callbackEndpointHost: null,
+            callbackEndpointPort: null,
             clock,
             expiresAtUtc: clock.UtcNow);
 

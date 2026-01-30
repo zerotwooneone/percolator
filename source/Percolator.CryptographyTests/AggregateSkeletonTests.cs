@@ -56,7 +56,18 @@ public class AggregateSkeletonTests
         var version = new ProtocolVersion(2);
         var invitation = new HandshakeInvitation(new byte[] { 1, 2, 3 });
 
-        var p = PendingSession.FromInvitation(id, peer, version, invitation, clock, expiresAtUtc: clock.UtcNow.AddHours(1));
+        var p = PendingSession.FromInvitationWithMetadata(
+            id,
+            peer,
+            version,
+            invitation,
+            requestCorrelationId: new RequestCorrelationId(Guid.NewGuid()),
+            isRelayed: false,
+            inviterIdentityKey: null,
+            callbackEndpointHost: null,
+            callbackEndpointPort: null,
+            clock,
+            expiresAtUtc: clock.UtcNow.AddHours(1));
 
         p.Id.Should().Be(id);
         p.RemotePeerId.Should().Be(peer);

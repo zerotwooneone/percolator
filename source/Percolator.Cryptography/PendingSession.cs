@@ -55,30 +55,6 @@ public class PendingSession
         }
     }
 
-    public static PendingSession FromInvitation(
-        PendingSessionId id,
-        PeerId remotePeerId,
-        ProtocolVersion protocolVersion,
-        HandshakeInvitation invitation,
-        IClock clock,
-        DateTimeOffset? expiresAtUtc = null)
-    {
-        if (invitation is null) throw new ArgumentNullException(nameof(invitation));
-        if (clock is null) throw new ArgumentNullException(nameof(clock));
-        return new PendingSession(
-            id,
-            remotePeerId,
-            protocolVersion,
-            invitation,
-            requestCorrelationId: null,
-            isRelayed: false,
-            inviterIdentityKey: null,
-            callbackEndpointHost: null,
-            callbackEndpointPort: null,
-            createdAtUtc: clock.UtcNow,
-            expiresAtUtc: expiresAtUtc);
-    }
-
     public static PendingSession FromInvitationWithMetadata(
         PendingSessionId id,
         PeerId remotePeerId,

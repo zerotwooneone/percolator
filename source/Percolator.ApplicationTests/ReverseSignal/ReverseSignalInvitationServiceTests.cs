@@ -32,6 +32,7 @@ public class ReverseSignalInvitationServiceTests
         Assert.That(saved, Is.Not.Null);
         Assert.That(saved!.Id, Is.EqualTo(id));
         Assert.That(saved!.CreatedAtUtc, Is.EqualTo(clock.UtcNow));
+        Assert.That(saved!.RequestCorrelationId, Is.Not.Null);
         Assert.That(saved!.ExpiresAtUtc.HasValue, Is.True);
         Assert.That(saved!.ExpiresAtUtc!.Value, Is.GreaterThan(saved!.CreatedAtUtc));
         repo.VerifyAll();

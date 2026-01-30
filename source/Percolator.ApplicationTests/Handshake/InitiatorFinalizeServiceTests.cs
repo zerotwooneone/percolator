@@ -97,7 +97,9 @@ public class InitiatorFinalizeServiceTests
             sessions.Object,
             index.Object,
             clock,
-            Mock.Of<ISessionCrypto>());
+            Mock.Of<ISessionCrypto>(),
+            Mock.Of<ISentInvitationRepository>(),
+            Mock.Of<Percolator.Application.KeyExchange.ISelfPreKeyBundleRepository>());
 
         // Act
         var result = await sut.TryFinalizeFromFirstResponderAsync(first, CancellationToken.None);
