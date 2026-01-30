@@ -119,7 +119,7 @@ public sealed class JsonSimulatorStateStore : ISimulatorStateStore, IDisposable
 
     private static string GetDefaultStatePath()
     {
-        var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+        var appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         return Path.Combine(appData, "Percolator", "simulator-state.json");
     }
 
