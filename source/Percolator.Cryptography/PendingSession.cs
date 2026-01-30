@@ -9,21 +9,21 @@ public class PendingSession
     public PeerId RemotePeerId { get; }
     public ProtocolVersion ProtocolVersion { get; }
     public HandshakeInvitation Invitation { get; }
-    public RequestCorrelationId? RequestCorrelationId { get; }
+    public RequestCorrelationId RequestCorrelationId { get; }
     public bool IsRelayed { get; }
     public RatchetIdentityKey? InviterIdentityKey { get; }
     public string? CallbackEndpointHost { get; }
     public int? CallbackEndpointPort { get; }
     public ApprovalState State { get; private set; }
     public DateTimeOffset CreatedAtUtc { get; }
-    public DateTimeOffset? ExpiresAtUtc { get; }
+    public DateTimeOffset? ExpiresAtUtc { get; private set; }
 
     private PendingSession(
         PendingSessionId id,
         PeerId remotePeerId,
         ProtocolVersion protocolVersion,
         HandshakeInvitation invitation,
-        RequestCorrelationId? requestCorrelationId,
+        RequestCorrelationId requestCorrelationId,
         bool isRelayed,
         RatchetIdentityKey? inviterIdentityKey,
         string? callbackEndpointHost,
@@ -60,7 +60,7 @@ public class PendingSession
         PeerId remotePeerId,
         ProtocolVersion protocolVersion,
         HandshakeInvitation invitation,
-        RequestCorrelationId? requestCorrelationId,
+        RequestCorrelationId requestCorrelationId,
         bool isRelayed,
         RatchetIdentityKey? inviterIdentityKey,
         string? callbackEndpointHost,
@@ -116,13 +116,10 @@ public class PendingSession
         State = ApprovalState.Rejected;
     }
 
-    public void Expire(IClock clock)
+    public void Expire(DateTimeOffset expiresAtUtc)
     {
-        if (clock is null) throw new ArgumentNullException(nameof(clock));
-        if (ExpiresAtUtc.HasValue && clock.UtcNow >= ExpiresAtUtc.Value)
-        {
-            State = ApprovalState.Expired;
-        }
+        ExpiresAtUtc = expiresAtUtc;
+        State = ApprovalState.Expired;
     }
 
     public bool IsExpiredAt(DateTimeOffset clockUtcNow)

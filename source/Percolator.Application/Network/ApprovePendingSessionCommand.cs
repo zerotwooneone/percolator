@@ -85,11 +85,6 @@ namespace Percolator.Application.Network
                 return new ApprovePendingSessionResult.RejectedExpired();
             }
 
-            if (pending.RequestCorrelationId is null)
-            {
-                throw new InvalidOperationException("PendingSession missing request_correlation_id. Purge outdated pending sessions.");
-            }
-
             // Parse stored invitation blob as EstablishDirectSessionRequest (envelope)
             EstablishDirectSessionRequest invitationEnvelope;
             try
@@ -234,7 +229,7 @@ namespace Percolator.Application.Network
             }
 
             await _pending.DeleteAsync(pending.Id, cancellationToken).ConfigureAwait(false);
-            return new ApprovePendingSessionResult.Accepted(delivery.SendPath, pending.RequestCorrelationId.Value);
+            return new ApprovePendingSessionResult.Accepted(delivery.SendPath, pending.RequestCorrelationId);
         }
     }
 }

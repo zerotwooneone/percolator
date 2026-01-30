@@ -135,7 +135,7 @@ public class PendingSessionBehaviorTests
             callbackEndpointPort: null,
             clock,
             expiresAtUtc: clock.UtcNow);
-        pending.Expire(clock);
+        pending.Expire(clock.UtcNow);
 
         // Act
         Action act = () => pending.ApproveAndRespond(new NoopCrypto(), new Mock<IKeyStore>().Object);
@@ -187,7 +187,7 @@ public class PendingSessionBehaviorTests
             callbackEndpointPort: null,
             clock,
             expiresAtUtc: clock.UtcNow);
-        pending.Expire(clock);
+        pending.Expire(clock.UtcNow);
 
         // Act
         Action act = () => pending.AutoRespond(new NoopCrypto(), new Mock<IKeyStore>().Object, new ApprovalPolicy(allowAutoRespond: true));
@@ -284,7 +284,7 @@ public class PendingSessionBehaviorTests
             clock,
             expiresAtUtc: clock.UtcNow);
 
-        pending.Expire(clock);
+        pending.Expire(clock.UtcNow);
         pending.State.Should().Be(ApprovalState.Expired);
     }
 }

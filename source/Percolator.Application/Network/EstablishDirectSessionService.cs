@@ -130,8 +130,7 @@ namespace Percolator.Application.Network
             // Replay/DoS: reject duplicates until expiry
             await foreach (var existing in _pendingSessions.EnumerateAsync(cancellationToken).ConfigureAwait(false))
             {
-                if (existing.RequestCorrelationId is not null
-                    && existing.RequestCorrelationId == requestCorrelationId)
+                if (existing.RequestCorrelationId == requestCorrelationId)
                 {
                     if (!existing.IsExpiredAt(_clock.UtcNow))
                     {

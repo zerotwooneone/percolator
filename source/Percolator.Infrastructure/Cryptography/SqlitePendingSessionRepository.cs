@@ -38,7 +38,7 @@ namespace Percolator.Infrastructure.Cryptography
                 RemotePeerId = pending.RemotePeerId.Value,
                 ProtocolVersion = pending.ProtocolVersion.Value,
                 Invitation = pending.Invitation.Value,
-                RequestCorrelationId = pending.RequestCorrelationId?.ToString(),
+                RequestCorrelationId = pending.RequestCorrelationId.ToString(),
                 IsRelayed = pending.IsRelayed,
                 InviterIdentityKey = pending.InviterIdentityKey?.Value,
                 CallbackEndpointHost = pending.CallbackEndpointHost,

@@ -37,7 +37,6 @@ public static class ServiceCollectionExtensions
 
         services.AddChatServices();
 
-        services.AddScoped<ReverseSignalInvitationService>();
         services.AddScoped<ReverseSignal.PendingSessionPurgeService>();
         services.AddSingleton<ICallbackEndpointValidator, CallbackEndpointValidator>();
 
