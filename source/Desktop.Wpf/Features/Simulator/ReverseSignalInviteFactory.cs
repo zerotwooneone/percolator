@@ -19,15 +19,18 @@ public sealed class ReverseSignalInviteFactory : IReverseSignalInviteFactory
     private readonly ActiveIdentityContext _active;
     private readonly ISigningService _signing;
     private readonly IOptions<TransportOptions> _transportOptions;
+    private readonly Percolator.Application.Network.IAdvertisedHostLookup _advertisedHostLookup;
 
     public ReverseSignalInviteFactory(
         ActiveIdentityContext active,
         ISigningService signing,
-        IOptions<TransportOptions> transportOptions)
+        IOptions<TransportOptions> transportOptions,
+        Percolator.Application.Network.IAdvertisedHostLookup advertisedHostLookup)
     {
         _active = active;
         _signing = signing;
         _transportOptions = transportOptions;
+        _advertisedHostLookup = advertisedHostLookup;
     }
 
     public EstablishDirectSessionRequest CreateInvite()
@@ -41,6 +44,8 @@ public sealed class ReverseSignalInviteFactory : IReverseSignalInviteFactory
         var port = _transportOptions.Value.GrpcPort;
         if (port == 0) port = 5001;
 
+        var inviterHost = _advertisedHostLookup.GetAdvertisedHostAsync().GetAwaiter().GetResult();
+
         var inviterSignedPreKeySpki = _active.Keys?.SignedPreKey?.ExportSubjectPublicKeyInfo();
         if (inviterSignedPreKeySpki is null || inviterSignedPreKeySpki.Length == 0)
         {
@@ -52,7 +57,7 @@ public sealed class ReverseSignalInviteFactory : IReverseSignalInviteFactory
         var payload = new InviteHandshakeRequestPayload
         {
             Version = 1,
-            InviterHost = "localhost",
+            InviterHost = inviterHost,
             InviterPort = (uint)port,
             ExpiresAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow.AddMinutes(10)),
             RequestCorrelationId = correlation.ToString(),

@@ -16,12 +16,13 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
     private readonly ISimulatedPeerDirectory _directory;
     private readonly SimulatedPeerModel _model;
     private readonly Percolator.Application.Network.IMainReverseSignalInviteFactory _inviteFactory;
+    private readonly Percolator.Application.Network.IAdvertisedHostLookup _advertisedHostLookup;
     private readonly ISimulatedPeerRuntimeService _peerRuntime;
     private readonly ISimulatorRelayEmulator _relay;
     private readonly Percolator.Application.Network.PercolatorMessageService _messageService;
     private readonly IOptions<TransportOptions> _transportOptions;
     private readonly Percolator.Application.Identity.ActiveIdentityContext _active;
-    private readonly Func<Guid?> _getSelectedRelayPeerId;
+    private readonly Func<Percolator.Cryptography.Primitives.PeerId?> _getSelectedRelayPeerId;
     private DisposableBag _bag;
 
     private Percolator.Cryptography.SessionId? _sessionToMain;
@@ -30,16 +31,18 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
         ISimulatedPeerDirectory directory,
         SimulatedPeerModel model,
         Percolator.Application.Network.IMainReverseSignalInviteFactory inviteFactory,
+        Percolator.Application.Network.IAdvertisedHostLookup advertisedHostLookup,
         ISimulatedPeerRuntimeService peerRuntime,
         ISimulatorRelayEmulator relay,
         Percolator.Application.Network.PercolatorMessageService messageService,
         IOptions<TransportOptions> transportOptions,
         Percolator.Application.Identity.ActiveIdentityContext active,
-        Func<Guid?> getSelectedRelayPeerId)
+        Func<Percolator.Cryptography.Primitives.PeerId?> getSelectedRelayPeerId)
     {
         _directory = directory;
         _model = model;
         _inviteFactory = inviteFactory;
+        _advertisedHostLookup = advertisedHostLookup;
         _peerRuntime = peerRuntime;
         _relay = relay;
         _messageService = messageService;
@@ -211,12 +214,14 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
             return;
         }
 
+        var relayPeerGuid = relayPeerId.Value;
+
         var invite = _inviteFactory.CreateInvite();
 
-        await _relay.EnqueueToRelayHostAsync(relayPeerId.Value, _model.PeerId, invite.ToByteArray(), debugType: nameof(EstablishDirectSessionRequest), cancellationToken: ct)
+        await _relay.EnqueueToRelayHostAsync(relayPeerGuid, _model.PeerId, invite.ToByteArray(), debugType: nameof(EstablishDirectSessionRequest), cancellationToken: ct)
             .ConfigureAwait(false);
 
-        var dequeued = await _relay.FetchFromRelayHostAsync(relayPeerId.Value, _model.PeerId, max: 1, cancellationToken: ct)
+        var dequeued = await _relay.FetchFromRelayHostAsync(relayPeerGuid, _model.PeerId, max: 1, cancellationToken: ct)
             .ConfigureAwait(false);
         if (dequeued.Count == 0)
         {
@@ -234,7 +239,7 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
 
         _sessionToMain = acceptance.SessionId;
 
-        await _relay.EnqueueToRelayHostAsync(relayPeerId.Value, inviterPeerId, acceptance.Response.ToByteArray(), debugType: nameof(InviteHandshakeResponse), cancellationToken: ct)
+        await _relay.EnqueueToRelayHostAsync(relayPeerGuid, inviterPeerId, acceptance.Response.ToByteArray(), debugType: nameof(InviteHandshakeResponse), cancellationToken: ct)
             .ConfigureAwait(false);
     }
 
@@ -246,12 +251,14 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
             return;
         }
 
+        var relayPeerGuid = relayPeerId.Value;
+
         if (_active.Identity is null)
         {
             return;
         }
 
-        if (_model.PeerId != relayPeerId.Value)
+        if (_model.PeerId != relayPeerGuid)
         {
             return;
         }
@@ -262,7 +269,7 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
         }
 
         await _relay.ForwardQueuedToMainAsync(
-            relayHostPeerId: relayPeerId.Value,
+            relayHostPeerId: relayPeerGuid,
             recipientPeerId: _active.Identity.Id,
             relayHostToMainSessionId: _sessionToMain,
             cancellationToken: ct).ConfigureAwait(false);
@@ -295,14 +302,18 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
             return ExecutePeerInviteDirectAsync(ct);
         }
 
+        var relayPeerGuid = relayPeerId.Value;
+
         var invite = CreatePeerToMainInvite();
-        return _relay.EnqueueToRelayHostAsync(relayPeerId.Value, _active.Identity.Id, invite.ToByteArray(), debugType: nameof(EstablishDirectSessionRequest), cancellationToken: ct);
+        return _relay.EnqueueToRelayHostAsync(relayPeerGuid, _active.Identity.Id, invite.ToByteArray(), debugType: nameof(EstablishDirectSessionRequest), cancellationToken: ct);
     }
 
     private EstablishDirectSessionRequest CreatePeerToMainInvite()
     {
         var port = _transportOptions.Value.GrpcPort;
         if (port == 0) port = 5001;
+
+        var inviterHost = _advertisedHostLookup.GetAdvertisedHostAsync().GetAwaiter().GetResult();
 
         using var identityEcdh = ECDiffieHellman.Create();
         identityEcdh.ImportECPrivateKey(_model.IdentitySigningKeyPrivateKeyEcPrivateKey, out _);
@@ -323,7 +334,7 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
         var payload = new InviteHandshakeRequestPayload
         {
             Version = 1,
-            InviterHost = "localhost",
+            InviterHost = inviterHost,
             InviterPort = (uint)port,
             ExpiresAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow.AddMinutes(10)),
             RequestCorrelationId = correlation.ToString(),

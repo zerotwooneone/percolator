@@ -24,6 +24,7 @@ public sealed class MainReverseSignalInviteFactory : IMainReverseSignalInviteFac
     private readonly ActiveIdentityContext _active;
     private readonly ISigningService _signing;
     private readonly IOptions<TransportOptions> _transportOptions;
+    private readonly IAdvertisedHostLookup _advertisedHostLookup;
     private readonly ISelfPreKeyBundleRepository _selfPreKeys;
     private readonly ISentInvitationRepository _sentInvitations;
     private readonly IClock _clock;
@@ -32,6 +33,7 @@ public sealed class MainReverseSignalInviteFactory : IMainReverseSignalInviteFac
         ActiveIdentityContext active,
         ISigningService signing,
         IOptions<TransportOptions> transportOptions,
+        IAdvertisedHostLookup advertisedHostLookup,
         ISelfPreKeyBundleRepository selfPreKeys,
         ISentInvitationRepository sentInvitations,
         IClock clock)
@@ -39,6 +41,7 @@ public sealed class MainReverseSignalInviteFactory : IMainReverseSignalInviteFac
         _active = active;
         _signing = signing;
         _transportOptions = transportOptions;
+        _advertisedHostLookup = advertisedHostLookup;
         _selfPreKeys = selfPreKeys;
         _sentInvitations = sentInvitations;
         _clock = clock;
@@ -60,6 +63,8 @@ public sealed class MainReverseSignalInviteFactory : IMainReverseSignalInviteFac
         var port = _transportOptions.Value.GrpcPort;
         if (port == 0) port = 5001;
 
+        var inviterHost = _advertisedHostLookup.GetAdvertisedHostAsync().GetAwaiter().GetResult();
+
         var expiresAtUtc = _clock.UtcNow.AddMinutes(10);
 
         // IMPORTANT: For reverse-signal, the inviter must remember which signed pre-key private material
@@ -75,7 +80,7 @@ public sealed class MainReverseSignalInviteFactory : IMainReverseSignalInviteFac
         var payload = new InviteHandshakeRequestPayload
         {
             Version = 1,
-            InviterHost = "localhost",
+            InviterHost = inviterHost,
             InviterPort = (uint)port,
             ExpiresAtUtc = Timestamp.FromDateTimeOffset(expiresAtUtc),
             RequestCorrelationId = correlation.ToString(),

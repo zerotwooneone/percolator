@@ -15,6 +15,7 @@ public sealed class HandshakeSimulatorViewModel : IDisposable
 {
     private readonly ISimulatedPeerDirectory _directory;
     private readonly Percolator.Application.Network.IMainReverseSignalInviteFactory _inviteFactory;
+    private readonly Percolator.Application.Network.IAdvertisedHostLookup _advertisedHostLookup;
     private readonly ISimulatedPeerRuntimeService _peerRuntime;
     private readonly ISimulatorRelayEmulator _relay;
     private readonly Percolator.Application.Network.PercolatorMessageService _messageService;
@@ -27,6 +28,7 @@ public sealed class HandshakeSimulatorViewModel : IDisposable
     public HandshakeSimulatorViewModel(
         ISimulatedPeerDirectory directory,
         Percolator.Application.Network.IMainReverseSignalInviteFactory inviteFactory,
+        Percolator.Application.Network.IAdvertisedHostLookup advertisedHostLookup,
         ISimulatedPeerRuntimeService peerRuntime,
         ISimulatorRelayEmulator relay,
         Percolator.Application.Network.PercolatorMessageService messageService,
@@ -35,6 +37,7 @@ public sealed class HandshakeSimulatorViewModel : IDisposable
     {
         _directory = directory;
         _inviteFactory = inviteFactory;
+        _advertisedHostLookup = advertisedHostLookup;
         _peerRuntime = peerRuntime;
         _relay = relay;
         _messageService = messageService;
@@ -126,12 +129,17 @@ public sealed class HandshakeSimulatorViewModel : IDisposable
                 _directory,
                 m,
                 _inviteFactory,
+                _advertisedHostLookup,
                 _peerRuntime,
                 _relay,
                 _messageService,
                 _transportOptions,
                 _active,
-                getSelectedRelayPeerId: () => SelectedRelayOption.Value?.PeerId));
+                getSelectedRelayPeerId: () =>
+                {
+                    var id = SelectedRelayOption.Value?.PeerId;
+                    return id is null ? null : new Percolator.Cryptography.Primitives.PeerId(id.Value);
+                }));
         }
 
         RebuildRelayOptions();
@@ -194,12 +202,17 @@ public sealed class HandshakeSimulatorViewModel : IDisposable
                     _directory,
                     newItem,
                     _inviteFactory,
+                    _advertisedHostLookup,
                     _peerRuntime,
                     _relay,
                     _messageService,
                     _transportOptions,
                     _active,
-                    getSelectedRelayPeerId: () => SelectedRelayOption.Value?.PeerId));
+                    getSelectedRelayPeerId: () =>
+                    {
+                        var id = SelectedRelayOption.Value?.PeerId;
+                        return id is null ? null : new Percolator.Cryptography.Primitives.PeerId(id.Value);
+                    }));
             }
         }
 

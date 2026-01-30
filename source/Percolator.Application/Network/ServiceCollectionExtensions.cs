@@ -114,6 +114,8 @@ public static class ServiceCollectionExtensions
 
         services.AddScoped<IInviteHandshakeResponseIngress, InviteHandshakeResponseIngress>();
 
+        services.AddSingleton<IAdvertisedHostLookup, ConfigurationAdvertisedHostLookup>();
+
         services.AddScoped<IMainReverseSignalInviteFactory, MainReverseSignalInviteFactory>();
 
         // Register the hosted service that runs the discovery (can be disabled in tests)

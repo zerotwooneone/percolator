@@ -44,16 +44,22 @@ public sealed class PendingHandshakeSimulatorService : IPendingHandshakeSimulato
 
     private readonly IEstablishDirectSessionService _establish;
     private readonly IOutboundMessageWireTap _wireTap;
+    private readonly IAdvertisedHostLookup _advertisedHostLookup;
+    private readonly Microsoft.Extensions.Options.IOptions<Percolator.Application.Configuration.TransportOptions> _transportOptions;
 
     private readonly Dictionary<Guid, SimulatedPeer> _peersByCorrelation = new();
     private readonly HashSet<string> _seenOutbound = new(StringComparer.Ordinal);
 
     public PendingHandshakeSimulatorService(
         IEstablishDirectSessionService establish,
-        IOutboundMessageWireTap wireTap)
+        IOutboundMessageWireTap wireTap,
+        IAdvertisedHostLookup advertisedHostLookup,
+        Microsoft.Extensions.Options.IOptions<Percolator.Application.Configuration.TransportOptions> transportOptions)
     {
         _establish = establish ?? throw new ArgumentNullException(nameof(establish));
         _wireTap = wireTap ?? throw new ArgumentNullException(nameof(wireTap));
+        _advertisedHostLookup = advertisedHostLookup ?? throw new ArgumentNullException(nameof(advertisedHostLookup));
+        _transportOptions = transportOptions ?? throw new ArgumentNullException(nameof(transportOptions));
     }
 
     public async Task<RequestCorrelationId> AddSyntheticPendingAsync(string? displayName = null, CancellationToken ct = default)
@@ -69,11 +75,15 @@ public sealed class PendingHandshakeSimulatorService : IPendingHandshakeSimulato
         var inviterSignedPreKeySpki = inviterSignedPreKey.PublicKey.ExportSubjectPublicKeyInfo();
         var preKeySig = inviterEcdsa.SignData(inviterSignedPreKeySpki, HashAlgorithmName.SHA256);
 
+        var inviterHost = await _advertisedHostLookup.GetAdvertisedHostAsync(ct).ConfigureAwait(false);
+        var port = _transportOptions.Value.GrpcPort;
+        if (port == 0) port = 5001;
+
         var payload = new InviteHandshakeRequestPayload
         {
             Version = 1,
-            InviterHost = "example.com",
-            InviterPort = 443,
+            InviterHost = inviterHost,
+            InviterPort = (uint)port,
             ExpiresAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow.AddMinutes(10)),
             RequestCorrelationId = correlation.ToString(),
             InviterPreKey = new InviteHandshakePreKeyBundle
@@ -120,11 +130,15 @@ public sealed class PendingHandshakeSimulatorService : IPendingHandshakeSimulato
             var inviterSignedPreKeySpki = inviterSignedPreKey.PublicKey.ExportSubjectPublicKeyInfo();
             var preKeySig = inviterEcdsa.SignData(inviterSignedPreKeySpki, HashAlgorithmName.SHA256);
 
+            var inviterHost = await _advertisedHostLookup.GetAdvertisedHostAsync(ct).ConfigureAwait(false);
+            var port = _transportOptions.Value.GrpcPort;
+            if (port == 0) port = 5001;
+
             var payload = new InviteHandshakeRequestPayload
             {
                 Version = 1,
-                InviterHost = "example.com",
-                InviterPort = 443,
+                InviterHost = inviterHost,
+                InviterPort = (uint)port,
                 ExpiresAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow.AddMinutes(10)),
                 RequestCorrelationId = correlation.ToString(),
                 InviterPreKey = new InviteHandshakePreKeyBundle
