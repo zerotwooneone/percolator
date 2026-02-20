@@ -19,6 +19,7 @@ namespace Percolator.Application.Network
         private readonly ILogger<GrpcSessionService> _logger;
         private readonly IPeerTrustManager _peerTrustManager;
         private readonly SharedCertificateManager _certificateManager;
+        private readonly ISimulatorOutboundInterceptor? _simulatorOutbound;
         
         // Keep strong references to active resources
         private readonly ConcurrentDictionary<string, GrpcChannel> _channels = new();
@@ -28,11 +29,13 @@ namespace Percolator.Application.Network
         public GrpcSessionService(
             ILogger<GrpcSessionService> logger,
             IPeerTrustManager peerTrustManager,
-            SharedCertificateManager certificateManager)
+            SharedCertificateManager certificateManager,
+            ISimulatorOutboundInterceptor? simulatorOutbound = null)
         {
             _logger = logger;
             _peerTrustManager = peerTrustManager;
             _certificateManager = certificateManager;
+            _simulatorOutbound = simulatorOutbound;
         }
         
         public async Task<EstablishDirectSessionResponse> EstablishDirectSessionAsync(
@@ -46,6 +49,12 @@ namespace Percolator.Application.Network
             DnsEndPoint endpoint,
             InviteHandshakeResponse request)
         {
+            if (_simulatorOutbound is not null
+                && _simulatorOutbound.TryDeliverInviteHandshakeResponse(endpoint, request, out var simulated))
+            {
+                return await simulated.ConfigureAwait(false);
+            }
+
             string connectionKey = $"{endpoint.Host}:{endpoint.Port}";
 
             try

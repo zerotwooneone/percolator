@@ -35,6 +35,16 @@ public interface ISimulatedPeerRuntimeService
     Task DeliverInviteHandshakeResponseToMainAsync(
         InviteHandshakeResponse response,
         CancellationToken cancellationToken = default);
+
+    Task ReceiveInviteHandshakeResponseFromMainAsync(
+        Guid simulatedPeerId,
+        InviteHandshakeResponse response,
+        CancellationToken cancellationToken = default);
+
+    Task<DeliverOpaqueMessageResponse> ReceiveOpaqueMessageFromMainAsync(
+        Guid simulatedPeerId,
+        DeliverOpaqueMessageRequest request,
+        CancellationToken cancellationToken = default);
 }
 
 public sealed class SimulatedPeerRuntimeService : ISimulatedPeerRuntimeService
@@ -85,6 +95,46 @@ public sealed class SimulatedPeerRuntimeService : ISimulatedPeerRuntimeService
             cancellationToken: cancellationToken);
 
         await _messageService.DeliverInviteHandshakeResponse(response, ctx).ConfigureAwait(false);
+    }
+
+    public Task ReceiveInviteHandshakeResponseFromMainAsync(
+        Guid simulatedPeerId,
+        InviteHandshakeResponse response,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (response is null) throw new ArgumentNullException(nameof(response));
+
+        var model = _peers.Peers.FirstOrDefault(p => p.PeerId == simulatedPeerId)
+            ?? throw new InvalidOperationException($"No simulated peer exists with id {simulatedPeerId}");
+
+        if (Guid.TryParse(response.RequestCorrelationId, out var corr))
+        {
+            model.MarkInboundPending(corr);
+        }
+        else
+        {
+            model.MarkInboundPending(Guid.NewGuid());
+        }
+
+        return Task.CompletedTask;
+    }
+
+    public Task<DeliverOpaqueMessageResponse> ReceiveOpaqueMessageFromMainAsync(
+        Guid simulatedPeerId,
+        DeliverOpaqueMessageRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (request is null) throw new ArgumentNullException(nameof(request));
+
+        var model = _peers.Peers.FirstOrDefault(p => p.PeerId == simulatedPeerId)
+            ?? throw new InvalidOperationException($"No simulated peer exists with id {simulatedPeerId}");
+
+        // For C.D2 we only need to prove routing works; full peer-side decrypt/dispatch comes in later chunks.
+        model.MarkInboundPending(Guid.NewGuid());
+
+        return Task.FromResult(new DeliverOpaqueMessageResponse { Version = 1 });
     }
 
     private SimulatedPeerRuntime CreateRuntime(Guid simulatedPeerId)

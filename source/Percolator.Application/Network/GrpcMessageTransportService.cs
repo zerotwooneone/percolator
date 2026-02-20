@@ -20,17 +20,20 @@ public class GrpcMessageTransportService : IMessageTransportService
     private readonly IPeerRoutingProfileRepository _profileRepository;
     private readonly IProfileRoutePlanner _routePlanner;
     private readonly IHttpClientFactory _httpClientFactory;
+    private readonly ISimulatorOutboundInterceptor? _simulatorOutbound;
 
     public GrpcMessageTransportService(
         ILogger<GrpcMessageTransportService> logger,
         IHttpClientFactory httpClientFactory,
         IPeerRoutingProfileRepository profileRepository,
-        IProfileRoutePlanner routePlanner)
+        IProfileRoutePlanner routePlanner,
+        ISimulatorOutboundInterceptor? simulatorOutbound = null)
     {
         _logger = logger;
         _httpClientFactory = httpClientFactory;
         _profileRepository = profileRepository;
         _routePlanner = routePlanner;
+        _simulatorOutbound = simulatorOutbound;
     }
 
     public async Task<DeliverOpaqueMessageResponse> SendMessageAsync(
@@ -58,10 +61,6 @@ public class GrpcMessageTransportService : IMessageTransportService
             throw new InvalidOperationException($"No route available for peer {recipientPeerId}. Cannot send message.");
         }
 
-        // Use the endpoint as the client key, not the peer ID
-        var clientKey = $"{endPoint.EndPoint.Host}:{endPoint.EndPoint.Port}";
-        var client = GetOrCreateClient(clientKey, endPoint);
-
         try
         {
             var request = new DeliverOpaqueMessageRequest
@@ -69,6 +68,16 @@ public class GrpcMessageTransportService : IMessageTransportService
                 Version = 1,
                 Payload = ByteString.CopyFrom(message.Value)
             };
+
+            if (_simulatorOutbound is not null
+                && _simulatorOutbound.TryDeliverOpaqueMessage(endPoint.EndPoint, request, cancellationToken, out var simulated))
+            {
+                return await simulated.ConfigureAwait(false);
+            }
+
+            // Use the endpoint as the client key, not the peer ID
+            var clientKey = $"{endPoint.EndPoint.Host}:{endPoint.EndPoint.Port}";
+            var client = GetOrCreateClient(clientKey, endPoint);
 
             // Add diagnostic logging for the payload
             _logger.LogInformation("Sending message payload with hash: {PayloadHash}, length: {PayloadLength}",
