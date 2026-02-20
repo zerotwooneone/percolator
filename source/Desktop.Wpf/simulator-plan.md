@@ -629,6 +629,114 @@ Known construction sites:
 
 ---
 
+# Chunk C.E — Identity-scoped MediatR for network ingress (SelfId explicit)
+
+## Goal
+Make the **network ingress pipeline** runnable under an explicit identity scope (`SelfId`) so:
+- The simulator can invoke real ingress logic for many simulated identities without creating a per-peer `IServiceProvider`.
+- The application can (later) support multiple identities concurrently.
+
+## Non-goals
+- This chunk does **not** remove `ActiveIdentityContext` from the main application.
+- The main application may continue to use `ActiveIdentityContext` to select the current identity **at the edge**.
+- This chunk does **not** redefine peer IDs or attempt to make them globally meaningful.
+
+## Identity scope
+Use `Percolator.Identity.SelfId` as the identity scope that is passed through MediatR.
+
+Facts / constraints:
+- `SelfId.Value` is an `int` and is the persisted scope key in SQLite.
+- Peer IDs are local values and do not have a stable meaning across peers.
+
+## Current call chain (must remain correct after refactor)
+Inbound opaque messages flow through:
+- `PercolatorMessageService.DeliverOpaqueMessage(...)`
+- `IMessageIngress.DeliverOpaqueAsync(IngressOpaquePayload ...)`
+- `DefaultIngressPipeline.DeliverOpaqueAsync(...)`
+- `_mediator.Send(DeliverOpaqueMessageCommand ...)`
+- `DeliverOpaqueMessageHandler`
+
+This chunk makes `SelfId` explicit at/after the ingress edge and removes any *ambient* identity dependencies inside handlers/adapters.
+
+## Work
+
+### C.E0) Add `SelfId` to ingress payload and MediatR requests
+Add `SelfId SelfIdentityId` to the ingress surface and all MediatR requests that require identity scope.
+
+Concrete targets:
+- `Percolator.Application/Ingress/IngressOpaquePayload` includes `SelfId SelfIdentityId`.
+- `Percolator.Application/Network/DeliverOpaqueMessageCommand` includes `SelfId SelfIdentityId`.
+
+Follow-on requests (as required by actual call sites):
+- `Percolator.Application/Network/ProcessInternalEnvelopeCommand` and its context carry `SelfId` (not raw `int`).
+- `Percolator.Application/Network/Handshake/ProcessRelayedOpaquePayloadCommand` includes `SelfId SelfIdentityId`.
+
+### C.E1) Keep `ActiveIdentityContext` at the edge, but remove it from core handlers
+Update the main application edge to populate `SelfId`:
+- `PercolatorMessageService` continues to use the main app’s `ActiveIdentityContext` to determine the current `SelfId`.
+- That `SelfId` is written into `IngressOpaquePayload`.
+
+Update the ingress pipeline:
+- `DefaultIngressPipeline` must copy `payload.SelfIdentityId` into `DeliverOpaqueMessageCommand.SelfIdentityId`.
+
+Remove identity ambient dependencies from core handlers:
+- `DeliverOpaqueMessageHandler` must not depend on `ActiveIdentityContext` / `IActiveIdentityAccessor`.
+- `ProcessRelayedOpaquePayloadHandler` must not depend on `ActiveIdentityContext` / `IActiveIdentityAccessor`.
+
+### C.E2) Ensure identity-scoped persistence adapters accept `SelfId`
+Update any adapter/repository that currently reads identity scope from `ActiveIdentityContext`.
+
+Concrete target:
+- `Percolator.Infrastructure/Sessions/RatchetKeyIndexAdapter.cs`
+  - Change `TryResolveAsync(...)` / `UpsertAsync(...)` to accept `SelfId`.
+  - Ensure EF queries scope by `selfIdentityId.Value`.
+
+### C.E3) Update internal call sites that construct identity-scoped commands
+Update all call sites that construct the impacted commands to provide `SelfId`.
+
+Known call sites (non-exhaustive; update all compiler errors):
+- `DefaultIngressPipeline` constructs `DeliverOpaqueMessageCommand`.
+- `DeliverOpaqueMessageHandler` constructs `SessionContext` / sends `ProcessInternalEnvelopeCommand`.
+- `DeliverOpaqueMessageHandler` sends `ProcessRelayedOpaquePayloadCommand` for `RelayOpaqueEnvelope`.
+- `ProcessInternalEnvelopeHandler` sends `ProcessRelayedOpaquePayloadCommand`.
+- `ProcessRelayedOpaquePayloadHandler` sends `ProcessInternalEnvelopeCommand`.
+
+## Tests impacted / updates required
+This chunk changes request signatures and removes constructor-injected identity dependencies from network ingress components. Update tests as part of the implementation.
+
+### Application unit tests
+- `Percolator.ApplicationTests/Network/DeliverOpaqueMessageHandlerTests.cs`
+  - Provide `SelfId` on `DeliverOpaqueMessageCommand`.
+  - Update `IRatchetKeyIndex` mocks if methods become `SelfId`-scoped.
+- `Percolator.ApplicationTests/Network/ProcessRelayedOpaquePayloadCommandTests.cs`
+  - Provide `SelfId` on `ProcessRelayedOpaquePayloadCommand`.
+  - Remove reliance on injected/initialized `ActiveIdentityContext`.
+- `Percolator.ApplicationTests/Network/RelayOrchestratorTests.cs`
+  - If orchestrator logic is updated to accept `SelfId` (or depends on identity-scoped repositories), update tests accordingly.
+- `Percolator.ApplicationTests/Network/InboundResolutionParityTests.cs`
+  - Update any direct construction of commands/handlers and `IRatchetKeyIndex` mocking.
+- `Percolator.ApplicationTests/Sessions/SessionMessageTests.cs`
+  - Update any ratchet index usage if method signatures change.
+- `Percolator.ApplicationTests/Network/IdentityReadinessInterceptorTests.cs`
+  - If readiness logic changes from “ambient identity present” to “identity supplied at ingress edge”, update assertions.
+
+### Integration tests
+- `Percolator.ApplicationIntegrationTests/*`
+  - Any test that exercises `PercolatorMessageService.DeliverOpaqueMessage` / `DefaultIngressPipeline` must supply/propagate a `SelfId`.
+
+### Infrastructure tests
+- `Percolator.InfrastructureTests/*` that directly construct `RatchetKeyIndexAdapter` or rely on ambient identity
+  - Update construction after removing `ActiveIdentityContext` dependency.
+
+## Validation / done when
+- The main application still uses `ActiveIdentityContext` to select the current identity at the edge.
+- Ingress passes `SelfId` explicitly through:
+  - `PercolatorMessageService` -> `IngressOpaquePayload` -> `DefaultIngressPipeline` -> `DeliverOpaqueMessageCommand` -> handlers.
+- Core handlers and identity-scoped adapters do not read identity scope from global/ambient state.
+- The design allows running multiple identities concurrently (identity scoped by `SelfId`, no `AsyncLocal`).
+
+---
+
 # Chunk C.D — Simulator port + loopback addressing for main -> simulated peer outbound routing
 
 ## Goal
