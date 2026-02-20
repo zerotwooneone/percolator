@@ -99,7 +99,7 @@ public class SubmitPreKeysHandlerTests
             });
 
         _secureSvc
-            .Setup(s => s.DecryptInboundAsync(It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.DecryptInboundAsync(It.IsAny<int>(), It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((new SessionId(directSessionId.Value), new Plaintext(responseBytes)));
 
         // Act
@@ -123,7 +123,7 @@ public class SubmitPreKeysHandlerTests
         // Assert
         rc.Should().Be(0);
         _transport.Verify(t => t.SendMessageAsync(remotePeerId, directSessionId, It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()), Times.Once);
-        _secureSvc.Verify(s => s.DecryptInboundAsync(It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()), Times.Once);
+        _secureSvc.Verify(s => s.DecryptInboundAsync(It.IsAny<int>(), It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Test]

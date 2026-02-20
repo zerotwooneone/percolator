@@ -103,11 +103,11 @@ public class RequestPreKeyBundleByPkhHandler : IRequestHandler<RequestPreKeyBund
         }
 
         var respCipher = new SessionRatchetMessage(deliverResp.ResponsePayload.ResponsePayload.ToByteArray());
-        var resolved = await _secureMessaging.DecryptInboundAsync(respCipher, cancellationToken).ConfigureAwait(false);
+        var resolved = await _secureMessaging.DecryptInboundAsync(1, respCipher, cancellationToken).ConfigureAwait(false);
         var respPlain = resolved?.plaintext;
         if (respPlain is null)
         {
-            throw new InvalidOperationException("Could not decrypt GetPreKeyBundle response payload.");
+            throw new InvalidOperationException("Could not decrypt pre-key bundle response.");
         }
 
         var internalResp = InternalEnvelope.Parser.ParseFrom(respPlain.Value);

@@ -18,6 +18,7 @@ public sealed class InboundMessageResolver
     }
 
     public async Task<(SessionId sessionId, Plaintext plaintext)?> ResolveAsync(
+        int selfIdentityId,
         SessionRatchetMessage message,
         IClock clock,
         CancellationToken cancellationToken = default)
@@ -28,7 +29,7 @@ public sealed class InboundMessageResolver
         var header = message.GetHeader();
 
         // Fast path: index lookup
-        var resolved = await _index.TryResolveAsync(header.PreKey, cancellationToken).ConfigureAwait(false);
+        var resolved = await _index.TryResolveAsync(selfIdentityId, header.PreKey, cancellationToken).ConfigureAwait(false);
         if (resolved is SessionId sid)
         {
             var session = await _repo.GetAsync(sid, cancellationToken).ConfigureAwait(false);
@@ -36,13 +37,13 @@ public sealed class InboundMessageResolver
             {
                 var pt = session.Decrypt(message, clock);
                 await _repo.UpdateAsync(session, cancellationToken).ConfigureAwait(false);
-                await _index.UpsertAsync(sid, header.PreKey, clock.UtcNow, cancellationToken).ConfigureAwait(false);
+                await _index.UpsertAsync(selfIdentityId, sid, header.PreKey, clock.UtcNow, cancellationToken).ConfigureAwait(false);
                 return (sid, pt);
             }
         }
 
         // Slow path: enumerate sessions and try decrypt until one succeeds
-        await foreach (var candidate in _catalog.EnumerateActiveAsync(cancellationToken).ConfigureAwait(false))
+        await foreach (var candidate in _catalog.EnumerateActiveAsync(selfIdentityId, cancellationToken).ConfigureAwait(false))
         {
             var s = await _repo.GetAsync(candidate, cancellationToken).ConfigureAwait(false);
             if (s is null) continue;
@@ -50,7 +51,7 @@ public sealed class InboundMessageResolver
             {
                 var pt = s.Decrypt(message, clock);
                 await _repo.UpdateAsync(s, cancellationToken).ConfigureAwait(false);
-                await _index.UpsertAsync(candidate, header.PreKey, clock.UtcNow, cancellationToken).ConfigureAwait(false);
+                await _index.UpsertAsync(selfIdentityId, candidate, header.PreKey, clock.UtcNow, cancellationToken).ConfigureAwait(false);
                 return (candidate, pt);
             }
             catch

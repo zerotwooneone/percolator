@@ -24,8 +24,6 @@ public class ProcessRelayedOpaquePayloadCommandTests
         var logger = Microsoft.Extensions.Logging.Abstractions.NullLogger<ProcessRelayedOpaquePayloadHandler>.Instance;
         var mediator = new Mock<IMediator>(MockBehavior.Strict);
         var secure = new Mock<Percolator.Application.Services.ISecureMessagingService>(MockBehavior.Strict);
-        var activeAccessor = Mock.Of<IActiveIdentityAccessor>(a => a.IsActive == true);
-        var active = new ActiveIdentityContext { Identity = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "t", null) { SelfIdentityId = new SelfId(1)} };
         var establish = new Mock<IEstablishDirectSessionService>(MockBehavior.Strict);
         var inviteIngress = new Mock<IInviteHandshakeResponseIngress>(MockBehavior.Strict);
 
@@ -37,11 +35,9 @@ public class ProcessRelayedOpaquePayloadCommandTests
             logger,
             mediator.Object,
             secure.Object,
-            activeAccessor,
-            active,
             establish.Object,
             inviteIngress.Object);
-        var result = await sut.Handle(new ProcessRelayedOpaquePayloadCommand(payload, relayHost), CancellationToken.None);
+        var result = await sut.Handle(new ProcessRelayedOpaquePayloadCommand(new SelfId(1), payload, relayHost), CancellationToken.None);
 
         Assert.That(result.WasSuccess, Is.False);
     }
@@ -80,12 +76,10 @@ public class ProcessRelayedOpaquePayloadCommandTests
             logger,
             mediator.Object,
             secure.Object,
-            activeAccessor,
-            active,
             establish.Object,
             inviteIngress.Object);
 
-        var result = await sut.Handle(new ProcessRelayedOpaquePayloadCommand(payload, relayHost), CancellationToken.None);
+        var result = await sut.Handle(new ProcessRelayedOpaquePayloadCommand(new SelfId(1), payload, relayHost), CancellationToken.None);
 
         Assert.That(result.WasSuccess, Is.True);
         establish.VerifyAll();
@@ -97,8 +91,6 @@ public class ProcessRelayedOpaquePayloadCommandTests
         var logger = Microsoft.Extensions.Logging.Abstractions.NullLogger<ProcessRelayedOpaquePayloadHandler>.Instance;
         var mediator = new Mock<IMediator>(MockBehavior.Strict);
         var secure = new Mock<Percolator.Application.Services.ISecureMessagingService>(MockBehavior.Strict);
-        var activeAccessor = Mock.Of<IActiveIdentityAccessor>(a => a.IsActive == true);
-        var active = new ActiveIdentityContext { Identity = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "t", null) { SelfIdentityId = new SelfId(1)} };
         var establish = new Mock<IEstablishDirectSessionService>(MockBehavior.Strict);
         var inviteIngress = new Mock<IInviteHandshakeResponseIngress>(MockBehavior.Strict);
 
@@ -122,12 +114,10 @@ public class ProcessRelayedOpaquePayloadCommandTests
             logger,
             mediator.Object,
             secure.Object,
-            activeAccessor,
-            active,
             establish.Object,
             inviteIngress.Object);
 
-        var result = await sut.Handle(new ProcessRelayedOpaquePayloadCommand(payload, relayHost), CancellationToken.None);
+        var result = await sut.Handle(new ProcessRelayedOpaquePayloadCommand(new SelfId(1), payload, relayHost), CancellationToken.None);
 
         Assert.That(result.WasSuccess, Is.True);
         inviteIngress.VerifyAll();

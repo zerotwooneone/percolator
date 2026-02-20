@@ -48,12 +48,12 @@ public sealed class InMemorySessionRepository : ISessionRepository
         return Task.CompletedTask;
     }
 
-    public Task<IReadOnlyList<SecureSession>> GetAllActiveAsync(CancellationToken cancellationToken = default)
+    public Task<IReadOnlyList<SecureSession>> GetAllActiveAsync(int selfIdentityId, CancellationToken cancellationToken = default)
     {
         IReadOnlyList<SecureSession> result;
         lock (_gate)
         {
-            result = _store.Select(x => x.Session).ToList();
+            result = _store.Where(x => x.SelfId == selfIdentityId).Select(x => x.Session).ToList();
         }
         // Simulate network/disk latency
         return Task.Delay(TimeSpan.FromSeconds(1), cancellationToken).ContinueWith(_ => (IReadOnlyList<SecureSession>)result, cancellationToken);

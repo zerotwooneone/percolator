@@ -18,14 +18,14 @@ file sealed class TestClock6 : IClock
 file sealed class FakeIndex : IRatchetKeyIndex
 {
     public SessionId? Resolved;
-    public (SessionId, RatchetEphemeralKey, DateTimeOffset)? Upserted;
+    public (int SelfIdentityId, SessionId SessionId, RatchetEphemeralKey HeaderKey, DateTimeOffset UpdatedAtUtc)? Upserted;
 
-    public Task<SessionId?> TryResolveAsync(RatchetEphemeralKey headerPublicKey, CancellationToken cancellationToken = default)
+    public Task<SessionId?> TryResolveAsync(int selfIdentityId, RatchetEphemeralKey headerPublicKey, CancellationToken cancellationToken = default)
         => Task.FromResult(Resolved);
 
-    public Task UpsertAsync(SessionId sessionId, RatchetEphemeralKey headerPublicKey, DateTimeOffset updatedAtUtc, CancellationToken cancellationToken = default)
+    public Task UpsertAsync(int selfIdentityId, SessionId sessionId, RatchetEphemeralKey headerPublicKey, DateTimeOffset updatedAtUtc, CancellationToken cancellationToken = default)
     {
-        Upserted = (sessionId, headerPublicKey, updatedAtUtc);
+        Upserted = (selfIdentityId, sessionId, headerPublicKey, updatedAtUtc);
         return Task.CompletedTask;
     }
 }
@@ -33,7 +33,7 @@ file sealed class FakeIndex : IRatchetKeyIndex
 file sealed class FakeCatalog : ISessionCatalog
 {
     public List<SessionId> Sessions { get; } = new();
-    public async IAsyncEnumerable<SessionId> EnumerateActiveAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)
+    public async IAsyncEnumerable<SessionId> EnumerateActiveAsync(int selfIdentityId, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         foreach (var s in Sessions)
         {
@@ -64,8 +64,9 @@ file sealed class FakeRepo : ISessionRepository
         Store[session.Id] = session;
         return Task.CompletedTask;
     }
-    public Task<IReadOnlyList<SecureSession>> GetAllActiveAsync(CancellationToken ct = default)
-        => throw new NotImplementedException();
+
+    public Task<IReadOnlyList<SecureSession>> GetAllActiveAsync(int selfIdentityId, CancellationToken cancellationToken = default)
+        => Task.FromResult((IReadOnlyList<SecureSession>)Store.Values.ToList());
 }
 
 [TestFixture]
@@ -98,7 +99,7 @@ public class InboundMessageResolverTests
         // Create a sender session to produce a valid framed message
         var sender = MakeSession(SessionId.NewId(), initiator, clock);
         var msg = sender.Encrypt(new Plaintext(new byte[] { 1 }), clock);
-        var result = await resolver.ResolveAsync(msg, clock, CancellationToken.None);
+        var result = await resolver.ResolveAsync(1, msg, clock, CancellationToken.None);
 
         result.Should().NotBeNull();
         result!.Value.sessionId.Should().Be(sid);
@@ -129,7 +130,7 @@ public class InboundMessageResolverTests
         var sender2 = MakeSession(SessionId.NewId(), initiator, clock);
         var msg = sender2.Encrypt(new Plaintext(new byte[] { 2 }), clock);
 
-        var result = await resolver.ResolveAsync(msg, clock, CancellationToken.None);
+        var result = await resolver.ResolveAsync(1, msg, clock, CancellationToken.None);
 
         result.Should().NotBeNull();
         result!.Value.sessionId.Should().BeOneOf(sid1, sid2);

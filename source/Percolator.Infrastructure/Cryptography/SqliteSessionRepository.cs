@@ -62,9 +62,13 @@ namespace Percolator.Infrastructure.Cryptography
             await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
         }
 
-        public async Task<IReadOnlyList<SecureSession>> GetAllActiveAsync(CancellationToken cancellationToken = default)
+        public async Task<IReadOnlyList<SecureSession>> GetAllActiveAsync(int selfIdentityId, CancellationToken cancellationToken = default)
         {
-            var rows = await _db.Sessions.AsNoTracking().OrderByDescending(x => x.LastUsedAtUtc).ToListAsync(cancellationToken).ConfigureAwait(false);
+            var rows = await _db.Sessions.AsNoTracking()
+                .Where(x => x.SelfIdentityId == selfIdentityId)
+                .OrderByDescending(x => x.LastUsedAtUtc)
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false);
             return rows.Select(FromDbo).ToList();
         }
 

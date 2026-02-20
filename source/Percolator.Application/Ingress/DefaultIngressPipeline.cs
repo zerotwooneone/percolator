@@ -41,7 +41,8 @@ public sealed class DefaultIngressPipeline : IIngressPipeline
 
         var command = new DeliverOpaqueMessageCommand
         {
-            PayloadBytes = payload.PayloadBytes
+            PayloadBytes = payload.PayloadBytes,
+            SelfIdentityId = payload.SelfIdentityId
         };
 
         var result = await _mediator.Send(command, cancellationToken).ConfigureAwait(false);

@@ -5,6 +5,7 @@ using Google.Protobuf;
 using Grpc.Core;
 using Microsoft.Extensions.Logging;
 using Percolator.Application.Ingress;
+using Percolator.Application.Identity;
 using Percolator.Contracts;
 using Percolator.Prekey.Handlers;
 using Percolator.Cryptography.Primitives;
@@ -17,17 +18,20 @@ namespace Percolator.Application.Network
         private readonly IMessageIngress _messageIngress;
         private readonly IEstablishDirectSessionService _establishService;
         private readonly IInviteHandshakeResponseIngress _inviteHandshakeResponseIngress;
+        private readonly ActiveIdentityContext _active;
 
         public PercolatorMessageService(
             ILogger<PercolatorMessageService> logger,
             IMessageIngress messageIngress,
             IEstablishDirectSessionService establishService,
-            IInviteHandshakeResponseIngress inviteHandshakeResponseIngress)
+            IInviteHandshakeResponseIngress inviteHandshakeResponseIngress,
+            ActiveIdentityContext active)
         {
             _logger = logger;
             _messageIngress = messageIngress;
             _establishService = establishService;
             _inviteHandshakeResponseIngress = inviteHandshakeResponseIngress;
+            _active = active;
         }
 
         public override async Task<EstablishDirectSessionResponse> EstablishDirectSession(EstablishDirectSessionRequest request, ServerCallContext context)
@@ -76,12 +80,18 @@ namespace Percolator.Application.Network
 
         public override async Task<DeliverOpaqueMessageResponse> DeliverOpaqueMessage(DeliverOpaqueMessageRequest request, ServerCallContext context)
         {
+            if (_active.Identity is null)
+            {
+                throw new RpcException(new Status(StatusCode.FailedPrecondition, "Active identity not loaded."));
+            }
+
             var correlationId = context.RequestHeaders
                 .FirstOrDefault(h => string.Equals(h.Key, "x-correlation-id", StringComparison.OrdinalIgnoreCase))
                 ?.Value;
 
             var ingressPayload = new IngressOpaquePayload(
                 PayloadBytes: request.Payload.ToByteArray(),
+                SelfIdentityId: _active.Identity.SelfIdentityId,
                 RemotePeerId: null,
                 TransportPeer: context.Peer,
                 CorrelationId: correlationId);

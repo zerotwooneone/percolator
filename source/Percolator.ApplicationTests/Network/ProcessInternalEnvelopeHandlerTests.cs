@@ -43,7 +43,7 @@ namespace Percolator.ApplicationTests.Network
                 PublicKeyHash = Google.Protobuf.ByteString.CopyFrom(new byte[31]) // invalid
             };
             var env = new InternalEnvelope { ChatEnvelope = new ChatEnvelope { EmojiAnnotation = em } };
-            var ctx = new SessionContext(Guid.NewGuid(), 1, null);
+            var ctx = new SessionContext(Guid.NewGuid(), new Percolator.Identity.SelfId(1), null);
 
             Assert.ThrowsAsync<InvalidOperationException>(() => sut.Handle(new ProcessInternalEnvelopeCommand(env, ctx), CancellationToken.None));
         }
@@ -61,7 +61,7 @@ namespace Percolator.ApplicationTests.Network
                 SentTimestampUtc = Timestamp.FromDateTime(DateTime.UtcNow)
             };
             var env = new InternalEnvelope { ChatEnvelope = new ChatEnvelope { EmojiAnnotation = em } };
-            var ctx = new SessionContext(Guid.NewGuid(), 1, null);
+            var ctx = new SessionContext(Guid.NewGuid(), new Percolator.Identity.SelfId(1), null);
 
             Assert.ThrowsAsync<InvalidOperationException>(() => sut.Handle(new ProcessInternalEnvelopeCommand(env, ctx), CancellationToken.None));
         }
@@ -79,7 +79,7 @@ namespace Percolator.ApplicationTests.Network
                 PublicKeyHash = Google.Protobuf.ByteString.CopyFrom(new byte[31]) // invalid
             };
             var env = new InternalEnvelope { ChatEnvelope = new ChatEnvelope { DeliveredReceipt = dr } };
-            var ctx = new SessionContext(Guid.NewGuid(), 1, null);
+            var ctx = new SessionContext(Guid.NewGuid(), new Percolator.Identity.SelfId(1), null);
 
             Assert.ThrowsAsync<InvalidOperationException>(() => sut.Handle(new ProcessInternalEnvelopeCommand(env, ctx), CancellationToken.None));
         }
@@ -96,7 +96,7 @@ namespace Percolator.ApplicationTests.Network
                 SentTimestampUtc = Timestamp.FromDateTime(DateTime.UtcNow)
             };
             var env = new InternalEnvelope { ChatEnvelope = new ChatEnvelope { DeliveredReceipt = dr } };
-            var ctx = new SessionContext(Guid.NewGuid(), 1, null);
+            var ctx = new SessionContext(Guid.NewGuid(), new Percolator.Identity.SelfId(1), null);
 
             Assert.ThrowsAsync<InvalidOperationException>(() => sut.Handle(new ProcessInternalEnvelopeCommand(env, ctx), CancellationToken.None));
         }
@@ -115,7 +115,7 @@ namespace Percolator.ApplicationTests.Network
                 PublicKeyHash = Google.Protobuf.ByteString.CopyFrom(new byte[31]) // invalid length
             };
             var env = new InternalEnvelope { ChatEnvelope = new ChatEnvelope { TextMessage = msg } };
-            var ctx = new SessionContext(Guid.NewGuid(), 1, null);
+            var ctx = new SessionContext(Guid.NewGuid(), new Percolator.Identity.SelfId(1), null);
 
             Assert.ThrowsAsync<InvalidOperationException>(() => sut.Handle(new ProcessInternalEnvelopeCommand(env, ctx), CancellationToken.None));
         }
@@ -133,7 +133,7 @@ namespace Percolator.ApplicationTests.Network
                 SentTimestampUtc = Timestamp.FromDateTime(DateTime.UtcNow)
             };
             var env = new InternalEnvelope { ChatEnvelope = new ChatEnvelope { TextMessage = msg } };
-            var ctx = new SessionContext(Guid.NewGuid(), 1, null);
+            var ctx = new SessionContext(Guid.NewGuid(), new Percolator.Identity.SelfId(1), null);
 
             Assert.ThrowsAsync<InvalidOperationException>(() => sut.Handle(new ProcessInternalEnvelopeCommand(env, ctx), CancellationToken.None));
         }
@@ -153,7 +153,7 @@ namespace Percolator.ApplicationTests.Network
                 PublicKeyHash = Google.Protobuf.ByteString.CopyFrom(new byte[32])
             };
             var env = new InternalEnvelope { ChatEnvelope = new ChatEnvelope { TextMessage = msg } };
-            var ctx = new SessionContext(Guid.NewGuid(), 1, null);
+            var ctx = new SessionContext(Guid.NewGuid(), new Percolator.Identity.SelfId(1), null);
 
             Assert.ThrowsAsync<InvalidOperationException>(() => sut.Handle(new ProcessInternalEnvelopeCommand(env, ctx), CancellationToken.None));
         }
@@ -172,7 +172,7 @@ namespace Percolator.ApplicationTests.Network
                 PublicKeyHash = Google.Protobuf.ByteString.CopyFrom(new byte[32])
             };
             var env = new InternalEnvelope { ChatEnvelope = new ChatEnvelope { ReadReceipt = rr } };
-            var ctx = new SessionContext(Guid.NewGuid(), 1, null);
+            var ctx = new SessionContext(Guid.NewGuid(), new Percolator.Identity.SelfId(1), null);
 
             Assert.ThrowsAsync<InvalidOperationException>(() => sut.Handle(new ProcessInternalEnvelopeCommand(env, ctx), CancellationToken.None));
         }
@@ -192,7 +192,7 @@ namespace Percolator.ApplicationTests.Network
                 PublicKeyHash = Google.Protobuf.ByteString.CopyFrom(new byte[32])
             };
             var env = new InternalEnvelope { ChatEnvelope = new ChatEnvelope { EmojiAnnotation = em } };
-            var ctx = new SessionContext(Guid.NewGuid(), 1, null);
+            var ctx = new SessionContext(Guid.NewGuid(), new Percolator.Identity.SelfId(1), null);
 
             Assert.ThrowsAsync<InvalidOperationException>(() => sut.Handle(new ProcessInternalEnvelopeCommand(env, ctx), CancellationToken.None));
         }
@@ -211,7 +211,7 @@ namespace Percolator.ApplicationTests.Network
                 PublicKeyHash = Google.Protobuf.ByteString.CopyFrom(new byte[32])
             };
             var env = new InternalEnvelope { ChatEnvelope = new ChatEnvelope { DeliveredReceipt = dr } };
-            var ctx = new SessionContext(Guid.NewGuid(), 1, null);
+            var ctx = new SessionContext(Guid.NewGuid(), new Percolator.Identity.SelfId(1), null);
 
             Assert.ThrowsAsync<InvalidOperationException>(() => sut.Handle(new ProcessInternalEnvelopeCommand(env, ctx), CancellationToken.None));
         }
@@ -235,7 +235,7 @@ namespace Percolator.ApplicationTests.Network
                 TargetPeerId = Google.Protobuf.ByteString.CopyFrom(new byte[32])
             };
             var env = new InternalEnvelope { DhtEnvelope = new DhtEnvelope { FindNodeRequest = contractsReq } };
-            var ctx = new SessionContext(null, 1, null);
+            var ctx = new SessionContext(null, new Percolator.Identity.SelfId(1), null);
 
             var result = await sut.Handle(new ProcessInternalEnvelopeCommand(env, ctx), CancellationToken.None);
             Assert.That(result, Is.Not.Null);
@@ -269,7 +269,7 @@ namespace Percolator.ApplicationTests.Network
                 TargetPeerId = Google.Protobuf.ByteString.CopyFrom(new byte[32])
             };
             var env = new InternalEnvelope { DhtEnvelope = new DhtEnvelope { FindNodeRequest = contractsReq } };
-            var ctx = new SessionContext(null, 1, null);
+            var ctx = new SessionContext(null, new Percolator.Identity.SelfId(1), null);
 
             var result = await sut.Handle(new ProcessInternalEnvelopeCommand(env, ctx), CancellationToken.None);
             Assert.That(result, Is.Not.Null);
@@ -299,7 +299,7 @@ namespace Percolator.ApplicationTests.Network
             rr.GroupConversationGuid = Google.Protobuf.ByteString.CopyFrom(groupId.ToByteArray());
 
             var env = new InternalEnvelope { ChatEnvelope = new ChatEnvelope { ReadReceipt = rr } };
-            var ctx = new SessionContext(null, 1, null);
+            var ctx = new SessionContext(null, new Percolator.Identity.SelfId(1), null);
 
             var result = await sut.Handle(new ProcessInternalEnvelopeCommand(env, ctx), CancellationToken.None);
             Assert.That(result, Is.Null);
@@ -336,7 +336,7 @@ namespace Percolator.ApplicationTests.Network
             };
 
             var env = new InternalEnvelope { ChatEnvelope = new ChatEnvelope { SignedAdminOperation = sao } };
-            var ctx = new SessionContext(null, 1, null);
+            var ctx = new SessionContext(null, new Percolator.Identity.SelfId(1), null);
 
             var result = await sut.Handle(new ProcessInternalEnvelopeCommand(env, ctx), CancellationToken.None);
             Assert.That(result, Is.Null);
@@ -366,7 +366,7 @@ namespace Percolator.ApplicationTests.Network
             };
 
             var env = new InternalEnvelope { ChatEnvelope = new ChatEnvelope { AdminCommitOperation = aco } };
-            var ctx = new SessionContext(null, 1, null);
+            var ctx = new SessionContext(null, new Percolator.Identity.SelfId(1), null);
 
             var result = await sut.Handle(new ProcessInternalEnvelopeCommand(env, ctx), CancellationToken.None);
             Assert.That(result, Is.Null);
@@ -394,7 +394,7 @@ namespace Percolator.ApplicationTests.Network
             };
 
             var env = new InternalEnvelope { ChatEnvelope = new ChatEnvelope { KeyAdoptionConfirmation = kac } };
-            var ctx = new SessionContext(null, 1, null);
+            var ctx = new SessionContext(null, new Percolator.Identity.SelfId(1), null);
 
             var result = await sut.Handle(new ProcessInternalEnvelopeCommand(env, ctx), CancellationToken.None);
             Assert.That(result, Is.Null);
@@ -420,7 +420,7 @@ namespace Percolator.ApplicationTests.Network
             };
 
             var env = new InternalEnvelope { ChatEnvelope = new ChatEnvelope { KeyDistribution = kd } };
-            var ctx = new SessionContext(null, 1, null);
+            var ctx = new SessionContext(null, new Percolator.Identity.SelfId(1), null);
 
             var result = await sut.Handle(new ProcessInternalEnvelopeCommand(env, ctx), CancellationToken.None);
             Assert.That(result, Is.Null);
@@ -448,7 +448,7 @@ namespace Percolator.ApplicationTests.Network
             em.GroupConversationGuid = Google.Protobuf.ByteString.CopyFrom(groupId.ToByteArray());
 
             var env = new InternalEnvelope { ChatEnvelope = new ChatEnvelope { EmojiAnnotation = em } };
-            var ctx = new SessionContext(null, 1, null);
+            var ctx = new SessionContext(null, new Percolator.Identity.SelfId(1), null);
 
             var result = await sut.Handle(new ProcessInternalEnvelopeCommand(env, ctx), CancellationToken.None);
             Assert.That(result, Is.Null);
@@ -475,7 +475,7 @@ namespace Percolator.ApplicationTests.Network
             dr.GroupConversationGuid = Google.Protobuf.ByteString.CopyFrom(groupId.ToByteArray());
 
             var env = new InternalEnvelope { ChatEnvelope = new ChatEnvelope { DeliveredReceipt = dr } };
-            var ctx = new SessionContext(null, 1, null);
+            var ctx = new SessionContext(null, new Percolator.Identity.SelfId(1), null);
 
             var result = await sut.Handle(new ProcessInternalEnvelopeCommand(env, ctx), CancellationToken.None);
             Assert.That(result, Is.Null);
@@ -510,7 +510,7 @@ namespace Percolator.ApplicationTests.Network
             {
                 DhtEnvelope = new DhtEnvelope { FindNodeRequest = contractsReq }
             };
-            var ctx = new SessionContext(null, 1, null);
+            var ctx = new SessionContext(null, new Percolator.Identity.SelfId(1), null);
 
             // Act
             var result = await sut.Handle(new ProcessInternalEnvelopeCommand(env, ctx), CancellationToken.None);
@@ -532,7 +532,7 @@ namespace Percolator.ApplicationTests.Network
             var sut = CreateSut(mediator);
 
             var env = new InternalEnvelope { ChatEnvelope = new ChatEnvelope { Version = 1 } };
-            var ctx = new SessionContext(null, 1, null);
+            var ctx = new SessionContext(null, new Percolator.Identity.SelfId(1), null);
 
             var result = await sut.Handle(new ProcessInternalEnvelopeCommand(env, ctx), CancellationToken.None);
             Assert.That(result, Is.Null);
@@ -560,7 +560,7 @@ namespace Percolator.ApplicationTests.Network
             text.GroupConversationGuid = Google.Protobuf.ByteString.CopyFrom(groupId.ToByteArray());
 
             var env = new InternalEnvelope { ChatEnvelope = new ChatEnvelope { TextMessage = text } };
-            var ctx = new SessionContext(null, 1, null);
+            var ctx = new SessionContext(null, new Percolator.Identity.SelfId(1), null);
 
             var result = await sut.Handle(new ProcessInternalEnvelopeCommand(env, ctx), CancellationToken.None);
             Assert.That(result, Is.Null);

@@ -70,7 +70,8 @@ public class Phase17CommandsOnlyTests : IntegrationTestBase
                 throw new InvalidOperationException("Direct client-to-client delivery is disabled for this scenario; use relay via Host.");
             }
             var mediator = _hostProvider.GetRequiredService<IMediator>();
-            var cmd = new DeliverOpaqueMessageCommand { PayloadBytes = message.Value };
+            var ctx = _hostProvider.GetRequiredService<ActiveIdentityContext>();
+            var cmd = new DeliverOpaqueMessageCommand { PayloadBytes = message.Value, SelfIdentityId = ctx.Identity!.SelfIdentityId };
             var result = await mediator.Send(cmd, cancellationToken);
             var response = new DeliverOpaqueMessageResponse { Version = 1 };
             if (result.ResponsePayloadBytes is not null)
@@ -114,7 +115,8 @@ public class Phase17CommandsOnlyTests : IntegrationTestBase
                 throw new InvalidOperationException($"No route registered for recipient {recipientPeerId.Value}");
             }
             var mediator = provider.GetRequiredService<IMediator>();
-            var cmd = new DeliverOpaqueMessageCommand { PayloadBytes = message.Value };
+            var ctx = provider.GetRequiredService<ActiveIdentityContext>();
+            var cmd = new DeliverOpaqueMessageCommand { PayloadBytes = message.Value, SelfIdentityId = ctx.Identity!.SelfIdentityId };
             var result = await mediator.Send(cmd, cancellationToken);
             var response = new DeliverOpaqueMessageResponse { Version = 1 };
             if (result.ResponsePayloadBytes is not null)

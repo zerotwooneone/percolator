@@ -20,7 +20,7 @@ namespace Percolator.Application.Network.Handshake
 {
     // Client-side processor for opaque relayed payloads. These bytes are already decrypted from Host↔Client.
     // We now parse the inner InternalEnvelope and, if it contains a handshake hello, complete responder-side handshake.
-    public record ProcessRelayedOpaquePayloadCommand(Payload OpaquePayload, Percolator.Identity.PeerId RelayHostPeerId) : IRequest<ProcessRelayedOpaquePayloadResponse>;
+    public record ProcessRelayedOpaquePayloadCommand(SelfId SelfIdentityId, Payload OpaquePayload, Percolator.Identity.PeerId RelayHostPeerId) : IRequest<ProcessRelayedOpaquePayloadResponse>;
 
     internal record ProcessRelayedOpaquePayloadResponse
     {
@@ -33,8 +33,6 @@ namespace Percolator.Application.Network.Handshake
         private readonly ILogger<ProcessRelayedOpaquePayloadHandler> _logger;
         private readonly IMediator _mediator;
         private readonly ISecureMessagingService _secureMessaging;
-        private readonly IActiveIdentityAccessor _activeIdentityAccessor;
-        private readonly ActiveIdentityContext _active;
         private readonly IEstablishDirectSessionService _establishDirectSessionService;
         private readonly IInviteHandshakeResponseIngress _inviteHandshakeResponseIngress;
 
@@ -56,16 +54,12 @@ namespace Percolator.Application.Network.Handshake
             ILogger<ProcessRelayedOpaquePayloadHandler> logger,
             IMediator mediator,
             ISecureMessagingService secureMessaging,
-            IActiveIdentityAccessor activeIdentityAccessor,
-            ActiveIdentityContext active,
             IEstablishDirectSessionService establishDirectSessionService,
             IInviteHandshakeResponseIngress inviteHandshakeResponseIngress)
         {
             _logger = logger;
             _mediator = mediator;
             _secureMessaging = secureMessaging;
-            _activeIdentityAccessor = activeIdentityAccessor;
-            _active = active;
             _establishDirectSessionService = establishDirectSessionService;
             _inviteHandshakeResponseIngress = inviteHandshakeResponseIngress;
         }
@@ -79,10 +73,7 @@ namespace Percolator.Application.Network.Handshake
                 return ProcessRelayedOpaquePayloadResponse.Failure;
             }
             // First attempt: treat as a DR SessionRatchetMessage opaque to the host.
-            if (!_activeIdentityAccessor.IsActive || _active.Identity is null)
-            {
-                throw new InvalidOperationException("Active identity not loaded.");
-            }
+            var selfIdentityId = request.SelfIdentityId.Value;
 
             SessionRatchetMessage ratchetMessage;
             try
@@ -107,7 +98,7 @@ namespace Percolator.Application.Network.Handshake
             }
 
             // Fast/slow path via SecureMessagingService
-            var resolved = await _secureMessaging.DecryptInboundAsync(ratchetMessage, cancellationToken).ConfigureAwait(false);
+            var resolved = await _secureMessaging.DecryptInboundAsync(selfIdentityId, ratchetMessage, cancellationToken).ConfigureAwait(false);
             if (resolved is null)
             {
                 return ProcessRelayedOpaquePayloadResponse.Failure;
@@ -140,7 +131,7 @@ namespace Percolator.Application.Network.Handshake
 
             await _mediator.Send(new Percolator.Application.Network.ProcessInternalEnvelopeCommand(
                 inner,
-                new Percolator.Application.Network.SessionContext(sid.Value, _active.Identity.SelfIdentityId.Value, null)
+                new Percolator.Application.Network.SessionContext(sid.Value, request.SelfIdentityId, null)
             ), cancellationToken).ConfigureAwait(false);
 
             return ProcessRelayedOpaquePayloadResponse.Success;

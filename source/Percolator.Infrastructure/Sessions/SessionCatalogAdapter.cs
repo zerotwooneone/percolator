@@ -14,9 +14,9 @@ public sealed class SessionCatalogAdapter : ISessionCatalog
         _sessions = sessions;
     }
 
-    public async IAsyncEnumerable<SessionId> EnumerateActiveAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)
+    public async IAsyncEnumerable<SessionId> EnumerateActiveAsync(int selfIdentityId, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        var list = await _sessions.GetAllActiveAsync(cancellationToken).ConfigureAwait(false);
+        var list = await _sessions.GetAllActiveAsync(selfIdentityId, cancellationToken).ConfigureAwait(false);
         foreach (var s in list)
             yield return s.Id;
     }

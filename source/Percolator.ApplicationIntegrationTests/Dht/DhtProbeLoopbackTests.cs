@@ -62,7 +62,7 @@ public sealed class FakeNetworkSender : Percolator.Network.Messaging.INetworkSen
         CancellationToken ct = default)
     {
         var handler = _serverProvider.GetRequiredService<IRequestHandler<DeliverOpaqueMessageCommand, DeliverOpaqueMessageResult>>();
-        var cmd = new DeliverOpaqueMessageCommand { PayloadBytes = payload.Value.ToArray() };
+        var cmd = new DeliverOpaqueMessageCommand { PayloadBytes = payload.Value.ToArray(), SelfIdentityId = new Percolator.Identity.SelfId(1) };
         var result = await handler.Handle(cmd, ct);
         return new Percolator.Network.Messaging.SendOutcome
         {
@@ -119,7 +119,7 @@ public class DhtProbeLoopbackTests : IntegrationTestBase
 
         // Server Receive: if used, decrypt inbound via SecureMessagingService
         serverSecureSvc
-            .Setup(s => s.DecryptInboundAsync(It.IsAny<Percolator.Cryptography.SessionRatchetMessage>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.DecryptInboundAsync(It.IsAny<int>(), It.IsAny<Percolator.Cryptography.SessionRatchetMessage>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(() =>
             {
                 var req = new FindNodeRequest { TargetPeerId = ByteString.CopyFrom(SHA256.HashData(Guid.NewGuid().ToByteArray())) };
@@ -189,15 +189,11 @@ public class DhtProbeLoopbackTests : IntegrationTestBase
 
         // Client decrypts response to internal FindNodeResponse envelope via SecureMessagingService
         clientSecureSvc
-            .Setup(s => s.DecryptInboundAsync(It.IsAny<Percolator.Cryptography.SessionRatchetMessage>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.DecryptInboundAsync(It.IsAny<int>(), It.IsAny<Percolator.Cryptography.SessionRatchetMessage>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(() =>
             {
                 var resp = new FindNodeResponse();
-                resp.CloserPeers.Add(new NodeInfo
-                {
-                    PeerId = ByteString.CopyFrom(Guid.NewGuid().ToByteArray()),
-                    Address = "localhost:59001"
-                });
+                resp.CloserPeers.Add(new NodeInfo { PeerId = ByteString.CopyFrom(Guid.NewGuid().ToByteArray()), Address = "localhost:59001" });
                 var env = new InternalEnvelope { DhtEnvelope = new DhtEnvelope { FindNodeResponse = resp } };
                 return (new SessionId(Guid.NewGuid()), new Percolator.Cryptography.Plaintext(env.ToByteArray()));
             });

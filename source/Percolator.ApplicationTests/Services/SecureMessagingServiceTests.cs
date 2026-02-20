@@ -20,7 +20,7 @@ public class SecureMessagingServiceTests
         public Task<SecureSession?> GetAsync(SessionId id, CancellationToken ct = default)
             => Task.FromResult(_sessions.TryGetValue(id.Value, out var s) ? s : null);
         public Task UpdateAsync(SecureSession s, CancellationToken ct = default) { _sessions[s.Id.Value] = s; return Task.CompletedTask; }
-        public Task<IReadOnlyList<SecureSession>> GetAllActiveAsync(CancellationToken ct = default)
+        public Task<IReadOnlyList<SecureSession>> GetAllActiveAsync(int selfIdentityId, CancellationToken ct = default)
             => Task.FromResult((IReadOnlyList<SecureSession>)_sessions.Values.ToList());
     }
 
@@ -56,12 +56,12 @@ public class SecureMessagingServiceTests
 
         // Arrange fast-path index hit for inbound decrypt
         var header = msg.GetHeader();
-        index.Setup(i => i.TryResolveAsync(header.PreKey, It.IsAny<CancellationToken>()))
+        index.Setup(i => i.TryResolveAsync(1, header.PreKey, It.IsAny<CancellationToken>()))
             .ReturnsAsync(receiver.Id);
-        index.Setup(i => i.UpsertAsync(receiver.Id, header.PreKey, It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+        index.Setup(i => i.UpsertAsync(1, receiver.Id, header.PreKey, It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
-        var roundtrip = await svc.DecryptInboundAsync(msg, CancellationToken.None);
+        var roundtrip = await svc.DecryptInboundAsync(1, msg, CancellationToken.None);
         roundtrip.Should().NotBeNull();
         roundtrip!.Value.sessionId.Should().Be(receiver.Id);
         roundtrip!.Value.plaintext.Value.Should().BeEquivalentTo(pt.Value);

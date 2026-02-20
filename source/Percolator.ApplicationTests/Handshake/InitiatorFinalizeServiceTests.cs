@@ -67,6 +67,7 @@ public class InitiatorFinalizeServiceTests
 
         var index = new Mock<IRatchetKeyIndex>(MockBehavior.Strict);
         index.Setup(i => i.UpsertAsync(
+            It.IsAny<int>(),
             It.IsAny<SessionId>(),
             It.IsAny<RatchetEphemeralKey>(),
             It.IsAny<DateTimeOffset>(),
@@ -109,7 +110,7 @@ public class InitiatorFinalizeServiceTests
         Assert.That(result!.Value.sessionId.Value, Is.EqualTo(assigned.Value));
         preStore.Verify(s => s.DeleteAsync(pre.Id, self.SelfIdentityId.Value, It.IsAny<CancellationToken>()), Times.Once);
         sessions.Verify(r => r.AddAsync(It.IsAny<SecureSession>(), It.IsAny<CancellationToken>()), Times.Once);
-        index.Verify(i => i.UpsertAsync(assigned, It.IsAny<RatchetEphemeralKey>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()), Times.Once);
+        index.Verify(i => i.UpsertAsync(self.SelfIdentityId.Value, assigned, It.IsAny<RatchetEphemeralKey>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()), Times.Once);
         preStore.VerifyAll();
         sessions.VerifyAll();
         index.VerifyAll();

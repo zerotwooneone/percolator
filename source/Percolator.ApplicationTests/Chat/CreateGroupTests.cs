@@ -129,7 +129,7 @@ internal sealed class NoopSender : IRemoteEnvelopeSender
             cg.CreatorIdentityKey = Google.Protobuf.ByteString.CopyFrom(Spki(1));
 
             var env = new InternalEnvelope { ChatEnvelope = new ChatEnvelope { CreateGroup = cg } };
-            var ctx = new SessionContext(SessionId: Guid.NewGuid(), SelfIdentityId: 123, RemotePeerGuid: Guid.NewGuid());
+            var ctx = new SessionContext(SessionId: Guid.NewGuid(), SelfIdentityId: new Percolator.Identity.SelfId(123), RemotePeerGuid: Guid.NewGuid());
 
             await handler.Handle(new ProcessInternalEnvelopeCommand(env, ctx), CancellationToken.None);
 

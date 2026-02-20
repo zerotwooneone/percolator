@@ -6,7 +6,6 @@ using MediatR;
 using Microsoft.Extensions.Logging;
 using Percolator.Application.Sessions;
 using Percolator.Application.Services;
-using Percolator.Application.Identity;
 using Percolator.Contracts;
 using Percolator.Cryptography;
 using Percolator.Network;
@@ -21,8 +20,6 @@ namespace Percolator.Application.Network
         private readonly ILogger<DeliverOpaqueMessageHandler> _logger;
         private readonly IMediator _mediator;
         private readonly IDirectSessionRepository _directSessionRepository;
-        private readonly IActiveIdentityAccessor _activeIdentityAccessor;
-        private readonly ActiveIdentityContext _activeIdentityContext;
         private readonly IRatchetKeyIndex _ratchetLookup;
         private readonly RelayOrchestrator _relayOrchestrator;
         private readonly IPeerRoutingProfileRepository _profileRepository;
@@ -46,8 +43,6 @@ namespace Percolator.Application.Network
             ILogger<DeliverOpaqueMessageHandler> logger,
             IMediator mediator,
             IDirectSessionRepository directSessionRepository,
-            IActiveIdentityAccessor activeIdentityAccessor,
-            ActiveIdentityContext activeIdentityContext,
             IRatchetKeyIndex ratchetLookup,
             RelayOrchestrator relayOrchestrator,
             IPeerRoutingProfileRepository profileRepository,
@@ -57,8 +52,6 @@ namespace Percolator.Application.Network
             _logger = logger;
             _mediator = mediator;
             _directSessionRepository = directSessionRepository;
-            _activeIdentityAccessor = activeIdentityAccessor;
-            _activeIdentityContext = activeIdentityContext;
             _ratchetLookup = ratchetLookup;
             _relayOrchestrator = relayOrchestrator;
             _profileRepository = profileRepository;
@@ -134,16 +127,13 @@ namespace Percolator.Application.Network
 
         public async Task<DeliverOpaqueMessageResult> Handle(DeliverOpaqueMessageCommand request, CancellationToken cancellationToken)
         {
-            if (!_activeIdentityAccessor.IsActive || _activeIdentityContext.Identity == null)
-            {
-                throw new InvalidOperationException("Active identity not loaded.");
-            }
+            var selfIdentityId = request.SelfIdentityId.Value;
             _logger.LogInformation("Processing opaque message (session inferred from ratchet header)");
             
                 var sessionRatchetMessage = new SessionRatchetMessage(request.PayloadBytes);
                 var header = sessionRatchetMessage.GetHeader();
                 var ratchetKey = header.PreKey;
-                var resolved = await _secureMessaging.DecryptInboundAsync(sessionRatchetMessage, cancellationToken).ConfigureAwait(false);
+                var resolved = await _secureMessaging.DecryptInboundAsync(selfIdentityId, sessionRatchetMessage, cancellationToken).ConfigureAwait(false);
                 if (resolved is null)
                 {
                     _logger.LogWarning("Decrypt returned null; returning empty result without side-effects");
@@ -158,9 +148,9 @@ namespace Percolator.Application.Network
                     return new DeliverOpaqueMessageResult();
                 }
 
-                await _ratchetLookup.UpsertAsync(inferredSessionId, ratchetKey, DateTimeOffset.UtcNow, cancellationToken).ConfigureAwait(false);
+                await _ratchetLookup.UpsertAsync(selfIdentityId, inferredSessionId, ratchetKey, DateTimeOffset.UtcNow, cancellationToken).ConfigureAwait(false);
 
-                var directSession = await _directSessionRepository.GetBySessionIdAsync(nonNullDirectSessionId, _activeIdentityContext.Identity.SelfIdentityId.Value).ConfigureAwait(false)
+                var directSession = await _directSessionRepository.GetBySessionIdAsync(nonNullDirectSessionId, selfIdentityId).ConfigureAwait(false)
                     ?? throw new InvalidOperationException($"No direct session mapping found for session {inferredSessionId}");
                 var remotePeerId = directSession.RemotePeerId;
                 _logger.LogInformation("Resolved remote peer {PeerId} for session {SessionId}", remotePeerId, directSession.SessionId);
@@ -193,7 +183,7 @@ namespace Percolator.Application.Network
                 }
                 _logger.LogDebug("Allowed InternalEnvelope case {Case}; dispatching to orchestrator/transport path", internalEnvelope.ApplicationPayloadCase);
 
-                var ctx = new SessionContext(inferredSessionId.Value, _activeIdentityContext.Identity!.SelfIdentityId.Value, directSession.RemotePeerId.Value);
+                var ctx = new SessionContext(inferredSessionId.Value, request.SelfIdentityId, directSession.RemotePeerId.Value);
 
                 // Special-case: RelayOpaqueEnvelope requires RPC-level ack response
                 if (internalEnvelope.ApplicationPayloadCase == InternalEnvelope.ApplicationPayloadOneofCase.RelayOpaqueEnvelope)
@@ -201,6 +191,7 @@ namespace Percolator.Application.Network
                     var relay = internalEnvelope.RelayOpaqueEnvelope;
                     // Process the inner opaque payload (this may establish sessions and send responder msg via MessageService)
                     await _mediator.Send(new ProcessRelayedOpaquePayloadCommand(
+                        request.SelfIdentityId,
                         new Payload(relay.OpaquePayload.ToByteArray()),
                         // Relay host is the remote peer for this direct session (Host as known by this node)
                         new Percolator.Identity.PeerId(directSession.RemotePeerId.Value)), cancellationToken).ConfigureAwait(false);

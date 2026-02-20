@@ -140,12 +140,11 @@ public class SubmitPreKeysHandler : IRequestHandler<SubmitPreKeysCommand, int>
         }
 
         var respCipher = new SessionRatchetMessage(deliverResp.ResponsePayload.ResponsePayload.ToByteArray());
-        var resolved = await _secureMessaging.DecryptInboundAsync(respCipher, cancellationToken).ConfigureAwait(false);
+        var resolved = await _secureMessaging.DecryptInboundAsync(1, respCipher, cancellationToken).ConfigureAwait(false);
         var respPlain = resolved?.plaintext;
         if (respPlain is null)
         {
-            _logger.LogWarning("Could not decrypt SubmitPreKeyBundle response payload.");
-            return 500;
+            throw new InvalidOperationException("Could not decrypt SubmitPreKeyBundle response.");
         }
         var internalResp = InternalEnvelope.Parser.ParseFrom(respPlain.Value);
         if (internalResp.ApplicationPayloadCase != InternalEnvelope.ApplicationPayloadOneofCase.SubmitPreKeyBundleResponse)

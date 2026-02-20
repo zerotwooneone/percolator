@@ -97,7 +97,7 @@ public class RelayOrchestrator
 
         // Decrypt response payload as RelayOpaqueResponse
         var ackCipher = new SessionRatchetMessage(response.ResponsePayload.ResponsePayload.ToByteArray());
-        var resolved = await _secureMessaging.DecryptInboundAsync(ackCipher, ct).ConfigureAwait(false);
+        var resolved = await _secureMessaging.DecryptInboundAsync(selfIdentityId.Value, ackCipher, ct).ConfigureAwait(false);
         var ackPlain = resolved?.plaintext;
         if (ackPlain is null)
         {

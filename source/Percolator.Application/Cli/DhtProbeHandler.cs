@@ -96,12 +96,11 @@ public class DhtProbeHandler : IRequestHandler<DhtProbeCommand, FindNodeResponse
         }
 
         var respRatchet = new SessionRatchetMessage(response.ResponsePayload.ResponsePayload.ToByteArray());
-        var resolved = await _secureMessaging.DecryptInboundAsync(respRatchet, cancellationToken).ConfigureAwait(false);
+        var resolved = await _secureMessaging.DecryptInboundAsync(1, respRatchet, cancellationToken).ConfigureAwait(false);
         var plaintext = resolved?.plaintext;
         if (plaintext is null)
         {
-            _logger.LogWarning("Could not decrypt FindNode response payload.");
-            return new FindNodeResponse();
+            throw new InvalidOperationException("Could not decrypt DHT probe response.");
         }
 
         var internalResp = InternalEnvelope.Parser.ParseFrom(plaintext.Value);

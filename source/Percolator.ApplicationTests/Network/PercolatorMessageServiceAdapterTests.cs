@@ -31,7 +31,11 @@ public class PercolatorMessageServiceAdapterTests
         var establish = Mock.Of<IEstablishDirectSessionService>();
         var inviteIngress = Mock.Of<IInviteHandshakeResponseIngress>();
 
-        var sut = new PercolatorMessageService(logger, ingress.Object, establish, inviteIngress);
+        var active = new Percolator.Application.Identity.ActiveIdentityContext
+        {
+            Identity = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "test") { SelfIdentityId = new Percolator.Identity.SelfId(1) }
+        };
+        var sut = new PercolatorMessageService(logger, ingress.Object, establish, inviteIngress, active);
 
         var request = new DeliverOpaqueMessageRequest
         {
@@ -72,7 +76,11 @@ public class PercolatorMessageServiceAdapterTests
         var establish = Mock.Of<IEstablishDirectSessionService>();
         var inviteIngress = Mock.Of<IInviteHandshakeResponseIngress>();
 
-        var sut = new PercolatorMessageService(logger, ingress.Object, establish, inviteIngress);
+        var active = new Percolator.Application.Identity.ActiveIdentityContext
+        {
+            Identity = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "test") { SelfIdentityId = new Percolator.Identity.SelfId(1) }
+        };
+        var sut = new PercolatorMessageService(logger, ingress.Object, establish, inviteIngress, active);
 
         var request = new DeliverOpaqueMessageRequest
         {

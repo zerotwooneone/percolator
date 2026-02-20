@@ -33,7 +33,7 @@ namespace Percolator.ApplicationTests.Handshake
             var lookup = new Mock<IRatchetKeyIndex>(MockBehavior.Strict);
             var resolved = new SessionId(Guid.NewGuid());
             lookup
-                .Setup(l => l.TryResolveAsync(It.IsAny<RatchetEphemeralKey>(), It.IsAny<CancellationToken>()))
+                .Setup(l => l.TryResolveAsync(It.IsAny<int>(), It.IsAny<RatchetEphemeralKey>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(resolved);
 
             var finalize = new Mock<IInitiatorFinalizeService>(MockBehavior.Strict);
@@ -62,7 +62,7 @@ namespace Percolator.ApplicationTests.Handshake
             await handler.Handle(cmd, CancellationToken.None);
 
             // Assert
-            lookup.Verify(l => l.TryResolveAsync(It.IsAny<RatchetEphemeralKey>(), It.IsAny<CancellationToken>()), Times.Once);
+            lookup.Verify(l => l.TryResolveAsync(It.IsAny<int>(), It.IsAny<RatchetEphemeralKey>(), It.IsAny<CancellationToken>()), Times.Once);
             lookup.VerifyAll();
         }
     }

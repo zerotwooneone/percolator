@@ -6,6 +6,7 @@ using Moq;
 using NUnit.Framework;
 using Percolator.Application.Ingress;
 using Percolator.Application.Network;
+using Percolator.Identity;
 
 namespace Percolator.ApplicationTests.Ingress;
 
@@ -23,7 +24,7 @@ public class DefaultIngressPipelineTests
 
         var sut = new DefaultIngressPipeline(readiness.Object, validator.Object, mediator.Object);
 
-        var result = await sut.DeliverOpaqueAsync(new IngressOpaquePayload(new byte[] { 0x01 }), CancellationToken.None);
+        var result = await sut.DeliverOpaqueAsync(new IngressOpaquePayload(new byte[] { 0x01 }, new SelfId(1)), CancellationToken.None);
 
         Assert.That(result.Disposition, Is.EqualTo(IngressDisposition.Rejected_NotReady));
         mediator.VerifyNoOtherCalls();
@@ -43,7 +44,7 @@ public class DefaultIngressPipelineTests
 
         var sut = new DefaultIngressPipeline(readiness.Object, validator.Object, mediator.Object);
 
-        var result = await sut.DeliverOpaqueAsync(new IngressOpaquePayload(Array.Empty<byte>()), CancellationToken.None);
+        var result = await sut.DeliverOpaqueAsync(new IngressOpaquePayload(Array.Empty<byte>(), new SelfId(1)), CancellationToken.None);
 
         Assert.That(result.Disposition, Is.EqualTo(IngressDisposition.Rejected_Invalid));
         mediator.VerifyNoOtherCalls();
@@ -67,7 +68,7 @@ public class DefaultIngressPipelineTests
 
         var sut = new DefaultIngressPipeline(readiness.Object, validator.Object, mediator.Object);
 
-        var result = await sut.DeliverOpaqueAsync(new IngressOpaquePayload(new byte[] { 0x01, 0x02 }), CancellationToken.None);
+        var result = await sut.DeliverOpaqueAsync(new IngressOpaquePayload(new byte[] { 0x01, 0x02 }, new SelfId(1)), CancellationToken.None);
 
         Assert.That(result.Disposition, Is.EqualTo(IngressDisposition.Accepted));
         Assert.That(result.ResponseBytes, Is.EqualTo(expected));

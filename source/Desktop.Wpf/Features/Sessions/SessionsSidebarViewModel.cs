@@ -111,7 +111,7 @@ public sealed class SessionsSidebarViewModel : ViewModelBase
             IsLoading.Value = true;
             var selfId = 1;
             if (int.TryParse(Self.Id.Value, out var parsed)) selfId = parsed;
-            var list = await sessions.GetAllActiveAsync(CancellationToken.None);
+            var list = await sessions.GetAllActiveAsync(selfId, CancellationToken.None);
 
             var created = new List<SessionListItem>();
             var i = 0;

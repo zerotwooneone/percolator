@@ -174,7 +174,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
             if(request.Context.RemotePeerGuid is null) throw new InvalidOperationException($"{nameof(request)} must have a {nameof(ProcessInternalEnvelopeCommand.Context.RemotePeerGuid)}");
             var relayPeerId = new Percolator.Identity.PeerId(request.Context.RemotePeerGuid.Value);
             var relay = env.RelayOpaqueEnvelope;
-            await _mediator.Send(new ProcessRelayedOpaquePayloadCommand(new Payload(relay.OpaquePayload.ToByteArray()), relayPeerId)).ConfigureAwait(false);
+            await _mediator.Send(new ProcessRelayedOpaquePayloadCommand(request.Context.SelfIdentityId, new Payload(relay.OpaquePayload.ToByteArray()), relayPeerId)).ConfigureAwait(false);
             return null;
         }
 
@@ -203,7 +203,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                         spkis.Add(bs.ToByteArray());
                     }
                     await _mediator.Send(new CreateGroupFromIdentityKeysCommand(
-                        request.Context.SelfIdentityId,
+                        request.Context.SelfIdentityId.Value,
                         groupGuid,
                         spkis,
                         cg.HasName ? cg.Name : null,

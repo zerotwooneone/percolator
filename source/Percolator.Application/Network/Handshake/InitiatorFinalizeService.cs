@@ -222,7 +222,7 @@ namespace Percolator.Application.Network.Handshake
                 _clock);
 
             await _sessions.AddAsync(final, cancellationToken).ConfigureAwait(false);
-            await _index.UpsertAsync(sid, header.PreKey, _clock.UtcNow, cancellationToken).ConfigureAwait(false);
+            await _index.UpsertAsync(_active.Identity.SelfIdentityId.Value, sid, header.PreKey, _clock.UtcNow, cancellationToken).ConfigureAwait(false);
 
             // Best-effort cleanup of legacy prehandshake store (if it was populated)
             try
@@ -285,7 +285,7 @@ namespace Percolator.Application.Network.Handshake
                         _clock);
 
                     await _sessions.AddAsync(final, cancellationToken).ConfigureAwait(false);
-                    await _index.UpsertAsync(sid, headerPreKey, _clock.UtcNow, cancellationToken).ConfigureAwait(false);
+                    await _index.UpsertAsync(_active.Identity.SelfIdentityId.Value, sid, headerPreKey, _clock.UtcNow, cancellationToken).ConfigureAwait(false);
                     await _prehandshake.DeleteAsync(pending.Id, _active.Identity.SelfIdentityId.Value, cancellationToken).ConfigureAwait(false);
 
                     _logger.LogInformation("Initiator finalized session {SessionId} from pending record {PendingId}", sid.Value, pending.Id);

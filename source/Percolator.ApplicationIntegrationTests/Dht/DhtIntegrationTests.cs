@@ -64,9 +64,9 @@ public class DhtIntegrationTests : IntegrationTestBase
             // Fast-path lookup resolves our header key via domain index
             var ratchetLookup = new Moq.Mock<IRatchetKeyIndex>();
             var preKey = new PreKey(headerKey);
-            ratchetLookup.Setup(l => l.TryResolveAsync(It.Is<RatchetEphemeralKey>(p => p.Value.SequenceEqual(headerKey)), It.IsAny<CancellationToken>()))
+            ratchetLookup.Setup(l => l.TryResolveAsync(It.IsAny<int>(), It.Is<RatchetEphemeralKey>(p => p.Value.SequenceEqual(headerKey)), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(sessionId);
-            ratchetLookup.Setup(l => l.UpsertAsync(It.Is<SessionId>(s => s.Value == sessionId.Value), It.IsAny<RatchetEphemeralKey>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            ratchetLookup.Setup(l => l.UpsertAsync(It.IsAny<int>(), It.Is<SessionId>(s => s.Value == sessionId.Value), It.IsAny<RatchetEphemeralKey>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
                 .Returns(Task.CompletedTask);
             services.AddSingleton<IRatchetKeyIndex>(ratchetLookup.Object);
             services.AddSingleton<IConversationRepository>(conversationRepoMock.Object);
@@ -106,7 +106,7 @@ public class DhtIntegrationTests : IntegrationTestBase
         var internalEnvelope = new InternalEnvelope { DhtEnvelope = dhtEnvelope };
         var ciphertext = new Ciphertext(new byte[1]); // Content doesn't matter
         secureSvcMock
-            .Setup(s => s.DecryptInboundAsync(It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.DecryptInboundAsync(It.IsAny<int>(), It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((sessionId, new Plaintext(internalEnvelope.ToByteArray())));
 
         // 2. Mock the direct session repository to map session to remote peer
@@ -175,10 +175,10 @@ public class DhtIntegrationTests : IntegrationTestBase
             var ratchetLookup2 = new Moq.Mock<IRatchetKeyIndex>();
             var preKey2 = new PreKey(headerKey2);
             ratchetLookup2
-                .Setup(l => l.TryResolveAsync(It.Is<RatchetEphemeralKey>(p => p.Value.SequenceEqual(headerKey2)), It.IsAny<CancellationToken>()))
+                .Setup(l => l.TryResolveAsync(It.IsAny<int>(), It.Is<RatchetEphemeralKey>(p => p.Value.SequenceEqual(headerKey2)), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(sessionId);
             ratchetLookup2
-                .Setup(l => l.UpsertAsync(It.Is<SessionId>(s => s.Value == sessionId.Value), It.IsAny<RatchetEphemeralKey>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+                .Setup(l => l.UpsertAsync(It.IsAny<int>(), It.Is<SessionId>(s => s.Value == sessionId.Value), It.IsAny<RatchetEphemeralKey>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
                 .Returns(Task.CompletedTask);
             services.AddSingleton<IRatchetKeyIndex>(ratchetLookup2.Object);
             // Avoid querying real DB tables from domain planner repo during tests
@@ -208,7 +208,7 @@ public class DhtIntegrationTests : IntegrationTestBase
         var dhtEnvelope = new DhtEnvelope { FindNodeRequest = findNodeRequestProto };
         var internalEnvelope = new InternalEnvelope { DhtEnvelope = dhtEnvelope };
         secureSvcMock
-            .Setup(s => s.DecryptInboundAsync(It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.DecryptInboundAsync(It.IsAny<int>(), It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((sessionId, new Plaintext(internalEnvelope.ToByteArray())));
 
         // 2. Mock the direct session repository to map session to remote peer
