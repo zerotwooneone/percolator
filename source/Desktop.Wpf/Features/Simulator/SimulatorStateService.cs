@@ -5,6 +5,8 @@ using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
+using Microsoft.Extensions.Options;
+using Percolator.Application.Configuration;
 using R3;
 
 namespace Desktop.Wpf.Features.Simulator;
@@ -33,16 +35,18 @@ public sealed class SimulatorStateService : ISimulatorStateService
 {
     private readonly ISimulatorStateStore _store;
     private readonly ISimulatedPeerKeyFactory _keys;
+    private readonly IOptions<TransportOptions> _transportOptions;
 
     private readonly ObservableCollection<SimulatedPeerDto> _peers = new();
     public ReadOnlyObservableCollection<SimulatedPeerDto> Peers { get; }
 
     private SimulatorStateDto _state = new();
 
-    public SimulatorStateService(ISimulatorStateStore store, ISimulatedPeerKeyFactory keys)
+    public SimulatorStateService(ISimulatorStateStore store, ISimulatedPeerKeyFactory keys, IOptions<TransportOptions> transportOptions)
     {
         _store = store;
         _keys = keys;
+        _transportOptions = transportOptions;
         Peers = new ReadOnlyObservableCollection<SimulatedPeerDto>(_peers);
     }
 
@@ -58,7 +62,7 @@ public sealed class SimulatorStateService : ISimulatorStateService
             _peers.Clear();
             foreach (var p in _state.Peers)
             {
-                NormalizePeer(p);
+                NormalizePeer(p, _transportOptions.Value);
                 changed |= _keys.EnsureReverseSignalKeys(p.ReverseSignalKeys);
                 _peers.Add(p);
             }
@@ -85,7 +89,7 @@ public sealed class SimulatorStateService : ISimulatorStateService
             Connection = new SimulatedPeerConnectionDto { Mode = ConnectionMode.Direct },
             Relay = new SimulatedPeerRelayStateDto { IsRelayCapable = false }
         };
-        NormalizePeer(peer);
+        NormalizePeer(peer, _transportOptions.Value);
         _ = _keys.EnsureReverseSignalKeys(peer.ReverseSignalKeys);
 
         _state.Peers.Add(peer);
@@ -238,7 +242,7 @@ public sealed class SimulatorStateService : ISimulatorStateService
         return dispatcher.InvokeAsync(action).Task;
     }
 
-    private static void NormalizePeer(SimulatedPeerDto peer)
+    private static void NormalizePeer(SimulatedPeerDto peer, TransportOptions transportOptions)
     {
         peer.Connection ??= new SimulatedPeerConnectionDto();
         peer.KnownPeerIds ??= new();
@@ -250,6 +254,26 @@ public sealed class SimulatorStateService : ISimulatorStateService
         peer.Relay.PreKeyStore ??= new();
         peer.Relay.PreKeyStore.PublishedBundles ??= new();
         peer.ReverseSignalKeys ??= new();
+
+        // Assign stable simulator endpoint if not set. This is a routing key only; no socket bind.
+        if (string.IsNullOrWhiteSpace(peer.Connection.Host) || string.Equals(peer.Connection.Host, "localhost", StringComparison.OrdinalIgnoreCase))
+        {
+            peer.Connection.Host = AllocateSimulatorLoopbackHost(peer.PeerId);
+        }
+        if (peer.Connection.Port == 0)
+        {
+            peer.Connection.Port = transportOptions.SimulatorPort;
+        }
+    }
+
+    private static string AllocateSimulatorLoopbackHost(Guid peerId)
+    {
+        // Stable mapping of Guid -> 127.77.X.Y. Keep within 1..254 to avoid network/broadcast edge cases.
+        using var sha = SHA256.Create();
+        var hash = sha.ComputeHash(peerId.ToByteArray());
+        var x = (byte)((hash[0] % 254) + 1);
+        var y = (byte)((hash[1] % 254) + 1);
+        return $"127.77.{x}.{y}";
     }
 
     

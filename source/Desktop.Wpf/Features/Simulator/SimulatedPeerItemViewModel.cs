@@ -310,10 +310,11 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
 
     private EstablishDirectSessionRequest CreatePeerToMainInvite()
     {
-        var port = _transportOptions.Value.GrpcPort;
-        if (port == 0) port = 5001;
+        // Simulated peer inviter must advertise its simulator endpoint so the main app can route responses back in-process.
+        var port = _transportOptions.Value.SimulatorPort;
+        if (port == 0) port = 5002;
 
-        var inviterHost = _advertisedHostLookup.GetAdvertisedHostAsync().GetAwaiter().GetResult();
+        var inviterHost = AllocateSimulatorLoopbackHost(_model.PeerId);
 
         using var identityEcdh = ECDiffieHellman.Create();
         identityEcdh.ImportECPrivateKey(_model.IdentitySigningKeyPrivateKeyEcPrivateKey, out _);
@@ -356,6 +357,16 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
             Payload = ByteString.CopyFrom(payloadBytes),
             PayloadSignature = ByteString.CopyFrom(payloadSig)
         };
+    }
+
+    private static string AllocateSimulatorLoopbackHost(Guid peerId)
+    {
+        // Stable mapping of Guid -> 127.77.X.Y. Keep within 1..254 to avoid network/broadcast edge cases.
+        using var sha = SHA256.Create();
+        var hash = sha.ComputeHash(peerId.ToByteArray());
+        var x = (byte)((hash[0] % 254) + 1);
+        var y = (byte)((hash[1] % 254) + 1);
+        return $"127.77.{x}.{y}";
     }
 
     private sealed class ServerCallContextStub : ServerCallContext

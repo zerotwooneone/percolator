@@ -4,5 +4,6 @@ public class TransportOptions
 {
     public const string SectionName = "Transport";
     public int GrpcPort { get; set; }
+    public int SimulatorPort { get; set; }
     public string? AdvertisedHost { get; set; }
 }
