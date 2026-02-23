@@ -45,18 +45,29 @@ public interface ISimulatedPeerRuntimeService
         Guid simulatedPeerId,
         DeliverOpaqueMessageRequest request,
         CancellationToken cancellationToken = default);
+
+    Task<Plaintext> DecryptSessionMessageAsync(
+        Guid simulatedPeerId,
+        SessionId sessionId,
+        SessionRatchetMessage message,
+        CancellationToken cancellationToken = default);
 }
 
 public sealed class SimulatedPeerRuntimeService : ISimulatedPeerRuntimeService
 {
     private readonly ISimulatedPeerDirectory _peers;
     private readonly PercolatorMessageService _messageService;
+    private readonly ISimulatorStateService _state;
     private readonly ConcurrentDictionary<Guid, SimulatedPeerRuntime> _runtimeByPeerId = new();
 
-    public SimulatedPeerRuntimeService(ISimulatedPeerDirectory peers, PercolatorMessageService messageService)
+    public SimulatedPeerRuntimeService(
+        ISimulatedPeerDirectory peers,
+        PercolatorMessageService messageService,
+        ISimulatorStateService state)
     {
         _peers = peers;
         _messageService = messageService;
+        _state = state;
     }
 
     public Task<SimulatedPeerInviteAcceptance> AcceptReverseSignalInviteAsync(
@@ -128,13 +139,21 @@ public sealed class SimulatedPeerRuntimeService : ISimulatedPeerRuntimeService
         cancellationToken.ThrowIfCancellationRequested();
         if (request is null) throw new ArgumentNullException(nameof(request));
 
-        var model = _peers.Peers.FirstOrDefault(p => p.PeerId == simulatedPeerId)
-            ?? throw new InvalidOperationException($"No simulated peer exists with id {simulatedPeerId}");
+        var runtime = _runtimeByPeerId.GetOrAdd(simulatedPeerId, CreateRuntime);
+        return runtime.ReceiveOpaqueMessageFromMainAsync(simulatedPeerId, request, _state, cancellationToken);
+    }
 
-        // For C.D2 we only need to prove routing works; full peer-side decrypt/dispatch comes in later chunks.
-        model.MarkInboundPending(Guid.NewGuid());
+    public Task<Plaintext> DecryptSessionMessageAsync(
+        Guid simulatedPeerId,
+        SessionId sessionId,
+        SessionRatchetMessage message,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (message is null) throw new ArgumentNullException(nameof(message));
 
-        return Task.FromResult(new DeliverOpaqueMessageResponse { Version = 1 });
+        var runtime = _runtimeByPeerId.GetOrAdd(simulatedPeerId, CreateRuntime);
+        return runtime.DecryptSessionMessageAsync(sessionId, message, cancellationToken);
     }
 
     private SimulatedPeerRuntime CreateRuntime(Guid simulatedPeerId)
@@ -249,6 +268,101 @@ public sealed class SimulatedPeerRuntimeService : ISimulatedPeerRuntimeService
             var cipher = session.Encrypt(plaintext, _clock);
             _sessionsById[sessionId.Value] = session;
             return Task.FromResult(cipher);
+        }
+
+        public Task<Plaintext> DecryptSessionMessageAsync(
+            SessionId sessionId,
+            SessionRatchetMessage message,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!_sessionsById.TryGetValue(sessionId.Value, out var session))
+            {
+                throw new InvalidOperationException($"No session exists for simulated peer {_model.PeerId} with id {sessionId.Value}");
+            }
+
+            var pt = session.Decrypt(message, _clock);
+            _sessionsById[sessionId.Value] = session;
+            return Task.FromResult(pt);
+        }
+
+        public async Task<DeliverOpaqueMessageResponse> ReceiveOpaqueMessageFromMainAsync(
+            Guid simulatedPeerId,
+            DeliverOpaqueMessageRequest request,
+            ISimulatorStateService state,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (state is null) throw new ArgumentNullException(nameof(state));
+
+            // Best-effort: try to decrypt with any known session (typically 1 per peer in simulator today)
+            var cipher = new SessionRatchetMessage(request.Payload.ToByteArray());
+
+            Plaintext? pt = null;
+            SecureSession? matched = null;
+            foreach (var kv in _sessionsById)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                try
+                {
+                    // SecureSession.Decrypt mutates state; only commit if it looks like a real plaintext.
+                    var candidate = kv.Value;
+                    var candidatePt = candidate.Decrypt(cipher, _clock);
+                    if (candidatePt.Value.Length == 0)
+                    {
+                        continue;
+                    }
+
+                    pt = candidatePt;
+                    matched = candidate;
+                    _sessionsById[kv.Key] = candidate;
+                    break;
+                }
+                catch
+                {
+                    // not this session
+                }
+            }
+
+            if (pt is null || matched is null)
+            {
+                _model.MarkInboundPending(Guid.NewGuid());
+                return new DeliverOpaqueMessageResponse { Version = 1 };
+            }
+
+            InternalEnvelope env;
+            try
+            {
+                env = InternalEnvelope.Parser.ParseFrom(pt.Value);
+            }
+            catch
+            {
+                _model.MarkInboundPending(Guid.NewGuid());
+                return new DeliverOpaqueMessageResponse { Version = 1 };
+            }
+
+            if (env.ApplicationPayloadCase == InternalEnvelope.ApplicationPayloadOneofCase.MessageQueueEnvelope
+                && env.MessageQueueEnvelope?.MessageCase == MessageQueueEnvelope.MessageOneofCase.EnqueueOpaqueMessageRequest)
+            {
+                var enqueue = env.MessageQueueEnvelope.EnqueueOpaqueMessageRequest;
+                if (!enqueue.HasRecipientPublicKeyHash || enqueue.RecipientPublicKeyHash.Length == 0)
+                    throw new InvalidOperationException("EnqueueOpaqueMessageRequest missing recipient_public_key_hash");
+                if (!enqueue.HasMessageBlob || enqueue.MessageBlob.Length == 0)
+                    throw new InvalidOperationException("EnqueueOpaqueMessageRequest missing message_blob");
+
+                await state.EnqueueRelayOpaqueAsync(
+                    relayHostPeerId: simulatedPeerId,
+                    recipientRoutingKey: enqueue.RecipientPublicKeyHash.ToByteArray(),
+                    opaqueBytes: enqueue.MessageBlob.ToByteArray(),
+                    debugType: "Opaque",
+                    cancellationToken: cancellationToken).ConfigureAwait(false);
+
+                return new DeliverOpaqueMessageResponse { Version = 1 };
+            }
+
+            _model.MarkInboundPending(Guid.NewGuid());
+            return new DeliverOpaqueMessageResponse { Version = 1 };
         }
     }
 

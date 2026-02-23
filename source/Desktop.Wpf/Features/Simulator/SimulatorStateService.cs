@@ -27,6 +27,7 @@ public interface ISimulatorStateService
     Task SetRelayCapableAsync(Guid peerId, bool isRelayCapable, CancellationToken cancellationToken = default);
 
     Task EnqueueRelayOpaqueAsync(Guid relayHostPeerId, byte[] recipientRoutingKey, byte[] opaqueBytes, string? debugType = null, CancellationToken cancellationToken = default);
+    Task<RelayQueuedBlobDto?> PeekRelayOpaqueAsync(Guid relayHostPeerId, byte[] recipientRoutingKey, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<RelayQueuedBlobDto>> DequeueRelayOpaqueAsync(Guid relayHostPeerId, byte[] recipientRoutingKey, int max, CancellationToken cancellationToken = default);
     Task<bool> DeleteRelayOpaqueByAckIdAsync(Guid relayHostPeerId, Guid ackId, CancellationToken cancellationToken = default);
 }
@@ -211,6 +212,25 @@ public sealed class SimulatorStateService : ISimulatorStateService
 
         await _store.SaveAsync(_state, cancellationToken).ConfigureAwait(false);
         return matches;
+    }
+
+    public Task<RelayQueuedBlobDto?> PeekRelayOpaqueAsync(
+        Guid relayHostPeerId,
+        byte[] recipientRoutingKey,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (recipientRoutingKey is null) throw new ArgumentNullException(nameof(recipientRoutingKey));
+
+        var peer = _state.Peers.FirstOrDefault(p => p.PeerId == relayHostPeerId);
+        if (peer is null) return Task.FromResult<RelayQueuedBlobDto?>(null);
+
+        var match = peer.Relay.OpaqueQueue.Items
+            .Where(i => i.RecipientRoutingKey.SequenceEqual(recipientRoutingKey))
+            .OrderBy(i => i.EnqueuedUtc)
+            .FirstOrDefault();
+
+        return Task.FromResult<RelayQueuedBlobDto?>(match);
     }
 
     public async Task<bool> DeleteRelayOpaqueByAckIdAsync(Guid relayHostPeerId, Guid ackId, CancellationToken cancellationToken = default)

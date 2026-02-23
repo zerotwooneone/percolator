@@ -18,6 +18,8 @@ public interface ISimulatorRelayEmulator
 {
     Task EnqueueToRelayHostAsync(Guid relayHostPeerId, Guid recipientPeerId, byte[] opaqueBytes, string? debugType = null, CancellationToken cancellationToken = default);
 
+    Task EnqueueToRelayHostByRoutingKeyAsync(Guid relayHostPeerId, byte[] recipientRoutingKey, byte[] opaqueBytes, string? debugType = null, CancellationToken cancellationToken = default);
+
     Task<IReadOnlyList<SimulatedRelayItem>> FetchFromRelayHostAsync(Guid relayHostPeerId, Guid recipientPeerId, int max, CancellationToken cancellationToken = default);
 
     Task<bool> DeleteByAckIdAsync(Guid relayHostPeerId, Guid recipientPeerId, Guid ackId, CancellationToken cancellationToken = default);
@@ -25,6 +27,12 @@ public interface ISimulatorRelayEmulator
     Task<int> ForwardQueuedToMainAsync(
         Guid relayHostPeerId,
         Guid recipientPeerId,
+        Percolator.Cryptography.SessionId relayHostToMainSessionId,
+        CancellationToken cancellationToken = default);
+
+    Task<int> ForwardQueuedToMainByRoutingKeyAsync(
+        Guid relayHostPeerId,
+        byte[] recipientRoutingKey,
         Percolator.Cryptography.SessionId relayHostToMainSessionId,
         CancellationToken cancellationToken = default);
 }
@@ -57,6 +65,18 @@ public sealed class SimulatorRelayEmulator : ISimulatorRelayEmulator
 
         var routingKey = recipientPeerId.ToByteArray();
         return _state.EnqueueRelayOpaqueAsync(relayHostPeerId, routingKey, opaqueBytes, debugType, cancellationToken);
+    }
+
+    public Task EnqueueToRelayHostByRoutingKeyAsync(
+        Guid relayHostPeerId,
+        byte[] recipientRoutingKey,
+        byte[] opaqueBytes,
+        string? debugType = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (recipientRoutingKey is null) throw new ArgumentNullException(nameof(recipientRoutingKey));
+        if (opaqueBytes is null) throw new ArgumentNullException(nameof(opaqueBytes));
+        return _state.EnqueueRelayOpaqueAsync(relayHostPeerId, recipientRoutingKey, opaqueBytes, debugType, cancellationToken);
     }
 
     public async Task<IReadOnlyList<SimulatedRelayItem>> FetchFromRelayHostAsync(
@@ -102,13 +122,12 @@ public sealed class SimulatorRelayEmulator : ISimulatorRelayEmulator
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var batch = await FetchFromRelayHostAsync(relayHostPeerId, recipientPeerId, max: 1, cancellationToken).ConfigureAwait(false);
-            if (batch.Count == 0)
+            var routingKey = recipientPeerId.ToByteArray();
+            var item = await _state.PeekRelayOpaqueAsync(relayHostPeerId, routingKey, cancellationToken).ConfigureAwait(false);
+            if (item is null)
             {
                 break;
             }
-
-            var item = batch[0];
             var env = new Percolator.Contracts.InternalEnvelope
             {
                 RelayOpaqueEnvelope = new Percolator.Contracts.RelayOpaqueEnvelope
@@ -137,7 +156,109 @@ public sealed class SimulatorRelayEmulator : ISimulatorRelayEmulator
                 requestHeaders: new Grpc.Core.Metadata(),
                 cancellationToken: cancellationToken);
 
-            await _messageService.DeliverOpaqueMessage(request, ctx).ConfigureAwait(false);
+            var response = await _messageService.DeliverOpaqueMessage(request, ctx).ConfigureAwait(false);
+
+            if (response.ResultCase != Percolator.Contracts.DeliverOpaqueMessageResponse.ResultOneofCase.ResponsePayload
+                || response.ResponsePayload is null
+                || !response.ResponsePayload.HasResponsePayload)
+            {
+                break;
+            }
+
+            var ackCipher = new Percolator.Cryptography.SessionRatchetMessage(response.ResponsePayload.ResponsePayload.ToByteArray());
+            var ackPlain = await _peerRuntime.DecryptSessionMessageAsync(relayHostPeerId, relayHostToMainSessionId, ackCipher, cancellationToken).ConfigureAwait(false);
+            var ack = Percolator.Contracts.RelayOpaqueResponse.Parser.ParseFrom(ackPlain.Value);
+            if (!ack.HasMessageAckId)
+            {
+                break;
+            }
+
+            var ackId = item.AckId;
+            var returnedAck = new Guid(ack.MessageAckId.ToByteArray());
+            if (returnedAck != ackId)
+            {
+                break;
+            }
+
+            _ = await _state.DeleteRelayOpaqueByAckIdAsync(relayHostPeerId, ackId, cancellationToken).ConfigureAwait(false);
+            forwarded++;
+        }
+
+        return forwarded;
+    }
+
+    public async Task<int> ForwardQueuedToMainByRoutingKeyAsync(
+        Guid relayHostPeerId,
+        byte[] recipientRoutingKey,
+        Percolator.Cryptography.SessionId relayHostToMainSessionId,
+        CancellationToken cancellationToken = default)
+    {
+        if (recipientRoutingKey is null) throw new ArgumentNullException(nameof(recipientRoutingKey));
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var forwarded = 0;
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var d = await _state.PeekRelayOpaqueAsync(relayHostPeerId, recipientRoutingKey, cancellationToken).ConfigureAwait(false);
+            if (d is null)
+            {
+                break;
+            }
+            var env = new Percolator.Contracts.InternalEnvelope
+            {
+                RelayOpaqueEnvelope = new Percolator.Contracts.RelayOpaqueEnvelope
+                {
+                    Version = 1,
+                    OpaquePayload = Google.Protobuf.ByteString.CopyFrom(d.OpaqueBytes),
+                    MessageAckId = Google.Protobuf.ByteString.CopyFrom(d.AckId.ToByteArray())
+                }
+            };
+
+            var cipher = await _peerRuntime.EncryptInternalEnvelopeAsync(
+                relayHostPeerId,
+                relayHostToMainSessionId,
+                env,
+                cancellationToken).ConfigureAwait(false);
+
+            var request = new Percolator.Contracts.DeliverOpaqueMessageRequest
+            {
+                Version = 1,
+                Payload = Google.Protobuf.ByteString.CopyFrom(cipher.Value)
+            };
+
+            var ctx = new ServerCallContextStub(
+                peer: "ipv4:127.0.0.1:0",
+                deadline: DateTime.UtcNow.AddMinutes(1),
+                requestHeaders: new Grpc.Core.Metadata(),
+                cancellationToken: cancellationToken);
+
+            var response = await _messageService.DeliverOpaqueMessage(request, ctx).ConfigureAwait(false);
+
+            if (response.ResultCase != Percolator.Contracts.DeliverOpaqueMessageResponse.ResultOneofCase.ResponsePayload
+                || response.ResponsePayload is null
+                || !response.ResponsePayload.HasResponsePayload)
+            {
+                break;
+            }
+
+            var ackCipher = new Percolator.Cryptography.SessionRatchetMessage(response.ResponsePayload.ResponsePayload.ToByteArray());
+            var ackPlain = await _peerRuntime.DecryptSessionMessageAsync(relayHostPeerId, relayHostToMainSessionId, ackCipher, cancellationToken).ConfigureAwait(false);
+            var ack = Percolator.Contracts.RelayOpaqueResponse.Parser.ParseFrom(ackPlain.Value);
+            if (!ack.HasMessageAckId)
+            {
+                break;
+            }
+
+            var ackId = d.AckId;
+            var returnedAck = new Guid(ack.MessageAckId.ToByteArray());
+            if (returnedAck != ackId)
+            {
+                break;
+            }
+
+            _ = await _state.DeleteRelayOpaqueByAckIdAsync(relayHostPeerId, ackId, cancellationToken).ConfigureAwait(false);
             forwarded++;
         }
 
