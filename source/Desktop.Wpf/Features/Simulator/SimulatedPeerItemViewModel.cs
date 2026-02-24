@@ -1,5 +1,6 @@
 using System;
 using System.Security.Cryptography;
+using System.Threading;
 using System.Threading.Tasks;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
@@ -172,6 +173,20 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
         PeerInviteRelayedCommand.AsObservable()
             .SubscribeAwait(async (_, ct) => await ExecutePeerInviteRelayedAsync(ct), AwaitOperation.Drop)
             .AddTo(ref _bag);
+
+        PublishStandardPreKeysToRelayCommand = Observable.Return(true)
+            .ToReactiveCommand<Unit>(_ => { })
+            .AddTo(ref _bag);
+        PublishStandardPreKeysToRelayCommand.AsObservable()
+            .SubscribeAwait(async (_, ct) => await ExecutePublishStandardPreKeysToRelayAsync(ct), AwaitOperation.Drop)
+            .AddTo(ref _bag);
+
+        PeerStandardHandshakeToMainRelayedCommand = Observable.Return(true)
+            .ToReactiveCommand<Unit>(_ => { })
+            .AddTo(ref _bag);
+        PeerStandardHandshakeToMainRelayedCommand.AsObservable()
+            .SubscribeAwait(async (_, ct) => await ExecutePeerStandardHandshakeToMainRelayedAsync(ct), AwaitOperation.Drop)
+            .AddTo(ref _bag);
     }
 
     public Guid PeerId => _model.PeerId;
@@ -204,6 +219,9 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
 
     public ReactiveCommand<Unit> PeerInviteDirectCommand { get; }
     public ReactiveCommand<Unit> PeerInviteRelayedCommand { get; }
+
+    public ReactiveCommand<Unit> PublishStandardPreKeysToRelayCommand { get; }
+    public ReactiveCommand<Unit> PeerStandardHandshakeToMainRelayedCommand { get; }
 
     private async Task ExecuteAcceptInboundPendingAsync(System.Threading.CancellationToken ct)
     {
@@ -367,6 +385,46 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
 
         var invite = CreatePeerToMainInvite();
         return _relay.EnqueueToRelayHostAsync(relayPeerGuid, _active.Identity.Id, invite.ToByteArray(), debugType: nameof(EstablishDirectSessionRequest), cancellationToken: ct);
+    }
+
+    private async Task ExecutePublishStandardPreKeysToRelayAsync(CancellationToken ct)
+    {
+        var relayPeerId = _getSelectedRelayPeerId();
+        if (relayPeerId is null)
+        {
+            return;
+        }
+
+        await _peerRuntime.PublishStandardPreKeyBundleToRelayAsync(
+                simulatedPeerId: _model.PeerId,
+                relayHostPeerId: relayPeerId.Value,
+                expiresUtc: DateTimeOffset.UtcNow.AddHours(12),
+                cancellationToken: ct)
+            .ConfigureAwait(false);
+    }
+
+    private async Task ExecutePeerStandardHandshakeToMainRelayedAsync(CancellationToken ct)
+    {
+        if (_active.Keys is null)
+        {
+            return;
+        }
+
+        var relayPeerId = _getSelectedRelayPeerId();
+        if (relayPeerId is null)
+        {
+            return;
+        }
+
+        var mainSpki = _active.Keys.IdentitySigningKey.ExportSubjectPublicKeyInfo();
+        var mainPkh = SHA256.HashData(mainSpki);
+
+        _ = await _peerRuntime.InitiateStandardHandshakeToMainByRelayPkhAsync(
+                simulatedPeerId: _model.PeerId,
+                relayHostPeerId: relayPeerId.Value,
+                responderPublicKeyHash: mainPkh,
+                cancellationToken: ct)
+            .ConfigureAwait(false);
     }
 
     private EstablishDirectSessionRequest CreatePeerToMainInvite()

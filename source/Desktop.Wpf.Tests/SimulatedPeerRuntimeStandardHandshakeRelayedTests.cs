@@ -73,6 +73,10 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
             .Verifiable();
         state.Setup(s => s.EnqueueRelayOpaqueAsync(It.IsAny<Guid>(), It.IsAny<byte[]>(), It.IsAny<byte[]>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
+        state.Setup(s => s.PublishPreKeyBundleAsync(It.IsAny<Guid>(), It.IsAny<byte[]>(), It.IsAny<Guid>(), It.IsAny<byte[]>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        state.Setup(s => s.TryPopPreKeyBundleByRecipientPkhAsync(It.IsAny<Guid>(), It.IsAny<byte[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((PublishedPreKeyBundleDto?)null);
 
         var sut = new SimulatedPeerRuntimeService(directory, messageService, state.Object, pending);
 

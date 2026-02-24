@@ -51,6 +51,7 @@ public sealed class SimulatedPeerRuntimeFinalizeRelayedTests
     {
         private readonly ConcurrentDictionary<(Guid RelayHost, string RoutingKeyB64), Queue<RelayQueuedBlobDto>> _queues = new();
         private readonly ConcurrentDictionary<Guid, SimulatedPeerRuntimeStoreDto> _runtimeByPeerId = new();
+        private readonly ConcurrentDictionary<(Guid RelayHost, string PkhB64), Queue<PublishedPreKeyBundleDto>> _preKeyBundles = new();
 
         public ReadOnlyObservableCollection<SimulatedPeerDto> Peers { get; } = new(new ObservableCollection<SimulatedPeerDto>());
 
@@ -101,6 +102,58 @@ public sealed class SimulatedPeerRuntimeFinalizeRelayedTests
 
         public Task<bool> DeleteRelayOpaqueByAckIdAsync(Guid relayHostPeerId, Guid ackId, CancellationToken cancellationToken = default)
             => throw new NotImplementedException();
+
+        public Task PublishPreKeyBundleAsync(
+            Guid relayHostPeerId,
+            byte[] recipientPublicKeyHash,
+            Guid logicalOwnerPeerId,
+            byte[] bundleBytes,
+            DateTimeOffset expiresUtc,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (recipientPublicKeyHash is null) throw new ArgumentNullException(nameof(recipientPublicKeyHash));
+            if (bundleBytes is null) throw new ArgumentNullException(nameof(bundleBytes));
+
+            var key = (relayHostPeerId, Convert.ToBase64String(recipientPublicKeyHash));
+            var q = _preKeyBundles.GetOrAdd(key, _ => new Queue<PublishedPreKeyBundleDto>());
+            q.Enqueue(new PublishedPreKeyBundleDto
+            {
+                RecipientPublicKeyHash = recipientPublicKeyHash,
+                LogicalOwnerPeerId = logicalOwnerPeerId,
+                BundleBytes = bundleBytes,
+                ExpiresUtc = expiresUtc
+            });
+            return Task.CompletedTask;
+        }
+
+        public Task<PublishedPreKeyBundleDto?> TryPopPreKeyBundleByRecipientPkhAsync(
+            Guid relayHostPeerId,
+            byte[] recipientPublicKeyHash,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (recipientPublicKeyHash is null) throw new ArgumentNullException(nameof(recipientPublicKeyHash));
+
+            var key = (relayHostPeerId, Convert.ToBase64String(recipientPublicKeyHash));
+            if (!_preKeyBundles.TryGetValue(key, out var q) || q.Count == 0)
+            {
+                return Task.FromResult<PublishedPreKeyBundleDto?>(null);
+            }
+
+            // best-effort expiration handling
+            var now = DateTimeOffset.UtcNow;
+            while (q.Count > 0 && q.Peek().ExpiresUtc <= now)
+            {
+                _ = q.Dequeue();
+            }
+            if (q.Count == 0)
+            {
+                return Task.FromResult<PublishedPreKeyBundleDto?>(null);
+            }
+
+            return Task.FromResult<PublishedPreKeyBundleDto?>(q.Dequeue());
+        }
 
         public Task<SimulatedPeerRuntimeStoreDto?> TryGetRuntimeStoreAsync(Guid peerId, CancellationToken cancellationToken = default)
         {

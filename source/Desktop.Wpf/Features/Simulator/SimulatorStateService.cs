@@ -31,6 +31,19 @@ public interface ISimulatorStateService
     Task<IReadOnlyList<RelayQueuedBlobDto>> DequeueRelayOpaqueAsync(Guid relayHostPeerId, byte[] recipientRoutingKey, int max, CancellationToken cancellationToken = default);
     Task<bool> DeleteRelayOpaqueByAckIdAsync(Guid relayHostPeerId, Guid ackId, CancellationToken cancellationToken = default);
 
+    Task PublishPreKeyBundleAsync(
+        Guid relayHostPeerId,
+        byte[] recipientPublicKeyHash,
+        Guid logicalOwnerPeerId,
+        byte[] bundleBytes,
+        DateTimeOffset expiresUtc,
+        CancellationToken cancellationToken = default);
+
+    Task<PublishedPreKeyBundleDto?> TryPopPreKeyBundleByRecipientPkhAsync(
+        Guid relayHostPeerId,
+        byte[] recipientPublicKeyHash,
+        CancellationToken cancellationToken = default);
+
     Task<SimulatedPeerRuntimeStoreDto?> TryGetRuntimeStoreAsync(Guid peerId, CancellationToken cancellationToken = default);
     Task SaveRuntimeStoreAsync(Guid peerId, SimulatedPeerRuntimeStoreDto store, CancellationToken cancellationToken = default);
 }
@@ -251,6 +264,61 @@ public sealed class SimulatorStateService : ISimulatorStateService
         }
 
         return changed;
+    }
+
+    public async Task PublishPreKeyBundleAsync(
+        Guid relayHostPeerId,
+        byte[] recipientPublicKeyHash,
+        Guid logicalOwnerPeerId,
+        byte[] bundleBytes,
+        DateTimeOffset expiresUtc,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (recipientPublicKeyHash is null) throw new ArgumentNullException(nameof(recipientPublicKeyHash));
+        if (bundleBytes is null) throw new ArgumentNullException(nameof(bundleBytes));
+
+        var peer = _state.Peers.FirstOrDefault(p => p.PeerId == relayHostPeerId);
+        if (peer is null) return;
+
+        // Allow publishing even if not relay-capable; caller/UI should prevent it but we keep storage permissive.
+        peer.Relay.PreKeyStore.PublishedBundles.Add(new PublishedPreKeyBundleDto
+        {
+            RecipientPublicKeyHash = recipientPublicKeyHash,
+            LogicalOwnerPeerId = logicalOwnerPeerId,
+            BundleBytes = bundleBytes,
+            ExpiresUtc = expiresUtc
+        });
+
+        await _store.SaveAsync(_state, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<PublishedPreKeyBundleDto?> TryPopPreKeyBundleByRecipientPkhAsync(
+        Guid relayHostPeerId,
+        byte[] recipientPublicKeyHash,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (recipientPublicKeyHash is null) throw new ArgumentNullException(nameof(recipientPublicKeyHash));
+
+        var peer = _state.Peers.FirstOrDefault(p => p.PeerId == relayHostPeerId);
+        if (peer is null) return null;
+
+        var now = DateTimeOffset.UtcNow;
+        // Remove expired bundles opportunistically.
+        peer.Relay.PreKeyStore.PublishedBundles.RemoveAll(b => b.ExpiresUtc <= now);
+
+        var match = peer.Relay.PreKeyStore.PublishedBundles
+            .FirstOrDefault(b => b.RecipientPublicKeyHash.SequenceEqual(recipientPublicKeyHash));
+
+        if (match is null)
+        {
+            return null;
+        }
+
+        peer.Relay.PreKeyStore.PublishedBundles.Remove(match);
+        await _store.SaveAsync(_state, cancellationToken).ConfigureAwait(false);
+        return match;
     }
 
     public Task<SimulatedPeerRuntimeStoreDto?> TryGetRuntimeStoreAsync(Guid peerId, CancellationToken cancellationToken = default)
