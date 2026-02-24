@@ -35,6 +35,12 @@ public interface ISimulatorRelayEmulator
         byte[] recipientRoutingKey,
         Percolator.Cryptography.SessionId relayHostToMainSessionId,
         CancellationToken cancellationToken = default);
+
+    Task<int> ForwardQueuedToPeerAsync(
+        Guid relayHostPeerId,
+        Guid recipientPeerId,
+        int max,
+        CancellationToken cancellationToken = default);
 }
 
 public sealed class SimulatorRelayEmulator : ISimulatorRelayEmulator
@@ -181,6 +187,37 @@ public sealed class SimulatorRelayEmulator : ISimulatorRelayEmulator
             }
 
             _ = await _state.DeleteRelayOpaqueByAckIdAsync(relayHostPeerId, ackId, cancellationToken).ConfigureAwait(false);
+            forwarded++;
+        }
+
+        return forwarded;
+    }
+
+    public async Task<int> ForwardQueuedToPeerAsync(
+        Guid relayHostPeerId,
+        Guid recipientPeerId,
+        int max,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var dequeued = await _state
+            .DequeueRelayOpaqueAsync(relayHostPeerId, recipientPeerId.ToByteArray(), max, cancellationToken)
+            .ConfigureAwait(false);
+        if (dequeued.Count == 0)
+        {
+            return 0;
+        }
+
+        var forwarded = 0;
+        foreach (var item in dequeued)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            _ = await _peerRuntime
+                .ReceiveRelayedOpaquePayloadAsync(recipientPeerId, item.OpaqueBytes, cancellationToken)
+                .ConfigureAwait(false);
+
             forwarded++;
         }
 

@@ -38,6 +38,10 @@ public interface ISimulatedPeerRuntimeService
         InviteHandshakeResponse response,
         CancellationToken cancellationToken = default);
 
+    Task<EstablishSessionResponse> DeliverEstablishSessionToMainAsync(
+        EstablishSessionRequest request,
+        CancellationToken cancellationToken = default);
+
     Task ReceiveInviteHandshakeResponseFromMainAsync(
         Guid simulatedPeerId,
         InviteHandshakeResponse response,
@@ -46,6 +50,11 @@ public interface ISimulatedPeerRuntimeService
     Task<DeliverOpaqueMessageResponse> ReceiveOpaqueMessageFromMainAsync(
         Guid simulatedPeerId,
         DeliverOpaqueMessageRequest request,
+        CancellationToken cancellationToken = default);
+
+    Task<EstablishSessionResponse?> ReceiveRelayedOpaquePayloadAsync(
+        Guid simulatedPeerId,
+        byte[] opaqueBytes,
         CancellationToken cancellationToken = default);
 
     Task<EstablishSessionResponse> ReceiveEstablishSessionFromMainAsync(
@@ -133,12 +142,30 @@ public sealed class SimulatedPeerRuntimeService : ISimulatedPeerRuntimeService
         if (response is null) throw new ArgumentNullException(nameof(response));
 
         var ctx = new ServerCallContextStub(
+            method: "/percolator.contracts.TransportService/DeliverInviteHandshakeResponse",
             peer: "ipv4:127.0.0.1:0",
             deadline: DateTime.UtcNow.AddMinutes(1),
             requestHeaders: new Metadata(),
             cancellationToken: cancellationToken);
 
         await _messageService.DeliverInviteHandshakeResponse(response, ctx).ConfigureAwait(false);
+    }
+
+    public Task<EstablishSessionResponse> DeliverEstablishSessionToMainAsync(
+        EstablishSessionRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (request is null) throw new ArgumentNullException(nameof(request));
+
+        var ctx = new ServerCallContextStub(
+            method: "/percolator.contracts.TransportService/EstablishSession",
+            peer: "ipv4:127.0.0.1:0",
+            deadline: DateTime.UtcNow.AddMinutes(1),
+            requestHeaders: new Metadata(),
+            cancellationToken: cancellationToken);
+
+        return _messageService.EstablishSession(request, ctx);
     }
 
     public Task ReceiveInviteHandshakeResponseFromMainAsync(
@@ -172,6 +199,24 @@ public sealed class SimulatedPeerRuntimeService : ISimulatedPeerRuntimeService
 
         var runtime = _runtimeByPeerId.GetOrAdd(simulatedPeerId, CreateRuntime);
         return runtime.ReceiveOpaqueMessageFromMainAsync(simulatedPeerId, request, _state, cancellationToken);
+    }
+
+    public async Task<EstablishSessionResponse?> ReceiveRelayedOpaquePayloadAsync(
+        Guid simulatedPeerId,
+        byte[] opaqueBytes,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (opaqueBytes is null) throw new ArgumentNullException(nameof(opaqueBytes));
+        if (opaqueBytes.Length == 0) return null;
+
+        var runtime = _runtimeByPeerId.GetOrAdd(simulatedPeerId, CreateRuntime);
+        var resp = await runtime.TryHandleRelayedOpaquePayloadAsync(opaqueBytes, cancellationToken).ConfigureAwait(false);
+        if (resp is not null)
+        {
+            await PersistRuntimeStoreAsync(simulatedPeerId, runtime, cancellationToken).ConfigureAwait(false);
+        }
+        return resp;
     }
 
     public Task<EstablishSessionResponse> ReceiveEstablishSessionFromMainAsync(
@@ -766,24 +811,65 @@ public sealed class SimulatedPeerRuntimeService : ISimulatedPeerRuntimeService
             _model.MarkInboundPending(Guid.NewGuid());
             return new DeliverOpaqueMessageResponse { Version = 1 };
         }
+
+        public async Task<EstablishSessionResponse?> TryHandleRelayedOpaquePayloadAsync(
+            byte[] opaqueBytes,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            try
+            {
+                var hello = HandshakeInitiatorHello.Parser.ParseFrom(opaqueBytes);
+                if (hello is not null
+                    && hello.HasInitiatorIdentityKeySpki && hello.InitiatorIdentityKeySpki.Length > 0
+                    && hello.HasInitiatorEphemeralKeySpki && hello.InitiatorEphemeralKeySpki.Length > 0
+                    && hello.HasSignedPreKeyId && hello.SignedPreKeyId.Length > 0)
+                {
+                    var req = new EstablishSessionRequest
+                    {
+                        Version = 1,
+                        IdentitySigningKey = hello.InitiatorIdentityKeySpki,
+                        EphemeralKey = hello.InitiatorEphemeralKeySpki,
+                        PrekeyId = hello.SignedPreKeyId
+                    };
+
+                    if (hello.HasOneTimePreKeyId && hello.OneTimePreKeyId.Length > 0)
+                    {
+                        req.OnetimePrekeyId = hello.OneTimePreKeyId;
+                    }
+
+                    var resp = await ReceiveEstablishSessionFromMainAsync(req, cancellationToken).ConfigureAwait(false);
+                    return resp;
+                }
+            }
+            catch
+            {
+                // ignore
+            }
+
+            return null;
+        }
     }
 
     private sealed class ServerCallContextStub : ServerCallContext
     {
+        private readonly string _method;
         private readonly string _peer;
         private readonly DateTime _deadline;
         private readonly Metadata _requestHeaders;
         private readonly CancellationToken _cancellationToken;
 
-        public ServerCallContextStub(string peer, DateTime deadline, Metadata requestHeaders, CancellationToken cancellationToken)
+        public ServerCallContextStub(string method, string peer, DateTime deadline, Metadata requestHeaders, CancellationToken cancellationToken)
         {
+            _method = method;
             _peer = peer;
             _deadline = deadline;
             _requestHeaders = requestHeaders;
             _cancellationToken = cancellationToken;
         }
 
-        protected override string MethodCore => "/percolator.contracts.TransportService/DeliverInviteHandshakeResponse";
+        protected override string MethodCore => _method;
         protected override string HostCore => "localhost";
         protected override string PeerCore => _peer;
         protected override DateTime DeadlineCore => _deadline;
