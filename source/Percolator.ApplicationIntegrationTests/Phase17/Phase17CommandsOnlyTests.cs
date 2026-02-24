@@ -16,34 +16,13 @@ using Percolator.Identity;
 using Percolator.Infrastructure.Persistence;
 using Percolator.Network;
 using PeerId = Percolator.Identity.PeerId;
+using Percolator.ApplicationIntegrationTests.TestDoubles;
 
 namespace Percolator.ApplicationIntegrationTests.Phase17;
 
 [TestFixture]
 public class Phase17CommandsOnlyTests : IntegrationTestBase
 {
-    private sealed class GrpcSessionLoopback : IGrpcSessionService
-    {
-        private readonly IServiceProvider _hostProvider;
-        public GrpcSessionLoopback(IServiceProvider hostProvider) => _hostProvider = hostProvider;
-
-        public async Task<EstablishDirectSessionResponse> EstablishDirectSessionAsync(DnsEndPoint endpoint, EstablishDirectSessionRequest request)
-        {
-            await Task.CompletedTask;
-            return new EstablishDirectSessionResponse
-            {
-                Version = 1,
-                Queued = new EstablishDirectSessionResponse.Types.Queued { Version = 1 }
-            };
-        }
-
-        public async Task<DeliverInviteHandshakeResponseAck> DeliverInviteHandshakeResponseAsync(DnsEndPoint endpoint, InviteHandshakeResponse request)
-        {
-            await Task.CompletedTask;
-            return new DeliverInviteHandshakeResponseAck { Version = 1 };
-        }
-    }
-
     private sealed class ClientToHostTransport : IMessageTransportService
     {
         private readonly IServiceProvider _clientProvider;
@@ -170,7 +149,7 @@ public class Phase17CommandsOnlyTests : IntegrationTestBase
         var alicePort = GetAvailablePort();
         using var alice = await CreateAndInitializeHostAsync(alicePort, "P17-Alice", identityName: "alice", additionalServiceRegistration: services =>
         {
-            services.Replace(ServiceDescriptor.Singleton<IGrpcSessionService>(sp => new GrpcSessionLoopback(host.Services)));
+            services.Replace(ServiceDescriptor.Singleton<IGrpcSessionService>(sp => new SingleHostGrpcSessionLoopback(host.Services)));
             services.RemoveAll<IMessageTransportService>();
             services.AddSingleton<IMessageTransportService>(sp => new ClientToHostTransport(sp, host.Services, "host"));
         });
@@ -178,7 +157,7 @@ public class Phase17CommandsOnlyTests : IntegrationTestBase
         var bobPort = GetAvailablePort();
         using var bob = await CreateAndInitializeHostAsync(bobPort, "P17-Bob", identityName: "bob", additionalServiceRegistration: services =>
         {
-            services.Replace(ServiceDescriptor.Singleton<IGrpcSessionService>(sp => new GrpcSessionLoopback(host.Services)));
+            services.Replace(ServiceDescriptor.Singleton<IGrpcSessionService>(sp => new SingleHostGrpcSessionLoopback(host.Services)));
             services.RemoveAll<IMessageTransportService>();
             services.AddSingleton<IMessageTransportService>(sp => new ClientToHostTransport(sp, host.Services, "host"));
         });
@@ -186,7 +165,7 @@ public class Phase17CommandsOnlyTests : IntegrationTestBase
         var charliePort = GetAvailablePort();
         using var charlie = await CreateAndInitializeHostAsync(charliePort, "P17-Charlie", identityName: "charlie", additionalServiceRegistration: services =>
         {
-            services.Replace(ServiceDescriptor.Singleton<IGrpcSessionService>(sp => new GrpcSessionLoopback(host.Services)));
+            services.Replace(ServiceDescriptor.Singleton<IGrpcSessionService>(sp => new SingleHostGrpcSessionLoopback(host.Services)));
             services.RemoveAll<IMessageTransportService>();
             services.AddSingleton<IMessageTransportService>(sp => new ClientToHostTransport(sp, host.Services, "host"));
         });

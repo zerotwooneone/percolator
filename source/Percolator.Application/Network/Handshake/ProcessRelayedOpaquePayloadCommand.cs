@@ -35,6 +35,7 @@ namespace Percolator.Application.Network.Handshake
         private readonly ISecureMessagingService _secureMessaging;
         private readonly IEstablishDirectSessionService _establishDirectSessionService;
         private readonly IInviteHandshakeResponseIngress _inviteHandshakeResponseIngress;
+        private readonly IStandardHandshakeIngress _standardHandshakeIngress;
 
         private static readonly HashSet<InternalEnvelope.ApplicationPayloadOneofCase> AllowedCases = new()
         {
@@ -55,13 +56,15 @@ namespace Percolator.Application.Network.Handshake
             IMediator mediator,
             ISecureMessagingService secureMessaging,
             IEstablishDirectSessionService establishDirectSessionService,
-            IInviteHandshakeResponseIngress inviteHandshakeResponseIngress)
+            IInviteHandshakeResponseIngress inviteHandshakeResponseIngress,
+            IStandardHandshakeIngress standardHandshakeIngress)
         {
             _logger = logger;
             _mediator = mediator;
             _secureMessaging = secureMessaging;
             _establishDirectSessionService = establishDirectSessionService;
             _inviteHandshakeResponseIngress = inviteHandshakeResponseIngress;
+            _standardHandshakeIngress = standardHandshakeIngress;
         }
 
         public async Task<ProcessRelayedOpaquePayloadResponse> Handle(ProcessRelayedOpaquePayloadCommand request, CancellationToken cancellationToken)
@@ -82,8 +85,8 @@ namespace Percolator.Application.Network.Handshake
             }
             catch
             {
-                // Not a valid ratchet message: try reverse-signal payload types (still opaque to relay).
-                return await TryHandleReverseSignalPayloadAsync(request.OpaquePayload.Value, cancellationToken).ConfigureAwait(false);
+                // Not a valid ratchet message: try known non-session payload types (still opaque to relay).
+                return await TryHandleNonSessionPayloadAsync(request.OpaquePayload.Value, cancellationToken).ConfigureAwait(false);
             }
 
             (RatchetEphemeralKey PreKey, ulong Counter, ulong PreviousChainLength) header;
@@ -93,8 +96,8 @@ namespace Percolator.Application.Network.Handshake
             }
             catch (Exception drEx)
             {
-                // Not a valid ratchet message header: try reverse-signal payload types (still opaque to relay).
-                return await TryHandleReverseSignalPayloadAsync(request.OpaquePayload.Value, cancellationToken).ConfigureAwait(false);
+                // Not a valid ratchet message header: try known non-session payload types (still opaque to relay).
+                return await TryHandleNonSessionPayloadAsync(request.OpaquePayload.Value, cancellationToken).ConfigureAwait(false);
             }
 
             // Fast/slow path via SecureMessagingService
@@ -137,8 +140,39 @@ namespace Percolator.Application.Network.Handshake
             return ProcessRelayedOpaquePayloadResponse.Success;
         }
 
-        private async Task<ProcessRelayedOpaquePayloadResponse> TryHandleReverseSignalPayloadAsync(byte[] bytes, CancellationToken cancellationToken)
+        private async Task<ProcessRelayedOpaquePayloadResponse> TryHandleNonSessionPayloadAsync(byte[] bytes, CancellationToken cancellationToken)
         {
+            // Standard signal bootstrap delivered through dumb relay queue: HandshakeInitiatorHello bytes.
+            try
+            {
+                var hello = HandshakeInitiatorHello.Parser.ParseFrom(bytes);
+                if (hello is not null
+                    && hello.HasInitiatorIdentityKeySpki && hello.InitiatorIdentityKeySpki.Length > 0
+                    && hello.HasInitiatorEphemeralKeySpki && hello.InitiatorEphemeralKeySpki.Length > 0
+                    && hello.HasSignedPreKeyId && hello.SignedPreKeyId.Length > 0)
+                {
+                    var establish = new EstablishSessionRequest
+                    {
+                        Version = 1,
+                        IdentitySigningKey = hello.InitiatorIdentityKeySpki,
+                        EphemeralKey = hello.InitiatorEphemeralKeySpki,
+                        PrekeyId = hello.SignedPreKeyId
+                    };
+
+                    if (hello.HasOneTimePreKeyId && hello.OneTimePreKeyId.Length > 0)
+                    {
+                        establish.OnetimePrekeyId = hello.OneTimePreKeyId;
+                    }
+
+                    _ = await _standardHandshakeIngress.HandleAsync(establish, cancellationToken).ConfigureAwait(false);
+                    return ProcessRelayedOpaquePayloadResponse.Success;
+                }
+            }
+            catch
+            {
+                // Not a HandshakeInitiatorHello.
+            }
+
             // Reverse-signal invite ingress delivered through dumb relay queue: EstablishDirectSessionRequest bytes.
             try
             {

@@ -18,6 +18,7 @@ namespace Percolator.Application.Network
         private readonly IMessageIngress _messageIngress;
         private readonly IEstablishDirectSessionService _establishService;
         private readonly IInviteHandshakeResponseIngress _inviteHandshakeResponseIngress;
+        private readonly IStandardHandshakeIngress _standardHandshakeIngress;
         private readonly ActiveIdentityContext _active;
 
         public PercolatorMessageService(
@@ -25,13 +26,20 @@ namespace Percolator.Application.Network
             IMessageIngress messageIngress,
             IEstablishDirectSessionService establishService,
             IInviteHandshakeResponseIngress inviteHandshakeResponseIngress,
+            IStandardHandshakeIngress standardHandshakeIngress,
             ActiveIdentityContext active)
         {
             _logger = logger;
             _messageIngress = messageIngress;
             _establishService = establishService;
             _inviteHandshakeResponseIngress = inviteHandshakeResponseIngress;
+            _standardHandshakeIngress = standardHandshakeIngress;
             _active = active;
+        }
+
+        public override Task<EstablishSessionResponse> EstablishSession(EstablishSessionRequest request, ServerCallContext context)
+        {
+            return _standardHandshakeIngress.HandleAsync(request, context.CancellationToken);
         }
 
         public override async Task<EstablishDirectSessionResponse> EstablishDirectSession(EstablishDirectSessionRequest request, ServerCallContext context)

@@ -7,6 +7,12 @@ namespace Percolator.Application.Network;
 
 public interface ISimulatorOutboundInterceptor
 {
+    bool TryEstablishSession(
+        DnsEndPoint endpoint,
+        EstablishSessionRequest request,
+        CancellationToken cancellationToken,
+        out Task<EstablishSessionResponse> result);
+
     bool TryDeliverInviteHandshakeResponse(
         DnsEndPoint endpoint,
         InviteHandshakeResponse request,

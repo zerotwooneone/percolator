@@ -42,6 +42,19 @@ namespace Percolator.ApplicationIntegrationTests.ChatMessaging
                 };
             }
 
+            public Task<EstablishSessionResponse> EstablishSessionAsync(
+                DnsEndPoint endpoint,
+                EstablishSessionRequest request,
+                CancellationToken cancellationToken = default)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                return Task.FromResult(new EstablishSessionResponse
+                {
+                    Version = 1,
+                    Never = new EstablishSessionResponse.Types.Never { Version = 1 }
+                });
+            }
+
             public async Task<DeliverInviteHandshakeResponseAck> DeliverInviteHandshakeResponseAsync(DnsEndPoint endpoint, InviteHandshakeResponse request)
             {
                 await Task.CompletedTask;

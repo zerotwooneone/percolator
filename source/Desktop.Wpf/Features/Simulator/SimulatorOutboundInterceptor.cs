@@ -40,6 +40,31 @@ public sealed class SimulatorOutboundInterceptor : ISimulatorOutboundInterceptor
         return true;
     }
 
+    public bool TryEstablishSession(
+        DnsEndPoint endpoint,
+        EstablishSessionRequest request,
+        CancellationToken cancellationToken,
+        out Task<EstablishSessionResponse> result)
+    {
+        if (!TryResolveSimulatedPeerId(endpoint, out var peerId))
+        {
+            result = Task.FromResult(new EstablishSessionResponse
+            {
+                Version = 1,
+                Never = new EstablishSessionResponse.Types.Never { Version = 1 }
+            });
+            return false;
+        }
+
+        _logger.LogInformation("[simulator] Intercepted EstablishSession to {SimPeer}", peerId);
+        result = Task.FromResult(new EstablishSessionResponse
+        {
+            Version = 1,
+            Never = new EstablishSessionResponse.Types.Never { Version = 1 }
+        });
+        return true;
+    }
+
     public bool TryDeliverOpaqueMessage(
         DnsEndPoint endpoint,
         DeliverOpaqueMessageRequest request,

@@ -114,6 +114,8 @@ public static class ServiceCollectionExtensions
 
         services.AddScoped<IInviteHandshakeResponseIngress, InviteHandshakeResponseIngress>();
 
+        services.AddScoped<IStandardHandshakeIngress, StandardHandshakeIngress>();
+
         services.AddSingleton<IAdvertisedHostLookup, ConfigurationAdvertisedHostLookup>();
 
         services.AddScoped<IMainReverseSignalInviteFactory, MainReverseSignalInviteFactory>();

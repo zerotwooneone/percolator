@@ -10,34 +10,13 @@ using Percolator.Application.Cli;
 using Percolator.Application.Identity;
 using Percolator.Application.Network;
 using Percolator.Contracts;
+using Percolator.ApplicationIntegrationTests.TestDoubles;
 
 namespace Percolator.ApplicationIntegrationTests.Dht;
 
 [TestFixture]
 public class DhtEndToEndTests : IntegrationTestBase
 {
-    private sealed class GrpcSessionLoopback : IGrpcSessionService
-    {
-        private readonly IServiceProvider _hostProvider;
-        public GrpcSessionLoopback(IServiceProvider hostProvider) => _hostProvider = hostProvider;
-
-        public async Task<EstablishDirectSessionResponse> EstablishDirectSessionAsync(DnsEndPoint endpoint, EstablishDirectSessionRequest request)
-        {
-            await Task.CompletedTask;
-            return new EstablishDirectSessionResponse
-            {
-                Version = 1,
-                Queued = new EstablishDirectSessionResponse.Types.Queued { Version = 1 }
-            };
-        }
-
-        public async Task<DeliverInviteHandshakeResponseAck> DeliverInviteHandshakeResponseAsync(DnsEndPoint endpoint, InviteHandshakeResponse request)
-        {
-            await Task.CompletedTask;
-            return new DeliverInviteHandshakeResponseAck { Version = 1 };
-        }
-    }
-
     private sealed class LoopbackTransport : IMessageTransportService
     {
         private readonly IServiceProvider _hostProvider;
@@ -81,7 +60,7 @@ public class DhtEndToEndTests : IntegrationTestBase
         using var alice = await CreateAndInitializeHostAsync(alicePort, "DhtE2E-Alice", identityName: "alice", additionalServiceRegistration: services =>
         {
             // Replace network-facing services with loopback fakes targeting the host
-            services.Replace(ServiceDescriptor.Singleton<IGrpcSessionService>(sp => new GrpcSessionLoopback(host.Services)));
+            services.Replace(ServiceDescriptor.Singleton<IGrpcSessionService>(sp => new SingleHostGrpcSessionLoopback(host.Services)));
             services.Replace(ServiceDescriptor.Singleton<IMessageTransportService>(sp => new LoopbackTransport(host.Services)));
         });
 
@@ -89,7 +68,7 @@ public class DhtEndToEndTests : IntegrationTestBase
         var bobPort = GetAvailablePort();
         using var bob = await CreateAndInitializeHostAsync(bobPort, "DhtE2E-Bob", identityName: "bob", additionalServiceRegistration: services =>
         {
-            services.Replace(ServiceDescriptor.Singleton<IGrpcSessionService>(sp => new GrpcSessionLoopback(host.Services)));
+            services.Replace(ServiceDescriptor.Singleton<IGrpcSessionService>(sp => new SingleHostGrpcSessionLoopback(host.Services)));
             services.Replace(ServiceDescriptor.Singleton<IMessageTransportService>(sp => new LoopbackTransport(host.Services)));
         });
 

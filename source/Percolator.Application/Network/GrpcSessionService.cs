@@ -45,6 +45,108 @@ namespace Percolator.Application.Network
             return await Inner_EstablishSession(endpoint, request).ConfigureAwait(false);
         }
 
+        public async Task<EstablishSessionResponse> EstablishSessionAsync(
+            DnsEndPoint endpoint,
+            EstablishSessionRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            if (_simulatorOutbound is not null
+                && _simulatorOutbound.TryEstablishSession(endpoint, request, cancellationToken, out var simulated))
+            {
+                return await simulated.ConfigureAwait(false);
+            }
+
+            string connectionKey = $"{endpoint.Host}:{endpoint.Port}";
+
+            try
+            {
+                _logger.LogInformation("Sending EstablishSession request to {Endpoint}", endpoint);
+
+                await CleanupConnectionResourcesAsync(connectionKey).ConfigureAwait(false);
+
+                bool isLocalConnection = endpoint.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase) ||
+                                         IPAddress.TryParse(endpoint.Host, out var ip) &&
+                                         (IPAddress.IsLoopback(ip) || ip.Equals(IPAddress.Any));
+
+                SocketsHttpHandler handler;
+                Uri uri;
+
+                if (isLocalConnection)
+                {
+                    handler = new SocketsHttpHandler
+                    {
+                        EnableMultipleHttp2Connections = true,
+                        PooledConnectionIdleTimeout = TimeSpan.FromMinutes(5),
+                        KeepAlivePingTimeout = TimeSpan.FromSeconds(20),
+                        KeepAlivePingDelay = TimeSpan.FromSeconds(60),
+                        ConnectTimeout = TimeSpan.FromSeconds(10)
+                    };
+
+                    uri = new Uri($"http://{endpoint.Host}:{endpoint.Port}");
+                }
+                else
+                {
+                    var sharedCertificate = _certificateManager.GetServerCertificate();
+                    if (sharedCertificate == null)
+                    {
+                        _logger.LogError("Failed to get shared certificate");
+                        throw new InvalidOperationException("Failed to get shared certificate");
+                    }
+
+                    _certificates[connectionKey] = sharedCertificate;
+
+                    handler = new SocketsHttpHandler
+                    {
+                        SslOptions = new SslClientAuthenticationOptions
+                        {
+                            ClientCertificates = new X509CertificateCollection { sharedCertificate },
+                            EnabledSslProtocols = System.Security.Authentication.SslProtocols.Tls12 | System.Security.Authentication.SslProtocols.Tls13,
+                            CertificateRevocationCheckMode = X509RevocationMode.NoCheck,
+                            TargetHost = endpoint.Host,
+                            ApplicationProtocols = new List<SslApplicationProtocol> { SslApplicationProtocol.Http2 },
+                            RemoteCertificateValidationCallback = (sender, cert, chain, errors) => true
+                        },
+                        PooledConnectionIdleTimeout = TimeSpan.FromMinutes(5),
+                        KeepAlivePingTimeout = TimeSpan.FromSeconds(20),
+                        KeepAlivePingDelay = TimeSpan.FromSeconds(60),
+                        EnableMultipleHttp2Connections = true,
+                        ConnectTimeout = TimeSpan.FromSeconds(10)
+                    };
+
+                    uri = new Uri($"https://{endpoint.Host}:{endpoint.Port}");
+                }
+
+                var httpClient = new HttpClient(handler)
+                {
+                    Timeout = TimeSpan.FromSeconds(300)
+                };
+                _httpClients[connectionKey] = httpClient;
+
+                var channelOptions = new GrpcChannelOptions
+                {
+                    HttpClient = httpClient,
+                    MaxReceiveMessageSize = 4 * 1024 * 1024,
+                    MaxSendMessageSize = 4 * 1024 * 1024,
+                    DisposeHttpClient = false
+                };
+
+                var channel = GrpcChannel.ForAddress(uri, channelOptions);
+                _channels[connectionKey] = channel;
+
+                var client = new TransportService.TransportServiceClient(channel);
+
+                using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                cts.CancelAfter(TimeSpan.FromSeconds(300));
+
+                return await client.EstablishSessionAsync(request, cancellationToken: cts.Token).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not RpcException)
+            {
+                _logger.LogError(ex, "Failed to send EstablishSession to {Endpoint}: {ErrorMessage}", endpoint, ex.Message);
+                throw new RpcException(new Status(StatusCode.Unavailable, ex.Message));
+            }
+        }
+
         public async Task<DeliverInviteHandshakeResponseAck> DeliverInviteHandshakeResponseAsync(
             DnsEndPoint endpoint,
             InviteHandshakeResponse request)

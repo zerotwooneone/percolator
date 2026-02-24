@@ -1,5 +1,7 @@
 using Percolator.Contracts;
 using System.Net;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace Percolator.Application.Network
 {
@@ -18,6 +20,11 @@ namespace Percolator.Application.Network
         Task<EstablishDirectSessionResponse> EstablishDirectSessionAsync(
             DnsEndPoint endpoint, 
             EstablishDirectSessionRequest request);
+
+        Task<EstablishSessionResponse> EstablishSessionAsync(
+            DnsEndPoint endpoint,
+            EstablishSessionRequest request,
+            CancellationToken cancellationToken = default);
 
         Task<DeliverInviteHandshakeResponseAck> DeliverInviteHandshakeResponseAsync(
             DnsEndPoint endpoint,
