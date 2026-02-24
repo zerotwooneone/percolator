@@ -41,6 +41,8 @@
                   <Separator />
                   <MenuItem Header="Mark Outbound Pending" Command="{Binding MarkOutboundPendingCommand}" Visibility="{Binding ShowMarkOutboundPending.Value, Converter={StaticResource BoolToVis}}" />
                   <MenuItem Header="Mark Inbound Pending" Command="{Binding MarkInboundPendingCommand}" Visibility="{Binding ShowMarkInboundPending.Value, Converter={StaticResource BoolToVis}}" />
+                  <MenuItem Header="Accept Inbound Pending" Command="{Binding AcceptInboundPendingCommand}" Visibility="{Binding ShowAcceptRejectInboundPending.Value, Converter={StaticResource BoolToVis}}" />
+                  <MenuItem Header="Reject Inbound Pending" Command="{Binding RejectInboundPendingCommand}" Visibility="{Binding ShowAcceptRejectInboundPending.Value, Converter={StaticResource BoolToVis}}" />
                   <MenuItem Header="Mark Established" Command="{Binding MarkEstablishedCommand}" Visibility="{Binding ShowMarkEstablished.Value, Converter={StaticResource BoolToVis}}" />
                   <MenuItem Header="Clear Runtime State" Command="{Binding ClearRuntimeStateCommand}" Visibility="{Binding ShowClearRuntimeState.Value, Converter={StaticResource BoolToVis}}" />
                 </MenuItem>

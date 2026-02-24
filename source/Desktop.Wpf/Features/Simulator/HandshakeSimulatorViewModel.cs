@@ -18,6 +18,7 @@ public sealed class HandshakeSimulatorViewModel : IDisposable
     private readonly Percolator.Application.Network.IAdvertisedHostLookup _advertisedHostLookup;
     private readonly ISimulatedPeerRuntimeService _peerRuntime;
     private readonly ISimulatorRelayEmulator _relay;
+    private readonly ISimulatedPeerPendingInbox _pending;
     private readonly Percolator.Application.Network.PercolatorMessageService _messageService;
     private readonly IOptions<TransportOptions> _transportOptions;
     private readonly Percolator.Application.Identity.ActiveIdentityContext _active;
@@ -33,13 +34,15 @@ public sealed class HandshakeSimulatorViewModel : IDisposable
         ISimulatorRelayEmulator relay,
         Percolator.Application.Network.PercolatorMessageService messageService,
         IOptions<TransportOptions> transportOptions,
-        Percolator.Application.Identity.ActiveIdentityContext active)
+        Percolator.Application.Identity.ActiveIdentityContext active,
+        ISimulatedPeerPendingInbox pending)
     {
         _directory = directory;
         _inviteFactory = inviteFactory;
         _advertisedHostLookup = advertisedHostLookup;
         _peerRuntime = peerRuntime;
         _relay = relay;
+        _pending = pending;
         _messageService = messageService;
         _transportOptions = transportOptions;
         _active = active;
@@ -139,7 +142,8 @@ public sealed class HandshakeSimulatorViewModel : IDisposable
                 {
                     var id = SelectedRelayOption.Value?.PeerId;
                     return id is null ? null : new Percolator.Cryptography.Primitives.PeerId(id.Value);
-                }));
+                },
+                pending: _pending));
         }
 
         RebuildRelayOptions();
@@ -212,7 +216,8 @@ public sealed class HandshakeSimulatorViewModel : IDisposable
                     {
                         var id = SelectedRelayOption.Value?.PeerId;
                         return id is null ? null : new Percolator.Cryptography.Primitives.PeerId(id.Value);
-                    }));
+                    },
+                    pending: _pending));
             }
         }
 

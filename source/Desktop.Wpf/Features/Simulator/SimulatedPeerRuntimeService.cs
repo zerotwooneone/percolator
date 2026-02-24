@@ -58,16 +58,19 @@ public sealed class SimulatedPeerRuntimeService : ISimulatedPeerRuntimeService
     private readonly ISimulatedPeerDirectory _peers;
     private readonly PercolatorMessageService _messageService;
     private readonly ISimulatorStateService _state;
+    private readonly ISimulatedPeerPendingInbox _pending;
     private readonly ConcurrentDictionary<Guid, SimulatedPeerRuntime> _runtimeByPeerId = new();
 
     public SimulatedPeerRuntimeService(
         ISimulatedPeerDirectory peers,
         PercolatorMessageService messageService,
-        ISimulatorStateService state)
+        ISimulatorStateService state,
+        ISimulatedPeerPendingInbox pending)
     {
         _peers = peers;
         _messageService = messageService;
         _state = state;
+        _pending = pending;
     }
 
     public Task<SimulatedPeerInviteAcceptance> AcceptReverseSignalInviteAsync(
@@ -119,14 +122,12 @@ public sealed class SimulatedPeerRuntimeService : ISimulatedPeerRuntimeService
         var model = _peers.Peers.FirstOrDefault(p => p.PeerId == simulatedPeerId)
             ?? throw new InvalidOperationException($"No simulated peer exists with id {simulatedPeerId}");
 
-        if (Guid.TryParse(response.RequestCorrelationId, out var corr))
-        {
-            model.MarkInboundPending(corr);
-        }
-        else
-        {
-            model.MarkInboundPending(Guid.NewGuid());
-        }
+        var corr = Guid.TryParse(response.RequestCorrelationId, out var parsed)
+            ? parsed
+            : Guid.NewGuid();
+
+        _pending.AddInviteHandshakeResponse(simulatedPeerId, corr, response);
+        model.MarkInboundPending(corr);
 
         return Task.CompletedTask;
     }

@@ -15,6 +15,7 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
 {
     private readonly ISimulatedPeerDirectory _directory;
     private readonly SimulatedPeerModel _model;
+    private readonly ISimulatedPeerPendingInbox _pending;
     private readonly Percolator.Application.Network.IMainReverseSignalInviteFactory _inviteFactory;
     private readonly Percolator.Application.Network.IAdvertisedHostLookup _advertisedHostLookup;
     private readonly ISimulatedPeerRuntimeService _peerRuntime;
@@ -37,10 +38,12 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
         Percolator.Application.Network.PercolatorMessageService messageService,
         IOptions<TransportOptions> transportOptions,
         Percolator.Application.Identity.ActiveIdentityContext active,
-        Func<Percolator.Cryptography.Primitives.PeerId?> getSelectedRelayPeerId)
+        Func<Percolator.Cryptography.Primitives.PeerId?> getSelectedRelayPeerId,
+        ISimulatedPeerPendingInbox pending)
     {
         _directory = directory;
         _model = model;
+        _pending = pending;
         _inviteFactory = inviteFactory;
         _advertisedHostLookup = advertisedHostLookup;
         _peerRuntime = peerRuntime;
@@ -75,6 +78,11 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
         ShowMarkEstablished = _model.RuntimeState
             .Select(s => s.UiState != SimulatorPeerUiState.Established)
             .ToBindableReactiveProperty(true)
+            .AddTo(ref _bag);
+
+        ShowAcceptRejectInboundPending = _model.RuntimeState
+            .Select(s => s.UiState == SimulatorPeerUiState.InboundPending)
+            .ToBindableReactiveProperty(false)
             .AddTo(ref _bag);
 
         ShowClearRuntimeState = _model.RuntimeState
@@ -114,6 +122,20 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
 
         ClearRuntimeStateCommand = Observable.Return(true)
             .ToReactiveCommand<Unit>(_ => _model.ClearRuntimeState())
+            .AddTo(ref _bag);
+
+        AcceptInboundPendingCommand = Observable.Return(true)
+            .ToReactiveCommand<Unit>(_ => { })
+            .AddTo(ref _bag);
+        AcceptInboundPendingCommand.AsObservable()
+            .Subscribe(_ => ExecuteAcceptInboundPending())
+            .AddTo(ref _bag);
+
+        RejectInboundPendingCommand = Observable.Return(true)
+            .ToReactiveCommand<Unit>(_ => { })
+            .AddTo(ref _bag);
+        RejectInboundPendingCommand.AsObservable()
+            .Subscribe(_ => ExecuteRejectInboundPending())
             .AddTo(ref _bag);
 
         MainInviteDirectCommand = Observable.Return(true)
@@ -162,6 +184,7 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
     public BindableReactiveProperty<bool> ShowMarkInboundPending { get; }
     public BindableReactiveProperty<bool> ShowMarkEstablished { get; }
     public BindableReactiveProperty<bool> ShowClearRuntimeState { get; }
+    public BindableReactiveProperty<bool> ShowAcceptRejectInboundPending { get; }
 
     public ReactiveCommand<Unit> ToggleOnlineCommand { get; }
     public ReactiveCommand<Unit> ToggleRelayCapableCommand { get; }
@@ -172,12 +195,35 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
     public ReactiveCommand<Unit> MarkEstablishedCommand { get; }
     public ReactiveCommand<Unit> ClearRuntimeStateCommand { get; }
 
+    public ReactiveCommand<Unit> AcceptInboundPendingCommand { get; }
+    public ReactiveCommand<Unit> RejectInboundPendingCommand { get; }
+
     public ReactiveCommand<Unit> MainInviteDirectCommand { get; }
     public ReactiveCommand<Unit> MainInviteRelayedCommand { get; }
     public ReactiveCommand<Unit> RelayForwardToMainCommand { get; }
 
     public ReactiveCommand<Unit> PeerInviteDirectCommand { get; }
     public ReactiveCommand<Unit> PeerInviteRelayedCommand { get; }
+
+    private void ExecuteAcceptInboundPending()
+    {
+        var corr = _model.RuntimeState.CurrentValue.PendingCorrelationId;
+        if (corr is null) return;
+
+        if (_pending.TryTakeInviteHandshakeResponse(_model.PeerId, corr.Value, out _))
+        {
+            _model.MarkEstablished();
+        }
+    }
+
+    private void ExecuteRejectInboundPending()
+    {
+        var corr = _model.RuntimeState.CurrentValue.PendingCorrelationId;
+        if (corr is null) return;
+
+        _ = _pending.TryTakeInviteHandshakeResponse(_model.PeerId, corr.Value, out _);
+        _model.ClearRuntimeState();
+    }
 
     private async Task ExecuteMainInviteDirectAsync(System.Threading.CancellationToken ct)
     {

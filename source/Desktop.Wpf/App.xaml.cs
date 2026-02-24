@@ -140,6 +140,7 @@ public partial class App : Application
                 services.AddSingleton<ISimulatedPeerKeyFactory, SimulatedPeerKeyFactory>();
                 services.AddSingleton<ISimulatorStateService, SimulatorStateService>();
                 services.AddSingleton<ISimulatedPeerDirectory, SimulatedPeerDirectory>();
+                services.AddSingleton<Desktop.Wpf.Features.Simulator.ISimulatedPeerPendingInbox, Desktop.Wpf.Features.Simulator.SimulatedPeerPendingInbox>();
                 services.AddScoped<Desktop.Wpf.Features.Simulator.ISimulatorRelayEmulator, Desktop.Wpf.Features.Simulator.SimulatorRelayEmulator>();
                 services.AddScoped<Desktop.Wpf.Features.Simulator.ISimulatedPeerRuntimeService, Desktop.Wpf.Features.Simulator.SimulatedPeerRuntimeService>();
                 services.AddSingleton<Percolator.Application.Network.ISimulatorOutboundInterceptor, Desktop.Wpf.Features.Simulator.SimulatorOutboundInterceptor>();
