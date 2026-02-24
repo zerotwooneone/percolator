@@ -873,6 +873,76 @@ Existing initiator-finalize path to reuse:
   - `HandleHandshakeResponderHelloCommand`
   - `IInitiatorFinalizeService.TryFinalizeFromFirstResponderAsync(...)`
 
+### D5) Main window: New Handshake flow (standard X3DH)
+Add a main-window entry point to initiate a standard (X3DH) handshake to another peer, optimized for a slick non-technical UX.
+
+UI surface:
+- Entry point: a “New Handshake” button in the pending requests/handshakes menu (the UserPlus indicator).
+- Register the modal dialog with `WindowManager` via `Shared/Windowing/ViewMappings.xaml` (VM -> Window mapping).
+
+Dialog requirements (3 tabs):
+
+#### Tab 1 — Network Search
+Goal: query a relay peer for the target’s pre-key bundle and immediately initiate a handshake.
+
+Inputs:
+- Relay selection:
+  - Select from known relays (list of saved relay endpoints/identities).
+  - Or manually enter a relay `DnsEndPoint`.
+    - If the relay is reachable (online), add it to the known relay list.
+- Target PKH input:
+  - Allow paste of PKH (accept common user formatting: whitespace, hex with/without separators, base64).
+
+Flow (phase-driven):
+- Phase 1 — Negotiation (“Establishing Tunnel...”)
+  - If a direct session to the selected relay peer already exists, reuse it.
+  - Otherwise, attempt to establish a direct session using the reverse-signal `EstablishDirectSession` path:
+    - Create an invite using `IMainReverseSignalInviteFactory`.
+    - Send `TransportService.EstablishDirectSession(EstablishDirectSessionRequest)` to the relay endpoint using `IGrpcSessionService`.
+    - Wait up to a bounded timeout for a direct session to appear (session establishment requires acceptance on the relay peer side).
+    - Error state must be explicit: relay offline, timeout, invite rejected/not accepted.
+- Phase 2 — Querying (“Querying Node...”)
+  - Send an `InternalEnvelope { PrekeyEnvelope { GetPreKeyBundleRequest { public_key_hash = <target PKH> } } }` to the relay via `IMessageTransportService` using the relay’s `DirectSessionId`.
+- Phase 3 — Resolution (“Decrypting Bundle...”, then “Initiating Handshake...”)
+  - Decrypt the `GetPreKeyBundleResponse`.
+  - On success, do not show raw JSON. Automatically parse the retrieved bundle and initiate `EstablishSessionRequest` to the target.
+  - OTK exhaustion fallback: if the bundle is missing the OTK, proceed without prompting.
+
+States:
+- Failure states: show clear failure reasons (relay offline, timeout, target not found).
+- Success state: automatically transitions to initiating the handshake.
+
+#### Tab 2 — Import Token
+Goal: initiate a standard handshake using an out-of-band “Invite Token” (opaque representation of `GetPreKeyBundleResponse.PreKeyBundle`).
+
+Inputs:
+- Target peer identity:
+  - Pick an existing known identity or add a new one by identity signing key (SPKI) with optional nickname.
+- Target `DnsEndPoint`.
+- Invite Token:
+  - Treat as an opaque “Secure Token” (base64 string) for UX purposes.
+  - Be tolerant of whitespace.
+
+Flow:
+- Decode + parse token into `GetPreKeyBundleResponse.PreKeyBundle`.
+- Build and send `EstablishSessionRequest` to the target endpoint.
+- Finalize initiator session once responder first message is received.
+
+#### Tab 3 — Generate Invite
+Goal: generate shareable, expiring pre-key bundles and display the user’s PKH.
+
+Requirements:
+- Provide a “Generate New Token” button.
+- Debounce generate button clicks with a 500ms timeout.
+- Each generated bundle must:
+  - include an expiry time
+  - be persisted to the database/local self pre-key store (SPK + OTK material) the same way as normal published keys.
+- Output a base64 “Invite Token” in a readonly textbox with a “Copy” button.
+
+Second section:
+- Display the current self identity PKH.
+- Provide a “Copy PKH” button.
+
 ## Done when
 - Standard signal initiation can be simulated in both directions, direct and relayed.
 
