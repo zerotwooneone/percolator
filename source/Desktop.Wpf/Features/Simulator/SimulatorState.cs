@@ -26,8 +26,42 @@ public sealed class SimulatedPeerDto
     public SimulatedPeerConnectionDto Connection { get; set; } = new();
     public List<Guid> KnownPeerIds { get; set; } = new();
     public SimulatedPeerPreKeyStateDto PreKeys { get; set; } = new();
+    public SimulatedPeerRuntimeStoreDto RuntimeStore { get; set; } = new();
     public SimulatedPeerRelayStateDto Relay { get; set; } = new();
     public SimulatedPeerReverseSignalKeysDto ReverseSignalKeys { get; set; } = new();
+}
+
+public sealed class SimulatedPeerRuntimeStoreDto
+{
+    public int Version { get; set; } = 1;
+    public List<SimulatedSecureSessionDto> Sessions { get; set; } = new();
+    public List<SimulatedSignedPreKeyDto> SignedPreKeys { get; set; } = new();
+}
+
+public sealed class SimulatedSecureSessionDto
+{
+    public Guid SessionId { get; set; }
+    public Guid RemotePeerId { get; set; }
+    public int ProtocolVersion { get; set; } = 1;
+
+    public byte[] RootKey { get; set; } = Array.Empty<byte>();
+    public byte[]? SendChainKey { get; set; }
+    public ulong SendCounter { get; set; }
+    public byte[]? RecvChainKey { get; set; }
+    public ulong RecvCounter { get; set; }
+    public ulong PrevChainLength { get; set; }
+    public byte[]? RemoteRatchetKey { get; set; }
+    public byte[]? DhRatchetPrivateKey { get; set; }
+
+    public DateTimeOffset CreatedAtUtc { get; set; }
+    public DateTimeOffset LastUsedAtUtc { get; set; }
+}
+
+public sealed class SimulatedSignedPreKeyDto
+{
+    public Guid SignedPreKeyId { get; set; }
+    public byte[] PrivateEcPrivateKey { get; set; } = Array.Empty<byte>();
+    public byte[] PublicSpki { get; set; } = Array.Empty<byte>();
 }
 
 public sealed class SimulatedPeerReverseSignalKeysDto

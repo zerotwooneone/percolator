@@ -133,7 +133,6 @@ public partial class App : Application
                 services.AddMediatR(cfg => cfg.RegisterServicesFromAssembly(typeof(MainWindow).Assembly));
 
                 // Features
-                services.AddSingleton<Percolator.Cryptography.ISessionRepository, Desktop.Wpf.Features.Sessions.InMemorySessionRepository>();
                 services.AddSingleton<IChatHistory, InMemoryChatHistory>();
                 services.AddScoped<IPendingHandshakeSimulatorService, PendingHandshakeSimulatorService>();
                 services.AddSingleton<ISimulatorStateStore, JsonSimulatorStateStore>();

@@ -22,11 +22,40 @@ public sealed class SimulatorStateStoreTests
             {
                 Version = 1
             };
+            var peerId = Guid.NewGuid();
             state.Peers.Add(new SimulatedPeerDto
             {
-                PeerId = Guid.NewGuid(),
+                PeerId = peerId,
                 DisplayName = "Alice",
-                IsOnline = true
+                IsOnline = true,
+                RuntimeStore = new SimulatedPeerRuntimeStoreDto
+                {
+                    Version = 1,
+                    SignedPreKeys =
+                    {
+                        new SimulatedSignedPreKeyDto
+                        {
+                            SignedPreKeyId = Guid.NewGuid(),
+                            PrivateEcPrivateKey = new byte[] { 1, 2, 3 },
+                            PublicSpki = new byte[] { 4, 5, 6 }
+                        }
+                    },
+                    Sessions =
+                    {
+                        new SimulatedSecureSessionDto
+                        {
+                            SessionId = Guid.NewGuid(),
+                            RemotePeerId = Guid.NewGuid(),
+                            ProtocolVersion = 1,
+                            RootKey = new byte[] { 9, 9, 9 },
+                            SendCounter = 7,
+                            RecvCounter = 8,
+                            PrevChainLength = 0,
+                            CreatedAtUtc = DateTimeOffset.UtcNow,
+                            LastUsedAtUtc = DateTimeOffset.UtcNow
+                        }
+                    }
+                }
             });
 
             await store.SaveAsync(state, CancellationToken.None);
@@ -35,6 +64,10 @@ public sealed class SimulatorStateStoreTests
             loaded.Should().NotBeNull();
             loaded!.Peers.Should().HaveCount(1);
             loaded.Peers[0].DisplayName.Should().Be("Alice");
+            loaded.Peers[0].PeerId.Should().Be(peerId);
+            loaded.Peers[0].RuntimeStore.Should().NotBeNull();
+            loaded.Peers[0].RuntimeStore.SignedPreKeys.Should().HaveCount(1);
+            loaded.Peers[0].RuntimeStore.Sessions.Should().HaveCount(1);
         }
         finally
         {

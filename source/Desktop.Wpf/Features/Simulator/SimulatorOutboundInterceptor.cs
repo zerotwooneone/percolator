@@ -57,11 +57,7 @@ public sealed class SimulatorOutboundInterceptor : ISimulatorOutboundInterceptor
         }
 
         _logger.LogInformation("[simulator] Intercepted EstablishSession to {SimPeer}", peerId);
-        result = Task.FromResult(new EstablishSessionResponse
-        {
-            Version = 1,
-            Never = new EstablishSessionResponse.Types.Never { Version = 1 }
-        });
+        result = _peerRuntime.ReceiveEstablishSessionFromMainAsync(peerId, request, cancellationToken);
         return true;
     }
 

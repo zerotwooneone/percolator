@@ -30,6 +30,9 @@ public interface ISimulatorStateService
     Task<RelayQueuedBlobDto?> PeekRelayOpaqueAsync(Guid relayHostPeerId, byte[] recipientRoutingKey, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<RelayQueuedBlobDto>> DequeueRelayOpaqueAsync(Guid relayHostPeerId, byte[] recipientRoutingKey, int max, CancellationToken cancellationToken = default);
     Task<bool> DeleteRelayOpaqueByAckIdAsync(Guid relayHostPeerId, Guid ackId, CancellationToken cancellationToken = default);
+
+    Task<SimulatedPeerRuntimeStoreDto?> TryGetRuntimeStoreAsync(Guid peerId, CancellationToken cancellationToken = default);
+    Task SaveRuntimeStoreAsync(Guid peerId, SimulatedPeerRuntimeStoreDto store, CancellationToken cancellationToken = default);
 }
 
 public sealed class SimulatorStateService : ISimulatorStateService
@@ -250,6 +253,23 @@ public sealed class SimulatorStateService : ISimulatorStateService
         return changed;
     }
 
+    public Task<SimulatedPeerRuntimeStoreDto?> TryGetRuntimeStoreAsync(Guid peerId, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var peer = _state.Peers.FirstOrDefault(p => p.PeerId == peerId);
+        return Task.FromResult(peer?.RuntimeStore);
+    }
+
+    public async Task SaveRuntimeStoreAsync(Guid peerId, SimulatedPeerRuntimeStoreDto store, CancellationToken cancellationToken = default)
+    {
+        if (store is null) throw new ArgumentNullException(nameof(store));
+        var peer = _state.Peers.FirstOrDefault(p => p.PeerId == peerId);
+        if (peer is null) return;
+
+        peer.RuntimeStore = store;
+        await _store.SaveAsync(_state, cancellationToken).ConfigureAwait(false);
+    }
+
     private static Task InvokeOnUiAsync(Action action)
     {
         var dispatcher = Application.Current?.Dispatcher;
@@ -268,6 +288,9 @@ public sealed class SimulatorStateService : ISimulatorStateService
         peer.KnownPeerIds ??= new();
         peer.PreKeys ??= new();
         peer.PreKeys.OneTimePreKeys ??= new();
+        peer.RuntimeStore ??= new();
+        peer.RuntimeStore.Sessions ??= new();
+        peer.RuntimeStore.SignedPreKeys ??= new();
         peer.Relay ??= new();
         peer.Relay.OpaqueQueue ??= new();
         peer.Relay.OpaqueQueue.Items ??= new();

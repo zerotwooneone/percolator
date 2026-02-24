@@ -72,6 +72,10 @@ public sealed class SimulatedPeerRuntimeFinalizeTests
         var messageService = (Percolator.Application.Network.PercolatorMessageService)
             FormatterServices.GetUninitializedObject(typeof(Percolator.Application.Network.PercolatorMessageService));
         var state = new Mock<ISimulatorStateService>(MockBehavior.Loose);
+        state.Setup(s => s.TryGetRuntimeStoreAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((SimulatedPeerRuntimeStoreDto?)null);
+        state.Setup(s => s.SaveRuntimeStoreAsync(It.IsAny<Guid>(), It.IsAny<SimulatedPeerRuntimeStoreDto>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
 
         var sut = new SimulatedPeerRuntimeService(directory, messageService, state.Object, pending);
 
@@ -153,6 +157,10 @@ public sealed class SimulatedPeerRuntimeFinalizeTests
         using var directory = new DirectoryStub(inviterModel, acceptorModel);
 
         var state = new Mock<ISimulatorStateService>(MockBehavior.Loose);
+        state.Setup(s => s.TryGetRuntimeStoreAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((SimulatedPeerRuntimeStoreDto?)null);
+        state.Setup(s => s.SaveRuntimeStoreAsync(It.IsAny<Guid>(), It.IsAny<SimulatedPeerRuntimeStoreDto>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
 
         var messageService = (Percolator.Application.Network.PercolatorMessageService)
             FormatterServices.GetUninitializedObject(typeof(Percolator.Application.Network.PercolatorMessageService));

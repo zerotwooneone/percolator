@@ -50,6 +50,7 @@ public sealed class SimulatedPeerRuntimeFinalizeRelayedTests
     private sealed class RelayStateStub : ISimulatorStateService
     {
         private readonly ConcurrentDictionary<(Guid RelayHost, string RoutingKeyB64), Queue<RelayQueuedBlobDto>> _queues = new();
+        private readonly ConcurrentDictionary<Guid, SimulatedPeerRuntimeStoreDto> _runtimeByPeerId = new();
 
         public ReadOnlyObservableCollection<SimulatedPeerDto> Peers { get; } = new(new ObservableCollection<SimulatedPeerDto>());
 
@@ -100,6 +101,20 @@ public sealed class SimulatedPeerRuntimeFinalizeRelayedTests
 
         public Task<bool> DeleteRelayOpaqueByAckIdAsync(Guid relayHostPeerId, Guid ackId, CancellationToken cancellationToken = default)
             => throw new NotImplementedException();
+
+        public Task<SimulatedPeerRuntimeStoreDto?> TryGetRuntimeStoreAsync(Guid peerId, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            _runtimeByPeerId.TryGetValue(peerId, out var store);
+            return Task.FromResult<SimulatedPeerRuntimeStoreDto?>(store);
+        }
+
+        public Task SaveRuntimeStoreAsync(Guid peerId, SimulatedPeerRuntimeStoreDto store, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            _runtimeByPeerId[peerId] = store;
+            return Task.CompletedTask;
+        }
     }
 
     [Test]
