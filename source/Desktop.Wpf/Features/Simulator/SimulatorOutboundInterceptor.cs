@@ -3,6 +3,7 @@ using System.Linq;
 using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Percolator.Application.Network;
 using Percolator.Contracts;
@@ -12,16 +13,16 @@ namespace Desktop.Wpf.Features.Simulator;
 public sealed class SimulatorOutboundInterceptor : ISimulatorOutboundInterceptor
 {
     private readonly ISimulatorStateService _state;
-    private readonly ISimulatedPeerRuntimeService _peerRuntime;
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<SimulatorOutboundInterceptor> _logger;
 
     public SimulatorOutboundInterceptor(
         ISimulatorStateService state,
-        ISimulatedPeerRuntimeService peerRuntime,
+        IServiceScopeFactory scopeFactory,
         ILogger<SimulatorOutboundInterceptor> logger)
     {
         _state = state;
-        _peerRuntime = peerRuntime;
+        _scopeFactory = scopeFactory;
         _logger = logger;
     }
 
@@ -57,7 +58,8 @@ public sealed class SimulatorOutboundInterceptor : ISimulatorOutboundInterceptor
         }
 
         _logger.LogInformation("[simulator] Intercepted EstablishSession to {SimPeer}", peerId);
-        result = _peerRuntime.ReceiveEstablishSessionFromMainAsync(peerId, request, cancellationToken);
+        result = InvokeInScopeAsync(
+            peerRuntime => peerRuntime.ReceiveEstablishSessionFromMainAsync(peerId, request, cancellationToken));
         return true;
     }
 
@@ -73,15 +75,36 @@ public sealed class SimulatorOutboundInterceptor : ISimulatorOutboundInterceptor
             return false;
         }
 
-        result = _peerRuntime.ReceiveOpaqueMessageFromMainAsync(peerId, request, cancellationToken);
+        result = InvokeInScopeAsync(
+            peerRuntime => peerRuntime.ReceiveOpaqueMessageFromMainAsync(peerId, request, cancellationToken));
         return true;
     }
 
     private async Task<DeliverInviteHandshakeResponseAck> DeliverInviteHandshakeResponseAsync(Guid simulatedPeerId, InviteHandshakeResponse response)
     {
         _logger.LogInformation("[simulator] Intercepted DeliverInviteHandshakeResponse to {SimPeer}", simulatedPeerId);
-        await _peerRuntime.ReceiveInviteHandshakeResponseFromMainAsync(simulatedPeerId, response).ConfigureAwait(false);
+        await InvokeInScopeAsync(
+                peerRuntime => peerRuntime.ReceiveInviteHandshakeResponseFromMainAsync(simulatedPeerId, response))
+            .ConfigureAwait(false);
         return new DeliverInviteHandshakeResponseAck { Version = 1 };
+    }
+
+    private async Task InvokeInScopeAsync(Func<ISimulatedPeerRuntimeService, Task> work)
+    {
+        if (work is null) throw new ArgumentNullException(nameof(work));
+
+        using var scope = _scopeFactory.CreateScope();
+        var peerRuntime = scope.ServiceProvider.GetRequiredService<ISimulatedPeerRuntimeService>();
+        await work(peerRuntime).ConfigureAwait(false);
+    }
+
+    private async Task<T> InvokeInScopeAsync<T>(Func<ISimulatedPeerRuntimeService, Task<T>> work)
+    {
+        if (work is null) throw new ArgumentNullException(nameof(work));
+
+        using var scope = _scopeFactory.CreateScope();
+        var peerRuntime = scope.ServiceProvider.GetRequiredService<ISimulatedPeerRuntimeService>();
+        return await work(peerRuntime).ConfigureAwait(false);
     }
 
     private bool TryResolveSimulatedPeerId(DnsEndPoint endpoint, out Guid simulatedPeerId)
