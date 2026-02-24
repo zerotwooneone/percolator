@@ -51,6 +51,17 @@ public interface ISimulatedPeerRuntimeService
         SessionId sessionId,
         SessionRatchetMessage message,
         CancellationToken cancellationToken = default);
+
+    void RecordOutboundInviteSignedPreKeyPrivate(
+        Guid simulatedPeerId,
+        Guid requestCorrelationId,
+        byte[] signedPreKeyPrivateEcPrivateKey);
+
+    Task<SessionId?> TryFinalizeInviteHandshakeResponseFromMainAsync(
+        Guid simulatedPeerId,
+        Guid acceptorPeerId,
+        Guid requestCorrelationId,
+        CancellationToken cancellationToken = default);
 }
 
 public sealed class SimulatedPeerRuntimeService : ISimulatedPeerRuntimeService
@@ -157,6 +168,46 @@ public sealed class SimulatedPeerRuntimeService : ISimulatedPeerRuntimeService
         return runtime.DecryptSessionMessageAsync(sessionId, message, cancellationToken);
     }
 
+    public void RecordOutboundInviteSignedPreKeyPrivate(
+        Guid simulatedPeerId,
+        Guid requestCorrelationId,
+        byte[] signedPreKeyPrivateEcPrivateKey)
+    {
+        if (signedPreKeyPrivateEcPrivateKey is null) throw new ArgumentNullException(nameof(signedPreKeyPrivateEcPrivateKey));
+        var runtime = _runtimeByPeerId.GetOrAdd(simulatedPeerId, CreateRuntime);
+        runtime.RecordOutboundInviteSignedPreKeyPrivate(requestCorrelationId, signedPreKeyPrivateEcPrivateKey);
+    }
+
+    public async Task<SessionId?> TryFinalizeInviteHandshakeResponseFromMainAsync(
+        Guid simulatedPeerId,
+        Guid acceptorPeerId,
+        Guid requestCorrelationId,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (!_pending.TryGetInviteHandshakeResponse(simulatedPeerId, requestCorrelationId, out var response))
+        {
+            return null;
+        }
+
+        var runtime = _runtimeByPeerId.GetOrAdd(simulatedPeerId, CreateRuntime);
+        var sessionId = await runtime.TryFinalizeInviteHandshakeResponseAsync(
+                acceptorPeerId,
+                requestCorrelationId,
+                response,
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        if (sessionId is null)
+        {
+            return null;
+        }
+
+        _ = _pending.TryTakeInviteHandshakeResponse(simulatedPeerId, requestCorrelationId, out _);
+        return sessionId;
+    }
+
     private SimulatedPeerRuntime CreateRuntime(Guid simulatedPeerId)
     {
         var model = _peers.Peers.FirstOrDefault(p => p.PeerId == simulatedPeerId);
@@ -174,12 +225,124 @@ public sealed class SimulatedPeerRuntimeService : ISimulatedPeerRuntimeService
         private readonly ISessionCrypto _crypto;
         private readonly IClock _clock;
         private readonly ConcurrentDictionary<Guid, SecureSession> _sessionsById = new();
+        private readonly ConcurrentDictionary<Guid, byte[]> _signedPreKeyPrivateByCorrelation = new();
 
         public SimulatedPeerRuntime(SimulatedPeerModel model)
         {
             _model = model;
             _crypto = new AeadSessionCrypto();
             _clock = new SystemClock();
+        }
+
+        public void RecordOutboundInviteSignedPreKeyPrivate(Guid requestCorrelationId, byte[] signedPreKeyPrivateEcPrivateKey)
+        {
+            _signedPreKeyPrivateByCorrelation[requestCorrelationId] = signedPreKeyPrivateEcPrivateKey;
+        }
+
+        public Task<SessionId?> TryFinalizeInviteHandshakeResponseAsync(
+            Guid acceptorPeerId,
+            Guid requestCorrelationId,
+            InviteHandshakeResponse response,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (response is null) throw new ArgumentNullException(nameof(response));
+
+            if (!_signedPreKeyPrivateByCorrelation.TryGetValue(requestCorrelationId, out var spkPrivBytes))
+            {
+                return Task.FromResult<SessionId?>(null);
+            }
+
+            if (!response.HasAcceptorIdentityKey || response.AcceptorIdentityKey.Length == 0)
+                throw new InvalidOperationException("InviteHandshakeResponse missing acceptor_identity_key");
+            if (!response.HasAcceptorX3DhEphemeralKey || response.AcceptorX3DhEphemeralKey.Length == 0)
+                throw new InvalidOperationException("InviteHandshakeResponse missing acceptor_x3dh_ephemeral_key");
+            if (!response.HasInitialRatchetMessage || response.InitialRatchetMessage.Length == 0)
+                throw new InvalidOperationException("InviteHandshakeResponse missing initial_ratchet_message");
+
+            var acceptorIdentityPublic = new RatchetIdentityKey(response.AcceptorIdentityKey.ToByteArray());
+            var acceptorEphemeralPublic = new RatchetEphemeralKey(response.AcceptorX3DhEphemeralKey.ToByteArray());
+
+            var localIkPriv = new PrivatePreKey(_model.IdentitySigningKeyPrivateKeyEcPrivateKey);
+            var localSpkPriv = new PrivatePreKey(spkPrivBytes);
+
+            SharedSecret shared;
+            try
+            {
+                shared = _crypto.X3DH_Respond(
+                    acceptorIdentityPublic,
+                    acceptorEphemeralPublic,
+                    localIkPriv,
+                    localSpkPriv,
+                    localOtkPrivate: null);
+            }
+            catch
+            {
+                return Task.FromResult<SessionId?>(null);
+            }
+
+            var root = new RootKey(shared.Value);
+
+            SessionRatchetMessage ratchetMessage;
+            try
+            {
+                ratchetMessage = new SessionRatchetMessage(response.InitialRatchetMessage.ToByteArray());
+            }
+            catch
+            {
+                return Task.FromResult<SessionId?>(null);
+            }
+
+            var tmp = RatchetBootstrap.CreateResponderSession(
+                SessionId.NewId(),
+                new PeerId(acceptorPeerId),
+                new ProtocolVersion(1),
+                root,
+                _clock);
+
+            Plaintext pt;
+            try
+            {
+                pt = tmp.Decrypt(ratchetMessage, _clock);
+            }
+            catch
+            {
+                return Task.FromResult<SessionId?>(null);
+            }
+
+            ResponderInnerHello inner;
+            try
+            {
+                inner = ResponderInnerHello.Parser.ParseFrom(pt.Value);
+            }
+            catch
+            {
+                return Task.FromResult<SessionId?>(null);
+            }
+
+            if (!inner.HasVersion || inner.Version != 1) return Task.FromResult<SessionId?>(null);
+            if (!inner.HasDirectSessionId || string.IsNullOrWhiteSpace(inner.DirectSessionId)) return Task.FromResult<SessionId?>(null);
+
+            SessionId sid;
+            try
+            {
+                sid = new SessionId(Guid.Parse(inner.DirectSessionId));
+            }
+            catch
+            {
+                return Task.FromResult<SessionId?>(null);
+            }
+
+            var final = SecureSession.Create(
+                sid,
+                tmp.RemotePeerId,
+                tmp.ProtocolVersion,
+                tmp.State,
+                new AeadSessionCrypto(),
+                _clock);
+
+            _sessionsById[sid.Value] = final;
+            return Task.FromResult<SessionId?>(sid);
         }
 
         public Task<SimulatedPeerInviteAcceptance> AcceptReverseSignalInviteAsync(

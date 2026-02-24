@@ -9,6 +9,8 @@ public interface ISimulatedPeerPendingInbox
 {
     void AddInviteHandshakeResponse(Guid simulatedPeerId, Guid correlationId, InviteHandshakeResponse response);
 
+    bool TryGetInviteHandshakeResponse(Guid simulatedPeerId, Guid correlationId, out InviteHandshakeResponse response);
+
     bool TryTakeInviteHandshakeResponse(Guid simulatedPeerId, Guid correlationId, out InviteHandshakeResponse response);
 
     IReadOnlyCollection<Guid> SnapshotInviteHandshakeResponseCorrelationIds(Guid simulatedPeerId);
@@ -22,6 +24,18 @@ public sealed class SimulatedPeerPendingInbox : ISimulatedPeerPendingInbox
     {
         if (response is null) throw new ArgumentNullException(nameof(response));
         _inviteResponses[(simulatedPeerId, correlationId)] = response;
+    }
+
+    public bool TryGetInviteHandshakeResponse(Guid simulatedPeerId, Guid correlationId, out InviteHandshakeResponse response)
+    {
+        if (_inviteResponses.TryGetValue((simulatedPeerId, correlationId), out var existing))
+        {
+            response = existing;
+            return true;
+        }
+
+        response = new InviteHandshakeResponse { Version = 1 };
+        return false;
     }
 
     public bool TryTakeInviteHandshakeResponse(Guid simulatedPeerId, Guid correlationId, out InviteHandshakeResponse response)

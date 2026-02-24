@@ -128,7 +128,7 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
             .ToReactiveCommand<Unit>(_ => { })
             .AddTo(ref _bag);
         AcceptInboundPendingCommand.AsObservable()
-            .Subscribe(_ => ExecuteAcceptInboundPending())
+            .SubscribeAwait(async (_, ct) => await ExecuteAcceptInboundPendingAsync(ct), AwaitOperation.Drop)
             .AddTo(ref _bag);
 
         RejectInboundPendingCommand = Observable.Return(true)
@@ -205,15 +205,30 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
     public ReactiveCommand<Unit> PeerInviteDirectCommand { get; }
     public ReactiveCommand<Unit> PeerInviteRelayedCommand { get; }
 
-    private void ExecuteAcceptInboundPending()
+    private async Task ExecuteAcceptInboundPendingAsync(System.Threading.CancellationToken ct)
     {
         var corr = _model.RuntimeState.CurrentValue.PendingCorrelationId;
         if (corr is null) return;
 
-        if (_pending.TryTakeInviteHandshakeResponse(_model.PeerId, corr.Value, out _))
+        if (_active.Identity is null)
         {
-            _model.MarkEstablished();
+            return;
         }
+
+        var finalized = await _peerRuntime.TryFinalizeInviteHandshakeResponseFromMainAsync(
+                simulatedPeerId: _model.PeerId,
+                acceptorPeerId: _active.Identity.Id,
+                requestCorrelationId: corr.Value,
+                cancellationToken: ct)
+            .ConfigureAwait(false);
+
+        if (finalized is null)
+        {
+            return;
+        }
+
+        _sessionToMain = finalized;
+        _model.MarkEstablished();
     }
 
     private void ExecuteRejectInboundPending()
@@ -375,9 +390,11 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
         var curve = identityEcdh.ExportParameters(false).Curve;
         using var inviterSignedPreKey = ECDiffieHellman.Create(curve);
         var inviterSignedPreKeySpki = inviterSignedPreKey.PublicKey.ExportSubjectPublicKeyInfo();
+        var inviterSignedPreKeyPriv = inviterSignedPreKey.ExportECPrivateKey();
         var preKeySig = identityEcdsa.SignData(inviterSignedPreKeySpki, HashAlgorithmName.SHA256);
 
         var correlation = Guid.NewGuid();
+        _peerRuntime.RecordOutboundInviteSignedPreKeyPrivate(_model.PeerId, correlation, inviterSignedPreKeyPriv);
         var payload = new InviteHandshakeRequestPayload
         {
             Version = 1,
