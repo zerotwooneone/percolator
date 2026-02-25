@@ -117,6 +117,7 @@ public partial class App : Application
                 // Views
                 services.AddSingleton<MainWindow>();
                 services.AddScoped<Desktop.Wpf.Features.Simulator.HandshakeSimulatorWindow>();
+                services.AddScoped<Desktop.Wpf.Features.Sessions.NewHandshakeDialogWindow>();
 
                 // Navigation
                 services.AddSingleton<INavigationService, NavigationService>();
@@ -125,6 +126,7 @@ public partial class App : Application
                 services.AddSingleton<ISessionScopeFactory, SessionScopeFactory>();
                 services.AddScoped<SessionsSidebarViewModel>();
                 services.AddScoped<Desktop.Wpf.Features.Sessions.PendingHandshakesMenuViewModel>();
+                services.AddScoped<Desktop.Wpf.Features.Sessions.NewHandshakeDialogViewModel>();
                 services.AddScoped<Desktop.Wpf.Features.Sessions.SessionShellViewModel>();
                 services.AddScoped<Desktop.Wpf.Features.Simulator.HandshakeSimulatorViewModel>();
                 services.AddSingleton<Desktop.Wpf.Features.Shell.IIdentityScopeAccessor, Desktop.Wpf.Features.Shell.IdentityScopeAccessor>();

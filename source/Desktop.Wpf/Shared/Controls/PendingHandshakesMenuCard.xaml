@@ -58,6 +58,14 @@
     <Border Style="{StaticResource BaseBorder}" Padding="12" Width="260">
       <StackPanel>
         <TextBlock Text="PENDING HANDSHAKES" Foreground="{StaticResource OnSurfaceVariantBrush}" FontSize="12"/>
+        <controls:MatButton Margin="0,10,0,0" Variant="Filled"
+                            Command="{Binding OpenNewHandshakeCommand}"
+                            att:MenuBehaviors.CloseParentOnClick="True">
+          <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+            <TextBlock Style="{StaticResource IconText}" Text="{StaticResource IconShield}" Margin="0,0,6,0"/>
+            <TextBlock Text="NEW HANDSHAKE" VerticalAlignment="Center"/>
+          </StackPanel>
+        </controls:MatButton>
         <ItemsControl ItemsSource="{Binding PendingHandshakes}" ItemTemplate="{StaticResource PendingHandshakeItemTemplate}"/>
       </StackPanel>
     </Border>

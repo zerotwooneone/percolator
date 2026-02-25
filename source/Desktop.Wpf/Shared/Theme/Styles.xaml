@@ -1,6 +1,7 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                     xmlns:att="clr-namespace:Desktop.Wpf.Shared.Attached"
+                    xmlns:controls="clr-namespace:Desktop.Wpf.Shared.Controls"
                     xmlns:system="clr-namespace:System;assembly=System.Runtime">
   <!-- Focus ring thickness preset -->
   <Thickness x:Key="FocusRingThickness">1</Thickness>
@@ -96,6 +97,26 @@
   <Style x:Key="MatIconButtonOutlined" TargetType="Button" BasedOn="{StaticResource MatIconButtonBase}">
     <Setter Property="Background" Value="Transparent"/>
     <Setter Property="BorderBrush" Value="{StaticResource InputBorderBrush}"/>
+  </Style>
+
+  <!-- MatButton (custom control) variants -->
+  <Style TargetType="{x:Type controls:MatButton}" BasedOn="{StaticResource MatButtonBase}">
+    <Style.Triggers>
+      <Trigger Property="Variant" Value="Filled">
+        <Setter Property="Background" Value="{StaticResource ButtonBackgroundBrush}"/>
+        <Setter Property="BorderBrush" Value="{StaticResource ButtonBackgroundBrush}"/>
+      </Trigger>
+      <Trigger Property="Variant" Value="Outlined">
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="BorderBrush" Value="{StaticResource InputBorderBrush}"/>
+      </Trigger>
+      <Trigger Property="IsIcon" Value="True">
+        <Setter Property="Width" Value="36"/>
+        <Setter Property="Height" Value="36"/>
+        <Setter Property="Padding" Value="0"/>
+        <Setter Property="FontSize" Value="16"/>
+      </Trigger>
+    </Style.Triggers>
   </Style>
 
   <!-- Typography styles are defined in Typography.xaml -->

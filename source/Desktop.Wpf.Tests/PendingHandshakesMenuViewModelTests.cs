@@ -1,6 +1,7 @@
 using System;
 using System.Threading.Tasks;
 using Desktop.Wpf.Features.Sessions;
+using Desktop.Wpf.Shared.Windowing;
 using FluentAssertions;
 using MediatR;
 using Moq;
@@ -27,7 +28,9 @@ public sealed class PendingHandshakesMenuViewModelTests
 
         var pendingRepo = new Mock<IPendingSessionRepository>(MockBehavior.Strict);
 
-        var sut = new PendingHandshakesMenuViewModel(mediator.Object, pendingRepo.Object);
+        var windowManager = new Mock<IWindowManager>(MockBehavior.Loose);
+
+        var sut = new PendingHandshakesMenuViewModel(windowManager.Object, mediator.Object, pendingRepo.Object);
         var item = new PendingHandshakeItem
         {
             DisplayName = "Alice",

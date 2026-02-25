@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Threading.Tasks;
 using Desktop.Wpf.Shared.Mvvm;
+using Desktop.Wpf.Shared.Windowing;
 using MediatR;
 using Percolator.Application.Cryptography;
 using Percolator.Application.Network;
@@ -30,11 +31,19 @@ public sealed class PendingHandshakesMenuViewModel
 
     public AsyncRelayCommand AcceptHandshakeCommand { get; }
     public AsyncRelayCommand BurnHandshakeCommand { get; }
+    public AsyncRelayCommand OpenNewHandshakeCommand { get; }
 
     public PendingHandshakesMenuViewModel(
+        IWindowManager windowManager,
         IMediator mediator,
         IPendingSessionRepository pendingSessions)
     {
+        OpenNewHandshakeCommand = new AsyncRelayCommand(_ =>
+        {
+            windowManager.ShowFor<NewHandshakeDialogViewModel>();
+            return Task.CompletedTask;
+        });
+
         AcceptHandshakeCommand = new AsyncRelayCommand(async obj =>
         {
             if (obj is PendingHandshakeItem item)

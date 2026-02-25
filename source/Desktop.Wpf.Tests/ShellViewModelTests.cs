@@ -66,6 +66,7 @@ public class ShellViewModelTests
         nav.SetupGet(n => n.ViewStream).Returns(Observable.Empty<object?>());
 
         var mutator = new Mock<IActiveIdentityMutator>();
+        var pendingWindowManager = new Mock<IWindowManager>(MockBehavior.Loose);
         var sessionsVm = new SessionsSidebarViewModel(
             nav.Object,
             new SelfIdentityModel(),
@@ -73,7 +74,7 @@ public class ShellViewModelTests
             Mock.Of<IPeerIdentityRepository>(),
             Mock.Of<Percolator.Cryptography.IPendingSessionRepository>(),
             Mock.Of<ISessionScopeFactory>(),
-            new PendingHandshakesMenuViewModel(Mock.Of<IMediator>(), Mock.Of<Percolator.Cryptography.IPendingSessionRepository>()),
+            new PendingHandshakesMenuViewModel(pendingWindowManager.Object, Mock.Of<IMediator>(), Mock.Of<Percolator.Cryptography.IPendingSessionRepository>()),
             Mock.Of<Percolator.Application.Cryptography.IPendingHandshakeQueries>());
         var sessionShellVm = new SessionShellViewModel();
 
@@ -119,6 +120,7 @@ public class ShellViewModelTests
             .Setup(sp => sp.GetService(typeof(IIdentityOrchestrator)))
             .Returns(orchestrator.Object);
 
+        var pendingWindowManager = new Mock<IWindowManager>(MockBehavior.Loose);
         var sessionsVm = new SessionsSidebarViewModel(
             nav.Object,
             new SelfIdentityModel(),
@@ -126,7 +128,7 @@ public class ShellViewModelTests
             Mock.Of<IPeerIdentityRepository>(),
             Mock.Of<Percolator.Cryptography.IPendingSessionRepository>(),
             Mock.Of<ISessionScopeFactory>(),
-            new PendingHandshakesMenuViewModel(Mock.Of<IMediator>(), Mock.Of<Percolator.Cryptography.IPendingSessionRepository>()),
+            new PendingHandshakesMenuViewModel(pendingWindowManager.Object, Mock.Of<IMediator>(), Mock.Of<Percolator.Cryptography.IPendingSessionRepository>()),
             Mock.Of<Percolator.Application.Cryptography.IPendingHandshakeQueries>());
         var sessionShellVm = new SessionShellViewModel();
         scopedProvider.Setup(sp => sp.GetService(typeof(SessionsSidebarViewModel))).Returns(sessionsVm);
@@ -166,6 +168,7 @@ public class ShellViewModelTests
         var scopedPeerRepo = new Mock<IPeerIdentityRepository>();
         var sessionScopeFactoryMock = new Mock<ISessionScopeFactory>();
         var pendingSessions = new Mock<IPendingSessionRepository>();
+        var pendingWindowManager = new Mock<IWindowManager>(MockBehavior.Loose);
         var sessionsVm = new SessionsSidebarViewModel(
             nav.Object,
             scopedSelf,
@@ -173,7 +176,7 @@ public class ShellViewModelTests
             scopedPeerRepo.Object,
             pendingSessions.Object,
             sessionScopeFactoryMock.Object,
-            new PendingHandshakesMenuViewModel(Mock.Of<IMediator>(), pendingSessions.Object),
+            new PendingHandshakesMenuViewModel(pendingWindowManager.Object, Mock.Of<IMediator>(), pendingSessions.Object),
             Mock.Of<Percolator.Application.Cryptography.IPendingHandshakeQueries>());
         var sessionShellVm = new SessionShellViewModel();
         scopedProvider
@@ -231,6 +234,7 @@ public class ShellViewModelTests
         var scopedPeerRepo = new Mock<IPeerIdentityRepository>();
         var scopedSessionFactory = new Mock<ISessionScopeFactory>();
         var pendingSessions = new Mock<IPendingSessionRepository>();
+        var pendingWindowManager = new Mock<IWindowManager>(MockBehavior.Loose);
         var sessionsVm = new SessionsSidebarViewModel(
             nav.Object,
             scopedSelf,
@@ -238,7 +242,7 @@ public class ShellViewModelTests
             scopedPeerRepo.Object,
             pendingSessions.Object,
             scopedSessionFactory.Object,
-            new PendingHandshakesMenuViewModel(Mock.Of<IMediator>(), pendingSessions.Object),
+            new PendingHandshakesMenuViewModel(pendingWindowManager.Object, Mock.Of<IMediator>(), pendingSessions.Object),
             Mock.Of<Percolator.Application.Cryptography.IPendingHandshakeQueries>());
         var sessionShellVm = new SessionShellViewModel();
         scopedProvider

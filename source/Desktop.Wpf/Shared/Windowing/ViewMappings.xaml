@@ -1,6 +1,10 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-                    xmlns:sim="clr-namespace:Desktop.Wpf.Features.Simulator;assembly=Desktop.Wpf">
+                    xmlns:sim="clr-namespace:Desktop.Wpf.Features.Simulator;assembly=Desktop.Wpf"
+                    xmlns:sessions="clr-namespace:Desktop.Wpf.Features.Sessions;assembly=Desktop.Wpf">
     <x:Type x:Key="{x:Type sim:HandshakeSimulatorViewModel}"
             TypeName="sim:HandshakeSimulatorWindow" />
+
+    <x:Type x:Key="{x:Type sessions:NewHandshakeDialogViewModel}"
+            TypeName="sessions:NewHandshakeDialogWindow" />
 </ResourceDictionary>
