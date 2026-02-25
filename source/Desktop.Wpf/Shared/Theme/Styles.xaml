@@ -345,7 +345,7 @@
               </DockPanel>
             </Border>
 
-            <Border Grid.Row="1" Margin="0,12,0,0">
+            <Border Grid.Row="1" Margin="0">
               <ContentPresenter x:Name="PART_SelectedContentHost"
                                 ContentSource="SelectedContent" />
             </Border>

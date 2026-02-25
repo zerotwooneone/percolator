@@ -7,7 +7,7 @@
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize"
         Style="{StaticResource BaseWindow}">
-  <Grid Margin="16" RowDefinitions="Auto,*,Auto">
+  <Grid Margin="16" RowDefinitions="Auto,*">
 
     <StackPanel Grid.Row="0" Margin="0,0,0,12">
       <TextBlock Style="{StaticResource TitleText}" Text="Open Secure Channel"/>
@@ -146,12 +146,6 @@
         </Grid>
       </TabItem>
     </TabControl>
-
-    <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
-      <controls:MatButton Variant="Outlined" Click="OnCloseClicked">
-        <TextBlock Text="CLOSE"/>
-      </controls:MatButton>
-    </StackPanel>
 
   </Grid>
 </Window>
