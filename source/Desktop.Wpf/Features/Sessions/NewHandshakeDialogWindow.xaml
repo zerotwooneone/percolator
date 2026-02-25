@@ -98,52 +98,54 @@
       </TabItem>
 
       <TabItem Header="Generate Invite">
-        <Grid Margin="0,12,0,0" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,*,Auto">
+        <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Margin="0,12,0,0">
+          <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,*,Auto" Margin="0,0,12,0">
 
-          <TextBlock Grid.Row="0" Text="YOUR INFO" Foreground="{StaticResource OnSurfaceVariantBrush}" FontSize="12"/>
+            <TextBlock Grid.Row="0" Text="YOUR INFO" Foreground="{StaticResource OnSurfaceVariantBrush}" FontSize="12"/>
 
-          <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,6,0,0">
-            <Border Style="{StaticResource Chip}">
-              <StackPanel Orientation="Horizontal">
-                <TextBlock Text="PKH" Foreground="{StaticResource OnSurfaceVariantBrush}" Margin="0,0,6,0"/>
-                <TextBlock Text="{Binding SelfPkhText.Value}"/>
+            <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,6,0,0">
+              <Border Style="{StaticResource Chip}">
+                <StackPanel Orientation="Horizontal">
+                  <TextBlock Text="PKH" Foreground="{StaticResource OnSurfaceVariantBrush}" Margin="0,0,6,0"/>
+                  <TextBlock Text="{Binding SelfPkhText.Value}"/>
+                </StackPanel>
+              </Border>
+              <controls:MatButton Margin="8,0,0,0" Variant="Outlined" Command="{Binding CopySelfPkhCommand}">
+                <TextBlock Text="COPY"/>
+              </controls:MatButton>
+            </StackPanel>
+
+            <TextBlock Grid.Row="2" Margin="0,14,0,0" Text="INVITE TOKEN" Foreground="{StaticResource OnSurfaceVariantBrush}" FontSize="12"/>
+
+            <TextBox Grid.Row="3" Margin="0,6,0,0" Height="180"
+                     Style="{StaticResource WatermarkTextBox}"
+                     Text="{Binding GeneratedTokenText.Value}"
+                     TextWrapping="Wrap" AcceptsReturn="True"
+                     VerticalScrollBarVisibility="Auto"
+                     IsReadOnly="True"
+                     att:Placeholder.Text="Generate a token" />
+
+            <TextBlock Grid.Row="4" Margin="0,10,0,0" Foreground="{StaticResource OnSurfaceVariantBrush}" Text="{Binding TokenValidityText.Value}"/>
+
+            <Border Grid.Row="5" Margin="0,14,0,0" Style="{StaticResource BaseBorder}" Background="{StaticResource SurfaceContainerLowBrush}" Padding="12">
+              <StackPanel>
+                <TextBlock Text="PHASE" Foreground="{StaticResource OnSurfaceVariantBrush}" FontSize="12"/>
+                <TextBlock Margin="0,6,0,0" Text="{Binding PhaseText.Value}" />
+                <TextBlock Margin="0,6,0,0" Foreground="{StaticResource ErrorBrush}" Text="{Binding ErrorText.Value}" />
               </StackPanel>
             </Border>
-            <controls:MatButton Margin="8,0,0,0" Variant="Outlined" Command="{Binding CopySelfPkhCommand}">
-              <TextBlock Text="COPY"/>
-            </controls:MatButton>
-          </StackPanel>
 
-          <TextBlock Grid.Row="2" Margin="0,14,0,0" Text="INVITE TOKEN" Foreground="{StaticResource OnSurfaceVariantBrush}" FontSize="12"/>
-
-          <TextBox Grid.Row="3" Margin="0,6,0,0" Height="180"
-                   Style="{StaticResource WatermarkTextBox}"
-                   Text="{Binding GeneratedTokenText.Value}"
-                   TextWrapping="Wrap" AcceptsReturn="True"
-                   VerticalScrollBarVisibility="Auto"
-                   IsReadOnly="True"
-                   att:Placeholder.Text="Generate a token" />
-
-          <TextBlock Grid.Row="4" Margin="0,10,0,0" Foreground="{StaticResource OnSurfaceVariantBrush}" Text="{Binding TokenValidityText.Value}"/>
-
-          <Border Grid.Row="5" Margin="0,14,0,0" Style="{StaticResource BaseBorder}" Background="{StaticResource SurfaceContainerLowBrush}" Padding="12">
-            <StackPanel>
-              <TextBlock Text="PHASE" Foreground="{StaticResource OnSurfaceVariantBrush}" FontSize="12"/>
-              <TextBlock Margin="0,6,0,0" Text="{Binding PhaseText.Value}" />
-              <TextBlock Margin="0,6,0,0" Foreground="{StaticResource ErrorBrush}" Text="{Binding ErrorText.Value}" />
+            <StackPanel Grid.Row="7" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
+              <controls:MatButton Variant="Outlined" Command="{Binding GenerateNewTokenCommand}" Margin="0,0,8,0">
+                <TextBlock Text="REGENERATE"/>
+              </controls:MatButton>
+              <controls:MatButton Variant="Filled" Command="{Binding CopyGeneratedTokenCommand}">
+                <TextBlock Text="COPY TOKEN"/>
+              </controls:MatButton>
             </StackPanel>
-          </Border>
 
-          <StackPanel Grid.Row="7" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
-            <controls:MatButton Variant="Outlined" Command="{Binding GenerateNewTokenCommand}" Margin="0,0,8,0">
-              <TextBlock Text="REGENERATE"/>
-            </controls:MatButton>
-            <controls:MatButton Variant="Filled" Command="{Binding CopyGeneratedTokenCommand}">
-              <TextBlock Text="COPY TOKEN"/>
-            </controls:MatButton>
-          </StackPanel>
-
-        </Grid>
+          </Grid>
+        </ScrollViewer>
       </TabItem>
     </TabControl>
 
