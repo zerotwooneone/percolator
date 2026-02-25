@@ -192,6 +192,9 @@ public sealed class SessionsSidebarViewModel : ViewModelBase
             foreach (var it in pendingItems)
                 PendingMenu.PendingHandshakes.Add(it);
         }
+        catch
+        {
+        }
         finally
         {
             IsLoading.Value = false;

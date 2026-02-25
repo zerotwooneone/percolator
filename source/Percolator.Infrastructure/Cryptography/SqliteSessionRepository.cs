@@ -66,10 +66,12 @@ namespace Percolator.Infrastructure.Cryptography
         {
             var rows = await _db.Sessions.AsNoTracking()
                 .Where(x => x.SelfIdentityId == selfIdentityId)
-                .OrderByDescending(x => x.LastUsedAtUtc)
                 .ToListAsync(cancellationToken)
                 .ConfigureAwait(false);
-            return rows.Select(FromDbo).ToList();
+            return rows
+                .OrderByDescending(x => x.LastUsedAtUtc)
+                .Select(FromDbo)
+                .ToList();
         }
 
         private SessionDbo ToDbo(SecureSession s, int selfIdentityId)
