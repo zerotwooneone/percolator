@@ -7,6 +7,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using Desktop.Wpf.Shared.Mvvm;
+using Grpc.Core;
 using Google.Protobuf;
 using Percolator.Application.Identity;
 using Percolator.Application.KeyExchange;
@@ -43,6 +44,7 @@ public sealed class NewHandshakeDialogViewModel : ViewModelBase
     private readonly ISelfPreKeyBundleRepository _selfPreKeys;
     private readonly IOneTimeKeyProvider _oneTimeKeys;
     private readonly ISessionCrypto _sessionCrypto;
+    private readonly IMainReverseSignalInviteFactory _reverseSignalInvites;
     private readonly IGrpcSessionService _grpcSessions;
     private readonly IMessageTransportService _transport;
     private readonly ISecureMessagingService _secureMessaging;
@@ -60,6 +62,7 @@ public sealed class NewHandshakeDialogViewModel : ViewModelBase
         ISelfPreKeyBundleRepository selfPreKeys,
         IOneTimeKeyProvider oneTimeKeys,
         ISessionCrypto sessionCrypto,
+        IMainReverseSignalInviteFactory reverseSignalInvites,
         IGrpcSessionService grpcSessions,
         IMessageTransportService transport,
         ISecureMessagingService secureMessaging,
@@ -74,6 +77,7 @@ public sealed class NewHandshakeDialogViewModel : ViewModelBase
         _selfPreKeys = selfPreKeys;
         _oneTimeKeys = oneTimeKeys;
         _sessionCrypto = sessionCrypto;
+        _reverseSignalInvites = reverseSignalInvites;
         _grpcSessions = grpcSessions;
         _transport = transport;
         _secureMessaging = secureMessaging;
@@ -104,7 +108,7 @@ public sealed class NewHandshakeDialogViewModel : ViewModelBase
         SearchAndConnectCommand = new AsyncRelayCommand(_ => ExecuteNetworkSearchAsync());
         DecodeAndInitiateCommand = new AsyncRelayCommand(_ => ExecuteImportTokenAsync());
 
-        var generateCommand = new AsyncRelayCommand(_ => ExecuteGenerateInviteAsync());
+        var generateCommand = new AsyncRelayCommand(500, _ => ExecuteGenerateInviteAsync());
         GenerateNewTokenCommand = generateCommand;
 
         CopyGeneratedTokenCommand = new AsyncRelayCommand(_ =>
@@ -285,6 +289,70 @@ public sealed class NewHandshakeDialogViewModel : ViewModelBase
         }
     }
 
+    private async Task PersistRelayEndpointAsync(IdentityPeerId relayPeerId, DnsEndPoint relayEndpoint, CancellationToken ct)
+    {
+        var profile = await _routingProfiles.GetByIdAsync(new NetworkPeerId(relayPeerId.Value), ct).ConfigureAwait(false)
+            ?? new PeerRoutingProfile();
+        if (profile.Id is null)
+        {
+            profile.BindIdentity(new NetworkPeerId(relayPeerId.Value));
+        }
+        profile.AddGrpcEndPoint(new GrpcEndPoint(relayEndpoint, _clock.UtcNow), _clock.UtcNow);
+        await _routingProfiles.UpsertAsync(profile, ct).ConfigureAwait(false);
+    }
+
+    private async Task<(IdentityPeerId relayPeerId, DirectSessionId sessionId)?> TryGetOrEstablishDirectSessionToRelayPeerAsync(
+        IdentityPeerId relayPeerId,
+        DnsEndPoint relayEndpoint,
+        CancellationToken ct)
+    {
+        if (_active.Identity is null)
+        {
+            throw new InvalidOperationException("Identity not loaded.");
+        }
+
+        var existing = await TryGetDirectSessionToRelayPeerAsync(relayPeerId).ConfigureAwait(false);
+        if (existing is not null)
+        {
+            return existing;
+        }
+
+        EstablishDirectSessionResponse queued;
+        try
+        {
+            var invite = _reverseSignalInvites.CreateInvite();
+            queued = await _grpcSessions.EstablishDirectSessionAsync(relayEndpoint, invite).ConfigureAwait(false);
+        }
+        catch (RpcException rpcEx) when (rpcEx.StatusCode == StatusCode.Unavailable)
+        {
+            throw new InvalidOperationException("Relay offline.", rpcEx);
+        }
+
+        if (queued.MessageCase != EstablishDirectSessionResponse.MessageOneofCase.Queued
+            || queued.Queued is null
+            || !queued.Queued.HasRequestCorrelationId
+            || string.IsNullOrWhiteSpace(queued.Queued.RequestCorrelationId))
+        {
+            throw new InvalidOperationException("Relay rejected invite.");
+        }
+
+        var timeoutUtc = _clock.UtcNow.AddSeconds(10);
+        while (_clock.UtcNow < timeoutUtc)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            var now = await TryGetDirectSessionToRelayPeerAsync(relayPeerId).ConfigureAwait(false);
+            if (now is not null)
+            {
+                return now;
+            }
+
+            await Task.Delay(250, ct).ConfigureAwait(false);
+        }
+
+        throw new InvalidOperationException("Timed out waiting for relay to accept invite.");
+    }
+
     private async Task ExecuteNetworkSearchAsync()
     {
         ResetStatus();
@@ -294,7 +362,7 @@ public sealed class NewHandshakeDialogViewModel : ViewModelBase
         var selectedRelay = SelectedRelay.Value;
         if (selectedRelay?.PeerId is null)
         {
-            ErrorText.Value = "Select a relay peer.";
+            ErrorText.Value = "Select a known relay.";
             PhaseText.Value = null;
             return;
         }
@@ -320,15 +388,12 @@ public sealed class NewHandshakeDialogViewModel : ViewModelBase
 
         try
         {
-            // Initial implementation: require an existing direct session to the selected relay.
-            // (We will add TOFU / reverse-signal establishment here in the next pass.)
-            var directRelay = await TryGetDirectSessionToRelayPeerAsync(selectedRelay.PeerId).ConfigureAwait(false);
-            if (directRelay is null)
-            {
-                ErrorText.Value = "No existing tunnel to relay. Create a direct session to the relay first.";
-                PhaseText.Value = null;
-                return;
-            }
+            var directRelay = await TryGetOrEstablishDirectSessionToRelayPeerAsync(
+                selectedRelay.PeerId,
+                relayEndpoint,
+                CancellationToken.None).ConfigureAwait(false);
+
+            await PersistRelayEndpointAsync(selectedRelay.PeerId, relayEndpoint, CancellationToken.None).ConfigureAwait(false);
 
             PhaseText.Value = "Querying Node...";
 
