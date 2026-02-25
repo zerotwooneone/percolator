@@ -169,6 +169,106 @@
     </Setter>
   </Style>
 
+  <Style TargetType="ComboBox">
+    <Setter Property="Foreground" Value="{StaticResource OnSurfaceBrush}"/>
+    <Setter Property="Background" Value="{StaticResource InputBackgroundBrush}"/>
+    <Setter Property="BorderBrush" Value="{StaticResource InputBorderBrush}"/>
+    <Setter Property="BorderThickness" Value="1"/>
+    <Setter Property="Padding" Value="10,6"/>
+    <Setter Property="MinHeight" Value="36"/>
+    <Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Auto"/>
+    <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled"/>
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="ComboBox">
+          <Grid>
+            <Border x:Name="Bd"
+                    Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="{TemplateBinding BorderThickness}"
+                    CornerRadius="6">
+              <Grid>
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="*"/>
+                  <ColumnDefinition Width="28"/>
+                </Grid.ColumnDefinitions>
+
+                <ContentPresenter Grid.Column="0"
+                                  Margin="{TemplateBinding Padding}"
+                                  HorizontalAlignment="Left"
+                                  VerticalAlignment="Center"
+                                  Content="{TemplateBinding SelectionBoxItem}"
+                                  ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+                                  ContentTemplateSelector="{TemplateBinding ItemTemplateSelector}"/>
+
+                <Border Grid.Column="1" Background="Transparent">
+                  <Path Width="10" Height="6"
+                        Fill="{StaticResource OnSurfaceVariantBrush}"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        Data="M 0 0 L 5 5 L 10 0 Z" />
+                </Border>
+              </Grid>
+            </Border>
+
+            <Popup x:Name="PART_Popup"
+                   Placement="Bottom"
+                   IsOpen="{TemplateBinding IsDropDownOpen}"
+                   AllowsTransparency="True"
+                   Focusable="False"
+                   PopupAnimation="Slide">
+              <Border Background="{StaticResource SurfaceBrush}"
+                      BorderBrush="{StaticResource OutlineBrush}"
+                      BorderThickness="1"
+                      CornerRadius="8"
+                      Margin="0,6,0,0"
+                      Padding="4">
+                <ScrollViewer>
+                  <ItemsPresenter />
+                </ScrollViewer>
+              </Border>
+            </Popup>
+          </Grid>
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+              <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource OutlineBrush}"/>
+            </Trigger>
+            <Trigger Property="IsEnabled" Value="False">
+              <Setter TargetName="Bd" Property="Opacity" Value="0.6"/>
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <Style TargetType="ComboBoxItem">
+    <Setter Property="Foreground" Value="{StaticResource OnSurfaceBrush}"/>
+    <Setter Property="Background" Value="Transparent"/>
+    <Setter Property="Padding" Value="10,8"/>
+    <Setter Property="Cursor" Value="Hand"/>
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="ComboBoxItem">
+          <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="6">
+            <ContentPresenter Margin="{TemplateBinding Padding}" />
+          </Border>
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsHighlighted" Value="True">
+              <Setter TargetName="Bd" Property="Background" Value="{StaticResource SurfaceHoverBrush}"/>
+            </Trigger>
+            <Trigger Property="IsSelected" Value="True">
+              <Setter TargetName="Bd" Property="Background" Value="{StaticResource SurfaceSelectedBrush}"/>
+            </Trigger>
+            <Trigger Property="IsEnabled" Value="False">
+              <Setter TargetName="Bd" Property="Opacity" Value="0.6"/>
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
   <!-- Borders and Chips -->
   <Style x:Key="BaseBorder" TargetType="Border">
     <Setter Property="CornerRadius" Value="8"/>
@@ -223,6 +323,83 @@
 
   <Style x:Key="BaseListViewItem" TargetType="ListViewItem" BasedOn="{StaticResource BaseListBoxItem}" />
   <Style TargetType="ListViewItem" BasedOn="{StaticResource BaseListViewItem}" />
+
+  <Style TargetType="TabControl">
+    <Setter Property="BorderThickness" Value="0"/>
+    <Setter Property="Background" Value="Transparent"/>
+    <Setter Property="Padding" Value="0"/>
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="TabControl">
+          <Grid KeyboardNavigation.TabNavigation="Local">
+            <Grid.RowDefinitions>
+              <RowDefinition Height="Auto"/>
+              <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+
+            <Border Grid.Row="0" Background="{StaticResource SurfaceContainerLowBrush}" CornerRadius="10" Padding="6">
+              <DockPanel LastChildFill="True">
+                <TabPanel x:Name="HeaderPanel"
+                          IsItemsHost="True"
+                          KeyboardNavigation.TabIndex="1" />
+              </DockPanel>
+            </Border>
+
+            <Border Grid.Row="1" Margin="0,12,0,0">
+              <ContentPresenter x:Name="PART_SelectedContentHost"
+                                ContentSource="SelectedContent" />
+            </Border>
+          </Grid>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <Style TargetType="TabItem">
+    <Setter Property="Foreground" Value="{StaticResource OnSurfaceVariantBrush}"/>
+    <Setter Property="FontSize" Value="13"/>
+    <Setter Property="Padding" Value="12,8"/>
+    <Setter Property="Margin" Value="2,0"/>
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="TabItem">
+          <Grid>
+            <Border x:Name="Bd"
+                    Background="Transparent"
+                    CornerRadius="8">
+              <ContentPresenter x:Name="ContentSite"
+                                ContentSource="Header"
+                                RecognizesAccessKey="True"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                Margin="{TemplateBinding Padding}"/>
+            </Border>
+
+            <Border x:Name="Indicator"
+                    Height="2"
+                    Background="{StaticResource PrimaryBrush}"
+                    VerticalAlignment="Bottom"
+                    CornerRadius="1"
+                    Opacity="0"/>
+          </Grid>
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+              <Setter TargetName="Bd" Property="Background" Value="{StaticResource SurfaceHoverBrush}"/>
+              <Setter Property="Foreground" Value="{StaticResource OnSurfaceBrush}"/>
+            </Trigger>
+            <Trigger Property="IsSelected" Value="True">
+              <Setter TargetName="Bd" Property="Background" Value="{StaticResource SurfaceSelectedBrush}"/>
+              <Setter Property="Foreground" Value="{StaticResource OnSurfaceBrush}"/>
+              <Setter TargetName="Indicator" Property="Opacity" Value="1"/>
+            </Trigger>
+            <Trigger Property="IsEnabled" Value="False">
+              <Setter TargetName="Bd" Property="Opacity" Value="0.6"/>
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
 
   <!-- Reusable slide-in/out animations for right-side panels -->
   <Storyboard x:Key="SlideInRightFast">
