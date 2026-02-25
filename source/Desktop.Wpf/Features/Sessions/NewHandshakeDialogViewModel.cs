@@ -9,6 +9,7 @@ using System.Windows;
 using Desktop.Wpf.Shared.Mvvm;
 using Grpc.Core;
 using Google.Protobuf;
+using System.Windows.Input;
 using Percolator.Application.Identity;
 using Percolator.Application.KeyExchange;
 using Percolator.Application.Network;
@@ -108,8 +109,12 @@ public sealed class NewHandshakeDialogViewModel : ViewModelBase
         SearchAndConnectCommand = new AsyncRelayCommand(_ => ExecuteNetworkSearchAsync());
         DecodeAndInitiateCommand = new AsyncRelayCommand(_ => ExecuteImportTokenAsync());
 
-        var generateCommand = new AsyncRelayCommand(500, _ => ExecuteGenerateInviteAsync());
-        GenerateNewTokenCommand = generateCommand;
+        var generateCommand = Observable.Return(true).ToReactiveCommand<Unit>(_ => { });
+        generateCommand.AsObservable()
+            .Debounce(TimeSpan.FromMilliseconds(500))
+            .SubscribeAwait(async (_, ct) => await ExecuteGenerateInviteAsync().ConfigureAwait(false), AwaitOperation.Drop)
+            .AddTo(ref _bag);
+        GenerateNewTokenCommand = generateCommand.AddTo(ref _bag);
 
         CopyGeneratedTokenCommand = new AsyncRelayCommand(_ =>
         {
@@ -153,7 +158,7 @@ public sealed class NewHandshakeDialogViewModel : ViewModelBase
 
     public AsyncRelayCommand SearchAndConnectCommand { get; }
     public AsyncRelayCommand DecodeAndInitiateCommand { get; }
-    public AsyncRelayCommand GenerateNewTokenCommand { get; }
+    public ICommand GenerateNewTokenCommand { get; }
     public AsyncRelayCommand CopyGeneratedTokenCommand { get; }
     public AsyncRelayCommand CopySelfPkhCommand { get; }
 
