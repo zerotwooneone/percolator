@@ -987,3 +987,9 @@ Use existing persistence and commands:
 
 ## Done when
 - Simulator can create a group conversation from selected established peers and it persists.
+
+# Chunk G — Replace IChatHistory with Chat Domain interface
+- find the appropriate chat domain interface, create one if needed
+- replace references to IChatHistory with the domain interface
+- delete IChatHistory (cutover, no migration) and implementations. Ask the user to delete the files
+- implement sqlite implementation of IGroupSenderKeyRepository and delete (cutover, no migration) InMemoryGroupSenderKeyRepository. Ask the user to delete this file
