@@ -55,6 +55,7 @@ public sealed class NewHandshakeDialogViewModel : ViewModelBase
     private readonly IPeerIdentityRepository _peerIdentities;
     private readonly IPeerPublicSigningKeyStore _peerKeyStore;
     private readonly IClock _clock;
+    private readonly TimeProvider _timeProvider;
 
     private readonly ObservableCollection<RelayNodeOption> _relayOptions = new();
 
@@ -72,7 +73,8 @@ public sealed class NewHandshakeDialogViewModel : ViewModelBase
         IPeerRoutingProfileRepository routingProfiles,
         IPeerIdentityRepository peerIdentities,
         IPeerPublicSigningKeyStore peerKeyStore,
-        IClock clock)
+        IClock clock,
+        TimeProvider? timeProvider = null)
     {
         _active = active;
         _selfPreKeys = selfPreKeys;
@@ -88,6 +90,7 @@ public sealed class NewHandshakeDialogViewModel : ViewModelBase
         _peerIdentities = peerIdentities;
         _peerKeyStore = peerKeyStore;
         _clock = clock;
+        _timeProvider = timeProvider ?? ObservableSystem.DefaultTimeProvider;
 
         SelectedTabIndex = new BindableReactiveProperty<int>(0).AddTo(ref _bag);
 
@@ -111,7 +114,7 @@ public sealed class NewHandshakeDialogViewModel : ViewModelBase
 
         var generateCommand = Observable.Return(true).ToReactiveCommand<Unit>(_ => { });
         generateCommand.AsObservable()
-            .Debounce(TimeSpan.FromMilliseconds(500))
+            .Debounce(TimeSpan.FromMilliseconds(500), _timeProvider)
             .SubscribeAwait(async (_, ct) => await ExecuteGenerateInviteAsync().ConfigureAwait(false), AwaitOperation.Drop)
             .AddTo(ref _bag);
         GenerateNewTokenCommand = generateCommand.AddTo(ref _bag);
@@ -194,29 +197,29 @@ public sealed class NewHandshakeDialogViewModel : ViewModelBase
 
         var identitySigningSpki = _active.Keys.IdentitySigningKey.ExportSubjectPublicKeyInfo();
 
-        using var signedPreKey = _oneTimeKeys.PopOneTimeKey();
-        if (signedPreKey is null)
+        var oneTimeKey = _oneTimeKeys.PopOneTimeKey();
+        if (oneTimeKey is null)
         {
             ErrorText.Value = "Key generator unavailable.";
             return;
         }
 
-        var signedPreKeySpki = signedPreKey.ExportSubjectPublicKeyInfo();
-        var signedPreKeyPriv = signedPreKey.ExportECPrivateKey();
+        var signedPreKeySpki = oneTimeKey.Value.publicKey.Value;
+        var signedPreKeyPriv = oneTimeKey.Value.privateKey.Value;
         var signedPreKeyId = Guid.NewGuid();
 
         using var ecdsa = ECDsa.Create(_active.Keys.IdentitySigningKey.ExportParameters(true));
         var preKeySignature = ecdsa.SignData(signedPreKeySpki, HashAlgorithmName.SHA256);
 
-        using var otk = _oneTimeKeys.PopOneTimeKey();
+        var otk = _oneTimeKeys.PopOneTimeKey();
         if (otk is null)
         {
             ErrorText.Value = "Key generator unavailable.";
             return;
         }
 
-        var otkSpki = otk.ExportSubjectPublicKeyInfo();
-        var otkPriv = otk.ExportECPrivateKey();
+        var otkSpki = otk.Value.publicKey.Value;
+        var otkPriv = otk.Value.privateKey.Value;
         var otkId = Guid.NewGuid();
 
         await _selfPreKeys.SaveSignedPreKeyAsync(

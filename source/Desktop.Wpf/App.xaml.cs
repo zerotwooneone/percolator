@@ -153,7 +153,7 @@ public partial class App : Application
                 services.AddSingleton<SelfIdentityModel>();
                 services.AddScoped<IStartupIdentityService, StartupIdentityService>();
                 // Identity repositories (in-memory fakes for desktop)
-                services.AddSingleton<Percolator.Identity.IPeerIdentityRepository, Desktop.Wpf.Features.Identity.InMemoryPeerIdentityRepository>();
+                services.AddSingleton<Percolator.Identity.IPeerIdentityRepository, Percolator.Infrastructure.Repositories.SqlitePeerIdentityRepository>();
 
                 // Startup views
                 services.AddSingleton<Desktop.Wpf.Features.Shell.NewUserViewModel>();

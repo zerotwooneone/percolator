@@ -76,23 +76,20 @@ public class SubmitPreKeysHandler : IRequestHandler<SubmitPreKeysCommand, int>
 
         // 2) Generate signed pre-key and one-time keys
         var identitySigningSpki = _activeIdentity.Keys.IdentitySigningKey.ExportSubjectPublicKeyInfo();
-        using var signedPreKey = _oneTimeKeyProvider.PopOneTimeKey()!;
-        var signedPreKeySpki = signedPreKey.ExportSubjectPublicKeyInfo();
-        var signedPreKeyPriv = signedPreKey.ExportECPrivateKey();
+        var oneTime = _oneTimeKeyProvider.PopOneTimeKey()!;
         var signedPreKeyId = Guid.NewGuid();
         // Sign the signed-pre-key public bytes with identity signing key (ECDSA over SPKI)
         using var ecdsa = ECDsa.Create(_activeIdentity.Keys.IdentitySigningKey.ExportParameters(true));
-        var preKeySignature = ecdsa.SignData(signedPreKeySpki, HashAlgorithmName.SHA256);
+        var preKeySignature = ecdsa.SignData(oneTime.Value.publicKey.Value, HashAlgorithmName.SHA256);
 
         var oneTimeList = new List<SubmitPreKeyBundleRequest.Types.OneTimePreKey>(request.OneTimeKeyCount);
         var otkPrivs = new List<(Guid otkId, byte[] otkPriv, byte[] otkSpki)>(request.OneTimeKeyCount);
         for (int i = 0; i < request.OneTimeKeyCount; i++)
         {
-            using var otk = _oneTimeKeyProvider.PopOneTimeKey()!;
-            var otkSpki = otk.ExportSubjectPublicKeyInfo();
+            var otk = _oneTimeKeyProvider.PopOneTimeKey()!;
+            var otkSpki = otk.Value.publicKey.Value;
             var otkId = Guid.NewGuid();
-            var otkPriv = otk.ExportECPrivateKey();
-            otkPrivs.Add((otkId, otkPriv, otkSpki));
+            otkPrivs.Add((otkId, otk.Value.privateKey.Value, otkSpki));
             oneTimeList.Add(new SubmitPreKeyBundleRequest.Types.OneTimePreKey
             {
                 Version = 1,
@@ -103,7 +100,7 @@ public class SubmitPreKeysHandler : IRequestHandler<SubmitPreKeysCommand, int>
 
         // 2b) Persist locally for responder use
         var selfId = _activeIdentity.Identity.SelfIdentityId;
-        await _selfPreKeyRepo.SaveSignedPreKeyAsync(selfId.Value, signedPreKeyId, signedPreKeyPriv, signedPreKeySpki, preKeySignature, request.ExpiresUtc, cancellationToken).ConfigureAwait(false);
+        await _selfPreKeyRepo.SaveSignedPreKeyAsync(selfId.Value, signedPreKeyId, oneTime.Value.privateKey.Value, oneTime.Value.publicKey.Value, preKeySignature, request.ExpiresUtc, cancellationToken).ConfigureAwait(false);
         await _selfPreKeyRepo.SaveOneTimePreKeysAsync(selfId.Value, otkPrivs, cancellationToken).ConfigureAwait(false);
 
         // 3) Build protobuf request
@@ -112,7 +109,7 @@ public class SubmitPreKeysHandler : IRequestHandler<SubmitPreKeysCommand, int>
             Version = 1,
             IdentityKey = ByteString.CopyFrom(identitySigningSpki),
             SignedPreKeyId = ByteString.CopyFrom(signedPreKeyId.ToByteArray()),
-            SignedPreKey = ByteString.CopyFrom(signedPreKeySpki),
+            SignedPreKey = ByteString.CopyFrom(oneTime.Value.publicKey.Value),
             PreKeySignature = ByteString.CopyFrom(preKeySignature),
             ExpiresUtc = Timestamp.FromDateTimeOffset(request.ExpiresUtc)
         };

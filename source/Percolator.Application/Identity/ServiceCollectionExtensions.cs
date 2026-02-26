@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using Percolator.Application.Network;
+using Percolator.Cryptography;
 using Percolator.Identity;
 using Percolator.Network;
 
@@ -11,7 +12,7 @@ public static class ServiceCollectionExtensions
     {
         // Concrete implementations from Percolator.Identity
         services.AddSingleton<ICredentialService, CredentialService>();
-        services.AddSingleton<IOneTimeKeyProvider, InMemoryOneTimeKeyProvider>();
+        services.AddSingleton<Percolator.Cryptography.IOneTimeKeyProvider, Percolator.Cryptography.InMemoryOneTimeKeyProvider>();
         services.AddSingleton<ActiveIdentityContext>();
         services.AddSingleton<IActiveIdentityMutator>(s => s.GetRequiredService<ActiveIdentityContext>());
         services.AddSingleton<IActiveIdentityAccessor, ActiveIdentityAccessor>();

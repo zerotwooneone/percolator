@@ -27,7 +27,7 @@ public class SubmitPreKeysHandlerTests
     private Mock<ISecureMessagingService> _secureSvc;
     private Mock<IMessageTransportService> _transport = null!;
     private Mock<Percolator.Identity.IPeerIdentityRepository> _peerIdentityRepository = null!;
-    private Mock<IOneTimeKeyProvider> _oneTimeKeyProvider = null!;
+    private IOneTimeKeyProvider _oneTimeKeyProvider = null!;
     private Mock<Percolator.Application.KeyExchange.ISelfPreKeyBundleRepository> _selfPreKeyRepo = null!;
 
     [SetUp]
@@ -37,7 +37,7 @@ public class SubmitPreKeysHandlerTests
         _directSessionLocator = new Mock<IDirectSessionLocator>();
         _transport = new Mock<IMessageTransportService>();
         _peerIdentityRepository = new Mock<Percolator.Identity.IPeerIdentityRepository>();
-        _oneTimeKeyProvider = new Mock<IOneTimeKeyProvider>();
+        _oneTimeKeyProvider = new InMemoryOneTimeKeyProvider();
         _selfPreKeyRepo = new Mock<Percolator.Application.KeyExchange.ISelfPreKeyBundleRepository>();
         _secureSvc = new Mock<ISecureMessagingService>(MockBehavior.Strict);
     }
@@ -68,10 +68,6 @@ public class SubmitPreKeysHandlerTests
         _directSessionLocator
             .Setup(s => s.GetAsync(It.IsAny<Percolator.Identity.PeerId>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(directSessionId);
-
-        // One-time key provider returns fresh keys for signed pre-key and N one-time keys
-        _oneTimeKeyProvider.Setup(p => p.PopOneTimeKey())
-            .Returns(() => ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256));
 
         // Secure messaging encrypt returns a dummy ratchet message
         _secureSvc
@@ -109,7 +105,7 @@ public class SubmitPreKeysHandlerTests
             _transport.Object,
             _activeIdentity,
             _peerIdentityRepository.Object,
-            _oneTimeKeyProvider.Object,
+            _oneTimeKeyProvider,
             _selfPreKeyRepo.Object,
             _secureSvc.Object);
 
@@ -142,7 +138,7 @@ public class SubmitPreKeysHandlerTests
             _transport.Object,
             _activeIdentity,
             _peerIdentityRepository.Object,
-            _oneTimeKeyProvider.Object,
+            _oneTimeKeyProvider,
             _selfPreKeyRepo.Object,
             _secureSvc.Object);
 
