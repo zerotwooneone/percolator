@@ -2,50 +2,39 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using MediatR;
-using Google.Protobuf;
 using Percolator.Contracts;
 using Microsoft.Extensions.Logging;
-using Percolator.Application.Identity;
 using Percolator.Application.Sessions;
 using Percolator.Cryptography;
+using Percolator.Identity;
 using Percolator.Network;
 
 namespace Percolator.Application.Network.Handshake
 {
     // Finalizes the initiator-side of the X3DH/DR establishment when a HandshakeResponderHello arrives via relay/MQ.
     public record HandleHandshakeResponderHelloCommand(
+        SelfId SelfIdentityId,
         InviteHandshakeResponse Response
     ) : IRequest;
 
     internal class HandleHandshakeResponderHelloHandler : IRequestHandler<HandleHandshakeResponderHelloCommand>
     {
         private readonly ILogger<HandleHandshakeResponderHelloHandler> _logger;
-        private readonly IActiveIdentityAccessor _activeIdentityAccessor;
-        private readonly ActiveIdentityContext _active;
         private readonly IRatchetKeyIndex _ratchetLookup;
         private readonly IInitiatorFinalizeService _finalize;
 
         public HandleHandshakeResponderHelloHandler(
             ILogger<HandleHandshakeResponderHelloHandler> logger,
-            IActiveIdentityAccessor activeIdentityAccessor,
-            ActiveIdentityContext active,
             IRatchetKeyIndex ratchetLookup,
             IInitiatorFinalizeService finalize)
         {
             _logger = logger;
-            _activeIdentityAccessor = activeIdentityAccessor;
-            _active = active;
             _ratchetLookup = ratchetLookup;
             _finalize = finalize;
         }
 
         public async Task Handle(HandleHandshakeResponderHelloCommand request, CancellationToken cancellationToken)
         {
-            if (!_activeIdentityAccessor.IsActive || _active.Identity is null)
-            {
-                throw new InvalidOperationException("Active identity not loaded.");
-            }
-
             if (request.Response is null)
             {
                 throw new InvalidOperationException("InviteHandshakeResponse is required.");
@@ -61,12 +50,12 @@ namespace Percolator.Application.Network.Handshake
             var header = ratchetMessage.GetHeader();
 
             // Fast-path: resolve session by ratchet header key (expected to miss on first responder message)
-            var sessionId = await _ratchetLookup.TryResolveAsync(_active.Identity.SelfIdentityId.Value, header.PreKey, cancellationToken).ConfigureAwait(false);
+            var sessionId = await _ratchetLookup.TryResolveAsync(request.SelfIdentityId.Value, header.PreKey, cancellationToken).ConfigureAwait(false);
             Percolator.Network.DirectSessionId directSessionId;
             if (sessionId is null)
             {
-                var finalized = await _finalize.TryFinalizeFromInviteHandshakeResponseAsync(request.Response, cancellationToken).ConfigureAwait(false)
-                    ?? await _finalize.TryFinalizeFromFirstResponderAsync(ratchetMessage, cancellationToken).ConfigureAwait(false)
+                var finalized = await _finalize.TryFinalizeFromInviteHandshakeResponseAsync(request.SelfIdentityId, request.Response, cancellationToken).ConfigureAwait(false)
+                    ?? await _finalize.TryFinalizeFromFirstResponderAsync(request.SelfIdentityId, ratchetMessage, cancellationToken).ConfigureAwait(false)
                     ?? throw new InvalidOperationException("Unable to finalize initiator session from responder hello");
                 var sid = finalized.sessionId;
                 directSessionId = new Percolator.Network.DirectSessionId(sid.Value);

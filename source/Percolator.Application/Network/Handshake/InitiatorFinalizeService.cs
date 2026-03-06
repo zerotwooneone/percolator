@@ -2,11 +2,11 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
-using Percolator.Application.Identity;
 using Percolator.Application.KeyExchange;
 using Percolator.Cryptography;
 using Percolator.Cryptography.Primitives;
 using Percolator.Contracts;
+using Percolator.Identity;
 using Percolator.Network;
 
 namespace Percolator.Application.Network.Handshake
@@ -14,8 +14,7 @@ namespace Percolator.Application.Network.Handshake
     internal sealed class InitiatorFinalizeService : IInitiatorFinalizeService
     {
         private readonly ILogger<InitiatorFinalizeService> _logger;
-        private readonly IActiveIdentityAccessor _activeIdentityAccessor;
-        private readonly ActiveIdentityContext _active;
+        private readonly ISelfIdentityKeysStore _keysStore;
         private readonly IPreHandshakeSessionStore _prehandshake;
         private readonly ISessionRepository _sessions;
         private readonly IRatchetKeyIndex _index;
@@ -26,8 +25,7 @@ namespace Percolator.Application.Network.Handshake
 
         public InitiatorFinalizeService(
             ILogger<InitiatorFinalizeService> logger,
-            IActiveIdentityAccessor activeIdentityAccessor,
-            ActiveIdentityContext active,
+            ISelfIdentityKeysStore keysStore,
             IPreHandshakeSessionStore prehandshake,
             ISessionRepository sessions,
             IRatchetKeyIndex index,
@@ -37,8 +35,7 @@ namespace Percolator.Application.Network.Handshake
             ISelfPreKeyBundleRepository selfPreKeys)
         {
             _logger = logger;
-            _activeIdentityAccessor = activeIdentityAccessor;
-            _active = active;
+            _keysStore = keysStore;
             _prehandshake = prehandshake;
             _sessions = sessions;
             _index = index;
@@ -49,13 +46,17 @@ namespace Percolator.Application.Network.Handshake
         }
 
         public async Task<(SessionId sessionId, Plaintext plaintext)?> TryFinalizeFromInviteHandshakeResponseAsync(
+            SelfId selfIdentityId,
             InviteHandshakeResponse response,
             CancellationToken cancellationToken = default)
         {
             if (response is null) throw new ArgumentNullException(nameof(response));
 
-            if (!_activeIdentityAccessor.IsActive || _active.Identity is null || _active.Keys is null)
-                throw new InvalidOperationException("Active identity not loaded.");
+            var keys = await _keysStore.LoadAsync(selfIdentityId, cancellationToken).ConfigureAwait(false);
+            if (keys is null)
+            {
+                throw new InvalidOperationException("Identity keys not loaded.");
+            }
 
             if (!response.HasAcceptorIdentityKey || response.AcceptorIdentityKey.Length == 0)
                 throw new InvalidOperationException("acceptor_identity_key is required.");
@@ -71,7 +72,7 @@ namespace Percolator.Application.Network.Handshake
             var acceptorIdentityPublic = new RatchetIdentityKey(response.AcceptorIdentityKey.ToByteArray());
             var acceptorEphemeralPublic = new RatchetEphemeralKey(response.AcceptorX3DhEphemeralKey.ToByteArray());
 
-            var localIkPriv = new PrivatePreKey(_active.Keys.IdentitySigningKey.ExportECPrivateKey());
+            var localIkPriv = new PrivatePreKey(keys.IdentitySigningKey.ExportECPrivateKey());
 
             // IMPORTANT: For reverse-signal, the inviter's signed pre-key used in the invite may be
             // different from _active.Keys.SignedPreKey. Resolve the correct private key via SentInvitation.
@@ -86,12 +87,6 @@ namespace Percolator.Application.Network.Handshake
                     return null;
                 }
 
-                if (_active.Identity is null)
-                {
-                    _logger.LogWarning("Invite finalize: active identity missing; skipping invite-response finalize.");
-                    return null;
-                }
-
                 var sent = await _sentInvitations.TryGetAsync(new RequestCorrelationId(corrGuid), cancellationToken).ConfigureAwait(false);
                 if (sent is null)
                 {
@@ -102,7 +97,7 @@ namespace Percolator.Application.Network.Handshake
                 }
 
                 var spk = await _selfPreKeys.TryGetSignedPreKeyAsync(
-                        _active.Identity.SelfIdentityId.Value,
+                        selfIdentityId.Value,
                         sent.SignedPreKeyId,
                         cancellationToken)
                     .ConfigureAwait(false);
@@ -222,15 +217,15 @@ namespace Percolator.Application.Network.Handshake
                 _clock);
 
             await _sessions.AddAsync(final, cancellationToken).ConfigureAwait(false);
-            await _index.UpsertAsync(_active.Identity.SelfIdentityId.Value, sid, header.PreKey, _clock.UtcNow, cancellationToken).ConfigureAwait(false);
+            await _index.UpsertAsync(selfIdentityId.Value, sid, header.PreKey, _clock.UtcNow, cancellationToken).ConfigureAwait(false);
 
             // Best-effort cleanup of legacy prehandshake store (if it was populated)
             try
             {
-                var mostRecent = await _prehandshake.TryGetMostRecentAsync(_active.Identity.SelfIdentityId.Value, cancellationToken).ConfigureAwait(false);
+                var mostRecent = await _prehandshake.TryGetMostRecentAsync(selfIdentityId.Value, cancellationToken).ConfigureAwait(false);
                 if (mostRecent is not null)
                 {
-                    await _prehandshake.DeleteAsync(mostRecent.Id, _active.Identity.SelfIdentityId.Value, cancellationToken).ConfigureAwait(false);
+                    await _prehandshake.DeleteAsync(mostRecent.Id, selfIdentityId.Value, cancellationToken).ConfigureAwait(false);
                 }
             }
             catch
@@ -243,17 +238,15 @@ namespace Percolator.Application.Network.Handshake
         }
 
         public async Task<(SessionId sessionId, Plaintext plaintext)?> TryFinalizeFromFirstResponderAsync(
+            SelfId selfIdentityId,
             SessionRatchetMessage responderFirst,
             CancellationToken cancellationToken = default)
         {
-            if (!_activeIdentityAccessor.IsActive || _active.Identity is null)
-                throw new InvalidOperationException("Active identity not loaded.");
-
             // Header's pre-key used to upsert on success
             var header = responderFirst.GetHeader();
             var headerPreKey = header.PreKey;
 
-            await foreach (var pending in _prehandshake.EnumeratePendingAsync(_active.Identity.SelfIdentityId.Value, cancellationToken).ConfigureAwait(false))
+            await foreach (var pending in _prehandshake.EnumeratePendingAsync(selfIdentityId.Value, cancellationToken).ConfigureAwait(false))
             {
                 try
                 {
@@ -285,8 +278,8 @@ namespace Percolator.Application.Network.Handshake
                         _clock);
 
                     await _sessions.AddAsync(final, cancellationToken).ConfigureAwait(false);
-                    await _index.UpsertAsync(_active.Identity.SelfIdentityId.Value, sid, headerPreKey, _clock.UtcNow, cancellationToken).ConfigureAwait(false);
-                    await _prehandshake.DeleteAsync(pending.Id, _active.Identity.SelfIdentityId.Value, cancellationToken).ConfigureAwait(false);
+                    await _index.UpsertAsync(selfIdentityId.Value, sid, headerPreKey, _clock.UtcNow, cancellationToken).ConfigureAwait(false);
+                    await _prehandshake.DeleteAsync(pending.Id, selfIdentityId.Value, cancellationToken).ConfigureAwait(false);
 
                     _logger.LogInformation("Initiator finalized session {SessionId} from pending record {PendingId}", sid.Value, pending.Id);
                     return (sid, pt);

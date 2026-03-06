@@ -4,12 +4,13 @@ using System.Threading.Tasks;
 using MediatR;
 using Percolator.Application.Network.Handshake;
 using Percolator.Contracts;
+using Percolator.Identity;
 
 namespace Percolator.Application.Network;
 
 public interface IInviteHandshakeResponseIngress
 {
-    Task HandleAsync(InviteHandshakeResponse response, CancellationToken ct = default);
+    Task HandleAsync(SelfId selfIdentityId, InviteHandshakeResponse response, CancellationToken ct = default);
 }
 
 internal sealed class InviteHandshakeResponseIngress : IInviteHandshakeResponseIngress
@@ -21,7 +22,7 @@ internal sealed class InviteHandshakeResponseIngress : IInviteHandshakeResponseI
         _mediator = mediator ?? throw new ArgumentNullException(nameof(mediator));
     }
 
-    public Task HandleAsync(InviteHandshakeResponse response, CancellationToken ct = default)
+    public Task HandleAsync(SelfId selfIdentityId, InviteHandshakeResponse response, CancellationToken ct = default)
     {
         if (response is null) throw new ArgumentNullException(nameof(response));
 
@@ -31,7 +32,7 @@ internal sealed class InviteHandshakeResponseIngress : IInviteHandshakeResponseI
         }
 
         return _mediator.Send(
-            new HandleHandshakeResponderHelloCommand(response),
+            new HandleHandshakeResponderHelloCommand(selfIdentityId, response),
             ct);
     }
 }

@@ -5,7 +5,6 @@ using Google.Protobuf;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using NUnit.Framework;
-using Percolator.Application.Identity;
 using Percolator.Application.Network.Handshake;
 using Percolator.Application.Sessions;
 using Percolator.Application.Services;
@@ -26,9 +25,7 @@ namespace Percolator.ApplicationTests.Handshake
         public async Task FastPath_UsesRatchetIndexLookup()
         {
             // Arrange
-            var identity = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "self") { SelfIdentityId = new SelfId(1) };
-            var active = new ActiveIdentityContext { Identity = identity };
-            var activeAccessor = Mock.Of<IActiveIdentityAccessor>(a => a.IsActive == true);
+            var selfId = new SelfId(1);
 
             var lookup = new Mock<IRatchetKeyIndex>(MockBehavior.Strict);
             var resolved = new SessionId(Guid.NewGuid());
@@ -38,10 +35,16 @@ namespace Percolator.ApplicationTests.Handshake
 
             var finalize = new Mock<IInitiatorFinalizeService>(MockBehavior.Strict);
 
+            finalize
+                .Setup(f => f.TryFinalizeFromInviteHandshakeResponseAsync(It.IsAny<SelfId>(), It.IsAny<InviteHandshakeResponse>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(((SessionId sessionId, Plaintext plaintext)?)null);
+
+            finalize
+                .Setup(f => f.TryFinalizeFromFirstResponderAsync(It.IsAny<SelfId>(), It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(((SessionId sessionId, Plaintext plaintext)?)null);
+
             var handler = new HandleHandshakeResponderHelloHandler(
                 new NullLogger<HandleHandshakeResponderHelloHandler>(),
-                activeAccessor,
-                active,
                 lookup.Object,
                 finalize.Object);
 
@@ -56,7 +59,7 @@ namespace Percolator.ApplicationTests.Handshake
                 InitialRatchetMessage = ByteString.CopyFrom(payload)
             };
 
-            var cmd = new HandleHandshakeResponderHelloCommand(resp);
+            var cmd = new HandleHandshakeResponderHelloCommand(selfId, resp);
 
             // Act
             await handler.Handle(cmd, CancellationToken.None);

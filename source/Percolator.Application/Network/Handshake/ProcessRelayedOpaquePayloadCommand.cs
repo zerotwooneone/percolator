@@ -4,7 +4,6 @@ using System.Threading.Tasks;
 using Google.Protobuf;
 using MediatR;
 using Microsoft.Extensions.Logging;
-using Percolator.Application.Identity;
 using Percolator.Application.Network;
 using Percolator.Contracts;
 using Percolator.Identity;
@@ -86,7 +85,7 @@ namespace Percolator.Application.Network.Handshake
             catch
             {
                 // Not a valid ratchet message: try known non-session payload types (still opaque to relay).
-                return await TryHandleNonSessionPayloadAsync(request.OpaquePayload.Value, cancellationToken).ConfigureAwait(false);
+                return await TryHandleNonSessionPayloadAsync(request.SelfIdentityId, request.OpaquePayload.Value, cancellationToken).ConfigureAwait(false);
             }
 
             (RatchetEphemeralKey PreKey, ulong Counter, ulong PreviousChainLength) header;
@@ -97,7 +96,7 @@ namespace Percolator.Application.Network.Handshake
             catch (Exception drEx)
             {
                 // Not a valid ratchet message header: try known non-session payload types (still opaque to relay).
-                return await TryHandleNonSessionPayloadAsync(request.OpaquePayload.Value, cancellationToken).ConfigureAwait(false);
+                return await TryHandleNonSessionPayloadAsync(request.SelfIdentityId, request.OpaquePayload.Value, cancellationToken).ConfigureAwait(false);
             }
 
             // Fast/slow path via SecureMessagingService
@@ -140,7 +139,7 @@ namespace Percolator.Application.Network.Handshake
             return ProcessRelayedOpaquePayloadResponse.Success;
         }
 
-        private async Task<ProcessRelayedOpaquePayloadResponse> TryHandleNonSessionPayloadAsync(byte[] bytes, CancellationToken cancellationToken)
+        private async Task<ProcessRelayedOpaquePayloadResponse> TryHandleNonSessionPayloadAsync(SelfId selfIdentityId, byte[] bytes, CancellationToken cancellationToken)
         {
             // Standard signal bootstrap delivered through dumb relay queue: HandshakeInitiatorHello bytes.
             try
@@ -207,7 +206,7 @@ namespace Percolator.Application.Network.Handshake
                     && resp.HasAcceptorX3DhEphemeralKey && resp.AcceptorX3DhEphemeralKey.Length > 0
                     && resp.HasInitialRatchetMessage && resp.InitialRatchetMessage.Length > 0)
                 {
-                    await _inviteHandshakeResponseIngress.HandleAsync(resp, cancellationToken).ConfigureAwait(false);
+                    await _inviteHandshakeResponseIngress.HandleAsync(selfIdentityId, resp, cancellationToken).ConfigureAwait(false);
                     return ProcessRelayedOpaquePayloadResponse.Success;
                 }
             }

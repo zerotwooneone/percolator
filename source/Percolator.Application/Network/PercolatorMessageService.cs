@@ -158,7 +158,12 @@ namespace Percolator.Application.Network
 
             _logger.LogInformation("Received InviteHandshakeResponse for correlation {CorrelationId}", request.RequestCorrelationId);
 
-            await _inviteHandshakeResponseIngress.HandleAsync(request, context.CancellationToken).ConfigureAwait(false);
+            if (_active.Identity is null)
+            {
+                throw new RpcException(new Status(StatusCode.FailedPrecondition, "Active identity not loaded."));
+            }
+
+            await _inviteHandshakeResponseIngress.HandleAsync(_active.Identity.SelfIdentityId, request, context.CancellationToken).ConfigureAwait(false);
             return new DeliverInviteHandshakeResponseAck { Version = 1 };
         }
     }

@@ -7,7 +7,6 @@ using Google.Protobuf;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using NUnit.Framework;
-using Percolator.Application.Identity;
 using Percolator.Application.Network.Handshake;
 using Percolator.Cryptography;
 using Percolator.Contracts;
@@ -33,13 +32,16 @@ public class InitiatorFinalizeServiceTests
     public async Task TryFinalizeFromFirstResponderAsync_Decrypts_Persists_Session_And_Deletes_PreHandshake()
     {
         // Arrange
-        var active = new ActiveIdentityContext();
-        var activeAccessor = Mock.Of<IActiveIdentityAccessor>(a => a.IsActive == true);
         var self = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "self")
         {
             SelfIdentityId = new SelfId(7)
         };
-        active.SetActiveIdentity(self, null);
+
+        var keysStore = new Mock<ISelfIdentityKeysStore>(MockBehavior.Strict);
+        keysStore
+            .Setup(s => s.LoadAsync(self.SelfIdentityId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new X3dhKeys(System.Security.Cryptography.ECDiffieHellman.Create(System.Security.Cryptography.ECCurve.NamedCurves.nistP256),
+                System.Security.Cryptography.ECDiffieHellman.Create(System.Security.Cryptography.ECCurve.NamedCurves.nistP256)));
 
         var clock = new TestClock { UtcNow = DateTimeOffset.UtcNow };
         var root = new byte[32];
@@ -92,8 +94,7 @@ public class InitiatorFinalizeServiceTests
 
         var sut = new InitiatorFinalizeService(
             new NullLogger<InitiatorFinalizeService>(),
-            activeAccessor,
-            active,
+            keysStore.Object,
             preStore.Object,
             sessions.Object,
             index.Object,
@@ -103,7 +104,7 @@ public class InitiatorFinalizeServiceTests
             Mock.Of<Percolator.Application.KeyExchange.ISelfPreKeyBundleRepository>());
 
         // Act
-        var result = await sut.TryFinalizeFromFirstResponderAsync(first, CancellationToken.None);
+        var result = await sut.TryFinalizeFromFirstResponderAsync(self.SelfIdentityId, first, CancellationToken.None);
 
         // Assert
         Assert.That(result, Is.Not.Null);

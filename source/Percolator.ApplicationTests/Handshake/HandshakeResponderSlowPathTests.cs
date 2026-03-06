@@ -4,7 +4,6 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using NUnit.Framework;
-using Percolator.Application.Identity;
 using Percolator.Application.Network.Handshake;
 using Percolator.Application.Sessions;
 using Percolator.Application.Services;
@@ -27,9 +26,7 @@ namespace Percolator.ApplicationTests.Handshake
         public async Task SlowPath_Decrypts_Parses_And_CleansPending()
         {
             // Arrange
-            var identity = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "self") { SelfIdentityId = new SelfId(5) };
-            var active = new ActiveIdentityContext { Identity = identity };
-            var activeAccessor = Mock.Of<IActiveIdentityAccessor>(a => a.IsActive == true);
+            var selfId = new SelfId(5);
 
             var lookup = new Mock<IRatchetKeyIndex>(MockBehavior.Strict);
             lookup
@@ -38,7 +35,7 @@ namespace Percolator.ApplicationTests.Handshake
 
             var mostRecent = new PreHandshakeRecord(
                 Id: 41,
-                SelfIdentityId: identity.SelfIdentityId.Value,
+                SelfIdentityId: selfId.Value,
                 RecipientPublicKeyHash: new byte[] { 0x41 },
                 LocalRequestId: Guid.NewGuid(),
                 InitiatorEphemeralPrivateKey: Array.Empty<byte>(),
@@ -50,10 +47,10 @@ namespace Percolator.ApplicationTests.Handshake
             var expectedSid = new SessionId(Guid.NewGuid());
             var finalize = new Mock<IInitiatorFinalizeService>(MockBehavior.Strict);
             finalize
-                .Setup(f => f.TryFinalizeFromInviteHandshakeResponseAsync(It.IsAny<InviteHandshakeResponse>(), It.IsAny<CancellationToken>()))
+                .Setup(f => f.TryFinalizeFromInviteHandshakeResponseAsync(It.IsAny<SelfId>(), It.IsAny<InviteHandshakeResponse>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(((SessionId sessionId, Plaintext plaintext)?)null);
             finalize
-                .Setup(f => f.TryFinalizeFromFirstResponderAsync(It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()))
+                .Setup(f => f.TryFinalizeFromFirstResponderAsync(It.IsAny<SelfId>(), It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(() =>
                 {
                     var inner = new ResponderInnerHello
@@ -66,8 +63,6 @@ namespace Percolator.ApplicationTests.Handshake
 
             var sut = new HandleHandshakeResponderHelloHandler(
                 new NullLogger<HandleHandshakeResponderHelloHandler>(),
-                activeAccessor,
-                active,
                 lookup.Object,
                 finalize.Object);
 
@@ -82,13 +77,13 @@ namespace Percolator.ApplicationTests.Handshake
                 InitialRatchetMessage = ByteString.CopyFrom(payload)
             };
 
-            var cmd = new HandleHandshakeResponderHelloCommand(resp);
+            var cmd = new HandleHandshakeResponderHelloCommand(selfId, resp);
 
             // Act
             await sut.Handle(cmd, CancellationToken.None);
 
             // Assert
-            finalize.Verify(f => f.TryFinalizeFromFirstResponderAsync(It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()), Times.Once);
+            finalize.Verify(f => f.TryFinalizeFromFirstResponderAsync(It.IsAny<SelfId>(), It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()), Times.Once);
             lookup.VerifyAll();
         }
     }

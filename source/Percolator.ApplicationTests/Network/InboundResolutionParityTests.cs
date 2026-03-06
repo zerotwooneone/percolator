@@ -5,7 +5,6 @@ using Google.Protobuf;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using NUnit.Framework;
-using Percolator.Application.Identity;
 using Percolator.Application.Network.Handshake;
 using Percolator.Application.Sessions;
 using Percolator.Application.Services;
@@ -32,14 +31,7 @@ namespace Percolator.ApplicationTests.Network
         {
             // Arrange
             var ratchetIndex = new Mock<IRatchetKeyIndex>(MockBehavior.Strict);
-            var active = new ActiveIdentityContext
-            {
-                Identity = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "self")
-                {
-                    SelfIdentityId = new SelfId(1)
-                }
-            };
-            var activeAccessor = Mock.Of<IActiveIdentityAccessor>(a => a.IsActive == true);
+            var selfId = new SelfId(1);
 
             var expectedSid = new SessionId(Guid.NewGuid());
             ratchetIndex
@@ -49,8 +41,6 @@ namespace Percolator.ApplicationTests.Network
             var finalize = new Mock<IInitiatorFinalizeService>(MockBehavior.Loose);
             var handler = new HandleHandshakeResponderHelloHandler(
                 new NullLogger<HandleHandshakeResponderHelloHandler>(),
-                activeAccessor,
-                active,
                 ratchetIndex.Object,
                 finalize.Object);
 
@@ -66,7 +56,7 @@ namespace Percolator.ApplicationTests.Network
                 InitialRatchetMessage = ByteString.CopyFrom(payload)
             };
 
-            var cmd = new HandleHandshakeResponderHelloCommand(resp);
+            var cmd = new HandleHandshakeResponderHelloCommand(selfId, resp);
 
             // Act
             await handler.Handle(cmd, CancellationToken.None);
@@ -74,10 +64,10 @@ namespace Percolator.ApplicationTests.Network
             // Assert
             ratchetIndex.Verify(x => x.TryResolveAsync(It.IsAny<int>(), It.IsAny<RatchetEphemeralKey>(), It.IsAny<CancellationToken>()), Times.Once);
             finalize.Verify(
-                f => f.TryFinalizeFromInviteHandshakeResponseAsync(It.IsAny<InviteHandshakeResponse>(), It.IsAny<CancellationToken>()),
+                f => f.TryFinalizeFromInviteHandshakeResponseAsync(It.IsAny<SelfId>(), It.IsAny<InviteHandshakeResponse>(), It.IsAny<CancellationToken>()),
                 Times.Never);
             finalize.Verify(
-                f => f.TryFinalizeFromFirstResponderAsync(It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()),
+                f => f.TryFinalizeFromFirstResponderAsync(It.IsAny<SelfId>(), It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()),
                 Times.Never);
         }
 
@@ -86,14 +76,7 @@ namespace Percolator.ApplicationTests.Network
         {
             // Arrange
             var ratchetIndex = new Mock<IRatchetKeyIndex>(MockBehavior.Strict);
-            var active = new ActiveIdentityContext
-            {
-                Identity = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "self")
-                {
-                    SelfIdentityId = new SelfId(2)
-                }
-            };
-            var activeAccessor = Mock.Of<IActiveIdentityAccessor>(a => a.IsActive == true);
+            var selfId = new SelfId(2);
 
             ratchetIndex
                 .Setup(x => x.TryResolveAsync(It.IsAny<int>(), It.IsAny<RatchetEphemeralKey>(), It.IsAny<CancellationToken>()))
@@ -105,16 +88,14 @@ namespace Percolator.ApplicationTests.Network
 
             var finalize = new Mock<IInitiatorFinalizeService>(MockBehavior.Strict);
             finalize
-                .Setup(f => f.TryFinalizeFromInviteHandshakeResponseAsync(It.IsAny<InviteHandshakeResponse>(), It.IsAny<CancellationToken>()))
+                .Setup(f => f.TryFinalizeFromInviteHandshakeResponseAsync(It.IsAny<SelfId>(), It.IsAny<InviteHandshakeResponse>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(((SessionId sessionId, Plaintext plaintext)?)null);
             finalize
-                .Setup(f => f.TryFinalizeFromFirstResponderAsync(It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()))
+                .Setup(f => f.TryFinalizeFromFirstResponderAsync(It.IsAny<SelfId>(), It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((sid, plaintext));
 
             var handler = new HandleHandshakeResponderHelloHandler(
                 new NullLogger<HandleHandshakeResponderHelloHandler>(),
-                activeAccessor,
-                active,
                 ratchetIndex.Object,
                 finalize.Object);
 
@@ -130,7 +111,7 @@ namespace Percolator.ApplicationTests.Network
                 InitialRatchetMessage = ByteString.CopyFrom(payload2)
             };
 
-            var cmd = new HandleHandshakeResponderHelloCommand(resp);
+            var cmd = new HandleHandshakeResponderHelloCommand(selfId, resp);
 
             // Act
             await handler.Handle(cmd, CancellationToken.None);
@@ -138,10 +119,10 @@ namespace Percolator.ApplicationTests.Network
             // Assert
             ratchetIndex.Verify(x => x.TryResolveAsync(It.IsAny<int>(), It.IsAny<RatchetEphemeralKey>(), It.IsAny<CancellationToken>()), Times.Once);
             finalize.Verify(
-                f => f.TryFinalizeFromInviteHandshakeResponseAsync(It.IsAny<InviteHandshakeResponse>(), It.IsAny<CancellationToken>()),
+                f => f.TryFinalizeFromInviteHandshakeResponseAsync(It.IsAny<SelfId>(), It.IsAny<InviteHandshakeResponse>(), It.IsAny<CancellationToken>()),
                 Times.Once);
             finalize.Verify(
-                f => f.TryFinalizeFromFirstResponderAsync(It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()),
+                f => f.TryFinalizeFromFirstResponderAsync(It.IsAny<SelfId>(), It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()),
                 Times.Once);
             finalize.VerifyNoOtherCalls();
         }

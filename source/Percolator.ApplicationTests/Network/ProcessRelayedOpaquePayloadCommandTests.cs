@@ -108,7 +108,7 @@ public class ProcessRelayedOpaquePayloadCommandTests
             InitialRatchetMessage = ByteString.CopyFrom(new byte[] { 0x03, 0x04 })
         };
 
-        inviteIngress.Setup(x => x.HandleAsync(It.IsAny<InviteHandshakeResponse>(), It.IsAny<CancellationToken>()))
+        inviteIngress.Setup(x => x.HandleAsync(It.IsAny<SelfId>(), It.IsAny<InviteHandshakeResponse>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask)
             .Verifiable();
 
