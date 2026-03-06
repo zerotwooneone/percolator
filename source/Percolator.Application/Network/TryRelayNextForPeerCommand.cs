@@ -3,11 +3,12 @@ using System.Threading;
 using System.Threading.Tasks;
 using MediatR;
 using Percolator.Application.Network;
+using Percolator.Identity;
 using IdentityPeerId = Percolator.Identity.PeerId;
 
 namespace Percolator.Application.Network
 {
-    public sealed record TryRelayNextForPeerCommand(IdentityPeerId RecipientPeerId) : IRequest;
+    public sealed record TryRelayNextForPeerCommand(SelfId SelfIdentityId, IdentityPeerId RecipientPeerId) : IRequest;
 
     internal sealed class TryRelayNextForPeerHandler : IRequestHandler<TryRelayNextForPeerCommand>
     {
@@ -23,7 +24,7 @@ namespace Percolator.Application.Network
             // Best-effort: attempt a single relay; let orchestrator throw to stop outer loops elsewhere.
             try
             {
-                await _relay.RelayNextAsync(request.RecipientPeerId, cancellationToken).ConfigureAwait(false);
+                await _relay.RelayNextAsync(request.SelfIdentityId, request.RecipientPeerId, cancellationToken).ConfigureAwait(false);
             }
             catch
             {

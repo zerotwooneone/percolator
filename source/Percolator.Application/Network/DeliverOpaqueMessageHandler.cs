@@ -216,7 +216,7 @@ namespace Percolator.Application.Network
                 try
                 {
                     var identityPeerId = new Percolator.Identity.PeerId(remotePeerId.Value);
-                    while (await _relayOrchestrator.RelayNextAsync(identityPeerId, cancellationToken).ConfigureAwait(false))
+                    while (await _relayOrchestrator.RelayNextAsync(request.SelfIdentityId, identityPeerId, cancellationToken).ConfigureAwait(false))
                     {
                         // continue while acked
                     }

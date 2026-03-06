@@ -6,9 +6,9 @@ using Google.Protobuf;
 using Microsoft.Extensions.Logging;
 using Percolator.Application.Sessions;
 using Percolator.Application.Services;
-using Percolator.Application.Identity;
 using Percolator.Contracts;
 using Percolator.Cryptography;
+using Percolator.Identity;
 using Percolator.MessageQueue.Abstractions;
 using Percolator.Network;
 using IdentityPeerId = Percolator.Identity.PeerId;
@@ -26,22 +26,20 @@ public class RelayOrchestrator
     private readonly IDirectSessionRepository _directSessions;
     private readonly ISecureMessagingService _secureMessaging;
     private readonly IMessageTransportService _transport;
-    private readonly ActiveIdentityContext _active;
+ 
 
     public RelayOrchestrator(
         ILogger<RelayOrchestrator> logger,
         IMessageQueueRepository queue,
         IDirectSessionRepository directSessions,
         ISecureMessagingService secureMessaging,
-        IMessageTransportService transport,
-        ActiveIdentityContext active)
+        IMessageTransportService transport)
     {
         _logger = logger;
         _queue = queue;
         _directSessions = directSessions;
         _secureMessaging = secureMessaging;
         _transport = transport;
-        _active = active;
     }
 
     /// <summary>
@@ -49,13 +47,8 @@ public class RelayOrchestrator
     /// Returns true if a message was relayed and acked; false if no messages were available.
     /// Throws on transport or decryption failures to stop the outer loop.
     /// </summary>
-    public async Task<bool> RelayNextAsync(IdentityPeerId recipientPeerId, CancellationToken ct = default)
+    public async Task<bool> RelayNextAsync(SelfId selfIdentityId, IdentityPeerId recipientPeerId, CancellationToken ct = default)
     {
-        if (_active.Identity is null)
-        {
-            throw new InvalidOperationException("Active identity not initialized");
-        }
-        var selfIdentityId = _active.Identity.SelfIdentityId;
         // Fetch one queued item (AckId, Blob)
         var items = await _queue.FetchAsync(recipientPeerId, 1, ct).ConfigureAwait(false);
         if (items.Count == 0)

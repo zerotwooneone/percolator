@@ -455,7 +455,7 @@ namespace Percolator.ApplicationTests.Network;
             .ReturnsAsync(Array.Empty<(Guid, byte[])>());
         var transport = new Mock<IMessageTransportService>(MockBehavior.Strict);
         var relayLogger = Mock.Of<ILogger<RelayOrchestrator>>();
-        var relay = new RelayOrchestrator(relayLogger, mqRepo.Object, directRepo.Object, secureSvc.Object, transport.Object, active);
+        var relay = new RelayOrchestrator(relayLogger, mqRepo.Object, directRepo.Object, secureSvc.Object, transport.Object);
         var profileRepo = new Mock<IPeerRoutingProfileRepository>(MockBehavior.Loose);
         // Always return a profile with a fresh localhost endpoint for any peer id
         profileRepo
