@@ -28,6 +28,7 @@ public sealed class SimulatorStateStoreTests
                 PeerId = peerId,
                 DisplayName = "Alice",
                 IsOnline = true,
+                PublishedKeysToPeerIds = { Guid.NewGuid(), Guid.NewGuid() },
                 RuntimeStore = new SimulatedPeerRuntimeStoreDto
                 {
                     Version = 1,
@@ -65,6 +66,7 @@ public sealed class SimulatorStateStoreTests
             loaded!.Peers.Should().HaveCount(1);
             loaded.Peers[0].DisplayName.Should().Be("Alice");
             loaded.Peers[0].PeerId.Should().Be(peerId);
+            loaded.Peers[0].PublishedKeysToPeerIds.Should().HaveCount(2);
             loaded.Peers[0].RuntimeStore.Should().NotBeNull();
             loaded.Peers[0].RuntimeStore.SignedPreKeys.Should().HaveCount(1);
             loaded.Peers[0].RuntimeStore.Sessions.Should().HaveCount(1);

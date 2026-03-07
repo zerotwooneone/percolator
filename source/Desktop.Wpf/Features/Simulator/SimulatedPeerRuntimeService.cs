@@ -48,6 +48,8 @@ public interface ISimulatedPeerRuntimeService
         Guid simulatedPeerId,
         Guid relayHostPeerId,
         DateTimeOffset expiresUtc,
+        bool includeOneTimeKeys,
+        int oneTimeKeyCount,
         CancellationToken cancellationToken = default);
 
     Task<byte[]?> TryPopStandardPreKeyBundleBytesFromRelayByRecipientPkhAsync(
@@ -206,12 +208,14 @@ public sealed class SimulatedPeerRuntimeService : ISimulatedPeerRuntimeService
         Guid simulatedPeerId,
         Guid relayHostPeerId,
         DateTimeOffset expiresUtc,
+        bool includeOneTimeKeys,
+        int oneTimeKeyCount,
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
         var runtime = _runtimeByPeerId.GetOrAdd(simulatedPeerId, CreateRuntime);
-        var bundle = runtime.CreateStandardPreKeyBundle(expiresUtc);
+        var bundle = runtime.CreateStandardPreKeyBundle(expiresUtc, includeOneTimeKeys: includeOneTimeKeys, oneTimeKeyCount: oneTimeKeyCount);
         var pkh = SHA256.HashData(bundle.IdentityKey.ToByteArray());
 
         await _state.PublishPreKeyBundleAsync(
@@ -467,7 +471,10 @@ public sealed class SimulatedPeerRuntimeService : ISimulatedPeerRuntimeService
             _clock = new SystemClock();
         }
 
-        public GetPreKeyBundleResponse.Types.PreKeyBundle CreateStandardPreKeyBundle(DateTimeOffset expiresUtc)
+        public GetPreKeyBundleResponse.Types.PreKeyBundle CreateStandardPreKeyBundle(
+            DateTimeOffset expiresUtc,
+            bool includeOneTimeKeys,
+            int oneTimeKeyCount)
         {
             // Ensure we have a stable signed pre-key for this peer.
             var spkId = Guid.NewGuid();
@@ -487,7 +494,7 @@ public sealed class SimulatedPeerRuntimeService : ISimulatedPeerRuntimeService
             using var identityEcdsa = ECDsa.Create(identityEcdh2.ExportParameters(true));
             var sig = identityEcdsa.SignData(spk.spkSpki, HashAlgorithmName.SHA256);
 
-            return new GetPreKeyBundleResponse.Types.PreKeyBundle
+            var bundle = new GetPreKeyBundleResponse.Types.PreKeyBundle
             {
                 Version = 1,
                 IdentityKey = ByteString.CopyFrom(_model.IdentitySigningKeySpki),
@@ -495,6 +502,23 @@ public sealed class SimulatedPeerRuntimeService : ISimulatedPeerRuntimeService
                 SignedPreKey = ByteString.CopyFrom(spk.spkSpki),
                 PreKeySignature = ByteString.CopyFrom(sig)
             };
+
+            if (includeOneTimeKeys && oneTimeKeyCount > 0)
+            {
+                // This is a simulator-only simplification: we include a single OTK in the bundle.
+                // The count is currently not modeled as a real store; it's accepted for UI parity.
+                using var identityEcdh3 = ECDiffieHellman.Create();
+                identityEcdh3.ImportECPrivateKey(_model.IdentitySigningKeyPrivateKeyEcPrivateKey, out _);
+                var curve = identityEcdh3.ExportParameters(false).Curve;
+                using var otk = ECDiffieHellman.Create(curve);
+                var otkId = Guid.NewGuid();
+                var otkSpki = otk.PublicKey.ExportSubjectPublicKeyInfo();
+
+                bundle.OneTimeKeyId = ByteString.CopyFrom(otkId.ToByteArray());
+                bundle.OneTimeKey = ByteString.CopyFrom(otkSpki);
+            }
+
+            return bundle;
         }
 
         public async Task<SessionId?> InitiateStandardHandshakeAsync(

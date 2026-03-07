@@ -46,6 +46,9 @@ public interface ISimulatorStateService
 
     Task<SimulatedPeerRuntimeStoreDto?> TryGetRuntimeStoreAsync(Guid peerId, CancellationToken cancellationToken = default);
     Task SaveRuntimeStoreAsync(Guid peerId, SimulatedPeerRuntimeStoreDto store, CancellationToken cancellationToken = default);
+
+    Task AddPublishedKeysRelationshipAsync(Guid publisherPeerId, Guid hostPeerId, CancellationToken cancellationToken = default);
+    Task RemovePublishedKeysRelationshipAsync(Guid publisherPeerId, Guid hostPeerId, CancellationToken cancellationToken = default);
 }
 
 public sealed class SimulatorStateService : ISimulatorStateService
@@ -100,6 +103,11 @@ public sealed class SimulatorStateService : ISimulatorStateService
 
                 NormalizePeer(p, _transportOptions.Value);
                 changed |= _keys.EnsureReverseSignalKeys(p.ReverseSignalKeys);
+                if (p.PublishedKeysToPeerIds is null)
+                {
+                    p.PublishedKeysToPeerIds = new();
+                    changed = true;
+                }
                 _peers.Add(p);
             }
         });
@@ -142,6 +150,14 @@ public sealed class SimulatorStateService : ISimulatorStateService
 
         _state.Peers.Remove(peer);
 
+        foreach (var p in _state.Peers)
+        {
+            if (p.PublishedKeysToPeerIds.Remove(peerId))
+            {
+                // best-effort cleanup
+            }
+        }
+
         await InvokeOnUiAsync(() =>
         {
             var inUi = _peers.FirstOrDefault(p => p.PeerId == peerId);
@@ -149,6 +165,34 @@ public sealed class SimulatorStateService : ISimulatorStateService
         });
 
         await _store.SaveAsync(_state, cancellationToken);
+    }
+
+    public async Task AddPublishedKeysRelationshipAsync(Guid publisherPeerId, Guid hostPeerId, CancellationToken cancellationToken = default)
+    {
+        if (publisherPeerId == hostPeerId) return;
+
+        var publisher = _state.Peers.FirstOrDefault(p => p.PeerId == publisherPeerId);
+        if (publisher is null) return;
+
+        publisher.PublishedKeysToPeerIds ??= new();
+        if (!publisher.PublishedKeysToPeerIds.Contains(hostPeerId))
+        {
+            publisher.PublishedKeysToPeerIds.Add(hostPeerId);
+            await _store.SaveAsync(_state, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    public async Task RemovePublishedKeysRelationshipAsync(Guid publisherPeerId, Guid hostPeerId, CancellationToken cancellationToken = default)
+    {
+        var publisher = _state.Peers.FirstOrDefault(p => p.PeerId == publisherPeerId);
+        if (publisher is null) return;
+
+        publisher.PublishedKeysToPeerIds ??= new();
+        var removed = publisher.PublishedKeysToPeerIds.Remove(hostPeerId);
+        if (removed)
+        {
+            await _store.SaveAsync(_state, cancellationToken).ConfigureAwait(false);
+        }
     }
 
     public async Task ToggleOnlineAsync(Guid peerId, CancellationToken cancellationToken = default)

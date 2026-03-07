@@ -1,0 +1,252 @@
+using System;
+using System.Collections.ObjectModel;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Windows;
+using R3;
+
+namespace Desktop.Wpf.Features.Simulator;
+
+public sealed class SimulatedPeerCardViewModel : IDisposable
+{
+    private readonly SimulatedPeerModel _model;
+    private readonly ISimulatorStateService _state;
+    private readonly ISimulatedPeerRuntimeService _runtime;
+    private readonly Func<Guid, string> _resolvePeerName;
+    private readonly Action _relationshipsChanged;
+    private DisposableBag _bag;
+
+    public SimulatedPeerCardViewModel(
+        SimulatedPeerModel model,
+        ISimulatorStateService state,
+        ISimulatedPeerRuntimeService runtime,
+        Func<Guid, string> resolvePeerName,
+        Action relationshipsChanged)
+    {
+        _model = model;
+        _state = state;
+        _runtime = runtime;
+        _resolvePeerName = resolvePeerName;
+        _relationshipsChanged = relationshipsChanged;
+
+        DisplayName = _model.DisplayName
+            .Select(n => string.IsNullOrWhiteSpace(n) ? _model.PeerId.ToString()[..8] : n!)
+            .ToBindableReactiveProperty(_model.PeerId.ToString()[..8])
+            .AddTo(ref _bag);
+
+        IsOnline = _model.IsOnline
+            .ToBindableReactiveProperty(_model.IsOnline.CurrentValue)
+            .AddTo(ref _bag);
+
+        IsOnline
+            .DistinctUntilChanged()
+            .Subscribe(isOnline => _model.SetOnline(isOnline))
+            .AddTo(ref _bag);
+
+        IsRelayCapable = _model.IsRelayCapable
+            .ToBindableReactiveProperty(_model.IsRelayCapable.CurrentValue)
+            .AddTo(ref _bag);
+
+        IsRelayCapable
+            .DistinctUntilChanged()
+            .Subscribe(isRelay => _model.SetRelayCapable(isRelay))
+            .AddTo(ref _bag);
+
+        PublicKeyHashHex = new BindableReactiveProperty<string>(string.Empty).AddTo(ref _bag);
+        PublicKeyHashShort = PublicKeyHashHex
+            .Select(x => string.IsNullOrWhiteSpace(x) ? string.Empty : (x.Length <= 16 ? x : x[..16] + "…"))
+            .ToBindableReactiveProperty(string.Empty)
+            .AddTo(ref _bag);
+
+        IncludeOneTimeKeys = new BindableReactiveProperty<bool>(true).AddTo(ref _bag);
+        OneTimeKeyCount = new BindableReactiveProperty<int>(5).AddTo(ref _bag);
+
+        PublishTargetPeerId = new BindableReactiveProperty<Guid?>(null).AddTo(ref _bag);
+
+        var toggleOnline = Observable.Return(true).ToReactiveCommand<Unit>(_ => { });
+        toggleOnline.AsObservable().Subscribe(_ => _model.SetOnline(!_model.IsOnline.CurrentValue)).AddTo(ref _bag);
+        ToggleOnlineCommand = toggleOnline.AddTo(ref _bag);
+
+        var toggleRelay = Observable.Return(true).ToReactiveCommand<Unit>(_ => { });
+        toggleRelay.AsObservable().Subscribe(_ => _model.SetRelayCapable(!_model.IsRelayCapable.CurrentValue)).AddTo(ref _bag);
+        ToggleRelayCapableCommand = toggleRelay.AddTo(ref _bag);
+
+        var copy = Observable.Return(true).ToReactiveCommand<Unit>(_ => { });
+        copy.AsObservable().Subscribe(_ => ExecuteCopyPkh()).AddTo(ref _bag);
+        CopyPublicKeyHashCommand = copy.AddTo(ref _bag);
+
+        var publish = PublishTargetPeerId.Select(id => id is not null).ToReactiveCommand<Unit>(_ => { });
+        publish.AsObservable().SubscribeAwait(async (_, ct) => await ExecutePublishAsync(ct), AwaitOperation.Drop).AddTo(ref _bag);
+        PublishKeysCommand = publish.AddTo(ref _bag);
+
+        PublishedToTags = new ObservableCollection<RelationshipTagViewModel>();
+        HostingForTags = new ObservableCollection<RelationshipTagViewModel>();
+
+        AvailablePublishTargets = new ObservableCollection<PublishTargetOption>();
+
+        _ = InitializeAsync();
+    }
+
+    public Guid PeerId => _model.PeerId;
+
+    public BindableReactiveProperty<string> DisplayName { get; }
+
+    public BindableReactiveProperty<bool> IsOnline { get; }
+
+    public BindableReactiveProperty<bool> IsRelayCapable { get; }
+
+    public BindableReactiveProperty<string> PublicKeyHashHex { get; }
+
+    public BindableReactiveProperty<string> PublicKeyHashShort { get; }
+
+    public BindableReactiveProperty<Guid?> PublishTargetPeerId { get; }
+
+    public BindableReactiveProperty<bool> IncludeOneTimeKeys { get; }
+
+    public BindableReactiveProperty<int> OneTimeKeyCount { get; }
+
+    public ObservableCollection<RelationshipTagViewModel> PublishedToTags { get; }
+
+    public ObservableCollection<RelationshipTagViewModel> HostingForTags { get; }
+
+    public ObservableCollection<PublishTargetOption> AvailablePublishTargets { get; }
+
+    public ReactiveCommand<Unit> ToggleOnlineCommand { get; }
+
+    public ReactiveCommand<Unit> ToggleRelayCapableCommand { get; }
+
+    public ReactiveCommand<Unit> CopyPublicKeyHashCommand { get; }
+
+    public ReactiveCommand<Unit> PublishKeysCommand { get; }
+
+    private async Task InitializeAsync()
+    {
+        try
+        {
+            var pkh = await _runtime.ComputePublicKeyHashAsync(_model.PeerId, CancellationToken.None).ConfigureAwait(false);
+            var hex = Convert.ToHexString(pkh);
+            await Application.Current.Dispatcher.InvokeAsync(() => PublicKeyHashHex.Value = hex);
+        }
+        catch
+        {
+            // ignore
+        }
+    }
+
+    private void ExecuteCopyPkh()
+    {
+        var text = PublicKeyHashHex.Value;
+        if (string.IsNullOrWhiteSpace(text)) return;
+        try { Clipboard.SetText(text); } catch { }
+    }
+
+    private async Task ExecutePublishAsync(CancellationToken ct)
+    {
+        var hostPeerId = PublishTargetPeerId.Value;
+        if (hostPeerId is null) return;
+
+        await _state.AddPublishedKeysRelationshipAsync(_model.PeerId, hostPeerId.Value, ct).ConfigureAwait(false);
+
+        // In our simulator, "publishing" means pushing a standard pre-key bundle into the host's pre-key store.
+        await _runtime.PublishStandardPreKeyBundleToRelayAsync(
+                simulatedPeerId: _model.PeerId,
+                relayHostPeerId: hostPeerId.Value,
+                expiresUtc: DateTimeOffset.UtcNow.AddHours(12),
+                includeOneTimeKeys: IncludeOneTimeKeys.Value,
+                oneTimeKeyCount: OneTimeKeyCount.Value,
+                cancellationToken: ct)
+            .ConfigureAwait(false);
+
+        _relationshipsChanged();
+    }
+
+    internal void RebuildRelationshipTags(SimulatedPeerDto dto, ReadOnlyObservableCollection<SimulatedPeerDto> allPeers)
+    {
+        PublishedToTags.Clear();
+        HostingForTags.Clear();
+
+        AvailablePublishTargets.Clear();
+        foreach (var p in allPeers.Where(p => p.PeerId != PeerId))
+        {
+            AvailablePublishTargets.Add(new PublishTargetOption(p.PeerId, _resolvePeerName(p.PeerId)));
+        }
+
+        dto.PublishedKeysToPeerIds ??= new();
+        foreach (var hostId in dto.PublishedKeysToPeerIds.Distinct().Where(x => x != PeerId))
+        {
+            var display = _resolvePeerName(hostId);
+            PublishedToTags.Add(new RelationshipTagViewModel(
+                peerId: hostId,
+                display: $"Published to: {display}",
+                onRemove: async ct =>
+                {
+                    await _state.RemovePublishedKeysRelationshipAsync(PeerId, hostId, ct).ConfigureAwait(false);
+                    _relationshipsChanged();
+                }));
+        }
+
+        foreach (var publisher in allPeers)
+        {
+            if (publisher.PeerId == PeerId) continue;
+            if (publisher.PublishedKeysToPeerIds?.Contains(PeerId) != true) continue;
+
+            var display = _resolvePeerName(publisher.PeerId);
+            HostingForTags.Add(new RelationshipTagViewModel(
+                peerId: publisher.PeerId,
+                display: $"Hosting keys for: {display}",
+                onRemove: async ct =>
+                {
+                    await _state.RemovePublishedKeysRelationshipAsync(publisher.PeerId, PeerId, ct).ConfigureAwait(false);
+                    _relationshipsChanged();
+                }));
+        }
+    }
+
+    public void Dispose()
+    {
+        _bag.Dispose();
+        DisplayName.Dispose();
+        IsOnline.Dispose();
+        IsRelayCapable.Dispose();
+        PublicKeyHashHex.Dispose();
+        PublishTargetPeerId.Dispose();
+        IncludeOneTimeKeys.Dispose();
+        OneTimeKeyCount.Dispose();
+    }
+
+    public sealed class RelationshipTagViewModel
+    {
+        private readonly Func<CancellationToken, Task> _remove;
+
+        public RelationshipTagViewModel(Guid peerId, string display, Func<CancellationToken, Task> onRemove)
+        {
+            PeerId = peerId;
+            Display = display;
+            _remove = onRemove;
+
+            var cmd = Observable.Return(true).ToReactiveCommand<Unit>(_ => { });
+            cmd.AsObservable().SubscribeAwait(async (_, ct) => await _remove(ct), AwaitOperation.Drop);
+            RemoveCommand = cmd;
+        }
+
+        public Guid PeerId { get; }
+
+        public string Display { get; }
+
+        public ReactiveCommand<Unit> RemoveCommand { get; }
+    }
+
+    public sealed class PublishTargetOption
+    {
+        public PublishTargetOption(Guid peerId, string display)
+        {
+            PeerId = peerId;
+            Display = display;
+        }
+
+        public Guid PeerId { get; }
+
+        public string Display { get; }
+    }
+}

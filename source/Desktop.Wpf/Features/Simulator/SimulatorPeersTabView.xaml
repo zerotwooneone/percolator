@@ -1,67 +1,95 @@
 <UserControl x:Class="Desktop.Wpf.Features.Simulator.SimulatorPeersTabView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-  <UserControl.Resources>
-    <BooleanToVisibilityConverter x:Key="BoolToVis" />
-  </UserControl.Resources>
+  <Grid Margin="16" RowDefinitions="Auto,*,Auto">
+    <DockPanel Grid.Row="0" Margin="0,0,0,12">
+      <StackPanel DockPanel.Dock="Left">
+        <TextBlock FontSize="18" FontWeight="SemiBold" Text="Peers" />
+        <TextBlock Margin="0,2,0,0" Foreground="Gray" Text="Manage simulated peers and pre-key publishing relationships." />
+      </StackPanel>
+      <Button DockPanel.Dock="Right" Content="Add Peer" Command="{Binding AddPeerCommand}" />
+    </DockPanel>
 
-  <Grid Margin="16" RowDefinitions="Auto,Auto,*,Auto" ColumnDefinitions="*,Auto">
+    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+      <ItemsControl ItemsSource="{Binding PeerCards}">
+        <ItemsControl.ItemsPanel>
+          <ItemsPanelTemplate>
+            <WrapPanel />
+          </ItemsPanelTemplate>
+        </ItemsControl.ItemsPanel>
 
-    <StackPanel Grid.Row="0" Grid.ColumnSpan="2" Orientation="Horizontal">
-      <TextBlock VerticalAlignment="Center" Margin="0,0,8,0" Text="New Peer:"/>
-      <TextBox Width="300" Margin="0,0,8,0" Text="{Binding NewPeerDisplayName.Value, UpdateSourceTrigger=PropertyChanged}"/>
-      <Button Content="Add" Command="{Binding AddPeerCommand}"/>
-    </StackPanel>
-
-    <StackPanel Grid.Row="0" Grid.ColumnSpan="2" Orientation="Horizontal" Margin="0,34,0,0">
-      <TextBlock VerticalAlignment="Center" Margin="0,0,8,0" Text="Relay:"/>
-      <ComboBox Width="300" ItemsSource="{Binding RelayOptions}" SelectedItem="{Binding SelectedRelayOption.Value}">
-        <ComboBox.ItemTemplate>
+        <ItemsControl.ItemTemplate>
           <DataTemplate>
-            <TextBlock Text="{Binding DisplayText}" />
+            <Border Width="330" Margin="0,0,12,12" Padding="12" BorderThickness="1" BorderBrush="#333" CornerRadius="8">
+              <StackPanel>
+                <DockPanel>
+                  <TextBlock DockPanel.Dock="Left" FontSize="15" FontWeight="SemiBold" Text="{Binding DisplayName.Value}" />
+                  <TextBlock DockPanel.Dock="Right" Foreground="#999" Text="{Binding PeerId}" />
+                </DockPanel>
+
+                <DockPanel Margin="0,10,0,0">
+                  <TextBlock DockPanel.Dock="Left" Foreground="#AAA" Text="PKH:" />
+                  <TextBlock DockPanel.Dock="Left" Margin="6,0,0,0" FontFamily="Consolas" Text="{Binding PublicKeyHashShort.Value}" />
+                  <Button DockPanel.Dock="Right" Content="Copy" Command="{Binding CopyPublicKeyHashCommand}" />
+                </DockPanel>
+
+                <StackPanel Margin="0,10,0,0" Orientation="Horizontal">
+                  <CheckBox VerticalAlignment="Center" IsChecked="{Binding IsRelayCapable.Value}" Content="Enable Relay" />
+                  <CheckBox VerticalAlignment="Center" Margin="16,0,0,0" IsChecked="{Binding IsOnline.Value}" Content="Online" />
+                </StackPanel>
+
+                <Separator Margin="0,10,0,10" />
+
+                <TextBlock FontWeight="SemiBold" Text="Publish keys" />
+                <DockPanel Margin="0,6,0,0">
+                  <ComboBox Width="220"
+                            ItemsSource="{Binding AvailablePublishTargets}"
+                            DisplayMemberPath="Display"
+                            SelectedValuePath="PeerId"
+                            SelectedValue="{Binding PublishTargetPeerId.Value}" />
+                  <Button DockPanel.Dock="Right" Content="Publish" Command="{Binding PublishKeysCommand}" />
+                </DockPanel>
+
+                <StackPanel Margin="0,8,0,0" Orientation="Horizontal">
+                  <CheckBox VerticalAlignment="Center" IsChecked="{Binding IncludeOneTimeKeys.Value}" Content="Include OTK" />
+                  <TextBlock VerticalAlignment="Center" Margin="12,0,6,0" Foreground="#AAA" Text="Count" />
+                  <TextBox Width="48" Text="{Binding OneTimeKeyCount.Value, UpdateSourceTrigger=PropertyChanged}" />
+                </StackPanel>
+
+                <StackPanel Margin="0,10,0,0">
+                  <TextBlock Foreground="#AAA" Text="Published to:" />
+                  <ItemsControl Margin="0,4,0,0" ItemsSource="{Binding PublishedToTags}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate>
+                        <DockPanel Margin="0,0,0,4">
+                          <TextBlock DockPanel.Dock="Left" Text="{Binding Display}" />
+                          <Button DockPanel.Dock="Right" Content="X" Command="{Binding RemoveCommand}" />
+                        </DockPanel>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </StackPanel>
+
+                <StackPanel Margin="0,10,0,0">
+                  <TextBlock Foreground="#AAA" Text="Hosting keys for:" />
+                  <ItemsControl Margin="0,4,0,0" ItemsSource="{Binding HostingForTags}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate>
+                        <DockPanel Margin="0,0,0,4">
+                          <TextBlock DockPanel.Dock="Left" Text="{Binding Display}" />
+                          <Button DockPanel.Dock="Right" Content="X" Command="{Binding RemoveCommand}" />
+                        </DockPanel>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </StackPanel>
+              </StackPanel>
+            </Border>
           </DataTemplate>
-        </ComboBox.ItemTemplate>
-      </ComboBox>
-    </StackPanel>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+    </ScrollViewer>
 
-    <TextBlock Grid.Row="1" Grid.ColumnSpan="2" Margin="0,10,0,0" TextWrapping="Wrap" Foreground="Gray" Text="Chunk A: manage simulated peers (add/remove, online toggle, relay-capable toggle). State is persisted under %AppData%/Percolator/simulator-state.json."/>
-
-    <ListBox Grid.Row="2" Grid.ColumnSpan="2" Margin="0,12,0,0" ItemsSource="{Binding Peers}" SelectedItem="{Binding SelectedPeer.Value}">
-      <ListBox.ItemTemplate>
-        <DataTemplate>
-          <DockPanel LastChildFill="False">
-            <DockPanel.ContextMenu>
-              <ContextMenu>
-                <MenuItem Header="Advanced">
-                  <MenuItem Header="Toggle Online" Command="{Binding ToggleOnlineCommand}" />
-                  <MenuItem Header="Toggle Relay-Capable" Command="{Binding ToggleRelayCapableCommand}" />
-                  <Separator />
-                  <MenuItem Header="Mark Outbound Pending" Command="{Binding MarkOutboundPendingCommand}" Visibility="{Binding ShowMarkOutboundPending.Value, Converter={StaticResource BoolToVis}}" />
-                  <MenuItem Header="Mark Inbound Pending" Command="{Binding MarkInboundPendingCommand}" Visibility="{Binding ShowMarkInboundPending.Value, Converter={StaticResource BoolToVis}}" />
-                  <MenuItem Header="Accept Inbound Pending" Command="{Binding AcceptInboundPendingCommand}" Visibility="{Binding ShowAcceptRejectInboundPending.Value, Converter={StaticResource BoolToVis}}" />
-                  <MenuItem Header="Reject Inbound Pending" Command="{Binding RejectInboundPendingCommand}" Visibility="{Binding ShowAcceptRejectInboundPending.Value, Converter={StaticResource BoolToVis}}" />
-                  <MenuItem Header="Mark Established" Command="{Binding MarkEstablishedCommand}" Visibility="{Binding ShowMarkEstablished.Value, Converter={StaticResource BoolToVis}}" />
-                  <MenuItem Header="Clear Runtime State" Command="{Binding ClearRuntimeStateCommand}" Visibility="{Binding ShowClearRuntimeState.Value, Converter={StaticResource BoolToVis}}" />
-                </MenuItem>
-              </ContextMenu>
-            </DockPanel.ContextMenu>
-            <TextBlock DockPanel.Dock="Left" Width="220" VerticalAlignment="Center" Text="{Binding DisplayText.Value}"/>
-            <TextBlock DockPanel.Dock="Left" Width="140" Margin="12,0,0,0" VerticalAlignment="Center" Text="{Binding RuntimeStateText.Value}"/>
-            <Button DockPanel.Dock="Right" Margin="8,0,0,0" Content="Remove" Command="{Binding RemoveCommand}"/>
-            <Button DockPanel.Dock="Right" Margin="8,0,0,0" Content="Fwd" Command="{Binding RelayForwardToMainCommand}"/>
-            <Button DockPanel.Dock="Right" Margin="8,0,0,0" Content="InvR" Command="{Binding MainInviteRelayedCommand}"/>
-            <Button DockPanel.Dock="Right" Margin="8,0,0,0" Content="Inv" Command="{Binding MainInviteDirectCommand}"/>
-            <Button DockPanel.Dock="Right" Margin="8,0,0,0" Content="PInvR" Command="{Binding PeerInviteRelayedCommand}"/>
-            <Button DockPanel.Dock="Right" Margin="8,0,0,0" Content="PInv" Command="{Binding PeerInviteDirectCommand}"/>
-          </DockPanel>
-        </DataTemplate>
-      </ListBox.ItemTemplate>
-    </ListBox>
-
-    <StackPanel Grid.Row="3" Grid.ColumnSpan="2" Orientation="Horizontal" HorizontalAlignment="Right">
-      <Button Margin="0,16,8,0" Content="Remove Selected" Command="{Binding RemoveSelectedPeerCommand}"/>
-      <TextBlock Margin="8,20,0,0" VerticalAlignment="Center" Text="{Binding Status.Value}"/>
-    </StackPanel>
-
+    <TextBlock Grid.Row="2" Margin="0,12,0,0" Foreground="#888" Text="{Binding Status.Value}" />
   </Grid>
 </UserControl>

@@ -26,6 +26,7 @@ public sealed class SimulatedPeerDto
     public bool IsOnline { get; set; } = true;
     public SimulatedPeerConnectionDto Connection { get; set; } = new();
     public List<Guid> KnownPeerIds { get; set; } = new();
+    public List<Guid> PublishedKeysToPeerIds { get; set; } = new();
     public SimulatedPeerPreKeyStateDto PreKeys { get; set; } = new();
     public SimulatedPeerRuntimeStoreDto RuntimeStore { get; set; } = new();
     public SimulatedPeerRelayStateDto Relay { get; set; } = new();
