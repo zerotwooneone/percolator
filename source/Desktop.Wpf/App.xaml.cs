@@ -129,6 +129,11 @@ public partial class App : Application
                 services.AddScoped<Desktop.Wpf.Features.Sessions.NewHandshakeDialogViewModel>();
                 services.AddScoped<Desktop.Wpf.Features.Sessions.SessionShellViewModel>();
                 services.AddScoped<Desktop.Wpf.Features.Simulator.HandshakeSimulatorViewModel>();
+                services.AddScoped<Desktop.Wpf.Features.Simulator.SimulatorPeersTabViewModel>();
+                services.AddScoped<Desktop.Wpf.Features.Simulator.SimulatorHandshakesTabViewModel>();
+                services.AddScoped<Desktop.Wpf.Features.Simulator.SimulatorRelayTabViewModel>();
+                services.AddScoped<Desktop.Wpf.Features.Simulator.SimulatorSessionsTabViewModel>();
+                services.AddScoped<Desktop.Wpf.Features.Simulator.SimulatorDiagnosticsTabViewModel>();
                 services.AddSingleton<Desktop.Wpf.Features.Shell.IIdentityScopeAccessor, Desktop.Wpf.Features.Shell.IdentityScopeAccessor>();
                 services.AddSingleton<Desktop.Wpf.Shared.Windowing.IWindowViewRegistry, Desktop.Wpf.Shared.Windowing.WindowViewRegistry>();
                 services.AddSingleton<IWindowManager, WindowManager>();
@@ -153,7 +158,7 @@ public partial class App : Application
                 services.AddSingleton<SelfIdentityModel>();
                 services.AddScoped<IStartupIdentityService, StartupIdentityService>();
                 // Identity repositories (in-memory fakes for desktop)
-                services.AddSingleton<Percolator.Identity.IPeerIdentityRepository, Percolator.Infrastructure.Repositories.SqlitePeerIdentityRepository>();
+                services.AddScoped<Percolator.Identity.IPeerIdentityRepository, Percolator.Infrastructure.Repositories.SqlitePeerIdentityRepository>();
 
                 // Startup views
                 services.AddSingleton<Desktop.Wpf.Features.Shell.NewUserViewModel>();
