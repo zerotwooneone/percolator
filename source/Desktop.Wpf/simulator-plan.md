@@ -866,7 +866,7 @@ Direct:
 
 Relayed:
 - Transport plug-in (Chunk E) intercepts outbound relay enqueue destined for the simulated peer and puts opaque bytes into the relay emulator.
-- Simulated peer fetches, processes `HandshakeInitiatorHello`, and returns the responder’s first ratchet message.
+- Simulated peer fetches, processes `HandshakeInitiatorHello`, and optionally returns the responder’s first ratchet message.
 
 Existing initiator-finalize path to reuse:
 - When the initiator later receives the responder’s first ratchet message through relay, it can be finalized using:
