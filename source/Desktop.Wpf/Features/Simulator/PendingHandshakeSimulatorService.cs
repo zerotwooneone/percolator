@@ -8,7 +8,6 @@ using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Percolator.Application.Network;
 using Percolator.Contracts;
-using Percolator.Cryptography;
 using Percolator.Cryptography.Primitives;
 
 namespace Desktop.Wpf.Features.Simulator;
@@ -35,9 +34,12 @@ public sealed record SimulatedPeerSnapshot(
 
 public sealed class PendingHandshakeSimulatorService : IPendingHandshakeSimulatorService
 {
+    private const int SelfIdentityIdBase = 99000;
+
     private sealed class SimulatedPeer
     {
         public required RequestCorrelationId CorrelationId;
+        public required Percolator.Identity.SelfId SelfIdentityId;
         public string? DisplayName;
         public SimulatedPeerState State;
     }
@@ -49,6 +51,8 @@ public sealed class PendingHandshakeSimulatorService : IPendingHandshakeSimulato
 
     private readonly Dictionary<Guid, SimulatedPeer> _peersByCorrelation = new();
     private readonly HashSet<string> _seenOutbound = new(StringComparer.Ordinal);
+
+    private int _nextSelfIdentityId = SelfIdentityIdBase - 1;
 
     public PendingHandshakeSimulatorService(
         IEstablishDirectSessionService establish,
@@ -65,6 +69,8 @@ public sealed class PendingHandshakeSimulatorService : IPendingHandshakeSimulato
     public async Task<RequestCorrelationId> AddSyntheticPendingAsync(string? displayName = null, CancellationToken ct = default)
     {
         var correlation = new RequestCorrelationId(Guid.NewGuid());
+
+        var selfIdentityId = new Percolator.Identity.SelfId(Interlocked.Increment(ref _nextSelfIdentityId));
 
         // Inviter identity key (ECDSA P-256)
         using var inviterEcdsa = ECDsa.Create(ECCurve.NamedCurves.nistP256);
@@ -97,11 +103,12 @@ public sealed class PendingHandshakeSimulatorService : IPendingHandshakeSimulato
         var payloadBytes = payload.ToByteArray();
         var payloadSig = inviterEcdsa.SignData(payloadBytes, HashAlgorithmName.SHA256);
 
-        _ = await _establish.QueueInviteAsync(inviterSpki, payloadBytes, payloadSig, isRelayed: false, ct).ConfigureAwait(false);
+        _ = await _establish.QueueInviteAsync(selfIdentityId, inviterSpki, payloadBytes, payloadSig, isRelayed: false, ct).ConfigureAwait(false);
 
         _peersByCorrelation[correlation.Value] = new SimulatedPeer
         {
             CorrelationId = correlation,
+            SelfIdentityId = selfIdentityId,
             DisplayName = displayName,
             State = SimulatedPeerState.PendingInvite
         };
@@ -120,6 +127,8 @@ public sealed class PendingHandshakeSimulatorService : IPendingHandshakeSimulato
 
             var correlation = new RequestCorrelationId(Guid.NewGuid());
             var display = $"SimPeer-{correlation.Value.ToString()[..8]}";
+
+            var selfIdentityId = new Percolator.Identity.SelfId(Interlocked.Increment(ref _nextSelfIdentityId));
 
             // Inviter identity key (ECDSA P-256)
             using var inviterEcdsa = ECDsa.Create(ECCurve.NamedCurves.nistP256);
@@ -153,11 +162,12 @@ public sealed class PendingHandshakeSimulatorService : IPendingHandshakeSimulato
             var payloadSig = inviterEcdsa.SignData(payloadBytes, HashAlgorithmName.SHA256);
 
             // Inject via real reverse-signal ingress path.
-            _ = await _establish.QueueInviteAsync(inviterSpki, payloadBytes, payloadSig, isRelayed: false, ct).ConfigureAwait(false);
+            _ = await _establish.QueueInviteAsync(selfIdentityId, inviterSpki, payloadBytes, payloadSig, isRelayed: false, ct).ConfigureAwait(false);
 
             _peersByCorrelation[correlation.Value] = new SimulatedPeer
             {
                 CorrelationId = correlation,
+                SelfIdentityId = selfIdentityId,
                 DisplayName = display,
                 State = SimulatedPeerState.PendingInvite
             };

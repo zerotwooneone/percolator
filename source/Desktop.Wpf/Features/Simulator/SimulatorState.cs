@@ -21,6 +21,7 @@ public sealed class GroupConversationDto
 public sealed class SimulatedPeerDto
 {
     public Guid PeerId { get; set; }
+    public int SelfIdentityId { get; set; }
     public string? DisplayName { get; set; }
     public bool IsOnline { get; set; } = true;
     public SimulatedPeerConnectionDto Connection { get; set; } = new();

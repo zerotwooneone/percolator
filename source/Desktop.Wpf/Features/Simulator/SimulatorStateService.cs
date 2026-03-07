@@ -50,6 +50,8 @@ public interface ISimulatorStateService
 
 public sealed class SimulatorStateService : ISimulatorStateService
 {
+    private const int SelfIdentityIdBase = 99000;
+
     private readonly ISimulatorStateStore _store;
     private readonly ISimulatedPeerKeyFactory _keys;
     private readonly IOptions<TransportOptions> _transportOptions;
@@ -58,6 +60,8 @@ public sealed class SimulatorStateService : ISimulatorStateService
     public ReadOnlyObservableCollection<SimulatedPeerDto> Peers { get; }
 
     private SimulatorStateDto _state = new();
+
+    private int _nextSelfIdentityId = SelfIdentityIdBase - 1;
 
     public SimulatorStateService(ISimulatorStateStore store, ISimulatedPeerKeyFactory keys, IOptions<TransportOptions> transportOptions)
     {
@@ -74,11 +78,26 @@ public sealed class SimulatorStateService : ISimulatorStateService
 
         var changed = false;
 
+        // Seed allocator from the maximum existing (valid) SelfIdentityId.
+        foreach (var p in _state.Peers)
+        {
+            if (p.SelfIdentityId >= SelfIdentityIdBase && p.SelfIdentityId > _nextSelfIdentityId)
+            {
+                _nextSelfIdentityId = p.SelfIdentityId;
+            }
+        }
+
         await InvokeOnUiAsync(() =>
         {
             _peers.Clear();
             foreach (var p in _state.Peers)
             {
+                if (p.SelfIdentityId < SelfIdentityIdBase)
+                {
+                    p.SelfIdentityId = Interlocked.Increment(ref _nextSelfIdentityId);
+                    changed = true;
+                }
+
                 NormalizePeer(p, _transportOptions.Value);
                 changed |= _keys.EnsureReverseSignalKeys(p.ReverseSignalKeys);
                 _peers.Add(p);
@@ -101,6 +120,7 @@ public sealed class SimulatorStateService : ISimulatorStateService
         var peer = new SimulatedPeerDto
         {
             PeerId = peerId,
+            SelfIdentityId = Interlocked.Increment(ref _nextSelfIdentityId),
             DisplayName = string.IsNullOrWhiteSpace(displayName) ? null : displayName,
             IsOnline = true,
             Connection = new SimulatedPeerConnectionDto { Mode = ConnectionMode.Direct },

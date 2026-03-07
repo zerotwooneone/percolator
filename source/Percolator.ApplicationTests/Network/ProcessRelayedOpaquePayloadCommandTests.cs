@@ -65,6 +65,7 @@ public class ProcessRelayedOpaquePayloadCommandTests
         };
 
         establish.Setup(x => x.QueueInviteAsync(
+                It.IsAny<SelfId>(),
                 It.IsAny<byte[]>(),
                 It.IsAny<byte[]>(),
                 It.IsAny<byte[]>(),
@@ -140,7 +141,7 @@ public class ProcessRelayedOpaquePayloadCommandTests
 
         var standardIngress = new Mock<IStandardHandshakeIngress>(MockBehavior.Strict);
         standardIngress
-            .Setup(x => x.HandleAsync(It.IsAny<EstablishSessionRequest>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.HandleAsync(It.IsAny<SelfId>(), It.IsAny<EstablishSessionRequest>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new EstablishSessionResponse { Version = 1, Never = new EstablishSessionResponse.Types.Never { Version = 1 } })
             .Verifiable();
 

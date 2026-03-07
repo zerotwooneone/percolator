@@ -8,7 +8,6 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using NUnit.Framework;
 using MediatR;
-using Percolator.Application.Identity;
 using Percolator.Application.Network;
 using Percolator.Application.ReverseSignal;
 using Percolator.ApplicationTests.Services;
@@ -27,18 +26,17 @@ namespace Percolator.ApplicationTests.Network
         {
             // Arrange
             var logger = new NullLogger<EstablishDirectSessionService>();
-            var active = new ActiveIdentityContext
-            {
-                Identity = new IdentityRecord(Guid.NewGuid(), "Server") { SelfIdentityId = new SelfId(7) },
-                Keys = new X3dhKeys(
+            var selfId = new SelfId(7);
+            var keysStore = new Mock<ISelfIdentityKeysStore>(MockBehavior.Strict);
+            keysStore
+                .Setup(s => s.LoadAsync(selfId, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new X3dhKeys(
                     IdentitySigningKey: ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
-                    SignedPreKey: ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256))
-            };
+                    SignedPreKey: ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256)));
             var peerRepo = new Mock<IPeerIdentityRepository>(MockBehavior.Loose);
             var signing = new Mock<Percolator.Network.ISigningService>(MockBehavior.Loose);
             var pendingRepo = new Mock<IPendingSessionRepository>(MockBehavior.Loose);
             var mediator = new Mock<IMediator>(MockBehavior.Loose);
-            var activeAccessor = Mock.Of<IActiveIdentityAccessor>(a => a.IsActive == true);
             var clock = new TestClock();
             var callbackValidator = new Mock<ICallbackEndpointValidator>(MockBehavior.Loose);
 
@@ -88,8 +86,7 @@ namespace Percolator.ApplicationTests.Network
 
             var svc = new EstablishDirectSessionService(
                 logger,
-                activeAccessor,
-                active,
+                keysStore.Object,
                 peerRepo.Object,
                 signing.Object,
                 pendingRepo.Object,
@@ -98,7 +95,7 @@ namespace Percolator.ApplicationTests.Network
                 callbackValidator.Object);
 
             // Act
-            _ = await svc.QueueInviteAsync(aliceSpki, payloadBytes, payloadSignatureBytes, isRelayed: false, CancellationToken.None);
+            _ = await svc.QueueInviteAsync(selfId, aliceSpki, payloadBytes, payloadSignatureBytes, isRelayed: false, CancellationToken.None);
 
             // Assert
             peerRepo.Verify(r => r.SaveAsync(It.IsAny<PeerIdentity>(), It.IsAny<CancellationToken>()), Times.Once);
@@ -111,19 +108,18 @@ namespace Percolator.ApplicationTests.Network
         {
             // Arrange
             var logger = new NullLogger<EstablishDirectSessionService>();
-            var active = new ActiveIdentityContext
-            {
-                Identity = new IdentityRecord(Guid.NewGuid(), "Server") { SelfIdentityId = new SelfId(7) },
-                Keys = new X3dhKeys(
+            var selfId = new SelfId(7);
+            var keysStore = new Mock<ISelfIdentityKeysStore>(MockBehavior.Strict);
+            keysStore
+                .Setup(s => s.LoadAsync(selfId, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new X3dhKeys(
                     IdentitySigningKey: ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
-                    SignedPreKey: ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256))
-            };
+                    SignedPreKey: ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256)));
             var peerRepo = new Mock<IPeerIdentityRepository>(MockBehavior.Loose);
             var signing = new Mock<Percolator.Network.ISigningService>(MockBehavior.Loose);
             var pendingRepo = new Mock<IPendingSessionRepository>(MockBehavior.Loose);
             var clock = new TestClock();
             var mediator = new Mock<IMediator>(MockBehavior.Loose);
-            var activeAccessor = Mock.Of<IActiveIdentityAccessor>(a => a.IsActive == true);
             var callbackValidator = new Mock<ICallbackEndpointValidator>(MockBehavior.Loose);
 
             using var aliceEcdsa = ECDsa.Create(ECCurve.NamedCurves.nistP256);
@@ -155,8 +151,7 @@ namespace Percolator.ApplicationTests.Network
 
             var svc = new EstablishDirectSessionService(
                 logger,
-                activeAccessor,
-                active,
+                keysStore.Object,
                 peerRepo.Object,
                 signing.Object,
                 pendingRepo.Object,
@@ -165,7 +160,7 @@ namespace Percolator.ApplicationTests.Network
                 callbackValidator.Object);
 
             // Act + Assert
-            Assert.ThrowsAsync<InvalidOperationException>(() => svc.QueueInviteAsync(aliceSpki, payloadBytes, payloadSignatureBytes, isRelayed: false, CancellationToken.None));
+            Assert.ThrowsAsync<InvalidOperationException>(() => svc.QueueInviteAsync(selfId, aliceSpki, payloadBytes, payloadSignatureBytes, isRelayed: false, CancellationToken.None));
 
             // Verify no side effects when signature invalid
             pendingRepo.Verify(r => r.AddAsync(It.IsAny<PendingSession>(), It.IsAny<CancellationToken>()), Times.Never);
@@ -177,19 +172,18 @@ namespace Percolator.ApplicationTests.Network
         {
             // Arrange
             var logger = new NullLogger<EstablishDirectSessionService>();
-            var active = new ActiveIdentityContext
-            {
-                Identity = new IdentityRecord(Guid.NewGuid(), "Server") { SelfIdentityId = new SelfId(7) },
-                Keys = new X3dhKeys(
+            var selfId = new SelfId(7);
+            var keysStore = new Mock<ISelfIdentityKeysStore>(MockBehavior.Strict);
+            keysStore
+                .Setup(s => s.LoadAsync(selfId, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new X3dhKeys(
                     IdentitySigningKey: ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
-                    SignedPreKey: ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256))
-            };
+                    SignedPreKey: ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256)));
             var peerRepo = new Mock<IPeerIdentityRepository>(MockBehavior.Loose);
             var signing = new Mock<Percolator.Network.ISigningService>(MockBehavior.Loose);
             var pendingRepo = new Mock<IPendingSessionRepository>(MockBehavior.Loose);
             var clock = new TestClock();
             var mediator = new Mock<IMediator>(MockBehavior.Loose);
-            var activeAccessor = Mock.Of<IActiveIdentityAccessor>(a => a.IsActive == true);
             var callbackValidator = new Mock<ICallbackEndpointValidator>(MockBehavior.Loose);
 
             using var inviterEcdsa = ECDsa.Create(ECCurve.NamedCurves.nistP256);
@@ -238,8 +232,7 @@ namespace Percolator.ApplicationTests.Network
 
             var svc = new EstablishDirectSessionService(
                 logger,
-                activeAccessor,
-                active,
+                keysStore.Object,
                 peerRepo.Object,
                 signing.Object,
                 pendingRepo.Object,
@@ -248,7 +241,7 @@ namespace Percolator.ApplicationTests.Network
                 callbackValidator.Object);
 
             // Act + Assert
-            Assert.ThrowsAsync<InvalidOperationException>(() => svc.QueueInviteAsync(inviterSpki, payloadBytes, payloadSignatureBytes, isRelayed: false, CancellationToken.None));
+            Assert.ThrowsAsync<InvalidOperationException>(() => svc.QueueInviteAsync(selfId, inviterSpki, payloadBytes, payloadSignatureBytes, isRelayed: false, CancellationToken.None));
 
             pendingRepo.Verify(r => r.AddAsync(It.IsAny<PendingSession>(), It.IsAny<CancellationToken>()), Times.Never);
             peerRepo.Verify(r => r.SaveAsync(It.IsAny<PeerIdentity>(), It.IsAny<CancellationToken>()), Times.Never);
@@ -260,19 +253,18 @@ namespace Percolator.ApplicationTests.Network
         {
             // Arrange
             var logger = new NullLogger<EstablishDirectSessionService>();
-            var active = new ActiveIdentityContext
-            {
-                Identity = new IdentityRecord(Guid.NewGuid(), "Server") { SelfIdentityId = new SelfId(7) },
-                Keys = new X3dhKeys(
+            var selfId = new SelfId(7);
+            var keysStore = new Mock<ISelfIdentityKeysStore>(MockBehavior.Strict);
+            keysStore
+                .Setup(s => s.LoadAsync(selfId, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new X3dhKeys(
                     IdentitySigningKey: ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
-                    SignedPreKey: ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256))
-            };
+                    SignedPreKey: ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256)));
             var peerRepo = new Mock<IPeerIdentityRepository>(MockBehavior.Loose);
             var signing = new Mock<Percolator.Network.ISigningService>(MockBehavior.Loose);
             var pendingRepo = new Mock<IPendingSessionRepository>(MockBehavior.Loose);
             var clock = new TestClock();
             var mediator = new Mock<IMediator>(MockBehavior.Loose);
-            var activeAccessor = Mock.Of<IActiveIdentityAccessor>(a => a.IsActive == true);
             var callbackValidator = new Mock<ICallbackEndpointValidator>(MockBehavior.Loose);
 
             using var inviterEcdsa = ECDsa.Create(ECCurve.NamedCurves.nistP256);
@@ -309,8 +301,7 @@ namespace Percolator.ApplicationTests.Network
 
             var svc = new EstablishDirectSessionService(
                 logger,
-                activeAccessor,
-                active,
+                keysStore.Object,
                 peerRepo.Object,
                 signing.Object,
                 pendingRepo.Object,
@@ -319,7 +310,7 @@ namespace Percolator.ApplicationTests.Network
                 callbackValidator.Object);
 
             // Act + Assert
-            Assert.ThrowsAsync<InvalidOperationException>(() => svc.QueueInviteAsync(inviterSpki, payloadBytes, payloadSignatureBytes, isRelayed: false, CancellationToken.None));
+            Assert.ThrowsAsync<InvalidOperationException>(() => svc.QueueInviteAsync(selfId, inviterSpki, payloadBytes, payloadSignatureBytes, isRelayed: false, CancellationToken.None));
 
             pendingRepo.Verify(r => r.AddAsync(It.IsAny<PendingSession>(), It.IsAny<CancellationToken>()), Times.Never);
             peerRepo.Verify(r => r.SaveAsync(It.IsAny<PeerIdentity>(), It.IsAny<CancellationToken>()), Times.Never);

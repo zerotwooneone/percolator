@@ -39,7 +39,12 @@ namespace Percolator.Application.Network
 
         public override Task<EstablishSessionResponse> EstablishSession(EstablishSessionRequest request, ServerCallContext context)
         {
-            return _standardHandshakeIngress.HandleAsync(request, context.CancellationToken);
+            if (_active.Identity is null)
+            {
+                throw new RpcException(new Status(StatusCode.FailedPrecondition, "Active identity not loaded."));
+            }
+
+            return _standardHandshakeIngress.HandleAsync(_active.Identity.SelfIdentityId, request, context.CancellationToken);
         }
 
         public override async Task<EstablishDirectSessionResponse> EstablishDirectSession(EstablishDirectSessionRequest request, ServerCallContext context)
@@ -62,7 +67,13 @@ namespace Percolator.Application.Network
             RequestCorrelationId requestCorrelationId;
             try
             {
+                if (_active.Identity is null)
+                {
+                    throw new RpcException(new Status(StatusCode.FailedPrecondition, "Active identity not loaded."));
+                }
+
                 requestCorrelationId = await _establishService.QueueInviteAsync(
+                        _active.Identity.SelfIdentityId,
                         request.InviterIdentityKey.ToByteArray(),
                         request.Payload.ToByteArray(),
                         request.PayloadSignature.ToByteArray(),

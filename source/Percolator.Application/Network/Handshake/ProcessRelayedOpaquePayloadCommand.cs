@@ -163,7 +163,7 @@ namespace Percolator.Application.Network.Handshake
                         establish.OnetimePrekeyId = hello.OneTimePreKeyId;
                     }
 
-                    _ = await _standardHandshakeIngress.HandleAsync(establish, cancellationToken).ConfigureAwait(false);
+                    _ = await _standardHandshakeIngress.HandleAsync(selfIdentityId, establish, cancellationToken).ConfigureAwait(false);
                     return ProcessRelayedOpaquePayloadResponse.Success;
                 }
             }
@@ -182,6 +182,7 @@ namespace Percolator.Application.Network.Handshake
                     && req.HasPayloadSignature && req.PayloadSignature.Length > 0)
                 {
                     _ = await _establishDirectSessionService.QueueInviteAsync(
+                        selfIdentityId,
                         req.InviterIdentityKey.ToByteArray(),
                         req.Payload.ToByteArray(),
                         req.PayloadSignature.ToByteArray(),

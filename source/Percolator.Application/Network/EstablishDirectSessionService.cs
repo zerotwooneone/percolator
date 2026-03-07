@@ -4,7 +4,6 @@ using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.Logging;
 using MediatR;
-using Percolator.Application.Identity;
 using Percolator.Application.ReverseSignal;
 using Percolator.Contracts;
 using Percolator.Cryptography;
@@ -18,8 +17,7 @@ namespace Percolator.Application.Network
     internal sealed class EstablishDirectSessionService : IEstablishDirectSessionService
     {
         private readonly ILogger<EstablishDirectSessionService> _logger;
-        private readonly IActiveIdentityAccessor _activeIdentityAccessor;
-        private readonly ActiveIdentityContext _active;
+        private readonly ISelfIdentityKeysStore _keysStore;
         private readonly IPeerIdentityRepository _peerIdentityRepository;
         private readonly Percolator.Network.ISigningService _signingService;
         private readonly IPendingSessionRepository _pendingSessions;
@@ -29,8 +27,7 @@ namespace Percolator.Application.Network
 
         public EstablishDirectSessionService(
             ILogger<EstablishDirectSessionService> logger,
-            IActiveIdentityAccessor activeIdentityAccessor,
-            ActiveIdentityContext active,
+            ISelfIdentityKeysStore keysStore,
             IPeerIdentityRepository peerIdentityRepository,
             Percolator.Network.ISigningService signingService,
             IPendingSessionRepository pendingSessions,
@@ -39,8 +36,7 @@ namespace Percolator.Application.Network
             ICallbackEndpointValidator callbackEndpointValidator)
         {
             _logger = logger;
-            _activeIdentityAccessor = activeIdentityAccessor;
-            _active = active;
+            _keysStore = keysStore;
             _peerIdentityRepository = peerIdentityRepository;
             _signingService = signingService;
             _pendingSessions = pendingSessions;
@@ -50,6 +46,7 @@ namespace Percolator.Application.Network
         }
 
         public async Task<RequestCorrelationId> QueueInviteAsync(
+            SelfId selfIdentityId,
             byte[] inviterIdentityKeySpki,
             byte[] payloadBytes,
             byte[] payloadSignatureBytes,
@@ -71,9 +68,9 @@ namespace Percolator.Application.Network
                 throw new ArgumentException("payload signature required", nameof(payloadSignatureBytes));
             }
 
-            if (!_activeIdentityAccessor.IsActive || _active.Identity is null || _active.Keys is null)
+            var keys = await _keysStore.LoadAsync(selfIdentityId, cancellationToken).ConfigureAwait(false);
+            if (keys is null)
             {
-                _logger.LogError("Local peer identity has not been established. Cannot accept reverse-signal invite");
                 throw new InvalidOperationException("Server identity not initialized.");
             }
 

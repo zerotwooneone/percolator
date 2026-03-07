@@ -1,4 +1,5 @@
 using Percolator.Cryptography.Primitives;
+using Percolator.Identity;
 
 namespace Percolator.Application.Network;
 
@@ -8,6 +9,7 @@ namespace Percolator.Application.Network;
 public interface IEstablishDirectSessionService
 {
     Task<RequestCorrelationId> QueueInviteAsync(
+        SelfId selfIdentityId,
         byte[] inviterIdentityKeySpki,
         byte[] payloadBytes,
         byte[] payloadSignatureBytes,

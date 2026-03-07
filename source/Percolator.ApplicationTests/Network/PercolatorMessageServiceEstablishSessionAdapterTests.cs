@@ -9,6 +9,7 @@ using NUnit.Framework;
 using Percolator.Application.Identity;
 using Percolator.Application.Network;
 using Percolator.Contracts;
+using Percolator.Identity;
 
 namespace Percolator.ApplicationTests.Network;
 
@@ -32,10 +33,13 @@ public sealed class PercolatorMessageServiceEstablishSessionAdapterTests
         var standardIngress = new Mock<IStandardHandshakeIngress>(MockBehavior.Strict);
         var request = new EstablishSessionRequest { Version = 1 };
         standardIngress
-            .Setup(s => s.HandleAsync(request, It.IsAny<CancellationToken>()))
+            .Setup(s => s.HandleAsync(It.IsAny<SelfId>(), request, It.IsAny<CancellationToken>()))
             .ReturnsAsync(expected);
 
-        var active = new ActiveIdentityContext();
+        var active = new ActiveIdentityContext
+        {
+            Identity = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "t") { SelfIdentityId = new SelfId(1) }
+        };
         var sut = new PercolatorMessageService(logger, ingress, establish, inviteIngress, standardIngress.Object, active);
 
         var ctx = new ServerCallContextStub(

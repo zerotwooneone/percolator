@@ -20,7 +20,10 @@ public static class ServiceCollectionExtensions
         services.Configure<NodeOptions>(configuration.GetSection(NodeOptions.SectionName));
 
         // Register the adapter that bridges the Network and Cryptography domains
-        services.AddSingleton<ISigningService, SigningService>();
+        services.AddSingleton<Percolator.Network.ISigningService, SigningService>();
+
+        // Cryptography signing service is used by identity-scoped ingress paths (e.g., StandardHandshakeIngress)
+        services.AddSingleton<Percolator.Cryptography.ISigningService, Percolator.Cryptography.EcdsaSigningService>();
 
         // Register the core service from the Network domain library
         services.AddSingleton<IPeerDiscoveryService, PeerDiscoveryService>();

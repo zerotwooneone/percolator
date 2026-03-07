@@ -4,7 +4,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using Google.Protobuf;
 using Percolator.Contracts;
-using Percolator.Application.Identity;
 using Percolator.Application.KeyExchange;
 using Percolator.Cryptography;
 using Percolator.Cryptography.Primitives;
@@ -16,27 +15,24 @@ namespace Percolator.Application.Network;
 
 internal sealed class StandardHandshakeIngress : IStandardHandshakeIngress
 {
-    private readonly IActiveIdentityAccessor _activeIdentityAccessor;
-    private readonly ActiveIdentityContext _active;
+    private readonly ISelfIdentityKeysStore _keysStore;
     private readonly ISelfPreKeyBundleRepository _selfPreKeys;
     private readonly ISessionCrypto _sessionCrypto;
     private readonly ISessionRepository _sessions;
     private readonly IClock _clock;
     private readonly IPeerIdentityRepository _peerIdentityRepository;
-    private readonly Percolator.Network.ISigningService _signingService;
+    private readonly Percolator.Cryptography.ISigningService _signingService;
 
     public StandardHandshakeIngress(
-        IActiveIdentityAccessor activeIdentityAccessor,
-        ActiveIdentityContext active,
+        ISelfIdentityKeysStore keysStore,
         ISelfPreKeyBundleRepository selfPreKeys,
         ISessionCrypto sessionCrypto,
         ISessionRepository sessions,
         IClock clock,
         IPeerIdentityRepository peerIdentityRepository,
-        Percolator.Network.ISigningService signingService)
+        Percolator.Cryptography.ISigningService signingService)
     {
-        _activeIdentityAccessor = activeIdentityAccessor;
-        _active = active;
+        _keysStore = keysStore;
         _selfPreKeys = selfPreKeys;
         _sessionCrypto = sessionCrypto;
         _sessions = sessions;
@@ -45,13 +41,16 @@ internal sealed class StandardHandshakeIngress : IStandardHandshakeIngress
         _signingService = signingService;
     }
 
-    public async Task<EstablishSessionResponse> HandleAsync(EstablishSessionRequest request, CancellationToken ct = default)
+    public async Task<EstablishSessionResponse> HandleAsync(SelfId selfIdentityId, EstablishSessionRequest request, CancellationToken ct = default)
     {
         if (request is null) throw new ArgumentNullException(nameof(request));
         ct.ThrowIfCancellationRequested();
 
-        if (!_activeIdentityAccessor.IsActive || _active.Identity is null || _active.Keys is null)
-            throw new InvalidOperationException("Active identity not loaded.");
+        var keys = await _keysStore.LoadAsync(selfIdentityId, ct).ConfigureAwait(false);
+        if (keys is null)
+        {
+            throw new InvalidOperationException("Identity keys not loaded.");
+        }
 
         if (!request.HasIdentitySigningKey || request.IdentitySigningKey.Length == 0)
             throw new InvalidOperationException("identity_signing_key is required.");
@@ -86,8 +85,7 @@ internal sealed class StandardHandshakeIngress : IStandardHandshakeIngress
             throw new InvalidOperationException("prekey_id must be a GUID (16 bytes).", ex);
         }
 
-        var selfId = _active.Identity.SelfIdentityId.Value;
-        var spk = await _selfPreKeys.TryGetSignedPreKeyAsync(selfId, signedPreKeyId, ct).ConfigureAwait(false);
+        var spk = await _selfPreKeys.TryGetSignedPreKeyAsync(selfIdentityId.Value, signedPreKeyId, ct).ConfigureAwait(false);
         if (spk is null)
         {
             return new EstablishSessionResponse
@@ -110,13 +108,13 @@ internal sealed class StandardHandshakeIngress : IStandardHandshakeIngress
                 throw new InvalidOperationException("onetime_prekey_id must be a GUID (16 bytes).", ex);
             }
 
-            otkPriv = await _selfPreKeys.TryPopOneTimePreKeyPrivateAsync(selfId, otkId, ct).ConfigureAwait(false);
+            otkPriv = await _selfPreKeys.TryPopOneTimePreKeyPrivateAsync(selfIdentityId.Value, otkId, ct).ConfigureAwait(false);
         }
 
         var initiatorIdentityPublic = new RatchetIdentityKey(initiatorIdentitySpki);
         var initiatorEphemeralPublic = new RatchetEphemeralKey(request.EphemeralKey.ToByteArray());
 
-        var localIkPriv = new PrivatePreKey(_active.Keys.IdentitySigningKey.ExportECPrivateKey());
+        var localIkPriv = new PrivatePreKey(keys.IdentitySigningKey.ExportECPrivateKey());
         var localSpkPriv = new PrivatePreKey(spk.Value.spkPrivate);
         var localOtkPriv = otkPriv is null ? null : new PrivatePreKey(otkPriv);
 
@@ -147,7 +145,7 @@ internal sealed class StandardHandshakeIngress : IStandardHandshakeIngress
         };
 
         var responsePayloadBytes = responsePayload.ToByteArray();
-        var signature = _signingService.Sign(new Payload(responsePayloadBytes));
+        var signature = _signingService.Sign(responsePayloadBytes, keys.IdentitySigningKey);
 
         return new EstablishSessionResponse
         {
@@ -155,7 +153,7 @@ internal sealed class StandardHandshakeIngress : IStandardHandshakeIngress
             Response = new EstablishSessionResponse.Types.Response
             {
                 Version = 1,
-                IdentitySigningKey = ByteString.CopyFrom(_active.Keys.IdentitySigningKey.ExportSubjectPublicKeyInfo()),
+                IdentitySigningKey = ByteString.CopyFrom(keys.IdentitySigningKey.ExportSubjectPublicKeyInfo()),
                 ResponsePayload = ByteString.CopyFrom(responsePayloadBytes),
                 PayloadSignature = ByteString.CopyFrom(signature.Value)
             }
