@@ -1,4 +1,5 @@
 using System;
+using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
 using Google.Protobuf;
@@ -12,6 +13,7 @@ using Percolator.Application.Sessions;
 using Percolator.Contracts;
 using Percolator.Cryptography;
 using Percolator.Identity;
+using Percolator.Network;
 
 namespace Percolator.ApplicationTests.Network;
 
@@ -24,6 +26,8 @@ public class ProcessRelayedOpaquePayloadCommandTests
         var logger = Microsoft.Extensions.Logging.Abstractions.NullLogger<ProcessRelayedOpaquePayloadHandler>.Instance;
         var mediator = new Mock<IMediator>(MockBehavior.Strict);
         var secure = new Mock<Percolator.Application.Services.ISecureMessagingService>(MockBehavior.Strict);
+        var transport = new Mock<IMessageTransportService>(MockBehavior.Strict);
+        var directSessions = new Mock<Percolator.Application.Services.IDirectSessionLocator>(MockBehavior.Strict);
         var establish = new Mock<IEstablishDirectSessionService>(MockBehavior.Strict);
         var inviteIngress = new Mock<IInviteHandshakeResponseIngress>(MockBehavior.Strict);
         var standardIngress = new Mock<IStandardHandshakeIngress>(MockBehavior.Strict);
@@ -36,6 +40,8 @@ public class ProcessRelayedOpaquePayloadCommandTests
             logger,
             mediator.Object,
             secure.Object,
+            transport.Object,
+            directSessions.Object,
             establish.Object,
             inviteIngress.Object,
             standardIngress.Object);
@@ -50,6 +56,8 @@ public class ProcessRelayedOpaquePayloadCommandTests
         var logger = Microsoft.Extensions.Logging.Abstractions.NullLogger<ProcessRelayedOpaquePayloadHandler>.Instance;
         var mediator = new Mock<IMediator>(MockBehavior.Strict);
         var secure = new Mock<Percolator.Application.Services.ISecureMessagingService>(MockBehavior.Strict);
+        var transport = new Mock<IMessageTransportService>(MockBehavior.Strict);
+        var directSessions = new Mock<Percolator.Application.Services.IDirectSessionLocator>(MockBehavior.Strict);
         var activeAccessor = Mock.Of<IActiveIdentityAccessor>(a => a.IsActive == true);
         var active = new ActiveIdentityContext { Identity = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "t", null) { SelfIdentityId = new SelfId(1)} };
         var establish = new Mock<IEstablishDirectSessionService>(MockBehavior.Strict);
@@ -80,6 +88,8 @@ public class ProcessRelayedOpaquePayloadCommandTests
             logger,
             mediator.Object,
             secure.Object,
+            transport.Object,
+            directSessions.Object,
             establish.Object,
             inviteIngress.Object,
             standardIngress.Object);
@@ -96,6 +106,8 @@ public class ProcessRelayedOpaquePayloadCommandTests
         var logger = Microsoft.Extensions.Logging.Abstractions.NullLogger<ProcessRelayedOpaquePayloadHandler>.Instance;
         var mediator = new Mock<IMediator>(MockBehavior.Strict);
         var secure = new Mock<Percolator.Application.Services.ISecureMessagingService>(MockBehavior.Strict);
+        var transport = new Mock<IMessageTransportService>(MockBehavior.Strict);
+        var directSessions = new Mock<Percolator.Application.Services.IDirectSessionLocator>(MockBehavior.Strict);
         var establish = new Mock<IEstablishDirectSessionService>(MockBehavior.Strict);
         var inviteIngress = new Mock<IInviteHandshakeResponseIngress>(MockBehavior.Strict);
         var standardIngress = new Mock<IStandardHandshakeIngress>(MockBehavior.Strict);
@@ -120,6 +132,8 @@ public class ProcessRelayedOpaquePayloadCommandTests
             logger,
             mediator.Object,
             secure.Object,
+            transport.Object,
+            directSessions.Object,
             establish.Object,
             inviteIngress.Object,
             standardIngress.Object);
@@ -131,11 +145,13 @@ public class ProcessRelayedOpaquePayloadCommandTests
     }
 
     [Test]
-    public async Task NonRatchetPayload_HandshakeInitiatorHello_routes_to_standard_handshake_ingress()
+    public async Task NonRatchetPayload_HandshakeInitiatorHello_routes_to_standard_handshake_ingress_and_does_not_enqueue_when_no_response_payload()
     {
         var logger = Microsoft.Extensions.Logging.Abstractions.NullLogger<ProcessRelayedOpaquePayloadHandler>.Instance;
         var mediator = new Mock<IMediator>(MockBehavior.Strict);
         var secure = new Mock<Percolator.Application.Services.ISecureMessagingService>(MockBehavior.Strict);
+        var transport = new Mock<IMessageTransportService>(MockBehavior.Strict);
+        var directSessions = new Mock<Percolator.Application.Services.IDirectSessionLocator>(MockBehavior.Strict);
         var establish = new Mock<IEstablishDirectSessionService>(MockBehavior.Strict);
         var inviteIngress = new Mock<IInviteHandshakeResponseIngress>(MockBehavior.Strict);
 
@@ -160,6 +176,8 @@ public class ProcessRelayedOpaquePayloadCommandTests
             logger,
             mediator.Object,
             secure.Object,
+            transport.Object,
+            directSessions.Object,
             establish.Object,
             inviteIngress.Object,
             standardIngress.Object);
@@ -168,5 +186,102 @@ public class ProcessRelayedOpaquePayloadCommandTests
 
         Assert.That(result.WasSuccess, Is.True);
         standardIngress.VerifyAll();
+        directSessions.VerifyNoOtherCalls();
+        secure.VerifyNoOtherCalls();
+        transport.VerifyNoOtherCalls();
+    }
+
+    [Test]
+    public async Task NonRatchetPayload_HandshakeInitiatorHello_enqueues_establish_session_response_back_to_relay_host_when_response_payload_present()
+    {
+        var logger = Microsoft.Extensions.Logging.Abstractions.NullLogger<ProcessRelayedOpaquePayloadHandler>.Instance;
+        var mediator = new Mock<IMediator>(MockBehavior.Strict);
+        var secure = new Mock<Percolator.Application.Services.ISecureMessagingService>(MockBehavior.Strict);
+        var transport = new Mock<IMessageTransportService>(MockBehavior.Strict);
+        var directSessions = new Mock<Percolator.Application.Services.IDirectSessionLocator>(MockBehavior.Strict);
+        var establish = new Mock<IEstablishDirectSessionService>(MockBehavior.Strict);
+        var inviteIngress = new Mock<IInviteHandshakeResponseIngress>(MockBehavior.Strict);
+
+        var response = new EstablishSessionResponse
+        {
+            Version = 1,
+            Response = new EstablishSessionResponse.Types.Response
+            {
+                Version = 1,
+                ResponsePayload = ByteString.CopyFrom(new byte[] { 0xAA, 0xBB }),
+                IdentitySigningKey = ByteString.CopyFrom(new byte[] { 0x01 }),
+                PayloadSignature = ByteString.CopyFrom(new byte[] { 0x02 })
+            }
+        };
+
+        var standardIngress = new Mock<IStandardHandshakeIngress>(MockBehavior.Strict);
+        standardIngress
+            .Setup(x => x.HandleAsync(It.IsAny<SelfId>(), It.IsAny<EstablishSessionRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(response)
+            .Verifiable();
+
+        var helloSpki = new byte[] { 0x10, 0x11, 0x12, 0x13 };
+        var expectedPkh = SHA256.HashData(helloSpki);
+
+        var hello = new HandshakeInitiatorHello
+        {
+            Version = 1,
+            InitiatorIdentityKeySpki = ByteString.CopyFrom(helloSpki),
+            InitiatorEphemeralKeySpki = ByteString.CopyFrom(new byte[] { 0x20 }),
+            SignedPreKeyId = ByteString.CopyFromUtf8("spk-1")
+        };
+
+        var payload = new Percolator.Network.Payload(hello.ToByteArray());
+        var relayHost = new Percolator.Identity.PeerId(Guid.NewGuid());
+        var selfId = new SelfId(123);
+        var directSessionId = new DirectSessionId(Guid.NewGuid());
+
+        directSessions
+            .Setup(x => x.GetAsync(relayHost, selfId.Value, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(directSessionId)
+            .Verifiable();
+
+        Plaintext? capturedPlaintext = null;
+        var cipher = new SessionRatchetMessage(new byte[] { 0xC1, 0xC2 });
+        secure
+            .Setup(x => x.EncryptAsync(new SessionId(directSessionId.Value), It.IsAny<Plaintext>(), It.IsAny<CancellationToken>()))
+            .Callback<SessionId, Plaintext, CancellationToken>((_, pt, _) => capturedPlaintext = pt)
+            .ReturnsAsync(cipher)
+            .Verifiable();
+
+        transport
+            .Setup(x => x.SendMessageAsync(relayHost, directSessionId, cipher, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new DeliverOpaqueMessageResponse { Version = 1 })
+            .Verifiable();
+
+        var sut = new ProcessRelayedOpaquePayloadHandler(
+            logger,
+            mediator.Object,
+            secure.Object,
+            transport.Object,
+            directSessions.Object,
+            establish.Object,
+            inviteIngress.Object,
+            standardIngress.Object);
+
+        var result = await sut.Handle(new ProcessRelayedOpaquePayloadCommand(selfId, payload, relayHost), CancellationToken.None);
+
+        Assert.That(result.WasSuccess, Is.True);
+        standardIngress.VerifyAll();
+        directSessions.VerifyAll();
+        secure.VerifyAll();
+        transport.VerifyAll();
+
+        Assert.That(capturedPlaintext, Is.Not.Null);
+        var env = InternalEnvelope.Parser.ParseFrom(capturedPlaintext!.Value);
+        Assert.That(env.ApplicationPayloadCase, Is.EqualTo(InternalEnvelope.ApplicationPayloadOneofCase.MessageQueueEnvelope));
+        Assert.That(env.MessageQueueEnvelope.MessageCase, Is.EqualTo(MessageQueueEnvelope.MessageOneofCase.EnqueueOpaqueMessageRequest));
+
+        var req = env.MessageQueueEnvelope.EnqueueOpaqueMessageRequest;
+        Assert.That(req.HasRecipientPublicKeyHash, Is.True);
+        Assert.That(req.RecipientPublicKeyHash.ToByteArray(), Is.EqualTo(expectedPkh));
+
+        Assert.That(req.HasMessageBlob, Is.True);
+        Assert.That(req.MessageBlob.ToByteArray(), Is.EqualTo(response.ToByteArray()));
     }
 }

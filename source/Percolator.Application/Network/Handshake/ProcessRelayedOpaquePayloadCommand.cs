@@ -1,4 +1,5 @@
 using System;
+using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
 using Google.Protobuf;
@@ -32,6 +33,8 @@ namespace Percolator.Application.Network.Handshake
         private readonly ILogger<ProcessRelayedOpaquePayloadHandler> _logger;
         private readonly IMediator _mediator;
         private readonly ISecureMessagingService _secureMessaging;
+        private readonly IMessageTransportService _transport;
+        private readonly IDirectSessionLocator _directSessions;
         private readonly IEstablishDirectSessionService _establishDirectSessionService;
         private readonly IInviteHandshakeResponseIngress _inviteHandshakeResponseIngress;
         private readonly IStandardHandshakeIngress _standardHandshakeIngress;
@@ -54,6 +57,8 @@ namespace Percolator.Application.Network.Handshake
             ILogger<ProcessRelayedOpaquePayloadHandler> logger,
             IMediator mediator,
             ISecureMessagingService secureMessaging,
+            IMessageTransportService transport,
+            IDirectSessionLocator directSessions,
             IEstablishDirectSessionService establishDirectSessionService,
             IInviteHandshakeResponseIngress inviteHandshakeResponseIngress,
             IStandardHandshakeIngress standardHandshakeIngress)
@@ -61,6 +66,8 @@ namespace Percolator.Application.Network.Handshake
             _logger = logger;
             _mediator = mediator;
             _secureMessaging = secureMessaging;
+            _transport = transport;
+            _directSessions = directSessions;
             _establishDirectSessionService = establishDirectSessionService;
             _inviteHandshakeResponseIngress = inviteHandshakeResponseIngress;
             _standardHandshakeIngress = standardHandshakeIngress;
@@ -85,7 +92,7 @@ namespace Percolator.Application.Network.Handshake
             catch
             {
                 // Not a valid ratchet message: try known non-session payload types (still opaque to relay).
-                return await TryHandleNonSessionPayloadAsync(request.SelfIdentityId, request.OpaquePayload.Value, cancellationToken).ConfigureAwait(false);
+                return await TryHandleNonSessionPayloadAsync(request.SelfIdentityId, request.RelayHostPeerId, request.OpaquePayload.Value, cancellationToken).ConfigureAwait(false);
             }
 
             (RatchetEphemeralKey PreKey, ulong Counter, ulong PreviousChainLength) header;
@@ -96,7 +103,7 @@ namespace Percolator.Application.Network.Handshake
             catch (Exception drEx)
             {
                 // Not a valid ratchet message header: try known non-session payload types (still opaque to relay).
-                return await TryHandleNonSessionPayloadAsync(request.SelfIdentityId, request.OpaquePayload.Value, cancellationToken).ConfigureAwait(false);
+                return await TryHandleNonSessionPayloadAsync(request.SelfIdentityId, request.RelayHostPeerId, request.OpaquePayload.Value, cancellationToken).ConfigureAwait(false);
             }
 
             // Fast/slow path via SecureMessagingService
@@ -139,7 +146,11 @@ namespace Percolator.Application.Network.Handshake
             return ProcessRelayedOpaquePayloadResponse.Success;
         }
 
-        private async Task<ProcessRelayedOpaquePayloadResponse> TryHandleNonSessionPayloadAsync(SelfId selfIdentityId, byte[] bytes, CancellationToken cancellationToken)
+        private async Task<ProcessRelayedOpaquePayloadResponse> TryHandleNonSessionPayloadAsync(
+            SelfId selfIdentityId,
+            Percolator.Identity.PeerId relayHostPeerId,
+            byte[] bytes,
+            CancellationToken cancellationToken)
         {
             // Standard signal bootstrap delivered through dumb relay queue: HandshakeInitiatorHello bytes.
             try
@@ -163,7 +174,20 @@ namespace Percolator.Application.Network.Handshake
                         establish.OnetimePrekeyId = hello.OneTimePreKeyId;
                     }
 
-                    _ = await _standardHandshakeIngress.HandleAsync(selfIdentityId, establish, cancellationToken).ConfigureAwait(false);
+                    var response = await _standardHandshakeIngress.HandleAsync(selfIdentityId, establish, cancellationToken).ConfigureAwait(false);
+
+                    if (response?.Response is not null && response.Response.HasResponsePayload && response.Response.ResponsePayload.Length > 0)
+                    {
+                        var initiatorSpki = hello.InitiatorIdentityKeySpki.ToByteArray();
+                        var initiatorPkh = SHA256.HashData(initiatorSpki);
+                        await EnqueueResponseToRelayHostAsync(
+                                selfIdentityId,
+                                relayHostPeerId,
+                                initiatorPkh,
+                                response.ToByteArray(),
+                                cancellationToken)
+                            .ConfigureAwait(false);
+                    }
                     return ProcessRelayedOpaquePayloadResponse.Success;
                 }
             }
@@ -217,6 +241,49 @@ namespace Percolator.Application.Network.Handshake
             }
 
             return ProcessRelayedOpaquePayloadResponse.Failure;
+        }
+
+        private async Task EnqueueResponseToRelayHostAsync(
+            SelfId selfIdentityId,
+            Percolator.Identity.PeerId relayHostPeerId,
+            byte[] recipientPublicKeyHash,
+            byte[] messageBlob,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (recipientPublicKeyHash is null) throw new ArgumentNullException(nameof(recipientPublicKeyHash));
+            if (messageBlob is null) throw new ArgumentNullException(nameof(messageBlob));
+
+            var directSessionId = await _directSessions.GetAsync(relayHostPeerId, selfIdentityId.Value, cancellationToken).ConfigureAwait(false);
+            if (directSessionId is null)
+            {
+                _logger.LogWarning("Cannot enqueue standard handshake response to relay host {RelayHostPeerId}: no direct session", relayHostPeerId);
+                return;
+            }
+
+            var mqReq = new EnqueueOpaqueMessageRequest
+            {
+                Version = 1,
+                RecipientPublicKeyHash = ByteString.CopyFrom(recipientPublicKeyHash),
+                MessageBlob = ByteString.CopyFrom(messageBlob)
+            };
+
+            var env = new InternalEnvelope
+            {
+                MessageQueueEnvelope = new MessageQueueEnvelope
+                {
+                    Version = 1,
+                    EnqueueOpaqueMessageRequest = mqReq
+                }
+            };
+
+            var plain = new Plaintext(env.ToByteArray());
+            var sid = new Percolator.Cryptography.SessionId(directSessionId.Value.Value);
+            var cipher = await _secureMessaging.EncryptAsync(sid, plain, cancellationToken).ConfigureAwait(false);
+
+            _ = await _transport
+                .SendMessageAsync(relayHostPeerId, directSessionId.Value, cipher, cancellationToken)
+                .ConfigureAwait(false);
         }
     }
 
