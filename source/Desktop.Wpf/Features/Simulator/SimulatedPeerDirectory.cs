@@ -22,6 +22,9 @@ public sealed class SimulatedPeerDirectory : ISimulatedPeerDirectory
 {
     private readonly ISimulatorStateService _state;
 
+    private readonly object _initGate = new();
+    private Task? _initializeTask;
+
     private readonly ObservableCollection<SimulatedPeerModel> _peers = new();
     public ReadOnlyObservableCollection<SimulatedPeerModel> Peers { get; }
 
@@ -35,30 +38,56 @@ public sealed class SimulatedPeerDirectory : ISimulatedPeerDirectory
 
     public async Task InitializeAsync(CancellationToken ct = default)
     {
-        await _state.InitializeAsync(ct);
-
-        foreach (var existing in _peers.ToArray())
+        Task? inFlight;
+        lock (_initGate)
         {
-            existing.Dispose();
+            inFlight = _initializeTask;
+            if (inFlight is null || inFlight.IsCompleted)
+            {
+                _initializeTask = InitializeCoreAsync(ct);
+                inFlight = _initializeTask;
+            }
         }
 
-        _peers.Clear();
-        _byId.Clear();
+        await inFlight.ConfigureAwait(false);
+    }
 
-        foreach (var dto in _state.Peers)
+    private async Task InitializeCoreAsync(CancellationToken ct)
+    {
+        try
         {
-            var model = new SimulatedPeerModel(
-                dto.PeerId,
-                dto.DisplayName,
-                dto.IsOnline,
-                dto.Relay.IsRelayCapable,
-                dto.ReverseSignalKeys.IdentitySigningKeySpki,
-                dto.ReverseSignalKeys.IdentitySigningKeyPrivateKeyEcPrivateKey);
+            await _state.InitializeAsync(ct).ConfigureAwait(false);
 
-            _peers.Add(model);
-            _byId[model.PeerId] = model;
+            foreach (var existing in _peers.ToArray())
+            {
+                existing.Dispose();
+            }
 
-            WirePersistence(model);
+            _peers.Clear();
+            _byId.Clear();
+
+            foreach (var dto in _state.Peers)
+            {
+                var model = new SimulatedPeerModel(
+                    dto.PeerId,
+                    dto.DisplayName,
+                    dto.IsOnline,
+                    dto.Relay.IsRelayCapable,
+                    dto.ReverseSignalKeys.IdentitySigningKeySpki,
+                    dto.ReverseSignalKeys.IdentitySigningKeyPrivateKeyEcPrivateKey);
+
+                _peers.Add(model);
+                _byId[model.PeerId] = model;
+
+                WirePersistence(model);
+            }
+        }
+        finally
+        {
+            lock (_initGate)
+            {
+                _initializeTask = null;
+            }
         }
     }
 

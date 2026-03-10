@@ -52,25 +52,13 @@ public sealed class SimulatorDiagnosticsService : ISimulatorDiagnosticsService
     private const int MaxEvents = 2000;
 
     private readonly ObservableCollection<SimulatorDiagnosticEvent> _events = new();
-    private readonly Subject<SimulatorDiagnosticEvent> _subject = new();
-    private readonly DisposableBag _bag = new();
+    private readonly object _gate = new();
 
     public ObservableCollection<SimulatorDiagnosticEvent> Events { get; }
 
     public SimulatorDiagnosticsService()
     {
         Events = _events;
-
-        _subject
-            .ObserveOnCurrentSynchronizationContext()
-            .Subscribe(e =>
-            {
-                _events.Add(e);
-                while (_events.Count > MaxEvents)
-                {
-                    _events.RemoveAt(0);
-                }
-            });
     }
 
     public void Emit(
@@ -93,11 +81,28 @@ public sealed class SimulatorDiagnosticsService : ISimulatorDiagnosticsService
         var dispatcher = Application.Current?.Dispatcher;
         if (dispatcher is null || dispatcher.CheckAccess())
         {
-            _subject.OnNext(ev);
+            lock (_gate)
+            {
+                _events.Add(ev);
+                while (_events.Count > MaxEvents)
+                {
+                    _events.RemoveAt(0);
+                }
+            }
             return;
         }
 
-        _ = dispatcher.InvokeAsync(() => _subject.OnNext(ev));
+        _ = dispatcher.InvokeAsync(() =>
+        {
+            lock (_gate)
+            {
+                _events.Add(ev);
+                while (_events.Count > MaxEvents)
+                {
+                    _events.RemoveAt(0);
+                }
+            }
+        });
     }
 
     public void Clear()
@@ -108,7 +113,10 @@ public sealed class SimulatorDiagnosticsService : ISimulatorDiagnosticsService
             return;
         }
 
-        _events.Clear();
+        lock (_gate)
+        {
+            _events.Clear();
+        }
     }
 
     public IReadOnlyList<SimulatorDiagnosticEvent> GetRecentEvents(int max)
@@ -118,10 +126,19 @@ public sealed class SimulatorDiagnosticsService : ISimulatorDiagnosticsService
         var dispatcher = Application.Current?.Dispatcher;
         if (dispatcher is null || dispatcher.CheckAccess())
         {
-            return _events.TakeLast(max).ToList();
+            lock (_gate)
+            {
+                return _events.TakeLast(max).ToList();
+            }
         }
 
-        return dispatcher.Invoke(() => (IReadOnlyList<SimulatorDiagnosticEvent>)_events.TakeLast(max).ToList());
+        return dispatcher.Invoke(() =>
+        {
+            lock (_gate)
+            {
+                return (IReadOnlyList<SimulatorDiagnosticEvent>)_events.TakeLast(max).ToList();
+            }
+        });
     }
 }
 
@@ -129,6 +146,8 @@ public sealed class SimulatorDiagnosticsTabViewModel : IDisposable
 {
     private readonly ISimulatorDiagnosticsService _diagnostics;
     private readonly ISimulatorStateService _state;
+
+    private readonly Subject<Unit> _rebuildRequests = new();
 
     private readonly ObservableCollection<SimulatorDiagnosticEvent> _filtered = new();
     private DisposableBag _bag;
@@ -155,18 +174,23 @@ public sealed class SimulatorDiagnosticsTabViewModel : IDisposable
         clear.AsObservable().Subscribe(_ => Clear()).AddTo(ref _bag);
         ClearCommand = clear.AddTo(ref _bag);
 
-        _diagnosticsChangedHandler = (_, __) => RebuildFiltered();
+        _rebuildRequests
+            .Debounce(TimeSpan.FromMilliseconds(100), TimeProvider.System)
+            .Subscribe(_ => RebuildFiltered())
+            .AddTo(ref _bag);
+
+        _diagnosticsChangedHandler = (_, __) => _rebuildRequests.OnNext(Unit.Default);
         ((INotifyCollectionChanged)_diagnostics.Events).CollectionChanged += _diagnosticsChangedHandler;
 
-        SelectedPeerId.Skip(1).Subscribe(_ => RebuildFiltered()).AddTo(ref _bag);
-        SelectedRelayHostPeerId.Skip(1).Subscribe(_ => RebuildFiltered()).AddTo(ref _bag);
-        SelectedEventType.Skip(1).Subscribe(_ => RebuildFiltered()).AddTo(ref _bag);
+        SelectedPeerId.Skip(1).Subscribe(_ => _rebuildRequests.OnNext(Unit.Default)).AddTo(ref _bag);
+        SelectedRelayHostPeerId.Skip(1).Subscribe(_ => _rebuildRequests.OnNext(Unit.Default)).AddTo(ref _bag);
+        SelectedEventType.Skip(1).Subscribe(_ => _rebuildRequests.OnNext(Unit.Default)).AddTo(ref _bag);
 
         _peersChangedHandler = (_, __) => RefreshFilterOptions();
         ((INotifyCollectionChanged)_state.Peers).CollectionChanged += _peersChangedHandler;
 
         RefreshFilterOptions();
-        RebuildFiltered();
+        _rebuildRequests.OnNext(Unit.Default);
     }
 
     public ReadOnlyObservableCollection<SimulatorDiagnosticEvent> Events { get; }

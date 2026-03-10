@@ -77,7 +77,6 @@ public sealed class SimulatorRelayTabViewModel : IDisposable
     private async Task InitializeAsync(CancellationToken ct = default)
     {
         await _directory.InitializeAsync(ct).ConfigureAwait(false);
-        await _state.InitializeAsync(ct).ConfigureAwait(false);
 
         var dispatcher = Application.Current?.Dispatcher;
         if (dispatcher is null || dispatcher.CheckAccess())

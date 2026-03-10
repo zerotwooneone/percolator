@@ -11,6 +11,7 @@ using FluentAssertions;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using NUnit.Framework;
+using Percolator.Application.Network;
 using Percolator.Contracts;
 
 namespace Desktop.Wpf.Tests;

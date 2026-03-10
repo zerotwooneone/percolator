@@ -55,9 +55,6 @@ public sealed class SimulatorPeersTabViewModel : IDisposable
         {
             await _directory.InitializeAsync(ct);
 
-            // Ensure simulator state is loaded so relationship graph is available.
-            await _state.InitializeAsync(ct);
-
             var dispatcher = Application.Current?.Dispatcher;
             if (dispatcher is null || dispatcher.CheckAccess())
             {

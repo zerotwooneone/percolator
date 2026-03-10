@@ -68,6 +68,9 @@ public sealed class SimulatorStateService : ISimulatorStateService
 
     private SimulatorStateDto _state = new();
 
+    private readonly object _initGate = new();
+    private Task? _initializeTask;
+
     private int _nextSelfIdentityId = SelfIdentityIdBase - 1;
 
     public SimulatorStateService(
@@ -85,49 +88,75 @@ public sealed class SimulatorStateService : ISimulatorStateService
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
-        var loaded = await _store.LoadAsync(cancellationToken);
-        _state = loaded ?? new SimulatorStateDto { Version = 1 };
-
-        var changed = false;
-
-        // Seed allocator from the maximum existing (valid) SelfIdentityId.
-        foreach (var p in _state.Peers)
+        Task? inFlight;
+        lock (_initGate)
         {
-            if (p.SelfIdentityId >= SelfIdentityIdBase && p.SelfIdentityId > _nextSelfIdentityId)
+            inFlight = _initializeTask;
+            if (inFlight is null || inFlight.IsCompleted)
             {
-                _nextSelfIdentityId = p.SelfIdentityId;
+                _initializeTask = InitializeCoreAsync(cancellationToken);
+                inFlight = _initializeTask;
             }
         }
 
-        await InvokeOnUiAsync(() =>
+        await inFlight.ConfigureAwait(false);
+    }
+
+    private async Task InitializeCoreAsync(CancellationToken cancellationToken)
+    {
+        try
         {
-            _peers.Clear();
+            var loaded = await _store.LoadAsync(cancellationToken);
+            _state = loaded ?? new SimulatorStateDto { Version = 1 };
+
+            var changed = false;
+
+            // Seed allocator from the maximum existing (valid) SelfIdentityId.
             foreach (var p in _state.Peers)
             {
-                if (p.SelfIdentityId < SelfIdentityIdBase)
+                if (p.SelfIdentityId >= SelfIdentityIdBase && p.SelfIdentityId > _nextSelfIdentityId)
                 {
-                    p.SelfIdentityId = Interlocked.Increment(ref _nextSelfIdentityId);
-                    changed = true;
+                    _nextSelfIdentityId = p.SelfIdentityId;
                 }
-
-                NormalizePeer(p, _transportOptions.Value);
-                changed |= _keys.EnsureReverseSignalKeys(p.ReverseSignalKeys);
-                if (p.PublishedKeysToPeerIds is null)
-                {
-                    p.PublishedKeysToPeerIds = new();
-                    changed = true;
-                }
-                _peers.Add(p);
             }
-        });
 
-        if (loaded is null)
-        {
-            await _store.SaveAsync(_state, cancellationToken);
+            await InvokeOnUiAsync(() =>
+            {
+                _peers.Clear();
+                foreach (var p in _state.Peers)
+                {
+                    if (p.SelfIdentityId < SelfIdentityIdBase)
+                    {
+                        p.SelfIdentityId = Interlocked.Increment(ref _nextSelfIdentityId);
+                        changed = true;
+                    }
+
+                    NormalizePeer(p, _transportOptions.Value);
+                    changed |= _keys.EnsureReverseSignalKeys(p.ReverseSignalKeys);
+                    if (p.PublishedKeysToPeerIds is null)
+                    {
+                        p.PublishedKeysToPeerIds = new();
+                        changed = true;
+                    }
+                    _peers.Add(p);
+                }
+            });
+
+            if (loaded is null)
+            {
+                await _store.SaveAsync(_state, cancellationToken);
+            }
+            else if (changed)
+            {
+                await _store.SaveAsync(_state, cancellationToken);
+            }
         }
-        else if (changed)
+        finally
         {
-            await _store.SaveAsync(_state, cancellationToken);
+            lock (_initGate)
+            {
+                _initializeTask = null;
+            }
         }
     }
 
