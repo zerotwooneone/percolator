@@ -4,6 +4,7 @@ using System.Collections.ObjectModel;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Windows;
 using R3;
 
 namespace Desktop.Wpf.Features.Simulator;
@@ -58,29 +59,33 @@ public sealed class SimulatedPeerDirectory : ISimulatedPeerDirectory
         {
             await _state.InitializeAsync(ct).ConfigureAwait(false);
 
-            foreach (var existing in _peers.ToArray())
+            // WPF collection + models must be mutated on UI thread.
+            await InvokeOnUiAsync(() =>
             {
-                existing.Dispose();
-            }
+                foreach (var existing in _peers.ToArray())
+                {
+                    existing.Dispose();
+                }
 
-            _peers.Clear();
-            _byId.Clear();
+                _peers.Clear();
+                _byId.Clear();
 
-            foreach (var dto in _state.Peers)
-            {
-                var model = new SimulatedPeerModel(
-                    dto.PeerId,
-                    dto.DisplayName,
-                    dto.IsOnline,
-                    dto.Relay.IsRelayCapable,
-                    dto.ReverseSignalKeys.IdentitySigningKeySpki,
-                    dto.ReverseSignalKeys.IdentitySigningKeyPrivateKeyEcPrivateKey);
+                foreach (var dto in _state.Peers)
+                {
+                    var model = new SimulatedPeerModel(
+                        dto.PeerId,
+                        dto.DisplayName,
+                        dto.IsOnline,
+                        dto.Relay.IsRelayCapable,
+                        dto.ReverseSignalKeys.IdentitySigningKeySpki,
+                        dto.ReverseSignalKeys.IdentitySigningKeyPrivateKeyEcPrivateKey);
 
-                _peers.Add(model);
-                _byId[model.PeerId] = model;
+                    _peers.Add(model);
+                    _byId[model.PeerId] = model;
 
-                WirePersistence(model);
-            }
+                    WirePersistence(model);
+                }
+            }).ConfigureAwait(false);
         }
         finally
         {
@@ -104,24 +109,41 @@ public sealed class SimulatedPeerDirectory : ISimulatedPeerDirectory
             dto?.ReverseSignalKeys.IdentitySigningKeySpki ?? Array.Empty<byte>(),
             dto?.ReverseSignalKeys.IdentitySigningKeyPrivateKeyEcPrivateKey ?? Array.Empty<byte>());
 
-        _peers.Add(model);
-        _byId[peerId] = model;
-
-        WirePersistence(model);
+        await InvokeOnUiAsync(() =>
+        {
+            _peers.Add(model);
+            _byId[peerId] = model;
+            WirePersistence(model);
+        }).ConfigureAwait(false);
 
         return model;
     }
 
     public async Task RemovePeerAsync(Guid peerId, CancellationToken ct = default)
     {
-        if (_byId.TryGetValue(peerId, out var model))
+        await InvokeOnUiAsync(() =>
         {
-            _byId.Remove(peerId);
-            _peers.Remove(model);
-            model.Dispose();
+            if (_byId.TryGetValue(peerId, out var model))
+            {
+                _byId.Remove(peerId);
+                _peers.Remove(model);
+                model.Dispose();
+            }
+        }).ConfigureAwait(false);
+
+        await _state.RemovePeerAsync(peerId, ct).ConfigureAwait(false);
+    }
+
+    private static Task InvokeOnUiAsync(Action action)
+    {
+        var dispatcher = Application.Current?.Dispatcher;
+        if (dispatcher is null || dispatcher.CheckAccess())
+        {
+            action();
+            return Task.CompletedTask;
         }
 
-        await _state.RemovePeerAsync(peerId, ct);
+        return dispatcher.InvokeAsync(action).Task;
     }
 
     private void WirePersistence(SimulatedPeerModel model)
