@@ -59,6 +59,16 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
             .ToBindableReactiveProperty(string.Empty)
             .AddTo(ref _bag);
 
+        PublicKeyHashDisplay = PublicKeyHashHex
+            .Select(ToPkhDisplay)
+            .ToBindableReactiveProperty(string.Empty)
+            .AddTo(ref _bag);
+
+        RelayBadgeVisibility = IsRelayCapable
+            .Select(x => x ? Visibility.Visible : Visibility.Collapsed)
+            .ToBindableReactiveProperty(Visibility.Collapsed)
+            .AddTo(ref _bag);
+
         IncludeOneTimeKeys = new BindableReactiveProperty<bool>(true).AddTo(ref _bag);
         OneTimeKeyCount = new BindableReactiveProperty<int>(5).AddTo(ref _bag);
 
@@ -67,6 +77,10 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
         var toggleOnline = Observable.Return(true).ToReactiveCommand<Unit>(_ => { });
         toggleOnline.AsObservable().Subscribe(_ => _model.SetOnline(!_model.IsOnline.CurrentValue)).AddTo(ref _bag);
         ToggleOnlineCommand = toggleOnline.AddTo(ref _bag);
+
+        var togglePower = Observable.Return(true).ToReactiveCommand<Unit>(_ => { });
+        togglePower.AsObservable().Subscribe(_ => _model.SetOnline(!_model.IsOnline.CurrentValue)).AddTo(ref _bag);
+        TogglePowerCommand = togglePower.AddTo(ref _bag);
 
         var toggleRelay = Observable.Return(true).ToReactiveCommand<Unit>(_ => { });
         toggleRelay.AsObservable().Subscribe(_ => _model.SetRelayCapable(!_model.IsRelayCapable.CurrentValue)).AddTo(ref _bag);
@@ -100,6 +114,10 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
 
     public BindableReactiveProperty<string> PublicKeyHashShort { get; }
 
+    public BindableReactiveProperty<string> PublicKeyHashDisplay { get; }
+
+    public BindableReactiveProperty<Visibility> RelayBadgeVisibility { get; }
+
     public BindableReactiveProperty<Guid?> PublishTargetPeerId { get; }
 
     public BindableReactiveProperty<bool> IncludeOneTimeKeys { get; }
@@ -114,11 +132,23 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
 
     public ReactiveCommand<Unit> ToggleOnlineCommand { get; }
 
+    public ReactiveCommand<Unit> TogglePowerCommand { get; }
+
     public ReactiveCommand<Unit> ToggleRelayCapableCommand { get; }
 
     public ReactiveCommand<Unit> CopyPublicKeyHashCommand { get; }
 
     public ReactiveCommand<Unit> PublishKeysCommand { get; }
+
+    private static string ToPkhDisplay(string hex)
+    {
+        if (string.IsNullOrWhiteSpace(hex)) return string.Empty;
+        var x = hex.Trim();
+        if (x.Length <= 10) return "0x" + x;
+        var head = x[..4];
+        var tail = x[^3..];
+        return $"0x{head}...{tail}";
+    }
 
     private async Task InitializeAsync()
     {

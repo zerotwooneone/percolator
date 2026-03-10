@@ -41,4 +41,5 @@
   <system:String x:Key="IconUserAdd">&#xF234;</system:String>
   <system:String x:Key="IconCircleCheck">&#xF05D;</system:String>
   <system:String x:Key="IconFire">&#xF0238;</system:String>
+  <system:String x:Key="IconPower">&#xF011;</system:String>
 </ResourceDictionary>
