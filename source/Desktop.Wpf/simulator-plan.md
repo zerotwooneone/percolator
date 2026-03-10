@@ -431,3 +431,77 @@ Target files:
 
 ## Done when
 - You can follow an entire handshake + messaging flow by reading the Diagnostics tab.
+
+---
+
+# Chunk N — Targeted tests (requirements-focused, non-brittle)
+
+## Goal
+Add a small set of unit tests that prove the simulator’s hard requirements are met, without chasing total coverage.
+
+Testing principles (must follow `source/unit-testing.md`):
+- Assert public behavior / observable effects only.
+- AAA layout.
+- Avoid strict interaction checks unless the interaction *is* the requirement.
+- Prefer real DTOs/value objects; mock only external dependencies.
+
+## Work
+
+### Window lifecycle / scope correctness
+- `WindowManager.ShowFor<TViewModel>()` should be able to open-close-open the same window type without crashing.
+  - **Arrange:** build a `WindowManager` with a test `IWindowViewRegistry`, and an `IServiceProvider` that returns a *scoped* `Window`.
+  - **Act:** call `ShowFor<HandshakeSimulatorViewModel>()`, raise `Closed`, then call `ShowFor<HandshakeSimulatorViewModel>()` again.
+  - **Assert:** second call does not throw; a new window instance is created; per-window scope is disposed on close.
+
+### Simulator state initialization (race/coalescing)
+- `SimulatorStateService.InitializeAsync` should coalesce concurrent calls.
+  - **Arrange:** state service with a stub store that can detect multiple loads.
+  - **Act:** kick off multiple `InitializeAsync()` tasks concurrently.
+  - **Assert:** store `LoadAsync` executed once; `Peers` snapshot is correct.
+
+- `SimulatedPeerDirectory.InitializeAsync` should coalesce concurrent calls and mutate collections on dispatcher.
+  - **Arrange:** directory with a dispatcher-backed test harness; state seeded with peers.
+  - **Act:** call `InitializeAsync()` concurrently.
+  - **Assert:** peer models count matches DTO count; no cross-thread collection exceptions.
+
+### Diagnostics event sink invariants
+- `SimulatorDiagnosticsService` maintains a bounded buffer.
+  - **Arrange:** service.
+  - **Act:** emit `MaxEvents + N` events.
+  - **Assert:** `Events.Count` never exceeds `MaxEvents`; latest events are retained.
+
+- `SimulatorDiagnosticsService.Clear()` empties the log.
+  - **Act:** emit events then clear.
+  - **Assert:** `Events` is empty.
+
+### Diagnostics VM filtering behavior
+- `SimulatorDiagnosticsTabViewModel` filtering returns only matching events.
+  - **Arrange:** diagnostics service with seeded events and state with peers.
+  - **Act:** set `SelectedPeerId`, `SelectedRelayHostPeerId`, `SelectedEventType`.
+  - **Assert:** `Events` contains only matching items.
+
+### Export diagnostic bundle
+- `HandshakeSimulatorViewModel.ExportDiagnosticsCommand` produces JSON containing required top-level sections.
+  - **Arrange:** state with at least one peer, one relay-capable peer, one runtime store session, and diagnostics with recent events.
+  - **Act:** invoke export path via a test seam (clipboard abstraction or extracted bundle builder).
+  - **Assert:** JSON parses; includes `Peers`, `RelayQueueSummary`, `RecentEvents`, `SessionSummaries`.
+
+### Handshake state machine observable transitions
+- `SimulatedHandshakeStateMachineCardViewModel` emits `HandshakeStateTransition` events on:
+  - send request (OutboundPending)
+  - accept (Established)
+  - force expire (Expired)
+  - reset (NoHandshake)
+
+Tests should assert:
+- peer model runtime state changes are reflected in public reactive properties (badge text/state text)
+- diagnostics events are emitted with the expected `EventType` and peer context
+
+### Decrypt failure diagnostics
+- `SimulatedPeerRuntimeService` emits a `DecryptFailure` diagnostics event when decrypt throws.
+  - **Arrange:** runtime configured to throw on decrypt.
+  - **Act:** call decrypt entrypoint.
+  - **Assert:** diagnostics contains a `DecryptFailure` event with peer/session context.
+
+## Done when
+- The above tests exist and are stable under refactors (no assertions on private fields or internal call order).

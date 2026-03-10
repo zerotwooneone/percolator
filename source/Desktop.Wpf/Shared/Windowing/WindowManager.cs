@@ -59,7 +59,7 @@ public sealed class WindowManager : IWindowManager
         };
 
         _open[typeof(TWindow)] = new OpenWindowEntry(new WeakReference<Window>(window), scope);
-        if (Application.Current is { MainWindow: { } owner })
+        if (Application.Current is { MainWindow: { } owner } && !ReferenceEquals(owner, window))
             window.Owner = owner;
         window.Show();
         window.Activate();
@@ -125,7 +125,7 @@ public sealed class WindowManager : IWindowManager
         };
 
         _open[windowType] = new OpenWindowEntry(new WeakReference<Window>(window), scope);
-        if (Application.Current is { MainWindow: { } owner })
+        if (Application.Current is { MainWindow: { } owner } && !ReferenceEquals(owner, window))
             window.Owner = owner;
         window.Show();
         window.Activate();
