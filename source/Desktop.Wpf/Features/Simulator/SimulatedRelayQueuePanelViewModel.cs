@@ -168,9 +168,7 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
             }
 
             var mainId = _mainIdentityId();
-            var ordered = peer.Relay.OpaqueQueue.Items
-                .OrderBy(i => i.EnqueuedUtc)
-                .ToList();
+            var ordered = peer.Relay.OpaqueQueue.Items.ToList();
 
             _items.Clear();
             foreach (var i in ordered)
@@ -209,13 +207,13 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
         if (dispatcher is null || dispatcher.CheckAccess())
         {
             ct.ThrowIfCancellationRequested();
-            return Task.FromResult(_items.OrderBy(i => i.EnqueuedUtc).FirstOrDefault());
+            return Task.FromResult(_items.FirstOrDefault());
         }
 
         return dispatcher.InvokeAsync(() =>
         {
             ct.ThrowIfCancellationRequested();
-            return _items.OrderBy(i => i.EnqueuedUtc).FirstOrDefault();
+            return _items.FirstOrDefault();
         }).Task;
     }
 

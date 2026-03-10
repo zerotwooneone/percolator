@@ -19,6 +19,8 @@ public class SecureSession
     private readonly bool _isInitiator;
     private readonly ISessionCrypto _crypto;
 
+    public int SkippedKeysCount => _skippedBuffer.Count;
+
     private SecureSession(SessionId id, PeerId remotePeerId, ProtocolVersion protocolVersion, RatchetState state, ISessionCrypto crypto, DateTimeOffset now, bool isInitiator)
     {
         Id = id;

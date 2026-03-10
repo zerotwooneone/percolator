@@ -103,6 +103,70 @@ public sealed class SimulatedPeerRuntimeFinalizeRelayedTests
         public Task<bool> DeleteRelayOpaqueByAckIdAsync(Guid relayHostPeerId, Guid ackId, CancellationToken cancellationToken = default)
             => throw new NotImplementedException();
 
+        public Task<bool> MoveRelayOpaqueByAckIdAsync(Guid relayHostPeerId, Guid ackId, int delta, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (delta == 0) return Task.FromResult(false);
+
+            foreach (var kvp in _queues)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (kvp.Key.RelayHost != relayHostPeerId) continue;
+
+                var q = kvp.Value;
+                lock (q)
+                {
+                    var list = q.ToArray();
+                    var idx = Array.FindIndex(list, x => x.AckId == ackId);
+                    if (idx < 0) continue;
+
+                    var newIdx = idx + delta;
+                    if (newIdx < 0 || newIdx >= list.Length) return Task.FromResult(false);
+
+                    var item = list[idx];
+                    var tmp = new List<RelayQueuedBlobDto>(list);
+                    tmp.RemoveAt(idx);
+                    tmp.Insert(newIdx, item);
+
+                    q.Clear();
+                    foreach (var it in tmp) q.Enqueue(it);
+                    return Task.FromResult(true);
+                }
+            }
+
+            return Task.FromResult(false);
+        }
+
+        public Task<bool> CorruptRelayOpaqueByAckIdAsync(Guid relayHostPeerId, Guid ackId, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            foreach (var kvp in _queues)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (kvp.Key.RelayHost != relayHostPeerId) continue;
+
+                var q = kvp.Value;
+                lock (q)
+                {
+                    var list = q.ToArray();
+                    var idx = Array.FindIndex(list, x => x.AckId == ackId);
+                    if (idx < 0) continue;
+                    if (list[idx].OpaqueBytes is null || list[idx].OpaqueBytes.Length == 0) return Task.FromResult(false);
+
+                    var bytes = (byte[])list[idx].OpaqueBytes.Clone();
+                    bytes[0] = (byte)(bytes[0] ^ 0x01);
+                    list[idx].OpaqueBytes = bytes;
+
+                    q.Clear();
+                    foreach (var it in list) q.Enqueue(it);
+                    return Task.FromResult(true);
+                }
+            }
+
+            return Task.FromResult(false);
+        }
+
         public Task PublishPreKeyBundleAsync(
             Guid relayHostPeerId,
             byte[] recipientPublicKeyHash,

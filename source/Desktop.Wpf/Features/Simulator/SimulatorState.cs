@@ -55,6 +55,8 @@ public sealed class SimulatedSecureSessionDto
     public byte[]? RemoteRatchetKey { get; set; }
     public byte[]? DhRatchetPrivateKey { get; set; }
 
+    public int SkippedKeysCount { get; set; }
+
     public DateTimeOffset CreatedAtUtc { get; set; }
     public DateTimeOffset LastUsedAtUtc { get; set; }
 }

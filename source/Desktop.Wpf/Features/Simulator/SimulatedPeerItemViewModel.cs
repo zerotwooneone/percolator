@@ -14,6 +14,7 @@ namespace Desktop.Wpf.Features.Simulator;
 
 public sealed class SimulatedPeerItemViewModel : IDisposable
 {
+    private static readonly Guid MainNodeSentinelPeerId = new("88880000-0000-0000-0000-000000000000");
     private readonly ISimulatedPeerDirectory _directory;
     private readonly SimulatedPeerModel _model;
     private readonly ISimulatedPeerPendingInbox _pending;
@@ -235,7 +236,7 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
 
         var finalized = await _peerRuntime.TryFinalizeInviteHandshakeResponseFromMainAsync(
                 simulatedPeerId: _model.PeerId,
-                acceptorPeerId: _active.Identity.Id,
+                acceptorPeerId: MainNodeSentinelPeerId,
                 requestCorrelationId: corr.Value,
                 cancellationToken: ct)
             .ConfigureAwait(false);
@@ -266,7 +267,7 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
         }
 
         var invite = _inviteFactory.CreateInvite();
-        var inviterPeerId = _active.Identity.Id;
+        var inviterPeerId = MainNodeSentinelPeerId;
 
         var acceptance = await _peerRuntime.AcceptReverseSignalInviteAsync(
             simulatedPeerId: _model.PeerId,
@@ -308,7 +309,7 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
         }
 
         var req = EstablishDirectSessionRequest.Parser.ParseFrom(dequeued[0].OpaqueBytes);
-        var inviterPeerId = _active.Identity.Id;
+        var inviterPeerId = MainNodeSentinelPeerId;
 
         var acceptance = await _peerRuntime.AcceptReverseSignalInviteAsync(
             simulatedPeerId: _model.PeerId,
@@ -349,7 +350,7 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
 
         await _relay.ForwardQueuedToMainAsync(
             relayHostPeerId: relayPeerGuid,
-            recipientPeerId: _active.Identity.Id,
+            recipientPeerId: MainNodeSentinelPeerId,
             relayHostToMainSessionId: _sessionToMain,
             cancellationToken: ct).ConfigureAwait(false);
     }
@@ -384,7 +385,7 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
         var relayPeerGuid = relayPeerId.Value;
 
         var invite = CreatePeerToMainInvite();
-        return _relay.EnqueueToRelayHostAsync(relayPeerGuid, _active.Identity.Id, invite.ToByteArray(), debugType: nameof(EstablishDirectSessionRequest), cancellationToken: ct);
+        return _relay.EnqueueToRelayHostAsync(relayPeerGuid, MainNodeSentinelPeerId, invite.ToByteArray(), debugType: nameof(EstablishDirectSessionRequest), cancellationToken: ct);
     }
 
     private async Task ExecutePublishStandardPreKeysToRelayAsync(CancellationToken ct)

@@ -280,7 +280,6 @@ public sealed class SimulatorStateService : ISimulatorStateService
         var peer = _state.Peers.FirstOrDefault(p => p.PeerId == relayHostPeerId);
         if (peer is null) return Array.Empty<RelayQueuedBlobDto>();
 
-        // IMPORTANT: preserve list order to support fault injection (out-of-order delivery/reordering)
         var matches = peer.Relay.OpaqueQueue.Items
             .Where(i => i.RecipientRoutingKey.SequenceEqual(recipientRoutingKey))
             .Take(max)
@@ -308,7 +307,6 @@ public sealed class SimulatorStateService : ISimulatorStateService
         var peer = _state.Peers.FirstOrDefault(p => p.PeerId == relayHostPeerId);
         if (peer is null) return Task.FromResult<RelayQueuedBlobDto?>(null);
 
-        // IMPORTANT: preserve list order to support fault injection (out-of-order delivery/reordering)
         var match = peer.Relay.OpaqueQueue.Items
             .FirstOrDefault(i => i.RecipientRoutingKey.SequenceEqual(recipientRoutingKey));
 

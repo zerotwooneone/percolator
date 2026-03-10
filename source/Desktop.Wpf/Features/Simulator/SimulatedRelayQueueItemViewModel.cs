@@ -4,6 +4,7 @@ namespace Desktop.Wpf.Features.Simulator;
 
 public sealed class SimulatedRelayQueueItemViewModel
 {
+    private static readonly Guid MainNodeSentinelPeerId = new("88880000-0000-0000-0000-000000000000");
     public SimulatedRelayQueueItemViewModel(
         Guid relayHostPeerId,
         RelayQueuedBlobDto model,
@@ -74,7 +75,7 @@ public sealed class SimulatedRelayQueueItemViewModel
         if (routingKey.Length == 16)
         {
             var id = new Guid(routingKey);
-            if (mainIdentityId.HasValue && id == mainIdentityId.Value)
+            if ((mainIdentityId.HasValue && id == mainIdentityId.Value) || id == MainNodeSentinelPeerId)
             {
                 return "Main Node";
             }

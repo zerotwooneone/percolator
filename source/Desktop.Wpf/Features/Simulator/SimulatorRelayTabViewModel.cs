@@ -26,6 +26,8 @@ public sealed class SimulatorRelayTabViewModel : IDisposable
     private CancellationTokenSource? _autoDeliverCts;
     private Task? _autoDeliverLoop;
 
+    private static readonly Guid MainNodeSentinelPeerId = new("88880000-0000-0000-0000-000000000000");
+
     private DisposableBag _bag;
 
     private readonly ObservableCollection<SimulatedRelayQueuePanelViewModel> _relayPanels = new();
@@ -200,7 +202,7 @@ public sealed class SimulatorRelayTabViewModel : IDisposable
             relayHostPeerId: relayHostPeerId,
             relayHostName: relayHostName,
             peerNameById: PeerNameById,
-            mainIdentityId: () => _active.Identity?.Id,
+            mainIdentityId: () => MainNodeSentinelPeerId,
             getRelayHostToMainSessionId: () => GetRelayHostToMainSessionIdAsync(relayHostPeerId),
             state: _state,
             delivery: _delivery,
@@ -232,13 +234,10 @@ public sealed class SimulatorRelayTabViewModel : IDisposable
 
     private async Task<SessionId?> GetRelayHostToMainSessionIdAsync(Guid relayHostPeerId)
     {
-        // Find a session in relay host runtime store that targets main identity.
-        if (_active.Identity is null) return null;
-
         var store = await _state.TryGetRuntimeStoreAsync(relayHostPeerId).ConfigureAwait(false);
         if (store is null) return null;
 
-        var match = store.Sessions.FirstOrDefault(s => s.RemotePeerId == _active.Identity.Id);
+        var match = store.Sessions.FirstOrDefault(s => s.RemotePeerId == MainNodeSentinelPeerId);
         if (match is null) return null;
         if (match.SessionId == Guid.Empty) return null;
 

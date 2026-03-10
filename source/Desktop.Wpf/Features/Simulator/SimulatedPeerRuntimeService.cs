@@ -822,6 +822,7 @@ public sealed class SimulatedPeerRuntimeService : ISimulatedPeerRuntimeService
                     PrevChainLength = s.State.PreviousChainLength,
                     RemoteRatchetKey = s.State.RemoteRatchetKey?.Value,
                     DhRatchetPrivateKey = s.State.DhRatchetPrivateKey?.Value,
+                    SkippedKeysCount = s.SkippedKeysCount,
                     CreatedAtUtc = s.CreatedAtUtc,
                     LastUsedAtUtc = s.LastUsedAtUtc
                 });
