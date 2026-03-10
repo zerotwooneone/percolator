@@ -111,6 +111,7 @@ public sealed class SimulatedPeerRuntimeService : ISimulatedPeerRuntimeService
     private readonly ISimulatedPeerDirectory _peers;
     private readonly PercolatorMessageService _messageService;
     private readonly ISimulatorStateService _state;
+    private readonly ISimulatorDiagnosticsService _diagnostics;
     private readonly ISimulatedPeerPendingInbox _pending;
     private readonly ConcurrentDictionary<Guid, SimulatedPeerRuntime> _runtimeByPeerId = new();
 
@@ -118,11 +119,13 @@ public sealed class SimulatedPeerRuntimeService : ISimulatedPeerRuntimeService
         ISimulatedPeerDirectory peers,
         PercolatorMessageService messageService,
         ISimulatorStateService state,
+        ISimulatorDiagnosticsService diagnostics,
         ISimulatedPeerPendingInbox pending)
     {
         _peers = peers;
         _messageService = messageService;
         _state = state;
+        _diagnostics = diagnostics;
         _pending = pending;
     }
 
@@ -385,9 +388,21 @@ public sealed class SimulatedPeerRuntimeService : ISimulatedPeerRuntimeService
         SessionRatchetMessage message,
         CancellationToken cancellationToken)
     {
-        var pt = await runtime.DecryptSessionMessageAsync(sessionId, message, cancellationToken).ConfigureAwait(false);
-        await PersistRuntimeStoreAsync(simulatedPeerId, runtime, cancellationToken).ConfigureAwait(false);
-        return pt;
+        try
+        {
+            var pt = await runtime.DecryptSessionMessageAsync(sessionId, message, cancellationToken).ConfigureAwait(false);
+            await PersistRuntimeStoreAsync(simulatedPeerId, runtime, cancellationToken).ConfigureAwait(false);
+            return pt;
+        }
+        catch (Exception ex)
+        {
+            _diagnostics.Emit(
+                SimulatorDiagnosticEventType.DecryptFailure,
+                $"Decrypt failure: peer={simulatedPeerId.ToString()[..8]} session={sessionId.Value.ToString()[..8]} err={ex.GetType().Name}",
+                peerId: simulatedPeerId,
+                contextTag: ex.Message);
+            throw;
+        }
     }
 
     public void RecordOutboundInviteSignedPreKeyPrivate(

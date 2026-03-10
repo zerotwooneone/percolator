@@ -18,6 +18,7 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
     private readonly Func<Task<SessionId?>> _getRelayHostToMainSessionId;
     private readonly ISimulatorStateService _state;
     private readonly ISimulatorRelayDeliveryService _delivery;
+    private readonly ISimulatorDiagnosticsService _diagnostics;
     private readonly ILogger<SimulatedRelayQueuePanelViewModel> _logger;
 
     private DisposableBag _bag;
@@ -33,6 +34,7 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
         Func<Task<SessionId?>> getRelayHostToMainSessionId,
         ISimulatorStateService state,
         ISimulatorRelayDeliveryService delivery,
+        ISimulatorDiagnosticsService diagnostics,
         ILogger<SimulatedRelayQueuePanelViewModel> logger)
     {
         _relayHostPeerId = relayHostPeerId;
@@ -42,6 +44,7 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
         _getRelayHostToMainSessionId = getRelayHostToMainSessionId;
         _state = state;
         _delivery = delivery;
+        _diagnostics = diagnostics;
         _logger = logger;
 
         Items = new ReadOnlyObservableCollection<SimulatedRelayQueueItemViewModel>(_items);
@@ -239,6 +242,13 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
                 await _delivery.DeliverToMainAsync(_relayHostPeerId, sid, item.Model, ct).ConfigureAwait(false);
 
                 _ = await _state.DeleteRelayOpaqueByAckIdAsync(_relayHostPeerId, item.AckId, ct).ConfigureAwait(false);
+
+                _diagnostics.Emit(
+                    SimulatorDiagnosticEventType.RelayDelivered,
+                    $"Relay deliver -> main: {(item.Model.DebugType ?? "opaque")}",
+                    relayHostPeerId: _relayHostPeerId,
+                    ackId: item.AckId);
+
                 await RefreshAsync(ct).ConfigureAwait(false);
                 return;
             }
@@ -251,6 +261,14 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
                 await _delivery.DeliverToPeerAsync(recipientPeerId, item.Model, ct).ConfigureAwait(false);
 
                 _ = await _state.DeleteRelayOpaqueByAckIdAsync(_relayHostPeerId, item.AckId, ct).ConfigureAwait(false);
+
+                _diagnostics.Emit(
+                    SimulatorDiagnosticEventType.RelayDelivered,
+                    $"Relay deliver -> {recipientPeerId.ToString()[..8]}: {(item.Model.DebugType ?? "opaque")}",
+                    peerId: recipientPeerId,
+                    relayHostPeerId: _relayHostPeerId,
+                    ackId: item.AckId);
+
                 await RefreshAsync(ct).ConfigureAwait(false);
                 return;
             }
@@ -268,6 +286,13 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
     {
         ct.ThrowIfCancellationRequested();
         _ = await _state.DeleteRelayOpaqueByAckIdAsync(relayHostPeerId: _relayHostPeerId, ackId: item.AckId, cancellationToken: ct).ConfigureAwait(false);
+
+        _diagnostics.Emit(
+            SimulatorDiagnosticEventType.RelayDropped,
+            $"Relay drop: {(item.Model.DebugType ?? "opaque")}",
+            relayHostPeerId: _relayHostPeerId,
+            ackId: item.AckId);
+
         await RefreshAsync(ct).ConfigureAwait(false);
     }
 

@@ -2,6 +2,7 @@ using System;
 using System.Collections.ObjectModel;
 using System.Security.Cryptography;
 using System.Runtime.Serialization;
+using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
 using Desktop.Wpf.Features.Simulator;
@@ -77,7 +78,8 @@ public sealed class SimulatedPeerRuntimeFinalizeTests
         state.Setup(s => s.SaveRuntimeStoreAsync(It.IsAny<Guid>(), It.IsAny<SimulatedPeerRuntimeStoreDto>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
-        var sut = new SimulatedPeerRuntimeService(directory, messageService, state.Object, pending);
+        var diagnostics = new SimulatorDiagnosticsService();
+        var sut = new SimulatedPeerRuntimeService(directory, messageService, state.Object, diagnostics, pending);
 
         var correlation = Guid.NewGuid();
 
@@ -165,7 +167,8 @@ public sealed class SimulatedPeerRuntimeFinalizeTests
         var messageService = (Percolator.Application.Network.PercolatorMessageService)
             FormatterServices.GetUninitializedObject(typeof(Percolator.Application.Network.PercolatorMessageService));
 
-        var sut = new SimulatedPeerRuntimeService(directory, messageService, state.Object, pending);
+        var diagnostics = new SimulatorDiagnosticsService();
+        var sut = new SimulatedPeerRuntimeService(directory, messageService, state.Object, diagnostics, pending);
 
         var correlation = Guid.NewGuid();
 

@@ -271,10 +271,11 @@ public sealed class SimulatedPeerRuntimeFinalizeRelayedTests
         using var directory = new DirectoryStub(inviterModel, acceptorModel);
 
         var messageService = (Percolator.Application.Network.PercolatorMessageService)
-            FormatterServices.GetUninitializedObject(typeof(Percolator.Application.Network.PercolatorMessageService));
+            FormatterServices.GetUninitializedObject(typeof(PercolatorMessageService));
         var stateForRuntime = new Moq.Mock<ISimulatorStateService>(Moq.MockBehavior.Loose);
 
-        var runtime = new SimulatedPeerRuntimeService(directory, messageService, stateForRuntime.Object, pending);
+        var diagnostics = new SimulatorDiagnosticsService();
+        var runtime = new SimulatedPeerRuntimeService(directory, messageService, stateForRuntime.Object, diagnostics, pending);
 
         var relayState = new RelayStateStub();
         var relay = new SimulatorRelayEmulator(relayState, runtime, messageService);

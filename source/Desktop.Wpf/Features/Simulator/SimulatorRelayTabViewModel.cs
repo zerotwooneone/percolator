@@ -19,6 +19,7 @@ public sealed class SimulatorRelayTabViewModel : IDisposable
     private readonly ISimulatedPeerRuntimeService _peerRuntime;
     private readonly PercolatorMessageService _messageService;
     private readonly ISimulatorRelayDeliveryService _delivery;
+    private readonly ISimulatorDiagnosticsService _diagnostics;
     private readonly Percolator.Application.Identity.ActiveIdentityContext _active;
     private readonly ILogger<SimulatorRelayTabViewModel> _logger;
     private readonly ILoggerFactory _loggerFactory;
@@ -39,6 +40,7 @@ public sealed class SimulatorRelayTabViewModel : IDisposable
         ISimulatedPeerRuntimeService peerRuntime,
         PercolatorMessageService messageService,
         ISimulatorRelayDeliveryService delivery,
+        ISimulatorDiagnosticsService diagnostics,
         Percolator.Application.Identity.ActiveIdentityContext active,
         ILogger<SimulatorRelayTabViewModel> logger,
         ILoggerFactory loggerFactory)
@@ -48,6 +50,7 @@ public sealed class SimulatorRelayTabViewModel : IDisposable
         _peerRuntime = peerRuntime;
         _messageService = messageService;
         _delivery = delivery;
+        _diagnostics = diagnostics;
         _active = active;
         _logger = logger;
         _loggerFactory = loggerFactory;
@@ -188,16 +191,14 @@ public sealed class SimulatorRelayTabViewModel : IDisposable
 
         foreach (var relay in _state.Peers.Where(p => p.Relay?.IsRelayCapable == true))
         {
-            _relayPanels.Add(CreatePanel(relay.PeerId));
+            _relayPanels.Add(CreatePanel(relay.PeerId, PeerNameById(relay.PeerId)));
         }
 
         ApplyGlobalAutoRelay();
     }
 
-    private SimulatedRelayQueuePanelViewModel CreatePanel(Guid relayHostPeerId)
+    private SimulatedRelayQueuePanelViewModel CreatePanel(Guid relayHostPeerId, string relayHostName)
     {
-        var relayHostName = PeerNameById(relayHostPeerId);
-
         return new SimulatedRelayQueuePanelViewModel(
             relayHostPeerId: relayHostPeerId,
             relayHostName: relayHostName,
@@ -206,6 +207,7 @@ public sealed class SimulatorRelayTabViewModel : IDisposable
             getRelayHostToMainSessionId: () => GetRelayHostToMainSessionIdAsync(relayHostPeerId),
             state: _state,
             delivery: _delivery,
+            diagnostics: _diagnostics,
             logger: _loggerFactory.CreateLogger<SimulatedRelayQueuePanelViewModel>());
     }
 

@@ -61,6 +61,7 @@ public sealed class SimulatorStateService : ISimulatorStateService
     private readonly ISimulatorStateStore _store;
     private readonly ISimulatedPeerKeyFactory _keys;
     private readonly IOptions<TransportOptions> _transportOptions;
+    private readonly ISimulatorDiagnosticsService _diagnostics;
 
     private readonly ObservableCollection<SimulatedPeerDto> _peers = new();
     public ReadOnlyObservableCollection<SimulatedPeerDto> Peers { get; }
@@ -69,11 +70,16 @@ public sealed class SimulatorStateService : ISimulatorStateService
 
     private int _nextSelfIdentityId = SelfIdentityIdBase - 1;
 
-    public SimulatorStateService(ISimulatorStateStore store, ISimulatedPeerKeyFactory keys, IOptions<TransportOptions> transportOptions)
+    public SimulatorStateService(
+        ISimulatorStateStore store,
+        ISimulatedPeerKeyFactory keys,
+        IOptions<TransportOptions> transportOptions,
+        ISimulatorDiagnosticsService diagnostics)
     {
         _store = store;
         _keys = keys;
         _transportOptions = transportOptions;
+        _diagnostics = diagnostics;
         Peers = new ReadOnlyObservableCollection<SimulatedPeerDto>(_peers);
     }
 
@@ -143,6 +149,12 @@ public sealed class SimulatorStateService : ISimulatorStateService
         _state.Peers.Add(peer);
         await InvokeOnUiAsync(() => _peers.Add(peer));
         await _store.SaveAsync(_state, cancellationToken);
+
+        _diagnostics.Emit(
+            SimulatorDiagnosticEventType.PeerCreated,
+            $"Peer created: {(string.IsNullOrWhiteSpace(peer.DisplayName) ? peer.PeerId.ToString()[..8] : peer.DisplayName)}",
+            peerId: peerId);
+
         return peerId;
     }
 
@@ -150,6 +162,8 @@ public sealed class SimulatorStateService : ISimulatorStateService
     {
         var peer = _state.Peers.FirstOrDefault(p => p.PeerId == peerId);
         if (peer is null) return;
+
+        var name = string.IsNullOrWhiteSpace(peer.DisplayName) ? peer.PeerId.ToString()[..8] : peer.DisplayName;
 
         _state.Peers.Remove(peer);
 
@@ -168,6 +182,11 @@ public sealed class SimulatorStateService : ISimulatorStateService
         });
 
         await _store.SaveAsync(_state, cancellationToken);
+
+        _diagnostics.Emit(
+            SimulatorDiagnosticEventType.PeerRemoved,
+            $"Peer removed: {name}",
+            peerId: peerId);
     }
 
     public async Task AddPublishedKeysRelationshipAsync(Guid publisherPeerId, Guid hostPeerId, CancellationToken cancellationToken = default)
@@ -182,6 +201,11 @@ public sealed class SimulatorStateService : ISimulatorStateService
         {
             publisher.PublishedKeysToPeerIds.Add(hostPeerId);
             await _store.SaveAsync(_state, cancellationToken).ConfigureAwait(false);
+
+            _diagnostics.Emit(
+                SimulatorDiagnosticEventType.PreKeyPublishRelationshipAdded,
+                $"Pre-keys relationship added: {publisherPeerId.ToString()[..8]} -> {hostPeerId.ToString()[..8]}",
+                peerId: publisherPeerId);
         }
     }
 
@@ -195,6 +219,11 @@ public sealed class SimulatorStateService : ISimulatorStateService
         if (removed)
         {
             await _store.SaveAsync(_state, cancellationToken).ConfigureAwait(false);
+
+            _diagnostics.Emit(
+                SimulatorDiagnosticEventType.PreKeyPublishRelationshipRemoved,
+                $"Pre-keys relationship removed: {publisherPeerId.ToString()[..8]} -> {hostPeerId.ToString()[..8]}",
+                peerId: publisherPeerId);
         }
     }
 
@@ -205,6 +234,11 @@ public sealed class SimulatorStateService : ISimulatorStateService
 
         peer.IsOnline = !peer.IsOnline;
         await _store.SaveAsync(_state, cancellationToken);
+
+        _diagnostics.Emit(
+            SimulatorDiagnosticEventType.PeerOnlineChanged,
+            $"Peer {(peer.IsOnline ? "online" : "offline")}: {(string.IsNullOrWhiteSpace(peer.DisplayName) ? peer.PeerId.ToString()[..8] : peer.DisplayName)}",
+            peerId: peerId);
     }
 
     public async Task ToggleRelayCapableAsync(Guid peerId, CancellationToken cancellationToken = default)
@@ -214,6 +248,11 @@ public sealed class SimulatorStateService : ISimulatorStateService
 
         peer.Relay.IsRelayCapable = !peer.Relay.IsRelayCapable;
         await _store.SaveAsync(_state, cancellationToken);
+
+        _diagnostics.Emit(
+            SimulatorDiagnosticEventType.PeerRelayCapableChanged,
+            $"Peer relay {(peer.Relay.IsRelayCapable ? "enabled" : "disabled")}: {(string.IsNullOrWhiteSpace(peer.DisplayName) ? peer.PeerId.ToString()[..8] : peer.DisplayName)}",
+            peerId: peerId);
     }
 
     public async Task UpdateDisplayNameAsync(Guid peerId, string? displayName, CancellationToken cancellationToken = default)
@@ -232,6 +271,11 @@ public sealed class SimulatorStateService : ISimulatorStateService
 
         peer.IsOnline = isOnline;
         await _store.SaveAsync(_state, cancellationToken);
+
+        _diagnostics.Emit(
+            SimulatorDiagnosticEventType.PeerOnlineChanged,
+            $"Peer {(peer.IsOnline ? "online" : "offline")}: {(string.IsNullOrWhiteSpace(peer.DisplayName) ? peer.PeerId.ToString()[..8] : peer.DisplayName)}",
+            peerId: peerId);
     }
 
     public async Task SetRelayCapableAsync(Guid peerId, bool isRelayCapable, CancellationToken cancellationToken = default)
@@ -241,6 +285,11 @@ public sealed class SimulatorStateService : ISimulatorStateService
 
         peer.Relay.IsRelayCapable = isRelayCapable;
         await _store.SaveAsync(_state, cancellationToken);
+
+        _diagnostics.Emit(
+            SimulatorDiagnosticEventType.PeerRelayCapableChanged,
+            $"Peer relay {(peer.Relay.IsRelayCapable ? "enabled" : "disabled")}: {(string.IsNullOrWhiteSpace(peer.DisplayName) ? peer.PeerId.ToString()[..8] : peer.DisplayName)}",
+            peerId: peerId);
     }
 
     public async Task EnqueueRelayOpaqueAsync(
@@ -256,16 +305,24 @@ public sealed class SimulatorStateService : ISimulatorStateService
         var peer = _state.Peers.FirstOrDefault(p => p.PeerId == relayHostPeerId);
         if (peer is null) return;
 
-        peer.Relay.OpaqueQueue.Items.Add(new RelayQueuedBlobDto
+        var queued = new RelayQueuedBlobDto
         {
             AckId = Guid.NewGuid(),
             RecipientRoutingKey = recipientRoutingKey,
             OpaqueBytes = opaqueBytes,
             EnqueuedUtc = DateTimeOffset.UtcNow,
             DebugType = debugType
-        });
+        };
+
+        peer.Relay.OpaqueQueue.Items.Add(queued);
 
         await _store.SaveAsync(_state, cancellationToken).ConfigureAwait(false);
+
+        _diagnostics.Emit(
+            SimulatorDiagnosticEventType.RelayEnqueued,
+            $"Relay enqueue: {(debugType ?? "opaque")}",
+            relayHostPeerId: relayHostPeerId,
+            ackId: queued.AckId);
     }
 
     public async Task<IReadOnlyList<RelayQueuedBlobDto>> DequeueRelayOpaqueAsync(
@@ -337,6 +394,13 @@ public sealed class SimulatorStateService : ISimulatorStateService
         list.Insert(newIdx, item);
 
         await _store.SaveAsync(_state, cancellationToken).ConfigureAwait(false);
+
+        _diagnostics.Emit(
+            SimulatorDiagnosticEventType.RelayReordered,
+            $"Relay reorder: delta={delta}",
+            relayHostPeerId: relayHostPeerId,
+            ackId: ackId);
+
         return true;
     }
 
@@ -360,6 +424,13 @@ public sealed class SimulatorStateService : ISimulatorStateService
         item.OpaqueBytes = bytes;
 
         await _store.SaveAsync(_state, cancellationToken).ConfigureAwait(false);
+
+        _diagnostics.Emit(
+            SimulatorDiagnosticEventType.RelayCorrupted,
+            $"Relay corrupt: {(item.DebugType ?? "opaque")}",
+            relayHostPeerId: relayHostPeerId,
+            ackId: ackId);
+
         return true;
     }
 
@@ -405,6 +476,13 @@ public sealed class SimulatorStateService : ISimulatorStateService
         });
 
         await _store.SaveAsync(_state, cancellationToken).ConfigureAwait(false);
+
+        _diagnostics.Emit(
+            SimulatorDiagnosticEventType.RelayEnqueued,
+            "Pre-key bundle published",
+            peerId: logicalOwnerPeerId,
+            relayHostPeerId: relayHostPeerId,
+            contextTag: Convert.ToBase64String(recipientPublicKeyHash));
     }
 
     public async Task<PublishedPreKeyBundleDto?> TryPopPreKeyBundleByRecipientPkhAsync(

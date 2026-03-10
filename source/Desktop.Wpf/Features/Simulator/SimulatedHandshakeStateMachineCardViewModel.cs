@@ -20,6 +20,7 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
     private readonly SimulatedPeerModel _model;
     private readonly ISimulatedPeerRuntimeService _runtime;
     private readonly ISimulatorRelayEmulator _relay;
+    private readonly ISimulatorDiagnosticsService _diagnostics;
     private readonly IOptions<TransportOptions> _transportOptions;
     private readonly Percolator.Application.Identity.ActiveIdentityContext _active;
     private readonly ISimulatorStateService _state;
@@ -30,6 +31,7 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
         SimulatedPeerModel model,
         ISimulatedPeerRuntimeService runtime,
         ISimulatorRelayEmulator relay,
+        ISimulatorDiagnosticsService diagnostics,
         IOptions<TransportOptions> transportOptions,
         Percolator.Application.Identity.ActiveIdentityContext active,
         ISimulatorStateService state)
@@ -37,6 +39,7 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
         _model = model;
         _runtime = runtime;
         _relay = relay;
+        _diagnostics = diagnostics;
         _transportOptions = transportOptions;
         _active = active;
         _state = state;
@@ -90,11 +93,11 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
         AcceptHandshakeCommand = accept.AddTo(ref _bag);
 
         ForceExpireCommand = Observable.Return(true)
-            .ToReactiveCommand<Unit>(_ => _model.MarkExpired())
+            .ToReactiveCommand<Unit>(_ => ExecuteForceExpire())
             .AddTo(ref _bag);
 
         ResetStateCommand = Observable.Return(true)
-            .ToReactiveCommand<Unit>(_ => _model.ClearRuntimeState())
+            .ToReactiveCommand<Unit>(_ => ExecuteReset())
             .AddTo(ref _bag);
 
         // Nice-to-have toggles: surfaced on UI later.
@@ -151,20 +154,47 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
                 if (!string.IsNullOrWhiteSpace(payload.RequestCorrelationId) && Guid.TryParse(payload.RequestCorrelationId, out var corr))
                 {
                     _model.MarkOutboundPending(corr);
+                    _diagnostics.Emit(
+                        SimulatorDiagnosticEventType.HandshakeStateTransition,
+                        $"Handshake: outbound pending corr={corr.ToString()[..8]}",
+                        peerId: _model.PeerId,
+                        relayHostPeerId: relayHost.PeerId,
+                        contextTag: "OutboundPending");
                 }
                 else
                 {
-                    _model.MarkOutboundPending(Guid.NewGuid());
+                    var corr2 = Guid.NewGuid();
+                    _model.MarkOutboundPending(corr2);
+                    _diagnostics.Emit(
+                        SimulatorDiagnosticEventType.HandshakeStateTransition,
+                        $"Handshake: outbound pending corr={corr2.ToString()[..8]}",
+                        peerId: _model.PeerId,
+                        relayHostPeerId: relayHost.PeerId,
+                        contextTag: "OutboundPending");
                 }
             }
             catch
             {
-                _model.MarkOutboundPending(Guid.NewGuid());
+                var corr3 = Guid.NewGuid();
+                _model.MarkOutboundPending(corr3);
+                _diagnostics.Emit(
+                    SimulatorDiagnosticEventType.HandshakeStateTransition,
+                    $"Handshake: outbound pending corr={corr3.ToString()[..8]}",
+                    peerId: _model.PeerId,
+                    relayHostPeerId: relayHost.PeerId,
+                    contextTag: "OutboundPending");
             }
         }
         else
         {
-            _model.MarkOutboundPending(Guid.NewGuid());
+            var corr4 = Guid.NewGuid();
+            _model.MarkOutboundPending(corr4);
+            _diagnostics.Emit(
+                SimulatorDiagnosticEventType.HandshakeStateTransition,
+                $"Handshake: outbound pending corr={corr4.ToString()[..8]}",
+                peerId: _model.PeerId,
+                relayHostPeerId: relayHost.PeerId,
+                contextTag: "OutboundPending");
         }
 
         await _relay.EnqueueToRelayHostAsync(
@@ -195,6 +225,31 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
         }
 
         _model.MarkEstablished();
+        _diagnostics.Emit(
+            SimulatorDiagnosticEventType.HandshakeStateTransition,
+            $"Handshake: established corr={corr.Value.ToString()[..8]}",
+            peerId: _model.PeerId,
+            contextTag: "Established");
+    }
+
+    private void ExecuteForceExpire()
+    {
+        _model.MarkExpired();
+        _diagnostics.Emit(
+            SimulatorDiagnosticEventType.HandshakeStateTransition,
+            "Handshake: expired",
+            peerId: _model.PeerId,
+            contextTag: "Expired");
+    }
+
+    private void ExecuteReset()
+    {
+        _model.ClearRuntimeState();
+        _diagnostics.Emit(
+            SimulatorDiagnosticEventType.HandshakeStateTransition,
+            "Handshake: reset (no handshake)",
+            peerId: _model.PeerId,
+            contextTag: "NoHandshake");
     }
 
     private EstablishDirectSessionRequest CreatePeerToMainInvite()

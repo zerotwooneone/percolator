@@ -18,6 +18,7 @@ public sealed class SimulatorHandshakesTabViewModel : IDisposable
     private readonly IOptions<TransportOptions> _transportOptions;
     private readonly Percolator.Application.Identity.ActiveIdentityContext _active;
     private readonly ISimulatorStateService _state;
+    private readonly ISimulatorDiagnosticsService _diagnostics;
 
     private readonly ObservableCollection<SimulatedHandshakeStateMachineCardViewModel> _cards = new();
 
@@ -27,7 +28,8 @@ public sealed class SimulatorHandshakesTabViewModel : IDisposable
         ISimulatorRelayEmulator relay,
         IOptions<TransportOptions> transportOptions,
         Percolator.Application.Identity.ActiveIdentityContext active,
-        ISimulatorStateService state)
+        ISimulatorStateService state,
+        ISimulatorDiagnosticsService diagnostics)
     {
         _directory = directory;
         _runtime = runtime;
@@ -35,6 +37,7 @@ public sealed class SimulatorHandshakesTabViewModel : IDisposable
         _transportOptions = transportOptions;
         _active = active;
         _state = state;
+        _diagnostics = diagnostics;
 
         Cards = new ReadOnlyObservableCollection<SimulatedHandshakeStateMachineCardViewModel>(_cards);
 
@@ -125,6 +128,7 @@ public sealed class SimulatorHandshakesTabViewModel : IDisposable
             model: model,
             runtime: _runtime,
             relay: _relay,
+            diagnostics: _diagnostics,
             transportOptions: _transportOptions,
             active: _active,
             state: _state);

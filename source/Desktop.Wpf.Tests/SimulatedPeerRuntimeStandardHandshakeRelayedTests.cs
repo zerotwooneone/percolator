@@ -78,7 +78,8 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
         state.Setup(s => s.TryPopPreKeyBundleByRecipientPkhAsync(It.IsAny<Guid>(), It.IsAny<byte[]>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((PublishedPreKeyBundleDto?)null);
 
-        var sut = new SimulatedPeerRuntimeService(directory, messageService, state.Object, pending);
+        var diagnostics = new SimulatorDiagnosticsService();
+        var sut = new SimulatedPeerRuntimeService(directory, messageService, state.Object, diagnostics, pending);
 
         using var initiatorIdentityEcdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         using var initiatorIdentityEcdsa = ECDsa.Create(initiatorIdentityEcdh.ExportParameters(true));
