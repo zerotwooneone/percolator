@@ -31,6 +31,9 @@ public interface ISimulatorStateService
     Task<IReadOnlyList<RelayQueuedBlobDto>> DequeueRelayOpaqueAsync(Guid relayHostPeerId, byte[] recipientRoutingKey, int max, CancellationToken cancellationToken = default);
     Task<bool> DeleteRelayOpaqueByAckIdAsync(Guid relayHostPeerId, Guid ackId, CancellationToken cancellationToken = default);
 
+    Task<bool> MoveRelayOpaqueByAckIdAsync(Guid relayHostPeerId, Guid ackId, int delta, CancellationToken cancellationToken = default);
+    Task<bool> CorruptRelayOpaqueByAckIdAsync(Guid relayHostPeerId, Guid ackId, CancellationToken cancellationToken = default);
+
     Task PublishPreKeyBundleAsync(
         Guid relayHostPeerId,
         byte[] recipientPublicKeyHash,
@@ -277,9 +280,9 @@ public sealed class SimulatorStateService : ISimulatorStateService
         var peer = _state.Peers.FirstOrDefault(p => p.PeerId == relayHostPeerId);
         if (peer is null) return Array.Empty<RelayQueuedBlobDto>();
 
+        // IMPORTANT: preserve list order to support fault injection (out-of-order delivery/reordering)
         var matches = peer.Relay.OpaqueQueue.Items
             .Where(i => i.RecipientRoutingKey.SequenceEqual(recipientRoutingKey))
-            .OrderBy(i => i.EnqueuedUtc)
             .Take(max)
             .ToList();
 
@@ -305,12 +308,61 @@ public sealed class SimulatorStateService : ISimulatorStateService
         var peer = _state.Peers.FirstOrDefault(p => p.PeerId == relayHostPeerId);
         if (peer is null) return Task.FromResult<RelayQueuedBlobDto?>(null);
 
+        // IMPORTANT: preserve list order to support fault injection (out-of-order delivery/reordering)
         var match = peer.Relay.OpaqueQueue.Items
-            .Where(i => i.RecipientRoutingKey.SequenceEqual(recipientRoutingKey))
-            .OrderBy(i => i.EnqueuedUtc)
-            .FirstOrDefault();
+            .FirstOrDefault(i => i.RecipientRoutingKey.SequenceEqual(recipientRoutingKey));
 
         return Task.FromResult<RelayQueuedBlobDto?>(match);
+    }
+
+    public async Task<bool> MoveRelayOpaqueByAckIdAsync(
+        Guid relayHostPeerId,
+        Guid ackId,
+        int delta,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (delta == 0) return false;
+
+        var peer = _state.Peers.FirstOrDefault(p => p.PeerId == relayHostPeerId);
+        if (peer is null) return false;
+
+        var list = peer.Relay.OpaqueQueue.Items;
+        var idx = list.FindIndex(i => i.AckId == ackId);
+        if (idx < 0) return false;
+
+        var newIdx = idx + delta;
+        if (newIdx < 0 || newIdx >= list.Count) return false;
+
+        var item = list[idx];
+        list.RemoveAt(idx);
+        list.Insert(newIdx, item);
+
+        await _store.SaveAsync(_state, cancellationToken).ConfigureAwait(false);
+        return true;
+    }
+
+    public async Task<bool> CorruptRelayOpaqueByAckIdAsync(
+        Guid relayHostPeerId,
+        Guid ackId,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var peer = _state.Peers.FirstOrDefault(p => p.PeerId == relayHostPeerId);
+        if (peer is null) return false;
+
+        var item = peer.Relay.OpaqueQueue.Items.FirstOrDefault(i => i.AckId == ackId);
+        if (item is null) return false;
+        if (item.OpaqueBytes is null || item.OpaqueBytes.Length == 0) return false;
+
+        // Flip one bit in first byte for MAC failure / tamper testing.
+        var bytes = item.OpaqueBytes.ToArray();
+        bytes[0] = (byte)(bytes[0] ^ 0x01);
+        item.OpaqueBytes = bytes;
+
+        await _store.SaveAsync(_state, cancellationToken).ConfigureAwait(false);
+        return true;
     }
 
     public async Task<bool> DeleteRelayOpaqueByAckIdAsync(Guid relayHostPeerId, Guid ackId, CancellationToken cancellationToken = default)

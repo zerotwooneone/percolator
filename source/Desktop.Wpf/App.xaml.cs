@@ -148,6 +148,7 @@ public partial class App : Application
                 services.AddSingleton<ISimulatedPeerDirectory, SimulatedPeerDirectory>();
                 services.AddSingleton<Desktop.Wpf.Features.Simulator.ISimulatedPeerPendingInbox, Desktop.Wpf.Features.Simulator.SimulatedPeerPendingInbox>();
                 services.AddScoped<Desktop.Wpf.Features.Simulator.ISimulatorRelayEmulator, Desktop.Wpf.Features.Simulator.SimulatorRelayEmulator>();
+                services.AddScoped<Desktop.Wpf.Features.Simulator.ISimulatorRelayDeliveryService, Desktop.Wpf.Features.Simulator.SimulatorRelayDeliveryService>();
                 services.AddScoped<Desktop.Wpf.Features.Simulator.ISimulatedPeerRuntimeService, Desktop.Wpf.Features.Simulator.SimulatedPeerRuntimeService>();
                 services.AddSingleton<Percolator.Application.Network.ISimulatorOutboundInterceptor, Desktop.Wpf.Features.Simulator.SimulatorOutboundInterceptor>();
                 // Per-session scoped chat stack
