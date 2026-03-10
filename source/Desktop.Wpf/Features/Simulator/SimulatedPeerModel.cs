@@ -91,6 +91,13 @@ public sealed class SimulatedPeerModel : IDisposable
             PendingCorrelationId = null
         };
 
+    public void MarkExpired()
+        => _runtimeState.Value = new SimulatorPeerRuntimeState
+        {
+            UiState = SimulatorPeerUiState.Expired,
+            PendingCorrelationId = null
+        };
+
     public void ClearRuntimeState()
         => _runtimeState.Value = _isOnline.Value
             ? new SimulatorPeerRuntimeState { UiState = SimulatorPeerUiState.Ready }

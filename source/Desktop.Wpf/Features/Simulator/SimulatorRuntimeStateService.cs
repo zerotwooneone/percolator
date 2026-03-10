@@ -10,6 +10,7 @@ public interface ISimulatorRuntimeStateService
     void MarkOutboundPending(Guid peerId, Guid requestCorrelationId);
     void MarkInboundPending(Guid peerId, Guid requestCorrelationId);
     void MarkEstablished(Guid peerId);
+    void MarkExpired(Guid peerId);
     void Clear(Guid peerId);
 }
 
@@ -60,6 +61,15 @@ public sealed class SimulatorRuntimeStateService : ISimulatorRuntimeStateService
         _runtime[peerId] = new SimulatorPeerRuntimeState
         {
             UiState = SimulatorPeerUiState.Established,
+            PendingCorrelationId = null
+        };
+    }
+
+    public void MarkExpired(Guid peerId)
+    {
+        _runtime[peerId] = new SimulatorPeerRuntimeState
+        {
+            UiState = SimulatorPeerUiState.Expired,
             PendingCorrelationId = null
         };
     }

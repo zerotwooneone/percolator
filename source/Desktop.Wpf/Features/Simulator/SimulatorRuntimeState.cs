@@ -8,7 +8,8 @@ public enum SimulatorPeerUiState
     OutboundPending = 1,
     InboundPending = 2,
     Established = 3,
-    Offline = 4
+    Offline = 4,
+    Expired = 5
 }
 
 public sealed record SimulatorPeerRuntimeState
