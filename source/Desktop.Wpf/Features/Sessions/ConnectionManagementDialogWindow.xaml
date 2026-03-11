@@ -18,8 +18,89 @@
     <TabControl Grid.Row="1" SelectedIndex="{Binding SelectedTabIndex.Value, Mode=TwoWay}">
       <TabItem Header="Incoming Signals">
         <Grid>
-          <TextBlock Foreground="{StaticResource OnSurfaceVariantBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"
-                     Text="No pending handshake requests."/>
+          <Grid.Style>
+            <Style TargetType="Grid">
+              <Style.Triggers>
+                <DataTrigger Binding="{Binding PendingInvitations.Count}" Value="0">
+                  <Setter Property="Tag" Value="Empty"/>
+                </DataTrigger>
+              </Style.Triggers>
+            </Style>
+          </Grid.Style>
+
+          <Border Style="{StaticResource BaseBorder}" Background="{StaticResource SurfaceContainerLowBrush}" Padding="16" CornerRadius="12">
+            <Grid>
+              <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+              </Grid.RowDefinitions>
+
+              <StackPanel Grid.Row="0">
+                <TextBlock Text="PENDING REQUESTS" Foreground="{StaticResource OnSurfaceVariantBrush}" FontSize="12"/>
+                <TextBlock Margin="0,6,0,0" Foreground="{StaticResource OnSurfaceVariantBrush}" Text="Approve or burn incoming reverse-signal invitations."/>
+              </StackPanel>
+
+              <Grid Grid.Row="1" Margin="0,12,0,0">
+                <Grid.Style>
+                  <Style TargetType="Grid">
+                    <Setter Property="Visibility" Value="Visible"/>
+                    <Style.Triggers>
+                      <DataTrigger Binding="{Binding PendingInvitations.Count}" Value="0">
+                        <Setter Property="Visibility" Value="Collapsed"/>
+                      </DataTrigger>
+                    </Style.Triggers>
+                  </Style>
+                </Grid.Style>
+
+                <ListBox ItemsSource="{Binding PendingInvitations}" BorderThickness="0" Background="Transparent">
+                  <ListBox.ItemTemplate>
+                    <DataTemplate>
+                      <Border Style="{StaticResource BaseBorder}" Background="{StaticResource SurfaceContainerLowestBrush}" Padding="12" Margin="0,0,0,10">
+                        <Grid ColumnDefinitions="Auto,*,Auto" RowDefinitions="Auto,Auto">
+                          <controls:InitialsAvatar Grid.RowSpan="2" Diameter="32" CornerRadius="16" Text="{Binding Initials}"/>
+
+                          <StackPanel Grid.Column="1" Margin="10,0,10,0">
+                            <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold"/>
+                            <TextBlock Text="{Binding RelayInfoText}" Foreground="{StaticResource OnSurfaceVariantBrush}" FontSize="12" />
+                          </StackPanel>
+
+                          <StackPanel Grid.Column="2" Grid.RowSpan="2" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                            <controls:MatButton Variant="Outlined" Margin="0,0,8,0"
+                                                Command="{Binding DataContext.BurnInvitationCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                CommandParameter="{Binding}">
+                              <TextBlock Text="BURN"/>
+                            </controls:MatButton>
+                            <controls:MatButton Variant="Filled"
+                                                Command="{Binding DataContext.AcceptInvitationCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                CommandParameter="{Binding}">
+                              <TextBlock Text="ACCEPT"/>
+                            </controls:MatButton>
+                          </StackPanel>
+
+                          <TextBlock Grid.Column="1" Grid.Row="1" Foreground="{StaticResource OnSurfaceVariantBrush}" FontSize="12" Text="{Binding StatusText}"/>
+                        </Grid>
+                      </Border>
+                    </DataTemplate>
+                  </ListBox.ItemTemplate>
+                </ListBox>
+              </Grid>
+
+              <Grid Grid.Row="1" Margin="0,12,0,0" HorizontalAlignment="Center" VerticalAlignment="Center">
+                <Grid.Style>
+                  <Style TargetType="Grid">
+                    <Setter Property="Visibility" Value="Collapsed"/>
+                    <Style.Triggers>
+                      <DataTrigger Binding="{Binding PendingInvitations.Count}" Value="0">
+                        <Setter Property="Visibility" Value="Visible"/>
+                      </DataTrigger>
+                    </Style.Triggers>
+                  </Style>
+                </Grid.Style>
+
+                <TextBlock Foreground="{StaticResource OnSurfaceVariantBrush}" Text="No pending handshake requests."/>
+              </Grid>
+            </Grid>
+          </Border>
         </Grid>
       </TabItem>
       <TabItem Header="Network Search">
