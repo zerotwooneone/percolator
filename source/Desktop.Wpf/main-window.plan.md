@@ -45,8 +45,6 @@ Work:
   - `design/connection-management.incoming.png` (tab strip + empty state)
   - `design/connection-management.addPeer.png` (Network Search tab layout)
   - `design/connection-management.import.png` (Import Token tab layout)
-- Glyphs:
-  - Dialog close button: `IconClose`
 - Hook up default-tab selection logic:
   - If inbound requests exist -> default to Incoming Signals
   - Else -> default to Network Search

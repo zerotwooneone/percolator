@@ -8,15 +8,11 @@
         Style="{StaticResource BaseWindow}">
   <Grid Margin="16" RowDefinitions="Auto,*">
 
-    <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="0,0,0,12">
+    <Grid Grid.Row="0" Margin="0,0,0,12">
       <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
         <TextBlock Style="{StaticResource IconText}" Text="{StaticResource IconNetwork}" Margin="0,0,10,0"/>
         <TextBlock Style="{StaticResource TitleText}" Text="Connection Management"/>
       </StackPanel>
-
-      <controls:MatButton Grid.Column="1" IsIcon="True" IsRound="True" Variant="Filled" Click="Close_Click">
-        <TextBlock Style="{StaticResource IconText}" Text="{StaticResource IconClose}"/>
-      </controls:MatButton>
     </Grid>
 
     <TabControl Grid.Row="1" SelectedIndex="{Binding SelectedTabIndex.Value, Mode=TwoWay}">
