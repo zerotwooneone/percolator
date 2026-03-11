@@ -40,7 +40,7 @@ public sealed class PendingHandshakesMenuViewModel
     {
         OpenNewHandshakeCommand = new AsyncRelayCommand(_ =>
         {
-            windowManager.ShowFor<NewHandshakeDialogViewModel>();
+            windowManager.ShowFor<ConnectionManagementDialogViewModel>();
             return Task.CompletedTask;
         });
 

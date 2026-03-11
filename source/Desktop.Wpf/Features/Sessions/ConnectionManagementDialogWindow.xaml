@@ -1,0 +1,48 @@
+<Window x:Class="Desktop.Wpf.Features.Sessions.ConnectionManagementDialogWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:controls="clr-namespace:Desktop.Wpf.Shared.Controls"
+        Title="Connection Management" Height="420" Width="560"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize"
+        Style="{StaticResource BaseWindow}">
+  <Grid Margin="16" RowDefinitions="Auto,*">
+
+    <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="0,0,0,12">
+      <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+        <TextBlock Style="{StaticResource IconText}" Text="{StaticResource IconNetwork}" Margin="0,0,10,0"/>
+        <TextBlock Style="{StaticResource TitleText}" Text="Connection Management"/>
+      </StackPanel>
+
+      <controls:MatButton Grid.Column="1" IsIcon="True" IsRound="True" Variant="Filled" Click="Close_Click">
+        <TextBlock Style="{StaticResource IconText}" Text="{StaticResource IconClose}"/>
+      </controls:MatButton>
+    </Grid>
+
+    <TabControl Grid.Row="1" SelectedIndex="{Binding SelectedTabIndex.Value, Mode=TwoWay}">
+      <TabItem Header="Incoming Signals">
+        <Grid>
+          <TextBlock Foreground="{StaticResource OnSurfaceVariantBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"
+                     Text="No pending handshake requests."/>
+        </Grid>
+      </TabItem>
+      <TabItem Header="Network Search">
+        <Grid Margin="0,12,0,0" RowDefinitions="Auto,Auto,Auto">
+          <TextBlock Text="TARGET IDENTITY (PKH)" Foreground="{StaticResource OnSurfaceVariantBrush}" FontSize="12"/>
+          <controls:MatInput Grid.Row="1" Margin="0,6,0,0" Placeholder="Paste target PKH here... (e.g. 0x7A2F...)" />
+          <controls:MatInput Grid.Row="2" Margin="0,12,0,0" Placeholder="Direct P2P (Local Mesh)" IsEnabled="False" />
+        </Grid>
+      </TabItem>
+      <TabItem Header="Import Token">
+        <Grid Margin="0,12,0,0" RowDefinitions="Auto,*">
+          <TextBlock Text="OUT-OF-BAND (OOB) TOKEN" Foreground="{StaticResource OnSurfaceVariantBrush}" FontSize="12"/>
+          <TextBox Grid.Row="1" Margin="0,6,0,0" Height="200"
+                   Style="{StaticResource WatermarkTextBox}"
+                   TextWrapping="Wrap" AcceptsReturn="True"
+                   VerticalScrollBarVisibility="Auto" />
+        </Grid>
+      </TabItem>
+    </TabControl>
+
+  </Grid>
+</Window>
