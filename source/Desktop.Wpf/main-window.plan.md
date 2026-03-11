@@ -370,6 +370,25 @@ Work:
 
 ---
 
+## Chunk M — Cleanup / remove legacy handshake UI and orphaned code
+
+Outcome:
+
+- The codebase has a single, clear handshake entry point: **Connection Management**.
+- Legacy UI and mappings that are no longer used are removed to avoid confusion and bit-rot.
+
+Work:
+
+- Remove legacy NewHandshake dialog artifacts if no longer used:
+  - `NewHandshakeDialogWindow.xaml` / `.xaml.cs`
+  - `NewHandshakeDialogViewModel.cs`
+- Remove DI registrations for the legacy window/view model.
+- Remove WindowManager mappings for legacy dialog in `Shared/Windowing/ViewMappings.xaml`.
+- Remove any remaining call sites that open the legacy dialog (search for `ShowFor<NewHandshakeDialogViewModel>`).
+- Ensure the “Add peer” header button and any other handshake affordances open `ConnectionManagementDialogViewModel`.
+
+---
+
 ## Risks / tricky areas
 
 - Debounced filtering and dispatcher scheduling: avoid hard UI-thread dependencies in core services.
