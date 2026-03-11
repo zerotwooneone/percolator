@@ -20,10 +20,12 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
     private readonly SimulatedPeerModel _model;
     private readonly ISimulatedPeerRuntimeService _runtime;
     private readonly ISimulatorRelayEmulator _relay;
+    private readonly ISimulatorMainIngressService _mainIngress;
     private readonly ISimulatorDiagnosticsService _diagnostics;
     private readonly IOptions<TransportOptions> _transportOptions;
     private readonly Percolator.Application.Identity.ActiveIdentityContext _active;
     private readonly ISimulatorStateService _state;
+    private readonly Func<Guid?> _selectedRelayHostPeerId;
 
     private DisposableBag _bag;
 
@@ -31,18 +33,22 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
         SimulatedPeerModel model,
         ISimulatedPeerRuntimeService runtime,
         ISimulatorRelayEmulator relay,
+        ISimulatorMainIngressService mainIngress,
         ISimulatorDiagnosticsService diagnostics,
         IOptions<TransportOptions> transportOptions,
         Percolator.Application.Identity.ActiveIdentityContext active,
-        ISimulatorStateService state)
+        ISimulatorStateService state,
+        Func<Guid?> selectedRelayHostPeerId)
     {
         _model = model;
         _runtime = runtime;
         _relay = relay;
+        _mainIngress = mainIngress;
         _diagnostics = diagnostics;
         _transportOptions = transportOptions;
         _active = active;
         _state = state;
+        _selectedRelayHostPeerId = selectedRelayHostPeerId;
 
         DisplayName = _model.DisplayName
             .Select(n => string.IsNullOrWhiteSpace(n) ? _model.PeerId.ToString()[..8] : n!)
@@ -88,6 +94,10 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
         send.AsObservable().SubscribeAwait(async (_, ct) => await ExecuteSendRequestToMainAsync(ct), AwaitOperation.Drop).AddTo(ref _bag);
         SendRequestToMainCommand = send.AddTo(ref _bag);
 
+        var sendRelayed = Observable.Return(true).ToReactiveCommand<Unit>(_ => { });
+        sendRelayed.AsObservable().SubscribeAwait(async (_, ct) => await ExecuteSendRelayedRequestToMainAsync(ct), AwaitOperation.Drop).AddTo(ref _bag);
+        SendRelayedRequestToMainCommand = sendRelayed.AddTo(ref _bag);
+
         var accept = Observable.Return(true).ToReactiveCommand<Unit>(_ => { });
         accept.AsObservable().SubscribeAwait(async (_, ct) => await ExecuteAcceptHandshakeAsync(ct), AwaitOperation.Drop).AddTo(ref _bag);
         AcceptHandshakeCommand = accept.AddTo(ref _bag);
@@ -129,6 +139,8 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
 
     public ReactiveCommand<Unit> SendRequestToMainCommand { get; }
 
+    public ReactiveCommand<Unit> SendRelayedRequestToMainCommand { get; }
+
     public ReactiveCommand<Unit> AcceptHandshakeCommand { get; }
 
     public ReactiveCommand<Unit> ForceExpireCommand { get; }
@@ -138,10 +150,6 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
     private async Task ExecuteSendRequestToMainAsync(CancellationToken ct)
     {
         if (_active.Identity is null) return;
-
-        // Choose first relay-capable peer as the relay host.
-        var relayHost = _state.Peers.FirstOrDefault(p => p.Relay?.IsRelayCapable == true);
-        if (relayHost is null) return;
 
         var invite = CreatePeerToMainInvite();
 
@@ -158,7 +166,6 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
                         SimulatorDiagnosticEventType.HandshakeStateTransition,
                         $"Handshake: outbound pending corr={corr.ToString()[..8]}",
                         peerId: _model.PeerId,
-                        relayHostPeerId: relayHost.PeerId,
                         contextTag: "OutboundPending");
                 }
                 else
@@ -169,7 +176,6 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
                         SimulatorDiagnosticEventType.HandshakeStateTransition,
                         $"Handshake: outbound pending corr={corr2.ToString()[..8]}",
                         peerId: _model.PeerId,
-                        relayHostPeerId: relayHost.PeerId,
                         contextTag: "OutboundPending");
                 }
             }
@@ -181,7 +187,6 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
                     SimulatorDiagnosticEventType.HandshakeStateTransition,
                     $"Handshake: outbound pending corr={corr3.ToString()[..8]}",
                     peerId: _model.PeerId,
-                    relayHostPeerId: relayHost.PeerId,
                     contextTag: "OutboundPending");
             }
         }
@@ -193,9 +198,27 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
                 SimulatorDiagnosticEventType.HandshakeStateTransition,
                 $"Handshake: outbound pending corr={corr4.ToString()[..8]}",
                 peerId: _model.PeerId,
-                relayHostPeerId: relayHost.PeerId,
                 contextTag: "OutboundPending");
         }
+
+        await _mainIngress
+            .SendEstablishDirectSessionToMainAsync(invite, ct)
+            .ConfigureAwait(false);
+    }
+
+    private async Task ExecuteSendRelayedRequestToMainAsync(CancellationToken ct)
+    {
+        if (_active.Identity is null) return;
+
+        var relayHostPeerId = _selectedRelayHostPeerId();
+        var relayHost = relayHostPeerId.HasValue
+            ? _state.Peers.FirstOrDefault(p => p.PeerId == relayHostPeerId.Value)
+            : null;
+
+        relayHost ??= _state.Peers.FirstOrDefault(p => p.Relay?.IsRelayCapable == true);
+        if (relayHost is null) return;
+
+        var invite = CreatePeerToMainInvite();
 
         await _relay.EnqueueToRelayHostAsync(
                 relayHostPeerId: relayHost.PeerId,

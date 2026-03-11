@@ -72,6 +72,8 @@ internal sealed class StandardHandshakeIngress : IStandardHandshakeIngress
             var hex = Convert.ToHexString(initiatorPkh);
             initiatorIdentity = new PeerIdentity(newId);
             initiatorIdentity.SetDisplayName(new DisplayName($"Peer-{hex.Substring(0, Math.Min(12, hex.Length))}"));
+            var now = _clock.UtcNow;
+            initiatorIdentity.AddKey(initiatorIdentitySpki, notBefore: now, expiresAt: now.AddYears(100), now: now);
             await _peerIdentityRepository.SaveAsync(initiatorIdentity, ct).ConfigureAwait(false);
         }
 

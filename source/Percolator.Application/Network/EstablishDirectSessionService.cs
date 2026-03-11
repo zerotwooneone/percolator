@@ -193,6 +193,8 @@ namespace Percolator.Application.Network
                 var hex = Convert.ToHexString(initiatorPkh);
                 identity = new PeerIdentity(newId);
                 identity.SetDisplayName(new DisplayName($"Peer-{hex.Substring(0, Math.Min(12, hex.Length))}"));
+                var now = _clock.UtcNow;
+                identity.AddKey(inviterIdentityKeySpki, notBefore: now, expiresAt: now.AddYears(100), now: now);
                 await _peerIdentityRepository.SaveAsync(identity, cancellationToken).ConfigureAwait(false);
             }
 

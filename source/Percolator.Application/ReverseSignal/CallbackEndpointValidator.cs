@@ -27,8 +27,14 @@ public sealed class CallbackEndpointValidator : ICallbackEndpointValidator
 
         if (IPAddress.TryParse(host, out var ip))
         {
+            var isLoopback = IPAddress.IsLoopback(ip);
+            if (isLoopback && !_options.Value.AllowLoopback)
+            {
+                return new CallbackEndpointValidationResult(false, "Loopback targets are not allowed.", true, true);
+            }
+
             var isLanTarget = IsLanTarget(ip);
-            if (isLanTarget && !_options.Value.AllowLan)
+            if (!isLoopback && isLanTarget && !_options.Value.AllowLan)
             {
                 return new CallbackEndpointValidationResult(false, "LAN targets are not allowed.", true, true);
             }
@@ -47,8 +53,6 @@ public sealed class CallbackEndpointValidator : ICallbackEndpointValidator
 
     private static bool IsLanTarget(IPAddress ip)
     {
-        if (IPAddress.IsLoopback(ip)) return true;
-
         if (ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
         {
             var bytes = ip.GetAddressBytes();

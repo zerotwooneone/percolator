@@ -55,7 +55,7 @@
                 <ListBox ItemsSource="{Binding PendingInvitations}" BorderThickness="0" Background="Transparent">
                   <ListBox.ItemTemplate>
                     <DataTemplate>
-                      <Border Style="{StaticResource BaseBorder}" Background="{StaticResource SurfaceContainerLowestBrush}" Padding="12" Margin="0,0,0,10">
+                      <Border Style="{StaticResource BaseBorder}" Background="{StaticResource SurfaceContainerLowBrush}" Padding="12" Margin="0,0,0,10">
                         <Grid ColumnDefinitions="Auto,*,Auto" RowDefinitions="Auto,Auto">
                           <controls:InitialsAvatar Grid.RowSpan="2" Diameter="32" CornerRadius="16" Text="{Binding Initials}"/>
 

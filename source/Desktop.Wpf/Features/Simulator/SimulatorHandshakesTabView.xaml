@@ -7,6 +7,15 @@
   <Grid Margin="16" RowDefinitions="Auto,*">
     <StackPanel Grid.Row="0" Margin="0,0,0,12">
       <TextBlock FontSize="18" FontWeight="SemiBold" Text="Handshake State Machines" />
+      <StackPanel Margin="0,8,0,0" Orientation="Horizontal">
+        <TextBlock VerticalAlignment="Center" Text="Relay host:" />
+        <ComboBox Margin="8,0,0,0"
+                  Width="260"
+                  ItemsSource="{Binding RelayHosts}"
+                  DisplayMemberPath="DisplayName"
+                  SelectedValuePath="PeerId"
+                  SelectedValue="{Binding SelectedRelayHostPeerId.Value, Mode=TwoWay}" />
+      </StackPanel>
     </StackPanel>
 
     <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
@@ -36,7 +45,8 @@
                     <Button Visibility="{Binding ShowReset.Value, Converter={StaticResource BoolToVis}}" Content="Reset State" Command="{Binding ResetStateCommand}" />
                     <Button Margin="8,0,0,0" Visibility="{Binding ShowForceExpire.Value, Converter={StaticResource BoolToVis}}" Content="Force Expire" Command="{Binding ForceExpireCommand}" />
                     <Button Margin="8,0,0,0" Visibility="{Binding ShowAccept.Value, Converter={StaticResource BoolToVis}}" Content="Accept Handshake" Command="{Binding AcceptHandshakeCommand}" />
-                    <Button Margin="8,0,0,0" Visibility="{Binding ShowSendRequest.Value, Converter={StaticResource BoolToVis}}" Content="Send Request to Main App" Command="{Binding SendRequestToMainCommand}" />
+                    <Button Margin="8,0,0,0" Visibility="{Binding ShowSendRequest.Value, Converter={StaticResource BoolToVis}}" Content="Send Direct Request" Command="{Binding SendRequestToMainCommand}" />
+                    <Button Margin="8,0,0,0" Visibility="{Binding ShowSendRequest.Value, Converter={StaticResource BoolToVis}}" Content="Send Relayed Request" Command="{Binding SendRelayedRequestToMainCommand}" />
                   </StackPanel>
                 </StackPanel>
               </Grid>

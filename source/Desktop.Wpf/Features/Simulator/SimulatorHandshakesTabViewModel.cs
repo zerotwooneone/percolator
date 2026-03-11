@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using System.Windows;
 using Microsoft.Extensions.Options;
 using Percolator.Application.Configuration;
+using R3;
 
 namespace Desktop.Wpf.Features.Simulator;
 
@@ -19,13 +20,16 @@ public sealed class SimulatorHandshakesTabViewModel : IDisposable
     private readonly Percolator.Application.Identity.ActiveIdentityContext _active;
     private readonly ISimulatorStateService _state;
     private readonly ISimulatorDiagnosticsService _diagnostics;
+    private readonly ISimulatorMainIngressService _mainIngress;
 
     private readonly ObservableCollection<SimulatedHandshakeStateMachineCardViewModel> _cards = new();
+    private readonly ObservableCollection<RelayHostOption> _relayHosts = new();
 
     public SimulatorHandshakesTabViewModel(
         ISimulatedPeerDirectory directory,
         ISimulatedPeerRuntimeService runtime,
         ISimulatorRelayEmulator relay,
+        ISimulatorMainIngressService mainIngress,
         IOptions<TransportOptions> transportOptions,
         Percolator.Application.Identity.ActiveIdentityContext active,
         ISimulatorStateService state,
@@ -34,17 +38,26 @@ public sealed class SimulatorHandshakesTabViewModel : IDisposable
         _directory = directory;
         _runtime = runtime;
         _relay = relay;
+        _mainIngress = mainIngress;
         _transportOptions = transportOptions;
         _active = active;
         _state = state;
         _diagnostics = diagnostics;
 
         Cards = new ReadOnlyObservableCollection<SimulatedHandshakeStateMachineCardViewModel>(_cards);
+        RelayHosts = new ReadOnlyObservableCollection<RelayHostOption>(_relayHosts);
+        SelectedRelayHostPeerId = new BindableReactiveProperty<Guid?>(null);
 
         _ = InitializeAsync();
     }
 
+    public sealed record RelayHostOption(Guid PeerId, string DisplayName);
+
     public ReadOnlyObservableCollection<SimulatedHandshakeStateMachineCardViewModel> Cards { get; }
+
+    public ReadOnlyObservableCollection<RelayHostOption> RelayHosts { get; }
+
+    public BindableReactiveProperty<Guid?> SelectedRelayHostPeerId { get; }
 
     private async Task InitializeAsync(CancellationToken ct = default)
     {
@@ -54,6 +67,7 @@ public sealed class SimulatorHandshakesTabViewModel : IDisposable
         if (dispatcher is null || dispatcher.CheckAccess())
         {
             ResetCards();
+            RefreshRelayHosts();
             HookDirectory();
         }
         else
@@ -61,6 +75,7 @@ public sealed class SimulatorHandshakesTabViewModel : IDisposable
             await dispatcher.InvokeAsync(() =>
             {
                 ResetCards();
+                RefreshRelayHosts();
                 HookDirectory();
             });
         }
@@ -80,6 +95,24 @@ public sealed class SimulatorHandshakesTabViewModel : IDisposable
         }
     }
 
+    private void RefreshRelayHosts()
+    {
+        _relayHosts.Clear();
+
+        foreach (var p in _state.Peers.Where(x => x.Relay?.IsRelayCapable == true))
+        {
+            var name = _directory.Peers.FirstOrDefault(d => d.PeerId == p.PeerId)?.DisplayName.CurrentValue;
+            name = string.IsNullOrWhiteSpace(name) ? p.PeerId.ToString()[..8] : name;
+            _relayHosts.Add(new RelayHostOption(p.PeerId, name!));
+        }
+
+        if (SelectedRelayHostPeerId.Value is not null
+            && _relayHosts.All(x => x.PeerId != SelectedRelayHostPeerId.Value.Value))
+        {
+            SelectedRelayHostPeerId.Value = null;
+        }
+    }
+
     private void HookDirectory()
     {
         var notify = (INotifyCollectionChanged)_directory.Peers;
@@ -94,6 +127,8 @@ public sealed class SimulatorHandshakesTabViewModel : IDisposable
             _ = Application.Current.Dispatcher.InvokeAsync(() => OnPeersChanged(sender, e));
             return;
         }
+
+        RefreshRelayHosts();
 
         if (e.Action is NotifyCollectionChangedAction.Reset)
         {
@@ -127,10 +162,12 @@ public sealed class SimulatorHandshakesTabViewModel : IDisposable
             model: model,
             runtime: _runtime,
             relay: _relay,
+            mainIngress: _mainIngress,
             diagnostics: _diagnostics,
             transportOptions: _transportOptions,
             active: _active,
-            state: _state);
+            state: _state,
+            selectedRelayHostPeerId: () => SelectedRelayHostPeerId.Value);
     }
 
     public void Dispose()
