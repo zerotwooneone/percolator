@@ -20,14 +20,15 @@
   <system:String x:Key="IconLock">&#xEA75;</system:String>
   <system:String x:Key="IconPhone">&#xF095;</system:String>
   <system:String x:Key="IconVideo">&#xF03D;</system:String>
+  <system:String x:Key="IconClose">&#xEA76;</system:String>
   <system:String x:Key="IconKebab">&#xEB10;</system:String>
   <system:String x:Key="IconCheck">&#xEAB2;</system:String>
   <system:String x:Key="IconDoubleCheck">&#xEBB1;</system:String>
+  <system:String x:Key="IconError">&#xEA87;</system:String>
   <system:String x:Key="IconPlus">&#xF067;</system:String>
   <system:String x:Key="IconSmiley">&#xEB54;</system:String>
   <system:String x:Key="IconClip">&#xF0C6;</system:String>
   <system:String x:Key="IconSend">&#xF1D9;</system:String>
-  <!-- Network menu icons -->
   <system:String x:Key="IconNetwork">&#xEF09;</system:String>
   <system:String x:Key="IconLatency">&#xF0128;</system:String>
   <system:String x:Key="IconRefresh">&#xF021;</system:String>
@@ -39,6 +40,7 @@
   <system:String x:Key="IconRelay">&#xF50F;</system:String>
   <system:String x:Key="IconDirect">&#xF0B45;</system:String>
   <system:String x:Key="IconUserAdd">&#xF234;</system:String>
+  <system:String x:Key="IconGroup">&#xF0C0;</system:String>
   <system:String x:Key="IconCircleCheck">&#xF05D;</system:String>
   <system:String x:Key="IconFire">&#xF0238;</system:String>
   <system:String x:Key="IconPower">&#xF011;</system:String>
