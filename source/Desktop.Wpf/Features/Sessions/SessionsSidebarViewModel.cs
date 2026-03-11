@@ -114,7 +114,6 @@ public sealed class SessionsSidebarViewModel : ViewModelBase
             var list = await sessions.GetAllActiveAsync(selfId, CancellationToken.None);
 
             var created = new List<SessionListItem>();
-            var i = 0;
             foreach (var s in list)
             {
                 var pid = new PeerId(s.RemotePeerId.Value);
@@ -124,47 +123,10 @@ public sealed class SessionsSidebarViewModel : ViewModelBase
                 item.DisplayName.Value = name;
                 item.Initials.Value = ComputeInitials(name);
 
-                // Vary sample options for richer UI coverage
-                var variant = i++ % 6;
-                switch (variant)
-                {
-                    case 0:
-                        item.IsOnline.Value = true;
-                        item.LastMessagePreview.Value = "Hey! Are we still on for later today?";
-                        item.TimestampText.Value = DateTime.Now.ToShortTimeString();
-                        item.UnreadCount.Value = 2;
-                        break;
-                    case 1:
-                        item.IsOnline.Value = false;
-                        item.LastMessagePreview.Value = "👍 Sounds good to me.";
-                        item.TimestampText.Value = "Yesterday";
-                        item.UnreadCount.Value = 0;
-                        break;
-                    case 2:
-                        item.IsOnline.Value = true;
-                        item.LastMessagePreview.Value = "Here is the document you asked for: Quarterly_Report_Final_v7.pdf";
-                        item.TimestampText.Value = DateTime.Now.AddMinutes(-37).ToShortTimeString();
-                        item.UnreadCount.Value = 1;
-                        break;
-                    case 3:
-                        item.IsOnline.Value = false;
-                        item.LastMessagePreview.Value = "This is a longer preview that should wrap across the line to test how the UI handles multi-line content in the session list.";
-                        item.TimestampText.Value = DateTime.Now.AddDays(-3).ToString("M/d");
-                        item.UnreadCount.Value = 99;
-                        break;
-                    case 4:
-                        item.IsOnline.Value = true;
-                        item.LastMessagePreview.Value = "(no preview)";
-                        item.TimestampText.Value = DateTime.Now.AddHours(-5).ToShortTimeString();
-                        item.UnreadCount.Value = 0;
-                        break;
-                    default:
-                        item.IsOnline.Value = false;
-                        item.LastMessagePreview.Value = "📎 Sent an attachment";
-                        item.TimestampText.Value = DateTime.Now.AddDays(-10).ToString("M/d");
-                        item.UnreadCount.Value = 12;
-                        break;
-                }
+                item.IsOnline.Value = false;
+                item.LastMessagePreview.Value = null;
+                item.TimestampText.Value = s.LastUsedAtUtc.LocalDateTime.ToString("g");
+                item.UnreadCount.Value = 0;
                 created.Add(item);
             }
 

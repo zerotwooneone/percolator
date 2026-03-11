@@ -594,7 +594,9 @@ public sealed class SimulatorStateService : ISimulatorStateService
         }
         if (peer.Connection.Port == 0)
         {
-            peer.Connection.Port = transportOptions.SimulatorPort;
+            var port = transportOptions.SimulatorPort;
+            if (port == 0) port = 5002;
+            peer.Connection.Port = port;
         }
     }
 
