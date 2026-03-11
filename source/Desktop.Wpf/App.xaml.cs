@@ -143,6 +143,9 @@ public partial class App : Application
 
                 // Features
                 services.AddSingleton<IChatHistory, InMemoryChatHistory>();
+                services.AddScoped<Desktop.Wpf.Features.Sessions.IMainInvitationInbox, Desktop.Wpf.Features.Sessions.MainInvitationInbox>();
+                services.AddScoped<Desktop.Wpf.Features.Sessions.IMainInvitationOutbox, Desktop.Wpf.Features.Sessions.MainInvitationOutbox>();
+                services.AddScoped<Desktop.Wpf.Features.Sessions.IMainInvitationActions, Desktop.Wpf.Features.Sessions.MainInvitationActions>();
                 services.AddScoped<IPendingHandshakeSimulatorService, PendingHandshakeSimulatorService>();
                 services.AddSingleton<ISimulatorStateStore, JsonSimulatorStateStore>();
                 services.AddSingleton<ISimulatedPeerKeyFactory, SimulatedPeerKeyFactory>();
