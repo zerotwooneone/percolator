@@ -25,6 +25,9 @@ public sealed class SimulatorHandshakesTabViewModel : IDisposable
     private readonly ObservableCollection<SimulatedHandshakeStateMachineCardViewModel> _cards = new();
     private readonly ObservableCollection<RelayHostOption> _relayHosts = new();
 
+    private NotifyCollectionChangedEventHandler? _diagnosticsChangedHandler;
+    private NotifyCollectionChangedEventHandler? _statePeersChangedHandler;
+
     public SimulatorHandshakesTabViewModel(
         ISimulatedPeerDirectory directory,
         ISimulatedPeerRuntimeService runtime,
@@ -61,6 +64,7 @@ public sealed class SimulatorHandshakesTabViewModel : IDisposable
 
     private async Task InitializeAsync(CancellationToken ct = default)
     {
+        await _state.InitializeAsync(ct).ConfigureAwait(false);
         await _directory.InitializeAsync(ct).ConfigureAwait(false);
 
         var dispatcher = Application.Current?.Dispatcher;
@@ -99,9 +103,9 @@ public sealed class SimulatorHandshakesTabViewModel : IDisposable
     {
         _relayHosts.Clear();
 
-        foreach (var p in _state.Peers.Where(x => x.Relay?.IsRelayCapable == true))
+        foreach (var p in _directory.Peers.Where(x => x.IsRelayCapable.CurrentValue))
         {
-            var name = _directory.Peers.FirstOrDefault(d => d.PeerId == p.PeerId)?.DisplayName.CurrentValue;
+            var name = p.DisplayName.CurrentValue;
             name = string.IsNullOrWhiteSpace(name) ? p.PeerId.ToString()[..8] : name;
             _relayHosts.Add(new RelayHostOption(p.PeerId, name!));
         }
@@ -118,6 +122,40 @@ public sealed class SimulatorHandshakesTabViewModel : IDisposable
         var notify = (INotifyCollectionChanged)_directory.Peers;
         notify.CollectionChanged -= OnPeersChanged;
         notify.CollectionChanged += OnPeersChanged;
+
+        _statePeersChangedHandler = (_, __) => OnStatePeersChanged();
+        ((INotifyCollectionChanged)_state.Peers).CollectionChanged -= _statePeersChangedHandler;
+        ((INotifyCollectionChanged)_state.Peers).CollectionChanged += _statePeersChangedHandler;
+
+        _diagnosticsChangedHandler = (_, __) => OnDiagnosticsChanged();
+        ((INotifyCollectionChanged)_diagnostics.Events).CollectionChanged -= _diagnosticsChangedHandler;
+        ((INotifyCollectionChanged)_diagnostics.Events).CollectionChanged += _diagnosticsChangedHandler;
+    }
+
+    private void OnStatePeersChanged()
+    {
+        if (!Application.Current.Dispatcher.CheckAccess())
+        {
+            _ = Application.Current.Dispatcher.InvokeAsync(OnStatePeersChanged);
+            return;
+        }
+
+        RefreshRelayHosts();
+    }
+
+    private void OnDiagnosticsChanged()
+    {
+        if (!Application.Current.Dispatcher.CheckAccess())
+        {
+            _ = Application.Current.Dispatcher.InvokeAsync(OnDiagnosticsChanged);
+            return;
+        }
+
+        var last = _diagnostics.Events.LastOrDefault();
+        if (last?.EventType == SimulatorDiagnosticEventType.PeerRelayCapableChanged)
+        {
+            RefreshRelayHosts();
+        }
     }
 
     private void OnPeersChanged(object? sender, NotifyCollectionChangedEventArgs e)
@@ -182,6 +220,28 @@ public sealed class SimulatorHandshakesTabViewModel : IDisposable
         {
             var notify = (INotifyCollectionChanged)_directory.Peers;
             notify.CollectionChanged -= OnPeersChanged;
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            if (_statePeersChangedHandler is not null)
+            {
+                ((INotifyCollectionChanged)_state.Peers).CollectionChanged -= _statePeersChangedHandler;
+            }
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            if (_diagnosticsChangedHandler is not null)
+            {
+                ((INotifyCollectionChanged)_diagnostics.Events).CollectionChanged -= _diagnosticsChangedHandler;
+            }
         }
         catch
         {

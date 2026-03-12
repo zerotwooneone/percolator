@@ -182,37 +182,54 @@
       <Setter.Value>
         <ControlTemplate TargetType="ComboBox">
           <Grid>
-            <Border x:Name="Bd"
-                    Background="{TemplateBinding Background}"
-                    BorderBrush="{TemplateBinding BorderBrush}"
-                    BorderThickness="{TemplateBinding BorderThickness}"
-                    CornerRadius="6">
-              <Grid>
-                <Grid.ColumnDefinitions>
-                  <ColumnDefinition Width="*"/>
-                  <ColumnDefinition Width="28"/>
-                </Grid.ColumnDefinitions>
+            <ToggleButton x:Name="PART_DropDownToggle"
+                          Background="Transparent"
+                          BorderThickness="0"
+                          Focusable="False"
+                          ClickMode="Press"
+                          HorizontalAlignment="Stretch"
+                          VerticalAlignment="Stretch"
+                          HorizontalContentAlignment="Stretch"
+                          VerticalContentAlignment="Stretch"
+                          IsChecked="{Binding RelativeSource={RelativeSource TemplatedParent}, Path=IsDropDownOpen, Mode=TwoWay}">
+              <ToggleButton.Template>
+                <ControlTemplate TargetType="ToggleButton">
+                  <ContentPresenter />
+                </ControlTemplate>
+              </ToggleButton.Template>
+              <Border x:Name="Bd"
+                      Background="{TemplateBinding Background}"
+                      BorderBrush="{TemplateBinding BorderBrush}"
+                      BorderThickness="{TemplateBinding BorderThickness}"
+                      CornerRadius="6">
+                <Grid>
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="28"/>
+                  </Grid.ColumnDefinitions>
 
-                <ContentPresenter Grid.Column="0"
-                                  Margin="{TemplateBinding Padding}"
-                                  HorizontalAlignment="Left"
-                                  VerticalAlignment="Center"
-                                  Content="{TemplateBinding SelectionBoxItem}"
-                                  ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
-                                  ContentTemplateSelector="{TemplateBinding ItemTemplateSelector}"/>
+                  <ContentPresenter Grid.Column="0"
+                                    Margin="{TemplateBinding Padding}"
+                                    HorizontalAlignment="Left"
+                                    VerticalAlignment="Center"
+                                    Content="{TemplateBinding SelectionBoxItem}"
+                                    ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+                                    ContentTemplateSelector="{TemplateBinding ItemTemplateSelector}"/>
 
-                <Border Grid.Column="1" Background="Transparent">
-                  <Path Width="10" Height="6"
-                        Fill="{StaticResource OnSurfaceVariantBrush}"
-                        HorizontalAlignment="Center"
-                        VerticalAlignment="Center"
-                        Data="M 0 0 L 5 5 L 10 0 Z" />
-                </Border>
-              </Grid>
-            </Border>
+                  <Border Grid.Column="1" Background="Transparent">
+                    <Path Width="10" Height="6"
+                          Fill="{StaticResource OnSurfaceVariantBrush}"
+                          HorizontalAlignment="Center"
+                          VerticalAlignment="Center"
+                          Data="M 0 0 L 5 5 L 10 0 Z" />
+                  </Border>
+                </Grid>
+              </Border>
+            </ToggleButton>
 
             <Popup x:Name="PART_Popup"
                    Placement="Bottom"
+                   PlacementTarget="{Binding RelativeSource={RelativeSource TemplatedParent}}"
                    IsOpen="{TemplateBinding IsDropDownOpen}"
                    AllowsTransparency="True"
                    Focusable="False"
