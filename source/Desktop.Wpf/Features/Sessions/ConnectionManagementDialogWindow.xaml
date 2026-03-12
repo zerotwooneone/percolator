@@ -104,10 +104,31 @@
         </Grid>
       </TabItem>
       <TabItem Header="Network Search">
-        <Grid Margin="0,12,0,0" RowDefinitions="Auto,Auto,Auto">
-          <TextBlock Text="TARGET IDENTITY (PKH)" Foreground="{StaticResource OnSurfaceVariantBrush}" FontSize="12"/>
-          <controls:MatInput Grid.Row="1" Margin="0,6,0,0" Placeholder="Paste target PKH here... (e.g. 0x7A2F...)" />
-          <controls:MatInput Grid.Row="2" Margin="0,12,0,0" Placeholder="Direct P2P (Local Mesh)" IsEnabled="False" />
+        <Grid Margin="0,12,0,0" RowDefinitions="Auto,Auto,Auto,Auto,*,Auto">
+          <TextBlock Grid.Row="0" Text="TARGET IDENTITY (PKH)" Foreground="{StaticResource OnSurfaceVariantBrush}" FontSize="12"/>
+          <controls:MatInput Grid.Row="1" Margin="0,6,0,0"
+                             Text="{Binding TargetPkhText.Value, UpdateSourceTrigger=PropertyChanged}"
+                             Placeholder="Paste target PKH here... (e.g. 0x7A2F...)" />
+
+          <TextBlock Grid.Row="2" Margin="0,14,0,0" Text="TRANSPORT ROUTE" Foreground="{StaticResource OnSurfaceVariantBrush}" FontSize="12"/>
+          <ComboBox Grid.Row="3" Margin="0,6,0,0"
+                    ItemsSource="{Binding RouteOptions}"
+                    SelectedItem="{Binding SelectedRoute.Value, Mode=TwoWay}"
+                    DisplayMemberPath="DisplayName" />
+
+          <Border Grid.Row="4" Margin="0,14,0,0" Style="{StaticResource BaseBorder}" Background="{StaticResource SurfaceContainerLowBrush}" Padding="12">
+            <StackPanel>
+              <TextBlock Text="PHASE" Foreground="{StaticResource OnSurfaceVariantBrush}" FontSize="12"/>
+              <TextBlock Margin="0,6,0,0" Text="{Binding PhaseText.Value}" />
+              <TextBlock Margin="0,6,0,0" Foreground="{StaticResource ErrorBrush}" Text="{Binding ErrorText.Value}" />
+            </StackPanel>
+          </Border>
+
+          <StackPanel Grid.Row="5" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
+            <controls:MatButton Variant="Filled" Command="{Binding SearchAndConnectCommand}">
+              <TextBlock Text="SEARCH &amp; CONNECT"/>
+            </controls:MatButton>
+          </StackPanel>
         </Grid>
       </TabItem>
       <TabItem Header="Import Token">
