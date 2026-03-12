@@ -22,6 +22,8 @@ namespace Percolator.Infrastructure.Cryptography
 
         public bool IsRelayed { get; set; }
 
+        public Guid? RelayHostPeerId { get; set; }
+
         public byte[]? InviterIdentityKey { get; set; }
 
         public string? CallbackEndpointHost { get; set; }

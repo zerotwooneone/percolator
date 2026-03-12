@@ -78,6 +78,7 @@ namespace Percolator.Application.Network
                         request.Payload.ToByteArray(),
                         request.PayloadSignature.ToByteArray(),
                         isRelayed: false,
+                        relayHostPeerId: null,
                         context.CancellationToken)
                     .ConfigureAwait(false);
             }

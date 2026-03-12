@@ -220,6 +220,54 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
 
         var invite = CreatePeerToMainInvite();
 
+        // Mark state as request sent (outbound pending) based on correlation id in payload.
+        if (invite.HasPayload && invite.Payload.Length > 0)
+        {
+            try
+            {
+                var payload = InviteHandshakeRequestPayload.Parser.ParseFrom(invite.Payload);
+                if (!string.IsNullOrWhiteSpace(payload.RequestCorrelationId) && Guid.TryParse(payload.RequestCorrelationId, out var corr))
+                {
+                    _model.MarkOutboundPending(corr);
+                    _diagnostics.Emit(
+                        SimulatorDiagnosticEventType.HandshakeStateTransition,
+                        $"Handshake: outbound pending corr={corr.ToString()[..8]}",
+                        peerId: _model.PeerId,
+                        contextTag: "OutboundPending");
+                }
+                else
+                {
+                    var corr2 = Guid.NewGuid();
+                    _model.MarkOutboundPending(corr2);
+                    _diagnostics.Emit(
+                        SimulatorDiagnosticEventType.HandshakeStateTransition,
+                        $"Handshake: outbound pending corr={corr2.ToString()[..8]}",
+                        peerId: _model.PeerId,
+                        contextTag: "OutboundPending");
+                }
+            }
+            catch
+            {
+                var corr3 = Guid.NewGuid();
+                _model.MarkOutboundPending(corr3);
+                _diagnostics.Emit(
+                    SimulatorDiagnosticEventType.HandshakeStateTransition,
+                    $"Handshake: outbound pending corr={corr3.ToString()[..8]}",
+                    peerId: _model.PeerId,
+                    contextTag: "OutboundPending");
+            }
+        }
+        else
+        {
+            var corr4 = Guid.NewGuid();
+            _model.MarkOutboundPending(corr4);
+            _diagnostics.Emit(
+                SimulatorDiagnosticEventType.HandshakeStateTransition,
+                $"Handshake: outbound pending corr={corr4.ToString()[..8]}",
+                peerId: _model.PeerId,
+                contextTag: "OutboundPending");
+        }
+
         await _relay.EnqueueToRelayHostAsync(
                 relayHostPeerId: relayHost.PeerId,
                 recipientPeerId: MainNodeSentinelPeerId,

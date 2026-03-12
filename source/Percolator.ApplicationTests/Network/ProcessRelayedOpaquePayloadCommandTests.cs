@@ -78,6 +78,7 @@ public class ProcessRelayedOpaquePayloadCommandTests
                 It.IsAny<byte[]>(),
                 It.IsAny<byte[]>(),
                 true,
+                It.IsAny<Percolator.Identity.PeerId?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new Percolator.Cryptography.Primitives.RequestCorrelationId(Guid.NewGuid()));
 

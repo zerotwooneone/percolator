@@ -11,6 +11,7 @@ public class PendingSession
     public HandshakeInvitation Invitation { get; }
     public RequestCorrelationId RequestCorrelationId { get; }
     public bool IsRelayed { get; }
+    public PeerId? RelayHostPeerId { get; }
     public RatchetIdentityKey? InviterIdentityKey { get; }
     public string? CallbackEndpointHost { get; }
     public int? CallbackEndpointPort { get; }
@@ -25,6 +26,7 @@ public class PendingSession
         HandshakeInvitation invitation,
         RequestCorrelationId requestCorrelationId,
         bool isRelayed,
+        PeerId? relayHostPeerId,
         RatchetIdentityKey? inviterIdentityKey,
         string? callbackEndpointHost,
         int? callbackEndpointPort,
@@ -37,6 +39,7 @@ public class PendingSession
         Invitation = invitation;
         RequestCorrelationId = requestCorrelationId;
         IsRelayed = isRelayed;
+        RelayHostPeerId = relayHostPeerId;
         InviterIdentityKey = inviterIdentityKey;
         CallbackEndpointHost = callbackEndpointHost;
         CallbackEndpointPort = callbackEndpointPort;
@@ -53,6 +56,16 @@ public class PendingSession
         {
             throw new InvalidOperationException("Relayed pending sessions cannot store a callback endpoint.");
         }
+
+        if (IsRelayed && RelayHostPeerId is null)
+        {
+            throw new InvalidOperationException("Relayed pending sessions must store the relay host peer id.");
+        }
+
+        if (!IsRelayed && RelayHostPeerId is not null)
+        {
+            throw new InvalidOperationException("Direct pending sessions cannot store a relay host peer id.");
+        }
     }
 
     public static PendingSession FromInvitationWithMetadata(
@@ -62,6 +75,7 @@ public class PendingSession
         HandshakeInvitation invitation,
         RequestCorrelationId requestCorrelationId,
         bool isRelayed,
+        PeerId? relayHostPeerId,
         RatchetIdentityKey? inviterIdentityKey,
         string? callbackEndpointHost,
         int? callbackEndpointPort,
@@ -77,6 +91,7 @@ public class PendingSession
             invitation,
             requestCorrelationId: requestCorrelationId,
             isRelayed: isRelayed,
+            relayHostPeerId: relayHostPeerId,
             inviterIdentityKey: inviterIdentityKey,
             callbackEndpointHost: callbackEndpointHost,
             callbackEndpointPort: callbackEndpointPort,

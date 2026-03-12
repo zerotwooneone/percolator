@@ -211,6 +211,7 @@ namespace Percolator.Application.Network.Handshake
                         req.Payload.ToByteArray(),
                         req.PayloadSignature.ToByteArray(),
                         isRelayed: true,
+                        relayHostPeerId: relayHostPeerId,
                         cancellationToken).ConfigureAwait(false);
 
                     return ProcessRelayedOpaquePayloadResponse.Success;

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -204,6 +204,7 @@ namespace Percolator.Infrastructure.Persistence.Migrations
                     Invitation = table.Column<byte[]>(type: "BLOB", nullable: false),
                     RequestCorrelationId = table.Column<string>(type: "TEXT", nullable: true),
                     IsRelayed = table.Column<bool>(type: "INTEGER", nullable: false),
+                    RelayHostPeerId = table.Column<Guid>(type: "TEXT", nullable: true),
                     InviterIdentityKey = table.Column<byte[]>(type: "BLOB", nullable: true),
                     CallbackEndpointHost = table.Column<string>(type: "TEXT", nullable: true),
                     CallbackEndpointPort = table.Column<int>(type: "INTEGER", nullable: true),

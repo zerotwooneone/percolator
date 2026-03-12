@@ -95,7 +95,7 @@ namespace Percolator.ApplicationTests.Network
                 callbackValidator.Object);
 
             // Act
-            _ = await svc.QueueInviteAsync(selfId, aliceSpki, payloadBytes, payloadSignatureBytes, isRelayed: false, CancellationToken.None);
+            _ = await svc.QueueInviteAsync(selfId, aliceSpki, payloadBytes, payloadSignatureBytes, isRelayed: false, relayHostPeerId: null, CancellationToken.None);
 
             // Assert
             peerRepo.Verify(r => r.SaveAsync(It.IsAny<PeerIdentity>(), It.IsAny<CancellationToken>()), Times.Once);
@@ -160,7 +160,7 @@ namespace Percolator.ApplicationTests.Network
                 callbackValidator.Object);
 
             // Act + Assert
-            Assert.ThrowsAsync<InvalidOperationException>(() => svc.QueueInviteAsync(selfId, aliceSpki, payloadBytes, payloadSignatureBytes, isRelayed: false, CancellationToken.None));
+            Assert.ThrowsAsync<InvalidOperationException>(() => svc.QueueInviteAsync(selfId, aliceSpki, payloadBytes, payloadSignatureBytes, isRelayed: false, relayHostPeerId: null, CancellationToken.None));
 
             // Verify no side effects when signature invalid
             pendingRepo.Verify(r => r.AddAsync(It.IsAny<PendingSession>(), It.IsAny<CancellationToken>()), Times.Never);
@@ -221,10 +221,11 @@ namespace Percolator.ApplicationTests.Network
                     new HandshakeInvitation(new byte[] { 0x01 }),
                     requestCorrelationId: new Percolator.Cryptography.Primitives.RequestCorrelationId(Guid.Parse("22222222-2222-2222-2222-222222222222")),
                     isRelayed: false,
+                    relayHostPeerId: null,
                     inviterIdentityKey: new RatchetIdentityKey(inviterSpki),
                     callbackEndpointHost: null,
                     callbackEndpointPort: null,
-                    clock,
+                    clock: clock,
                     expiresAtUtc: clock.UtcNow.AddMinutes(10))));
 
             callbackValidator.Setup(v => v.Validate(It.IsAny<string>(), It.IsAny<int>()))
@@ -241,7 +242,7 @@ namespace Percolator.ApplicationTests.Network
                 callbackValidator.Object);
 
             // Act + Assert
-            Assert.ThrowsAsync<InvalidOperationException>(() => svc.QueueInviteAsync(selfId, inviterSpki, payloadBytes, payloadSignatureBytes, isRelayed: false, CancellationToken.None));
+            Assert.ThrowsAsync<InvalidOperationException>(() => svc.QueueInviteAsync(selfId, inviterSpki, payloadBytes, payloadSignatureBytes, isRelayed: false, relayHostPeerId: null, CancellationToken.None));
 
             pendingRepo.Verify(r => r.AddAsync(It.IsAny<PendingSession>(), It.IsAny<CancellationToken>()), Times.Never);
             peerRepo.Verify(r => r.SaveAsync(It.IsAny<PeerIdentity>(), It.IsAny<CancellationToken>()), Times.Never);
@@ -310,7 +311,7 @@ namespace Percolator.ApplicationTests.Network
                 callbackValidator.Object);
 
             // Act + Assert
-            Assert.ThrowsAsync<InvalidOperationException>(() => svc.QueueInviteAsync(selfId, inviterSpki, payloadBytes, payloadSignatureBytes, isRelayed: false, CancellationToken.None));
+            Assert.ThrowsAsync<InvalidOperationException>(() => svc.QueueInviteAsync(selfId, inviterSpki, payloadBytes, payloadSignatureBytes, isRelayed: false, relayHostPeerId: null, CancellationToken.None));
 
             pendingRepo.Verify(r => r.AddAsync(It.IsAny<PendingSession>(), It.IsAny<CancellationToken>()), Times.Never);
             peerRepo.Verify(r => r.SaveAsync(It.IsAny<PeerIdentity>(), It.IsAny<CancellationToken>()), Times.Never);

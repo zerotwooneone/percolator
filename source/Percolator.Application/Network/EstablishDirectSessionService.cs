@@ -51,6 +51,7 @@ namespace Percolator.Application.Network
             byte[] payloadBytes,
             byte[] payloadSignatureBytes,
             bool isRelayed,
+            Percolator.Identity.PeerId? relayHostPeerId,
             CancellationToken cancellationToken)
         {
             if (inviterIdentityKeySpki is null || inviterIdentityKeySpki.Length == 0)
@@ -218,6 +219,7 @@ namespace Percolator.Application.Network
                 invitation,
                 requestCorrelationId: requestCorrelationId,
                 isRelayed: isRelayed,
+                relayHostPeerId: relayHostPeerId is null ? null : new Percolator.Cryptography.Primitives.PeerId(relayHostPeerId.Value),
                 inviterIdentityKey: inviterIdentityKey,
                 callbackEndpointHost: callbackHost,
                 callbackEndpointPort: callbackPort,

@@ -21,6 +21,7 @@ using Percolator.Identity.Model;
 using Percolator.Network;
 using Percolator.Network.ValueObjects;
 using Percolator.Application.ReverseSignal;
+using Percolator.Application.Services;
 using Percolator.ApplicationTests.Services;
 
 namespace Percolator.ApplicationTests.ReverseSignal
@@ -57,6 +58,7 @@ namespace Percolator.ApplicationTests.ReverseSignal
                 new HandshakeInvitation(invitationEnvelope.ToByteArray()),
                 requestCorrelationId: correlationId,
                 isRelayed: false,
+                relayHostPeerId: null,
                 inviterIdentityKey: new RatchetIdentityKey(inviterIdentitySpki),
                 callbackEndpointHost: "example.com",
                 callbackEndpointPort: 7777,
@@ -83,7 +85,10 @@ namespace Percolator.ApplicationTests.ReverseSignal
                 Mock.Of<IHandshakePlanner>(),
                 Mock.Of<ISessionRepository>(),
                 Mock.Of<IPeerRoutingProfileRepository>(),
-                Mock.Of<IInviteHandshakeResponseDeliveryService>());
+                Mock.Of<IInviteHandshakeResponseDeliveryService>(),
+                Mock.Of<IDirectSessionLocator>(),
+                Mock.Of<ISecureMessagingService>(),
+                Mock.Of<IMessageTransportService>());
 
             var result = await sut.Handle(new ApprovePendingSessionCommand(PendingSessionId.NewId()), CancellationToken.None);
             result.Should().BeOfType<ApprovePendingSessionResult.RejectedNotReady>();
@@ -183,7 +188,10 @@ namespace Percolator.ApplicationTests.ReverseSignal
                 planner.Object,
                 sessionRepo.Object,
                 profileRepo.Object,
-                delivery.Object);
+                delivery.Object,
+                Mock.Of<IDirectSessionLocator>(),
+                Mock.Of<ISecureMessagingService>(),
+                Mock.Of<IMessageTransportService>());
 
             var result = await sut.Handle(new ApprovePendingSessionCommand(pendingId), CancellationToken.None);
             result.Should().BeOfType<ApprovePendingSessionResult.Failed>();
@@ -282,7 +290,10 @@ namespace Percolator.ApplicationTests.ReverseSignal
                 planner.Object,
                 sessionRepo.Object,
                 profileRepo.Object,
-                delivery.Object);
+                delivery.Object,
+                Mock.Of<IDirectSessionLocator>(),
+                Mock.Of<ISecureMessagingService>(),
+                Mock.Of<IMessageTransportService>());
 
             var result = await sut.Handle(new ApprovePendingSessionCommand(pendingId), CancellationToken.None);
             result.Should().BeOfType<ApprovePendingSessionResult.Accepted>();
@@ -338,6 +349,7 @@ namespace Percolator.ApplicationTests.ReverseSignal
                 new HandshakeInvitation(invitationEnvelope.ToByteArray()),
                 requestCorrelationId: correlation,
                 isRelayed: true,
+                relayHostPeerId: new Percolator.Cryptography.Primitives.PeerId(Guid.NewGuid()),
                 inviterIdentityKey: new RatchetIdentityKey(inviterSpki),
                 callbackEndpointHost: null,
                 callbackEndpointPort: null,
@@ -366,13 +378,24 @@ namespace Percolator.ApplicationTests.ReverseSignal
             sessionRepo.Setup(r => r.AddAsync(It.IsAny<SecureSession>(), It.IsAny<CancellationToken>()))
                 .Returns(Task.CompletedTask);
 
+            // Relayed accept should not use IInviteHandshakeResponseDeliveryService; it should enqueue via relay transport.
             var delivery = new Mock<IInviteHandshakeResponseDeliveryService>(MockBehavior.Strict);
-            delivery.Setup(d => d.DeliverAsync(
-                    It.IsAny<Percolator.Network.PeerId>(),
-                    It.Is<DnsEndPoint?>(e => e == null),
-                    It.IsAny<InviteHandshakeResponse>(),
+
+            var directSessions = new Mock<IDirectSessionLocator>(MockBehavior.Strict);
+            directSessions.Setup(s => s.GetAsync(It.IsAny<Percolator.Identity.PeerId>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((Percolator.Network.DirectSessionId?)new Percolator.Network.DirectSessionId(Guid.NewGuid()));
+
+            var secure = new Mock<ISecureMessagingService>(MockBehavior.Strict);
+            secure.Setup(s => s.EncryptAsync(It.IsAny<Percolator.Cryptography.SessionId>(), It.IsAny<Plaintext>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new SessionRatchetMessage(new byte[] { 1, 2, 3 }));
+
+            var transport = new Mock<IMessageTransportService>(MockBehavior.Strict);
+            transport.Setup(t => t.SendMessageAsync(
+                    It.IsAny<Percolator.Identity.PeerId>(),
+                    It.IsAny<Percolator.Network.DirectSessionId>(),
+                    It.IsAny<SessionRatchetMessage>(),
                     It.IsAny<CancellationToken>()))
-                .ReturnsAsync(new InviteHandshakeResponseDeliveryResult(true, "Relay:00000000-0000-0000-0000-000000000000"));
+                .ReturnsAsync((Percolator.Contracts.DeliverOpaqueMessageResponse?)null);
 
             var sut = new ApprovePendingSessionHandler(
                 logger,
@@ -385,7 +408,10 @@ namespace Percolator.ApplicationTests.ReverseSignal
                 planner.Object,
                 sessionRepo.Object,
                 profileRepo.Object,
-                delivery.Object);
+                delivery.Object,
+                directSessions.Object,
+                secure.Object,
+                transport.Object);
 
             var result = await sut.Handle(new ApprovePendingSessionCommand(pendingId), CancellationToken.None);
             result.Should().BeOfType<ApprovePendingSessionResult.Accepted>();

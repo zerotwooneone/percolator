@@ -63,6 +63,7 @@ public class AggregateSkeletonTests
             invitation,
             requestCorrelationId: new RequestCorrelationId(Guid.NewGuid()),
             isRelayed: false,
+            relayHostPeerId: null,
             inviterIdentityKey: null,
             callbackEndpointHost: null,
             callbackEndpointPort: null,

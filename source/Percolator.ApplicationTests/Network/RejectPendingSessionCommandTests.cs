@@ -43,6 +43,7 @@ public sealed class RejectPendingSessionCommandTests
             new HandshakeInvitation(new byte[] { 1, 2, 3 }),
             requestCorrelationId: new RequestCorrelationId(Guid.NewGuid()),
             isRelayed: false,
+            relayHostPeerId: null,
             inviterIdentityKey: null,
             callbackEndpointHost: null,
             callbackEndpointPort: null,

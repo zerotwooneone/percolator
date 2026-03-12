@@ -14,5 +14,6 @@ public interface IEstablishDirectSessionService
         byte[] payloadBytes,
         byte[] payloadSignatureBytes,
         bool isRelayed,
+        Percolator.Identity.PeerId? relayHostPeerId,
         CancellationToken cancellationToken);
 }

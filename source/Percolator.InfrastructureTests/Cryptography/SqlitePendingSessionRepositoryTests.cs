@@ -56,6 +56,7 @@ public sealed class SqlitePendingSessionRepositoryTests
             new HandshakeInvitation(new byte[] { 1, 2, 3 }),
             requestCorrelationId: new RequestCorrelationId(Guid.Parse("11111111-1111-1111-1111-111111111111")),
             isRelayed: false,
+            relayHostPeerId: null,
             inviterIdentityKey: new RatchetIdentityKey(new byte[] { 9, 9, 9 }),
             callbackEndpointHost: "example.com",
             callbackEndpointPort: 443,

@@ -33,7 +33,7 @@ public sealed class CallbackEndpointValidator : ICallbackEndpointValidator
                 return new CallbackEndpointValidationResult(false, "Loopback targets are not allowed.", true, true);
             }
 
-            var isLanTarget = IsLanTarget(ip);
+            var isLanTarget = isLoopback || IsLanTarget(ip);
             if (!isLoopback && isLanTarget && !_options.Value.AllowLan)
             {
                 return new CallbackEndpointValidationResult(false, "LAN targets are not allowed.", true, true);

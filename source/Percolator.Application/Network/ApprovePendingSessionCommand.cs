@@ -1,5 +1,6 @@
 using System;
 using System.Net;
+using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
 using Google.Protobuf;
@@ -7,6 +8,8 @@ using MediatR;
 using Microsoft.Extensions.Logging;
 using Percolator.Application.Identity;
 using Percolator.Application.ReverseSignal;
+using Percolator.Application.Sessions;
+using Percolator.Application.Services;
 using Percolator.Contracts;
 using Percolator.Cryptography;
 using Percolator.Cryptography.Primitives;
@@ -39,6 +42,9 @@ namespace Percolator.Application.Network
         private readonly ISessionRepository _sessions;
         private readonly IPeerRoutingProfileRepository _profileRepository;
         private readonly IInviteHandshakeResponseDeliveryService _delivery;
+        private readonly IDirectSessionLocator _directSessions;
+        private readonly ISecureMessagingService _secureMessaging;
+        private readonly IMessageTransportService _transport;
 
         public ApprovePendingSessionHandler(
             ILogger<ApprovePendingSessionHandler> logger,
@@ -51,7 +57,10 @@ namespace Percolator.Application.Network
             IHandshakePlanner handshakePlanner,
             ISessionRepository sessions,
             IPeerRoutingProfileRepository profileRepository,
-            IInviteHandshakeResponseDeliveryService delivery)
+            IInviteHandshakeResponseDeliveryService delivery,
+            IDirectSessionLocator directSessions,
+            ISecureMessagingService secureMessaging,
+            IMessageTransportService transport)
         {
             _logger = logger;
             _activeIdentityAccessor = activeIdentityAccessor;
@@ -64,6 +73,9 @@ namespace Percolator.Application.Network
             _sessions = sessions;
             _profileRepository = profileRepository;
             _delivery = delivery;
+            _directSessions = directSessions;
+            _secureMessaging = secureMessaging;
+            _transport = transport;
         }
 
         public async Task<ApprovePendingSessionResult> Handle(ApprovePendingSessionCommand request, CancellationToken cancellationToken)
@@ -220,16 +232,84 @@ namespace Percolator.Application.Network
                 InitialRatchetMessage = ByteString.CopyFrom(initial.Value)
             };
 
-
-            var delivery = await _delivery.DeliverAsync(inviterNetPeerId, directCallbackEndpoint, response, cancellationToken).ConfigureAwait(false);
-            if (!delivery.Success)
+            InviteHandshakeResponseDeliveryResult delivery;
+            if (pending.IsRelayed)
             {
-                _logger.LogWarning(delivery.Error, "Failed to send InviteHandshakeResponse for pending session {PendingId}", pending.Id.Value);
-                return new ApprovePendingSessionResult.Failed(delivery.Error?.Message ?? "Send failed");
+                if (pending.RelayHostPeerId is null)
+                {
+                    return new ApprovePendingSessionResult.Failed("Relayed pending session is missing relay host metadata");
+                }
+
+                try
+                {
+                    await SendInviteHandshakeResponseViaRelayHostAsync(
+                            pending,
+                            inviterIdentityKeySpki,
+                            response,
+                            cancellationToken)
+                        .ConfigureAwait(false);
+                    delivery = new InviteHandshakeResponseDeliveryResult(true, $"Relay:{pending.RelayHostPeerId.Value}");
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to deliver InviteHandshakeResponse via relay host {RelayHostPeerId}", pending.RelayHostPeerId.Value);
+                    return new ApprovePendingSessionResult.Failed(ex.Message);
+                }
+            }
+            else
+            {
+                delivery = await _delivery.DeliverAsync(inviterNetPeerId, directCallbackEndpoint, response, cancellationToken).ConfigureAwait(false);
+                if (!delivery.Success)
+                {
+                    _logger.LogWarning(delivery.Error, "Failed to send InviteHandshakeResponse for pending session {PendingId}", pending.Id.Value);
+                    return new ApprovePendingSessionResult.Failed(delivery.Error?.Message ?? "Send failed");
+                }
             }
 
             await _pending.DeleteAsync(pending.Id, cancellationToken).ConfigureAwait(false);
             return new ApprovePendingSessionResult.Accepted(delivery.SendPath, pending.RequestCorrelationId);
+        }
+
+        private async Task SendInviteHandshakeResponseViaRelayHostAsync(
+            PendingSession pending,
+            byte[] inviterIdentityKeySpki,
+            InviteHandshakeResponse response,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (pending.RelayHostPeerId is null) throw new InvalidOperationException("RelayHostPeerId is required for relayed pending sessions");
+            if (inviterIdentityKeySpki is null || inviterIdentityKeySpki.Length == 0) throw new InvalidOperationException("Inviter identity key SPKI is required");
+
+            var relayHostPeerId = new Percolator.Identity.PeerId(pending.RelayHostPeerId.Value);
+
+            var relaySessionId = await _directSessions.GetAsync(relayHostPeerId, _active.Identity!.SelfIdentityId.Value, cancellationToken).ConfigureAwait(false);
+            if (relaySessionId is null)
+            {
+                throw new InvalidOperationException("No relay host session available");
+            }
+
+            var inviterPkh = SHA256.HashData(inviterIdentityKeySpki);
+            var mqReq = new EnqueueOpaqueMessageRequest
+            {
+                Version = 1,
+                RecipientPublicKeyHash = ByteString.CopyFrom(inviterPkh),
+                MessageBlob = ByteString.CopyFrom(response.ToByteArray())
+            };
+
+            var env = new InternalEnvelope
+            {
+                MessageQueueEnvelope = new MessageQueueEnvelope
+                {
+                    Version = 1,
+                    EnqueueOpaqueMessageRequest = mqReq
+                }
+            };
+
+            var plain = new Plaintext(env.ToByteArray());
+            var sid = new Percolator.Cryptography.SessionId(relaySessionId.Value.Value);
+            var cipher = await _secureMessaging.EncryptAsync(sid, plain, cancellationToken).ConfigureAwait(false);
+
+            _ = await _transport.SendMessageAsync(relayHostPeerId, relaySessionId.Value, cipher, cancellationToken).ConfigureAwait(false);
         }
     }
 }

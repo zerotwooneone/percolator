@@ -60,7 +60,17 @@ public sealed class SimulatedHandshakeStateMachineCardViewModelDiagnosticsTests
                 }
             }));
 
-        using var sut = new SimulatedHandshakeStateMachineCardViewModel(model, runtime.Object, relay.Object, diagnostics, options, active, state.Object);
+        var mainIngress = new Mock<ISimulatorMainIngressService>(MockBehavior.Loose);
+        using var sut = new SimulatedHandshakeStateMachineCardViewModel(
+            model,
+            runtime.Object,
+            relay.Object,
+            mainIngress.Object,
+            diagnostics,
+            options,
+            active,
+            state.Object,
+            selectedRelayHostPeerId: () => relayHostId);
 
         // Act
         sut.ForceExpireCommand.Execute(Unit.Default);
@@ -126,10 +136,20 @@ public sealed class SimulatedHandshakeStateMachineCardViewModelDiagnosticsTests
         var state = new Mock<ISimulatorStateService>(MockBehavior.Strict);
         state.SetupGet(s => s.Peers).Returns(new ReadOnlyObservableCollection<SimulatedPeerDto>(peers));
 
-        using var sut = new SimulatedHandshakeStateMachineCardViewModel(model, runtime.Object, relay.Object, diagnostics, options, active, state.Object);
+        var mainIngress = new Mock<ISimulatorMainIngressService>(MockBehavior.Loose);
+        using var sut = new SimulatedHandshakeStateMachineCardViewModel(
+            model,
+            runtime.Object,
+            relay.Object,
+            mainIngress.Object,
+            diagnostics,
+            options,
+            active,
+            state.Object,
+            selectedRelayHostPeerId: () => relayHostId);
 
         // Act
-        sut.SendRequestToMainCommand.Execute(Unit.Default);
+        sut.SendRelayedRequestToMainCommand.Execute(Unit.Default);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
         while (!diagnostics.Events.Any(e => e.ContextTag == "OutboundPending") && !cts.IsCancellationRequested)

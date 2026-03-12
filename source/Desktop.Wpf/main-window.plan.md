@@ -138,6 +138,41 @@ Definition of done:
 
 ---
 
+## Chunk C.1 — Accept-path routing for relayed Incoming Signals (no auto-send)
+
+Outcome:
+
+- Clicking **ACCEPT** on an inbound Reverse-Signal invitation that arrived **via relay** sends the `InviteHandshakeResponse` back to the inviter **through the same relay host**.
+- The response is **not** sent automatically on receipt of the invite; it is only sent on explicit user acceptance.
+- The response arrives at the inviter through the existing relayed-opaque processing path and triggers initiator finalization.
+
+Work:
+
+- Ensure pending inbound invitation records preserve relay provenance needed at accept time:
+  - `IsRelayed`
+  - `RelayHostPeerId` (identity peer id of relay host)
+  - `InviterIdentityKeySpki` (already present in the invite; used to derive the inviter PKH addressing key)
+  - (optional UI) relay display name / endpoint
+- Update the accept code path (the command/service used by the Incoming Signals Accept button, e.g. `ApprovePendingSessionCommand`) so that:
+  - **Direct invites** continue to deliver `InviteHandshakeResponse` via `inviter_host` + `inviter_port`.
+  - **Relayed invites** deliver `InviteHandshakeResponse` via the relay transport path, targeting the inviter by **public key hash (PKH)** derived from the inviter identity SPKI (`SHA256(inviter_identity_key_spki)`) and routed through the chosen relay host.
+- Relay transport precondition:
+  - The acceptor must have a usable route to the relay host (typically an established secure transport session to the relay host) at the time the user clicks **ACCEPT**.
+  - If the relay host route is not available, Accept should fail with a UI-visible error (and the Pending invitation should remain).
+- Confirm the relayed response wire format matches existing ingress:
+  - The inviter must receive the serialized `InviteHandshakeResponse` bytes as the decrypted relay “opaque payload” such that `ProcessRelayedOpaquePayloadCommand.TryHandleNonSessionPayloadAsync` can parse and dispatch it.
+  - The relayed response payload must not be wrapped in an `InternalEnvelope` and must not be a `SessionRatchetMessage`.
+- Add/extend tests:
+  - Accepting a relayed pending session uses the relay send path and does not attempt direct callback.
+  - Inviter-side processing via `ProcessRelayedOpaquePayloadCommand` successfully ingresses an `InviteHandshakeResponse` and finalizes initiator session state.
+
+Definition of done:
+
+- A relayed inbound invitation can be accepted from the Incoming Signals UI, and the inviter finalizes once the relayed `InviteHandshakeResponse` is delivered.
+- No response is sent unless the user clicks **ACCEPT**.
+
+---
+
 ## Chunk D — Implement Connection Management: Tab 2 (Network Search / outbound initiation)
 
 Outcome:

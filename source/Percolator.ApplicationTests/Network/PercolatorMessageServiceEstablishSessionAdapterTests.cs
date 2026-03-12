@@ -9,6 +9,7 @@ using NUnit.Framework;
 using Percolator.Application.Identity;
 using Percolator.Application.Network;
 using Percolator.Contracts;
+using Percolator.Cryptography.Primitives;
 using Percolator.Identity;
 
 namespace Percolator.ApplicationTests.Network;
@@ -21,7 +22,7 @@ public sealed class PercolatorMessageServiceEstablishSessionAdapterTests
     {
         var logger = Mock.Of<ILogger<PercolatorMessageService>>();
         var ingress = Mock.Of<Percolator.Application.Ingress.IMessageIngress>();
-        var establish = Mock.Of<IEstablishDirectSessionService>();
+        var establish = new Mock<IEstablishDirectSessionService>(MockBehavior.Loose);
         var inviteIngress = Mock.Of<IInviteHandshakeResponseIngress>();
 
         var expected = new EstablishSessionResponse
@@ -36,11 +37,21 @@ public sealed class PercolatorMessageServiceEstablishSessionAdapterTests
             .Setup(s => s.HandleAsync(It.IsAny<SelfId>(), request, It.IsAny<CancellationToken>()))
             .ReturnsAsync(expected);
 
+        establish.Setup(e => e.QueueInviteAsync(
+                It.IsAny<SelfId>(),
+                It.IsAny<byte[]>(),
+                It.IsAny<byte[]>(),
+                It.IsAny<byte[]>(),
+                It.IsAny<bool>(),
+                It.IsAny<Percolator.Identity.PeerId?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new RequestCorrelationId(Guid.NewGuid()));
+
         var active = new ActiveIdentityContext
         {
             Identity = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "t") { SelfIdentityId = new SelfId(1) }
         };
-        var sut = new PercolatorMessageService(logger, ingress, establish, inviteIngress, standardIngress.Object, active);
+        var sut = new PercolatorMessageService(logger, ingress, establish.Object, inviteIngress, standardIngress.Object, active);
 
         var ctx = new ServerCallContextStub(
             peer: "ipv4:127.0.0.1:7777",

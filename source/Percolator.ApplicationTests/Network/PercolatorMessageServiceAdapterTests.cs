@@ -11,6 +11,8 @@ using NUnit.Framework;
 using Percolator.Application.Ingress;
 using Percolator.Application.Network;
 using Percolator.Contracts;
+using Percolator.Cryptography.Primitives;
+using Percolator.Identity;
 
 namespace Percolator.ApplicationTests.Network;
 
@@ -74,7 +76,16 @@ public class PercolatorMessageServiceAdapterTests
             .ReturnsAsync(new IngressResult(IngressDisposition.Rejected_NotReady));
 
         var logger = Mock.Of<ILogger<PercolatorMessageService>>();
-        var establish = Mock.Of<IEstablishDirectSessionService>();
+        var establish = new Mock<IEstablishDirectSessionService>();
+        establish.Setup(e => e.QueueInviteAsync(
+                It.IsAny<SelfId>(),
+                It.IsAny<byte[]>(),
+                It.IsAny<byte[]>(),
+                It.IsAny<byte[]>(),
+                It.IsAny<bool>(),
+                It.IsAny<Percolator.Identity.PeerId?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new RequestCorrelationId(Guid.NewGuid()));
         var inviteIngress = Mock.Of<IInviteHandshakeResponseIngress>();
         var standardIngress = Mock.Of<IStandardHandshakeIngress>();
 
@@ -82,7 +93,7 @@ public class PercolatorMessageServiceAdapterTests
         {
             Identity = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "test") { SelfIdentityId = new Percolator.Identity.SelfId(1) }
         };
-        var sut = new PercolatorMessageService(logger, ingress.Object, establish, inviteIngress, standardIngress, active);
+        var sut = new PercolatorMessageService(logger, ingress.Object, establish.Object, inviteIngress, standardIngress, active);
 
         var request = new DeliverOpaqueMessageRequest
         {

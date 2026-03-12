@@ -103,7 +103,7 @@ public sealed class PendingHandshakeSimulatorService : IPendingHandshakeSimulato
         var payloadBytes = payload.ToByteArray();
         var payloadSig = inviterEcdsa.SignData(payloadBytes, HashAlgorithmName.SHA256);
 
-        _ = await _establish.QueueInviteAsync(selfIdentityId, inviterSpki, payloadBytes, payloadSig, isRelayed: false, ct).ConfigureAwait(false);
+        _ = await _establish.QueueInviteAsync(selfIdentityId, inviterSpki, payloadBytes, payloadSig, isRelayed: false, relayHostPeerId: null, ct).ConfigureAwait(false);
 
         _peersByCorrelation[correlation.Value] = new SimulatedPeer
         {
@@ -162,7 +162,7 @@ public sealed class PendingHandshakeSimulatorService : IPendingHandshakeSimulato
             var payloadSig = inviterEcdsa.SignData(payloadBytes, HashAlgorithmName.SHA256);
 
             // Inject via real reverse-signal ingress path.
-            _ = await _establish.QueueInviteAsync(selfIdentityId, inviterSpki, payloadBytes, payloadSig, isRelayed: false, ct).ConfigureAwait(false);
+            _ = await _establish.QueueInviteAsync(selfIdentityId, inviterSpki, payloadBytes, payloadSig, isRelayed: false, relayHostPeerId: null, ct).ConfigureAwait(false);
 
             _peersByCorrelation[correlation.Value] = new SimulatedPeer
             {
