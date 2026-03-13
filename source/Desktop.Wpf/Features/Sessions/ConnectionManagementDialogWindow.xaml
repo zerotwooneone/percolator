@@ -192,12 +192,27 @@
         </Grid>
       </TabItem>
       <TabItem Header="Import Token">
-        <Grid Margin="0,12,0,0" RowDefinitions="Auto,*">
+        <Grid Margin="0,12,0,0" RowDefinitions="Auto,*,Auto,Auto">
           <TextBlock Text="OUT-OF-BAND (OOB) TOKEN" Foreground="{StaticResource OnSurfaceVariantBrush}" FontSize="12"/>
           <TextBox Grid.Row="1" Margin="0,6,0,0" Height="200"
                    Style="{StaticResource WatermarkTextBox}"
+                   Text="{Binding InviteTokenText.Value, UpdateSourceTrigger=PropertyChanged}"
                    TextWrapping="Wrap" AcceptsReturn="True"
                    VerticalScrollBarVisibility="Auto" />
+
+          <Border Grid.Row="2" Margin="0,14,0,0" Style="{StaticResource BaseBorder}" Background="{StaticResource SurfaceContainerLowBrush}" Padding="12">
+            <StackPanel>
+              <TextBlock Text="PHASE" Foreground="{StaticResource OnSurfaceVariantBrush}" FontSize="12"/>
+              <TextBlock Margin="0,6,0,0" Text="{Binding PhaseText.Value}" />
+              <TextBlock Margin="0,6,0,0" Foreground="{StaticResource ErrorBrush}" Text="{Binding ErrorText.Value}" />
+            </StackPanel>
+          </Border>
+
+          <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
+            <controls:MatButton Variant="Filled" Command="{Binding DecodeAndInitiateCommand}">
+              <TextBlock Text="DECODE &amp; INITIATE"/>
+            </controls:MatButton>
+          </StackPanel>
         </Grid>
       </TabItem>
     </TabControl>

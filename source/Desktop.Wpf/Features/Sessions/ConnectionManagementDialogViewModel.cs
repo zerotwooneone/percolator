@@ -90,6 +90,7 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
     private readonly ISimulatorStateService _simulatorState;
     private readonly ActiveIdentityContext _active;
     private readonly IPeerIdentityRepository _peerIdentities;
+    private readonly IEstablishDirectSessionService _establishDirectSession;
 
     private readonly ObservableCollection<PendingInvitationItem> _pendingInvitations = new();
     private readonly ObservableCollection<RouteModeOption> _routeModeOptions = new();
@@ -111,6 +112,8 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
     public BindableReactiveProperty<string?> PhaseText { get; }
     public BindableReactiveProperty<string?> ErrorText { get; }
 
+    public BindableReactiveProperty<string?> InviteTokenText { get; }
+
     public ReadOnlyObservableCollection<PendingInvitationItem> PendingInvitations { get; }
 
     public AsyncRelayCommand AcceptInvitationCommand { get; }
@@ -118,6 +121,8 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
     public AsyncRelayCommand RefreshInboxCommand { get; }
 
     public AsyncRelayCommand SearchAndConnectCommand { get; }
+
+    public AsyncRelayCommand DecodeAndInitiateCommand { get; }
 
     public ConnectionManagementDialogViewModel(
         IMainInvitationInbox inbox,
@@ -130,7 +135,8 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
         IDirectSessionRepository directSessions,
         ISimulatorStateService simulatorState,
         ActiveIdentityContext active,
-        IPeerIdentityRepository peerIdentities)
+        IPeerIdentityRepository peerIdentities,
+        IEstablishDirectSessionService establishDirectSession)
     {
         _inbox = inbox;
         _actions = actions;
@@ -143,6 +149,7 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
         _simulatorState = simulatorState;
         _active = active;
         _peerIdentities = peerIdentities;
+        _establishDirectSession = establishDirectSession;
         SelectedTabIndex = new BindableReactiveProperty<int>(0).AddTo(ref _bag);
 
         PendingInvitations = new ReadOnlyObservableCollection<PendingInvitationItem>(_pendingInvitations);
@@ -161,17 +168,142 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
         PhaseText = new BindableReactiveProperty<string?>(null).AddTo(ref _bag);
         ErrorText = new BindableReactiveProperty<string?>(null).AddTo(ref _bag);
 
+        InviteTokenText = new BindableReactiveProperty<string?>(null).AddTo(ref _bag);
+
         RefreshInboxCommand = new AsyncRelayCommand(async _ => await RefreshInboxAsync().ConfigureAwait(false));
         AcceptInvitationCommand = new AsyncRelayCommand(async obj => await ExecuteAcceptAsync(obj).ConfigureAwait(false));
         BurnInvitationCommand = new AsyncRelayCommand(async obj => await ExecuteBurnAsync(obj).ConfigureAwait(false));
 
         SearchAndConnectCommand = new AsyncRelayCommand(async _ => await ExecuteNetworkSearchAsync().ConfigureAwait(false));
 
+        DecodeAndInitiateCommand = new AsyncRelayCommand(async _ => await ExecuteImportTokenAsync().ConfigureAwait(false));
+
         _inboxEvents.Changed
             .SubscribeAwait(async (_, ct) => await RefreshInboxAsync(ct).ConfigureAwait(false), AwaitOperation.Drop)
             .AddTo(ref _bag);
 
         _ = InitializeAsync().ContinueWith(static t => _ = t.Exception, TaskContinuationOptions.OnlyOnFaulted);
+    }
+
+    private async Task ExecuteImportTokenAsync(CancellationToken ct = default)
+    {
+        ResetStatus();
+        PhaseText.Value = "Decoding Token...";
+
+        if (_active.Identity is null)
+        {
+            ErrorText.Value = "Identity not loaded.";
+            PhaseText.Value = null;
+            return;
+        }
+
+        EstablishDirectSessionRequest env;
+        InviteHandshakeRequestPayload payload;
+        try
+        {
+            var bytes = DecodeTokenToBytes(InviteTokenText.Value);
+            env = EstablishDirectSessionRequest.Parser.ParseFrom(bytes);
+            payload = InviteHandshakeRequestPayload.Parser.ParseFrom(env.Payload);
+        }
+        catch
+        {
+            ErrorText.Value = "Invalid token.";
+            PhaseText.Value = null;
+            return;
+        }
+
+        if (!env.HasInviterIdentityKey || env.InviterIdentityKey.Length == 0)
+        {
+            ErrorText.Value = "Token missing inviter identity key.";
+            PhaseText.Value = null;
+            return;
+        }
+
+        if (!env.HasPayload || env.Payload.Length == 0)
+        {
+            ErrorText.Value = "Token missing payload.";
+            PhaseText.Value = null;
+            return;
+        }
+
+        if (!env.HasPayloadSignature || env.PayloadSignature.Length == 0)
+        {
+            ErrorText.Value = "Token missing signature.";
+            PhaseText.Value = null;
+            return;
+        }
+
+        PhaseText.Value = "Verifying Signature...";
+
+        if (!VerifyInvitePayloadSignature(
+                inviterIdentityKeySpki: env.InviterIdentityKey.ToByteArray(),
+                payloadBytes: env.Payload.ToByteArray(),
+                signatureBytes: env.PayloadSignature.ToByteArray()))
+        {
+            ErrorText.Value = "Token signature invalid.";
+            PhaseText.Value = null;
+            return;
+        }
+
+        PhaseText.Value = "Queuing Invitation...";
+
+        try
+        {
+            _ = await _establishDirectSession.QueueInviteAsync(
+                    selfIdentityId: new Percolator.Identity.SelfId(_active.Identity.SelfIdentityId.Value),
+                    inviterIdentityKeySpki: env.InviterIdentityKey.ToByteArray(),
+                    payloadBytes: env.Payload.ToByteArray(),
+                    payloadSignatureBytes: env.PayloadSignature.ToByteArray(),
+                    isRelayed: false,
+                    relayHostPeerId: null,
+                    cancellationToken: ct)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            ErrorText.Value = ex.Message;
+            PhaseText.Value = null;
+            return;
+        }
+
+        PhaseText.Value = null;
+
+        await RefreshInboxAsync(ct).ConfigureAwait(false);
+
+        var dispatcher = Application.Current?.Dispatcher;
+        if (dispatcher is null || dispatcher.CheckAccess())
+        {
+            SelectedTabIndex.Value = 0;
+        }
+        else
+        {
+            await dispatcher.InvokeAsync(() => SelectedTabIndex.Value = 0);
+        }
+    }
+
+    private static bool VerifyInvitePayloadSignature(byte[] inviterIdentityKeySpki, byte[] payloadBytes, byte[] signatureBytes)
+    {
+        try
+        {
+            using var ecdsa = ECDsa.Create();
+            ecdsa.ImportSubjectPublicKeyInfo(inviterIdentityKeySpki, out _);
+            return ecdsa.VerifyData(payloadBytes, signatureBytes, HashAlgorithmName.SHA256);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static byte[] DecodeTokenToBytes(string? token)
+    {
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            throw new InvalidOperationException("Token required.");
+        }
+
+        var t = new string(token.Where(c => !char.IsWhiteSpace(c)).ToArray());
+        return Convert.FromBase64String(t);
     }
 
     private async Task InitializeAsync(CancellationToken ct = default)
@@ -513,6 +645,7 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
         Disposable.Dispose(SelectedRelayHost);
         Disposable.Dispose(PhaseText);
         Disposable.Dispose(ErrorText);
+        Disposable.Dispose(InviteTokenText);
         _bag.Dispose();
     }
 }
