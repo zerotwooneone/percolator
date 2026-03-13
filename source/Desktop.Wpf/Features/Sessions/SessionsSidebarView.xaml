@@ -54,7 +54,7 @@
                 <controls:InitialsAvatar Diameter="36" CornerRadius="18" Text="{Binding Initials.Value}" IsOnline="{Binding IsOnline.Value}"/>
                 <StackPanel Grid.Column="1" Margin="10,0,0,0">
                   <TextBlock Text="{Binding DisplayName.Value}"/>
-                  <TextBlock Text="{Binding LastMessagePreview.Value}" Foreground="{StaticResource OnSurfaceVariantBrush}" FontSize="12"/>
+                  <TextBlock Text="{Binding LastSnippet.Value}" Foreground="{StaticResource OnSurfaceVariantBrush}" FontSize="12"/>
                 </StackPanel>
                 <StackPanel Grid.Column="2" Orientation="Vertical" HorizontalAlignment="Right">
                   <TextBlock Text="{Binding TimestampText.Value}" Foreground="{StaticResource OnSurfaceVariantBrush}" FontSize="12" HorizontalAlignment="Right"/>
