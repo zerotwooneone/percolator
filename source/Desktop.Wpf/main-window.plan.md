@@ -177,35 +177,166 @@ Definition of done:
 
 Outcome:
 
-- User can initiate a **Reverse-Signal invitation** from Main to a simulator peer by entering PKH and selecting a route.
+- User can initiate a **regular Signal** (pre-key + X3DH) handshake from Main to a simulator peer by entering a target PKH and selecting a route.
 - Route selection supports:
-  - `Direct P2P (Local Mesh)`
-  - Each active relay node by display name
+  - `Direct` (explicit `host:port` `DnsEndPoint`)
+  - `Via Relay Host` (select a relay host peer from Main’s known peers with a direct session)
+- This tab is responsible for:
+  - requesting a **pre-key bundle** for the target PKH using the selected route
+  - initiating the standard handshake init message using the same selected route
 
-Clarification:
+Work breakdown:
 
-- This is not a “Signal pre-key fetch” flow. This tab sends a Reverse-Signal **invitation** (Main acts as X3DH responder/inviter).
+### Chunk D.1 — Connection Management Tab 2 UI + VM wiring (Signal initiation surface)
+
+Outcome:
+
+- “Network Search” becomes “Add Peer by PKH” (naming flexible) for regular Signal.
+- User can enter:
+  - target PKH
+  - optional display name
+  - route mode (Direct vs Via Relay Host)
+  - direct endpoint (for Direct) or relay host peer selection (for Via Relay Host)
+- UI shows phase/error and disables retry when a NotUntil backoff is active.
 
 Work:
 
-- Implement the tab UI:
+- Update the tab UI:
   - PKH input
-  - Transport Route dropdown
-  - “Search & Connect” button
-- Reference screenshot:
-  - `design/connection-management.addPeer.png`
-- VM behavior:
-  - Validate PKH format (lightweight)
-  - On submit:
-    - create/ensure a local “Pending channel” record in the Secure Channels list model (see Chunk F)
-    - invoke invitation initiation API which:
-      - generates an `EstablishDirectSessionRequest` (serialized `InviteHandshakeRequestPayload`)
-      - records a `SentInvitation` keyed by `request_correlation_id`
-      - delivers the invite to the target via chosen transport route (direct or relayed)
+  - DisplayName input (optional)
+  - RouteMode selector
+  - Direct endpoint input (DnsEndPoint)
+  - Relay host dropdown sourced from `IDirectSessionRepository` (all peers with an active/known direct session, display by name, identify by peer id)
+  - Primary action: “Fetch Pre-Key Bundle & Initiate”
+  - Phase + Error status region
+- Update VM bindings to drive a state machine (phases are not final, but must be explicit):
+  - Idle
+  - RequestingPreKeyBundle
+  - PreKeyBundleNotUntil
+  - PreKeyBundleNever
+  - PreKeyBundleReceived
+  - InitiatingHandshake
+  - HandshakeSent
+  - Failed
 
 Definition of done:
 
-- Main can reliably send an outbound **invitation** to a simulator peer via direct or relay.
+- User can select direct/relay routes and click the primary action.
+- Relay host dropdown lists peers derived from `IDirectSessionRepository`.
+
+### Chunk D.2 — Pre-key bundle request via selected route (direct or relay-host)
+
+Outcome:
+
+- Main can request a pre-key bundle by PKH:
+  - Direct: from the target endpoint.
+  - Relayed: from the relay host (direct request/response to the relay host; relay host acts as the pre-key bundle holder for the target).
+
+Work:
+
+- Implement request logic:
+  - Build `InternalEnvelope.PrekeyEnvelope.GetPreKeyBundleRequest { public_key_hash = targetPkh }`
+  - Deliver request and interpret response:
+    - If response contains bundle -> proceed
+    - If no response payload -> show error
+
+Definition of done:
+
+- Pre-key bundle request succeeds/fails deterministically and returns a clear state to the UI.
+
+### Chunk D.2.1 — Finish `RequestPreKeyBundleByPkhHandler.PerformHandshake` (standard initiator X3DH)
+
+Outcome:
+
+- The pre-key bundle CLI flow can complete the initiator-side Signal bootstrap:
+  - build the initiator X3DH shared secret from the remote pre-key bundle
+  - send `EstablishSessionRequest` to the remote endpoint
+  - persist the created initiator session and direct session mapping
+
+Work:
+
+- Implement `PerformHandshake(...)` by following the existing standard handshake initiation pattern:
+  - validate and construct a `Percolator.Cryptography.PreKeyBundle` from:
+    - remote identity signing SPKI
+    - remote signed pre-key (and signature)
+    - optional one-time pre-key
+  - call `ISessionCrypto.X3DH_Initiate(...)` using the local identity private key and the remote bundle
+  - build and send `EstablishSessionRequest` (identity SPKI, ephemeral public key, signed prekey id, optional one-time prekey id)
+  - parse `EstablishSessionResponse` and extract the negotiated `session_id`
+  - create/persist the initiator `SecureSession` via `RatchetBootstrap.CreateInitiatorSession(...)`
+  - upsert `IDirectSessionRepository` mapping for the remote peer
+- Keep `RequestPreKeyBundleByPkhHandler` focused on the CLI path; Chunk D.4 remains the app/UI handshake initiation surface.
+
+Definition of done:
+
+- `RequestPreKeyBundleByPkhHandler` no longer throws `NotSupportedException` when attempting handshake.
+- A successful call results in a persisted initiator session and a direct session record usable by secure messaging.
+
+### Chunk D.3 — Simulator async state machine + persistence (restart-safe)
+
+Outcome:
+
+- The simulator persists outbound Signal initiation attempts so that:
+  - NotUntil backoff survives restart
+  - handshake “in progress” can survive restart and complete when messages arrive later
+
+Work:
+
+- Review what the simulator already persists today.
+- Extend persisted simulator state to include (at minimum):
+  - target PKH
+  - selected route (direct endpoint or relay host peer id)
+  - current phase
+  - NotUntilUtc (optional)
+  - last error (optional)
+- Ensure the simulator UI is driven by the persisted state machine.
+
+Definition of done:
+
+- Restarting the app does not lose NotUntil state or in-progress handshake intent.
+
+### Chunk D.4 — Standard handshake init send (direct or via relay queue)
+
+Outcome:
+
+- After a pre-key bundle is obtained:
+  - the peer is created/updated with SPKI and PKH mapping
+  - a standard handshake init is generated and sent via the selected route
+
+Work:
+
+- On bundle receipt:
+  - create/update peer identity + PKH mapping (SPKI-derived PKH must match input)
+  - upsert routing profile with the user-provided route
+- Handshake init send:
+  - Direct route: send `EstablishSessionRequest` to the endpoint
+  - Relayed route: enqueue `HandshakeInitiatorHello` bytes to the relay queue for the target PKH
+- Persist enough outbound state so the handshake can complete later when response arrives.
+
+Definition of done:
+
+- Main can initiate standard handshake to a simulator peer using direct or relay.
+
+### Chunk D.5 — Tests + diagnostics
+
+Outcome:
+
+- Confidence that:
+  - contract handling works (`pre_key_bundle` / `never` / `not_until`)
+  - state machine transitions are correct
+  - persistence retains NotUntil and in-progress state across restart
+
+Work:
+
+- Add/extend tests in Desktop.Wpf.Tests / ApplicationTests as appropriate.
+- Add diagnostics events to simulator diagnostics tab for:
+  - prekey request sent/response received
+  - NotUntil enforced
+  - handshake init sent
+
+Definition of done:
+
+- Automated tests cover the primary happy path and the NotUntil/Never paths.
 
 ---
 

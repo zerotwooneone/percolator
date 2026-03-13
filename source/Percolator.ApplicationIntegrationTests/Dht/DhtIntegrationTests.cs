@@ -32,6 +32,9 @@ public class DhtIntegrationTests : IntegrationTestBase
         var dhtRepositoryMock = new Mock<IDhtNodeRepository>();
         var secureSvcMock = new Mock<Percolator.Application.Services.ISecureMessagingService>();
         var directSessionRepoMock = new Mock<IDirectSessionRepository>();
+        directSessionRepoMock
+            .Setup(r => r.ListAsync(It.IsAny<int>()))
+            .ReturnsAsync(Array.Empty<DirectSession>());
 
         // Mocks for unused dependencies to allow the host to build
         var conversationRepoMock = new Mock<IConversationRepository>();
@@ -142,6 +145,9 @@ public class DhtIntegrationTests : IntegrationTestBase
         var dhtNodeRepoMock = new Mock<IDhtNodeRepository>();
         var secureSvcMock = new Mock<Percolator.Application.Services.ISecureMessagingService>();
         var directSessionRepoMock = new Mock<IDirectSessionRepository>();
+        directSessionRepoMock
+            .Setup(r => r.ListAsync(It.IsAny<int>()))
+            .ReturnsAsync(Array.Empty<DirectSession>());
         var sessionId = new Percolator.Cryptography.SessionId(Guid.NewGuid());
 
         // Build a valid ratchet payload header and register a lookup mock that resolves it

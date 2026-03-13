@@ -14,6 +14,7 @@ using Percolator.Application.Identity;
 using Percolator.Application.Network;
 using Percolator.Contracts;
 using Percolator.Identity;
+using Percolator.Identity.Model;
 using Percolator.Network;
 using Percolator.Network.ValueObjects;
 using Desktop.Wpf.Features.Simulator;
@@ -49,6 +50,30 @@ public sealed class TransportRouteOption
     public string DisplayName { get; }
 }
 
+public sealed class RouteModeOption
+{
+    public RouteModeOption(string key, string displayName)
+    {
+        Key = key;
+        DisplayName = displayName;
+    }
+
+    public string Key { get; }
+    public string DisplayName { get; }
+}
+
+public sealed class RelayHostOption
+{
+    public RelayHostOption(Guid peerId, string displayName)
+    {
+        PeerId = peerId;
+        DisplayName = displayName;
+    }
+
+    public Guid PeerId { get; }
+    public string DisplayName { get; }
+}
+
 public sealed class ConnectionManagementDialogViewModel : ViewModelBase
 {
     private readonly DisposableBag _bag;
@@ -64,15 +89,24 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
     private readonly IDirectSessionRepository _directSessions;
     private readonly ISimulatorStateService _simulatorState;
     private readonly ActiveIdentityContext _active;
+    private readonly IPeerIdentityRepository _peerIdentities;
 
     private readonly ObservableCollection<PendingInvitationItem> _pendingInvitations = new();
-    private readonly ObservableCollection<TransportRouteOption> _routeOptions = new();
+    private readonly ObservableCollection<RouteModeOption> _routeModeOptions = new();
+    private readonly ObservableCollection<RelayHostOption> _relayHostOptions = new();
 
     public BindableReactiveProperty<int> SelectedTabIndex { get; }
 
-    public ReadOnlyObservableCollection<TransportRouteOption> RouteOptions { get; }
-    public BindableReactiveProperty<TransportRouteOption?> SelectedRoute { get; }
     public BindableReactiveProperty<string?> TargetPkhText { get; }
+    public BindableReactiveProperty<string?> TargetDisplayNameText { get; }
+
+    public ReadOnlyObservableCollection<RouteModeOption> RouteModeOptions { get; }
+    public BindableReactiveProperty<RouteModeOption?> SelectedRouteMode { get; }
+
+    public BindableReactiveProperty<string?> DirectEndpointText { get; }
+
+    public ReadOnlyObservableCollection<RelayHostOption> RelayHostOptions { get; }
+    public BindableReactiveProperty<RelayHostOption?> SelectedRelayHost { get; }
 
     public BindableReactiveProperty<string?> PhaseText { get; }
     public BindableReactiveProperty<string?> ErrorText { get; }
@@ -95,7 +129,8 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
         ISecureMessagingService secureMessaging,
         IDirectSessionRepository directSessions,
         ISimulatorStateService simulatorState,
-        ActiveIdentityContext active)
+        ActiveIdentityContext active,
+        IPeerIdentityRepository peerIdentities)
     {
         _inbox = inbox;
         _actions = actions;
@@ -107,13 +142,21 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
         _directSessions = directSessions;
         _simulatorState = simulatorState;
         _active = active;
+        _peerIdentities = peerIdentities;
         SelectedTabIndex = new BindableReactiveProperty<int>(0).AddTo(ref _bag);
 
         PendingInvitations = new ReadOnlyObservableCollection<PendingInvitationItem>(_pendingInvitations);
 
-        RouteOptions = new ReadOnlyObservableCollection<TransportRouteOption>(_routeOptions);
-        SelectedRoute = new BindableReactiveProperty<TransportRouteOption?>(null).AddTo(ref _bag);
         TargetPkhText = new BindableReactiveProperty<string?>(null).AddTo(ref _bag);
+        TargetDisplayNameText = new BindableReactiveProperty<string?>(null).AddTo(ref _bag);
+
+        RouteModeOptions = new ReadOnlyObservableCollection<RouteModeOption>(_routeModeOptions);
+        SelectedRouteMode = new BindableReactiveProperty<RouteModeOption?>(null).AddTo(ref _bag);
+
+        DirectEndpointText = new BindableReactiveProperty<string?>(null).AddTo(ref _bag);
+
+        RelayHostOptions = new ReadOnlyObservableCollection<RelayHostOption>(_relayHostOptions);
+        SelectedRelayHost = new BindableReactiveProperty<RelayHostOption?>(null).AddTo(ref _bag);
 
         PhaseText = new BindableReactiveProperty<string?>(null).AddTo(ref _bag);
         ErrorText = new BindableReactiveProperty<string?>(null).AddTo(ref _bag);
@@ -134,7 +177,8 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
     private async Task InitializeAsync(CancellationToken ct = default)
     {
         await _simulatorState.InitializeAsync(ct).ConfigureAwait(false);
-        RefreshRouteOptions();
+        InitializeRouteModeOptions();
+        await RefreshRelayHostOptionsAsync(ct).ConfigureAwait(false);
 
         await RefreshInboxAsync(ct).ConfigureAwait(false);
 
@@ -148,6 +192,59 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
         {
             await dispatcher.InvokeAsync(() => SelectedTabIndex.Value = desired);
         }
+    }
+
+    private void InitializeRouteModeOptions()
+    {
+        _routeModeOptions.Clear();
+        _routeModeOptions.Add(new RouteModeOption("direct", "Direct"));
+        _routeModeOptions.Add(new RouteModeOption("relay", "Via Relay Host"));
+        SelectedRouteMode.Value ??= _routeModeOptions.FirstOrDefault();
+    }
+
+    private async Task RefreshRelayHostOptionsAsync(CancellationToken ct)
+    {
+        _relayHostOptions.Clear();
+
+        if (_active.Identity is null)
+        {
+            return;
+        }
+
+        IReadOnlyList<DirectSession> sessions;
+        try
+        {
+            sessions = await _directSessions.ListAsync(_active.Identity.SelfIdentityId.Value).ConfigureAwait(false);
+        }
+        catch
+        {
+            sessions = Array.Empty<DirectSession>();
+        }
+
+        foreach (var s in sessions.OrderBy(x => x.RemotePeerId.Value))
+        {
+            var peerId = new Percolator.Identity.PeerId(s.RemotePeerId.Value);
+
+            PeerIdentity? identity;
+            try
+            {
+                identity = await _peerIdentities.GetByIdAsync(peerId, ct).ConfigureAwait(false);
+            }
+            catch
+            {
+                identity = null;
+            }
+
+            var name = identity?.DisplayName?.Value;
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                name = peerId.Value.ToString()[..8];
+            }
+
+            _relayHostOptions.Add(new RelayHostOption(peerId.Value, name));
+        }
+
+        SelectedRelayHost.Value ??= _relayHostOptions.FirstOrDefault();
     }
 
     public async Task RefreshInboxAsync(CancellationToken ct = default)
@@ -254,22 +351,6 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
         await RefreshInboxAsync().ConfigureAwait(false);
     }
 
-    private void RefreshRouteOptions()
-    {
-        _routeOptions.Clear();
-        _routeOptions.Add(new TransportRouteOption(relayHostPeerId: null, displayName: "Direct P2P (Local Mesh)"));
-
-        foreach (var p in _simulatorState.Peers
-                     .Where(x => x.IsOnline && x.Relay?.IsRelayCapable == true)
-                     .OrderBy(x => x.DisplayName ?? x.PeerId.ToString()))
-        {
-            var name = string.IsNullOrWhiteSpace(p.DisplayName) ? p.PeerId.ToString()[..8] : p.DisplayName!;
-            _routeOptions.Add(new TransportRouteOption(p.PeerId, name));
-        }
-
-        SelectedRoute.Value ??= _routeOptions.FirstOrDefault();
-    }
-
     private async Task ExecuteNetworkSearchAsync()
     {
         ResetStatus();
@@ -288,48 +369,37 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
             return;
         }
 
-        var targetPeer = TryResolveSimulatedPeerByPkh(targetPkh);
-        if (targetPeer is null)
-        {
-            ErrorText.Value = "Target not found in simulator.";
-            PhaseText.Value = null;
-            return;
-        }
-
-        EstablishDirectSessionRequest invite;
         try
         {
-            invite = _reverseSignalInvites.CreateInvite();
-        }
-        catch (Exception ex)
-        {
-            ErrorText.Value = ex.Message;
-            PhaseText.Value = null;
-            return;
-        }
-
-        var route = SelectedRoute.Value;
-        if (route is null)
-        {
-            ErrorText.Value = "Select a transport route.";
-            PhaseText.Value = null;
-            return;
-        }
-
-        try
-        {
-            if (route.RelayHostPeerId is null)
+            var routeMode = SelectedRouteMode.Value;
+            if (routeMode is null)
             {
-                PhaseText.Value = "Sending Invite (Direct)...";
-                var endpoint = new DnsEndPoint(targetPeer.Connection.Host, targetPeer.Connection.Port);
-                _ = await _grpcSessions.EstablishDirectSessionAsync(endpoint, invite).ConfigureAwait(false);
+                ErrorText.Value = "Select a route mode.";
                 PhaseText.Value = null;
                 return;
             }
 
-            PhaseText.Value = "Sending Invite (Via Relay)...";
-            await SendInviteViaRelayAsync(route.RelayHostPeerId.Value, targetPkh, invite.ToByteArray(), CancellationToken.None)
-                .ConfigureAwait(false);
+            if (routeMode.Key == "direct")
+            {
+                _ = ParseDnsEndPoint(DirectEndpointText.Value);
+                PhaseText.Value = "Validated (Direct).";
+                return;
+            }
+
+            if (routeMode.Key == "relay")
+            {
+                if (SelectedRelayHost.Value is null)
+                {
+                    ErrorText.Value = "Select a relay host.";
+                    PhaseText.Value = null;
+                    return;
+                }
+
+                PhaseText.Value = "Validated (Relay).";
+                return;
+            }
+
+            ErrorText.Value = "Unknown route mode.";
             PhaseText.Value = null;
         }
         catch (Exception ex)
@@ -337,72 +407,6 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
             ErrorText.Value = ex.Message;
             PhaseText.Value = null;
         }
-    }
-
-    private SimulatedPeerDto? TryResolveSimulatedPeerByPkh(byte[] targetPkh)
-    {
-        foreach (var p in _simulatorState.Peers)
-        {
-            var spki = p.ReverseSignalKeys?.IdentitySigningKeySpki;
-            if (spki is null || spki.Length == 0) continue;
-
-            var pkh = SHA256.HashData(spki);
-            if (pkh.SequenceEqual(targetPkh))
-            {
-                return p;
-            }
-        }
-
-        return null;
-    }
-
-    private async Task SendInviteViaRelayAsync(
-        Guid relayHostPeerId,
-        byte[] recipientPkh,
-        byte[] inviteBytes,
-        CancellationToken ct)
-    {
-        if (_active.Identity is null)
-        {
-            throw new InvalidOperationException("Identity not loaded.");
-        }
-
-        var relaySession = await _directSessions.GetByRemotePeerIdAsync(
-                new Percolator.Network.PeerId(relayHostPeerId),
-                _active.Identity.SelfIdentityId.Value)
-            .ConfigureAwait(false);
-        if (relaySession is null)
-        {
-            throw new InvalidOperationException("No session to relay host.");
-        }
-
-        var mqReq = new EnqueueOpaqueMessageRequest
-        {
-            Version = 1,
-            RecipientPublicKeyHash = ByteString.CopyFrom(recipientPkh),
-            MessageBlob = ByteString.CopyFrom(inviteBytes)
-        };
-        var toRelay = new InternalEnvelope
-        {
-            MessageQueueEnvelope = new MessageQueueEnvelope
-            {
-                Version = 1,
-                EnqueueOpaqueMessageRequest = mqReq
-            }
-        };
-
-        var relayPlain = new Plaintext(toRelay.ToByteArray());
-        var relaySessionId = new SessionId(relaySession.SessionId.Value);
-        var relayDirectSessionId = new DirectSessionId(relaySession.SessionId.Value);
-        var relayCipher = await _secureMessaging.EncryptAsync(relaySessionId, relayPlain, ct).ConfigureAwait(false);
-
-        // EstablishDirectSessionRequest is one-way; no response required.
-        _ = await _transport.SendMessageAsync(
-                new Percolator.Identity.PeerId(relayHostPeerId),
-                relayDirectSessionId,
-                relayCipher,
-                ct)
-            .ConfigureAwait(false);
     }
 
     private static byte[] ParsePkh(string? text)
@@ -450,6 +454,28 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
         ErrorText.Value = null;
     }
 
+    private static DnsEndPoint ParseDnsEndPoint(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            throw new InvalidOperationException("Endpoint required.");
+        }
+
+        var trimmed = text.Trim();
+        if (trimmed.StartsWith("http://", StringComparison.OrdinalIgnoreCase))
+            trimmed = trimmed.Substring("http://".Length);
+        if (trimmed.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+            trimmed = trimmed.Substring("https://".Length);
+
+        var parts = trimmed.Split(':', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (parts.Length != 2 || !int.TryParse(parts[1], out var port) || port <= 0)
+        {
+            throw new InvalidOperationException("Invalid endpoint format. Use host:port");
+        }
+
+        return new DnsEndPoint(parts[0], port);
+    }
+
     private static string ComputeInitials(string? name)
     {
         if (string.IsNullOrWhiteSpace(name)) return "?";
@@ -462,8 +488,11 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
     protected override void DisposeCore()
     {
         Disposable.Dispose(SelectedTabIndex);
-        Disposable.Dispose(SelectedRoute);
         Disposable.Dispose(TargetPkhText);
+        Disposable.Dispose(TargetDisplayNameText);
+        Disposable.Dispose(SelectedRouteMode);
+        Disposable.Dispose(DirectEndpointText);
+        Disposable.Dispose(SelectedRelayHost);
         Disposable.Dispose(PhaseText);
         Disposable.Dispose(ErrorText);
         _bag.Dispose();

@@ -1,6 +1,8 @@
 using System;
 using System.Linq;
 using System.Threading.Tasks;
+using System.Collections.Generic;
+using System.Threading;
 using Microsoft.EntityFrameworkCore;
 using Percolator.Infrastructure.Persistence;
 using Percolator.Network;
@@ -14,6 +16,19 @@ public sealed class SqliteDirectSessionRepository : IDirectSessionRepository
     public SqliteDirectSessionRepository(PercolatorDbContext db)
     {
         _db = db;
+    }
+
+    public async Task<IReadOnlyList<DirectSession>> ListAsync(int selfIdentityId)
+    {
+        var rows = await _db.DirectSessions
+            .AsNoTracking()
+            .Where(x => x.SelfIdentityId == selfIdentityId)
+            .ToListAsync()
+            .ConfigureAwait(false);
+
+        return rows
+            .Select(dbo => new DirectSession(new PeerId(dbo.RemotePeerId), new DirectSessionId(dbo.SessionId)))
+            .ToList();
     }
 
     public async Task<DirectSession?> GetBySessionIdAsync(DirectSessionId sessionId, int selfIdentityId)

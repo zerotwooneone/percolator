@@ -26,6 +26,8 @@ public class NetworkTransportPortAdapterTests
         var logger = Mock.Of<Microsoft.Extensions.Logging.ILogger<NetworkTransportPortAdapter>>();
         var transport = new Mock<IMessageTransportService>(MockBehavior.Strict);
         var sessions = new Mock<IDirectSessionRepository>(MockBehavior.Strict);
+        sessions.Setup(s => s.ListAsync(It.IsAny<int>()))
+            .ReturnsAsync(Array.Empty<DirectSession>());
         var secure = new Mock<Percolator.Application.Services.ISecureMessagingService>(MockBehavior.Strict);
         var keyStore = new Mock<IPeerPublicSigningKeyStore>(MockBehavior.Strict);
         var active = MakeActive();
@@ -63,6 +65,8 @@ public class NetworkTransportPortAdapterTests
         var logger = Mock.Of<Microsoft.Extensions.Logging.ILogger<NetworkTransportPortAdapter>>();
         var transport = new Mock<IMessageTransportService>(MockBehavior.Loose);
         var sessions = new Mock<IDirectSessionRepository>(MockBehavior.Strict);
+        sessions.Setup(s => s.ListAsync(It.IsAny<int>()))
+            .ReturnsAsync(Array.Empty<DirectSession>());
         var secure = new Mock<Percolator.Application.Services.ISecureMessagingService>(MockBehavior.Loose);
         var keyStore = new Mock<IPeerPublicSigningKeyStore>(MockBehavior.Loose);
         var active = MakeActive();
@@ -83,6 +87,8 @@ public class NetworkTransportPortAdapterTests
         var logger = Mock.Of<Microsoft.Extensions.Logging.ILogger<NetworkTransportPortAdapter>>();
         var transport = new Mock<IMessageTransportService>(MockBehavior.Loose);
         var sessions = new Mock<IDirectSessionRepository>(MockBehavior.Strict);
+        sessions.Setup(s => s.ListAsync(It.IsAny<int>()))
+            .ReturnsAsync(Array.Empty<DirectSession>());
         var secure = new Mock<Percolator.Application.Services.ISecureMessagingService>(MockBehavior.Loose);
         var keyStore = new Mock<IPeerPublicSigningKeyStore>(MockBehavior.Loose);
         var active = MakeActive();
@@ -104,6 +110,8 @@ public class NetworkTransportPortAdapterTests
         var logger = Mock.Of<Microsoft.Extensions.Logging.ILogger<NetworkTransportPortAdapter>>();
         var transport = new Mock<IMessageTransportService>(MockBehavior.Strict);
         var sessions = new Mock<IDirectSessionRepository>(MockBehavior.Strict);
+        sessions.Setup(s => s.ListAsync(It.IsAny<int>()))
+            .ReturnsAsync(Array.Empty<DirectSession>());
         var secure = new Mock<Percolator.Application.Services.ISecureMessagingService>(MockBehavior.Strict);
         var keyStore = new Mock<IPeerPublicSigningKeyStore>(MockBehavior.Strict);
         var active = MakeActive();

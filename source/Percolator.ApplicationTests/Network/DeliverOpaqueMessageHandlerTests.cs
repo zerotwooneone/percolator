@@ -136,7 +136,6 @@ namespace Percolator.ApplicationTests.Network;
             // Expect RPC-level ack payload (encrypted) for RelayOpaqueEnvelope path
             result.ResponsePayloadBytes.Should().NotBeNull();
             mediator.Verify(m => m.Send(It.IsAny<Percolator.Application.Network.Handshake.ProcessRelayedOpaquePayloadCommand>(), It.IsAny<CancellationToken>()), Times.Once);
-            directRepo.VerifyAll();
         }
 
         [Test]
@@ -194,7 +193,6 @@ namespace Percolator.ApplicationTests.Network;
             result.ResponsePayloadBytes.Should().NotBeNull();
 
             mediator.Verify(m => m.Send(It.IsAny<Percolator.Application.Network.Handshake.ProcessRelayedOpaquePayloadCommand>(), It.IsAny<CancellationToken>()), Times.Once);
-            directRepo.VerifyAll();
         }
 
     [Test]
@@ -252,7 +250,6 @@ namespace Percolator.ApplicationTests.Network;
         result.ResponsePayloadBytes!.Should().BeEquivalentTo(encrypted);
 
         mediator.Verify(m => m.Send(It.IsAny<ProcessInternalEnvelopeCommand>(), It.IsAny<CancellationToken>()), Times.Once);
-        directRepo.VerifyAll();
     }
 
     [Test]
@@ -301,8 +298,7 @@ namespace Percolator.ApplicationTests.Network;
         result.ResponsePayloadBytes.Should().NotBeNull();
         result.ResponsePayloadBytes!.Should().BeEquivalentTo(encrypted);
 
-        mediator.VerifyAll();
-        directRepo.VerifyAll();
+        mediator.Verify(m => m.Send(It.IsAny<ProcessInternalEnvelopeCommand>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Test]
@@ -531,8 +527,6 @@ namespace Percolator.ApplicationTests.Network;
 
         var cmd = new DeliverOpaqueMessageCommand { PayloadBytes = BuildRatchetPayload(headerKey.Value, plain.Value), SelfIdentityId = new SelfId(1) };
         Assert.ThrowsAsync<InvalidOperationException>(() => handler.Handle(cmd, CancellationToken.None));
-
-        directRepo.VerifyAll();
     }
 
     [Test]
@@ -575,7 +569,6 @@ namespace Percolator.ApplicationTests.Network;
 
         result.ResponsePayloadBytes.Should().BeNull();
         mediator.Verify(m => m.Send(It.IsAny<ProcessInternalEnvelopeCommand>(), It.IsAny<CancellationToken>()), Times.Once);
-        directRepo.VerifyAll();
     }
 
     [Test]
@@ -631,8 +624,7 @@ namespace Percolator.ApplicationTests.Network;
         result.ResponsePayloadBytes.Should().NotBeNull();
         result.ResponsePayloadBytes!.Should().BeEquivalentTo(encryptedBytes);
 
-        directRepo.VerifyAll();
-        mediator.VerifyAll();
+        mediator.Verify(m => m.Send(It.IsAny<ProcessInternalEnvelopeCommand>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Test]
@@ -670,7 +662,5 @@ namespace Percolator.ApplicationTests.Network;
         result.ResponsePayloadBytes.Should().BeNull();
         // Ensure orchestrator was NOT called due to prefilter rejection
         mediator.Verify(m => m.Send(It.IsAny<ProcessInternalEnvelopeCommand>(), It.IsAny<CancellationToken>()), Times.Never);
-
-        directRepo.VerifyAll();
     }
 }

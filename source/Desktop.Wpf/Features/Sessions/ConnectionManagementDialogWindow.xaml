@@ -2,9 +2,9 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:controls="clr-namespace:Desktop.Wpf.Shared.Controls"
-        Title="Connection Management" Height="420" Width="560"
+        Title="Connection Management" Height="620" MinHeight="520" Width="560"
         WindowStartupLocation="CenterOwner"
-        ResizeMode="NoResize"
+        ResizeMode="CanResize"
         Style="{StaticResource BaseWindow}">
   <Grid Margin="16" RowDefinitions="Auto,*">
 
@@ -104,19 +104,79 @@
         </Grid>
       </TabItem>
       <TabItem Header="Network Search">
-        <Grid Margin="0,12,0,0" RowDefinitions="Auto,Auto,Auto,Auto,*,Auto">
+        <Grid Margin="0,12,0,0" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,*,Auto">
           <TextBlock Grid.Row="0" Text="TARGET IDENTITY (PKH)" Foreground="{StaticResource OnSurfaceVariantBrush}" FontSize="12"/>
           <controls:MatInput Grid.Row="1" Margin="0,6,0,0"
                              Text="{Binding TargetPkhText.Value, UpdateSourceTrigger=PropertyChanged}"
                              Placeholder="Paste target PKH here... (e.g. 0x7A2F...)" />
 
-          <TextBlock Grid.Row="2" Margin="0,14,0,0" Text="TRANSPORT ROUTE" Foreground="{StaticResource OnSurfaceVariantBrush}" FontSize="12"/>
-          <ComboBox Grid.Row="3" Margin="0,6,0,0"
-                    ItemsSource="{Binding RouteOptions}"
-                    SelectedItem="{Binding SelectedRoute.Value, Mode=TwoWay}"
+          <TextBlock Grid.Row="2" Margin="0,14,0,0" Text="DISPLAY NAME (OPTIONAL)" Foreground="{StaticResource OnSurfaceVariantBrush}" FontSize="12"/>
+          <controls:MatInput Grid.Row="3" Margin="0,6,0,0"
+                             Text="{Binding TargetDisplayNameText.Value, UpdateSourceTrigger=PropertyChanged}"
+                             Placeholder="e.g. Alice" />
+
+          <TextBlock Grid.Row="4" Margin="0,14,0,0" Text="ROUTE MODE" Foreground="{StaticResource OnSurfaceVariantBrush}" FontSize="12"/>
+          <ComboBox Grid.Row="5" Margin="0,6,0,0"
+                    ItemsSource="{Binding RouteModeOptions}"
+                    SelectedItem="{Binding SelectedRouteMode.Value, Mode=TwoWay}"
                     DisplayMemberPath="DisplayName" />
 
-          <Border Grid.Row="4" Margin="0,14,0,0" Style="{StaticResource BaseBorder}" Background="{StaticResource SurfaceContainerLowBrush}" Padding="12">
+          <TextBlock Grid.Row="6" Margin="0,14,0,0" Text="DIRECT ENDPOINT (HOST:PORT)" Foreground="{StaticResource OnSurfaceVariantBrush}" FontSize="12">
+            <TextBlock.Style>
+              <Style TargetType="TextBlock">
+                <Setter Property="Visibility" Value="Collapsed"/>
+                <Style.Triggers>
+                  <DataTrigger Binding="{Binding SelectedRouteMode.Value.Key}" Value="direct">
+                    <Setter Property="Visibility" Value="Visible"/>
+                  </DataTrigger>
+                </Style.Triggers>
+              </Style>
+            </TextBlock.Style>
+          </TextBlock>
+          <controls:MatInput Grid.Row="7" Margin="0,6,0,0"
+                             Text="{Binding DirectEndpointText.Value, UpdateSourceTrigger=PropertyChanged}"
+                             Placeholder="e.g. 127.0.0.1:5001">
+            <controls:MatInput.Style>
+              <Style TargetType="{x:Type controls:MatInput}">
+                <Setter Property="Visibility" Value="Collapsed"/>
+                <Style.Triggers>
+                  <DataTrigger Binding="{Binding SelectedRouteMode.Value.Key}" Value="direct">
+                    <Setter Property="Visibility" Value="Visible"/>
+                  </DataTrigger>
+                </Style.Triggers>
+              </Style>
+            </controls:MatInput.Style>
+          </controls:MatInput>
+
+          <TextBlock Grid.Row="8" Margin="0,14,0,0" Text="RELAY HOST" Foreground="{StaticResource OnSurfaceVariantBrush}" FontSize="12">
+            <TextBlock.Style>
+              <Style TargetType="TextBlock">
+                <Setter Property="Visibility" Value="Collapsed"/>
+                <Style.Triggers>
+                  <DataTrigger Binding="{Binding SelectedRouteMode.Value.Key}" Value="relay">
+                    <Setter Property="Visibility" Value="Visible"/>
+                  </DataTrigger>
+                </Style.Triggers>
+              </Style>
+            </TextBlock.Style>
+          </TextBlock>
+          <ComboBox Grid.Row="9" Margin="0,6,0,0"
+                    ItemsSource="{Binding RelayHostOptions}"
+                    SelectedItem="{Binding SelectedRelayHost.Value, Mode=TwoWay}"
+                    DisplayMemberPath="DisplayName">
+            <ComboBox.Style>
+              <Style TargetType="ComboBox" BasedOn="{StaticResource {x:Type ComboBox}}">
+                <Setter Property="Visibility" Value="Collapsed"/>
+                <Style.Triggers>
+                  <DataTrigger Binding="{Binding SelectedRouteMode.Value.Key}" Value="relay">
+                    <Setter Property="Visibility" Value="Visible"/>
+                  </DataTrigger>
+                </Style.Triggers>
+              </Style>
+            </ComboBox.Style>
+          </ComboBox>
+
+          <Border Grid.Row="10" Margin="0,14,0,0" Style="{StaticResource BaseBorder}" Background="{StaticResource SurfaceContainerLowBrush}" Padding="12">
             <StackPanel>
               <TextBlock Text="PHASE" Foreground="{StaticResource OnSurfaceVariantBrush}" FontSize="12"/>
               <TextBlock Margin="0,6,0,0" Text="{Binding PhaseText.Value}" />
@@ -124,9 +184,9 @@
             </StackPanel>
           </Border>
 
-          <StackPanel Grid.Row="5" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
+          <StackPanel Grid.Row="11" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
             <controls:MatButton Variant="Filled" Command="{Binding SearchAndConnectCommand}">
-              <TextBlock Text="SEARCH &amp; CONNECT"/>
+              <TextBlock Text="FETCH &amp; INITIATE"/>
             </controls:MatButton>
           </StackPanel>
         </Grid>

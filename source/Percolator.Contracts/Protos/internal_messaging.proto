@@ -348,10 +348,20 @@ message GetPreKeyBundleResponse {
     optional bytes pre_key_signature = 7;
   }
 
+  message Never {
+    optional int32 reason = 1;
+  }
+
+  message NotUntil {
+    optional google.protobuf.Timestamp not_until_utc = 1;
+  }
+
   optional uint32 version = 1;
   
   oneof message{
     PreKeyBundle pre_key_bundle = 2;  
+    Never never = 3;
+    NotUntil not_until = 4;
   };
 }
 

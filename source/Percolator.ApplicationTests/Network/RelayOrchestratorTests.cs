@@ -84,9 +84,10 @@ public class RelayOrchestratorTests
         var result = await orchestrator.RelayNextAsync(selfId, peerId, CancellationToken.None);
         result.Should().BeTrue();
 
-        queue.VerifyAll();
-        directSessions.VerifyAll();
-        transport.VerifyAll();
+        queue.Verify(q => q.FetchAsync(peerId, 1, It.IsAny<CancellationToken>()), Times.Once);
+        queue.Verify(q => q.DeleteByAckIdAsync(ackId, It.IsAny<CancellationToken>()), Times.Once);
+        directSessions.Verify(d => d.GetByRemotePeerIdAsync(networkPeerId, active.Identity!.SelfIdentityId.Value), Times.Once);
+        transport.Verify(t => t.SendMessageAsync(peerId, directSessionId, It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Test]

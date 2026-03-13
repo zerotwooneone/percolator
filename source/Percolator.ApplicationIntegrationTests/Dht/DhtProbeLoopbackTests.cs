@@ -112,6 +112,9 @@ public class DhtProbeLoopbackTests : IntegrationTestBase
         var serverDhtRepo = new Mock<IDhtNodeRepository>();
         var serverSecureSvc = new Mock<Percolator.Application.Services.ISecureMessagingService>();
         var serverDirectSessionRepo = new Mock<IDirectSessionRepository>();
+        serverDirectSessionRepo
+            .Setup(r => r.ListAsync(It.IsAny<int>()))
+            .ReturnsAsync(Array.Empty<DirectSession>());
 
         // Shared identifiers between client and server for the same direct session
         var directSessionId = new Percolator.Network.DirectSessionId(Guid.NewGuid());
@@ -208,6 +211,9 @@ public class DhtProbeLoopbackTests : IntegrationTestBase
             clientDirectSessionRepo
                 .Setup(r => r.GetByRemotePeerIdAsync(It.IsAny<Network.PeerId>(), It.IsAny<int>()))
                 .ReturnsAsync(new DirectSession(new NetworkPeerId(Guid.NewGuid()), directSessionId));
+            clientDirectSessionRepo
+                .Setup(r => r.ListAsync(It.IsAny<int>()))
+                .ReturnsAsync(Array.Empty<DirectSession>());
             services.Replace(ServiceDescriptor.Singleton<IDirectSessionRepository>(sp => clientDirectSessionRepo.Object));
             // DhtProbeHandler depends on IPeerIdentityRepository; provide a mock that resolves any name
             var clientPeerIdentityRepo = new Mock<Percolator.Identity.IPeerIdentityRepository>();

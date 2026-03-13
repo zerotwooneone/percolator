@@ -32,6 +32,8 @@ public sealed class OutboundMessageWireTapTests
         active.Identity = new IdentityRecord(Guid.NewGuid(), "self") { SelfIdentityId = new SelfId(1) };
 
         var sessions = new Mock<IDirectSessionRepository>(MockBehavior.Strict);
+        sessions.Setup(s => s.ListAsync(It.IsAny<int>()))
+            .ReturnsAsync(Array.Empty<DirectSession>());
         sessions.Setup(s => s.GetByRemotePeerIdAsync(It.IsAny<PeerId>(), It.IsAny<int>()))
             .ReturnsAsync(new DirectSession(new PeerId(Guid.NewGuid()), new DirectSessionId(Guid.NewGuid())));
 
@@ -71,6 +73,8 @@ public sealed class OutboundMessageWireTapTests
         active.Identity = new IdentityRecord(Guid.NewGuid(), "self") { SelfIdentityId = new SelfId(1) };
 
         var sessions = new Mock<IDirectSessionRepository>(MockBehavior.Strict);
+        sessions.Setup(s => s.ListAsync(It.IsAny<int>()))
+            .ReturnsAsync(Array.Empty<DirectSession>());
         sessions.Setup(s => s.GetByRemotePeerIdAsync(It.IsAny<PeerId>(), It.IsAny<int>()))
             .ReturnsAsync(new DirectSession(new PeerId(Guid.NewGuid()), new DirectSessionId(Guid.NewGuid())));
 

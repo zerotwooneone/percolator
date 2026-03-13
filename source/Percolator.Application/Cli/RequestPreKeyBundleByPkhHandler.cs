@@ -5,13 +5,10 @@ using Percolator.Application.Identity;
 using Percolator.Application.KeyExchange;
 using Percolator.Application.Network;
 using Percolator.Application.Services;
-using Percolator.Application.Services;
 using Percolator.Contracts;
 using Percolator.Cryptography;
 using Percolator.Identity;
-using Percolator.Identity.Model;
 using Percolator.Network;
-using IdentityPeerId = Percolator.Identity.PeerId;
 
 namespace Percolator.Application.Cli;
 
@@ -22,7 +19,6 @@ public class RequestPreKeyBundleByPkhHandler : IRequestHandler<RequestPreKeyBund
     private readonly ISecureMessagingService _secureMessaging;
     private readonly IMessageTransportService _transport;
     private readonly ActiveIdentityContext _activeIdentity;
-    private readonly IPeerIdentityRepository _peerIdentityRepository;
     private readonly IPeerPublicSigningKeyStore _peerPublicSigningKeyStore;
     private readonly IOneTimeKeyProvider _oneTimeKeyProvider;
 
@@ -32,7 +28,6 @@ public class RequestPreKeyBundleByPkhHandler : IRequestHandler<RequestPreKeyBund
         ISecureMessagingService secureMessaging,
         IMessageTransportService transport,
         ActiveIdentityContext activeIdentity,
-        IPeerIdentityRepository peerIdentityRepository,
         IPeerPublicSigningKeyStore peerPublicSigningKeyStore,
         IOneTimeKeyProvider oneTimeKeyProvider)
     {
@@ -41,7 +36,6 @@ public class RequestPreKeyBundleByPkhHandler : IRequestHandler<RequestPreKeyBund
         _secureMessaging = secureMessaging;
         _transport = transport;
         _activeIdentity = activeIdentity;
-        _peerIdentityRepository = peerIdentityRepository;
         _peerPublicSigningKeyStore = peerPublicSigningKeyStore;
         _oneTimeKeyProvider = oneTimeKeyProvider;
     }
@@ -52,18 +46,14 @@ public class RequestPreKeyBundleByPkhHandler : IRequestHandler<RequestPreKeyBund
         {
             throw new ArgumentException("PublicKeyHash must be provided.", nameof(request.PublicKeyHash));
         }
-        var existingRemotePeerId = await _peerPublicSigningKeyStore.GetPeerIdByPublicKeyHashAsync(request.PublicKeyHash, cancellationToken).ConfigureAwait(false);
-        if (existingRemotePeerId is not null)
+        var hostPeerId = await _peerPublicSigningKeyStore
+            .GetPeerIdByPublicKeyHashAsync(request.PublicKeyHash, cancellationToken)
+            .ConfigureAwait(false);
+        if (hostPeerId is null)
         {
-            _logger.LogWarning("Peer with public key hash {PublicKeyHash} already exists. Performing handshake anyway...", request.PublicKeyHash);
+            throw new InvalidOperationException("Peer not found by PKH.");
         }
-
-        var hostIdentity = await _peerIdentityRepository.GetByNameAsync(new DisplayName(request.TargetPeerName)).ConfigureAwait(false);
-        if (hostIdentity is null)
-        {
-            throw new InvalidOperationException("Peer not found.");
-        }
-        var hostPeer = new Peer(hostIdentity.Id, hostIdentity.DisplayName?.Value ?? request.TargetPeerName);
+        var hostPeer = new Peer(hostPeerId, hostPeerId.Value.ToString());
 
         if (_activeIdentity.Identity is null)
         {
