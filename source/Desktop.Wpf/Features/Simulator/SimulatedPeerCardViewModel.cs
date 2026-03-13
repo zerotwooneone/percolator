@@ -1,10 +1,14 @@
 using System;
 using System.Collections.ObjectModel;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
+using Google.Protobuf;
+using Google.Protobuf.WellKnownTypes;
 using R3;
+using Percolator.Contracts;
 
 namespace Desktop.Wpf.Features.Simulator;
 
@@ -90,6 +94,10 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
         copy.AsObservable().Subscribe(_ => ExecuteCopyPkh()).AddTo(ref _bag);
         CopyPublicKeyHashCommand = copy.AddTo(ref _bag);
 
+        var copyOob = Observable.Return(true).ToReactiveCommand<Unit>(_ => { });
+        copyOob.AsObservable().Subscribe(_ => ExecuteCopyOobInviteToken()).AddTo(ref _bag);
+        CopyOobInviteTokenCommand = copyOob.AddTo(ref _bag);
+
         var publish = PublishTargetPeerId.Select(id => id is not null).ToReactiveCommand<Unit>(_ => { });
         publish.AsObservable().SubscribeAwait(async (_, ct) => await ExecutePublishAsync(ct), AwaitOperation.Drop).AddTo(ref _bag);
         PublishKeysCommand = publish.AddTo(ref _bag);
@@ -138,6 +146,8 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
 
     public ReactiveCommand<Unit> CopyPublicKeyHashCommand { get; }
 
+    public ReactiveCommand<Unit> CopyOobInviteTokenCommand { get; }
+
     public ReactiveCommand<Unit> PublishKeysCommand { get; }
 
     private static string ToPkhDisplay(string hex)
@@ -169,6 +179,81 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
         var text = PublicKeyHashHex.Value;
         if (string.IsNullOrWhiteSpace(text)) return;
         try { Clipboard.SetText(text); } catch { }
+    }
+
+    private void ExecuteCopyOobInviteToken()
+    {
+        try
+        {
+            var invite = CreatePeerToMainInvite();
+            var token = Convert.ToBase64String(invite.ToByteArray());
+            if (string.IsNullOrWhiteSpace(token)) return;
+            Clipboard.SetText(token);
+        }
+        catch
+        {
+        }
+    }
+
+    private EstablishDirectSessionRequest CreatePeerToMainInvite()
+    {
+        // Peer inviter must advertise its simulator endpoint so the main app can route responses back in-process.
+        const int defaultPort = 5002;
+        var inviterHost = AllocateSimulatorLoopbackHost(_model.PeerId);
+
+        using var identityEcdh = ECDiffieHellman.Create();
+        identityEcdh.ImportECPrivateKey(_model.IdentitySigningKeyPrivateKeyEcPrivateKey, out _);
+        var p256 = ECCurve.NamedCurves.nistP256.Oid.Value;
+        var ikCurve = identityEcdh.ExportParameters(false).Curve.Oid.Value;
+        if (!string.Equals(ikCurve, p256, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException($"Simulated peer identity key is not P-256 (CurveOid={ikCurve}). Restart to regenerate simulator keys.");
+        }
+        using var identityEcdsa = ECDsa.Create(identityEcdh.ExportParameters(true));
+
+        var curve = identityEcdh.ExportParameters(false).Curve;
+        using var inviterSignedPreKey = ECDiffieHellman.Create(curve);
+        var inviterSignedPreKeySpki = inviterSignedPreKey.PublicKey.ExportSubjectPublicKeyInfo();
+        var inviterSignedPreKeyPriv = inviterSignedPreKey.ExportECPrivateKey();
+        var preKeySig = identityEcdsa.SignData(inviterSignedPreKeySpki, HashAlgorithmName.SHA256);
+
+        var correlation = Guid.NewGuid();
+        _runtime.RecordOutboundInviteSignedPreKeyPrivate(_model.PeerId, correlation, inviterSignedPreKeyPriv);
+        var payload = new InviteHandshakeRequestPayload
+        {
+            Version = 1,
+            InviterHost = inviterHost,
+            InviterPort = (uint)defaultPort,
+            ExpiresAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow.AddMinutes(10)),
+            RequestCorrelationId = correlation.ToString(),
+            InviterPreKey = new InviteHandshakePreKeyBundle
+            {
+                Version = 1,
+                InviterSignedPreKey = ByteString.CopyFrom(inviterSignedPreKeySpki),
+                PreKeySignature = ByteString.CopyFrom(preKeySig)
+            }
+        };
+
+        var payloadBytes = payload.ToByteArray();
+        var payloadSig = identityEcdsa.SignData(payloadBytes, HashAlgorithmName.SHA256);
+
+        return new EstablishDirectSessionRequest
+        {
+            Version = 1,
+            InviterIdentityKey = ByteString.CopyFrom(_model.IdentitySigningKeySpki),
+            Payload = ByteString.CopyFrom(payloadBytes),
+            PayloadSignature = ByteString.CopyFrom(payloadSig)
+        };
+    }
+
+    private static string AllocateSimulatorLoopbackHost(Guid peerId)
+    {
+        // Stable mapping of Guid -> 127.77.X.Y. Keep within 1..254 to avoid network/broadcast edge cases.
+        using var sha = SHA256.Create();
+        var hash = sha.ComputeHash(peerId.ToByteArray());
+        var x = (byte)((hash[0] % 254) + 1);
+        var y = (byte)((hash[1] % 254) + 1);
+        return $"127.77.{x}.{y}";
     }
 
     private async Task ExecutePublishAsync(CancellationToken ct)
