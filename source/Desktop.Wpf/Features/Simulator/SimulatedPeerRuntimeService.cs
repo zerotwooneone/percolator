@@ -230,6 +230,12 @@ public sealed class SimulatedPeerRuntimeService : ISimulatedPeerRuntimeService
                 cancellationToken: cancellationToken)
             .ConfigureAwait(false);
 
+        _diagnostics.Emit(
+            SimulatorDiagnosticEventType.PreKeyBundleFetched,
+            $"Pre-key bundle published -> relay={relayHostPeerId.ToString()[..8]} owner={simulatedPeerId.ToString()[..8]}",
+            peerId: simulatedPeerId,
+            relayHostPeerId: relayHostPeerId);
+
         await PersistRuntimeStoreAsync(simulatedPeerId, runtime, cancellationToken).ConfigureAwait(false);
     }
 
@@ -245,6 +251,14 @@ public sealed class SimulatedPeerRuntimeService : ISimulatedPeerRuntimeService
         var popped = await _state
             .TryPopPreKeyBundleByRecipientPkhAsync(relayHostPeerId, recipientPublicKeyHash, cancellationToken)
             .ConfigureAwait(false);
+
+        if (popped is not null && popped.BundleBytes is not null && popped.BundleBytes.Length > 0)
+        {
+            _diagnostics.Emit(
+                SimulatorDiagnosticEventType.PreKeyBundleFetched,
+                $"Pre-key bundle fetched from relay={relayHostPeerId.ToString()[..8]}",
+                relayHostPeerId: relayHostPeerId);
+        }
 
         return popped?.BundleBytes;
     }
@@ -291,7 +305,53 @@ public sealed class SimulatedPeerRuntimeService : ISimulatedPeerRuntimeService
             return null;
         }
 
-        return await InitiateStandardHandshakeToMainAsync(simulatedPeerId, bundleBytes, cancellationToken).ConfigureAwait(false);
+        GetPreKeyBundleResponse.Types.PreKeyBundle bundle;
+        try
+        {
+            bundle = GetPreKeyBundleResponse.Types.PreKeyBundle.Parser.ParseFrom(bundleBytes);
+        }
+        catch
+        {
+            return null;
+        }
+
+        if (!bundle.HasIdentityKey || bundle.IdentityKey.Length == 0)
+        {
+            return null;
+        }
+
+        var actualPkh = System.Security.Cryptography.SHA256.HashData(bundle.IdentityKey.ToByteArray());
+        if (!actualPkh.AsSpan().SequenceEqual(responderPublicKeyHash))
+        {
+            return null;
+        }
+
+        var runtime = _runtimeByPeerId.GetOrAdd(simulatedPeerId, CreateRuntime);
+
+        var hello = runtime.TryCreateHandshakeInitiatorHelloFromBundle(bundleBytes);
+        if (hello is null)
+        {
+            return null;
+        }
+
+        await _state.EnqueueRelayOpaqueAsync(
+                relayHostPeerId: relayHostPeerId,
+                recipientRoutingKey: responderPublicKeyHash,
+                opaqueBytes: hello.ToByteArray(),
+                debugType: nameof(HandshakeInitiatorHello),
+                cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
+
+        _diagnostics.Emit(
+            SimulatorDiagnosticEventType.StandardHandshakeHelloEnqueued,
+            $"Standard handshake hello enqueued -> relay={relayHostPeerId.ToString()[..8]}",
+            peerId: simulatedPeerId,
+            relayHostPeerId: relayHostPeerId);
+
+        // Handshake completion is asynchronous: the relay host must deliver to main and route the EstablishSessionResponse back.
+        // We'll finalize when the response arrives in a separate ingress path.
+        await PersistRuntimeStoreAsync(simulatedPeerId, runtime, cancellationToken).ConfigureAwait(false);
+        return null;
     }
 
     public Task ReceiveInviteHandshakeResponseFromMainAsync(
@@ -666,6 +726,87 @@ public sealed class SimulatedPeerRuntimeService : ISimulatedPeerRuntimeService
 
             _sessionsById[sid.Value] = session;
             return sid;
+        }
+
+        public HandshakeInitiatorHello? TryCreateHandshakeInitiatorHelloFromBundle(byte[] responderBundleBytes)
+        {
+            if (responderBundleBytes is null || responderBundleBytes.Length == 0) return null;
+
+            GetPreKeyBundleResponse.Types.PreKeyBundle bundle;
+            try
+            {
+                bundle = GetPreKeyBundleResponse.Types.PreKeyBundle.Parser.ParseFrom(responderBundleBytes);
+            }
+            catch
+            {
+                return null;
+            }
+
+            if (!bundle.HasIdentityKey || bundle.IdentityKey.Length == 0) return null;
+            if (!bundle.HasSignedPreKeyId || bundle.SignedPreKeyId.Length == 0) return null;
+            if (!bundle.HasSignedPreKey || bundle.SignedPreKey.Length == 0) return null;
+            if (!bundle.HasPreKeySignature || bundle.PreKeySignature.Length == 0) return null;
+
+            var remoteIdentity = new RatchetIdentityKey(bundle.IdentityKey.ToByteArray());
+            var remoteSpk = new PreKey(bundle.SignedPreKey.ToByteArray());
+            var remoteSig = new Signature(bundle.PreKeySignature.ToByteArray());
+
+            if (!_crypto.VerifySignature(remoteIdentity, remoteSpk, remoteSig))
+            {
+                return null;
+            }
+
+            Guid signedPreKeyId;
+            try
+            {
+                signedPreKeyId = new Guid(bundle.SignedPreKeyId.ToByteArray());
+            }
+            catch
+            {
+                return null;
+            }
+
+            Guid? oneTimePreKeyId = null;
+            OneTimeKey? oneTimePreKey = null;
+            if (bundle.HasOneTimeKeyId && bundle.OneTimeKeyId.Length > 0 && bundle.HasOneTimeKey && bundle.OneTimeKey.Length > 0)
+            {
+                try
+                {
+                    oneTimePreKeyId = new Guid(bundle.OneTimeKeyId.ToByteArray());
+                    oneTimePreKey = new OneTimeKey(bundle.OneTimeKey.ToByteArray());
+                }
+                catch
+                {
+                    oneTimePreKeyId = null;
+                    oneTimePreKey = null;
+                }
+            }
+
+            var pkb = new Percolator.Cryptography.PreKeyBundle(
+                remoteIdentity,
+                signedPreKeyId,
+                remoteSpk,
+                remoteSig,
+                oneTimePreKeyId,
+                oneTimePreKey,
+                expirationDateUtc: null);
+
+            var localIkPriv = new PrivatePreKey(_model.IdentitySigningKeyPrivateKeyEcPrivateKey);
+            var x3 = _crypto.X3DH_Initiate(localIkPriv, pkb);
+
+            var hello = new HandshakeInitiatorHello
+            {
+                Version = 1,
+                InitiatorIdentityKeySpki = ByteString.CopyFrom(_model.IdentitySigningKeySpki),
+                InitiatorEphemeralKeySpki = ByteString.CopyFrom(x3.EphemeralPublic.Value),
+                SignedPreKeyId = ByteString.CopyFrom(signedPreKeyId.ToByteArray())
+            };
+            if (oneTimePreKeyId is not null)
+            {
+                hello.OneTimePreKeyId = ByteString.CopyFrom(oneTimePreKeyId.Value.ToByteArray());
+            }
+
+            return hello;
         }
 
         public void RecordOutboundInviteSignedPreKeyPrivate(Guid requestCorrelationId, byte[] signedPreKeyPrivateEcPrivateKey)

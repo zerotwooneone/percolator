@@ -24,7 +24,9 @@ public enum SimulatorDiagnosticEventType
     RelayDropped = 9,
     RelayCorrupted = 10,
     RelayReordered = 11,
-    DecryptFailure = 12
+    DecryptFailure = 12,
+    PreKeyBundleFetched = 13,
+    StandardHandshakeHelloEnqueued = 14
 }
 
 public sealed record SimulatorDiagnosticEvent(

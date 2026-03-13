@@ -413,6 +413,12 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
             return;
         }
 
+        var notUntil = _model.RuntimeState.CurrentValue.NotUntilUtc;
+        if (notUntil.HasValue && notUntil.Value > DateTimeOffset.UtcNow)
+        {
+            return;
+        }
+
         var relayPeerId = _getSelectedRelayPeerId();
         if (relayPeerId is null)
         {
