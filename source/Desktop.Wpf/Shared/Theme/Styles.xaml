@@ -12,7 +12,7 @@
 
   <Style TargetType="Window" BasedOn="{StaticResource BaseWindow}" />
 
-  <Style TargetType="ToolTip">
+  <Style x:Key="BaseToolTip" TargetType="ToolTip">
     <Setter Property="Background" Value="{StaticResource SurfaceContainerHighBrush}"/>
     <Setter Property="Foreground" Value="{StaticResource OnSurfaceBrush}"/>
     <Setter Property="BorderBrush" Value="{StaticResource OutlineBrush}"/>
@@ -36,6 +36,8 @@
       </Setter.Value>
     </Setter>
   </Style>
+
+  <Style TargetType="ToolTip" BasedOn="{StaticResource BaseToolTip}" />
 
   <Style x:Key="BaseButton" TargetType="Button">
     <Setter Property="Foreground" Value="{StaticResource OnSurfaceBrush}"/>
@@ -194,7 +196,7 @@
     </Setter>
   </Style>
 
-  <Style TargetType="ComboBox">
+  <Style x:Key="BaseComboBox" TargetType="ComboBox">
     <Setter Property="Foreground" Value="{StaticResource OnSurfaceBrush}"/>
     <Setter Property="Background" Value="{StaticResource InputBackgroundBrush}"/>
     <Setter Property="BorderBrush" Value="{StaticResource InputBorderBrush}"/>
@@ -284,7 +286,9 @@
     </Setter>
   </Style>
 
-  <Style TargetType="ComboBoxItem">
+  <Style TargetType="ComboBox" BasedOn="{StaticResource BaseComboBox}" />
+
+  <Style x:Key="BaseComboBoxItem" TargetType="ComboBoxItem">
     <Setter Property="Foreground" Value="{StaticResource OnSurfaceBrush}"/>
     <Setter Property="Background" Value="Transparent"/>
     <Setter Property="Padding" Value="10,8"/>
@@ -310,6 +314,8 @@
       </Setter.Value>
     </Setter>
   </Style>
+
+  <Style TargetType="ComboBoxItem" BasedOn="{StaticResource BaseComboBoxItem}" />
 
   <!-- Borders and Chips -->
   <Style x:Key="BaseBorder" TargetType="Border">
@@ -366,7 +372,7 @@
   <Style x:Key="BaseListViewItem" TargetType="ListViewItem" BasedOn="{StaticResource BaseListBoxItem}" />
   <Style TargetType="ListViewItem" BasedOn="{StaticResource BaseListViewItem}" />
 
-  <Style TargetType="TabControl">
+  <Style x:Key="BaseTabControl" TargetType="TabControl">
     <Setter Property="BorderThickness" Value="0"/>
     <Setter Property="Background" Value="Transparent"/>
     <Setter Property="Padding" Value="0"/>
@@ -397,7 +403,9 @@
     </Setter>
   </Style>
 
-  <Style TargetType="TabItem">
+  <Style TargetType="TabControl" BasedOn="{StaticResource BaseTabControl}" />
+
+  <Style x:Key="BaseTabItem" TargetType="TabItem">
     <Setter Property="Foreground" Value="{StaticResource OnSurfaceVariantBrush}"/>
     <Setter Property="FontSize" Value="13"/>
     <Setter Property="Padding" Value="12,8"/>
@@ -442,6 +450,8 @@
       </Setter.Value>
     </Setter>
   </Style>
+
+  <Style TargetType="TabItem" BasedOn="{StaticResource BaseTabItem}" />
 
   <!-- Reusable slide-in/out animations for right-side panels -->
   <Storyboard x:Key="SlideInRightFast">
