@@ -14,22 +14,25 @@ public interface ISimulatorRelayDeliveryService
 {
     Task DeliverToMainAsync(Guid relayHostPeerId, SessionId relayHostToMainSessionId, RelayQueuedBlobDto item, CancellationToken cancellationToken = default);
 
-    Task DeliverToPeerAsync(Guid recipientPeerId, RelayQueuedBlobDto item, CancellationToken cancellationToken = default);
+    Task DeliverToPeerAsync(Guid relayHostPeerId, Guid recipientPeerId, RelayQueuedBlobDto item, CancellationToken cancellationToken = default);
 }
 
 public sealed class SimulatorRelayDeliveryService : ISimulatorRelayDeliveryService
 {
     private readonly ISimulatedPeerRuntimeService _peerRuntime;
     private readonly PercolatorMessageService _messageService;
+    private readonly ISimulatorStateService _state;
     private readonly ILogger<SimulatorRelayDeliveryService> _logger;
 
     public SimulatorRelayDeliveryService(
         ISimulatedPeerRuntimeService peerRuntime,
         PercolatorMessageService messageService,
+        ISimulatorStateService state,
         ILogger<SimulatorRelayDeliveryService> logger)
     {
         _peerRuntime = peerRuntime;
         _messageService = messageService;
+        _state = state;
         _logger = logger;
     }
 
@@ -71,14 +74,47 @@ public sealed class SimulatorRelayDeliveryService : ISimulatorRelayDeliveryServi
         _ = await _messageService.DeliverOpaqueMessage(request, ctx).ConfigureAwait(false);
     }
 
-    public async Task DeliverToPeerAsync(Guid recipientPeerId, RelayQueuedBlobDto item, CancellationToken cancellationToken = default)
+    public async Task DeliverToPeerAsync(
+        Guid relayHostPeerId,
+        Guid recipientPeerId,
+        RelayQueuedBlobDto item,
+        CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (item is null) throw new ArgumentNullException(nameof(item));
 
-        _ = await _peerRuntime
+        var resp = await _peerRuntime
             .ReceiveRelayedOpaquePayloadAsync(recipientPeerId, item.OpaqueBytes, cancellationToken)
             .ConfigureAwait(false);
+
+        if (resp?.Response is null || !resp.Response.HasResponsePayload || resp.Response.ResponsePayload.Length == 0)
+        {
+            return;
+        }
+
+        // For standard handshake via relay: opaque payload is HandshakeInitiatorHello; route response back to initiator PKH.
+        try
+        {
+            var hello = HandshakeInitiatorHello.Parser.ParseFrom(item.OpaqueBytes);
+            if (hello is null || !hello.HasInitiatorIdentityKeySpki || hello.InitiatorIdentityKeySpki.Length == 0)
+            {
+                return;
+            }
+
+            var initiatorPkh = System.Security.Cryptography.SHA256.HashData(hello.InitiatorIdentityKeySpki.ToByteArray());
+
+            await _state.EnqueueRelayOpaqueAsync(
+                    relayHostPeerId: relayHostPeerId,
+                    recipientRoutingKey: initiatorPkh,
+                    opaqueBytes: resp.ToByteArray(),
+                    debugType: nameof(EstablishSessionResponse),
+                    cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[simulator] Failed to enqueue EstablishSessionResponse back to relay host {RelayHost}", relayHostPeerId);
+        }
     }
 
     private sealed class ServerCallContextStub : ServerCallContext

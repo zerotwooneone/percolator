@@ -258,7 +258,7 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
             {
                 var recipientPeerId = new Guid(routingKey);
 
-                await _delivery.DeliverToPeerAsync(recipientPeerId, item.Model, ct).ConfigureAwait(false);
+                await _delivery.DeliverToPeerAsync(_relayHostPeerId, recipientPeerId, item.Model, ct).ConfigureAwait(false);
 
                 _ = await _state.DeleteRelayOpaqueByAckIdAsync(_relayHostPeerId, item.AckId, ct).ConfigureAwait(false);
 
