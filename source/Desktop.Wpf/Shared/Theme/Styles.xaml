@@ -12,6 +12,31 @@
 
   <Style TargetType="Window" BasedOn="{StaticResource BaseWindow}" />
 
+  <Style TargetType="ToolTip">
+    <Setter Property="Background" Value="{StaticResource SurfaceContainerHighBrush}"/>
+    <Setter Property="Foreground" Value="{StaticResource OnSurfaceBrush}"/>
+    <Setter Property="BorderBrush" Value="{StaticResource OutlineBrush}"/>
+    <Setter Property="BorderThickness" Value="1"/>
+    <Setter Property="Padding" Value="10,8"/>
+    <Setter Property="MaxWidth" Value="360"/>
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="ToolTip">
+          <Border Background="{TemplateBinding Background}"
+                  BorderBrush="{TemplateBinding BorderBrush}"
+                  BorderThickness="{TemplateBinding BorderThickness}"
+                  CornerRadius="8"
+                  Padding="{TemplateBinding Padding}">
+            <ContentPresenter Content="{TemplateBinding Content}"
+                              ContentTemplate="{TemplateBinding ContentTemplate}"
+                              ContentStringFormat="{TemplateBinding ContentStringFormat}"
+                              TextElement.Foreground="{TemplateBinding Foreground}" />
+          </Border>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
   <Style x:Key="BaseButton" TargetType="Button">
     <Setter Property="Foreground" Value="{StaticResource OnSurfaceBrush}"/>
     <Setter Property="Background" Value="{StaticResource ButtonBackgroundBrush}"/>
