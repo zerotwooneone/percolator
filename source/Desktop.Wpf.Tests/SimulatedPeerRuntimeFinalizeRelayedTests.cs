@@ -65,6 +65,12 @@ public sealed class SimulatedPeerRuntimeFinalizeRelayedTests
         public Task SetOnlineAsync(Guid peerId, bool isOnline, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task SetRelayCapableAsync(Guid peerId, bool isRelayCapable, CancellationToken cancellationToken = default) => throw new NotImplementedException();
 
+        public Task SetRuntimeStateAsync(Guid peerId, SimulatorPeerRuntimeState runtimeState, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.CompletedTask;
+        }
+
         public Task EnqueueRelayOpaqueAsync(Guid relayHostPeerId, byte[] recipientRoutingKey, byte[] opaqueBytes, string? debugType = null, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();

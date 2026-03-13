@@ -171,13 +171,13 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
             .SubscribeAwait(async (_, ct) => await RefreshInboxAsync(ct).ConfigureAwait(false), AwaitOperation.Drop)
             .AddTo(ref _bag);
 
-        _ = InitializeAsync();
+        _ = InitializeAsync().ContinueWith(static t => _ = t.Exception, TaskContinuationOptions.OnlyOnFaulted);
     }
 
     private async Task InitializeAsync(CancellationToken ct = default)
     {
         await _simulatorState.InitializeAsync(ct).ConfigureAwait(false);
-        InitializeRouteModeOptions();
+        await InvokeOnUiAsync(InitializeRouteModeOptions).ConfigureAwait(false);
         await RefreshRelayHostOptionsAsync(ct).ConfigureAwait(false);
 
         await RefreshInboxAsync(ct).ConfigureAwait(false);
@@ -204,10 +204,9 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
 
     private async Task RefreshRelayHostOptionsAsync(CancellationToken ct)
     {
-        _relayHostOptions.Clear();
-
         if (_active.Identity is null)
         {
+            await InvokeOnUiAsync(() => _relayHostOptions.Clear()).ConfigureAwait(false);
             return;
         }
 
@@ -221,6 +220,7 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
             sessions = Array.Empty<DirectSession>();
         }
 
+        var options = new List<RelayHostOption>();
         foreach (var s in sessions.OrderBy(x => x.RemotePeerId.Value))
         {
             var peerId = new Percolator.Identity.PeerId(s.RemotePeerId.Value);
@@ -241,10 +241,28 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
                 name = peerId.Value.ToString()[..8];
             }
 
-            _relayHostOptions.Add(new RelayHostOption(peerId.Value, name));
+            options.Add(new RelayHostOption(peerId.Value, name));
         }
 
-        SelectedRelayHost.Value ??= _relayHostOptions.FirstOrDefault();
+        await InvokeOnUiAsync(() =>
+        {
+            _relayHostOptions.Clear();
+            foreach (var o in options)
+                _relayHostOptions.Add(o);
+            SelectedRelayHost.Value ??= _relayHostOptions.FirstOrDefault();
+        }).ConfigureAwait(false);
+    }
+
+    private static Task InvokeOnUiAsync(Action action)
+    {
+        var dispatcher = Application.Current?.Dispatcher;
+        if (dispatcher is null || dispatcher.CheckAccess())
+        {
+            action();
+            return Task.CompletedTask;
+        }
+
+        return dispatcher.InvokeAsync(action).Task;
     }
 
     public async Task RefreshInboxAsync(CancellationToken ct = default)

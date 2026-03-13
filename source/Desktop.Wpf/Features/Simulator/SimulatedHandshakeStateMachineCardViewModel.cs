@@ -153,6 +153,16 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
 
         var invite = CreatePeerToMainInvite();
 
+        await InvokeOnUiAsync(() =>
+        {
+            _model.SetRuntimeState(_model.RuntimeState.CurrentValue with
+            {
+                SelectedRouteMode = ConnectionMode.Direct,
+                RelayHostPeerId = null,
+                Phase = "InviteSent"
+            });
+        }).ConfigureAwait(false);
+
         // Mark state as request sent (outbound pending) based on correlation id in payload.
         if (invite.HasPayload && invite.Payload.Length > 0)
         {
@@ -161,7 +171,12 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
                 var payload = InviteHandshakeRequestPayload.Parser.ParseFrom(invite.Payload);
                 if (!string.IsNullOrWhiteSpace(payload.RequestCorrelationId) && Guid.TryParse(payload.RequestCorrelationId, out var corr))
                 {
-                    _model.MarkOutboundPending(corr);
+                    await InvokeOnUiAsync(() =>
+                    {
+                        _model.MarkOutboundPending(corr);
+                        _model.SetAttemptPhase(corr, "InviteSent");
+                        _model.SetAttemptError(corr, null);
+                    }).ConfigureAwait(false);
                     _diagnostics.Emit(
                         SimulatorDiagnosticEventType.HandshakeStateTransition,
                         $"Handshake: outbound pending corr={corr.ToString()[..8]}",
@@ -171,7 +186,12 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
                 else
                 {
                     var corr2 = Guid.NewGuid();
-                    _model.MarkOutboundPending(corr2);
+                    await InvokeOnUiAsync(() =>
+                    {
+                        _model.MarkOutboundPending(corr2);
+                        _model.SetAttemptPhase(corr2, "InviteSent");
+                        _model.SetAttemptError(corr2, null);
+                    }).ConfigureAwait(false);
                     _diagnostics.Emit(
                         SimulatorDiagnosticEventType.HandshakeStateTransition,
                         $"Handshake: outbound pending corr={corr2.ToString()[..8]}",
@@ -182,7 +202,12 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
             catch
             {
                 var corr3 = Guid.NewGuid();
-                _model.MarkOutboundPending(corr3);
+                await InvokeOnUiAsync(() =>
+                {
+                    _model.MarkOutboundPending(corr3);
+                    _model.SetAttemptPhase(corr3, "InviteSent");
+                    _model.SetAttemptError(corr3, null);
+                }).ConfigureAwait(false);
                 _diagnostics.Emit(
                     SimulatorDiagnosticEventType.HandshakeStateTransition,
                     $"Handshake: outbound pending corr={corr3.ToString()[..8]}",
@@ -193,7 +218,12 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
         else
         {
             var corr4 = Guid.NewGuid();
-            _model.MarkOutboundPending(corr4);
+            await InvokeOnUiAsync(() =>
+            {
+                _model.MarkOutboundPending(corr4);
+                _model.SetAttemptPhase(corr4, "InviteSent");
+                _model.SetAttemptError(corr4, null);
+            }).ConfigureAwait(false);
             _diagnostics.Emit(
                 SimulatorDiagnosticEventType.HandshakeStateTransition,
                 $"Handshake: outbound pending corr={corr4.ToString()[..8]}",
@@ -201,9 +231,25 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
                 contextTag: "OutboundPending");
         }
 
-        await _mainIngress
-            .SendEstablishDirectSessionToMainAsync(invite, ct)
-            .ConfigureAwait(false);
+        try
+        {
+            await _mainIngress
+                .SendEstablishDirectSessionToMainAsync(invite, ct)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            var corr = _model.RuntimeState.CurrentValue.PendingCorrelationId;
+            if (corr is not null)
+            {
+                await InvokeOnUiAsync(() =>
+                {
+                    _model.SetAttemptError(corr.Value, ex.Message);
+                    _model.SetAttemptPhase(corr.Value, "SendFailed");
+                }).ConfigureAwait(false);
+            }
+            throw;
+        }
     }
 
     private async Task ExecuteSendRelayedRequestToMainAsync(CancellationToken ct)
@@ -220,6 +266,16 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
 
         var invite = CreatePeerToMainInvite();
 
+        await InvokeOnUiAsync(() =>
+        {
+            _model.SetRuntimeState(_model.RuntimeState.CurrentValue with
+            {
+                SelectedRouteMode = ConnectionMode.ViaRelay,
+                RelayHostPeerId = relayHost.PeerId,
+                Phase = "InviteEnqueued"
+            });
+        }).ConfigureAwait(false);
+
         // Mark state as request sent (outbound pending) based on correlation id in payload.
         if (invite.HasPayload && invite.Payload.Length > 0)
         {
@@ -228,7 +284,12 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
                 var payload = InviteHandshakeRequestPayload.Parser.ParseFrom(invite.Payload);
                 if (!string.IsNullOrWhiteSpace(payload.RequestCorrelationId) && Guid.TryParse(payload.RequestCorrelationId, out var corr))
                 {
-                    _model.MarkOutboundPending(corr);
+                    await InvokeOnUiAsync(() =>
+                    {
+                        _model.MarkOutboundPending(corr);
+                        _model.SetAttemptPhase(corr, "InviteEnqueued");
+                        _model.SetAttemptError(corr, null);
+                    }).ConfigureAwait(false);
                     _diagnostics.Emit(
                         SimulatorDiagnosticEventType.HandshakeStateTransition,
                         $"Handshake: outbound pending corr={corr.ToString()[..8]}",
@@ -238,7 +299,12 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
                 else
                 {
                     var corr2 = Guid.NewGuid();
-                    _model.MarkOutboundPending(corr2);
+                    await InvokeOnUiAsync(() =>
+                    {
+                        _model.MarkOutboundPending(corr2);
+                        _model.SetAttemptPhase(corr2, "InviteEnqueued");
+                        _model.SetAttemptError(corr2, null);
+                    }).ConfigureAwait(false);
                     _diagnostics.Emit(
                         SimulatorDiagnosticEventType.HandshakeStateTransition,
                         $"Handshake: outbound pending corr={corr2.ToString()[..8]}",
@@ -249,7 +315,12 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
             catch
             {
                 var corr3 = Guid.NewGuid();
-                _model.MarkOutboundPending(corr3);
+                await InvokeOnUiAsync(() =>
+                {
+                    _model.MarkOutboundPending(corr3);
+                    _model.SetAttemptPhase(corr3, "InviteEnqueued");
+                    _model.SetAttemptError(corr3, null);
+                }).ConfigureAwait(false);
                 _diagnostics.Emit(
                     SimulatorDiagnosticEventType.HandshakeStateTransition,
                     $"Handshake: outbound pending corr={corr3.ToString()[..8]}",
@@ -260,7 +331,12 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
         else
         {
             var corr4 = Guid.NewGuid();
-            _model.MarkOutboundPending(corr4);
+            await InvokeOnUiAsync(() =>
+            {
+                _model.MarkOutboundPending(corr4);
+                _model.SetAttemptPhase(corr4, "InviteEnqueued");
+                _model.SetAttemptError(corr4, null);
+            }).ConfigureAwait(false);
             _diagnostics.Emit(
                 SimulatorDiagnosticEventType.HandshakeStateTransition,
                 $"Handshake: outbound pending corr={corr4.ToString()[..8]}",
@@ -268,13 +344,29 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
                 contextTag: "OutboundPending");
         }
 
-        await _relay.EnqueueToRelayHostAsync(
-                relayHostPeerId: relayHost.PeerId,
-                recipientPeerId: MainNodeSentinelPeerId,
-                opaqueBytes: invite.ToByteArray(),
-                debugType: nameof(EstablishDirectSessionRequest),
-                cancellationToken: ct)
-            .ConfigureAwait(false);
+        try
+        {
+            await _relay.EnqueueToRelayHostAsync(
+                    relayHostPeerId: relayHost.PeerId,
+                    recipientPeerId: MainNodeSentinelPeerId,
+                    opaqueBytes: invite.ToByteArray(),
+                    debugType: nameof(EstablishDirectSessionRequest),
+                    cancellationToken: ct)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            var corr = _model.RuntimeState.CurrentValue.PendingCorrelationId;
+            if (corr is not null)
+            {
+                await InvokeOnUiAsync(() =>
+                {
+                    _model.SetAttemptError(corr.Value, ex.Message);
+                    _model.SetAttemptPhase(corr.Value, "EnqueueFailed");
+                }).ConfigureAwait(false);
+            }
+            throw;
+        }
     }
 
     private async Task ExecuteAcceptHandshakeAsync(CancellationToken ct)
@@ -295,7 +387,7 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
             return;
         }
 
-        _model.MarkEstablished();
+        await InvokeOnUiAsync(() => _model.MarkEstablished()).ConfigureAwait(false);
         _diagnostics.Emit(
             SimulatorDiagnosticEventType.HandshakeStateTransition,
             $"Handshake: established corr={corr.Value.ToString()[..8]}",
@@ -305,7 +397,7 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
 
     private void ExecuteForceExpire()
     {
-        _model.MarkExpired();
+        _ = InvokeOnUiAsync(() => _model.MarkExpired());
         _diagnostics.Emit(
             SimulatorDiagnosticEventType.HandshakeStateTransition,
             "Handshake: expired",
@@ -315,12 +407,24 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
 
     private void ExecuteReset()
     {
-        _model.ClearRuntimeState();
+        _ = InvokeOnUiAsync(() => _model.ClearRuntimeState());
         _diagnostics.Emit(
             SimulatorDiagnosticEventType.HandshakeStateTransition,
             "Handshake: reset (no handshake)",
             peerId: _model.PeerId,
             contextTag: "NoHandshake");
+    }
+
+    private static Task InvokeOnUiAsync(Action action)
+    {
+        var dispatcher = Application.Current?.Dispatcher;
+        if (dispatcher is null || dispatcher.CheckAccess())
+        {
+            action();
+            return Task.CompletedTask;
+        }
+
+        return dispatcher.InvokeAsync(action).Task;
     }
 
     private EstablishDirectSessionRequest CreatePeerToMainInvite()

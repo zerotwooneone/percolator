@@ -29,6 +29,7 @@ public sealed class SimulatedPeerDto
     public List<Guid> PublishedKeysToPeerIds { get; set; } = new();
     public SimulatedPeerPreKeyStateDto PreKeys { get; set; } = new();
     public SimulatedPeerRuntimeStoreDto RuntimeStore { get; set; } = new();
+    public SimulatorPeerRuntimeState RuntimeState { get; set; } = new();
     public SimulatedPeerRelayStateDto Relay { get; set; } = new();
     public SimulatedPeerReverseSignalKeysDto ReverseSignalKeys { get; set; } = new();
 }

@@ -26,6 +26,8 @@ public interface ISimulatorStateService
     Task SetOnlineAsync(Guid peerId, bool isOnline, CancellationToken cancellationToken = default);
     Task SetRelayCapableAsync(Guid peerId, bool isRelayCapable, CancellationToken cancellationToken = default);
 
+    Task SetRuntimeStateAsync(Guid peerId, SimulatorPeerRuntimeState runtimeState, CancellationToken cancellationToken = default);
+
     Task EnqueueRelayOpaqueAsync(Guid relayHostPeerId, byte[] recipientRoutingKey, byte[] opaqueBytes, string? debugType = null, CancellationToken cancellationToken = default);
     Task<RelayQueuedBlobDto?> PeekRelayOpaqueAsync(Guid relayHostPeerId, byte[] recipientRoutingKey, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<RelayQueuedBlobDto>> DequeueRelayOpaqueAsync(Guid relayHostPeerId, byte[] recipientRoutingKey, int max, CancellationToken cancellationToken = default);
@@ -216,6 +218,16 @@ public sealed class SimulatorStateService : ISimulatorStateService
             SimulatorDiagnosticEventType.PeerRemoved,
             $"Peer removed: {name}",
             peerId: peerId);
+    }
+
+    public async Task SetRuntimeStateAsync(Guid peerId, SimulatorPeerRuntimeState runtimeState, CancellationToken cancellationToken = default)
+    {
+        if (runtimeState is null) throw new ArgumentNullException(nameof(runtimeState));
+        var peer = _state.Peers.FirstOrDefault(p => p.PeerId == peerId);
+        if (peer is null) return;
+
+        peer.RuntimeState = runtimeState;
+        await _store.SaveAsync(_state, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task AddPublishedKeysRelationshipAsync(Guid publisherPeerId, Guid hostPeerId, CancellationToken cancellationToken = default)
@@ -580,12 +592,28 @@ public sealed class SimulatorStateService : ISimulatorStateService
         peer.RuntimeStore ??= new();
         peer.RuntimeStore.Sessions ??= new();
         peer.RuntimeStore.SignedPreKeys ??= new();
+        peer.RuntimeState ??= new SimulatorPeerRuntimeState();
         peer.Relay ??= new();
         peer.Relay.OpaqueQueue ??= new();
         peer.Relay.OpaqueQueue.Items ??= new();
         peer.Relay.PreKeyStore ??= new();
         peer.Relay.PreKeyStore.PublishedBundles ??= new();
         peer.ReverseSignalKeys ??= new();
+
+        // Ensure runtime state is consistent with online/offline.
+        if (!peer.IsOnline)
+        {
+            peer.RuntimeState = peer.RuntimeState with { UiState = SimulatorPeerUiState.Offline };
+        }
+        else if (peer.RuntimeState.UiState == SimulatorPeerUiState.Offline)
+        {
+            peer.RuntimeState = peer.RuntimeState with { UiState = SimulatorPeerUiState.Ready, PendingCorrelationId = null };
+        }
+
+        peer.RuntimeState = peer.RuntimeState with
+        {
+            HandshakeAttempts = peer.RuntimeState.HandshakeAttempts ?? new()
+        };
 
         // Assign stable simulator endpoint if not set. This is a routing key only; no socket bind.
         if (string.IsNullOrWhiteSpace(peer.Connection.Host) || string.Equals(peer.Connection.Host, "localhost", StringComparison.OrdinalIgnoreCase))

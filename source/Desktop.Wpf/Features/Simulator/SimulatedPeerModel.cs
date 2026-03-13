@@ -17,7 +17,8 @@ public sealed class SimulatedPeerModel : IDisposable
         bool isOnline,
         bool isRelayCapable,
         byte[] identitySigningKeySpki,
-        byte[] identitySigningKeyPrivateKeyEcPrivateKey)
+        byte[] identitySigningKeyPrivateKeyEcPrivateKey,
+        SimulatorPeerRuntimeState? initialRuntimeState = null)
     {
         PeerId = peerId;
 
@@ -28,10 +29,17 @@ public sealed class SimulatedPeerModel : IDisposable
         _isOnline = new ReactiveProperty<bool>(isOnline);
         _isRelayCapable = new ReactiveProperty<bool>(isRelayCapable);
 
-        _runtimeState = new ReactiveProperty<SimulatorPeerRuntimeState>(
-            isOnline
-                ? new SimulatorPeerRuntimeState { UiState = SimulatorPeerUiState.Ready }
-                : new SimulatorPeerRuntimeState { UiState = SimulatorPeerUiState.Offline });
+        var state = initialRuntimeState ?? new SimulatorPeerRuntimeState { UiState = SimulatorPeerUiState.Ready };
+        if (!isOnline)
+        {
+            state = state with { UiState = SimulatorPeerUiState.Offline };
+        }
+        else if (state.UiState == SimulatorPeerUiState.Offline)
+        {
+            state = state with { UiState = SimulatorPeerUiState.Ready, PendingCorrelationId = null };
+        }
+
+        _runtimeState = new ReactiveProperty<SimulatorPeerRuntimeState>(state);
     }
 
     public Guid PeerId { get; }
@@ -56,13 +64,13 @@ public sealed class SimulatedPeerModel : IDisposable
 
         if (!isOnline)
         {
-            _runtimeState.Value = new SimulatorPeerRuntimeState { UiState = SimulatorPeerUiState.Offline };
+            _runtimeState.Value = _runtimeState.Value with { UiState = SimulatorPeerUiState.Offline };
         }
         else
         {
             if (_runtimeState.Value.UiState == SimulatorPeerUiState.Offline)
             {
-                _runtimeState.Value = new SimulatorPeerRuntimeState { UiState = SimulatorPeerUiState.Ready };
+                _runtimeState.Value = _runtimeState.Value with { UiState = SimulatorPeerUiState.Ready, PendingCorrelationId = null };
             }
         }
     }
@@ -71,37 +79,133 @@ public sealed class SimulatedPeerModel : IDisposable
         => _isRelayCapable.Value = isRelayCapable;
 
     public void MarkOutboundPending(Guid requestCorrelationId)
-        => _runtimeState.Value = new SimulatorPeerRuntimeState
+        => _runtimeState.Value = UpsertAttempt(_runtimeState.Value, requestCorrelationId) with
         {
             UiState = SimulatorPeerUiState.OutboundPending,
             PendingCorrelationId = requestCorrelationId
         };
 
     public void MarkInboundPending(Guid requestCorrelationId)
-        => _runtimeState.Value = new SimulatorPeerRuntimeState
+        => _runtimeState.Value = UpsertAttempt(_runtimeState.Value, requestCorrelationId) with
         {
             UiState = SimulatorPeerUiState.InboundPending,
             PendingCorrelationId = requestCorrelationId
         };
 
     public void MarkEstablished()
-        => _runtimeState.Value = new SimulatorPeerRuntimeState
+        => _runtimeState.Value = _runtimeState.Value with
         {
             UiState = SimulatorPeerUiState.Established,
-            PendingCorrelationId = null
+            PendingCorrelationId = null,
+            Phase = null,
+            NotUntilUtc = null,
+            LastError = null
         };
 
     public void MarkExpired()
-        => _runtimeState.Value = new SimulatorPeerRuntimeState
+        => _runtimeState.Value = _runtimeState.Value with
         {
             UiState = SimulatorPeerUiState.Expired,
-            PendingCorrelationId = null
+            PendingCorrelationId = null,
+            Phase = null
         };
 
     public void ClearRuntimeState()
-        => _runtimeState.Value = _isOnline.Value
-            ? new SimulatorPeerRuntimeState { UiState = SimulatorPeerUiState.Ready }
-            : new SimulatorPeerRuntimeState { UiState = SimulatorPeerUiState.Offline };
+        => _runtimeState.Value = _runtimeState.Value with
+        {
+            UiState = _isOnline.Value ? SimulatorPeerUiState.Ready : SimulatorPeerUiState.Offline,
+            PendingCorrelationId = null,
+            TargetPublicKeyHash = null,
+            SelectedRouteMode = null,
+            DirectEndpoint = null,
+            RelayHostPeerId = null,
+            Phase = null,
+            NotUntilUtc = null,
+            LastError = null,
+            HandshakeAttempts = new()
+        };
+
+    private static SimulatorPeerRuntimeState UpsertAttempt(SimulatorPeerRuntimeState state, Guid correlationId)
+    {
+        var attempts = state.HandshakeAttempts ?? new();
+
+        var idx = attempts.FindIndex(a => a.CorrelationId == correlationId);
+        var createdAt = idx >= 0 ? attempts[idx].CreatedAtUtc : DateTimeOffset.UtcNow;
+        var snapshot = new SimulatorHandshakeAttemptState
+        {
+            CorrelationId = correlationId,
+            TargetPublicKeyHash = state.TargetPublicKeyHash,
+            SelectedRouteMode = state.SelectedRouteMode,
+            DirectEndpoint = state.DirectEndpoint,
+            RelayHostPeerId = state.RelayHostPeerId,
+            Phase = state.Phase,
+            NotUntilUtc = state.NotUntilUtc,
+            LastError = state.LastError,
+            CreatedAtUtc = createdAt
+        };
+
+        if (idx >= 0) attempts[idx] = snapshot;
+        else attempts.Add(snapshot);
+
+        return state with { HandshakeAttempts = attempts };
+    }
+
+    public void SetAttemptPhase(Guid correlationId, string? phase)
+        => _runtimeState.Value = UpdateAttempt(_runtimeState.Value, correlationId, a => a with { Phase = phase });
+
+    public void SetAttemptError(Guid correlationId, string? error)
+        => _runtimeState.Value = UpdateAttempt(_runtimeState.Value, correlationId, a => a with { LastError = error });
+
+    public void SetAttemptNotUntil(Guid correlationId, DateTimeOffset? notUntilUtc)
+        => _runtimeState.Value = UpdateAttempt(_runtimeState.Value, correlationId, a => a with { NotUntilUtc = notUntilUtc });
+
+    private static SimulatorPeerRuntimeState UpdateAttempt(
+        SimulatorPeerRuntimeState state,
+        Guid correlationId,
+        Func<SimulatorHandshakeAttemptState, SimulatorHandshakeAttemptState> update)
+    {
+        var attempts = state.HandshakeAttempts ?? new();
+        var idx = attempts.FindIndex(a => a.CorrelationId == correlationId);
+        if (idx < 0)
+        {
+            // Create a new attempt snapshot from current summary fields, then apply the update.
+            var initial = new SimulatorHandshakeAttemptState
+            {
+                CorrelationId = correlationId,
+                TargetPublicKeyHash = state.TargetPublicKeyHash,
+                SelectedRouteMode = state.SelectedRouteMode,
+                DirectEndpoint = state.DirectEndpoint,
+                RelayHostPeerId = state.RelayHostPeerId,
+                Phase = state.Phase,
+                NotUntilUtc = state.NotUntilUtc,
+                LastError = state.LastError,
+                CreatedAtUtc = DateTimeOffset.UtcNow
+            };
+
+            attempts.Add(update(initial));
+            return state with { HandshakeAttempts = attempts };
+        }
+
+        attempts[idx] = update(attempts[idx]);
+        return state with { HandshakeAttempts = attempts };
+    }
+
+    public void SetRuntimeState(SimulatorPeerRuntimeState state)
+    {
+        if (!IsOnline.CurrentValue)
+        {
+            _runtimeState.Value = state with { UiState = SimulatorPeerUiState.Offline };
+            return;
+        }
+
+        if (state.UiState == SimulatorPeerUiState.Offline)
+        {
+            _runtimeState.Value = state with { UiState = SimulatorPeerUiState.Ready, PendingCorrelationId = null };
+            return;
+        }
+
+        _runtimeState.Value = state;
+    }
 
     public void Dispose()
     {

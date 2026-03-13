@@ -78,7 +78,8 @@ public sealed class SimulatedPeerDirectory : ISimulatedPeerDirectory
                         dto.IsOnline,
                         dto.Relay.IsRelayCapable,
                         dto.ReverseSignalKeys.IdentitySigningKeySpki,
-                        dto.ReverseSignalKeys.IdentitySigningKeyPrivateKeyEcPrivateKey);
+                        dto.ReverseSignalKeys.IdentitySigningKeyPrivateKeyEcPrivateKey,
+                        dto.RuntimeState);
 
                     _peers.Add(model);
                     _byId[model.PeerId] = model;
@@ -107,7 +108,8 @@ public sealed class SimulatedPeerDirectory : ISimulatedPeerDirectory
             dto?.IsOnline ?? true,
             dto?.Relay.IsRelayCapable ?? false,
             dto?.ReverseSignalKeys.IdentitySigningKeySpki ?? Array.Empty<byte>(),
-            dto?.ReverseSignalKeys.IdentitySigningKeyPrivateKeyEcPrivateKey ?? Array.Empty<byte>());
+            dto?.ReverseSignalKeys.IdentitySigningKeyPrivateKeyEcPrivateKey ?? Array.Empty<byte>(),
+            dto?.RuntimeState);
 
         await InvokeOnUiAsync(() =>
         {
@@ -166,9 +168,16 @@ public sealed class SimulatedPeerDirectory : ISimulatedPeerDirectory
                 await _state.SetRelayCapableAsync(model.PeerId, isRelayCapable, ct),
                 AwaitOperation.Drop);
 
+        var d4 = model.RuntimeState
+            .DistinctUntilChanged()
+            .SubscribeAwait(async (runtimeState, ct) =>
+                    await _state.SetRuntimeStateAsync(model.PeerId, runtimeState, ct),
+                AwaitOperation.Drop);
+
         model.Track(d1);
         model.Track(d2);
         model.Track(d3);
+        model.Track(d4);
     }
 
     public void Dispose()
