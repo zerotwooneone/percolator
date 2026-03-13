@@ -48,9 +48,9 @@
                         <Grid ColumnDefinitions="*,Auto">
                           <StackPanel Grid.Column="0">
                             <TextBlock FontSize="11" Foreground="#888">
-                              <Run Text="{Binding TimestampDisplay}" />
+                              <Run Text="{Binding TimestampDisplay, Mode=OneWay}" />
                               <Run Text="  |  " />
-                              <Run Text="{Binding TypeLabel}" />
+                              <Run Text="{Binding TypeLabel, Mode=OneWay}" />
                             </TextBlock>
                             <TextBlock Margin="0,4,0,0" FontSize="13" Foreground="#67D7FF" Text="{Binding FromToDisplay}" />
                           </StackPanel>

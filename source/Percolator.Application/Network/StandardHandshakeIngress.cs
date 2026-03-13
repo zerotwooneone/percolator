@@ -19,6 +19,7 @@ internal sealed class StandardHandshakeIngress : IStandardHandshakeIngress
     private readonly ISelfPreKeyBundleRepository _selfPreKeys;
     private readonly ISessionCrypto _sessionCrypto;
     private readonly ISessionRepository _sessions;
+    private readonly IDirectSessionRepository _directSessions;
     private readonly IClock _clock;
     private readonly IPeerIdentityRepository _peerIdentityRepository;
     private readonly Percolator.Cryptography.ISigningService _signingService;
@@ -28,6 +29,7 @@ internal sealed class StandardHandshakeIngress : IStandardHandshakeIngress
         ISelfPreKeyBundleRepository selfPreKeys,
         ISessionCrypto sessionCrypto,
         ISessionRepository sessions,
+        IDirectSessionRepository directSessions,
         IClock clock,
         IPeerIdentityRepository peerIdentityRepository,
         Percolator.Cryptography.ISigningService signingService)
@@ -36,6 +38,7 @@ internal sealed class StandardHandshakeIngress : IStandardHandshakeIngress
         _selfPreKeys = selfPreKeys;
         _sessionCrypto = sessionCrypto;
         _sessions = sessions;
+        _directSessions = directSessions;
         _clock = clock;
         _peerIdentityRepository = peerIdentityRepository;
         _signingService = signingService;
@@ -138,6 +141,12 @@ internal sealed class StandardHandshakeIngress : IStandardHandshakeIngress
             crypto: _sessionCrypto);
 
         await _sessions.AddAsync(session, ct).ConfigureAwait(false);
+
+        await _directSessions.UpsertAsync(
+                new Percolator.Network.PeerId(initiatorIdentity.Id.Value),
+                new Percolator.Network.DirectSessionId(sessionId.Value),
+                selfIdentityId.Value)
+            .ConfigureAwait(false);
 
         var responsePayload = new EstablishSessionResponse.Types.Response.Types.ResponsePayload
         {
