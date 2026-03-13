@@ -33,6 +33,7 @@
   <system:String x:Key="IconLatency">&#xF0128;</system:String>
   <system:String x:Key="IconRefresh">&#xF021;</system:String>
   <system:String x:Key="IconCopy">&#xF0C5;</system:String>
+  <system:String x:Key="IconApplicationExport">&#xF0DAD;</system:String>
   <system:String x:Key="IconWrench">&#xF0AD;</system:String>
   <system:String x:Key="IconMapMarker">&#xF034E;</system:String>
   <system:String x:Key="IconTreeGraph">&#xF104A;</system:String>
