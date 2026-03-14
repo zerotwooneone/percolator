@@ -81,6 +81,7 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
     private readonly IMainInvitationInbox _inbox;
     private readonly IMainInvitationActions _actions;
     private readonly IMainInvitationInboxEvents _inboxEvents;
+    private readonly ISecureChannelsListEvents _secureChannelsEvents;
 
     private readonly IMainReverseSignalInviteFactory _reverseSignalInvites;
     private readonly IGrpcSessionService _grpcSessions;
@@ -128,6 +129,7 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
         IMainInvitationInbox inbox,
         IMainInvitationActions actions,
         IMainInvitationInboxEvents inboxEvents,
+        ISecureChannelsListEvents secureChannelsEvents,
         IMainReverseSignalInviteFactory reverseSignalInvites,
         IGrpcSessionService grpcSessions,
         IMessageTransportService transport,
@@ -141,6 +143,7 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
         _inbox = inbox;
         _actions = actions;
         _inboxEvents = inboxEvents;
+        _secureChannelsEvents = secureChannelsEvents;
         _reverseSignalInvites = reverseSignalInvites;
         _grpcSessions = grpcSessions;
         _transport = transport;
@@ -464,6 +467,7 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
                 item.RequestCorrelationId = accepted.RequestCorrelationId.ToString();
                 item.IsExpired = false;
                 await RefreshInboxAsync().ConfigureAwait(false);
+                _secureChannelsEvents.NotifyChanged();
                 break;
             case ApproveInvitationResult.RejectedNotReady:
                 item.StatusText = "Rejected: Not Ready";
@@ -475,6 +479,7 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
                 item.StatusText = "Rejected: Expired";
                 item.IsExpired = true;
                 await RefreshInboxAsync().ConfigureAwait(false);
+                _secureChannelsEvents.NotifyChanged();
                 break;
             case ApproveInvitationResult.Failed failed:
                 item.StatusText = $"Failed: {failed.ErrorMessage}";
@@ -499,6 +504,7 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
         }
 
         await RefreshInboxAsync().ConfigureAwait(false);
+        _secureChannelsEvents.NotifyChanged();
     }
 
     private async Task ExecuteNetworkSearchAsync()

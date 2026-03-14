@@ -31,7 +31,12 @@ public sealed class SessionsSidebarViewModel : ViewModelBase
     private readonly ISessionScopeFactory _sessionFactory;
     private readonly IPendingHandshakeQueries _pendingHandshakeQueries;
     private readonly IPreHandshakeSessionStore _preHandshake;
+    private readonly ISecureChannelsListEvents _events;
     private ISessionConductor? _conductor;
+
+    private readonly ISessionRepository _sessions;
+    private readonly IPeerIdentityRepository _peers;
+    private readonly IPendingSessionRepository _pendingSessions;
 
     public SessionsSidebarViewModel(INavigationService navigation,
         SelfIdentityModel self,
@@ -41,19 +46,24 @@ public sealed class SessionsSidebarViewModel : ViewModelBase
                                    ISessionScopeFactory sessionFactory,
                                    PendingHandshakesMenuViewModel pendingMenu, 
         IPendingHandshakeQueries pendingHandshakeQueries,
-        IPreHandshakeSessionStore preHandshake)
+        IPreHandshakeSessionStore preHandshake,
+        ISecureChannelsListEvents events)
     {
         Self = self;
+        _sessions = sessions;
+        _peers = peers;
+        _pendingSessions = pendingSessions;
         _sessionFactory = sessionFactory;
         _pendingHandshakeQueries = pendingHandshakeQueries;
         _preHandshake = preHandshake;
+        _events = events;
         SearchText = new BindableReactiveProperty<string>("");
         SelectedSessionId = new BindableReactiveProperty<string?>(null);
         IsLoading = new BindableReactiveProperty<bool>(true);
         PendingMenu = pendingMenu;
         
         // Load sessions once, then filter locally
-        _ = LoadAsync(sessions, peers, pendingSessions);
+        _ = ReloadAsync();
         var filtered = SearchText
             .Select(text => text?.Trim() ?? "")
             .DistinctUntilChanged()
@@ -107,7 +117,14 @@ public sealed class SessionsSidebarViewModel : ViewModelBase
             });
 
         Items = new ReadOnlyObservableCollection<SecureChannelListItemViewModel>(_items);
+
+        _events.Changed
+            .ObserveOnCurrentSynchronizationContext()
+            .Subscribe(__ => { _ = ReloadAsync(); });
     }
+
+    private async Task ReloadAsync()
+        => await LoadAsync(_sessions, _peers, _pendingSessions).ConfigureAwait(false);
 
     private SecureChannelListItemViewModel[] ApplyFilter(string text)
     {
