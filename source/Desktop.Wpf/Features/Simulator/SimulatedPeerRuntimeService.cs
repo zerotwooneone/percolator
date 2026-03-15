@@ -1,14 +1,8 @@
-using System;
 using System.Collections.Concurrent;
-using System.Linq;
 using System.Security.Cryptography;
-using System.Threading;
-using System.Threading.Tasks;
 using Desktop.Wpf.Features.Sessions;
 using Google.Protobuf;
 using Grpc.Core;
-using MediatR;
-using Microsoft.Extensions.Logging;
 using Percolator.Application.Network;
 using Percolator.Contracts;
 using Percolator.Cryptography;

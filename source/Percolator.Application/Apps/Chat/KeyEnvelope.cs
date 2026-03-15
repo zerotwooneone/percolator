@@ -1,5 +1,3 @@
-using System;
-
 namespace Percolator.Application.Apps.Chat
 {
     // Minimal AEAD envelope for per-recipient group key distribution.

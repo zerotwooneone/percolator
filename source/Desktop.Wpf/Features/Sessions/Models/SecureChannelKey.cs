@@ -1,5 +1,3 @@
-using System;
-
 namespace Desktop.Wpf.Features.Sessions.Models;
 
 public enum SecureChannelKeyType

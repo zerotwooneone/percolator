@@ -1,6 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
 using Percolator.Chat;
-using Percolator.Infrastructure.Chat;
 using Percolator.Application.Apps.Chat;
 using ChatApp = Percolator.Chat.App;
 

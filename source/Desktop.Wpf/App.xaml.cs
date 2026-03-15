@@ -1,10 +1,6 @@
-using System.Linq;
 using System.Windows;
 using System.Windows.Media;
-using System.Windows.Input;
-using System;
 using System.Diagnostics;
-using System.Threading.Tasks;
 using Desktop.Wpf.Features.Chat;
 using Desktop.Wpf.Shared.Config;
 using Desktop.Wpf.Shared.Windowing;
@@ -24,14 +20,11 @@ using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Percolator.Infrastructure;
 using Microsoft.EntityFrameworkCore;
 using Percolator.Application;
-using Percolator.Application.Cryptography;
 using Percolator.Application.Configuration;
 using Percolator.Application.Network;
 using Percolator.Cryptography;
-using Percolator.Infrastructure.Cryptography;
 using Percolator.Infrastructure.Persistence;
 using Desktop.Wpf.Features.Simulator;
-using MediatR;
 using Percolator.MessageQueue.DependencyInjection;
 using Desktop.Wpf.Features.Sessions.State;
 

@@ -1,12 +1,6 @@
-using System;
-using System.Threading;
-using System.Threading.Tasks;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
-using NUnit.Framework;
 using Percolator.Application.Network.Handshake;
-using Percolator.Application.Sessions;
-using Percolator.Application.Services;
 using Percolator.Cryptography;
 using Percolator.Contracts;
 using Google.Protobuf;

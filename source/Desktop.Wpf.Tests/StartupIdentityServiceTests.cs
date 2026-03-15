@@ -2,7 +2,6 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Desktop.Wpf.Features.Self;
-using Desktop.Wpf.Features.Sessions;
 using Moq;
 using NUnit.Framework;
 using Percolator.Identity;

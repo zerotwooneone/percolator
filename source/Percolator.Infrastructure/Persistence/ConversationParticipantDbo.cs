@@ -1,5 +1,3 @@
-using System;
-
 namespace Percolator.Infrastructure.Persistence;
 
 public class ConversationParticipantDbo

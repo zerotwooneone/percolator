@@ -1,18 +1,11 @@
-using System;
 using System.Net;
-using System.Threading;
-using System.Threading.Tasks;
 using MediatR;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
-using NUnit.Framework;
 using Percolator.Application.Network;
 using Percolator.Contracts;
 using Percolator.Dht;
-using Moq;
 using Percolator.Chat.App.Commands;
-using Percolator.Application.Apps.Chat;
 using Google.Protobuf.WellKnownTypes;
 
 namespace Percolator.ApplicationTests.Network

@@ -1,10 +1,4 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
 using MediatR;
-using Percolator.Chat.App;
 using Percolator.Chat.Primitives;
 using Percolator.Chat.ValueObjects;
 

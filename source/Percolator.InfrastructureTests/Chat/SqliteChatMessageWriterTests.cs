@@ -1,12 +1,6 @@
-using System;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
-using NUnit.Framework;
-using Percolator.Chat.App;
 using Percolator.Chat.ValueObjects;
 using Percolator.Infrastructure.Chat;
 using Percolator.Infrastructure.Persistence;

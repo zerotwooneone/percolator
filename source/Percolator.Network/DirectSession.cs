@@ -1,5 +1,3 @@
-using System;
-
 namespace Percolator.Network;
 
 public sealed class DirectSession

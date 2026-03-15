@@ -2,7 +2,6 @@ using System;
 using System.Collections.ObjectModel;
 using System.Security.Cryptography;
 using System.Runtime.Serialization;
-using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
 using Desktop.Wpf.Features.Simulator;

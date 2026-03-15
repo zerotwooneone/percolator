@@ -1,11 +1,6 @@
-using System;
-using System.Threading;
-using System.Threading.Tasks;
 using Moq;
-using NUnit.Framework;
 using Percolator.Application.Identity;
 using Percolator.Application.Network;
-using Percolator.Application.Sessions;
 using Percolator.Contracts;
 using Percolator.Cryptography;
 using Percolator.Network;

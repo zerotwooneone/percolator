@@ -1,15 +1,8 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
 using Google.Protobuf;
 using MediatR;
 using Microsoft.Extensions.Logging;
 using Percolator.Application.Network;
 using Percolator.Contracts;
-using Percolator.Cryptography;
-using Percolator.Network;
 using PeerId = Percolator.Identity.PeerId;
 using Percolator.Identity;
 

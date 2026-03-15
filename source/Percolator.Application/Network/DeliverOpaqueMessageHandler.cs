@@ -1,10 +1,7 @@
-using System.Security.Cryptography;
 using System.Net;
-using System.Collections.Generic;
 using Google.Protobuf;
 using MediatR;
 using Microsoft.Extensions.Logging;
-using Percolator.Application.Sessions;
 using Percolator.Application.Services;
 using Percolator.Contracts;
 using Percolator.Cryptography;

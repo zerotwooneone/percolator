@@ -1,4 +1,3 @@
-using System;
 using Microsoft.EntityFrameworkCore;
 using Percolator.Application.Identity;
 using Percolator.Identity;

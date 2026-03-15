@@ -1,6 +1,3 @@
-using System;
-using System.Collections.Generic;
-
 namespace Desktop.Wpf.Features.Simulator;
 
 public sealed class SimulatorStateDto

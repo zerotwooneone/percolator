@@ -1,8 +1,6 @@
 using MediatR;
-using Percolator.Chat.App;
 using Percolator.Chat.App.Commands;
 using Percolator.Chat.Events;
-using Percolator.Chat.ValueObjects;
 
 namespace Percolator.Chat.App.Handlers;
 

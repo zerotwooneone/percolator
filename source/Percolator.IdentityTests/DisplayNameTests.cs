@@ -1,5 +1,3 @@
-using System;
-using NUnit.Framework;
 using Percolator.Identity.Model;
 
 namespace Percolator.IdentityTests;

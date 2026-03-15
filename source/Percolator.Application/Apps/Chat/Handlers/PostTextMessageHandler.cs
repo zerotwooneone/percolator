@@ -2,7 +2,6 @@ using Google.Protobuf;
 using MediatR;
 using Percolator.Application.Identity;
 using Percolator.Application.Network;
-using Percolator.Application.Sessions;
 using Percolator.Chat.App;
 using Percolator.Chat.App.Commands;
 using Percolator.Chat.Events;

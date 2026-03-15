@@ -1,11 +1,9 @@
 using MediatR;
 using Percolator.Application.Services;
 using Percolator.Application.Identity;
-using Percolator.Chat.ValueObjects;
 using Percolator.Identity;
 using Percolator.Identity.Model;
 using Percolator.Network;
-using PeerId = Percolator.Identity.PeerId;
 
 namespace Percolator.Application.Cli;
 

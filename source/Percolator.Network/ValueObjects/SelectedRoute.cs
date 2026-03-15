@@ -1,5 +1,3 @@
-using Percolator.Network;
-
 namespace Percolator.Network.ValueObjects;
 
 public sealed class SelectedRoute

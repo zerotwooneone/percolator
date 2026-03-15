@@ -1,7 +1,3 @@
-using System;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
 using R3;
 using Desktop.Wpf.Shared.Navigation;
 using Desktop.Wpf.Features.Self;
@@ -10,13 +6,8 @@ using Desktop.Wpf.Shared.Mvvm;
 using Microsoft.Extensions.DependencyInjection;
 using Percolator.Application.Identity;
 using Percolator.Identity;
-using Percolator.Identity.Model;
-using System.Security.Cryptography;
-using Desktop.Wpf;
-using MediatR;
 using System.Windows.Input;
 using Desktop.Wpf.Shared.Windowing;
-using Desktop.Wpf.Shared.Mvvm;
 
 namespace Desktop.Wpf.Features.Shell;
 

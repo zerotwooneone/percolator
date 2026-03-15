@@ -1,8 +1,4 @@
-using System;
 using System.Collections.ObjectModel;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
 using R3;
 using Desktop.Wpf.Shared.Mvvm;
 using Desktop.Wpf.Features.Sessions;

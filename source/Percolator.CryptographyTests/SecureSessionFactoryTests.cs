@@ -1,8 +1,5 @@
-using System;
-using System.Security.Cryptography;
 using FluentAssertions;
 using Moq;
-using NUnit.Framework;
 using Percolator.Cryptography;
 using Percolator.Cryptography.Primitives;
 

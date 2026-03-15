@@ -1,4 +1,3 @@
-using System.Net;
 using MediatR;
 
 namespace Percolator.Application.Cli;

@@ -1,7 +1,3 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
-
 namespace Percolator.Identity.Model;
 
 public sealed class SelfIdentity

@@ -1,5 +1,3 @@
-using System.Threading.Tasks;
-using Microsoft.Extensions.Logging;
 using Percolator.Cryptography;
 using Percolator.Identity;
 

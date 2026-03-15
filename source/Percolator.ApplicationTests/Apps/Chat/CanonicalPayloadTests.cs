@@ -1,7 +1,4 @@
-using System;
-using System.Linq;
 using Google.Protobuf;
-using NUnit.Framework;
 using Percolator.Application.Apps.Chat;
 using Percolator.Contracts;
 

@@ -1,6 +1,5 @@
 using FluentAssertions;
 using Microsoft.Extensions.Options;
-using NUnit.Framework;
 using Percolator.Application.ReverseSignal;
 
 namespace Percolator.ApplicationTests.ReverseSignal;

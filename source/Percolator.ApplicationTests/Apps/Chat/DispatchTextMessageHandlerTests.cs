@@ -1,8 +1,3 @@
-using System;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
-using Google.Protobuf;
 using MediatR;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -10,9 +5,7 @@ using Moq;
 using Percolator.Application.Apps.Chat;
 using Percolator.Application.Network;
 using Percolator.Contracts;
-using Percolator.Cryptography;
 using Percolator.Identity;
-using Percolator.Network;
 
 // Alias to disambiguate between the two PeerId types
 using PeerId = Percolator.Identity.PeerId;

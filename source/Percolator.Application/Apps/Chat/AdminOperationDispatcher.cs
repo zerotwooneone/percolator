@@ -1,15 +1,9 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
 using Google.Protobuf;
 using MediatR;
 using Microsoft.Extensions.Logging;
 using Percolator.Contracts;
 using Percolator.Identity; // PeerId
 using Percolator.Application.Network;
-using Percolator.Identity;
 
 namespace Percolator.Application.Apps.Chat
 {

@@ -1,11 +1,8 @@
-using System.Security.Cryptography;
-using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Percolator.Chat;
 using Percolator.Chat.App;
 using Percolator.Chat.ValueObjects;
 using Percolator.Infrastructure.Persistence;
-using PeerId = Percolator.Identity.PeerId;
 
 namespace Percolator.Infrastructure.Chat;
 

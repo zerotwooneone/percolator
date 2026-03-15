@@ -1,5 +1,3 @@
-using System;
-using System.Threading.Tasks;
 using System.Windows.Input;
 
 namespace Desktop.Wpf.Shared.Mvvm;

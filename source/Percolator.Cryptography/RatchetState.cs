@@ -1,6 +1,3 @@
-using System;
-using System.Text.Json;
-
 namespace Percolator.Cryptography;
 
 public class RatchetState

@@ -2,16 +2,13 @@ using Google.Protobuf;
 using MediatR;
 using Microsoft.Extensions.Logging;
 using Percolator.Application.Identity;
-using Percolator.Application.KeyExchange;
 using Percolator.Application.Network;
 using Percolator.Application.Services;
-using Percolator.Chat.ValueObjects;
 using Percolator.Contracts;
 using Percolator.Cryptography;
 using Percolator.Identity;
 using Percolator.Identity.Model;
 using Percolator.Network;
-using PeerId = Percolator.Identity.PeerId;
 
 namespace Percolator.Application.Cli;
 

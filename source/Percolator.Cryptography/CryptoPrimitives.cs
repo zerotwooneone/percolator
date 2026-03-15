@@ -1,5 +1,3 @@
-using System;
-
 namespace Percolator.Cryptography;
 
 public sealed class CryptoPrimitives : ICryptoPrimitives

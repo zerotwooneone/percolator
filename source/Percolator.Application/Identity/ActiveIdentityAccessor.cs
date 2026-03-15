@@ -1,5 +1,3 @@
-using System;
-
 namespace Percolator.Application.Identity;
 
 public sealed class ActiveIdentityAccessor : IActiveIdentityAccessor

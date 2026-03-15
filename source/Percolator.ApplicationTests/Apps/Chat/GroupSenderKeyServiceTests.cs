@@ -1,8 +1,4 @@
-using System;
-using System.Threading;
-using System.Threading.Tasks;
 using Moq;
-using NUnit.Framework;
 using Percolator.Application.Apps.Chat;
 using Percolator.Chat.Primitives;
 using Percolator.Chat.ValueObjects;

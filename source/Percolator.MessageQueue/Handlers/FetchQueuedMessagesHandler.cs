@@ -3,7 +3,6 @@ using Microsoft.Extensions.Logging;
 using Percolator.MessageQueue.Abstractions;
 using Percolator.MessageQueue.Commands;
 using Percolator.MessageQueue.Results;
-using System.Linq;
 
 namespace Percolator.MessageQueue.Handlers;
 

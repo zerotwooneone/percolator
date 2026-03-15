@@ -1,9 +1,6 @@
-using System.Threading;
-using System.Threading.Tasks;
 using FluentAssertions;
 using Moq;
 using MediatR;
-using Percolator.Chat;
 using Percolator.Chat.App;
 using Percolator.Chat.App.Commands;
 using Percolator.Chat.Events;

@@ -1,11 +1,5 @@
-using System;
-using System.Collections.Generic;
-using System.Threading;
-using System.Threading.Tasks;
 using FluentAssertions;
 using Moq;
-using NUnit.Framework;
-using Percolator.Chat;
 using Percolator.Chat.App;
 using Percolator.Chat.App.Services;
 using Percolator.Chat.ValueObjects;

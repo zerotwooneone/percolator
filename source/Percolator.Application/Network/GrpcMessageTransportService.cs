@@ -2,14 +2,11 @@ using Grpc.Net.Client;
 using Percolator.Contracts;
 using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
-using Percolator.Identity;
 using IdentityPeerId = Percolator.Identity.PeerId;
 using Percolator.Network;
 using NetworkPeerId = Percolator.Network.PeerId;
-using Percolator.Chat.ValueObjects;
 using Percolator.Cryptography;
 using Google.Protobuf;
-using System.Net;
 
 namespace Percolator.Application.Network;
 

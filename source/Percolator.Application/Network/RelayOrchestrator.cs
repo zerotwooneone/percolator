@@ -1,10 +1,5 @@
-using System;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
 using Google.Protobuf;
 using Microsoft.Extensions.Logging;
-using Percolator.Application.Sessions;
 using Percolator.Application.Services;
 using Percolator.Contracts;
 using Percolator.Cryptography;

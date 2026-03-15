@@ -1,10 +1,5 @@
-using System;
-using System.Collections.Generic;
-using System.Threading;
 using Moq;
 using Percolator.Application.Network.Handshake;
-using Percolator.Application.Sessions;
-using Percolator.Application.Services;
 using Percolator.Network;
 
 namespace Percolator.ApplicationTests.TestHelpers

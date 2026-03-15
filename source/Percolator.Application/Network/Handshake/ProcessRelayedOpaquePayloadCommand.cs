@@ -1,19 +1,11 @@
-using System;
 using System.Security.Cryptography;
-using System.Threading;
-using System.Threading.Tasks;
 using Google.Protobuf;
 using MediatR;
 using Microsoft.Extensions.Logging;
-using Percolator.Application.Network;
 using Percolator.Contracts;
 using Percolator.Identity;
-using Percolator.MessageQueue.Commands;
-using Percolator.Application.Sessions;
 using Percolator.Cryptography;
-using System.Collections.Generic;
 using Percolator.Application.Services;
-using Percolator.MessageQueue.Primitives;
 using Percolator.Network;
 
 namespace Percolator.Application.Network.Handshake

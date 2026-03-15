@@ -1,7 +1,5 @@
-using System;
 using System.Security.Cryptography;
 using Google.Protobuf;
-using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.Logging;
 using MediatR;
 using Percolator.Application.ReverseSignal;

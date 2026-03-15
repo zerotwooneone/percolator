@@ -1,7 +1,3 @@
-using System;
-using System.Threading;
-using System.Threading.Tasks;
-using Google.Protobuf;
 using Grpc.Core;
 using Percolator.Application.Network;
 using Percolator.Contracts;

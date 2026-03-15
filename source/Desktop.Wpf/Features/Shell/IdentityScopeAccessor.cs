@@ -1,5 +1,3 @@
-using System;
-
 namespace Desktop.Wpf.Features.Shell;
 
 public sealed class IdentityScopeAccessor : IIdentityScopeAccessor

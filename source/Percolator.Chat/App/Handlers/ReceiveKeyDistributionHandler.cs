@@ -1,7 +1,5 @@
 using MediatR;
 using Percolator.Chat.App.Commands;
-using System.Threading;
-using System.Threading.Tasks;
 
 namespace Percolator.Chat.App.Handlers
 {

@@ -1,4 +1,3 @@
-using System;
 using R3;
 using Desktop.Wpf.Features.Sessions.Models;
 

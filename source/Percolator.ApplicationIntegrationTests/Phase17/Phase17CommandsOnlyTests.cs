@@ -13,8 +13,6 @@ using Percolator.Application.Network;
 using Percolator.Contracts;
 using System.Collections.Concurrent;
 using Percolator.Identity;
-using Percolator.Infrastructure.Persistence;
-using Percolator.Network;
 using PeerId = Percolator.Identity.PeerId;
 using Percolator.ApplicationIntegrationTests.TestDoubles;
 

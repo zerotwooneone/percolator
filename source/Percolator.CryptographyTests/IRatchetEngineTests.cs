@@ -1,5 +1,3 @@
-using System;
-using NUnit.Framework;
 using System.Security.Cryptography;
 using Percolator.Cryptography;
 

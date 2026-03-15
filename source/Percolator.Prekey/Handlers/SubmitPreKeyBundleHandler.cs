@@ -2,7 +2,6 @@ using MediatR;
 using Microsoft.Extensions.Logging;
 using Percolator.Cryptography;
 using Percolator.Identity;
-using Percolator.Network;
 using System.Security.Cryptography;
 using CryptoSignature = Percolator.Cryptography.Signature;
 using PublicKey = Percolator.Cryptography.PublicKey;

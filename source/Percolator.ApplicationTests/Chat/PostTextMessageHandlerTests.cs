@@ -1,18 +1,13 @@
-using System;
-using System.Threading;
-using System.Threading.Tasks;
 using FluentAssertions;
 using MediatR;
 using Moq;
 using Percolator.Application.Identity;
 using Percolator.Application.Apps.Chat.Handlers;
 using Percolator.Application.Network;
-using Percolator.Chat;
 using Percolator.Chat.App;
 using Percolator.Chat.App.Commands;
 using Percolator.Chat.ValueObjects;
 using Percolator.Chat.Events;
-using Percolator.Contracts;
 
 namespace Percolator.Chat.Tests;
 

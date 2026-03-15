@@ -1,9 +1,5 @@
-using System;
-using System.Threading;
-using System.Threading.Tasks;
 using MediatR;
 using Microsoft.Extensions.Logging;
-using Percolator.Application.Identity;
 using Percolator.Identity;
 using System.Security.Cryptography;
 

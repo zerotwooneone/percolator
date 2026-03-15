@@ -1,4 +1,3 @@
-using System;
 using Percolator.Cryptography;
 
 namespace Percolator.ApplicationTests.TestHelpers

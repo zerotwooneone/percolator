@@ -1,6 +1,5 @@
 using System.Net;
 using MediatR;
-using Percolator.Chat.ValueObjects;
 using Percolator.Network;
 
 namespace Percolator.Application.Cli;

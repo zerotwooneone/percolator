@@ -1,17 +1,10 @@
-using System;
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
-using System.ComponentModel;
-using System.Linq;
-using System.Threading.Tasks;
 using R3;
 using Desktop.Wpf.Shared.Navigation;
-using Desktop.Wpf.Features.Chat;
-using System.Collections.Generic;
 using Desktop.Wpf.Features.Self;
 using Desktop.Wpf.Shared.Mvvm;
 using Desktop.Wpf.Features.Sessions.State;
-using Desktop.Wpf.Features.Sessions.Models;
 
 namespace Desktop.Wpf.Features.Sessions;
 

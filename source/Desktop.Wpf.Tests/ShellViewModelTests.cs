@@ -12,7 +12,6 @@ using Moq;
 using NUnit.Framework;
 using Desktop.Wpf.Shared.Windowing;
 using Percolator.Application.Identity;
-using Percolator.Application.Network.Handshake;
 using Percolator.Cryptography;
 using Percolator.Identity;
 using Percolator.Identity.Model;

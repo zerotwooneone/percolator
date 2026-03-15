@@ -1,8 +1,3 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
 using Desktop.Wpf.Features.Self;
 using Desktop.Wpf.Features.Sessions.Models;
 using Desktop.Wpf.Features.Sessions.State;
@@ -12,7 +7,6 @@ using Percolator.Application.Network;
 using Percolator.Application.Network.Handshake;
 using Percolator.Cryptography;
 using Percolator.Identity;
-using Percolator.Identity.Model;
 using R3;
 
 namespace Desktop.Wpf.Features.Sessions;

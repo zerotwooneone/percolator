@@ -1,7 +1,4 @@
-using System;
 using System.Net;
-using System.Threading;
-using System.Threading.Tasks;
 using FluentAssertions;
 using Google.Protobuf;
 using Grpc.Core;
@@ -17,7 +14,6 @@ using System.Security.Cryptography;
 using Percolator.Application.Identity;
 using Percolator.Application.Cli;
 using Percolator.Prekey.DependencyInjection;
-using Percolator.Application.Apps.Chat;
 using Percolator.MessageQueue.Abstractions;
 using Percolator.Application.Services;
 

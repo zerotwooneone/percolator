@@ -1,14 +1,12 @@
 using Google.Protobuf;
 using Microsoft.Extensions.Logging;
 using Percolator.Application.Identity;
-using Percolator.Application.Sessions;
 using Percolator.Application.Services;
 using Percolator.Contracts;
 using Percolator.Cryptography;
 using Percolator.Identity;
 using Percolator.Network;
 using Percolator.Network.Messaging;
-using PeerId = Percolator.Cryptography.Primitives.PeerId;
 
 namespace Percolator.Application.Network;
 

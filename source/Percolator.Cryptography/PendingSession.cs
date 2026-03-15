@@ -1,4 +1,3 @@
-using System;
 using Percolator.Cryptography.Primitives;
 
 namespace Percolator.Cryptography;

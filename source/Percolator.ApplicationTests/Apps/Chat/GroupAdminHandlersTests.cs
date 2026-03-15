@@ -1,9 +1,4 @@
-using System;
-using System.Collections.Generic;
-using System.Threading;
-using System.Threading.Tasks;
 using FluentAssertions;
-using NUnit.Framework;
 using Moq;
 using MediatR;
 using Percolator.Chat;

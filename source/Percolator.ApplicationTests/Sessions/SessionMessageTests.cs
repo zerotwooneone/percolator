@@ -4,22 +4,12 @@ using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Console;
 using Microsoft.Extensions.Options;
-using Moq;
 using Percolator.Application.Identity;
-using Percolator.Application.Sessions;
-using Percolator.Application.Network;
-using Percolator.Chat;
-using Percolator.Chat.ValueObjects;
 using Percolator.Cryptography;
 using Percolator.Identity;
 using Percolator.Identity.Model;
-using ChatConversationId = Percolator.Chat.ValueObjects.ConversationId;
-using ChatParticipantId = Percolator.Chat.ValueObjects.ParticipantId;
 using CryptoSharedSecret = Percolator.Cryptography.SharedSecret;
 using CryptoRatchetIdentityKey = Percolator.Cryptography.RatchetIdentityKey;
-using CryptoRatchetEphemeralKey = Percolator.Cryptography.RatchetEphemeralKey;
-using CryptoPrivatePreKey = Percolator.Cryptography.PrivatePreKey;
-using CryptoPrivateOneTimeKey = Percolator.Cryptography.PrivateOneTimeKey;
 
 namespace Percolator.ApplicationTests.Sessions;
 

@@ -1,10 +1,6 @@
-using System;
 using System.Collections.ObjectModel;
-using System.Linq;
 using System.Net;
 using System.Security.Cryptography;
-using System.Threading;
-using System.Threading.Tasks;
 using System.Windows;
 using Desktop.Wpf.Shared.Mvvm;
 using Grpc.Core;

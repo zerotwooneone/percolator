@@ -1,4 +1,3 @@
-using System;
 using Percolator.Identity;
 
 namespace Percolator.Application.Ingress;

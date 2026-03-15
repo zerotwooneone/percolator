@@ -1,6 +1,3 @@
-using System.Threading;
-using System.Threading.Tasks;
-
 namespace Percolator.Application.Ingress;
 
 public interface IMessageIngress

@@ -1,7 +1,5 @@
-using System;
 using System.Net;
 using FluentAssertions;
-using NUnit.Framework;
 using Percolator.Network;
 using Percolator.Network.ValueObjects;
 

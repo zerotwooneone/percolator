@@ -1,8 +1,3 @@
-using System;
-using System.Collections.Generic;
-using System.Threading;
-using System.Threading.Tasks;
-using Percolator.Chat.App;
 using Percolator.Chat.ValueObjects;
 using Percolator.Chat.Primitives;
 

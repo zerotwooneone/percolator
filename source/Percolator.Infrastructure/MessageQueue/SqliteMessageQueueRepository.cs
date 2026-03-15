@@ -2,7 +2,6 @@ using Microsoft.EntityFrameworkCore;
 using Percolator.Identity;
 using Percolator.Infrastructure.Persistence;
 using Percolator.MessageQueue.Abstractions;
-using System.Linq;
 
 namespace Percolator.Infrastructure.MessageQueue;
 

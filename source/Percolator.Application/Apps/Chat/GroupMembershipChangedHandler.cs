@@ -1,19 +1,9 @@
-using System;
-using System.Threading;
-using System.Threading.Tasks;
 using MediatR;
 using Microsoft.Extensions.Logging;
-using Percolator.Application.Apps.Chat;
 using Percolator.Chat.App;
 using Percolator.Chat;
-using Percolator.Chat.ValueObjects;
 using Percolator.Application.Identity;
-using Google.Protobuf;
-using Percolator.Contracts;
-using System.Security.Cryptography;
-using Percolator.Cryptography;
 using Percolator.Application.Network;
-using Percolator.Identity;
 using ChatMembershipChanged = Percolator.Chat.App.GroupMembershipChangedNotification;
 
 namespace Percolator.Application.Apps.Chat

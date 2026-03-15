@@ -1,25 +1,17 @@
 using Desktop.Wpf.Shared.Mvvm;
 using R3;
-using System;
-using System.Collections.Generic;
 using System.Collections.ObjectModel;
-using System.Linq;
 using System.Net;
 using System.Security.Cryptography;
-using System.Threading;
-using System.Threading.Tasks;
 using System.Windows;
-using Google.Protobuf;
 using Percolator.Application.Identity;
 using Percolator.Application.Network;
 using Percolator.Contracts;
 using Percolator.Identity;
 using Percolator.Identity.Model;
 using Percolator.Network;
-using Percolator.Network.ValueObjects;
 using Desktop.Wpf.Features.Simulator;
 using Percolator.Application.Services;
-using Percolator.Cryptography;
 
 namespace Desktop.Wpf.Features.Sessions;
 

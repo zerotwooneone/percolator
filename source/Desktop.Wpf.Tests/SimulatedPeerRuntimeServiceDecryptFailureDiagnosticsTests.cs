@@ -8,7 +8,6 @@ using Desktop.Wpf.Features.Simulator;
 using FluentAssertions;
 using Moq;
 using NUnit.Framework;
-using Percolator.Contracts;
 using Percolator.Cryptography;
 
 namespace Desktop.Wpf.Tests;

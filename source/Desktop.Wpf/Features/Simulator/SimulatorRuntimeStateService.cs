@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Concurrent;
 
 namespace Desktop.Wpf.Features.Simulator;

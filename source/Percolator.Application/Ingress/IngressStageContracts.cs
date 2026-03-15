@@ -1,5 +1,3 @@
-using System;
-
 namespace Percolator.Application.Ingress;
 
 public enum SessionResolutionPath

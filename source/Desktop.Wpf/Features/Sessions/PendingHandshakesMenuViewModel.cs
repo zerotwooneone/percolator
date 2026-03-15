@@ -1,16 +1,10 @@
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
-using System.ComponentModel;
-using System.Linq;
-using System.Threading.Tasks;
 using Desktop.Wpf.Shared.Mvvm;
 using Desktop.Wpf.Shared.Windowing;
 using MediatR;
-using Percolator.Application.Cryptography;
 using Percolator.Application.Network;
 using Desktop.Wpf.Features.Sessions.State;
-using Desktop.Wpf.Features.Sessions.Models;
-using R3;
 using Percolator.Cryptography;
 
 namespace Desktop.Wpf.Features.Sessions;

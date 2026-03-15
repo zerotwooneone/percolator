@@ -1,6 +1,4 @@
 using MediatR;
-using System;
-using System.Collections.Generic;
 using PeerId = Percolator.Identity.PeerId;
 
 namespace Percolator.Application.Apps.Chat;

@@ -1,4 +1,3 @@
-using System.Net;
 using System.Security.Cryptography;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;

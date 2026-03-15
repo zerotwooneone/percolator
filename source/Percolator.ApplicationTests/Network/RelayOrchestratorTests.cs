@@ -1,15 +1,10 @@
-using System;
-using System.Threading;
-using System.Threading.Tasks;
 using FluentAssertions;
 using Google.Protobuf;
 using Microsoft.Extensions.Logging;
 using Moq;
-using NUnit.Framework;
 using Percolator.Application.Identity;
 using Percolator.Application.Network;
 using Percolator.Application.Services;
-using Percolator.Application.Sessions;
 using Percolator.Contracts;
 using Percolator.Cryptography;
 using Percolator.Identity;

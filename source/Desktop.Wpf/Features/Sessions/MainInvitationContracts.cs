@@ -1,8 +1,3 @@
-using System;
-using System.Collections.Generic;
-using System.Threading;
-using System.Threading.Tasks;
-
 namespace Desktop.Wpf.Features.Sessions;
 
 public sealed record PendingInvitationDto(

@@ -14,10 +14,8 @@ using Microsoft.AspNetCore.Builder;
 using Percolator.Infrastructure.Identity;
 using Percolator.Application.Identity;
 using Percolator.Infrastructure.Persistence;
-using Microsoft.EntityFrameworkCore;
 using System.Security.Cryptography.X509Certificates;
 using System.Security.Cryptography;
-using Percolator.Identity;
 using Percolator.MessageQueue.DependencyInjection;
 
 namespace Percolator.ApplicationIntegrationTests;

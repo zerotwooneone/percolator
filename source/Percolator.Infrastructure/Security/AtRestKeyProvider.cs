@@ -1,7 +1,5 @@
 using System.Security.Cryptography;
 using System.Text;
-using System.Threading;
-using System.Threading.Tasks;
 using Percolator.Application.Apps.Chat;
 
 namespace Percolator.Infrastructure.Security

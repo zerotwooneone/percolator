@@ -1,5 +1,4 @@
 using MediatR;
-using System;
 using Percolator.Network;
 
 namespace Percolator.Prekey.Handlers

@@ -1,8 +1,4 @@
-using System;
-using System.Threading;
-using System.Threading.Tasks;
 using MediatR;
-using Percolator.Application.Network;
 using Percolator.Identity;
 using IdentityPeerId = Percolator.Identity.PeerId;
 

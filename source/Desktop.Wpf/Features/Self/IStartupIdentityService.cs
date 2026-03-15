@@ -1,5 +1,3 @@
-using System.Threading;
-using System.Threading.Tasks;
 using Percolator.Identity.Model;
 
 namespace Desktop.Wpf.Features.Self;

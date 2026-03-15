@@ -1,5 +1,3 @@
-using System;
-
 namespace Percolator.Network.ValueObjects;
 
 public sealed class EndpointFreshness

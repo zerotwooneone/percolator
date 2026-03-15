@@ -1,7 +1,3 @@
-using System;
-using System.Threading;
-using System.Threading.Tasks;
-
 namespace Percolator.Application.Apps.Chat
 {
     // Maps a group conversation to the direct session used as the transport for key envelopes

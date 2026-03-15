@@ -1,7 +1,5 @@
-using MediatR;
 using Microsoft.Extensions.DependencyInjection;
 using Percolator.MessageQueue.Abstractions;
-using Percolator.MessageQueue;
 
 namespace Percolator.MessageQueue.DependencyInjection;
 

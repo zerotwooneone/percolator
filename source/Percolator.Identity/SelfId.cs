@@ -1,5 +1,3 @@
-using System;
-
 namespace Percolator.Identity;
 
 public readonly record struct SelfId

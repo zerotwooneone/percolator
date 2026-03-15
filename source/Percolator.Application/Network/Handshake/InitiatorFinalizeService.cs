@@ -1,6 +1,3 @@
-using System;
-using System.Threading;
-using System.Threading.Tasks;
 using MediatR;
 using Microsoft.Extensions.Logging;
 using Percolator.Application.KeyExchange;
@@ -8,7 +5,6 @@ using Percolator.Cryptography;
 using Percolator.Cryptography.Primitives;
 using Percolator.Contracts;
 using Percolator.Identity;
-using Percolator.Network;
 
 namespace Percolator.Application.Network.Handshake
 {

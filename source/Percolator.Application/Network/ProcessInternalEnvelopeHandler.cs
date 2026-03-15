@@ -11,7 +11,6 @@ using Percolator.Dht;
 using Percolator.Application.Network.Handshake;
 using Percolator.MessageQueue.Commands;
 using Percolator.MessageQueue.Abstractions;
-using Percolator.MessageQueue.Primitives;
 using Percolator.Network;
 using Percolator.Prekey.Handlers;
 using PeerId = Percolator.Identity.PeerId;

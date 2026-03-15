@@ -1,6 +1,3 @@
-using System;
-using System.Linq;
-
 namespace Percolator.Identity.Model;
 
 public sealed record DisplayName

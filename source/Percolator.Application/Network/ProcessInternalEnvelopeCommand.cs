@@ -1,10 +1,5 @@
-using System;
-using System.Collections.Generic;
-using System.Threading;
-using System.Threading.Tasks;
 using MediatR;
 using Percolator.Contracts;
-using Percolator.Network;
 using Percolator.Identity;
 
 namespace Percolator.Application.Network

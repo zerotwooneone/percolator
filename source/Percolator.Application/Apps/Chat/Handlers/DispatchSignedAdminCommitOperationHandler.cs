@@ -2,8 +2,6 @@ using Google.Protobuf;
 using MediatR;
 using Microsoft.Extensions.Logging;
 using Percolator.Contracts;
-using System;
-using System.Linq;
 using PeerId = Percolator.Identity.PeerId;
 using Percolator.Application.Network;
 using Percolator.Identity;

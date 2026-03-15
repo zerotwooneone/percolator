@@ -1,6 +1,5 @@
 using System.Linq;
 using System.Threading;
-using System.Windows;
 using Desktop.Wpf.Features.Simulator;
 using FluentAssertions;
 using NUnit.Framework;

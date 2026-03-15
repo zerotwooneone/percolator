@@ -1,7 +1,6 @@
 using Grpc.Net.Client;
 using Microsoft.Extensions.Logging;
 using Percolator.Contracts;
-using Percolator.Identity;
 using System.Collections.Concurrent;
 using Percolator.Network;
 using NetworkPeerId = Percolator.Network.PeerId;

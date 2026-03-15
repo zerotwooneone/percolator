@@ -1,4 +1,3 @@
-using System;
 using Google.Protobuf;
 using Percolator.Contracts;
 using Percolator.Cryptography.Primitives;

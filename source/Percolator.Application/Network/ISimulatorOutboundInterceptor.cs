@@ -1,6 +1,4 @@
 using System.Net;
-using System.Threading;
-using System.Threading.Tasks;
 using Percolator.Contracts;
 
 namespace Percolator.Application.Network;

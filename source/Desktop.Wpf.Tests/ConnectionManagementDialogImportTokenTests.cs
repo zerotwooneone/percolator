@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
@@ -12,7 +11,6 @@ using Percolator.Application.Identity;
 using Percolator.Application.Network;
 using Percolator.Application.Services;
 using Percolator.Contracts;
-using Percolator.Cryptography;
 using Percolator.Network;
 
 namespace Desktop.Wpf.Tests;

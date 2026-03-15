@@ -1,5 +1,3 @@
-using System;
-
 namespace Desktop.Wpf.Features.Simulator;
 
 public sealed class SimulatedRelayQueueItemViewModel

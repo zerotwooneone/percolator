@@ -1,5 +1,4 @@
 using MediatR;
-using Percolator.Chat.App;
 using Percolator.Chat.ValueObjects;
 using Percolator.Chat.Primitives;
 

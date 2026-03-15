@@ -1,5 +1,3 @@
-using System.Collections.Generic;
-
 namespace Percolator.Network.ValueObjects;
 
 public sealed class SelectionTrace

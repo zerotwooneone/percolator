@@ -1,5 +1,4 @@
 using MediatR;
-using Percolator.Contracts;
 
 namespace Percolator.Application.Cli;
 

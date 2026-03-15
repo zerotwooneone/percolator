@@ -1,6 +1,3 @@
-using System;
-using Microsoft.Extensions.DependencyInjection;
-
 namespace Desktop.Wpf.Features.Sessions
 {
     public interface ISessionScopeFactory

@@ -1,5 +1,3 @@
-using System;
-using System.Linq;
 using Google.Protobuf;
 using Google.Protobuf.Collections;
 using Percolator.Contracts;

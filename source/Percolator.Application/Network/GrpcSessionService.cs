@@ -1,6 +1,4 @@
 using System.Collections.Concurrent;
-using System.Collections.Generic;
-using System;
 using System.Net;
 using System.Net.Security;
 using System.Security.Cryptography.X509Certificates;

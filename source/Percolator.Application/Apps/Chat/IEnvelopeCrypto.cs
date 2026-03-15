@@ -1,6 +1,3 @@
-using System;
-using System.Threading;
-using System.Threading.Tasks;
 using Percolator.Chat.Primitives;
 
 namespace Percolator.Application.Apps.Chat

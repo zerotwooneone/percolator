@@ -1,15 +1,10 @@
-using System;
 using System.Net;
 using System.Security.Cryptography;
-using System.Threading;
-using System.Threading.Tasks;
 using Google.Protobuf;
-using Google.Protobuf.WellKnownTypes;
 using MediatR;
 using Microsoft.Extensions.Logging;
 using Percolator.Application.Identity;
 using Percolator.Application.ReverseSignal;
-using Percolator.Application.Sessions;
 using Percolator.Application.Services;
 using Percolator.Contracts;
 using Percolator.Cryptography;

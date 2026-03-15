@@ -1,7 +1,3 @@
-using System;
-using System.Threading.Tasks;
-using NUnit.Framework;
-
 namespace Percolator.NetworkTests;
 
 // Contract tests specifying expected behavior of IDirectSessionRepository

@@ -1,5 +1,3 @@
-using System;
-using NUnit.Framework;
 using Percolator.Identity;
 using Percolator.Identity.Model;
 
