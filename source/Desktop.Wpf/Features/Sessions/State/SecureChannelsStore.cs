@@ -34,6 +34,42 @@ public sealed class SecureChannelsStore : ISecureChannelsStore, IDisposable
 
     public ReadOnlyReactiveProperty<int> PendingInboundCount { get; }
 
+    internal Task ReplacePendingInboundAsync(IEnumerable<PendingInvitationModel> items)
+        => MutateOnDispatcherAsync(() =>
+        {
+            foreach (var existing in _pendingInbound.ToArray())
+            {
+                existing.Dispose();
+            }
+
+            _pendingInbound.Clear();
+            _pendingInboundByPendingId.Clear();
+
+            foreach (var it in items)
+            {
+                _pendingInboundByPendingId[it.PendingSessionId] = it;
+                _pendingInbound.Add(it);
+            }
+        });
+
+    internal Task ReplaceChannelsAsync(IEnumerable<SecureChannelModel> items)
+        => MutateOnDispatcherAsync(() =>
+        {
+            foreach (var existing in _channels.ToArray())
+            {
+                existing.Dispose();
+            }
+
+            _channels.Clear();
+            _channelsByKey.Clear();
+
+            foreach (var it in items)
+            {
+                _channelsByKey[it.Key] = it;
+                _channels.Add(it);
+            }
+        });
+
     internal Task UpsertPendingInboundAsync(PendingInvitationModel model)
         => MutateOnDispatcherAsync(() =>
         {
