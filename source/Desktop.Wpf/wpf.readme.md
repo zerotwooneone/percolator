@@ -11,8 +11,19 @@
     - Lifetimes: Singleton (Shell/global models), Scoped (identity/session), Transient (helpers).
 
 - **State and reactivity**
-    - Use R3 BindableReactiveProperty/ReadOnlyBindableReactiveProperty and ObserveOnCurrentSynchronizationContext() for UI.
-    - Dispose reactive state in DisposeCore().
+    - Use **shared models** (non-ViewModel) as the sharable, in-memory source of truth.
+        - Shared models may be reactive (R3) but should **not** be WPF-bindable.
+        - Default: shared models use `ReactiveProperty<T>` / `ReadOnlyReactiveProperty<T>`.
+        - Do not put `BindableReactiveProperty<T>` in shared models unless explicitly opting into “presentation models” that are WPF-coupled.
+    - Use **ViewModels** as the bindable projection layer.
+        - ViewModels expose `BindableReactiveProperty<T>` / `ReadOnlyBindableReactiveProperty<T>` for XAML binding via `.Value`.
+        - ViewModels own formatting and derived values (e.g., timestamp strings, initials, 99+ unread display).
+    - Avoid sharing ViewModels when possible.
+        - Prefer sharing models via a singleton store/service (e.g., `SecureChannelsStore`) and let each VM project what it needs.
+    - UI thread rules:
+        - Only mutate WPF-bound state (collections and bindable properties) on the UI thread.
+        - Use `ObserveOnCurrentSynchronizationContext()` and/or marshal via Dispatcher inside stores/services.
+    - Dispose reactive state in `DisposeCore()`.
 
 - **Async and cancellation**
     - Async methods accept CancellationToken; use try/finally for IsLoading flags; avoid blocking UI.
