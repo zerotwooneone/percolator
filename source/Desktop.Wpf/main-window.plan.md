@@ -633,13 +633,97 @@ Outcome:
   - Offline: warning + queued send visuals (basic)
   - Failed: hidden input + Retry/Delete
 
-Work:
+Work (recipe):
 
-- Create a `SelectedChannelViewModel` that exposes state.
-- Implement a simple templated UI switching on state.
-- Add commands:
-  - Retry Connection (re-initiate handshake)
-  - Delete Channel (remove from list)
+- State ownership (Desktop.Wpf shared model/store; no VM-owned state)
+  - Add a shared selection model:
+    - File: `Desktop.Wpf/Features/Sessions/State/SelectedChannelModel.cs`
+    - Lifetime: singleton (identity-scoped or app singleton; must be stable for sidebar + right pane)
+    - Public contract:
+      - `ReactiveProperty<SecureChannelKey?> SelectedKey` (nullable when nothing selected)
+  - Sidebar selection becomes a projection of `SelectedChannelModel.SelectedKey`.
+    - `SessionsSidebarViewModel` continues to expose a bindable `SelectedSessionId` for XAML, but it must be derived from / written through to `SelectedKey`.
+    - Avoid: storing a separate “selected id” field that can drift from the shared model.
+  - Guideline clarification:
+    - ViewModels MAY own ephemeral editor/UI state (e.g., draft text, checkboxes, transient validation messages).
+    - ViewModels MUST NOT own shared or notification-driven state (anything that must remain consistent across multiple VMs, or changes due to MediatR/domain events).
+
+- Per-channel right pane state model (LRU-cached; holds ephemeral state across re-selection)
+  - Introduce a per-channel state model that exists specifically to preserve ephemeral right-pane state across selections.
+  - This model MUST NOT replace `SecureChannelModel`.
+    - `SecureChannelModel` remains the authoritative shared channel list model owned by `ISecureChannelsStore`.
+    - The per-channel state model is an overlay for ephemeral UI/editor state (e.g., message draft text).
+  - Suggested shape:
+    - File: `Desktop.Wpf/Features/Sessions/State/SelectedSecureChannelStateModel.cs`
+    - Keying:
+      - `SecureChannelKey ChannelKey` (stable key; do not key by `SessionId` string)
+    - Ephemeral fields (examples):
+      - `ReactiveProperty<string> DraftMessageText`
+      - Optional: `ReactiveProperty<bool> IsKebabOpen`, `ReactiveProperty<int> SelectedInspectorTab`, etc.
+  - Passthrough vs snapshot recommendation:
+    - Prefer PASSTHROUGH for shared facts:
+      - Right pane reads display name/status/online/etc. from the current `SecureChannelModel` resolved from `ISecureChannelsStore.Channels` using `ChannelKey`.
+    - Keep only ephemeral/editor state in `SelectedSecureChannelStateModel`:
+      - e.g., draft message text that should be restored when returning to a channel.
+    - Avoid snapshotting shared facts into the per-channel state model (leads to stale/duplicated state and breaks Chunk F invariants).
+  - Cache owner:
+    - File: `Desktop.Wpf/Features/Sessions/State/SelectedSecureChannelStateCache.cs`
+    - Behavior:
+      - `GetOrCreate(SecureChannelKey key) => SelectedSecureChannelStateModel`
+      - LRU-bounded to max `10` items.
+      - Evicted `SelectedSecureChannelStateModel` MUST be disposed.
+
+- Memory / lifetime constraint (bounded recent selection)
+  - The system must limit how many “recently selected” channel-specific objects remain alive in memory.
+  - Start with a maximum of `10`.
+  - Use an LRU policy:
+    - When `SelectedKey` changes, mark the associated item as most-recently-used.
+    - When the number of cached items exceeds the max, evict the least-recently-selected.
+  - What is cached (implementation choice; must be explicit when implementing):
+    - Cache `SelectedSecureChannelStateModel` instances (per-channel ephemeral right-pane/editor state).
+    - Separately (optional future improvement): add an LRU to `ISessionScopeFactory.GetOrCreate(...)` if chat session scopes are heavy.
+  - Eviction behavior:
+    - Evicted items MUST be disposed (scope disposed, subscriptions released) to avoid leaks.
+    - Eviction MUST NOT affect the shared models/store (channel list + selection model remain intact).
+
+- Right pane view model (projection-only)
+  - Create a right pane VM that derives its entire state from `SelectedChannelModel.SelectedKey` + `ISecureChannelsStore.Channels`:
+    - File: `Desktop.Wpf/Features/Sessions/SelectedChannelPaneViewModel.cs`
+    - Inputs:
+      - `SelectedChannelModel`
+      - `ISecureChannelsStore`
+      - `IMediator` (for commands only)
+    - Public bindable outputs (example contract; adjust to match `design/main-window.md`):
+      - `BindableReactiveProperty<SelectedPaneState>` where `SelectedPaneState` is an enum: `None`, `Pending`, `Active`, `Offline`, `Failed`
+      - `BindableReactiveProperty<string?> DisplayName`, `BindableReactiveProperty<string?> BannerText`, `BindableReactiveProperty<bool> IsInputEnabled`, etc.
+      - Optional: a bindable `CurrentChannelKey` or `CurrentSessionId` for command payloads.
+  - State mapping rules (must be explicit and stable):
+    - `SecureChannelKind.PendingInbound` or `PendingOutbound` => `Pending`
+    - `SecureChannelKind.Direct` and `IsOnline == true` => `Active`
+    - `SecureChannelKind.Direct` and `IsOnline == false` => `Offline`
+    - `SecureChannelKind.Failed` => `Failed`
+  - Critical invariant:
+    - Pending->Active transitions must be driven by the existing shared model instance changing via store migration (Chunk F.6).
+    - The right pane must react solely to store/model changes (no imperative refresh calls).
+
+- UI composition / templating
+  - Host the right pane inside `SessionShellView` (right column content).
+  - Implement UI switching via templated `ContentControl`:
+    - File: `Desktop.Wpf/Features/Sessions/SessionShellView.xaml`
+    - Bind the pane VM (or its `CurrentState`) and switch templates based on `SelectedPaneState`.
+    - Keep the sidebar as-is (`SessionShellViewModel.Sidebar`).
+  - Add view mappings for any new view types if needed:
+    - File: `Desktop.Wpf/Shared/Theme/ViewMappings.xaml`
+
+- Commands (Application layer; projection updates store)
+  - Retry Connection
+    - Behavior: re-initiate handshake for the selected peer/channel.
+    - Implementation constraint: invoke via `IMediator.Send(...)` only.
+    - Resulting UI updates must occur via domain notifications -> `SecureChannelsProjection` -> store.
+  - Delete Channel
+    - Behavior: remove channel from list.
+    - Implementation constraint: invoke via `IMediator.Send(...)` and have application/domain remove/purge.
+    - Avoid: directly mutating the store from the VM.
 
 Implementation note:
 
@@ -651,7 +735,17 @@ Glyphs:
 
 Definition of done:
 
-- Pending -> Active transition updates UI when accept arrives.
+- Selecting a pending row shows Pending pane state (disabled input + “Establishing…” banner).
+- Selecting an active row shows Active pane state (enabled input + “E2E Encryption Established” banner).
+- Selecting an active row that is offline shows Offline pane state.
+- Selecting a failed row shows Failed pane state (input hidden) and exposes Retry/Delete commands.
+- Pending -> Active transition updates right pane automatically when the store migrates keys (Chunk F.6) and the channel kind becomes Direct.
+
+Minimal tests:
+
+- Add a non-brittle unit test for projection behavior:
+  - When `SelectedKey` changes, the pane VM updates its bindable state based on the matching `SecureChannelModel` in `ISecureChannelsStore.Channels`.
+  - When a `SecureChannelModel.Kind` changes (pending -> direct), the pane VM updates state without recreating the model.
 
 ---
 
@@ -663,30 +757,84 @@ Outcome:
 - Main can initiate handshake to simulator peer by sending a **Reverse-Signal invitation** and simulator can accept and respond.
 - Successful completion results in an Active channel entry with correct DIRECT vs RELAY badge.
 
-Work:
+Work (recipe):
 
-- Ensure transport route is preserved through the full invitation lifecycle:
-  - Invite delivery route (direct vs relayed)
-  - Response delivery route (direct callback to inviter_host/port vs relayed response)
-- Implement state transitions specific to Reverse-Signal:
-  - Outbound Invite sent -> Pending
-  - `InviteHandshakeResponse` received and inviter finalizes -> Active
+- Guideline constraint (repeat for safety)
+  - Application-layer services/handlers MUST NOT mutate WPF ViewModels.
+  - UI state changes MUST be reflected via domain notifications -> `SecureChannelsProjection` -> `SecureChannelsStore`.
+
+- Identify and use existing authoritative ingress/delivery primitives
+  - Direct callback ingress for Reverse-Signal response:
+    - File: `Percolator.Application/Network/InviteHandshakeResponseIngress.cs`
+    - Contract: `IInviteHandshakeResponseIngress.HandleAsync(SelfId, InviteHandshakeResponse, ct)`
+    - Delegates to: `HandleHandshakeResponderHelloCommand`
+  - Direct/Relayed delivery for Reverse-Signal response:
+    - File: `Percolator.Application/Network/InviteHandshakeResponseDeliveryService.cs`
+    - Behavior:
+      - Direct: `_grpc.DeliverInviteHandshakeResponseAsync(directCallbackEndpoint, response)`
+      - Relayed: `_transport.SendViaRelayAsync(...)` to chosen relay from `IRelayTopology`
+      - Emits send-path strings: `Direct`, `Relay:<peerId>`, and supports simulator wiretap `Simulated`
+  - Relayed ingress for Reverse-Signal invite + response (opaque bytes):
+    - File: `Percolator.Application/Network/Handshake/ProcessRelayedOpaquePayloadCommand.cs`
+    - `TryHandleNonSessionPayloadAsync(...)` already recognizes:
+      - Reverse-signal invite: `EstablishDirectSessionRequest` (queue invite as `isRelayed: true`)
+      - Reverse-signal response: `InviteHandshakeResponse` (delegates to `IInviteHandshakeResponseIngress`)
+
+- Route provenance: define what must be preserved and where it lives
+  - Data that must survive from invitation to active session:
+    - Invite delivery route: `Direct` vs `Relay:<peerId>`
+    - Response delivery route: `Direct` vs `Relay:<peerId>`
+  - Representation choice (Desktop.Wpf shared models):
+    - Add fields to `SecureChannelModel` (shared; notification-driven) to represent route provenance used by UI badges:
+      - Example: `ReactiveProperty<string?> RouteText` or `ReactiveProperty<bool> IsRelayed` + `ReactiveProperty<string?> RelayPeerId`
+    - These fields MUST be written only by the projection/store.
+
+- Reverse-Signal state transitions (authoritative behaviors)
+  - Outbound invite sent -> PendingOutbound channel row
+    - Key: correlation id (`SecureChannelKeyType.PendingCorrelation`)
+    - Kind: `SecureChannelKind.PendingOutbound`
+    - Route fields populated from invite send path
+  - Invite accepted -> inviter receives `InviteHandshakeResponse` -> inviter finalizes -> Active
+    - Response ingress must go through:
+      - direct callback: `InviteHandshakeResponseIngress`
+      - relayed opaque: `ProcessRelayedOpaquePayloadCommand` -> `IInviteHandshakeResponseIngress`
+    - Finalization must match `session-flow.md`:
+      - lookup by `request_correlation_id` in sent invitations
+      - complete X3DH + initialize ratchet
+      - persist session keyed by responder-provided `session_id`
+    - UI continuity requirement:
+      - the pending outbound row migrates to the active session row (Chunk F.6).
   - Invite expires (no response) -> Failed/Expired
+    - Pending outbound row transitions to `SecureChannelKind.Failed` and records a reason string/time.
   - Invite rejected/burned -> Failed
-- Ensure the “inviter finalizes” step matches `session-flow.md`:
-  - lookup by `request_correlation_id` in SentInvitations
-  - complete X3DH responder side and initialize ratchet
-  - persist session keyed by responder-provided `session_id`
-- Ensure inbound handling is symmetric for direct vs relayed ingress:
-  - direct ingress via callback endpoint
-  - relayed ingress via relay queue delivery service / command
-  - explicitly cover `InviteHandshakeResponse` ingress for:
-    - direct callback ingress (`InviteHandshakeResponseIngress`-style)
-    - relayed opaque payload ingress (`ProcessRelayedOpaquePayloadCommand`-style)
+    - Pending outbound row transitions to `SecureChannelKind.Failed`.
+
+- Projection requirements (Desktop.Wpf)
+  - Update `SecureChannelsProjection.ReloadAsync` to incorporate any new persistence sources for Reverse-Signal state:
+    - Pending outbound source(s): `IPreHandshakeSessionStore` (already used) and/or `ISentInvitationRepository`.
+    - If route provenance is only available from `ISentInvitationRepository`, use it to enrich the outbound pending rows.
+  - Ensure route fields (Direct/Relay) are set on:
+    - PendingOutbound rows
+    - Active session rows (based on last-known route provenance)
+
+- Simulator parity / validation helpers (Desktop.Wpf)
+  - Simulator can already deliver `InviteHandshakeResponse` to main:
+    - File: `Desktop.Wpf/Features/Simulator/SimulatedPeerRuntimeService.cs`
+    - Method: `DeliverInviteHandshakeResponseToMainAsync(...)`
+  - Ensure both directions can be driven via UI affordances (Connection Management dialog + simulator UI).
 
 Definition of done:
 
 - You can perform both directions of handshake through UI.
+
+Minimal tests (prefer integration-style where appropriate):
+
+- Direct reverse-signal response ingress:
+  - A valid `InviteHandshakeResponse` delivered through the direct callback path reaches `HandleHandshakeResponderHelloCommand`.
+- Relayed reverse-signal response ingress:
+  - A valid `InviteHandshakeResponse` blob delivered as relayed opaque bytes reaches `IInviteHandshakeResponseIngress`.
+- Route provenance:
+  - For at least one Direct and one Relay scenario, the channel row reflects the correct route badge/text.
 
 ---
 
@@ -697,10 +845,55 @@ Outcome:
 - Header button shows count badge and pulses when inbound requests exist.
 - Opening dialog defaults to Tab 1 if inbound exists else Tab 2.
 
-Work:
+Work (recipe):
 
-- Connect inbox count to shell VM.
-- Implement simple animation or style trigger.
+- Identify current UI hook points
+  - The “Add peer” button lives in the sessions sidebar:
+    - File: `Desktop.Wpf/Features/Sessions/SessionsSidebarView.xaml`
+    - Control: `MatButton x:Name="AddPeerBtn"`
+    - Currently binds `NotificationCount` to `PendingMenu.PendingHandshakes.Count`.
+  - Connection Management dialog selected tab is already bindable:
+    - File: `Desktop.Wpf/Features/Sessions/ConnectionManagementDialogWindow.xaml`
+    - Binding: `TabControl SelectedIndex="{Binding SelectedTabIndex.Value, Mode=TwoWay}"`
+    - VM property: `ConnectionManagementDialogViewModel.SelectedTabIndex`
+
+- State ownership
+  - The canonical inbound pending count must come from the shared store:
+    - Use `ISecureChannelsStore.PendingInboundCount` as the single source of truth.
+  - ViewModels MAY project this into a bindable property, but must not compute/maintain a separate count.
+
+- Badge wiring (MVVM compliant)
+  - Update the sidebar VM/XAML so `NotificationCount` ultimately reflects `ISecureChannelsStore.PendingInboundCount`.
+    - Acceptable approaches:
+      - Bind directly to `_store.PendingInboundCount.Value` via a VM-exposed `BindableReactiveProperty<int>` projection.
+      - Or expose a `PendingCount` property on `PendingHandshakesMenuViewModel` that is a projection of the store count.
+    - Avoid: binding to `ObservableCollection.Count` on a VM-owned list as the canonical count (it can drift from the store).
+
+- Pulse/attention behavior
+  - Implement a simple style trigger/animation on `AddPeerBtn` when `PendingInboundCount > 0`.
+    - Keep this as UI-only behavior; do not add domain logic.
+    - File(s): `SessionsSidebarView.xaml` or shared styles dictionary if preferred.
+
+- Default focus/tab behavior when opening Connection Management
+  - Rule:
+    - If `PendingInboundCount > 0`, default to Tab 1 (Incoming Signals).
+    - Else default to Tab 2 (Network Search).
+  - Implementation constraints:
+    - This is a UI concern driven by store state at dialog open time.
+    - Do not introduce a MediatR handler that imperatively manipulates dialog ViewModels.
+  - Concrete implementation location options:
+    - Option A: in `PendingHandshakesMenuViewModel.OpenNewHandshakeCommand`, set an input on the dialog VM prior to showing it.
+    - Option B: in `ConnectionManagementDialogViewModel.InitializeAsync`, read the store count and set `SelectedTabIndex` once.
+
+Definition of done:
+
+- Badge count matches `ISecureChannelsStore.PendingInboundCount`.
+- Badge is visible and pulses whenever inbound pending exists.
+- Opening Connection Management defaults to Incoming Signals tab when pending exists, otherwise defaults to Network Search.
+
+Minimal tests:
+
+- Unit test that a VM projection of `PendingInboundCount` updates when store pending inbound changes.
 
 ---
 
@@ -712,10 +905,58 @@ Outcome:
   - Direct: Main <-> Peer
   - Relayed: Main -> Relay -> Peer
 
-Work:
+Work (recipe):
 
-- Add inspector panel UI and toggle command.
-- Back it with route data already tracked in Chunk H.
+- Authoritative requirements
+  - Follow `design/main-window.md` “Uplink Inspector UI” section.
+  - Uplink is only meaningful for an active channel header; it is disabled for Pending.
+
+- State ownership
+  - Topology/route provenance is shared, notification-driven state:
+    - Source: fields on `SecureChannelModel` populated by projection (Chunk H).
+    - Do not store route provenance inside a scoped VM.
+  - Inspector visibility/toggle is ephemeral UI state:
+    - OK to keep in the right pane VM as `BindableReactiveProperty<bool> IsUplinkOpen`.
+    - Alternatively keep in `SelectedSecureChannelStateModel` if you want it preserved per-channel.
+
+- Model shape needed for UI
+  - Ensure `SecureChannelModel` exposes enough to render topology:
+    - Minimal for Chunk J:
+      - Route kind: Direct vs Relay (and optionally Group)
+      - Relay identifier/name when relayed
+    - If `SecureChannelKind` already distinguishes `Relay`, use it.
+    - Otherwise add explicit route fields as described in Chunk H (e.g., `RouteText`, `RelayPeerId`).
+
+- ViewModel projection
+  - Implement an inspector VM that projects from the selected channel (store) + the per-channel ephemeral state:
+    - File: `Desktop.Wpf/Features/Sessions/UplinkInspectorViewModel.cs`
+    - Inputs:
+      - `SelectedChannelModel`
+      - `ISecureChannelsStore`
+      - Optional: `SelectedSecureChannelStateCache` if preserving open/closed per channel.
+    - Outputs:
+      - `BindableReactiveProperty<bool> IsOpen`
+      - `BindableReactiveProperty<string> TopologyText` (or structured nodes)
+      - `BindableReactiveProperty<bool> IsEnabled` (false when Pending/Failed)
+
+- UI implementation
+  - Add a header “UPLINK” button to the active channel header in the right pane.
+    - If the right pane is a `ContentControl` with templates, add button within the Active template.
+  - Add the sliding side panel:
+    - Use a `Grid` column or overlay `Border` with animation when `IsOpen` changes.
+    - Keep visuals simple for the first pass:
+      - Direct: `[Operator Node] <====> [Peer Name]`
+      - Relayed: `[Operator Node] ----> [Relay] ----> [Peer Name]`
+
+Definition of done:
+
+- Active direct channel shows direct topology.
+- Active relayed channel shows relay topology with relay identifier.
+- Pending channel disables uplink.
+
+Minimal tests:
+
+- Unit test for inspector VM mapping from shared model route fields to output text/state.
 
 ---
 
@@ -726,10 +967,75 @@ Outcome:
 - Kebab menu includes “Reset Secure Session”.
 - Triggers a new outbound **Reverse-Signal invitation** behind the scenes while keeping channel history.
 
-Work:
+Work (recipe):
 
-- Add command + UI affordance.
-- Implement “temporary system message / banner” while re-establishing.
+- Authoritative requirements
+  - Follow `design/main-window.md` “Session Reset / Recovery” section.
+  - Goal is to heal a desynchronized ratchet without losing the channel row/history.
+
+- Identify existing reverse-signal primitives to reuse
+  - Invite construction:
+    - File: `Percolator.Application/Network/MainReverseSignalInviteFactory.cs`
+    - API: `IMainReverseSignalInviteFactory.CreateInvite()`
+    - Side effects:
+      - Persists a `SentInvitation` keyed by `request_correlation_id`.
+      - Persists a per-invite signed pre-key (needed later for inviter finalization).
+  - Inbound invite queueing:
+    - File: `Percolator.Application/Network/EstablishDirectSessionService.cs`
+    - Publishes `PendingSessionCreatedNotification`.
+  - Accepting invite:
+    - File: `Percolator.Application/Network/ApprovePendingSessionCommand.cs`
+    - Publishes `SecureSessionCreatedNotification` when acceptor establishes.
+    - Delivers `InviteHandshakeResponse` via `IInviteHandshakeResponseDeliveryService`.
+  - Inviter finalization:
+    - File: `Percolator.Application/Network/Handshake/InitiatorFinalizeService.cs`
+    - Correlates response by `request_correlation_id` to `SentInvitation` and publishes `SecureSessionCreatedNotification`.
+
+- State ownership
+  - “Reset in progress” is primarily an ephemeral UI concern scoped to a channel:
+    - Store it in `SelectedSecureChannelStateModel` as a reactive field:
+      - Example: `ReactiveProperty<bool> IsReestablishing`
+      - Example: `ReactiveProperty<string?> ReestablishingText`
+    - This keeps the main shared store focused on notification-driven channel facts.
+  - The channel row itself MUST remain the authoritative `SecureChannelModel` from the store.
+    - Do not delete and recreate the channel just to reset.
+
+- Command surface (ViewModel)
+  - Add a kebab menu affordance in the Active channel header UI:
+    - “Reset Secure Session” item.
+  - Implement a VM command that triggers reset:
+    - File: right-pane/header VM (from Chunk G)
+    - Behavior:
+      - Sets `SelectedSecureChannelStateModel.IsReestablishing = true`.
+      - Sends an application command via `IMediator.Send(...)` (or invokes an existing service) to initiate a new reverse-signal invite.
+      - Does not directly mutate `SecureChannelsStore`.
+
+- Application-layer behavior to trigger new invite
+  - Prefer an explicit application command (so it is testable and does not couple UI to services):
+    - Example: `ResetSecureSessionCommand(SecureChannelKey channelKey | PeerId remotePeerId, RouteChoice route)`.
+  - Implementation must:
+    - Build a fresh reverse-signal invite via `IMainReverseSignalInviteFactory.CreateInvite()`.
+    - Deliver it to the remote peer using the same routing primitives as outbound initiation (Chunk H).
+    - Ensure an outbound pending row exists and will migrate to active via Chunk F.6 correlation.
+
+- UI behavior
+  - While reset is pending:
+    - Show a temporary banner/system message in the right pane: “Re-establishing secure connection…”.
+    - Disable sending or mark messages as queued (placeholder acceptable).
+  - When the new session is established:
+    - Clear `IsReestablishing`.
+    - Channel remains selected; UI returns to Active.
+
+Definition of done:
+
+- “Reset Secure Session” is available for an active 1:1 channel.
+- Triggering reset creates a new outbound pending action and shows “Re-establishing…” immediately.
+- When the new session completes, the channel returns to Active without losing the channel row.
+
+Minimal tests:
+
+- Unit test: triggering reset sets `IsReestablishing` and invokes the application command.
+- Integration smoke: completing the reverse-signal flow clears `IsReestablishing` and results in an active session.
 
 ---
 
@@ -743,10 +1049,48 @@ Outcome:
   - badge colors
   - list item layout
 
-Work:
+Work (recipe):
 
-- Consolidate styles/templates.
-- Ensure list item visuals (avatar, badges, unread, online dot).
+- Scope/constraints
+  - This chunk is UI-only; do not change application logic or store/projection semantics.
+  - Prefer consolidating WPF styles/templates over adding per-view ad-hoc styling.
+
+- Authoritative references
+  - Visual targets: `Desktop.Wpf/design/*.png`
+  - Behavior targets (do not regress): `Desktop.Wpf/design/main-window.md`
+
+- Primary files to touch
+  - List visuals:
+    - `Desktop.Wpf/Features/Sessions/SessionsSidebarView.xaml`
+    - `Desktop.Wpf/Features/Sessions/SessionsSidebarViewModel.cs` (only if binding surface needs minor extensions)
+    - `Desktop.Wpf/Features/Sessions/SecureChannelListItemViewModel.cs` (only if additional bindable display props are needed)
+  - Shared styles/resources:
+    - `Desktop.Wpf/Shared/Theme/Styles.xaml`
+    - `Desktop.Wpf/Shared/Theme/Typography.xaml`
+    - `Desktop.Wpf/Shared/Theme/Colors.xaml` (if present)
+    - `Desktop.Wpf/Shared/Theme/Icons.xaml`
+  - Shared controls:
+    - `Desktop.Wpf/Shared/Controls/MatButton.xaml`
+    - `Desktop.Wpf/Shared/Controls/MatChip.xaml`
+    - `Desktop.Wpf/Shared/Controls/InitialsAvatar.xaml`
+
+- Concrete UI checklist
+  - Tab strip styling (Connection Management and any right-pane tab usage)
+  - Button states:
+    - hover/pressed/disabled visuals match screenshots
+  - Badge colors and shapes:
+    - unread badge
+    - channel tech badge (DIRECT/RELAY/GROUP/PENDING/FAILED)
+    - add-peer notification badge
+  - List item layout:
+    - avatar alignment + online dot
+    - name/snippet typography
+    - timestamp alignment
+
+Definition of done:
+
+- Screens match `design/*.png` within reasonable tolerance.
+- No behavioral regressions in filtering, selection, pending badge, and store-driven updates.
 
 ---
 
@@ -757,15 +1101,41 @@ Outcome:
 - The codebase has a single, clear handshake entry point: **Connection Management**.
 - Legacy UI and mappings that are no longer used are removed to avoid confusion and bit-rot.
 
-Work:
+Work (recipe):
 
-- Remove legacy NewHandshake dialog artifacts if no longer used:
-  - `NewHandshakeDialogWindow.xaml` / `.xaml.cs`
-  - `NewHandshakeDialogViewModel.cs`
-- Remove DI registrations for the legacy window/view model.
-- Remove WindowManager mappings for legacy dialog in `Shared/Windowing/ViewMappings.xaml`.
-- Remove any remaining call sites that open the legacy dialog (search for `ShowFor<NewHandshakeDialogViewModel>`).
-- Ensure the “Add peer” header button and any other handshake affordances open `ConnectionManagementDialogViewModel`.
+- Inventory and delete legacy handshake UI
+  - Remove legacy NewHandshake dialog artifacts if no longer used:
+    - `Desktop.Wpf/Features/Sessions/NewHandshakeDialogWindow.xaml`
+    - `Desktop.Wpf/Features/Sessions/NewHandshakeDialogWindow.xaml.cs`
+    - `Desktop.Wpf/Features/Sessions/NewHandshakeDialogViewModel.cs`
+  - Remove any related tests that only exist for the deleted UI.
+
+- Remove DI registrations and view mappings
+  - DI:
+    - File: `Desktop.Wpf/App.xaml.cs`
+    - Remove any `services.Add...<NewHandshakeDialogViewModel>()` style registrations.
+  - Window/view mappings:
+    - File: `Desktop.Wpf/Shared/Theme/ViewMappings.xaml`
+    - Remove mappings for legacy dialog.
+
+- Remove call sites
+  - Search for and remove remaining invocations:
+    - `ShowFor<NewHandshakeDialogViewModel>`
+    - `ShowFor<NewHandshakeDialogWindow>`
+  - Ensure they route to:
+    - `ConnectionManagementDialogViewModel`
+
+- Remove legacy event listeners/invalidation shims
+  - Search for MediatR listeners or event buses that exist only to refresh the legacy handshake UI.
+  - Candidate based on current code:
+    - `Desktop.Wpf/Features/Sessions/ConnectionManagementInboxEventListener.cs` (calls `IMainInvitationInboxEvents.NotifyChanged()` on `PendingSessionCreatedNotification`)
+  - Replace/retire them in favor of store-driven state (Chunk F) where applicable.
+
+Definition of done:
+
+- Only one handshake entry point remains in the UI: Connection Management.
+- No references remain to `NewHandshakeDialog*` types.
+- Build passes.
 
 ---
 
