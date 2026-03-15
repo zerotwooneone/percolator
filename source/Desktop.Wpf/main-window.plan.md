@@ -635,7 +635,7 @@ Outcome:
 
 Work (recipe):
 
-- State ownership (Desktop.Wpf shared model/store; no VM-owned state)
+- State ownership (Desktop.Wpf shared model/store for shared + notification-driven state)
   - Add a shared selection model:
     - File: `Desktop.Wpf/Features/Sessions/State/SelectedChannelModel.cs`
     - Lifetime: singleton (identity-scoped or app singleton; must be stable for sidebar + right pane)
@@ -713,7 +713,7 @@ Work (recipe):
     - Bind the pane VM (or its `CurrentState`) and switch templates based on `SelectedPaneState`.
     - Keep the sidebar as-is (`SessionShellViewModel.Sidebar`).
   - Add view mappings for any new view types if needed:
-    - File: `Desktop.Wpf/Shared/Theme/ViewMappings.xaml`
+    - File: `Desktop.Wpf/Shared/Theme/ViewMappings.xaml` or `Desktop.Wpf/Shared/Windowing/ViewMappings.xaml` (use whichever is the active mapping source in the app)
 
 - Commands (Application layer; projection updates store)
   - Retry Connection
@@ -1115,7 +1115,7 @@ Work (recipe):
     - File: `Desktop.Wpf/App.xaml.cs`
     - Remove any `services.Add...<NewHandshakeDialogViewModel>()` style registrations.
   - Window/view mappings:
-    - File: `Desktop.Wpf/Shared/Theme/ViewMappings.xaml`
+    - File: `Desktop.Wpf/Shared/Theme/ViewMappings.xaml` and/or `Desktop.Wpf/Shared/Windowing/ViewMappings.xaml` (remove from the one actually used)
     - Remove mappings for legacy dialog.
 
 - Remove call sites
