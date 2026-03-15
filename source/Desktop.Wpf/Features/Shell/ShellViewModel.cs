@@ -95,8 +95,8 @@ public sealed class ShellViewModel : ViewModelBase
             await orchestrator.ResolveIdentityAsync(domainIdentity.Id, CancellationToken.None);
 
             // Ensure the secure channels projection is instantiated and performs an initial load.
-            var channelsProjection = _identityScopeAccessor.Current.GetRequiredService<Desktop.Wpf.Features.Sessions.SecureChannelsProjection>();
-            channelsProjection.RequestReload();
+            var channelsProjection = _identityScopeAccessor.Current.GetService<Desktop.Wpf.Features.Sessions.SecureChannelsProjection>();
+            channelsProjection?.RequestReload();
             
             // Build the SessionShell from the identity-scoped provider
             var sidebarVm = _identityScopeAccessor.Current.GetRequiredService<SessionsSidebarViewModel>();
