@@ -141,8 +141,15 @@ public partial class App : Application
                 services.AddScoped<Desktop.Wpf.Features.Sessions.IMainInvitationOutbox, Desktop.Wpf.Features.Sessions.MainInvitationOutbox>();
                 services.AddScoped<Desktop.Wpf.Features.Sessions.IMainInvitationActions, Desktop.Wpf.Features.Sessions.MainInvitationActions>();
                 services.AddSingleton<Desktop.Wpf.Features.Sessions.IMainInvitationInboxEvents, Desktop.Wpf.Features.Sessions.MainInvitationInboxEvents>();
+                services.AddScoped<Desktop.Wpf.Features.Sessions.SecureChannelsProjection>();
+                services.AddScoped<MediatR.INotificationHandler<Percolator.Application.Network.PendingSessionCreatedNotification>>(sp => sp.GetRequiredService<Desktop.Wpf.Features.Sessions.SecureChannelsProjection>());
+                services.AddScoped<MediatR.INotificationHandler<Percolator.Application.Network.PendingSessionRemovedNotification>>(sp => sp.GetRequiredService<Desktop.Wpf.Features.Sessions.SecureChannelsProjection>());
+                services.AddScoped<MediatR.INotificationHandler<Percolator.Application.Network.SecureSessionCreatedNotification>>(sp => sp.GetRequiredService<Desktop.Wpf.Features.Sessions.SecureChannelsProjection>());
                 services.AddSingleton<SecureChannelsStore>();
                 services.AddSingleton<ISecureChannelsStore>(sp => sp.GetRequiredService<SecureChannelsStore>());
+                services.AddSingleton<SelectedChannelModel>();
+                services.AddSingleton<SelectedSecureChannelStateCache>();
+                services.AddScoped<SelectedChannelPaneViewModel>();
                 services.AddScoped<IPendingHandshakeSimulatorService, PendingHandshakeSimulatorService>();
                 services.AddSingleton<ISimulatorStateStore, JsonSimulatorStateStore>();
                 services.AddSingleton<ISimulatedPeerKeyFactory, SimulatedPeerKeyFactory>();

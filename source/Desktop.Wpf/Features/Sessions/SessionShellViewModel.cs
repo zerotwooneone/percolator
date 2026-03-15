@@ -11,6 +11,7 @@ public interface ISessionConductor
 public sealed class SessionShellViewModel : ViewModelBase, ISessionConductor
 {
     public object? Sidebar { get; set; }
+    public object? RightPane { get; set; }
     public BindableReactiveProperty<object?> CurrentContent { get; } = new(null);
 
     public void Show(object? viewModel)

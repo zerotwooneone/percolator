@@ -48,6 +48,14 @@ public sealed class SecureChannelsProjection :
             .Debounce(TimeSpan.FromMilliseconds(150))
             .SubscribeAwait(async (_, ct) => await ReloadAsync(ct).ConfigureAwait(false), AwaitOperation.Drop)
             .AddTo(ref _bag);
+
+        // When the projection is first created, immediately request a load so the UI has initial data.
+        _reloadRequested.OnNext(R3.Unit.Default);
+    }
+
+    public void RequestReload()
+    {
+        _reloadRequested.OnNext(R3.Unit.Default);
     }
 
     public Task Handle(PendingSessionCreatedNotification notification, CancellationToken cancellationToken)

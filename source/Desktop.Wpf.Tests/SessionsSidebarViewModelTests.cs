@@ -18,7 +18,6 @@ public sealed class SessionsSidebarViewModelTests
     {
         // ARRANGE
         var nav = new Mock<INavigationService>(MockBehavior.Loose);
-        var sessionFactory = new Mock<ISessionScopeFactory>(MockBehavior.Loose);
 
         var channels = new ObservableCollection<SecureChannelModel>();
         var channelsRo = new ReadOnlyObservableCollection<SecureChannelModel>(channels);
@@ -32,13 +31,14 @@ public sealed class SessionsSidebarViewModelTests
 
         var pendingWindowManager = new Mock<Desktop.Wpf.Shared.Windowing.IWindowManager>(MockBehavior.Loose);
         var pendingMenu = new PendingHandshakesMenuViewModel(pendingWindowManager.Object, Mock.Of<MediatR.IMediator>(), store.Object);
+        var selection = new SelectedChannelModel();
 
         var sut = new SessionsSidebarViewModel(
             nav.Object,
             new SelfIdentityModel(),
-            sessionFactory.Object,
             pendingMenu,
-            store.Object);
+            store.Object,
+            selection);
 
         sut.Items.Count.Should().Be(0);
 

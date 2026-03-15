@@ -5,6 +5,7 @@ using Desktop.Wpf.Shared.Navigation;
 using Desktop.Wpf.Features.Self;
 using Desktop.Wpf.Shared.Mvvm;
 using Desktop.Wpf.Features.Sessions.State;
+using Desktop.Wpf.Features.Sessions.Models;
 
 namespace Desktop.Wpf.Features.Sessions;
 
@@ -19,19 +20,19 @@ public sealed class SessionsSidebarViewModel : ViewModelBase
 
     private readonly ObservableCollection<SecureChannelListItemViewModel> _items = new();
 
-    private readonly ISessionScopeFactory _sessionFactory;
     private readonly ISecureChannelsStore _store;
+    private readonly SelectedChannelModel _selection;
     private ISessionConductor? _conductor;
 
     public SessionsSidebarViewModel(INavigationService navigation,
         SelfIdentityModel self,
-                                   ISessionScopeFactory sessionFactory,
                                    PendingHandshakesMenuViewModel pendingMenu,
-        ISecureChannelsStore store)
+        ISecureChannelsStore store,
+        SelectedChannelModel selection)
     {
         Self = self;
-        _sessionFactory = sessionFactory;
         _store = store;
+        _selection = selection;
         SearchText = new BindableReactiveProperty<string>("");
         SelectedSessionId = new BindableReactiveProperty<string?>(null);
         IsLoading = new BindableReactiveProperty<bool>(false);
@@ -52,47 +53,32 @@ public sealed class SessionsSidebarViewModel : ViewModelBase
             foreach (var i in list) _items.Add(i);
         });
 
-        // Navigate to chat on selection using a factory-managed per-session scope
+        // Selection is shared state. Sidebar selection writes through to SelectedChannelModel.
         SelectedSessionId
-            .Where(id => !string.IsNullOrEmpty(id))
+            .DistinctUntilChanged()
             .Subscribe(id =>
             {
-                if (id is null) return;
-                var entry = _items.FirstOrDefault(x => x.Id == id);
-                if (entry is null) return;
-
-                // Pending/failed/group items do not have an active chat session yet.
-                if (entry.BadgeType.Value is SecureChannelBadgeType.Pending
-                    or SecureChannelBadgeType.Failed
-                    or SecureChannelBadgeType.Group)
-                {
-                    return;
-                }
-                var header = entry is null ? null : new SessionHeader
-                {
-                    DisplayName = entry.DisplayName.Value,
-                    Initials = entry.Initials.Value,
-                    IsOnline = entry.IsOnline.Value
-                };
-                var resolved = _sessionFactory.GetOrCreate(id, header);
-                if (_conductor is not null)
-                    _conductor.Show(resolved.ViewModel);
-                else
-                    navigation.Navigate(resolved.ViewModel);
+                _selection.SelectedKey.Value = TryParseKey(id);
             });
 
-        // Navigate back to welcome when selection cleared
-        SelectedSessionId
-            .Where(id => string.IsNullOrEmpty(id))
-            .Subscribe(_ =>
+        // And shared selection updates the ListBox selection.
+        _selection.SelectedKey
+            .DistinctUntilChanged()
+            .Subscribe(key =>
             {
-                if (_conductor is not null)
-                    _conductor.Show(null);
-                else
-                    navigation.Navigate(null);
+                var next = key is null ? null : key.Value.Value.ToString("N");
+                if (SelectedSessionId.Value != next)
+                    SelectedSessionId.Value = next;
             });
 
         Items = new ReadOnlyObservableCollection<SecureChannelListItemViewModel>(_items);
+    }
+
+    private static SecureChannelKey? TryParseKey(string? id)
+    {
+        if (string.IsNullOrWhiteSpace(id)) return null;
+        if (!Guid.TryParse(id, out var guid)) return null;
+        return SecureChannelKey.FromSessionId(guid);
     }
 
     private SecureChannelListItemViewModel[] ApplyFilter(string text)

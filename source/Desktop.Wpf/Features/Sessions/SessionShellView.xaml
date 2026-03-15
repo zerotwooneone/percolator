@@ -14,7 +14,10 @@
 
     <!-- Main content host -->
     <Border Grid.Column="1" Background="{StaticResource SurfaceBrush}">
-      <ContentControl Content="{Binding CurrentContent.Value}"/>
+      <Grid>
+        <ContentControl Content="{Binding RightPane}"/>
+        <ContentControl Content="{Binding CurrentContent.Value}"/>
+      </Grid>
     </Border>
   </Grid>
 </UserControl>

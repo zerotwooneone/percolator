@@ -3,6 +3,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Desktop.Wpf.Features.Self;
 using Desktop.Wpf.Features.Sessions;
+using Desktop.Wpf.Features.Sessions.State;
 using Desktop.Wpf.Features.Shell;
 using Desktop.Wpf.Shared.Navigation;
 using FluentAssertions;
@@ -70,18 +71,21 @@ public class ShellViewModelTests
         var store = new Mock<Desktop.Wpf.Features.Sessions.State.ISecureChannelsStore>(MockBehavior.Loose);
         store.SetupGet(s => s.Channels).Returns(new System.Collections.ObjectModel.ReadOnlyObservableCollection<Desktop.Wpf.Features.Sessions.Models.SecureChannelModel>(new System.Collections.ObjectModel.ObservableCollection<Desktop.Wpf.Features.Sessions.Models.SecureChannelModel>()));
         store.SetupGet(s => s.PendingInbound).Returns(new System.Collections.ObjectModel.ReadOnlyObservableCollection<Desktop.Wpf.Features.Sessions.Models.PendingInvitationModel>(new System.Collections.ObjectModel.ObservableCollection<Desktop.Wpf.Features.Sessions.Models.PendingInvitationModel>()));
+        var selection = new SelectedChannelModel();
         var sessionsVm = new SessionsSidebarViewModel(
             nav.Object,
             new SelfIdentityModel(),
-            Mock.Of<ISessionScopeFactory>(),
             new PendingHandshakesMenuViewModel(pendingWindowManager.Object, Mock.Of<IMediator>(), store.Object),
-            store.Object);
+            store.Object,
+            selection);
         var sessionShellVm = new SessionShellViewModel();
+        var paneVm = new SelectedChannelPaneViewModel(selection, store.Object, Mock.Of<ISessionScopeFactory>(), new SelectedSecureChannelStateCache());
 
         var identityProvider = new Mock<IServiceProvider>();
         identityProvider.Setup(sp => sp.GetService(typeof(IActiveIdentityMutator))).Returns(mutator.Object);
         identityProvider.Setup(sp => sp.GetService(typeof(SessionsSidebarViewModel))).Returns(sessionsVm);
         identityProvider.Setup(sp => sp.GetService(typeof(SessionShellViewModel))).Returns(sessionShellVm);
+        identityProvider.Setup(sp => sp.GetService(typeof(SelectedChannelPaneViewModel))).Returns(paneVm);
 
         var sut = CreateSut(repo.Object, nav.Object, identityProvider.Object, startupIdentityService.Object);
 
@@ -124,15 +128,18 @@ public class ShellViewModelTests
         var store = new Mock<Desktop.Wpf.Features.Sessions.State.ISecureChannelsStore>(MockBehavior.Loose);
         store.SetupGet(s => s.Channels).Returns(new System.Collections.ObjectModel.ReadOnlyObservableCollection<Desktop.Wpf.Features.Sessions.Models.SecureChannelModel>(new System.Collections.ObjectModel.ObservableCollection<Desktop.Wpf.Features.Sessions.Models.SecureChannelModel>()));
         store.SetupGet(s => s.PendingInbound).Returns(new System.Collections.ObjectModel.ReadOnlyObservableCollection<Desktop.Wpf.Features.Sessions.Models.PendingInvitationModel>(new System.Collections.ObjectModel.ObservableCollection<Desktop.Wpf.Features.Sessions.Models.PendingInvitationModel>()));
+        var selection = new SelectedChannelModel();
         var sessionsVm = new SessionsSidebarViewModel(
             nav.Object,
             new SelfIdentityModel(),
-            Mock.Of<ISessionScopeFactory>(),
             new PendingHandshakesMenuViewModel(pendingWindowManager.Object, Mock.Of<IMediator>(), store.Object),
-            store.Object);
+            store.Object,
+            selection);
         var sessionShellVm = new SessionShellViewModel();
+        var paneVm = new SelectedChannelPaneViewModel(selection, store.Object, Mock.Of<ISessionScopeFactory>(), new SelectedSecureChannelStateCache());
         scopedProvider.Setup(sp => sp.GetService(typeof(SessionsSidebarViewModel))).Returns(sessionsVm);
         scopedProvider.Setup(sp => sp.GetService(typeof(SessionShellViewModel))).Returns(sessionShellVm);
+        scopedProvider.Setup(sp => sp.GetService(typeof(SelectedChannelPaneViewModel))).Returns(paneVm);
 
         var sut = CreateSut(repo.Object, nav.Object, scopedProvider.Object, startupIdentityService.Object);
 
@@ -172,19 +179,24 @@ public class ShellViewModelTests
         var store = new Mock<Desktop.Wpf.Features.Sessions.State.ISecureChannelsStore>(MockBehavior.Loose);
         store.SetupGet(s => s.Channels).Returns(new System.Collections.ObjectModel.ReadOnlyObservableCollection<Desktop.Wpf.Features.Sessions.Models.SecureChannelModel>(new System.Collections.ObjectModel.ObservableCollection<Desktop.Wpf.Features.Sessions.Models.SecureChannelModel>()));
         store.SetupGet(s => s.PendingInbound).Returns(new System.Collections.ObjectModel.ReadOnlyObservableCollection<Desktop.Wpf.Features.Sessions.Models.PendingInvitationModel>(new System.Collections.ObjectModel.ObservableCollection<Desktop.Wpf.Features.Sessions.Models.PendingInvitationModel>()));
+        var selection = new SelectedChannelModel();
         var sessionsVm = new SessionsSidebarViewModel(
             nav.Object,
             scopedSelf,
-            sessionScopeFactoryMock.Object,
             new PendingHandshakesMenuViewModel(pendingWindowManager.Object, Mock.Of<IMediator>(), store.Object),
-            store.Object);
+            store.Object,
+            selection);
         var sessionShellVm = new SessionShellViewModel();
+        var paneVm = new SelectedChannelPaneViewModel(selection, store.Object, sessionScopeFactoryMock.Object, new SelectedSecureChannelStateCache());
         scopedProvider
             .Setup(sp => sp.GetService(typeof(SessionsSidebarViewModel)))
             .Returns(sessionsVm);
         scopedProvider
             .Setup(sp => sp.GetService(typeof(SessionShellViewModel)))
             .Returns(sessionShellVm);
+        scopedProvider
+            .Setup(sp => sp.GetService(typeof(SelectedChannelPaneViewModel)))
+            .Returns(paneVm);
 
         var scope = new Mock<IServiceScope>();
         scope.SetupGet(s => s.ServiceProvider).Returns(scopedProvider.Object);
@@ -238,19 +250,24 @@ public class ShellViewModelTests
         var store = new Mock<Desktop.Wpf.Features.Sessions.State.ISecureChannelsStore>(MockBehavior.Loose);
         store.SetupGet(s => s.Channels).Returns(new System.Collections.ObjectModel.ReadOnlyObservableCollection<Desktop.Wpf.Features.Sessions.Models.SecureChannelModel>(new System.Collections.ObjectModel.ObservableCollection<Desktop.Wpf.Features.Sessions.Models.SecureChannelModel>()));
         store.SetupGet(s => s.PendingInbound).Returns(new System.Collections.ObjectModel.ReadOnlyObservableCollection<Desktop.Wpf.Features.Sessions.Models.PendingInvitationModel>(new System.Collections.ObjectModel.ObservableCollection<Desktop.Wpf.Features.Sessions.Models.PendingInvitationModel>()));
+        var selection = new SelectedChannelModel();
         var sessionsVm = new SessionsSidebarViewModel(
             nav.Object,
             scopedSelf,
-            scopedSessionFactory.Object,
             new PendingHandshakesMenuViewModel(pendingWindowManager.Object, Mock.Of<IMediator>(), store.Object),
-            store.Object);
+            store.Object,
+            selection);
         var sessionShellVm = new SessionShellViewModel();
+        var paneVm = new SelectedChannelPaneViewModel(selection, store.Object, scopedSessionFactory.Object, new SelectedSecureChannelStateCache());
         scopedProvider
             .Setup(sp => sp.GetService(typeof(SessionsSidebarViewModel)))
             .Returns(sessionsVm);
         scopedProvider
             .Setup(sp => sp.GetService(typeof(SessionShellViewModel)))
             .Returns(sessionShellVm);
+        scopedProvider
+            .Setup(sp => sp.GetService(typeof(SelectedChannelPaneViewModel)))
+            .Returns(paneVm);
 
         var scope = new Mock<IServiceScope>();
         scope.SetupGet(s => s.ServiceProvider).Returns(scopedProvider.Object);

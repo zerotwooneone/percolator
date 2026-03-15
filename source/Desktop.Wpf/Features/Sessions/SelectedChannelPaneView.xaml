@@ -1,0 +1,79 @@
+<UserControl x:Class="Desktop.Wpf.Features.Sessions.SelectedChannelPaneView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <Grid>
+    <ContentControl>
+      <ContentControl.Style>
+        <Style TargetType="ContentControl">
+          <Setter Property="Content" Value="{Binding}"/>
+          <Style.Triggers>
+            <DataTrigger Binding="{Binding State.Value}" Value="None">
+              <Setter Property="ContentTemplate">
+                <Setter.Value>
+                  <DataTemplate>
+                    <Grid>
+                      <TextBlock Text="Select a channel" Opacity="0.8" VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                    </Grid>
+                  </DataTemplate>
+                </Setter.Value>
+              </Setter>
+            </DataTrigger>
+            <DataTrigger Binding="{Binding State.Value}" Value="Pending">
+              <Setter Property="ContentTemplate">
+                <Setter.Value>
+                  <DataTemplate>
+                    <Grid>
+                      <TextBlock Text="{Binding BannerText.Value}" Opacity="0.9" VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                    </Grid>
+                  </DataTemplate>
+                </Setter.Value>
+              </Setter>
+            </DataTrigger>
+            <DataTrigger Binding="{Binding State.Value}" Value="Failed">
+              <Setter Property="ContentTemplate">
+                <Setter.Value>
+                  <DataTemplate>
+                    <Grid>
+                      <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Width="360" TextBlock.TextAlignment="Center">
+                        <TextBlock Text="{Binding BannerText.Value}" FontWeight="SemiBold"/>
+                        <TextBlock Text="Try resetting the session or removing the channel." Opacity="0.8" Margin="0,8,0,0"/>
+                      </StackPanel>
+                    </Grid>
+                  </DataTemplate>
+                </Setter.Value>
+              </Setter>
+            </DataTrigger>
+            <DataTrigger Binding="{Binding State.Value}" Value="Offline">
+              <Setter Property="ContentTemplate">
+                <Setter.Value>
+                  <DataTemplate>
+                    <Grid>
+                      <ContentControl Content="{Binding ActiveContent.Value}" IsEnabled="False"/>
+                      <Border Background="#80000000" VerticalAlignment="Top" Padding="12,10" Margin="12" CornerRadius="8">
+                        <TextBlock Text="{Binding BannerText.Value}"/>
+                      </Border>
+                    </Grid>
+                  </DataTemplate>
+                </Setter.Value>
+              </Setter>
+            </DataTrigger>
+            <DataTrigger Binding="{Binding State.Value}" Value="Active">
+              <Setter Property="ContentTemplate">
+                <Setter.Value>
+                  <DataTemplate>
+                    <Grid>
+                      <ContentControl Content="{Binding ActiveContent.Value}" IsEnabled="{Binding IsInputEnabled.Value}"/>
+                      <Border Background="#40101827" VerticalAlignment="Top" Padding="12,10" Margin="12" CornerRadius="8">
+                        <TextBlock Text="{Binding BannerText.Value}"/>
+                      </Border>
+                    </Grid>
+                  </DataTemplate>
+                </Setter.Value>
+              </Setter>
+            </DataTrigger>
+          </Style.Triggers>
+        </Style>
+      </ContentControl.Style>
+    </ContentControl>
+  </Grid>
+</UserControl>

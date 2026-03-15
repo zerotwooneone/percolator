@@ -93,11 +93,16 @@ public sealed class ShellViewModel : ViewModelBase
             // Resolve application identity + keys and populate ActiveIdentityContext.
             var orchestrator = _identityScopeAccessor.Current.GetRequiredService<IIdentityOrchestrator>();
             await orchestrator.ResolveIdentityAsync(domainIdentity.Id, CancellationToken.None);
+
+            // Ensure the secure channels projection is instantiated and performs an initial load.
+            var channelsProjection = _identityScopeAccessor.Current.GetRequiredService<Desktop.Wpf.Features.Sessions.SecureChannelsProjection>();
+            channelsProjection.RequestReload();
             
             // Build the SessionShell from the identity-scoped provider
             var sidebarVm = _identityScopeAccessor.Current.GetRequiredService<SessionsSidebarViewModel>();
             var sessionShell = _identityScopeAccessor.Current.GetRequiredService<Desktop.Wpf.Features.Sessions.SessionShellViewModel>();
             sessionShell.Sidebar = sidebarVm;
+            sessionShell.RightPane = _identityScopeAccessor.Current.GetRequiredService<Desktop.Wpf.Features.Sessions.SelectedChannelPaneViewModel>();
             sidebarVm.SetConductor(sessionShell);
             _navigation.Navigate(sessionShell);
         }
