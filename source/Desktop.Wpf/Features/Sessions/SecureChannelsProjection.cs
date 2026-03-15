@@ -12,6 +12,7 @@ using Percolator.Application.Network;
 using Percolator.Application.Network.Handshake;
 using Percolator.Cryptography;
 using Percolator.Identity;
+using Percolator.Identity.Model;
 using R3;
 
 namespace Desktop.Wpf.Features.Sessions;
@@ -87,6 +88,10 @@ public sealed class SecureChannelsProjection :
             var pendingInboundModels = new List<PendingInvitationModel>();
             var channelModels = new List<SecureChannelModel>();
 
+            // Build a correlation map for outbound pending: recipient PKH -> local request correlation id.
+            var outboundPendingByPkh = new Dictionary<string, Guid>(StringComparer.Ordinal);
+            var migrations = new Dictionary<SecureChannelKey, SecureChannelKey>();
+
             await foreach (var pending in _pendingHandshakeQueries.EnumerateOpenAsync(cancellationToken).ConfigureAwait(false))
             {
                 var displayName = pending.PeerName;
@@ -115,6 +120,19 @@ public sealed class SecureChannelsProjection :
                 var peer = await _peers.GetByIdAsync(pid, cancellationToken).ConfigureAwait(false);
                 var name = peer?.DisplayName?.Value ?? s.RemotePeerId.Value.ToString()[..8];
 
+                // If we can derive the peer's PKH (fingerprint) and it matches an outbound pending invite,
+                // migrate the pending correlation key to the established session key to preserve UI continuity.
+                var nowUtc = DateTimeOffset.UtcNow;
+                var activeKey = peer?.GetActiveKey(nowUtc);
+                if (activeKey is not null)
+                {
+                    var pkh = Convert.ToHexString(activeKey.Fingerprint);
+                    if (outboundPendingByPkh.TryGetValue(pkh, out var corrId) && corrId != Guid.Empty)
+                    {
+                        migrations[SecureChannelKey.FromPendingCorrelationId(corrId)] = SecureChannelKey.FromSessionId(s.Id.Value);
+                    }
+                }
+
                 channelModels.Add(new SecureChannelModel(
                     key: SecureChannelKey.FromSessionId(s.Id.Value),
                     displayName: name,
@@ -125,6 +143,18 @@ public sealed class SecureChannelsProjection :
 
             await foreach (var outbound in _preHandshake.EnumeratePendingAsync(selfId, cancellationToken).ConfigureAwait(false))
             {
+                if (outbound.RecipientPublicKeyHash is { Length: > 0 })
+                {
+                    outboundPendingByPkh[Convert.ToHexString(outbound.RecipientPublicKeyHash)] = outbound.LocalRequestId;
+                }
+
+                // If this outbound pending is already migrating to an established session, do not emit a separate
+                // pending row in the unified list.
+                if (migrations.ContainsKey(SecureChannelKey.FromPendingCorrelationId(outbound.LocalRequestId)))
+                {
+                    continue;
+                }
+
                 var peer = await _peers.FindByPublicKeyHashAsync(outbound.RecipientPublicKeyHash, cancellationToken).ConfigureAwait(false);
                 var name = peer?.DisplayName?.Value ?? "Outbound invite";
 
@@ -143,7 +173,7 @@ public sealed class SecureChannelsProjection :
                 .ToList();
 
             await _store.ReplacePendingInboundAsync(pendingInboundModels).ConfigureAwait(false);
-            await _store.ReplaceChannelsAsync(channelModels).ConfigureAwait(false);
+            await _store.ReplaceChannelsAsync(channelModels, migrations).ConfigureAwait(false);
         }
         catch
         {

@@ -43,7 +43,7 @@ public sealed class SecureChannelModel : IDisposable
         _lastUpdate = new ReactiveProperty<DateTimeOffset>(lastUpdateUtc);
     }
 
-    public SecureChannelKey Key { get; }
+    public SecureChannelKey Key { get; internal set; }
 
     public ReadOnlyReactiveProperty<string> DisplayName => _displayName;
     public ReadOnlyReactiveProperty<string> Initials => _initials;

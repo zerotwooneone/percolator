@@ -55,20 +55,83 @@ public sealed class SecureChannelsStore : ISecureChannelsStore, IDisposable
     internal Task ReplaceChannelsAsync(IEnumerable<SecureChannelModel> items)
         => MutateOnDispatcherAsync(() =>
         {
-            foreach (var existing in _channels.ToArray())
-            {
-                existing.Dispose();
-            }
-
-            _channels.Clear();
-            _channelsByKey.Clear();
-
-            foreach (var it in items)
-            {
-                _channelsByKey[it.Key] = it;
-                _channels.Add(it);
-            }
+            ReplaceChannelsCore(items, migrations: null);
         });
+
+    internal Task ReplaceChannelsAsync(IEnumerable<SecureChannelModel> items, IReadOnlyDictionary<SecureChannelKey, SecureChannelKey> migrations)
+        => MutateOnDispatcherAsync(() =>
+        {
+            ReplaceChannelsCore(items, migrations);
+        });
+
+    private void ReplaceChannelsCore(IEnumerable<SecureChannelModel> items, IReadOnlyDictionary<SecureChannelKey, SecureChannelKey>? migrations)
+    {
+        // Apply key migrations on existing models first so we can preserve object identity.
+        if (migrations is not null)
+        {
+            foreach (var kv in migrations)
+            {
+                var from = kv.Key;
+                var to = kv.Value;
+                if (from.Equals(to))
+                {
+                    continue;
+                }
+
+                if (_channelsByKey.TryGetValue(from, out var existing)
+                    && !_channelsByKey.ContainsKey(to))
+                {
+                    _channelsByKey.Remove(from);
+                    existing.Key = to;
+                    _channelsByKey[to] = existing;
+                }
+            }
+        }
+
+        var nextOrdered = new List<SecureChannelModel>();
+        var keepKeys = new HashSet<SecureChannelKey>();
+
+        foreach (var incoming in items)
+        {
+            if (_channelsByKey.TryGetValue(incoming.Key, out var existing))
+            {
+                existing.SetDisplayName(incoming.DisplayNameCurrent);
+                existing.SetInitials(incoming.InitialsCurrent);
+                existing.SetKind(incoming.KindCurrent);
+                existing.SetLastSnippet(incoming.LastSnippetCurrent);
+                existing.SetUnreadCount(incoming.UnreadCountCurrent);
+                existing.SetOnline(incoming.IsOnlineCurrent);
+                existing.SetLastUpdateUtc(incoming.LastUpdateUtcCurrent);
+
+                keepKeys.Add(existing.Key);
+                nextOrdered.Add(existing);
+                incoming.Dispose();
+                continue;
+            }
+
+            keepKeys.Add(incoming.Key);
+            nextOrdered.Add(incoming);
+            _channelsByKey[incoming.Key] = incoming;
+        }
+
+        // Dispose channels no longer present.
+        foreach (var existing in _channelsByKey.ToArray())
+        {
+            if (keepKeys.Contains(existing.Key))
+            {
+                continue;
+            }
+
+            _channelsByKey.Remove(existing.Key);
+            existing.Value.Dispose();
+        }
+
+        _channels.Clear();
+        foreach (var m in nextOrdered)
+        {
+            _channels.Add(m);
+        }
+    }
 
     internal Task UpsertPendingInboundAsync(PendingInvitationModel model)
         => MutateOnDispatcherAsync(() =>
