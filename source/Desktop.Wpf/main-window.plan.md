@@ -407,6 +407,222 @@ Definition of done:
 
 ---
 
+## Chunk F.1 — Application domain notifications for channel lifecycle (Option A)
+
+Outcome:
+
+- Application emits **authoritative** MediatR notifications when:
+  - inbound pending invitations are created/removed/expired
+  - active sessions are created
+- Desktop can build a reactive UI projection without polling.
+
+Scope:
+
+- `Percolator.Application` only (no WPF changes required in this sub-chunk).
+
+Work:
+
+- Add new notifications (files in `Percolator.Application`):
+  - `PendingSessionRemovedNotification(PendingSessionId PendingSessionId, RequestCorrelationId RequestCorrelationId, PendingSessionRemoveReason Reason)`
+  - `SecureSessionCreatedNotification(SessionId SessionId, Percolator.Cryptography.Primitives.PeerId RemotePeerId, ProtocolVersion ProtocolVersion, SecureSessionCreatedReason Reason)`
+  - Add enums:
+    - `PendingSessionRemoveReason` = Accepted | Burned | Expired | Invalid
+    - `SecureSessionCreatedReason` = AcceptedInvite | StandardHandshakeIngress | InitiatorFinalize
+
+- Publish points (concrete locations):
+  - `Percolator.Application/Network/EstablishDirectSessionService.cs`
+    - already publishes `PendingSessionCreatedNotification` after `_pendingSessions.AddAsync(...)`.
+  - `Percolator.Application/Network/ApprovePendingSessionCommand.cs` (`ApprovePendingSessionHandler`)
+    - after `_sessions.AddAsync(session, ...)` publish `SecureSessionCreatedNotification(..., reason: AcceptedInvite)`.
+    - after `_pending.DeleteAsync(pending.Id, ...)` publish `PendingSessionRemovedNotification(..., reason: Accepted)`.
+    - if burn/reject is implemented elsewhere, publish `PendingSessionRemovedNotification(..., reason: Burned)`.
+  - `Percolator.Application/Network/StandardHandshakeIngress.cs`
+    - after `_sessions.AddAsync(session, ...)` publish `SecureSessionCreatedNotification(..., reason: StandardHandshakeIngress)`.
+  - `Percolator.Application/Network/Handshake/InitiatorFinalizeService.cs`
+    - after `_sessions.AddAsync(final, ...)` publish `SecureSessionCreatedNotification(..., reason: InitiatorFinalize)`.
+  - `Percolator.Application/ReverseSignal/PendingSessionPurgeService.cs`
+    - after `_repository.DeleteAsync(...)` publish `PendingSessionRemovedNotification(..., reason: Expired)`.
+
+Notes:
+
+- Notifications should carry stable identifiers only; UI projection resolves names/routes via repositories.
+
+Definition of done:
+
+- Handshake receipt publishes pending-created.
+- Accept publishes session-created + pending-removed.
+- Expiry purge publishes pending-removed.
+
+---
+
+## Chunk F.2 — Desktop shared models + store/service (reactive, not bindable)
+
+Outcome:
+
+- Desktop has a singleton in-memory state owner that represents the **UI read model** for:
+  - unified channels list
+  - inbound pending invitations list + count
+- Shared models are reactive (`ReactiveProperty`) but **not WPF-bindable**.
+
+Scope:
+
+- `Desktop.Wpf` only. This chunk may break compilation until later chunks wire it in.
+
+Work:
+
+- Create new models (folder suggestion: `Desktop.Wpf/Features/Sessions/Models/`):
+  - `SecureChannelKey` (stable key; supports aliasing correlation/session)
+  - `SecureChannelModel` (reactive properties; no bindable types)
+  - `PendingInvitationModel` (reactive properties)
+
+- Create singleton store/service (folder suggestion: `Desktop.Wpf/Features/Sessions/State/`):
+  - `ISecureChannelsStore`
+  - `SecureChannelsStore`
+    - owns mutable `ObservableCollection<SecureChannelModel>` and exposes `ReadOnlyObservableCollection<SecureChannelModel>`
+    - owns mutable `ObservableCollection<PendingInvitationModel>` and exposes read-only wrapper
+    - exposes `ReadOnlyReactiveProperty<int> PendingInboundCount` (derived from collection count)
+    - provides internal mutation methods used by projection layer only:
+      - `UpsertPendingInbound(...)`, `RemovePendingInbound(...)`
+      - `UpsertSession(...)`
+      - `UpsertOutboundPending(...)` (placeholder)
+      - `UpsertFailure(...)` (placeholder)
+    - enforces thread affinity for collection mutation (dispatcher marshal inside store)
+
+- Register in DI (`Desktop.Wpf/App.xaml.cs`):
+  - `services.AddSingleton<ISecureChannelsStore, SecureChannelsStore>();`
+
+Definition of done:
+
+- Store exists, with models, and can be mutated by an internal API.
+
+---
+
+## Chunk F.3 — Desktop projection: consume Application notifications and update store
+
+Outcome:
+
+- Desktop receives Application lifecycle notifications and updates the shared store.
+- Projection is event-driven, single-flight, and dispatcher-safe.
+
+Scope:
+
+- `Desktop.Wpf` + notification handler types in the Desktop assembly.
+
+Work:
+
+- Add `SecureChannelsProjection` in `Desktop.Wpf/Features/Sessions/` implementing:
+  - `INotificationHandler<PendingSessionCreatedNotification>`
+  - `INotificationHandler<PendingSessionRemovedNotification>`
+  - `INotificationHandler<SecureSessionCreatedNotification>`
+
+- Projection strategy:
+  - Start with “reload affected portion” (acceptable early):
+    - For `PendingSessionCreatedNotification`: query `IPendingHandshakeQueries.EnumerateOpenAsync()` and repopulate pending inbound models.
+    - For `PendingSessionRemovedNotification`: same as above (or incremental remove if you have enough IDs).
+    - For `SecureSessionCreatedNotification`: query `ISessionRepository.GetAllActiveAsync(...)` and upsert session models.
+  - Ensure:
+    - event coalescing (debounce bursts)
+    - single-flight reload to prevent overlap
+    - store mutation happens on dispatcher.
+
+- Register MediatR handlers:
+  - confirm Desktop assembly registration already occurs in `App.xaml.cs` via `RegisterServicesFromAssembly(typeof(MainWindow).Assembly)`.
+
+Definition of done:
+
+- Inbound pending creates/removes update store.
+- Session-created updates store.
+
+---
+
+## Chunk F.4 — ViewModel refactor: project shared models into bindable ViewModels
+
+Outcome:
+
+- Main window sidebar and pending menu bind to ViewModels that are projections of shared models.
+- ViewModels are not shared; models are shared.
+
+Scope:
+
+- `Desktop.Wpf/Features/Sessions/`.
+
+Work:
+
+- Introduce bindable row VM:
+  - `SecureChannelListItemViewModel` becomes a projection of `SecureChannelModel`.
+  - It exposes `BindableReactiveProperty<T>` for XAML.
+  - It subscribes to model `ReactiveProperty` streams and maps/derives:
+    - `TimestampText`
+    - `UnreadDisplay`
+    - `HasUnread`
+
+- Update `SessionsSidebarViewModel` to:
+  - inject `ISecureChannelsStore`
+  - maintain an item VM list derived from `store.Channels`
+  - keep selection/navigation logic
+  - remove direct repository queries from sidebar.
+
+- Update pending menu + badge:
+  - `PendingHandshakesMenuViewModel` binds to `store.PendingInbound` (projected into UI items if needed).
+  - Sidebar badge binds to a VM property derived from `store.PendingInboundCount`.
+
+Definition of done:
+
+- Sidebar and badge are driven by the shared store via VM projections.
+
+---
+
+## Chunk F.5 — Remove legacy invalidation plumbing and scoped-VM mutation
+
+Outcome:
+
+- No WPF-local “notify changed” hack paths remain.
+- No MediatR handler mutates scoped ViewModels directly.
+
+Work:
+
+- Remove/retire:
+  - `ISecureChannelsListEvents` and implementations
+  - manual `.NotifyChanged()` calls from dialog VMs
+  - any remaining code paths that mutate `PendingHandshakesMenuViewModel.PendingHandshakes` from background scopes
+
+Definition of done:
+
+- Only the store/projection updates shared model state.
+
+---
+
+## Chunk F.6 — CorrelationId → SessionId migration and outbound pending normalization
+
+Outcome:
+
+- Pending outbound items migrate to active sessions while preserving UI continuity.
+
+Work:
+
+- Choose canonical outbound pending persistence source:
+  - `IPreHandshakeSessionStore` and/or `ISentInvitationRepository`.
+- Extend store to represent outbound pending items distinctly from inbound pending.
+- Implement merge rules in store/projection:
+  - when `SecureSessionCreatedNotification` arrives with enough information to correlate to an existing outbound pending (correlation id or recipient fingerprint), update a single `SecureChannelModel` instead of creating a new one.
+
+Definition of done:
+
+- Outbound pending rows transition to active without disappearing/reappearing as a new item.
+
+Chunk F (F.1–F.6) overall definition of done:
+
+- When a simulated peer sends an inbound handshake request:
+  - “Add peer” badge increments immediately.
+  - Secure Channels list shows a pending item without restarting.
+- When the user accepts/burns/expires a pending invitation:
+  - “Add peer” badge decrements immediately.
+  - Pending item is removed and/or transitions to Active when the session is created.
+- No MediatR handler mutates scoped WPF ViewModels directly.
+- WPF UI state is owned by a single store/projection service that is dispatcher-safe.
+
+---
+
 ## Chunk G — Main view right pane: channel-state-specific UI (Pending/Active/Offline/Failed)
 
 Outcome:
