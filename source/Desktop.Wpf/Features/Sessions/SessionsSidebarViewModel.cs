@@ -14,6 +14,7 @@ using Percolator.Application.Network.Handshake;
 using Percolator.Cryptography;
 using Percolator.Identity;
 using Percolator.Identity.Model;
+using System.Windows;
 
 namespace Desktop.Wpf.Features.Sessions;
 
@@ -161,8 +162,9 @@ public sealed class SessionsSidebarViewModel : ViewModelBase
                 created.Add(item);
             }
 
-            _items.Clear();
-            foreach (var it in created.OrderByDescending(x => x.LastUpdate.Value)) _items.Add(it);
+            var combined = created
+                .OrderByDescending(x => x.LastUpdate.Value)
+                .ToList();
 
             await foreach (var outbound in _preHandshake.EnumeratePendingAsync(selfId, CancellationToken.None).ConfigureAwait(false))
             {
@@ -179,9 +181,9 @@ public sealed class SessionsSidebarViewModel : ViewModelBase
                 outboundItem.UnreadCount.Value = 0;
 
                 // Dedupe by id (can overlap with inbound pending correlation IDs)
-                if (_items.All(x => x.Id != outboundItem.Id))
+                if (combined.All(x => x.Id != outboundItem.Id))
                 {
-                    _items.Add(outboundItem);
+                    combined.Add(outboundItem);
                 }
             }
 
@@ -209,19 +211,36 @@ public sealed class SessionsSidebarViewModel : ViewModelBase
                 pendingListItem.IsOnline.Value = false;
                 pendingListItem.LastUpdate.Value = pending.CreatedAtUtc;
                 pendingListItem.UnreadCount.Value = 0;
-                if (_items.All(x => x.Id != pendingListItem.Id))
+                if (combined.All(x => x.Id != pendingListItem.Id))
                 {
-                    _items.Add(pendingListItem);
+                    combined.Add(pendingListItem);
                 }
             }
 
-            var ordered = _items.OrderByDescending(x => x.LastUpdate.Value).ToArray();
-            _items.Clear();
-            foreach (var it in ordered) _items.Add(it);
+            combined = combined
+                .OrderByDescending(x => x.LastUpdate.Value)
+                .ToList();
 
-            PendingMenu.PendingHandshakes.Clear();
-            foreach (var it in pendingItems)
-                PendingMenu.PendingHandshakes.Add(it);
+            void apply()
+            {
+                _items.Clear();
+                foreach (var it in combined)
+                    _items.Add(it);
+
+                PendingMenu.PendingHandshakes.Clear();
+                foreach (var it in pendingItems)
+                    PendingMenu.PendingHandshakes.Add(it);
+            }
+
+            var dispatcher = Application.Current?.Dispatcher;
+            if (dispatcher is null || dispatcher.CheckAccess())
+            {
+                apply();
+            }
+            else
+            {
+                await dispatcher.InvokeAsync(apply);
+            }
         }
         catch
         {
