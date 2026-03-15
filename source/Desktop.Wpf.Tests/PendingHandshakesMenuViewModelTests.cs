@@ -20,13 +20,15 @@ public sealed class PendingHandshakesMenuViewModelTests
     [Test]
     public async Task AcceptHandshake_SendsApproveCommand_AndUpdatesItemFromTypedResult()
     {
+        // ARRANGE
         var pendingId = PendingSessionId.NewId();
+        var requestCorrelationId = new RequestCorrelationId(Guid.NewGuid());
         var mediator = new Mock<IMediator>(MockBehavior.Strict);
         mediator
             .Setup(m => m.Send(
                 It.Is<ApprovePendingSessionCommand>(c => c.PendingSessionId == pendingId),
                 default))
-            .ReturnsAsync(new ApprovePendingSessionResult.Accepted("Direct", new RequestCorrelationId(Guid.NewGuid())));
+            .ReturnsAsync(new ApprovePendingSessionResult.Accepted("Direct", requestCorrelationId));
 
         var store = new Mock<ISecureChannelsStore>(MockBehavior.Loose);
         store.SetupGet(s => s.Channels).Returns(
@@ -47,14 +49,24 @@ public sealed class PendingHandshakesMenuViewModelTests
         };
         sut.PendingHandshakes.Add(item);
 
+        // ACT
         sut.AcceptHandshakeCommand.Execute(item);
 
-        await Task.Delay(50);
+        // ASSERT
+        // AsyncRelayCommand is fire-and-forget (async void). Wait for the observable side-effect.
+        using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(1));
+        while (item.StatusText != "Accepted" && !cts.IsCancellationRequested)
+        {
+            await Task.Delay(10, cts.Token);
+        }
 
         item.StatusText.Should().Be("Accepted");
         item.SendPath.Should().Be("Direct");
         item.RequestCorrelationId.Should().NotBeNullOrWhiteSpace();
+        item.RequestCorrelationId.Should().Be(requestCorrelationId.Value.ToString());
 
-        mediator.VerifyAll();
+        mediator.Verify(
+            m => m.Send(It.IsAny<ApprovePendingSessionCommand>(), default),
+            Times.Once);
     }
 }
