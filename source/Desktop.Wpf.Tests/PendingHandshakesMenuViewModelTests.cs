@@ -1,6 +1,8 @@
 using System;
 using System.Threading.Tasks;
 using Desktop.Wpf.Features.Sessions;
+using Desktop.Wpf.Features.Sessions.Models;
+using Desktop.Wpf.Features.Sessions.State;
 using Desktop.Wpf.Shared.Windowing;
 using FluentAssertions;
 using MediatR;
@@ -26,11 +28,17 @@ public sealed class PendingHandshakesMenuViewModelTests
                 default))
             .ReturnsAsync(new ApprovePendingSessionResult.Accepted("Direct", new RequestCorrelationId(Guid.NewGuid())));
 
-        var pendingRepo = new Mock<IPendingSessionRepository>(MockBehavior.Strict);
+        var store = new Mock<ISecureChannelsStore>(MockBehavior.Loose);
+        store.SetupGet(s => s.Channels).Returns(
+            new System.Collections.ObjectModel.ReadOnlyObservableCollection<SecureChannelModel>(
+                new System.Collections.ObjectModel.ObservableCollection<SecureChannelModel>()));
+        store.SetupGet(s => s.PendingInbound).Returns(
+            new System.Collections.ObjectModel.ReadOnlyObservableCollection<PendingInvitationModel>(
+                new System.Collections.ObjectModel.ObservableCollection<PendingInvitationModel>()));
 
         var windowManager = new Mock<IWindowManager>(MockBehavior.Loose);
 
-        var sut = new PendingHandshakesMenuViewModel(windowManager.Object, mediator.Object, pendingRepo.Object);
+        var sut = new PendingHandshakesMenuViewModel(windowManager.Object, mediator.Object, store.Object);
         var item = new PendingHandshakeItem
         {
             DisplayName = "Alice",

@@ -1,7 +1,8 @@
 using System;
 using System.Collections.ObjectModel;
+using System.Collections.Specialized;
+using System.ComponentModel;
 using System.Linq;
-using System.Threading;
 using System.Threading.Tasks;
 using R3;
 using Desktop.Wpf.Shared.Navigation;
@@ -9,12 +10,8 @@ using Desktop.Wpf.Features.Chat;
 using System.Collections.Generic;
 using Desktop.Wpf.Features.Self;
 using Desktop.Wpf.Shared.Mvvm;
-using Percolator.Application.Cryptography;
-using Percolator.Application.Network.Handshake;
-using Percolator.Cryptography;
-using Percolator.Identity;
-using Percolator.Identity.Model;
-using System.Windows;
+using Desktop.Wpf.Features.Sessions.State;
+using Desktop.Wpf.Features.Sessions.Models;
 
 namespace Desktop.Wpf.Features.Sessions;
 
@@ -30,41 +27,26 @@ public sealed class SessionsSidebarViewModel : ViewModelBase
     private readonly ObservableCollection<SecureChannelListItemViewModel> _items = new();
 
     private readonly ISessionScopeFactory _sessionFactory;
-    private readonly IPendingHandshakeQueries _pendingHandshakeQueries;
-    private readonly IPreHandshakeSessionStore _preHandshake;
-    private readonly ISecureChannelsListEvents _events;
+    private readonly ISecureChannelsStore _store;
     private ISessionConductor? _conductor;
-
-    private readonly ISessionRepository _sessions;
-    private readonly IPeerIdentityRepository _peers;
-    private readonly IPendingSessionRepository _pendingSessions;
 
     public SessionsSidebarViewModel(INavigationService navigation,
         SelfIdentityModel self,
-                                   ISessionRepository sessions,
-                                   IPeerIdentityRepository peers,
-                                   IPendingSessionRepository pendingSessions,
                                    ISessionScopeFactory sessionFactory,
-                                   PendingHandshakesMenuViewModel pendingMenu, 
-        IPendingHandshakeQueries pendingHandshakeQueries,
-        IPreHandshakeSessionStore preHandshake,
-        ISecureChannelsListEvents events)
+                                   PendingHandshakesMenuViewModel pendingMenu,
+        ISecureChannelsStore store)
     {
         Self = self;
-        _sessions = sessions;
-        _peers = peers;
-        _pendingSessions = pendingSessions;
         _sessionFactory = sessionFactory;
-        _pendingHandshakeQueries = pendingHandshakeQueries;
-        _preHandshake = preHandshake;
-        _events = events;
+        _store = store;
         SearchText = new BindableReactiveProperty<string>("");
         SelectedSessionId = new BindableReactiveProperty<string?>(null);
-        IsLoading = new BindableReactiveProperty<bool>(true);
+        IsLoading = new BindableReactiveProperty<bool>(false);
         PendingMenu = pendingMenu;
-        
-        // Load sessions once, then filter locally
-        _ = ReloadAsync();
+
+        RebuildFromStore();
+        ((INotifyCollectionChanged)_store.Channels).CollectionChanged += OnChannelsChanged;
+
         var filtered = SearchText
             .Select(text => text?.Trim() ?? "")
             .DistinctUntilChanged()
@@ -118,14 +100,7 @@ public sealed class SessionsSidebarViewModel : ViewModelBase
             });
 
         Items = new ReadOnlyObservableCollection<SecureChannelListItemViewModel>(_items);
-
-        _events.Changed
-            .ObserveOnCurrentSynchronizationContext()
-            .Subscribe(__ => { _ = ReloadAsync(); });
     }
-
-    private async Task ReloadAsync()
-        => await LoadAsync(_sessions, _peers, _pendingSessions).ConfigureAwait(false);
 
     private SecureChannelListItemViewModel[] ApplyFilter(string text)
     {
@@ -135,133 +110,25 @@ public sealed class SessionsSidebarViewModel : ViewModelBase
         return snapshot.Where(x => x.DisplayName.Value.ToLowerInvariant().Contains(text) || (x.LastSnippet.Value ?? "").ToLowerInvariant().Contains(text)).ToArray();
     }
 
-    private async Task LoadAsync(ISessionRepository sessions, IPeerIdentityRepository peers, IPendingSessionRepository pendingSessions)
+    private void RebuildFromStore()
     {
-        try
+        var list = _store.Channels
+            .Select(m => new SecureChannelListItemViewModel(m))
+            .ToArray();
+
+        _items.Clear();
+        foreach (var it in list)
         {
-            IsLoading.Value = true;
-            var selfId = 1;
-            if (int.TryParse(Self.Id.Value, out var parsed)) selfId = parsed;
-            var list = await sessions.GetAllActiveAsync(selfId, CancellationToken.None);
-
-            var created = new List<SecureChannelListItemViewModel>();
-            foreach (var s in list)
-            {
-                var pid = new PeerId(s.RemotePeerId.Value);
-                var peer = await peers.GetByIdAsync(pid, CancellationToken.None);
-                var name = peer?.DisplayName?.Value ?? s.RemotePeerId.Value.ToString()[..8];
-                var item = new SecureChannelListItemViewModel { Id = s.Id.Value.ToString("N") };
-                item.DisplayName.Value = name;
-                item.Initials.Value = ComputeInitials(name);
-
-                item.IsOnline.Value = false;
-                item.BadgeType.Value = SecureChannelBadgeType.Direct;
-                item.LastSnippet.Value = null;
-                item.LastUpdate.Value = s.LastUsedAtUtc;
-                item.UnreadCount.Value = 0;
-                created.Add(item);
-            }
-
-            var combined = created
-                .OrderByDescending(x => x.LastUpdate.Value)
-                .ToList();
-
-            await foreach (var outbound in _preHandshake.EnumeratePendingAsync(selfId, CancellationToken.None).ConfigureAwait(false))
-            {
-                var peer = await peers.FindByPublicKeyHashAsync(outbound.RecipientPublicKeyHash, CancellationToken.None);
-                var name = peer?.DisplayName?.Value ?? "Outbound invite";
-
-                var outboundItem = new SecureChannelListItemViewModel { Id = outbound.LocalRequestId.ToString("N") };
-                outboundItem.DisplayName.Value = name;
-                outboundItem.Initials.Value = ComputeInitials(name);
-                outboundItem.BadgeType.Value = SecureChannelBadgeType.Pending;
-                outboundItem.LastSnippet.Value = null;
-                outboundItem.IsOnline.Value = false;
-                outboundItem.LastUpdate.Value = outbound.CreatedAtUtc;
-                outboundItem.UnreadCount.Value = 0;
-
-                // Dedupe by id (can overlap with inbound pending correlation IDs)
-                if (combined.All(x => x.Id != outboundItem.Id))
-                {
-                    combined.Add(outboundItem);
-                }
-            }
-
-            var pendingItems = new List<PendingHandshakeItem>();
-            await foreach (var pending in _pendingHandshakeQueries.EnumerateOpenAsync(CancellationToken.None).ConfigureAwait(false))
-            {
-                var relayText = pending.IsRelayed
-                    ? $"Via relay: {pending.RelayPeerName}{(string.IsNullOrWhiteSpace(pending.RelayEndpoint) ? "" : $" ({pending.RelayEndpoint})")}" 
-                    : null;
-                pendingItems.Add(new PendingHandshakeItem
-                {
-                    DisplayName = pending.PeerName,
-                    Initials = ComputeInitials(pending.PeerName),
-                    BundleText = $"bundle text",
-                    PendingId = pending.Id,
-                    IsRelayed = pending.IsRelayed,
-                    RelayInfoText = relayText
-                });
-
-                var pendingListItem = new SecureChannelListItemViewModel { Id = pending.RequestCorrelationId.Value.ToString("N") };
-                pendingListItem.DisplayName.Value = pending.PeerName;
-                pendingListItem.Initials.Value = ComputeInitials(pending.PeerName);
-                pendingListItem.BadgeType.Value = SecureChannelBadgeType.Pending;
-                pendingListItem.LastSnippet.Value = null;
-                pendingListItem.IsOnline.Value = false;
-                pendingListItem.LastUpdate.Value = pending.CreatedAtUtc;
-                pendingListItem.UnreadCount.Value = 0;
-                if (combined.All(x => x.Id != pendingListItem.Id))
-                {
-                    combined.Add(pendingListItem);
-                }
-            }
-
-            combined = combined
-                .OrderByDescending(x => x.LastUpdate.Value)
-                .ToList();
-
-            void apply()
-            {
-                _items.Clear();
-                foreach (var it in combined)
-                    _items.Add(it);
-
-                PendingMenu.PendingHandshakes.Clear();
-                foreach (var it in pendingItems)
-                    PendingMenu.PendingHandshakes.Add(it);
-            }
-
-            var dispatcher = Application.Current?.Dispatcher;
-            if (dispatcher is null || dispatcher.CheckAccess())
-            {
-                apply();
-            }
-            else
-            {
-                await dispatcher.InvokeAsync(apply);
-            }
-        }
-        catch
-        {
-        }
-        finally
-        {
-            IsLoading.Value = false;
+            _items.Add(it);
         }
     }
 
-    private static string ComputeInitials(string? name)
-    {
-        if (string.IsNullOrWhiteSpace(name)) return "?";
-        var parts = name.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        if (parts.Length == 1)
-            return parts[0].Substring(0, Math.Min(2, parts[0].Length)).ToUpperInvariant();
-        return (parts[0][0].ToString() + parts[^1][0].ToString()).ToUpperInvariant();
-    }
+    private void OnChannelsChanged(object? sender, NotifyCollectionChangedEventArgs e)
+        => RebuildFromStore();
 
     protected override void DisposeCore()
     {
+        ((INotifyCollectionChanged)_store.Channels).CollectionChanged -= OnChannelsChanged;
         Disposable.Dispose(SearchText, SelectedSessionId);
     }
 

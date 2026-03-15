@@ -68,17 +68,15 @@ public class ShellViewModelTests
 
         var mutator = new Mock<IActiveIdentityMutator>();
         var pendingWindowManager = new Mock<IWindowManager>(MockBehavior.Loose);
+        var store = new Mock<Desktop.Wpf.Features.Sessions.State.ISecureChannelsStore>(MockBehavior.Loose);
+        store.SetupGet(s => s.Channels).Returns(new System.Collections.ObjectModel.ReadOnlyObservableCollection<Desktop.Wpf.Features.Sessions.Models.SecureChannelModel>(new System.Collections.ObjectModel.ObservableCollection<Desktop.Wpf.Features.Sessions.Models.SecureChannelModel>()));
+        store.SetupGet(s => s.PendingInbound).Returns(new System.Collections.ObjectModel.ReadOnlyObservableCollection<Desktop.Wpf.Features.Sessions.Models.PendingInvitationModel>(new System.Collections.ObjectModel.ObservableCollection<Desktop.Wpf.Features.Sessions.Models.PendingInvitationModel>()));
         var sessionsVm = new SessionsSidebarViewModel(
             nav.Object,
             new SelfIdentityModel(),
-            Mock.Of<Percolator.Cryptography.ISessionRepository>(),
-            Mock.Of<IPeerIdentityRepository>(),
-            Mock.Of<Percolator.Cryptography.IPendingSessionRepository>(),
             Mock.Of<ISessionScopeFactory>(),
-            new PendingHandshakesMenuViewModel(pendingWindowManager.Object, Mock.Of<IMediator>(), Mock.Of<Percolator.Cryptography.IPendingSessionRepository>()),
-            Mock.Of<Percolator.Application.Cryptography.IPendingHandshakeQueries>(),
-            Mock.Of<IPreHandshakeSessionStore>(),
-            Mock.Of<Desktop.Wpf.Features.Sessions.ISecureChannelsListEvents>());
+            new PendingHandshakesMenuViewModel(pendingWindowManager.Object, Mock.Of<IMediator>(), store.Object),
+            store.Object);
         var sessionShellVm = new SessionShellViewModel();
 
         var identityProvider = new Mock<IServiceProvider>();
@@ -124,17 +122,15 @@ public class ShellViewModelTests
             .Returns(orchestrator.Object);
 
         var pendingWindowManager = new Mock<IWindowManager>(MockBehavior.Loose);
+        var store = new Mock<Desktop.Wpf.Features.Sessions.State.ISecureChannelsStore>(MockBehavior.Loose);
+        store.SetupGet(s => s.Channels).Returns(new System.Collections.ObjectModel.ReadOnlyObservableCollection<Desktop.Wpf.Features.Sessions.Models.SecureChannelModel>(new System.Collections.ObjectModel.ObservableCollection<Desktop.Wpf.Features.Sessions.Models.SecureChannelModel>()));
+        store.SetupGet(s => s.PendingInbound).Returns(new System.Collections.ObjectModel.ReadOnlyObservableCollection<Desktop.Wpf.Features.Sessions.Models.PendingInvitationModel>(new System.Collections.ObjectModel.ObservableCollection<Desktop.Wpf.Features.Sessions.Models.PendingInvitationModel>()));
         var sessionsVm = new SessionsSidebarViewModel(
             nav.Object,
             new SelfIdentityModel(),
-            Mock.Of<Percolator.Cryptography.ISessionRepository>(),
-            Mock.Of<IPeerIdentityRepository>(),
-            Mock.Of<Percolator.Cryptography.IPendingSessionRepository>(),
             Mock.Of<ISessionScopeFactory>(),
-            new PendingHandshakesMenuViewModel(pendingWindowManager.Object, Mock.Of<IMediator>(), Mock.Of<Percolator.Cryptography.IPendingSessionRepository>()),
-            Mock.Of<Percolator.Application.Cryptography.IPendingHandshakeQueries>(),
-            Mock.Of<IPreHandshakeSessionStore>(),
-            Mock.Of<Desktop.Wpf.Features.Sessions.ISecureChannelsListEvents>());
+            new PendingHandshakesMenuViewModel(pendingWindowManager.Object, Mock.Of<IMediator>(), store.Object),
+            store.Object);
         var sessionShellVm = new SessionShellViewModel();
         scopedProvider.Setup(sp => sp.GetService(typeof(SessionsSidebarViewModel))).Returns(sessionsVm);
         scopedProvider.Setup(sp => sp.GetService(typeof(SessionShellViewModel))).Returns(sessionShellVm);
@@ -174,17 +170,15 @@ public class ShellViewModelTests
         var sessionScopeFactoryMock = new Mock<ISessionScopeFactory>();
         var pendingSessions = new Mock<IPendingSessionRepository>();
         var pendingWindowManager = new Mock<IWindowManager>(MockBehavior.Loose);
+        var store = new Mock<Desktop.Wpf.Features.Sessions.State.ISecureChannelsStore>(MockBehavior.Loose);
+        store.SetupGet(s => s.Channels).Returns(new System.Collections.ObjectModel.ReadOnlyObservableCollection<Desktop.Wpf.Features.Sessions.Models.SecureChannelModel>(new System.Collections.ObjectModel.ObservableCollection<Desktop.Wpf.Features.Sessions.Models.SecureChannelModel>()));
+        store.SetupGet(s => s.PendingInbound).Returns(new System.Collections.ObjectModel.ReadOnlyObservableCollection<Desktop.Wpf.Features.Sessions.Models.PendingInvitationModel>(new System.Collections.ObjectModel.ObservableCollection<Desktop.Wpf.Features.Sessions.Models.PendingInvitationModel>()));
         var sessionsVm = new SessionsSidebarViewModel(
             nav.Object,
             scopedSelf,
-            scopedSessionsRepo.Object,
-            scopedPeerRepo.Object,
-            pendingSessions.Object,
             sessionScopeFactoryMock.Object,
-            new PendingHandshakesMenuViewModel(pendingWindowManager.Object, Mock.Of<IMediator>(), pendingSessions.Object),
-            Mock.Of<Percolator.Application.Cryptography.IPendingHandshakeQueries>(),
-            Mock.Of<IPreHandshakeSessionStore>(),
-            Mock.Of<Desktop.Wpf.Features.Sessions.ISecureChannelsListEvents>());
+            new PendingHandshakesMenuViewModel(pendingWindowManager.Object, Mock.Of<IMediator>(), store.Object),
+            store.Object);
         var sessionShellVm = new SessionShellViewModel();
         scopedProvider
             .Setup(sp => sp.GetService(typeof(SessionsSidebarViewModel)))
@@ -242,17 +236,15 @@ public class ShellViewModelTests
         var scopedSessionFactory = new Mock<ISessionScopeFactory>();
         var pendingSessions = new Mock<IPendingSessionRepository>();
         var pendingWindowManager = new Mock<IWindowManager>(MockBehavior.Loose);
+        var store = new Mock<Desktop.Wpf.Features.Sessions.State.ISecureChannelsStore>(MockBehavior.Loose);
+        store.SetupGet(s => s.Channels).Returns(new System.Collections.ObjectModel.ReadOnlyObservableCollection<Desktop.Wpf.Features.Sessions.Models.SecureChannelModel>(new System.Collections.ObjectModel.ObservableCollection<Desktop.Wpf.Features.Sessions.Models.SecureChannelModel>()));
+        store.SetupGet(s => s.PendingInbound).Returns(new System.Collections.ObjectModel.ReadOnlyObservableCollection<Desktop.Wpf.Features.Sessions.Models.PendingInvitationModel>(new System.Collections.ObjectModel.ObservableCollection<Desktop.Wpf.Features.Sessions.Models.PendingInvitationModel>()));
         var sessionsVm = new SessionsSidebarViewModel(
             nav.Object,
             scopedSelf,
-            scopedSessionsRepo.Object,
-            scopedPeerRepo.Object,
-            pendingSessions.Object,
             scopedSessionFactory.Object,
-            new PendingHandshakesMenuViewModel(pendingWindowManager.Object, Mock.Of<IMediator>(), pendingSessions.Object),
-            Mock.Of<Percolator.Application.Cryptography.IPendingHandshakeQueries>(),
-            Mock.Of<IPreHandshakeSessionStore>(),
-            Mock.Of<Desktop.Wpf.Features.Sessions.ISecureChannelsListEvents>());
+            new PendingHandshakesMenuViewModel(pendingWindowManager.Object, Mock.Of<IMediator>(), store.Object),
+            store.Object);
         var sessionShellVm = new SessionShellViewModel();
         scopedProvider
             .Setup(sp => sp.GetService(typeof(SessionsSidebarViewModel)))

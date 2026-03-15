@@ -1,10 +1,16 @@
 using System.Collections.ObjectModel;
+using System.Collections.Specialized;
+using System.ComponentModel;
+using System.Linq;
 using System.Threading.Tasks;
 using Desktop.Wpf.Shared.Mvvm;
 using Desktop.Wpf.Shared.Windowing;
 using MediatR;
 using Percolator.Application.Cryptography;
 using Percolator.Application.Network;
+using Desktop.Wpf.Features.Sessions.State;
+using Desktop.Wpf.Features.Sessions.Models;
+using R3;
 using Percolator.Cryptography;
 
 namespace Desktop.Wpf.Features.Sessions;
@@ -25,7 +31,7 @@ public sealed class PendingHandshakeItem
     public string? RelayInfoText { get; set; }
 }
 
-public sealed class PendingHandshakesMenuViewModel
+public sealed class PendingHandshakesMenuViewModel : System.IDisposable
 {
     public ObservableCollection<PendingHandshakeItem> PendingHandshakes { get; } = new();
 
@@ -33,11 +39,17 @@ public sealed class PendingHandshakesMenuViewModel
     public AsyncRelayCommand BurnHandshakeCommand { get; }
     public AsyncRelayCommand OpenNewHandshakeCommand { get; }
 
+    private readonly IMediator _mediator;
+    private readonly ISecureChannelsStore _store;
+
     public PendingHandshakesMenuViewModel(
         IWindowManager windowManager,
         IMediator mediator,
-        IPendingSessionRepository pendingSessions)
+        ISecureChannelsStore store)
     {
+        _mediator = mediator;
+        _store = store;
+
         OpenNewHandshakeCommand = new AsyncRelayCommand(_ =>
         {
             windowManager.ShowFor<ConnectionManagementDialogViewModel>();
@@ -48,7 +60,7 @@ public sealed class PendingHandshakesMenuViewModel
         {
             if (obj is PendingHandshakeItem item)
             {
-                var result = await mediator.Send(new ApprovePendingSessionCommand(item.PendingId)).ConfigureAwait(false);
+                var result = await _mediator.Send(new ApprovePendingSessionCommand(item.PendingId)).ConfigureAwait(false);
                 switch (result)
                 {
                     case ApprovePendingSessionResult.Accepted accepted:
@@ -80,16 +92,39 @@ public sealed class PendingHandshakesMenuViewModel
         {
             if (obj is PendingHandshakeItem item)
             {
-                var pending = await pendingSessions.GetAsync(item.PendingId);
-                if (pending is null)
-                {
-                    PendingHandshakes.Remove(item);
-                    return;
-                }
-                pending.Reject();
-                pendingSessions.UpdateAsync(pending);
-                PendingHandshakes.Remove(item);
+                await _mediator.Send(new RejectPendingSessionCommand(item.PendingId)).ConfigureAwait(false);
             }
         });
+
+        ((INotifyCollectionChanged)_store.PendingInbound).CollectionChanged += OnPendingInboundChanged;
+
+        RebuildFromStore();
     }
+
+    private void OnPendingInboundChanged(object? sender, NotifyCollectionChangedEventArgs e)
+        => RebuildFromStore();
+
+    private void RebuildFromStore()
+    {
+        var snapshot = _store.PendingInbound
+            .Select(m => new PendingHandshakeItem
+            {
+                DisplayName = m.DisplayNameCurrent,
+                Initials = m.InitialsCurrent,
+                BundleText = "bundle text",
+                PendingId = new Percolator.Cryptography.PendingSessionId(m.PendingSessionId),
+                IsRelayed = m.IsRelayedCurrent,
+                RelayInfoText = null
+            })
+            .ToList();
+
+        PendingHandshakes.Clear();
+        foreach (var it in snapshot)
+        {
+            PendingHandshakes.Add(it);
+        }
+    }
+
+    public void Dispose()
+        => ((INotifyCollectionChanged)_store.PendingInbound).CollectionChanged -= OnPendingInboundChanged;
 }
