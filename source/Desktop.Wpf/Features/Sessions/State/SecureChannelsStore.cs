@@ -182,45 +182,7 @@ public sealed class SecureChannelsStore : ISecureChannelsStore, IDisposable
             _channelsByKey[model.Key] = model;
             _channels.Add(model);
         });
-
-    internal Task RemoveChannelAsync(SecureChannelKey key)
-        => MutateOnDispatcherAsync(() =>
-        {
-            if (!_channelsByKey.TryGetValue(key, out var existing))
-            {
-                return;
-            }
-
-            _channelsByKey.Remove(key);
-            _channels.Remove(existing);
-            existing.Dispose();
-        });
-
-    internal Task UpsertOutboundPendingAsync(SecureChannelKey key, DateTimeOffset createdAtUtc)
-        => UpsertChannelAsync(new SecureChannelModel(
-            key,
-            displayName: "Outbound invite",
-            initials: "OB",
-            kind: SecureChannelKind.PendingOutbound,
-            lastUpdateUtc: createdAtUtc));
-
-    internal Task UpsertFailureAsync(SecureChannelKey key, string displayName, DateTimeOffset whenUtc)
-        => UpsertChannelAsync(new SecureChannelModel(
-            key,
-            displayName,
-            initials: ComputeInitials(displayName),
-            kind: SecureChannelKind.Failed,
-            lastUpdateUtc: whenUtc));
-
-    private static string ComputeInitials(string? name)
-    {
-        if (string.IsNullOrWhiteSpace(name)) return "?";
-        var parts = name.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        if (parts.Length == 1)
-            return parts[0].Substring(0, Math.Min(2, parts[0].Length)).ToUpperInvariant();
-        return (parts[0][0].ToString() + parts[^1][0].ToString()).ToUpperInvariant();
-    }
-
+    
     private static Task MutateOnDispatcherAsync(Action action)
     {
         var dispatcher = Application.Current?.Dispatcher;
