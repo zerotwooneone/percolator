@@ -33,6 +33,7 @@ using Percolator.Infrastructure.Persistence;
 using Desktop.Wpf.Features.Simulator;
 using MediatR;
 using Percolator.MessageQueue.DependencyInjection;
+using Desktop.Wpf.Features.Sessions.State;
 
 namespace Desktop.Wpf;
 
@@ -148,6 +149,7 @@ public partial class App : Application
                 services.AddScoped<Desktop.Wpf.Features.Sessions.IMainInvitationActions, Desktop.Wpf.Features.Sessions.MainInvitationActions>();
                 services.AddSingleton<Desktop.Wpf.Features.Sessions.IMainInvitationInboxEvents, Desktop.Wpf.Features.Sessions.MainInvitationInboxEvents>();
                 services.AddSingleton<Desktop.Wpf.Features.Sessions.ISecureChannelsListEvents, Desktop.Wpf.Features.Sessions.SecureChannelsListEvents>();
+                services.AddSingleton<ISecureChannelsStore, SecureChannelsStore>();
                 services.AddScoped<IPendingHandshakeSimulatorService, PendingHandshakeSimulatorService>();
                 services.AddSingleton<ISimulatorStateStore, JsonSimulatorStateStore>();
                 services.AddSingleton<ISimulatedPeerKeyFactory, SimulatedPeerKeyFactory>();
