@@ -7,6 +7,7 @@ using Google.Protobuf;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using NUnit.Framework;
+using MediatR;
 using Percolator.Application.Network.Handshake;
 using Percolator.Cryptography;
 using Percolator.Contracts;
@@ -101,7 +102,8 @@ public class InitiatorFinalizeServiceTests
             clock,
             Mock.Of<ISessionCrypto>(),
             Mock.Of<ISentInvitationRepository>(),
-            Mock.Of<Percolator.Application.KeyExchange.ISelfPreKeyBundleRepository>());
+            Mock.Of<Percolator.Application.KeyExchange.ISelfPreKeyBundleRepository>(),
+            Mock.Of<IMediator>());
 
         // Act
         var result = await sut.TryFinalizeFromFirstResponderAsync(self.SelfIdentityId, first, CancellationToken.None);

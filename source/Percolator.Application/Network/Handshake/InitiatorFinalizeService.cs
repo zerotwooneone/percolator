@@ -1,6 +1,7 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
+using MediatR;
 using Microsoft.Extensions.Logging;
 using Percolator.Application.KeyExchange;
 using Percolator.Cryptography;
@@ -22,6 +23,7 @@ namespace Percolator.Application.Network.Handshake
         private readonly ISessionCrypto _sessionCrypto;
         private readonly ISentInvitationRepository _sentInvitations;
         private readonly ISelfPreKeyBundleRepository _selfPreKeys;
+        private readonly IMediator _mediator;
 
         public InitiatorFinalizeService(
             ILogger<InitiatorFinalizeService> logger,
@@ -32,7 +34,8 @@ namespace Percolator.Application.Network.Handshake
             IClock clock,
             ISessionCrypto sessionCrypto,
             ISentInvitationRepository sentInvitations,
-            ISelfPreKeyBundleRepository selfPreKeys)
+            ISelfPreKeyBundleRepository selfPreKeys,
+            IMediator mediator)
         {
             _logger = logger;
             _keysStore = keysStore;
@@ -43,6 +46,7 @@ namespace Percolator.Application.Network.Handshake
             _sessionCrypto = sessionCrypto;
             _sentInvitations = sentInvitations;
             _selfPreKeys = selfPreKeys;
+            _mediator = mediator;
         }
 
         public async Task<(SessionId sessionId, Plaintext plaintext)?> TryFinalizeFromInviteHandshakeResponseAsync(
@@ -217,6 +221,12 @@ namespace Percolator.Application.Network.Handshake
                 _clock);
 
             await _sessions.AddAsync(final, cancellationToken).ConfigureAwait(false);
+            await _mediator.Publish(
+                    new Percolator.Application.Network.SecureSessionCreatedNotification(
+                        sid,
+                        Percolator.Application.Network.SecureSessionCreatedReason.InitiatorFinalize),
+                    cancellationToken)
+                .ConfigureAwait(false);
             await _index.UpsertAsync(selfIdentityId.Value, sid, header.PreKey, _clock.UtcNow, cancellationToken).ConfigureAwait(false);
 
             // Best-effort cleanup of legacy prehandshake store (if it was populated)
@@ -278,6 +288,12 @@ namespace Percolator.Application.Network.Handshake
                         _clock);
 
                     await _sessions.AddAsync(final, cancellationToken).ConfigureAwait(false);
+                    await _mediator.Publish(
+                            new Percolator.Application.Network.SecureSessionCreatedNotification(
+                                sid,
+                                Percolator.Application.Network.SecureSessionCreatedReason.InitiatorFinalize),
+                            cancellationToken)
+                        .ConfigureAwait(false);
                     await _index.UpsertAsync(selfIdentityId.Value, sid, headerPreKey, _clock.UtcNow, cancellationToken).ConfigureAwait(false);
                     await _prehandshake.DeleteAsync(pending.Id, selfIdentityId.Value, cancellationToken).ConfigureAwait(false);
 

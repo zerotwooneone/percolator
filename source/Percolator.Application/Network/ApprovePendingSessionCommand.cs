@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
 using Google.Protobuf;
+using Google.Protobuf.WellKnownTypes;
 using MediatR;
 using Microsoft.Extensions.Logging;
 using Percolator.Application.Identity;
@@ -45,6 +46,7 @@ namespace Percolator.Application.Network
         private readonly IDirectSessionLocator _directSessions;
         private readonly ISecureMessagingService _secureMessaging;
         private readonly IMessageTransportService _transport;
+        private readonly IMediator _mediator;
 
         public ApprovePendingSessionHandler(
             ILogger<ApprovePendingSessionHandler> logger,
@@ -60,7 +62,8 @@ namespace Percolator.Application.Network
             IInviteHandshakeResponseDeliveryService delivery,
             IDirectSessionLocator directSessions,
             ISecureMessagingService secureMessaging,
-            IMessageTransportService transport)
+            IMessageTransportService transport,
+            IMediator mediator)
         {
             _logger = logger;
             _activeIdentityAccessor = activeIdentityAccessor;
@@ -76,6 +79,7 @@ namespace Percolator.Application.Network
             _directSessions = directSessions;
             _secureMessaging = secureMessaging;
             _transport = transport;
+            _mediator = mediator;
         }
 
         public async Task<ApprovePendingSessionResult> Handle(ApprovePendingSessionCommand request, CancellationToken cancellationToken)
@@ -93,7 +97,12 @@ namespace Percolator.Application.Network
 
             if (pending.ExpiresAtUtc is not null && pending.ExpiresAtUtc.Value <= _clock.UtcNow)
             {
+                var correlationId = pending.RequestCorrelationId;
                 await _pending.DeleteAsync(pending.Id, cancellationToken).ConfigureAwait(false);
+                await _mediator.Publish(
+                        new PendingSessionRemovedNotification(pending.Id, correlationId, PendingSessionRemoveReason.Expired),
+                        cancellationToken)
+                    .ConfigureAwait(false);
                 return new ApprovePendingSessionResult.RejectedExpired();
             }
 
@@ -197,6 +206,14 @@ namespace Percolator.Application.Network
                 root,
                 _clock);
             await _sessions.AddAsync(session, cancellationToken).ConfigureAwait(false);
+            await _mediator.Publish(
+                    new SecureSessionCreatedNotification(
+                        sessionId,
+                        SecureSessionCreatedReason.AcceptedInvite,
+                        new Percolator.Cryptography.Primitives.PeerId(pending.RemotePeerId.Value),
+                        proto),
+                    cancellationToken)
+                .ConfigureAwait(false);
 
             var inner = new ResponderInnerHello
             {
@@ -266,7 +283,12 @@ namespace Percolator.Application.Network
                 }
             }
 
+            var acceptedCorrelationId = pending.RequestCorrelationId;
             await _pending.DeleteAsync(pending.Id, cancellationToken).ConfigureAwait(false);
+            await _mediator.Publish(
+                    new PendingSessionRemovedNotification(pending.Id, acceptedCorrelationId, PendingSessionRemoveReason.Accepted),
+                    cancellationToken)
+                .ConfigureAwait(false);
             return new ApprovePendingSessionResult.Accepted(delivery.SendPath, pending.RequestCorrelationId);
         }
 

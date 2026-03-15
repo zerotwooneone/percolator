@@ -12,6 +12,7 @@ using Moq;
 using NUnit.Framework;
 using Desktop.Wpf.Shared.Windowing;
 using Percolator.Application.Identity;
+using Percolator.Application.Network.Handshake;
 using Percolator.Cryptography;
 using Percolator.Identity;
 using Percolator.Identity.Model;
@@ -75,7 +76,9 @@ public class ShellViewModelTests
             Mock.Of<Percolator.Cryptography.IPendingSessionRepository>(),
             Mock.Of<ISessionScopeFactory>(),
             new PendingHandshakesMenuViewModel(pendingWindowManager.Object, Mock.Of<IMediator>(), Mock.Of<Percolator.Cryptography.IPendingSessionRepository>()),
-            Mock.Of<Percolator.Application.Cryptography.IPendingHandshakeQueries>());
+            Mock.Of<Percolator.Application.Cryptography.IPendingHandshakeQueries>(),
+            Mock.Of<IPreHandshakeSessionStore>(),
+            Mock.Of<Desktop.Wpf.Features.Sessions.ISecureChannelsListEvents>());
         var sessionShellVm = new SessionShellViewModel();
 
         var identityProvider = new Mock<IServiceProvider>();
@@ -129,7 +132,9 @@ public class ShellViewModelTests
             Mock.Of<Percolator.Cryptography.IPendingSessionRepository>(),
             Mock.Of<ISessionScopeFactory>(),
             new PendingHandshakesMenuViewModel(pendingWindowManager.Object, Mock.Of<IMediator>(), Mock.Of<Percolator.Cryptography.IPendingSessionRepository>()),
-            Mock.Of<Percolator.Application.Cryptography.IPendingHandshakeQueries>());
+            Mock.Of<Percolator.Application.Cryptography.IPendingHandshakeQueries>(),
+            Mock.Of<IPreHandshakeSessionStore>(),
+            Mock.Of<Desktop.Wpf.Features.Sessions.ISecureChannelsListEvents>());
         var sessionShellVm = new SessionShellViewModel();
         scopedProvider.Setup(sp => sp.GetService(typeof(SessionsSidebarViewModel))).Returns(sessionsVm);
         scopedProvider.Setup(sp => sp.GetService(typeof(SessionShellViewModel))).Returns(sessionShellVm);
@@ -177,7 +182,9 @@ public class ShellViewModelTests
             pendingSessions.Object,
             sessionScopeFactoryMock.Object,
             new PendingHandshakesMenuViewModel(pendingWindowManager.Object, Mock.Of<IMediator>(), pendingSessions.Object),
-            Mock.Of<Percolator.Application.Cryptography.IPendingHandshakeQueries>());
+            Mock.Of<Percolator.Application.Cryptography.IPendingHandshakeQueries>(),
+            Mock.Of<IPreHandshakeSessionStore>(),
+            Mock.Of<Desktop.Wpf.Features.Sessions.ISecureChannelsListEvents>());
         var sessionShellVm = new SessionShellViewModel();
         scopedProvider
             .Setup(sp => sp.GetService(typeof(SessionsSidebarViewModel)))
@@ -243,7 +250,9 @@ public class ShellViewModelTests
             pendingSessions.Object,
             scopedSessionFactory.Object,
             new PendingHandshakesMenuViewModel(pendingWindowManager.Object, Mock.Of<IMediator>(), pendingSessions.Object),
-            Mock.Of<Percolator.Application.Cryptography.IPendingHandshakeQueries>());
+            Mock.Of<Percolator.Application.Cryptography.IPendingHandshakeQueries>(),
+            Mock.Of<IPreHandshakeSessionStore>(),
+            Mock.Of<Desktop.Wpf.Features.Sessions.ISecureChannelsListEvents>());
         var sessionShellVm = new SessionShellViewModel();
         scopedProvider
             .Setup(sp => sp.GetService(typeof(SessionsSidebarViewModel)))

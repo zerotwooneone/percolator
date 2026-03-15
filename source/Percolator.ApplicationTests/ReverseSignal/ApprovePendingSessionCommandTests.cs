@@ -6,7 +6,6 @@ using System.Threading.Tasks;
 using FluentAssertions;
 using Google.Protobuf;
 using MediatR;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Logging;
 using Moq;
@@ -88,7 +87,8 @@ namespace Percolator.ApplicationTests.ReverseSignal
                 Mock.Of<IInviteHandshakeResponseDeliveryService>(),
                 Mock.Of<IDirectSessionLocator>(),
                 Mock.Of<ISecureMessagingService>(),
-                Mock.Of<IMessageTransportService>());
+                Mock.Of<IMessageTransportService>(),
+                Mock.Of<IMediator>());
 
             var result = await sut.Handle(new ApprovePendingSessionCommand(PendingSessionId.NewId()), CancellationToken.None);
             result.Should().BeOfType<ApprovePendingSessionResult.RejectedNotReady>();
@@ -177,6 +177,13 @@ namespace Percolator.ApplicationTests.ReverseSignal
                     It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new InviteHandshakeResponseDeliveryResult(false, "Direct", new Exception("network")));
 
+            var mediator = new Mock<IMediator>(MockBehavior.Strict);
+            mediator
+                .Setup(m => m.Publish(
+                    It.IsAny<SecureSessionCreatedNotification>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
+
             var sut = new ApprovePendingSessionHandler(
                 logger,
                 activeAccessor,
@@ -191,7 +198,8 @@ namespace Percolator.ApplicationTests.ReverseSignal
                 delivery.Object,
                 Mock.Of<IDirectSessionLocator>(),
                 Mock.Of<ISecureMessagingService>(),
-                Mock.Of<IMessageTransportService>());
+                Mock.Of<IMessageTransportService>(),
+                mediator.Object);
 
             var result = await sut.Handle(new ApprovePendingSessionCommand(pendingId), CancellationToken.None);
             result.Should().BeOfType<ApprovePendingSessionResult.Failed>();
@@ -279,6 +287,18 @@ namespace Percolator.ApplicationTests.ReverseSignal
                     It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new InviteHandshakeResponseDeliveryResult(true, "Direct"));
 
+            var mediator = new Mock<IMediator>(MockBehavior.Strict);
+            mediator
+                .Setup(m => m.Publish(
+                    It.IsAny<SecureSessionCreatedNotification>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
+            mediator
+                .Setup(m => m.Publish(
+                    It.IsAny<PendingSessionRemovedNotification>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
+
             var sut = new ApprovePendingSessionHandler(
                 logger,
                 activeAccessor,
@@ -293,7 +313,8 @@ namespace Percolator.ApplicationTests.ReverseSignal
                 delivery.Object,
                 Mock.Of<IDirectSessionLocator>(),
                 Mock.Of<ISecureMessagingService>(),
-                Mock.Of<IMessageTransportService>());
+                Mock.Of<IMessageTransportService>(),
+                mediator.Object);
 
             var result = await sut.Handle(new ApprovePendingSessionCommand(pendingId), CancellationToken.None);
             result.Should().BeOfType<ApprovePendingSessionResult.Accepted>();
@@ -395,7 +416,19 @@ namespace Percolator.ApplicationTests.ReverseSignal
                     It.IsAny<Percolator.Network.DirectSessionId>(),
                     It.IsAny<SessionRatchetMessage>(),
                     It.IsAny<CancellationToken>()))
-                .ReturnsAsync((Percolator.Contracts.DeliverOpaqueMessageResponse?)null);
+                .ReturnsAsync(new Percolator.Contracts.DeliverOpaqueMessageResponse());
+
+            var mediator = new Mock<IMediator>(MockBehavior.Strict);
+            mediator
+                .Setup(m => m.Publish(
+                    It.IsAny<SecureSessionCreatedNotification>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
+            mediator
+                .Setup(m => m.Publish(
+                    It.IsAny<PendingSessionRemovedNotification>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
 
             var sut = new ApprovePendingSessionHandler(
                 logger,
@@ -411,7 +444,8 @@ namespace Percolator.ApplicationTests.ReverseSignal
                 delivery.Object,
                 directSessions.Object,
                 secure.Object,
-                transport.Object);
+                transport.Object,
+                mediator.Object);
 
             var result = await sut.Handle(new ApprovePendingSessionCommand(pendingId), CancellationToken.None);
             result.Should().BeOfType<ApprovePendingSessionResult.Accepted>();

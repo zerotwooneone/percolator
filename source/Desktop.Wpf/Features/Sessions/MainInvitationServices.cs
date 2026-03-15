@@ -74,12 +74,10 @@ public sealed class MainInvitationOutbox : IMainInvitationOutbox
 public sealed class MainInvitationActions : IMainInvitationActions
 {
     private readonly IMediator _mediator;
-    private readonly IPendingSessionRepository _pendingSessions;
 
-    public MainInvitationActions(IMediator mediator, IPendingSessionRepository pendingSessions)
+    public MainInvitationActions(IMediator mediator)
     {
         _mediator = mediator;
-        _pendingSessions = pendingSessions;
     }
 
     public async Task<ApproveInvitationResult> ApproveAsync(Guid pendingSessionId, CancellationToken cancellationToken = default)
@@ -101,10 +99,8 @@ public sealed class MainInvitationActions : IMainInvitationActions
 
     public async Task BurnAsync(Guid pendingSessionId, CancellationToken cancellationToken = default)
     {
-        var pending = await _pendingSessions.GetAsync(new PendingSessionId(pendingSessionId), cancellationToken).ConfigureAwait(false);
-        if (pending is null) return;
-
-        pending.Reject();
-        await _pendingSessions.UpdateAsync(pending, cancellationToken).ConfigureAwait(false);
+        await _mediator
+            .Send(new RejectPendingSessionCommand(new PendingSessionId(pendingSessionId)), cancellationToken)
+            .ConfigureAwait(false);
     }
 }

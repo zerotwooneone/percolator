@@ -35,6 +35,8 @@ public sealed class ConnectionManagementDialogImportTokenTests
         var inboxEvents = new Mock<IMainInvitationInboxEvents>(MockBehavior.Loose);
         inboxEvents.SetupGet(x => x.Changed).Returns(new R3.Subject<R3.Unit>());
 
+        var secureChannelsEvents = new Mock<Desktop.Wpf.Features.Sessions.ISecureChannelsListEvents>(MockBehavior.Loose);
+
         var reverseSignalInvites = new Mock<IMainReverseSignalInviteFactory>(MockBehavior.Loose);
         var grpcSessions = new Mock<IGrpcSessionService>(MockBehavior.Loose);
         var transport = new Mock<IMessageTransportService>(MockBehavior.Loose);
@@ -67,6 +69,7 @@ public sealed class ConnectionManagementDialogImportTokenTests
             inbox.Object,
             actions.Object,
             inboxEvents.Object,
+            secureChannelsEvents.Object,
             reverseSignalInvites.Object,
             grpcSessions.Object,
             transport.Object,
@@ -121,6 +124,8 @@ public sealed class ConnectionManagementDialogImportTokenTests
         var inboxEvents = new Mock<IMainInvitationInboxEvents>(MockBehavior.Loose);
         inboxEvents.SetupGet(x => x.Changed).Returns(new R3.Subject<R3.Unit>());
 
+        var secureChannelsEvents = new Mock<Desktop.Wpf.Features.Sessions.ISecureChannelsListEvents>(MockBehavior.Loose);
+
         var reverseSignalInvites = new Mock<IMainReverseSignalInviteFactory>(MockBehavior.Loose);
         var grpcSessions = new Mock<IGrpcSessionService>(MockBehavior.Loose);
         var transport = new Mock<IMessageTransportService>(MockBehavior.Loose);
@@ -143,6 +148,7 @@ public sealed class ConnectionManagementDialogImportTokenTests
             inbox.Object,
             actions.Object,
             inboxEvents.Object,
+            secureChannelsEvents.Object,
             reverseSignalInvites.Object,
             grpcSessions.Object,
             transport.Object,

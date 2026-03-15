@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
 using Google.Protobuf;
+using MediatR;
 using Percolator.Contracts;
 using Percolator.Application.KeyExchange;
 using Percolator.Cryptography;
@@ -23,6 +24,7 @@ internal sealed class StandardHandshakeIngress : IStandardHandshakeIngress
     private readonly IClock _clock;
     private readonly IPeerIdentityRepository _peerIdentityRepository;
     private readonly Percolator.Cryptography.ISigningService _signingService;
+    private readonly IMediator _mediator;
 
     public StandardHandshakeIngress(
         ISelfIdentityKeysStore keysStore,
@@ -32,7 +34,8 @@ internal sealed class StandardHandshakeIngress : IStandardHandshakeIngress
         IDirectSessionRepository directSessions,
         IClock clock,
         IPeerIdentityRepository peerIdentityRepository,
-        Percolator.Cryptography.ISigningService signingService)
+        Percolator.Cryptography.ISigningService signingService,
+        IMediator mediator)
     {
         _keysStore = keysStore;
         _selfPreKeys = selfPreKeys;
@@ -42,6 +45,7 @@ internal sealed class StandardHandshakeIngress : IStandardHandshakeIngress
         _clock = clock;
         _peerIdentityRepository = peerIdentityRepository;
         _signingService = signingService;
+        _mediator = mediator;
     }
 
     public async Task<EstablishSessionResponse> HandleAsync(SelfId selfIdentityId, EstablishSessionRequest request, CancellationToken ct = default)
@@ -141,6 +145,14 @@ internal sealed class StandardHandshakeIngress : IStandardHandshakeIngress
             crypto: _sessionCrypto);
 
         await _sessions.AddAsync(session, ct).ConfigureAwait(false);
+        await _mediator.Publish(
+                new SecureSessionCreatedNotification(
+                    sessionId,
+                    SecureSessionCreatedReason.StandardHandshakeIngress,
+                    new Percolator.Cryptography.Primitives.PeerId(initiatorIdentity.Id.Value),
+                    new ProtocolVersion(1)),
+                ct)
+            .ConfigureAwait(false);
 
         await _directSessions.UpsertAsync(
                 new Percolator.Network.PeerId(initiatorIdentity.Id.Value),

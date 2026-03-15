@@ -2,6 +2,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
+using MediatR;
 using Moq;
 using NUnit.Framework;
 using Percolator.Application.Network;
@@ -23,7 +24,7 @@ public sealed class RejectPendingSessionCommandTests
         pendingRepo.Setup(r => r.GetAsync(id, It.IsAny<CancellationToken>()))
             .ReturnsAsync((PendingSession?)null);
 
-        var sut = new RejectPendingSessionHandler(pendingRepo.Object);
+        var sut = new RejectPendingSessionHandler(pendingRepo.Object, Mock.Of<IMediator>());
 
         var result = await sut.Handle(new RejectPendingSessionCommand(id), CancellationToken.None);
 
@@ -51,10 +52,17 @@ public sealed class RejectPendingSessionCommandTests
 
         pendingRepo.Setup(r => r.GetAsync(id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(pending);
-        pendingRepo.Setup(r => r.UpdateAsync(pending, It.IsAny<CancellationToken>()))
+        pendingRepo.Setup(r => r.DeleteAsync(id, It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
-        var sut = new RejectPendingSessionHandler(pendingRepo.Object);
+        var mediator = new Mock<IMediator>(MockBehavior.Strict);
+        mediator
+            .Setup(m => m.Publish(
+                It.IsAny<PendingSessionRemovedNotification>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        var sut = new RejectPendingSessionHandler(pendingRepo.Object, mediator.Object);
 
         var result = await sut.Handle(new RejectPendingSessionCommand(id), CancellationToken.None);
 

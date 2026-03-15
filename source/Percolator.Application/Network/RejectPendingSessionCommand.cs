@@ -18,10 +18,12 @@ public sealed record RejectPendingSessionCommand(PendingSessionId PendingSession
 internal sealed class RejectPendingSessionHandler : IRequestHandler<RejectPendingSessionCommand, RejectPendingSessionResult>
 {
     private readonly IPendingSessionRepository _pending;
+    private readonly IMediator _mediator;
 
-    public RejectPendingSessionHandler(IPendingSessionRepository pending)
+    public RejectPendingSessionHandler(IPendingSessionRepository pending, IMediator mediator)
     {
         _pending = pending;
+        _mediator = mediator;
     }
 
     public async Task<RejectPendingSessionResult> Handle(RejectPendingSessionCommand request, CancellationToken cancellationToken)
@@ -41,7 +43,12 @@ internal sealed class RejectPendingSessionHandler : IRequestHandler<RejectPendin
             return new RejectPendingSessionResult.Invalid(ex.Message);
         }
 
-        await _pending.UpdateAsync(pending, cancellationToken).ConfigureAwait(false);
+        var correlationId = pending.RequestCorrelationId;
+        await _pending.DeleteAsync(pending.Id, cancellationToken).ConfigureAwait(false);
+        await _mediator.Publish(
+                new PendingSessionRemovedNotification(pending.Id, correlationId, PendingSessionRemoveReason.Burned),
+                cancellationToken)
+            .ConfigureAwait(false);
         return new RejectPendingSessionResult.Rejected();
     }
 }

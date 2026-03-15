@@ -1,0 +1,11 @@
+using MediatR;
+using Percolator.Cryptography;
+using Percolator.Cryptography.Primitives;
+
+namespace Percolator.Application.Network;
+
+public sealed record SecureSessionCreatedNotification(
+    SessionId SessionId,
+    SecureSessionCreatedReason Reason,
+    PeerId? RemotePeerId = null,
+    ProtocolVersion? ProtocolVersion = null) : INotification;
