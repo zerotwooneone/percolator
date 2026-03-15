@@ -84,6 +84,7 @@ public sealed class SecureChannelsProjection :
 
             // Build a correlation map for outbound pending: recipient PKH -> local request correlation id.
             var outboundPendingByPkh = new Dictionary<string, Guid>(StringComparer.Ordinal);
+            var outboundPendingRecords = new List<PreHandshakeRecord>();
             var migrations = new Dictionary<SecureChannelKey, SecureChannelKey>();
 
             await foreach (var pending in _pendingHandshakeQueries.EnumerateOpenAsync(cancellationToken).ConfigureAwait(false))
@@ -105,6 +106,16 @@ public sealed class SecureChannelsProjection :
                     initials: initials,
                     kind: SecureChannelKind.PendingInbound,
                     lastUpdateUtc: pending.CreatedAtUtc));
+            }
+
+            await foreach (var outbound in _preHandshake.EnumeratePendingAsync(selfId, cancellationToken).ConfigureAwait(false))
+            {
+                outboundPendingRecords.Add(outbound);
+
+                if (outbound.RecipientPublicKeyHash is { Length: > 0 })
+                {
+                    outboundPendingByPkh[Convert.ToHexString(outbound.RecipientPublicKeyHash)] = outbound.LocalRequestId;
+                }
             }
 
             var sessions = await _sessions.GetAllActiveAsync(selfId, cancellationToken).ConfigureAwait(false);
@@ -135,13 +146,8 @@ public sealed class SecureChannelsProjection :
                     lastUpdateUtc: s.LastUsedAtUtc));
             }
 
-            await foreach (var outbound in _preHandshake.EnumeratePendingAsync(selfId, cancellationToken).ConfigureAwait(false))
+            foreach (var outbound in outboundPendingRecords)
             {
-                if (outbound.RecipientPublicKeyHash is { Length: > 0 })
-                {
-                    outboundPendingByPkh[Convert.ToHexString(outbound.RecipientPublicKeyHash)] = outbound.LocalRequestId;
-                }
-
                 // If this outbound pending is already migrating to an established session, do not emit a separate
                 // pending row in the unified list.
                 if (migrations.ContainsKey(SecureChannelKey.FromPendingCorrelationId(outbound.LocalRequestId)))
