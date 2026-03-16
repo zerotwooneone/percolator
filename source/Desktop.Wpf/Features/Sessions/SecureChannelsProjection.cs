@@ -107,13 +107,6 @@ public sealed class SecureChannelsProjection :
                     initials: initials,
                     isRelayed: pending.IsRelayed,
                     createdAtUtc: pending.CreatedAtUtc));
-
-                channelModels.Add(new SecureChannelModel(
-                    key: SecureChannelKey.FromPendingCorrelationId(pending.RequestCorrelationId.Value),
-                    displayName: displayName,
-                    initials: initials,
-                    kind: SecureChannelKind.PendingInbound,
-                    lastUpdateUtc: pending.CreatedAtUtc));
             }
 
             await foreach (var outbound in _preHandshake.EnumeratePendingAsync(selfId, cancellationToken).ConfigureAwait(false))
