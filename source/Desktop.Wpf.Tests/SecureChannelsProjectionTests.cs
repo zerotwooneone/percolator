@@ -69,6 +69,11 @@ public sealed class SecureChannelsProjectionTests
             .Setup(s => s.EnumeratePendingAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .Returns(AsyncEnumerableFrom<PreHandshakeRecord>());
 
+        var sentInvitations = new Mock<ISentInvitationRepository>(MockBehavior.Loose);
+        sentInvitations
+            .Setup(s => s.TryGetAsync(It.IsAny<RequestCorrelationId>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((SentInvitation?)null);
+
         var self = new SelfIdentityModel();
         self.Id.Value = "1";
 
@@ -79,6 +84,7 @@ public sealed class SecureChannelsProjectionTests
             directSessions.Object,
             pendingQueries.Object,
             preHandshake.Object,
+            sentInvitations.Object,
             self);
 
         // ACT
@@ -158,6 +164,20 @@ public sealed class SecureChannelsProjectionTests
             .Returns(AsyncEnumerableFrom(record))
             .Returns(AsyncEnumerableFrom(record));
 
+        var relayHostPeerId = new Percolator.Cryptography.Primitives.PeerId(Guid.NewGuid());
+        var sentInvitations = new Mock<ISentInvitationRepository>(MockBehavior.Loose);
+        sentInvitations
+            .Setup(s => s.TryGetAsync(new RequestCorrelationId(corrId), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SentInvitation(
+                new RequestCorrelationId(corrId),
+                signedPreKeyId: Guid.NewGuid(),
+                oneTimePreKeyId: null,
+                targetPeerId: null,
+                createdAtUtc: now,
+                expiresAtUtc: now.AddMinutes(10),
+                inviteRouteKind: InviteRouteKind.Relayed,
+                inviteRelayHostPeerId: relayHostPeerId));
+
         var self = new SelfIdentityModel();
         self.Id.Value = "1";
 
@@ -176,6 +196,7 @@ public sealed class SecureChannelsProjectionTests
             directSessions.Object,
             pendingQueries.Object,
             preHandshake.Object,
+            sentInvitations.Object,
             self);
 
         // ACT (first reload: outbound pending only)
@@ -188,6 +209,7 @@ public sealed class SecureChannelsProjectionTests
         var firstModel = store.Channels.Single();
         firstModel.Key.Should().Be(SecureChannelKey.FromPendingCorrelationId(corrId));
         firstModel.Kind.CurrentValue.Should().Be(Desktop.Wpf.Features.Sessions.Models.SecureChannelKind.PendingOutbound);
+        firstModel.Route.CurrentValue.Should().BeOfType<ChannelRoute.Relayed>();
 
         // ACT (second reload: session exists, correlation possible => migration)
         await sut.Handle(new SecureSessionCreatedNotification(sessionId, SecureSessionCreatedReason.InitiatorFinalize, peerId, new ProtocolVersion(1)), CancellationToken.None);
@@ -253,6 +275,11 @@ public sealed class SecureChannelsProjectionTests
         var self = new SelfIdentityModel();
         self.Id.Value = "1";
 
+        var sentInvitations = new Mock<ISentInvitationRepository>(MockBehavior.Loose);
+        sentInvitations
+            .Setup(s => s.TryGetAsync(It.IsAny<RequestCorrelationId>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((SentInvitation?)null);
+
         using var sut = new SecureChannelsProjection(
             store,
             sessions.Object,
@@ -260,6 +287,7 @@ public sealed class SecureChannelsProjectionTests
             directSessions.Object,
             pendingQueries.Object,
             preHandshake.Object,
+            sentInvitations.Object,
             self);
 
         // ACT

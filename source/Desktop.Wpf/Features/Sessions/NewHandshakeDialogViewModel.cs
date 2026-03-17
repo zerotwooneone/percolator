@@ -12,6 +12,7 @@ using Percolator.Application.Network;
 using Percolator.Application.Services;
 using Percolator.Contracts;
 using Percolator.Cryptography;
+using Percolator.Cryptography.Primitives;
 using Percolator.Identity;
 using Percolator.Identity.Model;
 using Percolator.Network;
@@ -42,6 +43,7 @@ public sealed class NewHandshakeDialogViewModel : ViewModelBase
     private readonly IOneTimeKeyProvider _oneTimeKeys;
     private readonly ISessionCrypto _sessionCrypto;
     private readonly IMainReverseSignalInviteFactory _reverseSignalInvites;
+    private readonly ISentInvitationRepository _sentInvitations;
     private readonly IGrpcSessionService _grpcSessions;
     private readonly IMessageTransportService _transport;
     private readonly ISecureMessagingService _secureMessaging;
@@ -61,6 +63,7 @@ public sealed class NewHandshakeDialogViewModel : ViewModelBase
         IOneTimeKeyProvider oneTimeKeys,
         ISessionCrypto sessionCrypto,
         IMainReverseSignalInviteFactory reverseSignalInvites,
+        ISentInvitationRepository sentInvitations,
         IGrpcSessionService grpcSessions,
         IMessageTransportService transport,
         ISecureMessagingService secureMessaging,
@@ -77,6 +80,7 @@ public sealed class NewHandshakeDialogViewModel : ViewModelBase
         _oneTimeKeys = oneTimeKeys;
         _sessionCrypto = sessionCrypto;
         _reverseSignalInvites = reverseSignalInvites;
+        _sentInvitations = sentInvitations;
         _grpcSessions = grpcSessions;
         _transport = transport;
         _secureMessaging = secureMessaging;
@@ -325,6 +329,26 @@ public sealed class NewHandshakeDialogViewModel : ViewModelBase
         try
         {
             var invite = _reverseSignalInvites.CreateInvite();
+
+            try
+            {
+                var payload = InviteHandshakeRequestPayload.Parser.ParseFrom(invite.Payload);
+                if (!string.IsNullOrWhiteSpace(payload.RequestCorrelationId)
+                    && Guid.TryParse(payload.RequestCorrelationId, out var corr)
+                    && corr != Guid.Empty)
+                {
+                    await _sentInvitations.SetInviteRouteAsync(
+                            requestCorrelationId: new RequestCorrelationId(corr),
+                            routeKind: InviteRouteKind.Relayed,
+                            relayHostPeerId: new Percolator.Cryptography.Primitives.PeerId(relayPeerId.Value),
+                            cancellationToken: ct)
+                        .ConfigureAwait(false);
+                }
+            }
+            catch
+            {
+            }
+
             queued = await _grpcSessions.EstablishDirectSessionAsync(relayEndpoint, invite).ConfigureAwait(false);
         }
         catch (RpcException rpcEx) when (rpcEx.StatusCode == StatusCode.Unavailable)

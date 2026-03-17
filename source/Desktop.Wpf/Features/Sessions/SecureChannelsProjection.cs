@@ -6,6 +6,7 @@ using Percolator.Application.Cryptography;
 using Percolator.Application.Network;
 using Percolator.Application.Network.Handshake;
 using Percolator.Cryptography;
+using Percolator.Cryptography.Primitives;
 using Percolator.Identity;
 using Percolator.Network;
 using R3;
@@ -24,6 +25,7 @@ public sealed class SecureChannelsProjection :
     private readonly IDirectSessionRepository _directSessions;
     private readonly IPendingHandshakeQueries _pendingHandshakeQueries;
     private readonly IPreHandshakeSessionStore _preHandshake;
+    private readonly ISentInvitationRepository _sentInvitations;
     private readonly SelfIdentityModel _self;
 
     private readonly Subject<R3.Unit> _reloadRequested = new();
@@ -38,6 +40,7 @@ public sealed class SecureChannelsProjection :
         IDirectSessionRepository directSessions,
         IPendingHandshakeQueries pendingHandshakeQueries,
         IPreHandshakeSessionStore preHandshake,
+        ISentInvitationRepository sentInvitations,
         SelfIdentityModel self)
     {
         _store = store;
@@ -46,6 +49,7 @@ public sealed class SecureChannelsProjection :
         _directSessions = directSessions;
         _pendingHandshakeQueries = pendingHandshakeQueries;
         _preHandshake = preHandshake;
+        _sentInvitations = sentInvitations;
         _self = self;
 
         _reloadRequested
@@ -181,13 +185,31 @@ public sealed class SecureChannelsProjection :
                 var peer = await _peers.FindByPublicKeyHashAsync(outbound.RecipientPublicKeyHash, cancellationToken).ConfigureAwait(false);
                 var name = peer?.DisplayName?.Value ?? "Outbound invite";
 
+                ChannelRoute route;
+                try
+                {
+                    var sent = await _sentInvitations
+                        .TryGetAsync(new RequestCorrelationId(outbound.LocalRequestId), cancellationToken)
+                        .ConfigureAwait(false);
+
+                    route = sent?.InviteRouteKind switch
+                    {
+                        InviteRouteKind.Relayed => new ChannelRoute.Relayed(sent.InviteRelayHostPeerId?.Value),
+                        _ => ChannelRoute.DirectRoute
+                    };
+                }
+                catch
+                {
+                    route = ChannelRoute.DirectRoute;
+                }
+
                 channelModels.Add(new SecureChannelModel(
                     key: SecureChannelKey.FromPendingCorrelationId(outbound.LocalRequestId),
                     displayName: name,
                     initials: ComputeInitials(name),
                     kind: SecureChannelKind.PendingOutbound,
                     lastUpdateUtc: outbound.CreatedAtUtc,
-                    route: ChannelRoute.DirectRoute));
+                    route: route));
             }
 
             channelModels = channelModels
