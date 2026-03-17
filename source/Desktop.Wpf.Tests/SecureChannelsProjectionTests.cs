@@ -73,6 +73,9 @@ public sealed class SecureChannelsProjectionTests
         sentInvitations
             .Setup(s => s.TryGetAsync(It.IsAny<RequestCorrelationId>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((SentInvitation?)null);
+        sentInvitations
+            .Setup(s => s.EnumerateUnexpiredAsync(It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            .Returns(AsyncEnumerableFrom<SentInvitation>());
 
         var self = new SelfIdentityModel();
         self.Id.Value = "1";
@@ -98,6 +101,82 @@ public sealed class SecureChannelsProjectionTests
         store.PendingInboundCount.CurrentValue.Should().Be(1);
         store.PendingInbound.Count.Should().Be(1);
         store.Channels.Count.Should().Be(0);
+    }
+
+    [Test]
+    public async Task OutboundPending_from_sent_invitation_is_rendered_immediately_after_notification()
+    {
+        // ARRANGE
+        WpfTestHarness.EnsureApplication();
+
+        var store = new SecureChannelsStore();
+
+        var sessions = new Mock<ISessionRepository>(MockBehavior.Loose);
+        sessions
+            .Setup(s => s.GetAllActiveAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<SecureSession>());
+
+        var peers = new Mock<IPeerIdentityRepository>(MockBehavior.Loose);
+
+        var directSessions = new Mock<IDirectSessionRepository>(MockBehavior.Loose);
+        directSessions
+            .Setup(s => s.ListAsync(It.IsAny<int>()))
+            .ReturnsAsync(Array.Empty<DirectSession>());
+
+        var pendingQueries = new Mock<IPendingHandshakeQueries>(MockBehavior.Loose);
+        pendingQueries
+            .Setup(q => q.EnumerateOpenAsync(It.IsAny<CancellationToken>()))
+            .Returns(AsyncEnumerableFrom<PendingHandshake>());
+
+        var preHandshake = new Mock<IPreHandshakeSessionStore>(MockBehavior.Loose);
+        preHandshake
+            .Setup(s => s.EnumeratePendingAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .Returns(AsyncEnumerableFrom<PreHandshakeRecord>());
+
+        var corrId = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+        var sentInvitation = new SentInvitation(
+            new RequestCorrelationId(corrId),
+            signedPreKeyId: Guid.NewGuid(),
+            oneTimePreKeyId: null,
+            targetPeerId: null,
+            createdAtUtc: now,
+            expiresAtUtc: now.AddMinutes(10),
+            inviteRouteKind: InviteRouteKind.Direct,
+            inviteRelayHostPeerId: null);
+
+        var sentInvitations = new Mock<ISentInvitationRepository>(MockBehavior.Loose);
+        sentInvitations
+            .Setup(s => s.TryGetAsync(It.IsAny<RequestCorrelationId>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((SentInvitation?)null);
+        sentInvitations
+            .Setup(s => s.EnumerateUnexpiredAsync(It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            .Returns(AsyncEnumerableFrom(sentInvitation));
+
+        var self = new SelfIdentityModel();
+        self.Id.Value = "1";
+
+        using var sut = new SecureChannelsProjection(
+            store,
+            sessions.Object,
+            peers.Object,
+            directSessions.Object,
+            pendingQueries.Object,
+            preHandshake.Object,
+            sentInvitations.Object,
+            self);
+
+        // ACT
+        await sut.Handle(new SentInvitationUpsertedNotification(new RequestCorrelationId(corrId)), CancellationToken.None);
+
+        // ASSERT
+        await WaitUntilAsync(
+            predicate: () => store.Channels.Count == 1,
+            timeout: TimeSpan.FromSeconds(2));
+
+        var model = store.Channels.Single();
+        model.Key.Should().Be(SecureChannelKey.FromPendingCorrelationId(corrId));
+        model.Kind.CurrentValue.Should().Be(Desktop.Wpf.Features.Sessions.Models.SecureChannelKind.PendingOutbound);
     }
 
     [Test]
@@ -177,6 +256,9 @@ public sealed class SecureChannelsProjectionTests
                 expiresAtUtc: now.AddMinutes(10),
                 inviteRouteKind: InviteRouteKind.Relayed,
                 inviteRelayHostPeerId: relayHostPeerId));
+        sentInvitations
+            .Setup(s => s.EnumerateUnexpiredAsync(It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            .Returns(AsyncEnumerableFrom<SentInvitation>());
 
         var self = new SelfIdentityModel();
         self.Id.Value = "1";
@@ -279,6 +361,9 @@ public sealed class SecureChannelsProjectionTests
         sentInvitations
             .Setup(s => s.TryGetAsync(It.IsAny<RequestCorrelationId>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((SentInvitation?)null);
+        sentInvitations
+            .Setup(s => s.EnumerateUnexpiredAsync(It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            .Returns(AsyncEnumerableFrom<SentInvitation>());
 
         using var sut = new SecureChannelsProjection(
             store,

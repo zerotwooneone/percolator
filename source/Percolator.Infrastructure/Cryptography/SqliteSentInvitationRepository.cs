@@ -126,6 +126,22 @@ internal sealed class SqliteSentInvitationRepository : ISentInvitationRepository
         }
     }
 
+    public async IAsyncEnumerable<SentInvitation> EnumerateUnexpiredAsync(DateTimeOffset nowUtc, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        // SQLite provider cannot translate some DateTimeOffset comparisons.
+        // Materialize first and then filter in-memory.
+        var candidates = await _db.SentInvitations
+            .AsNoTracking()
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        foreach (var row in candidates.Where(x => x.ExpiresAtUtc > nowUtc))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            yield return Rehydrate(row);
+        }
+    }
+
     private static SentInvitation Rehydrate(SentInvitationDbo row)
     {
         if (string.IsNullOrWhiteSpace(row.RequestCorrelationId)

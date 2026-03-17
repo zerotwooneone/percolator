@@ -17,6 +17,7 @@ public sealed class SecureChannelsProjection :
     INotificationHandler<PendingSessionCreatedNotification>,
     INotificationHandler<PendingSessionRemovedNotification>,
     INotificationHandler<SecureSessionCreatedNotification>,
+    INotificationHandler<SentInvitationUpsertedNotification>,
     IDisposable
 {
     private readonly SecureChannelsStore _store;
@@ -84,6 +85,12 @@ public sealed class SecureChannelsProjection :
         return Task.CompletedTask;
     }
 
+    public Task Handle(SentInvitationUpsertedNotification notification, CancellationToken cancellationToken)
+    {
+        _reloadRequested.OnNext(R3.Unit.Default);
+        return Task.CompletedTask;
+    }
+
     private async Task ReloadAsync(CancellationToken cancellationToken)
     {
         await _reloadGate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -97,6 +104,8 @@ public sealed class SecureChannelsProjection :
 
             var pendingInboundModels = new List<PendingInvitationModel>();
             var channelModels = new List<SecureChannelModel>();
+
+            var nowUtc = DateTimeOffset.UtcNow;
 
             // Build a correlation map for outbound pending: recipient PKH -> local request correlation id.
             var outboundPendingByPkh = new Dictionary<string, Guid>(StringComparer.Ordinal);
@@ -153,7 +162,6 @@ public sealed class SecureChannelsProjection :
 
                 // If we can derive the peer's PKH (fingerprint) and it matches an outbound pending invite,
                 // migrate the pending correlation key to the established session key to preserve UI continuity.
-                var nowUtc = DateTimeOffset.UtcNow;
                 var activeKey = peer?.GetActiveKey(nowUtc);
                 if (activeKey is not null)
                 {
@@ -209,6 +217,41 @@ public sealed class SecureChannelsProjection :
                     initials: ComputeInitials(name),
                     kind: SecureChannelKind.PendingOutbound,
                     lastUpdateUtc: outbound.CreatedAtUtc,
+                    route: route));
+            }
+
+            // Reverse-signal outbound invites: render directly from SentInvitation rows.
+            // This provides immediate PendingOutbound visibility after "Fetch & Initiate".
+            await foreach (var sent in _sentInvitations.EnumerateUnexpiredAsync(nowUtc, cancellationToken).ConfigureAwait(false))
+            {
+                var corr = sent.RequestCorrelationId.Value;
+                if (corr == Guid.Empty) continue;
+
+                var pendingKey = SecureChannelKey.FromPendingCorrelationId(corr);
+                if (migrations.ContainsKey(pendingKey))
+                {
+                    continue;
+                }
+
+                ChannelRoute route = sent.InviteRouteKind switch
+                {
+                    InviteRouteKind.Relayed => new ChannelRoute.Relayed(sent.InviteRelayHostPeerId?.Value),
+                    _ => ChannelRoute.DirectRoute
+                };
+
+                // H.4 will refine naming; for H.3 we only need immediate visibility.
+                var name = sent.TargetPeerId is not null
+                    ? (await _peers.GetByIdAsync(new Percolator.Identity.PeerId(sent.TargetPeerId.Value), cancellationToken).ConfigureAwait(false))?.DisplayName?.Value
+                    : null;
+
+                name ??= "Outbound invite";
+
+                channelModels.Add(new SecureChannelModel(
+                    key: pendingKey,
+                    displayName: name,
+                    initials: ComputeInitials(name),
+                    kind: SecureChannelKind.PendingOutbound,
+                    lastUpdateUtc: sent.CreatedAtUtc,
                     route: route));
             }
 

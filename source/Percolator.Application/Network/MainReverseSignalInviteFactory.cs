@@ -27,6 +27,7 @@ public sealed class MainReverseSignalInviteFactory : IMainReverseSignalInviteFac
     private readonly ISelfPreKeyBundleRepository _selfPreKeys;
     private readonly ISentInvitationRepository _sentInvitations;
     private readonly IClock _clock;
+    private readonly MediatR.IMediator _mediator;
 
     public MainReverseSignalInviteFactory(
         ActiveIdentityContext active,
@@ -35,7 +36,8 @@ public sealed class MainReverseSignalInviteFactory : IMainReverseSignalInviteFac
         IAdvertisedHostLookup advertisedHostLookup,
         ISelfPreKeyBundleRepository selfPreKeys,
         ISentInvitationRepository sentInvitations,
-        IClock clock)
+        IClock clock,
+        MediatR.IMediator mediator)
     {
         _active = active;
         _signing = signing;
@@ -44,6 +46,7 @@ public sealed class MainReverseSignalInviteFactory : IMainReverseSignalInviteFac
         _selfPreKeys = selfPreKeys;
         _sentInvitations = sentInvitations;
         _clock = clock;
+        _mediator = mediator;
     }
 
     public EstablishDirectSessionRequest CreateInvite()
@@ -114,6 +117,11 @@ public sealed class MainReverseSignalInviteFactory : IMainReverseSignalInviteFac
                 targetPeerId: null,
                 createdAtUtc: _clock.UtcNow,
                 expiresAtUtc: expiresAtUtc))
+            .GetAwaiter()
+            .GetResult();
+
+        _mediator
+            .Publish(new SentInvitationUpsertedNotification(new RequestCorrelationId(correlation)))
             .GetAwaiter()
             .GetResult();
 

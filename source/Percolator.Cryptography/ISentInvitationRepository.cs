@@ -8,5 +8,6 @@ public interface ISentInvitationRepository
     Task<SentInvitation?> TryGetAsync(RequestCorrelationId requestCorrelationId, CancellationToken cancellationToken = default);
     Task SetInviteRouteAsync(RequestCorrelationId requestCorrelationId, InviteRouteKind routeKind, PeerId? relayHostPeerId, CancellationToken cancellationToken = default);
     Task DeleteAsync(RequestCorrelationId requestCorrelationId, CancellationToken cancellationToken = default);
+    IAsyncEnumerable<SentInvitation> EnumerateUnexpiredAsync(DateTimeOffset nowUtc, CancellationToken cancellationToken = default);
     IAsyncEnumerable<SentInvitation> EnumerateExpiredAsync(DateTimeOffset nowUtc, CancellationToken cancellationToken = default);
 }
