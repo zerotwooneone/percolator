@@ -37,7 +37,41 @@ public sealed class SimulatorOutboundInterceptionTests
         Assert.That(ack, Is.Not.Null);
         Assert.That(ack.Version, Is.EqualTo(1));
 
-        interceptor.VerifyAll();
+        interceptor.Verify(i => i.TryDeliverInviteHandshakeResponse(endpoint, response, out It.Ref<Task<DeliverInviteHandshakeResponseAck>>.IsAny), Times.Once);
+        trust.VerifyNoOtherCalls();
+    }
+
+    [Test]
+    public async Task GrpcSessionService_EstablishDirectSessionAsync_short_circuits_to_interceptor()
+    {
+        var logger = Mock.Of<ILogger<GrpcSessionService>>();
+        var trust = new Mock<IPeerTrustManager>(MockBehavior.Strict);
+        var cert = new Mock<SharedCertificateManager>(MockBehavior.Loose, Mock.Of<ILogger<SharedCertificateManager>>());
+
+        var interceptor = new Mock<ISimulatorOutboundInterceptor>(MockBehavior.Strict);
+
+        var endpoint = new DnsEndPoint("127.77.1.1", 5002);
+        var request = new EstablishDirectSessionRequest { Version = 1 };
+
+        interceptor
+            .Setup(i => i.TryEstablishDirectSession(endpoint, request, It.IsAny<CancellationToken>(), out It.Ref<Task<EstablishDirectSessionResponse>>.IsAny))
+            .Returns((DnsEndPoint ep, EstablishDirectSessionRequest req, CancellationToken ct, out Task<EstablishDirectSessionResponse> result) =>
+            {
+                result = Task.FromResult(new EstablishDirectSessionResponse
+                {
+                    Version = 1,
+                    Queued = new EstablishDirectSessionResponse.Types.Queued { Version = 1, RequestCorrelationId = Guid.NewGuid().ToString() }
+                });
+                return true;
+            });
+
+        var sut = new GrpcSessionService(logger, trust.Object, cert.Object, interceptor.Object);
+
+        var resp = await sut.EstablishDirectSessionAsync(endpoint, request);
+        Assert.That(resp, Is.Not.Null);
+        Assert.That(resp.Version, Is.EqualTo(1));
+
+        interceptor.Verify(i => i.TryEstablishDirectSession(endpoint, request, It.IsAny<CancellationToken>(), out It.Ref<Task<EstablishDirectSessionResponse>>.IsAny), Times.Once);
         trust.VerifyNoOtherCalls();
     }
 
@@ -92,7 +126,11 @@ public sealed class SimulatorOutboundInterceptionTests
         // The critical assertion: we never created an HttpClient => no channel creation.
         httpFactory.Verify(x => x.CreateClient(It.IsAny<string>()), Times.Never);
 
-        interceptor.VerifyAll();
+        interceptor.Verify(i => i.TryDeliverOpaqueMessage(
+            endpoint,
+            It.IsAny<DeliverOpaqueMessageRequest>(),
+            It.IsAny<CancellationToken>(),
+            out It.Ref<Task<DeliverOpaqueMessageResponse>>.IsAny), Times.Once);
         profileRepo.VerifyAll();
         routePlanner.VerifyAll();
     }

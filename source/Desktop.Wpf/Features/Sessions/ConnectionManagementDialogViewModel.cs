@@ -11,6 +11,7 @@ using Percolator.Identity;
 using Percolator.Identity.Model;
 using Percolator.Network;
 using Desktop.Wpf.Features.Simulator;
+using Grpc.Core;
 using Percolator.Application.Services;
 
 namespace Desktop.Wpf.Features.Sessions;
@@ -523,8 +524,26 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
 
             if (routeMode.Key == "direct")
             {
-                _ = ParseDnsEndPoint(DirectEndpointText.Value);
-                PhaseText.Value = "Validated (Direct).";
+                var endpoint = ParseDnsEndPoint(DirectEndpointText.Value);
+                PhaseText.Value = "Sending invite...";
+
+                try
+                {
+                    var invite = _reverseSignalInvites.CreateInvite();
+                    _ = await _grpcSessions.EstablishDirectSessionAsync(endpoint, invite).ConfigureAwait(false);
+                    PhaseText.Value = "Invite sent.";
+                }
+                catch (RpcException rpcEx) when (rpcEx.StatusCode == StatusCode.Unavailable)
+                {
+                    ErrorText.Value = "Target offline.";
+                    PhaseText.Value = null;
+                }
+                catch (Exception ex)
+                {
+                    ErrorText.Value = ex.Message;
+                    PhaseText.Value = null;
+                }
+
                 return;
             }
 

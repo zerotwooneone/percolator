@@ -40,6 +40,12 @@ namespace Percolator.Application.Network
             DnsEndPoint endpoint, 
             EstablishDirectSessionRequest request)
         {
+            if (_simulatorOutbound is not null
+                && _simulatorOutbound.TryEstablishDirectSession(endpoint, request, CancellationToken.None, out var simulated))
+            {
+                return await simulated.ConfigureAwait(false);
+            }
+
             return await Inner_EstablishSession(endpoint, request).ConfigureAwait(false);
         }
 

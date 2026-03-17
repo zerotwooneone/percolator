@@ -1,4 +1,8 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Net;
+using Grpc.Core;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Percolator.Application.Network;
@@ -20,6 +24,27 @@ public sealed class SimulatorOutboundInterceptor : ISimulatorOutboundInterceptor
         _state = state;
         _scopeFactory = scopeFactory;
         _logger = logger;
+    }
+
+    public bool TryEstablishDirectSession(
+        DnsEndPoint endpoint,
+        EstablishDirectSessionRequest request,
+        CancellationToken cancellationToken,
+        out Task<EstablishDirectSessionResponse> result)
+    {
+        if (!TryResolveSimulatedPeerId(endpoint, out var peerId))
+        {
+            result = Task.FromResult(new EstablishDirectSessionResponse
+            {
+                Version = 1,
+                Never = new EstablishDirectSessionResponse.Types.Never()
+            });
+            return false;
+        }
+
+        _logger.LogInformation("[simulator] Intercepted EstablishDirectSession to {SimPeer}", peerId);
+        result = EstablishDirectSessionAsync(endpoint, peerId, request, cancellationToken);
+        return true;
     }
 
     public bool TryDeliverInviteHandshakeResponse(
@@ -85,6 +110,55 @@ public sealed class SimulatorOutboundInterceptor : ISimulatorOutboundInterceptor
         return new DeliverInviteHandshakeResponseAck { Version = 1 };
     }
 
+    private async Task<EstablishDirectSessionResponse> EstablishDirectSessionAsync(
+        DnsEndPoint endpoint,
+        Guid simulatedPeerId,
+        EstablishDirectSessionRequest request,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var peerRuntime = scope.ServiceProvider.GetRequiredService<ISimulatedPeerRuntimeService>();
+            var messageService = scope.ServiceProvider.GetRequiredService<PercolatorMessageService>();
+
+            var acceptance = await peerRuntime.AcceptReverseSignalInviteAsync(
+                    simulatedPeerId: simulatedPeerId,
+                    inviterPeerId: Guid.Empty,
+                    invite: request,
+                    cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
+
+            var ctx = new ServerCallContextStub(
+                method: "/percolator.contracts.TransportService/DeliverInviteHandshakeResponse",
+                peer: $"ipv4:{endpoint.Host}:{endpoint.Port}",
+                deadline: DateTime.UtcNow.AddMinutes(1),
+                requestHeaders: new Metadata(),
+                cancellationToken: cancellationToken);
+
+            await messageService.DeliverInviteHandshakeResponse(acceptance.Response, ctx).ConfigureAwait(false);
+
+            return new EstablishDirectSessionResponse
+            {
+                Version = 1,
+                Queued = new EstablishDirectSessionResponse.Types.Queued
+                {
+                    Version = 1,
+                    RequestCorrelationId = acceptance.Response.RequestCorrelationId
+                }
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[simulator] Failed to intercept EstablishDirectSession to {SimPeer}", simulatedPeerId);
+            return new EstablishDirectSessionResponse
+            {
+                Version = 1,
+                Never = new EstablishDirectSessionResponse.Types.Never()
+            };
+        }
+    }
+
     private async Task InvokeInScopeAsync(Func<ISimulatedPeerRuntimeService, Task> work)
     {
         if (work is null) throw new ArgumentNullException(nameof(work));
@@ -134,5 +208,37 @@ public sealed class SimulatorOutboundInterceptor : ISimulatorOutboundInterceptor
 
         simulatedPeerId = match.PeerId;
         return true;
+    }
+
+    private sealed class ServerCallContextStub : ServerCallContext
+    {
+        private readonly string _method;
+        private readonly string _peer;
+        private readonly DateTime _deadline;
+        private readonly Metadata _requestHeaders;
+        private readonly CancellationToken _cancellationToken;
+
+        public ServerCallContextStub(string method, string peer, DateTime deadline, Metadata requestHeaders, CancellationToken cancellationToken)
+        {
+            _method = method;
+            _peer = peer;
+            _deadline = deadline;
+            _requestHeaders = requestHeaders;
+            _cancellationToken = cancellationToken;
+        }
+
+        protected override string MethodCore => _method;
+        protected override string HostCore => "";
+        protected override string PeerCore => _peer;
+        protected override DateTime DeadlineCore => _deadline;
+        protected override Metadata RequestHeadersCore => _requestHeaders;
+        protected override CancellationToken CancellationTokenCore => _cancellationToken;
+        protected override Metadata ResponseTrailersCore => new();
+        protected override Status StatusCore { get; set; }
+        protected override WriteOptions? WriteOptionsCore { get; set; }
+        protected override AuthContext AuthContextCore => new("", new Dictionary<string, List<AuthProperty>>());
+
+        protected override ContextPropagationToken CreatePropagationTokenCore(ContextPropagationOptions? options) => throw new NotSupportedException();
+        protected override Task WriteResponseHeadersAsyncCore(Metadata responseHeaders) => Task.CompletedTask;
     }
 }
