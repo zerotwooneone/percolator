@@ -1,9 +1,6 @@
 using System;
-using System.Collections.Generic;
 using System.Linq;
 using System.Net;
-using System.Windows;
-using Grpc.Core;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Percolator.Application.Network;
@@ -121,8 +118,6 @@ public sealed class SimulatorOutboundInterceptor : ISimulatorOutboundInterceptor
         {
             using var scope = _scopeFactory.CreateScope();
             var peerRuntime = scope.ServiceProvider.GetRequiredService<ISimulatedPeerRuntimeService>();
-            var messageService = scope.ServiceProvider.GetRequiredService<PercolatorMessageService>();
-            var directory = scope.ServiceProvider.GetRequiredService<ISimulatedPeerDirectory>();
 
             var acceptance = await peerRuntime.AcceptReverseSignalInviteAsync(
                     simulatedPeerId: simulatedPeerId,
@@ -131,31 +126,19 @@ public sealed class SimulatorOutboundInterceptor : ISimulatorOutboundInterceptor
                     cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
 
-            var ctx = new ServerCallContextStub(
-                method: "/percolator.contracts.TransportService/DeliverInviteHandshakeResponse",
-                peer: $"ipv4:{endpoint.Host}:{endpoint.Port}",
-                deadline: DateTime.UtcNow.AddMinutes(1),
-                requestHeaders: new Metadata(),
-                cancellationToken: cancellationToken);
-
-            await messageService.DeliverInviteHandshakeResponse(acceptance.Response, ctx).ConfigureAwait(false);
-
-            // Chunk H.1: reflect the successful session creation in the simulator UI state.
-            // This is the Main -> Simulator initiation path; without this, the Handshakes tab
-            // can remain stale even though the simulated peer has created the ratchet session.
-            var model = directory.Peers.FirstOrDefault(p => p.PeerId == simulatedPeerId);
-            if (model is not null)
+            // Chunk H.2: do NOT auto-deliver the response to Main. Queue it so the simulator UI
+            // can present an explicit Accept button to trigger delivery.
+            if (!Guid.TryParse(acceptance.Response.RequestCorrelationId, out var corr))
             {
-                var dispatcher = Application.Current?.Dispatcher;
-                if (dispatcher is not null)
-                {
-                    await dispatcher.InvokeAsync(model.MarkEstablished);
-                }
-                else
-                {
-                    model.MarkEstablished();
-                }
+                corr = Guid.NewGuid();
             }
+
+            await peerRuntime.QueueInviteHandshakeResponseForDeliveryToMainAsync(
+                    simulatedPeerId: simulatedPeerId,
+                    requestCorrelationId: corr,
+                    response: acceptance.Response,
+                    cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
 
             return new EstablishDirectSessionResponse
             {
@@ -163,7 +146,7 @@ public sealed class SimulatorOutboundInterceptor : ISimulatorOutboundInterceptor
                 Queued = new EstablishDirectSessionResponse.Types.Queued
                 {
                     Version = 1,
-                    RequestCorrelationId = acceptance.Response.RequestCorrelationId
+                    RequestCorrelationId = corr.ToString()
                 }
             };
         }
@@ -229,35 +212,4 @@ public sealed class SimulatorOutboundInterceptor : ISimulatorOutboundInterceptor
         return true;
     }
 
-    private sealed class ServerCallContextStub : ServerCallContext
-    {
-        private readonly string _method;
-        private readonly string _peer;
-        private readonly DateTime _deadline;
-        private readonly Metadata _requestHeaders;
-        private readonly CancellationToken _cancellationToken;
-
-        public ServerCallContextStub(string method, string peer, DateTime deadline, Metadata requestHeaders, CancellationToken cancellationToken)
-        {
-            _method = method;
-            _peer = peer;
-            _deadline = deadline;
-            _requestHeaders = requestHeaders;
-            _cancellationToken = cancellationToken;
-        }
-
-        protected override string MethodCore => _method;
-        protected override string HostCore => "";
-        protected override string PeerCore => _peer;
-        protected override DateTime DeadlineCore => _deadline;
-        protected override Metadata RequestHeadersCore => _requestHeaders;
-        protected override CancellationToken CancellationTokenCore => _cancellationToken;
-        protected override Metadata ResponseTrailersCore => new();
-        protected override Status StatusCore { get; set; }
-        protected override WriteOptions? WriteOptionsCore { get; set; }
-        protected override AuthContext AuthContextCore => new("", new Dictionary<string, List<AuthProperty>>());
-
-        protected override ContextPropagationToken CreatePropagationTokenCore(ContextPropagationOptions? options) => throw new NotSupportedException();
-        protected override Task WriteResponseHeadersAsyncCore(Metadata responseHeaders) => Task.CompletedTask;
-    }
 }

@@ -378,9 +378,22 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
                 cancellationToken: ct)
             .ConfigureAwait(false);
 
+        // Chunk H.2: If finalization fails, this pending was likely initiated by Main -> Simulator.
+        // In that case we need to deliver the queued InviteHandshakeResponse to Main, and the
+        // simulated peer can transition to Established immediately (it already created the session
+        // during invite receipt).
         if (finalized is null)
         {
-            return;
+            var delivered = await _runtime.TryDeliverQueuedInviteHandshakeResponseToMainAsync(
+                    simulatedPeerId: _model.PeerId,
+                    requestCorrelationId: corr.Value,
+                    cancellationToken: ct)
+                .ConfigureAwait(false);
+
+            if (!delivered)
+            {
+                return;
+            }
         }
 
         await InvokeOnUiAsync(() => _model.MarkEstablished()).ConfigureAwait(false);

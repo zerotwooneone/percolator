@@ -99,6 +99,22 @@ public interface ISimulatedPeerRuntimeService
         Guid acceptorPeerId,
         Guid requestCorrelationId,
         CancellationToken cancellationToken = default);
+
+    bool TryGetPendingInviteHandshakeResponse(
+        Guid simulatedPeerId,
+        Guid requestCorrelationId,
+        out InviteHandshakeResponse response);
+
+    Task QueueInviteHandshakeResponseForDeliveryToMainAsync(
+        Guid simulatedPeerId,
+        Guid requestCorrelationId,
+        InviteHandshakeResponse response,
+        CancellationToken cancellationToken = default);
+
+    Task<bool> TryDeliverQueuedInviteHandshakeResponseToMainAsync(
+        Guid simulatedPeerId,
+        Guid requestCorrelationId,
+        CancellationToken cancellationToken = default);
 }
 
 public sealed class SimulatedPeerRuntimeService : ISimulatedPeerRuntimeService
@@ -512,6 +528,52 @@ public sealed class SimulatedPeerRuntimeService : ISimulatedPeerRuntimeService
         _ = _pending.TryTakeInviteHandshakeResponse(simulatedPeerId, requestCorrelationId, out _);
         await PersistRuntimeStoreAsync(simulatedPeerId, runtime, cancellationToken).ConfigureAwait(false);
         return sessionId;
+    }
+
+    public bool TryGetPendingInviteHandshakeResponse(
+        Guid simulatedPeerId,
+        Guid requestCorrelationId,
+        out InviteHandshakeResponse response)
+    {
+        return _pending.TryGetInviteHandshakeResponse(simulatedPeerId, requestCorrelationId, out response);
+    }
+
+    public async Task QueueInviteHandshakeResponseForDeliveryToMainAsync(
+        Guid simulatedPeerId,
+        Guid requestCorrelationId,
+        InviteHandshakeResponse response,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (response is null) throw new ArgumentNullException(nameof(response));
+
+        var model = _peers.Peers.FirstOrDefault(p => p.PeerId == simulatedPeerId)
+            ?? throw new InvalidOperationException($"No simulated peer exists with id {simulatedPeerId}");
+
+        _pending.AddInviteHandshakeResponse(simulatedPeerId, requestCorrelationId, response);
+        model.MarkInboundPending(requestCorrelationId);
+
+        var runtime = _runtimeByPeerId.GetOrAdd(simulatedPeerId, CreateRuntime);
+        await PersistRuntimeStoreAsync(simulatedPeerId, runtime, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<bool> TryDeliverQueuedInviteHandshakeResponseToMainAsync(
+        Guid simulatedPeerId,
+        Guid requestCorrelationId,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (!_pending.TryTakeInviteHandshakeResponse(simulatedPeerId, requestCorrelationId, out var response))
+        {
+            return false;
+        }
+
+        await DeliverInviteHandshakeResponseToMainAsync(response, cancellationToken).ConfigureAwait(false);
+
+        var runtime = _runtimeByPeerId.GetOrAdd(simulatedPeerId, CreateRuntime);
+        await PersistRuntimeStoreAsync(simulatedPeerId, runtime, cancellationToken).ConfigureAwait(false);
+        return true;
     }
 
     private async Task PersistRuntimeStoreAsync(Guid simulatedPeerId, SimulatedPeerRuntime runtime, CancellationToken cancellationToken)
