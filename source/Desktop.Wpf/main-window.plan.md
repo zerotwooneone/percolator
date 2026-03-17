@@ -875,6 +875,69 @@ Definition of done:
 - Simulator UI shows inbound pending with Accept/Reject buttons.
 - Clicking Accept delivers response to Main and results in established state on both sides.
 
+### Subchunk H.3 — Main-initiated reverse-signal should show PendingOutbound immediately (source: SentInvitation)
+
+Problem:
+
+- After clicking “Fetch & Initiate” (Network Search tab), the user expects to see a PendingOutbound secure channel appear in the main window list immediately.
+- The reverse-signal send path already persists a `SentInvitation` keyed by `request_correlation_id`, but the main list does not reliably render it as a pending channel.
+
+What needs to change:
+
+- **Projection must render PendingOutbound from `ISentInvitationRepository` (reverse-signal source of truth)**
+  - Do not force reverse-signal into `IPreHandshakeSessionStore` (it requires fields that are not available/meaningful at reverse-signal send time).
+  - Extend `SecureChannelsProjection.ReloadAsync` so PendingOutbound rows include unexpired `SentInvitation` rows that have not yet migrated to an established session.
+  - Key the pending channel by correlation id:
+    - `SecureChannelKey.FromPendingCorrelationId(sent.RequestCorrelationId.Value)`
+- **Define “still pending” vs “migrated” rule**
+  - A `SentInvitation` should stop rendering as PendingOutbound once:
+    - it is expired, or
+    - it has been matched/migrated to an established session (existing migration mechanism already uses correlation id continuity).
+- **Immediate UI refresh when invite is sent**
+  - Emitting the `SentInvitation` row is not enough if the projection is not notified.
+  - Add an outbound-send notification (e.g., `SentInvitationUpsertedNotification(RequestCorrelationId)` or `OutboundInviteSentNotification(RequestCorrelationId)`), and have `SecureChannelsProjection` handle it by requesting a reload.
+  - Avoid pushing UI-only reload calls from the dialog VM; prefer notification-driven projection behavior.
+
+Definition of done:
+
+- Clicking “Fetch & Initiate” shows a PendingOutbound secure channel immediately.
+- When the handshake completes, the pending row migrates to Active without duplicating entries.
+
+### Subchunk H.4 — Reverse-signal peer naming + endpoint-only initiation
+
+Goal:
+
+- The display name entered in Network Search is used consistently:
+  - immediately on the PendingOutbound row
+  - later on the saved peer identity once the remote identity is learned
+- Additionally, allow direct reverse-signal initiation with **endpoint only** (no PKH), using correlation-id keyed pending identity.
+
+What needs to change:
+
+- **Persist outbound metadata on `SentInvitation`**
+  - Add fields to `SentInvitation` (schema + repository + writer at send site):
+    - `TargetDisplayName`
+    - `TargetEndpointHost` + `TargetEndpointPort` (or a single normalized endpoint string)
+  - These fields are keyed by `RequestCorrelationId` and survive until finalize.
+- **Render PendingOutbound label from `SentInvitation`**
+  - Update `SecureChannelsProjection` PendingOutbound rendering to prefer:
+    - `PeerIdentity.DisplayName` if a peer exists
+    - else `SentInvitation.TargetDisplayName`
+    - else `"Outbound invite"`
+- **Endpoint-only UX**
+  - For Direct mode, allow `TargetPkhText` to be optional.
+  - Validate endpoint and send invite regardless of PKH presence.
+  - Persist the name + endpoint metadata on `SentInvitation` so the UI can show a coherent pending row.
+- **Upgrade to real peer identity on response**
+  - When `InviteHandshakeResponse` is received, compute the remote PKH from `acceptor_identity_key`.
+  - Resolve or create `PeerIdentity` keyed by PKH.
+  - Apply `TargetDisplayName` to the peer only if the peer has no existing display name.
+
+Definition of done:
+
+- The PendingOutbound row displays the user-entered name even when no peer exists yet.
+- Endpoint-only initiation works for Direct mode and results in a saved peer name once the response arrives.
+
 ---
 
 ## Chunk I — Notification badge + default focus behavior for Connection Management button
