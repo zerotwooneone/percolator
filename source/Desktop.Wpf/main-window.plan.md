@@ -949,43 +949,23 @@ Outcome:
 
 Work (recipe):
 
-- Identify current UI hook points
-  - The “Add peer” button lives in the sessions sidebar:
-    - File: `Desktop.Wpf/Features/Sessions/SessionsSidebarView.xaml`
-    - Control: `MatButton x:Name="AddPeerBtn"`
-    - Currently binds `NotificationCount` to `PendingMenu.PendingHandshakes.Count`.
-  - Connection Management dialog selected tab is already bindable:
-    - File: `Desktop.Wpf/Features/Sessions/ConnectionManagementDialogWindow.xaml`
-    - Binding: `TabControl SelectedIndex="{Binding SelectedTabIndex.Value, Mode=TwoWay}"`
-    - VM property: `ConnectionManagementDialogViewModel.SelectedTabIndex`
+- Badge count
+  - Ensure the header “Connection Management / Add peer” button displays the inbound pending count.
+  - The count must be sourced from shared state (store-level), not recomputed ad-hoc in the view.
+  - It’s acceptable to *project* the store count into a ViewModel property for binding.
 
-- State ownership
-  - The canonical inbound pending count must come from the shared store:
-    - Use `ISecureChannelsStore.PendingInboundCount` as the single source of truth.
-  - ViewModels MAY project this into a bindable property, but must not compute/maintain a separate count.
+- Pulse / attention behavior
+  - When the inbound pending count transitions:
+    - `0 -> 1` (first pending arrives)
+    - or `n -> n+1` (more pendings arrive)
+  - the header badge should pulse to draw attention.
+  - Keep this purely UI behavior (no domain logic).
 
-- Badge wiring (MVVM compliant)
-  - Update the sidebar VM/XAML so `NotificationCount` ultimately reflects `ISecureChannelsStore.PendingInboundCount`.
-    - Acceptable approaches:
-      - Bind directly to `_store.PendingInboundCount.Value` via a VM-exposed `BindableReactiveProperty<int>` projection.
-      - Or expose a `PendingCount` property on `PendingHandshakesMenuViewModel` that is a projection of the store count.
-    - Avoid: binding to `ObservableCollection.Count` on a VM-owned list as the canonical count (it can drift from the store).
-
-- Pulse/attention behavior
-  - Implement a simple style trigger/animation on `AddPeerBtn` when `PendingInboundCount > 0`.
-    - Keep this as UI-only behavior; do not add domain logic.
-    - File(s): `SessionsSidebarView.xaml` or shared styles dictionary if preferred.
-
-- Default focus/tab behavior when opening Connection Management
-  - Rule:
-    - If `PendingInboundCount > 0`, default to Tab 1 (Incoming Signals).
-    - Else default to Tab 2 (Network Search).
-  - Implementation constraints:
-    - This is a UI concern driven by store state at dialog open time.
-    - Do not introduce a MediatR handler that imperatively manipulates dialog ViewModels.
-  - Concrete implementation location options:
-    - Option A: in `PendingHandshakesMenuViewModel.OpenNewHandshakeCommand`, set an input on the dialog VM prior to showing it.
-    - Option B: in `ConnectionManagementDialogViewModel.InitializeAsync`, read the store count and set `SelectedTabIndex` once.
+- Default tab selection when opening Connection Management
+  - At dialog open time, choose the initial tab based on whether inbound pending exists:
+    - inbound pending exists: default to the Incoming Signals tab
+    - otherwise: default to the Network Search tab
+  - This decision should be made once when the dialog is created/opened (not continuously).
 
 Definition of done:
 
@@ -996,6 +976,14 @@ Definition of done:
 Minimal tests:
 
 - Unit test that a VM projection of `PendingInboundCount` updates when store pending inbound changes.
+
+Implementation note:
+
+- This chunk may already be complete:
+  - `MatButton.NotificationCount` has built-in pulsing behavior when the count increases.
+  - The sidebar button already binds its `NotificationCount` to a pending-handshake count.
+  - `ConnectionManagementDialogViewModel.InitializeAsync` already selects the Incoming tab when pending invitations exist.
+- If you want stricter alignment to the definition of done, the remaining delta would be to bind the badge count *directly* (or via a projection) to `ISecureChannelsStore.PendingInboundCount` and to base the default tab decision on the same store count rather than any dialog-local enumeration.
 
 ---
 
