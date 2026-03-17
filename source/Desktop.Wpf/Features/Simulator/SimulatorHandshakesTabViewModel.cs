@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.Windows;
@@ -21,8 +22,7 @@ public sealed class SimulatorHandshakesTabViewModel : IDisposable
     private readonly ObservableCollection<SimulatedHandshakeStateMachineCardViewModel> _cards = new();
     private readonly ObservableCollection<RelayHostOption> _relayHosts = new();
 
-    private NotifyCollectionChangedEventHandler? _diagnosticsChangedHandler;
-    private NotifyCollectionChangedEventHandler? _statePeersChangedHandler;
+    private readonly Dictionary<Guid, IDisposable> _relayCapableSubscriptions = new();
 
     public SimulatorHandshakesTabViewModel(
         ISimulatedPeerDirectory directory,
@@ -119,39 +119,35 @@ public sealed class SimulatorHandshakesTabViewModel : IDisposable
         notify.CollectionChanged -= OnPeersChanged;
         notify.CollectionChanged += OnPeersChanged;
 
-        _statePeersChangedHandler = (_, __) => OnStatePeersChanged();
-        ((INotifyCollectionChanged)_state.Peers).CollectionChanged -= _statePeersChangedHandler;
-        ((INotifyCollectionChanged)_state.Peers).CollectionChanged += _statePeersChangedHandler;
-
-        _diagnosticsChangedHandler = (_, __) => OnDiagnosticsChanged();
-        ((INotifyCollectionChanged)_diagnostics.Events).CollectionChanged -= _diagnosticsChangedHandler;
-        ((INotifyCollectionChanged)_diagnostics.Events).CollectionChanged += _diagnosticsChangedHandler;
+        WireRelayCapabilitySubscriptions();
     }
 
-    private void OnStatePeersChanged()
+    private void WireRelayCapabilitySubscriptions()
+    {
+        foreach (var d in _relayCapableSubscriptions.Values)
+        {
+            d.Dispose();
+        }
+        _relayCapableSubscriptions.Clear();
+
+        foreach (var peer in _directory.Peers)
+        {
+            var sub = peer.IsRelayCapable
+                .DistinctUntilChanged()
+                .Subscribe(_ => OnRelayCapabilityChanged());
+            _relayCapableSubscriptions[peer.PeerId] = sub;
+        }
+    }
+
+    private void OnRelayCapabilityChanged()
     {
         if (!Application.Current.Dispatcher.CheckAccess())
         {
-            _ = Application.Current.Dispatcher.InvokeAsync(OnStatePeersChanged);
+            _ = Application.Current.Dispatcher.InvokeAsync(OnRelayCapabilityChanged);
             return;
         }
 
         RefreshRelayHosts();
-    }
-
-    private void OnDiagnosticsChanged()
-    {
-        if (!Application.Current.Dispatcher.CheckAccess())
-        {
-            _ = Application.Current.Dispatcher.InvokeAsync(OnDiagnosticsChanged);
-            return;
-        }
-
-        var last = _diagnostics.Events.LastOrDefault();
-        if (last?.EventType == SimulatorDiagnosticEventType.PeerRelayCapableChanged)
-        {
-            RefreshRelayHosts();
-        }
     }
 
     private void OnPeersChanged(object? sender, NotifyCollectionChangedEventArgs e)
@@ -162,6 +158,7 @@ public sealed class SimulatorHandshakesTabViewModel : IDisposable
             return;
         }
 
+        WireRelayCapabilitySubscriptions();
         RefreshRelayHosts();
 
         if (e.Action is NotifyCollectionChangedAction.Reset)
@@ -221,26 +218,10 @@ public sealed class SimulatorHandshakesTabViewModel : IDisposable
         {
         }
 
-        try
+        foreach (var d in _relayCapableSubscriptions.Values)
         {
-            if (_statePeersChangedHandler is not null)
-            {
-                ((INotifyCollectionChanged)_state.Peers).CollectionChanged -= _statePeersChangedHandler;
-            }
+            d.Dispose();
         }
-        catch
-        {
-        }
-
-        try
-        {
-            if (_diagnosticsChangedHandler is not null)
-            {
-                ((INotifyCollectionChanged)_diagnostics.Events).CollectionChanged -= _diagnosticsChangedHandler;
-            }
-        }
-        catch
-        {
-        }
+        _relayCapableSubscriptions.Clear();
     }
 }
