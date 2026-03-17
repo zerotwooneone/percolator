@@ -6,6 +6,7 @@ using Percolator.Cryptography.Primitives;
 using Percolator.Contracts;
 using Percolator.Identity;
 using Percolator.Identity.Model;
+using Percolator.Network;
 
 namespace Percolator.Application.Network.Handshake
 {
@@ -21,6 +22,7 @@ namespace Percolator.Application.Network.Handshake
         private readonly ISentInvitationRepository _sentInvitations;
         private readonly ISelfPreKeyBundleRepository _selfPreKeys;
         private readonly IPeerIdentityRepository _peerIdentities;
+        private readonly IDirectSessionRepository _directSessions;
         private readonly IMediator _mediator;
 
         public InitiatorFinalizeService(
@@ -34,6 +36,7 @@ namespace Percolator.Application.Network.Handshake
             ISentInvitationRepository sentInvitations,
             ISelfPreKeyBundleRepository selfPreKeys,
             IPeerIdentityRepository peerIdentities,
+            IDirectSessionRepository directSessions,
             IMediator mediator)
         {
             _logger = logger;
@@ -46,6 +49,7 @@ namespace Percolator.Application.Network.Handshake
             _sentInvitations = sentInvitations;
             _selfPreKeys = selfPreKeys;
             _peerIdentities = peerIdentities;
+            _directSessions = directSessions;
             _mediator = mediator;
         }
 
@@ -254,6 +258,25 @@ namespace Percolator.Application.Network.Handshake
                 _clock);
 
             await _sessions.AddAsync(final, cancellationToken).ConfigureAwait(false);
+
+            // Persist mapping between remote peer and session id (used by UI for relay-host selection).
+            // Best-effort: do not fail finalize if persistence fails.
+            if (peerIdentity is not null)
+            {
+                try
+                {
+                    await _directSessions.UpsertAsync(
+                            new Percolator.Network.PeerId(peerIdentity.Id.Value),
+                            new Percolator.Network.DirectSessionId(sid.Value),
+                            selfIdentityId.Value)
+                        .ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogInformation(ex, "Invite finalize: best-effort direct session upsert failed.");
+                }
+            }
+
             await _mediator.Publish(
                     new Percolator.Application.Network.SecureSessionCreatedNotification(
                         sid,

@@ -50,6 +50,8 @@ public sealed class ConnectionManagementDialogImportTokenTests
 
         var peerIdentities = new Mock<Percolator.Identity.IPeerIdentityRepository>(MockBehavior.Loose);
 
+        var store = new Desktop.Wpf.Features.Sessions.State.SecureChannelsStore();
+
         var establish = new Mock<IEstablishDirectSessionService>(MockBehavior.Loose);
         establish.Setup(x => x.QueueInviteAsync(
                 It.IsAny<Percolator.Identity.SelfId>(),
@@ -73,7 +75,8 @@ public sealed class ConnectionManagementDialogImportTokenTests
             simulatorState.Object,
             active,
             peerIdentities.Object,
-            establish.Object);
+            establish.Object,
+            store);
 
         var token = CreateSignedInviteToken(out var inviterSpki, out var payloadBytes, out var sigBytes);
         sut.InviteTokenText.Value = token;
@@ -137,6 +140,8 @@ public sealed class ConnectionManagementDialogImportTokenTests
         var peerIdentities = new Mock<Percolator.Identity.IPeerIdentityRepository>(MockBehavior.Loose);
         var establish = new Mock<IEstablishDirectSessionService>(MockBehavior.Loose);
 
+        var store = new Desktop.Wpf.Features.Sessions.State.SecureChannelsStore();
+
         var sut = new ConnectionManagementDialogViewModel(
             inbox.Object,
             actions.Object,
@@ -149,7 +154,8 @@ public sealed class ConnectionManagementDialogImportTokenTests
             simulatorState.Object,
             active,
             peerIdentities.Object,
-            establish.Object);
+            establish.Object,
+            store);
 
         var token = CreateSignedInviteToken(out _, out var payloadBytes, out var sigBytes);
 

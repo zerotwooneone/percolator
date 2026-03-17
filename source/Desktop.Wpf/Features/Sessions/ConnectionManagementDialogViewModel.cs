@@ -1,5 +1,6 @@
 using Desktop.Wpf.Shared.Mvvm;
 using R3;
+using System.Collections.Specialized;
 using System.Collections.ObjectModel;
 using System.Net;
 using System.Security.Cryptography;
@@ -11,6 +12,7 @@ using Percolator.Identity;
 using Percolator.Identity.Model;
 using Percolator.Network;
 using Desktop.Wpf.Features.Simulator;
+using Desktop.Wpf.Features.Sessions.State;
 using Grpc.Core;
 using Percolator.Application.Services;
 
@@ -84,6 +86,10 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
     private readonly ActiveIdentityContext _active;
     private readonly IPeerIdentityRepository _peerIdentities;
     private readonly IEstablishDirectSessionService _establishDirectSession;
+    private readonly ISecureChannelsStore _store;
+
+    private readonly object _relayHostRefreshLock = new();
+    private bool _relayHostRefreshQueued;
 
     private readonly ObservableCollection<PendingInvitationItem> _pendingInvitations = new();
     private readonly ObservableCollection<RouteModeOption> _routeModeOptions = new();
@@ -128,7 +134,8 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
         ISimulatorStateService simulatorState,
         ActiveIdentityContext active,
         IPeerIdentityRepository peerIdentities,
-        IEstablishDirectSessionService establishDirectSession)
+        IEstablishDirectSessionService establishDirectSession,
+        ISecureChannelsStore store)
     {
         _inbox = inbox;
         _actions = actions;
@@ -142,6 +149,9 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
         _active = active;
         _peerIdentities = peerIdentities;
         _establishDirectSession = establishDirectSession;
+        _store = store;
+
+        ((INotifyCollectionChanged)_store.Channels).CollectionChanged += OnChannelsChanged;
         SelectedTabIndex = new BindableReactiveProperty<int>(0).AddTo(ref _bag);
 
         PendingInvitations = new ReadOnlyObservableCollection<PendingInvitationItem>(_pendingInvitations);
@@ -174,6 +184,32 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
             .AddTo(ref _bag);
 
         _ = InitializeAsync().ContinueWith(static t => _ = t.Exception, TaskContinuationOptions.OnlyOnFaulted);
+    }
+
+    private void OnChannelsChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        // Relay host options are derived from DirectSessions, which may change after a handshake completes.
+        // Refresh while the dialog is open so the Relay dropdown stays up-to-date.
+        lock (_relayHostRefreshLock)
+        {
+            if (_relayHostRefreshQueued) return;
+            _relayHostRefreshQueued = true;
+        }
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await RefreshRelayHostOptionsAsync(CancellationToken.None).ConfigureAwait(false);
+            }
+            finally
+            {
+                lock (_relayHostRefreshLock)
+                {
+                    _relayHostRefreshQueued = false;
+                }
+            }
+        });
     }
 
     private async Task ExecuteImportTokenAsync(CancellationToken ct = default)
@@ -607,6 +643,7 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
         Disposable.Dispose(PhaseText);
         Disposable.Dispose(ErrorText);
         Disposable.Dispose(InviteTokenText);
+        ((INotifyCollectionChanged)_store.Channels).CollectionChanged -= OnChannelsChanged;
         _bag.Dispose();
     }
 }
