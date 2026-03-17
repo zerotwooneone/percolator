@@ -37,6 +37,8 @@ internal sealed class SqliteSentInvitationRepository : ISentInvitationRepository
                 SignedPreKeyId = invitation.SignedPreKeyId,
                 OneTimePreKeyId = invitation.OneTimePreKeyId,
                 TargetPeerId = invitation.TargetPeerId?.Value,
+                InviteRouteKind = (int)invitation.InviteRouteKind,
+                InviteRelayHostPeerId = invitation.InviteRelayHostPeerId?.Value,
                 CreatedAtUtc = invitation.CreatedAtUtc,
                 ExpiresAtUtc = invitation.ExpiresAtUtc,
             });
@@ -46,10 +48,33 @@ internal sealed class SqliteSentInvitationRepository : ISentInvitationRepository
             existing.SignedPreKeyId = invitation.SignedPreKeyId;
             existing.OneTimePreKeyId = invitation.OneTimePreKeyId;
             existing.TargetPeerId = invitation.TargetPeerId?.Value;
+            existing.InviteRouteKind = (int)invitation.InviteRouteKind;
+            existing.InviteRelayHostPeerId = invitation.InviteRelayHostPeerId?.Value;
             existing.CreatedAtUtc = invitation.CreatedAtUtc;
             existing.ExpiresAtUtc = invitation.ExpiresAtUtc;
         }
 
+        await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task SetInviteRouteAsync(RequestCorrelationId requestCorrelationId, InviteRouteKind routeKind, PeerId? relayHostPeerId, CancellationToken cancellationToken = default)
+    {
+        if (_active.Identity is null) throw new InvalidOperationException("Active identity not loaded.");
+
+        var correlation = requestCorrelationId.ToString();
+        var existing = await _db.SentInvitations
+            .FirstOrDefaultAsync(
+                x => x.SelfIdentityId == _active.Identity.SelfIdentityId.Value && x.RequestCorrelationId == correlation,
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        if (existing is null)
+        {
+            return;
+        }
+
+        existing.InviteRouteKind = (int)routeKind;
+        existing.InviteRelayHostPeerId = relayHostPeerId?.Value;
         await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
     }
 
@@ -116,6 +141,8 @@ internal sealed class SqliteSentInvitationRepository : ISentInvitationRepository
             row.OneTimePreKeyId,
             row.TargetPeerId.HasValue ? new PeerId(row.TargetPeerId.Value) : null,
             row.CreatedAtUtc,
-            row.ExpiresAtUtc);
+            row.ExpiresAtUtc,
+            inviteRouteKind: (InviteRouteKind)row.InviteRouteKind,
+            inviteRelayHostPeerId: row.InviteRelayHostPeerId.HasValue ? new PeerId(row.InviteRelayHostPeerId.Value) : null);
     }
 }

@@ -7,6 +7,7 @@ using Percolator.Application.Network;
 using Percolator.Application.Network.Handshake;
 using Percolator.Cryptography;
 using Percolator.Identity;
+using Percolator.Network;
 using R3;
 
 namespace Desktop.Wpf.Features.Sessions;
@@ -20,6 +21,7 @@ public sealed class SecureChannelsProjection :
     private readonly SecureChannelsStore _store;
     private readonly ISessionRepository _sessions;
     private readonly IPeerIdentityRepository _peers;
+    private readonly IDirectSessionRepository _directSessions;
     private readonly IPendingHandshakeQueries _pendingHandshakeQueries;
     private readonly IPreHandshakeSessionStore _preHandshake;
     private readonly SelfIdentityModel _self;
@@ -33,6 +35,7 @@ public sealed class SecureChannelsProjection :
         SecureChannelsStore store,
         ISessionRepository sessions,
         IPeerIdentityRepository peers,
+        IDirectSessionRepository directSessions,
         IPendingHandshakeQueries pendingHandshakeQueries,
         IPreHandshakeSessionStore preHandshake,
         SelfIdentityModel self)
@@ -40,6 +43,7 @@ public sealed class SecureChannelsProjection :
         _store = store;
         _sessions = sessions;
         _peers = peers;
+        _directSessions = directSessions;
         _pendingHandshakeQueries = pendingHandshakeQueries;
         _preHandshake = preHandshake;
         _self = self;
@@ -120,11 +124,28 @@ public sealed class SecureChannelsProjection :
             }
 
             var sessions = await _sessions.GetAllActiveAsync(selfId, cancellationToken).ConfigureAwait(false);
+            IReadOnlyList<DirectSession> direct;
+            try
+            {
+                direct = await _directSessions.ListAsync(selfId).ConfigureAwait(false);
+            }
+            catch
+            {
+                direct = Array.Empty<DirectSession>();
+            }
+
+            var directPeers = new HashSet<Guid>(direct.Select(x => x.RemotePeerId.Value));
             foreach (var s in sessions)
             {
-                var pid = new PeerId(s.RemotePeerId.Value);
+                var pid = new Percolator.Identity.PeerId(s.RemotePeerId.Value);
                 var peer = await _peers.GetByIdAsync(pid, cancellationToken).ConfigureAwait(false);
                 var name = peer?.DisplayName?.Value ?? s.RemotePeerId.Value.ToString()[..8];
+
+                var isRelayed = !directPeers.Contains(s.RemotePeerId.Value);
+                var kind = isRelayed ? SecureChannelKind.Relay : SecureChannelKind.Direct;
+                var route = isRelayed
+                    ? new ChannelRoute.Relayed(RelayHostPeerId: null)
+                    : ChannelRoute.DirectRoute;
 
                 // If we can derive the peer's PKH (fingerprint) and it matches an outbound pending invite,
                 // migrate the pending correlation key to the established session key to preserve UI continuity.
@@ -143,8 +164,9 @@ public sealed class SecureChannelsProjection :
                     key: SecureChannelKey.FromSessionId(s.Id.Value),
                     displayName: name,
                     initials: ComputeInitials(name),
-                    kind: SecureChannelKind.Direct,
-                    lastUpdateUtc: s.LastUsedAtUtc));
+                    kind: kind,
+                    lastUpdateUtc: s.LastUsedAtUtc,
+                    route: route));
             }
 
             foreach (var outbound in outboundPendingRecords)
@@ -164,7 +186,8 @@ public sealed class SecureChannelsProjection :
                     displayName: name,
                     initials: ComputeInitials(name),
                     kind: SecureChannelKind.PendingOutbound,
-                    lastUpdateUtc: outbound.CreatedAtUtc));
+                    lastUpdateUtc: outbound.CreatedAtUtc,
+                    route: ChannelRoute.DirectRoute));
             }
 
             channelModels = channelModels

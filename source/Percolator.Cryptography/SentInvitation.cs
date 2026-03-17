@@ -2,12 +2,20 @@ using Percolator.Cryptography.Primitives;
 
 namespace Percolator.Cryptography;
 
+public enum InviteRouteKind
+{
+    Direct = 0,
+    Relayed = 1
+}
+
 public sealed class SentInvitation
 {
     public RequestCorrelationId RequestCorrelationId { get; }
     public Guid SignedPreKeyId { get; }
     public Guid? OneTimePreKeyId { get; }
     public PeerId? TargetPeerId { get; }
+    public InviteRouteKind InviteRouteKind { get; }
+    public PeerId? InviteRelayHostPeerId { get; }
     public DateTimeOffset CreatedAtUtc { get; }
     public DateTimeOffset ExpiresAtUtc { get; }
 
@@ -17,7 +25,9 @@ public sealed class SentInvitation
         Guid? oneTimePreKeyId,
         PeerId? targetPeerId,
         DateTimeOffset createdAtUtc,
-        DateTimeOffset expiresAtUtc)
+        DateTimeOffset expiresAtUtc,
+        InviteRouteKind inviteRouteKind = InviteRouteKind.Direct,
+        PeerId? inviteRelayHostPeerId = null)
     {
         if (requestCorrelationId.Value == Guid.Empty)
         {
@@ -40,6 +50,8 @@ public sealed class SentInvitation
         SignedPreKeyId = signedPreKeyId;
         OneTimePreKeyId = oneTimePreKeyId;
         TargetPeerId = targetPeerId;
+        InviteRouteKind = inviteRouteKind;
+        InviteRelayHostPeerId = inviteRelayHostPeerId;
         CreatedAtUtc = createdAtUtc;
         ExpiresAtUtc = expiresAtUtc;
     }

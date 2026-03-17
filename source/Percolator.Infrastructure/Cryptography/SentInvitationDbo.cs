@@ -13,6 +13,9 @@ public sealed class SentInvitationDbo
 
     public Guid? TargetPeerId { get; set; }
 
+    public int InviteRouteKind { get; set; }
+    public Guid? InviteRelayHostPeerId { get; set; }
+
     public DateTimeOffset CreatedAtUtc { get; set; }
     public DateTimeOffset ExpiresAtUtc { get; set; }
 }

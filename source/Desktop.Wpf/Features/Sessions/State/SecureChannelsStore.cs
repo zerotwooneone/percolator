@@ -97,6 +97,7 @@ public sealed class SecureChannelsStore : ISecureChannelsStore, IDisposable
                 existing.SetLastSnippet(incoming.LastSnippetCurrent);
                 existing.SetUnreadCount(incoming.UnreadCountCurrent);
                 existing.SetOnline(incoming.IsOnlineCurrent);
+                existing.SetRoute(incoming.RouteCurrent);
                 existing.SetLastUpdateUtc(incoming.LastUpdateUtcCurrent);
 
                 keepKeys.Add(existing.Key);
@@ -170,6 +171,7 @@ public sealed class SecureChannelsStore : ISecureChannelsStore, IDisposable
                 existing.SetLastSnippet(model.LastSnippetCurrent);
                 existing.SetUnreadCount(model.UnreadCountCurrent);
                 existing.SetOnline(model.IsOnlineCurrent);
+                existing.SetRoute(model.RouteCurrent);
                 existing.SetLastUpdateUtc(model.LastUpdateUtcCurrent);
                 model.Dispose();
                 return;

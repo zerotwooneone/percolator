@@ -17,6 +17,7 @@ using Percolator.Cryptography;
 using Percolator.Cryptography.Primitives;
 using Percolator.Identity;
 using Percolator.Identity.Model;
+using Percolator.Network;
 using PeerId = Percolator.Network.PeerId;
 
 namespace Desktop.Wpf.Tests;
@@ -39,6 +40,11 @@ public sealed class SecureChannelsProjectionTests
             .ReturnsAsync(Array.Empty<SecureSession>());
 
         var peers = new Mock<IPeerIdentityRepository>(MockBehavior.Loose);
+
+        var directSessions = new Mock<IDirectSessionRepository>(MockBehavior.Loose);
+        directSessions
+            .Setup(s => s.ListAsync(It.IsAny<int>()))
+            .ReturnsAsync(Array.Empty<DirectSession>());
 
         var pendingQueries = new Mock<IPendingHandshakeQueries>(MockBehavior.Loose);
         pendingQueries
@@ -70,6 +76,7 @@ public sealed class SecureChannelsProjectionTests
             store,
             sessions.Object,
             peers.Object,
+            directSessions.Object,
             pendingQueries.Object,
             preHandshake.Object,
             self);
@@ -79,12 +86,12 @@ public sealed class SecureChannelsProjectionTests
 
         // ASSERT
         await WaitUntilAsync(
-            predicate: () => store.PendingInboundCount.CurrentValue == 1 && store.Channels.Count > 0,
+            predicate: () => store.PendingInboundCount.CurrentValue == 1 && store.PendingInbound.Count == 1,
             timeout: TimeSpan.FromSeconds(2));
 
         store.PendingInboundCount.CurrentValue.Should().Be(1);
         store.PendingInbound.Count.Should().Be(1);
-        store.Channels.Count.Should().BeGreaterThan(0);
+        store.Channels.Count.Should().Be(0);
     }
 
     [Test]
@@ -154,10 +161,19 @@ public sealed class SecureChannelsProjectionTests
         var self = new SelfIdentityModel();
         self.Id.Value = "1";
 
+        var directSessions = new Mock<IDirectSessionRepository>(MockBehavior.Loose);
+        directSessions
+            .Setup(s => s.ListAsync(It.IsAny<int>()))
+            .ReturnsAsync(new[]
+            {
+                new DirectSession(new Percolator.Network.PeerId(peerId.Value), new DirectSessionId(Guid.NewGuid()))
+            });
+
         using var sut = new SecureChannelsProjection(
             store,
             sessions.Object,
             peers.Object,
+            directSessions.Object,
             pendingQueries.Object,
             preHandshake.Object,
             self);
@@ -185,6 +201,78 @@ public sealed class SecureChannelsProjectionTests
         ReferenceEquals(firstModel, migrated).Should().BeTrue("migration should preserve object identity for UI continuity");
         migrated.Key.Should().Be(SecureChannelKey.FromSessionId(sessionId.Value));
         migrated.Kind.CurrentValue.Should().Be(Desktop.Wpf.Features.Sessions.Models.SecureChannelKind.Direct);
+        migrated.Route.CurrentValue.Should().BeOfType<ChannelRoute.Direct>();
+    }
+
+    [Test]
+    public async Task Active_session_without_direct_session_mapping_is_marked_as_relayed()
+    {
+        // ARRANGE
+        WpfTestHarness.EnsureApplication();
+
+        var store = new SecureChannelsStore();
+
+        var peerId = new Percolator.Cryptography.Primitives.PeerId(Guid.NewGuid());
+        var sessionId = SessionId.NewId();
+
+        var now = DateTimeOffset.UtcNow;
+
+        var sessions = new Mock<ISessionRepository>(MockBehavior.Loose);
+        sessions
+            .Setup(s => s.GetAllActiveAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[]
+            {
+                RatchetBootstrap.CreateInitiatorSession(
+                    sessionId,
+                    peerId,
+                    new ProtocolVersion(1),
+                    new RootKey(new byte[32]),
+                    new StaticClock(now))
+            });
+
+        var peers = new Mock<IPeerIdentityRepository>(MockBehavior.Loose);
+        peers
+            .Setup(p => p.GetByIdAsync(It.IsAny<Percolator.Identity.PeerId>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((PeerIdentity?)null);
+
+        var directSessions = new Mock<IDirectSessionRepository>(MockBehavior.Loose);
+        directSessions
+            .Setup(s => s.ListAsync(It.IsAny<int>()))
+            .ReturnsAsync(Array.Empty<DirectSession>());
+
+        var pendingQueries = new Mock<IPendingHandshakeQueries>(MockBehavior.Loose);
+        pendingQueries
+            .Setup(q => q.EnumerateOpenAsync(It.IsAny<CancellationToken>()))
+            .Returns(AsyncEnumerableFrom<PendingHandshake>());
+
+        var preHandshake = new Mock<IPreHandshakeSessionStore>(MockBehavior.Loose);
+        preHandshake
+            .Setup(s => s.EnumeratePendingAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .Returns(AsyncEnumerableFrom<PreHandshakeRecord>());
+
+        var self = new SelfIdentityModel();
+        self.Id.Value = "1";
+
+        using var sut = new SecureChannelsProjection(
+            store,
+            sessions.Object,
+            peers.Object,
+            directSessions.Object,
+            pendingQueries.Object,
+            preHandshake.Object,
+            self);
+
+        // ACT
+        await sut.Handle(new SecureSessionCreatedNotification(sessionId, SecureSessionCreatedReason.InitiatorFinalize, peerId, new ProtocolVersion(1)), CancellationToken.None);
+
+        // ASSERT
+        await WaitUntilAsync(
+            predicate: () => store.Channels.Count == 1,
+            timeout: TimeSpan.FromSeconds(2));
+
+        var model = store.Channels.Single();
+        model.Kind.CurrentValue.Should().Be(Desktop.Wpf.Features.Sessions.Models.SecureChannelKind.Relay);
+        model.Route.CurrentValue.Should().BeOfType<ChannelRoute.Relayed>();
     }
 
     private static async Task WaitUntilAsync(Func<bool> predicate, TimeSpan timeout)

@@ -452,6 +452,8 @@ public class PercolatorDbContext : DbContext
             entity.Property(e => e.SignedPreKeyId).IsRequired();
             entity.Property(e => e.OneTimePreKeyId);
             entity.Property(e => e.TargetPeerId);
+            entity.Property(e => e.InviteRouteKind).IsRequired();
+            entity.Property(e => e.InviteRelayHostPeerId);
             entity.Property(e => e.CreatedAtUtc).IsRequired();
             entity.Property(e => e.ExpiresAtUtc).IsRequired();
             entity.HasIndex(e => new { e.SelfIdentityId, e.ExpiresAtUtc });

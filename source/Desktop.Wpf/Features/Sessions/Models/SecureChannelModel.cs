@@ -2,6 +2,17 @@ using R3;
 
 namespace Desktop.Wpf.Features.Sessions.Models;
 
+public abstract record ChannelRoute
+{
+    private ChannelRoute() { }
+
+    public sealed record Direct : ChannelRoute;
+
+    public sealed record Relayed(Guid? RelayHostPeerId) : ChannelRoute;
+
+    public static ChannelRoute DirectRoute { get; } = new Direct();
+}
+
 public enum SecureChannelKind
 {
     Direct,
@@ -22,6 +33,7 @@ public sealed class SecureChannelModel : IDisposable
     private readonly ReactiveProperty<string?> _lastSnippet;
     private readonly ReactiveProperty<int> _unreadCount;
     private readonly ReactiveProperty<bool> _isOnline;
+    private readonly ReactiveProperty<ChannelRoute> _route;
     private readonly ReactiveProperty<DateTimeOffset> _lastUpdate;
 
     public SecureChannelModel(
@@ -29,7 +41,8 @@ public sealed class SecureChannelModel : IDisposable
         string displayName,
         string initials,
         SecureChannelKind kind,
-        DateTimeOffset lastUpdateUtc)
+        DateTimeOffset lastUpdateUtc,
+        ChannelRoute? route = null)
     {
         Key = key;
 
@@ -39,6 +52,7 @@ public sealed class SecureChannelModel : IDisposable
         _lastSnippet = new ReactiveProperty<string?>(null);
         _unreadCount = new ReactiveProperty<int>(0);
         _isOnline = new ReactiveProperty<bool>(false);
+        _route = new ReactiveProperty<ChannelRoute>(route ?? ChannelRoute.DirectRoute);
         _lastUpdate = new ReactiveProperty<DateTimeOffset>(lastUpdateUtc);
     }
 
@@ -50,6 +64,7 @@ public sealed class SecureChannelModel : IDisposable
     public ReadOnlyReactiveProperty<string?> LastSnippet => _lastSnippet;
     public ReadOnlyReactiveProperty<int> UnreadCount => _unreadCount;
     public ReadOnlyReactiveProperty<bool> IsOnline => _isOnline;
+    public ReadOnlyReactiveProperty<ChannelRoute> Route => _route;
     public ReadOnlyReactiveProperty<DateTimeOffset> LastUpdateUtc => _lastUpdate;
 
     internal string DisplayNameCurrent => _displayName.Value;
@@ -58,6 +73,7 @@ public sealed class SecureChannelModel : IDisposable
     internal string? LastSnippetCurrent => _lastSnippet.Value;
     internal int UnreadCountCurrent => _unreadCount.Value;
     internal bool IsOnlineCurrent => _isOnline.Value;
+    internal ChannelRoute RouteCurrent => _route.Value;
     internal DateTimeOffset LastUpdateUtcCurrent => _lastUpdate.Value;
 
     internal void SetDisplayName(string displayName) => _displayName.Value = displayName;
@@ -66,6 +82,7 @@ public sealed class SecureChannelModel : IDisposable
     internal void SetLastSnippet(string? snippet) => _lastSnippet.Value = snippet;
     internal void SetUnreadCount(int unreadCount) => _unreadCount.Value = unreadCount;
     internal void SetOnline(bool isOnline) => _isOnline.Value = isOnline;
+    internal void SetRoute(ChannelRoute route) => _route.Value = route;
     internal void SetLastUpdateUtc(DateTimeOffset lastUpdateUtc) => _lastUpdate.Value = lastUpdateUtc;
 
     public void Dispose() => _bag.Dispose();
