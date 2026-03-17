@@ -16,6 +16,11 @@ namespace Percolator.Application.Network;
 public interface IMainReverseSignalInviteFactory
 {
     EstablishDirectSessionRequest CreateInvite();
+
+    EstablishDirectSessionRequest CreateInvite(
+        string? targetDisplayName,
+        string? targetEndpointHost,
+        int? targetEndpointPort);
 }
 
 public sealed class MainReverseSignalInviteFactory : IMainReverseSignalInviteFactory
@@ -50,6 +55,12 @@ public sealed class MainReverseSignalInviteFactory : IMainReverseSignalInviteFac
     }
 
     public EstablishDirectSessionRequest CreateInvite()
+        => CreateInvite(targetDisplayName: null, targetEndpointHost: null, targetEndpointPort: null);
+
+    public EstablishDirectSessionRequest CreateInvite(
+        string? targetDisplayName,
+        string? targetEndpointHost,
+        int? targetEndpointPort)
     {
         if (_active.Identity is null)
         {
@@ -116,7 +127,10 @@ public sealed class MainReverseSignalInviteFactory : IMainReverseSignalInviteFac
                 oneTimePreKeyId: null,
                 targetPeerId: null,
                 createdAtUtc: _clock.UtcNow,
-                expiresAtUtc: expiresAtUtc))
+                expiresAtUtc: expiresAtUtc,
+                targetDisplayName: targetDisplayName,
+                targetEndpointHost: targetEndpointHost,
+                targetEndpointPort: targetEndpointPort))
             .GetAwaiter()
             .GetResult();
 

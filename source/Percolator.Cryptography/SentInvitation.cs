@@ -14,6 +14,9 @@ public sealed class SentInvitation
     public Guid SignedPreKeyId { get; }
     public Guid? OneTimePreKeyId { get; }
     public PeerId? TargetPeerId { get; }
+    public string? TargetDisplayName { get; }
+    public string? TargetEndpointHost { get; }
+    public int? TargetEndpointPort { get; }
     public InviteRouteKind InviteRouteKind { get; }
     public PeerId? InviteRelayHostPeerId { get; }
     public DateTimeOffset CreatedAtUtc { get; }
@@ -26,6 +29,9 @@ public sealed class SentInvitation
         PeerId? targetPeerId,
         DateTimeOffset createdAtUtc,
         DateTimeOffset expiresAtUtc,
+        string? targetDisplayName = null,
+        string? targetEndpointHost = null,
+        int? targetEndpointPort = null,
         InviteRouteKind inviteRouteKind = InviteRouteKind.Direct,
         PeerId? inviteRelayHostPeerId = null)
     {
@@ -50,6 +56,9 @@ public sealed class SentInvitation
         SignedPreKeyId = signedPreKeyId;
         OneTimePreKeyId = oneTimePreKeyId;
         TargetPeerId = targetPeerId;
+        TargetDisplayName = string.IsNullOrWhiteSpace(targetDisplayName) ? null : targetDisplayName.Trim();
+        TargetEndpointHost = string.IsNullOrWhiteSpace(targetEndpointHost) ? null : targetEndpointHost.Trim();
+        TargetEndpointPort = targetEndpointPort;
         InviteRouteKind = inviteRouteKind;
         InviteRelayHostPeerId = inviteRelayHostPeerId;
         CreatedAtUtc = createdAtUtc;

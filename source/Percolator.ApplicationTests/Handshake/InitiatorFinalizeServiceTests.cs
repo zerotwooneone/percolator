@@ -98,6 +98,7 @@ public class InitiatorFinalizeServiceTests
             Mock.Of<ISessionCrypto>(),
             Mock.Of<ISentInvitationRepository>(),
             Mock.Of<Percolator.Application.KeyExchange.ISelfPreKeyBundleRepository>(),
+            Mock.Of<Percolator.Identity.IPeerIdentityRepository>(),
             Mock.Of<IMediator>());
 
         // Act

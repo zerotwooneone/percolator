@@ -13,6 +13,10 @@ public sealed class SentInvitationDbo
 
     public Guid? TargetPeerId { get; set; }
 
+    public string? TargetDisplayName { get; set; }
+    public string? TargetEndpointHost { get; set; }
+    public int? TargetEndpointPort { get; set; }
+
     public int InviteRouteKind { get; set; }
     public Guid? InviteRelayHostPeerId { get; set; }
 

@@ -5,6 +5,7 @@ using Percolator.Cryptography;
 using Percolator.Cryptography.Primitives;
 using Percolator.Contracts;
 using Percolator.Identity;
+using Percolator.Identity.Model;
 
 namespace Percolator.Application.Network.Handshake
 {
@@ -19,6 +20,7 @@ namespace Percolator.Application.Network.Handshake
         private readonly ISessionCrypto _sessionCrypto;
         private readonly ISentInvitationRepository _sentInvitations;
         private readonly ISelfPreKeyBundleRepository _selfPreKeys;
+        private readonly IPeerIdentityRepository _peerIdentities;
         private readonly IMediator _mediator;
 
         public InitiatorFinalizeService(
@@ -31,6 +33,7 @@ namespace Percolator.Application.Network.Handshake
             ISessionCrypto sessionCrypto,
             ISentInvitationRepository sentInvitations,
             ISelfPreKeyBundleRepository selfPreKeys,
+            IPeerIdentityRepository peerIdentities,
             IMediator mediator)
         {
             _logger = logger;
@@ -42,6 +45,7 @@ namespace Percolator.Application.Network.Handshake
             _sessionCrypto = sessionCrypto;
             _sentInvitations = sentInvitations;
             _selfPreKeys = selfPreKeys;
+            _peerIdentities = peerIdentities;
             _mediator = mediator;
         }
 
@@ -71,6 +75,9 @@ namespace Percolator.Application.Network.Handshake
             // using X3DH_Respond and then decrypt the acceptor's first ratchet message.
             var acceptorIdentityPublic = new RatchetIdentityKey(response.AcceptorIdentityKey.ToByteArray());
             var acceptorEphemeralPublic = new RatchetEphemeralKey(response.AcceptorX3DhEphemeralKey.ToByteArray());
+
+            // Derive remote PKH from acceptor identity key (SHA-256 of SPKI).
+            var remotePkh = System.Security.Cryptography.SHA256.HashData(response.AcceptorIdentityKey.ToByteArray());
 
             var localIkPriv = new PrivatePreKey(keys.IdentitySigningKey.ExportECPrivateKey());
 
@@ -117,6 +124,33 @@ namespace Percolator.Application.Network.Handshake
                 return null;
             }
 
+            // Resolve or create the peer identity by PKH and apply the user-entered display name (if any)
+            // from the sent invitation, but do not overwrite an existing user-set name.
+            PeerIdentity? peerIdentity = null;
+            try
+            {
+                peerIdentity = await _peerIdentities.FindByPublicKeyHashAsync(remotePkh, cancellationToken).ConfigureAwait(false);
+                if (peerIdentity is null)
+                {
+                    var newId = Percolator.Identity.PeerId.NewId();
+                    peerIdentity = new PeerIdentity(newId);
+                    var now = _clock.UtcNow;
+                    peerIdentity.AddKey(response.AcceptorIdentityKey.ToByteArray(), notBefore: now, expiresAt: now.AddYears(100), now: now);
+                }
+
+                if (peerIdentity.DisplayName is null && !string.IsNullOrWhiteSpace(sentInvitation.TargetDisplayName))
+                {
+                    peerIdentity.SetDisplayName(sentInvitation.TargetDisplayName);
+                }
+
+                await _peerIdentities.SaveAsync(peerIdentity, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogInformation(ex, "Invite finalize: best-effort peer identity upsert failed.");
+                peerIdentity = null;
+            }
+
             SharedSecret shared;
             try
             {
@@ -160,7 +194,9 @@ namespace Percolator.Application.Network.Handshake
             // Acceptor sent first message from an initiator session, so we must bootstrap as responder to decrypt.
             var tmp = RatchetBootstrap.CreateResponderSession(
                 SessionId.NewId(),
-                Percolator.Cryptography.Primitives.PeerId.NewId(),
+                peerIdentity is null
+                    ? Percolator.Cryptography.Primitives.PeerId.NewId()
+                    : new Percolator.Cryptography.Primitives.PeerId(peerIdentity.Id.Value),
                 new ProtocolVersion(1),
                 root,
                 _clock);

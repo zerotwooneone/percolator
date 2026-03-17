@@ -37,6 +37,9 @@ internal sealed class SqliteSentInvitationRepository : ISentInvitationRepository
                 SignedPreKeyId = invitation.SignedPreKeyId,
                 OneTimePreKeyId = invitation.OneTimePreKeyId,
                 TargetPeerId = invitation.TargetPeerId?.Value,
+                TargetDisplayName = invitation.TargetDisplayName,
+                TargetEndpointHost = invitation.TargetEndpointHost,
+                TargetEndpointPort = invitation.TargetEndpointPort,
                 InviteRouteKind = (int)invitation.InviteRouteKind,
                 InviteRelayHostPeerId = invitation.InviteRelayHostPeerId?.Value,
                 CreatedAtUtc = invitation.CreatedAtUtc,
@@ -48,6 +51,9 @@ internal sealed class SqliteSentInvitationRepository : ISentInvitationRepository
             existing.SignedPreKeyId = invitation.SignedPreKeyId;
             existing.OneTimePreKeyId = invitation.OneTimePreKeyId;
             existing.TargetPeerId = invitation.TargetPeerId?.Value;
+            existing.TargetDisplayName = invitation.TargetDisplayName;
+            existing.TargetEndpointHost = invitation.TargetEndpointHost;
+            existing.TargetEndpointPort = invitation.TargetEndpointPort;
             existing.InviteRouteKind = (int)invitation.InviteRouteKind;
             existing.InviteRelayHostPeerId = invitation.InviteRelayHostPeerId?.Value;
             existing.CreatedAtUtc = invitation.CreatedAtUtc;
@@ -158,6 +164,9 @@ internal sealed class SqliteSentInvitationRepository : ISentInvitationRepository
             row.TargetPeerId.HasValue ? new PeerId(row.TargetPeerId.Value) : null,
             row.CreatedAtUtc,
             row.ExpiresAtUtc,
+            targetDisplayName: row.TargetDisplayName,
+            targetEndpointHost: row.TargetEndpointHost,
+            targetEndpointPort: row.TargetEndpointPort,
             inviteRouteKind: (InviteRouteKind)row.InviteRouteKind,
             inviteRelayHostPeerId: row.InviteRelayHostPeerId.HasValue ? new PeerId(row.InviteRelayHostPeerId.Value) : null);
     }

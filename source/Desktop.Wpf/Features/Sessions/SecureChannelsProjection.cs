@@ -244,6 +244,7 @@ public sealed class SecureChannelsProjection :
                     ? (await _peers.GetByIdAsync(new Percolator.Identity.PeerId(sent.TargetPeerId.Value), cancellationToken).ConfigureAwait(false))?.DisplayName?.Value
                     : null;
 
+                name ??= sent.TargetDisplayName;
                 name ??= "Outbound invite";
 
                 channelModels.Add(new SecureChannelModel(

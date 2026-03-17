@@ -500,18 +500,6 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
 
         PhaseText.Value = "Validating...";
 
-        byte[] targetPkh;
-        try
-        {
-            targetPkh = ParsePkh(TargetPkhText.Value);
-        }
-        catch (Exception ex)
-        {
-            ErrorText.Value = ex.Message;
-            PhaseText.Value = null;
-            return;
-        }
-
         try
         {
             var routeMode = SelectedRouteMode.Value;
@@ -525,11 +513,31 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
             if (routeMode.Key == "direct")
             {
                 var endpoint = ParseDnsEndPoint(DirectEndpointText.Value);
+
+                // H.4: PKH is optional for direct reverse-signal initiation.
+                // If provided, validate format; if missing, proceed with endpoint-only initiation.
+                if (!string.IsNullOrWhiteSpace(TargetPkhText.Value))
+                {
+                    try
+                    {
+                        _ = ParsePkh(TargetPkhText.Value);
+                    }
+                    catch (Exception ex)
+                    {
+                        ErrorText.Value = ex.Message;
+                        PhaseText.Value = null;
+                        return;
+                    }
+                }
+
                 PhaseText.Value = "Sending invite...";
 
                 try
                 {
-                    var invite = _reverseSignalInvites.CreateInvite();
+                    var invite = _reverseSignalInvites.CreateInvite(
+                        targetDisplayName: TargetDisplayNameText.Value,
+                        targetEndpointHost: endpoint.Host,
+                        targetEndpointPort: endpoint.Port);
                     _ = await _grpcSessions.EstablishDirectSessionAsync(endpoint, invite).ConfigureAwait(false);
                     PhaseText.Value = "Invite sent.";
                 }

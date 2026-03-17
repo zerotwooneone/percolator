@@ -47,7 +47,16 @@ public sealed class SqliteSentInvitationRepositoryTests
         var created = DateTimeOffset.UtcNow;
         var expires = created.AddMinutes(10);
 
-        var invite = new SentInvitation(corr, spk, otk, targetPeerId: null, created, expires);
+        var invite = new SentInvitation(
+            corr,
+            spk,
+            otk,
+            targetPeerId: null,
+            created,
+            expires,
+            targetDisplayName: "Alice",
+            targetEndpointHost: "127.0.0.1",
+            targetEndpointPort: 5002);
         await repo.UpsertAsync(invite, CancellationToken.None);
 
         var loaded = await repo.TryGetAsync(corr, CancellationToken.None);
@@ -57,6 +66,9 @@ public sealed class SqliteSentInvitationRepositoryTests
         loaded.OneTimePreKeyId.Should().Be(otk);
         loaded.CreatedAtUtc.Should().Be(created);
         loaded.ExpiresAtUtc.Should().Be(expires);
+        loaded.TargetDisplayName.Should().Be("Alice");
+        loaded.TargetEndpointHost.Should().Be("127.0.0.1");
+        loaded.TargetEndpointPort.Should().Be(5002);
 
         await repo.DeleteAsync(corr, CancellationToken.None);
         var afterDelete = await repo.TryGetAsync(corr, CancellationToken.None);
