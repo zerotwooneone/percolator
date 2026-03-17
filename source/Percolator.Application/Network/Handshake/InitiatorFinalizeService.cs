@@ -77,6 +77,7 @@ namespace Percolator.Application.Network.Handshake
             // IMPORTANT: For reverse-signal, the inviter's signed pre-key used in the invite may be
             // different from _active.Keys.SignedPreKey. Resolve the correct private key via SentInvitation.
             PrivatePreKey localSpkPriv;
+            SentInvitation sentInvitation;
             try
             {
                 if (!response.HasRequestCorrelationId
@@ -87,8 +88,8 @@ namespace Percolator.Application.Network.Handshake
                     return null;
                 }
 
-                var sent = await _sentInvitations.TryGetAsync(new RequestCorrelationId(corrGuid), cancellationToken).ConfigureAwait(false);
-                if (sent is null)
+                sentInvitation = await _sentInvitations.TryGetAsync(new RequestCorrelationId(corrGuid), cancellationToken).ConfigureAwait(false);
+                if (sentInvitation is null)
                 {
                     // This commonly happens for peer->main simulator flows (pinv), where main is the acceptor
                     // and therefore never created a matching SentInvitation.
@@ -98,13 +99,13 @@ namespace Percolator.Application.Network.Handshake
 
                 var spk = await _selfPreKeys.TryGetSignedPreKeyAsync(
                         selfIdentityId.Value,
-                        sent.SignedPreKeyId,
+                        sentInvitation.SignedPreKeyId,
                         cancellationToken)
                     .ConfigureAwait(false);
 
                 if (spk is null)
                 {
-                    _logger.LogWarning("Invite finalize: could not load signed pre-key private for correlation {CorrelationId} (SignedPreKeyId={SignedPreKeyId}); skipping invite-response finalize.", corrGuid, sent.SignedPreKeyId);
+                    _logger.LogWarning("Invite finalize: could not load signed pre-key private for correlation {CorrelationId} (SignedPreKeyId={SignedPreKeyId}); skipping invite-response finalize.", corrGuid, sentInvitation.SignedPreKeyId);
                     return null;
                 }
 
@@ -224,6 +225,17 @@ namespace Percolator.Application.Network.Handshake
                     cancellationToken)
                 .ConfigureAwait(false);
             await _index.UpsertAsync(selfIdentityId.Value, sid, header.PreKey, _clock.UtcNow, cancellationToken).ConfigureAwait(false);
+
+            // Once the invite has been finalized into an active session, the outbound pending marker
+            // (SentInvitation) should be removed so the UI no longer renders a separate PendingOutbound row.
+            try
+            {
+                await _sentInvitations.DeleteAsync(sentInvitation.RequestCorrelationId, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogInformation(ex, "Invite finalize: best-effort deletion of sent invitation failed.");
+            }
 
             // Best-effort cleanup of legacy prehandshake store (if it was populated)
             try
