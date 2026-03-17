@@ -47,6 +47,9 @@
                       <controls:MatButton IsIcon="True" Variant="Outlined" Command="{Binding CopyPublicKeyHashCommand}" ToolTip="Copy PKH">
                         <TextBlock Style="{StaticResource IconText}" Text="{StaticResource IconCopy}"/>
                       </controls:MatButton>
+                      <controls:MatButton Margin="6,0,0,0" IsIcon="True" Variant="Outlined" Command="{Binding CopyEndpointCommand}" ToolTip="Copy Endpoint (host:port)">
+                        <TextBlock Style="{StaticResource IconText}" Text="{StaticResource IconNetwork}"/>
+                      </controls:MatButton>
                       <controls:MatButton Margin="6,0,0,0" IsIcon="True" Variant="Outlined" Command="{Binding CopyOobInviteTokenCommand}" ToolTip="Copy OOB Invite Token">
                         <TextBlock Style="{StaticResource IconText}" Text="{StaticResource IconApplicationExport}"/>
                       </controls:MatButton>

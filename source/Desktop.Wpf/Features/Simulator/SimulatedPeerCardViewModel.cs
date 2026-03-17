@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Collections.ObjectModel;
 using System.Security.Cryptography;
 using System.Windows;
@@ -64,6 +65,8 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
             .ToBindableReactiveProperty(string.Empty)
             .AddTo(ref _bag);
 
+        EndpointText = new BindableReactiveProperty<string>(string.Empty).AddTo(ref _bag);
+
         RelayBadgeVisibility = IsRelayCapable
             .Select(x => x ? Visibility.Visible : Visibility.Collapsed)
             .ToBindableReactiveProperty(Visibility.Collapsed)
@@ -94,6 +97,10 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
         copyOob.AsObservable().Subscribe(_ => ExecuteCopyOobInviteToken()).AddTo(ref _bag);
         CopyOobInviteTokenCommand = copyOob.AddTo(ref _bag);
 
+        var copyEndpoint = Observable.Return(true).ToReactiveCommand<Unit>(_ => { });
+        copyEndpoint.AsObservable().Subscribe(_ => ExecuteCopyEndpoint()).AddTo(ref _bag);
+        CopyEndpointCommand = copyEndpoint.AddTo(ref _bag);
+
         var publish = PublishTargetPeerId.Select(id => id is not null).ToReactiveCommand<Unit>(_ => { });
         publish.AsObservable().SubscribeAwait(async (_, ct) => await ExecutePublishAsync(ct), AwaitOperation.Drop).AddTo(ref _bag);
         PublishKeysCommand = publish.AddTo(ref _bag);
@@ -120,6 +127,8 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
 
     public BindableReactiveProperty<string> PublicKeyHashDisplay { get; }
 
+    public BindableReactiveProperty<string> EndpointText { get; }
+
     public BindableReactiveProperty<Visibility> RelayBadgeVisibility { get; }
 
     public BindableReactiveProperty<Guid?> PublishTargetPeerId { get; }
@@ -143,6 +152,8 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
     public ReactiveCommand<Unit> CopyPublicKeyHashCommand { get; }
 
     public ReactiveCommand<Unit> CopyOobInviteTokenCommand { get; }
+
+    public ReactiveCommand<Unit> CopyEndpointCommand { get; }
 
     public ReactiveCommand<Unit> PublishKeysCommand { get; }
 
@@ -168,6 +179,18 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
         {
             // ignore
         }
+
+        try
+        {
+            var endpoint = TryResolveEndpoint();
+            if (endpoint is not null)
+            {
+                await Application.Current.Dispatcher.InvokeAsync(() => EndpointText.Value = endpoint);
+            }
+        }
+        catch
+        {
+        }
     }
 
     private void ExecuteCopyPkh()
@@ -191,11 +214,19 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
         }
     }
 
+    private void ExecuteCopyEndpoint()
+    {
+        var endpoint = TryResolveEndpoint();
+        if (string.IsNullOrWhiteSpace(endpoint)) return;
+        try { Clipboard.SetText(endpoint); } catch { }
+    }
+
     private EstablishDirectSessionRequest CreatePeerToMainInvite()
     {
         // Peer inviter must advertise its simulator endpoint so the main app can route responses back in-process.
-        const int defaultPort = 5002;
-        var inviterHost = AllocateSimulatorLoopbackHost(_model.PeerId);
+        var endpoint = TryResolveEndpointParts();
+        var inviterHost = endpoint.host;
+        var inviterPort = endpoint.port;
 
         using var identityEcdh = ECDiffieHellman.Create();
         identityEcdh.ImportECPrivateKey(_model.IdentitySigningKeyPrivateKeyEcPrivateKey, out _);
@@ -219,7 +250,7 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
         {
             Version = 1,
             InviterHost = inviterHost,
-            InviterPort = (uint)defaultPort,
+            InviterPort = (uint)inviterPort,
             ExpiresAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow.AddMinutes(10)),
             RequestCorrelationId = correlation.ToString(),
             InviterPreKey = new InviteHandshakePreKeyBundle
@@ -240,6 +271,27 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
             Payload = ByteString.CopyFrom(payloadBytes),
             PayloadSignature = ByteString.CopyFrom(payloadSig)
         };
+    }
+
+    private string? TryResolveEndpoint()
+    {
+        var dto = _state.Peers.FirstOrDefault(p => p.PeerId == _model.PeerId);
+        if (dto is null) return null;
+        if (string.IsNullOrWhiteSpace(dto.Connection?.Host) || dto.Connection.Port <= 0) return null;
+        return $"{dto.Connection.Host}:{dto.Connection.Port}";
+    }
+
+    private (string host, int port) TryResolveEndpointParts()
+    {
+        var dto = _state.Peers.FirstOrDefault(p => p.PeerId == _model.PeerId);
+        if (dto is null
+            || string.IsNullOrWhiteSpace(dto.Connection?.Host)
+            || dto.Connection.Port <= 0)
+        {
+            return (AllocateSimulatorLoopbackHost(_model.PeerId), 5002);
+        }
+
+        return (dto.Connection.Host, dto.Connection.Port);
     }
 
     private static string AllocateSimulatorLoopbackHost(Guid peerId)
