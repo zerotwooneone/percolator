@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
+using System.Windows;
 using Grpc.Core;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -121,6 +122,7 @@ public sealed class SimulatorOutboundInterceptor : ISimulatorOutboundInterceptor
             using var scope = _scopeFactory.CreateScope();
             var peerRuntime = scope.ServiceProvider.GetRequiredService<ISimulatedPeerRuntimeService>();
             var messageService = scope.ServiceProvider.GetRequiredService<PercolatorMessageService>();
+            var directory = scope.ServiceProvider.GetRequiredService<ISimulatedPeerDirectory>();
 
             var acceptance = await peerRuntime.AcceptReverseSignalInviteAsync(
                     simulatedPeerId: simulatedPeerId,
@@ -137,6 +139,23 @@ public sealed class SimulatorOutboundInterceptor : ISimulatorOutboundInterceptor
                 cancellationToken: cancellationToken);
 
             await messageService.DeliverInviteHandshakeResponse(acceptance.Response, ctx).ConfigureAwait(false);
+
+            // Chunk H.1: reflect the successful session creation in the simulator UI state.
+            // This is the Main -> Simulator initiation path; without this, the Handshakes tab
+            // can remain stale even though the simulated peer has created the ratchet session.
+            var model = directory.Peers.FirstOrDefault(p => p.PeerId == simulatedPeerId);
+            if (model is not null)
+            {
+                var dispatcher = Application.Current?.Dispatcher;
+                if (dispatcher is not null)
+                {
+                    await dispatcher.InvokeAsync(model.MarkEstablished);
+                }
+                else
+                {
+                    model.MarkEstablished();
+                }
+            }
 
             return new EstablishDirectSessionResponse
             {
