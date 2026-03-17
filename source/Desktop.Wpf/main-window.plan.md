@@ -823,18 +823,57 @@ Work (recipe):
     - Method: `DeliverInviteHandshakeResponseToMainAsync(...)`
   - Ensure both directions can be driven via UI affordances (Connection Management dialog + simulator UI).
 
+### Subchunk H.1 — Simulator handshake UI state updates when Main initiates
+
+Problem:
+
+- When Main initiates a reverse-signal handshake to a simulated peer (direct `127.77.x.y:5002` path), the simulator runtime can create the session, but the simulator “Handshakes” UI state for that peer may not reflect the transition.
+
+Plan:
+
+- For Main -> Simulator direct initiation (outbound interceptor path), the simulator must update the same UI-owned state as the simulator->main flow:
+  - On receipt of `EstablishDirectSessionRequest` for a simulated peer, parse the invite payload’s `request_correlation_id` and set:
+    - `SimulatedPeerModel.MarkInboundPending(correlationId)`
+    - (optional) attempt phase string (e.g., `InviteReceived`) via the existing runtime-state attempt helpers.
+  - Ensure the pending `InviteHandshakeResponse` is stored in the simulator pending inbox keyed by `(simulatedPeerId, correlationId)` so the Accept button can finalize.
+- Ensure the “Handshakes” UI updates remain MVVM-safe:
+  - State transitions happen on the model (`SimulatedPeerModel`) and are observed by `SimulatedHandshakeStateMachineCardViewModel` via `RuntimeState`.
+  - No application-layer services directly mutate VMs.
+
 Definition of done:
 
-- You can perform both directions of handshake through UI.
+- Main sends direct reverse-signal invite to simulated peer.
+- The simulated peer card in the Handshakes tab visibly enters an inbound pending state.
+- After accepting, the simulated peer card shows established.
 
-Minimal tests (prefer integration-style where appropriate):
+### Subchunk H.2 — Replace hardcoded auto-accept with pending + manual accept
 
-- Direct reverse-signal response ingress:
-  - A valid `InviteHandshakeResponse` delivered through the direct callback path reaches `HandleHandshakeResponderHelloCommand`.
-- Relayed reverse-signal response ingress:
-  - A valid `InviteHandshakeResponse` blob delivered as relayed opaque bytes reaches `IInviteHandshakeResponseIngress`.
-- Route provenance:
-  - For at least one Direct and one Relay scenario, the channel row reflects the correct route badge/text.
+Problem:
+
+- The current interception flow effectively “auto-accepts” by generating an `InviteHandshakeResponse` and delivering it back to Main immediately.
+- This prevents the simulator from behaving like a real peer with an explicit “Accept” action.
+
+Plan:
+
+- Refactor the Main -> Simulator direct initiation pipeline to split two concerns:
+  - **Receipt:** accept and prepare the response, but do not deliver it.
+  - **Delivery:** user-driven via simulator UI (Accept button), optionally with an auto-accept toggle.
+- Replace the current behavior in `SimulatorOutboundInterceptor.EstablishDirectSessionAsync(...)`:
+  - Instead of calling `AcceptReverseSignalInviteAsync(...)` and immediately `PercolatorMessageService.DeliverInviteHandshakeResponse(...)`, route to a simulator runtime service method that:
+    - Computes `InviteHandshakeResponse` and stores it in `SimulatedPeerPendingInbox` (and persists it via `SimulatedPeerRuntimeStoreDto.PendingInviteHandshakeResponses`).
+    - Calls `SimulatedPeerModel.MarkInboundPending(correlationId)`.
+    - Returns `EstablishDirectSessionResponse.Queued` to Main (with `RequestCorrelationId` populated).
+- Update simulator Accept flow to be the single place that triggers delivery:
+  - On Accept, deliver the stored `InviteHandshakeResponse` to Main using the existing helper (`ISimulatedPeerRuntimeService.DeliverInviteHandshakeResponseToMainAsync(...)`) or directly via `PercolatorMessageService.DeliverInviteHandshakeResponse(...)`.
+  - Then call `TryFinalizeInviteHandshakeResponseFromMainAsync(...)` so the simulated peer finalizes the session and transitions to `MarkEstablished()`.
+- (Optional) Simulator-only toggles:
+  - If `SimulatedHandshakeStateMachineCardViewModel.AutoAccept` / `AutoRespond` are kept, implement them by invoking the same Accept command automatically after receipt (do not reintroduce a separate codepath).
+
+Definition of done:
+
+- Main initiating a handshake does NOT immediately complete unless simulator user clicks Accept.
+- Simulator UI shows inbound pending with Accept/Reject buttons.
+- Clicking Accept delivers response to Main and results in established state on both sides.
 
 ---
 
