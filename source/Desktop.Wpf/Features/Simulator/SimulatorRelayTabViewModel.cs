@@ -27,6 +27,8 @@ public sealed class SimulatorRelayTabViewModel : IDisposable
 
     private DisposableBag _bag;
 
+    private readonly Dictionary<Guid, IDisposable> _relayCapableSubscriptions = new();
+
     private readonly ObservableCollection<SimulatedRelayQueuePanelViewModel> _relayPanels = new();
     public ReadOnlyObservableCollection<SimulatedRelayQueuePanelViewModel> RelayPanels { get; }
 
@@ -159,9 +161,41 @@ public sealed class SimulatorRelayTabViewModel : IDisposable
 
     private void HookPeers()
     {
-        var notify = (INotifyCollectionChanged)_state.Peers;
+        var notify = (INotifyCollectionChanged)_directory.Peers;
         notify.CollectionChanged -= OnPeersChanged;
         notify.CollectionChanged += OnPeersChanged;
+
+        WireRelayCapabilitySubscriptions();
+    }
+
+    private void WireRelayCapabilitySubscriptions()
+    {
+        foreach (var d in _relayCapableSubscriptions.Values)
+        {
+            d.Dispose();
+        }
+        _relayCapableSubscriptions.Clear();
+
+        foreach (var peer in _directory.Peers)
+        {
+            var sub = peer.IsRelayCapable
+                .DistinctUntilChanged()
+                .Subscribe(_ => OnRelayCapabilityChanged());
+
+            _relayCapableSubscriptions[peer.PeerId] = sub;
+        }
+    }
+
+    private void OnRelayCapabilityChanged()
+    {
+        if (!Application.Current.Dispatcher.CheckAccess())
+        {
+            _ = Application.Current.Dispatcher.InvokeAsync(OnRelayCapabilityChanged);
+            return;
+        }
+
+        ResetPanels();
+        _ = RefreshAsync(CancellationToken.None);
     }
 
     private void OnPeersChanged(object? sender, NotifyCollectionChangedEventArgs e)
@@ -172,6 +206,7 @@ public sealed class SimulatorRelayTabViewModel : IDisposable
             return;
         }
 
+        WireRelayCapabilitySubscriptions();
         ResetPanels();
         _ = RefreshAsync(CancellationToken.None);
     }
@@ -184,7 +219,7 @@ public sealed class SimulatorRelayTabViewModel : IDisposable
         }
         _relayPanels.Clear();
 
-        foreach (var relay in _state.Peers.Where(p => p.Relay?.IsRelayCapable == true))
+        foreach (var relay in _directory.Peers.Where(p => p.IsRelayCapable.CurrentValue))
         {
             _relayPanels.Add(CreatePanel(relay.PeerId, PeerNameById(relay.PeerId)));
         }
@@ -253,12 +288,18 @@ public sealed class SimulatorRelayTabViewModel : IDisposable
 
         try
         {
-            var notify = (INotifyCollectionChanged)_state.Peers;
+            var notify = (INotifyCollectionChanged)_directory.Peers;
             notify.CollectionChanged -= OnPeersChanged;
         }
         catch
         {
         }
+
+        foreach (var d in _relayCapableSubscriptions.Values)
+        {
+            d.Dispose();
+        }
+        _relayCapableSubscriptions.Clear();
 
         _bag.Dispose();
         GlobalAutoRelayAll.Dispose();
@@ -266,6 +307,13 @@ public sealed class SimulatorRelayTabViewModel : IDisposable
 
     private string PeerNameById(Guid peerId)
     {
+        var model = _directory.Peers.FirstOrDefault(p => p.PeerId == peerId);
+        if (model is not null)
+        {
+            var name = model.DisplayName.CurrentValue;
+            if (!string.IsNullOrWhiteSpace(name)) return name;
+        }
+
         var dto = _state.Peers.FirstOrDefault(p => p.PeerId == peerId);
         if (dto is not null)
         {
