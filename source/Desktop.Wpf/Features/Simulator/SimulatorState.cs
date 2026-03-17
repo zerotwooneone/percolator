@@ -36,6 +36,20 @@ public sealed class SimulatedPeerRuntimeStoreDto
     public int Version { get; set; } = 1;
     public List<SimulatedSecureSessionDto> Sessions { get; set; } = new();
     public List<SimulatedSignedPreKeyDto> SignedPreKeys { get; set; } = new();
+    public List<SimulatedOutboundInviteDto> OutboundInvites { get; set; } = new();
+    public List<SimulatedPendingInviteHandshakeResponseDto> PendingInviteHandshakeResponses { get; set; } = new();
+}
+
+public sealed class SimulatedOutboundInviteDto
+{
+    public Guid CorrelationId { get; set; }
+    public byte[] SignedPreKeyPrivateEcPrivateKey { get; set; } = Array.Empty<byte>();
+}
+
+public sealed class SimulatedPendingInviteHandshakeResponseDto
+{
+    public Guid CorrelationId { get; set; }
+    public byte[] ResponseBytes { get; set; } = Array.Empty<byte>();
 }
 
 public sealed class SimulatedSecureSessionDto

@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Linq;
 using System.Security.Cryptography;
 using Desktop.Wpf.Features.Sessions;
 using Google.Protobuf;
@@ -366,6 +367,9 @@ public sealed class SimulatedPeerRuntimeService : ISimulatedPeerRuntimeService
         _pending.AddInviteHandshakeResponse(simulatedPeerId, corr, response);
         model.MarkInboundPending(corr);
 
+        var runtime = _runtimeByPeerId.GetOrAdd(simulatedPeerId, CreateRuntime);
+        _ = PersistRuntimeStoreAsync(simulatedPeerId, runtime, cancellationToken);
+
         return Task.CompletedTask;
     }
 
@@ -467,6 +471,15 @@ public sealed class SimulatedPeerRuntimeService : ISimulatedPeerRuntimeService
         if (signedPreKeyPrivateEcPrivateKey is null) throw new ArgumentNullException(nameof(signedPreKeyPrivateEcPrivateKey));
         var runtime = _runtimeByPeerId.GetOrAdd(simulatedPeerId, CreateRuntime);
         runtime.RecordOutboundInviteSignedPreKeyPrivate(requestCorrelationId, signedPreKeyPrivateEcPrivateKey);
+
+        try
+        {
+            _ = PersistRuntimeStoreAsync(simulatedPeerId, runtime, CancellationToken.None)
+                .ContinueWith(_ => { }, CancellationToken.None);
+        }
+        catch
+        {
+        }
     }
 
     public async Task<SessionId?> TryFinalizeInviteHandshakeResponseFromMainAsync(
@@ -477,12 +490,13 @@ public sealed class SimulatedPeerRuntimeService : ISimulatedPeerRuntimeService
     {
         cancellationToken.ThrowIfCancellationRequested();
 
+        var runtime = _runtimeByPeerId.GetOrAdd(simulatedPeerId, CreateRuntime);
+
         if (!_pending.TryGetInviteHandshakeResponse(simulatedPeerId, requestCorrelationId, out var response))
         {
             return null;
         }
 
-        var runtime = _runtimeByPeerId.GetOrAdd(simulatedPeerId, CreateRuntime);
         var sessionId = await runtime.TryFinalizeInviteHandshakeResponseAsync(
                 acceptorPeerId,
                 requestCorrelationId,
@@ -495,15 +509,29 @@ public sealed class SimulatedPeerRuntimeService : ISimulatedPeerRuntimeService
             return null;
         }
 
-        await PersistRuntimeStoreAsync(simulatedPeerId, runtime, cancellationToken).ConfigureAwait(false);
-
         _ = _pending.TryTakeInviteHandshakeResponse(simulatedPeerId, requestCorrelationId, out _);
+        await PersistRuntimeStoreAsync(simulatedPeerId, runtime, cancellationToken).ConfigureAwait(false);
         return sessionId;
     }
 
     private async Task PersistRuntimeStoreAsync(Guid simulatedPeerId, SimulatedPeerRuntime runtime, CancellationToken cancellationToken)
     {
         var store = runtime.ExportRuntimeStore();
+
+        var correlations = _pending.SnapshotInviteHandshakeResponseCorrelationIds(simulatedPeerId);
+        store.PendingInviteHandshakeResponses.Clear();
+        foreach (var corr in correlations)
+        {
+            if (_pending.TryGetInviteHandshakeResponse(simulatedPeerId, corr, out var resp))
+            {
+                store.PendingInviteHandshakeResponses.Add(new SimulatedPendingInviteHandshakeResponseDto
+                {
+                    CorrelationId = corr,
+                    ResponseBytes = resp.ToByteArray()
+                });
+            }
+        }
+
         await _state.SaveRuntimeStoreAsync(simulatedPeerId, store, cancellationToken).ConfigureAwait(false);
     }
 
@@ -520,6 +548,24 @@ public sealed class SimulatedPeerRuntimeService : ISimulatedPeerRuntimeService
         if (existing is not null)
         {
             runtime.ImportRuntimeStore(existing);
+
+            foreach (var dto in existing.PendingInviteHandshakeResponses ?? Enumerable.Empty<SimulatedPendingInviteHandshakeResponseDto>())
+            {
+                if (dto.CorrelationId == Guid.Empty) continue;
+                if (dto.ResponseBytes is null || dto.ResponseBytes.Length == 0) continue;
+
+                try
+                {
+                    var resp = InviteHandshakeResponse.Parser.ParseFrom(dto.ResponseBytes);
+                    if (resp is not null)
+                    {
+                        _pending.AddInviteHandshakeResponse(simulatedPeerId, dto.CorrelationId, resp);
+                    }
+                }
+                catch
+                {
+                }
+            }
         }
         return runtime;
     }
@@ -950,6 +996,14 @@ public sealed class SimulatedPeerRuntimeService : ISimulatedPeerRuntimeService
                 if (k.PublicSpki is null || k.PublicSpki.Length == 0) continue;
                 _signedPreKeyById[k.SignedPreKeyId] = (k.PrivateEcPrivateKey, k.PublicSpki);
             }
+
+            _signedPreKeyPrivateByCorrelation.Clear();
+            foreach (var i in store.OutboundInvites ?? Enumerable.Empty<SimulatedOutboundInviteDto>())
+            {
+                if (i.CorrelationId == Guid.Empty) continue;
+                if (i.SignedPreKeyPrivateEcPrivateKey is null || i.SignedPreKeyPrivateEcPrivateKey.Length == 0) continue;
+                _signedPreKeyPrivateByCorrelation[i.CorrelationId] = i.SignedPreKeyPrivateEcPrivateKey;
+            }
         }
 
         public SimulatedPeerRuntimeStoreDto ExportRuntimeStore()
@@ -978,13 +1032,22 @@ public sealed class SimulatedPeerRuntimeService : ISimulatedPeerRuntimeService
                 });
             }
 
-            foreach (var kvp in _signedPreKeyById)
+            foreach (var k in _signedPreKeyById)
             {
                 dto.SignedPreKeys.Add(new SimulatedSignedPreKeyDto
                 {
-                    SignedPreKeyId = kvp.Key,
-                    PrivateEcPrivateKey = kvp.Value.spkPriv,
-                    PublicSpki = kvp.Value.spkSpki
+                    SignedPreKeyId = k.Key,
+                    PrivateEcPrivateKey = k.Value.spkPriv,
+                    PublicSpki = k.Value.spkSpki
+                });
+            }
+
+            foreach (var kvp in _signedPreKeyPrivateByCorrelation)
+            {
+                dto.OutboundInvites.Add(new SimulatedOutboundInviteDto
+                {
+                    CorrelationId = kvp.Key,
+                    SignedPreKeyPrivateEcPrivateKey = kvp.Value
                 });
             }
 
