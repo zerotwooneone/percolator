@@ -91,7 +91,6 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
 
     public BindableReactiveProperty<int> SelectedTabIndex { get; }
 
-    public BindableReactiveProperty<string?> TargetPkhText { get; }
     public BindableReactiveProperty<string?> TargetDisplayNameText { get; }
 
     public ReadOnlyObservableCollection<RouteModeOption> RouteModeOptions { get; }
@@ -147,7 +146,6 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
 
         PendingInvitations = new ReadOnlyObservableCollection<PendingInvitationItem>(_pendingInvitations);
 
-        TargetPkhText = new BindableReactiveProperty<string?>(null).AddTo(ref _bag);
         TargetDisplayNameText = new BindableReactiveProperty<string?>(null).AddTo(ref _bag);
 
         RouteModeOptions = new ReadOnlyObservableCollection<RouteModeOption>(_routeModeOptions);
@@ -514,22 +512,6 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
             {
                 var endpoint = ParseDnsEndPoint(DirectEndpointText.Value);
 
-                // H.4: PKH is optional for direct reverse-signal initiation.
-                // If provided, validate format; if missing, proceed with endpoint-only initiation.
-                if (!string.IsNullOrWhiteSpace(TargetPkhText.Value))
-                {
-                    try
-                    {
-                        _ = ParsePkh(TargetPkhText.Value);
-                    }
-                    catch (Exception ex)
-                    {
-                        ErrorText.Value = ex.Message;
-                        PhaseText.Value = null;
-                        return;
-                    }
-                }
-
                 PhaseText.Value = "Sending invite...";
 
                 try
@@ -578,45 +560,6 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
         }
     }
 
-    private static byte[] ParsePkh(string? text)
-    {
-        if (string.IsNullOrWhiteSpace(text))
-            throw new InvalidOperationException("Target PKH required.");
-
-        var t = new string(text.Where(c => !char.IsWhiteSpace(c)).ToArray());
-        if (t.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
-            t = t.Substring(2);
-
-        if (TryParseHex(t, out var hexBytes))
-            return hexBytes;
-
-        try
-        {
-            return Convert.FromBase64String(t);
-        }
-        catch
-        {
-            throw new InvalidOperationException("PKH must be hex or base64.");
-        }
-    }
-
-    private static bool TryParseHex(string text, out byte[] bytes)
-    {
-        bytes = Array.Empty<byte>();
-        if (string.IsNullOrWhiteSpace(text)) return false;
-        if (text.Length % 2 != 0) return false;
-
-        try
-        {
-            bytes = Convert.FromHexString(text);
-            return true;
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
     private void ResetStatus()
     {
         PhaseText.Value = null;
@@ -657,7 +600,6 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
     protected override void DisposeCore()
     {
         Disposable.Dispose(SelectedTabIndex);
-        Disposable.Dispose(TargetPkhText);
         Disposable.Dispose(TargetDisplayNameText);
         Disposable.Dispose(SelectedRouteMode);
         Disposable.Dispose(DirectEndpointText);

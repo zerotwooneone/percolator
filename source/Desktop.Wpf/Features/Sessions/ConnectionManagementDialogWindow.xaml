@@ -104,24 +104,19 @@
         </Grid>
       </TabItem>
       <TabItem Header="Network Search">
-        <Grid Margin="0,12,0,0" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,*,Auto">
-          <TextBlock Grid.Row="0" Text="TARGET IDENTITY (PKH)" Foreground="{StaticResource OnSurfaceVariantBrush}" FontSize="12"/>
+        <Grid Margin="0,12,0,0" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,*,Auto">
+          <TextBlock Grid.Row="0" Margin="0,14,0,0" Text="DISPLAY NAME (OPTIONAL)" Foreground="{StaticResource OnSurfaceVariantBrush}" FontSize="12"/>
           <controls:MatInput Grid.Row="1" Margin="0,6,0,0"
-                             Text="{Binding TargetPkhText.Value, UpdateSourceTrigger=PropertyChanged}"
-                             Placeholder="Paste target PKH here... (e.g. 0x7A2F...)" />
-
-          <TextBlock Grid.Row="2" Margin="0,14,0,0" Text="DISPLAY NAME (OPTIONAL)" Foreground="{StaticResource OnSurfaceVariantBrush}" FontSize="12"/>
-          <controls:MatInput Grid.Row="3" Margin="0,6,0,0"
                              Text="{Binding TargetDisplayNameText.Value, UpdateSourceTrigger=PropertyChanged}"
                              Placeholder="e.g. Alice" />
 
-          <TextBlock Grid.Row="4" Margin="0,14,0,0" Text="ROUTE MODE" Foreground="{StaticResource OnSurfaceVariantBrush}" FontSize="12"/>
-          <ComboBox Grid.Row="5" Margin="0,6,0,0"
+          <TextBlock Grid.Row="2" Margin="0,14,0,0" Text="ROUTE MODE" Foreground="{StaticResource OnSurfaceVariantBrush}" FontSize="12"/>
+          <ComboBox Grid.Row="3" Margin="0,6,0,0"
                     ItemsSource="{Binding RouteModeOptions}"
                     SelectedItem="{Binding SelectedRouteMode.Value, Mode=TwoWay}"
                     DisplayMemberPath="DisplayName" />
 
-          <TextBlock Grid.Row="6" Margin="0,14,0,0" Text="DIRECT ENDPOINT (HOST:PORT)" Foreground="{StaticResource OnSurfaceVariantBrush}" FontSize="12">
+          <TextBlock Grid.Row="4" Margin="0,14,0,0" Text="DIRECT ENDPOINT (HOST:PORT)" Foreground="{StaticResource OnSurfaceVariantBrush}" FontSize="12">
             <TextBlock.Style>
               <Style TargetType="TextBlock">
                 <Setter Property="Visibility" Value="Collapsed"/>
@@ -133,7 +128,7 @@
               </Style>
             </TextBlock.Style>
           </TextBlock>
-          <controls:MatInput Grid.Row="7" Margin="0,6,0,0"
+          <controls:MatInput Grid.Row="5" Margin="0,6,0,0"
                              Text="{Binding DirectEndpointText.Value, UpdateSourceTrigger=PropertyChanged}"
                              Placeholder="e.g. 127.0.0.1:5001">
             <controls:MatInput.Style>
@@ -148,7 +143,7 @@
             </controls:MatInput.Style>
           </controls:MatInput>
 
-          <TextBlock Grid.Row="8" Margin="0,14,0,0" Text="RELAY HOST" Foreground="{StaticResource OnSurfaceVariantBrush}" FontSize="12">
+          <TextBlock Grid.Row="6" Margin="0,14,0,0" Text="RELAY HOST" Foreground="{StaticResource OnSurfaceVariantBrush}" FontSize="12">
             <TextBlock.Style>
               <Style TargetType="TextBlock">
                 <Setter Property="Visibility" Value="Collapsed"/>
@@ -160,7 +155,7 @@
               </Style>
             </TextBlock.Style>
           </TextBlock>
-          <ComboBox Grid.Row="9" Margin="0,6,0,0"
+          <ComboBox Grid.Row="7" Margin="0,6,0,0"
                     ItemsSource="{Binding RelayHostOptions}"
                     SelectedItem="{Binding SelectedRelayHost.Value, Mode=TwoWay}"
                     DisplayMemberPath="DisplayName">
@@ -176,7 +171,7 @@
             </ComboBox.Style>
           </ComboBox>
 
-          <Border Grid.Row="10" Margin="0,14,0,0" Style="{StaticResource BaseBorder}" Background="{StaticResource SurfaceContainerLowBrush}" Padding="12">
+          <Border Grid.Row="8" Margin="0,14,0,0" Style="{StaticResource BaseBorder}" Background="{StaticResource SurfaceContainerLowBrush}" Padding="12">
             <StackPanel>
               <TextBlock Text="PHASE" Foreground="{StaticResource OnSurfaceVariantBrush}" FontSize="12"/>
               <TextBlock Margin="0,6,0,0" Text="{Binding PhaseText.Value}" />
@@ -184,7 +179,7 @@
             </StackPanel>
           </Border>
 
-          <StackPanel Grid.Row="11" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
+          <StackPanel Grid.Row="9" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
             <controls:MatButton Variant="Filled" Command="{Binding SearchAndConnectCommand}">
               <TextBlock Text="FETCH &amp; INITIATE"/>
             </controls:MatButton>
