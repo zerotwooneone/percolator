@@ -104,6 +104,8 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
 
     public BindableReactiveProperty<string?> DirectEndpointText { get; }
 
+    public BindableReactiveProperty<string?> TargetPkhText { get; }
+
     public ReadOnlyObservableCollection<RelayHostOption> RelayHostOptions { get; }
     public BindableReactiveProperty<RelayHostOption?> SelectedRelayHost { get; }
 
@@ -162,6 +164,8 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
         SelectedRouteMode = new BindableReactiveProperty<RouteModeOption?>(null).AddTo(ref _bag);
 
         DirectEndpointText = new BindableReactiveProperty<string?>(null).AddTo(ref _bag);
+
+        TargetPkhText = new BindableReactiveProperty<string?>(null).AddTo(ref _bag);
 
         RelayHostOptions = new ReadOnlyObservableCollection<RelayHostOption>(_relayHostOptions);
         SelectedRelayHost = new BindableReactiveProperty<RelayHostOption?>(null).AddTo(ref _bag);
@@ -582,6 +586,20 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
                     return;
                 }
 
+                byte[] targetPkh;
+                try
+                {
+                    targetPkh = ParsePkh32(TargetPkhText.Value);
+                }
+                catch (Exception ex)
+                {
+                    ErrorText.Value = ex.Message;
+                    PhaseText.Value = null;
+                    return;
+                }
+
+                _ = targetPkh;
+
                 PhaseText.Value = "Validated (Relay).";
                 return;
             }
@@ -624,6 +642,34 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
         return new DnsEndPoint(parts[0], port);
     }
 
+    private static byte[] ParsePkh32(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            throw new InvalidOperationException("Target PKH required.");
+
+        var t = new string(text.Where(c => !char.IsWhiteSpace(c)).ToArray());
+        if (t.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+            t = t.Substring(2);
+
+        if (t.Length % 2 != 0)
+            throw new InvalidOperationException("PKH must be hex.");
+
+        byte[] bytes;
+        try
+        {
+            bytes = Convert.FromHexString(t);
+        }
+        catch
+        {
+            throw new InvalidOperationException("PKH must be hex.");
+        }
+
+        if (bytes.Length != 32)
+            throw new InvalidOperationException("PKH must be 32 bytes (64 hex chars).");
+
+        return bytes;
+    }
+
     private static string ComputeInitials(string? name)
     {
         if (string.IsNullOrWhiteSpace(name)) return "?";
@@ -639,6 +685,7 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
         Disposable.Dispose(TargetDisplayNameText);
         Disposable.Dispose(SelectedRouteMode);
         Disposable.Dispose(DirectEndpointText);
+        Disposable.Dispose(TargetPkhText);
         Disposable.Dispose(SelectedRelayHost);
         Disposable.Dispose(PhaseText);
         Disposable.Dispose(ErrorText);
