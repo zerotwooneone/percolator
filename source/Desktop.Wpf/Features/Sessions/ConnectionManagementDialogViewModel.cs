@@ -1,4 +1,5 @@
 using Desktop.Wpf.Shared.Mvvm;
+using Google.Protobuf;
 using R3;
 using System.Collections.Specialized;
 using System.Collections.ObjectModel;
@@ -8,6 +9,7 @@ using System.Windows;
 using Percolator.Application.Identity;
 using Percolator.Application.Network;
 using Percolator.Contracts;
+using Percolator.Cryptography;
 using Percolator.Identity;
 using Percolator.Identity.Model;
 using Percolator.Network;
@@ -598,9 +600,116 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
                     return;
                 }
 
-                _ = targetPkh;
+                if (_active.Identity is null)
+                {
+                    ErrorText.Value = "Identity not loaded.";
+                    PhaseText.Value = null;
+                    return;
+                }
 
-                PhaseText.Value = "Validated (Relay).";
+                var relayHostPeerId = new Percolator.Identity.PeerId(SelectedRelayHost.Value.PeerId);
+                var selfIdentityId = _active.Identity.SelfIdentityId.Value;
+
+                DirectSession? direct;
+                try
+                {
+                    direct = await _directSessions
+                        .GetByRemotePeerIdAsync(new Percolator.Network.PeerId(relayHostPeerId.Value), selfIdentityId)
+                        .ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    ErrorText.Value = ex.Message;
+                    PhaseText.Value = null;
+                    return;
+                }
+
+                if (direct is null)
+                {
+                    ErrorText.Value = "No direct session to relay host.";
+                    PhaseText.Value = null;
+                    return;
+                }
+
+                PhaseText.Value = "Fetching pre-key bundle...";
+
+                GetPreKeyBundleResponse.Types.PreKeyBundle? bundle;
+                try
+                {
+                    var internalEnvelope = new InternalEnvelope
+                    {
+                        PrekeyEnvelope = new PrekeyEnvelope
+                        {
+                            Version = 1,
+                            GetPreKeyBundleRequest = new GetPreKeyBundleRequest
+                            {
+                                Version = 1,
+                                PublicKeyHash = ByteString.CopyFrom(targetPkh)
+                            }
+                        }
+                    };
+
+                    var plaintext = new Plaintext(internalEnvelope.ToByteArray());
+                    var cryptoSessionId = new Percolator.Cryptography.SessionId(direct.SessionId.Value);
+                    var cipher = await _secureMessaging
+                        .EncryptAsync(cryptoSessionId, plaintext)
+                        .ConfigureAwait(false);
+
+                    var deliverResp = await _transport
+                        .SendMessageAsync(relayHostPeerId, direct.SessionId, cipher)
+                        .ConfigureAwait(false);
+
+                    if (deliverResp.ResultCase != DeliverOpaqueMessageResponse.ResultOneofCase.ResponsePayload
+                        || deliverResp.ResponsePayload is null
+                        || !deliverResp.ResponsePayload.HasResponsePayload
+                        || deliverResp.ResponsePayload.ResponsePayload.Length == 0)
+                    {
+                        throw new InvalidOperationException("No response payload returned.");
+                    }
+
+                    var respCipher = new SessionRatchetMessage(deliverResp.ResponsePayload.ResponsePayload.ToByteArray());
+                    var resolved = await _secureMessaging
+                        .DecryptInboundAsync(selfIdentityId, respCipher)
+                        .ConfigureAwait(false);
+                    var respPlain = resolved?.plaintext;
+                    if (respPlain is null)
+                    {
+                        throw new InvalidOperationException("Could not decrypt pre-key bundle response.");
+                    }
+
+                    var internalResp = InternalEnvelope.Parser.ParseFrom(respPlain.Value);
+                    if (internalResp.ApplicationPayloadCase != InternalEnvelope.ApplicationPayloadOneofCase.GetPreKeyBundleResponse)
+                    {
+                        throw new InvalidOperationException("Unexpected response type.");
+                    }
+
+                    bundle = internalResp.GetPreKeyBundleResponse?.PreKeyBundle;
+                }
+                catch (Exception ex)
+                {
+                    ErrorText.Value = ex.Message;
+                    PhaseText.Value = null;
+                    return;
+                }
+
+                if (bundle is null)
+                {
+                    ErrorText.Value = "Target not found.";
+                    PhaseText.Value = null;
+                    return;
+                }
+
+                if (!bundle.HasIdentityKey || bundle.IdentityKey.Length == 0
+                    || !bundle.HasSignedPreKeyId || bundle.SignedPreKeyId.Length == 0
+                    || !bundle.HasSignedPreKey || bundle.SignedPreKey.Length == 0
+                    || !bundle.HasPreKeySignature || bundle.PreKeySignature.Length == 0)
+                {
+                    ErrorText.Value = "Pre-key bundle invalid.";
+                    PhaseText.Value = null;
+                    return;
+                }
+
+                PhaseText.Value = "Pre-key bundle fetched.";
                 return;
             }
 
