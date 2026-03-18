@@ -9,8 +9,10 @@ using Moq;
 using NUnit.Framework;
 using Percolator.Application.Identity;
 using Percolator.Application.Network;
+using Percolator.Application.Network.Handshake;
 using Percolator.Application.Services;
 using Percolator.Contracts;
+using Percolator.Cryptography;
 using Percolator.Network;
 
 namespace Desktop.Wpf.Tests;
@@ -52,6 +54,13 @@ public sealed class ConnectionManagementDialogImportTokenTests
 
         var store = new Desktop.Wpf.Features.Sessions.State.SecureChannelsStore();
 
+        var sessionCrypto = new Mock<ISessionCrypto>(MockBehavior.Loose);
+        var preHandshake = new Mock<IPreHandshakeSessionStore>(MockBehavior.Loose);
+        var sentInvitations = new Mock<ISentInvitationRepository>(MockBehavior.Loose);
+        var clock = new Mock<IClock>(MockBehavior.Loose);
+        clock.SetupGet(x => x.UtcNow).Returns(DateTimeOffset.UtcNow);
+        var mediator = new Mock<MediatR.IMediator>(MockBehavior.Loose);
+
         var establish = new Mock<IEstablishDirectSessionService>(MockBehavior.Loose);
         establish.Setup(x => x.QueueInviteAsync(
                 It.IsAny<Percolator.Identity.SelfId>(),
@@ -76,7 +85,12 @@ public sealed class ConnectionManagementDialogImportTokenTests
             active,
             peerIdentities.Object,
             establish.Object,
-            store);
+            store,
+            sessionCrypto.Object,
+            preHandshake.Object,
+            sentInvitations.Object,
+            clock.Object,
+            mediator.Object);
 
         var token = CreateSignedInviteToken(out var inviterSpki, out var payloadBytes, out var sigBytes);
         sut.InviteTokenText.Value = token;
@@ -142,6 +156,13 @@ public sealed class ConnectionManagementDialogImportTokenTests
 
         var store = new Desktop.Wpf.Features.Sessions.State.SecureChannelsStore();
 
+        var sessionCrypto = new Mock<ISessionCrypto>(MockBehavior.Loose);
+        var preHandshake = new Mock<IPreHandshakeSessionStore>(MockBehavior.Loose);
+        var sentInvitations = new Mock<ISentInvitationRepository>(MockBehavior.Loose);
+        var clock = new Mock<IClock>(MockBehavior.Loose);
+        clock.SetupGet(x => x.UtcNow).Returns(DateTimeOffset.UtcNow);
+        var mediator = new Mock<MediatR.IMediator>(MockBehavior.Loose);
+
         var sut = new ConnectionManagementDialogViewModel(
             inbox.Object,
             actions.Object,
@@ -155,7 +176,12 @@ public sealed class ConnectionManagementDialogImportTokenTests
             active,
             peerIdentities.Object,
             establish.Object,
-            store);
+            store,
+            sessionCrypto.Object,
+            preHandshake.Object,
+            sentInvitations.Object,
+            clock.Object,
+            mediator.Object);
 
         var token = CreateSignedInviteToken(out _, out var payloadBytes, out var sigBytes);
 

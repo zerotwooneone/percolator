@@ -7,6 +7,7 @@ using Percolator.Contracts;
 using Percolator.Identity;
 using Percolator.Identity.Model;
 using Percolator.Network;
+using System.Security.Cryptography;
 
 namespace Percolator.Application.Network.Handshake
 {
@@ -374,6 +375,172 @@ namespace Percolator.Application.Network.Handshake
             }
 
             return null;
+        }
+
+        public async Task<SessionId?> TryFinalizeFromEstablishSessionResponseAsync(
+            SelfId selfIdentityId,
+            EstablishSessionResponse response,
+            CancellationToken cancellationToken = default)
+        {
+            if (response is null) throw new ArgumentNullException(nameof(response));
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (response.Response is null
+                || !response.Response.HasIdentitySigningKey
+                || response.Response.IdentitySigningKey.Length == 0
+                || !response.Response.HasResponsePayload
+                || response.Response.ResponsePayload.Length == 0
+                || !response.Response.HasPayloadSignature
+                || response.Response.PayloadSignature.Length == 0)
+            {
+                return null;
+            }
+
+            // Verify responder signature over raw ResponsePayload bytes
+            try
+            {
+                using var ecdsa = ECDsa.Create();
+                ecdsa.ImportSubjectPublicKeyInfo(response.Response.IdentitySigningKey.ToByteArray(), out _);
+                if (!ecdsa.VerifyData(
+                        response.Response.ResponsePayload.ToByteArray(),
+                        response.Response.PayloadSignature.ToByteArray(),
+                        HashAlgorithmName.SHA256))
+                {
+                    _logger.LogWarning("Standard finalize: EstablishSessionResponse signature invalid; dropping");
+                    return null;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Standard finalize: failed to verify EstablishSessionResponse signature; dropping");
+                return null;
+            }
+
+            var remoteIdentitySpki = response.Response.IdentitySigningKey.ToByteArray();
+            var remotePkh = SHA256.HashData(remoteIdentitySpki);
+
+            EstablishSessionResponse.Types.Response.Types.ResponsePayload respPayload;
+            try
+            {
+                respPayload = EstablishSessionResponse.Types.Response.Types.ResponsePayload.Parser.ParseFrom(response.Response.ResponsePayload);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Standard finalize: response payload parse failed");
+                return null;
+            }
+
+            if (!respPayload.HasSessionId || string.IsNullOrWhiteSpace(respPayload.SessionId))
+            {
+                _logger.LogWarning("Standard finalize: response missing session id");
+                return null;
+            }
+
+            SessionId sid;
+            try
+            {
+                sid = new SessionId(Guid.Parse(respPayload.SessionId));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Standard finalize: session id not a GUID: {SessionId}", respPayload.SessionId);
+                return null;
+            }
+
+            // Match to a pending pre-handshake attempt by recipient PKH
+            PreHandshakeRecord? match = null;
+            await foreach (var pending in _prehandshake.EnumeratePendingAsync(selfIdentityId.Value, cancellationToken).ConfigureAwait(false))
+            {
+                if (pending.RecipientPublicKeyHash is { Length: > 0 }
+                    && remotePkh.AsSpan().SequenceEqual(pending.RecipientPublicKeyHash))
+                {
+                    match = pending;
+                    break;
+                }
+            }
+
+            if (match is null)
+            {
+                _logger.LogInformation("Standard finalize: no pending record matched responder PKH; skipping");
+                return null;
+            }
+
+            // Resolve or create peer identity by PKH (for stable remote peer id mapping)
+            PeerIdentity? peerIdentity = null;
+            try
+            {
+                peerIdentity = await _peerIdentities.FindByPublicKeyHashAsync(remotePkh, cancellationToken).ConfigureAwait(false);
+                if (peerIdentity is null)
+                {
+                    var newId = Percolator.Identity.PeerId.NewId();
+                    peerIdentity = new PeerIdentity(newId);
+                    var now = _clock.UtcNow;
+                    peerIdentity.AddKey(remoteIdentitySpki, notBefore: now, expiresAt: now.AddYears(100), now: now);
+                    await _peerIdentities.SaveAsync(peerIdentity, cancellationToken).ConfigureAwait(false);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogInformation(ex, "Standard finalize: best-effort peer identity upsert failed; using ephemeral remote id");
+                peerIdentity = null;
+            }
+
+            var root = new RootKey(match.InitialRootKey);
+            var remoteCryptoPeerId = peerIdentity is null
+                ? Percolator.Cryptography.Primitives.PeerId.NewId()
+                : new Percolator.Cryptography.Primitives.PeerId(peerIdentity.Id.Value);
+
+            var initiatorSession = RatchetBootstrap.CreateInitiatorSession(
+                sid,
+                remoteCryptoPeerId,
+                new ProtocolVersion(1),
+                root,
+                _clock,
+                crypto: _sessionCrypto);
+
+            await _sessions.AddAsync(initiatorSession, cancellationToken).ConfigureAwait(false);
+
+            if (peerIdentity is not null)
+            {
+                try
+                {
+                    await _directSessions.UpsertAsync(
+                            new Percolator.Network.PeerId(peerIdentity.Id.Value),
+                            new Percolator.Network.DirectSessionId(sid.Value),
+                            selfIdentityId.Value)
+                        .ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogInformation(ex, "Standard finalize: best-effort direct session upsert failed.");
+                }
+            }
+
+            await _mediator.Publish(
+                    new Percolator.Application.Network.SecureSessionCreatedNotification(
+                        sid,
+                        Percolator.Application.Network.SecureSessionCreatedReason.InitiatorFinalize),
+                    cancellationToken)
+                .ConfigureAwait(false);
+
+            // Cleanup pending marker and outbound route marker
+            try
+            {
+                await _prehandshake.DeleteAsync(match.Id, selfIdentityId.Value, cancellationToken).ConfigureAwait(false);
+            }
+            catch
+            {
+            }
+            try
+            {
+                await _sentInvitations.DeleteAsync(new RequestCorrelationId(match.LocalRequestId), cancellationToken).ConfigureAwait(false);
+            }
+            catch
+            {
+            }
+
+            _logger.LogInformation("Initiator finalized session {SessionId} from EstablishSessionResponse", sid.Value);
+            return sid;
         }
     }
 }

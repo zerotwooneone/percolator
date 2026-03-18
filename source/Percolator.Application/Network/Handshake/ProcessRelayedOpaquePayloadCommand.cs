@@ -30,6 +30,7 @@ namespace Percolator.Application.Network.Handshake
         private readonly IEstablishDirectSessionService _establishDirectSessionService;
         private readonly IInviteHandshakeResponseIngress _inviteHandshakeResponseIngress;
         private readonly IStandardHandshakeIngress _standardHandshakeIngress;
+        private readonly IInitiatorFinalizeService _initiatorFinalize;
 
         private static readonly HashSet<InternalEnvelope.ApplicationPayloadOneofCase> AllowedCases = new()
         {
@@ -53,7 +54,8 @@ namespace Percolator.Application.Network.Handshake
             IDirectSessionLocator directSessions,
             IEstablishDirectSessionService establishDirectSessionService,
             IInviteHandshakeResponseIngress inviteHandshakeResponseIngress,
-            IStandardHandshakeIngress standardHandshakeIngress)
+            IStandardHandshakeIngress standardHandshakeIngress,
+            IInitiatorFinalizeService initiatorFinalize)
         {
             _logger = logger;
             _mediator = mediator;
@@ -63,6 +65,7 @@ namespace Percolator.Application.Network.Handshake
             _establishDirectSessionService = establishDirectSessionService;
             _inviteHandshakeResponseIngress = inviteHandshakeResponseIngress;
             _standardHandshakeIngress = standardHandshakeIngress;
+            _initiatorFinalize = initiatorFinalize;
         }
 
         public async Task<ProcessRelayedOpaquePayloadResponse> Handle(ProcessRelayedOpaquePayloadCommand request, CancellationToken cancellationToken)
@@ -231,6 +234,27 @@ namespace Percolator.Application.Network.Handshake
             catch
             {
                 // Not an InviteHandshakeResponse.
+            }
+
+            // Standard handshake response delivered through dumb relay queue: EstablishSessionResponse bytes.
+            try
+            {
+                var resp = EstablishSessionResponse.Parser.ParseFrom(bytes);
+                if (resp is not null
+                    && resp.Response is not null
+                    && resp.Response.HasIdentitySigningKey && resp.Response.IdentitySigningKey.Length > 0
+                    && resp.Response.HasResponsePayload && resp.Response.ResponsePayload.Length > 0
+                    && resp.Response.HasPayloadSignature && resp.Response.PayloadSignature.Length > 0)
+                {
+                    var sid = await _initiatorFinalize
+                        .TryFinalizeFromEstablishSessionResponseAsync(selfIdentityId, resp, cancellationToken)
+                        .ConfigureAwait(false);
+                    return sid is null ? ProcessRelayedOpaquePayloadResponse.Failure : ProcessRelayedOpaquePayloadResponse.Success;
+                }
+            }
+            catch
+            {
+                // Not an EstablishSessionResponse.
             }
 
             return ProcessRelayedOpaquePayloadResponse.Failure;

@@ -15,5 +15,10 @@ namespace Percolator.Application.Network.Handshake
             SelfId selfIdentityId,
             InviteHandshakeResponse response,
             CancellationToken cancellationToken = default);
+
+        Task<SessionId?> TryFinalizeFromEstablishSessionResponseAsync(
+            SelfId selfIdentityId,
+            EstablishSessionResponse response,
+            CancellationToken cancellationToken = default);
     }
 }
