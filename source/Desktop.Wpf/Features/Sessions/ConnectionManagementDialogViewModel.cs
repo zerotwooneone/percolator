@@ -8,6 +8,7 @@ using System.Security.Cryptography;
 using System.Windows;
 using Percolator.Application.Identity;
 using Percolator.Application.Network;
+using Percolator.Application.Network.Handshake;
 using Percolator.Contracts;
 using Percolator.Cryptography;
 using Percolator.Identity;
@@ -17,6 +18,7 @@ using Desktop.Wpf.Features.Simulator;
 using Desktop.Wpf.Features.Sessions.State;
 using Grpc.Core;
 using Percolator.Application.Services;
+using MediatR;
 
 namespace Desktop.Wpf.Features.Sessions;
 
@@ -90,6 +92,12 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
     private readonly IEstablishDirectSessionService _establishDirectSession;
     private readonly ISecureChannelsStore _store;
 
+    private readonly ISessionCrypto _sessionCrypto;
+    private readonly IPreHandshakeSessionStore _preHandshake;
+    private readonly ISentInvitationRepository _sentInvitations;
+    private readonly IClock _clock;
+    private readonly IMediator _mediator;
+
     private readonly object _relayHostRefreshLock = new();
     private bool _relayHostRefreshQueued;
 
@@ -139,7 +147,12 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
         ActiveIdentityContext active,
         IPeerIdentityRepository peerIdentities,
         IEstablishDirectSessionService establishDirectSession,
-        ISecureChannelsStore store)
+        ISecureChannelsStore store,
+        ISessionCrypto sessionCrypto,
+        IPreHandshakeSessionStore preHandshake,
+        ISentInvitationRepository sentInvitations,
+        IClock clock,
+        IMediator mediator)
     {
         _inbox = inbox;
         _actions = actions;
@@ -154,6 +167,12 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
         _peerIdentities = peerIdentities;
         _establishDirectSession = establishDirectSession;
         _store = store;
+
+        _sessionCrypto = sessionCrypto;
+        _preHandshake = preHandshake;
+        _sentInvitations = sentInvitations;
+        _clock = clock;
+        _mediator = mediator;
 
         ((INotifyCollectionChanged)_store.Channels).CollectionChanged += OnChannelsChanged;
         SelectedTabIndex = new BindableReactiveProperty<int>(0).AddTo(ref _bag);
@@ -709,7 +728,188 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
                     return;
                 }
 
-                PhaseText.Value = "Pre-key bundle fetched.";
+                // Verify PKH matches returned identity key and verify signature.
+                byte[] remoteIdentitySpki = bundle.IdentityKey.ToByteArray();
+                byte[] actualRemotePkh;
+                using (var sha = SHA256.Create())
+                {
+                    actualRemotePkh = sha.ComputeHash(remoteIdentitySpki);
+                }
+                if (!actualRemotePkh.AsSpan().SequenceEqual(targetPkh))
+                {
+                    ErrorText.Value = "Remote identity key does not match requested PKH.";
+                    PhaseText.Value = null;
+                    return;
+                }
+
+                Guid signedPreKeyId;
+                try
+                {
+                    signedPreKeyId = new Guid(bundle.SignedPreKeyId.ToByteArray());
+                }
+                catch
+                {
+                    ErrorText.Value = "Signed pre-key id invalid.";
+                    PhaseText.Value = null;
+                    return;
+                }
+
+                Guid? oneTimePreKeyId = null;
+                OneTimeKey? oneTimePreKey = null;
+                if (bundle.HasOneTimeKeyId && bundle.OneTimeKeyId.Length > 0 && bundle.HasOneTimeKey && bundle.OneTimeKey.Length > 0)
+                {
+                    try
+                    {
+                        oneTimePreKeyId = new Guid(bundle.OneTimeKeyId.ToByteArray());
+                        oneTimePreKey = new OneTimeKey(bundle.OneTimeKey.ToByteArray());
+                    }
+                    catch
+                    {
+                        oneTimePreKeyId = null;
+                        oneTimePreKey = null;
+                    }
+                }
+
+                var remoteIdentity = new RatchetIdentityKey(remoteIdentitySpki);
+                var remoteSpk = new PreKey(bundle.SignedPreKey.ToByteArray());
+                var remoteSig = new Percolator.Cryptography.Signature(bundle.PreKeySignature.ToByteArray());
+                if (!_sessionCrypto.VerifySignature(remoteIdentity, remoteSpk, remoteSig))
+                {
+                    ErrorText.Value = "Pre-key bundle signature invalid.";
+                    PhaseText.Value = null;
+                    return;
+                }
+
+                if (_active.Keys?.IdentitySigningKey is null)
+                {
+                    ErrorText.Value = "Identity keys not loaded.";
+                    PhaseText.Value = null;
+                    return;
+                }
+
+                PhaseText.Value = "Preparing handshake...";
+
+                // Build X3DH initiator state (persist only what is needed for slow-path finalize: initial root key).
+                var pkb = new Percolator.Cryptography.PreKeyBundle(
+                    remoteIdentity,
+                    signedPreKeyId,
+                    remoteSpk,
+                    remoteSig,
+                    oneTimePreKeyId,
+                    oneTimePreKey,
+                    expirationDateUtc: null);
+
+                var localIkPriv = new PrivatePreKey(_active.Keys.IdentitySigningKey.ExportECPrivateKey());
+                var x3 = _sessionCrypto.X3DH_Initiate(localIkPriv, pkb);
+
+                var correlationId = Guid.NewGuid();
+                var nowUtc = _clock.UtcNow;
+                var expiresAtUtc = nowUtc.AddMinutes(10);
+
+                try
+                {
+                    await _preHandshake.SaveAsync(
+                            new PreHandshakeRecord(
+                                Id: 0,
+                                SelfIdentityId: selfIdentityId,
+                                RecipientPublicKeyHash: targetPkh,
+                                LocalRequestId: correlationId,
+                                // Ephemeral private is no longer persisted; provide empty.
+                                InitiatorEphemeralPrivateKey: Array.Empty<byte>(),
+                                InitialRootKey: x3.SharedSecret.Value,
+                                CreatedAtUtc: nowUtc,
+                                ExpiresAtUtc: expiresAtUtc,
+                                RemoteIdentityKeySpki: remoteIdentitySpki),
+                            CancellationToken.None)
+                        .ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    ErrorText.Value = ex.Message;
+                    PhaseText.Value = null;
+                    return;
+                }
+
+                // Persist route provenance for PendingOutbound row (relay host), keyed by correlation id.
+                try
+                {
+                    await _sentInvitations.UpsertAsync(
+                            new SentInvitation(
+                                new Percolator.Cryptography.Primitives.RequestCorrelationId(correlationId),
+                                signedPreKeyId,
+                                oneTimePreKeyId,
+                                targetPeerId: null,
+                                createdAtUtc: nowUtc,
+                                expiresAtUtc: expiresAtUtc,
+                                targetDisplayName: TargetDisplayNameText.Value,
+                                targetEndpointHost: null,
+                                targetEndpointPort: null,
+                                inviteRouteKind: InviteRouteKind.Relayed,
+                                inviteRelayHostPeerId: new Percolator.Cryptography.Primitives.PeerId(relayHostPeerId.Value)))
+                        .ConfigureAwait(false);
+
+                    await _mediator.Publish(
+                            new SentInvitationUpsertedNotification(new Percolator.Cryptography.Primitives.RequestCorrelationId(correlationId)),
+                            CancellationToken.None)
+                        .ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    ErrorText.Value = ex.Message;
+                    PhaseText.Value = null;
+                    return;
+                }
+
+                // Create initiator hello and enqueue it to relay host for forwarding to target PKH.
+                var hello = new HandshakeInitiatorHello
+                {
+                    Version = 1,
+                    InitiatorIdentityKeySpki = ByteString.CopyFrom(_active.Keys.IdentitySigningKey.ExportSubjectPublicKeyInfo()),
+                    InitiatorEphemeralKeySpki = ByteString.CopyFrom(x3.EphemeralPublic.Value),
+                    SignedPreKeyId = ByteString.CopyFrom(signedPreKeyId.ToByteArray())
+                };
+                if (oneTimePreKeyId is not null)
+                {
+                    hello.OneTimePreKeyId = ByteString.CopyFrom(oneTimePreKeyId.Value.ToByteArray());
+                }
+
+                PhaseText.Value = "Enqueuing handshake...";
+                try
+                {
+                    var mqReq = new EnqueueOpaqueMessageRequest
+                    {
+                        Version = 1,
+                        RecipientPublicKeyHash = ByteString.CopyFrom(targetPkh),
+                        MessageBlob = ByteString.CopyFrom(hello.ToByteArray())
+                    };
+
+                    var env = new InternalEnvelope
+                    {
+                        MessageQueueEnvelope = new MessageQueueEnvelope
+                        {
+                            Version = 1,
+                            EnqueueOpaqueMessageRequest = mqReq
+                        }
+                    };
+
+                    var plainMq = new Plaintext(env.ToByteArray());
+                    var cryptoSessionIdMq = new Percolator.Cryptography.SessionId(direct.SessionId.Value);
+                    var cipherMq = await _secureMessaging
+                        .EncryptAsync(cryptoSessionIdMq, plainMq)
+                        .ConfigureAwait(false);
+
+                    _ = await _transport
+                        .SendMessageAsync(relayHostPeerId, direct.SessionId, cipherMq)
+                        .ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    ErrorText.Value = ex.Message;
+                    PhaseText.Value = null;
+                    return;
+                }
+
+                PhaseText.Value = "Handshake enqueued.";
                 return;
             }
 
