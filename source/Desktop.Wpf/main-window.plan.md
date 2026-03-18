@@ -938,6 +938,138 @@ Definition of done:
 - The PendingOutbound row displays the user-entered name even when no peer exists yet.
 - Endpoint-only initiation works for Direct mode and results in a saved peer name once the response arrives.
 
+### Subchunk H.5 — Network Search: Relay mode UX + validation (requires PKH)
+
+Goal:
+
+- When the route mode is set to **Via Relay Host**, the user must:
+  - pick a relay peer from the Relay Host dropdown
+  - enter a target peer PKH (hex)
+- The UI only enforces inputs and shows clear validation errors. No protocol changes yet.
+
+Work:
+
+- Update `ConnectionManagementDialogWindow.xaml`
+  - Add a `TARGET IDENTITY (PKH)` label + input.
+  - Visibility trigger: only visible when `SelectedRouteMode.Value.Key == "relay"`.
+- Update `ConnectionManagementDialogViewModel`
+  - Add `TargetPkhText` as a reactive property.
+  - In `ExecuteNetworkSearchAsync`, enforce Relay mode requirements:
+    - `SelectedRelayHost` is required
+    - `TargetPkhText` is required and must parse to 32 bytes
+  - Keep Direct mode behavior unchanged.
+
+Definition of done:
+
+- Relay mode cannot start without Relay Host + PKH.
+- Error messages are clear and do not throw to the UI thread.
+
+### Subchunk H.6 — Relay mode: fetch target pre-key bundle via relay host session
+
+Goal:
+
+- Clicking `Fetch & Initiate` in Relay mode performs only the “fetch pre-key bundle” step.
+- Provide early UI feedback when the entered PKH already corresponds to an established session (to prevent accidental session resets).
+
+Work:
+
+- Debounced PKH awareness (UX-only; no protocol changes)
+  - On `TargetPkhText` changes, debounce (e.g. ~300–500ms) and attempt parse.
+  - If parse succeeds, query local state:
+    - whether a `PeerIdentity` exists for that PKH
+    - whether any established secure session exists for that identity
+  - If an established session exists, show warning text under the PKH field:
+    - “An existing secure session with this identity already exists. Initiating a new handshake may reset/replace the active session.”
+  - Hide `Fetch & Initiate` in this state, and instead expose an explicit “Re-establish session” action.
+
+- Fetch semantics (align to Standard Flow: bundle fetch is the normal initiator step)
+  - Standard X3DH initiation requires the responder’s current pre-key bundle (see `source/session-flow.md` Part 1, Step 1.1).
+  - Do not skip the fetch merely because the PKH is “known”; the bundle includes key IDs and may rotate.
+  - It is acceptable to cache the fetched bundle briefly and reuse it while it is fresh.
+    - Use staleness/TTL to decide reuse vs refetch (e.g. “fetched within the last N minutes”).
+    - If the response includes explicit expiry metadata, use that.
+
+- Use existing envelope pattern over the Main↔Relay secure session:
+  - Request: `InternalEnvelope.PrekeyEnvelope.GetPreKeyBundleRequest` (`PublicKeyHash = targetPKH`)
+  - Encrypt to relay with `ISecureMessagingService.EncryptAsync(relaySessionId, ...)`
+  - Send to relay with `IMessageTransportService.SendMessageAsync(relayPeerId, relayDirectSessionId, cipher, ct)`
+  - Decrypt response with `ISecureMessagingService.DecryptInboundAsync(selfId, ...)`
+  - Expect: `InternalEnvelope.GetPreKeyBundleResponse.PreKeyBundle`
+
+- Overwrite/reset confirmation (only for explicit re-establish)
+  - If the user chooses “Re-establish session” while an established session exists:
+    - Show a yes/no confirmation dialog:
+      - “This will create a new session with this identity and may invalidate existing pending messages. Continue?”
+    - Do not delete historical sessions silently; prefer marking which session is “current” for routing.
+
+- Failures must be surfaced as user-facing errors:
+  - relay offline/unavailable
+  - relay returns no response payload
+  - response decrypt/parse failure
+  - target not found
+
+Definition of done:
+
+- For valid relay+PKH, UI reaches “bundle fetched” state.
+- For invalid/unavailable cases, UI shows the correct error.
+- If PKH maps to an existing established session, the UI warns (debounced) and prevents accidental initiation; a re-establish path is explicit and confirmed.
+
+### Subchunk H.7 — Relay mode: enqueue standard handshake initiator hello + show PendingOutbound
+
+Goal:
+
+- After pre-key bundle is available, Main initiates a standard (not reverse-signal) handshake via relay:
+  - create a `HandshakeInitiatorHello`
+  - enqueue it to the relay host’s message queue addressed to the target PKH
+  - immediately show a PendingOutbound channel in the main window list
+
+Work:
+
+- Create `HandshakeInitiatorHello` from the fetched bundle.
+  - MVP invariant: at most one pending standard-handshake-via-relay attempt per initiator at a time.
+- Enqueue to relay host:
+  - `InternalEnvelope.MessageQueueEnvelope.EnqueueOpaqueMessageRequest`
+    - `RecipientPublicKeyHash = targetPKH`
+    - `MessageBlob = hello.ToByteArray()`
+  - Encrypt to relay and send over the direct session.
+- Persist a “pending standard handshake via relay” record so projection can render PendingOutbound.
+  - Source of truth should be a durable store (prefer: extend `IPreHandshakeSessionStore`, or create a dedicated store if needed).
+  - Persist:
+    - target PKH
+    - relay peer id
+    - display name (if supplied)
+    - created time / expiry
+    - the initiator ephemeral material needed to finalize.
+- Projection (`SecureChannelsProjection`) must render PendingOutbound from this store.
+  - Route provenance text should include `Relay:<relayPeerId>`.
+
+Definition of done:
+
+- Clicking `Fetch & Initiate` in Relay mode produces a PendingOutbound row immediately.
+- The row includes relay route info.
+
+### Subchunk H.8 — Relay mode: async completion (finalize initiator on inbound relayed delivery)
+
+Goal:
+
+- When the target accepts/responds, the initiator finalizes and the pending row migrates to Active.
+
+Work:
+
+- No polling. Completion is driven by delivery.
+  - The relay host is responsible for delivering queued opaque messages to the initiator when possible.
+  - When Main receives an inbound relayed opaque payload from the relay host:
+    - Attempt parse as `EstablishSessionResponse`.
+    - Finalize initiator-side session using the persisted pending handshake state.
+    - Emit `SecureSessionCreatedNotification` so projection migrates PendingOutbound -> Active.
+- Failure/timeout semantics:
+  - If no completion after expiry, mark the pending attempt Failed/Expired and project it accordingly.
+
+Definition of done:
+
+- Completing the handshake via relay transitions the main window entry from PendingOutbound to Active.
+- The completion still works if Connection Management dialog is closed.
+
 ---
 
 ## Chunk I — Notification badge + default focus behavior for Connection Management button
