@@ -16,7 +16,7 @@ classDef pending fill:#1e3a8a,stroke:#38bdf8,color:#38bdf8
     
     PREKEYS_ACQUIRED --> REQUEST_SENT : Generate & enqueue HandshakeInitiatorHello
     PREKEYS_ACQUIRED --> EXPIRED_PREKEY : Bundle cache TTL expires
-    EXPIRED_PREKEY --> FETCHING_PREKEYS : Auto-retry fetch
+    EXPIRED_PREKEY --> FETCHING_PREKEYS : User retries fetch
 
     REQUEST_SENT --> HANDSHAKE_COMPLETE : Receive EstablishSessionResponse (via relay queue)
     REQUEST_SENT --> EXPIRED_HANDSHAKE : Timeout / undeliverable / stale pre-key
@@ -40,7 +40,7 @@ classDef pending fill:#1e3a8a,stroke:#38bdf8,color:#38bdf8
     %% -----------------------------------------
     HANDSHAKE_COMPLETE --> ACTIVE_SESSION : Initialize Double Ratchet
     ACTIVE_SESSION --> DESYNCED : Repeated decrypt failures / ratchet-key miss
-    DESYNCED --> FETCHING_PREKEYS : Silent Auto-Heal (Request new session)
+    DESYNCED --> FETCHING_PREKEYS : User re-establishes (request new session)
 
     %% -----------------------------------------
     %% CLEANUP
