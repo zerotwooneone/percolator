@@ -166,6 +166,7 @@ internal sealed class StandardHandshakeIngress : IStandardHandshakeIngress
         var responsePayloadBytes = responsePayload.ToByteArray();
         var signature = _signingService.Sign(responsePayloadBytes, keys.IdentitySigningKey);
 
+        //todo: critical: we should not automatically accept the request here. This should be queued for user approval.
         return new EstablishSessionResponse
         {
             Version = 1,
