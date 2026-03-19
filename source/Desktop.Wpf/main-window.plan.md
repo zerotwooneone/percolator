@@ -1150,6 +1150,193 @@ Definition of done:
 - When the target bundle exists (published to relay), the UI reaches the “bundle fetched” state and proceeds to enqueue the handshake.
 - When the target bundle does not exist, the relay returns a valid encrypted `GetPreKeyBundleResponse` with `PreKeyBundle` unset (and the UI shows "Target not found.").
 
+### Subchunk H.10 — Simulator: end-to-end relay success (Main ↔ Relay ↔ Simulated Peer)
+
+Goal:
+
+- From the Main window, using a relay-capable peer R:
+  - Pre-key bundle requests to R succeed (R handles request and returns response payload).
+  - Relayed opaque messages can be routed:
+    - Main -> R -> simulated peer P
+    - simulated peer P -> R -> Main
+
+Scope boundaries:
+
+- This subchunk is about simulator relay queue routing and delivery semantics.
+- It should not introduce new application-layer envelope processors or bypass the existing MediatR pipeline.
+- The simulator relay queue should mirror the main app’s addressing model: relay queue items are addressed by recipient `PublicKeyHash` (PKH), not by simulator-specific peer ids.
+
+Work:
+
+1. Make PKH the canonical recipient address for the simulator relay queue.
+   - All relay queue items should be enqueued with `RecipientRoutingKey = recipientPublicKeyHash` (32 bytes).
+   - Do not enqueue relay queue items keyed by simulator peer id (Guid).
+   - This aligns the simulator with the main app semantics (`EnqueueOpaqueMessageRequest.RecipientPublicKeyHash`).
+
+2. Introduce a first-class PKH <-> peer mapping inside simulator state.
+   - Each simulated peer must have an identity PKH that is stable and queryable:
+     - Compute as `SHA256(IdentityPublicKeySpkiBytes)` (same definition used by Main).
+     - Persist it on the peer DTO (so delivery does not depend on “which bundles were published”).
+   - Provide a state-service API to resolve recipients:
+     - `TryGetPeerIdByIdentityPkhAsync(byte[] recipientPkh) -> Guid?`
+
+3. Route relay queue items by PKH.
+   - When delivering a relay queue item:
+     - If PKH matches Main identity PKH, deliver using the existing ack-based “RelayOpaqueEnvelope” flow.
+     - Else resolve PKH -> `peerId` using the mapping from (2), then deliver using `ISimulatorRelayDeliveryService.DeliverToPeerAsync(peerId, ...)`.
+
+4. Add diagnostics for PKH routing failures.
+   - Emit a diagnostic event when:
+     - PKH does not match Main and cannot be resolved to any simulated peer.
+
+5. Validate relay-mode pre-key request stays green.
+   - Verify both:
+     - bundle found
+     - bundle not found
+
+Architecture note (why this change):
+
+- Using multiple unrelated “routing key formats” inside the simulator relay queue couples delivery behavior to call site details.
+- The main app consistently addresses relay messages by recipient PKH.
+- Making PKH the simulator’s canonical recipient address eliminates special cases and makes relayed delivery behavior predictable.
+
+Edit these files:
+
+- Relay delivery UI/VM:
+  - `Desktop.Wpf/Features/Simulator/SimulatedRelayQueuePanelViewModel.cs`
+    - extend `DeliverItemAsync`:
+      - PKH routing key (32 bytes) -> deliver-to-main-by-routing-key or resolve-to-peer
+  - `Desktop.Wpf/Features/Simulator/SimulatorRelayTabViewModel.cs`
+    - pass a `Func<byte[]?>` into the panel for “Main identity PKH”
+
+- Relay enqueue and state:
+  - `Desktop.Wpf/Features/Simulator/SimulatorState.cs`
+    - add an identity PKH field on the simulated peer DTO (persisted)
+  - `Desktop.Wpf/Features/Simulator/SimulatorStateService.cs`
+    - compute/normalize identity PKH in `NormalizePeer(...)`
+    - add `TryGetPeerIdByIdentityPkhAsync(...)`
+  - `Desktop.Wpf/Features/Simulator/SimulatorRelayEmulator.cs`
+    - ensure relay queue items are enqueued using recipient PKH (not Guid)
+
+- Diagnostics:
+  - `Desktop.Wpf/Features/Simulator/SimulatorDiagnosticsTabViewModel.cs`
+    - add a diagnostic event type for PKH routing resolution failure (if not reusing an existing one)
+
+- Verification call sites (no changes expected; these are the manual entry points):
+  - `Desktop.Wpf/Features/Sessions/ConnectionManagementDialogViewModel.cs`
+  - `Desktop.Wpf/Features/Sessions/NewHandshakeDialogViewModel.cs`
+
+If this is too large to implement in one pass, split this subchunk into:
+
+- Part A: Canonicalize relay queue enqueue to PKH + persist simulated peer identity PKH
+- Part B: Update relay queue delivery paths (PKH -> Main, PKH -> simulated peer) + diagnostics
+
+Definition of done:
+
+- Main -> relay host pre-key bundle request succeeds (non-empty response payload) for both:
+  - bundle found
+  - bundle not found
+- After Main enqueues a relayed opaque message to relay host with `RecipientPublicKeyHash`:
+  - relay queue item can be delivered to the correct simulated peer (PKH routing resolves to `LogicalOwnerPeerId`).
+- Relayed replies from simulated peers can be routed back to Main, including PKH-keyed deliveries.
+
+Verification (manual):
+
+- Setup:
+  - Create relay-capable simulated peer R.
+  - Create simulated peer P and publish P’s pre-key bundle to R (and satisfy the active-session publish gating).
+  - Establish direct session Main <-> R (existing handshake/invite path).
+- Pre-key request:
+  - From Main, run “Fetch and initiate” using relay R.
+  - Observe diagnostics and confirm the request yields a response payload and decrypts to `GetPreKeyBundleResponse`.
+- Relayed opaque delivery:
+  - From Main, enqueue a relayed opaque payload destined to P via R (this should create a relay queue item keyed by P’s PKH).
+  - In Relay tab, deliver the item and confirm it routes to P.
+  - Confirm reverse delivery back to Main works (including PKH routing key cases).
+
+### Subchunk H.11 — Simulator: Relay “Active Sessions Manager” (simulated auth) + pre-key publish gating
+
+Goal:
+
+- Make relay-mode simulator scenarios explicit and debuggable by modeling which peers are currently authenticated to use a relay host.
+- Ensure simulator UI does not silently repair missing sessions.
+- Disable publishing pre-keys to a relay host unless the relay host has an active session for the publishing peer.
+
+Why (root cause observed):
+
+- Main sends encrypted internal RPCs (e.g., `EnqueueOpaqueMessageRequest`, `GetPreKeyBundleRequest`) to the relay host over a direct session.
+- In simulator mode, the relay host can only decrypt these requests if the simulator runtime has the corresponding session material loaded.
+- The simulator currently allows users to create inconsistent topology (e.g., “published keys relationship exists” but relay host has no session for that peer), which leads to silent delivery failures (nothing enqueued).
+
+Design principles:
+
+- **No cryptography** for this feature.
+  - “Active Sessions” is a simulator-only concept: a list of peers that the relay host will treat as authenticated.
+  - Adding/removing an active session should not run X3DH or ratchet bootstrap.
+- Keep this as UI/state simulation, not application transport behavior.
+  - We are not changing how the real app establishes sessions.
+- Prefer “explicit invalid state” (disabled controls + diagnostics) over implicit repair.
+- Be explicit about what this does and does not guarantee.
+  - This feature does not create/seed `RuntimeStore.Sessions` and therefore does not “fix” missing ratchet/session material.
+  - It is an authorization/topology simulation layer that can be used for gating and clearer diagnostics.
+
+Work:
+
+1. Add/persist relay active session state + state service APIs + diagnostics events.
+   - Add `SimulatedPeerRelayStateDto.ActiveSessionsPeerIds` (`List<Guid>`).
+   - In `Desktop.Wpf/Features/Simulator/SimulatorStateService.cs` `NormalizePeer(SimulatedPeerDto, TransportOptions)` initialize `peer.Relay.ActiveSessionsPeerIds` to empty when missing.
+   - Extend `ISimulatorStateService` with:
+     - `AddRelayActiveSessionAsync(relayHostPeerId, peerId, ct)`
+     - `RemoveRelayActiveSessionAsync(relayHostPeerId, peerId, ct)`
+   - Extend `SimulatorDiagnosticEventType` with:
+     - `RelayActiveSessionAdded`
+     - `RelayActiveSessionRemoved`
+     - (optional) `PreKeyPublishBlockedNoActiveSession`
+
+2. Wire Relay tab UI to show/edit active sessions.
+   - Extend `SimulatorRelayTabView.xaml` relay panel template to include the “Active Sessions” box.
+   - Implement UI state/commands in `SimulatedRelayQueuePanelViewModel`:
+     - list entries + remove (`[X]`)
+     - dropdown of available peers + `Add` command
+     - extend `RefreshAsync` to refresh queue + active sessions list.
+
+3. Gate publish actions (both code paths) and show a reason when disabled.
+   - Gate `SimulatedPeerCardViewModel.ExecutePublishAsync(...)` via `PublishKeysCommand` enable condition.
+   - Gate `SimulatedPeerItemViewModel.ExecutePublishStandardPreKeysToRelayAsync(...)`.
+   - When blocked, emit `PreKeyPublishBlockedNoActiveSession` (if implemented).
+
+Edit these files:
+
+- State + persistence + service APIs:
+  - `Desktop.Wpf/Features/Simulator/SimulatorState.cs`
+  - `Desktop.Wpf/Features/Simulator/SimulatorStateService.cs`
+  - `Desktop.Wpf/Features/Simulator/SimulatorDiagnosticsTabViewModel.cs`
+
+- Relay tab UI:
+  - `Desktop.Wpf/Features/Simulator/SimulatedRelayQueuePanelViewModel.cs`
+  - `Desktop.Wpf/Features/Simulator/SimulatorRelayTabView.xaml`
+
+- Publish gating:
+  - `Desktop.Wpf/Features/Simulator/SimulatedPeerCardViewModel.cs`
+  - `Desktop.Wpf/Features/Simulator/SimulatedPeerItemViewModel.cs`
+
+Definition of done:
+
+- Relay tab shows an “Active Sessions” box per relay host.
+- Users can add/remove peers from a relay host’s active sessions list.
+- Each add/remove produces a diagnostics event.
+- “Publish prekey” is disabled unless the chosen relay host has an active session entry for the source peer.
+
+Verification (manual):
+
+- Add a relay-capable peer R and a publisher peer P.
+- Ensure `R` has no active session for `P`.
+  - Publishing P -> R is disabled.
+- Add `P` to `R` Active Sessions.
+  - Publishing becomes enabled and succeeds.
+- Remove `P` from `R` Active Sessions.
+  - Publishing becomes disabled again.
+
 ---
 
 ## Chunk I — Notification badge + default focus behavior for Connection Management button
