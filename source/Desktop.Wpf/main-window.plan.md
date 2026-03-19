@@ -1070,6 +1070,73 @@ Definition of done:
 - Completing the handshake via relay transitions the main window entry from PendingOutbound to Active.
 - The completion still works if Connection Management dialog is closed.
 
+### Subchunk H.9 — Simulator: relay host must respond to PreKey bundle requests (RPC response payload)
+
+Goal:
+
+- Relay-mode `Fetch & Initiate` must successfully fetch a target’s pre-key bundle through a simulated relay host.
+- The simulated relay host must behave like a real node for `DeliverOpaqueMessage` request/response semantics:
+  - When Main delivers an encrypted `InternalEnvelope` requesting `GetPreKeyBundleRequest` to the relay host,
+  - the relay host returns a `DeliverOpaqueMessageResponse.ResponsePayload` containing an encrypted `InternalEnvelope.GetPreKeyBundleResponse`.
+
+Root cause (current behavior):
+
+- Main sends `InternalEnvelope.PrekeyEnvelope.GetPreKeyBundleRequest` to the relay host over the *direct* session (expected request/response).
+- In simulator mode, `GrpcMessageTransportService` intercepts this RPC via `ISimulatorOutboundInterceptor.TryDeliverOpaqueMessage`.
+- The simulated peer handler (`SimulatedPeerRuntime.ReceiveOpaqueMessageFromMainAsync`) only handles:
+  - `InternalEnvelope.MessageQueueEnvelope.EnqueueOpaqueMessageRequest`
+  - and returns `DeliverOpaqueMessageResponse { Version = 1 }` for everything else.
+- Therefore the UI sees: `DeliverOpaqueMessageResponse` with **no** `ResponsePayload` and surfaces "No response payload returned.".
+
+Design principles:
+
+- The UI must not repair simulator state or routing (it’s a consumer).
+- The simulator must not “reach into” the main application’s state or repositories.
+  - The simulator pretends to be a remote peer; the only contract surface between Main and the simulator is the fake gRPC transport interception.
+- There should be one canonical envelope format (`InternalEnvelope`) and one canonical set of request/response message types.
+  - We already have this: `InternalEnvelope` + existing handlers on the Main side.
+- Avoid introducing a new application-layer “envelope processor” abstraction.
+  - We already have a request/response boundary in the application via MediatR (`ProcessInternalEnvelopeCommand`) and the ingress pipeline.
+  - The simulator should implement the *remote peer* behavior, not a second copy of the Main ingress pipeline.
+
+Work:
+
+- Implement request/response handling for `PrekeyEnvelope.GetPreKeyBundleRequest` inside the simulated relay host runtime.
+  - Location: `Desktop.Wpf/Features/Simulator/SimulatedPeerRuntimeService.cs` (nested `SimulatedPeerRuntime.ReceiveOpaqueMessageFromMainAsync`).
+  - Current behavior: handles only `MessageQueueEnvelope.EnqueueOpaqueMessageRequest`; returns empty `DeliverOpaqueMessageResponse` otherwise.
+  - New behavior for relay host:
+    - When decrypted `InternalEnvelope.ApplicationPayloadCase == PrekeyEnvelope` and `MessageCase == GetPreKeyBundleRequest`:
+      - Read the bundle bytes from the relay host’s own simulated store (owned by the simulator).
+        - Use existing simulator mechanisms (e.g., `ISimulatorStateService.TryPopPreKeyBundleByRecipientPkhAsync` or equivalent) keyed by `PublicKeyHash`.
+      - Build an `InternalEnvelope.GetPreKeyBundleResponse`:
+        - If bundle found: populate `PreKeyBundle` fields from the stored bytes.
+        - If not found: return a valid `GetPreKeyBundleResponse` with `PreKeyBundle` unset.
+      - Encrypt the response envelope back to Main using the matched session.
+      - Return `DeliverOpaqueMessageResponse` with `ResponsePayload` set to the encrypted bytes.
+    - This mirrors real gRPC semantics: request in, response payload out.
+
+- Keep relay-queue semantics unchanged.
+  - `EnqueueOpaqueMessageRequest` should remain supported and should still return an empty response payload (fire-and-forget enqueue).
+
+- Add simulator diagnostics to reduce brittleness when debugging.
+  - Emit a diagnostic event when the relay host receives a `GetPreKeyBundleRequest`.
+  - Emit a diagnostic event for:
+    - bundle found (and owner peer id if known)
+    - bundle not found
+    - decrypt/parse failure
+
+- Add targeted tests (simulator-focused) instead of inventing new application ports.
+  - Unit/integration test that:
+    - given an established direct session between Main and the simulated relay host,
+    - delivering a `DeliverOpaqueMessageRequest` containing an encrypted `GetPreKeyBundleRequest` returns a `DeliverOpaqueMessageResponse` with non-empty `ResponsePayload`.
+    - decrypting that payload yields an `InternalEnvelope.GetPreKeyBundleResponse`.
+
+Definition of done:
+
+- Relay-mode Network Search no longer errors with "No response payload returned.".
+- When the target bundle exists (published to relay), the UI reaches the “bundle fetched” state and proceeds to enqueue the handshake.
+- When the target bundle does not exist, the relay returns a valid encrypted `GetPreKeyBundleResponse` with `PreKeyBundle` unset (and the UI shows "Target not found.").
+
 ---
 
 ## Chunk I — Notification badge + default focus behavior for Connection Management button
