@@ -10,6 +10,8 @@ using Google.Protobuf;
 using Moq;
 using NUnit.Framework;
 using Percolator.Contracts;
+using Percolator.Cryptography;
+using Percolator.Cryptography.Primitives;
 
 namespace Desktop.Wpf.Tests;
 
@@ -252,5 +254,223 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
         var bytes = bundle.ToByteArray();
         var pkh = SHA256.HashData(responderIdentitySpki);
         return new ResponderBundleFixture(bytes, pkh);
+    }
+
+    [Test]
+    public async Task RelayHost_Returns_ResponsePayload_for_GetPreKeyBundleRequest_when_bundle_found()
+    {
+        // Arrange
+        var relayHostPeerId = Guid.NewGuid();
+
+        using var relayIdentityEcdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        var relayIdentityPriv = relayIdentityEcdh.ExportECPrivateKey();
+        var relayIdentitySpki = relayIdentityEcdh.PublicKey.ExportSubjectPublicKeyInfo();
+
+        var model = new SimulatedPeerModel(relayHostPeerId, "relay", isOnline: true, isRelayCapable: true, relayIdentitySpki, relayIdentityPriv);
+        using var directory = new DirectoryStub(model);
+
+        var messageService = (Percolator.Application.Network.PercolatorMessageService)
+            FormatterServices.GetUninitializedObject(typeof(Percolator.Application.Network.PercolatorMessageService));
+        var pending = new SimulatedPeerPendingInbox();
+
+        var bundle = CreateValidResponderPreKeyBundle();
+
+        var clock = new StaticClock(StaticClock.DefaultNow);
+        var sessionId = SessionId.NewId();
+        var root = new RootKey(new byte[32]);
+        var initiatorSession = RatchetBootstrap.CreateInitiatorSession(
+            sessionId,
+            PeerId.NewId(),
+            new ProtocolVersion(1),
+            root,
+            clock);
+        var responderSession = RatchetBootstrap.CreateResponderSession(
+            sessionId,
+            PeerId.NewId(),
+            new ProtocolVersion(1),
+            root,
+            clock);
+
+        var seededStore = new SimulatedPeerRuntimeStoreDto
+        {
+            Version = 1,
+            Sessions =
+            {
+                new SimulatedSecureSessionDto
+                {
+                    SessionId = responderSession.Id.Value,
+                    RemotePeerId = responderSession.RemotePeerId.Value,
+                    ProtocolVersion = responderSession.ProtocolVersion.Value,
+                    RootKey = responderSession.State.RootKey.Value,
+                    SendChainKey = responderSession.State.SendingChainKey?.Value,
+                    SendCounter = responderSession.State.SendingCounter,
+                    RecvChainKey = responderSession.State.ReceivingChainKey?.Value,
+                    RecvCounter = responderSession.State.ReceivingCounter,
+                    PrevChainLength = responderSession.State.PreviousChainLength,
+                    RemoteRatchetKey = responderSession.State.RemoteRatchetKey?.Value,
+                    DhRatchetPrivateKey = responderSession.State.DhRatchetPrivateKey?.Value,
+                    SkippedKeysCount = responderSession.SkippedKeysCount,
+                    CreatedAtUtc = responderSession.CreatedAtUtc,
+                    LastUsedAtUtc = responderSession.LastUsedAtUtc
+                }
+            }
+        };
+
+        var state = new Mock<ISimulatorStateService>(MockBehavior.Strict);
+        state.SetupGet(s => s.Peers)
+            .Returns(new ReadOnlyObservableCollection<SimulatedPeerDto>(new ObservableCollection<SimulatedPeerDto>()));
+        state.Setup(s => s.TryGetRuntimeStoreAsync(relayHostPeerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(seededStore);
+        state.Setup(s => s.SaveRuntimeStoreAsync(It.IsAny<Guid>(), It.IsAny<SimulatedPeerRuntimeStoreDto>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        state.Setup(s => s.TryPopPreKeyBundleByRecipientPkhAsync(relayHostPeerId, bundle.ResponderPkh, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PublishedPreKeyBundleDto
+            {
+                RecipientPublicKeyHash = bundle.ResponderPkh,
+                LogicalOwnerPeerId = Guid.NewGuid(),
+                BundleBytes = bundle.BundleBytes,
+                ExpiresUtc = DateTimeOffset.UtcNow.AddMinutes(5)
+            });
+
+        var diagnostics = new SimulatorDiagnosticsService();
+        var sut = new SimulatedPeerRuntimeService(directory, messageService, state.Object, diagnostics, pending);
+
+        var envReq = new InternalEnvelope
+        {
+            PrekeyEnvelope = new PrekeyEnvelope
+            {
+                Version = 1,
+                GetPreKeyBundleRequest = new GetPreKeyBundleRequest
+                {
+                    Version = 1,
+                    PublicKeyHash = ByteString.CopyFrom(bundle.ResponderPkh)
+                }
+            }
+        };
+
+        var pt = new Plaintext(envReq.ToByteArray());
+        var cipher = initiatorSession.Encrypt(pt, clock);
+        var deliverReq = new DeliverOpaqueMessageRequest { Version = 1, Payload = ByteString.CopyFrom(cipher.Value) };
+
+        // Act
+        var deliverResp = await sut.ReceiveOpaqueMessageFromMainAsync(relayHostPeerId, deliverReq, CancellationToken.None);
+
+        // Assert
+        deliverResp.ResultCase.Should().Be(DeliverOpaqueMessageResponse.ResultOneofCase.ResponsePayload);
+        deliverResp.ResponsePayload.Should().NotBeNull();
+        deliverResp.ResponsePayload!.ResponsePayload.Length.Should().BeGreaterThan(0);
+
+        var respCipher = new SessionRatchetMessage(deliverResp.ResponsePayload.ResponsePayload.ToByteArray());
+        var respPlain = initiatorSession.Decrypt(respCipher, clock);
+        var respEnv = InternalEnvelope.Parser.ParseFrom(respPlain.Value);
+        respEnv.ApplicationPayloadCase.Should().Be(InternalEnvelope.ApplicationPayloadOneofCase.GetPreKeyBundleResponse);
+        respEnv.GetPreKeyBundleResponse.Should().NotBeNull();
+        respEnv.GetPreKeyBundleResponse.PreKeyBundle.Should().NotBeNull();
+    }
+
+    [Test]
+    public async Task RelayHost_Returns_ResponsePayload_for_GetPreKeyBundleRequest_when_bundle_not_found()
+    {
+        // Arrange
+        var relayHostPeerId = Guid.NewGuid();
+
+        using var relayIdentityEcdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        var relayIdentityPriv = relayIdentityEcdh.ExportECPrivateKey();
+        var relayIdentitySpki = relayIdentityEcdh.PublicKey.ExportSubjectPublicKeyInfo();
+
+        var model = new SimulatedPeerModel(relayHostPeerId, "relay", isOnline: true, isRelayCapable: true, relayIdentitySpki, relayIdentityPriv);
+        using var directory = new DirectoryStub(model);
+
+        var messageService = (Percolator.Application.Network.PercolatorMessageService)
+            FormatterServices.GetUninitializedObject(typeof(Percolator.Application.Network.PercolatorMessageService));
+        var pending = new SimulatedPeerPendingInbox();
+
+        var requestedPkh = SHA256.HashData(Guid.NewGuid().ToByteArray());
+
+        var clock = new StaticClock(StaticClock.DefaultNow);
+        var sessionId = SessionId.NewId();
+        var root = new RootKey(new byte[32]);
+        var initiatorSession = RatchetBootstrap.CreateInitiatorSession(
+            sessionId,
+            PeerId.NewId(),
+            new ProtocolVersion(1),
+            root,
+            clock);
+        var responderSession = RatchetBootstrap.CreateResponderSession(
+            sessionId,
+            PeerId.NewId(),
+            new ProtocolVersion(1),
+            root,
+            clock);
+
+        var seededStore = new SimulatedPeerRuntimeStoreDto
+        {
+            Version = 1,
+            Sessions =
+            {
+                new SimulatedSecureSessionDto
+                {
+                    SessionId = responderSession.Id.Value,
+                    RemotePeerId = responderSession.RemotePeerId.Value,
+                    ProtocolVersion = responderSession.ProtocolVersion.Value,
+                    RootKey = responderSession.State.RootKey.Value,
+                    SendChainKey = responderSession.State.SendingChainKey?.Value,
+                    SendCounter = responderSession.State.SendingCounter,
+                    RecvChainKey = responderSession.State.ReceivingChainKey?.Value,
+                    RecvCounter = responderSession.State.ReceivingCounter,
+                    PrevChainLength = responderSession.State.PreviousChainLength,
+                    RemoteRatchetKey = responderSession.State.RemoteRatchetKey?.Value,
+                    DhRatchetPrivateKey = responderSession.State.DhRatchetPrivateKey?.Value,
+                    SkippedKeysCount = responderSession.SkippedKeysCount,
+                    CreatedAtUtc = responderSession.CreatedAtUtc,
+                    LastUsedAtUtc = responderSession.LastUsedAtUtc
+                }
+            }
+        };
+
+        var state = new Mock<ISimulatorStateService>(MockBehavior.Strict);
+        state.SetupGet(s => s.Peers)
+            .Returns(new ReadOnlyObservableCollection<SimulatedPeerDto>(new ObservableCollection<SimulatedPeerDto>()));
+        state.Setup(s => s.TryGetRuntimeStoreAsync(relayHostPeerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(seededStore);
+        state.Setup(s => s.SaveRuntimeStoreAsync(It.IsAny<Guid>(), It.IsAny<SimulatedPeerRuntimeStoreDto>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        state.Setup(s => s.TryPopPreKeyBundleByRecipientPkhAsync(relayHostPeerId, requestedPkh, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((PublishedPreKeyBundleDto?)null);
+
+        var diagnostics = new SimulatorDiagnosticsService();
+        var sut = new SimulatedPeerRuntimeService(directory, messageService, state.Object, diagnostics, pending);
+
+        var envReq = new InternalEnvelope
+        {
+            PrekeyEnvelope = new PrekeyEnvelope
+            {
+                Version = 1,
+                GetPreKeyBundleRequest = new GetPreKeyBundleRequest
+                {
+                    Version = 1,
+                    PublicKeyHash = ByteString.CopyFrom(requestedPkh)
+                }
+            }
+        };
+
+        var pt = new Plaintext(envReq.ToByteArray());
+        var cipher = initiatorSession.Encrypt(pt, clock);
+        var deliverReq = new DeliverOpaqueMessageRequest { Version = 1, Payload = ByteString.CopyFrom(cipher.Value) };
+
+        // Act
+        var deliverResp = await sut.ReceiveOpaqueMessageFromMainAsync(relayHostPeerId, deliverReq, CancellationToken.None);
+
+        // Assert
+        deliverResp.ResultCase.Should().Be(DeliverOpaqueMessageResponse.ResultOneofCase.ResponsePayload);
+        deliverResp.ResponsePayload.Should().NotBeNull();
+        deliverResp.ResponsePayload!.ResponsePayload.Length.Should().BeGreaterThan(0);
+
+        var respCipher = new SessionRatchetMessage(deliverResp.ResponsePayload.ResponsePayload.ToByteArray());
+        var respPlain = initiatorSession.Decrypt(respCipher, clock);
+        var respEnv = InternalEnvelope.Parser.ParseFrom(respPlain.Value);
+        respEnv.ApplicationPayloadCase.Should().Be(InternalEnvelope.ApplicationPayloadOneofCase.GetPreKeyBundleResponse);
+        respEnv.GetPreKeyBundleResponse.Should().NotBeNull();
+        respEnv.GetPreKeyBundleResponse.PreKeyBundle.Should().BeNull();
     }
 }

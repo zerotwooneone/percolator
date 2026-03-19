@@ -412,9 +412,5 @@ public sealed class SecureChannelsProjectionTests
         }
     }
 
-    private sealed class StaticClock : IClock
-    {
-        public StaticClock(DateTimeOffset now) => UtcNow = now;
-        public DateTimeOffset UtcNow { get; }
-    }
+    
 }

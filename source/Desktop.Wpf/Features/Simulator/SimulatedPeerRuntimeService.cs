@@ -1328,6 +1328,7 @@ public sealed class SimulatedPeerRuntimeService : ISimulatedPeerRuntimeService
 
             Plaintext? pt = null;
             SecureSession? matched = null;
+            Guid matchedSessionId = default;
             foreach (var kv in _sessionsById)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -1344,6 +1345,7 @@ public sealed class SimulatedPeerRuntimeService : ISimulatedPeerRuntimeService
 
                     pt = candidatePt;
                     matched = candidate;
+                    matchedSessionId = kv.Key;
                     _sessionsById[kv.Key] = candidate;
                     break;
                 }
@@ -1355,7 +1357,6 @@ public sealed class SimulatedPeerRuntimeService : ISimulatedPeerRuntimeService
 
             if (pt is null || matched is null)
             {
-                _model.MarkInboundPending(Guid.NewGuid());
                 return new DeliverOpaqueMessageResponse { Version = 1 };
             }
 
@@ -1366,8 +1367,57 @@ public sealed class SimulatedPeerRuntimeService : ISimulatedPeerRuntimeService
             }
             catch
             {
-                _model.MarkInboundPending(Guid.NewGuid());
                 return new DeliverOpaqueMessageResponse { Version = 1 };
+            }
+
+            if (env.ApplicationPayloadCase == InternalEnvelope.ApplicationPayloadOneofCase.PrekeyEnvelope
+                && env.PrekeyEnvelope?.MessageCase == PrekeyEnvelope.MessageOneofCase.GetPreKeyBundleRequest)
+            {
+                var getReq = env.PrekeyEnvelope.GetPreKeyBundleRequest;
+                if (!getReq.HasPublicKeyHash || getReq.PublicKeyHash.Length == 0)
+                {
+                    throw new InvalidOperationException("GetPreKeyBundleRequest missing public_key_hash");
+                }
+
+                PublishedPreKeyBundleDto? popped;
+                try
+                {
+                    popped = await state
+                        .TryPopPreKeyBundleByRecipientPkhAsync(simulatedPeerId, getReq.PublicKeyHash.ToByteArray(), cancellationToken)
+                        .ConfigureAwait(false);
+                }
+                catch
+                {
+                    popped = null;
+                }
+
+                var resp = new GetPreKeyBundleResponse { Version = 1 };
+                if (popped is not null && popped.BundleBytes is not null && popped.BundleBytes.Length > 0)
+                {
+                    try
+                    {
+                        resp.PreKeyBundle = GetPreKeyBundleResponse.Types.PreKeyBundle.Parser.ParseFrom(popped.BundleBytes);
+                    }
+                    catch
+                    {
+                        // best-effort: treat parse failure as not found
+                    }
+                }
+
+                var responseEnvelope = new InternalEnvelope { GetPreKeyBundleResponse = resp };
+                var responsePlain = new Plaintext(responseEnvelope.ToByteArray());
+                var responseCipher = matched.Encrypt(responsePlain, _clock);
+                _sessionsById[matchedSessionId] = matched;
+
+                return new DeliverOpaqueMessageResponse
+                {
+                    Version = 1,
+                    ResponsePayload = new DeliverOpaqueMessageResponse.Types.Payload
+                    {
+                        Version = 1,
+                        ResponsePayload = ByteString.CopyFrom(responseCipher.Value)
+                    }
+                };
             }
 
             if (env.ApplicationPayloadCase == InternalEnvelope.ApplicationPayloadOneofCase.MessageQueueEnvelope
@@ -1389,7 +1439,6 @@ public sealed class SimulatedPeerRuntimeService : ISimulatedPeerRuntimeService
                 return new DeliverOpaqueMessageResponse { Version = 1 };
             }
 
-            _model.MarkInboundPending(Guid.NewGuid());
             return new DeliverOpaqueMessageResponse { Version = 1 };
         }
 

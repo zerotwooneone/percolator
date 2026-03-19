@@ -196,13 +196,13 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
 
         InviteTokenText = new BindableReactiveProperty<string?>(null).AddTo(ref _bag);
 
-        RefreshInboxCommand = new AsyncRelayCommand(async _ => await RefreshInboxAsync().ConfigureAwait(false));
-        AcceptInvitationCommand = new AsyncRelayCommand(async obj => await ExecuteAcceptAsync(obj).ConfigureAwait(false));
-        BurnInvitationCommand = new AsyncRelayCommand(async obj => await ExecuteBurnAsync(obj).ConfigureAwait(false));
+        RefreshInboxCommand = new AsyncRelayCommand(async _ => await RefreshInboxAsync());
+        AcceptInvitationCommand = new AsyncRelayCommand(async obj => await ExecuteAcceptAsync(obj));
+        BurnInvitationCommand = new AsyncRelayCommand(async obj => await ExecuteBurnAsync(obj));
 
-        SearchAndConnectCommand = new AsyncRelayCommand(async _ => await ExecuteNetworkSearchAsync().ConfigureAwait(false));
+        SearchAndConnectCommand = new AsyncRelayCommand(async _ => await ExecuteNetworkSearchAsync());
 
-        DecodeAndInitiateCommand = new AsyncRelayCommand(async _ => await ExecuteImportTokenAsync().ConfigureAwait(false));
+        DecodeAndInitiateCommand = new AsyncRelayCommand(async _ => await ExecuteImportTokenAsync());
 
         _inboxEvents.Changed
             .SubscribeAwait(async (_, ct) => await RefreshInboxAsync(ct).ConfigureAwait(false), AwaitOperation.Drop)
