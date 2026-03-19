@@ -1370,7 +1370,7 @@ public sealed class SimulatedPeerRuntimeService : ISimulatedPeerRuntimeService
             }
             catch
             {
-                return new DeliverOpaqueMessageResponse { Version = 1 };
+                return new DeliverOpaqueMessageResponse { Version = 1, Never = new DeliverOpaqueMessageResponse.Types.Never{ Version = 1 }};
             }
 
             if (env.ApplicationPayloadCase == InternalEnvelope.ApplicationPayloadOneofCase.PrekeyEnvelope
@@ -1391,7 +1391,7 @@ public sealed class SimulatedPeerRuntimeService : ISimulatedPeerRuntimeService
                 }
                 catch
                 {
-                    popped = null;
+                    return new DeliverOpaqueMessageResponse { Version = 1, Never = new DeliverOpaqueMessageResponse.Types.Never{ Version = 1 }};
                 }
 
                 var resp = new GetPreKeyBundleResponse { Version = 1 };
