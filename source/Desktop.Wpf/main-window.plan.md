@@ -1108,11 +1108,18 @@ Work:
     - When decrypted `InternalEnvelope.ApplicationPayloadCase == PrekeyEnvelope` and `MessageCase == GetPreKeyBundleRequest`:
       - Read the bundle bytes from the relay host’s own simulated store (owned by the simulator).
         - Use existing simulator mechanisms (e.g., `ISimulatorStateService.TryPopPreKeyBundleByRecipientPkhAsync` or equivalent) keyed by `PublicKeyHash`.
-      - Build an `InternalEnvelope.GetPreKeyBundleResponse`:
-        - If bundle found: populate `PreKeyBundle` fields from the stored bytes.
-        - If not found: return a valid `GetPreKeyBundleResponse` with `PreKeyBundle` unset.
+        - Note: `TryPop...` consumes the stored bundle. This is intentional (one-time / consume-on-fetch semantics). Repeated fetches may return not found.
+      - Build the response envelope as **top-level** `InternalEnvelope.GetPreKeyBundleResponse`.
+        - Main expects `InternalEnvelope.ApplicationPayloadCase == GetPreKeyBundleResponse` after decrypting (not a nested `PrekeyEnvelope`).
+        - If bundle found:
+          - Parse `PublishedPreKeyBundleDto.BundleBytes` as `GetPreKeyBundleResponse.Types.PreKeyBundle` and attach it verbatim.
+            - Avoid manual field mapping to reduce brittleness.
+        - If not found:
+          - Return a valid `GetPreKeyBundleResponse { Version = 1 }` with `PreKeyBundle` unset.
       - Encrypt the response envelope back to Main using the matched session.
+        - Ensure ratchet state is persisted after encryption (encrypt mutates session state).
       - Return `DeliverOpaqueMessageResponse` with `ResponsePayload` set to the encrypted bytes.
+        - For `GetPreKeyBundleRequest`, **always** return a response payload (even if not found) so the caller never sees “No response payload returned.”
     - This mirrors real gRPC semantics: request in, response payload out.
 
 - Keep relay-queue semantics unchanged.
@@ -1130,6 +1137,12 @@ Work:
     - given an established direct session between Main and the simulated relay host,
     - delivering a `DeliverOpaqueMessageRequest` containing an encrypted `GetPreKeyBundleRequest` returns a `DeliverOpaqueMessageResponse` with non-empty `ResponsePayload`.
     - decrypting that payload yields an `InternalEnvelope.GetPreKeyBundleResponse`.
+  - Prefer to place/extend this coverage in existing suites:
+    - `Desktop.Wpf.Tests/SimulatedPeerRuntimeStandardHandshakeRelayedTests.cs` (already stubs `TryPopPreKeyBundleByRecipientPkhAsync`)
+    - Assertions should include:
+      - RPC-level response has `ResponsePayload` and it is non-empty
+      - decrypted bytes parse as `InternalEnvelope`
+      - `InternalEnvelope.ApplicationPayloadCase == GetPreKeyBundleResponse`
 
 Definition of done:
 
