@@ -36,6 +36,39 @@
                   <Button Grid.Column="5" Margin="8,0,0,0" Content="All" Command="{Binding AllCommand}" />
                 </Grid>
 
+                <Border Margin="0,12,0,0" Padding="12" BorderThickness="1" BorderBrush="#2A2A2A" CornerRadius="6">
+                  <StackPanel>
+                    <TextBlock FontSize="12" FontWeight="SemiBold" Text="Active Sessions" />
+
+                    <ItemsControl Margin="0,8,0,0" ItemsSource="{Binding ActiveSessionTags}">
+                      <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                          <WrapPanel />
+                        </ItemsPanelTemplate>
+                      </ItemsControl.ItemsPanel>
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                          <Border Margin="0,0,8,8" Padding="8,4" CornerRadius="10" Background="#1F1F1F">
+                            <StackPanel Orientation="Horizontal">
+                              <TextBlock FontSize="11" Foreground="#AAA" Text="{Binding Display}" VerticalAlignment="Center" />
+                              <Button Margin="8,0,0,0" Content="X" FontSize="10" Padding="6,0" Command="{Binding RemoveCommand}" />
+                            </StackPanel>
+                          </Border>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                    <Grid Margin="0,4,0,0" ColumnDefinitions="*,Auto">
+                      <ComboBox Grid.Column="0"
+                                ItemsSource="{Binding AvailableActiveSessionTargets}"
+                                DisplayMemberPath="Display"
+                                SelectedValuePath="PeerId"
+                                SelectedValue="{Binding SelectedActiveSessionPeerId.Value}" />
+                      <Button Grid.Column="1" Margin="8,0,0,0" Content="Add" Command="{Binding AddActiveSessionCommand}" />
+                    </Grid>
+                  </StackPanel>
+                </Border>
+
                 <ItemsControl Margin="0,12,0,0" ItemsSource="{Binding Items}">
                   <ItemsControl.ItemsPanel>
                     <ItemsPanelTemplate>

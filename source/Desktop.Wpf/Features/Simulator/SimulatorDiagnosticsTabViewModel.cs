@@ -22,7 +22,10 @@ public enum SimulatorDiagnosticEventType
     DecryptFailure = 12,
     PreKeyBundleFetched = 13,
     StandardHandshakeHelloEnqueued = 14,
-    RelayRoutingFailure = 15
+    RelayRoutingFailure = 15,
+    RelayActiveSessionAdded = 16,
+    RelayActiveSessionRemoved = 17,
+    PreKeyPublishBlockedMissingActiveSession = 18
 }
 
 public sealed record SimulatorDiagnosticEvent(

@@ -14,20 +14,24 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
     private readonly SimulatedPeerModel _model;
     private readonly ISimulatorStateService _state;
     private readonly ISimulatedPeerRuntimeService _runtime;
+    private readonly ISimulatorDiagnosticsService _diagnostics;
     private readonly Func<Guid, string> _resolvePeerName;
     private readonly Action _relationshipsChanged;
     private DisposableBag _bag;
+    private bool _disposed;
 
     public SimulatedPeerCardViewModel(
         SimulatedPeerModel model,
         ISimulatorStateService state,
         ISimulatedPeerRuntimeService runtime,
+        ISimulatorDiagnosticsService diagnostics,
         Func<Guid, string> resolvePeerName,
         Action relationshipsChanged)
     {
         _model = model;
         _state = state;
         _runtime = runtime;
+        _diagnostics = diagnostics;
         _resolvePeerName = resolvePeerName;
         _relationshipsChanged = relationshipsChanged;
 
@@ -101,7 +105,9 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
         copyEndpoint.AsObservable().Subscribe(_ => ExecuteCopyEndpoint()).AddTo(ref _bag);
         CopyEndpointCommand = copyEndpoint.AddTo(ref _bag);
 
-        var publish = PublishTargetPeerId.Select(id => id is not null).ToReactiveCommand<Unit>(_ => { });
+        var publish = PublishTargetPeerId
+            .Select(hostId => hostId is not null && HasActiveSessionToHost(hostId.Value))
+            .ToReactiveCommand<Unit>(_ => { });
         publish.AsObservable().SubscribeAwait(async (_, ct) => await ExecutePublishAsync(ct), AwaitOperation.Drop).AddTo(ref _bag);
         PublishKeysCommand = publish.AddTo(ref _bag);
 
@@ -173,7 +179,12 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
         {
             var pkh = await _runtime.ComputePublicKeyHashAsync(_model.PeerId, CancellationToken.None).ConfigureAwait(false);
             var hex = Convert.ToHexString(pkh);
-            await Application.Current.Dispatcher.InvokeAsync(() => PublicKeyHashHex.Value = hex);
+            if (_disposed) return;
+            await Application.Current.Dispatcher.InvokeAsync(() =>
+            {
+                if (_disposed) return;
+                PublicKeyHashHex.Value = hex;
+            });
         }
         catch
         {
@@ -185,7 +196,12 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
             var endpoint = TryResolveEndpoint();
             if (endpoint is not null)
             {
-                await Application.Current.Dispatcher.InvokeAsync(() => EndpointText.Value = endpoint);
+                if (_disposed) return;
+                await Application.Current.Dispatcher.InvokeAsync(() =>
+                {
+                    if (_disposed) return;
+                    EndpointText.Value = endpoint;
+                });
             }
         }
         catch
@@ -309,6 +325,16 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
         var hostPeerId = PublishTargetPeerId.Value;
         if (hostPeerId is null) return;
 
+        if (!HasActiveSessionToHost(hostPeerId.Value))
+        {
+            _diagnostics.Emit(
+                SimulatorDiagnosticEventType.PreKeyPublishBlockedMissingActiveSession,
+                $"Pre-key publish blocked (missing active session): publisher={_model.PeerId.ToString()[..8]} relay={hostPeerId.Value.ToString()[..8]}",
+                peerId: _model.PeerId,
+                relayHostPeerId: hostPeerId.Value);
+            return;
+        }
+
         await _state.AddPublishedKeysRelationshipAsync(_model.PeerId, hostPeerId.Value, ct).ConfigureAwait(false);
 
         // In our simulator, "publishing" means pushing a standard pre-key bundle into the host's pre-key store.
@@ -322,6 +348,15 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
             .ConfigureAwait(false);
 
         _relationshipsChanged();
+    }
+
+    private bool HasActiveSessionToHost(Guid relayHostPeerId)
+    {
+        var host = _state.Peers.FirstOrDefault(p => p.PeerId == relayHostPeerId);
+        if (host is null) return false;
+        if (host.Relay is null || !host.Relay.IsRelayCapable) return false;
+        if (host.Relay.ActiveSessionsPeerIds is null) return false;
+        return host.Relay.ActiveSessionsPeerIds.Contains(_model.PeerId);
     }
 
     internal void RebuildRelationshipTags(SimulatedPeerDto dto, ReadOnlyObservableCollection<SimulatedPeerDto> allPeers)
@@ -368,6 +403,7 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
 
     public void Dispose()
     {
+        _disposed = true;
         _bag.Dispose();
         DisplayName.Dispose();
         IsOnline.Dispose();

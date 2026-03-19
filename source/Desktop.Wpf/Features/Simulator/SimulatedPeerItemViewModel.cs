@@ -15,6 +15,8 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
     private readonly ISimulatedPeerDirectory _directory;
     private readonly SimulatedPeerModel _model;
     private readonly ISimulatedPeerPendingInbox _pending;
+    private readonly ISimulatorStateService _state;
+    private readonly ISimulatorDiagnosticsService _diagnostics;
     private readonly Percolator.Application.Network.IMainReverseSignalInviteFactory _inviteFactory;
     private readonly Percolator.Application.Network.IAdvertisedHostLookup _advertisedHostLookup;
     private readonly ISimulatedPeerRuntimeService _peerRuntime;
@@ -30,6 +32,8 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
     public SimulatedPeerItemViewModel(
         ISimulatedPeerDirectory directory,
         SimulatedPeerModel model,
+        ISimulatorStateService state,
+        ISimulatorDiagnosticsService diagnostics,
         Percolator.Application.Network.IMainReverseSignalInviteFactory inviteFactory,
         Percolator.Application.Network.IAdvertisedHostLookup advertisedHostLookup,
         ISimulatedPeerRuntimeService peerRuntime,
@@ -43,6 +47,8 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
         _directory = directory;
         _model = model;
         _pending = pending;
+        _state = state;
+        _diagnostics = diagnostics;
         _inviteFactory = inviteFactory;
         _advertisedHostLookup = advertisedHostLookup;
         _peerRuntime = peerRuntime;
@@ -320,6 +326,15 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
             .ConfigureAwait(false);
     }
 
+    private bool HasActiveSessionToHost(Guid relayHostPeerId)
+    {
+        var host = _state.Peers.FirstOrDefault(p => p.PeerId == relayHostPeerId);
+        if (host is null) return false;
+        if (host.Relay is null || !host.Relay.IsRelayCapable) return false;
+        if (host.Relay.ActiveSessionsPeerIds is null) return false;
+        return host.Relay.ActiveSessionsPeerIds.Contains(_model.PeerId);
+    }
+
     private async Task ExecuteRelayForwardToMainAsync(System.Threading.CancellationToken ct)
     {
         var relayPeerId = _getSelectedRelayPeerId();
@@ -412,6 +427,16 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
         var relayPeerId = _getSelectedRelayPeerId();
         if (relayPeerId is null)
         {
+            return;
+        }
+
+        if (!HasActiveSessionToHost(relayPeerId.Value))
+        {
+            _diagnostics.Emit(
+                SimulatorDiagnosticEventType.PreKeyPublishBlockedMissingActiveSession,
+                $"Pre-key publish blocked (missing active session): publisher={_model.PeerId.ToString()[..8]} relay={relayPeerId.Value.ToString()[..8]}",
+                peerId: _model.PeerId,
+                relayHostPeerId: relayPeerId.Value);
             return;
         }
 

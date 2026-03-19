@@ -51,6 +51,9 @@ public interface ISimulatorStateService
 
     Task AddPublishedKeysRelationshipAsync(Guid publisherPeerId, Guid hostPeerId, CancellationToken cancellationToken = default);
     Task RemovePublishedKeysRelationshipAsync(Guid publisherPeerId, Guid hostPeerId, CancellationToken cancellationToken = default);
+
+    Task AddRelayActiveSessionAsync(Guid relayHostPeerId, Guid peerId, CancellationToken cancellationToken = default);
+    Task RemoveRelayActiveSessionAsync(Guid relayHostPeerId, Guid peerId, CancellationToken cancellationToken = default);
 }
 
 public sealed class SimulatorStateService : ISimulatorStateService
@@ -282,6 +285,50 @@ public sealed class SimulatorStateService : ISimulatorStateService
                 $"Pre-keys relationship removed: {publisherPeerId.ToString()[..8]} -> {hostPeerId.ToString()[..8]}",
                 peerId: publisherPeerId);
         }
+    }
+
+    public async Task AddRelayActiveSessionAsync(Guid relayHostPeerId, Guid peerId, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (relayHostPeerId == peerId) return;
+
+        var relayHost = _state.Peers.FirstOrDefault(p => p.PeerId == relayHostPeerId);
+        if (relayHost is null) return;
+        if (relayHost.Relay is null) return;
+        if (!relayHost.Relay.IsRelayCapable) return;
+
+        relayHost.Relay.ActiveSessionsPeerIds ??= new();
+        if (relayHost.Relay.ActiveSessionsPeerIds.Contains(peerId)) return;
+
+        relayHost.Relay.ActiveSessionsPeerIds.Add(peerId);
+        await _store.SaveAsync(_state, cancellationToken).ConfigureAwait(false);
+
+        _diagnostics.Emit(
+            SimulatorDiagnosticEventType.RelayActiveSessionAdded,
+            $"Relay active session added: relay={relayHostPeerId.ToString()[..8]} peer={peerId.ToString()[..8]}",
+            peerId: peerId,
+            relayHostPeerId: relayHostPeerId);
+    }
+
+    public async Task RemoveRelayActiveSessionAsync(Guid relayHostPeerId, Guid peerId, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var relayHost = _state.Peers.FirstOrDefault(p => p.PeerId == relayHostPeerId);
+        if (relayHost is null) return;
+        if (relayHost.Relay is null) return;
+        if (relayHost.Relay.ActiveSessionsPeerIds is null) return;
+
+        var removed = relayHost.Relay.ActiveSessionsPeerIds.Remove(peerId);
+        if (!removed) return;
+
+        await _store.SaveAsync(_state, cancellationToken).ConfigureAwait(false);
+
+        _diagnostics.Emit(
+            SimulatorDiagnosticEventType.RelayActiveSessionRemoved,
+            $"Relay active session removed: relay={relayHostPeerId.ToString()[..8]} peer={peerId.ToString()[..8]}",
+            peerId: peerId,
+            relayHostPeerId: relayHostPeerId);
     }
 
     public async Task ToggleOnlineAsync(Guid peerId, CancellationToken cancellationToken = default)
@@ -610,6 +657,7 @@ public sealed class SimulatorStateService : ISimulatorStateService
         peer.RuntimeStore.SignedPreKeys ??= new();
         peer.RuntimeState ??= new SimulatorPeerRuntimeState();
         peer.Relay ??= new();
+        peer.Relay.ActiveSessionsPeerIds ??= new();
         peer.Relay.OpaqueQueue ??= new();
         peer.Relay.OpaqueQueue.Items ??= new();
         peer.Relay.PreKeyStore ??= new();

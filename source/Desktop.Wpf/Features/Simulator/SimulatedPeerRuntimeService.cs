@@ -1340,7 +1340,10 @@ public sealed class SimulatedPeerRuntimeService : ISimulatedPeerRuntimeService
                     var candidatePt = candidate.Decrypt(cipher, _clock);
                     if (candidatePt.Value.Length == 0)
                     {
-                        continue;
+                        // This can be a legitimate frame that was buffered (e.g., out-of-order / skipped-key).
+                        // Commit mutated state so we can decrypt subsequent frames.
+                        _sessionsById[kv.Key] = candidate;
+                        return new DeliverOpaqueMessageResponse { Version = 1 };
                     }
 
                     pt = candidatePt;

@@ -108,6 +108,7 @@ public sealed class SimulatedPeerConnectionDto
 public sealed class SimulatedPeerRelayStateDto
 {
     public bool IsRelayCapable { get; set; }
+    public List<Guid> ActiveSessionsPeerIds { get; set; } = new();
     public SimulatedRelayOpaqueQueueDto OpaqueQueue { get; set; } = new();
     public SimulatedRelayPreKeyStoreDto PreKeyStore { get; set; } = new();
 }

@@ -81,6 +81,10 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
             .ReturnsAsync((PublishedPreKeyBundleDto?)null);
         state.Setup(s => s.TryGetPeerIdByIdentityPkhAsync(It.IsAny<byte[]>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Guid?)null);
+        state.Setup(s => s.AddRelayActiveSessionAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        state.Setup(s => s.RemoveRelayActiveSessionAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
 
         var diagnostics = new SimulatorDiagnosticsService();
         var sut = new SimulatedPeerRuntimeService(directory, messageService, state.Object, diagnostics, pending);

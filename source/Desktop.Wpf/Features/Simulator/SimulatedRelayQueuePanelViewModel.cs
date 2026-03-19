@@ -22,6 +22,14 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
     private readonly ObservableCollection<SimulatedRelayQueueItemViewModel> _items = new();
     public ReadOnlyObservableCollection<SimulatedRelayQueueItemViewModel> Items { get; }
 
+    public ObservableCollection<ActiveSessionTagViewModel> ActiveSessionTags { get; }
+
+    public ObservableCollection<ActiveSessionTargetOption> AvailableActiveSessionTargets { get; }
+
+    public BindableReactiveProperty<Guid?> SelectedActiveSessionPeerId { get; }
+
+    public ReactiveCommand<Unit> AddActiveSessionCommand { get; }
+
     public SimulatedRelayQueuePanelViewModel(
         Guid relayHostPeerId,
         string relayHostName,
@@ -45,8 +53,21 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
 
         Items = new ReadOnlyObservableCollection<SimulatedRelayQueueItemViewModel>(_items);
 
+        ActiveSessionTags = new ObservableCollection<ActiveSessionTagViewModel>();
+        AvailableActiveSessionTargets = new ObservableCollection<ActiveSessionTargetOption>();
+        SelectedActiveSessionPeerId = new BindableReactiveProperty<Guid?>(null).AddTo(ref _bag);
+
         QueueCount = new BindableReactiveProperty<int>(0).AddTo(ref _bag);
         AutoDeliver = new BindableReactiveProperty<bool>(false).AddTo(ref _bag);
+
+        var addSession = SelectedActiveSessionPeerId
+            .Select(x => x.HasValue)
+            .ToReactiveCommand<Unit>(_ => { });
+        addSession
+            .AsObservable()
+            .SubscribeAwait(async (_, ct) => await ExecuteAddActiveSessionAsync(ct), AwaitOperation.Drop)
+            .AddTo(ref _bag);
+        AddActiveSessionCommand = addSession.AddTo(ref _bag);
 
         var refresh = Observable.Return(true).ToReactiveCommand<Unit>(_ => { });
         refresh.AsObservable().SubscribeAwait(async (_, ct) => await RefreshAsync(ct), AwaitOperation.Drop).AddTo(ref _bag);
@@ -124,6 +145,16 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
 
     public BindableReactiveProperty<bool> AutoDeliver { get; }
 
+    private async Task ExecuteAddActiveSessionAsync(CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        var peerId = SelectedActiveSessionPeerId.Value;
+        if (!peerId.HasValue) return;
+
+        await _state.AddRelayActiveSessionAsync(_relayHostPeerId, peerId.Value, ct).ConfigureAwait(false);
+        await RefreshAsync(ct).ConfigureAwait(false);
+    }
+
     public ReactiveCommand<Unit> RefreshCommand { get; }
 
     public ReactiveCommand<Unit> NextCommand { get; }
@@ -176,6 +207,27 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
             }
 
             QueueCount.Value = ordered.Count;
+
+            ActiveSessionTags.Clear();
+            AvailableActiveSessionTargets.Clear();
+
+            var active = (peer.Relay.ActiveSessionsPeerIds ?? new List<Guid>()).Distinct().ToHashSet();
+            foreach (var other in _state.Peers.Where(p => p.PeerId != _relayHostPeerId))
+            {
+                AvailableActiveSessionTargets.Add(new ActiveSessionTargetOption(other.PeerId, _peerNameById(other.PeerId)));
+            }
+
+            foreach (var peerId in active)
+            {
+                ActiveSessionTags.Add(new ActiveSessionTagViewModel(
+                    peerId: peerId,
+                    display: _peerNameById(peerId),
+                    onRemove: async removeCt =>
+                    {
+                        await _state.RemoveRelayActiveSessionAsync(_relayHostPeerId, peerId, removeCt).ConfigureAwait(false);
+                        await RefreshAsync(removeCt).ConfigureAwait(false);
+                    }));
+            }
         }
     }
 
@@ -341,5 +393,41 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
         _bag.Dispose();
         QueueCount.Dispose();
         AutoDeliver.Dispose();
+        SelectedActiveSessionPeerId.Dispose();
+    }
+
+    public sealed class ActiveSessionTagViewModel
+    {
+        private readonly Func<CancellationToken, Task> _remove;
+
+        public ActiveSessionTagViewModel(Guid peerId, string display, Func<CancellationToken, Task> onRemove)
+        {
+            PeerId = peerId;
+            Display = display;
+            _remove = onRemove;
+
+            var cmd = Observable.Return(true).ToReactiveCommand<Unit>(_ => { });
+            cmd.AsObservable().SubscribeAwait(async (_, ct) => await _remove(ct), AwaitOperation.Drop);
+            RemoveCommand = cmd;
+        }
+
+        public Guid PeerId { get; }
+
+        public string Display { get; }
+
+        public ReactiveCommand<Unit> RemoveCommand { get; }
+    }
+
+    public sealed class ActiveSessionTargetOption
+    {
+        public ActiveSessionTargetOption(Guid peerId, string display)
+        {
+            PeerId = peerId;
+            Display = display;
+        }
+
+        public Guid PeerId { get; }
+
+        public string Display { get; }
     }
 }

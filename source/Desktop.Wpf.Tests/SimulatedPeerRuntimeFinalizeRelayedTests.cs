@@ -258,6 +258,18 @@ public sealed class SimulatedPeerRuntimeFinalizeRelayedTests
             cancellationToken.ThrowIfCancellationRequested();
             return Task.CompletedTask;
         }
+
+        public Task AddRelayActiveSessionAsync(Guid relayHostPeerId, Guid peerId, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.CompletedTask;
+        }
+
+        public Task RemoveRelayActiveSessionAsync(Guid relayHostPeerId, Guid peerId, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.CompletedTask;
+        }
     }
 
     [Test]
