@@ -233,12 +233,26 @@ public sealed class SimulatorRelayTabViewModel : IDisposable
             relayHostPeerId: relayHostPeerId,
             relayHostName: relayHostName,
             peerNameById: PeerNameById,
-            mainIdentityId: () => MainNodeSentinelPeerId,
+            getMainIdentityPkh: GetMainIdentityPkh,
             getRelayHostToMainSessionId: () => GetRelayHostToMainSessionIdAsync(relayHostPeerId),
             state: _state,
             delivery: _delivery,
             diagnostics: _diagnostics,
             logger: _loggerFactory.CreateLogger<SimulatedRelayQueuePanelViewModel>());
+    }
+
+    private byte[]? GetMainIdentityPkh()
+    {
+        try
+        {
+            var spki = _active.Keys?.IdentitySigningKey.ExportSubjectPublicKeyInfo();
+            if (spki is null || spki.Length == 0) return null;
+            return System.Security.Cryptography.SHA256.HashData(spki);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private void ApplyGlobalAutoRelay()

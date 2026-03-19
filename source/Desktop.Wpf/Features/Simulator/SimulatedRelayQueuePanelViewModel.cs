@@ -10,7 +10,7 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
 {
     private readonly Guid _relayHostPeerId;
     private readonly Func<Guid, string> _peerNameById;
-    private readonly Func<Guid?> _mainIdentityId;
+    private readonly Func<byte[]?> _getMainIdentityPkh;
     private readonly Func<Task<SessionId?>> _getRelayHostToMainSessionId;
     private readonly ISimulatorStateService _state;
     private readonly ISimulatorRelayDeliveryService _delivery;
@@ -26,7 +26,7 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
         Guid relayHostPeerId,
         string relayHostName,
         Func<Guid, string> peerNameById,
-        Func<Guid?> mainIdentityId,
+        Func<byte[]?> getMainIdentityPkh,
         Func<Task<SessionId?>> getRelayHostToMainSessionId,
         ISimulatorStateService state,
         ISimulatorRelayDeliveryService delivery,
@@ -36,7 +36,7 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
         _relayHostPeerId = relayHostPeerId;
         RelayHostName = relayHostName;
         _peerNameById = peerNameById;
-        _mainIdentityId = mainIdentityId;
+        _getMainIdentityPkh = getMainIdentityPkh;
         _getRelayHostToMainSessionId = getRelayHostToMainSessionId;
         _state = state;
         _delivery = delivery;
@@ -166,13 +166,13 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
                 return;
             }
 
-            var mainId = _mainIdentityId();
+            var mainPkh = _getMainIdentityPkh();
             var ordered = peer.Relay.OpaqueQueue.Items.ToList();
 
             _items.Clear();
             foreach (var i in ordered)
             {
-                _items.Add(new SimulatedRelayQueueItemViewModel(_relayHostPeerId, i, _peerNameById, mainId));
+                _items.Add(new SimulatedRelayQueueItemViewModel(_relayHostPeerId, i, _peerNameById, mainPkh));
             }
 
             QueueCount.Value = ordered.Count;
@@ -222,11 +222,12 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
 
         try
         {
-            var mainId = _mainIdentityId();
+            var mainPkh = _getMainIdentityPkh();
             var routingKey = item.RecipientRoutingKey;
 
-            // Deliver to main identity (Guid routing key)
-            if (mainId.HasValue && routingKey is not null && routingKey.Length == 16 && new Guid(routingKey) == mainId.Value)
+            // Deliver to main identity (PKH routing key)
+            if (mainPkh is not null && mainPkh.Length == 32 && routingKey is not null && routingKey.Length == 32
+                && routingKey.AsSpan().SequenceEqual(mainPkh))
             {
                 var sid = await _getRelayHostToMainSessionId().ConfigureAwait(false);
                 if (sid is null)
@@ -242,6 +243,35 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
                 _diagnostics.Emit(
                     SimulatorDiagnosticEventType.RelayDelivered,
                     $"Relay deliver -> main: {(item.Model.DebugType ?? "opaque")}",
+                    relayHostPeerId: _relayHostPeerId,
+                    ackId: item.AckId);
+
+                await RefreshAsync(ct).ConfigureAwait(false);
+                return;
+            }
+
+            // Deliver to simulated peer (PKH routing key)
+            if (routingKey is not null && routingKey.Length == 32)
+            {
+                var recipientPeerId = await _state.TryGetPeerIdByIdentityPkhAsync(routingKey, ct).ConfigureAwait(false);
+                if (!recipientPeerId.HasValue)
+                {
+                    _diagnostics.Emit(
+                        SimulatorDiagnosticEventType.RelayRoutingFailure,
+                        $"Relay routing failure (no peer for PKH): {(item.Model.DebugType ?? "opaque")}",
+                        relayHostPeerId: _relayHostPeerId,
+                        ackId: item.AckId);
+                    return;
+                }
+
+                await _delivery.DeliverToPeerAsync(_relayHostPeerId, recipientPeerId.Value, item.Model, ct).ConfigureAwait(false);
+
+                _ = await _state.DeleteRelayOpaqueByAckIdAsync(_relayHostPeerId, item.AckId, ct).ConfigureAwait(false);
+
+                _diagnostics.Emit(
+                    SimulatorDiagnosticEventType.RelayDelivered,
+                    $"Relay deliver -> {recipientPeerId.Value.ToString()[..8]}: {(item.Model.DebugType ?? "opaque")}",
+                    peerId: recipientPeerId.Value,
                     relayHostPeerId: _relayHostPeerId,
                     ackId: item.AckId);
 

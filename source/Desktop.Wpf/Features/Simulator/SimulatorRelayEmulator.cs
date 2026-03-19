@@ -44,6 +44,8 @@ public sealed class SimulatorRelayEmulator : ISimulatorRelayEmulator
     private readonly ISimulatedPeerRuntimeService _peerRuntime;
     private readonly Percolator.Application.Network.PercolatorMessageService _messageService;
 
+    private static readonly Guid MainNodeSentinelPeerId = new("88880000-0000-0000-0000-000000000000");
+
     public SimulatorRelayEmulator(
         ISimulatorStateService state,
         ISimulatedPeerRuntimeService peerRuntime,
@@ -63,8 +65,26 @@ public sealed class SimulatorRelayEmulator : ISimulatorRelayEmulator
     {
         if (opaqueBytes is null) throw new ArgumentNullException(nameof(opaqueBytes));
 
-        var routingKey = recipientPeerId.ToByteArray();
-        return _state.EnqueueRelayOpaqueAsync(relayHostPeerId, routingKey, opaqueBytes, debugType, cancellationToken);
+        // Canonical simulator relay queue addressing is PKH (32 bytes). This method is legacy.
+        // Use the simulated peer's identity PKH as the routing key.
+        return EnqueueToRelayHostLegacyAsync(relayHostPeerId, recipientPeerId, opaqueBytes, debugType, cancellationToken);
+    }
+
+    private async Task EnqueueToRelayHostLegacyAsync(
+        Guid relayHostPeerId,
+        Guid recipientPeerId,
+        byte[] opaqueBytes,
+        string? debugType,
+        CancellationToken cancellationToken)
+    {
+        // Avoid silently enqueuing to "Main" by Guid; PKH routing is required for main.
+        if (recipientPeerId == new Guid("88880000-0000-0000-0000-000000000000"))
+        {
+            throw new InvalidOperationException("Legacy relay enqueue to Main by Guid is not supported; enqueue by routing key (PKH) instead.");
+        }
+
+        var pkh = await _peerRuntime.ComputePublicKeyHashAsync(recipientPeerId, cancellationToken).ConfigureAwait(false);
+        await _state.EnqueueRelayOpaqueAsync(relayHostPeerId, pkh, opaqueBytes, debugType, cancellationToken).ConfigureAwait(false);
     }
 
     public Task EnqueueToRelayHostByRoutingKeyAsync(
@@ -85,7 +105,12 @@ public sealed class SimulatorRelayEmulator : ISimulatorRelayEmulator
         int max,
         CancellationToken cancellationToken = default)
     {
-        var routingKey = recipientPeerId.ToByteArray();
+        if (recipientPeerId == MainNodeSentinelPeerId)
+        {
+            throw new InvalidOperationException("FetchFromRelayHostAsync cannot target Main by Guid. Use Fetch/forward by routing key (PKH) instead.");
+        }
+
+        var routingKey = await _peerRuntime.ComputePublicKeyHashAsync(recipientPeerId, cancellationToken).ConfigureAwait(false);
         var dequeued = await _state.DequeueRelayOpaqueAsync(relayHostPeerId, routingKey, max, cancellationToken).ConfigureAwait(false);
         if (dequeued.Count == 0) return Array.Empty<SimulatedRelayItem>();
 
@@ -117,12 +142,17 @@ public sealed class SimulatorRelayEmulator : ISimulatorRelayEmulator
     {
         cancellationToken.ThrowIfCancellationRequested();
 
+        if (recipientPeerId == MainNodeSentinelPeerId)
+        {
+            throw new InvalidOperationException("ForwardQueuedToMainAsync cannot target Main by Guid. Use ForwardQueuedToMainByRoutingKeyAsync (PKH) instead.");
+        }
+
         var forwarded = 0;
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var routingKey = recipientPeerId.ToByteArray();
+            var routingKey = await _peerRuntime.ComputePublicKeyHashAsync(recipientPeerId, cancellationToken).ConfigureAwait(false);
             var item = await _state.PeekRelayOpaqueAsync(relayHostPeerId, routingKey, cancellationToken).ConfigureAwait(false);
             if (item is null)
             {
@@ -195,8 +225,14 @@ public sealed class SimulatorRelayEmulator : ISimulatorRelayEmulator
     {
         cancellationToken.ThrowIfCancellationRequested();
 
+        if (recipientPeerId == MainNodeSentinelPeerId)
+        {
+            throw new InvalidOperationException("ForwardQueuedToPeerAsync cannot target Main by Guid. Use ForwardQueuedToMainByRoutingKeyAsync (PKH) instead.");
+        }
+
+        var recipientRoutingKey = await _peerRuntime.ComputePublicKeyHashAsync(recipientPeerId, cancellationToken).ConfigureAwait(false);
         var dequeued = await _state
-            .DequeueRelayOpaqueAsync(relayHostPeerId, recipientPeerId.ToByteArray(), max, cancellationToken)
+            .DequeueRelayOpaqueAsync(relayHostPeerId, recipientRoutingKey, max, cancellationToken)
             .ConfigureAwait(false);
         if (dequeued.Count == 0)
         {

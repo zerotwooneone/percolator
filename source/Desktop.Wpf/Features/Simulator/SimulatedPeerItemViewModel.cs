@@ -345,9 +345,17 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
             return;
         }
 
-        await _relay.ForwardQueuedToMainAsync(
+        if (_active.Keys is null)
+        {
+            return;
+        }
+
+        var mainSpki = _active.Keys.IdentitySigningKey.ExportSubjectPublicKeyInfo();
+        var mainPkh = SHA256.HashData(mainSpki);
+
+        await _relay.ForwardQueuedToMainByRoutingKeyAsync(
             relayHostPeerId: relayPeerGuid,
-            recipientPeerId: MainNodeSentinelPeerId,
+            recipientRoutingKey: mainPkh,
             relayHostToMainSessionId: _sessionToMain,
             cancellationToken: ct).ConfigureAwait(false);
     }
@@ -382,7 +390,21 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
         var relayPeerGuid = relayPeerId.Value;
 
         var invite = CreatePeerToMainInvite();
-        return _relay.EnqueueToRelayHostAsync(relayPeerGuid, MainNodeSentinelPeerId, invite.ToByteArray(), debugType: nameof(EstablishDirectSessionRequest), cancellationToken: ct);
+
+        if (_active.Keys is null)
+        {
+            return Task.CompletedTask;
+        }
+
+        var mainSpki = _active.Keys.IdentitySigningKey.ExportSubjectPublicKeyInfo();
+        var mainPkh = SHA256.HashData(mainSpki);
+
+        return _relay.EnqueueToRelayHostByRoutingKeyAsync(
+            relayHostPeerId: relayPeerGuid,
+            recipientRoutingKey: mainPkh,
+            opaqueBytes: invite.ToByteArray(),
+            debugType: nameof(EstablishDirectSessionRequest),
+            cancellationToken: ct);
     }
 
     private async Task ExecutePublishStandardPreKeysToRelayAsync(CancellationToken ct)

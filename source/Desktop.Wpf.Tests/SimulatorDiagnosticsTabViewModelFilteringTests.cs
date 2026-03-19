@@ -55,6 +55,8 @@ public sealed class SimulatorDiagnosticsTabViewModelFilteringTests
 
         var state = new Mock<ISimulatorStateService>(MockBehavior.Strict);
         state.SetupGet(s => s.Peers).Returns(new ReadOnlyObservableCollection<SimulatedPeerDto>(peers));
+        state.Setup(s => s.TryGetPeerIdByIdentityPkhAsync(It.IsAny<byte[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid?)null);
 
         var diagnostics = new SimulatorDiagnosticsService();
         diagnostics.Emit(SimulatorDiagnosticEventType.PeerCreated, "a1", peerId: peerA);

@@ -23,6 +23,8 @@ public interface ISimulatorStateService
 
     Task SetRuntimeStateAsync(Guid peerId, SimulatorPeerRuntimeState runtimeState, CancellationToken cancellationToken = default);
 
+    Task<Guid?> TryGetPeerIdByIdentityPkhAsync(byte[] recipientPublicKeyHash, CancellationToken cancellationToken = default);
+
     Task EnqueueRelayOpaqueAsync(Guid relayHostPeerId, byte[] recipientRoutingKey, byte[] opaqueBytes, string? debugType = null, CancellationToken cancellationToken = default);
     Task<RelayQueuedBlobDto?> PeekRelayOpaqueAsync(Guid relayHostPeerId, byte[] recipientRoutingKey, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<RelayQueuedBlobDto>> DequeueRelayOpaqueAsync(Guid relayHostPeerId, byte[] recipientRoutingKey, int max, CancellationToken cancellationToken = default);
@@ -130,6 +132,7 @@ public sealed class SimulatorStateService : ISimulatorStateService
 
                     NormalizePeer(p, _transportOptions.Value);
                     changed |= _keys.EnsureReverseSignalKeys(p.ReverseSignalKeys);
+                    changed |= EnsureIdentityPublicKeyHash(p);
                     if (p.PublishedKeysToPeerIds is null)
                     {
                         p.PublishedKeysToPeerIds = new();
@@ -171,6 +174,7 @@ public sealed class SimulatorStateService : ISimulatorStateService
         };
         NormalizePeer(peer, _transportOptions.Value);
         _ = _keys.EnsureReverseSignalKeys(peer.ReverseSignalKeys);
+        _ = EnsureIdentityPublicKeyHash(peer);
 
         _state.Peers.Add(peer);
         await InvokeOnUiAsync(() => _peers.Add(peer));
@@ -182,6 +186,23 @@ public sealed class SimulatorStateService : ISimulatorStateService
             peerId: peerId);
 
         return peerId;
+    }
+
+    public Task<Guid?> TryGetPeerIdByIdentityPkhAsync(byte[] recipientPublicKeyHash, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (recipientPublicKeyHash is null) throw new ArgumentNullException(nameof(recipientPublicKeyHash));
+        if (recipientPublicKeyHash.Length == 0) return Task.FromResult<Guid?>(null);
+
+        var matches = _state.Peers
+            .Where(p => p.IdentityPublicKeyHash is not null && p.IdentityPublicKeyHash.Length != 0)
+            .Where(p => p.IdentityPublicKeyHash.SequenceEqual(recipientPublicKeyHash))
+            .Select(p => p.PeerId)
+            .Take(2)
+            .ToList();
+
+        if (matches.Count != 1) return Task.FromResult<Guid?>(null);
+        return Task.FromResult<Guid?>(matches[0]);
     }
 
     public async Task RemovePeerAsync(Guid peerId, CancellationToken cancellationToken = default)
@@ -594,6 +615,7 @@ public sealed class SimulatorStateService : ISimulatorStateService
         peer.Relay.PreKeyStore ??= new();
         peer.Relay.PreKeyStore.PublishedBundles ??= new();
         peer.ReverseSignalKeys ??= new();
+        peer.IdentityPublicKeyHash ??= Array.Empty<byte>();
 
         // Ensure runtime state is consistent with online/offline.
         if (!peer.IsOnline)
@@ -621,6 +643,26 @@ public sealed class SimulatorStateService : ISimulatorStateService
             if (port == 0) port = 5002;
             peer.Connection.Port = port;
         }
+    }
+
+    private static bool EnsureIdentityPublicKeyHash(SimulatedPeerDto peer)
+    {
+        if (peer is null) throw new ArgumentNullException(nameof(peer));
+
+        var spki = peer.ReverseSignalKeys?.IdentitySigningKeySpki;
+        if (spki is null || spki.Length == 0)
+        {
+            return false;
+        }
+
+        var computed = SHA256.HashData(spki);
+        if (peer.IdentityPublicKeyHash is not null && peer.IdentityPublicKeyHash.AsSpan().SequenceEqual(computed))
+        {
+            return false;
+        }
+
+        peer.IdentityPublicKeyHash = computed;
+        return true;
     }
 
     private static string AllocateSimulatorLoopbackHost(Guid peerId)

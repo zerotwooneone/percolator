@@ -59,6 +59,8 @@ public sealed class SimulatedHandshakeStateMachineCardViewModelDiagnosticsTests
                     ReverseSignalKeys = new SimulatedPeerReverseSignalKeysDto()
                 }
             }));
+        state.Setup(s => s.TryGetPeerIdByIdentityPkhAsync(It.IsAny<byte[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid?)null);
 
         var mainIngress = new Mock<ISimulatorMainIngressService>(MockBehavior.Loose);
         using var sut = new SimulatedHandshakeStateMachineCardViewModel(
@@ -135,6 +137,8 @@ public sealed class SimulatedHandshakeStateMachineCardViewModelDiagnosticsTests
 
         var state = new Mock<ISimulatorStateService>(MockBehavior.Strict);
         state.SetupGet(s => s.Peers).Returns(new ReadOnlyObservableCollection<SimulatedPeerDto>(peers));
+        state.Setup(s => s.TryGetPeerIdByIdentityPkhAsync(It.IsAny<byte[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid?)null);
 
         var mainIngress = new Mock<ISimulatorMainIngressService>(MockBehavior.Loose);
         using var sut = new SimulatedHandshakeStateMachineCardViewModel(

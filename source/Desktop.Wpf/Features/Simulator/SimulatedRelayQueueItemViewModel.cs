@@ -7,7 +7,7 @@ public sealed class SimulatedRelayQueueItemViewModel
         Guid relayHostPeerId,
         RelayQueuedBlobDto model,
         Func<Guid, string> peerNameById,
-        Guid? mainIdentityId)
+        byte[]? mainIdentityPkh)
     {
         RelayHostPeerId = relayHostPeerId;
         Model = model;
@@ -18,7 +18,7 @@ public sealed class SimulatedRelayQueueItemViewModel
         DebugType = model.DebugType;
         TypeLabel = ToTypeLabel(model.DebugType);
 
-        RecipientDisplay = ToRecipientDisplay(model.RecipientRoutingKey, peerNameById, mainIdentityId);
+        RecipientDisplay = ToRecipientDisplay(model.RecipientRoutingKey, peerNameById, mainIdentityPkh);
         FromToDisplay = $"{peerNameById(relayHostPeerId)} -> {RecipientDisplay}";
 
         TimestampDisplay = model.EnqueuedUtc.LocalDateTime.ToString("HH:mm:ss");
@@ -62,7 +62,7 @@ public sealed class SimulatedRelayQueueItemViewModel
     private static string ToRecipientDisplay(
         byte[] routingKey,
         Func<Guid, string> peerNameById,
-        Guid? mainIdentityId)
+        byte[]? mainIdentityPkh)
     {
         if (routingKey is null || routingKey.Length == 0)
         {
@@ -73,11 +73,17 @@ public sealed class SimulatedRelayQueueItemViewModel
         if (routingKey.Length == 16)
         {
             var id = new Guid(routingKey);
-            if ((mainIdentityId.HasValue && id == mainIdentityId.Value) || id == MainNodeSentinelPeerId)
+            if (id == MainNodeSentinelPeerId)
             {
                 return "Main Node";
             }
             return peerNameById(id);
+        }
+
+        if (mainIdentityPkh is not null && mainIdentityPkh.Length == 32 && routingKey.Length == 32
+            && routingKey.AsSpan().SequenceEqual(mainIdentityPkh))
+        {
+            return "Main Node";
         }
 
         // PublicKeyHash routing key
