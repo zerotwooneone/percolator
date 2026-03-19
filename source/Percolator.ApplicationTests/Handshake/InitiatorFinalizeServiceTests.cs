@@ -100,6 +100,7 @@ public class InitiatorFinalizeServiceTests
             Mock.Of<Percolator.Application.KeyExchange.ISelfPreKeyBundleRepository>(),
             Mock.Of<Percolator.Identity.IPeerIdentityRepository>(),
             Mock.Of<Percolator.Network.IDirectSessionRepository>(),
+            Mock.Of<Percolator.Network.IPeerRoutingProfileRepository>(),
             Mock.Of<IMediator>());
 
         // Act

@@ -24,6 +24,7 @@ namespace Percolator.Application.Network.Handshake
         private readonly ISelfPreKeyBundleRepository _selfPreKeys;
         private readonly IPeerIdentityRepository _peerIdentities;
         private readonly IDirectSessionRepository _directSessions;
+        private readonly IPeerRoutingProfileRepository _routingProfiles;
         private readonly IMediator _mediator;
 
         public InitiatorFinalizeService(
@@ -38,6 +39,7 @@ namespace Percolator.Application.Network.Handshake
             ISelfPreKeyBundleRepository selfPreKeys,
             IPeerIdentityRepository peerIdentities,
             IDirectSessionRepository directSessions,
+            IPeerRoutingProfileRepository routingProfiles,
             IMediator mediator)
         {
             _logger = logger;
@@ -51,6 +53,7 @@ namespace Percolator.Application.Network.Handshake
             _selfPreKeys = selfPreKeys;
             _peerIdentities = peerIdentities;
             _directSessions = directSessions;
+            _routingProfiles = routingProfiles;
             _mediator = mediator;
         }
 
@@ -275,6 +278,35 @@ namespace Percolator.Application.Network.Handshake
                 catch (Exception ex)
                 {
                     _logger.LogInformation(ex, "Invite finalize: best-effort direct session upsert failed.");
+                }
+
+                // Persist routing profile for direct invites so transport can route to this peer.
+                // For direct reverse-signal, the inviter had an explicit endpoint at invite time.
+                if (sentInvitation.InviteRouteKind == InviteRouteKind.Direct
+                    && !string.IsNullOrWhiteSpace(sentInvitation.TargetEndpointHost)
+                    && sentInvitation.TargetEndpointPort is not null
+                    && sentInvitation.TargetEndpointPort.Value > 0)
+                {
+                    try
+                    {
+                        var netPeerId = new Percolator.Network.PeerId(peerIdentity.Id.Value);
+                        var profile = await _routingProfiles.GetByIdAsync(netPeerId, cancellationToken).ConfigureAwait(false)
+                            ?? new PeerRoutingProfile();
+                        if (profile.Id is null)
+                        {
+                            profile.BindIdentity(netPeerId);
+                        }
+
+                        var endpoint = new System.Net.DnsEndPoint(sentInvitation.TargetEndpointHost!, sentInvitation.TargetEndpointPort.Value);
+                        profile.AddGrpcEndPoint(new GrpcEndPoint(endpoint, _clock.UtcNow), _clock.UtcNow);
+                        // Bind identity public key from the handshake response (SPKI bytes)
+                        profile.SetIdentityPublicKey(new Percolator.Network.ValueObjects.IdentityPublicKey(response.AcceptorIdentityKey.ToByteArray()));
+                        await _routingProfiles.UpsertAsync(profile, cancellationToken).ConfigureAwait(false);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogInformation(ex, "Invite finalize: best-effort routing profile upsert failed.");
+                    }
                 }
             }
 
