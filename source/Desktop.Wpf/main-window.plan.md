@@ -1337,6 +1337,44 @@ Verification (manual):
 - Remove `P` from `R` Active Sessions.
   - Publishing becomes disabled again.
 
+### Subchunk H.12 — Simulator: WithRuntimeAsync wrappers to enforce runtime persistence
+
+Goal:
+
+- Eliminate the footgun where a runtime-mutating operation forgets to call `PersistRuntimeStoreAsync`.
+- Make persistence the default behavior for any operation that resolves a `SimulatedPeerRuntime`.
+
+Work:
+
+1. Add private wrapper helpers to `SimulatedPeerRuntimeService`.
+   - `WithRuntimeAsync(Guid simulatedPeerId, Func<SimulatedPeerRuntime, Task> work, CancellationToken ct)`
+     - resolves runtime via `_runtimeByPeerId.GetOrAdd(simulatedPeerId, CreateRuntime)`
+     - executes `work(runtime)`
+     - always persists via `PersistRuntimeStoreAsync(simulatedPeerId, runtime, ct)` in a `finally`
+   - `WithRuntimeAsync<T>(Guid simulatedPeerId, Func<SimulatedPeerRuntime, Task<T>> work, CancellationToken ct)`
+     - same as above, returning `T`
+   - `WithRuntimeReadOnlyAsync<T>(Guid simulatedPeerId, Func<SimulatedPeerRuntime, Task<T>> work, CancellationToken ct)`
+     - resolves runtime and executes work, but does not persist
+     - use only for operations that are guaranteed not to mutate runtime/session state
+
+2. Refactor all `SimulatedPeerRuntimeService` entrypoints that touch runtime to use wrappers.
+   - Replace direct `_runtimeByPeerId.GetOrAdd(...); ...; PersistRuntimeStoreAsync(...)` sequences with wrapper calls.
+   - Remove now-redundant `*InnerAsync(...)` helper methods.
+
+3. Fix persistence gaps by construction.
+   - Ensure `AcceptReverseSignalInviteAsync(...)` persists (it currently resolves runtime and calls into it without saving).
+   - Ensure `ReceiveInviteHandshakeResponseFromMainAsync(...)` uses the wrapper (no fire-and-forget persistence).
+
+4. Add a unit test that enforces the invariant.
+   - Add a test for `AcceptReverseSignalInviteAsync(...)` that asserts `ISimulatorStateService.SaveRuntimeStoreAsync(...)` is called.
+   - Keep the test mock-based (strict) and focused on the persistence contract.
+
+Definition of done:
+
+- No public method on `SimulatedPeerRuntimeService` resolves a runtime and mutates state without going through `WithRuntimeAsync(...)`.
+- `AcceptReverseSignalInviteAsync(...)` persists runtime store on success.
+- A unit test fails if a future edit removes persistence from the invite-accept path.
+
 ---
 
 ## Chunk I — Notification badge + default focus behavior for Connection Management button
