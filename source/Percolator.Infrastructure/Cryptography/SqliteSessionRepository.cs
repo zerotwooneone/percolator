@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using System.Threading;
 using Percolator.Application.Identity;
 using Percolator.Cryptography;
 using Percolator.Cryptography.Primitives;
@@ -8,6 +9,8 @@ namespace Percolator.Infrastructure.Cryptography
 {
     public class SqliteSessionRepository : ISessionRepository
     {
+        private static readonly SemaphoreSlim _dbGate = new(1, 1);
+
         private readonly PercolatorDbContext _db;
         private readonly ISessionCrypto _crypto;
         private readonly IClock _clock;
@@ -26,47 +29,79 @@ namespace Percolator.Infrastructure.Cryptography
 
         public async Task AddAsync(SecureSession session, CancellationToken cancellationToken = default)
         {
-            if (_active.Identity is null) throw new InvalidOperationException("Active identity not loaded.");
-            var dbo = ToDbo(session, _active.Identity.SelfIdentityId.Value);
-            _db.Sessions.Add(dbo);
-            await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+            await _dbGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                if (_active.Identity is null) throw new InvalidOperationException("Active identity not loaded.");
+                var dbo = ToDbo(session, _active.Identity.SelfIdentityId.Value);
+                _db.Sessions.Add(dbo);
+                await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                _dbGate.Release();
+            }
         }
 
         public async Task<SecureSession?> GetAsync(SessionId id, CancellationToken cancellationToken = default)
         {
-            var row = await _db.Sessions.AsNoTracking()
-                .FirstOrDefaultAsync(x => x.SessionId == id.Value, cancellationToken)
-                .ConfigureAwait(false);
-            if (row is null) return null;
-            return FromDbo(row);
+            await _dbGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                var row = await _db.Sessions.AsNoTracking()
+                    .FirstOrDefaultAsync(x => x.SessionId == id.Value, cancellationToken)
+                    .ConfigureAwait(false);
+                if (row is null) return null;
+                return FromDbo(row);
+            }
+            finally
+            {
+                _dbGate.Release();
+            }
         }
 
         public async Task UpdateAsync(SecureSession session, CancellationToken cancellationToken = default)
         {
-            if (_active.Identity is null) throw new InvalidOperationException("Active identity not loaded.");
-            var row = await _db.Sessions.FirstOrDefaultAsync(x => x.SessionId == session.Id.Value, cancellationToken).ConfigureAwait(false);
-            if (row is null) return;
-            // Update mutable fields
-            row.RootKey = session.State.RootKey.Value;
-            row.SendChainKey = session.State.SendingChainKey?.Value;
-            row.SendCounter = session.State.SendingCounter;
-            row.RecvChainKey = session.State.ReceivingChainKey?.Value;
-            row.RecvCounter = session.State.ReceivingCounter;
-            row.PrevChainLength = session.State.PreviousChainLength;
-            row.LastUsedAtUtc = session.LastUsedAtUtc;
-            await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+            await _dbGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                if (_active.Identity is null) throw new InvalidOperationException("Active identity not loaded.");
+                var row = await _db.Sessions.FirstOrDefaultAsync(x => x.SessionId == session.Id.Value, cancellationToken).ConfigureAwait(false);
+                if (row is null) return;
+                // Update mutable fields
+                row.RootKey = session.State.RootKey.Value;
+                row.SendChainKey = session.State.SendingChainKey?.Value;
+                row.SendCounter = session.State.SendingCounter;
+                row.RecvChainKey = session.State.ReceivingChainKey?.Value;
+                row.RecvCounter = session.State.ReceivingCounter;
+                row.PrevChainLength = session.State.PreviousChainLength;
+                row.LastUsedAtUtc = session.LastUsedAtUtc;
+                await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                _dbGate.Release();
+            }
         }
 
         public async Task<IReadOnlyList<SecureSession>> GetAllActiveAsync(int selfIdentityId, CancellationToken cancellationToken = default)
         {
-            var rows = await _db.Sessions.AsNoTracking()
-                .Where(x => x.SelfIdentityId == selfIdentityId)
-                .ToListAsync(cancellationToken)
-                .ConfigureAwait(false);
-            return rows
-                .OrderByDescending(x => x.LastUsedAtUtc)
-                .Select(FromDbo)
-                .ToList();
+            await _dbGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                var rows = await _db.Sessions.AsNoTracking()
+                    .Where(x => x.SelfIdentityId == selfIdentityId)
+                    .ToListAsync(cancellationToken)
+                    .ConfigureAwait(false);
+                return rows
+                    .OrderByDescending(x => x.LastUsedAtUtc)
+                    .Select(FromDbo)
+                    .ToList();
+            }
+            finally
+            {
+                _dbGate.Release();
+            }
         }
 
         private SessionDbo ToDbo(SecureSession s, int selfIdentityId)
