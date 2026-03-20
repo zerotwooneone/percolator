@@ -398,7 +398,25 @@ public sealed class SimulatedPeerRuntimeService : ISimulatedPeerRuntimeService
         if (request is null) throw new ArgumentNullException(nameof(request));
 
         var runtime = _runtimeByPeerId.GetOrAdd(simulatedPeerId, CreateRuntime);
-        return runtime.ReceiveOpaqueMessageFromMainAsync(simulatedPeerId, request, _state, cancellationToken);
+
+        return ReceiveOpaqueMessageFromMainInnerAsync(simulatedPeerId, runtime, request, cancellationToken);
+    }
+
+    private async Task<DeliverOpaqueMessageResponse> ReceiveOpaqueMessageFromMainInnerAsync(
+        Guid simulatedPeerId,
+        SimulatedPeerRuntime runtime,
+        DeliverOpaqueMessageRequest request,
+        CancellationToken cancellationToken)
+    {
+        var resp = await runtime
+            .ReceiveOpaqueMessageFromMainAsync(simulatedPeerId, request, _state, cancellationToken)
+            .ConfigureAwait(false);
+
+        // Critical: decrypt/encrypt mutates ratchet session state. Persist so subsequent messages
+        // (which may be handled in a new DI scope) can decrypt correctly.
+        await PersistRuntimeStoreAsync(simulatedPeerId, runtime, cancellationToken).ConfigureAwait(false);
+
+        return resp;
     }
 
     public async Task<EstablishSessionResponse?> ReceiveRelayedOpaquePayloadAsync(

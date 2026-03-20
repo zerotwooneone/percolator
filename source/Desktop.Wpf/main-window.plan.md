@@ -1633,3 +1633,70 @@ Definition of done:
 - Debounced filtering and dispatcher scheduling: avoid hard UI-thread dependencies in core services.
 - Preserving route provenance across handshake lifecycle (so UI can display “Arriving via …” accurately).
 - Avoid mixing “pending inbound” with the Secure Channels list (anti-spam requirement).
+
+---
+
+## Relay Bug 1
+
+### relay-setup-1 (repro)
+
+- Start from a brand new DB file (no peers).
+- In the Simulator window:
+  - Create 2 simulated peers.
+  - Mark exactly 1 of them as relay-capable (call it **Relay**).
+  - Add the non-relay peer (call it **Target**) as an active session on the Relay.
+  - From Target, publish a standard pre-key bundle to Relay.
+- In the Main window:
+  - Establish a direct connection/session to Relay.
+  - Open Connection Management -> Network Search.
+  - Choose route mode: **relay**.
+  - Select Relay as relay host.
+  - Enter Target PKH and click **Fetch Pre-Key Bundle & Initiate**.
+
+### Expected behavior
+
+- Main requests Target pre-key bundle from Relay (GetPreKeyBundleRequest).
+- Relay responds with GetPreKeyBundleResponse (bundle present).
+- Main then creates a HandshakeInitiatorHello and sends an EnqueueOpaqueMessageRequest to Relay.
+- Relay enqueues the hello in its relay queue under routing key == Target PKH.
+- Simulator UI (Relay tab) shows a new queued relay message on the Relay peer.
+
+### What we have checked / verified
+
+- Publish to relay host works; the pre-key bundle is stored in the relay host’s PublishedBundles collection.
+- Fetch-by-PKH from relay host works end-to-end:
+  - The request reaches the correct simulated peer runtime (simulatedPeerId matches the relay host peer id).
+  - The request PKH matches the stored bundle key (byte-for-byte).
+  - The relay host responds with a response payload containing the pre-key bundle.
+
+Concrete debug values (from a known-good run):
+
+- relayHostPeerId:
+  - `a8d433c8-7741-472b-ab52-c7ebebd920f4`
+- logicalOwnerPeerId (Target simulated peer id that published bundle):
+  - `64d5433b-7a86-4195-b106-ec98f1d2c1ad`
+- recipientPublicKeyHash / requested PKH (hex):
+  - `C147ED93237B62FFADAEF2480C47B1D9CFEAD154556F3F8BAA851EFCE098DEA5`
+- Relay host runtime ingress confirmation:
+  - `simulatedPeerId` for GetPreKeyBundleRequest == `a8d433c8-7741-472b-ab52-c7ebebd920f4`
+  - `getReq.PublicKeyHash` hex == `C147ED...DEA5`
+
+### Next verification steps
+
+The remaining suspected failure is in the **post-bundle enqueue** path (Main -> Relay EnqueueOpaqueMessageRequest -> Relay queue persistence/UI).
+
+- Verify Main actually sends the enqueue message:
+  - Breakpoint: `ConnectionManagementDialogViewModel.ExecuteNetworkSearchAsync` at the second `_transport.SendMessageAsync(...)` that sends `EnqueueOpaqueMessageRequest`.
+  - Capture: relayHostPeerId, direct session id, targetPkh hex, and size of `cipherMq`.
+
+- Verify transport routing hits the simulator interceptor for the enqueue send:
+  - Breakpoint: `SimulatorOutboundInterceptor.TryDeliverOpaqueMessage(...)`.
+  - Confirm: `TryResolveSimulatedPeerId(...) == true` and resolved peer id == relayHostPeerId.
+
+- Verify relay peer runtime parses the enqueue envelope and calls state enqueue:
+  - Breakpoint: `SimulatedPeerRuntime.ReceiveOpaqueMessageFromMainAsync` inside the `EnqueueOpaqueMessageRequest` branch.
+  - Confirm: `RecipientPublicKeyHash` == targetPkh and `MessageBlob` length > 0.
+  - Breakpoint: `SimulatorStateService.EnqueueRelayOpaqueAsync(...)` and confirm queue count increments.
+
+- If queue count increments but UI remains unchanged:
+  - Investigate `SimulatorRelayTabViewModel` / relay panel refresh behavior and dispatcher affinity.
