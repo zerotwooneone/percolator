@@ -148,8 +148,10 @@ public sealed class SimulatedPeerRuntimeService : ISimulatedPeerRuntimeService
     {
         if (invite is null) throw new ArgumentNullException(nameof(invite));
 
-        var runtime = _runtimeByPeerId.GetOrAdd(simulatedPeerId, CreateRuntime);
-        return runtime.AcceptReverseSignalInviteAsync(inviterPeerId, invite, cancellationToken);
+        return WithRuntimeAsync(
+            simulatedPeerId,
+            runtime => runtime.AcceptReverseSignalInviteAsync(inviterPeerId, invite, cancellationToken),
+            cancellationToken);
     }
 
     public Task<SessionRatchetMessage> EncryptInternalEnvelopeAsync(
@@ -159,20 +161,11 @@ public sealed class SimulatedPeerRuntimeService : ISimulatedPeerRuntimeService
         CancellationToken cancellationToken = default)
     {
         if (envelope is null) throw new ArgumentNullException(nameof(envelope));
-        var runtime = _runtimeByPeerId.GetOrAdd(simulatedPeerId, CreateRuntime);
-        return EncryptInternalEnvelopeInnerAsync(simulatedPeerId, runtime, sessionId, envelope, cancellationToken);
-    }
 
-    private async Task<SessionRatchetMessage> EncryptInternalEnvelopeInnerAsync(
-        Guid simulatedPeerId,
-        SimulatedPeerRuntime runtime,
-        SessionId sessionId,
-        InternalEnvelope envelope,
-        CancellationToken cancellationToken)
-    {
-        var msg = await runtime.EncryptInternalEnvelopeAsync(sessionId, envelope, cancellationToken).ConfigureAwait(false);
-        await PersistRuntimeStoreAsync(simulatedPeerId, runtime, cancellationToken).ConfigureAwait(false);
-        return msg;
+        return WithRuntimeAsync(
+            simulatedPeerId,
+            runtime => runtime.EncryptInternalEnvelopeAsync(sessionId, envelope, cancellationToken),
+            cancellationToken);
     }
 
     public async Task DeliverInviteHandshakeResponseToMainAsync(
@@ -228,26 +221,29 @@ public sealed class SimulatedPeerRuntimeService : ISimulatedPeerRuntimeService
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        var runtime = _runtimeByPeerId.GetOrAdd(simulatedPeerId, CreateRuntime);
-        var bundle = runtime.CreateStandardPreKeyBundle(expiresUtc, includeOneTimeKeys: includeOneTimeKeys, oneTimeKeyCount: oneTimeKeyCount);
-        var pkh = SHA256.HashData(bundle.IdentityKey.ToByteArray());
+        await WithRuntimeAsync(
+            simulatedPeerId,
+            async runtime =>
+            {
+                var bundle = runtime.CreateStandardPreKeyBundle(expiresUtc, includeOneTimeKeys: includeOneTimeKeys, oneTimeKeyCount: oneTimeKeyCount);
+                var pkh = SHA256.HashData(bundle.IdentityKey.ToByteArray());
 
-        await _state.PublishPreKeyBundleAsync(
-                relayHostPeerId,
-                recipientPublicKeyHash: pkh,
-                logicalOwnerPeerId: simulatedPeerId,
-                bundleBytes: bundle.ToByteArray(),
-                expiresUtc: expiresUtc,
-                cancellationToken: cancellationToken)
-            .ConfigureAwait(false);
+                await _state.PublishPreKeyBundleAsync(
+                        relayHostPeerId,
+                        recipientPublicKeyHash: pkh,
+                        logicalOwnerPeerId: simulatedPeerId,
+                        bundleBytes: bundle.ToByteArray(),
+                        expiresUtc: expiresUtc,
+                        cancellationToken: cancellationToken)
+                    .ConfigureAwait(false);
 
-        _diagnostics.Emit(
-            SimulatorDiagnosticEventType.PreKeyBundleFetched,
-            $"Pre-key bundle published -> relay={relayHostPeerId.ToString()[..8]} owner={simulatedPeerId.ToString()[..8]}",
-            peerId: simulatedPeerId,
-            relayHostPeerId: relayHostPeerId);
-
-        await PersistRuntimeStoreAsync(simulatedPeerId, runtime, cancellationToken).ConfigureAwait(false);
+                _diagnostics.Emit(
+                    SimulatorDiagnosticEventType.PreKeyBundleFetched,
+                    $"Pre-key bundle published -> relay={relayHostPeerId.ToString()[..8]} owner={simulatedPeerId.ToString()[..8]}",
+                    peerId: simulatedPeerId,
+                    relayHostPeerId: relayHostPeerId);
+            },
+            cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<byte[]?> TryPopStandardPreKeyBundleBytesFromRelayByRecipientPkhAsync(
@@ -283,16 +279,14 @@ public sealed class SimulatedPeerRuntimeService : ISimulatedPeerRuntimeService
         if (responderBundleBytes is null) throw new ArgumentNullException(nameof(responderBundleBytes));
         if (responderBundleBytes.Length == 0) return null;
 
-        var runtime = _runtimeByPeerId.GetOrAdd(simulatedPeerId, CreateRuntime);
-
-        var resp = await runtime.InitiateStandardHandshakeAsync(
-                responderBundleBytes,
-                (req, ct) => DeliverEstablishSessionToMainAsync(req, ct),
+        return await WithRuntimeAsync(
+                simulatedPeerId,
+                runtime => runtime.InitiateStandardHandshakeAsync(
+                    responderBundleBytes,
+                    (req, ct) => DeliverEstablishSessionToMainAsync(req, ct),
+                    cancellationToken),
                 cancellationToken)
             .ConfigureAwait(false);
-
-        await PersistRuntimeStoreAsync(simulatedPeerId, runtime, cancellationToken).ConfigureAwait(false);
-        return resp;
     }
 
     public async Task<SessionId?> InitiateStandardHandshakeToMainByRelayPkhAsync(
@@ -337,35 +331,40 @@ public sealed class SimulatedPeerRuntimeService : ISimulatedPeerRuntimeService
             return null;
         }
 
-        var runtime = _runtimeByPeerId.GetOrAdd(simulatedPeerId, CreateRuntime);
 
-        var hello = runtime.TryCreateHandshakeInitiatorHelloFromBundle(bundleBytes);
-        if (hello is null)
-        {
-            return null;
-        }
+        return await WithRuntimeAsync(
+                simulatedPeerId,
+                async runtime =>
+                {
+                    var hello = runtime.TryCreateHandshakeInitiatorHelloFromBundle(bundleBytes);
+                    if (hello is null)
+                    {
+                        return (SessionId?)null;
+                    }
 
-        await _state.EnqueueRelayOpaqueAsync(
-                relayHostPeerId: relayHostPeerId,
-                recipientRoutingKey: responderPublicKeyHash,
-                opaqueBytes: hello.ToByteArray(),
-                debugType: nameof(HandshakeInitiatorHello),
-                cancellationToken: cancellationToken)
+                    await _state.EnqueueRelayOpaqueAsync(
+                            relayHostPeerId: relayHostPeerId,
+                            recipientRoutingKey: responderPublicKeyHash,
+                            opaqueBytes: hello.ToByteArray(),
+                            debugType: nameof(HandshakeInitiatorHello),
+                            cancellationToken: cancellationToken)
+                        .ConfigureAwait(false);
+
+                    _diagnostics.Emit(
+                        SimulatorDiagnosticEventType.StandardHandshakeHelloEnqueued,
+                        $"Standard handshake hello enqueued -> relay={relayHostPeerId.ToString()[..8]}",
+                        peerId: simulatedPeerId,
+                        relayHostPeerId: relayHostPeerId);
+
+                    // Handshake completion is asynchronous: the relay host must deliver to main and route the EstablishSessionResponse back.
+                    // We'll finalize when the response arrives in a separate ingress path.
+                    return (SessionId?)null;
+                },
+                cancellationToken)
             .ConfigureAwait(false);
-
-        _diagnostics.Emit(
-            SimulatorDiagnosticEventType.StandardHandshakeHelloEnqueued,
-            $"Standard handshake hello enqueued -> relay={relayHostPeerId.ToString()[..8]}",
-            peerId: simulatedPeerId,
-            relayHostPeerId: relayHostPeerId);
-
-        // Handshake completion is asynchronous: the relay host must deliver to main and route the EstablishSessionResponse back.
-        // We'll finalize when the response arrives in a separate ingress path.
-        await PersistRuntimeStoreAsync(simulatedPeerId, runtime, cancellationToken).ConfigureAwait(false);
-        return null;
     }
 
-    public Task ReceiveInviteHandshakeResponseFromMainAsync(
+    public async Task ReceiveInviteHandshakeResponseFromMainAsync(
         Guid simulatedPeerId,
         InviteHandshakeResponse response,
         CancellationToken cancellationToken = default)
@@ -383,10 +382,7 @@ public sealed class SimulatedPeerRuntimeService : ISimulatedPeerRuntimeService
         _pending.AddInviteHandshakeResponse(simulatedPeerId, corr, response);
         model.MarkInboundPending(corr);
 
-        var runtime = _runtimeByPeerId.GetOrAdd(simulatedPeerId, CreateRuntime);
-        _ = PersistRuntimeStoreAsync(simulatedPeerId, runtime, cancellationToken);
-
-        return Task.CompletedTask;
+        await WithRuntimeAsync(simulatedPeerId, _ => Task.CompletedTask, cancellationToken).ConfigureAwait(false);
     }
 
     public Task<DeliverOpaqueMessageResponse> ReceiveOpaqueMessageFromMainAsync(
@@ -397,26 +393,10 @@ public sealed class SimulatedPeerRuntimeService : ISimulatedPeerRuntimeService
         cancellationToken.ThrowIfCancellationRequested();
         if (request is null) throw new ArgumentNullException(nameof(request));
 
-        var runtime = _runtimeByPeerId.GetOrAdd(simulatedPeerId, CreateRuntime);
-
-        return ReceiveOpaqueMessageFromMainInnerAsync(simulatedPeerId, runtime, request, cancellationToken);
-    }
-
-    private async Task<DeliverOpaqueMessageResponse> ReceiveOpaqueMessageFromMainInnerAsync(
-        Guid simulatedPeerId,
-        SimulatedPeerRuntime runtime,
-        DeliverOpaqueMessageRequest request,
-        CancellationToken cancellationToken)
-    {
-        var resp = await runtime
-            .ReceiveOpaqueMessageFromMainAsync(simulatedPeerId, request, _state, cancellationToken)
-            .ConfigureAwait(false);
-
-        // Critical: decrypt/encrypt mutates ratchet session state. Persist so subsequent messages
-        // (which may be handled in a new DI scope) can decrypt correctly.
-        await PersistRuntimeStoreAsync(simulatedPeerId, runtime, cancellationToken).ConfigureAwait(false);
-
-        return resp;
+        return WithRuntimeAsync(
+            simulatedPeerId,
+            runtime => runtime.ReceiveOpaqueMessageFromMainAsync(simulatedPeerId, request, _state, cancellationToken),
+            cancellationToken);
     }
 
     public async Task<EstablishSessionResponse?> ReceiveRelayedOpaquePayloadAsync(
@@ -428,13 +408,11 @@ public sealed class SimulatedPeerRuntimeService : ISimulatedPeerRuntimeService
         if (opaqueBytes is null) throw new ArgumentNullException(nameof(opaqueBytes));
         if (opaqueBytes.Length == 0) return null;
 
-        var runtime = _runtimeByPeerId.GetOrAdd(simulatedPeerId, CreateRuntime);
-        var resp = await runtime.TryHandleRelayedOpaquePayloadAsync(opaqueBytes, cancellationToken).ConfigureAwait(false);
-        if (resp is not null)
-        {
-            await PersistRuntimeStoreAsync(simulatedPeerId, runtime, cancellationToken).ConfigureAwait(false);
-        }
-        return resp;
+        return await WithRuntimeAsync(
+                simulatedPeerId,
+                runtime => runtime.TryHandleRelayedOpaquePayloadAsync(opaqueBytes, cancellationToken),
+                cancellationToken)
+            .ConfigureAwait(false);
     }
 
     public Task<EstablishSessionResponse> ReceiveEstablishSessionFromMainAsync(
@@ -445,19 +423,10 @@ public sealed class SimulatedPeerRuntimeService : ISimulatedPeerRuntimeService
         cancellationToken.ThrowIfCancellationRequested();
         if (request is null) throw new ArgumentNullException(nameof(request));
 
-        var runtime = _runtimeByPeerId.GetOrAdd(simulatedPeerId, CreateRuntime);
-        return ReceiveEstablishSessionFromMainInnerAsync(simulatedPeerId, runtime, request, cancellationToken);
-    }
-
-    private async Task<EstablishSessionResponse> ReceiveEstablishSessionFromMainInnerAsync(
-        Guid simulatedPeerId,
-        SimulatedPeerRuntime runtime,
-        EstablishSessionRequest request,
-        CancellationToken cancellationToken)
-    {
-        var resp = await runtime.ReceiveEstablishSessionFromMainAsync(request, cancellationToken).ConfigureAwait(false);
-        await PersistRuntimeStoreAsync(simulatedPeerId, runtime, cancellationToken).ConfigureAwait(false);
-        return resp;
+        return WithRuntimeAsync(
+            simulatedPeerId,
+            runtime => runtime.ReceiveEstablishSessionFromMainAsync(request, cancellationToken),
+            cancellationToken);
     }
 
     public Task<Plaintext> DecryptSessionMessageAsync(
@@ -469,32 +438,10 @@ public sealed class SimulatedPeerRuntimeService : ISimulatedPeerRuntimeService
         cancellationToken.ThrowIfCancellationRequested();
         if (message is null) throw new ArgumentNullException(nameof(message));
 
-        var runtime = _runtimeByPeerId.GetOrAdd(simulatedPeerId, CreateRuntime);
-        return DecryptSessionMessageInnerAsync(simulatedPeerId, runtime, sessionId, message, cancellationToken);
-    }
-
-    private async Task<Plaintext> DecryptSessionMessageInnerAsync(
-        Guid simulatedPeerId,
-        SimulatedPeerRuntime runtime,
-        SessionId sessionId,
-        SessionRatchetMessage message,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            var pt = await runtime.DecryptSessionMessageAsync(sessionId, message, cancellationToken).ConfigureAwait(false);
-            await PersistRuntimeStoreAsync(simulatedPeerId, runtime, cancellationToken).ConfigureAwait(false);
-            return pt;
-        }
-        catch (Exception ex)
-        {
-            _diagnostics.Emit(
-                SimulatorDiagnosticEventType.DecryptFailure,
-                $"Decrypt failure: peer={simulatedPeerId.ToString()[..8]} session={sessionId.Value.ToString()[..8]} err={ex.GetType().Name}",
-                peerId: simulatedPeerId,
-                contextTag: ex.Message);
-            throw;
-        }
+        return WithRuntimeAsync(
+            simulatedPeerId,
+            runtime => runtime.DecryptSessionMessageAsync(sessionId, message, cancellationToken),
+            cancellationToken);
     }
 
     public void RecordOutboundInviteSignedPreKeyPrivate(
@@ -503,13 +450,17 @@ public sealed class SimulatedPeerRuntimeService : ISimulatedPeerRuntimeService
         byte[] signedPreKeyPrivateEcPrivateKey)
     {
         if (signedPreKeyPrivateEcPrivateKey is null) throw new ArgumentNullException(nameof(signedPreKeyPrivateEcPrivateKey));
-        var runtime = _runtimeByPeerId.GetOrAdd(simulatedPeerId, CreateRuntime);
-        runtime.RecordOutboundInviteSignedPreKeyPrivate(requestCorrelationId, signedPreKeyPrivateEcPrivateKey);
 
         try
         {
-            _ = PersistRuntimeStoreAsync(simulatedPeerId, runtime, CancellationToken.None)
-                .ContinueWith(_ => { }, CancellationToken.None);
+            _ = WithRuntimeAsync(
+                simulatedPeerId,
+                runtime =>
+                {
+                    runtime.RecordOutboundInviteSignedPreKeyPrivate(requestCorrelationId, signedPreKeyPrivateEcPrivateKey);
+                    return Task.CompletedTask;
+                },
+                CancellationToken.None);
         }
         catch
         {
@@ -524,17 +475,18 @@ public sealed class SimulatedPeerRuntimeService : ISimulatedPeerRuntimeService
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        var runtime = _runtimeByPeerId.GetOrAdd(simulatedPeerId, CreateRuntime);
-
         if (!_pending.TryGetInviteHandshakeResponse(simulatedPeerId, requestCorrelationId, out var response))
         {
             return null;
         }
 
-        var sessionId = await runtime.TryFinalizeInviteHandshakeResponseAsync(
-                acceptorPeerId,
-                requestCorrelationId,
-                response,
+        var sessionId = await WithRuntimeAsync(
+                simulatedPeerId,
+                runtime => runtime.TryFinalizeInviteHandshakeResponseAsync(
+                    acceptorPeerId,
+                    requestCorrelationId,
+                    response,
+                    cancellationToken),
                 cancellationToken)
             .ConfigureAwait(false);
 
@@ -544,7 +496,6 @@ public sealed class SimulatedPeerRuntimeService : ISimulatedPeerRuntimeService
         }
 
         _ = _pending.TryTakeInviteHandshakeResponse(simulatedPeerId, requestCorrelationId, out _);
-        await PersistRuntimeStoreAsync(simulatedPeerId, runtime, cancellationToken).ConfigureAwait(false);
         return sessionId;
     }
 
@@ -571,8 +522,7 @@ public sealed class SimulatedPeerRuntimeService : ISimulatedPeerRuntimeService
         _pending.AddInviteHandshakeResponse(simulatedPeerId, requestCorrelationId, response);
         model.MarkInboundPending(requestCorrelationId);
 
-        var runtime = _runtimeByPeerId.GetOrAdd(simulatedPeerId, CreateRuntime);
-        await PersistRuntimeStoreAsync(simulatedPeerId, runtime, cancellationToken).ConfigureAwait(false);
+        await WithRuntimeAsync(simulatedPeerId, _ => Task.CompletedTask, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<bool> TryDeliverQueuedInviteHandshakeResponseToMainAsync(
@@ -589,9 +539,58 @@ public sealed class SimulatedPeerRuntimeService : ISimulatedPeerRuntimeService
 
         await DeliverInviteHandshakeResponseToMainAsync(response, cancellationToken).ConfigureAwait(false);
 
-        var runtime = _runtimeByPeerId.GetOrAdd(simulatedPeerId, CreateRuntime);
-        await PersistRuntimeStoreAsync(simulatedPeerId, runtime, cancellationToken).ConfigureAwait(false);
+        await WithRuntimeAsync(simulatedPeerId, _ => Task.CompletedTask, cancellationToken).ConfigureAwait(false);
         return true;
+    }
+
+    private async Task WithRuntimeAsync(
+        Guid simulatedPeerId,
+        Func<SimulatedPeerRuntime, Task> work,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (work is null) throw new ArgumentNullException(nameof(work));
+
+        var runtime = _runtimeByPeerId.GetOrAdd(simulatedPeerId, CreateRuntime);
+        try
+        {
+            await work(runtime).ConfigureAwait(false);
+        }
+        finally
+        {
+            await PersistRuntimeStoreAsync(simulatedPeerId, runtime, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private async Task<T> WithRuntimeAsync<T>(
+        Guid simulatedPeerId,
+        Func<SimulatedPeerRuntime, Task<T>> work,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (work is null) throw new ArgumentNullException(nameof(work));
+
+        var runtime = _runtimeByPeerId.GetOrAdd(simulatedPeerId, CreateRuntime);
+        try
+        {
+            return await work(runtime).ConfigureAwait(false);
+        }
+        finally
+        {
+            await PersistRuntimeStoreAsync(simulatedPeerId, runtime, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private Task<T> WithRuntimeReadOnlyAsync<T>(
+        Guid simulatedPeerId,
+        Func<SimulatedPeerRuntime, Task<T>> work,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (work is null) throw new ArgumentNullException(nameof(work));
+
+        var runtime = _runtimeByPeerId.GetOrAdd(simulatedPeerId, CreateRuntime);
+        return work(runtime);
     }
 
     private async Task PersistRuntimeStoreAsync(Guid simulatedPeerId, SimulatedPeerRuntime runtime, CancellationToken cancellationToken)

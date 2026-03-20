@@ -48,6 +48,73 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
     }
 
     [Test]
+    public async Task AcceptReverseSignalInviteAsync_persists_runtime_store()
+    {
+        var simulatedPeerId = Guid.NewGuid();
+        var inviterPeerId = Guid.NewGuid();
+
+        using var acceptorIdentityEcdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        var acceptorIdentityPriv = acceptorIdentityEcdh.ExportECPrivateKey();
+        using var acceptorIdentityEcdsa = ECDsa.Create(acceptorIdentityEcdh.ExportParameters(true));
+        var acceptorIdentitySpki = acceptorIdentityEcdsa.ExportSubjectPublicKeyInfo();
+
+        var model = new SimulatedPeerModel(simulatedPeerId, "sim", isOnline: true, isRelayCapable: false, acceptorIdentitySpki, acceptorIdentityPriv);
+        using var directory = new DirectoryStub(model);
+
+        var messageService = (Percolator.Application.Network.PercolatorMessageService)
+            FormatterServices.GetUninitializedObject(typeof(Percolator.Application.Network.PercolatorMessageService));
+        var pending = new SimulatedPeerPendingInbox();
+
+        using var inviterIdentityEcdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        var inviterIdentityPriv = inviterIdentityEcdh.ExportECPrivateKey();
+        using var inviterIdentityEcdsa = ECDsa.Create(inviterIdentityEcdh.ExportParameters(true));
+        var inviterIdentitySpki = inviterIdentityEcdsa.ExportSubjectPublicKeyInfo();
+
+        using var inviterSignedPreKeyEcdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        var inviterSignedPreKeySpki = inviterSignedPreKeyEcdh.PublicKey.ExportSubjectPublicKeyInfo();
+        var preKeySig = inviterIdentityEcdsa.SignData(inviterSignedPreKeySpki, HashAlgorithmName.SHA256);
+
+        var payload = new InviteHandshakeRequestPayload
+        {
+            Version = 1,
+            RequestCorrelationId = Guid.NewGuid().ToString(),
+            InviterPreKey = new InviteHandshakePreKeyBundle
+            {
+                Version = 1,
+                InviterSignedPreKey = ByteString.CopyFrom(inviterSignedPreKeySpki),
+                PreKeySignature = ByteString.CopyFrom(preKeySig)
+            }
+        };
+
+        var invite = new EstablishDirectSessionRequest
+        {
+            Version = 1,
+            InviterIdentityKey = ByteString.CopyFrom(inviterIdentitySpki),
+            Payload = ByteString.CopyFrom(payload.ToByteArray())
+        };
+
+        var state = new Mock<ISimulatorStateService>(MockBehavior.Strict);
+        state.SetupGet(s => s.Peers)
+            .Returns(new ReadOnlyObservableCollection<SimulatedPeerDto>(new ObservableCollection<SimulatedPeerDto>()));
+        state.Setup(s => s.TryGetRuntimeStoreAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((SimulatedPeerRuntimeStoreDto?)null);
+        state.Setup(s => s.SaveRuntimeStoreAsync(simulatedPeerId, It.IsAny<SimulatedPeerRuntimeStoreDto>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask)
+            .Verifiable();
+
+        var diagnostics = new SimulatorDiagnosticsService();
+        var sut = new SimulatedPeerRuntimeService(directory, messageService, state.Object, diagnostics, pending);
+
+        var acceptance = await sut.AcceptReverseSignalInviteAsync(simulatedPeerId, inviterPeerId, invite, CancellationToken.None);
+
+        acceptance.SessionId.Should().NotBeNull();
+        acceptance.Response.Should().NotBeNull();
+        acceptance.Response.Version.Should().Be(1);
+
+        state.Verify(s => s.SaveRuntimeStoreAsync(simulatedPeerId, It.IsAny<SimulatedPeerRuntimeStoreDto>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Test]
     public async Task Relayed_HandshakeInitiatorHello_is_handled_and_persists_runtime_store()
     {
         var simulatedPeerId = Guid.NewGuid();

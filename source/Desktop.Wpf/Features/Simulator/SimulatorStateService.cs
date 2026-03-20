@@ -257,16 +257,25 @@ public sealed class SimulatorStateService : ISimulatorStateService
         if (publisher is null) return;
 
         publisher.PublishedKeysToPeerIds ??= new();
-        if (!publisher.PublishedKeysToPeerIds.Contains(hostPeerId))
-        {
-            publisher.PublishedKeysToPeerIds.Add(hostPeerId);
-            await _store.SaveAsync(_state, cancellationToken).ConfigureAwait(false);
 
-            _diagnostics.Emit(
-                SimulatorDiagnosticEventType.PreKeyPublishRelationshipAdded,
-                $"Pre-keys relationship added: {publisherPeerId.ToString()[..8]} -> {hostPeerId.ToString()[..8]}",
-                peerId: publisherPeerId);
-        }
+        var added = false;
+        await InvokeOnUiAsync(() =>
+        {
+            if (!publisher.PublishedKeysToPeerIds.Contains(hostPeerId))
+            {
+                publisher.PublishedKeysToPeerIds.Add(hostPeerId);
+                added = true;
+            }
+        }).ConfigureAwait(false);
+
+        if (!added) return;
+
+        await _store.SaveAsync(_state, cancellationToken).ConfigureAwait(false);
+
+        _diagnostics.Emit(
+            SimulatorDiagnosticEventType.PreKeyPublishRelationshipAdded,
+            $"Pre-keys relationship added: {publisherPeerId.ToString()[..8]} -> {hostPeerId.ToString()[..8]}",
+            peerId: publisherPeerId);
     }
 
     public async Task RemovePublishedKeysRelationshipAsync(Guid publisherPeerId, Guid hostPeerId, CancellationToken cancellationToken = default)
@@ -275,16 +284,17 @@ public sealed class SimulatorStateService : ISimulatorStateService
         if (publisher is null) return;
 
         publisher.PublishedKeysToPeerIds ??= new();
-        var removed = publisher.PublishedKeysToPeerIds.Remove(hostPeerId);
-        if (removed)
-        {
-            await _store.SaveAsync(_state, cancellationToken).ConfigureAwait(false);
 
-            _diagnostics.Emit(
-                SimulatorDiagnosticEventType.PreKeyPublishRelationshipRemoved,
-                $"Pre-keys relationship removed: {publisherPeerId.ToString()[..8]} -> {hostPeerId.ToString()[..8]}",
-                peerId: publisherPeerId);
-        }
+        var removed = false;
+        await InvokeOnUiAsync(() => removed = publisher.PublishedKeysToPeerIds.Remove(hostPeerId)).ConfigureAwait(false);
+        if (!removed) return;
+
+        await _store.SaveAsync(_state, cancellationToken).ConfigureAwait(false);
+
+        _diagnostics.Emit(
+            SimulatorDiagnosticEventType.PreKeyPublishRelationshipRemoved,
+            $"Pre-keys relationship removed: {publisherPeerId.ToString()[..8]} -> {hostPeerId.ToString()[..8]}",
+            peerId: publisherPeerId);
     }
 
     public async Task AddRelayActiveSessionAsync(Guid relayHostPeerId, Guid peerId, CancellationToken cancellationToken = default)
@@ -298,9 +308,19 @@ public sealed class SimulatorStateService : ISimulatorStateService
         if (!relayHost.Relay.IsRelayCapable) return;
 
         relayHost.Relay.ActiveSessionsPeerIds ??= new();
-        if (relayHost.Relay.ActiveSessionsPeerIds.Contains(peerId)) return;
 
-        relayHost.Relay.ActiveSessionsPeerIds.Add(peerId);
+        var added = false;
+        await InvokeOnUiAsync(() =>
+        {
+            if (!relayHost.Relay.ActiveSessionsPeerIds.Contains(peerId))
+            {
+                relayHost.Relay.ActiveSessionsPeerIds.Add(peerId);
+                added = true;
+            }
+        }).ConfigureAwait(false);
+
+        if (!added) return;
+
         await _store.SaveAsync(_state, cancellationToken).ConfigureAwait(false);
 
         _diagnostics.Emit(
@@ -319,7 +339,8 @@ public sealed class SimulatorStateService : ISimulatorStateService
         if (relayHost.Relay is null) return;
         if (relayHost.Relay.ActiveSessionsPeerIds is null) return;
 
-        var removed = relayHost.Relay.ActiveSessionsPeerIds.Remove(peerId);
+        var removed = false;
+        await InvokeOnUiAsync(() => removed = relayHost.Relay.ActiveSessionsPeerIds.Remove(peerId)).ConfigureAwait(false);
         if (!removed) return;
 
         await _store.SaveAsync(_state, cancellationToken).ConfigureAwait(false);
@@ -336,7 +357,7 @@ public sealed class SimulatorStateService : ISimulatorStateService
         var peer = _state.Peers.FirstOrDefault(p => p.PeerId == peerId);
         if (peer is null) return;
 
-        peer.IsOnline = !peer.IsOnline;
+        await InvokeOnUiAsync(() => peer.IsOnline = !peer.IsOnline).ConfigureAwait(false);
         await _store.SaveAsync(_state, cancellationToken);
 
         _diagnostics.Emit(
@@ -350,7 +371,7 @@ public sealed class SimulatorStateService : ISimulatorStateService
         var peer = _state.Peers.FirstOrDefault(p => p.PeerId == peerId);
         if (peer is null) return;
 
-        peer.Relay.IsRelayCapable = !peer.Relay.IsRelayCapable;
+        await InvokeOnUiAsync(() => peer.Relay.IsRelayCapable = !peer.Relay.IsRelayCapable).ConfigureAwait(false);
         await _store.SaveAsync(_state, cancellationToken);
 
         _diagnostics.Emit(
@@ -364,7 +385,8 @@ public sealed class SimulatorStateService : ISimulatorStateService
         var peer = _state.Peers.FirstOrDefault(p => p.PeerId == peerId);
         if (peer is null) return;
 
-        peer.DisplayName = string.IsNullOrWhiteSpace(displayName) ? null : displayName.Trim();
+        await InvokeOnUiAsync(() => peer.DisplayName = string.IsNullOrWhiteSpace(displayName) ? null : displayName.Trim())
+            .ConfigureAwait(false);
         await _store.SaveAsync(_state, cancellationToken);
     }
 
@@ -373,7 +395,7 @@ public sealed class SimulatorStateService : ISimulatorStateService
         var peer = _state.Peers.FirstOrDefault(p => p.PeerId == peerId);
         if (peer is null) return;
 
-        peer.IsOnline = isOnline;
+        await InvokeOnUiAsync(() => peer.IsOnline = isOnline).ConfigureAwait(false);
         await _store.SaveAsync(_state, cancellationToken);
 
         _diagnostics.Emit(
@@ -387,7 +409,7 @@ public sealed class SimulatorStateService : ISimulatorStateService
         var peer = _state.Peers.FirstOrDefault(p => p.PeerId == peerId);
         if (peer is null) return;
 
-        peer.Relay.IsRelayCapable = isRelayCapable;
+        await InvokeOnUiAsync(() => peer.Relay.IsRelayCapable = isRelayCapable).ConfigureAwait(false);
         await _store.SaveAsync(_state, cancellationToken);
 
         _diagnostics.Emit(
@@ -418,7 +440,7 @@ public sealed class SimulatorStateService : ISimulatorStateService
             DebugType = debugType
         };
 
-        peer.Relay.OpaqueQueue.Items.Add(queued);
+        await InvokeOnUiAsync(() => peer.Relay.OpaqueQueue.Items.Add(queued)).ConfigureAwait(false);
 
         await _store.SaveAsync(_state, cancellationToken).ConfigureAwait(false);
 
@@ -448,10 +470,13 @@ public sealed class SimulatorStateService : ISimulatorStateService
 
         if (matches.Count == 0) return Array.Empty<RelayQueuedBlobDto>();
 
-        foreach (var item in matches)
+        await InvokeOnUiAsync(() =>
         {
-            peer.Relay.OpaqueQueue.Items.Remove(item);
-        }
+            foreach (var item in matches)
+            {
+                peer.Relay.OpaqueQueue.Items.Remove(item);
+            }
+        }).ConfigureAwait(false);
 
         await _store.SaveAsync(_state, cancellationToken).ConfigureAwait(false);
         return matches;
@@ -493,9 +518,12 @@ public sealed class SimulatorStateService : ISimulatorStateService
         var newIdx = idx + delta;
         if (newIdx < 0 || newIdx >= list.Count) return false;
 
-        var item = list[idx];
-        list.RemoveAt(idx);
-        list.Insert(newIdx, item);
+        await InvokeOnUiAsync(() =>
+        {
+            var item = list[idx];
+            list.RemoveAt(idx);
+            list.Insert(newIdx, item);
+        }).ConfigureAwait(false);
 
         await _store.SaveAsync(_state, cancellationToken).ConfigureAwait(false);
 
@@ -525,7 +553,8 @@ public sealed class SimulatorStateService : ISimulatorStateService
         // Flip one bit in first byte for MAC failure / tamper testing.
         var bytes = item.OpaqueBytes.ToArray();
         bytes[0] = (byte)(bytes[0] ^ 0x01);
-        item.OpaqueBytes = bytes;
+
+        await InvokeOnUiAsync(() => item.OpaqueBytes = bytes).ConfigureAwait(false);
 
         await _store.SaveAsync(_state, cancellationToken).ConfigureAwait(false);
 
@@ -543,9 +572,13 @@ public sealed class SimulatorStateService : ISimulatorStateService
         var peer = _state.Peers.FirstOrDefault(p => p.PeerId == relayHostPeerId);
         if (peer is null) return false;
 
-        var before = peer.Relay.OpaqueQueue.Items.Count;
-        peer.Relay.OpaqueQueue.Items.RemoveAll(i => i.AckId == ackId);
-        var changed = peer.Relay.OpaqueQueue.Items.Count != before;
+        var changed = false;
+        await InvokeOnUiAsync(() =>
+        {
+            var before = peer.Relay.OpaqueQueue.Items.Count;
+            peer.Relay.OpaqueQueue.Items.RemoveAll(i => i.AckId == ackId);
+            changed = peer.Relay.OpaqueQueue.Items.Count != before;
+        }).ConfigureAwait(false);
 
         if (changed)
         {
@@ -571,13 +604,16 @@ public sealed class SimulatorStateService : ISimulatorStateService
         if (peer is null) return;
 
         // Allow publishing even if not relay-capable; caller/UI should prevent it but we keep storage permissive.
-        peer.Relay.PreKeyStore.PublishedBundles.Add(new PublishedPreKeyBundleDto
+        await InvokeOnUiAsync(() =>
         {
-            RecipientPublicKeyHash = recipientPublicKeyHash,
-            LogicalOwnerPeerId = logicalOwnerPeerId,
-            BundleBytes = bundleBytes,
-            ExpiresUtc = expiresUtc
-        });
+            peer.Relay.PreKeyStore.PublishedBundles.Add(new PublishedPreKeyBundleDto
+            {
+                RecipientPublicKeyHash = recipientPublicKeyHash,
+                LogicalOwnerPeerId = logicalOwnerPeerId,
+                BundleBytes = bundleBytes,
+                ExpiresUtc = expiresUtc
+            });
+        }).ConfigureAwait(false);
 
         await _store.SaveAsync(_state, cancellationToken).ConfigureAwait(false);
 
@@ -630,7 +666,7 @@ public sealed class SimulatorStateService : ISimulatorStateService
         var peer = _state.Peers.FirstOrDefault(p => p.PeerId == peerId);
         if (peer is null) return;
 
-        peer.RuntimeStore = store;
+        await InvokeOnUiAsync(() => peer.RuntimeStore = store).ConfigureAwait(false);
         await _store.SaveAsync(_state, cancellationToken).ConfigureAwait(false);
     }
 

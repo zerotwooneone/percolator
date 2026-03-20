@@ -553,9 +553,17 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
         await RefreshInboxAsync().ConfigureAwait(false);
     }
 
-    private async Task ExecuteNetworkSearchAsync()
+    private async Task ExecuteNetworkSearchAsync(CancellationToken ct = default)
     {
         ResetStatus();
+        PhaseText.Value = "Starting...";
+
+        if (_active.Identity is null)
+        {
+            ErrorText.Value = "Identity not loaded.";
+            PhaseText.Value = null;
+            return;
+        }
 
         PhaseText.Value = "Validating...";
 
@@ -569,6 +577,10 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
                 return;
             }
 
+            // Relay host options are derived from persisted direct sessions. Refresh on demand so the dropdown
+            // reflects newly-established sessions even if no store-level collection change is emitted.
+            await RefreshRelayHostOptionsAsync(ct);
+
             if (routeMode.Key == "direct")
             {
                 var endpoint = ParseDnsEndPoint(DirectEndpointText.Value);
@@ -581,7 +593,7 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
                         targetDisplayName: TargetDisplayNameText.Value,
                         targetEndpointHost: endpoint.Host,
                         targetEndpointPort: endpoint.Port);
-                    _ = await _grpcSessions.EstablishDirectSessionAsync(endpoint, invite).ConfigureAwait(false);
+                    _ = await _grpcSessions.EstablishDirectSessionAsync(endpoint, invite);
                     PhaseText.Value = "Invite sent.";
                 }
                 catch (RpcException rpcEx) when (rpcEx.StatusCode == StatusCode.Unavailable)
@@ -634,7 +646,7 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
                 {
                     direct = await _directSessions
                         .GetByRemotePeerIdAsync(new Percolator.Network.PeerId(relayHostPeerId.Value), selfIdentityId)
-                        .ConfigureAwait(false);
+                        ;
                 }
                 catch (Exception ex)
                 {
@@ -672,11 +684,11 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
                     var cryptoSessionId = new Percolator.Cryptography.SessionId(direct.SessionId.Value);
                     var cipher = await _secureMessaging
                         .EncryptAsync(cryptoSessionId, plaintext)
-                        .ConfigureAwait(false);
+                        ;
 
                     var deliverResp = await _transport
                         .SendMessageAsync(relayHostPeerId, direct.SessionId, cipher)
-                        .ConfigureAwait(false);
+                        ;
 
                     if (deliverResp.ResultCase != DeliverOpaqueMessageResponse.ResultOneofCase.ResponsePayload
                         || deliverResp.ResponsePayload is null
@@ -689,7 +701,7 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
                     var respCipher = new SessionRatchetMessage(deliverResp.ResponsePayload.ResponsePayload.ToByteArray());
                     var resolved = await _secureMessaging
                         .DecryptInboundAsync(selfIdentityId, respCipher)
-                        .ConfigureAwait(false);
+                        ;
                     var respPlain = resolved?.plaintext;
                     if (respPlain is null)
                     {
@@ -821,7 +833,7 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
                                 ExpiresAtUtc: expiresAtUtc,
                                 RemoteIdentityKeySpki: remoteIdentitySpki),
                             CancellationToken.None)
-                        .ConfigureAwait(false);
+                        ;
                 }
                 catch (Exception ex)
                 {
