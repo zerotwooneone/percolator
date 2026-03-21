@@ -1381,100 +1381,151 @@ Definition of done:
 
 Goal:
 
-- Make simulator peer state a singleton-owned “store” surface (Angular-like), where ViewModels project reactive model changes onto WPF-bound properties/collections.
-- Replace `ISimulatorStateService.Peers` (`ReadOnlyObservableCollection<SimulatedPeerDto>`) with a thread-agnostic, non-WPF-bindable collection: [IReadOnlyModelList<SimulatedPeerModel>](cci:2://file:///C:/Users/squir/source/repos/percolator/source/Desktop.Wpf/Shared/Models/ModelList.cs:18:0-27:1).
-- Establish one consistent get-peer-modify-write pattern so peer updates (e.g., display name) are serialized and always persisted.
+
+- Replace the current simulator runtime architecture with three clean layers (per `r3.readme.md`):
+  - **Model**: `SimulatedPeerModel` owns *protocol state* (identity, prekeys, active sessions) as reactive properties/collections. No persistence logic, no gRPC/network calls.
+  - **Protocol Engine**: `ISignalProtocolEngine` performs pure Signal-ish operations (create prekey bundle, initiate handshake, encrypt/decrypt) by reading/writing model state.
+  - **Service/Orchestrator**: `SimulatorStateService` owns the peer collection, listens for inbound/outbound transport events, delegates crypto/state transitions to the engine, and sends responses back out. Persistence is handled via trackers + repository.
 
 Work:
 
-1. Define the shared model shape for peers (no DTOs in UI).
-  - Create `Desktop.Wpf/Features/Simulator/SimulatedPeerModel`.
-  - Use `ReactiveProperty<T>` for mutable fields:
-    - `DisplayName`, `IsOnline`, `IsRelayCapable`, `RuntimeState`.
-  - Keep immutable identity fields:
-    - `PeerId`, `SelfIdentityId`, `IdentityPublicKeyHash`, plus any key material required by the simulator runtime.
-  - Ensure [SimulatedPeerModel](cci:2://file:///C:/Users/squir/source/repos/percolator/source/Desktop.Wpf/Features/Simulator/SimulatedPeerModel.cs:4:0-219:1) is NOT WPF-bindable:
-    - No `BindableReactiveProperty<T>`.
-    - No `ObservableCollection`.
+1. Move protocol state into `SimulatedPeerModel` (pure model, no I/O).
+  - Extend `SimulatedPeerModel` to contain *protocol state*:
+    - Cryptographic identity (already present): `IdentitySigningKeySpki` + private key material (kept internal).
+    - A reactive collection of active secure sessions:
+      - ObservableDictionary<SessionId, SimulatedSecureSessionModel> Sessions (Exposed as IReadOnlyObservableDictionary<...>)
+    - A reactive collection for prekey material:
+      - `ObservableList<SimulatedSignedPreKeyModel> SignedPreKeys`
+      - `ObservableList<SimulatedOneTimePreKeyModel> OneTimePreKeys` (if simulator uses them)
+    - A reactive collection for pending invite responses (if needed):
+      - `ObservableList<SimulatedPendingInviteHandshakeResponseModel> PendingInviteResponses`
+  - Ensure *all* of these are pure model types:
+    - `ReactiveProperty<T>` and `ObservableCollections.R3` only
+    - no DTOs, no `BindableReactiveProperty`, no `Grpc`/transport references.
 
-2. Refactor `ISimulatorStateService.Peers` to [IReadOnlyModelList<SimulatedPeerModel>](cci:2://file:///C:/Users/squir/source/repos/percolator/source/Desktop.Wpf/Shared/Models/ModelList.cs:18:0-27:1).
-  - Update [ISimulatorStateService](cci:2://file:///C:/Users/squir/source/repos/percolator/source/Desktop.Wpf/Features/Simulator/SimulatorStateService.cs:8:0-56:1):
-    - `IReadOnlyModelList<SimulatedPeerModel> Peers { get; }`
-  - In [SimulatorStateService](cci:2://file:///C:/Users/squir/source/repos/percolator/source/Desktop.Wpf/Features/Simulator/SimulatorStateService.cs:58:0-762:1):
-    - Keep persistence DTOs in `_state` ([SimulatorStateDto](cci:2://file:///C:/Users/squir/source/repos/percolator/source/Desktop.Wpf/Features/Simulator/SimulatorState.cs:2:0-7:1) + [SimulatedPeerDto](cci:2://file:///C:/Users/squir/source/repos/percolator/source/Desktop.Wpf/Features/Simulator/SimulatorState.cs:17:0-32:1)).
-    - Create and own the authoritative runtime model list:
-      - private [ModelList<SimulatedPeerModel> _peers](cci:2://file:///C:/Users/squir/source/repos/percolator/source/Desktop.Wpf/Shared/Models/ModelList.cs:29:0-146:1)
-      - private `Dictionary<Guid, SimulatedPeerModel> _peerById`
-    - In [InitializeAsync](cci:1://file:///C:/Users/squir/source/repos/percolator/source/Desktop.Wpf/Features/Simulator/SimulatorStateService.cs:90:4-104:5), load DTO state, normalize/seed missing fields, create models, and call [_peers.Reset(models)](cci:1://file:///C:/Users/squir/source/repos/percolator/source/Desktop.Wpf/Shared/Models/ModelList.cs:59:4-73:5).
+2. Replace custom `ModelList<T>` with `ObservableCollections.R3` everywhere.
+  - Replace `SimulatedPeerModel.HandshakeAttempts` backing store with `ObservableList<SimulatorHandshakeAttemptState>`.
+  - Replace any remaining `IReadOnlyModelList<T>` usage with `ReadOnlyObservableList<T>`.
 
-3. Standardize serialized “get-peer-modify-write” service mutation pattern.
-  - Add a `SemaphoreSlim _peerGate = new(1, 1)` to serialize all peer mutations.
-  - Add a private helper:
-    - `Task WithPeerAsync(Guid peerId, Action<SimulatedPeerModel> mutateModel, Action<SimulatedPeerDto> mutateDto, CancellationToken ct)`
-      - `await _peerGate.WaitAsync(ct)`
-      - find model in `_peerById` and DTO in `_state.Peers`
-      - apply `mutateModel(model)` and `mutateDto(dto)`
-      - `await _store.SaveAsync(_state, ct)`
-      - `finally _peerGate.Release()`
-  - Route all peer mutation APIs through `WithPeerAsync`:
-    - [UpdateDisplayNameAsync](cci:1://file:///C:/Users/squir/source/repos/percolator/source/Desktop.Wpf/Features/Simulator/SimulatorStateService.cs:382:4-390:5), [SetOnlineAsync](cci:1://file:///C:/Users/squir/source/repos/percolator/source/Desktop.Wpf/Features/Simulator/SimulatorStateService.cs:392:4-404:5), [SetRelayCapableAsync](cci:1://file:///C:/Users/squir/source/repos/percolator/source/Desktop.Wpf/Features/Simulator/SimulatorStateService.cs:406:4-418:5), [SetRuntimeStateAsync](cci:1://file:///C:/Users/squir/source/repos/percolator/source/Desktop.Wpf/Features/Simulator/SimulatorStateService.cs:241:4-249:5), [ToggleOnlineAsync](cci:1://file:///C:/Users/squir/source/repos/percolator/source/Desktop.Wpf/Features/Simulator/SimulatorStateService.cs:354:4-366:5), [ToggleRelayCapableAsync](cci:1://file:///C:/Users/squir/source/repos/percolator/source/Desktop.Wpf/Features/Simulator/SimulatorStateService.cs:368:4-380:5).
+3. **User action required**: delete the custom collection implementation.
+  - Delete:
+    - `Desktop.Wpf/Shared/Models/ModelList.cs`
+    - `Desktop.Wpf/Shared/Models/IReadOnlyModelList.cs`
+  - Then fix compilation by migrating any remaining references to `ObservableCollections.R3`.
 
-4. Keep list mutation internal to the service (Angular-like store API).
-  - [AddPeerAsync](cci:1://file:///C:/Users/squir/source/repos/percolator/source/Desktop.Wpf/Features/Simulator/SimulatorStateService.cs:165:4-191:5):
-    - create DTO + model
-    - add DTO to `_state.Peers`
-    - add model to `_peerById` + [_peers.Add(model)](cci:1://file:///C:/Users/squir/source/repos/percolator/source/Desktop.Wpf/Shared/Models/ModelList.cs:79:4-95:5)
-    - save `_state`
-  - [RemovePeerAsync](cci:1://file:///C:/Users/squir/source/repos/percolator/source/Desktop.Wpf/Features/Simulator/SimulatorStateService.cs:210:4-239:5):
-    - remove DTO from `_state.Peers` + cleanup relationships
-    - remove model from `_peerById` + [_peers.Remove(model)](cci:1://file:///C:/Users/squir/source/repos/percolator/source/Desktop.Wpf/Shared/Models/ModelList.cs:90:4-106:5)
-    - dispose model if needed
-    - save `_state`
+4. Replace `ISimulatedPeerRuntimeService` with `ISignalProtocolEngine` (**no protobuf DTOs in the engine API**).
+  - Principle: `ISignalProtocolEngine` is pure domain/protocol logic.
+    - It must not reference `Google.Protobuf`, generated `*.Types.*` messages, or gRPC service contracts.
+    - It must not parse/serialize wire DTOs.
+  - Transport boundary rule:
+    - `SimulatorStateService` is responsible for:
+      - parsing inbound protobuf DTOs into **domain byte-wrapper types**
+      - calling the engine with domain types
+      - wrapping engine outputs back into protobuf DTOs for sending over the wire.
+  - Prefer existing domain wrappers from `Percolator.Cryptography` / primitives (examples already used in the codebase):
+    - `Percolator.Cryptography.PreKeyBundle`
+    - `Percolator.Cryptography.Primitives.SessionId`
+    - `Percolator.Cryptography.Plaintext`
+    - `Percolator.Cryptography.SessionRatchetMessage`
+    - `Percolator.Cryptography.RatchetIdentityKey`, `PreKey`, `OneTimeKey`, `Signature`, `PrivatePreKey`, `RootKey`
+  - Create `ISignalProtocolEngine` in `Desktop.Wpf/Features/Simulator/Protocol/` with a narrow, intention-revealing API (domain types only):
+    - `Percolator.Cryptography.PreKeyBundle CreateStandardPreKeyBundle(SimulatedPeerModel peer, DateTimeOffset? expiresUtc, bool includeOneTimeKeys, int oneTimeKeyCount)`
+    - `InitiateHandshakeResult? TryInitiateStandardHandshake(SimulatedPeerModel initiator, Percolator.Cryptography.PreKeyBundle responderBundle)`
+      - `InitiateHandshakeResult` is a small domain record (new) containing exactly what the orchestrator needs to build the outbound protobuf request:
+        - `SessionId SessionId`
+        - `byte[] InitiatorIdentitySigningKeySpki`
+        - `byte[] InitiatorEphemeralKeySpki`
+        - `Guid SignedPreKeyId`
+        - `Guid? OneTimePreKeyId`
+        - (and any minimal bootstrap state to persist onto the initiator model)
+    - `Percolator.Cryptography.SessionRatchetMessage EncryptMessage(SimulatedPeerModel sender, SessionId sessionId, Plaintext plaintext)`
+    - `Plaintext DecryptMessage(SimulatedPeerModel receiver, SessionId sessionId, SessionRatchetMessage message)`
+    - `AcceptInviteResult AcceptReverseSignalInvite(SimulatedPeerModel acceptor, ReverseSignalInviteDomain invite, Guid inviterPeerId)`
+      - `ReverseSignalInviteDomain` / `AcceptInviteResult` are domain records (new) containing just the byte arrays/ids the orchestrator needs to respond.
+    - `FinalizeInviteResult? TryFinalizeInviteHandshakeResponse(SimulatedPeerModel inviter, InviteHandshakeResponseDomain response, Guid acceptorPeerId, Guid requestCorrelationId)`
+      - again: domain record(s) only.
+  - Implement `SignalProtocolEngine` by extracting cryptography + session mutations currently embedded in `SimulatedPeerRuntimeService`/`SimulatedPeerRuntime`.
 
-5. Update simulator ViewModels to project from `Peers.Changes` (not WPF collections in services).
-  - Replace `ReadOnlyObservableCollection<SimulatedPeerDto>` peer reads with [SimulatedPeerModel](cci:2://file:///C:/Users/squir/source/repos/percolator/source/Desktop.Wpf/Features/Simulator/SimulatedPeerModel.cs:4:0-219:1) reads.
-  - [SimulatorPeersTabViewModel](cci:2://file:///C:/Users/squir/source/repos/percolator/source/Desktop.Wpf/Features/Simulator/SimulatorPeersTabViewModel.cs:7:0-220:1):
-    - subscribe to `_state.Peers.Changes`
-    - `ObserveOnCurrentSynchronizationContext()` (or dispatcher)
-    - update `_peerCards` incrementally (Reset/Add/Remove/Replace)
-  - [SimulatedPeerCardViewModel](cci:2://file:///C:/Users/squir/source/repos/percolator/source/Desktop.Wpf/Features/Simulator/SimulatedPeerCardViewModel.cs:11:0-450:1):
-    - bind to `_model.DisplayName/IsOnline/IsRelayCapable/RuntimeState`
-    - use service methods for mutations (no direct DTO edits, no UI-thread mutation assumptions)
+5. Refactor `SimulatorStateService` into a clean orchestrator.
+  - Responsibilities:
+    - owns `ObservableList<SimulatedPeerModel> _peers` and exposes `ReadOnlyObservableList<SimulatedPeerModel> Peers`.
+    - owns the transport adapters used for simulator-to-main delivery (existing in-proc gRPC stub calls).
+    - listens for inbound transport events (where these are surfaced today in the simulator layer) and routes to engine.
+    - sends outbound responses back to main or to relay queues using `ISimulatorStateService`-adjacent relay APIs.
+    - emits diagnostics (but diagnostics should not be used as a data synchronization mechanism).
+  - Explicitly remove these patterns from the new design:
+    - `ConcurrentDictionary<Guid, SimulatedPeerRuntime>` runtime caches
+    - `WithRuntimeAsync(...)` and the `GetOrAdd` runtime construction hacks
+    - manual “save runtime store now” calls scattered through protocol flows
 
-6. Replace DTO-based reads needed by specialized UI logic with snapshot queries (DTO remains persistence-only).
-  - Add read-only snapshot/query APIs on [ISimulatorStateService](cci:2://file:///C:/Users/squir/source/repos/percolator/source/Desktop.Wpf/Features/Simulator/SimulatorStateService.cs:8:0-56:1) as needed (immutable return):
-    - e.g. `SimulatedPeerSnapshot? TryGetPeerSnapshot(Guid peerId)`
-    - e.g. `IReadOnlyList<SimulatedPeerSnapshot> SnapshotPeers()`
-  - Use snapshots for relationship/tag rebuild and relay panels where a point-in-time view is sufficient.
+6. Introduce repository + tracker-based persistence for protocol state.
+  - Repository boundary (no DTO leakage):
+    - `ISimulatorStateRepository` interface accepts pure models (no DTO leakage into the service). However, the concrete JsonSimulatorStateRepository implementation MUST map these models into internal, flat persistence DTOs before serializing to JSON.
+    - It must cover peer identity + protocol state collections (sessions, prekeys, pending responses) as needed.
+  - Trackers:
+    - `SimulatedPeerProtocolStateTracker` observes `Sessions`, `SignedPreKeys`, `OneTimePreKeys`, pending invite responses, etc., and emits `Observable<Unit> Dirty`.
+    - `SimulatedPeerUiStateTracker` observes UI/runtime-ish fields (UiState, phase, routing selections, handshake attempts) and emits `Dirty`.
+    - `SimulatedPeersCollectionTracker` observes peer add/remove structural changes.
+  - Service-level save pipeline:
+    - merge all `Dirty` streams, debounce, call repository save with a snapshot of peers.
+    - use `FakeTimeProvider` in tests to make debounce deterministic.
 
-7. Update affected unit tests (strict mocks) and add one new invariant test.
-  - Update all `Desktop.Wpf.Tests` that mock `ISimulatorStateService.Peers` or enumerate peers (now `SimulatedPeerModel`).
-  - Add a focused test for the new mutation pattern:
-    - [UpdateDisplayNameAsync](cci:1://file:///C:/Users/squir/source/repos/percolator/source/Desktop.Wpf/Features/Simulator/SimulatorStateService.cs:382:4-390:5) updates model + DTO and calls `_store.SaveAsync` exactly once (serialized).
-  - Ensure simulator VM tests (if present) now subscribe to `Peers.Changes` and do UI-thread projection in the test harness.
+7. Update callsites to use the orchestrator + engine.
+  - Replace all direct uses of `ISimulatedPeerRuntimeService` with:
+    - orchestrator methods on `SimulatorStateService` (explicit actions), and/or
+    - direct model mutations for simple edits (display name / toggles), leaving persistence to trackers.
+  - Update simulator components that currently assume snapshots/dictionaries:
+    - `SimulatorOutboundInterceptor`
+    - relay delivery/emulation services
+    - handshake UI viewmodels
+
+8. Update ViewModels to be pure projections and to stop doing protocol work.
+  - ViewModels:
+    - ViewModels: observe SimulatedPeerModel reactive properties, marshal to the UI thread using ObserveOnCurrentSynchronizationContext(), and project them as BindableReactiveProperty<T> for XAML binding.
+    - project collections using `CreateView()`
+    - invoke orchestrator commands for explicit actions (initiate handshake, accept invite, publish keys)
+    - no cryptography, no persistence calls, no concurrent dictionaries.
+
+9. Update unit tests to match the new architecture.
+  - Replace tests that directly instantiate/validate `SimulatedPeerRuntimeService` with two layers of tests:
+    - **Engine tests** (`SignalProtocolEngine`): validate cryptographic/protocol behavior against model state (no persistence, no network).
+    - **Orchestrator tests** (`SimulatorStateService`): validate routing/orchestration decisions (which engine method called, which transport path used, which diagnostics emitted).
+  - Persistence tests:
+    - repository tests validate mapping to/from the existing JSON format.
+    - tracker tests validate debounced save triggers for:
+      - peer property changes
+      - session collection changes (add/remove/update)
+      - peer list structural changes.
 
 Edit these files:
 
-- Store + persistence:
-  - [Desktop.Wpf/Features/Simulator/SimulatorStateService.cs](cci:7://file:///C:/Users/squir/source/repos/percolator/source/Desktop.Wpf/Features/Simulator/SimulatorStateService.cs:0:0-0:0)
-  - [Desktop.Wpf/Features/Simulator/SimulatorState.cs](cci:7://file:///C:/Users/squir/source/repos/percolator/source/Desktop.Wpf/Features/Simulator/SimulatorState.cs:0:0-0:0) (DTO persistence format)
 - Models:
-  - [Desktop.Wpf/Features/Simulator/SimulatedPeerModel.cs](cci:7://file:///C:/Users/squir/source/repos/percolator/source/Desktop.Wpf/Features/Simulator/SimulatedPeerModel.cs:0:0-0:0)
-  - [Desktop.Wpf/Shared/Models/IReadOnlyModelList.cs](cci:7://file:///C:/Users/squir/source/repos/percolator/source/Desktop.Wpf/Shared/Models/IReadOnlyModelList.cs:0:0-0:0)
-  - [Desktop.Wpf/Shared/Models/ModelList.cs](cci:7://file:///C:/Users/squir/source/repos/percolator/source/Desktop.Wpf/Shared/Models/ModelList.cs:0:0-0:0)
-- ViewModels:
-  - [Desktop.Wpf/Features/Simulator/SimulatorPeersTabViewModel.cs](cci:7://file:///C:/Users/squir/source/repos/percolator/source/Desktop.Wpf/Features/Simulator/SimulatorPeersTabViewModel.cs:0:0-0:0)
-  - [Desktop.Wpf/Features/Simulator/SimulatedPeerCardViewModel.cs](cci:7://file:///C:/Users/squir/source/repos/percolator/source/Desktop.Wpf/Features/Simulator/SimulatedPeerCardViewModel.cs:0:0-0:0)
-  - Any simulator viewmodels that currently do `_state.Peers.FirstOrDefault(...)`
+  - `Desktop.Wpf/Features/Simulator/SimulatedPeerModel.cs`
+  - new model types for sessions/prekeys (folder: `Desktop.Wpf/Features/Simulator/Models/`)
+- Protocol:
+  - `Desktop.Wpf/Features/Simulator/Protocol/ISignalProtocolEngine.cs`
+  - `Desktop.Wpf/Features/Simulator/Protocol/SignalProtocolEngine.cs`
+- Orchestrator/service:
+  - `Desktop.Wpf/Features/Simulator/SimulatorStateService.cs`
+  - remove/retire `Desktop.Wpf/Features/Simulator/SimulatedPeerRuntimeService.cs`
+- Persistence:
+  - `Desktop.Wpf/Features/Simulator/ISimulatorStateRepository.cs`
+  - `Desktop.Wpf/Features/Simulator/JsonSimulatorStateRepository.cs`
+  - tracker classes in `Desktop.Wpf/Features/Simulator/Tracking/`
+- ViewModels/callsites:
+  - anything currently injecting `ISimulatedPeerRuntimeService`
 - Tests:
-  - `Desktop.Wpf.Tests/*` (any tests mocking or consuming `ISimulatorStateService.Peers`)
+  - `Desktop.Wpf.Tests/*` (split engine vs orchestrator vs persistence/tracker tests)
 
 Definition of done:
 
-- `ISimulatorStateService.Peers` is [IReadOnlyModelList<SimulatedPeerModel>](cci:2://file:///C:/Users/squir/source/repos/percolator/source/Desktop.Wpf/Shared/Models/ModelList.cs:18:0-27:1).
-- Peer list updates flow via `Peers.Changes`; ViewModels marshal changes onto UI thread and update UI-owned collections.
-- All peer mutations go through serialized service methods (`WithPeerAsync`) and persist to `_store`.
-- All affected unit tests compile and pass with strict mocks updated.
+- `ISimulatedPeerRuntimeService` and `SimulatedPeerRuntimeService` are removed from production code.
+- `SimulatedPeerModel` owns protocol state (identity + reactive session/prekey collections) and remains persistence/network unaware.
+- `ISignalProtocolEngine` encapsulates protocol operations and contains cryptography math (no I/O).
+- `SimulatorStateService` orchestrates inbound/outbound transport + delegates to engine + emits diagnostics.
+- Persistence is tracker-driven through `ISimulatorStateRepository` (no DTO leakage).
+- `ModelList.cs` and `IReadOnlyModelList.cs` are deleted by the user and all references migrated.
+- Unit tests are updated and passing under the new split (engine/orchestrator/repository).
 
 ## Chunk I — Notification badge + default focus behavior for Connection Management button
 
