@@ -127,7 +127,12 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
         CopyEndpointCommand = copyEndpoint.AddTo(ref _bag);
 
         var publish = PublishTargetPeerId
-            .Select(hostId => hostId is not null && HasActiveSessionToHost(hostId.Value))
+            .Select(hostId =>
+            {
+                var host = hostId is null ? null : _state.Peers.FirstOrDefault(p => p.PeerId == hostId.Value);
+                return host?.IsRelayCapable ?? Observable.Return(false);
+            })
+            .Switch()
             .ToReactiveCommand<Unit>(_ => { });
         publish.AsObservable().SubscribeAwait(async (_, ct) => await ExecutePublishAsync(ct), AwaitOperation.Drop).AddTo(ref _bag);
         PublishKeysCommand = publish.AddTo(ref _bag);
