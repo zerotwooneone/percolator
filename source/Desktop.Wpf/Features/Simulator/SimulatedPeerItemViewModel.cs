@@ -63,35 +63,36 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
             .ToBindableReactiveProperty(_model.PeerId.ToString()[..8])
             .AddTo(ref _bag);
 
-        RuntimeStateText = _model.RuntimeState
-            .Select(state => state.PendingCorrelationId is null
-                ? state.UiState.ToString()
-                : $"{state.UiState} ({state.PendingCorrelationId.Value.ToString()[..8]})")
-            .ToBindableReactiveProperty(_model.RuntimeState.CurrentValue.UiState.ToString())
+        RuntimeStateText = Observable
+            .CombineLatest(_model.UiState, _model.PendingCorrelationId, static (s, corr) => (s, corr))
+            .Select(t => t.corr is null
+                ? t.s.ToString()
+                : $"{t.s} ({t.corr.Value.ToString()[..8]})")
+            .ToBindableReactiveProperty(_model.UiState.CurrentValue.ToString())
             .AddTo(ref _bag);
 
-        ShowMarkOutboundPending = _model.RuntimeState
-            .Select(s => s.UiState != SimulatorPeerUiState.OutboundPending)
+        ShowMarkOutboundPending = _model.UiState
+            .Select(s => s != SimulatorPeerUiState.OutboundPending)
             .ToBindableReactiveProperty(true)
             .AddTo(ref _bag);
 
-        ShowMarkInboundPending = _model.RuntimeState
-            .Select(s => s.UiState != SimulatorPeerUiState.InboundPending)
+        ShowMarkInboundPending = _model.UiState
+            .Select(s => s != SimulatorPeerUiState.InboundPending)
             .ToBindableReactiveProperty(true)
             .AddTo(ref _bag);
 
-        ShowMarkEstablished = _model.RuntimeState
-            .Select(s => s.UiState != SimulatorPeerUiState.Established)
+        ShowMarkEstablished = _model.UiState
+            .Select(s => s != SimulatorPeerUiState.Established)
             .ToBindableReactiveProperty(true)
             .AddTo(ref _bag);
 
-        ShowAcceptRejectInboundPending = _model.RuntimeState
-            .Select(s => s.UiState == SimulatorPeerUiState.InboundPending)
+        ShowAcceptRejectInboundPending = _model.UiState
+            .Select(s => s == SimulatorPeerUiState.InboundPending)
             .ToBindableReactiveProperty(false)
             .AddTo(ref _bag);
 
-        ShowClearRuntimeState = _model.RuntimeState
-            .Select(s => s.UiState != SimulatorPeerUiState.Ready)
+        ShowClearRuntimeState = _model.UiState
+            .Select(s => s != SimulatorPeerUiState.Ready)
             .ToBindableReactiveProperty(true)
             .AddTo(ref _bag);
 
@@ -229,7 +230,7 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
 
     private async Task ExecuteAcceptInboundPendingAsync(System.Threading.CancellationToken ct)
     {
-        var corr = _model.RuntimeState.CurrentValue.PendingCorrelationId;
+        var corr = _model.PendingCorrelationId.CurrentValue;
         if (corr is null) return;
 
         if (_active.Identity is null)
@@ -255,7 +256,7 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
 
     private void ExecuteRejectInboundPending()
     {
-        var corr = _model.RuntimeState.CurrentValue.PendingCorrelationId;
+        var corr = _model.PendingCorrelationId.CurrentValue;
         if (corr is null) return;
 
         _ = _pending.TryTakeInviteHandshakeResponse(_model.PeerId, corr.Value, out _);
@@ -328,11 +329,10 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
 
     private bool HasActiveSessionToHost(Guid relayHostPeerId)
     {
-        var host = _state.Peers.FirstOrDefault(p => p.PeerId == relayHostPeerId);
+        var host = _state.TryGetPeerSnapshot(relayHostPeerId);
         if (host is null) return false;
-        if (host.Relay is null || !host.Relay.IsRelayCapable) return false;
-        if (host.Relay.ActiveSessionsPeerIds is null) return false;
-        return host.Relay.ActiveSessionsPeerIds.Contains(_model.PeerId);
+        if (!host.IsRelayCapable) return false;
+        return host.RelayActiveSessionsPeerIds.Contains(_model.PeerId);
     }
 
     private async Task ExecuteRelayForwardToMainAsync(System.Threading.CancellationToken ct)
@@ -457,7 +457,7 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
             return;
         }
 
-        var notUntil = _model.RuntimeState.CurrentValue.NotUntilUtc;
+        var notUntil = _model.NotUntilUtc.CurrentValue;
         if (notUntil.HasValue && notUntil.Value > DateTimeOffset.UtcNow)
         {
             return;

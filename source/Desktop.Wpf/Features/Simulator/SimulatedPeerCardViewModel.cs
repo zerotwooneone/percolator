@@ -17,6 +17,7 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
     private readonly ISimulatorDiagnosticsService _diagnostics;
     private readonly Func<Guid, string> _resolvePeerName;
     private readonly Action _relationshipsChanged;
+    private readonly Subject<Unit> _saveRequested;
     private DisposableBag _bag;
     private bool _disposed;
 
@@ -35,6 +36,12 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
         _resolvePeerName = resolvePeerName;
         _relationshipsChanged = relationshipsChanged;
 
+        _saveRequested = new Subject<Unit>();
+        _saveRequested
+            .Debounce(TimeSpan.FromMilliseconds(200))
+            .SubscribeAwait(async (_, ct) => await PersistAsync(ct).ConfigureAwait(false), AwaitOperation.Drop)
+            .AddTo(ref _bag);
+
         DisplayName = _model.DisplayName
             .Select(n => string.IsNullOrWhiteSpace(n) ? _model.PeerId.ToString()[..8] : n!)
             .ToBindableReactiveProperty(_model.PeerId.ToString()[..8])
@@ -46,7 +53,11 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
 
         IsOnline
             .DistinctUntilChanged()
-            .Subscribe(isOnline => _model.SetOnline(isOnline))
+            .Subscribe(isOnline =>
+            {
+                _model.SetOnline(isOnline);
+                _saveRequested.OnNext(Unit.Default);
+            })
             .AddTo(ref _bag);
 
         IsRelayCapable = _model.IsRelayCapable
@@ -55,7 +66,11 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
 
         IsRelayCapable
             .DistinctUntilChanged()
-            .Subscribe(isRelay => _model.SetRelayCapable(isRelay))
+            .Subscribe(isRelay =>
+            {
+                _model.SetRelayCapable(isRelay);
+                _saveRequested.OnNext(Unit.Default);
+            })
             .AddTo(ref _bag);
 
         PublicKeyHashHex = new BindableReactiveProperty<string>(string.Empty).AddTo(ref _bag);
@@ -82,15 +97,21 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
         PublishTargetPeerId = new BindableReactiveProperty<Guid?>(null).AddTo(ref _bag);
 
         var toggleOnline = Observable.Return(true).ToReactiveCommand<Unit>(_ => { });
-        toggleOnline.AsObservable().Subscribe(_ => _model.SetOnline(!_model.IsOnline.CurrentValue)).AddTo(ref _bag);
+        toggleOnline.AsObservable().Subscribe(_ => IsOnline.Value = !IsOnline.Value).AddTo(ref _bag);
         ToggleOnlineCommand = toggleOnline.AddTo(ref _bag);
 
         var togglePower = Observable.Return(true).ToReactiveCommand<Unit>(_ => { });
-        togglePower.AsObservable().Subscribe(_ => _model.SetOnline(!_model.IsOnline.CurrentValue)).AddTo(ref _bag);
+        togglePower.AsObservable().Subscribe(_ => IsOnline.Value = !IsOnline.Value).AddTo(ref _bag);
         TogglePowerCommand = togglePower.AddTo(ref _bag);
 
         var toggleRelay = Observable.Return(true).ToReactiveCommand<Unit>(_ => { });
-        toggleRelay.AsObservable().Subscribe(_ => _model.SetRelayCapable(!_model.IsRelayCapable.CurrentValue)).AddTo(ref _bag);
+        toggleRelay.AsObservable()
+            .Subscribe(_ =>
+            {
+                _model.SetRelayCapable(!_model.IsRelayCapable.CurrentValue);
+                _saveRequested.OnNext(Unit.Default);
+            })
+            .AddTo(ref _bag);
         ToggleRelayCapableCommand = toggleRelay.AddTo(ref _bag);
 
         var copy = Observable.Return(true).ToReactiveCommand<Unit>(_ => { });
@@ -117,6 +138,18 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
         AvailablePublishTargets = new ObservableCollection<PublishTargetOption>();
 
         _ = InitializeAsync();
+    }
+
+    private async Task PersistAsync(CancellationToken ct)
+    {
+        try
+        {
+            await _state.SetOnlineAsync(_model.PeerId, _model.IsOnline.CurrentValue, ct).ConfigureAwait(false);
+            await _state.SetRelayCapableAsync(_model.PeerId, _model.IsRelayCapable.CurrentValue, ct).ConfigureAwait(false);
+        }
+        catch
+        {
+        }
     }
 
     public Guid PeerId => _model.PeerId;
@@ -291,23 +324,23 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
 
     private string? TryResolveEndpoint()
     {
-        var dto = _state.Peers.FirstOrDefault(p => p.PeerId == _model.PeerId);
-        if (dto is null) return null;
-        if (string.IsNullOrWhiteSpace(dto.Connection?.Host) || dto.Connection.Port <= 0) return null;
-        return $"{dto.Connection.Host}:{dto.Connection.Port}";
+        var snap = _state.TryGetPeerSnapshot(_model.PeerId);
+        if (snap is null) return null;
+        if (string.IsNullOrWhiteSpace(snap.Host) || snap.Port <= 0) return null;
+        return $"{snap.Host}:{snap.Port}";
     }
 
     private (string host, int port) TryResolveEndpointParts()
     {
-        var dto = _state.Peers.FirstOrDefault(p => p.PeerId == _model.PeerId);
-        if (dto is null
-            || string.IsNullOrWhiteSpace(dto.Connection?.Host)
-            || dto.Connection.Port <= 0)
+        var snap = _state.TryGetPeerSnapshot(_model.PeerId);
+        if (snap is null
+            || string.IsNullOrWhiteSpace(snap.Host)
+            || snap.Port <= 0)
         {
             return (AllocateSimulatorLoopbackHost(_model.PeerId), 5002);
         }
 
-        return (dto.Connection.Host, dto.Connection.Port);
+        return (snap.Host, snap.Port);
     }
 
     private static string AllocateSimulatorLoopbackHost(Guid peerId)
@@ -352,14 +385,13 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
 
     private bool HasActiveSessionToHost(Guid relayHostPeerId)
     {
-        var host = _state.Peers.FirstOrDefault(p => p.PeerId == relayHostPeerId);
+        var host = _state.TryGetPeerSnapshot(relayHostPeerId);
         if (host is null) return false;
-        if (host.Relay is null || !host.Relay.IsRelayCapable) return false;
-        if (host.Relay.ActiveSessionsPeerIds is null) return false;
-        return host.Relay.ActiveSessionsPeerIds.Contains(_model.PeerId);
+        if (!host.IsRelayCapable) return false;
+        return host.RelayActiveSessionsPeerIds.Contains(_model.PeerId);
     }
 
-    internal void RebuildRelationshipTags(SimulatedPeerDto dto, ReadOnlyObservableCollection<SimulatedPeerDto> allPeers)
+    internal void RebuildRelationshipTags(SimulatedPeerSnapshot dto, IReadOnlyList<SimulatedPeerSnapshot> allPeers)
     {
         PublishedToTags.Clear();
         HostingForTags.Clear();
@@ -370,7 +402,6 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
             AvailablePublishTargets.Add(new PublishTargetOption(p.PeerId, _resolvePeerName(p.PeerId)));
         }
 
-        dto.PublishedKeysToPeerIds ??= new();
         foreach (var hostId in dto.PublishedKeysToPeerIds.Distinct().Where(x => x != PeerId))
         {
             var display = _resolvePeerName(hostId);
@@ -387,7 +418,7 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
         foreach (var publisher in allPeers)
         {
             if (publisher.PeerId == PeerId) continue;
-            if (publisher.PublishedKeysToPeerIds?.Contains(PeerId) != true) continue;
+            if (!publisher.PublishedKeysToPeerIds.Contains(PeerId)) continue;
 
             var display = _resolvePeerName(publisher.PeerId);
             HostingForTags.Add(new RelationshipTagViewModel(
@@ -403,7 +434,17 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
 
     public void Dispose()
     {
+        if (_disposed) return;
         _disposed = true;
+        Disposable.Dispose(CopyOobInviteTokenCommand);
+        Disposable.Dispose(CopyEndpointCommand);
+        Disposable.Dispose(PublishKeysCommand);
+
+        _saveRequested.Dispose();
+
+        foreach (var t in PublishedToTags.ToArray()) t.Dispose();
+        foreach (var t in HostingForTags.ToArray()) t.Dispose();
+
         _bag.Dispose();
         DisplayName.Dispose();
         IsOnline.Dispose();
@@ -414,7 +455,7 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
         OneTimeKeyCount.Dispose();
     }
 
-    public sealed class RelationshipTagViewModel
+    public sealed class RelationshipTagViewModel : IDisposable
     {
         private readonly Func<CancellationToken, Task> _remove;
 
@@ -434,6 +475,9 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
         public string Display { get; }
 
         public ReactiveCommand<Unit> RemoveCommand { get; }
+
+        public void Dispose()
+            => Disposable.Dispose(RemoveCommand);
     }
 
     public sealed class PublishTargetOption

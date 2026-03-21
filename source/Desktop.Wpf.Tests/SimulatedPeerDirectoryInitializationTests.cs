@@ -1,8 +1,10 @@
 using System;
 using System.Collections.ObjectModel;
+using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
 using Desktop.Wpf.Features.Simulator;
+using Desktop.Wpf.Shared.Models;
 using FluentAssertions;
 using Moq;
 using NUnit.Framework;
@@ -13,32 +15,29 @@ namespace Desktop.Wpf.Tests;
 public sealed class SimulatedPeerDirectoryInitializationTests
 {
     [Test]
-    public async Task InitializeAsync_CoalescesConcurrentCalls_AndBuildsModelsFromDtos()
+    public async Task InitializeAsync_CoalescesConcurrentCalls_AndProjectsModelsFromState()
     {
         // Arrange
-        var dto = new SimulatedPeerDto
-        {
-            PeerId = Guid.NewGuid(),
-            DisplayName = "Alice",
-            IsOnline = true,
-            Relay = new SimulatedPeerRelayStateDto { IsRelayCapable = true },
-            ReverseSignalKeys = new SimulatedPeerReverseSignalKeysDto
-            {
-                IdentitySigningKeySpki = new byte[] { 1, 2, 3 },
-                IdentitySigningKeyPrivateKeyEcPrivateKey = new byte[] { 4, 5, 6 }
-            }
-        };
+        var peerId = Guid.NewGuid();
+        using var ecdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        var priv = ecdh.ExportECPrivateKey();
+        var spki = ecdh.PublicKey.ExportSubjectPublicKeyInfo();
+        var model = new SimulatedPeerModel(peerId, "Alice", isOnline: true, isRelayCapable: true, spki, priv);
 
-        var peers = new ObservableCollection<SimulatedPeerDto> { dto };
+        var peers = new ModelList<SimulatedPeerModel>();
+        peers.Reset(new[] { model });
         var state = new Mock<ISimulatorStateService>(MockBehavior.Strict);
 
         var initGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var initCalls = 0;
         state.SetupGet(s => s.Peers)
-            .Returns(new ReadOnlyObservableCollection<SimulatedPeerDto>(peers));
+            .Returns(peers);
         state.Setup(s => s.InitializeAsync(It.IsAny<CancellationToken>()))
             .Callback(() => Interlocked.Increment(ref initCalls))
             .Returns(initGate.Task);
+
+        state.Setup(s => s.TryGetPeerSnapshot(It.IsAny<Guid>())).Returns((SimulatedPeerSnapshot?)null);
+        state.Setup(s => s.SnapshotPeers()).Returns(Array.Empty<SimulatedPeerSnapshot>());
 
         state.Setup(s => s.TryGetPeerIdByIdentityPkhAsync(It.IsAny<byte[]>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Guid?)null);
@@ -67,7 +66,7 @@ public sealed class SimulatedPeerDirectoryInitializationTests
         // Assert
         initCalls.Should().Be(1);
         sut.Peers.Should().HaveCount(1);
-        sut.Peers[0].PeerId.Should().Be(dto.PeerId);
+        sut.Peers[0].PeerId.Should().Be(peerId);
         sut.Peers[0].DisplayName.CurrentValue.Should().Be("Alice");
         sut.Peers[0].IsRelayCapable.CurrentValue.Should().BeTrue();
     }

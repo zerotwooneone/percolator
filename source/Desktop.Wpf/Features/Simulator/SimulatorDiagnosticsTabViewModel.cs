@@ -154,7 +154,7 @@ public sealed class SimulatorDiagnosticsTabViewModel : IDisposable
     private DisposableBag _bag;
 
     private NotifyCollectionChangedEventHandler? _diagnosticsChangedHandler;
-    private NotifyCollectionChangedEventHandler? _peersChangedHandler;
+    private IDisposable? _peersChangesSub;
 
     public SimulatorDiagnosticsTabViewModel(ISimulatorDiagnosticsService diagnostics, ISimulatorStateService state)
     {
@@ -187,8 +187,8 @@ public sealed class SimulatorDiagnosticsTabViewModel : IDisposable
         SelectedRelayHostPeerId.Skip(1).Subscribe(_ => _rebuildRequests.OnNext(Unit.Default)).AddTo(ref _bag);
         SelectedEventType.Skip(1).Subscribe(_ => _rebuildRequests.OnNext(Unit.Default)).AddTo(ref _bag);
 
-        _peersChangedHandler = (_, __) => RefreshFilterOptions();
-        ((INotifyCollectionChanged)_state.Peers).CollectionChanged += _peersChangedHandler;
+        _peersChangesSub = _state.Peers.Changes
+            .Subscribe(_ => RefreshFilterOptions());
 
         RefreshFilterOptions();
         _rebuildRequests.OnNext(Unit.Default);
@@ -225,7 +225,7 @@ public sealed class SimulatorDiagnosticsTabViewModel : IDisposable
 
     private void RefreshFilterOptions()
     {
-        var peers = _state.Peers
+        var peers = _state.SnapshotPeers()
             .Select(p => new SimulatorFilterOption<Guid?>(p.PeerId, string.IsNullOrWhiteSpace(p.DisplayName) ? p.PeerId.ToString()[..8] : p.DisplayName!))
             .OrderBy(p => p.Display)
             .ToList();
@@ -233,8 +233,8 @@ public sealed class SimulatorDiagnosticsTabViewModel : IDisposable
         peers.Insert(0, new SimulatorFilterOption<Guid?>(null, "All"));
         PeerFilterOptions.Value = peers;
 
-        var relays = _state.Peers
-            .Where(p => p.Relay?.IsRelayCapable == true)
+        var relays = _state.SnapshotPeers()
+            .Where(p => p.IsRelayCapable)
             .Select(p => new SimulatorFilterOption<Guid?>(p.PeerId, string.IsNullOrWhiteSpace(p.DisplayName) ? p.PeerId.ToString()[..8] : p.DisplayName!))
             .OrderBy(p => p.Display)
             .ToList();
@@ -303,16 +303,8 @@ public sealed class SimulatorDiagnosticsTabViewModel : IDisposable
         {
         }
 
-        try
-        {
-            if (_peersChangedHandler is not null)
-            {
-                ((INotifyCollectionChanged)_state.Peers).CollectionChanged -= _peersChangedHandler;
-            }
-        }
-        catch
-        {
-        }
+        try { _peersChangesSub?.Dispose(); } catch { }
+        _peersChangesSub = null;
 
         _bag.Dispose();
     }

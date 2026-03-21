@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Windows;
+using Desktop.Wpf.Shared.Models;
 using R3;
 
 namespace Desktop.Wpf.Features.Simulator;
@@ -25,6 +26,8 @@ public sealed class SimulatedPeerDirectory : ISimulatedPeerDirectory
     public ReadOnlyObservableCollection<SimulatedPeerModel> Peers { get; }
 
     private readonly Dictionary<Guid, SimulatedPeerModel> _byId = new();
+
+    private IDisposable? _changesSub;
 
     public SimulatedPeerDirectory(ISimulatorStateService state)
     {
@@ -57,31 +60,17 @@ public sealed class SimulatedPeerDirectory : ISimulatedPeerDirectory
             // WPF collection + models must be mutated on UI thread.
             await InvokeOnUiAsync(() =>
             {
-                foreach (var existing in _peers.ToArray())
-                {
-                    existing.Dispose();
-                }
-
                 _peers.Clear();
                 _byId.Clear();
 
-                foreach (var dto in _state.Peers)
+                foreach (var model in _state.Peers.GetSnapshot())
                 {
-                    var model = new SimulatedPeerModel(
-                        dto.PeerId,
-                        dto.DisplayName,
-                        dto.IsOnline,
-                        dto.Relay.IsRelayCapable,
-                        dto.ReverseSignalKeys.IdentitySigningKeySpki,
-                        dto.ReverseSignalKeys.IdentitySigningKeyPrivateKeyEcPrivateKey,
-                        dto.RuntimeState);
-
                     _peers.Add(model);
                     _byId[model.PeerId] = model;
-
-                    WirePersistence(model);
                 }
             }).ConfigureAwait(false);
+
+            HookChanges();
         }
         finally
         {
@@ -92,42 +81,82 @@ public sealed class SimulatedPeerDirectory : ISimulatedPeerDirectory
         }
     }
 
+    private void HookChanges()
+    {
+        _changesSub?.Dispose();
+        _changesSub = _state.Peers.Changes
+            .Subscribe(change =>
+            {
+                _ = InvokeOnUiAsync(() => ApplyChange(change));
+            });
+    }
+
+    private void ApplyChange(StoreListChange<SimulatedPeerModel> change)
+    {
+        if (change.Kind is StoreListChangeKind.Reset)
+        {
+            _peers.Clear();
+            _byId.Clear();
+            foreach (var m in change.Items)
+            {
+                _peers.Add(m);
+                _byId[m.PeerId] = m;
+            }
+            return;
+        }
+
+        if (change.Kind is StoreListChangeKind.Add)
+        {
+            foreach (var m in change.Items)
+            {
+                _peers.Add(m);
+                _byId[m.PeerId] = m;
+            }
+            return;
+        }
+
+        if (change.Kind is StoreListChangeKind.Remove)
+        {
+            foreach (var m in change.Items)
+            {
+                if (_byId.Remove(m.PeerId))
+                {
+                    _ = _peers.Remove(m);
+                }
+            }
+            return;
+        }
+
+        if (change.Kind is StoreListChangeKind.Replace)
+        {
+            // Models should be stable; replace should be rare. Best-effort.
+            foreach (var m in change.Items)
+            {
+                if (_byId.TryGetValue(m.PeerId, out var existing))
+                {
+                    var idx = _peers.IndexOf(existing);
+                    if (idx >= 0) _peers[idx] = m;
+                    _byId[m.PeerId] = m;
+                }
+                else
+                {
+                    _peers.Add(m);
+                    _byId[m.PeerId] = m;
+                }
+            }
+        }
+    }
+
     public async Task<SimulatedPeerModel> AddPeerAsync(string? displayName, CancellationToken ct = default)
     {
-        var peerId = await _state.AddPeerAsync(displayName, ct);
-
-        var dto = _state.Peers.FirstOrDefault(p => p.PeerId == peerId);
-        var model = new SimulatedPeerModel(
-            peerId,
-            dto?.DisplayName ?? displayName,
-            dto?.IsOnline ?? true,
-            dto?.Relay.IsRelayCapable ?? false,
-            dto?.ReverseSignalKeys.IdentitySigningKeySpki ?? Array.Empty<byte>(),
-            dto?.ReverseSignalKeys.IdentitySigningKeyPrivateKeyEcPrivateKey ?? Array.Empty<byte>(),
-            dto?.RuntimeState);
-
-        await InvokeOnUiAsync(() =>
-        {
-            _peers.Add(model);
-            _byId[peerId] = model;
-            WirePersistence(model);
-        }).ConfigureAwait(false);
-
+        var peerId = await _state.AddPeerAsync(displayName, ct).ConfigureAwait(false);
+        var model = _state.Peers.GetSnapshot().FirstOrDefault(x => x.PeerId == peerId);
+        if (model is null) throw new InvalidOperationException("Peer was created but no model was published.");
         return model;
     }
 
     public async Task RemovePeerAsync(Guid peerId, CancellationToken ct = default)
     {
-        await InvokeOnUiAsync(() =>
-        {
-            if (_byId.TryGetValue(peerId, out var model))
-            {
-                _byId.Remove(peerId);
-                _peers.Remove(model);
-                model.Dispose();
-            }
-        }).ConfigureAwait(false);
-
         await _state.RemovePeerAsync(peerId, ct).ConfigureAwait(false);
     }
 
@@ -143,44 +172,10 @@ public sealed class SimulatedPeerDirectory : ISimulatedPeerDirectory
         return dispatcher.InvokeAsync(action).Task;
     }
 
-    private void WirePersistence(SimulatedPeerModel model)
-    {
-        var d1 = model.DisplayName
-            .DistinctUntilChanged()
-            .SubscribeAwait(async (name, ct) =>
-                await _state.UpdateDisplayNameAsync(model.PeerId, name, ct),
-                AwaitOperation.Drop);
-
-        var d2 = model.IsOnline
-            .DistinctUntilChanged()
-            .SubscribeAwait(async (isOnline, ct) =>
-                await _state.SetOnlineAsync(model.PeerId, isOnline, ct),
-                AwaitOperation.Drop);
-
-        var d3 = model.IsRelayCapable
-            .DistinctUntilChanged()
-            .SubscribeAwait(async (isRelayCapable, ct) =>
-                await _state.SetRelayCapableAsync(model.PeerId, isRelayCapable, ct),
-                AwaitOperation.Drop);
-
-        var d4 = model.RuntimeState
-            .DistinctUntilChanged()
-            .SubscribeAwait(async (runtimeState, ct) =>
-                    await _state.SetRuntimeStateAsync(model.PeerId, runtimeState, ct),
-                AwaitOperation.Drop);
-
-        model.Track(d1);
-        model.Track(d2);
-        model.Track(d3);
-        model.Track(d4);
-    }
-
     public void Dispose()
     {
-        foreach (var p in _peers)
-        {
-            p.Dispose();
-        }
+        _changesSub?.Dispose();
+        _changesSub = null;
 
         _peers.Clear();
         _byId.Clear();

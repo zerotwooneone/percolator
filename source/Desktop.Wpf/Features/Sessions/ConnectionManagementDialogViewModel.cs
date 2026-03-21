@@ -14,7 +14,6 @@ using Percolator.Cryptography;
 using Percolator.Identity;
 using Percolator.Identity.Model;
 using Percolator.Network;
-using Desktop.Wpf.Features.Simulator;
 using Desktop.Wpf.Features.Sessions.State;
 using Grpc.Core;
 using Percolator.Application.Services;
@@ -86,7 +85,6 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
     private readonly IMessageTransportService _transport;
     private readonly ISecureMessagingService _secureMessaging;
     private readonly IDirectSessionRepository _directSessions;
-    private readonly ISimulatorStateService _simulatorState;
     private readonly ActiveIdentityContext _active;
     private readonly IPeerIdentityRepository _peerIdentities;
     private readonly IEstablishDirectSessionService _establishDirectSession;
@@ -143,7 +141,6 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
         IMessageTransportService transport,
         ISecureMessagingService secureMessaging,
         IDirectSessionRepository directSessions,
-        ISimulatorStateService simulatorState,
         ActiveIdentityContext active,
         IPeerIdentityRepository peerIdentities,
         IEstablishDirectSessionService establishDirectSession,
@@ -162,7 +159,6 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
         _transport = transport;
         _secureMessaging = secureMessaging;
         _directSessions = directSessions;
-        _simulatorState = simulatorState;
         _active = active;
         _peerIdentities = peerIdentities;
         _establishDirectSession = establishDirectSession;
@@ -215,6 +211,11 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
     {
         // Relay host options are derived from DirectSessions, which may change after a handshake completes.
         // Refresh while the dialog is open so the Relay dropdown stays up-to-date.
+        QueueRelayHostRefresh();
+    }
+
+    private void QueueRelayHostRefresh()
+    {
         lock (_relayHostRefreshLock)
         {
             if (_relayHostRefreshQueued) return;
@@ -360,7 +361,6 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
 
     private async Task InitializeAsync(CancellationToken ct = default)
     {
-        await _simulatorState.InitializeAsync(ct).ConfigureAwait(false);
         await InvokeOnUiAsync(InitializeRouteModeOptions).ConfigureAwait(false);
         await RefreshRelayHostOptionsAsync(ct).ConfigureAwait(false);
 

@@ -7,6 +7,7 @@ using System.Runtime.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
 using Desktop.Wpf.Features.Simulator;
+using Desktop.Wpf.Shared.Models;
 using FluentAssertions;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
@@ -54,7 +55,7 @@ public sealed class SimulatedPeerRuntimeFinalizeRelayedTests
         private readonly ConcurrentDictionary<Guid, SimulatedPeerRuntimeStoreDto> _runtimeByPeerId = new();
         private readonly ConcurrentDictionary<(Guid RelayHost, string PkhB64), Queue<PublishedPreKeyBundleDto>> _preKeyBundles = new();
 
-        public ReadOnlyObservableCollection<SimulatedPeerDto> Peers { get; } = new(new ObservableCollection<SimulatedPeerDto>());
+        public IReadOnlyModelList<SimulatedPeerModel> Peers { get; } = new ModelList<SimulatedPeerModel>();
 
         public Task InitializeAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
         public Task<Guid> AddPeerAsync(string? displayName, CancellationToken cancellationToken = default) => throw new NotImplementedException();
@@ -65,18 +66,16 @@ public sealed class SimulatedPeerRuntimeFinalizeRelayedTests
         public Task SetOnlineAsync(Guid peerId, bool isOnline, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task SetRelayCapableAsync(Guid peerId, bool isRelayCapable, CancellationToken cancellationToken = default) => throw new NotImplementedException();
 
-        public Task SetRuntimeStateAsync(Guid peerId, SimulatorPeerRuntimeState runtimeState, CancellationToken cancellationToken = default)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            return Task.CompletedTask;
-        }
-
         public Task<Guid?> TryGetPeerIdByIdentityPkhAsync(byte[] recipientPublicKeyHash, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (recipientPublicKeyHash is null) throw new ArgumentNullException(nameof(recipientPublicKeyHash));
             return Task.FromResult<Guid?>(null);
         }
+
+        public SimulatedPeerSnapshot? TryGetPeerSnapshot(Guid peerId) => null;
+
+        public IReadOnlyList<SimulatedPeerSnapshot> SnapshotPeers() => Array.Empty<SimulatedPeerSnapshot>();
 
         public Task EnqueueRelayOpaqueAsync(Guid relayHostPeerId, byte[] recipientRoutingKey, byte[] opaqueBytes, string? debugType = null, CancellationToken cancellationToken = default)
         {

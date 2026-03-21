@@ -27,7 +27,18 @@ public sealed class SimulatedPeerDto
     public List<Guid> PublishedKeysToPeerIds { get; set; } = new();
     public SimulatedPeerPreKeyStateDto PreKeys { get; set; } = new();
     public SimulatedPeerRuntimeStoreDto RuntimeStore { get; set; } = new();
-    public SimulatorPeerRuntimeState RuntimeState { get; set; } = new();
+
+    public SimulatorPeerUiState UiState { get; set; } = SimulatorPeerUiState.Ready;
+    public Guid? PendingCorrelationId { get; set; }
+    public byte[]? TargetPublicKeyHash { get; set; }
+    public ConnectionMode? SelectedRouteMode { get; set; }
+    public string? DirectEndpoint { get; set; }
+    public Guid? RelayHostPeerId { get; set; }
+    public string? Phase { get; set; }
+    public DateTimeOffset? NotUntilUtc { get; set; }
+    public string? LastError { get; set; }
+    public List<SimulatorHandshakeAttemptState> HandshakeAttempts { get; set; } = new();
+
     public SimulatedPeerRelayStateDto Relay { get; set; } = new();
     public SimulatedPeerReverseSignalKeysDto ReverseSignalKeys { get; set; } = new();
 }

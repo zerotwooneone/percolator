@@ -1,9 +1,12 @@
 using System;
 using System.Collections.ObjectModel;
+using System.Linq;
+using System.Security.Cryptography;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Desktop.Wpf.Features.Simulator;
+using Desktop.Wpf.Shared.Models;
 using FluentAssertions;
 using Moq;
 using NUnit.Framework;
@@ -46,7 +49,21 @@ public sealed class SimulatorDiagnosticBundleBuilderTests
         };
 
         var state = new Mock<ISimulatorStateService>(MockBehavior.Strict);
-        state.SetupGet(s => s.Peers).Returns(new ReadOnlyObservableCollection<SimulatedPeerDto>(peers));
+
+        using var ecdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        var priv = ecdh.ExportECPrivateKey();
+        var spki = ecdh.PublicKey.ExportSubjectPublicKeyInfo();
+        var modelList = new ModelList<SimulatedPeerModel>();
+        modelList.Reset(new[]
+        {
+            new SimulatedPeerModel(relayHostId, "Relay", isOnline: true, isRelayCapable: true, spki, priv),
+            new SimulatedPeerModel(peerId, "Peer", isOnline: true, isRelayCapable: false, spki, priv)
+        });
+
+        state.SetupGet(s => s.Peers).Returns(modelList);
+        state.Setup(s => s.SnapshotPeers()).Returns(peers.Select(SimulatedPeerSnapshot.FromDto).ToList());
+        state.Setup(s => s.TryGetPeerSnapshot(It.IsAny<Guid>()))
+            .Returns<Guid>(id => peers.Where(p => p.PeerId == id).Select(SimulatedPeerSnapshot.FromDto).FirstOrDefault());
         state.Setup(s => s.TryGetRuntimeStoreAsync(relayHostId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SimulatedPeerRuntimeStoreDto
             {

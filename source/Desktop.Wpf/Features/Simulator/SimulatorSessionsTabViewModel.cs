@@ -82,7 +82,8 @@ public sealed class SimulatorSessionsTabViewModel : IDisposable
         ct.ThrowIfCancellationRequested();
 
         var mainPeerId = MainNodeSentinelPeerId;
-        var peers = _state.Peers.ToList();
+        var peers = _state.Peers.GetSnapshot();
+        var snapshots = _state.SnapshotPeers();
 
         var cards = new System.Collections.Generic.List<SimulatorSessionCardViewModel>();
         foreach (var p in peers)
@@ -97,7 +98,8 @@ public sealed class SimulatorSessionsTabViewModel : IDisposable
 
             if (session is null) continue;
 
-            cards.Add(CreateCard(p, session));
+            var snap = snapshots.FirstOrDefault(x => x.PeerId == p.PeerId);
+            cards.Add(CreateCard(p, snap, session));
         }
 
         var dispatcher = Application.Current?.Dispatcher;
@@ -123,9 +125,11 @@ public sealed class SimulatorSessionsTabViewModel : IDisposable
         }
     }
 
-    private SimulatorSessionCardViewModel CreateCard(SimulatedPeerDto peer, SimulatedSecureSessionDto session)
+    private SimulatorSessionCardViewModel CreateCard(SimulatedPeerModel peer, SimulatedPeerSnapshot? snapshot, SimulatedSecureSessionDto session)
     {
-        var name = !string.IsNullOrWhiteSpace(peer.DisplayName) ? peer.DisplayName! : peer.PeerId.ToString()[..8];
+        var name = !string.IsNullOrWhiteSpace(snapshot?.DisplayName)
+            ? snapshot!.DisplayName!
+            : (peer.DisplayName.CurrentValue is { } n && !string.IsNullOrWhiteSpace(n) ? n : peer.PeerId.ToString()[..8]);
         var rootHash = TruncateHex(session.RootKey);
 
         return new SimulatorSessionCardViewModel(

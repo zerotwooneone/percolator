@@ -45,10 +45,6 @@ public sealed class ConnectionManagementDialogRelayFetchInitiateTests
 
         var directSessions = new Mock<IDirectSessionRepository>(MockBehavior.Loose);
 
-        var simulatorState = new Mock<Desktop.Wpf.Features.Simulator.ISimulatorStateService>(MockBehavior.Loose);
-        simulatorState.Setup(x => x.InitializeAsync(It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
-
         var relayHostId = Guid.NewGuid();
         var directSessionId = DirectSessionId.NewId();
         directSessions.Setup(x => x.GetByRemotePeerIdAsync(It.IsAny<Percolator.Network.PeerId>(), It.IsAny<int>()))
@@ -161,7 +157,6 @@ public sealed class ConnectionManagementDialogRelayFetchInitiateTests
             transport.Object,
             secureMessaging.Object,
             directSessions.Object,
-            simulatorState.Object,
             active,
             peerIdentities.Object,
             establish.Object,

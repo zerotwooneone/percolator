@@ -12,7 +12,7 @@ public interface IPendingHandshakeSimulatorService
     Task<RequestCorrelationId> AddSyntheticPendingAsync(string? displayName = null, CancellationToken ct = default);
 
     Task<IReadOnlyList<RequestCorrelationId>> AddSyntheticPendingsAsync(int count, CancellationToken ct = default);
-    IReadOnlyList<SimulatedPeerSnapshot> SnapshotPeers();
+    IReadOnlyList<PendingSimulatedPeerSnapshot> SnapshotPeers();
     int CorrelateOutboundSnapshot();
 }
 
@@ -22,7 +22,7 @@ public enum SimulatedPeerState
     OutboundResponseObserved = 1
 }
 
-public sealed record SimulatedPeerSnapshot(
+public sealed record PendingSimulatedPeerSnapshot(
     RequestCorrelationId RequestCorrelationId,
     SimulatedPeerState State,
     string? DisplayName);
@@ -173,10 +173,10 @@ public sealed class PendingHandshakeSimulatorService : IPendingHandshakeSimulato
         return list;
     }
 
-    public IReadOnlyList<SimulatedPeerSnapshot> SnapshotPeers()
+    public IReadOnlyList<PendingSimulatedPeerSnapshot> SnapshotPeers()
     {
         return _peersByCorrelation.Values
-            .Select(p => new SimulatedPeerSnapshot(p.CorrelationId, p.State, p.DisplayName))
+            .Select(p => new PendingSimulatedPeerSnapshot(p.CorrelationId, p.State, p.DisplayName))
             .OrderByDescending(p => p.RequestCorrelationId.Value)
             .ToList();
     }

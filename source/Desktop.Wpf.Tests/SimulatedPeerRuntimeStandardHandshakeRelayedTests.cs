@@ -1,14 +1,20 @@
 using System;
+using System.Collections;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Collections.Specialized;
 using System.Security.Cryptography;
 using System.Runtime.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
 using Desktop.Wpf.Features.Simulator;
+using Desktop.Wpf.Shared.Models;
 using FluentAssertions;
 using Google.Protobuf;
+using Google.Protobuf.WellKnownTypes;
 using Moq;
 using NUnit.Framework;
+using Percolator.Application.Network;
 using Percolator.Contracts;
 using Percolator.Cryptography;
 using Percolator.Cryptography.Primitives;
@@ -94,8 +100,9 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
         };
 
         var state = new Mock<ISimulatorStateService>(MockBehavior.Strict);
-        state.SetupGet(s => s.Peers)
-            .Returns(new ReadOnlyObservableCollection<SimulatedPeerDto>(new ObservableCollection<SimulatedPeerDto>()));
+        state.SetupGet(s => s.Peers).Returns(new ModelList<SimulatedPeerModel>());
+        state.Setup(s => s.TryGetPeerSnapshot(It.IsAny<Guid>())).Returns((SimulatedPeerSnapshot?)null);
+        state.Setup(s => s.SnapshotPeers()).Returns(Array.Empty<SimulatedPeerSnapshot>());
         state.Setup(s => s.TryGetRuntimeStoreAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((SimulatedPeerRuntimeStoreDto?)null);
         state.Setup(s => s.SaveRuntimeStoreAsync(simulatedPeerId, It.IsAny<SimulatedPeerRuntimeStoreDto>(), It.IsAny<CancellationToken>()))
@@ -133,8 +140,9 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
         var pending = new SimulatedPeerPendingInbox();
 
         var state = new Mock<ISimulatorStateService>(MockBehavior.Strict);
-        state.SetupGet(s => s.Peers)
-            .Returns(new ReadOnlyObservableCollection<SimulatedPeerDto>(new ObservableCollection<SimulatedPeerDto>()));
+        state.SetupGet(s => s.Peers).Returns(new ModelList<SimulatedPeerModel>());
+        state.Setup(s => s.TryGetPeerSnapshot(It.IsAny<Guid>())).Returns((SimulatedPeerSnapshot?)null);
+        state.Setup(s => s.SnapshotPeers()).Returns(Array.Empty<SimulatedPeerSnapshot>());
         state.Setup(s => s.TryGetRuntimeStoreAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((SimulatedPeerRuntimeStoreDto?)null);
         state.Setup(s => s.SaveRuntimeStoreAsync(It.IsAny<Guid>(), It.IsAny<SimulatedPeerRuntimeStoreDto>(), It.IsAny<CancellationToken>()))
@@ -206,8 +214,9 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
         var preKeyBundleBytes = bundle.BundleBytes;
 
         var state = new Mock<ISimulatorStateService>(MockBehavior.Strict);
-        state.SetupGet(s => s.Peers)
-            .Returns(new ReadOnlyObservableCollection<SimulatedPeerDto>(new ObservableCollection<SimulatedPeerDto>()));
+        state.SetupGet(s => s.Peers).Returns(new ModelList<SimulatedPeerModel>());
+        state.Setup(s => s.TryGetPeerSnapshot(It.IsAny<Guid>())).Returns((SimulatedPeerSnapshot?)null);
+        state.Setup(s => s.SnapshotPeers()).Returns(Array.Empty<SimulatedPeerSnapshot>());
         state.Setup(s => s.TryGetRuntimeStoreAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((SimulatedPeerRuntimeStoreDto?)null);
         state.Setup(s => s.TryPopPreKeyBundleByRecipientPkhAsync(relayHostPeerId, responderPkh, It.IsAny<CancellationToken>()))
@@ -272,8 +281,9 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
         var bundleBytes = CreateValidResponderPreKeyBundle().BundleBytes;
 
         var state = new Mock<ISimulatorStateService>(MockBehavior.Strict);
-        state.SetupGet(s => s.Peers)
-            .Returns(new ReadOnlyObservableCollection<SimulatedPeerDto>(new ObservableCollection<SimulatedPeerDto>()));
+        state.SetupGet(s => s.Peers).Returns(new ModelList<SimulatedPeerModel>());
+        state.Setup(s => s.TryGetPeerSnapshot(It.IsAny<Guid>())).Returns((SimulatedPeerSnapshot?)null);
+        state.Setup(s => s.SnapshotPeers()).Returns(Array.Empty<SimulatedPeerSnapshot>());
         state.Setup(s => s.TryGetRuntimeStoreAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((SimulatedPeerRuntimeStoreDto?)null);
         state.Setup(s => s.TryPopPreKeyBundleByRecipientPkhAsync(relayHostPeerId, requestedResponderPkh, It.IsAny<CancellationToken>()))
@@ -390,8 +400,9 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
         };
 
         var state = new Mock<ISimulatorStateService>(MockBehavior.Strict);
-        state.SetupGet(s => s.Peers)
-            .Returns(new ReadOnlyObservableCollection<SimulatedPeerDto>(new ObservableCollection<SimulatedPeerDto>()));
+        state.SetupGet(s => s.Peers).Returns(new ModelList<SimulatedPeerModel>());
+        state.Setup(s => s.TryGetPeerSnapshot(It.IsAny<Guid>())).Returns((SimulatedPeerSnapshot?)null);
+        state.Setup(s => s.SnapshotPeers()).Returns(Array.Empty<SimulatedPeerSnapshot>());
         state.Setup(s => s.TryGetRuntimeStoreAsync(relayHostPeerId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(seededStore);
         state.Setup(s => s.SaveRuntimeStoreAsync(It.IsAny<Guid>(), It.IsAny<SimulatedPeerRuntimeStoreDto>(), It.IsAny<CancellationToken>()))
@@ -502,8 +513,9 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
         };
 
         var state = new Mock<ISimulatorStateService>(MockBehavior.Strict);
-        state.SetupGet(s => s.Peers)
-            .Returns(new ReadOnlyObservableCollection<SimulatedPeerDto>(new ObservableCollection<SimulatedPeerDto>()));
+        state.SetupGet(s => s.Peers).Returns(new ModelList<SimulatedPeerModel>());
+        state.Setup(s => s.TryGetPeerSnapshot(It.IsAny<Guid>())).Returns((SimulatedPeerSnapshot?)null);
+        state.Setup(s => s.SnapshotPeers()).Returns(Array.Empty<SimulatedPeerSnapshot>());
         state.Setup(s => s.TryGetRuntimeStoreAsync(relayHostPeerId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(seededStore);
         state.Setup(s => s.SaveRuntimeStoreAsync(It.IsAny<Guid>(), It.IsAny<SimulatedPeerRuntimeStoreDto>(), It.IsAny<CancellationToken>()))

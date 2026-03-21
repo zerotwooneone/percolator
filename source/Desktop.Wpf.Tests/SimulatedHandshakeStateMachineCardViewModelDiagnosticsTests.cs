@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using Desktop.Wpf.Features.Simulator;
+using Desktop.Wpf.Shared.Models;
 using FluentAssertions;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -47,18 +48,28 @@ public sealed class SimulatedHandshakeStateMachineCardViewModelDiagnosticsTests
 
         var relayHostId = Guid.NewGuid();
         var state = new Mock<ISimulatorStateService>(MockBehavior.Strict);
-        state.SetupGet(s => s.Peers).Returns(new ReadOnlyObservableCollection<SimulatedPeerDto>(
-            new ObservableCollection<SimulatedPeerDto>
-            {
-                new()
-                {
-                    PeerId = relayHostId,
-                    DisplayName = "relay",
-                    IsOnline = true,
-                    Relay = new SimulatedPeerRelayStateDto { IsRelayCapable = true },
-                    ReverseSignalKeys = new SimulatedPeerReverseSignalKeysDto()
-                }
-            }));
+
+        using var ecdh2 = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        var priv2 = ecdh2.ExportECPrivateKey();
+        var spki2 = ecdh2.PublicKey.ExportSubjectPublicKeyInfo();
+        var modelList = new ModelList<SimulatedPeerModel>();
+        modelList.Reset(new[]
+        {
+            new SimulatedPeerModel(relayHostId, "relay", isOnline: true, isRelayCapable: true, spki2, priv2)
+        });
+
+        var relayDto = new SimulatedPeerDto
+        {
+            PeerId = relayHostId,
+            DisplayName = "relay",
+            IsOnline = true,
+            Relay = new SimulatedPeerRelayStateDto { IsRelayCapable = true },
+            ReverseSignalKeys = new SimulatedPeerReverseSignalKeysDto()
+        };
+
+        state.SetupGet(s => s.Peers).Returns(modelList);
+        state.Setup(s => s.SnapshotPeers()).Returns(new[] { SimulatedPeerSnapshot.FromDto(relayDto) });
+        state.Setup(s => s.TryGetPeerSnapshot(relayHostId)).Returns(SimulatedPeerSnapshot.FromDto(relayDto));
         state.Setup(s => s.TryGetPeerIdByIdentityPkhAsync(It.IsAny<byte[]>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Guid?)null);
         state.Setup(s => s.AddRelayActiveSessionAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
@@ -139,8 +150,19 @@ public sealed class SimulatedHandshakeStateMachineCardViewModelDiagnosticsTests
             }
         };
 
+        using var ecdh2 = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        var priv2 = ecdh2.ExportECPrivateKey();
+        var spki2 = ecdh2.PublicKey.ExportSubjectPublicKeyInfo();
+        var modelList = new ModelList<SimulatedPeerModel>();
+        modelList.Reset(new[]
+        {
+            new SimulatedPeerModel(relayHostId, "relay", isOnline: true, isRelayCapable: true, spki2, priv2)
+        });
+
         var state = new Mock<ISimulatorStateService>(MockBehavior.Strict);
-        state.SetupGet(s => s.Peers).Returns(new ReadOnlyObservableCollection<SimulatedPeerDto>(peers));
+        state.SetupGet(s => s.Peers).Returns(modelList);
+        state.Setup(s => s.SnapshotPeers()).Returns(peers.Select(SimulatedPeerSnapshot.FromDto).ToList());
+        state.Setup(s => s.TryGetPeerSnapshot(relayHostId)).Returns(SimulatedPeerSnapshot.FromDto(peers[0]));
         state.Setup(s => s.TryGetPeerIdByIdentityPkhAsync(It.IsAny<byte[]>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Guid?)null);
         state.Setup(s => s.AddRelayActiveSessionAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
@@ -170,7 +192,7 @@ public sealed class SimulatedHandshakeStateMachineCardViewModelDiagnosticsTests
             await Application.Current.Dispatcher.InvokeAsync(() => { });
         }
 
-        var corr = model.RuntimeState.CurrentValue.PendingCorrelationId;
+        var corr = model.PendingCorrelationId.CurrentValue;
         corr.Should().NotBeNull();
         model.MarkInboundPending(corr!.Value);
 

@@ -43,10 +43,6 @@ public sealed class ConnectionManagementDialogImportTokenTests
         directSessions.Setup(x => x.ListAsync(It.IsAny<int>()))
             .ReturnsAsync(Array.Empty<DirectSession>());
 
-        var simulatorState = new Mock<Desktop.Wpf.Features.Simulator.ISimulatorStateService>(MockBehavior.Loose);
-        simulatorState.Setup(x => x.InitializeAsync(It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
-
         var active = new ActiveIdentityContext();
         active.SetActiveIdentity(new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "self"));
 
@@ -81,7 +77,6 @@ public sealed class ConnectionManagementDialogImportTokenTests
             transport.Object,
             secureMessaging.Object,
             directSessions.Object,
-            simulatorState.Object,
             active,
             peerIdentities.Object,
             establish.Object,
@@ -144,10 +139,6 @@ public sealed class ConnectionManagementDialogImportTokenTests
         directSessions.Setup(x => x.ListAsync(It.IsAny<int>()))
             .ReturnsAsync(Array.Empty<DirectSession>());
 
-        var simulatorState = new Mock<Desktop.Wpf.Features.Simulator.ISimulatorStateService>(MockBehavior.Loose);
-        simulatorState.Setup(x => x.InitializeAsync(It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
-
         var active = new ActiveIdentityContext();
         active.SetActiveIdentity(new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "self"));
 
@@ -172,7 +163,6 @@ public sealed class ConnectionManagementDialogImportTokenTests
             transport.Object,
             secureMessaging.Object,
             directSessions.Object,
-            simulatorState.Object,
             active,
             peerIdentities.Object,
             establish.Object,

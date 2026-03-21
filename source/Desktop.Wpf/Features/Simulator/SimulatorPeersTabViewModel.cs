@@ -164,11 +164,12 @@ public sealed class SimulatorPeersTabViewModel : IDisposable
             return;
         }
 
+        var snapshots = _state.SnapshotPeers();
         foreach (var card in _peerCards)
         {
-            var dto = _state.Peers.FirstOrDefault(p => p.PeerId == card.PeerId);
+            var dto = snapshots.FirstOrDefault(p => p.PeerId == card.PeerId);
             if (dto is null) continue;
-            card.RebuildRelationshipTags(dto, _state.Peers);
+            card.RebuildRelationshipTags(dto, snapshots);
         }
     }
 

@@ -189,7 +189,7 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
             ct.ThrowIfCancellationRequested();
 
             // State service is initialized by parent VM.
-            var peer = _state.Peers.FirstOrDefault(p => p.PeerId == _relayHostPeerId);
+            var peer = _state.TryGetPeerSnapshot(_relayHostPeerId);
             if (peer is null)
             {
                 _items.Clear();
@@ -198,7 +198,7 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
             }
 
             var mainPkh = _getMainIdentityPkh();
-            var ordered = peer.Relay.OpaqueQueue.Items.ToList();
+            var ordered = peer.RelayOpaqueQueueItems.ToList();
 
             _items.Clear();
             foreach (var i in ordered)
@@ -211,8 +211,8 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
             ActiveSessionTags.Clear();
             AvailableActiveSessionTargets.Clear();
 
-            var active = (peer.Relay.ActiveSessionsPeerIds ?? new List<Guid>()).Distinct().ToHashSet();
-            foreach (var other in _state.Peers.Where(p => p.PeerId != _relayHostPeerId))
+            var active = peer.RelayActiveSessionsPeerIds.Distinct().ToHashSet();
+            foreach (var other in _state.SnapshotPeers().Where(p => p.PeerId != _relayHostPeerId))
             {
                 AvailableActiveSessionTargets.Add(new ActiveSessionTargetOption(other.PeerId, _peerNameById(other.PeerId)));
             }

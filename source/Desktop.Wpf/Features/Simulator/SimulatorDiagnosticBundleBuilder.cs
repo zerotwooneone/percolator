@@ -22,26 +22,33 @@ public sealed class SimulatorDiagnosticBundleBuilder : ISimulatorDiagnosticBundl
     {
         ct.ThrowIfCancellationRequested();
 
-        var peers = _state.Peers
-            .Select(p => new
+        var peerModels = _state.Peers.GetSnapshot();
+        var peerSnapshots = _state.SnapshotPeers();
+
+        var peers = peerModels
+            .Select(p =>
             {
-                p.PeerId,
-                p.DisplayName,
-                p.IsOnline,
-                IsRelayCapable = p.Relay?.IsRelayCapable == true,
-                ConnectionMode = p.Connection?.Mode.ToString(),
-                RelayPeerId = p.Connection?.RelayPeerId
+                var snap = peerSnapshots.FirstOrDefault(x => x.PeerId == p.PeerId);
+                return new
+                {
+                    p.PeerId,
+                    DisplayName = snap?.DisplayName ?? p.DisplayName.CurrentValue,
+                    IsOnline = snap?.IsOnline ?? p.IsOnline.CurrentValue,
+                    IsRelayCapable = snap?.IsRelayCapable ?? p.IsRelayCapable.CurrentValue,
+                    ConnectionMode = (snap?.ConnectionMode ?? ConnectionMode.Direct).ToString(),
+                    RelayPeerId = snap?.RelayPeerId
+                };
             })
             .ToList();
 
-        var relayQueueSummary = _state.Peers
-            .Where(p => p.Relay?.IsRelayCapable == true)
+        var relayQueueSummary = peerSnapshots
+            .Where(p => p.IsRelayCapable)
             .Select(p => new
             {
                 RelayHostPeerId = p.PeerId,
-                RelayHostName = p.DisplayName,
-                OpaqueQueueCount = p.Relay?.OpaqueQueue?.Items?.Count ?? 0,
-                PreKeyBundleCount = p.Relay?.PreKeyStore?.PublishedBundles?.Count ?? 0
+                RelayHostName = string.IsNullOrWhiteSpace(p.DisplayName) ? p.PeerId.ToString()[..8] : p.DisplayName,
+                OpaqueQueueCount = p.RelayOpaqueQueueItems.Count,
+                PreKeyBundleCount = p.RelayPreKeyBundleCount
             })
             .ToList();
 
@@ -60,7 +67,7 @@ public sealed class SimulatorDiagnosticBundleBuilder : ISimulatorDiagnosticBundl
             .ToList();
 
         var sessionSummaries = new List<object>();
-        foreach (var p in _state.Peers)
+        foreach (var p in peerModels)
         {
             ct.ThrowIfCancellationRequested();
             var store = await _state.TryGetRuntimeStoreAsync(p.PeerId, ct).ConfigureAwait(false);

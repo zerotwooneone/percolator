@@ -438,10 +438,31 @@ public sealed class SimulatedPeerRuntimeService : ISimulatedPeerRuntimeService
         cancellationToken.ThrowIfCancellationRequested();
         if (message is null) throw new ArgumentNullException(nameof(message));
 
-        return WithRuntimeAsync(
-            simulatedPeerId,
-            runtime => runtime.DecryptSessionMessageAsync(sessionId, message, cancellationToken),
-            cancellationToken);
+        return DecryptSessionMessageCoreAsync(simulatedPeerId, sessionId, message, cancellationToken);
+    }
+
+    private async Task<Plaintext> DecryptSessionMessageCoreAsync(
+        Guid simulatedPeerId,
+        SessionId sessionId,
+        SessionRatchetMessage message,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await WithRuntimeAsync(
+                    simulatedPeerId,
+                    runtime => runtime.DecryptSessionMessageAsync(sessionId, message, cancellationToken),
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _diagnostics.Emit(
+                SimulatorDiagnosticEventType.DecryptFailure,
+                $"Decrypt failure: {ex.Message}",
+                peerId: simulatedPeerId);
+            throw;
+        }
     }
 
     public void RecordOutboundInviteSignedPreKeyPrivate(

@@ -51,38 +51,38 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
             .ToBindableReactiveProperty(_model.PeerId.ToString()[..8])
             .AddTo(ref _bag);
 
-        StateText = _model.RuntimeState
+        StateText = _model.UiState
             .Select(MapState)
             .ToBindableReactiveProperty("No Handshake")
             .AddTo(ref _bag);
 
-        StateBadgeText = _model.RuntimeState
+        StateBadgeText = _model.UiState
             .Select(s => $"STATE: {MapState(s).ToUpperInvariant()}" )
             .ToBindableReactiveProperty("STATE: NO HANDSHAKE")
             .AddTo(ref _bag);
 
-        StateBadgeBackground = _model.RuntimeState
+        StateBadgeBackground = _model.UiState
             .Select(MapBadgeBackground)
             .ToBindableReactiveProperty(Brushes.Transparent)
             .AddTo(ref _bag);
 
-        ShowSendRequest = _model.RuntimeState
-            .Select(s => s.UiState == SimulatorPeerUiState.Ready)
+        ShowSendRequest = _model.UiState
+            .Select(s => s == SimulatorPeerUiState.Ready)
             .ToBindableReactiveProperty(true)
             .AddTo(ref _bag);
 
-        ShowAccept = _model.RuntimeState
-            .Select(s => s.UiState == SimulatorPeerUiState.InboundPending)
+        ShowAccept = _model.UiState
+            .Select(s => s == SimulatorPeerUiState.InboundPending)
             .ToBindableReactiveProperty(false)
             .AddTo(ref _bag);
 
-        ShowForceExpire = _model.RuntimeState
-            .Select(s => s.UiState == SimulatorPeerUiState.OutboundPending)
+        ShowForceExpire = _model.UiState
+            .Select(s => s == SimulatorPeerUiState.OutboundPending)
             .ToBindableReactiveProperty(false)
             .AddTo(ref _bag);
 
-        ShowReset = _model.RuntimeState
-            .Select(s => s.UiState == SimulatorPeerUiState.Established || s.UiState == SimulatorPeerUiState.Expired)
+        ShowReset = _model.UiState
+            .Select(s => s == SimulatorPeerUiState.Established || s == SimulatorPeerUiState.Expired)
             .ToBindableReactiveProperty(false)
             .AddTo(ref _bag);
 
@@ -151,12 +151,9 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
 
         await InvokeOnUiAsync(() =>
         {
-            _model.SetRuntimeState(_model.RuntimeState.CurrentValue with
-            {
-                SelectedRouteMode = ConnectionMode.Direct,
-                RelayHostPeerId = null,
-                Phase = "InviteSent"
-            });
+            _model.SetSelectedRouteMode(ConnectionMode.Direct);
+            _model.SetRelayHostPeerId(null);
+            _model.SetPhase("InviteSent");
         }).ConfigureAwait(false);
 
         // Mark state as request sent (outbound pending) based on correlation id in payload.
@@ -235,7 +232,7 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
         }
         catch (Exception ex)
         {
-            var corr = _model.RuntimeState.CurrentValue.PendingCorrelationId;
+            var corr = _model.PendingCorrelationId.CurrentValue;
             if (corr is not null)
             {
                 await InvokeOnUiAsync(() =>
@@ -254,22 +251,19 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
 
         var relayHostPeerId = _selectedRelayHostPeerId();
         var relayHost = relayHostPeerId.HasValue
-            ? _state.Peers.FirstOrDefault(p => p.PeerId == relayHostPeerId.Value)
+            ? _state.TryGetPeerSnapshot(relayHostPeerId.Value)
             : null;
 
-        relayHost ??= _state.Peers.FirstOrDefault(p => p.Relay?.IsRelayCapable == true);
+        relayHost ??= _state.SnapshotPeers().FirstOrDefault(p => p.IsRelayCapable);
         if (relayHost is null) return;
 
         var invite = CreatePeerToMainInvite();
 
         await InvokeOnUiAsync(() =>
         {
-            _model.SetRuntimeState(_model.RuntimeState.CurrentValue with
-            {
-                SelectedRouteMode = ConnectionMode.ViaRelay,
-                RelayHostPeerId = relayHost.PeerId,
-                Phase = "InviteEnqueued"
-            });
+            _model.SetSelectedRouteMode(ConnectionMode.ViaRelay);
+            _model.SetRelayHostPeerId(relayHost.PeerId);
+            _model.SetPhase("InviteEnqueued");
         }).ConfigureAwait(false);
 
         // Mark state as request sent (outbound pending) based on correlation id in payload.
@@ -352,7 +346,7 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
         }
         catch (Exception ex)
         {
-            var corr = _model.RuntimeState.CurrentValue.PendingCorrelationId;
+            var corr = _model.PendingCorrelationId.CurrentValue;
             if (corr is not null)
             {
                 await InvokeOnUiAsync(() =>
@@ -367,7 +361,7 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
 
     private async Task ExecuteAcceptHandshakeAsync(CancellationToken ct)
     {
-        var corr = _model.RuntimeState.CurrentValue.PendingCorrelationId;
+        var corr = _model.PendingCorrelationId.CurrentValue;
         if (corr is null) return;
         if (_active.Identity is null) return;
 
@@ -494,9 +488,9 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
         return $"127.77.{x}.{y}";
     }
 
-    private static string MapState(SimulatorPeerRuntimeState state)
+    private static string MapState(SimulatorPeerUiState state)
     {
-        return state.UiState switch
+        return state switch
         {
             SimulatorPeerUiState.Ready => "No Handshake",
             SimulatorPeerUiState.OutboundPending => "Request Sent",
@@ -504,13 +498,13 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
             SimulatorPeerUiState.Established => "Handshake Complete",
             SimulatorPeerUiState.Expired => "Expired",
             SimulatorPeerUiState.Offline => "Offline",
-            _ => state.UiState.ToString()
+            _ => state.ToString()
         };
     }
 
-    private static Brush MapBadgeBackground(SimulatorPeerRuntimeState state)
+    private static Brush MapBadgeBackground(SimulatorPeerUiState state)
     {
-        return state.UiState switch
+        return state switch
         {
             SimulatorPeerUiState.Ready => new SolidColorBrush((Color)ColorConverter.ConvertFromString("#333333")),
             SimulatorPeerUiState.OutboundPending => new SolidColorBrush((Color)ColorConverter.ConvertFromString("#3A2A05")),

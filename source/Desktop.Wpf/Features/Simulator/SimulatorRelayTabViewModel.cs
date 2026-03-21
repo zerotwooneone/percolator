@@ -328,11 +328,8 @@ public sealed class SimulatorRelayTabViewModel : IDisposable
             if (!string.IsNullOrWhiteSpace(name)) return name;
         }
 
-        var dto = _state.Peers.FirstOrDefault(p => p.PeerId == peerId);
-        if (dto is not null)
-        {
-            if (!string.IsNullOrWhiteSpace(dto.DisplayName)) return dto.DisplayName!;
-        }
+        var snap = _state.TryGetPeerSnapshot(peerId);
+        if (snap is not null && !string.IsNullOrWhiteSpace(snap.DisplayName)) return snap.DisplayName!;
         return peerId.ToString()[..8];
     }
 }
