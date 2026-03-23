@@ -1,20 +1,17 @@
 using System;
-using System.Collections;
-using System.Collections.Generic;
-using System.Collections.ObjectModel;
-using System.Collections.Specialized;
-using System.Security.Cryptography;
+using System.Linq;
 using System.Runtime.Serialization;
+using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
 using Desktop.Wpf.Features.Simulator;
-using Desktop.Wpf.Shared.Models;
 using FluentAssertions;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
-using Moq;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using NUnit.Framework;
-using Percolator.Application.Network;
+using Percolator.Application.Configuration;
 using Percolator.Contracts;
 using Percolator.Cryptography;
 using Percolator.Cryptography.Primitives;
@@ -24,33 +21,36 @@ namespace Desktop.Wpf.Tests;
 [TestFixture]
 public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
 {
-    private sealed class DirectoryStub : ISimulatedPeerDirectory
+    private sealed class InMemoryRepository : ISimulatorStateRepository
     {
-        private readonly ObservableCollection<SimulatedPeerModel> _peers;
+        public SimulatorStateDto? State { get; set; }
 
-        public DirectoryStub(params SimulatedPeerModel[] peers)
+        public Task<SimulatorStateDto?> LoadAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(State);
+
+        public Task SaveAsync(SimulatorStateDto state, CancellationToken cancellationToken = default)
         {
-            _peers = new ObservableCollection<SimulatedPeerModel>(peers);
-            Peers = new ReadOnlyObservableCollection<SimulatedPeerModel>(_peers);
+            State = state;
+            return Task.CompletedTask;
         }
+    }
 
-        public ReadOnlyObservableCollection<SimulatedPeerModel> Peers { get; }
+    private static SimulatorStateService CreateSut(
+        InMemoryRepository repo,
+        SimulatorDiagnosticsService diagnostics,
+        ISimulatedPeerPendingInbox pending,
+        IClock clock)
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IClock>(clock);
 
-        public Task InitializeAsync(CancellationToken ct = default) => Task.CompletedTask;
+        var sp = services.BuildServiceProvider();
+        var scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
 
-        public Task<SimulatedPeerModel> AddPeerAsync(string? displayName, CancellationToken ct = default)
-            => throw new NotImplementedException();
-
-        public Task RemovePeerAsync(Guid peerId, CancellationToken ct = default)
-            => throw new NotImplementedException();
-
-        public void Dispose()
-        {
-            foreach (var p in _peers)
-            {
-                p.Dispose();
-            }
-        }
+        var keys = new SimulatedPeerKeyFactory();
+        var options = Options.Create(new TransportOptions { GrpcPort = 5002 });
+        var engine = new Desktop.Wpf.Features.Simulator.Protocol.SignalProtocolEngine(new TestClock(TestClock.Default));
+        return new SimulatorStateService(repo, keys, options, diagnostics, pending, scopeFactory, engine);
     }
 
     [Test]
@@ -63,13 +63,6 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
         var acceptorIdentityPriv = acceptorIdentityEcdh.ExportECPrivateKey();
         using var acceptorIdentityEcdsa = ECDsa.Create(acceptorIdentityEcdh.ExportParameters(true));
         var acceptorIdentitySpki = acceptorIdentityEcdsa.ExportSubjectPublicKeyInfo();
-
-        var model = new SimulatedPeerModel(simulatedPeerId, "sim", isOnline: true, isRelayCapable: false, acceptorIdentitySpki, acceptorIdentityPriv);
-        using var directory = new DirectoryStub(model);
-
-        var messageService = (Percolator.Application.Network.PercolatorMessageService)
-            FormatterServices.GetUninitializedObject(typeof(Percolator.Application.Network.PercolatorMessageService));
-        var pending = new SimulatedPeerPendingInbox();
 
         using var inviterIdentityEcdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var inviterIdentityPriv = inviterIdentityEcdh.ExportECPrivateKey();
@@ -99,18 +92,34 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
             Payload = ByteString.CopyFrom(payload.ToByteArray())
         };
 
-        var state = new Mock<ISimulatorStateService>(MockBehavior.Strict);
-        state.SetupGet(s => s.Peers).Returns(new ModelList<SimulatedPeerModel>());
-        state.Setup(s => s.TryGetPeerSnapshot(It.IsAny<Guid>())).Returns((SimulatedPeerSnapshot?)null);
-        state.Setup(s => s.SnapshotPeers()).Returns(Array.Empty<SimulatedPeerSnapshot>());
-        state.Setup(s => s.TryGetRuntimeStoreAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((SimulatedPeerRuntimeStoreDto?)null);
-        state.Setup(s => s.SaveRuntimeStoreAsync(simulatedPeerId, It.IsAny<SimulatedPeerRuntimeStoreDto>(), It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask)
-            .Verifiable();
+        var repo = new InMemoryRepository
+        {
+            State = new SimulatorStateDto
+            {
+                Version = 1,
+                Peers =
+                {
+                    new SimulatedPeerDto
+                    {
+                        PeerId = simulatedPeerId,
+                        DisplayName = "sim",
+                        IsOnline = true,
+                        Relay = new SimulatedPeerRelayStateDto { IsRelayCapable = false },
+                        ReverseSignalKeys = new SimulatedPeerReverseSignalKeysDto
+                        {
+                            IdentitySigningKeySpki = acceptorIdentitySpki,
+                            IdentitySigningKeyPrivateKeyEcPrivateKey = acceptorIdentityPriv
+                        }
+                    }
+                }
+            }
+        };
 
+        var pending = new SimulatedPeerPendingInbox();
         var diagnostics = new SimulatorDiagnosticsService();
-        var sut = new SimulatedPeerRuntimeService(directory, messageService, state.Object, diagnostics, pending);
+        var clock = new StaticClock(StaticClock.DefaultNow);
+        var sut = CreateSut(repo, diagnostics, pending, clock);
+        await sut.InitializeAsync(CancellationToken.None);
 
         var acceptance = await sut.AcceptReverseSignalInviteAsync(simulatedPeerId, inviterPeerId, invite, CancellationToken.None);
 
@@ -118,7 +127,9 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
         acceptance.Response.Should().NotBeNull();
         acceptance.Response.Version.Should().Be(1);
 
-        state.Verify(s => s.SaveRuntimeStoreAsync(simulatedPeerId, It.IsAny<SimulatedPeerRuntimeStoreDto>(), It.IsAny<CancellationToken>()), Times.Once);
+        await Task.Delay(300);
+        repo.State!.Peers.Should().ContainSingle(p => p.PeerId == simulatedPeerId);
+        repo.State!.Peers.Single(p => p.PeerId == simulatedPeerId).RuntimeStore.Sessions.Should().HaveCount(1);
     }
 
     [Test]
@@ -131,38 +142,34 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
         using var responderIdentityEcdsa = ECDsa.Create(responderIdentityEcdh.ExportParameters(true));
         var responderIdentitySpki = responderIdentityEcdsa.ExportSubjectPublicKeyInfo();
 
-        var model = new SimulatedPeerModel(simulatedPeerId, "sim", isOnline: true, isRelayCapable: false, responderIdentitySpki, responderIdentityPriv);
-        using var directory = new DirectoryStub(model);
-
-        var messageService = (Percolator.Application.Network.PercolatorMessageService)
-            FormatterServices.GetUninitializedObject(typeof(Percolator.Application.Network.PercolatorMessageService));
+        var repo = new InMemoryRepository
+        {
+            State = new SimulatorStateDto
+            {
+                Version = 1,
+                Peers =
+                {
+                    new SimulatedPeerDto
+                    {
+                        PeerId = simulatedPeerId,
+                        DisplayName = "sim",
+                        IsOnline = true,
+                        Relay = new SimulatedPeerRelayStateDto { IsRelayCapable = false },
+                        ReverseSignalKeys = new SimulatedPeerReverseSignalKeysDto
+                        {
+                            IdentitySigningKeySpki = responderIdentitySpki,
+                            IdentitySigningKeyPrivateKeyEcPrivateKey = responderIdentityPriv
+                        }
+                    }
+                }
+            }
+        };
 
         var pending = new SimulatedPeerPendingInbox();
-
-        var state = new Mock<ISimulatorStateService>(MockBehavior.Strict);
-        state.SetupGet(s => s.Peers).Returns(new ModelList<SimulatedPeerModel>());
-        state.Setup(s => s.TryGetPeerSnapshot(It.IsAny<Guid>())).Returns((SimulatedPeerSnapshot?)null);
-        state.Setup(s => s.SnapshotPeers()).Returns(Array.Empty<SimulatedPeerSnapshot>());
-        state.Setup(s => s.TryGetRuntimeStoreAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((SimulatedPeerRuntimeStoreDto?)null);
-        state.Setup(s => s.SaveRuntimeStoreAsync(It.IsAny<Guid>(), It.IsAny<SimulatedPeerRuntimeStoreDto>(), It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask)
-            .Verifiable();
-        state.Setup(s => s.EnqueueRelayOpaqueAsync(It.IsAny<Guid>(), It.IsAny<byte[]>(), It.IsAny<byte[]>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
-        state.Setup(s => s.PublishPreKeyBundleAsync(It.IsAny<Guid>(), It.IsAny<byte[]>(), It.IsAny<Guid>(), It.IsAny<byte[]>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
-        state.Setup(s => s.TryPopPreKeyBundleByRecipientPkhAsync(It.IsAny<Guid>(), It.IsAny<byte[]>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((PublishedPreKeyBundleDto?)null);
-        state.Setup(s => s.TryGetPeerIdByIdentityPkhAsync(It.IsAny<byte[]>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Guid?)null);
-        state.Setup(s => s.AddRelayActiveSessionAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
-        state.Setup(s => s.RemoveRelayActiveSessionAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
-
         var diagnostics = new SimulatorDiagnosticsService();
-        var sut = new SimulatedPeerRuntimeService(directory, messageService, state.Object, diagnostics, pending);
+        var clock = new StaticClock(StaticClock.DefaultNow);
+        var sut = CreateSut(repo, diagnostics, pending, clock);
+        await sut.InitializeAsync(CancellationToken.None);
 
         using var initiatorIdentityEcdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         using var initiatorIdentityEcdsa = ECDsa.Create(initiatorIdentityEcdh.ExportParameters(true));
@@ -187,7 +194,8 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
         resp.Response.Should().NotBeNull();
         resp.Response.ResponsePayload.Should().NotBeNull();
 
-        state.Verify(s => s.SaveRuntimeStoreAsync(simulatedPeerId, It.IsAny<SimulatedPeerRuntimeStoreDto>(), It.IsAny<CancellationToken>()), Times.Once);
+        await Task.Delay(300);
+        repo.State!.Peers.Single(p => p.PeerId == simulatedPeerId).RuntimeStore.Sessions.Should().HaveCount(1);
     }
 
     [Test]
@@ -199,13 +207,8 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
 
         using var initiatorIdentityEcdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var initiatorIdentityPriv = initiatorIdentityEcdh.ExportECPrivateKey();
-        var initiatorIdentitySpki = initiatorIdentityEcdh.PublicKey.ExportSubjectPublicKeyInfo();
-
-        var model = new SimulatedPeerModel(simulatedPeerId, "sim", isOnline: true, isRelayCapable: false, initiatorIdentitySpki, initiatorIdentityPriv);
-        using var directory = new DirectoryStub(model);
-
-        var messageService = (Percolator.Application.Network.PercolatorMessageService)
-            FormatterServices.GetUninitializedObject(typeof(Percolator.Application.Network.PercolatorMessageService));
+        using var initiatorIdentityEcdsa = ECDsa.Create(initiatorIdentityEcdh.ExportParameters(true));
+        var initiatorIdentitySpki = initiatorIdentityEcdsa.ExportSubjectPublicKeyInfo();
 
         var pending = new SimulatedPeerPendingInbox();
 
@@ -213,27 +216,58 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
         var responderPkh = bundle.ResponderPkh;
         var preKeyBundleBytes = bundle.BundleBytes;
 
-        var state = new Mock<ISimulatorStateService>(MockBehavior.Strict);
-        state.SetupGet(s => s.Peers).Returns(new ModelList<SimulatedPeerModel>());
-        state.Setup(s => s.TryGetPeerSnapshot(It.IsAny<Guid>())).Returns((SimulatedPeerSnapshot?)null);
-        state.Setup(s => s.SnapshotPeers()).Returns(Array.Empty<SimulatedPeerSnapshot>());
-        state.Setup(s => s.TryGetRuntimeStoreAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((SimulatedPeerRuntimeStoreDto?)null);
-        state.Setup(s => s.TryPopPreKeyBundleByRecipientPkhAsync(relayHostPeerId, responderPkh, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new PublishedPreKeyBundleDto
+        var repo = new InMemoryRepository
+        {
+            State = new SimulatorStateDto
             {
-                RecipientPublicKeyHash = responderPkh,
-                LogicalOwnerPeerId = Guid.NewGuid(),
-                BundleBytes = preKeyBundleBytes,
-                ExpiresUtc = DateTimeOffset.UtcNow.AddMinutes(5)
-            });
-        state.Setup(s => s.EnqueueRelayOpaqueAsync(relayHostPeerId, responderPkh, It.IsAny<byte[]>(), nameof(HandshakeInitiatorHello), It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
-        state.Setup(s => s.SaveRuntimeStoreAsync(simulatedPeerId, It.IsAny<SimulatedPeerRuntimeStoreDto>(), It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
+                Version = 1,
+                Peers =
+                {
+                    new SimulatedPeerDto
+                    {
+                        PeerId = simulatedPeerId,
+                        DisplayName = "sim",
+                        IsOnline = true,
+                        Relay = new SimulatedPeerRelayStateDto { IsRelayCapable = false },
+                        ReverseSignalKeys = new SimulatedPeerReverseSignalKeysDto
+                        {
+                            IdentitySigningKeySpki = initiatorIdentitySpki,
+                            IdentitySigningKeyPrivateKeyEcPrivateKey = initiatorIdentityPriv
+                        }
+                    },
+                    new SimulatedPeerDto
+                    {
+                        PeerId = relayHostPeerId,
+                        DisplayName = "relay",
+                        IsOnline = true,
+                        Relay = new SimulatedPeerRelayStateDto
+                        {
+                            IsRelayCapable = true,
+                            PreKeyStore = new SimulatedRelayPreKeyStoreDto
+                            {
+                                Version = 1,
+                                PublishedBundles =
+                                {
+                                    new PublishedPreKeyBundleDto
+                                    {
+                                        RecipientPublicKeyHash = responderPkh,
+                                        LogicalOwnerPeerId = Guid.NewGuid(),
+                                        BundleBytes = preKeyBundleBytes,
+                                        ExpiresUtc = DateTimeOffset.UtcNow.AddMinutes(5)
+                                    }
+                                }
+                            }
+                        },
+                        // ReverseSignalKeys will be normalized/ensured by the service.
+                    }
+                }
+            }
+        };
 
         var diagnostics = new SimulatorDiagnosticsService();
-        var sut = new SimulatedPeerRuntimeService(directory, messageService, state.Object, diagnostics, pending);
+        var clock = new StaticClock(StaticClock.DefaultNow);
+        var sut = CreateSut(repo, diagnostics, pending, clock);
+        await sut.InitializeAsync(CancellationToken.None);
 
         // Act
         var sid = await sut.InitiateStandardHandshakeToMainByRelayPkhAsync(
@@ -244,8 +278,11 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
 
         // Assert
         sid.Should().BeNull();
-        state.Verify(s => s.EnqueueRelayOpaqueAsync(relayHostPeerId, responderPkh, It.IsAny<byte[]>(), nameof(HandshakeInitiatorHello), It.IsAny<CancellationToken>()), Times.Once);
-        state.Verify(s => s.SaveRuntimeStoreAsync(simulatedPeerId, It.IsAny<SimulatedPeerRuntimeStoreDto>(), It.IsAny<CancellationToken>()), Times.Once);
+
+        var queued = repo.State!.Peers.Single(p => p.PeerId == relayHostPeerId)
+            .Relay.OpaqueQueue.Items
+            .Single(i => i.DebugType == nameof(HandshakeInitiatorHello));
+        queued.RecipientRoutingKey.Should().Equal(responderPkh);
 
         diagnostics.Events.Should().Contain(e =>
             e.EventType == SimulatorDiagnosticEventType.PreKeyBundleFetched
@@ -265,13 +302,8 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
 
         using var initiatorIdentityEcdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var initiatorIdentityPriv = initiatorIdentityEcdh.ExportECPrivateKey();
-        var initiatorIdentitySpki = initiatorIdentityEcdh.PublicKey.ExportSubjectPublicKeyInfo();
-
-        var model = new SimulatedPeerModel(simulatedPeerId, "sim", isOnline: true, isRelayCapable: false, initiatorIdentitySpki, initiatorIdentityPriv);
-        using var directory = new DirectoryStub(model);
-
-        var messageService = (Percolator.Application.Network.PercolatorMessageService)
-            FormatterServices.GetUninitializedObject(typeof(Percolator.Application.Network.PercolatorMessageService));
+        using var initiatorIdentityEcdsa = ECDsa.Create(initiatorIdentityEcdh.ExportParameters(true));
+        var initiatorIdentitySpki = initiatorIdentityEcdsa.ExportSubjectPublicKeyInfo();
 
         var pending = new SimulatedPeerPendingInbox();
 
@@ -280,23 +312,62 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
         // Bundle is valid, but its identity key hashes to a different PKH.
         var bundleBytes = CreateValidResponderPreKeyBundle().BundleBytes;
 
-        var state = new Mock<ISimulatorStateService>(MockBehavior.Strict);
-        state.SetupGet(s => s.Peers).Returns(new ModelList<SimulatedPeerModel>());
-        state.Setup(s => s.TryGetPeerSnapshot(It.IsAny<Guid>())).Returns((SimulatedPeerSnapshot?)null);
-        state.Setup(s => s.SnapshotPeers()).Returns(Array.Empty<SimulatedPeerSnapshot>());
-        state.Setup(s => s.TryGetRuntimeStoreAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((SimulatedPeerRuntimeStoreDto?)null);
-        state.Setup(s => s.TryPopPreKeyBundleByRecipientPkhAsync(relayHostPeerId, requestedResponderPkh, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new PublishedPreKeyBundleDto
+        var repo = new InMemoryRepository
+        {
+            State = new SimulatorStateDto
             {
-                RecipientPublicKeyHash = requestedResponderPkh,
-                LogicalOwnerPeerId = Guid.NewGuid(),
-                BundleBytes = bundleBytes,
-                ExpiresUtc = DateTimeOffset.UtcNow.AddMinutes(5)
-            });
+                Version = 1,
+                Peers =
+                {
+                    new SimulatedPeerDto
+                    {
+                        PeerId = simulatedPeerId,
+                        DisplayName = "sim",
+                        IsOnline = true,
+                        Relay = new SimulatedPeerRelayStateDto { IsRelayCapable = false },
+                        ReverseSignalKeys = new SimulatedPeerReverseSignalKeysDto
+                        {
+                            IdentitySigningKeySpki = initiatorIdentitySpki,
+                            IdentitySigningKeyPrivateKeyEcPrivateKey = initiatorIdentityPriv
+                        }
+                    },
+                    new SimulatedPeerDto
+                    {
+                        PeerId = relayHostPeerId,
+                        DisplayName = "relay",
+                        IsOnline = true,
+                        Relay = new SimulatedPeerRelayStateDto
+                        {
+                            IsRelayCapable = true,
+                            PreKeyStore = new SimulatedRelayPreKeyStoreDto
+                            {
+                                Version = 1,
+                                PublishedBundles =
+                                {
+                                    new PublishedPreKeyBundleDto
+                                    {
+                                        RecipientPublicKeyHash = requestedResponderPkh,
+                                        LogicalOwnerPeerId = Guid.NewGuid(),
+                                        BundleBytes = bundleBytes,
+                                        ExpiresUtc = DateTimeOffset.UtcNow.AddMinutes(5)
+                                    }
+                                }
+                            }
+                        },
+                        ReverseSignalKeys = new SimulatedPeerReverseSignalKeysDto
+                        {
+                            IdentitySigningKeySpki = SHA256.HashData(Guid.NewGuid().ToByteArray()),
+                            IdentitySigningKeyPrivateKeyEcPrivateKey = new byte[] { 0x01 }
+                        }
+                    }
+                }
+            }
+        };
 
         var diagnostics = new SimulatorDiagnosticsService();
-        var sut = new SimulatedPeerRuntimeService(directory, messageService, state.Object, diagnostics, pending);
+        var clock = new StaticClock(StaticClock.DefaultNow);
+        var sut = CreateSut(repo, diagnostics, pending, clock);
+        await sut.InitializeAsync(CancellationToken.None);
 
         // Act
         var sid = await sut.InitiateStandardHandshakeToMainByRelayPkhAsync(
@@ -307,8 +378,8 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
 
         // Assert
         sid.Should().BeNull();
-        state.Verify(s => s.EnqueueRelayOpaqueAsync(It.IsAny<Guid>(), It.IsAny<byte[]>(), It.IsAny<byte[]>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
-        state.Verify(s => s.SaveRuntimeStoreAsync(It.IsAny<Guid>(), It.IsAny<SimulatedPeerRuntimeStoreDto>(), It.IsAny<CancellationToken>()), Times.Never);
+
+        repo.State!.Peers.Single(p => p.PeerId == relayHostPeerId).Relay.OpaqueQueue.Items.Should().BeEmpty();
 
         diagnostics.Events.Should().NotContain(e => e.EventType == SimulatorDiagnosticEventType.StandardHandshakeHelloEnqueued);
     }
@@ -347,13 +418,8 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
 
         using var relayIdentityEcdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var relayIdentityPriv = relayIdentityEcdh.ExportECPrivateKey();
-        var relayIdentitySpki = relayIdentityEcdh.PublicKey.ExportSubjectPublicKeyInfo();
-
-        var model = new SimulatedPeerModel(relayHostPeerId, "relay", isOnline: true, isRelayCapable: true, relayIdentitySpki, relayIdentityPriv);
-        using var directory = new DirectoryStub(model);
-
-        var messageService = (Percolator.Application.Network.PercolatorMessageService)
-            FormatterServices.GetUninitializedObject(typeof(Percolator.Application.Network.PercolatorMessageService));
+        using var relayIdentityEcdsa = ECDsa.Create(relayIdentityEcdh.ExportParameters(true));
+        var relayIdentitySpki = relayIdentityEcdsa.ExportSubjectPublicKeyInfo();
         var pending = new SimulatedPeerPendingInbox();
 
         var bundle = CreateValidResponderPreKeyBundle();
@@ -399,25 +465,50 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
             }
         };
 
-        var state = new Mock<ISimulatorStateService>(MockBehavior.Strict);
-        state.SetupGet(s => s.Peers).Returns(new ModelList<SimulatedPeerModel>());
-        state.Setup(s => s.TryGetPeerSnapshot(It.IsAny<Guid>())).Returns((SimulatedPeerSnapshot?)null);
-        state.Setup(s => s.SnapshotPeers()).Returns(Array.Empty<SimulatedPeerSnapshot>());
-        state.Setup(s => s.TryGetRuntimeStoreAsync(relayHostPeerId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(seededStore);
-        state.Setup(s => s.SaveRuntimeStoreAsync(It.IsAny<Guid>(), It.IsAny<SimulatedPeerRuntimeStoreDto>(), It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
-        state.Setup(s => s.TryPopPreKeyBundleByRecipientPkhAsync(relayHostPeerId, bundle.ResponderPkh, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new PublishedPreKeyBundleDto
+        var repo = new InMemoryRepository
+        {
+            State = new SimulatorStateDto
             {
-                RecipientPublicKeyHash = bundle.ResponderPkh,
-                LogicalOwnerPeerId = Guid.NewGuid(),
-                BundleBytes = bundle.BundleBytes,
-                ExpiresUtc = DateTimeOffset.UtcNow.AddMinutes(5)
-            });
+                Version = 1,
+                Peers =
+                {
+                    new SimulatedPeerDto
+                    {
+                        PeerId = relayHostPeerId,
+                        DisplayName = "relay",
+                        IsOnline = true,
+                        Relay = new SimulatedPeerRelayStateDto
+                        {
+                            IsRelayCapable = true,
+                            PreKeyStore = new SimulatedRelayPreKeyStoreDto
+                            {
+                                Version = 1,
+                                PublishedBundles =
+                                {
+                                    new PublishedPreKeyBundleDto
+                                    {
+                                        RecipientPublicKeyHash = bundle.ResponderPkh,
+                                        LogicalOwnerPeerId = Guid.NewGuid(),
+                                        BundleBytes = bundle.BundleBytes,
+                                        ExpiresUtc = DateTimeOffset.UtcNow.AddMinutes(5)
+                                    }
+                                }
+                            }
+                        },
+                        ReverseSignalKeys = new SimulatedPeerReverseSignalKeysDto
+                        {
+                            IdentitySigningKeySpki = relayIdentitySpki,
+                            IdentitySigningKeyPrivateKeyEcPrivateKey = relayIdentityPriv
+                        },
+                        RuntimeStore = seededStore
+                    }
+                }
+            }
+        };
 
         var diagnostics = new SimulatorDiagnosticsService();
-        var sut = new SimulatedPeerRuntimeService(directory, messageService, state.Object, diagnostics, pending);
+        var sut = CreateSut(repo, diagnostics, pending, clock);
+        await sut.InitializeAsync(CancellationToken.None);
 
         var envReq = new InternalEnvelope
         {
@@ -460,13 +551,8 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
 
         using var relayIdentityEcdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var relayIdentityPriv = relayIdentityEcdh.ExportECPrivateKey();
-        var relayIdentitySpki = relayIdentityEcdh.PublicKey.ExportSubjectPublicKeyInfo();
-
-        var model = new SimulatedPeerModel(relayHostPeerId, "relay", isOnline: true, isRelayCapable: true, relayIdentitySpki, relayIdentityPriv);
-        using var directory = new DirectoryStub(model);
-
-        var messageService = (Percolator.Application.Network.PercolatorMessageService)
-            FormatterServices.GetUninitializedObject(typeof(Percolator.Application.Network.PercolatorMessageService));
+        using var relayIdentityEcdsa = ECDsa.Create(relayIdentityEcdh.ExportParameters(true));
+        var relayIdentitySpki = relayIdentityEcdsa.ExportSubjectPublicKeyInfo();
         var pending = new SimulatedPeerPendingInbox();
 
         var requestedPkh = SHA256.HashData(Guid.NewGuid().ToByteArray());
@@ -512,19 +598,33 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
             }
         };
 
-        var state = new Mock<ISimulatorStateService>(MockBehavior.Strict);
-        state.SetupGet(s => s.Peers).Returns(new ModelList<SimulatedPeerModel>());
-        state.Setup(s => s.TryGetPeerSnapshot(It.IsAny<Guid>())).Returns((SimulatedPeerSnapshot?)null);
-        state.Setup(s => s.SnapshotPeers()).Returns(Array.Empty<SimulatedPeerSnapshot>());
-        state.Setup(s => s.TryGetRuntimeStoreAsync(relayHostPeerId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(seededStore);
-        state.Setup(s => s.SaveRuntimeStoreAsync(It.IsAny<Guid>(), It.IsAny<SimulatedPeerRuntimeStoreDto>(), It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
-        state.Setup(s => s.TryPopPreKeyBundleByRecipientPkhAsync(relayHostPeerId, requestedPkh, It.IsAny<CancellationToken>()))
-            .ReturnsAsync((PublishedPreKeyBundleDto?)null);
+        var repo = new InMemoryRepository
+        {
+            State = new SimulatorStateDto
+            {
+                Version = 1,
+                Peers =
+                {
+                    new SimulatedPeerDto
+                    {
+                        PeerId = relayHostPeerId,
+                        DisplayName = "relay",
+                        IsOnline = true,
+                        Relay = new SimulatedPeerRelayStateDto { IsRelayCapable = true },
+                        ReverseSignalKeys = new SimulatedPeerReverseSignalKeysDto
+                        {
+                            IdentitySigningKeySpki = relayIdentitySpki,
+                            IdentitySigningKeyPrivateKeyEcPrivateKey = relayIdentityPriv
+                        },
+                        RuntimeStore = seededStore
+                    }
+                }
+            }
+        };
 
         var diagnostics = new SimulatorDiagnosticsService();
-        var sut = new SimulatedPeerRuntimeService(directory, messageService, state.Object, diagnostics, pending);
+        var sut = CreateSut(repo, diagnostics, pending, clock);
+        await sut.InitializeAsync(CancellationToken.None);
 
         var envReq = new InternalEnvelope
         {

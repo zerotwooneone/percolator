@@ -82,7 +82,7 @@ public sealed class SimulatorSessionsTabViewModel : IDisposable
         ct.ThrowIfCancellationRequested();
 
         var mainPeerId = MainNodeSentinelPeerId;
-        var peers = _state.Peers.GetSnapshot();
+        var peers = _state.Peers.ToArray();
         var snapshots = _state.SnapshotPeers();
 
         var cards = new System.Collections.Generic.List<SimulatorSessionCardViewModel>();

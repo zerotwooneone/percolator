@@ -22,7 +22,7 @@ public sealed class SimulatorDiagnosticBundleBuilder : ISimulatorDiagnosticBundl
     {
         ct.ThrowIfCancellationRequested();
 
-        var peerModels = _state.Peers.GetSnapshot();
+        var peerModels = _state.Peers.ToArray();
         var peerSnapshots = _state.SnapshotPeers();
 
         var peers = peerModels

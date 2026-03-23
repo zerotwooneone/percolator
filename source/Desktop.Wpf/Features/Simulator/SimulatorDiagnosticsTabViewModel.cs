@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.Windows;
+using ObservableCollections;
 using R3;
 
 namespace Desktop.Wpf.Features.Simulator;
@@ -187,7 +188,12 @@ public sealed class SimulatorDiagnosticsTabViewModel : IDisposable
         SelectedRelayHostPeerId.Skip(1).Subscribe(_ => _rebuildRequests.OnNext(Unit.Default)).AddTo(ref _bag);
         SelectedEventType.Skip(1).Subscribe(_ => _rebuildRequests.OnNext(Unit.Default)).AddTo(ref _bag);
 
-        _peersChangesSub = _state.Peers.Changes
+        var peers = _state.Peers;
+        _peersChangesSub = Observable.Merge(
+                peers.ObserveAdd().Select(static _ => Unit.Default),
+                peers.ObserveRemove().Select(static _ => Unit.Default),
+                peers.ObserveReplace().Select(static _ => Unit.Default),
+                peers.ObserveReset().Select(static _ => Unit.Default))
             .Subscribe(_ => RefreshFilterOptions());
 
         RefreshFilterOptions();

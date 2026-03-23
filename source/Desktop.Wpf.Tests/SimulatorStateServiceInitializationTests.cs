@@ -2,17 +2,21 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Desktop.Wpf.Features.Simulator;
+using Desktop.Wpf.Features.Simulator.Protocol;
+using Desktop.Wpf.Features.Sessions;
 using FluentAssertions;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using NUnit.Framework;
 using Percolator.Application.Configuration;
+using Percolator.Cryptography;
 
 namespace Desktop.Wpf.Tests;
 
 [TestFixture]
 public sealed class SimulatorStateServiceInitializationTests
 {
-    private sealed class StoreStub : ISimulatorStateStore
+    private sealed class RepositoryStub : ISimulatorStateRepository
     {
         private readonly TaskCompletionSource<SimulatorStateDto?> _gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -34,11 +38,20 @@ public sealed class SimulatorStateServiceInitializationTests
     public async Task InitializeAsync_CoalescesConcurrentCalls()
     {
         // Arrange
-        var store = new StoreStub();
+        var store = new RepositoryStub();
         var keys = new SimulatedPeerKeyFactory();
-        var options = Options.Create(new TransportOptions { SimulatorPort = 5002 });
+        var options = Options.Create(new TransportOptions { GrpcPort = 5002 });
         var diagnostics = new SimulatorDiagnosticsService();
-        var sut = new SimulatorStateService(store, keys, options, diagnostics);
+
+        var services = new ServiceCollection();
+        services.AddSingleton<IClock, SystemClock>();
+        var sp = services.BuildServiceProvider();
+        var scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
+
+        var pending = new SimulatedPeerPendingInbox();
+        var engine = new SignalProtocolEngine(new SystemClock());
+
+        var sut = new SimulatorStateService(store, keys, options, diagnostics, pending, scopeFactory, engine);
 
         // Act
         var t1 = sut.InitializeAsync();

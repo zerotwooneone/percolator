@@ -17,7 +17,7 @@ public sealed class SimulatorStateStoreTests
         var tmp = Path.Combine(Path.GetTempPath(), $"percolator-sim-{Guid.NewGuid():N}.json");
         try
         {
-            var store = new JsonSimulatorStateStore(TimeSpan.FromMilliseconds(1), overridePath: tmp);
+            var store = new JsonSimulatorStateRepository(overridePath: tmp);
             var state = new SimulatorStateDto
             {
                 Version = 1

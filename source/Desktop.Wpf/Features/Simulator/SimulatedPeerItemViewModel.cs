@@ -19,7 +19,6 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
     private readonly ISimulatorDiagnosticsService _diagnostics;
     private readonly Percolator.Application.Network.IMainReverseSignalInviteFactory _inviteFactory;
     private readonly Percolator.Application.Network.IAdvertisedHostLookup _advertisedHostLookup;
-    private readonly ISimulatedPeerRuntimeService _peerRuntime;
     private readonly ISimulatorRelayEmulator _relay;
     private readonly Percolator.Application.Network.PercolatorMessageService _messageService;
     private readonly IOptions<TransportOptions> _transportOptions;
@@ -36,7 +35,6 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
         ISimulatorDiagnosticsService diagnostics,
         Percolator.Application.Network.IMainReverseSignalInviteFactory inviteFactory,
         Percolator.Application.Network.IAdvertisedHostLookup advertisedHostLookup,
-        ISimulatedPeerRuntimeService peerRuntime,
         ISimulatorRelayEmulator relay,
         Percolator.Application.Network.PercolatorMessageService messageService,
         IOptions<TransportOptions> transportOptions,
@@ -51,7 +49,6 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
         _diagnostics = diagnostics;
         _inviteFactory = inviteFactory;
         _advertisedHostLookup = advertisedHostLookup;
-        _peerRuntime = peerRuntime;
         _relay = relay;
         _messageService = messageService;
         _transportOptions = transportOptions;
@@ -238,7 +235,7 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
             return;
         }
 
-        var finalized = await _peerRuntime.TryFinalizeInviteHandshakeResponseFromMainAsync(
+        var finalized = await _state.TryFinalizeInviteHandshakeResponseFromMainAsync(
                 simulatedPeerId: _model.PeerId,
                 acceptorPeerId: MainNodeSentinelPeerId,
                 requestCorrelationId: corr.Value,
@@ -273,15 +270,16 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
         var invite = _inviteFactory.CreateInvite();
         var inviterPeerId = MainNodeSentinelPeerId;
 
-        var acceptance = await _peerRuntime.AcceptReverseSignalInviteAsync(
-            simulatedPeerId: _model.PeerId,
-            inviterPeerId: inviterPeerId,
-            invite: invite,
-            cancellationToken: ct).ConfigureAwait(false);
+        var acceptance = await _state.AcceptReverseSignalInviteAsync(
+                simulatedPeerId: _model.PeerId,
+                inviterPeerId: inviterPeerId,
+                invite: invite,
+                cancellationToken: ct)
+            .ConfigureAwait(false);
 
         _sessionToMain = acceptance.SessionId;
 
-        await _peerRuntime.DeliverInviteHandshakeResponseToMainAsync(acceptance.Response, ct).ConfigureAwait(false);
+        await _state.DeliverInviteHandshakeResponseToMainAsync(acceptance.Response, ct).ConfigureAwait(false);
     }
 
     private async Task ExecuteMainInviteRelayedAsync(System.Threading.CancellationToken ct)
@@ -315,11 +313,12 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
         var req = EstablishDirectSessionRequest.Parser.ParseFrom(dequeued[0].OpaqueBytes);
         var inviterPeerId = MainNodeSentinelPeerId;
 
-        var acceptance = await _peerRuntime.AcceptReverseSignalInviteAsync(
-            simulatedPeerId: _model.PeerId,
-            inviterPeerId: inviterPeerId,
-            invite: req,
-            cancellationToken: ct).ConfigureAwait(false);
+        var acceptance = await _state.AcceptReverseSignalInviteAsync(
+                simulatedPeerId: _model.PeerId,
+                inviterPeerId: inviterPeerId,
+                invite: req,
+                cancellationToken: ct)
+            .ConfigureAwait(false);
 
         _sessionToMain = acceptance.SessionId;
 
@@ -440,7 +439,7 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
             return;
         }
 
-        await _peerRuntime.PublishStandardPreKeyBundleToRelayAsync(
+        await _state.PublishStandardPreKeyBundleToRelayAsync(
                 simulatedPeerId: _model.PeerId,
                 relayHostPeerId: relayPeerId.Value,
                 expiresUtc: DateTimeOffset.UtcNow.AddHours(12),
@@ -472,7 +471,7 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
         var mainSpki = _active.Keys.IdentitySigningKey.ExportSubjectPublicKeyInfo();
         var mainPkh = SHA256.HashData(mainSpki);
 
-        _ = await _peerRuntime.InitiateStandardHandshakeToMainByRelayPkhAsync(
+        _ = await _state.InitiateStandardHandshakeToMainByRelayPkhAsync(
                 simulatedPeerId: _model.PeerId,
                 relayHostPeerId: relayPeerId.Value,
                 responderPublicKeyHash: mainPkh,
@@ -505,7 +504,7 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
         var preKeySig = identityEcdsa.SignData(inviterSignedPreKeySpki, HashAlgorithmName.SHA256);
 
         var correlation = Guid.NewGuid();
-        _peerRuntime.RecordOutboundInviteSignedPreKeyPrivate(_model.PeerId, correlation, inviterSignedPreKeyPriv);
+        _model.OutboundInvitesMutable.Add(new SimulatedOutboundInviteModel(correlation, inviterSignedPreKeyPriv));
         var payload = new InviteHandshakeRequestPayload
         {
             Version = 1,

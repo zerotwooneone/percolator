@@ -25,6 +25,7 @@ using Percolator.Application.Network;
 using Percolator.Cryptography;
 using Percolator.Infrastructure.Persistence;
 using Desktop.Wpf.Features.Simulator;
+using Desktop.Wpf.Features.Simulator.Protocol;
 using Percolator.MessageQueue.DependencyInjection;
 using Desktop.Wpf.Features.Sessions.State;
 
@@ -105,7 +106,7 @@ public partial class App : Application
                 // Core infrastructure (DB, identity, crypto, etc.)
                 services.AddInfrastructureServices(context.Configuration);
                 services.AddApplicationServices(context.Configuration);
-                services.AddScoped<IClock, SystemClock>();
+                services.AddSingleton<IClock, SystemClock>();
                 services.AddMessageQueue();
 
                 // Views
@@ -152,7 +153,7 @@ public partial class App : Application
                 services.AddSingleton<SelectedSecureChannelStateCache>();
                 services.AddScoped<SelectedChannelPaneViewModel>();
                 services.AddScoped<IPendingHandshakeSimulatorService, PendingHandshakeSimulatorService>();
-                services.AddSingleton<ISimulatorStateStore, JsonSimulatorStateStore>();
+                services.AddSingleton<Desktop.Wpf.Features.Simulator.ISimulatorStateRepository, Desktop.Wpf.Features.Simulator.JsonSimulatorStateRepository>();
                 services.AddSingleton<ISimulatedPeerKeyFactory, SimulatedPeerKeyFactory>();
                 services.AddSingleton<ISimulatorStateService, SimulatorStateService>();
                 services.AddSingleton<Desktop.Wpf.Features.Simulator.ISimulatorDiagnosticsService, Desktop.Wpf.Features.Simulator.SimulatorDiagnosticsService>();
@@ -162,7 +163,7 @@ public partial class App : Application
                 services.AddScoped<Desktop.Wpf.Features.Simulator.ISimulatorMainIngressService, Desktop.Wpf.Features.Simulator.SimulatorMainIngressService>();
                 services.AddScoped<Desktop.Wpf.Features.Simulator.ISimulatorRelayEmulator, Desktop.Wpf.Features.Simulator.SimulatorRelayEmulator>();
                 services.AddScoped<Desktop.Wpf.Features.Simulator.ISimulatorRelayDeliveryService, Desktop.Wpf.Features.Simulator.SimulatorRelayDeliveryService>();
-                services.AddScoped<Desktop.Wpf.Features.Simulator.ISimulatedPeerRuntimeService, Desktop.Wpf.Features.Simulator.SimulatedPeerRuntimeService>();
+                services.AddSingleton<ISignalProtocolEngine, SignalProtocolEngine>();
                 services.AddSingleton<Percolator.Application.Network.ISimulatorOutboundInterceptor, Desktop.Wpf.Features.Simulator.SimulatorOutboundInterceptor>();
                 // Per-session scoped chat stack
                 services.AddScoped<Desktop.Wpf.Features.Sessions.SessionContext>();

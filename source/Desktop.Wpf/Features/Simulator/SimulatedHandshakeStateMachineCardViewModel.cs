@@ -14,36 +14,33 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
 {
     private static readonly Guid MainNodeSentinelPeerId = new("88880000-0000-0000-0000-000000000000");
     private readonly SimulatedPeerModel _model;
-    private readonly ISimulatedPeerRuntimeService _runtime;
+    private readonly ISimulatorStateService _state;
     private readonly ISimulatorRelayEmulator _relay;
     private readonly ISimulatorMainIngressService _mainIngress;
     private readonly ISimulatorDiagnosticsService _diagnostics;
     private readonly IOptions<TransportOptions> _transportOptions;
     private readonly Percolator.Application.Identity.ActiveIdentityContext _active;
-    private readonly ISimulatorStateService _state;
     private readonly Func<Guid?> _selectedRelayHostPeerId;
 
     private DisposableBag _bag;
 
     public SimulatedHandshakeStateMachineCardViewModel(
         SimulatedPeerModel model,
-        ISimulatedPeerRuntimeService runtime,
+        ISimulatorStateService state,
         ISimulatorRelayEmulator relay,
         ISimulatorMainIngressService mainIngress,
         ISimulatorDiagnosticsService diagnostics,
         IOptions<TransportOptions> transportOptions,
         Percolator.Application.Identity.ActiveIdentityContext active,
-        ISimulatorStateService state,
         Func<Guid?> selectedRelayHostPeerId)
     {
         _model = model;
-        _runtime = runtime;
+        _state = state;
         _relay = relay;
         _mainIngress = mainIngress;
         _diagnostics = diagnostics;
         _transportOptions = transportOptions;
         _active = active;
-        _state = state;
         _selectedRelayHostPeerId = selectedRelayHostPeerId;
 
         DisplayName = _model.DisplayName
@@ -365,7 +362,7 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
         if (corr is null) return;
         if (_active.Identity is null) return;
 
-        var finalized = await _runtime.TryFinalizeInviteHandshakeResponseFromMainAsync(
+        var finalized = await _state.TryFinalizeInviteHandshakeResponseFromMainAsync(
                 simulatedPeerId: _model.PeerId,
                 acceptorPeerId: MainNodeSentinelPeerId,
                 requestCorrelationId: corr.Value,
@@ -378,7 +375,7 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
         // during invite receipt).
         if (finalized is null)
         {
-            var delivered = await _runtime.TryDeliverQueuedInviteHandshakeResponseToMainAsync(
+            var delivered = await _state.TryDeliverQueuedInviteHandshakeResponseToMainAsync(
                     simulatedPeerId: _model.PeerId,
                     requestCorrelationId: corr.Value,
                     cancellationToken: ct)
@@ -449,7 +446,7 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
         var preKeySig = identityEcdsa.SignData(inviterSignedPreKeySpki, HashAlgorithmName.SHA256);
 
         var correlation = Guid.NewGuid();
-        _runtime.RecordOutboundInviteSignedPreKeyPrivate(_model.PeerId, correlation, inviterSignedPreKeyPriv);
+        _model.OutboundInvitesMutable.Add(new SimulatedOutboundInviteModel(correlation, inviterSignedPreKeyPriv));
 
         var payload = new InviteHandshakeRequestPayload
         {

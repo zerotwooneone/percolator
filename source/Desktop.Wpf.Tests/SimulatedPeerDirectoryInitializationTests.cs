@@ -1,13 +1,14 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
 using Desktop.Wpf.Features.Simulator;
-using Desktop.Wpf.Shared.Models;
 using FluentAssertions;
 using Moq;
 using NUnit.Framework;
+using ObservableCollections;
 
 namespace Desktop.Wpf.Tests;
 
@@ -24,8 +25,8 @@ public sealed class SimulatedPeerDirectoryInitializationTests
         var spki = ecdh.PublicKey.ExportSubjectPublicKeyInfo();
         var model = new SimulatedPeerModel(peerId, "Alice", isOnline: true, isRelayCapable: true, spki, priv);
 
-        var peers = new ModelList<SimulatedPeerModel>();
-        peers.Reset(new[] { model });
+        var peers = new ObservableList<SimulatedPeerModel>();
+        peers.Add(model);
         var state = new Mock<ISimulatorStateService>(MockBehavior.Strict);
 
         var initGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);

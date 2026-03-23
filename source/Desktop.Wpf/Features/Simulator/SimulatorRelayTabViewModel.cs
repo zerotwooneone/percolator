@@ -12,7 +12,6 @@ public sealed class SimulatorRelayTabViewModel : IDisposable
 {
     private readonly ISimulatorStateService _state;
     private readonly ISimulatedPeerDirectory _directory;
-    private readonly ISimulatedPeerRuntimeService _peerRuntime;
     private readonly PercolatorMessageService _messageService;
     private readonly ISimulatorRelayDeliveryService _delivery;
     private readonly ISimulatorDiagnosticsService _diagnostics;
@@ -35,7 +34,6 @@ public sealed class SimulatorRelayTabViewModel : IDisposable
     public SimulatorRelayTabViewModel(
         ISimulatorStateService state,
         ISimulatedPeerDirectory directory,
-        ISimulatedPeerRuntimeService peerRuntime,
         PercolatorMessageService messageService,
         ISimulatorRelayDeliveryService delivery,
         ISimulatorDiagnosticsService diagnostics,
@@ -45,7 +43,6 @@ public sealed class SimulatorRelayTabViewModel : IDisposable
     {
         _state = state;
         _directory = directory;
-        _peerRuntime = peerRuntime;
         _messageService = messageService;
         _delivery = delivery;
         _diagnostics = diagnostics;

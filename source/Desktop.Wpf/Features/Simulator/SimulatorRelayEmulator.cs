@@ -40,19 +40,15 @@ public interface ISimulatorRelayEmulator
 public sealed class SimulatorRelayEmulator : ISimulatorRelayEmulator
 {
     private readonly ISimulatorStateService _state;
-
-    private readonly ISimulatedPeerRuntimeService _peerRuntime;
     private readonly Percolator.Application.Network.PercolatorMessageService _messageService;
 
     private static readonly Guid MainNodeSentinelPeerId = new("88880000-0000-0000-0000-000000000000");
 
     public SimulatorRelayEmulator(
         ISimulatorStateService state,
-        ISimulatedPeerRuntimeService peerRuntime,
         Percolator.Application.Network.PercolatorMessageService messageService)
     {
         _state = state;
-        _peerRuntime = peerRuntime;
         _messageService = messageService;
     }
 
@@ -77,14 +73,17 @@ public sealed class SimulatorRelayEmulator : ISimulatorRelayEmulator
         string? debugType,
         CancellationToken cancellationToken)
     {
-        // Avoid silently enqueuing to "Main" by Guid; PKH routing is required for main.
-        if (recipientPeerId == new Guid("88880000-0000-0000-0000-000000000000"))
+        byte[] routingKey;
+        if (recipientPeerId == MainNodeSentinelPeerId)
         {
-            throw new InvalidOperationException("Legacy relay enqueue to Main by Guid is not supported; enqueue by routing key (PKH) instead.");
+            routingKey = MainNodeSentinelPeerId.ToByteArray();
+        }
+        else
+        {
+            routingKey = await _state.ComputePublicKeyHashAsync(recipientPeerId, cancellationToken).ConfigureAwait(false);
         }
 
-        var pkh = await _peerRuntime.ComputePublicKeyHashAsync(recipientPeerId, cancellationToken).ConfigureAwait(false);
-        await _state.EnqueueRelayOpaqueAsync(relayHostPeerId, pkh, opaqueBytes, debugType, cancellationToken).ConfigureAwait(false);
+        await _state.EnqueueRelayOpaqueAsync(relayHostPeerId, routingKey, opaqueBytes, debugType, cancellationToken).ConfigureAwait(false);
     }
 
     public Task EnqueueToRelayHostByRoutingKeyAsync(
@@ -105,12 +104,15 @@ public sealed class SimulatorRelayEmulator : ISimulatorRelayEmulator
         int max,
         CancellationToken cancellationToken = default)
     {
+        byte[] routingKey;
         if (recipientPeerId == MainNodeSentinelPeerId)
         {
-            throw new InvalidOperationException("FetchFromRelayHostAsync cannot target Main by Guid. Use Fetch/forward by routing key (PKH) instead.");
+            routingKey = MainNodeSentinelPeerId.ToByteArray();
         }
-
-        var routingKey = await _peerRuntime.ComputePublicKeyHashAsync(recipientPeerId, cancellationToken).ConfigureAwait(false);
+        else
+        {
+            routingKey = await _state.ComputePublicKeyHashAsync(recipientPeerId, cancellationToken).ConfigureAwait(false);
+        }
         var dequeued = await _state.DequeueRelayOpaqueAsync(relayHostPeerId, routingKey, max, cancellationToken).ConfigureAwait(false);
         if (dequeued.Count == 0) return Array.Empty<SimulatedRelayItem>();
 
@@ -142,17 +144,20 @@ public sealed class SimulatorRelayEmulator : ISimulatorRelayEmulator
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        if (recipientPeerId == MainNodeSentinelPeerId)
-        {
-            throw new InvalidOperationException("ForwardQueuedToMainAsync cannot target Main by Guid. Use ForwardQueuedToMainByRoutingKeyAsync (PKH) instead.");
-        }
-
         var forwarded = 0;
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var routingKey = await _peerRuntime.ComputePublicKeyHashAsync(recipientPeerId, cancellationToken).ConfigureAwait(false);
+            byte[] routingKey;
+            if (recipientPeerId == MainNodeSentinelPeerId)
+            {
+                routingKey = MainNodeSentinelPeerId.ToByteArray();
+            }
+            else
+            {
+                routingKey = await _state.ComputePublicKeyHashAsync(recipientPeerId, cancellationToken).ConfigureAwait(false);
+            }
             var item = await _state.PeekRelayOpaqueAsync(relayHostPeerId, routingKey, cancellationToken).ConfigureAwait(false);
             if (item is null)
             {
@@ -168,11 +173,7 @@ public sealed class SimulatorRelayEmulator : ISimulatorRelayEmulator
                 }
             };
 
-            var cipher = await _peerRuntime.EncryptInternalEnvelopeAsync(
-                relayHostPeerId,
-                relayHostToMainSessionId,
-                env,
-                cancellationToken).ConfigureAwait(false);
+            var cipher = await _state.EncryptInternalEnvelopeAsync(relayHostPeerId, relayHostToMainSessionId, env, cancellationToken).ConfigureAwait(false);
 
             var request = new Percolator.Contracts.DeliverOpaqueMessageRequest
             {
@@ -196,7 +197,7 @@ public sealed class SimulatorRelayEmulator : ISimulatorRelayEmulator
             }
 
             var ackCipher = new Percolator.Cryptography.SessionRatchetMessage(response.ResponsePayload.ResponsePayload.ToByteArray());
-            var ackPlain = await _peerRuntime.DecryptSessionMessageAsync(relayHostPeerId, relayHostToMainSessionId, ackCipher, cancellationToken).ConfigureAwait(false);
+            var ackPlain = await _state.DecryptSessionMessageAsync(relayHostPeerId, relayHostToMainSessionId, ackCipher, cancellationToken).ConfigureAwait(false);
             var ack = Percolator.Contracts.RelayOpaqueResponse.Parser.ParseFrom(ackPlain.Value);
             if (!ack.HasMessageAckId)
             {
@@ -225,12 +226,15 @@ public sealed class SimulatorRelayEmulator : ISimulatorRelayEmulator
     {
         cancellationToken.ThrowIfCancellationRequested();
 
+        byte[] recipientRoutingKey;
         if (recipientPeerId == MainNodeSentinelPeerId)
         {
-            throw new InvalidOperationException("ForwardQueuedToPeerAsync cannot target Main by Guid. Use ForwardQueuedToMainByRoutingKeyAsync (PKH) instead.");
+            recipientRoutingKey = MainNodeSentinelPeerId.ToByteArray();
         }
-
-        var recipientRoutingKey = await _peerRuntime.ComputePublicKeyHashAsync(recipientPeerId, cancellationToken).ConfigureAwait(false);
+        else
+        {
+            recipientRoutingKey = await _state.ComputePublicKeyHashAsync(recipientPeerId, cancellationToken).ConfigureAwait(false);
+        }
         var dequeued = await _state
             .DequeueRelayOpaqueAsync(relayHostPeerId, recipientRoutingKey, max, cancellationToken)
             .ConfigureAwait(false);
@@ -244,8 +248,7 @@ public sealed class SimulatorRelayEmulator : ISimulatorRelayEmulator
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            _ = await _peerRuntime
-                .ReceiveRelayedOpaquePayloadAsync(recipientPeerId, item.OpaqueBytes, cancellationToken)
+            _ = await _state.ReceiveRelayedOpaquePayloadAsync(recipientPeerId, item.OpaqueBytes, cancellationToken)
                 .ConfigureAwait(false);
 
             forwarded++;
@@ -283,7 +286,7 @@ public sealed class SimulatorRelayEmulator : ISimulatorRelayEmulator
                 }
             };
 
-            var cipher = await _peerRuntime.EncryptInternalEnvelopeAsync(
+            var cipher = await _state.EncryptInternalEnvelopeAsync(
                 relayHostPeerId,
                 relayHostToMainSessionId,
                 env,
@@ -311,7 +314,7 @@ public sealed class SimulatorRelayEmulator : ISimulatorRelayEmulator
             }
 
             var ackCipher = new Percolator.Cryptography.SessionRatchetMessage(response.ResponsePayload.ResponsePayload.ToByteArray());
-            var ackPlain = await _peerRuntime.DecryptSessionMessageAsync(relayHostPeerId, relayHostToMainSessionId, ackCipher, cancellationToken).ConfigureAwait(false);
+            var ackPlain = await _state.DecryptSessionMessageAsync(relayHostPeerId, relayHostToMainSessionId, ackCipher, cancellationToken).ConfigureAwait(false);
             var ack = Percolator.Contracts.RelayOpaqueResponse.Parser.ParseFrom(ackPlain.Value);
             if (!ack.HasMessageAckId)
             {

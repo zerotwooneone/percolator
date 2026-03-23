@@ -1,272 +1,38 @@
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Collections.ObjectModel;
 using System.Security.Cryptography;
-using System.Runtime.Serialization;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Desktop.Wpf.Features.Simulator;
-using Desktop.Wpf.Shared.Models;
 using FluentAssertions;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using NUnit.Framework;
-using Percolator.Application.Network;
+using Percolator.Application.Configuration;
 using Percolator.Contracts;
+using Percolator.Cryptography;
+using Percolator.Cryptography.Primitives;
+using Desktop.Wpf.Features.Simulator.Protocol;
+using Desktop.Wpf.Features.Sessions;
 
 namespace Desktop.Wpf.Tests;
 
 [TestFixture]
 public sealed class SimulatedPeerRuntimeFinalizeRelayedTests
 {
-    private sealed class DirectoryStub : ISimulatedPeerDirectory
+    private sealed class InMemoryRepository : ISimulatorStateRepository
     {
-        private readonly ObservableCollection<SimulatedPeerModel> _peers;
+        public SimulatorStateDto? State { get; set; }
 
-        public DirectoryStub(params SimulatedPeerModel[] peers)
+        public Task<SimulatorStateDto?> LoadAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(State);
+
+        public Task SaveAsync(SimulatorStateDto state, CancellationToken cancellationToken = default)
         {
-            _peers = new ObservableCollection<SimulatedPeerModel>(peers);
-            Peers = new ReadOnlyObservableCollection<SimulatedPeerModel>(_peers);
-        }
-
-        public ReadOnlyObservableCollection<SimulatedPeerModel> Peers { get; }
-
-        public Task InitializeAsync(CancellationToken ct = default) => Task.CompletedTask;
-
-        public Task<SimulatedPeerModel> AddPeerAsync(string? displayName, CancellationToken ct = default)
-            => throw new NotImplementedException();
-
-        public Task RemovePeerAsync(Guid peerId, CancellationToken ct = default)
-            => throw new NotImplementedException();
-
-        public void Dispose()
-        {
-            foreach (var p in _peers)
-            {
-                p.Dispose();
-            }
-        }
-    }
-
-    private sealed class RelayStateStub : ISimulatorStateService
-    {
-        private readonly ConcurrentDictionary<(Guid RelayHost, string RoutingKeyB64), Queue<RelayQueuedBlobDto>> _queues = new();
-        private readonly ConcurrentDictionary<Guid, SimulatedPeerRuntimeStoreDto> _runtimeByPeerId = new();
-        private readonly ConcurrentDictionary<(Guid RelayHost, string PkhB64), Queue<PublishedPreKeyBundleDto>> _preKeyBundles = new();
-
-        public IReadOnlyModelList<SimulatedPeerModel> Peers { get; } = new ModelList<SimulatedPeerModel>();
-
-        public Task InitializeAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
-        public Task<Guid> AddPeerAsync(string? displayName, CancellationToken cancellationToken = default) => throw new NotImplementedException();
-        public Task RemovePeerAsync(Guid peerId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
-        public Task ToggleOnlineAsync(Guid peerId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
-        public Task ToggleRelayCapableAsync(Guid peerId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
-        public Task UpdateDisplayNameAsync(Guid peerId, string? displayName, CancellationToken cancellationToken = default) => throw new NotImplementedException();
-        public Task SetOnlineAsync(Guid peerId, bool isOnline, CancellationToken cancellationToken = default) => throw new NotImplementedException();
-        public Task SetRelayCapableAsync(Guid peerId, bool isRelayCapable, CancellationToken cancellationToken = default) => throw new NotImplementedException();
-
-        public Task<Guid?> TryGetPeerIdByIdentityPkhAsync(byte[] recipientPublicKeyHash, CancellationToken cancellationToken = default)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (recipientPublicKeyHash is null) throw new ArgumentNullException(nameof(recipientPublicKeyHash));
-            return Task.FromResult<Guid?>(null);
-        }
-
-        public SimulatedPeerSnapshot? TryGetPeerSnapshot(Guid peerId) => null;
-
-        public IReadOnlyList<SimulatedPeerSnapshot> SnapshotPeers() => Array.Empty<SimulatedPeerSnapshot>();
-
-        public Task EnqueueRelayOpaqueAsync(Guid relayHostPeerId, byte[] recipientRoutingKey, byte[] opaqueBytes, string? debugType = null, CancellationToken cancellationToken = default)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            var key = (relayHostPeerId, Convert.ToBase64String(recipientRoutingKey));
-            var q = _queues.GetOrAdd(key, _ => new Queue<RelayQueuedBlobDto>());
-            q.Enqueue(new RelayQueuedBlobDto
-            {
-                AckId = Guid.NewGuid(),
-                RecipientRoutingKey = recipientRoutingKey,
-                OpaqueBytes = opaqueBytes,
-                EnqueuedUtc = DateTimeOffset.UtcNow,
-                DebugType = debugType
-            });
-            return Task.CompletedTask;
-        }
-
-        public Task<RelayQueuedBlobDto?> PeekRelayOpaqueAsync(Guid relayHostPeerId, byte[] recipientRoutingKey, CancellationToken cancellationToken = default)
-            => throw new NotImplementedException();
-
-        public Task<IReadOnlyList<RelayQueuedBlobDto>> DequeueRelayOpaqueAsync(Guid relayHostPeerId, byte[] recipientRoutingKey, int max, CancellationToken cancellationToken = default)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            var key = (relayHostPeerId, Convert.ToBase64String(recipientRoutingKey));
-            if (!_queues.TryGetValue(key, out var q) || q.Count == 0)
-            {
-                return Task.FromResult<IReadOnlyList<RelayQueuedBlobDto>>(Array.Empty<RelayQueuedBlobDto>());
-            }
-
-            var list = new List<RelayQueuedBlobDto>(Math.Min(max, q.Count));
-            while (q.Count > 0 && list.Count < max)
-            {
-                list.Add(q.Dequeue());
-            }
-            return Task.FromResult<IReadOnlyList<RelayQueuedBlobDto>>(list);
-        }
-
-        public Task<bool> DeleteRelayOpaqueByAckIdAsync(Guid relayHostPeerId, Guid ackId, CancellationToken cancellationToken = default)
-            => throw new NotImplementedException();
-
-        public Task<bool> MoveRelayOpaqueByAckIdAsync(Guid relayHostPeerId, Guid ackId, int delta, CancellationToken cancellationToken = default)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (delta == 0) return Task.FromResult(false);
-
-            foreach (var kvp in _queues)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                if (kvp.Key.RelayHost != relayHostPeerId) continue;
-
-                var q = kvp.Value;
-                lock (q)
-                {
-                    var list = q.ToArray();
-                    var idx = Array.FindIndex(list, x => x.AckId == ackId);
-                    if (idx < 0) continue;
-
-                    var newIdx = idx + delta;
-                    if (newIdx < 0 || newIdx >= list.Length) return Task.FromResult(false);
-
-                    var item = list[idx];
-                    var tmp = new List<RelayQueuedBlobDto>(list);
-                    tmp.RemoveAt(idx);
-                    tmp.Insert(newIdx, item);
-
-                    q.Clear();
-                    foreach (var it in tmp) q.Enqueue(it);
-                    return Task.FromResult(true);
-                }
-            }
-
-            return Task.FromResult(false);
-        }
-
-        public Task<bool> CorruptRelayOpaqueByAckIdAsync(Guid relayHostPeerId, Guid ackId, CancellationToken cancellationToken = default)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            foreach (var kvp in _queues)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                if (kvp.Key.RelayHost != relayHostPeerId) continue;
-
-                var q = kvp.Value;
-                lock (q)
-                {
-                    var list = q.ToArray();
-                    var idx = Array.FindIndex(list, x => x.AckId == ackId);
-                    if (idx < 0) continue;
-                    if (list[idx].OpaqueBytes is null || list[idx].OpaqueBytes.Length == 0) return Task.FromResult(false);
-
-                    var bytes = (byte[])list[idx].OpaqueBytes.Clone();
-                    bytes[0] = (byte)(bytes[0] ^ 0x01);
-                    list[idx].OpaqueBytes = bytes;
-
-                    q.Clear();
-                    foreach (var it in list) q.Enqueue(it);
-                    return Task.FromResult(true);
-                }
-            }
-
-            return Task.FromResult(false);
-        }
-
-        public Task PublishPreKeyBundleAsync(
-            Guid relayHostPeerId,
-            byte[] recipientPublicKeyHash,
-            Guid logicalOwnerPeerId,
-            byte[] bundleBytes,
-            DateTimeOffset expiresUtc,
-            CancellationToken cancellationToken = default)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (recipientPublicKeyHash is null) throw new ArgumentNullException(nameof(recipientPublicKeyHash));
-            if (bundleBytes is null) throw new ArgumentNullException(nameof(bundleBytes));
-
-            var key = (relayHostPeerId, Convert.ToBase64String(recipientPublicKeyHash));
-            var q = _preKeyBundles.GetOrAdd(key, _ => new Queue<PublishedPreKeyBundleDto>());
-            q.Enqueue(new PublishedPreKeyBundleDto
-            {
-                RecipientPublicKeyHash = recipientPublicKeyHash,
-                LogicalOwnerPeerId = logicalOwnerPeerId,
-                BundleBytes = bundleBytes,
-                ExpiresUtc = expiresUtc
-            });
-            return Task.CompletedTask;
-        }
-
-        public Task<PublishedPreKeyBundleDto?> TryPopPreKeyBundleByRecipientPkhAsync(
-            Guid relayHostPeerId,
-            byte[] recipientPublicKeyHash,
-            CancellationToken cancellationToken = default)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (recipientPublicKeyHash is null) throw new ArgumentNullException(nameof(recipientPublicKeyHash));
-
-            var key = (relayHostPeerId, Convert.ToBase64String(recipientPublicKeyHash));
-            if (!_preKeyBundles.TryGetValue(key, out var q) || q.Count == 0)
-            {
-                return Task.FromResult<PublishedPreKeyBundleDto?>(null);
-            }
-
-            // best-effort expiration handling
-            var now = DateTimeOffset.UtcNow;
-            while (q.Count > 0 && q.Peek().ExpiresUtc <= now)
-            {
-                _ = q.Dequeue();
-            }
-            if (q.Count == 0)
-            {
-                return Task.FromResult<PublishedPreKeyBundleDto?>(null);
-            }
-
-            return Task.FromResult<PublishedPreKeyBundleDto?>(q.Dequeue());
-        }
-
-        public Task<SimulatedPeerRuntimeStoreDto?> TryGetRuntimeStoreAsync(Guid peerId, CancellationToken cancellationToken = default)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            _runtimeByPeerId.TryGetValue(peerId, out var store);
-            return Task.FromResult<SimulatedPeerRuntimeStoreDto?>(store);
-        }
-
-        public Task SaveRuntimeStoreAsync(Guid peerId, SimulatedPeerRuntimeStoreDto store, CancellationToken cancellationToken = default)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            _runtimeByPeerId[peerId] = store;
-            return Task.CompletedTask;
-        }
-
-        public Task AddPublishedKeysRelationshipAsync(Guid publisherPeerId, Guid hostPeerId, CancellationToken cancellationToken = default)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            return Task.CompletedTask;
-        }
-
-        public Task RemovePublishedKeysRelationshipAsync(Guid publisherPeerId, Guid hostPeerId, CancellationToken cancellationToken = default)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            return Task.CompletedTask;
-        }
-
-        public Task AddRelayActiveSessionAsync(Guid relayHostPeerId, Guid peerId, CancellationToken cancellationToken = default)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            return Task.CompletedTask;
-        }
-
-        public Task RemoveRelayActiveSessionAsync(Guid relayHostPeerId, Guid peerId, CancellationToken cancellationToken = default)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
+            State = state;
             return Task.CompletedTask;
         }
     }
@@ -274,9 +40,6 @@ public sealed class SimulatedPeerRuntimeFinalizeRelayedTests
     [Test]
     public async Task Relayed_invite_and_response_can_be_accepted_and_finalized()
     {
-        var pending = new SimulatedPeerPendingInbox();
-
-        var relayHostPeerId = Guid.NewGuid();
         var inviterPeerId = Guid.NewGuid();
         var acceptorPeerId = Guid.NewGuid();
 
@@ -290,28 +53,78 @@ public sealed class SimulatedPeerRuntimeFinalizeRelayedTests
         using var acceptorIdentityEcdsa = ECDsa.Create(acceptorIdentityEcdh.ExportParameters(true));
         var acceptorIdentitySpki = acceptorIdentityEcdsa.ExportSubjectPublicKeyInfo();
 
-        var inviterModel = new SimulatedPeerModel(inviterPeerId, "inviter", isOnline: true, isRelayCapable: false, inviterIdentitySpki, inviterIdentityPriv);
-        var acceptorModel = new SimulatedPeerModel(acceptorPeerId, "acceptor", isOnline: true, isRelayCapable: false, acceptorIdentitySpki, acceptorIdentityPriv);
-
-        using var directory = new DirectoryStub(inviterModel, acceptorModel);
-
-        var messageService = (Percolator.Application.Network.PercolatorMessageService)
-            FormatterServices.GetUninitializedObject(typeof(PercolatorMessageService));
-        var stateForRuntime = new Moq.Mock<ISimulatorStateService>(Moq.MockBehavior.Loose);
-
-        var diagnostics = new SimulatorDiagnosticsService();
-        var runtime = new SimulatedPeerRuntimeService(directory, messageService, stateForRuntime.Object, diagnostics, pending);
-
-        var relayState = new RelayStateStub();
-        var relay = new SimulatorRelayEmulator(relayState, runtime, messageService);
-
         using var inviterSignedPreKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var inviterSignedPreKeySpki = inviterSignedPreKey.PublicKey.ExportSubjectPublicKeyInfo();
         var inviterSignedPreKeyPriv = inviterSignedPreKey.ExportECPrivateKey();
         var preKeySig = inviterIdentityEcdsa.SignData(inviterSignedPreKeySpki, HashAlgorithmName.SHA256);
 
         var correlation = Guid.NewGuid();
-        runtime.RecordOutboundInviteSignedPreKeyPrivate(inviterPeerId, correlation, inviterSignedPreKeyPriv);
+
+        var pending = new SimulatedPeerPendingInbox();
+        var repo = new InMemoryRepository
+        {
+            State = new SimulatorStateDto
+            {
+                Version = 1,
+                Peers =
+                {
+                    new SimulatedPeerDto
+                    {
+                        PeerId = inviterPeerId,
+                        DisplayName = "inviter",
+                        IsOnline = true,
+                        ReverseSignalKeys = new SimulatedPeerReverseSignalKeysDto
+                        {
+                            IdentitySigningKeySpki = inviterIdentitySpki,
+                            IdentitySigningKeyPrivateKeyEcPrivateKey = inviterIdentityPriv
+                        },
+                        RuntimeStore = new SimulatedPeerRuntimeStoreDto
+                        {
+                            OutboundInvites = new List<SimulatedOutboundInviteDto>
+                            {
+                                new SimulatedOutboundInviteDto
+                                {
+                                    CorrelationId = correlation,
+                                    SignedPreKeyPrivateEcPrivateKey = inviterSignedPreKeyPriv
+                                }
+                            }
+                        }
+                    },
+                    new SimulatedPeerDto
+                    {
+                        PeerId = acceptorPeerId,
+                        DisplayName = "acceptor",
+                        IsOnline = true,
+                        ReverseSignalKeys = new SimulatedPeerReverseSignalKeysDto
+                        {
+                            IdentitySigningKeySpki = acceptorIdentitySpki,
+                            IdentitySigningKeyPrivateKeyEcPrivateKey = acceptorIdentityPriv
+                        }
+                    }
+                }
+            }
+        };
+
+        var services = new ServiceCollection();
+        services.AddSingleton<IClock, SystemClock>();
+        var sp = services.BuildServiceProvider();
+        var scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
+
+        var engine = new SignalProtocolEngine(new SystemClock());
+        var keys = new SimulatedPeerKeyFactory();
+        var options = Options.Create(new TransportOptions { GrpcPort = 5002 });
+        var diagnostics = new SimulatorDiagnosticsService();
+
+        var state = new SimulatorStateService(
+            store: repo,
+            keys: keys,
+            transportOptions: options,
+            diagnostics: diagnostics,
+            pending: pending,
+            scopeFactory: scopeFactory,
+            engine: engine);
+
+        await state.InitializeAsync(CancellationToken.None);
 
         var payload = new InviteHandshakeRequestPayload
         {
@@ -339,27 +152,15 @@ public sealed class SimulatedPeerRuntimeFinalizeRelayedTests
             PayloadSignature = ByteString.CopyFrom(payloadSig)
         };
 
-        await relay.EnqueueToRelayHostAsync(relayHostPeerId, acceptorPeerId, invite.ToByteArray(), debugType: nameof(EstablishDirectSessionRequest), cancellationToken: CancellationToken.None);
-
-        var inviteFromRelay = await relay.FetchFromRelayHostAsync(relayHostPeerId, acceptorPeerId, max: 1, cancellationToken: CancellationToken.None);
-        inviteFromRelay.Should().HaveCount(1);
-        var parsedInvite = EstablishDirectSessionRequest.Parser.ParseFrom(inviteFromRelay[0].OpaqueBytes);
-
-        var acceptance = await runtime.AcceptReverseSignalInviteAsync(
+        var acceptance = await state.AcceptReverseSignalInviteAsync(
             simulatedPeerId: acceptorPeerId,
             inviterPeerId: inviterPeerId,
-            invite: parsedInvite,
+            invite: invite,
             cancellationToken: CancellationToken.None);
 
-        await relay.EnqueueToRelayHostAsync(relayHostPeerId, inviterPeerId, acceptance.Response.ToByteArray(), debugType: nameof(InviteHandshakeResponse), cancellationToken: CancellationToken.None);
+        await state.ReceiveInviteHandshakeResponseFromMainAsync(inviterPeerId, acceptance.Response, CancellationToken.None);
 
-        var responseFromRelay = await relay.FetchFromRelayHostAsync(relayHostPeerId, inviterPeerId, max: 1, cancellationToken: CancellationToken.None);
-        responseFromRelay.Should().HaveCount(1);
-        var parsedResponse = InviteHandshakeResponse.Parser.ParseFrom(responseFromRelay[0].OpaqueBytes);
-
-        pending.AddInviteHandshakeResponse(inviterPeerId, correlation, parsedResponse);
-
-        var finalizedSid = await runtime.TryFinalizeInviteHandshakeResponseFromMainAsync(
+        var finalizedSid = await state.TryFinalizeInviteHandshakeResponseFromMainAsync(
             simulatedPeerId: inviterPeerId,
             acceptorPeerId: acceptorPeerId,
             requestCorrelationId: correlation,

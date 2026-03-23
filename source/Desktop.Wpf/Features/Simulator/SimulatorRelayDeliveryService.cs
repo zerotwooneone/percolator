@@ -16,18 +16,15 @@ public interface ISimulatorRelayDeliveryService
 
 public sealed class SimulatorRelayDeliveryService : ISimulatorRelayDeliveryService
 {
-    private readonly ISimulatedPeerRuntimeService _peerRuntime;
     private readonly PercolatorMessageService _messageService;
     private readonly ISimulatorStateService _state;
     private readonly ILogger<SimulatorRelayDeliveryService> _logger;
 
     public SimulatorRelayDeliveryService(
-        ISimulatedPeerRuntimeService peerRuntime,
         PercolatorMessageService messageService,
         ISimulatorStateService state,
         ILogger<SimulatorRelayDeliveryService> logger)
     {
-        _peerRuntime = peerRuntime;
         _messageService = messageService;
         _state = state;
         _logger = logger;
@@ -52,7 +49,7 @@ public sealed class SimulatorRelayDeliveryService : ISimulatorRelayDeliveryServi
             }
         };
 
-        var cipher = await _peerRuntime
+        var cipher = await _state
             .EncryptInternalEnvelopeAsync(relayHostPeerId, relayHostToMainSessionId, env, cancellationToken)
             .ConfigureAwait(false);
 
@@ -68,7 +65,11 @@ public sealed class SimulatorRelayDeliveryService : ISimulatorRelayDeliveryServi
             requestHeaders: new Metadata(),
             cancellationToken: cancellationToken);
 
-        _ = await _messageService.DeliverOpaqueMessage(request, ctx).ConfigureAwait(false);
+        var resp = await _messageService.DeliverOpaqueMessage(request, ctx).ConfigureAwait(false);
+
+        var respCipher = new SessionRatchetMessage(resp.ResponsePayload.ResponsePayload.ToByteArray());
+        var plain = await _state.DecryptSessionMessageAsync(relayHostPeerId, relayHostToMainSessionId, respCipher, cancellationToken).ConfigureAwait(false);
+        var response = RelayOpaqueResponse.Parser.ParseFrom(plain.Value);
     }
 
     public async Task DeliverToPeerAsync(
@@ -80,11 +81,11 @@ public sealed class SimulatorRelayDeliveryService : ISimulatorRelayDeliveryServi
         cancellationToken.ThrowIfCancellationRequested();
         if (item is null) throw new ArgumentNullException(nameof(item));
 
-        var resp = await _peerRuntime
+        var forwarded = await _state
             .ReceiveRelayedOpaquePayloadAsync(recipientPeerId, item.OpaqueBytes, cancellationToken)
             .ConfigureAwait(false);
 
-        if (resp?.Response is null || !resp.Response.HasResponsePayload || resp.Response.ResponsePayload.Length == 0)
+        if (forwarded?.Response is null || !forwarded.Response.HasResponsePayload || forwarded.Response.ResponsePayload.Length == 0)
         {
             return;
         }
@@ -103,7 +104,7 @@ public sealed class SimulatorRelayDeliveryService : ISimulatorRelayDeliveryServi
             await _state.EnqueueRelayOpaqueAsync(
                     relayHostPeerId: relayHostPeerId,
                     recipientRoutingKey: initiatorPkh,
-                    opaqueBytes: resp.ToByteArray(),
+                    opaqueBytes: forwarded.ToByteArray(),
                     debugType: nameof(EstablishSessionResponse),
                     cancellationToken: cancellationToken)
                 .ConfigureAwait(false);

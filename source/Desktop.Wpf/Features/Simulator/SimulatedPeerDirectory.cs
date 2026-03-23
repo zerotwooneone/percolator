@@ -1,6 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Windows;
-using Desktop.Wpf.Shared.Models;
+using ObservableCollections;
 using R3;
 
 namespace Desktop.Wpf.Features.Simulator;
@@ -27,7 +27,7 @@ public sealed class SimulatedPeerDirectory : ISimulatedPeerDirectory
 
     private readonly Dictionary<Guid, SimulatedPeerModel> _byId = new();
 
-    private IDisposable? _changesSub;
+    private IDisposable? _peersSub;
 
     public SimulatedPeerDirectory(ISimulatorStateService state)
     {
@@ -63,14 +63,14 @@ public sealed class SimulatedPeerDirectory : ISimulatedPeerDirectory
                 _peers.Clear();
                 _byId.Clear();
 
-                foreach (var model in _state.Peers.GetSnapshot())
+                foreach (var model in _state.Peers)
                 {
                     _peers.Add(model);
                     _byId[model.PeerId] = model;
                 }
             }).ConfigureAwait(false);
 
-            HookChanges();
+            HookPeers();
         }
         finally
         {
@@ -81,76 +81,34 @@ public sealed class SimulatedPeerDirectory : ISimulatedPeerDirectory
         }
     }
 
-    private void HookChanges()
+    private void HookPeers()
     {
-        _changesSub?.Dispose();
-        _changesSub = _state.Peers.Changes
-            .Subscribe(change =>
-            {
-                _ = InvokeOnUiAsync(() => ApplyChange(change));
-            });
+        _peersSub?.Dispose();
+
+        var peers = _state.Peers;
+        _peersSub = Observable.Merge(
+                peers.ObserveAdd().Select(static _ => Unit.Default),
+                peers.ObserveRemove().Select(static _ => Unit.Default),
+                peers.ObserveReplace().Select(static _ => Unit.Default),
+                peers.ObserveReset().Select(static _ => Unit.Default))
+            .SubscribeAwait(async (_,__) =>  await InvokeOnUiAsync(RebuildFromState));
     }
 
-    private void ApplyChange(StoreListChange<SimulatedPeerModel> change)
+    private void RebuildFromState()
     {
-        if (change.Kind is StoreListChangeKind.Reset)
+        _peers.Clear();
+        _byId.Clear();
+        foreach (var m in _state.Peers)
         {
-            _peers.Clear();
-            _byId.Clear();
-            foreach (var m in change.Items)
-            {
-                _peers.Add(m);
-                _byId[m.PeerId] = m;
-            }
-            return;
-        }
-
-        if (change.Kind is StoreListChangeKind.Add)
-        {
-            foreach (var m in change.Items)
-            {
-                _peers.Add(m);
-                _byId[m.PeerId] = m;
-            }
-            return;
-        }
-
-        if (change.Kind is StoreListChangeKind.Remove)
-        {
-            foreach (var m in change.Items)
-            {
-                if (_byId.Remove(m.PeerId))
-                {
-                    _ = _peers.Remove(m);
-                }
-            }
-            return;
-        }
-
-        if (change.Kind is StoreListChangeKind.Replace)
-        {
-            // Models should be stable; replace should be rare. Best-effort.
-            foreach (var m in change.Items)
-            {
-                if (_byId.TryGetValue(m.PeerId, out var existing))
-                {
-                    var idx = _peers.IndexOf(existing);
-                    if (idx >= 0) _peers[idx] = m;
-                    _byId[m.PeerId] = m;
-                }
-                else
-                {
-                    _peers.Add(m);
-                    _byId[m.PeerId] = m;
-                }
-            }
+            _peers.Add(m);
+            _byId[m.PeerId] = m;
         }
     }
 
     public async Task<SimulatedPeerModel> AddPeerAsync(string? displayName, CancellationToken ct = default)
     {
         var peerId = await _state.AddPeerAsync(displayName, ct).ConfigureAwait(false);
-        var model = _state.Peers.GetSnapshot().FirstOrDefault(x => x.PeerId == peerId);
+        var model = _state.Peers.FirstOrDefault(x => x.PeerId == peerId);
         if (model is null) throw new InvalidOperationException("Peer was created but no model was published.");
         return model;
     }
@@ -174,8 +132,8 @@ public sealed class SimulatedPeerDirectory : ISimulatedPeerDirectory
 
     public void Dispose()
     {
-        _changesSub?.Dispose();
-        _changesSub = null;
+        _peersSub?.Dispose();
+        _peersSub = null;
 
         _peers.Clear();
         _byId.Clear();

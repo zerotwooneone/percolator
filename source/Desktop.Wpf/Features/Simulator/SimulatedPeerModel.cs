@@ -1,5 +1,7 @@
+using ObservableCollections;
+using Percolator.Cryptography;
+using Percolator.Cryptography.Primitives;
 using R3;
-using Desktop.Wpf.Shared.Models;
 
 namespace Desktop.Wpf.Features.Simulator;
 
@@ -20,7 +22,13 @@ public sealed class SimulatedPeerModel : IDisposable
     private readonly ReactiveProperty<DateTimeOffset?> _notUntilUtc;
     private readonly ReactiveProperty<string?> _lastError;
 
-    private readonly ModelList<SimulatorHandshakeAttemptState> _handshakeAttempts;
+    private readonly ObservableList<SimulatorHandshakeAttemptState> _handshakeAttempts;
+    private readonly ReactiveProperty<int> _handshakeAttemptsVersion;
+
+    private readonly ObservableDictionary<SessionId, SecureSession> _sessions;
+    private readonly ObservableList<SimulatedSignedPreKeyModel> _signedPreKeys;
+    private readonly ObservableList<SimulatedOutboundInviteModel> _outboundInvites;
+    private readonly ObservableList<SimulatedPendingInviteHandshakeResponseModel> _pendingInviteHandshakeResponses;
 
     public SimulatedPeerModel(
         Guid peerId,
@@ -71,8 +79,14 @@ public sealed class SimulatedPeerModel : IDisposable
         _notUntilUtc = new ReactiveProperty<DateTimeOffset?>(notUntilUtc);
         _lastError = new ReactiveProperty<string?>(lastError);
 
-        _handshakeAttempts = new ModelList<SimulatorHandshakeAttemptState>();
-        _handshakeAttempts.Reset(handshakeAttempts ?? new());
+        _handshakeAttempts = new ObservableList<SimulatorHandshakeAttemptState>();
+        _handshakeAttempts.AddRange(handshakeAttempts ?? new());
+        _handshakeAttemptsVersion = new ReactiveProperty<int>(0);
+
+        _sessions = new ObservableDictionary<SessionId, SecureSession>();
+        _signedPreKeys = new ObservableList<SimulatedSignedPreKeyModel>();
+        _outboundInvites = new ObservableList<SimulatedOutboundInviteModel>();
+        _pendingInviteHandshakeResponses = new ObservableList<SimulatedPendingInviteHandshakeResponseModel>();
     }
 
     public Guid PeerId { get; }
@@ -94,7 +108,18 @@ public sealed class SimulatedPeerModel : IDisposable
     public ReadOnlyReactiveProperty<DateTimeOffset?> NotUntilUtc => _notUntilUtc;
     public ReadOnlyReactiveProperty<string?> LastError => _lastError;
 
-    public IReadOnlyModelList<SimulatorHandshakeAttemptState> HandshakeAttempts => _handshakeAttempts;
+    public IReadOnlyObservableList<SimulatorHandshakeAttemptState> HandshakeAttempts => _handshakeAttempts;
+    public ReadOnlyReactiveProperty<int> HandshakeAttemptsVersion => _handshakeAttemptsVersion;
+
+    public IReadOnlyObservableDictionary<SessionId, SecureSession> Sessions => _sessions;
+    public IReadOnlyObservableList<SimulatedSignedPreKeyModel> SignedPreKeys => _signedPreKeys;
+    public IReadOnlyObservableList<SimulatedOutboundInviteModel> OutboundInvites => _outboundInvites;
+    public IReadOnlyObservableList<SimulatedPendingInviteHandshakeResponseModel> PendingInviteHandshakeResponses => _pendingInviteHandshakeResponses;
+
+    internal ObservableDictionary<SessionId, SecureSession> SessionsMutable => _sessions;
+    internal ObservableList<SimulatedSignedPreKeyModel> SignedPreKeysMutable => _signedPreKeys;
+    internal ObservableList<SimulatedOutboundInviteModel> OutboundInvitesMutable => _outboundInvites;
+    internal ObservableList<SimulatedPendingInviteHandshakeResponseModel> PendingInviteHandshakeResponsesMutable => _pendingInviteHandshakeResponses;
 
     internal void Track(IDisposable disposable)
         => disposable.AddTo(ref _bag);
@@ -185,12 +210,14 @@ public sealed class SimulatedPeerModel : IDisposable
         _phase.Value = null;
         _notUntilUtc.Value = null;
         _lastError.Value = null;
-        _handshakeAttempts.Reset(new List<SimulatorHandshakeAttemptState>());
+
+        _handshakeAttempts.Clear();
+        _handshakeAttemptsVersion.Value++;
     }
 
     private void UpsertAttempt(Guid correlationId)
     {
-        var attempts = _handshakeAttempts.GetSnapshot().ToList();
+        var attempts = _handshakeAttempts.ToList();
 
         var idx = attempts.FindIndex(a => a.CorrelationId == correlationId);
         var createdAt = idx >= 0 ? attempts[idx].CreatedAtUtc : DateTimeOffset.UtcNow;
@@ -208,10 +235,16 @@ public sealed class SimulatedPeerModel : IDisposable
             CreatedAtUtc = createdAt
         };
 
-        if (idx >= 0) attempts[idx] = snapshot;
-        else attempts.Add(snapshot);
+        if (idx >= 0)
+        {
+            _handshakeAttempts[idx] = snapshot;
+        }
+        else
+        {
+            _handshakeAttempts.Add(snapshot);
+        }
 
-        _handshakeAttempts.Reset(attempts);
+        _handshakeAttemptsVersion.Value++;
     }
 
     public void SetAttemptPhase(Guid correlationId, string? phase)
@@ -227,8 +260,15 @@ public sealed class SimulatedPeerModel : IDisposable
         Guid correlationId,
         Func<SimulatorHandshakeAttemptState, SimulatorHandshakeAttemptState> update)
     {
-        var attempts = _handshakeAttempts.GetSnapshot().ToList();
-        var idx = attempts.FindIndex(a => a.CorrelationId == correlationId);
+        var idx = -1;
+        for (var i = 0; i < _handshakeAttempts.Count; i++)
+        {
+            if (_handshakeAttempts[i].CorrelationId == correlationId)
+            {
+                idx = i;
+                break;
+            }
+        }
         if (idx < 0)
         {
             // Create a new attempt snapshot from current summary fields, then apply the update.
@@ -245,13 +285,13 @@ public sealed class SimulatedPeerModel : IDisposable
                 CreatedAtUtc = DateTimeOffset.UtcNow
             };
 
-            attempts.Add(update(initial));
-            _handshakeAttempts.Reset(attempts);
+            _handshakeAttempts.Add(update(initial));
+            _handshakeAttemptsVersion.Value++;
             return;
         }
 
-        attempts[idx] = update(attempts[idx]);
-        _handshakeAttempts.Reset(attempts);
+        _handshakeAttempts[idx] = update(_handshakeAttempts[idx]);
+        _handshakeAttemptsVersion.Value++;
     }
 
     public void Dispose()
@@ -271,9 +311,15 @@ public sealed class SimulatedPeerModel : IDisposable
         _notUntilUtc.Dispose();
         _lastError.Dispose();
 
-        _handshakeAttempts.Dispose();
+        _handshakeAttemptsVersion.Dispose();
     }
 
     private static string? NormalizeDisplayName(string? displayName)
         => string.IsNullOrWhiteSpace(displayName) ? null : displayName.Trim();
 }
+
+public sealed record SimulatedSignedPreKeyModel(Guid SignedPreKeyId, byte[] PrivateEcPrivateKey, byte[] PublicSpki);
+
+public sealed record SimulatedOutboundInviteModel(Guid CorrelationId, byte[] SignedPreKeyPrivateEcPrivateKey);
+
+public sealed record SimulatedPendingInviteHandshakeResponseModel(Guid CorrelationId, byte[] ResponseBytes);

@@ -1,6 +1,6 @@
 namespace Desktop.Wpf.Features.Simulator;
 
-public interface ISimulatorStateStore
+public interface ISimulatorStateRepository
 {
     Task<SimulatorStateDto?> LoadAsync(CancellationToken cancellationToken = default);
 

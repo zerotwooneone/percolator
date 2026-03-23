@@ -13,7 +13,6 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
 {
     private readonly SimulatedPeerModel _model;
     private readonly ISimulatorStateService _state;
-    private readonly ISimulatedPeerRuntimeService _runtime;
     private readonly ISimulatorDiagnosticsService _diagnostics;
     private readonly Func<Guid, string> _resolvePeerName;
     private readonly Action _relationshipsChanged;
@@ -24,14 +23,12 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
     public SimulatedPeerCardViewModel(
         SimulatedPeerModel model,
         ISimulatorStateService state,
-        ISimulatedPeerRuntimeService runtime,
         ISimulatorDiagnosticsService diagnostics,
         Func<Guid, string> resolvePeerName,
         Action relationshipsChanged)
     {
         _model = model;
         _state = state;
-        _runtime = runtime;
         _diagnostics = diagnostics;
         _resolvePeerName = resolvePeerName;
         _relationshipsChanged = relationshipsChanged;
@@ -215,7 +212,7 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
     {
         try
         {
-            var pkh = await _runtime.ComputePublicKeyHashAsync(_model.PeerId, CancellationToken.None).ConfigureAwait(false);
+            var pkh = await _state.ComputePublicKeyHashAsync(_model.PeerId, CancellationToken.None).ConfigureAwait(false);
             var hex = Convert.ToHexString(pkh);
             if (_disposed) return;
             await Application.Current.Dispatcher.InvokeAsync(() =>
@@ -299,7 +296,7 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
         var preKeySig = identityEcdsa.SignData(inviterSignedPreKeySpki, HashAlgorithmName.SHA256);
 
         var correlation = Guid.NewGuid();
-        _runtime.RecordOutboundInviteSignedPreKeyPrivate(_model.PeerId, correlation, inviterSignedPreKeyPriv);
+        _model.OutboundInvitesMutable.Add(new SimulatedOutboundInviteModel(correlation, inviterSignedPreKeyPriv));
         var payload = new InviteHandshakeRequestPayload
         {
             Version = 1,
@@ -376,7 +373,7 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
         await _state.AddPublishedKeysRelationshipAsync(_model.PeerId, hostPeerId.Value, ct).ConfigureAwait(false);
 
         // In our simulator, "publishing" means pushing a standard pre-key bundle into the host's pre-key store.
-        await _runtime.PublishStandardPreKeyBundleToRelayAsync(
+        await _state.PublishStandardPreKeyBundleToRelayAsync(
                 simulatedPeerId: _model.PeerId,
                 relayHostPeerId: hostPeerId.Value,
                 expiresUtc: DateTimeOffset.UtcNow.AddHours(12),

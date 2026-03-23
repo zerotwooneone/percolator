@@ -1,14 +1,15 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
 using Desktop.Wpf.Features.Simulator;
-using Desktop.Wpf.Shared.Models;
 using FluentAssertions;
 using Moq;
 using NUnit.Framework;
+using ObservableCollections;
 
 namespace Desktop.Wpf.Tests;
 
@@ -60,14 +61,11 @@ public sealed class SimulatorDiagnosticsTabViewModelFilteringTests
         using var ecdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var priv = ecdh.ExportECPrivateKey();
         var spki = ecdh.PublicKey.ExportSubjectPublicKeyInfo();
-        var modelList = new ModelList<SimulatedPeerModel>();
-        modelList.Reset(new[]
-        {
-            new SimulatedPeerModel(peerA, "A", isOnline: true, isRelayCapable: false, spki, priv),
-            new SimulatedPeerModel(relay, "Relay", isOnline: true, isRelayCapable: true, spki, priv),
-            new SimulatedPeerModel(peerB, "B", isOnline: true, isRelayCapable: false, spki, priv)
-        });
-        state.SetupGet(s => s.Peers).Returns(modelList);
+        var peersList = new ObservableList<SimulatedPeerModel>();
+        peersList.Add(new SimulatedPeerModel(peerA, "A", isOnline: true, isRelayCapable: false, spki, priv));
+        peersList.Add(new SimulatedPeerModel(relay, "Relay", isOnline: true, isRelayCapable: true, spki, priv));
+        peersList.Add(new SimulatedPeerModel(peerB, "B", isOnline: true, isRelayCapable: false, spki, priv));
+        state.SetupGet(s => s.Peers).Returns(peersList);
         state.Setup(s => s.SnapshotPeers()).Returns(peers.Select(SimulatedPeerSnapshot.FromDto).ToList());
         state.Setup(s => s.TryGetPeerSnapshot(It.IsAny<Guid>()))
             .Returns<Guid>(id => peers.Where(p => p.PeerId == id).Select(SimulatedPeerSnapshot.FromDto).FirstOrDefault());

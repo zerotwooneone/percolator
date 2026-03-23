@@ -1,13 +1,15 @@
 using System;
-using System.Collections.ObjectModel;
-using System.Runtime.Serialization;
 using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
 using Desktop.Wpf.Features.Simulator;
+using Desktop.Wpf.Features.Simulator.Protocol;
+using Desktop.Wpf.Features.Sessions;
 using FluentAssertions;
-using Moq;
 using NUnit.Framework;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
+using Percolator.Application.Configuration;
 using Percolator.Cryptography;
 
 namespace Desktop.Wpf.Tests;
@@ -15,32 +17,17 @@ namespace Desktop.Wpf.Tests;
 [TestFixture]
 public sealed class SimulatedPeerRuntimeServiceDecryptFailureDiagnosticsTests
 {
-    private sealed class DirectoryStub : ISimulatedPeerDirectory
+    private sealed class InMemoryRepository : ISimulatorStateRepository
     {
-        private readonly ObservableCollection<SimulatedPeerModel> _peers;
+        public SimulatorStateDto? State { get; set; }
 
-        public DirectoryStub(params SimulatedPeerModel[] peers)
+        public Task<SimulatorStateDto?> LoadAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(State);
+
+        public Task SaveAsync(SimulatorStateDto state, CancellationToken cancellationToken = default)
         {
-            _peers = new ObservableCollection<SimulatedPeerModel>(peers);
-            Peers = new ReadOnlyObservableCollection<SimulatedPeerModel>(_peers);
-        }
-
-        public ReadOnlyObservableCollection<SimulatedPeerModel> Peers { get; }
-
-        public Task InitializeAsync(CancellationToken ct = default) => Task.CompletedTask;
-
-        public Task<SimulatedPeerModel> AddPeerAsync(string? displayName, CancellationToken ct = default)
-            => throw new NotImplementedException();
-
-        public Task RemovePeerAsync(Guid peerId, CancellationToken ct = default)
-            => throw new NotImplementedException();
-
-        public void Dispose()
-        {
-            foreach (var p in _peers)
-            {
-                p.Dispose();
-            }
+            State = state;
+            return Task.CompletedTask;
         }
     }
 
@@ -54,21 +41,42 @@ public sealed class SimulatedPeerRuntimeServiceDecryptFailureDiagnosticsTests
         using var identityEcdsa = ECDsa.Create(identityEcdh.ExportParameters(true));
         var identitySpki = identityEcdsa.ExportSubjectPublicKeyInfo();
 
-        var model = new SimulatedPeerModel(peerId, "peer", isOnline: true, isRelayCapable: false, identitySpki, identityPriv);
-        using var directory = new DirectoryStub(model);
-
-        var messageService = (Percolator.Application.Network.PercolatorMessageService)
-            FormatterServices.GetUninitializedObject(typeof(Percolator.Application.Network.PercolatorMessageService));
-
-        var state = new Mock<ISimulatorStateService>(MockBehavior.Loose);
-        state.Setup(s => s.TryGetRuntimeStoreAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((SimulatedPeerRuntimeStoreDto?)null);
-        state.Setup(s => s.SaveRuntimeStoreAsync(It.IsAny<Guid>(), It.IsAny<SimulatedPeerRuntimeStoreDto>(), It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
-
-        var pending = new SimulatedPeerPendingInbox();
         var diagnostics = new SimulatorDiagnosticsService();
-        var sut = new SimulatedPeerRuntimeService(directory, messageService, state.Object, diagnostics, pending);
+
+        var repo = new InMemoryRepository
+        {
+            State = new SimulatorStateDto
+            {
+                Version = 1,
+                Peers =
+                {
+                    new SimulatedPeerDto
+                    {
+                        PeerId = peerId,
+                        DisplayName = "peer",
+                        IsOnline = true,
+                        ReverseSignalKeys = new SimulatedPeerReverseSignalKeysDto
+                        {
+                            IdentitySigningKeySpki = identitySpki,
+                            IdentitySigningKeyPrivateKeyEcPrivateKey = identityPriv
+                        }
+                    }
+                }
+            }
+        };
+
+        var services = new ServiceCollection();
+        services.AddSingleton<IClock, SystemClock>();
+        var sp = services.BuildServiceProvider();
+        var scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
+
+        var keys = new SimulatedPeerKeyFactory();
+        var options = Options.Create(new TransportOptions { GrpcPort = 5002 });
+        var pending = new SimulatedPeerPendingInbox();
+        var engine = new SignalProtocolEngine(new SystemClock());
+
+        var sut = new SimulatorStateService(repo, keys, options, diagnostics, pending, scopeFactory, engine);
+        await sut.InitializeAsync(CancellationToken.None);
 
         var sessionId = new SessionId(Guid.NewGuid());
         var badMessage = new SessionRatchetMessage(RandomNumberGenerator.GetBytes(10));

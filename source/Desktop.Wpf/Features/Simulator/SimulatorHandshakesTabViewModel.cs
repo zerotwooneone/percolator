@@ -11,7 +11,6 @@ namespace Desktop.Wpf.Features.Simulator;
 public sealed class SimulatorHandshakesTabViewModel : IDisposable
 {
     private readonly ISimulatedPeerDirectory _directory;
-    private readonly ISimulatedPeerRuntimeService _runtime;
     private readonly ISimulatorRelayEmulator _relay;
     private readonly IOptions<TransportOptions> _transportOptions;
     private readonly Percolator.Application.Identity.ActiveIdentityContext _active;
@@ -26,7 +25,6 @@ public sealed class SimulatorHandshakesTabViewModel : IDisposable
 
     public SimulatorHandshakesTabViewModel(
         ISimulatedPeerDirectory directory,
-        ISimulatedPeerRuntimeService runtime,
         ISimulatorRelayEmulator relay,
         ISimulatorMainIngressService mainIngress,
         IOptions<TransportOptions> transportOptions,
@@ -35,7 +33,6 @@ public sealed class SimulatorHandshakesTabViewModel : IDisposable
         ISimulatorDiagnosticsService diagnostics)
     {
         _directory = directory;
-        _runtime = runtime;
         _relay = relay;
         _mainIngress = mainIngress;
         _transportOptions = transportOptions;
@@ -191,13 +188,12 @@ public sealed class SimulatorHandshakesTabViewModel : IDisposable
     {
         return new SimulatedHandshakeStateMachineCardViewModel(
             model: model,
-            runtime: _runtime,
+            state: _state,
             relay: _relay,
             mainIngress: _mainIngress,
             diagnostics: _diagnostics,
             transportOptions: _transportOptions,
             active: _active,
-            state: _state,
             selectedRelayHostPeerId: () => SelectedRelayHostPeerId.Value);
     }
 

@@ -9,7 +9,6 @@ public sealed class SimulatorPeersTabViewModel : IDisposable
 {
     private readonly ISimulatedPeerDirectory _directory;
     private readonly ISimulatorStateService _state;
-    private readonly ISimulatedPeerRuntimeService _runtime;
     private readonly ISimulatorDiagnosticsService _diagnostics;
 
     private readonly ObservableCollection<SimulatedPeerCardViewModel> _peerCards = new();
@@ -18,12 +17,10 @@ public sealed class SimulatorPeersTabViewModel : IDisposable
     public SimulatorPeersTabViewModel(
         ISimulatedPeerDirectory directory,
         ISimulatorStateService state,
-        ISimulatedPeerRuntimeService runtime,
         ISimulatorDiagnosticsService diagnostics)
     {
         _directory = directory;
         _state = state;
-        _runtime = runtime;
         _diagnostics = diagnostics;
 
         PeerCards = new ReadOnlyObservableCollection<SimulatedPeerCardViewModel>(_peerCards);
@@ -98,7 +95,6 @@ public sealed class SimulatorPeersTabViewModel : IDisposable
         return new SimulatedPeerCardViewModel(
             model: m,
             state: _state,
-            runtime: _runtime,
             diagnostics: _diagnostics,
             resolvePeerName: ResolvePeerName,
             relationshipsChanged: RefreshRelationships);
