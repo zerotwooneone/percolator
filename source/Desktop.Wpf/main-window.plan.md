@@ -1527,6 +1527,67 @@ Definition of done:
 - `ModelList.cs` and `IReadOnlyModelList.cs` are deleted by the user and all references migrated.
 - Unit tests are updated and passing under the new split (engine/orchestrator/repository).
 
+### Subchunk H.14 — Simulator: Refactor SimulatorRelayEmulator into SimulatedRelayModel + Orchestrator
+
+**Goal:**
+Dismantle the `SimulatorRelayEmulator` "God Object." Move queue state to a new pure domain model (`SimulatedRelayModel`). Keep all protocol math strictly in the generic `ISignalProtocolEngine`, and absorb gRPC transport and Protobuf serialization into the central `SimulatorStateService` orchestrator.
+
+*Context:* This is a QA simulator, so we are optimizing for debugging ease and reactive tracking simplicity rather than massive scale. **No backward compatibility is required for persistence**; create clean, greenfield JSON DTOs that map directly to the new models.
+
+**Work:**
+
+**Step 0: User Action Required (Manual Deletion)**
+*Agent Instruction:* Pause and verify with the user that the following files and registrations have been deleted before proceeding with code generation.
+1. Delete `Desktop.Wpf/Features/Simulator/SimulatorRelayEmulator.cs` (and its interface).
+2. Remove its registration from the Dependency Injection container.
+
+**Step 1: Create the Pure Domain Model (`SimulatedRelayModel`)**
+* Target File: `Desktop.Wpf/Features/Simulator/Models/SimulatedRelayModel.cs`
+* Create a struct wrapper for routing keys so `byte[]` can be used safely in dictionaries: `public readonly record struct RoutingKey(string HexValue) { public static RoutingKey FromBytes(byte[] b) => new(Convert.ToHexString(b)); }`
+* Create a pure domain record for queued items: `SimulatedRelayMessage(RoutingKey Destination, Guid AckId, byte[] OpaqueBytes, DateTimeOffset EnqueuedUtc, string? DebugType)`.
+* Give `SimulatedRelayModel` a flat, $O(1)$ reactive state collection using `ObservableCollections.R3` keyed by AckId for trivial tracking:
+  * `ObservableDictionary<Guid, SimulatedRelayMessage> PendingMessages` (expose as `IReadOnlyObservableDictionary`).
+* Internally (not exposed to UI), maintain a lightweight `Dictionary<RoutingKey, HashSet<Guid>> _routingIndex` to quickly find messages by destination without an $O(N)$ scan.
+* Implement pure state mutation methods: `EnqueueMessage(message)` and `RemoveMessage(ackId)`. Maintain the internal index within these methods.
+
+**Step 2: Maintain Engine Purity (`ISignalProtocolEngine`)**
+* **Strict Boundary Rule:** The Engine must NOT know about `RelayOpaqueEnvelope`, `RelayOpaqueResponse`, or any Protobuf generated types.
+* The Engine should only rely on generic methods like `EncryptMessage(SimulatedPeerModel sender, SessionId sessionId, Plaintext plaintext)` and `DecryptMessage(...)`.
+* Do not add relay-specific envelope building to the Engine.
+
+**Step 3: Update Orchestrator (`SimulatorStateService`)**
+* Update `SimulatorStateService` to manage a new collection: `ObservableList<SimulatedRelayModel> Relays` (Expose as `ReadOnlyObservableList`).
+* Absorb the `ForwardQueuedToMainAsync` logic.
+* **Workflow Rule for Forwarding:**
+  1. Orchestrator queries the relay's `_routingIndex` (via a getter method) to find pending `AckId`s for the destination, then reads those messages from `PendingMessages`.
+  2. Orchestrator builds the Protobuf `InternalEnvelope` (wrapping the `RelayOpaqueEnvelope`) and serializes it to raw bytes.
+  3. Orchestrator wraps those bytes in a pure domain `Plaintext` and calls `ISignalProtocolEngine.EncryptMessage(...)`.
+  4. Orchestrator wraps the resulting cipher bytes into the Protobuf `DeliverOpaqueMessageRequest` and makes the gRPC call.
+  5. Orchestrator extracts the response payload bytes, wraps them in `SessionRatchetMessage`, and calls `ISignalProtocolEngine.DecryptMessage(...)`.
+  6. Orchestrator parses the resulting `Plaintext` into the Protobuf `RelayOpaqueResponse`, extracts the returned `AckId`, and calls `SimulatedRelayModel.RemoveMessage(ackId)`.
+
+**Step 4: Greenfield Persistence & Trackers**
+* Target File: `Desktop.Wpf/Features/Simulator/Tracking/SimulatedRelayProtocolStateTracker.cs`
+* The tracker simply merges `ObserveAdd` and `ObserveRemove` from the flat `PendingMessages` dictionary, yielding a single unified `Observable<Unit> Dirty` stream. No nested tracking required.
+* Update `ISimulatorStateRepository` to handle saving/loading `SimulatedRelayModel`.
+* **Persistence Rule:** Disregard legacy JSON structures. Create a completely new set of Persistence DTOs (e.g., `RelayPersistenceDto`, `RelayMessageDto`). For QA debugging simplicity, serialize the entire relay model and its messages into a single JSON file.
+* The Orchestrator subscribes to the Tracker's `Dirty` stream, applies a `.Debounce(TimeSpan.FromSeconds(2), TimeProvider)`, and invokes the Repository save.
+
+**Step 5: ViewModels (Strict Thread Safety)**
+* Update any ViewModels that formerly relied on `ISimulatorRelayEmulator` to instead observe `SimulatedRelayModel`.
+* **Thread Safety Rule:** ViewModels MUST observe the model's reactive collections, optionally apply pacing (`Sample` or `ThrottleLast`) if messages enqueue rapidly, marshal to the UI thread using `ObserveOnCurrentSynchronizationContext()`, and project collections for the UI using `CreateView()`.
+
+**Step 6: Update Unit Tests**
+* **Orchestrator Tests:** Verify `ForwardQueuedToMainAsync` correctly maps between Protobuf DTOs, the pure Engine math, and the gRPC mocks, mutating the pure model upon success.
+* **Tracker Tests:** Verify that adding/removing items in the flat `SimulatedRelayModel.PendingMessages` collection triggers the `Dirty` observable sequence exactly once per operation.
+
+**Definition of Done:**
+* Legacy emulator is deleted.
+* `SimulatedRelayModel` holds pure queue state in a flat dictionary keyed by `AckId`.
+* `ISignalProtocolEngine` remains completely ignorant of Protobuf relay envelopes.
+* `SimulatorStateService` handles the Protobuf mapping and transport orchestration.
+* New JSON persistence schema is implemented (single file per relay) via trackers without legacy data mapping.
+
 ## Chunk I — Notification badge + default focus behavior for Connection Management button
 
 Outcome:
