@@ -19,15 +19,18 @@ public sealed class SimulatorRelayDeliveryService : ISimulatorRelayDeliveryServi
     private readonly PercolatorMessageService _messageService;
     private readonly ISimulatorStateService _state;
     private readonly ILogger<SimulatorRelayDeliveryService> _logger;
+    private readonly ISimulatorDiagnosticsService _diagnostics;
 
     public SimulatorRelayDeliveryService(
         PercolatorMessageService messageService,
         ISimulatorStateService state,
-        ILogger<SimulatorRelayDeliveryService> logger)
+        ILogger<SimulatorRelayDeliveryService> logger,
+        ISimulatorDiagnosticsService diagnostics)
     {
         _messageService = messageService;
         _state = state;
         _logger = logger;
+        _diagnostics = diagnostics;
     }
 
     public async Task DeliverToMainAsync(
@@ -108,6 +111,13 @@ public sealed class SimulatorRelayDeliveryService : ISimulatorRelayDeliveryServi
                     debugType: nameof(EstablishSessionResponse),
                     cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
+
+            _diagnostics.Emit(
+                SimulatorDiagnosticEventType.HandshakeStateTransition,
+                "Standard handshake response enqueued (relayed)",
+                peerId: recipientPeerId,
+                relayHostPeerId: relayHostPeerId,
+                contextTag: "ResponseEnqueued");
         }
         catch (Exception ex)
         {

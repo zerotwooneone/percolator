@@ -975,6 +975,12 @@ public sealed class SimulatorStateService : ISimulatorStateService
                 && hello.HasInitiatorEphemeralKeySpki && hello.InitiatorEphemeralKeySpki.Length > 0
                 && hello.HasSignedPreKeyId && hello.SignedPreKeyId.Length > 0)
             {
+                _diagnostics.Emit(
+                    SimulatorDiagnosticEventType.HandshakeStateTransition,
+                    "Standard handshake hello received (relayed)",
+                    peerId: simulatedPeerId,
+                    contextTag: "HelloReceived");
+
                 var req = new EstablishSessionRequest
                 {
                     Version = 1,
