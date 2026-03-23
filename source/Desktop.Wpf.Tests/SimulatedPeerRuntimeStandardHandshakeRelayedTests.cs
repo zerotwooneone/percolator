@@ -384,6 +384,135 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
         diagnostics.Events.Should().NotContain(e => e.EventType == SimulatorDiagnosticEventType.StandardHandshakeHelloEnqueued);
     }
 
+    [Test]
+    public async Task Relayed_EstablishSessionResponse_is_handled_by_initiator_and_persists_session_with_assigned_session_id()
+    {
+        // Arrange
+        var initiatorPeerId = Guid.NewGuid();
+        var responderPeerId = Guid.NewGuid();
+        var relayHostPeerId = Guid.NewGuid();
+
+        using var initiatorIdentityEcdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        var initiatorIdentityPriv = initiatorIdentityEcdh.ExportECPrivateKey();
+        using var initiatorIdentityEcdsa = ECDsa.Create(initiatorIdentityEcdh.ExportParameters(true));
+        var initiatorIdentitySpki = initiatorIdentityEcdsa.ExportSubjectPublicKeyInfo();
+
+        using var responderIdentityEcdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        var responderIdentityPriv = responderIdentityEcdh.ExportECPrivateKey();
+        using var responderIdentityEcdsa = ECDsa.Create(responderIdentityEcdh.ExportParameters(true));
+        var responderIdentitySpki = responderIdentityEcdsa.ExportSubjectPublicKeyInfo();
+
+        var responderPkh = SHA256.HashData(responderIdentitySpki);
+
+        // Create a valid responder bundle and publish it to relay under responder PKH.
+        // (The bundle identity key must hash to responderPkh, so we forge it from responder keys.)
+        using var responderSignedPreKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        var responderSignedPreKeySpki = responderSignedPreKey.PublicKey.ExportSubjectPublicKeyInfo();
+        var preKeySig = responderIdentityEcdsa.SignData(responderSignedPreKeySpki, HashAlgorithmName.SHA256);
+        var bundle = new GetPreKeyBundleResponse.Types.PreKeyBundle
+        {
+            Version = 1,
+            IdentityKey = ByteString.CopyFrom(responderIdentitySpki),
+            SignedPreKeyId = ByteString.CopyFrom(Guid.NewGuid().ToByteArray()),
+            SignedPreKey = ByteString.CopyFrom(responderSignedPreKeySpki),
+            PreKeySignature = ByteString.CopyFrom(preKeySig)
+        };
+
+        var repo = new InMemoryRepository
+        {
+            State = new SimulatorStateDto
+            {
+                Version = 1,
+                Peers =
+                {
+                    new SimulatedPeerDto
+                    {
+                        PeerId = initiatorPeerId,
+                        DisplayName = "init",
+                        IsOnline = true,
+                        Relay = new SimulatedPeerRelayStateDto { IsRelayCapable = false },
+                        ReverseSignalKeys = new SimulatedPeerReverseSignalKeysDto
+                        {
+                            IdentitySigningKeySpki = initiatorIdentitySpki,
+                            IdentitySigningKeyPrivateKeyEcPrivateKey = initiatorIdentityPriv
+                        }
+                    },
+                    new SimulatedPeerDto
+                    {
+                        PeerId = responderPeerId,
+                        DisplayName = "resp",
+                        IsOnline = true,
+                        Relay = new SimulatedPeerRelayStateDto { IsRelayCapable = false },
+                        ReverseSignalKeys = new SimulatedPeerReverseSignalKeysDto
+                        {
+                            IdentitySigningKeySpki = responderIdentitySpki,
+                            IdentitySigningKeyPrivateKeyEcPrivateKey = responderIdentityPriv
+                        }
+                    },
+                    new SimulatedPeerDto
+                    {
+                        PeerId = relayHostPeerId,
+                        DisplayName = "relay",
+                        IsOnline = true,
+                        Relay = new SimulatedPeerRelayStateDto
+                        {
+                            IsRelayCapable = true,
+                            PreKeyStore = new SimulatedRelayPreKeyStoreDto
+                            {
+                                Version = 1,
+                                PublishedBundles =
+                                {
+                                    new PublishedPreKeyBundleDto
+                                    {
+                                        RecipientPublicKeyHash = responderPkh,
+                                        LogicalOwnerPeerId = responderPeerId,
+                                        BundleBytes = bundle.ToByteArray(),
+                                        ExpiresUtc = DateTimeOffset.UtcNow.AddMinutes(5)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        };
+
+        var pending = new SimulatedPeerPendingInbox();
+        var diagnostics = new SimulatorDiagnosticsService();
+        var clock = new StaticClock(StaticClock.DefaultNow);
+        var sut = CreateSut(repo, diagnostics, pending, clock);
+        await sut.InitializeAsync(CancellationToken.None);
+
+        // Act 1: initiator initiates, enqueuing HandshakeInitiatorHello to relay.
+        _ = await sut.InitiateStandardHandshakeToMainByRelayPkhAsync(
+            initiatorPeerId,
+            relayHostPeerId,
+            responderPkh,
+            CancellationToken.None);
+
+        var helloQueued = repo.State!.Peers.Single(p => p.PeerId == relayHostPeerId)
+            .Relay.OpaqueQueue.Items
+            .Single(i => i.DebugType == nameof(HandshakeInitiatorHello));
+        var helloBytes = helloQueued.OpaqueBytes;
+
+        // Act 2: responder handles hello and returns EstablishSessionResponse.
+        var establishResp = await sut.ReceiveRelayedOpaquePayloadAsync(responderPeerId, helloBytes, CancellationToken.None);
+        establishResp.Should().NotBeNull();
+        establishResp!.Response.Should().NotBeNull();
+
+        // Act 3: initiator consumes EstablishSessionResponse.
+        _ = await sut.ReceiveRelayedOpaquePayloadAsync(initiatorPeerId, establishResp.ToByteArray(), CancellationToken.None);
+
+        // Assert: initiator persisted a session with the responder-assigned session id.
+        var payload = EstablishSessionResponse.Types.Response.Types.ResponsePayload.Parser.ParseFrom(establishResp.Response.ResponsePayload);
+        var assignedSid = new SessionId(Guid.Parse(payload.SessionId));
+
+        await Task.Delay(300);
+        repo.State!.Peers.Single(p => p.PeerId == initiatorPeerId)
+            .RuntimeStore.Sessions
+            .Should().ContainSingle(s => s.SessionId == assignedSid.Value);
+    }
+
     private sealed record ResponderBundleFixture(byte[] BundleBytes, byte[] ResponderPkh);
 
     private static ResponderBundleFixture CreateValidResponderPreKeyBundle()

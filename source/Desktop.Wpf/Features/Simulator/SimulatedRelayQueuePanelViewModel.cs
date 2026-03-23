@@ -8,6 +8,8 @@ namespace Desktop.Wpf.Features.Simulator;
 
 public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
 {
+    private static readonly Guid MainNodeSentinelPeerId = new("88880000-0000-0000-0000-000000000000");
+
     private readonly Guid _relayHostPeerId;
     private readonly Func<Guid, string> _peerNameById;
     private readonly Func<byte[]?> _getMainIdentityPkh;
@@ -335,6 +337,29 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
             if (routingKey is not null && routingKey.Length == 16)
             {
                 var recipientPeerId = new Guid(routingKey);
+
+                if (recipientPeerId == MainNodeSentinelPeerId)
+                {
+                    var sid = await _getRelayHostToMainSessionId().ConfigureAwait(false);
+                    if (sid is null)
+                    {
+                        _logger.LogWarning("[simulator] Relay host {RelayHost} has no session to main; cannot deliver", _relayHostPeerId);
+                        return;
+                    }
+
+                    await _delivery.DeliverToMainAsync(_relayHostPeerId, sid, item.Model, ct).ConfigureAwait(false);
+
+                    _ = await _state.DeleteRelayOpaqueByAckIdAsync(_relayHostPeerId, item.AckId, ct).ConfigureAwait(false);
+
+                    _diagnostics.Emit(
+                        SimulatorDiagnosticEventType.RelayDelivered,
+                        $"Relay deliver -> main: {(item.Model.DebugType ?? "opaque")}",
+                        relayHostPeerId: _relayHostPeerId,
+                        ackId: item.AckId);
+
+                    await RefreshAsync(ct).ConfigureAwait(false);
+                    return;
+                }
 
                 await _delivery.DeliverToPeerAsync(_relayHostPeerId, recipientPeerId, item.Model, ct).ConfigureAwait(false);
 

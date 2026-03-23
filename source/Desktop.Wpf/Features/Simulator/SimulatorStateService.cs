@@ -854,6 +854,8 @@ public sealed class SimulatorStateService : ISimulatorStateService
             return null;
         }
 
+        model.SetPendingStandardHandshakeToMain(responderPublicKeyHash, initiated.SessionId.Value);
+
         var hello = new HandshakeInitiatorHello
         {
             Version = 1,
@@ -987,6 +989,94 @@ public sealed class SimulatorStateService : ISimulatorStateService
                 }
 
                 return await ReceiveEstablishSessionFromMainAsync(simulatedPeerId, req, cancellationToken).ConfigureAwait(false);
+            }
+        }
+        catch
+        {
+            // ignore
+        }
+
+        try
+        {
+            var resp = EstablishSessionResponse.Parser.ParseFrom(opaqueBytes);
+            if (resp is not null
+                && resp.Response is not null
+                && resp.Response.HasIdentitySigningKey && resp.Response.IdentitySigningKey.Length > 0
+                && resp.Response.HasResponsePayload && resp.Response.ResponsePayload.Length > 0)
+            {
+                EstablishSessionResponse.Types.Response.Types.ResponsePayload payload;
+                try
+                {
+                    payload = EstablishSessionResponse.Types.Response.Types.ResponsePayload.Parser.ParseFrom(resp.Response.ResponsePayload);
+                }
+                catch
+                {
+                    return null;
+                }
+
+                if (!payload.HasSessionId || string.IsNullOrWhiteSpace(payload.SessionId)) return null;
+
+                Guid assignedGuid;
+                try
+                {
+                    assignedGuid = Guid.Parse(payload.SessionId);
+                }
+                catch
+                {
+                    return null;
+                }
+
+                var responderPkh = SHA256.HashData(resp.Response.IdentitySigningKey.ToByteArray());
+                await _peerGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+                try
+                {
+                    var model = _peers.FirstOrDefault(p => p.PeerId == simulatedPeerId)
+                        ?? throw new InvalidOperationException($"No simulated peer exists with id {simulatedPeerId}");
+
+                    var pendingPkh = model.PendingStandardHandshakeToMainResponderPublicKeyHash.CurrentValue;
+                    var pendingSidGuid = model.PendingStandardHandshakeToMainTemporarySessionId.CurrentValue;
+                    if (pendingPkh is null || pendingPkh.Length == 0 || pendingSidGuid is null)
+                    {
+                        return null;
+                    }
+                    if (!pendingPkh.AsSpan().SequenceEqual(responderPkh))
+                    {
+                        return null;
+                    }
+
+                    var pendingSessionId = new SessionId(pendingSidGuid.Value);
+
+                    if (!model.SessionsMutable.TryGetValue(pendingSessionId, out var pendingSession))
+                    {
+                        return null;
+                    }
+
+                    var clock = ResolveClock();
+                    var final = SecureSession.Create(
+                        new SessionId(assignedGuid),
+                        pendingSession.RemotePeerId,
+                        pendingSession.ProtocolVersion,
+                        pendingSession.State,
+                        new AeadSessionCrypto(),
+                        clock);
+
+                    model.SessionsMutable.Remove(pendingSessionId);
+                    model.SessionsMutable[final.Id] = final;
+
+                    model.ClearPendingStandardHandshakeToMain();
+                }
+                finally
+                {
+                    _peerGate.Release();
+                }
+
+                _diagnostics.Emit(
+                    SimulatorDiagnosticEventType.HandshakeStateTransition,
+                    $"Standard handshake established: sid={assignedGuid.ToString()[..8]}",
+                    peerId: simulatedPeerId,
+                    contextTag: "Established");
+
+                return null;
             }
         }
         catch
@@ -1149,7 +1239,9 @@ public sealed class SimulatorStateService : ISimulatorStateService
             phase: dto.Phase,
             notUntilUtc: dto.NotUntilUtc,
             lastError: dto.LastError,
-            handshakeAttempts: dto.HandshakeAttempts);
+            handshakeAttempts: dto.HandshakeAttempts,
+            pendingStandardHandshakeToMainResponderPublicKeyHash: dto.PendingStandardHandshakeToMainResponderPublicKeyHash,
+            pendingStandardHandshakeToMainTemporarySessionId: dto.PendingStandardHandshakeToMainTemporarySessionId);
     }
 
     private static void HydrateRuntimeStore(SimulatedPeerModel model, SimulatedPeerRuntimeStoreDto store, IClock clock)
@@ -1938,6 +2030,9 @@ public sealed class SimulatorStateService : ISimulatorStateService
             dto.NotUntilUtc = model.NotUntilUtc.CurrentValue;
             dto.LastError = model.LastError.CurrentValue;
             dto.HandshakeAttempts = model.HandshakeAttempts.ToList();
+
+            dto.PendingStandardHandshakeToMainResponderPublicKeyHash = model.PendingStandardHandshakeToMainResponderPublicKeyHash.CurrentValue;
+            dto.PendingStandardHandshakeToMainTemporarySessionId = model.PendingStandardHandshakeToMainTemporarySessionId.CurrentValue;
 
             dto.RuntimeStore = new SimulatedPeerRuntimeStoreDto
             {

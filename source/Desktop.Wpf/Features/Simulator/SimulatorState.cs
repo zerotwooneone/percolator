@@ -39,6 +39,9 @@ public sealed class SimulatedPeerDto
     public string? LastError { get; set; }
     public List<SimulatorHandshakeAttemptState> HandshakeAttempts { get; set; } = new();
 
+    public byte[]? PendingStandardHandshakeToMainResponderPublicKeyHash { get; set; }
+    public Guid? PendingStandardHandshakeToMainTemporarySessionId { get; set; }
+
     public SimulatedPeerRelayStateDto Relay { get; set; } = new();
     public SimulatedPeerReverseSignalKeysDto ReverseSignalKeys { get; set; } = new();
 }

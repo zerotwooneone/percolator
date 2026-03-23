@@ -22,6 +22,9 @@ public sealed class SimulatedPeerModel : IDisposable
     private readonly ReactiveProperty<DateTimeOffset?> _notUntilUtc;
     private readonly ReactiveProperty<string?> _lastError;
 
+    private readonly ReactiveProperty<byte[]?> _pendingStandardHandshakeToMainResponderPublicKeyHash;
+    private readonly ReactiveProperty<Guid?> _pendingStandardHandshakeToMainTemporarySessionId;
+
     private readonly ObservableList<SimulatorHandshakeAttemptState> _handshakeAttempts;
     private readonly ReactiveProperty<int> _handshakeAttemptsVersion;
 
@@ -46,7 +49,9 @@ public sealed class SimulatedPeerModel : IDisposable
         string? phase = null,
         DateTimeOffset? notUntilUtc = null,
         string? lastError = null,
-        List<SimulatorHandshakeAttemptState>? handshakeAttempts = null)
+        List<SimulatorHandshakeAttemptState>? handshakeAttempts = null,
+        byte[]? pendingStandardHandshakeToMainResponderPublicKeyHash = null,
+        Guid? pendingStandardHandshakeToMainTemporarySessionId = null)
     {
         PeerId = peerId;
 
@@ -79,6 +84,9 @@ public sealed class SimulatedPeerModel : IDisposable
         _notUntilUtc = new ReactiveProperty<DateTimeOffset?>(notUntilUtc);
         _lastError = new ReactiveProperty<string?>(lastError);
 
+        _pendingStandardHandshakeToMainResponderPublicKeyHash = new ReactiveProperty<byte[]?>(pendingStandardHandshakeToMainResponderPublicKeyHash);
+        _pendingStandardHandshakeToMainTemporarySessionId = new ReactiveProperty<Guid?>(pendingStandardHandshakeToMainTemporarySessionId);
+
         _handshakeAttempts = new ObservableList<SimulatorHandshakeAttemptState>();
         _handshakeAttempts.AddRange(handshakeAttempts ?? new());
         _handshakeAttemptsVersion = new ReactiveProperty<int>(0);
@@ -107,6 +115,9 @@ public sealed class SimulatedPeerModel : IDisposable
     public ReadOnlyReactiveProperty<string?> Phase => _phase;
     public ReadOnlyReactiveProperty<DateTimeOffset?> NotUntilUtc => _notUntilUtc;
     public ReadOnlyReactiveProperty<string?> LastError => _lastError;
+
+    public ReadOnlyReactiveProperty<byte[]?> PendingStandardHandshakeToMainResponderPublicKeyHash => _pendingStandardHandshakeToMainResponderPublicKeyHash;
+    public ReadOnlyReactiveProperty<Guid?> PendingStandardHandshakeToMainTemporarySessionId => _pendingStandardHandshakeToMainTemporarySessionId;
 
     public IReadOnlyObservableList<SimulatorHandshakeAttemptState> HandshakeAttempts => _handshakeAttempts;
     public ReadOnlyReactiveProperty<int> HandshakeAttemptsVersion => _handshakeAttemptsVersion;
@@ -169,6 +180,15 @@ public sealed class SimulatedPeerModel : IDisposable
     public void SetLastError(string? lastError)
         => _lastError.Value = lastError;
 
+    public void SetPendingStandardHandshakeToMain(byte[]? responderPublicKeyHash, Guid? temporarySessionId)
+    {
+        _pendingStandardHandshakeToMainResponderPublicKeyHash.Value = responderPublicKeyHash;
+        _pendingStandardHandshakeToMainTemporarySessionId.Value = temporarySessionId;
+    }
+
+    public void ClearPendingStandardHandshakeToMain()
+        => SetPendingStandardHandshakeToMain(null, null);
+
     public void MarkOutboundPending(Guid requestCorrelationId)
     {
         UpsertAttempt(requestCorrelationId);
@@ -190,6 +210,8 @@ public sealed class SimulatedPeerModel : IDisposable
         _phase.Value = null;
         _notUntilUtc.Value = null;
         _lastError.Value = null;
+
+        ClearPendingStandardHandshakeToMain();
     }
 
     public void MarkExpired()

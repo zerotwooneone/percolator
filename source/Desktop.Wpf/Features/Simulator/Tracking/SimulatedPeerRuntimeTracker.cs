@@ -23,6 +23,9 @@ public sealed class SimulatedPeerRuntimeTracker : IDisposable
         peer.LastError.Subscribe(_ => _dirty.OnNext(Unit.Default)).AddTo(ref _bag);
         peer.HandshakeAttemptsVersion.Subscribe(_ => _dirty.OnNext(Unit.Default)).AddTo(ref _bag);
 
+        peer.PendingStandardHandshakeToMainResponderPublicKeyHash.Subscribe(_ => _dirty.OnNext(Unit.Default)).AddTo(ref _bag);
+        peer.PendingStandardHandshakeToMainTemporarySessionId.Subscribe(_ => _dirty.OnNext(Unit.Default)).AddTo(ref _bag);
+
         peer.SessionsMutable.ObserveAdd().Subscribe(_ => _dirty.OnNext(Unit.Default)).AddTo(ref _bag);
         peer.SessionsMutable.ObserveRemove().Subscribe(_ => _dirty.OnNext(Unit.Default)).AddTo(ref _bag);
         peer.SessionsMutable.ObserveReplace().Subscribe(_ => _dirty.OnNext(Unit.Default)).AddTo(ref _bag);
