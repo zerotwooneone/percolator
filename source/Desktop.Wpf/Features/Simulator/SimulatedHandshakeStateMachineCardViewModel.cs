@@ -15,7 +15,6 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
     private static readonly Guid MainNodeSentinelPeerId = new("88880000-0000-0000-0000-000000000000");
     private readonly SimulatedPeerModel _model;
     private readonly ISimulatorStateService _state;
-    private readonly ISimulatorRelayEmulator _relay;
     private readonly ISimulatorMainIngressService _mainIngress;
     private readonly ISimulatorDiagnosticsService _diagnostics;
     private readonly IOptions<TransportOptions> _transportOptions;
@@ -27,7 +26,6 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
     public SimulatedHandshakeStateMachineCardViewModel(
         SimulatedPeerModel model,
         ISimulatorStateService state,
-        ISimulatorRelayEmulator relay,
         ISimulatorMainIngressService mainIngress,
         ISimulatorDiagnosticsService diagnostics,
         IOptions<TransportOptions> transportOptions,
@@ -36,7 +34,6 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
     {
         _model = model;
         _state = state;
-        _relay = relay;
         _mainIngress = mainIngress;
         _diagnostics = diagnostics;
         _transportOptions = transportOptions;
@@ -248,10 +245,10 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
 
         var relayHostPeerId = _selectedRelayHostPeerId();
         var relayHost = relayHostPeerId.HasValue
-            ? _state.TryGetPeerSnapshot(relayHostPeerId.Value)
+            ? _state.Peers.FirstOrDefault(p => p.PeerId == relayHostPeerId.Value)
             : null;
 
-        relayHost ??= _state.SnapshotPeers().FirstOrDefault(p => p.IsRelayCapable);
+        relayHost ??= _state.Peers.FirstOrDefault(p => p.IsRelayCapable.CurrentValue);
         if (relayHost is null) return;
 
         var invite = CreatePeerToMainInvite();
@@ -333,9 +330,8 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
 
         try
         {
-            await _relay.EnqueueToRelayHostAsync(
+            await _state.EnqueueRelayUpstreamToMainAsync(
                     relayHostPeerId: relayHost.PeerId,
-                    recipientPeerId: MainNodeSentinelPeerId,
                     opaqueBytes: invite.ToByteArray(),
                     debugType: nameof(EstablishDirectSessionRequest),
                     cancellationToken: ct)
@@ -349,7 +345,7 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
                 await InvokeOnUiAsync(() =>
                 {
                     _model.SetAttemptError(corr.Value, ex.Message);
-                    _model.SetAttemptPhase(corr.Value, "EnqueueFailed");
+                    _model.SetAttemptPhase(corr.Value, "RelayEnqueueFailed");
                 }).ConfigureAwait(false);
             }
             throw;

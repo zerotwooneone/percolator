@@ -230,26 +230,11 @@ public sealed class SimulatorRelayTabViewModel : IDisposable
             relayHostPeerId: relayHostPeerId,
             relayHostName: relayHostName,
             peerNameById: PeerNameById,
-            getMainIdentityPkh: GetMainIdentityPkh,
             getRelayHostToMainSessionId: () => GetRelayHostToMainSessionIdAsync(relayHostPeerId),
             state: _state,
             delivery: _delivery,
             diagnostics: _diagnostics,
             logger: _loggerFactory.CreateLogger<SimulatedRelayQueuePanelViewModel>());
-    }
-
-    private byte[]? GetMainIdentityPkh()
-    {
-        try
-        {
-            var spki = _active.Keys?.IdentitySigningKey.ExportSubjectPublicKeyInfo();
-            if (spki is null || spki.Length == 0) return null;
-            return System.Security.Cryptography.SHA256.HashData(spki);
-        }
-        catch
-        {
-            return null;
-        }
     }
 
     private void ApplyGlobalAutoRelay()
@@ -324,9 +309,6 @@ public sealed class SimulatorRelayTabViewModel : IDisposable
             var name = model.DisplayName.CurrentValue;
             if (!string.IsNullOrWhiteSpace(name)) return name;
         }
-
-        var snap = _state.TryGetPeerSnapshot(peerId);
-        if (snap is not null && !string.IsNullOrWhiteSpace(snap.DisplayName)) return snap.DisplayName!;
         return peerId.ToString()[..8];
     }
 }

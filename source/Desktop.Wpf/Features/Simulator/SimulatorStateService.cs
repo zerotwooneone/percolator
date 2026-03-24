@@ -9,141 +9,10 @@ using Percolator.Contracts;
 using Percolator.Cryptography;
 using Percolator.Cryptography.Primitives;
 using Desktop.Wpf.Features.Simulator.Tracking;
+using Desktop.Wpf.Features.Simulator.Models;
 using R3;
 
 namespace Desktop.Wpf.Features.Simulator;
-
-public interface ISimulatorStateService
-{
-    IReadOnlyObservableList<SimulatedPeerModel> Peers { get; }
-
-    Task InitializeAsync(CancellationToken cancellationToken = default);
-
-    Task<Guid> AddPeerAsync(string? displayName, CancellationToken cancellationToken = default);
-    Task RemovePeerAsync(Guid peerId, CancellationToken cancellationToken = default);
-    Task ToggleOnlineAsync(Guid peerId, CancellationToken cancellationToken = default);
-    Task ToggleRelayCapableAsync(Guid peerId, CancellationToken cancellationToken = default);
-
-    Task UpdateDisplayNameAsync(Guid peerId, string? displayName, CancellationToken cancellationToken = default);
-    Task SetOnlineAsync(Guid peerId, bool isOnline, CancellationToken cancellationToken = default);
-    Task SetRelayCapableAsync(Guid peerId, bool isRelayCapable, CancellationToken cancellationToken = default);
-
-    Task<Guid?> TryGetPeerIdByIdentityPkhAsync(byte[] recipientPublicKeyHash, CancellationToken cancellationToken = default);
-
-    Task EnqueueRelayOpaqueAsync(Guid relayHostPeerId, byte[] recipientRoutingKey, byte[] opaqueBytes, string? debugType = null, CancellationToken cancellationToken = default);
-    Task<RelayQueuedBlobDto?> PeekRelayOpaqueAsync(Guid relayHostPeerId, byte[] recipientRoutingKey, CancellationToken cancellationToken = default);
-    Task<IReadOnlyList<RelayQueuedBlobDto>> DequeueRelayOpaqueAsync(Guid relayHostPeerId, byte[] recipientRoutingKey, int max, CancellationToken cancellationToken = default);
-    Task<bool> DeleteRelayOpaqueByAckIdAsync(Guid relayHostPeerId, Guid ackId, CancellationToken cancellationToken = default);
-
-    Task<bool> MoveRelayOpaqueByAckIdAsync(Guid relayHostPeerId, Guid ackId, int delta, CancellationToken cancellationToken = default);
-    Task<bool> CorruptRelayOpaqueByAckIdAsync(Guid relayHostPeerId, Guid ackId, CancellationToken cancellationToken = default);
-
-    Task PublishPreKeyBundleAsync(
-        Guid relayHostPeerId,
-        byte[] recipientPublicKeyHash,
-        Guid logicalOwnerPeerId,
-        byte[] bundleBytes,
-        DateTimeOffset expiresUtc,
-        CancellationToken cancellationToken = default);
-
-    Task<PublishedPreKeyBundleDto?> TryPopPreKeyBundleByRecipientPkhAsync(
-        Guid relayHostPeerId,
-        byte[] recipientPublicKeyHash,
-        CancellationToken cancellationToken = default);
-
-    Task<SimulatedPeerRuntimeStoreDto?> TryGetRuntimeStoreAsync(Guid peerId, CancellationToken cancellationToken = default);
-    Task SaveRuntimeStoreAsync(Guid peerId, SimulatedPeerRuntimeStoreDto store, CancellationToken cancellationToken = default);
-
-    Task AddPublishedKeysRelationshipAsync(Guid publisherPeerId, Guid hostPeerId, CancellationToken cancellationToken = default);
-    Task RemovePublishedKeysRelationshipAsync(Guid publisherPeerId, Guid hostPeerId, CancellationToken cancellationToken = default);
-
-    Task AddRelayActiveSessionAsync(Guid relayHostPeerId, Guid peerId, CancellationToken cancellationToken = default);
-    Task RemoveRelayActiveSessionAsync(Guid relayHostPeerId, Guid peerId, CancellationToken cancellationToken = default);
-
-    SimulatedPeerSnapshot? TryGetPeerSnapshot(Guid peerId);
-    IReadOnlyList<SimulatedPeerSnapshot> SnapshotPeers();
-
-    Task<EstablishDirectSessionResponse> ReceiveEstablishDirectSessionFromMainAsync(
-        Guid simulatedPeerId,
-        Guid inviterPeerId,
-        EstablishDirectSessionRequest request,
-        CancellationToken cancellationToken = default);
-
-    Task<SimulatedPeerInviteAcceptance> AcceptReverseSignalInviteAsync(
-        Guid simulatedPeerId,
-        Guid inviterPeerId,
-        EstablishDirectSessionRequest invite,
-        CancellationToken cancellationToken = default);
-
-    Task DeliverInviteHandshakeResponseToMainAsync(
-        InviteHandshakeResponse response,
-        CancellationToken cancellationToken = default);
-
-    Task ReceiveInviteHandshakeResponseFromMainAsync(
-        Guid simulatedPeerId,
-        InviteHandshakeResponse response,
-        CancellationToken cancellationToken = default);
-
-    Task QueueInviteHandshakeResponseForDeliveryToMainAsync(
-        Guid simulatedPeerId,
-        Guid requestCorrelationId,
-        InviteHandshakeResponse response,
-        CancellationToken cancellationToken = default);
-
-    Task<bool> TryDeliverQueuedInviteHandshakeResponseToMainAsync(
-        Guid simulatedPeerId,
-        Guid requestCorrelationId,
-        CancellationToken cancellationToken = default);
-
-    Task<SessionId?> TryFinalizeInviteHandshakeResponseFromMainAsync(
-        Guid simulatedPeerId,
-        Guid acceptorPeerId,
-        Guid requestCorrelationId,
-        CancellationToken cancellationToken = default);
-
-    Task<EstablishSessionResponse> ReceiveEstablishSessionFromMainAsync(
-        Guid simulatedPeerId,
-        EstablishSessionRequest request,
-        CancellationToken cancellationToken = default);
-
-    Task<DeliverOpaqueMessageResponse> ReceiveOpaqueMessageFromMainAsync(
-        Guid simulatedPeerId,
-        DeliverOpaqueMessageRequest request,
-        CancellationToken cancellationToken = default);
-
-    Task PublishStandardPreKeyBundleToRelayAsync(
-        Guid simulatedPeerId,
-        Guid relayHostPeerId,
-        DateTimeOffset expiresUtc,
-        bool includeOneTimeKeys,
-        int oneTimeKeyCount,
-        CancellationToken cancellationToken = default);
-
-    Task<SessionId?> InitiateStandardHandshakeToMainByRelayPkhAsync(
-        Guid simulatedPeerId,
-        Guid relayHostPeerId,
-        byte[] responderPublicKeyHash,
-        CancellationToken cancellationToken = default);
-
-    Task<byte[]> ComputePublicKeyHashAsync(Guid simulatedPeerId, CancellationToken cancellationToken = default);
-
-    Task<SessionRatchetMessage> EncryptInternalEnvelopeAsync(
-        Guid simulatedPeerId,
-        SessionId sessionId,
-        InternalEnvelope envelope,
-        CancellationToken cancellationToken = default);
-
-    Task<Plaintext> DecryptSessionMessageAsync(
-        Guid simulatedPeerId,
-        SessionId sessionId,
-        SessionRatchetMessage message,
-        CancellationToken cancellationToken = default);
-
-    Task<EstablishSessionResponse?> ReceiveRelayedOpaquePayloadAsync(
-        Guid simulatedPeerId,
-        byte[] opaqueBytes,
-        CancellationToken cancellationToken = default);
-}
 
 public sealed class SimulatorStateService : ISimulatorStateService
 {
@@ -160,9 +29,16 @@ public sealed class SimulatorStateService : ISimulatorStateService
     private readonly ObservableList<SimulatedPeerModel> _peers = new();
     public IReadOnlyObservableList<SimulatedPeerModel> Peers => _peers;
 
+    private readonly ObservableList<SimulatedRelayModel> _relays = new();
+    public IReadOnlyObservableList<SimulatedRelayModel> Relays => _relays;
+
+    private readonly Dictionary<Guid, SimulatedRelayModel> _relayByHostPeerId = new();
+
     private readonly Dictionary<Guid, SimulatedPeerModel> _peerById = new();
 
     private readonly Dictionary<Guid, IDisposable> _runtimePersistenceByPeerId = new();
+
+    private readonly Dictionary<Guid, IDisposable> _relayPersistenceByHostPeerId = new();
 
     private SimulatorStateDto _state = new();
 
@@ -170,6 +46,7 @@ public sealed class SimulatorStateService : ISimulatorStateService
     private Task? _initializeTask;
 
     private readonly SemaphoreSlim _peerGate = new(1, 1);
+    private readonly SemaphoreSlim _relayGate = new(1, 1);
 
     private int _nextSelfIdentityId = SelfIdentityIdBase - 1;
 
@@ -700,9 +577,9 @@ public sealed class SimulatorStateService : ISimulatorStateService
             if (!enqueue.HasMessageBlob || enqueue.MessageBlob.Length == 0)
                 throw new InvalidOperationException("EnqueueOpaqueMessageRequest missing message_blob");
 
-            await EnqueueRelayOpaqueAsync(
+            await EnqueueRelayDownstreamToPeerAsync(
                 relayHostPeerId: simulatedPeerId,
-                recipientRoutingKey: enqueue.RecipientPublicKeyHash.ToByteArray(),
+                targetPkh: enqueue.RecipientPublicKeyHash.ToByteArray(),
                 opaqueBytes: enqueue.MessageBlob.ToByteArray(),
                 debugType: "Opaque",
                 cancellationToken: cancellationToken).ConfigureAwait(false);
@@ -868,9 +745,9 @@ public sealed class SimulatorStateService : ISimulatorStateService
             hello.OneTimePreKeyId = ByteString.CopyFrom(initiated.OneTimePreKeyId.Value.ToByteArray());
         }
 
-        await EnqueueRelayOpaqueAsync(
+        await EnqueueRelayDownstreamToPeerAsync(
                 relayHostPeerId: relayHostPeerId,
-                recipientRoutingKey: responderPublicKeyHash,
+                targetPkh: responderPublicKeyHash,
                 opaqueBytes: hello.ToByteArray(),
                 debugType: nameof(HandshakeInitiatorHello),
                 cancellationToken: cancellationToken)
@@ -954,6 +831,553 @@ public sealed class SimulatorStateService : ISimulatorStateService
                 SimulatorDiagnosticEventType.DecryptFailure,
                 $"Decrypt failure: {ex.GetType().Name}: {ex.Message}",
                 peerId: simulatedPeerId);
+            throw;
+        }
+    }
+
+    private async Task InitializeRelaysAsync(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        // Greenfield relay persistence: load per-relay state into pure models.
+        // Only create relay models for relay-capable peers.
+        var relayCapablePeerIds = _state.Peers
+            .Where(p => p.Relay.IsRelayCapable)
+            .Select(p => p.PeerId)
+            .ToList();
+
+        foreach (var d in _relayPersistenceByHostPeerId.Values)
+        {
+            d.Dispose();
+        }
+        _relayPersistenceByHostPeerId.Clear();
+
+        _relays.Clear();
+        _relayByHostPeerId.Clear();
+
+        foreach (var hostPeerId in relayCapablePeerIds)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var relay = new SimulatedRelayModel(hostPeerId);
+            _relays.Add(relay);
+            _relayByHostPeerId[hostPeerId] = relay;
+
+            var loaded = await _store.LoadRelayAsync(hostPeerId, cancellationToken).ConfigureAwait(false);
+            if (loaded is not null && loaded.RelayHostPeerId == hostPeerId)
+            {
+                foreach (var m in loaded.UpstreamToMain)
+                {
+                    if (m.AckId == Guid.Empty) continue;
+                    relay.EnqueueForMain(new OutboundRelayMessage(m.AckId, m.OpaqueBytes, m.EnqueuedUtc, m.DebugType));
+                }
+
+                foreach (var m in loaded.DownstreamToPeers)
+                {
+                    if (m.AckId == Guid.Empty) continue;
+                    if (m.TargetPkh is null || m.TargetPkh.Length == 0) continue;
+                    relay.EnqueueForPeer(new InboundRelayMessage(m.AckId, m.TargetPkh, m.OpaqueBytes, m.EnqueuedUtc, m.DebugType));
+                }
+            }
+
+            AttachRelayPersistence(relay);
+        }
+    }
+
+    private void AttachRelayPersistence(SimulatedRelayModel relay)
+    {
+        if (_relayPersistenceByHostPeerId.ContainsKey(relay.RelayHostPeerId)) return;
+
+        var tracker = new SimulatedRelayProtocolStateTracker(relay);
+        var sub = tracker.Dirty
+            .Debounce(TimeSpan.FromMilliseconds(200))
+            .SubscribeAwait(async (_, ct) => await PersistRelayAsync(relay, ct).ConfigureAwait(false), AwaitOperation.Drop);
+
+        _relayPersistenceByHostPeerId[relay.RelayHostPeerId] = new CompositeDisposable(tracker, sub);
+    }
+
+    private Task PersistRelayAsync(SimulatedRelayModel relay, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var dto = new RelayPersistenceDto
+        {
+            Version = 1,
+            RelayHostPeerId = relay.RelayHostPeerId,
+            UpstreamToMain = relay.UpstreamToMain.Values
+                .OrderBy(x => x.EnqueuedUtc)
+                .Select(x => new RelayUpstreamMessageDto
+                {
+                    AckId = x.AckId,
+                    OpaqueBytes = x.OpaqueBytes,
+                    EnqueuedUtc = x.EnqueuedUtc,
+                    DebugType = x.DebugType
+                })
+                .ToList(),
+            DownstreamToPeers = relay.DownstreamToPeers.Values
+                .OrderBy(x => x.EnqueuedUtc)
+                .Select(x => new RelayDownstreamMessageDto
+                {
+                    AckId = x.AckId,
+                    TargetPkh = x.TargetPkh,
+                    OpaqueBytes = x.OpaqueBytes,
+                    EnqueuedUtc = x.EnqueuedUtc,
+                    DebugType = x.DebugType
+                })
+                .ToList()
+        };
+
+        return _store.SaveRelayAsync(dto, cancellationToken);
+    }
+
+    private SimulatedRelayModel GetRelayOrThrow(Guid relayHostPeerId)
+    {
+        if (_relayByHostPeerId.TryGetValue(relayHostPeerId, out var relay)) return relay;
+        throw new InvalidOperationException($"No relay exists with host peer id {relayHostPeerId}");
+    }
+
+    public async Task<bool> DeleteRelayMessageByAckIdAsync(Guid relayHostPeerId, Guid ackId, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        await _relayGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var relay = GetRelayOrThrow(relayHostPeerId);
+            return relay.RemoveMessage(ackId);
+        }
+        finally
+        {
+            _relayGate.Release();
+        }
+    }
+
+    public async Task<bool> MoveRelayMessageByAckIdAsync(Guid relayHostPeerId, Guid ackId, int delta, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (delta == 0) return false;
+
+        await _relayGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var relay = GetRelayOrThrow(relayHostPeerId);
+            var ordered = relay.UpstreamToMain.Values
+                .Select(x => (AckId: x.AckId, EnqueuedUtc: x.EnqueuedUtc))
+                .Concat(relay.DownstreamToPeers.Values.Select(x => (AckId: x.AckId, EnqueuedUtc: x.EnqueuedUtc)))
+                .OrderBy(x => x.EnqueuedUtc)
+                .ToList();
+
+            var idx = ordered.FindIndex(x => x.AckId == ackId);
+            if (idx < 0) return false;
+
+            var newIdx = idx + delta;
+            if (newIdx < 0 || newIdx >= ordered.Count) return false;
+
+            var before = newIdx > 0 ? ordered[newIdx - 1].EnqueuedUtc : (DateTimeOffset?)null;
+            var after = newIdx < ordered.Count - 1 ? ordered[newIdx + 1].EnqueuedUtc : (DateTimeOffset?)null;
+
+            DateTimeOffset newTime;
+            if (before is null && after is null)
+            {
+                newTime = DateTimeOffset.UtcNow;
+            }
+            else if (before is null)
+            {
+                newTime = after.Value.AddTicks(-1);
+            }
+            else if (after is null)
+            {
+                newTime = before.Value.AddTicks(1);
+            }
+            else
+            {
+                var midTicks = (before.Value.UtcTicks + after.Value.UtcTicks) / 2;
+                newTime = new DateTimeOffset(midTicks, TimeSpan.Zero);
+                if (newTime <= before.Value) newTime = before.Value.AddTicks(1);
+                if (newTime >= after.Value) newTime = after.Value.AddTicks(-1);
+            }
+
+            if (relay.UpstreamToMain.TryGetValue(ackId, out var outMsg))
+            {
+                relay.EnqueueForMain(outMsg with { EnqueuedUtc = newTime });
+            }
+            else if (relay.DownstreamToPeers.TryGetValue(ackId, out var inMsg))
+            {
+                relay.EnqueueForPeer(inMsg with { EnqueuedUtc = newTime });
+            }
+            else
+            {
+                return false;
+            }
+
+            _diagnostics.Emit(
+                SimulatorDiagnosticEventType.RelayReordered,
+                $"Relay reorder: delta={delta}",
+                relayHostPeerId: relayHostPeerId,
+                ackId: ackId);
+
+            return true;
+        }
+        finally
+        {
+            _relayGate.Release();
+        }
+    }
+
+    public async Task<bool> CorruptRelayMessageByAckIdAsync(Guid relayHostPeerId, Guid ackId, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        await _relayGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var relay = GetRelayOrThrow(relayHostPeerId);
+
+            if (relay.UpstreamToMain.TryGetValue(ackId, out var outMsg))
+            {
+                if (outMsg.OpaqueBytes is null || outMsg.OpaqueBytes.Length == 0) return false;
+                var bytes = outMsg.OpaqueBytes.ToArray();
+                bytes[0] = (byte)(bytes[0] ^ 0x01);
+                relay.EnqueueForMain(outMsg with { OpaqueBytes = bytes });
+            }
+            else if (relay.DownstreamToPeers.TryGetValue(ackId, out var inMsg))
+            {
+                if (inMsg.OpaqueBytes is null || inMsg.OpaqueBytes.Length == 0) return false;
+                var bytes = inMsg.OpaqueBytes.ToArray();
+                bytes[0] = (byte)(bytes[0] ^ 0x01);
+                relay.EnqueueForPeer(inMsg with { OpaqueBytes = bytes });
+            }
+            else
+            {
+                return false;
+            }
+
+            _diagnostics.Emit(
+                SimulatorDiagnosticEventType.RelayCorrupted,
+                "Relay corrupt",
+                relayHostPeerId: relayHostPeerId,
+                ackId: ackId);
+
+            return true;
+        }
+        finally
+        {
+            _relayGate.Release();
+        }
+    }
+
+    public async Task EnqueueRelayUpstreamToMainAsync(
+        Guid relayHostPeerId,
+        byte[] opaqueBytes,
+        string? debugType = null,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (opaqueBytes is null) throw new ArgumentNullException(nameof(opaqueBytes));
+        if (opaqueBytes.Length == 0) return;
+
+        await _relayGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var relay = GetRelayOrThrow(relayHostPeerId);
+
+            var msg = new OutboundRelayMessage(
+                AckId: Guid.NewGuid(),
+                OpaqueBytes: opaqueBytes,
+                EnqueuedUtc: DateTimeOffset.UtcNow,
+                DebugType: debugType);
+
+            relay.EnqueueForMain(msg);
+
+            _diagnostics.Emit(
+                SimulatorDiagnosticEventType.RelayEnqueued,
+                $"Relay enqueue: {(debugType ?? "opaque")}",
+                relayHostPeerId: relayHostPeerId,
+                ackId: msg.AckId);
+        }
+        finally
+        {
+            _relayGate.Release();
+        }
+    }
+
+    public async Task EnqueueRelayDownstreamToPeerAsync(
+        Guid relayHostPeerId,
+        byte[] targetPkh,
+        byte[] opaqueBytes,
+        string? debugType = null,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (targetPkh is null) throw new ArgumentNullException(nameof(targetPkh));
+        if (targetPkh.Length == 0) throw new ArgumentException("TargetPkh must be non-empty", nameof(targetPkh));
+        if (opaqueBytes is null) throw new ArgumentNullException(nameof(opaqueBytes));
+        if (opaqueBytes.Length == 0) return;
+
+        await _relayGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var relay = GetRelayOrThrow(relayHostPeerId);
+
+            var msg = new InboundRelayMessage(
+                AckId: Guid.NewGuid(),
+                TargetPkh: targetPkh,
+                OpaqueBytes: opaqueBytes,
+                EnqueuedUtc: DateTimeOffset.UtcNow,
+                DebugType: debugType);
+
+            relay.EnqueueForPeer(msg);
+
+            _diagnostics.Emit(
+                SimulatorDiagnosticEventType.RelayEnqueued,
+                $"Relay enqueue: {(debugType ?? "opaque")}",
+                relayHostPeerId: relayHostPeerId,
+                ackId: msg.AckId);
+        }
+        finally
+        {
+            _relayGate.Release();
+        }
+    }
+
+    public async Task<IReadOnlyList<InboundRelayMessage>> DequeueRelayDownstreamToPeerAsync(
+        Guid relayHostPeerId,
+        byte[] targetPkh,
+        int max,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (targetPkh is null) throw new ArgumentNullException(nameof(targetPkh));
+        if (targetPkh.Length == 0) return Array.Empty<InboundRelayMessage>();
+        if (max <= 0) return Array.Empty<InboundRelayMessage>();
+
+        await _relayGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var relay = GetRelayOrThrow(relayHostPeerId);
+            var snapshot = relay.DownstreamToPeers
+                .Values
+                .Where(x => x.TargetPkh.AsSpan().SequenceEqual(targetPkh))
+                .OrderBy(x => x.EnqueuedUtc)
+                .Take(max)
+                .ToList();
+            if (snapshot.Count == 0) return Array.Empty<InboundRelayMessage>();
+
+            foreach (var msg in snapshot)
+            {
+                relay.RemoveMessage(msg.AckId);
+            }
+
+            return snapshot;
+        }
+        finally
+        {
+            _relayGate.Release();
+        }
+    }
+
+    public async Task<int> ForwardRelayUpstreamToMainAsync(
+        Guid relayHostPeerId,
+        SessionId relayHostToMainSessionId,
+        int max,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (max <= 0) return 0;
+
+        using var scope = _scopeFactory.CreateScope();
+        var messageService = scope.ServiceProvider.GetRequiredService<Percolator.Application.Network.PercolatorMessageService>();
+
+        var forwarded = 0;
+        while (forwarded < max)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            OutboundRelayMessage? next;
+
+            await _relayGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                var relay = GetRelayOrThrow(relayHostPeerId);
+                next = relay.UpstreamToMain
+                    .Values
+                    .OrderBy(x => x.EnqueuedUtc)
+                    .FirstOrDefault();
+
+                if (next is not null)
+                {
+                    // Checkout: remove before releasing gate so we can't double-send.
+                    relay.RemoveMessage(next.AckId);
+                }
+            }
+            finally
+            {
+                _relayGate.Release();
+            }
+
+            if (next is null)
+            {
+                break;
+            }
+
+            try
+            {
+                var env = new InternalEnvelope
+                {
+                    RelayOpaqueEnvelope = new RelayOpaqueEnvelope
+                    {
+                        Version = 1,
+                        OpaquePayload = ByteString.CopyFrom(next.OpaqueBytes),
+                        MessageAckId = ByteString.CopyFrom(next.AckId.ToByteArray())
+                    }
+                };
+
+                var cipher = await EncryptInternalEnvelopeAsync(relayHostPeerId, relayHostToMainSessionId, env, cancellationToken)
+                    .ConfigureAwait(false);
+
+                var request = new DeliverOpaqueMessageRequest
+                {
+                    Version = 1,
+                    Payload = ByteString.CopyFrom(cipher.Value)
+                };
+
+                var ctx = new ServerCallContextStub(
+                    method: "/percolator.contracts.TransportService/DeliverOpaqueMessage",
+                    peer: "ipv4:127.0.0.1:0",
+                    deadline: DateTime.UtcNow.AddMinutes(1),
+                    requestHeaders: new Metadata(),
+                    cancellationToken: cancellationToken);
+
+                var resp = await messageService.DeliverOpaqueMessage(request, ctx).ConfigureAwait(false);
+
+                if (resp.ResultCase != DeliverOpaqueMessageResponse.ResultOneofCase.ResponsePayload
+                    || resp.ResponsePayload is null
+                    || !resp.ResponsePayload.HasResponsePayload
+                    || resp.ResponsePayload.ResponsePayload.Length == 0)
+                {
+                    await EnqueueRelayUpstreamToMainAsync(relayHostPeerId, next.OpaqueBytes, next.DebugType, cancellationToken).ConfigureAwait(false);
+                    break;
+                }
+
+                var ackCipher = new SessionRatchetMessage(resp.ResponsePayload.ResponsePayload.ToByteArray());
+                var ackPlain = await DecryptSessionMessageAsync(relayHostPeerId, relayHostToMainSessionId, ackCipher, cancellationToken)
+                    .ConfigureAwait(false);
+                var ack = RelayOpaqueResponse.Parser.ParseFrom(ackPlain.Value);
+                if (!ack.HasMessageAckId || ack.MessageAckId.Length == 0)
+                {
+                    await EnqueueRelayUpstreamToMainAsync(relayHostPeerId, next.OpaqueBytes, next.DebugType, cancellationToken).ConfigureAwait(false);
+                    break;
+                }
+
+                var returned = new Guid(ack.MessageAckId.ToByteArray());
+                if (returned != next.AckId)
+                {
+                    await EnqueueRelayUpstreamToMainAsync(relayHostPeerId, next.OpaqueBytes, next.DebugType, cancellationToken).ConfigureAwait(false);
+                    break;
+                }
+
+                forwarded++;
+            }
+            catch
+            {
+                await EnqueueRelayUpstreamToMainAsync(relayHostPeerId, next.OpaqueBytes, next.DebugType, cancellationToken).ConfigureAwait(false);
+                throw;
+            }
+        }
+
+        return forwarded;
+    }
+
+    public async Task<bool> DeliverRelayUpstreamToMainByAckIdAsync(
+        Guid relayHostPeerId,
+        SessionId relayHostToMainSessionId,
+        Guid ackId,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        OutboundRelayMessage? msg;
+        await _relayGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var relay = GetRelayOrThrow(relayHostPeerId);
+            if (!relay.UpstreamToMain.TryGetValue(ackId, out var found))
+            {
+                return false;
+            }
+            msg = found;
+
+            // Checkout: remove before releasing gate so we can't double-send.
+            relay.RemoveMessage(msg.AckId);
+        }
+        finally
+        {
+            _relayGate.Release();
+        }
+
+        try
+        {
+            var env = new InternalEnvelope
+            {
+                RelayOpaqueEnvelope = new RelayOpaqueEnvelope
+                {
+                    Version = 1,
+                    OpaquePayload = ByteString.CopyFrom(msg.OpaqueBytes),
+                    MessageAckId = ByteString.CopyFrom(msg.AckId.ToByteArray())
+                }
+            };
+
+            var cipher = await EncryptInternalEnvelopeAsync(relayHostPeerId, relayHostToMainSessionId, env, cancellationToken)
+                .ConfigureAwait(false);
+
+            using var scope = _scopeFactory.CreateScope();
+            var messageService = scope.ServiceProvider.GetRequiredService<Percolator.Application.Network.PercolatorMessageService>();
+
+            var request = new DeliverOpaqueMessageRequest
+            {
+                Version = 1,
+                Payload = ByteString.CopyFrom(cipher.Value)
+            };
+
+            var ctx = new ServerCallContextStub(
+                method: "/percolator.contracts.TransportService/DeliverOpaqueMessage",
+                peer: "ipv4:127.0.0.1:0",
+                deadline: DateTime.UtcNow.AddMinutes(1),
+                requestHeaders: new Metadata(),
+                cancellationToken: cancellationToken);
+
+            var resp = await messageService.DeliverOpaqueMessage(request, ctx).ConfigureAwait(false);
+            if (resp.ResultCase != DeliverOpaqueMessageResponse.ResultOneofCase.ResponsePayload
+                || resp.ResponsePayload is null
+                || !resp.ResponsePayload.HasResponsePayload
+                || resp.ResponsePayload.ResponsePayload.Length == 0)
+            {
+                await EnqueueRelayUpstreamToMainAsync(relayHostPeerId, msg.OpaqueBytes, msg.DebugType, cancellationToken).ConfigureAwait(false);
+                return false;
+            }
+
+            var ackCipher = new SessionRatchetMessage(resp.ResponsePayload.ResponsePayload.ToByteArray());
+            var ackPlain = await DecryptSessionMessageAsync(relayHostPeerId, relayHostToMainSessionId, ackCipher, cancellationToken)
+                .ConfigureAwait(false);
+            var ack = RelayOpaqueResponse.Parser.ParseFrom(ackPlain.Value);
+            if (!ack.HasMessageAckId || ack.MessageAckId.Length == 0)
+            {
+                await EnqueueRelayUpstreamToMainAsync(relayHostPeerId, msg.OpaqueBytes, msg.DebugType, cancellationToken).ConfigureAwait(false);
+                return false;
+            }
+
+            var returned = new Guid(ack.MessageAckId.ToByteArray());
+            if (returned != msg.AckId)
+            {
+                await EnqueueRelayUpstreamToMainAsync(relayHostPeerId, msg.OpaqueBytes, msg.DebugType, cancellationToken).ConfigureAwait(false);
+                return false;
+            }
+
+            return true;
+        }
+        catch
+        {
+            await EnqueueRelayUpstreamToMainAsync(relayHostPeerId, msg.OpaqueBytes, msg.DebugType, cancellationToken).ConfigureAwait(false);
             throw;
         }
     }
@@ -1209,6 +1633,8 @@ public sealed class SimulatorStateService : ISimulatorStateService
             _peers.Clear();
             _peers.AddRange(models);
 
+            await InitializeRelaysAsync(cancellationToken).ConfigureAwait(false);
+
             if (loaded is null)
             {
                 await _store.SaveAsync(_state, cancellationToken);
@@ -1233,9 +1659,13 @@ public sealed class SimulatorStateService : ISimulatorStateService
             peerId: dto.PeerId,
             displayName: dto.DisplayName,
             isOnline: dto.IsOnline,
-            isRelayCapable: dto.Relay.IsRelayCapable,
+            isRelayCapable: dto.Relay?.IsRelayCapable == true,
             identitySigningKeySpki: dto.ReverseSignalKeys.IdentitySigningKeySpki,
             identitySigningKeyPrivateKeyEcPrivateKey: dto.ReverseSignalKeys.IdentitySigningKeyPrivateKeyEcPrivateKey,
+            connectionMode: dto.Connection?.Mode ?? ConnectionMode.Direct,
+            host: dto.Connection?.Host,
+            port: dto.Connection?.Port ?? 0,
+            relayPeerId: dto.Connection?.RelayPeerId,
             uiState: dto.UiState,
             pendingCorrelationId: dto.PendingCorrelationId,
             targetPublicKeyHash: dto.TargetPublicKeyHash,
@@ -1245,6 +1675,8 @@ public sealed class SimulatorStateService : ISimulatorStateService
             phase: dto.Phase,
             notUntilUtc: dto.NotUntilUtc,
             lastError: dto.LastError,
+            publishedKeysToPeerIds: dto.PublishedKeysToPeerIds,
+            relayActiveSessionsPeerIds: dto.Relay?.ActiveSessionsPeerIds,
             handshakeAttempts: dto.HandshakeAttempts,
             pendingStandardHandshakeToMainResponderPublicKeyHash: dto.PendingStandardHandshakeToMainResponderPublicKeyHash,
             pendingStandardHandshakeToMainTemporarySessionId: dto.PendingStandardHandshakeToMainTemporarySessionId);
@@ -1428,6 +1860,14 @@ public sealed class SimulatorStateService : ISimulatorStateService
             if (publisher.PublishedKeysToPeerIds.Contains(hostPeerId)) return;
             publisher.PublishedKeysToPeerIds.Add(hostPeerId);
 
+            if (_peerById.TryGetValue(publisherPeerId, out var model))
+            {
+                if (!model.PublishedKeysToPeerIdsMutable.Contains(hostPeerId))
+                {
+                    model.PublishedKeysToPeerIdsMutable.Add(hostPeerId);
+                }
+            }
+
             await _store.SaveAsync(_state, cancellationToken).ConfigureAwait(false);
         }
         finally
@@ -1452,6 +1892,11 @@ public sealed class SimulatorStateService : ISimulatorStateService
             publisher.PublishedKeysToPeerIds ??= new();
             var removed = publisher.PublishedKeysToPeerIds.Remove(hostPeerId);
             if (!removed) return;
+
+            if (_peerById.TryGetValue(publisherPeerId, out var model))
+            {
+                _ = model.PublishedKeysToPeerIdsMutable.Remove(hostPeerId);
+            }
 
             await _store.SaveAsync(_state, cancellationToken).ConfigureAwait(false);
         }
@@ -1483,6 +1928,14 @@ public sealed class SimulatorStateService : ISimulatorStateService
             if (relayHost.Relay.ActiveSessionsPeerIds.Contains(peerId)) return;
             relayHost.Relay.ActiveSessionsPeerIds.Add(peerId);
 
+            if (_peerById.TryGetValue(relayHostPeerId, out var model))
+            {
+                if (!model.RelayActiveSessionsPeerIdsMutable.Contains(peerId))
+                {
+                    model.RelayActiveSessionsPeerIdsMutable.Add(peerId);
+                }
+            }
+
             await _store.SaveAsync(_state, cancellationToken).ConfigureAwait(false);
         }
         finally
@@ -1511,6 +1964,11 @@ public sealed class SimulatorStateService : ISimulatorStateService
 
             var removed = relayHost.Relay.ActiveSessionsPeerIds.Remove(peerId);
             if (!removed) return;
+
+            if (_peerById.TryGetValue(relayHostPeerId, out var model))
+            {
+                _ = model.RelayActiveSessionsPeerIdsMutable.Remove(peerId);
+            }
 
             await _store.SaveAsync(_state, cancellationToken).ConfigureAwait(false);
         }
@@ -1615,206 +2073,6 @@ public sealed class SimulatorStateService : ISimulatorStateService
             SimulatorDiagnosticEventType.PeerRelayCapableChanged,
             $"Peer relay {(dto.Relay.IsRelayCapable ? "enabled" : "disabled")}: {(string.IsNullOrWhiteSpace(dto.DisplayName) ? dto.PeerId.ToString()[..8] : dto.DisplayName)}",
             peerId: peerId);
-    }
-
-    public async Task EnqueueRelayOpaqueAsync(
-        Guid relayHostPeerId,
-        byte[] recipientRoutingKey,
-        byte[] opaqueBytes,
-        string? debugType = null,
-        CancellationToken cancellationToken = default)
-    {
-        if (recipientRoutingKey is null) throw new ArgumentNullException(nameof(recipientRoutingKey));
-        if (opaqueBytes is null) throw new ArgumentNullException(nameof(opaqueBytes));
-
-        await _peerGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            var peer = _state.Peers.FirstOrDefault(p => p.PeerId == relayHostPeerId);
-            if (peer is null) return;
-
-        var queued = new RelayQueuedBlobDto
-        {
-            AckId = Guid.NewGuid(),
-            RecipientRoutingKey = recipientRoutingKey,
-            OpaqueBytes = opaqueBytes,
-            EnqueuedUtc = DateTimeOffset.UtcNow,
-            DebugType = debugType
-        };
-
-            peer.Relay.OpaqueQueue.Items.Add(queued);
-
-            await _store.SaveAsync(_state, cancellationToken).ConfigureAwait(false);
-
-            _diagnostics.Emit(
-                SimulatorDiagnosticEventType.RelayEnqueued,
-                $"Relay enqueue: {(debugType ?? "opaque")}",
-                relayHostPeerId: relayHostPeerId,
-                ackId: queued.AckId);
-        }
-        finally
-        {
-            _peerGate.Release();
-        }
-    }
-
-    public async Task<IReadOnlyList<RelayQueuedBlobDto>> DequeueRelayOpaqueAsync(
-        Guid relayHostPeerId,
-        byte[] recipientRoutingKey,
-        int max,
-        CancellationToken cancellationToken = default)
-    {
-        if (recipientRoutingKey is null) throw new ArgumentNullException(nameof(recipientRoutingKey));
-        if (max <= 0) return Array.Empty<RelayQueuedBlobDto>();
-
-        await _peerGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            var peer = _state.Peers.FirstOrDefault(p => p.PeerId == relayHostPeerId);
-            if (peer is null) return Array.Empty<RelayQueuedBlobDto>();
-
-        var matches = peer.Relay.OpaqueQueue.Items
-            .Where(i => i.RecipientRoutingKey.SequenceEqual(recipientRoutingKey))
-            .Take(max)
-            .ToList();
-
-        if (matches.Count == 0) return Array.Empty<RelayQueuedBlobDto>();
-
-            foreach (var item in matches)
-            {
-                peer.Relay.OpaqueQueue.Items.Remove(item);
-            }
-
-            await _store.SaveAsync(_state, cancellationToken).ConfigureAwait(false);
-            return matches;
-        }
-        finally
-        {
-            _peerGate.Release();
-        }
-    }
-
-    public Task<RelayQueuedBlobDto?> PeekRelayOpaqueAsync(
-        Guid relayHostPeerId,
-        byte[] recipientRoutingKey,
-        CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        if (recipientRoutingKey is null) throw new ArgumentNullException(nameof(recipientRoutingKey));
-
-        var peer = _state.Peers.FirstOrDefault(p => p.PeerId == relayHostPeerId);
-        if (peer is null) return Task.FromResult<RelayQueuedBlobDto?>(null);
-
-        var match = peer.Relay.OpaqueQueue.Items
-            .FirstOrDefault(i => i.RecipientRoutingKey.SequenceEqual(recipientRoutingKey));
-
-        return Task.FromResult<RelayQueuedBlobDto?>(match);
-    }
-
-    public async Task<bool> MoveRelayOpaqueByAckIdAsync(
-        Guid relayHostPeerId,
-        Guid ackId,
-        int delta,
-        CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        if (delta == 0) return false;
-
-        await _peerGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            var peer = _state.Peers.FirstOrDefault(p => p.PeerId == relayHostPeerId);
-            if (peer is null) return false;
-
-        var list = peer.Relay.OpaqueQueue.Items;
-        var idx = list.FindIndex(i => i.AckId == ackId);
-        if (idx < 0) return false;
-
-        var newIdx = idx + delta;
-        if (newIdx < 0 || newIdx >= list.Count) return false;
-
-            var item = list[idx];
-            list.RemoveAt(idx);
-            list.Insert(newIdx, item);
-
-            await _store.SaveAsync(_state, cancellationToken).ConfigureAwait(false);
-
-            _diagnostics.Emit(
-                SimulatorDiagnosticEventType.RelayReordered,
-                $"Relay reorder: delta={delta}",
-                relayHostPeerId: relayHostPeerId,
-                ackId: ackId);
-
-            return true;
-        }
-        finally
-        {
-            _peerGate.Release();
-        }
-    }
-
-    public async Task<bool> CorruptRelayOpaqueByAckIdAsync(
-        Guid relayHostPeerId,
-        Guid ackId,
-        CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-
-        await _peerGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            var peer = _state.Peers.FirstOrDefault(p => p.PeerId == relayHostPeerId);
-            if (peer is null) return false;
-
-            var item = peer.Relay.OpaqueQueue.Items.FirstOrDefault(i => i.AckId == ackId);
-            if (item is null) return false;
-            if (item.OpaqueBytes is null || item.OpaqueBytes.Length == 0) return false;
-
-            // Flip one bit in first byte for MAC failure / tamper testing.
-            var bytes = item.OpaqueBytes.ToArray();
-            bytes[0] = (byte)(bytes[0] ^ 0x01);
-
-            item.OpaqueBytes = bytes;
-
-            await _store.SaveAsync(_state, cancellationToken).ConfigureAwait(false);
-
-            _diagnostics.Emit(
-                SimulatorDiagnosticEventType.RelayCorrupted,
-                $"Relay corrupt: {(item.DebugType ?? "opaque")}",
-                relayHostPeerId: relayHostPeerId,
-                ackId: ackId);
-
-            return true;
-        }
-        finally
-        {
-            _peerGate.Release();
-        }
-    }
-
-    public async Task<bool> DeleteRelayOpaqueByAckIdAsync(Guid relayHostPeerId, Guid ackId, CancellationToken cancellationToken = default)
-    {
-        await _peerGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            var peer = _state.Peers.FirstOrDefault(p => p.PeerId == relayHostPeerId);
-            if (peer is null) return false;
-
-            var before = peer.Relay.OpaqueQueue.Items.Count;
-            peer.Relay.OpaqueQueue.Items.RemoveAll(i => i.AckId == ackId);
-            var changed = peer.Relay.OpaqueQueue.Items.Count != before;
-
-            if (changed)
-            {
-                await _store.SaveAsync(_state, cancellationToken).ConfigureAwait(false);
-            }
-
-            return changed;
-        }
-        finally
-        {
-            _peerGate.Release();
-        }
     }
 
     public async Task PublishPreKeyBundleAsync(
@@ -1948,16 +2206,6 @@ public sealed class SimulatorStateService : ISimulatorStateService
             _peerGate.Release();
         }
     }
-
-    public SimulatedPeerSnapshot? TryGetPeerSnapshot(Guid peerId)
-    {
-        var dto = _state.Peers.FirstOrDefault(p => p.PeerId == peerId);
-        if (dto is null) return null;
-        return SimulatedPeerSnapshot.FromDto(dto);
-    }
-
-    public IReadOnlyList<SimulatedPeerSnapshot> SnapshotPeers()
-        => _state.Peers.Select(SimulatedPeerSnapshot.FromDto).ToList();
 
     private static void NormalizePeer(SimulatedPeerDto peer, TransportOptions transportOptions)
     {
@@ -2125,37 +2373,4 @@ public sealed class SimulatorStateService : ISimulatorStateService
         return $"127.77.{x}.{y}";
     }
 
-    
-}
-
-public sealed record SimulatedPeerSnapshot(
-    Guid PeerId,
-    string? DisplayName,
-    bool IsOnline,
-    bool IsRelayCapable,
-    ConnectionMode ConnectionMode,
-    string? Host,
-    int Port,
-    Guid RelayPeerId,
-    IReadOnlyList<Guid> PublishedKeysToPeerIds,
-    IReadOnlyList<Guid> RelayActiveSessionsPeerIds,
-    IReadOnlyList<RelayQueuedBlobDto> RelayOpaqueQueueItems,
-    int RelayPreKeyBundleCount)
-{
-    public static SimulatedPeerSnapshot FromDto(SimulatedPeerDto dto)
-    {
-        return new SimulatedPeerSnapshot(
-            PeerId: dto.PeerId,
-            DisplayName: dto.DisplayName,
-            IsOnline: dto.IsOnline,
-            IsRelayCapable: dto.Relay?.IsRelayCapable == true,
-            ConnectionMode: dto.Connection?.Mode ?? ConnectionMode.Direct,
-            Host: dto.Connection?.Host,
-            Port: dto.Connection?.Port ?? 0,
-            RelayPeerId: dto.Connection?.RelayPeerId ?? Guid.Empty,
-            PublishedKeysToPeerIds: (dto.PublishedKeysToPeerIds ?? new()).ToArray(),
-            RelayActiveSessionsPeerIds: (dto.Relay?.ActiveSessionsPeerIds ?? new()).ToArray(),
-            RelayOpaqueQueueItems: (dto.Relay?.OpaqueQueue?.Items ?? new()).ToArray(),
-            RelayPreKeyBundleCount: dto.Relay?.PreKeyStore?.PublishedBundles?.Count ?? 0);
-    }
 }

@@ -23,32 +23,33 @@ public sealed class SimulatorDiagnosticBundleBuilder : ISimulatorDiagnosticBundl
         ct.ThrowIfCancellationRequested();
 
         var peerModels = _state.Peers.ToArray();
-        var peerSnapshots = _state.SnapshotPeers();
 
         var peers = peerModels
             .Select(p =>
             {
-                var snap = peerSnapshots.FirstOrDefault(x => x.PeerId == p.PeerId);
                 return new
                 {
                     p.PeerId,
-                    DisplayName = snap?.DisplayName ?? p.DisplayName.CurrentValue,
-                    IsOnline = snap?.IsOnline ?? p.IsOnline.CurrentValue,
-                    IsRelayCapable = snap?.IsRelayCapable ?? p.IsRelayCapable.CurrentValue,
-                    ConnectionMode = (snap?.ConnectionMode ?? ConnectionMode.Direct).ToString(),
-                    RelayPeerId = snap?.RelayPeerId
+                    DisplayName = p.DisplayName.CurrentValue ?? p.PeerId.ToString()[..8],
+                    IsOnline = p.IsOnline.CurrentValue,
+                    IsRelayCapable = p.IsRelayCapable.CurrentValue,
+                    ConnectionMode = p.ConnectionMode.CurrentValue.ToString(),
+                    RelayPeerId = p.RelayPeerId.CurrentValue
                 };
             })
             .ToList();
 
-        var relayQueueSummary = peerSnapshots
-            .Where(p => p.IsRelayCapable)
+        var relayByHostId = _state.Relays.ToDictionary(r => r.RelayHostPeerId);
+        var relayQueueSummary = peerModels
+            .Where(p => p.IsRelayCapable.CurrentValue)
             .Select(p => new
             {
                 RelayHostPeerId = p.PeerId,
-                RelayHostName = string.IsNullOrWhiteSpace(p.DisplayName) ? p.PeerId.ToString()[..8] : p.DisplayName,
-                OpaqueQueueCount = p.RelayOpaqueQueueItems.Count,
-                PreKeyBundleCount = p.RelayPreKeyBundleCount
+                RelayHostName = string.IsNullOrWhiteSpace(p.DisplayName.CurrentValue) ? p.PeerId.ToString()[..8] : p.DisplayName.CurrentValue,
+                OpaqueQueueCount = relayByHostId.TryGetValue(p.PeerId, out var relay)
+                    ? relay.UpstreamToMain.Count + relay.DownstreamToPeers.Count
+                    : 0,
+                PreKeyBundleCount = 0
             })
             .ToList();
 

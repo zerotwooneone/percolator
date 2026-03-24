@@ -7,6 +7,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Desktop.Wpf.Features.Simulator;
+using Desktop.Wpf.Features.Simulator.Models;
 using FluentAssertions;
 using Moq;
 using NUnit.Framework;
@@ -58,10 +59,11 @@ public sealed class SimulatorDiagnosticBundleBuilderTests
         peersList.Add(new SimulatedPeerModel(relayHostId, "Relay", isOnline: true, isRelayCapable: true, spki, priv));
         peersList.Add(new SimulatedPeerModel(peerId, "Peer", isOnline: true, isRelayCapable: false, spki, priv));
 
+        var relaysList = new ObservableList<SimulatedRelayModel>();
+        relaysList.Add(new SimulatedRelayModel(relayHostId));
+
         state.SetupGet(s => s.Peers).Returns(peersList);
-        state.Setup(s => s.SnapshotPeers()).Returns(peers.Select(SimulatedPeerSnapshot.FromDto).ToList());
-        state.Setup(s => s.TryGetPeerSnapshot(It.IsAny<Guid>()))
-            .Returns<Guid>(id => peers.Where(p => p.PeerId == id).Select(SimulatedPeerSnapshot.FromDto).FirstOrDefault());
+        state.SetupGet(s => s.Relays).Returns(relaysList);
         state.Setup(s => s.TryGetRuntimeStoreAsync(relayHostId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SimulatedPeerRuntimeStoreDto
             {

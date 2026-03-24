@@ -20,6 +20,8 @@ public sealed class SimulatorStateServiceInitializationTests
     {
         private readonly TaskCompletionSource<SimulatorStateDto?> _gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
+        public RelayPersistenceDto? Relay { get; set; }
+
         public int LoadCalls;
 
         public Task<SimulatorStateDto?> LoadAsync(CancellationToken cancellationToken = default)
@@ -30,6 +32,15 @@ public sealed class SimulatorStateServiceInitializationTests
 
         public Task SaveAsync(SimulatorStateDto state, CancellationToken cancellationToken = default)
             => Task.CompletedTask;
+
+        public Task<RelayPersistenceDto?> LoadRelayAsync(Guid relayHostPeerId, CancellationToken cancellationToken = default)
+            => Task.FromResult(Relay);
+
+        public Task SaveRelayAsync(RelayPersistenceDto relay, CancellationToken cancellationToken = default)
+        {
+            Relay = relay;
+            return Task.CompletedTask;
+        }
 
         public void Release(SimulatorStateDto? state) => _gate.TrySetResult(state);
     }

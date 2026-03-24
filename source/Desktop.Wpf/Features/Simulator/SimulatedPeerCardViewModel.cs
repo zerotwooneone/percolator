@@ -326,23 +326,22 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
 
     private string? TryResolveEndpoint()
     {
-        var snap = _state.TryGetPeerSnapshot(_model.PeerId);
-        if (snap is null) return null;
-        if (string.IsNullOrWhiteSpace(snap.Host) || snap.Port <= 0) return null;
-        return $"{snap.Host}:{snap.Port}";
+        var host = _model.Host.CurrentValue;
+        var port = _model.Port.CurrentValue;
+        if (string.IsNullOrWhiteSpace(host) || port <= 0) return null;
+        return $"{host}:{port}";
     }
 
     private (string host, int port) TryResolveEndpointParts()
     {
-        var snap = _state.TryGetPeerSnapshot(_model.PeerId);
-        if (snap is null
-            || string.IsNullOrWhiteSpace(snap.Host)
-            || snap.Port <= 0)
+        var host = _model.Host.CurrentValue;
+        var port = _model.Port.CurrentValue;
+        if (string.IsNullOrWhiteSpace(host) || port <= 0)
         {
             return (AllocateSimulatorLoopbackHost(_model.PeerId), 5002);
         }
 
-        return (snap.Host, snap.Port);
+        return (host, port);
     }
 
     private static string AllocateSimulatorLoopbackHost(Guid peerId)
@@ -387,13 +386,13 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
 
     private bool HasActiveSessionToHost(Guid relayHostPeerId)
     {
-        var host = _state.TryGetPeerSnapshot(relayHostPeerId);
+        var host = _state.Peers.FirstOrDefault(p => p.PeerId == relayHostPeerId);
         if (host is null) return false;
-        if (!host.IsRelayCapable) return false;
+        if (!host.IsRelayCapable.CurrentValue) return false;
         return host.RelayActiveSessionsPeerIds.Contains(_model.PeerId);
     }
 
-    internal void RebuildRelationshipTags(SimulatedPeerSnapshot dto, IReadOnlyList<SimulatedPeerSnapshot> allPeers)
+    internal void RebuildRelationshipTags(SimulatedPeerModel model, IReadOnlyList<SimulatedPeerModel> allPeers)
     {
         PublishedToTags.Clear();
         HostingForTags.Clear();
@@ -404,7 +403,7 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
             AvailablePublishTargets.Add(new PublishTargetOption(p.PeerId, _resolvePeerName(p.PeerId)));
         }
 
-        foreach (var hostId in dto.PublishedKeysToPeerIds.Distinct().Where(x => x != PeerId))
+        foreach (var hostId in model.PublishedKeysToPeerIds.Distinct().Where(x => x != PeerId))
         {
             var display = _resolvePeerName(hostId);
             PublishedToTags.Add(new RelationshipTagViewModel(

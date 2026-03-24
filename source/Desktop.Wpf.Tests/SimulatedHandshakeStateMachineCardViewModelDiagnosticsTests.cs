@@ -36,8 +36,6 @@ public sealed class SimulatedHandshakeStateMachineCardViewModelDiagnosticsTests
 
         var model = new SimulatedPeerModel(peerId, "peer", isOnline: true, isRelayCapable: false, spki, priv);
 
-        var relay = new Mock<ISimulatorRelayEmulator>(MockBehavior.Loose);
-
         var diagnostics = new SimulatorDiagnosticsService();
         var options = Options.Create(new TransportOptions { GrpcPort = 5002 });
 
@@ -47,11 +45,15 @@ public sealed class SimulatedHandshakeStateMachineCardViewModelDiagnosticsTests
         var relayHostId = Guid.NewGuid();
         var state = new Mock<ISimulatorStateService>(MockBehavior.Loose);
 
+        var relayHostModel = new SimulatedPeerModel(relayHostId, "relay", isOnline: true, isRelayCapable: true, spki, priv);
+        var peers = new ObservableCollections.ObservableList<SimulatedPeerModel>();
+        peers.Add(relayHostModel);
+        state.SetupGet(s => s.Peers).Returns(peers);
+
         var mainIngress = new Mock<ISimulatorMainIngressService>(MockBehavior.Loose);
         using var sut = new SimulatedHandshakeStateMachineCardViewModel(
             model,
             state.Object,
-            relay.Object,
             mainIngress.Object,
             diagnostics,
             options,
@@ -82,16 +84,6 @@ public sealed class SimulatedHandshakeStateMachineCardViewModelDiagnosticsTests
 
         var relayHostId = Guid.NewGuid();
 
-        var relay = new Mock<ISimulatorRelayEmulator>(MockBehavior.Strict);
-        relay
-            .Setup(r => r.EnqueueToRelayHostAsync(
-                relayHostId,
-                It.IsAny<Guid>(),
-                It.IsAny<byte[]>(),
-                It.IsAny<string?>(),
-                It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
-
         var diagnostics = new SimulatorDiagnosticsService();
         var options = Options.Create(new TransportOptions { GrpcPort = 5002 });
 
@@ -99,39 +91,19 @@ public sealed class SimulatedHandshakeStateMachineCardViewModelDiagnosticsTests
         active.SetActiveIdentity(new IdentityRecord(Guid.NewGuid(), "self"));
 
         var state = new Mock<ISimulatorStateService>(MockBehavior.Loose);
+
+        var relayHostModel = new SimulatedPeerModel(relayHostId, "relay", isOnline: true, isRelayCapable: true, spki, priv);
+        var peers = new ObservableCollections.ObservableList<SimulatedPeerModel>();
+        peers.Add(relayHostModel);
+        state.SetupGet(s => s.Peers).Returns(peers);
+
         state
-            .Setup(s => s.TryGetPeerSnapshot(relayHostId))
-            .Returns(new SimulatedPeerSnapshot(
-                PeerId: relayHostId,
-                DisplayName: "relay",
-                IsOnline: true,
-                IsRelayCapable: true,
-                ConnectionMode: ConnectionMode.Direct,
-                Host: "127.0.0.1",
-                Port: 5002,
-                RelayPeerId: Guid.Empty,
-                PublishedKeysToPeerIds: Array.Empty<Guid>(),
-                RelayActiveSessionsPeerIds: Array.Empty<Guid>(),
-                RelayOpaqueQueueItems: Array.Empty<RelayQueuedBlobDto>(),
-                RelayPreKeyBundleCount: 0));
-        state
-            .Setup(s => s.SnapshotPeers())
-            .Returns(new[]
-            {
-                new SimulatedPeerSnapshot(
-                    PeerId: relayHostId,
-                    DisplayName: "relay",
-                    IsOnline: true,
-                    IsRelayCapable: true,
-                    ConnectionMode: ConnectionMode.Direct,
-                    Host: "127.0.0.1",
-                    Port: 5002,
-                    RelayPeerId: Guid.Empty,
-                    PublishedKeysToPeerIds: Array.Empty<Guid>(),
-                    RelayActiveSessionsPeerIds: Array.Empty<Guid>(),
-                    RelayOpaqueQueueItems: Array.Empty<RelayQueuedBlobDto>(),
-                    RelayPreKeyBundleCount: 0)
-            });
+            .Setup(s => s.EnqueueRelayUpstreamToMainAsync(
+                relayHostId,
+                It.IsAny<byte[]>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
         state
             .Setup(s => s.TryFinalizeInviteHandshakeResponseFromMainAsync(
                 peerId,
@@ -144,7 +116,6 @@ public sealed class SimulatedHandshakeStateMachineCardViewModelDiagnosticsTests
         using var sut = new SimulatedHandshakeStateMachineCardViewModel(
             model,
             state.Object,
-            relay.Object,
             mainIngress.Object,
             diagnostics,
             options,
@@ -177,6 +148,6 @@ public sealed class SimulatedHandshakeStateMachineCardViewModelDiagnosticsTests
         // Assert
         diagnostics.Events.Should().Contain(e => e.EventType == SimulatorDiagnosticEventType.HandshakeStateTransition && e.ContextTag == "OutboundPending" && e.PeerId == peerId);
         diagnostics.Events.Should().Contain(e => e.EventType == SimulatorDiagnosticEventType.HandshakeStateTransition && e.ContextTag == "Established" && e.PeerId == peerId);
-        relay.VerifyAll();
+        state.VerifyAll();
     }
 }

@@ -2,37 +2,42 @@ namespace Desktop.Wpf.Features.Simulator;
 
 public sealed class SimulatedRelayQueueItemViewModel
 {
-    private static readonly Guid MainNodeSentinelPeerId = new("88880000-0000-0000-0000-000000000000");
     public SimulatedRelayQueueItemViewModel(
         Guid relayHostPeerId,
-        RelayQueuedBlobDto model,
-        Func<Guid, string> peerNameById,
-        byte[]? mainIdentityPkh)
+        Guid ackId,
+        DateTimeOffset enqueuedUtc,
+        string? debugType,
+        byte[]? targetPkh,
+        byte[] opaqueBytes,
+        Func<Guid, string> peerNameById)
     {
         RelayHostPeerId = relayHostPeerId;
-        Model = model;
 
-        AckId = model.AckId;
-        EnqueuedUtc = model.EnqueuedUtc;
+        AckId = ackId;
+        EnqueuedUtc = enqueuedUtc;
+        DebugType = debugType;
+        TargetPkh = targetPkh;
+        OpaqueBytes = opaqueBytes;
 
-        DebugType = model.DebugType;
-        TypeLabel = ToTypeLabel(model.DebugType);
+        TypeLabel = ToTypeLabel(debugType);
 
-        RecipientDisplay = ToRecipientDisplay(model.RecipientRoutingKey, peerNameById, mainIdentityPkh);
+        RecipientDisplay = ToRecipientDisplay(targetPkh);
         FromToDisplay = $"{peerNameById(relayHostPeerId)} -> {RecipientDisplay}";
 
-        TimestampDisplay = model.EnqueuedUtc.LocalDateTime.ToString("HH:mm:ss");
+        TimestampDisplay = enqueuedUtc.LocalDateTime.ToString("HH:mm:ss");
     }
 
     public Guid RelayHostPeerId { get; }
-
-    public RelayQueuedBlobDto Model { get; }
 
     public Guid AckId { get; }
 
     public DateTimeOffset EnqueuedUtc { get; }
 
     public string? DebugType { get; }
+
+    public byte[]? TargetPkh { get; }
+
+    public byte[] OpaqueBytes { get; }
 
     public string TypeLabel { get; }
 
@@ -41,8 +46,6 @@ public sealed class SimulatedRelayQueueItemViewModel
     public string RecipientDisplay { get; }
 
     public string FromToDisplay { get; }
-
-    public byte[] RecipientRoutingKey => Model.RecipientRoutingKey;
 
     public static string ToTypeLabel(string? debugType)
     {
@@ -59,35 +62,14 @@ public sealed class SimulatedRelayQueueItemViewModel
         };
     }
 
-    private static string ToRecipientDisplay(
-        byte[] routingKey,
-        Func<Guid, string> peerNameById,
-        byte[]? mainIdentityPkh)
+    private static string ToRecipientDisplay(byte[]? targetPkh)
     {
-        if (routingKey is null || routingKey.Length == 0)
-        {
-            return "?";
-        }
-
-        // Guid routing key (simulated peer id or main identity id)
-        if (routingKey.Length == 16)
-        {
-            var id = new Guid(routingKey);
-            if (id == MainNodeSentinelPeerId)
-            {
-                return "Main Node";
-            }
-            return peerNameById(id);
-        }
-
-        if (mainIdentityPkh is not null && mainIdentityPkh.Length == 32 && routingKey.Length == 32
-            && routingKey.AsSpan().SequenceEqual(mainIdentityPkh))
+        if (targetPkh is null || targetPkh.Length == 0)
         {
             return "Main Node";
         }
 
-        // PublicKeyHash routing key
-        var hex = Convert.ToHexString(routingKey);
+        var hex = Convert.ToHexString(targetPkh);
         return $"PKH:{TruncateHex(hex, 12)}";
     }
 

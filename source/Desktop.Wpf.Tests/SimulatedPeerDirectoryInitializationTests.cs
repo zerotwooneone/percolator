@@ -37,9 +37,6 @@ public sealed class SimulatedPeerDirectoryInitializationTests
             .Callback(() => Interlocked.Increment(ref initCalls))
             .Returns(initGate.Task);
 
-        state.Setup(s => s.TryGetPeerSnapshot(It.IsAny<Guid>())).Returns((SimulatedPeerSnapshot?)null);
-        state.Setup(s => s.SnapshotPeers()).Returns(Array.Empty<SimulatedPeerSnapshot>());
-
         state.Setup(s => s.TryGetPeerIdByIdentityPkhAsync(It.IsAny<byte[]>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Guid?)null);
         state.Setup(s => s.AddRelayActiveSessionAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))

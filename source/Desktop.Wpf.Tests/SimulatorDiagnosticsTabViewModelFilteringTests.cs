@@ -66,9 +66,6 @@ public sealed class SimulatorDiagnosticsTabViewModelFilteringTests
         peersList.Add(new SimulatedPeerModel(relay, "Relay", isOnline: true, isRelayCapable: true, spki, priv));
         peersList.Add(new SimulatedPeerModel(peerB, "B", isOnline: true, isRelayCapable: false, spki, priv));
         state.SetupGet(s => s.Peers).Returns(peersList);
-        state.Setup(s => s.SnapshotPeers()).Returns(peers.Select(SimulatedPeerSnapshot.FromDto).ToList());
-        state.Setup(s => s.TryGetPeerSnapshot(It.IsAny<Guid>()))
-            .Returns<Guid>(id => peers.Where(p => p.PeerId == id).Select(SimulatedPeerSnapshot.FromDto).FirstOrDefault());
         state.Setup(s => s.TryGetPeerIdByIdentityPkhAsync(It.IsAny<byte[]>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Guid?)null);
         state.Setup(s => s.AddRelayActiveSessionAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))

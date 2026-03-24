@@ -231,17 +231,17 @@ public sealed class SimulatorDiagnosticsTabViewModel : IDisposable
 
     private void RefreshFilterOptions()
     {
-        var peers = _state.SnapshotPeers()
-            .Select(p => new SimulatorFilterOption<Guid?>(p.PeerId, string.IsNullOrWhiteSpace(p.DisplayName) ? p.PeerId.ToString()[..8] : p.DisplayName!))
+        var peers = _state.Peers
+            .Select(p => new SimulatorFilterOption<Guid?>(p.PeerId, string.IsNullOrWhiteSpace(p.DisplayName.CurrentValue) ? p.PeerId.ToString()[..8] : p.DisplayName.CurrentValue!))
             .OrderBy(p => p.Display)
             .ToList();
 
         peers.Insert(0, new SimulatorFilterOption<Guid?>(null, "All"));
         PeerFilterOptions.Value = peers;
 
-        var relays = _state.SnapshotPeers()
-            .Where(p => p.IsRelayCapable)
-            .Select(p => new SimulatorFilterOption<Guid?>(p.PeerId, string.IsNullOrWhiteSpace(p.DisplayName) ? p.PeerId.ToString()[..8] : p.DisplayName!))
+        var relays = _state.Peers
+            .Where(p => p.IsRelayCapable.CurrentValue)
+            .Select(p => new SimulatorFilterOption<Guid?>(p.PeerId, string.IsNullOrWhiteSpace(p.DisplayName.CurrentValue) ? p.PeerId.ToString()[..8] : p.DisplayName.CurrentValue!))
             .OrderBy(p => p.Display)
             .ToList();
 

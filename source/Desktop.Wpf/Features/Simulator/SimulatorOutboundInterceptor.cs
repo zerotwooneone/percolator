@@ -146,10 +146,10 @@ public sealed class SimulatorOutboundInterceptor : ISimulatorOutboundInterceptor
             return false;
         }
 
-        var match = _state.SnapshotPeers().FirstOrDefault(p =>
-            !string.IsNullOrWhiteSpace(p.Host)
-            && string.Equals(p.Host, endpoint.Host, StringComparison.OrdinalIgnoreCase)
-            && p.Port == endpoint.Port);
+        var match = _state.Peers.FirstOrDefault(p =>
+            !string.IsNullOrWhiteSpace(p.Host.CurrentValue)
+            && string.Equals(p.Host.CurrentValue, endpoint.Host, StringComparison.OrdinalIgnoreCase)
+            && p.Port.CurrentValue == endpoint.Port);
 
         if (match is null)
         {

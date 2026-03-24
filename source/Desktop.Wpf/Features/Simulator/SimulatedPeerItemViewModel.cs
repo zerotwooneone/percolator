@@ -19,7 +19,6 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
     private readonly ISimulatorDiagnosticsService _diagnostics;
     private readonly Percolator.Application.Network.IMainReverseSignalInviteFactory _inviteFactory;
     private readonly Percolator.Application.Network.IAdvertisedHostLookup _advertisedHostLookup;
-    private readonly ISimulatorRelayEmulator _relay;
     private readonly Percolator.Application.Network.PercolatorMessageService _messageService;
     private readonly IOptions<TransportOptions> _transportOptions;
     private readonly Percolator.Application.Identity.ActiveIdentityContext _active;
@@ -35,7 +34,6 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
         ISimulatorDiagnosticsService diagnostics,
         Percolator.Application.Network.IMainReverseSignalInviteFactory inviteFactory,
         Percolator.Application.Network.IAdvertisedHostLookup advertisedHostLookup,
-        ISimulatorRelayEmulator relay,
         Percolator.Application.Network.PercolatorMessageService messageService,
         IOptions<TransportOptions> transportOptions,
         Percolator.Application.Identity.ActiveIdentityContext active,
@@ -49,7 +47,6 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
         _diagnostics = diagnostics;
         _inviteFactory = inviteFactory;
         _advertisedHostLookup = advertisedHostLookup;
-        _relay = relay;
         _messageService = messageService;
         _transportOptions = transportOptions;
         _active = active;
@@ -300,15 +297,24 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
 
         var invite = _inviteFactory.CreateInvite();
 
-        await _relay.EnqueueToRelayHostAsync(relayPeerGuid, _model.PeerId, invite.ToByteArray(), debugType: nameof(EstablishDirectSessionRequest), cancellationToken: ct)
+        var selfPkh = await _state.ComputePublicKeyHashAsync(_model.PeerId, ct).ConfigureAwait(false);
+
+        await _state.EnqueueRelayDownstreamToPeerAsync(
+                relayHostPeerId: relayPeerGuid,
+                targetPkh: selfPkh,
+                opaqueBytes: invite.ToByteArray(),
+                debugType: nameof(EstablishDirectSessionRequest),
+                cancellationToken: ct)
             .ConfigureAwait(false);
 
-        var dequeued = await _relay.FetchFromRelayHostAsync(relayPeerGuid, _model.PeerId, max: 1, cancellationToken: ct)
+        var dequeued = await _state.DequeueRelayDownstreamToPeerAsync(
+                relayHostPeerId: relayPeerGuid,
+                targetPkh: selfPkh,
+                max: 1,
+                cancellationToken: ct)
             .ConfigureAwait(false);
-        if (dequeued.Count == 0)
-        {
-            return;
-        }
+
+        if (dequeued.Count == 0) return;
 
         var req = EstablishDirectSessionRequest.Parser.ParseFrom(dequeued[0].OpaqueBytes);
         var inviterPeerId = MainNodeSentinelPeerId;
@@ -322,15 +328,19 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
 
         _sessionToMain = acceptance.SessionId;
 
-        await _relay.EnqueueToRelayHostAsync(relayPeerGuid, inviterPeerId, acceptance.Response.ToByteArray(), debugType: nameof(InviteHandshakeResponse), cancellationToken: ct)
+        await _state.EnqueueRelayUpstreamToMainAsync(
+                relayHostPeerId: relayPeerGuid,
+                opaqueBytes: acceptance.Response.ToByteArray(),
+                debugType: nameof(InviteHandshakeResponse),
+                cancellationToken: ct)
             .ConfigureAwait(false);
     }
 
     private bool HasActiveSessionToHost(Guid relayHostPeerId)
     {
-        var host = _state.TryGetPeerSnapshot(relayHostPeerId);
+        var host = _state.Peers.FirstOrDefault(p => p.PeerId == relayHostPeerId);
         if (host is null) return false;
-        if (!host.IsRelayCapable) return false;
+        if (!host.IsRelayCapable.CurrentValue) return false;
         return host.RelayActiveSessionsPeerIds.Contains(_model.PeerId);
     }
 
@@ -365,13 +375,14 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
         }
 
         var mainSpki = _active.Keys.IdentitySigningKey.ExportSubjectPublicKeyInfo();
-        var mainPkh = SHA256.HashData(mainSpki);
+        _ = SHA256.HashData(mainSpki);
 
-        await _relay.ForwardQueuedToMainByRoutingKeyAsync(
-            relayHostPeerId: relayPeerGuid,
-            recipientRoutingKey: mainPkh,
-            relayHostToMainSessionId: _sessionToMain,
-            cancellationToken: ct).ConfigureAwait(false);
+        await _state.ForwardRelayUpstreamToMainAsync(
+                relayHostPeerId: relayPeerGuid,
+                relayHostToMainSessionId: _sessionToMain,
+                max: 250,
+                cancellationToken: ct)
+            .ConfigureAwait(false);
     }
 
     private async Task ExecutePeerInviteDirectAsync(System.Threading.CancellationToken ct)
@@ -411,11 +422,10 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
         }
 
         var mainSpki = _active.Keys.IdentitySigningKey.ExportSubjectPublicKeyInfo();
-        var mainPkh = SHA256.HashData(mainSpki);
+        _ = SHA256.HashData(mainSpki);
 
-        return _relay.EnqueueToRelayHostByRoutingKeyAsync(
+        return _state.EnqueueRelayUpstreamToMainAsync(
             relayHostPeerId: relayPeerGuid,
-            recipientRoutingKey: mainPkh,
             opaqueBytes: invite.ToByteArray(),
             debugType: nameof(EstablishDirectSessionRequest),
             cancellationToken: ct);

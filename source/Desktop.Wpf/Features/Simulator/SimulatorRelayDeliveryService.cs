@@ -9,9 +9,21 @@ namespace Desktop.Wpf.Features.Simulator;
 
 public interface ISimulatorRelayDeliveryService
 {
-    Task DeliverToMainAsync(Guid relayHostPeerId, SessionId relayHostToMainSessionId, RelayQueuedBlobDto item, CancellationToken cancellationToken = default);
+    Task DeliverToMainAsync(
+        Guid relayHostPeerId,
+        SessionId relayHostToMainSessionId,
+        Guid ackId,
+        byte[] opaqueBytes,
+        string? debugType,
+        CancellationToken cancellationToken = default);
 
-    Task DeliverToPeerAsync(Guid relayHostPeerId, Guid recipientPeerId, RelayQueuedBlobDto item, CancellationToken cancellationToken = default);
+    Task DeliverToPeerAsync(
+        Guid relayHostPeerId,
+        Guid recipientPeerId,
+        Guid ackId,
+        byte[] opaqueBytes,
+        string? debugType,
+        CancellationToken cancellationToken = default);
 }
 
 public sealed class SimulatorRelayDeliveryService : ISimulatorRelayDeliveryService
@@ -36,19 +48,21 @@ public sealed class SimulatorRelayDeliveryService : ISimulatorRelayDeliveryServi
     public async Task DeliverToMainAsync(
         Guid relayHostPeerId,
         SessionId relayHostToMainSessionId,
-        RelayQueuedBlobDto item,
+        Guid ackId,
+        byte[] opaqueBytes,
+        string? debugType,
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (item is null) throw new ArgumentNullException(nameof(item));
+        if (opaqueBytes is null) throw new ArgumentNullException(nameof(opaqueBytes));
 
         var env = new InternalEnvelope
         {
             RelayOpaqueEnvelope = new RelayOpaqueEnvelope
             {
                 Version = 1,
-                OpaquePayload = ByteString.CopyFrom(item.OpaqueBytes),
-                MessageAckId = ByteString.CopyFrom(item.AckId.ToByteArray())
+                OpaquePayload = ByteString.CopyFrom(opaqueBytes),
+                MessageAckId = ByteString.CopyFrom(ackId.ToByteArray())
             }
         };
 
@@ -78,14 +92,16 @@ public sealed class SimulatorRelayDeliveryService : ISimulatorRelayDeliveryServi
     public async Task DeliverToPeerAsync(
         Guid relayHostPeerId,
         Guid recipientPeerId,
-        RelayQueuedBlobDto item,
+        Guid ackId,
+        byte[] opaqueBytes,
+        string? debugType,
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (item is null) throw new ArgumentNullException(nameof(item));
+        if (opaqueBytes is null) throw new ArgumentNullException(nameof(opaqueBytes));
 
         var forwarded = await _state
-            .ReceiveRelayedOpaquePayloadAsync(recipientPeerId, item.OpaqueBytes, cancellationToken)
+            .ReceiveRelayedOpaquePayloadAsync(recipientPeerId, opaqueBytes, cancellationToken)
             .ConfigureAwait(false);
 
         if (forwarded?.Response is null || !forwarded.Response.HasResponsePayload || forwarded.Response.ResponsePayload.Length == 0)
@@ -96,7 +112,7 @@ public sealed class SimulatorRelayDeliveryService : ISimulatorRelayDeliveryServi
         // For standard handshake via relay: opaque payload is HandshakeInitiatorHello; route response back to initiator PKH.
         try
         {
-            var hello = HandshakeInitiatorHello.Parser.ParseFrom(item.OpaqueBytes);
+            var hello = HandshakeInitiatorHello.Parser.ParseFrom(opaqueBytes);
             if (hello is null || !hello.HasInitiatorIdentityKeySpki || hello.InitiatorIdentityKeySpki.Length == 0)
             {
                 return;
@@ -104,9 +120,9 @@ public sealed class SimulatorRelayDeliveryService : ISimulatorRelayDeliveryServi
 
             var initiatorPkh = System.Security.Cryptography.SHA256.HashData(hello.InitiatorIdentityKeySpki.ToByteArray());
 
-            await _state.EnqueueRelayOpaqueAsync(
+            await _state.EnqueueRelayDownstreamToPeerAsync(
                     relayHostPeerId: relayHostPeerId,
-                    recipientRoutingKey: initiatorPkh,
+                    targetPkh: initiatorPkh,
                     opaqueBytes: forwarded.ToByteArray(),
                     debugType: nameof(EstablishSessionResponse),
                     cancellationToken: cancellationToken)

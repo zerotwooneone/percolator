@@ -25,12 +25,23 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
     {
         public SimulatorStateDto? State { get; set; }
 
+        public RelayPersistenceDto? Relay { get; set; }
+
         public Task<SimulatorStateDto?> LoadAsync(CancellationToken cancellationToken = default)
             => Task.FromResult(State);
 
         public Task SaveAsync(SimulatorStateDto state, CancellationToken cancellationToken = default)
         {
             State = state;
+            return Task.CompletedTask;
+        }
+
+        public Task<RelayPersistenceDto?> LoadRelayAsync(Guid relayHostPeerId, CancellationToken cancellationToken = default)
+            => Task.FromResult(Relay);
+
+        public Task SaveRelayAsync(RelayPersistenceDto relay, CancellationToken cancellationToken = default)
+        {
+            Relay = relay;
             return Task.CompletedTask;
         }
     }
@@ -279,10 +290,16 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
         // Assert
         sid.Should().BeNull();
 
-        var queued = repo.State!.Peers.Single(p => p.PeerId == relayHostPeerId)
-            .Relay.OpaqueQueue.Items
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        while ((repo.Relay?.DownstreamToPeers?.Any(i => i.DebugType == nameof(HandshakeInitiatorHello)) != true) && !cts.IsCancellationRequested)
+        {
+            await Task.Delay(10, cts.Token);
+        }
+
+        repo.Relay.Should().NotBeNull();
+        var queued = repo.Relay!.DownstreamToPeers
             .Single(i => i.DebugType == nameof(HandshakeInitiatorHello));
-        queued.RecipientRoutingKey.Should().Equal(responderPkh);
+        queued.TargetPkh.Should().Equal(responderPkh);
 
         diagnostics.Events.Should().Contain(e =>
             e.EventType == SimulatorDiagnosticEventType.PreKeyBundleFetched
@@ -490,8 +507,14 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
             responderPkh,
             CancellationToken.None);
 
-        var helloQueued = repo.State!.Peers.Single(p => p.PeerId == relayHostPeerId)
-            .Relay.OpaqueQueue.Items
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        while ((repo.Relay?.DownstreamToPeers?.Any(i => i.DebugType == nameof(HandshakeInitiatorHello)) != true) && !cts.IsCancellationRequested)
+        {
+            await Task.Delay(10, cts.Token);
+        }
+
+        repo.Relay.Should().NotBeNull();
+        var helloQueued = repo.Relay!.DownstreamToPeers
             .Single(i => i.DebugType == nameof(HandshakeInitiatorHello));
         var helloBytes = helloQueued.OpaqueBytes;
 

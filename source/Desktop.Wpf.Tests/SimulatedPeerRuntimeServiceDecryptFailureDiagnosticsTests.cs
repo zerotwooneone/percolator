@@ -21,12 +21,23 @@ public sealed class SimulatedPeerRuntimeServiceDecryptFailureDiagnosticsTests
     {
         public SimulatorStateDto? State { get; set; }
 
+        public RelayPersistenceDto? Relay { get; set; }
+
         public Task<SimulatorStateDto?> LoadAsync(CancellationToken cancellationToken = default)
             => Task.FromResult(State);
 
         public Task SaveAsync(SimulatorStateDto state, CancellationToken cancellationToken = default)
         {
             State = state;
+            return Task.CompletedTask;
+        }
+
+        public Task<RelayPersistenceDto?> LoadRelayAsync(Guid relayHostPeerId, CancellationToken cancellationToken = default)
+            => Task.FromResult(Relay);
+
+        public Task SaveRelayAsync(RelayPersistenceDto relay, CancellationToken cancellationToken = default)
+        {
+            Relay = relay;
             return Task.CompletedTask;
         }
     }
