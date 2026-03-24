@@ -92,13 +92,13 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
 
         var toggleOnline = Observable.Return(true).ToReactiveCommand<Unit>(_ => { });
         toggleOnline.AsObservable()
-            .Subscribe(_ => _model.SetOnline(!_model.IsOnline.CurrentValue))
+            .Subscribe(_ => _model.IsOnline.Value = !_model.IsOnline.CurrentValue)
             .AddTo(ref _bag);
         ToggleOnlineCommand = toggleOnline.AddTo(ref _bag);
 
         var toggleRelayCapable = Observable.Return(true).ToReactiveCommand<Unit>(_ => { });
         toggleRelayCapable.AsObservable()
-            .Subscribe(_ => _model.SetRelayCapable(!_model.IsRelayCapable.CurrentValue))
+            .Subscribe(_ => _model.IsRelayCapable.Value = !_model.IsRelayCapable.CurrentValue)
             .AddTo(ref _bag);
         ToggleRelayCapableCommand = toggleRelayCapable.AddTo(ref _bag);
 

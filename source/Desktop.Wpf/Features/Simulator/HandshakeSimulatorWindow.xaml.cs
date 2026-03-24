@@ -8,6 +8,8 @@ public partial class HandshakeSimulatorWindow : Window
     {
         InitializeComponent();
         DataContext = vm;
+
+        _ = vm.InitializeAsync();
     }
 
     protected override void OnClosed(System.EventArgs e)

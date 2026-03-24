@@ -15,13 +15,7 @@ public interface ISimulatorStateService
 
     Task<Guid> AddPeerAsync(string? displayName, CancellationToken cancellationToken = default);
     Task RemovePeerAsync(Guid peerId, CancellationToken cancellationToken = default);
-    Task ToggleOnlineAsync(Guid peerId, CancellationToken cancellationToken = default);
-    Task ToggleRelayCapableAsync(Guid peerId, CancellationToken cancellationToken = default);
-
-    Task UpdateDisplayNameAsync(Guid peerId, string? displayName, CancellationToken cancellationToken = default);
-    Task SetOnlineAsync(Guid peerId, bool isOnline, CancellationToken cancellationToken = default);
-    Task SetRelayCapableAsync(Guid peerId, bool isRelayCapable, CancellationToken cancellationToken = default);
-
+    
     Task<Guid?> TryGetPeerIdByIdentityPkhAsync(byte[] recipientPublicKeyHash, CancellationToken cancellationToken = default);
 
     Task EnqueueRelayUpstreamToMainAsync(
@@ -60,19 +54,6 @@ public interface ISimulatorStateService
     Task<bool> MoveRelayMessageByAckIdAsync(Guid relayHostPeerId, Guid ackId, int delta, CancellationToken cancellationToken = default);
 
     Task<bool> CorruptRelayMessageByAckIdAsync(Guid relayHostPeerId, Guid ackId, CancellationToken cancellationToken = default);
-
-    Task PublishPreKeyBundleAsync(
-        Guid relayHostPeerId,
-        byte[] recipientPublicKeyHash,
-        Guid logicalOwnerPeerId,
-        byte[] bundleBytes,
-        DateTimeOffset expiresUtc,
-        CancellationToken cancellationToken = default);
-
-    Task<PublishedPreKeyBundleDto?> TryPopPreKeyBundleByRecipientPkhAsync(
-        Guid relayHostPeerId,
-        byte[] recipientPublicKeyHash,
-        CancellationToken cancellationToken = default);
 
     Task<SimulatedPeerRuntimeStoreDto?> TryGetRuntimeStoreAsync(Guid peerId, CancellationToken cancellationToken = default);
     Task SaveRuntimeStoreAsync(Guid peerId, SimulatedPeerRuntimeStoreDto store, CancellationToken cancellationToken = default);

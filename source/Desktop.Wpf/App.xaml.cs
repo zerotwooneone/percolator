@@ -28,6 +28,7 @@ using Desktop.Wpf.Features.Simulator;
 using Desktop.Wpf.Features.Simulator.Protocol;
 using Percolator.MessageQueue.DependencyInjection;
 using Desktop.Wpf.Features.Sessions.State;
+using Desktop.Wpf.Shared.Mvvm;
 
 namespace Desktop.Wpf;
 
@@ -156,6 +157,7 @@ public partial class App : Application
                 services.AddSingleton<Desktop.Wpf.Features.Simulator.ISimulatorStateRepository, Desktop.Wpf.Features.Simulator.JsonSimulatorStateRepository>();
                 services.AddSingleton<ISimulatedPeerKeyFactory, SimulatedPeerKeyFactory>();
                 services.AddSingleton<ISimulatorStateService, SimulatorStateService>();
+                services.AddSingleton<IUiDispatcher, WpfUiDispatcher>();
                 services.AddSingleton<Desktop.Wpf.Features.Simulator.ISimulatorDiagnosticsService, Desktop.Wpf.Features.Simulator.SimulatorDiagnosticsService>();
                 services.AddSingleton<Desktop.Wpf.Features.Simulator.ISimulatorDiagnosticBundleBuilder, Desktop.Wpf.Features.Simulator.SimulatorDiagnosticBundleBuilder>();
                 services.AddSingleton<ISimulatedPeerDirectory, SimulatedPeerDirectory>();

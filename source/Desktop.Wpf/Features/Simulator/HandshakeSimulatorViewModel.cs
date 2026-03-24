@@ -1,11 +1,13 @@
-using System.Windows;
 using R3;
+using Desktop.Wpf.Shared.Mvvm;
 
 namespace Desktop.Wpf.Features.Simulator;
 
 public sealed class HandshakeSimulatorViewModel : IDisposable
 {
     private DisposableBag _bag;
+
+    private readonly IUiDispatcher _ui;
 
     private readonly ISimulatorDiagnosticsService _diagnostics;
     private readonly ISimulatorStateService _state;
@@ -17,6 +19,7 @@ public sealed class HandshakeSimulatorViewModel : IDisposable
         SimulatorRelayTabViewModel relay,
         SimulatorSessionsTabViewModel sessions,
         SimulatorDiagnosticsTabViewModel diagnostics,
+        IUiDispatcher ui,
         ISimulatorDiagnosticsService diagnosticsService,
         ISimulatorStateService state,
         ISimulatorDiagnosticBundleBuilder bundleBuilder)
@@ -26,6 +29,8 @@ public sealed class HandshakeSimulatorViewModel : IDisposable
         Relay = relay;
         Sessions = sessions;
         Diagnostics = diagnostics;
+
+        _ui = ui;
 
         _diagnostics = diagnosticsService;
         _state = state;
@@ -47,17 +52,17 @@ public sealed class HandshakeSimulatorViewModel : IDisposable
 
         Status = new BindableReactiveProperty<string?>(null).AddTo(ref _bag);
 
-        var reset = Observable.Return(true).ToReactiveCommand<Unit>(_ => { });
-        reset.AsObservable()
+        ResetSimulatorStateCommand = new ReactiveCommand<Unit>().AddTo(ref _bag);
+        ResetSimulatorStateCommand
+            .AsObservable()
             .SubscribeAwait(async (_, ct) => await ExecuteResetAsync(ct), AwaitOperation.Drop)
             .AddTo(ref _bag);
-        ResetSimulatorStateCommand = reset.AddTo(ref _bag);
 
-        var export = Observable.Return(true).ToReactiveCommand<Unit>(_ => { });
-        export.AsObservable()
+        ExportDiagnosticsCommand = new ReactiveCommand<Unit>().AddTo(ref _bag);
+        ExportDiagnosticsCommand
+            .AsObservable()
             .SubscribeAwait(async (_, ct) => await ExecuteExportDiagnosticsAsync(ct), AwaitOperation.Drop)
             .AddTo(ref _bag);
-        ExportDiagnosticsCommand = export.AddTo(ref _bag);
 
         SelectTabCommand = new ReactiveCommand<SimulatorTabKind>(tab => SelectedTab.Value = tab).AddTo(ref _bag);
     }
@@ -80,12 +85,17 @@ public sealed class HandshakeSimulatorViewModel : IDisposable
 
     public ReactiveCommand<SimulatorTabKind> SelectTabCommand { get; }
 
+    public async Task InitializeAsync(CancellationToken ct = default)
+    {
+        await Peers.InitializeAsync(ct).ConfigureAwait(false);
+    }
+
     private async Task ExecuteResetAsync(CancellationToken ct)
     {
         try
         {
-            await Peers.ResetAsync(ct).ConfigureAwait(false);
-            await SetStatusOnUiAsync("Simulator state reset").ConfigureAwait(false);
+            //todo: need to consider how to reset the state of the simulator
+            await SetStatusOnUiAsync("Simulator state reset NOT implemented").ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -105,15 +115,7 @@ public sealed class HandshakeSimulatorViewModel : IDisposable
             ct.ThrowIfCancellationRequested();
             var json = await _bundleBuilder.BuildJsonAsync(ct).ConfigureAwait(false);
 
-            var dispatcher = Application.Current?.Dispatcher;
-            if (dispatcher is null || dispatcher.CheckAccess())
-            {
-                Clipboard.SetText(json);
-            }
-            else
-            {
-                await dispatcher.InvokeAsync(() => Clipboard.SetText(json));
-            }
+            await _ui.InvokeAsync(() => System.Windows.Clipboard.SetText(json), ct).ConfigureAwait(false);
 
             await SetStatusOnUiAsync("Diagnostic bundle copied to clipboard").ConfigureAwait(false);
         }
@@ -124,16 +126,7 @@ public sealed class HandshakeSimulatorViewModel : IDisposable
     }
 
     private Task SetStatusOnUiAsync(string? status)
-    {
-        var dispatcher = Application.Current?.Dispatcher;
-        if (dispatcher is null || dispatcher.CheckAccess())
-        {
-            Status.Value = status;
-            return Task.CompletedTask;
-        }
-
-        return dispatcher.InvokeAsync(() => Status.Value = status).Task;
-    }
+        => _ui.InvokeAsync(() => Status.Value = status);
 
     public void Dispose()
     {

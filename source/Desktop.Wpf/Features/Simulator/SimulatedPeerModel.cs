@@ -9,8 +9,6 @@ public sealed class SimulatedPeerModel : IDisposable
 {
     private DisposableBag _bag;
     private readonly ReactiveProperty<string?> _displayName;
-    private readonly ReactiveProperty<bool> _isOnline;
-    private readonly ReactiveProperty<bool> _isRelayCapable;
 
     private readonly ReactiveProperty<SimulatorPeerUiState> _uiState;
     private readonly ReactiveProperty<Guid?> _pendingCorrelationId;
@@ -73,8 +71,8 @@ public sealed class SimulatedPeerModel : IDisposable
         IdentitySigningKeyPrivateKeyEcPrivateKey = identitySigningKeyPrivateKeyEcPrivateKey;
 
         _displayName = new ReactiveProperty<string?>(NormalizeDisplayName(displayName));
-        _isOnline = new ReactiveProperty<bool>(isOnline);
-        _isRelayCapable = new ReactiveProperty<bool>(isRelayCapable);
+        IsOnline = new ReactiveProperty<bool>(isOnline);
+        IsRelayCapable = new ReactiveProperty<bool>(isRelayCapable);
 
         var ui = uiState;
         var pending = pendingCorrelationId;
@@ -128,8 +126,8 @@ public sealed class SimulatedPeerModel : IDisposable
     internal byte[] IdentitySigningKeyPrivateKeyEcPrivateKey { get; }
 
     public ReadOnlyReactiveProperty<string?> DisplayName => _displayName;
-    public ReadOnlyReactiveProperty<bool> IsOnline => _isOnline;
-    public ReadOnlyReactiveProperty<bool> IsRelayCapable => _isRelayCapable;
+    public ReactiveProperty<bool> IsOnline { get; }
+    public ReactiveProperty<bool> IsRelayCapable { get; }
 
     public ReadOnlyReactiveProperty<SimulatorPeerUiState> UiState => _uiState;
     public ReadOnlyReactiveProperty<Guid?> PendingCorrelationId => _pendingCorrelationId;
@@ -174,30 +172,7 @@ public sealed class SimulatedPeerModel : IDisposable
     public void SetDisplayName(string? displayName)
         => _displayName.Value = NormalizeDisplayName(displayName);
 
-    public void SetOnline(bool isOnline)
-    {
-        _isOnline.Value = isOnline;
-
-        if (!isOnline)
-        {
-            _uiState.Value = SimulatorPeerUiState.Offline;
-        }
-        else
-        {
-            if (_uiState.Value == SimulatorPeerUiState.Offline)
-            {
-                _uiState.Value = SimulatorPeerUiState.Ready;
-                _pendingCorrelationId.Value = null;
-            }
-        }
-    }
-
-    public void SetRelayCapable(bool isRelayCapable)
-        => _isRelayCapable.Value = isRelayCapable;
-
-    public void SetTargetPublicKeyHash(byte[]? targetPublicKeyHash)
-        => _targetPublicKeyHash.Value = targetPublicKeyHash;
-
+    
     public void SetSelectedRouteMode(ConnectionMode? selectedRouteMode)
         => _selectedRouteMode.Value = selectedRouteMode;
 
@@ -267,7 +242,7 @@ public sealed class SimulatedPeerModel : IDisposable
 
     public void ClearRuntimeState()
     {
-        _uiState.Value = _isOnline.Value ? SimulatorPeerUiState.Ready : SimulatorPeerUiState.Offline;
+        _uiState.Value = IsOnline.Value ? SimulatorPeerUiState.Ready : SimulatorPeerUiState.Offline;
         _pendingCorrelationId.Value = null;
         _targetPublicKeyHash.Value = null;
         _selectedRouteMode.Value = null;
@@ -364,8 +339,8 @@ public sealed class SimulatedPeerModel : IDisposable
     {
         _bag.Dispose();
         _displayName.Dispose();
-        _isOnline.Dispose();
-        _isRelayCapable.Dispose();
+        IsOnline.Dispose();
+        IsRelayCapable.Dispose();
 
         _uiState.Dispose();
         _pendingCorrelationId.Dispose();

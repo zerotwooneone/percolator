@@ -1983,99 +1983,8 @@ public sealed class SimulatorStateService : ISimulatorStateService
             peerId: peerId,
             relayHostPeerId: relayHostPeerId);
     }
-
-    public async Task ToggleOnlineAsync(Guid peerId, CancellationToken cancellationToken = default)
-    {
-        await _peerGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            var peer = _state.Peers.FirstOrDefault(p => p.PeerId == peerId);
-            if (peer is null) return;
-
-            var newValue = !peer.IsOnline;
-            if (_peerById.TryGetValue(peerId, out var model)) model.SetOnline(newValue);
-            peer.IsOnline = newValue;
-
-            await _store.SaveAsync(_state, cancellationToken).ConfigureAwait(false);
-
-            _diagnostics.Emit(
-                SimulatorDiagnosticEventType.PeerOnlineChanged,
-                $"Peer {(peer.IsOnline ? "online" : "offline")}: {(string.IsNullOrWhiteSpace(peer.DisplayName) ? peer.PeerId.ToString()[..8] : peer.DisplayName)}",
-                peerId: peerId);
-        }
-        finally
-        {
-            _peerGate.Release();
-        }
-    }
-
-    public async Task ToggleRelayCapableAsync(Guid peerId, CancellationToken cancellationToken = default)
-    {
-        await _peerGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            var peer = _state.Peers.FirstOrDefault(p => p.PeerId == peerId);
-            if (peer is null) return;
-
-            var newValue = !peer.Relay.IsRelayCapable;
-            if (_peerById.TryGetValue(peerId, out var model)) model.SetRelayCapable(newValue);
-            peer.Relay.IsRelayCapable = newValue;
-
-            await _store.SaveAsync(_state, cancellationToken).ConfigureAwait(false);
-
-            _diagnostics.Emit(
-                SimulatorDiagnosticEventType.PeerRelayCapableChanged,
-                $"Peer relay {(peer.Relay.IsRelayCapable ? "enabled" : "disabled")}: {(string.IsNullOrWhiteSpace(peer.DisplayName) ? peer.PeerId.ToString()[..8] : peer.DisplayName)}",
-                peerId: peerId);
-        }
-        finally
-        {
-            _peerGate.Release();
-        }
-    }
-
-    public async Task UpdateDisplayNameAsync(Guid peerId, string? displayName, CancellationToken cancellationToken = default)
-    {
-        await WithPeerAsync(
-            peerId,
-            mutateModel: m => m.SetDisplayName(displayName),
-            mutateDto: dto => dto.DisplayName = string.IsNullOrWhiteSpace(displayName) ? null : displayName.Trim(),
-            cancellationToken).ConfigureAwait(false);
-    }
-
-    public async Task SetOnlineAsync(Guid peerId, bool isOnline, CancellationToken cancellationToken = default)
-    {
-        await WithPeerAsync(
-            peerId,
-            mutateModel: m => m.SetOnline(isOnline),
-            mutateDto: dto => dto.IsOnline = isOnline,
-            cancellationToken).ConfigureAwait(false);
-
-        var dto = _state.Peers.FirstOrDefault(p => p.PeerId == peerId);
-        if (dto is null) return;
-        _diagnostics.Emit(
-            SimulatorDiagnosticEventType.PeerOnlineChanged,
-            $"Peer {(dto.IsOnline ? "online" : "offline")}: {(string.IsNullOrWhiteSpace(dto.DisplayName) ? dto.PeerId.ToString()[..8] : dto.DisplayName)}",
-            peerId: peerId);
-    }
-
-    public async Task SetRelayCapableAsync(Guid peerId, bool isRelayCapable, CancellationToken cancellationToken = default)
-    {
-        await WithPeerAsync(
-            peerId,
-            mutateModel: m => m.SetRelayCapable(isRelayCapable),
-            mutateDto: dto => dto.Relay.IsRelayCapable = isRelayCapable,
-            cancellationToken).ConfigureAwait(false);
-
-        var dto = _state.Peers.FirstOrDefault(p => p.PeerId == peerId);
-        if (dto is null) return;
-        _diagnostics.Emit(
-            SimulatorDiagnosticEventType.PeerRelayCapableChanged,
-            $"Peer relay {(dto.Relay.IsRelayCapable ? "enabled" : "disabled")}: {(string.IsNullOrWhiteSpace(dto.DisplayName) ? dto.PeerId.ToString()[..8] : dto.DisplayName)}",
-            peerId: peerId);
-    }
-
-    public async Task PublishPreKeyBundleAsync(
+    
+     private async Task PublishPreKeyBundleAsync(
         Guid relayHostPeerId,
         byte[] recipientPublicKeyHash,
         Guid logicalOwnerPeerId,
@@ -2117,7 +2026,7 @@ public sealed class SimulatorStateService : ISimulatorStateService
             contextTag: Convert.ToBase64String(recipientPublicKeyHash));
     }
 
-    public async Task<PublishedPreKeyBundleDto?> TryPopPreKeyBundleByRecipientPkhAsync(
+    private async Task<PublishedPreKeyBundleDto?> TryPopPreKeyBundleByRecipientPkhAsync(
         Guid relayHostPeerId,
         byte[] recipientPublicKeyHash,
         CancellationToken cancellationToken = default)

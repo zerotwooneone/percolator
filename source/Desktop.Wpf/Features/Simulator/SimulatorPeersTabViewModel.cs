@@ -1,72 +1,53 @@
-using System.Collections.ObjectModel;
-using System.Collections.Specialized;
-using System.Windows;
+using ObservableCollections;
 using R3;
+using Desktop.Wpf.Shared.Mvvm;
 
 namespace Desktop.Wpf.Features.Simulator;
 
 public sealed class SimulatorPeersTabViewModel : IDisposable
 {
-    private readonly ISimulatedPeerDirectory _directory;
+    private readonly IUiDispatcher _ui;
     private readonly ISimulatorStateService _state;
     private readonly ISimulatorDiagnosticsService _diagnostics;
 
-    private readonly ObservableCollection<SimulatedPeerCardViewModel> _peerCards = new();
+    private ISynchronizedView<SimulatedPeerModel, SimulatedPeerCardViewModel>? _peerCards;
+    private NotifyCollectionChangedSynchronizedViewList<SimulatedPeerCardViewModel>? _peerCardsNotify;
     private DisposableBag _bag;
 
     public SimulatorPeersTabViewModel(
-        ISimulatedPeerDirectory directory,
+        IUiDispatcher ui,
         ISimulatorStateService state,
         ISimulatorDiagnosticsService diagnostics)
     {
-        _directory = directory;
+        _ui = ui;
         _state = state;
         _diagnostics = diagnostics;
 
-        PeerCards = new ReadOnlyObservableCollection<SimulatedPeerCardViewModel>(_peerCards);
-
         Status = new BindableReactiveProperty<string?>(null).AddTo(ref _bag);
 
-        var addPeer = Observable.Return(true).ToReactiveCommand<Unit>(_ => { });
-        addPeer.AsObservable()
+        AddPeerCommand = new ReactiveCommand<Unit>().AddTo(ref _bag);
+        AddPeerCommand
+            .AsObservable()
             .SubscribeAwait(async (_, ct) => await ExecuteAddPeerAsync(ct), AwaitOperation.Drop)
             .AddTo(ref _bag);
-        AddPeerCommand = addPeer.AddTo(ref _bag);
-
-        _ = InitializeAsync();
     }
 
     public BindableReactiveProperty<string?> Status { get; }
 
     public ReactiveCommand<Unit> AddPeerCommand { get; }
 
-    public ReadOnlyObservableCollection<SimulatedPeerCardViewModel> PeerCards { get; }
+    public NotifyCollectionChangedSynchronizedViewList<SimulatedPeerCardViewModel> PeerCards
+        => _peerCardsNotify ?? throw new InvalidOperationException("ViewModel not initialized.");
 
-    public Task ResetAsync(CancellationToken ct = default)
-        => InitializeAsync(ct);
-
-    private async Task InitializeAsync(CancellationToken ct = default)
+    public async Task InitializeAsync(CancellationToken ct = default)
     {
         try
         {
-            await _directory.InitializeAsync(ct);
+            await _state.InitializeAsync(ct).ConfigureAwait(false);
 
-            var dispatcher = Application.Current?.Dispatcher;
-            if (dispatcher is null || dispatcher.CheckAccess())
-            {
-                ResetPeerCards();
-                HookDirectory();
-            }
-            else
-            {
-                await dispatcher.InvokeAsync(() =>
-                {
-                    ResetPeerCards();
-                    HookDirectory();
-                });
-            }
+            await _ui.InvokeAsync(InitializePeerCardsView, ct).ConfigureAwait(false);
 
-            await SetStatusOnUiAsync($"Loaded {_peerCards.Count} peers");
+            await SetStatusOnUiAsync($"Loaded {PeerCards.Count} peers");
         }
         catch (Exception ex)
         {
@@ -74,20 +55,28 @@ public sealed class SimulatorPeersTabViewModel : IDisposable
         }
     }
 
-    private void ResetPeerCards()
+    private void InitializePeerCardsView()
     {
-        foreach (var p in _peerCards)
-        {
-            p.Dispose();
-        }
+        _peerCards?.Dispose();
+        _peerCardsNotify?.Dispose();
 
-        _peerCards.Clear();
-        foreach (var m in _directory.Peers)
-        {
-            _peerCards.Add(CreatePeerCardVm(m));
-        }
+        var peers = _state.Peers;
 
-        RefreshRelationships();
+        _peerCards = peers
+            .CreateView(CreatePeerCardVm)
+            .AddTo(ref _bag);
+
+        // IMPORTANT: Call once and keep it alive for the VM lifetime.
+        // Do NOT call ToNotifyCollectionChanged() repeatedly from a getter.
+        _peerCardsNotify = _peerCards.ToNotifyCollectionChanged();
+
+        peers.ObserveCountChanged()
+            .ObserveOnCurrentSynchronizationContext()
+            .Subscribe(_ =>
+            {
+                Status.Value = $"Peers: {_peerCardsNotify.Count}";
+            })
+            .AddTo(ref _bag);
     }
 
     private SimulatedPeerCardViewModel CreatePeerCardVm(SimulatedPeerModel m)
@@ -96,97 +85,25 @@ public sealed class SimulatorPeersTabViewModel : IDisposable
             model: m,
             state: _state,
             diagnostics: _diagnostics,
-            resolvePeerName: ResolvePeerName,
-            relationshipsChanged: RefreshRelationships);
-    }
-
-    private void HookDirectory()
-    {
-        var notify = (INotifyCollectionChanged)_directory.Peers;
-        notify.CollectionChanged -= OnDirectoryPeersChanged;
-        notify.CollectionChanged += OnDirectoryPeersChanged;
-    }
-
-    private void OnDirectoryPeersChanged(object? sender, NotifyCollectionChangedEventArgs e)
-    {
-        if (!Application.Current.Dispatcher.CheckAccess())
-        {
-            _ = Application.Current.Dispatcher.InvokeAsync(() => OnDirectoryPeersChanged(sender, e));
-            return;
-        }
-
-        if (e.Action is NotifyCollectionChangedAction.Reset)
-        {
-            ResetPeerCards();
-            return;
-        }
-
-        if (e.OldItems is not null)
-        {
-            foreach (var oldItem in e.OldItems.OfType<SimulatedPeerModel>())
-            {
-                var existing = _peerCards.FirstOrDefault(x => x.PeerId == oldItem.PeerId);
-                if (existing is null) continue;
-                _peerCards.Remove(existing);
-                existing.Dispose();
-            }
-        }
-
-        if (e.NewItems is not null)
-        {
-            foreach (var newItem in e.NewItems.OfType<SimulatedPeerModel>())
-            {
-                _peerCards.Add(CreatePeerCardVm(newItem));
-            }
-        }
-
-        RefreshRelationships();
-
-        _ = SetStatusOnUiAsync($"Peers: {_peerCards.Count}");
+            resolvePeerName: ResolvePeerName);
     }
 
     private string ResolvePeerName(Guid peerId)
     {
-        var m = _directory.Peers.FirstOrDefault(x => x.PeerId == peerId);
+        var m = _state.Peers.FirstOrDefault(x => x.PeerId == peerId);
         var name = m?.DisplayName.CurrentValue;
         return string.IsNullOrWhiteSpace(name) ? peerId.ToString()[..8] : name;
     }
 
-    private void RefreshRelationships()
-    {
-        if (!Application.Current.Dispatcher.CheckAccess())
-        {
-            _ = Application.Current.Dispatcher.InvokeAsync(RefreshRelationships);
-            return;
-        }
-
-        var peers = _state.Peers.ToArray();
-        foreach (var card in _peerCards)
-        {
-            var model = peers.FirstOrDefault(p => p.PeerId == card.PeerId);
-            if (model is null) continue;
-            card.RebuildRelationshipTags(model, peers);
-        }
-    }
-
     private Task SetStatusOnUiAsync(string? status)
-    {
-        var dispatcher = Application.Current?.Dispatcher;
-        if (dispatcher is null || dispatcher.CheckAccess())
-        {
-            Status.Value = status;
-            return Task.CompletedTask;
-        }
-
-        return dispatcher.InvokeAsync(() => Status.Value = status).Task;
-    }
+        => _ui.InvokeAsync(() => Status.Value = status);
 
     private async Task ExecuteAddPeerAsync(CancellationToken ct)
     {
         try
         {
-            _ = await _directory.AddPeerAsync(displayName: null, ct);
-            await SetStatusOnUiAsync($"Peers: {_peerCards.Count}");
+            _ = await _state.AddPeerAsync(displayName: null, ct).ConfigureAwait(false);
+            await SetStatusOnUiAsync($"Peers: {_peerCardsNotify?.Count}");
         }
         catch (Exception ex)
         {
@@ -196,23 +113,10 @@ public sealed class SimulatorPeersTabViewModel : IDisposable
 
     public void Dispose()
     {
-        foreach (var p in _peerCards)
-        {
-            p.Dispose();
-        }
-
-        _peerCards.Clear();
-
+        _peerCardsNotify?.Dispose();
+        _peerCardsNotify = null;
+        _peerCards?.Dispose();
+        _peerCards = null;
         _bag.Dispose();
-
-        try
-        {
-            var notify = (INotifyCollectionChanged)_directory.Peers;
-            notify.CollectionChanged -= OnDirectoryPeersChanged;
-        }
-        catch
-        {
-            // Best-effort.
-        }
     }
 }
