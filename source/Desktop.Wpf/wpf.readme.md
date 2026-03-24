@@ -25,6 +25,27 @@
         - Use `ObserveOnCurrentSynchronizationContext()` and/or marshal via Dispatcher inside stores/services.
     - Dispose reactive state in `DisposeCore()`.
 
+- **UI dispatcher (UI-thread marshalling)**
+    - ViewModels should not call `Application.Current.Dispatcher` directly.
+    - Inject an `IUiDispatcher` abstraction and marshal UI-bound work through it.
+    - This keeps ViewModels testable and avoids hidden global dependencies.
+
+- **Reactive collections (WPF binding)**
+    - Services expose reactive collections as `IReadOnlyObservableList<T>` / `IReadOnlyObservableDictionary<TKey, TValue>`.
+    - ViewModels project collections using `CreateView(transform)` to produce an `ISynchronizedView<TModel, TViewModel>`.
+    - WPF `ItemsControl` bindings should use the adapter returned by `ToNotifyCollectionChanged()`.
+        - Call `ToNotifyCollectionChanged()` **once**, store the instance, and dispose it with the ViewModel.
+        - Do **not** call `ToNotifyCollectionChanged()` in a property getter.
+
+- **Initialization (explicit, no fire-and-forget in constructors)**
+    - Do not start background work from a ViewModel constructor (no `_ = InitializeAsync()` in constructors).
+    - Expose an explicit `InitializeAsync(CancellationToken)` method.
+    - Call initialization from the composition root / view lifecycle (e.g., the window after `DataContext` is assigned).
+
+- **Commands (R3)**
+    - Prefer direct command construction (e.g., `new ReactiveCommand<Unit>()`) over creating commands via dummy observables.
+    - Use `SubscribeAwait(..., AwaitOperation.Drop)` to prevent double-execution when a command can be invoked repeatedly.
+
 - **Async and cancellation**
     - Async methods accept CancellationToken; use try/finally for IsLoading flags; avoid blocking UI.
 
