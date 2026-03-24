@@ -6,6 +6,7 @@ using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
 using Desktop.Wpf.Features.Simulator;
+using Desktop.Wpf.Shared.Mvvm;
 using FluentAssertions;
 using Moq;
 using NUnit.Framework;
@@ -74,11 +75,12 @@ public sealed class SimulatorDiagnosticsTabViewModelFilteringTests
             .Returns(Task.CompletedTask);
 
         var diagnostics = new SimulatorDiagnosticsService();
+
+        using var sut = new SimulatorDiagnosticsTabViewModel(new WpfUiDispatcher(), diagnostics, state.Object);
+
         diagnostics.Emit(SimulatorDiagnosticEventType.PeerCreated, "a1", peerId: peerA);
         diagnostics.Emit(SimulatorDiagnosticEventType.RelayEnqueued, "a2", peerId: peerA, relayHostPeerId: relay);
         diagnostics.Emit(SimulatorDiagnosticEventType.RelayEnqueued, "b1", peerId: peerB, relayHostPeerId: relay);
-
-        using var sut = new SimulatorDiagnosticsTabViewModel(diagnostics, state.Object);
 
         // Act
         sut.SelectedPeerId.Value = peerA;

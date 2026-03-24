@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Text.Json;
 
 namespace Desktop.Wpf.Features.Simulator;
@@ -54,7 +55,8 @@ public sealed class SimulatorDiagnosticBundleBuilder : ISimulatorDiagnosticBundl
             .ToList();
 
         var recentEvents = _diagnostics
-            .GetRecentEvents(500)
+            .Events
+            .TakeLast(500)
             .Select(e => new
             {
                 e.TimestampUtc,

@@ -1,168 +1,29 @@
-using System.Collections.ObjectModel;
-using System.Collections.Specialized;
-using System.Windows;
 using ObservableCollections;
 using R3;
+using Desktop.Wpf.Shared.Mvvm;
 
 namespace Desktop.Wpf.Features.Simulator;
 
-public enum SimulatorDiagnosticEventType
-{
-    PeerCreated = 0,
-    PeerRemoved = 1,
-    PeerOnlineChanged = 2,
-    PeerRelayCapableChanged = 3,
-    PreKeyPublishRelationshipAdded = 4,
-    PreKeyPublishRelationshipRemoved = 5,
-    HandshakeStateTransition = 6,
-    RelayEnqueued = 7,
-    RelayDelivered = 8,
-    RelayDropped = 9,
-    RelayCorrupted = 10,
-    RelayReordered = 11,
-    DecryptFailure = 12,
-    PreKeyBundleFetched = 13,
-    StandardHandshakeHelloEnqueued = 14,
-    RelayRoutingFailure = 15,
-    RelayActiveSessionAdded = 16,
-    RelayActiveSessionRemoved = 17,
-    PreKeyPublishBlockedMissingActiveSession = 18
-}
-
-public sealed record SimulatorDiagnosticEvent(
-    DateTimeOffset TimestampUtc,
-    SimulatorDiagnosticEventType EventType,
-    string Message,
-    Guid? PeerId = null,
-    Guid? RelayHostPeerId = null,
-    Guid? AckId = null,
-    string? ContextTag = null);
-
-public interface ISimulatorDiagnosticsService
-{
-    ObservableCollection<SimulatorDiagnosticEvent> Events { get; }
-
-    void Emit(SimulatorDiagnosticEventType eventType, string message, Guid? peerId = null, Guid? relayHostPeerId = null, Guid? ackId = null, string? contextTag = null);
-
-    void Clear();
-
-    IReadOnlyList<SimulatorDiagnosticEvent> GetRecentEvents(int max);
-}
-
-public sealed class SimulatorDiagnosticsService : ISimulatorDiagnosticsService
-{
-    private const int MaxEvents = 2000;
-
-    private readonly ObservableCollection<SimulatorDiagnosticEvent> _events = new();
-    private readonly object _gate = new();
-
-    public ObservableCollection<SimulatorDiagnosticEvent> Events { get; }
-
-    public SimulatorDiagnosticsService()
-    {
-        Events = _events;
-    }
-
-    public void Emit(
-        SimulatorDiagnosticEventType eventType,
-        string message,
-        Guid? peerId = null,
-        Guid? relayHostPeerId = null,
-        Guid? ackId = null,
-        string? contextTag = null)
-    {
-        var ev = new SimulatorDiagnosticEvent(
-            TimestampUtc: DateTimeOffset.UtcNow,
-            EventType: eventType,
-            Message: message,
-            PeerId: peerId,
-            RelayHostPeerId: relayHostPeerId,
-            AckId: ackId,
-            ContextTag: contextTag);
-
-        var dispatcher = Application.Current?.Dispatcher;
-        if (dispatcher is null || dispatcher.CheckAccess())
-        {
-            lock (_gate)
-            {
-                _events.Add(ev);
-                while (_events.Count > MaxEvents)
-                {
-                    _events.RemoveAt(0);
-                }
-            }
-            return;
-        }
-
-        _ = dispatcher.InvokeAsync(() =>
-        {
-            lock (_gate)
-            {
-                _events.Add(ev);
-                while (_events.Count > MaxEvents)
-                {
-                    _events.RemoveAt(0);
-                }
-            }
-        });
-    }
-
-    public void Clear()
-    {
-        if (!Application.Current.Dispatcher.CheckAccess())
-        {
-            _ = Application.Current.Dispatcher.InvokeAsync(Clear);
-            return;
-        }
-
-        lock (_gate)
-        {
-            _events.Clear();
-        }
-    }
-
-    public IReadOnlyList<SimulatorDiagnosticEvent> GetRecentEvents(int max)
-    {
-        if (max <= 0) return Array.Empty<SimulatorDiagnosticEvent>();
-
-        var dispatcher = Application.Current?.Dispatcher;
-        if (dispatcher is null || dispatcher.CheckAccess())
-        {
-            lock (_gate)
-            {
-                return _events.TakeLast(max).ToList();
-            }
-        }
-
-        return dispatcher.Invoke(() =>
-        {
-            lock (_gate)
-            {
-                return (IReadOnlyList<SimulatorDiagnosticEvent>)_events.TakeLast(max).ToList();
-            }
-        });
-    }
-}
-
 public sealed class SimulatorDiagnosticsTabViewModel : IDisposable
 {
+    private readonly IUiDispatcher _ui;
     private readonly ISimulatorDiagnosticsService _diagnostics;
     private readonly ISimulatorStateService _state;
 
-    private readonly Subject<Unit> _rebuildRequests = new();
-
-    private readonly ObservableCollection<SimulatorDiagnosticEvent> _filtered = new();
+    private ISynchronizedView<SimulatorDiagnosticEvent, SimulatorDiagnosticEvent>? _filteredView;
+    private NotifyCollectionChangedSynchronizedViewList<SimulatorDiagnosticEvent>? _filteredNotify;
     private DisposableBag _bag;
 
-    private NotifyCollectionChangedEventHandler? _diagnosticsChangedHandler;
-    private IDisposable? _peersChangesSub;
-
-    public SimulatorDiagnosticsTabViewModel(ISimulatorDiagnosticsService diagnostics, ISimulatorStateService state)
+    public SimulatorDiagnosticsTabViewModel(IUiDispatcher ui, ISimulatorDiagnosticsService diagnostics, ISimulatorStateService state)
     {
+        _ui = ui;
         _diagnostics = diagnostics;
         _state = state;
 
-        Events = new ReadOnlyObservableCollection<SimulatorDiagnosticEvent>(_filtered);
+        _filteredView = _diagnostics.Events
+            .CreateView(static ev => ev)
+            .AddTo(ref _bag);
+        _filteredNotify = _filteredView.ToNotifyCollectionChanged();
 
         SelectedPeerId = new BindableReactiveProperty<Guid?>(null).AddTo(ref _bag);
         SelectedRelayHostPeerId = new BindableReactiveProperty<Guid?>(null).AddTo(ref _bag);
@@ -172,35 +33,49 @@ public sealed class SimulatorDiagnosticsTabViewModel : IDisposable
         RelayFilterOptions = new BindableReactiveProperty<IReadOnlyList<SimulatorFilterOption<Guid?>>>(Array.Empty<SimulatorFilterOption<Guid?>>()).AddTo(ref _bag);
         EventTypeFilterOptions = new BindableReactiveProperty<IReadOnlyList<SimulatorFilterOption<SimulatorDiagnosticEventType?>>>(Array.Empty<SimulatorFilterOption<SimulatorDiagnosticEventType?>>()).AddTo(ref _bag);
 
-        var clear = Observable.Return(true).ToReactiveCommand<Unit>(_ => { });
-        clear.AsObservable().Subscribe(_ => Clear()).AddTo(ref _bag);
-        ClearCommand = clear.AddTo(ref _bag);
-
-        _rebuildRequests
-            .Debounce(TimeSpan.FromMilliseconds(100), TimeProvider.System)
-            .Subscribe(_ => RebuildFiltered())
+        ClearCommand = new ReactiveCommand<Unit>().AddTo(ref _bag);
+        ClearCommand
+            .AsObservable()
+            .Subscribe(_ => Clear())
             .AddTo(ref _bag);
 
-        _diagnosticsChangedHandler = (_, __) => _rebuildRequests.OnNext(Unit.Default);
-        ((INotifyCollectionChanged)_diagnostics.Events).CollectionChanged += _diagnosticsChangedHandler;
-
-        SelectedPeerId.Skip(1).Subscribe(_ => _rebuildRequests.OnNext(Unit.Default)).AddTo(ref _bag);
-        SelectedRelayHostPeerId.Skip(1).Subscribe(_ => _rebuildRequests.OnNext(Unit.Default)).AddTo(ref _bag);
-        SelectedEventType.Skip(1).Subscribe(_ => _rebuildRequests.OnNext(Unit.Default)).AddTo(ref _bag);
+        Observable
+            .Merge(
+                SelectedPeerId.Skip(1).Select(static _ => Unit.Default),
+                SelectedRelayHostPeerId.Skip(1).Select(static _ => Unit.Default),
+                SelectedEventType.Skip(1).Select(static _ => Unit.Default))
+            .Debounce(TimeSpan.FromMilliseconds(50), TimeProvider.System)
+            .SubscribeAwait(async (_, ct) => await _ui.InvokeAsync(ApplyFilterOnUi, ct), AwaitOperation.Drop)
+            .AddTo(ref _bag);
 
         var peers = _state.Peers;
-        _peersChangesSub = Observable.Merge(
-                peers.ObserveAdd().Select(static _ => Unit.Default),
-                peers.ObserveRemove().Select(static _ => Unit.Default),
-                peers.ObserveReplace().Select(static _ => Unit.Default),
-                peers.ObserveReset().Select(static _ => Unit.Default))
-            .Subscribe(_ => RefreshFilterOptions());
+        var peersChanged = Observable.Merge(
+            peers.ObserveAdd().Select(static _ => Unit.Default),
+            peers.ObserveRemove().Select(static _ => Unit.Default),
+            peers.ObserveReplace().Select(static _ => Unit.Default),
+            peers.ObserveReset().Select(static _ => Unit.Default));
 
-        RefreshFilterOptions();
-        _rebuildRequests.OnNext(Unit.Default);
+        peersChanged
+            .SubscribeAwait(async (_, ct) =>
+            {
+                var peerOptions = BuildPeerFilterOptions();
+                var relayOptions = BuildRelayFilterOptions();
+                var typeOptions = BuildEventTypeFilterOptions();
+
+                await _ui.InvokeAsync(() =>
+                {
+                    PeerFilterOptions.Value = peerOptions;
+                    RelayFilterOptions.Value = relayOptions;
+                    EventTypeFilterOptions.Value = typeOptions;
+                }, ct).ConfigureAwait(false);
+
+                await _ui.InvokeAsync(ApplyFilterOnUi, ct).ConfigureAwait(false);
+            }, AwaitOperation.Drop)
+            .AddTo(ref _bag);
     }
 
-    public ReadOnlyObservableCollection<SimulatorDiagnosticEvent> Events { get; }
+    public NotifyCollectionChangedSynchronizedViewList<SimulatorDiagnosticEvent> Events
+        => _filteredNotify ?? throw new InvalidOperationException("ViewModel not initialized.");
 
     public BindableReactiveProperty<Guid?> SelectedPeerId { get; }
     public BindableReactiveProperty<Guid?> SelectedRelayHostPeerId { get; }
@@ -215,39 +90,41 @@ public sealed class SimulatorDiagnosticsTabViewModel : IDisposable
     private void Clear()
     {
         _diagnostics.Clear();
-        RefreshEvents();
     }
 
-    private void RefreshEvents()
-    {
-        if (!Application.Current.Dispatcher.CheckAccess())
-        {
-            _ = Application.Current.Dispatcher.InvokeAsync(RefreshEvents);
-            return;
-        }
-
-        _filtered.Clear();
-    }
-
-    private void RefreshFilterOptions()
+    private IReadOnlyList<SimulatorFilterOption<Guid?>> BuildPeerFilterOptions()
     {
         var peers = _state.Peers
-            .Select(p => new SimulatorFilterOption<Guid?>(p.PeerId, string.IsNullOrWhiteSpace(p.DisplayName.CurrentValue) ? p.PeerId.ToString()[..8] : p.DisplayName.CurrentValue!))
+            .Select(p => new SimulatorFilterOption<Guid?>(
+                p.PeerId,
+                string.IsNullOrWhiteSpace(p.DisplayName.CurrentValue)
+                    ? p.PeerId.ToString()[..8]
+                    : p.DisplayName.CurrentValue!))
             .OrderBy(p => p.Display)
             .ToList();
 
         peers.Insert(0, new SimulatorFilterOption<Guid?>(null, "All"));
-        PeerFilterOptions.Value = peers;
+        return peers;
+    }
 
+    private IReadOnlyList<SimulatorFilterOption<Guid?>> BuildRelayFilterOptions()
+    {
         var relays = _state.Peers
             .Where(p => p.IsRelayCapable.CurrentValue)
-            .Select(p => new SimulatorFilterOption<Guid?>(p.PeerId, string.IsNullOrWhiteSpace(p.DisplayName.CurrentValue) ? p.PeerId.ToString()[..8] : p.DisplayName.CurrentValue!))
+            .Select(p => new SimulatorFilterOption<Guid?>(
+                p.PeerId,
+                string.IsNullOrWhiteSpace(p.DisplayName.CurrentValue)
+                    ? p.PeerId.ToString()[..8]
+                    : p.DisplayName.CurrentValue!))
             .OrderBy(p => p.Display)
             .ToList();
 
         relays.Insert(0, new SimulatorFilterOption<Guid?>(null, "All"));
-        RelayFilterOptions.Value = relays;
+        return relays;
+    }
 
+    private static IReadOnlyList<SimulatorFilterOption<SimulatorDiagnosticEventType?>> BuildEventTypeFilterOptions()
+    {
         var types = Enum.GetValues(typeof(SimulatorDiagnosticEventType))
             .Cast<SimulatorDiagnosticEventType>()
             .Select(t => new SimulatorFilterOption<SimulatorDiagnosticEventType?>(t, t.ToString()))
@@ -255,65 +132,55 @@ public sealed class SimulatorDiagnosticsTabViewModel : IDisposable
             .ToList();
 
         types.Insert(0, new SimulatorFilterOption<SimulatorDiagnosticEventType?>(null, "All"));
-        EventTypeFilterOptions.Value = types;
+        return types;
     }
 
-    private void RebuildFiltered()
+    private void ApplyFilterOnUi()
     {
-        if (!Application.Current.Dispatcher.CheckAccess())
-        {
-            _ = Application.Current.Dispatcher.InvokeAsync(RebuildFiltered);
-            return;
-        }
+        if (_filteredView is null) return;
 
         var peerId = SelectedPeerId.Value;
         var relayHostId = SelectedRelayHostPeerId.Value;
         var eventType = SelectedEventType.Value;
 
-        var query = _diagnostics.Events.AsEnumerable();
-        if (peerId is not null)
+        if (peerId is null && relayHostId is null && eventType is null)
         {
-            query = query.Where(e => e.PeerId == peerId);
-        }
-        if (relayHostId is not null)
-        {
-            query = query.Where(e => e.RelayHostPeerId == relayHostId);
-        }
-        if (eventType is not null)
-        {
-            query = query.Where(e => e.EventType == eventType);
+            _filteredView.ResetFilter();
+            return;
         }
 
-        var list = query
-            .OrderBy(e => e.TimestampUtc)
-            .TakeLast(1000)
-            .ToList();
+        _filteredView.AttachFilter(new DiagnosticsFilter(peerId, relayHostId, eventType));
+    }
 
-        _filtered.Clear();
-        foreach (var ev in list)
+    private sealed class DiagnosticsFilter : ISynchronizedViewFilter<SimulatorDiagnosticEvent, SimulatorDiagnosticEvent>
+    {
+        private readonly Guid? _peerId;
+        private readonly Guid? _relayHostPeerId;
+        private readonly SimulatorDiagnosticEventType? _eventType;
+
+        public DiagnosticsFilter(Guid? peerId, Guid? relayHostPeerId, SimulatorDiagnosticEventType? eventType)
         {
-            _filtered.Add(ev);
+            _peerId = peerId;
+            _relayHostPeerId = relayHostPeerId;
+            _eventType = eventType;
+        }
+
+        public bool IsMatch(SimulatorDiagnosticEvent value, SimulatorDiagnosticEvent view)
+        {
+            if (_peerId is not null && value.PeerId != _peerId) return false;
+            if (_relayHostPeerId is not null && value.RelayHostPeerId != _relayHostPeerId) return false;
+            if (_eventType is not null && value.EventType != _eventType) return false;
+            return true;
         }
     }
 
     public void Dispose()
     {
-        try
-        {
-            if (_diagnosticsChangedHandler is not null)
-            {
-                ((INotifyCollectionChanged)_diagnostics.Events).CollectionChanged -= _diagnosticsChangedHandler;
-            }
-        }
-        catch
-        {
-        }
-
-        try { _peersChangesSub?.Dispose(); } catch { }
-        _peersChangesSub = null;
+        _filteredNotify?.Dispose();
+        _filteredNotify = null;
+        _filteredView?.Dispose();
+        _filteredView = null;
 
         _bag.Dispose();
     }
 }
-
-public sealed record SimulatorFilterOption<T>(T Value, string Display);
