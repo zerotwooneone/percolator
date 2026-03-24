@@ -32,10 +32,19 @@
 
 - **Reactive collections (WPF binding)**
     - Services expose reactive collections as `IReadOnlyObservableList<T>` / `IReadOnlyObservableDictionary<TKey, TValue>`.
+    - Services should not perform filtering or sorting over the model collections they maintain.
+        - Services own the canonical collection.
+        - Filtering and sorting are presentation concerns handled by ViewModels and/or XAML.
     - ViewModels project collections using `CreateView(transform)` to produce an `ISynchronizedView<TModel, TViewModel>`.
     - WPF `ItemsControl` bindings should use the adapter returned by `ToNotifyCollectionChanged()`.
         - Call `ToNotifyCollectionChanged()` **once**, store the instance, and dispose it with the ViewModel.
         - Do **not** call `ToNotifyCollectionChanged()` in a property getter.
+    - Avoid list replacement for `ItemsControl` sources.
+        - Do not bind `ItemsSource` to a `BindableReactiveProperty<IReadOnlyList<T>>` that is regenerated on every update.
+        - This causes full UI rebuilds, breaks virtualization, and often loses scroll position.
+        - Prefer `CreateView(...)` + `ToNotifyCollectionChanged()` for incremental updates.
+    - Sorting should usually be done in XAML using `CollectionViewSource`.
+        - This keeps ViewModels focused on projection and avoids re-materializing lists.
 
 - **Initialization (explicit, no fire-and-forget in constructors)**
     - Do not start background work from a ViewModel constructor (no `_ = InitializeAsync()` in constructors).
@@ -48,6 +57,16 @@
 
 - **Async and cancellation**
     - Async methods accept CancellationToken; use try/finally for IsLoading flags; avoid blocking UI.
+
+- **Disposal and lifetimes (reactive resources)**
+    - ViewModels that own reactive resources must be `IDisposable`.
+        - Includes: `ReactiveCommand`, `BindableReactiveProperty`, `ISynchronizedView`, `ToNotifyCollectionChanged()` adapters, and subscriptions.
+    - Nested/child ViewModels that create commands/subscriptions must also be disposable.
+        - Ensure the parent ViewModel disposes child ViewModels when appropriate.
+
+- **Mutation safety (snapshot before iterating)**
+    - When iterating a reactive collection and mutating it during processing, snapshot first.
+        - Example: `var items = QueueItems.ToList(); foreach (var x in items) { /* may remove */ }`
 
 - **TDD essentials**
     - Behavior-first tests with MockBehavior.Strict.
