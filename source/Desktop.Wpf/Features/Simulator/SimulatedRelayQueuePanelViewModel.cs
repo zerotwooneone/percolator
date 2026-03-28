@@ -204,14 +204,24 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
 
     public async Task DeliverNextAsync(CancellationToken ct)
     {
-        var next = QueueItems.FirstOrDefault();
+        // Snapshot domain state so this can be safely invoked from background loops.
+        var next = _relay.MessageQueue
+            .Select(kvp => kvp.Value)
+            .OrderBy(x => x.EnqueuedUtc)
+            .FirstOrDefault();
+
         if (next is null) return;
+
         await DeliverItemAsync(next, ct).ConfigureAwait(false);
     }
 
     public async Task DeliverAllAsync(CancellationToken ct)
     {
-        var itemsToDeliver = QueueItems.ToList();
+        // Snapshot domain state so this can be safely invoked from background loops.
+        var itemsToDeliver = _relay.MessageQueue
+            .Select(kvp => kvp.Value)
+            .OrderBy(x => x.EnqueuedUtc)
+            .ToList();
 
         foreach (var item in itemsToDeliver)
         {
@@ -226,69 +236,102 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
 
         try
         {
-            if (item.TargetPkh is null || item.TargetPkh.Length == 0)
-            {
-                var sid = await _getRelayHostToMainSessionId().ConfigureAwait(false);
-                if (sid is null)
-                {
-                    _logger.LogWarning("[simulator] Relay host {RelayHost} has no session to main; cannot deliver", _relayHostPeerId);
-                    return;
-                }
-
-                var delivered = await _state.DeliverRelayUpstreamToMainByAckIdAsync(_relayHostPeerId, sid, item.AckId, ct).ConfigureAwait(false);
-                if (!delivered)
-                {
-                    return;
-                }
-
-                _diagnostics.Emit(
-                    SimulatorDiagnosticEventType.RelayDelivered,
-                    $"Relay deliver -> main: {(item.DebugType ?? "opaque")}",
-                    relayHostPeerId: _relayHostPeerId,
-                    ackId: item.AckId);
-                return;
-            }
-
-            // Deliver to simulated peer (PKH)
-            if (item.TargetPkh is not null && item.TargetPkh.Length == 32)
-            {
-                var recipientPeerId = await _state.TryGetPeerIdByIdentityPkhAsync(item.TargetPkh, ct).ConfigureAwait(false);
-                if (!recipientPeerId.HasValue)
-                {
-                    _diagnostics.Emit(
-                        SimulatorDiagnosticEventType.RelayRoutingFailure,
-                        $"Relay routing failure (no peer for PKH): {(item.DebugType ?? "opaque")}",
-                        relayHostPeerId: _relayHostPeerId,
-                        ackId: item.AckId);
-                    return;
-                }
-
-                await _delivery.DeliverToPeerAsync(
-                        relayHostPeerId: _relayHostPeerId,
-                        recipientPeerId: recipientPeerId.Value,
-                        ackId: item.AckId,
-                        opaqueBytes: item.OpaqueBytes,
-                        debugType: item.DebugType,
-                        cancellationToken: ct)
-                    .ConfigureAwait(false);
-
-                _ = await _state.DeleteRelayMessageByAckIdAsync(_relayHostPeerId, item.AckId, ct).ConfigureAwait(false);
-
-                _diagnostics.Emit(
-                    SimulatorDiagnosticEventType.RelayDelivered,
-                    $"Relay deliver -> {recipientPeerId.Value.ToString()[..8]}: {(item.DebugType ?? "opaque")}",
-                    peerId: recipientPeerId.Value,
-                    relayHostPeerId: _relayHostPeerId,
-                    ackId: item.AckId);
-                return;
-            }
-
-            _logger.LogWarning("[simulator] Cannot deliver relay item {AckId} with unknown target", item.AckId);
+            await DeliverItemAsync(
+                    ackId: item.AckId,
+                    enqueuedUtc: item.EnqueuedUtc,
+                    debugType: item.DebugType,
+                    targetPkh: item.TargetPkh,
+                    opaqueBytes: item.OpaqueBytes,
+                    ct: ct)
+                .ConfigureAwait(false);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "[simulator] Error delivering relay item {AckId}", item.AckId);
         }
+    }
+
+    private Task DeliverItemAsync(RelayMessage message, CancellationToken ct)
+    {
+        byte[]? targetPkh = message is InboundRelayMessage inbound ? inbound.TargetPkh : null;
+        return DeliverItemAsync(
+            ackId: message.AckId,
+            enqueuedUtc: message.EnqueuedUtc,
+            debugType: message.DebugType,
+            targetPkh: targetPkh,
+            opaqueBytes: message.OpaqueBytes,
+            ct: ct);
+    }
+
+    private async Task DeliverItemAsync(
+        Guid ackId,
+        DateTimeOffset enqueuedUtc,
+        string? debugType,
+        byte[]? targetPkh,
+        byte[] opaqueBytes,
+        CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        if (targetPkh is null || targetPkh.Length == 0)
+        {
+            var sid = await _getRelayHostToMainSessionId().ConfigureAwait(false);
+            if (sid is null)
+            {
+                _logger.LogWarning("[simulator] Relay host {RelayHost} has no session to main; cannot deliver", _relayHostPeerId);
+                return;
+            }
+
+            var delivered = await _state.DeliverRelayUpstreamToMainByAckIdAsync(_relayHostPeerId, sid, ackId, ct).ConfigureAwait(false);
+            if (!delivered)
+            {
+                return;
+            }
+
+            _diagnostics.Emit(
+                SimulatorDiagnosticEventType.RelayDelivered,
+                $"Relay deliver -> main: {(debugType ?? "opaque")}",
+                relayHostPeerId: _relayHostPeerId,
+                ackId: ackId);
+            return;
+        }
+
+        // Deliver to simulated peer (PKH)
+        if (targetPkh.Length == 32)
+        {
+            var recipientPeerId = await _state.TryGetPeerIdByIdentityPkhAsync(targetPkh, ct).ConfigureAwait(false);
+            if (!recipientPeerId.HasValue)
+            {
+                _diagnostics.Emit(
+                    SimulatorDiagnosticEventType.RelayRoutingFailure,
+                    $"Relay routing failure (no peer for PKH): {(debugType ?? "opaque")}",
+                    relayHostPeerId: _relayHostPeerId,
+                    ackId: ackId);
+                return;
+            }
+
+            await _delivery.DeliverToPeerAsync(
+                    relayHostPeerId: _relayHostPeerId,
+                    recipientPeerId: recipientPeerId.Value,
+                    ackId: ackId,
+                    opaqueBytes: opaqueBytes,
+                    debugType: debugType,
+                    cancellationToken: ct)
+                .ConfigureAwait(false);
+
+            _ = await _state.DeleteRelayMessageByAckIdAsync(_relayHostPeerId, ackId, ct).ConfigureAwait(false);
+
+            _diagnostics.Emit(
+                SimulatorDiagnosticEventType.RelayDelivered,
+                $"Relay deliver -> {recipientPeerId.Value.ToString()[..8]}: {(debugType ?? "opaque")}",
+                peerId: recipientPeerId.Value,
+                relayHostPeerId: _relayHostPeerId,
+                ackId: ackId);
+            return;
+        }
+
+        _logger.LogWarning("[simulator] Cannot deliver relay item {AckId} with unknown target", ackId);
+        await Task.CompletedTask.ConfigureAwait(false);
     }
 
     private async Task DropItemAsync(SimulatedRelayQueueItemViewModel item, CancellationToken ct)

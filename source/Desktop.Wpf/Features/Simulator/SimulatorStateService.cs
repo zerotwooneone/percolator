@@ -1857,6 +1857,8 @@ public sealed class SimulatorStateService : ISimulatorStateService
             _peerGate.Release();
         }
 
+        await RemoveRelayIfExistsAsync(peerId, cancellationToken).ConfigureAwait(false);
+
         _saveTrigger.OnNext(Unit.Default);
 
         _diagnostics.Emit(
@@ -2047,11 +2049,67 @@ public sealed class SimulatorStateService : ISimulatorStateService
         var tracker = new SimulatedPeerRuntimeTracker(model);
 
         // Persist runtime-ish fields on a debounce to avoid noisy disk writes during handshake transitions.
-        var sub = tracker.Dirty
+        var saveSub = tracker.Dirty
             .Debounce(TimeSpan.FromMilliseconds(200))
             .SubscribeAwait(async (_, ct) => await PersistPeerRuntimeFieldsAsync(model, ct).ConfigureAwait(false), AwaitOperation.Drop);
 
-        _runtimePersistenceByPeerId[model.PeerId] = new CompositeDisposable(tracker, sub);
+        var lifecycleSub = model.IsRelayCapable
+            .Skip(1) // Prevent double-loading during InitializeCoreAsync
+            .DistinctUntilChanged()
+            .SubscribeAwait(async (enabled, ct) => await OnRelayCapabilityChangedAsync(model.PeerId, enabled, ct).ConfigureAwait(false), AwaitOperation.Sequential);
+
+        _runtimePersistenceByPeerId[model.PeerId] = new CompositeDisposable(tracker, saveSub, lifecycleSub);
+    }
+
+    private async Task OnRelayCapabilityChangedAsync(Guid peerId, bool enabled, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (!enabled)
+        {
+            await RemoveRelayIfExistsAsync(peerId, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        var loaded = await _store.LoadRelayAsync(peerId, cancellationToken).ConfigureAwait(false)
+            ?? new SimulatedRelayModel(peerId);
+
+        await _relayGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (_relayByHostPeerId.ContainsKey(peerId)) return;
+
+            _relays.Add(loaded);
+            _relayByHostPeerId[peerId] = loaded;
+            AttachRelayPersistence(loaded);
+        }
+        finally
+        {
+            _relayGate.Release();
+        }
+    }
+
+    private async Task RemoveRelayIfExistsAsync(Guid relayHostPeerId, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        await _relayGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (!_relayByHostPeerId.TryGetValue(relayHostPeerId, out var relay)) return;
+
+            _relayByHostPeerId.Remove(relayHostPeerId);
+            _ = _relays.Remove(relay);
+
+            if (_relayPersistenceByHostPeerId.Remove(relayHostPeerId, out var d))
+            {
+                d.Dispose();
+            }
+        }
+        finally
+        {
+            _relayGate.Release();
+        }
     }
 
     private async Task PersistPeerRuntimeFieldsAsync(SimulatedPeerModel model, CancellationToken cancellationToken)

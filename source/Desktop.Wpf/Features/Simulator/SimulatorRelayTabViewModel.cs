@@ -94,6 +94,11 @@ public sealed class SimulatorRelayTabViewModel : IDisposable
         _relayPanels = _state.Relays
             .CreateView(CreatePanel)
             .AddTo(ref _bag);
+
+        _relayPanels.ObserveRemove()
+            .Subscribe(evt => evt.Value.View.Dispose())
+            .AddTo(ref _bag);
+
         _relayPanelsNotify = _relayPanels.ToNotifyCollectionChanged();
     }
 
@@ -133,7 +138,11 @@ public sealed class SimulatorRelayTabViewModel : IDisposable
                 await Task.Delay(TimeSpan.FromMilliseconds(350), ct).ConfigureAwait(false);
 
                 // Snapshot to avoid concurrent modification while iterating.
-                var panels = RelayPanels.ToList();
+                var panels = new List<SimulatedRelayQueuePanelViewModel>();
+                foreach (var panel in RelayPanels)
+                {
+                    panels.Add(panel);
+                }
                 foreach (var panel in panels)
                 {
                     ct.ThrowIfCancellationRequested();
