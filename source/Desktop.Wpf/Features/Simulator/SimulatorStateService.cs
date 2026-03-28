@@ -2105,6 +2105,8 @@ public sealed class SimulatorStateService : ISimulatorStateService
             {
                 d.Dispose();
             }
+
+            relay.Dispose();
         }
         finally
         {

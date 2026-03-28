@@ -138,11 +138,16 @@ public sealed class SimulatorRelayTabViewModel : IDisposable
                 await Task.Delay(TimeSpan.FromMilliseconds(350), ct).ConfigureAwait(false);
 
                 // Snapshot to avoid concurrent modification while iterating.
-                var panels = new List<SimulatedRelayQueuePanelViewModel>();
-                foreach (var panel in RelayPanels)
-                {
-                    panels.Add(panel);
-                }
+                var panels = await _ui.InvokeAsync(() =>
+                    {
+                        var snapshot = new List<SimulatedRelayQueuePanelViewModel>();
+                        foreach (var panel in RelayPanels)
+                        {
+                            snapshot.Add(panel);
+                        }
+                        return snapshot;
+                    })
+                    .ConfigureAwait(false);
                 foreach (var panel in panels)
                 {
                     ct.ThrowIfCancellationRequested();
