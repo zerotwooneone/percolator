@@ -16,15 +16,15 @@ namespace Desktop.Wpf.Features.Simulator;
 
 public sealed class SimulatorStateService : ISimulatorStateService
 {
-    private const int SelfIdentityIdBase = 99000;
-
     private readonly ISimulatorStateRepository _store;
-    private readonly ISimulatedPeerKeyFactory _keys;
     private readonly IOptions<TransportOptions> _transportOptions;
     private readonly ISimulatorDiagnosticsService _diagnostics;
     private readonly ISimulatedPeerPendingInbox _pending;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly Desktop.Wpf.Features.Simulator.Protocol.ISignalProtocolEngine _engine;
+
+    private readonly Subject<Unit> _saveTrigger = new();
+    private DisposableBag _bag;
 
     private readonly ObservableList<SimulatedPeerModel> _peers = new();
     public IReadOnlyObservableList<SimulatedPeerModel> Peers => _peers;
@@ -40,19 +40,14 @@ public sealed class SimulatorStateService : ISimulatorStateService
 
     private readonly Dictionary<Guid, IDisposable> _relayPersistenceByHostPeerId = new();
 
-    private SimulatorStateDto _state = new();
-
     private readonly object _initGate = new();
     private Task? _initializeTask;
 
     private readonly SemaphoreSlim _peerGate = new(1, 1);
     private readonly SemaphoreSlim _relayGate = new(1, 1);
 
-    private int _nextSelfIdentityId = SelfIdentityIdBase - 1;
-
     public SimulatorStateService(
         ISimulatorStateRepository store,
-        ISimulatedPeerKeyFactory keys,
         IOptions<TransportOptions> transportOptions,
         ISimulatorDiagnosticsService diagnostics,
         ISimulatedPeerPendingInbox pending,
@@ -60,12 +55,31 @@ public sealed class SimulatorStateService : ISimulatorStateService
         Desktop.Wpf.Features.Simulator.Protocol.ISignalProtocolEngine engine)
     {
         _store = store;
-        _keys = keys;
         _transportOptions = transportOptions;
         _diagnostics = diagnostics;
         _pending = pending;
         _scopeFactory = scopeFactory;
         _engine = engine;
+
+        _saveTrigger
+            .Debounce(TimeSpan.FromMilliseconds(250))
+            .SelectAwait(async (_, ct) =>
+            {
+                await _peerGate.WaitAsync(ct).ConfigureAwait(false);
+                try
+                {
+                    return _peers.Select(p => p.Freeze()).ToList();
+                }
+                finally
+                {
+                    _peerGate.Release();
+                }
+            })
+            .SubscribeAwait(async (snapshot, ct) =>
+            {
+                await _store.SavePeersAsync(snapshot, ct).ConfigureAwait(false);
+            }, AwaitOperation.Sequential)
+            .AddTo(ref _bag);
     }
 
     private IClock ResolveClock()
@@ -110,7 +124,7 @@ public sealed class SimulatorStateService : ISimulatorStateService
         CancellationToken cancellationToken = default)
         => DeliverInviteHandshakeResponseToMainAsyncCore(response, cancellationToken);
 
-    public Task<SimulatedPeerInviteAcceptance> AcceptReverseSignalInviteAsync(
+    public async Task<SimulatedPeerInviteAcceptance> AcceptReverseSignalInviteAsync(
         Guid simulatedPeerId,
         Guid inviterPeerId,
         EstablishDirectSessionRequest invite,
@@ -119,8 +133,11 @@ public sealed class SimulatorStateService : ISimulatorStateService
         cancellationToken.ThrowIfCancellationRequested();
         if (invite is null) throw new ArgumentNullException(nameof(invite));
 
-        var model = _peers.FirstOrDefault(p => p.PeerId == simulatedPeerId)
-            ?? throw new InvalidOperationException($"No simulated peer exists with id {simulatedPeerId}");
+        await _peerGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var model = _peers.FirstOrDefault(p => p.PeerId == simulatedPeerId)
+                ?? throw new InvalidOperationException($"No simulated peer exists with id {simulatedPeerId}");
 
         if (!invite.HasInviterIdentityKey || invite.InviterIdentityKey.Length == 0)
             throw new InvalidOperationException("Invite missing inviter_identity_key");
@@ -152,46 +169,51 @@ public sealed class SimulatorStateService : ISimulatorStateService
             oneTimePreKey: inviterOtk,
             expirationDateUtc: payload.ExpiresAtUtc?.ToDateTimeOffset());
 
-        var crypto = new AeadSessionCrypto();
-        var clock = ResolveClock();
+            var crypto = new AeadSessionCrypto();
+            var clock = ResolveClock();
 
-        var localIkPriv = new PrivatePreKey(model.IdentitySigningKeyPrivateKeyEcPrivateKey);
-        var x3 = crypto.X3DH_Initiate(localIkPriv, inviterBundle);
+            var localIkPriv = new PrivatePreKey(model.IdentitySigningKeyPrivateKeyEcPrivateKey);
+            var x3 = crypto.X3DH_Initiate(localIkPriv, inviterBundle);
 
-        var sessionId = SessionId.NewId();
-        var root = new RootKey(x3.SharedSecret.Value);
-        var session = RatchetBootstrap.CreateInitiatorSession(
-            sessionId,
-            new PeerId(inviterPeerId),
-            new ProtocolVersion(1),
-            root,
-            clock,
-            crypto: crypto);
+            var sessionId = SessionId.NewId();
+            var root = new RootKey(x3.SharedSecret.Value);
+            var session = RatchetBootstrap.CreateInitiatorSession(
+                sessionId,
+                new PeerId(inviterPeerId),
+                new ProtocolVersion(1),
+                root,
+                clock,
+                crypto: crypto);
 
-        model.SessionsMutable[sessionId] = session;
+            model.SessionsMutable[sessionId] = session;
 
-        var inner = new ResponderInnerHello
+            var inner = new ResponderInnerHello
+            {
+                Version = 1,
+                DirectSessionId = sessionId.Value.ToString()
+            };
+
+            var initial = session.Encrypt(new Plaintext(inner.ToByteArray()), clock);
+            model.SessionsMutable[sessionId] = session;
+
+            var response = new InviteHandshakeResponse
+            {
+                Version = 1,
+                RequestCorrelationId = payload.RequestCorrelationId,
+                AcceptorIdentityKey = ByteString.CopyFrom(model.IdentitySigningKeySpki),
+                AcceptorX3DhEphemeralKey = ByteString.CopyFrom(x3.EphemeralPublic.Value),
+                InitialRatchetMessage = ByteString.CopyFrom(initial.Value)
+            };
+
+            return new SimulatedPeerInviteAcceptance(sessionId, response);
+        }
+        finally
         {
-            Version = 1,
-            DirectSessionId = sessionId.Value.ToString()
-        };
-
-        var initial = session.Encrypt(new Plaintext(inner.ToByteArray()), clock);
-        model.SessionsMutable[sessionId] = session;
-
-        var response = new InviteHandshakeResponse
-        {
-            Version = 1,
-            RequestCorrelationId = payload.RequestCorrelationId,
-            AcceptorIdentityKey = ByteString.CopyFrom(model.IdentitySigningKeySpki),
-            AcceptorX3DhEphemeralKey = ByteString.CopyFrom(x3.EphemeralPublic.Value),
-            InitialRatchetMessage = ByteString.CopyFrom(initial.Value)
-        };
-
-        return Task.FromResult(new SimulatedPeerInviteAcceptance(sessionId, response));
+            _peerGate.Release();
+        }
     }
 
-    public Task ReceiveInviteHandshakeResponseFromMainAsync(
+    public async Task ReceiveInviteHandshakeResponseFromMainAsync(
         Guid simulatedPeerId,
         InviteHandshakeResponse response,
         CancellationToken cancellationToken = default)
@@ -199,16 +221,24 @@ public sealed class SimulatorStateService : ISimulatorStateService
         cancellationToken.ThrowIfCancellationRequested();
         if (response is null) throw new ArgumentNullException(nameof(response));
 
-        var model = _peers.FirstOrDefault(p => p.PeerId == simulatedPeerId)
-            ?? throw new InvalidOperationException($"No simulated peer exists with id {simulatedPeerId}");
+        await _peerGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var model = _peers.FirstOrDefault(p => p.PeerId == simulatedPeerId)
+                ?? throw new InvalidOperationException($"No simulated peer exists with id {simulatedPeerId}");
 
-        var corr = Guid.TryParse(response.RequestCorrelationId, out var parsed) ? parsed : Guid.NewGuid();
-        _pending.AddInviteHandshakeResponse(simulatedPeerId, corr, response);
-        model.MarkInboundPending(corr);
-        return Task.CompletedTask;
+            var corr = Guid.TryParse(response.RequestCorrelationId, out var parsed) ? parsed : Guid.NewGuid();
+            _pending.AddInviteHandshakeResponse(simulatedPeerId, corr, response);
+            model.MarkInboundPending(corr);
+            return;
+        }
+        finally
+        {
+            _peerGate.Release();
+        }
     }
 
-    public Task QueueInviteHandshakeResponseForDeliveryToMainAsync(
+    public async Task QueueInviteHandshakeResponseForDeliveryToMainAsync(
         Guid simulatedPeerId,
         Guid requestCorrelationId,
         InviteHandshakeResponse response,
@@ -217,12 +247,20 @@ public sealed class SimulatorStateService : ISimulatorStateService
         cancellationToken.ThrowIfCancellationRequested();
         if (response is null) throw new ArgumentNullException(nameof(response));
 
-        var model = _peers.FirstOrDefault(p => p.PeerId == simulatedPeerId)
-            ?? throw new InvalidOperationException($"No simulated peer exists with id {simulatedPeerId}");
+        await _peerGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var model = _peers.FirstOrDefault(p => p.PeerId == simulatedPeerId)
+                ?? throw new InvalidOperationException($"No simulated peer exists with id {simulatedPeerId}");
 
-        _pending.AddInviteHandshakeResponse(simulatedPeerId, requestCorrelationId, response);
-        model.MarkInboundPending(requestCorrelationId);
-        return Task.CompletedTask;
+            _pending.AddInviteHandshakeResponse(simulatedPeerId, requestCorrelationId, response);
+            model.MarkInboundPending(requestCorrelationId);
+            return;
+        }
+        finally
+        {
+            _peerGate.Release();
+        }
     }
 
     public async Task<bool> TryDeliverQueuedInviteHandshakeResponseToMainAsync(
@@ -241,7 +279,7 @@ public sealed class SimulatorStateService : ISimulatorStateService
         return true;
     }
 
-    public Task<SessionId?> TryFinalizeInviteHandshakeResponseFromMainAsync(
+    public async Task<SessionId?> TryFinalizeInviteHandshakeResponseFromMainAsync(
         Guid simulatedPeerId,
         Guid acceptorPeerId,
         Guid requestCorrelationId,
@@ -251,16 +289,27 @@ public sealed class SimulatorStateService : ISimulatorStateService
 
         if (!_pending.TryGetInviteHandshakeResponse(simulatedPeerId, requestCorrelationId, out var response))
         {
-            return Task.FromResult<SessionId?>(null);
+            return null;
         }
 
-        var model = _peers.FirstOrDefault(p => p.PeerId == simulatedPeerId)
-            ?? throw new InvalidOperationException($"No simulated peer exists with id {simulatedPeerId}");
+        SimulatedPeerModel model;
+        SimulatedOutboundInviteModel? outbound;
 
-        var outbound = model.OutboundInvitesMutable.FirstOrDefault(x => x.CorrelationId == requestCorrelationId);
-        if (outbound is null)
+        await _peerGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            return Task.FromResult<SessionId?>(null);
+            model = _peers.FirstOrDefault(p => p.PeerId == simulatedPeerId)
+                ?? throw new InvalidOperationException($"No simulated peer exists with id {simulatedPeerId}");
+
+            outbound = model.OutboundInvitesMutable.FirstOrDefault(x => x.CorrelationId == requestCorrelationId);
+            if (outbound is null)
+            {
+                return null;
+            }
+        }
+        finally
+        {
+            _peerGate.Release();
         }
 
         if (!response.HasAcceptorIdentityKey || response.AcceptorIdentityKey.Length == 0)
@@ -289,7 +338,7 @@ public sealed class SimulatorStateService : ISimulatorStateService
         }
         catch
         {
-            return Task.FromResult<SessionId?>(null);
+            return null;
         }
 
         var root = new RootKey(shared.Value);
@@ -301,7 +350,7 @@ public sealed class SimulatorStateService : ISimulatorStateService
         }
         catch
         {
-            return Task.FromResult<SessionId?>(null);
+            return null;
         }
 
         var clock = ResolveClock();
@@ -319,7 +368,7 @@ public sealed class SimulatorStateService : ISimulatorStateService
         }
         catch
         {
-            return Task.FromResult<SessionId?>(null);
+            return null;
         }
 
         ResponderInnerHello inner;
@@ -329,11 +378,11 @@ public sealed class SimulatorStateService : ISimulatorStateService
         }
         catch
         {
-            return Task.FromResult<SessionId?>(null);
+            return null;
         }
 
-        if (!inner.HasVersion || inner.Version != 1) return Task.FromResult<SessionId?>(null);
-        if (!inner.HasDirectSessionId || string.IsNullOrWhiteSpace(inner.DirectSessionId)) return Task.FromResult<SessionId?>(null);
+        if (!inner.HasVersion || inner.Version != 1) return null;
+        if (!inner.HasDirectSessionId || string.IsNullOrWhiteSpace(inner.DirectSessionId)) return null;
 
         SessionId sid;
         try
@@ -342,7 +391,7 @@ public sealed class SimulatorStateService : ISimulatorStateService
         }
         catch
         {
-            return Task.FromResult<SessionId?>(null);
+            return null;
         }
 
         var final = SecureSession.Create(
@@ -353,12 +402,20 @@ public sealed class SimulatorStateService : ISimulatorStateService
             crypto,
             clock);
 
-        model.SessionsMutable[sid] = final;
-        _ = _pending.TryTakeInviteHandshakeResponse(simulatedPeerId, requestCorrelationId, out _);
-        return Task.FromResult<SessionId?>(sid);
+        await _peerGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            model.SessionsMutable[sid] = final;
+            _ = _pending.TryTakeInviteHandshakeResponse(simulatedPeerId, requestCorrelationId, out _);
+            return sid;
+        }
+        finally
+        {
+            _peerGate.Release();
+        }
     }
 
-    public Task<EstablishSessionResponse> ReceiveEstablishSessionFromMainAsync(
+    public async Task<EstablishSessionResponse> ReceiveEstablishSessionFromMainAsync(
         Guid simulatedPeerId,
         EstablishSessionRequest request,
         CancellationToken cancellationToken = default)
@@ -366,8 +423,11 @@ public sealed class SimulatorStateService : ISimulatorStateService
         cancellationToken.ThrowIfCancellationRequested();
         if (request is null) throw new ArgumentNullException(nameof(request));
 
-        var model = _peers.FirstOrDefault(p => p.PeerId == simulatedPeerId)
-            ?? throw new InvalidOperationException($"No simulated peer exists with id {simulatedPeerId}");
+        await _peerGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var model = _peers.FirstOrDefault(p => p.PeerId == simulatedPeerId)
+                ?? throw new InvalidOperationException($"No simulated peer exists with id {simulatedPeerId}");
 
         if (!request.HasIdentitySigningKey || request.IdentitySigningKey.Length == 0)
             throw new InvalidOperationException("EstablishSession missing identity_signing_key");
@@ -441,17 +501,22 @@ public sealed class SimulatorStateService : ISimulatorStateService
         using var identityEcdsa = ECDsa.Create(identityEcdh2.ExportParameters(true));
         var sig = identityEcdsa.SignData(payloadBytes, HashAlgorithmName.SHA256);
 
-        return Task.FromResult(new EstablishSessionResponse
-        {
-            Version = 1,
-            Response = new EstablishSessionResponse.Types.Response
+            return new EstablishSessionResponse
             {
                 Version = 1,
-                IdentitySigningKey = ByteString.CopyFrom(model.IdentitySigningKeySpki),
-                ResponsePayload = ByteString.CopyFrom(payloadBytes),
-                PayloadSignature = ByteString.CopyFrom(sig)
-            }
-        });
+                Response = new EstablishSessionResponse.Types.Response
+                {
+                    Version = 1,
+                    IdentitySigningKey = ByteString.CopyFrom(model.IdentitySigningKeySpki),
+                    ResponsePayload = ByteString.CopyFrom(payloadBytes),
+                    PayloadSignature = ByteString.CopyFrom(sig)
+                }
+            };
+        }
+        finally
+        {
+            _peerGate.Release();
+        }
     }
 
     public async Task<DeliverOpaqueMessageResponse> ReceiveOpaqueMessageFromMainAsync(
@@ -462,46 +527,56 @@ public sealed class SimulatorStateService : ISimulatorStateService
         cancellationToken.ThrowIfCancellationRequested();
         if (request is null) throw new ArgumentNullException(nameof(request));
 
-        var model = _peers.FirstOrDefault(p => p.PeerId == simulatedPeerId)
-            ?? throw new InvalidOperationException($"No simulated peer exists with id {simulatedPeerId}");
+        SimulatedPeerModel model;
+        Plaintext? pt;
+        SecureSession? matched;
+        SessionId? matchedSessionId;
 
-        // Best-effort: try to decrypt with any known session (typically 1 per peer in simulator today)
-        var cipher = new SessionRatchetMessage(request.Payload.ToByteArray());
         var clock = ResolveClock();
-
-        Plaintext? pt = null;
-        SecureSession? matched = null;
-        SessionId? matchedSessionId = null;
-
-        foreach (var kv in model.SessionsMutable)
+        // Phase 1: only hold the gate while we touch peer/session state.
+        await _peerGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            cancellationToken.ThrowIfCancellationRequested();
+            model = _peers.FirstOrDefault(p => p.PeerId == simulatedPeerId)
+                ?? throw new InvalidOperationException($"No simulated peer exists with id {simulatedPeerId}");
 
-            if (kv.Key is null)
-            {
-                continue;
-            }
+            // Best-effort: try to decrypt with any known session (typically 1 per peer in simulator today)
+            var cipher = new SessionRatchetMessage(request.Payload.ToByteArray());
+            
 
-            try
+            pt = null;
+            matched = null;
+            matchedSessionId = null;
+
+            foreach (var kv in model.SessionsMutable)
             {
-                var candidate = kv.Value;
-                var candidatePt = candidate.Decrypt(cipher, clock);
-                if (candidatePt.Value.Length == 0)
+                cancellationToken.ThrowIfCancellationRequested();
+
+                try
                 {
-                    model.SessionsMutable[kv.Key] = candidate;
-                    return new DeliverOpaqueMessageResponse { Version = 1 };
-                }
+                    var candidate = kv.Value;
+                    var candidatePt = candidate.Decrypt(cipher, clock);
+                    if (candidatePt.Value.Length == 0)
+                    {
+                        model.SessionsMutable[kv.Key] = candidate;
+                        return new DeliverOpaqueMessageResponse { Version = 1 };
+                    }
 
-                pt = candidatePt;
-                matched = candidate;
-                matchedSessionId = kv.Key;
-                model.SessionsMutable[kv.Key] = candidate;
-                break;
+                    pt = candidatePt;
+                    matched = candidate;
+                    matchedSessionId = kv.Key;
+                    model.SessionsMutable[kv.Key] = candidate;
+                    break;
+                }
+                catch
+                {
+                    // not this session
+                }
             }
-            catch
-            {
-                // not this session
-            }
+        }
+        finally
+        {
+            _peerGate.Release();
         }
 
         if (pt is null || matched is null || matchedSessionId is null)
@@ -528,7 +603,7 @@ public sealed class SimulatorStateService : ISimulatorStateService
                 throw new InvalidOperationException("GetPreKeyBundleRequest missing public_key_hash");
             }
 
-            PublishedPreKeyBundleDto? popped;
+            SimulatedPublishedPreKeyBundleModel? popped;
             try
             {
                 popped = await TryPopPreKeyBundleByRecipientPkhAsync(simulatedPeerId, getReq.PublicKeyHash.ToByteArray(), cancellationToken)
@@ -555,7 +630,16 @@ public sealed class SimulatorStateService : ISimulatorStateService
             var responseEnvelope = new InternalEnvelope { GetPreKeyBundleResponse = resp };
             var responsePlain = new Plaintext(responseEnvelope.ToByteArray());
             var responseCipher = matched.Encrypt(responsePlain, clock);
-            model.SessionsMutable[matchedSessionId] = matched;
+
+            await _peerGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                model.SessionsMutable[matchedSessionId] = matched;
+            }
+            finally
+            {
+                _peerGate.Release();
+            }
 
             return new DeliverOpaqueMessageResponse
             {
@@ -600,36 +684,49 @@ public sealed class SimulatorStateService : ISimulatorStateService
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        var model = _peers.FirstOrDefault(p => p.PeerId == simulatedPeerId)
-            ?? throw new InvalidOperationException($"No simulated peer exists with id {simulatedPeerId}");
+        byte[] recipientPublicKeyHash;
+        byte[] dtoBytes;
 
-        var bundle = _engine.CreateStandardPreKeyBundle(
-            peer: model,
-            expiresUtc: expiresUtc,
-            includeOneTimeKeys: includeOneTimeKeys,
-            oneTimeKeyCount: oneTimeKeyCount);
-
-        var dto = new GetPreKeyBundleResponse.Types.PreKeyBundle
+        await _peerGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            Version = 1,
-            IdentityKey = ByteString.CopyFrom(model.IdentitySigningKeySpki),
-            SignedPreKeyId = ByteString.CopyFrom(bundle.SignedPreKeyId.ToByteArray()),
-            SignedPreKey = ByteString.CopyFrom(bundle.SignedPreKey.Value),
-            PreKeySignature = ByteString.CopyFrom(bundle.SignedPreKeySignature.Value)
-        };
+            var model = _peers.FirstOrDefault(p => p.PeerId == simulatedPeerId)
+                ?? throw new InvalidOperationException($"No simulated peer exists with id {simulatedPeerId}");
 
-        if (bundle.OneTimePreKeyId is not null && bundle.OneTimePreKey is not null)
+            var bundle = _engine.CreateStandardPreKeyBundle(
+                peer: model,
+                expiresUtc: expiresUtc,
+                includeOneTimeKeys: includeOneTimeKeys,
+                oneTimeKeyCount: oneTimeKeyCount);
+
+            var dto = new GetPreKeyBundleResponse.Types.PreKeyBundle
+            {
+                Version = 1,
+                IdentityKey = ByteString.CopyFrom(model.IdentitySigningKeySpki),
+                SignedPreKeyId = ByteString.CopyFrom(bundle.SignedPreKeyId.ToByteArray()),
+                SignedPreKey = ByteString.CopyFrom(bundle.SignedPreKey.Value),
+                PreKeySignature = ByteString.CopyFrom(bundle.SignedPreKeySignature.Value)
+            };
+
+            if (bundle.OneTimePreKeyId is not null && bundle.OneTimePreKey is not null)
+            {
+                dto.OneTimeKeyId = ByteString.CopyFrom(bundle.OneTimePreKeyId.Value.ToByteArray());
+                dto.OneTimeKey = ByteString.CopyFrom(bundle.OneTimePreKey.Value);
+            }
+
+            recipientPublicKeyHash = SHA256.HashData(model.IdentitySigningKeySpki);
+            dtoBytes = dto.ToByteArray();
+        }
+        finally
         {
-            dto.OneTimeKeyId = ByteString.CopyFrom(bundle.OneTimePreKeyId.Value.ToByteArray());
-            dto.OneTimeKey = ByteString.CopyFrom(bundle.OneTimePreKey.Value);
+            _peerGate.Release();
         }
 
-        var pkh = SHA256.HashData(model.IdentitySigningKeySpki);
         await PublishPreKeyBundleAsync(
-                relayHostPeerId,
-                recipientPublicKeyHash: pkh,
+                relayHostPeerId: relayHostPeerId,
+                recipientPublicKeyHash: recipientPublicKeyHash,
                 logicalOwnerPeerId: simulatedPeerId,
-                bundleBytes: dto.ToByteArray(),
+                bundleBytes: dtoBytes,
                 expiresUtc: expiresUtc,
                 cancellationToken: cancellationToken)
             .ConfigureAwait(false);
@@ -722,33 +819,44 @@ public sealed class SimulatorStateService : ISimulatorStateService
             oneTimePreKey: oneTimePreKey,
             expirationDateUtc: null);
 
-        var model = _peers.FirstOrDefault(p => p.PeerId == simulatedPeerId)
-            ?? throw new InvalidOperationException($"No simulated peer exists with id {simulatedPeerId}");
-
-        var initiated = _engine.TryInitiateStandardHandshake(model, responderBundle);
-        if (initiated is null)
+        byte[] helloBytes;
+        await _peerGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            return null;
+            var model = _peers.FirstOrDefault(p => p.PeerId == simulatedPeerId)
+                ?? throw new InvalidOperationException($"No simulated peer exists with id {simulatedPeerId}");
+
+            var initiated = _engine.TryInitiateStandardHandshake(model, responderBundle);
+            if (initiated is null)
+            {
+                return null;
+            }
+
+            model.SetPendingStandardHandshakeToMain(responderPublicKeyHash, initiated.SessionId.Value);
+
+            var hello = new HandshakeInitiatorHello
+            {
+                Version = 1,
+                InitiatorIdentityKeySpki = ByteString.CopyFrom(initiated.InitiatorIdentitySigningKeySpki),
+                InitiatorEphemeralKeySpki = ByteString.CopyFrom(initiated.InitiatorEphemeralKeySpki),
+                SignedPreKeyId = ByteString.CopyFrom(initiated.SignedPreKeyId.ToByteArray())
+            };
+            if (initiated.OneTimePreKeyId is not null)
+            {
+                hello.OneTimePreKeyId = ByteString.CopyFrom(initiated.OneTimePreKeyId.Value.ToByteArray());
+            }
+
+            helloBytes = hello.ToByteArray();
         }
-
-        model.SetPendingStandardHandshakeToMain(responderPublicKeyHash, initiated.SessionId.Value);
-
-        var hello = new HandshakeInitiatorHello
+        finally
         {
-            Version = 1,
-            InitiatorIdentityKeySpki = ByteString.CopyFrom(initiated.InitiatorIdentitySigningKeySpki),
-            InitiatorEphemeralKeySpki = ByteString.CopyFrom(initiated.InitiatorEphemeralKeySpki),
-            SignedPreKeyId = ByteString.CopyFrom(initiated.SignedPreKeyId.ToByteArray())
-        };
-        if (initiated.OneTimePreKeyId is not null)
-        {
-            hello.OneTimePreKeyId = ByteString.CopyFrom(initiated.OneTimePreKeyId.Value.ToByteArray());
+            _peerGate.Release();
         }
 
         await EnqueueRelayDownstreamToPeerAsync(
                 relayHostPeerId: relayHostPeerId,
                 targetPkh: responderPublicKeyHash,
-                opaqueBytes: hello.ToByteArray(),
+                opaqueBytes: helloBytes,
                 debugType: nameof(HandshakeInitiatorHello),
                 cancellationToken: cancellationToken)
             .ConfigureAwait(false);
@@ -781,17 +889,24 @@ public sealed class SimulatorStateService : ISimulatorStateService
         return messageService.EstablishSession(request, ctx);
     }
 
-    public Task<byte[]> ComputePublicKeyHashAsync(Guid simulatedPeerId, CancellationToken cancellationToken = default)
+    public async Task<byte[]> ComputePublicKeyHashAsync(Guid simulatedPeerId, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        var model = _peers.FirstOrDefault(p => p.PeerId == simulatedPeerId)
-            ?? throw new InvalidOperationException($"No simulated peer exists with id {simulatedPeerId}");
-
-        return Task.FromResult(SHA256.HashData(model.IdentitySigningKeySpki));
+        await _peerGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var model = _peers.FirstOrDefault(p => p.PeerId == simulatedPeerId)
+                ?? throw new InvalidOperationException($"No simulated peer exists with id {simulatedPeerId}");
+            return SHA256.HashData(model.IdentitySigningKeySpki);
+        }
+        finally
+        {
+            _peerGate.Release();
+        }
     }
 
-    public Task<SessionRatchetMessage> EncryptInternalEnvelopeAsync(
+    public async Task<SessionRatchetMessage> EncryptInternalEnvelopeAsync(
         Guid simulatedPeerId,
         SessionId sessionId,
         InternalEnvelope envelope,
@@ -800,15 +915,23 @@ public sealed class SimulatorStateService : ISimulatorStateService
         cancellationToken.ThrowIfCancellationRequested();
         if (envelope is null) throw new ArgumentNullException(nameof(envelope));
 
-        var model = _peers.FirstOrDefault(p => p.PeerId == simulatedPeerId)
-            ?? throw new InvalidOperationException($"No simulated peer exists with id {simulatedPeerId}");
+        await _peerGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var model = _peers.FirstOrDefault(p => p.PeerId == simulatedPeerId)
+                ?? throw new InvalidOperationException($"No simulated peer exists with id {simulatedPeerId}");
 
-        var plaintext = new Plaintext(envelope.ToByteArray());
-        var cipher = _engine.Encrypt(model, sessionId, plaintext);
-        return Task.FromResult(cipher);
+            var plaintext = new Plaintext(envelope.ToByteArray());
+            var cipher = _engine.Encrypt(model, sessionId, plaintext);
+            return cipher;
+        }
+        finally
+        {
+            _peerGate.Release();
+        }
     }
 
-    public Task<Plaintext> DecryptSessionMessageAsync(
+    public async Task<Plaintext> DecryptSessionMessageAsync(
         Guid simulatedPeerId,
         SessionId sessionId,
         SessionRatchetMessage message,
@@ -817,13 +940,21 @@ public sealed class SimulatorStateService : ISimulatorStateService
         cancellationToken.ThrowIfCancellationRequested();
         if (message is null) throw new ArgumentNullException(nameof(message));
 
-        var model = _peers.FirstOrDefault(p => p.PeerId == simulatedPeerId)
-            ?? throw new InvalidOperationException($"No simulated peer exists with id {simulatedPeerId}");
-
         try
         {
-            var pt = _engine.Decrypt(model, sessionId, message);
-            return Task.FromResult(pt);
+            await _peerGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                var model = _peers.FirstOrDefault(p => p.PeerId == simulatedPeerId)
+                    ?? throw new InvalidOperationException($"No simulated peer exists with id {simulatedPeerId}");
+
+                var pt = _engine.Decrypt(model, sessionId, message);
+                return pt;
+            }
+            finally
+            {
+                _peerGate.Release();
+            }
         }
         catch (Exception ex)
         {
@@ -841,10 +972,19 @@ public sealed class SimulatorStateService : ISimulatorStateService
 
         // Greenfield relay persistence: load per-relay state into pure models.
         // Only create relay models for relay-capable peers.
-        var relayCapablePeerIds = _state.Peers
-            .Where(p => p.Relay.IsRelayCapable)
-            .Select(p => p.PeerId)
-            .ToList();
+        List<Guid> relayCapablePeerIds;
+        await _peerGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            relayCapablePeerIds = _peers
+                .Where(p => p.IsRelayCapable.Value)
+                .Select(p => p.PeerId)
+                .ToList();
+        }
+        finally
+        {
+            _peerGate.Release();
+        }
 
         foreach (var d in _relayPersistenceByHostPeerId.Values)
         {
@@ -859,26 +999,11 @@ public sealed class SimulatorStateService : ISimulatorStateService
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var relay = new SimulatedRelayModel(hostPeerId);
+            var relay = await _store.LoadRelayAsync(hostPeerId, cancellationToken).ConfigureAwait(false)
+                ?? new SimulatedRelayModel(hostPeerId);
+
             _relays.Add(relay);
             _relayByHostPeerId[hostPeerId] = relay;
-
-            var loaded = await _store.LoadRelayAsync(hostPeerId, cancellationToken).ConfigureAwait(false);
-            if (loaded is not null && loaded.RelayHostPeerId == hostPeerId)
-            {
-                foreach (var m in loaded.UpstreamToMain)
-                {
-                    if (m.AckId == Guid.Empty) continue;
-                    relay.EnqueueForMain(new OutboundRelayMessage(m.AckId, m.OpaqueBytes, m.EnqueuedUtc, m.DebugType));
-                }
-
-                foreach (var m in loaded.DownstreamToPeers)
-                {
-                    if (m.AckId == Guid.Empty) continue;
-                    if (m.TargetPkh is null || m.TargetPkh.Length == 0) continue;
-                    relay.EnqueueForPeer(new InboundRelayMessage(m.AckId, m.TargetPkh, m.OpaqueBytes, m.EnqueuedUtc, m.DebugType));
-                }
-            }
 
             AttachRelayPersistence(relay);
         }
@@ -899,35 +1024,23 @@ public sealed class SimulatorStateService : ISimulatorStateService
     private Task PersistRelayAsync(SimulatedRelayModel relay, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        return PersistRelayFrozenAsync(relay, cancellationToken);
+    }
 
-        var dto = new RelayPersistenceDto
+    private async Task PersistRelayFrozenAsync(SimulatedRelayModel relay, CancellationToken cancellationToken)
+    {
+        RelayStateSnapshot frozen;
+        await _relayGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            Version = 1,
-            RelayHostPeerId = relay.RelayHostPeerId,
-            UpstreamToMain = relay.UpstreamToMain.Values
-                .OrderBy(x => x.EnqueuedUtc)
-                .Select(x => new RelayUpstreamMessageDto
-                {
-                    AckId = x.AckId,
-                    OpaqueBytes = x.OpaqueBytes,
-                    EnqueuedUtc = x.EnqueuedUtc,
-                    DebugType = x.DebugType
-                })
-                .ToList(),
-            DownstreamToPeers = relay.DownstreamToPeers.Values
-                .OrderBy(x => x.EnqueuedUtc)
-                .Select(x => new RelayDownstreamMessageDto
-                {
-                    AckId = x.AckId,
-                    TargetPkh = x.TargetPkh,
-                    OpaqueBytes = x.OpaqueBytes,
-                    EnqueuedUtc = x.EnqueuedUtc,
-                    DebugType = x.DebugType
-                })
-                .ToList()
-        };
+            frozen = relay.Freeze();
+        }
+        finally
+        {
+            _relayGate.Release();
+        }
 
-        return _store.SaveRelayAsync(dto, cancellationToken);
+        await _store.SaveRelayAsync(frozen, cancellationToken).ConfigureAwait(false);
     }
 
     private SimulatedRelayModel GetRelayOrThrow(Guid relayHostPeerId)
@@ -961,9 +1074,9 @@ public sealed class SimulatorStateService : ISimulatorStateService
         try
         {
             var relay = GetRelayOrThrow(relayHostPeerId);
-            var ordered = relay.UpstreamToMain.Values
+            var ordered = relay.MessageQueue
+                .Select(kvp => kvp.Value)
                 .Select(x => (AckId: x.AckId, EnqueuedUtc: x.EnqueuedUtc))
-                .Concat(relay.DownstreamToPeers.Values.Select(x => (AckId: x.AckId, EnqueuedUtc: x.EnqueuedUtc)))
                 .OrderBy(x => x.EnqueuedUtc)
                 .ToList();
 
@@ -997,13 +1110,14 @@ public sealed class SimulatorStateService : ISimulatorStateService
                 if (newTime >= after.Value) newTime = after.Value.AddTicks(-1);
             }
 
-            if (relay.UpstreamToMain.TryGetValue(ackId, out var outMsg))
+            if (relay.MessageQueue.TryGetValue(ackId, out var msg))
             {
-                relay.EnqueueForMain(outMsg with { EnqueuedUtc = newTime });
-            }
-            else if (relay.DownstreamToPeers.TryGetValue(ackId, out var inMsg))
-            {
-                relay.EnqueueForPeer(inMsg with { EnqueuedUtc = newTime });
+                relay.EnqueueMessage(msg switch
+                {
+                    OutboundRelayMessage outMsg => outMsg with { EnqueuedUtc = newTime },
+                    InboundRelayMessage inMsg => inMsg with { EnqueuedUtc = newTime },
+                    _ => msg
+                });
             }
             else
             {
@@ -1033,19 +1147,27 @@ public sealed class SimulatorStateService : ISimulatorStateService
         {
             var relay = GetRelayOrThrow(relayHostPeerId);
 
-            if (relay.UpstreamToMain.TryGetValue(ackId, out var outMsg))
+            if (relay.MessageQueue.TryGetValue(ackId, out var msg))
             {
-                if (outMsg.OpaqueBytes is null || outMsg.OpaqueBytes.Length == 0) return false;
-                var bytes = outMsg.OpaqueBytes.ToArray();
-                bytes[0] = (byte)(bytes[0] ^ 0x01);
-                relay.EnqueueForMain(outMsg with { OpaqueBytes = bytes });
-            }
-            else if (relay.DownstreamToPeers.TryGetValue(ackId, out var inMsg))
-            {
-                if (inMsg.OpaqueBytes is null || inMsg.OpaqueBytes.Length == 0) return false;
-                var bytes = inMsg.OpaqueBytes.ToArray();
-                bytes[0] = (byte)(bytes[0] ^ 0x01);
-                relay.EnqueueForPeer(inMsg with { OpaqueBytes = bytes });
+                switch (msg)
+                {
+                    case OutboundRelayMessage outMsg:
+                    {
+                        if (outMsg.OpaqueBytes is null || outMsg.OpaqueBytes.Length == 0) return false;
+                        var bytes = outMsg.OpaqueBytes.ToArray();
+                        bytes[0] = (byte)(bytes[0] ^ 0x01);
+                        relay.EnqueueMessage(outMsg with { OpaqueBytes = bytes });
+                        break;
+                    }
+                    case InboundRelayMessage inMsg:
+                    {
+                        if (inMsg.OpaqueBytes is null || inMsg.OpaqueBytes.Length == 0) return false;
+                        var bytes = inMsg.OpaqueBytes.ToArray();
+                        bytes[0] = (byte)(bytes[0] ^ 0x01);
+                        relay.EnqueueMessage(inMsg with { OpaqueBytes = bytes });
+                        break;
+                    }
+                }
             }
             else
             {
@@ -1087,7 +1209,7 @@ public sealed class SimulatorStateService : ISimulatorStateService
                 EnqueuedUtc: DateTimeOffset.UtcNow,
                 DebugType: debugType);
 
-            relay.EnqueueForMain(msg);
+            relay.EnqueueMessage(msg);
 
             _diagnostics.Emit(
                 SimulatorDiagnosticEventType.RelayEnqueued,
@@ -1126,7 +1248,7 @@ public sealed class SimulatorStateService : ISimulatorStateService
                 EnqueuedUtc: DateTimeOffset.UtcNow,
                 DebugType: debugType);
 
-            relay.EnqueueForPeer(msg);
+            relay.EnqueueMessage(msg);
 
             _diagnostics.Emit(
                 SimulatorDiagnosticEventType.RelayEnqueued,
@@ -1155,8 +1277,9 @@ public sealed class SimulatorStateService : ISimulatorStateService
         try
         {
             var relay = GetRelayOrThrow(relayHostPeerId);
-            var snapshot = relay.DownstreamToPeers
-                .Values
+            var snapshot = relay.MessageQueue
+                .Select(kvp => kvp.Value)
+                .OfType<InboundRelayMessage>()
                 .Where(x => x.TargetPkh.AsSpan().SequenceEqual(targetPkh))
                 .OrderBy(x => x.EnqueuedUtc)
                 .Take(max)
@@ -1199,8 +1322,9 @@ public sealed class SimulatorStateService : ISimulatorStateService
             try
             {
                 var relay = GetRelayOrThrow(relayHostPeerId);
-                next = relay.UpstreamToMain
-                    .Values
+                next = relay.MessageQueue
+                    .Select(kvp => kvp.Value)
+                    .OfType<OutboundRelayMessage>()
                     .OrderBy(x => x.EnqueuedUtc)
                     .FirstOrDefault();
 
@@ -1301,11 +1425,11 @@ public sealed class SimulatorStateService : ISimulatorStateService
         try
         {
             var relay = GetRelayOrThrow(relayHostPeerId);
-            if (!relay.UpstreamToMain.TryGetValue(ackId, out var found))
+            if (!relay.MessageQueue.TryGetValue(ackId, out var found) || found is not OutboundRelayMessage foundOut)
             {
                 return false;
             }
-            msg = found;
+            msg = foundOut;
 
             // Checkout: remove before releasing gate so we can't double-send.
             relay.RemoveMessage(msg.AckId);
@@ -1588,61 +1712,38 @@ public sealed class SimulatorStateService : ISimulatorStateService
     {
         try
         {
-            var loaded = await _store.LoadAsync(cancellationToken).ConfigureAwait(false);
-            _state = loaded ?? new SimulatorStateDto { Version = 1 };
-
-            var changed = false;
-
-            // Seed allocator from the maximum existing (valid) SelfIdentityId.
-            foreach (var p in _state.Peers)
+            foreach (var d in _runtimePersistenceByPeerId.Values)
             {
-                if (p.SelfIdentityId >= SelfIdentityIdBase && p.SelfIdentityId > _nextSelfIdentityId)
+                d.Dispose();
+            }
+            _runtimePersistenceByPeerId.Clear();
+
+            foreach (var d in _relayPersistenceByHostPeerId.Values)
+            {
+                d.Dispose();
+            }
+            _relayPersistenceByHostPeerId.Clear();
+
+            var models = await _store.LoadPeersAsync(cancellationToken).ConfigureAwait(false);
+
+            await _peerGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                _peerById.Clear();
+                _peers.Clear();
+                foreach (var model in models)
                 {
-                    _nextSelfIdentityId = p.SelfIdentityId;
+                    _peerById[model.PeerId] = model;
+                    _peers.Add(model);
+                    AttachRuntimePersistence(model);
                 }
             }
-
-            var clock = ResolveClock();
-
-            var models = new List<SimulatedPeerModel>();
-            _peerById.Clear();
-            foreach (var p in _state.Peers)
+            finally
             {
-                if (p.SelfIdentityId < SelfIdentityIdBase)
-                {
-                    p.SelfIdentityId = Interlocked.Increment(ref _nextSelfIdentityId);
-                    changed = true;
-                }
-
-                NormalizePeer(p, _transportOptions.Value);
-                _ = _keys.EnsureReverseSignalKeys(p.ReverseSignalKeys);
-                _ = EnsureIdentityPublicKeyHash(p);
-                if (p.PublishedKeysToPeerIds is null)
-                {
-                    p.PublishedKeysToPeerIds = new();
-                    changed = true;
-                }
-
-                var model = CreateModel(p);
-                HydrateRuntimeStore(model, p.RuntimeStore, clock);
-                models.Add(model);
-                _peerById[model.PeerId] = model;
-                AttachRuntimePersistence(model);
+                _peerGate.Release();
             }
-
-            _peers.Clear();
-            _peers.AddRange(models);
 
             await InitializeRelaysAsync(cancellationToken).ConfigureAwait(false);
-
-            if (loaded is null)
-            {
-                await _store.SaveAsync(_state, cancellationToken);
-            }
-            else if (changed)
-            {
-                await _store.SaveAsync(_state, cancellationToken);
-            }
         }
         finally
         {
@@ -1653,132 +1754,50 @@ public sealed class SimulatorStateService : ISimulatorStateService
         }
     }
 
-    private static SimulatedPeerModel CreateModel(SimulatedPeerDto dto)
-    {
-        return new SimulatedPeerModel(
-            peerId: dto.PeerId,
-            displayName: dto.DisplayName,
-            isOnline: dto.IsOnline,
-            isRelayCapable: dto.Relay?.IsRelayCapable == true,
-            identitySigningKeySpki: dto.ReverseSignalKeys.IdentitySigningKeySpki,
-            identitySigningKeyPrivateKeyEcPrivateKey: dto.ReverseSignalKeys.IdentitySigningKeyPrivateKeyEcPrivateKey,
-            connectionMode: dto.Connection?.Mode ?? ConnectionMode.Direct,
-            host: dto.Connection?.Host,
-            port: dto.Connection?.Port ?? 0,
-            relayPeerId: dto.Connection?.RelayPeerId,
-            uiState: dto.UiState,
-            pendingCorrelationId: dto.PendingCorrelationId,
-            targetPublicKeyHash: dto.TargetPublicKeyHash,
-            selectedRouteMode: dto.SelectedRouteMode,
-            directEndpoint: dto.DirectEndpoint,
-            relayHostPeerId: dto.RelayHostPeerId,
-            phase: dto.Phase,
-            notUntilUtc: dto.NotUntilUtc,
-            lastError: dto.LastError,
-            publishedKeysToPeerIds: dto.PublishedKeysToPeerIds,
-            relayActiveSessionsPeerIds: dto.Relay?.ActiveSessionsPeerIds,
-            handshakeAttempts: dto.HandshakeAttempts,
-            pendingStandardHandshakeToMainResponderPublicKeyHash: dto.PendingStandardHandshakeToMainResponderPublicKeyHash,
-            pendingStandardHandshakeToMainTemporarySessionId: dto.PendingStandardHandshakeToMainTemporarySessionId);
-    }
-
-    private static void HydrateRuntimeStore(SimulatedPeerModel model, SimulatedPeerRuntimeStoreDto store, IClock clock)
-    {
-        if (model is null) throw new ArgumentNullException(nameof(model));
-        if (store is null) throw new ArgumentNullException(nameof(store));
-        if (clock is null) throw new ArgumentNullException(nameof(clock));
-
-        var crypto = new AeadSessionCrypto();
-
-        // Sessions
-        foreach (var dto in store.Sessions)
-        {
-            if (dto.SessionId == Guid.Empty) continue;
-            if (dto.RemotePeerId == Guid.Empty) continue;
-            if (dto.RootKey is null || dto.RootKey.Length == 0) continue;
-
-            var state = new RatchetState(
-                rootKey: new RootKey(dto.RootKey),
-                sendingChainKey: dto.SendChainKey is null || dto.SendChainKey.Length == 0 ? null : new ChainKey(dto.SendChainKey),
-                sendingCounter: dto.SendCounter,
-                receivingChainKey: dto.RecvChainKey is null || dto.RecvChainKey.Length == 0 ? null : new ChainKey(dto.RecvChainKey),
-                receivingCounter: dto.RecvCounter,
-                previousChainLength: dto.PrevChainLength,
-                remoteRatchetKey: dto.RemoteRatchetKey is null || dto.RemoteRatchetKey.Length == 0 ? null : new RatchetEphemeralKey(dto.RemoteRatchetKey),
-                dhRatchetPrivateKey: dto.DhRatchetPrivateKey is null || dto.DhRatchetPrivateKey.Length == 0 ? null : new PrivateEphemeralKey(dto.DhRatchetPrivateKey),
-                skippedKeyLimit: 1000);
-
-            var session = SecureSession.Create(
-                new SessionId(dto.SessionId),
-                new PeerId(dto.RemotePeerId),
-                new ProtocolVersion(dto.ProtocolVersion <= 0 ? 1 : dto.ProtocolVersion),
-                state,
-                crypto,
-                clock);
-
-            model.SessionsMutable[session.Id] = session;
-        }
-
-        // Signed pre-keys
-        foreach (var dto in store.SignedPreKeys)
-        {
-            if (dto.SignedPreKeyId == Guid.Empty) continue;
-            model.SignedPreKeysMutable.Add(new SimulatedSignedPreKeyModel(dto.SignedPreKeyId, dto.PrivateEcPrivateKey, dto.PublicSpki));
-        }
-
-        // Outbound invites
-        foreach (var dto in store.OutboundInvites)
-        {
-            if (dto.CorrelationId == Guid.Empty) continue;
-            model.OutboundInvitesMutable.Add(new SimulatedOutboundInviteModel(dto.CorrelationId, dto.SignedPreKeyPrivateEcPrivateKey));
-        }
-
-        // Pending invite responses
-        foreach (var dto in store.PendingInviteHandshakeResponses)
-        {
-            if (dto.CorrelationId == Guid.Empty) continue;
-            model.PendingInviteHandshakeResponsesMutable.Add(new SimulatedPendingInviteHandshakeResponseModel(dto.CorrelationId, dto.ResponseBytes));
-        }
-    }
-
     public async Task<Guid> AddPeerAsync(string? displayName, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
         var peerId = Guid.NewGuid();
-        var dto = new SimulatedPeerDto
+
+        byte[] priv;
+        byte[] spki;
+        using (var ecdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256))
         {
-            PeerId = peerId,
-            SelfIdentityId = Interlocked.Increment(ref _nextSelfIdentityId),
-            DisplayName = string.IsNullOrWhiteSpace(displayName) ? null : displayName.Trim(),
-            IsOnline = true,
-            Connection = new SimulatedPeerConnectionDto { Mode = ConnectionMode.Direct },
-            Relay = new SimulatedPeerRelayStateDto { IsRelayCapable = false }
-        };
+            priv = ecdh.ExportECPrivateKey();
+            spki = ecdh.ExportSubjectPublicKeyInfo();
+        }
 
-        NormalizePeer(dto, _transportOptions.Value);
-        _ = _keys.EnsureReverseSignalKeys(dto.ReverseSignalKeys);
-        _ = EnsureIdentityPublicKeyHash(dto);
-
-        var model = CreateModel(dto);
+        var name = string.IsNullOrWhiteSpace(displayName) ? null : displayName.Trim();
+        var model = new SimulatedPeerModel(
+            peerId: peerId,
+            displayName: name,
+            isOnline: true,
+            isRelayCapable: false,
+            identitySigningKeySpki: spki,
+            identitySigningKeyPrivateKeyEcPrivateKey: priv,
+            connectionMode: ConnectionMode.Direct,
+            host: null,
+            port: 0,
+            relayPeerId: null);
 
         await _peerGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            _state.Peers.Add(dto);
             _peerById[peerId] = model;
             _peers.Add(model);
             AttachRuntimePersistence(model);
-            await _store.SaveAsync(_state, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
             _peerGate.Release();
         }
 
+        _saveTrigger.OnNext(Unit.Default);
+
         _diagnostics.Emit(
             SimulatorDiagnosticEventType.PeerCreated,
-            $"Peer created: {(string.IsNullOrWhiteSpace(dto.DisplayName) ? dto.PeerId.ToString()[..8] : dto.DisplayName)}",
+            $"Peer created: {(string.IsNullOrWhiteSpace(model.DisplayName.CurrentValue) ? model.PeerId.ToString()[..8] : model.DisplayName.CurrentValue)}",
             peerId: peerId);
 
         return peerId;
@@ -1790,9 +1809,8 @@ public sealed class SimulatorStateService : ISimulatorStateService
         if (recipientPublicKeyHash is null) throw new ArgumentNullException(nameof(recipientPublicKeyHash));
         if (recipientPublicKeyHash.Length == 0) return Task.FromResult<Guid?>(null);
 
-        var matches = _state.Peers
-            .Where(p => p.IdentityPublicKeyHash is not null && p.IdentityPublicKeyHash.Length != 0)
-            .Where(p => p.IdentityPublicKeyHash.SequenceEqual(recipientPublicKeyHash))
+        var matches = _peers
+            .Where(p => SHA256.HashData(p.IdentitySigningKeySpki).SequenceEqual(recipientPublicKeyHash))
             .Select(p => p.PeerId)
             .Take(2)
             .ToList();
@@ -1805,19 +1823,20 @@ public sealed class SimulatorStateService : ISimulatorStateService
     {
         cancellationToken.ThrowIfCancellationRequested();
 
+        string name;
+
         await _peerGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var peer = _state.Peers.FirstOrDefault(p => p.PeerId == peerId);
-            if (peer is null) return;
+            name = _peerById.TryGetValue(peerId, out var removed)
+                ? (string.IsNullOrWhiteSpace(removed.DisplayName.CurrentValue) ? removed.PeerId.ToString()[..8] : removed.DisplayName.CurrentValue)
+                : peerId.ToString()[..8];
 
-            var name = string.IsNullOrWhiteSpace(peer.DisplayName) ? peer.PeerId.ToString()[..8] : peer.DisplayName;
-
-            _state.Peers.Remove(peer);
-
-            foreach (var p in _state.Peers)
+            foreach (var p in _peers)
             {
-                _ = p.PublishedKeysToPeerIds.Remove(peerId);
+                _ = p.PublishedKeysToPeerIdsMutable.Remove(peerId);
+                _ = p.KnownPeerIds.Remove(peerId);
+                _ = p.RelayActiveSessionsPeerIdsMutable.Remove(peerId);
             }
 
             if (_peerById.TryGetValue(peerId, out var model))
@@ -1832,18 +1851,18 @@ public sealed class SimulatorStateService : ISimulatorStateService
 
                 model.Dispose();
             }
-
-            await _store.SaveAsync(_state, cancellationToken).ConfigureAwait(false);
-
-            _diagnostics.Emit(
-                SimulatorDiagnosticEventType.PeerRemoved,
-                $"Peer removed: {name}",
-                peerId: peerId);
         }
         finally
         {
             _peerGate.Release();
         }
+
+        _saveTrigger.OnNext(Unit.Default);
+
+        _diagnostics.Emit(
+            SimulatorDiagnosticEventType.PeerRemoved,
+            $"Peer removed: {name}",
+            peerId: peerId);
     }
 
     public async Task AddPublishedKeysRelationshipAsync(Guid publisherPeerId, Guid hostPeerId, CancellationToken cancellationToken = default)
@@ -1853,27 +1872,16 @@ public sealed class SimulatorStateService : ISimulatorStateService
         await _peerGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var publisher = _state.Peers.FirstOrDefault(p => p.PeerId == publisherPeerId);
-            if (publisher is null) return;
-
-            publisher.PublishedKeysToPeerIds ??= new();
-            if (publisher.PublishedKeysToPeerIds.Contains(hostPeerId)) return;
-            publisher.PublishedKeysToPeerIds.Add(hostPeerId);
-
-            if (_peerById.TryGetValue(publisherPeerId, out var model))
-            {
-                if (!model.PublishedKeysToPeerIdsMutable.Contains(hostPeerId))
-                {
-                    model.PublishedKeysToPeerIdsMutable.Add(hostPeerId);
-                }
-            }
-
-            await _store.SaveAsync(_state, cancellationToken).ConfigureAwait(false);
+            if (!_peerById.TryGetValue(publisherPeerId, out var model)) return;
+            if (model.PublishedKeysToPeerIdsMutable.Contains(hostPeerId)) return;
+            model.PublishedKeysToPeerIdsMutable.Add(hostPeerId);
         }
         finally
         {
             _peerGate.Release();
         }
+
+        _saveTrigger.OnNext(Unit.Default);
 
         _diagnostics.Emit(
             SimulatorDiagnosticEventType.PreKeyPublishRelationshipAdded,
@@ -1886,24 +1894,16 @@ public sealed class SimulatorStateService : ISimulatorStateService
         await _peerGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var publisher = _state.Peers.FirstOrDefault(p => p.PeerId == publisherPeerId);
-            if (publisher is null) return;
-
-            publisher.PublishedKeysToPeerIds ??= new();
-            var removed = publisher.PublishedKeysToPeerIds.Remove(hostPeerId);
+            if (!_peerById.TryGetValue(publisherPeerId, out var model)) return;
+            var removed = model.PublishedKeysToPeerIdsMutable.Remove(hostPeerId);
             if (!removed) return;
-
-            if (_peerById.TryGetValue(publisherPeerId, out var model))
-            {
-                _ = model.PublishedKeysToPeerIdsMutable.Remove(hostPeerId);
-            }
-
-            await _store.SaveAsync(_state, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
             _peerGate.Release();
         }
+
+        _saveTrigger.OnNext(Unit.Default);
 
         _diagnostics.Emit(
             SimulatorDiagnosticEventType.PreKeyPublishRelationshipRemoved,
@@ -1919,29 +1919,17 @@ public sealed class SimulatorStateService : ISimulatorStateService
         await _peerGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var relayHost = _state.Peers.FirstOrDefault(p => p.PeerId == relayHostPeerId);
-            if (relayHost is null) return;
-            if (relayHost.Relay is null) return;
-            if (!relayHost.Relay.IsRelayCapable) return;
-
-            relayHost.Relay.ActiveSessionsPeerIds ??= new();
-            if (relayHost.Relay.ActiveSessionsPeerIds.Contains(peerId)) return;
-            relayHost.Relay.ActiveSessionsPeerIds.Add(peerId);
-
-            if (_peerById.TryGetValue(relayHostPeerId, out var model))
-            {
-                if (!model.RelayActiveSessionsPeerIdsMutable.Contains(peerId))
-                {
-                    model.RelayActiveSessionsPeerIdsMutable.Add(peerId);
-                }
-            }
-
-            await _store.SaveAsync(_state, cancellationToken).ConfigureAwait(false);
+            if (!_peerById.TryGetValue(relayHostPeerId, out var model)) return;
+            if (!model.IsRelayCapable.Value) return;
+            if (model.RelayActiveSessionsPeerIdsMutable.Contains(peerId)) return;
+            model.RelayActiveSessionsPeerIdsMutable.Add(peerId);
         }
         finally
         {
             _peerGate.Release();
         }
+
+        _saveTrigger.OnNext(Unit.Default);
 
         _diagnostics.Emit(
             SimulatorDiagnosticEventType.RelayActiveSessionAdded,
@@ -1957,25 +1945,16 @@ public sealed class SimulatorStateService : ISimulatorStateService
         await _peerGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var relayHost = _state.Peers.FirstOrDefault(p => p.PeerId == relayHostPeerId);
-            if (relayHost is null) return;
-            if (relayHost.Relay is null) return;
-            if (relayHost.Relay.ActiveSessionsPeerIds is null) return;
-
-            var removed = relayHost.Relay.ActiveSessionsPeerIds.Remove(peerId);
+            if (!_peerById.TryGetValue(relayHostPeerId, out var model)) return;
+            var removed = model.RelayActiveSessionsPeerIdsMutable.Remove(peerId);
             if (!removed) return;
-
-            if (_peerById.TryGetValue(relayHostPeerId, out var model))
-            {
-                _ = model.RelayActiveSessionsPeerIdsMutable.Remove(peerId);
-            }
-
-            await _store.SaveAsync(_state, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
             _peerGate.Release();
         }
+
+        _saveTrigger.OnNext(Unit.Default);
 
         _diagnostics.Emit(
             SimulatorDiagnosticEventType.RelayActiveSessionRemoved,
@@ -1999,24 +1978,20 @@ public sealed class SimulatorStateService : ISimulatorStateService
         await _peerGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var peer = _state.Peers.FirstOrDefault(p => p.PeerId == relayHostPeerId);
-            if (peer is null) return;
+            if (!_peerById.TryGetValue(relayHostPeerId, out var host)) return;
 
-            // Allow publishing even if not relay-capable; caller/UI should prevent it but we keep storage permissive.
-            peer.Relay.PreKeyStore.PublishedBundles.Add(new PublishedPreKeyBundleDto
-            {
-                RecipientPublicKeyHash = recipientPublicKeyHash,
-                LogicalOwnerPeerId = logicalOwnerPeerId,
-                BundleBytes = bundleBytes,
-                ExpiresUtc = expiresUtc
-            });
-
-            await _store.SaveAsync(_state, cancellationToken).ConfigureAwait(false);
+            host.PublishedPreKeyBundles.Add(new SimulatedPublishedPreKeyBundleModel(
+                RecipientPublicKeyHash: recipientPublicKeyHash,
+                LogicalOwnerPeerId: logicalOwnerPeerId,
+                BundleBytes: bundleBytes,
+                ExpiresUtc: expiresUtc));
         }
         finally
         {
             _peerGate.Release();
         }
+
+        _saveTrigger.OnNext(Unit.Default);
 
         _diagnostics.Emit(
             SimulatorDiagnosticEventType.RelayEnqueued,
@@ -2026,7 +2001,7 @@ public sealed class SimulatorStateService : ISimulatorStateService
             contextTag: Convert.ToBase64String(recipientPublicKeyHash));
     }
 
-    private async Task<PublishedPreKeyBundleDto?> TryPopPreKeyBundleByRecipientPkhAsync(
+    private async Task<SimulatedPublishedPreKeyBundleModel?> TryPopPreKeyBundleByRecipientPkhAsync(
         Guid relayHostPeerId,
         byte[] recipientPublicKeyHash,
         CancellationToken cancellationToken = default)
@@ -2037,125 +2012,31 @@ public sealed class SimulatorStateService : ISimulatorStateService
         await _peerGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var peer = _state.Peers.FirstOrDefault(p => p.PeerId == relayHostPeerId);
-            if (peer is null) return null;
+            if (!_peerById.TryGetValue(relayHostPeerId, out var host)) return null;
 
-        var now = DateTimeOffset.UtcNow;
-        // Remove expired bundles opportunistically.
-        peer.Relay.PreKeyStore.PublishedBundles.RemoveAll(b => b.ExpiresUtc <= now);
+            var now = DateTimeOffset.UtcNow;
+            for (var i = host.PublishedPreKeyBundles.Count - 1; i >= 0; i--)
+            {
+                if (host.PublishedPreKeyBundles[i].ExpiresUtc <= now)
+                {
+                    host.PublishedPreKeyBundles.RemoveAt(i);
+                }
+            }
 
-        var match = peer.Relay.PreKeyStore.PublishedBundles
-            .FirstOrDefault(b => b.RecipientPublicKeyHash.SequenceEqual(recipientPublicKeyHash));
+            var match = host.PublishedPreKeyBundles
+                .FirstOrDefault(b => b.RecipientPublicKeyHash.SequenceEqual(recipientPublicKeyHash));
 
             if (match is null)
             {
                 return null;
             }
 
-            peer.Relay.PreKeyStore.PublishedBundles.Remove(match);
-            await _store.SaveAsync(_state, cancellationToken).ConfigureAwait(false);
+            host.PublishedPreKeyBundles.Remove(match);
             return match;
         }
         finally
         {
             _peerGate.Release();
-        }
-    }
-
-    public Task<SimulatedPeerRuntimeStoreDto?> TryGetRuntimeStoreAsync(Guid peerId, CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        var peer = _state.Peers.FirstOrDefault(p => p.PeerId == peerId);
-        return Task.FromResult(peer?.RuntimeStore);
-    }
-
-    public async Task SaveRuntimeStoreAsync(Guid peerId, SimulatedPeerRuntimeStoreDto store, CancellationToken cancellationToken = default)
-    {
-        if (store is null) throw new ArgumentNullException(nameof(store));
-        await _peerGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            var peer = _state.Peers.FirstOrDefault(p => p.PeerId == peerId);
-            if (peer is null) return;
-
-            peer.RuntimeStore = store;
-            await _store.SaveAsync(_state, cancellationToken).ConfigureAwait(false);
-        }
-        finally
-        {
-            _peerGate.Release();
-        }
-    }
-
-    private async Task WithPeerAsync(
-        Guid peerId,
-        Action<SimulatedPeerModel> mutateModel,
-        Action<SimulatedPeerDto> mutateDto,
-        CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        if (mutateModel is null) throw new ArgumentNullException(nameof(mutateModel));
-        if (mutateDto is null) throw new ArgumentNullException(nameof(mutateDto));
-
-        await _peerGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            var dto = _state.Peers.FirstOrDefault(p => p.PeerId == peerId);
-            if (dto is null) return;
-
-            if (!_peerById.TryGetValue(peerId, out var model)) return;
-
-            mutateModel(model);
-            mutateDto(dto);
-
-            await _store.SaveAsync(_state, cancellationToken).ConfigureAwait(false);
-        }
-        finally
-        {
-            _peerGate.Release();
-        }
-    }
-
-    private static void NormalizePeer(SimulatedPeerDto peer, TransportOptions transportOptions)
-    {
-        peer.Connection ??= new SimulatedPeerConnectionDto();
-        peer.KnownPeerIds ??= new();
-        peer.PreKeys ??= new();
-        peer.PreKeys.OneTimePreKeys ??= new();
-        peer.RuntimeStore ??= new();
-        peer.RuntimeStore.Sessions ??= new();
-        peer.RuntimeStore.SignedPreKeys ??= new();
-        peer.HandshakeAttempts ??= new();
-        peer.Relay ??= new();
-        peer.Relay.ActiveSessionsPeerIds ??= new();
-        peer.Relay.OpaqueQueue ??= new();
-        peer.Relay.OpaqueQueue.Items ??= new();
-        peer.Relay.PreKeyStore ??= new();
-        peer.Relay.PreKeyStore.PublishedBundles ??= new();
-        peer.ReverseSignalKeys ??= new();
-        peer.IdentityPublicKeyHash ??= Array.Empty<byte>();
-
-        // Ensure runtime state is consistent with online/offline.
-        if (!peer.IsOnline)
-        {
-            peer.UiState = SimulatorPeerUiState.Offline;
-        }
-        else if (peer.UiState == SimulatorPeerUiState.Offline)
-        {
-            peer.UiState = SimulatorPeerUiState.Ready;
-            peer.PendingCorrelationId = null;
-        }
-
-        // Assign stable simulator endpoint if not set. This is a routing key only; no socket bind.
-        if (string.IsNullOrWhiteSpace(peer.Connection.Host) || string.Equals(peer.Connection.Host, "localhost", StringComparison.OrdinalIgnoreCase))
-        {
-            peer.Connection.Host = AllocateSimulatorLoopbackHost(peer.PeerId);
-        }
-        if (peer.Connection.Port == 0)
-        {
-            var port = transportOptions.SimulatorPort;
-            if (port == 0) port = 5002;
-            peer.Connection.Port = port;
         }
     }
 
@@ -2177,109 +2058,8 @@ public sealed class SimulatorStateService : ISimulatorStateService
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        await _peerGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            var dto = _state.Peers.FirstOrDefault(p => p.PeerId == model.PeerId);
-            if (dto is null) return;
-
-            dto.UiState = model.UiState.CurrentValue;
-            dto.PendingCorrelationId = model.PendingCorrelationId.CurrentValue;
-            dto.TargetPublicKeyHash = model.TargetPublicKeyHash.CurrentValue;
-            dto.SelectedRouteMode = model.SelectedRouteMode.CurrentValue;
-            dto.DirectEndpoint = model.DirectEndpoint.CurrentValue;
-            dto.RelayHostPeerId = model.RelayHostPeerId.CurrentValue;
-            dto.Phase = model.Phase.CurrentValue;
-            dto.NotUntilUtc = model.NotUntilUtc.CurrentValue;
-            dto.LastError = model.LastError.CurrentValue;
-            dto.HandshakeAttempts = model.HandshakeAttempts.ToList();
-
-            dto.PendingStandardHandshakeToMainResponderPublicKeyHash = model.PendingStandardHandshakeToMainResponderPublicKeyHash.CurrentValue;
-            dto.PendingStandardHandshakeToMainTemporarySessionId = model.PendingStandardHandshakeToMainTemporarySessionId.CurrentValue;
-
-            dto.RuntimeStore = new SimulatedPeerRuntimeStoreDto
-            {
-                Version = 1,
-                Sessions = model.Sessions
-                    .Select(kv => kv.Value)
-                    .Select(s => new SimulatedSecureSessionDto
-                    {
-                        SessionId = s.Id.Value,
-                        RemotePeerId = s.RemotePeerId.Value,
-                        ProtocolVersion = s.ProtocolVersion.Value,
-                        RootKey = s.State.RootKey.Value,
-                        SendChainKey = s.State.SendingChainKey?.Value,
-                        SendCounter = s.State.SendingCounter,
-                        RecvChainKey = s.State.ReceivingChainKey?.Value,
-                        RecvCounter = s.State.ReceivingCounter,
-                        PrevChainLength = s.State.PreviousChainLength,
-                        RemoteRatchetKey = s.State.RemoteRatchetKey?.Value,
-                        DhRatchetPrivateKey = s.State.DhRatchetPrivateKey?.Value,
-                        SkippedKeysCount = s.SkippedKeysCount,
-                        CreatedAtUtc = s.CreatedAtUtc,
-                        LastUsedAtUtc = s.LastUsedAtUtc
-                    })
-                    .ToList(),
-                SignedPreKeys = model.SignedPreKeys
-                    .Select(s => new SimulatedSignedPreKeyDto
-                    {
-                        SignedPreKeyId = s.SignedPreKeyId,
-                        PrivateEcPrivateKey = s.PrivateEcPrivateKey,
-                        PublicSpki = s.PublicSpki
-                    })
-                    .ToList(),
-                OutboundInvites = model.OutboundInvites
-                    .Select(i => new SimulatedOutboundInviteDto
-                    {
-                        CorrelationId = i.CorrelationId,
-                        SignedPreKeyPrivateEcPrivateKey = i.SignedPreKeyPrivateEcPrivateKey
-                    })
-                    .ToList(),
-                PendingInviteHandshakeResponses = model.PendingInviteHandshakeResponses
-                    .Select(r => new SimulatedPendingInviteHandshakeResponseDto
-                    {
-                        CorrelationId = r.CorrelationId,
-                        ResponseBytes = r.ResponseBytes
-                    })
-                    .ToList()
-            };
-
-            await _store.SaveAsync(_state, cancellationToken).ConfigureAwait(false);
-        }
-        finally
-        {
-            _peerGate.Release();
-        }
-    }
-
-    private static bool EnsureIdentityPublicKeyHash(SimulatedPeerDto peer)
-    {
-        if (peer is null) throw new ArgumentNullException(nameof(peer));
-
-        var spki = peer.ReverseSignalKeys?.IdentitySigningKeySpki;
-        if (spki is null || spki.Length == 0)
-        {
-            return false;
-        }
-
-        var computed = SHA256.HashData(spki);
-        if (peer.IdentityPublicKeyHash is not null && peer.IdentityPublicKeyHash.AsSpan().SequenceEqual(computed))
-        {
-            return false;
-        }
-
-        peer.IdentityPublicKeyHash = computed;
-        return true;
-    }
-
-    private static string AllocateSimulatorLoopbackHost(Guid peerId)
-    {
-        // Stable mapping of Guid -> 127.77.X.Y. Keep within 1..254 to avoid network/broadcast edge cases.
-        using var sha = SHA256.Create();
-        var hash = sha.ComputeHash(peerId.ToByteArray());
-        var x = (byte)((hash[0] % 254) + 1);
-        var y = (byte)((hash[1] % 254) + 1);
-        return $"127.77.{x}.{y}";
+        _saveTrigger.OnNext(Unit.Default);
+        await Task.CompletedTask.ConfigureAwait(false);
     }
 
 }

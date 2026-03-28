@@ -1,8 +1,9 @@
-using System.Collections.ObjectModel;
-using System.Windows;
+using Desktop.Wpf.Features.Simulator.Models;
 using Microsoft.Extensions.Logging;
+using ObservableCollections;
 using Percolator.Cryptography;
 using R3;
+using System.Linq;
 
 namespace Desktop.Wpf.Features.Simulator;
 
@@ -18,16 +19,21 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
 
     private DisposableBag _bag;
 
-    private readonly ObservableCollection<SimulatedRelayQueueItemViewModel> _items = new();
-    public ReadOnlyObservableCollection<SimulatedRelayQueueItemViewModel> Items { get; }
+    private readonly Desktop.Wpf.Features.Simulator.Models.SimulatedRelayModel _relay;
 
-    public ObservableCollection<ActiveSessionTagViewModel> ActiveSessionTags { get; }
+    private readonly ISynchronizedView<SimulatedPeerModel, ActiveSessionTargetOption> _availableTargets;
+    private readonly NotifyCollectionChangedSynchronizedViewList<ActiveSessionTargetOption> _availableTargetsNotify;
 
-    public ObservableCollection<ActiveSessionTargetOption> AvailableActiveSessionTargets { get; }
+    private readonly ISynchronizedView<Guid, ActiveSessionTagViewModel> _activeSessionTags;
+    private readonly NotifyCollectionChangedSynchronizedViewList<ActiveSessionTagViewModel> _activeSessionTagsNotify;
 
     public BindableReactiveProperty<Guid?> SelectedActiveSessionPeerId { get; }
 
     public ReactiveCommand<Unit> AddActiveSessionCommand { get; }
+
+    public NotifyCollectionChangedSynchronizedViewList<ActiveSessionTagViewModel> ActiveSessionTags => _activeSessionTagsNotify;
+
+    public NotifyCollectionChangedSynchronizedViewList<ActiveSessionTargetOption> AvailableActiveSessionTargets => _availableTargetsNotify;
 
     public SimulatedRelayQueuePanelViewModel(
         Guid relayHostPeerId,
@@ -48,35 +54,64 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
         _diagnostics = diagnostics;
         _logger = logger;
 
-        Items = new ReadOnlyObservableCollection<SimulatedRelayQueueItemViewModel>(_items);
+        _relay = _state.Relays.FirstOrDefault(r => r.RelayHostPeerId == _relayHostPeerId)
+            ?? throw new InvalidOperationException($"No relay exists for host peer id {_relayHostPeerId}");
 
-        ActiveSessionTags = new ObservableCollection<ActiveSessionTagViewModel>();
-        AvailableActiveSessionTargets = new ObservableCollection<ActiveSessionTargetOption>();
+        _availableTargets = _state.Peers
+            .CreateView(p => new ActiveSessionTargetOption(p.PeerId, _peerNameById(p.PeerId)))
+            .AddTo(ref _bag);
+        _availableTargets.AttachFilter((p, _) => p.PeerId != _relayHostPeerId);
+        _availableTargetsNotify = _availableTargets.ToNotifyCollectionChanged().AddTo(ref _bag);
+
+        var hostPeer = _state.Peers.FirstOrDefault(p => p.PeerId == _relayHostPeerId)
+            ?? throw new InvalidOperationException($"No peer exists for relay host id {_relayHostPeerId}");
+        _activeSessionTags = hostPeer.RelayActiveSessionsPeerIds
+            .CreateView(CreateActiveSessionTag)
+            .AddTo(ref _bag);
+        _activeSessionTagsNotify = _activeSessionTags.ToNotifyCollectionChanged().AddTo(ref _bag);
         SelectedActiveSessionPeerId = new BindableReactiveProperty<Guid?>(null).AddTo(ref _bag);
 
-        QueueCount = new BindableReactiveProperty<int>(0).AddTo(ref _bag);
+        var synchronizedQueueView = _relay.MessageQueue
+            .CreateView(kvp =>
+            {
+                var m = kvp.Value;
+                return new SimulatedRelayQueueItemViewModel(
+                    relayHostPeerId: _relayHostPeerId,
+                    ackId: m.AckId,
+                    enqueuedUtc: m.EnqueuedUtc,
+                    debugType: m.DebugType,
+                    targetPkh: m is InboundRelayMessage inbound ? inbound.TargetPkh : null,
+                    opaqueBytes: m.OpaqueBytes,
+                    peerNameById: _peerNameById);
+            })
+            .AddTo(ref _bag);
+
+        QueueItems = synchronizedQueueView.ToNotifyCollectionChanged().AddTo(ref _bag);
+
+        QueueCount = synchronizedQueueView
+            .ObserveCountChanged()
+            .ToBindableReactiveProperty(synchronizedQueueView.Count)
+            .AddTo(ref _bag);
+
         AutoDeliver = new BindableReactiveProperty<bool>(false).AddTo(ref _bag);
 
-        var addSession = SelectedActiveSessionPeerId
-            .Select(x => x.HasValue)
-            .ToReactiveCommand<Unit>(_ => { });
-        addSession
+        AddActiveSessionCommand = new ReactiveCommand<Unit>().AddTo(ref _bag);
+        AddActiveSessionCommand
             .AsObservable()
             .SubscribeAwait(async (_, ct) => await ExecuteAddActiveSessionAsync(ct), AwaitOperation.Drop)
             .AddTo(ref _bag);
-        AddActiveSessionCommand = addSession.AddTo(ref _bag);
 
-        var refresh = Observable.Return(true).ToReactiveCommand<Unit>(_ => { });
-        refresh.AsObservable().SubscribeAwait(async (_, ct) => await RefreshAsync(ct), AwaitOperation.Drop).AddTo(ref _bag);
-        RefreshCommand = refresh.AddTo(ref _bag);
+        NextCommand = new ReactiveCommand<Unit>().AddTo(ref _bag);
+        NextCommand
+            .AsObservable()
+            .SubscribeAwait(async (_, ct) => await DeliverNextAsync(ct), AwaitOperation.Drop)
+            .AddTo(ref _bag);
 
-        var next = Observable.Return(true).ToReactiveCommand<Unit>(_ => { });
-        next.AsObservable().SubscribeAwait(async (_, ct) => await DeliverNextAsync(ct), AwaitOperation.Drop).AddTo(ref _bag);
-        NextCommand = next.AddTo(ref _bag);
-
-        var all = Observable.Return(true).ToReactiveCommand<Unit>(_ => { });
-        all.AsObservable().SubscribeAwait(async (_, ct) => await DeliverAllAsync(ct), AwaitOperation.Drop).AddTo(ref _bag);
-        AllCommand = all.AddTo(ref _bag);
+        AllCommand = new ReactiveCommand<Unit>().AddTo(ref _bag);
+        AllCommand
+            .AsObservable()
+            .SubscribeAwait(async (_, ct) => await DeliverAllAsync(ct), AwaitOperation.Drop)
+            .AddTo(ref _bag);
 
         DeliverItemCommand = new ReactiveCommand<SimulatedRelayQueueItemViewModel>().AddTo(ref _bag);
         DeliverItemCommand
@@ -138,6 +173,8 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
 
     public string RelayHostName { get; }
 
+    public NotifyCollectionChangedSynchronizedViewList<SimulatedRelayQueueItemViewModel> QueueItems { get; }
+
     public BindableReactiveProperty<int> QueueCount { get; }
 
     public BindableReactiveProperty<bool> AutoDeliver { get; }
@@ -149,10 +186,7 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
         if (!peerId.HasValue) return;
 
         await _state.AddRelayActiveSessionAsync(_relayHostPeerId, peerId.Value, ct).ConfigureAwait(false);
-        await RefreshAsync(ct).ConfigureAwait(false);
     }
-
-    public ReactiveCommand<Unit> RefreshCommand { get; }
 
     public ReactiveCommand<Unit> NextCommand { get; }
 
@@ -168,118 +202,22 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
 
     public ReactiveCommand<SimulatedRelayQueueItemViewModel> CorruptCommand { get; }
 
-    public async Task RefreshAsync(CancellationToken ct = default)
-    {
-        ct.ThrowIfCancellationRequested();
-
-        var dispatcher = Application.Current?.Dispatcher;
-        if (dispatcher is null || dispatcher.CheckAccess())
-        {
-            RefreshOnUi();
-            return;
-        }
-
-        await dispatcher.InvokeAsync(RefreshOnUi);
-
-        void RefreshOnUi()
-        {
-            ct.ThrowIfCancellationRequested();
-
-            var relay = _state.Relays.FirstOrDefault(r => r.RelayHostPeerId == _relayHostPeerId);
-            var ordered = relay is null
-                ? new List<(Guid AckId, DateTimeOffset EnqueuedUtc, string? DebugType, byte[]? TargetPkh, byte[] OpaqueBytes)>()
-                : relay.UpstreamToMain.Values
-                    .Select(x => (
-                        AckId: x.AckId,
-                        EnqueuedUtc: x.EnqueuedUtc,
-                        DebugType: x.DebugType,
-                        TargetPkh: (byte[]?)null,
-                        OpaqueBytes: x.OpaqueBytes))
-                    .Concat(relay.DownstreamToPeers.Values.Select(x => (
-                        AckId: x.AckId,
-                        EnqueuedUtc: x.EnqueuedUtc,
-                        DebugType: x.DebugType,
-                        TargetPkh: (byte[]?)x.TargetPkh,
-                        OpaqueBytes: x.OpaqueBytes)))
-                    .OrderBy(x => x.EnqueuedUtc)
-                    .ToList();
-
-            _items.Clear();
-            foreach (var i in ordered)
-            {
-                _items.Add(new SimulatedRelayQueueItemViewModel(
-                    relayHostPeerId: _relayHostPeerId,
-                    ackId: i.AckId,
-                    enqueuedUtc: i.EnqueuedUtc,
-                    debugType: i.DebugType,
-                    targetPkh: i.TargetPkh,
-                    opaqueBytes: i.OpaqueBytes,
-                    peerNameById: _peerNameById));
-            }
-
-            QueueCount.Value = ordered.Count;
-
-            ActiveSessionTags.Clear();
-            AvailableActiveSessionTargets.Clear();
-
-            var relayHost = _state.Peers.FirstOrDefault(p => p.PeerId == _relayHostPeerId);
-            var active = relayHost is null
-                ? new HashSet<Guid>()
-                : relayHost.RelayActiveSessionsPeerIds.Distinct().ToHashSet();
-            foreach (var other in _state.Peers.Where(p => p.PeerId != _relayHostPeerId))
-            {
-                AvailableActiveSessionTargets.Add(new ActiveSessionTargetOption(other.PeerId, _peerNameById(other.PeerId)));
-            }
-
-            foreach (var peerId in active)
-            {
-                ActiveSessionTags.Add(new ActiveSessionTagViewModel(
-                    peerId: peerId,
-                    display: _peerNameById(peerId),
-                    onRemove: async removeCt =>
-                    {
-                        await _state.RemoveRelayActiveSessionAsync(_relayHostPeerId, peerId, removeCt).ConfigureAwait(false);
-                        await RefreshAsync(removeCt).ConfigureAwait(false);
-                    }));
-            }
-        }
-    }
-
     public async Task DeliverNextAsync(CancellationToken ct)
     {
-        await RefreshAsync(ct).ConfigureAwait(false);
-
-        var next = await GetNextItemOnUiAsync(ct).ConfigureAwait(false);
+        var next = QueueItems.FirstOrDefault();
         if (next is null) return;
         await DeliverItemAsync(next, ct).ConfigureAwait(false);
     }
 
     public async Task DeliverAllAsync(CancellationToken ct)
     {
-        while (true)
-        {
-            ct.ThrowIfCancellationRequested();
-            await RefreshAsync(ct).ConfigureAwait(false);
-            var next = await GetNextItemOnUiAsync(ct).ConfigureAwait(false);
-            if (next is null) return;
-            await DeliverItemAsync(next, ct).ConfigureAwait(false);
-        }
-    }
+        var itemsToDeliver = QueueItems.ToList();
 
-    private Task<SimulatedRelayQueueItemViewModel?> GetNextItemOnUiAsync(CancellationToken ct)
-    {
-        var dispatcher = Application.Current?.Dispatcher;
-        if (dispatcher is null || dispatcher.CheckAccess())
+        foreach (var item in itemsToDeliver)
         {
             ct.ThrowIfCancellationRequested();
-            return Task.FromResult(_items.FirstOrDefault());
+            await DeliverItemAsync(item, ct).ConfigureAwait(false);
         }
-
-        return dispatcher.InvokeAsync(() =>
-        {
-            ct.ThrowIfCancellationRequested();
-            return _items.FirstOrDefault();
-        }).Task;
     }
 
     private async Task DeliverItemAsync(SimulatedRelayQueueItemViewModel item, CancellationToken ct)
@@ -308,8 +246,6 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
                     $"Relay deliver -> main: {(item.DebugType ?? "opaque")}",
                     relayHostPeerId: _relayHostPeerId,
                     ackId: item.AckId);
-
-                await RefreshAsync(ct).ConfigureAwait(false);
                 return;
             }
 
@@ -344,8 +280,6 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
                     peerId: recipientPeerId.Value,
                     relayHostPeerId: _relayHostPeerId,
                     ackId: item.AckId);
-
-                await RefreshAsync(ct).ConfigureAwait(false);
                 return;
             }
 
@@ -367,35 +301,41 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
             $"Relay drop: {(item.DebugType ?? "opaque")}",
             relayHostPeerId: _relayHostPeerId,
             ackId: item.AckId);
-
-        await RefreshAsync(ct).ConfigureAwait(false);
     }
 
     private async Task MoveItemAsync(SimulatedRelayQueueItemViewModel item, int delta, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
         _ = await _state.MoveRelayMessageByAckIdAsync(relayHostPeerId: _relayHostPeerId, ackId: item.AckId, delta: delta, cancellationToken: ct).ConfigureAwait(false);
-        await RefreshAsync(ct).ConfigureAwait(false);
     }
 
     private async Task CorruptItemAsync(SimulatedRelayQueueItemViewModel item, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
         _ = await _state.CorruptRelayMessageByAckIdAsync(relayHostPeerId: _relayHostPeerId, ackId: item.AckId, cancellationToken: ct).ConfigureAwait(false);
-        await RefreshAsync(ct).ConfigureAwait(false);
     }
 
     public void Dispose()
     {
+        foreach (var tag in ActiveSessionTags)
+        {
+            tag.Dispose();
+        }
         _bag.Dispose();
-        QueueCount.Dispose();
-        AutoDeliver.Dispose();
-        SelectedActiveSessionPeerId.Dispose();
     }
 
-    public sealed class ActiveSessionTagViewModel
+    private ActiveSessionTagViewModel CreateActiveSessionTag(Guid peerId)
+    {
+        return new ActiveSessionTagViewModel(
+            peerId: peerId,
+            display: _peerNameById(peerId),
+            onRemove: removeCt => _state.RemoveRelayActiveSessionAsync(_relayHostPeerId, peerId, removeCt));
+    }
+
+    public sealed class ActiveSessionTagViewModel : IDisposable
     {
         private readonly Func<CancellationToken, Task> _remove;
+        private readonly IDisposable _removeSubscription;
 
         public ActiveSessionTagViewModel(Guid peerId, string display, Func<CancellationToken, Task> onRemove)
         {
@@ -403,9 +343,10 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
             Display = display;
             _remove = onRemove;
 
-            var cmd = Observable.Return(true).ToReactiveCommand<Unit>(_ => { });
-            cmd.AsObservable().SubscribeAwait(async (_, ct) => await _remove(ct), AwaitOperation.Drop);
-            RemoveCommand = cmd;
+            RemoveCommand = new ReactiveCommand<Unit>();
+            _removeSubscription = RemoveCommand
+                .AsObservable()
+                .SubscribeAwait(async (_, ct) => await _remove(ct), AwaitOperation.Drop);
         }
 
         public Guid PeerId { get; }
@@ -413,6 +354,12 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
         public string Display { get; }
 
         public ReactiveCommand<Unit> RemoveCommand { get; }
+
+        public void Dispose()
+        {
+            _removeSubscription.Dispose();
+            RemoveCommand.Dispose();
+        }
     }
 
     public sealed class ActiveSessionTargetOption

@@ -1,60 +1,89 @@
 using ObservableCollections;
 using R3;
+using System;
+using System.Linq;
 
 namespace Desktop.Wpf.Features.Simulator.Models;
+
+public abstract record RelayMessage(
+    Guid AckId,
+    byte[] OpaqueBytes,
+    DateTimeOffset EnqueuedUtc,
+    string? DebugType);
 
 public sealed record OutboundRelayMessage(
     Guid AckId,
     byte[] OpaqueBytes,
     DateTimeOffset EnqueuedUtc,
-    string? DebugType);
+    string? DebugType)
+    : RelayMessage(AckId, OpaqueBytes, EnqueuedUtc, DebugType);
 
 public sealed record InboundRelayMessage(
     Guid AckId,
     byte[] TargetPkh,
     byte[] OpaqueBytes,
     DateTimeOffset EnqueuedUtc,
-    string? DebugType);
+    string? DebugType)
+    : RelayMessage(AckId, OpaqueBytes, EnqueuedUtc, DebugType);
 
 public sealed class SimulatedRelayModel : IDisposable
 {
-    private readonly ObservableDictionary<Guid, OutboundRelayMessage> _upstreamToMain = new();
-    private readonly ObservableDictionary<Guid, InboundRelayMessage> _downstreamToPeers = new();
-
     public SimulatedRelayModel(Guid relayHostPeerId)
     {
         RelayHostPeerId = relayHostPeerId;
-        UpstreamToMain = _upstreamToMain;
-        DownstreamToPeers = _downstreamToPeers;
     }
 
     public Guid RelayHostPeerId { get; }
 
-    public IReadOnlyObservableDictionary<Guid, OutboundRelayMessage> UpstreamToMain { get; }
+    public ObservableDictionary<Guid, RelayMessage> MessageQueue { get; } = new();
 
-    public IReadOnlyObservableDictionary<Guid, InboundRelayMessage> DownstreamToPeers { get; }
-
-    public void EnqueueForMain(OutboundRelayMessage message)
+    public void EnqueueMessage(RelayMessage message)
     {
         if (message is null) throw new ArgumentNullException(nameof(message));
 
-        _upstreamToMain[message.AckId] = message;
-    }
+        if (message is InboundRelayMessage inbound)
+        {
+            if (inbound.TargetPkh is null) throw new ArgumentNullException(nameof(inbound.TargetPkh));
+            if (inbound.TargetPkh.Length == 0) throw new ArgumentException("TargetPkh must be non-empty", nameof(message));
+        }
 
-    public void EnqueueForPeer(InboundRelayMessage message)
-    {
-        if (message is null) throw new ArgumentNullException(nameof(message));
-        if (message.TargetPkh is null) throw new ArgumentNullException(nameof(message.TargetPkh));
-        if (message.TargetPkh.Length == 0) throw new ArgumentException("TargetPkh must be non-empty", nameof(message));
-
-        _downstreamToPeers[message.AckId] = message;
+        MessageQueue[message.AckId] = message;
     }
 
     public bool RemoveMessage(Guid ackId)
     {
-        var removedMain = _upstreamToMain.Remove(ackId);
-        var removedPeer = _downstreamToPeers.Remove(ackId);
-        return removedMain || removedPeer;
+        return MessageQueue.Remove(ackId);
+    }
+
+    public RelayStateSnapshot Freeze()
+    {
+        var upstream = MessageQueue
+            .Select(kvp => kvp.Value)
+            .OfType<OutboundRelayMessage>()
+            .OrderBy(x => x.EnqueuedUtc)
+            .Select(x => new OutboundRelayMessageSnapshot(
+                AckId: x.AckId,
+                OpaqueBytes: x.OpaqueBytes.ToArray(),
+                EnqueuedUtc: x.EnqueuedUtc,
+                DebugType: x.DebugType))
+            .ToList();
+
+        var downstream = MessageQueue
+            .Select(kvp => kvp.Value)
+            .OfType<InboundRelayMessage>()
+            .OrderBy(x => x.EnqueuedUtc)
+            .Select(x => new InboundRelayMessageSnapshot(
+                AckId: x.AckId,
+                TargetPkh: x.TargetPkh.ToArray(),
+                OpaqueBytes: x.OpaqueBytes.ToArray(),
+                EnqueuedUtc: x.EnqueuedUtc,
+                DebugType: x.DebugType))
+            .ToList();
+
+        return new RelayStateSnapshot(
+            RelayHostPeerId: RelayHostPeerId,
+            UpstreamToMain: upstream,
+            DownstreamToPeers: downstream);
     }
 
     public void Dispose()

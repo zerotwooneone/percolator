@@ -17,6 +17,7 @@ using Percolator.Cryptography;
 using Percolator.Cryptography.Primitives;
 using Desktop.Wpf.Features.Simulator.Protocol;
 using Desktop.Wpf.Features.Sessions;
+using Desktop.Wpf.Features.Simulator.Models;
 
 namespace Desktop.Wpf.Tests;
 
@@ -25,25 +26,28 @@ public sealed class SimulatedPeerRuntimeFinalizeRelayedTests
 {
     private sealed class InMemoryRepository : ISimulatorStateRepository
     {
-        public SimulatorStateDto? State { get; set; }
+        public IReadOnlyList<SimulatedPeerModel> Peers { get; set; } = Array.Empty<SimulatedPeerModel>();
+        public SimulatedRelayModel? Relay { get; set; }
 
-        public RelayPersistenceDto? Relay { get; set; }
+        public IReadOnlyList<PeerStateSnapshot> SavedPeers { get; private set; } = Array.Empty<PeerStateSnapshot>();
 
-        public Task<SimulatorStateDto?> LoadAsync(CancellationToken cancellationToken = default)
-            => Task.FromResult(State);
+        public RelayStateSnapshot? SavedRelay { get; private set; }
 
-        public Task SaveAsync(SimulatorStateDto state, CancellationToken cancellationToken = default)
+        public Task<IReadOnlyList<SimulatedPeerModel>> LoadPeersAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(Peers);
+
+        public Task SavePeersAsync(IReadOnlyList<PeerStateSnapshot> peers, CancellationToken cancellationToken = default)
         {
-            State = state;
+            SavedPeers = peers;
             return Task.CompletedTask;
         }
 
-        public Task<RelayPersistenceDto?> LoadRelayAsync(Guid relayHostPeerId, CancellationToken cancellationToken = default)
+        public Task<SimulatedRelayModel?> LoadRelayAsync(Guid relayHostPeerId, CancellationToken cancellationToken = default)
             => Task.FromResult(Relay);
 
-        public Task SaveRelayAsync(RelayPersistenceDto relay, CancellationToken cancellationToken = default)
+        public Task SaveRelayAsync(RelayStateSnapshot relay, CancellationToken cancellationToken = default)
         {
-            Relay = relay;
+            SavedRelay = relay;
             return Task.CompletedTask;
         }
     }
@@ -74,47 +78,26 @@ public sealed class SimulatedPeerRuntimeFinalizeRelayedTests
         var pending = new SimulatedPeerPendingInbox();
         var repo = new InMemoryRepository
         {
-            State = new SimulatorStateDto
+            Peers = new[]
             {
-                Version = 1,
-                Peers =
-                {
-                    new SimulatedPeerDto
-                    {
-                        PeerId = inviterPeerId,
-                        DisplayName = "inviter",
-                        IsOnline = true,
-                        ReverseSignalKeys = new SimulatedPeerReverseSignalKeysDto
-                        {
-                            IdentitySigningKeySpki = inviterIdentitySpki,
-                            IdentitySigningKeyPrivateKeyEcPrivateKey = inviterIdentityPriv
-                        },
-                        RuntimeStore = new SimulatedPeerRuntimeStoreDto
-                        {
-                            OutboundInvites = new List<SimulatedOutboundInviteDto>
-                            {
-                                new SimulatedOutboundInviteDto
-                                {
-                                    CorrelationId = correlation,
-                                    SignedPreKeyPrivateEcPrivateKey = inviterSignedPreKeyPriv
-                                }
-                            }
-                        }
-                    },
-                    new SimulatedPeerDto
-                    {
-                        PeerId = acceptorPeerId,
-                        DisplayName = "acceptor",
-                        IsOnline = true,
-                        ReverseSignalKeys = new SimulatedPeerReverseSignalKeysDto
-                        {
-                            IdentitySigningKeySpki = acceptorIdentitySpki,
-                            IdentitySigningKeyPrivateKeyEcPrivateKey = acceptorIdentityPriv
-                        }
-                    }
-                }
+                new SimulatedPeerModel(
+                    peerId: inviterPeerId,
+                    displayName: "inviter",
+                    isOnline: true,
+                    isRelayCapable: false,
+                    identitySigningKeySpki: inviterIdentitySpki,
+                    identitySigningKeyPrivateKeyEcPrivateKey: inviterIdentityPriv),
+                new SimulatedPeerModel(
+                    peerId: acceptorPeerId,
+                    displayName: "acceptor",
+                    isOnline: true,
+                    isRelayCapable: false,
+                    identitySigningKeySpki: acceptorIdentitySpki,
+                    identitySigningKeyPrivateKeyEcPrivateKey: acceptorIdentityPriv)
             }
         };
+
+        repo.Peers[0].OutboundInvitesMutable.Add(new SimulatedOutboundInviteModel(correlation, inviterSignedPreKeyPriv));
 
         var services = new ServiceCollection();
         services.AddSingleton<IClock, SystemClock>();
@@ -122,13 +105,11 @@ public sealed class SimulatedPeerRuntimeFinalizeRelayedTests
         var scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
 
         var engine = new SignalProtocolEngine(new SystemClock());
-        var keys = new SimulatedPeerKeyFactory();
         var options = Options.Create(new TransportOptions { GrpcPort = 5002 });
         var diagnostics = new SimulatorDiagnosticsService();
 
         var state = new SimulatorStateService(
             store: repo,
-            keys: keys,
             transportOptions: options,
             diagnostics: diagnostics,
             pending: pending,
@@ -178,6 +159,8 @@ public sealed class SimulatedPeerRuntimeFinalizeRelayedTests
             cancellationToken: CancellationToken.None);
 
         finalizedSid.Should().NotBeNull();
+
+        repo.Peers.Single(p => p.PeerId == inviterPeerId).Sessions.Count.Should().Be(1);
         pending.TryGetInviteHandshakeResponse(inviterPeerId, correlation, out _).Should().BeFalse();
     }
 }

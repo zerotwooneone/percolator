@@ -1,10 +1,17 @@
 using System;
 using System.IO;
+using System.Linq;
+using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
 using Desktop.Wpf.Features.Simulator;
 using FluentAssertions;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using NUnit.Framework;
+using Percolator.Application.Configuration;
+using Percolator.Cryptography;
+using Percolator.Cryptography.Primitives;
 
 namespace Desktop.Wpf.Tests;
 
@@ -17,59 +24,78 @@ public sealed class SimulatorStateStoreTests
         var tmp = Path.Combine(Path.GetTempPath(), $"percolator-sim-{Guid.NewGuid():N}.json");
         try
         {
-            var store = new JsonSimulatorStateRepository(overridePath: tmp);
-            var state = new SimulatorStateDto
-            {
-                Version = 1
-            };
             var peerId = Guid.NewGuid();
-            state.Peers.Add(new SimulatedPeerDto
-            {
-                PeerId = peerId,
-                DisplayName = "Alice",
-                IsOnline = true,
-                PublishedKeysToPeerIds = { Guid.NewGuid(), Guid.NewGuid() },
-                RuntimeStore = new SimulatedPeerRuntimeStoreDto
-                {
-                    Version = 1,
-                    SignedPreKeys =
-                    {
-                        new SimulatedSignedPreKeyDto
-                        {
-                            SignedPreKeyId = Guid.NewGuid(),
-                            PrivateEcPrivateKey = new byte[] { 1, 2, 3 },
-                            PublicSpki = new byte[] { 4, 5, 6 }
-                        }
-                    },
-                    Sessions =
-                    {
-                        new SimulatedSecureSessionDto
-                        {
-                            SessionId = Guid.NewGuid(),
-                            RemotePeerId = Guid.NewGuid(),
-                            ProtocolVersion = 1,
-                            RootKey = new byte[] { 9, 9, 9 },
-                            SendCounter = 7,
-                            RecvCounter = 8,
-                            PrevChainLength = 0,
-                            CreatedAtUtc = DateTimeOffset.UtcNow,
-                            LastUsedAtUtc = DateTimeOffset.UtcNow
-                        }
-                    }
-                }
-            });
 
-            await store.SaveAsync(state, CancellationToken.None);
+            var services = new ServiceCollection();
+            services.AddSingleton<IClock>(new TestClock(DateTimeOffset.UtcNow));
+            var sp = services.BuildServiceProvider();
+            var scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
 
-            var loaded = await store.LoadAsync(CancellationToken.None);
-            loaded.Should().NotBeNull();
-            loaded!.Peers.Should().HaveCount(1);
-            loaded.Peers[0].DisplayName.Should().Be("Alice");
-            loaded.Peers[0].PeerId.Should().Be(peerId);
-            loaded.Peers[0].PublishedKeysToPeerIds.Should().HaveCount(2);
-            loaded.Peers[0].RuntimeStore.Should().NotBeNull();
-            loaded.Peers[0].RuntimeStore.SignedPreKeys.Should().HaveCount(1);
-            loaded.Peers[0].RuntimeStore.Sessions.Should().HaveCount(1);
+            var options = Options.Create(new TransportOptions { SimulatorPort = 5002 });
+            var keys = new SimulatedPeerKeyFactory();
+
+            var store = new JsonSimulatorStateRepository(
+                overridePath: tmp,
+                transportOptions: options,
+                keys: keys,
+                scopeFactory: scopeFactory);
+
+            var remotePeerId = Guid.NewGuid();
+            var signedPreKeyId = Guid.NewGuid();
+
+            using var identity = System.Security.Cryptography.ECDiffieHellman.Create(System.Security.Cryptography.ECCurve.NamedCurves.nistP256);
+            var priv = identity.ExportECPrivateKey();
+            var spki = identity.ExportSubjectPublicKeyInfo();
+
+            var model = new SimulatedPeerModel(
+                peerId: peerId,
+                displayName: "Alice",
+                isOnline: true,
+                isRelayCapable: false,
+                identitySigningKeySpki: spki,
+                identitySigningKeyPrivateKeyEcPrivateKey: priv);
+
+            model.PublishedKeysToPeerIdsMutable.Add(Guid.NewGuid());
+            model.PublishedKeysToPeerIdsMutable.Add(Guid.NewGuid());
+
+            model.SignedPreKeysMutable.Add(new SimulatedSignedPreKeyModel(
+                SignedPreKeyId: signedPreKeyId,
+                PrivateEcPrivateKey: new byte[] { 1, 2, 3 },
+                PublicSpki: new byte[] { 4, 5, 6 }));
+
+            var ratchet = new RatchetState(
+                rootKey: new RootKey(new byte[] { 9, 9, 9 }),
+                sendingChainKey: null,
+                sendingCounter: 7,
+                receivingChainKey: null,
+                receivingCounter: 8,
+                previousChainLength: 0,
+                remoteRatchetKey: null,
+                dhRatchetPrivateKey: null,
+                skippedKeyLimit: 1000);
+
+            var session = SecureSession.Create(
+                id: new SessionId(Guid.NewGuid()),
+                remotePeerId: new PeerId(remotePeerId),
+                protocolVersion: new ProtocolVersion(1),
+                state: ratchet,
+                sessionCrypto: new AeadSessionCrypto(),
+                clock: new TestClock(DateTimeOffset.UtcNow));
+
+            model.PublishedKeysToPeerIdsMutable.Add(Guid.NewGuid());
+            model.SignedPreKeysMutable.Add(new SimulatedSignedPreKeyModel(Guid.NewGuid(), RandomNumberGenerator.GetBytes(32), RandomNumberGenerator.GetBytes(32)));
+            model.SessionsMutable[session.Id] = session;
+
+            await store.SavePeersAsync(new[] { model.Freeze() }, CancellationToken.None);
+
+            var loaded = await store.LoadPeersAsync(CancellationToken.None);
+            loaded.Should().HaveCount(1);
+            var loadedPeer = loaded.Single();
+            loadedPeer.PeerId.Should().Be(peerId);
+            loadedPeer.DisplayName.CurrentValue.Should().Be("Alice");
+            loadedPeer.PublishedKeysToPeerIds.Should().HaveCount(3);
+            loadedPeer.SignedPreKeys.Should().HaveCount(2);
+            loadedPeer.Sessions.Count.Should().Be(1);
         }
         finally
         {

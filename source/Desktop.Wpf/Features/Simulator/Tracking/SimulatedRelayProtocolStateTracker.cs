@@ -13,15 +13,10 @@ public sealed class SimulatedRelayProtocolStateTracker : IDisposable
     {
         Relay = relay ?? throw new ArgumentNullException(nameof(relay));
 
-        relay.UpstreamToMain.ObserveAdd().Subscribe(_ => _dirty.OnNext(Unit.Default)).AddTo(ref _bag);
-        relay.UpstreamToMain.ObserveRemove().Subscribe(_ => _dirty.OnNext(Unit.Default)).AddTo(ref _bag);
-        relay.UpstreamToMain.ObserveReplace().Subscribe(_ => _dirty.OnNext(Unit.Default)).AddTo(ref _bag);
-        relay.UpstreamToMain.ObserveReset().Subscribe(_ => _dirty.OnNext(Unit.Default)).AddTo(ref _bag);
-
-        relay.DownstreamToPeers.ObserveAdd().Subscribe(_ => _dirty.OnNext(Unit.Default)).AddTo(ref _bag);
-        relay.DownstreamToPeers.ObserveRemove().Subscribe(_ => _dirty.OnNext(Unit.Default)).AddTo(ref _bag);
-        relay.DownstreamToPeers.ObserveReplace().Subscribe(_ => _dirty.OnNext(Unit.Default)).AddTo(ref _bag);
-        relay.DownstreamToPeers.ObserveReset().Subscribe(_ => _dirty.OnNext(Unit.Default)).AddTo(ref _bag);
+        relay.MessageQueue.ObserveAdd().Subscribe(_ => _dirty.OnNext(Unit.Default)).AddTo(ref _bag);
+        relay.MessageQueue.ObserveRemove().Subscribe(_ => _dirty.OnNext(Unit.Default)).AddTo(ref _bag);
+        relay.MessageQueue.ObserveReplace().Subscribe(_ => _dirty.OnNext(Unit.Default)).AddTo(ref _bag);
+        relay.MessageQueue.ObserveReset().Subscribe(_ => _dirty.OnNext(Unit.Default)).AddTo(ref _bag);
     }
 
     public SimulatedRelayModel Relay { get; }

@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Collections.ObjectModel;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text.Json;
@@ -12,6 +11,8 @@ using FluentAssertions;
 using Moq;
 using NUnit.Framework;
 using ObservableCollections;
+using Percolator.Cryptography;
+using Percolator.Cryptography.Primitives;
 
 namespace Desktop.Wpf.Tests;
 
@@ -24,31 +25,6 @@ public sealed class SimulatorDiagnosticBundleBuilderTests
         // Arrange
         var relayHostId = Guid.NewGuid();
         var peerId = Guid.NewGuid();
-
-        var peers = new ObservableCollection<SimulatedPeerDto>
-        {
-            new()
-            {
-                PeerId = relayHostId,
-                DisplayName = "Relay",
-                IsOnline = true,
-                Relay = new SimulatedPeerRelayStateDto
-                {
-                    IsRelayCapable = true,
-                    OpaqueQueue = new SimulatedRelayOpaqueQueueDto { Items = new() },
-                    PreKeyStore = new SimulatedRelayPreKeyStoreDto { PublishedBundles = new() }
-                },
-                ReverseSignalKeys = new SimulatedPeerReverseSignalKeysDto()
-            },
-            new()
-            {
-                PeerId = peerId,
-                DisplayName = "Peer",
-                IsOnline = true,
-                Relay = new SimulatedPeerRelayStateDto { IsRelayCapable = false },
-                ReverseSignalKeys = new SimulatedPeerReverseSignalKeysDto()
-            }
-        };
 
         var state = new Mock<ISimulatorStateService>(MockBehavior.Strict);
 
@@ -64,34 +40,21 @@ public sealed class SimulatorDiagnosticBundleBuilderTests
 
         state.SetupGet(s => s.Peers).Returns(peersList);
         state.SetupGet(s => s.Relays).Returns(relaysList);
-        state.Setup(s => s.TryGetRuntimeStoreAsync(relayHostId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new SimulatedPeerRuntimeStoreDto
-            {
-                Version = 1,
-                Sessions = new()
-                {
-                    new SimulatedSecureSessionDto
-                    {
-                        SessionId = Guid.NewGuid(),
-                        RemotePeerId = peerId,
-                        ProtocolVersion = 1,
-                        RootKey = new byte[] { 1, 2, 3 },
-                        SendCounter = 7,
-                        RecvCounter = 8,
-                        SkippedKeysCount = 0,
-                        CreatedAtUtc = DateTimeOffset.UtcNow,
-                        LastUsedAtUtc = DateTimeOffset.UtcNow
-                    }
-                }
-            });
-        state.Setup(s => s.TryGetRuntimeStoreAsync(peerId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync((SimulatedPeerRuntimeStoreDto?)null);
         state.Setup(s => s.TryGetPeerIdByIdentityPkhAsync(It.IsAny<byte[]>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Guid?)null);
         state.Setup(s => s.AddRelayActiveSessionAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
         state.Setup(s => s.RemoveRelayActiveSessionAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
+
+        var sessionId = new SessionId(Guid.NewGuid());
+        var remotePeerId = new PeerId(peerId);
+        var stateRoot = new RootKey(new byte[] { 1, 2, 3 });
+        var ratchet = new RatchetState(stateRoot, sendingChainKey: null, sendingCounter: 7, receivingChainKey: null, receivingCounter: 8, previousChainLength: 0, remoteRatchetKey: null, dhRatchetPrivateKey: null, skippedKeyLimit: 1000);
+        var crypto = new AeadSessionCrypto();
+        var clock = new TestClock(DateTimeOffset.UtcNow);
+        var session = SecureSession.Create(sessionId, remotePeerId, new ProtocolVersion(1), ratchet, crypto, clock);
+        peersList[0].SessionsMutable[session.Id] = session;
 
         var diagnostics = new SimulatorDiagnosticsService();
         diagnostics.Emit(SimulatorDiagnosticEventType.PeerCreated, "Peer created", peerId: peerId);

@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Windows;
+using Percolator.Cryptography;
 using R3;
 
 namespace Desktop.Wpf.Features.Simulator;
@@ -88,12 +89,10 @@ public sealed class SimulatorSessionsTabViewModel : IDisposable
         foreach (var p in peers)
         {
             ct.ThrowIfCancellationRequested();
-            var store = await _state.TryGetRuntimeStoreAsync(p.PeerId, ct).ConfigureAwait(false);
-            if (store is null) continue;
-
-            var session = store.Sessions
+            var session = p.Sessions
+                .Select(kv => kv.Value)
                 .OrderByDescending(s => s.LastUsedAtUtc)
-                .FirstOrDefault(s => s.RemotePeerId == mainPeerId);
+                .FirstOrDefault(s => s.RemotePeerId.Value == mainPeerId);
 
             if (session is null) continue;
 
@@ -123,19 +122,19 @@ public sealed class SimulatorSessionsTabViewModel : IDisposable
         }
     }
 
-    private SimulatorSessionCardViewModel CreateCard(SimulatedPeerModel peer, SimulatedSecureSessionDto session)
+    private SimulatorSessionCardViewModel CreateCard(SimulatedPeerModel peer, SecureSession session)
     {
         var name = peer.DisplayName.CurrentValue is { } n && !string.IsNullOrWhiteSpace(n)
             ? n
             : peer.PeerId.ToString()[..8];
-        var rootHash = TruncateHex(session.RootKey);
+        var rootHash = TruncateHex(session.State.RootKey.Value);
 
         return new SimulatorSessionCardViewModel(
             peerName: name,
             peerIdShort: peer.PeerId.ToString()[..8],
             rootKeyHash: rootHash,
-            sendingCounter: session.SendCounter,
-            receivingCounter: session.RecvCounter,
+            sendingCounter: session.State.SendingCounter,
+            receivingCounter: session.State.ReceivingCounter,
             skippedKeysCount: session.SkippedKeysCount);
     }
 

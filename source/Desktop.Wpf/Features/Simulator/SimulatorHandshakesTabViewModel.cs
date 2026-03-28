@@ -1,8 +1,8 @@
 using System.Collections.Generic;
-using System.Collections.ObjectModel;
 using System.Collections.Specialized;
-using System.Windows;
+using Desktop.Wpf.Shared.Mvvm;
 using Microsoft.Extensions.Options;
+using ObservableCollections;
 using Percolator.Application.Configuration;
 using R3;
 
@@ -10,6 +10,8 @@ namespace Desktop.Wpf.Features.Simulator;
 
 public sealed class SimulatorHandshakesTabViewModel : IDisposable
 {
+    private readonly IUiDispatcher _ui;
+
     private readonly ISimulatedPeerDirectory _directory;
     private readonly IOptions<TransportOptions> _transportOptions;
     private readonly Percolator.Application.Identity.ActiveIdentityContext _active;
@@ -17,10 +19,16 @@ public sealed class SimulatorHandshakesTabViewModel : IDisposable
     private readonly ISimulatorDiagnosticsService _diagnostics;
     private readonly ISimulatorMainIngressService _mainIngress;
 
-    private readonly ObservableCollection<SimulatedHandshakeStateMachineCardViewModel> _cards = new();
-    private readonly ObservableCollection<RelayHostOption> _relayHosts = new();
+    private ISynchronizedView<SimulatedPeerModel, SimulatedHandshakeStateMachineCardViewModel>? _cards;
+    private NotifyCollectionChangedSynchronizedViewList<SimulatedHandshakeStateMachineCardViewModel>? _cardsNotify;
 
-    private readonly Dictionary<Guid, IDisposable> _relayCapableSubscriptions = new();
+    private readonly ObservableList<RelayHostOption> _relayHosts = new();
+    private NotifyCollectionChangedSynchronizedViewList<RelayHostOption>? _relayHostsNotify;
+
+    private readonly object _peerRelaySubGate = new();
+    private IReadOnlyDictionary<Guid, IDisposable> _peerRelaySubs = new Dictionary<Guid, IDisposable>();
+
+    private DisposableBag _bag;
 
     public SimulatorHandshakesTabViewModel(
         ISimulatedPeerDirectory directory,
@@ -28,8 +36,10 @@ public sealed class SimulatorHandshakesTabViewModel : IDisposable
         IOptions<TransportOptions> transportOptions,
         Percolator.Application.Identity.ActiveIdentityContext active,
         ISimulatorStateService state,
-        ISimulatorDiagnosticsService diagnostics)
+        ISimulatorDiagnosticsService diagnostics,
+        IUiDispatcher ui)
     {
+        _ui = ui;
         _directory = directory;
         _mainIngress = mainIngress;
         _transportOptions = transportOptions;
@@ -37,63 +47,109 @@ public sealed class SimulatorHandshakesTabViewModel : IDisposable
         _state = state;
         _diagnostics = diagnostics;
 
-        Cards = new ReadOnlyObservableCollection<SimulatedHandshakeStateMachineCardViewModel>(_cards);
-        RelayHosts = new ReadOnlyObservableCollection<RelayHostOption>(_relayHosts);
-        SelectedRelayHostPeerId = new BindableReactiveProperty<Guid?>(null);
+        SelectedRelayHostPeerId = new BindableReactiveProperty<Guid?>(null).AddTo(ref _bag);
 
-        _ = InitializeAsync();
+        _relayHostsNotify = _relayHosts.ToNotifyCollectionChanged();
     }
 
     public sealed record RelayHostOption(Guid PeerId, string DisplayName);
 
-    public ReadOnlyObservableCollection<SimulatedHandshakeStateMachineCardViewModel> Cards { get; }
+    public NotifyCollectionChangedSynchronizedViewList<SimulatedHandshakeStateMachineCardViewModel> Cards
+        => _cardsNotify ?? throw new InvalidOperationException("ViewModel not initialized.");
 
-    public ReadOnlyObservableCollection<RelayHostOption> RelayHosts { get; }
+    public NotifyCollectionChangedSynchronizedViewList<RelayHostOption> RelayHosts
+        => _relayHostsNotify ?? throw new InvalidOperationException("ViewModel not initialized.");
 
     public BindableReactiveProperty<Guid?> SelectedRelayHostPeerId { get; }
 
-    private async Task InitializeAsync(CancellationToken ct = default)
+    public async Task InitializeAsync(CancellationToken ct = default)
     {
         await _state.InitializeAsync(ct).ConfigureAwait(false);
         await _directory.InitializeAsync(ct).ConfigureAwait(false);
 
-        var dispatcher = Application.Current?.Dispatcher;
-        if (dispatcher is null || dispatcher.CheckAccess())
-        {
-            ResetCards();
-            RefreshRelayHosts();
-            HookDirectory();
-        }
-        else
-        {
-            await dispatcher.InvokeAsync(() =>
-            {
-                ResetCards();
-                RefreshRelayHosts();
-                HookDirectory();
-            });
-        }
+        InitializeCardsView();
+        HookRelayHosts();
     }
 
-    private void ResetCards()
+    private void InitializeCardsView()
     {
-        foreach (var c in _cards)
-        {
-            c.Dispose();
-        }
-        _cards.Clear();
+        _cardsNotify?.Dispose();
+        _cardsNotify = null;
+        _cards?.Dispose();
+        _cards = null;
 
-        foreach (var p in _directory.Peers)
+        _cards = _state.Peers
+            .CreateView(CreateCard)
+            .AddTo(ref _bag);
+        _cardsNotify = _cards.ToNotifyCollectionChanged();
+    }
+
+    private void HookRelayHosts()
+    {
+        var peers = _state.Peers;
+        var peersChanged = Observable.Merge(
+            peers.ObserveAdd().Select(static _ => Unit.Default),
+            peers.ObserveRemove().Select(static _ => Unit.Default),
+            peers.ObserveReplace().Select(static _ => Unit.Default),
+            peers.ObserveReset().Select(static _ => Unit.Default));
+
+        peersChanged
+            .SubscribeAwait(async (_, ct) =>
+            {
+                await _ui.InvokeAsync(RewirePeerRelaySubscriptionsOnUi, ct).ConfigureAwait(false);
+                await _ui.InvokeAsync(RebuildRelayHostsOnUi, ct).ConfigureAwait(false);
+            }, AwaitOperation.Drop)
+            .AddTo(ref _bag);
+
+        _ = _ui.InvokeAsync(() =>
         {
-            _cards.Add(CreateCard(p));
+            RewirePeerRelaySubscriptionsOnUi();
+            RebuildRelayHostsOnUi();
+        }, CancellationToken.None);
+    }
+
+    private void RewirePeerRelaySubscriptionsOnUi()
+    {
+        IReadOnlyDictionary<Guid, IDisposable> prev;
+        lock (_peerRelaySubGate)
+        {
+            prev = _peerRelaySubs;
+            _peerRelaySubs = new Dictionary<Guid, IDisposable>();
+        }
+
+        foreach (var d in prev.Values)
+        {
+            try { d.Dispose(); } catch { }
+        }
+
+        var next = new Dictionary<Guid, IDisposable>();
+        foreach (var peer in _state.Peers)
+        {
+            // RelayHosts needs to update when IsRelayCapable toggles or display name changes.
+            var relayChanged = peer.IsRelayCapable.DistinctUntilChanged().Select(static _ => Unit.Default);
+            var nameChanged = peer.DisplayName.DistinctUntilChanged().Select(static _ => Unit.Default);
+
+            var sub = Observable.Merge(relayChanged, nameChanged)
+                .SubscribeAwait(async (_, __) => await _ui.InvokeAsync(RebuildRelayHostsOnUi, CancellationToken.None));
+
+            next[peer.PeerId] = sub;
+        }
+
+        lock (_peerRelaySubGate)
+        {
+            foreach (var d in _peerRelaySubs.Values)
+            {
+                try { d.Dispose(); } catch { }
+            }
+            _peerRelaySubs = next;
         }
     }
 
-    private void RefreshRelayHosts()
+    private void RebuildRelayHostsOnUi()
     {
         _relayHosts.Clear();
 
-        foreach (var p in _directory.Peers.Where(x => x.IsRelayCapable.CurrentValue))
+        foreach (var p in _state.Peers.Where(static x => x.IsRelayCapable.CurrentValue))
         {
             var name = p.DisplayName.CurrentValue;
             name = string.IsNullOrWhiteSpace(name) ? p.PeerId.ToString()[..8] : name;
@@ -104,80 +160,6 @@ public sealed class SimulatorHandshakesTabViewModel : IDisposable
             && _relayHosts.All(x => x.PeerId != SelectedRelayHostPeerId.Value.Value))
         {
             SelectedRelayHostPeerId.Value = null;
-        }
-    }
-
-    private void HookDirectory()
-    {
-        var notify = (INotifyCollectionChanged)_directory.Peers;
-        notify.CollectionChanged -= OnPeersChanged;
-        notify.CollectionChanged += OnPeersChanged;
-
-        WireRelayCapabilitySubscriptions();
-    }
-
-    private void WireRelayCapabilitySubscriptions()
-    {
-        foreach (var d in _relayCapableSubscriptions.Values)
-        {
-            d.Dispose();
-        }
-        _relayCapableSubscriptions.Clear();
-
-        foreach (var peer in _directory.Peers)
-        {
-            var sub = peer.IsRelayCapable
-                .DistinctUntilChanged()
-                .Subscribe(_ => OnRelayCapabilityChanged());
-            _relayCapableSubscriptions[peer.PeerId] = sub;
-        }
-    }
-
-    private void OnRelayCapabilityChanged()
-    {
-        if (!Application.Current.Dispatcher.CheckAccess())
-        {
-            _ = Application.Current.Dispatcher.InvokeAsync(OnRelayCapabilityChanged);
-            return;
-        }
-
-        RefreshRelayHosts();
-    }
-
-    private void OnPeersChanged(object? sender, NotifyCollectionChangedEventArgs e)
-    {
-        if (!Application.Current.Dispatcher.CheckAccess())
-        {
-            _ = Application.Current.Dispatcher.InvokeAsync(() => OnPeersChanged(sender, e));
-            return;
-        }
-
-        WireRelayCapabilitySubscriptions();
-        RefreshRelayHosts();
-
-        if (e.Action is NotifyCollectionChangedAction.Reset)
-        {
-            ResetCards();
-            return;
-        }
-
-        if (e.OldItems is not null)
-        {
-            foreach (var oldItem in e.OldItems.OfType<SimulatedPeerModel>())
-            {
-                var existing = _cards.FirstOrDefault(x => x.PeerId == oldItem.PeerId);
-                if (existing is null) continue;
-                _cards.Remove(existing);
-                existing.Dispose();
-            }
-        }
-
-        if (e.NewItems is not null)
-        {
-            foreach (var newItem in e.NewItems.OfType<SimulatedPeerModel>())
-            {
-                _cards.Add(CreateCard(newItem));
-            }
         }
     }
 
@@ -195,25 +177,23 @@ public sealed class SimulatorHandshakesTabViewModel : IDisposable
 
     public void Dispose()
     {
-        foreach (var c in _cards)
-        {
-            c.Dispose();
-        }
-        _cards.Clear();
+        _cardsNotify?.Dispose();
+        _cardsNotify = null;
+        _cards?.Dispose();
+        _cards = null;
 
-        try
+        _relayHostsNotify?.Dispose();
+        _relayHostsNotify = null;
+
+        lock (_peerRelaySubGate)
         {
-            var notify = (INotifyCollectionChanged)_directory.Peers;
-            notify.CollectionChanged -= OnPeersChanged;
-        }
-        catch
-        {
+            foreach (var d in _peerRelaySubs.Values)
+            {
+                try { d.Dispose(); } catch { }
+            }
+            _peerRelaySubs = new Dictionary<Guid, IDisposable>();
         }
 
-        foreach (var d in _relayCapableSubscriptions.Values)
-        {
-            d.Dispose();
-        }
-        _relayCapableSubscriptions.Clear();
+        _bag.Dispose();
     }
 }

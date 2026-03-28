@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Collections.ObjectModel;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Threading;
@@ -28,34 +27,6 @@ public sealed class SimulatorDiagnosticsTabViewModelFilteringTests
         var peerA = Guid.NewGuid();
         var peerB = Guid.NewGuid();
         var relay = Guid.NewGuid();
-
-        var peers = new ObservableCollection<SimulatedPeerDto>
-        {
-            new()
-            {
-                PeerId = peerA,
-                DisplayName = "A",
-                IsOnline = true,
-                Relay = new SimulatedPeerRelayStateDto { IsRelayCapable = false },
-                ReverseSignalKeys = new SimulatedPeerReverseSignalKeysDto()
-            },
-            new()
-            {
-                PeerId = relay,
-                DisplayName = "Relay",
-                IsOnline = true,
-                Relay = new SimulatedPeerRelayStateDto { IsRelayCapable = true },
-                ReverseSignalKeys = new SimulatedPeerReverseSignalKeysDto()
-            },
-            new()
-            {
-                PeerId = peerB,
-                DisplayName = "B",
-                IsOnline = true,
-                Relay = new SimulatedPeerRelayStateDto { IsRelayCapable = false },
-                ReverseSignalKeys = new SimulatedPeerReverseSignalKeysDto()
-            }
-        };
 
         var state = new Mock<ISimulatorStateService>(MockBehavior.Strict);
 

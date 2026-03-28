@@ -1,10 +1,12 @@
 using System;
+using System.Collections.Generic;
 using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
 using Desktop.Wpf.Features.Simulator;
 using Desktop.Wpf.Features.Simulator.Protocol;
 using Desktop.Wpf.Features.Sessions;
+using Desktop.Wpf.Features.Simulator.Models;
 using FluentAssertions;
 using NUnit.Framework;
 using Microsoft.Extensions.DependencyInjection;
@@ -19,25 +21,28 @@ public sealed class SimulatedPeerRuntimeServiceDecryptFailureDiagnosticsTests
 {
     private sealed class InMemoryRepository : ISimulatorStateRepository
     {
-        public SimulatorStateDto? State { get; set; }
+        public IReadOnlyList<SimulatedPeerModel> Peers { get; set; } = Array.Empty<SimulatedPeerModel>();
+        public SimulatedRelayModel? Relay { get; set; }
 
-        public RelayPersistenceDto? Relay { get; set; }
+        public IReadOnlyList<PeerStateSnapshot> SavedPeers { get; private set; } = Array.Empty<PeerStateSnapshot>();
 
-        public Task<SimulatorStateDto?> LoadAsync(CancellationToken cancellationToken = default)
-            => Task.FromResult(State);
+        public RelayStateSnapshot? SavedRelay { get; private set; }
 
-        public Task SaveAsync(SimulatorStateDto state, CancellationToken cancellationToken = default)
+        public Task<IReadOnlyList<SimulatedPeerModel>> LoadPeersAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(Peers);
+
+        public Task SavePeersAsync(IReadOnlyList<PeerStateSnapshot> peers, CancellationToken cancellationToken = default)
         {
-            State = state;
+            SavedPeers = peers;
             return Task.CompletedTask;
         }
 
-        public Task<RelayPersistenceDto?> LoadRelayAsync(Guid relayHostPeerId, CancellationToken cancellationToken = default)
+        public Task<SimulatedRelayModel?> LoadRelayAsync(Guid relayHostPeerId, CancellationToken cancellationToken = default)
             => Task.FromResult(Relay);
 
-        public Task SaveRelayAsync(RelayPersistenceDto relay, CancellationToken cancellationToken = default)
+        public Task SaveRelayAsync(RelayStateSnapshot relay, CancellationToken cancellationToken = default)
         {
-            Relay = relay;
+            SavedRelay = relay;
             return Task.CompletedTask;
         }
     }
@@ -56,23 +61,15 @@ public sealed class SimulatedPeerRuntimeServiceDecryptFailureDiagnosticsTests
 
         var repo = new InMemoryRepository
         {
-            State = new SimulatorStateDto
+            Peers = new[]
             {
-                Version = 1,
-                Peers =
-                {
-                    new SimulatedPeerDto
-                    {
-                        PeerId = peerId,
-                        DisplayName = "peer",
-                        IsOnline = true,
-                        ReverseSignalKeys = new SimulatedPeerReverseSignalKeysDto
-                        {
-                            IdentitySigningKeySpki = identitySpki,
-                            IdentitySigningKeyPrivateKeyEcPrivateKey = identityPriv
-                        }
-                    }
-                }
+                new SimulatedPeerModel(
+                    peerId: peerId,
+                    displayName: "peer",
+                    isOnline: true,
+                    isRelayCapable: false,
+                    identitySigningKeySpki: identitySpki,
+                    identitySigningKeyPrivateKeyEcPrivateKey: identityPriv)
             }
         };
 
@@ -81,12 +78,11 @@ public sealed class SimulatedPeerRuntimeServiceDecryptFailureDiagnosticsTests
         var sp = services.BuildServiceProvider();
         var scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
 
-        var keys = new SimulatedPeerKeyFactory();
         var options = Options.Create(new TransportOptions { GrpcPort = 5002 });
         var pending = new SimulatedPeerPendingInbox();
         var engine = new SignalProtocolEngine(new SystemClock());
 
-        var sut = new SimulatorStateService(repo, keys, options, diagnostics, pending, scopeFactory, engine);
+        var sut = new SimulatorStateService(repo, options, diagnostics, pending, scopeFactory, engine);
         await sut.InitializeAsync(CancellationToken.None);
 
         var sessionId = new SessionId(Guid.NewGuid());

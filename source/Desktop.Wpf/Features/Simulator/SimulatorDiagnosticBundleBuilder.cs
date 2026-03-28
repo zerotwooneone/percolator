@@ -48,7 +48,7 @@ public sealed class SimulatorDiagnosticBundleBuilder : ISimulatorDiagnosticBundl
                 RelayHostPeerId = p.PeerId,
                 RelayHostName = string.IsNullOrWhiteSpace(p.DisplayName.CurrentValue) ? p.PeerId.ToString()[..8] : p.DisplayName.CurrentValue,
                 OpaqueQueueCount = relayByHostId.TryGetValue(p.PeerId, out var relay)
-                    ? relay.UpstreamToMain.Count + relay.DownstreamToPeers.Count
+                    ? relay.MessageQueue.Count
                     : 0,
                 PreKeyBundleCount = 0
             })
@@ -73,20 +73,18 @@ public sealed class SimulatorDiagnosticBundleBuilder : ISimulatorDiagnosticBundl
         foreach (var p in peerModels)
         {
             ct.ThrowIfCancellationRequested();
-            var store = await _state.TryGetRuntimeStoreAsync(p.PeerId, ct).ConfigureAwait(false);
-            if (store is null) continue;
-
-            foreach (var s in store.Sessions)
+            await Task.CompletedTask.ConfigureAwait(false);
+            foreach (var s in p.Sessions.Select(kv => kv.Value))
             {
                 sessionSummaries.Add(new
                 {
                     LocalPeerId = p.PeerId,
-                    RemotePeerId = s.RemotePeerId,
-                    s.SessionId,
-                    s.ProtocolVersion,
-                    SendCounter = s.SendCounter,
-                    RecvCounter = s.RecvCounter,
-                    s.SkippedKeysCount,
+                    RemotePeerId = s.RemotePeerId.Value,
+                    SessionId = s.Id.Value,
+                    ProtocolVersion = s.ProtocolVersion.Value,
+                    SendCounter = s.State.SendingCounter,
+                    RecvCounter = s.State.ReceivingCounter,
+                    SkippedKeysCount = s.SkippedKeysCount,
                     s.CreatedAtUtc,
                     s.LastUsedAtUtc
                 });

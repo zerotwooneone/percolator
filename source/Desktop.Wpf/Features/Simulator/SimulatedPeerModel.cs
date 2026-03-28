@@ -2,6 +2,8 @@ using ObservableCollections;
 using Percolator.Cryptography;
 using Percolator.Cryptography.Primitives;
 using R3;
+using System;
+using System.Linq;
 
 namespace Desktop.Wpf.Features.Simulator;
 
@@ -34,6 +36,9 @@ public sealed class SimulatedPeerModel : IDisposable
     private readonly ObservableList<Guid> _publishedKeysToPeerIds;
     private readonly ObservableList<Guid> _relayActiveSessionsPeerIds;
 
+    public ObservableList<Guid> KnownPeerIds { get; }
+    public ObservableList<SimulatedPublishedPreKeyBundleModel> PublishedPreKeyBundles { get; }
+
     private readonly ObservableDictionary<SessionId, SecureSession> _sessions;
     private readonly ObservableList<SimulatedSignedPreKeyModel> _signedPreKeys;
     private readonly ObservableList<SimulatedOutboundInviteModel> _outboundInvites;
@@ -63,7 +68,9 @@ public sealed class SimulatedPeerModel : IDisposable
         List<Guid>? relayActiveSessionsPeerIds = null,
         List<SimulatorHandshakeAttemptState>? handshakeAttempts = null,
         byte[]? pendingStandardHandshakeToMainResponderPublicKeyHash = null,
-        Guid? pendingStandardHandshakeToMainTemporarySessionId = null)
+        Guid? pendingStandardHandshakeToMainTemporarySessionId = null,
+        List<Guid>? knownPeerIds = null,
+        List<SimulatedPublishedPreKeyBundleModel>? publishedPreKeyBundles = null)
     {
         PeerId = peerId;
 
@@ -113,6 +120,12 @@ public sealed class SimulatedPeerModel : IDisposable
 
         _relayActiveSessionsPeerIds = new ObservableList<Guid>();
         _relayActiveSessionsPeerIds.AddRange(relayActiveSessionsPeerIds ?? new());
+
+        KnownPeerIds = new ObservableList<Guid>();
+        KnownPeerIds.AddRange(knownPeerIds ?? new());
+
+        PublishedPreKeyBundles = new ObservableList<SimulatedPublishedPreKeyBundleModel>();
+        PublishedPreKeyBundles.AddRange(publishedPreKeyBundles ?? new());
 
         _sessions = new ObservableDictionary<SessionId, SecureSession>();
         _signedPreKeys = new ObservableList<SimulatedSignedPreKeyModel>();
@@ -297,6 +310,77 @@ public sealed class SimulatedPeerModel : IDisposable
     public void SetAttemptNotUntil(Guid correlationId, DateTimeOffset? notUntilUtc)
         => UpdateAttempt(correlationId, a => a with { NotUntilUtc = notUntilUtc });
 
+    public PeerStateSnapshot Freeze()
+    {
+        return new PeerStateSnapshot(
+            PeerId: PeerId,
+            DisplayName: _displayName.Value,
+            IsOnline: IsOnline.Value,
+            IsRelayCapable: IsRelayCapable.Value,
+            IdentitySigningKeySpki: IdentitySigningKeySpki.ToArray(),
+            IdentitySigningKeyPrivateKeyEcPrivateKey: IdentitySigningKeyPrivateKeyEcPrivateKey.ToArray(),
+            ConnectionMode: _connectionMode.Value,
+            Host: _host.Value,
+            Port: _port.Value,
+            RelayPeerId: _relayPeerId.Value,
+            UiState: _uiState.Value,
+            PendingCorrelationId: _pendingCorrelationId.Value,
+            TargetPublicKeyHash: _targetPublicKeyHash.Value?.ToArray(),
+            SelectedRouteMode: _selectedRouteMode.Value,
+            DirectEndpoint: _directEndpoint.Value,
+            RelayHostPeerId: _relayHostPeerId.Value,
+            Phase: _phase.Value,
+            NotUntilUtc: _notUntilUtc.Value,
+            LastError: _lastError.Value,
+            PublishedKeysToPeerIds: _publishedKeysToPeerIds.ToList(),
+            RelayActiveSessionsPeerIds: _relayActiveSessionsPeerIds.ToList(),
+            HandshakeAttempts: _handshakeAttempts.ToList(),
+            PendingStandardHandshakeToMainResponderPublicKeyHash: _pendingStandardHandshakeToMainResponderPublicKeyHash.Value?.ToArray(),
+            PendingStandardHandshakeToMainTemporarySessionId: _pendingStandardHandshakeToMainTemporarySessionId.Value,
+            KnownPeerIds: KnownPeerIds.ToList(),
+            PublishedPreKeyBundles: PublishedPreKeyBundles
+                .Select(b => new PublishedPreKeyBundleSnapshot(
+                    RecipientPublicKeyHash: b.RecipientPublicKeyHash.ToArray(),
+                    LogicalOwnerPeerId: b.LogicalOwnerPeerId,
+                    BundleBytes: b.BundleBytes.ToArray(),
+                    ExpiresUtc: b.ExpiresUtc))
+                .ToList(),
+            Sessions: _sessions
+                .Select(kv => kv.Value)
+                .Select(s => new SessionSnapshot(
+                    SessionId: s.Id.Value,
+                    RemotePeerId: s.RemotePeerId.Value,
+                    ProtocolVersion: s.ProtocolVersion.Value,
+                    RootKey: s.State.RootKey.Value.ToArray(),
+                    SendChainKey: s.State.SendingChainKey?.Value?.ToArray(),
+                    SendCounter: s.State.SendingCounter,
+                    RecvChainKey: s.State.ReceivingChainKey?.Value?.ToArray(),
+                    RecvCounter: s.State.ReceivingCounter,
+                    PrevChainLength: s.State.PreviousChainLength,
+                    RemoteRatchetKey: s.State.RemoteRatchetKey?.Value?.ToArray(),
+                    DhRatchetPrivateKey: s.State.DhRatchetPrivateKey?.Value?.ToArray(),
+                    SkippedKeysCount: s.SkippedKeysCount,
+                    CreatedAtUtc: s.CreatedAtUtc,
+                    LastUsedAtUtc: s.LastUsedAtUtc))
+                .ToList(),
+            SignedPreKeys: _signedPreKeys
+                .Select(x => new SignedPreKeySnapshot(
+                    SignedPreKeyId: x.SignedPreKeyId,
+                    PrivateEcPrivateKey: x.PrivateEcPrivateKey.ToArray(),
+                    PublicSpki: x.PublicSpki.ToArray()))
+                .ToList(),
+            OutboundInvites: _outboundInvites
+                .Select(x => new OutboundInviteSnapshot(
+                    CorrelationId: x.CorrelationId,
+                    SignedPreKeyPrivateEcPrivateKey: x.SignedPreKeyPrivateEcPrivateKey.ToArray()))
+                .ToList(),
+            PendingInviteHandshakeResponses: _pendingInviteHandshakeResponses
+                .Select(x => new PendingInviteHandshakeResponseSnapshot(
+                    CorrelationId: x.CorrelationId,
+                    ResponseBytes: x.ResponseBytes.ToArray()))
+                .ToList());
+    }
+
     private void UpdateAttempt(
         Guid correlationId,
         Func<SimulatorHandshakeAttemptState, SimulatorHandshakeAttemptState> update)
@@ -369,3 +453,9 @@ public sealed record SimulatedSignedPreKeyModel(Guid SignedPreKeyId, byte[] Priv
 public sealed record SimulatedOutboundInviteModel(Guid CorrelationId, byte[] SignedPreKeyPrivateEcPrivateKey);
 
 public sealed record SimulatedPendingInviteHandshakeResponseModel(Guid CorrelationId, byte[] ResponseBytes);
+
+public sealed record SimulatedPublishedPreKeyBundleModel(
+    byte[] RecipientPublicKeyHash,
+    Guid LogicalOwnerPeerId,
+    byte[] BundleBytes,
+    DateTimeOffset ExpiresUtc);

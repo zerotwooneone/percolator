@@ -1,7 +1,6 @@
-using System.Collections.ObjectModel;
-using System.Collections.Specialized;
-using System.Windows;
+using Desktop.Wpf.Shared.Mvvm;
 using Microsoft.Extensions.Logging;
+using ObservableCollections;
 using Percolator.Application.Network;
 using Percolator.Cryptography;
 using R3;
@@ -10,6 +9,8 @@ namespace Desktop.Wpf.Features.Simulator;
 
 public sealed class SimulatorRelayTabViewModel : IDisposable
 {
+    private readonly IUiDispatcher _ui;
+
     private readonly ISimulatorStateService _state;
     private readonly ISimulatedPeerDirectory _directory;
     private readonly PercolatorMessageService _messageService;
@@ -24,12 +25,10 @@ public sealed class SimulatorRelayTabViewModel : IDisposable
 
     private static readonly Guid MainNodeSentinelPeerId = new("88880000-0000-0000-0000-000000000000");
 
+    private ISynchronizedView<Desktop.Wpf.Features.Simulator.Models.SimulatedRelayModel, SimulatedRelayQueuePanelViewModel>? _relayPanels;
+    private NotifyCollectionChangedSynchronizedViewList<SimulatedRelayQueuePanelViewModel>? _relayPanelsNotify;
+
     private DisposableBag _bag;
-
-    private readonly Dictionary<Guid, IDisposable> _relayCapableSubscriptions = new();
-
-    private readonly ObservableCollection<SimulatedRelayQueuePanelViewModel> _relayPanels = new();
-    public ReadOnlyObservableCollection<SimulatedRelayQueuePanelViewModel> RelayPanels { get; }
 
     public SimulatorRelayTabViewModel(
         ISimulatorStateService state,
@@ -38,9 +37,11 @@ public sealed class SimulatorRelayTabViewModel : IDisposable
         ISimulatorRelayDeliveryService delivery,
         ISimulatorDiagnosticsService diagnostics,
         Percolator.Application.Identity.ActiveIdentityContext active,
+        IUiDispatcher ui,
         ILogger<SimulatorRelayTabViewModel> logger,
         ILoggerFactory loggerFactory)
     {
+        _ui = ui;
         _state = state;
         _directory = directory;
         _messageService = messageService;
@@ -50,47 +51,50 @@ public sealed class SimulatorRelayTabViewModel : IDisposable
         _logger = logger;
         _loggerFactory = loggerFactory;
 
-        RelayPanels = new ReadOnlyObservableCollection<SimulatedRelayQueuePanelViewModel>(_relayPanels);
-
         GlobalAutoRelayAll = new BindableReactiveProperty<bool>(false).AddTo(ref _bag);
         GlobalAutoRelayAll
             .Skip(1)
             .Subscribe(_ => ApplyGlobalAutoRelay())
             .AddTo(ref _bag);
 
-        var refresh = Observable.Return(true).ToReactiveCommand<Unit>(_ => { });
-        refresh.AsObservable().SubscribeAwait(async (_, ct) => await RefreshAsync(ct), AwaitOperation.Drop).AddTo(ref _bag);
-        RefreshCommand = refresh.AddTo(ref _bag);
-
-        _ = InitializeAsync();
+        RefreshCommand = new ReactiveCommand<Unit>().AddTo(ref _bag);
+        RefreshCommand
+            .AsObservable()
+            .SubscribeAwait(async (_, ct) => await RefreshAsync(ct), AwaitOperation.Drop)
+            .AddTo(ref _bag);
     }
 
     public BindableReactiveProperty<bool> GlobalAutoRelayAll { get; }
 
     public ReactiveCommand<Unit> RefreshCommand { get; }
 
-    private async Task InitializeAsync(CancellationToken ct = default)
+    public NotifyCollectionChangedSynchronizedViewList<SimulatedRelayQueuePanelViewModel> RelayPanels
+        => _relayPanelsNotify ?? throw new InvalidOperationException("ViewModel not initialized.");
+
+    public async Task InitializeAsync(CancellationToken ct = default)
     {
+        await _state.InitializeAsync(ct).ConfigureAwait(false);
         await _directory.InitializeAsync(ct).ConfigureAwait(false);
 
-        var dispatcher = Application.Current?.Dispatcher;
-        if (dispatcher is null || dispatcher.CheckAccess())
-        {
-            ResetPanels();
-            HookPeers();
-        }
-        else
-        {
-            await dispatcher.InvokeAsync(() =>
-            {
-                ResetPanels();
-                HookPeers();
-            });
-        }
+        InitializePanelsView();
+        ApplyGlobalAutoRelay();
 
         await RefreshAsync(ct).ConfigureAwait(false);
 
         StartAutoDeliverLoop();
+    }
+
+    private void InitializePanelsView()
+    {
+        _relayPanelsNotify?.Dispose();
+        _relayPanelsNotify = null;
+        _relayPanels?.Dispose();
+        _relayPanels = null;
+
+        _relayPanels = _state.Relays
+            .CreateView(CreatePanel)
+            .AddTo(ref _bag);
+        _relayPanelsNotify = _relayPanels.ToNotifyCollectionChanged();
     }
 
     private void StartAutoDeliverLoop()
@@ -129,7 +133,7 @@ public sealed class SimulatorRelayTabViewModel : IDisposable
                 await Task.Delay(TimeSpan.FromMilliseconds(350), ct).ConfigureAwait(false);
 
                 // Snapshot to avoid concurrent modification while iterating.
-                var panels = _relayPanels.ToList();
+                var panels = RelayPanels.ToList();
                 foreach (var panel in panels)
                 {
                     ct.ThrowIfCancellationRequested();
@@ -156,76 +160,10 @@ public sealed class SimulatorRelayTabViewModel : IDisposable
         }
     }
 
-    private void HookPeers()
+    private SimulatedRelayQueuePanelViewModel CreatePanel(Desktop.Wpf.Features.Simulator.Models.SimulatedRelayModel relay)
     {
-        var notify = (INotifyCollectionChanged)_directory.Peers;
-        notify.CollectionChanged -= OnPeersChanged;
-        notify.CollectionChanged += OnPeersChanged;
-
-        WireRelayCapabilitySubscriptions();
-    }
-
-    private void WireRelayCapabilitySubscriptions()
-    {
-        foreach (var d in _relayCapableSubscriptions.Values)
-        {
-            d.Dispose();
-        }
-        _relayCapableSubscriptions.Clear();
-
-        foreach (var peer in _directory.Peers)
-        {
-            var sub = peer.IsRelayCapable
-                .DistinctUntilChanged()
-                .Subscribe(_ => OnRelayCapabilityChanged());
-
-            _relayCapableSubscriptions[peer.PeerId] = sub;
-        }
-    }
-
-    private void OnRelayCapabilityChanged()
-    {
-        if (!Application.Current.Dispatcher.CheckAccess())
-        {
-            _ = Application.Current.Dispatcher.InvokeAsync(OnRelayCapabilityChanged);
-            return;
-        }
-
-        ResetPanels();
-        _ = RefreshAsync(CancellationToken.None);
-    }
-
-    private void OnPeersChanged(object? sender, NotifyCollectionChangedEventArgs e)
-    {
-        if (!Application.Current.Dispatcher.CheckAccess())
-        {
-            _ = Application.Current.Dispatcher.InvokeAsync(() => OnPeersChanged(sender, e));
-            return;
-        }
-
-        WireRelayCapabilitySubscriptions();
-        ResetPanels();
-        _ = RefreshAsync(CancellationToken.None);
-    }
-
-    private void ResetPanels()
-    {
-        foreach (var p in _relayPanels)
-        {
-            p.Dispose();
-        }
-        _relayPanels.Clear();
-
-        foreach (var relay in _directory.Peers.Where(p => p.IsRelayCapable.CurrentValue))
-        {
-            _relayPanels.Add(CreatePanel(relay.PeerId, PeerNameById(relay.PeerId)));
-        }
-
-        ApplyGlobalAutoRelay();
-    }
-
-    private SimulatedRelayQueuePanelViewModel CreatePanel(Guid relayHostPeerId, string relayHostName)
-    {
+        var relayHostPeerId = relay.RelayHostPeerId;
+        var relayHostName = PeerNameById(relayHostPeerId);
         return new SimulatedRelayQueuePanelViewModel(
             relayHostPeerId: relayHostPeerId,
             relayHostName: relayHostName,
@@ -240,7 +178,9 @@ public sealed class SimulatorRelayTabViewModel : IDisposable
     private void ApplyGlobalAutoRelay()
     {
         var enabled = GlobalAutoRelayAll.Value;
-        foreach (var p in _relayPanels)
+        if (_relayPanelsNotify is null) return;
+
+        foreach (var p in _relayPanelsNotify)
         {
             p.AutoDeliver.Value = enabled;
         }
@@ -249,56 +189,33 @@ public sealed class SimulatorRelayTabViewModel : IDisposable
     public async Task RefreshAsync(CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
-
-        foreach (var p in _relayPanels)
-        {
-            ct.ThrowIfCancellationRequested();
-            await p.RefreshAsync(ct).ConfigureAwait(false);
-        }
-
-        // Auto-deliver (nice-to-have for later: background loop).
-        // For now: if toggled on, user still advances delivery manually via Next/All.
+        await Task.CompletedTask.ConfigureAwait(false);
     }
 
     private async Task<SessionId?> GetRelayHostToMainSessionIdAsync(Guid relayHostPeerId)
     {
-        var store = await _state.TryGetRuntimeStoreAsync(relayHostPeerId).ConfigureAwait(false);
-        if (store is null) return null;
+        await Task.CompletedTask.ConfigureAwait(false);
 
-        var match = store.Sessions.FirstOrDefault(s => s.RemotePeerId == MainNodeSentinelPeerId);
-        if (match is null) return null;
-        if (match.SessionId == Guid.Empty) return null;
+        var peer = _directory.Peers.FirstOrDefault(p => p.PeerId == relayHostPeerId);
+        if (peer is null) return null;
 
-        return new SessionId(match.SessionId);
+        var match = peer.Sessions
+            .Select(kv => kv.Value)
+            .FirstOrDefault(s => s.RemotePeerId.Value == MainNodeSentinelPeerId);
+
+        return match?.Id;
     }
 
     public void Dispose()
     {
         StopAutoDeliverLoop();
 
-        foreach (var p in _relayPanels)
-        {
-            p.Dispose();
-        }
-        _relayPanels.Clear();
-
-        try
-        {
-            var notify = (INotifyCollectionChanged)_directory.Peers;
-            notify.CollectionChanged -= OnPeersChanged;
-        }
-        catch
-        {
-        }
-
-        foreach (var d in _relayCapableSubscriptions.Values)
-        {
-            d.Dispose();
-        }
-        _relayCapableSubscriptions.Clear();
+        _relayPanelsNotify?.Dispose();
+        _relayPanelsNotify = null;
+        _relayPanels?.Dispose();
+        _relayPanels = null;
 
         _bag.Dispose();
-        GlobalAutoRelayAll.Dispose();
     }
 
     private string PeerNameById(Guid peerId)

@@ -1,12 +1,14 @@
+using Desktop.Wpf.Features.Simulator.Models;
+
 namespace Desktop.Wpf.Features.Simulator;
 
 public interface ISimulatorStateRepository
 {
-    Task<SimulatorStateDto?> LoadAsync(CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<SimulatedPeerModel>> LoadPeersAsync(CancellationToken cancellationToken = default);
 
-    Task SaveAsync(SimulatorStateDto state, CancellationToken cancellationToken = default);
+    Task SavePeersAsync(IReadOnlyList<PeerStateSnapshot> peers, CancellationToken cancellationToken = default);
 
-    Task<RelayPersistenceDto?> LoadRelayAsync(Guid relayHostPeerId, CancellationToken cancellationToken = default);
+    Task<SimulatedRelayModel?> LoadRelayAsync(Guid relayHostPeerId, CancellationToken cancellationToken = default);
 
-    Task SaveRelayAsync(RelayPersistenceDto relay, CancellationToken cancellationToken = default);
+    Task SaveRelayAsync(RelayStateSnapshot relay, CancellationToken cancellationToken = default);
 }
