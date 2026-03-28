@@ -39,6 +39,10 @@
     - WPF `ItemsControl` bindings should use the adapter returned by `ToNotifyCollectionChanged()`.
         - Call `ToNotifyCollectionChanged()` **once**, store the instance, and dispose it with the ViewModel.
         - Do **not** call `ToNotifyCollectionChanged()` in a property getter.
+    - Disposing projected child ViewModels:
+        - If you project models to child ViewModels via `CreateView(...)`, removals from the underlying model collection do **not** automatically dispose the child ViewModel.
+        - Attach an `ObserveRemove()` subscription and dispose the removed view:
+            - `view.ObserveRemove().Subscribe(evt => evt.Value.View.Dispose())`
     - Avoid list replacement for `ItemsControl` sources.
         - Do not bind `ItemsSource` to a `BindableReactiveProperty<IReadOnlyList<T>>` that is regenerated on every update.
         - This causes full UI rebuilds, breaks virtualization, and often loses scroll position.
@@ -63,10 +67,21 @@
         - Includes: `ReactiveCommand`, `BindableReactiveProperty`, `ISynchronizedView`, `ToNotifyCollectionChanged()` adapters, and subscriptions.
     - Nested/child ViewModels that create commands/subscriptions must also be disposable.
         - Ensure the parent ViewModel disposes child ViewModels when appropriate.
+    - Background loops must not hold references to removed ViewModels.
+        - If you run a background loop over a projected collection, snapshot the set of *current* items each iteration.
+        - Do not assume `.ToList()` works on all WPF-synchronized collection adapters.
 
 - **Mutation safety (snapshot before iterating)**
     - When iterating a reactive collection and mutating it during processing, snapshot first.
         - Example: `var items = QueueItems.ToList(); foreach (var x in items) { /* may remove */ }`
+
+- **Threading & background loops (avoid UI-bound state off-thread)**
+    - Avoid reading UI-bound collections from background threads.
+        - Example: `NotifyCollectionChangedSynchronizedViewList<T>` is a UI adapter and may throw cross-thread dispatcher exceptions when enumerated from background loops.
+    - For background work, query the pure domain collections instead.
+        - Example: use `ObservableDictionary<TKey, TValue>` / `ObservableList<T>` state in the service/model, order and snapshot that, then call service methods by id.
+    - Snapshotting: some synchronized view adapters do not support `CopyTo`, which can break `Enumerable.ToList()`.
+        - If you need a snapshot, use a manual `foreach` copy into `List<T>`.
 
 - **TDD essentials**
     - Behavior-first tests with MockBehavior.Strict.
