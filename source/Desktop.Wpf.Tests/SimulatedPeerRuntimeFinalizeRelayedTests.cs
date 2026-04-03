@@ -109,6 +109,7 @@ public sealed class SimulatedPeerRuntimeFinalizeRelayedTests
         var diagnostics = new SimulatorDiagnosticsService();
 
         var state = new SimulatorStateService(
+            ui: new TestUiDispatcher(),
             store: repo,
             transportOptions: options,
             diagnostics: diagnostics,

@@ -63,7 +63,7 @@ public sealed class SimulatorStateServiceInitializationTests
         var pending = new SimulatedPeerPendingInbox();
         var engine = new SignalProtocolEngine(new SystemClock());
 
-        var sut = new SimulatorStateService(store, options, diagnostics, pending, scopeFactory, engine);
+        var sut = new SimulatorStateService(new TestUiDispatcher(), store, options, diagnostics, pending, scopeFactory, engine);
 
         // Act
         var t1 = sut.InitializeAsync();

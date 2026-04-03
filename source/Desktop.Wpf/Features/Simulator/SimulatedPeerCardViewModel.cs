@@ -386,41 +386,40 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
         {
             PublishedToTags.Clear();
             HostingForTags.Clear();
+            AvailablePublishTargets.Clear();
+
+            foreach (var p in allPeers.Where(p => p.PeerId != PeerId))
+            {
+                AvailablePublishTargets.Add(new PublishTargetOption(p.PeerId, _resolvePeerName(p.PeerId)));
+            }
+
+            foreach (var hostId in model.PublishedKeysToPeerIds.Distinct().Where(x => x != PeerId))
+            {
+                var display = _resolvePeerName(hostId);
+                PublishedToTags.Add(new RelationshipTagViewModel(
+                    peerId: hostId,
+                    display: $"Published to: {display}",
+                    onRemove: async ct =>
+                    {
+                        await _state.RemovePublishedKeysRelationshipAsync(PeerId, hostId, ct).ConfigureAwait(false);
+                    }));
+            }
+
+            foreach (var publisher in allPeers)
+            {
+                if (publisher.PeerId == PeerId) continue;
+                if (!publisher.PublishedKeysToPeerIds.Contains(PeerId)) continue;
+
+                var display = _resolvePeerName(publisher.PeerId);
+                HostingForTags.Add(new RelationshipTagViewModel(
+                    peerId: publisher.PeerId,
+                    display: $"Hosting keys for: {display}",
+                    onRemove: async ct =>
+                    {
+                        await _state.RemovePublishedKeysRelationshipAsync(publisher.PeerId, PeerId, ct).ConfigureAwait(false);
+                    }));
+            }
         });
-        
-
-        AvailablePublishTargets.Clear();
-        foreach (var p in allPeers.Where(p => p.PeerId != PeerId))
-        {
-            AvailablePublishTargets.Add(new PublishTargetOption(p.PeerId, _resolvePeerName(p.PeerId)));
-        }
-
-        foreach (var hostId in model.PublishedKeysToPeerIds.Distinct().Where(x => x != PeerId))
-        {
-            var display = _resolvePeerName(hostId);
-            PublishedToTags.Add(new RelationshipTagViewModel(
-                peerId: hostId,
-                display: $"Published to: {display}",
-                onRemove: async ct =>
-                {
-                    await _state.RemovePublishedKeysRelationshipAsync(PeerId, hostId, ct).ConfigureAwait(false);
-                }));
-        }
-
-        foreach (var publisher in allPeers)
-        {
-            if (publisher.PeerId == PeerId) continue;
-            if (!publisher.PublishedKeysToPeerIds.Contains(PeerId)) continue;
-
-            var display = _resolvePeerName(publisher.PeerId);
-            HostingForTags.Add(new RelationshipTagViewModel(
-                peerId: publisher.PeerId,
-                display: $"Hosting keys for: {display}",
-                onRemove: async ct =>
-                {
-                    await _state.RemovePublishedKeysRelationshipAsync(publisher.PeerId, PeerId, ct).ConfigureAwait(false);
-                }));
-        }
     }
 
     public void Dispose()

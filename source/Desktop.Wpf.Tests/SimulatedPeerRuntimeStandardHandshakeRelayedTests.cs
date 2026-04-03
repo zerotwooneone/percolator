@@ -61,12 +61,9 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
         var services = new ServiceCollection();
         services.AddSingleton<IClock>(clock);
 
-        var sp = services.BuildServiceProvider();
-        var scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
-
         var options = Options.Create(new TransportOptions { GrpcPort = 5002 });
         var engine = new Desktop.Wpf.Features.Simulator.Protocol.SignalProtocolEngine(new TestClock(TestClock.Default));
-        return new SimulatorStateService(repo, options, diagnostics, pending, scopeFactory, engine);
+        return new SimulatorStateService(new TestUiDispatcher(), repo, options, diagnostics, pending, services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(), engine);
     }
 
     [Test]

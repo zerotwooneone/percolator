@@ -10,12 +10,14 @@ using Percolator.Cryptography;
 using Percolator.Cryptography.Primitives;
 using Desktop.Wpf.Features.Simulator.Tracking;
 using Desktop.Wpf.Features.Simulator.Models;
+using Desktop.Wpf.Shared.Mvvm;
 using R3;
 
 namespace Desktop.Wpf.Features.Simulator;
 
 public sealed class SimulatorStateService : ISimulatorStateService
 {
+    private readonly IUiDispatcher _ui;
     private readonly ISimulatorStateRepository _store;
     private readonly IOptions<TransportOptions> _transportOptions;
     private readonly ISimulatorDiagnosticsService _diagnostics;
@@ -47,6 +49,7 @@ public sealed class SimulatorStateService : ISimulatorStateService
     private readonly SemaphoreSlim _relayGate = new(1, 1);
 
     public SimulatorStateService(
+        IUiDispatcher ui,
         ISimulatorStateRepository store,
         IOptions<TransportOptions> transportOptions,
         ISimulatorDiagnosticsService diagnostics,
@@ -54,6 +57,7 @@ public sealed class SimulatorStateService : ISimulatorStateService
         IServiceScopeFactory scopeFactory,
         Desktop.Wpf.Features.Simulator.Protocol.ISignalProtocolEngine engine)
     {
+        _ui = ui;
         _store = store;
         _transportOptions = transportOptions;
         _diagnostics = diagnostics;
@@ -992,8 +996,17 @@ public sealed class SimulatorStateService : ISimulatorStateService
         }
         _relayPersistenceByHostPeerId.Clear();
 
-        _relays.Clear();
-        _relayByHostPeerId.Clear();
+        await _relayGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            _relayByHostPeerId.Clear();
+
+            await _ui.InvokeAsync(() => _relays.Clear(), cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _relayGate.Release();
+        }
 
         foreach (var hostPeerId in relayCapablePeerIds)
         {
@@ -1002,10 +1015,18 @@ public sealed class SimulatorStateService : ISimulatorStateService
             var relay = await _store.LoadRelayAsync(hostPeerId, cancellationToken).ConfigureAwait(false)
                 ?? new SimulatedRelayModel(hostPeerId);
 
-            _relays.Add(relay);
-            _relayByHostPeerId[hostPeerId] = relay;
+            await _relayGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                _relayByHostPeerId[hostPeerId] = relay;
+                AttachRelayPersistence(relay);
+            }
+            finally
+            {
+                _relayGate.Release();
+            }
 
-            AttachRelayPersistence(relay);
+            await _ui.InvokeAsync(() => _relays.Add(relay), cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -1730,13 +1751,22 @@ public sealed class SimulatorStateService : ISimulatorStateService
             try
             {
                 _peerById.Clear();
-                _peers.Clear();
+
                 foreach (var model in models)
                 {
                     _peerById[model.PeerId] = model;
-                    _peers.Add(model);
                     AttachRuntimePersistence(model);
                 }
+
+                await _ui.InvokeAsync(() =>
+                    {
+                        _peers.Clear();
+                        foreach (var model in models)
+                        {
+                            _peers.Add(model);
+                        }
+                    },
+                    cancellationToken).ConfigureAwait(false);
             }
             finally
             {
@@ -1785,13 +1815,14 @@ public sealed class SimulatorStateService : ISimulatorStateService
         try
         {
             _peerById[peerId] = model;
-            _peers.Add(model);
             AttachRuntimePersistence(model);
         }
         finally
         {
             _peerGate.Release();
         }
+
+        await _ui.InvokeAsync(() => _peers.Add(model), cancellationToken).ConfigureAwait(false);
 
         _saveTrigger.OnNext(Unit.Default);
 
@@ -1809,11 +1840,20 @@ public sealed class SimulatorStateService : ISimulatorStateService
         if (recipientPublicKeyHash is null) throw new ArgumentNullException(nameof(recipientPublicKeyHash));
         if (recipientPublicKeyHash.Length == 0) return Task.FromResult<Guid?>(null);
 
-        var matches = _peers
-            .Where(p => SHA256.HashData(p.IdentitySigningKeySpki).SequenceEqual(recipientPublicKeyHash))
-            .Select(p => p.PeerId)
-            .Take(2)
-            .ToList();
+        List<Guid> matches;
+        _peerGate.Wait(cancellationToken);
+        try
+        {
+            matches = _peerById.Values
+                .Where(p => SHA256.HashData(p.IdentitySigningKeySpki).SequenceEqual(recipientPublicKeyHash))
+                .Select(p => p.PeerId)
+                .Take(2)
+                .ToList();
+        }
+        finally
+        {
+            _peerGate.Release();
+        }
 
         if (matches.Count != 1) return Task.FromResult<Guid?>(null);
         return Task.FromResult<Guid?>(matches[0]);
@@ -1824,32 +1864,30 @@ public sealed class SimulatorStateService : ISimulatorStateService
         cancellationToken.ThrowIfCancellationRequested();
 
         string name;
+        SimulatedPeerModel? removedModel = null;
 
         await _peerGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            name = _peerById.TryGetValue(peerId, out var removed)
-                ? (string.IsNullOrWhiteSpace(removed.DisplayName.CurrentValue) ? removed.PeerId.ToString()[..8] : removed.DisplayName.CurrentValue)
+            name = _peerById.TryGetValue(peerId, out removedModel)
+                ? (string.IsNullOrWhiteSpace(removedModel.DisplayName.CurrentValue) ? removedModel.PeerId.ToString()[..8] : removedModel.DisplayName.CurrentValue)
                 : peerId.ToString()[..8];
 
-            foreach (var p in _peers)
+            if (removedModel is not null)
             {
-                _ = p.PublishedKeysToPeerIdsMutable.Remove(peerId);
-                _ = p.KnownPeerIds.Remove(peerId);
-                _ = p.RelayActiveSessionsPeerIdsMutable.Remove(peerId);
-            }
+                foreach (var p in _peerById.Values)
+                {
+                    _ = p.PublishedKeysToPeerIdsMutable.Remove(peerId);
+                    _ = p.KnownPeerIds.Remove(peerId);
+                    _ = p.RelayActiveSessionsPeerIdsMutable.Remove(peerId);
+                }
 
-            if (_peerById.TryGetValue(peerId, out var model))
-            {
                 _peerById.Remove(peerId);
-                _ = _peers.Remove(model);
 
                 if (_runtimePersistenceByPeerId.Remove(peerId, out var sub))
                 {
                     sub.Dispose();
                 }
-
-                model.Dispose();
             }
         }
         finally
@@ -1857,7 +1895,14 @@ public sealed class SimulatorStateService : ISimulatorStateService
             _peerGate.Release();
         }
 
+        if (removedModel is not null)
+        {
+            await _ui.InvokeAsync(() => _ = _peers.Remove(removedModel), cancellationToken).ConfigureAwait(false);
+        }
+
         await RemoveRelayIfExistsAsync(peerId, cancellationToken).ConfigureAwait(false);
+
+        removedModel?.Dispose();
 
         _saveTrigger.OnNext(Unit.Default);
 
@@ -2074,18 +2119,24 @@ public sealed class SimulatorStateService : ISimulatorStateService
         var loaded = await _store.LoadRelayAsync(peerId, cancellationToken).ConfigureAwait(false)
             ?? new SimulatedRelayModel(peerId);
 
+        var added = false;
         await _relayGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             if (_relayByHostPeerId.ContainsKey(peerId)) return;
 
-            _relays.Add(loaded);
             _relayByHostPeerId[peerId] = loaded;
             AttachRelayPersistence(loaded);
+            added = true;
         }
         finally
         {
             _relayGate.Release();
+        }
+
+        if (added)
+        {
+            await _ui.InvokeAsync(() => _relays.Add(loaded), cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -2093,25 +2144,27 @@ public sealed class SimulatorStateService : ISimulatorStateService
     {
         cancellationToken.ThrowIfCancellationRequested();
 
+        SimulatedRelayModel? relay = null;
         await _relayGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (!_relayByHostPeerId.TryGetValue(relayHostPeerId, out var relay)) return;
+            if (!_relayByHostPeerId.TryGetValue(relayHostPeerId, out relay)) return;
 
             _relayByHostPeerId.Remove(relayHostPeerId);
-            _ = _relays.Remove(relay);
 
             if (_relayPersistenceByHostPeerId.Remove(relayHostPeerId, out var d))
             {
                 d.Dispose();
             }
-
-            relay.Dispose();
         }
         finally
         {
             _relayGate.Release();
         }
+
+        await _ui.InvokeAsync(() => _ = _relays.Remove(relay), cancellationToken).ConfigureAwait(false);
+
+        relay.Dispose();
     }
 
     private async Task PersistPeerRuntimeFieldsAsync(SimulatedPeerModel model, CancellationToken cancellationToken)

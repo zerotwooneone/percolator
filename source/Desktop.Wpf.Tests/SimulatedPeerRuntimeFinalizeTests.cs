@@ -107,7 +107,7 @@ public sealed class SimulatedPeerRuntimeFinalizeTests
         var options = Options.Create(new TransportOptions { GrpcPort = 5002 });
         var engine = new SignalProtocolEngine(new SystemClock());
 
-        var sut = new SimulatorStateService(repo, options, diagnostics, pending, scopeFactory, engine);
+        var sut = new SimulatorStateService(new TestUiDispatcher(), repo, options, diagnostics, pending, scopeFactory, engine);
         await sut.InitializeAsync(CancellationToken.None);
 
         var payload = new InviteHandshakeRequestPayload
@@ -206,7 +206,7 @@ public sealed class SimulatedPeerRuntimeFinalizeTests
         var options = Options.Create(new TransportOptions { GrpcPort = 5002 });
         var engine = new SignalProtocolEngine(new SystemClock());
 
-        var sut = new SimulatorStateService(repo, options, diagnostics, pending, scopeFactory, engine);
+        var sut = new SimulatorStateService(new TestUiDispatcher(), repo, options, diagnostics, pending, scopeFactory, engine);
         await sut.InitializeAsync(CancellationToken.None);
 
         await sut.ReceiveInviteHandshakeResponseFromMainAsync(inviterPeerId, new InviteHandshakeResponse
