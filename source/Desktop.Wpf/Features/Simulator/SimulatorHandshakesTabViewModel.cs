@@ -12,7 +12,7 @@ public sealed class SimulatorHandshakesTabViewModel : IDisposable
 {
     private readonly IUiDispatcher _ui;
 
-    private readonly ISimulatedPeerDirectory _directory;
+    private readonly ISimulatorInitializer _directory;
     private readonly IOptions<TransportOptions> _transportOptions;
     private readonly Percolator.Application.Identity.ActiveIdentityContext _active;
     private readonly ISimulatorStateService _state;
@@ -31,7 +31,7 @@ public sealed class SimulatorHandshakesTabViewModel : IDisposable
     private DisposableBag _bag;
 
     public SimulatorHandshakesTabViewModel(
-        ISimulatedPeerDirectory directory,
+        ISimulatorInitializer directory,
         ISimulatorMainIngressService mainIngress,
         IOptions<TransportOptions> transportOptions,
         Percolator.Application.Identity.ActiveIdentityContext active,
@@ -87,11 +87,7 @@ public sealed class SimulatorHandshakesTabViewModel : IDisposable
     private void HookRelayHosts()
     {
         var peers = _state.Peers;
-        var peersChanged = Observable.Merge(
-            peers.ObserveAdd().Select(static _ => Unit.Default),
-            peers.ObserveRemove().Select(static _ => Unit.Default),
-            peers.ObserveReplace().Select(static _ => Unit.Default),
-            peers.ObserveReset().Select(static _ => Unit.Default));
+        var peersChanged = peers.ObserveChanged();
 
         peersChanged
             .SubscribeAwait(async (_, ct) =>

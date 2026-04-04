@@ -86,9 +86,7 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
             NormalizePeer(dto, _transportOptions.Value);
             _ = _keys.EnsureReverseSignalKeys(dto.ReverseSignalKeys);
             _ = EnsureIdentityPublicKeyHash(dto);
-            dto.PublishedKeysToPeerIds ??= new();
             dto.Relay ??= new();
-            dto.Relay.ActiveSessionsPeerIds ??= new();
 
             var model = CreateModel(dto);
             HydrateRuntimeStore(model, dto.RuntimeStore, clock);
@@ -97,16 +95,24 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
 
         if (loaded is null)
         {
-            await SavePeersAsync(peers.Select(p => p.Freeze()).ToList(), cancellationToken).ConfigureAwait(false);
+            await SavePeersAsync(
+                    peers: peers.Select(p => p.Freeze()).ToList(),
+                    relationships: Array.Empty<PeerRelationshipSnapshot>(),
+                    cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
         }
 
         return peers;
     }
 
-    public async Task SavePeersAsync(IReadOnlyList<PeerStateSnapshot> peers, CancellationToken cancellationToken = default)
+    public async Task SavePeersAsync(
+        IReadOnlyList<PeerStateSnapshot> peers,
+        IReadOnlyList<PeerRelationshipSnapshot> relationships,
+        CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (peers is null) throw new ArgumentNullException(nameof(peers));
+        if (relationships is null) throw new ArgumentNullException(nameof(relationships));
 
         await _ioGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -136,12 +142,91 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
                 state.Peers.Add(dto);
             }
 
+            // Relationships are persisted inside peer DTOs for now (back-compat), but the Service is ignorant of this.
+            var publishedKeyEdges = new Dictionary<Guid, List<Guid>>();
+            var relayActiveEdges = new Dictionary<Guid, List<Guid>>();
+            foreach (var rel in relationships)
+            {
+                if (rel.SourcePeerId == Guid.Empty) continue;
+                if (rel.TargetPeerId == Guid.Empty) continue;
+                if (rel.SourcePeerId == rel.TargetPeerId) continue;
+
+                if (rel.Type == RelationshipType.PublishedKey)
+                {
+                    if (!publishedKeyEdges.TryGetValue(rel.SourcePeerId, out var list))
+                    {
+                        list = new List<Guid>();
+                        publishedKeyEdges[rel.SourcePeerId] = list;
+                    }
+                    list.Add(rel.TargetPeerId);
+                }
+                else if (rel.Type == RelationshipType.RelayActiveSession)
+                {
+                    if (!relayActiveEdges.TryGetValue(rel.SourcePeerId, out var list))
+                    {
+                        list = new List<Guid>();
+                        relayActiveEdges[rel.SourcePeerId] = list;
+                    }
+                    list.Add(rel.TargetPeerId);
+                }
+            }
+
+            foreach (var peer in state.Peers)
+            {
+                peer.PublishedKeysToPeerIds = publishedKeyEdges.TryGetValue(peer.PeerId, out var pk)
+                    ? pk.Distinct().OrderBy(x => x).ToList()
+                    : new List<Guid>();
+
+                peer.Relay ??= new SimulatedPeerRelayStateDto();
+                peer.Relay.ActiveSessionsPeerIds = relayActiveEdges.TryGetValue(peer.PeerId, out var rs)
+                    ? rs.Distinct().OrderBy(x => x).ToList()
+                    : new List<Guid>();
+            }
+
             await WritePeersFileAsync(state, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
             _ioGate.Release();
         }
+    }
+
+    public async Task<IReadOnlyList<PeerRelationship>> LoadRelationshipsAsync(CancellationToken cancellationToken = default)
+    {
+        var loaded = await ReadPeersFileAsync(cancellationToken).ConfigureAwait(false);
+        if (loaded is null) return Array.Empty<PeerRelationship>();
+
+        var edges = new List<PeerRelationship>();
+        foreach (var peer in loaded.Peers)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (peer.PeerId == Guid.Empty) continue;
+
+            if (peer.PublishedKeysToPeerIds is not null)
+            {
+                foreach (var target in peer.PublishedKeysToPeerIds)
+                {
+                    if (target == Guid.Empty) continue;
+                    if (target == peer.PeerId) continue;
+                    edges.Add(new PeerRelationship(peer.PeerId, target, RelationshipType.PublishedKey));
+                }
+            }
+
+            var relayTargets = peer.Relay?.ActiveSessionsPeerIds;
+            if (relayTargets is not null)
+            {
+                foreach (var target in relayTargets)
+                {
+                    if (target == Guid.Empty) continue;
+                    if (target == peer.PeerId) continue;
+                    edges.Add(new PeerRelationship(peer.PeerId, target, RelationshipType.RelayActiveSession));
+                }
+            }
+        }
+
+        return edges
+            .Distinct()
+            .ToList();
     }
 
     public async Task<SimulatedRelayModel?> LoadRelayAsync(Guid relayHostPeerId, CancellationToken cancellationToken = default)
@@ -310,8 +395,6 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
             notUntilUtc: dto.NotUntilUtc,
             lastError: dto.LastError,
             knownPeerIds: dto.KnownPeerIds,
-            publishedKeysToPeerIds: dto.PublishedKeysToPeerIds,
-            relayActiveSessionsPeerIds: dto.Relay?.ActiveSessionsPeerIds,
             handshakeAttempts: dto.HandshakeAttempts,
             pendingStandardHandshakeToMainResponderPublicKeyHash: dto.PendingStandardHandshakeToMainResponderPublicKeyHash,
             pendingStandardHandshakeToMainTemporarySessionId: dto.PendingStandardHandshakeToMainTemporarySessionId,
@@ -341,7 +424,6 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
                 RelayPeerId = model.RelayPeerId
             },
             KnownPeerIds = model.KnownPeerIds.ToList(),
-            PublishedKeysToPeerIds = model.PublishedKeysToPeerIds.ToList(),
             UiState = model.UiState,
             PendingCorrelationId = model.PendingCorrelationId,
             TargetPublicKeyHash = model.TargetPublicKeyHash,
@@ -357,7 +439,6 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
             Relay = new SimulatedPeerRelayStateDto
             {
                 IsRelayCapable = model.IsRelayCapable,
-                ActiveSessionsPeerIds = model.RelayActiveSessionsPeerIds.ToList(),
                 PreKeyStore = new SimulatedRelayPreKeyStoreDto
                 {
                     Version = 1,

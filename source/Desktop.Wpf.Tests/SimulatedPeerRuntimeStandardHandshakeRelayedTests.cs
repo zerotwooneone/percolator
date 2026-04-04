@@ -27,20 +27,31 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
     {
         public IReadOnlyList<SimulatedPeerModel> Peers { get; set; } = Array.Empty<SimulatedPeerModel>();
 
+        public IReadOnlyList<PeerRelationship> Relationships { get; set; } = Array.Empty<PeerRelationship>();
+
         public SimulatedRelayModel? Relay { get; set; }
 
         public IReadOnlyList<PeerStateSnapshot> SavedPeers { get; private set; } = Array.Empty<PeerStateSnapshot>();
+
+        public IReadOnlyList<PeerRelationshipSnapshot> SavedRelationships { get; private set; } = Array.Empty<PeerRelationshipSnapshot>();
 
         public RelayStateSnapshot? SavedRelay { get; private set; }
 
         public Task<IReadOnlyList<SimulatedPeerModel>> LoadPeersAsync(CancellationToken cancellationToken = default)
             => Task.FromResult(Peers);
 
-        public Task SavePeersAsync(IReadOnlyList<PeerStateSnapshot> peers, CancellationToken cancellationToken = default)
+        public Task SavePeersAsync(
+            IReadOnlyList<PeerStateSnapshot> peers,
+            IReadOnlyList<PeerRelationshipSnapshot> relationships,
+            CancellationToken cancellationToken = default)
         {
             SavedPeers = peers;
+            SavedRelationships = relationships;
             return Task.CompletedTask;
         }
+
+        public Task<IReadOnlyList<PeerRelationship>> LoadRelationshipsAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(Relationships);
 
         public Task<SimulatedRelayModel?> LoadRelayAsync(Guid relayHostPeerId, CancellationToken cancellationToken = default)
             => Task.FromResult(Relay);

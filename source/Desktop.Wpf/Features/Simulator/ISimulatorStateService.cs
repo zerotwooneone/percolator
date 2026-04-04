@@ -11,6 +11,8 @@ public interface ISimulatorStateService
 
     IReadOnlyObservableList<SimulatedRelayModel> Relays { get; }
 
+    IReadOnlyObservableList<PeerRelationship> Relationships { get; }
+
     Task InitializeAsync(CancellationToken cancellationToken = default);
 
     Task<Guid> AddPeerAsync(string? displayName, CancellationToken cancellationToken = default);

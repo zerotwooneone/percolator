@@ -12,7 +12,7 @@ public sealed class SimulatorRelayTabViewModel : IDisposable
     private readonly IUiDispatcher _ui;
 
     private readonly ISimulatorStateService _state;
-    private readonly ISimulatedPeerDirectory _directory;
+    private readonly ISimulatorInitializer _directory;
     private readonly PercolatorMessageService _messageService;
     private readonly ISimulatorRelayDeliveryService _delivery;
     private readonly ISimulatorDiagnosticsService _diagnostics;
@@ -32,7 +32,7 @@ public sealed class SimulatorRelayTabViewModel : IDisposable
 
     public SimulatorRelayTabViewModel(
         ISimulatorStateService state,
-        ISimulatedPeerDirectory directory,
+        ISimulatorInitializer directory,
         PercolatorMessageService messageService,
         ISimulatorRelayDeliveryService delivery,
         ISimulatorDiagnosticsService diagnostics,
@@ -210,7 +210,7 @@ public sealed class SimulatorRelayTabViewModel : IDisposable
     {
         await Task.CompletedTask.ConfigureAwait(false);
 
-        var peer = _directory.Peers.FirstOrDefault(p => p.PeerId == relayHostPeerId);
+        var peer = _state.Peers.FirstOrDefault(p => p.PeerId == relayHostPeerId);
         if (peer is null) return null;
 
         var match = peer.Sessions
@@ -234,7 +234,7 @@ public sealed class SimulatorRelayTabViewModel : IDisposable
 
     private string PeerNameById(Guid peerId)
     {
-        var model = _directory.Peers.FirstOrDefault(p => p.PeerId == peerId);
+        var model = _state.Peers.FirstOrDefault(p => p.PeerId == peerId);
         if (model is not null)
         {
             var name = model.DisplayName.CurrentValue;

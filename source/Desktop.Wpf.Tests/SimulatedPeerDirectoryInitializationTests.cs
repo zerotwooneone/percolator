@@ -44,7 +44,7 @@ public sealed class SimulatedPeerDirectoryInitializationTests
         state.Setup(s => s.RemoveRelayActiveSessionAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
-        using var sut = new SimulatedPeerDirectory(state.Object);
+        var sut = new SimulatorInitializer(state.Object);
 
         // Act
         var t1 = sut.InitializeAsync();
@@ -63,9 +63,5 @@ public sealed class SimulatedPeerDirectoryInitializationTests
 
         // Assert
         initCalls.Should().Be(1);
-        sut.Peers.Should().HaveCount(1);
-        sut.Peers[0].PeerId.Should().Be(peerId);
-        sut.Peers[0].DisplayName.CurrentValue.Should().Be("Alice");
-        sut.Peers[0].IsRelayCapable.CurrentValue.Should().BeTrue();
     }
 }

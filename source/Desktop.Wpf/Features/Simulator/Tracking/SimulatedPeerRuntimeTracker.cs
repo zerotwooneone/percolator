@@ -26,25 +26,13 @@ public sealed class SimulatedPeerRuntimeTracker : IDisposable
         peer.PendingStandardHandshakeToMainResponderPublicKeyHash.Subscribe(_ => _dirty.OnNext(Unit.Default)).AddTo(ref _bag);
         peer.PendingStandardHandshakeToMainTemporarySessionId.Subscribe(_ => _dirty.OnNext(Unit.Default)).AddTo(ref _bag);
 
-        peer.SessionsMutable.ObserveAdd().Subscribe(_ => _dirty.OnNext(Unit.Default)).AddTo(ref _bag);
-        peer.SessionsMutable.ObserveRemove().Subscribe(_ => _dirty.OnNext(Unit.Default)).AddTo(ref _bag);
-        peer.SessionsMutable.ObserveReplace().Subscribe(_ => _dirty.OnNext(Unit.Default)).AddTo(ref _bag);
-        peer.SessionsMutable.ObserveReset().Subscribe(_ => _dirty.OnNext(Unit.Default)).AddTo(ref _bag);
+        peer.SessionsMutable.ObserveChanged().Subscribe(_ => _dirty.OnNext(Unit.Default)).AddTo(ref _bag);
 
-        peer.SignedPreKeysMutable.ObserveAdd().Subscribe(_ => _dirty.OnNext(Unit.Default)).AddTo(ref _bag);
-        peer.SignedPreKeysMutable.ObserveRemove().Subscribe(_ => _dirty.OnNext(Unit.Default)).AddTo(ref _bag);
-        peer.SignedPreKeysMutable.ObserveReplace().Subscribe(_ => _dirty.OnNext(Unit.Default)).AddTo(ref _bag);
-        peer.SignedPreKeysMutable.ObserveReset().Subscribe(_ => _dirty.OnNext(Unit.Default)).AddTo(ref _bag);
+        peer.SignedPreKeysMutable.ObserveChanged().Subscribe(_ => _dirty.OnNext(Unit.Default)).AddTo(ref _bag);
 
-        peer.OutboundInvitesMutable.ObserveAdd().Subscribe(_ => _dirty.OnNext(Unit.Default)).AddTo(ref _bag);
-        peer.OutboundInvitesMutable.ObserveRemove().Subscribe(_ => _dirty.OnNext(Unit.Default)).AddTo(ref _bag);
-        peer.OutboundInvitesMutable.ObserveReplace().Subscribe(_ => _dirty.OnNext(Unit.Default)).AddTo(ref _bag);
-        peer.OutboundInvitesMutable.ObserveReset().Subscribe(_ => _dirty.OnNext(Unit.Default)).AddTo(ref _bag);
+        peer.OutboundInvitesMutable.ObserveChanged().Subscribe(_ => _dirty.OnNext(Unit.Default)).AddTo(ref _bag);
 
-        peer.PendingInviteHandshakeResponsesMutable.ObserveAdd().Subscribe(_ => _dirty.OnNext(Unit.Default)).AddTo(ref _bag);
-        peer.PendingInviteHandshakeResponsesMutable.ObserveRemove().Subscribe(_ => _dirty.OnNext(Unit.Default)).AddTo(ref _bag);
-        peer.PendingInviteHandshakeResponsesMutable.ObserveReplace().Subscribe(_ => _dirty.OnNext(Unit.Default)).AddTo(ref _bag);
-        peer.PendingInviteHandshakeResponsesMutable.ObserveReset().Subscribe(_ => _dirty.OnNext(Unit.Default)).AddTo(ref _bag);
+        peer.PendingInviteHandshakeResponsesMutable.ObserveChanged().Subscribe(_ => _dirty.OnNext(Unit.Default)).AddTo(ref _bag);
     }
 
     public SimulatedPeerModel Peer { get; }

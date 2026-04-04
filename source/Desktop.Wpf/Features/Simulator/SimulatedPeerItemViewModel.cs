@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using Desktop.Wpf.Features.Simulator.Models;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
@@ -12,7 +13,7 @@ namespace Desktop.Wpf.Features.Simulator;
 public sealed class SimulatedPeerItemViewModel : IDisposable
 {
     private static readonly Guid MainNodeSentinelPeerId = new("88880000-0000-0000-0000-000000000000");
-    private readonly ISimulatedPeerDirectory _directory;
+    private readonly ISimulatorInitializer _directory;
     private readonly SimulatedPeerModel _model;
     private readonly ISimulatedPeerPendingInbox _pending;
     private readonly ISimulatorStateService _state;
@@ -28,7 +29,7 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
     private Percolator.Cryptography.SessionId? _sessionToMain;
 
     public SimulatedPeerItemViewModel(
-        ISimulatedPeerDirectory directory,
+        ISimulatorInitializer directory,
         SimulatedPeerModel model,
         ISimulatorStateService state,
         ISimulatorDiagnosticsService diagnostics,
@@ -104,7 +105,7 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
 
         var remove = Observable.Return(true).ToReactiveCommand<Unit>(_ => { });
         remove.AsObservable()
-            .SubscribeAwait(async (_, ct) => await _directory.RemovePeerAsync(_model.PeerId, ct), AwaitOperation.Drop)
+            .SubscribeAwait(async (_, ct) => await _state.RemovePeerAsync(_model.PeerId, ct), AwaitOperation.Drop)
             .AddTo(ref _bag);
         RemoveCommand = remove.AddTo(ref _bag);
 
@@ -338,10 +339,7 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
 
     private bool HasActiveSessionToHost(Guid relayHostPeerId)
     {
-        var host = _state.Peers.FirstOrDefault(p => p.PeerId == relayHostPeerId);
-        if (host is null) return false;
-        if (!host.IsRelayCapable.CurrentValue) return false;
-        return host.RelayActiveSessionsPeerIds.Contains(_model.PeerId);
+        return _state.Relationships.Contains(new PeerRelationship(relayHostPeerId, _model.PeerId, RelationshipType.RelayActiveSession));
     }
 
     private async Task ExecuteRelayForwardToMainAsync(System.Threading.CancellationToken ct)

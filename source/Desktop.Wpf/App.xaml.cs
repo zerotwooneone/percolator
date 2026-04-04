@@ -160,7 +160,7 @@ public partial class App : Application
                 services.AddSingleton<IUiDispatcher, WpfUiDispatcher>();
                 services.AddSingleton<Desktop.Wpf.Features.Simulator.ISimulatorDiagnosticsService, Desktop.Wpf.Features.Simulator.SimulatorDiagnosticsService>();
                 services.AddSingleton<Desktop.Wpf.Features.Simulator.ISimulatorDiagnosticBundleBuilder, Desktop.Wpf.Features.Simulator.SimulatorDiagnosticBundleBuilder>();
-                services.AddSingleton<ISimulatedPeerDirectory, SimulatedPeerDirectory>();
+                services.AddSingleton<ISimulatorInitializer, SimulatorInitializer>();
                 services.AddSingleton<Desktop.Wpf.Features.Simulator.ISimulatedPeerPendingInbox, Desktop.Wpf.Features.Simulator.SimulatedPeerPendingInbox>();
                 services.AddScoped<Desktop.Wpf.Features.Simulator.ISimulatorMainIngressService, Desktop.Wpf.Features.Simulator.SimulatorMainIngressService>();
                 services.AddScoped<Desktop.Wpf.Features.Simulator.ISimulatorRelayDeliveryService, Desktop.Wpf.Features.Simulator.SimulatorRelayDeliveryService>();

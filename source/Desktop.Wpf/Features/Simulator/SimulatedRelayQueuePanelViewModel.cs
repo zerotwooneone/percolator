@@ -24,7 +24,7 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
     private readonly ISynchronizedView<SimulatedPeerModel, ActiveSessionTargetOption> _availableTargets;
     private readonly NotifyCollectionChangedSynchronizedViewList<ActiveSessionTargetOption> _availableTargetsNotify;
 
-    private readonly ISynchronizedView<Guid, ActiveSessionTagViewModel> _activeSessionTags;
+    private readonly ISynchronizedView<PeerRelationship, ActiveSessionTagViewModel> _activeSessionTags;
     private readonly NotifyCollectionChangedSynchronizedViewList<ActiveSessionTagViewModel> _activeSessionTagsNotify;
 
     public BindableReactiveProperty<Guid?> SelectedActiveSessionPeerId { get; }
@@ -63,11 +63,12 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
         _availableTargets.AttachFilter((p, _) => p.PeerId != _relayHostPeerId);
         _availableTargetsNotify = _availableTargets.ToNotifyCollectionChanged().AddTo(ref _bag);
 
-        var hostPeer = _state.Peers.FirstOrDefault(p => p.PeerId == _relayHostPeerId)
-            ?? throw new InvalidOperationException($"No peer exists for relay host id {_relayHostPeerId}");
-        _activeSessionTags = hostPeer.RelayActiveSessionsPeerIds
-            .CreateView(CreateActiveSessionTag)
+        _activeSessionTags = _state.Relationships
+            .CreateView(rel => CreateActiveSessionTag(rel.TargetPeerId))
             .AddTo(ref _bag);
+        _activeSessionTags.AttachFilter((rel, _) =>
+            rel.SourcePeerId == _relayHostPeerId
+            && rel.Type == RelationshipType.RelayActiveSession);
         _activeSessionTagsNotify = _activeSessionTags.ToNotifyCollectionChanged().AddTo(ref _bag);
         SelectedActiveSessionPeerId = new BindableReactiveProperty<Guid?>(null).AddTo(ref _bag);
 

@@ -49,11 +49,7 @@ public sealed class SimulatorDiagnosticsTabViewModel : IDisposable
             .AddTo(ref _bag);
 
         var peers = _state.Peers;
-        var peersChanged = Observable.Merge(
-            peers.ObserveAdd().Select(static _ => Unit.Default),
-            peers.ObserveRemove().Select(static _ => Unit.Default),
-            peers.ObserveReplace().Select(static _ => Unit.Default),
-            peers.ObserveReset().Select(static _ => Unit.Default));
+        var peersChanged = peers.ObserveChanged();
 
         peersChanged
             .SubscribeAwait(async (_, ct) =>

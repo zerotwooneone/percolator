@@ -22,8 +22,6 @@ public sealed record PeerStateSnapshot(
     string? Phase,
     DateTimeOffset? NotUntilUtc,
     string? LastError,
-    IReadOnlyList<Guid> PublishedKeysToPeerIds,
-    IReadOnlyList<Guid> RelayActiveSessionsPeerIds,
     IReadOnlyList<SimulatorHandshakeAttemptState> HandshakeAttempts,
     byte[]? PendingStandardHandshakeToMainResponderPublicKeyHash,
     Guid? PendingStandardHandshakeToMainTemporarySessionId,

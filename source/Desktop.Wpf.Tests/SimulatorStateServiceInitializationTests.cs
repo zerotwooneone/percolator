@@ -32,8 +32,14 @@ public sealed class SimulatorStateServiceInitializationTests
             return _gate.Task;
         }
 
-        public Task SavePeersAsync(IReadOnlyList<PeerStateSnapshot> peers, CancellationToken cancellationToken = default)
+        public Task SavePeersAsync(
+            IReadOnlyList<PeerStateSnapshot> peers,
+            IReadOnlyList<PeerRelationshipSnapshot> relationships,
+            CancellationToken cancellationToken = default)
             => Task.CompletedTask;
+
+        public Task<IReadOnlyList<PeerRelationship>> LoadRelationshipsAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<PeerRelationship>>(Array.Empty<PeerRelationship>());
 
         public Task<SimulatedRelayModel?> LoadRelayAsync(Guid relayHostPeerId, CancellationToken cancellationToken = default)
             => Task.FromResult(Relay);

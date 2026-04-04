@@ -1,12 +1,16 @@
+using System;
+using System.Collections.Generic;
 using System.Linq;
-using System.Collections.ObjectModel;
 using System.Security.Cryptography;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Windows;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using ObservableCollections;
 using R3;
 using Percolator.Contracts;
+using Desktop.Wpf.Features.Simulator.Models;
 
 namespace Desktop.Wpf.Features.Simulator;
 
@@ -19,6 +23,10 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
     private DisposableBag _bag;
     private bool _disposed;
 
+    private readonly ISynchronizedView<SimulatedPeerModel, PublishTargetOption> _availableTargetsView;
+    private readonly ISynchronizedView<PeerRelationship, RelationshipTagViewModel> _publishedToView;
+    private readonly ISynchronizedView<PeerRelationship, RelationshipTagViewModel> _hostingForView;
+
     public SimulatedPeerCardViewModel(
         SimulatedPeerModel model,
         ISimulatorStateService state,
@@ -29,29 +37,6 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
         _state = state;
         _diagnostics = diagnostics;
         _resolvePeerName = resolvePeerName;
-
-        var peers = _state.Peers;
-        var peersChanged = peers
-            .ObserveChanged()
-            .Select(static _ => Unit.Default);
-
-        var publishedKeysChanged = peersChanged
-            .Select(_ =>
-            {
-                var perPeer = peers
-                    .Select(p => p.PublishedKeysToPeerIds.ObserveChanged().Select(static __ => Unit.Default))
-                    .ToArray();
-                return perPeer.Length == 0
-                    ? Observable.Empty<Unit>()
-                    : Observable.Merge(perPeer);
-            })
-            .Switch();
-
-        Observable.Merge(peersChanged, publishedKeysChanged)
-            .Debounce(TimeSpan.FromMilliseconds(50))
-            .ObserveOnCurrentSynchronizationContext()
-            .SubscribeAwait((_,__)=>RebuildRelationshipTags())
-            .AddTo(ref _bag);
 
         DisplayName = _model.DisplayName
             .Select(n => string.IsNullOrWhiteSpace(n) ? _model.PeerId.ToString()[..8] : n!)
@@ -133,10 +118,34 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
         publish.AsObservable().SubscribeAwait(async (_, ct) => await ExecutePublishAsync(ct), AwaitOperation.Drop).AddTo(ref _bag);
         PublishKeysCommand = publish.AddTo(ref _bag);
 
-        PublishedToTags = new ObservableCollection<RelationshipTagViewModel>();
-        HostingForTags = new ObservableCollection<RelationshipTagViewModel>();
+        // 1. Available Targets (Simplified: All peers except self)
+        _availableTargetsView = _state.Peers
+            .CreateView(p => new PublishTargetOption(p.PeerId, _resolvePeerName(p.PeerId)))
+            .AddTo(ref _bag);
+        _availableTargetsView.AttachFilter((p, _) => p.PeerId != PeerId);
+        AvailablePublishTargets = _availableTargetsView.ToNotifyCollectionChanged().AddTo(ref _bag);
 
-        AvailablePublishTargets = new ObservableCollection<PublishTargetOption>();
+        // 2. Published To View (Projected from the flat Relationship Graph)
+        _publishedToView = _state.Relationships
+            .CreateView(rel => new RelationshipTagViewModel(
+                peerId: rel.TargetPeerId,
+                display: _resolvePeerName(rel.TargetPeerId),
+                onRemove: async ct => await _state.RemovePublishedKeysRelationshipAsync(PeerId, rel.TargetPeerId, ct)))
+            .AddTo(ref _bag);
+        _publishedToView.AttachFilter((rel, _) => rel.SourcePeerId == PeerId && rel.Type == RelationshipType.PublishedKey);
+        _publishedToView.ObserveRemove().Subscribe(evt => evt.Value.View.Dispose()).AddTo(ref _bag);
+        PublishedToTags = _publishedToView.ToNotifyCollectionChanged().AddTo(ref _bag);
+
+        // 3. Hosting For View (Projected from the flat Relationship Graph)
+        _hostingForView = _state.Relationships
+            .CreateView(rel => new RelationshipTagViewModel(
+                peerId: rel.SourcePeerId,
+                display: _resolvePeerName(rel.SourcePeerId),
+                onRemove: async ct => await _state.RemovePublishedKeysRelationshipAsync(rel.SourcePeerId, PeerId, ct)))
+            .AddTo(ref _bag);
+        _hostingForView.AttachFilter((rel, _) => rel.TargetPeerId == PeerId && rel.Type == RelationshipType.PublishedKey);
+        _hostingForView.ObserveRemove().Subscribe(evt => evt.Value.View.Dispose()).AddTo(ref _bag);
+        HostingForTags = _hostingForView.ToNotifyCollectionChanged().AddTo(ref _bag);
 
         _ = InitializeAsync();
     }
@@ -165,11 +174,11 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
 
     public BindableReactiveProperty<int> OneTimeKeyCount { get; }
 
-    public ObservableCollection<RelationshipTagViewModel> PublishedToTags { get; }
+    public NotifyCollectionChangedSynchronizedViewList<RelationshipTagViewModel> PublishedToTags { get; }
 
-    public ObservableCollection<RelationshipTagViewModel> HostingForTags { get; }
+    public NotifyCollectionChangedSynchronizedViewList<RelationshipTagViewModel> HostingForTags { get; }
 
-    public ObservableCollection<PublishTargetOption> AvailablePublishTargets { get; }
+    public NotifyCollectionChangedSynchronizedViewList<PublishTargetOption> AvailablePublishTargets { get; }
 
     public ReactiveCommand<Unit> ToggleOnlineCommand { get; }
 
@@ -371,55 +380,7 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
 
     private bool HasActiveSessionToHost(Guid relayHostPeerId)
     {
-        var host = _state.Peers.FirstOrDefault(p => p.PeerId == relayHostPeerId);
-        if (host is null) return false;
-        if (!host.IsRelayCapable.CurrentValue) return false;
-        return host.RelayActiveSessionsPeerIds.Contains(_model.PeerId);
-    }
-
-    private async ValueTask RebuildRelationshipTags()
-    {
-        var model = _model;
-        var allPeers = _state.Peers.ToArray();
-
-        await Application.Current.Dispatcher.InvokeAsync(() =>
-        {
-            PublishedToTags.Clear();
-            HostingForTags.Clear();
-            AvailablePublishTargets.Clear();
-
-            foreach (var p in allPeers.Where(p => p.PeerId != PeerId))
-            {
-                AvailablePublishTargets.Add(new PublishTargetOption(p.PeerId, _resolvePeerName(p.PeerId)));
-            }
-
-            foreach (var hostId in model.PublishedKeysToPeerIds.Distinct().Where(x => x != PeerId))
-            {
-                var display = _resolvePeerName(hostId);
-                PublishedToTags.Add(new RelationshipTagViewModel(
-                    peerId: hostId,
-                    display: $"Published to: {display}",
-                    onRemove: async ct =>
-                    {
-                        await _state.RemovePublishedKeysRelationshipAsync(PeerId, hostId, ct).ConfigureAwait(false);
-                    }));
-            }
-
-            foreach (var publisher in allPeers)
-            {
-                if (publisher.PeerId == PeerId) continue;
-                if (!publisher.PublishedKeysToPeerIds.Contains(PeerId)) continue;
-
-                var display = _resolvePeerName(publisher.PeerId);
-                HostingForTags.Add(new RelationshipTagViewModel(
-                    peerId: publisher.PeerId,
-                    display: $"Hosting keys for: {display}",
-                    onRemove: async ct =>
-                    {
-                        await _state.RemovePublishedKeysRelationshipAsync(publisher.PeerId, PeerId, ct).ConfigureAwait(false);
-                    }));
-            }
-        });
+        return _state.Relationships.Contains(new PeerRelationship(relayHostPeerId, _model.PeerId, RelationshipType.RelayActiveSession));
     }
 
     public void Dispose()
@@ -429,9 +390,6 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
         Disposable.Dispose(CopyOobInviteTokenCommand);
         Disposable.Dispose(CopyEndpointCommand);
         Disposable.Dispose(PublishKeysCommand);
-
-        foreach (var t in PublishedToTags.ToArray()) t.Dispose();
-        foreach (var t in HostingForTags.ToArray()) t.Dispose();
 
         _bag.Dispose();
         DisplayName.Dispose();

@@ -5,6 +5,7 @@ using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
 using Desktop.Wpf.Features.Simulator;
+using Desktop.Wpf.Features.Simulator.Models;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
@@ -55,8 +56,9 @@ public sealed class SimulatorStateStoreTests
                 identitySigningKeySpki: spki,
                 identitySigningKeyPrivateKeyEcPrivateKey: priv);
 
-            model.PublishedKeysToPeerIdsMutable.Add(Guid.NewGuid());
-            model.PublishedKeysToPeerIdsMutable.Add(Guid.NewGuid());
+            var host1 = Guid.NewGuid();
+            var host2 = Guid.NewGuid();
+            var host3 = Guid.NewGuid();
 
             model.SignedPreKeysMutable.Add(new SimulatedSignedPreKeyModel(
                 SignedPreKeyId: signedPreKeyId,
@@ -82,20 +84,31 @@ public sealed class SimulatorStateStoreTests
                 sessionCrypto: new AeadSessionCrypto(),
                 clock: new TestClock(DateTimeOffset.UtcNow));
 
-            model.PublishedKeysToPeerIdsMutable.Add(Guid.NewGuid());
             model.SignedPreKeysMutable.Add(new SimulatedSignedPreKeyModel(Guid.NewGuid(), RandomNumberGenerator.GetBytes(32), RandomNumberGenerator.GetBytes(32)));
             model.SessionsMutable[session.Id] = session;
 
-            await store.SavePeersAsync(new[] { model.Freeze() }, CancellationToken.None);
+            var relationships = new[]
+            {
+                new PeerRelationshipSnapshot(model.PeerId, host1, RelationshipType.PublishedKey),
+                new PeerRelationshipSnapshot(model.PeerId, host2, RelationshipType.PublishedKey),
+                new PeerRelationshipSnapshot(model.PeerId, host3, RelationshipType.PublishedKey)
+            };
+
+            await store.SavePeersAsync(new[] { model.Freeze() }, relationships, CancellationToken.None);
 
             var loaded = await store.LoadPeersAsync(CancellationToken.None);
             loaded.Should().HaveCount(1);
             var loadedPeer = loaded.Single();
             loadedPeer.PeerId.Should().Be(peerId);
             loadedPeer.DisplayName.CurrentValue.Should().Be("Alice");
-            loadedPeer.PublishedKeysToPeerIds.Should().HaveCount(3);
             loadedPeer.SignedPreKeys.Should().HaveCount(2);
             loadedPeer.Sessions.Count.Should().Be(1);
+
+            var loadedRelationships = await store.LoadRelationshipsAsync(CancellationToken.None);
+            loadedRelationships
+                .Count(r => r.SourcePeerId == model.PeerId && r.Type == RelationshipType.PublishedKey)
+                .Should()
+                .Be(3);
         }
         finally
         {
