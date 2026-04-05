@@ -90,11 +90,10 @@ public sealed class SimulatedPeerRuntimeServiceDecryptFailureDiagnosticsTests
         var sp = services.BuildServiceProvider();
         var scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
 
-        var options = Options.Create(new TransportOptions { GrpcPort = 5002 });
         var pending = new SimulatedPeerPendingInbox();
         var engine = new SignalProtocolEngine(new SystemClock());
 
-        var sut = new SimulatorStateService(new TestUiDispatcher(), repo, options, diagnostics, pending, scopeFactory, engine);
+        var sut = new SimulatorStateService(repo, diagnostics, pending, scopeFactory, engine);
         await sut.InitializeAsync(CancellationToken.None);
 
         var sessionId = new SessionId(Guid.NewGuid());

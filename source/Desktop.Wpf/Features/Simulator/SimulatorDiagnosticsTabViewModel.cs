@@ -23,7 +23,7 @@ public sealed class SimulatorDiagnosticsTabViewModel : IDisposable
         _filteredView = _diagnostics.Events
             .CreateView(static ev => ev)
             .AddTo(ref _bag);
-        _filteredNotify = _filteredView.ToNotifyCollectionChanged();
+        _filteredNotify = _filteredView.ToNotifyCollectionChanged(_ui.CollectionEventDispatcher);
 
         SelectedPeerId = new BindableReactiveProperty<Guid?>(null).AddTo(ref _bag);
         SelectedRelayHostPeerId = new BindableReactiveProperty<Guid?>(null).AddTo(ref _bag);

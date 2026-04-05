@@ -1,4 +1,5 @@
 using Desktop.Wpf.Features.Simulator.Models;
+using Desktop.Wpf.Shared.Mvvm;
 using Microsoft.Extensions.Logging;
 using ObservableCollections;
 using Percolator.Cryptography;
@@ -12,6 +13,7 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
     private readonly Guid _relayHostPeerId;
     private readonly Func<Guid, string> _peerNameById;
     private readonly Func<Task<SessionId?>> _getRelayHostToMainSessionId;
+    private readonly IUiDispatcher _ui;
     private readonly ISimulatorStateService _state;
     private readonly ISimulatorRelayDeliveryService _delivery;
     private readonly ISimulatorDiagnosticsService _diagnostics;
@@ -40,6 +42,7 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
         string relayHostName,
         Func<Guid, string> peerNameById,
         Func<Task<SessionId?>> getRelayHostToMainSessionId,
+        IUiDispatcher ui,
         ISimulatorStateService state,
         ISimulatorRelayDeliveryService delivery,
         ISimulatorDiagnosticsService diagnostics,
@@ -49,6 +52,7 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
         RelayHostName = relayHostName;
         _peerNameById = peerNameById;
         _getRelayHostToMainSessionId = getRelayHostToMainSessionId;
+        _ui = ui;
         _state = state;
         _delivery = delivery;
         _diagnostics = diagnostics;
@@ -61,7 +65,7 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
             .CreateView(p => new ActiveSessionTargetOption(p.PeerId, _peerNameById(p.PeerId)))
             .AddTo(ref _bag);
         _availableTargets.AttachFilter((p, _) => p.PeerId != _relayHostPeerId);
-        _availableTargetsNotify = _availableTargets.ToNotifyCollectionChanged().AddTo(ref _bag);
+        _availableTargetsNotify = _availableTargets.ToNotifyCollectionChanged(_ui.CollectionEventDispatcher).AddTo(ref _bag);
 
         _activeSessionTags = _state.Relationships
             .CreateView(rel => CreateActiveSessionTag(rel.TargetPeerId))
@@ -69,7 +73,7 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
         _activeSessionTags.AttachFilter((rel, _) =>
             rel.SourcePeerId == _relayHostPeerId
             && rel.Type == RelationshipType.RelayActiveSession);
-        _activeSessionTagsNotify = _activeSessionTags.ToNotifyCollectionChanged().AddTo(ref _bag);
+        _activeSessionTagsNotify = _activeSessionTags.ToNotifyCollectionChanged(_ui.CollectionEventDispatcher).AddTo(ref _bag);
         SelectedActiveSessionPeerId = new BindableReactiveProperty<Guid?>(null).AddTo(ref _bag);
 
         var synchronizedQueueView = _relay.MessageQueue
@@ -87,7 +91,7 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
             })
             .AddTo(ref _bag);
 
-        QueueItems = synchronizedQueueView.ToNotifyCollectionChanged().AddTo(ref _bag);
+        QueueItems = synchronizedQueueView.ToNotifyCollectionChanged(_ui.CollectionEventDispatcher).AddTo(ref _bag);
 
         QueueCount = synchronizedQueueView
             .ObserveCountChanged()

@@ -58,7 +58,6 @@ public sealed class SimulatorStateServiceInitializationTests
     {
         // Arrange
         var store = new RepositoryStub();
-        var options = Options.Create(new TransportOptions { GrpcPort = 5002 });
         var diagnostics = new SimulatorDiagnosticsService();
 
         var services = new ServiceCollection();
@@ -69,7 +68,7 @@ public sealed class SimulatorStateServiceInitializationTests
         var pending = new SimulatedPeerPendingInbox();
         var engine = new SignalProtocolEngine(new SystemClock());
 
-        var sut = new SimulatorStateService(new TestUiDispatcher(), store, options, diagnostics, pending, scopeFactory, engine);
+        var sut = new SimulatorStateService(store, diagnostics, pending, scopeFactory, engine);
 
         // Act
         var t1 = sut.InitializeAsync();

@@ -117,13 +117,10 @@ public sealed class SimulatedPeerRuntimeFinalizeRelayedTests
         var scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
 
         var engine = new SignalProtocolEngine(new SystemClock());
-        var options = Options.Create(new TransportOptions { GrpcPort = 5002 });
         var diagnostics = new SimulatorDiagnosticsService();
 
         var state = new SimulatorStateService(
-            ui: new TestUiDispatcher(),
             store: repo,
-            transportOptions: options,
             diagnostics: diagnostics,
             pending: pending,
             scopeFactory: scopeFactory,

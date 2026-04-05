@@ -49,7 +49,7 @@ public sealed class SimulatorHandshakesTabViewModel : IDisposable
 
         SelectedRelayHostPeerId = new BindableReactiveProperty<Guid?>(null).AddTo(ref _bag);
 
-        _relayHostsNotify = _relayHosts.ToNotifyCollectionChanged();
+        _relayHostsNotify = _relayHosts.ToNotifyCollectionChanged(_ui.CollectionEventDispatcher);
     }
 
     public sealed record RelayHostOption(Guid PeerId, string DisplayName);
@@ -81,7 +81,7 @@ public sealed class SimulatorHandshakesTabViewModel : IDisposable
         _cards = _state.Peers
             .CreateView(CreateCard)
             .AddTo(ref _bag);
-        _cardsNotify = _cards.ToNotifyCollectionChanged();
+        _cardsNotify = _cards.ToNotifyCollectionChanged(_ui.CollectionEventDispatcher);
     }
 
     private void HookRelayHosts()

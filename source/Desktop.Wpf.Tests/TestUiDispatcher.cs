@@ -2,11 +2,14 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Desktop.Wpf.Shared.Mvvm;
+using ObservableCollections;
 
 namespace Desktop.Wpf.Tests;
 
 internal sealed class TestUiDispatcher : IUiDispatcher
 {
+    public ICollectionEventDispatcher CollectionEventDispatcher { get; } = new SynchronizationContextCollectionEventDispatcher(new SynchronizationContext());
+
     public bool CheckAccess() => true;
 
     public Task InvokeAsync(Action action, CancellationToken cancellationToken = default)

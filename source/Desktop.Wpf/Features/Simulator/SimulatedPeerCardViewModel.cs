@@ -11,12 +11,14 @@ using ObservableCollections;
 using R3;
 using Percolator.Contracts;
 using Desktop.Wpf.Features.Simulator.Models;
+using Desktop.Wpf.Shared.Mvvm;
 
 namespace Desktop.Wpf.Features.Simulator;
 
 public sealed class SimulatedPeerCardViewModel : IDisposable
 {
     private readonly SimulatedPeerModel _model;
+    private readonly IUiDispatcher _ui;
     private readonly ISimulatorStateService _state;
     private readonly ISimulatorDiagnosticsService _diagnostics;
     private readonly Func<Guid, string> _resolvePeerName;
@@ -29,11 +31,13 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
 
     public SimulatedPeerCardViewModel(
         SimulatedPeerModel model,
+        IUiDispatcher ui,
         ISimulatorStateService state,
         ISimulatorDiagnosticsService diagnostics,
         Func<Guid, string> resolvePeerName)
     {
         _model = model;
+        _ui = ui;
         _state = state;
         _diagnostics = diagnostics;
         _resolvePeerName = resolvePeerName;
@@ -123,7 +127,7 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
             .CreateView(p => new PublishTargetOption(p.PeerId, _resolvePeerName(p.PeerId)))
             .AddTo(ref _bag);
         _availableTargetsView.AttachFilter((p, _) => p.PeerId != PeerId);
-        AvailablePublishTargets = _availableTargetsView.ToNotifyCollectionChanged().AddTo(ref _bag);
+        AvailablePublishTargets = _availableTargetsView.ToNotifyCollectionChanged(_ui.CollectionEventDispatcher).AddTo(ref _bag);
 
         // 2. Published To View (Projected from the flat Relationship Graph)
         _publishedToView = _state.Relationships
@@ -134,7 +138,7 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
             .AddTo(ref _bag);
         _publishedToView.AttachFilter((rel, _) => rel.SourcePeerId == PeerId && rel.Type == RelationshipType.PublishedKey);
         _publishedToView.ObserveRemove().Subscribe(evt => evt.Value.View.Dispose()).AddTo(ref _bag);
-        PublishedToTags = _publishedToView.ToNotifyCollectionChanged().AddTo(ref _bag);
+        PublishedToTags = _publishedToView.ToNotifyCollectionChanged(_ui.CollectionEventDispatcher).AddTo(ref _bag);
 
         // 3. Hosting For View (Projected from the flat Relationship Graph)
         _hostingForView = _state.Relationships
@@ -145,7 +149,7 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
             .AddTo(ref _bag);
         _hostingForView.AttachFilter((rel, _) => rel.TargetPeerId == PeerId && rel.Type == RelationshipType.PublishedKey);
         _hostingForView.ObserveRemove().Subscribe(evt => evt.Value.View.Dispose()).AddTo(ref _bag);
-        HostingForTags = _hostingForView.ToNotifyCollectionChanged().AddTo(ref _bag);
+        HostingForTags = _hostingForView.ToNotifyCollectionChanged(_ui.CollectionEventDispatcher).AddTo(ref _bag);
 
         _ = InitializeAsync();
     }
@@ -211,11 +215,11 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
             var pkh = await _state.ComputePublicKeyHashAsync(_model.PeerId, CancellationToken.None).ConfigureAwait(false);
             var hex = Convert.ToHexString(pkh);
             if (_disposed) return;
-            await Application.Current.Dispatcher.InvokeAsync(() =>
+            await _ui.InvokeAsync(() =>
             {
                 if (_disposed) return;
                 PublicKeyHashHex.Value = hex;
-            });
+            }, CancellationToken.None).ConfigureAwait(false);
         }
         catch
         {
@@ -224,19 +228,22 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
 
         try
         {
-            var endpoint = TryResolveEndpoint();
+            var host = _model.Host.CurrentValue;
+            var port = _model.Port.CurrentValue;
+            var endpoint = string.IsNullOrWhiteSpace(host) || port <= 0 ? null : $"{host}:{port}";
             if (endpoint is not null)
             {
                 if (_disposed) return;
-                await Application.Current.Dispatcher.InvokeAsync(() =>
+                await _ui.InvokeAsync(() =>
                 {
                     if (_disposed) return;
                     EndpointText.Value = endpoint;
-                });
+                }, CancellationToken.None).ConfigureAwait(false);
             }
         }
         catch
         {
+            // ignore
         }
     }
 

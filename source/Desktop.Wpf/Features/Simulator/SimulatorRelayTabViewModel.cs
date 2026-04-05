@@ -99,7 +99,7 @@ public sealed class SimulatorRelayTabViewModel : IDisposable
             .Subscribe(evt => evt.Value.View.Dispose())
             .AddTo(ref _bag);
 
-        _relayPanelsNotify = _relayPanels.ToNotifyCollectionChanged();
+        _relayPanelsNotify = _relayPanels.ToNotifyCollectionChanged(_ui.CollectionEventDispatcher);
     }
 
     private void StartAutoDeliverLoop()
@@ -177,12 +177,12 @@ public sealed class SimulatorRelayTabViewModel : IDisposable
     private SimulatedRelayQueuePanelViewModel CreatePanel(Desktop.Wpf.Features.Simulator.Models.SimulatedRelayModel relay)
     {
         var relayHostPeerId = relay.RelayHostPeerId;
-        var relayHostName = PeerNameById(relayHostPeerId);
         return new SimulatedRelayQueuePanelViewModel(
-            relayHostPeerId: relayHostPeerId,
-            relayHostName: relayHostName,
+            relayHostPeerId: relay.RelayHostPeerId,
+            relayHostName: PeerNameById(relayHostPeerId),
             peerNameById: PeerNameById,
             getRelayHostToMainSessionId: () => GetRelayHostToMainSessionIdAsync(relayHostPeerId),
+            ui: _ui,
             state: _state,
             delivery: _delivery,
             diagnostics: _diagnostics,

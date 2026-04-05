@@ -68,7 +68,7 @@ public sealed class SimulatorPeersTabViewModel : IDisposable
 
         // IMPORTANT: Call once and keep it alive for the VM lifetime.
         // Do NOT call ToNotifyCollectionChanged() repeatedly from a getter.
-        _peerCardsNotify = _peerCards.ToNotifyCollectionChanged();
+        _peerCardsNotify = _peerCards.ToNotifyCollectionChanged(_ui.CollectionEventDispatcher);
 
         peers.ObserveCountChanged()
             .ObserveOnCurrentSynchronizationContext()
@@ -83,6 +83,7 @@ public sealed class SimulatorPeersTabViewModel : IDisposable
     {
         return new SimulatedPeerCardViewModel(
             model: m,
+            ui: _ui,
             state: _state,
             diagnostics: _diagnostics,
             resolvePeerName: ResolvePeerName);
