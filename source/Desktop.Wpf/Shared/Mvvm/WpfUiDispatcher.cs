@@ -1,9 +1,13 @@
 using System.Windows;
+using ObservableCollections;
 
 namespace Desktop.Wpf.Shared.Mvvm;
 
 public sealed class WpfUiDispatcher : IUiDispatcher
 {
+    public ICollectionEventDispatcher CollectionEventDispatcher =>
+        SynchronizationContextCollectionEventDispatcher.Current;
+
     public bool CheckAccess()
         => Application.Current?.Dispatcher?.CheckAccess() ?? true;
 
