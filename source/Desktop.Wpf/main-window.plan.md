@@ -27,6 +27,258 @@ Constraints / notes:
 
 ## Chunk A 
 
+Outcome:
+
+- `SimulatorStateService` is a **pure singleton orchestrator** (R3 “pure service” pattern):
+  - No `IUiDispatcher` injection.
+  - Exposes state only as `IReadOnlyObservableList<T>` / `IReadOnlyObservableDictionary<TKey,TValue>`.
+  - Performs domain mutations directly on the calling thread under domain gates (`_peerGate`, `_relayGate`).
+- All WPF thread-bridging is owned by **ViewModels** (WPF MVVM guidelines):
+  - Collection projections marshal using the injected dispatcher: `IUiDispatcher.CollectionEventDispatcher`.
+  - Property projections marshal using `.ObserveOnCurrentSynchronizationContext()`.
+- Simulator UI and unit tests are updated to the new boundaries.
+
+Critical review notes (what must change):
+
+- The service currently performs UI-thread marshalling via `_ui.InvokeAsync(...)` when mutating domain `ObservableList<T>`.
+  - This violates the R3 “UI-agnostic mandate” and couples the service to WPF.
+- Once the service becomes UI-agnostic, domain collections will be mutated from background threads.
+  - Any VM binding to `ToNotifyCollectionChanged()` without a dispatcher will throw `NotSupportedException`.
+  - Therefore, every simulator VM that binds to projected collections must explicitly marshal collection change events.
+
+Affected ViewModels (must be audited and likely updated):
+
+- `HandshakeSimulatorViewModel`
+- `SimulatedHandshakeStateMachineCardViewModel`
+- `SimulatedPeerCardViewModel`
+- `SimulatedPeerItemViewModel`
+- `SimulatedRelayQueueItemViewModel`
+- `SimulatedRelayQueuePanelViewModel`
+- `SimulatorDiagnosticsTabViewModel`
+- `SimulatorHandshakesTabViewModel`
+- `SimulatorPeersTabViewModel`
+- `SimulatorRelayTabViewModel`
+- `SimulatorSessionsTabViewModel`
+
+Also affected (non-VM but part of the simulator boundary):
+
+- `SimulatorStateService` (primary refactor)
+- `ISimulatorStateService` (ensure read-only exposure stays correct)
+- Any simulator components that subscribe to state changes and assume UI-thread affinity:
+  - `SimulatorOutboundInterceptor`
+  - `SimulatorInitializer`
+  - `SimulatorRelayDeliveryService`
+
+Work (plan):
+
+- Refactor `SimulatorStateService` into a pure service
+  - Remove `IUiDispatcher` from the constructor and DI registrations.
+  - Replace all `_ui.InvokeAsync(() => list.Add/remove/clear...)` with direct mutations under the correct gate.
+  - Enforce the concurrency invariant:
+    - Any iteration/snapshot of `_peers`, `_relays`, `_relationships`, dictionaries must occur under the same gate used for mutations.
+  - Ensure the service exposes state as read-only:
+    - `Peers`, `Relays`, `Relationships` stay `IReadOnlyObservableList<T>`.
+  - Confirm persistence still uses Domain Snapshot Pattern:
+    - Snapshot creation under gate.
+    - Repository receives immutable records only.
+
+- Update simulator ViewModels to own WPF thread bridging
+  - Collections:
+    - Any `CreateView(...).ToNotifyCollectionChanged()` must become:
+      - `.ToNotifyCollectionChanged(_ui.CollectionEventDispatcher)`.
+  - Properties:
+    - Any `.ToBindableReactiveProperty()` or `BindableReactiveProperty` projection must marshal first:
+      - `.ObserveOnCurrentSynchronizationContext()`.
+  - Filtering:
+    - Keep filters purely VM-level (`AttachFilter`, `ResetFilter`, and targeted refresh).
+  - Disposal:
+    - Ensure every `CreateView` has `ObserveRemove().Subscribe(evt => evt.Value.View.Dispose())` when projecting child VMs.
+
+- Update unit tests for the new threading boundaries
+  - Simulator tests must stop assuming service mutates state on the UI thread.
+  - Add/adjust test infrastructure to provide a `SynchronizationContext` when constructing VMs that call
+    `_ui.CollectionEventDispatcher`.
+  - Update affected test classes (expected to include, but not limited to):
+    - `SimulatorStateServiceInitializationTests`
+    - `SimulatorStateStoreTests`
+    - `SimulatedPeerRuntime*Tests`
+  - Add a small set of focused tests:
+    - VM collection projections do not throw cross-thread when service mutates on background thread.
+    - Service methods mutate domain lists without dispatcher dependency.
+
+- Follow-up audit / regression checklist
+  - Run simulator UI flows:
+    - Add/remove peers
+    - Toggle relay capable
+    - Add/remove published-key relationships
+    - Add/remove relay active sessions
+    - Relay queue updates
+  - Ensure no VM binds to a list via `BindableReactiveProperty<IReadOnlyList<T>>` (virtualization rule).
+  - Ensure no sorting is introduced in VMs (XAML `CollectionViewSource` only).
+
+Definition of done:
+
+- `SimulatorStateService` has **zero** references to `IUiDispatcher` (constructor + body).
+- All simulator Views/VMs remain stable (no WPF cross-thread exceptions) under background mutations.
+- Simulator unit tests compile and pass.
+
+Subchunks (implement one at a time; each is a large, coherent change-set):
+
+## Chunk A.1 — Dispatcher boundary finalized (interface + WPF implementation + docs)
+
+Outcome:
+
+- `IUiDispatcher` exposes a **get-only** `CollectionEventDispatcher` (type: `ICollectionEventDispatcher`) so VMs can bridge collection change events without static globals.
+- `WpfUiDispatcher` implements `CollectionEventDispatcher`.
+- Docs reference `_ui.CollectionEventDispatcher` (not `SynchronizationContextCollectionEventDispatcher.Current`).
+
+Concrete edits:
+
+- `Desktop.Wpf/Shared/Mvvm/IUiDispatcher.cs`
+  - Ensure the property exists:
+    - `ICollectionEventDispatcher CollectionEventDispatcher { get; }`
+- `Desktop.Wpf/Shared/Mvvm/WpfUiDispatcher.cs`
+  - Implement:
+    - `public ICollectionEventDispatcher CollectionEventDispatcher => SynchronizationContextCollectionEventDispatcher.Current;`
+- `Desktop.Wpf/r3.readme.md`
+- `Desktop.Wpf/main-window.plan.md` (this Chunk A)
+
+Definition of done:
+
+- All code compiles with the new interface property.
+- No docs mention the static `SynchronizationContextCollectionEventDispatcher.Current`.
+
+## Chunk A.2 — Make `SimulatorStateService` a pure service (remove `IUiDispatcher`)
+
+Outcome:
+
+- `SimulatorStateService` has **no** `IUiDispatcher` dependency.
+- All domain collection mutations happen under gates on the calling thread.
+
+Concrete edits (file: `Desktop.Wpf/Features/Simulator/SimulatorStateService.cs`):
+
+- Remove field + ctor parameter:
+  - `private readonly IUiDispatcher _ui;`
+  - `SimulatorStateService(IUiDispatcher ui, ...)`
+- Replace every `_ui.InvokeAsync(() => ...)` that mutates domain lists with direct mutations under the correct gate.
+  - Known call sites to remove (from grep):
+    - `_relays.Clear()`
+    - `_relays.Add(relay)`
+    - `_relationships.Clear()` + `_relationships.Add(rel)` loop
+    - `_peers.Clear()` + `_peers.Add(model)` loop
+    - `_peers.Add(model)`
+    - `_peers.Remove(removedModel)`
+    - `_relationships.Add(rel)` / `_relationships.Remove(rel)`
+    - `_relays.Add(loaded)`
+    - `_relays.Remove(relay)`
+
+Concurrency invariants (must be enforced while doing the above):
+
+- Any iteration/snapshot of `_peers`, `_relays`, `_relationships` must be done under the same gate as mutation.
+- Do not introduce any UI-thread marshalling in the service.
+
+Definition of done:
+
+- `SimulatorStateService.cs` contains **zero** references to `IUiDispatcher` or `_ui.`.
+- Build succeeds (even if some VMs still throw at runtime until A.3 is applied).
+
+## Chunk A.3 — Fix simulator VM collection bridging (no cross-thread WPF exceptions)
+
+Outcome:
+
+- Any simulator VM binding to `NotifyCollectionChangedSynchronizedViewList<T>` uses the dispatcher-aware overload:
+  - `.ToNotifyCollectionChanged(_ui.CollectionEventDispatcher)`
+
+Concrete edits (known files + call sites from grep):
+
+- `Desktop.Wpf/Features/Simulator/SimulatedPeerCardViewModel.cs`
+  - Update:
+    - `AvailablePublishTargets = _availableTargetsView.ToNotifyCollectionChanged(...)`
+    - `PublishedToTags = _publishedToView.ToNotifyCollectionChanged(...)`
+    - `HostingForTags = _hostingForView.ToNotifyCollectionChanged(...)`
+  - Requires `IUiDispatcher` injection if not already present.
+
+- `Desktop.Wpf/Features/Simulator/SimulatedRelayQueuePanelViewModel.cs`
+  - Update:
+    - `_availableTargetsNotify = _availableTargets.ToNotifyCollectionChanged(...)`
+    - `_activeSessionTagsNotify = _activeSessionTags.ToNotifyCollectionChanged(...)`
+    - `QueueItems = synchronizedQueueView.ToNotifyCollectionChanged(...)`
+  - Requires `IUiDispatcher` injection if not already present.
+
+- `Desktop.Wpf/Features/Simulator/SimulatorDiagnosticsTabViewModel.cs`
+  - Update:
+    - `_filteredNotify = _filteredView.ToNotifyCollectionChanged(...)`
+
+- `Desktop.Wpf/Features/Simulator/SimulatorHandshakesTabViewModel.cs`
+  - Update:
+    - `_relayHostsNotify = _relayHosts.ToNotifyCollectionChanged(...)`
+    - `_cardsNotify = _cards.ToNotifyCollectionChanged(...)`
+
+- `Desktop.Wpf/Features/Simulator/SimulatorPeersTabViewModel.cs`
+  - Update:
+    - `_peerCardsNotify = _peerCards.ToNotifyCollectionChanged(...)`
+
+- `Desktop.Wpf/Features/Simulator/SimulatorRelayTabViewModel.cs`
+  - Update:
+    - `_relayPanelsNotify = _relayPanels.ToNotifyCollectionChanged(...)`
+
+Definition of done:
+
+- All simulator VMs compile.
+- The simulator UI no longer throws WPF cross-thread exceptions when the service mutates domain collections off-thread.
+
+## Chunk A.4 — VM UI-thread usage audit (keep `_ui.InvokeAsync` only for true UI operations)
+
+Outcome:
+
+- VMs may still use `_ui.InvokeAsync(...)`, but only for:
+  - clipboard access
+  - updating UI-only `BindableReactiveProperty` values from background flows
+  - safely enumerating UI-bound adapters (rare; prefer querying domain instead)
+
+Concrete edits (known VM `_ui.InvokeAsync` call sites from grep):
+
+- `Desktop.Wpf/Features/Simulator/HandshakeSimulatorViewModel.cs`
+  - Clipboard write stays on UI thread.
+  - Status updates remain UI-thread safe.
+
+- `Desktop.Wpf/Features/Simulator/SimulatorDiagnosticsTabViewModel.cs`
+  - Keep UI-thread filter application.
+  - Ensure any domain enumeration is not performed against UI-bound adapters off-thread.
+
+- `Desktop.Wpf/Features/Simulator/SimulatorHandshakesTabViewModel.cs`
+  - Keep UI-thread rebuild hooks, but ensure they do not assume service thread affinity.
+
+- `Desktop.Wpf/Features/Simulator/SimulatorPeersTabViewModel.cs`
+  - `InitializePeerCardsView` can remain invoked on UI thread (VM concern).
+
+- `Desktop.Wpf/Features/Simulator/SimulatorRelayTabViewModel.cs`
+  - Confirm auto-deliver loop does not enumerate UI-bound lists off-thread without `_ui.InvokeAsync`.
+
+Definition of done:
+
+- No VM enumerates `NotifyCollectionChangedSynchronizedViewList<T>` off-thread.
+- Remaining `_ui.InvokeAsync` usage in VMs is strictly UI-only.
+
+## Chunk A.5 — Update unit tests for new dispatcher boundary
+
+Outcome:
+
+- Simulator tests compile and pass under the new `IUiDispatcher.CollectionEventDispatcher` requirement.
+
+Concrete edits:
+
+- Provide a test `IUiDispatcher` implementation that:
+  - Returns a deterministic `ICollectionEventDispatcher`.
+  - Uses a test `SynchronizationContext` for `InvokeAsync` execution.
+
+- Update test classes that construct simulator VMs to pass the test dispatcher.
+
+Definition of done:
+
+- `dotnet test` passes.
+
+---
 
 ## Chunk I — Notification badge + default focus behavior for Connection Management button
 
