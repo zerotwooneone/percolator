@@ -280,6 +280,252 @@ Definition of done:
 
 ---
 
+## Chunk B — Simulator shell + loading state (remove redundant InitializeAsync waits)
+
+Outcome:
+
+- The simulator opens a window immediately and shows a simple **Loading…** state while the simulator state is initialized.
+- `HandshakeSimulatorViewModel` no longer needs to call `ISimulatorStateService.InitializeAsync` (or otherwise "wait for state") in three separate places.
+- Initialization responsibility is moved behind a dedicated initializer interface:
+  - `ISimulatorStateInitializer.InitializeAsync(...)`.
+  - `SimulatorStateService` may implement this interface.
+  - `ISimulatorStateService` becomes strictly a **runtime state + actions** contract.
+
+Motivation:
+
+- WPF will bind to ViewModel properties as soon as `DataContext` is set.
+- Async initialization that occurs after `DataContext` assignment can cause:
+  - fragile “ViewModel not initialized” patterns,
+  - redundant initialization calls,
+  - and UI that stays closed while work happens.
+
+Work (plan):
+
+### Chunk B.1 — Split initialization into `ISimulatorStateInitializer`
+
+- Add interface:
+  - File: `Desktop.Wpf/Features/Simulator/ISimulatorStateInitializer.cs`
+  - Shape:
+    - `Task InitializeAsync(CancellationToken cancellationToken = default);`
+- Update `ISimulatorStateService`:
+  - Remove `InitializeAsync(...)` from the interface.
+- Update `SimulatorStateService`:
+  - Implement `ISimulatorStateInitializer`.
+  - Keep the existing initialization logic, but expose it only via the initializer interface.
+- Update DI registrations (App startup):
+  - Ensure `SimulatorStateService` is registered once, and is resolved as:
+    - `ISimulatorStateService`
+    - `ISimulatorStateInitializer`
+  - Avoid double-singleton instances.
+
+Implementation detail (must be followed):
+
+- Register the concrete singleton once, then map interfaces to the same instance.
+  - Example pattern:
+    - `services.AddSingleton<SimulatorStateService>();`
+    - `services.AddSingleton<ISimulatorStateService>(sp => sp.GetRequiredService<SimulatorStateService>());`
+    - `services.AddSingleton<ISimulatorStateInitializer>(sp => sp.GetRequiredService<SimulatorStateService>());`
+
+### Chunk B.2 — Single simulator window with an in-window loading view
+
+Goal:
+
+- The simulator uses **one window**.
+- The window opens immediately and initially shows a simple **Loading…** view.
+- Only after `ISimulatorStateInitializer.InitializeAsync` completes does the window show the existing simulator UI (what it shows today).
+
+Concrete edits:
+
+- Introduce a lightweight host ViewModel that owns loading state + the real content VM:
+  - `Desktop.Wpf/Features/Simulator/HandshakeSimulatorHostViewModel.cs`
+  - Responsibilities:
+    - `BindableReactiveProperty<bool> IsLoading` (default true)
+    - `BindableReactiveProperty<string?> Status` (default "Loading…")
+    - `object? ContentViewModel` (null until ready; or a typed property)
+    - On startup, call and await `ISimulatorStateInitializer.InitializeAsync`.
+    - When initialization succeeds:
+      - create/resolve the existing simulator VM (current `HandshakeSimulatorViewModel`),
+      - set `ContentViewModel`,
+      - set `IsLoading = false`.
+    - When initialization fails:
+      - keep `IsLoading = true` and set `Status` to the error.
+
+Lifetime ownership (must be explicit):
+
+- `HandshakeSimulatorHostViewModel` owns the inner simulator VM lifetime.
+  - If the host VM is disposed, it must dispose the inner simulator VM if it was created.
+  - If initialization fails after the inner VM has been created, the host must dispose it.
+  - The window should dispose the host VM on `Closed` (existing pattern).
+
+- Update the simulator window to bind to the host VM and switch content:
+  - `Desktop.Wpf/Features/Simulator/HandshakeSimulatorWindow.xaml`
+    - Display a simple "Loading…" visual when `IsLoading` is true.
+    - Display the existing simulator content (the view bound to `HandshakeSimulatorViewModel`) when `IsLoading` is false.
+    - Implementation can use:
+      - a `ContentControl` bound to `ContentViewModel`, with a `DataTemplate` for `HandshakeSimulatorViewModel`,
+      - and a separate loading overlay/placeholder driven by `IsLoading`.
+  - `Desktop.Wpf/Features/Simulator/HandshakeSimulatorWindow.xaml.cs`
+    - Inject `HandshakeSimulatorHostViewModel` (not the inner VM).
+    - Set `DataContext = hostVm`.
+    - Kick off host initialization without blocking window creation.
+
+Idiomatic pattern notes (must be followed):
+
+- The host VM should not rely on fragile timing (e.g., hoping the service is initialized before bindings evaluate).
+  - The host VM must be safe to bind immediately.
+- Avoid "fire-and-forget" tasks that can crash the process:
+  - Store the initialization `Task` (or use `SubscribeAwait` with error handling) so exceptions are observed.
+  - Surface failures via `Status`.
+- Support cancellation:
+  - The host VM should accept a `CancellationToken` and cancel initialization when the window closes.
+  - Ensure the host VM disposes the inner simulator VM if initialization fails after creating it.
+
+Transition orchestration (must be MVVM-friendly):
+
+- The host VM may obtain the inner VM via DI (constructor injection of a factory or `Func<HandshakeSimulatorViewModel>`).
+- Avoid `new HandshakeSimulatorViewModel(...)` in code-behind.
+
+Definition of done:
+
+- Opening the simulator shows a window immediately with "Loading…".
+- The existing simulator UI is not displayed until the simulator state has been initialized.
+
+### Chunk B.3 — Constructor-time projections in simulator tab VMs (no-throw bindable getters)
+
+Goal:
+
+- WPF bindings must be able to evaluate immediately after `DataContext` is set.
+- Therefore, any bindable property getter used by XAML must be safe:
+  - Do **not** throw `InvalidOperationException("ViewModel not initialized")`.
+  - Provide an empty-but-valid collection instance from the constructor.
+
+Concrete edits:
+
+- `Desktop.Wpf/Features/Simulator/SimulatorPeersTabViewModel.cs`
+  - Remove the `PeerCards` getter throw pattern.
+  - Construct the `CreateView(...)` and `ToNotifyCollectionChanged(_ui.CollectionEventDispatcher)` adapter in the constructor.
+  - Remove `InitializeAsync` (or reduce it to no-op / remove state waits entirely).
+
+- `Desktop.Wpf/Features/Simulator/SimulatorHandshakesTabViewModel.cs`
+  - Remove `Cards` getter throw pattern.
+  - Create `_cards` projection + `_cardsNotify` in the constructor.
+  - Keep relay-host list (`_relayHostsNotify`) created in constructor (already done).
+  - Wire `HookRelayHosts()` from constructor (it is UI-thread oriented and should not depend on service initialization barriers).
+  - Remove `InitializeAsync` (or reduce it to directory-only concerns if any remain after shell work).
+
+- `Desktop.Wpf/Features/Simulator/SimulatorRelayTabViewModel.cs`
+  - Remove `RelayPanels` getter throw pattern.
+  - Create `_relayPanels` projection + `_relayPanelsNotify` in the constructor.
+  - Remove `InitializeAsync` state waits.
+
+Definition of done:
+
+- These three tab VMs can be constructed and bound without calling `InitializeAsync`.
+- No bindable getter throws due to "not initialized".
+
+### Chunk B.4 — Relay auto-deliver lifecycle moved into a dedicated service
+
+Goal:
+
+- The current relay auto-deliver loop is long-running background work and is not VM initialization.
+- Replace it with a dedicated service that owns start/stop lifecycle.
+
+Concrete edits:
+
+- Add a new service interface + implementation:
+  - `Desktop.Wpf/Features/Simulator/ISimulatorRelayAutoDeliverService.cs`
+  - `Desktop.Wpf/Features/Simulator/SimulatorRelayAutoDeliverService.cs`
+  - Responsibilities:
+    - Start/stop a background loop.
+    - Periodically query domain state (`_state.Relays`, `_state.Relationships`) and deliver items.
+    - Be cancellation-safe and disposable.
+  - The service should depend on:
+    - `ISimulatorStateService`
+    - `ISimulatorRelayDeliveryService`
+
+Non-goals / constraints (must be followed):
+
+- The relay auto-deliver service must NOT enumerate UI-bound adapter collections (e.g., `NotifyCollectionChangedSynchronizedViewList<T>`).
+- The relay auto-deliver service must NOT depend on `IUiDispatcher`.
+  - It must be purely domain-driven and safe to run in tests.
+
+- Update `SimulatorRelayTabViewModel`:
+  - Remove `_autoDeliverCts`, `_autoDeliverLoop`, and `AutoDeliverLoopAsync` from the VM.
+  - Keep only UI state:
+    - `GlobalAutoRelayAll`
+    - `RelayPanels` projection
+
+- Decide where start/stop is called:
+  - Preferred: shell window (or the real simulator window) starts the service on `Loaded` and stops it on `Closed`.
+
+Definition of done:
+
+- Relay auto-deliver continues to function.
+- No background loop is owned by the tab VM.
+
+### Chunk B.5 — Refactor handshake simulator startup to use the shell
+
+- Remove simulator-state initialization waits from:
+  - `Desktop.Wpf/Features/Simulator/HandshakeSimulatorViewModel.cs`
+- The handshake simulator window/viewmodel assumes the state is already initialized.
+- Ensure `HandshakeSimulatorWindow.xaml.cs` does not need to await initialization before setting `DataContext`.
+
+### Chunk B.6 — Update tests and simulator entry points
+
+- Update any tests that were calling `ISimulatorStateService.InitializeAsync`:
+  - Call `ISimulatorStateInitializer.InitializeAsync` instead.
+- Ensure `dotnet test` remains green.
+
+### Chunk B.7 — Simulator unit test fallout (initializer split + constructor projections + relay loop service)
+
+Goal:
+
+- Make test fallout explicit and non-surprising.
+- Ensure tests remain focused on observable behavior and compile against the new contracts.
+
+Concrete affected test files (from grep; update these explicitly):
+
+- `Desktop.Wpf.Tests/SimulatorStateServiceInitializationTests.cs`
+  - If `InitializeAsync` is removed from `ISimulatorStateService`, update tests to call:
+    - `ISimulatorStateInitializer.InitializeAsync` (or cast `sut` to initializer if using concrete type).
+
+- `Desktop.Wpf.Tests/SimulatedPeerRuntimeFinalizeTests.cs`
+- `Desktop.Wpf.Tests/SimulatedPeerRuntimeFinalizeRelayedTests.cs`
+- `Desktop.Wpf.Tests/SimulatedPeerRuntimeStandardHandshakeRelayedTests.cs`
+- `Desktop.Wpf.Tests/SimulatedPeerRuntimeServiceDecryptFailureDiagnosticsTests.cs`
+  - These tests currently call `sut.InitializeAsync(...)` on the service.
+  - Update to call `initializer.InitializeAsync(...)` instead.
+
+- `Desktop.Wpf.Tests/SimulatedPeerDirectoryInitializationTests.cs`
+  - This test currently mocks `ISimulatorStateService.InitializeAsync`.
+  - Update it to mock `ISimulatorStateInitializer.InitializeAsync`.
+  - `SimulatorInitializer` should depend on the initializer interface (or otherwise be refactored so the test can control init gating deterministically).
+
+Additional expected fallout (verify during implementation):
+
+- Any tests that construct simulator tab VMs and previously required calling `InitializeAsync` before reading properties.
+  - After constructor-time projections (B.3), tests should not need an init step to access bindable collections.
+
+- Relay loop service (B.4):
+  - If any tests assumed `SimulatorRelayTabViewModel.InitializeAsync` starts auto-deliver, update those tests to explicitly start the relay auto-deliver service (or to assert delivery by directly invoking relay-delivery APIs).
+
+Definition of done:
+
+- All simulator unit tests compile and pass.
+- No tests reference the removed `ISimulatorStateService.InitializeAsync`.
+
+Chunk B definition of done (overall):
+
+- `HandshakeSimulatorWindow` opens immediately and shows "Loading…".
+- The existing simulator UI is not displayed until `ISimulatorStateInitializer.InitializeAsync` completes.
+- `HandshakeSimulatorViewModel` no longer contains redundant “wait for simulator state to load” calls.
+- `ISimulatorStateService` no longer exposes `InitializeAsync`.
+- Simulator tabs can be constructed/bound without calling `InitializeAsync`.
+- Relay auto-deliver loop is owned by the dedicated service (not a tab VM).
+- Build + tests are green.
+
+---
+
 ## Chunk I — Notification badge + default focus behavior for Connection Management button
 
 Outcome:
