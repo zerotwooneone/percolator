@@ -11,8 +11,6 @@ public class SecureSession
     public RatchetState State => _state;
     public DateTimeOffset CreatedAtUtc { get; }
     public DateTimeOffset LastUsedAtUtc { get; private set; }
-    private ulong _sendCounter;
-    private ulong _recvCounter;
     private readonly Dictionary<ulong, SessionRatchetMessage> _skippedBuffer = new();
     private readonly bool _isInitiator;
     private readonly ISessionCrypto _crypto;
@@ -27,8 +25,6 @@ public class SecureSession
         _state = state;
         CreatedAtUtc = now;
         LastUsedAtUtc = now;
-        _sendCounter = 0UL;
-        _recvCounter = 0UL;
         _isInitiator = isInitiator;
         _crypto = crypto;
     }
@@ -69,11 +65,11 @@ public class SecureSession
     {
         if (clock is null) throw new ArgumentNullException(nameof(clock));
         LastUsedAtUtc = clock.UtcNow;
-        var previousChainLength = _sendCounter;
-        var (ct, headerKey, newState) = _crypto.DR_Encrypt(_state, plaintext, new AssociatedData(Array.Empty<byte>()), _sendCounter, previousChainLength);
-        var msg = SessionRatchetMessage.Create(headerKey, _sendCounter, previousChainLength, ct);
+        var counter = _state.SendingCounter;
+        var previousChainLength = counter;
+        var (ct, headerKey, newState) = _crypto.DR_Encrypt(_state, plaintext, new AssociatedData(Array.Empty<byte>()), counter, previousChainLength);
+        var msg = SessionRatchetMessage.Create(headerKey, counter, previousChainLength, ct);
         _state = newState;
-        _sendCounter++;
         return msg;
     }
 
@@ -82,11 +78,11 @@ public class SecureSession
         if (associatedData is null) throw new ArgumentNullException(nameof(associatedData));
         if (clock is null) throw new ArgumentNullException(nameof(clock));
         LastUsedAtUtc = clock.UtcNow;
-        var previousChainLength = _sendCounter;
-        var (ct, headerKey, newState) = _crypto.DR_Encrypt(_state, plaintext, associatedData, _sendCounter, previousChainLength);
-        var msg = SessionRatchetMessage.Create(headerKey, _sendCounter, previousChainLength, ct);
+        var counter = _state.SendingCounter;
+        var previousChainLength = counter;
+        var (ct, headerKey, newState) = _crypto.DR_Encrypt(_state, plaintext, associatedData, counter, previousChainLength);
+        var msg = SessionRatchetMessage.Create(headerKey, counter, previousChainLength, ct);
         _state = newState;
-        _sendCounter++;
         return msg;
     }
 
@@ -95,14 +91,15 @@ public class SecureSession
         if (clock is null) throw new ArgumentNullException(nameof(clock));
         LastUsedAtUtc = clock.UtcNow;
         var (preKey, ctr, _) = message.GetHeader();
-        if (ctr > _recvCounter)
+        var recvCounter = _state.ReceivingCounter;
+        if (ctr > recvCounter)
         {
             if (_skippedBuffer.Count >= _state.SkippedKeyLimit)
                 throw new InvalidOperationException("Skipped-key buffer limit reached.");
             _skippedBuffer[ctr] = message;
             return new Plaintext(Array.Empty<byte>());
         }
-        if (ctr < _recvCounter)
+        if (ctr < recvCounter)
         {
             throw new InvalidOperationException("Replay detected.");
         }
@@ -117,7 +114,6 @@ public class SecureSession
         {
             throw new InvalidOperationException("Malformed or unauthentic frame.");
         }
-        _recvCounter++;
         return pt;
     }
 
@@ -127,14 +123,15 @@ public class SecureSession
         if (clock is null) throw new ArgumentNullException(nameof(clock));
         LastUsedAtUtc = clock.UtcNow;
         var (preKey, ctr, _) = message.GetHeader();
-        if (ctr > _recvCounter)
+        var recvCounter = _state.ReceivingCounter;
+        if (ctr > recvCounter)
         {
             if (_skippedBuffer.Count >= _state.SkippedKeyLimit)
                 throw new InvalidOperationException("Skipped-key buffer limit reached.");
             _skippedBuffer[ctr] = message;
             return new Plaintext(Array.Empty<byte>());
         }
-        if (ctr < _recvCounter)
+        if (ctr < recvCounter)
         {
             throw new InvalidOperationException("Replay detected.");
         }
@@ -149,7 +146,6 @@ public class SecureSession
         {
             throw new InvalidOperationException("Malformed or unauthentic frame.");
         }
-        _recvCounter++;
         return pt;
     }
 }
