@@ -1,6 +1,5 @@
 using System.Security.Cryptography;
 using System.Windows;
-using System.Windows.Media;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.Options;
@@ -50,14 +49,13 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
             .ToBindableReactiveProperty("No Handshake")
             .AddTo(ref _bag);
 
+        UiState = _model.UiState
+            .ToBindableReactiveProperty(SimulatorPeerUiState.Ready)
+            .AddTo(ref _bag);
+
         StateBadgeText = _model.UiState
             .Select(s => $"STATE: {MapState(s).ToUpperInvariant()}" )
             .ToBindableReactiveProperty("STATE: NO HANDSHAKE")
-            .AddTo(ref _bag);
-
-        StateBadgeBackground = _model.UiState
-            .Select(MapBadgeBackground)
-            .ToBindableReactiveProperty(Brushes.Transparent)
             .AddTo(ref _bag);
 
         ShowSendRequest = _model.UiState
@@ -113,7 +111,7 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
 
     public BindableReactiveProperty<string> StateBadgeText { get; }
 
-    public BindableReactiveProperty<Brush> StateBadgeBackground { get; }
+    public BindableReactiveProperty<SimulatorPeerUiState> UiState { get; }
 
     public BindableReactiveProperty<bool> ShowSendRequest { get; }
 
@@ -495,26 +493,13 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
         };
     }
 
-    private static Brush MapBadgeBackground(SimulatorPeerUiState state)
-    {
-        return state switch
-        {
-            SimulatorPeerUiState.Ready => new SolidColorBrush((Color)ColorConverter.ConvertFromString("#333333")),
-            SimulatorPeerUiState.OutboundPending => new SolidColorBrush((Color)ColorConverter.ConvertFromString("#3A2A05")),
-            SimulatorPeerUiState.InboundPending => new SolidColorBrush((Color)ColorConverter.ConvertFromString("#2B1646")),
-            SimulatorPeerUiState.Established => new SolidColorBrush((Color)ColorConverter.ConvertFromString("#063A26")),
-            SimulatorPeerUiState.Expired => new SolidColorBrush((Color)ColorConverter.ConvertFromString("#3A0505")),
-            _ => new SolidColorBrush((Color)ColorConverter.ConvertFromString("#333333"))
-        };
-    }
-
     public void Dispose()
     {
         _bag.Dispose();
         DisplayName.Dispose();
         StateText.Dispose();
         StateBadgeText.Dispose();
-        StateBadgeBackground.Dispose();
+        UiState.Dispose();
         ShowSendRequest.Dispose();
         ShowAccept.Dispose();
         ShowForceExpire.Dispose();

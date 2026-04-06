@@ -5,6 +5,13 @@
                     xmlns:system="clr-namespace:System;assembly=System.Runtime">
   <!-- Focus ring thickness preset -->
   <Thickness x:Key="FocusRingThickness">1</Thickness>
+
+  <SolidColorBrush x:Key="Simulator.HandshakeBadge.ReadyBrush" Color="#333333"/>
+  <SolidColorBrush x:Key="Simulator.HandshakeBadge.OutboundPendingBrush" Color="#3A2A05"/>
+  <SolidColorBrush x:Key="Simulator.HandshakeBadge.InboundPendingBrush" Color="#2B1646"/>
+  <SolidColorBrush x:Key="Simulator.HandshakeBadge.EstablishedBrush" Color="#063A26"/>
+  <SolidColorBrush x:Key="Simulator.HandshakeBadge.ExpiredBrush" Color="#3A0505"/>
+
   <Style x:Key="BaseWindow" TargetType="Window">
     <Setter Property="Background" Value="{StaticResource SurfaceBrush}"/>
     <Setter Property="Foreground" Value="{StaticResource OnSurfaceBrush}"/>
