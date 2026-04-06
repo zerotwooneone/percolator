@@ -21,6 +21,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
     private readonly ISimulatedPeerPendingInbox _pending;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly Desktop.Wpf.Features.Simulator.Protocol.ISignalProtocolEngine _engine;
+    private readonly IOptions<TransportOptions> _transportOptions;
 
     private readonly Subject<Unit> _saveTrigger = new();
     private DisposableBag _bag;
@@ -53,12 +54,14 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         ISimulatorDiagnosticsService diagnostics,
         ISimulatedPeerPendingInbox pending,
         IServiceScopeFactory scopeFactory,
+        IOptions<TransportOptions> transportOptions,
         Desktop.Wpf.Features.Simulator.Protocol.ISignalProtocolEngine engine)
     {
         _store = store;
         _diagnostics = diagnostics;
         _pending = pending;
         _scopeFactory = scopeFactory;
+        _transportOptions = transportOptions;
         _engine = engine;
 
         _saveTrigger
@@ -1800,33 +1803,30 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         }
 
         var name = string.IsNullOrWhiteSpace(displayName) ? null : displayName.Trim();
-        var model = new SimulatedPeerModel(
-            peerId: peerId,
-            displayName: name,
-            isOnline: true,
-            isRelayCapable: false,
-            identitySigningKeySpki: spki,
-            identitySigningKeyPrivateKeyEcPrivateKey: priv,
-            connectionMode: ConnectionMode.Direct,
-            host: null,
-            port: 0,
-            relayPeerId: null);
 
+        SimulatedPeerModel model;
         await _peerGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            var host = AllocateNextLoopbackHostOnPeerGate();
+            var port = _transportOptions.Value.SimulatorPort;
+            if (port == 0) port = 5002;
+
+            model = new SimulatedPeerModel(
+                peerId: peerId,
+                displayName: name,
+                isOnline: true,
+                isRelayCapable: false,
+                identitySigningKeySpki: spki,
+                identitySigningKeyPrivateKeyEcPrivateKey: priv,
+                connectionMode: ConnectionMode.Direct,
+                host: host,
+                port: port,
+                relayPeerId: null);
+
             _peerById[peerId] = model;
-            AttachRuntimePersistence(model);
-        }
-        finally
-        {
-            _peerGate.Release();
-        }
-
-        await _peerGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
             _peers.Add(model);
+            AttachRuntimePersistence(model);
         }
         finally
         {
@@ -1841,6 +1841,39 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             peerId: peerId);
 
         return peerId;
+    }
+
+    private string AllocateNextLoopbackHostOnPeerGate()
+    {
+        // Must be called under _peerGate.
+        var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var p in _peers)
+        {
+            var host = p.Host.CurrentValue;
+            if (!string.IsNullOrWhiteSpace(host))
+            {
+                used.Add(host);
+            }
+        }
+
+        for (var x = 1; x <= 254; x++)
+        {
+            for (var y = 1; y <= 254; y++)
+            {
+                var candidate = $"127.77.{x}.{y}";
+                if (!used.Contains(candidate))
+                {
+                    return candidate;
+                }
+            }
+        }
+
+        // Fallback: extremely unlikely. Preserve previous deterministic mapping.
+        using var sha = SHA256.Create();
+        var hash = sha.ComputeHash(Guid.NewGuid().ToByteArray());
+        var fx = (byte)((hash[0] % 254) + 1);
+        var fy = (byte)((hash[1] % 254) + 1);
+        return $"127.77.{fx}.{fy}";
     }
 
     public Task<Guid?> TryGetPeerIdByIdentityPkhAsync(byte[] recipientPublicKeyHash, CancellationToken cancellationToken = default)
