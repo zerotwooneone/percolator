@@ -29,503 +29,173 @@ Constraints / notes:
 
 Outcome:
 
-- `SimulatorStateService` is a **pure singleton orchestrator** (R3 “pure service” pattern):
-  - No `IUiDispatcher` injection.
-  - Exposes state only as `IReadOnlyObservableList<T>` / `IReadOnlyObservableDictionary<TKey,TValue>`.
-  - Performs domain mutations directly on the calling thread under domain gates (`_peerGate`, `_relayGate`).
-- All WPF thread-bridging is owned by **ViewModels** (WPF MVVM guidelines):
-  - Collection projections marshal using the injected dispatcher: `IUiDispatcher.CollectionEventDispatcher`.
-  - Property projections marshal using `.ObserveOnCurrentSynchronizationContext()`.
-- Simulator UI and unit tests are updated to the new boundaries.
-
-Critical review notes (what must change):
-
-- The service currently performs UI-thread marshalling via `_ui.InvokeAsync(...)` when mutating domain `ObservableList<T>`.
-  - This violates the R3 “UI-agnostic mandate” and couples the service to WPF.
-- Once the service becomes UI-agnostic, domain collections will be mutated from background threads.
-  - Any VM binding to `ToNotifyCollectionChanged()` without a dispatcher will throw `NotSupportedException`.
-  - Therefore, every simulator VM that binds to projected collections must explicitly marshal collection change events.
-
-Affected ViewModels (must be audited and likely updated):
-
-- `HandshakeSimulatorViewModel`
-- `SimulatedHandshakeStateMachineCardViewModel`
-- `SimulatedPeerCardViewModel`
-- `SimulatedPeerItemViewModel`
-- `SimulatedRelayQueueItemViewModel`
-- `SimulatedRelayQueuePanelViewModel`
-- `SimulatorDiagnosticsTabViewModel`
-- `SimulatorHandshakesTabViewModel`
-- `SimulatorPeersTabViewModel`
-- `SimulatorRelayTabViewModel`
-- `SimulatorSessionsTabViewModel`
-
-Also affected (non-VM but part of the simulator boundary):
-
-- `SimulatorStateService` (primary refactor)
-- `ISimulatorStateService` (ensure read-only exposure stays correct)
-- Any simulator components that subscribe to state changes and assume UI-thread affinity:
-  - `SimulatorOutboundInterceptor`
-  - `SimulatorInitializer`
-  - `SimulatorRelayDeliveryService`
-
-Work (plan):
-
-- Refactor `SimulatorStateService` into a pure service
-  - Remove `IUiDispatcher` from the constructor and DI registrations.
-  - Replace all `_ui.InvokeAsync(() => list.Add/remove/clear...)` with direct mutations under the correct gate.
-  - Enforce the concurrency invariant:
-    - Any iteration/snapshot of `_peers`, `_relays`, `_relationships`, dictionaries must occur under the same gate used for mutations.
-  - Ensure the service exposes state as read-only:
-    - `Peers`, `Relays`, `Relationships` stay `IReadOnlyObservableList<T>`.
-  - Confirm persistence still uses Domain Snapshot Pattern:
-    - Snapshot creation under gate.
-    - Repository receives immutable records only.
-
-- Update simulator ViewModels to own WPF thread bridging
-  - Collections:
-    - Any `CreateView(...).ToNotifyCollectionChanged()` must become:
-      - `.ToNotifyCollectionChanged(_ui.CollectionEventDispatcher)`.
-  - Properties:
-    - Any `.ToBindableReactiveProperty()` or `BindableReactiveProperty` projection must marshal first:
-      - `.ObserveOnCurrentSynchronizationContext()`.
-  - Filtering:
-    - Keep filters purely VM-level (`AttachFilter`, `ResetFilter`, and targeted refresh).
-  - Disposal:
-    - Ensure every `CreateView` has `ObserveRemove().Subscribe(evt => evt.Value.View.Dispose())` when projecting child VMs.
-
-- Update unit tests for the new threading boundaries
-  - Simulator tests must stop assuming service mutates state on the UI thread.
-  - Add/adjust test infrastructure to provide a `SynchronizationContext` when constructing VMs that call
-    `_ui.CollectionEventDispatcher`.
-  - Update affected test classes (expected to include, but not limited to):
-    - `SimulatorStateServiceInitializationTests`
-    - `SimulatorStateStoreTests`
-    - `SimulatedPeerRuntime*Tests`
-  - Add a small set of focused tests:
-    - VM collection projections do not throw cross-thread when service mutates on background thread.
-    - Service methods mutate domain lists without dispatcher dependency.
-
-- Follow-up audit / regression checklist
-  - Run simulator UI flows:
-    - Add/remove peers
-    - Toggle relay capable
-    - Add/remove published-key relationships
-    - Add/remove relay active sessions
-    - Relay queue updates
-  - Ensure no VM binds to a list via `BindableReactiveProperty<IReadOnlyList<T>>` (virtualization rule).
-  - Ensure no sorting is introduced in VMs (XAML `CollectionViewSource` only).
-
-Definition of done:
-
-- `SimulatorStateService` has **zero** references to `IUiDispatcher` (constructor + body).
-- All simulator Views/VMs remain stable (no WPF cross-thread exceptions) under background mutations.
-- Simulator unit tests compile and pass.
-
-Subchunks (implement one at a time; each is a large, coherent change-set):
-
-## Chunk A.1 — Dispatcher boundary finalized (interface + WPF implementation + docs)
-
-Outcome:
-
-- `IUiDispatcher` exposes a **get-only** `CollectionEventDispatcher` (type: `ICollectionEventDispatcher`) so VMs can bridge collection change events without static globals.
-- `WpfUiDispatcher` implements `CollectionEventDispatcher`.
-- Docs reference `_ui.CollectionEventDispatcher` (not `SynchronizationContextCollectionEventDispatcher.Current`).
-
-Concrete edits:
-
-- `Desktop.Wpf/Shared/Mvvm/IUiDispatcher.cs`
-  - Ensure the property exists:
-    - `ICollectionEventDispatcher CollectionEventDispatcher { get; }`
-- `Desktop.Wpf/Shared/Mvvm/WpfUiDispatcher.cs`
-  - Implement:
-    - `public ICollectionEventDispatcher CollectionEventDispatcher => SynchronizationContextCollectionEventDispatcher.Current;`
-- `Desktop.Wpf/r3.readme.md`
-- `Desktop.Wpf/main-window.plan.md` (this Chunk A)
-
-Definition of done:
-
-- All code compiles with the new interface property.
-- No docs mention the static `SynchronizationContextCollectionEventDispatcher.Current`.
-
-## Chunk A.2 — Make `SimulatorStateService` a pure service (remove `IUiDispatcher`)
-
-Outcome:
-
-- `SimulatorStateService` has **no** `IUiDispatcher` dependency.
-- All domain collection mutations happen under gates on the calling thread.
-
-Concrete edits (file: `Desktop.Wpf/Features/Simulator/SimulatorStateService.cs`):
-
-- Remove field + ctor parameter:
-  - `private readonly IUiDispatcher _ui;`
-  - `SimulatorStateService(IUiDispatcher ui, ...)`
-- Replace every `_ui.InvokeAsync(() => ...)` that mutates domain lists with direct mutations under the correct gate.
-  - Known call sites to remove (from grep):
-    - `_relays.Clear()`
-    - `_relays.Add(relay)`
-    - `_relationships.Clear()` + `_relationships.Add(rel)` loop
-    - `_peers.Clear()` + `_peers.Add(model)` loop
-    - `_peers.Add(model)`
-    - `_peers.Remove(removedModel)`
-    - `_relationships.Add(rel)` / `_relationships.Remove(rel)`
-    - `_relays.Add(loaded)`
-    - `_relays.Remove(relay)`
-
-Concurrency invariants (must be enforced while doing the above):
-
-- Any iteration/snapshot of `_peers`, `_relays`, `_relationships` must be done under the same gate as mutation.
-- Do not introduce any UI-thread marshalling in the service.
-
-Definition of done:
-
-- `SimulatorStateService.cs` contains **zero** references to `IUiDispatcher` or `_ui.`.
-- Build succeeds (even if some VMs still throw at runtime until A.3 is applied).
-
-## Chunk A.3 — Fix simulator VM collection bridging (no cross-thread WPF exceptions)
-
-Outcome:
-
-- Any simulator VM binding to `NotifyCollectionChangedSynchronizedViewList<T>` uses the dispatcher-aware overload:
-  - `.ToNotifyCollectionChanged(_ui.CollectionEventDispatcher)`
-
-Concrete edits (known files + call sites from grep):
-
-- `Desktop.Wpf/Features/Simulator/SimulatedPeerCardViewModel.cs`
-  - Update:
-    - `AvailablePublishTargets = _availableTargetsView.ToNotifyCollectionChanged(...)`
-    - `PublishedToTags = _publishedToView.ToNotifyCollectionChanged(...)`
-    - `HostingForTags = _hostingForView.ToNotifyCollectionChanged(...)`
-  - Requires `IUiDispatcher` injection if not already present.
-
-- `Desktop.Wpf/Features/Simulator/SimulatedRelayQueuePanelViewModel.cs`
-  - Update:
-    - `_availableTargetsNotify = _availableTargets.ToNotifyCollectionChanged(...)`
-    - `_activeSessionTagsNotify = _activeSessionTags.ToNotifyCollectionChanged(...)`
-    - `QueueItems = synchronizedQueueView.ToNotifyCollectionChanged(...)`
-  - Requires `IUiDispatcher` injection if not already present.
-
-- `Desktop.Wpf/Features/Simulator/SimulatorDiagnosticsTabViewModel.cs`
-  - Update:
-    - `_filteredNotify = _filteredView.ToNotifyCollectionChanged(...)`
-
-- `Desktop.Wpf/Features/Simulator/SimulatorHandshakesTabViewModel.cs`
-  - Update:
-    - `_relayHostsNotify = _relayHosts.ToNotifyCollectionChanged(...)`
-    - `_cardsNotify = _cards.ToNotifyCollectionChanged(...)`
-
-- `Desktop.Wpf/Features/Simulator/SimulatorPeersTabViewModel.cs`
-  - Update:
-    - `_peerCardsNotify = _peerCards.ToNotifyCollectionChanged(...)`
-
-- `Desktop.Wpf/Features/Simulator/SimulatorRelayTabViewModel.cs`
-  - Update:
-    - `_relayPanelsNotify = _relayPanels.ToNotifyCollectionChanged(...)`
-
-Definition of done:
-
-- All simulator VMs compile.
-- The simulator UI no longer throws WPF cross-thread exceptions when the service mutates domain collections off-thread.
-
-## Chunk A.4 — VM UI-thread usage audit (keep `_ui.InvokeAsync` only for true UI operations)
-
-Outcome:
-
-- VMs may still use `_ui.InvokeAsync(...)`, but only for:
-  - clipboard access
-  - updating UI-only `BindableReactiveProperty` values from background flows
-  - safely enumerating UI-bound adapters (rare; prefer querying domain instead)
-
-Concrete edits (known VM `_ui.InvokeAsync` call sites from grep):
-
-- `Desktop.Wpf/Features/Simulator/HandshakeSimulatorViewModel.cs`
-  - Clipboard write stays on UI thread.
-  - Status updates remain UI-thread safe.
-
-- `Desktop.Wpf/Features/Simulator/SimulatorDiagnosticsTabViewModel.cs`
-  - Keep UI-thread filter application.
-  - Ensure any domain enumeration is not performed against UI-bound adapters off-thread.
-
-- `Desktop.Wpf/Features/Simulator/SimulatorHandshakesTabViewModel.cs`
-  - Keep UI-thread rebuild hooks, but ensure they do not assume service thread affinity.
-
-- `Desktop.Wpf/Features/Simulator/SimulatorPeersTabViewModel.cs`
-  - `InitializePeerCardsView` can remain invoked on UI thread (VM concern).
-
-- `Desktop.Wpf/Features/Simulator/SimulatorRelayTabViewModel.cs`
-  - Confirm auto-deliver loop does not enumerate UI-bound lists off-thread without `_ui.InvokeAsync`.
-
-Definition of done:
-
-- No VM enumerates `NotifyCollectionChangedSynchronizedViewList<T>` off-thread.
-- Remaining `_ui.InvokeAsync` usage in VMs is strictly UI-only.
-
-## Chunk A.5 — Update unit tests for new dispatcher boundary
-
-Outcome:
-
-- Simulator tests compile and pass under the new `IUiDispatcher.CollectionEventDispatcher` requirement.
-
-Concrete edits:
-
-- Provide a test `IUiDispatcher` implementation that:
-  - Returns a deterministic `ICollectionEventDispatcher`.
-  - Uses a test `SynchronizationContext` for `InvokeAsync` execution.
-
-- Update test classes that construct simulator VMs to pass the test dispatcher.
-
-Definition of done:
-
-- `dotnet test` passes.
-
----
-
-## Chunk B — Simulator shell + loading state (remove redundant InitializeAsync waits)
-
-Outcome:
-
-- The simulator opens a window immediately and shows a simple **Loading…** state while the simulator state is initialized.
-- `HandshakeSimulatorViewModel` no longer needs to call `ISimulatorStateService.InitializeAsync` (or otherwise "wait for state") in three separate places.
-- Initialization responsibility is moved behind a dedicated initializer interface:
-  - `ISimulatorStateInitializer.InitializeAsync(...)`.
-  - `SimulatorStateService` may implement this interface.
-  - `ISimulatorStateService` becomes strictly a **runtime state + actions** contract.
+- Simulator persistence is expressed as a **single snapshot** round-trip:
+  - `ISimulatorStateRepository.LoadStateAsync(ct)`
+  - `ISimulatorStateRepository.SaveStateAsync(snapshot, ct)`
+- `JsonSimulatorStateRepository` becomes a pure serializer/deserializer of the snapshot (no piecemeal peer/relationship/relay calls).
+- `SimulatorStateService` owns:
+  - Hydrating runtime models from `SimulatorStateSnapshot`.
+  - Freezing runtime state into `SimulatorStateSnapshot`.
+- Unit tests use an in-memory snapshot repository stub and validate snapshot contents (sessions included).
 
 Motivation:
 
-- WPF will bind to ViewModel properties as soon as `DataContext` is set.
-- Async initialization that occurs after `DataContext` assignment can cause:
-  - fragile “ViewModel not initialized” patterns,
-  - redundant initialization calls,
-  - and UI that stays closed while work happens.
+- Today persistence is split across:
+  - `LoadPeersAsync` / `SavePeersAsync`
+  - `LoadRelationshipsAsync`
+  - `LoadRelayAsync` / `SaveRelayAsync` (separate files)
+  - plus repository-internal state (`_groups`, `_selfIdentityIdByPeerId`)
+- The split contracts allow mismatched writes/reads and make it harder to reason about “what is the simulator state at time T”.
+- A single snapshot makes persistence and tests deterministic and simplifies reasoning about rehydration (especially for sessions/ratchet state).
+
+Non-goals / constraints:
+
+- No migration/version handling for preexisting persistence files.
+  - Existing simulator state files can be deleted when this change lands.
+- Relays are part of simulator state and are persisted in the same file as peers.
+  - There must be no relay persistence directory and no relay files.
+- Use a single concurrency gate for all simulator state (peers, relationships, relays).
+- Groups are round-tripped but are not domain-mutated in Chunk A.
 
 Work (plan):
 
-### Chunk B.1 — Split initialization into `ISimulatorStateInitializer`
+### A.1 — Introduce `SimulatorStateSnapshot`
 
-- Add interface:
-  - File: `Desktop.Wpf/Features/Simulator/ISimulatorStateInitializer.cs`
-  - Shape:
-    - `Task InitializeAsync(CancellationToken cancellationToken = default);`
-- Update `ISimulatorStateService`:
-  - Remove `InitializeAsync(...)` from the interface.
-- Update `SimulatorStateService`:
-  - Implement `ISimulatorStateInitializer`.
-  - Keep the existing initialization logic, but expose it only via the initializer interface.
-- Update DI registrations (App startup):
-  - Ensure `SimulatorStateService` is registered once, and is resolved as:
-    - `ISimulatorStateService`
-    - `ISimulatorStateInitializer`
-  - Avoid double-singleton instances.
+- Add an immutable snapshot type that is the **only** persistence surface:
+  - `public sealed record SimulatorStateSnapshot(...)`
 
-Implementation detail (must be followed):
+Snapshot fields (must be exhaustive enough to replace current repo methods):
 
-- Register the concrete singleton once, then map interfaces to the same instance.
-  - Example pattern:
-    - `services.AddSingleton<SimulatorStateService>();`
-    - `services.AddSingleton<ISimulatorStateService>(sp => sp.GetRequiredService<SimulatorStateService>());`
-    - `services.AddSingleton<ISimulatorStateInitializer>(sp => sp.GetRequiredService<SimulatorStateService>());`
+- `int Version`
+- `IReadOnlyList<PeerStateSnapshot> Peers`
+- `IReadOnlyList<PeerRelationshipSnapshot> Relationships`
+- `IReadOnlyList<RelayStateSnapshot> Relays`
 
-### Chunk B.2 — Single simulator window with an in-window loading view
+- `IReadOnlyList<GroupConversationDto> Groups`
+  - Groups are persisted as part of the repository snapshot (they are not domain-mutated by the simulator runtime today).
 
-Goal:
+Peer snapshot requirements:
 
-- The simulator uses **one window**.
-- The window opens immediately and initially shows a simple **Loading…** view.
-- Only after `ISimulatorStateInitializer.InitializeAsync` completes does the window show the existing simulator UI (what it shows today).
+- `PeerStateSnapshot` must carry `SelfIdentityId`.
+  - Add `int SelfIdentityId` as a first-class field on `PeerStateSnapshot`.
+  - This removes the last repository-owned cross-call cache (`_selfIdentityIdByPeerId`).
 
-Concrete edits:
+Identity id allocation rule:
 
-- Introduce a lightweight host ViewModel that owns loading state + the real content VM:
-  - `Desktop.Wpf/Features/Simulator/HandshakeSimulatorHostViewModel.cs`
-  - Responsibilities:
-    - `BindableReactiveProperty<bool> IsLoading` (default true)
-    - `BindableReactiveProperty<string?> Status` (default "Loading…")
-    - `object? ContentViewModel` (null until ready; or a typed property)
-    - On startup, call and await `ISimulatorStateInitializer.InitializeAsync`.
-    - When initialization succeeds:
-      - create/resolve the existing simulator VM (current `HandshakeSimulatorViewModel`),
-      - set `ContentViewModel`,
-      - set `IsLoading = false`.
-    - When initialization fails:
-      - keep `IsLoading = true` and set `Status` to the error.
+- `SimulatorStateService` owns allocating new `SelfIdentityId` values.
+  - On initialization: set `_nextSelfIdentityId` to `max(snapshot.Peers.Select(p => p.SelfIdentityId))` (default baseline 99000 - 1).
+  - On `AddPeerAsync`: allocate `SelfIdentityId = ++_nextSelfIdentityId`.
 
-Lifetime ownership (must be explicit):
+### A.2 — Change repository interface
 
-- `HandshakeSimulatorHostViewModel` owns the inner simulator VM lifetime.
-  - If the host VM is disposed, it must dispose the inner simulator VM if it was created.
-  - If initialization fails after the inner VM has been created, the host must dispose it.
-  - The window should dispose the host VM on `Closed` (existing pattern).
+- Update `ISimulatorStateRepository` to only:
+  - `Task<SimulatorStateSnapshot> LoadStateAsync(CancellationToken ct);`
+  - `Task SaveStateAsync(SimulatorStateSnapshot snapshot, CancellationToken ct);`
 
-- Update the simulator window to bind to the host VM and switch content:
-  - `Desktop.Wpf/Features/Simulator/HandshakeSimulatorWindow.xaml`
-    - Display a simple "Loading…" visual when `IsLoading` is true.
-    - Display the existing simulator content (the view bound to `HandshakeSimulatorViewModel`) when `IsLoading` is false.
-    - Implementation can use:
-      - a `ContentControl` bound to `ContentViewModel`, with a `DataTemplate` for `HandshakeSimulatorViewModel`,
-      - and a separate loading overlay/placeholder driven by `IsLoading`.
-  - `Desktop.Wpf/Features/Simulator/HandshakeSimulatorWindow.xaml.cs`
-    - Inject `HandshakeSimulatorHostViewModel` (not the inner VM).
-    - Set `DataContext = hostVm`.
-    - Kick off host initialization without blocking window creation.
+Remove old members:
 
-Idiomatic pattern notes (must be followed):
+- `LoadPeersAsync`, `SavePeersAsync`, `LoadRelationshipsAsync`, `LoadRelayAsync`, `SaveRelayAsync`
 
-- The host VM should not rely on fragile timing (e.g., hoping the service is initialized before bindings evaluate).
-  - The host VM must be safe to bind immediately.
-- Avoid "fire-and-forget" tasks that can crash the process:
-  - Store the initialization `Task` (or use `SubscribeAwait` with error handling) so exceptions are observed.
-  - Surface failures via `Status`.
-- Support cancellation:
-  - The host VM should accept a `CancellationToken` and cancel initialization when the window closes.
-  - Ensure the host VM disposes the inner simulator VM if initialization fails after creating it.
+### A.3 — Update `JsonSimulatorStateRepository`
 
-Transition orchestration (must be MVVM-friendly):
+- Implement `LoadStateAsync`:
+  - Read `simulator-state.json` into DTO(s).
+  - Convert DTO(s) to `SimulatorStateSnapshot`.
+  - Return a fully-normalized snapshot:
+    - never-null lists
+    - version defaults (this is Version 1; no migration is required)
+    - normalize peer connection host/port (preserving any explicitly configured values)
 
-- The host VM may obtain the inner VM via DI (constructor injection of a factory or `Func<HandshakeSimulatorViewModel>`).
-- Avoid `new HandshakeSimulatorViewModel(...)` in code-behind.
+- Implement `SaveStateAsync`:
+  - Convert `SimulatorStateSnapshot` to DTO(s) and write to `simulator-state.json`.
+  - Relays are persisted inside `simulator-state.json` as part of the snapshot.
+    - There must be no separate relay persistence.
 
-Definition of done:
+- DTO update:
+  - Add `List<RelayPersistenceDto> Relays` to the root simulator state DTO (`SimulatorStateDto`).
+  - `LoadStateAsync` must populate snapshot `Relays` from `SimulatorStateDto.Relays`.
+  - `SaveStateAsync` must write snapshot `Relays` into `SimulatorStateDto.Relays`.
 
-- Opening the simulator shows a window immediately with "Loading…".
-- The existing simulator UI is not displayed until the simulator state has been initialized.
+Notes:
 
-### Chunk B.3 — Constructor-time projections in simulator tab VMs (no-throw bindable getters)
+- Keep normalization logic (`NormalizePeer`) but apply it at snapshot/DTO conversion boundaries.
+- Repository must not maintain cross-call mutable caches for identity ids or groups.
+  - Everything required to round-trip must be in the snapshot.
 
-Goal:
+### A.4 — Update `SimulatorStateService` to use snapshot contract
 
-- WPF bindings must be able to evaluate immediately after `DataContext` is set.
-- Therefore, any bindable property getter used by XAML must be safe:
-  - Do **not** throw `InvalidOperationException("ViewModel not initialized")`.
-  - Provide an empty-but-valid collection instance from the constructor.
+- Initialization:
+  - Replace `LoadPeersAsync + LoadRelationshipsAsync + InitializeRelaysAsync(LoadRelayAsync...)` with one `LoadStateAsync`.
+  - Hydrate:
+    - peers from `snapshot.Peers` (construct `SimulatedPeerModel` + hydrate runtime store sessions)
+    - relationships from `snapshot.Relationships`
+    - relays from `snapshot.Relays`
 
-Concrete edits:
+- Concurrency model:
+  - Replace `_peerGate` + `_relayGate` with one `_stateGate`.
+  - Refactor gate usage to be idiomatic and hard to misuse:
+    - Introduce a single helper that takes the lock and runs a delegate, e.g. `WithStateGateAsync(Func<Task>)` / `WithStateGateAsync<T>(Func<Task<T>>)`.
+    - Ensure all public APIs that read/mutate state go through the helper (no direct `WaitAsync` scattered around).
+    - Ensure freezing the snapshot for persistence is always performed under the same helper.
 
-- `Desktop.Wpf/Features/Simulator/SimulatorPeersTabViewModel.cs`
-  - Remove the `PeerCards` getter throw pattern.
-  - Construct the `CreateView(...)` and `ToNotifyCollectionChanged(_ui.CollectionEventDispatcher)` adapter in the constructor.
-  - Remove `InitializeAsync` (or reduce it to no-op / remove state waits entirely).
+- Self identity id allocation:
+  - On load, compute `_nextSelfIdentityId` from snapshot.
+  - Ensure `SimulatedPeerModel.Freeze()` includes the peer's `SelfIdentityId`.
+  - Ensure any peer creation path assigns `SelfIdentityId` exactly once.
 
-- `Desktop.Wpf/Features/Simulator/SimulatorHandshakesTabViewModel.cs`
-  - Remove `Cards` getter throw pattern.
-  - Create `_cards` projection + `_cardsNotify` in the constructor.
-  - Keep relay-host list (`_relayHostsNotify`) created in constructor (already done).
-  - Wire `HookRelayHosts()` from constructor (it is UI-thread oriented and should not depend on service initialization barriers).
-  - Remove `InitializeAsync` (or reduce it to directory-only concerns if any remain after shell work).
+- `SimulatedPeerModel` identity storage:
+  - `SimulatedPeerModel` must store `SelfIdentityId` as a first-class property.
+  - Hydration must set `SelfIdentityId` from snapshot.
 
-- `Desktop.Wpf/Features/Simulator/SimulatorRelayTabViewModel.cs`
-  - Remove `RelayPanels` getter throw pattern.
-  - Create `_relayPanels` projection + `_relayPanelsNotify` in the constructor.
-  - Remove `InitializeAsync` state waits.
+- Groups:
+  - `SimulatorStateService` does not mutate groups as part of Chunk A.
+  - Store the loaded `Groups` list on the service (private field), and pass it back on save.
+  - Do not call `LoadStateAsync` during save.
 
-Definition of done:
+- Persistence pipeline:
+  - Replace:
+    - `_store.SavePeersAsync(peerSnaps, relSnaps, ...)`
+    - `_store.SaveRelayAsync(...)`
+    with:
+    - Freeze a single `SimulatorStateSnapshot` and call `_store.SaveStateAsync(snapshot, ...)`.
+  - Persist relays via the same debounced save trigger.
+    - Since relays are part of the snapshot, there is no separate relay persistence pipeline.
 
-- These three tab VMs can be constructed and bound without calling `InitializeAsync`.
-- No bindable getter throws due to "not initialized".
+### A.5 — Update tests
 
-### Chunk B.4 — Relay auto-deliver lifecycle moved into a dedicated service
+Impacted test files (from code search):
 
-Goal:
+- `Desktop.Wpf.Tests/SimulatorStateStoreTests.cs`
+  - Replace peer/relationship round-trip assertions with snapshot round-trip assertions.
 
-- The current relay auto-deliver loop is long-running background work and is not VM initialization.
-- Replace it with a dedicated service that owns start/stop lifecycle.
+- Repository stubs used by runtime tests:
+  - `SimulatorStateServiceInitializationTests.cs` (RepositoryStub)
+  - `SimulatedPeerRuntimeFinalizeTests.cs` (InMemoryRepository)
+  - `SimulatedPeerRuntimeFinalizeRelayedTests.cs` (InMemoryRepository)
+  - `SimulatedPeerRuntimeStandardHandshakeRelayedTests.cs` (InMemoryRepository)
+  - `SimulatedPeerRuntimeServiceDecryptFailureDiagnosticsTests.cs` (InMemoryRepository)
+  - Update to store a single `SimulatorStateSnapshot` and expose the last saved snapshot for assertions.
 
-Concrete edits:
-
-- Add a new service interface + implementation:
-  - `Desktop.Wpf/Features/Simulator/ISimulatorRelayAutoDeliverService.cs`
-  - `Desktop.Wpf/Features/Simulator/SimulatorRelayAutoDeliverService.cs`
-  - Responsibilities:
-    - Start/stop a background loop.
-    - Periodically query domain state (`_state.Relays`, `_state.Relationships`) and deliver items.
-    - Be cancellation-safe and disposable.
-  - The service should depend on:
-    - `ISimulatorStateService`
-    - `ISimulatorRelayDeliveryService`
-
-Non-goals / constraints (must be followed):
-
-- The relay auto-deliver service must NOT enumerate UI-bound adapter collections (e.g., `NotifyCollectionChangedSynchronizedViewList<T>`).
-- The relay auto-deliver service must NOT depend on `IUiDispatcher`.
-  - It must be purely domain-driven and safe to run in tests.
-
-- Update `SimulatorRelayTabViewModel`:
-  - Remove `_autoDeliverCts`, `_autoDeliverLoop`, and `AutoDeliverLoopAsync` from the VM.
-  - Keep only UI state:
-    - `GlobalAutoRelayAll`
-    - `RelayPanels` projection
-
-- Decide where start/stop is called:
-  - Preferred: shell window (or the real simulator window) starts the service on `Loaded` and stops it on `Closed`.
+- Update assertions:
+  - Tests that currently inspect `SavedPeers` / `SavedRelationships` / `SavedRelay` should now inspect:
+    - `SavedSnapshot.Peers`
+    - `SavedSnapshot.Relationships`
+    - `SavedSnapshot.Relays`
 
 Definition of done:
 
-- Relay auto-deliver continues to function.
-- No background loop is owned by the tab VM.
+- The simulator still loads and saves state correctly.
+- Sessions persist in the peer runtime store snapshot and are restored on load.
+- Build succeeds and `dotnet test` passes.
 
-### Chunk B.5 — Refactor handshake simulator startup to use the shell
+### A.6 — Remove dead code introduced by the refactor
 
-- Remove simulator-state initialization waits from:
-  - `Desktop.Wpf/Features/Simulator/HandshakeSimulatorViewModel.cs`
-- The handshake simulator window/viewmodel assumes the state is already initialized.
-- Ensure `HandshakeSimulatorWindow.xaml.cs` does not need to await initialization before setting `DataContext`.
-
-### Chunk B.6 — Update tests and simulator entry points
-
-- Update any tests that were calling `ISimulatorStateService.InitializeAsync`:
-  - Call `ISimulatorStateInitializer.InitializeAsync` instead.
-- Ensure `dotnet test` remains green.
-
-### Chunk B.7 — Simulator unit test fallout (initializer split + constructor projections + relay loop service)
-
-Goal:
-
-- Make test fallout explicit and non-surprising.
-- Ensure tests remain focused on observable behavior and compile against the new contracts.
-
-Concrete affected test files (from grep; update these explicitly):
-
-- `Desktop.Wpf.Tests/SimulatorStateServiceInitializationTests.cs`
-  - If `InitializeAsync` is removed from `ISimulatorStateService`, update tests to call:
-    - `ISimulatorStateInitializer.InitializeAsync` (or cast `sut` to initializer if using concrete type).
-
-- `Desktop.Wpf.Tests/SimulatedPeerRuntimeFinalizeTests.cs`
-- `Desktop.Wpf.Tests/SimulatedPeerRuntimeFinalizeRelayedTests.cs`
-- `Desktop.Wpf.Tests/SimulatedPeerRuntimeStandardHandshakeRelayedTests.cs`
-- `Desktop.Wpf.Tests/SimulatedPeerRuntimeServiceDecryptFailureDiagnosticsTests.cs`
-  - These tests currently call `sut.InitializeAsync(...)` on the service.
-  - Update to call `initializer.InitializeAsync(...)` instead.
-
-- `Desktop.Wpf.Tests/SimulatedPeerDirectoryInitializationTests.cs`
-  - This test currently mocks `ISimulatorStateService.InitializeAsync`.
-  - Update it to mock `ISimulatorStateInitializer.InitializeAsync`.
-  - `SimulatorInitializer` should depend on the initializer interface (or otherwise be refactored so the test can control init gating deterministically).
-
-Additional expected fallout (verify during implementation):
-
-- Any tests that construct simulator tab VMs and previously required calling `InitializeAsync` before reading properties.
-  - After constructor-time projections (B.3), tests should not need an init step to access bindable collections.
-
-- Relay loop service (B.4):
-  - If any tests assumed `SimulatorRelayTabViewModel.InitializeAsync` starts auto-deliver, update those tests to explicitly start the relay auto-deliver service (or to assert delivery by directly invoking relay-delivery APIs).
-
-Definition of done:
-
-- All simulator unit tests compile and pass.
-- No tests reference the removed `ISimulatorStateService.InitializeAsync`.
-
-Chunk B definition of done (overall):
-
-- `HandshakeSimulatorWindow` opens immediately and shows "Loading…".
-- The existing simulator UI is not displayed until `ISimulatorStateInitializer.InitializeAsync` completes.
-- `HandshakeSimulatorViewModel` no longer contains redundant “wait for simulator state to load” calls.
-- `ISimulatorStateService` no longer exposes `InitializeAsync`.
-- Simulator tabs can be constructed/bound without calling `InitializeAsync`.
-- Relay auto-deliver loop is owned by the dedicated service (not a tab VM).
-- Build + tests are green.
+- Delete relay file persistence code paths in `JsonSimulatorStateRepository`.
+- Remove relay-specific repository methods and any remaining call sites.
+- Remove `_relayGate` and any relay-only persistence helpers in `SimulatorStateService`.
+- Remove repository-owned caches that become redundant under the snapshot contract.
 
 ---
-
 ## Chunk I — Notification badge + default focus behavior for Connection Management button
 
 Outcome:
