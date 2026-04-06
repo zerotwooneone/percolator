@@ -840,7 +840,7 @@ Definition of done:
   - Select Relay as relay host.
   - Enter Target PKH and click **Fetch Pre-Key Bundle & Initiate**.
 
-### Expected behavior
+#### Expected behavior
 
 - Main requests Target pre-key bundle from Relay (GetPreKeyBundleRequest).
 - Relay responds with GetPreKeyBundleResponse (bundle present).
@@ -848,7 +848,7 @@ Definition of done:
 - Relay enqueues the hello in its relay queue under routing key == Target PKH.
 - Simulator UI (Relay tab) shows a new queued relay message on the Relay peer.
 
-### What we have checked / verified
+#### What we have checked / verified
 
 - Publish to relay host works; the pre-key bundle is stored in the relay host’s PublishedBundles collection.
 - Fetch-by-PKH from relay host works end-to-end:
