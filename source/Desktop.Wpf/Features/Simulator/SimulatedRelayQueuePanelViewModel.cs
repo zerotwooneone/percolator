@@ -98,7 +98,10 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
             .ToBindableReactiveProperty(synchronizedQueueView.Count)
             .AddTo(ref _bag);
 
-        AutoDeliver = new BindableReactiveProperty<bool>(false).AddTo(ref _bag);
+        AutoDeliver = _relay.AutoDeliverEnabled
+            .ToBindableReactiveProperty(_relay.AutoDeliverEnabled.CurrentValue)
+            .AddTo(ref _bag);
+        AutoDeliver.Subscribe(newValue => _relay.AutoDeliverEnabled.Value = newValue).AddTo(ref _bag);
 
         AddActiveSessionCommand = new ReactiveCommand<Unit>().AddTo(ref _bag);
         AddActiveSessionCommand

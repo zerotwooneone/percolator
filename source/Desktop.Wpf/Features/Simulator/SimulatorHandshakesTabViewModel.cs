@@ -12,7 +12,7 @@ public sealed class SimulatorHandshakesTabViewModel : IDisposable
 {
     private readonly IUiDispatcher _ui;
 
-    private readonly ISimulatorInitializer _directory;
+    private readonly ISimulatorInitializer _simulatorInitializer;
     private readonly IOptions<TransportOptions> _transportOptions;
     private readonly Percolator.Application.Identity.ActiveIdentityContext _active;
     private readonly ISimulatorStateService _state;
@@ -20,10 +20,10 @@ public sealed class SimulatorHandshakesTabViewModel : IDisposable
     private readonly ISimulatorMainIngressService _mainIngress;
 
     private ISynchronizedView<SimulatedPeerModel, SimulatedHandshakeStateMachineCardViewModel>? _cards;
-    private NotifyCollectionChangedSynchronizedViewList<SimulatedHandshakeStateMachineCardViewModel>? _cardsNotify;
+    private readonly NotifyCollectionChangedSynchronizedViewList<SimulatedHandshakeStateMachineCardViewModel> _cardsNotify;
 
     private readonly ObservableList<RelayHostOption> _relayHosts = new();
-    private NotifyCollectionChangedSynchronizedViewList<RelayHostOption>? _relayHostsNotify;
+    private readonly NotifyCollectionChangedSynchronizedViewList<RelayHostOption> _relayHostsNotify;
 
     private readonly object _peerRelaySubGate = new();
     private IReadOnlyDictionary<Guid, IDisposable> _peerRelaySubs = new Dictionary<Guid, IDisposable>();
@@ -31,7 +31,7 @@ public sealed class SimulatorHandshakesTabViewModel : IDisposable
     private DisposableBag _bag;
 
     public SimulatorHandshakesTabViewModel(
-        ISimulatorInitializer directory,
+        ISimulatorInitializer simulatorInitializer,
         ISimulatorMainIngressService mainIngress,
         IOptions<TransportOptions> transportOptions,
         Percolator.Application.Identity.ActiveIdentityContext active,
@@ -40,7 +40,7 @@ public sealed class SimulatorHandshakesTabViewModel : IDisposable
         IUiDispatcher ui)
     {
         _ui = ui;
-        _directory = directory;
+        _simulatorInitializer = simulatorInitializer;
         _mainIngress = mainIngress;
         _transportOptions = transportOptions;
         _active = active;
@@ -50,39 +50,22 @@ public sealed class SimulatorHandshakesTabViewModel : IDisposable
         SelectedRelayHostPeerId = new BindableReactiveProperty<Guid?>(null).AddTo(ref _bag);
 
         _relayHostsNotify = _relayHosts.ToNotifyCollectionChanged(_ui.CollectionEventDispatcher);
-    }
-
-    public sealed record RelayHostOption(Guid PeerId, string DisplayName);
-
-    public NotifyCollectionChangedSynchronizedViewList<SimulatedHandshakeStateMachineCardViewModel> Cards
-        => _cardsNotify ?? throw new InvalidOperationException("ViewModel not initialized.");
-
-    public NotifyCollectionChangedSynchronizedViewList<RelayHostOption> RelayHosts
-        => _relayHostsNotify ?? throw new InvalidOperationException("ViewModel not initialized.");
-
-    public BindableReactiveProperty<Guid?> SelectedRelayHostPeerId { get; }
-
-    public async Task InitializeAsync(CancellationToken ct = default)
-    {
-        await _state.InitializeAsync(ct).ConfigureAwait(false);
-        await _directory.InitializeAsync(ct).ConfigureAwait(false);
-
-        InitializeCardsView();
-        HookRelayHosts();
-    }
-
-    private void InitializeCardsView()
-    {
-        _cardsNotify?.Dispose();
-        _cardsNotify = null;
-        _cards?.Dispose();
-        _cards = null;
 
         _cards = _state.Peers
             .CreateView(CreateCard)
             .AddTo(ref _bag);
         _cardsNotify = _cards.ToNotifyCollectionChanged(_ui.CollectionEventDispatcher);
+
+        HookRelayHosts();
     }
+
+    public sealed record RelayHostOption(Guid PeerId, string DisplayName);
+
+    public NotifyCollectionChangedSynchronizedViewList<SimulatedHandshakeStateMachineCardViewModel> Cards => _cardsNotify;
+
+    public NotifyCollectionChangedSynchronizedViewList<RelayHostOption> RelayHosts => _relayHostsNotify;
+
+    public BindableReactiveProperty<Guid?> SelectedRelayHostPeerId { get; }
 
     private void HookRelayHosts()
     {
@@ -173,13 +156,9 @@ public sealed class SimulatorHandshakesTabViewModel : IDisposable
 
     public void Dispose()
     {
-        _cardsNotify?.Dispose();
-        _cardsNotify = null;
-        _cards?.Dispose();
-        _cards = null;
-
-        _relayHostsNotify?.Dispose();
-        _relayHostsNotify = null;
+        _cards.Dispose();
+        _cardsNotify.Dispose();
+        _relayHostsNotify.Dispose();
 
         lock (_peerRelaySubGate)
         {

@@ -94,7 +94,7 @@ public sealed class SimulatedPeerRuntimeServiceDecryptFailureDiagnosticsTests
         var engine = new SignalProtocolEngine(new SystemClock());
 
         var sut = new SimulatorStateService(repo, diagnostics, pending, scopeFactory, engine);
-        await sut.InitializeAsync(CancellationToken.None);
+        await ((ISimulatorStateInitializer)sut).InitializeAsync(CancellationToken.None);
 
         var sessionId = new SessionId(Guid.NewGuid());
         var badMessage = new SessionRatchetMessage(RandomNumberGenerator.GetBytes(10));

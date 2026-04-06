@@ -35,6 +35,8 @@ public sealed class SimulatedRelayModel : IDisposable
 
     public Guid RelayHostPeerId { get; }
 
+    public ReactiveProperty<bool> AutoDeliverEnabled { get; } = new(false);
+
     public ObservableDictionary<Guid, RelayMessage> MessageQueue { get; } = new();
 
     public void EnqueueMessage(RelayMessage message)

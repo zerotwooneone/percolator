@@ -126,7 +126,7 @@ public sealed class SimulatedPeerRuntimeFinalizeRelayedTests
             scopeFactory: scopeFactory,
             engine: engine);
 
-        await state.InitializeAsync(CancellationToken.None);
+        await ((ISimulatorStateInitializer)state).InitializeAsync(CancellationToken.None);
 
         var payload = new InviteHandshakeRequestPayload
         {

@@ -56,7 +56,7 @@ public sealed class ShellViewModel : ViewModelBase
         {
             // Only show when identity scope is available
             if (_identityScopeAccessor.Current is null) throw new InvalidOperationException("Identity scope not available");
-            _windowManager.ShowFor<Desktop.Wpf.Features.Simulator.HandshakeSimulatorViewModel>();
+            _windowManager.ShowFor<Desktop.Wpf.Features.Simulator.HandshakeSimulatorHostViewModel>();
             await Task.CompletedTask;
         });
 

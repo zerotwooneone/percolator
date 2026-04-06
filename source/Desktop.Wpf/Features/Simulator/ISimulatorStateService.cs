@@ -13,8 +13,6 @@ public interface ISimulatorStateService
 
     IReadOnlyObservableList<PeerRelationship> Relationships { get; }
 
-    Task InitializeAsync(CancellationToken cancellationToken = default);
-
     Task<Guid> AddPeerAsync(string? displayName, CancellationToken cancellationToken = default);
     Task RemovePeerAsync(Guid peerId, CancellationToken cancellationToken = default);
     

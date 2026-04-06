@@ -1,3 +1,5 @@
+using System.Threading;
+using System.Threading.Tasks;
 using ObservableCollections;
 using R3;
 using Desktop.Wpf.Shared.Mvvm;
@@ -10,8 +12,8 @@ public sealed class SimulatorPeersTabViewModel : IDisposable
     private readonly ISimulatorStateService _state;
     private readonly ISimulatorDiagnosticsService _diagnostics;
 
-    private ISynchronizedView<SimulatedPeerModel, SimulatedPeerCardViewModel>? _peerCards;
-    private NotifyCollectionChangedSynchronizedViewList<SimulatedPeerCardViewModel>? _peerCardsNotify;
+    private readonly ISynchronizedView<SimulatedPeerModel, SimulatedPeerCardViewModel> _peerCards;
+    private readonly NotifyCollectionChangedSynchronizedViewList<SimulatedPeerCardViewModel> _peerCardsNotify;
     private DisposableBag _bag;
 
     public SimulatorPeersTabViewModel(
@@ -25,6 +27,22 @@ public sealed class SimulatorPeersTabViewModel : IDisposable
 
         Status = new BindableReactiveProperty<string?>(null).AddTo(ref _bag);
 
+        _peerCards = _state.Peers
+            .CreateView(CreatePeerCardVm)
+            .AddTo(ref _bag);
+
+        // IMPORTANT: Call once and keep it alive for the VM lifetime.
+        // Do NOT call ToNotifyCollectionChanged() repeatedly from a getter.
+        _peerCardsNotify = _peerCards.ToNotifyCollectionChanged(_ui.CollectionEventDispatcher);
+
+        _state.Peers.ObserveCountChanged()
+            .ObserveOnCurrentSynchronizationContext()
+            .Subscribe(_ =>
+            {
+                Status.Value = $"Peers: {_peerCardsNotify.Count}";
+            })
+            .AddTo(ref _bag);
+
         AddPeerCommand = new ReactiveCommand<Unit>().AddTo(ref _bag);
         AddPeerCommand
             .AsObservable()
@@ -36,48 +54,7 @@ public sealed class SimulatorPeersTabViewModel : IDisposable
 
     public ReactiveCommand<Unit> AddPeerCommand { get; }
 
-    public NotifyCollectionChangedSynchronizedViewList<SimulatedPeerCardViewModel> PeerCards
-        => _peerCardsNotify ?? throw new InvalidOperationException("ViewModel not initialized.");
-
-    public async Task InitializeAsync(CancellationToken ct = default)
-    {
-        try
-        {
-            await _state.InitializeAsync(ct).ConfigureAwait(false);
-
-            await _ui.InvokeAsync(InitializePeerCardsView, ct).ConfigureAwait(false);
-
-            await SetStatusOnUiAsync($"Loaded {PeerCards.Count} peers");
-        }
-        catch (Exception ex)
-        {
-            await SetStatusOnUiAsync($"Error: {ex.Message}");
-        }
-    }
-
-    private void InitializePeerCardsView()
-    {
-        _peerCards?.Dispose();
-        _peerCardsNotify?.Dispose();
-
-        var peers = _state.Peers;
-
-        _peerCards = peers
-            .CreateView(CreatePeerCardVm)
-            .AddTo(ref _bag);
-
-        // IMPORTANT: Call once and keep it alive for the VM lifetime.
-        // Do NOT call ToNotifyCollectionChanged() repeatedly from a getter.
-        _peerCardsNotify = _peerCards.ToNotifyCollectionChanged(_ui.CollectionEventDispatcher);
-
-        peers.ObserveCountChanged()
-            .ObserveOnCurrentSynchronizationContext()
-            .Subscribe(_ =>
-            {
-                Status.Value = $"Peers: {_peerCardsNotify.Count}";
-            })
-            .AddTo(ref _bag);
-    }
+    public NotifyCollectionChangedSynchronizedViewList<SimulatedPeerCardViewModel> PeerCards => _peerCardsNotify;
 
     private SimulatedPeerCardViewModel CreatePeerCardVm(SimulatedPeerModel m)
     {
@@ -114,10 +91,8 @@ public sealed class SimulatorPeersTabViewModel : IDisposable
 
     public void Dispose()
     {
-        _peerCardsNotify?.Dispose();
-        _peerCardsNotify = null;
-        _peerCards?.Dispose();
-        _peerCards = null;
+        _peerCardsNotify.Dispose();
+        _peerCards.Dispose();
         _bag.Dispose();
     }
 }

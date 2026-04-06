@@ -126,6 +126,7 @@ public partial class App : Application
                 services.AddScoped<Desktop.Wpf.Features.Sessions.NewHandshakeDialogViewModel>();
                 services.AddScoped<Desktop.Wpf.Features.Sessions.ConnectionManagementDialogViewModel>();
                 services.AddScoped<Desktop.Wpf.Features.Sessions.SessionShellViewModel>();
+                services.AddScoped<Desktop.Wpf.Features.Simulator.HandshakeSimulatorHostViewModel>();
                 services.AddScoped<Desktop.Wpf.Features.Simulator.HandshakeSimulatorViewModel>();
                 services.AddScoped<Desktop.Wpf.Features.Simulator.SimulatorPeersTabViewModel>();
                 services.AddScoped<Desktop.Wpf.Features.Simulator.SimulatorHandshakesTabViewModel>();
@@ -156,7 +157,9 @@ public partial class App : Application
                 services.AddScoped<IPendingHandshakeSimulatorService, PendingHandshakeSimulatorService>();
                 services.AddSingleton<Desktop.Wpf.Features.Simulator.ISimulatorStateRepository, Desktop.Wpf.Features.Simulator.JsonSimulatorStateRepository>();
                 services.AddSingleton<ISimulatedPeerKeyFactory, SimulatedPeerKeyFactory>();
-                services.AddSingleton<ISimulatorStateService, SimulatorStateService>();
+                services.AddSingleton<SimulatorStateService>();
+                services.AddSingleton<ISimulatorStateService>(sp => sp.GetRequiredService<SimulatorStateService>());
+                services.AddSingleton<ISimulatorStateInitializer>(sp => sp.GetRequiredService<SimulatorStateService>());
                 services.AddSingleton<IUiDispatcher, WpfUiDispatcher>();
                 services.AddSingleton<Desktop.Wpf.Features.Simulator.ISimulatorDiagnosticsService, Desktop.Wpf.Features.Simulator.SimulatorDiagnosticsService>();
                 services.AddSingleton<Desktop.Wpf.Features.Simulator.ISimulatorDiagnosticBundleBuilder, Desktop.Wpf.Features.Simulator.SimulatorDiagnosticBundleBuilder>();
@@ -166,6 +169,7 @@ public partial class App : Application
                 services.AddScoped<Desktop.Wpf.Features.Simulator.ISimulatorRelayDeliveryService, Desktop.Wpf.Features.Simulator.SimulatorRelayDeliveryService>();
                 services.AddSingleton<ISignalProtocolEngine, SignalProtocolEngine>();
                 services.AddSingleton<Percolator.Application.Network.ISimulatorOutboundInterceptor, Desktop.Wpf.Features.Simulator.SimulatorOutboundInterceptor>();
+                services.AddScoped<Desktop.Wpf.Features.Simulator.ISimulatorRelayAutoDeliverService, Desktop.Wpf.Features.Simulator.SimulatorRelayAutoDeliverService>();
                 // Per-session scoped chat stack
                 services.AddScoped<Desktop.Wpf.Features.Sessions.SessionContext>();
                 services.AddScoped<Desktop.Wpf.Features.Chat.ChatViewModel>();

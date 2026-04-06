@@ -14,7 +14,7 @@ using R3;
 
 namespace Desktop.Wpf.Features.Simulator;
 
-public sealed class SimulatorStateService : ISimulatorStateService
+public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorStateInitializer
 {
     private readonly ISimulatorStateRepository _store;
     private readonly ISimulatorDiagnosticsService _diagnostics;

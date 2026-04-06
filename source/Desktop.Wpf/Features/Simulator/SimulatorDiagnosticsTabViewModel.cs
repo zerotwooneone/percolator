@@ -10,8 +10,8 @@ public sealed class SimulatorDiagnosticsTabViewModel : IDisposable
     private readonly ISimulatorDiagnosticsService _diagnostics;
     private readonly ISimulatorStateService _state;
 
-    private ISynchronizedView<SimulatorDiagnosticEvent, SimulatorDiagnosticEvent>? _filteredView;
-    private NotifyCollectionChangedSynchronizedViewList<SimulatorDiagnosticEvent>? _filteredNotify;
+    private readonly ISynchronizedView<SimulatorDiagnosticEvent, SimulatorDiagnosticEvent> _filteredView;
+    private readonly NotifyCollectionChangedSynchronizedViewList<SimulatorDiagnosticEvent> _filteredNotify;
     private DisposableBag _bag;
 
     public SimulatorDiagnosticsTabViewModel(IUiDispatcher ui, ISimulatorDiagnosticsService diagnostics, ISimulatorStateService state)
@@ -70,8 +70,7 @@ public sealed class SimulatorDiagnosticsTabViewModel : IDisposable
             .AddTo(ref _bag);
     }
 
-    public NotifyCollectionChangedSynchronizedViewList<SimulatorDiagnosticEvent> Events
-        => _filteredNotify ?? throw new InvalidOperationException("ViewModel not initialized.");
+    public NotifyCollectionChangedSynchronizedViewList<SimulatorDiagnosticEvent> Events => _filteredNotify;
 
     public BindableReactiveProperty<Guid?> SelectedPeerId { get; }
     public BindableReactiveProperty<Guid?> SelectedRelayHostPeerId { get; }
@@ -172,10 +171,8 @@ public sealed class SimulatorDiagnosticsTabViewModel : IDisposable
 
     public void Dispose()
     {
-        _filteredNotify?.Dispose();
-        _filteredNotify = null;
-        _filteredView?.Dispose();
-        _filteredView = null;
+        _filteredNotify.Dispose();
+        _filteredView.Dispose();
 
         _bag.Dispose();
     }

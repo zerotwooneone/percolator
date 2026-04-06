@@ -20,13 +20,10 @@ public sealed class SimulatorRelayTabViewModel : IDisposable
     private readonly ILogger<SimulatorRelayTabViewModel> _logger;
     private readonly ILoggerFactory _loggerFactory;
 
-    private CancellationTokenSource? _autoDeliverCts;
-    private Task? _autoDeliverLoop;
-
     private static readonly Guid MainNodeSentinelPeerId = new("88880000-0000-0000-0000-000000000000");
 
-    private ISynchronizedView<Desktop.Wpf.Features.Simulator.Models.SimulatedRelayModel, SimulatedRelayQueuePanelViewModel>? _relayPanels;
-    private NotifyCollectionChangedSynchronizedViewList<SimulatedRelayQueuePanelViewModel>? _relayPanelsNotify;
+    private readonly ISynchronizedView<Desktop.Wpf.Features.Simulator.Models.SimulatedRelayModel, SimulatedRelayQueuePanelViewModel> _relayPanels;
+    private readonly NotifyCollectionChangedSynchronizedViewList<SimulatedRelayQueuePanelViewModel> _relayPanelsNotify;
 
     private DisposableBag _bag;
 
@@ -62,34 +59,6 @@ public sealed class SimulatorRelayTabViewModel : IDisposable
             .AsObservable()
             .SubscribeAwait(async (_, ct) => await RefreshAsync(ct), AwaitOperation.Drop)
             .AddTo(ref _bag);
-    }
-
-    public BindableReactiveProperty<bool> GlobalAutoRelayAll { get; }
-
-    public ReactiveCommand<Unit> RefreshCommand { get; }
-
-    public NotifyCollectionChangedSynchronizedViewList<SimulatedRelayQueuePanelViewModel> RelayPanels
-        => _relayPanelsNotify ?? throw new InvalidOperationException("ViewModel not initialized.");
-
-    public async Task InitializeAsync(CancellationToken ct = default)
-    {
-        await _state.InitializeAsync(ct).ConfigureAwait(false);
-        await _directory.InitializeAsync(ct).ConfigureAwait(false);
-
-        InitializePanelsView();
-        ApplyGlobalAutoRelay();
-
-        await RefreshAsync(ct).ConfigureAwait(false);
-
-        StartAutoDeliverLoop();
-    }
-
-    private void InitializePanelsView()
-    {
-        _relayPanelsNotify?.Dispose();
-        _relayPanelsNotify = null;
-        _relayPanels?.Dispose();
-        _relayPanels = null;
 
         _relayPanels = _state.Relays
             .CreateView(CreatePanel)
@@ -100,79 +69,15 @@ public sealed class SimulatorRelayTabViewModel : IDisposable
             .AddTo(ref _bag);
 
         _relayPanelsNotify = _relayPanels.ToNotifyCollectionChanged(_ui.CollectionEventDispatcher);
+
+        ApplyGlobalAutoRelay();
     }
 
-    private void StartAutoDeliverLoop()
-    {
-        StopAutoDeliverLoop();
+    public BindableReactiveProperty<bool> GlobalAutoRelayAll { get; }
 
-        _autoDeliverCts = new CancellationTokenSource();
-        var token = _autoDeliverCts.Token;
-        _autoDeliverLoop = Task.Run(async () => await AutoDeliverLoopAsync(token).ConfigureAwait(false), token);
-    }
+    public ReactiveCommand<Unit> RefreshCommand { get; }
 
-    private void StopAutoDeliverLoop()
-    {
-        try
-        {
-            _autoDeliverCts?.Cancel();
-        }
-        catch
-        {
-        }
-        finally
-        {
-            _autoDeliverCts?.Dispose();
-            _autoDeliverCts = null;
-            _autoDeliverLoop = null;
-        }
-    }
-
-    private async Task AutoDeliverLoopAsync(CancellationToken ct)
-    {
-        while (!ct.IsCancellationRequested)
-        {
-            try
-            {
-                // Small delay to avoid tight looping.
-                await Task.Delay(TimeSpan.FromMilliseconds(350), ct).ConfigureAwait(false);
-
-                // Snapshot to avoid concurrent modification while iterating.
-                var panels = await _ui.InvokeAsync(() =>
-                    {
-                        var snapshot = new List<SimulatedRelayQueuePanelViewModel>();
-                        foreach (var panel in RelayPanels)
-                        {
-                            snapshot.Add(panel);
-                        }
-                        return snapshot;
-                    })
-                    .ConfigureAwait(false);
-                foreach (var panel in panels)
-                {
-                    ct.ThrowIfCancellationRequested();
-
-                    // Global auto-relay forces per-panel on; otherwise respect panel toggle.
-                    var enabled = GlobalAutoRelayAll.Value || panel.AutoDeliver.Value;
-                    if (!enabled)
-                    {
-                        continue;
-                    }
-
-                    // Deliver a single item per cycle per relay to keep things fair.
-                    await panel.DeliverNextAsync(ct).ConfigureAwait(false);
-                }
-            }
-            catch (OperationCanceledException)
-            {
-                break;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "[simulator] Auto-deliver loop error");
-            }
-        }
-    }
+    public NotifyCollectionChangedSynchronizedViewList<SimulatedRelayQueuePanelViewModel> RelayPanels => _relayPanelsNotify;
 
     private SimulatedRelayQueuePanelViewModel CreatePanel(Desktop.Wpf.Features.Simulator.Models.SimulatedRelayModel relay)
     {
@@ -192,11 +97,10 @@ public sealed class SimulatorRelayTabViewModel : IDisposable
     private void ApplyGlobalAutoRelay()
     {
         var enabled = GlobalAutoRelayAll.Value;
-        if (_relayPanelsNotify is null) return;
 
-        foreach (var p in _relayPanelsNotify)
+        foreach (var relay in _state.Relays)
         {
-            p.AutoDeliver.Value = enabled;
+            relay.AutoDeliverEnabled.Value = enabled;
         }
     }
 
@@ -222,12 +126,8 @@ public sealed class SimulatorRelayTabViewModel : IDisposable
 
     public void Dispose()
     {
-        StopAutoDeliverLoop();
-
-        _relayPanelsNotify?.Dispose();
-        _relayPanelsNotify = null;
-        _relayPanels?.Dispose();
-        _relayPanels = null;
+        _relayPanelsNotify.Dispose();
+        _relayPanels.Dispose();
 
         _bag.Dispose();
     }

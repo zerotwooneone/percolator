@@ -71,8 +71,9 @@ public sealed class SimulatorStateServiceInitializationTests
         var sut = new SimulatorStateService(store, diagnostics, pending, scopeFactory, engine);
 
         // Act
-        var t1 = sut.InitializeAsync();
-        var t2 = sut.InitializeAsync();
+        var initializer = (ISimulatorStateInitializer)sut;
+        var t1 = initializer.InitializeAsync();
+        var t2 = initializer.InitializeAsync();
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(1));
         while (Volatile.Read(ref store.LoadCalls) == 0 && !cts.IsCancellationRequested)

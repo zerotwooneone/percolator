@@ -85,13 +85,6 @@ public sealed class HandshakeSimulatorViewModel : IDisposable
 
     public ReactiveCommand<SimulatorTabKind> SelectTabCommand { get; }
 
-    public async Task InitializeAsync(CancellationToken ct = default)
-    {
-        await Peers.InitializeAsync(ct).ConfigureAwait(false);
-        await Handshakes.InitializeAsync(ct).ConfigureAwait(false);
-        await Relay.InitializeAsync(ct).ConfigureAwait(false);
-    }
-
     private async Task ExecuteResetAsync(CancellationToken ct)
     {
         try

@@ -4,12 +4,10 @@ namespace Desktop.Wpf.Features.Simulator;
 
 public partial class HandshakeSimulatorWindow : Window
 {
-    public HandshakeSimulatorWindow(HandshakeSimulatorViewModel vm)
+    public HandshakeSimulatorWindow(HandshakeSimulatorHostViewModel vm)
     {
         InitializeComponent();
         DataContext = vm;
-
-        _ = vm.InitializeAsync();
     }
 
     protected override void OnClosed(System.EventArgs e)

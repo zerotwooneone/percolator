@@ -119,7 +119,7 @@ public sealed class SimulatedPeerRuntimeFinalizeTests
         var engine = new SignalProtocolEngine(new SystemClock());
 
         var sut = new SimulatorStateService(repo, diagnostics, pending, scopeFactory, engine);
-        await sut.InitializeAsync(CancellationToken.None);
+        await ((ISimulatorStateInitializer)sut).InitializeAsync(CancellationToken.None);
 
         var payload = new InviteHandshakeRequestPayload
         {
@@ -217,7 +217,7 @@ public sealed class SimulatedPeerRuntimeFinalizeTests
         var engine = new SignalProtocolEngine(new SystemClock());
 
         var sut = new SimulatorStateService(repo, diagnostics, pending, scopeFactory, engine);
-        await sut.InitializeAsync(CancellationToken.None);
+        await ((ISimulatorStateInitializer)sut).InitializeAsync(CancellationToken.None);
 
         await sut.ReceiveInviteHandshakeResponseFromMainAsync(inviterPeerId, new InviteHandshakeResponse
         {

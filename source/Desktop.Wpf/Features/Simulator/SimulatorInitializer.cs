@@ -1,7 +1,5 @@
-using System.Collections.ObjectModel;
-using System.Windows;
-using ObservableCollections;
-using R3;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace Desktop.Wpf.Features.Simulator;
 
@@ -13,12 +11,12 @@ public interface ISimulatorInitializer
 
 public sealed class SimulatorInitializer : ISimulatorInitializer
 {
-    private readonly ISimulatorStateService _state;
+    private readonly ISimulatorStateInitializer _state;
 
     private readonly object _initGate = new();
     private Task? _initializeTask;
 
-    public SimulatorInitializer(ISimulatorStateService state)
+    public SimulatorInitializer(ISimulatorStateInitializer state)
     {
         _state = state;
     }

@@ -133,7 +133,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
         var diagnostics = new SimulatorDiagnosticsService();
         var clock = new StaticClock(StaticClock.DefaultNow);
         var sut = CreateSut(repo, diagnostics, pending, clock);
-        await sut.InitializeAsync(CancellationToken.None);
+        await ((ISimulatorStateInitializer)sut).InitializeAsync(CancellationToken.None);
 
         var acceptance = await sut.AcceptReverseSignalInviteAsync(simulatedPeerId, inviterPeerId, invite, CancellationToken.None);
 
@@ -174,7 +174,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
         var diagnostics = new SimulatorDiagnosticsService();
         var clock = new StaticClock(StaticClock.DefaultNow);
         var sut = CreateSut(repo, diagnostics, pending, clock);
-        await sut.InitializeAsync(CancellationToken.None);
+        await ((ISimulatorStateInitializer)sut).InitializeAsync(CancellationToken.None);
 
         using var initiatorIdentityEcdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         using var initiatorIdentityEcdsa = ECDsa.Create(initiatorIdentityEcdh.ExportParameters(true));
@@ -253,7 +253,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
         var diagnostics = new SimulatorDiagnosticsService();
         var clock = new StaticClock(StaticClock.DefaultNow);
         var sut = CreateSut(repo, diagnostics, pending, clock);
-        await sut.InitializeAsync(CancellationToken.None);
+        await ((ISimulatorStateInitializer)sut).InitializeAsync(CancellationToken.None);
 
         // Act
         var sid = await sut.InitiateStandardHandshakeToMainByRelayPkhAsync(
@@ -331,7 +331,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
         var diagnostics = new SimulatorDiagnosticsService();
         var clock = new StaticClock(StaticClock.DefaultNow);
         var sut = CreateSut(repo, diagnostics, pending, clock);
-        await sut.InitializeAsync(CancellationToken.None);
+        await ((ISimulatorStateInitializer)sut).InitializeAsync(CancellationToken.None);
 
         // Act
         var sid = await sut.InitiateStandardHandshakeToMainByRelayPkhAsync(
@@ -423,7 +423,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
         var diagnostics = new SimulatorDiagnosticsService();
         var clock = new StaticClock(StaticClock.DefaultNow);
         var sut = CreateSut(repo, diagnostics, pending, clock);
-        await sut.InitializeAsync(CancellationToken.None);
+        await ((ISimulatorStateInitializer)sut).InitializeAsync(CancellationToken.None);
 
         // Act 1: initiator initiates, enqueuing HandshakeInitiatorHello to relay.
         _ = await sut.InitiateStandardHandshakeToMainByRelayPkhAsync(
@@ -539,7 +539,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
 
         var diagnostics = new SimulatorDiagnosticsService();
         var sut = CreateSut(repo, diagnostics, pending, clock);
-        await sut.InitializeAsync(CancellationToken.None);
+        await ((ISimulatorStateInitializer)sut).InitializeAsync(CancellationToken.None);
 
         var envReq = new InternalEnvelope
         {
@@ -622,7 +622,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
 
         var diagnostics = new SimulatorDiagnosticsService();
         var sut = CreateSut(repo, diagnostics, pending, clock);
-        await sut.InitializeAsync(CancellationToken.None);
+        await ((ISimulatorStateInitializer)sut).InitializeAsync(CancellationToken.None);
 
         var envReq = new InternalEnvelope
         {

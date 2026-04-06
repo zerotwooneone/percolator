@@ -28,12 +28,14 @@ public sealed class SimulatedPeerDirectoryInitializationTests
         var peers = new ObservableList<SimulatedPeerModel>();
         peers.Add(model);
         var state = new Mock<ISimulatorStateService>(MockBehavior.Strict);
+        var initializer = new Mock<ISimulatorStateInitializer>(MockBehavior.Strict);
 
         var initGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var initCalls = 0;
         state.SetupGet(s => s.Peers)
             .Returns(peers);
-        state.Setup(s => s.InitializeAsync(It.IsAny<CancellationToken>()))
+
+        initializer.Setup(s => s.InitializeAsync(It.IsAny<CancellationToken>()))
             .Callback(() => Interlocked.Increment(ref initCalls))
             .Returns(initGate.Task);
 
@@ -44,7 +46,7 @@ public sealed class SimulatedPeerDirectoryInitializationTests
         state.Setup(s => s.RemoveRelayActiveSessionAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
-        var sut = new SimulatorInitializer(state.Object);
+        var sut = new SimulatorInitializer(initializer.Object);
 
         // Act
         var t1 = sut.InitializeAsync();
