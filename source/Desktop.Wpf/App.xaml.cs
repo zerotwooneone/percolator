@@ -167,7 +167,14 @@ public partial class App : Application
                 services.AddSingleton<ISimulatorInitializer, SimulatorInitializer>();
                 services.AddSingleton<Desktop.Wpf.Features.Simulator.ISimulatedPeerPendingInbox, Desktop.Wpf.Features.Simulator.SimulatedPeerPendingInbox>();
                 services.AddScoped<Desktop.Wpf.Features.Simulator.ISimulatorMainIngressService, Desktop.Wpf.Features.Simulator.SimulatorMainIngressService>();
-                services.AddScoped<Desktop.Wpf.Features.Simulator.ISimulatorRelayDeliveryService, Desktop.Wpf.Features.Simulator.SimulatorRelayDeliveryService>();
+                services.AddScoped<Desktop.Wpf.Features.Simulator.ISimulatorRelayDeliveryService>(sp =>
+                    new Desktop.Wpf.Features.Simulator.SimulatorRelayDeliveryService(
+                        sp.GetRequiredService<Percolator.Application.Network.PercolatorMessageService>(),
+                        sp.GetRequiredService<Desktop.Wpf.Features.Simulator.ISimulatorStateService>(),
+                        sp.GetRequiredService<Percolator.Identity.ISelfIdentityRepository>(),
+                        sp.GetRequiredService<Percolator.Identity.ISelfIdentityKeysStore>(),
+                        sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<Desktop.Wpf.Features.Simulator.SimulatorRelayDeliveryService>>(),
+                        sp.GetRequiredService<Desktop.Wpf.Features.Simulator.ISimulatorDiagnosticsService>()));
                 services.AddSingleton<ISignalProtocolEngine, SignalProtocolEngine>();
                 services.AddSingleton<Percolator.Application.Network.ISimulatorOutboundInterceptor, Desktop.Wpf.Features.Simulator.SimulatorOutboundInterceptor>();
                 services.AddScoped<Desktop.Wpf.Features.Simulator.ISimulatorRelayAutoDeliverService, Desktop.Wpf.Features.Simulator.SimulatorRelayAutoDeliverService>();

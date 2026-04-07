@@ -1,9 +1,11 @@
+using System.Collections.Generic;
 using Google.Protobuf;
 using Grpc.Core;
 using Microsoft.Extensions.Logging;
 using Percolator.Application.Network;
 using Percolator.Contracts;
 using Percolator.Cryptography;
+using Percolator.Identity;
 
 namespace Desktop.Wpf.Features.Simulator;
 
@@ -30,17 +32,23 @@ public sealed class SimulatorRelayDeliveryService : ISimulatorRelayDeliveryServi
 {
     private readonly PercolatorMessageService _messageService;
     private readonly ISimulatorStateService _state;
+    private readonly ISelfIdentityRepository _selfIdentityRepository;
+    private readonly ISelfIdentityKeysStore _selfIdentityKeysStore;
     private readonly ILogger<SimulatorRelayDeliveryService> _logger;
     private readonly ISimulatorDiagnosticsService _diagnostics;
 
     public SimulatorRelayDeliveryService(
         PercolatorMessageService messageService,
         ISimulatorStateService state,
+        ISelfIdentityRepository selfIdentityRepository,
+        ISelfIdentityKeysStore selfIdentityKeysStore,
         ILogger<SimulatorRelayDeliveryService> logger,
         ISimulatorDiagnosticsService diagnostics)
     {
         _messageService = messageService;
         _state = state;
+        _selfIdentityRepository = selfIdentityRepository;
+        _selfIdentityKeysStore = selfIdentityKeysStore;
         _logger = logger;
         _diagnostics = diagnostics;
     }
@@ -120,13 +128,42 @@ public sealed class SimulatorRelayDeliveryService : ISimulatorRelayDeliveryServi
 
             var initiatorPkh = System.Security.Cryptography.SHA256.HashData(hello.InitiatorIdentityKeySpki.ToByteArray());
 
-            await _state.EnqueueRelayDownstreamToPeerAsync(
-                    relayHostPeerId: relayHostPeerId,
-                    targetPkh: initiatorPkh,
-                    opaqueBytes: forwarded.ToByteArray(),
-                    debugType: nameof(EstablishSessionResponse),
-                    cancellationToken: cancellationToken)
+            var initiatorPeerId = await _state
+                .TryGetPeerIdByIdentityPkhAsync(initiatorPkh, cancellationToken)
                 .ConfigureAwait(false);
+
+            if (initiatorPeerId.HasValue)
+            {
+                await _state.EnqueueRelayDownstreamToPeerAsync(
+                        relayHostPeerId: relayHostPeerId,
+                        targetPkh: initiatorPkh,
+                        opaqueBytes: forwarded.ToByteArray(),
+                        debugType: nameof(EstablishSessionResponse),
+                        cancellationToken: cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            else
+            {
+                var matchesMainIdentity = await MatchesAnyMainIdentityPkhAsync(initiatorPkh, cancellationToken).ConfigureAwait(false);
+                if (matchesMainIdentity)
+                {
+                    await _state.EnqueueRelayUpstreamToMainAsync(
+                            relayHostPeerId: relayHostPeerId,
+                            opaqueBytes: forwarded.ToByteArray(),
+                            debugType: nameof(EstablishSessionResponse),
+                            cancellationToken: cancellationToken)
+                        .ConfigureAwait(false);
+                }
+                else
+                {
+                    _diagnostics.Emit(
+                        SimulatorDiagnosticEventType.RelayRoutingFailure,
+                        $"Relay response routing failure (no simulated peer or main identity for PKH): {nameof(EstablishSessionResponse)}",
+                        relayHostPeerId: relayHostPeerId,
+                        ackId: ackId);
+                    return;
+                }
+            }
 
             _diagnostics.Emit(
                 SimulatorDiagnosticEventType.HandshakeStateTransition,
@@ -139,6 +176,59 @@ public sealed class SimulatorRelayDeliveryService : ISimulatorRelayDeliveryServi
         {
             _logger.LogWarning(ex, "[simulator] Failed to enqueue EstablishSessionResponse back to relay host {RelayHost}", relayHostPeerId);
         }
+    }
+
+    private async Task<bool> MatchesAnyMainIdentityPkhAsync(byte[] pkh, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        if (pkh is null) throw new ArgumentNullException(nameof(pkh));
+        if (pkh.Length == 0) return false;
+
+        IReadOnlyList<Percolator.Identity.Model.SelfIdentity> identities;
+        try
+        {
+            identities = await _selfIdentityRepository.ListAsync(ct).ConfigureAwait(false);
+        }
+        catch
+        {
+            return false;
+        }
+
+        foreach (var identity in identities)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            X3dhKeys? keys;
+            try
+            {
+                keys = await _selfIdentityKeysStore.LoadAsync(identity.Id, ct).ConfigureAwait(false);
+            }
+            catch
+            {
+                continue;
+            }
+
+            if (keys is null)
+            {
+                continue;
+            }
+
+            try
+            {
+                var spki = keys.IdentitySigningKey.ExportSubjectPublicKeyInfo();
+                var computed = System.Security.Cryptography.SHA256.HashData(spki);
+                if (computed.AsSpan().SequenceEqual(pkh))
+                {
+                    return true;
+                }
+            }
+            finally
+            {
+                try { keys.Dispose(); } catch { }
+            }
+        }
+
+        return false;
     }
 
     private sealed class ServerCallContextStub : ServerCallContext
