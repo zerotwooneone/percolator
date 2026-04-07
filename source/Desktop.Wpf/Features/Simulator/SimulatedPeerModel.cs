@@ -43,6 +43,7 @@ public sealed class SimulatedPeerModel : IDisposable
 
     public SimulatedPeerModel(
         Guid peerId,
+        int selfIdentityId,
         string? displayName,
         bool isOnline,
         bool isRelayCapable,
@@ -68,6 +69,7 @@ public sealed class SimulatedPeerModel : IDisposable
         List<SimulatedPublishedPreKeyBundleModel>? publishedPreKeyBundles = null)
     {
         PeerId = peerId;
+        SelfIdentityId = selfIdentityId;
 
         IdentitySigningKeySpki = identitySigningKeySpki;
         IdentitySigningKeyPrivateKeyEcPrivateKey = identitySigningKeyPrivateKeyEcPrivateKey;
@@ -123,6 +125,8 @@ public sealed class SimulatedPeerModel : IDisposable
     }
 
     public Guid PeerId { get; }
+
+    public int SelfIdentityId { get; }
 
     public byte[] IdentitySigningKeySpki { get; }
     internal byte[] IdentitySigningKeyPrivateKeyEcPrivateKey { get; }
@@ -311,6 +315,7 @@ public sealed class SimulatedPeerModel : IDisposable
     {
         return new PeerStateSnapshot(
             PeerId: PeerId,
+            SelfIdentityId: SelfIdentityId,
             DisplayName: _displayName.Value,
             IsOnline: IsOnline.Value,
             IsRelayCapable: IsRelayCapable.Value,

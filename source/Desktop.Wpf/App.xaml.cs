@@ -161,6 +161,7 @@ public partial class App : Application
                 services.AddSingleton<ISimulatorStateService>(sp => sp.GetRequiredService<SimulatorStateService>());
                 services.AddSingleton<ISimulatorStateInitializer>(sp => sp.GetRequiredService<SimulatorStateService>());
                 services.AddSingleton<IUiDispatcher, WpfUiDispatcher>();
+                services.AddSingleton<Desktop.Wpf.Features.Simulator.ISimulatorDelay, Desktop.Wpf.Features.Simulator.SystemSimulatorDelay>();
                 services.AddSingleton<Desktop.Wpf.Features.Simulator.ISimulatorDiagnosticsService, Desktop.Wpf.Features.Simulator.SimulatorDiagnosticsService>();
                 services.AddSingleton<Desktop.Wpf.Features.Simulator.ISimulatorDiagnosticBundleBuilder, Desktop.Wpf.Features.Simulator.SimulatorDiagnosticBundleBuilder>();
                 services.AddSingleton<ISimulatorInitializer, SimulatorInitializer>();

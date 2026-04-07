@@ -29,36 +29,27 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
 
         public IReadOnlyList<PeerRelationship> Relationships { get; set; } = Array.Empty<PeerRelationship>();
 
-        public SimulatedRelayModel? Relay { get; set; }
+        public IReadOnlyList<SimulatedRelayModel> Relays { get; set; } = Array.Empty<SimulatedRelayModel>();
 
-        public IReadOnlyList<PeerStateSnapshot> SavedPeers { get; private set; } = Array.Empty<PeerStateSnapshot>();
+        public SimulatorStateSnapshot? SavedSnapshot { get; private set; }
 
-        public IReadOnlyList<PeerRelationshipSnapshot> SavedRelationships { get; private set; } = Array.Empty<PeerRelationshipSnapshot>();
-
-        public RelayStateSnapshot? SavedRelay { get; private set; }
-
-        public Task<IReadOnlyList<SimulatedPeerModel>> LoadPeersAsync(CancellationToken cancellationToken = default)
-            => Task.FromResult(Peers);
-
-        public Task SavePeersAsync(
-            IReadOnlyList<PeerStateSnapshot> peers,
-            IReadOnlyList<PeerRelationshipSnapshot> relationships,
-            CancellationToken cancellationToken = default)
+        public Task<SimulatorStateSnapshot> LoadStateAsync(CancellationToken cancellationToken = default)
         {
-            SavedPeers = peers;
-            SavedRelationships = relationships;
-            return Task.CompletedTask;
+            var peerSnaps = Peers.Select(p => p.Freeze()).ToList();
+            var relSnaps = Relationships.Select(r => new PeerRelationshipSnapshot(r.SourcePeerId, r.TargetPeerId, r.Type)).ToList();
+            var relaySnaps = Relays.Select(r => r.Freeze()).ToList();
+
+            return Task.FromResult(new SimulatorStateSnapshot(
+                Version: 1,
+                Peers: peerSnaps,
+                Relationships: relSnaps,
+                Relays: relaySnaps,
+                Groups: Array.Empty<GroupConversationDto>()));
         }
 
-        public Task<IReadOnlyList<PeerRelationship>> LoadRelationshipsAsync(CancellationToken cancellationToken = default)
-            => Task.FromResult(Relationships);
-
-        public Task<SimulatedRelayModel?> LoadRelayAsync(Guid relayHostPeerId, CancellationToken cancellationToken = default)
-            => Task.FromResult(Relay);
-
-        public Task SaveRelayAsync(RelayStateSnapshot relay, CancellationToken cancellationToken = default)
+        public Task SaveStateAsync(SimulatorStateSnapshot snapshot, CancellationToken cancellationToken = default)
         {
-            SavedRelay = relay;
+            SavedSnapshot = snapshot;
             return Task.CompletedTask;
         }
     }
@@ -72,12 +63,20 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
         var services = new ServiceCollection();
         services.AddSingleton<IClock>(clock);
 
+        var transportOptions = Options.Create(new TransportOptions { SimulatorPort = 5002 });
+
         var engine = new Desktop.Wpf.Features.Simulator.Protocol.SignalProtocolEngine(new TestClock(TestClock.Default));
-        return new SimulatorStateService(repo, diagnostics, pending, services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(), engine);
+        return new SimulatorStateService(
+            repo,
+            diagnostics,
+            pending,
+            services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(),
+            transportOptions,
+            engine);
     }
 
     [Test]
-    public async Task AcceptReverseSignalInviteAsync_persists_runtime_store()
+    public async Task AcceptReverseSignalInviteAsync_creates_session_in_memory()
     {
         var simulatedPeerId = Guid.NewGuid();
         var inviterPeerId = Guid.NewGuid();
@@ -121,6 +120,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
             {
                 new SimulatedPeerModel(
                     peerId: simulatedPeerId,
+                    selfIdentityId: 99000,
                     displayName: "sim",
                     isOnline: true,
                     isRelayCapable: false,
@@ -141,9 +141,88 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
         acceptance.Response.Should().NotBeNull();
         acceptance.Response.Version.Should().Be(1);
 
-        await Task.Delay(300);
-        repo.Peers.Should().ContainSingle(p => p.PeerId == simulatedPeerId);
-        repo.Peers.Single(p => p.PeerId == simulatedPeerId).Sessions.Count.Should().Be(1);
+        sut.Peers.Should().ContainSingle(p => p.PeerId == simulatedPeerId);
+        sut.Peers.Single(p => p.PeerId == simulatedPeerId).Sessions.Count.Should().Be(1);
+    }
+
+    [Test]
+    public async Task AcceptReverseSignalInviteAsync_eventually_persists_runtime_store()
+    {
+        // Arrange
+        var simulatedPeerId = Guid.NewGuid();
+        var inviterPeerId = Guid.NewGuid();
+
+        using var acceptorIdentityEcdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        var acceptorIdentityPriv = acceptorIdentityEcdh.ExportECPrivateKey();
+        using var acceptorIdentityEcdsa = ECDsa.Create(acceptorIdentityEcdh.ExportParameters(true));
+        var acceptorIdentitySpki = acceptorIdentityEcdsa.ExportSubjectPublicKeyInfo();
+
+        using var inviterIdentityEcdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        using var inviterIdentityEcdsa = ECDsa.Create(inviterIdentityEcdh.ExportParameters(true));
+        var inviterIdentitySpki = inviterIdentityEcdsa.ExportSubjectPublicKeyInfo();
+
+        using var inviterSignedPreKeyEcdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        var inviterSignedPreKeySpki = inviterSignedPreKeyEcdh.PublicKey.ExportSubjectPublicKeyInfo();
+        var preKeySig = inviterIdentityEcdsa.SignData(inviterSignedPreKeySpki, HashAlgorithmName.SHA256);
+
+        var payload = new InviteHandshakeRequestPayload
+        {
+            Version = 1,
+            RequestCorrelationId = Guid.NewGuid().ToString(),
+            InviterPreKey = new InviteHandshakePreKeyBundle
+            {
+                Version = 1,
+                InviterSignedPreKey = ByteString.CopyFrom(inviterSignedPreKeySpki),
+                PreKeySignature = ByteString.CopyFrom(preKeySig)
+            }
+        };
+
+        var invite = new EstablishDirectSessionRequest
+        {
+            Version = 1,
+            InviterIdentityKey = ByteString.CopyFrom(inviterIdentitySpki),
+            Payload = ByteString.CopyFrom(payload.ToByteArray())
+        };
+
+        var repo = new InMemoryRepository
+        {
+            Peers = new[]
+            {
+                new SimulatedPeerModel(
+                    peerId: simulatedPeerId,
+                    selfIdentityId: 99000,
+                    displayName: "sim",
+                    isOnline: true,
+                    isRelayCapable: false,
+                    identitySigningKeySpki: acceptorIdentitySpki,
+                    identitySigningKeyPrivateKeyEcPrivateKey: acceptorIdentityPriv)
+            }
+        };
+
+        var pending = new SimulatedPeerPendingInbox();
+        var diagnostics = new SimulatorDiagnosticsService();
+        var clock = new StaticClock(StaticClock.DefaultNow);
+        var sut = CreateSut(repo, diagnostics, pending, clock);
+        await ((ISimulatorStateInitializer)sut).InitializeAsync(CancellationToken.None);
+
+        // Act
+        _ = await sut.AcceptReverseSignalInviteAsync(simulatedPeerId, inviterPeerId, invite, CancellationToken.None);
+
+        // Assert (eventual, due to debounced persistence)
+        var timeoutAt = DateTimeOffset.UtcNow.AddSeconds(3);
+        while (DateTimeOffset.UtcNow < timeoutAt)
+        {
+            var snap = repo.SavedSnapshot;
+            if (snap is not null && snap.Peers.Single(p => p.PeerId == simulatedPeerId).Sessions.Count == 1)
+            {
+                break;
+            }
+
+            await Task.Delay(25);
+        }
+
+        repo.SavedSnapshot.Should().NotBeNull();
+        repo.SavedSnapshot!.Peers.Single(p => p.PeerId == simulatedPeerId).Sessions.Count.Should().Be(1);
     }
 
     [Test]
@@ -162,6 +241,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
             {
                 new SimulatedPeerModel(
                     peerId: simulatedPeerId,
+                    selfIdentityId: 99000,
                     displayName: "sim",
                     isOnline: true,
                     isRelayCapable: false,
@@ -199,8 +279,18 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
         resp.Response.Should().NotBeNull();
         resp.Response.ResponsePayload.Should().NotBeNull();
 
-        await Task.Delay(300);
-        repo.Peers.Single(p => p.PeerId == simulatedPeerId).Sessions.Count.Should().Be(1);
+        var timeoutAt = DateTimeOffset.UtcNow.AddSeconds(2);
+        while (DateTimeOffset.UtcNow < timeoutAt)
+        {
+            if (sut.Peers.Single(p => p.PeerId == simulatedPeerId).Sessions.Count == 1)
+            {
+                break;
+            }
+
+            await Task.Delay(20);
+        }
+
+        sut.Peers.Single(p => p.PeerId == simulatedPeerId).Sessions.Count.Should().Be(1);
     }
 
     [Test]
@@ -227,6 +317,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
             {
                 new SimulatedPeerModel(
                     peerId: simulatedPeerId,
+                    selfIdentityId: 99000,
                     displayName: "sim",
                     isOnline: true,
                     isRelayCapable: false,
@@ -234,6 +325,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
                     identitySigningKeyPrivateKeyEcPrivateKey: initiatorIdentityPriv),
                 new SimulatedPeerModel(
                     peerId: relayHostPeerId,
+                    selfIdentityId: 99001,
                     displayName: "relay",
                     isOnline: true,
                     isRelayCapable: true,
@@ -247,6 +339,10 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
                             BundleBytes: preKeyBundleBytes,
                             ExpiresUtc: DateTimeOffset.UtcNow.AddMinutes(5))
                     })
+            },
+            Relays = new[]
+            {
+                new SimulatedRelayModel(relayHostPeerId)
             }
         };
 
@@ -305,6 +401,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
             {
                 new SimulatedPeerModel(
                     peerId: simulatedPeerId,
+                    selfIdentityId: 99000,
                     displayName: "sim",
                     isOnline: true,
                     isRelayCapable: false,
@@ -312,6 +409,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
                     identitySigningKeyPrivateKeyEcPrivateKey: initiatorIdentityPriv),
                 new SimulatedPeerModel(
                     peerId: relayHostPeerId,
+                    selfIdentityId: 99001,
                     displayName: "relay",
                     isOnline: true,
                     isRelayCapable: true,
@@ -325,6 +423,10 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
                             BundleBytes: bundleBytes,
                             ExpiresUtc: DateTimeOffset.UtcNow.AddMinutes(5))
                     })
+            },
+            Relays = new[]
+            {
+                new SimulatedRelayModel(relayHostPeerId)
             }
         };
 
@@ -343,8 +445,20 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
         // Assert
         sid.Should().BeNull();
 
-        await Task.Delay(350);
-        (repo.Relay?.MessageQueue.Count ?? 0).Should().Be(0);
+        var relayTimeoutAt = DateTimeOffset.UtcNow.AddSeconds(2);
+        while (DateTimeOffset.UtcNow < relayTimeoutAt)
+        {
+            var relay = sut.Relays.Single(r => r.RelayHostPeerId == relayHostPeerId);
+            if (relay.MessageQueue.Count == 0)
+            {
+                break;
+            }
+
+            await Task.Delay(20);
+        }
+
+        var relayAfter = sut.Relays.Single(r => r.RelayHostPeerId == relayHostPeerId);
+        relayAfter.MessageQueue.Count.Should().Be(0);
 
         diagnostics.Events.Should().NotContain(e => e.EventType == SimulatorDiagnosticEventType.StandardHandshakeHelloEnqueued);
     }
@@ -389,6 +503,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
             {
                 new SimulatedPeerModel(
                     peerId: initiatorPeerId,
+                    selfIdentityId: 99000,
                     displayName: "init",
                     isOnline: true,
                     isRelayCapable: false,
@@ -396,6 +511,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
                     identitySigningKeyPrivateKeyEcPrivateKey: initiatorIdentityPriv),
                 new SimulatedPeerModel(
                     peerId: responderPeerId,
+                    selfIdentityId: 99001,
                     displayName: "resp",
                     isOnline: true,
                     isRelayCapable: false,
@@ -403,6 +519,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
                     identitySigningKeyPrivateKeyEcPrivateKey: responderIdentityPriv),
                 new SimulatedPeerModel(
                     peerId: relayHostPeerId,
+                    selfIdentityId: 99002,
                     displayName: "relay",
                     isOnline: true,
                     isRelayCapable: true,
@@ -416,6 +533,10 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
                             BundleBytes: bundle.ToByteArray(),
                             ExpiresUtc: DateTimeOffset.UtcNow.AddMinutes(5))
                     })
+            },
+            Relays = new[]
+            {
+                new SimulatedRelayModel(relayHostPeerId)
             }
         };
 
@@ -450,8 +571,19 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
         var payload = EstablishSessionResponse.Types.Response.Types.ResponsePayload.Parser.ParseFrom(establishResp.Response.ResponsePayload);
         var assignedSid = new SessionId(Guid.Parse(payload.SessionId));
 
-        await Task.Delay(300);
-        repo.Peers.Single(p => p.PeerId == initiatorPeerId)
+        var initiatorTimeoutAt = DateTimeOffset.UtcNow.AddSeconds(2);
+        while (DateTimeOffset.UtcNow < initiatorTimeoutAt)
+        {
+            var peer = sut.Peers.Single(p => p.PeerId == initiatorPeerId);
+            if (peer.Sessions.Keys.Any(s => s.Value == assignedSid.Value))
+            {
+                break;
+            }
+
+            await Task.Delay(20);
+        }
+
+        sut.Peers.Single(p => p.PeerId == initiatorPeerId)
             .Sessions
             .Keys
             .Should().ContainSingle(s => s.Value == assignedSid.Value);
@@ -519,6 +651,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
             {
                 new SimulatedPeerModel(
                     peerId: relayHostPeerId,
+                    selfIdentityId: 99000,
                     displayName: "relay",
                     isOnline: true,
                     isRelayCapable: true,
@@ -535,11 +668,11 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
             }
         };
 
-        repo.Peers[0].SessionsMutable[responderSession.Id] = responderSession;
-
         var diagnostics = new SimulatorDiagnosticsService();
         var sut = CreateSut(repo, diagnostics, pending, clock);
         await ((ISimulatorStateInitializer)sut).InitializeAsync(CancellationToken.None);
+
+        sut.Peers.Single(p => p.PeerId == relayHostPeerId).SessionsMutable[responderSession.Id] = responderSession;
 
         var envReq = new InternalEnvelope
         {
@@ -610,19 +743,20 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
             {
                 new SimulatedPeerModel(
                     peerId: relayHostPeerId,
+                    selfIdentityId: 99000,
                     displayName: "relay",
                     isOnline: true,
                     isRelayCapable: true,
-                    identitySigningKeySpki: relayIdentitySpki,
-                    identitySigningKeyPrivateKeyEcPrivateKey: relayIdentityPriv)
+                    identitySigningKeySpki: SHA256.HashData(Guid.NewGuid().ToByteArray()),
+                    identitySigningKeyPrivateKeyEcPrivateKey: new byte[] { 0x01 })
             }
         };
-
-        repo.Peers[0].SessionsMutable[responderSession.Id] = responderSession;
 
         var diagnostics = new SimulatorDiagnosticsService();
         var sut = CreateSut(repo, diagnostics, pending, clock);
         await ((ISimulatorStateInitializer)sut).InitializeAsync(CancellationToken.None);
+
+        sut.Peers.Single(p => p.PeerId == relayHostPeerId).SessionsMutable[responderSession.Id] = responderSession;
 
         var envReq = new InternalEnvelope
         {

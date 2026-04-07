@@ -4,6 +4,7 @@ namespace Desktop.Wpf.Features.Simulator;
 
 public sealed record PeerStateSnapshot(
     Guid PeerId,
+    int SelfIdentityId,
     string? DisplayName,
     bool IsOnline,
     bool IsRelayCapable,

@@ -12,6 +12,7 @@ public sealed class SimulatorRelayAutoDeliverService : ISimulatorRelayAutoDelive
     private readonly ISimulatorRelayDeliveryService _delivery;
     private readonly ISimulatorDiagnosticsService _diagnostics;
     private readonly ILogger<SimulatorRelayAutoDeliverService> _logger;
+    private readonly ISimulatorDelay _delay;
 
     private readonly object _gate = new();
     private CancellationTokenSource? _cts;
@@ -21,11 +22,13 @@ public sealed class SimulatorRelayAutoDeliverService : ISimulatorRelayAutoDelive
         ISimulatorStateService state,
         ISimulatorRelayDeliveryService delivery,
         ISimulatorDiagnosticsService diagnostics,
+        ISimulatorDelay delay,
         ILogger<SimulatorRelayAutoDeliverService> logger)
     {
         _state = state;
         _delivery = delivery;
         _diagnostics = diagnostics;
+        _delay = delay;
         _logger = logger;
     }
 
@@ -64,7 +67,7 @@ public sealed class SimulatorRelayAutoDeliverService : ISimulatorRelayAutoDelive
         {
             try
             {
-                await Task.Delay(TimeSpan.FromMilliseconds(350), ct).ConfigureAwait(false);
+                await _delay.DelayAsync(TimeSpan.FromMilliseconds(350), ct).ConfigureAwait(false);
 
                 var relays = _state.Relays.ToArray();
                 foreach (var relay in relays)

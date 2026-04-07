@@ -5,6 +5,7 @@ public sealed class SimulatorStateDto
     public int Version { get; set; } = 1;
     public List<SimulatedPeerDto> Peers { get; set; } = new();
     public List<GroupConversationDto> Groups { get; set; } = new();
+    public List<RelayPersistenceDto> Relays { get; set; } = new();
 }
 
 public sealed class GroupConversationDto

@@ -26,10 +26,6 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
 
     private readonly SemaphoreSlim _ioGate = new(1, 1);
 
-    private readonly Dictionary<Guid, int> _selfIdentityIdByPeerId = new();
-    private int _nextSelfIdentityId = 99000 - 1;
-    private List<GroupConversationDto> _groups = new();
-
     public JsonSimulatorStateRepository(
         IOptions<TransportOptions> transportOptions,
         ISimulatedPeerKeyFactory keys,
@@ -54,30 +50,14 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
         };
     }
 
-    public async Task<IReadOnlyList<SimulatedPeerModel>> LoadPeersAsync(CancellationToken cancellationToken = default)
+    public async Task<SimulatorStateSnapshot> LoadStateAsync(CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+
         var loaded = await ReadPeersFileAsync(cancellationToken).ConfigureAwait(false);
         var state = loaded ?? new SimulatorStateDto { Version = 1 };
 
-        _groups = state.Groups ?? new();
-
-        _selfIdentityIdByPeerId.Clear();
-        foreach (var p in state.Peers)
-        {
-            if (p.PeerId == Guid.Empty) continue;
-            if (p.SelfIdentityId >= 99000 && p.SelfIdentityId > _nextSelfIdentityId)
-            {
-                _nextSelfIdentityId = p.SelfIdentityId;
-            }
-            if (p.SelfIdentityId >= 99000)
-            {
-                _selfIdentityIdByPeerId[p.PeerId] = p.SelfIdentityId;
-            }
-        }
-
-        var clock = ResolveClock();
-        var peers = new List<SimulatedPeerModel>(state.Peers.Count);
-
+        var peerSnaps = new List<PeerStateSnapshot>(state.Peers.Count);
         foreach (var dto in state.Peers)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -86,211 +66,77 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
             NormalizePeer(dto, _transportOptions.Value);
             _ = _keys.EnsureReverseSignalKeys(dto.ReverseSignalKeys);
             _ = EnsureIdentityPublicKeyHash(dto);
-            dto.Relay ??= new();
 
-            var model = CreateModel(dto);
-            HydrateRuntimeStore(model, dto.RuntimeStore, clock);
-            peers.Add(model);
+            peerSnaps.Add(CreatePeerSnapshot(dto));
         }
+
+        var relSnaps = LoadRelationshipsFromState(state);
+
+        var relaySnaps = new List<RelayStateSnapshot>(state.Relays?.Count ?? 0);
+        if (state.Relays is not null)
+        {
+            foreach (var dto in state.Relays)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (dto.RelayHostPeerId == Guid.Empty) continue;
+                relaySnaps.Add(CreateRelaySnapshot(dto));
+            }
+        }
+
+        var groups = state.Groups ?? new();
+
+        var snap = new SimulatorStateSnapshot(
+            Version: state.Version <= 0 ? 1 : state.Version,
+            Peers: peerSnaps,
+            Relationships: relSnaps,
+            Relays: relaySnaps,
+            Groups: groups);
 
         if (loaded is null)
         {
-            await SavePeersAsync(
-                    peers: peers.Select(p => p.Freeze()).ToList(),
-                    relationships: Array.Empty<PeerRelationshipSnapshot>(),
-                    cancellationToken: cancellationToken)
-                .ConfigureAwait(false);
+            await SaveStateAsync(snap, cancellationToken).ConfigureAwait(false);
         }
 
-        return peers;
+        return snap;
     }
 
-    public async Task SavePeersAsync(
-        IReadOnlyList<PeerStateSnapshot> peers,
-        IReadOnlyList<PeerRelationshipSnapshot> relationships,
-        CancellationToken cancellationToken = default)
+    public async Task SaveStateAsync(SimulatorStateSnapshot snapshot, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (peers is null) throw new ArgumentNullException(nameof(peers));
-        if (relationships is null) throw new ArgumentNullException(nameof(relationships));
+        if (snapshot is null) throw new ArgumentNullException(nameof(snapshot));
 
         await _ioGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            var peers = snapshot.Peers ?? Array.Empty<PeerStateSnapshot>();
+            var relationships = snapshot.Relationships ?? Array.Empty<PeerRelationshipSnapshot>();
+
             var state = new SimulatorStateDto
             {
-                Version = 1,
-                Groups = _groups ?? new(),
-                Peers = new List<SimulatedPeerDto>(peers.Count)
+                Version = snapshot.Version <= 0 ? 1 : snapshot.Version,
+                Groups = snapshot.Groups?.ToList() ?? new(),
+                Peers = new List<SimulatedPeerDto>(peers.Count),
+                Relays = snapshot.Relays
+                    ?.Select(CreateRelayDto)
+                    .ToList()
+                    ?? new()
             };
 
-            foreach (var model in peers)
+            foreach (var p in peers)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                if (model.PeerId == Guid.Empty) continue;
+                if (p.PeerId == Guid.Empty) continue;
 
-                if (!_selfIdentityIdByPeerId.TryGetValue(model.PeerId, out var selfId))
-                {
-                    selfId = Interlocked.Increment(ref _nextSelfIdentityId);
-                    _selfIdentityIdByPeerId[model.PeerId] = selfId;
-                }
-
-                var dto = CreateDto(model, selfId);
+                var dto = CreateDto(p);
                 NormalizePeer(dto, _transportOptions.Value);
                 _ = _keys.EnsureReverseSignalKeys(dto.ReverseSignalKeys);
                 _ = EnsureIdentityPublicKeyHash(dto);
                 state.Peers.Add(dto);
             }
 
-            // Relationships are persisted inside peer DTOs for now (back-compat), but the Service is ignorant of this.
-            var publishedKeyEdges = new Dictionary<Guid, List<Guid>>();
-            var relayActiveEdges = new Dictionary<Guid, List<Guid>>();
-            foreach (var rel in relationships)
-            {
-                if (rel.SourcePeerId == Guid.Empty) continue;
-                if (rel.TargetPeerId == Guid.Empty) continue;
-                if (rel.SourcePeerId == rel.TargetPeerId) continue;
-
-                if (rel.Type == RelationshipType.PublishedKey)
-                {
-                    if (!publishedKeyEdges.TryGetValue(rel.SourcePeerId, out var list))
-                    {
-                        list = new List<Guid>();
-                        publishedKeyEdges[rel.SourcePeerId] = list;
-                    }
-                    list.Add(rel.TargetPeerId);
-                }
-                else if (rel.Type == RelationshipType.RelayActiveSession)
-                {
-                    if (!relayActiveEdges.TryGetValue(rel.SourcePeerId, out var list))
-                    {
-                        list = new List<Guid>();
-                        relayActiveEdges[rel.SourcePeerId] = list;
-                    }
-                    list.Add(rel.TargetPeerId);
-                }
-            }
-
-            foreach (var peer in state.Peers)
-            {
-                peer.PublishedKeysToPeerIds = publishedKeyEdges.TryGetValue(peer.PeerId, out var pk)
-                    ? pk.Distinct().OrderBy(x => x).ToList()
-                    : new List<Guid>();
-
-                peer.Relay ??= new SimulatedPeerRelayStateDto();
-                peer.Relay.ActiveSessionsPeerIds = relayActiveEdges.TryGetValue(peer.PeerId, out var rs)
-                    ? rs.Distinct().OrderBy(x => x).ToList()
-                    : new List<Guid>();
-            }
+            ApplyRelationshipsToPeers(state.Peers, relationships);
 
             await WritePeersFileAsync(state, cancellationToken).ConfigureAwait(false);
-        }
-        finally
-        {
-            _ioGate.Release();
-        }
-    }
-
-    public async Task<IReadOnlyList<PeerRelationship>> LoadRelationshipsAsync(CancellationToken cancellationToken = default)
-    {
-        var loaded = await ReadPeersFileAsync(cancellationToken).ConfigureAwait(false);
-        if (loaded is null) return Array.Empty<PeerRelationship>();
-
-        var edges = new List<PeerRelationship>();
-        foreach (var peer in loaded.Peers)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (peer.PeerId == Guid.Empty) continue;
-
-            if (peer.PublishedKeysToPeerIds is not null)
-            {
-                foreach (var target in peer.PublishedKeysToPeerIds)
-                {
-                    if (target == Guid.Empty) continue;
-                    if (target == peer.PeerId) continue;
-                    edges.Add(new PeerRelationship(peer.PeerId, target, RelationshipType.PublishedKey));
-                }
-            }
-
-            var relayTargets = peer.Relay?.ActiveSessionsPeerIds;
-            if (relayTargets is not null)
-            {
-                foreach (var target in relayTargets)
-                {
-                    if (target == Guid.Empty) continue;
-                    if (target == peer.PeerId) continue;
-                    edges.Add(new PeerRelationship(peer.PeerId, target, RelationshipType.RelayActiveSession));
-                }
-            }
-        }
-
-        return edges
-            .Distinct()
-            .ToList();
-    }
-
-    public async Task<SimulatedRelayModel?> LoadRelayAsync(Guid relayHostPeerId, CancellationToken cancellationToken = default)
-    {
-        var dto = await LoadRelayDtoAsync(relayHostPeerId, cancellationToken).ConfigureAwait(false);
-        if (dto is null) return null;
-        if (dto.RelayHostPeerId != relayHostPeerId) return null;
-
-        var relay = new SimulatedRelayModel(relayHostPeerId);
-        foreach (var m in dto.UpstreamToMain)
-        {
-            if (m.AckId == Guid.Empty) continue;
-            relay.EnqueueMessage(new OutboundRelayMessage(m.AckId, m.OpaqueBytes, m.EnqueuedUtc, m.DebugType));
-        }
-        foreach (var m in dto.DownstreamToPeers)
-        {
-            if (m.AckId == Guid.Empty) continue;
-            if (m.TargetPkh is null || m.TargetPkh.Length == 0) continue;
-            relay.EnqueueMessage(new InboundRelayMessage(m.AckId, m.TargetPkh, m.OpaqueBytes, m.EnqueuedUtc, m.DebugType));
-        }
-        return relay;
-    }
-
-    public Task SaveRelayAsync(RelayStateSnapshot relay, CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        if (relay is null) throw new ArgumentNullException(nameof(relay));
-
-        var dto = new RelayPersistenceDto
-        {
-            Version = 1,
-            RelayHostPeerId = relay.RelayHostPeerId,
-            UpstreamToMain = relay.UpstreamToMain
-                .OrderBy(x => x.EnqueuedUtc)
-                .Select(x => new RelayUpstreamMessageDto
-                {
-                    AckId = x.AckId,
-                    OpaqueBytes = x.OpaqueBytes,
-                    EnqueuedUtc = x.EnqueuedUtc,
-                    DebugType = x.DebugType
-                })
-                .ToList(),
-            DownstreamToPeers = relay.DownstreamToPeers
-                .OrderBy(x => x.EnqueuedUtc)
-                .Select(x => new RelayDownstreamMessageDto
-                {
-                    AckId = x.AckId,
-                    TargetPkh = x.TargetPkh,
-                    OpaqueBytes = x.OpaqueBytes,
-                    EnqueuedUtc = x.EnqueuedUtc,
-                    DebugType = x.DebugType
-                })
-                .ToList()
-        };
-
-        return SaveRelayWithIoGateAsync(dto, cancellationToken);
-    }
-
-    private async Task SaveRelayWithIoGateAsync(RelayPersistenceDto dto, CancellationToken cancellationToken)
-    {
-        await _ioGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            await SaveRelayDtoAsync(dto, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -338,44 +184,13 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
         File.Delete(tmp);
     }
 
-    private async Task<RelayPersistenceDto?> LoadRelayDtoAsync(Guid relayHostPeerId, CancellationToken cancellationToken)
+    private PeerStateSnapshot CreatePeerSnapshot(SimulatedPeerDto dto)
     {
-        var path = GetRelayPath(relayHostPeerId);
-        if (!File.Exists(path)) return null;
+        var clock = ResolveClock();
 
-        await _ioGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            await using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
-            return await JsonSerializer.DeserializeAsync<RelayPersistenceDto>(fs, _json, cancellationToken).ConfigureAwait(false);
-        }
-        finally
-        {
-            _ioGate.Release();
-        }
-    }
-
-    private async Task SaveRelayDtoAsync(RelayPersistenceDto relay, CancellationToken cancellationToken)
-    {
-        if (relay is null) throw new ArgumentNullException(nameof(relay));
-
-        var path = GetRelayPath(relay.RelayHostPeerId);
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-
-        var tmp = path + ".tmp";
-        await using (var fs = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None))
-        {
-            await JsonSerializer.SerializeAsync(fs, relay, _json, cancellationToken).ConfigureAwait(false);
-        }
-
-        File.Copy(tmp, path, overwrite: true);
-        File.Delete(tmp);
-    }
-
-    private static SimulatedPeerModel CreateModel(SimulatedPeerDto dto)
-    {
-        return new SimulatedPeerModel(
+        var model = new SimulatedPeerModel(
             peerId: dto.PeerId,
+            selfIdentityId: dto.SelfIdentityId,
             displayName: dto.DisplayName,
             isOnline: dto.IsOnline,
             isRelayCapable: dto.Relay?.IsRelayCapable == true,
@@ -405,14 +220,19 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
                     b.BundleBytes,
                     b.ExpiresUtc))
                 .ToList());
+
+        HydrateRuntimeStore(model, dto.RuntimeStore, clock);
+        var snap = model.Freeze();
+        model.Dispose();
+        return snap;
     }
 
-    private static SimulatedPeerDto CreateDto(PeerStateSnapshot model, int selfIdentityId)
+    private static SimulatedPeerDto CreateDto(PeerStateSnapshot model)
     {
         var dto = new SimulatedPeerDto
         {
             PeerId = model.PeerId,
-            SelfIdentityId = selfIdentityId,
+            SelfIdentityId = model.SelfIdentityId,
             DisplayName = model.DisplayName,
             IsOnline = model.IsOnline,
             IdentityPublicKeyHash = SHA256.HashData(model.IdentitySigningKeySpki),
@@ -507,6 +327,134 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
         };
 
         return dto;
+    }
+
+    private static IReadOnlyList<PeerRelationshipSnapshot> LoadRelationshipsFromState(SimulatorStateDto state)
+    {
+        var edges = new List<PeerRelationshipSnapshot>();
+        foreach (var peer in state.Peers)
+        {
+            if (peer.PeerId == Guid.Empty) continue;
+
+            if (peer.PublishedKeysToPeerIds is not null)
+            {
+                foreach (var target in peer.PublishedKeysToPeerIds)
+                {
+                    if (target == Guid.Empty) continue;
+                    if (target == peer.PeerId) continue;
+                    edges.Add(new PeerRelationshipSnapshot(peer.PeerId, target, RelationshipType.PublishedKey));
+                }
+            }
+
+            var relayTargets = peer.Relay?.ActiveSessionsPeerIds;
+            if (relayTargets is not null)
+            {
+                foreach (var target in relayTargets)
+                {
+                    if (target == Guid.Empty) continue;
+                    if (target == peer.PeerId) continue;
+                    edges.Add(new PeerRelationshipSnapshot(peer.PeerId, target, RelationshipType.RelayActiveSession));
+                }
+            }
+        }
+
+        return edges
+            .Distinct()
+            .ToList();
+    }
+
+    private static void ApplyRelationshipsToPeers(List<SimulatedPeerDto> peers, IReadOnlyList<PeerRelationshipSnapshot> relationships)
+    {
+        var publishedKeyEdges = new Dictionary<Guid, List<Guid>>();
+        var relayActiveEdges = new Dictionary<Guid, List<Guid>>();
+        foreach (var rel in relationships)
+        {
+            if (rel.SourcePeerId == Guid.Empty) continue;
+            if (rel.TargetPeerId == Guid.Empty) continue;
+            if (rel.SourcePeerId == rel.TargetPeerId) continue;
+
+            if (rel.Type == RelationshipType.PublishedKey)
+            {
+                if (!publishedKeyEdges.TryGetValue(rel.SourcePeerId, out var list))
+                {
+                    list = new List<Guid>();
+                    publishedKeyEdges[rel.SourcePeerId] = list;
+                }
+                list.Add(rel.TargetPeerId);
+            }
+            else if (rel.Type == RelationshipType.RelayActiveSession)
+            {
+                if (!relayActiveEdges.TryGetValue(rel.SourcePeerId, out var list))
+                {
+                    list = new List<Guid>();
+                    relayActiveEdges[rel.SourcePeerId] = list;
+                }
+                list.Add(rel.TargetPeerId);
+            }
+        }
+
+        foreach (var peer in peers)
+        {
+            peer.PublishedKeysToPeerIds = publishedKeyEdges.TryGetValue(peer.PeerId, out var pk)
+                ? pk.Distinct().OrderBy(x => x).ToList()
+                : new List<Guid>();
+
+            peer.Relay ??= new SimulatedPeerRelayStateDto();
+            peer.Relay.ActiveSessionsPeerIds = relayActiveEdges.TryGetValue(peer.PeerId, out var rs)
+                ? rs.Distinct().OrderBy(x => x).ToList()
+                : new List<Guid>();
+        }
+    }
+
+    private static RelayStateSnapshot CreateRelaySnapshot(RelayPersistenceDto dto)
+    {
+        var upstream = dto.UpstreamToMain
+            .Where(m => m.AckId != Guid.Empty)
+            .OrderBy(m => m.EnqueuedUtc)
+            .Select(m => new OutboundRelayMessageSnapshot(m.AckId, m.OpaqueBytes, m.EnqueuedUtc, m.DebugType))
+            .ToList();
+
+        var downstream = dto.DownstreamToPeers
+            .Where(m => m.AckId != Guid.Empty)
+            .Where(m => m.TargetPkh is not null && m.TargetPkh.Length != 0)
+            .OrderBy(m => m.EnqueuedUtc)
+            .Select(m => new InboundRelayMessageSnapshot(m.AckId, m.TargetPkh, m.OpaqueBytes, m.EnqueuedUtc, m.DebugType))
+            .ToList();
+
+        return new RelayStateSnapshot(
+            RelayHostPeerId: dto.RelayHostPeerId,
+            UpstreamToMain: upstream,
+            DownstreamToPeers: downstream);
+    }
+
+    private static RelayPersistenceDto CreateRelayDto(RelayStateSnapshot relay)
+    {
+        return new RelayPersistenceDto
+        {
+            Version = 1,
+            RelayHostPeerId = relay.RelayHostPeerId,
+            UpstreamToMain = relay.UpstreamToMain
+                .OrderBy(x => x.EnqueuedUtc)
+                .Select(x => new RelayUpstreamMessageDto
+                {
+                    AckId = x.AckId,
+                    OpaqueBytes = x.OpaqueBytes,
+                    EnqueuedUtc = x.EnqueuedUtc,
+                    DebugType = x.DebugType
+                })
+                .ToList(),
+            DownstreamToPeers = relay.DownstreamToPeers
+                .OrderBy(x => x.EnqueuedUtc)
+                .Select(x => new RelayDownstreamMessageDto
+                {
+                    AckId = x.AckId,
+                    TargetPkh = x.TargetPkh,
+                    OpaqueBytes = x.OpaqueBytes,
+                    EnqueuedUtc = x.EnqueuedUtc,
+                    DebugType = x.DebugType
+                })
+                .ToList()
+        };
     }
 
     private static void HydrateRuntimeStore(SimulatedPeerModel model, SimulatedPeerRuntimeStoreDto store, IClock clock)
@@ -640,25 +588,9 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
         return Path.Combine(appData, "Percolator", "simulator-state.json");
     }
 
-    private static string GetDefaultRelayDirectory()
-    {
-        var appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        return Path.Combine(appData, "Percolator", "simulator-relays");
-    }
-
     private string GetStatePath()
     {
         return string.IsNullOrWhiteSpace(_overridePath) ? GetDefaultStatePath() : _overridePath;
-    }
-
-    private string GetRelayPath(Guid relayHostPeerId)
-    {
-        // Keep relays separate from simulator-state.json for greenfield persistence.
-        var baseDir = string.IsNullOrWhiteSpace(_overridePath)
-            ? GetDefaultRelayDirectory()
-            : Path.Combine(Path.GetDirectoryName(_overridePath)!, "simulator-relays");
-
-        return Path.Combine(baseDir, $"relay-{relayHostPeerId:N}.json");
     }
 
     public void Dispose()

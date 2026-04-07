@@ -20,37 +20,20 @@ public sealed class SimulatorStateServiceInitializationTests
 {
     private sealed class RepositoryStub : ISimulatorStateRepository
     {
-        private readonly TaskCompletionSource<IReadOnlyList<SimulatedPeerModel>> _gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
-
-        public SimulatedRelayModel? Relay { get; set; }
+        private readonly TaskCompletionSource<SimulatorStateSnapshot> _gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public int LoadCalls;
 
-        public Task<IReadOnlyList<SimulatedPeerModel>> LoadPeersAsync(CancellationToken cancellationToken = default)
+        public Task<SimulatorStateSnapshot> LoadStateAsync(CancellationToken cancellationToken = default)
         {
             Interlocked.Increment(ref LoadCalls);
             return _gate.Task;
         }
 
-        public Task SavePeersAsync(
-            IReadOnlyList<PeerStateSnapshot> peers,
-            IReadOnlyList<PeerRelationshipSnapshot> relationships,
-            CancellationToken cancellationToken = default)
+        public Task SaveStateAsync(SimulatorStateSnapshot snapshot, CancellationToken cancellationToken = default)
             => Task.CompletedTask;
 
-        public Task<IReadOnlyList<PeerRelationship>> LoadRelationshipsAsync(CancellationToken cancellationToken = default)
-            => Task.FromResult<IReadOnlyList<PeerRelationship>>(Array.Empty<PeerRelationship>());
-
-        public Task<SimulatedRelayModel?> LoadRelayAsync(Guid relayHostPeerId, CancellationToken cancellationToken = default)
-            => Task.FromResult(Relay);
-
-        public Task SaveRelayAsync(RelayStateSnapshot relay, CancellationToken cancellationToken = default)
-        {
-            Relay = new SimulatedRelayModel(relay.RelayHostPeerId);
-            return Task.CompletedTask;
-        }
-
-        public void Release(IReadOnlyList<SimulatedPeerModel> peers) => _gate.TrySetResult(peers);
+        public void Release(SimulatorStateSnapshot snapshot) => _gate.TrySetResult(snapshot);
     }
 
     [Test]
@@ -66,9 +49,10 @@ public sealed class SimulatorStateServiceInitializationTests
         var scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
 
         var pending = new SimulatedPeerPendingInbox();
+        var transportOptions = Options.Create(new TransportOptions { SimulatorPort = 5002 });
         var engine = new SignalProtocolEngine(new SystemClock());
 
-        var sut = new SimulatorStateService(store, diagnostics, pending, scopeFactory, engine);
+        var sut = new SimulatorStateService(store, diagnostics, pending, scopeFactory, transportOptions, engine);
 
         // Act
         var initializer = (ISimulatorStateInitializer)sut;
@@ -83,7 +67,12 @@ public sealed class SimulatorStateServiceInitializationTests
 
         store.LoadCalls.Should().Be(1);
 
-        store.Release(Array.Empty<SimulatedPeerModel>());
+        store.Release(new SimulatorStateSnapshot(
+            Version: 1,
+            Peers: Array.Empty<PeerStateSnapshot>(),
+            Relationships: Array.Empty<PeerRelationshipSnapshot>(),
+            Relays: Array.Empty<RelayStateSnapshot>(),
+            Groups: Array.Empty<GroupConversationDto>()));
         await Task.WhenAll(t1, t2);
 
         // Assert

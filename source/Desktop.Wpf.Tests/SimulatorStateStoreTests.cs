@@ -50,6 +50,7 @@ public sealed class SimulatorStateStoreTests
 
             var model = new SimulatedPeerModel(
                 peerId: peerId,
+                selfIdentityId: 99000,
                 displayName: "Alice",
                 isOnline: true,
                 isRelayCapable: false,
@@ -94,21 +95,79 @@ public sealed class SimulatorStateStoreTests
                 new PeerRelationshipSnapshot(model.PeerId, host3, RelationshipType.PublishedKey)
             };
 
-            await store.SavePeersAsync(new[] { model.Freeze() }, relationships, CancellationToken.None);
+            var relayHostPeerId = Guid.NewGuid();
+            var ackUp = Guid.NewGuid();
+            var ackDown = Guid.NewGuid();
+            var targetPkh = SHA256.HashData(Guid.NewGuid().ToByteArray());
+            var enqueuedUtc = DateTimeOffset.UtcNow;
 
-            var loaded = await store.LoadPeersAsync(CancellationToken.None);
-            loaded.Should().HaveCount(1);
-            var loadedPeer = loaded.Single();
+            var relays = new[]
+            {
+                new RelayStateSnapshot(
+                    RelayHostPeerId: relayHostPeerId,
+                    UpstreamToMain: new[]
+                    {
+                        new OutboundRelayMessageSnapshot(
+                            AckId: ackUp,
+                            OpaqueBytes: new byte[] { 0x0A, 0x0B },
+                            EnqueuedUtc: enqueuedUtc,
+                            DebugType: "up")
+                    },
+                    DownstreamToPeers: new[]
+                    {
+                        new InboundRelayMessageSnapshot(
+                            AckId: ackDown,
+                            TargetPkh: targetPkh,
+                            OpaqueBytes: new byte[] { 0x0C, 0x0D },
+                            EnqueuedUtc: enqueuedUtc,
+                            DebugType: "down")
+                    })
+            };
+
+            var groups = new[]
+            {
+                new GroupConversationDto
+                {
+                    Version = 1,
+                    GroupId = Guid.NewGuid(),
+                    Name = "g",
+                    ParticipantPeerIds = new() { peerId, host1 }
+                }
+            };
+
+            var snapshot = new SimulatorStateSnapshot(
+                Version: 1,
+                Peers: new[] { model.Freeze() },
+                Relationships: relationships,
+                Relays: relays,
+                Groups: groups);
+
+            await store.SaveStateAsync(snapshot, CancellationToken.None);
+
+            var loadedSnapshot = await store.LoadStateAsync(CancellationToken.None);
+            loadedSnapshot.Peers.Should().HaveCount(1);
+            var loadedPeer = loadedSnapshot.Peers.Single();
+
             loadedPeer.PeerId.Should().Be(peerId);
-            loadedPeer.DisplayName.CurrentValue.Should().Be("Alice");
+            loadedPeer.DisplayName.Should().Be("Alice");
             loadedPeer.SignedPreKeys.Should().HaveCount(2);
-            loadedPeer.Sessions.Count.Should().Be(1);
+            loadedPeer.Sessions.Should().HaveCount(1);
 
-            var loadedRelationships = await store.LoadRelationshipsAsync(CancellationToken.None);
-            loadedRelationships
+            loadedSnapshot.Relationships
                 .Count(r => r.SourcePeerId == model.PeerId && r.Type == RelationshipType.PublishedKey)
                 .Should()
                 .Be(3);
+
+            loadedSnapshot.Relays.Should().HaveCount(1);
+            loadedSnapshot.Relays.Single().RelayHostPeerId.Should().Be(relayHostPeerId);
+            loadedSnapshot.Relays.Single().UpstreamToMain.Should().ContainSingle(m => m.AckId == ackUp && m.DebugType == "up");
+            loadedSnapshot.Relays.Single().DownstreamToPeers.Should().ContainSingle(m => m.AckId == ackDown && m.DebugType == "down");
+            loadedSnapshot.Relays.Single().DownstreamToPeers.Single(m => m.AckId == ackDown).TargetPkh.Should().Equal(targetPkh);
+
+            loadedSnapshot.Groups.Should().HaveCount(1);
+            loadedSnapshot.Groups.Single().GroupId.Should().Be(groups[0].GroupId);
+            loadedSnapshot.Groups.Single().Name.Should().Be("g");
+            loadedSnapshot.Groups.Single().ParticipantPeerIds.Should().Contain(peerId);
         }
         finally
         {

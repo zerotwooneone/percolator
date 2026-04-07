@@ -32,8 +32,8 @@ public sealed class SimulatorDiagnosticBundleBuilderTests
         var priv = ecdh.ExportECPrivateKey();
         var spki = ecdh.PublicKey.ExportSubjectPublicKeyInfo();
         var peersList = new ObservableList<SimulatedPeerModel>();
-        peersList.Add(new SimulatedPeerModel(relayHostId, "Relay", isOnline: true, isRelayCapable: true, spki, priv));
-        peersList.Add(new SimulatedPeerModel(peerId, "Peer", isOnline: true, isRelayCapable: false, spki, priv));
+        peersList.Add(new SimulatedPeerModel(relayHostId, selfIdentityId: 99000, "Relay", isOnline: true, isRelayCapable: true, spki, priv));
+        peersList.Add(new SimulatedPeerModel(peerId, selfIdentityId: 99001, "Peer", isOnline: true, isRelayCapable: false, spki, priv));
 
         var relaysList = new ObservableList<SimulatedRelayModel>();
         relaysList.Add(new SimulatedRelayModel(relayHostId));

@@ -29,36 +29,27 @@ public sealed class SimulatedPeerRuntimeFinalizeTests
 
         public IReadOnlyList<PeerRelationship> Relationships { get; set; } = Array.Empty<PeerRelationship>();
 
-        public SimulatedRelayModel? Relay { get; set; }
+        public IReadOnlyList<SimulatedRelayModel> Relays { get; set; } = Array.Empty<SimulatedRelayModel>();
 
-        public IReadOnlyList<PeerStateSnapshot> SavedPeers { get; private set; } = Array.Empty<PeerStateSnapshot>();
+        public SimulatorStateSnapshot? SavedSnapshot { get; private set; }
 
-        public IReadOnlyList<PeerRelationshipSnapshot> SavedRelationships { get; private set; } = Array.Empty<PeerRelationshipSnapshot>();
-
-        public RelayStateSnapshot? SavedRelay { get; private set; }
-
-        public Task<IReadOnlyList<SimulatedPeerModel>> LoadPeersAsync(CancellationToken cancellationToken = default)
-            => Task.FromResult(Peers);
-
-        public Task SavePeersAsync(
-            IReadOnlyList<PeerStateSnapshot> peers,
-            IReadOnlyList<PeerRelationshipSnapshot> relationships,
-            CancellationToken cancellationToken = default)
+        public Task<SimulatorStateSnapshot> LoadStateAsync(CancellationToken cancellationToken = default)
         {
-            SavedPeers = peers;
-            SavedRelationships = relationships;
-            return Task.CompletedTask;
+            var peerSnaps = Peers.Select(p => p.Freeze()).ToList();
+            var relSnaps = Relationships.Select(r => new PeerRelationshipSnapshot(r.SourcePeerId, r.TargetPeerId, r.Type)).ToList();
+            var relaySnaps = Relays.Select(r => r.Freeze()).ToList();
+
+            return Task.FromResult(new SimulatorStateSnapshot(
+                Version: 1,
+                Peers: peerSnaps,
+                Relationships: relSnaps,
+                Relays: relaySnaps,
+                Groups: Array.Empty<GroupConversationDto>()));
         }
 
-        public Task<IReadOnlyList<PeerRelationship>> LoadRelationshipsAsync(CancellationToken cancellationToken = default)
-            => Task.FromResult(Relationships);
-
-        public Task<SimulatedRelayModel?> LoadRelayAsync(Guid relayHostPeerId, CancellationToken cancellationToken = default)
-            => Task.FromResult(Relay);
-
-        public Task SaveRelayAsync(RelayStateSnapshot relay, CancellationToken cancellationToken = default)
+        public Task SaveStateAsync(SimulatorStateSnapshot snapshot, CancellationToken cancellationToken = default)
         {
-            SavedRelay = relay;
+            SavedSnapshot = snapshot;
             return Task.CompletedTask;
         }
     }
@@ -92,6 +83,7 @@ public sealed class SimulatedPeerRuntimeFinalizeTests
             {
                 new SimulatedPeerModel(
                     peerId: inviterPeerId,
+                    selfIdentityId: 99000,
                     displayName: "inviter",
                     isOnline: true,
                     isRelayCapable: false,
@@ -99,6 +91,7 @@ public sealed class SimulatedPeerRuntimeFinalizeTests
                     identitySigningKeyPrivateKeyEcPrivateKey: inviterIdentityPriv),
                 new SimulatedPeerModel(
                     peerId: acceptorPeerId,
+                    selfIdentityId: 99001,
                     displayName: "acceptor",
                     isOnline: true,
                     isRelayCapable: false,
@@ -107,8 +100,6 @@ public sealed class SimulatedPeerRuntimeFinalizeTests
             }
         };
 
-        repo.Peers[0].OutboundInvitesMutable.Add(new SimulatedOutboundInviteModel(correlation, inviterSignedPreKeyPriv));
-
         var services = new ServiceCollection();
         services.AddSingleton<IClock, SystemClock>();
         var sp = services.BuildServiceProvider();
@@ -116,10 +107,15 @@ public sealed class SimulatedPeerRuntimeFinalizeTests
 
         var pending = new SimulatedPeerPendingInbox();
         var diagnostics = new SimulatorDiagnosticsService();
+        var transportOptions = Options.Create(new TransportOptions { SimulatorPort = 5002 });
         var engine = new SignalProtocolEngine(new SystemClock());
 
-        var sut = new SimulatorStateService(repo, diagnostics, pending, scopeFactory, engine);
+        var sut = new SimulatorStateService(repo, diagnostics, pending, scopeFactory, transportOptions, engine);
         await ((ISimulatorStateInitializer)sut).InitializeAsync(CancellationToken.None);
+
+        sut.Peers.Single(p => p.PeerId == inviterPeerId)
+            .OutboundInvitesMutable
+            .Add(new SimulatedOutboundInviteModel(correlation, inviterSignedPreKeyPriv));
 
         var payload = new InviteHandshakeRequestPayload
         {
@@ -163,7 +159,7 @@ public sealed class SimulatedPeerRuntimeFinalizeTests
 
         finalizedSid.Should().NotBeNull();
 
-        repo.Peers.Single(p => p.PeerId == inviterPeerId).Sessions.Count.Should().Be(1);
+        sut.Peers.Single(p => p.PeerId == inviterPeerId).Sessions.Count.Should().Be(1);
 
         pending.TryGetInviteHandshakeResponse(inviterPeerId, correlation, out _).Should().BeFalse();
     }
@@ -192,6 +188,7 @@ public sealed class SimulatedPeerRuntimeFinalizeTests
             {
                 new SimulatedPeerModel(
                     peerId: inviterPeerId,
+                    selfIdentityId: 99000,
                     displayName: "inviter",
                     isOnline: true,
                     isRelayCapable: false,
@@ -199,6 +196,7 @@ public sealed class SimulatedPeerRuntimeFinalizeTests
                     identitySigningKeyPrivateKeyEcPrivateKey: inviterIdentityPriv),
                 new SimulatedPeerModel(
                     peerId: acceptorPeerId,
+                    selfIdentityId: 99001,
                     displayName: "acceptor",
                     isOnline: true,
                     isRelayCapable: false,
@@ -214,9 +212,10 @@ public sealed class SimulatedPeerRuntimeFinalizeTests
 
         var pending = new SimulatedPeerPendingInbox();
         var diagnostics = new SimulatorDiagnosticsService();
+        var transportOptions = Options.Create(new TransportOptions { SimulatorPort = 5002 });
         var engine = new SignalProtocolEngine(new SystemClock());
 
-        var sut = new SimulatorStateService(repo, diagnostics, pending, scopeFactory, engine);
+        var sut = new SimulatorStateService(repo, diagnostics, pending, scopeFactory, transportOptions, engine);
         await ((ISimulatorStateInitializer)sut).InitializeAsync(CancellationToken.None);
 
         await sut.ReceiveInviteHandshakeResponseFromMainAsync(inviterPeerId, new InviteHandshakeResponse
