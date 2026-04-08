@@ -196,6 +196,226 @@ Definition of done:
 - Remove repository-owned caches that become redundant under the snapshot contract.
 
 ---
+
+## Chunk B — Relay bug 1: “Next” doesn’t decrement queue counter + delivered handshake doesn’t update peer state
+
+Outcome:
+
+- Clicking **Next** on the Relay tab removes exactly one item from the relay queue, and **the queue counter and item list update immediately**.
+- Delivering a queued relayed standard handshake (`HandshakeInitiatorHello`) causes the **target peer’s handshake UI to transition reactively** (show “Request Received”), and **does not** auto-accept until the user clicks Accept.
+
+
+Important observed current behavior (must change in this chunk):
+
+- `SimulatorRelayDeliveryService.DeliverToPeerAsync(...)` currently calls `_state.ReceiveRelayedOpaquePayloadAsync(recipientPeerId, opaqueBytes, ...)`.
+- `SimulatorStateService.ReceiveRelayedOpaquePayloadAsync(...)` currently parses `HandshakeInitiatorHello` and immediately calls `ReceiveEstablishSessionFromMainAsync(...)`, creating a session and returning `EstablishSessionResponse`.
+- `SimulatorRelayDeliveryService.DeliverToPeerAsync(...)` then immediately enqueues that `EstablishSessionResponse` back to the initiator (either downstream to a simulated peer or upstream to Main).
+
+This means standard handshakes are currently *auto-accepted* on delivery, which is the opposite of the simulator UX we want.
+
+Context / key constraint (R3):
+
+- Domain models can be mutated on background threads.
+- ViewModels must marshal reactive streams to the WPF dispatcher before binding.
+- Reference: `Desktop.Wpf/r3.readme.md`:
+  - For properties: call `ObserveOnCurrentSynchronizationContext()` *before* `.ToBindableReactiveProperty()`.
+  - For collections: use `.ToNotifyCollectionChanged(_ui.CollectionEventDispatcher)`.
+
+Work (recipe):
+
+### B.1 — Fix Relay tab queue counter not reacting to dequeue/remove
+
+Symptom:
+
+- Relay queue item removal happens in domain (`SimulatorStateService.DeleteRelayMessageByAckIdAsync`), but the Relay tab’s `QueueCount` can appear stuck.
+
+Root cause:
+
+- `QueueCount` is derived from `synchronizedQueueView.ObserveCountChanged()` but is bound without UI-thread marshalling.
+
+Change:
+
+- `Desktop.Wpf/Features/Simulator/SimulatedRelayQueuePanelViewModel.cs`
+  - Update `QueueCount`:
+    - `synchronizedQueueView.ObserveCountChanged()`
+    - `.ObserveOnCurrentSynchronizationContext()`
+    - `.ToBindableReactiveProperty(...)`
+  - Do not touch `QueueItems`; it is already marshaled via `.ToNotifyCollectionChanged(_ui.CollectionEventDispatcher)`.
+
+Definition of done:
+
+- With a non-empty relay queue visible, click **Next**.
+- Confirm:
+  - delivered item disappears from list
+  - `QueueCount` decrements immediately
+  - no WPF cross-thread exceptions
+
+### B.2 — Make all Simulator ViewModels UI-thread-safe (required for reactive handshake UI updates)
+
+What to fix:
+
+- Any projection from `_model.*` reactive properties into a `BindableReactiveProperty` must include `.ObserveOnCurrentSynchronizationContext()`.
+
+Where (minimum set for this chunk):
+
+- `Desktop.Wpf/Features/Simulator/SimulatedPeerItemViewModel.cs`
+- `Desktop.Wpf/Features/Simulator/SimulatedHandshakeStateMachineCardViewModel.cs`
+
+Definition of done:
+
+- When a background service changes `SimulatedPeerModel.UiState` (or any other runtime reactive property), UI updates within the next dispatcher tick.
+
+### B.3 — Track pending inbound Standard Signal hellos inside the Peer Aggregate
+
+The UI currently exposes a generic `InboundPending` state. We must rename this to `AwaitingUserAcceptance` and track standard Signal hellos separately from reverse-signal invites.
+
+Required renames:
+
+- **Rename UI state**
+  - `SimulatorPeerUiState.InboundPending` -> `SimulatorPeerUiState.AwaitingUserAcceptance`
+  - Update all references across WPF code, converters, tests, and any persisted snapshots accordingly.
+
+- **Rename reverse-signal tracking field**
+  - `SimulatedPeerModel.PendingCorrelationId` -> `SimulatedPeerModel.InboundReverseSignalPendingCorrelationId`
+
+New domain model:
+
+- Create `Desktop.Wpf/Features/Simulator/Models/SimulatedPendingStandardSignalHelloModel.cs` with:
+  - `Guid RelayHostPeerId`
+  - `byte[] InitiatorIdentityKeySpki`
+  - `byte[] InitiatorEphemeralKeySpki`
+  - `Guid SignedPreKeyId`
+  - `Guid? OneTimePreKeyId`
+  - `DateTimeOffset ReceivedUtc`
+
+Add to peer model (authoritative state ownership):
+
+- `SimulatedPeerModel` owns pending inbound standard hellos.
+- Add:
+  - `ObservableDictionary<string, SimulatedPendingStandardSignalHelloModel> PendingInboundStandardSignalHellosMutable`
+  - Expose read-only view:
+    - `IReadOnlyObservableDictionary<string, SimulatedPendingStandardSignalHelloModel> PendingInboundStandardSignalHellos`
+  - Do not add a "selected initiator" property.
+    - The simulator handshake UI will be updated to list each pending handshake and pass `initiatorPkhHex` as a command parameter.
+
+Keying and update semantics:
+
+- `InitiatorPkhHex = Convert.ToHexString(SHA256(hello.InitiatorIdentityKeySpki)).ToLowerInvariant()`.
+- One pending per initiator identity key per recipient peer.
+- Most recent overrides existing entry for the same initiator PKH.
+- No expiration.
+
+Implementation note:
+
+- This data is stored on the peer aggregate (`SimulatedPeerModel.PendingInboundStandardSignalHellosMutable`) and is mutated under the simulator state gate.
+
+### B.4 — Handshakes tab UI: list pending inbound handshakes (per peer) and accept per item
+
+Rationale:
+
+- Today, the Handshakes tab shows one peer card with a single `Accept` button.
+- With standard Signal, a single recipient peer can have multiple pending inbound hellos (one per initiator identity PKH).
+- Therefore, `Accept` must be **per pending item** (command parameter) rather than relying on a global selection property.
+
+Existing candidate assessment:
+
+- `Desktop.Wpf/Features/Sessions/PendingHandshakesMenuViewModel` exists but is part of the sessions UI and is already in use (sidebar/menu card). It is not suitable to reuse directly for the simulator.
+- No existing simulator-specific ViewModel for listing pending inbound handshake items was found.
+
+Plan:
+
+- Update `Desktop.Wpf/Features/Simulator/SimulatorHandshakesTabView.xaml` peer card template to include a "Pending" section.
+- Add two visual groupings in each peer card:
+  - Reverse-signal invite (at most one): show when `InboundReverseSignalPendingCorrelationId != null`.
+  - Standard Signal hellos (0..n): list all entries in `PendingInboundStandardSignalHellos`.
+- Add a per-item `Accept` button for each pending standard hello.
+  - The command must pass `initiatorPkhHex` (string) as the parameter.
+  - Optional: also include a per-item `Reject`/`Dismiss` that removes that pending hello.
+
+ViewModel changes (high-level):
+
+- Extend `SimulatedHandshakeStateMachineCardViewModel` to expose a bindable list of pending standard hello rows.
+  - Each row must include:
+    - `InitiatorPkhHex`
+    - `ReceivedUtc`
+    - `AcceptCommand` (or reuse parent command with parameter)
+    - Optional `RejectCommand`
+- Prefer projecting the model’s dictionary to a UI collection using the same R3/WPF threading rule as elsewhere:
+  - marshal to dispatcher before raising collection change notifications.
+
+Definition of done:
+
+- The Handshakes tab displays **multiple** pending standard hellos for a single recipient peer.
+- Clicking Accept on a specific pending standard hello accepts **that specific** initiator (no ambiguity).
+
+### B.5 — Delivery path: do not auto-accept standard hellos
+
+Change required:
+
+- In `SimulatorRelayDeliveryService.DeliverToPeerAsync(...)`:
+  - If `opaqueBytes` parses as `HandshakeInitiatorHello`:
+    - Do **not** call `_state.ReceiveRelayedOpaquePayloadAsync(...)`.
+    - Instead call a new state service API:
+      - `Task UpsertPendingStandardSignalHelloAsync(Guid recipientPeerId, Guid relayHostPeerId, HandshakeInitiatorHello hello, DateTimeOffset receivedUtc, CancellationToken ct)`
+    - That API must (under `_stateGate`):
+      - upsert the pending model into the recipient peer’s `PendingInboundStandardSignalHellosMutable`
+      - set the recipient peer’s `UiState = AwaitingUserAcceptance`
+      - update `PendingInboundStandardSignalHellosMutable[initiatorPkhHex] = <model>`
+      - set `InboundReverseSignalPendingCorrelationId = null`
+    - Emit diagnostics: `HandshakeStateTransition` with `contextTag = "StandardSignalPending"`.
+  - If it is not a hello, continue existing behavior.
+
+### B.6 — Acceptance: finalize standard signal hello and route response
+
+- Create:
+  - `Task<bool> TryAcceptPendingStandardSignalHelloAsync(Guid recipientPeerId, string initiatorPkhHex, CancellationToken ct)`
+
+Under `_stateGate`:
+
+- 1) Look up the recipient `SimulatedPeerModel`.
+- 2) Look up and remove the pending hello from `SimulatedPeerModel.PendingInboundStandardSignalHellosMutable`.
+  - If not found, return `false`.
+- 3) Map hello -> `EstablishSessionRequest` and call `ReceiveEstablishSessionFromMainAsync(...)`.
+  - Important: do **not** refactor `ReceiveEstablishSessionFromMainAsync` in this chunk.
+- 4) Update the recipient peer UI state to Established if (and only if) no other inbound pending items exist.
+  - If other pendings remain (standard hellos and/or reverse-signal invite), keep `UiState = AwaitingUserAcceptance`.
+
+Release `_stateGate`.
+
+Outside the lock:
+
+- Route the resulting `EstablishSessionResponse` back to the initiator using `TryGetPeerIdByIdentityPkhAsync`.
+  - If local, call `EnqueueRelayDownstreamToPeerAsync`.
+  - If remote, call `EnqueueRelayUpstreamToMainAsync`.
+
+ViewModel wiring requirement (no discriminator enum):
+
+- Reverse-signal invite acceptance remains the peer-card Accept behavior (single correlation id).
+- Standard Signal acceptance is per pending item in the list UI (B.4) and must call:
+  - `TryAcceptPendingStandardSignalHelloAsync(recipientPeerId, initiatorPkhHex, ct)`
+
+### B.7 — Tests
+
+Update/add tests to cover:
+
+- **Relay queue UI**
+  - Next decrements count (reactive marshalling fix).
+- **Standard hello pending + accept**
+  - Delivering `HandshakeInitiatorHello` via relay:
+    - does not enqueue an immediate response
+    - sets recipient peer `UiState=AwaitingUserAcceptance`
+    - adds/overwrites `SimulatedPeerModel.PendingInboundStandardSignalHellos[initiatorPkhHex]`
+  - Accepting standard hello:
+    - enqueues an `EstablishSessionResponse` back to initiator (upstream or downstream)
+    - marks recipient established
+
+- **Handshakes tab list UI (smoke)**
+  - When multiple pending standard hellos exist for a peer, the tab renders multiple rows.
+  - Clicking Accept on a specific row calls accept for that row’s `initiatorPkhHex`.
+
+---
+
+---
 ## Chunk I — Notification badge + default focus behavior for Connection Management button
 
 Outcome:
@@ -518,42 +738,3 @@ Definition of done:
 - Relay enqueues the hello in its relay queue under routing key == Target PKH.
 - Simulator UI (Relay tab) shows a new queued relay message on the Relay peer.
 
-#### What we have checked / verified
-
-- Publish to relay host works; the pre-key bundle is stored in the relay host’s PublishedBundles collection.
-- Fetch-by-PKH from relay host works end-to-end:
-  - The request reaches the correct simulated peer runtime (simulatedPeerId matches the relay host peer id).
-  - The request PKH matches the stored bundle key (byte-for-byte).
-  - The relay host responds with a response payload containing the pre-key bundle.
-
-Concrete debug values (from a known-good run):
-
-- relayHostPeerId:
-  - `a8d433c8-7741-472b-ab52-c7ebebd920f4`
-- logicalOwnerPeerId (Target simulated peer id that published bundle):
-  - `64d5433b-7a86-4195-b106-ec98f1d2c1ad`
-- recipientPublicKeyHash / requested PKH (hex):
-  - `C147ED93237B62FFADAEF2480C47B1D9CFEAD154556F3F8BAA851EFCE098DEA5`
-- Relay host runtime ingress confirmation:
-  - `simulatedPeerId` for GetPreKeyBundleRequest == `a8d433c8-7741-472b-ab52-c7ebebd920f4`
-  - `getReq.PublicKeyHash` hex == `C147ED...DEA5`
-
-### Next verification steps
-
-The remaining suspected failure is in the **post-bundle enqueue** path (Main -> Relay EnqueueOpaqueMessageRequest -> Relay queue persistence/UI).
-
-- Verify Main actually sends the enqueue message:
-  - Breakpoint: `ConnectionManagementDialogViewModel.ExecuteNetworkSearchAsync` at the second `_transport.SendMessageAsync(...)` that sends `EnqueueOpaqueMessageRequest`.
-  - Capture: relayHostPeerId, direct session id, targetPkh hex, and size of `cipherMq`.
-
-- Verify transport routing hits the simulator interceptor for the enqueue send:
-  - Breakpoint: `SimulatorOutboundInterceptor.TryDeliverOpaqueMessage(...)`.
-  - Confirm: `TryResolveSimulatedPeerId(...) == true` and resolved peer id == relayHostPeerId.
-
-- Verify relay peer runtime parses the enqueue envelope and calls state enqueue:
-  - Breakpoint: `SimulatedPeerRuntime.ReceiveOpaqueMessageFromMainAsync` inside the `EnqueueOpaqueMessageRequest` branch.
-  - Confirm: `RecipientPublicKeyHash` == targetPkh and `MessageBlob` length > 0.
-  - Breakpoint: `SimulatorStateService.EnqueueRelayOpaqueAsync(...)` and confirm queue count increments.
-
-- If queue count increments but UI remains unchanged:
-  - Investigate `SimulatorRelayTabViewModel` / relay panel refresh behavior and dispatcher affinity.
