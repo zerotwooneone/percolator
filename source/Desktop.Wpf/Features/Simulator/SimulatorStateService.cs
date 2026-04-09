@@ -669,7 +669,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             }
 
             var resp = new GetPreKeyBundleResponse { Version = 1 };
-            if (popped is not null && popped.BundleBytes is not null && popped.BundleBytes.Length > 0)
+            if (popped?.BundleBytes is {Length: > 0})
             {
                 try
                 {

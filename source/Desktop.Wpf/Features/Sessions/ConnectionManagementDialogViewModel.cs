@@ -911,7 +911,7 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
                         .ConfigureAwait(false);
 
                     _ = await _transport
-                        .SendMessageAsync(relayHostPeerId, direct.SessionId, cipherMq)
+                        .SendMessageAsync(relayHostPeerId, direct.SessionId, cipherMq, ct)
                         .ConfigureAwait(false);
                 }
                 catch (Exception ex)
