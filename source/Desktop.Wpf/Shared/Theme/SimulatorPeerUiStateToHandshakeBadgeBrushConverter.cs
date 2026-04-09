@@ -19,7 +19,7 @@ public sealed class SimulatorPeerUiStateToHandshakeBadgeBrushConverter : IValueC
         {
             SimulatorPeerUiState.Ready => "Simulator.HandshakeBadge.ReadyBrush",
             SimulatorPeerUiState.OutboundPending => "Simulator.HandshakeBadge.OutboundPendingBrush",
-            SimulatorPeerUiState.InboundPending => "Simulator.HandshakeBadge.InboundPendingBrush",
+            SimulatorPeerUiState.AwaitingUserAcceptance => "Simulator.HandshakeBadge.InboundPendingBrush",
             SimulatorPeerUiState.Established => "Simulator.HandshakeBadge.EstablishedBrush",
             SimulatorPeerUiState.Expired => "Simulator.HandshakeBadge.ExpiredBrush",
             _ => "Simulator.HandshakeBadge.ReadyBrush"

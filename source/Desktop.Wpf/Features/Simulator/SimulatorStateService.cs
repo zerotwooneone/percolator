@@ -1,16 +1,28 @@
 using Google.Protobuf;
+using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
-using System.Security.Cryptography;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using ObservableCollections;
 using Percolator.Application.Configuration;
+using Percolator.Application.Network;
 using Percolator.Contracts;
 using Percolator.Cryptography;
 using Percolator.Cryptography.Primitives;
-using Desktop.Wpf.Features.Simulator.Tracking;
-using Desktop.Wpf.Features.Simulator.Models;
 using R3;
+using Desktop.Wpf.Features.Simulator.Models;
+using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
+using Desktop.Wpf.Features.Simulator.Tracking;
 
 namespace Desktop.Wpf.Features.Simulator;
 
@@ -52,13 +64,16 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
 
     private readonly SemaphoreSlim _stateGate = new(1, 1);
 
+    private readonly TimeProvider _timeProvider;
+
     public SimulatorStateService(
         ISimulatorStateRepository store,
         ISimulatorDiagnosticsService diagnostics,
         ISimulatedPeerPendingInbox pending,
         IServiceScopeFactory scopeFactory,
         IOptions<TransportOptions> transportOptions,
-        Desktop.Wpf.Features.Simulator.Protocol.ISignalProtocolEngine engine)
+        Desktop.Wpf.Features.Simulator.Protocol.ISignalProtocolEngine engine,
+        TimeProvider? timeProvider = null)
     {
         _store = store;
         _diagnostics = diagnostics;
@@ -67,8 +82,10 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         _transportOptions = transportOptions;
         _engine = engine;
 
+        _timeProvider = timeProvider ?? ObservableSystem.DefaultTimeProvider;
+
         _saveTrigger
-            .Debounce(TimeSpan.FromMilliseconds(250))
+            .Debounce(TimeSpan.FromMilliseconds(250), _timeProvider)
             .SelectAwait(async (_, ct) => await FreezeSnapshotAsync(ct).ConfigureAwait(false))
             .SubscribeAwait(async (snap, ct) => await _store.SaveStateAsync(snap, ct).ConfigureAwait(false), AwaitOperation.Sequential)
             .AddTo(ref _bag);
@@ -907,6 +924,172 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         return null;
     }
 
+    public async Task UpsertPendingStandardSignalHelloAsync(
+        Guid recipientPeerId,
+        Guid relayHostPeerId,
+        HandshakeInitiatorHello hello,
+        DateTimeOffset receivedUtc,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (hello is null) throw new ArgumentNullException(nameof(hello));
+
+        if (!hello.HasInitiatorIdentityKeySpki || hello.InitiatorIdentityKeySpki.Length == 0)
+        {
+            return;
+        }
+
+        var initiatorPkh = SHA256.HashData(hello.InitiatorIdentityKeySpki.ToByteArray());
+        var initiatorPkhHex = Convert.ToHexString(initiatorPkh).ToLowerInvariant();
+
+        await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var model = _peers.FirstOrDefault(p => p.PeerId == recipientPeerId)
+                ?? throw new InvalidOperationException($"No simulated peer exists with id {recipientPeerId}");
+
+            model.PendingInboundStandardSignalHellosMutable[initiatorPkhHex] = new SimulatedPendingStandardSignalHelloModel(
+                RelayHostPeerId: relayHostPeerId,
+                InitiatorIdentityKeySpki: hello.InitiatorIdentityKeySpki.ToByteArray(),
+                InitiatorEphemeralKeySpki: hello.InitiatorEphemeralKeySpki.ToByteArray(),
+                SignedPreKeyId: hello.HasSignedPreKeyId && hello.SignedPreKeyId.Length > 0
+                    ? new Guid(hello.SignedPreKeyId.ToByteArray())
+                    : Guid.Empty,
+                OneTimePreKeyId: hello.HasOneTimePreKeyId && hello.OneTimePreKeyId.Length > 0
+                    ? new Guid(hello.OneTimePreKeyId.ToByteArray())
+                    : null,
+                ReceivedUtc: receivedUtc);
+
+            model.MarkAwaitingUserAcceptance();
+
+            // Standard-signal pending UI takes precedence for the peer card. Clear reverse-signal correlation.
+            // (User can still accept reverse-signal invites from the peer list tab.)
+            // NOTE: this is a runtime-only UI convenience; it does not reject the invite.
+            // The invite acceptance logic still keys on correlation id presence.
+            //
+            // If this behavior is undesired, remove it and allow both to be pending concurrently.
+            //
+            // For now: clear to match the plan's deterministic routing.
+            //
+            model.ClearInboundReverseSignalPendingCorrelationId();
+        }
+        finally
+        {
+            _stateGate.Release();
+        }
+
+        _diagnostics.Emit(
+            SimulatorDiagnosticEventType.HandshakeStateTransition,
+            $"Standard hello pending: initiator={initiatorPkhHex[..8]}",
+            peerId: recipientPeerId,
+            relayHostPeerId: relayHostPeerId,
+            contextTag: "StandardSignalPending");
+    }
+
+    public async Task<bool> TryAcceptPendingStandardSignalHelloAsync(
+        Guid recipientPeerId,
+        string initiatorPkhHex,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (string.IsNullOrWhiteSpace(initiatorPkhHex)) throw new ArgumentNullException(nameof(initiatorPkhHex));
+
+        SimulatedPendingStandardSignalHelloModel? pending;
+        Guid relayHostPeerId;
+
+        await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var model = _peers.FirstOrDefault(p => p.PeerId == recipientPeerId)
+                ?? throw new InvalidOperationException($"No simulated peer exists with id {recipientPeerId}");
+
+            if (!model.PendingInboundStandardSignalHellosMutable.TryGetValue(initiatorPkhHex, out pending))
+            {
+                return false;
+            }
+
+            relayHostPeerId = pending.RelayHostPeerId;
+            model.PendingInboundStandardSignalHellosMutable.Remove(initiatorPkhHex);
+
+            var hasAnyPending = model.InboundReverseSignalPendingCorrelationId.CurrentValue is not null
+                || model.PendingInboundStandardSignalHellosMutable.Count > 0;
+
+            if (hasAnyPending)
+            {
+                model.MarkAwaitingUserAcceptance();
+            }
+            else
+            {
+                model.MarkEstablished();
+            }
+        }
+        finally
+        {
+            _stateGate.Release();
+        }
+
+        EstablishSessionResponse response;
+        try
+        {
+            var req = new EstablishSessionRequest
+            {
+                Version = 1,
+                IdentitySigningKey = ByteString.CopyFrom(pending!.InitiatorIdentityKeySpki),
+                EphemeralKey = ByteString.CopyFrom(pending.InitiatorEphemeralKeySpki),
+                PrekeyId = ByteString.CopyFrom(pending.SignedPreKeyId.ToByteArray())
+            };
+
+            if (pending.OneTimePreKeyId.HasValue)
+            {
+                req.OnetimePrekeyId = ByteString.CopyFrom(pending.OneTimePreKeyId.Value.ToByteArray());
+            }
+
+            response = await ReceiveEstablishSessionFromMainAsync(recipientPeerId, req, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _diagnostics.Emit(
+                SimulatorDiagnosticEventType.HandshakeStateTransition,
+                $"Standard hello accept failed: {ex.Message}",
+                peerId: recipientPeerId,
+                relayHostPeerId: relayHostPeerId,
+                contextTag: "StandardSignalAcceptFailed");
+            throw;
+        }
+
+        var initiatorPkh = Convert.FromHexString(initiatorPkhHex);
+        var initiatorPeerId = await TryGetPeerIdByIdentityPkhAsync(initiatorPkh, cancellationToken).ConfigureAwait(false);
+
+        if (initiatorPeerId.HasValue)
+        {
+            await EnqueueRelayDownstreamToPeerAsync(
+                    relayHostPeerId: relayHostPeerId,
+                    targetPkh: initiatorPkh,
+                    opaqueBytes: response.ToByteArray(),
+                    debugType: nameof(EstablishSessionResponse),
+                    cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
+        }
+        else
+        {
+            await EnqueueRelayUpstreamToMainAsync(
+                    relayHostPeerId: relayHostPeerId,
+                    opaqueBytes: response.ToByteArray(),
+                    debugType: nameof(EstablishSessionResponse),
+                    cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        _diagnostics.Emit(
+            SimulatorDiagnosticEventType.HandshakeStateTransition,
+            $"Standard hello accepted: initiator={initiatorPkhHex[..8]}",
+            peerId: recipientPeerId,
+            relayHostPeerId: relayHostPeerId,
+            contextTag: "StandardSignalAccepted");
+
+        return true;
+    }
+
     private Task<EstablishSessionResponse> DeliverEstablishSessionToMainAsync(
         EstablishSessionRequest request,
         CancellationToken cancellationToken)
@@ -1514,40 +1697,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         if (opaqueBytes is null) throw new ArgumentNullException(nameof(opaqueBytes));
         if (opaqueBytes.Length == 0) return null;
 
-        try
-        {
-            var hello = HandshakeInitiatorHello.Parser.ParseFrom(opaqueBytes);
-            if (hello is not null
-                && hello.HasInitiatorIdentityKeySpki && hello.InitiatorIdentityKeySpki.Length > 0
-                && hello.HasInitiatorEphemeralKeySpki && hello.InitiatorEphemeralKeySpki.Length > 0
-                && hello.HasSignedPreKeyId && hello.SignedPreKeyId.Length > 0)
-            {
-                _diagnostics.Emit(
-                    SimulatorDiagnosticEventType.HandshakeStateTransition,
-                    "Standard handshake hello received (relayed)",
-                    peerId: simulatedPeerId,
-                    contextTag: "HelloReceived");
-
-                var req = new EstablishSessionRequest
-                {
-                    Version = 1,
-                    IdentitySigningKey = hello.InitiatorIdentityKeySpki,
-                    EphemeralKey = hello.InitiatorEphemeralKeySpki,
-                    PrekeyId = hello.SignedPreKeyId
-                };
-
-                if (hello.HasOneTimePreKeyId && hello.OneTimePreKeyId.Length > 0)
-                {
-                    req.OnetimePrekeyId = hello.OneTimePreKeyId;
-                }
-
-                return await ReceiveEstablishSessionFromMainAsync(simulatedPeerId, req, cancellationToken).ConfigureAwait(false);
-            }
-        }
-        catch
-        {
-            // ignore
-        }
+        // Standard handshake hellos are handled by the relay delivery service via UpsertPendingStandardSignalHelloAsync.
 
         try
         {
@@ -1786,7 +1936,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             port: snap.Port,
             relayPeerId: snap.RelayPeerId == Guid.Empty ? null : snap.RelayPeerId,
             uiState: snap.UiState,
-            pendingCorrelationId: snap.PendingCorrelationId,
+            pendingCorrelationId: snap.InboundReverseSignalPendingCorrelationId,
             targetPublicKeyHash: snap.TargetPublicKeyHash,
             selectedRouteMode: snap.SelectedRouteMode,
             directEndpoint: snap.DirectEndpoint,

@@ -1,4 +1,5 @@
 using ObservableCollections;
+using Desktop.Wpf.Features.Simulator.Models;
 using Percolator.Cryptography;
 using Percolator.Cryptography.Primitives;
 using R3;
@@ -13,7 +14,7 @@ public sealed class SimulatedPeerModel : IDisposable
     private readonly ReactiveProperty<string?> _displayName;
 
     private readonly ReactiveProperty<SimulatorPeerUiState> _uiState;
-    private readonly ReactiveProperty<Guid?> _pendingCorrelationId;
+    private readonly ReactiveProperty<Guid?> _inboundReverseSignalPendingCorrelationId;
     private readonly ReactiveProperty<byte[]?> _targetPublicKeyHash;
     private readonly ReactiveProperty<ConnectionMode?> _selectedRouteMode;
     private readonly ReactiveProperty<string?> _directEndpoint;
@@ -40,6 +41,8 @@ public sealed class SimulatedPeerModel : IDisposable
     private readonly ObservableList<SimulatedSignedPreKeyModel> _signedPreKeys;
     private readonly ObservableList<SimulatedOutboundInviteModel> _outboundInvites;
     private readonly ObservableList<SimulatedPendingInviteHandshakeResponseModel> _pendingInviteHandshakeResponses;
+
+    private readonly ObservableDictionary<string, SimulatedPendingStandardSignalHelloModel> _pendingInboundStandardSignalHellos;
 
     public SimulatedPeerModel(
         Guid peerId,
@@ -91,7 +94,7 @@ public sealed class SimulatedPeerModel : IDisposable
         }
 
         _uiState = new ReactiveProperty<SimulatorPeerUiState>(ui);
-        _pendingCorrelationId = new ReactiveProperty<Guid?>(pending);
+        _inboundReverseSignalPendingCorrelationId = new ReactiveProperty<Guid?>(pending);
         _targetPublicKeyHash = new ReactiveProperty<byte[]?>(targetPublicKeyHash);
         _selectedRouteMode = new ReactiveProperty<ConnectionMode?>(selectedRouteMode);
         _directEndpoint = new ReactiveProperty<string?>(directEndpoint);
@@ -122,6 +125,8 @@ public sealed class SimulatedPeerModel : IDisposable
         _signedPreKeys = new ObservableList<SimulatedSignedPreKeyModel>();
         _outboundInvites = new ObservableList<SimulatedOutboundInviteModel>();
         _pendingInviteHandshakeResponses = new ObservableList<SimulatedPendingInviteHandshakeResponseModel>();
+
+        _pendingInboundStandardSignalHellos = new ObservableDictionary<string, SimulatedPendingStandardSignalHelloModel>(StringComparer.Ordinal);
     }
 
     public Guid PeerId { get; }
@@ -136,7 +141,7 @@ public sealed class SimulatedPeerModel : IDisposable
     public ReactiveProperty<bool> IsRelayCapable { get; }
 
     public ReadOnlyReactiveProperty<SimulatorPeerUiState> UiState => _uiState;
-    public ReadOnlyReactiveProperty<Guid?> PendingCorrelationId => _pendingCorrelationId;
+    public ReadOnlyReactiveProperty<Guid?> InboundReverseSignalPendingCorrelationId => _inboundReverseSignalPendingCorrelationId;
     public ReadOnlyReactiveProperty<byte[]?> TargetPublicKeyHash => _targetPublicKeyHash;
     public ReadOnlyReactiveProperty<ConnectionMode?> SelectedRouteMode => _selectedRouteMode;
     public ReadOnlyReactiveProperty<string?> DirectEndpoint => _directEndpoint;
@@ -161,10 +166,14 @@ public sealed class SimulatedPeerModel : IDisposable
     public IReadOnlyObservableList<SimulatedOutboundInviteModel> OutboundInvites => _outboundInvites;
     public IReadOnlyObservableList<SimulatedPendingInviteHandshakeResponseModel> PendingInviteHandshakeResponses => _pendingInviteHandshakeResponses;
 
+    public IReadOnlyObservableDictionary<string, SimulatedPendingStandardSignalHelloModel> PendingInboundStandardSignalHellos => _pendingInboundStandardSignalHellos;
+
     internal ObservableDictionary<SessionId, SecureSession> SessionsMutable => _sessions;
     internal ObservableList<SimulatedSignedPreKeyModel> SignedPreKeysMutable => _signedPreKeys;
     internal ObservableList<SimulatedOutboundInviteModel> OutboundInvitesMutable => _outboundInvites;
     internal ObservableList<SimulatedPendingInviteHandshakeResponseModel> PendingInviteHandshakeResponsesMutable => _pendingInviteHandshakeResponses;
+
+    internal ObservableDictionary<string, SimulatedPendingStandardSignalHelloModel> PendingInboundStandardSignalHellosMutable => _pendingInboundStandardSignalHellos;
 
     internal void Track(IDisposable disposable)
         => disposable.AddTo(ref _bag);
@@ -212,38 +221,45 @@ public sealed class SimulatedPeerModel : IDisposable
     {
         UpsertAttempt(requestCorrelationId);
         _uiState.Value = SimulatorPeerUiState.OutboundPending;
-        _pendingCorrelationId.Value = requestCorrelationId;
+        _inboundReverseSignalPendingCorrelationId.Value = requestCorrelationId;
     }
 
     public void MarkInboundPending(Guid requestCorrelationId)
     {
         UpsertAttempt(requestCorrelationId);
-        _uiState.Value = SimulatorPeerUiState.InboundPending;
-        _pendingCorrelationId.Value = requestCorrelationId;
+        _uiState.Value = SimulatorPeerUiState.AwaitingUserAcceptance;
+        _inboundReverseSignalPendingCorrelationId.Value = requestCorrelationId;
     }
+
+    internal void MarkAwaitingUserAcceptance()
+        => _uiState.Value = SimulatorPeerUiState.AwaitingUserAcceptance;
+
+    internal void ClearInboundReverseSignalPendingCorrelationId()
+        => _inboundReverseSignalPendingCorrelationId.Value = null;
 
     public void MarkEstablished()
     {
         _uiState.Value = SimulatorPeerUiState.Established;
-        _pendingCorrelationId.Value = null;
+        _inboundReverseSignalPendingCorrelationId.Value = null;
         _phase.Value = null;
         _notUntilUtc.Value = null;
         _lastError.Value = null;
 
         ClearPendingStandardHandshakeToMain();
+        _pendingInboundStandardSignalHellos.Clear();
     }
 
     public void MarkExpired()
     {
         _uiState.Value = SimulatorPeerUiState.Expired;
-        _pendingCorrelationId.Value = null;
+        _inboundReverseSignalPendingCorrelationId.Value = null;
         _phase.Value = null;
     }
 
     public void ClearRuntimeState()
     {
         _uiState.Value = IsOnline.Value ? SimulatorPeerUiState.Ready : SimulatorPeerUiState.Offline;
-        _pendingCorrelationId.Value = null;
+        _inboundReverseSignalPendingCorrelationId.Value = null;
         _targetPublicKeyHash.Value = null;
         _selectedRouteMode.Value = null;
         _directEndpoint.Value = null;
@@ -251,6 +267,8 @@ public sealed class SimulatedPeerModel : IDisposable
         _phase.Value = null;
         _notUntilUtc.Value = null;
         _lastError.Value = null;
+
+        _pendingInboundStandardSignalHellos.Clear();
 
         _handshakeAttempts.Clear();
         _handshakeAttemptsVersion.Value++;
@@ -326,7 +344,7 @@ public sealed class SimulatedPeerModel : IDisposable
             Port: _port.Value,
             RelayPeerId: _relayPeerId.Value,
             UiState: _uiState.Value,
-            PendingCorrelationId: _pendingCorrelationId.Value,
+            InboundReverseSignalPendingCorrelationId: _inboundReverseSignalPendingCorrelationId.Value,
             TargetPublicKeyHash: _targetPublicKeyHash.Value?.ToArray(),
             SelectedRouteMode: _selectedRouteMode.Value,
             DirectEndpoint: _directEndpoint.Value,
@@ -416,7 +434,7 @@ public sealed class SimulatedPeerModel : IDisposable
         IsRelayCapable.Dispose();
 
         _uiState.Dispose();
-        _pendingCorrelationId.Dispose();
+        _inboundReverseSignalPendingCorrelationId.Dispose();
         _targetPublicKeyHash.Dispose();
         _selectedRouteMode.Dispose();
         _directEndpoint.Dispose();

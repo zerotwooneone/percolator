@@ -95,6 +95,7 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
 
         QueueCount = synchronizedQueueView
             .ObserveCountChanged()
+            .ObserveOnCurrentSynchronizationContext()
             .ToBindableReactiveProperty(synchronizedQueueView.Count)
             .AddTo(ref _bag);
 

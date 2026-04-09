@@ -245,7 +245,7 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
             },
             KnownPeerIds = model.KnownPeerIds.ToList(),
             UiState = model.UiState,
-            PendingCorrelationId = model.PendingCorrelationId,
+            PendingCorrelationId = model.InboundReverseSignalPendingCorrelationId,
             TargetPublicKeyHash = model.TargetPublicKeyHash,
             SelectedRouteMode = model.SelectedRouteMode,
             DirectEndpoint = model.DirectEndpoint,

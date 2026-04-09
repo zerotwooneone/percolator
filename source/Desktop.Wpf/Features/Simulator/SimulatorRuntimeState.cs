@@ -4,7 +4,7 @@ public enum SimulatorPeerUiState
 {
     Ready = 0,
     OutboundPending = 1,
-    InboundPending = 2,
+    AwaitingUserAcceptance = 2,
     Established = 3,
     Offline = 4,
     Expired = 5

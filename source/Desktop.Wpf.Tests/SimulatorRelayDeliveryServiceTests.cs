@@ -22,7 +22,7 @@ namespace Desktop.Wpf.Tests;
 public sealed class SimulatorRelayDeliveryServiceTests
 {
     [Test]
-    public async Task DeliverToPeerAsync_when_initiator_pkh_does_not_match_simulated_peer_enqueues_establish_session_response_upstream_to_main()
+    public async Task DeliverToPeerAsync_when_payload_is_valid_handshake_initiator_hello_upserts_pending_standard_hello_and_does_not_forward()
     {
         // Arrange
         var relayHostPeerId = Guid.NewGuid();
@@ -42,50 +42,10 @@ public sealed class SimulatorRelayDeliveryServiceTests
         };
         var opaqueBytes = hello.ToByteArray();
 
-        var forwarded = new EstablishSessionResponse
-        {
-            Version = 1,
-            Response = new EstablishSessionResponse.Types.Response
-            {
-                Version = 1,
-                IdentitySigningKey = ByteString.CopyFrom(new byte[] { 0x99 }),
-                ResponsePayload = ByteString.CopyFrom(new EstablishSessionResponse.Types.Response.Types.ResponsePayload
-                {
-                    Version = 1,
-                    SessionId = Guid.NewGuid().ToString()
-                }.ToByteArray()),
-                PayloadSignature = ByteString.CopyFrom(new byte[] { 0xAA })
-            }
-        };
-
         var state = new Mock<ISimulatorStateService>();
-        state
-            .Setup(s => s.ReceiveRelayedOpaquePayloadAsync(recipientPeerId, It.Is<byte[]>(b => b.SequenceEqual(opaqueBytes)), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(forwarded);
-
-        state
-            .Setup(s => s.TryGetPeerIdByIdentityPkhAsync(It.Is<byte[]>(b => b.SequenceEqual(initiatorPkh)), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Guid?)null);
 
         var selfRepo = new Mock<ISelfIdentityRepository>();
-        selfRepo
-            .Setup(r => r.ListAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new[] { new SelfIdentity(new SelfId(1)) });
-
         var keysStore = new Mock<ISelfIdentityKeysStore>();
-        keysStore
-            .Setup(s => s.LoadAsync(new SelfId(1), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new X3dhKeys(
-                IdentitySigningKey: initiatorIdentity,
-                SignedPreKey: ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256)));
-
-        state
-            .Setup(s => s.EnqueueRelayUpstreamToMainAsync(
-                relayHostPeerId,
-                It.IsAny<byte[]>(),
-                nameof(EstablishSessionResponse),
-                It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
 
         var messageService = new PercolatorMessageService(
             logger: Mock.Of<ILogger<PercolatorMessageService>>(),
@@ -104,25 +64,20 @@ public sealed class SimulatorRelayDeliveryServiceTests
         await sut.DeliverToPeerAsync(relayHostPeerId, recipientPeerId, ackId, opaqueBytes, debugType: "hello", CancellationToken.None);
 
         // Assert
-        state.Verify(s => s.EnqueueRelayUpstreamToMainAsync(
-            relayHostPeerId,
-            It.Is<byte[]>(b => b.SequenceEqual(forwarded.ToByteArray())),
-            nameof(EstablishSessionResponse),
-            It.IsAny<CancellationToken>()), Times.Once);
-
-        diagnostics.Verify(d => d.Emit(
-            SimulatorDiagnosticEventType.HandshakeStateTransition,
-            It.Is<string>(msg => msg.Contains("response enqueued", StringComparison.OrdinalIgnoreCase)),
+        state.Verify(s => s.UpsertPendingStandardSignalHelloAsync(
             recipientPeerId,
             relayHostPeerId,
-            null,
-            "ResponseEnqueued"), Times.Once);
+            It.Is<HandshakeInitiatorHello>(h => h.InitiatorIdentityKeySpki.ToByteArray().SequenceEqual(initiatorSpki)),
+            It.IsAny<DateTimeOffset>(),
+            It.IsAny<CancellationToken>()), Times.Once);
 
-        ackId.Should().NotBe(Guid.Empty);
+        state.Verify(s => s.ReceiveRelayedOpaquePayloadAsync(It.IsAny<Guid>(), It.IsAny<byte[]>(), It.IsAny<CancellationToken>()), Times.Never);
+        state.Verify(s => s.EnqueueRelayUpstreamToMainAsync(It.IsAny<Guid>(), It.IsAny<byte[]>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
+        state.Verify(s => s.EnqueueRelayDownstreamToPeerAsync(It.IsAny<Guid>(), It.IsAny<byte[]>(), It.IsAny<byte[]>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Test]
-    public async Task DeliverToPeerAsync_when_initiator_pkh_matches_simulated_peer_enqueues_establish_session_response_downstream_to_initiator_pkh()
+    public async Task DeliverToPeerAsync_when_payload_is_valid_handshake_initiator_hello_upserts_pending_standard_hello_even_if_initiator_identity_matches_a_simulated_peer()
     {
         // Arrange
         var relayHostPeerId = Guid.NewGuid();
@@ -142,41 +97,7 @@ public sealed class SimulatorRelayDeliveryServiceTests
         };
         var opaqueBytes = hello.ToByteArray();
 
-        var forwarded = new EstablishSessionResponse
-        {
-            Version = 1,
-            Response = new EstablishSessionResponse.Types.Response
-            {
-                Version = 1,
-                IdentitySigningKey = ByteString.CopyFrom(new byte[] { 0x99 }),
-                ResponsePayload = ByteString.CopyFrom(new EstablishSessionResponse.Types.Response.Types.ResponsePayload
-                {
-                    Version = 1,
-                    SessionId = Guid.NewGuid().ToString()
-                }.ToByteArray()),
-                PayloadSignature = ByteString.CopyFrom(new byte[] { 0xAA })
-            }
-        };
-
-        var initiatorPeerId = Guid.NewGuid();
-
         var state = new Mock<ISimulatorStateService>();
-        state
-            .Setup(s => s.ReceiveRelayedOpaquePayloadAsync(recipientPeerId, It.Is<byte[]>(b => b.SequenceEqual(opaqueBytes)), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(forwarded);
-
-        state
-            .Setup(s => s.TryGetPeerIdByIdentityPkhAsync(It.Is<byte[]>(b => b.SequenceEqual(initiatorPkh)), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(initiatorPeerId);
-
-        state
-            .Setup(s => s.EnqueueRelayDownstreamToPeerAsync(
-                relayHostPeerId,
-                It.Is<byte[]>(b => b.SequenceEqual(initiatorPkh)),
-                It.IsAny<byte[]>(),
-                nameof(EstablishSessionResponse),
-                It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
 
         var messageService = new PercolatorMessageService(
             logger: Mock.Of<ILogger<PercolatorMessageService>>(),
@@ -198,12 +119,16 @@ public sealed class SimulatorRelayDeliveryServiceTests
         await sut.DeliverToPeerAsync(relayHostPeerId, recipientPeerId, ackId, opaqueBytes, debugType: "hello", CancellationToken.None);
 
         // Assert
-        state.Verify(s => s.EnqueueRelayDownstreamToPeerAsync(
+        state.Verify(s => s.UpsertPendingStandardSignalHelloAsync(
+            recipientPeerId,
             relayHostPeerId,
-            It.Is<byte[]>(b => b.SequenceEqual(initiatorPkh)),
-            It.Is<byte[]>(b => b.SequenceEqual(forwarded.ToByteArray())),
-            nameof(EstablishSessionResponse),
+            It.Is<HandshakeInitiatorHello>(h => h.InitiatorIdentityKeySpki.ToByteArray().SequenceEqual(initiatorSpki)),
+            It.IsAny<DateTimeOffset>(),
             It.IsAny<CancellationToken>()), Times.Once);
+
+        state.Verify(s => s.ReceiveRelayedOpaquePayloadAsync(It.IsAny<Guid>(), It.IsAny<byte[]>(), It.IsAny<CancellationToken>()), Times.Never);
+        state.Verify(s => s.EnqueueRelayUpstreamToMainAsync(It.IsAny<Guid>(), It.IsAny<byte[]>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
+        state.Verify(s => s.EnqueueRelayDownstreamToPeerAsync(It.IsAny<Guid>(), It.IsAny<byte[]>(), It.IsAny<byte[]>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Test]
@@ -222,8 +147,8 @@ public sealed class SimulatorRelayDeliveryServiceTests
         {
             Version = 1,
             InitiatorIdentityKeySpki = ByteString.CopyFrom(initiatorSpki),
-            InitiatorEphemeralKeySpki = ByteString.CopyFrom(new byte[] { 0x01 }),
-            SignedPreKeyId = ByteString.CopyFrom(new byte[] { 0x02 })
+            InitiatorEphemeralKeySpki = ByteString.Empty,
+            SignedPreKeyId = ByteString.Empty
         };
         var opaqueBytes = hello.ToByteArray();
 
@@ -283,6 +208,7 @@ public sealed class SimulatorRelayDeliveryServiceTests
             ackId,
             null), Times.Once);
 
+        state.Verify(s => s.UpsertPendingStandardSignalHelloAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<HandshakeInitiatorHello>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()), Times.Never);
         state.Verify(s => s.EnqueueRelayUpstreamToMainAsync(It.IsAny<Guid>(), It.IsAny<byte[]>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
         state.Verify(s => s.EnqueueRelayDownstreamToPeerAsync(It.IsAny<Guid>(), It.IsAny<byte[]>(), It.IsAny<byte[]>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
     }

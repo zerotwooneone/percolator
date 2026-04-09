@@ -141,4 +141,16 @@ public interface ISimulatorStateService
         Guid simulatedPeerId,
         byte[] opaqueBytes,
         CancellationToken cancellationToken = default);
+
+    Task UpsertPendingStandardSignalHelloAsync(
+        Guid recipientPeerId,
+        Guid relayHostPeerId,
+        HandshakeInitiatorHello hello,
+        DateTimeOffset receivedUtc,
+        CancellationToken cancellationToken = default);
+
+    Task<bool> TryAcceptPendingStandardSignalHelloAsync(
+        Guid recipientPeerId,
+        string initiatorPkhHex,
+        CancellationToken cancellationToken = default);
 }

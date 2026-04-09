@@ -15,7 +15,7 @@ public sealed record PeerStateSnapshot(
     int Port,
     Guid RelayPeerId,
     SimulatorPeerUiState UiState,
-    Guid? PendingCorrelationId,
+    Guid? InboundReverseSignalPendingCorrelationId,
     byte[]? TargetPublicKeyHash,
     ConnectionMode? SelectedRouteMode,
     string? DirectEndpoint,

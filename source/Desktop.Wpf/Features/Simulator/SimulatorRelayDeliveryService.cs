@@ -108,6 +108,29 @@ public sealed class SimulatorRelayDeliveryService : ISimulatorRelayDeliveryServi
         cancellationToken.ThrowIfCancellationRequested();
         if (opaqueBytes is null) throw new ArgumentNullException(nameof(opaqueBytes));
 
+        try
+        {
+            var hello = HandshakeInitiatorHello.Parser.ParseFrom(opaqueBytes);
+            if (hello is not null
+                && hello.HasInitiatorIdentityKeySpki && hello.InitiatorIdentityKeySpki.Length > 0
+                && hello.HasInitiatorEphemeralKeySpki && hello.InitiatorEphemeralKeySpki.Length > 0
+                && hello.HasSignedPreKeyId && hello.SignedPreKeyId.Length > 0)
+            {
+                await _state.UpsertPendingStandardSignalHelloAsync(
+                        recipientPeerId: recipientPeerId,
+                        relayHostPeerId: relayHostPeerId,
+                        hello: hello,
+                        receivedUtc: DateTimeOffset.UtcNow,
+                        cancellationToken: cancellationToken)
+                    .ConfigureAwait(false);
+                return;
+            }
+        }
+        catch
+        {
+            // Not a hello; fall through.
+        }
+
         var forwarded = await _state
             .ReceiveRelayedOpaquePayloadAsync(recipientPeerId, opaqueBytes, cancellationToken)
             .ConfigureAwait(false);
@@ -117,7 +140,7 @@ public sealed class SimulatorRelayDeliveryService : ISimulatorRelayDeliveryServi
             return;
         }
 
-        // For standard handshake via relay: opaque payload is HandshakeInitiatorHello; route response back to initiator PKH.
+        // Route response back to initiator PKH.
         try
         {
             var hello = HandshakeInitiatorHello.Parser.ParseFrom(opaqueBytes);

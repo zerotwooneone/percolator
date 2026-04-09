@@ -63,6 +63,20 @@ public sealed class SimulatorRelayTabViewModelTests
         public System.Threading.Tasks.Task<Percolator.Cryptography.SessionRatchetMessage> EncryptInternalEnvelopeAsync(Guid simulatedPeerId, Percolator.Cryptography.SessionId sessionId, Percolator.Contracts.InternalEnvelope envelope, System.Threading.CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public System.Threading.Tasks.Task<Percolator.Cryptography.Plaintext> DecryptSessionMessageAsync(Guid simulatedPeerId, Percolator.Cryptography.SessionId sessionId, Percolator.Cryptography.SessionRatchetMessage message, System.Threading.CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public System.Threading.Tasks.Task<Percolator.Contracts.EstablishSessionResponse?> ReceiveRelayedOpaquePayloadAsync(Guid simulatedPeerId, byte[] opaqueBytes, System.Threading.CancellationToken cancellationToken = default) => throw new NotImplementedException();
+
+        public System.Threading.Tasks.Task UpsertPendingStandardSignalHelloAsync(
+            Guid recipientPeerId,
+            Guid relayHostPeerId,
+            Percolator.Contracts.HandshakeInitiatorHello hello,
+            DateTimeOffset receivedUtc,
+            System.Threading.CancellationToken cancellationToken = default)
+            => System.Threading.Tasks.Task.CompletedTask;
+
+        public System.Threading.Tasks.Task<bool> TryAcceptPendingStandardSignalHelloAsync(
+            Guid recipientPeerId,
+            string initiatorPkhHex,
+            System.Threading.CancellationToken cancellationToken = default)
+            => System.Threading.Tasks.Task.FromResult(false);
     }
 
     [Test]

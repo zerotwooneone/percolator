@@ -54,12 +54,14 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
         _getSelectedRelayPeerId = getSelectedRelayPeerId;
 
         DisplayText = _model.DisplayName
+            .ObserveOnCurrentSynchronizationContext()
             .Select(name => string.IsNullOrWhiteSpace(name) ? _model.PeerId.ToString()[..8] : name!)
             .ToBindableReactiveProperty(_model.PeerId.ToString()[..8])
             .AddTo(ref _bag);
 
         RuntimeStateText = Observable
-            .CombineLatest(_model.UiState, _model.PendingCorrelationId, static (s, corr) => (s, corr))
+            .CombineLatest(_model.UiState, _model.InboundReverseSignalPendingCorrelationId, static (s, corr) => (s, corr))
+            .ObserveOnCurrentSynchronizationContext()
             .Select(t => t.corr is null
                 ? t.s.ToString()
                 : $"{t.s} ({t.corr.Value.ToString()[..8]})")
@@ -67,26 +69,31 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
             .AddTo(ref _bag);
 
         ShowMarkOutboundPending = _model.UiState
+            .ObserveOnCurrentSynchronizationContext()
             .Select(s => s != SimulatorPeerUiState.OutboundPending)
             .ToBindableReactiveProperty(true)
             .AddTo(ref _bag);
 
         ShowMarkInboundPending = _model.UiState
-            .Select(s => s != SimulatorPeerUiState.InboundPending)
+            .ObserveOnCurrentSynchronizationContext()
+            .Select(s => s != SimulatorPeerUiState.AwaitingUserAcceptance)
             .ToBindableReactiveProperty(true)
             .AddTo(ref _bag);
 
         ShowMarkEstablished = _model.UiState
+            .ObserveOnCurrentSynchronizationContext()
             .Select(s => s != SimulatorPeerUiState.Established)
             .ToBindableReactiveProperty(true)
             .AddTo(ref _bag);
 
         ShowAcceptRejectInboundPending = _model.UiState
-            .Select(s => s == SimulatorPeerUiState.InboundPending)
+            .ObserveOnCurrentSynchronizationContext()
+            .Select(s => s == SimulatorPeerUiState.AwaitingUserAcceptance)
             .ToBindableReactiveProperty(false)
             .AddTo(ref _bag);
 
         ShowClearRuntimeState = _model.UiState
+            .ObserveOnCurrentSynchronizationContext()
             .Select(s => s != SimulatorPeerUiState.Ready)
             .ToBindableReactiveProperty(true)
             .AddTo(ref _bag);
@@ -225,7 +232,7 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
 
     private async Task ExecuteAcceptInboundPendingAsync(System.Threading.CancellationToken ct)
     {
-        var corr = _model.PendingCorrelationId.CurrentValue;
+        var corr = _model.InboundReverseSignalPendingCorrelationId.CurrentValue;
         if (corr is null) return;
 
         if (_active.Identity is null)
@@ -251,7 +258,7 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
 
     private void ExecuteRejectInboundPending()
     {
-        var corr = _model.PendingCorrelationId.CurrentValue;
+        var corr = _model.InboundReverseSignalPendingCorrelationId.CurrentValue;
         if (corr is null) return;
 
         _ = _pending.TryTakeInviteHandshakeResponse(_model.PeerId, corr.Value, out _);

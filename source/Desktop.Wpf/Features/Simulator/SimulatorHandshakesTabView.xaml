@@ -46,10 +46,31 @@
                   <StackPanel Margin="0,10,0,0" Orientation="Horizontal" HorizontalAlignment="Right">
                     <Button Visibility="{Binding ShowReset.Value, Converter={StaticResource BoolToVis}}" Content="Reset State" Command="{Binding ResetStateCommand}" />
                     <Button Margin="8,0,0,0" Visibility="{Binding ShowForceExpire.Value, Converter={StaticResource BoolToVis}}" Content="Force Expire" Command="{Binding ForceExpireCommand}" />
-                    <Button Margin="8,0,0,0" Visibility="{Binding ShowAccept.Value, Converter={StaticResource BoolToVis}}" Content="Accept Handshake" Command="{Binding AcceptHandshakeCommand}" />
+                    <Button Margin="8,0,0,0" Visibility="{Binding ShowAcceptReverseSignal.Value, Converter={StaticResource BoolToVis}}" Content="Accept Handshake" Command="{Binding AcceptHandshakeCommand}" />
                     <Button Margin="8,0,0,0" Visibility="{Binding ShowSendRequest.Value, Converter={StaticResource BoolToVis}}" Content="Send Direct Request" Command="{Binding SendRequestToMainCommand}" />
                     <Button Margin="8,0,0,0" Visibility="{Binding ShowSendRequest.Value, Converter={StaticResource BoolToVis}}" Content="Send Relayed Request" Command="{Binding SendRelayedRequestToMainCommand}" />
                   </StackPanel>
+
+
+                  <ItemsControl Margin="0,10,0,0" ItemsSource="{Binding PendingStandardSignalHellos.Value}">
+                    <ItemsControl.ItemsPanel>
+                      <ItemsPanelTemplate>
+                        <StackPanel />
+                      </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate>
+                        <DockPanel LastChildFill="False" Margin="0,0,0,6">
+                          <Button DockPanel.Dock="Right"
+                                  Margin="10,0,0,0"
+                                  Content="Accept"
+                                  Command="{Binding DataContext.AcceptPendingStandardSignalHelloCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                  CommandParameter="{Binding InitiatorPkhHex}" />
+                          <TextBlock VerticalAlignment="Center" Text="{Binding InitiatorPkhHex}" />
+                        </DockPanel>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
                 </StackPanel>
               </Grid>
             </Border>

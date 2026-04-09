@@ -132,7 +132,7 @@ public sealed class SimulatedHandshakeStateMachineCardViewModelDiagnosticsTests
             await Application.Current.Dispatcher.InvokeAsync(() => { });
         }
 
-        var corr = model.PendingCorrelationId.CurrentValue;
+        var corr = model.InboundReverseSignalPendingCorrelationId.CurrentValue;
         corr.Should().NotBeNull();
         model.MarkInboundPending(corr!.Value);
 

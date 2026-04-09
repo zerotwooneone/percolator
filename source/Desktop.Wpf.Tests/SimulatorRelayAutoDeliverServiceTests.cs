@@ -79,6 +79,20 @@ public sealed class SimulatorRelayAutoDeliverServiceTests
         public Task<Percolator.Cryptography.SessionRatchetMessage> EncryptInternalEnvelopeAsync(Guid simulatedPeerId, Percolator.Cryptography.SessionId sessionId, Percolator.Contracts.InternalEnvelope envelope, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<Percolator.Cryptography.Plaintext> DecryptSessionMessageAsync(Guid simulatedPeerId, Percolator.Cryptography.SessionId sessionId, Percolator.Cryptography.SessionRatchetMessage message, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<Percolator.Contracts.EstablishSessionResponse?> ReceiveRelayedOpaquePayloadAsync(Guid simulatedPeerId, byte[] opaqueBytes, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+
+        public Task UpsertPendingStandardSignalHelloAsync(
+            Guid recipientPeerId,
+            Guid relayHostPeerId,
+            Percolator.Contracts.HandshakeInitiatorHello hello,
+            DateTimeOffset receivedUtc,
+            CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+
+        public Task<bool> TryAcceptPendingStandardSignalHelloAsync(
+            Guid recipientPeerId,
+            string initiatorPkhHex,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult(false);
     }
 
     [Test]

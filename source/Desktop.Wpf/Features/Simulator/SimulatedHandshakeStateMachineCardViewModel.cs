@@ -3,6 +3,7 @@ using System.Windows;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.Options;
+using ObservableCollections;
 using Percolator.Application.Configuration;
 using Percolator.Contracts;
 using R3;
@@ -40,40 +41,67 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
         _selectedRelayHostPeerId = selectedRelayHostPeerId;
 
         DisplayName = _model.DisplayName
+            .ObserveOnCurrentSynchronizationContext()
             .Select(n => string.IsNullOrWhiteSpace(n) ? _model.PeerId.ToString()[..8] : n!)
             .ToBindableReactiveProperty(_model.PeerId.ToString()[..8])
             .AddTo(ref _bag);
 
         StateText = _model.UiState
+            .ObserveOnCurrentSynchronizationContext()
             .Select(MapState)
             .ToBindableReactiveProperty("No Handshake")
             .AddTo(ref _bag);
 
         UiState = _model.UiState
+            .ObserveOnCurrentSynchronizationContext()
             .ToBindableReactiveProperty(SimulatorPeerUiState.Ready)
             .AddTo(ref _bag);
 
         StateBadgeText = _model.UiState
+            .ObserveOnCurrentSynchronizationContext()
             .Select(s => $"STATE: {MapState(s).ToUpperInvariant()}" )
             .ToBindableReactiveProperty("STATE: NO HANDSHAKE")
             .AddTo(ref _bag);
 
         ShowSendRequest = _model.UiState
+            .ObserveOnCurrentSynchronizationContext()
             .Select(s => s == SimulatorPeerUiState.Ready)
             .ToBindableReactiveProperty(true)
             .AddTo(ref _bag);
 
         ShowAccept = _model.UiState
-            .Select(s => s == SimulatorPeerUiState.InboundPending)
+            .ObserveOnCurrentSynchronizationContext()
+            .Select(s => s == SimulatorPeerUiState.AwaitingUserAcceptance)
             .ToBindableReactiveProperty(false)
             .AddTo(ref _bag);
 
+        ShowAcceptReverseSignal = Observable
+            .CombineLatest(
+                _model.UiState,
+                _model.InboundReverseSignalPendingCorrelationId,
+                static (s, corr) => s == SimulatorPeerUiState.AwaitingUserAcceptance && corr is not null)
+            .ObserveOnCurrentSynchronizationContext()
+            .ToBindableReactiveProperty(false)
+            .AddTo(ref _bag);
+
+        PendingStandardSignalHellos = _model.PendingInboundStandardSignalHellosMutable
+            .ObserveChanged()
+            .ObserveOnCurrentSynchronizationContext()
+            .Select(_ => (IReadOnlyList<PendingStandardSignalHelloItem>)_model.PendingInboundStandardSignalHellos
+                .Select(static kvp => new PendingStandardSignalHelloItem(kvp.Key, kvp.Value.ReceivedUtc))
+                .OrderByDescending(static x => x.ReceivedUtc)
+                .ToArray())
+            .ToBindableReactiveProperty(Array.Empty<PendingStandardSignalHelloItem>())
+            .AddTo(ref _bag);
+
         ShowForceExpire = _model.UiState
+            .ObserveOnCurrentSynchronizationContext()
             .Select(s => s == SimulatorPeerUiState.OutboundPending)
             .ToBindableReactiveProperty(false)
             .AddTo(ref _bag);
 
         ShowReset = _model.UiState
+            .ObserveOnCurrentSynchronizationContext()
             .Select(s => s == SimulatorPeerUiState.Established || s == SimulatorPeerUiState.Expired)
             .ToBindableReactiveProperty(false)
             .AddTo(ref _bag);
@@ -89,6 +117,10 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
         var accept = Observable.Return(true).ToReactiveCommand<Unit>(_ => { });
         accept.AsObservable().SubscribeAwait(async (_, ct) => await ExecuteAcceptHandshakeAsync(ct), AwaitOperation.Drop).AddTo(ref _bag);
         AcceptHandshakeCommand = accept.AddTo(ref _bag);
+
+        var acceptStandard = Observable.Return(true).ToReactiveCommand<string>(_ => { });
+        acceptStandard.AsObservable().SubscribeAwait(async (initiatorPkhHex, ct) => await ExecuteAcceptPendingStandardSignalHelloAsync(initiatorPkhHex, ct), AwaitOperation.Drop).AddTo(ref _bag);
+        AcceptPendingStandardSignalHelloCommand = acceptStandard.AddTo(ref _bag);
 
         ForceExpireCommand = Observable.Return(true)
             .ToReactiveCommand<Unit>(_ => ExecuteForceExpire())
@@ -117,6 +149,10 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
 
     public BindableReactiveProperty<bool> ShowAccept { get; }
 
+    public BindableReactiveProperty<bool> ShowAcceptReverseSignal { get; }
+
+    public BindableReactiveProperty<IReadOnlyList<PendingStandardSignalHelloItem>> PendingStandardSignalHellos { get; }
+
     public BindableReactiveProperty<bool> ShowForceExpire { get; }
 
     public BindableReactiveProperty<bool> ShowReset { get; }
@@ -131,9 +167,13 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
 
     public ReactiveCommand<Unit> AcceptHandshakeCommand { get; }
 
+    public ReactiveCommand<string> AcceptPendingStandardSignalHelloCommand { get; }
+
     public ReactiveCommand<Unit> ForceExpireCommand { get; }
 
     public ReactiveCommand<Unit> ResetStateCommand { get; }
+
+    public sealed record PendingStandardSignalHelloItem(string InitiatorPkhHex, DateTimeOffset ReceivedUtc);
 
     private async Task ExecuteSendRequestToMainAsync(CancellationToken ct)
     {
@@ -224,7 +264,7 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
         }
         catch (Exception ex)
         {
-            var corr = _model.PendingCorrelationId.CurrentValue;
+            var corr = _model.InboundReverseSignalPendingCorrelationId.CurrentValue;
             if (corr is not null)
             {
                 await InvokeOnUiAsync(() =>
@@ -337,7 +377,7 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
         }
         catch (Exception ex)
         {
-            var corr = _model.PendingCorrelationId.CurrentValue;
+            var corr = _model.InboundReverseSignalPendingCorrelationId.CurrentValue;
             if (corr is not null)
             {
                 await InvokeOnUiAsync(() =>
@@ -352,7 +392,7 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
 
     private async Task ExecuteAcceptHandshakeAsync(CancellationToken ct)
     {
-        var corr = _model.PendingCorrelationId.CurrentValue;
+        var corr = _model.InboundReverseSignalPendingCorrelationId.CurrentValue;
         if (corr is null) return;
         if (_active.Identity is null) return;
 
@@ -387,6 +427,27 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
             $"Handshake: established corr={corr.Value.ToString()[..8]}",
             peerId: _model.PeerId,
             contextTag: "Established");
+    }
+
+    private async Task ExecuteAcceptPendingStandardSignalHelloAsync(string initiatorPkhHex, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(initiatorPkhHex)) return;
+
+        var accepted = await _state
+            .TryAcceptPendingStandardSignalHelloAsync(
+                recipientPeerId: _model.PeerId,
+                initiatorPkhHex: initiatorPkhHex,
+                cancellationToken: ct)
+            .ConfigureAwait(false);
+
+        if (!accepted)
+        {
+            _diagnostics.Emit(
+                SimulatorDiagnosticEventType.HandshakeStateTransition,
+                $"Handshake: standard-signal accept failed initiator={initiatorPkhHex}",
+                peerId: _model.PeerId,
+                contextTag: "StandardSignalAcceptFailed");
+        }
     }
 
     private void ExecuteForceExpire()
@@ -485,7 +546,7 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
         {
             SimulatorPeerUiState.Ready => "No Handshake",
             SimulatorPeerUiState.OutboundPending => "Request Sent",
-            SimulatorPeerUiState.InboundPending => "Request Received",
+            SimulatorPeerUiState.AwaitingUserAcceptance => "Request Received",
             SimulatorPeerUiState.Established => "Handshake Complete",
             SimulatorPeerUiState.Expired => "Expired",
             SimulatorPeerUiState.Offline => "Offline",
