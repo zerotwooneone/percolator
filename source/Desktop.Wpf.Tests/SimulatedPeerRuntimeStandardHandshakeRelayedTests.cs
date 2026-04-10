@@ -803,15 +803,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
         var deliverResp = await sut.ReceiveOpaqueMessageFromMainAsync(relayHostPeerId, deliverReq, CancellationToken.None);
 
         // Assert
-        deliverResp.ResultCase.Should().Be(DeliverOpaqueMessageResponse.ResultOneofCase.ResponsePayload);
-        deliverResp.ResponsePayload.Should().NotBeNull();
-        deliverResp.ResponsePayload!.ResponsePayload.Length.Should().BeGreaterThan(0);
-
-        var respCipher = new SessionRatchetMessage(deliverResp.ResponsePayload.ResponsePayload.ToByteArray());
-        var respPlain = initiatorSession.Decrypt(respCipher, clock);
-        var respEnv = InternalEnvelope.Parser.ParseFrom(respPlain.Value);
-        respEnv.ApplicationPayloadCase.Should().Be(InternalEnvelope.ApplicationPayloadOneofCase.GetPreKeyBundleResponse);
-        respEnv.GetPreKeyBundleResponse.Should().NotBeNull();
-        respEnv.GetPreKeyBundleResponse.PreKeyBundle.Should().BeNull();
+        deliverResp.ResultCase.Should().Be(DeliverOpaqueMessageResponse.ResultOneofCase.Never);
+        deliverResp.ResponsePayload.Should().BeNull();
     }
 }

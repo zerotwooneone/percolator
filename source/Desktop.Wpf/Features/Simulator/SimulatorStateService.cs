@@ -668,18 +668,15 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
                 return new DeliverOpaqueMessageResponse { Version = 1, Never = new DeliverOpaqueMessageResponse.Types.Never { Version = 1 } };
             }
 
-            var resp = new GetPreKeyBundleResponse { Version = 1 };
-            if (popped?.BundleBytes is {Length: > 0})
+            if (popped is null)
             {
-                try
-                {
-                    resp.PreKeyBundle = GetPreKeyBundleResponse.Types.PreKeyBundle.Parser.ParseFrom(popped.BundleBytes);
-                }
-                catch
-                {
-                    // best-effort: treat parse failure as not found
-                }
+                return new DeliverOpaqueMessageResponse { Version = 1, Never = new DeliverOpaqueMessageResponse.Types.Never { Version = 1 } };
             }
+            var resp = new GetPreKeyBundleResponse
+            {
+                Version = 1,
+                PreKeyBundle = GetPreKeyBundleResponse.Types.PreKeyBundle.Parser.ParseFrom(popped.BundleBytes)
+            };
 
             var responseEnvelope = new InternalEnvelope { GetPreKeyBundleResponse = resp };
             var responsePlain = new Plaintext(responseEnvelope.ToByteArray());
