@@ -25,397 +25,69 @@ Constraints / notes:
 
 ---
 
-## Chunk A 
+## Chunk A - Architectural Fix: Introduce Application-Level Query Service and Peer Connection State Service
 
-Outcome:
+### The Problem (Concurrency Exception & Guideline Violations)
+The `SecureChannelsProjection` was built as a `Scoped` MediatR event handler. This means it shares the exact same `PercolatorDbContext` as the domain command that triggers it (e.g., `HandleHandshakeResponderHelloCommand`). When the projection drops an event onto a background Rx `Subject` and returns, the domain command continues executing while the background Rx pipeline concurrently queries the DB, causing EF Core to crash with a concurrency exception.
 
-- Simulator persistence is expressed as a **single snapshot** round-trip:
-  - `ISimulatorStateRepository.LoadStateAsync(ct)`
-  - `ISimulatorStateRepository.SaveStateAsync(snapshot, ct)`
-- `JsonSimulatorStateRepository` becomes a pure serializer/deserializer of the snapshot (no piecemeal peer/relationship/relay calls).
-- `SimulatorStateService` owns:
-  - Hydrating runtime models from `SimulatorStateSnapshot`.
-  - Freezing runtime state into `SimulatorStateSnapshot`.
-- Unit tests use an in-memory snapshot repository stub and validate snapshot contents (sessions included).
+Beyond the bug, `SecureChannelsProjection` violates the application's Domain-Driven Design and R3 guidelines. It directly injects **six** disparate domain-level repositories (`ISessionRepository`, `IPeerIdentityRepository`, `IDirectSessionRepository`, `IPendingHandshakeQueries`, `IPreHandshakeSessionStore`, `ISentInvitationRepository`) to manually stitch together UI models. This leaks heavy domain complexity into the UI layer and breaks the "Pure Service / Stateless Repository" boundary. Furthermore, the concept of a "Secure Channel Repository" violates DDD, because "Secure Channel" is not an aggregate root in the system—it's a synthetic UI construct.
 
-Motivation:
+### The Architectural Shift: "Peer Connection State"
+The concept we are modeling for the UI is the **state of a connection/handshake with a peer**. The primary purpose of an X3DH session is establishing a secure pipeline for chat, peer discovery, or file transfer. 
 
-- Today persistence is split across:
-  - `LoadPeersAsync` / `SavePeersAsync`
-  - `LoadRelationshipsAsync`
-  - `LoadRelayAsync` / `SaveRelayAsync` (separate files)
-  - plus repository-internal state (`_groups`, `_selfIdentityIdByPeerId`)
-- The split contracts allow mismatched writes/reads and make it harder to reason about “what is the simulator state at time T”.
-- A single snapshot makes persistence and tests deterministic and simplifies reasoning about rehydration (especially for sessions/ratchet state).
+We will shift terminology from "Secure Channel" to **Peer Connection**. 
 
-Non-goals / constraints:
-
-- No migration/version handling for preexisting persistence files.
-  - Existing simulator state files can be deleted when this change lands.
-- Relays are part of simulator state and are persisted in the same file as peers.
-  - There must be no relay persistence directory and no relay files.
-- Use a single concurrency gate for all simulator state (peers, relationships, relays).
-- Groups are round-tripped but are not domain-mutated in Chunk A.
-
-Work (plan):
-
-### A.1 — Introduce `SimulatorStateSnapshot`
-
-- Add an immutable snapshot type that is the **only** persistence surface:
-  - `public sealed record SimulatorStateSnapshot(...)`
-
-Snapshot fields (must be exhaustive enough to replace current repo methods):
-
-- `int Version`
-- `IReadOnlyList<PeerStateSnapshot> Peers`
-- `IReadOnlyList<PeerRelationshipSnapshot> Relationships`
-- `IReadOnlyList<RelayStateSnapshot> Relays`
-
-- `IReadOnlyList<GroupConversationDto> Groups`
-  - Groups are persisted as part of the repository snapshot (they are not domain-mutated by the simulator runtime today).
-
-Peer snapshot requirements:
-
-- `PeerStateSnapshot` must carry `SelfIdentityId`.
-  - Add `int SelfIdentityId` as a first-class field on `PeerStateSnapshot`.
-  - This removes the last repository-owned cross-call cache (`_selfIdentityIdByPeerId`).
-
-Identity id allocation rule:
-
-- `SimulatorStateService` owns allocating new `SelfIdentityId` values.
-  - On initialization: set `_nextSelfIdentityId` to `max(snapshot.Peers.Select(p => p.SelfIdentityId))` (default baseline 99000 - 1).
-  - On `AddPeerAsync`: allocate `SelfIdentityId = ++_nextSelfIdentityId`.
-
-### A.2 — Change repository interface
-
-- Update `ISimulatorStateRepository` to only:
-  - `Task<SimulatorStateSnapshot> LoadStateAsync(CancellationToken ct);`
-  - `Task SaveStateAsync(SimulatorStateSnapshot snapshot, CancellationToken ct);`
-
-Remove old members:
-
-- `LoadPeersAsync`, `SavePeersAsync`, `LoadRelationshipsAsync`, `LoadRelayAsync`, `SaveRelayAsync`
-
-### A.3 — Update `JsonSimulatorStateRepository`
-
-- Implement `LoadStateAsync`:
-  - Read `simulator-state.json` into DTO(s).
-  - Convert DTO(s) to `SimulatorStateSnapshot`.
-  - Return a fully-normalized snapshot:
-    - never-null lists
-    - version defaults (this is Version 1; no migration is required)
-    - normalize peer connection host/port (preserving any explicitly configured values)
-
-- Implement `SaveStateAsync`:
-  - Convert `SimulatorStateSnapshot` to DTO(s) and write to `simulator-state.json`.
-  - Relays are persisted inside `simulator-state.json` as part of the snapshot.
-    - There must be no separate relay persistence.
-
-- DTO update:
-  - Add `List<RelayPersistenceDto> Relays` to the root simulator state DTO (`SimulatorStateDto`).
-  - `LoadStateAsync` must populate snapshot `Relays` from `SimulatorStateDto.Relays`.
-  - `SaveStateAsync` must write snapshot `Relays` into `SimulatorStateDto.Relays`.
-
-Notes:
-
-- Keep normalization logic (`NormalizePeer`) but apply it at snapshot/DTO conversion boundaries.
-- Repository must not maintain cross-call mutable caches for identity ids or groups.
-  - Everything required to round-trip must be in the snapshot.
-
-### A.4 — Update `SimulatorStateService` to use snapshot contract
-
-- Initialization:
-  - Replace `LoadPeersAsync + LoadRelationshipsAsync + InitializeRelaysAsync(LoadRelayAsync...)` with one `LoadStateAsync`.
-  - Hydrate:
-    - peers from `snapshot.Peers` (construct `SimulatedPeerModel` + hydrate runtime store sessions)
-    - relationships from `snapshot.Relationships`
-    - relays from `snapshot.Relays`
-
-- Concurrency model:
-  - Replace `_peerGate` + `_relayGate` with one `_stateGate`.
-  - Refactor gate usage to be idiomatic and hard to misuse:
-    - Introduce a single helper that takes the lock and runs a delegate, e.g. `WithStateGateAsync(Func<Task>)` / `WithStateGateAsync<T>(Func<Task<T>>)`.
-    - Ensure all public APIs that read/mutate state go through the helper (no direct `WaitAsync` scattered around).
-    - Ensure freezing the snapshot for persistence is always performed under the same helper.
-
-- Self identity id allocation:
-  - On load, compute `_nextSelfIdentityId` from snapshot.
-  - Ensure `SimulatedPeerModel.Freeze()` includes the peer's `SelfIdentityId`.
-  - Ensure any peer creation path assigns `SelfIdentityId` exactly once.
-
-- `SimulatedPeerModel` identity storage:
-  - `SimulatedPeerModel` must store `SelfIdentityId` as a first-class property.
-  - Hydration must set `SelfIdentityId` from snapshot.
-
-- Groups:
-  - `SimulatorStateService` does not mutate groups as part of Chunk A.
-  - Store the loaded `Groups` list on the service (private field), and pass it back on save.
-  - Do not call `LoadStateAsync` during save.
-
-- Persistence pipeline:
-  - Replace:
-    - `_store.SavePeersAsync(peerSnaps, relSnaps, ...)`
-    - `_store.SaveRelayAsync(...)`
-    with:
-    - Freeze a single `SimulatorStateSnapshot` and call `_store.SaveStateAsync(snapshot, ...)`.
-  - Persist relays via the same debounced save trigger.
-    - Since relays are part of the snapshot, there is no separate relay persistence pipeline.
-
-### A.5 — Update tests
-
-Impacted test files (from code search):
-
-- `Desktop.Wpf.Tests/SimulatorStateStoreTests.cs`
-  - Replace peer/relationship round-trip assertions with snapshot round-trip assertions.
-
-- Repository stubs used by runtime tests:
-  - `SimulatorStateServiceInitializationTests.cs` (RepositoryStub)
-  - `SimulatedPeerRuntimeFinalizeTests.cs` (InMemoryRepository)
-  - `SimulatedPeerRuntimeFinalizeRelayedTests.cs` (InMemoryRepository)
-  - `SimulatedPeerRuntimeStandardHandshakeRelayedTests.cs` (InMemoryRepository)
-  - `SimulatedPeerRuntimeServiceDecryptFailureDiagnosticsTests.cs` (InMemoryRepository)
-  - Update to store a single `SimulatorStateSnapshot` and expose the last saved snapshot for assertions.
-
-- Update assertions:
-  - Tests that currently inspect `SavedPeers` / `SavedRelationships` / `SavedRelay` should now inspect:
-    - `SavedSnapshot.Peers`
-    - `SavedSnapshot.Relationships`
-    - `SavedSnapshot.Relays`
-
-Definition of done:
-
-- The simulator still loads and saves state correctly.
-- Sessions persist in the peer runtime store snapshot and are restored on load.
-- Build succeeds and `dotnet test` passes.
-
-### A.6 — Remove dead code introduced by the refactor
-
-- Delete relay file persistence code paths in `JsonSimulatorStateRepository`.
-- Remove relay-specific repository methods and any remaining call sites.
-- Remove `_relayGate` and any relay-only persistence helpers in `SimulatorStateService`.
-- Remove repository-owned caches that become redundant under the snapshot contract.
+### Important AI Implementation Rules for this Chunk:
+1. **Documentation Context:** When implementing these steps, you MUST adhere to the patterns and constraints defined in:
+   - `@source/Desktop.Wpf/r3.readme.md` (Domain services, TimeProvider, ObservableList, thread safety)
+   - `@source/Desktop.Wpf/wpf.readme.md` (WPF thread bridging, CreateView, ViewModel disposal)
+   - `@source/unit-testing.md` (NUnit, Moq, FluentAssertions, FakeTimeProvider)
+2. **File Deletion/Renaming Constraint:** If a step requires renaming or deleting an existing class, file, or interface, **the AI MUST NOT perform the deletion/renaming itself**. Instead, the AI must explicitly **ASK THE USER** to perform the rename/delete action, providing the exact file paths and names. You may create *new* files alongside the old ones to transition bindings, but the user must delete the old ones.
+3. **Unit Testing:** Every new class containing logic (Queries, Services, ViewModels) MUST have an accompanying minimal unit test file as outlined in `@source/unit-testing.md`.
 
 ---
 
-## Chunk B — Relay bug 1: “Next” doesn’t decrement queue counter + delivered handshake doesn’t update peer state
+### Sub-Chunk A.1: Revert `RatchetKeyIndexAdapter` DbContext Hack
+**Goal:** Restore the domain repository to its proper scoped state.
+- **Task:** Edit `RatchetKeyIndexAdapter.cs`. Remove `IServiceScopeFactory`. Inject `PercolatorDbContext` directly via the constructor and use it directly for `TryResolveAsync` and `UpsertAsync`.
+- **Validation:** Ensure existing unit tests for session indexing still compile and pass.
+
+### Sub-Chunk A.2: Define Query Models & `IPeerConnectionQueries` Interface
+**Goal:** Create the read-only CQRS boundary for the UI.
+- **Task:** Create a new file `PeerConnectionStateSnapshot.cs` in `Desktop.Wpf`. It should be an immutable `record` representing the connection state (ConnectionId, PeerId, DisplayName, Status, RelayHostPeerId, LastActivityUtc).
+- **Task:** Create an immutable `PendingInboundSnapshot.cs` record for incoming unaccepted handshakes.
+- **Task:** Create `IPeerConnectionQueries.cs` defining:
+  - `Task<IReadOnlyList<PeerConnectionStateSnapshot>> LoadAllConnectionsAsync(int selfIdentityId, CancellationToken ct)`
+  - `Task<IReadOnlyList<PendingInboundSnapshot>> LoadPendingInboundAsync(CancellationToken ct)`
+- **Docs Ref:** Aligns with the "Domain Snapshot Pattern" in `@source/Desktop.Wpf/r3.readme.md`.
+
+### Sub-Chunk A.3: Implement `PeerConnectionQueries` (CQRS)
+**Goal:** Move complex DB aggregation out of the background projection.
+- **Task:** Create `PeerConnectionQueries.cs` implementing `IPeerConnectionQueries`. 
+- **Task:** Migrate the complex data-stitching logic currently found inside `SecureChannelsProjection.ReloadAsync` into these new query methods. You may inject the 6 domain repositories (`ISessionRepository`, `IPeerIdentityRepository`, etc.) into this class, as it will be safely resolved within its own short-lived scope.
+- **Testing:** Create `PeerConnectionQueriesTests.cs` using Moq to mock the underlying repositories and verify that the correct snapshots are returned (see `@source/unit-testing.md`).
+
+### Sub-Chunk A.4: Create `PeerConnectionStateService` (R3 Orchestrator)
+**Goal:** Replace the faulty projection with a thread-safe R3 Singleton Service.
+- **Task:** Create `PeerConnectionStateService.cs` as a Singleton.
+- **Task:** It must own `ObservableList<PeerConnectionModel>` and `ObservableList<PendingInvitationModel>`. Expose them as `IReadOnlyObservableList` (Reference: `@source/Desktop.Wpf/r3.readme.md`).
+- **Task:** It must implement MediatR `INotificationHandler` for `SecureSessionCreatedNotification`, `PendingSessionCreatedNotification`, `PendingSessionRemovedNotification`, and `SentInvitationUpsertedNotification`.
+- **Task:** Handle events by dropping a signal on a `Subject<Unit>`. Use `.Debounce(TimeSpan.FromMilliseconds(150), TimeProvider.System)` to trigger a private `ReloadAsync` method. 
+- **Task:** Inside `ReloadAsync`, wrap the work in `using var scope = _scopeFactory.CreateScope();`, resolve `IPeerConnectionQueries`, await the snapshots, and safely mutate the `ObservableList`s inside a `SemaphoreSlim` lock.
+- **Testing:** Create `PeerConnectionStateServiceTests.cs`. Inject a `FakeTimeProvider`, trigger notifications, advance time by 150ms, and verify the `ObservableList` updates correctly (Reference: `@source/Desktop.Wpf/r3.readme.md` TimeProvider section).
+
+### Sub-Chunk A.5: UI Binding Updates & Cleanup Prompt
+**Goal:** Wire the UI to the new service and remove the old architecture.
+- **Task:** Update `App.xaml.cs` to register `PeerConnectionQueries` (Scoped), `PeerConnectionStateService` (Singleton), and map the MediatR notifications to the new service.
+- **Task:** Update ViewModels (`SelectedChannelPaneViewModel`, `ConnectionManagementDialogViewModel`, etc.) to inject `PeerConnectionStateService` instead of `SecureChannelsStore`. Update their observable bindings using `.CreateView()` and `.ToNotifyCollectionChanged()` (Reference: `@source/Desktop.Wpf/wpf.readme.md`).
+- **Task:** **STOP AND ASK THE USER** to physically delete `SecureChannelsProjection.cs`, `SecureChannelsStore.cs`, `SecureChannelModel.cs`, and any corresponding test files. Wait for user confirmation before proceeding to the next chunks.
+
+### Definition of Done for Chunk A
+- Domain complexity is hidden behind the `IPeerConnectionQueries` CQRS boundary.
+- `PeerConnectionStateService` acts as a true R3 Singleton orchestrator managing in-memory collections without DB concurrency crashes.
+- All dependencies are properly scoped and thoroughly unit-tested. 
 
-Outcome:
 
-- Clicking **Next** on the Relay tab removes exactly one item from the relay queue, and **the queue counter and item list update immediately**.
-- Delivering a queued relayed standard handshake (`HandshakeInitiatorHello`) causes the **target peer’s handshake UI to transition reactively** (show “Request Received”), and **does not** auto-accept until the user clicks Accept.
-
-
-Important observed current behavior (must change in this chunk):
-
-- `SimulatorRelayDeliveryService.DeliverToPeerAsync(...)` currently calls `_state.ReceiveRelayedOpaquePayloadAsync(recipientPeerId, opaqueBytes, ...)`.
-- `SimulatorStateService.ReceiveRelayedOpaquePayloadAsync(...)` currently parses `HandshakeInitiatorHello` and immediately calls `ReceiveEstablishSessionFromMainAsync(...)`, creating a session and returning `EstablishSessionResponse`.
-- `SimulatorRelayDeliveryService.DeliverToPeerAsync(...)` then immediately enqueues that `EstablishSessionResponse` back to the initiator (either downstream to a simulated peer or upstream to Main).
-
-This means standard handshakes are currently *auto-accepted* on delivery, which is the opposite of the simulator UX we want.
-
-Context / key constraint (R3):
-
-- Domain models can be mutated on background threads.
-- ViewModels must marshal reactive streams to the WPF dispatcher before binding.
-- Reference: `Desktop.Wpf/r3.readme.md`:
-  - For properties: call `ObserveOnCurrentSynchronizationContext()` *before* `.ToBindableReactiveProperty()`.
-  - For collections: use `.ToNotifyCollectionChanged(_ui.CollectionEventDispatcher)`.
-
-Work (recipe):
-
-### B.1 — Fix Relay tab queue counter not reacting to dequeue/remove
-
-Symptom:
-
-- Relay queue item removal happens in domain (`SimulatorStateService.DeleteRelayMessageByAckIdAsync`), but the Relay tab’s `QueueCount` can appear stuck.
-
-Root cause:
-
-- `QueueCount` is derived from `synchronizedQueueView.ObserveCountChanged()` but is bound without UI-thread marshalling.
-
-Change:
-
-- `Desktop.Wpf/Features/Simulator/SimulatedRelayQueuePanelViewModel.cs`
-  - Update `QueueCount`:
-    - `synchronizedQueueView.ObserveCountChanged()`
-    - `.ObserveOnCurrentSynchronizationContext()`
-    - `.ToBindableReactiveProperty(...)`
-  - Do not touch `QueueItems`; it is already marshaled via `.ToNotifyCollectionChanged(_ui.CollectionEventDispatcher)`.
-
-Definition of done:
-
-- With a non-empty relay queue visible, click **Next**.
-- Confirm:
-  - delivered item disappears from list
-  - `QueueCount` decrements immediately
-  - no WPF cross-thread exceptions
-
-### B.2 — Make all Simulator ViewModels UI-thread-safe (required for reactive handshake UI updates)
-
-What to fix:
-
-- Any projection from `_model.*` reactive properties into a `BindableReactiveProperty` must include `.ObserveOnCurrentSynchronizationContext()`.
-
-Where (minimum set for this chunk):
-
-- `Desktop.Wpf/Features/Simulator/SimulatedPeerItemViewModel.cs`
-- `Desktop.Wpf/Features/Simulator/SimulatedHandshakeStateMachineCardViewModel.cs`
-
-Definition of done:
-
-- When a background service changes `SimulatedPeerModel.UiState` (or any other runtime reactive property), UI updates within the next dispatcher tick.
-
-### B.3 — Track pending inbound Standard Signal hellos inside the Peer Aggregate
-
-The UI currently exposes a generic `InboundPending` state. We must rename this to `AwaitingUserAcceptance` and track standard Signal hellos separately from reverse-signal invites.
-
-Required renames:
-
-- **Rename UI state**
-  - `SimulatorPeerUiState.InboundPending` -> `SimulatorPeerUiState.AwaitingUserAcceptance`
-  - Update all references across WPF code, converters, tests, and any persisted snapshots accordingly.
-
-- **Rename reverse-signal tracking field**
-  - `SimulatedPeerModel.PendingCorrelationId` -> `SimulatedPeerModel.InboundReverseSignalPendingCorrelationId`
-
-New domain model:
-
-- Create `Desktop.Wpf/Features/Simulator/Models/SimulatedPendingStandardSignalHelloModel.cs` with:
-  - `Guid RelayHostPeerId`
-  - `byte[] InitiatorIdentityKeySpki`
-  - `byte[] InitiatorEphemeralKeySpki`
-  - `Guid SignedPreKeyId`
-  - `Guid? OneTimePreKeyId`
-  - `DateTimeOffset ReceivedUtc`
-
-Add to peer model (authoritative state ownership):
-
-- `SimulatedPeerModel` owns pending inbound standard hellos.
-- Add:
-  - `ObservableDictionary<string, SimulatedPendingStandardSignalHelloModel> PendingInboundStandardSignalHellosMutable`
-  - Expose read-only view:
-    - `IReadOnlyObservableDictionary<string, SimulatedPendingStandardSignalHelloModel> PendingInboundStandardSignalHellos`
-  - Do not add a "selected initiator" property.
-    - The simulator handshake UI will be updated to list each pending handshake and pass `initiatorPkhHex` as a command parameter.
-
-Keying and update semantics:
-
-- `InitiatorPkhHex = Convert.ToHexString(SHA256(hello.InitiatorIdentityKeySpki)).ToLowerInvariant()`.
-- One pending per initiator identity key per recipient peer.
-- Most recent overrides existing entry for the same initiator PKH.
-- No expiration.
-
-Implementation note:
-
-- This data is stored on the peer aggregate (`SimulatedPeerModel.PendingInboundStandardSignalHellosMutable`) and is mutated under the simulator state gate.
-
-### B.4 — Handshakes tab UI: list pending inbound handshakes (per peer) and accept per item
-
-Rationale:
-
-- Today, the Handshakes tab shows one peer card with a single `Accept` button.
-- With standard Signal, a single recipient peer can have multiple pending inbound hellos (one per initiator identity PKH).
-- Therefore, `Accept` must be **per pending item** (command parameter) rather than relying on a global selection property.
-
-Existing candidate assessment:
-
-- `Desktop.Wpf/Features/Sessions/PendingHandshakesMenuViewModel` exists but is part of the sessions UI and is already in use (sidebar/menu card). It is not suitable to reuse directly for the simulator.
-- No existing simulator-specific ViewModel for listing pending inbound handshake items was found.
-
-Plan:
-
-- Update `Desktop.Wpf/Features/Simulator/SimulatorHandshakesTabView.xaml` peer card template to include a "Pending" section.
-- Add two visual groupings in each peer card:
-  - Reverse-signal invite (at most one): show when `InboundReverseSignalPendingCorrelationId != null`.
-  - Standard Signal hellos (0..n): list all entries in `PendingInboundStandardSignalHellos`.
-- Add a per-item `Accept` button for each pending standard hello.
-  - The command must pass `initiatorPkhHex` (string) as the parameter.
-  - Optional: also include a per-item `Reject`/`Dismiss` that removes that pending hello.
-
-ViewModel changes (high-level):
-
-- Extend `SimulatedHandshakeStateMachineCardViewModel` to expose a bindable list of pending standard hello rows.
-  - Each row must include:
-    - `InitiatorPkhHex`
-    - `ReceivedUtc`
-    - `AcceptCommand` (or reuse parent command with parameter)
-    - Optional `RejectCommand`
-- Prefer projecting the model’s dictionary to a UI collection using the same R3/WPF threading rule as elsewhere:
-  - marshal to dispatcher before raising collection change notifications.
-
-Definition of done:
-
-- The Handshakes tab displays **multiple** pending standard hellos for a single recipient peer.
-- Clicking Accept on a specific pending standard hello accepts **that specific** initiator (no ambiguity).
-
-### B.5 — Delivery path: do not auto-accept standard hellos
-
-Change required:
-
-- In `SimulatorRelayDeliveryService.DeliverToPeerAsync(...)`:
-  - If `opaqueBytes` parses as `HandshakeInitiatorHello`:
-    - Do **not** call `_state.ReceiveRelayedOpaquePayloadAsync(...)`.
-    - Instead call a new state service API:
-      - `Task UpsertPendingStandardSignalHelloAsync(Guid recipientPeerId, Guid relayHostPeerId, HandshakeInitiatorHello hello, DateTimeOffset receivedUtc, CancellationToken ct)`
-    - That API must (under `_stateGate`):
-      - upsert the pending model into the recipient peer’s `PendingInboundStandardSignalHellosMutable`
-      - set the recipient peer’s `UiState = AwaitingUserAcceptance`
-      - update `PendingInboundStandardSignalHellosMutable[initiatorPkhHex] = <model>`
-      - set `InboundReverseSignalPendingCorrelationId = null`
-    - Emit diagnostics: `HandshakeStateTransition` with `contextTag = "StandardSignalPending"`.
-  - If it is not a hello, continue existing behavior.
-
-### B.6 — Acceptance: finalize standard signal hello and route response
-
-- Create:
-  - `Task<bool> TryAcceptPendingStandardSignalHelloAsync(Guid recipientPeerId, string initiatorPkhHex, CancellationToken ct)`
-
-Under `_stateGate`:
-
-- 1) Look up the recipient `SimulatedPeerModel`.
-- 2) Look up and remove the pending hello from `SimulatedPeerModel.PendingInboundStandardSignalHellosMutable`.
-  - If not found, return `false`.
-- 3) Map hello -> `EstablishSessionRequest` and call `ReceiveEstablishSessionFromMainAsync(...)`.
-  - Important: do **not** refactor `ReceiveEstablishSessionFromMainAsync` in this chunk.
-- 4) Update the recipient peer UI state to Established if (and only if) no other inbound pending items exist.
-  - If other pendings remain (standard hellos and/or reverse-signal invite), keep `UiState = AwaitingUserAcceptance`.
-
-Release `_stateGate`.
-
-Outside the lock:
-
-- Route the resulting `EstablishSessionResponse` back to the initiator using `TryGetPeerIdByIdentityPkhAsync`.
-  - If local, call `EnqueueRelayDownstreamToPeerAsync`.
-  - If remote, call `EnqueueRelayUpstreamToMainAsync`.
-
-ViewModel wiring requirement (no discriminator enum):
-
-- Reverse-signal invite acceptance remains the peer-card Accept behavior (single correlation id).
-- Standard Signal acceptance is per pending item in the list UI (B.4) and must call:
-  - `TryAcceptPendingStandardSignalHelloAsync(recipientPeerId, initiatorPkhHex, ct)`
-
-### B.7 — Tests
-
-Update/add tests to cover:
-
-- **Relay queue UI**
-  - Next decrements count (reactive marshalling fix).
-- **Standard hello pending + accept**
-  - Delivering `HandshakeInitiatorHello` via relay:
-    - does not enqueue an immediate response
-    - sets recipient peer `UiState=AwaitingUserAcceptance`
-    - adds/overwrites `SimulatedPeerModel.PendingInboundStandardSignalHellos[initiatorPkhHex]`
-  - Accepting standard hello:
-    - enqueues an `EstablishSessionResponse` back to initiator (upstream or downstream)
-    - marks recipient established
-
-- **Handshakes tab list UI (smoke)**
-  - When multiple pending standard hellos exist for a peer, the tab renders multiple rows.
-  - Clicking Accept on a specific row calls accept for that row’s `initiatorPkhHex`.
-
----
-
----
 ## Chunk I — Notification badge + default focus behavior for Connection Management button
 
 Outcome:
