@@ -729,7 +729,6 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         Guid simulatedPeerId,
         Guid relayHostPeerId,
         DateTimeOffset expiresUtc,
-        bool includeOneTimeKeys,
         int oneTimeKeyCount,
         CancellationToken cancellationToken = default)
     {
@@ -747,7 +746,6 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             var bundle = _engine.CreateStandardPreKeyBundle(
                 peer: model,
                 expiresUtc: expiresUtc,
-                includeOneTimeKeys: includeOneTimeKeys,
                 oneTimeKeyCount: oneTimeKeyCount);
 
             var dto = new GetPreKeyBundleResponse.Types.PreKeyBundle
@@ -759,10 +757,13 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
                 PreKeySignature = ByteString.CopyFrom(bundle.SignedPreKeySignature.Value)
             };
 
-            if (bundle.OneTimePreKeyId is not null && bundle.OneTimePreKey is not null)
+            foreach (var bundleOneTimeKey in bundle.OneTimeKeys)        
             {
-                dto.OneTimeKeyId = ByteString.CopyFrom(bundle.OneTimePreKeyId.Value.ToByteArray());
-                dto.OneTimeKey = ByteString.CopyFrom(bundle.OneTimePreKey.Value);
+                dto.OneTimeKeys.Add(new GetPreKeyBundleResponse.Types.OneTimeKey
+                {
+                    OneTimeKeyId = ByteString.CopyFrom(bundleOneTimeKey.Id.ToByteArray()),
+                    KeyBytes = ByteString.CopyFrom(bundleOneTimeKey.Key.Value)
+                });
             }
 
             recipientPublicKeyHash = SHA256.HashData(model.IdentitySigningKeySpki);
@@ -844,30 +845,25 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             return null;
         }
 
-        Guid? oneTimePreKeyId = null;
-        OneTimeKey? oneTimePreKey = null;
-        if (bundleProto.HasOneTimeKeyId && bundleProto.OneTimeKeyId.Length > 0
-            && bundleProto.HasOneTimeKey && bundleProto.OneTimeKey.Length > 0)
+        if (bundleProto.OneTimeKeys.Count > OneTimeKeyRequestSanityLimit)
         {
-            try
-            {
-                oneTimePreKeyId = new Guid(bundleProto.OneTimeKeyId.ToByteArray());
-                oneTimePreKey = new OneTimeKey(bundleProto.OneTimeKey.ToByteArray());
-            }
-            catch
-            {
-                oneTimePreKeyId = null;
-                oneTimePreKey = null;
-            }
+            return null;
         }
-
+        if (bundleProto.OneTimeKeys.Count >0 && (!bundleProto.OneTimeKeys.First().HasKeyBytes || bundleProto.OneTimeKeys.First().KeyBytes.Length == 0))
+        {
+            return null;
+        }
+        var oneTimePreKeyInstance = bundleProto.OneTimeKeys
+                .Select(k => new OneTimeKeyInstance(new Guid(k.OneTimeKeyId.ToByteArray()), new OneTimeKey(k.KeyBytes.ToByteArray())))
+                .FirstOrDefault();
+        
         var responderBundle = new Percolator.Cryptography.PreKeyBundle(
             identitySigningKey: new RatchetIdentityKey(bundleProto.IdentityKey.ToByteArray()),
             signedPreKeyId: signedPreKeyId,
             signedPreKey: new PreKey(bundleProto.SignedPreKey.ToByteArray()),
             signedPreKeySignature: new Signature(bundleProto.PreKeySignature.ToByteArray()),
-            oneTimePreKeyId: oneTimePreKeyId,
-            oneTimePreKey: oneTimePreKey,
+            oneTimePreKeyId: oneTimePreKeyInstance?.Id,
+            oneTimePreKey: oneTimePreKeyInstance?.Key,
             expirationDateUtc: null);
 
         byte[] helloBytes;
@@ -920,6 +916,8 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
 
         return null;
     }
+
+    private const int OneTimeKeyRequestSanityLimit = 100;
 
     public async Task UpsertPendingStandardSignalHelloAsync(
         Guid recipientPeerId,

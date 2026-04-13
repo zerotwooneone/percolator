@@ -15,10 +15,9 @@ public sealed class SignalProtocolEngine : ISignalProtocolEngine
         _crypto = new AeadSessionCrypto();
     }
 
-    public PreKeyBundle CreateStandardPreKeyBundle(
+    public PreKeyBundleForPublish CreateStandardPreKeyBundle(
         SimulatedPeerModel peer,
         DateTimeOffset? expiresUtc,
-        bool includeOneTimeKeys,
         int oneTimeKeyCount)
     {
         if (peer is null) throw new ArgumentNullException(nameof(peer));
@@ -30,25 +29,22 @@ public sealed class SignalProtocolEngine : ISignalProtocolEngine
         using var identityEcdsa = ECDsa.Create(identityEcdh.ExportParameters(true));
         var signature = identityEcdsa.SignData(signedPreKey.PublicSpki, HashAlgorithmName.SHA256);
 
-        Guid? oneTimePreKeyId = null;
-        OneTimeKey? oneTimePreKey = null;
-        if (includeOneTimeKeys && oneTimeKeyCount > 0)
+        var oneTimeKeys = oneTimeKeyCount == 0 ? Array.Empty<OneTimeKeyInstance>() : new OneTimeKeyInstance[oneTimeKeyCount];
+        for (int oneTimeIndex = 0; oneTimeIndex < oneTimeKeyCount; oneTimeIndex++)
         {
             using var identityEcdh2 = ECDiffieHellman.Create();
             identityEcdh2.ImportECPrivateKey(peer.IdentitySigningKeyPrivateKeyEcPrivateKey, out _);
             var curve = identityEcdh2.ExportParameters(false).Curve;
             using var otk = ECDiffieHellman.Create(curve);
-            oneTimePreKeyId = Guid.NewGuid();
-            oneTimePreKey = new OneTimeKey(otk.PublicKey.ExportSubjectPublicKeyInfo());
+            oneTimeKeys[oneTimeIndex] = new OneTimeKeyInstance(Guid.NewGuid(), new OneTimeKey(otk.PublicKey.ExportSubjectPublicKeyInfo()));
         }
-
-        return new PreKeyBundle(
+        
+        return new PreKeyBundleForPublish(
             identitySigningKey: new RatchetIdentityKey(peer.IdentitySigningKeySpki),
             signedPreKeyId: signedPreKey.SignedPreKeyId,
             signedPreKey: new PreKey(signedPreKey.PublicSpki),
             signedPreKeySignature: new Signature(signature),
-            oneTimePreKeyId: oneTimePreKeyId,
-            oneTimePreKey: oneTimePreKey,
+            oneTimeKeys: oneTimeKeys,
             expirationDateUtc: expiresUtc);
     }
 

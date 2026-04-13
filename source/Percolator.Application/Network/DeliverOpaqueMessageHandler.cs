@@ -110,8 +110,12 @@ namespace Percolator.Application.Network
                         };
                         if (bundle.OneTimePreKey is not null)
                         {
-                            msg.OneTimeKeyId = ByteString.CopyFrom(bundle.OneTimePreKeyId!.Value.ToByteArray());
-                            msg.OneTimeKey = ByteString.CopyFrom(bundle.OneTimePreKey.Value);
+                            msg.OneTimeKeys.Add(new GetPreKeyBundleResponse.Types.OneTimeKey
+                            {
+                                Version = 1,
+                                OneTimeKeyId = ByteString.CopyFrom(bundle.OneTimePreKeyId!.Value.ToByteArray()),
+                                KeyBytes = ByteString.CopyFrom(bundle.OneTimePreKey.Value)
+                            });
                         }
                         resp.PreKeyBundle = msg;
                     }

@@ -242,10 +242,15 @@ public sealed class NewHandshakeDialogViewModel : ViewModelBase
             IdentityKey = ByteString.CopyFrom(identitySigningSpki),
             SignedPreKeyId = ByteString.CopyFrom(signedPreKeyId.ToByteArray()),
             SignedPreKey = ByteString.CopyFrom(signedPreKeySpki),
-            PreKeySignature = ByteString.CopyFrom(preKeySignature),
-            OneTimeKeyId = ByteString.CopyFrom(otkId.ToByteArray()),
-            OneTimeKey = ByteString.CopyFrom(otkSpki)
+            PreKeySignature = ByteString.CopyFrom(preKeySignature)
         };
+
+        bundle.OneTimeKeys.Add(new GetPreKeyBundleResponse.Types.OneTimeKey
+        {
+            Version = 1,
+            OneTimeKeyId = ByteString.CopyFrom(otkId.ToByteArray()),
+            KeyBytes = ByteString.CopyFrom(otkSpki)
+        });
 
         var token = EncodeToken(bundle.ToByteArray());
         GeneratedTokenText.Value = token;
@@ -551,17 +556,21 @@ public sealed class NewHandshakeDialogViewModel : ViewModelBase
 
         Guid? oneTimePreKeyId = null;
         OneTimeKey? oneTimePreKey = null;
-        if (bundle.HasOneTimeKeyId && bundle.OneTimeKeyId.Length > 0 && bundle.HasOneTimeKey && bundle.OneTimeKey.Length > 0)
+        if (bundle.OneTimeKeys.Count > 0)
         {
-            try
+            var first = bundle.OneTimeKeys.FirstOrDefault(k => k is not null && k.OneTimeKeyId.Length > 0 && k.KeyBytes.Length > 0);
+            if (first is not null)
             {
-                oneTimePreKeyId = new Guid(bundle.OneTimeKeyId.ToByteArray());
-                oneTimePreKey = new OneTimeKey(bundle.OneTimeKey.ToByteArray());
-            }
-            catch
-            {
-                oneTimePreKeyId = null;
-                oneTimePreKey = null;
+                try
+                {
+                    oneTimePreKeyId = new Guid(first.OneTimeKeyId.ToByteArray());
+                    oneTimePreKey = new OneTimeKey(first.KeyBytes.ToByteArray());
+                }
+                catch
+                {
+                    oneTimePreKeyId = null;
+                    oneTimePreKey = null;
+                }
             }
         }
 

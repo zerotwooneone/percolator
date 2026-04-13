@@ -94,10 +94,15 @@ public sealed class RequestPreKeyBundleByPkhHandlerTests
             IdentityKey = ByteString.CopyFrom(remoteIdentitySpki),
             SignedPreKeyId = ByteString.CopyFrom(signedPreKeyId.ToByteArray()),
             SignedPreKey = ByteString.CopyFrom(new byte[] { 1, 1, 1 }),
-            PreKeySignature = ByteString.CopyFrom(new byte[] { 2, 2, 2 }),
-            OneTimeKeyId = ByteString.CopyFrom(oneTimePreKeyId.ToByteArray()),
-            OneTimeKey = ByteString.CopyFrom(new byte[] { 3, 3, 3 })
+            PreKeySignature = ByteString.CopyFrom(new byte[] { 2, 2, 2 })
         };
+
+        bundle.OneTimeKeys.Add(new GetPreKeyBundleResponse.Types.OneTimeKey
+        {
+            Version = 1,
+            OneTimeKeyId = ByteString.CopyFrom(oneTimePreKeyId.ToByteArray()),
+            KeyBytes = ByteString.CopyFrom(new byte[] { 3, 3, 3 })
+        });
 
         var internalResp = new InternalEnvelope
         {

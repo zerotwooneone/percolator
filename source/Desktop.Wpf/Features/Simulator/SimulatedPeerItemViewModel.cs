@@ -458,7 +458,6 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
                 simulatedPeerId: _model.PeerId,
                 relayHostPeerId: relayPeerId.Value,
                 expiresUtc: DateTimeOffset.UtcNow.AddHours(12),
-                includeOneTimeKeys: true,
                 oneTimeKeyCount: 5,
                 cancellationToken: ct)
             .ConfigureAwait(false);

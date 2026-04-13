@@ -113,7 +113,6 @@ public interface ISimulatorStateService
         Guid simulatedPeerId,
         Guid relayHostPeerId,
         DateTimeOffset expiresUtc,
-        bool includeOneTimeKeys,
         int oneTimeKeyCount,
         CancellationToken cancellationToken = default);
 

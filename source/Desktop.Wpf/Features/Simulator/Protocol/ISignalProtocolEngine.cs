@@ -5,10 +5,9 @@ namespace Desktop.Wpf.Features.Simulator.Protocol;
 
 public interface ISignalProtocolEngine
 {
-    PreKeyBundle CreateStandardPreKeyBundle(
+    PreKeyBundleForPublish CreateStandardPreKeyBundle(
         SimulatedPeerModel peer,
         DateTimeOffset? expiresUtc,
-        bool includeOneTimeKeys,
         int oneTimeKeyCount);
 
     InitiateStandardHandshakeResult? TryInitiateStandardHandshake(

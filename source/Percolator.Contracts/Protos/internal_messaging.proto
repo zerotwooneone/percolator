@@ -338,14 +338,18 @@ message GetPreKeyBundleRequest {
 
 // Response carrying the pre-key bundle for the requested PKH.
 message GetPreKeyBundleResponse {
-  message PreKeyBundle {
+  message OneTimeKey {
     optional uint32 version = 1;
     optional bytes one_time_key_id = 2;
-    optional bytes one_time_key = 3;
-    optional bytes identity_key = 4;
-    optional bytes signed_pre_key_id = 5;
-    optional bytes signed_pre_key = 6;
-    optional bytes pre_key_signature = 7;
+    optional bytes key_bytes = 3;
+  }
+  message PreKeyBundle {
+    optional uint32 version = 1;    
+    optional bytes identity_key = 2;
+    optional bytes signed_pre_key_id = 3;
+    optional bytes signed_pre_key = 4;
+    optional bytes pre_key_signature = 5;
+    repeated OneTimeKey one_time_keys = 6;
   }
 
   message Never {

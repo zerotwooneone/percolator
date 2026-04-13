@@ -379,7 +379,6 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
                 simulatedPeerId: _model.PeerId,
                 relayHostPeerId: hostPeerId.Value,
                 expiresUtc: DateTimeOffset.UtcNow.AddHours(12),
-                includeOneTimeKeys: IncludeOneTimeKeys.Value,
                 oneTimeKeyCount: OneTimeKeyCount.Value,
                 cancellationToken: ct)
             .ConfigureAwait(false);

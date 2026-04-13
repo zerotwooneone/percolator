@@ -154,8 +154,12 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                         };
                         if (bundle.OneTimePreKey is not null)
                         {
-                            msg.OneTimeKeyId = Google.Protobuf.ByteString.CopyFrom(bundle.OneTimePreKeyId!.Value.ToByteArray());
-                            msg.OneTimeKey = Google.Protobuf.ByteString.CopyFrom(bundle.OneTimePreKey.Value);
+                            msg.OneTimeKeys.Add(new GetPreKeyBundleResponse.Types.OneTimeKey
+                            {
+                                Version = 1,
+                                OneTimeKeyId = Google.Protobuf.ByteString.CopyFrom(bundle.OneTimePreKeyId!.Value.ToByteArray()),
+                                KeyBytes = Google.Protobuf.ByteString.CopyFrom(bundle.OneTimePreKey.Value)
+                            });
                         }
                         resp.PreKeyBundle = msg;
                     }

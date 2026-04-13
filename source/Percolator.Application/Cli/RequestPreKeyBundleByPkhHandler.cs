@@ -202,17 +202,21 @@ public class RequestPreKeyBundleByPkhHandler : IRequestHandler<RequestPreKeyBund
 
         Guid? oneTimePreKeyId = null;
         OneTimeKey? oneTimePreKey = null;
-        if (bundle.OneTimeKeyId is not null && bundle.OneTimeKeyId.Length > 0 && bundle.OneTimeKey is not null && bundle.OneTimeKey.Length > 0)
+        if (bundle.OneTimeKeys.Count > 0)
         {
-            try
+            var first = bundle.OneTimeKeys.FirstOrDefault(k => k is not null && k.OneTimeKeyId.Length > 0 && k.KeyBytes.Length > 0);
+            if (first is not null)
             {
-                oneTimePreKeyId = new Guid(bundle.OneTimeKeyId.ToByteArray());
-                oneTimePreKey = new OneTimeKey(bundle.OneTimeKey.ToByteArray());
-            }
-            catch
-            {
-                oneTimePreKeyId = null;
-                oneTimePreKey = null;
+                try
+                {
+                    oneTimePreKeyId = new Guid(first.OneTimeKeyId.ToByteArray());
+                    oneTimePreKey = new OneTimeKey(first.KeyBytes.ToByteArray());
+                }
+                catch
+                {
+                    oneTimePreKeyId = null;
+                    oneTimePreKey = null;
+                }
             }
         }
 
