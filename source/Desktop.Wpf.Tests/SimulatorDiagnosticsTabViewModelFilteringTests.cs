@@ -5,7 +5,6 @@ using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
 using Desktop.Wpf.Features.Simulator;
-using Desktop.Wpf.Shared.Mvvm;
 using FluentAssertions;
 using Moq;
 using NUnit.Framework;
@@ -47,7 +46,7 @@ public sealed class SimulatorDiagnosticsTabViewModelFilteringTests
 
         var diagnostics = new SimulatorDiagnosticsService();
 
-        using var sut = new SimulatorDiagnosticsTabViewModel(new WpfUiDispatcher(), diagnostics, state.Object);
+        using var sut = new SimulatorDiagnosticsTabViewModel(new TestUiDispatcher(), diagnostics, state.Object);
 
         diagnostics.Emit(SimulatorDiagnosticEventType.PeerCreated, "a1", peerId: peerA);
         diagnostics.Emit(SimulatorDiagnosticEventType.RelayEnqueued, "a2", peerId: peerA, relayHostPeerId: relay);
@@ -58,11 +57,10 @@ public sealed class SimulatorDiagnosticsTabViewModelFilteringTests
         sut.SelectedRelayHostPeerId.Value = relay;
         sut.SelectedEventType.Value = SimulatorDiagnosticEventType.RelayEnqueued;
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-        while (sut.Events.Count != 1 && !cts.IsCancellationRequested)
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(2);
+        while (sut.Events.Count != 1 && DateTime.UtcNow < deadline)
         {
-            await Task.Delay(25, cts.Token);
-            WpfTestHarness.DoEvents();
+            await Task.Delay(25);
         }
 
         // Assert

@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
 using Desktop.Wpf.Features.Sessions;
+using Desktop.Wpf.Features.Sessions.Commands;
 using FluentAssertions;
 using Google.Protobuf;
 using Moq;
@@ -14,6 +15,7 @@ using Percolator.Application.Services;
 using Percolator.Contracts;
 using Percolator.Cryptography;
 using Percolator.Network;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Desktop.Wpf.Tests;
 
@@ -31,7 +33,6 @@ public sealed class ConnectionManagementDialogImportTokenTests
         inbox.Setup(x => x.GetOpenAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(Array.Empty<PendingInvitationDto>());
 
-        var actions = new Mock<IMainInvitationActions>(MockBehavior.Loose);
         var inboxEvents = new Mock<IMainInvitationInboxEvents>(MockBehavior.Loose);
         inboxEvents.SetupGet(x => x.Changed).Returns(new R3.Subject<R3.Unit>());
 
@@ -48,7 +49,8 @@ public sealed class ConnectionManagementDialogImportTokenTests
 
         var peerIdentities = new Mock<Percolator.Identity.IPeerIdentityRepository>(MockBehavior.Loose);
 
-        var store = new Desktop.Wpf.Features.Sessions.State.SecureChannelsStore();
+        var state = new PeerConnectionStateService(Mock.Of<IServiceScopeFactory>(MockBehavior.Loose));
+        var ui = new TestUiDispatcher();
 
         var sessionCrypto = new Mock<ISessionCrypto>(MockBehavior.Loose);
         var preHandshake = new Mock<IPreHandshakeSessionStore>(MockBehavior.Loose);
@@ -56,35 +58,15 @@ public sealed class ConnectionManagementDialogImportTokenTests
         var clock = new Mock<IClock>(MockBehavior.Loose);
         clock.SetupGet(x => x.UtcNow).Returns(DateTimeOffset.UtcNow);
         var mediator = new Mock<MediatR.IMediator>(MockBehavior.Loose);
-
-        var establish = new Mock<IEstablishDirectSessionService>(MockBehavior.Loose);
-        establish.Setup(x => x.QueueInviteAsync(
-                It.IsAny<Percolator.Identity.SelfId>(),
-                It.IsAny<byte[]>(),
-                It.IsAny<byte[]>(),
-                It.IsAny<byte[]>(),
-                It.IsAny<bool>(),
-                It.IsAny<Percolator.Identity.PeerId?>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new Percolator.Cryptography.Primitives.RequestCorrelationId(Guid.NewGuid()));
+        mediator.Setup(x => x.Send(It.IsAny<DecodeAndQueueInviteCommand>(), default))
+            .ReturnsAsync(new DecodeAndQueueInviteResult.Success());
 
         var sut = new ConnectionManagementDialogViewModel(
             inbox.Object,
-            actions.Object,
             inboxEvents.Object,
-            reverseSignalInvites.Object,
-            grpcSessions.Object,
-            transport.Object,
-            secureMessaging.Object,
-            directSessions.Object,
             active,
-            peerIdentities.Object,
-            establish.Object,
-            store,
-            sessionCrypto.Object,
-            preHandshake.Object,
-            sentInvitations.Object,
-            clock.Object,
+            state,
+            ui,
             mediator.Object);
 
         var token = CreateSignedInviteToken(out var inviterSpki, out var payloadBytes, out var sigBytes);
@@ -94,25 +76,9 @@ public sealed class ConnectionManagementDialogImportTokenTests
         sut.DecodeAndInitiateCommand.Execute(null);
 
         // Assert
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-        while (!cts.IsCancellationRequested)
-        {
-            var count = establish.Invocations.Count;
-            if (count > 0) break;
-            await Task.Delay(20, cts.Token);
-        }
-
-        establish.Invocations.Count.Should().BeGreaterThan(0);
-
-        establish.Verify(x => x.QueueInviteAsync(
-                It.IsAny<Percolator.Identity.SelfId>(),
-                It.Is<byte[]>(b => b != null && b.SequenceEqual(inviterSpki)),
-                It.Is<byte[]>(b => b != null && b.SequenceEqual(payloadBytes)),
-                It.Is<byte[]>(b => b != null && b.SequenceEqual(sigBytes)),
-                false,
-                null,
-                It.IsAny<CancellationToken>()),
-            Times.Once);
+        mediator.Verify(x => x.Send(
+            It.Is<DecodeAndQueueInviteCommand>(c => c.Token == token),
+            default), Times.Once);
 
         sut.SelectedTabIndex.Value.Should().Be(0);
     }
@@ -127,7 +93,6 @@ public sealed class ConnectionManagementDialogImportTokenTests
         inbox.Setup(x => x.GetOpenAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(Array.Empty<PendingInvitationDto>());
 
-        var actions = new Mock<IMainInvitationActions>(MockBehavior.Loose);
         var inboxEvents = new Mock<IMainInvitationInboxEvents>(MockBehavior.Loose);
         inboxEvents.SetupGet(x => x.Changed).Returns(new R3.Subject<R3.Unit>());
 
@@ -145,32 +110,19 @@ public sealed class ConnectionManagementDialogImportTokenTests
         var peerIdentities = new Mock<Percolator.Identity.IPeerIdentityRepository>(MockBehavior.Loose);
         var establish = new Mock<IEstablishDirectSessionService>(MockBehavior.Loose);
 
-        var store = new Desktop.Wpf.Features.Sessions.State.SecureChannelsStore();
+        var state = new PeerConnectionStateService(Mock.Of<IServiceScopeFactory>(MockBehavior.Loose));
+        var ui = new TestUiDispatcher();
 
-        var sessionCrypto = new Mock<ISessionCrypto>(MockBehavior.Loose);
-        var preHandshake = new Mock<IPreHandshakeSessionStore>(MockBehavior.Loose);
-        var sentInvitations = new Mock<ISentInvitationRepository>(MockBehavior.Loose);
-        var clock = new Mock<IClock>(MockBehavior.Loose);
-        clock.SetupGet(x => x.UtcNow).Returns(DateTimeOffset.UtcNow);
         var mediator = new Mock<MediatR.IMediator>(MockBehavior.Loose);
+        mediator.Setup(x => x.Send(It.IsAny<DecodeAndQueueInviteCommand>(), default))
+            .ReturnsAsync(new DecodeAndQueueInviteResult.Failed("Token signature invalid."));
 
         var sut = new ConnectionManagementDialogViewModel(
             inbox.Object,
-            actions.Object,
             inboxEvents.Object,
-            reverseSignalInvites.Object,
-            grpcSessions.Object,
-            transport.Object,
-            secureMessaging.Object,
-            directSessions.Object,
             active,
-            peerIdentities.Object,
-            establish.Object,
-            store,
-            sessionCrypto.Object,
-            preHandshake.Object,
-            sentInvitations.Object,
-            clock.Object,
+            state,
+            ui,
             mediator.Object);
 
         var token = CreateSignedInviteToken(out _, out var payloadBytes, out var sigBytes);
@@ -193,15 +145,7 @@ public sealed class ConnectionManagementDialogImportTokenTests
 
         // Assert
         await Task.Delay(100);
-        establish.Verify(x => x.QueueInviteAsync(
-                It.IsAny<Percolator.Identity.SelfId>(),
-                It.IsAny<byte[]>(),
-                It.IsAny<byte[]>(),
-                It.IsAny<byte[]>(),
-                It.IsAny<bool>(),
-                It.IsAny<Percolator.Identity.PeerId?>(),
-                It.IsAny<CancellationToken>()),
-            Times.Never);
+        mediator.Verify(x => x.Send(It.IsAny<DecodeAndQueueInviteCommand>(), default), Times.Once);
 
         sut.ErrorText.Value.Should().Be("Token signature invalid.");
     }

@@ -601,6 +601,121 @@ SearchText.Subscribe(_ => _connectionsView.RefreshFilter()).AddTo(ref _bag);
 Items = _connectionsView.ToNotifyCollectionChanged(ui.CollectionEventDispatcher);
 ```
 
+## Chunk F — Fix Architectural Regressions: Concurrency, Filtering, and I/O
+
+**Context & AI Instructions:**
+In the previous implementation, several critical architectural constraints were ignored. You MUST execute the following fixes exactly as written. Do not use workarounds.
+1. `ObservableCollection<T>` must NEVER be modified from background threads.
+2. Shadow collections break WPF UI virtualization. You must use native Cysharp `ObservableCollections` filtering.
+3. File I/O must be atomic to prevent corruption.
+
+---
+
+#### Step 1: Fix Sidebar Filtering (Eradicate the Shadow Collection)
+**File:** `Desktop.Wpf/Features/Sessions/SessionsSidebarViewModel.cs`
+
+**Action:**
+1. Delete the `_items` field entirely: `private readonly ObservableCollection<PeerConnectionListItemViewModel> _items = new();`
+2. Change the public property signature:
+   From: `public ReadOnlyObservableCollection<PeerConnectionListItemViewModel> Items { get; }`
+   To: `public INotifyCollectionChangedSynchronizedViewList<PeerConnectionListItemViewModel> Items { get; }`
+3. Completely rewrite the filtering logic in the constructor to use native attachment. Replace the `filteredItems` subscription and `initialItems` initialization with exactly this:
+```csharp
+// 1. Create the view and track it
+_connectionsView = _stateService.Connections
+    .CreateView(model => new PeerConnectionListItemViewModel(model))
+    .AddTo(ref _bag);
+
+// 2. Dispose child VMs when removed from the domain
+_connectionsView.ObserveRemove().Subscribe(evt => evt.Value.View.Dispose()).AddTo(ref _bag);
+
+// 3. Attach the dynamic filter logic
+_connectionsView.AttachFilter((model, vm) => 
+{
+    var term = SearchText.Value?.Trim() ?? "";
+    if (string.IsNullOrEmpty(term)) return true;
+    return vm.DisplayName.CurrentValue?.Contains(term, StringComparison.OrdinalIgnoreCase) == true;
+});
+
+// 4. Force the view to re-evaluate when search text changes
+SearchText.Subscribe(_ => _connectionsView.RefreshFilter()).AddTo(ref _bag);
+
+// 5. Expose directly to WPF via the UI Dispatcher
+Items = _connectionsView.ToNotifyCollectionChanged(ui.CollectionEventDispatcher);
+```
+
+#### Step 2: Fix the Cross-Thread Crash Timebomb
+**File:** `Desktop.Wpf/Features/Sessions/ConnectionManagementDialogViewModel.cs`
+
+**Action:** `_pendingInvitations` is currently an `ObservableCollection`, but `RefreshInboxAsync` is called by background network events. This will crash WPF. Convert it to a thread-safe `ObservableList`.
+
+1. Delete: `private readonly ObservableCollection<PendingInvitationItemViewModel> _pendingInvitations = new();`
+2. Add these two fields instead:
+```csharp
+private readonly ObservableList<PendingInvitationItemViewModel> _pendingInvitations = new();
+private readonly ISynchronizedView<PendingInvitationItemViewModel, PendingInvitationItemViewModel> _pendingInvitationsView;
+```
+3. Change the public property signature:
+   From: `public ReadOnlyObservableCollection<PendingInvitationItemViewModel> PendingInvitations { get; }`
+   To: `public INotifyCollectionChangedSynchronizedViewList<PendingInvitationItemViewModel> PendingInvitations { get; }`
+4. In the constructor, initialize the view before assigning the property:
+```csharp
+_pendingInvitationsView = _pendingInvitations.CreateView(x => x).AddTo(ref _bag);
+PendingInvitations = _pendingInvitationsView.ToNotifyCollectionChanged(ui.CollectionEventDispatcher);
+```
+
+#### Step 3: Remove Redundant Application Service (Enforce MediatR)
+**File:** `Desktop.Wpf/Features/Sessions/ConnectionManagementDialogViewModel.cs`
+
+**Action:** We must bypass `IMainInvitationActions` and use MediatR directly.
+1. Remove `IMainInvitationActions _actions` from the fields and the constructor signature.
+2. In `ExecuteAcceptAsync`, replace the `_actions.ApproveAsync` call with MediatR:
+```csharp
+// Replace this:
+// result = await _actions.ApproveAsync(item.PendingSessionId);
+
+// With this:
+var commandResult = await _mediator.Send(new ApprovePendingSessionCommand(new Percolator.Application.Network.PendingSessionId(item.PendingSessionId)));
+```
+*(Note: You will need to map `commandResult` exactly as you were mapping `result` previously to handle the `Accepted`, `RejectedNotReady`, etc. cases)*.
+3. In `ExecuteBurnAsync`, replace the `_actions.BurnAsync` call with MediatR:
+```csharp
+// Replace this:
+// await _actions.BurnAsync(item.PendingSessionId);
+
+// With this:
+await _mediator.Send(new RejectPendingSessionCommand(new Percolator.Application.Network.PendingSessionId(item.PendingSessionId)));
+```
+
+#### Step 4: Fix Non-Atomic File Operations
+**File:** `Desktop.Wpf/Features/Simulator/JsonSimulatorStateRepository.cs`
+
+**Action:** `File.Copy` followed by `File.Delete` is not atomic and risks file corruption if power is lost.
+1. Find the `WritePeersFileAsync` method. Replace the end of the method:
+```csharp
+// Replace this:
+File.Copy(tmp, path, overwrite: true);
+File.Delete(tmp);
+
+// With this:
+File.Move(tmp, path, overwrite: true);
+```
+2. Find the `SaveRelayDtoAsync` method. Replace the end of the method:
+```csharp
+// Replace this:
+File.Copy(tmp, path, overwrite: true);
+File.Delete(tmp);
+
+// With this:
+File.Move(tmp, path, overwrite: true);
+```
+
+#### Definition of Done:
+1. `SessionsSidebarViewModel` no longer contains the word `_items` or uses `new ReadOnlyObservableCollection`.
+2. `ConnectionManagementDialogViewModel` uses `ObservableList` for pending invitations, making it safe to update from background network threads.
+3. `IMainInvitationActions` is completely removed from `ConnectionManagementDialogViewModel`.
+4. `JsonSimulatorStateRepository` uses `File.Move` instead of `File.Copy` for atomic saves.
+
 ## Chunk I — Notification badge + default focus behavior for Connection Management button
 
 Outcome:

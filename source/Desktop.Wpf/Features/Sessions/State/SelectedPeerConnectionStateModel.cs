@@ -3,11 +3,11 @@ using R3;
 
 namespace Desktop.Wpf.Features.Sessions.State;
 
-public sealed class SelectedSecureChannelStateModel : IDisposable
+public sealed class SelectedPeerConnectionStateModel : IDisposable
 {
     private DisposableBag _bag;
 
-    public SelectedSecureChannelStateModel(SecureChannelKey channelKey)
+    public SelectedPeerConnectionStateModel(PeerConnectionKey channelKey)
     {
         ChannelKey = channelKey;
         DraftMessageText = new BindableReactiveProperty<string>(string.Empty).AddTo(ref _bag);
@@ -16,7 +16,7 @@ public sealed class SelectedSecureChannelStateModel : IDisposable
         ReestablishingText = new BindableReactiveProperty<string?>(null).AddTo(ref _bag);
     }
 
-    public SecureChannelKey ChannelKey { get; }
+    public PeerConnectionKey ChannelKey { get; }
 
     public BindableReactiveProperty<string> DraftMessageText { get; }
 

@@ -1,7 +1,8 @@
-using System.Linq;
 using Desktop.Wpf.Features.Sessions.Models;
+using Desktop.Wpf.Features.Sessions.Queries;
 using Desktop.Wpf.Features.Sessions.State;
 using Desktop.Wpf.Shared.Mvvm;
+using ObservableCollections;
 using R3;
 
 namespace Desktop.Wpf.Features.Sessions;
@@ -25,21 +26,22 @@ public sealed class SelectedChannelPaneViewModel : ViewModelBase
     public BindableReactiveProperty<object?> ActiveContent { get; }
 
     private readonly SelectedChannelModel _selection;
-    private readonly ISecureChannelsStore _store;
+    private readonly PeerConnectionStateService _stateService;
     private readonly ISessionScopeFactory _sessionFactory;
-    private readonly SelectedSecureChannelStateCache _stateCache;
+    private readonly SelectedPeerConnectionStateCache _stateCache;
 
     private DisposableBag _bag;
     private DisposableBag _currentSelectionBag;
+    private PeerConnectionModel? _currentConnection;
 
     public SelectedChannelPaneViewModel(
         SelectedChannelModel selection,
-        ISecureChannelsStore store,
+        PeerConnectionStateService stateService,
         ISessionScopeFactory sessionFactory,
-        SelectedSecureChannelStateCache stateCache)
+        SelectedPeerConnectionStateCache stateCache)
     {
         _selection = selection;
-        _store = store;
+        _stateService = stateService;
         _sessionFactory = sessionFactory;
         _stateCache = stateCache;
 
@@ -58,10 +60,11 @@ public sealed class SelectedChannelPaneViewModel : ViewModelBase
         OnSelectionChanged(_selection.SelectedKey.Value);
     }
 
-    private void OnSelectionChanged(SecureChannelKey? selectedKey)
+    private void OnSelectionChanged(PeerConnectionKey? selectedKey)
     {
         _currentSelectionBag.Dispose();
         _currentSelectionBag = default;
+        _currentConnection = null;
 
         if (selectedKey is null)
         {
@@ -74,7 +77,17 @@ public sealed class SelectedChannelPaneViewModel : ViewModelBase
         }
 
         var key = selectedKey.Value;
-        var model = _store.Channels.FirstOrDefault(c => c.Key.Equals(key));
+        if (key.Type != SecureChannelKeyType.SecureSession)
+        {
+            State.Value = SelectedPaneState.None;
+            DisplayName.Value = null;
+            BannerText.Value = null;
+            IsInputEnabled.Value = false;
+            ActiveContent.Value = null;
+            return;
+        }
+
+        var model = _stateService.Connections.FirstOrDefault(c => c.ConnectionId == key.Value);
 
         if (model is null)
         {
@@ -86,6 +99,7 @@ public sealed class SelectedChannelPaneViewModel : ViewModelBase
             return;
         }
 
+        _currentConnection = model;
         DisplayName.Value = model.DisplayName.CurrentValue;
 
         var state = MapState(model);
@@ -123,21 +137,30 @@ public sealed class SelectedChannelPaneViewModel : ViewModelBase
                 ActiveContent.Value = null;
                 break;
         }
+
+        // Bind to model changes for reactive updates
+        model.DisplayName
+            .DistinctUntilChanged()
+            .ObserveOnCurrentSynchronizationContext()
+            .Subscribe(x => DisplayName.Value = x)
+            .AddTo(ref _currentSelectionBag);
+
+        model.Status
+            .Select(MapStateFromStatus)
+            .DistinctUntilChanged()
+            .ObserveOnCurrentSynchronizationContext()
+            .Subscribe(x => State.Value = x)
+            .AddTo(ref _currentSelectionBag);
     }
 
-    private object? ResolveChatContent(SecureChannelModel model, SecureChannelKey key)
+    private object? ResolveChatContent(PeerConnectionModel model, PeerConnectionKey key)
     {
-        if (key.Type != SecureChannelKeyType.SecureSession)
-        {
-            return null;
-        }
-
         var sessionId = key.Value.ToString("N");
         var header = new SessionHeader
         {
             DisplayName = model.DisplayName.CurrentValue,
             Initials = model.Initials.CurrentValue,
-            IsOnline = model.IsOnline.CurrentValue
+            IsOnline = true
         };
 
         var resolved = _sessionFactory.GetOrCreate(sessionId, header);
@@ -166,17 +189,17 @@ public sealed class SelectedChannelPaneViewModel : ViewModelBase
         return resolved.ViewModel;
     }
 
-    private static SelectedPaneState MapState(SecureChannelModel model)
-    {
-        return model.Kind.CurrentValue switch
+    private static SelectedPaneState MapState(PeerConnectionModel model)
+        => MapStateFromStatus(model.Status.CurrentValue);
+
+    private static SelectedPaneState MapStateFromStatus(PeerConnectionStatus status)
+        => status switch
         {
-            SecureChannelKind.PendingInbound => SelectedPaneState.Pending,
-            SecureChannelKind.PendingOutbound => SelectedPaneState.Pending,
-            SecureChannelKind.Failed => SelectedPaneState.Failed,
-            SecureChannelKind.Direct => model.IsOnline.CurrentValue ? SelectedPaneState.Active : SelectedPaneState.Offline,
-            _ => SelectedPaneState.Active
+            PeerConnectionStatus.Direct => SelectedPaneState.Active,
+            PeerConnectionStatus.Relay => SelectedPaneState.Active,
+            PeerConnectionStatus.Group => SelectedPaneState.Active,
+            _ => SelectedPaneState.Offline
         };
-    }
 
     protected override void DisposeCore()
     {

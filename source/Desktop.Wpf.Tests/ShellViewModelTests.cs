@@ -3,6 +3,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Desktop.Wpf.Features.Self;
 using Desktop.Wpf.Features.Sessions;
+using Desktop.Wpf.Features.Sessions.Queries;
 using Desktop.Wpf.Features.Sessions.State;
 using Desktop.Wpf.Features.Shell;
 using Desktop.Wpf.Shared.Navigation;
@@ -44,13 +45,14 @@ public class ShellViewModelTests
         ISelfIdentityRepository selfIdRepro,
         INavigationService nav,
         IServiceProvider identityProvider,
-        IStartupIdentityService startupIdentityService)
+        IStartupIdentityService startupIdentityService,
+        PeerConnectionStateService peerConnectionStateService)
     {
         var self = new SelfIdentityModel();
         var identityScopeAccessor = new IdentityScopeAccessor();
         identityScopeAccessor.Current = identityProvider;
         var windowManager = new Mock<IWindowManager>();
-        return new ShellViewModel(nav, selfIdRepro, startupIdentityService, self, identityScopeAccessor, windowManager.Object);
+        return new ShellViewModel(nav, selfIdRepro, startupIdentityService, self, identityScopeAccessor, windowManager.Object, peerConnectionStateService);
     }
 
     [Test]
@@ -68,18 +70,19 @@ public class ShellViewModelTests
 
         var mutator = new Mock<IActiveIdentityMutator>();
         var pendingWindowManager = new Mock<IWindowManager>(MockBehavior.Loose);
-        var store = new Mock<Desktop.Wpf.Features.Sessions.State.ISecureChannelsStore>(MockBehavior.Loose);
-        store.SetupGet(s => s.Channels).Returns(new System.Collections.ObjectModel.ReadOnlyObservableCollection<Desktop.Wpf.Features.Sessions.Models.SecureChannelModel>(new System.Collections.ObjectModel.ObservableCollection<Desktop.Wpf.Features.Sessions.Models.SecureChannelModel>()));
-        store.SetupGet(s => s.PendingInbound).Returns(new System.Collections.ObjectModel.ReadOnlyObservableCollection<Desktop.Wpf.Features.Sessions.Models.PendingInvitationModel>(new System.Collections.ObjectModel.ObservableCollection<Desktop.Wpf.Features.Sessions.Models.PendingInvitationModel>()));
+        var scopeFactory = new Mock<IServiceScopeFactory>(MockBehavior.Loose);
+        var state = new PeerConnectionStateService(scopeFactory.Object);
+        var ui = new TestUiDispatcher();
         var selection = new SelectedChannelModel();
         var sessionsVm = new SessionsSidebarViewModel(
             nav.Object,
             new SelfIdentityModel(),
-            new PendingHandshakesMenuViewModel(pendingWindowManager.Object, Mock.Of<IMediator>(), store.Object),
-            store.Object,
-            selection);
+            new PendingHandshakesMenuViewModel(pendingWindowManager.Object, Mock.Of<IMediator>(), state, ui),
+            state,
+            selection,
+            ui);
         var sessionShellVm = new SessionShellViewModel();
-        var paneVm = new SelectedChannelPaneViewModel(selection, store.Object, Mock.Of<ISessionScopeFactory>(), new SelectedSecureChannelStateCache());
+        var paneVm = new SelectedChannelPaneViewModel(selection, state, Mock.Of<ISessionScopeFactory>(), new SelectedPeerConnectionStateCache());
 
         var identityProvider = new Mock<IServiceProvider>();
         identityProvider.Setup(sp => sp.GetService(typeof(IActiveIdentityMutator))).Returns(mutator.Object);
@@ -87,7 +90,7 @@ public class ShellViewModelTests
         identityProvider.Setup(sp => sp.GetService(typeof(SessionShellViewModel))).Returns(sessionShellVm);
         identityProvider.Setup(sp => sp.GetService(typeof(SelectedChannelPaneViewModel))).Returns(paneVm);
 
-        var sut = CreateSut(repo.Object, nav.Object, identityProvider.Object, startupIdentityService.Object);
+        var sut = CreateSut(repo.Object, nav.Object, identityProvider.Object, startupIdentityService.Object, state);
 
         sut.IsLoading.Value.Should().BeTrue();
 
@@ -119,29 +122,32 @@ public class ShellViewModelTests
         nav.SetupGet(n => n.ViewStream).Returns(Observable.Empty<object?>());
 
         var orchestrator = new Mock<IIdentityOrchestrator>();
+        orchestrator
+            .Setup(o => o.ResolveIdentityAsync(It.IsAny<SelfId>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
         var scopedProvider = new Mock<IServiceProvider>();
         scopedProvider
             .Setup(sp => sp.GetService(typeof(IIdentityOrchestrator)))
             .Returns(orchestrator.Object);
-
         var pendingWindowManager = new Mock<IWindowManager>(MockBehavior.Loose);
-        var store = new Mock<Desktop.Wpf.Features.Sessions.State.ISecureChannelsStore>(MockBehavior.Loose);
-        store.SetupGet(s => s.Channels).Returns(new System.Collections.ObjectModel.ReadOnlyObservableCollection<Desktop.Wpf.Features.Sessions.Models.SecureChannelModel>(new System.Collections.ObjectModel.ObservableCollection<Desktop.Wpf.Features.Sessions.Models.SecureChannelModel>()));
-        store.SetupGet(s => s.PendingInbound).Returns(new System.Collections.ObjectModel.ReadOnlyObservableCollection<Desktop.Wpf.Features.Sessions.Models.PendingInvitationModel>(new System.Collections.ObjectModel.ObservableCollection<Desktop.Wpf.Features.Sessions.Models.PendingInvitationModel>()));
+        var scopeFactory = new Mock<IServiceScopeFactory>(MockBehavior.Loose);
+        var state = new PeerConnectionStateService(scopeFactory.Object);
+        var ui = new TestUiDispatcher();
         var selection = new SelectedChannelModel();
         var sessionsVm = new SessionsSidebarViewModel(
             nav.Object,
             new SelfIdentityModel(),
-            new PendingHandshakesMenuViewModel(pendingWindowManager.Object, Mock.Of<IMediator>(), store.Object),
-            store.Object,
-            selection);
+            new PendingHandshakesMenuViewModel(pendingWindowManager.Object, Mock.Of<IMediator>(), state, ui),
+            state,
+            selection,
+            ui);
         var sessionShellVm = new SessionShellViewModel();
-        var paneVm = new SelectedChannelPaneViewModel(selection, store.Object, Mock.Of<ISessionScopeFactory>(), new SelectedSecureChannelStateCache());
+        var paneVm = new SelectedChannelPaneViewModel(selection, state, Mock.Of<ISessionScopeFactory>(), new SelectedPeerConnectionStateCache());
         scopedProvider.Setup(sp => sp.GetService(typeof(SessionsSidebarViewModel))).Returns(sessionsVm);
         scopedProvider.Setup(sp => sp.GetService(typeof(SessionShellViewModel))).Returns(sessionShellVm);
         scopedProvider.Setup(sp => sp.GetService(typeof(SelectedChannelPaneViewModel))).Returns(paneVm);
 
-        var sut = CreateSut(repo.Object, nav.Object, scopedProvider.Object, startupIdentityService.Object);
+        var sut = CreateSut(repo.Object, nav.Object, scopedProvider.Object, startupIdentityService.Object, state);
 
         // Allow async startup to run
         await Task.Delay(50);
@@ -176,18 +182,35 @@ public class ShellViewModelTests
         var sessionScopeFactoryMock = new Mock<ISessionScopeFactory>();
         var pendingSessions = new Mock<IPendingSessionRepository>();
         var pendingWindowManager = new Mock<IWindowManager>(MockBehavior.Loose);
-        var store = new Mock<Desktop.Wpf.Features.Sessions.State.ISecureChannelsStore>(MockBehavior.Loose);
-        store.SetupGet(s => s.Channels).Returns(new System.Collections.ObjectModel.ReadOnlyObservableCollection<Desktop.Wpf.Features.Sessions.Models.SecureChannelModel>(new System.Collections.ObjectModel.ObservableCollection<Desktop.Wpf.Features.Sessions.Models.SecureChannelModel>()));
-        store.SetupGet(s => s.PendingInbound).Returns(new System.Collections.ObjectModel.ReadOnlyObservableCollection<Desktop.Wpf.Features.Sessions.Models.PendingInvitationModel>(new System.Collections.ObjectModel.ObservableCollection<Desktop.Wpf.Features.Sessions.Models.PendingInvitationModel>()));
+        var queries = new Mock<IPeerConnectionQueries>(MockBehavior.Strict);
+        queries
+            .Setup(q => q.LoadAllConnectionsAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<PeerConnectionStateSnapshot>());
+        queries
+            .Setup(q => q.LoadPendingInboundAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<PendingInboundSnapshot>());
+
+        scopedProvider
+            .Setup(sp => sp.GetService(typeof(IPeerConnectionQueries)))
+            .Returns(queries.Object);
+
+        var stateScope = new Mock<IServiceScope>();
+        stateScope.SetupGet(s => s.ServiceProvider).Returns(scopedProvider.Object);
+        var scopeFactory = new Mock<IServiceScopeFactory>(MockBehavior.Strict);
+        scopeFactory.Setup(f => f.CreateScope()).Returns(stateScope.Object);
+
+        var state = new PeerConnectionStateService(scopeFactory.Object);
+        var ui = new TestUiDispatcher();
         var selection = new SelectedChannelModel();
         var sessionsVm = new SessionsSidebarViewModel(
             nav.Object,
             scopedSelf,
-            new PendingHandshakesMenuViewModel(pendingWindowManager.Object, Mock.Of<IMediator>(), store.Object),
-            store.Object,
-            selection);
+            new PendingHandshakesMenuViewModel(pendingWindowManager.Object, Mock.Of<IMediator>(), state, ui),
+            state,
+            selection,
+            ui);
         var sessionShellVm = new SessionShellViewModel();
-        var paneVm = new SelectedChannelPaneViewModel(selection, store.Object, sessionScopeFactoryMock.Object, new SelectedSecureChannelStateCache());
+        var paneVm = new SelectedChannelPaneViewModel(selection, state, sessionScopeFactoryMock.Object, new SelectedPeerConnectionStateCache());
         scopedProvider
             .Setup(sp => sp.GetService(typeof(SessionsSidebarViewModel)))
             .Returns(sessionsVm);
@@ -201,14 +224,14 @@ public class ShellViewModelTests
         var scope = new Mock<IServiceScope>();
         scope.SetupGet(s => s.ServiceProvider).Returns(scopedProvider.Object);
 
-        var scopeFactory = new Mock<IServiceScopeFactory>();
-        scopeFactory.Setup(f => f.CreateScope()).Returns(scope.Object);
+        var scopeFactory2 = new Mock<IServiceScopeFactory>();
+        scopeFactory2.Setup(f => f.CreateScope()).Returns(scope.Object);
 
         var root = new Mock<IServiceProvider>();
         root.Setup(sp => sp.GetService(typeof(IServiceScopeFactory)))
-            .Returns(scopeFactory.Object);
+            .Returns(scopeFactory2.Object);
 
-        var sut = CreateSut(repo.Object, nav.Object, scopedProvider.Object, startupIdentityService.Object);
+        var sut = CreateSut(repo.Object, nav.Object, scopedProvider.Object, startupIdentityService.Object, state);
 
         await Task.Delay(50);
 
@@ -247,18 +270,19 @@ public class ShellViewModelTests
         var scopedSessionFactory = new Mock<ISessionScopeFactory>();
         var pendingSessions = new Mock<IPendingSessionRepository>();
         var pendingWindowManager = new Mock<IWindowManager>(MockBehavior.Loose);
-        var store = new Mock<Desktop.Wpf.Features.Sessions.State.ISecureChannelsStore>(MockBehavior.Loose);
-        store.SetupGet(s => s.Channels).Returns(new System.Collections.ObjectModel.ReadOnlyObservableCollection<Desktop.Wpf.Features.Sessions.Models.SecureChannelModel>(new System.Collections.ObjectModel.ObservableCollection<Desktop.Wpf.Features.Sessions.Models.SecureChannelModel>()));
-        store.SetupGet(s => s.PendingInbound).Returns(new System.Collections.ObjectModel.ReadOnlyObservableCollection<Desktop.Wpf.Features.Sessions.Models.PendingInvitationModel>(new System.Collections.ObjectModel.ObservableCollection<Desktop.Wpf.Features.Sessions.Models.PendingInvitationModel>()));
+        var scopeFactory = new Mock<IServiceScopeFactory>(MockBehavior.Loose);
+        var state = new PeerConnectionStateService(scopeFactory.Object);
+        var ui = new TestUiDispatcher();
         var selection = new SelectedChannelModel();
         var sessionsVm = new SessionsSidebarViewModel(
             nav.Object,
             scopedSelf,
-            new PendingHandshakesMenuViewModel(pendingWindowManager.Object, Mock.Of<IMediator>(), store.Object),
-            store.Object,
-            selection);
+            new PendingHandshakesMenuViewModel(pendingWindowManager.Object, Mock.Of<IMediator>(), state, ui),
+            state,
+            selection,
+            ui);
         var sessionShellVm = new SessionShellViewModel();
-        var paneVm = new SelectedChannelPaneViewModel(selection, store.Object, scopedSessionFactory.Object, new SelectedSecureChannelStateCache());
+        var paneVm = new SelectedChannelPaneViewModel(selection, state, scopedSessionFactory.Object, new SelectedPeerConnectionStateCache());
         scopedProvider
             .Setup(sp => sp.GetService(typeof(SessionsSidebarViewModel)))
             .Returns(sessionsVm);
@@ -272,18 +296,33 @@ public class ShellViewModelTests
         var scope = new Mock<IServiceScope>();
         scope.SetupGet(s => s.ServiceProvider).Returns(scopedProvider.Object);
 
-        var scopeFactory = new Mock<IServiceScopeFactory>();
-        scopeFactory.Setup(f => f.CreateScope()).Returns(scope.Object);
+        var scopeFactory2 = new Mock<IServiceScopeFactory>();
+        scopeFactory2.Setup(f => f.CreateScope()).Returns(scope.Object);
 
         var root = new Mock<IServiceProvider>();
         root.Setup(sp => sp.GetService(typeof(IServiceScopeFactory)))
-            .Returns(scopeFactory.Object);
+            .Returns(scopeFactory2.Object);
 
-        var sut = CreateSut(repo.Object, nav.Object, scopedProvider.Object, startupIdentityService.Object);
+        var sut = CreateSut(repo.Object, nav.Object, scopedProvider.Object, startupIdentityService.Object, state);
 
         await Task.Delay(50);
 
-        nav.Verify(n => n.Navigate(It.Is<object>(o => ReferenceEquals(o, sessionShellVm))), Times.AtLeastOnce);
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(1);
+        while (DateTime.UtcNow < deadline)
+        {
+            try
+            {
+                nav.Verify(n => n.Navigate(It.IsAny<Desktop.Wpf.Features.Sessions.SessionShellViewModel>()), Times.AtLeastOnce);
+                return;
+            }
+            catch
+            {
+                await Task.Delay(10);
+            }
+        }
+
+        nav.Verify(n => n.Navigate(It.IsAny<Desktop.Wpf.Features.Sessions.SessionShellViewModel>()), Times.AtLeastOnce,
+            "Expected navigation to SessionShellViewModel within 1s");
     }
 
     // Host-based sidebar test removed; VM-first composition no longer uses ISidebarHost.

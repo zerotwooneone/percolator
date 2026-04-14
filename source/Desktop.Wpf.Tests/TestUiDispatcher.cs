@@ -8,7 +8,13 @@ namespace Desktop.Wpf.Tests;
 
 internal sealed class TestUiDispatcher : IUiDispatcher
 {
-    public ICollectionEventDispatcher CollectionEventDispatcher { get; } = new SynchronizationContextCollectionEventDispatcher(new SynchronizationContext());
+    public TestUiDispatcher()
+    {
+        var context = SynchronizationContext.Current ?? new SynchronizationContext();
+        CollectionEventDispatcher = new SynchronizationContextCollectionEventDispatcher(context);
+    }
+
+    public ICollectionEventDispatcher CollectionEventDispatcher { get; }
 
     public bool CheckAccess() => true;
 

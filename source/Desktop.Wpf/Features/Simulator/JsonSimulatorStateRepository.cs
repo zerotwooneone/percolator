@@ -180,8 +180,7 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
             await JsonSerializer.SerializeAsync(fs, state, _json, cancellationToken).ConfigureAwait(false);
         }
 
-        File.Copy(tmp, path, overwrite: true);
-        File.Delete(tmp);
+        File.Move(tmp, path, overwrite: true);
     }
 
     private PeerStateSnapshot CreatePeerSnapshot(SimulatedPeerDto dto)

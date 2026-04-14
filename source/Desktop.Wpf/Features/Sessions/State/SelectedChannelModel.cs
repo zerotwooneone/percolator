@@ -5,5 +5,5 @@ namespace Desktop.Wpf.Features.Sessions.State;
 
 public sealed class SelectedChannelModel
 {
-    public ReactiveProperty<SecureChannelKey?> SelectedKey { get; } = new(null);
+    public ReactiveProperty<PeerConnectionKey?> SelectedKey { get; } = new(null);
 }

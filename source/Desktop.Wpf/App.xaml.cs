@@ -27,6 +27,7 @@ using Percolator.Infrastructure.Persistence;
 using Desktop.Wpf.Features.Simulator;
 using Desktop.Wpf.Features.Simulator.Protocol;
 using Percolator.MessageQueue.DependencyInjection;
+using Desktop.Wpf.Features.Sessions.Queries;
 using Desktop.Wpf.Features.Sessions.State;
 using Desktop.Wpf.Shared.Mvvm;
 
@@ -113,7 +114,6 @@ public partial class App : Application
                 // Views
                 services.AddSingleton<MainWindow>();
                 services.AddScoped<Desktop.Wpf.Features.Simulator.HandshakeSimulatorWindow>();
-                services.AddScoped<Desktop.Wpf.Features.Sessions.NewHandshakeDialogWindow>();
                 services.AddScoped<Desktop.Wpf.Features.Sessions.ConnectionManagementDialogWindow>();
 
                 // Navigation
@@ -123,7 +123,6 @@ public partial class App : Application
                 services.AddSingleton<ISessionScopeFactory, SessionScopeFactory>();
                 services.AddScoped<SessionsSidebarViewModel>();
                 services.AddScoped<Desktop.Wpf.Features.Sessions.PendingHandshakesMenuViewModel>();
-                services.AddScoped<Desktop.Wpf.Features.Sessions.NewHandshakeDialogViewModel>();
                 services.AddScoped<Desktop.Wpf.Features.Sessions.ConnectionManagementDialogViewModel>();
                 services.AddScoped<Desktop.Wpf.Features.Sessions.SessionShellViewModel>();
                 services.AddScoped<Desktop.Wpf.Features.Simulator.HandshakeSimulatorHostViewModel>();
@@ -144,15 +143,11 @@ public partial class App : Application
                 services.AddScoped<Desktop.Wpf.Features.Sessions.IMainInvitationOutbox, Desktop.Wpf.Features.Sessions.MainInvitationOutbox>();
                 services.AddScoped<Desktop.Wpf.Features.Sessions.IMainInvitationActions, Desktop.Wpf.Features.Sessions.MainInvitationActions>();
                 services.AddSingleton<Desktop.Wpf.Features.Sessions.IMainInvitationInboxEvents, Desktop.Wpf.Features.Sessions.MainInvitationInboxEvents>();
-                services.AddScoped<Desktop.Wpf.Features.Sessions.SecureChannelsProjection>();
-                services.AddScoped<MediatR.INotificationHandler<Percolator.Application.Network.PendingSessionCreatedNotification>>(sp => sp.GetRequiredService<Desktop.Wpf.Features.Sessions.SecureChannelsProjection>());
-                services.AddScoped<MediatR.INotificationHandler<Percolator.Application.Network.PendingSessionRemovedNotification>>(sp => sp.GetRequiredService<Desktop.Wpf.Features.Sessions.SecureChannelsProjection>());
-                services.AddScoped<MediatR.INotificationHandler<Percolator.Application.Network.SecureSessionCreatedNotification>>(sp => sp.GetRequiredService<Desktop.Wpf.Features.Sessions.SecureChannelsProjection>());
-                services.AddScoped<MediatR.INotificationHandler<Percolator.Application.Network.SentInvitationUpsertedNotification>>(sp => sp.GetRequiredService<Desktop.Wpf.Features.Sessions.SecureChannelsProjection>());
-                services.AddSingleton<SecureChannelsStore>();
-                services.AddSingleton<ISecureChannelsStore>(sp => sp.GetRequiredService<SecureChannelsStore>());
+                services.AddScoped<Desktop.Wpf.Features.Sessions.Queries.IPeerConnectionQueries, Desktop.Wpf.Features.Sessions.Queries.PeerConnectionQueries>();
+                services.AddSingleton<Desktop.Wpf.Features.Sessions.PeerConnectionStateService>();
+                services.AddSingleton<Desktop.Wpf.Features.Sessions.PeerConnectionReloadCoordinator>();
                 services.AddSingleton<SelectedChannelModel>();
-                services.AddSingleton<SelectedSecureChannelStateCache>();
+                services.AddSingleton<SelectedPeerConnectionStateCache>();
                 services.AddScoped<SelectedChannelPaneViewModel>();
                 services.AddScoped<IPendingHandshakeSimulatorService, PendingHandshakeSimulatorService>();
                 services.AddSingleton<Desktop.Wpf.Features.Simulator.ISimulatorStateRepository, Desktop.Wpf.Features.Simulator.JsonSimulatorStateRepository>();
@@ -187,6 +182,7 @@ public partial class App : Application
                 services.AddScoped<IStartupIdentityService, StartupIdentityService>();
                 // Identity repositories (in-memory fakes for desktop)
                 services.AddScoped<Percolator.Identity.IPeerIdentityRepository, Percolator.Infrastructure.Repositories.SqlitePeerIdentityRepository>();
+                services.AddSingleton(TimeProvider.System);
 
                 // Startup views
                 services.AddSingleton<Desktop.Wpf.Features.Shell.NewUserViewModel>();

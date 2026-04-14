@@ -2,18 +2,18 @@ using Desktop.Wpf.Features.Sessions.Models;
 
 namespace Desktop.Wpf.Features.Sessions.State;
 
-public sealed class SelectedSecureChannelStateCache : IDisposable
+public sealed class SelectedPeerConnectionStateCache : IDisposable
 {
     private readonly int _capacity;
-    private readonly Dictionary<SecureChannelKey, SelectedSecureChannelStateModel> _items = new();
-    private readonly LinkedList<SecureChannelKey> _lru = new();
+    private readonly Dictionary<PeerConnectionKey, SelectedPeerConnectionStateModel> _items = new();
+    private readonly LinkedList<PeerConnectionKey> _lru = new();
 
-    public SelectedSecureChannelStateCache(int capacity = 10)
+    public SelectedPeerConnectionStateCache(int capacity = 10)
     {
         _capacity = capacity;
     }
 
-    public SelectedSecureChannelStateModel GetOrCreate(SecureChannelKey key)
+    public SelectedPeerConnectionStateModel GetOrCreate(PeerConnectionKey key)
     {
         if (_items.TryGetValue(key, out var existing))
         {
@@ -21,14 +21,14 @@ public sealed class SelectedSecureChannelStateCache : IDisposable
             return existing;
         }
 
-        var model = new SelectedSecureChannelStateModel(key);
+        var model = new SelectedPeerConnectionStateModel(key);
         _items[key] = model;
         _lru.AddFirst(key);
         EvictIfNeeded();
         return model;
     }
 
-    private void Touch(SecureChannelKey key)
+    private void Touch(PeerConnectionKey key)
     {
         var node = _lru.Find(key);
         if (node is null) return;

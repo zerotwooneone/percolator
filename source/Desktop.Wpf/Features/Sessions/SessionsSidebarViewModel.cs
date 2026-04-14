@@ -1,57 +1,79 @@
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
-using System.Collections.Specialized;
-using R3;
-using Desktop.Wpf.Shared.Navigation;
-using Desktop.Wpf.Features.Self;
-using Desktop.Wpf.Shared.Mvvm;
-using Desktop.Wpf.Features.Sessions.State;
+using System.Linq;
 using Desktop.Wpf.Features.Sessions.Models;
+using Desktop.Wpf.Features.Self;
+using Desktop.Wpf.Features.Sessions.State;
+using Desktop.Wpf.Shared.Mvvm;
+using Desktop.Wpf.Shared.Navigation;
+using ObservableCollections;
+using R3;
+using System.Collections.Specialized;
 
 namespace Desktop.Wpf.Features.Sessions;
 
 public sealed class SessionsSidebarViewModel : ViewModelBase
 {
     public BindableReactiveProperty<string> SearchText { get; }
-    public ReadOnlyObservableCollection<SecureChannelListItemViewModel> Items { get; }
+    public INotifyCollectionChangedSynchronizedViewList<PeerConnectionListItemViewModel> Items { get; }
     public BindableReactiveProperty<string?> SelectedSessionId { get; }
     public SelfIdentityModel Self { get; }
     public BindableReactiveProperty<bool> IsLoading { get; }
     public PendingHandshakesMenuViewModel PendingMenu { get; }
 
-    private readonly ObservableCollection<SecureChannelListItemViewModel> _items = new();
-
-    private readonly ISecureChannelsStore _store;
+    private readonly ISynchronizedView<PeerConnectionModel, PeerConnectionListItemViewModel> _connectionsView;
+    private readonly PeerConnectionStateService _stateService;
     private readonly SelectedChannelModel _selection;
+    private readonly DisposableBag _bag;
     private ISessionConductor? _conductor;
 
-    public SessionsSidebarViewModel(INavigationService navigation,
+    public SessionsSidebarViewModel(
+        INavigationService navigation,
         SelfIdentityModel self,
-                                   PendingHandshakesMenuViewModel pendingMenu,
-        ISecureChannelsStore store,
-        SelectedChannelModel selection)
+        PendingHandshakesMenuViewModel pendingMenu,
+        PeerConnectionStateService stateService,
+        SelectedChannelModel selection,
+        IUiDispatcher ui)
     {
         Self = self;
-        _store = store;
+        _stateService = stateService;
         _selection = selection;
         SearchText = new BindableReactiveProperty<string>("");
         SelectedSessionId = new BindableReactiveProperty<string?>(null);
         IsLoading = new BindableReactiveProperty<bool>(false);
         PendingMenu = pendingMenu;
+        _bag = new DisposableBag();
 
-        RebuildFromStore();
-        ((INotifyCollectionChanged)_store.Channels).CollectionChanged += OnChannelsChanged;
+        // 1. Create the view and track it
+        _connectionsView = _stateService.Connections
+            .CreateView(model => new PeerConnectionListItemViewModel(model))
+            .AddTo(ref _bag);
 
-        var filtered = SearchText
-            .Select(text => text?.Trim() ?? "")
-            .DistinctUntilChanged()
-            .Select(text => ApplyFilter(text))
-            .ObserveOnCurrentSynchronizationContext();
+        // 2. Dispose child VMs when removed from the domain
+        _connectionsView.ObserveRemove().Subscribe(evt => evt.Value.View.Dispose()).AddTo(ref _bag);
 
-        filtered.Subscribe(list =>
+        // 3. Attach the dynamic filter logic
+        void AttachFilter()
         {
-            _items.Clear();
-            foreach (var i in list) _items.Add(i);
-        });
+            _connectionsView.AttachFilter((model, vm) => 
+            {
+                var term = SearchText.Value?.Trim() ?? "";
+                if (string.IsNullOrEmpty(term)) return true;
+                return vm.DisplayName.CurrentValue?.Contains(term, StringComparison.OrdinalIgnoreCase) == true;
+            });
+        }
+
+        AttachFilter();
+
+        // 4. Force the view to re-evaluate when search text changes
+        SearchText.Subscribe(_ => 
+        {
+            _connectionsView.ResetFilter();
+            AttachFilter();
+        }).AddTo(ref _bag);
+
+        // 5. Expose directly to WPF via the UI Dispatcher
+        Items = _connectionsView.ToNotifyCollectionChanged(ui.CollectionEventDispatcher);
 
         // Selection is shared state. Sidebar selection writes through to SelectedChannelModel.
         SelectedSessionId
@@ -59,7 +81,7 @@ public sealed class SessionsSidebarViewModel : ViewModelBase
             .Subscribe(id =>
             {
                 _selection.SelectedKey.Value = TryParseKey(id);
-            });
+            }).AddTo(ref _bag);
 
         // And shared selection updates the ListBox selection.
         _selection.SelectedKey
@@ -69,45 +91,19 @@ public sealed class SessionsSidebarViewModel : ViewModelBase
                 var next = key is null ? null : key.Value.Value.ToString("N");
                 if (SelectedSessionId.Value != next)
                     SelectedSessionId.Value = next;
-            });
-
-        Items = new ReadOnlyObservableCollection<SecureChannelListItemViewModel>(_items);
+            }).AddTo(ref _bag);
     }
 
-    private static SecureChannelKey? TryParseKey(string? id)
+    private static PeerConnectionKey? TryParseKey(string? id)
     {
         if (string.IsNullOrWhiteSpace(id)) return null;
         if (!Guid.TryParse(id, out var guid)) return null;
-        return SecureChannelKey.FromSessionId(guid);
+        return PeerConnectionKey.FromSessionId(guid);
     }
-
-    private SecureChannelListItemViewModel[] ApplyFilter(string text)
-    {
-        var snapshot = _items.ToArray();
-        if (string.IsNullOrWhiteSpace(text)) return snapshot;
-        text = text.ToLowerInvariant();
-        return snapshot.Where(x => x.DisplayName.Value.ToLowerInvariant().Contains(text) || (x.LastSnippet.Value ?? "").ToLowerInvariant().Contains(text)).ToArray();
-    }
-
-    private void RebuildFromStore()
-    {
-        var list = _store.Channels
-            .Select(m => new SecureChannelListItemViewModel(m))
-            .ToArray();
-
-        _items.Clear();
-        foreach (var it in list)
-        {
-            _items.Add(it);
-        }
-    }
-
-    private void OnChannelsChanged(object? sender, NotifyCollectionChangedEventArgs e)
-        => RebuildFromStore();
 
     protected override void DisposeCore()
     {
-        ((INotifyCollectionChanged)_store.Channels).CollectionChanged -= OnChannelsChanged;
+        _bag.Dispose();
         Disposable.Dispose(SearchText, SelectedSessionId);
     }
 

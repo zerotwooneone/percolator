@@ -5,9 +5,6 @@
     <x:Type x:Key="{x:Type sim:HandshakeSimulatorHostViewModel}"
             TypeName="sim:HandshakeSimulatorWindow" />
 
-    <x:Type x:Key="{x:Type sessions:NewHandshakeDialogViewModel}"
-            TypeName="sessions:NewHandshakeDialogWindow" />
-
     <x:Type x:Key="{x:Type sessions:ConnectionManagementDialogViewModel}"
             TypeName="sessions:ConnectionManagementDialogWindow" />
 </ResourceDictionary>

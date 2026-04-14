@@ -23,6 +23,7 @@ public sealed class ShellViewModel : ViewModelBase
     private IServiceScope? _identityScope;
     private readonly IIdentityScopeAccessor _identityScopeAccessor;
     private readonly IWindowManager _windowManager;
+    private readonly Desktop.Wpf.Features.Sessions.PeerConnectionStateService _peerConnectionStateService;
 
     public ICommand OpenHandshakeSimulatorCommand { get; }
 
@@ -31,7 +32,8 @@ public sealed class ShellViewModel : ViewModelBase
                           IStartupIdentityService startupIdentity,
                           SelfIdentityModel self,
                           IIdentityScopeAccessor identityScopeAccessor,
-                          IWindowManager windowManager)
+                          IWindowManager windowManager,
+                          Desktop.Wpf.Features.Sessions.PeerConnectionStateService peerConnectionStateService)
     {
         _navigation = navigation;
         _repo = repo;
@@ -39,6 +41,7 @@ public sealed class ShellViewModel : ViewModelBase
         _self = self;
         _identityScopeAccessor = identityScopeAccessor;
         _windowManager = windowManager;
+        _peerConnectionStateService = peerConnectionStateService;
 
         if (_identityScopeAccessor.Current is null)
         {
@@ -94,10 +97,12 @@ public sealed class ShellViewModel : ViewModelBase
             var orchestrator = _identityScopeAccessor.Current.GetRequiredService<IIdentityOrchestrator>();
             await orchestrator.ResolveIdentityAsync(domainIdentity.Id, CancellationToken.None);
 
-            // Ensure the secure channels projection is instantiated and performs an initial load.
-            var channelsProjection = _identityScopeAccessor.Current.GetService<Desktop.Wpf.Features.Sessions.SecureChannelsProjection>();
-            channelsProjection?.RequestReload();
-            
+            // Initialize the peer connection state service with the self identity ID
+            if (int.TryParse(domainIdentity.Id.ToString(), out var selfIdentityId))
+            {
+                await _peerConnectionStateService.InitializeAsync(selfIdentityId, CancellationToken.None);
+            }
+
             // Build the SessionShell from the identity-scoped provider
             var sidebarVm = _identityScopeAccessor.Current.GetRequiredService<SessionsSidebarViewModel>();
             var sessionShell = _identityScopeAccessor.Current.GetRequiredService<Desktop.Wpf.Features.Sessions.SessionShellViewModel>();

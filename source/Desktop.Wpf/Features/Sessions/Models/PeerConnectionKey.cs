@@ -7,15 +7,15 @@ public enum SecureChannelKeyType
     PendingSession
 }
 
-public readonly record struct SecureChannelKey(SecureChannelKeyType Type, Guid Value)
+public readonly record struct PeerConnectionKey(SecureChannelKeyType Type, Guid Value)
 {
-    public static SecureChannelKey FromSessionId(Guid sessionId)
+    public static PeerConnectionKey FromSessionId(Guid sessionId)
         => new(SecureChannelKeyType.SecureSession, sessionId);
 
-    public static SecureChannelKey FromPendingCorrelationId(Guid correlationId)
+    public static PeerConnectionKey FromPendingCorrelationId(Guid correlationId)
         => new(SecureChannelKeyType.PendingCorrelation, correlationId);
 
-    public static SecureChannelKey FromPendingSessionId(Guid pendingSessionId)
+    public static PeerConnectionKey FromPendingSessionId(Guid pendingSessionId)
         => new(SecureChannelKeyType.PendingSession, pendingSessionId);
 
     public override string ToString()

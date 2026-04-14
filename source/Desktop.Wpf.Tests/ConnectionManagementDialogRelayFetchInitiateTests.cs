@@ -4,6 +4,8 @@ using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
 using Desktop.Wpf.Features.Sessions;
+using Desktop.Wpf.Features.Sessions.Commands;
+using Desktop.Wpf.Features.Sessions.Queries;
 using FluentAssertions;
 using Google.Protobuf;
 using Moq;
@@ -17,6 +19,7 @@ using Percolator.Cryptography;
 using Percolator.Identity;
 using Percolator.Identity.Model;
 using Percolator.Network;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Desktop.Wpf.Tests;
 
@@ -33,7 +36,6 @@ public sealed class ConnectionManagementDialogRelayFetchInitiateTests
         inbox.Setup(x => x.GetOpenAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(Array.Empty<PendingInvitationDto>());
 
-        var actions = new Mock<IMainInvitationActions>(MockBehavior.Loose);
         var inboxEvents = new Mock<IMainInvitationInboxEvents>(MockBehavior.Loose);
         inboxEvents.SetupGet(x => x.Changed).Returns(new R3.Subject<R3.Unit>());
 
@@ -61,7 +63,8 @@ public sealed class ConnectionManagementDialogRelayFetchInitiateTests
 
         var peerIdentities = new Mock<Percolator.Identity.IPeerIdentityRepository>(MockBehavior.Loose);
         var establish = new Mock<IEstablishDirectSessionService>(MockBehavior.Loose);
-        var store = new Desktop.Wpf.Features.Sessions.State.SecureChannelsStore();
+        var state = new PeerConnectionStateService(Mock.Of<IServiceScopeFactory>(MockBehavior.Loose));
+        var ui = new TestUiDispatcher();
 
         var sessionCrypto = new Mock<ISessionCrypto>(MockBehavior.Loose);
         sessionCrypto.Setup(x => x.VerifySignature(It.IsAny<RatchetIdentityKey>(), It.IsAny<PreKey>(), It.IsAny<Percolator.Cryptography.Signature>()))
@@ -75,8 +78,6 @@ public sealed class ConnectionManagementDialogRelayFetchInitiateTests
         var clock = new Mock<IClock>(MockBehavior.Loose);
         clock.SetupGet(x => x.UtcNow).Returns(DateTimeOffset.UtcNow);
 
-        var mediator = new Mock<MediatR.IMediator>(MockBehavior.Loose);
-
         byte[] remoteIdentitySpki;
         using (var remoteEcdsa = ECDsa.Create(ECCurve.NamedCurves.nistP256))
         {
@@ -86,122 +87,34 @@ public sealed class ConnectionManagementDialogRelayFetchInitiateTests
         var targetPkh = SHA256.HashData(remoteIdentitySpki);
         var targetPkhHex = Convert.ToHexString(targetPkh);
 
-        var bundleResp = new InternalEnvelope
-        {
-            GetPreKeyBundleResponse = new GetPreKeyBundleResponse
-            {
-                Version = 1,
-                PreKeyBundle = new GetPreKeyBundleResponse.Types.PreKeyBundle
-                {
-                    Version = 1,
-                    IdentityKey = ByteString.CopyFrom(remoteIdentitySpki),
-                    SignedPreKeyId = ByteString.CopyFrom(Guid.NewGuid().ToByteArray()),
-                    SignedPreKey = ByteString.CopyFrom(new byte[] { 1, 2, 3 }),
-                    PreKeySignature = ByteString.CopyFrom(new byte[] { 4, 5, 6 })
-                }
-            }
-        };
-
-        secureMessaging.Setup(x => x.DecryptInboundAsync(
-                It.IsAny<int>(),
-                It.IsAny<SessionRatchetMessage>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync((new Percolator.Cryptography.SessionId(Guid.NewGuid()), new Plaintext(bundleResp.ToByteArray())));
-
-        var encryptCall = 0;
-        byte[]? enqueuePlaintextBytes = null;
-        secureMessaging.Setup(x => x.EncryptAsync(
-                It.IsAny<Percolator.Cryptography.SessionId>(),
-                It.IsAny<Plaintext>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Percolator.Cryptography.SessionId _, Plaintext pt, CancellationToken __) =>
-            {
-                encryptCall++;
-                if (encryptCall == 2)
-                {
-                    enqueuePlaintextBytes = pt.Value;
-                }
-                return new SessionRatchetMessage(new byte[] { (byte)encryptCall });
-            });
-
-        var transportCall = 0;
-        transport.Setup(x => x.SendMessageAsync(
-                It.IsAny<Percolator.Identity.PeerId>(),
-                It.IsAny<DirectSessionId>(),
-                It.IsAny<SessionRatchetMessage>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(() =>
-            {
-                transportCall++;
-                if (transportCall == 1)
-                {
-                    return new DeliverOpaqueMessageResponse
-                    {
-                        Version = 1,
-                        ResponsePayload = new DeliverOpaqueMessageResponse.Types.Payload
-                        {
-                            Version = 1,
-                            ResponsePayload = ByteString.CopyFrom(new byte[] { 9, 9, 9 })
-                        }
-                    };
-                }
-                return new DeliverOpaqueMessageResponse { Version = 1 };
-            });
+        var mediator = new Mock<MediatR.IMediator>(MockBehavior.Loose);
+        mediator.Setup(x => x.Send(It.IsAny<GetRelayHostOptionsQuery>(), default))
+            .ReturnsAsync(new GetRelayHostOptionsResult(Array.Empty<RelayHostOptionDto>()));
+        mediator.Setup(x => x.Send(It.IsAny<ConnectViaNetworkCommand>(), default))
+            .ReturnsAsync(new ConnectViaNetworkResult.Success());
 
         var sut = new ConnectionManagementDialogViewModel(
             inbox.Object,
-            actions.Object,
             inboxEvents.Object,
-            reverseSignalInvites.Object,
-            grpcSessions.Object,
-            transport.Object,
-            secureMessaging.Object,
-            directSessions.Object,
             active,
-            peerIdentities.Object,
-            establish.Object,
-            store,
-            sessionCrypto.Object,
-            preHandshake.Object,
-            sentInvitations.Object,
-            clock.Object,
+            state,
+            ui,
             mediator.Object);
 
         sut.SelectedRouteMode.Value = new RouteModeOption("relay", "Via Relay Host");
         sut.SelectedRelayHost.Value = new RelayHostOption(relayHostId, "relay");
         sut.TargetPkhText.Value = targetPkhHex;
 
+        // Act
         sut.SearchAndConnectCommand.Execute(null);
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-        while (!cts.IsCancellationRequested)
-        {
-            if (transport.Invocations.Count >= 2 && enqueuePlaintextBytes is not null) break;
-            await Task.Delay(20, cts.Token);
-        }
-
-        transport.Verify(x => x.SendMessageAsync(
-                It.Is<Percolator.Identity.PeerId>(p => p.Value == relayHostId),
-                It.Is<DirectSessionId>(sid => sid.Value == directSessionId.Value),
-                It.IsAny<SessionRatchetMessage>(),
-                It.IsAny<CancellationToken>()),
-            Times.Exactly(2));
-
-        enqueuePlaintextBytes.Should().NotBeNull();
-        var parsed = InternalEnvelope.Parser.ParseFrom(enqueuePlaintextBytes!);
-        parsed.ApplicationPayloadCase.Should().Be(InternalEnvelope.ApplicationPayloadOneofCase.MessageQueueEnvelope);
-        parsed.MessageQueueEnvelope.Should().NotBeNull();
-        parsed.MessageQueueEnvelope.MessageCase.Should().Be(MessageQueueEnvelope.MessageOneofCase.EnqueueOpaqueMessageRequest);
-
-        var enqueue = parsed.MessageQueueEnvelope.EnqueueOpaqueMessageRequest;
-        enqueue.RecipientPublicKeyHash.ToByteArray().Should().Equal(targetPkh);
-        enqueue.MessageBlob.Should().NotBeNull();
-        enqueue.MessageBlob.Length.Should().BeGreaterThan(0);
-
-        var hello = HandshakeInitiatorHello.Parser.ParseFrom(enqueue.MessageBlob);
-        hello.Version.Should().Be(1);
-
-        preHandshake.Verify(x => x.SaveAsync(It.IsAny<PreHandshakeRecord>(), It.IsAny<CancellationToken>()), Times.Once);
-        sentInvitations.Verify(x => x.UpsertAsync(It.IsAny<SentInvitation>(), It.IsAny<CancellationToken>()), Times.Once);
+        // Assert - Verify MediatR command was sent with correct parameters (black box testing)
+        mediator.Verify(x => x.Send(
+            It.Is<ConnectViaNetworkCommand>(c =>
+                c.RouteMode == "relay" &&
+                c.DirectEndpoint == null &&
+                c.TargetPkhText == targetPkhHex &&
+                c.RelayHostPeerId == relayHostId),
+            default), Times.Once);
     }
 }
