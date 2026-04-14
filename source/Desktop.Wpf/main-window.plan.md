@@ -87,6 +87,519 @@ We will shift terminology from "Secure Channel" to **Peer Connection**.
 - `PeerConnectionStateService` acts as a true R3 Singleton orchestrator managing in-memory collections without DB concurrency crashes.
 - All dependencies are properly scoped and thoroughly unit-tested. 
 
+### Chunk B — Refactor `PeerConnectionStateService` to Pure Clean CQRS
+
+**Outcome:**
+The UI state service becomes a thread-safe, pure state container. Background EF Core queries are executed safely within MediatR's built-in dependency injection scopes, eliminating `DbContext` concurrency crashes.
+
+**Context / Key Constraints:**
+* `IPeerConnectionQueries` relies on EF Core, which is Scoped and NOT thread-safe.
+* `PeerConnectionStateService` is a Singleton. Injecting `IServiceScopeFactory` to handle concurrent MediatR events manually causes race conditions and violates the Single Responsibility Principle.
+* **Bug Fix:** The previous debounce implementation accidentally dropped the `selfIdentityId` during reloads, causing new connections to never load. We must cache the active identity ID.
+
+Please execute the following exactly as written.
+
+#### B.1 — Strip `PeerConnectionStateService` down to a Pure State Container
+**File:** `Desktop.Wpf/Features/Sessions/PeerConnectionStateService.cs`
+
+**Changes Required:**
+1. **Remove Interfaces:** Remove all `INotificationHandler<...>` interfaces from the class declaration.
+2. **Remove Infrastructure:** Delete the `_scopeFactory`, `_timeProvider`, `_reloadTrigger`, and `_reloadGate` fields. Remove the debounce pipeline from the constructor.
+3. **Cache Identity:** Add a public property: `public int? ActiveSelfIdentityId { get; private set; }`.
+4. **Update Initialization:** Rewrite `InitializeAsync` to set the identity and perform the initial load using a one-off scope:
+```csharp
+public async Task InitializeAsync(int selfIdentityId, CancellationToken cancellationToken = default)
+{
+    ActiveSelfIdentityId = selfIdentityId;
+    using var scope = _scopeFactory.CreateScope();
+    var queries = scope.ServiceProvider.GetRequiredService<IPeerConnectionQueries>();
+
+    var connectionSnapshots = await queries.LoadAllConnectionsAsync(selfIdentityId, cancellationToken).ConfigureAwait(false);
+    UpdateConnections(connectionSnapshots);
+
+    var pendingSnapshots = await queries.LoadPendingInboundAsync(cancellationToken).ConfigureAwait(false);
+    UpdatePendingInbound(pendingSnapshots);
+}
+```
+*(Note: Keep `IServiceScopeFactory` injected in the constructor ONLY for this single `InitializeAsync` method).*
+5. **Expose Mutators:** Change the access modifier of `UpdateConnections` and `UpdatePendingInbound` from `private` to `public`. Remove the old `ReloadAsync` and `Handle(...)` methods entirely.
+
+#### B.2 — Extract MediatR Handlers to a Scoped Class
+**File:** Create a new file `Desktop.Wpf/Features/Sessions/Handlers/PeerConnectionStateUpdateHandlers.cs`
+
+**Implementation details:**
+Create a single class that implements the 4 notification handlers. Because this class is resolved by MediatR, it is safely scoped.
+
+```csharp
+using Desktop.Wpf.Features.Sessions.Queries;
+using MediatR;
+using Percolator.Application.Network;
+using Percolator.Application.Network.Handshake;
+
+namespace Desktop.Wpf.Features.Sessions.Handlers;
+
+public sealed class PeerConnectionStateUpdateHandlers :
+    INotificationHandler<SecureSessionCreatedNotification>,
+    INotificationHandler<PendingSessionCreatedNotification>,
+    INotificationHandler<PendingSessionRemovedNotification>,
+    INotificationHandler<SentInvitationUpsertedNotification>
+{
+    private readonly IPeerConnectionQueries _queries;
+    private readonly PeerConnectionStateService _state;
+
+    public PeerConnectionStateUpdateHandlers(
+        IPeerConnectionQueries queries,
+        PeerConnectionStateService state)
+    {
+        _queries = queries;
+        _state = state;
+    }
+
+    public Task Handle(SecureSessionCreatedNotification notification, CancellationToken cancellationToken) => ReloadStateAsync(cancellationToken);
+    public Task Handle(PendingSessionCreatedNotification notification, CancellationToken cancellationToken) => ReloadStateAsync(cancellationToken);
+    public Task Handle(PendingSessionRemovedNotification notification, CancellationToken cancellationToken) => ReloadStateAsync(cancellationToken);
+    public Task Handle(SentInvitationUpsertedNotification notification, CancellationToken cancellationToken) => ReloadStateAsync(cancellationToken);
+
+    private async Task ReloadStateAsync(CancellationToken cancellationToken)
+    {
+        // 1. Safely query EF Core using the scoped queries instance
+        if (_state.ActiveSelfIdentityId.HasValue)
+        {
+            var connections = await _queries.LoadAllConnectionsAsync(_state.ActiveSelfIdentityId.Value, cancellationToken).ConfigureAwait(false);
+            _state.UpdateConnections(connections);
+        }
+
+        var pending = await _queries.LoadPendingInboundAsync(cancellationToken).ConfigureAwait(false);
+        _state.UpdatePendingInbound(pending);
+    }
+}
+```
+
+#### Definition of Done:
+1. `PeerConnectionStateService` no longer implements `INotificationHandler`.
+2. `PeerConnectionStateService` no longer contains a `Subject` or `Debounce` pipeline.
+3. The newly created `PeerConnectionStateUpdateHandlers` compiles cleanly and uses native dependency injection for the query interface.
+4. When a `SecureSessionCreatedNotification` fires, the `ActiveSelfIdentityId` is successfully utilized to fetch and update the connections list.
+
+### Chunk C — Fix Concurrency, Disposal Glitches, and Restore Debounce Shield
+
+**Outcome:**
+1. Fixes thread-safety race conditions by locking the pure Domain mutations in `PeerConnectionStateService`.
+2. Fixes WPF UI glitches/R3 ObjectDisposedExceptions by correcting the remove-then-dispose order.
+3. Fixes the "Thundering Herd" N+1 query regression by introducing a `PeerConnectionReloadCoordinator` to debounce MediatR events before hitting EF Core.
+
+Please execute the following three steps exactly as written:
+
+#### C.1 — Fix Thread-Safety and Disposal Order
+**File:** `Desktop.Wpf/Features/Sessions/PeerConnectionStateService.cs`
+
+**Changes Required:**
+1. Add a locking primitive to the fields: `private readonly object _stateGate = new();`
+2. Update `UpdateConnections` to lock the mutation and fix the disposal order:
+```csharp
+public void UpdateConnections(IReadOnlyList<PeerConnectionStateSnapshot> snapshots)
+{
+    lock (_stateGate)
+    {
+        var existingById = _connections.ToDictionary(c => c.ConnectionId);
+
+        var toRemove = existingById.Keys.Except(snapshots.Select(s => s.ConnectionId)).ToList();
+        foreach (var id in toRemove)
+        {
+            if (existingById.TryGetValue(id, out var model))
+            {
+                // FIX: Remove from the collection BEFORE disposing to prevent UI glitching
+                _connections.Remove(model);
+                model.Dispose();
+            }
+        }
+
+        foreach (var snapshot in snapshots)
+        {
+            if (existingById.TryGetValue(snapshot.ConnectionId, out var existing))
+            {
+                existing.UpdateFromSnapshot(snapshot);
+            }
+            else
+            {
+                var model = new PeerConnectionModel(
+                    snapshot.ConnectionId,
+                    snapshot.PeerId,
+                    snapshot.DisplayName,
+                    snapshot.Initials,
+                    snapshot.Status,
+                    snapshot.LastActivityUtc);
+                _connections.Add(model);
+            }
+        }
+    }
+}
+```
+3. Apply the exact same lock `lock (_stateGate)` and disposal order fix (`_pendingInbound.Remove(model); model.Dispose();`) to `UpdatePendingInbound`.
+
+#### C.2 — Extract the Debounce Shield (The Coordinator)
+**File:** Create a new file `Desktop.Wpf/Features/Sessions/PeerConnectionReloadCoordinator.cs`
+
+**Context:** We must debounce the EF Core queries to prevent CPU spikes during mass network events, but we cannot pollute the State Service. This Coordinator handles the timing and scoped DI queries.
+
+```csharp
+using Desktop.Wpf.Features.Sessions.Queries;
+using Microsoft.Extensions.DependencyInjection;
+using R3;
+
+namespace Desktop.Wpf.Features.Sessions;
+
+public sealed class PeerConnectionReloadCoordinator : IDisposable
+{
+    private readonly Subject<Unit> _reloadTrigger = new();
+    private readonly IServiceScopeFactory _scopeFactory;
+    private readonly PeerConnectionStateService _state;
+    private DisposableBag _bag;
+
+    public PeerConnectionReloadCoordinator(
+        IServiceScopeFactory scopeFactory, 
+        PeerConnectionStateService state)
+    {
+        _scopeFactory = scopeFactory;
+        _state = state;
+
+        _reloadTrigger
+            .Debounce(TimeSpan.FromMilliseconds(250))
+            .SubscribeAwait(async (_, ct) => await ReloadCoreAsync(ct).ConfigureAwait(false), AwaitOperation.Drop)
+            .AddTo(ref _bag);
+    }
+
+    public void TriggerReload() => _reloadTrigger.OnNext(Unit.Default);
+
+    private async Task ReloadCoreAsync(CancellationToken cancellationToken)
+    {
+        if (!_state.ActiveSelfIdentityId.HasValue) return;
+
+        using var scope = _scopeFactory.CreateScope();
+        var queries = scope.ServiceProvider.GetRequiredService<IPeerConnectionQueries>();
+
+        var connections = await queries.LoadAllConnectionsAsync(_state.ActiveSelfIdentityId.Value, cancellationToken).ConfigureAwait(false);
+        _state.UpdateConnections(connections);
+
+        var pending = await queries.LoadPendingInboundAsync(cancellationToken).ConfigureAwait(false);
+        _state.UpdatePendingInbound(pending);
+    }
+
+    public void Dispose()
+    {
+        _bag.Dispose();
+        _reloadTrigger.Dispose();
+    }
+}
+```
+
+#### C.3 — Update Handlers to use the Coordinator
+**File:** `Desktop.Wpf/Features/Sessions/Handlers/PeerConnectionStateUpdateHandlers.cs`
+
+**Changes Required:**
+1. Replace the injected `IPeerConnectionQueries` and `PeerConnectionStateService` with the new `PeerConnectionReloadCoordinator`.
+2. Remove the `ReloadStateAsync` method entirely.
+3. Update all four `Handle` methods to simply call `_coordinator.TriggerReload()`.
+
+```csharp
+public sealed class PeerConnectionStateUpdateHandlers :
+    INotificationHandler<SecureSessionCreatedNotification>,
+    INotificationHandler<PendingSessionCreatedNotification>,
+    INotificationHandler<PendingSessionRemovedNotification>,
+    INotificationHandler<SentInvitationUpsertedNotification>
+{
+    private readonly PeerConnectionReloadCoordinator _coordinator;
+
+    public PeerConnectionStateUpdateHandlers(PeerConnectionReloadCoordinator coordinator)
+    {
+        _coordinator = coordinator;
+    }
+
+    public Task Handle(SecureSessionCreatedNotification notification, CancellationToken cancellationToken)
+    {
+        _coordinator.TriggerReload();
+        return Task.CompletedTask;
+    }
+    // Repeat for the other 3 handlers...
+}
+```
+
+#### Definition of Done:
+1. `PeerConnectionStateService` safely locks mutations with `_stateGate` and removes items from observables *before* calling `.Dispose()`.
+2. `PeerConnectionReloadCoordinator` successfully debounces MediatR events using R3.
+3. All EF Core queries are safely executed inside the Coordinator's short-lived `CreateScope()`.
+
+## Chunk D
+### Refactor Request: Enforce Pure Reactive MVVM Guidelines
+
+We need to clean up several ViewModels to adhere strictly to our R3 and WPF MVVM guidelines. Specifically, we must eliminate memory leaks caused by untracked `ISynchronizedView`s, remove imperative Dispatcher hacks, and use native reactive filtering.
+
+Please execute the following steps exactly as written.
+
+#### Step 1: Fix View Memory Leaks & Disposal Rules
+Any time `CreateView` is called, the resulting `ISynchronizedView` MUST be stored in a private readonly field, added to the `_bag`, and have a cleanup subscription for child VMs.
+
+**File 1: `Desktop.Wpf/Features/Sessions/PendingHandshakesMenuViewModel.cs`**
+* **Fix:** Add a private field: `private readonly ISynchronizedView<PeerPendingInvitationModel, PendingHandshakeItem> _pendingView;`
+* **Fix:** In the constructor, split the initialization:
+    ```csharp
+    _pendingView = _stateService.PendingInbound
+        .CreateView(model => new PendingHandshakeItem { ... })
+        .AddTo(ref _bag);
+    
+    PendingHandshakes = _pendingView.ToNotifyCollectionChanged(ui.CollectionEventDispatcher);
+    ```
+
+**File 2: `Desktop.Wpf/Features/Sessions/ConnectionManagementDialogViewModel.cs`**
+* **Fix:** Ensure `_connectionsView` is stored as an `ISynchronizedView` (not just the `NotifyCollectionChangedSynchronizedViewList`) and appended with `.AddTo(ref _bag)`.
+
+#### Step 2: Replace "Shadow Collections" with Native Reactive Filtering
+**File 3: `Desktop.Wpf/Features/Sessions/SessionsSidebarViewModel.cs`**
+This file currently uses a hacky shadow `ObservableCollection` and listens to `INotifyCollectionChanged` to filter items. We must use R3 and Cysharp's native filtering.
+
+* **Delete:** `_items`, `OnConnectionsCollectionChanged`, and `ApplyFilter`.
+* **Change:** Change `Items` from `ReadOnlyObservableCollection` to `NotifyCollectionChangedSynchronizedViewList<PeerConnectionListItemViewModel>`.
+* **Rewrite Constructor Initialization:** Use `AttachFilter` and `RefreshFilter` instead of shadow lists:
+    ```csharp
+    // 1. Create the view and track it
+    var view = _stateService.Connections
+        .CreateView(model => new PeerConnectionListItemViewModel(model))
+        .AddTo(ref _bag);
+
+    // 2. Dispose child VMs when removed from the domain
+    view.ObserveRemove().Subscribe(evt => evt.Value.View.Dispose()).AddTo(ref _bag);
+
+    // 3. Attach the dynamic filter logic
+    view.AttachFilter((model, vm) => 
+    {
+        var term = SearchText.Value?.Trim() ?? "";
+        if (string.IsNullOrEmpty(term)) return true;
+        // Apply your search logic here (e.g., model.DisplayName.Contains)
+        return model.DisplayName.CurrentValue?.Contains(term, StringComparison.OrdinalIgnoreCase) == true;
+    });
+
+    // 4. Force the view to re-evaluate the filter when the search text changes
+    SearchText.Subscribe(_ => view.RefreshFilter()).AddTo(ref _bag);
+
+    // 5. Expose to WPF
+    Items = view.ToNotifyCollectionChanged(ui.CollectionEventDispatcher);
+    ```
+
+#### Step 3: Eliminate Manual Dispatcher Hacks
+**File 4: `Desktop.Wpf/Features/Sessions/ConnectionManagementDialogViewModel.cs`**
+ViewModels should rely on the SynchronizationContext naturally provided by `AsyncRelayCommand` executions, rather than manually invoking the UI Dispatcher.
+
+* **Delete:** The `InvokeOnUiAsync` helper method entirely.
+* **Fix:** Remove all `Application.Current?.Dispatcher.InvokeAsync` blocks.
+* **Fix:** In methods triggered by the UI (like `ExecuteImportTokenAsync`, `ExecuteNetworkSearchAsync`, etc.), simply assign values directly to the `BindableReactiveProperty` fields (e.g., `PhaseText.Value = "Decoding...";`).
+* **Note on `.ConfigureAwait(false)`:** Ensure that inside your ICommand/AsyncRelayCommand execution methods, you do **not** use `.ConfigureAwait(false)` if you intend to update UI properties immediately afterward. Omitting it allows the `await` to seamlessly resume on the WPF UI thread.
+
+#### Definition of Done:
+1. No `CreateView()` calls are left un-added to a `_bag`.
+2. `SessionsSidebarViewModel` no longer implements `INotifyCollectionChanged` event handlers.
+3. `ConnectionManagementDialogViewModel` no longer references `Application.Current.Dispatcher`.
+
+## Chunk E — Clean Architecture: Extract Application Logic & Fix Reactive MVVM
+
+**Context & AI Instructions:**
+You are to execute a strict refactoring to adhere to our WPF/R3 Clean Architecture guidelines. You must follow every step exactly. Do not skip steps. Do not leave old, unused code behind.
+
+**Goals:**
+1. Eradicate the "Fat ViewModel" anti-pattern in `ConnectionManagementDialogViewModel` by extracting X3DH, cryptography, and network logic into MediatR handlers.
+2. Upgrade plain POCO items into fully reactive, `IDisposable` ViewModels.
+3. Fix WPF thread-crashing bugs and enforce native Cysharp `ObservableCollections` filtering.
+
+---
+
+#### Step 1: Upgrade Plain POCOs to Reactive ViewModels
+We must change list items from basic properties to `IDisposable` ViewModels so they can update the UI dynamically.
+
+**1A. Replace `PendingInvitationItem`**
+Open `Desktop.Wpf/Features/Sessions/ConnectionManagementDialogViewModel.cs`. Delete the `PendingInvitationItem` class.
+Create a new file: `Desktop.Wpf/Features/Sessions/PendingInvitationItemViewModel.cs`:
+```csharp
+using R3;
+using System;
+
+namespace Desktop.Wpf.Features.Sessions;
+
+public sealed class PendingInvitationItemViewModel : IDisposable
+{
+    private DisposableBag _bag;
+
+    public Guid PendingSessionId { get; }
+    public string DisplayName { get; }
+    public string Initials { get; }
+    public bool IsRelayed { get; }
+    public string? RelayInfoText { get; }
+    
+    // Reactive properties for UI updates
+    public BindableReactiveProperty<string> StatusText { get; }
+    public BindableReactiveProperty<bool> IsExpired { get; }
+
+    public string? SendPath { get; set; }
+    public string? RequestCorrelationId { get; set; }
+
+    public PendingInvitationItemViewModel(Guid pendingSessionId, string displayName, string initials, bool isRelayed, string? relayInfoText)
+    {
+        PendingSessionId = pendingSessionId;
+        DisplayName = displayName;
+        Initials = initials;
+        IsRelayed = isRelayed;
+        RelayInfoText = relayInfoText;
+        
+        StatusText = new BindableReactiveProperty<string>("Pending").AddTo(ref _bag);
+        IsExpired = new BindableReactiveProperty<bool>(false).AddTo(ref _bag);
+    }
+
+    public void Dispose() => _bag.Dispose();
+}
+```
+
+**1B. Replace `PendingHandshakeItem`**
+Open `Desktop.Wpf/Features/Sessions/PendingHandshakesMenuViewModel.cs`. Delete the `PendingHandshakeItem` class.
+Create a new file: `Desktop.Wpf/Features/Sessions/PendingHandshakeItemViewModel.cs` applying the exact same reactive pattern (constructor taking `DisplayName`, `Initials`, `BundleText`, `PendingId`, `IsRelayed`, `RelayInfoText`; and `StatusText`/`IsExpired` as `BindableReactiveProperty`). Update `PendingHandshakesMenuViewModel` to use this new type and call `.Dispose()` on old items when re-creating the view.
+
+---
+
+#### Step 2: Extract Cryptography and Network Logic into MediatR Commands
+ViewModels must NEVER perform cryptography or call Repositories.
+
+**2A. Create Token Decode Command**
+Create `Desktop.Wpf/Features/Sessions/Commands/DecodeAndQueueInviteCommand.cs`:
+```csharp
+using MediatR;
+
+namespace Desktop.Wpf.Features.Sessions.Commands;
+
+public record DecodeAndQueueInviteCommand(string Token) : IRequest<DecodeAndQueueInviteResult>;
+
+public abstract record DecodeAndQueueInviteResult
+{
+    public sealed record Success : DecodeAndQueueInviteResult;
+    public sealed record Failed(string ErrorMessage) : DecodeAndQueueInviteResult;
+}
+```
+
+**2B. Create Token Decode Handler**
+Create `Desktop.Wpf/Features/Sessions/Handlers/DecodeAndQueueInviteCommandHandler.cs`.
+* Implement `IRequestHandler<DecodeAndQueueInviteCommand, DecodeAndQueueInviteResult>`.
+* **Action:** Cut the entire `try/catch` decoding, ECDSA signature verification (`VerifyInvitePayloadSignature`), and `_establishDirectSession.QueueInviteAsync` logic out of `ConnectionManagementDialogViewModel.ExecuteImportTokenAsync` and paste it into this handler's `Handle` method.
+* **Dependencies to inject:** `IEstablishDirectSessionService`, `ActiveIdentityContext`.
+
+**2C. Create Network Search Command**
+Create `Desktop.Wpf/Features/Sessions/Commands/ConnectViaNetworkCommand.cs`:
+```csharp
+using MediatR;
+using System;
+
+namespace Desktop.Wpf.Features.Sessions.Commands;
+
+public record ConnectViaNetworkCommand(
+    string RouteMode, 
+    string? DirectEndpoint, 
+    string? TargetPkhText, 
+    Guid? RelayHostPeerId, 
+    string? TargetDisplayName) : IRequest<ConnectViaNetworkResult>;
+
+public abstract record ConnectViaNetworkResult
+{
+    public sealed record Success : ConnectViaNetworkResult;
+    public sealed record TargetOffline : ConnectViaNetworkResult;
+    public sealed record Failed(string ErrorMessage) : ConnectViaNetworkResult;
+}
+```
+
+**2D. Create Network Search Handler**
+Create `Desktop.Wpf/Features/Sessions/Handlers/ConnectViaNetworkCommandHandler.cs`.
+* Implement `IRequestHandler<ConnectViaNetworkCommand, ConnectViaNetworkResult>`.
+* **Action:** Cut the entire `RouteMode == "direct"` and `RouteMode == "relay"` branches out of `ConnectionManagementDialogViewModel.ExecuteNetworkSearchAsync` and paste them here. This includes X3DH initiation (`_sessionCrypto.X3DH_Initiate`), Protobuf envelope building, and `_preHandshake.SaveAsync`.
+* **Dependencies to inject:** `IMainReverseSignalInviteFactory`, `IGrpcSessionService`, `ISecureMessagingService`, `IMessageTransportService`, `IDirectSessionRepository`, `IPeerIdentityRepository`, `ISessionCrypto`, `IPreHandshakeSessionStore`, `ISentInvitationRepository`, `Percolator.Application.Services.IClock`, and `ActiveIdentityContext`.
+
+---
+
+#### Step 3: Refactor ConnectionManagementDialogViewModel (Thin & Thread-Safe)
+Open `Desktop.Wpf/Features/Sessions/ConnectionManagementDialogViewModel.cs`.
+
+**3A. Strip Dependencies**
+Remove all cryptography, transport, and repository interfaces from the constructor. You only need: `IMediator`, `IUiDispatcher`, `ActiveIdentityContext`, `IMainInvitationInbox`, `IMainInvitationInboxEvents`, and `PeerConnectionStateService`.
+
+**3B. Fix RelayHost Threading Crash**
+* Delete `private readonly ObservableCollection<RelayHostOption> _relayHostOptions = new();`
+* Add:
+  ```csharp
+  private readonly ObservableCollections.ObservableList<RelayHostOption> _relayHostOptions = new();
+  private readonly ObservableCollections.ISynchronizedView<RelayHostOption, RelayHostOption> _relayHostView;
+  ```
+* In the constructor:
+  ```csharp
+  _relayHostView = _relayHostOptions.CreateView(x => x).AddTo(ref _bag);
+  RelayHostOptions = _relayHostView.ToNotifyCollectionChanged(ui.CollectionEventDispatcher);
+  ```
+* In `QueueRelayHostRefresh()`, completely delete the `Task.Run` wrapper. Just call the async method directly (fire and forget). Since `_relayHostOptions` is now a pure domain list, it is safe to modify from background threads.
+
+**3C. Fix Execute Methods**
+Rewrite the execution methods to use the commands you created in Step 2:
+```csharp
+private async Task ExecuteImportTokenAsync(CancellationToken ct = default)
+{
+    ResetStatus();
+    PhaseText.Value = "Processing...";
+    
+    var result = await _mediator.Send(new DecodeAndQueueInviteCommand(InviteTokenText.Value), ct);
+    
+    if (result is DecodeAndQueueInviteResult.Failed failed)
+    {
+        ErrorText.Value = failed.ErrorMessage;
+        PhaseText.Value = null;
+        return;
+    }
+    
+    PhaseText.Value = null;
+    await RefreshInboxAsync(ct);
+    SelectedTabIndex.Value = 0;
+}
+```
+*(Apply the exact same MediatR dispatch pattern to `ExecuteNetworkSearchAsync` using `ConnectViaNetworkCommand`).*
+
+**3D. Update Inbox to use ViewModels**
+In `RefreshInboxAsync`, change `ObservableCollection<PendingInvitationItem>` to `ObservableList<PendingInvitationItemViewModel>`. Ensure you call `.Dispose()` on old items when clearing the list. When `AcceptInvitationCommand` succeeds, update `item.StatusText.Value = "Accepted";` (using `.Value` since it is now reactive).
+
+---
+
+#### Step 4: Fix Sidebar Filtering Rules
+Open `Desktop.Wpf/Features/Sessions/SessionsSidebarViewModel.cs`.
+
+**4A. Delete Anti-Patterns**
+* DELETE `private readonly ObservableCollection<PeerConnectionListItemViewModel> _items = new();`.
+* DELETE the `ApplyFilter` method.
+* DELETE the `OnConnectionsCollectionChanged` method.
+
+**4B. Implement Native R3 Filtering**
+Rewrite the constructor to properly project, track, and filter the view natively without shadow collections:
+```csharp
+// 1. Create the view and track it
+_connectionsView = _stateService.Connections
+    .CreateView(model => new PeerConnectionListItemViewModel(model))
+    .AddTo(ref _bag);
+
+// 2. Dispose child VMs when removed from the domain
+_connectionsView.ObserveRemove().Subscribe(evt => evt.Value.View.Dispose()).AddTo(ref _bag);
+
+// 3. Attach the dynamic filter logic
+_connectionsView.AttachFilter((model, vm) => 
+{
+    var term = SearchText.Value?.Trim() ?? "";
+    if (string.IsNullOrEmpty(term)) return true;
+    return vm.DisplayName.CurrentValue?.Contains(term, StringComparison.OrdinalIgnoreCase) == true;
+});
+
+// 4. Force the view to re-evaluate when search text changes
+SearchText.Subscribe(_ => _connectionsView.RefreshFilter()).AddTo(ref _bag);
+
+// 5. Expose to WPF
+Items = _connectionsView.ToNotifyCollectionChanged(ui.CollectionEventDispatcher);
+```
 
 ## Chunk I — Notification badge + default focus behavior for Connection Management button
 
