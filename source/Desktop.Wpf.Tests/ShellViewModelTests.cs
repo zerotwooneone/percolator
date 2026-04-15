@@ -247,6 +247,9 @@ public class ShellViewModelTests
         nav.SetupGet(n => n.ViewStream).Returns(Observable.Empty<object?>());
 
         var orchestrator = new Mock<IIdentityOrchestrator>();
+        orchestrator
+            .Setup(o => o.ResolveIdentityAsync(It.IsAny<SelfId>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
         var scopedProvider = new Mock<IServiceProvider>();
         scopedProvider
             .Setup(sp => sp.GetService(typeof(IIdentityOrchestrator)))
@@ -259,7 +262,22 @@ public class ShellViewModelTests
         var scopedSelf = new SelfIdentityModel();
         var scopedSessionFactory = new Mock<ISessionScopeFactory>();
         var pendingWindowManager = new Mock<IWindowManager>(MockBehavior.Loose);
-        var scopeFactory = new Mock<IServiceScopeFactory>(MockBehavior.Loose);
+        
+        // Mock the queries for PeerConnectionStateService.InitializeAsync
+        var queries = new Mock<IPeerConnectionQueries>(MockBehavior.Strict);
+        queries
+            .Setup(q => q.LoadAllConnectionsAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<PeerConnectionStateSnapshot>());
+        queries
+            .Setup(q => q.LoadPendingInboundAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<PendingInboundSnapshot>());
+        
+        var stateScope = new Mock<IServiceScope>();
+        stateScope.SetupGet(s => s.ServiceProvider).Returns(scopedProvider.Object);
+        stateScope.Setup(s => s.ServiceProvider.GetService(typeof(IPeerConnectionQueries))).Returns(queries.Object);
+        
+        var scopeFactory = new Mock<IServiceScopeFactory>(MockBehavior.Strict);
+        scopeFactory.Setup(f => f.CreateScope()).Returns(stateScope.Object);
         var state = new PeerConnectionStateService(scopeFactory.Object);
         var ui = new TestUiDispatcher();
         var selection = new SelectedChannelModel();
