@@ -341,12 +341,15 @@ Definition of done:
   - Choose route mode: **relay**.
   - Select Relay as relay host.
   - Enter Target PKH and click **Fetch Pre-Key Bundle & Initiate**.
+- In the Simulator window:
+  - on the relay tab, there should be a new message in the relay queue. the queue count should drop to zero
+  - press "next" to process the message in the queue
+  - on the handshakes tab, there should be a new pending handshake - click "accept"
+  - on the relay tab there should be a new message in the relay queue
+  - press "next" to process the message in the queue
 
 #### Expected behavior
 
-- Main requests Target pre-key bundle from Relay (GetPreKeyBundleRequest).
-- Relay responds with GetPreKeyBundleResponse (bundle present).
-- Main then creates a HandshakeInitiatorHello and sends an EnqueueOpaqueMessageRequest to Relay.
-- Relay enqueues the hello in its relay queue under routing key == Target PKH.
-- Simulator UI (Relay tab) shows a new queued relay message on the Relay peer.
+- Main - when **Fetch Pre-Key Bundle & Initiate** is clicked to initiate a session with a relayed peer, a new peer connection should appear in the main window - but instead nothing appears
+- Main - when the relayed peer accepts the pending handshake, the peer connection should become active
 
