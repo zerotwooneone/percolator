@@ -27,6 +27,84 @@ Constraints / notes:
 
 ## Chunk A 
 
+### Relay Bug 1 — Main window does not update after relayed standard handshake completes
+
+#### Observed symptom
+
+- When initiating a **relayed** standard handshake from Main (Fetch Pre-Key Bundle & Initiate) and then processing relay queue messages + accepting the handshake on the simulated peer, the **Main window does not show a new/active peer connection**.
+
+#### Code path (from Simulator “Relay Queue” tab → back into Main)
+
+- **UI button**
+  - `Desktop.Wpf/Features/Simulator/SimulatedRelayQueuePanelViewModel.cs`
+    - `NextCommand` → `DeliverNextAsync` → `DeliverItemAsync(...)`
+
+- **Relay message routing decision**
+  - If the relay queue item has **no `targetPkh`**, it is treated as **upstream to Main**:
+    - `DeliverItemAsync(...)` calls:
+      - `ISimulatorStateService.DeliverRelayUpstreamToMainByAckIdAsync(...)`
+
+- **Simulator delivers upstream message to Main’s gRPC handler**
+  - `Desktop.Wpf/Features/Simulator/SimulatorStateService.cs`
+    - `DeliverRelayUpstreamToMainByAckIdAsync(...)` wraps the relay payload bytes into:
+      - `InternalEnvelope { RelayOpaqueEnvelope { OpaquePayload = ... } }`
+    - Encrypts that envelope to the **direct session between RelayHost ↔ Main**
+    - Then calls `Percolator.Application.Network.PercolatorMessageService.DeliverOpaqueMessage(...)`
+
+- **Main gRPC entrypoint**
+  - `Percolator.Application/Network/PercolatorMessageService.cs`
+    - `DeliverOpaqueMessage(...)` → `_messageIngress.DeliverOpaqueAsync(...)`
+
+- **Main internal envelope dispatch**
+  - `Percolator.Application/Network/DeliverOpaqueMessageHandler.cs`
+    - Decrypts session message, parses `InternalEnvelope`
+    - If case is `RelayOpaqueEnvelope`:
+      - `_mediator.Send(new ProcessRelayedOpaquePayloadCommand(...))`
+
+- **Relayed payload processing (this is where the standard handshake response is finalized)**
+  - `Percolator.Application/Network/Handshake/ProcessRelayedOpaquePayloadCommand.cs`
+    - `TryHandleNonSessionPayloadAsync(...)` attempts to parse the relayed bytes as:
+      - `EstablishSessionResponse`
+    - On success it calls:
+      - `IInitiatorFinalizeService.TryFinalizeFromEstablishSessionResponseAsync(...)`
+
+- **Initiator finalization should publish the “session created” notification**
+  - `Percolator.Application/Network/Handshake/InitiatorFinalizeService.cs`
+    - `TryFinalizeFromEstablishSessionResponseAsync(...)`
+      - Adds initiator session via `_sessions.AddAsync(...)`
+      - Publishes `SecureSessionCreatedNotification(...)`
+
+- **Desktop.Wpf listens to that notification and should refresh UI state**
+  - `Desktop.Wpf/Features/Sessions/Handlers/PeerConnectionStateUpdateHandlers.cs`
+    - Handles `SecureSessionCreatedNotification` by calling `_coordinator.TriggerReload()`
+  - `Desktop.Wpf/Features/Sessions/PeerConnectionReloadCoordinator.cs`
+    - Debounces and reloads via `IPeerConnectionQueries`
+    - Updates `PeerConnectionStateService.Connections`
+
+#### Where it breaks (most likely)
+
+- `PeerConnectionReloadCoordinator.ReloadCoreAsync(...)` is a no-op unless:
+  - `PeerConnectionStateService.ActiveSelfIdentityId.HasValue == true`
+- `ActiveSelfIdentityId` is set only when `PeerConnectionStateService.InitializeAsync(...)` is called.
+- In `Desktop.Wpf/Features/Shell/ShellViewModel.cs`, initialization currently does:
+  - `int.TryParse(domainIdentity.Id.ToString(), out var selfIdentityId)`
+- `domainIdentity.Id` is a `SelfId` value object; its `ToString()` is **not guaranteed to be parseable as an `int`**.
+  - If parsing fails, `PeerConnectionStateService.InitializeAsync(...)` is never called.
+  - Result: the UI state service never loads initial state, and later MediatR notifications trigger reloads that immediately return.
+
+#### Suggested fixes
+
+- **Fix the identity ID plumbing (high confidence fix)**
+  - In `Desktop.Wpf/Features/Shell/ShellViewModel.cs`, replace the `int.TryParse(...)` block with direct access to the value:
+    - `await _peerConnectionStateService.InitializeAsync(domainIdentity.Id.Value, CancellationToken.None);`
+  - This ensures `ActiveSelfIdentityId` is always populated, making all subsequent reload triggers effective.
+
+- **Add a guard + log to make this failure mode obvious**
+  - If keeping any conditional, log when initialization is skipped and include `domainIdentity.Id`.
+
+- **(Optional) Improve relayed connection UI fidelity**
+  - `PeerConnectionQueries.LoadAllConnectionsAsync` currently sets `RelayHostPeerId: null` even when `status == Relay`.
+  - If the Uplink/route inspector is expected to show topology, `RelayHostPeerId` should be populated from routing/profile state.
 
 ## Chunk I — Notification badge + default focus behavior for Connection Management button
 
