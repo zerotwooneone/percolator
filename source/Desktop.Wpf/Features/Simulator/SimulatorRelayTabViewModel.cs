@@ -12,15 +12,10 @@ public sealed class SimulatorRelayTabViewModel : IDisposable
     private readonly IUiDispatcher _ui;
 
     private readonly ISimulatorStateService _state;
-    private readonly ISimulatorInitializer _directory;
-    private readonly PercolatorMessageService _messageService;
     private readonly ISimulatorRelayDeliveryService _delivery;
     private readonly ISimulatorDiagnosticsService _diagnostics;
-    private readonly Percolator.Application.Identity.ActiveIdentityContext _active;
     private readonly ILogger<SimulatorRelayTabViewModel> _logger;
     private readonly ILoggerFactory _loggerFactory;
-
-    private static readonly Guid MainNodeSentinelPeerId = new("88880000-0000-0000-0000-000000000000");
 
     private readonly ISynchronizedView<Desktop.Wpf.Features.Simulator.Models.SimulatedRelayModel, SimulatedRelayQueuePanelViewModel> _relayPanels;
     private readonly NotifyCollectionChangedSynchronizedViewList<SimulatedRelayQueuePanelViewModel> _relayPanelsNotify;
@@ -29,22 +24,16 @@ public sealed class SimulatorRelayTabViewModel : IDisposable
 
     public SimulatorRelayTabViewModel(
         ISimulatorStateService state,
-        ISimulatorInitializer directory,
-        PercolatorMessageService messageService,
         ISimulatorRelayDeliveryService delivery,
         ISimulatorDiagnosticsService diagnostics,
-        Percolator.Application.Identity.ActiveIdentityContext active,
         IUiDispatcher ui,
         ILogger<SimulatorRelayTabViewModel> logger,
         ILoggerFactory loggerFactory)
     {
         _ui = ui;
         _state = state;
-        _directory = directory;
-        _messageService = messageService;
         _delivery = delivery;
         _diagnostics = diagnostics;
-        _active = active;
         _logger = logger;
         _loggerFactory = loggerFactory;
 
@@ -117,11 +106,19 @@ public sealed class SimulatorRelayTabViewModel : IDisposable
         var peer = _state.Peers.FirstOrDefault(p => p.PeerId == relayHostPeerId);
         if (peer is null) return null;
 
-        var match = peer.Sessions
-            .Select(kv => kv.Value)
-            .FirstOrDefault(s => s.RemotePeerId.Value == MainNodeSentinelPeerId);
+        // Snapshot the known simulated peers to prevent InvalidOperationException during enumeration
+        var knownSimulatedPeerIds = _state.Peers.Select(p => p.PeerId).ToHashSet();
 
-        return match?.Id;
+        // Topology Inference: Main connects with an ephemeral ID. Therefore, any session 
+        // where the RemotePeerId is NOT in the simulator's sandbox list is the uplink to Main.
+        // We order by CreatedAt descending to ensure we get the active session if Main reconnects.
+        var uplinkSession = peer.Sessions
+            .Select(kv => kv.Value)
+            .Where(s => !knownSimulatedPeerIds.Contains(s.RemotePeerId.Value))
+            .OrderByDescending(s => s.CreatedAtUtc)
+            .FirstOrDefault();
+
+        return uplinkSession?.Id;
     }
 
     public void Dispose()
