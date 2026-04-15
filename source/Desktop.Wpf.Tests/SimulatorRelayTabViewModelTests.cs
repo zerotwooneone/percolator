@@ -6,9 +6,6 @@ using Microsoft.Extensions.Logging;
 using Moq;
 using NUnit.Framework;
 using ObservableCollections;
-using Percolator.Application.Ingress;
-using Percolator.Application.Identity;
-using Percolator.Application.Network;
 
 
 namespace Desktop.Wpf.Tests;
@@ -87,28 +84,16 @@ public sealed class SimulatorRelayTabViewModelTests
         state.AddRelay(Guid.NewGuid(), autoDeliverEnabled: false);
         state.AddRelay(Guid.NewGuid(), autoDeliverEnabled: false);
 
-        var directory = Mock.Of<ISimulatorInitializer>();
-        var messageService = new PercolatorMessageService(
-            logger: Mock.Of<ILogger<PercolatorMessageService>>(),
-            messageIngress: Mock.Of<IMessageIngress>(),
-            establishService: Mock.Of<IEstablishDirectSessionService>(),
-            inviteHandshakeResponseIngress: Mock.Of<IInviteHandshakeResponseIngress>(),
-            standardHandshakeIngress: Mock.Of<IStandardHandshakeIngress>(),
-            active: new ActiveIdentityContext());
         var delivery = Mock.Of<ISimulatorRelayDeliveryService>();
         var diagnostics = Mock.Of<ISimulatorDiagnosticsService>();
-        var active = new ActiveIdentityContext();
         var ui = new TestUiDispatcher();
         var logger = Mock.Of<ILogger<SimulatorRelayTabViewModel>>();
         var loggerFactory = Mock.Of<ILoggerFactory>();
 
         using var sut = new SimulatorRelayTabViewModel(
             state: state,
-            directory: directory,
-            messageService: messageService,
             delivery: delivery,
             diagnostics: diagnostics,
-            active: active,
             ui: ui,
             logger: logger,
             loggerFactory: loggerFactory);

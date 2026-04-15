@@ -19,8 +19,6 @@ public sealed class SessionsSidebarViewModelTests
     public void Items_rebuilds_when_state_connections_collection_changes()
     {
         // ARRANGE
-        var nav = new Mock<INavigationService>(MockBehavior.Loose);
-
         var state = new PeerConnectionStateService(Mock.Of<IServiceScopeFactory>(MockBehavior.Loose));
         var pendingWindowManager = new Mock<Desktop.Wpf.Shared.Windowing.IWindowManager>(MockBehavior.Loose);
         var ui = new TestUiDispatcher();
@@ -28,7 +26,6 @@ public sealed class SessionsSidebarViewModelTests
         var selection = new SelectedChannelModel();
 
         var sut = new SessionsSidebarViewModel(
-            nav.Object,
             new SelfIdentityModel(),
             pendingMenu,
             state,

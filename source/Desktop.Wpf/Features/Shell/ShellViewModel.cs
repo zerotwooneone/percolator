@@ -17,26 +17,23 @@ public sealed class ShellViewModel : ViewModelBase
     public BindableReactiveProperty<bool> IsLoading { get; }
 
     private readonly INavigationService _navigation;
-    private readonly ISelfIdentityRepository _repo;
     private readonly IStartupIdentityService _startupIdentity;
     private readonly SelfIdentityModel _self;
     private IServiceScope? _identityScope;
     private readonly IIdentityScopeAccessor _identityScopeAccessor;
     private readonly IWindowManager _windowManager;
-    private readonly Desktop.Wpf.Features.Sessions.PeerConnectionStateService _peerConnectionStateService;
+    private readonly PeerConnectionStateService _peerConnectionStateService;
 
     public ICommand OpenHandshakeSimulatorCommand { get; }
 
     public ShellViewModel(INavigationService navigation,
-                          ISelfIdentityRepository repo,
                           IStartupIdentityService startupIdentity,
                           SelfIdentityModel self,
                           IIdentityScopeAccessor identityScopeAccessor,
                           IWindowManager windowManager,
-                          Desktop.Wpf.Features.Sessions.PeerConnectionStateService peerConnectionStateService)
+                          PeerConnectionStateService peerConnectionStateService)
     {
         _navigation = navigation;
-        _repo = repo;
         _startupIdentity = startupIdentity;
         _self = self;
         _identityScopeAccessor = identityScopeAccessor;
@@ -105,7 +102,6 @@ public sealed class ShellViewModel : ViewModelBase
             var sessionShell = _identityScopeAccessor.Current.GetRequiredService<Desktop.Wpf.Features.Sessions.SessionShellViewModel>();
             sessionShell.Sidebar = sidebarVm;
             sessionShell.RightPane = _identityScopeAccessor.Current.GetRequiredService<Desktop.Wpf.Features.Sessions.SelectedChannelPaneViewModel>();
-            sidebarVm.SetConductor(sessionShell);
             _navigation.Navigate(sessionShell);
         }
         finally

@@ -1,14 +1,9 @@
-using System.Collections.Generic;
-using System.Collections.ObjectModel;
-using System.Linq;
 using Desktop.Wpf.Features.Sessions.Models;
 using Desktop.Wpf.Features.Self;
 using Desktop.Wpf.Features.Sessions.State;
 using Desktop.Wpf.Shared.Mvvm;
-using Desktop.Wpf.Shared.Navigation;
 using ObservableCollections;
 using R3;
-using System.Collections.Specialized;
 
 namespace Desktop.Wpf.Features.Sessions;
 
@@ -25,10 +20,8 @@ public sealed class SessionsSidebarViewModel : ViewModelBase
     private readonly PeerConnectionStateService _stateService;
     private readonly SelectedChannelModel _selection;
     private readonly DisposableBag _bag;
-    private ISessionConductor? _conductor;
 
     public SessionsSidebarViewModel(
-        INavigationService navigation,
         SelfIdentityModel self,
         PendingHandshakesMenuViewModel pendingMenu,
         PeerConnectionStateService stateService,
@@ -105,10 +98,5 @@ public sealed class SessionsSidebarViewModel : ViewModelBase
     {
         _bag.Dispose();
         Disposable.Dispose(SearchText, SelectedSessionId);
-    }
-
-    public void SetConductor(ISessionConductor conductor)
-    {
-        _conductor = conductor;
     }
 }
