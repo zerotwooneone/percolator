@@ -2,6 +2,7 @@ using Desktop.Wpf.Features.Sessions.Models;
 using Desktop.Wpf.Features.Sessions.Queries;
 using Microsoft.Extensions.DependencyInjection;
 using ObservableCollections;
+using Percolator.Identity;
 
 namespace Desktop.Wpf.Features.Sessions;
 
@@ -14,20 +15,20 @@ public sealed class PeerConnectionStateService : IDisposable
 
     public IReadOnlyObservableList<PeerConnectionModel> Connections => _connections;
     public IReadOnlyObservableList<PeerPendingInvitationModel> PendingInbound => _pendingInbound;
-    public int? ActiveSelfIdentityId { get; private set; }
+    public SelfId? ActiveSelfIdentityId { get; private set; }
 
     public PeerConnectionStateService(IServiceScopeFactory scopeFactory)
     {
         _scopeFactory = scopeFactory;
     }
 
-    public async Task InitializeAsync(int selfIdentityId, CancellationToken cancellationToken = default)
+    public async Task InitializeAsync(SelfId selfIdentityId, CancellationToken cancellationToken = default)
     {
         ActiveSelfIdentityId = selfIdentityId;
         using var scope = _scopeFactory.CreateScope();
         var queries = scope.ServiceProvider.GetRequiredService<IPeerConnectionQueries>();
 
-        var connectionSnapshots = await queries.LoadAllConnectionsAsync(selfIdentityId, cancellationToken).ConfigureAwait(false);
+        var connectionSnapshots = await queries.LoadAllConnectionsAsync(selfIdentityId.Value, cancellationToken).ConfigureAwait(false);
         UpdateConnections(connectionSnapshots);
 
         var pendingSnapshots = await queries.LoadPendingInboundAsync(cancellationToken).ConfigureAwait(false);

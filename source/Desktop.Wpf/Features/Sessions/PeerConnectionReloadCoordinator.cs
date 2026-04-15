@@ -35,7 +35,7 @@ public sealed class PeerConnectionReloadCoordinator : IDisposable
         using var scope = _scopeFactory.CreateScope();
         var queries = scope.ServiceProvider.GetRequiredService<IPeerConnectionQueries>();
 
-        var connections = await queries.LoadAllConnectionsAsync(_state.ActiveSelfIdentityId.Value, cancellationToken).ConfigureAwait(false);
+        var connections = await queries.LoadAllConnectionsAsync(_state.ActiveSelfIdentityId.Value.Value, cancellationToken).ConfigureAwait(false);
         _state.UpdateConnections(connections);
 
         var pending = await queries.LoadPendingInboundAsync(cancellationToken).ConfigureAwait(false);

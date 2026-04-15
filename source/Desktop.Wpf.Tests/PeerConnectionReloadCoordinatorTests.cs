@@ -7,6 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Time.Testing;
 using Moq;
 using NUnit.Framework;
+using Percolator.Identity;
 
 namespace Desktop.Wpf.Tests;
 
@@ -41,7 +42,7 @@ public sealed class PeerConnectionReloadCoordinatorTests
 
         // Seed identity so reload will execute
         // (InitializeAsync queries the same mocked queries instance and sets ActiveSelfIdentityId)
-        state.InitializeAsync(123).GetAwaiter().GetResult();
+        state.InitializeAsync(new SelfId(123)).GetAwaiter().GetResult();
 
         Mock.Get(queries.Object).Invocations.Clear();
 

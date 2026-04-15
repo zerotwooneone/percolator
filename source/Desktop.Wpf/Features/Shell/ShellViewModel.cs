@@ -98,10 +98,7 @@ public sealed class ShellViewModel : ViewModelBase
             await orchestrator.ResolveIdentityAsync(domainIdentity.Id, CancellationToken.None);
 
             // Initialize the peer connection state service with the self identity ID
-            if (int.TryParse(domainIdentity.Id.ToString(), out var selfIdentityId))
-            {
-                await _peerConnectionStateService.InitializeAsync(selfIdentityId, CancellationToken.None);
-            }
+            await _peerConnectionStateService.InitializeAsync(domainIdentity.Id, CancellationToken.None);
 
             // Build the SessionShell from the identity-scoped provider
             var sidebarVm = _identityScopeAccessor.Current.GetRequiredService<SessionsSidebarViewModel>();
