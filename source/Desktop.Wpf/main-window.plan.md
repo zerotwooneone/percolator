@@ -106,6 +106,111 @@ Constraints / notes:
   - `PeerConnectionQueries.LoadAllConnectionsAsync` currently sets `RelayHostPeerId: null` even when `status == Relay`.
   - If the Uplink/route inspector is expected to show topology, `RelayHostPeerId` should be populated from routing/profile state.
 
+Chunk B: Persistence Extension for MainUplinkSessionId
+Objective: Extend the simulator's disk persistence pipeline to serialize and deserialize the newly added MainUplinkSessionId property, ensuring the established gRPC uplink survives application restarts and state snapshots.
+
+Step 1: Update the Snapshot DTO (PeerStateSnapshot.cs)
+
+Locate the PeerStateSnapshot record definition (likely in Desktop.Wpf.Features.Simulator.Models).
+
+Add a new property to the record signature: Guid? MainUplinkSessionId.
+
+Place this property adjacent to the existing PendingStandardHandshakeToMainTemporarySessionId property to maintain logical grouping.
+
+Step 2: Update the Domain Model Constructor (SimulatedPeerModel.cs)
+
+Modify the SimulatedPeerModel constructor signature.
+
+Add a new optional parameter: SessionId? mainUplinkSessionId = null.
+
+Inside the constructor body, locate the initialization of _mainUplinkSessionId.
+
+Change the initialization from a hardcoded null to use the injected parameter: _mainUplinkSessionId = new ReactiveProperty<SessionId?>(mainUplinkSessionId);.
+
+Step 3: Update Serialization / Freeze Logic (SimulatedPeerModel.cs)
+
+Locate the Freeze() method inside SimulatedPeerModel.
+
+Update the instantiation of the PeerStateSnapshot record to include the new property.
+
+Extract the underlying Guid from the SessionId value object. The assignment should look exactly like this: MainUplinkSessionId: _mainUplinkSessionId.Value?.Value.
+
+Step 4: Update Deserialization / Rehydration (SimulatorStateService.cs)
+
+Locate the CreatePeerFromSnapshot(PeerStateSnapshot snap) method inside SimulatorStateService.cs.
+
+Extract the saved Guid? from the snapshot and convert it back into a SessionId value object.
+
+Add the parsed value to the SimulatedPeerModel instantiation mapping.
+
+Implementation detail: ```csharp
+var mainUplinkSessionId = snap.MainUplinkSessionId.HasValue
+? new SessionId(snap.MainUplinkSessionId.Value)
+: (SessionId?)null;
+
+Pass mainUplinkSessionId into the SimulatedPeerModel constructor call.
+
+## Chunk C — Clean Architecture: Fix Relay Routing via Topology Inference
+
+**Context & AI Instructions:**
+Currently, when a simulated peer accepts a relayed handshake, the response fails to route back to Main because the simulator is searching for a hardcoded `MainNodeSentinelPeerId`. Main uses ephemeral IDs, so this fails.
+Instead of adding new state to the domain models to track this, we will use Topology Inference: Main is the only external node that connects to the Simulator. Therefore, any session whose `RemotePeerId` is NOT in the Simulator's known peer list is the uplink to Main.
+
+You will also clean up technical debt by deleting an unused property that was abandoned during architectural review.
+
+Execute the following steps exactly.
+
+#### Step 1: Rip out unused technical debt from the Peer Model
+**File:** `Desktop.Wpf/Features/Simulator/SimulatedPeerModel.cs`
+
+We are abandoning the `InboundMainUplinkSessionId` property. You must delete it completely.
+1. Delete the field: `private readonly ReactiveProperty<SessionId?> _inboundMainUplinkSessionId;`
+2. Delete it from the constructor parameters.
+3. Delete the constructor assignment: `_inboundMainUplinkSessionId = new ReactiveProperty<SessionId?>(inboundMainUplinkSessionId);`
+4. Delete the public property: `public ReadOnlyReactiveProperty<SessionId?> InboundMainUplinkSessionId => _inboundMainUplinkSessionId;`
+5. Delete its cleanup from `ClearRuntimeState()` and `Dispose()`.
+6. Remove `InboundMainUplinkSessionId: _inboundMainUplinkSessionId.Value?.Value` from the `Freeze()` method return object.
+
+*(Note: If your compiler complains about `PeerStateSnapshot` missing a parameter in `Freeze()`, simply remove `Guid? InboundMainUplinkSessionId` from the `PeerStateSnapshot` record definition in `PeerStateSnapshot.cs` as well).*
+
+#### Step 2: Implement Topology Inference for Relay Routing
+**File:** `Desktop.Wpf/Features/Simulator/SimulatorRelayTabViewModel.cs`
+
+1. Delete the sentinel ID constant entirely:
+```csharp
+private static readonly Guid MainNodeSentinelPeerId = new("88880000-0000-0000-0000-000000000000");
+```
+
+2. Rewrite the `GetRelayHostToMainSessionIdAsync` method to dynamically resolve the uplink by querying for the most recent external session:
+```csharp
+    private async Task<SessionId?> GetRelayHostToMainSessionIdAsync(Guid relayHostPeerId)
+    {
+        await Task.CompletedTask.ConfigureAwait(false);
+
+        var peer = _state.Peers.FirstOrDefault(p => p.PeerId == relayHostPeerId);
+        if (peer is null) return null;
+
+        // Snapshot the known simulated peers to prevent InvalidOperationException during enumeration
+        var knownSimulatedPeerIds = _state.Peers.Select(p => p.PeerId).ToHashSet();
+
+        // Topology Inference: Main connects with an ephemeral ID. Therefore, any session 
+        // where the RemotePeerId is NOT in the simulator's sandbox list is the uplink to Main.
+        // We order by CreatedAt descending to ensure we get the active session if Main reconnects.
+        var uplinkSession = peer.Sessions
+            .Select(kv => kv.Value)
+            .Where(s => !knownSimulatedPeerIds.Contains(s.RemotePeerId.Value))
+            .OrderByDescending(s => s.CreatedAtUtc)
+            .FirstOrDefault();
+
+        return uplinkSession?.Id;
+    }
+```
+
+#### Definition of Done:
+1. `SimulatedPeerModel` no longer contains the phrase `InboundMainUplinkSessionId`.
+2. `SimulatorRelayTabViewModel` no longer references `MainNodeSentinelPeerId`.
+3. `GetRelayHostToMainSessionIdAsync` successfully uses the topology inference query to return the session.
+
 ## Chunk I — Notification badge + default focus behavior for Connection Management button
 
 Outcome:
