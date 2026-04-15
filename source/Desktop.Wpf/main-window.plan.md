@@ -211,6 +211,69 @@ private static readonly Guid MainNodeSentinelPeerId = new("88880000-0000-0000-00
 2. `SimulatorRelayTabViewModel` no longer references `MainNodeSentinelPeerId`.
 3. `GetRelayHostToMainSessionIdAsync` successfully uses the topology inference query to return the session.
 
+## Chunk D — Reactive MVVM: Fix Sidebar Reactivity and Sorting
+
+**Context & AI Instructions:**
+The session sidebar is not updating reactively when background domain events mutate existing connections. We must add a mutation broadcast to the Domain layer, and utilize native Cysharp `AttachSort` and `AttachFilter` in the ViewModel.
+
+Execute the following 3 steps exactly.
+
+#### Step 1: Add a Mutation Broadcast to the State Service
+**File:** `Desktop.Wpf/Features/Sessions/PeerConnectionStateService.cs`
+
+The state service must announce when it has finished a batch mutation so UI views know to refresh their sorts/filters.
+1. Add a new field: `private readonly Subject<R3.Unit> _stateMutated = new();`
+2. Add a public property to expose it: `public Observable<R3.Unit> StateMutated => _stateMutated;`
+3. Inside `Dispose()`, add `_stateMutated.Dispose();`
+4. Inside `UpdateConnections(...)`, immediately *after* the `lock (_stateGate)` block closes, add:
+   `_stateMutated.OnNext(R3.Unit.Default);`
+5. Inside `UpdatePendingInbound(...)`, immediately *after* the `lock (_stateGate)` block closes, add:
+   `_stateMutated.OnNext(R3.Unit.Default);`
+
+#### Step 2: Implement Native View Sorting and Filtering
+**File:** `Desktop.Wpf/Features/Sessions/SessionsSidebarViewModel.cs`
+
+Rewrite the sorting and filtering logic in the constructor to use the native Cysharp `ISynchronizedView` APIs.
+Find the block containing `AttachFilter();` and `SearchText.Subscribe...` and replace it entirely with this:
+
+```csharp
+// 3. Attach the dynamic filter logic EXACTLY ONCE
+_connectionsView.AttachFilter((model, vm) => 
+{
+    var term = SearchText.Value?.Trim() ?? "";
+    if (string.IsNullOrEmpty(term)) return true;
+    return vm.DisplayName.CurrentValue?.Contains(term, StringComparison.OrdinalIgnoreCase) == true;
+});
+
+// 3b. Attach the dynamic sort logic (Chronological by Last Activity)
+_connectionsView.AttachSort(Comparer<PeerConnectionListItemViewModel>.Create((a, b) => 
+{
+    // Descending order: newest at the top
+    return b.LastUpdate.CurrentValue.CompareTo(a.LastUpdate.CurrentValue);
+}));
+
+// 4. Force the view to re-evaluate when search text changes
+SearchText
+    .Subscribe(_ => _connectionsView.RefreshFilter())
+    .AddTo(ref _bag);
+
+// 4b. Force the view to re-evaluate when existing domain items are silently mutated
+_stateService.StateMutated
+    .ObserveOnCurrentSynchronizationContext()
+    .Subscribe(_ => 
+    {
+        _connectionsView.RefreshFilter();
+        _connectionsView.RefreshSort();
+    })
+    .AddTo(ref _bag);
+```
+*(Delete the local `void AttachFilter()` function completely).*
+
+#### Definition of Done:
+1. `PeerConnectionStateService` emits `StateMutated.OnNext` outside of its locks.
+2. `SessionsSidebarViewModel` utilizes `AttachSort` to organize the UI descending by `LastUpdate`.
+3. `SessionsSidebarViewModel` never calls `ResetFilter()`. It only calls `RefreshFilter()` and `RefreshSort()` in response to state changes.
+
 ## Chunk I — Notification badge + default focus behavior for Connection Management button
 
 Outcome:
