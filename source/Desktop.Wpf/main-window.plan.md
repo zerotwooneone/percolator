@@ -1,601 +1,791 @@
-# Main Window + Simulator Handshake Enablement Plan
+# Bi-Directional Chat Plan (Main ↔ Simulator)
 
-Goal: make the **Main Window** and **Simulator Window** capable of performing **handshakes in both directions** (Main -> Simulator peer, Simulator peer -> Main), while implementing the Main Window UI behaviors described in `design/main-window.md`.
+**Goal:** Secure bi-directional chat messaging between the Main Window and Simulated Peers over established Direct and Relayed sessions.
 
-Protocol anchor:
+## Architecture Guidelines Checklist
 
-- The handshake UX described here is primarily the **Reverse-Signal** flow from `session-flow.md` Part 2.
-  - The “inviter” sends an **invitation** (`EstablishDirectSessionRequest` containing `InviteHandshakeRequestPayload`).
-  - The “acceptor” queues the invitation for approval.
-  - On acceptance, the acceptor initiates X3DH as the initiator and replies with an **`InviteHandshakeResponse`** (containing the first ratchet message).
-- “Direct vs Relayed” is a **transport routing** choice; crypto payloads remain the same.
+| Guideline | Source | Rule |
+|---|---|---|
+| Thread-agnostic services | `r3.readme.md` | State services must not inject `IUiDispatcher`. Mutations under `SemaphoreSlim`/`lock`. |
+| ViewModel UI bridging | `wpf.readme.md` | ViewModels own the dispatcher. Collections via `CreateView` → `ToNotifyCollectionChanged(ui.CollectionEventDispatcher)`. Properties via `ObserveOnCurrentSynchronizationContext()`. |
+| Domain snapshotting | `r3.readme.md` | `.Freeze()` under lock produces pure immutable records for background I/O. |
+| No ViewModel sorting | `wpf.readme.md` | Sorting in XAML via `CollectionViewSource.GetDefaultView(...)` + `CustomSort`. |
+| Robust tests | `unit-testing.md` | AAA pattern, black-box, no internal-state assertions. Mock external deps only. |
+| Domain isolation | Architecture | Domain projects never reference each other or Application. Cross-domain goes via Application. |
+| Contracts project | Architecture | Only protobuf defs. No C# interfaces. |
 
-Routing model (important for chunk correctness):
+## Pre-existing Concern: Potential Double-Send
 
-- **Direct**: invitation/response are delivered via the callback endpoint using `inviter_host` + `inviter_port` embedded in the invite payload.
-- **Relayed**: invitation/response are delivered as opaque bytes through the relay queue (relay host peer id).
+`PostTextMessageHandler` (Application layer) currently sends `ChatEnvelope` directly to all participants (lines 69-76) AND publishes `TextMessagePostedEvent`. `TextMessagePostedHandler` catches that event and dispatches `DispatchTextMessageCommand`, which sends again via `IRemoteEnvelopeSender` (with PKH resolution for relay fallback).
 
-Constraints / notes:
+Treat this as a **bug** (duplicate send risk). The preferred fix (when you address it) is:
 
-- Chunks are intentionally large.
-- The project does not need to be buildable or testable between chunks.
-- Prioritize **handshake plumbing + UI** over full visual polish.
-- Replace the current “Add peer” context menu entry points with a **Connection Management** dialog.
-- UI iconography assumes the user has NerdFont available (see `Shared/Theme/Icons.xaml`). 
+- Keep the `TextMessagePostedEvent` → `DispatchTextMessageCommand` pipeline as the **only** outbound network send.
+- Remove the direct `IRemoteEnvelopeSender` send loop from `PostTextMessageHandler`.
+
+This plan intentionally scopes that fix out; the bi-directional plan remains correct even if the duplicate-send is resolved later.
+
+## Identity & Author Attribution Invariants (verifiable in codebase)
+
+- Peers never exchange `PeerId` values. `PeerId` is a local-only identifier.
+- The only cross-peer author identifier is the author's identity signing public key (`SPKI`) or its hash (`PKH = SHA256(SPKI)`).
+- For group chat, the author is identified by `TextMessage.AuthorIdentityKey` (SPKI). This is already stamped on outbound messages by `PostTextMessageHandler`.
+
+**Inbound author resolution algorithm (group / relayed / any message that includes SPKI):**
+
+1) Read `authorSpki = chatEnvelope.TextMessage.AuthorIdentityKey`.
+2) Compute `authorPkh = SHA256(authorSpki)`.
+3) Resolve local peer id via `IPeerPublicSigningKeyStore.GetPeerIdByPublicKeyHashAsync(authorPkh)`.
+   - If null: fail fast (throw) in the Application layer. The sender must be introduced/known (e.g., by `SetPeerNameByPublicKeyCommand`) before we can attribute.
+4) Convert to Chat domain participant id via `new ParticipantId(peerId.Value)`.
+
+**Layering rule:** Chat domain stays isolated from Identity types. Implement the lookup via an Application-layer adapter over `IPeerPublicSigningKeyStore` (Chat-side boundary is `IPkhPeerResolver`).
+
+**Important type constraint:** In this codebase, `ParticipantId` is a `Guid` wrapper. Any PKH→peer lookup used for chat author attribution must return a `Guid`-backed identifier (not an `int`).
 
 ---
 
-## Chunk A 
+## Chunk A: Separate Inbound vs Outbound Chat Commands
 
-### Relay Bug 1 — Main window does not update after relayed standard handshake completes
+**Problem:** `ProcessInternalEnvelopeHandler` currently dispatches inbound text messages via `PostTextMessageCommand`, whose handler sends the message over the network to all participants AND publishes `TextMessagePostedEvent`. The event then triggers `TextMessagePostedHandler` → `DispatchTextMessageCommand` → another network send. This causes an echo loop: received messages are re-broadcasted.
+Additionally, `SqliteChatMessageWriter.AddTextMessageAsync(...)` currently determines `SenderId` by selecting the participant that is *not* `SelfIdentity.PeerId`. Therefore, the current persistence API cannot correctly represent who authored the message and will mis-attribute outbound messages.
 
-#### Observed symptom
+**Solution:** Split inbound vs outbound into separate commands *and* make message persistence **direction-aware** by explicitly providing the acting participant.
+- Inbound processing must never reach outbound dispatch.
+- Outbound processing must persist messages as authored by self.
+- Inbound processing must persist messages as authored by the remote peer.
 
-- When initiating a **relayed** standard handshake from Main (Fetch Pre-Key Bundle & Initiate) and then processing relay queue messages + accepting the handshake on the simulated peer, the **Main window does not show a new/active peer connection**.
+### A0: Refactor `IChatMessageWriter` to be direction-aware
+- **File:** `Percolator.Chat/App/IChatMessageWriter.cs`
+- **Change:** Replace the `selfIdentityId`-only methods with actor-aware methods. Make the actor explicit.
 
-#### Code path (from Simulator “Relay Queue” tab → back into Main)
-
-- **UI button**
-  - `Desktop.Wpf/Features/Simulator/SimulatedRelayQueuePanelViewModel.cs`
-    - `NextCommand` → `DeliverNextAsync` → `DeliverItemAsync(...)`
-
-- **Relay message routing decision**
-  - If the relay queue item has **no `targetPkh`**, it is treated as **upstream to Main**:
-    - `DeliverItemAsync(...)` calls:
-      - `ISimulatorStateService.DeliverRelayUpstreamToMainByAckIdAsync(...)`
-
-- **Simulator delivers upstream message to Main’s gRPC handler**
-  - `Desktop.Wpf/Features/Simulator/SimulatorStateService.cs`
-    - `DeliverRelayUpstreamToMainByAckIdAsync(...)` wraps the relay payload bytes into:
-      - `InternalEnvelope { RelayOpaqueEnvelope { OpaquePayload = ... } }`
-    - Encrypts that envelope to the **direct session between RelayHost ↔ Main**
-    - Then calls `Percolator.Application.Network.PercolatorMessageService.DeliverOpaqueMessage(...)`
-
-- **Main gRPC entrypoint**
-  - `Percolator.Application/Network/PercolatorMessageService.cs`
-    - `DeliverOpaqueMessage(...)` → `_messageIngress.DeliverOpaqueAsync(...)`
-
-- **Main internal envelope dispatch**
-  - `Percolator.Application/Network/DeliverOpaqueMessageHandler.cs`
-    - Decrypts session message, parses `InternalEnvelope`
-    - If case is `RelayOpaqueEnvelope`:
-      - `_mediator.Send(new ProcessRelayedOpaquePayloadCommand(...))`
-
-- **Relayed payload processing (this is where the standard handshake response is finalized)**
-  - `Percolator.Application/Network/Handshake/ProcessRelayedOpaquePayloadCommand.cs`
-    - `TryHandleNonSessionPayloadAsync(...)` attempts to parse the relayed bytes as:
-      - `EstablishSessionResponse`
-    - On success it calls:
-      - `IInitiatorFinalizeService.TryFinalizeFromEstablishSessionResponseAsync(...)`
-
-- **Initiator finalization should publish the “session created” notification**
-  - `Percolator.Application/Network/Handshake/InitiatorFinalizeService.cs`
-    - `TryFinalizeFromEstablishSessionResponseAsync(...)`
-      - Adds initiator session via `_sessions.AddAsync(...)`
-      - Publishes `SecureSessionCreatedNotification(...)`
-
-- **Desktop.Wpf listens to that notification and should refresh UI state**
-  - `Desktop.Wpf/Features/Sessions/Handlers/PeerConnectionStateUpdateHandlers.cs`
-    - Handles `SecureSessionCreatedNotification` by calling `_coordinator.TriggerReload()`
-  - `Desktop.Wpf/Features/Sessions/PeerConnectionReloadCoordinator.cs`
-    - Debounces and reloads via `IPeerConnectionQueries`
-    - Updates `PeerConnectionStateService.Connections`
-
-#### Where it breaks (most likely)
-
-- `PeerConnectionReloadCoordinator.ReloadCoreAsync(...)` is a no-op unless:
-  - `PeerConnectionStateService.ActiveSelfIdentityId.HasValue == true`
-- `ActiveSelfIdentityId` is set only when `PeerConnectionStateService.InitializeAsync(...)` is called.
-- In `Desktop.Wpf/Features/Shell/ShellViewModel.cs`, initialization currently does:
-  - `int.TryParse(domainIdentity.Id.ToString(), out var selfIdentityId)`
-- `domainIdentity.Id` is a `SelfId` value object; its `ToString()` is **not guaranteed to be parseable as an `int`**.
-  - If parsing fails, `PeerConnectionStateService.InitializeAsync(...)` is never called.
-  - Result: the UI state service never loads initial state, and later MediatR notifications trigger reloads that immediately return.
-
-#### Suggested fixes
-
-- **Fix the identity ID plumbing (high confidence fix)**
-  - In `Desktop.Wpf/Features/Shell/ShellViewModel.cs`, replace the `int.TryParse(...)` block with direct access to the value:
-    - `await _peerConnectionStateService.InitializeAsync(domainIdentity.Id.Value, CancellationToken.None);`
-  - This ensures `ActiveSelfIdentityId` is always populated, making all subsequent reload triggers effective.
-
-- **Add a guard + log to make this failure mode obvious**
-  - If keeping any conditional, log when initialization is skipped and include `domainIdentity.Id`.
-
-- **(Optional) Improve relayed connection UI fidelity**
-  - `PeerConnectionQueries.LoadAllConnectionsAsync` currently sets `RelayHostPeerId: null` even when `status == Relay`.
-  - If the Uplink/route inspector is expected to show topology, `RelayHostPeerId` should be populated from routing/profile state.
-
-Chunk B: Persistence Extension for MainUplinkSessionId
-Objective: Extend the simulator's disk persistence pipeline to serialize and deserialize the newly added MainUplinkSessionId property, ensuring the established gRPC uplink survives application restarts and state snapshots.
-
-Step 1: Update the Snapshot DTO (PeerStateSnapshot.cs)
-
-Locate the PeerStateSnapshot record definition (likely in Desktop.Wpf.Features.Simulator.Models).
-
-Add a new property to the record signature: Guid? MainUplinkSessionId.
-
-Place this property adjacent to the existing PendingStandardHandshakeToMainTemporarySessionId property to maintain logical grouping.
-
-Step 2: Update the Domain Model Constructor (SimulatedPeerModel.cs)
-
-Modify the SimulatedPeerModel constructor signature.
-
-Add a new optional parameter: SessionId? mainUplinkSessionId = null.
-
-Inside the constructor body, locate the initialization of _mainUplinkSessionId.
-
-Change the initialization from a hardcoded null to use the injected parameter: _mainUplinkSessionId = new ReactiveProperty<SessionId?>(mainUplinkSessionId);.
-
-Step 3: Update Serialization / Freeze Logic (SimulatedPeerModel.cs)
-
-Locate the Freeze() method inside SimulatedPeerModel.
-
-Update the instantiation of the PeerStateSnapshot record to include the new property.
-
-Extract the underlying Guid from the SessionId value object. The assignment should look exactly like this: MainUplinkSessionId: _mainUplinkSessionId.Value?.Value.
-
-Step 4: Update Deserialization / Rehydration (SimulatorStateService.cs)
-
-Locate the CreatePeerFromSnapshot(PeerStateSnapshot snap) method inside SimulatorStateService.cs.
-
-Extract the saved Guid? from the snapshot and convert it back into a SessionId value object.
-
-Add the parsed value to the SimulatedPeerModel instantiation mapping.
-
-Implementation detail: ```csharp
-var mainUplinkSessionId = snap.MainUplinkSessionId.HasValue
-? new SessionId(snap.MainUplinkSessionId.Value)
-: (SessionId?)null;
-
-Pass mainUplinkSessionId into the SimulatedPeerModel constructor call.
-
-## Chunk C — Clean Architecture: Fix Relay Routing via Topology Inference
-
-**Context & AI Instructions:**
-Currently, when a simulated peer accepts a relayed handshake, the response fails to route back to Main because the simulator is searching for a hardcoded `MainNodeSentinelPeerId`. Main uses ephemeral IDs, so this fails.
-Instead of adding new state to the domain models to track this, we will use Topology Inference: Main is the only external node that connects to the Simulator. Therefore, any session whose `RemotePeerId` is NOT in the Simulator's known peer list is the uplink to Main.
-
-You will also clean up technical debt by deleting an unused property that was abandoned during architectural review.
-
-Execute the following steps exactly.
-
-#### Step 1: Rip out unused technical debt from the Peer Model
-**File:** `Desktop.Wpf/Features/Simulator/SimulatedPeerModel.cs`
-
-We are abandoning the `InboundMainUplinkSessionId` property. You must delete it completely.
-1. Delete the field: `private readonly ReactiveProperty<SessionId?> _inboundMainUplinkSessionId;`
-2. Delete it from the constructor parameters.
-3. Delete the constructor assignment: `_inboundMainUplinkSessionId = new ReactiveProperty<SessionId?>(inboundMainUplinkSessionId);`
-4. Delete the public property: `public ReadOnlyReactiveProperty<SessionId?> InboundMainUplinkSessionId => _inboundMainUplinkSessionId;`
-5. Delete its cleanup from `ClearRuntimeState()` and `Dispose()`.
-6. Remove `InboundMainUplinkSessionId: _inboundMainUplinkSessionId.Value?.Value` from the `Freeze()` method return object.
-
-*(Note: If your compiler complains about `PeerStateSnapshot` missing a parameter in `Freeze()`, simply remove `Guid? InboundMainUplinkSessionId` from the `PeerStateSnapshot` record definition in `PeerStateSnapshot.cs` as well).*
-
-#### Step 2: Implement Topology Inference for Relay Routing
-**File:** `Desktop.Wpf/Features/Simulator/SimulatorRelayTabViewModel.cs`
-
-1. Delete the sentinel ID constant entirely:
 ```csharp
-private static readonly Guid MainNodeSentinelPeerId = new("88880000-0000-0000-0000-000000000000");
+Task AddTextMessageAsync(
+    ConversationId conversationId,
+    int selfIdentityId,
+    ParticipantId senderId,
+    string content,
+    MessageId messageId,
+    DateTimeOffset sentAt,
+    CancellationToken cancellationToken);
+
+Task AddReadReceiptAsync(
+    ConversationId conversationId,
+    int selfIdentityId,
+    ParticipantId readerId,
+    MessageId messageId,
+    DateTimeOffset sentAt,
+    CancellationToken cancellationToken);
+
+Task AddDeliveredReceiptAsync(
+    ConversationId conversationId,
+    int selfIdentityId,
+    ParticipantId recipientId,
+    MessageId messageId,
+    DateTimeOffset deliveredAt,
+    CancellationToken cancellationToken);
+
+Task AddEmojiAnnotationAsync(
+    ConversationId conversationId,
+    int selfIdentityId,
+    ParticipantId reactorId,
+    MessageId messageId,
+    string emoji,
+    DateTimeOffset sentAt,
+    CancellationToken cancellationToken);
 ```
 
-2. Rewrite the `GetRelayHostToMainSessionIdAsync` method to dynamically resolve the uplink by querying for the most recent external session:
+### A0.1: Update infrastructure writer implementation
+- **File:** `Percolator.Infrastructure/Chat/SqliteChatMessageWriter.cs`
+- **Change:** Remove the "pick participant not self" actor inference. Use the explicitly passed-in `senderId` / `readerId` / `recipientId` / `reactorId` when creating DB rows.
+
+### A1: Introduce inbound commands and handlers (text + receipts + emoji)
+Create inbound commands that resolve the conversation, persist with the correct actor ID, publish inbound-only events, and **do not** send anything over the network.
+
+**New Command & Handler Files (in `Percolator.Chat/App/Commands/` and `Percolator.Chat/App/Handlers/`):**
+Create the command and handler for Text Messages, Read Receipts, Delivered Receipts, and Emoji Annotations.
+
+*Use this exact implementation for the Text Message handler to establish the pattern, and mirror it for the others:*
+
 ```csharp
-    private async Task<SessionId?> GetRelayHostToMainSessionIdAsync(Guid relayHostPeerId)
+public sealed record ReceiveTextMessageCommand(
+    ConversationLookupKey LookupKey,
+    ParticipantId SenderId,
+    MessageId MessageId,
+    string Content,
+    DateTimeOffset SentTimestampUtc) : IRequest;
+
+public sealed class ReceiveTextMessageHandler : IRequestHandler<ReceiveTextMessageCommand>
+{
+    private readonly IConversationResolver _resolver;
+    private readonly IChatMessageWriter _writer;
+    private readonly IPublisher _publisher;
+
+    public ReceiveTextMessageHandler(
+        IConversationResolver resolver,
+        IChatMessageWriter writer,
+        IPublisher publisher)
     {
-        await Task.CompletedTask.ConfigureAwait(false);
+        _resolver = resolver;
+        _writer = writer;
+        _publisher = publisher;
+    }
 
-        var peer = _state.Peers.FirstOrDefault(p => p.PeerId == relayHostPeerId);
-        if (peer is null) return null;
+    public async Task Handle(ReceiveTextMessageCommand request, CancellationToken cancellationToken)
+    {
+        request.LookupKey.EnsureExactlyOne();
+        var resolution = await _resolver.ResolveAsync(request.LookupKey, cancellationToken).ConfigureAwait(false);
 
-        // Snapshot the known simulated peers to prevent InvalidOperationException during enumeration
-        var knownSimulatedPeerIds = _state.Peers.Select(p => p.PeerId).ToHashSet();
+        await _writer.AddTextMessageAsync(
+            resolution.Conversation.Id,
+            resolution.SelfIdentityId,
+            request.SenderId,
+            request.Content,
+            request.MessageId,
+            request.SentTimestampUtc,
+            cancellationToken).ConfigureAwait(false);
 
-        // Topology Inference: Main connects with an ephemeral ID. Therefore, any session 
-        // where the RemotePeerId is NOT in the simulator's sandbox list is the uplink to Main.
-        // We order by CreatedAt descending to ensure we get the active session if Main reconnects.
-        var uplinkSession = peer.Sessions
-            .Select(kv => kv.Value)
-            .Where(s => !knownSimulatedPeerIds.Contains(s.RemotePeerId.Value))
-            .OrderByDescending(s => s.CreatedAtUtc)
+        await _publisher.Publish(new TextMessageReceivedEvent(
+            resolution.Conversation.Id.Value,
+            request.MessageId.Value,
+            resolution.SelfIdentityId,
+            request.SenderId.Value,
+            request.Content,
+            request.SentTimestampUtc), cancellationToken).ConfigureAwait(false);
+    }
+}
+```
+
+### A2: Add inbound-only events for UI projection
+Create event types that are explicitly inbound and therefore must **not** be handled by application dispatch handlers.
+- **New Files (in `Percolator.Chat/Events/`):**
+  - `TextMessageReceivedEvent.cs`
+  - `ReadReceiptReceivedEvent.cs`
+  - `DeliveredReceiptReceivedEvent.cs`
+  - `EmojiAnnotationReceivedEvent.cs`
+- Each event must carry: `ConversationId`, `MessageId`, `SelfIdentityId`, the specific Actor ID, and Timestamp.
+
+### A3: Make outbound posting explicit about actor
+Update the existing outbound `Post*` handlers to explicitly pass the self actor ID into the refactored writer API.
+- **Files:** `Percolator.Application/Apps/Chat/Handlers/PostTextMessageHandler.cs` (and equivalent receipt/emoji handlers).
+- **Change:** After resolving the conversation, determine `selfParticipantId` via the existing `ActiveIdentityContext` implementation of `ISelfParticipantIdProvider`. Call the new `Add*Async` writer methods passing `selfParticipantId` as the actor.
+
+### A4: Route inbound envelopes to inbound commands
+- **File:** `Percolator.Application/Network/ProcessInternalEnvelopeHandler.cs`
+- **Change:** Route `ChatEnvelope` cases (`TextMessage`, `ReadReceipt`, etc.) to their respective `Receive*Command` types.
+- **Actor Resolution Logic:**
+  - Group chat: Use `ChatEnvelope.TextMessage.AuthorIdentityKey` (SPKI) to compute PKH, then resolve to `ParticipantId`. Throw if missing.
+  - Direct chat: Use `request.Context.RemotePeerGuid` to compute `ParticipantId`. Throw if missing.
+- **Add the Resolver Adapter:**
+  - Update `Percolator.Chat/App/IPkhPeerResolver.cs` signature: `Task<ParticipantId?> GetParticipantIdByPkhAsync(Pkh pkh, CancellationToken cancellationToken);`
+  - Create `Percolator.Application/Apps/Chat/PkhPeerResolver.cs` implementing `IPkhPeerResolver`. Have it depend on `IPeerPublicSigningKeyStore`.
+  - Register it in `Percolator.Application/Apps/Chat/ServiceCollectionExtensions.cs` as scoped.
+
+### A5: Ensure application dispatch boundaries
+Application network dispatch handlers must continue to listen **only** to `*PostedEvent` (outbound) and must not subscribe to any `*ReceivedEvent` types.
+
+### A: Tests
+- **Test 1:** `ReceiveTextMessageHandler` calls writer with `senderId = remoteParticipantId` and publishes `TextMessageReceivedEvent`.
+- **Test 2:** `PostTextMessageHandler` calls writer with `senderId = selfParticipantId`.
+- **Test 3:** `ProcessInternalEnvelopeHandler` routes inbound `ChatEnvelope.TextMessage` to `ReceiveTextMessageCommand`.
+- **Test 4:** Assert no handler exists in `Percolator.Application` implementing `INotificationHandler<*ReceivedEvent>`.
+
+### A: Definition of Done
+- `IChatMessageWriter` is actor-aware.
+- Inbound envelopes route to `Receive*` commands which persist and publish `*ReceivedEvent` only.
+- Application dispatch handlers listen only to `*PostedEvent` (no echo loop).
+- Unit tests pass.
+
+## Chunk B: Register Production Chat Infrastructure in Desktop.Wpf
+
+**Problem:** `Desktop.Wpf/App.xaml.cs` currently registers a mock `InMemoryChatHistory` as the chat persistence mechanism. The real SQLite-backed implementations from `Percolator.Infrastructure.Chat` (which correctly implement `IConversationRepository`, `IChatMessageWriter`, etc.) are not wired up to the Dependency Injection container.
+
+**Solution:** Remove the mock registration and call the infrastructure registration extension method.
+
+### B1: Add `AddChatInfrastructure()` call
+- **File:** `Desktop.Wpf/App.xaml.cs`
+- **Add Import:** At the top of the file, add `using Percolator.Infrastructure.Chat;`
+- **Location:** Find the `ConfigureServices` method (or wherever services are registered). Look for this existing line:
+  `services.AddInfrastructureServices(context.Configuration);` (This registers the `PercolatorDbContext`).
+- **Action:** Immediately *after* `services.AddInfrastructureServices(...)` and *before* `services.AddApplicationServices(...)`, add the following line:
+  ```csharp
+  services.AddChatInfrastructure();
+  ```
+- **Constraint Note:** Everything registered by `AddChatInfrastructure()` is **scoped** because it depends on the Entity Framework `PercolatorDbContext`. This means these services can never be injected directly into a Singleton. Any Singleton (like the `ChatReloadCoordinator` we will build next) must use `IServiceScopeFactory` to resolve them.
+
+### B2: Remove `InMemoryChatHistory` registration
+- **File:** `Desktop.Wpf/App.xaml.cs`
+- **Location:** Find the `IChatHistory` registration (likely around line 141, depending on recent changes).
+- **Action:** Delete the following line entirely:
+  ```csharp
+  services.AddSingleton<IChatHistory, InMemoryChatHistory>();
+  ```
+*(Note: Do not delete the `IChatHistory.cs` or `InMemoryChatHistory.cs` files yet. We will delete them in Chunk D once `ChatViewModel` no longer depends on them to avoid breaking the build mid-refactor).*
+
+### B: Tests
+- **Manual Verification Only:**
+  1. Build the `Desktop.Wpf` project.
+  2. Launch the application.
+  3. Confirm the application starts without any Dependency Injection or Entity Framework migration exceptions.
+
+### B: Definition of Done
+- `using Percolator.Infrastructure.Chat;` is present in `App.xaml.cs`.
+- `services.AddChatInfrastructure();` is called in the DI composition root.
+- `InMemoryChatHistory` registration is removed.
+- Project compiles and launches successfully.
+
+## Chunk C: Reactive Chat State Service & Model Refactor
+
+**Problem:** The WPF layer needs a thread-agnostic, singleton state orchestrator that aggregates chat messages per session. To support high-performance "Upsert" diffing (preserving UI scroll position), we must cleanly separate the data snapshot from the reactive Domain Model and avoid memory leaks.
+
+### C1: Refactor ChatMessage into Snapshot and Model
+- **File:** `Desktop.Wpf/Features/Chat/ChatMessageModel.cs` (Replace/Rename existing `ChatMessage.cs`)
+- **Action:** Create a pure snapshot record and a fully reactive `IDisposable` domain model. Ensure `DisposableBag` is used to prevent memory leaks on the reactive properties.
+
+```csharp
+using R3;
+using System;
+
+namespace Desktop.Wpf.Features.Chat;
+
+public sealed record ChatMessageSnapshot(
+    string Id, 
+    string Author, 
+    string Text, 
+    DateTimeOffset Timestamp, 
+    bool IsOwn, 
+    bool IsDelivered, 
+    bool IsRead);
+
+public sealed class ChatMessageModel : IDisposable
+{
+    private DisposableBag _bag;
+
+    public string Id { get; }
+    public string Author { get; }
+    public string Text { get; }
+    public DateTimeOffset Timestamp { get; }
+    public bool IsOwn { get; }
+
+    public BindableReactiveProperty<bool> IsDelivered { get; }
+    public BindableReactiveProperty<bool> IsRead { get; }
+
+    public ChatMessageModel(ChatMessageSnapshot snapshot)
+    {
+        Id = snapshot.Id;
+        Author = snapshot.Author;
+        Text = snapshot.Text;
+        Timestamp = snapshot.Timestamp;
+        IsOwn = snapshot.IsOwn;
+
+        IsDelivered = new BindableReactiveProperty<bool>(snapshot.IsDelivered).AddTo(ref _bag);
+        IsRead = new BindableReactiveProperty<bool>(snapshot.IsRead).AddTo(ref _bag);
+    }
+
+    public void UpdateFromSnapshot(ChatMessageSnapshot snapshot)
+    {
+        IsDelivered.Value = snapshot.IsDelivered;
+        IsRead.Value = snapshot.IsRead;
+    }
+
+    public void Dispose() => _bag.Dispose();
+}
+```
+
+### C2: Create `ChatStateService` (Pure Sync Pattern)
+- **File:** `Desktop.Wpf/Features/Chat/State/ChatStateService.cs`
+- **Behavior:** Owns in-memory `ObservableList<ChatMessageModel>`, uses a state gate lock, and publishes `StateMutated`. Use the **Sync** pattern instead of Replace to preserve UI scroll state.
+
+```csharp
+using ObservableCollections;
+using R3;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Linq;
+
+namespace Desktop.Wpf.Features.Chat.State;
+
+public sealed class ChatStateService : IDisposable
+{
+    private readonly ConcurrentDictionary<string, ObservableList<ChatMessageModel>> _sessionMessages = new();
+    private readonly Subject<Unit> _stateMutated = new();
+    private readonly object _stateGate = new();
+
+    public Observable<Unit> StateMutated => _stateMutated;
+
+    public ObservableList<ChatMessageModel> GetOrAddSessionMessagesList(string sessionId) 
+        => _sessionMessages.GetOrAdd(sessionId, _ => new ObservableList<ChatMessageModel>());
+
+    public void SyncMessages(string sessionId, IReadOnlyList<ChatMessageSnapshot> snapshots)
+    {
+        var list = GetOrAddSessionMessagesList(sessionId);
+
+        lock (_stateGate)
+        {
+            var existingById = list.ToDictionary(m => m.Id);
+            
+            foreach (var snap in snapshots)
+            {
+                if (existingById.TryGetValue(snap.Id, out var existing))
+                {
+                    existing.UpdateFromSnapshot(snap);
+                }
+                else
+                {
+                    list.Add(new ChatMessageModel(snap));
+                }
+            }
+        }
+        
+        _stateMutated.OnNext(Unit.Default);
+    }
+
+    public void Dispose()
+    {
+        lock (_stateGate)
+        {
+            foreach (var list in _sessionMessages.Values)
+            {
+                foreach (var msg in list) msg.Dispose();
+                list.Clear();
+            }
+            _sessionMessages.Clear();
+        }
+        _stateMutated.Dispose();
+    }
+}
+```
+
+### C3: Create `ChatReloadCoordinator` (Debounced async load)
+- **File:** `Desktop.Wpf/Features/Chat/ChatReloadCoordinator.cs`
+- **Behavior:**
+  - Depends on `ChatStateService` and `IServiceScopeFactory`.
+  - Exposes `public void TriggerReloadForSession(string sessionId)`.
+  - Must use `SelectAwait` to safely handle asynchronous database calls within the R3 pipeline.
+
+**Implement the pipeline exactly like this:**
+```csharp
+private readonly Subject<string> _reloadTrigger = new();
+private readonly DisposableBag _bag = new();
+
+// In the constructor:
+_reloadTrigger
+    .Debounce(TimeSpan.FromMilliseconds(50))
+    .SelectAwait(async (sessionId, ct) =>
+    {
+        await ReloadCoreAsync(sessionId, ct).ConfigureAwait(false);
+        return Unit.Default;
+    }, AwaitOperation.Drop) // Drop prevents overlapping DB queries for the same session burst
+    .Subscribe()
+    .AddTo(ref _bag);
+
+public void TriggerReloadForSession(string sessionId)
+{
+    _reloadTrigger.OnNext(sessionId);
+}
+```
+
+**In the `ReloadCoreAsync` method:**
+- Create a scope: `using var scope = _scopeFactory.CreateScope();`
+- Resolve `IConversationRepository`.
+- Load messages via `IConversationRepository.GetByIdAsync(...)`.
+- Map the DB `Percolator.Chat.Message` entities into `Desktop.Wpf.Features.Chat.ChatMessageSnapshot` records. (Use a simple property-to-property mapping. For `IsOwn`, check if the message `SenderId` matches the current `ActiveIdentityContext`'s Self Participant ID).
+- Call `_state.SyncMessages(sessionId, mappedSnapshots)`.
+
+### C4: Create `ChatStateUpdateHandlers` (Live MediatR Updates)
+- **File:** `Desktop.Wpf/Features/Chat/Handlers/ChatStateUpdateHandlers.cs`
+- **Behavior:** Implements `INotificationHandler<TextMessagePostedEvent>` and `INotificationHandler<TextMessageReceivedEvent>`.
+- **Action:** - If the `ConversationId` maps to a known open session, map the event data into a `ChatMessageSnapshot`.
+  - Pass the mapped snapshot to `_state.SyncMessages(sessionId, new[] { snapshot })`.
+  - *(Note: A robust dev will also trigger `ChatReloadCoordinator.TriggerReloadForSession` as a fallback, but pushing the single message snapshot is faster for the UI).*
+
+### C: Definition of Done
+- `ChatMessage` is successfully split into `ChatMessageSnapshot` and `ChatMessageModel`.
+- `ChatMessageModel` safely implements `IDisposable` with a `DisposableBag`.
+- `ChatStateService` manages messages via the `SyncMessages` (Upsert) pattern.
+- The reload coordinator and update handlers successfully map infrastructure/domain events into Snapshots and feed them into the State Service.
+
+## Chunk D: Pure Projection ChatViewModel
+
+**Problem:** `ChatViewModel` currently uses a mock `IChatHistory` abstraction and a manual `ObservableCollection`. It must be refactored to project its state purely from the `ChatStateService` using R3 reactive patterns, and it must use WPF native sorting to arrange the messages chronologically without mutating the domain.
+
+### D1: Implement the WPF Chronological Comparer
+- **File:** `Desktop.Wpf/Features/Chat/ChatViewModel.cs`
+- **Action:** At the bottom of the file (outside the `ChatViewModel` class but inside the namespace), add a custom comparer to sort the ViewModels chronologically. Chat history should be sorted ascending (oldest at the top, newest at the bottom).
+
+```csharp
+public sealed class ChatMessageChronologicalComparer : System.Collections.IComparer
+{
+    public int Compare(object? x, object? y)
+    {
+        if (x is null && y is null) return 0;
+        if (x is null) return 1;
+        if (y is null) return -1;
+        
+        var msgX = (ChatMessageModel)x;
+        var msgY = (ChatMessageModel)y;
+        
+        // Ascending: oldest at the top, newest at the bottom
+        return msgX.Timestamp.CompareTo(msgY.Timestamp);
+    }
+}
+```
+
+### D2: Rewrite `ChatViewModel` Dependencies and Fields
+- **File:** `Desktop.Wpf/Features/Chat/ChatViewModel.cs`
+- **Action:** 1. Remove the `IChatHistory _history` field entirely.
+  2. Add the following required constructor dependencies:
+    - `Desktop.Wpf.Features.Chat.State.ChatStateService _chatState`
+    - `ChatReloadCoordinator _reloadCoordinator`
+    - `IMediator _mediator`
+    - `IUiDispatcher _ui`
+  3. Add the reactive tracking fields:
+     ```csharp
+     private ISynchronizedView<ChatMessageModel, ChatMessageModel>? _messagesView;
+     private INotifyCollectionChangedSynchronizedViewList<ChatMessageModel>? _messagesSyncList;
+     ```
+  4. Change the `Messages` property type to `object?` so WPF can bind to the `ListCollectionView`:
+     ```csharp
+     public object? Messages { get; private set; }
+     ```
+
+### D3: Implement `SetSession` (The Reactive Pipeline)
+- **File:** `Desktop.Wpf/Features/Chat/ChatViewModel.cs`
+- **Action:** Replace the existing `SetSession` logic with the following reactive projection pipeline. Note that `SetSession` is called exactly once per scoped instance.
+
+```csharp
+public void SetSession(string sessionId)
+{
+    _sessionId = sessionId;
+
+    // Trigger initial background load from SQLite
+    _reloadCoordinator.TriggerReloadForSession(sessionId);
+
+    // 1. Get the raw, unsorted domain list
+    var domainList = _chatState.GetOrAddSessionMessagesList(sessionId);
+
+    // 2. Create a pass-through view and track it
+    _messagesView = domainList.CreateView(m => m).AddTo(ref _bag);
+
+    // 3. Bridge the view to the WPF UI thread
+    _messagesSyncList = _messagesView.ToNotifyCollectionChanged(_ui.CollectionEventDispatcher);
+
+    // 4. Wrap it in a WPF CollectionView for native chronological sorting
+    var collectionView = (System.Windows.Data.ListCollectionView)System.Windows.Data.CollectionViewSource.GetDefaultView(_messagesSyncList);
+    collectionView.CustomSort = new ChatMessageChronologicalComparer();
+    
+    Messages = collectionView;
+
+    // 5. Force the UI to refresh its sort when background mutations occur
+    _chatState.StateMutated
+        .ObserveOnCurrentSynchronizationContext()
+        .Subscribe(_ => collectionView.Refresh())
+        .AddTo(ref _bag);
+}
+```
+
+### D4: Rewrite `SendCommand` to use MediatR
+- **File:** `Desktop.Wpf/Features/Chat/ChatViewModel.cs`
+- **Action:** Update the `SendCommand` execution logic to dispatch the new outbound command you built in Chunk A.
+
+```csharp
+SendCommand = new AsyncRelayCommand(async _ =>
+{
+    if (_sessionId is null) return;
+    var text = MessageInput.Value;
+    if (string.IsNullOrWhiteSpace(text)) return;
+
+    var lookup = ConversationLookupKey.ForDirectSession(Guid.Parse(_sessionId));
+    var messageId = new MessageId(Guid.NewGuid());
+    var sentTs = DateTimeOffset.UtcNow;
+
+    await _mediator.Send(new PostTextMessageCommand(lookup, messageId, text, sentTs));
+
+    MessageInput.Value = string.Empty;
+}, _ => CanSend.Value);
+```
+
+### D5: Update `DisposeCore`
+- **File:** `Desktop.Wpf/Features/Chat/ChatViewModel.cs`
+- **Action:** Ensure the UI resources are released. Add `_messagesSyncList?.Dispose();` inside `DisposeCore()`.
+
+### D6: Clean Up Dead Code
+- **Action:** Delete `Desktop.Wpf/Features/Chat/IChatHistory.cs` and `Desktop.Wpf/Features/Chat/InMemoryChatHistory.cs`. Ensure no references to these files remain.
+
+### D: Definition of Done
+- `ChatViewModel` has no dependency on `IChatHistory`.
+- `Messages` is exposed as an `object?` containing a sorted WPF `ListCollectionView`.
+- Sending a message routes purely through `IMediator` (`PostTextMessageCommand`).
+- Dead files are deleted.
+- The project compiles and the chat UI loads properly.
+
+## Chunk E: Simulator Rolling Chat State
+
+**Problem:** Simulated peers need to remember a bounded window of recent chat messages for debugging and display. This must use the existing Domain Snapshot pattern (`Freeze()` / `PeerStateSnapshot`) and persist via JSON without breaking the current hydration flows.
+
+### E1: Add chat snapshot record to `PeerStateSnapshot`
+- **File:** `Desktop.Wpf/Features/Simulator/PeerStateSnapshot.cs`
+- **Action 1:** Add a new record near the other snapshot records in the file:
+  ```csharp
+  public sealed record SimulatedChatMessageSnapshot(bool IsFromMain, string Content, DateTimeOffset ReceivedUtc);
+  ```
+- **Action 2:** Update the `PeerStateSnapshot` primary constructor to include the new list. Append it at the very end of the parameter list to minimize churn:
+  ```csharp
+  public sealed record PeerStateSnapshot(
+      // ... existing parameters ...
+      IReadOnlyList<SimulatedChatMessageSnapshot> RecentChatMessages);
+  ```
+
+### E2: Add bounded recent chat state to `SimulatedPeerModel`
+- **File:** `Desktop.Wpf/Features/Simulator/SimulatedPeerModel.cs`
+- **Action 1:** Add the tracking lists as fields/properties:
+  ```csharp
+  private readonly ObservableList<SimulatedChatMessageSnapshot> _recentChatMessages = new();
+  public IReadOnlyObservableList<SimulatedChatMessageSnapshot> RecentChatMessages => _recentChatMessages;
+  internal ObservableList<SimulatedChatMessageSnapshot> RecentChatMessagesMutable => _recentChatMessages;
+  ```
+- **Action 2:** Add the mutation method (bounded to 50 messages):
+  ```csharp
+  public void AddChatMessage(bool isFromMain, string content, DateTimeOffset receivedUtc)
+  {
+      const int MaxMessages = 50;
+      _recentChatMessages.Add(new SimulatedChatMessageSnapshot(isFromMain, content, receivedUtc));
+      while (_recentChatMessages.Count > MaxMessages)
+      {
+          _recentChatMessages.RemoveAt(0);
+      }
+  }
+  ```
+
+### E3: Extend `Freeze()` to include recent chat
+- **File:** `Desktop.Wpf/Features/Simulator/SimulatedPeerModel.cs`
+- **Action:** Inside the `Freeze()` method, update the `new PeerStateSnapshot(...)` instantiation to include the new field:
+  `RecentChatMessages: _recentChatMessages.ToList()`
+
+### E4: Hydrate recent chat in `SimulatorStateService`
+- **File:** `Desktop.Wpf/Features/Simulator/SimulatorStateService.cs`
+- **Action:** Update `CreatePeerFromSnapshot(PeerStateSnapshot snap)`. After constructing `var model = new SimulatedPeerModel(...);` but *before* returning it, hydrate the mutable list:
+  ```csharp
+  foreach (var m in snap.RecentChatMessages)
+  {
+      model.RecentChatMessagesMutable.Add(m);
+  }
+  ```
+
+### E5: Persist recent chat via JSON DTO mapping
+- **File:** `Desktop.Wpf/Features/Simulator/JsonSimulatorStateRepository.cs`
+- **Action 1:** Add DTO representations at the bottom of the file (or wherever `SimulatedPeerDto` is defined):
+  ```csharp
+  public sealed class SimulatedChatMessageDto
+  {
+      public bool IsFromMain { get; set; }
+      public string Content { get; set; } = "";
+      public DateTimeOffset ReceivedUtc { get; set; }
+  }
+  ```
+- **Action 2:** Add the list property to `SimulatedPeerDto`:
+  ```csharp
+  public List<SimulatedChatMessageDto> RecentChatMessages { get; set; } = new();
+  ```
+- **Action 3:** Update `CreateDto(PeerStateSnapshot model)`:
+  ```csharp
+  RecentChatMessages = model.RecentChatMessages.Select(m => new SimulatedChatMessageDto
+  {
+      IsFromMain = m.IsFromMain,
+      Content = m.Content,
+      ReceivedUtc = m.ReceivedUtc
+  }).ToList()
+  ```
+- **Action 4:** Update `CreatePeerSnapshot(SimulatedPeerDto dto)`: After creating `SimulatedPeerModel model = new SimulatedPeerModel(...)` and before calling `model.Freeze()`, hydrate the model:
+  ```csharp
+  foreach (var m in dto.RecentChatMessages)
+  {
+      model.RecentChatMessagesMutable.Add(new SimulatedChatMessageSnapshot(m.IsFromMain, m.Content, m.ReceivedUtc));
+  }
+  ```
+
+### E6: Mark runtime tracker dirty on chat changes
+- **File:** `Desktop.Wpf/Features/Simulator/Tracking/SimulatedPeerRuntimeTracker.cs`
+- **Action:** Add the following subscription inside the constructor to ensure the JSON auto-saves when a chat message is received:
+  ```csharp
+  peer.RecentChatMessagesMutable.ObserveChanged().Subscribe(_ => _dirty.OnNext(Unit.Default)).AddTo(ref _bag);
+  ```
+
+### E: Definition of Done
+- `SimulatedPeerModel` stores up to 50 recent chat messages.
+- `Freeze()` captures them into `PeerStateSnapshot`.
+- JSON round-trip preserves chat messages.
+- `SimulatedPeerRuntimeTracker` triggers a save on chat changes.
+- Project compiles successfully.
+
+## Chunk F: Simulator Chat Ingress & Egress
+
+**Problem:** Simulated peers must: (1) parse incoming chat envelopes from Main and store them, and (2) generate outbound chat envelopes back to Main over the correct cryptographic session.
+
+### F1: Ingress — Direct path (`ReceiveOpaqueMessageFromMainAsync`)
+- **File:** `Desktop.Wpf/Features/Simulator/SimulatorStateService.cs`
+- **Action:** In `ReceiveOpaqueMessageFromMainAsync`, after the call that parses `InternalEnvelope` (look for `InternalEnvelope.Parser.ParseFrom(...)`), and immediately before the existing `PrekeyEnvelope` handling branch, add the following check:
+
+```csharp
+if (env.ApplicationPayloadCase == InternalEnvelope.ApplicationPayloadOneofCase.ChatEnvelope
+    && env.ChatEnvelope?.MessageCase == ChatEnvelope.MessageOneofCase.TextMessage)
+{
+    var text = env.ChatEnvelope.TextMessage;
+    await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+    try
+    {
+        model.AddChatMessage(
+            isFromMain: true,
+            content: text.Content,
+            receivedUtc: text.SentTimestampUtc?.ToDateTimeOffset() ?? DateTimeOffset.UtcNow);
+    }
+    finally
+    {
+        _stateGate.Release();
+    }
+    _saveTrigger.OnNext(Unit.Default);
+    return new DeliverOpaqueMessageResponse { Version = 1 };
+}
+```
+
+### F2: Ingress — Relayed path (`ReceiveRelayedOpaquePayloadAsync`)
+- **File:** `Desktop.Wpf/Features/Simulator/SimulatorStateService.cs`
+- **Problem:** `ReceiveRelayedOpaquePayloadAsync` currently only tries to parse `opaqueBytes` as `EstablishSessionResponse`. It needs to attempt session decryption for chat messages.
+- **Action:** After the existing `EstablishSessionResponse` parse attempt (the try/catch that returns when it succeeds), and immediately before the final `return null;`, add this decryption attempt block:
+
+```csharp
+// Try to decrypt as a ratchet message (chat or other encrypted payload from Main via relay)
+try
+{
+    var cipher = new SessionRatchetMessage(opaqueBytes);
+    var clock = ResolveClock();
+
+    await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+    try
+    {
+        var peerModel = _peers.FirstOrDefault(p => p.PeerId == simulatedPeerId);
+        if (peerModel is null) return null;
+
+        foreach (var kv in peerModel.SessionsMutable)
+        {
+            try
+            {
+                var pt = kv.Value.Decrypt(cipher, clock);
+                peerModel.SessionsMutable[kv.Key] = kv.Value;
+
+                if (pt.Value.Length == 0) return null;
+
+                var innerEnv = InternalEnvelope.Parser.ParseFrom(pt.Value);
+                if (innerEnv.ApplicationPayloadCase == InternalEnvelope.ApplicationPayloadOneofCase.ChatEnvelope
+                    && innerEnv.ChatEnvelope?.MessageCase == ChatEnvelope.MessageOneofCase.TextMessage)
+                {
+                    var txt = innerEnv.ChatEnvelope.TextMessage;
+                    peerModel.AddChatMessage(
+                        isFromMain: true,
+                        content: txt.Content,
+                        receivedUtc: txt.SentTimestampUtc?.ToDateTimeOffset() ?? DateTimeOffset.UtcNow);
+                    _saveTrigger.OnNext(Unit.Default);
+                }
+                return null; // Decrypted successfully, handled
+            }
+            catch { /* not this session */ }
+        }
+    }
+    finally
+    {
+        _stateGate.Release();
+    }
+}
+catch { /* not a ratchet message */ }
+```
+
+### F3: Egress — `SendChatMessageToMainAsync`
+- **File:** `Desktop.Wpf/Features/Simulator/SimulatorStateService.cs` (and `ISimulatorStateService.cs`)
+- **Action 1:** Add the method signature to the interface:
+  `Task SendChatMessageToMainAsync(Guid simulatedPeerId, string content, CancellationToken cancellationToken = default);`
+- **Action 2:** Implement the public method in the service. Note the deterministic session selection query.
+
+```csharp
+public async Task SendChatMessageToMainAsync(Guid simulatedPeerId, string content, CancellationToken cancellationToken = default)
+{
+    cancellationToken.ThrowIfCancellationRequested();
+
+    var chatEnvelope = new ChatEnvelope
+    {
+        TextMessage = new TextMessage
+        {
+            MessageId = ByteString.CopyFrom(Guid.NewGuid().ToByteArray()),
+            Content = content,
+            SentTimestampUtc = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow)
+        }
+    };
+    var internalEnvelope = new InternalEnvelope { ChatEnvelope = chatEnvelope };
+
+    await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+    try
+    {
+        var model = _peers.FirstOrDefault(p => p.PeerId == simulatedPeerId)
+            ?? throw new InvalidOperationException($"No simulated peer with id {simulatedPeerId}");
+
+        // Session selection: Select the most recently created session
+        var sessionId = model.SessionsMutable
+            .OrderByDescending(kv => kv.Value.CreatedAtUtc)
+            .Select(kv => kv.Key)
             .FirstOrDefault();
 
-        return uplinkSession?.Id;
+        if (sessionId == default)
+            throw new InvalidOperationException($"No session found for peer {simulatedPeerId} to send chat message");
+
+        // Encrypt using the existing helper
+        var cipher = await EncryptInternalEnvelopeAsync(simulatedPeerId, sessionId, internalEnvelope, cancellationToken)
+            .ConfigureAwait(false);
+
+        // Record outbound message in peer's chat history
+        model.AddChatMessage(isFromMain: false, content: content, receivedUtc: DateTimeOffset.UtcNow);
+
+        // Route based on connection mode
+        if (model.ConnectionMode.CurrentValue == ConnectionMode.Relay)
+        {
+            var relayHostPeerId = model.RelayPeerId.CurrentValue;
+            if (relayHostPeerId != Guid.Empty)
+            {
+                await EnqueueRelayUpstreamToMainAsync(
+                    relayHostPeerId: relayHostPeerId,
+                    opaqueBytes: cipher.Value,
+                    debugType: "Chat",
+                    cancellationToken: cancellationToken).ConfigureAwait(false);
+            }
+        }
+        else
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var messageService = scope.ServiceProvider.GetRequiredService<Percolator.Application.Network.PercolatorMessageService>();
+
+            var request = new DeliverOpaqueMessageRequest
+            {
+                Version = 1,
+                Payload = ByteString.CopyFrom(cipher.Value)
+            };
+
+            var ctx = new ServerCallContextStub(
+                method: "/percolator.contracts.TransportService/DeliverOpaqueMessage",
+                peer: "ipv4:127.0.0.1:0",
+                deadline: DateTime.UtcNow.AddMinutes(1),
+                requestHeaders: new Metadata(),
+                cancellationToken: cancellationToken);
+
+            _ = await messageService.DeliverOpaqueMessage(request, ctx).ConfigureAwait(false);
+        }
     }
-```
-
-#### Definition of Done:
-1. `SimulatedPeerModel` no longer contains the phrase `InboundMainUplinkSessionId`.
-2. `SimulatorRelayTabViewModel` no longer references `MainNodeSentinelPeerId`.
-3. `GetRelayHostToMainSessionIdAsync` successfully uses the topology inference query to return the session.
-
-## Chunk D — Reactive MVVM: Fix Sidebar Reactivity and Sorting
-
-**Context & AI Instructions:**
-The session sidebar is not updating reactively when background domain events mutate existing connections. We must add a mutation broadcast to the Domain layer, and utilize native Cysharp `AttachSort` and `AttachFilter` in the ViewModel.
-
-Execute the following 3 steps exactly.
-
-#### Step 1: Add a Mutation Broadcast to the State Service
-**File:** `Desktop.Wpf/Features/Sessions/PeerConnectionStateService.cs`
-
-The state service must announce when it has finished a batch mutation so UI views know to refresh their sorts/filters.
-1. Add a new field: `private readonly Subject<R3.Unit> _stateMutated = new();`
-2. Add a public property to expose it: `public Observable<R3.Unit> StateMutated => _stateMutated;`
-3. Inside `Dispose()`, add `_stateMutated.Dispose();`
-4. Inside `UpdateConnections(...)`, immediately *after* the `lock (_stateGate)` block closes, add:
-   `_stateMutated.OnNext(R3.Unit.Default);`
-5. Inside `UpdatePendingInbound(...)`, immediately *after* the `lock (_stateGate)` block closes, add:
-   `_stateMutated.OnNext(R3.Unit.Default);`
-
-#### Step 2: Implement Native View Sorting and Filtering
-**File:** `Desktop.Wpf/Features/Sessions/SessionsSidebarViewModel.cs`
-
-Rewrite the sorting and filtering logic in the constructor to use the native Cysharp `ISynchronizedView` APIs.
-Find the block containing `AttachFilter();` and `SearchText.Subscribe...` and replace it entirely with this:
-
-```csharp
-// 3. Attach the dynamic filter logic EXACTLY ONCE
-_connectionsView.AttachFilter((model, vm) => 
-{
-    var term = SearchText.Value?.Trim() ?? "";
-    if (string.IsNullOrEmpty(term)) return true;
-    return vm.DisplayName.CurrentValue?.Contains(term, StringComparison.OrdinalIgnoreCase) == true;
-});
-
-// 3b. Attach the dynamic sort logic (Chronological by Last Activity)
-_connectionsView.AttachSort(Comparer<PeerConnectionListItemViewModel>.Create((a, b) => 
-{
-    // Descending order: newest at the top
-    return b.LastUpdate.CurrentValue.CompareTo(a.LastUpdate.CurrentValue);
-}));
-
-// 4. Force the view to re-evaluate when search text changes
-SearchText
-    .Subscribe(_ => _connectionsView.RefreshFilter())
-    .AddTo(ref _bag);
-
-// 4b. Force the view to re-evaluate when existing domain items are silently mutated
-_stateService.StateMutated
-    .ObserveOnCurrentSynchronizationContext()
-    .Subscribe(_ => 
+    finally
     {
-        _connectionsView.RefreshFilter();
-        _connectionsView.RefreshSort();
-    })
-    .AddTo(ref _bag);
+        _stateGate.Release();
+    }
+    _saveTrigger.OnNext(Unit.Default);
+}
 ```
-*(Delete the local `void AttachFilter()` function completely).*
 
-#### Definition of Done:
-1. `PeerConnectionStateService` emits `StateMutated.OnNext` outside of its locks.
-2. `SessionsSidebarViewModel` utilizes `AttachSort` to organize the UI descending by `LastUpdate`.
-3. `SessionsSidebarViewModel` never calls `ResetFilter()`. It only calls `RefreshFilter()` and `RefreshSort()` in response to state changes.
-
-## Chunk I — Notification badge + default focus behavior for Connection Management button
-
-Outcome:
-
-- Header button shows count badge and pulses when inbound requests exist.
-- Opening dialog defaults to Tab 1 if inbound exists else Tab 2.
-
-Work (recipe):
-
-- Badge count
-  - Ensure the header “Connection Management / Add peer” button displays the inbound pending count.
-  - The count must be sourced from shared state (store-level), not recomputed ad-hoc in the view.
-  - It’s acceptable to *project* the store count into a ViewModel property for binding.
-
-- Pulse / attention behavior
-  - When the inbound pending count transitions:
-    - `0 -> 1` (first pending arrives)
-    - or `n -> n+1` (more pendings arrive)
-  - the header badge should pulse to draw attention.
-  - Keep this purely UI behavior (no domain logic).
-
-- Default tab selection when opening Connection Management
-  - At dialog open time, choose the initial tab based on whether inbound pending exists:
-    - inbound pending exists: default to the Incoming Signals tab
-    - otherwise: default to the Network Search tab
-  - This decision should be made once when the dialog is created/opened (not continuously).
-
-Definition of done:
-
-- Badge count matches `ISecureChannelsStore.PendingInboundCount`.
-- Badge is visible and pulses whenever inbound pending exists.
-- Opening Connection Management defaults to Incoming Signals tab when pending exists, otherwise defaults to Network Search.
-
-Minimal tests:
-
-- Unit test that a VM projection of `PendingInboundCount` updates when store pending inbound changes.
-
-Implementation note:
-
-- This chunk may already be complete:
-  - `MatButton.NotificationCount` has built-in pulsing behavior when the count increases.
-  - The sidebar button already binds its `NotificationCount` to a pending-handshake count.
-  - `ConnectionManagementDialogViewModel.InitializeAsync` already selects the Incoming tab when pending invitations exist.
-- If you want stricter alignment to the definition of done, the remaining delta would be to bind the badge count *directly* (or via a projection) to `ISecureChannelsStore.PendingInboundCount` and to base the default tab decision on the same store count rather than any dialog-local enumeration.
-
----
-
-## Chunk J — Uplink Inspector side panel (Direct vs Relay topology)
-
-Outcome:
-
-- “UPLINK” button toggles a side panel showing connection topology:
-  - Direct: Main <-> Peer
-  - Relayed: Main -> Relay -> Peer
-
-Work (recipe):
-
-- Authoritative requirements
-  - Follow `design/main-window.md` “Uplink Inspector UI” section.
-  - Uplink is only meaningful for an active channel header; it is disabled for Pending.
-
-- State ownership
-  - Topology/route provenance is shared, notification-driven state:
-    - Source: fields on `SecureChannelModel` populated by projection (Chunk H).
-    - Do not store route provenance inside a scoped VM.
-  - Inspector visibility/toggle is ephemeral UI state:
-    - OK to keep in the right pane VM as `BindableReactiveProperty<bool> IsUplinkOpen`.
-    - Alternatively keep in `SelectedSecureChannelStateModel` if you want it preserved per-channel.
-
-- Model shape needed for UI
-  - Ensure `SecureChannelModel` exposes enough to render topology:
-    - Minimal for Chunk J:
-      - Route kind: Direct vs Relay (and optionally Group)
-      - Relay identifier/name when relayed
-    - If `SecureChannelKind` already distinguishes `Relay`, use it.
-    - Otherwise add explicit route fields as described in Chunk H (e.g., `RouteText`, `RelayPeerId`).
-
-- ViewModel projection
-  - Implement an inspector VM that projects from the selected channel (store) + the per-channel ephemeral state:
-    - File: `Desktop.Wpf/Features/Sessions/UplinkInspectorViewModel.cs`
-    - Inputs:
-      - `SelectedChannelModel`
-      - `ISecureChannelsStore`
-      - Optional: `SelectedSecureChannelStateCache` if preserving open/closed per channel.
-    - Outputs:
-      - `BindableReactiveProperty<bool> IsOpen`
-      - `BindableReactiveProperty<string> TopologyText` (or structured nodes)
-      - `BindableReactiveProperty<bool> IsEnabled` (false when Pending/Failed)
-
-- UI implementation
-  - Add a header “UPLINK” button to the active channel header in the right pane.
-    - If the right pane is a `ContentControl` with templates, add button within the Active template.
-  - Add the sliding side panel:
-    - Use a `Grid` column or overlay `Border` with animation when `IsOpen` changes.
-    - Keep visuals simple for the first pass:
-      - Direct: `[Operator Node] <====> [Peer Name]`
-      - Relayed: `[Operator Node] ----> [Relay] ----> [Peer Name]`
-
-Definition of done:
-
-- Active direct channel shows direct topology.
-- Active relayed channel shows relay topology with relay identifier.
-- Pending channel disables uplink.
-
-Minimal tests:
-
-- Unit test for inspector VM mapping from shared model route fields to output text/state.
-
----
-
-## Chunk K — Session reset / recovery action
-
-Outcome:
-
-- Kebab menu includes “Reset Secure Session”.
-- Triggers a new outbound **Reverse-Signal invitation** behind the scenes while keeping channel history.
-
-Work (recipe):
-
-- Authoritative requirements
-  - Follow `design/main-window.md` “Session Reset / Recovery” section.
-  - Goal is to heal a desynchronized ratchet without losing the channel row/history.
-
-- Identify existing reverse-signal primitives to reuse
-  - Invite construction:
-    - File: `Percolator.Application/Network/MainReverseSignalInviteFactory.cs`
-    - API: `IMainReverseSignalInviteFactory.CreateInvite()`
-    - Side effects:
-      - Persists a `SentInvitation` keyed by `request_correlation_id`.
-      - Persists a per-invite signed pre-key (needed later for inviter finalization).
-  - Inbound invite queueing:
-    - File: `Percolator.Application/Network/EstablishDirectSessionService.cs`
-    - Publishes `PendingSessionCreatedNotification`.
-  - Accepting invite:
-    - File: `Percolator.Application/Network/ApprovePendingSessionCommand.cs`
-    - Publishes `SecureSessionCreatedNotification` when acceptor establishes.
-    - Delivers `InviteHandshakeResponse` via `IInviteHandshakeResponseDeliveryService`.
-  - Inviter finalization:
-    - File: `Percolator.Application/Network/Handshake/InitiatorFinalizeService.cs`
-    - Correlates response by `request_correlation_id` to `SentInvitation` and publishes `SecureSessionCreatedNotification`.
-
-- State ownership
-  - “Reset in progress” is primarily an ephemeral UI concern scoped to a channel:
-    - Store it in `SelectedSecureChannelStateModel` as a reactive field:
-      - Example: `ReactiveProperty<bool> IsReestablishing`
-      - Example: `ReactiveProperty<string?> ReestablishingText`
-    - This keeps the main shared store focused on notification-driven channel facts.
-  - The channel row itself MUST remain the authoritative `SecureChannelModel` from the store.
-    - Do not delete and recreate the channel just to reset.
-
-- Command surface (ViewModel)
-  - Add a kebab menu affordance in the Active channel header UI:
-    - “Reset Secure Session” item.
-  - Implement a VM command that triggers reset:
-    - File: right-pane/header VM (from Chunk G)
-    - Behavior:
-      - Sets `SelectedSecureChannelStateModel.IsReestablishing = true`.
-      - Sends an application command via `IMediator.Send(...)` (or invokes an existing service) to initiate a new reverse-signal invite.
-      - Does not directly mutate `SecureChannelsStore`.
-
-- Application-layer behavior to trigger new invite
-  - Prefer an explicit application command (so it is testable and does not couple UI to services):
-    - Example: `ResetSecureSessionCommand(SecureChannelKey channelKey | PeerId remotePeerId, RouteChoice route)`.
-  - Implementation must:
-    - Build a fresh reverse-signal invite via `IMainReverseSignalInviteFactory.CreateInvite()`.
-    - Deliver it to the remote peer using the same routing primitives as outbound initiation (Chunk H).
-    - Ensure an outbound pending row exists and will migrate to active via Chunk F.6 correlation.
-
-- UI behavior
-  - While reset is pending:
-    - Show a temporary banner/system message in the right pane: “Re-establishing secure connection…”.
-    - Disable sending or mark messages as queued (placeholder acceptable).
-  - When the new session is established:
-    - Clear `IsReestablishing`.
-    - Channel remains selected; UI returns to Active.
-
-Definition of done:
-
-- “Reset Secure Session” is available for an active 1:1 channel.
-- Triggering reset creates a new outbound pending action and shows “Re-establishing…” immediately.
-- When the new session completes, the channel returns to Active without losing the channel row.
-
-Minimal tests:
-
-- Unit test: triggering reset sets `IsReestablishing` and invokes the application command.
-- Integration smoke: completing the reverse-signal flow clears `IsReestablishing` and results in an active session.
-
----
-
-## Chunk L — Visual fidelity pass (match screenshots)
-
-Outcome:
-
-- Style and layout improvements to match `design/*.png`:
-  - tab strip styling
-  - button states
-  - badge colors
-  - list item layout
-
-Work (recipe):
-
-- Scope/constraints
-  - This chunk is UI-only; do not change application logic or store/projection semantics.
-  - Prefer consolidating WPF styles/templates over adding per-view ad-hoc styling.
-
-- Authoritative references
-  - Visual targets: `Desktop.Wpf/design/*.png`
-  - Behavior targets (do not regress): `Desktop.Wpf/design/main-window.md`
-
-- Primary files to touch
-  - List visuals:
-    - `Desktop.Wpf/Features/Sessions/SessionsSidebarView.xaml`
-    - `Desktop.Wpf/Features/Sessions/SessionsSidebarViewModel.cs` (only if binding surface needs minor extensions)
-    - `Desktop.Wpf/Features/Sessions/SecureChannelListItemViewModel.cs` (only if additional bindable display props are needed)
-  - Shared styles/resources:
-    - `Desktop.Wpf/Shared/Theme/Styles.xaml`
-    - `Desktop.Wpf/Shared/Theme/Typography.xaml`
-    - `Desktop.Wpf/Shared/Theme/Colors.xaml` (if present)
-    - `Desktop.Wpf/Shared/Theme/Icons.xaml`
-  - Shared controls:
-    - `Desktop.Wpf/Shared/Controls/MatButton.xaml`
-    - `Desktop.Wpf/Shared/Controls/MatChip.xaml`
-    - `Desktop.Wpf/Shared/Controls/InitialsAvatar.xaml`
-
-- Concrete UI checklist
-  - Tab strip styling (Connection Management and any right-pane tab usage)
-  - Button states:
-    - hover/pressed/disabled visuals match screenshots
-  - Badge colors and shapes:
-    - unread badge
-    - channel tech badge (DIRECT/RELAY/GROUP/PENDING/FAILED)
-    - add-peer notification badge
-  - List item layout:
-    - avatar alignment + online dot
-    - name/snippet typography
-    - timestamp alignment
-
-Definition of done:
-
-- Screens match `design/*.png` within reasonable tolerance.
-- No behavioral regressions in filtering, selection, pending badge, and store-driven updates.
-
----
-
-## Chunk M — Cleanup / remove legacy handshake UI and orphaned code
-
-Outcome:
-
-- The codebase has a single, clear handshake entry point: **Connection Management**.
-- Legacy UI and mappings that are no longer used are removed to avoid confusion and bit-rot.
-
-Work (recipe):
-
-- Inventory and delete legacy handshake UI
-  - Remove legacy NewHandshake dialog artifacts if no longer used:
-    - `Desktop.Wpf/Features/Sessions/NewHandshakeDialogWindow.xaml`
-    - `Desktop.Wpf/Features/Sessions/NewHandshakeDialogWindow.xaml.cs`
-    - `Desktop.Wpf/Features/Sessions/NewHandshakeDialogViewModel.cs`
-  - Remove any related tests that only exist for the deleted UI.
-
-- Remove DI registrations and view mappings
-  - DI:
-    - File: `Desktop.Wpf/App.xaml.cs`
-    - Remove any `services.Add...<NewHandshakeDialogViewModel>()` style registrations.
-  - Window/view mappings:
-    - File: `Desktop.Wpf/Shared/Theme/ViewMappings.xaml` and/or `Desktop.Wpf/Shared/Windowing/ViewMappings.xaml` (remove from the one actually used)
-    - Remove mappings for legacy dialog.
-
-- Remove call sites
-  - Search for and remove remaining invocations:
-    - `ShowFor<NewHandshakeDialogViewModel>`
-    - `ShowFor<NewHandshakeDialogWindow>`
-  - Ensure they route to:
-    - `ConnectionManagementDialogViewModel`
-
-- Remove legacy event listeners/invalidation shims
-  - Search for MediatR listeners or event buses that exist only to refresh the legacy handshake UI.
-  - Candidate based on current code:
-    - `Desktop.Wpf/Features/Sessions/ConnectionManagementInboxEventListener.cs` (calls `IMainInvitationInboxEvents.NotifyChanged()` on `PendingSessionCreatedNotification`)
-  - Replace/retire them in favor of store-driven state (Chunk F) where applicable.
-
-Definition of done:
-
-- Only one handshake entry point remains in the UI: Connection Management.
-- No references remain to `NewHandshakeDialog*` types.
-- Build passes.
-
----
-
-## Risks / tricky areas
-
-- Debounced filtering and dispatcher scheduling: avoid hard UI-thread dependencies in core services.
-- Preserving route provenance across handshake lifecycle (so UI can display “Arriving via …” accurately).
-- Avoid mixing “pending inbound” with the Secure Channels list (anti-spam requirement).
-
----
-
-## Relay Bug 1
-
-### relay-setup-1 (repro)
-
-- Start from a brand new DB file (no peers).
-- In the Simulator window:
-  - Create 2 simulated peers.
-  - Mark exactly 1 of them as relay-capable (call it **Relay**).
-  - Add the non-relay peer (call it **Target**) as an active session on the Relay.
-  - From Target, publish a standard pre-key bundle to Relay.
-- In the Main window:
-  - Establish a direct connection/session to Relay.
-  - Open Connection Management -> Network Search.
-  - Choose route mode: **relay**.
-  - Select Relay as relay host.
-  - Enter Target PKH and click **Fetch Pre-Key Bundle & Initiate**.
-- In the Simulator window:
-  - on the relay tab, there should be a new message in the relay queue. the queue count should drop to zero
-  - press "next" to process the message in the queue
-  - on the handshakes tab, there should be a new pending handshake - click "accept"
-  - on the relay tab there should be a new message in the relay queue
-  - press "next" to process the message in the queue
-
-#### Expected behavior
-
-- Main - when **Fetch Pre-Key Bundle & Initiate** is clicked to initiate a session with a relayed peer, a new peer connection should appear in the main window - but instead nothing appears
-- Main - when the relayed peer accepts the pending handshake, the peer connection should become active
-
+### F: Definition of Done
+- Incoming chat messages from Main are decrypted and stored in simulated peer's `RecentChatMessages` (both direct and relayed paths).
+- `SendChatMessageToMainAsync` encrypts a chat message and routes it to Main (direct or relay).
+- Project compiles and all integration features work as expected.
