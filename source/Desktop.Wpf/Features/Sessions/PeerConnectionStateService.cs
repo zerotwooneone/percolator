@@ -3,6 +3,7 @@ using Desktop.Wpf.Features.Sessions.Queries;
 using Microsoft.Extensions.DependencyInjection;
 using ObservableCollections;
 using Percolator.Identity;
+using R3;
 
 namespace Desktop.Wpf.Features.Sessions;
 
@@ -12,10 +13,12 @@ public sealed class PeerConnectionStateService : IDisposable
     private readonly ObservableList<PeerConnectionModel> _connections = new();
     private readonly ObservableList<PeerPendingInvitationModel> _pendingInbound = new();
     private readonly object _stateGate = new();
+    private readonly Subject<Unit> _stateMutated = new();
 
     public IReadOnlyObservableList<PeerConnectionModel> Connections => _connections;
     public IReadOnlyObservableList<PeerPendingInvitationModel> PendingInbound => _pendingInbound;
     public SelfId? ActiveSelfIdentityId { get; private set; }
+    public Observable<Unit> StateMutated => _stateMutated;
 
     public PeerConnectionStateService(IServiceScopeFactory scopeFactory)
     {
@@ -71,6 +74,7 @@ public sealed class PeerConnectionStateService : IDisposable
                 }
             }
         }
+        _stateMutated.OnNext(Unit.Default);
     }
 
     public void UpdatePendingInbound(IReadOnlyList<PendingInboundSnapshot> snapshots)
@@ -109,6 +113,7 @@ public sealed class PeerConnectionStateService : IDisposable
                 }
             }
         }
+        _stateMutated.OnNext(Unit.Default);
     }
 
 
@@ -124,5 +129,6 @@ public sealed class PeerConnectionStateService : IDisposable
             _pendingInbound.Clear();
             foreach (var p in pends) p.Dispose();
         }
+        _stateMutated.Dispose();
     }
 }

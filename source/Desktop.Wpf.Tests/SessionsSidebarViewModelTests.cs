@@ -4,7 +4,6 @@ using Desktop.Wpf.Features.Self;
 using Desktop.Wpf.Features.Sessions;
 using Desktop.Wpf.Features.Sessions.Queries;
 using Desktop.Wpf.Features.Sessions.State;
-using Desktop.Wpf.Shared.Navigation;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
@@ -32,7 +31,8 @@ public sealed class SessionsSidebarViewModelTests
             selection,
             ui);
 
-        ((System.Collections.Generic.ICollection<PeerConnectionListItemViewModel>)sut.Items).Count.Should().Be(0);
+        var itemsCollection = (System.Collections.IList)sut.Items.SourceCollection;
+        itemsCollection.Count.Should().Be(0);
 
         // ACT
         var a1 = new PeerConnectionStateSnapshot(
@@ -46,7 +46,9 @@ public sealed class SessionsSidebarViewModelTests
         state.UpdateConnections(new[] { a1 });
 
         // ASSERT
-        ((System.Collections.Generic.ICollection<PeerConnectionListItemViewModel>)sut.Items).Count.Should().Be(1);
-        ((System.Collections.Generic.IList<PeerConnectionListItemViewModel>)sut.Items)[0].DisplayName.Value.Should().Be("Alice");
+        itemsCollection = (System.Collections.IList)sut.Items.SourceCollection;
+        itemsCollection.Count.Should().Be(1);
+        itemsCollection[0].Should().BeOfType<PeerConnectionListItemViewModel>();
+        ((PeerConnectionListItemViewModel)itemsCollection[0]).DisplayName.Value.Should().Be("Alice");
     }
 }

@@ -10,7 +10,7 @@ namespace Desktop.Wpf.Features.Sessions;
 public sealed class SessionsSidebarViewModel : ViewModelBase
 {
     public BindableReactiveProperty<string> SearchText { get; }
-    public INotifyCollectionChangedSynchronizedViewList<PeerConnectionListItemViewModel> Items { get; }
+    public System.ComponentModel.ICollectionView Items { get; }
     public BindableReactiveProperty<string?> SelectedSessionId { get; }
     public SelfIdentityModel Self { get; }
     public BindableReactiveProperty<bool> IsLoading { get; }
@@ -45,28 +45,37 @@ public sealed class SessionsSidebarViewModel : ViewModelBase
         // 2. Dispose child VMs when removed from the domain
         _connectionsView.ObserveRemove().Subscribe(evt => evt.Value.View.Dispose()).AddTo(ref _bag);
 
-        // 3. Attach the dynamic filter logic
-        void AttachFilter()
+        // 3. Define the dynamic filter logic
+        bool FilterItem(PeerConnectionModel model, PeerConnectionListItemViewModel vm)
         {
-            _connectionsView.AttachFilter((model, vm) => 
-            {
-                var term = SearchText.Value?.Trim() ?? "";
-                if (string.IsNullOrEmpty(term)) return true;
-                return vm.DisplayName.CurrentValue?.Contains(term, StringComparison.OrdinalIgnoreCase) == true;
-            });
+            var term = SearchText.Value?.Trim() ?? "";
+            if (string.IsNullOrEmpty(term)) return true;
+            return vm.DisplayName.CurrentValue?.Contains(term, StringComparison.OrdinalIgnoreCase) == true;
         }
+        
+        // Attach it initially
+        _connectionsView.AttachFilter(FilterItem);
 
-        AttachFilter();
+        // 4. Create the synchronized list and wrap it in a WPF CollectionView for sorting
+        var synchronizedList = _connectionsView.ToNotifyCollectionChanged(ui.CollectionEventDispatcher);
+        var collectionView = (System.Windows.Data.ListCollectionView)System.Windows.Data.CollectionViewSource.GetDefaultView(synchronizedList);
+        collectionView.CustomSort = new PeerConnectionChronologicalComparer();
+        Items = collectionView;
 
-        // 4. Force the view to re-evaluate when search text changes
-        SearchText.Subscribe(_ => 
-        {
-            _connectionsView.ResetFilter();
-            AttachFilter();
-        }).AddTo(ref _bag);
+        // 5. Force the Cysharp view to re-evaluate filters when search text changes
+        SearchText
+            .Subscribe(_ => _connectionsView.AttachFilter(FilterItem))
+            .AddTo(ref _bag);
 
-        // 5. Expose directly to WPF via the UI Dispatcher
-        Items = _connectionsView.ToNotifyCollectionChanged(ui.CollectionEventDispatcher);
+        // 6. Force WPF to re-sort and Cysharp to re-filter when existing domain items are mutated
+        _stateService.StateMutated
+            .ObserveOnCurrentSynchronizationContext()
+            .Subscribe(_ => 
+            {
+                _connectionsView.AttachFilter(FilterItem);
+                collectionView.Refresh();
+            })
+            .AddTo(ref _bag);
 
         // Selection is shared state. Sidebar selection writes through to SelectedChannelModel.
         SelectedSessionId
@@ -98,5 +107,21 @@ public sealed class SessionsSidebarViewModel : ViewModelBase
     {
         _bag.Dispose();
         Disposable.Dispose(SearchText, SelectedSessionId);
+    }
+}
+
+public sealed class PeerConnectionChronologicalComparer : System.Collections.IComparer
+{
+    public int Compare(object? x, object? y)
+    {
+        if (x is null && y is null) return 0;
+        if (x is null) return 1;
+        if (y is null) return -1;
+        
+        var vmX = (PeerConnectionListItemViewModel)x;
+        var vmY = (PeerConnectionListItemViewModel)y;
+        
+        // Descending: newest at the top
+        return vmY.LastUpdate.CurrentValue.CompareTo(vmX.LastUpdate.CurrentValue);
     }
 }
