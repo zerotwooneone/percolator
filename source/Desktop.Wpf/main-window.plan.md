@@ -253,3 +253,227 @@ This plan intentionally scopes that fix out; the bi-directional plan remains cor
  
  - Main can send a chat message to a relayed simulated peer and see it in the simulator card history
  - a relayed simulated peer can send a chat message to Main and see it in Main’s chat history
+
+---
+
+## Chunk B: Make DirectSession mapping persistence hard-to-break + make handshake finalize code testable
+
+### B.0 Problem statement
+
+Chunk A ensured the DirectSession mapping is written in at least one previously-missed finalize flow (`TryFinalizeFromFirstResponderAsync`) and centralized mapping writes behind `IDirectSessionMappingWriter`.
+
+However:
+
+- Some finalize flows are difficult to unit test because they combine:
+  - protobuf parsing
+  - signature verification
+  - peer identity upsert
+  - ratchet/session creation
+  - persistence + notifications
+- Some unit tests are brittle due to strict mocks and `VerifyAll()`.
+- We want the invariant to be resilient even if mapping persistence fails (best-effort).
+
+**Chunk B goal:** reduce brittleness, improve testability, and add minimal high-value tests that prevent regressions of the DirectSession mapping invariant.
+
+### B.1 Testing standard for Chunk B (apply `unit-testing.md`)
+
+- Tests must follow AAA.
+- Prefer black-box behavior assertions.
+- Avoid `VerifyAll()`.
+- Only verify interactions when the interaction *is* the behavior (e.g., mapping persistence).
+
+### B.2 Simplify the existing Chunk A tests (reduce brittleness)
+
+#### B.2.1 InitiatorFinalizeServiceTests
+
+File:
+
+- `source/Percolator.ApplicationTests/Handshake/InitiatorFinalizeServiceTests.cs`
+
+Change the test:
+
+- `TryFinalizeFromFirstResponderAsync_Decrypts_Persists_Session_And_Deletes_PreHandshake`
+
+Required edits:
+
+- Remove these calls:
+  - `preStore.VerifyAll()`
+  - `sessions.VerifyAll()`
+  - `index.VerifyAll()`
+  - `directSessionMappingWriter.VerifyAll()`
+- Keep the assertions that represent public behavior:
+  - `result` is not null
+  - result session id equals responder-assigned session id
+  - `IDirectSessionMappingWriter.WriteMappingAsync(...)` was called and the captured `DirectSessionId` equals the responder-assigned session id
+- If you keep any `Verify(... Times.Once)` calls, limit them to:
+  - mapping write (primary behavior)
+  - prehandshake delete (optional; only keep if deletion is a contract)
+
+#### B.2.2 StandardHandshakeIngressTests
+
+File:
+
+- `source/Percolator.ApplicationTests/Network/StandardHandshakeIngressTests.cs`
+
+Change the test:
+
+- `HandleAsync_WhenValidRequest_PersistsDirectSessionMapping`
+
+Required edits:
+
+- Remove `directSessionMappingWriter.VerifyAll()`.
+- Keep:
+  - `result.MessageCase == EstablishSessionResponse.MessageOneofCase.Response`
+  - `WriteMappingAsync(...)` was called and captured `selfIdentityId` matches
+
+#### B.2.3 DirectSessionMappingWriterTests
+
+File:
+
+- `source/Percolator.ApplicationTests/Services/DirectSessionMappingWriterTests.cs`
+
+Change required:
+
+- Remove `WriteMappingAsync_WhenRepositorySucceeds_DoesNotLogWarning`.
+  - Rationale: asserting *absence* of logs is brittle and not part of a strong public contract.
+- Keep a single test:
+  - `WriteMappingAsync_WhenRepositoryThrows_DoesNotThrow` (may still verify a warning log occurred, but do not assert specific message contents).
+
+### B.3 Harden handshake flows so a mapping write cannot break session establishment
+
+#### B.3.1 Make mapping persistence best-effort at call sites
+
+Files:
+
+- `source/Percolator.Application/Network/Handshake/InitiatorFinalizeService.cs`
+- `source/Percolator.Application/Network/StandardHandshakeIngress.cs`
+
+Required change:
+
+- Wrap the call to `_directSessionMappingWriter.WriteMappingAsync(...)` in `try/catch`.
+- In `catch (Exception ex)`:
+  - log **Information** (not Warning) that mapping persistence failed (include `RemotePeerId`, `SessionId`, `SelfIdentityId`),
+  - **do not** rethrow.
+
+Acceptance criteria:
+
+- If mapping persistence throws, handshake finalization still succeeds (session is persisted, response is returned).
+
+### B.4 Add minimal high-value tests for the call-site best-effort behavior
+
+#### B.4.1 StandardHandshakeIngress: mapping writer failure does not fail handshake
+
+File:
+
+- `source/Percolator.ApplicationTests/Network/StandardHandshakeIngressTests.cs`
+
+Add test:
+
+- `HandleAsync_WhenMappingWriterThrows_ReturnsResponse`
+
+Arrange:
+
+- Same setup as the existing `HandleAsync_WhenValidRequest_PersistsDirectSessionMapping`.
+- Configure the `IDirectSessionMappingWriter` mock:
+  - `.Setup(w => w.WriteMappingAsync(...)).ThrowsAsync(new InvalidOperationException("boom"))`
+
+Act:
+
+- Call `sut.HandleAsync(...)`.
+
+Assert:
+
+- Response is non-null.
+- Response has `MessageCase == Response`.
+- (Do NOT assert logging.)
+
+#### B.4.2 InitiatorFinalizeService: mapping writer failure does not fail finalize
+
+File:
+
+- `source/Percolator.ApplicationTests/Handshake/InitiatorFinalizeServiceTests.cs`
+
+Add test:
+
+- `TryFinalizeFromFirstResponderAsync_WhenMappingWriterThrows_ReturnsSessionId`
+
+Arrange:
+
+- Copy the existing test setup for the responder-first finalize.
+- Configure mapping writer to throw.
+
+Act:
+
+- Call `TryFinalizeFromFirstResponderAsync(...)`.
+
+Assert:
+
+- result is non-null
+- session id equals responder-assigned session id
+
+### B.5 Make remaining finalize flows unit-testable by extracting “validation/parsing” logic
+
+#### B.5.1 Extract EstablishSessionResponse validation/parsing
+
+Files:
+
+- New interface: `source/Percolator.Application/Network/Handshake/IEstablishSessionResponseValidator.cs`
+- Implementation: `source/Percolator.Application/Network/Handshake/EstablishSessionResponseValidator.cs`
+
+Interface contract:
+
+- Method:
+  - `Task<EstablishSessionResponseValidationResult?> TryValidateAsync(EstablishSessionResponse response, CancellationToken ct)`
+- Where `EstablishSessionResponseValidationResult` contains:
+  - `SessionId SessionId`
+  - `byte[] RemoteIdentitySpki`
+  - `byte[] RemotePublicKeyHash`
+
+Implementation requirements (move code out of `TryFinalizeFromEstablishSessionResponseAsync`):
+
+- Validate required fields
+- Verify signature over `ResponsePayload` bytes
+- Parse `ResponsePayload` and validate `SessionId` present
+- Return `null` on any validation failure
+
+#### B.5.2 Update InitiatorFinalizeService to use the validator
+
+File:
+
+- `source/Percolator.Application/Network/Handshake/InitiatorFinalizeService.cs`
+
+Required change:
+
+- Inject `IEstablishSessionResponseValidator` into constructor.
+- Replace the inline signature verification + payload parse in `TryFinalizeFromEstablishSessionResponseAsync` with a call to the validator.
+
+Update DI registrations (composition root) accordingly.
+
+### B.6 Add unit tests for the validator (pure logic; low mocking)
+
+File:
+
+- `source/Percolator.ApplicationTests/Handshake/EstablishSessionResponseValidatorTests.cs`
+
+Add tests (minimum):
+
+- `TryValidateAsync_WhenSignatureInvalid_ReturnsNull`
+- `TryValidateAsync_WhenPayloadMissingSessionId_ReturnsNull`
+- `TryValidateAsync_WhenValid_ReturnsSessionIdAndRemoteHash`
+
+Notes:
+
+- Use real protobuf messages.
+- Generate real keys for signature validation.
+- Do not mock protobuf parsing.
+
+### B.7 Verification
+
+#### B.7.1 Automated
+
+- `dotnet test` must be green for:
+  - `Percolator.ApplicationTests`
+
+#### B.7.2 Manual (WPF)
+
+- Repeat the manual checks from A.4.2 and A.5 for relayed chat.
