@@ -25,7 +25,8 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
     private readonly IDhtService _dhtService;
     private readonly IPeerRoutingProfileRepository _profileRepository;
     private readonly IMessageQueueService _mqService;
-    public ProcessInternalEnvelopeHandler(ILogger<ProcessInternalEnvelopeHandler> logger, IMediator mediator, Percolator.Chat.App.IAdminOperations adminOps, IDhtService dhtService, IMessageQueueService mqService, IPeerRoutingProfileRepository profileRepository)
+    private readonly Percolator.Chat.App.IPkhPeerResolver _pkhPeerResolver;
+    public ProcessInternalEnvelopeHandler(ILogger<ProcessInternalEnvelopeHandler> logger, IMediator mediator, Percolator.Chat.App.IAdminOperations adminOps, IDhtService dhtService, IMessageQueueService mqService, IPeerRoutingProfileRepository profileRepository, Percolator.Chat.App.IPkhPeerResolver pkhPeerResolver)
     {
         _logger = logger;
         _mediator = mediator;
@@ -33,6 +34,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
         _dhtService = dhtService;
         _mqService = mqService;
         _profileRepository = profileRepository;
+        _pkhPeerResolver = pkhPeerResolver;
     }
 
     public async Task<InternalEnvelope?> Handle(ProcessInternalEnvelopeCommand request, CancellationToken cancellationToken)
@@ -242,9 +244,31 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                             ? ConversationLookupKey.ForPublicKeyHash(Pkh.FromBytes(pkh))
                             : ConversationLookupKey.ForDirectSession(request.Context.SessionId ?? throw new InvalidOperationException("SessionId required when no routing hint provided."));
 
+                    // Actor resolution
+                    ParticipantId senderId;
+                    if (groupGuid.HasValue)
+                    {
+                        // Group chat: Use AuthorIdentityKey (SPKI) to compute PKH, then resolve to ParticipantId
+                        if (!text.HasAuthorIdentityKey || text.AuthorIdentityKey is null || text.AuthorIdentityKey.Length == 0)
+                            throw new InvalidOperationException("Group chat TextMessage must include AuthorIdentityKey.");
+                        var authorSpki = text.AuthorIdentityKey.ToByteArray();
+                        var authorPkh = System.Security.Cryptography.SHA256.HashData(authorSpki);
+                        var resolved = await _pkhPeerResolver.GetParticipantIdByPkhAsync(Pkh.FromBytes(authorPkh), cancellationToken).ConfigureAwait(false);
+                        if (resolved is null)
+                            throw new InvalidOperationException("Group chat message sender not found in peer store. The sender must be introduced/known before we can attribute.");
+                        senderId = resolved.Value;
+                    }
+                    else
+                    {
+                        // Direct chat: Use RemotePeerGuid
+                        if (request.Context.RemotePeerGuid is null)
+                            throw new InvalidOperationException("Direct chat TextMessage requires RemotePeerGuid in context.");
+                        senderId = new ParticipantId(request.Context.RemotePeerGuid.Value);
+                    }
+
                     var messageId = new MessageId(new Guid(text.MessageId.ToByteArray()));
                     var sentTs = text.SentTimestampUtc.ToDateTimeOffset();
-                    await _mediator.Send(new PostTextMessageCommand(lookup, messageId, text.Content, sentTs), cancellationToken).ConfigureAwait(false);
+                    await _mediator.Send(new ReceiveTextMessageCommand(lookup, senderId, messageId, text.Content, sentTs), cancellationToken).ConfigureAwait(false);
                     return null;
                 }
                 case ChatEnvelope.MessageOneofCase.ReadReceipt:
@@ -275,9 +299,31 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                             ? ConversationLookupKey.ForPublicKeyHash(Pkh.FromBytes(pkh))
                             : ConversationLookupKey.ForDirectSession(request.Context.SessionId ?? throw new InvalidOperationException("SessionId required when no routing hint provided."));
 
+                    // Actor resolution
+                    ParticipantId readerId;
+                    if (groupGuid.HasValue)
+                    {
+                        // Group chat: Use AuthorIdentityKey (SPKI) to compute PKH, then resolve to ParticipantId
+                        if (!rr.HasAuthorIdentityKey || rr.AuthorIdentityKey is null || rr.AuthorIdentityKey.Length == 0)
+                            throw new InvalidOperationException("Group chat ReadReceipt must include AuthorIdentityKey.");
+                        var authorSpki = rr.AuthorIdentityKey.ToByteArray();
+                        var authorPkh = System.Security.Cryptography.SHA256.HashData(authorSpki);
+                        var resolved = await _pkhPeerResolver.GetParticipantIdByPkhAsync(Pkh.FromBytes(authorPkh), cancellationToken).ConfigureAwait(false);
+                        if (resolved is null)
+                            throw new InvalidOperationException("Group chat receipt sender not found in peer store. The sender must be introduced/known before we can attribute.");
+                        readerId = resolved.Value;
+                    }
+                    else
+                    {
+                        // Direct chat: Use RemotePeerGuid
+                        if (request.Context.RemotePeerGuid is null)
+                            throw new InvalidOperationException("Direct chat ReadReceipt requires RemotePeerGuid in context.");
+                        readerId = new ParticipantId(request.Context.RemotePeerGuid.Value);
+                    }
+
                     var messageId = new MessageId(new Guid(rr.MessageId.ToByteArray()));
                     var ts = rr.SentTimestampUtc.ToDateTimeOffset();
-                    await _mediator.Send(new PostReadReceiptCommand(lookup, messageId, ts), cancellationToken).ConfigureAwait(false);
+                    await _mediator.Send(new ReceiveReadReceiptCommand(lookup, readerId, messageId, ts), cancellationToken).ConfigureAwait(false);
                     return null;
                 }
                 case ChatEnvelope.MessageOneofCase.EmojiAnnotation:
@@ -310,9 +356,31 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                             ? ConversationLookupKey.ForPublicKeyHash(Pkh.FromBytes(pkh))
                             : ConversationLookupKey.ForDirectSession(request.Context.SessionId ?? throw new InvalidOperationException("SessionId required when no routing hint provided."));
 
+                    // Actor resolution
+                    ParticipantId reactorId;
+                    if (groupGuid.HasValue)
+                    {
+                        // Group chat: Use AuthorIdentityKey (SPKI) to compute PKH, then resolve to ParticipantId
+                        if (!em.HasAuthorIdentityKey || em.AuthorIdentityKey is null || em.AuthorIdentityKey.Length == 0)
+                            throw new InvalidOperationException("Group chat EmojiAnnotation must include AuthorIdentityKey.");
+                        var authorSpki = em.AuthorIdentityKey.ToByteArray();
+                        var authorPkh = System.Security.Cryptography.SHA256.HashData(authorSpki);
+                        var resolved = await _pkhPeerResolver.GetParticipantIdByPkhAsync(Pkh.FromBytes(authorPkh), cancellationToken).ConfigureAwait(false);
+                        if (resolved is null)
+                            throw new InvalidOperationException("Group chat emoji reactor not found in peer store. The sender must be introduced/known before we can attribute.");
+                        reactorId = resolved.Value;
+                    }
+                    else
+                    {
+                        // Direct chat: Use RemotePeerGuid
+                        if (request.Context.RemotePeerGuid is null)
+                            throw new InvalidOperationException("Direct chat EmojiAnnotation requires RemotePeerGuid in context.");
+                        reactorId = new ParticipantId(request.Context.RemotePeerGuid.Value);
+                    }
+
                     var messageId = new MessageId(new Guid(em.MessageId.ToByteArray()));
                     var ts = em.SentTimestampUtc.ToDateTimeOffset();
-                    await _mediator.Send(new PostEmojiAnnotationCommand(lookup, messageId, em.Emoji, ts), cancellationToken).ConfigureAwait(false);
+                    await _mediator.Send(new ReceiveEmojiAnnotationCommand(lookup, reactorId, messageId, em.Emoji, ts), cancellationToken).ConfigureAwait(false);
                     return null;
                 }
                 case ChatEnvelope.MessageOneofCase.DeliveredReceipt:
@@ -343,9 +411,31 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                             ? ConversationLookupKey.ForPublicKeyHash(Pkh.FromBytes(pkh))
                             : ConversationLookupKey.ForDirectSession(request.Context.SessionId ?? throw new InvalidOperationException("SessionId required when no routing hint provided."));
 
+                    // Actor resolution
+                    ParticipantId recipientId;
+                    if (groupGuid.HasValue)
+                    {
+                        // Group chat: Use AuthorIdentityKey (SPKI) to compute PKH, then resolve to ParticipantId
+                        if (!dr.HasAuthorIdentityKey || dr.AuthorIdentityKey is null || dr.AuthorIdentityKey.Length == 0)
+                            throw new InvalidOperationException("Group chat DeliveredReceipt must include AuthorIdentityKey.");
+                        var authorSpki = dr.AuthorIdentityKey.ToByteArray();
+                        var authorPkh = System.Security.Cryptography.SHA256.HashData(authorSpki);
+                        var resolved = await _pkhPeerResolver.GetParticipantIdByPkhAsync(Pkh.FromBytes(authorPkh), cancellationToken).ConfigureAwait(false);
+                        if (resolved is null)
+                            throw new InvalidOperationException("Group chat delivered receipt recipient not found in peer store. The sender must be introduced/known before we can attribute.");
+                        recipientId = resolved.Value;
+                    }
+                    else
+                    {
+                        // Direct chat: Use RemotePeerGuid
+                        if (request.Context.RemotePeerGuid is null)
+                            throw new InvalidOperationException("Direct chat DeliveredReceipt requires RemotePeerGuid in context.");
+                        recipientId = new ParticipantId(request.Context.RemotePeerGuid.Value);
+                    }
+
                     var messageId = new MessageId(new Guid(dr.MessageId.ToByteArray()));
                     var ts = dr.SentTimestampUtc.ToDateTimeOffset();
-                    await _mediator.Send(new PostDeliveredReceiptCommand(lookup, messageId, ts), cancellationToken).ConfigureAwait(false);
+                    await _mediator.Send(new ReceiveDeliveredReceiptCommand(lookup, recipientId, messageId, ts), cancellationToken).ConfigureAwait(false);
                     return null;
                 }
                 case ChatEnvelope.MessageOneofCase.SignedAdminOperation:

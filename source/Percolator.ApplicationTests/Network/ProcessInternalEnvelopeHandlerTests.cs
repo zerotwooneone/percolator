@@ -19,7 +19,8 @@ namespace Percolator.ApplicationTests.Network
             var dht = new Moq.Mock<Percolator.Dht.IDhtService>(MockBehavior.Loose);
             var mq = new Moq.Mock<Percolator.MessageQueue.Abstractions.IMessageQueueService>(MockBehavior.Loose);
             var profile = new Moq.Mock<Percolator.Network.IPeerRoutingProfileRepository>(MockBehavior.Loose);
-            return new ProcessInternalEnvelopeHandler(logger, mediatorMock.Object, adminOps.Object, dht.Object, mq.Object, profile.Object);
+            var pkhPeerResolver = new Moq.Mock<Percolator.Chat.App.IPkhPeerResolver>(MockBehavior.Loose);
+            return new ProcessInternalEnvelopeHandler(logger, mediatorMock.Object, adminOps.Object, dht.Object, mq.Object, profile.Object, pkhPeerResolver.Object);
         }
 
         [Test]
@@ -221,7 +222,8 @@ namespace Percolator.ApplicationTests.Network
             var adminOps = new Moq.Mock<Percolator.Chat.App.IAdminOperations>(MockBehavior.Loose);
             var mq = new Moq.Mock<Percolator.MessageQueue.Abstractions.IMessageQueueService>(MockBehavior.Loose);
             var profile = new Moq.Mock<Percolator.Network.IPeerRoutingProfileRepository>(MockBehavior.Loose);
-            var sut = new ProcessInternalEnvelopeHandler(logger, mediator.Object, adminOps.Object, dht.Object, mq.Object, profile.Object);
+            var pkhPeerResolver = new Moq.Mock<Percolator.Chat.App.IPkhPeerResolver>(MockBehavior.Loose);
+            var sut = new ProcessInternalEnvelopeHandler(logger, mediator.Object, adminOps.Object, dht.Object, mq.Object, profile.Object, pkhPeerResolver.Object);
 
             var contractsReq = new Percolator.Contracts.FindNodeRequest
             {
@@ -256,7 +258,8 @@ namespace Percolator.ApplicationTests.Network
             var adminOps = new Moq.Mock<Percolator.Chat.App.IAdminOperations>(MockBehavior.Loose);
             var mq = new Moq.Mock<Percolator.MessageQueue.Abstractions.IMessageQueueService>(MockBehavior.Loose);
             var profile = new Moq.Mock<Percolator.Network.IPeerRoutingProfileRepository>(MockBehavior.Loose);
-            var sut = new ProcessInternalEnvelopeHandler(logger, mediator.Object, adminOps.Object, dht.Object, mq.Object, profile.Object);
+            var pkhPeerResolver = new Moq.Mock<Percolator.Chat.App.IPkhPeerResolver>(MockBehavior.Loose);
+            var sut = new ProcessInternalEnvelopeHandler(logger, mediator.Object, adminOps.Object, dht.Object, mq.Object, profile.Object, pkhPeerResolver.Object);
             var contractsReq = new Percolator.Contracts.FindNodeRequest
             {
                 TargetPeerId = Google.Protobuf.ByteString.CopyFrom(new byte[32])
@@ -306,7 +309,8 @@ namespace Percolator.ApplicationTests.Network
             var logger = NullLogger<ProcessInternalEnvelopeHandler>.Instance;
             var adminOps = new Mock<Percolator.Chat.App.IAdminOperations>(MockBehavior.Loose);
             var mq2 = new Moq.Mock<Percolator.MessageQueue.Abstractions.IMessageQueueService>(MockBehavior.Loose);
-            var sut = new ProcessInternalEnvelopeHandler(logger, mediator.Object, adminOps.Object, new Mock<Percolator.Dht.IDhtService>().Object, mq2.Object, new Mock<Percolator.Network.IPeerRoutingProfileRepository>().Object);
+            var pkhPeerResolver = new Moq.Mock<Percolator.Chat.App.IPkhPeerResolver>(MockBehavior.Loose);
+            var sut = new ProcessInternalEnvelopeHandler(logger, mediator.Object, adminOps.Object, new Mock<Percolator.Dht.IDhtService>().Object, mq2.Object, new Mock<Percolator.Network.IPeerRoutingProfileRepository>().Object, pkhPeerResolver.Object);
 
             var groupId = Guid.NewGuid();
             var opId = Guid.NewGuid();
@@ -492,7 +496,8 @@ namespace Percolator.ApplicationTests.Network
             var logger = NullLogger<ProcessInternalEnvelopeHandler>.Instance;
             var adminOps = new Mock<Percolator.Chat.App.IAdminOperations>(MockBehavior.Loose);
             var mq4 = new Moq.Mock<Percolator.MessageQueue.Abstractions.IMessageQueueService>(MockBehavior.Loose);
-            var sut = new ProcessInternalEnvelopeHandler(logger, mediator.Object, adminOps.Object, dht.Object, mq4.Object, new Mock<Percolator.Network.IPeerRoutingProfileRepository>().Object);
+            var pkhPeerResolver = new Moq.Mock<Percolator.Chat.App.IPkhPeerResolver>(MockBehavior.Loose);
+            var sut = new ProcessInternalEnvelopeHandler(logger, mediator.Object, adminOps.Object, dht.Object, mq4.Object, new Mock<Percolator.Network.IPeerRoutingProfileRepository>().Object, pkhPeerResolver.Object);
 
             // Build InternalEnvelope with DHT FindNodeRequest
             var contractsReq = new Percolator.Contracts.FindNodeRequest

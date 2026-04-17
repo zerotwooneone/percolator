@@ -1,3 +1,4 @@
+using Desktop.Wpf.Features.Chat;
 using Percolator.Cryptography;
 
 namespace Desktop.Wpf.Features.Simulator;
@@ -31,7 +32,8 @@ public sealed record PeerStateSnapshot(
     IReadOnlyList<SessionSnapshot> Sessions,
     IReadOnlyList<SignedPreKeySnapshot> SignedPreKeys,
     IReadOnlyList<OutboundInviteSnapshot> OutboundInvites,
-    IReadOnlyList<PendingInviteHandshakeResponseSnapshot> PendingInviteHandshakeResponses);
+    IReadOnlyList<PendingInviteHandshakeResponseSnapshot> PendingInviteHandshakeResponses,
+    IReadOnlyList<SimulatedChatMessageSnapshot> RecentChatMessages);
 
 public sealed record PublishedPreKeyBundleSnapshot(
     byte[] RecipientPublicKeyHash,
@@ -60,3 +62,5 @@ public sealed record SignedPreKeySnapshot(Guid SignedPreKeyId, byte[] PrivateEcP
 public sealed record OutboundInviteSnapshot(Guid CorrelationId, byte[] SignedPreKeyPrivateEcPrivateKey);
 
 public sealed record PendingInviteHandshakeResponseSnapshot(Guid CorrelationId, byte[] ResponseBytes);
+
+public sealed record SimulatedChatMessageSnapshot(bool IsFromMain, string Content, DateTimeOffset ReceivedUtc);

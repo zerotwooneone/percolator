@@ -74,6 +74,9 @@ public sealed class SimulatorRelayTabViewModelTests
             string initiatorPkhHex,
             System.Threading.CancellationToken cancellationToken = default)
             => System.Threading.Tasks.Task.FromResult(false);
+
+        public System.Threading.Tasks.Task SendChatMessageToMainAsync(Guid simulatedPeerId, string content, System.Threading.CancellationToken cancellationToken = default)
+            => System.Threading.Tasks.Task.CompletedTask;
     }
 
     [Test]

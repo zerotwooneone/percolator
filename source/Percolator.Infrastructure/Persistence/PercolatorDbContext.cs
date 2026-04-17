@@ -590,7 +590,7 @@ public class PercolatorDbContext : DbContext
             entity.Property(e => e.ReaderId).IsRequired();
             entity.Property(e => e.SentAt).IsRequired();
             entity.HasIndex(e => new { e.ConversationId, e.MessageGuid, e.ReaderId }).IsUnique();
-            entity.HasOne<ConversationDbo>()
+            entity.HasOne(e => e.Conversation)
                 .WithMany()
                 .HasForeignKey(e => e.ConversationId)
                 .OnDelete(DeleteBehavior.Cascade)
@@ -608,7 +608,7 @@ public class PercolatorDbContext : DbContext
             entity.Property(e => e.RecipientId).IsRequired();
             entity.Property(e => e.DeliveredAt).IsRequired();
             entity.HasIndex(e => new { e.ConversationId, e.MessageGuid, e.RecipientId }).IsUnique();
-            entity.HasOne<ConversationDbo>()
+            entity.HasOne(e => e.Conversation)
                 .WithMany()
                 .HasForeignKey(e => e.ConversationId)
                 .OnDelete(DeleteBehavior.Cascade)
@@ -627,7 +627,7 @@ public class PercolatorDbContext : DbContext
             entity.Property(e => e.Emoji).IsRequired();
             entity.Property(e => e.SentAt).IsRequired();
             entity.HasIndex(e => new { e.ConversationId, e.MessageGuid, e.ReactorId, e.Emoji }).IsUnique();
-            entity.HasOne<ConversationDbo>()
+            entity.HasOne(e => e.Conversation)
                 .WithMany()
                 .HasForeignKey(e => e.ConversationId)
                 .OnDelete(DeleteBehavior.Cascade)

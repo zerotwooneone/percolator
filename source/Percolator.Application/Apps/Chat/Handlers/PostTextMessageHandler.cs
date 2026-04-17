@@ -2,6 +2,7 @@ using Google.Protobuf;
 using MediatR;
 using Percolator.Application.Identity;
 using Percolator.Application.Network;
+using Percolator.Chat;
 using Percolator.Chat.App;
 using Percolator.Chat.App.Commands;
 using Percolator.Chat.Events;
@@ -36,10 +37,12 @@ public sealed class PostTextMessageHandler : IRequestHandler<PostTextMessageComm
         request.LookupKey.EnsureExactlyOne();
 
         var resolution = await _resolver.ResolveAsync(request.LookupKey, cancellationToken).ConfigureAwait(false);
+        var selfParticipantId = ((ISelfParticipantIdProvider) _active).Get();
 
         await _writer.AddTextMessageAsync(
             resolution.Conversation.Id,
             resolution.SelfIdentityId,
+            selfParticipantId,
             request.Content,
             request.MessageId,
             request.SentTimestampUtc,

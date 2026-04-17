@@ -5,6 +5,7 @@ using Percolator.Chat.App;
 using Percolator.Chat.App.Commands;
 using Percolator.Chat.Events;
 using Percolator.Chat.ValueObjects;
+using Percolator.Chat;
 
 namespace Percolator.Chat.Tests;
 
@@ -14,6 +15,7 @@ public class PostEmojiAnnotationHandlerTests
     private Mock<IConversationResolver> _resolver = null!;
     private Mock<IChatMessageWriter> _writer = null!;
     private Mock<IPublisher> _publisher = null!;
+    private Mock<ISelfParticipantIdProvider> _selfParticipantIdProvider = null!;
 
     [SetUp]
     public void SetUp()
@@ -21,6 +23,7 @@ public class PostEmojiAnnotationHandlerTests
         _resolver = new Mock<IConversationResolver>(MockBehavior.Strict);
         _writer = new Mock<IChatMessageWriter>(MockBehavior.Strict);
         _publisher = new Mock<IPublisher>(MockBehavior.Loose);
+        _selfParticipantIdProvider = new Mock<ISelfParticipantIdProvider>(MockBehavior.Strict);
     }
 
     private static Conversation MakeConversation()
@@ -43,20 +46,25 @@ public class PostEmojiAnnotationHandlerTests
         var sentAt = DateTimeOffset.UtcNow;
         var convo = MakeConversation();
         var selfIdentityId = 101;
+        var selfParticipantId = new ParticipantId(Guid.NewGuid());
 
         _resolver
             .Setup(r => r.ResolveAsync(lookup, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ConversationResolution(convo, selfIdentityId));
 
+        _selfParticipantIdProvider
+            .Setup(p => p.Get())
+            .Returns(selfParticipantId);
+
         _writer
-            .Setup(w => w.AddEmojiAnnotationAsync(convo.Id, selfIdentityId, messageId, emoji, sentAt, It.IsAny<CancellationToken>()))
+            .Setup(w => w.AddEmojiAnnotationAsync(convo.Id, selfIdentityId, selfParticipantId, messageId, emoji, sentAt, It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
         _publisher
             .Setup(p => p.Publish(It.IsAny<EmojiAnnotationPostedEvent>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
-        var handler = new PostEmojiAnnotationHandler(_resolver.Object, _writer.Object, _publisher.Object);
+        var handler = new PostEmojiAnnotationHandler(_resolver.Object, _writer.Object, _publisher.Object, _selfParticipantIdProvider.Object);
         var cmd = new PostEmojiAnnotationCommand(lookup, messageId, emoji, sentAt);
 
         // Act
@@ -74,7 +82,7 @@ public class PostEmojiAnnotationHandlerTests
         // Arrange
         var lookup = new ConversationLookupKey(Guid.NewGuid(), new Pkh(new byte[32]), null);
         var messageId = new MessageId(Guid.NewGuid());
-        var handler = new PostEmojiAnnotationHandler(_resolver.Object, _writer.Object, _publisher.Object);
+        var handler = new PostEmojiAnnotationHandler(_resolver.Object, _writer.Object, _publisher.Object, _selfParticipantIdProvider.Object);
         var cmd = new PostEmojiAnnotationCommand(lookup, messageId, "😀", DateTimeOffset.UtcNow);
 
         // Act

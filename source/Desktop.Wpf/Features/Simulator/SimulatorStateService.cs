@@ -648,6 +648,26 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             return new DeliverOpaqueMessageResponse { Version = 1, Never = new DeliverOpaqueMessageResponse.Types.Never { Version = 1 } };
         }
 
+        if (env.ApplicationPayloadCase == InternalEnvelope.ApplicationPayloadOneofCase.ChatEnvelope
+            && env.ChatEnvelope?.MessageCase == ChatEnvelope.MessageOneofCase.TextMessage)
+        {
+            var text = env.ChatEnvelope.TextMessage;
+            await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                model.AddChatMessage(
+                    isFromMain: true,
+                    content: text.Content,
+                    receivedUtc: text.SentTimestampUtc?.ToDateTimeOffset() ?? DateTimeOffset.UtcNow);
+            }
+            finally
+            {
+                _stateGate.Release();
+            }
+            _saveTrigger.OnNext(Unit.Default);
+            return new DeliverOpaqueMessageResponse { Version = 1 };
+        }
+
         if (env.ApplicationPayloadCase == InternalEnvelope.ApplicationPayloadOneofCase.PrekeyEnvelope
             && env.PrekeyEnvelope?.MessageCase == PrekeyEnvelope.MessageOneofCase.GetPreKeyBundleRequest)
         {
@@ -1782,7 +1802,129 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             // ignore
         }
 
+        // Try to decrypt as a ratchet message (chat or other encrypted payload from Main via relay)
+        try
+        {
+            var cipher = new SessionRatchetMessage(opaqueBytes);
+            var clock = ResolveClock();
+
+            await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                var peerModel = _peers.FirstOrDefault(p => p.PeerId == simulatedPeerId);
+                if (peerModel is null) return null;
+
+                foreach (var kv in peerModel.SessionsMutable)
+                {
+                    try
+                    {
+                        var pt = kv.Value.Decrypt(cipher, clock);
+                        peerModel.SessionsMutable[kv.Key] = kv.Value;
+
+                        if (pt.Value.Length == 0) return null;
+
+                        var innerEnv = InternalEnvelope.Parser.ParseFrom(pt.Value);
+                        if (innerEnv.ApplicationPayloadCase == InternalEnvelope.ApplicationPayloadOneofCase.ChatEnvelope
+                            && innerEnv.ChatEnvelope?.MessageCase == ChatEnvelope.MessageOneofCase.TextMessage)
+                        {
+                            var txt = innerEnv.ChatEnvelope.TextMessage;
+                            peerModel.AddChatMessage(
+                                isFromMain: true,
+                                content: txt.Content,
+                                receivedUtc: txt.SentTimestampUtc?.ToDateTimeOffset() ?? DateTimeOffset.UtcNow);
+                            _saveTrigger.OnNext(Unit.Default);
+                        }
+                        return null; // Decrypted successfully, handled
+                    }
+                    catch { /* not this session */ }
+                }
+            }
+            finally
+            {
+                _stateGate.Release();
+            }
+        }
+        catch { /* not a ratchet message */ }
+
         return null;
+    }
+
+    public async Task SendChatMessageToMainAsync(Guid simulatedPeerId, string content, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var chatEnvelope = new ChatEnvelope
+        {
+            TextMessage = new TextMessage
+            {
+                MessageId = Google.Protobuf.ByteString.CopyFrom(Guid.NewGuid().ToByteArray()),
+                Content = content,
+                SentTimestampUtc = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow)
+            }
+        };
+        var internalEnvelope = new InternalEnvelope { ChatEnvelope = chatEnvelope };
+
+        await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var model = _peers.FirstOrDefault(p => p.PeerId == simulatedPeerId)
+                ?? throw new InvalidOperationException($"No simulated peer with id {simulatedPeerId}");
+
+            // Session selection: Select the most recently created session
+            var sessionId = model.SessionsMutable
+                .OrderByDescending(kv => kv.Value.CreatedAtUtc)
+                .Select(kv => kv.Key)
+                .FirstOrDefault();
+
+            if (sessionId == default)
+                throw new InvalidOperationException($"No session found for peer {simulatedPeerId} to send chat message");
+
+            // Encrypt using the existing helper
+            var cipher = await EncryptInternalEnvelopeAsync(simulatedPeerId, sessionId, internalEnvelope, cancellationToken)
+                .ConfigureAwait(false);
+
+            // Record outbound message in peer's chat history
+            model.AddChatMessage(isFromMain: false, content: content, receivedUtc: DateTimeOffset.UtcNow);
+
+            // Route based on connection mode
+            if (model.ConnectionMode.CurrentValue == ConnectionMode.ViaRelay)
+            {
+                var relayHostPeerId = model.RelayPeerId.CurrentValue;
+                if (relayHostPeerId != Guid.Empty)
+                {
+                    await EnqueueRelayUpstreamToMainAsync(
+                        relayHostPeerId: relayHostPeerId,
+                        opaqueBytes: cipher.Value,
+                        debugType: "Chat",
+                        cancellationToken: cancellationToken).ConfigureAwait(false);
+                }
+            }
+            else
+            {
+                using var scope = _scopeFactory.CreateScope();
+                var messageService = scope.ServiceProvider.GetRequiredService<Percolator.Application.Network.PercolatorMessageService>();
+
+                var request = new DeliverOpaqueMessageRequest
+                {
+                    Version = 1,
+                    Payload = Google.Protobuf.ByteString.CopyFrom(cipher.Value)
+                };
+
+                var ctx = new ServerCallContextStub(
+                    method: "/percolator.contracts.TransportService/DeliverOpaqueMessage",
+                    peer: "ipv4:127.0.0.1:0",
+                    deadline: DateTime.UtcNow.AddMinutes(1),
+                    requestHeaders: new Metadata(),
+                    cancellationToken: cancellationToken);
+
+                _ = await messageService.DeliverOpaqueMessage(request, ctx).ConfigureAwait(false);
+            }
+        }
+        finally
+        {
+            _stateGate.Release();
+        }
+        _saveTrigger.OnNext(Unit.Default);
     }
 
     private async Task DeliverInviteHandshakeResponseToMainAsyncCore(
@@ -1918,7 +2060,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
 
     private SimulatedPeerModel CreatePeerFromSnapshot(PeerStateSnapshot snap)
     {
-        return new SimulatedPeerModel(
+        var peer = new SimulatedPeerModel(
             peerId: snap.PeerId,
             selfIdentityId: snap.SelfIdentityId,
             displayName: snap.DisplayName,
@@ -1950,6 +2092,14 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
                     b.BundleBytes,
                     b.ExpiresUtc))
                 .ToList());
+
+        // Hydrate chat messages
+        foreach (var msg in snap.RecentChatMessages)
+        {
+            peer.RecentChatMessagesMutable.Add(msg);
+        }
+
+        return peer;
     }
 
     private static SimulatedRelayModel CreateRelayFromSnapshot(RelayStateSnapshot snap)

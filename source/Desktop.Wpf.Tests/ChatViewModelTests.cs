@@ -2,9 +2,15 @@ using System;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Windows.Data;
 using Desktop.Wpf.Features.Chat;
 using Desktop.Wpf.Features.Sessions;
+using Desktop.Wpf.Features.Chat.State;
+using Desktop.Wpf.Shared.Mvvm;
 using FluentAssertions;
+using MediatR;
+using Microsoft.Extensions.Logging;
+using Moq;
 using NUnit.Framework;
 
 namespace Desktop.Wpf.Tests;
@@ -15,9 +21,12 @@ public class ChatViewModelTests
     [Test]
     public void CanSend_reflects_non_empty_input()
     {
-        var history = new InMemoryChatHistory();
         var ctx = new SessionContext();
-        var vm = new ChatViewModel(history, ctx);
+        using var chatState = new ChatStateService();
+        var reloadCoordinator = new Mock<IChatReloadCoordinator>(MockBehavior.Loose);
+        var mediator = new Mock<IMediator>(MockBehavior.Loose);
+        var ui = new Mock<IUiDispatcher>(MockBehavior.Loose);
+        var vm = new ChatViewModel(ctx, chatState, reloadCoordinator.Object, mediator.Object, ui.Object);
 
         vm.MessageInput.Value = "";
         vm.CanSend.Value.Should().BeFalse();
@@ -29,10 +38,14 @@ public class ChatViewModelTests
     [Test]
     public async Task SendCommand_appends_message_and_clears_input()
     {
-        var history = new InMemoryChatHistory();
         var ctx = new SessionContext();
-        var vm = new ChatViewModel(history, ctx);
-        vm.SetSession("test-session");
+        var chatState = new ChatStateService();
+        var reloadCoordinator = new Mock<IChatReloadCoordinator>(MockBehavior.Loose);
+        var mediator = new Mock<IMediator>(MockBehavior.Loose);
+        var ui = new Mock<IUiDispatcher>(MockBehavior.Loose);
+        var vm = new ChatViewModel(ctx, chatState, reloadCoordinator.Object, mediator.Object, ui.Object);
+        var testSessionId = Guid.NewGuid().ToString("N");
+        vm.SetSession(testSessionId);
 
         vm.MessageInput.Value = "hi";
         vm.CanSend.Value.Should().BeTrue();
@@ -40,21 +53,27 @@ public class ChatViewModelTests
         // Execute send synchronously and await observable effect deterministically
         vm.SendCommand.Execute(null);
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(500));
-        while (vm.Messages.Count == 0 && !cts.IsCancellationRequested)
-            await Task.Delay(10, cts.Token);
+        // Allow async command to run
+        await Task.Delay(50);
 
-        vm.Messages.Count.Should().Be(1);
-        vm.Messages.First().Text.Should().Be("hi");
         vm.MessageInput.Value.Should().Be(string.Empty);
+        mediator.Verify(m => m.Send(
+            It.Is<Percolator.Chat.App.Commands.PostTextMessageCommand>(cmd =>
+                cmd.LookupKey.DirectSessionId == Guid.Parse(testSessionId) &&
+                cmd.Content == "hi"),
+            It.IsAny<CancellationToken>()),
+            Times.Once);
     }
 
     [Test]
     public void SendCommand_CanExecute_tracks_CanSend()
     {
-        var history = new InMemoryChatHistory();
         var ctx = new SessionContext();
-        var vm = new ChatViewModel(history, ctx);
+        using var chatState = new ChatStateService();
+        var reloadCoordinator = new Mock<IChatReloadCoordinator>(MockBehavior.Loose);
+        var mediator = new Mock<IMediator>(MockBehavior.Loose);
+        var ui = new Mock<IUiDispatcher>(MockBehavior.Loose);
+        var vm = new ChatViewModel(ctx, chatState, reloadCoordinator.Object, mediator.Object, ui.Object);
 
         vm.MessageInput.Value = string.Empty;
         vm.SendCommand.CanExecute(null).Should().BeFalse();
@@ -66,9 +85,12 @@ public class ChatViewModelTests
     [Test]
     public void RouteIcon_and_Text_change_with_IsRelayed()
     {
-        var history = new InMemoryChatHistory();
         var ctx = new SessionContext();
-        var vm = new ChatViewModel(history, ctx);
+        using var chatState = new ChatStateService();
+        var reloadCoordinator = new Mock<IChatReloadCoordinator>(MockBehavior.Loose);
+        var mediator = new Mock<IMediator>(MockBehavior.Loose);
+        var ui = new Mock<IUiDispatcher>(MockBehavior.Loose);
+        var vm = new ChatViewModel(ctx, chatState, reloadCoordinator.Object, mediator.Object, ui.Object);
 
         // Direct state
         vm.IsRelayed.Value = false;

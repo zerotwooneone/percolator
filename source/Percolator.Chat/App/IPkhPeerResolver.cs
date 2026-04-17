@@ -10,5 +10,5 @@ namespace Percolator.Chat.App;
 /// </summary>
 public interface IPkhPeerResolver
 {
-    Task<int?> GetPeerIdByPkhAsync(Pkh pkh, CancellationToken cancellationToken);
+    Task<ParticipantId?> GetParticipantIdByPkhAsync(Pkh pkh, CancellationToken cancellationToken);
 }

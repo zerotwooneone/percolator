@@ -5,6 +5,7 @@ using Percolator.Cryptography.Primitives;
 using R3;
 using System;
 using System.Linq;
+using Desktop.Wpf.Features.Chat;
 
 namespace Desktop.Wpf.Features.Simulator;
 
@@ -41,6 +42,7 @@ public sealed class SimulatedPeerModel : IDisposable
     private readonly ObservableList<SimulatedSignedPreKeyModel> _signedPreKeys;
     private readonly ObservableList<SimulatedOutboundInviteModel> _outboundInvites;
     private readonly ObservableList<SimulatedPendingInviteHandshakeResponseModel> _pendingInviteHandshakeResponses;
+    private readonly ObservableList<SimulatedChatMessageSnapshot> _recentChatMessages;
 
     private readonly ObservableDictionary<string, SimulatedPendingStandardSignalHelloModel> _pendingInboundStandardSignalHellos;
 
@@ -125,6 +127,7 @@ public sealed class SimulatedPeerModel : IDisposable
         _signedPreKeys = new ObservableList<SimulatedSignedPreKeyModel>();
         _outboundInvites = new ObservableList<SimulatedOutboundInviteModel>();
         _pendingInviteHandshakeResponses = new ObservableList<SimulatedPendingInviteHandshakeResponseModel>();
+        _recentChatMessages = new ObservableList<SimulatedChatMessageSnapshot>();
 
         _pendingInboundStandardSignalHellos = new ObservableDictionary<string, SimulatedPendingStandardSignalHelloModel>(StringComparer.Ordinal);
     }
@@ -165,6 +168,7 @@ public sealed class SimulatedPeerModel : IDisposable
     public IReadOnlyObservableList<SimulatedSignedPreKeyModel> SignedPreKeys => _signedPreKeys;
     public IReadOnlyObservableList<SimulatedOutboundInviteModel> OutboundInvites => _outboundInvites;
     public IReadOnlyObservableList<SimulatedPendingInviteHandshakeResponseModel> PendingInviteHandshakeResponses => _pendingInviteHandshakeResponses;
+    public IReadOnlyObservableList<SimulatedChatMessageSnapshot> RecentChatMessages => _recentChatMessages;
 
     public IReadOnlyObservableDictionary<string, SimulatedPendingStandardSignalHelloModel> PendingInboundStandardSignalHellos => _pendingInboundStandardSignalHellos;
 
@@ -172,6 +176,7 @@ public sealed class SimulatedPeerModel : IDisposable
     internal ObservableList<SimulatedSignedPreKeyModel> SignedPreKeysMutable => _signedPreKeys;
     internal ObservableList<SimulatedOutboundInviteModel> OutboundInvitesMutable => _outboundInvites;
     internal ObservableList<SimulatedPendingInviteHandshakeResponseModel> PendingInviteHandshakeResponsesMutable => _pendingInviteHandshakeResponses;
+    internal ObservableList<SimulatedChatMessageSnapshot> RecentChatMessagesMutable => _recentChatMessages;
 
     internal ObservableDictionary<string, SimulatedPendingStandardSignalHelloModel> PendingInboundStandardSignalHellosMutable => _pendingInboundStandardSignalHellos;
 
@@ -180,6 +185,16 @@ public sealed class SimulatedPeerModel : IDisposable
 
     public void SetDisplayName(string? displayName)
         => _displayName.Value = NormalizeDisplayName(displayName);
+
+    public void AddChatMessage(bool isFromMain, string content, DateTimeOffset receivedUtc)
+    {
+        var m = new SimulatedChatMessageSnapshot(isFromMain, content, receivedUtc);
+        _recentChatMessages.Add(m);
+        if (_recentChatMessages.Count > 50)
+        {
+            _recentChatMessages.RemoveAt(0);
+        }
+    }
 
     
     public void SetSelectedRouteMode(ConnectionMode? selectedRouteMode)
@@ -385,7 +400,8 @@ public sealed class SimulatedPeerModel : IDisposable
                 .ToList(),
             PendingInviteHandshakeResponses: _pendingInviteHandshakeResponses
                 .Select(r => new PendingInviteHandshakeResponseSnapshot(r.CorrelationId, r.ResponseBytes.ToArray()))
-                .ToList());
+                .ToList(),
+            RecentChatMessages: _recentChatMessages.ToList());
     }
 
     private void UpdateAttempt(

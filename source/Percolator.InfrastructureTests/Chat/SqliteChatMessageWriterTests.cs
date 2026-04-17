@@ -63,14 +63,24 @@ public class SqliteChatMessageWriterTests
     {
         var ctx = CreateDbContext(out var conn);
         await using var _ = conn;
-        var (conversationId, _) = SeedConversation(ctx, 1);
+        var (conversationId, otherPeerId) = SeedConversation(ctx, 1);
         var writer = new SqliteChatMessageWriter(ctx);
         var messageId = new MessageId(Guid.NewGuid());
+        var sentAt = DateTimeOffset.UtcNow;
         var deliveredAt = DateTimeOffset.UtcNow;
         var ct = CancellationToken.None;
+        var senderId = new ParticipantId(otherPeerId);
+        var recipientId = new ParticipantId(otherPeerId);
 
-        await writer.AddDeliveredReceiptAsync(conversationId, 1, messageId, deliveredAt, ct);
-        await writer.AddDeliveredReceiptAsync(conversationId, 1, messageId, deliveredAt, ct);
+        // Add message first
+        await writer.AddTextMessageAsync(conversationId, 1, senderId, "test", messageId, sentAt, ct);
+
+        // Ensure message exists before adding receipt
+        var messageExists = await ctx.Messages.AnyAsync(m => m.ConversationId == conversationId.Value && m.MessageGuid == messageId.Value, ct);
+        messageExists.Should().BeTrue("Message should exist before adding receipt");
+
+        await writer.AddDeliveredReceiptAsync(conversationId, 1, recipientId, messageId, deliveredAt, ct);
+        await writer.AddDeliveredReceiptAsync(conversationId, 1, recipientId, messageId, deliveredAt, ct);
 
         var count = await ctx.DeliveredReceipts.CountAsync(r => r.ConversationId == conversationId.Value && r.MessageGuid == messageId.Value);
         count.Should().Be(1);
@@ -86,9 +96,10 @@ public class SqliteChatMessageWriterTests
         var messageId = new MessageId(Guid.NewGuid());
         var sentAt = DateTimeOffset.UtcNow;
         var ct = CancellationToken.None;
+        var participantId = new ParticipantId(Guid.NewGuid());
 
-        await writer.AddTextMessageAsync(conversationId, 1, "hello", messageId, sentAt, ct);
-        await writer.AddTextMessageAsync(conversationId, 1, "hello", messageId, sentAt, ct);
+        await writer.AddTextMessageAsync(conversationId, 1, participantId, "hello", messageId, sentAt, ct);
+        await writer.AddTextMessageAsync(conversationId, 1, participantId, "hello", messageId, sentAt, ct);
 
         var count = await ctx.Messages.CountAsync(m => m.ConversationId == conversationId.Value && m.MessageGuid == messageId.Value);
         count.Should().Be(1);
@@ -104,8 +115,9 @@ public class SqliteChatMessageWriterTests
         var messageId = new MessageId(Guid.NewGuid());
         var sentAt = DateTimeOffset.UtcNow;
         var ct = CancellationToken.None;
+        var participantId = new ParticipantId(otherPeerId);
 
-        await writer.AddTextMessageAsync(conversationId, 1, "hello", messageId, sentAt, ct);
+        await writer.AddTextMessageAsync(conversationId, 1, participantId, "hello", messageId, sentAt, ct);
 
         var msg = await ctx.Messages.SingleAsync(m => m.ConversationId == conversationId.Value && m.MessageGuid == messageId.Value);
         msg.SenderId.Should().Be(otherPeerId);
@@ -116,14 +128,19 @@ public class SqliteChatMessageWriterTests
     {
         var ctx = CreateDbContext(out var conn);
         await using var _ = conn;
-        var (conversationId, _) = SeedConversation(ctx, 1);
+        var (conversationId, otherPeerId) = SeedConversation(ctx, 1);
         var writer = new SqliteChatMessageWriter(ctx);
         var messageId = new MessageId(Guid.NewGuid());
         var sentAt = DateTimeOffset.UtcNow;
         var ct = CancellationToken.None;
+        var senderId = new ParticipantId(otherPeerId);
+        var readerId = new ParticipantId(otherPeerId);
 
-        await writer.AddReadReceiptAsync(conversationId, 1, messageId, sentAt, ct);
-        await writer.AddReadReceiptAsync(conversationId, 1, messageId, sentAt, ct);
+        // Add message first
+        await writer.AddTextMessageAsync(conversationId, 1, senderId, "test", messageId, sentAt, ct);
+
+        await writer.AddReadReceiptAsync(conversationId, 1, readerId, messageId, sentAt, ct);
+        await writer.AddReadReceiptAsync(conversationId, 1, readerId, messageId, sentAt, ct);
 
         var count = await ctx.ReadReceipts.CountAsync(r => r.ConversationId == conversationId.Value && r.MessageGuid == messageId.Value);
         count.Should().Be(1);
@@ -134,15 +151,20 @@ public class SqliteChatMessageWriterTests
     {
         var ctx = CreateDbContext(out var conn);
         await using var _ = conn;
-        var (conversationId, _) = SeedConversation(ctx, 1);
+        var (conversationId, otherPeerId) = SeedConversation(ctx, 1);
         var writer = new SqliteChatMessageWriter(ctx);
         var messageId = new MessageId(Guid.NewGuid());
         var sentAt = DateTimeOffset.UtcNow;
         var ct = CancellationToken.None;
+        var senderId = new ParticipantId(otherPeerId);
+        var reactorId = new ParticipantId(otherPeerId);
 
-        await writer.AddEmojiAnnotationAsync(conversationId, 1, messageId, "👍", sentAt, ct);
-        await writer.AddEmojiAnnotationAsync(conversationId, 1, messageId, "👍", sentAt, ct);
-        await writer.AddEmojiAnnotationAsync(conversationId, 1, messageId, "🔥", sentAt, ct);
+        // Add message first
+        await writer.AddTextMessageAsync(conversationId, 1, senderId, "test", messageId, sentAt, ct);
+
+        await writer.AddEmojiAnnotationAsync(conversationId, 1, reactorId, messageId, "👍", sentAt, ct);
+        await writer.AddEmojiAnnotationAsync(conversationId, 1, reactorId, messageId, "👍", sentAt, ct);
+        await writer.AddEmojiAnnotationAsync(conversationId, 1, reactorId, messageId, "🔥", sentAt, ct);
 
         var countThumbs = await ctx.EmojiReactions.CountAsync(e => e.ConversationId == conversationId.Value && e.MessageGuid == messageId.Value && e.Emoji == "👍");
         var countFire = await ctx.EmojiReactions.CountAsync(e => e.ConversationId == conversationId.Value && e.MessageGuid == messageId.Value && e.Emoji == "🔥");

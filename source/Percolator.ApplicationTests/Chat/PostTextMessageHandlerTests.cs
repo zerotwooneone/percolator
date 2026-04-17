@@ -50,13 +50,14 @@ public class PostTextMessageHandlerTests
         var sentAt = DateTimeOffset.UtcNow;
         var convo = MakeConversation();
         var selfIdentityId = 42;
+        var selfParticipantId = new ParticipantId(Guid.NewGuid());
 
         _resolver
             .Setup(r => r.ResolveAsync(lookup, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ConversationResolution(convo, selfIdentityId));
 
         _writer
-            .Setup(w => w.AddTextMessageAsync(convo.Id, selfIdentityId, content, messageId, sentAt, It.IsAny<CancellationToken>()))
+            .Setup(w => w.AddTextMessageAsync(convo.Id, selfIdentityId, selfParticipantId, content, messageId, sentAt, It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
         _publisher

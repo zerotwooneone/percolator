@@ -15,6 +15,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IAdminSequenceProvider, AdminSequenceProvider>();
         services.AddScoped<IGroupSenderKeyService, GroupSenderKeyService>();
         services.AddScoped<IEnvelopeCrypto, DummyEnvelopeCrypto>();
+        services.AddScoped<IPkhPeerResolver, PkhPeerResolver>();
 
         return services;
     }

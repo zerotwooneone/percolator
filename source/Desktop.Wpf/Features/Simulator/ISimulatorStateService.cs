@@ -152,4 +152,6 @@ public interface ISimulatorStateService
         Guid recipientPeerId,
         string initiatorPkhHex,
         CancellationToken cancellationToken = default);
+
+    Task SendChatMessageToMainAsync(Guid simulatedPeerId, string content, CancellationToken cancellationToken = default);
 }

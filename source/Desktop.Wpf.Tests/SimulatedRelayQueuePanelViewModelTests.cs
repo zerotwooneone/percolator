@@ -86,6 +86,9 @@ public sealed class SimulatedRelayQueuePanelViewModelTests
             string initiatorPkhHex,
             CancellationToken cancellationToken = default)
             => Task.FromResult(false);
+
+        public Task SendChatMessageToMainAsync(Guid simulatedPeerId, string content, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
     }
 
     [Test]

@@ -17,6 +17,7 @@ public sealed class SqliteChatMessageWriter : IChatMessageWriter
     public async Task AddTextMessageAsync(
         ConversationId conversationId,
         int selfIdentityId,
+        ParticipantId senderId,
         string content,
         MessageId messageId,
         DateTimeOffset sentAt,
@@ -31,31 +32,11 @@ public sealed class SqliteChatMessageWriter : IChatMessageWriter
             return; // idempotent success
         }
 
-        // Determine sender for direct conversations: pick the participant that is not self
-        var convo = await _db.Conversations
-            .Include(c => c.Participants)
-            .FirstOrDefaultAsync(c => c.Id == conversationId.Value && c.SelfIdentityId == selfIdentityId, cancellationToken)
-            ?? throw new InvalidOperationException($"Conversation {conversationId} not found for selfIdentityId={selfIdentityId}.");
-
-        var selfIdentity = await _db.SelfIdentities
-            .AsNoTracking()
-            .FirstOrDefaultAsync(i => i.Id == selfIdentityId, cancellationToken)
-            ?? throw new InvalidOperationException($"SelfIdentity not found for id {selfIdentityId}.");
-
-        var senderId = convo.Participants
-            .Select(p => p.ParticipantId)
-            .FirstOrDefault(p => p != selfIdentity.PeerId);
-        if (senderId == Guid.Empty)
-        {
-            // Fallback to self as sender if we didn't find another participant (e.g., group path TBA)
-            senderId = selfIdentity.PeerId;
-        }
-
         _db.Messages.Add(new MessageDbo
         {
             ConversationId = conversationId.Value,
             MessageGuid = messageId.Value,
-            SenderId = senderId,
+            SenderId = senderId.Value,
             Body = content,
             SentAt = sentAt
         });
@@ -81,33 +62,15 @@ public sealed class SqliteChatMessageWriter : IChatMessageWriter
     public async Task AddDeliveredReceiptAsync(
         ConversationId conversationId,
         int selfIdentityId,
+        ParticipantId recipientId,
         MessageId messageId,
         DateTimeOffset deliveredAt,
         CancellationToken cancellationToken)
     {
-        // Ensure conversation and determine recipientId (mirror logic from read receipts)
-        var convo = await _db.Conversations
-            .Include(c => c.Participants)
-            .FirstOrDefaultAsync(c => c.Id == conversationId.Value && c.SelfIdentityId == selfIdentityId, cancellationToken)
-            ?? throw new InvalidOperationException($"Conversation {conversationId} not found for selfIdentityId={selfIdentityId}.");
-
-        var selfIdentity = await _db.SelfIdentities
-            .AsNoTracking()
-            .FirstOrDefaultAsync(i => i.Id == selfIdentityId, cancellationToken)
-            ?? throw new InvalidOperationException($"SelfIdentity not found for id {selfIdentityId}.");
-
-        var recipientId = convo.Participants
-            .Select(p => p.ParticipantId)
-            .FirstOrDefault(p => p != selfIdentity.PeerId);
-        if (recipientId == Guid.Empty)
-        {
-            recipientId = selfIdentity.PeerId;
-        }
-
         // Idempotency check
         var exists = await _db.DeliveredReceipts
             .AsNoTracking()
-            .AnyAsync(r => r.ConversationId == conversationId.Value && r.MessageGuid == messageId.Value && r.RecipientId == recipientId, cancellationToken);
+            .AnyAsync(r => r.ConversationId == conversationId.Value && r.MessageGuid == messageId.Value && r.RecipientId == recipientId.Value, cancellationToken);
         if (exists)
         {
             return;
@@ -117,9 +80,8 @@ public sealed class SqliteChatMessageWriter : IChatMessageWriter
         {
             ConversationId = conversationId.Value,
             MessageGuid = messageId.Value,
-            RecipientId = recipientId,
-            DeliveredAt = deliveredAt,
-            Conversation = convo
+            RecipientId = recipientId.Value,
+            DeliveredAt = deliveredAt
         });
 
         try
@@ -130,7 +92,7 @@ public sealed class SqliteChatMessageWriter : IChatMessageWriter
         {
             var nowExists = await _db.DeliveredReceipts
                 .AsNoTracking()
-                .AnyAsync(r => r.ConversationId == conversationId.Value && r.MessageGuid == messageId.Value && r.RecipientId == recipientId, cancellationToken);
+                .AnyAsync(r => r.ConversationId == conversationId.Value && r.MessageGuid == messageId.Value && r.RecipientId == recipientId.Value, cancellationToken);
             if (!nowExists)
             {
                 throw;
@@ -141,32 +103,15 @@ public sealed class SqliteChatMessageWriter : IChatMessageWriter
     public async Task AddReadReceiptAsync(
         ConversationId conversationId,
         int selfIdentityId,
+        ParticipantId readerId,
         MessageId messageId,
         DateTimeOffset sentAt,
         CancellationToken cancellationToken)
     {
         // Idempotency check: one receipt per reader per message
-        var convo = await _db.Conversations
-            .Include(c => c.Participants)
-            .FirstOrDefaultAsync(c => c.Id == conversationId.Value && c.SelfIdentityId == selfIdentityId, cancellationToken)
-            ?? throw new InvalidOperationException($"Conversation {conversationId} not found for selfIdentityId={selfIdentityId}.");
-
-        var selfIdentity = await _db.SelfIdentities
-            .AsNoTracking()
-            .FirstOrDefaultAsync(i => i.Id == selfIdentityId, cancellationToken)
-            ?? throw new InvalidOperationException($"SelfIdentity not found for id {selfIdentityId}.");
-
-        var readerId = convo.Participants
-            .Select(p => p.ParticipantId)
-            .FirstOrDefault(p => p != selfIdentity.PeerId);
-        if (readerId == Guid.Empty)
-        {
-            readerId = selfIdentity.PeerId;
-        }
-
         var exists = await _db.ReadReceipts
             .AsNoTracking()
-            .AnyAsync(r => r.ConversationId == conversationId.Value && r.MessageGuid == messageId.Value && r.ReaderId == readerId, cancellationToken);
+            .AnyAsync(r => r.ConversationId == conversationId.Value && r.MessageGuid == messageId.Value && r.ReaderId == readerId.Value, cancellationToken);
         if (exists)
         {
             return;
@@ -176,9 +121,8 @@ public sealed class SqliteChatMessageWriter : IChatMessageWriter
         {
             ConversationId = conversationId.Value,
             MessageGuid = messageId.Value,
-            ReaderId = readerId,
-            SentAt = sentAt,
-            Conversation = convo
+            ReaderId = readerId.Value,
+            SentAt = sentAt
         });
 
         try
@@ -189,7 +133,7 @@ public sealed class SqliteChatMessageWriter : IChatMessageWriter
         {
             var nowExists = await _db.ReadReceipts
                 .AsNoTracking()
-                .AnyAsync(r => r.ConversationId == conversationId.Value && r.MessageGuid == messageId.Value && r.ReaderId == readerId, cancellationToken);
+                .AnyAsync(r => r.ConversationId == conversationId.Value && r.MessageGuid == messageId.Value && r.ReaderId == readerId.Value, cancellationToken);
             if (!nowExists)
             {
                 throw;
@@ -200,32 +144,15 @@ public sealed class SqliteChatMessageWriter : IChatMessageWriter
     public async Task AddEmojiAnnotationAsync(
         ConversationId conversationId,
         int selfIdentityId,
+        ParticipantId reactorId,
         MessageId messageId,
         string emoji,
         DateTimeOffset sentAt,
         CancellationToken cancellationToken)
     {
-        var convo = await _db.Conversations
-            .Include(c => c.Participants)
-            .FirstOrDefaultAsync(c => c.Id == conversationId.Value && c.SelfIdentityId == selfIdentityId, cancellationToken)
-            ?? throw new InvalidOperationException($"Conversation {conversationId} not found for selfIdentityId={selfIdentityId}.");
-
-        var selfIdentity = await _db.SelfIdentities
-            .AsNoTracking()
-            .FirstOrDefaultAsync(i => i.Id == selfIdentityId, cancellationToken)
-            ?? throw new InvalidOperationException($"SelfIdentity not found for id {selfIdentityId}.");
-
-        var reactorId = convo.Participants
-            .Select(p => p.ParticipantId)
-            .FirstOrDefault(p => p != selfIdentity.PeerId);
-        if (reactorId == Guid.Empty)
-        {
-            reactorId = selfIdentity.PeerId;
-        }
-
         var exists = await _db.EmojiReactions
             .AsNoTracking()
-            .AnyAsync(e => e.ConversationId == conversationId.Value && e.MessageGuid == messageId.Value && e.ReactorId == reactorId && e.Emoji == emoji, cancellationToken);
+            .AnyAsync(e => e.ConversationId == conversationId.Value && e.MessageGuid == messageId.Value && e.ReactorId == reactorId.Value && e.Emoji == emoji, cancellationToken);
         if (exists)
         {
             return;
@@ -235,10 +162,9 @@ public sealed class SqliteChatMessageWriter : IChatMessageWriter
         {
             ConversationId = conversationId.Value,
             MessageGuid = messageId.Value,
-            ReactorId = reactorId,
+            ReactorId = reactorId.Value,
             Emoji = emoji,
-            SentAt = sentAt,
-            Conversation = convo
+            SentAt = sentAt
         });
 
         try
@@ -249,7 +175,7 @@ public sealed class SqliteChatMessageWriter : IChatMessageWriter
         {
             var nowExists = await _db.EmojiReactions
                 .AsNoTracking()
-                .AnyAsync(e => e.ConversationId == conversationId.Value && e.MessageGuid == messageId.Value && e.ReactorId == reactorId && e.Emoji == emoji, cancellationToken);
+                .AnyAsync(e => e.ConversationId == conversationId.Value && e.MessageGuid == messageId.Value && e.ReactorId == reactorId.Value && e.Emoji == emoji, cancellationToken);
             if (!nowExists)
             {
                 throw;

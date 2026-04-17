@@ -18,6 +18,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Percolator.Infrastructure;
+using Percolator.Infrastructure.Chat;
 using Microsoft.EntityFrameworkCore;
 using Percolator.Application;
 using Percolator.Application.Configuration;
@@ -107,6 +108,7 @@ public partial class App : Application
 
                 // Core infrastructure (DB, identity, crypto, etc.)
                 services.AddInfrastructureServices(context.Configuration);
+                services.AddChatInfrastructure();
                 services.AddApplicationServices(context.Configuration);
                 services.AddSingleton<IClock, SystemClock>();
                 services.AddMessageQueue();
@@ -138,7 +140,9 @@ public partial class App : Application
                 services.AddMediatR(cfg => cfg.RegisterServicesFromAssembly(typeof(MainWindow).Assembly));
 
                 // Features
-                services.AddSingleton<IChatHistory, InMemoryChatHistory>();
+                services.AddSingleton<Desktop.Wpf.Features.Chat.State.ChatStateService>();
+                services.AddSingleton<ChatReloadCoordinator>();
+                services.AddSingleton<IChatReloadCoordinator>(sp => sp.GetRequiredService<ChatReloadCoordinator>());
                 services.AddScoped<Desktop.Wpf.Features.Sessions.IMainInvitationInbox, Desktop.Wpf.Features.Sessions.MainInvitationInbox>();
                 services.AddScoped<Desktop.Wpf.Features.Sessions.IMainInvitationOutbox, Desktop.Wpf.Features.Sessions.MainInvitationOutbox>();
                 services.AddScoped<Desktop.Wpf.Features.Sessions.IMainInvitationActions, Desktop.Wpf.Features.Sessions.MainInvitationActions>();

@@ -5,6 +5,7 @@ using Percolator.Chat.App;
 using Percolator.Chat.App.Commands;
 using Percolator.Chat.Events;
 using Percolator.Chat.ValueObjects;
+using Percolator.Chat;
 
 namespace Percolator.Chat.Tests;
 
@@ -14,6 +15,7 @@ public class PostReadReceiptHandlerTests
     private Mock<IConversationResolver> _resolver = null!;
     private Mock<IChatMessageWriter> _writer = null!;
     private Mock<IPublisher> _publisher = null!;
+    private Mock<ISelfParticipantIdProvider> _selfParticipantIdProvider = null!;
 
     [SetUp]
     public void SetUp()
@@ -21,6 +23,7 @@ public class PostReadReceiptHandlerTests
         _resolver = new Mock<IConversationResolver>(MockBehavior.Strict);
         _writer = new Mock<IChatMessageWriter>(MockBehavior.Strict);
         _publisher = new Mock<IPublisher>(MockBehavior.Loose);
+        _selfParticipantIdProvider = new Mock<ISelfParticipantIdProvider>(MockBehavior.Strict);
     }
 
     private static Conversation MakeConversation()
@@ -42,20 +45,25 @@ public class PostReadReceiptHandlerTests
         var sentAt = DateTimeOffset.UtcNow;
         var convo = MakeConversation();
         var selfIdentityId = 7;
+        var selfParticipantId = new ParticipantId(Guid.NewGuid());
 
         _resolver
             .Setup(r => r.ResolveAsync(lookup, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ConversationResolution(convo, selfIdentityId));
 
+        _selfParticipantIdProvider
+            .Setup(p => p.Get())
+            .Returns(selfParticipantId);
+
         _writer
-            .Setup(w => w.AddReadReceiptAsync(convo.Id, selfIdentityId, messageId, sentAt, It.IsAny<CancellationToken>()))
+            .Setup(w => w.AddReadReceiptAsync(convo.Id, selfIdentityId, selfParticipantId, messageId, sentAt, It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
         _publisher
             .Setup(p => p.Publish(It.IsAny<ReadReceiptPostedEvent>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
-        var handler = new PostReadReceiptHandler(_resolver.Object, _writer.Object, _publisher.Object);
+        var handler = new PostReadReceiptHandler(_resolver.Object, _writer.Object, _publisher.Object, _selfParticipantIdProvider.Object);
         var cmd = new PostReadReceiptCommand(lookup, messageId, sentAt);
 
         // Act
@@ -73,7 +81,7 @@ public class PostReadReceiptHandlerTests
         // Arrange
         var lookup = new ConversationLookupKey(Guid.NewGuid(), new Pkh(new byte[32]), null);
         var messageId = new MessageId(Guid.NewGuid());
-        var handler = new PostReadReceiptHandler(_resolver.Object, _writer.Object, _publisher.Object);
+        var handler = new PostReadReceiptHandler(_resolver.Object, _writer.Object, _publisher.Object, _selfParticipantIdProvider.Object);
         var cmd = new PostReadReceiptCommand(lookup, messageId, DateTimeOffset.UtcNow);
 
         // Act

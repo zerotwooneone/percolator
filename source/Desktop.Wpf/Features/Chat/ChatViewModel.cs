@@ -1,13 +1,19 @@
-using System.Collections.ObjectModel;
+using System.Windows.Data;
 using R3;
+using ObservableCollections;
 using Desktop.Wpf.Shared.Mvvm;
 using Desktop.Wpf.Features.Sessions;
+using MediatR;
+using Percolator.Chat.App;
+using Percolator.Chat.App.Commands;
+using Percolator.Chat.Primitives;
+using Percolator.Chat.ValueObjects;
 
 namespace Desktop.Wpf.Features.Chat;
 
 public sealed class ChatViewModel : ViewModelBase
 {
-    public ReadOnlyObservableCollection<ChatMessage> Messages { get; }
+    public object? Messages { get; private set; }
     public BindableReactiveProperty<string> MessageInput { get; }
     public BindableReactiveProperty<bool> CanSend { get; }
     public BindableReactiveProperty<string> Title { get; }
@@ -22,19 +28,31 @@ public sealed class ChatViewModel : ViewModelBase
     public AsyncRelayCommand CloseNetworkCommand { get; }
     public BindableReactiveProperty<bool> AutoDiscoveryEnabled { get; }
 
-    private readonly ObservableCollection<ChatMessage> _messages = new();
     private string? _sessionId;
-    private readonly IChatHistory _history;
     private readonly SessionContext _sessionContext;
+    private readonly Desktop.Wpf.Features.Chat.State.ChatStateService _chatState;
+    private readonly IChatReloadCoordinator _reloadCoordinator;
+    private readonly IMediator _mediator;
+    private readonly IUiDispatcher _ui;
+    private DisposableBag _bag;
+    private ISynchronizedView<ChatMessageModel, ChatMessageModel>? _messagesView;
+    private INotifyCollectionChangedSynchronizedViewList<ChatMessageModel>? _messagesSyncList;
 
-    public ChatViewModel(IChatHistory history, SessionContext sessionContext)
+    public ChatViewModel(
+        SessionContext sessionContext,
+        Desktop.Wpf.Features.Chat.State.ChatStateService chatState,
+        IChatReloadCoordinator reloadCoordinator,
+        IMediator mediator,
+        IUiDispatcher ui)
     {
-        _history = history;
         _sessionContext = sessionContext;
+        _chatState = chatState;
+        _reloadCoordinator = reloadCoordinator;
+        _mediator = mediator;
+        _ui = ui;
 
         MessageInput = _sessionContext.Draft;
         CanSend = MessageInput.Select(text => !string.IsNullOrWhiteSpace(text)).ToBindableReactiveProperty(false);
-        Messages = new ReadOnlyObservableCollection<ChatMessage>(_messages);
         // Header binds to SessionContext
         Title = _sessionContext.PeerName;
         Initials = _sessionContext.Initials;
@@ -56,13 +74,20 @@ public sealed class ChatViewModel : ViewModelBase
             if (_sessionId is null) return;
             var text = MessageInput.Value;
             if (string.IsNullOrWhiteSpace(text)) return;
-            var msg = new ChatMessage { Id = Guid.NewGuid().ToString("N"), Author = "Me", Text = text, TimestampText = DateTime.Now.ToShortTimeString(), IsOwn = true };
-            await _history.AppendAsync(_sessionId, msg, CancellationToken.None);
-            _messages.Add(msg);
+            
+            var sessionGuid = Guid.Parse(_sessionId);
+            var messageId = MessageId.NewId();
+            var sentTimestamp = DateTimeOffset.UtcNow;
+            
+            await _mediator.Send(new PostTextMessageCommand(
+                ConversationLookupKey.ForDirectSession(sessionGuid),
+                messageId,
+                text,
+                sentTimestamp));
+            
             MessageInput.Value = string.Empty;
         }, _ => CanSend.Value);
 
-        // Propagate CanSend changes to the command so the button updates
         CanSend.Subscribe(_ => SendCommand.RaiseCanExecuteChanged());
 
         ToggleNetworkCommand = new AsyncRelayCommand(async _ =>
@@ -78,17 +103,40 @@ public sealed class ChatViewModel : ViewModelBase
         });
     }
 
-    public async void SetSession(string sessionId)
+    public void SetSession(string sessionId)
     {
         _sessionId = sessionId;
-        _messages.Clear();
-        var items = await _history.GetMessagesAsync(sessionId, CancellationToken.None);
-        foreach (var m in items) _messages.Add(m);
-        // Session header data is provided by SessionContext (set by navigation scope)
+        _bag = new DisposableBag();
+
+        // 1. Get the raw, unsorted domain list from the state service
+        var domainList = _chatState.GetOrAddSessionMessagesList(sessionId);
+
+        // 2. Create a pass-through view and track it
+        _messagesView = domainList.CreateView(m => m).AddTo(ref _bag);
+
+        // 3. Bridge the view to the WPF UI thread using Cysharp's native synchronizer
+        _messagesSyncList = _messagesView.ToNotifyCollectionChanged(_ui.CollectionEventDispatcher);
+
+        // 4. Wrap it in a WPF CollectionView for native chronological sorting
+        var collectionView = (System.Windows.Data.ListCollectionView)System.Windows.Data.CollectionViewSource.GetDefaultView(_messagesSyncList);
+        collectionView.CustomSort = new ChatMessageChronologicalComparer();
+        
+        // Assign directly to the property so WPF can bind to the view
+        Messages = collectionView;
+
+        // 5. Force the UI to refresh its sort/filter when background mutations occur
+        _chatState.StateMutated
+            .ObserveOnCurrentSynchronizationContext()
+            .Subscribe(_ => collectionView.Refresh())
+            .AddTo(ref _bag);
+
+        // Trigger initial background load from SQLite
+        _reloadCoordinator.TriggerReloadForSession(sessionId);
     }
 
     protected override void DisposeCore()
     {
+        _bag.Dispose();
         Disposable.Dispose(MessageInput, CanSend, Title, Initials, IsOnline, IsNetworkOpen, IsRelayed, AutoDiscoveryEnabled, RouteIcon, RouteText);
     }
 
@@ -99,5 +147,21 @@ public sealed class ChatViewModel : ViewModelBase
         if (parts.Length == 1)
             return parts[0].Substring(0, Math.Min(2, parts[0].Length)).ToUpperInvariant();
         return (parts[0][0].ToString() + parts[^1][0].ToString()).ToUpperInvariant();
+    }
+
+    private sealed class ChatMessageChronologicalComparer : System.Collections.IComparer
+    {
+        public int Compare(object? x, object? y)
+        {
+            if (x is null && y is null) return 0;
+            if (x is null) return 1;
+            if (y is null) return -1;
+            
+            var msgX = (Desktop.Wpf.Features.Chat.ChatMessageModel)x;
+            var msgY = (Desktop.Wpf.Features.Chat.ChatMessageModel)y;
+            
+            // Ascending: oldest at the top, newest at the bottom
+            return msgX.Timestamp.CompareTo(msgY.Timestamp);
+        }
     }
 }
