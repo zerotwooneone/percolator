@@ -80,6 +80,7 @@ namespace Percolator.ApplicationTests.ReverseSignal
                 Mock.Of<IPeerRoutingProfileRepository>(),
                 Mock.Of<IInviteHandshakeResponseDeliveryService>(),
                 Mock.Of<IDirectSessionLocator>(),
+                Mock.Of<IDirectSessionMappingWriter>(),
                 Mock.Of<ISecureMessagingService>(),
                 Mock.Of<IMessageTransportService>(),
                 Mock.Of<IMediator>());
@@ -191,6 +192,7 @@ namespace Percolator.ApplicationTests.ReverseSignal
                 profileRepo.Object,
                 delivery.Object,
                 Mock.Of<IDirectSessionLocator>(),
+                Mock.Of<IDirectSessionMappingWriter>(),
                 Mock.Of<ISecureMessagingService>(),
                 Mock.Of<IMessageTransportService>(),
                 mediator.Object);
@@ -306,6 +308,7 @@ namespace Percolator.ApplicationTests.ReverseSignal
                 profileRepo.Object,
                 delivery.Object,
                 Mock.Of<IDirectSessionLocator>(),
+                Mock.Of<IDirectSessionMappingWriter>(),
                 Mock.Of<ISecureMessagingService>(),
                 Mock.Of<IMessageTransportService>(),
                 mediator.Object);
@@ -437,6 +440,7 @@ namespace Percolator.ApplicationTests.ReverseSignal
                 profileRepo.Object,
                 delivery.Object,
                 directSessions.Object,
+                Mock.Of<IDirectSessionMappingWriter>(),
                 secure.Object,
                 transport.Object,
                 mediator.Object);

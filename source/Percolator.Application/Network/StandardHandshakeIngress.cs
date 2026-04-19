@@ -1,8 +1,10 @@
 using System.Security.Cryptography;
 using Google.Protobuf;
 using MediatR;
+using Microsoft.Extensions.Logging;
 using Percolator.Contracts;
 using Percolator.Application.KeyExchange;
+using Percolator.Application.Services;
 using Percolator.Cryptography;
 using Percolator.Identity;
 using Percolator.Identity.Model;
@@ -16,32 +18,35 @@ internal sealed class StandardHandshakeIngress : IStandardHandshakeIngress
     private readonly ISelfPreKeyBundleRepository _selfPreKeys;
     private readonly ISessionCrypto _sessionCrypto;
     private readonly ISessionRepository _sessions;
-    private readonly IDirectSessionRepository _directSessions;
+    private readonly IDirectSessionMappingWriter _directSessionMappingWriter;
     private readonly IClock _clock;
     private readonly IPeerIdentityRepository _peerIdentityRepository;
     private readonly Percolator.Cryptography.ISigningService _signingService;
     private readonly IMediator _mediator;
+    private readonly ILogger<StandardHandshakeIngress> _logger;
 
     public StandardHandshakeIngress(
         ISelfIdentityKeysStore keysStore,
         ISelfPreKeyBundleRepository selfPreKeys,
         ISessionCrypto sessionCrypto,
         ISessionRepository sessions,
-        IDirectSessionRepository directSessions,
+        IDirectSessionMappingWriter directSessionMappingWriter,
         IClock clock,
         IPeerIdentityRepository peerIdentityRepository,
         Percolator.Cryptography.ISigningService signingService,
-        IMediator mediator)
+        IMediator mediator,
+        ILogger<StandardHandshakeIngress> logger)
     {
         _keysStore = keysStore;
         _selfPreKeys = selfPreKeys;
         _sessionCrypto = sessionCrypto;
         _sessions = sessions;
-        _directSessions = directSessions;
+        _directSessionMappingWriter = directSessionMappingWriter;
         _clock = clock;
         _peerIdentityRepository = peerIdentityRepository;
         _signingService = signingService;
         _mediator = mediator;
+        _logger = logger;
     }
 
     public async Task<EstablishSessionResponse> HandleAsync(SelfId selfIdentityId, EstablishSessionRequest request, CancellationToken ct = default)
@@ -150,11 +155,20 @@ internal sealed class StandardHandshakeIngress : IStandardHandshakeIngress
                 ct)
             .ConfigureAwait(false);
 
-        await _directSessions.UpsertAsync(
+        try
+        {
+            await _directSessionMappingWriter.WriteMappingAsync(
                 new Percolator.Network.PeerId(initiatorIdentity.Id.Value),
                 new Percolator.Network.DirectSessionId(sessionId.Value),
-                selfIdentityId.Value)
-            .ConfigureAwait(false);
+                selfIdentityId.Value,
+                ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogInformation(ex,
+                "Failed to persist DirectSession mapping for RemotePeerId={RemotePeerId}, SessionId={SessionId}, SelfIdentityId={SelfIdentityId}",
+                initiatorIdentity.Id.Value, sessionId.Value, selfIdentityId.Value);
+        }
 
         var responsePayload = new EstablishSessionResponse.Types.Response.Types.ResponsePayload
         {

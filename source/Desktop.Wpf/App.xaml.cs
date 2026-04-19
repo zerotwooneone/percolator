@@ -112,6 +112,7 @@ public partial class App : Application
                 services.AddApplicationServices(context.Configuration);
                 services.AddSingleton<IClock, SystemClock>();
                 services.AddMessageQueue();
+                services.AddScoped<Percolator.Application.Services.IDirectSessionMappingWriter, Percolator.Application.Services.DirectSessionMappingWriter>();
 
                 // Views
                 services.AddSingleton<MainWindow>();

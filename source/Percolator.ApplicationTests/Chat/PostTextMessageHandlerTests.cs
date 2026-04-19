@@ -52,6 +52,8 @@ public class PostTextMessageHandlerTests
         var selfIdentityId = 42;
         var selfParticipantId = new ParticipantId(Guid.NewGuid());
 
+        _active.SetActiveIdentity(new Percolator.Identity.Model.IdentityRecord(selfParticipantId.Value, "self"));
+
         _resolver
             .Setup(r => r.ResolveAsync(lookup, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ConversationResolution(convo, selfIdentityId));

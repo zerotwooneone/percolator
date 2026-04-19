@@ -141,6 +141,7 @@ public static class ServiceCollectionExtensions
 
         // Application-layer envelope sender
         services.AddScoped<IMessageService, MessageService>();
+        services.AddScoped<Handshake.IEstablishSessionResponseValidator, Handshake.EstablishSessionResponseValidator>();
         services.AddScoped<Handshake.IInitiatorFinalizeService, Handshake.InitiatorFinalizeService>();
         services.AddTransient<IRemoteEnvelopeSender, RemoteEnvelopeSender>();
 

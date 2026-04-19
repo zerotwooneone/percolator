@@ -39,6 +39,7 @@ namespace Percolator.Application.Network
         private readonly IPeerRoutingProfileRepository _profileRepository;
         private readonly IInviteHandshakeResponseDeliveryService _delivery;
         private readonly IDirectSessionLocator _directSessions;
+        private readonly IDirectSessionMappingWriter _directSessionMappingWriter;
         private readonly ISecureMessagingService _secureMessaging;
         private readonly IMessageTransportService _transport;
         private readonly IMediator _mediator;
@@ -56,6 +57,7 @@ namespace Percolator.Application.Network
             IPeerRoutingProfileRepository profileRepository,
             IInviteHandshakeResponseDeliveryService delivery,
             IDirectSessionLocator directSessions,
+            IDirectSessionMappingWriter directSessionMappingWriter,
             ISecureMessagingService secureMessaging,
             IMessageTransportService transport,
             IMediator mediator)
@@ -72,6 +74,7 @@ namespace Percolator.Application.Network
             _profileRepository = profileRepository;
             _delivery = delivery;
             _directSessions = directSessions;
+            _directSessionMappingWriter = directSessionMappingWriter;
             _secureMessaging = secureMessaging;
             _transport = transport;
             _mediator = mediator;
@@ -201,6 +204,16 @@ namespace Percolator.Application.Network
                 root,
                 _clock);
             await _sessions.AddAsync(session, cancellationToken).ConfigureAwait(false);
+
+            // Persist DirectSession mapping for conversation lookup
+            var inviterNetPeerId = new Percolator.Network.PeerId(pending.RemotePeerId.Value);
+            var directSessionId = new DirectSessionId(sessionId.Value);
+            await _directSessionMappingWriter.WriteMappingAsync(
+                inviterNetPeerId,
+                directSessionId,
+                _active.Identity.SelfIdentityId.Value,
+                cancellationToken).ConfigureAwait(false);
+
             await _mediator.Publish(
                     new SecureSessionCreatedNotification(
                         sessionId,
@@ -217,7 +230,6 @@ namespace Percolator.Application.Network
             };
             var initial = session.Encrypt(new Plaintext(inner.ToByteArray()), _clock);
 
-            var inviterNetPeerId = new Percolator.Network.PeerId(pending.RemotePeerId.Value);
             if (!pending.IsRelayed)
             {
                 // Routing-profile mutation boundary: only on explicit acceptance of a direct invite.

@@ -12,15 +12,17 @@ namespace Percolator.ApplicationTests.Network
 {
     public class ProcessInternalEnvelopeHandlerTests
     {
-        private static ProcessInternalEnvelopeHandler CreateSut(Mock<IMediator> mediatorMock)
+        private static ProcessInternalEnvelopeHandler CreateSut(
+            Mock<IMediator> mediatorMock,
+            Mock<Percolator.Chat.App.IPkhPeerResolver>? pkhPeerResolverMock = null)
         {
             var logger = NullLogger<ProcessInternalEnvelopeHandler>.Instance;
             var adminOps = new Moq.Mock<Percolator.Chat.App.IAdminOperations>(MockBehavior.Loose);
             var dht = new Moq.Mock<Percolator.Dht.IDhtService>(MockBehavior.Loose);
             var mq = new Moq.Mock<Percolator.MessageQueue.Abstractions.IMessageQueueService>(MockBehavior.Loose);
             var profile = new Moq.Mock<Percolator.Network.IPeerRoutingProfileRepository>(MockBehavior.Loose);
-            var pkhPeerResolver = new Moq.Mock<Percolator.Chat.App.IPkhPeerResolver>(MockBehavior.Loose);
-            return new ProcessInternalEnvelopeHandler(logger, mediatorMock.Object, adminOps.Object, dht.Object, mq.Object, profile.Object, pkhPeerResolver.Object);
+            pkhPeerResolverMock ??= new Moq.Mock<Percolator.Chat.App.IPkhPeerResolver>(MockBehavior.Loose);
+            return new ProcessInternalEnvelopeHandler(logger, mediatorMock.Object, adminOps.Object, dht.Object, mq.Object, profile.Object, pkhPeerResolverMock.Object);
         }
 
         [Test]
@@ -280,16 +282,27 @@ namespace Percolator.ApplicationTests.Network
         {
             var mediator = new Mock<IMediator>(MockBehavior.Strict);
             mediator
-                .Setup(m => m.Send(It.IsAny<PostReadReceiptCommand>(), It.IsAny<CancellationToken>()))
+                .Setup(m => m.Send(It.IsAny<ReceiveReadReceiptCommand>(), It.IsAny<CancellationToken>()))
                 .Returns(Task.CompletedTask);
 
-            var sut = CreateSut(mediator);
+            var authorSpki = new byte[] { 1, 2, 3 };
+            var authorPkh = System.Security.Cryptography.SHA256.HashData(authorSpki);
+            var resolvedParticipantId = new Percolator.Chat.ValueObjects.ParticipantId(Guid.NewGuid());
+            var pkhPeerResolver = new Mock<Percolator.Chat.App.IPkhPeerResolver>(MockBehavior.Strict);
+            pkhPeerResolver
+                .Setup(r => r.GetParticipantIdByPkhAsync(
+                    Percolator.Chat.ValueObjects.Pkh.FromBytes(authorPkh),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(resolvedParticipantId);
+
+            var sut = CreateSut(mediator, pkhPeerResolver);
 
             var messageId = Guid.NewGuid();
             var groupId = Guid.NewGuid();
             var rr = new ReadReceipt
             {
                 MessageId = Google.Protobuf.ByteString.CopyFrom(messageId.ToByteArray()),
+                AuthorIdentityKey = Google.Protobuf.ByteString.CopyFrom(authorSpki),
                 SentTimestampUtc = Timestamp.FromDateTime(DateTime.UtcNow)
             };
             rr.GroupConversationGuid = Google.Protobuf.ByteString.CopyFrom(groupId.ToByteArray());
@@ -429,10 +442,20 @@ namespace Percolator.ApplicationTests.Network
         {
             var mediator = new Mock<IMediator>(MockBehavior.Strict);
             mediator
-                .Setup(m => m.Send(It.IsAny<PostEmojiAnnotationCommand>(), It.IsAny<CancellationToken>()))
+                .Setup(m => m.Send(It.IsAny<ReceiveEmojiAnnotationCommand>(), It.IsAny<CancellationToken>()))
                 .Returns(Task.CompletedTask);
 
-            var sut = CreateSut(mediator);
+            var authorSpki = new byte[] { 1, 2, 3 };
+            var authorPkh = System.Security.Cryptography.SHA256.HashData(authorSpki);
+            var resolvedParticipantId = new Percolator.Chat.ValueObjects.ParticipantId(Guid.NewGuid());
+            var pkhPeerResolver = new Mock<Percolator.Chat.App.IPkhPeerResolver>(MockBehavior.Strict);
+            pkhPeerResolver
+                .Setup(r => r.GetParticipantIdByPkhAsync(
+                    Percolator.Chat.ValueObjects.Pkh.FromBytes(authorPkh),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(resolvedParticipantId);
+
+            var sut = CreateSut(mediator, pkhPeerResolver);
 
             var messageId = Guid.NewGuid();
             var groupId = Guid.NewGuid();
@@ -440,6 +463,7 @@ namespace Percolator.ApplicationTests.Network
             {
                 MessageId = Google.Protobuf.ByteString.CopyFrom(messageId.ToByteArray()),
                 Emoji = ":)",
+                AuthorIdentityKey = Google.Protobuf.ByteString.CopyFrom(authorSpki),
                 SentTimestampUtc = Timestamp.FromDateTime(DateTime.UtcNow)
             };
             em.GroupConversationGuid = Google.Protobuf.ByteString.CopyFrom(groupId.ToByteArray());
@@ -457,16 +481,27 @@ namespace Percolator.ApplicationTests.Network
         {
             var mediator = new Mock<IMediator>(MockBehavior.Strict);
             mediator
-                .Setup(m => m.Send(It.IsAny<PostDeliveredReceiptCommand>(), It.IsAny<CancellationToken>()))
+                .Setup(m => m.Send(It.IsAny<ReceiveDeliveredReceiptCommand>(), It.IsAny<CancellationToken>()))
                 .Returns(Task.CompletedTask);
 
-            var sut = CreateSut(mediator);
+            var authorSpki = new byte[] { 1, 2, 3 };
+            var authorPkh = System.Security.Cryptography.SHA256.HashData(authorSpki);
+            var resolvedParticipantId = new Percolator.Chat.ValueObjects.ParticipantId(Guid.NewGuid());
+            var pkhPeerResolver = new Mock<Percolator.Chat.App.IPkhPeerResolver>(MockBehavior.Strict);
+            pkhPeerResolver
+                .Setup(r => r.GetParticipantIdByPkhAsync(
+                    Percolator.Chat.ValueObjects.Pkh.FromBytes(authorPkh),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(resolvedParticipantId);
+
+            var sut = CreateSut(mediator, pkhPeerResolver);
 
             var messageId = Guid.NewGuid();
             var groupId = Guid.NewGuid();
             var dr = new DeliveredReceipt
             {
                 MessageId = Google.Protobuf.ByteString.CopyFrom(messageId.ToByteArray()),
+                AuthorIdentityKey = Google.Protobuf.ByteString.CopyFrom(authorSpki),
                 SentTimestampUtc = Timestamp.FromDateTime(DateTime.UtcNow)
             };
             dr.GroupConversationGuid = Google.Protobuf.ByteString.CopyFrom(groupId.ToByteArray());
@@ -542,10 +577,20 @@ namespace Percolator.ApplicationTests.Network
         {
             var mediator = new Mock<IMediator>(MockBehavior.Strict);
             mediator
-                .Setup(m => m.Send(It.IsAny<PostTextMessageCommand>(), It.IsAny<CancellationToken>()))
+                .Setup(m => m.Send(It.IsAny<ReceiveTextMessageCommand>(), It.IsAny<CancellationToken>()))
                 .Returns(Task.CompletedTask);
 
-            var sut = CreateSut(mediator);
+            var authorSpki = new byte[] { 1, 2, 3 };
+            var authorPkh = System.Security.Cryptography.SHA256.HashData(authorSpki);
+            var resolvedParticipantId = new Percolator.Chat.ValueObjects.ParticipantId(Guid.NewGuid());
+            var pkhPeerResolver = new Mock<Percolator.Chat.App.IPkhPeerResolver>(MockBehavior.Strict);
+            pkhPeerResolver
+                .Setup(r => r.GetParticipantIdByPkhAsync(
+                    Percolator.Chat.ValueObjects.Pkh.FromBytes(authorPkh),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(resolvedParticipantId);
+
+            var sut = CreateSut(mediator, pkhPeerResolver);
 
             var messageId = Guid.NewGuid();
             var groupId = Guid.NewGuid();
@@ -553,6 +598,7 @@ namespace Percolator.ApplicationTests.Network
             {
                 MessageId = Google.Protobuf.ByteString.CopyFrom(messageId.ToByteArray()),
                 Content = "hi",
+                AuthorIdentityKey = Google.Protobuf.ByteString.CopyFrom(authorSpki),
                 SentTimestampUtc = Timestamp.FromDateTime(DateTime.UtcNow)
             };
             text.GroupConversationGuid = Google.Protobuf.ByteString.CopyFrom(groupId.ToByteArray());

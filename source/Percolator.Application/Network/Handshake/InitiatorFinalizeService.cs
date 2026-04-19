@@ -1,6 +1,7 @@
 using MediatR;
 using Microsoft.Extensions.Logging;
 using Percolator.Application.KeyExchange;
+using Percolator.Application.Services;
 using Percolator.Cryptography;
 using Percolator.Cryptography.Primitives;
 using Percolator.Contracts;
@@ -23,9 +24,10 @@ namespace Percolator.Application.Network.Handshake
         private readonly ISentInvitationRepository _sentInvitations;
         private readonly ISelfPreKeyBundleRepository _selfPreKeys;
         private readonly IPeerIdentityRepository _peerIdentities;
-        private readonly IDirectSessionRepository _directSessions;
+        private readonly IDirectSessionMappingWriter _directSessionMappingWriter;
         private readonly IPeerRoutingProfileRepository _routingProfiles;
         private readonly IMediator _mediator;
+        private readonly IEstablishSessionResponseValidator _responseValidator;
 
         public InitiatorFinalizeService(
             ILogger<InitiatorFinalizeService> logger,
@@ -38,9 +40,10 @@ namespace Percolator.Application.Network.Handshake
             ISentInvitationRepository sentInvitations,
             ISelfPreKeyBundleRepository selfPreKeys,
             IPeerIdentityRepository peerIdentities,
-            IDirectSessionRepository directSessions,
+            IDirectSessionMappingWriter directSessionMappingWriter,
             IPeerRoutingProfileRepository routingProfiles,
-            IMediator mediator)
+            IMediator mediator,
+            IEstablishSessionResponseValidator responseValidator)
         {
             _logger = logger;
             _keysStore = keysStore;
@@ -52,9 +55,10 @@ namespace Percolator.Application.Network.Handshake
             _sentInvitations = sentInvitations;
             _selfPreKeys = selfPreKeys;
             _peerIdentities = peerIdentities;
-            _directSessions = directSessions;
+            _directSessionMappingWriter = directSessionMappingWriter;
             _routingProfiles = routingProfiles;
             _mediator = mediator;
+            _responseValidator = responseValidator;
         }
 
         public async Task<(SessionId sessionId, Plaintext plaintext)?> TryFinalizeFromInviteHandshakeResponseAsync(
@@ -264,20 +268,21 @@ namespace Percolator.Application.Network.Handshake
             await _sessions.AddAsync(final, cancellationToken).ConfigureAwait(false);
 
             // Persist mapping between remote peer and session id (used by UI for relay-host selection).
-            // Best-effort: do not fail finalize if persistence fails.
             if (peerIdentity is not null)
             {
                 try
                 {
-                    await _directSessions.UpsertAsync(
-                            new Percolator.Network.PeerId(peerIdentity.Id.Value),
-                            new Percolator.Network.DirectSessionId(sid.Value),
-                            selfIdentityId.Value)
-                        .ConfigureAwait(false);
+                    await _directSessionMappingWriter.WriteMappingAsync(
+                        new Percolator.Network.PeerId(peerIdentity.Id.Value),
+                        new Percolator.Network.DirectSessionId(sid.Value),
+                        selfIdentityId.Value,
+                        cancellationToken).ConfigureAwait(false);
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogInformation(ex, "Invite finalize: best-effort direct session upsert failed.");
+                    _logger.LogInformation(ex,
+                        "Failed to persist DirectSession mapping for RemotePeerId={RemotePeerId}, SessionId={SessionId}, SelfIdentityId={SelfIdentityId}",
+                        peerIdentity.Id.Value, sid.Value, selfIdentityId.Value);
                 }
 
                 // Persist routing profile for direct invites so transport can route to this peer.
@@ -388,6 +393,23 @@ namespace Percolator.Application.Network.Handshake
                         _clock);
 
                     await _sessions.AddAsync(final, cancellationToken).ConfigureAwait(false);
+
+                    // Persist mapping between remote peer and session id (used by UI for relay-host selection).
+                    try
+                    {
+                        await _directSessionMappingWriter.WriteMappingAsync(
+                            new Percolator.Network.PeerId(tmp.RemotePeerId.Value),
+                            new Percolator.Network.DirectSessionId(sid.Value),
+                            selfIdentityId.Value,
+                            cancellationToken).ConfigureAwait(false);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogInformation(ex,
+                            "Failed to persist DirectSession mapping for RemotePeerId={RemotePeerId}, SessionId={SessionId}, SelfIdentityId={SelfIdentityId}",
+                            tmp.RemotePeerId.Value, sid.Value, selfIdentityId.Value);
+                    }
+
                     await _mediator.Publish(
                             new Percolator.Application.Network.SecureSessionCreatedNotification(
                                 sid,
@@ -417,67 +439,15 @@ namespace Percolator.Application.Network.Handshake
             if (response is null) throw new ArgumentNullException(nameof(response));
             cancellationToken.ThrowIfCancellationRequested();
 
-            if (response.Response is null
-                || !response.Response.HasIdentitySigningKey
-                || response.Response.IdentitySigningKey.Length == 0
-                || !response.Response.HasResponsePayload
-                || response.Response.ResponsePayload.Length == 0
-                || !response.Response.HasPayloadSignature
-                || response.Response.PayloadSignature.Length == 0)
+            var validationResult = await _responseValidator.TryValidateAsync(response, cancellationToken).ConfigureAwait(false);
+            if (validationResult is null)
             {
                 return null;
             }
 
-            // Verify responder signature over raw ResponsePayload bytes
-            try
-            {
-                using var ecdsa = ECDsa.Create();
-                ecdsa.ImportSubjectPublicKeyInfo(response.Response.IdentitySigningKey.ToByteArray(), out _);
-                if (!ecdsa.VerifyData(
-                        response.Response.ResponsePayload.ToByteArray(),
-                        response.Response.PayloadSignature.ToByteArray(),
-                        HashAlgorithmName.SHA256))
-                {
-                    _logger.LogWarning("Standard finalize: EstablishSessionResponse signature invalid; dropping");
-                    return null;
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Standard finalize: failed to verify EstablishSessionResponse signature; dropping");
-                return null;
-            }
-
-            var remoteIdentitySpki = response.Response.IdentitySigningKey.ToByteArray();
-            var remotePkh = SHA256.HashData(remoteIdentitySpki);
-
-            EstablishSessionResponse.Types.Response.Types.ResponsePayload respPayload;
-            try
-            {
-                respPayload = EstablishSessionResponse.Types.Response.Types.ResponsePayload.Parser.ParseFrom(response.Response.ResponsePayload);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Standard finalize: response payload parse failed");
-                return null;
-            }
-
-            if (!respPayload.HasSessionId || string.IsNullOrWhiteSpace(respPayload.SessionId))
-            {
-                _logger.LogWarning("Standard finalize: response missing session id");
-                return null;
-            }
-
-            SessionId sid;
-            try
-            {
-                sid = new SessionId(Guid.Parse(respPayload.SessionId));
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Standard finalize: session id not a GUID: {SessionId}", respPayload.SessionId);
-                return null;
-            }
+            var sid = validationResult.SessionId;
+            var remoteIdentitySpki = validationResult.RemoteIdentitySpki;
+            var remotePkh = validationResult.RemotePublicKeyHash;
 
             // Match to a pending pre-handshake attempt by recipient PKH
             PreHandshakeRecord? match = null;
@@ -536,15 +506,17 @@ namespace Percolator.Application.Network.Handshake
             {
                 try
                 {
-                    await _directSessions.UpsertAsync(
-                            new Percolator.Network.PeerId(peerIdentity.Id.Value),
-                            new Percolator.Network.DirectSessionId(sid.Value),
-                            selfIdentityId.Value)
-                        .ConfigureAwait(false);
+                    await _directSessionMappingWriter.WriteMappingAsync(
+                        new Percolator.Network.PeerId(peerIdentity.Id.Value),
+                        new Percolator.Network.DirectSessionId(sid.Value),
+                        selfIdentityId.Value,
+                        cancellationToken).ConfigureAwait(false);
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogInformation(ex, "Standard finalize: best-effort direct session upsert failed.");
+                    _logger.LogInformation(ex,
+                        "Failed to persist DirectSession mapping for RemotePeerId={RemotePeerId}, SessionId={SessionId}, SelfIdentityId={SelfIdentityId}",
+                        peerIdentity.Id.Value, sid.Value, selfIdentityId.Value);
                 }
             }
 
