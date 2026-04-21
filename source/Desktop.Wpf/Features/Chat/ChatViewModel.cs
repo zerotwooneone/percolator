@@ -130,8 +130,8 @@ public sealed class ChatViewModel : ViewModelBase
             .Subscribe(_ => collectionView.Refresh())
             .AddTo(ref _bag);
 
-        // Trigger initial background load from SQLite
-        _reloadCoordinator.TriggerReloadForSession(sessionId);
+        // Note: Initial reload is not triggered here because SetSession receives a PeerConnectionKey.Value (PeerId),
+        // not a ConversationId. Reload is triggered by ChatStateUpdateHandlers when messages are posted/received.
     }
 
     protected override void DisposeCore()

@@ -15,12 +15,12 @@ namespace Desktop.Wpf.Features.Chat;
 
 public interface IChatReloadCoordinator : IDisposable
 {
-    void TriggerReloadForSession(string sessionId);
+    void TriggerReloadForConversation(ConversationId conversationId, int selfIdentityId);
 }
 
 public sealed class ChatReloadCoordinator : IChatReloadCoordinator
 {
-    private readonly Subject<string> _reloadTrigger = new();
+    private readonly Subject<(ConversationId conversationId, int selfIdentityId)> _reloadTrigger = new();
     private readonly DisposableBag _bag = new();
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ChatStateService _state;
@@ -37,38 +37,27 @@ public sealed class ChatReloadCoordinator : IChatReloadCoordinator
 
         _reloadTrigger
             .Debounce(TimeSpan.FromMilliseconds(50))
-            .SelectAwait(async (sessionId, ct) =>
+            .SelectAwait(async (evt, ct) =>
             {
-                await ReloadCoreAsync(sessionId, ct).ConfigureAwait(false);
+                await ReloadCoreAsync(evt.conversationId, evt.selfIdentityId, ct).ConfigureAwait(false);
                 return Unit.Default;
             }, AwaitOperation.Drop)
             .Subscribe()
             .AddTo(ref _bag);
     }
 
-    public void TriggerReloadForSession(string sessionId)
+    public void TriggerReloadForConversation(ConversationId conversationId, int selfIdentityId)
     {
-        _reloadTrigger.OnNext(sessionId);
+        _reloadTrigger.OnNext((conversationId, selfIdentityId));
     }
 
-    private async Task ReloadCoreAsync(string sessionId, CancellationToken cancellationToken)
+    private async Task ReloadCoreAsync(ConversationId conversationId, int selfIdentityId, CancellationToken cancellationToken)
     {
         using var scope = _scopeFactory.CreateScope();
         var conversationRepository = scope.ServiceProvider.GetRequiredService<IConversationRepository>();
         var selfParticipantId = _selfParticipantIdProvider.Get();
 
-        var sessionGuid = Guid.Parse(sessionId);
-        var resolution = await scope.ServiceProvider
-            .GetRequiredService<IConversationResolver>()
-            .ResolveAsync(ConversationLookupKey.ForDirectSession(sessionGuid), cancellationToken)
-            .ConfigureAwait(false);
-
-        if (resolution is null)
-            return;
-
-        var conversation = await conversationRepository.GetByIdAsync(
-            resolution.Conversation.Id, 
-            resolution.SelfIdentityId).ConfigureAwait(false);
+        var conversation = await conversationRepository.GetByIdAsync(conversationId, selfIdentityId).ConfigureAwait(false);
 
         if (conversation is null)
             return;
@@ -83,7 +72,8 @@ public sealed class ChatReloadCoordinator : IChatReloadCoordinator
             IsRead: m.ReadReceipts.Any(r => r.ReaderId.Value == selfParticipantId.Value)
         )).ToList();
 
-        _state.SyncMessages(sessionId, snapshots);
+        var conversationKey = conversationId.Value.ToString("N");
+        _state.SyncMessages(conversationKey, snapshots);
     }
 
     public void Dispose()
