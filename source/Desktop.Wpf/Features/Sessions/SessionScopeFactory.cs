@@ -1,13 +1,14 @@
 using Microsoft.Extensions.DependencyInjection;
 using Desktop.Wpf.Features.Chat;
+using Percolator.Network;
 
 namespace Desktop.Wpf.Features.Sessions
 {
     public sealed class SessionScopeFactory : ISessionScopeFactory, IDisposable
     {
         private readonly IServiceScopeFactory _scopeFactory;
-        private readonly Dictionary<string, IServiceScope> _scopes = new();
-        private readonly LinkedList<string> _lru = new();
+        private readonly Dictionary<DirectSessionId, IServiceScope> _scopes = new();
+        private readonly LinkedList<DirectSessionId> _lru = new();
         private const int ScopeCapacity = 3;
 
         public SessionScopeFactory(IServiceScopeFactory scopeFactory)
@@ -15,10 +16,8 @@ namespace Desktop.Wpf.Features.Sessions
             _scopeFactory = scopeFactory;
         }
 
-        public SessionResolved GetOrCreate(string sessionId, SessionHeader? header = null)
+        public SessionResolved GetOrCreate(DirectSessionId sessionId, SessionHeader? header = null)
         {
-            if (string.IsNullOrWhiteSpace(sessionId)) throw new ArgumentException("sessionId required", nameof(sessionId));
-
             if (!_scopes.TryGetValue(sessionId, out var scope))
             {
                 scope = _scopeFactory.CreateScope();
@@ -45,7 +44,7 @@ namespace Desktop.Wpf.Features.Sessions
             }
 
             var ctx = scope.ServiceProvider.GetRequiredService<SessionContext>();
-            ctx.SetSessionId(sessionId);
+            ctx.SetSessionId(sessionId.Value.ToString());
             if (header is not null)
             {
                 if (header.DisplayName is not null) ctx.PeerName.Value = header.DisplayName;

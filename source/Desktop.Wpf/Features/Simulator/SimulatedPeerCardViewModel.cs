@@ -151,6 +151,8 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
         _hostingForView.ObserveRemove().Subscribe(evt => evt.Value.View.Dispose()).AddTo(ref _bag);
         HostingForTags = _hostingForView.ToNotifyCollectionChanged(_ui.CollectionEventDispatcher).AddTo(ref _bag);
 
+        ChatViewModel = new SimulatorChatViewModel(_model, _state, _ui);
+
         _ = InitializeAsync();
     }
 
@@ -183,6 +185,8 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
     public NotifyCollectionChangedSynchronizedViewList<RelationshipTagViewModel> HostingForTags { get; }
 
     public NotifyCollectionChangedSynchronizedViewList<PublishTargetOption> AvailablePublishTargets { get; }
+
+    public SimulatorChatViewModel ChatViewModel { get; }
 
     public ReactiveCommand<Unit> ToggleOnlineCommand { get; }
 
@@ -396,6 +400,8 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
         Disposable.Dispose(CopyOobInviteTokenCommand);
         Disposable.Dispose(CopyEndpointCommand);
         Disposable.Dispose(PublishKeysCommand);
+
+        ChatViewModel.Dispose();
 
         _bag.Dispose();
         DisplayName.Dispose();

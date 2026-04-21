@@ -6,6 +6,7 @@ using Percolator.Chat;
 using Percolator.Chat.App;
 using Percolator.Chat.App.Commands;
 using Percolator.Chat.Events;
+using Percolator.Chat.ValueObjects;
 using Percolator.Contracts;
 
 namespace Percolator.Application.Apps.Chat.Handlers;
@@ -91,7 +92,8 @@ public sealed class PostTextMessageHandler : IRequestHandler<PostTextMessageComm
                     .Select(p => p.Value)
                     .ToList(),
                 request.Content,
-                request.SentTimestampUtc),
+                request.SentTimestampUtc,
+                Percolator.Chat.ValueObjects.DirectSessionIdValueObject.FromGuid(request.LookupKey.DirectSessionId)),
             cancellationToken).ConfigureAwait(false);
     }
 

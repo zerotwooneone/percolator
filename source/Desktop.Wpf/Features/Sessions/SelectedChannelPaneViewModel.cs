@@ -1,8 +1,10 @@
+using Desktop.Wpf.Features.Chat;
 using Desktop.Wpf.Features.Sessions.Models;
 using Desktop.Wpf.Features.Sessions.Queries;
 using Desktop.Wpf.Features.Sessions.State;
 using Desktop.Wpf.Shared.Mvvm;
 using ObservableCollections;
+using Percolator.Network;
 using R3;
 
 namespace Desktop.Wpf.Features.Sessions;
@@ -29,6 +31,7 @@ public sealed class SelectedChannelPaneViewModel : ViewModelBase
     private readonly PeerConnectionStateService _stateService;
     private readonly ISessionScopeFactory _sessionFactory;
     private readonly SelectedPeerConnectionStateCache _stateCache;
+    private readonly IChatReloadCoordinator _reloadCoordinator;
 
     private DisposableBag _bag;
     private DisposableBag _currentSelectionBag;
@@ -38,12 +41,14 @@ public sealed class SelectedChannelPaneViewModel : ViewModelBase
         SelectedChannelModel selection,
         PeerConnectionStateService stateService,
         ISessionScopeFactory sessionFactory,
-        SelectedPeerConnectionStateCache stateCache)
+        SelectedPeerConnectionStateCache stateCache,
+        IChatReloadCoordinator reloadCoordinator)
     {
         _selection = selection;
         _stateService = stateService;
         _sessionFactory = sessionFactory;
         _stateCache = stateCache;
+        _reloadCoordinator = reloadCoordinator;
 
         State = new BindableReactiveProperty<SelectedPaneState>(SelectedPaneState.None).AddTo(ref _bag);
         DisplayName = new BindableReactiveProperty<string?>(null).AddTo(ref _bag);
@@ -155,7 +160,7 @@ public sealed class SelectedChannelPaneViewModel : ViewModelBase
 
     private object? ResolveChatContent(PeerConnectionModel model, PeerConnectionKey key)
     {
-        var sessionId = key.Value.ToString("N");
+        var sessionId = new DirectSessionId(key.Value);
         var header = new SessionHeader
         {
             DisplayName = model.DisplayName.CurrentValue,
@@ -164,6 +169,9 @@ public sealed class SelectedChannelPaneViewModel : ViewModelBase
         };
 
         var resolved = _sessionFactory.GetOrCreate(sessionId, header);
+
+        // Trigger initial load from SQLite on background thread
+        _reloadCoordinator.TriggerReloadForSession(sessionId);
 
         var overlay = _stateCache.GetOrCreate(key);
 

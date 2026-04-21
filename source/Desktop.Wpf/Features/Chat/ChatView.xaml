@@ -3,9 +3,15 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:att="clr-namespace:Desktop.Wpf.Shared.Attached"
              xmlns:controls="clr-namespace:Desktop.Wpf.Shared.Controls"
-             xmlns:converters="clr-namespace:Desktop.Wpf.Shared.Converters">
+             xmlns:converters="clr-namespace:Desktop.Wpf.Shared.Converters"
+             xmlns:componentModel="clr-namespace:System.ComponentModel;assembly=WindowsBase">
   <UserControl.Resources>
     <converters:DateTimeOffsetToStringConverter x:Key="DateTimeOffsetToStringConverter"/>
+    <CollectionViewSource x:Key="MessagesView" Source="{Binding Messages}">
+      <CollectionViewSource.SortDescriptions>
+        <componentModel:SortDescription PropertyName="Timestamp" Direction="Ascending" />
+      </CollectionViewSource.SortDescriptions>
+    </CollectionViewSource>
   </UserControl.Resources>
   <Grid>
     <Grid.RowDefinitions>
@@ -47,7 +53,7 @@
 
     <!-- Messages -->
     <ScrollViewer x:Name="MessagesScroll" Grid.Row="1" VerticalScrollBarVisibility="Auto">
-      <ItemsControl ItemsSource="{Binding Messages}">
+      <ItemsControl ItemsSource="{Binding Source={StaticResource MessagesView}}">
         <ItemsControl.ItemsPanel>
           <ItemsPanelTemplate>
             <StackPanel/>

@@ -40,6 +40,7 @@ public sealed class ReceiveDeliveredReceiptHandler : IRequestHandler<ReceiveDeli
             request.MessageId.Value,
             resolution.SelfIdentityId,
             request.RecipientId.Value,
-            request.DeliveredTimestampUtc), cancellationToken).ConfigureAwait(false);
+            request.DeliveredTimestampUtc,
+            DirectSessionIdValueObject.FromGuid(request.LookupKey.DirectSessionId)), cancellationToken).ConfigureAwait(false);
     }
 }

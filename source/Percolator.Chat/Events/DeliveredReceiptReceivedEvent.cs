@@ -1,4 +1,5 @@
 using MediatR;
+using Percolator.Chat.ValueObjects;
 
 namespace Percolator.Chat.Events
 {
@@ -9,19 +10,22 @@ namespace Percolator.Chat.Events
         public int SelfIdentityId { get; }
         public Guid RecipientPeerId { get; }
         public DateTimeOffset DeliveredTimestampUtc { get; }
+        public DirectSessionIdValueObject? DirectSessionId { get; }
 
         public DeliveredReceiptReceivedEvent(
             Guid conversationId,
             Guid messageId,
             int selfIdentityId,
             Guid recipientPeerId,
-            DateTimeOffset deliveredTimestampUtc)
+            DateTimeOffset deliveredTimestampUtc,
+            DirectSessionIdValueObject? directSessionId = null)
         {
             ConversationId = conversationId;
             MessageId = messageId;
             SelfIdentityId = selfIdentityId;
             RecipientPeerId = recipientPeerId;
             DeliveredTimestampUtc = deliveredTimestampUtc;
+            DirectSessionId = directSessionId;
         }
     }
 }

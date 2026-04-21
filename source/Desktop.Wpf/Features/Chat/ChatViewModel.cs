@@ -8,12 +8,13 @@ using Percolator.Chat.App;
 using Percolator.Chat.App.Commands;
 using Percolator.Chat.Primitives;
 using Percolator.Chat.ValueObjects;
+using Percolator.Network;
 
 namespace Desktop.Wpf.Features.Chat;
 
 public sealed class ChatViewModel : ViewModelBase
 {
-    public object? Messages { get; private set; }
+    public NotifyCollectionChangedSynchronizedViewList<ChatMessageViewModel> Messages { get; private set; }
     public BindableReactiveProperty<string> MessageInput { get; }
     public BindableReactiveProperty<bool> CanSend { get; }
     public BindableReactiveProperty<string> Title { get; }
@@ -28,15 +29,14 @@ public sealed class ChatViewModel : ViewModelBase
     public AsyncRelayCommand CloseNetworkCommand { get; }
     public BindableReactiveProperty<bool> AutoDiscoveryEnabled { get; }
 
-    private string? _sessionId;
+    private DirectSessionId? _sessionId;
     private readonly SessionContext _sessionContext;
     private readonly Desktop.Wpf.Features.Chat.State.ChatStateService _chatState;
     private readonly IChatReloadCoordinator _reloadCoordinator;
     private readonly IMediator _mediator;
     private readonly IUiDispatcher _ui;
     private DisposableBag _bag;
-    private ISynchronizedView<ChatMessageModel, ChatMessageModel>? _messagesView;
-    private INotifyCollectionChangedSynchronizedViewList<ChatMessageModel>? _messagesSyncList;
+    private ISynchronizedView<ChatMessageModel, ChatMessageViewModel>? _messagesView;
 
     public ChatViewModel(
         SessionContext sessionContext,
@@ -74,17 +74,16 @@ public sealed class ChatViewModel : ViewModelBase
             if (_sessionId is null) return;
             var text = MessageInput.Value;
             if (string.IsNullOrWhiteSpace(text)) return;
-            
-            var sessionGuid = Guid.Parse(_sessionId);
+
             var messageId = MessageId.NewId();
             var sentTimestamp = DateTimeOffset.UtcNow;
-            
+
             await _mediator.Send(new PostTextMessageCommand(
-                ConversationLookupKey.ForDirectSession(sessionGuid),
+                ConversationLookupKey.ForDirectSession(_sessionId.Value.Value),
                 messageId,
                 text,
                 sentTimestamp));
-            
+
             MessageInput.Value = string.Empty;
         }, _ => CanSend.Value);
 
@@ -103,7 +102,7 @@ public sealed class ChatViewModel : ViewModelBase
         });
     }
 
-    public void SetSession(string sessionId)
+    public void SetSession(DirectSessionId sessionId)
     {
         _sessionId = sessionId;
         _bag = new DisposableBag();
@@ -111,27 +110,14 @@ public sealed class ChatViewModel : ViewModelBase
         // 1. Get the raw, unsorted domain list from the state service
         var domainList = _chatState.GetOrAddSessionMessagesList(sessionId);
 
-        // 2. Create a pass-through view and track it
-        _messagesView = domainList.CreateView(m => m).AddTo(ref _bag);
+        // 2. Create a view that projects ChatMessageModel -> ChatMessageViewModel (established pattern from SimulatorPeersTabViewModel)
+        _messagesView = domainList.CreateView(m => new ChatMessageViewModel(m, _ui)).AddTo(ref _bag);
 
         // 3. Bridge the view to the WPF UI thread using Cysharp's native synchronizer
-        _messagesSyncList = _messagesView.ToNotifyCollectionChanged(_ui.CollectionEventDispatcher);
+        Messages = _messagesView.ToNotifyCollectionChanged(_ui.CollectionEventDispatcher);
 
-        // 4. Wrap it in a WPF CollectionView for native chronological sorting
-        var collectionView = (System.Windows.Data.ListCollectionView)System.Windows.Data.CollectionViewSource.GetDefaultView(_messagesSyncList);
-        collectionView.CustomSort = new ChatMessageChronologicalComparer();
-        
-        // Assign directly to the property so WPF can bind to the view
-        Messages = collectionView;
-
-        // 5. Force the UI to refresh its sort/filter when background mutations occur
-        _chatState.StateMutated
-            .ObserveOnCurrentSynchronizationContext()
-            .Subscribe(_ => collectionView.Refresh())
-            .AddTo(ref _bag);
-
-        // Note: Initial reload is not triggered here because SetSession receives a PeerConnectionKey.Value (PeerId),
-        // not a ConversationId. Reload is triggered by ChatStateUpdateHandlers when messages are posted/received.
+        // 4. Do NOT subscribe to a "state mutated" signal just to refresh UI.
+        // 5. Do NOT sort in the ViewModel — per wpf.readme.md §1, sorting is a XAML concern.
     }
 
     protected override void DisposeCore()
@@ -147,21 +133,5 @@ public sealed class ChatViewModel : ViewModelBase
         if (parts.Length == 1)
             return parts[0].Substring(0, Math.Min(2, parts[0].Length)).ToUpperInvariant();
         return (parts[0][0].ToString() + parts[^1][0].ToString()).ToUpperInvariant();
-    }
-
-    private sealed class ChatMessageChronologicalComparer : System.Collections.IComparer
-    {
-        public int Compare(object? x, object? y)
-        {
-            if (x is null && y is null) return 0;
-            if (x is null) return 1;
-            if (y is null) return -1;
-            
-            var msgX = (Desktop.Wpf.Features.Chat.ChatMessageModel)x;
-            var msgY = (Desktop.Wpf.Features.Chat.ChatMessageModel)y;
-            
-            // Ascending: oldest at the top, newest at the bottom
-            return msgX.Timestamp.CompareTo(msgY.Timestamp);
-        }
     }
 }

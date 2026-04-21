@@ -1,8 +1,10 @@
+using Percolator.Network;
+
 namespace Desktop.Wpf.Features.Sessions
 {
     public interface ISessionScopeFactory
     {
-        SessionResolved GetOrCreate(string sessionId, SessionHeader? header = null);
+        SessionResolved GetOrCreate(DirectSessionId sessionId, SessionHeader? header = null);
     }
 
     public sealed class SessionResolved

@@ -42,6 +42,7 @@ public sealed class ReceiveTextMessageHandler : IRequestHandler<ReceiveTextMessa
             resolution.SelfIdentityId,
             request.SenderId.Value,
             request.Content,
-            request.SentTimestampUtc), cancellationToken).ConfigureAwait(false);
+            request.SentTimestampUtc,
+            DirectSessionIdValueObject.FromGuid(request.LookupKey.DirectSessionId)), cancellationToken).ConfigureAwait(false);
     }
 }

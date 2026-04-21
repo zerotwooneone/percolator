@@ -1,0 +1,60 @@
+using ObservableCollections;
+using R3;
+using Desktop.Wpf.Shared.Mvvm;
+
+namespace Desktop.Wpf.Features.Simulator;
+
+public sealed class SimulatorChatViewModel : ViewModelBase
+{
+    public BindableReactiveProperty<string> MessageInput { get; }
+    public AsyncRelayCommand SendMessageCommand { get; }
+    public NotifyCollectionChangedSynchronizedViewList<SimulatorChatMessageModel> Messages { get; }
+
+    private readonly SimulatedPeerModel _model;
+    private readonly ISimulatorStateService _state;
+    private readonly ISynchronizedView<SimulatedChatMessageSnapshot, SimulatorChatMessageModel> _messagesView;
+    private DisposableBag _bag;
+
+    public SimulatorChatViewModel(SimulatedPeerModel model, ISimulatorStateService state, IUiDispatcher ui)
+    {
+        _model = model;
+        _state = state;
+
+        MessageInput = new BindableReactiveProperty<string>(string.Empty).AddTo(ref _bag);
+
+        _messagesView = _model.RecentChatMessages
+            .CreateView(m => new SimulatorChatMessageModel(m))
+            .AddTo(ref _bag);
+        Messages = _messagesView.ToNotifyCollectionChanged(ui.CollectionEventDispatcher);
+
+        SendMessageCommand = new AsyncRelayCommand(async _ =>
+        {
+            var text = MessageInput.Value;
+            if (string.IsNullOrWhiteSpace(text)) return;
+
+            await _state.SendChatMessageToMainAsync(_model.PeerId, text, CancellationToken.None);
+            MessageInput.Value = string.Empty;
+        }, _ => !string.IsNullOrWhiteSpace(MessageInput.Value));
+    }
+
+    protected override void DisposeCore()
+    {
+        Messages.Dispose(); // MUST dispose ToNotifyCollectionChanged adapter (wpf.readme.md §3)
+        _bag.Dispose();
+    }
+}
+
+public sealed class SimulatorChatMessageModel
+{
+    public string Content { get; }
+    public bool IsFromMain { get; }
+    public DateTimeOffset Timestamp { get; }
+    public string Direction => IsFromMain ? "← From Main" : "→ To Main";
+
+    public SimulatorChatMessageModel(SimulatedChatMessageSnapshot snapshot)
+    {
+        Content = snapshot.Content;
+        IsFromMain = snapshot.IsFromMain;
+        Timestamp = snapshot.ReceivedUtc;
+    }
+}

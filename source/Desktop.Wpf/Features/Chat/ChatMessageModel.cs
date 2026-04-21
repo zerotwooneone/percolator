@@ -1,22 +1,24 @@
 using R3;
+using Percolator.Chat.ValueObjects;
 using System;
 
 namespace Desktop.Wpf.Features.Chat;
 
 public sealed record ChatMessageSnapshot(
-    string Id, 
-    string Author, 
-    string Text, 
-    DateTimeOffset Timestamp, 
-    bool IsOwn, 
-    bool IsDelivered, 
-    bool IsRead);
+    MessageId Id,
+    string Author,
+    string Text,
+    DateTimeOffset Timestamp,
+    bool IsOwn,
+    bool IsDelivered,
+    bool IsRead,
+    bool IsSending = false);
 
 public sealed class ChatMessageModel : IDisposable
 {
     private DisposableBag _bag;
 
-    public string Id { get; }
+    public MessageId Id { get; }
     public string Author { get; }
     public string Text { get; }
     public DateTimeOffset Timestamp { get; }
@@ -24,6 +26,7 @@ public sealed class ChatMessageModel : IDisposable
 
     public BindableReactiveProperty<bool> IsDelivered { get; }
     public BindableReactiveProperty<bool> IsRead { get; }
+    public BindableReactiveProperty<bool> IsSending { get; }
 
     public ChatMessageModel(ChatMessageSnapshot snapshot)
     {
@@ -35,12 +38,15 @@ public sealed class ChatMessageModel : IDisposable
 
         IsDelivered = new BindableReactiveProperty<bool>(snapshot.IsDelivered).AddTo(ref _bag);
         IsRead = new BindableReactiveProperty<bool>(snapshot.IsRead).AddTo(ref _bag);
+        IsSending = new BindableReactiveProperty<bool>(snapshot.IsSending).AddTo(ref _bag);
     }
 
     public void UpdateFromSnapshot(ChatMessageSnapshot snapshot)
     {
-        IsDelivered.Value = snapshot.IsDelivered;
-        IsRead.Value = snapshot.IsRead;
+        // Do not let a DB snapshot overwrite a 'true' state with a 'false' state
+        if (snapshot.IsDelivered) IsDelivered.Value = true;
+        if (snapshot.IsRead) IsRead.Value = true;
+        // IsSending is NOT overwritten — managed by optimistic insert + DeliveredReceiptReceivedEventHandler
     }
 
     public void Dispose() => _bag.Dispose();
