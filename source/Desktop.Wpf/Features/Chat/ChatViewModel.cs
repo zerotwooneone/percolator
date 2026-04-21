@@ -51,12 +51,13 @@ public sealed class ChatViewModel : ViewModelBase
         _mediator = mediator;
         _ui = ui;
 
-        MessageInput = _sessionContext.Draft;
+        // Convert SessionContext ReactiveProperty to BindableReactiveProperty for UI binding
+        MessageInput = _sessionContext.Draft.ToBindableReactiveProperty(string.Empty);
         CanSend = MessageInput.Select(text => !string.IsNullOrWhiteSpace(text)).ToBindableReactiveProperty(false);
         // Header binds to SessionContext
-        Title = _sessionContext.PeerName;
-        Initials = _sessionContext.Initials;
-        IsOnline = _sessionContext.IsOnline;
+        Title = _sessionContext.PeerName.ToBindableReactiveProperty("");
+        Initials = _sessionContext.Initials.ToBindableReactiveProperty("?");
+        IsOnline = _sessionContext.IsOnline.ToBindableReactiveProperty(false);
 
         IsNetworkOpen = new BindableReactiveProperty<bool>(false);
         IsRelayed = new BindableReactiveProperty<bool>(false); // seed: direct

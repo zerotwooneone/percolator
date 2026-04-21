@@ -24,9 +24,9 @@ public sealed class ChatMessageModel : IDisposable
     public DateTimeOffset Timestamp { get; }
     public bool IsOwn { get; }
 
-    public BindableReactiveProperty<bool> IsDelivered { get; }
-    public BindableReactiveProperty<bool> IsRead { get; }
-    public BindableReactiveProperty<bool> IsSending { get; }
+    public ReactiveProperty<bool> IsDelivered { get; }
+    public ReactiveProperty<bool> IsRead { get; }
+    public ReactiveProperty<bool> IsSending { get; }
 
     public ChatMessageModel(ChatMessageSnapshot snapshot)
     {
@@ -36,9 +36,9 @@ public sealed class ChatMessageModel : IDisposable
         Timestamp = snapshot.Timestamp;
         IsOwn = snapshot.IsOwn;
 
-        IsDelivered = new BindableReactiveProperty<bool>(snapshot.IsDelivered).AddTo(ref _bag);
-        IsRead = new BindableReactiveProperty<bool>(snapshot.IsRead).AddTo(ref _bag);
-        IsSending = new BindableReactiveProperty<bool>(snapshot.IsSending).AddTo(ref _bag);
+        IsDelivered = new ReactiveProperty<bool>(snapshot.IsDelivered).AddTo(ref _bag);
+        IsRead = new ReactiveProperty<bool>(snapshot.IsRead).AddTo(ref _bag);
+        IsSending = new ReactiveProperty<bool>(snapshot.IsSending).AddTo(ref _bag);
     }
 
     public void UpdateFromSnapshot(ChatMessageSnapshot snapshot)

@@ -6,11 +6,11 @@ public sealed class SessionContext
 {
     private const string UninitializedId = "uninitialized";
     public string SessionId { get; private set; } = UninitializedId;
-    public BindableReactiveProperty<string> PeerName { get; } = new("");
-    public BindableReactiveProperty<string> Initials { get; } = new("?");
-    public BindableReactiveProperty<bool> IsOnline { get; } = new(false);
+    public ReactiveProperty<string> PeerName { get; } = new("");
+    public ReactiveProperty<string> Initials { get; } = new("?");
+    public ReactiveProperty<bool> IsOnline { get; } = new(false);
     // Per-session composer draft text
-    public BindableReactiveProperty<string> Draft { get; } = new("");
+    public ReactiveProperty<string> Draft { get; } = new("");
 
     public void SetSessionId(string id)
     {
