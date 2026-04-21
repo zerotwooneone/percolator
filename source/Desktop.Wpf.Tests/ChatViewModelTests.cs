@@ -12,6 +12,7 @@ using MediatR;
 using Microsoft.Extensions.Logging;
 using Moq;
 using NUnit.Framework;
+using Percolator.Network;
 
 namespace Desktop.Wpf.Tests;
 
@@ -44,7 +45,7 @@ public class ChatViewModelTests
         var mediator = new Mock<IMediator>(MockBehavior.Loose);
         var ui = new Mock<IUiDispatcher>(MockBehavior.Loose);
         var vm = new ChatViewModel(ctx, chatState, reloadCoordinator.Object, mediator.Object, ui.Object);
-        var testSessionId = Guid.NewGuid().ToString("N");
+        var testSessionId = new DirectSessionId(Guid.NewGuid());
         vm.SetSession(testSessionId);
 
         vm.MessageInput.Value = "hi";
@@ -59,7 +60,7 @@ public class ChatViewModelTests
         vm.MessageInput.Value.Should().Be(string.Empty);
         mediator.Verify(m => m.Send(
             It.Is<Percolator.Chat.App.Commands.PostTextMessageCommand>(cmd =>
-                cmd.LookupKey.DirectSessionId == Guid.Parse(testSessionId) &&
+                cmd.LookupKey.DirectSessionId.Value == testSessionId.Value &&
                 cmd.Content == "hi"),
             It.IsAny<CancellationToken>()),
             Times.Once);

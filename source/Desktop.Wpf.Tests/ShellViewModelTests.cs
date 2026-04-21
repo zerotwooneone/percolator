@@ -18,6 +18,7 @@ using Percolator.Cryptography;
 using Percolator.Identity;
 using Percolator.Identity.Model;
 using R3;
+using Desktop.Wpf.Features.Chat;
 
 namespace Desktop.Wpf.Tests;
 
@@ -79,7 +80,7 @@ public class ShellViewModelTests
             selection,
             ui);
         var sessionShellVm = new SessionShellViewModel();
-        var paneVm = new SelectedChannelPaneViewModel(selection, state, Mock.Of<ISessionScopeFactory>(), new SelectedPeerConnectionStateCache());
+        var paneVm = new SelectedChannelPaneViewModel(selection, state, Mock.Of<ISessionScopeFactory>(), new SelectedPeerConnectionStateCache(), Mock.Of<IChatReloadCoordinator>());
 
         var identityProvider = new Mock<IServiceProvider>();
         identityProvider.Setup(sp => sp.GetService(typeof(IActiveIdentityMutator))).Returns(mutator.Object);
@@ -138,7 +139,7 @@ public class ShellViewModelTests
             selection,
             ui);
         var sessionShellVm = new SessionShellViewModel();
-        var paneVm = new SelectedChannelPaneViewModel(selection, state, Mock.Of<ISessionScopeFactory>(), new SelectedPeerConnectionStateCache());
+        var paneVm = new SelectedChannelPaneViewModel(selection, state, Mock.Of<ISessionScopeFactory>(), new SelectedPeerConnectionStateCache(), Mock.Of<IChatReloadCoordinator>());
         scopedProvider.Setup(sp => sp.GetService(typeof(SessionsSidebarViewModel))).Returns(sessionsVm);
         scopedProvider.Setup(sp => sp.GetService(typeof(SessionShellViewModel))).Returns(sessionShellVm);
         scopedProvider.Setup(sp => sp.GetService(typeof(SelectedChannelPaneViewModel))).Returns(paneVm);
@@ -202,7 +203,7 @@ public class ShellViewModelTests
             selection,
             ui);
         var sessionShellVm = new SessionShellViewModel();
-        var paneVm = new SelectedChannelPaneViewModel(selection, state, sessionScopeFactoryMock.Object, new SelectedPeerConnectionStateCache());
+        var paneVm = new SelectedChannelPaneViewModel(selection, state, sessionScopeFactoryMock.Object, new SelectedPeerConnectionStateCache(), Mock.Of<IChatReloadCoordinator>());
         scopedProvider
             .Setup(sp => sp.GetService(typeof(SessionsSidebarViewModel)))
             .Returns(sessionsVm);
@@ -288,7 +289,7 @@ public class ShellViewModelTests
             selection,
             ui);
         var sessionShellVm = new SessionShellViewModel();
-        var paneVm = new SelectedChannelPaneViewModel(selection, state, scopedSessionFactory.Object, new SelectedPeerConnectionStateCache());
+        var paneVm = new SelectedChannelPaneViewModel(selection, state, scopedSessionFactory.Object, new SelectedPeerConnectionStateCache(), Mock.Of<IChatReloadCoordinator>());
         scopedProvider
             .Setup(sp => sp.GetService(typeof(SessionsSidebarViewModel)))
             .Returns(sessionsVm);
