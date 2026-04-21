@@ -10,12 +10,10 @@ public sealed class ChatStateUpdateHandlers :
     INotificationHandler<TextMessagePostedEvent>, 
     INotificationHandler<TextMessageReceivedEvent>
 {
-    private readonly ChatStateService _state;
     private readonly IChatReloadCoordinator _reload;
 
-    public ChatStateUpdateHandlers(ChatStateService state, IChatReloadCoordinator reload)
+    public ChatStateUpdateHandlers(IChatReloadCoordinator reload)
     {
-        _state = state;
         _reload = reload;
     }
 
