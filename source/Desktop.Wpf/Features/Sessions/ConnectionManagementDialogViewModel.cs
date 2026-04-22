@@ -3,13 +3,14 @@ using Desktop.Wpf.Features.Sessions.Models;
 using Desktop.Wpf.Features.Sessions.Queries;
 using Desktop.Wpf.Shared.Mvvm;
 using ObservableCollections;
+using Percolator.Application.Identity;
+using Percolator.Application.Network;
+using Percolator.Cryptography;
 using R3;
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
-using Percolator.Application.Network;
 using MediatR;
-using Percolator.Application.Identity;
-using Percolator.Cryptography;
+using Percolator.Network;
 
 namespace Desktop.Wpf.Features.Sessions;
 
@@ -41,13 +42,13 @@ public sealed class RouteModeOption
 
 public sealed class RelayHostOption
 {
-    public RelayHostOption(Guid peerId, string displayName)
+    public RelayHostOption(PeerId peerId, string displayName)
     {
         PeerId = peerId;
         DisplayName = displayName;
     }
 
-    public Guid PeerId { get; }
+    public PeerId PeerId { get; }
     public string DisplayName { get; }
 }
 
@@ -264,12 +265,12 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
         var items = open
             .OrderByDescending(x => x.CreatedAtUtc)
             .Select(p => new PendingInvitationItemViewModel(
-                p.PendingSessionId,
+                new PendingSessionId(p.PendingSessionId),
                 p.PeerName,
                 ComputeInitials(p.PeerName),
                 p.IsRelayed,
                 p.IsRelayed
-                    ? $"Via relay: {p.RelayPeerName}{(string.IsNullOrWhiteSpace(p.RelayEndpoint) ? "" : $" ({p.RelayEndpoint})")}" 
+                    ? $"Via relay: {p.RelayPeerName}{(string.IsNullOrWhiteSpace(p.RelayEndpoint) ? "" : $" ({p.RelayEndpoint})")}"
                     : null))
             .ToList();
 
@@ -287,7 +288,7 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
         ApprovePendingSessionResult result;
         try
         {
-            result = await _mediator.Send(new ApprovePendingSessionCommand(new PendingSessionId(item.PendingSessionId)));
+            result = await _mediator.Send(new ApprovePendingSessionCommand(item.PendingSessionId));
         }
         catch (Exception ex)
         {
@@ -330,7 +331,7 @@ public sealed class ConnectionManagementDialogViewModel : ViewModelBase
 
         try
         {
-            await _mediator.Send(new RejectPendingSessionCommand(new PendingSessionId(item.PendingSessionId)));
+            await _mediator.Send(new RejectPendingSessionCommand(item.PendingSessionId));
         }
         catch
         {

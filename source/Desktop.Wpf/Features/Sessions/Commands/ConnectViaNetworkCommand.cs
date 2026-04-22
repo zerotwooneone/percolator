@@ -1,5 +1,6 @@
 using MediatR;
 using System;
+using Percolator.Network;
 
 namespace Desktop.Wpf.Features.Sessions.Commands;
 
@@ -7,7 +8,7 @@ public record ConnectViaNetworkCommand(
     string RouteMode,
     string? DirectEndpoint,
     string? TargetPkhText,
-    Guid? RelayHostPeerId,
+    PeerId? RelayHostPeerId,
     string? TargetDisplayName) : IRequest<ConnectViaNetworkResult>;
 
 public abstract record ConnectViaNetworkResult

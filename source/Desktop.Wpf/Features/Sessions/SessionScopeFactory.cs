@@ -44,7 +44,7 @@ namespace Desktop.Wpf.Features.Sessions
             }
 
             var ctx = scope.ServiceProvider.GetRequiredService<SessionContext>();
-            ctx.SetSessionId(sessionId.Value.ToString());
+            ctx.SetSessionId(sessionId);
             if (header is not null)
             {
                 if (header.DisplayName is not null) ctx.PeerName.Value = header.DisplayName;

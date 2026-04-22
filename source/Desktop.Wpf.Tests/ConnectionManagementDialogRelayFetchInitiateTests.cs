@@ -102,7 +102,7 @@ public sealed class ConnectionManagementDialogRelayFetchInitiateTests
             mediator.Object);
 
         sut.SelectedRouteMode.Value = new RouteModeOption("relay", "Via Relay Host");
-        sut.SelectedRelayHost.Value = new RelayHostOption(relayHostId, "relay");
+        sut.SelectedRelayHost.Value = new RelayHostOption(new Percolator.Network.PeerId(relayHostId), "relay");
         sut.TargetPkhText.Value = targetPkhHex;
 
         // Act
@@ -114,7 +114,7 @@ public sealed class ConnectionManagementDialogRelayFetchInitiateTests
                 c.RouteMode == "relay" &&
                 c.DirectEndpoint == null &&
                 c.TargetPkhText == targetPkhHex &&
-                c.RelayHostPeerId == relayHostId),
+                c.RelayHostPeerId.Value == relayHostId),
             default), Times.Once);
     }
 }

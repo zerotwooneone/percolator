@@ -52,7 +52,7 @@ public sealed class GetRelayHostOptionsQueryHandler : IRequestHandler<GetRelayHo
                 name = peerId.Value.ToString()[..8];
             }
 
-            options.Add(new RelayHostOptionDto(peerId.Value, name));
+            options.Add(new RelayHostOptionDto(new Percolator.Network.PeerId(peerId.Value), name));
         }
 
         return new GetRelayHostOptionsResult(options);

@@ -1,5 +1,5 @@
+using Percolator.Cryptography;
 using R3;
-using System;
 
 namespace Desktop.Wpf.Features.Sessions;
 
@@ -7,7 +7,7 @@ public sealed class PendingInvitationItemViewModel : IDisposable
 {
     private DisposableBag _bag;
 
-    public Guid PendingSessionId { get; }
+    public PendingSessionId PendingSessionId { get; }
     public string DisplayName { get; }
     public string Initials { get; }
     public bool IsRelayed { get; }
@@ -20,14 +20,14 @@ public sealed class PendingInvitationItemViewModel : IDisposable
     public string? SendPath { get; set; }
     public string? RequestCorrelationId { get; set; }
 
-    public PendingInvitationItemViewModel(Guid pendingSessionId, string displayName, string initials, bool isRelayed, string? relayInfoText)
+    public PendingInvitationItemViewModel(PendingSessionId pendingSessionId, string displayName, string initials, bool isRelayed, string? relayInfoText)
     {
         PendingSessionId = pendingSessionId;
         DisplayName = displayName;
         Initials = initials;
         IsRelayed = isRelayed;
         RelayInfoText = relayInfoText;
-        
+
         StatusText = new BindableReactiveProperty<string>("Pending").AddTo(ref _bag);
         IsExpired = new BindableReactiveProperty<bool>(false).AddTo(ref _bag);
     }

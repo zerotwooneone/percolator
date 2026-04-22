@@ -1,5 +1,5 @@
 using MediatR;
-using System;
+using Percolator.Network;
 using System.Collections.Generic;
 
 namespace Desktop.Wpf.Features.Sessions.Queries;
@@ -8,4 +8,4 @@ public record GetRelayHostOptionsQuery(int SelfIdentityId) : IRequest<GetRelayHo
 
 public record GetRelayHostOptionsResult(IReadOnlyList<RelayHostOptionDto> Options);
 
-public record RelayHostOptionDto(Guid PeerId, string DisplayName);
+public record RelayHostOptionDto(PeerId PeerId, string DisplayName);
