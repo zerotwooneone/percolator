@@ -25,140 +25,104 @@ public sealed class SelectedChannelPaneViewModel : ViewModelBase
     public BindableReactiveProperty<string?> BannerText { get; }
     public BindableReactiveProperty<bool> IsInputEnabled { get; }
 
-    public BindableReactiveProperty<object?> ActiveContent { get; }
+    public BindableReactiveProperty<ChatViewModel?> ActiveContent { get; }
 
     private readonly SelectedChannelModel _selection;
     private readonly PeerConnectionStateService _stateService;
     private readonly ISessionScopeFactory _sessionFactory;
-    private readonly SelectedPeerConnectionStateCache _stateCache;
     private readonly IChatReloadCoordinator _reloadCoordinator;
 
     private DisposableBag _bag;
-    private DisposableBag _currentSelectionBag;
-    private PeerConnectionModel? _currentConnection;
 
     public SelectedChannelPaneViewModel(
         SelectedChannelModel selection,
         PeerConnectionStateService stateService,
         ISessionScopeFactory sessionFactory,
-        SelectedPeerConnectionStateCache stateCache,
         IChatReloadCoordinator reloadCoordinator)
     {
         _selection = selection;
         _stateService = stateService;
         _sessionFactory = sessionFactory;
-        _stateCache = stateCache;
         _reloadCoordinator = reloadCoordinator;
 
-        State = new BindableReactiveProperty<SelectedPaneState>(SelectedPaneState.None).AddTo(ref _bag);
-        DisplayName = new BindableReactiveProperty<string?>(null).AddTo(ref _bag);
-        BannerText = new BindableReactiveProperty<string?>(null).AddTo(ref _bag);
-        IsInputEnabled = new BindableReactiveProperty<bool>(false).AddTo(ref _bag);
-        ActiveContent = new BindableReactiveProperty<object?>(null).AddTo(ref _bag);
-
-        _selection.SelectedKey
+        // Create observable stream of the selected connection model
+        var selectedConnectionObservable = _selection.SelectedKey
             .DistinctUntilChanged()
-            .Subscribe(key => OnSelectionChanged(key))
+            .Select(key =>
+            {
+                if (key is null || key.Value.Type != SecureChannelKeyType.SecureSession)
+                    return null;
+                return _stateService.Connections.FirstOrDefault(c => c.ConnectionId == key.Value.Value);
+            })
+            .DistinctUntilChanged();
+
+        // DisplayName: project from selected connection's DisplayName, null if no selection
+        DisplayName = selectedConnectionObservable
+            .Select(model => model is null ? Observable.Return<string?>(null) : model.DisplayName)
+            .Switch()
+            .DistinctUntilChanged()
+            .ObserveOnCurrentSynchronizationContext()
+            .ToBindableReactiveProperty(null)
             .AddTo(ref _bag);
 
-        // Initialize
-        OnSelectionChanged(_selection.SelectedKey.Value);
-    }
+        var stateObservable = selectedConnectionObservable
+            .Select(model => model is null
+                ? Observable.Return(SelectedPaneState.None)
+                : model.Status.Select(MapStateFromStatus))
+            .Switch()
+            .DistinctUntilChanged();
 
-    private void OnSelectionChanged(PeerConnectionKey? selectedKey)
-    {
-        _currentSelectionBag.Dispose();
-        _currentSelectionBag = default;
-        _currentConnection = null;
-
-        if (selectedKey is null)
-        {
-            State.Value = SelectedPaneState.None;
-            DisplayName.Value = null;
-            BannerText.Value = null;
-            IsInputEnabled.Value = false;
-            ActiveContent.Value = null;
-            return;
-        }
-
-        var key = selectedKey.Value;
-        if (key.Type != SecureChannelKeyType.SecureSession)
-        {
-            State.Value = SelectedPaneState.None;
-            DisplayName.Value = null;
-            BannerText.Value = null;
-            IsInputEnabled.Value = false;
-            ActiveContent.Value = null;
-            return;
-        }
-
-        var model = _stateService.Connections.FirstOrDefault(c => c.ConnectionId == key.Value);
-
-        if (model is null)
-        {
-            State.Value = SelectedPaneState.None;
-            DisplayName.Value = null;
-            BannerText.Value = null;
-            IsInputEnabled.Value = false;
-            ActiveContent.Value = null;
-            return;
-        }
-
-        _currentConnection = model;
-        DisplayName.Value = model.DisplayName.CurrentValue;
-
-        var state = MapState(model);
-        State.Value = state;
-
-        switch (state)
-        {
-            case SelectedPaneState.Pending:
-                BannerText.Value = "Establishing…";
-                IsInputEnabled.Value = false;
-                ActiveContent.Value = null;
-                break;
-
-            case SelectedPaneState.Failed:
-                BannerText.Value = "Connection failed.";
-                IsInputEnabled.Value = false;
-                ActiveContent.Value = null;
-                break;
-
-            case SelectedPaneState.Offline:
-                BannerText.Value = "Offline";
-                IsInputEnabled.Value = false;
-                ActiveContent.Value = ResolveChatContent(model, key);
-                break;
-
-            case SelectedPaneState.Active:
-                BannerText.Value = "E2E Encryption Established";
-                IsInputEnabled.Value = true;
-                ActiveContent.Value = ResolveChatContent(model, key);
-                break;
-
-            default:
-                BannerText.Value = null;
-                IsInputEnabled.Value = false;
-                ActiveContent.Value = null;
-                break;
-        }
-
-        // Bind to model changes for reactive updates
-        model.DisplayName
+        State = stateObservable
             .DistinctUntilChanged()
             .ObserveOnCurrentSynchronizationContext()
-            .Subscribe(x => DisplayName.Value = x)
-            .AddTo(ref _currentSelectionBag);
+            .ToBindableReactiveProperty(SelectedPaneState.None)
+            .AddTo(ref _bag);
 
-        model.Status
-            .Select(MapStateFromStatus)
+        BannerText = stateObservable
+            .Select(state =>
+            {
+                return state switch
+                {
+                    SelectedPaneState.Pending => "Establishing…",
+                    SelectedPaneState.Failed => "Connection failed.",
+                    SelectedPaneState.Offline => "Offline",
+                    SelectedPaneState.Active => "E2E Encryption Established",
+                    _ => null
+                };
+            })
             .DistinctUntilChanged()
             .ObserveOnCurrentSynchronizationContext()
-            .Subscribe(x => State.Value = x)
-            .AddTo(ref _currentSelectionBag);
+            .ToBindableReactiveProperty(null)
+            .AddTo(ref _bag);
+
+        IsInputEnabled = stateObservable
+            .Select(state => SelectedPaneState.Active == state)
+            .DistinctUntilChanged()
+            .ObserveOnCurrentSynchronizationContext()
+            .ToBindableReactiveProperty(false)
+            .AddTo(ref _bag);
+
+        // ActiveContent: project ChatViewModel from selection
+        ActiveContent = _selection.SelectedKey
+            .DistinctUntilChanged()
+            .Select(key =>
+            {
+                if (key is null || key.Value.Type != SecureChannelKeyType.SecureSession)
+                    return null;
+
+                var keyVal = key.Value;
+                var model = _stateService.Connections.FirstOrDefault(c => c.ConnectionId == keyVal.Value);
+                if (model is null)
+                    return null;
+
+                return ResolveChatContentWithSubscriptions(model, keyVal);
+            })
+            .ObserveOnCurrentSynchronizationContext()
+            .ToBindableReactiveProperty(null)
+            .AddTo(ref _bag);
     }
 
-    private object? ResolveChatContent(PeerConnectionModel model, PeerConnectionKey key)
+    private ChatViewModel? ResolveChatContentWithSubscriptions(PeerConnectionModel model, PeerConnectionKey key)
     {
         var sessionId = new DirectSessionId(key.Value);
         var header = new SessionHeader
@@ -173,32 +137,8 @@ public sealed class SelectedChannelPaneViewModel : ViewModelBase
         // Trigger initial load from SQLite on background thread
         _reloadCoordinator.TriggerReloadForSession(sessionId);
 
-        var overlay = _stateCache.GetOrCreate(key);
-
-        // Bridge draft text from per-channel overlay into per-session SessionContext draft.
-        resolved.Context.Draft.Value = overlay.DraftMessageText.Value;
-
-        resolved.Context.Draft
-            .Subscribe(text =>
-            {
-                if (overlay.DraftMessageText.Value != text)
-                    overlay.DraftMessageText.Value = text;
-            })
-            .AddTo(ref _currentSelectionBag);
-
-        overlay.DraftMessageText
-            .Subscribe(text =>
-            {
-                if (resolved.Context.Draft.Value != text)
-                    resolved.Context.Draft.Value = text;
-            })
-            .AddTo(ref _currentSelectionBag);
-
         return resolved.ViewModel;
     }
-
-    private static SelectedPaneState MapState(PeerConnectionModel model)
-        => MapStateFromStatus(model.Status.CurrentValue);
 
     private static SelectedPaneState MapStateFromStatus(PeerConnectionStatus status)
         => status switch
@@ -211,7 +151,6 @@ public sealed class SelectedChannelPaneViewModel : ViewModelBase
 
     protected override void DisposeCore()
     {
-        _currentSelectionBag.Dispose();
         _bag.Dispose();
     }
 }

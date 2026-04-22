@@ -1,3 +1,4 @@
+using Desktop.Wpf.Features.Chat;
 using Percolator.Network;
 
 namespace Desktop.Wpf.Features.Sessions
@@ -10,7 +11,7 @@ namespace Desktop.Wpf.Features.Sessions
     public sealed class SessionResolved
     {
         public required SessionContext Context { get; init; }
-        public required object ViewModel { get; init; }
+        public required ChatViewModel ViewModel { get; init; }
     }
 
     public sealed class SessionHeader

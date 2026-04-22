@@ -10,21 +10,15 @@ public sealed class SelectedPeerConnectionStateModel : IDisposable
     public SelectedPeerConnectionStateModel(PeerConnectionKey channelKey)
     {
         ChannelKey = channelKey;
-        DraftMessageText = new BindableReactiveProperty<string>(string.Empty).AddTo(ref _bag);
-        IsUplinkOpen = new BindableReactiveProperty<bool>(false).AddTo(ref _bag);
-        IsReestablishing = new BindableReactiveProperty<bool>(false).AddTo(ref _bag);
-        ReestablishingText = new BindableReactiveProperty<string?>(null).AddTo(ref _bag);
+        IsUplinkOpen = new ReactiveProperty<bool>(false).AddTo(ref _bag);
+        IsReestablishing = new ReactiveProperty<bool>(false).AddTo(ref _bag);
+        ReestablishingText = new ReactiveProperty<string?>(null).AddTo(ref _bag);
     }
 
     public PeerConnectionKey ChannelKey { get; }
-
-    public BindableReactiveProperty<string> DraftMessageText { get; }
-
-    public BindableReactiveProperty<bool> IsUplinkOpen { get; }
-
-    public BindableReactiveProperty<bool> IsReestablishing { get; }
-
-    public BindableReactiveProperty<string?> ReestablishingText { get; }
+    public ReactiveProperty<bool> IsUplinkOpen { get; }
+    public ReactiveProperty<bool> IsReestablishing { get; }
+    public ReactiveProperty<string?> ReestablishingText { get; }
 
     public void Dispose() => _bag.Dispose();
 }
