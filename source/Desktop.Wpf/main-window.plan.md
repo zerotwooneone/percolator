@@ -893,29 +893,147 @@ Add a chat `Expander` inside the peer card DataTemplate, after the existing "Pre
    - Open a conversation, send a message, close and reopen
    - Verify messages still display (validates `DirectSessionId` keying from A.0)
 
-## Summary of Changes by File
+## Chunk B
 
-| File | Steps | Changes |
-|------|-------|---------|
-| `Percolator.Chat/ValueObjects/DirectSessionIdValueObject.cs` | A.0.5 | New file — Chat-domain wrapper for DirectSessionId |
-| `Percolator.Chat/Events/TextMessagePostedEvent.cs` | A.0.5 | Add `DirectSessionIdValueObject? DirectSessionId` property |
-| `Percolator.Chat/Events/TextMessageReceivedEvent.cs` | A.0.5 | Add `DirectSessionIdValueObject? DirectSessionId` property |
-| `Percolator.Chat/Events/DeliveredReceiptReceivedEvent.cs` | A.0.5 | Add `DirectSessionIdValueObject? DirectSessionId` property |
-| `Percolator.Application/Apps/Chat/Handlers/PostTextMessageHandler.cs` | A.0.5 | Pass `DirectSessionIdValueObject.FromGuid(request.LookupKey.DirectSessionId)` to event |
-| `Percolator.Chat/App/Handlers/ReceiveTextMessageHandler.cs` | A.0.5 | Pass `DirectSessionIdValueObject.FromGuid(request.LookupKey.DirectSessionId)` to event |
-| `Percolator.Chat/App/Handlers/ReceiveDeliveredReceiptHandler.cs` | A.0.5 | Pass `DirectSessionIdValueObject.FromGuid(request.LookupKey.DirectSessionId)` to event |
-| `Desktop.Wpf/Features/Chat/State/ChatStateService.cs` | A.0.1, A.2, A.3.4 | Re-key from `string` to `DirectSessionId`, add `object _stateGate`, add `OptimisticInsert` and `MarkAsDelivered` public methods |
-| `Desktop.Wpf/Features/Chat/ChatMessageModel.cs` | A.3 | `Id` → `MessageId`, add `IsSending` property |
-| `Desktop.Wpf/Features/Chat/ChatMessageViewModel.cs` | A.0.2 | New file — projects ChatMessageModel to UI thread |
-| `Desktop.Wpf/Features/Chat/ChatViewModel.cs` | A.0.2 | `SetSession(DirectSessionId)`, typed `_sessionId`, `Messages` → `NotifyCollectionChangedSynchronizedViewList<ChatMessageViewModel>`, project to `ChatMessageViewModel` |
-| `Desktop.Wpf/Features/Chat/IChatReloadCoordinator.cs` | A.0.6 | New signature with `DirectSessionId`, add `TriggerReloadForSession` |
-| `Desktop.Wpf/Features/Chat/ChatReloadCoordinator.cs` | A.0.6, A.1 | Inject `TimeProvider`, `ActiveIdentityContext`; single Subject with union type; `ReloadCoreAsync`/`ReloadFromSessionAsync` |
-| `Desktop.Wpf/Features/Chat/Handlers/ChatStateUpdateHandlers.cs` | A.3.4 | Optimistic insert via `OptimisticInsert` method, use enriched events with `DirectSessionIdValueObject` |
-| `Desktop.Wpf/Features/Chat/Handlers/DeliveredReceiptReceivedEventHandler.cs` | A.2 | New file — call `MarkAsDelivered` method for delivery state update |
-| `Desktop.Wpf/Features/Sessions/SessionScopeFactory.cs` | A.0.3 | Re-key from `string` to `DirectSessionId` |
-| `Desktop.Wpf/Features/Sessions/SelectedChannelPaneViewModel.cs` | A.0.4, A.1 | Use `DirectSessionId`, inject `IChatReloadCoordinator`, trigger initial load |
-| `Desktop.Wpf/Features/Chat/ChatView.xaml` | A.0.2 | Add CollectionViewSource to Resources, add componentModel namespace, update ItemsSource binding |
-| `Desktop.Wpf/Features/Simulator/SimulatorChatViewModel.cs` | A.4 | New file |
-| `Desktop.Wpf/Features/Simulator/SimulatedPeerCardViewModel.cs` | A.5 | Add `ChatViewModel` property, dispose |
-| `Desktop.Wpf/Features/Simulator/SimulatorPeersTabView.xaml` | A.5 | Add chat Expander to peer card DataTemplate after line 113 |
+### Issue 1: Chat Messages Loaded from SQL Not Showing on Right Side (Locally Sent)
 
+**Code Path:**
+
+1. **Send Path:**
+   - User clicks send in `ChatViewModel.SendCommand`
+   - `ChatViewModel.SendCommand` → `Mediator.Send(PostTextMessageCommand)`
+   - `PostTextMessageHandler.Handle`:
+     - Gets `selfParticipantId` from `ActiveIdentityContext` (implements `ISelfParticipantIdProvider`)
+     - `var selfParticipantId = ((ISelfParticipantIdProvider) _active).Get()` returns `new ParticipantId(Identity.Id)`
+     - Calls `_writer.AddTextMessageAsync(resolution.Conversation.Id, resolution.SelfIdentityId, selfParticipantId, ...)`
+   - `SqliteChatMessageWriter.AddTextMessageAsync`:
+     - Persists to `MessageDbo` with `SenderId = senderId.Value` (Guid)
+     - `SenderId` column stores the Guid value
+
+2. **Load Path:**
+   - `ChatReloadCoordinator.ReloadCoreAsync` or `ReloadFromSessionAsync`:
+     - Calls `repo.GetByIdAsync(conversationId, selfIdentityId)`
+   - `SqliteConversationRepository.GetByIdAsync`:
+     - Loads `ConversationDbo` with included `Messages`
+   - `ToDomain`:
+     - Converts `MessageDbo` to `Message`: `new Message(new MessageId(m.MessageGuid), new ParticipantId(m.SenderId), ...)`
+   - `ChatReloadCoordinator.SyncConversationToState`:
+     - Gets `selfParticipantId = _selfParticipantIdProvider.Get()`
+     - Creates `ChatMessageSnapshot` with `IsOwn: m.SenderId == selfParticipantId`
+
+**Theory for Issue:**
+
+The `ParticipantId` is a `readonly record struct(Guid Value)`, so equality comparison should work correctly. However, there are potential issues:
+
+1. **Type Alias Confusion:** `ActiveIdentityContext` uses `using ChatParticipantId = Percolator.Chat.ValueObjects.ParticipantId;` and returns `new ChatParticipantId(Identity.Id)`. This should be equivalent to `ParticipantId` since it's an alias, but could indicate a design inconsistency.
+
+2. **Self Participant Id Mismatch:** The `selfParticipantId` retrieved at load time (`_selfParticipantIdProvider.Get()`) might not match the `SenderId` stored in the database. This could happen if:
+   - The active identity changed between send and load
+   - The `ActiveIdentityContext.Identity.Id` is not the same as the participant ID used when sending
+
+3. **Missing ConversationId Mapping:** The `DirectSessionId` to `ConversationId` mapping might be incorrect, causing messages to be loaded from the wrong conversation.
+
+**Recommended Investigation:**
+- Add logging to verify the actual `SenderId` values stored in SQL
+- Verify `selfParticipantId` value at both send and load time
+- Check if `DirectSessionId` → `ConversationId` mapping is correct
+
+---
+
+### Issue 2: Chat Messages Sent from Main to Direct Session Simulated Peer Not Showing in Simulator Chat
+
+**Code Path:**
+
+1. **Send Path (Main Window):**
+   - User clicks send in `ChatViewModel.SendCommand`
+   - `ChatViewModel.SendCommand` → `Mediator.Send(PostTextMessageCommand)`
+   - `PostTextMessageHandler.Handle`:
+     - Creates `ChatEnvelope` with `TextMessage`
+     - Calls `_sender.SendChatEnvelopeToPeerAsync(chatEnvelope, route, ct)` for each participant
+   - `RemoteEnvelopeSender.SendChatEnvelopeToPeerAsync`:
+     - Wraps in `InternalEnvelope`
+     - Calls `_messageService.SendMessageAsync(internalEnvelope, recipient.PeerId, ct)`
+   - `IMessageService.SendMessageAsync` → `GrpcMessageTransportService.SendMessageAsync`:
+     - Calls `_simulatorOutbound.TryDeliverOpaqueMessage(endpoint, request, ct, out result)`
+   - `SimulatorOutboundInterceptor.TryDeliverOpaqueMessage`:
+     - Resolves simulated peer from endpoint (127.77.x.x IP range)
+     - Calls `_state.ReceiveOpaqueMessageFromMainAsync(peerId, request, ct)`
+
+2. **Receive Path (Simulator):**
+   - `SimulatorStateService.ReceiveOpaqueMessageFromMainAsync`:
+     - Decrypts message using available sessions
+     - Parses `InternalEnvelope`
+     - If `ChatEnvelope.TextMessage`:
+       - Calls `model.AddChatMessage(isFromMain: true, content: text.Content, receivedUtc: ...)`
+     - Returns `DeliverOpaqueMessageResponse { Version = 1 }`
+
+**Theory for Issue:**
+
+1. **Endpoint Resolution Failure:** The `TryResolveSimulatedPeerId` method in `SimulatorOutboundInterceptor` requires the endpoint to be in the 127.77.x.x IP range. If the routing profile for the simulated peer has a different endpoint, the interceptor will return `false` and the message won't be delivered to the simulator.
+
+2. **Decryption Failure:** The message might not decrypt successfully:
+   - No matching session found between main and the simulated peer
+   - Session ratchet state mismatch
+   - The decrypted plaintext is empty (line 613-616 returns early without adding to chat)
+
+3. **Session Lookup Issue:** The code iterates through `model.SessionsMutable` to find a session that can decrypt. If the session was not properly established or is in a broken state, decryption will fail.
+
+**Recommended Investigation:**
+- Add logging in `SimulatorOutboundInterceptor.TryResolveSimulatedPeerId` to verify endpoint resolution
+- Add logging in `SimulatorStateService.ReceiveOpaqueMessageFromMainAsync` to verify:
+  - If the peer was found
+  - If decryption succeeded
+  - If the envelope was parsed as a chat message
+- Verify that the session between main and the simulated peer is properly established
+
+---
+
+### Issue 3: Chat Messages Sent from Main to Relay Session Simulated Peer Not Enqueued in Relay Tab
+
+**Code Path:**
+
+1. **Send Path (Main Window):**
+   - Same as Issue 2 up to `PostTextMessageHandler.Handle`
+   - The message is sent via network to the relay host
+
+2. **Simulator Send Path (Simulated Peer via Relay):**
+   - When a simulated peer sends via relay (e.g., `SendChatMessageToMainAsync`):
+     - `SimulatorStateService.SendChatMessageToMainAsync`:
+       - Checks `model.ConnectionMode.CurrentValue == ConnectionMode.ViaRelay`
+       - Gets `relayHostPeerId = model.RelayPeerId.CurrentValue`
+       - Calls `EnqueueRelayUpstreamToMainAsync(relayHostPeerId, cipher.Value, debugType: "Chat", ct)`
+   - `SimulatorStateService.EnqueueRelayUpstreamToMainAsync`:
+     - Adds message to relay queue: `_relays[relayHostPeerId].UpstreamQueue.Add(...)`
+     - Triggers save
+
+3. **Main → Relay Path:**
+   - When main sends to a peer that is connected via relay:
+   - The message should be routed through the relay host
+   - The relay host should receive it and forward it to the target peer
+
+**Theory for Issue:**
+
+1. **Missing Main → Relay Routing:** There appears to be no code path for messages sent FROM main TO a relay-connected peer that enqueues them in the simulator's relay tab. The `EnqueueRelayUpstreamToMainAsync` is only called from:
+   - `SimulatedPeerModel` sending to main (simulator → main)
+   - `SimulatorRelayDeliveryService` handling relayed messages from main
+   - Handshake-related relay operations
+
+2. **Relay Delivery Service Gap:** The `SimulatorRelayDeliveryService` handles relayed messages, but it may not be intercepting chat messages sent from main to relay-connected peers. The service might only be handling handshake messages, not chat messages.
+
+3. **Connection Mode Not Respected:** When main sends a message to a peer, the routing logic might not check if that peer is connected via relay. The `PostTextMessageHandler` sends to all participants without considering their connection mode.
+
+**Recommended Investigation:**
+- Verify if `SimulatorRelayDeliveryService` is supposed to intercept chat messages from main
+- Check if there's a missing interceptor or handler for main → relay peer chat messages
+- Verify that the routing logic in `PostTextMessageHandler` or `RemoteEnvelopeSender` considers relay connections
+- Add logging to verify where messages sent from main to relay-connected peers actually go
+
+---
+
+### Summary of Theories
+
+| Issue | Root Cause Theory | Evidence |
+|-------|-------------------|----------|
+| **1. SQL load wrong side** | Self participant ID mismatch between send and load | Type alias confusion, potential identity change |
+| **2. Direct session simulator** | Endpoint resolution or decryption failure | Requires 127.77.x.x IP, session lookup might fail |
+| **3. Relay session simulator** | Missing main → relay routing path | No code path found for main → relay peer chat messages |
