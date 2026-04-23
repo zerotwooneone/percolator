@@ -1,6 +1,7 @@
 using Desktop.Wpf.Features.Simulator.Models;
 using Microsoft.Extensions.Logging;
 using Percolator.Cryptography;
+using Percolator.Network;
 
 namespace Desktop.Wpf.Features.Simulator;
 
@@ -145,7 +146,7 @@ public sealed class SimulatorRelayAutoDeliverService : ISimulatorRelayAutoDelive
             try
             {
                 var resolved = await _state.TryGetPeerIdByIdentityPkhAsync(inbound.TargetPkh, ct).ConfigureAwait(false);
-                recipientPeerId = resolved;
+                recipientPeerId = resolved is not null ? resolved.Value : null;
             }
             catch
             {
@@ -161,7 +162,7 @@ public sealed class SimulatorRelayAutoDeliverService : ISimulatorRelayAutoDelive
             {
                 await _delivery.DeliverToPeerAsync(
                         relayHostPeerId: relay.RelayHostPeerId,
-                        recipientPeerId: recipientPeerId.Value,
+                        recipientPeerId: new PeerId(recipientPeerId.Value),
                         ackId: inbound.AckId,
                         opaqueBytes: inbound.OpaqueBytes,
                         debugType: inbound.DebugType,
@@ -173,7 +174,7 @@ public sealed class SimulatorRelayAutoDeliverService : ISimulatorRelayAutoDelive
                 _diagnostics.Emit(
                     SimulatorDiagnosticEventType.RelayDelivered,
                     $"Relay deliver -> {recipientPeerId.Value.ToString()[..8]}: {(inbound.DebugType ?? "opaque")}",
-                    peerId: recipientPeerId.Value,
+                    peerId: new PeerId(recipientPeerId.Value),
                     relayHostPeerId: relay.RelayHostPeerId,
                     ackId: inbound.AckId);
             }
@@ -184,7 +185,7 @@ public sealed class SimulatorRelayAutoDeliverService : ISimulatorRelayAutoDelive
         }
     }
 
-    private SessionId? TryGetRelayHostToMainSessionId(Guid relayHostPeerId)
+    private SessionId? TryGetRelayHostToMainSessionId(PeerId relayHostPeerId)
     {
         var peer = _state.Peers.FirstOrDefault(p => p.PeerId == relayHostPeerId);
         if (peer is null) return null;

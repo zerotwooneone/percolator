@@ -13,6 +13,7 @@ using NUnit.Framework;
 using ObservableCollections;
 using Percolator.Cryptography;
 using Percolator.Cryptography.Primitives;
+using Percolator.Network;
 
 namespace Desktop.Wpf.Tests;
 
@@ -23,8 +24,8 @@ public sealed class SimulatorDiagnosticBundleBuilderTests
     public async Task BuildJsonAsync_ContainsRequiredTopLevelSections()
     {
         // Arrange
-        var relayHostId = Guid.NewGuid();
-        var peerId = Guid.NewGuid();
+        var relayHostId = new Percolator.Network.PeerId(Guid.NewGuid());
+        var peerId = new Percolator.Network.PeerId(Guid.NewGuid());
 
         var state = new Mock<ISimulatorStateService>(MockBehavior.Strict);
 
@@ -41,14 +42,14 @@ public sealed class SimulatorDiagnosticBundleBuilderTests
         state.SetupGet(s => s.Peers).Returns(peersList);
         state.SetupGet(s => s.Relays).Returns(relaysList);
         state.Setup(s => s.TryGetPeerIdByIdentityPkhAsync(It.IsAny<byte[]>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Guid?)null);
-        state.Setup(s => s.AddRelayActiveSessionAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Percolator.Network.PeerId?)null);
+        state.Setup(s => s.AddRelayActiveSessionAsync(It.IsAny<Percolator.Network.PeerId>(), It.IsAny<Percolator.Network.PeerId>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
-        state.Setup(s => s.RemoveRelayActiveSessionAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+        state.Setup(s => s.RemoveRelayActiveSessionAsync(It.IsAny<Percolator.Network.PeerId>(), It.IsAny<Percolator.Network.PeerId>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
         var sessionId = new SessionId(Guid.NewGuid());
-        var remotePeerId = new PeerId(peerId);
+        var remotePeerId = new Percolator.Cryptography.Primitives.PeerId(peerId.Value);
         var stateRoot = new RootKey(new byte[] { 1, 2, 3 });
         var ratchet = new RatchetState(stateRoot, sendingChainKey: null, sendingCounter: 7, receivingChainKey: null, receivingCounter: 8, previousChainLength: 0, remoteRatchetKey: null, dhRatchetPrivateKey: null, skippedKeyLimit: 1000);
         var crypto = new AeadSessionCrypto();

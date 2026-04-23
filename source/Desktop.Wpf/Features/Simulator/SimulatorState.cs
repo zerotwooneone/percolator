@@ -1,3 +1,5 @@
+using Percolator.Network;
+
 namespace Desktop.Wpf.Features.Simulator;
 
 public sealed class SimulatorStateDto
@@ -18,7 +20,7 @@ public sealed class GroupConversationDto
 
 public sealed class SimulatedPeerDto
 {
-    public Guid PeerId { get; set; }
+    public PeerId PeerId { get; set; }
     public int SelfIdentityId { get; set; }
     public string? DisplayName { get; set; }
     public bool IsOnline { get; set; } = true;
@@ -34,7 +36,7 @@ public sealed class SimulatedPeerDto
     public byte[]? TargetPublicKeyHash { get; set; }
     public ConnectionMode? SelectedRouteMode { get; set; }
     public string? DirectEndpoint { get; set; }
-    public Guid? RelayHostPeerId { get; set; }
+    public PeerId? RelayHostPeerId { get; set; }
     public string? Phase { get; set; }
     public DateTimeOffset? NotUntilUtc { get; set; }
     public string? LastError { get; set; }
@@ -71,7 +73,7 @@ public sealed class SimulatedPendingInviteHandshakeResponseDto
 public sealed class SimulatedSecureSessionDto
 {
     public Guid SessionId { get; set; }
-    public Guid RemotePeerId { get; set; }
+    public PeerId RemotePeerId { get; set; }
     public int ProtocolVersion { get; set; } = 1;
 
     public byte[] RootKey { get; set; } = Array.Empty<byte>();
@@ -117,7 +119,7 @@ public sealed class SimulatedPeerConnectionDto
     public ConnectionMode Mode { get; set; } = ConnectionMode.Direct;
     public string Host { get; set; } = "localhost";
     public int Port { get; set; } = 0;
-    public Guid RelayPeerId { get; set; }
+    public PeerId RelayPeerId { get; set; }
 }
 
 public sealed class SimulatedPeerRelayStateDto
@@ -152,7 +154,7 @@ public sealed class SimulatedRelayPreKeyStoreDto
 public sealed class PublishedPreKeyBundleDto
 {
     public byte[] RecipientPublicKeyHash { get; set; } = Array.Empty<byte>();
-    public Guid LogicalOwnerPeerId { get; set; }
+    public PeerId LogicalOwnerPeerId { get; set; }
     public byte[] BundleBytes { get; set; } = Array.Empty<byte>();
     public DateTimeOffset ExpiresUtc { get; set; }
 }

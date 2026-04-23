@@ -1,4 +1,5 @@
 using ObservableCollections;
+using Percolator.Network;
 using R3;
 using Desktop.Wpf.Shared.Mvvm;
 
@@ -91,9 +92,9 @@ public sealed class SimulatorDiagnosticsTabViewModel : IDisposable
     {
         var peers = _state.Peers
             .Select(p => new SimulatorFilterOption<Guid?>(
-                p.PeerId,
+                p.PeerId.Value,
                 string.IsNullOrWhiteSpace(p.DisplayName.CurrentValue)
-                    ? p.PeerId.ToString()[..8]
+                    ? p.PeerId.Value.ToString()[..8]
                     : p.DisplayName.CurrentValue!))
             .OrderBy(p => p.Display)
             .ToList();
@@ -107,9 +108,9 @@ public sealed class SimulatorDiagnosticsTabViewModel : IDisposable
         var relays = _state.Peers
             .Where(p => p.IsRelayCapable.CurrentValue)
             .Select(p => new SimulatorFilterOption<Guid?>(
-                p.PeerId,
+                p.PeerId.Value,
                 string.IsNullOrWhiteSpace(p.DisplayName.CurrentValue)
-                    ? p.PeerId.ToString()[..8]
+                    ? p.PeerId.Value.ToString()[..8]
                     : p.DisplayName.CurrentValue!))
             .OrderBy(p => p.Display)
             .ToList();
@@ -134,8 +135,8 @@ public sealed class SimulatorDiagnosticsTabViewModel : IDisposable
     {
         if (_filteredView is null) return;
 
-        var peerId = SelectedPeerId.Value;
-        var relayHostId = SelectedRelayHostPeerId.Value;
+        var peerId = SelectedPeerId.Value is not null ? new PeerId(SelectedPeerId.Value.Value) : null;
+        var relayHostId = SelectedRelayHostPeerId.Value is not null ? new PeerId(SelectedRelayHostPeerId.Value.Value) : null;
         var eventType = SelectedEventType.Value;
 
         if (peerId is null && relayHostId is null && eventType is null)
@@ -149,11 +150,11 @@ public sealed class SimulatorDiagnosticsTabViewModel : IDisposable
 
     private sealed class DiagnosticsFilter : ISynchronizedViewFilter<SimulatorDiagnosticEvent, SimulatorDiagnosticEvent>
     {
-        private readonly Guid? _peerId;
-        private readonly Guid? _relayHostPeerId;
+        private readonly PeerId? _peerId;
+        private readonly PeerId? _relayHostPeerId;
         private readonly SimulatorDiagnosticEventType? _eventType;
 
-        public DiagnosticsFilter(Guid? peerId, Guid? relayHostPeerId, SimulatorDiagnosticEventType? eventType)
+        public DiagnosticsFilter(PeerId? peerId, PeerId? relayHostPeerId, SimulatorDiagnosticEventType? eventType)
         {
             _peerId = peerId;
             _relayHostPeerId = relayHostPeerId;
@@ -162,8 +163,8 @@ public sealed class SimulatorDiagnosticsTabViewModel : IDisposable
 
         public bool IsMatch(SimulatorDiagnosticEvent value, SimulatorDiagnosticEvent view)
         {
-            if (_peerId is not null && value.PeerId != _peerId) return false;
-            if (_relayHostPeerId is not null && value.RelayHostPeerId != _relayHostPeerId) return false;
+            if (_peerId is not null && value.PeerId?.Value != _peerId?.Value) return false;
+            if (_relayHostPeerId is not null && value.RelayHostPeerId?.Value != _relayHostPeerId?.Value) return false;
             if (_eventType is not null && value.EventType != _eventType) return false;
             return true;
         }

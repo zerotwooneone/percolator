@@ -15,6 +15,7 @@ using Percolator.Application.Ingress;
 using Percolator.Application.Network;
 using Percolator.Identity;
 using Percolator.Identity.Model;
+using Percolator.Network;
 
 namespace Desktop.Wpf.Tests;
 
@@ -25,8 +26,8 @@ public sealed class SimulatorRelayDeliveryServiceTests
     public async Task DeliverToPeerAsync_when_payload_is_valid_handshake_initiator_hello_upserts_pending_standard_hello_and_does_not_forward()
     {
         // Arrange
-        var relayHostPeerId = Guid.NewGuid();
-        var recipientPeerId = Guid.NewGuid();
+        var relayHostPeerId = new Percolator.Network.PeerId(Guid.NewGuid());
+        var recipientPeerId = new Percolator.Network.PeerId(Guid.NewGuid());
         var ackId = Guid.NewGuid();
 
         var initiatorIdentity = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
@@ -71,17 +72,17 @@ public sealed class SimulatorRelayDeliveryServiceTests
             It.IsAny<DateTimeOffset>(),
             It.IsAny<CancellationToken>()), Times.Once);
 
-        state.Verify(s => s.ReceiveRelayedOpaquePayloadAsync(It.IsAny<Guid>(), It.IsAny<byte[]>(), It.IsAny<CancellationToken>()), Times.Never);
-        state.Verify(s => s.EnqueueRelayUpstreamToMainAsync(It.IsAny<Guid>(), It.IsAny<byte[]>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
-        state.Verify(s => s.EnqueueRelayDownstreamToPeerAsync(It.IsAny<Guid>(), It.IsAny<byte[]>(), It.IsAny<byte[]>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
+        state.Verify(s => s.ReceiveRelayedOpaquePayloadAsync(It.IsAny<Percolator.Network.PeerId>(), It.IsAny<byte[]>(), It.IsAny<CancellationToken>()), Times.Never);
+        state.Verify(s => s.EnqueueRelayUpstreamToMainAsync(It.IsAny<Percolator.Network.PeerId>(), It.IsAny<byte[]>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
+        state.Verify(s => s.EnqueueRelayDownstreamToPeerAsync(It.IsAny<Percolator.Network.PeerId>(), It.IsAny<byte[]>(), It.IsAny<byte[]>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Test]
     public async Task DeliverToPeerAsync_when_payload_is_valid_handshake_initiator_hello_upserts_pending_standard_hello_even_if_initiator_identity_matches_a_simulated_peer()
     {
         // Arrange
-        var relayHostPeerId = Guid.NewGuid();
-        var recipientPeerId = Guid.NewGuid();
+        var relayHostPeerId = new Percolator.Network.PeerId(Guid.NewGuid());
+        var recipientPeerId = new Percolator.Network.PeerId(Guid.NewGuid());
         var ackId = Guid.NewGuid();
 
         using var initiatorIdentity = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
@@ -126,17 +127,17 @@ public sealed class SimulatorRelayDeliveryServiceTests
             It.IsAny<DateTimeOffset>(),
             It.IsAny<CancellationToken>()), Times.Once);
 
-        state.Verify(s => s.ReceiveRelayedOpaquePayloadAsync(It.IsAny<Guid>(), It.IsAny<byte[]>(), It.IsAny<CancellationToken>()), Times.Never);
-        state.Verify(s => s.EnqueueRelayUpstreamToMainAsync(It.IsAny<Guid>(), It.IsAny<byte[]>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
-        state.Verify(s => s.EnqueueRelayDownstreamToPeerAsync(It.IsAny<Guid>(), It.IsAny<byte[]>(), It.IsAny<byte[]>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
+        state.Verify(s => s.ReceiveRelayedOpaquePayloadAsync(It.IsAny<Percolator.Network.PeerId>(), It.IsAny<byte[]>(), It.IsAny<CancellationToken>()), Times.Never);
+        state.Verify(s => s.EnqueueRelayUpstreamToMainAsync(It.IsAny<Percolator.Network.PeerId>(), It.IsAny<byte[]>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
+        state.Verify(s => s.EnqueueRelayDownstreamToPeerAsync(It.IsAny<Percolator.Network.PeerId>(), It.IsAny<byte[]>(), It.IsAny<byte[]>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Test]
     public async Task DeliverToPeerAsync_when_initiator_pkh_matches_neither_simulated_peer_nor_main_identity_emits_routing_failure_and_does_not_enqueue()
     {
         // Arrange
-        var relayHostPeerId = Guid.NewGuid();
-        var recipientPeerId = Guid.NewGuid();
+        var relayHostPeerId = new Percolator.Network.PeerId(Guid.NewGuid());
+        var recipientPeerId = new Percolator.Network.PeerId(Guid.NewGuid());
         var ackId = Guid.NewGuid();
 
         using var initiatorIdentity = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
@@ -174,7 +175,7 @@ public sealed class SimulatorRelayDeliveryServiceTests
             .ReturnsAsync(forwarded);
         state
             .Setup(s => s.TryGetPeerIdByIdentityPkhAsync(It.Is<byte[]>(b => b.SequenceEqual(initiatorPkh)), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Guid?)null);
+            .ReturnsAsync((Percolator.Network.PeerId?)null);
 
         var selfRepo = new Mock<ISelfIdentityRepository>();
         selfRepo
@@ -208,8 +209,8 @@ public sealed class SimulatorRelayDeliveryServiceTests
             ackId,
             null), Times.Once);
 
-        state.Verify(s => s.UpsertPendingStandardSignalHelloAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<HandshakeInitiatorHello>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()), Times.Never);
-        state.Verify(s => s.EnqueueRelayUpstreamToMainAsync(It.IsAny<Guid>(), It.IsAny<byte[]>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
-        state.Verify(s => s.EnqueueRelayDownstreamToPeerAsync(It.IsAny<Guid>(), It.IsAny<byte[]>(), It.IsAny<byte[]>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
+        state.Verify(s => s.UpsertPendingStandardSignalHelloAsync(It.IsAny<Percolator.Network.PeerId>(), It.IsAny<Percolator.Network.PeerId>(), It.IsAny<HandshakeInitiatorHello>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()), Times.Never);
+        state.Verify(s => s.EnqueueRelayUpstreamToMainAsync(It.IsAny<Percolator.Network.PeerId>(), It.IsAny<byte[]>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
+        state.Verify(s => s.EnqueueRelayDownstreamToPeerAsync(It.IsAny<Percolator.Network.PeerId>(), It.IsAny<byte[]>(), It.IsAny<byte[]>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 }

@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using ObservableCollections;
 using Percolator.Application.Network;
 using Percolator.Cryptography;
+using Percolator.Network;
 using R3;
 
 namespace Desktop.Wpf.Features.Simulator;
@@ -99,7 +100,7 @@ public sealed class SimulatorRelayTabViewModel : IDisposable
         await Task.CompletedTask.ConfigureAwait(false);
     }
 
-    private async Task<SessionId?> GetRelayHostToMainSessionIdAsync(Guid relayHostPeerId)
+    private async Task<SessionId?> GetRelayHostToMainSessionIdAsync(PeerId relayHostPeerId)
     {
         await Task.CompletedTask.ConfigureAwait(false);
 
@@ -114,7 +115,7 @@ public sealed class SimulatorRelayTabViewModel : IDisposable
         // We order by CreatedAt descending to ensure we get the active session if Main reconnects.
         var uplinkSession = peer.Sessions
             .Select(kv => kv.Value)
-            .Where(s => !knownSimulatedPeerIds.Contains(s.RemotePeerId.Value))
+            .Where(s => !knownSimulatedPeerIds.Contains(new Percolator.Network.PeerId(s.RemotePeerId.Value)))
             .OrderByDescending(s => s.CreatedAtUtc)
             .FirstOrDefault();
 
@@ -129,7 +130,7 @@ public sealed class SimulatorRelayTabViewModel : IDisposable
         _bag.Dispose();
     }
 
-    private string PeerNameById(Guid peerId)
+    private string PeerNameById(PeerId peerId)
     {
         var model = _state.Peers.FirstOrDefault(p => p.PeerId == peerId);
         if (model is not null)

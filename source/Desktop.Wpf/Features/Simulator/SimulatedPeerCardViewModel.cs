@@ -10,6 +10,7 @@ using Google.Protobuf.WellKnownTypes;
 using ObservableCollections;
 using R3;
 using Percolator.Contracts;
+using Percolator.Network;
 using Desktop.Wpf.Features.Simulator.Models;
 using Desktop.Wpf.Shared.Mvvm;
 
@@ -114,7 +115,7 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
         var publish = PublishTargetPeerId
             .Select(hostId =>
             {
-                var host = hostId is null ? null : _state.Peers.FirstOrDefault(p => p.PeerId == hostId.Value);
+                var host = hostId is null ? null : _state.Peers.FirstOrDefault(p => p.PeerId == new PeerId(hostId.Value));
                 return host?.IsRelayCapable ?? Observable.Return(false);
             })
             .Switch()
@@ -124,19 +125,19 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
 
         // 1. Available Targets (Simplified: All peers except self)
         _availableTargetsView = _state.Peers
-            .CreateView(p => new PublishTargetOption(p.PeerId, _resolvePeerName(p.PeerId)))
+            .CreateView(p => new PublishTargetOption(p.PeerId, _resolvePeerName(p.PeerId.Value)))
             .AddTo(ref _bag);
-        _availableTargetsView.AttachFilter((p, _) => p.PeerId != PeerId);
+        _availableTargetsView.AttachFilter((p, _) => p.PeerId != _model.PeerId);
         AvailablePublishTargets = _availableTargetsView.ToNotifyCollectionChanged(_ui.CollectionEventDispatcher).AddTo(ref _bag);
 
         // 2. Published To View (Projected from the flat Relationship Graph)
         _publishedToView = _state.Relationships
             .CreateView(rel => new RelationshipTagViewModel(
                 peerId: rel.TargetPeerId,
-                display: _resolvePeerName(rel.TargetPeerId),
-                onRemove: async ct => await _state.RemovePublishedKeysRelationshipAsync(PeerId, rel.TargetPeerId, ct)))
+                display: _resolvePeerName(rel.TargetPeerId.Value),
+                onRemove: async ct => await _state.RemovePublishedKeysRelationshipAsync(_model.PeerId, rel.TargetPeerId, ct)))
             .AddTo(ref _bag);
-        _publishedToView.AttachFilter((rel, _) => rel.SourcePeerId == PeerId && rel.Type == RelationshipType.PublishedKey);
+        _publishedToView.AttachFilter((rel, _) => rel.SourcePeerId == _model.PeerId && rel.Type == RelationshipType.PublishedKey);
         _publishedToView.ObserveRemove().Subscribe(evt => evt.Value.View.Dispose()).AddTo(ref _bag);
         PublishedToTags = _publishedToView.ToNotifyCollectionChanged(_ui.CollectionEventDispatcher).AddTo(ref _bag);
 
@@ -144,10 +145,10 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
         _hostingForView = _state.Relationships
             .CreateView(rel => new RelationshipTagViewModel(
                 peerId: rel.SourcePeerId,
-                display: _resolvePeerName(rel.SourcePeerId),
-                onRemove: async ct => await _state.RemovePublishedKeysRelationshipAsync(rel.SourcePeerId, PeerId, ct)))
+                display: _resolvePeerName(rel.SourcePeerId.Value),
+                onRemove: async ct => await _state.RemovePublishedKeysRelationshipAsync(rel.SourcePeerId, _model.PeerId, ct)))
             .AddTo(ref _bag);
-        _hostingForView.AttachFilter((rel, _) => rel.TargetPeerId == PeerId && rel.Type == RelationshipType.PublishedKey);
+        _hostingForView.AttachFilter((rel, _) => rel.TargetPeerId == _model.PeerId && rel.Type == RelationshipType.PublishedKey);
         _hostingForView.ObserveRemove().Subscribe(evt => evt.Value.View.Dispose()).AddTo(ref _bag);
         HostingForTags = _hostingForView.ToNotifyCollectionChanged(_ui.CollectionEventDispatcher).AddTo(ref _bag);
 
@@ -156,7 +157,7 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
         _ = InitializeAsync();
     }
 
-    public Guid PeerId => _model.PeerId;
+    public PeerId PeerId => _model.PeerId;
 
     public BindableReactiveProperty<string> DisplayName { get; }
 
@@ -351,11 +352,11 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
         return (host, port);
     }
 
-    private static string AllocateSimulatorLoopbackHost(Guid peerId)
+    private static string AllocateSimulatorLoopbackHost(PeerId peerId)
     {
         // Stable mapping of Guid -> 127.77.X.Y. Keep within 1..254 to avoid network/broadcast edge cases.
         using var sha = SHA256.Create();
-        var hash = sha.ComputeHash(peerId.ToByteArray());
+        var hash = sha.ComputeHash(peerId.Value.ToByteArray());
         var x = (byte)((hash[0] % 254) + 1);
         var y = (byte)((hash[1] % 254) + 1);
         return $"127.77.{x}.{y}";
@@ -366,29 +367,29 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
         var hostPeerId = PublishTargetPeerId.Value;
         if (hostPeerId is null) return;
 
-        if (!HasActiveSessionToHost(hostPeerId.Value))
+        if (!HasActiveSessionToHost(new PeerId(hostPeerId.Value)))
         {
             _diagnostics.Emit(
                 SimulatorDiagnosticEventType.PreKeyPublishBlockedMissingActiveSession,
-                $"Pre-key publish blocked (missing active session): publisher={_model.PeerId.ToString()[..8]} relay={hostPeerId.Value.ToString()[..8]}",
+                $"Pre-key publish blocked (missing active session): publisher={_model.PeerId.Value.ToString()[..8]} relay={hostPeerId.Value.ToString()[..8]}",
                 peerId: _model.PeerId,
-                relayHostPeerId: hostPeerId.Value);
+                relayHostPeerId: new PeerId(hostPeerId.Value));
             return;
         }
 
-        await _state.AddPublishedKeysRelationshipAsync(_model.PeerId, hostPeerId.Value, ct).ConfigureAwait(false);
+        await _state.AddPublishedKeysRelationshipAsync(_model.PeerId, new PeerId(hostPeerId.Value), ct).ConfigureAwait(false);
 
         // In our simulator, "publishing" means pushing a standard pre-key bundle into the host's pre-key store.
         await _state.PublishStandardPreKeyBundleToRelayAsync(
                 simulatedPeerId: _model.PeerId,
-                relayHostPeerId: hostPeerId.Value,
+                relayHostPeerId: new PeerId(hostPeerId.Value),
                 expiresUtc: DateTimeOffset.UtcNow.AddHours(12),
                 oneTimeKeyCount: OneTimeKeyCount.Value,
                 cancellationToken: ct)
             .ConfigureAwait(false);
     }
 
-    private bool HasActiveSessionToHost(Guid relayHostPeerId)
+    private bool HasActiveSessionToHost(PeerId relayHostPeerId)
     {
         return _state.Relationships.Contains(new PeerRelationship(relayHostPeerId, _model.PeerId, RelationshipType.RelayActiveSession));
     }
@@ -417,7 +418,7 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
     {
         private readonly Func<CancellationToken, Task> _remove;
 
-        public RelationshipTagViewModel(Guid peerId, string display, Func<CancellationToken, Task> onRemove)
+        public RelationshipTagViewModel(PeerId peerId, string display, Func<CancellationToken, Task> onRemove)
         {
             PeerId = peerId;
             Display = display;
@@ -428,7 +429,7 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
             RemoveCommand = cmd;
         }
 
-        public Guid PeerId { get; }
+        public PeerId PeerId { get; }
 
         public string Display { get; }
 
@@ -440,13 +441,13 @@ public sealed class SimulatedPeerCardViewModel : IDisposable
 
     public sealed class PublishTargetOption
     {
-        public PublishTargetOption(Guid peerId, string display)
+        public PublishTargetOption(PeerId peerId, string display)
         {
             PeerId = peerId;
             Display = display;
         }
 
-        public Guid PeerId { get; }
+        public PeerId PeerId { get; }
 
         public string Display { get; }
     }

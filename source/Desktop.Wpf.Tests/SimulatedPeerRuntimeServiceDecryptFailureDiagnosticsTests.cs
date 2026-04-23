@@ -14,6 +14,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Percolator.Application.Configuration;
 using Percolator.Cryptography;
+using Percolator.Network;
 
 namespace Desktop.Wpf.Tests;
 
@@ -55,7 +56,7 @@ public sealed class SimulatedPeerRuntimeServiceDecryptFailureDiagnosticsTests
     public async Task DecryptSessionMessageAsync_WhenDecryptThrows_EmitsDecryptFailureDiagnosticEvent()
     {
         // Arrange
-        var peerId = Guid.NewGuid();
+        var peerId = new PeerId(Guid.NewGuid());
         using var identityEcdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var identityPriv = identityEcdh.ExportECPrivateKey();
         using var identityEcdsa = ECDsa.Create(identityEcdh.ExportParameters(true));

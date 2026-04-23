@@ -4,6 +4,7 @@ using System.Net;
 using Microsoft.Extensions.Logging;
 using Percolator.Application.Network;
 using Percolator.Contracts;
+using Percolator.Network;
 
 namespace Desktop.Wpf.Features.Simulator;
 
@@ -93,7 +94,7 @@ public sealed class SimulatorOutboundInterceptor : ISimulatorOutboundInterceptor
         return true;
     }
 
-    private async Task<DeliverInviteHandshakeResponseAck> DeliverInviteHandshakeResponseAsync(Guid simulatedPeerId, InviteHandshakeResponse response)
+    private async Task<DeliverInviteHandshakeResponseAck> DeliverInviteHandshakeResponseAsync(PeerId simulatedPeerId, InviteHandshakeResponse response)
     {
         _logger.LogInformation("[simulator] Intercepted DeliverInviteHandshakeResponse to {SimPeer}", simulatedPeerId);
         await _state.ReceiveInviteHandshakeResponseFromMainAsync(simulatedPeerId, response).ConfigureAwait(false);
@@ -102,7 +103,7 @@ public sealed class SimulatorOutboundInterceptor : ISimulatorOutboundInterceptor
 
     private async Task<EstablishDirectSessionResponse> EstablishDirectSessionAsync(
         DnsEndPoint endpoint,
-        Guid simulatedPeerId,
+        PeerId simulatedPeerId,
         EstablishDirectSessionRequest request,
         CancellationToken cancellationToken)
     {
@@ -110,7 +111,7 @@ public sealed class SimulatorOutboundInterceptor : ISimulatorOutboundInterceptor
         {
             return await _state.ReceiveEstablishDirectSessionFromMainAsync(
                     simulatedPeerId: simulatedPeerId,
-                    inviterPeerId: Guid.Empty,
+                    inviterPeerId: new PeerId(Guid.Empty),
                     request: request,
                     cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
@@ -126,9 +127,9 @@ public sealed class SimulatorOutboundInterceptor : ISimulatorOutboundInterceptor
         }
     }
 
-    private bool TryResolveSimulatedPeerId(DnsEndPoint endpoint, out Guid simulatedPeerId)
+    private bool TryResolveSimulatedPeerId(DnsEndPoint endpoint, out PeerId simulatedPeerId)
     {
-        simulatedPeerId = default;
+        simulatedPeerId = new PeerId(Guid.Empty);
 
         if (!IPAddress.TryParse(endpoint.Host, out var ip))
         {

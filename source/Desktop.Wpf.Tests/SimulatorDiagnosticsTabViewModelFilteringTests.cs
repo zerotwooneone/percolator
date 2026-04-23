@@ -9,6 +9,7 @@ using FluentAssertions;
 using Moq;
 using NUnit.Framework;
 using ObservableCollections;
+using Percolator.Network;
 
 namespace Desktop.Wpf.Tests;
 
@@ -23,9 +24,9 @@ public sealed class SimulatorDiagnosticsTabViewModelFilteringTests
     public async Task Filtering_ByPeerRelayAndType_Works()
     {
         // Arrange
-        var peerA = Guid.NewGuid();
-        var peerB = Guid.NewGuid();
-        var relay = Guid.NewGuid();
+        var peerA = new Percolator.Network.PeerId(Guid.NewGuid());
+        var peerB = new Percolator.Network.PeerId(Guid.NewGuid());
+        var relay = new Percolator.Network.PeerId(Guid.NewGuid());
 
         var state = new Mock<ISimulatorStateService>(MockBehavior.Strict);
 
@@ -38,10 +39,10 @@ public sealed class SimulatorDiagnosticsTabViewModelFilteringTests
         peersList.Add(new SimulatedPeerModel(peerB, selfIdentityId: 99002, "B", isOnline: true, isRelayCapable: false, spki, priv));
         state.SetupGet(s => s.Peers).Returns(peersList);
         state.Setup(s => s.TryGetPeerIdByIdentityPkhAsync(It.IsAny<byte[]>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Guid?)null);
-        state.Setup(s => s.AddRelayActiveSessionAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Percolator.Network.PeerId?)null);
+        state.Setup(s => s.AddRelayActiveSessionAsync(It.IsAny<Percolator.Network.PeerId>(), It.IsAny<Percolator.Network.PeerId>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
-        state.Setup(s => s.RemoveRelayActiveSessionAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+        state.Setup(s => s.RemoveRelayActiveSessionAsync(It.IsAny<Percolator.Network.PeerId>(), It.IsAny<Percolator.Network.PeerId>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
         var diagnostics = new SimulatorDiagnosticsService();
@@ -53,8 +54,8 @@ public sealed class SimulatorDiagnosticsTabViewModelFilteringTests
         diagnostics.Emit(SimulatorDiagnosticEventType.RelayEnqueued, "b1", peerId: peerB, relayHostPeerId: relay);
 
         // Act
-        sut.SelectedPeerId.Value = peerA;
-        sut.SelectedRelayHostPeerId.Value = relay;
+        sut.SelectedPeerId.Value = peerA.Value;
+        sut.SelectedRelayHostPeerId.Value = relay.Value;
         sut.SelectedEventType.Value = SimulatorDiagnosticEventType.RelayEnqueued;
 
         var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(2);

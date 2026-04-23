@@ -3,6 +3,7 @@ using Desktop.Wpf.Shared.Mvvm;
 using Microsoft.Extensions.Logging;
 using ObservableCollections;
 using Percolator.Cryptography;
+using Percolator.Network;
 using R3;
 using System.Linq;
 
@@ -10,8 +11,8 @@ namespace Desktop.Wpf.Features.Simulator;
 
 public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
 {
-    private readonly Guid _relayHostPeerId;
-    private readonly Func<Guid, string> _peerNameById;
+    private readonly PeerId _relayHostPeerId;
+    private readonly Func<PeerId, string> _peerNameById;
     private readonly Func<Task<SessionId?>> _getRelayHostToMainSessionId;
     private readonly IUiDispatcher _ui;
     private readonly ISimulatorStateService _state;
@@ -29,7 +30,7 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
     private readonly ISynchronizedView<PeerRelationship, ActiveSessionTagViewModel> _activeSessionTags;
     private readonly NotifyCollectionChangedSynchronizedViewList<ActiveSessionTagViewModel> _activeSessionTagsNotify;
 
-    public BindableReactiveProperty<Guid?> SelectedActiveSessionPeerId { get; }
+    public BindableReactiveProperty<PeerId?> SelectedActiveSessionPeerId { get; }
 
     public ReactiveCommand<Unit> AddActiveSessionCommand { get; }
 
@@ -38,9 +39,9 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
     public NotifyCollectionChangedSynchronizedViewList<ActiveSessionTargetOption> AvailableActiveSessionTargets => _availableTargetsNotify;
 
     public SimulatedRelayQueuePanelViewModel(
-        Guid relayHostPeerId,
+        PeerId relayHostPeerId,
         string relayHostName,
-        Func<Guid, string> peerNameById,
+        Func<PeerId, string> peerNameById,
         Func<Task<SessionId?>> getRelayHostToMainSessionId,
         IUiDispatcher ui,
         ISimulatorStateService state,
@@ -74,7 +75,7 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
             rel.SourcePeerId == _relayHostPeerId
             && rel.Type == RelationshipType.RelayActiveSession);
         _activeSessionTagsNotify = _activeSessionTags.ToNotifyCollectionChanged(_ui.CollectionEventDispatcher).AddTo(ref _bag);
-        SelectedActiveSessionPeerId = new BindableReactiveProperty<Guid?>(null).AddTo(ref _bag);
+        SelectedActiveSessionPeerId = new BindableReactiveProperty<PeerId?>(null).AddTo(ref _bag);
 
         var synchronizedQueueView = _relay.MessageQueue
             .CreateView(kvp =>
@@ -178,7 +179,7 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
             .AddTo(ref _bag);
     }
 
-    public Guid RelayHostPeerId => _relayHostPeerId;
+    public PeerId RelayHostPeerId => _relayHostPeerId;
 
     public string RelayHostName { get; }
 
@@ -192,9 +193,9 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
     {
         ct.ThrowIfCancellationRequested();
         var peerId = SelectedActiveSessionPeerId.Value;
-        if (!peerId.HasValue) return;
+        if (peerId is null) return;
 
-        await _state.AddRelayActiveSessionAsync(_relayHostPeerId, peerId.Value, ct).ConfigureAwait(false);
+        await _state.AddRelayActiveSessionAsync(_relayHostPeerId, peerId, ct).ConfigureAwait(false);
     }
 
     public ReactiveCommand<Unit> NextCommand { get; }
@@ -309,7 +310,7 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
         if (targetPkh.Length == 32)
         {
             var recipientPeerId = await _state.TryGetPeerIdByIdentityPkhAsync(targetPkh, ct).ConfigureAwait(false);
-            if (!recipientPeerId.HasValue)
+            if (recipientPeerId is null)
             {
                 _diagnostics.Emit(
                     SimulatorDiagnosticEventType.RelayRoutingFailure,
@@ -321,7 +322,7 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
 
             await _delivery.DeliverToPeerAsync(
                     relayHostPeerId: _relayHostPeerId,
-                    recipientPeerId: recipientPeerId.Value,
+                    recipientPeerId: new PeerId(recipientPeerId.Value),
                     ackId: ackId,
                     opaqueBytes: opaqueBytes,
                     debugType: debugType,
@@ -333,7 +334,7 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
             _diagnostics.Emit(
                 SimulatorDiagnosticEventType.RelayDelivered,
                 $"Relay deliver -> {recipientPeerId.Value.ToString()[..8]}: {(debugType ?? "opaque")}",
-                peerId: recipientPeerId.Value,
+                peerId: new PeerId(recipientPeerId.Value),
                 relayHostPeerId: _relayHostPeerId,
                 ackId: ackId);
             return;
@@ -376,7 +377,7 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
         _bag.Dispose();
     }
 
-    private ActiveSessionTagViewModel CreateActiveSessionTag(Guid peerId)
+    private ActiveSessionTagViewModel CreateActiveSessionTag(PeerId peerId)
     {
         return new ActiveSessionTagViewModel(
             peerId: peerId,
@@ -389,7 +390,7 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
         private readonly Func<CancellationToken, Task> _remove;
         private readonly IDisposable _removeSubscription;
 
-        public ActiveSessionTagViewModel(Guid peerId, string display, Func<CancellationToken, Task> onRemove)
+        public ActiveSessionTagViewModel(PeerId peerId, string display, Func<CancellationToken, Task> onRemove)
         {
             PeerId = peerId;
             Display = display;
@@ -401,7 +402,7 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
                 .SubscribeAwait(async (_, ct) => await _remove(ct), AwaitOperation.Drop);
         }
 
-        public Guid PeerId { get; }
+        public PeerId PeerId { get; }
 
         public string Display { get; }
 
@@ -416,13 +417,13 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
 
     public sealed class ActiveSessionTargetOption
     {
-        public ActiveSessionTargetOption(Guid peerId, string display)
+        public ActiveSessionTargetOption(PeerId peerId, string display)
         {
             PeerId = peerId;
             Display = display;
         }
 
-        public Guid PeerId { get; }
+        public PeerId PeerId { get; }
 
         public string Display { get; }
     }

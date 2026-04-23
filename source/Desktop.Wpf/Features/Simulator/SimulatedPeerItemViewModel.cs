@@ -7,12 +7,13 @@ using Microsoft.Extensions.Options;
 using R3;
 using Percolator.Contracts;
 using Percolator.Application.Configuration;
+using Percolator.Network;
 
 namespace Desktop.Wpf.Features.Simulator;
 
 public sealed class SimulatedPeerItemViewModel : IDisposable
 {
-    private static readonly Guid MainNodeSentinelPeerId = new("88880000-0000-0000-0000-000000000000");
+    private static readonly PeerId MainNodeSentinelPeerId = new(new Guid("88880000-0000-0000-0000-000000000000"));
     private readonly ISimulatorInitializer _directory;
     private readonly SimulatedPeerModel _model;
     private readonly ISimulatedPeerPendingInbox _pending;
@@ -23,7 +24,7 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
     private readonly Percolator.Application.Network.PercolatorMessageService _messageService;
     private readonly IOptions<TransportOptions> _transportOptions;
     private readonly Percolator.Application.Identity.ActiveIdentityContext _active;
-    private readonly Func<Percolator.Cryptography.Primitives.PeerId?> _getSelectedRelayPeerId;
+    private readonly Func<Percolator.Network.PeerId?> _getSelectedRelayPeerId;
     private DisposableBag _bag;
 
     private Percolator.Cryptography.SessionId? _sessionToMain;
@@ -38,7 +39,7 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
         Percolator.Application.Network.PercolatorMessageService messageService,
         IOptions<TransportOptions> transportOptions,
         Percolator.Application.Identity.ActiveIdentityContext active,
-        Func<Percolator.Cryptography.Primitives.PeerId?> getSelectedRelayPeerId,
+        Func<Percolator.Network.PeerId?> getSelectedRelayPeerId,
         ISimulatedPeerPendingInbox pending)
     {
         _directory = directory;
@@ -196,7 +197,7 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
             .AddTo(ref _bag);
     }
 
-    public Guid PeerId => _model.PeerId;
+    public PeerId PeerId => _model.PeerId;
 
     public BindableReactiveProperty<string> DisplayText { get; }
 
@@ -301,14 +302,12 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
             return;
         }
 
-        var relayPeerGuid = relayPeerId.Value;
-
         var invite = _inviteFactory.CreateInvite();
 
         var selfPkh = await _state.ComputePublicKeyHashAsync(_model.PeerId, ct).ConfigureAwait(false);
 
         await _state.EnqueueRelayDownstreamToPeerAsync(
-                relayHostPeerId: relayPeerGuid,
+                relayHostPeerId: relayPeerId,
                 targetPkh: selfPkh,
                 opaqueBytes: invite.ToByteArray(),
                 debugType: nameof(EstablishDirectSessionRequest),
@@ -316,7 +315,7 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
             .ConfigureAwait(false);
 
         var dequeued = await _state.DequeueRelayDownstreamToPeerAsync(
-                relayHostPeerId: relayPeerGuid,
+                relayHostPeerId: relayPeerId,
                 targetPkh: selfPkh,
                 max: 1,
                 cancellationToken: ct)
@@ -337,14 +336,14 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
         _sessionToMain = acceptance.SessionId;
 
         await _state.EnqueueRelayUpstreamToMainAsync(
-                relayHostPeerId: relayPeerGuid,
+                relayHostPeerId: relayPeerId,
                 opaqueBytes: acceptance.Response.ToByteArray(),
                 debugType: nameof(InviteHandshakeResponse),
                 cancellationToken: ct)
             .ConfigureAwait(false);
     }
 
-    private bool HasActiveSessionToHost(Guid relayHostPeerId)
+    private bool HasActiveSessionToHost(PeerId relayHostPeerId)
     {
         return _state.Relationships.Contains(new PeerRelationship(relayHostPeerId, _model.PeerId, RelationshipType.RelayActiveSession));
     }
@@ -357,14 +356,12 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
             return;
         }
 
-        var relayPeerGuid = relayPeerId.Value;
-
         if (_active.Identity is null)
         {
             return;
         }
 
-        if (_model.PeerId != relayPeerGuid)
+        if (_model.PeerId != relayPeerId)
         {
             return;
         }
@@ -383,7 +380,7 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
         _ = SHA256.HashData(mainSpki);
 
         await _state.ForwardRelayUpstreamToMainAsync(
-                relayHostPeerId: relayPeerGuid,
+                relayHostPeerId: relayPeerId,
                 relayHostToMainSessionId: _sessionToMain,
                 max: 250,
                 cancellationToken: ct)
@@ -417,8 +414,6 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
             return ExecutePeerInviteDirectAsync(ct);
         }
 
-        var relayPeerGuid = relayPeerId.Value;
-
         var invite = CreatePeerToMainInvite();
 
         if (_active.Keys is null)
@@ -430,7 +425,7 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
         _ = SHA256.HashData(mainSpki);
 
         return _state.EnqueueRelayUpstreamToMainAsync(
-            relayHostPeerId: relayPeerGuid,
+            relayHostPeerId: relayPeerId,
             opaqueBytes: invite.ToByteArray(),
             debugType: nameof(EstablishDirectSessionRequest),
             cancellationToken: ct);
@@ -444,19 +439,19 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
             return;
         }
 
-        if (!HasActiveSessionToHost(relayPeerId.Value))
+        if (!HasActiveSessionToHost(relayPeerId))
         {
             _diagnostics.Emit(
                 SimulatorDiagnosticEventType.PreKeyPublishBlockedMissingActiveSession,
-                $"Pre-key publish blocked (missing active session): publisher={_model.PeerId.ToString()[..8]} relay={relayPeerId.Value.ToString()[..8]}",
+                $"Pre-key publish blocked (missing active session): publisher={_model.PeerId.Value.ToString()[..8]} relay={relayPeerId.Value.ToString()[..8]}",
                 peerId: _model.PeerId,
-                relayHostPeerId: relayPeerId.Value);
+                relayHostPeerId: relayPeerId);
             return;
         }
 
         await _state.PublishStandardPreKeyBundleToRelayAsync(
                 simulatedPeerId: _model.PeerId,
-                relayHostPeerId: relayPeerId.Value,
+                relayHostPeerId: relayPeerId,
                 expiresUtc: DateTimeOffset.UtcNow.AddHours(12),
                 oneTimeKeyCount: 5,
                 cancellationToken: ct)
@@ -487,7 +482,7 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
 
         _ = await _state.InitiateStandardHandshakeToMainByRelayPkhAsync(
                 simulatedPeerId: _model.PeerId,
-                relayHostPeerId: relayPeerId.Value,
+                relayHostPeerId: new PeerId(relayPeerId.Value),
                 responderPublicKeyHash: mainPkh,
                 cancellationToken: ct)
             .ConfigureAwait(false);
@@ -546,11 +541,11 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
         };
     }
 
-    private static string AllocateSimulatorLoopbackHost(Guid peerId)
+    private static string AllocateSimulatorLoopbackHost(PeerId peerId)
     {
         // Stable mapping of Guid -> 127.77.X.Y. Keep within 1..254 to avoid network/broadcast edge cases.
         using var sha = SHA256.Create();
-        var hash = sha.ComputeHash(peerId.ToByteArray());
+        var hash = sha.ComputeHash(peerId.Value.ToByteArray());
         var x = (byte)((hash[0] % 254) + 1);
         var y = (byte)((hash[1] % 254) + 1);
         return $"127.77.{x}.{y}";

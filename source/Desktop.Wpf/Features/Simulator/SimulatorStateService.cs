@@ -9,7 +9,7 @@ using Percolator.Application.Configuration;
 using Percolator.Application.Network;
 using Percolator.Contracts;
 using Percolator.Cryptography;
-using Percolator.Cryptography.Primitives;
+using Percolator.Network;
 using R3;
 using Desktop.Wpf.Features.Simulator.Models;
 using System;
@@ -47,13 +47,13 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
     private readonly ObservableList<PeerRelationship> _relationships = new();
     public IReadOnlyObservableList<PeerRelationship> Relationships => _relationships;
 
-    private readonly Dictionary<Guid, SimulatedRelayModel> _relayByHostPeerId = new();
+    private readonly Dictionary<PeerId, SimulatedRelayModel> _relayByHostPeerId = new();
 
-    private readonly Dictionary<Guid, SimulatedPeerModel> _peerById = new();
+    private readonly Dictionary<PeerId, SimulatedPeerModel> _peerById = new();
 
-    private readonly Dictionary<Guid, IDisposable> _runtimePersistenceByPeerId = new();
+    private readonly Dictionary<PeerId, IDisposable> _runtimePersistenceByPeerId = new();
 
-    private readonly Dictionary<Guid, IDisposable> _relayPersistenceByHostPeerId = new();
+    private readonly Dictionary<PeerId, IDisposable> _relayPersistenceByHostPeerId = new();
 
     private List<GroupConversationDto> _groups = new();
 
@@ -144,8 +144,8 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
     }
 
     public async Task<EstablishDirectSessionResponse> ReceiveEstablishDirectSessionFromMainAsync(
-        Guid simulatedPeerId,
-        Guid inviterPeerId,
+        PeerId simulatedPeerId,
+        PeerId inviterPeerId,
         EstablishDirectSessionRequest request,
         CancellationToken cancellationToken = default)
     {
@@ -179,8 +179,8 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         => DeliverInviteHandshakeResponseToMainAsyncCore(response, cancellationToken);
 
     public async Task<SimulatedPeerInviteAcceptance> AcceptReverseSignalInviteAsync(
-        Guid simulatedPeerId,
-        Guid inviterPeerId,
+        PeerId simulatedPeerId,
+        PeerId inviterPeerId,
         EstablishDirectSessionRequest invite,
         CancellationToken cancellationToken = default)
     {
@@ -218,7 +218,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             identitySigningKey: new RatchetIdentityKey(invite.InviterIdentityKey.ToByteArray()),
             signedPreKeyId: Guid.Empty,
             signedPreKey: new PreKey(payload.InviterPreKey.InviterSignedPreKey.ToByteArray()),
-            signedPreKeySignature: new Signature(payload.InviterPreKey.PreKeySignature.ToByteArray()),
+            signedPreKeySignature: new Percolator.Cryptography.Signature(payload.InviterPreKey.PreKeySignature.ToByteArray()),
             oneTimePreKeyId: null,
             oneTimePreKey: inviterOtk,
             expirationDateUtc: payload.ExpiresAtUtc?.ToDateTimeOffset());
@@ -233,7 +233,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             var root = new RootKey(x3.SharedSecret.Value);
             var session = RatchetBootstrap.CreateInitiatorSession(
                 sessionId,
-                new PeerId(inviterPeerId),
+                new Percolator.Cryptography.Primitives.PeerId(inviterPeerId.Value),
                 new ProtocolVersion(1),
                 root,
                 clock,
@@ -268,7 +268,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
     }
 
     public async Task ReceiveInviteHandshakeResponseFromMainAsync(
-        Guid simulatedPeerId,
+        PeerId simulatedPeerId,
         InviteHandshakeResponse response,
         CancellationToken cancellationToken = default)
     {
@@ -293,7 +293,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
     }
 
     public async Task QueueInviteHandshakeResponseForDeliveryToMainAsync(
-        Guid simulatedPeerId,
+        PeerId simulatedPeerId,
         Guid requestCorrelationId,
         InviteHandshakeResponse response,
         CancellationToken cancellationToken = default)
@@ -318,7 +318,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
     }
 
     public async Task<bool> TryDeliverQueuedInviteHandshakeResponseToMainAsync(
-        Guid simulatedPeerId,
+        PeerId simulatedPeerId,
         Guid requestCorrelationId,
         CancellationToken cancellationToken = default)
     {
@@ -334,8 +334,8 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
     }
 
     public async Task<SessionId?> TryFinalizeInviteHandshakeResponseFromMainAsync(
-        Guid simulatedPeerId,
-        Guid acceptorPeerId,
+        PeerId simulatedPeerId,
+        PeerId acceptorPeerId,
         Guid requestCorrelationId,
         CancellationToken cancellationToken = default)
     {
@@ -410,7 +410,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         var clock = ResolveClock();
         var tmp = RatchetBootstrap.CreateResponderSession(
             SessionId.NewId(),
-            new PeerId(acceptorPeerId),
+            new Percolator.Cryptography.Primitives.PeerId(acceptorPeerId.Value),
             new ProtocolVersion(1),
             root,
             clock);
@@ -470,7 +470,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
     }
 
     public async Task<EstablishSessionResponse> ReceiveEstablishSessionFromMainAsync(
-        Guid simulatedPeerId,
+        PeerId simulatedPeerId,
         EstablishSessionRequest request,
         CancellationToken cancellationToken = default)
     {
@@ -574,7 +574,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
     }
 
     public async Task<DeliverOpaqueMessageResponse> ReceiveOpaqueMessageFromMainAsync(
-        Guid simulatedPeerId,
+        PeerId simulatedPeerId,
         DeliverOpaqueMessageRequest request,
         CancellationToken cancellationToken = default)
     {
@@ -746,8 +746,8 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
     }
 
     public async Task PublishStandardPreKeyBundleToRelayAsync(
-        Guid simulatedPeerId,
-        Guid relayHostPeerId,
+        PeerId simulatedPeerId,
+        PeerId relayHostPeerId,
         DateTimeOffset expiresUtc,
         int oneTimeKeyCount,
         CancellationToken cancellationToken = default)
@@ -811,8 +811,8 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
     }
 
     public async Task<SessionId?> InitiateStandardHandshakeToMainByRelayPkhAsync(
-        Guid simulatedPeerId,
-        Guid relayHostPeerId,
+        PeerId simulatedPeerId,
+        PeerId relayHostPeerId,
         byte[] responderPublicKeyHash,
         CancellationToken cancellationToken = default)
     {
@@ -881,7 +881,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             identitySigningKey: new RatchetIdentityKey(bundleProto.IdentityKey.ToByteArray()),
             signedPreKeyId: signedPreKeyId,
             signedPreKey: new PreKey(bundleProto.SignedPreKey.ToByteArray()),
-            signedPreKeySignature: new Signature(bundleProto.PreKeySignature.ToByteArray()),
+            signedPreKeySignature: new Percolator.Cryptography.Signature(bundleProto.PreKeySignature.ToByteArray()),
             oneTimePreKeyId: oneTimePreKeyInstance?.Id,
             oneTimePreKey: oneTimePreKeyInstance?.Key,
             expirationDateUtc: null);
@@ -940,8 +940,8 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
     private const int OneTimeKeyRequestSanityLimit = 100;
 
     public async Task UpsertPendingStandardSignalHelloAsync(
-        Guid recipientPeerId,
-        Guid relayHostPeerId,
+        PeerId recipientPeerId,
+        PeerId relayHostPeerId,
         HandshakeInitiatorHello hello,
         DateTimeOffset receivedUtc,
         CancellationToken cancellationToken = default)
@@ -1002,7 +1002,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
     }
 
     public async Task<bool> TryAcceptPendingStandardSignalHelloAsync(
-        Guid recipientPeerId,
+        PeerId recipientPeerId,
         string initiatorPkhHex,
         CancellationToken cancellationToken = default)
     {
@@ -1010,7 +1010,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         if (string.IsNullOrWhiteSpace(initiatorPkhHex)) throw new ArgumentNullException(nameof(initiatorPkhHex));
 
         SimulatedPendingStandardSignalHelloModel? pending;
-        Guid relayHostPeerId;
+        PeerId relayHostPeerId;
 
         await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -1075,7 +1075,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         var initiatorPkh = Convert.FromHexString(initiatorPkhHex);
         var initiatorPeerId = await TryGetPeerIdByIdentityPkhAsync(initiatorPkh, cancellationToken).ConfigureAwait(false);
 
-        if (initiatorPeerId.HasValue)
+        if (initiatorPeerId is not null)
         {
             await EnqueueRelayDownstreamToPeerAsync(
                     relayHostPeerId: relayHostPeerId,
@@ -1124,7 +1124,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         return messageService.EstablishSession(request, ctx);
     }
 
-    public async Task<byte[]> ComputePublicKeyHashAsync(Guid simulatedPeerId, CancellationToken cancellationToken = default)
+    public async Task<byte[]> ComputePublicKeyHashAsync(PeerId simulatedPeerId, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -1142,7 +1142,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
     }
 
     public async Task<SessionRatchetMessage> EncryptInternalEnvelopeAsync(
-        Guid simulatedPeerId,
+        PeerId simulatedPeerId,
         SessionId sessionId,
         InternalEnvelope envelope,
         CancellationToken cancellationToken = default)
@@ -1167,7 +1167,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
     }
 
     public async Task<Plaintext> DecryptSessionMessageAsync(
-        Guid simulatedPeerId,
+        PeerId simulatedPeerId,
         SessionId sessionId,
         SessionRatchetMessage message,
         CancellationToken cancellationToken = default)
@@ -1201,13 +1201,13 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         }
     }
 
-    private SimulatedRelayModel GetRelayOrThrow(Guid relayHostPeerId)
+    private SimulatedRelayModel GetRelayOrThrow(PeerId relayHostPeerId)
     {
         if (_relayByHostPeerId.TryGetValue(relayHostPeerId, out var relay)) return relay;
         throw new InvalidOperationException($"No relay exists with host peer id {relayHostPeerId}");
     }
 
-    public async Task<bool> DeleteRelayMessageByAckIdAsync(Guid relayHostPeerId, Guid ackId, CancellationToken cancellationToken = default)
+    public async Task<bool> DeleteRelayMessageByAckIdAsync(PeerId relayHostPeerId, Guid ackId, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -1231,7 +1231,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         return removed;
     }
 
-    public async Task<bool> MoveRelayMessageByAckIdAsync(Guid relayHostPeerId, Guid ackId, int delta, CancellationToken cancellationToken = default)
+    public async Task<bool> MoveRelayMessageByAckIdAsync(PeerId relayHostPeerId, Guid ackId, int delta, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (delta == 0) return false;
@@ -1313,7 +1313,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         return changed;
     }
 
-    public async Task<bool> CorruptRelayMessageByAckIdAsync(Guid relayHostPeerId, Guid ackId, CancellationToken cancellationToken = default)
+    public async Task<bool> CorruptRelayMessageByAckIdAsync(PeerId relayHostPeerId, Guid ackId, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -1375,7 +1375,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
     }
 
     public async Task EnqueueRelayUpstreamToMainAsync(
-        Guid relayHostPeerId,
+        PeerId relayHostPeerId,
         byte[] opaqueBytes,
         string? debugType = null,
         CancellationToken cancellationToken = default)
@@ -1412,7 +1412,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
     }
 
     public async Task EnqueueRelayDownstreamToPeerAsync(
-        Guid relayHostPeerId,
+        PeerId relayHostPeerId,
         byte[] targetPkh,
         byte[] opaqueBytes,
         string? debugType = null,
@@ -1453,7 +1453,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
     }
 
     public async Task<IReadOnlyList<InboundRelayMessage>> DequeueRelayDownstreamToPeerAsync(
-        Guid relayHostPeerId,
+        PeerId relayHostPeerId,
         byte[] targetPkh,
         int max,
         CancellationToken cancellationToken = default)
@@ -1495,7 +1495,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
     }
 
     public async Task<int> ForwardRelayUpstreamToMainAsync(
-        Guid relayHostPeerId,
+        PeerId relayHostPeerId,
         SessionId relayHostToMainSessionId,
         int max,
         CancellationToken cancellationToken = default)
@@ -1610,7 +1610,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
     }
 
     public async Task<bool> DeliverRelayUpstreamToMainByAckIdAsync(
-        Guid relayHostPeerId,
+        PeerId relayHostPeerId,
         SessionId relayHostToMainSessionId,
         Guid ackId,
         CancellationToken cancellationToken = default)
@@ -1704,7 +1704,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
     }
 
     public async Task<EstablishSessionResponse?> ReceiveRelayedOpaquePayloadAsync(
-        Guid simulatedPeerId,
+        PeerId simulatedPeerId,
         byte[] opaqueBytes,
         CancellationToken cancellationToken = default)
     {
@@ -1849,7 +1849,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         return null;
     }
 
-    public async Task SendChatMessageToMainAsync(Guid simulatedPeerId, string content, CancellationToken cancellationToken = default)
+    public async Task SendChatMessageToMainAsync(PeerId simulatedPeerId, string content, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -1890,10 +1890,10 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             if (model.ConnectionMode.CurrentValue == ConnectionMode.ViaRelay)
             {
                 var relayHostPeerId = model.RelayPeerId.CurrentValue;
-                if (relayHostPeerId != Guid.Empty)
+                if (relayHostPeerId.Value != Guid.Empty)
                 {
                     await EnqueueRelayUpstreamToMainAsync(
-                        relayHostPeerId: relayHostPeerId,
+                        relayHostPeerId: new PeerId(relayHostPeerId.Value),
                         opaqueBytes: cipher.Value,
                         debugType: "Chat",
                         cancellationToken: cancellationToken).ConfigureAwait(false);
@@ -2071,7 +2071,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             connectionMode: snap.ConnectionMode,
             host: snap.Host,
             port: snap.Port,
-            relayPeerId: snap.RelayPeerId == Guid.Empty ? null : snap.RelayPeerId,
+            relayPeerId: snap.RelayPeerId.Value == Guid.Empty ? null : snap.RelayPeerId,
             uiState: snap.UiState,
             pendingCorrelationId: snap.InboundReverseSignalPendingCorrelationId,
             targetPublicKeyHash: snap.TargetPublicKeyHash,
@@ -2119,11 +2119,11 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         return relay;
     }
 
-    public async Task<Guid> AddPeerAsync(string? displayName, CancellationToken cancellationToken = default)
+    public async Task<PeerId> AddPeerAsync(string? displayName, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        var peerId = Guid.NewGuid();
+        var peerId = PeerId.NewId();
 
         byte[] priv;
         byte[] spki;
@@ -2210,13 +2210,13 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         return $"127.77.{fx}.{fy}";
     }
 
-    public Task<Guid?> TryGetPeerIdByIdentityPkhAsync(byte[] recipientPublicKeyHash, CancellationToken cancellationToken = default)
+    public Task<PeerId?> TryGetPeerIdByIdentityPkhAsync(byte[] recipientPublicKeyHash, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (recipientPublicKeyHash is null) throw new ArgumentNullException(nameof(recipientPublicKeyHash));
-        if (recipientPublicKeyHash.Length == 0) return Task.FromResult<Guid?>(null);
+        if (recipientPublicKeyHash.Length == 0) return Task.FromResult<PeerId?>(null);
 
-        List<Guid> matches;
+        List<PeerId> matches;
         _stateGate.Wait(cancellationToken);
         try
         {
@@ -2231,11 +2231,11 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             _stateGate.Release();
         }
 
-        if (matches.Count != 1) return Task.FromResult<Guid?>(null);
-        return Task.FromResult<Guid?>(matches[0]);
+        if (matches.Count != 1) return Task.FromResult<PeerId?>(null);
+        return Task.FromResult<PeerId?>(matches[0]);
     }
 
-    public async Task RemovePeerAsync(Guid peerId, CancellationToken cancellationToken = default)
+    public async Task RemovePeerAsync(PeerId peerId, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -2287,7 +2287,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             peerId: peerId);
     }
 
-    public async Task AddPublishedKeysRelationshipAsync(Guid publisherPeerId, Guid hostPeerId, CancellationToken cancellationToken = default)
+    public async Task AddPublishedKeysRelationshipAsync(PeerId publisherPeerId, PeerId hostPeerId, CancellationToken cancellationToken = default)
     {
         if (publisherPeerId == hostPeerId) return;
 
@@ -2315,7 +2315,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             peerId: publisherPeerId);
     }
 
-    public async Task RemovePublishedKeysRelationshipAsync(Guid publisherPeerId, Guid hostPeerId, CancellationToken cancellationToken = default)
+    public async Task RemovePublishedKeysRelationshipAsync(PeerId publisherPeerId, PeerId hostPeerId, CancellationToken cancellationToken = default)
     {
         await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -2338,7 +2338,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             peerId: publisherPeerId);
     }
 
-    public async Task AddRelayActiveSessionAsync(Guid relayHostPeerId, Guid peerId, CancellationToken cancellationToken = default)
+    public async Task AddRelayActiveSessionAsync(PeerId relayHostPeerId, PeerId peerId, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (relayHostPeerId == peerId) return;
@@ -2368,7 +2368,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             relayHostPeerId: relayHostPeerId);
     }
 
-    public async Task RemoveRelayActiveSessionAsync(Guid relayHostPeerId, Guid peerId, CancellationToken cancellationToken = default)
+    public async Task RemoveRelayActiveSessionAsync(PeerId relayHostPeerId, PeerId peerId, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (relayHostPeerId == peerId) return;
@@ -2396,9 +2396,9 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
     }
 
     public async Task PublishPreKeyBundleAsync(
-        Guid relayHostPeerId,
+        PeerId relayHostPeerId,
         byte[] recipientPublicKeyHash,
-        Guid logicalOwnerPeerId,
+        PeerId logicalOwnerPeerId,
         byte[] bundleBytes,
         DateTimeOffset expiresUtc,
         CancellationToken cancellationToken = default)
@@ -2434,7 +2434,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
     }
 
     private async Task<SimulatedPublishedPreKeyBundleModel?> TryPopPreKeyBundleByRecipientPkhAsync(
-        Guid relayHostPeerId,
+        PeerId relayHostPeerId,
         byte[] recipientPublicKeyHash,
         CancellationToken cancellationToken = default)
     {
@@ -2488,7 +2488,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         _runtimePersistenceByPeerId[model.PeerId] = new CompositeDisposable(tracker, saveSub, lifecycleSub);
     }
 
-    private async Task OnRelayCapabilityChangedAsync(Guid peerId, bool enabled, CancellationToken cancellationToken)
+    private async Task OnRelayCapabilityChangedAsync(PeerId peerId, bool enabled, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -2530,7 +2530,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         _relayPersistenceByHostPeerId[relay.RelayHostPeerId] = new CompositeDisposable(tracker, saveSub);
     }
 
-    private async Task RemoveRelayIfExistsAsync(Guid relayHostPeerId, CancellationToken cancellationToken)
+    private async Task RemoveRelayIfExistsAsync(PeerId relayHostPeerId, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 

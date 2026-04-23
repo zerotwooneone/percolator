@@ -13,6 +13,7 @@ using NUnit.Framework;
 using Percolator.Application.Configuration;
 using Percolator.Cryptography;
 using Percolator.Cryptography.Primitives;
+using Percolator.Network;
 
 namespace Desktop.Wpf.Tests;
 
@@ -25,7 +26,7 @@ public sealed class SimulatorStateStoreTests
         var tmp = Path.Combine(Path.GetTempPath(), $"percolator-sim-{Guid.NewGuid():N}.json");
         try
         {
-            var peerId = Guid.NewGuid();
+            var peerId = new Percolator.Network.PeerId(Guid.NewGuid());
 
             var services = new ServiceCollection();
             services.AddSingleton<IClock>(new TestClock(DateTimeOffset.UtcNow));
@@ -41,7 +42,7 @@ public sealed class SimulatorStateStoreTests
                 keys: keys,
                 scopeFactory: scopeFactory);
 
-            var remotePeerId = Guid.NewGuid();
+            var remotePeerId = new Percolator.Cryptography.Primitives.PeerId(Guid.NewGuid());
             var signedPreKeyId = Guid.NewGuid();
 
             using var identity = System.Security.Cryptography.ECDiffieHellman.Create(System.Security.Cryptography.ECCurve.NamedCurves.nistP256);
@@ -57,9 +58,9 @@ public sealed class SimulatorStateStoreTests
                 identitySigningKeySpki: spki,
                 identitySigningKeyPrivateKeyEcPrivateKey: priv);
 
-            var host1 = Guid.NewGuid();
-            var host2 = Guid.NewGuid();
-            var host3 = Guid.NewGuid();
+            var host1 = new Percolator.Network.PeerId(Guid.NewGuid());
+            var host2 = new Percolator.Network.PeerId(Guid.NewGuid());
+            var host3 = new Percolator.Network.PeerId(Guid.NewGuid());
 
             model.SignedPreKeysMutable.Add(new SimulatedSignedPreKeyModel(
                 SignedPreKeyId: signedPreKeyId,
@@ -79,7 +80,7 @@ public sealed class SimulatorStateStoreTests
 
             var session = SecureSession.Create(
                 id: new SessionId(Guid.NewGuid()),
-                remotePeerId: new PeerId(remotePeerId),
+                remotePeerId: remotePeerId,
                 protocolVersion: new ProtocolVersion(1),
                 state: ratchet,
                 sessionCrypto: new AeadSessionCrypto(),
@@ -95,7 +96,7 @@ public sealed class SimulatorStateStoreTests
                 new PeerRelationshipSnapshot(model.PeerId, host3, RelationshipType.PublishedKey)
             };
 
-            var relayHostPeerId = Guid.NewGuid();
+            var relayHostPeerId = new Percolator.Network.PeerId(Guid.NewGuid());
             var ackUp = Guid.NewGuid();
             var ackDown = Guid.NewGuid();
             var targetPkh = SHA256.HashData(Guid.NewGuid().ToByteArray());
@@ -131,7 +132,7 @@ public sealed class SimulatorStateStoreTests
                     Version = 1,
                     GroupId = Guid.NewGuid(),
                     Name = "g",
-                    ParticipantPeerIds = new() { peerId, host1 }
+                    ParticipantPeerIds = new() { peerId.Value, host1.Value }
                 }
             };
 
@@ -167,7 +168,7 @@ public sealed class SimulatorStateStoreTests
             loadedSnapshot.Groups.Should().HaveCount(1);
             loadedSnapshot.Groups.Single().GroupId.Should().Be(groups[0].GroupId);
             loadedSnapshot.Groups.Single().Name.Should().Be("g");
-            loadedSnapshot.Groups.Single().ParticipantPeerIds.Should().Contain(peerId);
+            loadedSnapshot.Groups.Single().ParticipantPeerIds.Should().Contain(peerId.Value);
         }
         finally
         {

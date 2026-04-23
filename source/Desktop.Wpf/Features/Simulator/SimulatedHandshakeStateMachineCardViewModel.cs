@@ -6,20 +6,21 @@ using Microsoft.Extensions.Options;
 using ObservableCollections;
 using Percolator.Application.Configuration;
 using Percolator.Contracts;
+using Percolator.Network;
 using R3;
 
 namespace Desktop.Wpf.Features.Simulator;
 
 public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
 {
-    private static readonly Guid MainNodeSentinelPeerId = new("88880000-0000-0000-0000-000000000000");
+    private static readonly PeerId MainNodeSentinelPeerId = new(new Guid("88880000-0000-0000-0000-000000000000"));
     private readonly SimulatedPeerModel _model;
     private readonly ISimulatorStateService _state;
     private readonly ISimulatorMainIngressService _mainIngress;
     private readonly ISimulatorDiagnosticsService _diagnostics;
     private readonly IOptions<TransportOptions> _transportOptions;
     private readonly Percolator.Application.Identity.ActiveIdentityContext _active;
-    private readonly Func<Guid?> _selectedRelayHostPeerId;
+    private readonly Func<PeerId?> _selectedRelayHostPeerId;
 
     private DisposableBag _bag;
 
@@ -30,7 +31,7 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
         ISimulatorDiagnosticsService diagnostics,
         IOptions<TransportOptions> transportOptions,
         Percolator.Application.Identity.ActiveIdentityContext active,
-        Func<Guid?> selectedRelayHostPeerId)
+        Func<PeerId?> selectedRelayHostPeerId)
     {
         _model = model;
         _state = state;
@@ -135,7 +136,7 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
         AutoRespond = new BindableReactiveProperty<bool>(false).AddTo(ref _bag);
     }
 
-    public Guid PeerId => _model.PeerId;
+    public PeerId PeerId => _model.PeerId;
 
     public BindableReactiveProperty<string> DisplayName { get; }
 
@@ -282,8 +283,8 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
         if (_active.Identity is null) return;
 
         var relayHostPeerId = _selectedRelayHostPeerId();
-        var relayHost = relayHostPeerId.HasValue
-            ? _state.Peers.FirstOrDefault(p => p.PeerId == relayHostPeerId.Value)
+        var relayHost = relayHostPeerId is not null
+            ? _state.Peers.FirstOrDefault(p => p.PeerId == relayHostPeerId)
             : null;
 
         relayHost ??= _state.Peers.FirstOrDefault(p => p.IsRelayCapable.CurrentValue);
@@ -294,7 +295,7 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
         await InvokeOnUiAsync(() =>
         {
             _model.SetSelectedRouteMode(ConnectionMode.ViaRelay);
-            _model.SetRelayHostPeerId(relayHost.PeerId);
+            _model.SetRelayHostPeerId(new PeerId(relayHost.PeerId.Value));
             _model.SetPhase("InviteEnqueued");
         }).ConfigureAwait(false);
 
@@ -530,11 +531,11 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
         };
     }
 
-    private static string AllocateSimulatorLoopbackHost(Guid peerId)
+    private static string AllocateSimulatorLoopbackHost(PeerId peerId)
     {
         // Stable mapping of Guid -> 127.77.X.Y. Keep within 1..254 to avoid network/broadcast edge cases.
         using var sha = SHA256.Create();
-        var hash = sha.ComputeHash(peerId.ToByteArray());
+        var hash = sha.ComputeHash(peerId.Value.ToByteArray());
         var x = (byte)((hash[0] % 254) + 1);
         var y = (byte)((hash[1] % 254) + 1);
         return $"127.77.{x}.{y}";

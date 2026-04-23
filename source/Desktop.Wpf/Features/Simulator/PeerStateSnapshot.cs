@@ -1,10 +1,11 @@
 using Desktop.Wpf.Features.Chat;
 using Percolator.Cryptography;
+using Percolator.Network;
 
 namespace Desktop.Wpf.Features.Simulator;
 
 public sealed record PeerStateSnapshot(
-    Guid PeerId,
+    PeerId PeerId,
     int SelfIdentityId,
     string? DisplayName,
     bool IsOnline,
@@ -14,13 +15,13 @@ public sealed record PeerStateSnapshot(
     ConnectionMode ConnectionMode,
     string? Host,
     int Port,
-    Guid RelayPeerId,
+    PeerId RelayPeerId,
     SimulatorPeerUiState UiState,
     Guid? InboundReverseSignalPendingCorrelationId,
     byte[]? TargetPublicKeyHash,
     ConnectionMode? SelectedRouteMode,
     string? DirectEndpoint,
-    Guid? RelayHostPeerId,
+    PeerId? RelayHostPeerId,
     string? Phase,
     DateTimeOffset? NotUntilUtc,
     string? LastError,
@@ -37,7 +38,7 @@ public sealed record PeerStateSnapshot(
 
 public sealed record PublishedPreKeyBundleSnapshot(
     byte[] RecipientPublicKeyHash,
-    Guid LogicalOwnerPeerId,
+    PeerId LogicalOwnerPeerId,
     byte[] BundleBytes,
     DateTimeOffset ExpiresUtc);
 

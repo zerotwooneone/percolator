@@ -1,4 +1,5 @@
 using ObservableCollections;
+using Percolator.Network;
 using R3;
 using System;
 using System.Linq;
@@ -28,12 +29,12 @@ public sealed record InboundRelayMessage(
 
 public sealed class SimulatedRelayModel : IDisposable
 {
-    public SimulatedRelayModel(Guid relayHostPeerId)
+    public SimulatedRelayModel(PeerId relayHostPeerId)
     {
         RelayHostPeerId = relayHostPeerId;
     }
 
-    public Guid RelayHostPeerId { get; }
+    public PeerId RelayHostPeerId { get; }
 
     public ReactiveProperty<bool> AutoDeliverEnabled { get; } = new(false);
 

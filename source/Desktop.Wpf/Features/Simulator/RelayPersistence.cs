@@ -1,9 +1,11 @@
+using Percolator.Network;
+
 namespace Desktop.Wpf.Features.Simulator;
 
 public sealed class RelayPersistenceDto
 {
     public int Version { get; set; } = 1;
-    public Guid RelayHostPeerId { get; set; }
+    public PeerId RelayHostPeerId { get; set; }
 
     public List<RelayUpstreamMessageDto> UpstreamToMain { get; set; } = new();
 

@@ -1,6 +1,7 @@
 using System.Threading;
 using System.Threading.Tasks;
 using ObservableCollections;
+using Percolator.Network;
 using R3;
 using Desktop.Wpf.Shared.Mvvm;
 
@@ -68,7 +69,7 @@ public sealed class SimulatorPeersTabViewModel : IDisposable
 
     private string ResolvePeerName(Guid peerId)
     {
-        var m = _state.Peers.FirstOrDefault(x => x.PeerId == peerId);
+        var m = _state.Peers.FirstOrDefault(x => x.PeerId.Value == peerId);
         var name = m?.DisplayName.CurrentValue;
         return string.IsNullOrWhiteSpace(name) ? peerId.ToString()[..8] : name;
     }

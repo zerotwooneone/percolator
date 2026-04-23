@@ -1,14 +1,16 @@
+using Percolator.Network;
+
 namespace Desktop.Wpf.Features.Simulator;
 
 public sealed class RelayPeerOption
 {
-    public RelayPeerOption(Guid? peerId, string displayText)
+    public RelayPeerOption(PeerId? peerId, string displayText)
     {
         PeerId = peerId;
         DisplayText = displayText;
     }
 
-    public Guid? PeerId { get; }
+    public PeerId? PeerId { get; }
 
     public string DisplayText { get; }
 }

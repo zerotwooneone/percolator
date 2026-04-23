@@ -17,6 +17,7 @@ using Microsoft.Extensions.Options;
 using Percolator.Application.Configuration;
 using Percolator.Contracts;
 using Percolator.Cryptography;
+using Percolator.Network;
 
 namespace Desktop.Wpf.Tests;
 
@@ -57,8 +58,8 @@ public sealed class SimulatedPeerRuntimeFinalizeTests
     [Test]
     public async Task Accept_finalize_creates_session_when_signed_prekey_private_is_recorded()
     {
-        var inviterPeerId = Guid.NewGuid();
-        var acceptorPeerId = Guid.NewGuid();
+        var inviterPeerId = new PeerId(Guid.NewGuid());
+        var acceptorPeerId = new PeerId(Guid.NewGuid());
 
         using var inviterIdentityEcdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var inviterIdentityPriv = inviterIdentityEcdh.ExportECPrivateKey();
@@ -167,8 +168,8 @@ public sealed class SimulatedPeerRuntimeFinalizeTests
     [Test]
     public async Task Accept_finalize_returns_null_when_missing_signed_prekey_private()
     {
-        var inviterPeerId = Guid.NewGuid();
-        var acceptorPeerId = Guid.NewGuid();
+        var inviterPeerId = new PeerId(Guid.NewGuid());
+        var acceptorPeerId = new PeerId(Guid.NewGuid());
 
         using var inviterIdentityEcdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var inviterIdentityPriv = inviterIdentityEcdh.ExportECPrivateKey();

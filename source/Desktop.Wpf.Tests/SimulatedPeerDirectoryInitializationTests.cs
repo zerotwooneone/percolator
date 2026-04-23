@@ -9,6 +9,7 @@ using FluentAssertions;
 using Moq;
 using NUnit.Framework;
 using ObservableCollections;
+using Percolator.Network;
 
 namespace Desktop.Wpf.Tests;
 
@@ -19,7 +20,7 @@ public sealed class SimulatedPeerDirectoryInitializationTests
     public async Task InitializeAsync_CoalescesConcurrentCalls_AndProjectsModelsFromState()
     {
         // Arrange
-        var peerId = Guid.NewGuid();
+        var peerId = new PeerId(Guid.NewGuid());
         using var ecdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var priv = ecdh.ExportECPrivateKey();
         var spki = ecdh.PublicKey.ExportSubjectPublicKeyInfo();
@@ -40,10 +41,10 @@ public sealed class SimulatedPeerDirectoryInitializationTests
             .Returns(initGate.Task);
 
         state.Setup(s => s.TryGetPeerIdByIdentityPkhAsync(It.IsAny<byte[]>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Guid?)null);
-        state.Setup(s => s.AddRelayActiveSessionAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((PeerId?)null);
+        state.Setup(s => s.AddRelayActiveSessionAsync(It.IsAny<PeerId>(), It.IsAny<PeerId>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
-        state.Setup(s => s.RemoveRelayActiveSessionAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+        state.Setup(s => s.RemoveRelayActiveSessionAsync(It.IsAny<PeerId>(), It.IsAny<PeerId>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
         var sut = new SimulatorInitializer(initializer.Object);

@@ -6,13 +6,14 @@ using Percolator.Application.Network;
 using Percolator.Contracts;
 using Percolator.Cryptography;
 using Percolator.Identity;
+using Percolator.Network;
 
 namespace Desktop.Wpf.Features.Simulator;
 
 public interface ISimulatorRelayDeliveryService
 {
     Task DeliverToMainAsync(
-        Guid relayHostPeerId,
+        Percolator.Network.PeerId relayHostPeerId,
         SessionId relayHostToMainSessionId,
         Guid ackId,
         byte[] opaqueBytes,
@@ -20,8 +21,8 @@ public interface ISimulatorRelayDeliveryService
         CancellationToken cancellationToken = default);
 
     Task DeliverToPeerAsync(
-        Guid relayHostPeerId,
-        Guid recipientPeerId,
+        Percolator.Network.PeerId relayHostPeerId,
+        Percolator.Network.PeerId recipientPeerId,
         Guid ackId,
         byte[] opaqueBytes,
         string? debugType,
@@ -54,7 +55,7 @@ public sealed class SimulatorRelayDeliveryService : ISimulatorRelayDeliveryServi
     }
 
     public async Task DeliverToMainAsync(
-        Guid relayHostPeerId,
+        Percolator.Network.PeerId relayHostPeerId,
         SessionId relayHostToMainSessionId,
         Guid ackId,
         byte[] opaqueBytes,
@@ -98,8 +99,8 @@ public sealed class SimulatorRelayDeliveryService : ISimulatorRelayDeliveryServi
     }
 
     public async Task DeliverToPeerAsync(
-        Guid relayHostPeerId,
-        Guid recipientPeerId,
+        Percolator.Network.PeerId relayHostPeerId,
+        Percolator.Network.PeerId recipientPeerId,
         Guid ackId,
         byte[] opaqueBytes,
         string? debugType,
@@ -155,7 +156,7 @@ public sealed class SimulatorRelayDeliveryService : ISimulatorRelayDeliveryServi
                 .TryGetPeerIdByIdentityPkhAsync(initiatorPkh, cancellationToken)
                 .ConfigureAwait(false);
 
-            if (initiatorPeerId.HasValue)
+            if (initiatorPeerId is not null)
             {
                 await _state.EnqueueRelayDownstreamToPeerAsync(
                         relayHostPeerId: relayHostPeerId,

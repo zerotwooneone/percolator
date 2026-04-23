@@ -4,6 +4,7 @@ using Desktop.Wpf.Shared.Mvvm;
 using Microsoft.Extensions.Options;
 using ObservableCollections;
 using Percolator.Application.Configuration;
+using Percolator.Network;
 using R3;
 
 namespace Desktop.Wpf.Features.Simulator;
@@ -26,7 +27,7 @@ public sealed class SimulatorHandshakesTabViewModel : IDisposable
     private readonly NotifyCollectionChangedSynchronizedViewList<RelayHostOption> _relayHostsNotify;
 
     private readonly object _peerRelaySubGate = new();
-    private IReadOnlyDictionary<Guid, IDisposable> _peerRelaySubs = new Dictionary<Guid, IDisposable>();
+    private IReadOnlyDictionary<PeerId, IDisposable> _peerRelaySubs = new Dictionary<PeerId, IDisposable>();
 
     private DisposableBag _bag;
 
@@ -47,7 +48,7 @@ public sealed class SimulatorHandshakesTabViewModel : IDisposable
         _state = state;
         _diagnostics = diagnostics;
 
-        SelectedRelayHostPeerId = new BindableReactiveProperty<Guid?>(null).AddTo(ref _bag);
+        SelectedRelayHostPeerId = new BindableReactiveProperty<PeerId?>(null).AddTo(ref _bag);
 
         _relayHostsNotify = _relayHosts.ToNotifyCollectionChanged(_ui.CollectionEventDispatcher);
 
@@ -59,13 +60,13 @@ public sealed class SimulatorHandshakesTabViewModel : IDisposable
         HookRelayHosts();
     }
 
-    public sealed record RelayHostOption(Guid PeerId, string DisplayName);
+    public sealed record RelayHostOption(PeerId PeerId, string DisplayName);
 
     public NotifyCollectionChangedSynchronizedViewList<SimulatedHandshakeStateMachineCardViewModel> Cards => _cardsNotify;
 
     public NotifyCollectionChangedSynchronizedViewList<RelayHostOption> RelayHosts => _relayHostsNotify;
 
-    public BindableReactiveProperty<Guid?> SelectedRelayHostPeerId { get; }
+    public BindableReactiveProperty<PeerId?> SelectedRelayHostPeerId { get; }
 
     private void HookRelayHosts()
     {
@@ -89,11 +90,11 @@ public sealed class SimulatorHandshakesTabViewModel : IDisposable
 
     private void RewirePeerRelaySubscriptionsOnUi()
     {
-        IReadOnlyDictionary<Guid, IDisposable> prev;
+        IReadOnlyDictionary<PeerId, IDisposable> prev;
         lock (_peerRelaySubGate)
         {
             prev = _peerRelaySubs;
-            _peerRelaySubs = new Dictionary<Guid, IDisposable>();
+            _peerRelaySubs = new Dictionary<PeerId, IDisposable>();
         }
 
         foreach (var d in prev.Values)
@@ -101,7 +102,7 @@ public sealed class SimulatorHandshakesTabViewModel : IDisposable
             try { d.Dispose(); } catch { }
         }
 
-        var next = new Dictionary<Guid, IDisposable>();
+        var next = new Dictionary<PeerId, IDisposable>();
         foreach (var peer in _state.Peers)
         {
             // RelayHosts needs to update when IsRelayCapable toggles or display name changes.
@@ -136,7 +137,7 @@ public sealed class SimulatorHandshakesTabViewModel : IDisposable
         }
 
         if (SelectedRelayHostPeerId.Value is not null
-            && _relayHosts.All(x => x.PeerId != SelectedRelayHostPeerId.Value.Value))
+            && _relayHosts.All(x => x.PeerId.Value != SelectedRelayHostPeerId.Value.Value))
         {
             SelectedRelayHostPeerId.Value = null;
         }
@@ -166,7 +167,7 @@ public sealed class SimulatorHandshakesTabViewModel : IDisposable
             {
                 try { d.Dispose(); } catch { }
             }
-            _peerRelaySubs = new Dictionary<Guid, IDisposable>();
+            _peerRelaySubs = new Dictionary<PeerId, IDisposable>();
         }
 
         _bag.Dispose();

@@ -1,12 +1,14 @@
 using ObservableCollections;
 
+using Percolator.Network;
+
 namespace Desktop.Wpf.Features.Simulator;
 
 public interface ISimulatorDiagnosticsService
 {
     IReadOnlyObservableList<SimulatorDiagnosticEvent> Events { get; }
 
-    void Emit(SimulatorDiagnosticEventType eventType, string message, Guid? peerId = null, Guid? relayHostPeerId = null, Guid? ackId = null, string? contextTag = null);
+    void Emit(SimulatorDiagnosticEventType eventType, string message, PeerId? peerId = null, PeerId? relayHostPeerId = null, Guid? ackId = null, string? contextTag = null);
 
     void Clear();
 }

@@ -1,4 +1,5 @@
 using ObservableCollections;
+using Percolator.Network;
 
 namespace Desktop.Wpf.Features.Simulator;
 
@@ -14,8 +15,8 @@ public sealed class SimulatorDiagnosticsService : ISimulatorDiagnosticsService
     public void Emit(
         SimulatorDiagnosticEventType eventType,
         string message,
-        Guid? peerId = null,
-        Guid? relayHostPeerId = null,
+        PeerId? peerId = null,
+        PeerId? relayHostPeerId = null,
         Guid? ackId = null,
         string? contextTag = null)
     {

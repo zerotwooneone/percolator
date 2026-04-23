@@ -2,6 +2,7 @@ using System;
 using NUnit.Framework;
 using Desktop.Wpf.Features.Simulator;
 using Percolator.Contracts;
+using Percolator.Network;
 
 namespace Desktop.Wpf.Tests;
 
@@ -13,7 +14,7 @@ public sealed class SimulatedPeerPendingInboxTests
     {
         var inbox = new SimulatedPeerPendingInbox();
 
-        var peer = Guid.NewGuid();
+        var peer = new PeerId(Guid.NewGuid());
         var corr = Guid.NewGuid();
         var msg = new InviteHandshakeResponse { Version = 1, RequestCorrelationId = corr.ToString() };
 
@@ -30,7 +31,7 @@ public sealed class SimulatedPeerPendingInboxTests
     {
         var inbox = new SimulatedPeerPendingInbox();
 
-        var peer = Guid.NewGuid();
+        var peer = new PeerId(Guid.NewGuid());
         var corr = Guid.NewGuid();
         var msg = new InviteHandshakeResponse { Version = 1, RequestCorrelationId = corr.ToString() };
 
@@ -47,7 +48,7 @@ public sealed class SimulatedPeerPendingInboxTests
     {
         var inbox = new SimulatedPeerPendingInbox();
 
-        Assert.That(inbox.TryGetInviteHandshakeResponse(Guid.NewGuid(), Guid.NewGuid(), out _), Is.False);
+        Assert.That(inbox.TryGetInviteHandshakeResponse(new PeerId(Guid.NewGuid()), Guid.NewGuid(), out _), Is.False);
     }
 
     [Test]
@@ -55,13 +56,13 @@ public sealed class SimulatedPeerPendingInboxTests
     {
         var inbox = new SimulatedPeerPendingInbox();
 
-        var peer = Guid.NewGuid();
+        var peer = new PeerId(Guid.NewGuid());
         var corr = Guid.NewGuid();
         var msg = new InviteHandshakeResponse { Version = 1, RequestCorrelationId = corr.ToString() };
 
         inbox.AddInviteHandshakeResponse(peer, corr, msg);
 
-        Assert.That(inbox.TryTakeInviteHandshakeResponse(Guid.NewGuid(), corr, out _), Is.False);
+        Assert.That(inbox.TryTakeInviteHandshakeResponse(new PeerId(Guid.NewGuid()), corr, out _), Is.False);
         Assert.That(inbox.TryTakeInviteHandshakeResponse(peer, Guid.NewGuid(), out _), Is.False);
 
         Assert.That(inbox.TryTakeInviteHandshakeResponse(peer, corr, out _), Is.True);

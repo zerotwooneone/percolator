@@ -1,7 +1,9 @@
+using Percolator.Network;
+
 namespace Desktop.Wpf.Features.Simulator.Models;
 
 public sealed record RelayStateSnapshot(
-    Guid RelayHostPeerId,
+    PeerId RelayHostPeerId,
     IReadOnlyList<OutboundRelayMessageSnapshot> UpstreamToMain,
     IReadOnlyList<InboundRelayMessageSnapshot> DownstreamToPeers);
 

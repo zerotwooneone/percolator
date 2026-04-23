@@ -1,7 +1,7 @@
 using ObservableCollections;
 using Desktop.Wpf.Features.Simulator.Models;
 using Percolator.Cryptography;
-using Percolator.Cryptography.Primitives;
+using Percolator.Network;
 using R3;
 using System;
 using System.Linq;
@@ -19,12 +19,12 @@ public sealed class SimulatedPeerModel : IDisposable
     private readonly ReactiveProperty<byte[]?> _targetPublicKeyHash;
     private readonly ReactiveProperty<ConnectionMode?> _selectedRouteMode;
     private readonly ReactiveProperty<string?> _directEndpoint;
-    private readonly ReactiveProperty<Guid?> _relayHostPeerId;
+    private readonly ReactiveProperty<PeerId?> _relayHostPeerId;
 
     private readonly ReactiveProperty<ConnectionMode> _connectionMode;
     private readonly ReactiveProperty<string?> _host;
     private readonly ReactiveProperty<int> _port;
-    private readonly ReactiveProperty<Guid> _relayPeerId;
+    private readonly ReactiveProperty<PeerId> _relayPeerId;
     private readonly ReactiveProperty<string?> _phase;
     private readonly ReactiveProperty<DateTimeOffset?> _notUntilUtc;
     private readonly ReactiveProperty<string?> _lastError;
@@ -47,7 +47,7 @@ public sealed class SimulatedPeerModel : IDisposable
     private readonly ObservableDictionary<string, SimulatedPendingStandardSignalHelloModel> _pendingInboundStandardSignalHellos;
 
     public SimulatedPeerModel(
-        Guid peerId,
+        PeerId peerId,
         int selfIdentityId,
         string? displayName,
         bool isOnline,
@@ -57,13 +57,13 @@ public sealed class SimulatedPeerModel : IDisposable
         ConnectionMode connectionMode = Desktop.Wpf.Features.Simulator.ConnectionMode.Direct,
         string? host = null,
         int port = 0,
-        Guid? relayPeerId = null,
+        PeerId? relayPeerId = null,
         SimulatorPeerUiState uiState = SimulatorPeerUiState.Ready,
         Guid? pendingCorrelationId = null,
         byte[]? targetPublicKeyHash = null,
         ConnectionMode? selectedRouteMode = null,
         string? directEndpoint = null,
-        Guid? relayHostPeerId = null,
+        PeerId? relayHostPeerId = null,
         string? phase = null,
         DateTimeOffset? notUntilUtc = null,
         string? lastError = null,
@@ -100,12 +100,12 @@ public sealed class SimulatedPeerModel : IDisposable
         _targetPublicKeyHash = new ReactiveProperty<byte[]?>(targetPublicKeyHash);
         _selectedRouteMode = new ReactiveProperty<ConnectionMode?>(selectedRouteMode);
         _directEndpoint = new ReactiveProperty<string?>(directEndpoint);
-        _relayHostPeerId = new ReactiveProperty<Guid?>(relayHostPeerId);
+        _relayHostPeerId = new ReactiveProperty<PeerId?>(relayHostPeerId);
 
         _connectionMode = new ReactiveProperty<ConnectionMode>(connectionMode);
         _host = new ReactiveProperty<string?>(host);
         _port = new ReactiveProperty<int>(port);
-        _relayPeerId = new ReactiveProperty<Guid>(relayPeerId ?? Guid.Empty);
+        _relayPeerId = new ReactiveProperty<PeerId>(relayPeerId ?? new PeerId(Guid.Empty));
         _phase = new ReactiveProperty<string?>(phase);
         _notUntilUtc = new ReactiveProperty<DateTimeOffset?>(notUntilUtc);
         _lastError = new ReactiveProperty<string?>(lastError);
@@ -132,7 +132,7 @@ public sealed class SimulatedPeerModel : IDisposable
         _pendingInboundStandardSignalHellos = new ObservableDictionary<string, SimulatedPendingStandardSignalHelloModel>(StringComparer.Ordinal);
     }
 
-    public Guid PeerId { get; }
+    public PeerId PeerId { get; }
 
     public int SelfIdentityId { get; }
 
@@ -148,12 +148,12 @@ public sealed class SimulatedPeerModel : IDisposable
     public ReadOnlyReactiveProperty<byte[]?> TargetPublicKeyHash => _targetPublicKeyHash;
     public ReadOnlyReactiveProperty<ConnectionMode?> SelectedRouteMode => _selectedRouteMode;
     public ReadOnlyReactiveProperty<string?> DirectEndpoint => _directEndpoint;
-    public ReadOnlyReactiveProperty<Guid?> RelayHostPeerId => _relayHostPeerId;
+    public ReadOnlyReactiveProperty<PeerId?> RelayHostPeerId => _relayHostPeerId;
 
     public ReadOnlyReactiveProperty<ConnectionMode> ConnectionMode => _connectionMode;
     public ReadOnlyReactiveProperty<string?> Host => _host;
     public ReadOnlyReactiveProperty<int> Port => _port;
-    public ReadOnlyReactiveProperty<Guid> RelayPeerId => _relayPeerId;
+    public ReadOnlyReactiveProperty<PeerId> RelayPeerId => _relayPeerId;
     public ReadOnlyReactiveProperty<string?> Phase => _phase;
     public ReadOnlyReactiveProperty<DateTimeOffset?> NotUntilUtc => _notUntilUtc;
     public ReadOnlyReactiveProperty<string?> LastError => _lastError;
@@ -203,10 +203,10 @@ public sealed class SimulatedPeerModel : IDisposable
     public void SetDirectEndpoint(string? directEndpoint)
         => _directEndpoint.Value = directEndpoint;
 
-    public void SetRelayHostPeerId(Guid? relayHostPeerId)
+    public void SetRelayHostPeerId(PeerId? relayHostPeerId)
         => _relayHostPeerId.Value = relayHostPeerId;
 
-    public void SetConnection(ConnectionMode mode, string? host, int port, Guid relayPeerId)
+    public void SetConnection(ConnectionMode mode, string? host, int port, PeerId relayPeerId)
     {
         _connectionMode.Value = mode;
         _host.Value = host;
@@ -309,7 +309,7 @@ public sealed class SimulatedPeerModel : IDisposable
                 TargetPublicKeyHash = _targetPublicKeyHash.Value,
                 SelectedRouteMode = _selectedRouteMode.Value,
                 DirectEndpoint = _directEndpoint.Value,
-                RelayHostPeerId = _relayHostPeerId.Value,
+                RelayHostPeerId = _relayHostPeerId.Value?.Value,
                 Phase = _phase.Value,
                 NotUntilUtc = _notUntilUtc.Value,
                 LastError = _lastError.Value,
@@ -326,7 +326,7 @@ public sealed class SimulatedPeerModel : IDisposable
             TargetPublicKeyHash = _targetPublicKeyHash.Value,
             SelectedRouteMode = _selectedRouteMode.Value,
             DirectEndpoint = _directEndpoint.Value,
-            RelayHostPeerId = _relayHostPeerId.Value,
+            RelayHostPeerId = _relayHostPeerId.Value.Value != Guid.Empty ? _relayHostPeerId.Value.Value : null,
             Phase = _phase.Value,
             NotUntilUtc = _notUntilUtc.Value,
             LastError = _lastError.Value,
@@ -426,7 +426,7 @@ public sealed class SimulatedPeerModel : IDisposable
                 TargetPublicKeyHash = _targetPublicKeyHash.Value,
                 SelectedRouteMode = _selectedRouteMode.Value,
                 DirectEndpoint = _directEndpoint.Value,
-                RelayHostPeerId = _relayHostPeerId.Value,
+                RelayHostPeerId = _relayHostPeerId.Value.Value != Guid.Empty ? _relayHostPeerId.Value.Value : null,
                 Phase = _phase.Value,
                 NotUntilUtc = _notUntilUtc.Value,
                 LastError = _lastError.Value,
@@ -479,6 +479,6 @@ public sealed record SimulatedPendingInviteHandshakeResponseModel(Guid Correlati
 
 public sealed record SimulatedPublishedPreKeyBundleModel(
     byte[] RecipientPublicKeyHash,
-    Guid LogicalOwnerPeerId,
+    PeerId LogicalOwnerPeerId,
     byte[] BundleBytes,
     DateTimeOffset ExpiresUtc);

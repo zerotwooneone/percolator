@@ -15,6 +15,7 @@ using Percolator.Application.Configuration;
 using Percolator.Contracts;
 using Percolator.Cryptography;
 using Percolator.Cryptography.Primitives;
+using Percolator.Network;
 using Desktop.Wpf.Features.Simulator.Protocol;
 using Desktop.Wpf.Features.Sessions;
 using Desktop.Wpf.Features.Simulator.Models;
@@ -58,8 +59,8 @@ public sealed class SimulatedPeerRuntimeFinalizeRelayedTests
     [Test]
     public async Task Relayed_invite_and_response_can_be_accepted_and_finalized()
     {
-        var inviterPeerId = Guid.NewGuid();
-        var acceptorPeerId = Guid.NewGuid();
+        var inviterPeerId = new Percolator.Network.PeerId(Guid.NewGuid());
+        var acceptorPeerId = new Percolator.Network.PeerId(Guid.NewGuid());
 
         using var inviterIdentityEcdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var inviterIdentityPriv = inviterIdentityEcdh.ExportECPrivateKey();

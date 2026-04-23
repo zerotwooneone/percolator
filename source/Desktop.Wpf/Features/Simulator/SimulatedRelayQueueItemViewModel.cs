@@ -1,15 +1,17 @@
+using Percolator.Network;
+
 namespace Desktop.Wpf.Features.Simulator;
 
 public sealed class SimulatedRelayQueueItemViewModel
 {
     public SimulatedRelayQueueItemViewModel(
-        Guid relayHostPeerId,
+        PeerId relayHostPeerId,
         Guid ackId,
         DateTimeOffset enqueuedUtc,
         string? debugType,
         byte[]? targetPkh,
         byte[] opaqueBytes,
-        Func<Guid, string> peerNameById)
+        Func<PeerId, string> peerNameById)
     {
         RelayHostPeerId = relayHostPeerId;
 
@@ -27,7 +29,7 @@ public sealed class SimulatedRelayQueueItemViewModel
         TimestampDisplay = enqueuedUtc.LocalDateTime.ToString("HH:mm:ss");
     }
 
-    public Guid RelayHostPeerId { get; }
+    public PeerId RelayHostPeerId { get; }
 
     public Guid AckId { get; }
 

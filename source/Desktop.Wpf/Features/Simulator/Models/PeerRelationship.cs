@@ -1,3 +1,5 @@
+using Percolator.Network;
+
 namespace Desktop.Wpf.Features.Simulator.Models;
 
 public enum RelationshipType
@@ -6,6 +8,6 @@ public enum RelationshipType
     RelayActiveSession
 }
 
-public sealed record PeerRelationship(Guid SourcePeerId, Guid TargetPeerId, RelationshipType Type);
+public sealed record PeerRelationship(PeerId SourcePeerId, PeerId TargetPeerId, RelationshipType Type);
 
-public sealed record PeerRelationshipSnapshot(Guid SourcePeerId, Guid TargetPeerId, RelationshipType Type);
+public sealed record PeerRelationshipSnapshot(PeerId SourcePeerId, PeerId TargetPeerId, RelationshipType Type);

@@ -2,6 +2,7 @@ using Desktop.Wpf.Features.Simulator.Models;
 using ObservableCollections;
 using Percolator.Contracts;
 using Percolator.Cryptography;
+using Percolator.Network;
 
 namespace Desktop.Wpf.Features.Simulator;
 
@@ -13,63 +14,63 @@ public interface ISimulatorStateService
 
     IReadOnlyObservableList<PeerRelationship> Relationships { get; }
 
-    Task<Guid> AddPeerAsync(string? displayName, CancellationToken cancellationToken = default);
-    Task RemovePeerAsync(Guid peerId, CancellationToken cancellationToken = default);
-    
-    Task<Guid?> TryGetPeerIdByIdentityPkhAsync(byte[] recipientPublicKeyHash, CancellationToken cancellationToken = default);
+    Task<PeerId> AddPeerAsync(string? displayName, CancellationToken cancellationToken = default);
+    Task RemovePeerAsync(PeerId peerId, CancellationToken cancellationToken = default);
+
+    Task<PeerId?> TryGetPeerIdByIdentityPkhAsync(byte[] recipientPublicKeyHash, CancellationToken cancellationToken = default);
 
     Task EnqueueRelayUpstreamToMainAsync(
-        Guid relayHostPeerId,
+        PeerId relayHostPeerId,
         byte[] opaqueBytes,
         string? debugType = null,
         CancellationToken cancellationToken = default);
 
     Task EnqueueRelayDownstreamToPeerAsync(
-        Guid relayHostPeerId,
+        PeerId relayHostPeerId,
         byte[] targetPkh,
         byte[] opaqueBytes,
         string? debugType = null,
         CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<InboundRelayMessage>> DequeueRelayDownstreamToPeerAsync(
-        Guid relayHostPeerId,
+        PeerId relayHostPeerId,
         byte[] targetPkh,
         int max,
         CancellationToken cancellationToken = default);
 
     Task<int> ForwardRelayUpstreamToMainAsync(
-        Guid relayHostPeerId,
+        PeerId relayHostPeerId,
         SessionId relayHostToMainSessionId,
         int max,
         CancellationToken cancellationToken = default);
 
     Task<bool> DeliverRelayUpstreamToMainByAckIdAsync(
-        Guid relayHostPeerId,
+        PeerId relayHostPeerId,
         SessionId relayHostToMainSessionId,
         Guid ackId,
         CancellationToken cancellationToken = default);
 
-    Task<bool> DeleteRelayMessageByAckIdAsync(Guid relayHostPeerId, Guid ackId, CancellationToken cancellationToken = default);
+    Task<bool> DeleteRelayMessageByAckIdAsync(PeerId relayHostPeerId, Guid ackId, CancellationToken cancellationToken = default);
 
-    Task<bool> MoveRelayMessageByAckIdAsync(Guid relayHostPeerId, Guid ackId, int delta, CancellationToken cancellationToken = default);
+    Task<bool> MoveRelayMessageByAckIdAsync(PeerId relayHostPeerId, Guid ackId, int delta, CancellationToken cancellationToken = default);
 
-    Task<bool> CorruptRelayMessageByAckIdAsync(Guid relayHostPeerId, Guid ackId, CancellationToken cancellationToken = default);
+    Task<bool> CorruptRelayMessageByAckIdAsync(PeerId relayHostPeerId, Guid ackId, CancellationToken cancellationToken = default);
 
-    Task AddPublishedKeysRelationshipAsync(Guid publisherPeerId, Guid hostPeerId, CancellationToken cancellationToken = default);
-    Task RemovePublishedKeysRelationshipAsync(Guid publisherPeerId, Guid hostPeerId, CancellationToken cancellationToken = default);
+    Task AddPublishedKeysRelationshipAsync(PeerId publisherPeerId, PeerId hostPeerId, CancellationToken cancellationToken = default);
+    Task RemovePublishedKeysRelationshipAsync(PeerId publisherPeerId, PeerId hostPeerId, CancellationToken cancellationToken = default);
 
-    Task AddRelayActiveSessionAsync(Guid relayHostPeerId, Guid peerId, CancellationToken cancellationToken = default);
-    Task RemoveRelayActiveSessionAsync(Guid relayHostPeerId, Guid peerId, CancellationToken cancellationToken = default);
+    Task AddRelayActiveSessionAsync(PeerId relayHostPeerId, PeerId peerId, CancellationToken cancellationToken = default);
+    Task RemoveRelayActiveSessionAsync(PeerId relayHostPeerId, PeerId peerId, CancellationToken cancellationToken = default);
 
     Task<EstablishDirectSessionResponse> ReceiveEstablishDirectSessionFromMainAsync(
-        Guid simulatedPeerId,
-        Guid inviterPeerId,
+        PeerId simulatedPeerId,
+        PeerId inviterPeerId,
         EstablishDirectSessionRequest request,
         CancellationToken cancellationToken = default);
 
     Task<SimulatedPeerInviteAcceptance> AcceptReverseSignalInviteAsync(
-        Guid simulatedPeerId,
-        Guid inviterPeerId,
+        PeerId simulatedPeerId,
+        PeerId inviterPeerId,
         EstablishDirectSessionRequest invite,
         CancellationToken cancellationToken = default);
 
@@ -78,80 +79,80 @@ public interface ISimulatorStateService
         CancellationToken cancellationToken = default);
 
     Task ReceiveInviteHandshakeResponseFromMainAsync(
-        Guid simulatedPeerId,
+        PeerId simulatedPeerId,
         InviteHandshakeResponse response,
         CancellationToken cancellationToken = default);
 
     Task QueueInviteHandshakeResponseForDeliveryToMainAsync(
-        Guid simulatedPeerId,
+        PeerId simulatedPeerId,
         Guid requestCorrelationId,
         InviteHandshakeResponse response,
         CancellationToken cancellationToken = default);
 
     Task<bool> TryDeliverQueuedInviteHandshakeResponseToMainAsync(
-        Guid simulatedPeerId,
+        PeerId simulatedPeerId,
         Guid requestCorrelationId,
         CancellationToken cancellationToken = default);
 
     Task<SessionId?> TryFinalizeInviteHandshakeResponseFromMainAsync(
-        Guid simulatedPeerId,
-        Guid acceptorPeerId,
+        PeerId simulatedPeerId,
+        PeerId acceptorPeerId,
         Guid requestCorrelationId,
         CancellationToken cancellationToken = default);
 
     Task<EstablishSessionResponse> ReceiveEstablishSessionFromMainAsync(
-        Guid simulatedPeerId,
+        PeerId simulatedPeerId,
         EstablishSessionRequest request,
         CancellationToken cancellationToken = default);
 
     Task<DeliverOpaqueMessageResponse> ReceiveOpaqueMessageFromMainAsync(
-        Guid simulatedPeerId,
+        PeerId simulatedPeerId,
         DeliverOpaqueMessageRequest request,
         CancellationToken cancellationToken = default);
 
     Task PublishStandardPreKeyBundleToRelayAsync(
-        Guid simulatedPeerId,
-        Guid relayHostPeerId,
+        PeerId simulatedPeerId,
+        PeerId relayHostPeerId,
         DateTimeOffset expiresUtc,
         int oneTimeKeyCount,
         CancellationToken cancellationToken = default);
 
     Task<SessionId?> InitiateStandardHandshakeToMainByRelayPkhAsync(
-        Guid simulatedPeerId,
-        Guid relayHostPeerId,
+        PeerId simulatedPeerId,
+        PeerId relayHostPeerId,
         byte[] responderPublicKeyHash,
         CancellationToken cancellationToken = default);
 
-    Task<byte[]> ComputePublicKeyHashAsync(Guid simulatedPeerId, CancellationToken cancellationToken = default);
+    Task<byte[]> ComputePublicKeyHashAsync(PeerId simulatedPeerId, CancellationToken cancellationToken = default);
 
     Task<SessionRatchetMessage> EncryptInternalEnvelopeAsync(
-        Guid simulatedPeerId,
+        PeerId simulatedPeerId,
         SessionId sessionId,
         InternalEnvelope envelope,
         CancellationToken cancellationToken = default);
 
     Task<Plaintext> DecryptSessionMessageAsync(
-        Guid simulatedPeerId,
+        PeerId simulatedPeerId,
         SessionId sessionId,
         SessionRatchetMessage message,
         CancellationToken cancellationToken = default);
 
     Task<EstablishSessionResponse?> ReceiveRelayedOpaquePayloadAsync(
-        Guid simulatedPeerId,
+        PeerId simulatedPeerId,
         byte[] opaqueBytes,
         CancellationToken cancellationToken = default);
 
     Task UpsertPendingStandardSignalHelloAsync(
-        Guid recipientPeerId,
-        Guid relayHostPeerId,
+        PeerId recipientPeerId,
+        PeerId relayHostPeerId,
         HandshakeInitiatorHello hello,
         DateTimeOffset receivedUtc,
         CancellationToken cancellationToken = default);
 
     Task<bool> TryAcceptPendingStandardSignalHelloAsync(
-        Guid recipientPeerId,
+        PeerId recipientPeerId,
         string initiatorPkhHex,
         CancellationToken cancellationToken = default);
 
-    Task SendChatMessageToMainAsync(Guid simulatedPeerId, string content, CancellationToken cancellationToken = default);
+    Task SendChatMessageToMainAsync(PeerId simulatedPeerId, string content, CancellationToken cancellationToken = default);
 }

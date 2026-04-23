@@ -14,6 +14,7 @@ using Percolator.Application.Configuration;
 using Percolator.Application.Identity;
 using Percolator.Cryptography;
 using Percolator.Identity.Model;
+using Percolator.Network;
 using R3;
 
 namespace Desktop.Wpf.Tests;
@@ -29,7 +30,7 @@ public sealed class SimulatedHandshakeStateMachineCardViewModelDiagnosticsTests
     public async Task ForceExpire_And_Reset_EmitHandshakeStateTransitionEvents()
     {
         // Arrange
-        var peerId = Guid.NewGuid();
+        var peerId = new PeerId(Guid.NewGuid());
         using var ecdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var priv = ecdh.ExportECPrivateKey();
         var spki = ecdh.PublicKey.ExportSubjectPublicKeyInfo();
@@ -42,7 +43,7 @@ public sealed class SimulatedHandshakeStateMachineCardViewModelDiagnosticsTests
         var active = new ActiveIdentityContext();
         active.SetActiveIdentity(new IdentityRecord(Guid.NewGuid(), "self"));
 
-        var relayHostId = Guid.NewGuid();
+        var relayHostId = new PeerId(Guid.NewGuid());
         var state = new Mock<ISimulatorStateService>(MockBehavior.Loose);
 
         var relayHostModel = new SimulatedPeerModel(relayHostId, selfIdentityId: 99001, "relay", isOnline: true, isRelayCapable: true, spki, priv);
@@ -75,14 +76,14 @@ public sealed class SimulatedHandshakeStateMachineCardViewModelDiagnosticsTests
     public async Task SendRequest_And_Accept_EmitHandshakeStateTransitionEvents()
     {
         // Arrange
-        var peerId = Guid.NewGuid();
+        var peerId = new PeerId(Guid.NewGuid());
         using var ecdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var priv = ecdh.ExportECPrivateKey();
         var spki = ecdh.PublicKey.ExportSubjectPublicKeyInfo();
 
         var model = new SimulatedPeerModel(peerId, selfIdentityId: 99000, "peer", isOnline: true, isRelayCapable: false, spki, priv);
 
-        var relayHostId = Guid.NewGuid();
+        var relayHostId = new PeerId(Guid.NewGuid());
 
         var diagnostics = new SimulatorDiagnosticsService();
         var options = Options.Create(new TransportOptions { GrpcPort = 5002 });
@@ -107,7 +108,7 @@ public sealed class SimulatedHandshakeStateMachineCardViewModelDiagnosticsTests
         state
             .Setup(s => s.TryFinalizeInviteHandshakeResponseFromMainAsync(
                 peerId,
-                It.IsAny<Guid>(),
+                It.IsAny<PeerId>(),
                 It.IsAny<Guid>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SessionId(Guid.NewGuid()));
