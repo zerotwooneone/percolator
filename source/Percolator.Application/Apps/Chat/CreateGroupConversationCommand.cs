@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using MediatR;
+using Percolator.Identity;
 
 namespace Percolator.Application.Apps.Chat
 {
@@ -54,7 +55,8 @@ namespace Percolator.Application.Apps.Chat
                 {
                     pkh = sha.ComputeHash(spki);
                 }
-                var peerId = await _keyStore.GetPeerIdByPublicKeyHashAsync(pkh, cancellationToken).ConfigureAwait(false);
+                var identityPublicKeyHash = IdentityPublicKeyHash.FromBytes(pkh);
+                var peerId = await _keyStore.GetPeerIdByPublicKeyHashAsync(identityPublicKeyHash, cancellationToken).ConfigureAwait(false);
                 if (peerId is null)
                 {
                     _logger.LogWarning("[CreateGroupConversation] SPKI[{Index}] did not resolve to a known PeerId (pkh={Pkh})", index, Convert.ToBase64String(pkh));

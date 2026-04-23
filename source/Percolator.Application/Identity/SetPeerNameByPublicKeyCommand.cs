@@ -32,9 +32,10 @@ namespace Percolator.Application.Identity
                 throw new ArgumentException("Peer name is required.");
 
             var pkh = SHA256.HashData(request.IdentitySigningKeySpki);
+            var identityPublicKeyHash = IdentityPublicKeyHash.FromBytes(pkh);
 
             // Try to resolve an existing peer by PKH mapping
-            var existingPeerId = await _keyStore.GetPeerIdByPublicKeyHashAsync(pkh, cancellationToken).ConfigureAwait(false);
+            var existingPeerId = await _keyStore.GetPeerIdByPublicKeyHashAsync(identityPublicKeyHash, cancellationToken).ConfigureAwait(false);
             PeerIdentity identity;
             if (existingPeerId is not null)
             {
@@ -53,7 +54,7 @@ namespace Percolator.Application.Identity
             }
 
             // Ensure PKH mapping is active for this peer
-            await _keyStore.ActivateIfChangedAsync(identity.Id, request.IdentitySigningKeySpki, pkh, DateTimeOffset.UtcNow, cancellationToken).ConfigureAwait(false);
+            await _keyStore.ActivateIfChangedAsync(identity.Id, request.IdentitySigningKeySpki, identityPublicKeyHash, DateTimeOffset.UtcNow, cancellationToken).ConfigureAwait(false);
             _logger.LogInformation("Set peer '{Name}' with id {PeerId} by public key (pkh={Pkh})", request.Name, identity.Id.Value, Convert.ToHexString(pkh));
         }
     }

@@ -38,7 +38,7 @@ public class DispatchDeliveredReceiptHandlerTests
 
         _keyStoreMock
             .Setup(k => k.GetPublicKeyHashByPeerIdAsync(_recipientId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync((byte[]?)null);
+            .ReturnsAsync((IdentityPublicKeyHash?)null);
         _senderMock
             .Setup(s => s.SendChatEnvelopeToPeerAsync(
                 It.IsAny<Percolator.Contracts.ChatEnvelope>(),

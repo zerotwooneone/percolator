@@ -62,8 +62,8 @@ public sealed class DispatchTextMessageHandler : IRequestHandler<DispatchTextMes
         try
         {
             // Resolve PKH for host-enqueue fallback when no direct session exists
-            byte[]? pkh = await _keyStore.GetPublicKeyHashByPeerIdAsync(recipientId, cancellationToken).ConfigureAwait(false);
-            var route = new RecipientRoute(recipientId, pkh);
+            IdentityPublicKeyHash? pkh = await _keyStore.GetPublicKeyHashByPeerIdAsync(recipientId, cancellationToken).ConfigureAwait(false);
+            var route = new RecipientRoute(recipientId, pkh?.ToArray());
             await _sender.SendChatEnvelopeToPeerAsync(chatEnvelope, route, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex)

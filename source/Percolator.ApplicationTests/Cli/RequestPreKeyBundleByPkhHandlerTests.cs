@@ -69,10 +69,11 @@ public sealed class RequestPreKeyBundleByPkhHandlerTests
         var remotePeerId = new Percolator.Identity.PeerId(Guid.NewGuid());
         var remoteIdentitySpki = new byte[] { 9, 8, 7, 6, 5 };
         var expectedPkh = SHA256.HashData(remoteIdentitySpki);
+        var identityPublicKeyHash = IdentityPublicKeyHash.FromBytes(expectedPkh);
 
         _peerKeyStore
             .Setup(s => s.GetPeerIdByPublicKeyHashAsync(
-                It.Is<byte[]>(b => b.SequenceEqual(expectedPkh)),
+                It.Is<IdentityPublicKeyHash>(h => h.ToArray().SequenceEqual(expectedPkh)),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(remotePeerId);
 
@@ -240,7 +241,7 @@ public sealed class RequestPreKeyBundleByPkhHandlerTests
             _routePlanner.Object,
             _clock.Object);
 
-        var cmd = new RequestPreKeyBundleByPkhCommand(new byte[] { 1, 2, 3 });
+        var cmd = new RequestPreKeyBundleByPkhCommand(new byte[32].Select((_, i) => i < 3 ? (byte)(i + 1) : (byte)0).ToArray());
 
         // Act
         Func<Task> act = () => sut.Handle(cmd, CancellationToken.None);
@@ -261,11 +262,12 @@ public sealed class RequestPreKeyBundleByPkhHandlerTests
 
         var remoteIdentitySpki = new byte[] { 9, 8, 7, 6, 5 };
         var expectedPkh = SHA256.HashData(remoteIdentitySpki);
+        var identityPublicKeyHash = IdentityPublicKeyHash.FromBytes(expectedPkh);
         var remotePeerId = new Percolator.Identity.PeerId(Guid.NewGuid());
 
         _peerKeyStore
             .Setup(s => s.GetPeerIdByPublicKeyHashAsync(
-                It.Is<byte[]>(b => b.SequenceEqual(expectedPkh)),
+                It.Is<IdentityPublicKeyHash>(h => h.ToArray().SequenceEqual(expectedPkh)),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(remotePeerId);
 
@@ -312,11 +314,12 @@ public sealed class RequestPreKeyBundleByPkhHandlerTests
 
         var expectedIdentitySpki = new byte[] { 1, 2, 3, 4 };
         var expectedPkh = SHA256.HashData(expectedIdentitySpki);
+        var identityPublicKeyHash = IdentityPublicKeyHash.FromBytes(expectedPkh);
 
         var remotePeerId = new Percolator.Identity.PeerId(Guid.NewGuid());
         _peerKeyStore
             .Setup(s => s.GetPeerIdByPublicKeyHashAsync(
-                It.Is<byte[]>(b => b.SequenceEqual(expectedPkh)),
+                It.Is<IdentityPublicKeyHash>(h => h.ToArray().SequenceEqual(expectedPkh)),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(remotePeerId);
 

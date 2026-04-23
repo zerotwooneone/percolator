@@ -46,7 +46,8 @@ public class MessageQueueService : IMessageQueueService
             return new EnqueueOpaqueMessageResult(false, $"message_blob exceeds {MaxBlobBytes} bytes");
         }
 
-        var peerId = await _publicKeyStore.GetPeerIdByPublicKeyHashAsync(recipientPublicKeyHash, cancellationToken);
+        var identityPublicKeyHash = IdentityPublicKeyHash.FromBytes(recipientPublicKeyHash);
+        var peerId = await _publicKeyStore.GetPeerIdByPublicKeyHashAsync(identityPublicKeyHash, cancellationToken);
         if (peerId is null)
         {
             return new EnqueueOpaqueMessageResult(false, "unknown recipient_public_key_hash");

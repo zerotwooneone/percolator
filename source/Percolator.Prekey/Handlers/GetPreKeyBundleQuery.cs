@@ -1,10 +1,11 @@
 using MediatR;
 using Percolator.Cryptography;
+using Percolator.Identity;
 
 namespace Percolator.Prekey.Handlers
 {
     public class GetPreKeyBundleQuery : IRequest<PreKeyBundle?>
     {
-        public byte[] TargetPublicSigningKeyHash { get; set; } = System.Array.Empty<byte>();
+        public IdentityPublicKeyHash TargetPublicSigningKeyHash { get; set; } = IdentityPublicKeyHash.FromBytes(System.Array.Empty<byte>());
     }
 }

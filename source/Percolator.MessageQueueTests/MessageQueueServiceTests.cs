@@ -80,7 +80,8 @@ public class MessageQueueServiceTests
     {
         var pkh = new byte[32];
         var blob = new byte[] { 0xAA };
-        _keyStore.Setup(k => k.GetPeerIdByPublicKeyHashAsync(pkh, It.IsAny<CancellationToken>()))
+        var identityPublicKeyHash = IdentityPublicKeyHash.FromBytes(pkh);
+        _keyStore.Setup(k => k.GetPeerIdByPublicKeyHashAsync(identityPublicKeyHash, It.IsAny<CancellationToken>()))
                  .ReturnsAsync((PeerId?)null);
 
         var result = await _sut.EnqueueOpaqueAsync(pkh, blob, CancellationToken.None);
@@ -97,7 +98,8 @@ public class MessageQueueServiceTests
         var pkh = new byte[32];
         var blob = new byte[] { 0xBB };
         var peerId = PeerId.NewId();
-        _keyStore.Setup(k => k.GetPeerIdByPublicKeyHashAsync(pkh, It.IsAny<CancellationToken>()))
+        var identityPublicKeyHash = IdentityPublicKeyHash.FromBytes(pkh);
+        _keyStore.Setup(k => k.GetPeerIdByPublicKeyHashAsync(identityPublicKeyHash, It.IsAny<CancellationToken>()))
                  .ReturnsAsync(peerId);
         _repo.Setup(r => r.TryEnqueueAsync(peerId, blob, It.IsAny<CancellationToken>()))
              .ReturnsAsync((false, 10u, 100u));
@@ -116,7 +118,8 @@ public class MessageQueueServiceTests
         var pkh = new byte[32];
         var blob = new byte[] { 0xCC };
         var peerId = PeerId.NewId();
-        _keyStore.Setup(k => k.GetPeerIdByPublicKeyHashAsync(pkh, It.IsAny<CancellationToken>()))
+        var identityPublicKeyHash = IdentityPublicKeyHash.FromBytes(pkh);
+        _keyStore.Setup(k => k.GetPeerIdByPublicKeyHashAsync(identityPublicKeyHash, It.IsAny<CancellationToken>()))
                  .ReturnsAsync(peerId);
         _repo.Setup(r => r.TryEnqueueAsync(peerId, blob, It.IsAny<CancellationToken>()))
              .ReturnsAsync((true, 11u, 101u));

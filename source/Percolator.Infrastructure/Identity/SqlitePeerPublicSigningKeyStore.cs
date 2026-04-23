@@ -13,14 +13,15 @@ public class SqlitePeerPublicSigningKeyStore : IPeerPublicSigningKeyStore
         _db = db;
     }
 
-    public async Task ActivateIfChangedAsync(PeerId peerId, byte[] publicKeySpki, byte[] publicKeyHash, DateTimeOffset nowUtc, CancellationToken ct = default)
+    public async Task ActivateIfChangedAsync(PeerId peerId, byte[] publicKeySpki, IdentityPublicKeyHash publicKeyHash, DateTimeOffset nowUtc, CancellationToken ct = default)
     {
+        var publicKeyHashBytes = publicKeyHash.ToArray();
         await using var tx = await _db.Database.BeginTransactionAsync(ct);
         try
         {
             // Check if any row exists with this hash (for any peer). If so, avoid inserting a duplicate.
             var anyByHash = await _db.PeerPublicSigningKeys
-                .Where(x => x.PublicKeyHash.SequenceEqual(publicKeyHash))
+                .Where(x => x.PublicKeyHash.SequenceEqual(publicKeyHashBytes))
                 .FirstOrDefaultAsync(ct);
             if (anyByHash is not null)
             {
@@ -57,7 +58,7 @@ public class SqlitePeerPublicSigningKeyStore : IPeerPublicSigningKeyStore
                 .OrderByDescending(x => x.ActiveAtUtc)
                 .FirstOrDefault();
 
-            if (active is not null && active.PublicKeyHash.SequenceEqual(publicKeyHash))
+            if (active is not null && active.PublicKeyHash.SequenceEqual(publicKeyHashBytes))
             {
                 // Idempotent: same key already active -> no-op
                 await tx.CommitAsync(ct);
@@ -76,7 +77,7 @@ public class SqlitePeerPublicSigningKeyStore : IPeerPublicSigningKeyStore
             {
                 PeerId = peerId,
                 PublicKey = publicKeySpki,
-                PublicKeyHash = publicKeyHash,
+                PublicKeyHash = publicKeyHashBytes,
                 ActiveAtUtc = nowUtc,
                 ExpiredAtUtc = null
             };
@@ -91,15 +92,16 @@ public class SqlitePeerPublicSigningKeyStore : IPeerPublicSigningKeyStore
         }
     }
 
-    public async Task<PeerId?> GetPeerIdByPublicKeyHashAsync(byte[] publicKeyHash, CancellationToken ct = default)
+    public async Task<PeerId?> GetPeerIdByPublicKeyHashAsync(IdentityPublicKeyHash publicKeyHash, CancellationToken ct = default)
     {
+        var publicKeyHashBytes = publicKeyHash.ToArray();
         var row = await _db.PeerPublicSigningKeys
             .AsNoTracking()
-            .FirstOrDefaultAsync(x => x.PublicKeyHash.SequenceEqual(publicKeyHash), ct);
+            .FirstOrDefaultAsync(x => x.PublicKeyHash.SequenceEqual(publicKeyHashBytes), ct);
         return row is null ? null : row.PeerId;
     }
 
-    public async Task<byte[]?> GetPublicKeyHashByPeerIdAsync(PeerId peerId, CancellationToken ct = default)
+    public async Task<IdentityPublicKeyHash?> GetPublicKeyHashByPeerIdAsync(PeerId peerId, CancellationToken ct = default)
     {
         // Materialize then order to ensure we pick the most recent active key
         var activeRows = await _db.PeerPublicSigningKeys
@@ -109,23 +111,6 @@ public class SqlitePeerPublicSigningKeyStore : IPeerPublicSigningKeyStore
         var latest = activeRows
             .OrderByDescending(x => x.ActiveAtUtc)
             .FirstOrDefault();
-        return latest?.PublicKeyHash;
-    }
-
-    // Typed overloads for IdentityPublicKeyHash (delegate to existing byte[] implementations)
-    public async Task ActivateIfChangedAsync(PeerId peerId, byte[] publicKeySpki, IdentityPublicKeyHash publicKeyHash, DateTimeOffset nowUtc, CancellationToken ct = default)
-    {
-        await ActivateIfChangedAsync(peerId, publicKeySpki, publicKeyHash.ToArray(), nowUtc, ct);
-    }
-
-    public async Task<PeerId?> GetPeerIdByPublicKeyHashAsync(IdentityPublicKeyHash publicKeyHash, CancellationToken ct = default)
-    {
-        return await GetPeerIdByPublicKeyHashAsync(publicKeyHash.ToArray(), ct);
-    }
-
-    public async Task<IdentityPublicKeyHash?> GetPublicKeyHashByPeerIdTypedAsync(PeerId peerId, CancellationToken ct = default)
-    {
-        var bytes = await GetPublicKeyHashByPeerIdAsync(peerId, ct);
-        return bytes is null ? null : IdentityPublicKeyHash.FromBytes(bytes);
+        return latest?.PublicKeyHash is null ? null : IdentityPublicKeyHash.FromBytes(latest.PublicKeyHash);
     }
 }

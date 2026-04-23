@@ -9,6 +9,7 @@ using Percolator.Chat.ValueObjects;
 using Percolator.Contracts;
 using Percolator.Dht;
 using Percolator.Application.Network.Handshake;
+using Percolator.Identity;
 using Percolator.MessageQueue.Commands;
 using Percolator.MessageQueue.Abstractions;
 using Percolator.Network;
@@ -141,7 +142,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                     if (!getReq.HasPublicKeyHash) throw new InvalidOperationException("PublicKeyHash is required");
                     var bundle = await _mediator.Send(new GetPreKeyBundleQuery
                     {
-                        TargetPublicSigningKeyHash = getReq.PublicKeyHash.ToByteArray()
+                        TargetPublicSigningKeyHash = IdentityPublicKeyHash.FromBytes(getReq.PublicKeyHash.ToByteArray())
                     }, cancellationToken).ConfigureAwait(false);
                     var resp = new GetPreKeyBundleResponse { Version = 1 };
                     if (bundle is not null)

@@ -8,6 +8,7 @@ using Percolator.Cryptography;
 using Percolator.Network;
 using Percolator.Prekey.Handlers;
 using Percolator.Application.Network.Handshake;
+using Percolator.Identity;
 using NetworkPeerId = Percolator.Network.PeerId;
 
 namespace Percolator.Application.Network
@@ -95,7 +96,7 @@ namespace Percolator.Application.Network
                     if (!getReq.HasPublicKeyHash) throw new InvalidOperationException("PublicKeyHash is required");
                     var bundle = await _mediator.Send(new Percolator.Prekey.Handlers.GetPreKeyBundleQuery
                     {
-                        TargetPublicSigningKeyHash = getReq.PublicKeyHash.ToByteArray()
+                        TargetPublicSigningKeyHash = IdentityPublicKeyHash.FromBytes(getReq.PublicKeyHash.ToByteArray())
                     }, ct).ConfigureAwait(false);
                     var resp = new GetPreKeyBundleResponse { Version = 1 };
                     if (bundle is not null)

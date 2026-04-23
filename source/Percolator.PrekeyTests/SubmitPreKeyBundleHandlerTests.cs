@@ -69,7 +69,7 @@ public class SubmitPreKeyBundleHandlerTests
         _publicKeyStore.Verify(s => s.ActivateIfChangedAsync(
             It.Is<Percolator.Identity.PeerId>(p => p.Value == remotePeerId.Value),
             It.Is<byte[]>(pk => pk.SequenceEqual(publicSigningKey)),
-            It.IsAny<byte[]>(), // hash
+            It.IsAny<IdentityPublicKeyHash>(), // hash
             It.IsAny<DateTimeOffset>(),
             It.IsAny<CancellationToken>()), Times.Once);
 

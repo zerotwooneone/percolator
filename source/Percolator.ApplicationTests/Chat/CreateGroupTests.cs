@@ -57,30 +57,13 @@ internal sealed class NoopSender : IRemoteEnvelopeSender
                     var pkh = SHA256.HashData(spki);
                     _map[Convert.ToBase64String(pkh)] = id;
                 }
-                public Task ActivateIfChangedAsync(PeerId peerId, byte[] publicKeySpki, byte[] publicKeyHash, DateTimeOffset nowUtc, CancellationToken ct = default) => Task.CompletedTask;
                 public Task ActivateIfChangedAsync(PeerId peerId, byte[] publicKeySpki, IdentityPublicKeyHash publicKeyHash, DateTimeOffset nowUtc, CancellationToken ct = default) => Task.CompletedTask;
-                public Task<PeerId?> GetPeerIdByPublicKeyHashAsync(byte[] publicKeyHash, CancellationToken ct = default)
-                {
-                    _map.TryGetValue(Convert.ToBase64String(publicKeyHash), out var id);
-                    return Task.FromResult<PeerId?>(id);
-                }
                 public Task<PeerId?> GetPeerIdByPublicKeyHashAsync(IdentityPublicKeyHash publicKeyHash, CancellationToken ct = default)
                 {
                     _map.TryGetValue(Convert.ToBase64String(publicKeyHash.ToArray()), out var id);
                     return Task.FromResult<PeerId?>(id);
                 }
-                public Task<byte[]?> GetPublicKeyHashByPeerIdAsync(PeerId peerId, CancellationToken cancellationToken)
-                {
-                    foreach (var kvp in _map)
-                    {
-                        if (kvp.Value.Equals(peerId))
-                        {
-                            return Task.FromResult<byte[]?>(Convert.FromBase64String(kvp.Key));
-                        }
-                    }
-                    return Task.FromResult<byte[]?>(null);
-                }
-                public Task<IdentityPublicKeyHash?> GetPublicKeyHashByPeerIdTypedAsync(PeerId peerId, CancellationToken cancellationToken)
+                public Task<IdentityPublicKeyHash?> GetPublicKeyHashByPeerIdAsync(PeerId peerId, CancellationToken cancellationToken)
                 {
                     foreach (var kvp in _map)
                     {

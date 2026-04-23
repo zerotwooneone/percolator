@@ -49,7 +49,7 @@ public class DispatchTextMessageHandlerTests
 
         _keyStoreMock
             .Setup(k => k.GetPublicKeyHashByPeerIdAsync(_recipientId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync((byte[]?)null);
+            .ReturnsAsync((IdentityPublicKeyHash?)null);
 
         _senderMock
             .Setup(s => s.SendChatEnvelopeToPeerAsync(
@@ -80,10 +80,10 @@ public class DispatchTextMessageHandlerTests
 
         _keyStoreMock
             .Setup(k => k.GetPublicKeyHashByPeerIdAsync(_recipientId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync((byte[]?)null);
+            .ReturnsAsync((IdentityPublicKeyHash?)null);
         _keyStoreMock
             .Setup(k => k.GetPublicKeyHashByPeerIdAsync(_selfId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync((byte[]?)null);
+            .ReturnsAsync((IdentityPublicKeyHash?)null);
 
         _senderMock
             .Setup(s => s.SendChatEnvelopeToPeerAsync(

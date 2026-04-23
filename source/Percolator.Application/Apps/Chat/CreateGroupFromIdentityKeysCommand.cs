@@ -53,7 +53,8 @@ namespace Percolator.Application.Apps.Chat
                 {
                     pkh = sha.ComputeHash(spki);
                 }
-                var peerId = await _keyStore.GetPeerIdByPublicKeyHashAsync(pkh, cancellationToken).ConfigureAwait(false);
+                var identityPublicKeyHash = IdentityPublicKeyHash.FromBytes(pkh);
+                var peerId = await _keyStore.GetPeerIdByPublicKeyHashAsync(identityPublicKeyHash, cancellationToken).ConfigureAwait(false);
                 if (peerId is null)
                 {
                     _logger.LogWarning("[CreateGroup] SPKI[{Index}] did not resolve to a known PeerId (pkh={Pkh})", index, Convert.ToBase64String(pkh));
@@ -129,7 +130,8 @@ namespace Percolator.Application.Apps.Chat
                 {
                     pkh = sha.ComputeHash(spki);
                 }
-                var peerId = await _keyStore.GetPeerIdByPublicKeyHashAsync(pkh, cancellationToken).ConfigureAwait(false);
+                var identityPublicKeyHash = IdentityPublicKeyHash.FromBytes(pkh);
+                var peerId = await _keyStore.GetPeerIdByPublicKeyHashAsync(identityPublicKeyHash, cancellationToken).ConfigureAwait(false);
                 if (peerId is null) continue;
                 var pid = new Percolator.Identity.PeerId(peerId.Value);
                 var route = new RecipientRoute(pid, pkh);

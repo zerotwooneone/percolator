@@ -30,6 +30,7 @@ public class GetPreKeyBundleHandlerTests
         // Arrange
         var keyHash = new byte[32];
         new Random().NextBytes(keyHash);
+        var identityPublicKeyHash = IdentityPublicKeyHash.FromBytes(keyHash);
         var peerId = new Percolator.Identity.PeerId(Guid.NewGuid());
         var expected = new PreKeyBundle(
             new RatchetIdentityKey(new byte[] { 1 }),
@@ -40,12 +41,12 @@ public class GetPreKeyBundleHandlerTests
             new OneTimeKey(new byte[] { 4 }),
             DateTimeOffset.UtcNow.AddHours(1));
 
-        _publicKeyStore.Setup(s => s.GetPeerIdByPublicKeyHashAsync(keyHash, It.IsAny<CancellationToken>()))
+        _publicKeyStore.Setup(s => s.GetPeerIdByPublicKeyHashAsync(identityPublicKeyHash, It.IsAny<CancellationToken>()))
             .ReturnsAsync(peerId);
         _bundleRepository.Setup(r => r.PopBundleAsync(new Percolator.Cryptography.Primitives.PeerId(peerId.Value)))
             .ReturnsAsync(expected);
 
-        var query = new GetPreKeyBundleQuery { TargetPublicSigningKeyHash = keyHash };
+        var query = new GetPreKeyBundleQuery { TargetPublicSigningKeyHash = identityPublicKeyHash };
 
         // Act
         var result = await _sut.Handle(query, CancellationToken.None);
@@ -61,9 +62,10 @@ public class GetPreKeyBundleHandlerTests
     {
         // Arrange
         var keyHash = new byte[32];
-        _publicKeyStore.Setup(s => s.GetPeerIdByPublicKeyHashAsync(keyHash, It.IsAny<CancellationToken>()))
+        var identityPublicKeyHash = IdentityPublicKeyHash.FromBytes(keyHash);
+        _publicKeyStore.Setup(s => s.GetPeerIdByPublicKeyHashAsync(identityPublicKeyHash, It.IsAny<CancellationToken>()))
             .ReturnsAsync((Percolator.Identity.PeerId?)null);
-        var query = new GetPreKeyBundleQuery { TargetPublicSigningKeyHash = keyHash };
+        var query = new GetPreKeyBundleQuery { TargetPublicSigningKeyHash = identityPublicKeyHash };
 
         // Act
         var result = await _sut.Handle(query, CancellationToken.None);
@@ -78,13 +80,14 @@ public class GetPreKeyBundleHandlerTests
     {
         // Arrange
         var keyHash = new byte[32];
+        var identityPublicKeyHash = IdentityPublicKeyHash.FromBytes(keyHash);
         var peerId = new Percolator.Identity.PeerId(Guid.NewGuid());
-        _publicKeyStore.Setup(s => s.GetPeerIdByPublicKeyHashAsync(keyHash, It.IsAny<CancellationToken>()))
+        _publicKeyStore.Setup(s => s.GetPeerIdByPublicKeyHashAsync(identityPublicKeyHash, It.IsAny<CancellationToken>()))
             .ReturnsAsync(peerId);
         _bundleRepository.Setup(r => r.PopBundleAsync(new Percolator.Cryptography.Primitives.PeerId(peerId.Value)))
             .ReturnsAsync((PreKeyBundle?)null);
 
-        var query = new GetPreKeyBundleQuery { TargetPublicSigningKeyHash = keyHash };
+        var query = new GetPreKeyBundleQuery { TargetPublicSigningKeyHash = identityPublicKeyHash };
 
         // Act
         var result = await _sut.Handle(query, CancellationToken.None);
@@ -97,7 +100,7 @@ public class GetPreKeyBundleHandlerTests
     public void Handle_missing_hash_throws()
     {
         // Arrange
-        var query = new GetPreKeyBundleQuery { TargetPublicSigningKeyHash = Array.Empty<byte>() };
+        var query = new GetPreKeyBundleQuery { TargetPublicSigningKeyHash = IdentityPublicKeyHash.FromBytes(Array.Empty<byte>()) };
 
         // Act
         Func<Task> act = async () => await _sut.Handle(query, CancellationToken.None);

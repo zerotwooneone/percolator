@@ -37,11 +37,11 @@ namespace Percolator.ApplicationTests.Apps.Chat
             var bobPeer = new PeerId(Guid.NewGuid());
             var charliePeer = new PeerId(Guid.NewGuid());
 
-            keyStore.Setup(s => s.GetPeerIdByPublicKeyHashAsync(It.Is<byte[]>(b => b.SequenceEqual(alicePkh)), It.IsAny<CancellationToken>()))
+            keyStore.Setup(s => s.GetPeerIdByPublicKeyHashAsync(It.Is<IdentityPublicKeyHash>(h => h.ToArray().SequenceEqual(alicePkh)), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(alicePeer);
-            keyStore.Setup(s => s.GetPeerIdByPublicKeyHashAsync(It.Is<byte[]>(b => b.SequenceEqual(bobPkh)), It.IsAny<CancellationToken>()))
+            keyStore.Setup(s => s.GetPeerIdByPublicKeyHashAsync(It.Is<IdentityPublicKeyHash>(h => h.ToArray().SequenceEqual(bobPkh)), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(bobPeer);
-            keyStore.Setup(s => s.GetPeerIdByPublicKeyHashAsync(It.Is<byte[]>(b => b.SequenceEqual(charliePkh)), It.IsAny<CancellationToken>()))
+            keyStore.Setup(s => s.GetPeerIdByPublicKeyHashAsync(It.Is<IdentityPublicKeyHash>(h => h.ToArray().SequenceEqual(charliePkh)), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(charliePeer);
 
             // Expect CreateGroupAsync with participants containing the resolved PeerIds

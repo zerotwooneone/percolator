@@ -23,11 +23,6 @@ namespace Percolator.Prekey.Handlers
 
         public async Task<PreKeyBundle?> Handle(GetPreKeyBundleQuery request, CancellationToken cancellationToken)
         {
-            if (request.TargetPublicSigningKeyHash is null || request.TargetPublicSigningKeyHash.Length == 0)
-            {
-                throw new InvalidOperationException("TargetPublicSigningKeyHash is required.");
-            }
-
             var peerId = await _publicKeyStore.GetPeerIdByPublicKeyHashAsync(request.TargetPublicSigningKeyHash, cancellationToken);
             if (peerId is null)
             {

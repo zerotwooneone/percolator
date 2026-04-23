@@ -78,7 +78,7 @@ public sealed class NetworkTransportPortAdapter : ITransportPort
             var mqReq = new EnqueueOpaqueMessageRequest
             {
                 Version = 1,
-                RecipientPublicKeyHash = Google.Protobuf.ByteString.CopyFrom(pkh),
+                RecipientPublicKeyHash = Google.Protobuf.ByteString.CopyFrom(pkh.ToArray()),
                 MessageBlob = Google.Protobuf.ByteString.CopyFrom(payload.Value.ToArray())
             };
             var toRelay = new InternalEnvelope

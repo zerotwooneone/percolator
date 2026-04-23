@@ -40,7 +40,7 @@ namespace Percolator.Prekey.Handlers
 
             var identityPeerId = new Percolator.Identity.PeerId(request.RemotePeerId.Value);
             
-            var publicKeyHash = SHA256.HashData(remoteIdentitySigningKeyBytes);
+            var publicKeyHash = IdentityPublicKeyHash.FromBytes(SHA256.HashData(remoteIdentitySigningKeyBytes));
             var nowTimestamp = DateTimeOffset.UtcNow;
             await _publicKeyStore.ActivateIfChangedAsync(identityPeerId, remoteIdentitySigningKeyBytes, publicKeyHash, nowTimestamp, cancellationToken);
 

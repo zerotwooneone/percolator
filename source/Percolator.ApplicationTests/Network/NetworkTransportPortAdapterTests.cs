@@ -116,7 +116,7 @@ public class NetworkTransportPortAdapterTests
         var rsid = new DirectSessionId(Guid.NewGuid());
         sessions.Setup(s => s.GetByRemotePeerIdAsync(relay, 1)).ReturnsAsync(new DirectSession(relay, rsid));
         keyStore.Setup(k => k.GetPublicKeyHashByPeerIdAsync(new Percolator.Identity.PeerId(target.Value), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new byte[] { 5, 5, 5 });
+            .ReturnsAsync(IdentityPublicKeyHash.FromBytes(new byte[32].Select((_, i) => i == 0 ? (byte)5 : (byte)0).ToArray()));
 
         var relayCipher = new SessionRatchetMessage(new byte[] { 7 });
         secure.Setup(s => s.EncryptAsync(It.IsAny<SessionId>(), It.IsAny<Plaintext>(), It.IsAny<CancellationToken>()))

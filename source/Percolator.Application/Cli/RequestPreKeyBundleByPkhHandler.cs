@@ -68,8 +68,9 @@ public class RequestPreKeyBundleByPkhHandler : IRequestHandler<RequestPreKeyBund
         {
             throw new ArgumentException("PublicKeyHash must be provided.", nameof(request.PublicKeyHash));
         }
+        var identityPublicKeyHash = IdentityPublicKeyHash.FromBytes(request.PublicKeyHash);
         var hostPeerId = await _peerPublicSigningKeyStore
-            .GetPeerIdByPublicKeyHashAsync(request.PublicKeyHash, cancellationToken)
+            .GetPeerIdByPublicKeyHashAsync(identityPublicKeyHash, cancellationToken)
             .ConfigureAwait(false);
         if (hostPeerId is null)
         {

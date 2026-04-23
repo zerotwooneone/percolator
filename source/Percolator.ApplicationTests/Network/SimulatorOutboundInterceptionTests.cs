@@ -175,8 +175,6 @@ public sealed class SimulatorOutboundInterceptionTests
         wireTap.Setup(w => w.Enabled).Returns(false);
 
         keyStore.Setup(k => k.GetPublicKeyHashByPeerIdAsync(peerId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(recipientPublicKeyHash);
-        keyStore.Setup(k => k.GetPublicKeyHashByPeerIdTypedAsync(peerId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(IdentityPublicKeyHash.FromBytes(recipientPublicKeyHash));
 
         interceptor.Setup(i => i.TryRouteMessageViaSimulatorRelayAsync(
