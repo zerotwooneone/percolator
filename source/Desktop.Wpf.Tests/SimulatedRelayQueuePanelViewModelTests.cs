@@ -10,7 +10,9 @@ using Microsoft.Extensions.Logging;
 using Moq;
 using NUnit.Framework;
 using ObservableCollections;
+using Percolator.Identity;
 using Percolator.Network;
+using PeerId = Percolator.Network.PeerId;
 
 namespace Desktop.Wpf.Tests;
 
@@ -32,7 +34,7 @@ public sealed class SimulatedRelayQueuePanelViewModelTests
         var relay = new SimulatedRelayModel(relayHostPeerId);
         relay.EnqueueMessage(new InboundRelayMessage(
             AckId: ackId,
-            TargetPkh: targetPkh,
+            TargetPkh: IdentityPublicKeyHash.FromBytes(targetPkh),
             OpaqueBytes: opaque,
             EnqueuedUtc: DateTimeOffset.UtcNow,
             DebugType: "t"));

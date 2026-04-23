@@ -4,11 +4,12 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Percolator.Application.Identity;
-using Percolator.Network;
 using Desktop.Wpf.Features.Simulator;
 using Desktop.Wpf.Features.Simulator.Models;
 using NUnit.Framework;
 using ObservableCollections;
+using Percolator.Identity;
+using PeerId = Percolator.Network.PeerId;
 
 namespace Desktop.Wpf.Tests;
 
@@ -24,12 +25,15 @@ public sealed class SimulatorOutboundInterceptorRelayRoutingTests
         var activeMock = new Mock<ActiveIdentityContext>();
         var diagnosticsMock = new Mock<ISimulatorDiagnosticsService>();
 
-        var recipientPublicKeyHash = new byte[32]; // 32 bytes for PKH
-        recipientPublicKeyHash[0] = 1;
+        var recipientPublicKeyHashBytes = new byte[32];
+        recipientPublicKeyHashBytes[0] = 1;
+        var recipientPublicKeyHash = IdentityPublicKeyHash.FromBytes(recipientPublicKeyHashBytes); // 32 bytes for PKH
         var cipherBytes = new byte[] { 1, 2, 3 };
 
         stateMock.Setup(s => s.Peers).Returns(new ObservableList<SimulatedPeerModel>());
         stateMock.Setup(s => s.TryGetPeerIdByIdentityPublicKeyHashAsync(It.IsAny<byte[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((PeerId?)null);
+        stateMock.Setup(s => s.TryGetPeerIdByIdentityPublicKeyHashAsync(It.IsAny<IdentityPublicKeyHash>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((PeerId?)null);
 
         var sut = new SimulatorOutboundInterceptor(
@@ -66,8 +70,9 @@ public sealed class SimulatorOutboundInterceptorRelayRoutingTests
         var diagnosticsMock = new Mock<ISimulatorDiagnosticsService>();
 
         var peerId = new PeerId(Guid.NewGuid());
-        var recipientPublicKeyHash = new byte[32];
-        recipientPublicKeyHash[0] = 1;
+        var recipientPublicKeyHashBytes = new byte[32];
+        recipientPublicKeyHashBytes[0] = 1;
+        var recipientPublicKeyHash = IdentityPublicKeyHash.FromBytes(recipientPublicKeyHashBytes);
         var cipherBytes = new byte[] { 1, 2, 3 };
         var peer = new SimulatedPeerModel(
             peerId: peerId,
@@ -121,8 +126,9 @@ public sealed class SimulatorOutboundInterceptorRelayRoutingTests
 
         var peerId = new PeerId(Guid.NewGuid());
         var relayHostPeerId = new PeerId(Guid.NewGuid());
-        var recipientPublicKeyHash = new byte[32];
-        recipientPublicKeyHash[0] = 1;
+        var recipientPublicKeyHashBytes = new byte[32];
+        recipientPublicKeyHashBytes[0] = 1;
+        var recipientPublicKeyHash = IdentityPublicKeyHash.FromBytes(recipientPublicKeyHashBytes);
         var cipherBytes = new byte[] { 1, 2, 3 };
 
         var peer = new SimulatedPeerModel(
@@ -144,7 +150,7 @@ public sealed class SimulatorOutboundInterceptorRelayRoutingTests
             .ReturnsAsync(peerId);
         stateMock.Setup(s => s.EnqueueRelayDownstreamToPeerAsync(
             relayHostPeerId,
-            recipientPublicKeyHash,
+            recipientPublicKeyHash.ToArray(),
             cipherBytes,
             It.IsAny<string?>(),
             It.IsAny<CancellationToken>()))
@@ -167,7 +173,7 @@ public sealed class SimulatorOutboundInterceptorRelayRoutingTests
         Assert.That(result, Is.True);
         stateMock.Verify(s => s.EnqueueRelayDownstreamToPeerAsync(
             relayHostPeerId,
-            recipientPublicKeyHash,
+            recipientPublicKeyHash.ToArray(),
             cipherBytes,
             "Test",
             It.IsAny<CancellationToken>()),

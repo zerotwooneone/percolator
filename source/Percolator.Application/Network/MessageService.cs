@@ -64,7 +64,7 @@ namespace Percolator.Application.Network
             if (_simulatorOutboundInterceptor is not null)
             {
                 var recipientPublicKeyHash = await _keyStore
-                    .GetPublicKeyHashByPeerIdAsync(recipientPeerId, ct)
+                    .GetPublicKeyHashByPeerIdTypedAsync(recipientPeerId, ct)
                     .ConfigureAwait(false);
                 if (recipientPublicKeyHash is not null)
                 {
@@ -155,7 +155,7 @@ namespace Percolator.Application.Network
             if (_simulatorOutboundInterceptor is not null)
             {
                 var recipientPublicKeyHash = await _keyStore
-                    .GetPublicKeyHashByPeerIdAsync(recipientPeerId, ct)
+                    .GetPublicKeyHashByPeerIdTypedAsync(recipientPeerId, ct)
                     .ConfigureAwait(false);
                 if (recipientPublicKeyHash is not null)
                 {

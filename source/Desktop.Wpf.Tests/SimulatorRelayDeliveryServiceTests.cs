@@ -176,6 +176,9 @@ public sealed class SimulatorRelayDeliveryServiceTests
         state
             .Setup(s => s.TryGetPeerIdByIdentityPublicKeyHashAsync(It.Is<byte[]>(b => b.SequenceEqual(initiatorPkh)), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Percolator.Network.PeerId?)null);
+        state
+            .Setup(s => s.TryGetPeerIdByIdentityPublicKeyHashAsync(It.Is<IdentityPublicKeyHash>(pkh => pkh.ToArray().SequenceEqual(initiatorPkh)), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Percolator.Network.PeerId?)null);
 
         var selfRepo = new Mock<ISelfIdentityRepository>();
         selfRepo

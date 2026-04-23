@@ -13,6 +13,7 @@ using NUnit.Framework;
 using ObservableCollections;
 using Percolator.Cryptography;
 using Percolator.Cryptography.Primitives;
+using Percolator.Identity;
 using Percolator.Network;
 
 namespace Desktop.Wpf.Tests;
@@ -42,6 +43,8 @@ public sealed class SimulatorDiagnosticBundleBuilderTests
         state.SetupGet(s => s.Peers).Returns(peersList);
         state.SetupGet(s => s.Relays).Returns(relaysList);
         state.Setup(s => s.TryGetPeerIdByIdentityPublicKeyHashAsync(It.IsAny<byte[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Percolator.Network.PeerId?)null);
+        state.Setup(s => s.TryGetPeerIdByIdentityPublicKeyHashAsync(It.IsAny<IdentityPublicKeyHash>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Percolator.Network.PeerId?)null);
         state.Setup(s => s.AddRelayActiveSessionAsync(It.IsAny<Percolator.Network.PeerId>(), It.IsAny<Percolator.Network.PeerId>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);

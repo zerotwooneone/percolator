@@ -30,7 +30,7 @@ public class DirectSessionIdValueObjectTests
 
         // Assert
         result.Should().NotBeNull();
-        result!.Value.Should().Be(guid);
+        result!.Value.Value.Should().Be(guid);
     }
 
     [Test]

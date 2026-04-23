@@ -2,6 +2,7 @@ using Desktop.Wpf.Features.Simulator.Models;
 using ObservableCollections;
 using Percolator.Contracts;
 using Percolator.Cryptography;
+using Percolator.Identity;
 using Percolator.Network;
 
 namespace Desktop.Wpf.Features.Simulator;
@@ -14,63 +15,66 @@ public interface ISimulatorStateService
 
     IReadOnlyObservableList<PeerRelationship> Relationships { get; }
 
-    Task<PeerId> AddPeerAsync(string? displayName, CancellationToken cancellationToken = default);
-    Task RemovePeerAsync(PeerId peerId, CancellationToken cancellationToken = default);
+    Task<Percolator.Network.PeerId> AddPeerAsync(string? displayName, CancellationToken cancellationToken = default);
+    Task RemovePeerAsync(Percolator.Network.PeerId peerId, CancellationToken cancellationToken = default);
 
-    Task<PeerId?> TryGetPeerIdByIdentityPublicKeyHashAsync(byte[] recipientPublicKeyHash, CancellationToken cancellationToken = default);
+    Task<Percolator.Network.PeerId?> TryGetPeerIdByIdentityPublicKeyHashAsync(byte[] recipientPublicKeyHash, CancellationToken cancellationToken = default);
+
+    // Typed overload for IdentityPublicKeyHash (non-breaking addition)
+    Task<Percolator.Network.PeerId?> TryGetPeerIdByIdentityPublicKeyHashAsync(IdentityPublicKeyHash recipientPublicKeyHash, CancellationToken cancellationToken = default);
 
     Task EnqueueRelayUpstreamToMainAsync(
-        PeerId relayHostPeerId,
+        Percolator.Network.PeerId relayHostPeerId,
         byte[] opaqueBytes,
         string? debugType = null,
         CancellationToken cancellationToken = default);
 
     Task EnqueueRelayDownstreamToPeerAsync(
-        PeerId relayHostPeerId,
+        Percolator.Network.PeerId relayHostPeerId,
         byte[] targetIdentityPublicKeyHash,
         byte[] opaqueBytes,
         string? debugType = null,
         CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<InboundRelayMessage>> DequeueRelayDownstreamToPeerAsync(
-        PeerId relayHostPeerId,
+        Percolator.Network.PeerId relayHostPeerId,
         byte[] targetIdentityPublicKeyHash,
         int max,
         CancellationToken cancellationToken = default);
 
     Task<int> ForwardRelayUpstreamToMainAsync(
-        PeerId relayHostPeerId,
+        Percolator.Network.PeerId relayHostPeerId,
         SessionId relayHostToMainSessionId,
         int max,
         CancellationToken cancellationToken = default);
 
     Task<bool> DeliverRelayUpstreamToMainByAckIdAsync(
-        PeerId relayHostPeerId,
+        Percolator.Network.PeerId relayHostPeerId,
         SessionId relayHostToMainSessionId,
         Guid ackId,
         CancellationToken cancellationToken = default);
 
-    Task<bool> DeleteRelayMessageByAckIdAsync(PeerId relayHostPeerId, Guid ackId, CancellationToken cancellationToken = default);
+    Task<bool> DeleteRelayMessageByAckIdAsync(Percolator.Network.PeerId relayHostPeerId, Guid ackId, CancellationToken cancellationToken = default);
 
-    Task<bool> MoveRelayMessageByAckIdAsync(PeerId relayHostPeerId, Guid ackId, int delta, CancellationToken cancellationToken = default);
+    Task<bool> MoveRelayMessageByAckIdAsync(Percolator.Network.PeerId relayHostPeerId, Guid ackId, int delta, CancellationToken cancellationToken = default);
 
-    Task<bool> CorruptRelayMessageByAckIdAsync(PeerId relayHostPeerId, Guid ackId, CancellationToken cancellationToken = default);
+    Task<bool> CorruptRelayMessageByAckIdAsync(Percolator.Network.PeerId relayHostPeerId, Guid ackId, CancellationToken cancellationToken = default);
 
-    Task AddPublishedKeysRelationshipAsync(PeerId publisherPeerId, PeerId hostPeerId, CancellationToken cancellationToken = default);
-    Task RemovePublishedKeysRelationshipAsync(PeerId publisherPeerId, PeerId hostPeerId, CancellationToken cancellationToken = default);
+    Task AddPublishedKeysRelationshipAsync(Percolator.Network.PeerId publisherPeerId, Percolator.Network.PeerId hostPeerId, CancellationToken cancellationToken = default);
+    Task RemovePublishedKeysRelationshipAsync(Percolator.Network.PeerId publisherPeerId, Percolator.Network.PeerId hostPeerId, CancellationToken cancellationToken = default);
 
-    Task AddRelayActiveSessionAsync(PeerId relayHostPeerId, PeerId peerId, CancellationToken cancellationToken = default);
-    Task RemoveRelayActiveSessionAsync(PeerId relayHostPeerId, PeerId peerId, CancellationToken cancellationToken = default);
+    Task AddRelayActiveSessionAsync(Percolator.Network.PeerId relayHostPeerId, Percolator.Network.PeerId peerId, CancellationToken cancellationToken = default);
+    Task RemoveRelayActiveSessionAsync(Percolator.Network.PeerId relayHostPeerId, Percolator.Network.PeerId peerId, CancellationToken cancellationToken = default);
 
     Task<EstablishDirectSessionResponse> ReceiveEstablishDirectSessionFromMainAsync(
-        PeerId simulatedPeerId,
-        PeerId mainPeerId,
+        Percolator.Network.PeerId simulatedPeerId,
+        Percolator.Network.PeerId mainPeerId,
         EstablishDirectSessionRequest request,
         CancellationToken cancellationToken = default);
 
     Task<SimulatedPeerInviteAcceptance> AcceptReverseSignalInviteAsync(
-        PeerId simulatedPeerId,
-        PeerId inviterPeerId,
+        Percolator.Network.PeerId simulatedPeerId,
+        Percolator.Network.PeerId inviterPeerId,
         EstablishDirectSessionRequest invite,
         CancellationToken cancellationToken = default);
 
@@ -79,80 +83,80 @@ public interface ISimulatorStateService
         CancellationToken cancellationToken = default);
 
     Task ReceiveInviteHandshakeResponseFromMainAsync(
-        PeerId simulatedPeerId,
+        Percolator.Network.PeerId simulatedPeerId,
         InviteHandshakeResponse response,
         CancellationToken cancellationToken = default);
 
     Task QueueInviteHandshakeResponseForDeliveryToMainAsync(
-        PeerId simulatedPeerId,
+        Percolator.Network.PeerId simulatedPeerId,
         Guid requestCorrelationId,
         InviteHandshakeResponse response,
         CancellationToken cancellationToken = default);
 
     Task<bool> TryDeliverQueuedInviteHandshakeResponseToMainAsync(
-        PeerId simulatedPeerId,
+        Percolator.Network.PeerId simulatedPeerId,
         Guid requestCorrelationId,
         CancellationToken cancellationToken = default);
 
     Task<SessionId?> TryFinalizeInviteHandshakeResponseFromMainAsync(
-        PeerId simulatedPeerId,
-        PeerId acceptorPeerId,
+        Percolator.Network.PeerId simulatedPeerId,
+        Percolator.Network.PeerId acceptorPeerId,
         Guid requestCorrelationId,
         CancellationToken cancellationToken = default);
 
     Task<EstablishSessionResponse> ReceiveEstablishSessionFromMainAsync(
-        PeerId simulatedPeerId,
+        Percolator.Network.PeerId simulatedPeerId,
         EstablishSessionRequest request,
         CancellationToken cancellationToken = default);
 
     Task<DeliverOpaqueMessageResponse> ReceiveOpaqueMessageFromMainAsync(
-        PeerId simulatedPeerId,
+        Percolator.Network.PeerId simulatedPeerId,
         DeliverOpaqueMessageRequest request,
         CancellationToken cancellationToken = default);
 
     Task PublishStandardPreKeyBundleToRelayAsync(
-        PeerId simulatedPeerId,
-        PeerId relayHostPeerId,
+        Percolator.Network.PeerId simulatedPeerId,
+        Percolator.Network.PeerId relayHostPeerId,
         DateTimeOffset expiresUtc,
         int oneTimeKeyCount,
         CancellationToken cancellationToken = default);
 
     Task<SessionId?> InitiateStandardHandshakeToMainByRelayPkhAsync(
-        PeerId simulatedPeerId,
-        PeerId relayHostPeerId,
+        Percolator.Network.PeerId simulatedPeerId,
+        Percolator.Network.PeerId relayHostPeerId,
         byte[] responderPublicKeyHash,
         CancellationToken cancellationToken = default);
 
-    Task<byte[]> ComputePublicKeyHashAsync(PeerId simulatedPeerId, CancellationToken cancellationToken = default);
+    Task<byte[]> ComputePublicKeyHashAsync(Percolator.Network.PeerId simulatedPeerId, CancellationToken cancellationToken = default);
 
     Task<SessionRatchetMessage> EncryptInternalEnvelopeAsync(
-        PeerId simulatedPeerId,
+        Percolator.Network.PeerId simulatedPeerId,
         SessionId sessionId,
         InternalEnvelope envelope,
         CancellationToken cancellationToken = default);
 
     Task<Plaintext> DecryptSessionMessageAsync(
-        PeerId simulatedPeerId,
+        Percolator.Network.PeerId simulatedPeerId,
         SessionId sessionId,
         SessionRatchetMessage message,
         CancellationToken cancellationToken = default);
 
     Task<EstablishSessionResponse?> ReceiveRelayedOpaquePayloadAsync(
-        PeerId simulatedPeerId,
+        Percolator.Network.PeerId simulatedPeerId,
         byte[] opaqueBytes,
         CancellationToken cancellationToken = default);
 
     Task UpsertPendingStandardSignalHelloAsync(
-        PeerId recipientPeerId,
-        PeerId relayHostPeerId,
+        Percolator.Network.PeerId recipientPeerId,
+        Percolator.Network.PeerId relayHostPeerId,
         HandshakeInitiatorHello hello,
         DateTimeOffset receivedUtc,
         CancellationToken cancellationToken = default);
 
     Task<bool> TryAcceptPendingStandardSignalHelloAsync(
-        PeerId recipientPeerId,
+        Percolator.Network.PeerId recipientPeerId,
         string initiatorPkhHex,
         CancellationToken cancellationToken = default);
 
-    Task SendChatMessageToMainAsync(PeerId simulatedPeerId, string content, CancellationToken cancellationToken = default);
+    Task SendChatMessageToMainAsync(Percolator.Network.PeerId simulatedPeerId, string content, CancellationToken cancellationToken = default);
 }

@@ -111,4 +111,21 @@ public class SqlitePeerPublicSigningKeyStore : IPeerPublicSigningKeyStore
             .FirstOrDefault();
         return latest?.PublicKeyHash;
     }
+
+    // Typed overloads for IdentityPublicKeyHash (delegate to existing byte[] implementations)
+    public async Task ActivateIfChangedAsync(PeerId peerId, byte[] publicKeySpki, IdentityPublicKeyHash publicKeyHash, DateTimeOffset nowUtc, CancellationToken ct = default)
+    {
+        await ActivateIfChangedAsync(peerId, publicKeySpki, publicKeyHash.ToArray(), nowUtc, ct);
+    }
+
+    public async Task<PeerId?> GetPeerIdByPublicKeyHashAsync(IdentityPublicKeyHash publicKeyHash, CancellationToken ct = default)
+    {
+        return await GetPeerIdByPublicKeyHashAsync(publicKeyHash.ToArray(), ct);
+    }
+
+    public async Task<IdentityPublicKeyHash?> GetPublicKeyHashByPeerIdTypedAsync(PeerId peerId, CancellationToken ct = default)
+    {
+        var bytes = await GetPublicKeyHashByPeerIdAsync(peerId, ct);
+        return bytes is null ? null : IdentityPublicKeyHash.FromBytes(bytes);
+    }
 }

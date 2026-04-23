@@ -11,6 +11,7 @@ using Moq;
 using NUnit.Framework;
 using ObservableCollections;
 using Percolator.Application.Identity;
+using Percolator.Identity;
 using Percolator.Identity.Model;
 using Percolator.Network;
 
@@ -30,7 +31,7 @@ public sealed class SimulatorRelayAutoDeliverServiceTests
 
     private sealed class StateStub : TestSimulatorStateServiceBase
     {
-        public override Task<bool> DeliverRelayUpstreamToMainByAckIdAsync(PeerId relayHostPeerId, Percolator.Cryptography.SessionId relayHostToMainSessionId, Guid ackId, CancellationToken cancellationToken = default)
+        public override Task<bool> DeliverRelayUpstreamToMainByAckIdAsync(Percolator.Network.PeerId relayHostPeerId, Percolator.Cryptography.SessionId relayHostToMainSessionId, Guid ackId, CancellationToken cancellationToken = default)
             => Task.FromResult(true);
     }
 
@@ -39,9 +40,9 @@ public sealed class SimulatorRelayAutoDeliverServiceTests
     {
         // Arrange
         var relayHostPeerIdGuid = Guid.NewGuid();
-        var relayHostPeerId = new PeerId(relayHostPeerIdGuid);
+        var relayHostPeerId = new Percolator.Network.PeerId(relayHostPeerIdGuid);
         var recipientPeerIdGuid = Guid.NewGuid();
-        var recipientPeerId = new PeerId(recipientPeerIdGuid);
+        var recipientPeerId = new Percolator.Network.PeerId(recipientPeerIdGuid);
         var ackId = Guid.NewGuid();
         var targetPkh = System.Security.Cryptography.SHA256.HashData(Guid.NewGuid().ToByteArray());
 
@@ -49,7 +50,7 @@ public sealed class SimulatorRelayAutoDeliverServiceTests
         relay.AutoDeliverEnabled.Value = true;
         relay.EnqueueMessage(new InboundRelayMessage(
             AckId: ackId,
-            TargetPkh: targetPkh,
+            TargetPkh: IdentityPublicKeyHash.FromBytes(targetPkh),
             OpaqueBytes: new byte[] { 0x01 },
             EnqueuedUtc: DateTimeOffset.UtcNow,
             DebugType: "x"));

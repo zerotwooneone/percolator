@@ -18,6 +18,7 @@ using Percolator.Application.Configuration;
 using Percolator.Contracts;
 using Percolator.Cryptography;
 using Percolator.Cryptography.Primitives;
+using Percolator.Identity;
 using Percolator.Network;
 
 namespace Desktop.Wpf.Tests;
@@ -378,7 +379,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
         var queued = relay.MessageQueue.Select(kvp => kvp.Value)
             .OfType<InboundRelayMessage>()
             .Single(i => i.DebugType == nameof(HandshakeInitiatorHello));
-        queued.TargetPkh.Should().Equal(responderPkh);
+        queued.TargetPkh.Should().Be(IdentityPublicKeyHash.FromBytes(responderPkh));
 
         diagnostics.Events.Should().Contain(e =>
             e.EventType == SimulatorDiagnosticEventType.PreKeyBundleFetched

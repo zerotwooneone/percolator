@@ -6,7 +6,8 @@ using System.Threading.Tasks;
 using Desktop.Wpf.Features.Simulator;
 using Desktop.Wpf.Features.Simulator.Models;
 using ObservableCollections;
-using Percolator.Network;
+using Percolator.Identity;
+using PeerId = Percolator.Network.PeerId;
 
 namespace Desktop.Wpf.Tests;
 
@@ -41,12 +42,20 @@ public abstract class TestSimulatorStateServiceBase : ISimulatorStateService
         return Task.FromResult(ResolvePkhToPeerId);
     }
 
+    public virtual Task<PeerId?> TryGetPeerIdByIdentityPublicKeyHashAsync(IdentityPublicKeyHash recipientPublicKeyHash,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(ResolvePkhToPeerId);
+    }
+
     public virtual Task<bool> DeleteRelayMessageByAckIdAsync(PeerId relayHostPeerId, Guid ackId, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var relay = _relays.FirstOrDefault(r => r.RelayHostPeerId.Value == relayHostPeerId.Value);
         if (relay is null) return Task.FromResult(false);
-        return Task.FromResult(relay.RemoveMessage(ackId));
+        var removed = relay.RemoveMessage(ackId);
+        return Task.FromResult(removed);
     }
 
     public virtual Task<bool> DeliverRelayUpstreamToMainByAckIdAsync(PeerId relayHostPeerId, Percolator.Cryptography.SessionId relayHostToMainSessionId, Guid ackId, CancellationToken cancellationToken = default)

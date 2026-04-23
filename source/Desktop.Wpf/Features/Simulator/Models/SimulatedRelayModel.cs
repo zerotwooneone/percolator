@@ -1,4 +1,5 @@
 using ObservableCollections;
+using Percolator.Identity;
 using Percolator.Network;
 using R3;
 using System;
@@ -21,7 +22,7 @@ public sealed record OutboundRelayMessage(
 
 public sealed record InboundRelayMessage(
     Guid AckId,
-    byte[] TargetPkh,
+    IdentityPublicKeyHash TargetPkh,
     byte[] OpaqueBytes,
     DateTimeOffset EnqueuedUtc,
     string? DebugType)
@@ -29,12 +30,12 @@ public sealed record InboundRelayMessage(
 
 public sealed class SimulatedRelayModel : IDisposable
 {
-    public SimulatedRelayModel(PeerId relayHostPeerId)
+    public SimulatedRelayModel(Percolator.Network.PeerId relayHostPeerId)
     {
         RelayHostPeerId = relayHostPeerId;
     }
 
-    public PeerId RelayHostPeerId { get; }
+    public Percolator.Network.PeerId RelayHostPeerId { get; }
 
     public ReactiveProperty<bool> AutoDeliverEnabled { get; } = new(false);
 
@@ -44,12 +45,7 @@ public sealed class SimulatedRelayModel : IDisposable
     {
         if (message is null) throw new ArgumentNullException(nameof(message));
 
-        if (message is InboundRelayMessage inbound)
-        {
-            if (inbound.TargetPkh is null) throw new ArgumentNullException(nameof(inbound.TargetPkh));
-            if (inbound.TargetPkh.Length == 0) throw new ArgumentException("TargetPkh must be non-empty", nameof(message));
-        }
-
+        // Type invariant enforced by IdentityPublicKeyHash - no length check needed
         MessageQueue[message.AckId] = message;
     }
 

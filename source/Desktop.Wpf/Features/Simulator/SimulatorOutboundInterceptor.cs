@@ -169,17 +169,16 @@ public sealed class SimulatorOutboundInterceptor : ISimulatorOutboundInterceptor
     }
 
     public async Task<bool> TryRouteMessageViaSimulatorRelayAsync(
-        byte[] recipientPublicKeyHash,
+        Percolator.Identity.IdentityPublicKeyHash recipientPublicKeyHash,
         byte[] cipherBytes,
         string? debugType = null,
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (recipientPublicKeyHash is null) throw new ArgumentNullException(nameof(recipientPublicKeyHash));
-        if (recipientPublicKeyHash.Length != 32) return false;
         if (cipherBytes is null) throw new ArgumentNullException(nameof(cipherBytes));
 
         // Resolve simulated peer by PKH (do NOT assume PeerId is meaningful across peers)
+        // Use the typed overload now that it's available
         var simulatedPeerId = await _state
             .TryGetPeerIdByIdentityPublicKeyHashAsync(recipientPublicKeyHash, cancellationToken)
             .ConfigureAwait(false);
@@ -206,7 +205,7 @@ public sealed class SimulatorOutboundInterceptor : ISimulatorOutboundInterceptor
         // Enqueue in simulator's relay queue (downstream: main → target peer via relay)
         await _state.EnqueueRelayDownstreamToPeerAsync(
             relayHostPeerId: relayHostPeerId,
-            targetIdentityPublicKeyHash: recipientPublicKeyHash,
+            targetIdentityPublicKeyHash: recipientPublicKeyHash.ToArray(),
             opaqueBytes: cipherBytes,
             debugType: debugType ?? "ChatMessage",
             cancellationToken: cancellationToken)

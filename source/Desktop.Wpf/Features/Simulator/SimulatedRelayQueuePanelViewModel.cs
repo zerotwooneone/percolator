@@ -86,7 +86,7 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
                     ackId: m.AckId,
                     enqueuedUtc: m.EnqueuedUtc,
                     debugType: m.DebugType,
-                    targetIdentityPublicKeyHash: m is InboundRelayMessage inbound ? inbound.TargetPkh : null,
+                    targetIdentityPublicKeyHash: m is InboundRelayMessage inbound ? inbound.TargetPkh.ToArray() : null,
                     opaqueBytes: m.OpaqueBytes,
                     peerNameById: _peerNameById);
             })
@@ -263,7 +263,7 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
 
     private Task DeliverItemAsync(RelayMessage message, CancellationToken ct)
     {
-        byte[]? targetIdentityPublicKeyHash = message is InboundRelayMessage inbound ? inbound.TargetPkh : null;
+        byte[]? targetIdentityPublicKeyHash = message is InboundRelayMessage inbound ? inbound.TargetPkh.ToArray() : null;
         return DeliverItemAsync(
             ackId: message.AckId,
             enqueuedUtc: message.EnqueuedUtc,

@@ -6,6 +6,7 @@ using Percolator.Application.Network;
 using Percolator.Application.Services;
 using Percolator.Contracts;
 using Percolator.Cryptography;
+using Percolator.Identity;
 using Percolator.Identity.Model;
 using Percolator.Network;
 using Percolator.Network.Messaging;
@@ -146,14 +147,14 @@ public sealed class SimulatorOutboundInterceptionTests
         var logger = Mock.Of<ILogger<MessageService>>();
         var sessions = new Mock<IDirectSessionRepository>();
         var secureMessaging = new Mock<ISecureMessagingService>();
-        var active = new Mock<ActiveIdentityContext>();
+        var active = new ActiveIdentityContext();
         var networkSender = new Mock<INetworkSender>();
         var wireTap = new Mock<IOutboundMessageWireTap>();
         var interceptor = new Mock<ISimulatorOutboundInterceptor>();
         var keyStore = new Mock<Percolator.Identity.IPeerPublicSigningKeyStore>();
 
         var identity = new IdentityRecord(Guid.NewGuid(), "self") { SelfIdentityId = new Percolator.Identity.SelfId(1) };
-        active.Setup(a => a.Identity).Returns(identity);
+        active.Identity = identity;
 
         var peerId = new Percolator.Identity.PeerId(Guid.NewGuid());
         var networkPeerId = new Percolator.Network.PeerId(peerId.Value);
@@ -175,9 +176,11 @@ public sealed class SimulatorOutboundInterceptionTests
 
         keyStore.Setup(k => k.GetPublicKeyHashByPeerIdAsync(peerId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(recipientPublicKeyHash);
+        keyStore.Setup(k => k.GetPublicKeyHashByPeerIdTypedAsync(peerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(IdentityPublicKeyHash.FromBytes(recipientPublicKeyHash));
 
         interceptor.Setup(i => i.TryRouteMessageViaSimulatorRelayAsync(
-            It.IsAny<byte[]>(),
+            It.IsAny<IdentityPublicKeyHash>(),
             It.IsAny<byte[]>(),
             It.IsAny<string?>(),
             It.IsAny<CancellationToken>()))
@@ -187,7 +190,7 @@ public sealed class SimulatorOutboundInterceptionTests
             logger,
             sessions.Object,
             secureMessaging.Object,
-            active.Object,
+            active,
             networkSender.Object,
             wireTap.Object,
             keyStore.Object,

@@ -9,6 +9,7 @@ using FluentAssertions;
 using Moq;
 using NUnit.Framework;
 using ObservableCollections;
+using Percolator.Identity;
 using Percolator.Network;
 
 namespace Desktop.Wpf.Tests;
@@ -39,6 +40,8 @@ public sealed class SimulatorDiagnosticsTabViewModelFilteringTests
         peersList.Add(new SimulatedPeerModel(peerB, selfIdentityId: 99002, "B", isOnline: true, isRelayCapable: false, spki, priv));
         state.SetupGet(s => s.Peers).Returns(peersList);
         state.Setup(s => s.TryGetPeerIdByIdentityPublicKeyHashAsync(It.IsAny<byte[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Percolator.Network.PeerId?)null);
+        state.Setup(s => s.TryGetPeerIdByIdentityPublicKeyHashAsync(It.IsAny<IdentityPublicKeyHash>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Percolator.Network.PeerId?)null);
         state.Setup(s => s.AddRelayActiveSessionAsync(It.IsAny<Percolator.Network.PeerId>(), It.IsAny<Percolator.Network.PeerId>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);

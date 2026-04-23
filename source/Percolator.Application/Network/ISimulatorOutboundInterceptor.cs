@@ -34,13 +34,13 @@ public interface ISimulatorOutboundInterceptor
     /// If the peer is a simulated peer connected via relay, enqueues the message in the simulator's
     /// relay queue and returns true. Otherwise, returns false to proceed with normal network send.
     /// </summary>
-    /// <param name="recipientPublicKeyHash">The recipient identity PKH (32 bytes)</param>
+    /// <param name="recipientPublicKeyHash">The recipient identity PKH (typed, 32 bytes enforced by type)</param>
     /// <param name="cipherBytes">The encrypted message payload (session cipher)</param>
     /// <param name="debugType">Optional debug type for diagnostics</param>
     /// <param name="cancellationToken">Cancellation token</param>
     /// <returns>True if the message was enqueued in simulator relay (skip network send), false otherwise</returns>
     Task<bool> TryRouteMessageViaSimulatorRelayAsync(
-        byte[] recipientPublicKeyHash,
+        IdentityPublicKeyHash recipientPublicKeyHash,
         byte[] cipherBytes,
         string? debugType = null,
         CancellationToken cancellationToken = default);

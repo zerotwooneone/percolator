@@ -9,7 +9,9 @@ using FluentAssertions;
 using Moq;
 using NUnit.Framework;
 using ObservableCollections;
+using Percolator.Identity;
 using Percolator.Network;
+using PeerId = Percolator.Network.PeerId;
 
 namespace Desktop.Wpf.Tests;
 
@@ -41,6 +43,8 @@ public sealed class SimulatedPeerDirectoryInitializationTests
             .Returns(initGate.Task);
 
         state.Setup(s => s.TryGetPeerIdByIdentityPublicKeyHashAsync(It.IsAny<byte[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((PeerId?)null);
+        state.Setup(s => s.TryGetPeerIdByIdentityPublicKeyHashAsync(It.IsAny<IdentityPublicKeyHash>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((PeerId?)null);
         state.Setup(s => s.AddRelayActiveSessionAsync(It.IsAny<PeerId>(), It.IsAny<PeerId>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
