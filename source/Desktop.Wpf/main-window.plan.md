@@ -1256,3 +1256,741 @@ Update tests:
   - Add explicit assertions that when interceptor returns false, `_networkSender` is called.
 
 ---
+
+## Chunk G
+
+### Goal
+
+Identify and eliminate unnecessary `IdentityPublicKeyHash.ToArray()` allocations by passing the strongly-typed value directly through the call chain where possible. This reduces memory allocations and improves type safety.
+
+### Current State Analysis
+
+Following the refactor to use `IdentityPublicKeyHash` instead of `byte[]` in `IPeerPublicSigningKeyStore`, several call sites still convert to byte arrays unnecessarily. This creates allocation overhead and breaks the strongly-typed boundary.
+
+### Problem Callsites (IdentityPublicKeyHash.ToArray())
+
+**G.1: Application layer - RecipientRoute uses byte[]? PublicKeyHash (HIGH IMPACT)**
+
+The `RecipientRoute` record in `IRemoteEnvelopeSender.cs` uses `byte[]? PublicKeyHash` instead of `IdentityPublicKeyHash?`. This is a cross-cutting issue affecting the entire Application layer chat dispatch system.
+
+- `Percolator.Application\Network\IRemoteEnvelopeSender.cs` (line 11)
+  - `public sealed record RecipientRoute(PeerId PeerId, byte[]? PublicKeyHash);`
+  - **Impact:** All handlers creating RecipientRoute must call `ToArray()`
+
+**G.1.1: Dispatch handlers calling pkh?.ToArray()**
+
+All these handlers resolve PKH from the key store, then immediately convert to byte[]:
+
+- `Percolator.Application\Apps\Chat\Handlers\DispatchTextMessageHandler.cs` (line 66)
+  - `var route = new RecipientRoute(recipientId, pkh?.ToArray());`
+
+- `Percolator.Application\Apps\Chat\Handlers\DispatchDeliveredReceiptHandler.cs` (line 56)
+  - `await _sender.SendChatEnvelopeToPeerAsync(chat, new RecipientRoute(recipientId, pkh?.ToArray()), cancellationToken);`
+
+- `Percolator.Application\Apps\Chat\Handlers\DispatchEmojiAnnotationHandler.cs` (line 57)
+  - `await _sender.SendChatEnvelopeToPeerAsync(chat, new RecipientRoute(recipientId, pkh?.ToArray()), cancellationToken);`
+
+- `Percolator.Application\Apps\Chat\Handlers\DispatchReadReceiptHandler.cs` (line 60)
+  - `await _sender.SendChatEnvelopeToPeerAsync(chat, new RecipientRoute(recipientId, pkh?.ToArray()), cancellationToken);`
+
+- `Percolator.Application\Apps\Chat\Handlers\DispatchSignedAdminCommitOperationHandler.cs` (line 64)
+  - `await _sender.SendChatEnvelopeToPeerAsync(chat, new RecipientRoute(recipientId, pkh?.ToArray()), cancellationToken);`
+
+- `Percolator.Application\Apps\Chat\AdminOperationDispatcher.cs` (line 156)
+  - `await _sender.SendChatEnvelopeToPeerAsync(envelope.ChatEnvelope, new RecipientRoute(pid, pkh?.ToArray()), ct);`
+
+**G.1.2: Commands passing byte[] directly**
+
+- `Percolator.Application\Apps\Chat\CreateGroupFromIdentityKeysCommand.cs` (line 137)
+  - `var route = new RecipientRoute(pid, pkh);` where pkh is byte[]
+
+- `Percolator.Application\Apps\Chat\KeyVersionAdoptedHandler.cs` (line 71)
+  - `var route = new RecipientRoute(new Percolator.Identity.PeerId(adminPeerId.Value), pkh);` where pkh is byte[]
+
+**G.1.3: Test dictionary key using ToArray()**
+
+- `Percolator.ApplicationTests\Apps\Chat\CreateGroupTests.cs` (line 63)
+  - `_map.TryGetValue(Convert.ToBase64String(publicKeyHash.ToArray()), out var id);`
+  - Uses ToArray() to create Base64 string key
+
+**G.2: Simulator relay routing (Desktop.Wpf - production code)**
+
+- `Desktop.Wpf\Features\Simulator\SimulatorOutboundInterceptor.cs` (line 208)
+  - Calls `recipientPublicKeyHash.ToArray()` when passing to `_state.EnqueueRelayDownstreamToPeerAsync`
+  - **Opportunity:** Add typed overload to `ISimulatorStateService.EnqueueRelayDownstreamToPeerAsync` accepting `IdentityPublicKeyHash`
+
+- `Desktop.Wpf\Features\Simulator\SimulatorStateService.cs` (line 2242)
+  - Current typed overload delegates to byte[] overload: `return TryGetPeerIdByIdentityPublicKeyHashAsync(recipientPublicKeyHash.ToArray(), cancellationToken)`
+  - **Opportunity:** Make typed overload the primary implementation, remove byte[] delegation
+
+**G.3: UI snapshotting (Desktop.Wpf - ViewModel/Model code)**
+
+- `Desktop.Wpf\Features\Simulator\SimulatedRelayQueuePanelViewModel.cs` (lines 89, 266)
+  - Calls `inbound.TargetPkh.ToArray()` when creating view models and snapshots
+  - **Opportunity:** View models should hold `IdentityPublicKeyHash` directly, convert only at persistence boundaries
+
+- `Desktop.Wpf\Features\Simulator\Models\SimulatedRelayModel.cs` (line 76)
+  - Calls `x.TargetPkh.ToArray()` when creating `InboundRelayMessageSnapshot`
+  - **Opportunity:** Snapshot record should use `IdentityPublicKeyHash`, convert only for JSON/protobuf serialization
+
+**G.4: Test mock setups (test projects)**
+
+- `Desktop.Wpf.Tests\SimulatorRelayDeliveryServiceTests.cs` (line 180)
+  - Mock uses `pkh.ToArray().SequenceEqual(initiatorPkh)` for matching
+  - **Opportunity:** Use `It.Is<IdentityPublicKeyHash>(pkh => pkh.Equals(expectedPkh))` instead
+
+- `Percolator.ApplicationTests\Network\NetworkTransportPortAdapterTests.cs` (line 119)
+  - Mock returns `IdentityPublicKeyHash.FromBytes(new byte[32]...).ToArray()` - double conversion
+  - **Opportunity:** Return `IdentityPublicKeyHash` directly
+
+- `Percolator.ApplicationTests\Cli\RequestPreKeyBundleByPkhHandlerTests.cs` (lines 76, 270, 322)
+  - Mock uses `h.ToArray().SequenceEqual(expectedPkh)` for matching
+  - **Opportunity:** Use `It.Is<IdentityPublicKeyHash>(h => h.Equals(expectedPkh))` instead
+
+- `Percolator.ApplicationTests\Apps\Chat\CreateGroupConversationHandlerTests.cs` (lines 40, 42, 44)
+  - Mock uses `h.ToArray().SequenceEqual(alicePkh)` for matching
+  - **Opportunity:** Use `It.Is<IdentityPublicKeyHash>(h => h.Equals(expectedPkh))` instead
+
+### G.1: Fix RecipientRoute to use IdentityPublicKeyHash
+
+**File:** `Percolator.Application\Network\IRemoteEnvelopeSender.cs`
+
+Update RecipientRoute to use typed value:
+```csharp
+public sealed record RecipientRoute(PeerId PeerId, Percolator.Identity.IdentityPublicKeyHash? PublicKeyHash);
+```
+
+**Files to update - Dispatch handlers (6 files):**
+
+1. `Percolator.Application\Apps\Chat\Handlers\DispatchTextMessageHandler.cs` (line 66)
+   ```csharp
+   // Before
+   var route = new RecipientRoute(recipientId, pkh?.ToArray());
+   // After
+   var route = new RecipientRoute(recipientId, pkh);
+   ```
+
+2. `Percolator.Application\Apps\Chat\Handlers\DispatchDeliveredReceiptHandler.cs` (line 56)
+   ```csharp
+   // Before
+   await _sender.SendChatEnvelopeToPeerAsync(chat, new RecipientRoute(recipientId, pkh?.ToArray()), cancellationToken);
+   // After
+   await _sender.SendChatEnvelopeToPeerAsync(chat, new RecipientRoute(recipientId, pkh), cancellationToken);
+   ```
+
+3. `Percolator.Application\Apps\Chat\Handlers\DispatchEmojiAnnotationHandler.cs` (line 57)
+   ```csharp
+   // Before
+   await _sender.SendChatEnvelopeToPeerAsync(chat, new RecipientRoute(recipientId, pkh?.ToArray()), cancellationToken);
+   // After
+   await _sender.SendChatEnvelopeToPeerAsync(chat, new RecipientRoute(recipientId, pkh), cancellationToken);
+   ```
+
+4. `Percolator.Application\Apps\Chat\Handlers\DispatchReadReceiptHandler.cs` (line 60)
+   ```csharp
+   // Before
+   await _sender.SendChatEnvelopeToPeerAsync(chat, new RecipientRoute(recipientId, pkh?.ToArray()), cancellationToken);
+   // After
+   await _sender.SendChatEnvelopeToPeerAsync(chat, new RecipientRoute(recipientId, pkh), cancellationToken);
+   ```
+
+5. `Percolator.Application\Apps\Chat\Handlers\DispatchSignedAdminCommitOperationHandler.cs` (line 64)
+   ```csharp
+   // Before
+   await _sender.SendChatEnvelopeToPeerAsync(chat, new RecipientRoute(recipientId, pkh?.ToArray()), cancellationToken);
+   // After
+   await _sender.SendChatEnvelopeToPeerAsync(chat, new RecipientRoute(recipientId, pkh), cancellationToken);
+   ```
+
+6. `Percolator.Application\Apps\Chat\AdminOperationDispatcher.cs` (line 156)
+   ```csharp
+   // Before
+   await _sender.SendChatEnvelopeToPeerAsync(envelope.ChatEnvelope, new RecipientRoute(pid, pkh?.ToArray()), ct);
+   // After
+   await _sender.SendChatEnvelopeToPeerAsync(envelope.ChatEnvelope, new RecipientRoute(pid, pkh), ct);
+   ```
+
+**Files to update - Commands (2 files):**
+
+7. `Percolator.Application\Apps\Chat\CreateGroupFromIdentityKeysCommand.cs` (line 137)
+   ```csharp
+   // Before
+   var route = new RecipientRoute(pid, pkh);
+   // After
+   var route = new RecipientRoute(pid, IdentityPublicKeyHash.FromBytes(pkh));
+   ```
+
+8. `Percolator.Application\Apps\Chat\KeyVersionAdoptedHandler.cs` (line 71)
+   ```csharp
+   // Before
+   var route = new RecipientRoute(new Percolator.Identity.PeerId(adminPeerId.Value), pkh);
+   // After
+   var route = new RecipientRoute(new Percolator.Identity.PeerId(adminPeerId.Value), IdentityPublicKeyHash.FromBytes(pkh));
+   ```
+
+**File to update - Test:**
+
+9. `Percolator.ApplicationTests\Apps\Chat\CreateGroupTests.cs` (line 63)
+   ```csharp
+   // Before
+   _map.TryGetValue(Convert.ToBase64String(publicKeyHash.ToArray()), out var id);
+   // After
+   _map.TryGetValue(Convert.ToBase64String(publicKeyHash.AsReadOnlyMemory().ToArray()), out var id);
+   ```
+
+### G.2: Add typed overload to ISimulatorStateService
+
+**File:** `Desktop.Wpf\Features\Simulator\ISimulatorStateService.cs`
+
+Add typed overload for `EnqueueRelayDownstreamToPeerAsync`:
+```csharp
+Task EnqueueRelayDownstreamToPeerAsync(
+    Percolator.Network.PeerId relayHostPeerId,
+    Percolator.Identity.IdentityPublicKeyHash targetIdentityPublicKeyHash,
+    byte[] opaqueBytes,
+    string? debugType = null,
+    CancellationToken cancellationToken = default);
+```
+
+**File:** `Desktop.Wpf\Features\Simulator\SimulatorStateService.cs`
+
+Implement typed overload as primary, keep byte[] as convenience:
+```csharp
+public async Task EnqueueRelayDownstreamToPeerAsync(
+    Percolator.Network.PeerId relayHostPeerId,
+    Percolator.Identity.IdentityPublicKeyHash targetIdentityPublicKeyHash,
+    byte[] opaqueBytes,
+    string? debugType = null,
+    CancellationToken cancellationToken = default)
+{
+    // Implementation using typed value directly
+    // No ToArray() call needed
+    await EnqueueRelayDownstreamToPeerAsync(
+        relayHostPeerId,
+        targetIdentityPublicKeyHash.ToArray(),
+        opaqueBytes,
+        debugType,
+        cancellationToken);
+}
+
+// Existing byte[] overload remains for backward compatibility
+public async Task EnqueueRelayDownstreamToPeerAsync(
+    Percolator.Network.PeerId relayHostPeerId,
+    byte[] targetIdentityPublicKeyHash,
+    byte[] opaqueBytes,
+    string? debugType = null,
+    CancellationToken cancellationToken = default)
+{
+    // Existing implementation unchanged
+}
+```
+
+**File:** `Desktop.Wpf\Features\Simulator\SimulatorOutboundInterceptor.cs`
+
+Update to use typed overload:
+```csharp
+await _state.EnqueueRelayDownstreamToPeerAsync(
+    relayHostPeerId: relayHostPeerId,
+    targetIdentityPublicKeyHash: recipientPublicKeyHash, // No ToArray()
+    opaqueBytes: cipherBytes,
+    debugType: debugType ?? "ChatMessage",
+    cancellationToken: cancellationToken)
+```
+
+### G.3: Update TryGetPeerIdByIdentityPublicKeyHashAsync to use typed implementation
+
+**File:** `Desktop.Wpf\Features\Simulator\SimulatorStateService.cs`
+
+Make typed overload the primary implementation:
+```csharp
+// Typed overload - primary implementation
+public async Task<Percolator.Network.PeerId?> TryGetPeerIdByIdentityPublicKeyHashAsync(Percolator.Identity.IdentityPublicKeyHash recipientPublicKeyHash, CancellationToken cancellationToken = default)
+{
+    cancellationToken.ThrowIfCancellationRequested();
+    await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+    try
+    {
+        // Direct lookup using typed value
+        foreach (var peer in _peers)
+        {
+            var peerPkh = await ComputePublicKeyHashAsync(peer.PeerId, cancellationToken).ConfigureAwait(false);
+            if (peerPkh.Equals(recipientPublicKeyHash))
+                return peer.PeerId;
+        }
+        return null;
+    }
+    finally
+    {
+        _stateGate.Release();
+    }
+}
+
+// Byte[] overload - convenience wrapper
+public async Task<Percolator.Network.PeerId?> TryGetPeerIdByIdentityPublicKeyHashAsync(byte[] recipientPublicKeyHash, CancellationToken cancellationToken = default)
+{
+    var typed = Percolator.Identity.IdentityPublicKeyHash.FromBytes(recipientPublicKeyHash);
+    return await TryGetPeerIdByIdentityPublicKeyHashAsync(typed, cancellationToken).ConfigureAwait(false);
+}
+```
+
+### G.4: Update UI snapshots to hold IdentityPublicKeyHash
+
+**File:** `Desktop.Wpf\Features\Simulator\Models\SimulatedRelayModel.cs`
+
+Update `InboundRelayMessageSnapshot` to use typed value:
+```csharp
+public sealed record InboundRelayMessageSnapshot(
+    Guid AckId,
+    Percolator.Identity.IdentityPublicKeyHash TargetIdentityPublicKeyHash, // Changed from byte[]
+    byte[] OpaqueBytes,
+    DateTimeOffset EnqueuedUtc,
+    string? DebugType);
+```
+
+Update creation:
+```csharp
+.Select(x => new InboundRelayMessageSnapshot(
+    AckId: x.AckId,
+    TargetIdentityPublicKeyHash: x.TargetPkh, // No ToArray()
+    OpaqueBytes: x.OpaqueBytes.ToArray(),
+    EnqueuedUtc: x.EnqueuedUtc,
+    DebugType: x.DebugType))
+```
+
+**File:** `Desktop.Wpf\Features\Simulator\SimulatedRelayQueuePanelViewModel.cs`
+
+Update view model to hold typed value:
+```csharp
+public sealed record SimulatedRelayQueueItemViewModel(
+    Percolator.Network.PeerId RelayHostPeerId,
+    Guid AckId,
+    DateTimeOffset EnqueuedUtc,
+    string? DebugType,
+    Percolator.Identity.IdentityPublicKeyHash? TargetIdentityPublicKeyHash, // Changed from byte[]
+    byte[] OpaqueBytes,
+    IReadOnlyDictionary<Guid, string> PeerNameById);
+
+// Update creation
+targetIdentityPublicKeyHash: m is InboundRelayMessage inbound ? inbound.TargetPkh : null, // No ToArray()
+```
+
+### G.5: Update test mock setups to use typed matching
+
+**Pattern:** Replace `h.ToArray().SequenceEqual(expectedPkh)` with `h.Equals(expectedPkh)`
+
+Files to update:
+- `Desktop.Wpf.Tests\SimulatorRelayDeliveryServiceTests.cs`
+- `Percolator.ApplicationTests\Network\NetworkTransportPortAdapterTests.cs`
+- `Percolator.ApplicationTests\Cli\RequestPreKeyBundleByPkhHandlerTests.cs`
+- `Percolator.ApplicationTests\Apps\Chat\CreateGroupConversationHandlerTests.cs`
+
+Example:
+```csharp
+// Before
+.Setup(s => s.GetPeerIdByPublicKeyHashAsync(
+    It.Is<IdentityPublicKeyHash>(h => h.ToArray().SequenceEqual(expectedPkh)),
+    It.IsAny<CancellationToken>()))
+
+// After
+.Setup(s => s.GetPeerIdByPublicKeyHashAsync(
+    It.Is<IdentityPublicKeyHash>(h => h.Equals(expectedPkh)),
+    It.IsAny<CancellationToken>()))
+```
+
+---
+
+## Chunk H
+
+### Goal
+
+Refactor all `ByteArrayRecord` implementations to follow the pattern established by `IdentityPublicKeyHash`: use `ReadOnlyMemory<byte>` internally, provide defensive copying only at boundaries, and eliminate unnecessary array allocations.
+
+### Current State Analysis
+
+The codebase has multiple `ByteArrayRecord` base classes across different domains, all using `byte[] Value` with defensive copying issues:
+
+- `Percolator.Identity.Primitives.ByteArrayRecord` - wraps `byte[] Value`
+- `Percolator.Chat.Primitives.ByteArrayRecord` - wraps `byte[] Value`
+- `Percolator.Network.Primitives.ByteArrayRecord` - wraps `byte[] Value`
+- `Percolator.Cryptography.Primitives.ByteArrayRecord` - wraps `byte[] Value`
+- `Percolator.Dht.Primitives.ByteArrayRecord` - wraps `byte[] Value` (different pattern - no inheritance)
+
+**Problems with current approach:**
+1. Direct `byte[]` storage allows external mutation (no defensive copy on construction)
+2. `Value` property exposes mutable array to callers
+3. Multiple duplicate implementations across domains
+4. No standard `ToArray()` / `AsReadOnlyMemory()` pattern
+5. Hash code computation iterates array every time (not cached)
+
+### Research Findings: Concrete ByteArrayRecord Implementations
+
+**Percolator.Cryptography (18 types):**
+- AssociatedData, ChainKey, Ciphertext, HandshakeInvitation, HandshakeResponseMessage, OneTimeKey, Plaintext, PreKey, PrivateEphemeralKey, PrivateOneTimeKey, PublicKey, PrivatePreKey, RatchetEphemeralKey, RatchetIdentityKey, RootKey, Signature, SharedSecret, SessionRatchetMessage
+
+**Percolator.Network (7 types):**
+- DirectMessagePublicKey, Payload, TlsCertificate, IdentityPublicKey, Signature, PublicKeyHash, PublicKey
+
+**Percolator.Chat (3 types):**
+- Pkh, GroupAvatar, EncryptedGroupKey
+
+**Percolator.Dht (1 type):**
+- NodeId (has length validation - must preserve)
+
+### Research Findings: ByteArrayRecord.Value Direct Access Patterns
+
+**Pattern 1: Length checks for validation**
+- Cryptography.HandshakePlanner.cs - inv.Value.Length == 0
+- Cryptography.AeadSessionCrypto.cs - localIdentityPrivate?.Value is null || localIdentityPrivate.Value.Length == 0
+- Cryptography.IPreKeyBundleValidator.cs - bundle.IdentitySigningKey?.Value is null || bundle.IdentitySigningKey.Value.Length == 0
+- Cryptography.CryptographyExtensions.cs - publicKey.Value.Length == 64 || publicKey.Value.Length == 65
+- Dht.DhtService.cs - node.Id.Value.Length == targetId.Value.Length
+- Dht.NodeId.cs - if (id1.Value.Length != id2.Value.Length)
+
+**Pattern 2: Indexing and array manipulation**
+- Cryptography.CryptographyExtensions.cs - publicKey.Value.Skip(1).Take(32).ToArray()
+- Cryptography.X3dhDeriver.cs - ikA.ImportECPrivateKey(localIdentityPrivateKey.Value, out _)
+- Dht.NodeId.cs - xorResult[i] = (byte)(id1.Value[i] ^ id2.Value[i])
+
+**Pattern 3: Direct pass-through to crypto APIs**
+- Cryptography.IRatchetEngine.cs - SessionRatchetMessage.GetAssociatedData((preKey, counter, prevLen), ad.Value)
+- Cryptography.CryptographyExtensions.cs - ECDH import/export operations
+
+**Pattern 4: Test assertions using .Value**
+- Multiple test files access .Value directly for assertions
+- CryptographyTests.SessionRatchetMessageTests.cs - retrievedKey.Value.Should().BeEquivalentTo(ratchetKey.Value)
+
+### Impact Analysis
+
+**High-impact changes:**
+- All 29 concrete ByteArrayRecord types need constructor updates
+- ~20+ call sites in Cryptography domain use .Value.Length for validation
+- ~10+ call sites use .Value for crypto API boundaries
+- ~15+ test assertions use .Value for comparison
+
+**Medium-impact changes:**
+- Protobuf serialization boundaries need .ToArray() calls
+- Dht domain has unique pattern with length validation (NodeId)
+- Network domain types used in cross-domain boundaries
+
+**Low-impact changes:**
+- Chat domain has only 3 types
+- Identity domain only has IdentityPublicKeyHash (already refactored)
+
+### Design Pattern from IdentityPublicKeyHash
+
+**Key improvements:**
+1. Internal storage: `ReadOnlyMemory<byte>` instead of `byte[]`
+2. Defensive copy in `FromBytes()` factory method
+3. `ToArray()` returns defensive copy
+4. `AsReadOnlyMemory()` exposes read-only view
+5. Cached hash code (optional optimization)
+6. Custom `Equals()` using `SequenceEqual`
+
+### H.1: Consolidate ByteArrayRecord into a shared library
+
+**Architectural decision:** Create a new `Percolator.Common` project to hold shared value object infrastructure. This avoids code duplication while maintaining domain isolation (no domain references another domain).
+
+**File:** `source/Percolator.Common/Primitives/ByteArrayRecord.cs` (new file)
+```csharp
+namespace Percolator.Common.Primitives;
+
+public abstract record ByteArrayRecord
+{
+    private readonly ReadOnlyMemory<byte> _value;
+    private readonly int _cachedHashCode;
+
+    protected ByteArrayRecord(ReadOnlyMemory<byte> value)
+    {
+        _value = value;
+        _cachedHashCode = ComputeHashCode(value.Span);
+    }
+
+    /// <summary>
+    /// Creates a ByteArrayRecord from raw bytes with a defensive copy.
+    /// </summary>
+    protected static byte[] CopyBytes(byte[] bytes)
+    {
+        if (bytes is null)
+            throw new ArgumentNullException(nameof(bytes));
+        
+        var copy = new byte[bytes.Length];
+        Buffer.BlockCopy(bytes, 0, copy, 0, bytes.Length);
+        return copy;
+    }
+
+    /// <summary>
+    /// Returns a defensive copy of the value as a byte array.
+    /// </summary>
+    public byte[] ToArray()
+    {
+        var copy = new byte[_value.Length];
+        _value.Span.CopyTo(copy);
+        return copy;
+    }
+
+    /// <summary>
+    /// Returns the value as read-only memory without copying.
+    /// </summary>
+    public ReadOnlyMemory<byte> AsReadOnlyMemory() => _value;
+
+    /// <summary>
+    /// Returns the value as a span without copying.
+    /// </summary>
+    public ReadOnlySpan<byte> AsSpan() => _value.Span;
+
+    public virtual bool Equals(ByteArrayRecord? other)
+    {
+        if (other is null) return false;
+        if (ReferenceEquals(this, other)) return true;
+        return _value.Span.SequenceEqual(other._value.Span);
+    }
+
+    public override int GetHashCode() => _cachedHashCode;
+
+    private static int ComputeHashCode(ReadOnlySpan<byte> span)
+    {
+        unchecked
+        {
+            var hash = 17;
+            for (int i = 0; i < span.Length; i++)
+            {
+                hash = hash * 23 + span[i];
+            }
+            return hash;
+        }
+    }
+}
+```
+
+### H.2: Update all ByteArrayRecord implementations to inherit from shared base
+
+**H.2.1: Percolator.Identity.Primitives.ByteArrayRecord**
+
+**File:** `source/Percolator.Identity/Primitives/ByteArrayRecord.cs`
+```csharp
+using Percolator.Common.Primitives;
+
+namespace Percolator.Identity.Primitives;
+
+public abstract record ByteArrayRecord : Percolator.Common.Primitives.ByteArrayRecord
+{
+    protected ByteArrayRecord(byte[] bytes) 
+        : base(CopyBytes(bytes))
+    {
+    }
+}
+```
+
+**H.2.2: Percolator.Chat.Primitives.ByteArrayRecord**
+
+**File:** `source/Percolator.Chat/Primitives/ByteArrayRecord.cs`
+```csharp
+using Percolator.Common.Primitives;
+
+namespace Percolator.Chat.Primitives;
+
+public abstract record ByteArrayRecord : Percolator.Common.Primitives.ByteArrayRecord
+{
+    protected ByteArrayRecord(byte[] bytes) 
+        : base(CopyBytes(bytes))
+    {
+    }
+}
+```
+
+**H.2.3: Percolator.Network.Primitives.ByteArrayRecord**
+
+**File:** `source/Percolator.Network/Primitives/ByteArrayRecord.cs`
+```csharp
+using Percolator.Common.Primitives;
+
+namespace Percolator.Network.Primitives;
+
+public abstract record ByteArrayRecord : Percolator.Common.Primitives.ByteArrayRecord
+{
+    protected ByteArrayRecord(byte[] bytes) 
+        : base(CopyBytes(bytes))
+    {
+    }
+}
+```
+
+**H.2.4: Percolator.Cryptography.Primitives.ByteArrayRecord`
+
+**File:** `source/Percolator.Cryptography/Primitives/ByteArrayRecord.cs`
+```csharp
+using Percolator.Common.Primitives;
+
+namespace Percolator.Cryptography.Primitives;
+
+public abstract record ByteArrayRecord : Percolator.Common.Primitives.ByteArrayRecord
+{
+    protected ByteArrayRecord(byte[] bytes) 
+        : base(CopyBytes(bytes))
+    {
+    }
+}
+```
+
+**H.2.5: Percolator.Dht.Primitives.ByteArrayRecord**
+
+**File:** `source/Percolator.Dht/Primitives/ByteArrayRecord.cs`
+```csharp
+using Percolator.Common.Primitives;
+
+namespace Percolator.Dht.Primitives;
+
+public abstract record ByteArrayRecord : Percolator.Common.Primitives.ByteArrayRecord
+{
+    protected ByteArrayRecord(byte[] bytes) 
+        : base(CopyBytes(bytes))
+    {
+    }
+
+    // Dht has existing Value property - override to delegate
+    public byte[] Value => ToArray();
+}
+```
+
+### H.3: Update ByteArrayRecord implementations to use proper construction
+
+**H.3.1: Percolator.Chat.ValueObjects.Pkh**
+
+**File:** `source/Percolator.Chat/ValueObjects/Pkh.cs`
+```csharp
+using Percolator.Chat.Primitives;
+
+namespace Percolator.Chat.ValueObjects;
+
+public sealed record Pkh : ByteArrayRecord
+{
+    public Pkh(byte[] value) : base(value) { }
+
+    public static Pkh FromBytes(byte[] value)
+    {
+        if (value is null) throw new ArgumentNullException(nameof(value));
+        return new Pkh(value);
+    }
+}
+```
+
+**H.3.2: Percolator.Network.ValueObjects.IdentityPublicKey**
+
+**File:** `source/Percolator.Network/ValueObjects/IdentityPublicKey.cs`
+```csharp
+using Percolator.Network.Primitives;
+
+namespace Percolator.Network.ValueObjects;
+
+public record IdentityPublicKey : ByteArrayRecord
+{
+    public IdentityPublicKey(byte[] value) : base(value) { }
+}
+```
+
+**H.3.3: Percolator.Cryptography types**
+
+All cryptography types inherit from ByteArrayRecord. Update constructors to use base class:
+- `AssociatedData.cs`
+- `ChainKey.cs`
+- `Ciphertext.cs`
+- `HandshakeResponseMessage.cs`
+- `HandshakeInvitation.cs`
+- `OneTimeKey.cs`
+- `Plaintext.cs`
+- `PreKey.cs`
+- `PrivateEphemeralKey.cs`
+- `PrivateOneTimeKey.cs`
+- `RatchetEphemeralKey.cs`
+- `RatchetIdentityKey.cs`
+- `PublicKey.cs`
+- `PrivatePreKey.cs`
+- `RootKey.cs`
+- `Signature.cs`
+- `SharedSecret.cs`
+- `SessionRatchetMessage.cs`
+
+**H.3.4: Percolator.Network types**
+
+- `Payload.cs`
+- `TlsCertificate.cs`
+- `Signature.cs`
+- `DirectMessagePublicKey.cs`
+- `PublicKeyHash.cs`
+- `PublicKey.cs`
+
+**H.3.5: Percolator.Chat types**
+
+- `GroupAvatar.cs`
+- `EncryptedGroupKey.cs`
+
+**H.3.6: Percolator.Dht types**
+
+- `NodeId.cs` (already has length validation, preserve it)
+
+### H.4: Update call sites to use ToArray() only at boundaries
+
+**H.4.1: Protobuf serialization boundaries**
+
+Search for `.Value` usage in protobuf conversion code and replace with `.ToArray()`:
+```csharp
+// Before
+ByteString.CopyFrom(record.Value)
+
+// After
+ByteString.CopyFrom(record.ToArray())
+```
+
+**H.4.2: Persistence/JSON boundaries**
+
+Search for `.Value` usage in serialization code and replace with `.ToArray()`:
+```csharp
+// Before
+JsonSerializer.Serialize(record.Value)
+
+// After
+JsonSerializer.Serialize(record.ToArray())
+```
+
+**H.4.3: Cryptography API boundaries**
+
+Some cryptography APIs accept `byte[]` directly. Update call sites:
+```csharp
+// Before
+cryptoApi.Process(record.Value)
+
+// After
+cryptoApi.Process(record.ToArray())
+```
+
+**H.4.4: Test assertions**
+
+Update test assertions to use proper equality:
+```csharp
+// Before
+Assert.That(actual.Value.SequenceEqual(expected.Value))
+
+// After
+Assert.That(actual.Equals(expected))
+```
+
+### H.5: Remove duplicate ByteArrayRecord implementations
+
+After consolidating to shared base, remove the duplicate implementations in:
+- `Percolator.Identity.Primitives.ByteArrayRecord.cs`
+- `Percolator.Chat.Primitives.ByteArrayRecord.cs`
+- `Percolator.Network.Primitives.ByteArrayRecord.cs`
+- `Percolator.Cryptography.Primitives.ByteArrayRecord.cs`
+
+Keep only the thin wrapper that inherits from `Percolator.Common.Primitives.ByteArrayRecord` to maintain domain isolation.
+
+### Notes
+
+- The shared base class approach maintains domain isolation (no cross-domain references)
+- Defensive copying happens at construction boundaries only
+- Internal operations use `ReadOnlyMemory<byte>` without allocation
+- `ToArray()` is called only at external boundaries (protobuf, persistence, crypto APIs)
+- Hash code is cached for performance
+- This pattern is already proven by `IdentityPublicKeyHash`
+
+---
