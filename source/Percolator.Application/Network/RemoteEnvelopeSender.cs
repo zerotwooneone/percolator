@@ -21,7 +21,9 @@ namespace Percolator.Application.Network
             var internalEnvelope = new InternalEnvelope { ChatEnvelope = chatEnvelope };
             try
             {
-                var result = await _messageService.SendMessageAsync(internalEnvelope, recipient.PeerId, ct).ConfigureAwait(false);
+                var result = await _messageService
+                    .SendMessageAsync(internalEnvelope, recipient.PeerId, recipient.PublicKeyHash, ct)
+                    .ConfigureAwait(false);
                 if (result.LastError is not null)
                 {
                     _logger.LogWarning(result.LastError, "Failed sending envelope to {PeerId} via {Path}", recipient.PeerId, result.Path);

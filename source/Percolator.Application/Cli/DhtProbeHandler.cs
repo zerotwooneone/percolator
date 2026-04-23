@@ -65,7 +65,7 @@ public class DhtProbeHandler : IRequestHandler<DhtProbeCommand, FindNodeResponse
         {
             DhtEnvelope = new DhtEnvelope { PingRequest = new PingRequest() }
         };
-        await _messageService.SendMessageAsync(pingEnvelope, remotePeer.Id, cancellationToken).ConfigureAwait(false);
+        await _messageService.SendMessageAsync(pingEnvelope, remotePeer.Id, null, cancellationToken).ConfigureAwait(false);
 
 
         // 3) Build FindNode with target peer id (use self hashed signing key if unspecified)
@@ -80,9 +80,9 @@ public class DhtProbeHandler : IRequestHandler<DhtProbeCommand, FindNodeResponse
                 }
             }
         };
-
+        note("passing recip PKH seems insane");
         // 4) Send and receive response, decrypt and parse
-        var (sendResult, response) = await _messageService.SendMessageWithResponseAsync(findNodeEnvelope, remotePeer.Id, cancellationToken).ConfigureAwait(false);
+        var (sendResult, response) = await _messageService.SendMessageWithResponseAsync(findNodeEnvelope, remotePeer.Id, null, cancellationToken).ConfigureAwait(false);
         if (response is null
             || response.ResultCase != DeliverOpaqueMessageResponse.ResultOneofCase.ResponsePayload
             || response.ResponsePayload is null

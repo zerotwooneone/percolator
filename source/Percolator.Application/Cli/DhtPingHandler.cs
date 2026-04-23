@@ -49,7 +49,7 @@ public sealed class DhtPingHandler : IRequestHandler<DhtPingCommand, Unit>
             DhtEnvelope = new DhtEnvelope { PingRequest = new PingRequest() }
         };
         _logger.LogInformation("Sending DHT Ping to peer {PeerId}", peer.Id);
-        await _messageService.SendMessageAsync(env, peer.Id, cancellationToken).ConfigureAwait(false);
+        await _messageService.SendMessageAsync(env, peer.Id, null, cancellationToken).ConfigureAwait(false);
         return Unit.Value;
     }
 }

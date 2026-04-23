@@ -18,6 +18,7 @@ namespace Percolator.Application.Network
         private readonly ActiveIdentityContext _active;
         private readonly INetworkSender _networkSender;
         private readonly IOutboundMessageWireTap _wireTap;
+        private readonly ISimulatorOutboundInterceptor? _simulatorOutboundInterceptor;
 
         public MessageService(
             ILogger<MessageService> logger,
@@ -25,7 +26,8 @@ namespace Percolator.Application.Network
             ISecureMessagingService secureMessaging,
             ActiveIdentityContext active,
             INetworkSender networkSender,
-            IOutboundMessageWireTap wireTap)
+            IOutboundMessageWireTap wireTap,
+            ISimulatorOutboundInterceptor? simulatorOutboundInterceptor = null)
         {
             _logger = logger;
             _sessions = sessions;
@@ -33,11 +35,13 @@ namespace Percolator.Application.Network
             _active = active;
             _networkSender = networkSender;
             _wireTap = wireTap;
+            _simulatorOutboundInterceptor = simulatorOutboundInterceptor;
         }
 
         public async Task<(SendResult Result, DeliverOpaqueMessageResponse? Response)> SendMessageWithResponseAsync(
             InternalEnvelope envelope,
             PeerId recipientPeerId,
+            byte[]? recipientPublicKeyHash,
             CancellationToken ct = default)
         {
             if (_active.Identity is null)
@@ -52,6 +56,23 @@ namespace Percolator.Application.Network
 
             var sessionId = new SessionId(ds.SessionId.Value);
             var cipher = await _secureMessaging.EncryptAsync(sessionId, new Plaintext(envelope.ToByteArray()), ct).ConfigureAwait(false);
+
+            // Check if this should route via simulator relay
+            if (_simulatorOutboundInterceptor is not null && recipientPublicKeyHash is not null)
+            {
+                var routedViaSimulator = await _simulatorOutboundInterceptor
+                    .TryRouteMessageViaSimulatorRelayAsync(
+                        recipientPublicKeyHash,
+                        cipher.Value,
+                        debugType: envelope.ChatEnvelope?.MessageCase.ToString(),
+                        ct)
+                    .ConfigureAwait(false);
+
+                if (routedViaSimulator)
+                {
+                    return (SendResult.CreateSuccess("SimulatorRelay", new[] { "SimulatorRelay" }, attempts: 0), null);
+                }
+            }
 
             if (_wireTap.Enabled)
             {
@@ -106,7 +127,11 @@ namespace Percolator.Application.Network
             return (SendResult.CreateSuccess(outcome.Path, outcome.AttemptedPaths.ToArray(), outcome.Attempts), resp);
         }
 
-        public async Task<SendResult> SendMessageAsync(InternalEnvelope envelope, PeerId recipientPeerId, CancellationToken ct = default)
+        public async Task<SendResult> SendMessageAsync(
+            InternalEnvelope envelope,
+            PeerId recipientPeerId,
+            byte[]? recipientPublicKeyHash,
+            CancellationToken ct = default)
         {
             if (_active.Identity is null)
                 throw new InvalidOperationException("Active identity not initialized");
@@ -120,6 +145,23 @@ namespace Percolator.Application.Network
 
             var sessionId = new SessionId(ds.SessionId.Value);
             var cipher = await _secureMessaging.EncryptAsync(sessionId, new Plaintext(envelope.ToByteArray()), ct).ConfigureAwait(false);
+
+            // Check if this should route via simulator relay
+            if (_simulatorOutboundInterceptor is not null && recipientPublicKeyHash is not null)
+            {
+                var routedViaSimulator = await _simulatorOutboundInterceptor
+                    .TryRouteMessageViaSimulatorRelayAsync(
+                        recipientPublicKeyHash,
+                        cipher.Value,
+                        debugType: envelope.ChatEnvelope?.MessageCase.ToString(),
+                        ct)
+                    .ConfigureAwait(false);
+
+                if (routedViaSimulator)
+                {
+                    return SendResult.CreateSuccess("SimulatorRelay", new[] { "SimulatorRelay" }, attempts: 0);
+                }
+            }
 
             if (_wireTap.Enabled)
             {

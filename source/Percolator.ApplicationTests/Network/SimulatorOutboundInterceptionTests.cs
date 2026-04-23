@@ -1,10 +1,14 @@
 using System.Net;
 using Microsoft.Extensions.Logging;
 using Moq;
+using Percolator.Application.Identity;
 using Percolator.Application.Network;
+using Percolator.Application.Services;
 using Percolator.Contracts;
 using Percolator.Cryptography;
+using Percolator.Identity.Model;
 using Percolator.Network;
+using Percolator.Network.Messaging;
 
 namespace Percolator.ApplicationTests.Network;
 
@@ -133,5 +137,93 @@ public sealed class SimulatorOutboundInterceptionTests
             out It.Ref<Task<DeliverOpaqueMessageResponse>>.IsAny), Times.Once);
         profileRepo.VerifyAll();
         routePlanner.VerifyAll();
+    }
+
+    [Test]
+    public async Task MessageService_SendMessageAsync_WhenInterceptorRoutesViaSimulatorRelay_ReturnsSuccessWithoutNetworkSend()
+    {
+        // ARRANGE
+        var logger = Mock.Of<ILogger<MessageService>>();
+        var sessions = new Mock<IDirectSessionRepository>();
+        var secureMessaging = new Mock<ISecureMessagingService>();
+        var active = new Mock<ActiveIdentityContext>();
+        var networkSender = new Mock<INetworkSender>();
+        var wireTap = new Mock<IOutboundMessageWireTap>();
+        var interceptor = new Mock<ISimulatorOutboundInterceptor>();
+
+        var identity = new IdentityRecord(
+            Percolator.Identity.SelfId.NewId(),
+            "Test",
+            Percolator.Cryptography.KeyGeneration.GenerateEd25519KeyPair());
+
+        active.Setup(a => a.Identity).Returns(identity);
+
+        var peerId = new Percolator.Identity.PeerId(Guid.NewGuid());
+        var networkPeerId = new Percolator.Network.PeerId(peerId.Value);
+        var sessionId = Guid.NewGuid();
+        var recipientPublicKeyHash = new byte[32];
+        recipientPublicKeyHash[0] = 1;
+
+        var session = new Percolator.Network.DirectSession(
+            sessionId,
+            identity.SelfIdentityId,
+            networkPeerId,
+            DateTimeOffset.UtcNow,
+            Percolator.Cryptography.KeyGeneration.GenerateX25519KeyPair().PublicKey);
+
+        sessions.Setup(s => s.GetByRemotePeerIdAsync(networkPeerId, identity.SelfIdentityId.Value, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(session);
+
+        var cipher = new Percolator.Cryptography.SessionRatchetMessage(new byte[] { 1, 2, 3 });
+        secureMessaging.Setup(s => s.EncryptAsync(It.IsAny<Percolator.Cryptography.SessionId>(), It.IsAny<Percolator.Cryptography.Plaintext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(cipher);
+
+        wireTap.Setup(w => w.Enabled).Returns(false);
+
+        interceptor.Setup(i => i.TryRouteMessageViaSimulatorRelayAsync(
+            It.IsAny<byte[]>(),
+            It.IsAny<byte[]>(),
+            It.IsAny<string?>(),
+            It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+
+        var sut = new MessageService(
+            logger,
+            sessions.Object,
+            secureMessaging.Object,
+            active.Object,
+            networkSender.Object,
+            wireTap.Object,
+            interceptor.Object);
+
+        var envelope = new Percolator.Contracts.InternalEnvelope
+        {
+            Version = 1,
+            ChatEnvelope = new Percolator.Contracts.ChatEnvelope
+            {
+                Version = 1,
+                TextMessage = new Percolator.Contracts.TextMessage
+                {
+                    Version = 1,
+                    Content = "Test message",
+                    TimestampUtc = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                }
+            }
+        };
+
+        // ACT
+        var result = await sut.SendMessageAsync(envelope, peerId, recipientPublicKeyHash, CancellationToken.None);
+
+        // ASSERT
+        Assert.That(result.Success, Is.True);
+        Assert.That(result.Path, Is.EqualTo("SimulatorRelay"));
+
+        // Critical: network sender should never be called when interceptor routes via simulator relay
+        networkSender.Verify(n => n.SendAsync(
+            It.IsAny<Percolator.Network.PeerId>(),
+            It.IsAny<NetworkPayload>(),
+            It.IsAny<SendStrategy>(),
+            It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 }

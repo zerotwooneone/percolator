@@ -14,15 +14,18 @@ public sealed class SimulatorOutboundInterceptor : ISimulatorOutboundInterceptor
     private readonly ISimulatorStateService _state;
     private readonly ILogger<SimulatorOutboundInterceptor> _logger;
     private readonly ActiveIdentityContext _active;
+    private readonly ISimulatorDiagnosticsService _diagnostics;
 
     public SimulatorOutboundInterceptor(
         ISimulatorStateService state,
         ILogger<SimulatorOutboundInterceptor> logger,
-        ActiveIdentityContext active)
+        ActiveIdentityContext active,
+        ISimulatorDiagnosticsService diagnostics)
     {
         _state = state;
         _logger = logger;
         _active = active;
+        _diagnostics = diagnostics;
     }
 
     public bool TryEstablishDirectSession(
@@ -163,6 +166,64 @@ public sealed class SimulatorOutboundInterceptor : ISimulatorOutboundInterceptor
 
         simulatedPeerId = match.PeerId;
         return true;
+    }
+
+    public async Task<bool> TryRouteMessageViaSimulatorRelayAsync(
+        byte[] recipientPublicKeyHash,
+        byte[] cipherBytes,
+        string? debugType = null,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (recipientPublicKeyHash is null) throw new ArgumentNullException(nameof(recipientPublicKeyHash));
+        if (recipientPublicKeyHash.Length != 32) return false;
+        if (cipherBytes is null) throw new ArgumentNullException(nameof(cipherBytes));
+
+        // Resolve simulated peer by PKH (do NOT assume PeerId is meaningful across peers)
+        var simulatedPeerId = await _state
+            .TryGetPeerIdByIdentityPkhAsync(recipientPublicKeyHash, cancellationToken)
+            .ConfigureAwait(false);
+        if (simulatedPeerId is null) return false;
+
+        var peer = _state.Peers.FirstOrDefault(p => p.PeerId == simulatedPeerId);
+        if (peer is null) return false;
+
+        // Check if peer is connected via relay
+        if (peer.ConnectionMode.CurrentValue != ConnectionMode.ViaRelay)
+        {
+            return false; // Not connected via relay, proceed with normal send
+        }
+
+        // Get the relay host peer ID
+        if (peer.RelayPeerId.CurrentValue.Value == Guid.Empty)
+        {
+            _logger.LogWarning("[simulator relay] Peer {PeerId} has ViaRelay mode but no relay host ID", peer.PeerId);
+            return false; // Fallback to normal send
+        }
+
+        var relayHostPeerId = peer.RelayPeerId.CurrentValue;
+
+        // Enqueue in simulator's relay queue (downstream: main → target peer via relay)
+        await _state.EnqueueRelayDownstreamToPeerAsync(
+            relayHostPeerId: relayHostPeerId,
+            targetPkh: recipientPublicKeyHash,
+            opaqueBytes: cipherBytes,
+            debugType: debugType ?? "ChatMessage",
+            cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
+
+        _logger.LogInformation(
+            "[simulator relay] Routed message to peer {PeerId} via relay host {RelayHost}",
+            peer.PeerId,
+            relayHostPeerId);
+
+        _diagnostics.Emit(
+            SimulatorDiagnosticEventType.RelayEnqueued,
+            $"Message routed to peer {peer.PeerId} via simulator relay host {relayHostPeerId}",
+            peerId: peer.PeerId,
+            relayHostPeerId: relayHostPeerId);
+
+        return true; // Message enqueued, skip network send
     }
 
 }
