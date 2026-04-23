@@ -71,7 +71,7 @@
                       <ComboBox Width="260"
                                 ItemsSource="{Binding AvailablePublishTargets}"
                                 DisplayMemberPath="Display"
-                                SelectedValuePath="PeerId"
+                                SelectedValuePath="PeerId.Value"
                                 SelectedValue="{Binding PublishTargetPeerId.Value}" />
                       <Button DockPanel.Dock="Right" Content="Publish" Command="{Binding PublishKeysCommand}" />
                     </DockPanel>
