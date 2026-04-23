@@ -1046,7 +1046,7 @@ The `ParticipantId` is a `readonly record struct(Guid Value)`, so equality compa
 
 **Root Cause:** Missing Main → Relay Routing Path
 
-When main sends a chat message to a peer that is connected via relay, the message is sent directly to the peer's endpoint without checking the peer's connection mode. The simulator's relay tab only shows messages when they are explicitly enqueued via `EnqueueRelayUpstreamToMainAsync` or `EnqueueRelayDownstreamToPeerAsync`. There is no interceptor that detects when main is sending to a relay-connected peer and enqueues the message in the simulator's relay queue.
+When main sends a chat message to a peer that is connected via relay, the message is sent directly to the peer's endpoint without checking the peer's connection mode. The simulator's relay tab only shows messages when they are explicitly enqueued via `EnqueueRelayDownstreamToPeerAsync`. There is no interceptor that detects when main is sending to a relay-connected peer and enqueues the message in the simulator's relay queue.
 
 **Current Code Path Gap:**
 
@@ -1058,263 +1058,240 @@ When main sends a chat message to a peer that is connected via relay, the messag
    - `RemoteEnvelopeSender.SendChatEnvelopeToPeerAsync`:
      - Wraps in `InternalEnvelope`
      - Calls `_messageService.SendMessageAsync(internalEnvelope, recipient.PeerId, ct)`
-   - `IMessageService.SendMessageAsync` → `GrpcMessageTransportService.SendMessageAsync`:
-     - Sends via gRPC to the peer's endpoint
+   - `MessageService.SendMessageAsync` (in `Percolator.Application\Network\MessageService.cs`):
+     - Encrypts the envelope to a session cipher
+     - Calls `_networkSender.SendAsync` with `SendStrategy.DirectThenRelay`
      - **NO CHECK** for whether the peer is connected via relay in the simulator
 
 2. **Simulator Relay Tab (What Should Happen):**
    - When main sends to a relay-connected peer, the message should:
-     - Be intercepted before gRPC send
-     - Be enqueued in the simulator's relay queue (`EnqueueRelayUpstreamToMainAsync`)
-     - Appear in the relay tab UI
+     - Be intercepted before network send
+     - Be enqueued in the simulator's relay queue via `EnqueueRelayDownstreamToPeerAsync` (which calls `SimulatedRelayModel.EnqueueMessage`)
+     - Appear in the relay tab UI as a downstream message
      - Be forwarded to the target peer by the relay host
 
-**Solution: Add Main → Relay Interceptor**
+**Solution: Extend ISimulatorOutboundInterceptor**
 
-The solution is to add an interceptor in the `PercolatorMessageService` that checks if the recipient peer is a simulated peer connected via relay. If so, enqueue the message in the simulator's relay queue instead of sending via gRPC.
+The solution is to extend `ISimulatorOutboundInterceptor` with a new method that checks if the recipient peer is a simulated peer connected via relay. If so, enqueue the message in the simulator's relay queue using the same pattern as relayed handshakes.
 
-### Step C.1: Add Connection Mode Check to SimulatedPeerModel
+### Step C.1: Add Method to ISimulatorOutboundInterceptor
 
-**Problem:** The simulator needs to track whether a peer is connected via relay, but this information is not easily accessible from the main window's message sending path.
+**Problem:** The existing `ISimulatorOutboundInterceptor` only intercepts gRPC calls based on endpoint resolution. We need a method that can be called from `MessageService` to intercept message sends based on peer ID.
 
-**Solution:** Add a method to `ISimulatorStateService` that checks if a peer is connected via relay.
+**Solution:** Add a new method to `ISimulatorOutboundInterceptor` that checks if a message to a peer should be routed via simulator relay.
 
-**File:** `Desktop.Wpf/Features/Simulator/ISimulatorStateService.cs`
+**File:** `Percolator.Application/Network/ISimulatorOutboundInterceptor.cs`
+
+**Add this method to the interface (after the existing methods):**
 
 ```csharp
 /// <summary>
-/// Checks if the specified simulated peer is currently connected via relay.
+/// Checks if a message to the specified peer should be routed via simulator relay.
+/// If the peer is a simulated peer connected via relay, enqueues the message in the simulator's
+/// relay queue and returns true. Otherwise, returns false to proceed with normal network send.
 /// </summary>
-/// <param name="simulatedPeerId">The peer ID to check</param>
-/// <returns>True if the peer is connected via relay, false otherwise</returns>
-bool IsPeerConnectedViaRelay(PeerId simulatedPeerId);
-```
-
-**File:** `Desktop.Wpf/Features/Simulator/SimulatorStateService.cs`
-
-```csharp
-public bool IsPeerConnectedViaRelay(PeerId simulatedPeerId)
-{
-    _stateGate.Wait();
-    try
-    {
-        var peer = _peers.FirstOrDefault(p => p.PeerId == simulatedPeerId);
-        if (peer is null) return false;
-
-        return peer.ConnectionMode.CurrentValue == ConnectionMode.ViaRelay
-            && peer.RelayPeerId.CurrentValue is not null;
-    }
-    finally
-    {
-        _stateGate.Release();
-    }
-}
-```
-
-### Step C.2: Add Simulator Relay Interceptor Interface
-
-**Problem:** Need a way for the main window's message service to check if a peer is a simulated peer connected via relay, and if so, enqueue the message in the simulator's relay queue.
-
-**Solution:** Create an interceptor interface that the `PercolatorMessageService` can call to check for simulator relay routing.
-
-**File:** `Desktop.Wpf/Features/Simulator/ISimulatorRelayInterceptor.cs` (new file)
-
-```csharp
-using Percolator.Network;
-
-namespace Desktop.Wpf.Features.Simulator;
-
-/// <summary>
-/// Interceptor for routing messages to simulator relay when the recipient is a simulated peer connected via relay.
-/// </summary>
-public interface ISimulatorRelayInterceptor
-{
-    /// <summary>
-    /// Checks if the message should be routed via simulator relay instead of direct gRPC.
-    /// If true, enqueues the message in the simulator's relay queue and returns true.
-    /// If false, the caller should proceed with direct gRPC send.
-    /// </summary>
-    /// <param name="recipientPeerId">The recipient peer ID</param>
-    /// <param name="opaqueBytes">The message payload</param>
-    /// <param name="debugType">Optional debug type for diagnostics</param>
-    /// <param name="cancellationToken">Cancellation token</param>
-    /// <returns>True if the message was enqueued in simulator relay, false if direct send should proceed</returns>
-    Task<bool> TryRouteViaSimulatorRelayAsync(
-        PeerId recipientPeerId,
-        byte[] opaqueBytes,
-        string? debugType = null,
-        CancellationToken cancellationToken = default);
-}
-```
-
-### Step C.3: Implement Simulator Relay Interceptor
-
-**File:** `Desktop.Wpf/Features/Simulator/SimulatorRelayInterceptor.cs` (new file)
-
-```csharp
-using Microsoft.Extensions.Logging;
-using Percolator.Network;
-using System;
-using System.Threading;
-using System.Threading.Tasks;
-
-namespace Desktop.Wpf.Features.Simulator;
-
-public sealed class SimulatorRelayInterceptor : ISimulatorRelayInterceptor
-{
-    private readonly ISimulatorStateService _state;
-    private readonly ILogger<SimulatorRelayInterceptor> _logger;
-
-    public SimulatorRelayInterceptor(
-        ISimulatorStateService state,
-        ILogger<SimulatorRelayInterceptor> logger)
-    {
-        _state = state;
-        _logger = logger;
-    }
-
-    public async Task<bool> TryRouteViaSimulatorRelayAsync(
-        PeerId recipientPeerId,
-        byte[] opaqueBytes,
-        string? debugType = null,
-        CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        if (opaqueBytes is null) throw new ArgumentNullException(nameof(opaqueBytes));
-
-        // Check if recipient is a simulated peer connected via relay
-        if (!_state.IsPeerConnectedViaRelay(recipientPeerId))
-        {
-            return false; // Not a simulator relay peer, proceed with direct send
-        }
-
-        // Get the relay host peer ID
-        var peer = _state.Peers.FirstOrDefault(p => p.PeerId == recipientPeerId);
-        if (peer?.RelayPeerId.CurrentValue is not { } relayHostPeerId)
-        {
-            _logger.LogWarning("[simulator relay] Peer {PeerId} has relay mode but no relay host ID", recipientPeerId);
-            return false; // Fallback to direct send
-        }
-
-        // Enqueue in simulator's relay queue
-        await _state.EnqueueRelayUpstreamToMainAsync(
-            relayHostPeerId: relayHostPeerId,
-            opaqueBytes: opaqueBytes,
-            debugType: debugType ?? "ChatMessage",
-            cancellationToken: cancellationToken)
-            .ConfigureAwait(false);
-
-        _logger.LogInformation(
-            "[simulator relay] Routed message to peer {PeerId} via relay host {RelayHost}",
-            recipientPeerId,
-            relayHostPeerId);
-
-        return true; // Message enqueued, skip direct gRPC send
-    }
-}
-```
-
-### Step C.4: Wire Interceptor into PercolatorMessageService
-
-**Problem:** The `PercolatorMessageService` needs to call the simulator relay interceptor before sending via gRPC.
-
-**Solution:** Inject `ISimulatorRelayInterceptor` into `PercolatorMessageService` and call it in `SendMessageAsync`.
-
-**File:** `Desktop.Wpf/Features/Sessions/PercolatorMessageService.cs`
-
-```csharp
-private readonly ISimulatorRelayInterceptor? _simulatorRelayInterceptor;
-
-public PercolatorMessageService(
-    // ... existing dependencies
-    ISimulatorRelayInterceptor? simulatorRelayInterceptor = null) // Optional for non-simulator scenarios
-{
-    // ... existing initialization
-    _simulatorRelayInterceptor = simulatorRelayInterceptor;
-}
-
-public async Task SendMessageAsync(
-    InternalEnvelope envelope,
+/// <param name="recipientPeerId">The recipient peer ID</param>
+/// <param name="cipherBytes">The encrypted message payload (session cipher)</param>
+/// <param name="debugType">Optional debug type for diagnostics</param>
+/// <param name="cancellationToken">Cancellation token</param>
+/// <returns>True if the message was enqueued in simulator relay (skip network send), false otherwise</returns>
+Task<bool> TryRouteMessageViaSimulatorRelayAsync(
     PeerId recipientPeerId,
-    CancellationToken cancellationToken = default)
-{
-    cancellationToken.ThrowIfCancellationRequested();
-
-    var cipher = envelope.RelayOpaqueEnvelope?.OpaquePayload?.ToByteArray()
-        ?? throw new InvalidOperationException("Envelope must have RelayOpaqueEnvelope with OpaquePayload");
-
-    // NEW: Check if this should route via simulator relay
-    if (_simulatorRelayInterceptor is not null)
-    {
-        var routedViaSimulator = await _simulatorRelayInterceptor.TryRouteViaSimulatorRelayAsync(
-            recipientPeerId,
-            cipher,
-            debugType: envelope.ChatEnvelope?.MessageCase.ToString(),
-            cancellationToken)
-            .ConfigureAwait(false);
-
-        if (routedViaSimulator)
-        {
-            return; // Message enqueued in simulator relay, skip gRPC send
-        }
-    }
-
-    // Existing gRPC send logic continues...
-    var request = new DeliverOpaqueMessageRequest { /* ... */ };
-    // ...
-}
+    byte[] cipherBytes,
+    string? debugType = null,
+    CancellationToken cancellationToken = default);
 ```
 
-### Step C.5: Register Interceptor in DI
+### Step C.2: Implement the Method in SimulatorOutboundInterceptor
 
-**File:** `Desktop.Wpf/App.xaml.cs` (or appropriate service registration location)
+**Problem:** Need to implement the new method to check if the recipient is a relay-connected simulated peer and enqueue the message using the same pattern as relayed handshakes.
 
-```csharp
-services.AddSingleton<ISimulatorRelayInterceptor, SimulatorRelayInterceptor>();
-```
+**Solution:** Implement the method following the pattern used by relayed handshakes (see `SimulatorStateService.cs` lines 735, 923, 1080).
 
-**Note:** The interceptor should only be registered in the Desktop.Wpf project (simulator scenario), not in the main Percolator.Node application.
+**File:** `Desktop.Wpf/Features/Simulator/SimulatorOutboundInterceptor.cs`
 
-### Step C.6: Add Diagnostic Events
-
-**Problem:** Need visibility into when messages are routed via simulator relay.
-
-**Solution:** Add diagnostic events in the interceptor.
-
-**File:** `Desktop.Wpf/Features/Simulator/SimulatorRelayInterceptor.cs`
+**Add this private field at the top of the class (after the existing private fields):**
 
 ```csharp
 private readonly ISimulatorDiagnosticsService _diagnostics;
+```
 
-public SimulatorRelayInterceptor(
+**Replace the existing constructor with:**
+
+```csharp
+public SimulatorOutboundInterceptor(
     ISimulatorStateService state,
-    ISimulatorDiagnosticsService diagnostics,
-    ILogger<SimulatorRelayInterceptor> logger)
+    ILogger<SimulatorOutboundInterceptor> logger,
+    ActiveIdentityContext active,
+    ISimulatorDiagnosticsService diagnostics)
 {
     _state = state;
-    _diagnostics = diagnostics;
     _logger = logger;
+    _active = active;
+    _diagnostics = diagnostics;
 }
+```
 
-public async Task<bool> TryRouteViaSimulatorRelayAsync(
+**Add this method to the class (after the existing methods):**
+
+```csharp
+public async Task<bool> TryRouteMessageViaSimulatorRelayAsync(
     PeerId recipientPeerId,
-    byte[] opaqueBytes,
+    byte[] cipherBytes,
     string? debugType = null,
     CancellationToken cancellationToken = default)
 {
-    // ... existing checks ...
+    cancellationToken.ThrowIfCancellationRequested();
+    if (cipherBytes is null) throw new ArgumentNullException(nameof(cipherBytes));
+
+    // Check if recipient is a simulated peer
+    var peer = _state.Peers.FirstOrDefault(p => p.PeerId == recipientPeerId);
+    if (peer is null)
+    {
+        return false; // Not a simulated peer, proceed with normal send
+    }
+
+    // Check if peer is connected via relay
+    if (peer.ConnectionMode.CurrentValue != ConnectionMode.ViaRelay)
+    {
+        return false; // Not connected via relay, proceed with normal send
+    }
+
+    // Get the relay host peer ID
+    if (peer.RelayPeerId.CurrentValue.Value == Guid.Empty)
+    {
+        _logger.LogWarning("[simulator relay] Peer {PeerId} has ViaRelay mode but no relay host ID", recipientPeerId);
+        return false; // Fallback to normal send
+    }
+
+    var relayHostPeerId = peer.RelayPeerId.CurrentValue;
+
+    // Compute the target peer's PKH (same pattern as relayed handshakes)
+    var targetPkh = await _state.ComputePublicKeyHashAsync(recipientPeerId, cancellationToken).ConfigureAwait(false);
+
+    // Enqueue in simulator's relay queue (downstream: main → target peer via relay)
+    await _state.EnqueueRelayDownstreamToPeerAsync(
+        relayHostPeerId: relayHostPeerId,
+        targetPkh: targetPkh,
+        opaqueBytes: cipherBytes,
+        debugType: debugType ?? "ChatMessage",
+        cancellationToken: cancellationToken)
+        .ConfigureAwait(false);
+
+    _logger.LogInformation(
+        "[simulator relay] Routed message to peer {PeerId} via relay host {RelayHost}",
+        recipientPeerId,
+        relayHostPeerId);
 
     _diagnostics.Emit(
-        SimulatorDiagnosticEventType.RelayRoutingSuccess,
+        SimulatorDiagnosticEventType.RelayEnqueued,
         $"Message routed to peer {recipientPeerId} via simulator relay host {relayHostPeerId}",
         peerId: recipientPeerId,
         relayHostPeerId: relayHostPeerId);
 
-    await _state.EnqueueRelayUpstreamToMainAsync(/* ... */).ConfigureAwait(false);
-
-    return true;
+    return true; // Message enqueued, skip network send
 }
 ```
+
+### Step C.3: Wire Interceptor into MessageService
+
+**Problem:** The `MessageService` needs to call the simulator relay interceptor before sending via the network.
+
+**Solution:** Inject `ISimulatorOutboundInterceptor` into `MessageService` and call the new method in `SendMessageAsync`.
+
+**File:** `Percolator.Application/Network/MessageService.cs`
+
+**Add this private field (after the existing private fields, after `private readonly IOutboundMessageWireTap _wireTap;`):**
+
+```csharp
+private readonly ISimulatorOutboundInterceptor? _simulatorOutboundInterceptor;
+```
+
+**Replace the existing constructor (the `public MessageService` constructor) with:**
+
+```csharp
+public MessageService(
+    ILogger<MessageService> logger,
+    IDirectSessionRepository sessions,
+    ISecureMessagingService secureMessaging,
+    ActiveIdentityContext active,
+    INetworkSender networkSender,
+    IOutboundMessageWireTap wireTap,
+    ISimulatorOutboundInterceptor? simulatorOutboundInterceptor = null) // Optional for non-simulator scenarios
+{
+    _logger = logger;
+    _sessions = sessions;
+    _secureMessaging = secureMessaging;
+    _active = active;
+    _networkSender = networkSender;
+    _wireTap = wireTap;
+    _simulatorOutboundInterceptor = simulatorOutboundInterceptor;
+}
+```
+
+**In the `SendMessageAsync` method, add this check after the cipher is computed (after the line `var cipher = await _secureMessaging.EncryptAsync(sessionId, new Plaintext(envelope.ToByteArray()), ct).ConfigureAwait(false);`), before the wireTap check (before the line `if (_wireTap.Enabled)`):**
+
+```csharp
+// Check if this should route via simulator relay
+if (_simulatorOutboundInterceptor is not null)
+{
+    var routedViaSimulator = await _simulatorOutboundInterceptor
+        .TryRouteMessageViaSimulatorRelayAsync(
+            recipientPeerId,
+            cipher.Value,
+            debugType: envelope.ChatEnvelope?.MessageCase.ToString(),
+            ct)
+        .ConfigureAwait(false);
+
+    if (routedViaSimulator)
+    {
+        return SendResult.CreateSuccess("SimulatorRelay", new[] { "SimulatorRelay" }, attempts: 0);
+    }
+}
+```
+
+**In the `SendMessageWithResponseAsync` method, add this check after the cipher is computed (after the line `var cipher = await _secureMessaging.EncryptAsync(sessionId, new Plaintext(envelope.ToByteArray()), ct).ConfigureAwait(false);`), before the wireTap check (before the line `if (_wireTap.Enabled)`):**
+
+```csharp
+// Check if this should route via simulator relay
+if (_simulatorOutboundInterceptor is not null)
+{
+    var routedViaSimulator = await _simulatorOutboundInterceptor
+        .TryRouteMessageViaSimulatorRelayAsync(
+            recipientPeerId,
+            cipher.Value,
+            debugType: envelope.ChatEnvelope?.MessageCase.ToString(),
+            ct)
+        .ConfigureAwait(false);
+
+    if (routedViaSimulator)
+    {
+        return (SendResult.CreateSuccess("SimulatorRelay", new[] { "SimulatorRelay" }, attempts: 0), null);
+    }
+}
+```
+
+### Step C.4: Register ISimulatorOutboundInterceptor in DI
+
+**Problem:** The `ISimulatorOutboundInterceptor` is already registered in Desktop.Wpf, but we need to ensure `MessageService` can receive it as a dependency. Also need to verify `ISimulatorDiagnosticsService` is registered for the updated constructor.
+
+**Solution:** The interceptor is already registered in `Desktop.Wpf/App.xaml.cs` at line 179. No changes needed for registration. The DI container will automatically inject it into `MessageService` when registered in the Application layer.
+
+**Verification:** Verify that `ISimulatorDiagnosticsService` is registered in Desktop.Wpf DI. If not, add it.
+
+**File:** `Desktop.Wpf/App.xaml.cs`
+
+**Check if this registration exists (should be in the service registration section):**
+
+```csharp
+services.AddSingleton<ISimulatorDiagnosticsService, SimulatorDiagnosticsService>();
+```
+
+**If the above line does not exist, add it to the service registration section.**
+
+**File:** `Percolator.Application/Network/ServiceCollectionExtensions.cs`
+
+**No changes needed** - the `ISimulatorOutboundInterceptor` is registered in Desktop.Wpf and will be available to MessageService through the DI container.
 
 ### Verification
 
@@ -1322,11 +1299,13 @@ public async Task<bool> TryRouteViaSimulatorRelayAsync(
 
 1. Start the application with simulator
 2. Create two simulated peers (Peer A and Peer B)
-3. Establish a relay session between main and Peer B (via Peer A as relay host)
-4. Send a chat message from main to Peer B
-5. Verify:
-   - The message appears in the simulator's relay tab (under Peer A's relay queue)
-   - The message is forwarded from Peer A to Peer B
+3. Make Peer A a relay host
+4. Establish a relay session between main and Peer B (via Peer A as relay host)
+5. Send a chat message from main to Peer B
+6. Verify:
+   - The message appears in the simulator's relay tab (under Peer A's relay queue, in the "Downstream to Peers" section)
+   - The message shows the target peer's PKH
+   - The message can be manually delivered from the relay tab
    - Peer B receives the message in its chat UI
 
-**Expected Result:** Messages sent from main to relay-connected simulated peers now appear in the simulator's relay tab and are properly forwarded to the target peer.
+**Expected Result:** Messages sent from main to relay-connected simulated peers now appear in the simulator's relay tab as downstream messages and can be manually delivered to the target peer.
