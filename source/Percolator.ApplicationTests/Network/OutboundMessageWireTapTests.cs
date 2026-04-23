@@ -41,13 +41,16 @@ public sealed class OutboundMessageWireTapTests
         sender.Setup(s => s.SendAsync(It.IsAny<PeerId>(), It.IsAny<NetworkPayload>(), It.IsAny<SendStrategy>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SendOutcome { Success = true, Path = "Direct", AttemptedPaths = new[] { "Direct" }, Attempts = 1 });
 
+        var keyStore = new Mock<IPeerPublicSigningKeyStore>(MockBehavior.Strict);
+
         var sut = new MessageService(
             NullLogger<MessageService>.Instance,
             sessions.Object,
             secure.Object,
             active,
             sender.Object,
-            tap);
+            tap,
+            keyStore.Object);
 
         var env = new InternalEnvelope ();
         var recipient = new Percolator.Identity.PeerId(Guid.NewGuid());
@@ -83,13 +86,16 @@ public sealed class OutboundMessageWireTapTests
         sender.Setup(s => s.SendAsync(It.IsAny<PeerId>(), It.IsAny<NetworkPayload>(), It.IsAny<SendStrategy>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SendOutcome { Success = true, Path = "Direct", AttemptedPaths = new[] { "Direct" }, Attempts = 1 });
 
+        var keyStore = new Mock<IPeerPublicSigningKeyStore>(MockBehavior.Strict);
+
         var sut = new MessageService(
             NullLogger<MessageService>.Instance,
             sessions.Object,
             secure.Object,
             active,
             sender.Object,
-            tap);
+            tap,
+            keyStore.Object);
 
         var env = new InternalEnvelope ();
         var recipient = new Percolator.Identity.PeerId(Guid.NewGuid());

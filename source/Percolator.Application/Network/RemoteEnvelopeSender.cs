@@ -22,7 +22,7 @@ namespace Percolator.Application.Network
             try
             {
                 var result = await _messageService
-                    .SendMessageAsync(internalEnvelope, recipient.PeerId, recipient.PublicKeyHash, ct)
+                    .SendMessageAsync(internalEnvelope, recipient.PeerId, ct)
                     .ConfigureAwait(false);
                 if (result.LastError is not null)
                 {

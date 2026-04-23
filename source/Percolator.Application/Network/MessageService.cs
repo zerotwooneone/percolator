@@ -4,6 +4,7 @@ using Percolator.Application.Identity;
 using Percolator.Application.Services;
 using Percolator.Contracts;
 using Percolator.Cryptography;
+using Percolator.Identity;
 using Percolator.Network;
 using PeerId = Percolator.Identity.PeerId;
 using Percolator.Network.Messaging;
@@ -18,6 +19,7 @@ namespace Percolator.Application.Network
         private readonly ActiveIdentityContext _active;
         private readonly INetworkSender _networkSender;
         private readonly IOutboundMessageWireTap _wireTap;
+        private readonly IPeerPublicSigningKeyStore _keyStore;
         private readonly ISimulatorOutboundInterceptor? _simulatorOutboundInterceptor;
 
         public MessageService(
@@ -27,6 +29,7 @@ namespace Percolator.Application.Network
             ActiveIdentityContext active,
             INetworkSender networkSender,
             IOutboundMessageWireTap wireTap,
+            IPeerPublicSigningKeyStore keyStore,
             ISimulatorOutboundInterceptor? simulatorOutboundInterceptor = null)
         {
             _logger = logger;
@@ -35,13 +38,13 @@ namespace Percolator.Application.Network
             _active = active;
             _networkSender = networkSender;
             _wireTap = wireTap;
+            _keyStore = keyStore;
             _simulatorOutboundInterceptor = simulatorOutboundInterceptor;
         }
 
         public async Task<(SendResult Result, DeliverOpaqueMessageResponse? Response)> SendMessageWithResponseAsync(
             InternalEnvelope envelope,
             PeerId recipientPeerId,
-            byte[]? recipientPublicKeyHash,
             CancellationToken ct = default)
         {
             if (_active.Identity is null)
@@ -58,8 +61,13 @@ namespace Percolator.Application.Network
             var cipher = await _secureMessaging.EncryptAsync(sessionId, new Plaintext(envelope.ToByteArray()), ct).ConfigureAwait(false);
 
             // Check if this should route via simulator relay
-            if (_simulatorOutboundInterceptor is not null && recipientPublicKeyHash is not null)
+            if (_simulatorOutboundInterceptor is not null)
             {
+                var recipientPublicKeyHash = await _keyStore
+                    .GetPublicKeyHashByPeerIdAsync(recipientPeerId, ct)
+                    .ConfigureAwait(false);
+                if (recipientPublicKeyHash is not null)
+                {
                 var routedViaSimulator = await _simulatorOutboundInterceptor
                     .TryRouteMessageViaSimulatorRelayAsync(
                         recipientPublicKeyHash,
@@ -71,6 +79,7 @@ namespace Percolator.Application.Network
                 if (routedViaSimulator)
                 {
                     return (SendResult.CreateSuccess("SimulatorRelay", new[] { "SimulatorRelay" }, attempts: 0), null);
+                }
                 }
             }
 
@@ -127,11 +136,7 @@ namespace Percolator.Application.Network
             return (SendResult.CreateSuccess(outcome.Path, outcome.AttemptedPaths.ToArray(), outcome.Attempts), resp);
         }
 
-        public async Task<SendResult> SendMessageAsync(
-            InternalEnvelope envelope,
-            PeerId recipientPeerId,
-            byte[]? recipientPublicKeyHash,
-            CancellationToken ct = default)
+        public async Task<SendResult> SendMessageAsync(InternalEnvelope envelope, PeerId recipientPeerId, CancellationToken ct = default)
         {
             if (_active.Identity is null)
                 throw new InvalidOperationException("Active identity not initialized");
@@ -147,8 +152,13 @@ namespace Percolator.Application.Network
             var cipher = await _secureMessaging.EncryptAsync(sessionId, new Plaintext(envelope.ToByteArray()), ct).ConfigureAwait(false);
 
             // Check if this should route via simulator relay
-            if (_simulatorOutboundInterceptor is not null && recipientPublicKeyHash is not null)
+            if (_simulatorOutboundInterceptor is not null)
             {
+                var recipientPublicKeyHash = await _keyStore
+                    .GetPublicKeyHashByPeerIdAsync(recipientPeerId, ct)
+                    .ConfigureAwait(false);
+                if (recipientPublicKeyHash is not null)
+                {
                 var routedViaSimulator = await _simulatorOutboundInterceptor
                     .TryRouteMessageViaSimulatorRelayAsync(
                         recipientPublicKeyHash,
@@ -160,6 +170,7 @@ namespace Percolator.Application.Network
                 if (routedViaSimulator)
                 {
                     return SendResult.CreateSuccess("SimulatorRelay", new[] { "SimulatorRelay" }, attempts: 0);
+                }
                 }
             }
 

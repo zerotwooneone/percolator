@@ -150,28 +150,21 @@ public sealed class SimulatorOutboundInterceptionTests
         var networkSender = new Mock<INetworkSender>();
         var wireTap = new Mock<IOutboundMessageWireTap>();
         var interceptor = new Mock<ISimulatorOutboundInterceptor>();
+        var keyStore = new Mock<Percolator.Identity.IPeerPublicSigningKeyStore>();
 
-        var identity = new IdentityRecord(
-            Percolator.Identity.SelfId.NewId(),
-            "Test",
-            Percolator.Cryptography.KeyGeneration.GenerateEd25519KeyPair());
-
+        var identity = new IdentityRecord(Guid.NewGuid(), "self") { SelfIdentityId = new Percolator.Identity.SelfId(1) };
         active.Setup(a => a.Identity).Returns(identity);
 
         var peerId = new Percolator.Identity.PeerId(Guid.NewGuid());
         var networkPeerId = new Percolator.Network.PeerId(peerId.Value);
-        var sessionId = Guid.NewGuid();
         var recipientPublicKeyHash = new byte[32];
         recipientPublicKeyHash[0] = 1;
 
         var session = new Percolator.Network.DirectSession(
-            sessionId,
-            identity.SelfIdentityId,
-            networkPeerId,
-            DateTimeOffset.UtcNow,
-            Percolator.Cryptography.KeyGeneration.GenerateX25519KeyPair().PublicKey);
+            new Percolator.Network.PeerId(peerId.Value),
+            new Percolator.Network.DirectSessionId(Guid.NewGuid()));
 
-        sessions.Setup(s => s.GetByRemotePeerIdAsync(networkPeerId, identity.SelfIdentityId.Value, It.IsAny<CancellationToken>()))
+        sessions.Setup(s => s.GetByRemotePeerIdAsync(networkPeerId, identity.SelfIdentityId.Value))
             .ReturnsAsync(session);
 
         var cipher = new Percolator.Cryptography.SessionRatchetMessage(new byte[] { 1, 2, 3 });
@@ -179,6 +172,9 @@ public sealed class SimulatorOutboundInterceptionTests
             .ReturnsAsync(cipher);
 
         wireTap.Setup(w => w.Enabled).Returns(false);
+
+        keyStore.Setup(k => k.GetPublicKeyHashByPeerIdAsync(peerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(recipientPublicKeyHash);
 
         interceptor.Setup(i => i.TryRouteMessageViaSimulatorRelayAsync(
             It.IsAny<byte[]>(),
@@ -194,25 +190,13 @@ public sealed class SimulatorOutboundInterceptionTests
             active.Object,
             networkSender.Object,
             wireTap.Object,
+            keyStore.Object,
             interceptor.Object);
 
-        var envelope = new Percolator.Contracts.InternalEnvelope
-        {
-            Version = 1,
-            ChatEnvelope = new Percolator.Contracts.ChatEnvelope
-            {
-                Version = 1,
-                TextMessage = new Percolator.Contracts.TextMessage
-                {
-                    Version = 1,
-                    Content = "Test message",
-                    TimestampUtc = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-                }
-            }
-        };
+        var envelope = new Percolator.Contracts.InternalEnvelope();
 
         // ACT
-        var result = await sut.SendMessageAsync(envelope, peerId, recipientPublicKeyHash, CancellationToken.None);
+        var result = await sut.SendMessageAsync(envelope, peerId, CancellationToken.None);
 
         // ASSERT
         Assert.That(result.Success, Is.True);

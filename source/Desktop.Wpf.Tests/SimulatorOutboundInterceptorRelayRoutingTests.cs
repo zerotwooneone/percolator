@@ -69,8 +69,15 @@ public sealed class SimulatorOutboundInterceptorRelayRoutingTests
         var recipientPublicKeyHash = new byte[32];
         recipientPublicKeyHash[0] = 1;
         var cipherBytes = new byte[] { 1, 2, 3 };
-        var peer = new SimulatedPeerModel(peerId, "TestPeer");
-        peer.ConnectionMode.Value = ConnectionMode.Direct;
+        var peer = new SimulatedPeerModel(
+            peerId: peerId,
+            selfIdentityId: 1,
+            displayName: "TestPeer",
+            isOnline: true,
+            isRelayCapable: false,
+            identitySigningKeySpki: new byte[] { 0x01 },
+            identitySigningKeyPrivateKeyEcPrivateKey: new byte[] { 0x02 },
+            connectionMode: ConnectionMode.Direct);
 
         var peers = new ObservableList<SimulatedPeerModel>();
         peers.Add(peer);
@@ -118,9 +125,16 @@ public sealed class SimulatorOutboundInterceptorRelayRoutingTests
         recipientPublicKeyHash[0] = 1;
         var cipherBytes = new byte[] { 1, 2, 3 };
 
-        var peer = new SimulatedPeerModel(peerId, "TestPeer");
-        peer.ConnectionMode.Value = ConnectionMode.ViaRelay;
-        peer.RelayPeerId.Value = relayHostPeerId;
+        var peer = new SimulatedPeerModel(
+            peerId: peerId,
+            selfIdentityId: 1,
+            displayName: "TestPeer",
+            isOnline: true,
+            isRelayCapable: false,
+            identitySigningKeySpki: new byte[] { 0x01 },
+            identitySigningKeyPrivateKeyEcPrivateKey: new byte[] { 0x02 },
+            connectionMode: ConnectionMode.ViaRelay,
+            relayPeerId: relayHostPeerId);
 
         var peers = new ObservableList<SimulatedPeerModel>();
         peers.Add(peer);

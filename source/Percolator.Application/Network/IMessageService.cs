@@ -5,16 +5,8 @@ namespace Percolator.Application.Network
 {
     public interface IMessageService
     {
-        Task<SendResult> SendMessageAsync(
-            InternalEnvelope envelope,
-            PeerId recipientPeerId,
-            byte[]? recipientPublicKeyHash,
-            CancellationToken ct = default);
-        Task<(SendResult Result, Percolator.Contracts.DeliverOpaqueMessageResponse? Response)> SendMessageWithResponseAsync(
-            InternalEnvelope envelope,
-            PeerId recipientPeerId,
-            byte[]? recipientPublicKeyHash,
-            CancellationToken ct = default);
+        Task<SendResult> SendMessageAsync(InternalEnvelope envelope, PeerId recipientPeerId, CancellationToken ct = default);
+        Task<(SendResult Result, Percolator.Contracts.DeliverOpaqueMessageResponse? Response)> SendMessageWithResponseAsync(InternalEnvelope envelope, PeerId recipientPeerId, CancellationToken ct = default);
     }
 
     public sealed class SendResult
