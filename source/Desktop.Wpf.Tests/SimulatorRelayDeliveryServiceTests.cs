@@ -74,7 +74,7 @@ public sealed class SimulatorRelayDeliveryServiceTests
 
         state.Verify(s => s.ReceiveRelayedOpaquePayloadAsync(It.IsAny<Percolator.Network.PeerId>(), It.IsAny<byte[]>(), It.IsAny<CancellationToken>()), Times.Never);
         state.Verify(s => s.EnqueueRelayUpstreamToMainAsync(It.IsAny<Percolator.Network.PeerId>(), It.IsAny<byte[]>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
-        state.Verify(s => s.EnqueueRelayDownstreamToPeerAsync(It.IsAny<Percolator.Network.PeerId>(), It.IsAny<byte[]>(), It.IsAny<byte[]>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
+        state.Verify(s => s.EnqueueRelayDownstreamToPeerAsync(It.IsAny<Percolator.Network.PeerId>(), It.IsAny<Percolator.Identity.IdentityPublicKeyHash>(), It.IsAny<byte[]>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Test]
@@ -129,7 +129,7 @@ public sealed class SimulatorRelayDeliveryServiceTests
 
         state.Verify(s => s.ReceiveRelayedOpaquePayloadAsync(It.IsAny<Percolator.Network.PeerId>(), It.IsAny<byte[]>(), It.IsAny<CancellationToken>()), Times.Never);
         state.Verify(s => s.EnqueueRelayUpstreamToMainAsync(It.IsAny<Percolator.Network.PeerId>(), It.IsAny<byte[]>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
-        state.Verify(s => s.EnqueueRelayDownstreamToPeerAsync(It.IsAny<Percolator.Network.PeerId>(), It.IsAny<byte[]>(), It.IsAny<byte[]>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
+        state.Verify(s => s.EnqueueRelayDownstreamToPeerAsync(It.IsAny<Percolator.Network.PeerId>(), It.IsAny<Percolator.Identity.IdentityPublicKeyHash>(), It.IsAny<byte[]>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Test]
@@ -174,10 +174,7 @@ public sealed class SimulatorRelayDeliveryServiceTests
             .Setup(s => s.ReceiveRelayedOpaquePayloadAsync(recipientPeerId, It.Is<byte[]>(b => b.SequenceEqual(opaqueBytes)), It.IsAny<CancellationToken>()))
             .ReturnsAsync(forwarded);
         state
-            .Setup(s => s.TryGetPeerIdByIdentityPublicKeyHashAsync(It.Is<byte[]>(b => b.SequenceEqual(initiatorPkh)), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Percolator.Network.PeerId?)null);
-        state
-            .Setup(s => s.TryGetPeerIdByIdentityPublicKeyHashAsync(It.Is<IdentityPublicKeyHash>(pkh => pkh.ToArray().SequenceEqual(initiatorPkh)), It.IsAny<CancellationToken>()))
+            .Setup(s => s.TryGetPeerIdByIdentityPublicKeyHashAsync(It.Is<IdentityPublicKeyHash>(pkh => pkh.Equals(Percolator.Identity.IdentityPublicKeyHash.FromBytes(initiatorPkh))), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Percolator.Network.PeerId?)null);
 
         var selfRepo = new Mock<ISelfIdentityRepository>();
@@ -214,6 +211,6 @@ public sealed class SimulatorRelayDeliveryServiceTests
 
         state.Verify(s => s.UpsertPendingStandardSignalHelloAsync(It.IsAny<Percolator.Network.PeerId>(), It.IsAny<Percolator.Network.PeerId>(), It.IsAny<HandshakeInitiatorHello>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()), Times.Never);
         state.Verify(s => s.EnqueueRelayUpstreamToMainAsync(It.IsAny<Percolator.Network.PeerId>(), It.IsAny<byte[]>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
-        state.Verify(s => s.EnqueueRelayDownstreamToPeerAsync(It.IsAny<Percolator.Network.PeerId>(), It.IsAny<byte[]>(), It.IsAny<byte[]>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
+        state.Verify(s => s.EnqueueRelayDownstreamToPeerAsync(It.IsAny<Percolator.Network.PeerId>(), It.IsAny<Percolator.Identity.IdentityPublicKeyHash>(), It.IsAny<byte[]>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 }

@@ -422,7 +422,7 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
             .Where(m => m.AckId != Guid.Empty)
             .Where(m => m.TargetIdentityPublicKeyHash is not null && m.TargetIdentityPublicKeyHash.Length != 0)
             .OrderBy(m => m.EnqueuedUtc)
-            .Select(m => new InboundRelayMessageSnapshot(m.AckId, m.TargetIdentityPublicKeyHash, m.OpaqueBytes, m.EnqueuedUtc, m.DebugType))
+            .Select(m => new InboundRelayMessageSnapshot(m.AckId, Percolator.Identity.IdentityPublicKeyHash.FromBytes(m.TargetIdentityPublicKeyHash), m.OpaqueBytes, m.EnqueuedUtc, m.DebugType))
             .ToList();
 
         return new RelayStateSnapshot(
@@ -452,7 +452,7 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
                 .Select(x => new RelayDownstreamMessageDto
                 {
                     AckId = x.AckId,
-                    TargetIdentityPublicKeyHash = x.TargetIdentityPublicKeyHash,
+                    TargetIdentityPublicKeyHash = x.TargetIdentityPublicKeyHash.ToArray(),
                     OpaqueBytes = x.OpaqueBytes,
                     EnqueuedUtc = x.EnqueuedUtc,
                     DebugType = x.DebugType

@@ -205,7 +205,7 @@ public sealed class SimulatorOutboundInterceptor : ISimulatorOutboundInterceptor
         // Enqueue in simulator's relay queue (downstream: main → target peer via relay)
         await _state.EnqueueRelayDownstreamToPeerAsync(
             relayHostPeerId: relayHostPeerId,
-            targetIdentityPublicKeyHash: recipientPublicKeyHash.ToArray(),
+            targetIdentityPublicKeyHash: recipientPublicKeyHash,
             opaqueBytes: cipherBytes,
             debugType: debugType ?? "ChatMessage",
             cancellationToken: cancellationToken)

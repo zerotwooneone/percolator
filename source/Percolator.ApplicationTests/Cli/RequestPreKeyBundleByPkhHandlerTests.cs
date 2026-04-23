@@ -73,7 +73,7 @@ public sealed class RequestPreKeyBundleByPkhHandlerTests
 
         _peerKeyStore
             .Setup(s => s.GetPeerIdByPublicKeyHashAsync(
-                It.Is<IdentityPublicKeyHash>(h => h.ToArray().SequenceEqual(expectedPkh)),
+                It.Is<IdentityPublicKeyHash>(h => h.Equals(identityPublicKeyHash)),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(remotePeerId);
 
@@ -267,7 +267,7 @@ public sealed class RequestPreKeyBundleByPkhHandlerTests
 
         _peerKeyStore
             .Setup(s => s.GetPeerIdByPublicKeyHashAsync(
-                It.Is<IdentityPublicKeyHash>(h => h.ToArray().SequenceEqual(expectedPkh)),
+                It.Is<IdentityPublicKeyHash>(h => h.Equals(identityPublicKeyHash)),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(remotePeerId);
 
@@ -319,7 +319,7 @@ public sealed class RequestPreKeyBundleByPkhHandlerTests
         var remotePeerId = new Percolator.Identity.PeerId(Guid.NewGuid());
         _peerKeyStore
             .Setup(s => s.GetPeerIdByPublicKeyHashAsync(
-                It.Is<IdentityPublicKeyHash>(h => h.ToArray().SequenceEqual(expectedPkh)),
+                It.Is<IdentityPublicKeyHash>(h => h.Equals(identityPublicKeyHash)),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(remotePeerId);
 

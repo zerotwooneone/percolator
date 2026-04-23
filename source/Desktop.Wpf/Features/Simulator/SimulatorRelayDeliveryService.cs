@@ -150,7 +150,7 @@ public sealed class SimulatorRelayDeliveryService : ISimulatorRelayDeliveryServi
                 return;
             }
 
-            var initiatorPkh = System.Security.Cryptography.SHA256.HashData(hello.InitiatorIdentityKeySpki.ToByteArray());
+            var initiatorPkh = Percolator.Identity.IdentityPublicKeyHash.FromSpki(hello.InitiatorIdentityKeySpki.ToByteArray());
 
             var initiatorPeerId = await _state
                 .TryGetPeerIdByIdentityPublicKeyHashAsync(initiatorPkh, cancellationToken)
@@ -202,11 +202,10 @@ public sealed class SimulatorRelayDeliveryService : ISimulatorRelayDeliveryServi
         }
     }
 
-    private async Task<bool> MatchesAnyMainIdentityPkhAsync(byte[] pkh, CancellationToken ct)
+    private async Task<bool> MatchesAnyMainIdentityPkhAsync(IdentityPublicKeyHash pkh, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
         if (pkh is null) throw new ArgumentNullException(nameof(pkh));
-        if (pkh.Length == 0) return false;
 
         IReadOnlyList<Percolator.Identity.Model.SelfIdentity> identities;
         try
@@ -240,8 +239,8 @@ public sealed class SimulatorRelayDeliveryService : ISimulatorRelayDeliveryServi
             try
             {
                 var spki = keys.IdentitySigningKey.ExportSubjectPublicKeyInfo();
-                var computed = System.Security.Cryptography.SHA256.HashData(spki);
-                if (computed.AsSpan().SequenceEqual(pkh))
+                var computed = IdentityPublicKeyHash.FromSpki(spki);
+                if (computed.Equals(pkh))
                 {
                     return true;
                 }

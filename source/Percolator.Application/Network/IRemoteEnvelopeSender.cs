@@ -8,5 +8,5 @@ namespace Percolator.Application.Network
         Task SendChatEnvelopeToPeerAsync(ChatEnvelope chatEnvelope, RecipientRoute recipient, CancellationToken ct = default);
     }
 
-    public sealed record RecipientRoute(PeerId PeerId, byte[]? PublicKeyHash);
+    public sealed record RecipientRoute(PeerId PeerId, Percolator.Identity.IdentityPublicKeyHash? PublicKeyHash);
 }

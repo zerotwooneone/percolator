@@ -735,7 +735,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
 
             await EnqueueRelayDownstreamToPeerAsync(
                 relayHostPeerId: simulatedPeerId,
-                targetIdentityPublicKeyHash: enqueue.RecipientPublicKeyHash.ToByteArray(),
+                targetIdentityPublicKeyHash: Percolator.Identity.IdentityPublicKeyHash.FromBytes(enqueue.RecipientPublicKeyHash.ToByteArray()),
                 opaqueBytes: enqueue.MessageBlob.ToByteArray(),
                 debugType: "Opaque",
                 cancellationToken: cancellationToken).ConfigureAwait(false);
@@ -850,8 +850,9 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         if (!bundleProto.HasSignedPreKey || bundleProto.SignedPreKey.Length == 0) return null;
         if (!bundleProto.HasPreKeySignature || bundleProto.PreKeySignature.Length == 0) return null;
 
-        var actualPkh = SHA256.HashData(bundleProto.IdentityKey.ToByteArray());
-        if (!actualPkh.AsSpan().SequenceEqual(responderPublicKeyHash))
+        var actualPkh = Percolator.Identity.IdentityPublicKeyHash.FromSpki(bundleProto.IdentityKey.ToByteArray());
+        var responderPkhTyped = Percolator.Identity.IdentityPublicKeyHash.FromBytes(responderPublicKeyHash);
+        if (!actualPkh.Equals(responderPkhTyped))
         {
             return null;
         }
@@ -923,7 +924,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
 
         await EnqueueRelayDownstreamToPeerAsync(
                 relayHostPeerId: relayHostPeerId,
-                targetIdentityPublicKeyHash: responderPublicKeyHash,
+                targetIdentityPublicKeyHash: Percolator.Identity.IdentityPublicKeyHash.FromBytes(responderPublicKeyHash),
                 opaqueBytes: helloBytes,
                 debugType: nameof(HandshakeInitiatorHello),
                 cancellationToken: cancellationToken)
@@ -1074,13 +1075,14 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         }
 
         var initiatorPkh = Convert.FromHexString(initiatorPkhHex);
-        var initiatorPeerId = await TryGetPeerIdByIdentityPublicKeyHashAsync(initiatorPkh, cancellationToken).ConfigureAwait(false);
+        var initiatorPkhTyped = Percolator.Identity.IdentityPublicKeyHash.FromBytes(initiatorPkh);
+        var initiatorPeerId = await TryGetPeerIdByIdentityPublicKeyHashAsync(initiatorPkhTyped, cancellationToken).ConfigureAwait(false);
 
         if (initiatorPeerId is not null)
         {
             await EnqueueRelayDownstreamToPeerAsync(
                     relayHostPeerId: relayHostPeerId,
-                    targetIdentityPublicKeyHash: initiatorPkh,
+                    targetIdentityPublicKeyHash: initiatorPkhTyped,
                     opaqueBytes: response.ToByteArray(),
                     debugType: nameof(EstablishSessionResponse),
                     cancellationToken: cancellationToken)
@@ -1414,14 +1416,12 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
 
     public async Task EnqueueRelayDownstreamToPeerAsync(
         Percolator.Network.PeerId relayHostPeerId,
-        byte[] targetIdentityPublicKeyHash,
+        Percolator.Identity.IdentityPublicKeyHash targetIdentityPublicKeyHash,
         byte[] opaqueBytes,
         string? debugType = null,
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (targetIdentityPublicKeyHash is null) throw new ArgumentNullException(nameof(targetIdentityPublicKeyHash));
-        if (targetIdentityPublicKeyHash.Length == 0) throw new ArgumentException("TargetPkh must be non-empty", nameof(targetIdentityPublicKeyHash));
         if (opaqueBytes is null) throw new ArgumentNullException(nameof(opaqueBytes));
         if (opaqueBytes.Length == 0) return;
 
@@ -1432,7 +1432,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
 
             var msg = new InboundRelayMessage(
                 AckId: Guid.NewGuid(),
-                TargetPkh: Percolator.Identity.IdentityPublicKeyHash.FromBytes(targetIdentityPublicKeyHash),
+                TargetPkh: targetIdentityPublicKeyHash,
                 OpaqueBytes: opaqueBytes,
                 EnqueuedUtc: DateTimeOffset.UtcNow,
                 DebugType: debugType);
@@ -1745,7 +1745,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
                     return null;
                 }
 
-                var responderPkh = SHA256.HashData(resp.Response.IdentitySigningKey.ToByteArray());
+                var responderPkhTyped = Percolator.Identity.IdentityPublicKeyHash.FromSpki(resp.Response.IdentitySigningKey.ToByteArray());
                 await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
                 try
                 {
@@ -1758,7 +1758,8 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
                     {
                         return null;
                     }
-                    if (!pendingPkh.AsSpan().SequenceEqual(responderPkh))
+                    var pendingPkhTyped = Percolator.Identity.IdentityPublicKeyHash.FromBytes(pendingPkh);
+                    if (!pendingPkhTyped.Equals(responderPkhTyped))
                     {
                         return null;
                     }
@@ -2114,8 +2115,8 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         foreach (var m in snap.DownstreamToPeers)
         {
             if (m.AckId == Guid.Empty) continue;
-            if (m.TargetIdentityPublicKeyHash is null || m.TargetIdentityPublicKeyHash.Length == 0) continue;
-            relay.EnqueueMessage(new InboundRelayMessage(m.AckId, Percolator.Identity.IdentityPublicKeyHash.FromBytes(m.TargetIdentityPublicKeyHash), m.OpaqueBytes, m.EnqueuedUtc, m.DebugType));
+            if (m.TargetIdentityPublicKeyHash is null) continue;
+            relay.EnqueueMessage(new InboundRelayMessage(m.AckId, m.TargetIdentityPublicKeyHash, m.OpaqueBytes, m.EnqueuedUtc, m.DebugType));
         }
         return relay;
     }
@@ -2211,18 +2212,16 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         return $"127.77.{fx}.{fy}";
     }
 
-    public Task<Percolator.Network.PeerId?> TryGetPeerIdByIdentityPublicKeyHashAsync(byte[] recipientPublicKeyHash, CancellationToken cancellationToken = default)
+    public async Task<Percolator.Network.PeerId?> TryGetPeerIdByIdentityPublicKeyHashAsync(Percolator.Identity.IdentityPublicKeyHash recipientPublicKeyHash, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (recipientPublicKeyHash is null) throw new ArgumentNullException(nameof(recipientPublicKeyHash));
-        if (recipientPublicKeyHash.Length == 0) return Task.FromResult<Percolator.Network.PeerId?>(null);
-
+        
         List<Percolator.Network.PeerId> matches;
-        _stateGate.Wait(cancellationToken);
+        await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             matches = _peerById.Values
-                .Where(p => SHA256.HashData(p.IdentitySigningKeySpki).SequenceEqual(recipientPublicKeyHash))
+                .Where(p => Percolator.Identity.IdentityPublicKeyHash.FromSpki(p.IdentitySigningKeySpki).Equals(recipientPublicKeyHash))
                 .Select(p => p.PeerId)
                 .Take(2)
                 .ToList();
@@ -2232,14 +2231,8 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             _stateGate.Release();
         }
 
-        if (matches.Count != 1) return Task.FromResult<Percolator.Network.PeerId?>(null);
-        return Task.FromResult<Percolator.Network.PeerId?>(matches[0]);
-    }
-
-    // Typed overload for IdentityPublicKeyHash (delegates to byte[] implementation)
-    public Task<Percolator.Network.PeerId?> TryGetPeerIdByIdentityPublicKeyHashAsync(Percolator.Identity.IdentityPublicKeyHash recipientPublicKeyHash, CancellationToken cancellationToken = default)
-    {
-        return TryGetPeerIdByIdentityPublicKeyHashAsync(recipientPublicKeyHash.ToArray(), cancellationToken);
+        if (matches.Count != 1) return null;
+        return matches[0];
     }
 
     public async Task RemovePeerAsync(Percolator.Network.PeerId peerId, CancellationToken cancellationToken = default)

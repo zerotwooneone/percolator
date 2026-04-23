@@ -68,7 +68,7 @@ namespace Percolator.Application.Apps.Chat
                 return;
             }
             var pkh = await _pkhResolver.GetActivePkhAsync(adminPeerId.Value, ct).ConfigureAwait(false);
-            var route = new RecipientRoute(new Percolator.Identity.PeerId(adminPeerId.Value), pkh);
+            var route = new RecipientRoute(new Percolator.Identity.PeerId(adminPeerId.Value), pkh is null ? null : Percolator.Identity.IdentityPublicKeyHash.FromBytes(pkh));
             await _sender.SendChatEnvelopeToPeerAsync(chat, route, ct).ConfigureAwait(false);
         }
 

@@ -31,8 +31,6 @@ public sealed class SimulatorOutboundInterceptorRelayRoutingTests
         var cipherBytes = new byte[] { 1, 2, 3 };
 
         stateMock.Setup(s => s.Peers).Returns(new ObservableList<SimulatedPeerModel>());
-        stateMock.Setup(s => s.TryGetPeerIdByIdentityPublicKeyHashAsync(It.IsAny<byte[]>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((PeerId?)null);
         stateMock.Setup(s => s.TryGetPeerIdByIdentityPublicKeyHashAsync(It.IsAny<IdentityPublicKeyHash>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((PeerId?)null);
 
@@ -53,7 +51,7 @@ public sealed class SimulatorOutboundInterceptorRelayRoutingTests
         Assert.That(result, Is.False);
         stateMock.Verify(s => s.EnqueueRelayDownstreamToPeerAsync(
             It.IsAny<PeerId>(),
-            It.IsAny<byte[]>(),
+            It.IsAny<Percolator.Identity.IdentityPublicKeyHash>(),
             It.IsAny<byte[]>(),
             It.IsAny<string?>(),
             It.IsAny<CancellationToken>()),
@@ -108,7 +106,7 @@ public sealed class SimulatorOutboundInterceptorRelayRoutingTests
         Assert.That(result, Is.False);
         stateMock.Verify(s => s.EnqueueRelayDownstreamToPeerAsync(
             It.IsAny<PeerId>(),
-            It.IsAny<byte[]>(),
+            It.IsAny<Percolator.Identity.IdentityPublicKeyHash>(),
             It.IsAny<byte[]>(),
             It.IsAny<string?>(),
             It.IsAny<CancellationToken>()),
@@ -150,7 +148,7 @@ public sealed class SimulatorOutboundInterceptorRelayRoutingTests
             .ReturnsAsync(peerId);
         stateMock.Setup(s => s.EnqueueRelayDownstreamToPeerAsync(
             relayHostPeerId,
-            recipientPublicKeyHash.ToArray(),
+            recipientPublicKeyHash,
             cipherBytes,
             It.IsAny<string?>(),
             It.IsAny<CancellationToken>()))
@@ -173,7 +171,7 @@ public sealed class SimulatorOutboundInterceptorRelayRoutingTests
         Assert.That(result, Is.True);
         stateMock.Verify(s => s.EnqueueRelayDownstreamToPeerAsync(
             relayHostPeerId,
-            recipientPublicKeyHash.ToArray(),
+            recipientPublicKeyHash,
             cipherBytes,
             "Test",
             It.IsAny<CancellationToken>()),

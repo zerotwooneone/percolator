@@ -111,8 +111,7 @@ public class Phase17CommandsOnlyTests : IntegrationTestBase
         {
             // Resolve by PKH only (legacy PeerConnection repo removed)
             var pubKeyRepo = _hostProvider.GetRequiredService<IPeerPublicSigningKeyStore>();
-            using var sha = SHA256.Create();
-            var publicKeyHash = IdentityPublicKeyHash.FromBytes(sha.ComputeHash(publicKeyBytes));
+            var publicKeyHash = IdentityPublicKeyHash.FromSpki(publicKeyBytes);
             var pubKeyRec = await pubKeyRepo.GetPeerIdByPublicKeyHashAsync(publicKeyHash);
             if (pubKeyRec is not null)
             {

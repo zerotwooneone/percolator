@@ -309,7 +309,7 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
         // Deliver to simulated peer (PKH)
         if (targetIdentityPublicKeyHash.Length == 32)
         {
-            var recipientPeerId = await _state.TryGetPeerIdByIdentityPublicKeyHashAsync(targetIdentityPublicKeyHash, ct).ConfigureAwait(false);
+            var recipientPeerId = await _state.TryGetPeerIdByIdentityPublicKeyHashAsync(Percolator.Identity.IdentityPublicKeyHash.FromBytes(targetIdentityPublicKeyHash), ct).ConfigureAwait(false);
             if (recipientPeerId is null)
             {
                 _diagnostics.Emit(

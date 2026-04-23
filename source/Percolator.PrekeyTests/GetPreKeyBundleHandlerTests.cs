@@ -97,15 +97,12 @@ public class GetPreKeyBundleHandlerTests
     }
 
     [Test]
-    public void Handle_missing_hash_throws()
+    public void FromBytes_with_empty_array_throws()
     {
-        // Arrange
-        var query = new GetPreKeyBundleQuery { TargetPublicSigningKeyHash = IdentityPublicKeyHash.FromBytes(Array.Empty<byte>()) };
-
         // Act
-        Func<Task> act = async () => await _sut.Handle(query, CancellationToken.None);
+        var act = () => IdentityPublicKeyHash.FromBytes(Array.Empty<byte>());
 
         // Assert
-        act.Should().ThrowAsync<InvalidOperationException>();
+        act.Should().Throw<ArgumentException>().WithMessage("Public key hash must be exactly 32 bytes.*");
     }
 }

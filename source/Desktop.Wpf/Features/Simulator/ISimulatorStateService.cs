@@ -18,9 +18,6 @@ public interface ISimulatorStateService
     Task<Percolator.Network.PeerId> AddPeerAsync(string? displayName, CancellationToken cancellationToken = default);
     Task RemovePeerAsync(Percolator.Network.PeerId peerId, CancellationToken cancellationToken = default);
 
-    Task<Percolator.Network.PeerId?> TryGetPeerIdByIdentityPublicKeyHashAsync(byte[] recipientPublicKeyHash, CancellationToken cancellationToken = default);
-
-    // Typed overload for IdentityPublicKeyHash (non-breaking addition)
     Task<Percolator.Network.PeerId?> TryGetPeerIdByIdentityPublicKeyHashAsync(IdentityPublicKeyHash recipientPublicKeyHash, CancellationToken cancellationToken = default);
 
     Task EnqueueRelayUpstreamToMainAsync(
@@ -31,7 +28,7 @@ public interface ISimulatorStateService
 
     Task EnqueueRelayDownstreamToPeerAsync(
         Percolator.Network.PeerId relayHostPeerId,
-        byte[] targetIdentityPublicKeyHash,
+        Percolator.Identity.IdentityPublicKeyHash targetIdentityPublicKeyHash,
         byte[] opaqueBytes,
         string? debugType = null,
         CancellationToken cancellationToken = default);

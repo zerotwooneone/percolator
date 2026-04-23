@@ -61,7 +61,7 @@ public sealed class DispatchSignedAdminCommitOperationHandler : IRequestHandler<
         try
         {
             IdentityPublicKeyHash? pkh = await _keyStore.GetPublicKeyHashByPeerIdAsync(recipientId, cancellationToken).ConfigureAwait(false);
-            await _sender.SendChatEnvelopeToPeerAsync(chat, new RecipientRoute(recipientId, pkh?.ToArray()), cancellationToken).ConfigureAwait(false);
+            await _sender.SendChatEnvelopeToPeerAsync(chat, new RecipientRoute(recipientId, pkh), cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex)
         {

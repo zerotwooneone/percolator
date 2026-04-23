@@ -134,7 +134,7 @@ namespace Percolator.Application.Apps.Chat
                 var peerId = await _keyStore.GetPeerIdByPublicKeyHashAsync(identityPublicKeyHash, cancellationToken).ConfigureAwait(false);
                 if (peerId is null) continue;
                 var pid = new Percolator.Identity.PeerId(peerId.Value);
-                var route = new RecipientRoute(pid, pkh);
+                var route = new RecipientRoute(pid, IdentityPublicKeyHash.FromBytes(pkh));
                 await _sender.SendChatEnvelopeToPeerAsync(env.ChatEnvelope, route, cancellationToken).ConfigureAwait(false);
             }
         }

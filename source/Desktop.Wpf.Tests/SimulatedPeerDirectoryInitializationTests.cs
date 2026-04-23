@@ -42,8 +42,6 @@ public sealed class SimulatedPeerDirectoryInitializationTests
             .Callback(() => Interlocked.Increment(ref initCalls))
             .Returns(initGate.Task);
 
-        state.Setup(s => s.TryGetPeerIdByIdentityPublicKeyHashAsync(It.IsAny<byte[]>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((PeerId?)null);
         state.Setup(s => s.TryGetPeerIdByIdentityPublicKeyHashAsync(It.IsAny<IdentityPublicKeyHash>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((PeerId?)null);
         state.Setup(s => s.AddRelayActiveSessionAsync(It.IsAny<PeerId>(), It.IsAny<PeerId>(), It.IsAny<CancellationToken>()))

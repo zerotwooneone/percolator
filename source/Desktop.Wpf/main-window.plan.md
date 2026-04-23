@@ -50,41 +50,41 @@ This plan intentionally scopes that fix out; the bi-directional plan remains cor
 ### Code Review Findings
 
 **Domain Types (prefer these over raw `Guid` / `string`):**
-- `DirectSessionId` — `readonly record struct(Guid Value)` in `Percolator.Network`
-- `ConversationId` — `readonly record struct(Guid Value)` in `Percolator.Chat.ValueObjects`
-- `MessageId` — `readonly record struct(Guid Value)` in `Percolator.Chat.ValueObjects`
-- `ParticipantId` — `readonly record struct(Guid Value)` in `Percolator.Chat.ValueObjects`
-- `PeerId` — `record(Guid Value)` in `Percolator.Network`
-- `SelfId` — `readonly record struct(int Value)` in `Percolator.Identity`
+- `DirectSessionId` -- `readonly record struct(Guid Value)` in `Percolator.Network`
+- `ConversationId` -- `readonly record struct(Guid Value)` in `Percolator.Chat.ValueObjects`
+- `MessageId` -- `readonly record struct(Guid Value)` in `Percolator.Chat.ValueObjects`
+- `ParticipantId` -- `readonly record struct(Guid Value)` in `Percolator.Chat.ValueObjects`
+- `PeerId` -- `record(Guid Value)` in `Percolator.Network`
+- `SelfId` -- `readonly record struct(int Value)` in `Percolator.Identity`
 
 **Key Identity Access:**
 - `ActiveIdentityContext.Identity.SelfIdentityId` → `SelfId` (wraps `int`). Use `.Value` for raw int.
 - `ISelfParticipantIdProvider.Get()` → `ParticipantId` (wraps `Guid`). Different from `SelfId`.
 
 **What's Already Implemented:**
-- `IConversationResolver.ResolveAsync(ConversationLookupKey, CancellationToken)` → `ConversationResolution(Conversation, int SelfIdentityId)` — the canonical way to turn a lookup key into a conversation
-- `ConversationLookupKey.ForDirectSession(Guid)` — factory for direct session lookup
-- `ChatReloadCoordinator` — Singleton, uses R3 `Subject`→`Debounce`→`SelectAwait` pipeline (missing `TimeProvider` injection)
-- `PeerConnectionReloadCoordinator` — reference pattern: injects `TimeProvider`, passes to `Debounce(…, timeProvider)`
+- `IConversationResolver.ResolveAsync(ConversationLookupKey, CancellationToken)` → `ConversationResolution(Conversation, int SelfIdentityId)` -- the canonical way to turn a lookup key into a conversation
+- `ConversationLookupKey.ForDirectSession(Guid)` -- factory for direct session lookup
+- `ChatReloadCoordinator` -- Singleton, uses R3 `Subject`→`Debounce`→`SelectAwait` pipeline (missing `TimeProvider` injection)
+- `PeerConnectionReloadCoordinator` -- reference pattern: injects `TimeProvider`, passes to `Debounce(..., timeProvider)`
 - `TimeProvider.System` registered as Singleton in `App.xaml.cs`
-- `ChatStateService` — Singleton, owns `ObservableList<ChatMessageModel>` collections behind a `_stateGate` lock
+- `ChatStateService` -- Singleton, owns `ObservableList<ChatMessageModel>` collections behind a `_stateGate` lock
 - `SimulatedPeerModel.AddChatMessage` enforces max 50 messages
 - `SendChatMessageToMainAsync` exists in `ISimulatorStateService`
-- Peer cards rendered inline in `SimulatorPeersTabView.xaml` DataTemplate — there is **no** `SimulatedPeerCardView.xaml`
+- Peer cards rendered inline in `SimulatorPeersTabView.xaml` DataTemplate -- there is **no** `SimulatedPeerCardView.xaml`
 - All three Chat event publish sites (`PostTextMessageHandler`, `ReceiveTextMessageHandler`, `ReceiveDeliveredReceiptHandler`) have `request.LookupKey.DirectSessionId` available at publish time
 
 **What's NOT Implemented:**
-- WPF handler for `DeliveredReceiptReceivedEvent` — needed to update `ChatMessageModel.IsDelivered`
+- WPF handler for `DeliveredReceiptReceivedEvent` -- needed to update `ChatMessageModel.IsDelivered`
 - `IsSending` property on `ChatMessageModel`
-- Simulator chat UI (`SimulatorChatViewModel`) — does NOT exist
+- Simulator chat UI (`SimulatorChatViewModel`) -- does NOT exist
 - Integration of chat UI into `SimulatedPeerCardViewModel`
-- Initial chat load trigger — removed in Chunk C, not restored
+- Initial chat load trigger -- removed in Chunk C, not restored
 
 **CRITICAL BUG: Session Key ≠ Conversation Key Mismatch**
-`ChatViewModel.SetSession(sessionId)` receives `key.Value.ToString("N")` where `key.Value` is a `DirectSessionId` GUID. Messages are stored under this key. However, `ChatReloadCoordinator.ReloadCoreAsync` writes to `conversationId.Value.ToString("N")` — a **different GUID**. Messages written by reload go to a list nobody reads. See Step A.0.
+`ChatViewModel.SetSession(sessionId)` receives `key.Value.ToString("N")` where `key.Value` is a `DirectSessionId` GUID. Messages are stored under this key. However, `ChatReloadCoordinator.ReloadCoreAsync` writes to `conversationId.Value.ToString("N")` -- a **different GUID**. Messages written by reload go to a list nobody reads. See Step A.0.
 
 **DESIGN PRINCIPLE: State Service model modification**
-Per `r3.readme.md` §1, state services own observable collections of mutable models. Models can be modified directly on any thread — the ViewModel's job is to project them to the UI thread. We do NOT add "thread-safe wrapper methods" for individual property mutations. **Reactive properties already notify** (e.g., `BindableReactiveProperty<bool>` raises change events), so handlers can mutate model properties directly without an extra "state mutated" signal.
+Per `r3.readme.md` §1, state services own observable collections of mutable models. Models can be modified directly on any thread -- the ViewModel's job is to project them to the UI thread. We do NOT add "thread-safe wrapper methods" for individual property mutations. **Reactive properties already notify** (e.g., `BindableReactiveProperty<bool>` raises change events), so handlers can mutate model properties directly without an extra "state mutated" signal.
 
 ### Goal
 
@@ -106,20 +106,20 @@ This chunk addresses:
 ### Current State Analysis
 
 **Main Window Chat:**
-- `ChatStateService` keys its `ConcurrentDictionary` by `string`. Currently `ChatReloadCoordinator` writes via `conversationId.Value.ToString("N")`, but `ChatViewModel.SetSession` reads via `DirectSessionId.Value.ToString("N")` — **mismatch** (Step A.0)
-- `ChatReloadCoordinator` — missing `TimeProvider` injection (should follow `PeerConnectionReloadCoordinator` pattern)
-- `ChatMessageModel` — has `IsDelivered`, `IsRead` as `BindableReactiveProperty<bool>`. Missing `IsSending`.
-- `ChatMessageSnapshot` — uses `string Id`. Should use `MessageId`.
+- `ChatStateService` keys its `ConcurrentDictionary` by `string`. Currently `ChatReloadCoordinator` writes via `conversationId.Value.ToString("N")`, but `ChatViewModel.SetSession` reads via `DirectSessionId.Value.ToString("N")` -- **mismatch** (Step A.0)
+- `ChatReloadCoordinator` -- missing `TimeProvider` injection (should follow `PeerConnectionReloadCoordinator` pattern)
+- `ChatMessageModel` -- has `IsDelivered`, `IsRead` as `BindableReactiveProperty<bool>`. Missing `IsSending`.
+- `ChatMessageSnapshot` -- uses `string Id`. Should use `MessageId`.
 - Issues: key mismatch, no initial load trigger, no delivery receipt handler, no sending state
 
 **Simulator Chat:**
-- `SimulatedPeerModel.RecentChatMessages` — `ObservableList<SimulatedChatMessageSnapshot>` with max 50
-- `SimulatedPeerCardViewModel` — rendered inline in `SimulatorPeersTabView.xaml`. No chat section.
+- `SimulatedPeerModel.RecentChatMessages` -- `ObservableList<SimulatedChatMessageSnapshot>` with max 50
+- `SimulatedPeerCardViewModel` -- rendered inline in `SimulatorPeersTabView.xaml`. No chat section.
 - Issue: No UI to display or send chat messages
 
 ### Step A.0: Fix Session Key ≠ Conversation Key Mismatch + Improve Domain Typing
 
-**Problem:** `ChatViewModel.SetSession(sessionId)` stores messages under `DirectSessionId.ToString("N")`. `ChatReloadCoordinator.ReloadCoreAsync` writes to `ConversationId.Value.ToString("N")` — a different GUID. Messages never appear.
+**Problem:** `ChatViewModel.SetSession(sessionId)` stores messages under `DirectSessionId.ToString("N")`. `ChatReloadCoordinator.ReloadCoreAsync` writes to `ConversationId.Value.ToString("N")` -- a different GUID. Messages never appear.
 
 **Root cause:**
 1. `SelectedChannelPaneViewModel.ResolveChatContent` → `key.Value` is a `DirectSessionId` GUID
@@ -129,7 +129,7 @@ This chunk addresses:
 
 **Solution: Use `DirectSessionId` as the canonical storage key and enrich domain events.**
 
-The `ConversationLookupKey` already carries an optional `DirectSessionId`. All three event publish sites (`PostTextMessageHandler`, `ReceiveTextMessageHandler`, `ReceiveDeliveredReceiptHandler`) have `request.LookupKey.DirectSessionId` available. Add `Guid? DirectSessionId` to the domain events so the WPF handlers can route without a reverse-lookup or DB call. This does NOT break domain isolation — `DirectSessionId` is already a concept in the Chat domain via `ConversationLookupKey`.
+The `ConversationLookupKey` already carries an optional `DirectSessionId`. All three event publish sites (`PostTextMessageHandler`, `ReceiveTextMessageHandler`, `ReceiveDeliveredReceiptHandler`) have `request.LookupKey.DirectSessionId` available. Add `Guid? DirectSessionId` to the domain events so the WPF handlers can route without a reverse-lookup or DB call. This does NOT break domain isolation -- `DirectSessionId` is already a concept in the Chat domain via `ConversationLookupKey`.
 
 **A.0.1: Re-key `ChatStateService` from `string` to `DirectSessionId`**
 
@@ -261,7 +261,7 @@ public void SetSession(DirectSessionId sessionId)
     Messages = _messagesView.ToNotifyCollectionChanged(_ui.CollectionEventDispatcher);
 
     // 4. Do NOT subscribe to a "state mutated" signal just to refresh UI.
-    // 5. Do NOT sort in the ViewModel — per wpf.readme.md §1, sorting is a XAML concern.
+    // 5. Do NOT sort in the ViewModel -- per wpf.readme.md §1, sorting is a XAML concern.
 }
 ```
 
@@ -349,11 +349,11 @@ public readonly record struct DirectSessionIdValueObject(Guid Value)
 }
 ```
 
-**File:** `Percolator.Chat/Events/TextMessagePostedEvent.cs` — add `DirectSessionIdValueObject? DirectSessionId` property
+**File:** `Percolator.Chat/Events/TextMessagePostedEvent.cs` -- add `DirectSessionIdValueObject? DirectSessionId` property
 
-**File:** `Percolator.Chat/Events/TextMessageReceivedEvent.cs` — add `DirectSessionIdValueObject? DirectSessionId` property
+**File:** `Percolator.Chat/Events/TextMessageReceivedEvent.cs` -- add `DirectSessionIdValueObject? DirectSessionId` property
 
-**File:** `Percolator.Chat/Events/DeliveredReceiptReceivedEvent.cs` — add `DirectSessionIdValueObject? DirectSessionId` property
+**File:** `Percolator.Chat/Events/DeliveredReceiptReceivedEvent.cs` -- add `DirectSessionIdValueObject? DirectSessionId` property
 
 Nullable because group/PKH lookups won't have a `DirectSessionId`. Only direct-session conversations will.
 
@@ -469,7 +469,7 @@ public sealed class ChatReloadCoordinator : IChatReloadCoordinator
 
 **Solution:** Implement `ReloadFromSessionAsync` and `ReloadCoreAsync` in `ChatReloadCoordinator` (pipelines already wired in Step A.0.6). Trigger from `SelectedChannelPaneViewModel`.
 
-**File:** `Desktop.Wpf/Features/Chat/ChatReloadCoordinator.cs` — implement the two reload methods:
+**File:** `Desktop.Wpf/Features/Chat/ChatReloadCoordinator.cs` -- implement the two reload methods:
 
 ```csharp
 private async Task ReloadFromSessionAsync(DirectSessionId sessionId, CancellationToken ct)
@@ -521,9 +521,9 @@ private void SyncConversationToState(ConversationResolution resolution, DirectSe
 ```
 
 **Key notes:**
-- `ChatMessageSnapshot.Id` is now `MessageId` (not `string`) — see Step A.3 for the type change
+- `ChatMessageSnapshot.Id` is now `MessageId` (not `string`) -- see Step A.3 for the type change
 - `ParticipantId` supports `==` comparison (it's a `readonly record struct`)
-- `ConversationResolution` is returned by `IConversationResolver.ResolveAsync` — it auto-creates the conversation if needed
+- `ConversationResolution` is returned by `IConversationResolver.ResolveAsync` -- it auto-creates the conversation if needed
 - Both `Debounce` calls pass `timeProvider` (wired in A.0.6)
 
 **File:** `Desktop.Wpf/Features/Sessions/SelectedChannelPaneViewModel.cs`
@@ -551,7 +551,7 @@ private object? ResolveChatContent(PeerConnectionModel model, PeerConnectionKey 
 }
 ```
 
-### Step A.2: Handle DeliveredReceiptReceivedEvent — update model directly
+### Step A.2: Handle DeliveredReceiptReceivedEvent -- update model directly
 
 **Problem:** Messages start with `IsDelivered = false` but never get updated to `true` when delivered.
 
@@ -650,7 +650,7 @@ public sealed class ChatMessageModel : IDisposable
         // Do not let a DB snapshot overwrite a 'true' state with a 'false' state
         if (snapshot.IsDelivered) IsDelivered.Value = true;
         if (snapshot.IsRead) IsRead.Value = true;
-        // IsSending is NOT overwritten — managed by optimistic insert + DeliveredReceiptReceivedEventHandler
+        // IsSending is NOT overwritten -- managed by optimistic insert + DeliveredReceiptReceivedEventHandler
     }
 
     public void Dispose() => _bag.Dispose();
@@ -661,11 +661,11 @@ public sealed class ChatMessageModel : IDisposable
 
 **A.3.3: Update `ChatStateService.SyncMessages`**
 
-`SyncMessages` already uses `existingById.TryGetValue` to merge — `UpdateFromSnapshot` doesn't overwrite `IsSending`, so it's naturally preserved. No changes needed to `SyncMessages` beyond the re-key from `string` to `DirectSessionId` done in A.0.1.
+`SyncMessages` already uses `existingById.TryGetValue` to merge -- `UpdateFromSnapshot` doesn't overwrite `IsSending`, so it's naturally preserved. No changes needed to `SyncMessages` beyond the re-key from `string` to `DirectSessionId` done in A.0.1.
 
-**A.3.4: Update `ChatStateUpdateHandlers` — optimistic insert via public method**
+**A.3.4: Update `ChatStateUpdateHandlers` -- optimistic insert via public method**
 
-**Architectural decision:** Lock only around structural changes to ObservableList (adding/removing items). Do NOT lock around property updates on existing models — those are reactive and thread-safe. Encapsulate locking within ChatStateService via public methods.
+**Architectural decision:** Lock only around structural changes to ObservableList (adding/removing items). Do NOT lock around property updates on existing models -- those are reactive and thread-safe. Encapsulate locking within ChatStateService via public methods.
 
 **File:** `Desktop.Wpf/Features/Chat/Handlers/ChatStateUpdateHandlers.cs`
 
@@ -800,17 +800,17 @@ public sealed class SimulatorChatMessageModel
 ```
 
 **Pattern notes:**
-- `DisposableBag _bag` — struct, no `new` needed (matches `SimulatedPeerCardViewModel`)
-- `Messages` — concrete `NotifyCollectionChangedSynchronizedViewList<T>` (no interface variant exists)
-- `Messages.Dispose()` explicitly in `DisposeCore` — per `wpf.readme.md` §3
-- No `ViewMappings.xaml` entry — embedded inline, not resolved by implicit DataTemplate
-- XAML binding: `{Binding MessageInput.Value, UpdateSourceTrigger=PropertyChanged}` — `.Value` required for `BindableReactiveProperty`
+- `DisposableBag _bag` -- struct, no `new` needed (matches `SimulatedPeerCardViewModel`)
+- `Messages` -- concrete `NotifyCollectionChangedSynchronizedViewList<T>` (no interface variant exists)
+- `Messages.Dispose()` explicitly in `DisposeCore` -- per `wpf.readme.md` §3
+- No `ViewMappings.xaml` entry -- embedded inline, not resolved by implicit DataTemplate
+- XAML binding: `{Binding MessageInput.Value, UpdateSourceTrigger=PropertyChanged}` -- `.Value` required for `BindableReactiveProperty`
 
 ### Step A.5: Integrate simulator chat UI into SimulatedPeerCardViewModel
 
 **Problem:** The simulator peer card needs to display the chat UI.
 
-**Solution:** Add a `SimulatorChatViewModel` property to `SimulatedPeerCardViewModel` and embed the chat UI in the existing `SimulatorPeersTabView.xaml` DataTemplate. There is **no** `SimulatedPeerCardView.xaml` — peer cards are rendered inline.
+**Solution:** Add a `SimulatorChatViewModel` property to `SimulatedPeerCardViewModel` and embed the chat UI in the existing `SimulatorPeersTabView.xaml` DataTemplate. There is **no** `SimulatedPeerCardView.xaml` -- peer cards are rendered inline.
 
 **File:** `Desktop.Wpf/Features/Simulator/SimulatedPeerCardViewModel.cs`
 
@@ -854,7 +854,7 @@ Add a chat `Expander` inside the peer card DataTemplate, after the existing "Pre
 ```
 
 **Key notes:**
-- Binding uses `ChatViewModel.MessageInput.Value` (not `ChatViewModel.MessageInput`) — `.Value` is required for `BindableReactiveProperty`
+- Binding uses `ChatViewModel.MessageInput.Value` (not `ChatViewModel.MessageInput`) -- `.Value` is required for `BindableReactiveProperty`
 - `SimulatedPeerCardViewModel` already injects `IUiDispatcher` as `_ui`, so passing it to `SimulatorChatViewModel` is straightforward
 - `SimulatedPeerCardViewModel` already injects `ISimulatorStateService` as `_state`
 
@@ -862,7 +862,7 @@ Add a chat `Expander` inside the peer card DataTemplate, after the existing "Pre
 
 **Verification:** `SimulatedPeerModel.AddChatMessage` enforces max 50 messages via `RemoveAt(0)` when count exceeds 50. `JsonSimulatorStateRepository` persists the `RecentChatMessages` list in the snapshot.
 
-**No changes needed** — requirement 2b already satisfied.
+**No changes needed** -- requirement 2b already satisfied.
 
 ### Step A.7: Verification
 

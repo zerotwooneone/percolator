@@ -1,9 +1,10 @@
+using Percolator.Identity;
 using Percolator.Network;
 
 namespace Desktop.Wpf.Features.Simulator.Models;
 
 public sealed record RelayStateSnapshot(
-    PeerId RelayHostPeerId,
+    Percolator.Network.PeerId RelayHostPeerId,
     IReadOnlyList<OutboundRelayMessageSnapshot> UpstreamToMain,
     IReadOnlyList<InboundRelayMessageSnapshot> DownstreamToPeers);
 
@@ -15,7 +16,7 @@ public sealed record OutboundRelayMessageSnapshot(
 
 public sealed record InboundRelayMessageSnapshot(
     Guid AckId,
-    byte[] TargetIdentityPublicKeyHash,
+    IdentityPublicKeyHash TargetIdentityPublicKeyHash,
     byte[] OpaqueBytes,
     DateTimeOffset EnqueuedUtc,
     string? DebugType);

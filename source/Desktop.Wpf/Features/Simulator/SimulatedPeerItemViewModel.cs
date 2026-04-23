@@ -308,7 +308,7 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
 
         await _state.EnqueueRelayDownstreamToPeerAsync(
                 relayHostPeerId: relayPeerId,
-                targetIdentityPublicKeyHash: selfPkh,
+                targetIdentityPublicKeyHash: Percolator.Identity.IdentityPublicKeyHash.FromBytes(selfPkh),
                 opaqueBytes: invite.ToByteArray(),
                 debugType: nameof(EstablishDirectSessionRequest),
                 cancellationToken: ct)

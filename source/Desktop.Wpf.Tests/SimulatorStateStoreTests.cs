@@ -13,6 +13,7 @@ using NUnit.Framework;
 using Percolator.Application.Configuration;
 using Percolator.Cryptography;
 using Percolator.Cryptography.Primitives;
+using Percolator.Identity;
 using Percolator.Network;
 
 namespace Desktop.Wpf.Tests;
@@ -99,7 +100,7 @@ public sealed class SimulatorStateStoreTests
             var relayHostPeerId = new Percolator.Network.PeerId(Guid.NewGuid());
             var ackUp = Guid.NewGuid();
             var ackDown = Guid.NewGuid();
-            var targetPkh = SHA256.HashData(Guid.NewGuid().ToByteArray());
+            var targetPkh = IdentityPublicKeyHash.FromSpki(Guid.NewGuid().ToByteArray());
             var enqueuedUtc = DateTimeOffset.UtcNow;
 
             var relays = new[]
@@ -163,7 +164,7 @@ public sealed class SimulatorStateStoreTests
             loadedSnapshot.Relays.Single().RelayHostPeerId.Should().Be(relayHostPeerId);
             loadedSnapshot.Relays.Single().UpstreamToMain.Should().ContainSingle(m => m.AckId == ackUp && m.DebugType == "up");
             loadedSnapshot.Relays.Single().DownstreamToPeers.Should().ContainSingle(m => m.AckId == ackDown && m.DebugType == "down");
-            loadedSnapshot.Relays.Single().DownstreamToPeers.Single(m => m.AckId == ackDown).TargetIdentityPublicKeyHash.Should().Equal(targetPkh);
+            loadedSnapshot.Relays.Single().DownstreamToPeers.Single(m => m.AckId == ackDown).TargetIdentityPublicKeyHash.Should().Be(targetPkh);
 
             loadedSnapshot.Groups.Should().HaveCount(1);
             loadedSnapshot.Groups.Single().GroupId.Should().Be(groups[0].GroupId);
