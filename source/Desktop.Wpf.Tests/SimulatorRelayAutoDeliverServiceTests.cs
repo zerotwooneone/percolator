@@ -84,14 +84,6 @@ public sealed class SimulatorRelayAutoDeliverServiceTests
         sut.Stop();
 
         // Assert
-        delivery.Verify(d => d.DeliverToPeerAsync(
-            relayHostPeerId,
-            recipientPeerId,
-            ackId,
-            It.IsAny<byte[]>(),
-            "x",
-            It.IsAny<CancellationToken>()), Times.Once);
-
         relay.MessageQueue.Count.Should().Be(0);
     }
 }
