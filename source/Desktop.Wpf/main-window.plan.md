@@ -1076,13 +1076,15 @@ The solution is to extend `ISimulatorOutboundInterceptor` with a new method that
 
 ### Step C.1: Add Method to ISimulatorOutboundInterceptor
 
-**Problem:** The existing `ISimulatorOutboundInterceptor` only intercepts gRPC calls based on endpoint resolution. We need a method that can be called from `MessageService` to intercept message sends based on peer ID.
+**Problem:** The existing `ISimulatorOutboundInterceptor` only intercepts gRPC calls based on endpoint resolution. We need a method that can be called from `MessageService` to intercept message sends based on the **recipient identity PKH** (crypto identifier), because `PeerId` is not a stable identifier across peers.
 
-**Solution:** Add a new method to `ISimulatorOutboundInterceptor` that checks if a message to a peer should be routed via simulator relay.
+**Solution:** Add a new method to `ISimulatorOutboundInterceptor` that checks if a message to a peer should be routed via simulator relay based on **recipientPublicKeyHash (PKH)**.
 
 **File:** `Percolator.Application/Network/ISimulatorOutboundInterceptor.cs`
 
-**Add this method to the interface (after the existing methods):**
+**Current State:** This method exists, but it currently takes `PeerId recipientPeerId`. That is incorrect for simulator relay routing.
+
+**Change the method signature to (after the existing methods):**
 
 ```csharp
 /// <summary>
@@ -1090,13 +1092,13 @@ The solution is to extend `ISimulatorOutboundInterceptor` with a new method that
 /// If the peer is a simulated peer connected via relay, enqueues the message in the simulator's
 /// relay queue and returns true. Otherwise, returns false to proceed with normal network send.
 /// </summary>
-/// <param name="recipientPeerId">The recipient peer ID</param>
+/// <param name="recipientPublicKeyHash">The recipient identity PKH (32 bytes)</param>
 /// <param name="cipherBytes">The encrypted message payload (session cipher)</param>
 /// <param name="debugType">Optional debug type for diagnostics</param>
 /// <param name="cancellationToken">Cancellation token</param>
 /// <returns>True if the message was enqueued in simulator relay (skip network send), false otherwise</returns>
 Task<bool> TryRouteMessageViaSimulatorRelayAsync(
-    PeerId recipientPeerId,
+    byte[] recipientPublicKeyHash,
     byte[] cipherBytes,
     string? debugType = null,
     CancellationToken cancellationToken = default);
@@ -1106,50 +1108,39 @@ Task<bool> TryRouteMessageViaSimulatorRelayAsync(
 
 **Problem:** Need to implement the new method to check if the recipient is a relay-connected simulated peer and enqueue the message using the same pattern as relayed handshakes.
 
-**Solution:** Implement the method following the pattern used by relayed handshakes (see `SimulatorStateService.cs` lines 735, 923, 1080).
+**Solution:** Implement the method following the pattern used by relayed handshakes (see `SimulatorStateService.cs` calls to `EnqueueRelayDownstreamToPeerAsync`).
 
 **File:** `Desktop.Wpf/Features/Simulator/SimulatorOutboundInterceptor.cs`
 
-**Add this private field at the top of the class (after the existing private fields):**
+**Current State:** `ISimulatorDiagnosticsService _diagnostics` is already injected and stored.
 
-```csharp
-private readonly ISimulatorDiagnosticsService _diagnostics;
-```
+**Important Correction:** Remove the current PeerId-based lookup and PKH computation. This method must:
+1) Use `recipientPublicKeyHash` as the authoritative recipient identifier
+2) Resolve whether that PKH belongs to a simulated peer using `_state.TryGetPeerIdByIdentityPkhAsync(recipientPublicKeyHash, ct)`
+3) If simulated and `ConnectionMode.ViaRelay`, enqueue using `EnqueueRelayDownstreamToPeerAsync(relayHostPeerId, recipientPublicKeyHash, cipherBytes, ...)`
 
-**Replace the existing constructor with:**
-
-```csharp
-public SimulatorOutboundInterceptor(
-    ISimulatorStateService state,
-    ILogger<SimulatorOutboundInterceptor> logger,
-    ActiveIdentityContext active,
-    ISimulatorDiagnosticsService diagnostics)
-{
-    _state = state;
-    _logger = logger;
-    _active = active;
-    _diagnostics = diagnostics;
-}
-```
-
-**Add this method to the class (after the existing methods):**
+**Update the existing method to:**
 
 ```csharp
 public async Task<bool> TryRouteMessageViaSimulatorRelayAsync(
-    PeerId recipientPeerId,
+    byte[] recipientPublicKeyHash,
     byte[] cipherBytes,
     string? debugType = null,
     CancellationToken cancellationToken = default)
 {
     cancellationToken.ThrowIfCancellationRequested();
+    if (recipientPublicKeyHash is null) throw new ArgumentNullException(nameof(recipientPublicKeyHash));
+    if (recipientPublicKeyHash.Length != 32) return false;
     if (cipherBytes is null) throw new ArgumentNullException(nameof(cipherBytes));
 
-    // Check if recipient is a simulated peer
-    var peer = _state.Peers.FirstOrDefault(p => p.PeerId == recipientPeerId);
-    if (peer is null)
-    {
-        return false; // Not a simulated peer, proceed with normal send
-    }
+    // Resolve simulated peer by PKH (do NOT assume PeerId is meaningful across peers)
+    var simulatedPeerId = await _state
+        .TryGetPeerIdByIdentityPkhAsync(recipientPublicKeyHash, cancellationToken)
+        .ConfigureAwait(false);
+    if (simulatedPeerId is null) return false;
+
+    var peer = _state.Peers.FirstOrDefault(p => p.PeerId == simulatedPeerId.Value);
+    if (peer is null) return false;
 
     // Check if peer is connected via relay
     if (peer.ConnectionMode.CurrentValue != ConnectionMode.ViaRelay)
@@ -1160,19 +1151,16 @@ public async Task<bool> TryRouteMessageViaSimulatorRelayAsync(
     // Get the relay host peer ID
     if (peer.RelayPeerId.CurrentValue.Value == Guid.Empty)
     {
-        _logger.LogWarning("[simulator relay] Peer {PeerId} has ViaRelay mode but no relay host ID", recipientPeerId);
+        _logger.LogWarning("[simulator relay] Peer {PeerId} has ViaRelay mode but no relay host ID", peer.PeerId);
         return false; // Fallback to normal send
     }
 
     var relayHostPeerId = peer.RelayPeerId.CurrentValue;
 
-    // Compute the target peer's PKH (same pattern as relayed handshakes)
-    var targetPkh = await _state.ComputePublicKeyHashAsync(recipientPeerId, cancellationToken).ConfigureAwait(false);
-
     // Enqueue in simulator's relay queue (downstream: main → target peer via relay)
     await _state.EnqueueRelayDownstreamToPeerAsync(
         relayHostPeerId: relayHostPeerId,
-        targetPkh: targetPkh,
+        targetPkh: recipientPublicKeyHash,
         opaqueBytes: cipherBytes,
         debugType: debugType ?? "ChatMessage",
         cancellationToken: cancellationToken)
@@ -1180,13 +1168,13 @@ public async Task<bool> TryRouteMessageViaSimulatorRelayAsync(
 
     _logger.LogInformation(
         "[simulator relay] Routed message to peer {PeerId} via relay host {RelayHost}",
-        recipientPeerId,
+        peer.PeerId,
         relayHostPeerId);
 
     _diagnostics.Emit(
         SimulatorDiagnosticEventType.RelayEnqueued,
-        $"Message routed to peer {recipientPeerId} via simulator relay host {relayHostPeerId}",
-        peerId: recipientPeerId,
+        $"Message routed to peer {peer.PeerId} via simulator relay host {relayHostPeerId}",
+        peerId: peer.PeerId,
         relayHostPeerId: relayHostPeerId);
 
     return true; // Message enqueued, skip network send
@@ -1197,7 +1185,11 @@ public async Task<bool> TryRouteMessageViaSimulatorRelayAsync(
 
 **Problem:** The `MessageService` needs to call the simulator relay interceptor before sending via the network.
 
-**Solution:** Inject `ISimulatorOutboundInterceptor` into `MessageService` and call the new method in `SendMessageAsync`.
+**Solution:** Inject `ISimulatorOutboundInterceptor` into `MessageService` and call the new method in `SendMessageAsync` / `SendMessageWithResponseAsync`.
+
+**Important Correction:** The interceptor requires **recipient PKH**. The send pipeline already has a route model that can carry PKH: `RecipientRoute(PeerId PeerId, byte[]? PublicKeyHash)`.
+
+Therefore we must plumb `RecipientRoute.PublicKeyHash` down into `MessageService` so the interceptor can route correctly.
 
 **File:** `Percolator.Application/Network/MessageService.cs`
 
@@ -1217,7 +1209,8 @@ public MessageService(
     ActiveIdentityContext active,
     INetworkSender networkSender,
     IOutboundMessageWireTap wireTap,
-    ISimulatorOutboundInterceptor? simulatorOutboundInterceptor = null) // Optional for non-simulator scenarios
+    ISimulatorOutboundInterceptor? simulatorOutboundInterceptor = null)
+// Optional for non-simulator scenarios
 {
     _logger = logger;
     _sessions = sessions;
@@ -1229,15 +1222,54 @@ public MessageService(
 }
 ```
 
-**In the `SendMessageAsync` method, add this check after the cipher is computed (after the line `var cipher = await _secureMessaging.EncryptAsync(sessionId, new Plaintext(envelope.ToByteArray()), ct).ConfigureAwait(false);`), before the wireTap check (before the line `if (_wireTap.Enabled)`):**
+**Current State:** `MessageService` currently calls the interceptor with `recipientPeerId`.
+
+**Change Required:** Modify `MessageService.SendMessageAsync` and `SendMessageWithResponseAsync` signatures to accept `byte[]? recipientPublicKeyHash`.
+
+- Update `IMessageService` accordingly.
+- Update call sites (at minimum `RemoteEnvelopeSender.SendChatEnvelopeToPeerAsync`) to pass `RecipientRoute.PublicKeyHash`.
+
+**File:** `Percolator.Application/Network/IMessageService.cs`
+
+**Change both methods to:**
+
+```csharp
+Task<SendResult> SendMessageAsync(
+    InternalEnvelope envelope,
+    PeerId recipientPeerId,
+    byte[]? recipientPublicKeyHash,
+    CancellationToken ct = default);
+
+Task<(SendResult Result, DeliverOpaqueMessageResponse? Response)> SendMessageWithResponseAsync(
+    InternalEnvelope envelope,
+    PeerId recipientPeerId,
+    byte[]? recipientPublicKeyHash,
+    CancellationToken ct = default);
+```
+
+**File:** `Percolator.Application/Network/RemoteEnvelopeSender.cs`
+
+**Change the call to:**
+
+```csharp
+var result = await _messageService
+    .SendMessageAsync(internalEnvelope, recipient.PeerId, recipient.PublicKeyHash, ct)
+    .ConfigureAwait(false);
+```
+
+**File:** `Percolator.Application/Network/MessageService.cs`
+
+**Update both methods to accept `byte[]? recipientPublicKeyHash`.**
+
+**In `SendMessageAsync`, add this check after cipher is computed and before the wireTap check:**
 
 ```csharp
 // Check if this should route via simulator relay
-if (_simulatorOutboundInterceptor is not null)
+if (_simulatorOutboundInterceptor is not null && recipientPublicKeyHash is not null)
 {
     var routedViaSimulator = await _simulatorOutboundInterceptor
         .TryRouteMessageViaSimulatorRelayAsync(
-            recipientPeerId,
+            recipientPublicKeyHash,
             cipher.Value,
             debugType: envelope.ChatEnvelope?.MessageCase.ToString(),
             ct)
@@ -1250,15 +1282,15 @@ if (_simulatorOutboundInterceptor is not null)
 }
 ```
 
-**In the `SendMessageWithResponseAsync` method, add this check after the cipher is computed (after the line `var cipher = await _secureMessaging.EncryptAsync(sessionId, new Plaintext(envelope.ToByteArray()), ct).ConfigureAwait(false);`), before the wireTap check (before the line `if (_wireTap.Enabled)`):**
+**In `SendMessageWithResponseAsync`, add the analogous check (and guard on `recipientPublicKeyHash is not null`):**
 
 ```csharp
 // Check if this should route via simulator relay
-if (_simulatorOutboundInterceptor is not null)
+if (_simulatorOutboundInterceptor is not null && recipientPublicKeyHash is not null)
 {
     var routedViaSimulator = await _simulatorOutboundInterceptor
         .TryRouteMessageViaSimulatorRelayAsync(
-            recipientPeerId,
+            recipientPublicKeyHash,
             cipher.Value,
             debugType: envelope.ChatEnvelope?.MessageCase.ToString(),
             ct)
@@ -1292,6 +1324,24 @@ services.AddSingleton<ISimulatorDiagnosticsService, SimulatorDiagnosticsService>
 **File:** `Percolator.Application/Network/ServiceCollectionExtensions.cs`
 
 **No changes needed** - the `ISimulatorOutboundInterceptor` is registered in Desktop.Wpf and will be available to MessageService through the DI container.
+
+### Step C.5: Remove Incorrect PeerId-Based Simulator Relay Routing (Code Already Implemented)
+
+**Problem:** The current code uses `PeerId` as the basis for determining whether a message is destined for a simulated relay-connected peer. This is incorrect because `PeerId` is not meaningful across peers.
+
+**Required Cleanup (must be done as part of this chunk):**
+
+- Update `ISimulatorOutboundInterceptor.TryRouteMessageViaSimulatorRelayAsync` signature from `(PeerId recipientPeerId, ...)` to `(byte[] recipientPublicKeyHash, ...)`.
+- Update `SimulatorOutboundInterceptor.TryRouteMessageViaSimulatorRelayAsync` implementation to:
+  - Stop using `_state.ComputePublicKeyHashAsync(recipientPeerId, ...)`
+  - Stop searching `_state.Peers` by `recipientPeerId`
+  - Resolve simulated peer by PKH via `_state.TryGetPeerIdByIdentityPkhAsync(recipientPublicKeyHash, ct)`
+  - Enqueue using `targetPkh: recipientPublicKeyHash`.
+- Update `MessageService` to pass `recipientPublicKeyHash` (plumbed from `RecipientRoute.PublicKeyHash`) and stop passing `recipientPeerId`.
+
+**Update / fix unit tests** added for the initial implementation:
+- Desktop.Wpf.Tests: adjust tests to pass PKH and mock `TryGetPeerIdByIdentityPkhAsync` instead of `ComputePublicKeyHashAsync`.
+- Percolator.ApplicationTests: adjust `MessageService_SendMessageAsync_WhenInterceptorRoutesViaSimulatorRelay...` to call the new `MessageService.SendMessageAsync(..., recipientPublicKeyHash, ...)` overload.
 
 ### Verification
 
