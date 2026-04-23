@@ -1187,9 +1187,11 @@ public async Task<bool> TryRouteMessageViaSimulatorRelayAsync(
 
 **Solution:** Inject `ISimulatorOutboundInterceptor` into `MessageService` and call the new method in `SendMessageAsync` / `SendMessageWithResponseAsync`.
 
-**Important Correction:** The interceptor requires **recipient PKH**. The send pipeline already has a route model that can carry PKH: `RecipientRoute(PeerId PeerId, byte[]? PublicKeyHash)`.
+**Important Correction:** The interceptor requires **recipient PKH**.
 
-Therefore we must plumb `RecipientRoute.PublicKeyHash` down into `MessageService` so the interceptor can route correctly.
+**Updated approach:** Do **not** plumb PKH through `IMessageService` or the outbound send call sites. Instead, resolve PKH inside `MessageService` using the existing persisted mapping in `IPeerPublicSigningKeyStore`.
+
+This keeps call sites stable (they only know `PeerId`) while still enabling simulator relay routing via PKH.
 
 **File:** `Percolator.Application/Network/MessageService.cs`
 
@@ -1222,86 +1224,18 @@ public MessageService(
 }
 ```
 
-**Current State:** `MessageService` currently calls the interceptor with `recipientPeerId`.
+**Current State:** `MessageService` calls the interceptor with PKH after resolving it via `IPeerPublicSigningKeyStore.GetPublicKeyHashByPeerIdAsync`.
 
-**Change Required:** Modify `MessageService.SendMessageAsync` and `SendMessageWithResponseAsync` signatures to accept `byte[]? recipientPublicKeyHash`.
+**Files:**
+- `Percolator.Application/Network/MessageService.cs`
+- `Percolator.Identity/IPeerPublicSigningKeyStore.cs` (already exists)
 
-- Update `IMessageService` accordingly.
-- Update call sites (at minimum `RemoteEnvelopeSender.SendChatEnvelopeToPeerAsync`) to pass `RecipientRoute.PublicKeyHash`.
-
-**File:** `Percolator.Application/Network/IMessageService.cs`
-
-**Change both methods to:**
-
-```csharp
-Task<SendResult> SendMessageAsync(
-    InternalEnvelope envelope,
-    PeerId recipientPeerId,
-    byte[]? recipientPublicKeyHash,
-    CancellationToken ct = default);
-
-Task<(SendResult Result, DeliverOpaqueMessageResponse? Response)> SendMessageWithResponseAsync(
-    InternalEnvelope envelope,
-    PeerId recipientPeerId,
-    byte[]? recipientPublicKeyHash,
-    CancellationToken ct = default);
-```
-
-**File:** `Percolator.Application/Network/RemoteEnvelopeSender.cs`
-
-**Change the call to:**
-
-```csharp
-var result = await _messageService
-    .SendMessageAsync(internalEnvelope, recipient.PeerId, recipient.PublicKeyHash, ct)
-    .ConfigureAwait(false);
-```
-
-**File:** `Percolator.Application/Network/MessageService.cs`
-
-**Update both methods to accept `byte[]? recipientPublicKeyHash`.**
-
-**In `SendMessageAsync`, add this check after cipher is computed and before the wireTap check:**
-
-```csharp
-// Check if this should route via simulator relay
-if (_simulatorOutboundInterceptor is not null && recipientPublicKeyHash is not null)
-{
-    var routedViaSimulator = await _simulatorOutboundInterceptor
-        .TryRouteMessageViaSimulatorRelayAsync(
-            recipientPublicKeyHash,
-            cipher.Value,
-            debugType: envelope.ChatEnvelope?.MessageCase.ToString(),
-            ct)
-        .ConfigureAwait(false);
-
-    if (routedViaSimulator)
-    {
-        return SendResult.CreateSuccess("SimulatorRelay", new[] { "SimulatorRelay" }, attempts: 0);
-    }
-}
-```
-
-**In `SendMessageWithResponseAsync`, add the analogous check (and guard on `recipientPublicKeyHash is not null`):**
-
-```csharp
-// Check if this should route via simulator relay
-if (_simulatorOutboundInterceptor is not null && recipientPublicKeyHash is not null)
-{
-    var routedViaSimulator = await _simulatorOutboundInterceptor
-        .TryRouteMessageViaSimulatorRelayAsync(
-            recipientPublicKeyHash,
-            cipher.Value,
-            debugType: envelope.ChatEnvelope?.MessageCase.ToString(),
-            ct)
-        .ConfigureAwait(false);
-
-    if (routedViaSimulator)
-    {
-        return (SendResult.CreateSuccess("SimulatorRelay", new[] { "SimulatorRelay" }, attempts: 0), null);
-    }
-}
-```
+**Required change (high level):**
+1) Inject `IPeerPublicSigningKeyStore` into `MessageService`.
+2) Before attempting simulator relay routing:
+   - `var recipientPkh = await _keyStore.GetPublicKeyHashByPeerIdAsync(recipientPeerId, ct)`
+   - if non-null, call `_simulatorOutboundInterceptor.TryRouteMessageViaSimulatorRelayAsync(recipientPkh, cipher.Value, ...)`
+3) Leave `IMessageService` signature unchanged.
 
 ### Step C.4: Register ISimulatorOutboundInterceptor in DI
 
@@ -1337,11 +1271,11 @@ services.AddSingleton<ISimulatorDiagnosticsService, SimulatorDiagnosticsService>
   - Stop searching `_state.Peers` by `recipientPeerId`
   - Resolve simulated peer by PKH via `_state.TryGetPeerIdByIdentityPkhAsync(recipientPublicKeyHash, ct)`
   - Enqueue using `targetPkh: recipientPublicKeyHash`.
-- Update `MessageService` to pass `recipientPublicKeyHash` (plumbed from `RecipientRoute.PublicKeyHash`) and stop passing `recipientPeerId`.
+- Update the main-window send path to resolve PKH via `IPeerPublicSigningKeyStore.GetPublicKeyHashByPeerIdAsync` before attempting simulator relay routing.
 
 **Update / fix unit tests** added for the initial implementation:
 - Desktop.Wpf.Tests: adjust tests to pass PKH and mock `TryGetPeerIdByIdentityPkhAsync` instead of `ComputePublicKeyHashAsync`.
-- Percolator.ApplicationTests: adjust `MessageService_SendMessageAsync_WhenInterceptorRoutesViaSimulatorRelay...` to call the new `MessageService.SendMessageAsync(..., recipientPublicKeyHash, ...)` overload.
+- Percolator.ApplicationTests: adjust `MessageService_SendMessageAsync_WhenInterceptorRoutesViaSimulatorRelay...` to mock `IPeerPublicSigningKeyStore.GetPublicKeyHashByPeerIdAsync` and call the existing `SendMessageAsync(envelope, recipientPeerId, ct)`.
 
 ### Verification
 
@@ -1359,3 +1293,303 @@ services.AddSingleton<ISimulatorDiagnosticsService, SimulatorDiagnosticsService>
    - Peer B receives the message in its chat UI
 
 **Expected Result:** Messages sent from main to relay-connected simulated peers now appear in the simulator's relay tab as downstream messages and can be manually delivered to the target peer.
+
+---
+
+## Chunk D
+
+### Goal
+
+Replace many naked `byte[]` PKH parameters/fields (especially in simulator relay routing and related tests) with a well-named, explicit PKH type.
+
+### Constraints / Non-Goals
+
+- Simulator remains in-memory and persists simulated peers between restarts (do not mingle simulator peer data with main window peer store).
+- Do not do project-wide renames in this chunk.
+
+### Investigation: existing PKH types
+
+There is already a `Pkh` value object in `Percolator.Chat.ValueObjects`:
+
+- `Percolator.Chat/ValueObjects/Pkh.cs`
+  - Implements `ByteArrayRecord` equality (SequenceEqual + stable hash)
+  - Does not enforce 32-byte length
+  - Lives in Chat domain, so it is NOT suitable as the canonical PKH type for Identity/Network/Simulator relay routing.
+
+There is also a `PublicKeyHash` value object in `Percolator.Network`:
+
+- `Percolator.Network/PublicKeyHash.cs`
+  - Implements `ByteArrayRecord` equality
+  - Does not enforce 32-byte length
+  - Lives in Network domain, so it is NOT suitable as the canonical PKH type for Identity.
+
+### Design decision
+
+Create an Identity-domain PKH type that is explicit about what it represents and enforces invariants:
+
+- Consistent name: `IdentityPublicKeyHash`
+- Location: `Percolator.Identity` project
+
+Suggested shape (concrete proposal):
+
+- `public sealed record IdentityPublicKeyHash(byte[] Value) : Percolator.Identity.Primitives.ByteArrayRecord(Value)`
+- Enforce invariant in factory method(s): 32 bytes (SHA-256) only.
+- Provide explicit construction and boundary conversions:
+  - `static IdentityPublicKeyHash FromBytes(byte[] value)` (validates non-null and `Length == 32`)
+  - `static IdentityPublicKeyHash FromSpki(byte[] publicKeySpki)` (computes `SHA256.HashData(...)` and validates)
+  - `byte[] ToArray()` (returns a copy to avoid callers mutating the underlying `Value`)
+
+Note: do not expose a public constructor without validation unless you are comfortable relying on call site discipline.
+
+### Work items
+
+**D.1: Add the new PKH type**
+
+- Add `Percolator.Identity/IdentityPublicKeyHash.cs`
+- Implement:
+  - `FromBytes(byte[])` validation (`ArgumentNullException`, `ArgumentException` for non-32)
+  - Optional: `FromSpki(byte[])` (uses `System.Security.Cryptography.SHA256.HashData`)
+  - Optional: `ToHexString()` helper (only if already using hex formatting elsewhere; otherwise defer)
+
+**D.2: Add adapters at the boundaries**
+
+Update `Percolator.Identity/IPeerPublicSigningKeyStore.cs` to add *non-breaking* overloads (keep the existing `byte[]` APIs until migration is complete):
+
+- Add overloads:
+  - `Task ActivateIfChangedAsync(PeerId peerId, byte[] publicKeySpki, IdentityPublicKeyHash publicKeyHash, DateTimeOffset nowUtc, CancellationToken ct = default);`
+  - `Task<PeerId?> GetPeerIdByPublicKeyHashAsync(IdentityPublicKeyHash publicKeyHash, CancellationToken ct = default);`
+  - `Task<IdentityPublicKeyHash?> GetPublicKeyHashByPeerIdAsync(PeerId peerId, CancellationToken ct = default);`
+
+Then update the store implementation(s) in Infrastructure to implement these overloads by delegating to existing `byte[]` implementations.
+
+**D.3: Gradually migrate application/simulator call sites**
+
+Prioritize call sites where PKH is central to correctness and where we currently have `Length == 32` guards:
+
+- `Percolator.Application/Network/ISimulatorOutboundInterceptor.cs`
+  - Change `TryRouteMessageViaSimulatorRelayAsync(byte[] recipientPublicKeyHash, ...)`
+  - To: `TryRouteMessageViaSimulatorRelayAsync(IdentityPublicKeyHash recipientPublicKeyHash, ...)`
+
+- `Desktop.Wpf/Features/Simulator/ISimulatorStateService.cs`
+  - Change `TryGetPeerIdByIdentityPkhAsync(byte[] recipientPublicKeyHash, ...)`
+  - To: `TryGetPeerIdByIdentityPublicKeyHashAsync(IdentityPublicKeyHash recipientPublicKeyHash, ...)`
+
+- `Desktop.Wpf/Features/Simulator/SimulatorOutboundInterceptor.cs`
+  - Remove `recipientPublicKeyHash.Length != 32` guard; rely on `IdentityPublicKeyHash`.
+
+- `Desktop.Wpf/Features/Simulator/Models/SimulatedRelayModel.cs`
+  - Change `InboundRelayMessage.TargetPkh: byte[]` to `IdentityPublicKeyHash`
+  - Remove non-empty checks and replace with type invariant
+
+- Persistence boundary:
+  - `Desktop.Wpf/Features/Simulator/*Snapshot*.cs` and JSON repository should remain `byte[]` (serialized) but convert at boundaries.
+
+Explicit migration sequencing:
+1) Introduce `IdentityPublicKeyHash` and store overloads.
+2) Update simulator-facing APIs and models to typed PKH.
+3) Update `MessageService` to call the typed overload from `_keyStore.GetPublicKeyHashByPeerIdAsync` and only convert to `byte[]` at protocol boundaries.
+
+---
+
+## Chunk E
+
+### Goal
+
+Build a Desktop.Wpf-only send pipeline (decorator chain) so simulator-specific routing logic does not live in the core `MessageService` hot path.
+
+This aligns with:
+
+- Simulator is a local in-memory simulation of remote peers
+- Eventually simulator becomes a separate process and this fork disappears
+
+### Proposed architecture
+
+**E.1: Introduce an outbound send abstraction in Application layer**
+
+Add a single seam that Desktop.Wpf can decorate without forking `MessageService`:
+
+- In `Percolator.Application/Network` add:
+  - `public interface IOutboundCipherSender`
+    - `Task SendAsync(byte[] cipherBytes, PeerId recipientPeerId, string? debugType, CancellationToken ct = default);`
+
+Then:
+
+- `MessageService` depends on `IOutboundCipherSender` for the final delivery step.
+- `MessageService` remains responsible for:
+  - resolving sessions
+  - encrypting `InternalEnvelope` -> `cipherBytes`
+  - providing `debugType` (currently derived from `envelope.ChatEnvelope?.MessageCase.ToString()`)
+
+**E.2: Default sender implementation (Application)**
+
+Implement `NetworkOutboundCipherSender : IOutboundCipherSender` in `Percolator.Application/Network` that performs what `MessageService` currently does after encryption:
+
+- Wire tap
+- Network send
+
+DI: register `IOutboundCipherSender` to `NetworkOutboundCipherSender` in `Percolator.Application/Network/ServiceCollectionExtensions.cs`.
+
+**E.3: Desktop.Wpf adds simulator decorator**
+
+In Desktop.Wpf composition root, decorate `IOutboundCipherSender` with:
+
+- `SimulatorRelayOutboundCipherSenderDecorator : IOutboundCipherSender`
+  - Dependencies:
+    - inner `IOutboundCipherSender`
+    - `ISimulatorOutboundInterceptor`
+    - `IPeerPublicSigningKeyStore`
+  - Behavior:
+    1) Resolve `IdentityPublicKeyHash?` via `_keyStore.GetPublicKeyHashByPeerIdAsync(recipientPeerId, ct)`
+    2) If null: call inner sender (normal network path)
+    3) If non-null: call `_simulatorOutboundInterceptor.TryRouteMessageViaSimulatorRelayAsync(pkh, cipherBytes, debugType, ct)`
+       - If routed: return without calling inner sender
+       - If not routed: call inner sender
+
+This moves simulator-only routing out of `MessageService` while preserving the current behavior.
+
+### Notes
+
+- Keep the decorator registration in Desktop.Wpf only.
+- Ensure Application layer has no reference to Desktop.Wpf types.
+- When simulator becomes a separate process, delete the decorator and the seam stays useful for other cross-cutting behaviors.
+
+---
+
+## Chunk F
+
+### Goal
+
+After Chunk D (typed PKH) is implemented, improve correctness and consistency across the Chunk C feature set, especially unit tests and guard logic.
+
+### Improvements (assuming typed PKH exists)
+
+**F.1: Remove PKH length checks from internal logic**
+
+Replace `if (pkh.Length != 32) return false;` style checks with type safety:
+
+- `Desktop.Wpf/Features/Simulator/SimulatorOutboundInterceptor.cs`
+  - Remove `recipientPublicKeyHash.Length != 32` guard
+
+- `Desktop.Wpf/Features/Simulator/Models/SimulatedRelayModel.cs`
+  - Replace `TargetPkh.Length == 0` checks with `IdentityPublicKeyHash` construction at boundaries
+
+Keep validation only where raw bytes enter the system:
+
+- protobuf parsing (`ByteString.ToByteArray()`)
+- JSON persistence snapshots
+
+**F.2: Remove direct `SequenceEqual` usage in feature logic**
+
+- Use typed PKH equality semantics.
+
+**F.3: Unit test improvements**
+
+Introduce a test helper (in test projects) that produces deterministic `IdentityPublicKeyHash` values:
+
+- `IdentityPublicKeyHashTestFactory.Create(byte seed)` -> `IdentityPublicKeyHash`
+
+Update tests:
+
+- `Desktop.Wpf.Tests/SimulatorOutboundInterceptorRelayRoutingTests.cs`
+  - Use `IdentityPublicKeyHash` directly
+  - Update mocks to `TryGetPeerIdByIdentityPublicKeyHashAsync`
+
+- `Percolator.ApplicationTests/Network/SimulatorOutboundInterceptionTests.cs`
+  - Add explicit assertions that when `_keyStore.GetPublicKeyHashByPeerIdAsync(recipientPeerId)` returns null, the interceptor is not called.
+  - Add explicit assertions that when interceptor returns false, `_networkSender` is called.
+
+---
+
+## Chunk G
+
+### Goal
+
+Perform a targeted rename pass for PKH-related identifiers so the codebase consistently uses **`IdentityPublicKeyHash`** as the canonical name.
+
+This chunk is **TODO-only**: you will perform the renames.
+
+### Rename conventions to apply
+
+- Type name: `IdentityPublicKeyHash`
+- Parameter/local name: `identityPublicKeyHash`
+- Avoid abbreviations like `pkh` in public APIs. (Private locals are OK if you prefer, but this scan assumes you want to remove them for clarity.)
+
+### TODO checklist (repo-specific)
+
+#### G.1 Simulator (Desktop.Wpf) API + model naming
+
+- [ ] `Desktop.Wpf/Features/Simulator/ISimulatorStateService.cs`
+  - Rename method:
+    - `TryGetPeerIdByIdentityPkhAsync(byte[] recipientPublicKeyHash, ...)`
+    - To: `TryGetPeerIdByIdentityPublicKeyHashAsync(byte[] identityPublicKeyHash, ...)`
+  - Rename parameters:
+    - `recipientPublicKeyHash` -> `identityPublicKeyHash`
+    - `targetPkh` -> `targetIdentityPublicKeyHash`
+
+- [ ] `Desktop.Wpf/Features/Simulator/SimulatorOutboundInterceptor.cs`
+  - Rename parameter:
+    - `recipientPublicKeyHash` -> `identityPublicKeyHash`
+  - Rename call site:
+    - `_state.TryGetPeerIdByIdentityPkhAsync(...)` -> `_state.TryGetPeerIdByIdentityPublicKeyHashAsync(...)`
+  - Rename enqueue parameter usage:
+    - `targetPkh: recipientPublicKeyHash` -> `targetIdentityPublicKeyHash: identityPublicKeyHash`
+
+- [ ] `Desktop.Wpf/Features/Simulator/Models/SimulatedRelayModel.cs`
+  - Rename `InboundRelayMessage.TargetPkh` -> `TargetIdentityPublicKeyHash`
+  - Update error text accordingly (if you want consistency).
+  - Update snapshot mapping fields that reference `TargetPkh`.
+
+- [ ] `Desktop.Wpf/Features/Simulator/JsonSimulatorStateRepository.cs`
+  - Rename DTO fields/locals:
+    - `TargetPkh` -> `TargetIdentityPublicKeyHash`
+    - `EnsureIdentityPublicKeyHash(...)` is already aligned and should remain.
+
+- [ ] `Desktop.Wpf/Features/Simulator/PeerStateSnapshot.cs`
+  - Rename snapshot properties:
+    - `TargetPublicKeyHash` -> `TargetIdentityPublicKeyHash`
+    - `PendingStandardHandshakeToMainResponderPublicKeyHash` -> `PendingStandardHandshakeToMainResponderIdentityPublicKeyHash`
+    - `PublishedPreKeyBundleSnapshot.RecipientPublicKeyHash` -> `RecipientIdentityPublicKeyHash`
+
+#### G.2 Simulator tests
+
+- [ ] `Desktop.Wpf.Tests/SimulatorOutboundInterceptorRelayRoutingTests.cs`
+  - Rename local vars:
+    - `recipientPublicKeyHash` -> `identityPublicKeyHash`
+  - Update mock:
+    - `TryGetPeerIdByIdentityPkhAsync` -> `TryGetPeerIdByIdentityPublicKeyHashAsync`
+
+#### G.3 Application / CLI naming
+
+- [ ] `Percolator.Application/Cli/RequestPreKeyBundleByPkhHandler.cs`
+  - Decide whether you want to rename this command/handler to remove `ByPkh`.
+  - If yes, suggested naming:
+    - `RequestPreKeyBundleByIdentityPublicKeyHash*`
+    - Replace variables:
+      - `expectedRemotePkh` -> `expectedRemoteIdentityPublicKeyHash`
+      - `remotePkh` -> `remoteIdentityPublicKeyHash`
+      - `initiatorPkh` -> `initiatorIdentityPublicKeyHash` (if present in other files)
+
+#### G.4 Application / Network route models
+
+- [ ] `Percolator.Application/Network/IRemoteEnvelopeSender.cs`
+  - Rename record field:
+    - `RecipientRoute(PeerId PeerId, byte[]? PublicKeyHash)`
+    - To: `RecipientRoute(PeerId PeerId, byte[]? IdentityPublicKeyHash)`
+  - Update call sites accordingly.
+
+#### G.5 Chat adapter naming (optional; depends on how strongly you want to purge “Pkh”)
+
+These are intentionally named `Pkh` today to avoid Chat referencing Identity. You can still rename them for clarity if you’re willing to accept more verbose names.
+
+- [ ] `Percolator.Chat/App/IPkhPeerResolver.cs`
+  - Consider renaming:
+    - `IPkhPeerResolver` -> `IIdentityPublicKeyHashPeerResolver`
+    - `GetParticipantIdByPkhAsync(Pkh pkh, ...)` -> `GetParticipantIdByIdentityPublicKeyHashAsync(Pkh identityPublicKeyHash, ...)`
+
+- [ ] `Percolator.Application/Apps/Chat/PkhPeerResolver.cs`
+  - Rename class + method accordingly if you do G.5.
+
+### Notes / guardrails
+
+- Keep this rename work **after** Chunk D if you introduce a real `IdentityPublicKeyHash` type; otherwise you’ll be renaming `byte[]`-based APIs twice.
+- Expect ripples into JSON persistence DTOs and UI view models for simulator state; those are worth renaming together to avoid half-old/half-new terminology.
