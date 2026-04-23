@@ -308,7 +308,7 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
 
         await _state.EnqueueRelayDownstreamToPeerAsync(
                 relayHostPeerId: relayPeerId,
-                targetPkh: selfPkh,
+                targetIdentityPublicKeyHash: selfPkh,
                 opaqueBytes: invite.ToByteArray(),
                 debugType: nameof(EstablishDirectSessionRequest),
                 cancellationToken: ct)
@@ -316,7 +316,7 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
 
         var dequeued = await _state.DequeueRelayDownstreamToPeerAsync(
                 relayHostPeerId: relayPeerId,
-                targetPkh: selfPkh,
+                targetIdentityPublicKeyHash: selfPkh,
                 max: 1,
                 cancellationToken: ct)
             .ConfigureAwait(false);

@@ -22,8 +22,8 @@ namespace Percolator.Application.PeerDiscovery
         {            
             var ep = discoveredPeer.Endpoints.FirstOrDefault();
             var epStr = ep.EndPoint.Host + ":" + ep.EndPoint.Port;
-            _logger.LogInformation("Discovered peer {Endpoint} with public key hash {PublicKeyHash}. Adding to trusted store.", epStr, discoveredPeer.PublicKeyHash);
-            await _trustedPeerStore.AddAsync(discoveredPeer.PublicKeyHash).ConfigureAwait(false);
+            _logger.LogInformation("Discovered peer {Endpoint} with public key hash {PublicKeyHash}. Adding to trusted store.", epStr, discoveredPeer.IdentityPublicKeyHash);
+            await _trustedPeerStore.AddAsync(discoveredPeer.IdentityPublicKeyHash).ConfigureAwait(false);
         }
 
         public Task HandlePeerExpiredAsync(DiscoveredPeer discoveredPeer)

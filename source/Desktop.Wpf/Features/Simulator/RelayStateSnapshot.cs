@@ -15,7 +15,7 @@ public sealed record OutboundRelayMessageSnapshot(
 
 public sealed record InboundRelayMessageSnapshot(
     Guid AckId,
-    byte[] TargetPkh,
+    byte[] TargetIdentityPublicKeyHash,
     byte[] OpaqueBytes,
     DateTimeOffset EnqueuedUtc,
     string? DebugType);

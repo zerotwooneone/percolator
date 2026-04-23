@@ -86,7 +86,7 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
                     ackId: m.AckId,
                     enqueuedUtc: m.EnqueuedUtc,
                     debugType: m.DebugType,
-                    targetPkh: m is InboundRelayMessage inbound ? inbound.TargetPkh : null,
+                    targetIdentityPublicKeyHash: m is InboundRelayMessage inbound ? inbound.TargetPkh : null,
                     opaqueBytes: m.OpaqueBytes,
                     peerNameById: _peerNameById);
             })
@@ -250,7 +250,7 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
                     ackId: item.AckId,
                     enqueuedUtc: item.EnqueuedUtc,
                     debugType: item.DebugType,
-                    targetPkh: item.TargetPkh,
+                    targetIdentityPublicKeyHash: item.TargetIdentityPublicKeyHash,
                     opaqueBytes: item.OpaqueBytes,
                     ct: ct)
                 .ConfigureAwait(false);
@@ -263,12 +263,12 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
 
     private Task DeliverItemAsync(RelayMessage message, CancellationToken ct)
     {
-        byte[]? targetPkh = message is InboundRelayMessage inbound ? inbound.TargetPkh : null;
+        byte[]? targetIdentityPublicKeyHash = message is InboundRelayMessage inbound ? inbound.TargetPkh : null;
         return DeliverItemAsync(
             ackId: message.AckId,
             enqueuedUtc: message.EnqueuedUtc,
             debugType: message.DebugType,
-            targetPkh: targetPkh,
+            targetIdentityPublicKeyHash: targetIdentityPublicKeyHash,
             opaqueBytes: message.OpaqueBytes,
             ct: ct);
     }
@@ -277,13 +277,13 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
         Guid ackId,
         DateTimeOffset enqueuedUtc,
         string? debugType,
-        byte[]? targetPkh,
+        byte[]? targetIdentityPublicKeyHash,
         byte[] opaqueBytes,
         CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
 
-        if (targetPkh is null || targetPkh.Length == 0)
+        if (targetIdentityPublicKeyHash is null || targetIdentityPublicKeyHash.Length == 0)
         {
             var sid = await _getRelayHostToMainSessionId().ConfigureAwait(false);
             if (sid is null)
@@ -307,9 +307,9 @@ public sealed class SimulatedRelayQueuePanelViewModel : IDisposable
         }
 
         // Deliver to simulated peer (PKH)
-        if (targetPkh.Length == 32)
+        if (targetIdentityPublicKeyHash.Length == 32)
         {
-            var recipientPeerId = await _state.TryGetPeerIdByIdentityPkhAsync(targetPkh, ct).ConfigureAwait(false);
+            var recipientPeerId = await _state.TryGetPeerIdByIdentityPublicKeyHashAsync(targetIdentityPublicKeyHash, ct).ConfigureAwait(false);
             if (recipientPeerId is null)
             {
                 _diagnostics.Emit(

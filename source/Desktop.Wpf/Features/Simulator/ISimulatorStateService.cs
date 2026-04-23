@@ -17,7 +17,7 @@ public interface ISimulatorStateService
     Task<PeerId> AddPeerAsync(string? displayName, CancellationToken cancellationToken = default);
     Task RemovePeerAsync(PeerId peerId, CancellationToken cancellationToken = default);
 
-    Task<PeerId?> TryGetPeerIdByIdentityPkhAsync(byte[] recipientPublicKeyHash, CancellationToken cancellationToken = default);
+    Task<PeerId?> TryGetPeerIdByIdentityPublicKeyHashAsync(byte[] recipientPublicKeyHash, CancellationToken cancellationToken = default);
 
     Task EnqueueRelayUpstreamToMainAsync(
         PeerId relayHostPeerId,
@@ -27,14 +27,14 @@ public interface ISimulatorStateService
 
     Task EnqueueRelayDownstreamToPeerAsync(
         PeerId relayHostPeerId,
-        byte[] targetPkh,
+        byte[] targetIdentityPublicKeyHash,
         byte[] opaqueBytes,
         string? debugType = null,
         CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<InboundRelayMessage>> DequeueRelayDownstreamToPeerAsync(
         PeerId relayHostPeerId,
-        byte[] targetPkh,
+        byte[] targetIdentityPublicKeyHash,
         int max,
         CancellationToken cancellationToken = default);
 

@@ -23,7 +23,7 @@ public sealed class RelayUpstreamMessageDto
 public sealed class RelayDownstreamMessageDto
 {
     public Guid AckId { get; set; }
-    public byte[] TargetPkh { get; set; } = Array.Empty<byte>();
+    public byte[] TargetIdentityPublicKeyHash { get; set; } = Array.Empty<byte>();
     public byte[] OpaqueBytes { get; set; } = Array.Empty<byte>();
     public DateTimeOffset EnqueuedUtc { get; set; }
     public string? DebugType { get; set; }

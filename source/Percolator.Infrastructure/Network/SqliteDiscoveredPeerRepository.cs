@@ -55,7 +55,7 @@ public sealed class SqliteDiscoveredPeerRepository : IDiscoveredPeerRepository
             row = new DiscoveredPeerDbo
             {
                 DiscoveryKey = entity.DiscoveryKey.Value,
-                PublicKeyHash = entity.PublicKeyHash?.Value,
+                PublicKeyHash = entity.IdentityPublicKeyHash?.Value,
                 FirstSeenUtc = entity.FirstSeenUtc,
                 LastSeenUtc = entity.LastSeenUtc,
                 Source = (int)entity.Source,
@@ -66,7 +66,7 @@ public sealed class SqliteDiscoveredPeerRepository : IDiscoveredPeerRepository
         }
         else
         {
-            row.PublicKeyHash = entity.PublicKeyHash?.Value;
+            row.PublicKeyHash = entity.IdentityPublicKeyHash?.Value;
             row.LastSeenUtc = entity.LastSeenUtc;
             row.Source = (int)entity.Source;
             row.Confidence = entity.Confidence;

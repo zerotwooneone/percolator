@@ -420,9 +420,9 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
 
         var downstream = dto.DownstreamToPeers
             .Where(m => m.AckId != Guid.Empty)
-            .Where(m => m.TargetPkh is not null && m.TargetPkh.Length != 0)
+            .Where(m => m.TargetIdentityPublicKeyHash is not null && m.TargetIdentityPublicKeyHash.Length != 0)
             .OrderBy(m => m.EnqueuedUtc)
-            .Select(m => new InboundRelayMessageSnapshot(m.AckId, m.TargetPkh, m.OpaqueBytes, m.EnqueuedUtc, m.DebugType))
+            .Select(m => new InboundRelayMessageSnapshot(m.AckId, m.TargetIdentityPublicKeyHash, m.OpaqueBytes, m.EnqueuedUtc, m.DebugType))
             .ToList();
 
         return new RelayStateSnapshot(
@@ -452,7 +452,7 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
                 .Select(x => new RelayDownstreamMessageDto
                 {
                     AckId = x.AckId,
-                    TargetPkh = x.TargetPkh,
+                    TargetIdentityPublicKeyHash = x.TargetIdentityPublicKeyHash,
                     OpaqueBytes = x.OpaqueBytes,
                     EnqueuedUtc = x.EnqueuedUtc,
                     DebugType = x.DebugType

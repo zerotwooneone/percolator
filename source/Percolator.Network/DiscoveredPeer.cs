@@ -8,7 +8,7 @@ namespace Percolator.Network;
 public class DiscoveredPeer
 {
     public DiscoveryKey DiscoveryKey { get; }
-    public PublicKeyHash? PublicKeyHash { get; private set; }
+    public PublicKeyHash? IdentityPublicKeyHash { get; private set; }
     public DateTimeOffset FirstSeenUtc { get; private set; }
     public DateTimeOffset LastSeenUtc { get; private set; }
     public DiscoverySource Source { get; private set; }
@@ -21,18 +21,18 @@ public class DiscoveredPeer
     public PeerId? BoundPeerId { get; private set; }
     public DateTimeOffset? PromotedAtUtc { get; private set; }
 
-    private DiscoveredPeer(DiscoveryKey key, PublicKeyHash? pkh, DateTimeOffset now)
+    private DiscoveredPeer(DiscoveryKey key, PublicKeyHash? identityPublicKeyHash, DateTimeOffset now)
     {
         DiscoveryKey = key;
-        PublicKeyHash = pkh;
+        IdentityPublicKeyHash = identityPublicKeyHash;
         FirstSeenUtc = now;
         LastSeenUtc = now;
         Source = DiscoverySource.Cache;
         Confidence = 0.0;
     }
 
-    public static DiscoveredPeer Create(DiscoveryKey key, PublicKeyHash? pkh, DateTimeOffset now)
-        => new DiscoveredPeer(key, pkh, now);
+    public static DiscoveredPeer Create(DiscoveryKey key, PublicKeyHash? identityPublicKeyHash, DateTimeOffset now)
+        => new DiscoveredPeer(key, identityPublicKeyHash, now);
 
     public void RecordDiscovery(DiscoverySource source, DateTimeOffset now)
     {

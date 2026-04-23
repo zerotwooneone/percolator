@@ -147,7 +147,7 @@ public sealed class SimulatorRelayAutoDeliverService : ISimulatorRelayAutoDelive
             Guid? recipientPeerId = null;
             try
             {
-                var resolved = await _state.TryGetPeerIdByIdentityPkhAsync(inbound.TargetPkh, ct).ConfigureAwait(false);
+                var resolved = await _state.TryGetPeerIdByIdentityPublicKeyHashAsync(inbound.TargetPkh, ct).ConfigureAwait(false);
                 recipientPeerId = resolved is not null ? resolved.Value : null;
             }
             catch

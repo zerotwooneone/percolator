@@ -113,10 +113,10 @@ public sealed class ConnectViaNetworkCommandHandler : IRequestHandler<ConnectVia
             return new ConnectViaNetworkResult.Failed("Select a relay host.");
         }
 
-        byte[] targetPkh;
+        byte[] targetIdentityPublicKeyHash;
         try
         {
-            targetPkh = ParsePkh32(request.TargetPkhText);
+            targetIdentityPublicKeyHash = ParsePkh32(request.TargetPkhText);
         }
         catch (Exception ex)
         {
@@ -158,7 +158,7 @@ public sealed class ConnectViaNetworkCommandHandler : IRequestHandler<ConnectVia
                     GetPreKeyBundleRequest = new GetPreKeyBundleRequest
                     {
                         Version = 1,
-                        PublicKeyHash = ByteString.CopyFrom(targetPkh)
+                        PublicKeyHash = ByteString.CopyFrom(targetIdentityPublicKeyHash)
                     }
                 }
             };
@@ -221,7 +221,7 @@ public sealed class ConnectViaNetworkCommandHandler : IRequestHandler<ConnectVia
         {
             actualRemotePkh = sha.ComputeHash(remoteIdentitySpki);
         }
-        if (!actualRemotePkh.AsSpan().SequenceEqual(targetPkh))
+        if (!actualRemotePkh.AsSpan().SequenceEqual(targetIdentityPublicKeyHash))
         {
             return new ConnectViaNetworkResult.Failed("Remote identity key does not match requested PKH.");
         }
@@ -292,7 +292,7 @@ public sealed class ConnectViaNetworkCommandHandler : IRequestHandler<ConnectVia
                     new PreHandshakeRecord(
                         Id: 0,
                         SelfIdentityId: selfIdentityId,
-                        RecipientPublicKeyHash: targetPkh,
+                        RecipientPublicKeyHash: targetIdentityPublicKeyHash,
                         LocalRequestId: correlationId,
                         InitiatorEphemeralPrivateKey: Array.Empty<byte>(),
                         InitialRootKey: x3.SharedSecret.Value,
@@ -352,7 +352,7 @@ public sealed class ConnectViaNetworkCommandHandler : IRequestHandler<ConnectVia
             var mqReq = new EnqueueOpaqueMessageRequest
             {
                 Version = 1,
-                RecipientPublicKeyHash = ByteString.CopyFrom(targetPkh),
+                RecipientPublicKeyHash = ByteString.CopyFrom(targetIdentityPublicKeyHash),
                 MessageBlob = ByteString.CopyFrom(hello.ToByteArray())
             };
 

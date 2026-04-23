@@ -35,7 +35,7 @@ public abstract class TestSimulatorStateServiceBase : ISimulatorStateService
 
     public virtual void AddRelay(SimulatedRelayModel relay) => _relays.Add(relay);
 
-    public virtual Task<PeerId?> TryGetPeerIdByIdentityPkhAsync(byte[] recipientPublicKeyHash, CancellationToken cancellationToken = default)
+    public virtual Task<PeerId?> TryGetPeerIdByIdentityPublicKeyHashAsync(byte[] recipientPublicKeyHash, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         return Task.FromResult(ResolvePkhToPeerId);
@@ -55,8 +55,8 @@ public abstract class TestSimulatorStateServiceBase : ISimulatorStateService
     public Task<PeerId> AddPeerAsync(string? displayName, CancellationToken cancellationToken = default) => throw new NotImplementedException();
     public Task RemovePeerAsync(PeerId peerId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
     public Task EnqueueRelayUpstreamToMainAsync(PeerId relayHostPeerId, byte[] opaqueBytes, string? debugType = null, CancellationToken cancellationToken = default) => throw new NotImplementedException();
-    public Task EnqueueRelayDownstreamToPeerAsync(PeerId relayHostPeerId, byte[] targetPkh, byte[] opaqueBytes, string? debugType = null, CancellationToken cancellationToken = default) => throw new NotImplementedException();
-    public Task<IReadOnlyList<InboundRelayMessage>> DequeueRelayDownstreamToPeerAsync(PeerId relayHostPeerId, byte[] targetPkh, int max, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+    public Task EnqueueRelayDownstreamToPeerAsync(PeerId relayHostPeerId, byte[] targetIdentityPublicKeyHash, byte[] opaqueBytes, string? debugType = null, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+    public Task<IReadOnlyList<InboundRelayMessage>> DequeueRelayDownstreamToPeerAsync(PeerId relayHostPeerId, byte[] targetIdentityPublicKeyHash, int max, CancellationToken cancellationToken = default) => throw new NotImplementedException();
     public Task<int> ForwardRelayUpstreamToMainAsync(PeerId relayHostPeerId, Percolator.Cryptography.SessionId relayHostToMainSessionId, int max, CancellationToken cancellationToken = default) => throw new NotImplementedException();
     public Task<bool> MoveRelayMessageByAckIdAsync(PeerId relayHostPeerId, Guid ackId, int delta, CancellationToken cancellationToken = default) => throw new NotImplementedException();
     public Task<bool> CorruptRelayMessageByAckIdAsync(PeerId relayHostPeerId, Guid ackId, CancellationToken cancellationToken = default) => throw new NotImplementedException();

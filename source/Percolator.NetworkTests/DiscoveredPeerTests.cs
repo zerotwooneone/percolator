@@ -17,7 +17,7 @@ public class DiscoveredPeerTests
 
         var peer = DiscoveredPeer.Create(dk, pkh, now);
         peer.DiscoveryKey.Should().Be(dk);
-        peer.PublicKeyHash.Should().Be(pkh);
+        peer.IdentityPublicKeyHash.Should().Be(pkh);
         peer.FirstSeenUtc.Should().BeCloseTo(now, TimeSpan.FromSeconds(1));
         peer.LastSeenUtc.Should().BeCloseTo(now, TimeSpan.FromSeconds(1));
 

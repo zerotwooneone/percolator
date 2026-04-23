@@ -118,7 +118,7 @@ public sealed class SimulatorStateStoreTests
                     {
                         new InboundRelayMessageSnapshot(
                             AckId: ackDown,
-                            TargetPkh: targetPkh,
+                            TargetIdentityPublicKeyHash: targetPkh,
                             OpaqueBytes: new byte[] { 0x0C, 0x0D },
                             EnqueuedUtc: enqueuedUtc,
                             DebugType: "down")
@@ -163,7 +163,7 @@ public sealed class SimulatorStateStoreTests
             loadedSnapshot.Relays.Single().RelayHostPeerId.Should().Be(relayHostPeerId);
             loadedSnapshot.Relays.Single().UpstreamToMain.Should().ContainSingle(m => m.AckId == ackUp && m.DebugType == "up");
             loadedSnapshot.Relays.Single().DownstreamToPeers.Should().ContainSingle(m => m.AckId == ackDown && m.DebugType == "down");
-            loadedSnapshot.Relays.Single().DownstreamToPeers.Single(m => m.AckId == ackDown).TargetPkh.Should().Equal(targetPkh);
+            loadedSnapshot.Relays.Single().DownstreamToPeers.Single(m => m.AckId == ackDown).TargetIdentityPublicKeyHash.Should().Equal(targetPkh);
 
             loadedSnapshot.Groups.Should().HaveCount(1);
             loadedSnapshot.Groups.Single().GroupId.Should().Be(groups[0].GroupId);

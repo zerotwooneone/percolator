@@ -43,7 +43,7 @@ public class SqliteDiscoveredPeerRepositoryTests
 
         loaded.Should().NotBeNull();
         loaded!.DiscoveryKey.Should().Be(key);
-        loaded.PublicKeyHash.Should().Be(pkh);
+        loaded.IdentityPublicKeyHash.Should().Be(pkh);
     }
 
     [Test]
@@ -76,7 +76,7 @@ public class SqliteDiscoveredPeerRepositoryTests
 
         var loaded = await repo.GetByPublicKeyHashAsync(pkh);
         loaded.Should().NotBeNull();
-        loaded!.PublicKeyHash!.Value.Should().BeEquivalentTo(pkh.Value);
+        loaded!.IdentityPublicKeyHash!.Value.Should().BeEquivalentTo(pkh.Value);
     }
 
     [Test]

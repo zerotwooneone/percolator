@@ -9,7 +9,7 @@ public sealed class SimulatedRelayQueueItemViewModel
         Guid ackId,
         DateTimeOffset enqueuedUtc,
         string? debugType,
-        byte[]? targetPkh,
+        byte[]? targetIdentityPublicKeyHash,
         byte[] opaqueBytes,
         Func<PeerId, string> peerNameById)
     {
@@ -18,12 +18,12 @@ public sealed class SimulatedRelayQueueItemViewModel
         AckId = ackId;
         EnqueuedUtc = enqueuedUtc;
         DebugType = debugType;
-        TargetPkh = targetPkh;
+        TargetIdentityPublicKeyHash = targetIdentityPublicKeyHash;
         OpaqueBytes = opaqueBytes;
 
         TypeLabel = ToTypeLabel(debugType);
 
-        RecipientDisplay = ToRecipientDisplay(targetPkh);
+        RecipientDisplay = ToRecipientDisplay(targetIdentityPublicKeyHash);
         FromToDisplay = $"{peerNameById(relayHostPeerId)} -> {RecipientDisplay}";
 
         TimestampDisplay = enqueuedUtc.LocalDateTime.ToString("HH:mm:ss");
@@ -37,7 +37,7 @@ public sealed class SimulatedRelayQueueItemViewModel
 
     public string? DebugType { get; }
 
-    public byte[]? TargetPkh { get; }
+    public byte[]? TargetIdentityPublicKeyHash { get; }
 
     public byte[] OpaqueBytes { get; }
 

@@ -77,7 +77,7 @@ public sealed class SimulatedRelayModel : IDisposable
             .OrderBy(x => x.EnqueuedUtc)
             .Select(x => new InboundRelayMessageSnapshot(
                 AckId: x.AckId,
-                TargetPkh: x.TargetPkh.ToArray(),
+                TargetIdentityPublicKeyHash: x.TargetPkh.ToArray(),
                 OpaqueBytes: x.OpaqueBytes.ToArray(),
                 EnqueuedUtc: x.EnqueuedUtc,
                 DebugType: x.DebugType))

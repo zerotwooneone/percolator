@@ -41,7 +41,7 @@ public sealed class SimulatorDiagnosticBundleBuilderTests
 
         state.SetupGet(s => s.Peers).Returns(peersList);
         state.SetupGet(s => s.Relays).Returns(relaysList);
-        state.Setup(s => s.TryGetPeerIdByIdentityPkhAsync(It.IsAny<byte[]>(), It.IsAny<CancellationToken>()))
+        state.Setup(s => s.TryGetPeerIdByIdentityPublicKeyHashAsync(It.IsAny<byte[]>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Percolator.Network.PeerId?)null);
         state.Setup(s => s.AddRelayActiveSessionAsync(It.IsAny<Percolator.Network.PeerId>(), It.IsAny<Percolator.Network.PeerId>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);

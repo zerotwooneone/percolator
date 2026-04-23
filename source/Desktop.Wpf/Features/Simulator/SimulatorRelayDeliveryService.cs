@@ -153,14 +153,14 @@ public sealed class SimulatorRelayDeliveryService : ISimulatorRelayDeliveryServi
             var initiatorPkh = System.Security.Cryptography.SHA256.HashData(hello.InitiatorIdentityKeySpki.ToByteArray());
 
             var initiatorPeerId = await _state
-                .TryGetPeerIdByIdentityPkhAsync(initiatorPkh, cancellationToken)
+                .TryGetPeerIdByIdentityPublicKeyHashAsync(initiatorPkh, cancellationToken)
                 .ConfigureAwait(false);
 
             if (initiatorPeerId is not null)
             {
                 await _state.EnqueueRelayDownstreamToPeerAsync(
                         relayHostPeerId: relayHostPeerId,
-                        targetPkh: initiatorPkh,
+                        targetIdentityPublicKeyHash: initiatorPkh,
                         opaqueBytes: forwarded.ToByteArray(),
                         debugType: nameof(EstablishSessionResponse),
                         cancellationToken: cancellationToken)

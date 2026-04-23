@@ -734,7 +734,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
 
             await EnqueueRelayDownstreamToPeerAsync(
                 relayHostPeerId: simulatedPeerId,
-                targetPkh: enqueue.RecipientPublicKeyHash.ToByteArray(),
+                targetIdentityPublicKeyHash: enqueue.RecipientPublicKeyHash.ToByteArray(),
                 opaqueBytes: enqueue.MessageBlob.ToByteArray(),
                 debugType: "Opaque",
                 cancellationToken: cancellationToken).ConfigureAwait(false);
@@ -922,7 +922,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
 
         await EnqueueRelayDownstreamToPeerAsync(
                 relayHostPeerId: relayHostPeerId,
-                targetPkh: responderPublicKeyHash,
+                targetIdentityPublicKeyHash: responderPublicKeyHash,
                 opaqueBytes: helloBytes,
                 debugType: nameof(HandshakeInitiatorHello),
                 cancellationToken: cancellationToken)
@@ -1073,13 +1073,13 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         }
 
         var initiatorPkh = Convert.FromHexString(initiatorPkhHex);
-        var initiatorPeerId = await TryGetPeerIdByIdentityPkhAsync(initiatorPkh, cancellationToken).ConfigureAwait(false);
+        var initiatorPeerId = await TryGetPeerIdByIdentityPublicKeyHashAsync(initiatorPkh, cancellationToken).ConfigureAwait(false);
 
         if (initiatorPeerId is not null)
         {
             await EnqueueRelayDownstreamToPeerAsync(
                     relayHostPeerId: relayHostPeerId,
-                    targetPkh: initiatorPkh,
+                    targetIdentityPublicKeyHash: initiatorPkh,
                     opaqueBytes: response.ToByteArray(),
                     debugType: nameof(EstablishSessionResponse),
                     cancellationToken: cancellationToken)
@@ -1413,14 +1413,14 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
 
     public async Task EnqueueRelayDownstreamToPeerAsync(
         PeerId relayHostPeerId,
-        byte[] targetPkh,
+        byte[] targetIdentityPublicKeyHash,
         byte[] opaqueBytes,
         string? debugType = null,
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (targetPkh is null) throw new ArgumentNullException(nameof(targetPkh));
-        if (targetPkh.Length == 0) throw new ArgumentException("TargetPkh must be non-empty", nameof(targetPkh));
+        if (targetIdentityPublicKeyHash is null) throw new ArgumentNullException(nameof(targetIdentityPublicKeyHash));
+        if (targetIdentityPublicKeyHash.Length == 0) throw new ArgumentException("TargetPkh must be non-empty", nameof(targetIdentityPublicKeyHash));
         if (opaqueBytes is null) throw new ArgumentNullException(nameof(opaqueBytes));
         if (opaqueBytes.Length == 0) return;
 
@@ -1431,7 +1431,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
 
             var msg = new InboundRelayMessage(
                 AckId: Guid.NewGuid(),
-                TargetPkh: targetPkh,
+                TargetPkh: targetIdentityPublicKeyHash,
                 OpaqueBytes: opaqueBytes,
                 EnqueuedUtc: DateTimeOffset.UtcNow,
                 DebugType: debugType);
@@ -1454,13 +1454,13 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
 
     public async Task<IReadOnlyList<InboundRelayMessage>> DequeueRelayDownstreamToPeerAsync(
         PeerId relayHostPeerId,
-        byte[] targetPkh,
+        byte[] targetIdentityPublicKeyHash,
         int max,
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (targetPkh is null) throw new ArgumentNullException(nameof(targetPkh));
-        if (targetPkh.Length == 0) return Array.Empty<InboundRelayMessage>();
+        if (targetIdentityPublicKeyHash is null) throw new ArgumentNullException(nameof(targetIdentityPublicKeyHash));
+        if (targetIdentityPublicKeyHash.Length == 0) return Array.Empty<InboundRelayMessage>();
         if (max <= 0) return Array.Empty<InboundRelayMessage>();
 
         List<InboundRelayMessage> snapshot;
@@ -1471,7 +1471,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             snapshot = relay.MessageQueue
                 .Select(kvp => kvp.Value)
                 .OfType<InboundRelayMessage>()
-                .Where(x => x.TargetPkh.AsSpan().SequenceEqual(targetPkh))
+                .Where(x => x.TargetPkh.AsSpan().SequenceEqual(targetIdentityPublicKeyHash))
                 .OrderBy(x => x.EnqueuedUtc)
                 .Take(max)
                 .ToList();
@@ -2113,8 +2113,8 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         foreach (var m in snap.DownstreamToPeers)
         {
             if (m.AckId == Guid.Empty) continue;
-            if (m.TargetPkh is null || m.TargetPkh.Length == 0) continue;
-            relay.EnqueueMessage(new InboundRelayMessage(m.AckId, m.TargetPkh, m.OpaqueBytes, m.EnqueuedUtc, m.DebugType));
+            if (m.TargetIdentityPublicKeyHash is null || m.TargetIdentityPublicKeyHash.Length == 0) continue;
+            relay.EnqueueMessage(new InboundRelayMessage(m.AckId, m.TargetIdentityPublicKeyHash, m.OpaqueBytes, m.EnqueuedUtc, m.DebugType));
         }
         return relay;
     }
@@ -2210,7 +2210,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         return $"127.77.{fx}.{fy}";
     }
 
-    public Task<PeerId?> TryGetPeerIdByIdentityPkhAsync(byte[] recipientPublicKeyHash, CancellationToken cancellationToken = default)
+    public Task<PeerId?> TryGetPeerIdByIdentityPublicKeyHashAsync(byte[] recipientPublicKeyHash, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (recipientPublicKeyHash is null) throw new ArgumentNullException(nameof(recipientPublicKeyHash));

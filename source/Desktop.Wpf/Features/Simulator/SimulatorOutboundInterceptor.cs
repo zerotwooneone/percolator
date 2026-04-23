@@ -181,7 +181,7 @@ public sealed class SimulatorOutboundInterceptor : ISimulatorOutboundInterceptor
 
         // Resolve simulated peer by PKH (do NOT assume PeerId is meaningful across peers)
         var simulatedPeerId = await _state
-            .TryGetPeerIdByIdentityPkhAsync(recipientPublicKeyHash, cancellationToken)
+            .TryGetPeerIdByIdentityPublicKeyHashAsync(recipientPublicKeyHash, cancellationToken)
             .ConfigureAwait(false);
         if (simulatedPeerId is null) return false;
 
@@ -206,7 +206,7 @@ public sealed class SimulatorOutboundInterceptor : ISimulatorOutboundInterceptor
         // Enqueue in simulator's relay queue (downstream: main → target peer via relay)
         await _state.EnqueueRelayDownstreamToPeerAsync(
             relayHostPeerId: relayHostPeerId,
-            targetPkh: recipientPublicKeyHash,
+            targetIdentityPublicKeyHash: recipientPublicKeyHash,
             opaqueBytes: cipherBytes,
             debugType: debugType ?? "ChatMessage",
             cancellationToken: cancellationToken)

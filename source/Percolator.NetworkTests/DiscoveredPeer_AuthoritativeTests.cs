@@ -18,7 +18,7 @@ public class DiscoveredPeer_AuthoritativeTests
         // Expect a new authoritative ctor/factory taking DiscoveryKey and optional pkh
         var dp = DiscoveredPeer.Create(dk, pkh, now);
         dp.DiscoveryKey.Should().Be(dk);
-        dp.PublicKeyHash.Should().Be(pkh);
+        dp.IdentityPublicKeyHash.Should().Be(pkh);
         dp.FirstSeenUtc.Should().BeCloseTo(now, TimeSpan.FromSeconds(1));
         dp.LastSeenUtc.Should().BeCloseTo(now, TimeSpan.FromSeconds(1));
 
