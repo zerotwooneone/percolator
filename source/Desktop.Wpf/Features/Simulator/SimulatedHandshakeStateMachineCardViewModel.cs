@@ -13,7 +13,6 @@ namespace Desktop.Wpf.Features.Simulator;
 
 public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
 {
-    private static readonly PeerId MainNodeSentinelPeerId = new(new Guid("88880000-0000-0000-0000-000000000000"));
     private readonly SimulatedPeerModel _model;
     private readonly ISimulatorStateService _state;
     private readonly ISimulatorMainIngressService _mainIngress;
@@ -397,9 +396,10 @@ public sealed class SimulatedHandshakeStateMachineCardViewModel : IDisposable
         if (corr is null) return;
         if (_active.Identity is null) return;
 
+        var acceptorPeerId = _active.Identity is not null ? new PeerId(_active.Identity.Id) : new PeerId(Guid.Empty);
         var finalized = await _state.TryFinalizeInviteHandshakeResponseFromMainAsync(
                 simulatedPeerId: _model.PeerId,
-                acceptorPeerId: MainNodeSentinelPeerId,
+                acceptorPeerId: acceptorPeerId,
                 requestCorrelationId: corr.Value,
                 cancellationToken: ct)
             .ConfigureAwait(false);

@@ -10,6 +10,8 @@ using Microsoft.Extensions.Logging;
 using Moq;
 using NUnit.Framework;
 using ObservableCollections;
+using Percolator.Application.Identity;
+using Percolator.Identity.Model;
 using Percolator.Network;
 
 namespace Desktop.Wpf.Tests;
@@ -133,8 +135,11 @@ public sealed class SimulatorRelayAutoDeliverServiceTests
         var diagnostics = Mock.Of<ISimulatorDiagnosticsService>();
         var logger = Mock.Of<ILogger<SimulatorRelayAutoDeliverService>>();
         var delay = new DelayStub();
+        var active = new ActiveIdentityContext();
+        var identityId = Guid.NewGuid();
+        active.SetActiveIdentity(new IdentityRecord(identityId, "test"));
 
-        var sut = new SimulatorRelayAutoDeliverService(state, delivery.Object, diagnostics, delay, logger);
+        var sut = new SimulatorRelayAutoDeliverService(state, delivery.Object, diagnostics, delay, logger, active);
 
         // Act
         sut.Start();

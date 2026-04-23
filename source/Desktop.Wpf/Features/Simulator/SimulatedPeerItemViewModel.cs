@@ -13,7 +13,6 @@ namespace Desktop.Wpf.Features.Simulator;
 
 public sealed class SimulatedPeerItemViewModel : IDisposable
 {
-    private static readonly PeerId MainNodeSentinelPeerId = new(new Guid("88880000-0000-0000-0000-000000000000"));
     private readonly ISimulatorInitializer _directory;
     private readonly SimulatedPeerModel _model;
     private readonly ISimulatedPeerPendingInbox _pending;
@@ -241,9 +240,10 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
             return;
         }
 
+        var acceptorPeerId = _active.Identity is not null ? new PeerId(_active.Identity.Id) : new PeerId(Guid.Empty);
         var finalized = await _state.TryFinalizeInviteHandshakeResponseFromMainAsync(
                 simulatedPeerId: _model.PeerId,
-                acceptorPeerId: MainNodeSentinelPeerId,
+                acceptorPeerId: acceptorPeerId,
                 requestCorrelationId: corr.Value,
                 cancellationToken: ct)
             .ConfigureAwait(false);
@@ -274,7 +274,7 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
         }
 
         var invite = _inviteFactory.CreateInvite();
-        var inviterPeerId = MainNodeSentinelPeerId;
+        var inviterPeerId = _active.Identity is not null ? new PeerId(_active.Identity.Id) : new PeerId(Guid.Empty);
 
         var acceptance = await _state.AcceptReverseSignalInviteAsync(
                 simulatedPeerId: _model.PeerId,
@@ -324,7 +324,7 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
         if (dequeued.Count == 0) return;
 
         var req = EstablishDirectSessionRequest.Parser.ParseFrom(dequeued[0].OpaqueBytes);
-        var inviterPeerId = MainNodeSentinelPeerId;
+        var inviterPeerId = _active.Identity is not null ? new PeerId(_active.Identity.Id) : new PeerId(Guid.Empty);
 
         var acceptance = await _state.AcceptReverseSignalInviteAsync(
                 simulatedPeerId: _model.PeerId,

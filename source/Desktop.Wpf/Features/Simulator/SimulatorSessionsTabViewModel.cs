@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Windows;
 using Percolator.Cryptography;
+using Percolator.Application.Identity;
 using R3;
 
 namespace Desktop.Wpf.Features.Simulator;
@@ -8,8 +9,7 @@ namespace Desktop.Wpf.Features.Simulator;
 public sealed class SimulatorSessionsTabViewModel : IDisposable
 {
     private readonly ISimulatorStateService _state;
-
-    private static readonly Guid MainNodeSentinelPeerId = new("88880000-0000-0000-0000-000000000000");
+    private readonly ActiveIdentityContext _active;
 
     private readonly ObservableCollection<SimulatorSessionCardViewModel> _cards = new();
     public ReadOnlyObservableCollection<SimulatorSessionCardViewModel> Cards { get; }
@@ -20,9 +20,11 @@ public sealed class SimulatorSessionsTabViewModel : IDisposable
     private Task? _refreshLoop;
 
     public SimulatorSessionsTabViewModel(
-        ISimulatorStateService state)
+        ISimulatorStateService state,
+        ActiveIdentityContext active)
     {
         _state = state;
+        _active = active;
         Cards = new ReadOnlyObservableCollection<SimulatorSessionCardViewModel>(_cards);
 
         StartRefreshLoop();
@@ -82,7 +84,7 @@ public sealed class SimulatorSessionsTabViewModel : IDisposable
     {
         ct.ThrowIfCancellationRequested();
 
-        var mainPeerId = MainNodeSentinelPeerId;
+        var mainPeerId = _active.Identity is not null ? _active.Identity.Id : Guid.Empty;
         var peers = _state.Peers.ToArray();
 
         var cards = new System.Collections.Generic.List<SimulatorSessionCardViewModel>();

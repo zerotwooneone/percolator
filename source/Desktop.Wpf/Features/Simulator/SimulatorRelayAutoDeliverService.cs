@@ -2,14 +2,14 @@ using Desktop.Wpf.Features.Simulator.Models;
 using Microsoft.Extensions.Logging;
 using Percolator.Cryptography;
 using Percolator.Network;
+using Percolator.Application.Identity;
 
 namespace Desktop.Wpf.Features.Simulator;
 
 public sealed class SimulatorRelayAutoDeliverService : ISimulatorRelayAutoDeliverService, IDisposable
 {
-    private static readonly Guid MainNodeSentinelPeerId = new("88880000-0000-0000-0000-000000000000");
-
     private readonly ISimulatorStateService _state;
+    private readonly ActiveIdentityContext _active;
     private readonly ISimulatorRelayDeliveryService _delivery;
     private readonly ISimulatorDiagnosticsService _diagnostics;
     private readonly ILogger<SimulatorRelayAutoDeliverService> _logger;
@@ -24,13 +24,15 @@ public sealed class SimulatorRelayAutoDeliverService : ISimulatorRelayAutoDelive
         ISimulatorRelayDeliveryService delivery,
         ISimulatorDiagnosticsService diagnostics,
         ISimulatorDelay delay,
-        ILogger<SimulatorRelayAutoDeliverService> logger)
+        ILogger<SimulatorRelayAutoDeliverService> logger,
+        ActiveIdentityContext active)
     {
         _state = state;
         _delivery = delivery;
         _diagnostics = diagnostics;
         _delay = delay;
         _logger = logger;
+        _active = active;
     }
 
     public void Start()
@@ -190,9 +192,10 @@ public sealed class SimulatorRelayAutoDeliverService : ISimulatorRelayAutoDelive
         var peer = _state.Peers.FirstOrDefault(p => p.PeerId == relayHostPeerId);
         if (peer is null) return null;
 
+        var mainPeerId = _active.Identity is not null ? _active.Identity.Id : Guid.Empty;
         var match = peer.Sessions
             .Select(kv => kv.Value)
-            .FirstOrDefault(s => s.RemotePeerId.Value == MainNodeSentinelPeerId);
+            .FirstOrDefault(s => s.RemotePeerId.Value == mainPeerId);
 
         return match?.Id;
     }
