@@ -2,6 +2,7 @@ using System;
 using System.Linq;
 using System.Net;
 using Microsoft.Extensions.Logging;
+using Percolator.Application.Identity;
 using Percolator.Application.Network;
 using Percolator.Contracts;
 using Percolator.Network;
@@ -12,13 +13,16 @@ public sealed class SimulatorOutboundInterceptor : ISimulatorOutboundInterceptor
 {
     private readonly ISimulatorStateService _state;
     private readonly ILogger<SimulatorOutboundInterceptor> _logger;
+    private readonly ActiveIdentityContext _active;
 
     public SimulatorOutboundInterceptor(
         ISimulatorStateService state,
-        ILogger<SimulatorOutboundInterceptor> logger)
+        ILogger<SimulatorOutboundInterceptor> logger,
+        ActiveIdentityContext active)
     {
         _state = state;
         _logger = logger;
+        _active = active;
     }
 
     public bool TryEstablishDirectSession(
@@ -38,7 +42,7 @@ public sealed class SimulatorOutboundInterceptor : ISimulatorOutboundInterceptor
         }
 
         _logger.LogInformation("[simulator] Intercepted EstablishDirectSession to {SimPeer}", peerId);
-        result = EstablishDirectSessionAsync(endpoint, peerId, request, cancellationToken);
+        result = EstablishDirectSessionAsync(peerId, request, cancellationToken);
         return true;
     }
 
@@ -102,16 +106,16 @@ public sealed class SimulatorOutboundInterceptor : ISimulatorOutboundInterceptor
     }
 
     private async Task<EstablishDirectSessionResponse> EstablishDirectSessionAsync(
-        DnsEndPoint endpoint,
         PeerId simulatedPeerId,
         EstablishDirectSessionRequest request,
         CancellationToken cancellationToken)
     {
         try
         {
+            var inviterPeerId = _active.Identity is not null ? new PeerId(_active.Identity.Id) : new PeerId(Guid.Empty);
             return await _state.ReceiveEstablishDirectSessionFromMainAsync(
                     simulatedPeerId: simulatedPeerId,
-                    inviterPeerId: new PeerId(Guid.Empty),
+                    mainPeerId: inviterPeerId,
                     request: request,
                     cancellationToken: cancellationToken)
                 .ConfigureAwait(false);

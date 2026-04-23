@@ -64,7 +64,7 @@ public interface ISimulatorStateService
 
     Task<EstablishDirectSessionResponse> ReceiveEstablishDirectSessionFromMainAsync(
         PeerId simulatedPeerId,
-        PeerId inviterPeerId,
+        PeerId mainPeerId,
         EstablishDirectSessionRequest request,
         CancellationToken cancellationToken = default);
 

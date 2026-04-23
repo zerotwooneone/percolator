@@ -145,14 +145,14 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
 
     public async Task<EstablishDirectSessionResponse> ReceiveEstablishDirectSessionFromMainAsync(
         PeerId simulatedPeerId,
-        PeerId inviterPeerId,
+        PeerId mainPeerId,
         EstablishDirectSessionRequest request,
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (request is null) throw new ArgumentNullException(nameof(request));
 
-        var acceptance = await AcceptReverseSignalInviteAsync(simulatedPeerId, inviterPeerId, request, cancellationToken)
+        var acceptance = await AcceptReverseSignalInviteAsync(simulatedPeerId, mainPeerId, request, cancellationToken)
             .ConfigureAwait(false);
 
         var corr = Guid.TryParse(acceptance.Response.RequestCorrelationId, out var parsed) ? parsed : Guid.NewGuid();
