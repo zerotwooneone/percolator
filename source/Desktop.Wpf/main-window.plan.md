@@ -893,153 +893,9 @@ Add a chat `Expander` inside the peer card DataTemplate, after the existing "Pre
    - Open a conversation, send a message, close and reopen
    - Verify messages still display (validates `DirectSessionId` keying from A.0)
 
+---
+
 ## Chunk B
-
-### Issue 1: Chat Messages Loaded from SQL Not Showing on Right Side (Locally Sent)
-
-**Code Path:**
-
-1. **Send Path:**
-   - User clicks send in `ChatViewModel.SendCommand`
-   - `ChatViewModel.SendCommand` → `Mediator.Send(PostTextMessageCommand)`
-   - `PostTextMessageHandler.Handle`:
-     - Gets `selfParticipantId` from `ActiveIdentityContext` (implements `ISelfParticipantIdProvider`)
-     - `var selfParticipantId = ((ISelfParticipantIdProvider) _active).Get()` returns `new ParticipantId(Identity.Id)`
-     - Calls `_writer.AddTextMessageAsync(resolution.Conversation.Id, resolution.SelfIdentityId, selfParticipantId, ...)`
-   - `SqliteChatMessageWriter.AddTextMessageAsync`:
-     - Persists to `MessageDbo` with `SenderId = senderId.Value` (Guid)
-     - `SenderId` column stores the Guid value
-
-2. **Load Path:**
-   - `ChatReloadCoordinator.ReloadCoreAsync` or `ReloadFromSessionAsync`:
-     - Calls `repo.GetByIdAsync(conversationId, selfIdentityId)`
-   - `SqliteConversationRepository.GetByIdAsync`:
-     - Loads `ConversationDbo` with included `Messages`
-   - `ToDomain`:
-     - Converts `MessageDbo` to `Message`: `new Message(new MessageId(m.MessageGuid), new ParticipantId(m.SenderId), ...)`
-   - `ChatReloadCoordinator.SyncConversationToState`:
-     - Gets `selfParticipantId = _selfParticipantIdProvider.Get()`
-     - Creates `ChatMessageSnapshot` with `IsOwn: m.SenderId == selfParticipantId`
-
-**Theory for Issue:**
-
-The `ParticipantId` is a `readonly record struct(Guid Value)`, so equality comparison should work correctly. However, there are potential issues:
-
-1. **Type Alias Confusion:** `ActiveIdentityContext` uses `using ChatParticipantId = Percolator.Chat.ValueObjects.ParticipantId;` and returns `new ChatParticipantId(Identity.Id)`. This should be equivalent to `ParticipantId` since it's an alias, but could indicate a design inconsistency.
-
-2. **Self Participant Id Mismatch:** The `selfParticipantId` retrieved at load time (`_selfParticipantIdProvider.Get()`) might not match the `SenderId` stored in the database. This could happen if:
-   - The active identity changed between send and load
-   - The `ActiveIdentityContext.Identity.Id` is not the same as the participant ID used when sending
-
-3. **Missing ConversationId Mapping:** The `DirectSessionId` to `ConversationId` mapping might be incorrect, causing messages to be loaded from the wrong conversation.
-
-**Recommended Investigation:**
-- Add logging to verify the actual `SenderId` values stored in SQL
-- Verify `selfParticipantId` value at both send and load time
-- Check if `DirectSessionId` → `ConversationId` mapping is correct
-
----
-
-### Issue 2: Chat Messages Sent from Main to Direct Session Simulated Peer Not Showing in Simulator Chat
-
-**Code Path:**
-
-1. **Send Path (Main Window):**
-   - User clicks send in `ChatViewModel.SendCommand`
-   - `ChatViewModel.SendCommand` → `Mediator.Send(PostTextMessageCommand)`
-   - `PostTextMessageHandler.Handle`:
-     - Creates `ChatEnvelope` with `TextMessage`
-     - Calls `_sender.SendChatEnvelopeToPeerAsync(chatEnvelope, route, ct)` for each participant
-   - `RemoteEnvelopeSender.SendChatEnvelopeToPeerAsync`:
-     - Wraps in `InternalEnvelope`
-     - Calls `_messageService.SendMessageAsync(internalEnvelope, recipient.PeerId, ct)`
-   - `IMessageService.SendMessageAsync` → `GrpcMessageTransportService.SendMessageAsync`:
-     - Calls `_simulatorOutbound.TryDeliverOpaqueMessage(endpoint, request, ct, out result)`
-   - `SimulatorOutboundInterceptor.TryDeliverOpaqueMessage`:
-     - Resolves simulated peer from endpoint (127.77.x.x IP range)
-     - Calls `_state.ReceiveOpaqueMessageFromMainAsync(peerId, request, ct)`
-
-2. **Receive Path (Simulator):**
-   - `SimulatorStateService.ReceiveOpaqueMessageFromMainAsync`:
-     - Decrypts message using available sessions
-     - Parses `InternalEnvelope`
-     - If `ChatEnvelope.TextMessage`:
-       - Calls `model.AddChatMessage(isFromMain: true, content: text.Content, receivedUtc: ...)`
-     - Returns `DeliverOpaqueMessageResponse { Version = 1 }`
-
-**Theory for Issue:**
-
-1. **Endpoint Resolution Failure:** The `TryResolveSimulatedPeerId` method in `SimulatorOutboundInterceptor` requires the endpoint to be in the 127.77.x.x IP range. If the routing profile for the simulated peer has a different endpoint, the interceptor will return `false` and the message won't be delivered to the simulator.
-
-2. **Decryption Failure:** The message might not decrypt successfully:
-   - No matching session found between main and the simulated peer
-   - Session ratchet state mismatch
-   - The decrypted plaintext is empty (line 613-616 returns early without adding to chat)
-
-3. **Session Lookup Issue:** The code iterates through `model.SessionsMutable` to find a session that can decrypt. If the session was not properly established or is in a broken state, decryption will fail.
-
-**Recommended Investigation:**
-- Add logging in `SimulatorOutboundInterceptor.TryResolveSimulatedPeerId` to verify endpoint resolution
-- Add logging in `SimulatorStateService.ReceiveOpaqueMessageFromMainAsync` to verify:
-  - If the peer was found
-  - If decryption succeeded
-  - If the envelope was parsed as a chat message
-- Verify that the session between main and the simulated peer is properly established
-
----
-
-### Issue 3: Chat Messages Sent from Main to Relay Session Simulated Peer Not Enqueued in Relay Tab
-
-**Code Path:**
-
-1. **Send Path (Main Window):**
-   - Same as Issue 2 up to `PostTextMessageHandler.Handle`
-   - The message is sent via network to the relay host
-
-2. **Simulator Send Path (Simulated Peer via Relay):**
-   - When a simulated peer sends via relay (e.g., `SendChatMessageToMainAsync`):
-     - `SimulatorStateService.SendChatMessageToMainAsync`:
-       - Checks `model.ConnectionMode.CurrentValue == ConnectionMode.ViaRelay`
-       - Gets `relayHostPeerId = model.RelayPeerId.CurrentValue`
-       - Calls `EnqueueRelayUpstreamToMainAsync(relayHostPeerId, cipher.Value, debugType: "Chat", ct)`
-   - `SimulatorStateService.EnqueueRelayUpstreamToMainAsync`:
-     - Adds message to relay queue: `_relays[relayHostPeerId].UpstreamQueue.Add(...)`
-     - Triggers save
-
-3. **Main → Relay Path:**
-   - When main sends to a peer that is connected via relay:
-   - The message should be routed through the relay host
-   - The relay host should receive it and forward it to the target peer
-
-**Theory for Issue:**
-
-1. **Missing Main → Relay Routing:** There appears to be no code path for messages sent FROM main TO a relay-connected peer that enqueues them in the simulator's relay tab. The `EnqueueRelayUpstreamToMainAsync` is only called from:
-   - `SimulatedPeerModel` sending to main (simulator → main)
-   - `SimulatorRelayDeliveryService` handling relayed messages from main
-   - Handshake-related relay operations
-
-2. **Relay Delivery Service Gap:** The `SimulatorRelayDeliveryService` handles relayed messages, but it may not be intercepting chat messages sent from main to relay-connected peers. The service might only be handling handshake messages, not chat messages.
-
-3. **Connection Mode Not Respected:** When main sends a message to a peer, the routing logic might not check if that peer is connected via relay. The `PostTextMessageHandler` sends to all participants without considering their connection mode.
-
-**Recommended Investigation:**
-- Verify if `SimulatorRelayDeliveryService` is supposed to intercept chat messages from main
-- Check if there's a missing interceptor or handler for main → relay peer chat messages
-- Verify that the routing logic in `PostTextMessageHandler` or `RemoteEnvelopeSender` considers relay connections
-- Add logging to verify where messages sent from main to relay-connected peers actually go
-
----
-
-### Summary of Theories
-
-| Issue | Root Cause Theory | Evidence |
-|-------|-------------------|----------|
-| **1. SQL load wrong side** | Self participant ID mismatch between send and load | Type alias confusion, potential identity change |
-| **2. Direct session simulator** | Endpoint resolution or decryption failure | Requires 127.77.x.x IP, session lookup might fail |
-| **3. Relay session simulator** | Missing main → relay routing path | No code path found for main → relay peer chat messages |
-
----
-
 
 ---
 
@@ -1059,16 +915,16 @@ Replace many naked `byte[]` PKH parameters/fields (especially in simulator relay
 There is already a `Pkh` value object in `Percolator.Chat.ValueObjects`:
 
 - `Percolator.Chat/ValueObjects/Pkh.cs`
-  - Implements `ByteArrayRecord` equality (SequenceEqual + stable hash)
-  - Does not enforce 32-byte length
-  - Lives in Chat domain, so it is NOT suitable as the canonical PKH type for Identity/Network/Simulator relay routing.
+    - Implements `ByteArrayRecord` equality (SequenceEqual + stable hash)
+    - Does not enforce 32-byte length
+    - Lives in Chat domain, so it is NOT suitable as the canonical PKH type for Identity/Network/Simulator relay routing.
 
 There is also a `PublicKeyHash` value object in `Percolator.Network`:
 
 - `Percolator.Network/PublicKeyHash.cs`
-  - Implements `ByteArrayRecord` equality
-  - Does not enforce 32-byte length
-  - Lives in Network domain, so it is NOT suitable as the canonical PKH type for Identity.
+    - Implements `ByteArrayRecord` equality
+    - Does not enforce 32-byte length
+    - Lives in Network domain, so it is NOT suitable as the canonical PKH type for Identity.
 
 ### Design decision
 
@@ -1081,14 +937,14 @@ Suggested shape (concrete proposal):
 
 - Backing storage uses `ReadOnlyMemory<byte>` to avoid accidental mutation by callers.
 - Provide explicit construction and boundary conversions:
-  - `static IdentityPublicKeyHash FromBytes(byte[] bytes)`
-    - validates non-null and `Length == 32`
-    - copies into an internal buffer
-  - `static IdentityPublicKeyHash FromSpki(byte[] spki)`
-    - computes `SHA256.HashData(spki)`
-    - delegates to `FromBytes(...)`
-  - `byte[] ToArray()`
-    - returns a copy for boundary APIs that still require `byte[]`
+    - `static IdentityPublicKeyHash FromBytes(byte[] bytes)`
+        - validates non-null and `Length == 32`
+        - copies into an internal buffer
+    - `static IdentityPublicKeyHash FromSpki(byte[] spki)`
+        - computes `SHA256.HashData(spki)`
+        - delegates to `FromBytes(...)`
+    - `byte[] ToArray()`
+        - returns a copy for boundary APIs that still require `byte[]`
 
 Preferred computation policy:
 
@@ -1100,18 +956,18 @@ Preferred computation policy:
 
 - Add `Percolator.Identity/IdentityPublicKeyHash.cs`
 - Implement:
-  - `FromBytes(byte[])` validation (`ArgumentNullException`, `ArgumentException` for non-32)
-  - `FromSpki(byte[])` (uses `System.Security.Cryptography.SHA256.HashData`)
-  - Optional: `ToHexString()` helper (only if already using hex formatting elsewhere; otherwise defer)
+    - `FromBytes(byte[])` validation (`ArgumentNullException`, `ArgumentException` for non-32)
+    - `FromSpki(byte[])` (uses `System.Security.Cryptography.SHA256.HashData`)
+    - Optional: `ToHexString()` helper (only if already using hex formatting elsewhere; otherwise defer)
 
 **D.2: Add adapters at the boundaries**
 
 Update `Percolator.Identity/IPeerPublicSigningKeyStore.cs` to add *non-breaking* overloads (keep the existing `byte[]` APIs until migration is complete):
 
 - Add overloads:
-  - `Task ActivateIfChangedAsync(PeerId peerId, byte[] publicKeySpki, IdentityPublicKeyHash publicKeyHash, DateTimeOffset nowUtc, CancellationToken ct = default);`
-  - `Task<PeerId?> GetPeerIdByPublicKeyHashAsync(IdentityPublicKeyHash publicKeyHash, CancellationToken ct = default);`
-  - `Task<IdentityPublicKeyHash?> GetPublicKeyHashByPeerIdAsync(PeerId peerId, CancellationToken ct = default);`
+    - `Task ActivateIfChangedAsync(PeerId peerId, byte[] publicKeySpki, IdentityPublicKeyHash publicKeyHash, DateTimeOffset nowUtc, CancellationToken ct = default);`
+    - `Task<PeerId?> GetPeerIdByPublicKeyHashAsync(IdentityPublicKeyHash publicKeyHash, CancellationToken ct = default);`
+    - `Task<IdentityPublicKeyHash?> GetPublicKeyHashByPeerIdAsync(PeerId peerId, CancellationToken ct = default);`
 
 Then update the store implementation(s) in Infrastructure to implement these overloads by delegating to existing `byte[]` implementations.
 
@@ -1120,22 +976,22 @@ Then update the store implementation(s) in Infrastructure to implement these ove
 Prioritize call sites where PKH is central to correctness and where we currently have `Length == 32` guards:
 
 - `Percolator.Application/Network/ISimulatorOutboundInterceptor.cs`
-  - Change `TryRouteMessageViaSimulatorRelayAsync(byte[] recipientPublicKeyHash, ...)`
-  - To: `TryRouteMessageViaSimulatorRelayAsync(IdentityPublicKeyHash recipientPublicKeyHash, ...)`
+    - Change `TryRouteMessageViaSimulatorRelayAsync(byte[] recipientPublicKeyHash, ...)`
+    - To: `TryRouteMessageViaSimulatorRelayAsync(IdentityPublicKeyHash recipientPublicKeyHash, ...)`
 
 - `Desktop.Wpf/Features/Simulator/ISimulatorStateService.cs`
-  - Change `TryGetPeerIdByIdentityPkhAsync(byte[] recipientPublicKeyHash, ...)`
-  - To: `TryGetPeerIdByIdentityPublicKeyHashAsync(IdentityPublicKeyHash recipientPublicKeyHash, ...)`
+    - Change `TryGetPeerIdByIdentityPkhAsync(byte[] recipientPublicKeyHash, ...)`
+    - To: `TryGetPeerIdByIdentityPublicKeyHashAsync(IdentityPublicKeyHash recipientPublicKeyHash, ...)`
 
 - `Desktop.Wpf/Features/Simulator/SimulatorOutboundInterceptor.cs`
-  - Remove `recipientPublicKeyHash.Length != 32` guard; rely on `IdentityPublicKeyHash`.
+    - Remove `recipientPublicKeyHash.Length != 32` guard; rely on `IdentityPublicKeyHash`.
 
 - `Desktop.Wpf/Features/Simulator/Models/SimulatedRelayModel.cs`
-  - Change `InboundRelayMessage.TargetPkh: byte[]` to `IdentityPublicKeyHash`
-  - Remove non-empty checks and replace with type invariant
+    - Change `InboundRelayMessage.TargetPkh: byte[]` to `IdentityPublicKeyHash`
+    - Remove non-empty checks and replace with type invariant
 
 - Persistence boundary:
-  - `Desktop.Wpf/Features/Simulator/*Snapshot*.cs` and JSON repository should remain `byte[]` (serialized) but convert at boundaries.
+    - `Desktop.Wpf/Features/Simulator/*Snapshot*.cs` and JSON repository should remain `byte[]` (serialized) but convert at boundaries.
 
 Explicit migration sequencing:
 1) Introduce `IdentityPublicKeyHash` and store overloads.
