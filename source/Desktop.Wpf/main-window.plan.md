@@ -1261,7 +1261,7 @@ Update tests:
 
 ### Goal
 
-Refactor all `ByteArrayRecord` implementations to follow the pattern established by `IdentityPublicKeyHash`: use `ReadOnlyMemory<byte>` internally, provide defensive copying only at boundaries, and eliminate unnecessary array allocations.
+Refactor all `ByteArrayRecord` implementations to use `ReadOnlyMemory<byte>` internally while retaining the `.Value` property for backward compatibility. Defensive copying happens at construction boundaries only, eliminating unnecessary array allocations in internal operations.
 
 ### Current State Analysis
 
@@ -1276,9 +1276,8 @@ The codebase has multiple `ByteArrayRecord` base classes across different domain
 **Problems with current approach:**
 1. Direct `byte[]` storage allows external mutation (no defensive copy on construction)
 2. `Value` property exposes mutable array to callers
-3. Multiple duplicate implementations across domains
-4. No standard `ToArray()` / `AsReadOnlyMemory()` pattern
-5. Hash code computation iterates array every time (not cached)
+3. No standard `ToArray()` / `AsReadOnlyMemory()` pattern
+4. Hash code computation iterates array every time
 
 ### Research Findings: Concrete ByteArrayRecord Implementations
 
@@ -1317,64 +1316,42 @@ The codebase has multiple `ByteArrayRecord` base classes across different domain
 - Multiple test files access .Value directly for assertions
 - CryptographyTests.SessionRatchetMessageTests.cs - retrievedKey.Value.Should().BeEquivalentTo(ratchetKey.Value)
 
-### Impact Analysis
+### Design Pattern
 
-**High-impact changes:**
-- All 29 concrete ByteArrayRecord types need constructor updates
-- ~20+ call sites in Cryptography domain use .Value.Length for validation
-- ~10+ call sites use .Value for crypto API boundaries
-- ~15+ test assertions use .Value for comparison
-
-**Medium-impact changes:**
-- Protobuf serialization boundaries need .ToArray() calls
-- Dht domain has unique pattern with length validation (NodeId)
-- Network domain types used in cross-domain boundaries
-
-**Low-impact changes:**
-- Chat domain has only 3 types
-- Identity domain only has IdentityPublicKeyHash (already refactored)
-
-### Design Pattern from IdentityPublicKeyHash
-
-**Key improvements:**
+**Key improvements (per domain, no shared infrastructure):**
 1. Internal storage: `ReadOnlyMemory<byte>` instead of `byte[]`
-2. Defensive copy in `FromBytes()` factory method
-3. `ToArray()` returns defensive copy
-4. `AsReadOnlyMemory()` exposes read-only view
-5. Cached hash code (optional optimization)
+2. Defensive copy in constructor
+3. `Value` property returns defensive copy (maintains backward compatibility)
+4. `ToArray()` returns defensive copy (alias for Value)
+5. `AsReadOnlyMemory()` exposes read-only view without copying
 6. Custom `Equals()` using `SequenceEqual`
+7. Hash code computed on demand (no caching)
 
-### H.1: Consolidate ByteArrayRecord into a shared library
+### H.1: Update Percolator.Identity.Primitives.ByteArrayRecord
 
-**Architectural decision:** Create a new `Percolator.Common` project to hold shared value object infrastructure. This avoids code duplication while maintaining domain isolation (no domain references another domain).
-
-**File:** `source/Percolator.Common/Primitives/ByteArrayRecord.cs` (new file)
+**File:** `source/Percolator.Identity/Primitives/ByteArrayRecord.cs`
 ```csharp
-namespace Percolator.Common.Primitives;
+namespace Percolator.Identity.Primitives;
 
 public abstract record ByteArrayRecord
 {
     private readonly ReadOnlyMemory<byte> _value;
-    private readonly int _cachedHashCode;
 
-    protected ByteArrayRecord(ReadOnlyMemory<byte> value)
-    {
-        _value = value;
-        _cachedHashCode = ComputeHashCode(value.Span);
-    }
-
-    /// <summary>
-    /// Creates a ByteArrayRecord from raw bytes with a defensive copy.
-    /// </summary>
-    protected static byte[] CopyBytes(byte[] bytes)
+    protected ByteArrayRecord(byte[] bytes)
     {
         if (bytes is null)
             throw new ArgumentNullException(nameof(bytes));
         
         var copy = new byte[bytes.Length];
         Buffer.BlockCopy(bytes, 0, copy, 0, bytes.Length);
-        return copy;
+        _value = copy;
     }
+
+    /// <summary>
+    /// Returns a defensive copy of the value as a byte array.
+    /// Maintains backward compatibility with existing .Value access patterns.
+    /// </summary>
+    public byte[] Value => ToArray();
 
     /// <summary>
     /// Returns a defensive copy of the value as a byte array.
@@ -1403,13 +1380,12 @@ public abstract record ByteArrayRecord
         return _value.Span.SequenceEqual(other._value.Span);
     }
 
-    public override int GetHashCode() => _cachedHashCode;
-
-    private static int ComputeHashCode(ReadOnlySpan<byte> span)
+    public override int GetHashCode()
     {
         unchecked
         {
             var hash = 17;
+            var span = _value.Span;
             for (int i = 0; i < span.Length; i++)
             {
                 hash = hash * 23 + span[i];
@@ -1420,235 +1396,284 @@ public abstract record ByteArrayRecord
 }
 ```
 
-### H.2: Update all ByteArrayRecord implementations to inherit from shared base
-
-**H.2.1: Percolator.Identity.Primitives.ByteArrayRecord**
-
-**File:** `source/Percolator.Identity/Primitives/ByteArrayRecord.cs`
-```csharp
-using Percolator.Common.Primitives;
-
-namespace Percolator.Identity.Primitives;
-
-public abstract record ByteArrayRecord : Percolator.Common.Primitives.ByteArrayRecord
-{
-    protected ByteArrayRecord(byte[] bytes) 
-        : base(CopyBytes(bytes))
-    {
-    }
-}
-```
-
-**H.2.2: Percolator.Chat.Primitives.ByteArrayRecord**
+### H.2: Update Percolator.Chat.Primitives.ByteArrayRecord
 
 **File:** `source/Percolator.Chat/Primitives/ByteArrayRecord.cs`
 ```csharp
-using Percolator.Common.Primitives;
-
 namespace Percolator.Chat.Primitives;
 
-public abstract record ByteArrayRecord : Percolator.Common.Primitives.ByteArrayRecord
+public abstract record ByteArrayRecord
 {
-    protected ByteArrayRecord(byte[] bytes) 
-        : base(CopyBytes(bytes))
+    private readonly ReadOnlyMemory<byte> _value;
+
+    protected ByteArrayRecord(byte[] bytes)
     {
+        if (bytes is null)
+            throw new ArgumentNullException(nameof(bytes));
+        
+        var copy = new byte[bytes.Length];
+        Buffer.BlockCopy(bytes, 0, copy, 0, bytes.Length);
+        _value = copy;
+    }
+
+    public byte[] Value => ToArray();
+
+    public byte[] ToArray()
+    {
+        var copy = new byte[_value.Length];
+        _value.Span.CopyTo(copy);
+        return copy;
+    }
+
+    public ReadOnlyMemory<byte> AsReadOnlyMemory() => _value;
+
+    public ReadOnlySpan<byte> AsSpan() => _value.Span;
+
+    public virtual bool Equals(ByteArrayRecord? other)
+    {
+        if (other is null) return false;
+        if (ReferenceEquals(this, other)) return true;
+        return _value.Span.SequenceEqual(other._value.Span);
+    }
+
+    public override int GetHashCode()
+    {
+        unchecked
+        {
+            var hash = 17;
+            var span = _value.Span;
+            for (int i = 0; i < span.Length; i++)
+            {
+                hash = hash * 23 + span[i];
+            }
+            return hash;
+        }
     }
 }
 ```
 
-**H.2.3: Percolator.Network.Primitives.ByteArrayRecord**
+### H.3: Update Percolator.Network.Primitives.ByteArrayRecord
 
 **File:** `source/Percolator.Network/Primitives/ByteArrayRecord.cs`
 ```csharp
-using Percolator.Common.Primitives;
-
 namespace Percolator.Network.Primitives;
 
-public abstract record ByteArrayRecord : Percolator.Common.Primitives.ByteArrayRecord
+public abstract record ByteArrayRecord
 {
-    protected ByteArrayRecord(byte[] bytes) 
-        : base(CopyBytes(bytes))
+    private readonly ReadOnlyMemory<byte> _value;
+
+    protected ByteArrayRecord(byte[] bytes)
     {
+        if (bytes is null)
+            throw new ArgumentNullException(nameof(bytes));
+        
+        var copy = new byte[bytes.Length];
+        Buffer.BlockCopy(bytes, 0, copy, 0, bytes.Length);
+        _value = copy;
+    }
+
+    public byte[] Value => ToArray();
+
+    public byte[] ToArray()
+    {
+        var copy = new byte[_value.Length];
+        _value.Span.CopyTo(copy);
+        return copy;
+    }
+
+    public ReadOnlyMemory<byte> AsReadOnlyMemory() => _value;
+
+    public ReadOnlySpan<byte> AsSpan() => _value.Span;
+
+    public virtual bool Equals(ByteArrayRecord? other)
+    {
+        if (other is null) return false;
+        if (ReferenceEquals(this, other)) return true;
+        return _value.Span.SequenceEqual(other._value.Span);
+    }
+
+    public override int GetHashCode()
+    {
+        unchecked
+        {
+            var hash = 17;
+            var span = _value.Span;
+            for (int i = 0; i < span.Length; i++)
+            {
+                hash = hash * 23 + span[i];
+            }
+            return hash;
+        }
     }
 }
 ```
 
-**H.2.4: Percolator.Cryptography.Primitives.ByteArrayRecord`
+### H.4: Update Percolator.Cryptography.Primitives.ByteArrayRecord
 
 **File:** `source/Percolator.Cryptography/Primitives/ByteArrayRecord.cs`
 ```csharp
-using Percolator.Common.Primitives;
-
 namespace Percolator.Cryptography.Primitives;
 
-public abstract record ByteArrayRecord : Percolator.Common.Primitives.ByteArrayRecord
+public abstract record ByteArrayRecord
 {
-    protected ByteArrayRecord(byte[] bytes) 
-        : base(CopyBytes(bytes))
+    private readonly ReadOnlyMemory<byte> _value;
+
+    protected ByteArrayRecord(byte[] bytes)
     {
+        if (bytes is null)
+            throw new ArgumentNullException(nameof(bytes));
+        
+        var copy = new byte[bytes.Length];
+        Buffer.BlockCopy(bytes, 0, copy, 0, bytes.Length);
+        _value = copy;
+    }
+
+    public byte[] Value => ToArray();
+
+    public byte[] ToArray()
+    {
+        var copy = new byte[_value.Length];
+        _value.Span.CopyTo(copy);
+        return copy;
+    }
+
+    public ReadOnlyMemory<byte> AsReadOnlyMemory() => _value;
+
+    public ReadOnlySpan<byte> AsSpan() => _value.Span;
+
+    public virtual bool Equals(ByteArrayRecord? other)
+    {
+        if (other is null) return false;
+        if (ReferenceEquals(this, other)) return true;
+        return _value.Span.SequenceEqual(other._value.Span);
+    }
+
+    public override int GetHashCode()
+    {
+        unchecked
+        {
+            var hash = 17;
+            var span = _value.Span;
+            for (int i = 0; i < span.Length; i++)
+            {
+                hash = hash * 23 + span[i];
+            }
+            return hash;
+        }
     }
 }
 ```
 
-**H.2.5: Percolator.Dht.Primitives.ByteArrayRecord**
+### H.5: Update Percolator.Dht.Primitives.ByteArrayRecord
 
 **File:** `source/Percolator.Dht/Primitives/ByteArrayRecord.cs`
 ```csharp
-using Percolator.Common.Primitives;
-
 namespace Percolator.Dht.Primitives;
 
-public abstract record ByteArrayRecord : Percolator.Common.Primitives.ByteArrayRecord
+public abstract record ByteArrayRecord
 {
-    protected ByteArrayRecord(byte[] bytes) 
-        : base(CopyBytes(bytes))
+    private readonly ReadOnlyMemory<byte> _value;
+
+    protected ByteArrayRecord(byte[] bytes)
     {
+        if (bytes is null)
+            throw new ArgumentNullException(nameof(bytes));
+        
+        var copy = new byte[bytes.Length];
+        Buffer.BlockCopy(bytes, 0, copy, 0, bytes.Length);
+        _value = copy;
     }
 
-    // Dht has existing Value property - override to delegate
     public byte[] Value => ToArray();
-}
-```
 
-### H.3: Update ByteArrayRecord implementations to use proper construction
-
-**H.3.1: Percolator.Chat.ValueObjects.Pkh**
-
-**File:** `source/Percolator.Chat/ValueObjects/Pkh.cs`
-```csharp
-using Percolator.Chat.Primitives;
-
-namespace Percolator.Chat.ValueObjects;
-
-public sealed record Pkh : ByteArrayRecord
-{
-    public Pkh(byte[] value) : base(value) { }
-
-    public static Pkh FromBytes(byte[] value)
+    public byte[] ToArray()
     {
-        if (value is null) throw new ArgumentNullException(nameof(value));
-        return new Pkh(value);
+        var copy = new byte[_value.Length];
+        _value.Span.CopyTo(copy);
+        return copy;
+    }
+
+    public ReadOnlyMemory<byte> AsReadOnlyMemory() => _value;
+
+    public ReadOnlySpan<byte> AsSpan() => _value.Span;
+
+    public virtual bool Equals(ByteArrayRecord? other)
+    {
+        if (other is null) return false;
+        if (ReferenceEquals(this, other)) return true;
+        return _value.Span.SequenceEqual(other._value.Span);
+    }
+
+    public override int GetHashCode()
+    {
+        unchecked
+        {
+            var hash = 17;
+            var span = _value.Span;
+            for (int i = 0; i < span.Length; i++)
+            {
+                hash = hash * 23 + span[i];
+            }
+            return hash;
+        }
     }
 }
 ```
 
-**H.3.2: Percolator.Network.ValueObjects.IdentityPublicKey**
+### H.6: Update concrete implementations
 
-**File:** `source/Percolator.Network/ValueObjects/IdentityPublicKey.cs`
+All concrete ByteArrayRecord implementations already call `base(bytes)` in their constructors. No changes needed to concrete implementations - they automatically benefit from the new base class behavior.
+
+**Types updated automatically:**
+- Percolator.Chat: Pkh, GroupAvatar, EncryptedGroupKey
+- Percolator.Cryptography: AssociatedData, ChainKey, Ciphertext, HandshakeInvitation, HandshakeResponseMessage, OneTimeKey, Plaintext, PreKey, PrivateEphemeralKey, PrivateOneTimeKey, PublicKey, PrivatePreKey, RatchetEphemeralKey, RatchetIdentityKey, RootKey, Signature, SharedSecret, SessionRatchetMessage
+- Percolator.Network: DirectMessagePublicKey, Payload, TlsCertificate, IdentityPublicKey, Signature, PublicKeyHash, PublicKey
+- Percolator.Dht: NodeId (preserves existing length validation logic)
+
+### H.7: Update call sites for performance (optional optimization)
+
+**Note:** Since `.Value` is retained as a computed property that returns `ToArray()`, existing code continues to work without changes. However, call sites can be updated to use `AsReadOnlyMemory()` or `AsSpan()` for zero-allocation access where appropriate.
+
+**H.7.1: Protobuf serialization boundaries**
+
+Where performance matters, update to avoid double allocation:
 ```csharp
-using Percolator.Network.Primitives;
-
-namespace Percolator.Network.ValueObjects;
-
-public record IdentityPublicKey : ByteArrayRecord
-{
-    public IdentityPublicKey(byte[] value) : base(value) { }
-}
-```
-
-**H.3.3: Percolator.Cryptography types**
-
-All cryptography types inherit from ByteArrayRecord. Update constructors to use base class:
-- `AssociatedData.cs`
-- `ChainKey.cs`
-- `Ciphertext.cs`
-- `HandshakeResponseMessage.cs`
-- `HandshakeInvitation.cs`
-- `OneTimeKey.cs`
-- `Plaintext.cs`
-- `PreKey.cs`
-- `PrivateEphemeralKey.cs`
-- `PrivateOneTimeKey.cs`
-- `RatchetEphemeralKey.cs`
-- `RatchetIdentityKey.cs`
-- `PublicKey.cs`
-- `PrivatePreKey.cs`
-- `RootKey.cs`
-- `Signature.cs`
-- `SharedSecret.cs`
-- `SessionRatchetMessage.cs`
-
-**H.3.4: Percolator.Network types**
-
-- `Payload.cs`
-- `TlsCertificate.cs`
-- `Signature.cs`
-- `DirectMessagePublicKey.cs`
-- `PublicKeyHash.cs`
-- `PublicKey.cs`
-
-**H.3.5: Percolator.Chat types**
-
-- `GroupAvatar.cs`
-- `EncryptedGroupKey.cs`
-
-**H.3.6: Percolator.Dht types**
-
-- `NodeId.cs` (already has length validation, preserve it)
-
-### H.4: Update call sites to use ToArray() only at boundaries
-
-**H.4.1: Protobuf serialization boundaries**
-
-Search for `.Value` usage in protobuf conversion code and replace with `.ToArray()`:
-```csharp
-// Before
+// Before (works but allocates)
 ByteString.CopyFrom(record.Value)
 
-// After
-ByteString.CopyFrom(record.ToArray())
+// After (avoids allocation)
+ByteString.CopyFrom(record.AsReadOnlyMemory().Span)
 ```
 
-**H.4.2: Persistence/JSON boundaries**
+**H.7.2: Cryptography API boundaries**
 
-Search for `.Value` usage in serialization code and replace with `.ToArray()`:
+Update crypto API calls to use spans where supported:
 ```csharp
-// Before
-JsonSerializer.Serialize(record.Value)
-
-// After
-JsonSerializer.Serialize(record.ToArray())
-```
-
-**H.4.3: Cryptography API boundaries**
-
-Some cryptography APIs accept `byte[]` directly. Update call sites:
-```csharp
-// Before
+// Before (works but allocates)
 cryptoApi.Process(record.Value)
 
-// After
-cryptoApi.Process(record.ToArray())
+// After (avoids allocation if API supports spans)
+cryptoApi.Process(record.AsSpan())
 ```
 
-**H.4.4: Test assertions**
+**H.7.3: Test assertions**
 
-Update test assertions to use proper equality:
+Update test assertions to use typed equality:
 ```csharp
-// Before
+// Before (works but allocates)
 Assert.That(actual.Value.SequenceEqual(expected.Value))
 
-// After
+// After (uses type equality, no allocation)
 Assert.That(actual.Equals(expected))
 ```
 
-### H.5: Remove duplicate ByteArrayRecord implementations
-
-After consolidating to shared base, remove the duplicate implementations in:
-- `Percolator.Identity.Primitives.ByteArrayRecord.cs`
-- `Percolator.Chat.Primitives.ByteArrayRecord.cs`
-- `Percolator.Network.Primitives.ByteArrayRecord.cs`
-- `Percolator.Cryptography.Primitives.ByteArrayRecord.cs`
-
-Keep only the thin wrapper that inherits from `Percolator.Common.Primitives.ByteArrayRecord` to maintain domain isolation.
-
 ### Notes
 
-- The shared base class approach maintains domain isolation (no cross-domain references)
+- Each domain maintains its own ByteArrayRecord implementation (preserves domain isolation)
+- `.Value` property is retained for backward compatibility
 - Defensive copying happens at construction boundaries only
-- Internal operations use `ReadOnlyMemory<byte>` without allocation
-- `ToArray()` is called only at external boundaries (protobuf, persistence, crypto APIs)
-- Hash code is cached for performance
-- This pattern is already proven by `IdentityPublicKeyHash`
+- Internal operations can use `AsReadOnlyMemory()` or `AsSpan()` for zero-allocation access
+- This is a "big bang" change - all ByteArrayRecord base classes updated simultaneously
+- No migration strategy needed - existing `.Value` access patterns continue to work
 
 ---
