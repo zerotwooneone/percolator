@@ -2102,6 +2102,42 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             peer.RecentChatMessagesMutable.Add(msg);
         }
 
+        // Hydrate sessions
+        foreach (var sessionSnap in snap.Sessions)
+        {
+            var rootKey = new RootKey(sessionSnap.RootKey);
+            var sendChainKey = sessionSnap.SendChainKey is not null ? new ChainKey(sessionSnap.SendChainKey) : null;
+            var recvChainKey = sessionSnap.RecvChainKey is not null ? new ChainKey(sessionSnap.RecvChainKey) : null;
+            var remoteRatchetKey = sessionSnap.RemoteRatchetKey is not null ? new RatchetEphemeralKey(sessionSnap.RemoteRatchetKey) : null;
+            var dhRatchetPrivateKey = sessionSnap.DhRatchetPrivateKey is not null ? new PrivateEphemeralKey(sessionSnap.DhRatchetPrivateKey) : null;
+
+            var ratchetState = new RatchetState(
+                rootKey: rootKey,
+                sendingChainKey: sendChainKey,
+                sendingCounter: sessionSnap.SendCounter,
+                receivingChainKey: recvChainKey,
+                receivingCounter: sessionSnap.RecvCounter,
+                previousChainLength: sessionSnap.PrevChainLength,
+                remoteRatchetKey: remoteRatchetKey,
+                dhRatchetPrivateKey: dhRatchetPrivateKey,
+                skippedKeyLimit: 1000);
+
+            var clock = ResolveClock();
+            var sessionCrypto = new AeadSessionCrypto();
+            var session = SecureSession.Create(
+                id: new SessionId(sessionSnap.SessionId),
+                remotePeerId: new Percolator.Cryptography.Primitives.PeerId(sessionSnap.RemotePeerId),
+                protocolVersion: new ProtocolVersion(sessionSnap.ProtocolVersion),
+                state: ratchetState,
+                sessionCrypto: sessionCrypto,
+                clock: clock);
+
+            // Note: CreatedAtUtc and LastUsedAtUtc will be set to current time on restore.
+            // The cryptographic state (ratchet keys, counters) is preserved, which is what matters for decryption.
+
+            peer.SessionsMutable[session.Id] = session;
+        }
+
         return peer;
     }
 
