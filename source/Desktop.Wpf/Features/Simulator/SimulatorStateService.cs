@@ -2102,6 +2102,31 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             peer.RecentChatMessagesMutable.Add(msg);
         }
 
+        // Hydrate signed prekeys
+        foreach (var spk in snap.SignedPreKeys)
+        {
+            peer.SignedPreKeysMutable.Add(new SimulatedSignedPreKeyModel(
+                spk.SignedPreKeyId,
+                spk.PrivateEcPrivateKey,
+                spk.PublicSpki));
+        }
+
+        // Hydrate outbound invites
+        foreach (var invite in snap.OutboundInvites)
+        {
+            peer.OutboundInvitesMutable.Add(new SimulatedOutboundInviteModel(
+                invite.CorrelationId,
+                invite.SignedPreKeyPrivateEcPrivateKey));
+        }
+
+        // Hydrate pending invite handshake responses
+        foreach (var response in snap.PendingInviteHandshakeResponses)
+        {
+            peer.PendingInviteHandshakeResponsesMutable.Add(new SimulatedPendingInviteHandshakeResponseModel(
+                response.CorrelationId,
+                response.ResponseBytes));
+        }
+
         // Hydrate sessions
         foreach (var sessionSnap in snap.Sessions)
         {
