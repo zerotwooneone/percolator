@@ -101,6 +101,55 @@ public sealed class SimulatorOutboundInterceptor : ISimulatorOutboundInterceptor
         return true;
     }
 
+    public async Task<SimulatorOutboundInterceptResult> InterceptDeliverOpaqueMessageAsync(
+        DnsEndPoint endpoint,
+        DeliverOpaqueMessageRequest request,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        // Detection rule: treat any literal dotted-quad 127.77.* as simulator-owned
+        if (!IPAddress.TryParse(endpoint.Host, out var ip))
+        {
+            return SimulatorOutboundInterceptResult.NotForSimulator();
+        }
+
+        var bytes = ip.GetAddressBytes();
+        if (bytes.Length != 4)
+        {
+            return SimulatorOutboundInterceptResult.NotForSimulator();
+        }
+
+        if (bytes[0] != 127 || bytes[1] != 77)
+        {
+            return SimulatorOutboundInterceptResult.NotForSimulator();
+        }
+
+        // Routing rule: check if endpoint matches a simulated peer (host+port)
+        var match = _state.Peers.FirstOrDefault(p =>
+            !string.IsNullOrWhiteSpace(p.Host.CurrentValue)
+            && string.Equals(p.Host.CurrentValue, endpoint.Host, StringComparison.OrdinalIgnoreCase)
+            && p.Port.CurrentValue == endpoint.Port);
+
+        if (match is null)
+        {
+            return SimulatorOutboundInterceptResult.Undeliverable(
+                $"No simulated peer listening at {endpoint.Host}:{endpoint.Port}");
+        }
+
+        // Deliver to simulator
+        try
+        {
+            await _state.ReceiveOpaqueMessageFromMainAsync(match.PeerId, request, cancellationToken).ConfigureAwait(false);
+            return SimulatorOutboundInterceptResult.DeliveredToSimulator();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[simulator] Failed to deliver opaque message to {SimPeer}", match.PeerId);
+            throw; // Propagate exception as per plan
+        }
+    }
+
     private async Task<DeliverInviteHandshakeResponseAck> DeliverInviteHandshakeResponseAsync(PeerId simulatedPeerId, InviteHandshakeResponse response)
     {
         _logger.LogInformation("[simulator] Intercepted DeliverInviteHandshakeResponse to {SimPeer}", simulatedPeerId);
@@ -166,63 +215,6 @@ public sealed class SimulatorOutboundInterceptor : ISimulatorOutboundInterceptor
 
         simulatedPeerId = match.PeerId;
         return true;
-    }
-
-    public async Task<bool> TryRouteMessageViaSimulatorRelayAsync(
-        Percolator.Identity.IdentityPublicKeyHash recipientPublicKeyHash,
-        byte[] cipherBytes,
-        string? debugType = null,
-        CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        if (cipherBytes is null) throw new ArgumentNullException(nameof(cipherBytes));
-
-        // Resolve simulated peer by PKH (do NOT assume PeerId is meaningful across peers)
-        // Use the typed overload now that it's available
-        var simulatedPeerId = await _state
-            .TryGetPeerIdByIdentityPublicKeyHashAsync(recipientPublicKeyHash, cancellationToken)
-            .ConfigureAwait(false);
-        if (simulatedPeerId is null) return false;
-
-        var peer = _state.Peers.FirstOrDefault(p => p.PeerId == simulatedPeerId);
-        if (peer is null) return false;
-
-        // Check if peer is connected via relay
-        if (peer.ConnectionMode.CurrentValue != ConnectionMode.ViaRelay)
-        {
-            return false; // Not connected via relay, proceed with normal send
-        }
-
-        // Get the relay host peer ID
-        if (peer.RelayPeerId.CurrentValue.Value == Guid.Empty)
-        {
-            _logger.LogWarning("[simulator relay] Peer {PeerId} has ViaRelay mode but no relay host ID", peer.PeerId);
-            return false; // Fallback to normal send
-        }
-
-        var relayHostPeerId = peer.RelayPeerId.CurrentValue;
-
-        // Enqueue in simulator's relay queue (downstream: main → target peer via relay)
-        await _state.EnqueueRelayDownstreamToPeerAsync(
-            relayHostPeerId: relayHostPeerId,
-            targetIdentityPublicKeyHash: recipientPublicKeyHash,
-            opaqueBytes: cipherBytes,
-            debugType: debugType ?? "ChatMessage",
-            cancellationToken: cancellationToken)
-            .ConfigureAwait(false);
-
-        _logger.LogInformation(
-            "[simulator relay] Routed message to peer {PeerId} via relay host {RelayHost}",
-            peer.PeerId,
-            relayHostPeerId);
-
-        _diagnostics.Emit(
-            SimulatorDiagnosticEventType.RelayEnqueued,
-            $"Message routed to peer {peer.PeerId} via simulator relay host {relayHostPeerId}",
-            peerId: peer.PeerId,
-            relayHostPeerId: relayHostPeerId);
-
-        return true; // Message enqueued, skip network send
     }
 
 }

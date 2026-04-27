@@ -111,16 +111,11 @@ public sealed class SimulatorOutboundInterceptionTests
         var cipher = new SessionRatchetMessage(new byte[] { 1, 2, 3 });
 
         interceptor
-            .Setup(i => i.TryDeliverOpaqueMessage(
+            .Setup(i => i.InterceptDeliverOpaqueMessageAsync(
                 endpoint,
                 It.IsAny<DeliverOpaqueMessageRequest>(),
-                It.IsAny<CancellationToken>(),
-                out It.Ref<Task<DeliverOpaqueMessageResponse>>.IsAny))
-            .Returns((DnsEndPoint ep, DeliverOpaqueMessageRequest req, CancellationToken ct, out Task<DeliverOpaqueMessageResponse> result) =>
-            {
-                result = Task.FromResult(new DeliverOpaqueMessageResponse { Version = 1 });
-                return true;
-            });
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(SimulatorOutboundInterceptResult.DeliveredToSimulator());
 
         var sut = new GrpcMessageTransportService(logger, httpFactory.Object, profileRepo.Object, routePlanner.Object, interceptor.Object);
 
@@ -131,84 +126,126 @@ public sealed class SimulatorOutboundInterceptionTests
         // The critical assertion: we never created an HttpClient => no channel creation.
         httpFactory.Verify(x => x.CreateClient(It.IsAny<string>()), Times.Never);
 
-        interceptor.Verify(i => i.TryDeliverOpaqueMessage(
+        interceptor.Verify(i => i.InterceptDeliverOpaqueMessageAsync(
             endpoint,
             It.IsAny<DeliverOpaqueMessageRequest>(),
-            It.IsAny<CancellationToken>(),
-            out It.Ref<Task<DeliverOpaqueMessageResponse>>.IsAny), Times.Once);
+            It.IsAny<CancellationToken>()), Times.Once);
         profileRepo.VerifyAll();
         routePlanner.VerifyAll();
     }
 
     [Test]
-    public async Task MessageService_SendMessageAsync_WhenInterceptorRoutesViaSimulatorRelay_ReturnsSuccessWithoutNetworkSend()
+    public async Task GrpcMessageTransportService_SendMessageAsync_WhenUndeliverable_ThrowsWithoutChannelCreation()
     {
-        // ARRANGE
-        var logger = Mock.Of<ILogger<MessageService>>();
-        var sessions = new Mock<IDirectSessionRepository>();
-        var secureMessaging = new Mock<ISecureMessagingService>();
-        var active = new ActiveIdentityContext();
-        var networkSender = new Mock<INetworkSender>();
-        var wireTap = new Mock<IOutboundMessageWireTap>();
-        var interceptor = new Mock<ISimulatorOutboundInterceptor>();
-        var keyStore = new Mock<Percolator.Identity.IPeerPublicSigningKeyStore>();
+        var logger = Mock.Of<ILogger<GrpcMessageTransportService>>();
 
-        var identity = new IdentityRecord(Guid.NewGuid(), "self") { SelfIdentityId = new Percolator.Identity.SelfId(1) };
-        active.Identity = identity;
+        var httpFactory = new Mock<IHttpClientFactory>(MockBehavior.Strict);
 
-        var peerId = new Percolator.Identity.PeerId(Guid.NewGuid());
-        var networkPeerId = new Percolator.Network.PeerId(peerId.Value);
-        var recipientPublicKeyHash = new byte[32];
-        recipientPublicKeyHash[0] = 1;
+        var profileRepo = new Mock<IPeerRoutingProfileRepository>(MockBehavior.Strict);
+        var routePlanner = new Mock<IProfileRoutePlanner>(MockBehavior.Strict);
 
-        var session = new Percolator.Network.DirectSession(
-            new Percolator.Network.PeerId(peerId.Value),
-            new Percolator.Network.DirectSessionId(Guid.NewGuid()));
+        var interceptor = new Mock<ISimulatorOutboundInterceptor>(MockBehavior.Strict);
 
-        sessions.Setup(s => s.GetByRemotePeerIdAsync(networkPeerId, identity.SelfIdentityId.Value))
-            .ReturnsAsync(session);
+        var peer = new Percolator.Identity.PeerId(Guid.NewGuid());
+        var networkPeerId = new Percolator.Network.PeerId(peer.Value);
+        var endpoint = new DnsEndPoint("127.77.1.1", 5002);
 
-        var cipher = new Percolator.Cryptography.SessionRatchetMessage(new byte[] { 1, 2, 3 });
-        secureMessaging.Setup(s => s.EncryptAsync(It.IsAny<Percolator.Cryptography.SessionId>(), It.IsAny<Percolator.Cryptography.Plaintext>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(cipher);
+        var profile = new PeerRoutingProfile();
+        profile.BindIdentity(networkPeerId);
+        profile.AddGrpcEndPoint(new GrpcEndPoint(endpoint, DateTimeOffset.UtcNow), DateTimeOffset.UtcNow);
 
-        wireTap.Setup(w => w.Enabled).Returns(false);
+        profileRepo
+            .Setup(r => r.GetByIdAsync(networkPeerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(profile);
 
-        keyStore.Setup(k => k.GetPublicKeyHashByPeerIdAsync(peerId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(IdentityPublicKeyHash.FromBytes(recipientPublicKeyHash));
+        var selection = new RouteSelection(Endpoint: new GrpcEndPoint(endpoint, DateTimeOffset.UtcNow), Relay: null);
+        routePlanner.Setup(p => p.SelectRoute(profile)).Returns(selection);
 
-        interceptor.Setup(i => i.TryRouteMessageViaSimulatorRelayAsync(
-            It.IsAny<IdentityPublicKeyHash>(),
-            It.IsAny<byte[]>(),
-            It.IsAny<string?>(),
-            It.IsAny<CancellationToken>()))
-            .ReturnsAsync(true);
+        var requestSessionId = new DirectSessionId(Guid.NewGuid());
+        var cipher = new SessionRatchetMessage(new byte[] { 1, 2, 3 });
 
-        var sut = new MessageService(
-            logger,
-            sessions.Object,
-            secureMessaging.Object,
-            active,
-            networkSender.Object,
-            wireTap.Object,
-            keyStore.Object,
-            interceptor.Object);
+        interceptor
+            .Setup(i => i.InterceptDeliverOpaqueMessageAsync(
+                endpoint,
+                It.IsAny<DeliverOpaqueMessageRequest>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(SimulatorOutboundInterceptResult.Undeliverable("No matching simulated peer"));
 
-        var envelope = new Percolator.Contracts.InternalEnvelope();
+        var sut = new GrpcMessageTransportService(logger, httpFactory.Object, profileRepo.Object, routePlanner.Object, interceptor.Object);
 
-        // ACT
-        var result = await sut.SendMessageAsync(envelope, peerId, CancellationToken.None);
+        var ex = Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await sut.SendMessageAsync(peer, requestSessionId, cipher, CancellationToken.None));
 
-        // ASSERT
-        Assert.That(result.Success, Is.True);
-        Assert.That(result.Path, Is.EqualTo("SimulatorRelay"));
+        Assert.That(ex.Message, Does.Contain("127.77.1.1:5002"));
+        Assert.That(ex.Message, Does.Contain("No matching simulated peer"));
 
-        // Critical: network sender should never be called when interceptor routes via simulator relay
-        networkSender.Verify(n => n.SendAsync(
-            It.IsAny<Percolator.Network.PeerId>(),
-            It.IsAny<NetworkPayload>(),
-            It.IsAny<SendStrategy>(),
-            It.IsAny<CancellationToken>()),
-            Times.Never);
+        // The critical assertion: we never created an HttpClient => no channel creation.
+        httpFactory.Verify(x => x.CreateClient(It.IsAny<string>()), Times.Never);
+
+        interceptor.Verify(i => i.InterceptDeliverOpaqueMessageAsync(
+            endpoint,
+            It.IsAny<DeliverOpaqueMessageRequest>(),
+            It.IsAny<CancellationToken>()), Times.Once);
+        profileRepo.VerifyAll();
+        routePlanner.VerifyAll();
+    }
+
+    [Test]
+    public async Task GrpcMessageTransportService_SendMessageAsync_WhenNotForSimulator_ProceedsWithNormalSend()
+    {
+        var logger = Mock.Of<ILogger<GrpcMessageTransportService>>();
+
+        var httpFactory = new Mock<IHttpClientFactory>(MockBehavior.Strict);
+        var handler = new System.Net.Http.HttpClientHandler();
+        httpFactory.Setup(f => f.CreateClient(It.IsAny<string>())).Returns(new HttpClient(handler));
+
+        var profileRepo = new Mock<IPeerRoutingProfileRepository>(MockBehavior.Strict);
+        var routePlanner = new Mock<IProfileRoutePlanner>(MockBehavior.Strict);
+
+        var interceptor = new Mock<ISimulatorOutboundInterceptor>(MockBehavior.Strict);
+
+        var peer = new Percolator.Identity.PeerId(Guid.NewGuid());
+        var networkPeerId = new Percolator.Network.PeerId(peer.Value);
+        var endpoint = new DnsEndPoint("192.168.1.1", 5002); // Non-simulator endpoint
+
+        var profile = new PeerRoutingProfile();
+        profile.BindIdentity(networkPeerId);
+        profile.AddGrpcEndPoint(new GrpcEndPoint(endpoint, DateTimeOffset.UtcNow), DateTimeOffset.UtcNow);
+
+        profileRepo
+            .Setup(r => r.GetByIdAsync(networkPeerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(profile);
+
+        var selection = new RouteSelection(Endpoint: new GrpcEndPoint(endpoint, DateTimeOffset.UtcNow), Relay: null);
+        routePlanner.Setup(p => p.SelectRoute(profile)).Returns(selection);
+
+        var requestSessionId = new DirectSessionId(Guid.NewGuid());
+        var cipher = new SessionRatchetMessage(new byte[] { 1, 2, 3 });
+
+        interceptor
+            .Setup(i => i.InterceptDeliverOpaqueMessageAsync(
+                endpoint,
+                It.IsAny<DeliverOpaqueMessageRequest>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(SimulatorOutboundInterceptResult.NotForSimulator());
+
+        var sut = new GrpcMessageTransportService(logger, httpFactory.Object, profileRepo.Object, routePlanner.Object, interceptor.Object);
+
+        // This will fail with a real gRPC call (since we're using a non-simulator endpoint),
+        // but the important assertion is that the interceptor was called and returned NotForSimulator.
+        // For this test, we just verify the interceptor was called and we proceed to channel creation.
+        Assert.That(async () => await sut.SendMessageAsync(peer, requestSessionId, cipher, CancellationToken.None), Throws.InstanceOf<Exception>());
+
+        // The interceptor was called and returned NotForSimulator, so we attempted channel creation
+        interceptor.Verify(i => i.InterceptDeliverOpaqueMessageAsync(
+            endpoint,
+            It.IsAny<DeliverOpaqueMessageRequest>(),
+            It.IsAny<CancellationToken>()), Times.Once);
+
+        // HttpClient was created (since we proceeded with normal send)
+        httpFactory.Verify(x => x.CreateClient(It.IsAny<string>()), Times.AtLeastOnce);
+
+        profileRepo.VerifyAll();
+        routePlanner.VerifyAll();
     }
 }
