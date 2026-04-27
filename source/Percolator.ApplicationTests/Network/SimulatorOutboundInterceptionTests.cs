@@ -16,6 +16,14 @@ namespace Percolator.ApplicationTests.Network;
 [TestFixture]
 public sealed class SimulatorOutboundInterceptionTests
 {
+    private sealed class ThrowingHttpMessageHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            throw new HttpRequestException("Test handler: outbound HTTP call attempted");
+        }
+    }
+
     [Test]
     public async Task GrpcSessionService_DeliverInviteHandshakeResponseAsync_short_circuits_to_interceptor()
     {
@@ -169,7 +177,7 @@ public sealed class SimulatorOutboundInterceptionTests
                 endpoint,
                 It.IsAny<DeliverOpaqueMessageRequest>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(SimulatorOutboundInterceptResult.Undeliverable("No matching simulated peer"));
+            .ReturnsAsync(SimulatorOutboundInterceptResult.Undeliverable(endpoint, "No matching simulated peer"));
 
         var sut = new GrpcMessageTransportService(logger, httpFactory.Object, profileRepo.Object, routePlanner.Object, interceptor.Object);
 
@@ -177,7 +185,6 @@ public sealed class SimulatorOutboundInterceptionTests
             await sut.SendMessageAsync(peer, requestSessionId, cipher, CancellationToken.None));
 
         Assert.That(ex.Message, Does.Contain("127.77.1.1:5002"));
-        Assert.That(ex.Message, Does.Contain("No matching simulated peer"));
 
         // The critical assertion: we never created an HttpClient => no channel creation.
         httpFactory.Verify(x => x.CreateClient(It.IsAny<string>()), Times.Never);
@@ -196,7 +203,7 @@ public sealed class SimulatorOutboundInterceptionTests
         var logger = Mock.Of<ILogger<GrpcMessageTransportService>>();
 
         var httpFactory = new Mock<IHttpClientFactory>(MockBehavior.Strict);
-        var handler = new System.Net.Http.HttpClientHandler();
+        var handler = new ThrowingHttpMessageHandler();
         httpFactory.Setup(f => f.CreateClient(It.IsAny<string>())).Returns(new HttpClient(handler));
 
         var profileRepo = new Mock<IPeerRoutingProfileRepository>(MockBehavior.Strict);

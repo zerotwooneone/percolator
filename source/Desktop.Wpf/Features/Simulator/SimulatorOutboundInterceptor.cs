@@ -85,22 +85,6 @@ public sealed class SimulatorOutboundInterceptor : ISimulatorOutboundInterceptor
         return true;
     }
 
-    public bool TryDeliverOpaqueMessage(
-        DnsEndPoint endpoint,
-        DeliverOpaqueMessageRequest request,
-        CancellationToken cancellationToken,
-        out Task<DeliverOpaqueMessageResponse> result)
-    {
-        if (!TryResolveSimulatedPeerId(endpoint, out var peerId))
-        {
-            result = Task.FromResult(new DeliverOpaqueMessageResponse { Version = 1 });
-            return false;
-        }
-
-        result = _state.ReceiveOpaqueMessageFromMainAsync(peerId, request, cancellationToken);
-        return true;
-    }
-
     public async Task<SimulatorOutboundInterceptResult> InterceptDeliverOpaqueMessageAsync(
         DnsEndPoint endpoint,
         DeliverOpaqueMessageRequest request,
@@ -134,6 +118,7 @@ public sealed class SimulatorOutboundInterceptor : ISimulatorOutboundInterceptor
         if (match is null)
         {
             return SimulatorOutboundInterceptResult.Undeliverable(
+                endpoint,
                 $"No simulated peer listening at {endpoint.Host}:{endpoint.Port}");
         }
 

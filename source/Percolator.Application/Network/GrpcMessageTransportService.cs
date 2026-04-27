@@ -76,8 +76,9 @@ public class GrpcMessageTransportService : IMessageTransportService
                 }
                 if (interceptResult.Kind == SimulatorOutboundInterceptResultKind.Undeliverable)
                 {
+                    var destination = interceptResult.Endpoint ?? endPoint.EndPoint;
                     throw new InvalidOperationException(
-                        $"Send to simulator-reserved endpoint {endPoint.EndPoint} failed: {interceptResult.FailureReason ?? "No matching simulated peer"}");
+                        $"Send to simulator-reserved endpoint {destination} failed: {interceptResult.FailureReason ?? "No matching simulated peer"}");
                 }
                 // NotForSimulator: proceed with normal gRPC send
             }
