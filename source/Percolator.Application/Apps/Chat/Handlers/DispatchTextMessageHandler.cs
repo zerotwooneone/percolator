@@ -47,6 +47,16 @@ public sealed class DispatchTextMessageHandler : IRequestHandler<DispatchTextMes
             }
         };
 
+        // Include group metadata if present
+        if (request.GroupConversationGuid.HasValue)
+        {
+            chatEnvelope.TextMessage.GroupConversationGuid = ByteString.CopyFrom(request.GroupConversationGuid.Value.ToByteArray());
+        }
+        if (request.AuthorIdentityKey is not null)
+        {
+            chatEnvelope.TextMessage.AuthorIdentityKey = ByteString.CopyFrom(request.AuthorIdentityKey);
+        }
+
         // Process each recipient sequentially (preserve per-recipient ordering if needed)
         foreach (var peerId in request.RecipientPeerIds)
         {
