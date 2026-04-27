@@ -459,8 +459,9 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
         // Assert
         sid.Should().BeNull();
 
-        var relayTimeoutAt = DateTimeOffset.UtcNow.AddSeconds(2);
-        while (DateTimeOffset.UtcNow < relayTimeoutAt)
+        // Wait for relay queue to empty (observable behavior, not timing-dependent)
+        var maxAttempts = 50; // Prevent infinite loop
+        for (var i = 0; i < maxAttempts; i++)
         {
             var relay = sut.Relays.Single(r => r.RelayHostPeerId.Value == relayHostPeerId.Value);
             if (relay.MessageQueue.Count == 0)
@@ -468,7 +469,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
                 break;
             }
 
-            await Task.Delay(20);
+            await Task.Delay(50);
         }
 
         var relayAfter = sut.Relays.Single(r => r.RelayHostPeerId.Value == relayHostPeerId.Value);

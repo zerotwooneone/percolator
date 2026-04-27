@@ -659,7 +659,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
                 model.AddChatMessage(
                     isFromMain: true,
                     content: text.Content,
-                    receivedUtc: text.SentTimestampUtc?.ToDateTimeOffset() ?? DateTimeOffset.UtcNow);
+                    receivedUtc: text.SentTimestampUtc?.ToDateTimeOffset() ?? _timeProvider.GetUtcNow());
             }
             finally
             {
@@ -1262,7 +1262,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             DateTimeOffset newTime;
             if (before is null && after is null)
             {
-                newTime = DateTimeOffset.UtcNow;
+                newTime = _timeProvider.GetUtcNow();
             }
             else if (before is null)
             {
@@ -1395,7 +1395,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             var msg = new OutboundRelayMessage(
                 AckId: Guid.NewGuid(),
                 OpaqueBytes: opaqueBytes,
-                EnqueuedUtc: DateTimeOffset.UtcNow,
+                EnqueuedUtc: _timeProvider.GetUtcNow(),
                 DebugType: debugType);
 
             relay.EnqueueMessage(msg);
@@ -1434,7 +1434,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
                 AckId: Guid.NewGuid(),
                 TargetPkh: targetIdentityPublicKeyHash,
                 OpaqueBytes: opaqueBytes,
-                EnqueuedUtc: DateTimeOffset.UtcNow,
+                EnqueuedUtc: _timeProvider.GetUtcNow(),
                 DebugType: debugType);
 
             relay.EnqueueMessage(msg);
@@ -1833,7 +1833,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
                             peerModel.AddChatMessage(
                                 isFromMain: true,
                                 content: txt.Content,
-                                receivedUtc: txt.SentTimestampUtc?.ToDateTimeOffset() ?? DateTimeOffset.UtcNow);
+                                receivedUtc: txt.SentTimestampUtc?.ToDateTimeOffset() ?? _timeProvider.GetUtcNow());
                             _saveTrigger.OnNext(Unit.Default);
                         }
                         return null; // Decrypted successfully, handled
@@ -1855,13 +1855,14 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
     {
         cancellationToken.ThrowIfCancellationRequested();
 
+        var now = _timeProvider.GetUtcNow();
         var chatEnvelope = new ChatEnvelope
         {
             TextMessage = new TextMessage
             {
                 MessageId = Google.Protobuf.ByteString.CopyFrom(Guid.NewGuid().ToByteArray()),
                 Content = content,
-                SentTimestampUtc = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow)
+                SentTimestampUtc = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTimeOffset(now)
             }
         };
         var internalEnvelope = new InternalEnvelope { ChatEnvelope = chatEnvelope };
@@ -1886,7 +1887,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
                 .ConfigureAwait(false);
 
             // Record outbound message in peer's chat history
-            model.AddChatMessage(isFromMain: false, content: content, receivedUtc: DateTimeOffset.UtcNow);
+            model.AddChatMessage(isFromMain: false, content: content, receivedUtc: now);
 
             // Route based on connection mode
             if (model.ConnectionMode.CurrentValue == ConnectionMode.ViaRelay)
@@ -2446,7 +2447,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         {
             if (!_peerById.TryGetValue(relayHostPeerId, out var host)) return null;
 
-            var now = DateTimeOffset.UtcNow;
+            var now = _timeProvider.GetUtcNow();
             for (var i = host.PublishedPreKeyBundles.Count - 1; i >= 0; i--)
             {
                 if (host.PublishedPreKeyBundles[i].ExpiresUtc <= now)
