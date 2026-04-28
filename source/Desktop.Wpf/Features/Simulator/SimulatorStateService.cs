@@ -2590,27 +2590,6 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
                 match.OneTimeKeys.RemoveAt(0);
             }
 
-            // Serialize bundle with popped onetime key (or without if none available)
-            var dto = new GetPreKeyBundleResponse.Types.PreKeyBundle
-            {
-                Version = 1,
-                IdentityKey = ByteString.CopyFrom(match.IdentityKey),
-                SignedPreKeyId = ByteString.CopyFrom(match.SignedPreKeyId.ToByteArray()),
-                SignedPreKey = ByteString.CopyFrom(match.SignedPreKey),
-                PreKeySignature = ByteString.CopyFrom(match.PreKeySignature)
-            };
-
-            if (poppedOneTimeKey is not null)
-            {
-                dto.OneTimeKeys.Add(new GetPreKeyBundleResponse.Types.OneTimeKey
-                {
-                    OneTimeKeyId = ByteString.CopyFrom(poppedOneTimeKey.Id.ToByteArray()),
-                    KeyBytes = ByteString.CopyFrom(poppedOneTimeKey.Key.Value)
-                });
-            }
-
-            var bundleBytes = dto.ToByteArray();
-
             var responseOneTimeKeys = poppedOneTimeKey is null
                 ? new ObservableList<Percolator.Cryptography.OneTimeKeyInstance>()
                 : new ObservableList<Percolator.Cryptography.OneTimeKeyInstance>(new[] { poppedOneTimeKey });
