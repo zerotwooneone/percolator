@@ -28,6 +28,8 @@ namespace Percolator.Application.Network.Handshake
         private readonly IPeerRoutingProfileRepository _routingProfiles;
         private readonly IMediator _mediator;
         private readonly IEstablishSessionResponseValidator _responseValidator;
+        private readonly IPeerRouteCandidateRepository _candidateRepository;
+        private readonly IPeerPublicSigningKeyStore _keyStore;
 
         public InitiatorFinalizeService(
             ILogger<InitiatorFinalizeService> logger,
@@ -43,7 +45,9 @@ namespace Percolator.Application.Network.Handshake
             IDirectSessionMappingWriter directSessionMappingWriter,
             IPeerRoutingProfileRepository routingProfiles,
             IMediator mediator,
-            IEstablishSessionResponseValidator responseValidator)
+            IEstablishSessionResponseValidator responseValidator,
+            IPeerRouteCandidateRepository candidateRepository,
+            IPeerPublicSigningKeyStore keyStore)
         {
             _logger = logger;
             _keysStore = keysStore;
@@ -59,6 +63,8 @@ namespace Percolator.Application.Network.Handshake
             _routingProfiles = routingProfiles;
             _mediator = mediator;
             _responseValidator = responseValidator;
+            _candidateRepository = candidateRepository;
+            _keyStore = keyStore;
         }
 
         public async Task<(SessionId sessionId, Plaintext plaintext)?> TryFinalizeFromInviteHandshakeResponseAsync(
@@ -535,6 +541,21 @@ namespace Percolator.Application.Network.Handshake
                         profile.AddOrRefreshRelay(new Percolator.Network.PeerId(relayPeerId.Value), _clock.UtcNow);
                         profile.SetIdentityPublicKey(new Percolator.Network.ValueObjects.IdentityPublicKey(remoteIdentitySpki));
                         await _routingProfiles.UpsertAsync(profile, cancellationToken).ConfigureAwait(false);
+
+                        // Upsert PKH record for target peer so relayed sends can look it up
+                        var pkh = IdentityPublicKeyHash.FromBytes(remotePkh);
+                        await _keyStore.ActivateIfChangedAsync(peerIdentity.Id, remoteIdentitySpki, pkh, _clock.UtcNow, cancellationToken).ConfigureAwait(false);
+
+                        // Phase 1: Write candidate route for relayed handshake
+                        var candidate = new PeerRouteCandidate
+                        {
+                            SelfIdentityId = selfIdentityId.Value,
+                            RemotePeerId = netPeerId,
+                            RouteKind = RouteKind.Relayed,
+                            RelayHostPeerId = relayPeerId.Value,
+                            ObservedAtUtc = _clock.UtcNow
+                        };
+                        await _candidateRepository.UpsertAsync(candidate, cancellationToken).ConfigureAwait(false);
                     }
                     catch (Exception ex)
                     {

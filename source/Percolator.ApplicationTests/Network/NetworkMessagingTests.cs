@@ -1,6 +1,7 @@
 using Moq;
 using Percolator.Network;
 using Percolator.Network.Messaging;
+using Percolator.Application.Network.Messaging;
 
 namespace Percolator.ApplicationTests.Network;
 
@@ -12,6 +13,7 @@ public class NetworkMessagingTests
     {
         var repo = new Mock<IPeerRoutingProfileRepository>();
         var topo = new Mock<IRelayTopology>();
+        var candidateRepo = new Mock<IPeerRouteCandidateRepository>();
         var peer = new PeerId(Guid.NewGuid());
         var profile = new PeerRoutingProfile();
         profile.BindIdentity(peer);
@@ -23,17 +25,17 @@ public class NetworkMessagingTests
 
         var planner = new SimpleRoutePlanner();
         var exec = new Mock<ISendExecutor>();
-        IReadOnlyList<string>? capturedRoutes = null;
-        exec.Setup(e => e.ExecuteAsync(peer, It.IsAny<NetworkPayload>(), It.IsAny<IReadOnlyList<string>>(), It.IsAny<CancellationToken>()))
-            .Callback<PeerId, NetworkPayload, IReadOnlyList<string>, CancellationToken>((_, __, routes, ___) => capturedRoutes = routes)
+        IReadOnlyList<PlannedRoute>? capturedRoutes = null;
+        exec.Setup(e => e.ExecuteAsync(peer, It.IsAny<NetworkPayload>(), It.IsAny<IReadOnlyList<PlannedRoute>>(), It.IsAny<CancellationToken>()))
+            .Callback<PeerId, NetworkPayload, IReadOnlyList<PlannedRoute>, CancellationToken>((_, __, routes, ___) => capturedRoutes = routes)
             .ReturnsAsync(new SendOutcome { Success = true, Path = "Direct", AttemptedPaths = new[] { "Direct" }, Attempts = 1 });
 
-        var sut = new DefaultNetworkSender(planner, repo.Object, topo.Object, exec.Object);
-        _ = await sut.SendAsync(peer, new NetworkPayload(new byte[] { 1 }), SendStrategy.DirectOnly, CancellationToken.None);
+        var sut = new DefaultNetworkSender(planner, repo.Object, topo.Object, exec.Object, candidateRepo.Object);
+        _ = await sut.SendAsync(1, peer, new NetworkPayload(new byte[] { 1 }), SendStrategy.DirectOnly, CancellationToken.None);
 
         Assert.That(capturedRoutes, Is.Not.Null);
         Assert.That(capturedRoutes!.Count, Is.EqualTo(1));
-        Assert.That(capturedRoutes![0], Is.EqualTo("Direct"));
+        Assert.That(capturedRoutes![0], Is.InstanceOf<PlannedRoute.Direct>());
     }
 
     [Test]
@@ -41,6 +43,7 @@ public class NetworkMessagingTests
     {
         var repo = new Mock<IPeerRoutingProfileRepository>();
         var topo = new Mock<IRelayTopology>();
+        var candidateRepo = new Mock<IPeerRouteCandidateRepository>();
         var peer = new PeerId(Guid.NewGuid());
         var relay = new PeerId(Guid.NewGuid());
         repo.Setup(r => r.GetByIdAsync(peer, It.IsAny<CancellationToken>())).ReturnsAsync((PeerRoutingProfile?)null);
@@ -48,16 +51,17 @@ public class NetworkMessagingTests
 
         var planner = new SimpleRoutePlanner();
         var exec = new Mock<ISendExecutor>();
-        IReadOnlyList<string>? capturedRoutes = null;
-        exec.Setup(e => e.ExecuteAsync(peer, It.IsAny<NetworkPayload>(), It.IsAny<IReadOnlyList<string>>(), It.IsAny<CancellationToken>()))
-            .Callback<PeerId, NetworkPayload, IReadOnlyList<string>, CancellationToken>((_, __, routes, ___) => capturedRoutes = routes)
+        IReadOnlyList<PlannedRoute>? capturedRoutes = null;
+        exec.Setup(e => e.ExecuteAsync(peer, It.IsAny<NetworkPayload>(), It.IsAny<IReadOnlyList<PlannedRoute>>(), It.IsAny<CancellationToken>()))
+            .Callback<PeerId, NetworkPayload, IReadOnlyList<PlannedRoute>, CancellationToken>((_, __, routes, ___) => capturedRoutes = routes)
             .ReturnsAsync(new SendOutcome { Success = true, Path = $"Relay:{relay.Value}", AttemptedPaths = new[] { $"Relay:{relay.Value}" }, Attempts = 1 });
 
-        var sut = new DefaultNetworkSender(planner, repo.Object, topo.Object, exec.Object);
-        _ = await sut.SendAsync(peer, new NetworkPayload(new byte[] { 1 }), SendStrategy.DirectThenRelay, CancellationToken.None);
+        var sut = new DefaultNetworkSender(planner, repo.Object, topo.Object, exec.Object, candidateRepo.Object);
+        _ = await sut.SendAsync(1, peer, new NetworkPayload(new byte[] { 1 }), SendStrategy.DirectThenRelay, CancellationToken.None);
 
         Assert.That(capturedRoutes, Is.Not.Null);
-        Assert.That(capturedRoutes!.Single(), Is.EqualTo($"Relay:{relay.Value}"));
+        Assert.That(capturedRoutes!.Single(), Is.InstanceOf<PlannedRoute.Relay>());
+        Assert.That(((PlannedRoute.Relay)capturedRoutes!.Single()).RelayHostPeerId.Value, Is.EqualTo(relay.Value));
     }
 
     [Test]
@@ -67,15 +71,60 @@ public class NetworkMessagingTests
         var peer = new PeerId(Guid.NewGuid());
         var repo = new Mock<IPeerRoutingProfileRepository>();
         var topo = new Mock<IRelayTopology>();
+        var candidateRepo = new Mock<IPeerRouteCandidateRepository>();
         // profile with no endpoints/relays triggers no planned route; sender returns failure without calling executor
         var emptyProfile = new PeerRoutingProfile(); emptyProfile.BindIdentity(peer);
         repo.Setup(r => r.GetByIdAsync(peer, It.IsAny<CancellationToken>())).ReturnsAsync(emptyProfile);
         topo.Setup(t => t.GetRelayForAsync(peer, It.IsAny<CancellationToken>())).ReturnsAsync((PeerId?)null);
-        var sut = new DefaultNetworkSender(new SimpleRoutePlanner(), repo.Object, topo.Object, exec.Object);
+        candidateRepo.Setup(r => r.GetCandidatesAsync(It.IsAny<int>(), It.IsAny<PeerId>(), It.IsAny<CancellationToken>())).ReturnsAsync(Array.Empty<PeerRouteCandidate>());
+        var sut = new DefaultNetworkSender(new SimpleRoutePlanner(), repo.Object, topo.Object, exec.Object, candidateRepo.Object);
 
-        var outcome = await sut.SendAsync(peer, new NetworkPayload(new byte[] {1,2,3}), SendStrategy.DirectOnly, CancellationToken.None);
+        var outcome = await sut.SendAsync(1, peer, new NetworkPayload(new byte[] {1,2,3}), SendStrategy.DirectOnly, CancellationToken.None);
         Assert.That(outcome.Success, Is.False);
         Assert.That(outcome.Reason, Is.EqualTo(SendFailureReason.NoEndpoints));
+    }
+
+    [Test]
+    public async Task NetworkSender_When_NoProfile_HasCandidates_UsesCandidateFallback()
+    {
+        var exec = new Mock<ISendExecutor>();
+        var peer = new PeerId(Guid.NewGuid());
+        var repo = new Mock<IPeerRoutingProfileRepository>();
+        var topo = new Mock<IRelayTopology>();
+        var candidateRepo = new Mock<IPeerRouteCandidateRepository>();
+        
+        // No confirmed profile
+        repo.Setup(r => r.GetByIdAsync(peer, It.IsAny<CancellationToken>())).ReturnsAsync((PeerRoutingProfile?)null);
+        topo.Setup(t => t.GetRelayForAsync(peer, It.IsAny<CancellationToken>())).ReturnsAsync((PeerId?)null);
+        
+        // But we have a candidate relay route
+        var relayPeerId = new PeerId(Guid.NewGuid());
+        var candidates = new List<PeerRouteCandidate>
+        {
+            new PeerRouteCandidate
+            {
+                SelfIdentityId = 1,
+                RemotePeerId = peer,
+                RouteKind = RouteKind.Relayed,
+                RelayHostPeerId = relayPeerId.Value,
+                ObservedAtUtc = DateTimeOffset.UtcNow
+            }
+        };
+        candidateRepo.Setup(r => r.GetCandidatesAsync(1, peer, It.IsAny<CancellationToken>())).ReturnsAsync(candidates);
+        
+        var sut = new DefaultNetworkSender(new SimpleRoutePlanner(), repo.Object, topo.Object, exec.Object, candidateRepo.Object);
+        
+        IReadOnlyList<PlannedRoute>? capturedRoutes = null;
+        exec.Setup(e => e.ExecuteAsync(peer, It.IsAny<NetworkPayload>(), It.IsAny<IReadOnlyList<PlannedRoute>>(), It.IsAny<CancellationToken>()))
+            .Callback<PeerId, NetworkPayload, IReadOnlyList<PlannedRoute>, CancellationToken>((_, __, routes, ___) => capturedRoutes = routes)
+            .ReturnsAsync(new SendOutcome { Success = true, Path = $"Relay:{relayPeerId.Value}", AttemptedPaths = new[] { $"Relay:{relayPeerId.Value}" }, Attempts = 1 });
+
+        var outcome = await sut.SendAsync(1, peer, new NetworkPayload(new byte[] {1,2,3}), SendStrategy.DirectThenRelay, CancellationToken.None);
+        
+        Assert.That(capturedRoutes, Is.Not.Null);
+        Assert.That(capturedRoutes!.Count, Is.EqualTo(1));
+        Assert.That(capturedRoutes![0], Is.InstanceOf<PlannedRoute.Relay>());
+        Assert.That(((PlannedRoute.Relay)capturedRoutes![0]).RelayHostPeerId.Value, Is.EqualTo(relayPeerId.Value));
     }
 
     [Test]
@@ -89,7 +138,7 @@ public class NetworkMessagingTests
             .ReturnsAsync((true, response, (SendFailureReason?)null, (Exception?)null));
 
         var sut = new DefaultSendExecutor(transport.Object);
-        var outcome = await sut.ExecuteAsync(peer, payload, new[] { "Direct" }, CancellationToken.None);
+        var outcome = await sut.ExecuteAsync(peer, payload, new[] { new PlannedRoute.Direct() }, CancellationToken.None);
 
         Assert.That(outcome.Success, Is.True);
         Assert.That(outcome.Path, Is.EqualTo("Direct"));
@@ -111,7 +160,7 @@ public class NetworkMessagingTests
             .ReturnsAsync((true, (NetworkPayload?)null, (SendFailureReason?)null, (Exception?)null));
 
         var sut = new DefaultSendExecutor(transport.Object);
-        var routes = new[] { "Direct", $"Relay:{relay.Value}" };
+        var routes = new PlannedRoute[] { new PlannedRoute.Direct(), new PlannedRoute.Relay(relay) };
         var outcome = await sut.ExecuteAsync(peer, payload, routes, CancellationToken.None);
 
         Assert.That(outcome.Success, Is.True);

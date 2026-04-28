@@ -1,6 +1,8 @@
 using System.Diagnostics;
+using Percolator.Network;
+using Percolator.Network.Messaging;
 
-namespace Percolator.Network.Messaging;
+namespace Percolator.Application.Network.Messaging;
 
 public sealed class DefaultSendExecutor : ISendExecutor
 {
@@ -11,7 +13,7 @@ public sealed class DefaultSendExecutor : ISendExecutor
         _transport = transport;
     }
 
-    public async Task<SendOutcome> ExecuteAsync(PeerId target, NetworkPayload payload, IReadOnlyList<string> plannedRoutes, CancellationToken ct = default)
+    public async Task<SendOutcome> ExecuteAsync(PeerId target, NetworkPayload payload, IReadOnlyList<PlannedRoute> plannedRoutes, CancellationToken ct = default)
     {
         var attemptedPaths = new List<string>(plannedRoutes.Count);
         var attemptDetails = new List<AttemptDetail>(plannedRoutes.Count);
@@ -19,7 +21,13 @@ public sealed class DefaultSendExecutor : ISendExecutor
         foreach (var route in plannedRoutes)
         {
             ct.ThrowIfCancellationRequested();
-            attemptedPaths.Add(route);
+            string routeString = route switch
+            {
+                PlannedRoute.Direct => "Direct",
+                PlannedRoute.Relay r => $"Relay:{r.RelayHostPeerId.Value}",
+                _ => "Unknown"
+            };
+            attemptedPaths.Add(routeString);
 
             var sw = Stopwatch.StartNew();
             bool ok;
@@ -27,35 +35,26 @@ public sealed class DefaultSendExecutor : ISendExecutor
             SendFailureReason? reason;
             Exception? error;
 
-            if (string.Equals(route, "Direct", StringComparison.Ordinal))
+            if (route is PlannedRoute.Direct)
             {
                 (ok, response, reason, error) = await _transport.SendDirectAsync(target, payload, ct).ConfigureAwait(false);
             }
-            else if (route.StartsWith("Relay:", StringComparison.Ordinal))
+            else if (route is PlannedRoute.Relay relay)
             {
-                var relayStr = route.Substring("Relay:".Length);
-                if (!Guid.TryParse(relayStr, out var relayGuid))
-                {
-                    // Malformed route; record and continue
-                    sw.Stop();
-                    attemptDetails.Add(new AttemptDetail { Route = route, Duration = sw.Elapsed, Reason = SendFailureReason.Unknown });
-                    continue;
-                }
-                var relay = new PeerId(relayGuid);
-                (ok, response, reason, error) = await _transport.SendViaRelayAsync(relay, target, payload, ct).ConfigureAwait(false);
+                (ok, response, reason, error) = await _transport.SendViaRelayAsync(relay.RelayHostPeerId, target, payload, ct).ConfigureAwait(false);
             }
             else
             {
-                // Unknown route token
+                // Unknown route type
                 sw.Stop();
-                attemptDetails.Add(new AttemptDetail { Route = route, Duration = sw.Elapsed, Reason = SendFailureReason.Unknown });
+                attemptDetails.Add(new AttemptDetail { Route = routeString, Duration = sw.Elapsed, Reason = SendFailureReason.Unknown });
                 continue;
             }
 
             sw.Stop();
             attemptDetails.Add(new AttemptDetail
             {
-                Route = route,
+                Route = routeString,
                 Duration = sw.Elapsed,
                 Reason = ok ? null : (reason ?? SendFailureReason.Unknown)
             });
@@ -65,7 +64,7 @@ public sealed class DefaultSendExecutor : ISendExecutor
                 return new SendOutcome
                 {
                     Success = true,
-                    Path = route.StartsWith("Relay:", StringComparison.Ordinal) ? route : "Direct",
+                    Path = routeString,
                     AttemptedPaths = attemptedPaths,
                     Attempts = attemptedPaths.Count,
                     AttemptsDetail = attemptDetails,

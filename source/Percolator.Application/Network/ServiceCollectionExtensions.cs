@@ -151,8 +151,8 @@ public static class ServiceCollectionExtensions
         // Register domain Network.Messaging components required by MessageService
         services.AddScoped<Percolator.Network.Messaging.IRelayTopology, Percolator.Network.Messaging.DefaultRelayTopology>();
         services.AddScoped<Percolator.Network.Messaging.ITransportPort, NetworkTransportPortAdapter>();
-        services.AddScoped<Percolator.Network.Messaging.ISendExecutor, Percolator.Network.Messaging.DefaultSendExecutor>();
-        services.AddScoped<Percolator.Network.Messaging.INetworkSender, Percolator.Network.Messaging.DefaultNetworkSender>();
+        services.AddScoped<Percolator.Network.Messaging.ISendExecutor, Percolator.Application.Network.Messaging.DefaultSendExecutor>();
+        services.AddScoped<Percolator.Network.Messaging.INetworkSender, Percolator.Application.Network.Messaging.DefaultNetworkSender>();
 
         return services;
     }

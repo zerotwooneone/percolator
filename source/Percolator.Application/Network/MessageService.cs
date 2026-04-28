@@ -74,7 +74,7 @@ namespace Percolator.Application.Network
             }
 
             var outcome = await _networkSender
-                .SendAsync(new Percolator.Network.PeerId(recipientPeerId.Value), new NetworkPayload(cipher.Value), SendStrategy.DirectThenRelay, ct)
+                .SendAsync(_active.Identity!.SelfIdentityId.Value, new Percolator.Network.PeerId(recipientPeerId.Value), new NetworkPayload(cipher.Value), SendStrategy.DirectThenRelay, ct)
                 .ConfigureAwait(false);
 
             if (_wireTap.Enabled)
@@ -142,7 +142,7 @@ namespace Percolator.Application.Network
             }
 
             var outcome = await _networkSender
-                .SendAsync(new Percolator.Network.PeerId(recipientPeerId.Value), new NetworkPayload(cipher.Value), SendStrategy.DirectThenRelay, ct)
+                .SendAsync(_active.Identity!.SelfIdentityId.Value, new Percolator.Network.PeerId(recipientPeerId.Value), new NetworkPayload(cipher.Value), SendStrategy.DirectThenRelay, ct)
                 .ConfigureAwait(false);
 
             if (_wireTap.Enabled)

@@ -11,6 +11,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IDirectSessionRepository, SqliteDirectSessionRepository>();
         // New Network domain repositories
         services.AddScoped<IPeerRoutingProfileRepository, SqlitePeerRoutingProfileRepository>();
+        services.AddScoped<IPeerRouteCandidateRepository, SqlitePeerRouteCandidateRepository>();
         services.AddScoped<IDiscoveredPeerRepository, SqliteDiscoveredPeerRepository>();
         return services;
     }

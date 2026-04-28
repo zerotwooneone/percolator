@@ -54,13 +54,14 @@ public sealed class FakeNetworkSender : Percolator.Network.Messaging.INetworkSen
     public FakeNetworkSender(IServiceProvider serverProvider) => _serverProvider = serverProvider;
 
     public async Task<Percolator.Network.Messaging.SendOutcome> SendAsync(
+        int selfIdentityId,
         Percolator.Network.PeerId target,
         Percolator.Network.Messaging.NetworkPayload payload,
         Percolator.Network.Messaging.SendStrategy strategy,
         CancellationToken ct = default)
     {
         var handler = _serverProvider.GetRequiredService<IRequestHandler<DeliverOpaqueMessageCommand, DeliverOpaqueMessageResult>>();
-        var cmd = new DeliverOpaqueMessageCommand { PayloadBytes = payload.Value.ToArray(), SelfIdentityId = new Percolator.Identity.SelfId(1) };
+        var cmd = new DeliverOpaqueMessageCommand { PayloadBytes = payload.Value.ToArray(), SelfIdentityId = new Percolator.Identity.SelfId(selfIdentityId) };
         var result = await handler.Handle(cmd, ct);
         return new Percolator.Network.Messaging.SendOutcome
         {

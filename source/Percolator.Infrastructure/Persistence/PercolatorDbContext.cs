@@ -59,6 +59,7 @@ public class PercolatorDbContext : DbContext
     public DbSet<GrpcEndPointRoutingDbo> PeerRoutingGrpcEndPoints { get; set; } = null!;
     public DbSet<RelayLinkDbo> PeerRoutingRelays { get; set; } = null!;
     public DbSet<TlsCertificateRoutingDbo> PeerRoutingTlsCertificates { get; set; } = null!;
+    public DbSet<PeerRouteCandidateDbo> PeerRouteCandidates { get; set; } = null!;
     public DbSet<DiscoveredPeerDbo> DiscoveredPeers { get; set; } = null!;
     public DbSet<DiscoveredPeerEndpointDbo> DiscoveredPeerEndpoints { get; set; } = null!;
     public DbSet<GroupMemberDbo> GroupMembers { get; set; } = null!;
@@ -710,6 +711,26 @@ public class PercolatorDbContext : DbContext
                 .IsRequired();
         });
 
+        modelBuilder.Entity<PeerRouteCandidateDbo>(entity =>
+        {
+            entity.ToTable("PeerRouteCandidates");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.SelfIdentityId).IsRequired();
+            entity.Property(e => e.RemotePeerId).IsRequired();
+            entity.Property(e => e.RouteKind).IsRequired();
+            entity.Property(e => e.EndpointHost);
+            entity.Property(e => e.EndpointPort);
+            entity.Property(e => e.RelayHostPeerId);
+            entity.Property(e => e.ObservedAtUtc).IsRequired();
+            entity.Property(e => e.LastAttemptAtUtc);
+            entity.Property(e => e.LastSuccessAtUtc);
+            entity.Property(e => e.AttemptCount).IsRequired();
+            entity.Property(e => e.LastError);
+            entity.Property(e => e.Source).IsRequired();
+            entity.HasIndex(e => new { e.SelfIdentityId, e.RemotePeerId, e.RouteKind, e.EndpointHost, e.EndpointPort, e.RelayHostPeerId }).IsUnique();
+        });
+
+
         modelBuilder.Entity<DiscoveredPeerDbo>(entity =>
         {
             entity.ToTable("DiscoveredPeers");
@@ -742,3 +763,6 @@ public class PercolatorDbContext : DbContext
         });
     }
 }
+
+
+

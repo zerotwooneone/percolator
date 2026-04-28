@@ -38,7 +38,7 @@ public sealed class OutboundMessageWireTapTests
             .ReturnsAsync(new SessionRatchetMessage(new byte[] { 0xAA, 0xBB }));
 
         var sender = new Mock<INetworkSender>(MockBehavior.Strict);
-        sender.Setup(s => s.SendAsync(It.IsAny<PeerId>(), It.IsAny<NetworkPayload>(), It.IsAny<SendStrategy>(), It.IsAny<CancellationToken>()))
+        sender.Setup(s => s.SendAsync(It.IsAny<int>(), It.IsAny<PeerId>(), It.IsAny<NetworkPayload>(), It.IsAny<SendStrategy>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SendOutcome { Success = true, Path = "Direct", AttemptedPaths = new[] { "Direct" }, Attempts = 1 });
 
         var keyStore = new Mock<IPeerPublicSigningKeyStore>(MockBehavior.Strict);
@@ -57,7 +57,7 @@ public sealed class OutboundMessageWireTapTests
 
         _ = await sut.SendMessageAsync(env, recipient, CancellationToken.None);
 
-        sender.Verify(s => s.SendAsync(It.IsAny<PeerId>(), It.IsAny<NetworkPayload>(), It.IsAny<SendStrategy>(), It.IsAny<CancellationToken>()), Times.Once);
+        sender.Verify(s => s.SendAsync(It.IsAny<int>(), It.IsAny<PeerId>(), It.IsAny<NetworkPayload>(), It.IsAny<SendStrategy>(), It.IsAny<CancellationToken>()), Times.Once);
 
         tap.Snapshot().Should().BeEmpty();
     }
@@ -83,7 +83,7 @@ public sealed class OutboundMessageWireTapTests
             .ReturnsAsync(new SessionRatchetMessage(expectedCipher));
 
         var sender = new Mock<INetworkSender>(MockBehavior.Strict);
-        sender.Setup(s => s.SendAsync(It.IsAny<PeerId>(), It.IsAny<NetworkPayload>(), It.IsAny<SendStrategy>(), It.IsAny<CancellationToken>()))
+        sender.Setup(s => s.SendAsync(It.IsAny<int>(), It.IsAny<PeerId>(), It.IsAny<NetworkPayload>(), It.IsAny<SendStrategy>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SendOutcome { Success = true, Path = "Direct", AttemptedPaths = new[] { "Direct" }, Attempts = 1 });
 
         var keyStore = new Mock<IPeerPublicSigningKeyStore>(MockBehavior.Strict);
@@ -102,7 +102,7 @@ public sealed class OutboundMessageWireTapTests
 
         _ = await sut.SendMessageAsync(env, recipient, CancellationToken.None);
 
-        sender.Verify(s => s.SendAsync(It.IsAny<PeerId>(), It.IsAny<NetworkPayload>(), It.IsAny<SendStrategy>(), It.IsAny<CancellationToken>()), Times.Never);
+        sender.Verify(s => s.SendAsync(It.IsAny<int>(), It.IsAny<PeerId>(), It.IsAny<NetworkPayload>(), It.IsAny<SendStrategy>(), It.IsAny<CancellationToken>()), Times.Never);
 
         var items = tap.Snapshot();
         items.Should().HaveCount(1);

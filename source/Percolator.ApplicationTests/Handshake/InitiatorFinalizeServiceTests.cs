@@ -121,7 +121,9 @@ public class InitiatorFinalizeServiceTests
             directSessionMappingWriter.Object,
             Mock.Of<Percolator.Network.IPeerRoutingProfileRepository>(),
             Mock.Of<IMediator>(),
-            Mock.Of<IEstablishSessionResponseValidator>());
+            Mock.Of<IEstablishSessionResponseValidator>(),
+            Mock.Of<IPeerRouteCandidateRepository>(),
+            Mock.Of<IPeerPublicSigningKeyStore>());
 
         // Act
         var result = await sut.TryFinalizeFromFirstResponderAsync(self.SelfIdentityId, first, CancellationToken.None);
@@ -225,7 +227,9 @@ public class InitiatorFinalizeServiceTests
             directSessionMappingWriter.Object,
             Mock.Of<Percolator.Network.IPeerRoutingProfileRepository>(),
             Mock.Of<IMediator>(),
-            Mock.Of<IEstablishSessionResponseValidator>());
+            Mock.Of<IEstablishSessionResponseValidator>(),
+            Mock.Of<IPeerRouteCandidateRepository>(),
+            Mock.Of<IPeerPublicSigningKeyStore>());
 
         // Act
         var result = await sut.TryFinalizeFromFirstResponderAsync(self.SelfIdentityId, first, CancellationToken.None);
