@@ -434,6 +434,7 @@ namespace Percolator.Application.Network.Handshake
         public async Task<SessionId?> TryFinalizeFromEstablishSessionResponseAsync(
             SelfId selfIdentityId,
             EstablishSessionResponse response,
+            Percolator.Identity.PeerId? relayPeerId = null,
             CancellationToken cancellationToken = default)
         {
             if (response is null) throw new ArgumentNullException(nameof(response));
@@ -517,6 +518,28 @@ namespace Percolator.Application.Network.Handshake
                     _logger.LogInformation(ex,
                         "Failed to persist DirectSession mapping for RemotePeerId={RemotePeerId}, SessionId={SessionId}, SelfIdentityId={SelfIdentityId}",
                         peerIdentity.Id.Value, sid.Value, selfIdentityId.Value);
+                }
+
+                // For relayed handshakes, create a routing profile with relay information
+                if (relayPeerId is not null)
+                {
+                    try
+                    {
+                        var netPeerId = new Percolator.Network.PeerId(peerIdentity.Id.Value);
+                        var profile = await _routingProfiles.GetByIdAsync(netPeerId, cancellationToken).ConfigureAwait(false)
+                            ?? new PeerRoutingProfile();
+                        if (profile.Id is null)
+                        {
+                            profile.BindIdentity(netPeerId);
+                        }
+                        profile.AddOrRefreshRelay(new Percolator.Network.PeerId(relayPeerId.Value), _clock.UtcNow);
+                        profile.SetIdentityPublicKey(new Percolator.Network.ValueObjects.IdentityPublicKey(remoteIdentitySpki));
+                        await _routingProfiles.UpsertAsync(profile, cancellationToken).ConfigureAwait(false);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogInformation(ex, "Standard finalize: best-effort routing profile upsert with relay failed.");
+                    }
                 }
             }
 

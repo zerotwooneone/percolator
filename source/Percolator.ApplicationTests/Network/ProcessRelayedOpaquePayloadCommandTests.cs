@@ -310,6 +310,7 @@ public class ProcessRelayedOpaquePayloadCommandTests
             .Setup(x => x.TryFinalizeFromEstablishSessionResponseAsync(
                 It.IsAny<SelfId>(),
                 It.IsAny<EstablishSessionResponse>(),
+                It.IsAny<Percolator.Identity.PeerId?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(expected)
             .Verifiable();

@@ -19,6 +19,7 @@ namespace Percolator.Application.Network.Handshake
         Task<SessionId?> TryFinalizeFromEstablishSessionResponseAsync(
             SelfId selfIdentityId,
             EstablishSessionResponse response,
+            Percolator.Identity.PeerId? relayPeerId = null,
             CancellationToken cancellationToken = default);
     }
 }

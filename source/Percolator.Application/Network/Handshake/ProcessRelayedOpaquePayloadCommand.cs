@@ -247,7 +247,7 @@ namespace Percolator.Application.Network.Handshake
                     && resp.Response.HasPayloadSignature && resp.Response.PayloadSignature.Length > 0)
                 {
                     var sid = await _initiatorFinalize
-                        .TryFinalizeFromEstablishSessionResponseAsync(selfIdentityId, resp, cancellationToken)
+                        .TryFinalizeFromEstablishSessionResponseAsync(selfIdentityId, resp, relayHostPeerId, cancellationToken)
                         .ConfigureAwait(false);
                     return sid is null ? ProcessRelayedOpaquePayloadResponse.Failure : ProcessRelayedOpaquePayloadResponse.Success;
                 }
