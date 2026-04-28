@@ -216,7 +216,14 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
                 ?.Select(b => new SimulatedPublishedPreKeyBundleModel(
                     b.RecipientPublicKeyHash,
                     b.LogicalOwnerPeerId,
-                    b.BundleBytes,
+                    b.IdentityKey,
+                    b.SignedPreKeyId,
+                    b.SignedPreKey,
+                    b.PreKeySignature,
+                    new ObservableList<Percolator.Cryptography.OneTimeKeyInstance>(
+                        b.OneTimeKeys.Select(otk => new Percolator.Cryptography.OneTimeKeyInstance(
+                            otk.Id,
+                            new Percolator.Cryptography.OneTimeKey(otk.KeyBytes)))),
                     b.ExpiresUtc))
                 .ToList());
 
@@ -266,7 +273,15 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
                         {
                             RecipientPublicKeyHash = b.RecipientPublicKeyHash,
                             LogicalOwnerPeerId = b.LogicalOwnerPeerId,
-                            BundleBytes = b.BundleBytes,
+                            IdentityKey = b.IdentityKey,
+                            SignedPreKeyId = b.SignedPreKeyId,
+                            SignedPreKey = b.SignedPreKey,
+                            PreKeySignature = b.PreKeySignature,
+                            OneTimeKeys = b.OneTimeKeys.Select(otk => new OneTimeKeyDto
+                            {
+                                Id = otk.Id,
+                                KeyBytes = otk.KeyBytes
+                            }).ToList(),
                             ExpiresUtc = b.ExpiresUtc
                         })
                         .ToList()

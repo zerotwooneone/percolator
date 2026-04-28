@@ -39,8 +39,16 @@ public sealed record PeerStateSnapshot(
 public sealed record PublishedPreKeyBundleSnapshot(
     byte[] RecipientPublicKeyHash,
     PeerId LogicalOwnerPeerId,
-    byte[] BundleBytes,
+    byte[] IdentityKey,
+    Guid SignedPreKeyId,
+    byte[] SignedPreKey,
+    byte[] PreKeySignature,
+    IReadOnlyList<OneTimeKeySnapshot> OneTimeKeys,
     DateTimeOffset ExpiresUtc);
+
+public sealed record OneTimeKeySnapshot(
+    Guid Id,
+    byte[] KeyBytes);
 
 public sealed record SessionSnapshot(
     Guid SessionId,

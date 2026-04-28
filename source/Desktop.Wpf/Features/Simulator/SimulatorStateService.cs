@@ -693,10 +693,30 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             {
                 return new DeliverOpaqueMessageResponse { Version = 1, Never = new DeliverOpaqueMessageResponse.Types.Never { Version = 1 } };
             }
+
+            // Serialize bundle from individual components
+            var bundleDto = new GetPreKeyBundleResponse.Types.PreKeyBundle
+            {
+                Version = 1,
+                IdentityKey = ByteString.CopyFrom(popped.IdentityKey),
+                SignedPreKeyId = ByteString.CopyFrom(popped.SignedPreKeyId.ToByteArray()),
+                SignedPreKey = ByteString.CopyFrom(popped.SignedPreKey),
+                PreKeySignature = ByteString.CopyFrom(popped.PreKeySignature)
+            };
+
+            foreach (var otk in popped.OneTimeKeys)
+            {
+                bundleDto.OneTimeKeys.Add(new GetPreKeyBundleResponse.Types.OneTimeKey
+                {
+                    OneTimeKeyId = ByteString.CopyFrom(otk.Id.ToByteArray()),
+                    KeyBytes = ByteString.CopyFrom(otk.Key.Value)
+                });
+            }
+
             var resp = new GetPreKeyBundleResponse
             {
                 Version = 1,
-                PreKeyBundle = GetPreKeyBundleResponse.Types.PreKeyBundle.Parser.ParseFrom(popped.BundleBytes)
+                PreKeyBundle = bundleDto
             };
 
             var responseEnvelope = new InternalEnvelope { GetPreKeyBundleResponse = resp };
@@ -757,6 +777,11 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
 
         byte[] recipientPublicKeyHash;
         byte[] dtoBytes;
+        byte[] identityKey;
+        Guid signedPreKeyId;
+        byte[] signedPreKey;
+        byte[] preKeySignature;
+        IReadOnlyCollection<Percolator.Cryptography.OneTimeKeyInstance> oneTimeKeys;
 
         await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -789,6 +814,11 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
 
             recipientPublicKeyHash = SHA256.HashData(model.IdentitySigningKeySpki);
             dtoBytes = dto.ToByteArray();
+            identityKey = bundle.IdentitySigningKey.Value;
+            signedPreKeyId = bundle.SignedPreKeyId;
+            signedPreKey = bundle.SignedPreKey.Value;
+            preKeySignature = bundle.SignedPreKeySignature.Value;
+            oneTimeKeys = bundle.OneTimeKeys;
         }
         finally
         {
@@ -799,7 +829,11 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
                 relayHostPeerId: relayHostPeerId,
                 recipientPublicKeyHash: recipientPublicKeyHash,
                 logicalOwnerPeerId: simulatedPeerId,
-                bundleBytes: dtoBytes,
+                identityKey: identityKey,
+                signedPreKeyId: signedPreKeyId,
+                signedPreKey: signedPreKey,
+                preKeySignature: preKeySignature,
+                oneTimeKeys: oneTimeKeys,
                 expiresUtc: expiresUtc,
                 cancellationToken: cancellationToken)
             .ConfigureAwait(false);
@@ -824,7 +858,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         var popped = await TryPopPreKeyBundleByRecipientPkhAsync(relayHostPeerId, responderPublicKeyHash, cancellationToken)
             .ConfigureAwait(false);
 
-        if (popped?.BundleBytes is null || popped.BundleBytes.Length == 0)
+        if (popped is null)
         {
             return null;
         }
@@ -835,14 +869,23 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             peerId: simulatedPeerId,
             relayHostPeerId: relayHostPeerId);
 
-        GetPreKeyBundleResponse.Types.PreKeyBundle bundleProto;
-        try
+        // Serialize bundle from individual components
+        var bundleProto = new GetPreKeyBundleResponse.Types.PreKeyBundle
         {
-            bundleProto = GetPreKeyBundleResponse.Types.PreKeyBundle.Parser.ParseFrom(popped.BundleBytes);
-        }
-        catch
+            Version = 1,
+            IdentityKey = ByteString.CopyFrom(popped.IdentityKey),
+            SignedPreKeyId = ByteString.CopyFrom(popped.SignedPreKeyId.ToByteArray()),
+            SignedPreKey = ByteString.CopyFrom(popped.SignedPreKey),
+            PreKeySignature = ByteString.CopyFrom(popped.PreKeySignature)
+        };
+
+        foreach (var otk in popped.OneTimeKeys)
         {
-            return null;
+            bundleProto.OneTimeKeys.Add(new GetPreKeyBundleResponse.Types.OneTimeKey
+            {
+                OneTimeKeyId = ByteString.CopyFrom(otk.Id.ToByteArray()),
+                KeyBytes = ByteString.CopyFrom(otk.Key.Value)
+            });
         }
 
         if (!bundleProto.HasIdentityKey || bundleProto.IdentityKey.Length == 0) return null;
@@ -2092,7 +2135,14 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
                 .Select(b => new SimulatedPublishedPreKeyBundleModel(
                     b.RecipientPublicKeyHash,
                     b.LogicalOwnerPeerId,
-                    b.BundleBytes,
+                    b.IdentityKey,
+                    b.SignedPreKeyId,
+                    b.SignedPreKey,
+                    b.PreKeySignature,
+                    new ObservableList<Percolator.Cryptography.OneTimeKeyInstance>(
+                        b.OneTimeKeys.Select(otk => new Percolator.Cryptography.OneTimeKeyInstance(
+                            otk.Id,
+                            new Percolator.Cryptography.OneTimeKey(otk.KeyBytes)))),
                     b.ExpiresUtc))
                 .ToList());
 
@@ -2461,13 +2511,16 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         Percolator.Network.PeerId relayHostPeerId,
         byte[] recipientPublicKeyHash,
         Percolator.Network.PeerId logicalOwnerPeerId,
-        byte[] bundleBytes,
+        byte[] identityKey,
+        Guid signedPreKeyId,
+        byte[] signedPreKey,
+        byte[] preKeySignature,
+        IReadOnlyCollection<Percolator.Cryptography.OneTimeKeyInstance> oneTimeKeys,
         DateTimeOffset expiresUtc,
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (recipientPublicKeyHash is null) throw new ArgumentNullException(nameof(recipientPublicKeyHash));
-        if (bundleBytes is null) throw new ArgumentNullException(nameof(bundleBytes));
 
         await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -2477,7 +2530,11 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             host.PublishedPreKeyBundles.Add(new SimulatedPublishedPreKeyBundleModel(
                 RecipientPublicKeyHash: recipientPublicKeyHash,
                 LogicalOwnerPeerId: logicalOwnerPeerId,
-                BundleBytes: bundleBytes,
+                IdentityKey: identityKey,
+                SignedPreKeyId: signedPreKeyId,
+                SignedPreKey: signedPreKey,
+                PreKeySignature: preKeySignature,
+                OneTimeKeys: new ObservableList<Percolator.Cryptography.OneTimeKeyInstance>(oneTimeKeys),
                 ExpiresUtc: expiresUtc));
         }
         finally
@@ -2495,7 +2552,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             contextTag: Convert.ToBase64String(recipientPublicKeyHash));
     }
 
-    private async Task<SimulatedPublishedPreKeyBundleModel?> TryPopPreKeyBundleByRecipientPkhAsync(
+    internal async Task<SimulatedPublishedPreKeyBundleModel?> TryPopPreKeyBundleByRecipientPkhAsync(
         Percolator.Network.PeerId relayHostPeerId,
         byte[] recipientPublicKeyHash,
         CancellationToken cancellationToken = default)
@@ -2525,8 +2582,55 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
                 return null;
             }
 
-            host.PublishedPreKeyBundles.Remove(match);
-            return match;
+            // Pop one onetime key if available
+            Percolator.Cryptography.OneTimeKeyInstance? poppedOneTimeKey = null;
+            if (match.OneTimeKeys.Count > 0)
+            {
+                poppedOneTimeKey = match.OneTimeKeys[0];
+                match.OneTimeKeys.RemoveAt(0);
+            }
+
+            // Serialize bundle with popped onetime key (or without if none available)
+            var dto = new GetPreKeyBundleResponse.Types.PreKeyBundle
+            {
+                Version = 1,
+                IdentityKey = ByteString.CopyFrom(match.IdentityKey),
+                SignedPreKeyId = ByteString.CopyFrom(match.SignedPreKeyId.ToByteArray()),
+                SignedPreKey = ByteString.CopyFrom(match.SignedPreKey),
+                PreKeySignature = ByteString.CopyFrom(match.PreKeySignature)
+            };
+
+            if (poppedOneTimeKey is not null)
+            {
+                dto.OneTimeKeys.Add(new GetPreKeyBundleResponse.Types.OneTimeKey
+                {
+                    OneTimeKeyId = ByteString.CopyFrom(poppedOneTimeKey.Id.ToByteArray()),
+                    KeyBytes = ByteString.CopyFrom(poppedOneTimeKey.Key.Value)
+                });
+            }
+
+            var bundleBytes = dto.ToByteArray();
+
+            var responseOneTimeKeys = poppedOneTimeKey is null
+                ? new ObservableList<Percolator.Cryptography.OneTimeKeyInstance>()
+                : new ObservableList<Percolator.Cryptography.OneTimeKeyInstance>(new[] { poppedOneTimeKey });
+
+            // Return a new bundle containing only the popped onetime key (if any)
+            var result = new SimulatedPublishedPreKeyBundleModel(
+                RecipientPublicKeyHash: match.RecipientPublicKeyHash,
+                LogicalOwnerPeerId: match.LogicalOwnerPeerId,
+                IdentityKey: match.IdentityKey,
+                SignedPreKeyId: match.SignedPreKeyId,
+                SignedPreKey: match.SignedPreKey,
+                PreKeySignature: match.PreKeySignature,
+                OneTimeKeys: responseOneTimeKeys,
+                ExpiresUtc: match.ExpiresUtc);
+
+            // Note: We don't remove the bundle entry - it stays with remaining onetime keys
+            // It will be removed when it expires or when manually cleared
+
+            _saveTrigger.OnNext(Unit.Default);
+            return result;
         }
         finally
         {

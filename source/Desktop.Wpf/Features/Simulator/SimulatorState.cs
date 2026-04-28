@@ -155,8 +155,18 @@ public sealed class PublishedPreKeyBundleDto
 {
     public byte[] RecipientPublicKeyHash { get; set; } = Array.Empty<byte>();
     public PeerId LogicalOwnerPeerId { get; set; }
-    public byte[] BundleBytes { get; set; } = Array.Empty<byte>();
+    public byte[] IdentityKey { get; set; } = Array.Empty<byte>();
+    public Guid SignedPreKeyId { get; set; }
+    public byte[] SignedPreKey { get; set; } = Array.Empty<byte>();
+    public byte[] PreKeySignature { get; set; } = Array.Empty<byte>();
+    public List<OneTimeKeyDto> OneTimeKeys { get; set; } = new();
     public DateTimeOffset ExpiresUtc { get; set; }
+}
+
+public sealed class OneTimeKeyDto
+{
+    public Guid Id { get; set; }
+    public byte[] KeyBytes { get; set; } = Array.Empty<byte>();
 }
 
 public sealed class SimulatedPeerPreKeyStateDto

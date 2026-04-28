@@ -189,4 +189,103 @@ public sealed class SimulatorStateServiceInitializationTests
         restoredPeer.PendingInviteHandshakeResponsesMutable.Should().HaveCount(1);
         restoredPeer.PendingInviteHandshakeResponsesMutable.First().CorrelationId.Should().Be(responseCorrelationId);
     }
+
+    [Test]
+    public async Task PublishPreKeyBundle_WithMultipleOnetimeKeys_PopsOneAtATime()
+    {
+        // Arrange
+        var expiresUtc = DateTimeOffset.UtcNow.AddDays(1);
+
+        var services = new ServiceCollection();
+        services.AddSingleton<IClock, SystemClock>();
+        var sp = services.BuildServiceProvider();
+        var scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
+
+        var pending = new SimulatedPeerPendingInbox();
+        var diagnostics = new SimulatorDiagnosticsService();
+        var transportOptions = Options.Create(new TransportOptions { SimulatorPort = 5002 });
+        var engine = new SignalProtocolEngine(new SystemClock());
+
+        var store = new RepositoryStub();
+
+        var sut = new SimulatorStateService(
+            store,
+            diagnostics,
+            pending,
+            scopeFactory,
+            transportOptions,
+            engine);
+
+        // Release empty snapshot so InitializeAsync can complete
+        store.Release(new SimulatorStateSnapshot(
+            Version: 1,
+            Peers: Array.Empty<PeerStateSnapshot>(),
+            Relationships: Array.Empty<PeerRelationshipSnapshot>(),
+            Relays: Array.Empty<RelayStateSnapshot>(),
+            Groups: Array.Empty<GroupConversationDto>()));
+
+        await sut.InitializeAsync(CancellationToken.None);
+
+        // Add the relay host peer
+        var relayHostPeerId = await sut.AddPeerAsync(
+            displayName: "relay",
+            cancellationToken: CancellationToken.None);
+
+        // Add the simulated peer
+        var simulatedPeerId = await sut.AddPeerAsync(
+            displayName: "sim",
+            cancellationToken: CancellationToken.None);
+
+        // Act: Publish a bundle with 3 onetime keys
+        await sut.PublishStandardPreKeyBundleToRelayAsync(
+            simulatedPeerId,
+            relayHostPeerId,
+            expiresUtc: expiresUtc,
+            oneTimeKeyCount: 3,
+            cancellationToken: CancellationToken.None);
+
+        var simulatedPeer = sut.Peers.Single(p => p.PeerId == simulatedPeerId);
+        var simulatedPkh = SHA256.HashData(simulatedPeer.IdentitySigningKeySpki);
+
+        // Act: pop the bundle 4 times
+        var pop1 = await sut.TryPopPreKeyBundleByRecipientPkhAsync(
+            relayHostPeerId,
+            simulatedPkh,
+            cancellationToken: CancellationToken.None);
+        var pop2 = await sut.TryPopPreKeyBundleByRecipientPkhAsync(
+            relayHostPeerId,
+            simulatedPkh,
+            cancellationToken: CancellationToken.None);
+        var pop3 = await sut.TryPopPreKeyBundleByRecipientPkhAsync(
+            relayHostPeerId,
+            simulatedPkh,
+            cancellationToken: CancellationToken.None);
+        var pop4 = await sut.TryPopPreKeyBundleByRecipientPkhAsync(
+            relayHostPeerId,
+            simulatedPkh,
+            cancellationToken: CancellationToken.None);
+
+        // Assert
+        pop1.Should().NotBeNull();
+        pop2.Should().NotBeNull();
+        pop3.Should().NotBeNull();
+        pop4.Should().NotBeNull();
+
+        pop1!.OneTimeKeys.Should().HaveCount(1);
+        pop2!.OneTimeKeys.Should().HaveCount(1);
+        pop3!.OneTimeKeys.Should().HaveCount(1);
+        pop4!.OneTimeKeys.Should().HaveCount(0);
+
+        var poppedIds = new[]
+        {
+            pop1.OneTimeKeys.Single().Id,
+            pop2.OneTimeKeys.Single().Id,
+            pop3.OneTimeKeys.Single().Id
+        };
+        poppedIds.Distinct().Should().HaveCount(3);
+
+        var relay = sut.Peers.Single(p => p.PeerId == relayHostPeerId);
+        relay.PublishedPreKeyBundles.Should().HaveCount(1);
+        relay.PublishedPreKeyBundles.Single().OneTimeKeys.Should().HaveCount(0);
+    }
 }

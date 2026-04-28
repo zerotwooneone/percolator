@@ -14,6 +14,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
 using NUnit.Framework;
+using ObservableCollections;
 using Percolator.Application.Configuration;
 using Percolator.Contracts;
 using Percolator.Cryptography;
@@ -323,7 +324,6 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
 
         var bundle = CreateValidResponderPreKeyBundle();
         var responderPkh = bundle.ResponderPkh;
-        var preKeyBundleBytes = bundle.BundleBytes;
 
         var repo = new InMemoryRepository
         {
@@ -350,7 +350,11 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
                         new(
                             RecipientPublicKeyHash: responderPkh,
                             LogicalOwnerPeerId: new Percolator.Network.PeerId(Guid.NewGuid()),
-                            BundleBytes: preKeyBundleBytes,
+                            IdentityKey: bundle.IdentityKey,
+                            SignedPreKeyId: bundle.SignedPreKeyId,
+                            SignedPreKey: bundle.SignedPreKey,
+                            PreKeySignature: bundle.PreKeySignature,
+                            OneTimeKeys: new ObservableList<Percolator.Cryptography.OneTimeKeyInstance>(),
                             ExpiresUtc: DateTimeOffset.UtcNow.AddMinutes(5))
                     })
             },
@@ -407,7 +411,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
         var requestedResponderPkh = SHA256.HashData(Guid.NewGuid().ToByteArray());
 
         // Bundle is valid, but its identity key hashes to a different PKH.
-        var bundleBytes = CreateValidResponderPreKeyBundle().BundleBytes;
+        var bundle = CreateValidResponderPreKeyBundle();
 
         var repo = new InMemoryRepository
         {
@@ -434,7 +438,11 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
                         new(
                             RecipientPublicKeyHash: requestedResponderPkh,
                             LogicalOwnerPeerId: new Percolator.Network.PeerId(Guid.NewGuid()),
-                            BundleBytes: bundleBytes,
+                            IdentityKey: bundle.IdentityKey,
+                            SignedPreKeyId: bundle.SignedPreKeyId,
+                            SignedPreKey: bundle.SignedPreKey,
+                            PreKeySignature: bundle.PreKeySignature,
+                            OneTimeKeys: new ObservableList<Percolator.Cryptography.OneTimeKeyInstance>(),
                             ExpiresUtc: DateTimeOffset.UtcNow.AddMinutes(5))
                     })
             },
@@ -503,14 +511,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
         using var responderSignedPreKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var responderSignedPreKeySpki = responderSignedPreKey.PublicKey.ExportSubjectPublicKeyInfo();
         var preKeySig = responderIdentityEcdsa.SignData(responderSignedPreKeySpki, HashAlgorithmName.SHA256);
-        var bundle = new GetPreKeyBundleResponse.Types.PreKeyBundle
-        {
-            Version = 1,
-            IdentityKey = ByteString.CopyFrom(responderIdentitySpki),
-            SignedPreKeyId = ByteString.CopyFrom(Guid.NewGuid().ToByteArray()),
-            SignedPreKey = ByteString.CopyFrom(responderSignedPreKeySpki),
-            PreKeySignature = ByteString.CopyFrom(preKeySig)
-        };
+        var signedPreKeyId = Guid.NewGuid();
 
         var repo = new InMemoryRepository
         {
@@ -545,7 +546,11 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
                         new(
                             RecipientPublicKeyHash: responderPkh,
                             LogicalOwnerPeerId: responderPeerId,
-                            BundleBytes: bundle.ToByteArray(),
+                            IdentityKey: responderIdentitySpki,
+                            SignedPreKeyId: signedPreKeyId,
+                            SignedPreKey: responderSignedPreKeySpki,
+                            PreKeySignature: preKeySig,
+                            OneTimeKeys: new ObservableList<Percolator.Cryptography.OneTimeKeyInstance>(),
                             ExpiresUtc: DateTimeOffset.UtcNow.AddMinutes(5))
                     })
             },
@@ -616,7 +621,12 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
             .Should().ContainSingle(s => s.Value == assignedSid.Value);
     }
 
-    private sealed record ResponderBundleFixture(byte[] BundleBytes, byte[] ResponderPkh);
+    private sealed record ResponderBundleFixture(
+        byte[] IdentityKey,
+        Guid SignedPreKeyId,
+        byte[] SignedPreKey,
+        byte[] PreKeySignature,
+        byte[] ResponderPkh);
 
     private static ResponderBundleFixture CreateValidResponderPreKeyBundle()
     {
@@ -628,18 +638,15 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
         var responderSignedPreKeySpki = responderSignedPreKey.PublicKey.ExportSubjectPublicKeyInfo();
         var preKeySig = responderIdentityEcdsa.SignData(responderSignedPreKeySpki, HashAlgorithmName.SHA256);
 
-        var bundle = new GetPreKeyBundleResponse.Types.PreKeyBundle
-        {
-            Version = 1,
-            IdentityKey = ByteString.CopyFrom(responderIdentitySpki),
-            SignedPreKeyId = ByteString.CopyFrom(Guid.NewGuid().ToByteArray()),
-            SignedPreKey = ByteString.CopyFrom(responderSignedPreKeySpki),
-            PreKeySignature = ByteString.CopyFrom(preKeySig)
-        };
+        var signedPreKeyId = Guid.NewGuid();
 
-        var bytes = bundle.ToByteArray();
         var pkh = SHA256.HashData(responderIdentitySpki);
-        return new ResponderBundleFixture(bytes, pkh);
+        return new ResponderBundleFixture(
+            IdentityKey: responderIdentitySpki,
+            SignedPreKeyId: signedPreKeyId,
+            SignedPreKey: responderSignedPreKeySpki,
+            PreKeySignature: preKeySig,
+            ResponderPkh: pkh);
     }
 
     [Test]
@@ -689,7 +696,11 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
                         new(
                             RecipientPublicKeyHash: bundle.ResponderPkh,
                             LogicalOwnerPeerId: new Percolator.Network.PeerId(Guid.NewGuid()),
-                            BundleBytes: bundle.BundleBytes,
+                            IdentityKey: bundle.IdentityKey,
+                            SignedPreKeyId: bundle.SignedPreKeyId,
+                            SignedPreKey: bundle.SignedPreKey,
+                            PreKeySignature: bundle.PreKeySignature,
+                            OneTimeKeys: new ObservableList<Percolator.Cryptography.OneTimeKeyInstance>(),
                             ExpiresUtc: DateTimeOffset.UtcNow.AddMinutes(5))
                     })
             }

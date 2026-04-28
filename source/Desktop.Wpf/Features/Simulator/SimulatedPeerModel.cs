@@ -372,7 +372,15 @@ public sealed class SimulatedPeerModel : IDisposable
             PendingStandardHandshakeToMainTemporarySessionId: _pendingStandardHandshakeToMainTemporarySessionId.Value,
             KnownPeerIds: KnownPeerIds.ToList(),
             PublishedPreKeyBundles: PublishedPreKeyBundles
-                .Select(b => new PublishedPreKeyBundleSnapshot(b.RecipientPublicKeyHash, b.LogicalOwnerPeerId, b.BundleBytes, b.ExpiresUtc))
+                .Select(b => new PublishedPreKeyBundleSnapshot(
+                    b.RecipientPublicKeyHash,
+                    b.LogicalOwnerPeerId,
+                    b.IdentityKey,
+                    b.SignedPreKeyId,
+                    b.SignedPreKey,
+                    b.PreKeySignature,
+                    b.OneTimeKeys.Select(otk => new OneTimeKeySnapshot(otk.Id, otk.Key.Value)).ToList(),
+                    b.ExpiresUtc))
                 .ToList(),
             Sessions: _sessions
                 .Select(kvp => kvp.Value)
@@ -480,5 +488,9 @@ public sealed record SimulatedPendingInviteHandshakeResponseModel(Guid Correlati
 public sealed record SimulatedPublishedPreKeyBundleModel(
     byte[] RecipientPublicKeyHash,
     PeerId LogicalOwnerPeerId,
-    byte[] BundleBytes,
+    byte[] IdentityKey,
+    Guid SignedPreKeyId,
+    byte[] SignedPreKey,
+    byte[] PreKeySignature,
+    ObservableList<Percolator.Cryptography.OneTimeKeyInstance> OneTimeKeys,
     DateTimeOffset ExpiresUtc);
