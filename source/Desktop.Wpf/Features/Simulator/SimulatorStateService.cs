@@ -704,12 +704,14 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
                 PreKeySignature = ByteString.CopyFrom(popped.PreKeySignature)
             };
 
-            foreach (var otk in popped.OneTimeKeys)
+            //there should be 0-1 onetime keys
+            var onetimekey = popped.OneTimeKeys.FirstOrDefault();
+            if (onetimekey is not null)
             {
                 bundleDto.OneTimeKeys.Add(new GetPreKeyBundleResponse.Types.OneTimeKey
                 {
-                    OneTimeKeyId = ByteString.CopyFrom(otk.Id.ToByteArray()),
-                    KeyBytes = ByteString.CopyFrom(otk.Key.Value)
+                    OneTimeKeyId = ByteString.CopyFrom(onetimekey.Id.ToByteArray()),
+                    KeyBytes = ByteString.CopyFrom(onetimekey.Key.Value)
                 });
             }
 
