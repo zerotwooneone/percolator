@@ -1728,107 +1728,312 @@ Persistence test (exact):
 
 ## Chunk J
 
-### J.1: Goal
+### J.0: Fix build breaks introduced while prototyping (required before proceeding)
 
-When a destination is simulator-owned and intercepted at the transport boundary, the caller should receive the **real** `DeliverOpaqueMessageResponse` produced by the simulator runtime (e.g., `GetPreKeyBundleResponse`), not a placeholder `{ Version = 1 }`.
+If you previously implemented a prototype fix by passing relay context into `InitiatorFinalizeService.TryFinalizeFromEstablishSessionResponseAsync(...)`, ensure the code compiles before continuing with the refactor.
 
-This chunk implements the “cleaner but bigger change” alternative:
+Observed build errors (example):
 
-- Replace the current 3-state `SimulatorOutboundInterceptResult` record with a discriminated-union style result that can carry a `DeliverOpaqueMessageResponse` payload.
+- `InitiatorFinalizeService.cs`: `PeerId` does not contain `HasValue`
+- `InitiatorFinalizeService.cs`: `Guid` does not contain `Value`
 
-### J.2: Current problem (implementation anchors)
+Concrete fix instructions:
 
-- `Desktop.Wpf/Features/Simulator/SimulatorOutboundInterceptor.cs`
-  - Calls `_state.ReceiveOpaqueMessageFromMainAsync(...)` but discards the returned `DeliverOpaqueMessageResponse`.
-- `Percolator.Application/Network/GrpcMessageTransportService.cs`
-  - If the interception result is `DeliveredToSimulator`, it returns `new DeliverOpaqueMessageResponse { Version = 1 }`.
+1) Treat `relayPeerId` as a nullable reference (or nullable value type) consistent with the actual `Percolator.Identity.PeerId` definition.
+   - Replace `relayPeerId.HasValue` with `relayPeerId is not null` when it is a nullable reference type.
+2) When converting an identity peer id to a network peer id, do not attempt `relayPeerId.Value.Value`.
+   - If the identity peer id wraps a `Guid`, use `relayPeerId.Value` as the `Guid`.
+   - Then construct `new Percolator.Network.PeerId(relayPeerId.Value)`.
 
-### J.3: New interception result type (explicit design)
+Decision (pre-made): this prototype is temporary. The final architecture in this chunk moves routing persistence out of finalize methods entirely.
 
-In `Percolator.Application/Network`, replace `SimulatorOutboundInterceptResult` with a payload-capable result.
+### J.1: Problem statement (observed failure)
 
-Decision (pre-made): implement as an abstract record with 3 concrete derived records.
+After a **relayed standard handshake** is established (`main -> sim relay -> target`), sending a chat message to the target can fail in `Percolator.Network.Messaging.DefaultNetworkSender.SendAsync(...)` because:
 
-- File: `Percolator.Application/Network/SimulatorOutboundInterceptResult.cs`
-- Types:
+- `IPeerRoutingProfileRepository.GetByIdAsync(target)` returns null (no row), so the sender can’t plan any route.
+- `IRelayTopology` is currently implemented (`DefaultRelayTopology`) by also reading `IPeerRoutingProfileRepository`, so it cannot provide a relay route if the profile row is missing.
 
-```csharp
-public abstract record SimulatorOutboundInterceptResult
-{
-    public sealed record NotForSimulator : SimulatorOutboundInterceptResult;
+The root cause is that the **standard-handshake finalize path** (`InitiatorFinalizeService.TryFinalizeFromEstablishSessionResponseAsync`) historically does not upsert a routing profile for the newly-identified peer, while the invite finalize path does so (direct-only).
 
-    public sealed record Undeliverable(DnsEndPoint Endpoint, string FailureReason) : SimulatorOutboundInterceptResult;
+### J.2: Constraints / invariants (explicit)
 
-    public sealed record DeliveredToSimulator(DeliverOpaqueMessageResponse Response) : SimulatorOutboundInterceptResult;
-}
-```
+- Do not persist unsolicited **inbound** handshake attempts (originating outside Main Window) to SQLite before the user accepts them.
+- Outbound, Main Window initiated connection attempts may persist minimal “pending outbound” state to allow slow-path finalize.
+- Routing profile mutation should be explicit and attributable to:
+  - user-initiated outbound attempts, or
+  - explicit user acceptance of inbound attempts.
+- Architecture goal: route persistence should not be a hidden side-effect scattered across multiple flows.
 
-Notes:
+### J.3: Current data flow (as implemented today)
 
-- `DeliveredToSimulator` MUST carry the simulator-generated `DeliverOpaqueMessageResponse`.
-- `Undeliverable` MUST carry the endpoint and a failure reason (for fast-fail error messages).
+Relayed standard handshake initiated by Main Window (implementation anchors):
 
-### J.4: Update the outbound interceptor contract
+- `Desktop.Wpf/Features/Sessions/Handlers/ConnectViaNetworkCommandHandler.cs`
+  - Writes `PreHandshakeRecord` to `IPreHandshakeSessionStore` (SQLite)
+  - Writes `SentInvitation` to `ISentInvitationRepository` (SQLite)
+    - `InviteRouteKind.Relayed`
+    - `InviteRelayHostPeerId = relayHostPeerId`
+  - Sends `HandshakeInitiatorHello` to relay host’s message queue
 
-- File: `Percolator.Application/Network/ISimulatorOutboundInterceptor.cs`
-- Change signature:
+Relayed establish-session response finalize:
 
-```csharp
-Task<SimulatorOutboundInterceptResult> InterceptDeliverOpaqueMessageAsync(
-    DnsEndPoint endpoint,
-    DeliverOpaqueMessageRequest request,
-    CancellationToken cancellationToken);
-```
+- `Percolator.Application/Network/Handshake/ProcessRelayedOpaquePayloadCommand.cs`
+  - Parses bytes as `EstablishSessionResponse`
+  - Calls `IInitiatorFinalizeService.TryFinalizeFromEstablishSessionResponseAsync(...)`
 
-Decision (pre-made): keep the method name and parameters; only the return type semantics change.
 
-### J.5: Implement payload return in `SimulatorOutboundInterceptor`
+Finalization currently:
 
-- File: `Desktop.Wpf/Features/Simulator/SimulatorOutboundInterceptor.cs`
-- In `InterceptDeliverOpaqueMessageAsync(...)`:
-  - If destination is not simulator-owned: return `new SimulatorOutboundInterceptResult.NotForSimulator()`.
-  - If simulator-owned but no peer matches `(Host, Port)`: return `new SimulatorOutboundInterceptResult.Undeliverable(endpoint, "...")`.
-  - If a peer matches:
-    - `var response = await _state.ReceiveOpaqueMessageFromMainAsync(match.PeerId, request, cancellationToken)`
-    - return `new SimulatorOutboundInterceptResult.DeliveredToSimulator(response)`
+- `InitiatorFinalizeService.TryFinalizeFromEstablishSessionResponseAsync(...)`
+  - Matches a pending `PreHandshakeRecord` by recipient PKH
+  - Ensures a stable `PeerIdentity` exists (assigns a `Percolator.Identity.PeerId`)
+  - Creates session + writes DirectSession mapping
+  - **Does not upsert** a `PeerRoutingProfile` for that peer (therefore no relay route can be planned)
 
-Decision (pre-made): interception still must not create an HTTP client/channel.
+### J.4: Phase split (laser focus)
 
-### J.6: Update transport to return the simulator response
+- Phase 1 goal: enable chat send to a relayed peer even when `PeerRoutingProfiles` has no row for the target.
+- Phase 2 goal: promote candidates into confirmed profiles + prune candidates.
 
-- File: `Percolator.Application/Network/GrpcMessageTransportService.cs`
-- Where interception is checked (currently compares `.Kind`):
-  - Replace the `Kind` checks with pattern matching:
+### J.5: Candidate routes + confirmed routes (Option B2)
 
-```csharp
-switch (interceptResult)
-{
-    case SimulatorOutboundInterceptResult.DeliveredToSimulator delivered:
-        return delivered.Response;
-    case SimulatorOutboundInterceptResult.Undeliverable undeliverable:
-        throw new InvalidOperationException($"{undeliverable.FailureReason}");
-    case SimulatorOutboundInterceptResult.NotForSimulator:
-        break; // fall through to normal gRPC send
-}
-```
+Decision (pre-made): adopt **Option B2**.
 
-Decision (pre-made): retain the existing fast-fail behavior for undeliverable simulator-owned endpoints.
+- `PeerRoutingProfiles` becomes **confirmed routes only** (routes that have worked at least once).
+- Introduce a new persistence store for **candidate routes** (allowed-to-try, may be wrong): `PeerRouteCandidates`.
 
-### J.7: Update unit tests
+Problem (researched): `SecureSessionCreatedNotification` carries `RemotePeerId` but does not carry enough data to upsert a route. Also, acceptance flows delete their pending records; therefore we need an explicit place to persist candidate routes.
 
-- File: `Percolator.ApplicationTests/Network/SimulatorOutboundInterceptionTests.cs`
-- Update mocks to return the new derived record instances.
+### J.5.1: New candidate store (explicit schema)
 
-Add/adjust assertions:
+- Add a new repository + table: `IPeerRouteCandidateRepository` backed by `SqlitePeerRouteCandidateRepository`.
+- New table: `PeerRouteCandidates`.
 
-- When the interceptor returns `DeliveredToSimulator(new DeliverOpaqueMessageResponse { Version = 1, ... })`, transport must return that exact response instance (or equivalent data).
-- Maintain the existing assertion that `IHttpClientFactory.CreateClient(...)` is not called for simulator-owned destinations.
+Suggested columns (pre-made):
 
-### J.8: Migration steps (pre-made order)
+- `Id` (long)
+- `SelfIdentityId` (int)
+- `RemotePeerId` (Guid)
+- `RouteKind` (int: Direct|Relayed)
+- `EndpointHost` (string?, for direct)
+- `EndpointPort` (int?, for direct)
+- `RelayHostPeerId` (Guid?, for relayed)
+- `ObservedAtUtc` (DateTimeOffset)
+- `LastAttemptAtUtc` (DateTimeOffset?)
+- `LastSuccessAtUtc` (DateTimeOffset?)
+- `AttemptCount` (int)
+- `LastError` (string?)
+- `Source` (string)
 
-1. Introduce new `SimulatorOutboundInterceptResult` union type.
-2. Update `ISimulatorOutboundInterceptor` interface.
-3. Update `SimulatorOutboundInterceptor` implementation.
-4. Update `GrpcMessageTransportService` to pattern-match and return the delivered response.
-5. Update application tests.
-6. Run full test suite.
+Uniqueness constraint (pre-made): unique index on `(SelfIdentityId, RemotePeerId, RouteKind, EndpointHost, EndpointPort, RelayHostPeerId)`.
+
+### J.5.2: Where candidates are written (concrete)
+
+- Inbound invite acceptance (`Percolator.Application/Network/ApprovePendingSessionCommand.cs`):
+  - After user acceptance is validated, persist a candidate route:
+    - Direct: candidate `DnsEndPoint(pending.CallbackEndpointHost, pending.CallbackEndpointPort.Value)`
+    - Relayed: candidate `RelayHostPeerId = pending.RelayHostPeerId`
+  - This satisfies the constraint “no unsolicited inbound persistence before acceptance” because this write occurs only on acceptance.
+
+- Outbound relayed standard handshake attempt initiation (`Desktop.Wpf/Features/Sessions/Handlers/ConnectViaNetworkCommandHandler.cs`):
+  - Persist a candidate relay route for the *target peer* only after `peerIdentity` is known.
+  - Since peer identity isn’t known at initiate time, this candidate write happens at finalize time (see below).
+
+- Outbound finalize (`Percolator.Application/Network/Handshake/InitiatorFinalizeService.cs`):
+  - Once `peerIdentity` is resolved, persist candidate route derived from `SentInvitation`:
+    - Direct: `TargetEndpointHost/Port`
+    - Relayed: `InviteRelayHostPeerId`
+
+### J.5.3: Phase 1 — sender fallback to candidates (concrete)
+
+Approach 1 decision (pre-made): teach `DefaultNetworkSender` to fall back to candidates.
+
+- When `PeerRoutingProfiles` yields no plan (profile missing or planner selects no usable route), `DefaultNetworkSender.SendAsync(...)` should query `IPeerRouteCandidateRepository` for candidates and build a best-effort plan:
+  - Hard limit: try at most **3** candidates per send
+  - Sort by `LastSuccessAtUtc desc` then `ObservedAtUtc desc`
+  - Ordering rule:
+    - If any relay candidates exist => try relay candidates first, then direct
+    - Else => try direct candidates first, then relay
+
+### J.5.4: Phase 2 — promotion to confirmed routing profiles (defer)
+
+Phase note (pre-made): promotion is Phase 2. Phase 1 does not require promotion to achieve the relayed-chat-send goal.
+
+Direct endpoint selection (researched):
+
+- `GrpcMessageTransportService.SendMessageAsync(...)` selects a `GrpcEndPoint` using `IProfileRoutePlanner.SelectRoute(profile)` and throws if no endpoint exists.
+- `ITransportPort.SendDirectAsync(...)` explicitly says endpoint selection is an implementation detail and does not return which endpoint was used.
+
+Decision (pre-made): use Option A for direct confirmation attribution.
+
+- Extend `ITransportPort` to surface the used endpoint (host/port) on success.
+- Prefer a named result type over a tuple.
+
+Phase 2 implementation anchor (pre-made):
+
+- Add a record in `Percolator.Network.Messaging`:
+  - `public sealed record TransportSendResult(bool Ok, NetworkPayload? ResponsePayload, SendFailureReason? Reason, Exception? Error, System.Net.DnsEndPoint? UsedEndpoint);`
+- Update `ITransportPort`:
+  - `SendDirectAsync(...)` => `Task<TransportSendResult> SendDirectAsync(...)`
+  - `SendViaRelayAsync(...)` => `Task<TransportSendResult> SendViaRelayAsync(...)`
+- Add `IRouteConfirmationService` (Application) that:
+  - Updates candidate stats
+  - Upserts confirmed `PeerRoutingProfile`
+- On successful send:
+  - Direct => confirm using `UsedEndpoint`
+  - Relay => confirm using relay host peer id
+
+### J.6: DI + handler/service discovery (researched)
+
+Concrete instruction (pre-made): place the new *application services* in `Percolator.Application` and the sqlite repository implementation + migrations in `Percolator.Infrastructure`.
+
+- Add the new candidate repository + confirmation services in the **Percolator.Application** and **Percolator.Infrastructure** layers:
+  - `Percolator.Network` interface for candidates: `IPeerRouteCandidateRepository`
+  - `Percolator.Infrastructure` implementation: `SqlitePeerRouteCandidateRepository`
+
+Phase 2 additions:
+
+- `Percolator.Application/Network/IRouteConfirmationService.cs`
+- `Percolator.Application/Network/RouteConfirmationService.cs`
+
+Concrete registration anchors (pre-made):
+
+- Wire application services in `Percolator.Application/Network/ServiceCollectionExtensions.cs` (inside `AddNetworkServices(...)`).
+- Wire sqlite repository in `Percolator.Infrastructure/Cryptography/ServiceCollectionExtensions.cs` (it already registers sqlite-backed handshake/session repositories like `SqlitePendingSessionRepository` and `SqliteSentInvitationRepository`).
+- `IPeerRoutingProfileRepository` is registered in `Percolator.Infrastructure/Network/ServiceCollectionExtensions.cs` as `SqlitePeerRoutingProfileRepository`.
+
+### J.7: Ordering + failure semantics (Option B2)
+
+Current behavior (researched) in `ApprovePendingSessionCommand.cs`:
+
+- Creates the session and publishes `SecureSessionCreatedNotification`.
+- For direct invites, it upserts routing (`AddGrpcEndPoint`) **before** attempting to deliver the `InviteHandshakeResponse`.
+
+Concrete ordering (pre-made) for the refactor:
+
+Inbound accept (`ApprovePendingSessionCommand`) (Phase 1):
+
+1) After user acceptance is validated and session is created:
+   - Persist a **candidate** route to `PeerRouteCandidates`.
+2) Attempt delivery of the invite response (direct or relayed).
+3) Delete the pending session record.
+
+Failure semantics (pre-made):
+
+- If candidate persistence fails, log and continue; do not fail acceptance solely due to candidate persistence.
+- If delivery fails, return failure as today; candidate may already exist (acceptable; it reflects user-authorized provenance).
+
+Outbound finalize (`InitiatorFinalizeService`):
+
+1) On successful finalize with stable `peerIdentity`:
+   - Persist candidate route derived from `SentInvitation`.
+2) Phase 1: no promotion required.
+
+- Determine route provenance:
+  - For outbound sessions created via `InitiatorFinalize`:
+    - Look up the matching outbound attempt by `PreHandshakeRecord.LocalRequestId` and/or `SentInvitation`.
+    - If a `SentInvitation` exists and is `Relayed`, use `InviteRelayHostPeerId` as the relay route.
+  - For inbound sessions created via explicit acceptance:
+    - Use the accepted invitation’s callback endpoint (direct) OR relay host context (relayed) that is already present on the pending record.
+
+Phase 2 note: confirmed profile upsert occurs only via `IRouteConfirmationService` (called from the chosen success boundary). Finalize should not upsert confirmed routes.
+
+### J.8: Refactor plan (pre-made order)
+
+Phase 1 (required):
+
+**Dependency note:** Steps 1-4 are independent and can be done in any order (or in parallel). Step 5 is blocked by steps 1-4. Step 6 is blocked only by step 1. Step 7 is blocked by steps 5 and 6.
+
+1) Add `PeerRouteCandidates` persistence:
+   - Add `Percolator.Network` repo interface + sqlite implementation + EF migration.
+2) Replace string route tokens with a discriminated union:
+   - Add `PlannedRoute` in `Percolator.Network.Messaging`:
+     - `PlannedRoute.Direct`
+     - `PlannedRoute.Relay(PeerId RelayHostPeerId)`
+   - Update `ISendExecutor.ExecuteAsync(...)` to accept `IReadOnlyList<PlannedRoute>` instead of `IReadOnlyList<string>`.
+   - Update `SendOutcome`/`AttemptDetail` to keep human-readable strings for diagnostics, but stop parsing strings for behavior.
+3) Extend `INetworkSender.SendAsync(...)` to include self identity (Option 2A):
+   - `Task<SendOutcome> SendAsync(SelfId selfIdentityId, PeerId target, NetworkPayload payload, SendStrategy strategy, CancellationToken ct = default)`
+   - Update all call sites accordingly.
+4) Move orchestration implementations into Application (do now):
+   - Move `Percolator.Network/Messaging/NetworkSender.cs` => `Percolator.Application/Network/Messaging/DefaultNetworkSender.cs`
+   - Move `Percolator.Network/Messaging/SendExecutor.cs` => `Percolator.Application/Network/Messaging/DefaultSendExecutor.cs`
+   - Keep `INetworkSender`, `ISendExecutor`, `PlannedRoute`, `SendOutcome`, etc. in `Percolator.Network`.
+   - Update `Percolator.Application/Network/ServiceCollectionExtensions.cs` registrations to point at the new Application implementations.
+5) Implement Approach 1 fallback (with the hard-coded sanity limits):
+   - **Blocked by:** steps 1-4
+   - In `DefaultNetworkSender.SendAsync(selfIdentityId, target, ...)`:
+     - If confirmed profile planning yields no routes, query `IPeerRouteCandidateRepository.GetCandidatesAsync(selfIdentityId, target)`.
+     - Apply the candidate policy:
+       - Sort: `LastSuccessAtUtc desc` then `ObservedAtUtc desc`
+       - Prefer relay-first if any relay candidates exist; otherwise direct-first
+       - Limit to 3 candidates
+     - Convert candidates into `PlannedRoute` list:
+       - relay candidate => `PlannedRoute.Relay(relayHostPeerId)`
+       - direct candidate => `PlannedRoute.Direct`
+6) Ensure candidate writes exist for relayed handshakes:
+   - **Blocked by:** step 1 (repository must exist)
+   - Outbound relayed standard handshake finalize persists a **relay** candidate (`InviteRelayHostPeerId`) for the target peer.
+   - Inbound accept persists relay candidate (`PendingSession.RelayHostPeerId`) for relayed invites.
+7) Update tests (Phase 1):
+   - **Blocked by:** steps 5 and 6 (implementation must exist)
+   - Verify finalize persists relay candidate.
+   - Verify sender can route a chat send via `PlannedRoute.Relay(...)` even when `PeerRoutingProfiles.GetByIdAsync(target)` returns null.
+
+Phase 2 (defer):
+
+8) Add `TransportSendResult` + endpoint attribution (Option A).
+9) Add `IRouteConfirmationService` promotion + stats updates.
+10) Add candidate pruning:
+   - Define a retention policy (e.g., prune candidates with `LastSuccessAtUtc` null and `ObservedAtUtc` older than N days).
+
+Concrete test locations (pre-made):
+
+- `Percolator.ApplicationTests/Network/`:
+  - Add `PeerRouteCandidateRepositoryTests.cs` (or infrastructure tests) to validate unique index semantics.
+- Extend existing tests:
+  - `Percolator.ApplicationTests/ReverseSignal/ApprovePendingSessionCommandTests.cs`
+    - Verify candidate is persisted on acceptance.
+  - `Percolator.ApplicationTests/Handshake/InitiatorFinalizeServiceTests.cs`
+    - Verify finalize persists the candidate derived from SentInvitation.
+
+Decision (pre-made): unit test promotion logic via `RouteConfirmationService` directly; do not rely on MediatR wiring.
+
+Phase 2 tests (pre-made):
+
+- `Percolator.ApplicationTests/Network/RouteConfirmationServiceTests.cs`:
+  - Given a candidate direct endpoint, confirm promotes it into `PeerRoutingProfiles`.
+  - Given a candidate relay host, confirm promotes relay link into `PeerRoutingProfiles`.
+
+- Extend `Percolator.ApplicationTests/ReverseSignal/ApprovePendingSessionCommandTests.cs`:
+  - Verify promotion occurs only when delivery succeeds.
+
+### J.9: Remaining research / implementation questions (explicit)
+
+- Migrations: `PeerRoutingProfiles` and its dependent tables are created in `Percolator.Infrastructure/Persistence/Migrations/20251228034329_InitialCreate.cs`.
+  - Add the `PeerRouteCandidates` table via a new EF migration in the same `Percolator.Infrastructure.Persistence.Migrations` namespace/pattern.
+- Confirm all `INetworkSender.SendAsync(...)` call sites can supply `SelfId` (the active identity).
+- Confirm we have a single authoritative call site for chat sends (so the signature change is not overly invasive).
+- Phase 2: promotion + pruning details.
+
+### J.10: Key “gotchas” to verify during implementation
+
+- Promotion correctness: ensure promotion runs exactly once per successful send (avoid double-confirmation from multiple layers).
+- Candidate hygiene: ensure uniqueness constraint prevents candidate spam; consider pruning expired/very-old candidates.
+- Endpoint attribution: ensure `TransportSendResult.UsedEndpoint` is non-null for direct sends that should confirm a candidate; if null, decide whether to skip promotion or to promote a less-specific "direct reachable" signal.
+
+### J.11: Critical review notes (tradeoffs of Option B2)
+
+- Option B2 provides clean semantics (confirmed routes only), but it is a larger change that introduces a second source of truth.
+- First-message bootstrap is addressed by Approach 1 (fallback to candidates in `DefaultNetworkSender`).
+- Promotion based on `DefaultSendExecutor` requires transport to surface the endpoint/relay used. Option A provides this via `TransportSendResult.UsedEndpoint`.
+
+### J.12: Architecture notes (scratch-built vs current)
+
+Scratch-built recommendation (pre-made): keep the Network project as *pure domain + ports* (routing models, route planning interfaces, transport ports). Keep orchestration in the Application layer.
+
+- Today: `DefaultSendExecutor`/`DefaultNetworkSender` live in `Percolator.Network.Messaging` but are wired and used by Application services.
+- Improvement direction (defer until after goal is met): move the orchestration implementations (sender/executor + promotion) into `Percolator.Application.Network` and keep `Percolator.Network` as contracts + domain types.
+
+Laser-focus decision: do not add new MediatR routing handlers. Make routing explicit in the existing call paths.
