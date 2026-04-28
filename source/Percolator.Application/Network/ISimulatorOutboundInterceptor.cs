@@ -25,8 +25,10 @@ public interface ISimulatorOutboundInterceptor
 
     /// <summary>
     /// Intercepts outbound opaque message sends to simulator-reserved endpoints.
-    /// Returns a 3-state result indicating whether the message is for the simulator,
-    /// was delivered to the simulator, or is undeliverable (no matching simulated peer).
+    /// Returns a discriminated-union result:
+    /// - NotForSimulator: proceed with normal network send
+    /// - DeliveredToSimulator: message was delivered; contains the simulator's response
+    /// - Undeliverable: simulator-owned endpoint has no matching simulated peer
     /// </summary>
     Task<SimulatorOutboundInterceptResult> InterceptDeliverOpaqueMessageAsync(
         DnsEndPoint endpoint,

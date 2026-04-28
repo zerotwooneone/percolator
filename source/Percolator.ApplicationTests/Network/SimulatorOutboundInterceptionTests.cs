@@ -123,7 +123,7 @@ public sealed class SimulatorOutboundInterceptionTests
                 endpoint,
                 It.IsAny<DeliverOpaqueMessageRequest>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(SimulatorOutboundInterceptResult.DeliveredToSimulator());
+            .ReturnsAsync(new SimulatorOutboundInterceptResult.DeliveredToSimulator(new DeliverOpaqueMessageResponse { Version = 1 }));
 
         var sut = new GrpcMessageTransportService(logger, httpFactory.Object, profileRepo.Object, routePlanner.Object, interceptor.Object);
 
@@ -177,7 +177,7 @@ public sealed class SimulatorOutboundInterceptionTests
                 endpoint,
                 It.IsAny<DeliverOpaqueMessageRequest>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(SimulatorOutboundInterceptResult.Undeliverable(endpoint, "No matching simulated peer"));
+            .ReturnsAsync(new SimulatorOutboundInterceptResult.Undeliverable(endpoint, "No matching simulated peer"));
 
         var sut = new GrpcMessageTransportService(logger, httpFactory.Object, profileRepo.Object, routePlanner.Object, interceptor.Object);
 
@@ -234,7 +234,7 @@ public sealed class SimulatorOutboundInterceptionTests
                 endpoint,
                 It.IsAny<DeliverOpaqueMessageRequest>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(SimulatorOutboundInterceptResult.NotForSimulator());
+            .ReturnsAsync(new SimulatorOutboundInterceptResult.NotForSimulator());
 
         var sut = new GrpcMessageTransportService(logger, httpFactory.Object, profileRepo.Object, routePlanner.Object, interceptor.Object);
 

@@ -70,17 +70,17 @@ public class GrpcMessageTransportService : IMessageTransportService
             if (_simulatorOutbound is not null)
             {
                 var interceptResult = await _simulatorOutbound.InterceptDeliverOpaqueMessageAsync(endPoint.EndPoint, request, cancellationToken).ConfigureAwait(false);
-                if (interceptResult.Kind == SimulatorOutboundInterceptResultKind.DeliveredToSimulator)
+                switch (interceptResult)
                 {
-                    return new DeliverOpaqueMessageResponse { Version = 1 };
+                    case SimulatorOutboundInterceptResult.DeliveredToSimulator delivered:
+                        return delivered.Response;
+                    case SimulatorOutboundInterceptResult.Undeliverable undeliverable:
+                        throw new InvalidOperationException(
+                            $"Send to simulator-reserved endpoint {undeliverable.Endpoint} failed: {undeliverable.FailureReason}");
+                    case SimulatorOutboundInterceptResult.NotForSimulator:
+                        // Proceed with normal gRPC send
+                        break;
                 }
-                if (interceptResult.Kind == SimulatorOutboundInterceptResultKind.Undeliverable)
-                {
-                    var destination = interceptResult.Endpoint ?? endPoint.EndPoint;
-                    throw new InvalidOperationException(
-                        $"Send to simulator-reserved endpoint {destination} failed: {interceptResult.FailureReason ?? "No matching simulated peer"}");
-                }
-                // NotForSimulator: proceed with normal gRPC send
             }
 
             // Use the endpoint as the client key, not the peer ID

@@ -95,18 +95,18 @@ public sealed class SimulatorOutboundInterceptor : ISimulatorOutboundInterceptor
         // Detection rule: treat any literal dotted-quad 127.77.* as simulator-owned
         if (!IPAddress.TryParse(endpoint.Host, out var ip))
         {
-            return SimulatorOutboundInterceptResult.NotForSimulator();
+            return new SimulatorOutboundInterceptResult.NotForSimulator();
         }
 
         var bytes = ip.GetAddressBytes();
         if (bytes.Length != 4)
         {
-            return SimulatorOutboundInterceptResult.NotForSimulator();
+            return new SimulatorOutboundInterceptResult.NotForSimulator();
         }
 
         if (bytes[0] != 127 || bytes[1] != 77)
         {
-            return SimulatorOutboundInterceptResult.NotForSimulator();
+            return new SimulatorOutboundInterceptResult.NotForSimulator();
         }
 
         // Routing rule: check if endpoint matches a simulated peer (host+port)
@@ -117,7 +117,7 @@ public sealed class SimulatorOutboundInterceptor : ISimulatorOutboundInterceptor
 
         if (match is null)
         {
-            return SimulatorOutboundInterceptResult.Undeliverable(
+            return new SimulatorOutboundInterceptResult.Undeliverable(
                 endpoint,
                 $"No simulated peer listening at {endpoint.Host}:{endpoint.Port}");
         }
@@ -125,8 +125,8 @@ public sealed class SimulatorOutboundInterceptor : ISimulatorOutboundInterceptor
         // Deliver to simulator
         try
         {
-            await _state.ReceiveOpaqueMessageFromMainAsync(match.PeerId, request, cancellationToken).ConfigureAwait(false);
-            return SimulatorOutboundInterceptResult.DeliveredToSimulator();
+            var response = await _state.ReceiveOpaqueMessageFromMainAsync(match.PeerId, request, cancellationToken).ConfigureAwait(false);
+            return new SimulatorOutboundInterceptResult.DeliveredToSimulator(response);
         }
         catch (Exception ex)
         {
