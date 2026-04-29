@@ -107,15 +107,16 @@ public class RequestPreKeyBundleByPkhHandler : IRequestHandler<RequestPreKeyBund
         var ratchetMessage = await _secureMessaging.EncryptAsync(cryptoHostSessionId, plaintext, cancellationToken).ConfigureAwait(false);
         _logger.LogInformation("Requesting pre-key bundle from peer {PeerId}", hostPeer.Id);
         var deliverResp = await _transport.SendMessageAsync(hostPeer.Id, directHostSessionId.Value, ratchetMessage, cancellationToken).ConfigureAwait(false);
+        var response = deliverResp.OriginalResponse;
 
-        if (deliverResp.ResultCase != DeliverOpaqueMessageResponse.ResultOneofCase.ResponsePayload
-            || deliverResp.ResponsePayload is null
-            || !deliverResp.ResponsePayload.HasResponsePayload)
+        if (response.ResultCase != DeliverOpaqueMessageResponse.ResultOneofCase.ResponsePayload
+            || response.ResponsePayload is null
+            || !response.ResponsePayload.HasResponsePayload)
         {
             throw new InvalidOperationException("No response payload returned.");
         }
 
-        var respCipher = new SessionRatchetMessage(deliverResp.ResponsePayload.ResponsePayload.ToByteArray());
+        var respCipher = new SessionRatchetMessage(response.ResponsePayload.ResponsePayload.ToByteArray());
         var resolved = await _secureMessaging.DecryptInboundAsync(1, respCipher, cancellationToken).ConfigureAwait(false);
         var respPlain = resolved?.plaintext;
         if (respPlain is null)

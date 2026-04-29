@@ -129,7 +129,7 @@ public sealed class SimulatorOutboundInterceptionTests
 
         var resp = await sut.SendMessageAsync(peer, requestSessionId, cipher, CancellationToken.None);
         Assert.That(resp, Is.Not.Null);
-        Assert.That(resp.Version, Is.EqualTo(1));
+        Assert.That(resp.OriginalResponse.Version, Is.EqualTo(1));
 
         // The critical assertion: we never created an HttpClient => no channel creation.
         httpFactory.Verify(x => x.CreateClient(It.IsAny<string>()), Times.Never);

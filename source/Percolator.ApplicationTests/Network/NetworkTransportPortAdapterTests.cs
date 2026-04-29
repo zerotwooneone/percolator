@@ -44,14 +44,14 @@ public class NetworkTransportPortAdapterTests
             }
         };
         transport.Setup(t => t.SendMessageAsync(new Percolator.Identity.PeerId(target.Value), dsid, It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(resp);
+            .ReturnsAsync(new SendMessageResponse { OriginalResponse = resp });
 
         var sut = new NetworkTransportPortAdapter(logger, transport.Object, sessions.Object, secure.Object, active, keyStore.Object);
         var outcome = await sut.SendDirectAsync(target, new NetworkPayload(new byte[] { 0xAA }), CancellationToken.None);
 
         Assert.That(outcome.Ok, Is.True);
-        Assert.That(outcome.Response.HasValue, Is.True);
-        Assert.That(outcome.Response!.Value.Value.ToArray(), Is.EquivalentTo(new byte[] { 9 }));
+        Assert.That(outcome.ResponsePayload.HasValue, Is.True);
+        Assert.That(outcome.ResponsePayload!.Value.Value.ToArray(), Is.EquivalentTo(new byte[] { 9 }));
     }
 
     [Test]
@@ -132,13 +132,13 @@ public class NetworkTransportPortAdapterTests
             }
         };
         transport.Setup(t => t.SendMessageAsync(new Percolator.Identity.PeerId(relay.Value), rsid, relayCipher, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(resp);
+            .ReturnsAsync(new SendMessageResponse { OriginalResponse = resp });
 
         var sut = new NetworkTransportPortAdapter(logger, transport.Object, sessions.Object, secure.Object, active, keyStore.Object);
         var outcome = await sut.SendViaRelayAsync(relay, target, new NetworkPayload(new byte[] { 1,2,3 }), CancellationToken.None);
 
         Assert.That(outcome.Ok, Is.True);
-        Assert.That(outcome.Response.HasValue, Is.True);
-        Assert.That(outcome.Response!.Value.Value.ToArray(), Is.EquivalentTo(new byte[] { 0x42 }));
+        Assert.That(outcome.ResponsePayload.HasValue, Is.True);
+        Assert.That(outcome.ResponsePayload!.Value.Value.ToArray(), Is.EquivalentTo(new byte[] { 0x42 }));
     }
 }

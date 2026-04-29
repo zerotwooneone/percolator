@@ -161,6 +161,7 @@ public class SubmitPreKeysHandler : IRequestHandler<SubmitPreKeysCommand, int>
         var plaintext = new Plaintext(envelope.ToByteArray());
         var ratchetMessage = await _secureMessaging.EncryptAsync(new SessionId(directSessionId.Value), plaintext, cancellationToken).ConfigureAwait(false);
         _logger.LogInformation("DHT probe sending (with response) to peer {PeerId}", remotePeerId);
-        return await _transport.SendMessageAsync(remotePeerId, directSessionId, ratchetMessage, cancellationToken).ConfigureAwait(false);
+        var response = await _transport.SendMessageAsync(remotePeerId, directSessionId, ratchetMessage, cancellationToken).ConfigureAwait(false);
+        return response.OriginalResponse;
     }
 }

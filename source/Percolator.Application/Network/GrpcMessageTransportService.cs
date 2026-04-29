@@ -33,7 +33,7 @@ public class GrpcMessageTransportService : IMessageTransportService
         _simulatorOutbound = simulatorOutbound;
     }
 
-    public async Task<DeliverOpaqueMessageResponse> SendMessageAsync(
+    public async Task<SendMessageResponse> SendMessageAsync(
         IdentityPeerId recipientPeerId, 
         DirectSessionId directSessionId,
         SessionRatchetMessage message,
@@ -73,7 +73,7 @@ public class GrpcMessageTransportService : IMessageTransportService
                 switch (interceptResult)
                 {
                     case SimulatorOutboundInterceptResult.DeliveredToSimulator delivered:
-                        return delivered.Response;
+                        return new SendMessageResponse { OriginalResponse = delivered.Response, UsedEndpoint = endPoint };
                     case SimulatorOutboundInterceptResult.Undeliverable undeliverable:
                         throw new InvalidOperationException(
                             $"Send to simulator-reserved endpoint {undeliverable.Endpoint} failed: {undeliverable.FailureReason}");
@@ -99,7 +99,7 @@ public class GrpcMessageTransportService : IMessageTransportService
                 recipientPeerId, response.Version);
 
             // Legacy last-seen update retained only for legacy path; planner path relies on domain repo updates elsewhere
-            return response;
+            return new SendMessageResponse { OriginalResponse = response, UsedEndpoint = endPoint };
         }
         catch (InvalidProtocolBufferException ex)
         {

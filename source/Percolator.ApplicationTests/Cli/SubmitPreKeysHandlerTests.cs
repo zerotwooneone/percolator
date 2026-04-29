@@ -79,13 +79,16 @@ public class SubmitPreKeysHandlerTests
         // Transport returns a response payload (opaque); the secure messaging service will decrypt it
         _transport
             .Setup(t => t.SendMessageAsync(remotePeerId, directSessionId, It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new DeliverOpaqueMessageResponse
+            .ReturnsAsync(new SendMessageResponse
             {
-                Version = 1,
-                ResponsePayload = new DeliverOpaqueMessageResponse.Types.Payload
+                OriginalResponse = new DeliverOpaqueMessageResponse
                 {
                     Version = 1,
-                    ResponsePayload = ByteString.CopyFrom(responseBytes)
+                    ResponsePayload = new DeliverOpaqueMessageResponse.Types.Payload
+                    {
+                        Version = 1,
+                        ResponsePayload = ByteString.CopyFrom(responseBytes)
+                    }
                 }
             });
 

@@ -161,7 +161,7 @@ namespace Percolator.ApplicationIntegrationTests.ChatMessaging
                 _nameToProvider = nameToProvider;
             }
 
-            public async Task<DeliverOpaqueMessageResponse> SendMessageAsync(
+            public async Task<SendMessageResponse> SendMessageAsync(
                 Percolator.Identity.PeerId recipientPeerId,
                 Percolator.Network.DirectSessionId directSessionId,
                 Percolator.Cryptography.SessionRatchetMessage message,
@@ -219,7 +219,7 @@ namespace Percolator.ApplicationIntegrationTests.ChatMessaging
                             cancellationToken: cancellationToken);
                         TestContext.WriteLine($"[Loopback] DeliverOpaqueMessage to session={directSessionId.Value}...");
                         var response = await svc.DeliverOpaqueMessage(req, ctx);
-                        return response;
+                        return new SendMessageResponse { OriginalResponse = response };
                     }
                     finally
                     {

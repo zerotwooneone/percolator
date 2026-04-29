@@ -6,4 +6,5 @@ public interface IPeerRouteCandidateRepository
     Task<IReadOnlyList<PeerRouteCandidate>> GetCandidatesAsync(int selfIdentityId, PeerId remotePeerId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<PeerRouteCandidate>> GetAllCandidatesAsync(int selfIdentityId, CancellationToken cancellationToken = default);
     Task DeleteAsync(long id, CancellationToken cancellationToken = default);
+    Task PruneAsync(int selfIdentityId, DateTimeOffset nowUtc, CancellationToken cancellationToken = default);
 }

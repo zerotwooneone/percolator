@@ -118,13 +118,16 @@ public sealed class RequestPreKeyBundleByPkhHandlerTests
 
         _transport
             .Setup(t => t.SendMessageAsync(remotePeerId, hostDirectSessionId, It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new DeliverOpaqueMessageResponse
+            .ReturnsAsync(new SendMessageResponse
             {
-                Version = 1,
-                ResponsePayload = new DeliverOpaqueMessageResponse.Types.Payload
+                OriginalResponse = new DeliverOpaqueMessageResponse
                 {
                     Version = 1,
-                    ResponsePayload = ByteString.CopyFrom(respBytes)
+                    ResponsePayload = new DeliverOpaqueMessageResponse.Types.Payload
+                    {
+                        Version = 1,
+                        ResponsePayload = ByteString.CopyFrom(respBytes)
+                    }
                 }
             });
 
@@ -367,13 +370,16 @@ public sealed class RequestPreKeyBundleByPkhHandlerTests
 
         _transport
             .Setup(t => t.SendMessageAsync(remotePeerId, hostDirectSessionId, It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new DeliverOpaqueMessageResponse
+            .ReturnsAsync(new SendMessageResponse
             {
-                Version = 1,
-                ResponsePayload = new DeliverOpaqueMessageResponse.Types.Payload
+                OriginalResponse = new DeliverOpaqueMessageResponse
                 {
                     Version = 1,
-                    ResponsePayload = ByteString.CopyFrom(respBytes)
+                    ResponsePayload = new DeliverOpaqueMessageResponse.Types.Payload
+                    {
+                        Version = 1,
+                        ResponsePayload = ByteString.CopyFrom(respBytes)
+                    }
                 }
             });
 

@@ -22,7 +22,7 @@ public class DhtEndToEndTests : IntegrationTestBase
         private readonly IServiceProvider _hostProvider;
         public LoopbackTransport(IServiceProvider hostProvider) => _hostProvider = hostProvider;
 
-        public async Task<DeliverOpaqueMessageResponse> SendMessageAsync(
+        public async Task<SendMessageResponse> SendMessageAsync(
             Percolator.Identity.PeerId recipientPeerId,
             Percolator.Network.DirectSessionId directSessionId,
             Percolator.Cryptography.SessionRatchetMessage message,
@@ -44,7 +44,7 @@ public class DhtEndToEndTests : IntegrationTestBase
                     ResponsePayload = ByteString.CopyFrom(result.ResponsePayloadBytes)
                 };
             }
-            return response;
+            return new SendMessageResponse { OriginalResponse = response };
         }
     }
 

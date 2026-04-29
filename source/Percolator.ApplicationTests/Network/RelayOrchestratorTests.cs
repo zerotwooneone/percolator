@@ -66,7 +66,7 @@ public class RelayOrchestratorTests
             }
         };
         transport.Setup(t => t.SendMessageAsync(peerId, directSessionId, It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(response);
+            .ReturnsAsync(new SendMessageResponse { OriginalResponse = response });
 
         // DR decrypt of ack payload via SecureMessagingService yields RelayOpaqueResponse with same ack id
         var ack = new RelayOpaqueResponse { Version = 1, MessageAckId = ByteString.CopyFrom(ackId.ToByteArray()) };
@@ -113,7 +113,7 @@ public class RelayOrchestratorTests
             }
         };
         transport.Setup(t => t.SendMessageAsync(peerId, directSessionId, It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(response);
+            .ReturnsAsync(new SendMessageResponse { OriginalResponse = response });
 
         var mismatched = new RelayOpaqueResponse { Version = 1, MessageAckId = ByteString.CopyFrom(Guid.NewGuid().ToByteArray()) };
         secureSvc.Setup(s => s.DecryptInboundAsync(It.IsAny<int>(), It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()))
@@ -145,7 +145,7 @@ public class RelayOrchestratorTests
 
         // No response payload
         transport.Setup(t => t.SendMessageAsync(peerId, directSessionId, It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new DeliverOpaqueMessageResponse());
+            .ReturnsAsync(new SendMessageResponse { OriginalResponse = new DeliverOpaqueMessageResponse() });
 
         Assert.ThrowsAsync<InvalidOperationException>(async () => await orchestrator.RelayNextAsync(selfId, peerId, CancellationToken.None));
     }

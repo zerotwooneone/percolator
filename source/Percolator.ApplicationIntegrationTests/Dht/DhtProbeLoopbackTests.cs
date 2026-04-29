@@ -88,7 +88,7 @@ public class DhtProbeLoopbackTests : IntegrationTestBase
         public LoopbackTransport(Func<DeliverOpaqueMessageRequest, Task<DeliverOpaqueMessageResponse>> invoke)
         { _invoke = invoke; }
 
-        public async Task<DeliverOpaqueMessageResponse> SendMessageAsync(
+        public async Task<SendMessageResponse> SendMessageAsync(
             Percolator.Identity.PeerId recipientPeerId,
             Percolator.Network.DirectSessionId directSessionId,
             Percolator.Cryptography.SessionRatchetMessage message,
@@ -100,7 +100,7 @@ public class DhtProbeLoopbackTests : IntegrationTestBase
             };
 
             // Call directly into the remote service (no gRPC)
-            return await _invoke(request);
+            return new SendMessageResponse { OriginalResponse = await _invoke(request) };
         }
     }
 

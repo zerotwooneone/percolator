@@ -6,6 +6,14 @@ public readonly record struct NetworkPayload(ReadOnlyMemory<byte> Value)
     public static NetworkPayload FromArray(byte[] bytes) => new(bytes);
 }
 
+// Result type for transport operations, including endpoint attribution for direct sends
+public sealed record TransportSendResult(
+    bool Ok,
+    NetworkPayload? ResponsePayload,
+    SendFailureReason? Reason,
+    Exception? Error,
+    System.Net.DnsEndPoint? UsedEndpoint);
+
 public enum SendStrategy
 {
     DirectOnly = 0,
@@ -58,5 +66,5 @@ public interface IRelayTopology
 
 public interface ISendExecutor
 {
-    Task<SendOutcome> ExecuteAsync(PeerId target, NetworkPayload payload, IReadOnlyList<PlannedRoute> plannedRoutes, CancellationToken ct = default);
+    Task<SendOutcome> ExecuteAsync(int selfIdentityId, PeerId target, NetworkPayload payload, IReadOnlyList<PlannedRoute> plannedRoutes, CancellationToken ct = default);
 }

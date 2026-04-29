@@ -338,7 +338,7 @@ namespace Percolator.Application.Network
             var sid = new Percolator.Cryptography.SessionId(relaySessionId.Value.Value);
             var cipher = await _secureMessaging.EncryptAsync(sid, plain, cancellationToken).ConfigureAwait(false);
 
-            _ = await _transport.SendMessageAsync(relayHostPeerId, relaySessionId.Value, cipher, cancellationToken).ConfigureAwait(false);
+            var _ = await _transport.SendMessageAsync(relayHostPeerId, relaySessionId.Value, cipher, cancellationToken).ConfigureAwait(false);
         }
     }
 }

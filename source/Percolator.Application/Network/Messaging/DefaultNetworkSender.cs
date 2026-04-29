@@ -110,6 +110,6 @@ public sealed class DefaultNetworkSender : INetworkSender
             };
         }
 
-        return await _executor.ExecuteAsync(target, payload, plan, ct).ConfigureAwait(false);
+        return await _executor.ExecuteAsync(selfIdentityId, target, payload, plan, ct).ConfigureAwait(false);
     }
 }

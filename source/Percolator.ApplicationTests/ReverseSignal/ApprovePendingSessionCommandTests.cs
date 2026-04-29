@@ -413,7 +413,7 @@ namespace Percolator.ApplicationTests.ReverseSignal
                     It.IsAny<Percolator.Network.DirectSessionId>(),
                     It.IsAny<SessionRatchetMessage>(),
                     It.IsAny<CancellationToken>()))
-                .ReturnsAsync(new Percolator.Contracts.DeliverOpaqueMessageResponse());
+                .ReturnsAsync(new SendMessageResponse { OriginalResponse = new Percolator.Contracts.DeliverOpaqueMessageResponse() });
 
             var mediator = new Mock<IMediator>(MockBehavior.Strict);
             mediator

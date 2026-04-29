@@ -74,7 +74,8 @@ public class RelayOrchestrator
         // Encrypt and send
         var plaintext = new Plaintext(env.ToByteArray());
         var cipher = await _secureMessaging.EncryptAsync(sessionId, plaintext, ct).ConfigureAwait(false);
-        var response = await _transport.SendMessageAsync(recipientPeerId, directSessionId, cipher, ct).ConfigureAwait(false);
+        var responseWrapper = await _transport.SendMessageAsync(recipientPeerId, directSessionId, cipher, ct).ConfigureAwait(false);
+        var response = responseWrapper.OriginalResponse;
 
         // Expect RPC-level response payload (DR-ciphertext)
         if (response.ResultCase != DeliverOpaqueMessageResponse.ResultOneofCase.ResponsePayload ||

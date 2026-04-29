@@ -2009,22 +2009,28 @@ Phase 1 (required):
         - Upsert a confirmed relay route for `(SelfIdentityId, RemotePeerId)`.
     
     Call boundary (explicit, non-negotiable):
-    
+
     - `DefaultSendExecutor` is the only place that knows *which route actually succeeded* AND has access to the `TransportSendResult`.
     - Therefore, Phase 2 MUST invoke confirmation from `DefaultSendExecutor`.
     - To support this, update `ISendExecutor.ExecuteAsync(...)` signature to include `SelfId`:
-      - `Task<SendOutcome> ExecuteAsync(SelfId selfIdentityId, PeerId target, NetworkPayload payload, IReadOnlyList<PlannedRoute> plannedRoutes, CancellationToken ct = default)`
+      - `Task<SendOutcome> ExecuteAsync(int selfIdentityId, PeerId target, NetworkPayload payload, IReadOnlyList<PlannedRoute> plannedRoutes, CancellationToken ct = default)`
+    - **Domain boundary constraint:** `Percolator.Network` and `Percolator.Identity` are domain libraries that must never reference each other. Therefore:
+      - Network domain interfaces (`INetworkSender`, `ISendExecutor`, `IPeerRouteCandidateRepository`) use `int` for selfIdentityId
+      - Application layer (`IRouteConfirmationService`, `RouteConfirmationService`) uses `SelfId` (from `Percolator.Identity`)
+      - `DefaultSendExecutor` (in Application layer) converts `int` to `SelfId` when calling the confirmation service
     - Update `DefaultNetworkSender.SendAsync(...)` to pass `selfIdentityId` into `ExecuteAsync`.
 
  10) Add candidate pruning.
-    
+
     Concrete policy (pre-made):
-    
+
     - Prune candidates where:
       - `LastSuccessAtUtc` is null AND `ObservedAtUtc < UtcNow - 14 days`
     - Do not prune candidates with `LastSuccessAtUtc` set.
-    
-    Implementation anchor (explicit): implement pruning as a repository method on `IPeerRouteCandidateRepository` (e.g., `PruneAsync(SelfId selfIdentityId, DateTimeOffset nowUtc, CancellationToken ct)`), and call it from a low-frequency background task (not from the send hot path).
+
+    Implementation anchor (explicit): implement pruning as a repository method on `IPeerRouteCandidateRepository` (e.g., `PruneAsync(SelfId selfIdentityId, DateTimeOffset nowUtc, CancellationToken ct)`).
+
+    Deferred: Background task for calling PruneAsync is deferred. The method exists and can be called manually or via a future background service.
 
 Concrete test locations (pre-made):
 
@@ -2071,3 +2077,32 @@ Scratch-built recommendation (pre-made): keep the Network project as *pure domai
 - Improvement direction (defer until after goal is met): move the orchestration implementations (sender/executor + promotion) into `Percolator.Application.Network` and keep `Percolator.Network` as contracts + domain types.
 
 Laser-focus decision: do not add new MediatR routing handlers. Make routing explicit in the existing call paths.
+
+### J.13: Direct route promotion - endpoint attribution
+
+**Problem:** Phase 2 implementation returns `UsedEndpoint = null` for all direct sends because the underlying `IMessageTransportService.SendMessageAsync` does not return which endpoint was actually used. This makes direct route promotion non-functional since the promotion logic requires `UsedEndpoint` to be non-null.
+
+**Root cause:** The `NetworkTransportPortAdapter` calls `IMessageTransportService.SendMessageAsync`, which doesn't surface the endpoint that was selected for the connection. The adapter cannot populate `UsedEndpoint` without this information.
+
+**Solution options:**
+
+**Option A (recommended):** Enhance `IMessageTransportService.SendMessageAsync` to return the endpoint used.
+- Update `SendMessageAsync` signature to return `SendMessageResponse` containing `UsedEndpoint`
+- Update `GrpcMessageTransportService` implementation to track and return the endpoint
+- Update `NetworkTransportPortAdapter.SendDirectAsync` to populate `UsedEndpoint` from the response
+- This makes direct promotion functional without guessing
+
+**Option B (deferred):** Accept that direct promotion requires transport layer changes and defer it.
+- Document that direct promotion is blocked until transport enhancement
+- Keep relay promotion functional
+- Revisit when transport layer is refactored
+
+**Decision:** Implement Option A to enable direct route promotion as intended by the Phase 2 plan.
+
+**Implementation steps:**
+1. Add `SendMessageResponse` record with `UsedEndpoint` and `ResponsePayload` fields
+2. Update `IMessageTransportService.SendMessageAsync` to return `SendMessageResponse?`
+3. Update `GrpcMessageTransportService.SendMessageAsync` to return the endpoint used
+4. Update `NetworkTransportPortAdapter.SendDirectAsync` to populate `UsedEndpoint` from response
+5. Update tests for the new signature
+6. Verify direct route promotion works end-to-end

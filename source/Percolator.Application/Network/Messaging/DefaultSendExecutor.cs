@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Microsoft.Extensions.Logging;
 using Percolator.Network;
 using Percolator.Network.Messaging;
 
@@ -7,16 +8,24 @@ namespace Percolator.Application.Network.Messaging;
 public sealed class DefaultSendExecutor : ISendExecutor
 {
     private readonly ITransportPort _transport;
+    private readonly IRouteConfirmationService _confirmationService;
+    private readonly ILogger<DefaultSendExecutor> _logger;
 
-    public DefaultSendExecutor(ITransportPort transport)
+    public DefaultSendExecutor(
+        ITransportPort transport,
+        IRouteConfirmationService confirmationService,
+        ILogger<DefaultSendExecutor> logger)
     {
         _transport = transport;
+        _confirmationService = confirmationService;
+        _logger = logger;
     }
 
-    public async Task<SendOutcome> ExecuteAsync(PeerId target, NetworkPayload payload, IReadOnlyList<PlannedRoute> plannedRoutes, CancellationToken ct = default)
+    public async Task<SendOutcome> ExecuteAsync(int selfIdentityId, PeerId target, NetworkPayload payload, IReadOnlyList<PlannedRoute> plannedRoutes, CancellationToken ct = default)
     {
         var attemptedPaths = new List<string>(plannedRoutes.Count);
         var attemptDetails = new List<AttemptDetail>(plannedRoutes.Count);
+        var nowUtc = DateTimeOffset.UtcNow;
 
         foreach (var route in plannedRoutes)
         {
@@ -30,18 +39,15 @@ public sealed class DefaultSendExecutor : ISendExecutor
             attemptedPaths.Add(routeString);
 
             var sw = Stopwatch.StartNew();
-            bool ok;
-            NetworkPayload? response;
-            SendFailureReason? reason;
-            Exception? error;
+            TransportSendResult result;
 
             if (route is PlannedRoute.Direct)
             {
-                (ok, response, reason, error) = await _transport.SendDirectAsync(target, payload, ct).ConfigureAwait(false);
+                result = await _transport.SendDirectAsync(target, payload, ct).ConfigureAwait(false);
             }
             else if (route is PlannedRoute.Relay relay)
             {
-                (ok, response, reason, error) = await _transport.SendViaRelayAsync(relay.RelayHostPeerId, target, payload, ct).ConfigureAwait(false);
+                result = await _transport.SendViaRelayAsync(relay.RelayHostPeerId, target, payload, ct).ConfigureAwait(false);
             }
             else
             {
@@ -56,10 +62,19 @@ public sealed class DefaultSendExecutor : ISendExecutor
             {
                 Route = routeString,
                 Duration = sw.Elapsed,
-                Reason = ok ? null : (reason ?? SendFailureReason.Unknown)
+                Reason = result.Ok ? null : (result.Reason ?? SendFailureReason.Unknown)
             });
 
-            if (ok)
+            // Record attempt and promote on success
+            await RecordAttemptAndPromoteAsync(
+                selfIdentityId,
+                target,
+                route,
+                result,
+                nowUtc,
+                ct).ConfigureAwait(false);
+
+            if (result.Ok)
             {
                 return new SendOutcome
                 {
@@ -68,7 +83,7 @@ public sealed class DefaultSendExecutor : ISendExecutor
                     AttemptedPaths = attemptedPaths,
                     Attempts = attemptedPaths.Count,
                     AttemptsDetail = attemptDetails,
-                    ResponsePayload = response
+                    ResponsePayload = result.ResponsePayload
                 };
             }
         }
@@ -83,5 +98,66 @@ public sealed class DefaultSendExecutor : ISendExecutor
             Reason = attemptDetails.LastOrDefault()?.Reason ?? SendFailureReason.Unknown,
             AttemptsDetail = attemptDetails
         };
+    }
+
+    private async Task RecordAttemptAndPromoteAsync(
+        int selfIdentityId,
+        PeerId target,
+        PlannedRoute route,
+        TransportSendResult result,
+        DateTimeOffset nowUtc,
+        CancellationToken ct)
+    {
+        try
+        {
+            var routeKind = route is PlannedRoute.Relay ? RouteKind.Relayed : RouteKind.Direct;
+            string? endpointHost = null;
+            int? endpointPort = null;
+            Guid? relayHostPeerId = null;
+
+            if (route is PlannedRoute.Relay relay)
+            {
+                relayHostPeerId = relay.RelayHostPeerId.Value;
+            }
+
+            // Convert int to SelfId for Application layer service
+            var selfId = new Percolator.Identity.SelfId(selfIdentityId);
+
+            // Record attempt
+            await _confirmationService.RecordAttemptAsync(
+                selfId,
+                target,
+                routeKind,
+                endpointHost,
+                endpointPort,
+                relayHostPeerId,
+                result.Ok,
+                nowUtc,
+                ct).ConfigureAwait(false);
+
+            // Promote on success
+            if (result.Ok)
+            {
+                if (routeKind == RouteKind.Direct && result.UsedEndpoint is not null)
+                {
+                    endpointHost = result.UsedEndpoint.Host;
+                    endpointPort = result.UsedEndpoint.Port;
+                }
+
+                await _confirmationService.PromoteToConfirmedAsync(
+                    selfId,
+                    target,
+                    routeKind,
+                    endpointHost,
+                    endpointPort,
+                    relayHostPeerId,
+                    nowUtc,
+                    ct).ConfigureAwait(false);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to record attempt/promote route for {Target}", target);
+        }
     }
 }

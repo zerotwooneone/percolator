@@ -7,7 +7,7 @@ namespace Percolator.Application.Network;
 
 public interface IMessageTransportService
 {
-    Task<DeliverOpaqueMessageResponse> SendMessageAsync(
+    Task<SendMessageResponse> SendMessageAsync(
         PeerId recipientPeerId,
         DirectSessionId directSessionId,
         SessionRatchetMessage message,

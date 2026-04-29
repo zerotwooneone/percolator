@@ -102,8 +102,8 @@ internal sealed class InviteHandshakeResponseDeliveryService : IInviteHandshakeR
         try
         {
             var payload = NetworkPayload.FromArray(response.ToByteArray());
-            var (ok, _, reason, error) = await _transport.SendViaRelayAsync(new PeerId(relay.Value), inviterPeerId, payload, ct).ConfigureAwait(false);
-            if (ok)
+            var relayResult = await _transport.SendViaRelayAsync(new PeerId(relay.Value), inviterPeerId, payload, ct).ConfigureAwait(false);
+            if (relayResult.Ok)
             {
                 var sendPath = $"Relay:{relay.Value}";
                 if (_wireTap.Enabled)
@@ -129,7 +129,7 @@ internal sealed class InviteHandshakeResponseDeliveryService : IInviteHandshakeR
                     PayloadBytes: response.ToByteArray(),
                     PayloadLength: response.CalculateSize()));
             }
-            return new InviteHandshakeResponseDeliveryResult(false, $"Relay:{relay.Value}", error ?? new InvalidOperationException(reason?.ToString() ?? "Relay send failed"));
+            return new InviteHandshakeResponseDeliveryResult(false, $"Relay:{relay.Value}", relayResult.Error ?? new InvalidOperationException(relayResult.Reason?.ToString() ?? "Relay send failed"));
         }
         catch (Exception ex)
         {

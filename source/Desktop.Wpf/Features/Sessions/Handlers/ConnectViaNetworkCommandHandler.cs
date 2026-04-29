@@ -170,16 +170,17 @@ public sealed class ConnectViaNetworkCommandHandler : IRequestHandler<ConnectVia
 
             var deliverResp = await _transport
                 .SendMessageAsync(new Percolator.Identity.PeerId(relayHostPeerId.Value), direct.SessionId, cipher);
+            var response = deliverResp.OriginalResponse;
 
-            if (deliverResp.ResultCase != DeliverOpaqueMessageResponse.ResultOneofCase.ResponsePayload
-                || deliverResp.ResponsePayload is null
-                || !deliverResp.ResponsePayload.HasResponsePayload
-                || deliverResp.ResponsePayload.ResponsePayload.Length == 0)
+            if (response.ResultCase != DeliverOpaqueMessageResponse.ResultOneofCase.ResponsePayload
+                || response.ResponsePayload is null
+                || !response.ResponsePayload.HasResponsePayload
+                || response.ResponsePayload.ResponsePayload.Length == 0)
             {
                 throw new InvalidOperationException("No response payload returned.");
             }
 
-            var respCipher = new SessionRatchetMessage(deliverResp.ResponsePayload.ResponsePayload.ToByteArray());
+            var respCipher = new SessionRatchetMessage(response.ResponsePayload.ResponsePayload.ToByteArray());
             var resolved = await _secureMessaging
                 .DecryptInboundAsync(selfIdentityId, respCipher);
             var respPlain = resolved?.plaintext;

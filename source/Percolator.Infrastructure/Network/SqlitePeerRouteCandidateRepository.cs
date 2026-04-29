@@ -85,6 +85,19 @@ public sealed class SqlitePeerRouteCandidateRepository : IPeerRouteCandidateRepo
         }
     }
 
+    public async Task PruneAsync(int selfIdentityId, DateTimeOffset nowUtc, CancellationToken cancellationToken = default)
+    {
+        var cutoff = nowUtc.AddDays(-14);
+        var toPrune = _db.PeerRouteCandidates
+            .Where(c =>
+                c.SelfIdentityId == selfIdentityId &&
+                c.LastSuccessAtUtc == null &&
+                c.ObservedAtUtc < cutoff);
+
+        _db.PeerRouteCandidates.RemoveRange(toPrune);
+        await _db.SaveChangesAsync(cancellationToken);
+    }
+
     private static PeerRouteCandidate MapToDomain(PeerRouteCandidateDbo dbo)
     {
         return new PeerRouteCandidate

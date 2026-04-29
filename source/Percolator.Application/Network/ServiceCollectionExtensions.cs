@@ -154,6 +154,9 @@ public static class ServiceCollectionExtensions
         services.AddScoped<Percolator.Network.Messaging.ISendExecutor, Percolator.Application.Network.Messaging.DefaultSendExecutor>();
         services.AddScoped<Percolator.Network.Messaging.INetworkSender, Percolator.Application.Network.Messaging.DefaultNetworkSender>();
 
+        // Route confirmation service for promoting candidates to confirmed profiles
+        services.AddScoped<IRouteConfirmationService, RouteConfirmationService>();
+
         return services;
     }
 }

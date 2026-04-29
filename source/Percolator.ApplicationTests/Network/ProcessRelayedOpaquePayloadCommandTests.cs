@@ -257,7 +257,7 @@ public class ProcessRelayedOpaquePayloadCommandTests
 
         transport
             .Setup(x => x.SendMessageAsync(relayHost, directSessionId, cipher, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new DeliverOpaqueMessageResponse { Version = 1 })
+            .ReturnsAsync(new SendMessageResponse { OriginalResponse = new DeliverOpaqueMessageResponse { Version = 1 } })
             .Verifiable();
 
         var sut = new ProcessRelayedOpaquePayloadHandler(

@@ -33,7 +33,7 @@ public class Phase17CommandsOnlyTests : IntegrationTestBase
             _hostName = hostName;
         }
 
-        public async Task<DeliverOpaqueMessageResponse> SendMessageAsync(
+        public async Task<SendMessageResponse> SendMessageAsync(
             Percolator.Identity.PeerId recipientPeerId,
             Percolator.Network.DirectSessionId directSessionId,
             Percolator.Cryptography.SessionRatchetMessage message,
@@ -59,7 +59,7 @@ public class Phase17CommandsOnlyTests : IntegrationTestBase
                     ResponsePayload = ByteString.CopyFrom(result.ResponsePayloadBytes)
                 };
             }
-            return response;
+            return new SendMessageResponse { OriginalResponse = response };
         }
     }
     
@@ -81,7 +81,7 @@ public class Phase17CommandsOnlyTests : IntegrationTestBase
             _routes[peerId] = provider;
         }
 
-        public async Task<DeliverOpaqueMessageResponse> SendMessageAsync(
+        public async Task<SendMessageResponse> SendMessageAsync(
             Percolator.Identity.PeerId recipientPeerId,
             Percolator.Network.DirectSessionId directSessionId,
             Percolator.Cryptography.SessionRatchetMessage message,
@@ -104,7 +104,7 @@ public class Phase17CommandsOnlyTests : IntegrationTestBase
                     ResponsePayload = ByteString.CopyFrom(result.ResponsePayloadBytes)
                 };
             }
-            return response;
+            return new SendMessageResponse { OriginalResponse = response };
         }
 
         public async Task<PeerId> GetPeerIdFromHost(byte[] publicKeyBytes)

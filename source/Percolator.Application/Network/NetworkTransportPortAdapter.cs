@@ -36,44 +36,48 @@ public sealed class NetworkTransportPortAdapter : ITransportPort
         _keyStore = keyStore;
     }
 
-    public async Task<(bool Ok, NetworkPayload? Response, SendFailureReason? Reason, Exception? Error)> SendDirectAsync(Percolator.Network.PeerId target, NetworkPayload payload, CancellationToken ct = default)
+    public async Task<TransportSendResult> SendDirectAsync(Percolator.Network.PeerId target, NetworkPayload payload, CancellationToken ct = default)
     {
         try
         {
-            if (_active.Identity is null) return (false, Response: null ,SendFailureReason.Unknown, new InvalidOperationException("Active identity not initialized"));
+            if (_active.Identity is null) return new TransportSendResult(false, null, SendFailureReason.Unknown, new InvalidOperationException("Active identity not initialized"), null);
             var ds = await _sessions.GetByRemotePeerIdAsync(target, _active.Identity.SelfIdentityId.Value).ConfigureAwait(false);
-            if (ds is null) return (false, null, SendFailureReason.NoPeerConnection, null);
+            if (ds is null) return new TransportSendResult(false, null, SendFailureReason.NoPeerConnection, null, null);
 
             var directSessionId = new DirectSessionId(ds.SessionId.Value);
             var recipientIdentityPeerId = new Percolator.Identity.PeerId(target.Value);
             var cipher = new SessionRatchetMessage(payload.Value.ToArray());
             var resp = await _transport.SendMessageAsync(recipientIdentityPeerId, directSessionId, cipher, ct).ConfigureAwait(false);
-            if (resp?.ResponsePayload is not null)
+            
+            // Extract used endpoint from response
+            System.Net.DnsEndPoint? usedEndpoint = resp.UsedEndpoint?.EndPoint;
+            
+            if (resp.OriginalResponse?.ResponsePayload is not null)
             {
-                return (true, new NetworkPayload(resp.ResponsePayload.ResponsePayload.ToByteArray()), null, null);
+                return new TransportSendResult(true, new NetworkPayload(resp.OriginalResponse.ResponsePayload.ResponsePayload.ToByteArray()), null, null, usedEndpoint);
             }
-            return (true, null, null, null);
+            return new TransportSendResult(true, null, null, null, usedEndpoint);
         }
         catch (Exception ex)
         {
             _logger.LogDebug(ex, "Direct transport attempt failed to {PeerId}", target);
-            return (false, null, SendFailureReason.TransportUnavailable, ex);
+            return new TransportSendResult(false, null, SendFailureReason.TransportUnavailable, ex, null);
         }
     }
 
-    public async Task<(bool Ok, NetworkPayload? Response, SendFailureReason? Reason, Exception? Error)> SendViaRelayAsync(Percolator.Network.PeerId relay, Percolator.Network.PeerId target, NetworkPayload payload, CancellationToken ct = default)
+    public async Task<TransportSendResult> SendViaRelayAsync(Percolator.Network.PeerId relay, Percolator.Network.PeerId target, NetworkPayload payload, CancellationToken ct = default)
     {
         try
         {
-            if (_active.Identity is null) return (false, Response: null , SendFailureReason.Unknown, new InvalidOperationException("Active identity not initialized"));
+            if (_active.Identity is null) return new TransportSendResult(false, null, SendFailureReason.Unknown, new InvalidOperationException("Active identity not initialized"), null);
             // Must have a direct session to the relay host
             var relaySession = await _sessions.GetByRemotePeerIdAsync(relay, _active.Identity.SelfIdentityId.Value).ConfigureAwait(false);
-            if (relaySession is null) return (false, null, SendFailureReason.NoRelaySession, null);
+            if (relaySession is null) return new TransportSendResult(false, null, SendFailureReason.NoRelaySession, null, null);
 
             // We need recipient PKH to enqueue
             var recipientIdentityPeerId = new Percolator.Identity.PeerId(target.Value);
             var pkh = await _keyStore.GetPublicKeyHashByPeerIdAsync(recipientIdentityPeerId, ct).ConfigureAwait(false);
-            if (pkh is null) return (false, null, SendFailureReason.NoPeerConnection, null);
+            if (pkh is null) return new TransportSendResult(false, null, SendFailureReason.NoPeerConnection, null, null);
 
             var mqReq = new EnqueueOpaqueMessageRequest
             {
@@ -95,16 +99,16 @@ public sealed class NetworkTransportPortAdapter : ITransportPort
             var relayDirectSessionId = new DirectSessionId(relaySession.SessionId.Value);
             var relayCipher = await _secureMessaging.EncryptAsync(relaySessionId, relayPlain, ct).ConfigureAwait(false);
             var resp = await _transport.SendMessageAsync(new Percolator.Identity.PeerId(relay.Value), relayDirectSessionId, relayCipher, ct).ConfigureAwait(false);
-            if (resp?.ResponsePayload is not null)
+            if (resp.OriginalResponse?.ResponsePayload is not null)
             {
-                return (true, new NetworkPayload(resp.ResponsePayload.ResponsePayload.ToByteArray()), null, null);
+                return new TransportSendResult(true, new NetworkPayload(resp.OriginalResponse.ResponsePayload.ResponsePayload.ToByteArray()), null, null, null);
             }
-            return (true, null, null, null);
+            return new TransportSendResult(true, null, null, null, null);
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Relay transport attempt failed via {Relay} for {Target}", relay, target);
-            return (false, null, SendFailureReason.TransportUnavailable, ex);
+            return new TransportSendResult(false, null, SendFailureReason.TransportUnavailable, ex, null);
         }
     }
 }
