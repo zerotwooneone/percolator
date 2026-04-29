@@ -32,7 +32,6 @@ public sealed class SimulatorRelayDeliveryServiceTests
 
         var initiatorIdentity = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var initiatorSpki = initiatorIdentity.ExportSubjectPublicKeyInfo();
-        var initiatorPkh = SHA256.HashData(initiatorSpki);
 
         var hello = new HandshakeInitiatorHello
         {
@@ -48,18 +47,10 @@ public sealed class SimulatorRelayDeliveryServiceTests
         var selfRepo = new Mock<ISelfIdentityRepository>();
         var keysStore = new Mock<ISelfIdentityKeysStore>();
 
-        var messageService = new PercolatorMessageService(
-            logger: Mock.Of<ILogger<PercolatorMessageService>>(),
-            messageIngress: Mock.Of<IMessageIngress>(),
-            establishService: Mock.Of<IEstablishDirectSessionService>(),
-            inviteHandshakeResponseIngress: Mock.Of<IInviteHandshakeResponseIngress>(),
-            standardHandshakeIngress: Mock.Of<IStandardHandshakeIngress>(),
-            active: new ActiveIdentityContext());
-
         var diagnostics = new Mock<ISimulatorDiagnosticsService>();
         var logger = Mock.Of<ILogger<SimulatorRelayDeliveryService>>();
 
-        var sut = new SimulatorRelayDeliveryService(messageService, state.Object, selfRepo.Object, keysStore.Object, logger, diagnostics.Object);
+        var sut = new SimulatorRelayDeliveryService(state.Object, selfRepo.Object, keysStore.Object, logger, diagnostics.Object);
 
         // Act
         await sut.DeliverToPeerAsync(relayHostPeerId, recipientPeerId, ackId, opaqueBytes, debugType: "hello", CancellationToken.None);
@@ -87,7 +78,6 @@ public sealed class SimulatorRelayDeliveryServiceTests
 
         using var initiatorIdentity = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var initiatorSpki = initiatorIdentity.ExportSubjectPublicKeyInfo();
-        var initiatorPkh = SHA256.HashData(initiatorSpki);
 
         var hello = new HandshakeInitiatorHello
         {
@@ -100,13 +90,7 @@ public sealed class SimulatorRelayDeliveryServiceTests
 
         var state = new Mock<ISimulatorStateService>();
 
-        var messageService = new PercolatorMessageService(
-            logger: Mock.Of<ILogger<PercolatorMessageService>>(),
-            messageIngress: Mock.Of<IMessageIngress>(),
-            establishService: Mock.Of<IEstablishDirectSessionService>(),
-            inviteHandshakeResponseIngress: Mock.Of<IInviteHandshakeResponseIngress>(),
-            standardHandshakeIngress: Mock.Of<IStandardHandshakeIngress>(),
-            active: new ActiveIdentityContext());
+        
 
         var diagnostics = new Mock<ISimulatorDiagnosticsService>();
         var logger = Mock.Of<ILogger<SimulatorRelayDeliveryService>>();
@@ -114,7 +98,7 @@ public sealed class SimulatorRelayDeliveryServiceTests
         var selfRepo = new Mock<ISelfIdentityRepository>();
         var keysStore = new Mock<ISelfIdentityKeysStore>();
 
-        var sut = new SimulatorRelayDeliveryService(messageService, state.Object, selfRepo.Object, keysStore.Object, logger, diagnostics.Object);
+        var sut = new SimulatorRelayDeliveryService(state.Object, selfRepo.Object, keysStore.Object, logger, diagnostics.Object);
 
         // Act
         await sut.DeliverToPeerAsync(relayHostPeerId, recipientPeerId, ackId, opaqueBytes, debugType: "hello", CancellationToken.None);
@@ -184,18 +168,10 @@ public sealed class SimulatorRelayDeliveryServiceTests
 
         var keysStore = new Mock<ISelfIdentityKeysStore>();
 
-        var messageService = new PercolatorMessageService(
-            logger: Mock.Of<ILogger<PercolatorMessageService>>(),
-            messageIngress: Mock.Of<IMessageIngress>(),
-            establishService: Mock.Of<IEstablishDirectSessionService>(),
-            inviteHandshakeResponseIngress: Mock.Of<IInviteHandshakeResponseIngress>(),
-            standardHandshakeIngress: Mock.Of<IStandardHandshakeIngress>(),
-            active: new ActiveIdentityContext());
-
         var diagnostics = new Mock<ISimulatorDiagnosticsService>();
         var logger = Mock.Of<ILogger<SimulatorRelayDeliveryService>>();
 
-        var sut = new SimulatorRelayDeliveryService(messageService, state.Object, selfRepo.Object, keysStore.Object, logger, diagnostics.Object);
+        var sut = new SimulatorRelayDeliveryService(state.Object, selfRepo.Object, keysStore.Object, logger, diagnostics.Object);
 
         // Act
         await sut.DeliverToPeerAsync(relayHostPeerId, recipientPeerId, ackId, opaqueBytes, debugType: "hello", CancellationToken.None);

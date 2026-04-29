@@ -23,7 +23,6 @@ public interface ISimulatorRelayDeliveryService
 
 public sealed class SimulatorRelayDeliveryService : ISimulatorRelayDeliveryService
 {
-    private readonly PercolatorMessageService _messageService;
     private readonly ISimulatorStateService _state;
     private readonly ISelfIdentityRepository _selfIdentityRepository;
     private readonly ISelfIdentityKeysStore _selfIdentityKeysStore;
@@ -31,14 +30,12 @@ public sealed class SimulatorRelayDeliveryService : ISimulatorRelayDeliveryServi
     private readonly ISimulatorDiagnosticsService _diagnostics;
 
     public SimulatorRelayDeliveryService(
-        PercolatorMessageService messageService,
         ISimulatorStateService state,
         ISelfIdentityRepository selfIdentityRepository,
         ISelfIdentityKeysStore selfIdentityKeysStore,
         ILogger<SimulatorRelayDeliveryService> logger,
         ISimulatorDiagnosticsService diagnostics)
     {
-        _messageService = messageService;
         _state = state;
         _selfIdentityRepository = selfIdentityRepository;
         _selfIdentityKeysStore = selfIdentityKeysStore;
@@ -201,34 +198,5 @@ public sealed class SimulatorRelayDeliveryService : ISimulatorRelayDeliveryServi
 
         return false;
     }
-
-    private sealed class ServerCallContextStub : ServerCallContext
-    {
-        private readonly string _peer;
-        private readonly DateTime _deadline;
-        private readonly Metadata _requestHeaders;
-        private readonly CancellationToken _cancellationToken;
-
-        public ServerCallContextStub(string peer, DateTime deadline, Metadata requestHeaders, CancellationToken cancellationToken)
-        {
-            _peer = peer;
-            _deadline = deadline;
-            _requestHeaders = requestHeaders;
-            _cancellationToken = cancellationToken;
-        }
-
-        protected override string MethodCore => "/percolator.contracts.TransportService/DeliverOpaqueMessage";
-        protected override string HostCore => "localhost";
-        protected override string PeerCore => _peer;
-        protected override DateTime DeadlineCore => _deadline;
-        protected override Metadata RequestHeadersCore => _requestHeaders;
-        protected override CancellationToken CancellationTokenCore => _cancellationToken;
-        protected override Metadata ResponseTrailersCore { get; } = new Metadata();
-        protected override Status StatusCore { get; set; }
-        protected override WriteOptions? WriteOptionsCore { get; set; }
-        protected override AuthContext AuthContextCore { get; } = new AuthContext(null, new System.Collections.Generic.Dictionary<string, System.Collections.Generic.List<AuthProperty>>());
-
-        protected override ContextPropagationToken CreatePropagationTokenCore(ContextPropagationOptions? options) => throw new NotImplementedException();
-        protected override Task WriteResponseHeadersAsyncCore(Metadata responseHeaders) => Task.CompletedTask;
-    }
+    
 }

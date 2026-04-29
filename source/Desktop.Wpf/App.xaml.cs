@@ -169,7 +169,6 @@ public partial class App : Application
                 services.AddScoped<Desktop.Wpf.Features.Simulator.ISimulatorMainIngressService, Desktop.Wpf.Features.Simulator.SimulatorMainIngressService>();
                 services.AddScoped<Desktop.Wpf.Features.Simulator.ISimulatorRelayDeliveryService>(sp =>
                     new Desktop.Wpf.Features.Simulator.SimulatorRelayDeliveryService(
-                        sp.GetRequiredService<Percolator.Application.Network.PercolatorMessageService>(),
                         sp.GetRequiredService<Desktop.Wpf.Features.Simulator.ISimulatorStateService>(),
                         sp.GetRequiredService<Percolator.Identity.ISelfIdentityRepository>(),
                         sp.GetRequiredService<Percolator.Identity.ISelfIdentityKeysStore>(),
