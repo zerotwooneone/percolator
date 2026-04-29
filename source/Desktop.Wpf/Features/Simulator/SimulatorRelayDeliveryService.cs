@@ -12,14 +12,6 @@ namespace Desktop.Wpf.Features.Simulator;
 
 public interface ISimulatorRelayDeliveryService
 {
-    Task DeliverToMainAsync(
-        Percolator.Network.PeerId relayHostPeerId,
-        SessionId relayHostToMainSessionId,
-        Guid ackId,
-        byte[] opaqueBytes,
-        string? debugType,
-        CancellationToken cancellationToken = default);
-
     Task DeliverToPeerAsync(
         Percolator.Network.PeerId relayHostPeerId,
         Percolator.Network.PeerId recipientPeerId,
@@ -53,51 +45,7 @@ public sealed class SimulatorRelayDeliveryService : ISimulatorRelayDeliveryServi
         _logger = logger;
         _diagnostics = diagnostics;
     }
-
-    public async Task DeliverToMainAsync(
-        Percolator.Network.PeerId relayHostPeerId,
-        SessionId relayHostToMainSessionId,
-        Guid ackId,
-        byte[] opaqueBytes,
-        string? debugType,
-        CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        if (opaqueBytes is null) throw new ArgumentNullException(nameof(opaqueBytes));
-
-        var env = new InternalEnvelope
-        {
-            RelayOpaqueEnvelope = new RelayOpaqueEnvelope
-            {
-                Version = 1,
-                OpaquePayload = ByteString.CopyFrom(opaqueBytes),
-                MessageAckId = ByteString.CopyFrom(ackId.ToByteArray())
-            }
-        };
-
-        var cipher = await _state
-            .EncryptInternalEnvelopeAsync(relayHostPeerId, relayHostToMainSessionId, env, cancellationToken)
-            .ConfigureAwait(false);
-
-        var request = new DeliverOpaqueMessageRequest
-        {
-            Version = 1,
-            Payload = ByteString.CopyFrom(cipher.Value)
-        };
-
-        var ctx = new ServerCallContextStub(
-            peer: "ipv4:127.0.0.1:0",
-            deadline: DateTime.UtcNow.AddMinutes(1),
-            requestHeaders: new Metadata(),
-            cancellationToken: cancellationToken);
-
-        var resp = await _messageService.DeliverOpaqueMessage(request, ctx).ConfigureAwait(false);
-
-        var respCipher = new SessionRatchetMessage(resp.ResponsePayload.ResponsePayload.ToByteArray());
-        var plain = await _state.DecryptSessionMessageAsync(relayHostPeerId, relayHostToMainSessionId, respCipher, cancellationToken).ConfigureAwait(false);
-        var response = RelayOpaqueResponse.Parser.ParseFrom(plain.Value);
-    }
-
+    
     public async Task DeliverToPeerAsync(
         Percolator.Network.PeerId relayHostPeerId,
         Percolator.Network.PeerId recipientPeerId,
