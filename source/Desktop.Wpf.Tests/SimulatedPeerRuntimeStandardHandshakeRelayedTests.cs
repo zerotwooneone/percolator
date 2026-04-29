@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Runtime.Serialization;
 using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
@@ -9,7 +8,6 @@ using Desktop.Wpf.Features.Simulator;
 using Desktop.Wpf.Features.Simulator.Models;
 using FluentAssertions;
 using Google.Protobuf;
-using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
@@ -18,9 +16,7 @@ using ObservableCollections;
 using Percolator.Application.Configuration;
 using Percolator.Contracts;
 using Percolator.Cryptography;
-using Percolator.Cryptography.Primitives;
 using Percolator.Identity;
-using Percolator.Network;
 
 namespace Desktop.Wpf.Tests;
 
@@ -94,7 +90,6 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
         var acceptorIdentitySpki = acceptorIdentityEcdsa.ExportSubjectPublicKeyInfo();
 
         using var inviterIdentityEcdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        var inviterIdentityPriv = inviterIdentityEcdh.ExportECPrivateKey();
         using var inviterIdentityEcdsa = ECDsa.Create(inviterIdentityEcdh.ExportParameters(true));
         var inviterIdentitySpki = inviterIdentityEcdsa.ExportSubjectPublicKeyInfo();
 
@@ -233,6 +228,11 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
         using var responderIdentityEcdsa = ECDsa.Create(responderIdentityEcdh.ExportParameters(true));
         var responderIdentitySpki = responderIdentityEcdsa.ExportSubjectPublicKeyInfo();
 
+        var spkId = Guid.NewGuid();
+        using var responderSignedPreKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        var responderSignedPreKeySpki = responderSignedPreKey.PublicKey.ExportSubjectPublicKeyInfo();
+        var responderSignedPreKeyPriv = responderSignedPreKey.ExportECPrivateKey();
+
         var repo = new InMemoryRepository
         {
             Peers = new[]
@@ -252,6 +252,10 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
             }
         };
 
+        // Add signed prekey to responder peer after construction
+        repo.Peers.Single(p => p.PeerId == simulatedPeerId)
+            .SignedPreKeysMutable.Add(new SimulatedSignedPreKeyModel(spkId, responderSignedPreKeyPriv, responderSignedPreKeySpki));
+
         var pending = new SimulatedPeerPendingInbox();
         var diagnostics = new SimulatorDiagnosticsService();
         var clock = new StaticClock(StaticClock.DefaultNow);
@@ -265,7 +269,6 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
         using var initiatorEph = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var initiatorEphSpki = initiatorEph.PublicKey.ExportSubjectPublicKeyInfo();
 
-        var spkId = Guid.NewGuid();
         var hello = new HandshakeInitiatorHello
         {
             Version = 1,
@@ -559,6 +562,10 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
                 new SimulatedRelayModel(relayHostPeerId)
             }
         };
+
+        // Add signed prekey to responder peer after construction
+        repo.Peers.Single(p => p.PeerId == responderPeerId)
+            .SignedPreKeysMutable.Add(new SimulatedSignedPreKeyModel(signedPreKeyId, responderSignedPreKey.ExportECPrivateKey(), responderSignedPreKeySpki));
 
         var pending = new SimulatedPeerPendingInbox();
         var diagnostics = new SimulatorDiagnosticsService();
