@@ -504,15 +504,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         var spk = model.SignedPreKeysMutable.FirstOrDefault(x => x.SignedPreKeyId == spkId);
         if (spk is null)
         {
-            // Keep simulator tolerant of unknown IDs (matches previous runtime behavior).
-            using var identityEcdh = ECDiffieHellman.Create();
-            identityEcdh.ImportECPrivateKey(model.IdentitySigningKeyPrivateKeyEcPrivateKey, out _);
-            var curve = identityEcdh.ExportParameters(false).Curve;
-            using var signedPreKey = ECDiffieHellman.Create(curve);
-            var spkSpki = signedPreKey.PublicKey.ExportSubjectPublicKeyInfo();
-            var spkPriv = signedPreKey.ExportECPrivateKey();
-            spk = new SimulatedSignedPreKeyModel(spkId, spkPriv, spkSpki);
-            model.SignedPreKeysMutable.Add(spk);
+           throw new InvalidOperationException($"could not find signed prekey by signed prekey id");
         }
 
         var initiatorId = new RatchetIdentityKey(request.IdentitySigningKey.ToByteArray());
