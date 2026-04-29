@@ -336,6 +336,14 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
                         CorrelationId = r.CorrelationId,
                         ResponseBytes = r.ResponseBytes
                     })
+                    .ToList(),
+                OneTimePreKeysPrivate = model.OneTimePreKeysPrivate
+                    .Select(r => new OneTimePreKeyPrivateDto
+                    {
+                        Id = r.Id,
+                        PrivateKeyBytes = r.PrivateKeyBytes,
+                        CreatedAtUtc = r.CreatedAtUtc
+                    })
                     .ToList()
             }
         };
@@ -529,6 +537,16 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
             if (dto.CorrelationId == Guid.Empty) continue;
             model.PendingInviteHandshakeResponsesMutable.Add(new SimulatedPendingInviteHandshakeResponseModel(dto.CorrelationId, dto.ResponseBytes));
         }
+
+        foreach (var dto in store.OneTimePreKeysPrivate)
+        {
+            if (dto.Id == Guid.Empty) continue;
+            if (dto.PrivateKeyBytes is null || dto.PrivateKeyBytes.Length == 0) continue;
+            model.OneTimePreKeysPrivateMutable.Add(new SimulatedOneTimePreKeyPrivateRecord(
+                SimulatedOneTimePreKeyId.FromGuid(dto.Id),
+                new PrivatePreKey(dto.PrivateKeyBytes),
+                dto.CreatedAtUtc));
+        }
     }
 
     private static void NormalizePeer(SimulatedPeerDto peer, TransportOptions transportOptions)
@@ -540,6 +558,7 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
         peer.RuntimeStore ??= new();
         peer.RuntimeStore.Sessions ??= new();
         peer.RuntimeStore.SignedPreKeys ??= new();
+        peer.RuntimeStore.OneTimePreKeysPrivate ??= new();
         peer.HandshakeAttempts ??= new();
         peer.Relay ??= new();
         peer.Relay.ActiveSessionsPeerIds ??= new();

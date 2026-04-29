@@ -514,12 +514,30 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         var localIkPriv = new PrivatePreKey(model.IdentitySigningKeyPrivateKeyEcPrivateKey);
         var localSpkPriv = new PrivatePreKey(spk.PrivateEcPrivateKey);
 
+        PrivatePreKey localOtkPrivate;
+        if (request.HasOnetimePrekeyId && request.OnetimePrekeyId.Length > 0)
+        {
+            var otkGuid = new Guid(request.OnetimePrekeyId.ToByteArray());
+            var otkId = SimulatedOneTimePreKeyId.FromGuid(otkGuid);
+            if (!model.TryPopOneTimePreKeyPrivate(otkId, out localOtkPrivate))
+            {
+                throw new InvalidOperationException(
+                    $"Requested OTK id {otkGuid} not found on simulated peer {simulatedPeerId}. " +
+                    $"Remaining private OTK count: {model.OneTimePreKeysPrivate.Count}. " +
+                    $"This indicates a mismatch between initiator and responder OTK pools.");
+            }
+        }
+        else
+        {
+            localOtkPrivate = null;
+        }
+
         var shared = crypto.X3DH_Respond(
             initiatorId,
             initiatorEph,
             localIkPriv,
             localSpkPriv,
-            localOtkPrivate: null);
+            localOtkPrivate);
 
         var sessionId = SessionId.NewId();
         var root = new RootKey(shared.Value);

@@ -44,6 +44,8 @@ public sealed class SimulatedPeerRuntimeTracker : IDisposable
         peer.PendingInviteHandshakeResponsesMutable.ObserveChanged().Subscribe(_ => _dirty.OnNext(Unit.Default)).AddTo(ref _bag);
 
         peer.PendingInboundStandardSignalHellosMutable.ObserveChanged().Subscribe(_ => _dirty.OnNext(Unit.Default)).AddTo(ref _bag);
+
+        peer.OneTimePreKeysPrivateMutable.ObserveChanged().Subscribe(_ => _dirty.OnNext(Unit.Default)).AddTo(ref _bag);
     }
 
     public SimulatedPeerModel Peer { get; }

@@ -43,6 +43,7 @@ public sealed class SimulatedPeerModel : IDisposable
     private readonly ObservableList<SimulatedOutboundInviteModel> _outboundInvites;
     private readonly ObservableList<SimulatedPendingInviteHandshakeResponseModel> _pendingInviteHandshakeResponses;
     private readonly ObservableList<SimulatedChatMessageSnapshot> _recentChatMessages;
+    private readonly ObservableList<SimulatedOneTimePreKeyPrivateRecord> _oneTimePreKeysPrivate;
 
     private readonly ObservableDictionary<string, SimulatedPendingStandardSignalHelloModel> _pendingInboundStandardSignalHellos;
 
@@ -128,6 +129,7 @@ public sealed class SimulatedPeerModel : IDisposable
         _outboundInvites = new ObservableList<SimulatedOutboundInviteModel>();
         _pendingInviteHandshakeResponses = new ObservableList<SimulatedPendingInviteHandshakeResponseModel>();
         _recentChatMessages = new ObservableList<SimulatedChatMessageSnapshot>();
+        _oneTimePreKeysPrivate = new ObservableList<SimulatedOneTimePreKeyPrivateRecord>();
 
         _pendingInboundStandardSignalHellos = new ObservableDictionary<string, SimulatedPendingStandardSignalHelloModel>(StringComparer.Ordinal);
     }
@@ -169,6 +171,7 @@ public sealed class SimulatedPeerModel : IDisposable
     public IReadOnlyObservableList<SimulatedOutboundInviteModel> OutboundInvites => _outboundInvites;
     public IReadOnlyObservableList<SimulatedPendingInviteHandshakeResponseModel> PendingInviteHandshakeResponses => _pendingInviteHandshakeResponses;
     public IReadOnlyObservableList<SimulatedChatMessageSnapshot> RecentChatMessages => _recentChatMessages;
+    public IReadOnlyObservableList<SimulatedOneTimePreKeyPrivateRecord> OneTimePreKeysPrivate => _oneTimePreKeysPrivate;
 
     public IReadOnlyObservableDictionary<string, SimulatedPendingStandardSignalHelloModel> PendingInboundStandardSignalHellos => _pendingInboundStandardSignalHellos;
 
@@ -177,6 +180,7 @@ public sealed class SimulatedPeerModel : IDisposable
     internal ObservableList<SimulatedOutboundInviteModel> OutboundInvitesMutable => _outboundInvites;
     internal ObservableList<SimulatedPendingInviteHandshakeResponseModel> PendingInviteHandshakeResponsesMutable => _pendingInviteHandshakeResponses;
     internal ObservableList<SimulatedChatMessageSnapshot> RecentChatMessagesMutable => _recentChatMessages;
+    internal ObservableList<SimulatedOneTimePreKeyPrivateRecord> OneTimePreKeysPrivateMutable => _oneTimePreKeysPrivate;
 
     internal ObservableDictionary<string, SimulatedPendingStandardSignalHelloModel> PendingInboundStandardSignalHellosMutable => _pendingInboundStandardSignalHellos;
 
@@ -194,6 +198,21 @@ public sealed class SimulatedPeerModel : IDisposable
         {
             _recentChatMessages.RemoveAt(0);
         }
+    }
+
+    internal bool TryPopOneTimePreKeyPrivate(SimulatedOneTimePreKeyId id, out PrivatePreKey privateKey)
+    {
+        for (var i = 0; i < _oneTimePreKeysPrivate.Count; i++)
+        {
+            if (_oneTimePreKeysPrivate[i].Id == id)
+            {
+                privateKey = _oneTimePreKeysPrivate[i].PrivateKey;
+                _oneTimePreKeysPrivate.RemoveAt(i);
+                return true;
+            }
+        }
+        privateKey = default;
+        return false;
     }
 
     
@@ -409,7 +428,13 @@ public sealed class SimulatedPeerModel : IDisposable
             PendingInviteHandshakeResponses: _pendingInviteHandshakeResponses
                 .Select(r => new PendingInviteHandshakeResponseSnapshot(r.CorrelationId, r.ResponseBytes.ToArray()))
                 .ToList(),
-            RecentChatMessages: _recentChatMessages.ToList());
+            RecentChatMessages: _recentChatMessages.ToList(),
+            OneTimePreKeysPrivate: _oneTimePreKeysPrivate
+                .Select(r => new SimulatedOneTimePreKeyPrivateSnapshot(
+                    r.Id.Value,
+                    r.PrivateKey.Value,
+                    r.CreatedAtUtc))
+                .ToList());
     }
 
     private void UpdateAttempt(

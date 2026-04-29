@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using Desktop.Wpf.Features.Simulator.Models;
 using Percolator.Cryptography;
 using Percolator.Cryptography.Primitives;
 
@@ -36,7 +37,19 @@ public sealed class SignalProtocolEngine : ISignalProtocolEngine
             identityEcdh2.ImportECPrivateKey(peer.IdentitySigningKeyPrivateKeyEcPrivateKey, out _);
             var curve = identityEcdh2.ExportParameters(false).Curve;
             using var otk = ECDiffieHellman.Create(curve);
-            oneTimeKeys[oneTimeIndex] = new OneTimeKeyInstance(Guid.NewGuid(), new OneTimeKey(otk.PublicKey.ExportSubjectPublicKeyInfo()));
+            var otkId = Guid.NewGuid();
+            var otkPublicSpki = otk.PublicKey.ExportSubjectPublicKeyInfo();
+            var otkPrivateBytes = otk.ExportECPrivateKey();
+
+            // Store private key on the peer's private OTK store
+            var otkPrivateRecord = new SimulatedOneTimePreKeyPrivateRecord(
+                SimulatedOneTimePreKeyId.FromGuid(otkId),
+                new PrivatePreKey(otkPrivateBytes),
+                _clock.UtcNow);
+            peer.OneTimePreKeysPrivateMutable.Add(otkPrivateRecord);
+
+            // Publish only the public portion
+            oneTimeKeys[oneTimeIndex] = new OneTimeKeyInstance(otkId, new OneTimeKey(otkPublicSpki));
         }
         
         return new PreKeyBundleForPublish(
