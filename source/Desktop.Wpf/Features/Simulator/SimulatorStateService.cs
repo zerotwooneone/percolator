@@ -1859,7 +1859,10 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             try
             {
                 var peerModel = _peers.FirstOrDefault(p => p.PeerId == simulatedPeerId);
-                if (peerModel is null) return null;
+                if (peerModel is null)
+                {
+                    return null;
+                }
 
                 foreach (var kv in peerModel.SessionsMutable)
                 {
@@ -1868,7 +1871,10 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
                         var pt = kv.Value.Decrypt(cipher, clock);
                         peerModel.SessionsMutable[kv.Key] = kv.Value;
 
-                        if (pt.Value.Length == 0) return null;
+                        if (pt.Value.Length == 0)
+                        {
+                            return null;
+                        }
 
                         var innerEnv = InternalEnvelope.Parser.ParseFrom(pt.Value);
                         if (innerEnv.ApplicationPayloadCase == InternalEnvelope.ApplicationPayloadOneofCase.ChatEnvelope
