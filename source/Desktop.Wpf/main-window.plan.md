@@ -1812,19 +1812,19 @@ Problem (researched): `SecureSessionCreatedNotification` carries `RemotePeerId` 
 
 Suggested columns (pre-made):
 
-- `Id` (long)
-- `SelfIdentityId` (int)
-- `RemotePeerId` (Guid)
-- `RouteKind` (int: Direct|Relayed)
+- `Id` (long, autoincrement)
+- `SelfIdentityId` (int, NOT NULL)
+- `RemotePeerId` (Guid, NOT NULL)
+- `RouteKind` (int: Direct|Relayed, NOT NULL)
 - `EndpointHost` (string?, for direct)
 - `EndpointPort` (int?, for direct)
 - `RelayHostPeerId` (Guid?, for relayed)
-- `ObservedAtUtc` (DateTimeOffset)
+- `ObservedAtUtc` (DateTimeOffset, NOT NULL)
 - `LastAttemptAtUtc` (DateTimeOffset?)
 - `LastSuccessAtUtc` (DateTimeOffset?)
-- `AttemptCount` (int)
+- `AttemptCount` (int, NOT NULL) - initialize to 0 for new candidates
 - `LastError` (string?)
-- `Source` (string)
+- `Source` (string, NOT NULL) - use "main-initiated" for main-initiated candidates, "outside-initiated" for incoming requests
 
 Uniqueness constraint (pre-made): unique index on `(SelfIdentityId, RemotePeerId, RouteKind, EndpointHost, EndpointPort, RelayHostPeerId)`.
 

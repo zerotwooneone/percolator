@@ -1742,7 +1742,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
 
             return true;
         }
-        catch
+        catch (Exception ex)
         {
             await EnqueueRelayUpstreamToMainAsync(relayHostPeerId, msg.OpaqueBytes, msg.DebugType, cancellationToken).ConfigureAwait(false);
             throw;

@@ -553,7 +553,9 @@ namespace Percolator.Application.Network.Handshake
                             RemotePeerId = netPeerId,
                             RouteKind = RouteKind.Relayed,
                             RelayHostPeerId = relayPeerId.Value,
-                            ObservedAtUtc = _clock.UtcNow
+                            ObservedAtUtc = _clock.UtcNow,
+                            AttemptCount = 0,
+                            Source = "main-initiated"
                         };
                         await _candidateRepository.UpsertAsync(candidate, cancellationToken).ConfigureAwait(false);
                     }
