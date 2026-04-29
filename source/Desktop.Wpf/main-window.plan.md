@@ -1963,12 +1963,68 @@ Phase 1 (required):
    - Verify finalize persists relay candidate.
    - Verify sender can route a chat send via `PlannedRoute.Relay(...)` even when `PeerRoutingProfiles.GetByIdAsync(target)` returns null.
 
-Phase 2 (defer):
+ Phase 2 (implementation-ready):
+ 
+ 8) Add `TransportSendResult` + endpoint attribution (Option A) (compile-first step).
+    
+    Required code changes (explicit):
+    
+    - Add new result type in `Percolator.Network.Messaging`:
+      - `TransportSendResult` MUST include:
+        - `bool Ok`
+        - `NetworkPayload? ResponsePayload`
+        - `SendFailureReason? Reason`
+        - `Exception? Error`
+        - `System.Net.DnsEndPoint? UsedEndpoint` (direct only)
+    - Update `Percolator.Network.Messaging/ITransportPort.cs`:
+      - Replace the tuple returns with `Task<TransportSendResult> SendDirectAsync(...)` and `Task<TransportSendResult> SendViaRelayAsync(...)`.
+    - Update Application transport adapter implementation:
+      - `Percolator.Application/Network/NetworkTransportPortAdapter.cs` MUST populate:
+        - `UsedEndpoint` for direct sends (the endpoint actually used)
+        - `UsedEndpoint = null` for relayed sends
+    
+    Invariant (explicit): `UsedEndpoint` is only meaningful for `SendDirectAsync` successes. If the adapter cannot surface the used endpoint, it must return `UsedEndpoint = null` and Phase 2 promotion for direct MUST be skipped (never guess).
 
-8) Add `TransportSendResult` + endpoint attribution (Option A).
-9) Add `IRouteConfirmationService` promotion + stats updates.
-10) Add candidate pruning:
-   - Define a retention policy (e.g., prune candidates with `LastSuccessAtUtc` null and `ObservedAtUtc` older than N days).
+ 9) Add route confirmation and promotion (`IRouteConfirmationService`) + candidate stats updates.
+    
+    Required interfaces (explicit):
+    
+    - Add in `Percolator.Application/Network/`:
+      - `IRouteConfirmationService`
+      - `RouteConfirmationService`
+    
+    Required behavior (explicit):
+    
+    - On *every* send attempt (success or failure), update candidate stats for the attempted candidate(s):
+      - increment `AttemptCount`
+      - set `LastAttemptAtUtc`
+      - on failure, set `LastError`
+      - on success, set `LastSuccessAtUtc` and clear `LastError`
+    - On success, promote the exact successful route into `PeerRoutingProfiles`:
+      - If the successful route was **Direct**:
+        - Promote only when `TransportSendResult.UsedEndpoint` is non-null.
+        - Upsert a confirmed direct endpoint for `(SelfIdentityId, RemotePeerId)`.
+      - If the successful route was **Relay**:
+        - Promote using the `PlannedRoute.RelayHostPeerId` that was actually attempted.
+        - Upsert a confirmed relay route for `(SelfIdentityId, RemotePeerId)`.
+    
+    Call boundary (explicit, non-negotiable):
+    
+    - `DefaultSendExecutor` is the only place that knows *which route actually succeeded* AND has access to the `TransportSendResult`.
+    - Therefore, Phase 2 MUST invoke confirmation from `DefaultSendExecutor`.
+    - To support this, update `ISendExecutor.ExecuteAsync(...)` signature to include `SelfId`:
+      - `Task<SendOutcome> ExecuteAsync(SelfId selfIdentityId, PeerId target, NetworkPayload payload, IReadOnlyList<PlannedRoute> plannedRoutes, CancellationToken ct = default)`
+    - Update `DefaultNetworkSender.SendAsync(...)` to pass `selfIdentityId` into `ExecuteAsync`.
+
+ 10) Add candidate pruning.
+    
+    Concrete policy (pre-made):
+    
+    - Prune candidates where:
+      - `LastSuccessAtUtc` is null AND `ObservedAtUtc < UtcNow - 14 days`
+    - Do not prune candidates with `LastSuccessAtUtc` set.
+    
+    Implementation anchor (explicit): implement pruning as a repository method on `IPeerRouteCandidateRepository` (e.g., `PruneAsync(SelfId selfIdentityId, DateTimeOffset nowUtc, CancellationToken ct)`), and call it from a low-frequency background task (not from the send hot path).
 
 Concrete test locations (pre-made):
 
@@ -1982,20 +2038,16 @@ Concrete test locations (pre-made):
 
 Decision (pre-made): unit test promotion logic via `RouteConfirmationService` directly; do not rely on MediatR wiring.
 
-Phase 2 tests (pre-made):
+ Phase 2 tests (pre-made):
 
 - `Percolator.ApplicationTests/Network/RouteConfirmationServiceTests.cs`:
   - Given a candidate direct endpoint, confirm promotes it into `PeerRoutingProfiles`.
   - Given a candidate relay host, confirm promotes relay link into `PeerRoutingProfiles`.
 
-- Extend `Percolator.ApplicationTests/ReverseSignal/ApprovePendingSessionCommandTests.cs`:
-  - Verify promotion occurs only when delivery succeeds.
+ - Extended `Percolator.ApplicationTests/ReverseSignal/ApprovePendingSessionCommandTests.cs`:
+   - Verify promotion occurs only when delivery succeeds.
 
 ### J.9: Remaining research / implementation questions (explicit)
-
-- Migrations: `PeerRoutingProfiles` and its dependent tables are created in `Percolator.Infrastructure/Persistence/Migrations/20251228034329_InitialCreate.cs`.
-  - Add the `PeerRouteCandidates` table via a new EF migration in the same `Percolator.Infrastructure.Persistence.Migrations` namespace/pattern.
-- Confirm all `INetworkSender.SendAsync(...)` call sites can supply `SelfId` (the active identity).
 - Confirm we have a single authoritative call site for chat sends (so the signature change is not overly invasive).
 - Phase 2: promotion + pruning details.
 
