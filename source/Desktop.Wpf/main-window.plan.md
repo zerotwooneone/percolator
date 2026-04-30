@@ -1115,505 +1115,260 @@ Update tests:
 
 ### Goal
 
-Refactor all `ByteArrayRecord` implementations to use `ReadOnlyMemory<byte>` internally while retaining the `.Value` property for backward compatibility. Defensive copying happens at construction boundaries only, eliminating unnecessary array allocations in internal operations.
-
-### Current State Analysis
-
-The codebase has multiple `ByteArrayRecord` base classes across different domains, all using `byte[] Value` with defensive copying issues:
-
-- `Percolator.Identity.Primitives.ByteArrayRecord` - wraps `byte[] Value`
-- `Percolator.Chat.Primitives.ByteArrayRecord` - wraps `byte[] Value`
-- `Percolator.Network.Primitives.ByteArrayRecord` - wraps `byte[] Value`
-- `Percolator.Cryptography.Primitives.ByteArrayRecord` - wraps `byte[] Value`
-- `Percolator.Dht.Primitives.ByteArrayRecord` - wraps `byte[] Value` (different pattern - no inheritance)
-
-**Problems with current approach:**
-1. Direct `byte[]` storage allows external mutation (no defensive copy on construction)
-2. `Value` property exposes mutable array to callers
-3. No standard `ToArray()` / `AsReadOnlyMemory()` pattern
-4. Hash code computation iterates array every time
-
-### Research Findings: Concrete ByteArrayRecord Implementations
-
-**Percolator.Cryptography (18 types):**
-- AssociatedData, ChainKey, Ciphertext, HandshakeInvitation, HandshakeResponseMessage, OneTimeKey, Plaintext, PreKey, PrivateEphemeralKey, PrivateOneTimeKey, PublicKey, PrivatePreKey, RatchetEphemeralKey, RatchetIdentityKey, RootKey, Signature, SharedSecret, SessionRatchetMessage
-
-**Percolator.Network (7 types):**
-- DirectMessagePublicKey, Payload, TlsCertificate, IdentityPublicKey, Signature, PublicKeyHash, PublicKey
-
-**Percolator.Chat (3 types):**
-- Pkh, GroupAvatar, EncryptedGroupKey
-
-**Percolator.Dht (1 type):**
-- NodeId (has length validation - must preserve)
-
-### Research Findings: ByteArrayRecord.Value Direct Access Patterns
-
-**Pattern 1: Length checks for validation**
-- Cryptography.HandshakePlanner.cs - inv.Value.Length == 0
-- Cryptography.AeadSessionCrypto.cs - localIdentityPrivate?.Value is null || localIdentityPrivate.Value.Length == 0
-- Cryptography.IPreKeyBundleValidator.cs - bundle.IdentitySigningKey?.Value is null || bundle.IdentitySigningKey.Value.Length == 0
-- Cryptography.CryptographyExtensions.cs - publicKey.Value.Length == 64 || publicKey.Value.Length == 65
-- Dht.DhtService.cs - node.Id.Value.Length == targetId.Value.Length
-- Dht.NodeId.cs - if (id1.Value.Length != id2.Value.Length)
-
-**Pattern 2: Indexing and array manipulation**
-- Cryptography.CryptographyExtensions.cs - publicKey.Value.Skip(1).Take(32).ToArray()
-- Cryptography.X3dhDeriver.cs - ikA.ImportECPrivateKey(localIdentityPrivateKey.Value, out _)
-- Dht.NodeId.cs - xorResult[i] = (byte)(id1.Value[i] ^ id2.Value[i])
-
-**Pattern 3: Direct pass-through to crypto APIs**
-- Cryptography.IRatchetEngine.cs - SessionRatchetMessage.GetAssociatedData((preKey, counter, prevLen), ad.Value)
-- Cryptography.CryptographyExtensions.cs - ECDH import/export operations
-
-**Pattern 4: Test assertions using .Value**
-- Multiple test files access .Value directly for assertions
-- CryptographyTests.SessionRatchetMessageTests.cs - retrievedKey.Value.Should().BeEquivalentTo(ratchetKey.Value)
-
-### Design Pattern
-
-**Key improvements (per domain, no shared infrastructure):**
-1. Internal storage: `ReadOnlyMemory<byte>` instead of `byte[]`
-2. Defensive copy in constructor
-3. `Value` property returns defensive copy (maintains backward compatibility)
-4. `ToArray()` returns defensive copy (alias for Value)
-5. `AsReadOnlyMemory()` exposes read-only view without copying
-6. Custom `Equals()` using `SequenceEqual`
-7. Hash code computed on demand (no caching)
-
-### H.1: Update Percolator.Identity.Primitives.ByteArrayRecord
-
-**File:** `source/Percolator.Identity/Primitives/ByteArrayRecord.cs`
-```csharp
-namespace Percolator.Identity.Primitives;
-
-public abstract record ByteArrayRecord
-{
-    private readonly ReadOnlyMemory<byte> _value;
-
-    protected ByteArrayRecord(byte[] bytes)
-    {
-        if (bytes is null)
-            throw new ArgumentNullException(nameof(bytes));
-        
-        var copy = new byte[bytes.Length];
-        Buffer.BlockCopy(bytes, 0, copy, 0, bytes.Length);
-        _value = copy;
-    }
-
-    /// <summary>
-    /// Returns a defensive copy of the value as a byte array.
-    /// Maintains backward compatibility with existing .Value access patterns.
-    /// </summary>
-    public byte[] Value => ToArray();
-
-    /// <summary>
-    /// Returns a defensive copy of the value as a byte array.
-    /// </summary>
-    public byte[] ToArray()
-    {
-        var copy = new byte[_value.Length];
-        _value.Span.CopyTo(copy);
-        return copy;
-    }
-
-    /// <summary>
-    /// Returns the value as read-only memory without copying.
-    /// </summary>
-    public ReadOnlyMemory<byte> AsReadOnlyMemory() => _value;
-
-    /// <summary>
-    /// Returns the value as a span without copying.
-    /// </summary>
-    public ReadOnlySpan<byte> AsSpan() => _value.Span;
-
-    public virtual bool Equals(ByteArrayRecord? other)
-    {
-        if (other is null) return false;
-        if (ReferenceEquals(this, other)) return true;
-        return _value.Span.SequenceEqual(other._value.Span);
-    }
-
-    public override int GetHashCode()
-    {
-        unchecked
-        {
-            var hash = 17;
-            var span = _value.Span;
-            for (int i = 0; i < span.Length; i++)
-            {
-                hash = hash * 23 + span[i];
-            }
-            return hash;
-        }
-    }
-}
-```
-
-### H.2: Update Percolator.Chat.Primitives.ByteArrayRecord
-
-**File:** `source/Percolator.Chat/Primitives/ByteArrayRecord.cs`
-```csharp
-namespace Percolator.Chat.Primitives;
-
-public abstract record ByteArrayRecord
-{
-    private readonly ReadOnlyMemory<byte> _value;
-
-    protected ByteArrayRecord(byte[] bytes)
-    {
-        if (bytes is null)
-            throw new ArgumentNullException(nameof(bytes));
-        
-        var copy = new byte[bytes.Length];
-        Buffer.BlockCopy(bytes, 0, copy, 0, bytes.Length);
-        _value = copy;
-    }
-
-    public byte[] Value => ToArray();
-
-    public byte[] ToArray()
-    {
-        var copy = new byte[_value.Length];
-        _value.Span.CopyTo(copy);
-        return copy;
-    }
-
-    public ReadOnlyMemory<byte> AsReadOnlyMemory() => _value;
-
-    public ReadOnlySpan<byte> AsSpan() => _value.Span;
-
-    public virtual bool Equals(ByteArrayRecord? other)
-    {
-        if (other is null) return false;
-        if (ReferenceEquals(this, other)) return true;
-        return _value.Span.SequenceEqual(other._value.Span);
-    }
-
-    public override int GetHashCode()
-    {
-        unchecked
-        {
-            var hash = 17;
-            var span = _value.Span;
-            for (int i = 0; i < span.Length; i++)
-            {
-                hash = hash * 23 + span[i];
-            }
-            return hash;
-        }
-    }
-}
-```
-
-### H.3: Update Percolator.Network.Primitives.ByteArrayRecord
-
-**File:** `source/Percolator.Network/Primitives/ByteArrayRecord.cs`
-```csharp
-namespace Percolator.Network.Primitives;
-
-public abstract record ByteArrayRecord
-{
-    private readonly ReadOnlyMemory<byte> _value;
-
-    protected ByteArrayRecord(byte[] bytes)
-    {
-        if (bytes is null)
-            throw new ArgumentNullException(nameof(bytes));
-        
-        var copy = new byte[bytes.Length];
-        Buffer.BlockCopy(bytes, 0, copy, 0, bytes.Length);
-        _value = copy;
-    }
-
-    public byte[] Value => ToArray();
-
-    public byte[] ToArray()
-    {
-        var copy = new byte[_value.Length];
-        _value.Span.CopyTo(copy);
-        return copy;
-    }
-
-    public ReadOnlyMemory<byte> AsReadOnlyMemory() => _value;
-
-    public ReadOnlySpan<byte> AsSpan() => _value.Span;
-
-    public virtual bool Equals(ByteArrayRecord? other)
-    {
-        if (other is null) return false;
-        if (ReferenceEquals(this, other)) return true;
-        return _value.Span.SequenceEqual(other._value.Span);
-    }
-
-    public override int GetHashCode()
-    {
-        unchecked
-        {
-            var hash = 17;
-            var span = _value.Span;
-            for (int i = 0; i < span.Length; i++)
-            {
-                hash = hash * 23 + span[i];
-            }
-            return hash;
-        }
-    }
-}
-```
-
-### H.4: Update Percolator.Cryptography.Primitives.ByteArrayRecord
-
-**File:** `source/Percolator.Cryptography/Primitives/ByteArrayRecord.cs`
-```csharp
-namespace Percolator.Cryptography.Primitives;
-
-public abstract record ByteArrayRecord
-{
-    private readonly ReadOnlyMemory<byte> _value;
-
-    protected ByteArrayRecord(byte[] bytes)
-    {
-        if (bytes is null)
-            throw new ArgumentNullException(nameof(bytes));
-        
-        var copy = new byte[bytes.Length];
-        Buffer.BlockCopy(bytes, 0, copy, 0, bytes.Length);
-        _value = copy;
-    }
-
-    public byte[] Value => ToArray();
-
-    public byte[] ToArray()
-    {
-        var copy = new byte[_value.Length];
-        _value.Span.CopyTo(copy);
-        return copy;
-    }
-
-    public ReadOnlyMemory<byte> AsReadOnlyMemory() => _value;
-
-    public ReadOnlySpan<byte> AsSpan() => _value.Span;
-
-    public virtual bool Equals(ByteArrayRecord? other)
-    {
-        if (other is null) return false;
-        if (ReferenceEquals(this, other)) return true;
-        return _value.Span.SequenceEqual(other._value.Span);
-    }
-
-    public override int GetHashCode()
-    {
-        unchecked
-        {
-            var hash = 17;
-            var span = _value.Span;
-            for (int i = 0; i < span.Length; i++)
-            {
-                hash = hash * 23 + span[i];
-            }
-            return hash;
-        }
-    }
-}
-```
-
-### H.5: Update Percolator.Dht.Primitives.ByteArrayRecord
-
-**File:** `source/Percolator.Dht/Primitives/ByteArrayRecord.cs`
-```csharp
-namespace Percolator.Dht.Primitives;
-
-public abstract record ByteArrayRecord
-{
-    private readonly ReadOnlyMemory<byte> _value;
-
-    protected ByteArrayRecord(byte[] bytes)
-    {
-        if (bytes is null)
-            throw new ArgumentNullException(nameof(bytes));
-        
-        var copy = new byte[bytes.Length];
-        Buffer.BlockCopy(bytes, 0, copy, 0, bytes.Length);
-        _value = copy;
-    }
-
-    public byte[] Value => ToArray();
-
-    public byte[] ToArray()
-    {
-        var copy = new byte[_value.Length];
-        _value.Span.CopyTo(copy);
-        return copy;
-    }
-
-    public ReadOnlyMemory<byte> AsReadOnlyMemory() => _value;
-
-    public ReadOnlySpan<byte> AsSpan() => _value.Span;
-
-    public virtual bool Equals(ByteArrayRecord? other)
-    {
-        if (other is null) return false;
-        if (ReferenceEquals(this, other)) return true;
-        return _value.Span.SequenceEqual(other._value.Span);
-    }
-
-    public override int GetHashCode()
-    {
-        unchecked
-        {
-            var hash = 17;
-            var span = _value.Span;
-            for (int i = 0; i < span.Length; i++)
-            {
-                hash = hash * 23 + span[i];
-            }
-            return hash;
-        }
-    }
-}
-```
-
-### H.6: Update concrete implementations
-
-All concrete ByteArrayRecord implementations already call `base(bytes)` in their constructors. No changes needed to concrete implementations - they automatically benefit from the new base class behavior.
-
-**Types updated automatically:**
-- Percolator.Chat: Pkh, GroupAvatar, EncryptedGroupKey
-- Percolator.Cryptography: AssociatedData, ChainKey, Ciphertext, HandshakeInvitation, HandshakeResponseMessage, OneTimeKey, Plaintext, PreKey, PrivateEphemeralKey, PrivateOneTimeKey, PublicKey, PrivatePreKey, RatchetEphemeralKey, RatchetIdentityKey, RootKey, Signature, SharedSecret, SessionRatchetMessage
-- Percolator.Network: DirectMessagePublicKey, Payload, TlsCertificate, IdentityPublicKey, Signature, PublicKeyHash, PublicKey
-- Percolator.Dht: NodeId (preserves existing length validation logic)
-
-### H.7: Update call sites for performance (optional optimization)
-
-**Note:** Since `.Value` is retained as a computed property that returns `ToArray()`, existing code continues to work without changes. However, call sites can be updated to use `AsReadOnlyMemory()` or `AsSpan()` for zero-allocation access where appropriate.
-
-**H.7.1: Protobuf serialization boundaries**
-
-Where performance matters, update to avoid double allocation:
-```csharp
-// Before (works but allocates)
-ByteString.CopyFrom(record.Value)
-
-// After (avoids allocation)
-ByteString.CopyFrom(record.AsReadOnlyMemory().Span)
-```
-
-**H.7.2: Cryptography API boundaries**
-
-Update crypto API calls to use spans where supported:
-```csharp
-// Before (works but allocates)
-cryptoApi.Process(record.Value)
-
-// After (avoids allocation if API supports spans)
-cryptoApi.Process(record.AsSpan())
-```
-
-**H.7.3: Test assertions**
-
-Update test assertions to use typed equality:
-```csharp
-// Before (works but allocates)
-Assert.That(actual.Value.SequenceEqual(expected.Value))
-
-// After (uses type equality, no allocation)
-Assert.That(actual.Equals(expected))
-```
-
-### Notes
-
-- Each domain maintains its own ByteArrayRecord implementation (preserves domain isolation)
-- `.Value` property is retained for backward compatibility
-- Defensive copying happens at construction boundaries only
-- Internal operations can use `AsReadOnlyMemory()` or `AsSpan()` for zero-allocation access
-- This is a "big bang" change - all ByteArrayRecord base classes updated simultaneously
-- No migration strategy needed - existing `.Value` access patterns continue to work
-
-## Chunk I
-
-### Goal
-
-Replace the shared `ByteArrayRecord` base-type approach with a source-generator-driven pattern for byte-array-backed value objects, so each domain can declare concise types and receive a consistent, allocation-conscious implementation at compile time.
-
-**Target user experience:**
-```csharp
-[ByteArray(length: 32)]
-public sealed partial record IdentityPublicKeyHash
-{
-    public static IdentityPublicKeyHash FromSpki(byte[] spki) { /* handwritten */ }
-}
-```
-
-### Deliverables
-
-- A new source generator project that produces implementations for `[ByteArray]`-annotated types.
-- Domain libraries that define byte-array-backed value objects reference the generator as an analyzer.
-- At least one representative type per domain is migrated to the generator pattern as a proof of end-to-end viability.
-
-### I.1: Introduce generator projects
-
-**I.1.1: Create a generator project**
-
-Add a new project (suggested: `Percolator.SourceGenerators`) with:
-- Roslyn source generator implementation.
-- A `[ByteArray]` generator (and future generators as needed).
-- Project configuration so consumers can reference it as an analyzer (generator) without creating a runtime dependency.
- 
-Implementation decisions to lock in now:
-- The generator will provide `ByteArrayAttribute` via `RegisterPostInitializationOutput` so consuming projects do not need a runtime reference just to compile the attribute.
-- The attribute namespace will be `Percolator.SourceGenerators`.
-- The generator project should target `netstandard2.0` (typical for analyzers) and use a modern C# version.
-- The generator project should include Roslyn packages (e.g., `Microsoft.CodeAnalysis.CSharp`) as private assets.
-- The generator will only support `sealed partial record` types (not classes/structs) in the initial version.
-- The generator will emit diagnostics for misuse (non-partial types, invalid length constraints, member conflicts, etc.).
-
-**I.1.2: Decide attribute + generated API surface**
-
-Specify the generated members and invariants. Suggested baseline:
-- **Backing storage:** `private readonly ReadOnlyMemory<byte> _value;`
-- **Accessors (no allocation):** `ReadOnlySpan<byte> Span` and/or `ReadOnlyMemory<byte> Memory`
-- **Boundary conversion (allocates):** `byte[] ToArray()`
-- **Construction (safe default):** `public static T FromBytes(byte[] bytes)` that validates and copies
-- **Equality/Hash:** byte-wise equality and stable hash based on bytes
-- **Validation hooks:** generated length checks based on `[ByteArray(length)]` with optional `[ByteArray(minLength, maxLength)]` overload
-
-Note: this plan explicitly drops `.Value` and drops `FromMemoryDangerous`.
-
-### I.1.3: Validate project compatibility for source generators
-
-Current state (as of this plan): the domain libraries are SDK-style projects targeting .NET 9 (`net9.0`, `net9.0-windows`, `net9.0-windows7.0`). This is compatible with source generators; no solution-wide `Directory.Build.props/targets` or `global.json` constraints were found that would prevent generator usage.
-
-### I.2: Reference the generator from all relevant domain libraries
-
-Update each domain library that defines byte-array-backed value objects to reference the generator as an analyzer via project reference.
-
-Recommended reference style:
-```xml
-<ProjectReference Include="..\Percolator.SourceGenerators\Percolator.SourceGenerators.csproj"
-                  OutputItemType="Analyzer"
-                  ReferenceOutputAssembly="false" />
-```
-
-Candidate domain libraries:
-- `Percolator.Identity`
-- `Percolator.Chat`
-- `Percolator.Network`
-- `Percolator.Cryptography`
-- `Percolator.Dht`
-
-### I.3: Migrate representative types (prove viability)
-
-For each domain, migrate at least one representative value object to the generator pattern:
-- Convert the type declaration to `sealed partial record`.
-- Apply `[ByteArray(...)]` with appropriate invariants.
-- Keep domain-specific factory methods (e.g. `FromSpki`) handwritten.
-- Update call sites to use `Span`/`Memory`/`ToArray()` as appropriate.
-
-This step is intentionally limited-scope to avoid a risky "big bang" conversion of every type at once.
-
-### I.4: Verification
-
-- Build the solution and ensure generated `.g.cs` files compile in each consuming domain library.
-- Run all existing tests.
-- Spot-check allocations at key boundaries (protobuf serialization and crypto API boundaries) to ensure the new APIs enable span/memory usage without forced copies.
+Migrate all byte-array-backed value objects away from per-domain `ByteArrayRecord` base classes and into the `[ByteArray]` source generator pattern.
+
+This chunk is the authoritative migration playbook for:
+
+- Removing inheritance-based byte-array wrappers.
+- Standardizing API surface (span/memory access, copying rules, factories, equality/hash code).
+- Preserving strong typing across domains (no shared interface between unrelated types).
+
+### Non-goals
+
+- Do not introduce a shared interface across unrelated domain types.
+- Do not keep `.Value` as a public mutable `byte[]` escape hatch.
+- Do not re-implement ad-hoc byte equality/hash code in each domain type.
+
+### Target State: Generator-driven value object pattern
+
+For each byte-backed domain type:
+
+- The type becomes `sealed partial record` annotated with `[ByteArray(...)]`.
+- The generator owns internal storage (`ReadOnlyMemory<byte>`), equality, and `GetHashCode`.
+- Construction happens via generated factories (copying rules are explicit).
+- Call sites use `Span`/`Memory` where possible; `ToArray()` only at serialization boundaries.
+
+Generated API surface (reference):
+
+- `ReadOnlySpan<byte> Span { get; }`
+- `ReadOnlyMemory<byte> Memory { get; }`
+- `byte[] ToArray()`
+- Factories:
+  - `FromBytes(byte[] bytes)` (defensive copy)
+  - `FromBytesOwned(byte[] bytes)` (takes ownership, no copy)
+  - `FromSpan(ReadOnlySpan<byte> bytes)` (defensive copy)
+  - `TryFromBytes(byte[] bytes, out T value)`
+  - `TryFromSpan(ReadOnlySpan<byte> bytes, out T value)`
+
+### Migration Rulebook (must-follow)
+
+- **Rule H.0.1 (construction)**
+  - If the input `byte[]` is not guaranteed unique/owned by the caller, use `FromBytes`.
+  - Use `FromBytesOwned` only when you just allocated the array and will not mutate it again.
+- **Rule H.0.2 (no `.Value` usage)**
+  - Replace `.Value` reads with `.Span` / `.Memory`.
+  - Replace `.Value` pass-through to APIs with span/memory overloads.
+  - If a library requires `byte[]`, call `.ToArray()` at that boundary.
+- **Rule H.0.3 (equality)**
+  - Remove `SequenceEqual` call-site comparisons where a typed comparison is possible.
+- **Rule H.0.4 (length constraints)**
+  - Use `[ByteArray(length: N)]` for fixed-size values.
+  - Use `[ByteArray(minLength: A, maxLength: B)]` for ranged sizes.
+  - Keep any additional invariants (format, prefix tags, etc.) in domain code (not in the generator).
+
+### H.1: Project configuration (one-time per domain project)
+
+For each project that declares byte-backed value objects (examples: `Percolator.Identity`, `Percolator.Network`, `Percolator.Cryptography`, `Percolator.Chat`, `Percolator.Dht`):
+
+- Add a reference to the generator project/package as an analyzer.
+- Ensure the project can see the `[ByteArray]` attribute (do not add a global using; use explicit `using Percolator.SourceGenerators;` where needed).
+
+Implementation checklist per project:
+
+- Add analyzer reference to `Percolator.SourceGenerators`.
+- Build once and confirm generator runs (no diagnostics).
+
+**Verified in repo:** This wiring is already present in these projects as a `ProjectReference` configured as an analyzer:
+
+- `Percolator.Chat/Percolator.Chat.csproj`
+- `Percolator.Cryptography/Percolator.Cryptography.csproj`
+- `Percolator.Dht/Percolator.Dht.csproj`
+- `Percolator.Identity/Percolator.Identity.csproj`
+- `Percolator.Network/Percolator.Network.csproj`
+
+Canonical form (keep consistent across projects):
+
+- `ProjectReference` to `Percolator.SourceGenerators.csproj` with:
+  - `OutputItemType="Analyzer"`
+  - `ReferenceOutputAssembly="false"`
+
+### H.2: IdentityPublicKeyHash migration (representative example)
+
+**File:** `source/Percolator.Identity/IdentityPublicKeyHash.cs`
+
+Replace the hand-written implementation with a generator-driven record, preserving the domain-specific `FromSpki` logic.
+
+Implementation steps:
+
+1. Convert to a generated type:
+   - Change the type to `public sealed partial record IdentityPublicKeyHash`.
+   - Add `[ByteArray(length: 32)]`.
+   - Add `using Percolator.SourceGenerators;`.
+2. Remove manual storage and manual equality/hash code:
+   - Delete `_value` field.
+   - Delete custom `Equals` / `GetHashCode`.
+   - Delete manual `FromBytes(byte[] bytes)` and `ToArray()`.
+3. Re-implement `FromSpki` to call the generated factory:
+   - Compute `SHA256.HashData(spki)`.
+   - Use `IdentityPublicKeyHash.FromBytesOwned(hash)` (safe because `HashData` returns a fresh array).
+
+Post-conditions:
+
+- `IdentityPublicKeyHash` enforces 32-byte length via generator.
+- Call sites stop depending on `AsReadOnlyMemory()` and use `Memory`/`Span`.
+
+### H.3: Migrate the simple wrapper types (bulk change)
+
+These are currently thin wrappers over `ByteArrayRecord` with no extra invariants.
+
+For each of these types:
+
+- Replace `public record X(byte[] Value) : ByteArrayRecord(Value);` with:
+  - `public sealed partial record X` + `[ByteArray(...)]`.
+- Decide the correct constraint:
+  - If unconstrained, omit length constraints.
+  - If constrained, add `[ByteArray(length: N)]` or `[ByteArray(minLength: A, maxLength: B)]`.
+- Remove any custom `FromBytes` pass-through that adds no invariants.
+
+Concrete starting set (from current codebase):
+
+- `Percolator.Network`: `PublicKey`, `PublicKeyHash`, `Signature`, `Payload`, `TlsCertificate`, `DirectMessagePublicKey`, `ValueObjects/IdentityPublicKey`
+- `Percolator.Cryptography`: `PublicKey`, `Signature`, `Ciphertext`, `SharedSecret`, and remaining `ByteArrayRecord` wrappers
+- `Percolator.Chat`: `ValueObjects/Pkh`, `Primitives/GroupAvatar`, `Primitives/EncryptedGroupKey`
+
+### H.3.1: Length constraint review checklist (do this before migrating each type)
+
+As part of migrating each type to `[ByteArray]`, decide whether to set `length`, `minLength`, and/or `maxLength`.
+
+**Findings (usage-driven constraints):**
+
+Set `length: 32` (high confidence, backed by code usage):
+
+- `Percolator.Identity/IdentityPublicKeyHash.cs`
+  - Already enforces `Length == 32`.
+- `Percolator.Dht/NodeId.cs`
+  - Already enforces `Length == 32`.
+- `Percolator.Network/PublicKeyHash.cs`
+  - `Percolator.Application/Network/SigningService.GetHash(PublicKey)` computes `SHA256.HashData(publicKey.Value)`.
+- `Percolator.Cryptography/SharedSecret.cs`
+  - Constructed from `CryptoUtils.KDF(..., outputLength: CryptoUtils.KeySize)` where `KeySize == 32`.
+- `Percolator.Cryptography/RootKey.cs`
+  - Derived from X3DH output / used as 32-byte KDF input/output.
+- `Percolator.Cryptography/ChainKey.cs`
+  - Derived via `CryptoUtils.KDF(..., outputLength: 32)`.
+- `Percolator.Chat/ValueObjects/Pkh.cs`
+  - Used as input to `IdentityPublicKeyHash.FromBytes(pkh.Value)` (which requires 32 bytes).
+
+Leave unconstrained (variable by design / no stable invariant proven in code):
+
+- `Percolator.Network/PublicKey.cs`, `Signature.cs`, `Payload.cs`, `TlsCertificate.cs`, `DirectMessagePublicKey.cs`, `ValueObjects/IdentityPublicKey.cs`
+- `Percolator.Cryptography/AssociatedData.cs`, `Ciphertext.cs`, `Plaintext.cs`, `HandshakeInvitation.cs`, `HandshakeResponse.cs`, `SessionRatchetMessage.cs`, `Signature.cs`
+- `Percolator.Chat/Primitives/GroupAvatar.cs`, `EncryptedGroupKey.cs`
+
+Special case (do not constrain until representation is standardized):
+
+- `Percolator.Cryptography/RatchetIdentityKey.cs`, `RatchetEphemeralKey.cs`, `PreKey.cs`, `OneTimeKey.cs`
+  - These are consumed as SPKI (`ImportSubjectPublicKeyInfo(...)`, variable length) and also handled as raw EC point (64/65) in `CryptographyExtensions`.
+
+### H.4: Migrate NodeId (has domain logic)
+
+**File:** `source/Percolator.Dht/NodeId.cs`
+
+Current state includes an explicit length check and a `XorDistance` routine.
+
+Implementation steps:
+
+1. Convert the type to a generated type:
+   - Make it `public sealed partial record NodeId`.
+   - Add `[ByteArray(length: 32)]`.
+2. Remove the constructor that does length validation (generator handles it).
+3. Update `XorDistance` to use `Span` indexing rather than `.Value`:
+   - Replace `id1.Value.Length` / `id2.Value.Length` with `id1.Span.Length` / `id2.Span.Length`.
+   - Replace `id1.Value[i]` / `id2.Value[i]` with `id1.Span[i]` / `id2.Span[i]`.
+   - Keep allocating `xorResult` as `byte[]` (required for `BigInteger` input anyway).
+
+### H.5: Call-site migration (must be done as part of each type migration)
+
+Update code to stop using `.Value`.
+
+Required patterns:
+
+- Replace `x.Value.Length` with `x.Span.Length`.
+- Replace `x.Value[i]` with `x.Span[i]`.
+- Replace `SequenceEqual(x.Value, y.Value)` with `x == y` (or `x.Equals(y)` depending on nullability).
+- At serialization boundaries:
+  - Replace `ByteString.CopyFrom(x.Value)` with `ByteString.CopyFrom(x.Span)` where available, otherwise `ByteString.CopyFrom(x.ToArray())`.
+
+### H.5.1: CryptographyExtensions strategy (raw key slicing)
+
+`Percolator.Cryptography/CryptographyExtensions.cs` currently uses LINQ over `publicKey.Value` to slice raw EC points (Skip/Take/ToArray).
+
+Guidance for the generator migration:
+
+- Keep `CryptographyExtensions` as the location for these transformations.
+- As the byte-backed types move to generator-backed, update that code to use span slicing.
+- During migration, update `CryptographyExtensions` and X3DH code to use `.Span` or `.ToArray()` at the API boundary; do not re-introduce `.Value`-style `byte[]` properties.
+- Avoid calling `.ToArray()` just to pass bytes into code that lives in this repo:
+  - Prefer updating the internal method signature to accept the byte-backed type directly, or `ReadOnlySpan<byte>` / `ReadOnlyMemory<byte>`.
+  - Reserve `.ToArray()` for true external boundaries (e.g., protobuf types, BCL APIs that require `byte[]`).
+
+If this pattern repeats across multiple call sites, introduce ONE helper (either shape is acceptable):
+
+- Helper on the type (preferred only if domain-meaningful):
+  - Example: `publicKey.TryGetRawUncompressedP256Point(out ReadOnlySpan<byte> x, out ReadOnlySpan<byte> y)`
+- Helper in `CryptographyExtensions` (preferred if it is purely formatting/interop logic):
+  - Example: `ReadOnlySpan<byte> SlicePointX(ReadOnlySpan<byte> keyBytes)` / `SlicePointY(...)`
+
+Do not add helpers that encourage leaking mutable arrays; keep the public surface span/memory-first.
+
+### H.6: Deleting `ByteArrayRecord` (two viable sequences)
+
+There are two workable migration orders. Pick one and execute consistently per domain.
+
+**Approach A: Delete `ByteArrayRecord` first (compiler-led migration)**
+
+- Pros:
+  - Fastest way to surface the full dependency graph.
+  - Prevents “half migrated” types from continuing to compile via inheritance.
+  - Encourages immediate adoption of generator factories and `.Span`/`.Memory` usage.
+- Cons:
+  - Can produce a large wave of compile errors across many projects simultaneously.
+  - Harder to do in small, reviewable PRs unless you scope the deletion to one domain at a time.
+
+**Approach B: Migrate types first, delete `ByteArrayRecord` last (incremental)**
+
+- Pros:
+  - Smaller, more reviewable changes; fewer cross-project error storms.
+  - Lets you migrate and validate one type at a time.
+- Cons:
+  - Risk of leaving `ByteArrayRecord` around “too long” and continuing to add new usages.
+
+Recommendation:
+
+- Use **Approach A per domain** (delete the base type in one domain project, fix all fallout there, then move to the next domain).
+
+### H.7: Remove `ByteArrayRecord` base classes (end-of-chunk cleanup)
+
+Once all concrete types in a domain project are migrated and no files reference `ByteArrayRecord`:
+
+- Delete the per-domain `Primitives/ByteArrayRecord.cs`.
+- Remove any `using ...Primitives;` that existed only for `ByteArrayRecord`.
+
+### H.8: Tests updates
+
+Update tests to avoid byte-array equivalence checks when typed equality exists.
+
+- Prefer `actual.Should().Be(expected)` over comparing `.Value` arrays.
+- When validating serialized bytes, use `actual.ToArray()` explicitly at the assertion boundary.
+
+### Definition of Done
+
+- No domain project contains a `ByteArrayRecord` base type.
+- All byte-backed value objects are generated via `[ByteArray]`.
+- No production code references `.Value` on migrated types.
+- Solution builds with zero generator diagnostics.
+
+Measurable checks:
+
+- `ByteArrayRecord` references: 0 matches across `source/`.
+- `.Value` on migrated types: 0 matches in the migrated domain projects (allow-list only where `.Value` is unrelated to byte-backed value objects).
