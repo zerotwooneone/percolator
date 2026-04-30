@@ -5,6 +5,7 @@ using Percolator.Application.PeerDiscovery;
 using Percolator.Application.ReverseSignal;
 using Percolator.Network;
 using Microsoft.Extensions.Logging;
+using Percolator.Application.Network.Messaging;
 
 namespace Percolator.Application.Network;
 
@@ -150,7 +151,7 @@ public static class ServiceCollectionExtensions
 
         // Register domain Network.Messaging components required by MessageService
         services.AddScoped<Percolator.Network.Messaging.IRelayTopology, Percolator.Network.Messaging.DefaultRelayTopology>();
-        services.AddScoped<Percolator.Network.Messaging.ITransportPort, NetworkTransportPortAdapter>();
+        services.AddScoped<IRouteSender, RouteSender>();
         services.AddScoped<Percolator.Network.Messaging.ISendExecutor, Percolator.Application.Network.Messaging.DefaultSendExecutor>();
         services.AddScoped<Percolator.Network.Messaging.INetworkSender, Percolator.Application.Network.Messaging.DefaultNetworkSender>();
 

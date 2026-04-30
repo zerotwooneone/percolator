@@ -7,12 +7,12 @@ namespace Percolator.Application.Network.Messaging;
 
 public sealed class DefaultSendExecutor : ISendExecutor
 {
-    private readonly ITransportPort _transport;
+    private readonly IRouteSender _transport;
     private readonly IRouteConfirmationService _confirmationService;
     private readonly ILogger<DefaultSendExecutor> _logger;
 
     public DefaultSendExecutor(
-        ITransportPort transport,
+        IRouteSender transport,
         IRouteConfirmationService confirmationService,
         ILogger<DefaultSendExecutor> logger)
     {

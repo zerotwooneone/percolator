@@ -1,6 +1,7 @@
 using System.Net;
 using Google.Protobuf;
 using Microsoft.Extensions.Logging;
+using Percolator.Application.Network.Messaging;
 using Percolator.Contracts;
 using Percolator.Network;
 using Percolator.Network.Messaging;
@@ -12,14 +13,14 @@ internal sealed class InviteHandshakeResponseDeliveryService : IInviteHandshakeR
     private readonly ILogger<InviteHandshakeResponseDeliveryService> _logger;
     private readonly IGrpcSessionService _grpc;
     private readonly IRelayTopology _relayTopology;
-    private readonly ITransportPort _transport;
+    private readonly IRouteSender _transport;
     private readonly IOutboundMessageWireTap _wireTap;
 
     public InviteHandshakeResponseDeliveryService(
         ILogger<InviteHandshakeResponseDeliveryService> logger,
         IGrpcSessionService grpc,
         IRelayTopology relayTopology,
-        ITransportPort transport,
+        IRouteSender transport,
         IOutboundMessageWireTap wireTap)
     {
         _logger = logger;

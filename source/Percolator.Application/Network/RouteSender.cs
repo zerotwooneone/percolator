@@ -1,6 +1,7 @@
 using Google.Protobuf;
 using Microsoft.Extensions.Logging;
 using Percolator.Application.Identity;
+using Percolator.Application.Network.Messaging;
 using Percolator.Application.Services;
 using Percolator.Contracts;
 using Percolator.Cryptography;
@@ -11,17 +12,17 @@ using Percolator.Network.Messaging;
 namespace Percolator.Application.Network;
 
 // Bridges Network domain sender to existing Application transport and crypto/session services
-public sealed class NetworkTransportPortAdapter : ITransportPort
+public sealed class RouteSender : IRouteSender
 {
-    private readonly ILogger<NetworkTransportPortAdapter> _logger;
+    private readonly ILogger<RouteSender> _logger;
     private readonly IMessageTransportService _transport;
     private readonly IDirectSessionRepository _sessions;
     private readonly ISecureMessagingService _secureMessaging;
     private readonly ActiveIdentityContext _active;
     private readonly IPeerPublicSigningKeyStore _keyStore;
 
-    public NetworkTransportPortAdapter(
-        ILogger<NetworkTransportPortAdapter> logger,
+    public RouteSender(
+        ILogger<RouteSender> logger,
         IMessageTransportService transport,
         IDirectSessionRepository sessions,
         ISecureMessagingService secureMessaging,

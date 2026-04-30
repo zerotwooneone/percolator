@@ -1,6 +1,9 @@
-namespace Percolator.Network.Messaging;
+using Percolator.Network;
+using Percolator.Network.Messaging;
 
-public interface ITransportPort
+namespace Percolator.Application.Network.Messaging;
+
+public interface IRouteSender
 {
     // Attempt direct delivery to target. Implementation decides endpoint selection.
     Task<TransportSendResult> SendDirectAsync(PeerId target, NetworkPayload payload, CancellationToken ct = default);

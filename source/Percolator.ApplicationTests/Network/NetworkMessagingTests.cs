@@ -132,7 +132,7 @@ public class NetworkMessagingTests
     [Test]
     public async Task SendExecutor_DirectSuccess_Propagates_Response()
     {
-        var transport = new Mock<ITransportPort>();
+        var transport = new Mock<IRouteSender>();
         var confirmationService = new Mock<IRouteConfirmationService>();
         var logger = new Mock<ILogger<DefaultSendExecutor>>();
         var peer = new PeerId(Guid.NewGuid());
@@ -153,7 +153,7 @@ public class NetworkMessagingTests
     [Test]
     public async Task SendExecutor_DirectFails_RelaySucceeds_Returns_RelayPath()
     {
-        var transport = new Mock<ITransportPort>();
+        var transport = new Mock<IRouteSender>();
         var confirmationService = new Mock<IRouteConfirmationService>();
         var logger = new Mock<ILogger<DefaultSendExecutor>>();
         var peer = new PeerId(Guid.NewGuid());

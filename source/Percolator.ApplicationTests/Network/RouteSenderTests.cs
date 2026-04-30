@@ -10,7 +10,7 @@ using Percolator.Identity;
 namespace Percolator.ApplicationTests.Network;
 
 [TestFixture]
-public class NetworkTransportPortAdapterTests
+public class RouteSenderTests
 {
     private ActiveIdentityContext MakeActive()
         => new ActiveIdentityContext { Identity = new Percolator.Identity.Model.IdentityRecord(Guid.NewGuid(), "me", null) { SelfIdentityId = new SelfId(1) } };
@@ -18,7 +18,7 @@ public class NetworkTransportPortAdapterTests
     [Test]
     public async Task Direct_with_session_returns_response_payload_when_present()
     {
-        var logger = Mock.Of<Microsoft.Extensions.Logging.ILogger<NetworkTransportPortAdapter>>();
+        var logger = Mock.Of<Microsoft.Extensions.Logging.ILogger<RouteSender>>();
         var transport = new Mock<IMessageTransportService>(MockBehavior.Strict);
         var sessions = new Mock<IDirectSessionRepository>(MockBehavior.Strict);
         sessions.Setup(s => s.ListAsync(It.IsAny<int>()))
@@ -46,7 +46,7 @@ public class NetworkTransportPortAdapterTests
         transport.Setup(t => t.SendMessageAsync(new Percolator.Identity.PeerId(target.Value), dsid, It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SendMessageResponse { OriginalResponse = resp });
 
-        var sut = new NetworkTransportPortAdapter(logger, transport.Object, sessions.Object, secure.Object, active, keyStore.Object);
+        var sut = new RouteSender(logger, transport.Object, sessions.Object, secure.Object, active, keyStore.Object);
         var outcome = await sut.SendDirectAsync(target, new NetworkPayload(new byte[] { 0xAA }), CancellationToken.None);
 
         Assert.That(outcome.Ok, Is.True);
@@ -57,7 +57,7 @@ public class NetworkTransportPortAdapterTests
     [Test]
     public async Task Direct_without_session_returns_NoPeerConnection()
     {
-        var logger = Mock.Of<Microsoft.Extensions.Logging.ILogger<NetworkTransportPortAdapter>>();
+        var logger = Mock.Of<Microsoft.Extensions.Logging.ILogger<RouteSender>>();
         var transport = new Mock<IMessageTransportService>(MockBehavior.Loose);
         var sessions = new Mock<IDirectSessionRepository>(MockBehavior.Strict);
         sessions.Setup(s => s.ListAsync(It.IsAny<int>()))
@@ -69,7 +69,7 @@ public class NetworkTransportPortAdapterTests
         var target = new Percolator.Network.PeerId(Guid.NewGuid());
         sessions.Setup(s => s.GetByRemotePeerIdAsync(target, 1)).ReturnsAsync((DirectSession?)null);
 
-        var sut = new NetworkTransportPortAdapter(logger, transport.Object, sessions.Object, secure.Object, active, keyStore.Object);
+        var sut = new RouteSender(logger, transport.Object, sessions.Object, secure.Object, active, keyStore.Object);
         var outcome = await sut.SendDirectAsync(target, new NetworkPayload(new byte[] { 1 }), CancellationToken.None);
 
         Assert.That(outcome.Ok, Is.False);
@@ -79,7 +79,7 @@ public class NetworkTransportPortAdapterTests
     [Test]
     public async Task Relay_without_host_session_returns_NoRelaySession()
     {
-        var logger = Mock.Of<Microsoft.Extensions.Logging.ILogger<NetworkTransportPortAdapter>>();
+        var logger = Mock.Of<Microsoft.Extensions.Logging.ILogger<RouteSender>>();
         var transport = new Mock<IMessageTransportService>(MockBehavior.Loose);
         var sessions = new Mock<IDirectSessionRepository>(MockBehavior.Strict);
         sessions.Setup(s => s.ListAsync(It.IsAny<int>()))
@@ -92,7 +92,7 @@ public class NetworkTransportPortAdapterTests
         var target = new Percolator.Network.PeerId(Guid.NewGuid());
         sessions.Setup(s => s.GetByRemotePeerIdAsync(relay, 1)).ReturnsAsync((DirectSession?)null);
 
-        var sut = new NetworkTransportPortAdapter(logger, transport.Object, sessions.Object, secure.Object, active, keyStore.Object);
+        var sut = new RouteSender(logger, transport.Object, sessions.Object, secure.Object, active, keyStore.Object);
         var outcome = await sut.SendViaRelayAsync(relay, target, new NetworkPayload(new byte[] { 1 }), CancellationToken.None);
 
         Assert.That(outcome.Ok, Is.False);
@@ -102,7 +102,7 @@ public class NetworkTransportPortAdapterTests
     [Test]
     public async Task Relay_with_host_session_and_pkh_wraps_and_returns_response()
     {
-        var logger = Mock.Of<Microsoft.Extensions.Logging.ILogger<NetworkTransportPortAdapter>>();
+        var logger = Mock.Of<Microsoft.Extensions.Logging.ILogger<RouteSender>>();
         var transport = new Mock<IMessageTransportService>(MockBehavior.Strict);
         var sessions = new Mock<IDirectSessionRepository>(MockBehavior.Strict);
         sessions.Setup(s => s.ListAsync(It.IsAny<int>()))
@@ -134,7 +134,7 @@ public class NetworkTransportPortAdapterTests
         transport.Setup(t => t.SendMessageAsync(new Percolator.Identity.PeerId(relay.Value), rsid, relayCipher, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SendMessageResponse { OriginalResponse = resp });
 
-        var sut = new NetworkTransportPortAdapter(logger, transport.Object, sessions.Object, secure.Object, active, keyStore.Object);
+        var sut = new RouteSender(logger, transport.Object, sessions.Object, secure.Object, active, keyStore.Object);
         var outcome = await sut.SendViaRelayAsync(relay, target, new NetworkPayload(new byte[] { 1,2,3 }), CancellationToken.None);
 
         Assert.That(outcome.Ok, Is.True);
