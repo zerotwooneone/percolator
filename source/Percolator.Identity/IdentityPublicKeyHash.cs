@@ -6,7 +6,7 @@ namespace Percolator.Identity;
 /// Represents the SHA-256 hash of an identity public key (PKH).
 /// This type is immutable and enforces the invariant that the value is exactly 32 bytes.
 /// </summary>
-public sealed record IdentityPublicKeyHash : IEquatable<IdentityPublicKeyHash>
+public sealed record IdentityPublicKeyHash 
 {
     private readonly ReadOnlyMemory<byte> _value;
 
