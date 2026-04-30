@@ -1529,3 +1529,91 @@ Assert.That(actual.Equals(expected))
 - Internal operations can use `AsReadOnlyMemory()` or `AsSpan()` for zero-allocation access
 - This is a "big bang" change - all ByteArrayRecord base classes updated simultaneously
 - No migration strategy needed - existing `.Value` access patterns continue to work
+
+## Chunk I
+
+### Goal
+
+Replace the shared `ByteArrayRecord` base-type approach with a source-generator-driven pattern for byte-array-backed value objects, so each domain can declare concise types and receive a consistent, allocation-conscious implementation at compile time.
+
+**Target user experience:**
+```csharp
+[ByteArray(length: 32)]
+public sealed partial record IdentityPublicKeyHash
+{
+    public static IdentityPublicKeyHash FromSpki(byte[] spki) { /* handwritten */ }
+}
+```
+
+### Deliverables
+
+- A new source generator project that produces implementations for `[ByteArray]`-annotated types.
+- Domain libraries that define byte-array-backed value objects reference the generator as an analyzer.
+- At least one representative type per domain is migrated to the generator pattern as a proof of end-to-end viability.
+
+### I.1: Introduce generator projects
+
+**I.1.1: Create a generator project**
+
+Add a new project (suggested: `Percolator.SourceGenerators`) with:
+- Roslyn source generator implementation.
+- A `[ByteArray]` generator (and future generators as needed).
+- Project configuration so consumers can reference it as an analyzer (generator) without creating a runtime dependency.
+ 
+Implementation decisions to lock in now:
+- The generator will provide `ByteArrayAttribute` via `RegisterPostInitializationOutput` so consuming projects do not need a runtime reference just to compile the attribute.
+- The attribute namespace will be `Percolator.SourceGenerators`.
+- The generator project should target `netstandard2.0` (typical for analyzers) and use a modern C# version.
+- The generator project should include Roslyn packages (e.g., `Microsoft.CodeAnalysis.CSharp`) as private assets.
+- The generator will only support `sealed partial record` types (not classes/structs) in the initial version.
+- The generator will emit diagnostics for misuse (non-partial types, invalid length constraints, member conflicts, etc.).
+
+**I.1.2: Decide attribute + generated API surface**
+
+Specify the generated members and invariants. Suggested baseline:
+- **Backing storage:** `private readonly ReadOnlyMemory<byte> _value;`
+- **Accessors (no allocation):** `ReadOnlySpan<byte> Span` and/or `ReadOnlyMemory<byte> Memory`
+- **Boundary conversion (allocates):** `byte[] ToArray()`
+- **Construction (safe default):** `public static T FromBytes(byte[] bytes)` that validates and copies
+- **Equality/Hash:** byte-wise equality and stable hash based on bytes
+- **Validation hooks:** generated length checks based on `[ByteArray(length)]` with optional `[ByteArray(minLength, maxLength)]` overload
+
+Note: this plan explicitly drops `.Value` and drops `FromMemoryDangerous`.
+
+### I.1.3: Validate project compatibility for source generators
+
+Current state (as of this plan): the domain libraries are SDK-style projects targeting .NET 9 (`net9.0`, `net9.0-windows`, `net9.0-windows7.0`). This is compatible with source generators; no solution-wide `Directory.Build.props/targets` or `global.json` constraints were found that would prevent generator usage.
+
+### I.2: Reference the generator from all relevant domain libraries
+
+Update each domain library that defines byte-array-backed value objects to reference the generator as an analyzer via project reference.
+
+Recommended reference style:
+```xml
+<ProjectReference Include="..\Percolator.SourceGenerators\Percolator.SourceGenerators.csproj"
+                  OutputItemType="Analyzer"
+                  ReferenceOutputAssembly="false" />
+```
+
+Candidate domain libraries:
+- `Percolator.Identity`
+- `Percolator.Chat`
+- `Percolator.Network`
+- `Percolator.Cryptography`
+- `Percolator.Dht`
+
+### I.3: Migrate representative types (prove viability)
+
+For each domain, migrate at least one representative value object to the generator pattern:
+- Convert the type declaration to `sealed partial record`.
+- Apply `[ByteArray(...)]` with appropriate invariants.
+- Keep domain-specific factory methods (e.g. `FromSpki`) handwritten.
+- Update call sites to use `Span`/`Memory`/`ToArray()` as appropriate.
+
+This step is intentionally limited-scope to avoid a risky "big bang" conversion of every type at once.
+
+### I.4: Verification
+
+- Build the solution and ensure generated `.g.cs` files compile in each consuming domain library.
+- Run all existing tests.
+- Spot-check allocations at key boundaries (protobuf serialization and crypto API boundaries) to ensure the new APIs enable span/memory usage without forced copies.
