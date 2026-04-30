@@ -18,7 +18,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "SolutionFolder", "SolutionF
 		group-flow.readme.md = group-flow.readme.md
 	EndProjectSection
 EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Cryptography", "Cryptography", "{D3EFBBDF-641F-4849-8BCB-BFAA7DEA0447}"
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "01 - Cryptography Domain", "01 - Cryptography Domain", "{D3EFBBDF-641F-4849-8BCB-BFAA7DEA0447}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.Cryptography", "Percolator.Cryptography\Percolator.Cryptography.csproj", "{F88E64D0-D7F8-4876-BD39-2175D1B86889}"
 EndProject
@@ -26,7 +26,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.CryptographyTest
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.Network", "Percolator.Network\Percolator.Network.csproj", "{2E01B654-6BE2-455D-B263-3F023AE2B992}"
 EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Network", "Network", "{AFC9DC50-61AE-42A7-BF5A-3F55F2BA6BC0}"
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "01 - Network Domain", "01 - Network Domain", "{AFC9DC50-61AE-42A7-BF5A-3F55F2BA6BC0}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.Application", "Percolator.Application\Percolator.Application.csproj", "{84C0438D-5FAA-43BA-B91C-AD759FB95CC8}"
 EndProject
@@ -38,13 +38,13 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.NetworkTests", "
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.Identity", "Percolator.Identity\Percolator.Identity.csproj", "{7AE9C224-C232-43F6-A329-7ADE70EE76B2}"
 EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Identity", "Identity", "{A2C7AA6D-251E-45AB-A32A-8EA6BB634ACA}"
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "01 - Identity Domain", "01 - Identity Domain", "{A2C7AA6D-251E-45AB-A32A-8EA6BB634ACA}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.IdentityTests", "Percolator.IdentityTests\Percolator.IdentityTests.csproj", "{3DFDC043-0D74-493E-B9F2-2B4E902AB9FA}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.ApplicationTests", "Percolator.ApplicationTests\Percolator.ApplicationTests.csproj", "{58617EF5-4875-4B42-9CD8-1E622D2C2C37}"
 EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Apps", "Apps", "{2CB618DD-9551-4593-8B98-FFAE20DC4C64}"
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "04 - Apps", "04 - Apps", "{2CB618DD-9551-4593-8B98-FFAE20DC4C64}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Chat", "Chat", "{869EC03E-6CCA-48A9-B7E1-C6CEC6796ED5}"
 EndProject
@@ -56,11 +56,11 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.Infrastructure",
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.InfrastructureTests", "Percolator.InfrastructureTests\Percolator.InfrastructureTests.csproj", "{AB5DB604-C8D2-4017-8FE9-54A2E0010AF5}"
 EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Infrastructure", "Infrastructure", "{1BA0BC13-1FAC-43E6-8485-EB8EA00CD072}"
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "02 - Infrastructure", "02 - Infrastructure", "{1BA0BC13-1FAC-43E6-8485-EB8EA00CD072}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.ApplicationIntegrationTests", "Percolator.ApplicationIntegrationTests\Percolator.ApplicationIntegrationTests.csproj", "{39757A1B-B502-4A78-9EFF-4845050A032C}"
 EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Application", "Application", "{72EA6752-DA13-4F0D-9963-A0C2DDAAEC9F}"
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "03 - Application", "03 - Application", "{72EA6752-DA13-4F0D-9963-A0C2DDAAEC9F}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.Dht", "Percolator.Dht\Percolator.Dht.csproj", "{127B80B5-1F20-4AF8-B650-6E7A50795562}"
 EndProject
@@ -80,11 +80,19 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "MessageQueue", "MessageQueu
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.MessageQueueTests", "Percolator.MessageQueueTests\Percolator.MessageQueueTests.csproj", "{09C5AA0A-B94F-46F9-806A-EF0EB299086D}"
 EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Desktop", "Desktop", "{FD9F8435-A340-4CFA-B719-2D0A55E42A43}"
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "05 - Desktop", "05 - Desktop", "{FD9F8435-A340-4CFA-B719-2D0A55E42A43}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Desktop.Wpf", "Desktop.Wpf\Desktop.Wpf.csproj", "{AE5304FF-B633-431F-9D8E-960341AD588C}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Desktop.Wpf.Tests", "Desktop.Wpf.Tests\Desktop.Wpf.Tests.csproj", "{A0BEB0EF-BF37-4F4C-ABD4-95645BCE19CE}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.SourceGenerators", "Percolator.SourceGenerators\Percolator.SourceGenerators.csproj", "{1D7EC593-33F1-4D43-8028-78CBB87BC7D3}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.SourceGenerators.Tests", "Percolator.SourceGenerators.Tests\Percolator.SourceGenerators.Tests.csproj", "{B4D2F2D6-5D82-4F35-A5D6-0E6F06F6E1D4}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "00 - SourceGenerators", "00 - SourceGenerators", "{05656FCE-23D8-4E94-9B36-08CB2565CF34}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "05 - CLI", "05 - CLI", "{95B5220A-7103-479A-BFC5-E635C0214F5B}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -372,6 +380,30 @@ Global
 		{A0BEB0EF-BF37-4F4C-ABD4-95645BCE19CE}.Release|x64.Build.0 = Release|Any CPU
 		{A0BEB0EF-BF37-4F4C-ABD4-95645BCE19CE}.Release|x86.ActiveCfg = Release|Any CPU
 		{A0BEB0EF-BF37-4F4C-ABD4-95645BCE19CE}.Release|x86.Build.0 = Release|Any CPU
+		{1D7EC593-33F1-4D43-8028-78CBB87BC7D3}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1D7EC593-33F1-4D43-8028-78CBB87BC7D3}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1D7EC593-33F1-4D43-8028-78CBB87BC7D3}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{1D7EC593-33F1-4D43-8028-78CBB87BC7D3}.Debug|x64.Build.0 = Debug|Any CPU
+		{1D7EC593-33F1-4D43-8028-78CBB87BC7D3}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{1D7EC593-33F1-4D43-8028-78CBB87BC7D3}.Debug|x86.Build.0 = Debug|Any CPU
+		{1D7EC593-33F1-4D43-8028-78CBB87BC7D3}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1D7EC593-33F1-4D43-8028-78CBB87BC7D3}.Release|Any CPU.Build.0 = Release|Any CPU
+		{1D7EC593-33F1-4D43-8028-78CBB87BC7D3}.Release|x64.ActiveCfg = Release|Any CPU
+		{1D7EC593-33F1-4D43-8028-78CBB87BC7D3}.Release|x64.Build.0 = Release|Any CPU
+		{1D7EC593-33F1-4D43-8028-78CBB87BC7D3}.Release|x86.ActiveCfg = Release|Any CPU
+		{1D7EC593-33F1-4D43-8028-78CBB87BC7D3}.Release|x86.Build.0 = Release|Any CPU
+		{B4D2F2D6-5D82-4F35-A5D6-0E6F06F6E1D4}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B4D2F2D6-5D82-4F35-A5D6-0E6F06F6E1D4}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B4D2F2D6-5D82-4F35-A5D6-0E6F06F6E1D4}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{B4D2F2D6-5D82-4F35-A5D6-0E6F06F6E1D4}.Debug|x64.Build.0 = Debug|Any CPU
+		{B4D2F2D6-5D82-4F35-A5D6-0E6F06F6E1D4}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{B4D2F2D6-5D82-4F35-A5D6-0E6F06F6E1D4}.Debug|x86.Build.0 = Debug|Any CPU
+		{B4D2F2D6-5D82-4F35-A5D6-0E6F06F6E1D4}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B4D2F2D6-5D82-4F35-A5D6-0E6F06F6E1D4}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B4D2F2D6-5D82-4F35-A5D6-0E6F06F6E1D4}.Release|x64.ActiveCfg = Release|Any CPU
+		{B4D2F2D6-5D82-4F35-A5D6-0E6F06F6E1D4}.Release|x64.Build.0 = Release|Any CPU
+		{B4D2F2D6-5D82-4F35-A5D6-0E6F06F6E1D4}.Release|x86.ActiveCfg = Release|Any CPU
+		{B4D2F2D6-5D82-4F35-A5D6-0E6F06F6E1D4}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -402,5 +434,9 @@ Global
 		{09C5AA0A-B94F-46F9-806A-EF0EB299086D} = {C56C4046-E243-463C-BBFE-190792190DCB}
 		{AE5304FF-B633-431F-9D8E-960341AD588C} = {FD9F8435-A340-4CFA-B719-2D0A55E42A43}
 		{A0BEB0EF-BF37-4F4C-ABD4-95645BCE19CE} = {FD9F8435-A340-4CFA-B719-2D0A55E42A43}
+		{1D7EC593-33F1-4D43-8028-78CBB87BC7D3} = {05656FCE-23D8-4E94-9B36-08CB2565CF34}
+		{B4D2F2D6-5D82-4F35-A5D6-0E6F06F6E1D4} = {05656FCE-23D8-4E94-9B36-08CB2565CF34}
+		{A0AF616A-5F9F-4A91-911E-37E8247AB281} = {05656FCE-23D8-4E94-9B36-08CB2565CF34}
+		{79696699-D13D-4152-AAA7-C30F37B06666} = {95B5220A-7103-479A-BFC5-E635C0214F5B}
 	EndGlobalSection
 EndGlobal

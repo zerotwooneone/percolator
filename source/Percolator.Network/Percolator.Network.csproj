@@ -18,6 +18,7 @@
   <ItemGroup>
     <InternalsVisibleTo Include="Percolator.NetworkTests" />
     <ProjectReference Include="..\Percolator.Contracts\Percolator.Contracts.csproj" />
+    <ProjectReference Include="..\Percolator.SourceGenerators\Percolator.SourceGenerators.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
 </Project>
