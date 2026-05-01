@@ -427,6 +427,7 @@ public sealed class ByteArrayGenerator : IIncrementalGenerator
 
             sb.AppendLine("    public global::System.ReadOnlySpan<byte> Span => _value.Span;");
             sb.AppendLine("    public global::System.ReadOnlyMemory<byte> Memory => _value;");
+            sb.AppendLine("    public int Length => _value.Length;");
             sb.AppendLine();
 
             sb.AppendLine("    public byte[] ToArray() => _value.ToArray();");
@@ -485,7 +486,8 @@ public sealed class ByteArrayGenerator : IIncrementalGenerator
                 }
 
                 if (IsConflictingMemberByName(m, "Span") ||
-                    IsConflictingMemberByName(m, "Memory"))
+                    IsConflictingMemberByName(m, "Memory") ||
+                    IsConflictingMemberByName(m, "Length"))
                 {
                     member = m.Name;
                     return false;
