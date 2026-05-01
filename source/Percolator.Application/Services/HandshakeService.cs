@@ -18,6 +18,7 @@ public sealed class HandshakeService : IHandshakeService
         CancellationToken cancellationToken = default)
     {
         // Minimal Green: create a session and optionally produce the first cipher
+        // critical: this is not secure - the root key is zero
         var sessionId = SessionId.NewId();
         var proto = new ProtocolVersion(1);
         var root = RootKey.FromBytesOwned(new byte[32]);
