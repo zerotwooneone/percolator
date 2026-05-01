@@ -2216,3 +2216,23 @@ Guidance: not every call site should be “fixed” by allowing empty. Many are 
   - Evidence: explicit negative test `FromBytes_with_empty_array_throws`.
   - Recommendation:
     - Keep fixed length 32; empty must throw.
+
+#### H.12 - Suspicious zeroed keys in production code
+
+**Critical issue:** Using zeroed arrays as cryptographic keys is cryptographically catastrophic. All sessions initialized with the same zeroed root will derive the same chain keys, making encryption deterministic and insecure.
+
+**Suspicious production code (requires remediation):**
+
+- **Percolator.Application\Services\HandshakeService.cs**
+    - Line 24: `RootKey.FromBytesOwned(new byte[32])`
+    - Context: Used in `InitiateStandardHandshakeAsync` to create a session with a zeroed root key
+    - Impact: Every session created via this service will have the same initial chain keys
+    - Status: Comment added noting this is not secure
+    - Recommendation: This should not create a crypto session at all. Return only a `SessionId` and let the real handshake pipeline create/persist a session with a real X3DH-derived root.
+
+- **Percolator.Prekey\Handlers\GetPreKeyBundleQuery.cs**
+    - Line 9: `IdentityPublicKeyHash.FromBytes(new byte[32])` as default value
+    - Context: Default property initializer for query class
+    - Impact: If this default is used without being set, it will query for a zeroed key hash (unlikely to match any real peer)
+    - Recommendation: Either require explicit initialization or use `null` as default to make missing value explicit
+
