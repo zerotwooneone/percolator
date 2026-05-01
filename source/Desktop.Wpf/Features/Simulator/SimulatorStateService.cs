@@ -1211,17 +1211,25 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var model = _peers.FirstOrDefault(p => p.PeerId == simulatedPeerId)
-                ?? throw new InvalidOperationException($"No simulated peer exists with id {simulatedPeerId}");
-
-            var plaintext = Plaintext.FromBytesOwned(envelope.ToByteArray());
-            var cipher = _engine.Encrypt(model, sessionId, plaintext);
-            return cipher;
+            return EncryptInternalEnvelopeAsyncCore(simulatedPeerId, sessionId, envelope);
         }
         finally
         {
             _stateGate.Release();
         }
+    }
+
+    private SessionRatchetMessage EncryptInternalEnvelopeAsyncCore(
+        Percolator.Network.PeerId simulatedPeerId,
+        SessionId sessionId,
+        InternalEnvelope envelope)
+    {
+        var model = _peers.FirstOrDefault(p => p.PeerId == simulatedPeerId)
+            ?? throw new InvalidOperationException($"No simulated peer exists with id {simulatedPeerId}");
+
+        var plaintext = Plaintext.FromBytesOwned(envelope.ToByteArray());
+        var cipher = _engine.Encrypt(model, sessionId, plaintext);
+        return cipher;
     }
 
     public async Task<Plaintext> DecryptSessionMessageAsync(
@@ -1942,8 +1950,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
                 throw new InvalidOperationException($"No session found for peer {simulatedPeerId} to send chat message");
 
             // Encrypt using the existing helper
-            var cipher = await EncryptInternalEnvelopeAsync(simulatedPeerId, sessionId, internalEnvelope, cancellationToken)
-                .ConfigureAwait(false);
+            var cipher = EncryptInternalEnvelopeAsyncCore(simulatedPeerId, sessionId, internalEnvelope);
 
             // Record outbound message in peer's chat history
             model.AddChatMessage(isFromMain: false, content: content, receivedUtc: now);

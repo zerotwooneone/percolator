@@ -7,7 +7,7 @@ namespace Desktop.Wpf.Features.Simulator;
 public sealed class SimulatorChatViewModel : ViewModelBase
 {
     public BindableReactiveProperty<string> MessageInput { get; }
-    public AsyncRelayCommand SendMessageCommand { get; }
+    public ReactiveAsyncCommand SendMessageCommand { get; }
     public NotifyCollectionChangedSynchronizedViewList<SimulatorChatMessageModel> Messages { get; }
 
     private readonly SimulatedPeerModel _model;
@@ -27,14 +27,19 @@ public sealed class SimulatorChatViewModel : ViewModelBase
             .AddTo(ref _bag);
         Messages = _messagesView.ToNotifyCollectionChanged(ui.CollectionEventDispatcher);
 
-        SendMessageCommand = new AsyncRelayCommand(async _ =>
+        SendMessageCommand = new ReactiveAsyncCommand(
+            ui,
+            async _ =>
         {
             var text = MessageInput.Value;
             if (string.IsNullOrWhiteSpace(text)) return;
 
             await _state.SendChatMessageToMainAsync(_model.PeerId, text, CancellationToken.None);
             MessageInput.Value = string.Empty;
-        }, _ => !string.IsNullOrWhiteSpace(MessageInput.Value));
+        },
+            requery: MessageInput.Select(_ => Unit.Default),
+            canExecute: _ => !string.IsNullOrWhiteSpace(MessageInput.Value))
+            .AddTo(ref _bag);
     }
 
     protected override void DisposeCore()
