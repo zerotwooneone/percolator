@@ -474,7 +474,19 @@ namespace Percolator.Application.Network.Handshake
                 return null;
             }
 
+            // Retrieve the SentInvitation to get the user-entered peer name (if any)
+            SentInvitation? sentInvitation = null;
+            try
+            {
+                sentInvitation = await _sentInvitations.TryGetAsync(new RequestCorrelationId(match.LocalRequestId), cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogInformation(ex, "Standard finalize: failed to retrieve sent invitation for correlation {CorrelationId}; peer name will not be applied", match.LocalRequestId);
+            }
+
             // Resolve or create peer identity by PKH (for stable remote peer id mapping)
+            // and apply the user-entered display name (if any) from the sent invitation
             PeerIdentity? peerIdentity = null;
             try
             {
@@ -485,8 +497,14 @@ namespace Percolator.Application.Network.Handshake
                     peerIdentity = new PeerIdentity(newId);
                     var now = _clock.UtcNow;
                     peerIdentity.AddKey(remoteIdentitySpki, notBefore: now, expiresAt: now.AddYears(100), now: now);
-                    await _peerIdentities.SaveAsync(peerIdentity, cancellationToken).ConfigureAwait(false);
                 }
+
+                if (peerIdentity.DisplayName is null && sentInvitation is not null && !string.IsNullOrWhiteSpace(sentInvitation.TargetDisplayName))
+                {
+                    peerIdentity.SetDisplayName(sentInvitation.TargetDisplayName);
+                }
+
+                await _peerIdentities.SaveAsync(peerIdentity, cancellationToken).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
