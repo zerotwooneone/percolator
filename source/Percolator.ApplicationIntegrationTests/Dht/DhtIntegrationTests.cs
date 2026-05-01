@@ -84,7 +84,7 @@ public class DhtIntegrationTests : IntegrationTestBase
                     profile.BindIdentity(pid);
                     var now = DateTimeOffset.UtcNow;
                     profile.AddGrpcEndPoint(new GrpcEndPoint(remoteEndpoint, now), now);
-                    profile.SetIdentityPublicKey(Percolator.Network.ValueObjects.IdentityPublicKey.FromBytes(remoteSigningKey.ToArray()));
+                    profile.SetIdentityPublicKey(Percolator.Network.ValueObjects.IdentityPublicKey.FromBytesOwned(remoteSigningKey.ToArray()));
                     return Task.FromResult<PeerRoutingProfile?>(profile);
                 });
             services.AddSingleton<IPeerRoutingProfileRepository>(profileRepoMock.Object);
@@ -122,7 +122,7 @@ public class DhtIntegrationTests : IntegrationTestBase
         };
         
         // Production derives NodeId as SHA-256 of the signing key bytes (SPKI). Reflect that here.
-        var nodeId = NodeId.FromBytes(SHA256.HashData(remoteSigningKey.ToArray()));
+        var nodeId = NodeId.FromBytesOwned(SHA256.HashData(remoteSigningKey.ToArray()));
         dhtRepositoryMock.Setup(r => r.GetAsync(nodeId)).ReturnsAsync(() => (DhtNode?)null);
 
         // Act

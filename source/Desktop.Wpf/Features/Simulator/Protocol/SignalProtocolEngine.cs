@@ -77,7 +77,7 @@ public sealed class SignalProtocolEngine : ISignalProtocolEngine
         var x3 = _crypto.X3DH_Initiate(localIkPriv, responderBundle);
 
         var sessionId = SessionId.NewId();
-        var root = RootKey.FromBytes(x3.SharedSecret.ToArray());
+        var root = RootKey.FromBytesOwned(x3.SharedSecret.ToArray());
 
         var session = RatchetBootstrap.CreateInitiatorSession(
             sessionId,

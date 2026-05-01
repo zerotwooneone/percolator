@@ -20,7 +20,7 @@ public sealed class HandshakeService : IHandshakeService
         // Minimal Green: create a session and optionally produce the first cipher
         var sessionId = SessionId.NewId();
         var proto = new ProtocolVersion(1);
-        var root = RootKey.FromBytes(new byte[32]);
+        var root = RootKey.FromBytesOwned(new byte[32]);
         var session = RatchetBootstrap.CreateInitiatorSession(sessionId, peerId, proto, root, _clock);
 
         SessionRatchetMessage? initial = null;

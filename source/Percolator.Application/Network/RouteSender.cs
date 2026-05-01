@@ -47,7 +47,7 @@ public sealed class RouteSender : IRouteSender
 
             var directSessionId = new DirectSessionId(ds.SessionId.Value);
             var recipientIdentityPeerId = new Percolator.Identity.PeerId(target.Value);
-            var cipher = SessionRatchetMessage.FromBytes(payload.Value.ToArray());
+            var cipher = SessionRatchetMessage.FromBytesOwned(payload.Value.ToArray());
             var resp = await _transport.SendMessageAsync(recipientIdentityPeerId, directSessionId, cipher, ct).ConfigureAwait(false);
             
             // Extract used endpoint from response

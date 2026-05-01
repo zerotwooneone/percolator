@@ -41,12 +41,12 @@ public sealed class AeadRatchetEngine : IRatchetEngine
         {
             using var dh = ECDiffieHellman.Create();
             dh.ImportECPrivateKey(state.DhRatchetPrivateKey.Span, out _);
-            headerKey = RatchetEphemeralKey.FromBytes(dh.PublicKey.ExportSubjectPublicKeyInfo());
+            headerKey = RatchetEphemeralKey.FromBytesOwned(dh.PublicKey.ExportSubjectPublicKeyInfo());
         }
         else
         {
             using var eph = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-            headerKey = RatchetEphemeralKey.FromBytes(eph.PublicKey.ExportSubjectPublicKeyInfo());
+            headerKey = RatchetEphemeralKey.FromBytesOwned(eph.PublicKey.ExportSubjectPublicKeyInfo());
         }
 
         var adBytes = ad.ToArray();

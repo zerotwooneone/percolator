@@ -135,7 +135,7 @@ public class SubmitPreKeysHandler : IRequestHandler<SubmitPreKeysCommand, int>
             throw new InvalidOperationException("No response payload returned.");
         }
 
-        var respCipher = SessionRatchetMessage.FromBytes(deliverResp.ResponsePayload.ResponsePayload.ToByteArray());
+        var respCipher = SessionRatchetMessage.FromBytesOwned(deliverResp.ResponsePayload.ResponsePayload.ToByteArray());
         var resolved = await _secureMessaging.DecryptInboundAsync(1, respCipher, cancellationToken).ConfigureAwait(false);
         var respPlain = resolved?.plaintext;
         if (respPlain is null)
@@ -158,7 +158,7 @@ public class SubmitPreKeysHandler : IRequestHandler<SubmitPreKeysCommand, int>
         IdentityPeerId remotePeerId, 
         CancellationToken cancellationToken)
     {
-        var plaintext = Plaintext.FromBytes(envelope.ToByteArray());
+        var plaintext = Plaintext.FromBytesOwned(envelope.ToByteArray());
         var ratchetMessage = await _secureMessaging.EncryptAsync(new SessionId(directSessionId.Value), plaintext, cancellationToken).ConfigureAwait(false);
         _logger.LogInformation("DHT probe sending (with response) to peer {PeerId}", remotePeerId);
         var response = await _transport.SendMessageAsync(remotePeerId, directSessionId, ratchetMessage, cancellationToken).ConfigureAwait(false);

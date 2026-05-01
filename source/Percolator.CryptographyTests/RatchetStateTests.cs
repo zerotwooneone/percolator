@@ -10,11 +10,11 @@ public class RatchetStateTests
     [Test]
     public void Construct_WithValidInputs_SetsProperties()
     {
-        var root = RootKey.FromBytes(RandomNumberGenerator.GetBytes(32));
-        var send = ChainKey.FromBytes(RandomNumberGenerator.GetBytes(32));
-        var recv = ChainKey.FromBytes(RandomNumberGenerator.GetBytes(32));
-        var remote = RatchetEphemeralKey.FromBytes(RandomNumberGenerator.GetBytes(91)); // typical SPKI length
-        var priv = PrivateEphemeralKey.FromBytes(RandomNumberGenerator.GetBytes(100));
+        var root = RootKey.FromBytesOwned(RandomNumberGenerator.GetBytes(32));
+        var send = ChainKey.FromBytesOwned(RandomNumberGenerator.GetBytes(32));
+        var recv = ChainKey.FromBytesOwned(RandomNumberGenerator.GetBytes(32));
+        var remote = RatchetEphemeralKey.FromBytesOwned(RandomNumberGenerator.GetBytes(91)); // typical SPKI length
+        var priv = PrivateEphemeralKey.FromBytesOwned(RandomNumberGenerator.GetBytes(100));
 
         var state = new RatchetState(
             root,
@@ -57,7 +57,7 @@ public class RatchetStateTests
     [Test]
     public void Construct_WithInvalidSkippedKeyLimit_Throws()
     {
-        var root = RootKey.FromBytes(RandomNumberGenerator.GetBytes(32));
+        var root = RootKey.FromBytesOwned(RandomNumberGenerator.GetBytes(32));
         Action act = () => _ = new RatchetState(root, null, 0, null, 0, 0, null, null, 0);
         act.Should().Throw<ArgumentOutOfRangeException>();
     }

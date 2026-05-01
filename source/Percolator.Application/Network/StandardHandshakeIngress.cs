@@ -122,9 +122,9 @@ internal sealed class StandardHandshakeIngress : IStandardHandshakeIngress
         }
 
         var initiatorIdentityPublic = RatchetIdentityKey.FromBytes(initiatorIdentitySpki);
-        var initiatorEphemeralPublic = RatchetEphemeralKey.FromBytes(request.EphemeralKey.ToByteArray());
+        var initiatorEphemeralPublic = RatchetEphemeralKey.FromBytesOwned(request.EphemeralKey.ToByteArray());
 
-        var localIkPriv = PrivatePreKey.FromBytes(keys.IdentitySigningKey.ExportECPrivateKey());
+        var localIkPriv = PrivatePreKey.FromBytesOwned(keys.IdentitySigningKey.ExportECPrivateKey());
         var localSpkPriv = PrivatePreKey.FromBytes(spk.Value.spkPrivate);
         var localOtkPriv = otkPriv is null ? null : PrivatePreKey.FromBytes(otkPriv);
 
@@ -135,7 +135,7 @@ internal sealed class StandardHandshakeIngress : IStandardHandshakeIngress
             localSpkPriv,
             localOtkPriv);
 
-        var root = RootKey.FromBytes(shared.ToArray());
+        var root = RootKey.FromBytesOwned(shared.ToArray());
         var sessionId = SessionId.NewId();
         var session = RatchetBootstrap.CreateResponderSession(
             sessionId,

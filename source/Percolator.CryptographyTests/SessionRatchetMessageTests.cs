@@ -39,7 +39,7 @@ public class SessionRatchetMessageTests
         var ratchetKey = RatchetEphemeralKey.FromBytes(keyPair.PublicKey.ExportSubjectPublicKeyInfo());
         ulong counter = 123;
         ulong previousChainLength = 50;
-        var ciphertext = Ciphertext.FromBytes(RandomNumberGenerator.GetBytes(64));
+        var ciphertext = Ciphertext.FromBytesOwned(RandomNumberGenerator.GetBytes(64));
         var original = SessionRatchetMessage.Create(ratchetKey, counter, previousChainLength, ciphertext);
 
         // Act - Serialize by getting ToArray and deserialize by creating new instance

@@ -46,8 +46,8 @@ public sealed class HandshakeInvitationParser : IHandshakeInvitationParser
             throw new InvalidOperationException("Handshake invitation is missing required X3DH fields.");
         }
 
-        var ik = RatchetIdentityKey.FromBytes(request.IdentitySigningKey.ToByteArray());
-        var ek = RatchetEphemeralKey.FromBytes(request.EphemeralKey.ToByteArray());
+        var ik = RatchetIdentityKey.FromBytesOwned(request.IdentitySigningKey.ToByteArray());
+        var ek = RatchetEphemeralKey.FromBytesOwned(request.EphemeralKey.ToByteArray());
         var spkId = request.PrekeyId.ToStringUtf8();
         string? opkId = request.OnetimePrekeyId.IsEmpty ? null : request.OnetimePrekeyId.ToStringUtf8();
 
@@ -81,6 +81,6 @@ public static class HandshakeInvitationBuilder
         }
 
         var bytes = request.ToByteArray();
-        return HandshakeInvitation.FromBytes(bytes);
+        return HandshakeInvitation.FromBytesOwned(bytes);
     }
 }

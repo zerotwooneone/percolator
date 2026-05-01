@@ -240,7 +240,7 @@ public class RequestPreKeyBundleByPkhHandler : IRequestHandler<RequestPreKeyBund
             oneTimePreKey,
             expirationDateUtc: null);
 
-        var localIkPriv = PrivatePreKey.FromBytes(_activeIdentity.Keys.IdentitySigningKey.ExportECPrivateKey());
+        var localIkPriv = PrivatePreKey.FromBytesOwned(_activeIdentity.Keys.IdentitySigningKey.ExportECPrivateKey());
         var x3 = _sessionCrypto.X3DH_Initiate(localIkPriv, pkb);
 
         var req = new EstablishSessionRequest
@@ -276,7 +276,7 @@ public class RequestPreKeyBundleByPkhHandler : IRequestHandler<RequestPreKeyBund
 
         var sessionId = new SessionId(Guid.Parse(respPayload.SessionId));
 
-        var root = RootKey.FromBytes(x3.SharedSecret.ToArray());
+        var root = RootKey.FromBytesOwned(x3.SharedSecret.ToArray());
         var initiatorSession = RatchetBootstrap.CreateInitiatorSession(
             sessionId,
             new Percolator.Cryptography.Primitives.PeerId(remotePeerId.Value),

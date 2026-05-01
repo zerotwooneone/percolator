@@ -190,12 +190,12 @@ namespace Percolator.Application.Network
             // Validate bundle before deriving shared secret.
             _handshakePlanner.ValidatePreKeyBundle(inviterBundle);
 
-            var localIkPriv = PrivatePreKey.FromBytes(_active.Keys.IdentitySigningKey.ExportECPrivateKey());
+            var localIkPriv = PrivatePreKey.FromBytesOwned(_active.Keys.IdentitySigningKey.ExportECPrivateKey());
             var x3 = _sessionCrypto.X3DH_Initiate(localIkPriv, inviterBundle);
 
             // Create initiator session (acceptor side) with a session id chosen by the acceptor.
             var sessionId = SessionId.NewId();
-            var root = RootKey.FromBytes(x3.SharedSecret.ToArray());
+            var root = RootKey.FromBytesOwned(x3.SharedSecret.ToArray());
             var proto = pending.ProtocolVersion;
             var session = RatchetBootstrap.CreateInitiatorSession(
                 sessionId,

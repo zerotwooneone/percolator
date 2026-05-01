@@ -55,7 +55,7 @@ public sealed class ReverseSignalInitiator : IReverseSignalInitiator
     {
         if (initiatorResult is null) throw new ArgumentNullException(nameof(initiatorResult));
 
-        var rootKey = RootKey.FromBytes(initiatorResult.InitialRootKey.ToArray());
+        var rootKey = RootKey.FromBytesOwned(initiatorResult.InitialRootKey.ToArray());
         var (sendChain, recvChain) = RatchetBootstrap.DeriveInitiatorChains(rootKey);
 
         var state = new RatchetState(

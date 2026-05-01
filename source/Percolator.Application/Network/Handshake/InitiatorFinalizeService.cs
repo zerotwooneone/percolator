@@ -97,7 +97,7 @@ namespace Percolator.Application.Network.Handshake
             // Derive remote PKH from acceptor identity key (SHA-256 of SPKI).
             var remotePkh = System.Security.Cryptography.SHA256.HashData(response.AcceptorIdentityKey.ToByteArray());
 
-            var localIkPriv = PrivatePreKey.FromBytes(keys.IdentitySigningKey.ExportECPrivateKey());
+            var localIkPriv = PrivatePreKey.FromBytesOwned(keys.IdentitySigningKey.ExportECPrivateKey());
 
             // IMPORTANT: For reverse-signal, the inviter's signed pre-key used in the invite may be
             // different from _active.Keys.SignedPreKey. Resolve the correct private key via SentInvitation.
@@ -185,12 +185,12 @@ namespace Percolator.Application.Network.Handshake
                 return null;
             }
 
-            var root = RootKey.FromBytes(shared.ToArray());
+            var root = RootKey.FromBytesOwned(shared.ToArray());
 
             SessionRatchetMessage ratchetMessage;
             try
             {
-                ratchetMessage = SessionRatchetMessage.FromBytes(response.InitialRatchetMessage.ToByteArray());
+                ratchetMessage = SessionRatchetMessage.FromBytesOwned(response.InitialRatchetMessage.ToByteArray());
             }
             catch (Exception ex)
             {
@@ -371,7 +371,7 @@ namespace Percolator.Application.Network.Handshake
             {
                 try
                 {
-                    var root = RootKey.FromBytes(pending.InitialRootKey.ToArray());
+                    var root = RootKey.FromBytesOwned(pending.InitialRootKey.ToArray());
                     var tmp = RatchetBootstrap.CreateInitiatorSession(
                         SessionId.NewId(),
                         Percolator.Cryptography.Primitives.PeerId.NewId(),
@@ -494,7 +494,7 @@ namespace Percolator.Application.Network.Handshake
                 peerIdentity = null;
             }
 
-            var root = RootKey.FromBytes(match.InitialRootKey.ToArray());
+            var root = RootKey.FromBytesOwned(match.InitialRootKey.ToArray());
             var remoteCryptoPeerId = peerIdentity is null
                 ? Percolator.Cryptography.Primitives.PeerId.NewId()
                 : new Percolator.Cryptography.Primitives.PeerId(peerIdentity.Id.Value);

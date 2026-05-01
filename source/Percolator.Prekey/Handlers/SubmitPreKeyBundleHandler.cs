@@ -56,7 +56,7 @@ namespace Percolator.Prekey.Handlers
                     PreKey.FromBytes(signedPreKeyBytes),
                     signedPreKeySignature,
                     oneTimePreKeyId,
-                    OneTimeKey.FromBytes(oneTimePreKey.Key),
+                    OneTimeKey.FromBytesOwned(oneTimePreKey.Key),
                     request.Expires
                 );
                 domainBundles.Add(domainBundle);

@@ -277,7 +277,7 @@ public sealed class ConnectViaNetworkCommandHandler : IRequestHandler<ConnectVia
             oneTimePreKey,
             expirationDateUtc: null);
 
-        var localIkPriv = PrivatePreKey.FromBytes(_active.Keys.IdentitySigningKey.ExportECPrivateKey());
+        var localIkPriv = PrivatePreKey.FromBytesOwned(_active.Keys.IdentitySigningKey.ExportECPrivateKey());
         var x3 = _sessionCrypto.X3DH_Initiate(localIkPriv, pkb);
 
         var correlationId = Guid.NewGuid();

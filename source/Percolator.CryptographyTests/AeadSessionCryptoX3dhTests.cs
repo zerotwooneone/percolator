@@ -19,7 +19,7 @@ public class AeadSessionCryptoX3dhTests
         using var spk = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var spkPub = PreKey.FromBytes(spk.PublicKey.ExportSubjectPublicKeyInfo());
         // Signature is invalid (random bytes)
-        var signature = Signature.FromBytes(RandomNumberGenerator.GetBytes(64));
+        var signature = Signature.FromBytesOwned(RandomNumberGenerator.GetBytes(64));
         // Bundle without one-time key
         var bundle = new PreKeyBundle(identity,
             signedPreKeyId: Guid.NewGuid(),

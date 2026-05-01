@@ -43,7 +43,7 @@ public class SecureSession
         if (clock is null) throw new ArgumentNullException(nameof(clock));
 
         var (sharedSecret, _ephPub) = sessionCrypto.X3DH_Initiate(keyStore.GetIdentityPrivateKey(), remoteBundle);
-        var state = new RatchetState(RootKey.FromBytes(sharedSecret.ToArray()), null, 0, null, 0, 0, null, null, 1000);
+        var state = new RatchetState(RootKey.FromBytesOwned(sharedSecret.ToArray()), null, 0, null, 0, 0, null, null, 1000);
         return new SecureSession(SessionId.NewId(), remotePeerId, protocolVersion, state, sessionCrypto, clock.UtcNow, true);
     }
 

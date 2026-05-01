@@ -22,8 +22,8 @@ public class PeerDiscoveryServiceTests
     private static readonly ECDsa _testKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
 
     // Test Value Types
-    private static readonly PublicKey _testPublicKey = PublicKey.FromBytes(_testKey.ExportSubjectPublicKeyInfo());
-    private static readonly PublicKeyHash _testPublicKeyHash = PublicKeyHash.FromBytes(SHA256.HashData(_testPublicKey.ToArray()));
+    private static readonly PublicKey _testPublicKey = PublicKey.FromBytesOwned(_testKey.ExportSubjectPublicKeyInfo());
+    private static readonly PublicKeyHash _testPublicKeyHash = PublicKeyHash.FromBytesOwned(SHA256.HashData(_testPublicKey.ToArray()));
 
     [SetUp]
     public void Setup()
@@ -43,7 +43,7 @@ public class PeerDiscoveryServiceTests
         _mockSigningService.Setup(s => s.GetActivePublicKey()).Returns(_testPublicKey);
         _mockSigningService.Setup(s => s.GetActivePublicKeyHash()).Returns(_testPublicKeyHash);
         _mockSigningService.Setup(s => s.GetHash(It.IsAny<PublicKey>()))
-            .Returns<PublicKey>(pk => PublicKeyHash.FromBytes(SHA256.HashData(pk.ToArray())));
+            .Returns<PublicKey>(pk => PublicKeyHash.FromBytesOwned(SHA256.HashData(pk.ToArray())));
 
         // The constructor will be updated to match this
         _service = new PeerDiscoveryService(
@@ -82,10 +82,10 @@ public class PeerDiscoveryServiceTests
             Port = 5001,
             PublicKey = ByteString.CopyFrom(_testPublicKey.ToArray())
         };
-        var payload = Payload.FromBytes(protoPayload.ToByteArray());
+        var payload = Payload.FromBytesOwned(protoPayload.ToByteArray());
 
         // Arrange: Create a signature and a broadcast message
-        var signature = Signature.FromBytes(_testKey.SignData(payload.ToArray(), HashAlgorithmName.SHA256));
+        var signature = Signature.FromBytesOwned(_testKey.SignData(payload.ToArray(), HashAlgorithmName.SHA256));
         var broadcast = new DiscoveryBroadcast
         {
             PublicKey = ByteString.CopyFrom(_testPublicKey.ToArray()),

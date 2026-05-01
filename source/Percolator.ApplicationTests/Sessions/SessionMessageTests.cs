@@ -26,7 +26,7 @@ public class SessionMessageTests
         if (identity.Identity is null) throw new InvalidOperationException("Identity context not loaded");
         // Simplified test helper: wrap plaintext bytes into a ratchet message (passthrough)
         await Task.Yield();
-        return SessionRatchetMessage.FromBytes(plaintext.ToArray());
+        return SessionRatchetMessage.FromSpan(plaintext.Span);
     }
 
     private async Task<Plaintext> TryInferAndDecryptViaStoreAsync(
@@ -37,7 +37,7 @@ public class SessionMessageTests
         if (identity.Identity is null) throw new InvalidOperationException("Identity context not loaded");
         // Simplified test helper: unwrap the ratchet message back to plaintext (passthrough)
         await Task.Yield();
-        return Plaintext.FromBytes(encrypted.ToArray());
+        return Plaintext.FromSpan(encrypted.Span);
     }
     private ActiveIdentityContext _aliceIdentity = null!;
     private ActiveIdentityContext _bobIdentity = null!;
@@ -136,8 +136,8 @@ public class SessionMessageTests
 
         // Assert: The decrypted message matches the original
         decryptedBytes.Should().NotBeNull();
-        decryptedBytes!.ToArray().Should().BeEquivalentTo(originalBytes);
-        Encoding.UTF8.GetString(decryptedBytes!.ToArray()).Should().Be(originalMessage);
+        decryptedBytes!.Span.ToArray().Should().BeEquivalentTo(originalBytes);
+        Encoding.UTF8.GetString(decryptedBytes!.Span.ToArray()).Should().Be(originalMessage);
     }
 
     private (CryptoSharedSecret, CryptoSharedSecret) PerformX3DH()

@@ -83,7 +83,7 @@ public class PeerDiscoveryService : IDisposable, IPeerDiscoveryService
                     Port = _config.ListenPort,
                     PublicKey = ByteString.CopyFrom(publicKey.ToArray())
                 };
-                var payload = Payload.FromBytes(protoPayload.ToByteArray());
+                var payload = Payload.FromBytesOwned(protoPayload.ToByteArray());
 
                 // 3. Sign the payload
                 var signature = _signingService.Sign(payload);
@@ -129,9 +129,9 @@ public class PeerDiscoveryService : IDisposable, IPeerDiscoveryService
                 var broadcast = DiscoveryBroadcast.Parser.ParseFrom(result.Buffer);
 
                 // 2. Wrap primitives in value types for verification
-                var payload = Payload.FromBytes(broadcast.Payload.ToByteArray());
-                var signature = Signature.FromBytes(broadcast.Signature.ToByteArray());
-                var publicKey = PublicKey.FromBytes(broadcast.PublicKey.ToByteArray());
+                var payload = Payload.FromBytesOwned(broadcast.Payload.ToByteArray());
+                var signature = Signature.FromBytesOwned(broadcast.Signature.ToByteArray());
+                var publicKey = PublicKey.FromBytesOwned(broadcast.PublicKey.ToByteArray());
 
                 // 3. Verify the signature
                 if (!_signingService.Verify(payload, signature, publicKey))

@@ -41,20 +41,20 @@ public class SigningService : ISigningService
     public PublicKeyHash GetHash(PublicKey publicKey)
     {
         var hash = SHA256.HashData(publicKey.ToArray());
-        return PublicKeyHash.FromBytes(hash);
+        return PublicKeyHash.FromBytesOwned(hash);
     }
 
     public Signature Sign(Payload payload)
     {
         var privateKey = GetActiveSigningKey();
         var cryptoSignature = _cryptographyService.Sign(payload.ToArray(), privateKey);
-        return Signature.FromBytes(cryptoSignature.ToArray());
+        return Signature.FromBytesOwned(cryptoSignature.ToArray());
     }
 
     public bool Verify(Payload payload, Signature signature, PublicKey publicKey)
     {
-        var cryptoSignature = Crypto.Signature.FromBytes(signature.ToArray());
-        var cryptoPublicKey = Crypto.PublicKey.FromBytes(publicKey.ToArray());
+        var cryptoSignature = Crypto.Signature.FromBytesOwned(signature.ToArray());
+        var cryptoPublicKey = Crypto.PublicKey.FromBytesOwned(publicKey.ToArray());
         return _cryptographyService.Verify(payload.ToArray(), cryptoSignature, cryptoPublicKey);
     }
 }
