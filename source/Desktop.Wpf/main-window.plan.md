@@ -1372,3 +1372,774 @@ Measurable checks:
 
 - `ByteArrayRecord` references: 0 matches across `source/`.
 - `.Value` on migrated types: 0 matches in the migrated domain projects (allow-list only where `.Value` is unrelated to byte-backed value objects).
+
+### H.9 - Reduce avoidable byte[] allocations after ByteArray migration
+
+Scope:
+
+- Do not target unit tests in this chunk (production code only).
+- `Desktop.Wpf/Features/Simulator/**` is low priority; only touch if a change is trivial and clearly safe.
+
+#### H.9.1 - Groups of things to investigate (inventory)
+
+- **H.9.1.a Crypto import/verify/sign/hashing call sites**
+  - Target patterns:
+    - `ecdsa.ImportSubjectPublicKeyInfo(x.ToArray(), out _)`
+    - `ecdsa.VerifyData(data.ToArray(), sig.ToArray(), ...)`
+    - `ecdsa.SignData(data.ToArray(), ...)`
+    - `SHA256.HashData(x.ToArray())`
+  - Known hotspot examples:
+    - `Percolator.Cryptography/AeadSessionCrypto.cs`: `VerifySignature(...)` calls `ToArray()` on inputs.
+    - `Percolator.Cryptography/CryptographyExtensions.cs`: `ToEcdhPublicKey(...)` calls `publicKey.ToArray()` many times per method (sometimes 5-10+).
+
+- **H.9.1.b Protobuf boundary conversions (ByteString / ParseFrom / ToByteArray)**
+  - Target patterns:
+    - `ByteString.CopyFrom(byteArrayValueObject.ToArray())`
+    - `SomeDomainType.FromBytes(protoBytes.ToByteArray())`
+    - `Parser.ParseFrom(byteArrayValueObject.ToArray())`
+  - Known hotspot examples:
+    - `Percolator.Application/Cli/RequestPreKeyBundleByPkhHandler.cs`: many `ToByteArray()` calls from protobuf fields; also `ByteString.CopyFrom(x3.EphemeralPublic.ToArray())`.
+    - `Percolator.Application/Network/ApprovePendingSessionCommand.cs`: `OneTimeKey.FromBytes(payload...ToByteArray())`.
+
+- **H.9.1.c ByteArray factory usage where ownership is already unique (use `FromBytesOwned`)**
+  - Target patterns:
+    - `X.FromBytes(someFreshArray)` where `someFreshArray` is newly allocated and not aliased.
+  - “Fresh array” sources that are candidates for `FromBytesOwned(...)`:
+    - `SHA256.HashData(...)` (returns a new `byte[]`)
+    - `Guid.NewGuid().ToByteArray()`
+    - `protoMessage.ToByteArray()`
+    - `ByteString.ToByteArray()`
+    - `Stream.ReadExactly(...)` into a newly allocated buffer
+  - Known good example (already done):
+    - `Percolator.Identity/IdentityPublicKeyHash.cs`: `FromSpki(...)` uses `FromBytesOwned(hash)`.
+
+- **H.9.1.d Equality / comparisons that accidentally allocate (production hot paths only)**
+  - Target patterns:
+    - `a.ToArray().SequenceEqual(b)` or `a.ToArray().AsSpan().SequenceEqual(...)`
+    - `a.ToArray()` inside a predicate in a tight loop
+  - Preferred patterns:
+    - `a.Span.SequenceEqual(b)`
+    - `a.Memory.Span.SequenceEqual(b)`
+
+- **H.9.1.e “Repeated ToArray” inside a single method**
+  - Target patterns:
+    - multiple calls to `.ToArray()` on the same value object inside a single code path
+  - Known hotspot examples:
+    - `Percolator.Cryptography/CryptographyExtensions.cs`: repeated `publicKey.ToArray()` calls in fallback logic.
+
+#### H.9.2 - Patterns and rules (implementation plan a simple AI can follow)
+
+- **H.9.2.a Prefer `Span`/`Memory` when the callee supports it**
+  - **Rule**
+    - If a method has an overload accepting `ReadOnlySpan<byte>` or `ReadOnlyMemory<byte>`, pass `value.Span` / `value.Memory` instead of calling `value.ToArray()`.
+  - **Primary targets**
+    - .NET crypto APIs often have span-based overloads (verify each call site):
+      - `ECDsa.ImportSubjectPublicKeyInfo(ReadOnlySpan<byte>, out int)`
+      - `ECDiffieHellman.ImportSubjectPublicKeyInfo(ReadOnlySpan<byte>, out int)`
+      - `ECDsa.VerifyData(ReadOnlySpan<byte> data, ReadOnlySpan<byte> signature, HashAlgorithmName)`
+      - `SHA256.HashData(ReadOnlySpan<byte>)`
+  - **Concrete refactor pattern**
+    - Before:
+      - `ecdsa.ImportSubjectPublicKeyInfo(identityPublic.ToArray(), out _);`
+      - `ecdsa.VerifyData(signedPreKey.ToArray(), signature.ToArray(), HashAlgorithmName.SHA256);`
+    - After (if overloads exist):
+      - `ecdsa.ImportSubjectPublicKeyInfo(identityPublic.Span, out _);`
+      - `ecdsa.VerifyData(signedPreKey.Span, signature.Span, HashAlgorithmName.SHA256);`
+
+- **H.9.2.b If span overload doesn’t exist, avoid repeated allocations by caching the array once**
+  - **Rule**
+    - If a callee only accepts `byte[]`, call `ToArray()` once, store it in a local, and reuse that local.
+  - **Concrete refactor pattern**
+    - Before:
+      - `if (publicKey.ToArray().Length == 65) { ... publicKey.ToArray().Skip(1) ... }`
+    - After:
+      - `var pk = publicKey.ToArray();`
+      - Use `pk` for all length checks / slicing / downstream calls.
+  - **Primary target**
+    - `Percolator.Cryptography/CryptographyExtensions.cs` (large reduction in repeated `ToArray()` calls).
+
+- **H.9.2.c Use `FromBytesOwned` when the input is a fresh array and ownership is transferred**
+  - **Rule**
+    - Replace `X.FromBytes(freshArray)` with `X.FromBytesOwned(freshArray)` when:
+      - `freshArray` was just created (see H.9.1.c sources), and
+      - no other code retains a reference to `freshArray`, and
+      - you will not mutate `freshArray` after passing it.
+  - **Examples that are usually safe**
+    - `var hash = SHA256.HashData(spanOrArray); return X.FromBytesOwned(hash);`
+    - `var bytes = protoField.ToByteArray(); var x = X.FromBytesOwned(bytes);`
+  - **Examples that are NOT safe**
+    - When you’re wrapping a buffer that is reused (array pool, shared static, or a long-lived mutable array).
+    - When you didn’t allocate the array in the current scope and can’t prove uniqueness.
+
+- **H.9.2.d Prefer `.Span`/`.Memory` for comparisons and predicates**
+  - **Rule**
+    - Replace `a.ToArray().SequenceEqual(b)` with `a.Span.SequenceEqual(b)` (or `a.Span.SequenceEqual(b.Span)` when both are ByteArray types).
+  - **Notes**
+    - Avoid applying this to unit tests in this chunk.
+
+- **H.9.2.e Protobuf boundaries: avoid “double copy” at the boundary**
+  - **Rule**
+    - If you already must materialize a `byte[]` from protobuf (`ByteString.ToByteArray()`), and you immediately wrap it into a ByteArray value object, prefer `FromBytesOwned(...)`.
+  - **Rule**
+    - If you already have a ByteArray value object and protobuf has a span overload (`ByteString.CopyFrom(ReadOnlySpan<byte>)`), prefer passing `value.Span`.
+    - If protobuf only accepts `byte[]` (or if we can’t find the overload), accept the single allocation boundary but avoid intermediate `ToArray()` calls.
+
+#### H.9.3 - Execution order (sub-pieces to visit one by one)
+
+- **H.9.3.a** Fix repeated `ToArray()` calls inside `Percolator.Cryptography/CryptographyExtensions.cs` (cache array once; use span overloads if available).
+- **H.9.3.b** Audit `Percolator.Cryptography/AeadSessionCrypto.VerifySignature` for span overload usage.
+- **H.9.3.c** Audit protobuf handlers in `Percolator.Application` and switch `FromBytes` -> `FromBytesOwned` for `ByteString.ToByteArray()` and `*.ToByteArray()` sources where safe.
+- **H.9.3.d** Sweep for `SHA256.HashData(x.ToArray())` and switch to `HashData(x.Span)` + `FromBytesOwned(...)` where appropriate.
+- **H.9.3.e** Sweep for `SequenceEqual` call sites and replace `ToArray()`-based comparisons with `Span`.
+- **H.9.3.f** Audit persistence + serialization boundaries in production code (high value, often easy wins):
+  - Sqlite repositories mapping `byte[]` columns -> ByteArray value objects (`FromBytesOwned` where safe).
+  - JSON persistence / wire formats (e.g., any `Convert.ToBase64String(x.ToArray())` / `FromBase64String(...)` flows).
+  - Stream I/O where buffers are newly allocated per read (safe `FromBytesOwned`) vs pooled buffers (do not use owned).
+
+#### H.9.4 - Concrete call sites to update (most likely allocation wins)
+
+Notes:
+
+- Production code only (exclude unit tests).
+- `Desktop.Wpf/Features/Simulator/**` remains low priority and is intentionally not enumerated here.
+
+- **H.9.4.a Crypto import/verify/sign/hashing**
+  - `Percolator.Cryptography/CryptographyExtensions.cs`
+    - `ToEcdhPublicKey(RatchetIdentityKey)` uses `publicKey.ToArray()` repeatedly and uses LINQ `Skip/Take/ToArray()`.
+    - `ToEcdhPublicKey(RatchetEphemeralKey)` same pattern.
+    - `ToEcdhPublicKey(PreKey)` same pattern.
+    - `ToEcdhPublicKey(OneTimeKey)` same pattern.
+    - Likely update:
+      - Cache `var pk = publicKey.ToArray()` once.
+      - Prefer span overloads for `ImportSubjectPublicKeyInfo` when available.
+      - Replace LINQ slicing with span slicing + single allocation only when needed (`parameters.Q.X/Y` need `byte[]`).
+  - `Percolator.Cryptography/AeadSessionCrypto.cs`
+    - `X3DH_Initiate(...)` checks `localIdentityPrivateKey.ToArray()` multiple times.
+    - `VerifySignature(...)` does `ImportSubjectPublicKeyInfo(identityPublic.ToArray(), ...)` and `VerifyData(signedPreKey.ToArray(), signature.ToArray(), ...)`.
+    - Likely update:
+      - Use span overloads if available (`identityPublic.Span`, `signedPreKey.Span`, `signature.Span`).
+      - Otherwise cache arrays once per call.
+  - `Percolator.Cryptography/X3dhDeriver.cs`
+    - `DeriveInitiator(...)` and `DeriveResponder(...)` call `ToArray()` repeatedly on each input for guards and for imports.
+    - Likely update:
+      - Cache `byte[]` once per input (`ikBytes`, `spkBytes`, `privBytes`, etc.).
+      - Use span overloads for `ImportSubjectPublicKeyInfo` / `ImportECPrivateKey` if available.
+  - `Percolator.Application/Network/SigningService.cs`
+    - `GetHash(PublicKey publicKey)` uses `SHA256.HashData(publicKey.ToArray())`.
+    - `Sign(Payload payload)` uses `payload.ToArray()` and then wraps signature using `Signature.FromBytes(cryptoSignature.ToArray())`.
+    - `Verify(...)` round-trips `signature.ToArray()`/`publicKey.ToArray()` into crypto-domain wrappers.
+    - Likely update:
+      - `SHA256.HashData(publicKey.Span)` and then `PublicKeyHash.FromBytesOwned(hash)` (hash is fresh).
+      - If cryptography service supports span inputs, pass `payload.Span`.
+
+- **H.9.4.b Protobuf boundaries (ByteString / ParseFrom / ToByteArray)**
+  - `Percolator.Application/Network/ProcessInternalEnvelopeHandler.cs`
+    - DHT:
+      - `TargetPeerId.ToByteArray()` then `NodeId.FromBytes(target)`.
+      - `ByteString.CopyFrom(node.Id.ToArray())` inside loop.
+      - `SHA256.HashData(profile.IdentityPublicKey.ToArray())`.
+    - Prekey:
+      - Large `ToByteArray()` fan-out building `SubmitPreKeyBundleCommand`.
+      - `IdentityPublicKeyHash.FromBytes(getReq.PublicKeyHash.ToByteArray())`.
+      - `ByteString.CopyFrom(bundle.IdentitySigningKey.ToArray())` and similar for other bundle fields.
+    - Chat:
+      - `cg.InitialParticipantIdentityKeys` loop calling `bs.ToByteArray()`.
+      - Multiple GUID + PKH conversions via `.ToByteArray()`.
+      - `SHA256.HashData(authorSpki)` then `Pkh.FromBytes(authorPkh)`.
+    - Likely update:
+      - When converting `ByteString -> byte[] -> ByteArrayType`, prefer `FromBytesOwned(...)` (the `ToByteArray()` result is fresh).
+      - When producing `ByteString` from ByteArray types, prefer `ByteString.CopyFrom(x.Span)` if available; else accept boundary allocation.
+      - Replace `SHA256.HashData(x.ToArray())` with `HashData(x.Span)`.
+  - `Percolator.Application/Network/DeliverOpaqueMessageHandler.cs`
+    - `InternalEnvelope.Parser.ParseFrom(plaintext.ToArray())`.
+    - `Payload.FromBytes(relay.OpaquePayload.ToByteArray())`.
+    - `Plaintext.FromBytes(ack.ToByteArray())`.
+    - `ackCipher.ToArray()`.
+    - Likely update:
+      - Replace parsing with span-based ParseFrom (no `ToArray()`):
+        - `InternalEnvelope.Parser.ParseFrom(plaintext.Span)`.
+      - Use `FromBytesOwned(relay.OpaquePayload.ToByteArray())` if safe.
+  - `Percolator.Application/Cli/RequestPreKeyBundleByPkhHandler.cs`
+    - `Plaintext.FromBytes(internalEnvelope.ToByteArray())`.
+    - `SessionRatchetMessage.FromBytes(response.ResponsePayload.ResponsePayload.ToByteArray())`.
+    - `InternalEnvelope.Parser.ParseFrom(respPlain.ToArray())`.
+    - `bundle.*.ToByteArray()` used many times in `PerformHandshake`.
+    - `ByteString.CopyFrom(x3.EphemeralPublic.ToArray())`.
+    - `RootKey.FromBytes(x3.SharedSecret.ToArray())`.
+    - Likely update:
+      - Prefer `Plaintext.FromBytesOwned(internalEnvelope.ToByteArray())` (fresh array).
+      - Prefer `SessionRatchetMessage.FromBytesOwned(responseBytes)` where `responseBytes` came from `ToByteArray()`.
+      - Cache `respPlainBytes` once if parser needs `byte[]`.
+      - Prefer `ByteString.CopyFrom(x3.EphemeralPublic.Span)` if available.
+      - Prefer `RootKey.FromBytesOwned(x3.SharedSecret.ToArray())` only if we can get a *fresh* array (today it’s a copy; better is `RootKey.FromSpan(x3.SharedSecret.Span)` or `Hash/KDF` APIs that accept span).
+  - `Percolator.Application/Cli/SubmitPreKeysHandler.cs`
+    - `ecdsa.SignData(oneTime.Value.publicKey.ToArray(), ...)`.
+    - `otk.Value.publicKey.ToArray()` / `otk.Value.privateKey.ToArray()`.
+    - `SessionRatchetMessage.FromBytes(deliverResp.ResponsePayload.ResponsePayload.ToByteArray())`.
+    - `InternalEnvelope.Parser.ParseFrom(respPlain.ToArray())`.
+    - Likely update:
+      - Prefer span overloads for `SignData` if available.
+      - Prefer `FromBytesOwned(...)` when wrapping `ToByteArray()` results.
+
+- **H.9.4.c Persistence boundaries (Sqlite repositories)**
+  - `Percolator.Infrastructure/Cryptography/SqliteSessionRepository.cs`
+    - `FromDbo(...)` wraps DB-provided `byte[]` via `RootKey.FromBytes(row.RootKey)` and `ChainKey.FromBytes(row.SendChainKey)` etc.
+    - Likely update:
+      - Consider `FromBytesOwned(...)` for `row.*` arrays if EF materialization yields unique arrays that won’t be mutated/reused (verify EF behavior + repository invariants first).
+      - If not safe to own, keep `FromBytes` but avoid additional `ToArray()` copies elsewhere.
+
+- **H.9.4.d Network payload / wiretap**
+  - `Percolator.Application/Network/MessageService.cs`
+    - `cipher.ToArray()` is called multiple times per send (payload + length + wiretap + NetworkPayload).
+    - Likely update:
+      - Cache once: `var cipherBytes = cipher.ToArray();` and reuse.
+      - Prefer `NetworkPayload.FromBytesOwned(cipherBytes)` if the payload wrapper can own (or introduce it).
+      - `OutboundWireMessage` should take `ReadOnlyMemory<byte>` if possible (avoid copy).
+
+- **H.9.4.e Desktop.Wpf (non-simulator) protobuf/cipher boundaries**
+  - `Desktop.Wpf/Features/Sessions/Handlers/ConnectViaNetworkCommandHandler.cs`
+    - Same pre-key bundle flow as CLI: `Plaintext.FromBytes(internalEnvelope.ToByteArray())`, `SessionRatchetMessage.FromBytes(response...ToByteArray())`, `InternalEnvelope.Parser.ParseFrom(respPlain.ToArray())`.
+    - Likely update:
+      - Prefer `FromBytesOwned(...)` when wrapping results of `ToByteArray()`/`internalEnvelope.ToByteArray()`.
+      - Cache `respPlainBytes` if parser needs `byte[]`.
+
+#### H.9.5 - Group 1 findings: Cryptography interop hot paths (Percolator.Cryptography)
+
+Target framework note:
+
+- `Percolator.Cryptography` targets `net9.0`, so prefer Span-based crypto APIs where possible.
+- Treat these BCL methods as available and preferred in this codebase:
+  - `ECDsa.ImportSubjectPublicKeyInfo(ReadOnlySpan<byte>, out int)`
+  - `ECDsa.VerifyData(ReadOnlySpan<byte> data, ReadOnlySpan<byte> signature, HashAlgorithmName)`
+  - `ECDsa.SignData(ReadOnlySpan<byte> data, HashAlgorithmName)`
+  - `ECDiffieHellman.ImportSubjectPublicKeyInfo(ReadOnlySpan<byte>, out int)`
+  - `ECDiffieHellman.ImportECPrivateKey(ReadOnlySpan<byte>, out int)`
+  - `SHA256.HashData(ReadOnlySpan<byte>)`
+
+- **CryptographyExtensions.ToEcdhPublicKey(...) (all overloads)**
+  - **Issue**
+    - Extremely high repeated `publicKey.ToArray()` calls.
+    - LINQ `Skip/Take/ToArray()` creates extra intermediate allocations.
+  - **Most likely updates**
+    - Prefer the span overload for SPKI import:
+      - `ecdh.ImportSubjectPublicKeyInfo(publicKey.Span, out _);`
+    - In the fallback/raw-point path, call `ToArray()` once and reuse:
+      - `var pk = publicKey.ToArray();`
+    - Replace LINQ slicing with span slicing:
+      - `pk.AsSpan(1, 32).ToArray()` / `pk.AsSpan(33, 32).ToArray()`.
+    - Avoid repeated `pk.Length` checks; evaluate once.
+
+- **AeadSessionCrypto.VerifySignature(...)**
+  - **Issue**
+    - Allocates multiple arrays per call (`identityPublic.ToArray()`, `signedPreKey.ToArray()`, `signature.ToArray()`).
+  - **Most likely updates**
+    - Replace with span-based calls (no `ToArray()`):
+      - `ecdsa.ImportSubjectPublicKeyInfo(identityPublic.Span, out _);`
+      - `return ecdsa.VerifyData(signedPreKey.Span, signature.Span, HashAlgorithmName.SHA256);`
+
+- **AeadSessionCrypto.X3DH_Initiate(...)**
+  - **Issue**
+    - `localIdentityPrivateKey.ToArray()` called multiple times just for guards.
+  - **Most likely updates**
+    - Replace guards with span-length checks:
+      - `if (localIdentityPrivateKey is null || localIdentityPrivateKey.Span.Length == 0) ...`
+
+- **X3dhDeriver.DeriveInitiator / DeriveResponder**
+  - **Issue**
+    - Repeated `ToArray()` for each guard and each import call.
+  - **Most likely updates**
+    - Replace guard clauses with span-length checks (`x.Span.Length`).
+    - Replace import calls with span overloads:
+      - `ikA.ImportECPrivateKey(localIdentityPrivateKey.Span, out _);`
+      - `ikB.ImportSubjectPublicKeyInfo(remoteIdentityKey.Span, out _);`
+      - `spkB.ImportSubjectPublicKeyInfo(remoteSignedPreKey.Span, out _);`
+      - `opkB.ImportSubjectPublicKeyInfo(remoteOneTimePreKey.Span, out _);`
+      - `ikB.ImportECPrivateKey(localIdentityPrivateKey.Span, out _);` etc.
+
+- **PreKeyBundleValidator.Validate(...)**
+  - **Missed hotspot**
+    - Uses `bundle.IdentitySigningKey.ToArray()` for guards + for `ImportSubjectPublicKeyInfo`.
+    - Uses `VerifyData(bundle.SignedPreKey.ToArray(), bundle.SignedPreKeySignature.ToArray(), ...)`.
+  - **Implementation-ready update**
+    - Guard using span length:
+      - `bundle.IdentitySigningKey is null || bundle.IdentitySigningKey.Span.Length == 0`
+    - Use span overloads:
+      - `ecdsa.ImportSubjectPublicKeyInfo(bundle.IdentitySigningKey.Span, out _);`
+      - `ecdsa.VerifyData(bundle.SignedPreKey.Span, bundle.SignedPreKeySignature.Span, HashAlgorithmName.SHA256)`.
+
+- **EcdsaSigningService.Verify(...)**
+  - **Missed hotspot**
+    - `ImportSubjectPublicKeyInfo(publicKey.ToArray(), ...)` and `VerifyData(data, signature.ToArray(), ...)`.
+  - **Implementation-ready update**
+    - `ecdsa.ImportSubjectPublicKeyInfo(publicKey.Span, out _);`
+    - `return ecdsa.VerifyData(data, signature.Span, HashAlgorithmName.SHA256);`
+
+- **AeadRatchetEngine (IRatchetEngine implementation)**
+  - **Missed hotspot**
+    - `CryptoUtils.KDF(null, state.SendingChainKey.ToArray(), ...)` and `...ReceivingChainKey.ToArray()`.
+    - `dh.ImportECPrivateKey(state.DhRatchetPrivateKey.ToArray(), out _)`.
+    - `ad.ToArray()`, `pt.ToArray()`, `framed.GetCiphertext().ToArray()`.
+  - **Implementation-ready update**
+    - Use span overloads for EC private import:
+      - `dh.ImportECPrivateKey(state.DhRatchetPrivateKey.Span, out _);`
+    - Replace KDF inputs to avoid `ToArray()` by adding span-first overloads:
+      - Introduce `CryptoUtils.KDF(ReadOnlySpan<byte> key, ReadOnlySpan<byte> input, string label, int outputLen)` (or similar), then pass `state.SendingChainKey.Span`.
+    - Replace `ad.ToArray()` / `pt.ToArray()` with `.Span` only if `GetAssociatedData` and `EncryptAesGcm/DecryptAesGcm` gain span overloads.
+      - If not adding overloads now, cache once per method:
+        - `var adBytes = ad.ToArray();`
+        - `var ptBytes = pt.ToArray();`
+
+- **SessionRatchetMessage (domain wrapper around protobuf RatchetMessage)**
+  - **Missed hotspot**
+    - `Create(...)`:
+      - `ByteString.CopyFrom(ratchetKey.ToArray())` and `ByteString.CopyFrom(ciphertext.ToArray())`.
+      - `ms.ToArray()` then `SessionRatchetMessage.FromBytes(...)` (double-copy possible).
+    - `GetHeader()` / `GetCiphertext()` parse with `Parser.ParseFrom(ToArray())` (allocates each call).
+    - `GetHeaderAssociatedData()` + `GetAssociatedData(...)` call `header.PreKey.ToArray()`.
+  - **Implementation-ready update**
+    - Prefer `ByteString.CopyFrom(ratchetKey.Span)` / `ByteString.CopyFrom(ciphertext.Span)` if available; else cache `ToArray()` once.
+    - Replace `SessionRatchetMessage.FromBytes(ms.ToArray())` with `FromBytesOwned(ms.ToArray())` (fresh array).
+    - Avoid reparsing for header/ciphertext:
+      - Parse once inside each method using span-based ParseFrom (no `ToArray()`):
+        - `var proto = Contracts.RatchetMessage.Parser.ParseFrom(Span);`.
+    - Replace `header.PreKey.ToArray()` usage in associated-data serialization by caching once:
+      - `var preKeyBytes = header.PreKey.ToArray(); writer.Write(preKeyBytes);`
+
+#### H.9.6 - Group 2 findings: Protobuf envelope processing (Percolator.Application)
+
+Library/version note:
+
+- `Percolator.Contracts` uses `Google.Protobuf` `3.27.2`.
+- Treat these protobuf/BCL APIs as available and preferred:
+  - `ByteString.Span` (read-only view, no allocation)
+  - `ByteString.CopyFrom(ReadOnlySpan<byte>)` (avoid `ToArray()` when producing protobuf)
+  - `MessageParser<T>.ParseFrom(ReadOnlySpan<byte>)` (confirmed)
+  - `new Guid(ReadOnlySpan<byte>)` (avoid `ToByteArray()` when reading GUID fields)
+  - `SHA256.HashData(ReadOnlySpan<byte>)`
+
+- **ProcessInternalEnvelopeHandler.Handle(...)**
+  - **DHT branch**
+    - `TargetPeerId`:
+      - Prefer `NodeId.FromSpan(dht.FindNodeRequest.TargetPeerId.Span)` to avoid allocating `target`.
+      - If a `byte[]` must be materialized for other reasons, use `FromBytesOwned(TargetPeerId.ToByteArray())` (fresh array).
+    - `ByteString.CopyFrom(node.Id.ToArray())` in loop:
+      - Replace with `ByteString.CopyFrom(node.Id.Span)`.
+    - `SHA256.HashData(profile.IdentityPublicKey.ToArray())`:
+      - Replace with `SHA256.HashData(profile.IdentityPublicKey.Span)`.
+  - **Prekey branch**
+    - When wrapping protobuf `ByteString` into ByteArray value objects:
+      - Prefer `FromSpan(byteString.Span)` when available.
+      - If the value object only has `FromBytes(byte[])` / `FromBytesOwned(byte[])`, then do:
+        - `var bytes = byteString.ToByteArray();`
+        - `X.FromBytesOwned(bytes)`.
+    - `IdentityPublicKeyHash.FromBytes(getReq.PublicKeyHash.ToByteArray())`:
+      - Replace with `IdentityPublicKeyHash.FromSpan(getReq.PublicKeyHash.Span)`.
+    - Building response bundles:
+      - Replace `ByteString.CopyFrom(bundle.IdentitySigningKey.ToArray())` with `ByteString.CopyFrom(bundle.IdentitySigningKey.Span)`.
+      - Same for:
+        - `bundle.SignedPreKey.Span`
+        - `bundle.SignedPreKeySignature.Span`
+        - `bundle.OneTimePreKey.Span`
+  - **Chat branch**
+    - GUID fields:
+      - Replace patterns like `new Guid(x.ToByteArray())` with `new Guid(x.Span)`.
+        - Applies to `GroupConversationGuid`, `MessageId`, `OpId`, membership GUID lists, etc.
+    - PKH / hashes:
+      - Replace patterns like `pkh = text.PublicKeyHash.ToByteArray()` + `Pkh.FromBytes(pkh)` with:
+        - `Pkh.FromSpan(text.PublicKeyHash.Span)`.
+      - Replace `authorSpki = text.AuthorIdentityKey.ToByteArray(); authorPkh = SHA256.HashData(authorSpki);` with:
+        - `var authorPkh = SHA256.HashData(text.AuthorIdentityKey.Span);`
+        - `Pkh.FromBytesOwned(authorPkh)`.
+    - SPKI lists:
+      - `cg.InitialParticipantIdentityKeys` currently uses `bs.ToByteArray()`.
+      - If downstream command accepts `IReadOnlyList<byte[]>`, you may keep it.
+      - If downstream can be updated, prefer passing `ReadOnlyMemory<byte>` or `ReadOnlySpan<byte>` to avoid per-key allocations.
+  - **MQ branch**
+    - `req.RecipientPublicKeyHash`:
+      - Prefer passing `req.RecipientPublicKeyHash.Span` down-stack if possible.
+    - `req.MessageBlob`:
+      - Prefer passing `req.MessageBlob.Span` down-stack if possible.
+    - If downstream requires `byte[]`, materialize once and treat it as boundary allocation.
+
+#### H.9.7 - Group 3 findings: Message ingress/egress + response encryption (Percolator.Application)
+
+Assumptions for this group:
+
+- Protobuf parsers support `ParseFrom(ReadOnlySpan<byte>)` (confirmed).
+- Protobuf `ByteString.CopyFrom(ReadOnlySpan<byte>)` is preferred where applicable.
+- This group focuses on low-risk wins (local caching, span parsing) and avoids invasive signature changes.
+
+- **MessageService.SendMessageAsync / SendMessageWithResponseAsync**
+  - **Issue**
+    - `cipher.ToArray()` is called multiple times per send (wiretap payload, wiretap length, `NetworkPayload`, etc.).
+  - **Most likely updates (safe)**
+    - Introduce a single cached local per send:
+      - `var cipherBytes = cipher.ToArray();`
+      - Replace ALL of these with `cipherBytes`:
+        - `PayloadBytes: cipher.ToArray()`
+        - `PayloadLength: cipher.ToArray().Length`
+        - `new NetworkPayload(cipher.ToArray())`
+    - Also cache `attemptedPaths = outcome.AttemptedPaths.ToArray()` once if used more than once.
+    - Response payload mapping:
+      - Replace `ByteString.CopyFrom(outcome.ResponsePayload.Value.Value.ToArray())` with span-based copy when possible.
+
+- **DeliverOpaqueMessageHandler.Handle(...)**
+  - **Issue**
+    - Parsing + inner payload wrapping allocates due to `ToArray()`/`ToByteArray()`.
+  - **Most likely updates**
+    - Replace:
+      - `InternalEnvelope.Parser.ParseFrom(plaintext.ToArray())`
+      - with:
+      - `InternalEnvelope.Parser.ParseFrom(plaintext.Span)`
+    - Replace:
+      - `Payload.FromBytes(relay.OpaquePayload.ToByteArray())`
+      - with:
+      - `Payload.FromBytesOwned(relay.OpaquePayload.ToByteArray())` (ByteString alloc is fresh)
+    - Replace:
+      - `Plaintext.FromBytes(ack.ToByteArray())`
+      - with:
+      - `Plaintext.FromBytesOwned(ack.ToByteArray())` (fresh array)
+    - Cache once:
+      - `var ackBytes = ackCipher.ToArray();` (already done, just ensure it’s not recomputed elsewhere)
+
+- **PercolatorMessageService.DeliverOpaqueMessage(...) (gRPC entrypoint)**
+  - **Missed hotspot**
+    - `PayloadBytes: request.Payload.ToByteArray()` is a boundary allocation.
+  - **Implementation-ready update**
+    - Keep as boundary allocation unless `IngressOpaquePayload` and the downstream ingress pipeline are updated to accept `ReadOnlyMemory<byte>`.
+    - If you decide to update ingress signatures, prefer:
+      - `PayloadBytesMemory: request.Payload.Memory` (or `request.Payload.Span` where lifetime allows)
+      - and avoid allocating `byte[]`.
+
+#### H.9.8 - Group 4 findings: Persistence boundaries (Percolator.Infrastructure)
+
+Goal:
+
+- Reduce avoidable copies when rehydrating ByteArray value objects from persisted `byte[]` blobs.
+- Keep changes local to repositories/stores (no unit tests, no simulator).
+
+Safety rule for `FromBytesOwned(...)` with EF Core `byte[]` properties:
+
+- **Allowed** when ALL are true:
+  - The `byte[]` comes directly from an EF Core entity property (`row.SomeBlob`) representing a BLOB column.
+  - The domain value object is immutable (it is), and no code will mutate the EF `byte[]` after wrapping.
+  - The EF entity will not be reused to mutate that property after wrapping (typically true for `AsNoTracking()` reads).
+  - No other reference to the same `byte[]` escapes (do not store the raw `byte[]` elsewhere).
+- **Not allowed** when:
+  - The source is pooled/reused buffers.
+  - The source is a shared static buffer.
+  - The value is derived from a `ToArray()` of a ByteArray value object (that already created a copy; ownership transfer gives no win).
+
+- **SqliteSessionRepository.FromDbo(...)**
+  - **Observation**
+    - DB materialized `byte[]` arrays are immediately wrapped via `FromBytes(...)` (which copies).
+  - **Implementation-ready update (apply safety rule above)**
+    - Replace in `FromDbo(row)`:
+      - `RootKey.FromBytes(row.RootKey)` -> `RootKey.FromBytesOwned(row.RootKey)`
+      - `ChainKey.FromBytes(row.SendChainKey)` -> `ChainKey.FromBytesOwned(row.SendChainKey)`
+      - `ChainKey.FromBytes(row.RecvChainKey)` -> `ChainKey.FromBytesOwned(row.RecvChainKey)`
+      - `RatchetEphemeralKey.FromBytes(row.RemoteRatchetKey)` -> `RatchetEphemeralKey.FromBytesOwned(row.RemoteRatchetKey)`
+      - `PrivateEphemeralKey.FromBytes(row.DhRatchetPrivateKey)` -> `PrivateEphemeralKey.FromBytesOwned(row.DhRatchetPrivateKey)`
+
+- **SqlitePendingSessionRepository.Rehydrate(...)**
+  - **Missed rehydration hotspot**
+    - `HandshakeInvitation.FromBytes(row.Invitation)`
+    - `RatchetIdentityKey.FromBytes(row.InviterIdentityKey)`
+  - **Implementation-ready update (apply safety rule above)**
+    - `HandshakeInvitation.FromBytes(row.Invitation)` -> `HandshakeInvitation.FromBytesOwned(row.Invitation)`
+    - `RatchetIdentityKey.FromBytes(row.InviterIdentityKey)` -> `RatchetIdentityKey.FromBytesOwned(row.InviterIdentityKey)`
+
+- **SqlitePreKeyBundleRepository.PopBundleAsync / TryPopBundleAsync**
+  - **Missed rehydration hotspot**
+    - Wraps EF `byte[]` blobs via `FromBytes(...)`:
+      - `RatchetIdentityKey.FromBytes(identityKeyDbo.PublicKey)`
+      - `PreKey.FromBytes(spk.PublicKey)`
+      - `Signature.FromBytes(spk.Signature)`
+      - `OneTimeKey.FromBytes(otkDbo.PublicKey)`
+  - **Implementation-ready update (apply safety rule above)**
+    - Prefer `FromBytesOwned(...)` for each EF-provided blob:
+      - `RatchetIdentityKey.FromBytesOwned(identityKeyDbo.PublicKey)`
+      - `PreKey.FromBytesOwned(spk.PublicKey)`
+      - `Signature.FromBytesOwned(spk.Signature)`
+      - `OneTimeKey.FromBytesOwned(otkDbo.PublicKey)`
+
+- **SqlitePeerRoutingProfileRepository.GetByIdInternalAsync / GetByPublicKeyInternalAsync**
+  - **Missed rehydration hotspots**
+    - `IdentityPublicKey.FromBytes(row.DirectMessagePublicKey)`
+    - `TlsCertificate.FromBytes(c.RawData)`
+    - `IdentityPublicKey.FromBytes(match.DirectMessagePublicKey!)`
+  - **Implementation-ready update (apply safety rule above)**
+    - `IdentityPublicKey.FromBytes(row.DirectMessagePublicKey)` -> `IdentityPublicKey.FromBytesOwned(row.DirectMessagePublicKey)`
+    - `TlsCertificate.FromBytes(c.RawData)` -> `TlsCertificate.FromBytesOwned(c.RawData)`
+    - `IdentityPublicKey.FromBytes(match.DirectMessagePublicKey!)` -> `IdentityPublicKey.FromBytesOwned(match.DirectMessagePublicKey!)`
+  - **Additional allocation wins (safe caching / spans)**
+    - In `UpsertInternalAsync`:
+      - Replace repeated `cert.ToArray()` with cached `var raw = cert.ToArray();` (used for `RawData` and hashing).
+      - Replace `SHA256.HashData(cert.ToArray())` with `SHA256.HashData(cert.Span)`.
+    - In `GetByPublicKeyInternalAsync`:
+      - Replace `match.DirectMessagePublicKey.SequenceEqual(pk.ToArray())` with `match.DirectMessagePublicKey.AsSpan().SequenceEqual(pk.Span)`.
+
+#### H.9.9 - Group 5 findings: Desktop.Wpf (non-simulator, low impact)
+
+Scope:
+
+- Exclude `Desktop.Wpf/Features/Simulator/**` (low priority).
+- Exclude unit tests.
+- Prefer Protobuf span APIs (`ParseFrom(span)`, `ByteString.Span`) and `FromBytesOwned` for fresh arrays.
+
+- **ConnectViaNetworkCommandHandler (relay mode path)**
+  - **FromBytesOwned candidates**
+    - `Plaintext.FromBytes(env.ToByteArray())` -> `Plaintext.FromBytesOwned(env.ToByteArray())`.
+    - `SessionRatchetMessage.FromBytes(responseBytes)` where `responseBytes = ...ToByteArray()` -> `FromBytesOwned(responseBytes)`.
+  - **ParseFrom**
+    - Replace `InternalEnvelope.Parser.ParseFrom(respPlain.ToArray())` with:
+      - `InternalEnvelope.Parser.ParseFrom(respPlain.Span)`.
+  - **GUID parsing**
+    - Replace `new Guid(bundle.SignedPreKeyId.ToByteArray())` with:
+      - `new Guid(bundle.SignedPreKeyId.Span)`.
+    - Replace `new Guid(first.OneTimeKeyId.ToByteArray())` with:
+      - `new Guid(first.OneTimeKeyId.Span)`.
+  - **Protobuf -> ByteArray value objects**
+    - Replace `OneTimeKey.FromBytes(first.KeyBytes.ToByteArray())` with:
+      - `OneTimeKey.FromSpan(first.KeyBytes.Span)`.
+    - Replace `PreKey.FromBytes(bundle.SignedPreKey.ToByteArray())` with:
+      - `PreKey.FromSpan(bundle.SignedPreKey.Span)`.
+    - Replace `Signature.FromBytes(bundle.PreKeySignature.ToByteArray())` with:
+      - `Signature.FromSpan(bundle.PreKeySignature.Span)`.
+  - **Hashing**
+    - Replace `SHA256.Create().ComputeHash(remoteIdentitySpki)` with:
+      - `SHA256.HashData(bundle.IdentityKey.Span)`.
+    - If `remoteIdentitySpki` must be materialized for other reasons, do it once and reuse.
+  - **Saving root key**
+    - `InitialRootKey: x3.SharedSecret.ToArray()` stores a new copy.
+      - Consider updating the persistence model to store `ReadOnlyMemory<byte>`/`byte[]` from a single cached array.
+      - Avoid `FromBytesOwned` here unless you have a fresh array you can safely transfer.
+
+- **DecodeAndQueueInviteCommandHandler**
+  - **Missed hotspot**
+    - Token decoding uses `Convert.FromBase64String(...)` (fresh array) then parses protobuf.
+    - Multiple `ToByteArray()` calls for signature verification and queueing.
+  - **Implementation-ready updates**
+    - Replace `EstablishDirectSessionRequest.Parser.ParseFrom(bytes)` with span-based parse:
+      - `EstablishDirectSessionRequest.Parser.ParseFrom(bytes)` is already parsing a fresh `byte[]`; keep.
+      - But replace `InviteHandshakeRequestPayload.Parser.ParseFrom(env.Payload)` with:
+        - `InviteHandshakeRequestPayload.Parser.ParseFrom(env.Payload.Span)`.
+    - Replace signature verification inputs:
+      - `env.InviterIdentityKey.ToByteArray()` -> use `env.InviterIdentityKey.Span` with `ImportSubjectPublicKeyInfo` span overload.
+      - `env.Payload.ToByteArray()` -> prefer `env.Payload.Span`.
+      - `env.PayloadSignature.ToByteArray()` -> prefer `env.PayloadSignature.Span`.
+    - If downstream `QueueInviteAsync(...)` requires `byte[]`, materialize once per field and reuse locals.
+
+- **PeerConnectionStateService**
+  - **Note**
+    - Uses `ToArray()` on UI collections in `Dispose()` (`_connections.ToArray()`, `_pendingInbound.ToArray()`).
+    - Low frequency and not ByteArray/protobuf related; ignore for H.9.
+
+### H.10 - ByteArray length constraint corrections
+
+During the ByteArray migration in chunk H, several types were assigned incorrect length constraints.
+
+The goal here is to set:
+- A **minimum length** that matches what the current implementation produces/accepts today.
+- A **maximum length** that is safely above realistic values, without being overly permissive.
+
+#### Observed/expected encodings in current implementation
+
+- **EC public keys** are primarily handled as **SPKI / SubjectPublicKeyInfo** blobs (`ExportSubjectPublicKeyInfo` / `ImportSubjectPublicKeyInfo`).
+  - These are **not 32 bytes**.
+  - Additionally, `Percolator.Cryptography.CryptographyExtensions.ToEcdhPublicKey(...)` includes a compatibility fallback that accepts **raw EC point** encodings of **64 bytes (X||Y)** or **65 bytes (0x04||X||Y)**.
+
+- **EC private keys** are stored as `ExportECPrivateKey` / `ImportECPrivateKey` blobs (SEC1 ECPrivateKey structure).
+  - These are **not 32 bytes**.
+
+- **ECDSA signatures** are produced by `ECDsa.SignData(...)` and verified with `ECDsa.VerifyData(...)`.
+  - That means **ASN.1 DER signature** encoding, not fixed-size raw `r||s`.
+
+#### Incorrect fixed length (should be variable length)
+
+- **Percolator.Cryptography.OneTimeKey**
+  - Current: `[ByteArray(length: 32)]`
+  - Used as: public key bytes produced by `ECDiffieHellmanPublicKey.ExportSubjectPublicKeyInfo()` (see `InMemoryOneTimeKeyProvider`).
+  - Also accepted as: raw EC point bytes (64/65) via `CryptographyExtensions.ToEcdhPublicKey(OneTimeKey)` fallback.
+  - Proposed constraints:
+    - `minLength: 64` (raw point is the smallest format we accept today)
+    - `maxLength: 200` (comfortably above expected P-256 SPKI sizes)
+
+- **Percolator.Cryptography.RatchetEphemeralKey**
+  - Current: `[ByteArray(length: 32)]`
+  - Used as: SPKI public key bytes (imported with `ImportSubjectPublicKeyInfo(...)` in multiple places).
+  - Also accepted as: raw EC point bytes (64/65) via `CryptographyExtensions.ToEcdhPublicKey(RatchetEphemeralKey)` fallback.
+  - Proposed constraints:
+    - `minLength: 64`
+    - `maxLength: 200`
+
+- **Percolator.Cryptography.PrivateOneTimeKey**
+  - Current: `[ByteArray(length: 32)]`
+  - Used as: private key bytes produced by `ECDiffieHellman.ExportECPrivateKey()` (see `InMemoryOneTimeKeyProvider`).
+  - Expected length today: `ExportECPrivateKey()` produces a DER/SEC1 blob (typically ~120 bytes for P-256 on .NET).
+  - Proposed constraints:
+    - `minLength: 100`
+    - `maxLength: 250`
+
+- **Percolator.Cryptography.PrivateEphemeralKey**
+  - Current: `[ByteArray(length: 32)]`
+  - Used as: private key bytes consumed by `ECDiffieHellman.ImportECPrivateKey(...)`.
+  - Proposed constraints:
+    - `minLength: 100`
+    - `maxLength: 250`
+
+- **Percolator.Cryptography.PrivatePreKey**
+  - Current: `[ByteArray(length: 32)]`
+  - Used as: identity/signed-prekey private bytes produced by `ExportECPrivateKey()` and consumed by `ImportECPrivateKey(...)` (see `SqliteSelfIdentityKeysStore`, `InitiatorFinalizeService`).
+  - Proposed constraints:
+    - `minLength: 100`
+    - `maxLength: 250`
+
+#### Types currently using `maxLength: 1000` that should be tightened using current expectations
+
+- **Percolator.Cryptography.PreKey**
+  - Current: `[ByteArray(minLength: 1, maxLength: 1000)]`
+  - Used as: SPKI public key bytes (imported with `ImportSubjectPublicKeyInfo(...)` in X3DH and signature verification paths).
+  - Also accepted as: raw EC point bytes (64/65) via `CryptographyExtensions.ToEcdhPublicKey(PreKey)` fallback.
+  - Proposed constraints:
+    - `minLength: 64`
+    - `maxLength: 200`
+
+- **Percolator.Cryptography.RatchetIdentityKey**
+  - Current: `[ByteArray(minLength: 1, maxLength: 1000)]`
+  - Used as: SPKI public key bytes.
+  - Also accepted as: raw EC point bytes (64/65) via `CryptographyExtensions.ToEcdhPublicKey(RatchetIdentityKey)` fallback.
+  - Proposed constraints:
+    - `minLength: 64`
+    - `maxLength: 200`
+
+- **Percolator.Cryptography.PublicKey**
+  - Current: `[ByteArray(minLength: 1, maxLength: 1000)]`
+  - Used as: SPKI public key bytes (`ImportSubjectPublicKeyInfo(...)` in `EcdsaSigningService.Verify`).
+  - Proposed constraints:
+    - `minLength: 80` (SPKI-only; we do not currently have a raw-point fallback for this type)
+    - `maxLength: 200`
+
+- **Percolator.Cryptography.Signature**
+  - Current: `[ByteArray(minLength: 1, maxLength: 1000)]`
+  - Used as: DER ECDSA signature bytes (`ECDsa.SignData` / `ECDsa.VerifyData`).
+  - Expected length today: DER signatures for P-256 are small (typically ~70-72 bytes).
+  - Proposed constraints:
+    - `minLength: 60`
+    - `maxLength: 120`
+
+- **Percolator.Network.PublicKey / DirectMessagePublicKey / ValueObjects.IdentityPublicKey / Signature**
+  - Current: `[ByteArray(minLength: 1, maxLength: 1000)]`
+  - These should be tightened using the same rationale as the cryptography equivalents (SPKI public keys ~ O(100 bytes), DER signatures ~ O(70 bytes)).
+
+#### Notes / alternatives
+- If we want the constraints to be exact and not heuristic, we should add **format-specific factory methods** (e.g. `FromSpki(...)`, `FromEcPrivateKey(...)`, `FromDerSignature(...)`) that validate by calling the corresponding `Import...` APIs, and then either:
+  - Use `[ByteArray()]` (no generator constraints), or
+  - Keep loose `[ByteArray(minLength, maxLength)]` as a first-line guardrail plus the parse/validate step as the true invariant.
+
+- The 32-byte fixed length constraint is only appropriate for raw 256-bit values (hashes, symmetric keys), not for DER/SPKI key material.
+
+#### Full inventory of `[ByteArray]` types (all projects) and recommended constraints
+
+This is the complete set of types in the repo using `[ByteArray(...)]` and how we should tighten (or keep) their constraints based on current usage.
+
+##### Keep fixed 32-byte lengths (correct)
+
+- **Percolator.Dht.NodeId**
+  - Keep: `[ByteArray(length: 32)]`
+
+- **Percolator.Cryptography.ChainKey**
+  - Keep: `[ByteArray(length: 32)]`
+
+- **Percolator.Cryptography.RootKey**
+  - Keep: `[ByteArray(length: 32)]`
+
+- **Percolator.Cryptography.SharedSecret**
+  - Keep: `[ByteArray(length: 32)]`
+
+- **Percolator.Identity.IdentityPublicKeyHash**
+  - Keep: `[ByteArray(length: 32)]`
+
+- **Percolator.Network.PublicKeyHash**
+  - Keep: `[ByteArray(length: 32)]`
+
+##### Keep large blob constraints (already reasonable)
+
+These are used for general payloads or ciphertext/plaintext and do not have a natural tight upper bound in the current design.
+
+- **Percolator.Cryptography.Plaintext**
+  - Keep: `[ByteArray(minLength: 1, maxLength: 1000000)]`
+
+- **Percolator.Cryptography.Ciphertext**
+  - Keep: `[ByteArray(minLength: 1, maxLength: 1000000)]`
+
+- **Percolator.Cryptography.AssociatedData**
+  - Keep: `[ByteArray(minLength: 1, maxLength: 1000000)]`
+
+- **Percolator.Cryptography.SessionRatchetMessage**
+  - Keep: `[ByteArray(minLength: 1, maxLength: 1000000)]`
+
+- **Percolator.Network.Payload**
+  - Keep: `[ByteArray(minLength: 1, maxLength: 1000000)]`
+
+##### Invitation/response/certificate blobs
+
+- **Percolator.Cryptography.HandshakeInvitation**
+  - Keep: `[ByteArray(minLength: 1, maxLength: 10000)]`
+
+- **Percolator.Cryptography.HandshakeResponseMessage**
+  - Keep: `[ByteArray(minLength: 1, maxLength: 10000)]`
+
+- **Percolator.Network.TlsCertificate**
+  - Current: `[ByteArray(minLength: 1, maxLength: 10000)]`
+  - Used as: `X509Certificate2.RawData` (DER).
+  - Proposed: `[ByteArray(minLength: 1, maxLength: 50000)]`
+
+##### Key and signature types (tighten based on current encoding)
+
+**Public keys (SPKI, plus raw-point compatibility where supported today):**
+
+- **Percolator.Cryptography.OneTimeKey**
+  - Proposed: `[ByteArray(minLength: 64, maxLength: 200)]`
+
+- **Percolator.Cryptography.RatchetEphemeralKey**
+  - Proposed: `[ByteArray(minLength: 64, maxLength: 200)]`
+
+- **Percolator.Cryptography.PreKey**
+  - Proposed: `[ByteArray(minLength: 64, maxLength: 200)]`
+
+- **Percolator.Cryptography.RatchetIdentityKey**
+  - Proposed: `[ByteArray(minLength: 64, maxLength: 200)]`
+
+**Public keys (SPKI-only):**
+
+- **Percolator.Cryptography.PublicKey**
+  - Proposed: `[ByteArray(minLength: 80, maxLength: 200)]`
+
+- **Percolator.Network.PublicKey**
+  - Proposed: `[ByteArray(minLength: 80, maxLength: 200)]`
+
+- **Percolator.Network.DirectMessagePublicKey**
+  - Proposed: `[ByteArray(minLength: 80, maxLength: 200)]`
+
+- **Percolator.Network.ValueObjects.IdentityPublicKey**
+  - Proposed: `[ByteArray(minLength: 80, maxLength: 200)]`
+
+**Private keys (SEC1/DER from `ExportECPrivateKey`):**
+
+- **Percolator.Cryptography.PrivateOneTimeKey**
+  - Proposed: `[ByteArray(minLength: 100, maxLength: 250)]`
+
+- **Percolator.Cryptography.PrivateEphemeralKey**
+  - Proposed: `[ByteArray(minLength: 100, maxLength: 250)]`
+
+- **Percolator.Cryptography.PrivatePreKey**
+  - Proposed: `[ByteArray(minLength: 100, maxLength: 250)]`
+
+**Signatures (DER from `ECDsa.SignData`):**
+
+- **Percolator.Cryptography.Signature**
+  - Proposed: `[ByteArray(minLength: 60, maxLength: 120)]`
+
+- **Percolator.Network.Signature**
+  - Proposed: `[ByteArray(minLength: 60, maxLength: 120)]`
