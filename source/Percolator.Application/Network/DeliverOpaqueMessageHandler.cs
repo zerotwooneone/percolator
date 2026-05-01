@@ -94,10 +94,8 @@ namespace Percolator.Application.Network
                 case PrekeyEnvelope.MessageOneofCase.GetPreKeyBundleRequest:
                     var getReq = prekeyEnvelope.GetPreKeyBundleRequest;
                     if (!getReq.HasPublicKeyHash) throw new InvalidOperationException("PublicKeyHash is required");
-                    var bundle = await _mediator.Send(new Percolator.Prekey.Handlers.GetPreKeyBundleQuery
-                    {
-                        TargetPublicSigningKeyHash = IdentityPublicKeyHash.FromSpan(getReq.PublicKeyHash.Span)
-                    }, ct).ConfigureAwait(false);
+                    var bundle = await _mediator.Send(new Percolator.Prekey.Handlers.GetPreKeyBundleQuery(
+                        IdentityPublicKeyHash.FromSpan(getReq.PublicKeyHash.Span)), ct).ConfigureAwait(false);
                     var resp = new GetPreKeyBundleResponse { Version = 1 };
                     if (bundle is not null)
                     {

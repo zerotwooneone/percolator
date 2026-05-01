@@ -4,8 +4,13 @@ using Percolator.Identity;
 
 namespace Percolator.Prekey.Handlers
 {
-    public class GetPreKeyBundleQuery : IRequest<PreKeyBundle?>
+    public sealed class GetPreKeyBundleQuery : IRequest<PreKeyBundle?>
     {
-        public IdentityPublicKeyHash TargetPublicSigningKeyHash { get; set; } = IdentityPublicKeyHash.FromBytes(new byte[32]);
+        public IdentityPublicKeyHash TargetPublicSigningKeyHash { get; }
+
+        public GetPreKeyBundleQuery(IdentityPublicKeyHash targetPublicSigningKeyHash)
+        {
+            TargetPublicSigningKeyHash = targetPublicSigningKeyHash;
+        }
     }
 }

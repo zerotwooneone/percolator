@@ -139,10 +139,8 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                 {
                     var getReq = pre.GetPreKeyBundleRequest;
                     if (!getReq.HasPublicKeyHash) throw new InvalidOperationException("PublicKeyHash is required");
-                    var bundle = await _mediator.Send(new GetPreKeyBundleQuery
-                    {
-                        TargetPublicSigningKeyHash = IdentityPublicKeyHash.FromSpan(getReq.PublicKeyHash.Span)
-                    }, cancellationToken).ConfigureAwait(false);
+                    var bundle = await _mediator.Send(new GetPreKeyBundleQuery(
+                        IdentityPublicKeyHash.FromSpan(getReq.PublicKeyHash.Span)), cancellationToken).ConfigureAwait(false);
                     var resp = new GetPreKeyBundleResponse { Version = 1 };
                     if (bundle is not null)
                     {
