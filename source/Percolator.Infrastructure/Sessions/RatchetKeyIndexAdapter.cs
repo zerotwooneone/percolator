@@ -18,7 +18,7 @@ internal sealed class RatchetKeyIndexAdapter : IRatchetKeyIndex
         var row = await _db.RatchetKeyIndex
             .AsNoTracking()
             // EF Core can translate byte[] equality to BLOB comparison for SQLite
-            .Where(r => r.SelfIdentityId == selfIdentityId && r.RatchetPublicKey == headerPublicKey.Value)
+            .Where(r => r.SelfIdentityId == selfIdentityId && r.RatchetPublicKey == headerPublicKey.ToArray())
             .Select(r => new { r.DirectSessionId })
             .FirstOrDefaultAsync(cancellationToken)
             .ConfigureAwait(false);
@@ -32,7 +32,7 @@ internal sealed class RatchetKeyIndexAdapter : IRatchetKeyIndex
 
         var existing = await set
             // EF Core can translate byte[] equality to BLOB comparison for SQLite
-            .Where(r => r.RatchetPublicKey == headerPublicKey.Value)
+            .Where(r => r.RatchetPublicKey == headerPublicKey.ToArray())
             .FirstOrDefaultAsync(cancellationToken)
             .ConfigureAwait(false);
 
@@ -42,7 +42,7 @@ internal sealed class RatchetKeyIndexAdapter : IRatchetKeyIndex
             {
                 SelfIdentityId = selfIdentityId,
                 DirectSessionId = sessionId.Value,
-                RatchetPublicKey = headerPublicKey.Value,
+                RatchetPublicKey = headerPublicKey.ToArray(),
                 UpdatedAtUtc = updatedAtUtc
             }, cancellationToken).ConfigureAwait(false);
         }

@@ -6,7 +6,7 @@ public sealed class HandshakePlanner
     {
         if (inv is null) throw new ArgumentNullException(nameof(inv));
         if (crypto is null) throw new ArgumentNullException(nameof(crypto));
-        if (inv.Value.Length == 0) throw new ArgumentException("Invitation payload must not be empty.", nameof(inv));
+        if (inv.ToArray().Length == 0) throw new ArgumentException("Invitation payload must not be empty.", nameof(inv));
         // Additional signature/version checks will be added in future steps.
     }
 

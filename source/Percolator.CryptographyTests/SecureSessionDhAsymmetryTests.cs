@@ -21,15 +21,15 @@ public class SecureSessionDhAsymmetryTests
             SessionId.NewId(),
             PeerId.NewId(),
             new ProtocolVersion(1),
-            CryptoTestBootstrap.CreateBootstrappedState(new RootKey(new byte[32])),
+            CryptoTestBootstrap.CreateBootstrappedState(RootKey.FromBytes(new byte[32])),
             crypto,
             clock);
 
-        var msg = s.Encrypt(new Plaintext(new byte[] { 0x01 }), clock);
+        var msg = s.Encrypt(Plaintext.FromBytes(new byte[] { 0x01 }), clock);
         var (preKey, _, _) = msg.GetHeader();
 
-        preKey.Value.Should().NotBeNull();
-        preKey.Value.Length.Should().BeGreaterThanOrEqualTo(32); // expect real DH pubkey length
-        preKey.Value[0].Should().NotBe(0x01); // not the trivial placeholder key
+        preKey.ToArray().Should().NotBeNull();
+        preKey.ToArray().Length.Should().BeGreaterThanOrEqualTo(32); // expect real DH pubkey length
+        preKey.ToArray()[0].Should().NotBe(0x01); // not the trivial placeholder key
     }
 }

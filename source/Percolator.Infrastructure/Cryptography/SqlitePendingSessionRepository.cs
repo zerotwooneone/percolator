@@ -32,11 +32,11 @@ namespace Percolator.Infrastructure.Cryptography
                 SelfIdentityId = _active.Identity.SelfIdentityId.Value,
                 RemotePeerId = pending.RemotePeerId.Value,
                 ProtocolVersion = pending.ProtocolVersion.Value,
-                Invitation = pending.Invitation.Value,
+                Invitation = pending.Invitation.ToArray(),
                 RequestCorrelationId = pending.RequestCorrelationId.ToString(),
                 IsRelayed = pending.IsRelayed,
                 RelayHostPeerId = pending.RelayHostPeerId?.Value,
-                InviterIdentityKey = pending.InviterIdentityKey?.Value,
+                InviterIdentityKey = pending.InviterIdentityKey?.ToArray(),
                 CallbackEndpointHost = pending.CallbackEndpointHost,
                 CallbackEndpointPort = pending.CallbackEndpointPort,
                 State = (int)pending.State,
@@ -97,10 +97,10 @@ namespace Percolator.Infrastructure.Cryptography
             var id = new PendingSessionId(row.Id);
             var remote = new PeerId(row.RemotePeerId);
             var ver = new ProtocolVersion(row.ProtocolVersion);
-            var invitation = new HandshakeInvitation(row.Invitation);
+            var invitation = HandshakeInvitation.FromBytesOwned(row.Invitation);
             var inviterKey = row.InviterIdentityKey is null
                 ? null
-                : new RatchetIdentityKey(row.InviterIdentityKey);
+                : RatchetIdentityKey.FromBytesOwned(row.InviterIdentityKey);
 
             if (string.IsNullOrWhiteSpace(row.RequestCorrelationId)
                 || !Guid.TryParse(row.RequestCorrelationId, out var correlationGuid)

@@ -12,10 +12,10 @@ namespace Percolator.ApplicationTests.TestHelpers
 
         public static PreKeyBundle MakeBundleA(Guid spkId, Guid? otkId = null)
             => new PreKeyBundle(
-                new RatchetIdentityKey(RemoteIdentitySpkiA),
+                RatchetIdentityKey.FromBytes(RemoteIdentitySpkiA),
                 spkId,
-                new PreKey(RemotePreKeySpkiA),
-                new Signature(new byte[] { 0x09 }),
+                PreKey.FromBytes(RemotePreKeySpkiA),
+                Percolator.Cryptography.Signature.FromBytes(new byte[64]),
                 otkId,
                 null,
                 null);

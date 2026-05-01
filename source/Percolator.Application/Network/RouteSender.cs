@@ -47,7 +47,7 @@ public sealed class RouteSender : IRouteSender
 
             var directSessionId = new DirectSessionId(ds.SessionId.Value);
             var recipientIdentityPeerId = new Percolator.Identity.PeerId(target.Value);
-            var cipher = new SessionRatchetMessage(payload.Value.ToArray());
+            var cipher = SessionRatchetMessage.FromBytes(payload.Value.ToArray());
             var resp = await _transport.SendMessageAsync(recipientIdentityPeerId, directSessionId, cipher, ct).ConfigureAwait(false);
             
             // Extract used endpoint from response
@@ -95,7 +95,7 @@ public sealed class RouteSender : IRouteSender
                 }
             };
 
-            var relayPlain = new Plaintext(toRelay.ToByteArray());
+            var relayPlain = Plaintext.FromBytes(toRelay.ToByteArray());
             var relaySessionId = new SessionId(relaySession.SessionId.Value);
             var relayDirectSessionId = new DirectSessionId(relaySession.SessionId.Value);
             var relayCipher = await _secureMessaging.EncryptAsync(relaySessionId, relayPlain, ct).ConfigureAwait(false);

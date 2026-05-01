@@ -61,8 +61,8 @@ namespace Percolator.Application.Apps.Chat
             build(payload);
 
             var canonicalBytes = CanonicalPayload.ForAdminOperation(payload);
-            var sig = _signingService.Sign(new Payload(canonicalBytes));
-            return Task.FromResult<(byte[] payload, byte[] signature)>((canonicalBytes, sig.Value));
+            var sig = _signingService.Sign(Payload.FromBytes(canonicalBytes));
+            return Task.FromResult<(byte[] payload, byte[] signature)>((canonicalBytes, sig.ToArray()));
         }
     }
 }

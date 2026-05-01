@@ -17,7 +17,7 @@ public class SecureSessionMalformedFrameTests
     {
         var clock = new TestClock_Malformed();
         var crypto = new AeadSessionCrypto();
-        var root = new RootKey(new byte[32]);
+        var root = RootKey.FromBytes(new byte[32]);
         var (initiator, responder) = CryptoTestBootstrap.CreatePairedStates(root);
         var receiver = SecureSession.Create(
             SessionId.NewId(),
@@ -34,9 +34,9 @@ public class SecureSessionMalformedFrameTests
             crypto,
             clock);
 
-        var good = sender.Encrypt(new Plaintext(new byte[] { 0x21, 0x22, 0x23 }), clock);
+        var good = sender.Encrypt(Plaintext.FromBytes(new byte[] { 0x21, 0x22, 0x23 }), clock);
         var (hdr, ctr, prev) = good.GetHeader();
-        var tampered = SessionRatchetMessage.Create(hdr, ctr, prev, new Ciphertext(new byte[] { 0x01 }));
+        var tampered = SessionRatchetMessage.Create(hdr, ctr, prev, Ciphertext.FromBytes(new byte[] { 0x01 }));
 
         Action act = () => receiver.Decrypt(tampered, clock);
         act.Should().Throw<InvalidOperationException>();

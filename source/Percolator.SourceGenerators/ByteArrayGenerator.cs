@@ -344,9 +344,9 @@ public sealed class ByteArrayGenerator : IIncrementalGenerator
             sb.AppendLine("    private readonly global::System.ReadOnlyMemory<byte> _value;");
             sb.AppendLine();
 
-            sb.AppendLine($"    private const int? __ExpectedLength = {expectedLengthLiteral};");
-            sb.AppendLine($"    private const int? __MinLength = {minLengthLiteral};");
-            sb.AppendLine($"    private const int? __MaxLength = {maxLengthLiteral};");
+            sb.AppendLine($"    private static readonly int? __ExpectedLength = {expectedLengthLiteral};");
+            sb.AppendLine($"    private static readonly int? __MinLength = {minLengthLiteral};");
+            sb.AppendLine($"    private static readonly int? __MaxLength = {maxLengthLiteral};");
             sb.AppendLine();
 
             sb.AppendLine("    private static bool __IsValidLength(int length)");
@@ -432,7 +432,7 @@ public sealed class ByteArrayGenerator : IIncrementalGenerator
             sb.AppendLine("    public byte[] ToArray() => _value.ToArray();");
             sb.AppendLine();
 
-            sb.Append("    public virtual bool Equals(").Append(typeName).AppendLine("? other)");
+            sb.Append("    public bool Equals(").Append(typeName).AppendLine("? other)");
             sb.AppendLine("    {");
             sb.AppendLine("        if (other is null) return false;");
             sb.AppendLine("        if (global::System.Object.ReferenceEquals(this, other)) return true;");

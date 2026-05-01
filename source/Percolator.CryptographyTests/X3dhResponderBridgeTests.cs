@@ -11,14 +11,14 @@ public class X3dhResponderBridgeTests
     public void DeriveResponder_WithOneTimePreKey_UsesOtkAndReturnsResult()
     {
         // ARRANGE
-        var ik = new RatchetIdentityKey(new byte[] { 0x01, 0x02 });
-        var ek = new RatchetEphemeralKey(new byte[] { 0x03, 0x04 });
+        var ik = RatchetIdentityKey.FromBytes(new byte[64]);
+        var ek = RatchetEphemeralKey.FromBytes(new byte[64]);
         var invitation = new ParsedInvitation(ik, ek, "spk-1", "opk-1");
 
-        var idPriv = new PrivatePreKey(new byte[] { 0x10 });
-        var spkPriv = new PrivatePreKey(new byte[] { 0x11 });
-        var otkPriv = new PrivatePreKey(new byte[] { 0x12 });
-        var expected = new ResponderResult(new SharedSecret(new byte[] { 0xAA }), UsedOneTimeKey: true);
+        var idPriv = PrivatePreKey.FromBytes(new byte[100]);
+        var spkPriv = PrivatePreKey.FromBytes(new byte[100]);
+        var otkPriv = PrivatePreKey.FromBytes(new byte[100]);
+        var expected = new ResponderResult(SharedSecret.FromBytes(new byte[32]), UsedOneTimeKey: true);
 
         var ks = new Mock<IKeyStore>(MockBehavior.Strict);
         ks.Setup(k => k.GetIdentityPrivateKey()).Returns(idPriv);
@@ -43,13 +43,13 @@ public class X3dhResponderBridgeTests
     public void DeriveResponder_WithoutOneTimePreKey_PassesNullOtk()
     {
         // ARRANGE
-        var ik = new RatchetIdentityKey(new byte[] { 0x05, 0x06 });
-        var ek = new RatchetEphemeralKey(new byte[] { 0x07, 0x08 });
+        var ik = RatchetIdentityKey.FromBytes(new byte[64]);
+        var ek = RatchetEphemeralKey.FromBytes(new byte[64]);
         var invitation = new ParsedInvitation(ik, ek, "spk-2", null);
 
-        var idPriv = new PrivatePreKey(new byte[] { 0x20 });
-        var spkPriv = new PrivatePreKey(new byte[] { 0x21 });
-        var expected = new ResponderResult(new SharedSecret(new byte[] { 0xBB }), UsedOneTimeKey: false);
+        var idPriv = PrivatePreKey.FromBytes(new byte[100]);
+        var spkPriv = PrivatePreKey.FromBytes(new byte[100]);
+        var expected = new ResponderResult(SharedSecret.FromBytes(new byte[32]), UsedOneTimeKey: false);
 
         var ks = new Mock<IKeyStore>(MockBehavior.Strict);
         ks.Setup(k => k.GetIdentityPrivateKey()).Returns(idPriv);

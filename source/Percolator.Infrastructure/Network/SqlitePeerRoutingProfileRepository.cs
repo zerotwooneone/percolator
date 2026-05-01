@@ -27,7 +27,7 @@ public sealed class SqlitePeerRoutingProfileRepository : IPeerRoutingProfileRepo
         profile.BindIdentity(new PeerId(row.PeerId));
         if (row.DirectMessagePublicKey is not null)
         {
-            profile.SetIdentityPublicKey(new IdentityPublicKey(row.DirectMessagePublicKey));
+            profile.SetIdentityPublicKey(IdentityPublicKey.FromBytesOwned(row.DirectMessagePublicKey));
         }
         if (row.ReachabilityLastChangeUtc is DateTimeOffset ts)
         {
@@ -48,7 +48,7 @@ public sealed class SqlitePeerRoutingProfileRepository : IPeerRoutingProfileRepo
         certRows = certRows.OrderBy(c => c.AddedAtUtc).ToList();
         if (certRows.Count > 0)
         {
-            var certs = certRows.Select(c => new TlsCertificate(c.RawData)).ToArray();
+            var certs = certRows.Select(c => TlsCertificate.FromBytesOwned(c.RawData)).ToArray();
             var tsCert = certRows.Last().AddedAtUtc;
             profile.RotateCertificates(certs, tsCert);
         }
@@ -78,7 +78,7 @@ public sealed class SqlitePeerRoutingProfileRepository : IPeerRoutingProfileRepo
                 PeerId = aggregate.Id.Value,
                 ReachabilityStatus = (int)aggregate.Reachability.Status,
                 ReachabilityLastChangeUtc = aggregate.Reachability.LastChangeUtc == DateTimeOffset.MinValue ? null : aggregate.Reachability.LastChangeUtc,
-                DirectMessagePublicKey = aggregate.IdentityPublicKey?.Value
+                DirectMessagePublicKey = aggregate.IdentityPublicKey?.ToArray()
             };
             _db.PeerRoutingProfiles.Add(row);
         }
@@ -86,7 +86,7 @@ public sealed class SqlitePeerRoutingProfileRepository : IPeerRoutingProfileRepo
         {
             row.ReachabilityStatus = (int)aggregate.Reachability.Status;
             row.ReachabilityLastChangeUtc = aggregate.Reachability.LastChangeUtc == DateTimeOffset.MinValue ? null : aggregate.Reachability.LastChangeUtc;
-            row.DirectMessagePublicKey = aggregate.IdentityPublicKey?.Value;
+            row.DirectMessagePublicKey = aggregate.IdentityPublicKey?.ToArray();
         }
 
         // Merge endpoints
@@ -119,11 +119,12 @@ public sealed class SqlitePeerRoutingProfileRepository : IPeerRoutingProfileRepo
         }
         foreach (var cert in aggregate.Certificates)
         {
-            var hash = SHA256.HashData(cert.RawData);
+            var raw = cert.ToArray();
+            var hash = SHA256.HashData(cert.Span);
             _db.PeerRoutingTlsCertificates.Add(new TlsCertificateRoutingDbo
             {
                 PeerId = row.PeerId,
-                RawData = cert.RawData,
+                RawData = raw,
                 RawDataHash = hash,
                 AddedAtUtc = DateTimeOffset.UtcNow
             });
@@ -187,14 +188,14 @@ public sealed class SqlitePeerRoutingProfileRepository : IPeerRoutingProfileRepo
             .AsNoTracking()
             .ToListAsync(ct);
 
-        var match = all.FirstOrDefault(r => r.DirectMessagePublicKey != null && r.DirectMessagePublicKey.SequenceEqual(pk.Value));
+        var match = all.FirstOrDefault(r => r.DirectMessagePublicKey != null && r.DirectMessagePublicKey.AsSpan().SequenceEqual(pk.Span));
         if (match is null)
         {
             return null;
         }
         var profile = new PeerRoutingProfile();
         profile.BindIdentity(new PeerId(match.PeerId));
-        profile.SetIdentityPublicKey(new IdentityPublicKey(match.DirectMessagePublicKey!));
+        profile.SetIdentityPublicKey(IdentityPublicKey.FromBytesOwned(match.DirectMessagePublicKey!));
         if (match.ReachabilityLastChangeUtc is DateTimeOffset ts)
         {
             profile.RecordReachability((ReachabilityStatus)match.ReachabilityStatus, ts);

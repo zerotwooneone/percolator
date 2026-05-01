@@ -21,12 +21,12 @@ public class SecureSessionCounterTests
             SessionId.NewId(),
             PeerId.NewId(),
             new ProtocolVersion(1),
-            CryptoTestBootstrap.CreateBootstrappedState(new RootKey(new byte[32])),
+            CryptoTestBootstrap.CreateBootstrappedState(RootKey.FromBytes(new byte[32])),
             crypto,
             clock);
 
-        var m1 = s.Encrypt(new Plaintext(new byte[] { 1 }), clock);
-        var m2 = s.Encrypt(new Plaintext(new byte[] { 2 }), clock);
+        var m1 = s.Encrypt(Plaintext.FromBytes(new byte[] { 1 }), clock);
+        var m2 = s.Encrypt(Plaintext.FromBytes(new byte[] { 2 }), clock);
 
         var (_, c1, _) = m1.GetHeader();
         var (_, c2, _) = m2.GetHeader();

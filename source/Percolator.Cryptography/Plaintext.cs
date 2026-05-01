@@ -1,5 +1,10 @@
 using Percolator.Cryptography.Primitives;
+using Percolator.SourceGenerators;
 
 namespace Percolator.Cryptography;
 
-public record Plaintext(byte[] Value) : ByteArrayRecord(Value);
+[ByteArray(minLength: 1, maxLength: 1000000)]
+public sealed partial record Plaintext
+{
+    public static Plaintext Empty { get; } = new(Array.Empty<byte>());
+}

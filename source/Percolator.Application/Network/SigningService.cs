@@ -29,7 +29,7 @@ public class SigningService : ISigningService
     {
         var privateKey = GetActiveSigningKey();
         var publicKeyBytes = privateKey.ExportSubjectPublicKeyInfo();
-        return new PublicKey(publicKeyBytes);
+        return PublicKey.FromBytes(publicKeyBytes);
     }
 
     public PublicKeyHash GetActivePublicKeyHash()
@@ -40,21 +40,21 @@ public class SigningService : ISigningService
 
     public PublicKeyHash GetHash(PublicKey publicKey)
     {
-        var hash = SHA256.HashData(publicKey.Value);
-        return new PublicKeyHash(hash);
+        var hash = SHA256.HashData(publicKey.ToArray());
+        return PublicKeyHash.FromBytes(hash);
     }
 
     public Signature Sign(Payload payload)
     {
         var privateKey = GetActiveSigningKey();
-        var cryptoSignature = _cryptographyService.Sign(payload.Value, privateKey);
-        return new Signature(cryptoSignature.Value);
+        var cryptoSignature = _cryptographyService.Sign(payload.ToArray(), privateKey);
+        return Signature.FromBytes(cryptoSignature.ToArray());
     }
 
     public bool Verify(Payload payload, Signature signature, PublicKey publicKey)
     {
-        var cryptoSignature = new Crypto.Signature(signature.Value);
-        var cryptoPublicKey = new Crypto.PublicKey(publicKey.Value);
-        return _cryptographyService.Verify(payload.Value, cryptoSignature, cryptoPublicKey);
+        var cryptoSignature = Crypto.Signature.FromBytes(signature.ToArray());
+        var cryptoPublicKey = Crypto.PublicKey.FromBytes(publicKey.ToArray());
+        return _cryptographyService.Verify(payload.ToArray(), cryptoSignature, cryptoPublicKey);
     }
 }

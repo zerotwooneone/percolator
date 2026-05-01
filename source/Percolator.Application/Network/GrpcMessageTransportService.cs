@@ -63,7 +63,7 @@ public class GrpcMessageTransportService : IMessageTransportService
             var request = new DeliverOpaqueMessageRequest
             {
                 Version = 1,
-                Payload = ByteString.CopyFrom(message.Value)
+                Payload = ByteString.CopyFrom(message.ToArray())
             };
 
             // Interceptor check for simulator-reserved endpoints
@@ -89,8 +89,8 @@ public class GrpcMessageTransportService : IMessageTransportService
 
             // Add diagnostic logging for the payload
             _logger.LogInformation("Sending message payload with hash: {PayloadHash}, length: {PayloadLength}",
-                Convert.ToBase64String(System.Security.Cryptography.SHA256.HashData(message.Value)),
-                message.Value.Length);
+                Convert.ToBase64String(System.Security.Cryptography.SHA256.HashData(message.ToArray())),
+                message.ToArray().Length);
                 
             _logger.LogInformation("Sending message to {RecipientPeerId} for conversation {ConversationId}",
                 recipientPeerId, directSessionId);

@@ -32,7 +32,7 @@ public class DhtEndToEndTests : IntegrationTestBase
             var mediator = _hostProvider.GetRequiredService<IMediator>();
             var cmd = new DeliverOpaqueMessageCommand
             {
-                PayloadBytes = message.Value
+                PayloadBytes = message.ToArray()
             };
             var result = await mediator.Send(cmd, cancellationToken);
             var response = new DeliverOpaqueMessageResponse();

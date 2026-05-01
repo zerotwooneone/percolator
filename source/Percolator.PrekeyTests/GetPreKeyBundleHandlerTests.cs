@@ -33,12 +33,12 @@ public class GetPreKeyBundleHandlerTests
         var identityPublicKeyHash = IdentityPublicKeyHash.FromBytes(keyHash);
         var peerId = new Percolator.Identity.PeerId(Guid.NewGuid());
         var expected = new PreKeyBundle(
-            new RatchetIdentityKey(new byte[] { 1 }),
+            RatchetIdentityKey.FromBytes(new byte[64]),
             Guid.NewGuid(),
-            new PreKey(new byte[] { 2 }),
-            new Signature(new byte[] { 3 }),
+            PreKey.FromBytes(new byte[64]),
+            Signature.FromBytes(new byte[64]),
             Guid.NewGuid(),
-            new OneTimeKey(new byte[] { 4 }),
+            OneTimeKey.FromBytes(new byte[64]),
             DateTimeOffset.UtcNow.AddHours(1));
 
         _publicKeyStore.Setup(s => s.GetPeerIdByPublicKeyHashAsync(identityPublicKeyHash, It.IsAny<CancellationToken>()))
@@ -103,6 +103,6 @@ public class GetPreKeyBundleHandlerTests
         var act = () => IdentityPublicKeyHash.FromBytes(Array.Empty<byte>());
 
         // Assert
-        act.Should().Throw<ArgumentException>().WithMessage("Public key hash must be exactly 32 bytes.*");
+        act.Should().Throw<ArgumentException>().WithMessage("Expected length 32*");
     }
 }

@@ -30,7 +30,7 @@ public class FileBasedTrustedPeerStoreTests
     {
         // Arrange
         var trustedStore = new FileBasedTrustedPeerStore(_storageOptions);
-        var publicKeyHash = new PublicKeyHash(RandomNumberGenerator.GetBytes(32));
+        var publicKeyHash = PublicKeyHash.FromBytes(RandomNumberGenerator.GetBytes(32));
 
         // Act
         await trustedStore.AddAsync(publicKeyHash);
@@ -43,7 +43,7 @@ public class FileBasedTrustedPeerStoreTests
     public async Task IsTrusted_WhenHashIsPersisted_ReturnsTrueAsync()
     {
         // Arrange
-        var publicKeyHash = new PublicKeyHash(RandomNumberGenerator.GetBytes(32));
+        var publicKeyHash = PublicKeyHash.FromBytes(RandomNumberGenerator.GetBytes(32));
         var initialStore = new FileBasedTrustedPeerStore(_storageOptions);
         await initialStore.AddAsync(publicKeyHash);
 

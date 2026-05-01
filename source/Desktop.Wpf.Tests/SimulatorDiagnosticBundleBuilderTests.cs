@@ -51,7 +51,7 @@ public sealed class SimulatorDiagnosticBundleBuilderTests
 
         var sessionId = new SessionId(Guid.NewGuid());
         var remotePeerId = new Percolator.Cryptography.Primitives.PeerId(peerId.Value);
-        var stateRoot = new RootKey(new byte[] { 1, 2, 3 });
+        var stateRoot = RootKey.FromBytes(new byte[32]);
         var ratchet = new RatchetState(stateRoot, sendingChainKey: null, sendingCounter: 7, receivingChainKey: null, receivingCounter: 8, previousChainLength: 0, remoteRatchetKey: null, dhRatchetPrivateKey: null, skippedKeyLimit: 1000);
         var crypto = new AeadSessionCrypto();
         var clock = new TestClock(DateTimeOffset.UtcNow);

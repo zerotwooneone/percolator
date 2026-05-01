@@ -17,7 +17,7 @@ public class SecureSessionBehaviorTests
         var id = SessionId.NewId();
         var peer = PeerId.NewId();
         var version = new ProtocolVersion(1);
-        var state = CryptoTestBootstrap.CreateBootstrappedState(new RootKey(new byte[32]));
+        var state = CryptoTestBootstrap.CreateBootstrappedState(RootKey.FromBytes(new byte[32]));
         var crypto = new AeadSessionCrypto();
         return SecureSession.Create(id, peer, version, state, crypto, clock);
     }
@@ -28,17 +28,17 @@ public class SecureSessionBehaviorTests
         // Arrange
         var clock = new TestClock4();
         var session = CreateBaselineSession(clock);
-        var pt = new Plaintext(new byte[] { 1, 2, 3 });
+        var pt = Plaintext.FromBytes(new byte[] { 1, 2, 3 });
 
         // Act
         var msg = session.Encrypt(pt, clock);
 
         // Assert (behavioral)
         var (key, counter, prevLen) = msg.GetHeader();
-        key.Value.Should().NotBeNull();
+        key.ToArray().Should().NotBeNull();
         counter.Should().BeGreaterThanOrEqualTo(0UL);
         prevLen.Should().BeGreaterThanOrEqualTo(0UL);
-        msg.GetCiphertext().Value.Length.Should().BeGreaterThan(0);
+        msg.GetCiphertext().ToArray().Length.Should().BeGreaterThan(0);
         session.LastUsedAtUtc.Should().Be(clock.UtcNow);
     }
 
@@ -47,11 +47,11 @@ public class SecureSessionBehaviorTests
     {
         // Arrange
         var clock = new TestClock4();
-        var root = new RootKey(new byte[32]);
+        var root = RootKey.FromBytes(new byte[32]);
         var (initiator, responder) = CryptoTestBootstrap.CreatePairedStates(root);
         var receiver = SecureSession.Create(SessionId.NewId(), PeerId.NewId(), new ProtocolVersion(1), responder, new AeadSessionCrypto(), clock);
         var sender = SecureSession.Create(SessionId.NewId(), PeerId.NewId(), new ProtocolVersion(1), initiator, new AeadSessionCrypto(), clock);
-        var expected = new Plaintext(new byte[] { 9, 9, 9 });
+        var expected = Plaintext.FromBytes(new byte[] { 9, 9, 9 });
         var framed = sender.Encrypt(expected, clock);
         clock.UtcNow = clock.UtcNow.AddMinutes(1);
 
@@ -59,7 +59,7 @@ public class SecureSessionBehaviorTests
         var pt = receiver.Decrypt(framed, clock);
 
         // Assert
-        pt.Value.Should().NotBeNull();
+        pt.ToArray().Should().NotBeNull();
         receiver.LastUsedAtUtc.Should().Be(clock.UtcNow);
     }
 }

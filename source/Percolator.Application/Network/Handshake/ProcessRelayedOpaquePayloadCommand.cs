@@ -70,9 +70,9 @@ namespace Percolator.Application.Network.Handshake
 
         public async Task<ProcessRelayedOpaquePayloadResponse> Handle(ProcessRelayedOpaquePayloadCommand request, CancellationToken cancellationToken)
         {
-            _logger.LogInformation("Received relayed opaque payload (len={Len})", request.OpaquePayload.Value.Length);
+            _logger.LogInformation("Received relayed opaque payload (len={Len})", request.OpaquePayload.Span.Length);
 
-            if (request.OpaquePayload is null || request.OpaquePayload.Value.Length == 0)
+            if (request.OpaquePayload is null || request.OpaquePayload.Span.Length == 0)
             {
                 return ProcessRelayedOpaquePayloadResponse.Failure;
             }
@@ -82,12 +82,12 @@ namespace Percolator.Application.Network.Handshake
             SessionRatchetMessage ratchetMessage;
             try
             {
-                ratchetMessage = new SessionRatchetMessage(request.OpaquePayload.Value);
+                ratchetMessage = SessionRatchetMessage.FromBytes(request.OpaquePayload.ToArray());
             }
             catch
             {
                 // Not a valid ratchet message: try known non-session payload types (still opaque to relay).
-                return await TryHandleNonSessionPayloadAsync(request.SelfIdentityId, request.RelayHostPeerId, request.OpaquePayload.Value, cancellationToken).ConfigureAwait(false);
+                return await TryHandleNonSessionPayloadAsync(request.SelfIdentityId, request.RelayHostPeerId, request.OpaquePayload.ToArray(), cancellationToken).ConfigureAwait(false);
             }
 
             (RatchetEphemeralKey PreKey, ulong Counter, ulong PreviousChainLength) header;
@@ -98,7 +98,7 @@ namespace Percolator.Application.Network.Handshake
             catch (Exception drEx)
             {
                 // Not a valid ratchet message header: try known non-session payload types (still opaque to relay).
-                return await TryHandleNonSessionPayloadAsync(request.SelfIdentityId, request.RelayHostPeerId, request.OpaquePayload.Value, cancellationToken).ConfigureAwait(false);
+                return await TryHandleNonSessionPayloadAsync(request.SelfIdentityId, request.RelayHostPeerId, request.OpaquePayload.ToArray(), cancellationToken).ConfigureAwait(false);
             }
 
             // Fast/slow path via SecureMessagingService
@@ -118,7 +118,7 @@ namespace Percolator.Application.Network.Handshake
             InternalEnvelope inner;
             try
             {
-                inner = InternalEnvelope.Parser.ParseFrom(plaintext.Value);
+                inner = InternalEnvelope.Parser.ParseFrom(plaintext.ToArray());
             }
             catch (Exception ex)
             {
@@ -294,7 +294,7 @@ namespace Percolator.Application.Network.Handshake
                 }
             };
 
-            var plain = new Plaintext(env.ToByteArray());
+            var plain = Plaintext.FromBytes(env.ToByteArray());
             var sid = new Percolator.Cryptography.SessionId(directSessionId.Value.Value);
             var cipher = await _secureMessaging.EncryptAsync(sid, plain, cancellationToken).ConfigureAwait(false);
 

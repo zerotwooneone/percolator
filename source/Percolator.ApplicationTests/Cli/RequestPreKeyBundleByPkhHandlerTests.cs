@@ -67,7 +67,7 @@ public sealed class RequestPreKeyBundleByPkhHandlerTests
             ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256));
 
         var remotePeerId = new Percolator.Identity.PeerId(Guid.NewGuid());
-        var remoteIdentitySpki = new byte[] { 9, 8, 7, 6, 5 };
+        var remoteIdentitySpki = new byte[80];
         var expectedPkh = SHA256.HashData(remoteIdentitySpki);
         var identityPublicKeyHash = IdentityPublicKeyHash.FromBytes(expectedPkh);
 
@@ -84,7 +84,7 @@ public sealed class RequestPreKeyBundleByPkhHandlerTests
 
         _secureMessaging
             .Setup(s => s.EncryptAsync(It.IsAny<SessionId>(), It.IsAny<Plaintext>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new SessionRatchetMessage(new byte[] { 1, 2, 3 }));
+            .ReturnsAsync(SessionRatchetMessage.FromBytes(new byte[] { 1, 2, 3 }));
 
         var signedPreKeyId = Guid.NewGuid();
         var oneTimePreKeyId = Guid.NewGuid();
@@ -94,8 +94,8 @@ public sealed class RequestPreKeyBundleByPkhHandlerTests
             Version = 1,
             IdentityKey = ByteString.CopyFrom(remoteIdentitySpki),
             SignedPreKeyId = ByteString.CopyFrom(signedPreKeyId.ToByteArray()),
-            SignedPreKey = ByteString.CopyFrom(new byte[] { 1, 1, 1 }),
-            PreKeySignature = ByteString.CopyFrom(new byte[] { 2, 2, 2 })
+            SignedPreKey = ByteString.CopyFrom(new byte[64]),
+            PreKeySignature = ByteString.CopyFrom(new byte[64])
         };
 
         bundle.OneTimeKeys.Add(new GetPreKeyBundleResponse.Types.OneTimeKey
@@ -133,7 +133,7 @@ public sealed class RequestPreKeyBundleByPkhHandlerTests
 
         _secureMessaging
             .Setup(s => s.DecryptInboundAsync(selfIdentityId, It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((new SessionId(hostDirectSessionId.Value), new Plaintext(respBytes)));
+            .ReturnsAsync((new SessionId(hostDirectSessionId.Value), Plaintext.FromBytes(respBytes)));
 
         var endpoint = new DnsEndPoint("example.com", 7777);
         var profile = new PeerRoutingProfile();
@@ -151,8 +151,8 @@ public sealed class RequestPreKeyBundleByPkhHandlerTests
             .Setup(c => c.VerifySignature(It.IsAny<RatchetIdentityKey>(), It.IsAny<PreKey>(), It.IsAny<Percolator.Cryptography.Signature>()))
             .Returns(true);
 
-        var sharedSecret = new SharedSecret(new byte[32]);
-        var eph = new RatchetEphemeralKey(new byte[] { 4, 4, 4 });
+        var sharedSecret = SharedSecret.FromBytes(new byte[32]);
+        var eph = RatchetEphemeralKey.FromBytes(new byte[64]);
         _sessionCrypto
             .Setup(c => c.X3DH_Initiate(It.IsAny<PrivatePreKey>(), It.IsAny<Percolator.Cryptography.PreKeyBundle>()))
             .Returns((sharedSecret, eph));
@@ -263,7 +263,7 @@ public sealed class RequestPreKeyBundleByPkhHandlerTests
             SelfIdentityId = new SelfId(selfIdentityId)
         };
 
-        var remoteIdentitySpki = new byte[] { 9, 8, 7, 6, 5 };
+        var remoteIdentitySpki = new byte[80];
         var expectedPkh = SHA256.HashData(remoteIdentitySpki);
         var identityPublicKeyHash = IdentityPublicKeyHash.FromBytes(expectedPkh);
         var remotePeerId = new Percolator.Identity.PeerId(Guid.NewGuid());
@@ -333,7 +333,7 @@ public sealed class RequestPreKeyBundleByPkhHandlerTests
 
         _secureMessaging
             .Setup(s => s.EncryptAsync(It.IsAny<SessionId>(), It.IsAny<Plaintext>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new SessionRatchetMessage(new byte[] { 1 }));
+            .ReturnsAsync(SessionRatchetMessage.FromBytes(new byte[] { 1 }));
 
         var endpoint = new DnsEndPoint("example.com", 7777);
         var profile = new PeerRoutingProfile();
@@ -385,7 +385,7 @@ public sealed class RequestPreKeyBundleByPkhHandlerTests
 
         _secureMessaging
             .Setup(s => s.DecryptInboundAsync(selfIdentityId, It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((new SessionId(hostDirectSessionId.Value), new Plaintext(respBytes)));
+            .ReturnsAsync((new SessionId(hostDirectSessionId.Value), Plaintext.FromBytes(respBytes)));
 
         _sessionCrypto
             .Setup(c => c.VerifySignature(It.IsAny<RatchetIdentityKey>(), It.IsAny<PreKey>(), It.IsAny<Percolator.Cryptography.Signature>()))

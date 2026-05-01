@@ -37,7 +37,7 @@ public class PeerRoutingProfileTests
     public void RotateCertificates_ReplacesCertificates()
     {
         var profile = new PeerRoutingProfile();
-        var certs = new[] { new TlsCertificate(Array.Empty<byte>()), new TlsCertificate(Array.Empty<byte>()) };
+        var certs = new[] { TlsCertificate.FromBytes(new byte[1]), TlsCertificate.FromBytes(new byte[1]) };
         profile.Invoking(p => p.RotateCertificates(certs, DateTimeOffset.UtcNow)).Should().NotThrow();
         profile.Certificates.Should().HaveCount(2);
     }
@@ -65,7 +65,7 @@ public class PeerRoutingProfileTests
     {
         var profile = new PeerRoutingProfile();
         var dk = new DiscoveryKey("seed:127.0.0.1:5000");
-        var dp = DiscoveredPeer.Create(dk, new PublicKeyHash(new byte[32]), DateTimeOffset.UtcNow);
+        var dp = DiscoveredPeer.Create(dk, PublicKeyHash.FromBytes(new byte[32]), DateTimeOffset.UtcNow);
         dp.ObserveEndpoint(new GrpcEndPoint(new DnsEndPoint("127.0.0.1", 5000), DateTimeOffset.UtcNow), DateTimeOffset.UtcNow);
         profile.Invoking(p => p.MergeDiscovered(dp)).Should().NotThrow();
     }

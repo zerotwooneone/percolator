@@ -108,7 +108,7 @@ namespace Percolator.Application.Network
             EstablishDirectSessionRequest invitationEnvelope;
             try
             {
-                invitationEnvelope = EstablishDirectSessionRequest.Parser.ParseFrom(pending.Invitation.Value);
+                invitationEnvelope = EstablishDirectSessionRequest.Parser.ParseFrom(pending.Invitation.ToArray());
             }
             catch (Exception ex)
             {
@@ -174,15 +174,15 @@ namespace Percolator.Application.Network
             OneTimeKey? oneTimePreKey = null;
             if (payload.InviterPreKey.HasInviterOneTimePreKey && payload.InviterPreKey.InviterOneTimePreKey.Length > 0)
             {
-                oneTimePreKey = new OneTimeKey(payload.InviterPreKey.InviterOneTimePreKey.ToByteArray());
+                oneTimePreKey = OneTimeKey.FromBytes(payload.InviterPreKey.InviterOneTimePreKey.ToByteArray());
             }
 
             var inviterIdentityKeySpki = invitationEnvelope.InviterIdentityKey.ToByteArray();
             var inviterBundle = new Percolator.Cryptography.PreKeyBundle(
-                new RatchetIdentityKey(inviterIdentityKeySpki),
+                RatchetIdentityKey.FromBytes(inviterIdentityKeySpki),
                 signedPreKeyId,
-                new PreKey(payload.InviterPreKey.InviterSignedPreKey.ToByteArray()),
-                new Percolator.Cryptography.Signature(payload.InviterPreKey.PreKeySignature.ToByteArray()),
+                PreKey.FromBytes(payload.InviterPreKey.InviterSignedPreKey.ToByteArray()),
+                Percolator.Cryptography.Signature.FromBytes(payload.InviterPreKey.PreKeySignature.ToByteArray()),
                 oneTimePreKeyId,
                 oneTimePreKey,
                 payload.ExpiresAtUtc?.ToDateTimeOffset());
@@ -190,12 +190,12 @@ namespace Percolator.Application.Network
             // Validate bundle before deriving shared secret.
             _handshakePlanner.ValidatePreKeyBundle(inviterBundle);
 
-            var localIkPriv = new PrivatePreKey(_active.Keys.IdentitySigningKey.ExportECPrivateKey());
+            var localIkPriv = PrivatePreKey.FromBytes(_active.Keys.IdentitySigningKey.ExportECPrivateKey());
             var x3 = _sessionCrypto.X3DH_Initiate(localIkPriv, inviterBundle);
 
             // Create initiator session (acceptor side) with a session id chosen by the acceptor.
             var sessionId = SessionId.NewId();
-            var root = new RootKey(x3.SharedSecret.Value);
+            var root = RootKey.FromBytes(x3.SharedSecret.ToArray());
             var proto = pending.ProtocolVersion;
             var session = RatchetBootstrap.CreateInitiatorSession(
                 sessionId,
@@ -228,7 +228,7 @@ namespace Percolator.Application.Network
                 Version = 1,
                 DirectSessionId = sessionId.Value.ToString()
             };
-            var initial = session.Encrypt(new Plaintext(inner.ToByteArray()), _clock);
+            var initial = session.Encrypt(Plaintext.FromBytes(inner.ToByteArray()), _clock);
 
             if (!pending.IsRelayed)
             {
@@ -242,7 +242,7 @@ namespace Percolator.Application.Network
                 profile.AddGrpcEndPoint(
                     new GrpcEndPoint(directCallbackEndpoint!, _clock.UtcNow),
                     _clock.UtcNow);
-                profile.SetIdentityPublicKey(new IdentityPublicKey(inviterIdentityKeySpki));
+                profile.SetIdentityPublicKey(IdentityPublicKey.FromBytes(inviterIdentityKeySpki));
                 await _profileRepository.UpsertAsync(profile, cancellationToken).ConfigureAwait(false);
             }
 
@@ -252,8 +252,8 @@ namespace Percolator.Application.Network
                 Version = 1,
                 RequestCorrelationId = pending.RequestCorrelationId.ToString(),
                 AcceptorIdentityKey = ByteString.CopyFrom(_active.Keys.IdentitySigningKey.ExportSubjectPublicKeyInfo()),
-                AcceptorX3DhEphemeralKey = ByteString.CopyFrom(x3.EphemeralPublic.Value),
-                InitialRatchetMessage = ByteString.CopyFrom(initial.Value)
+                AcceptorX3DhEphemeralKey = ByteString.CopyFrom(x3.EphemeralPublic.ToArray()),
+                InitialRatchetMessage = ByteString.CopyFrom(initial.ToArray())
             };
 
             InviteHandshakeResponseDeliveryResult delivery;
@@ -334,7 +334,7 @@ namespace Percolator.Application.Network
                 }
             };
 
-            var plain = new Plaintext(env.ToByteArray());
+            var plain = Plaintext.FromBytes(env.ToByteArray());
             var sid = new Percolator.Cryptography.SessionId(relaySessionId.Value.Value);
             var cipher = await _secureMessaging.EncryptAsync(sid, plain, cancellationToken).ConfigureAwait(false);
 

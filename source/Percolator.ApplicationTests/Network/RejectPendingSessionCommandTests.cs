@@ -37,7 +37,7 @@ public sealed class RejectPendingSessionCommandTests
             id,
             new Percolator.Cryptography.Primitives.PeerId(Guid.NewGuid()),
             new ProtocolVersion(1),
-            new HandshakeInvitation(new byte[] { 1, 2, 3 }),
+            HandshakeInvitation.FromBytes(new byte[] { 1, 2, 3 }),
             requestCorrelationId: new RequestCorrelationId(Guid.NewGuid()),
             isRelayed: false,
             relayHostPeerId: null,

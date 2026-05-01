@@ -21,12 +21,12 @@ public class SecureSessionReceiveOrderTests
             SessionId.NewId(),
             PeerId.NewId(),
             new ProtocolVersion(1),
-            new RatchetState(new RootKey(new byte[32]), null, 0, null, 0, 0, null, null, 1000),
+            new RatchetState(RootKey.FromBytes(new byte[32]), null, 0, null, 0, 0, null, null, 1000),
             crypto,
             clock);
 
         // Simulate receiving a future counter (2) before 0 or 1
-        var msgOutOfOrder = SessionRatchetMessage.Create(new RatchetEphemeralKey(new byte[32]), 2, 0, new Ciphertext(new byte[] { 0x33 }));
+        var msgOutOfOrder = SessionRatchetMessage.Create(RatchetEphemeralKey.FromBytes(new byte[64]), 2, 0, Ciphertext.FromBytes(new byte[] { 0x33 }));
         Action act = () => s.Decrypt(msgOutOfOrder, clock);
         act.Should().NotThrow();
     }

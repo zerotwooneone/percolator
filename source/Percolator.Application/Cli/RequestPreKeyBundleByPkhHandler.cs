@@ -102,7 +102,7 @@ public class RequestPreKeyBundleByPkhHandler : IRequestHandler<RequestPreKeyBund
         };
 
         // Encrypt and send
-        var plaintext = new Plaintext(internalEnvelope.ToByteArray());
+        var plaintext = Plaintext.FromBytes(internalEnvelope.ToByteArray());
         var cryptoHostSessionId = new SessionId(directHostSessionId.Value.Value);
         var ratchetMessage = await _secureMessaging.EncryptAsync(cryptoHostSessionId, plaintext, cancellationToken).ConfigureAwait(false);
         _logger.LogInformation("Requesting pre-key bundle from peer {PeerId}", hostPeer.Id);
@@ -116,7 +116,7 @@ public class RequestPreKeyBundleByPkhHandler : IRequestHandler<RequestPreKeyBund
             throw new InvalidOperationException("No response payload returned.");
         }
 
-        var respCipher = new SessionRatchetMessage(response.ResponsePayload.ResponsePayload.ToByteArray());
+        var respCipher = SessionRatchetMessage.FromBytes(response.ResponsePayload.ResponsePayload.ToByteArray());
         var resolved = await _secureMessaging.DecryptInboundAsync(1, respCipher, cancellationToken).ConfigureAwait(false);
         var respPlain = resolved?.plaintext;
         if (respPlain is null)
@@ -124,7 +124,7 @@ public class RequestPreKeyBundleByPkhHandler : IRequestHandler<RequestPreKeyBund
             throw new InvalidOperationException("Could not decrypt pre-key bundle response.");
         }
 
-        var internalResp = InternalEnvelope.Parser.ParseFrom(respPlain.Value);
+        var internalResp = InternalEnvelope.Parser.ParseFrom(respPlain.ToArray());
         if (internalResp.ApplicationPayloadCase != InternalEnvelope.ApplicationPayloadOneofCase.GetPreKeyBundleResponse)
         {
             _logger.LogWarning("Unexpected response type: {Type}", internalResp.ApplicationPayloadCase);
@@ -212,7 +212,7 @@ public class RequestPreKeyBundleByPkhHandler : IRequestHandler<RequestPreKeyBund
                 try
                 {
                     oneTimePreKeyId = new Guid(first.OneTimeKeyId.ToByteArray());
-                    oneTimePreKey = new OneTimeKey(first.KeyBytes.ToByteArray());
+                    oneTimePreKey = OneTimeKey.FromBytes(first.KeyBytes.ToByteArray());
                 }
                 catch
                 {
@@ -222,9 +222,9 @@ public class RequestPreKeyBundleByPkhHandler : IRequestHandler<RequestPreKeyBund
             }
         }
 
-        var remoteIdentity = new RatchetIdentityKey(remoteIdentitySpki);
-        var remoteSpk = new PreKey(bundle.SignedPreKey.ToByteArray());
-        var remoteSig = new Percolator.Cryptography.Signature(bundle.PreKeySignature.ToByteArray());
+        var remoteIdentity = RatchetIdentityKey.FromBytes(remoteIdentitySpki);
+        var remoteSpk = PreKey.FromBytes(bundle.SignedPreKey.ToByteArray());
+        var remoteSig = Percolator.Cryptography.Signature.FromBytes(bundle.PreKeySignature.ToByteArray());
 
         if (!_sessionCrypto.VerifySignature(remoteIdentity, remoteSpk, remoteSig))
         {
@@ -240,14 +240,14 @@ public class RequestPreKeyBundleByPkhHandler : IRequestHandler<RequestPreKeyBund
             oneTimePreKey,
             expirationDateUtc: null);
 
-        var localIkPriv = new PrivatePreKey(_activeIdentity.Keys.IdentitySigningKey.ExportECPrivateKey());
+        var localIkPriv = PrivatePreKey.FromBytes(_activeIdentity.Keys.IdentitySigningKey.ExportECPrivateKey());
         var x3 = _sessionCrypto.X3DH_Initiate(localIkPriv, pkb);
 
         var req = new EstablishSessionRequest
         {
             Version = 1,
             IdentitySigningKey = ByteString.CopyFrom(_activeIdentity.Keys.IdentitySigningKey.ExportSubjectPublicKeyInfo()),
-            EphemeralKey = ByteString.CopyFrom(x3.EphemeralPublic.Value),
+            EphemeralKey = ByteString.CopyFrom(x3.EphemeralPublic.ToArray()),
             PrekeyId = ByteString.CopyFrom(signedPreKeyId.ToByteArray())
         };
         if (oneTimePreKeyId is not null)
@@ -276,7 +276,7 @@ public class RequestPreKeyBundleByPkhHandler : IRequestHandler<RequestPreKeyBund
 
         var sessionId = new SessionId(Guid.Parse(respPayload.SessionId));
 
-        var root = new RootKey(x3.SharedSecret.Value);
+        var root = RootKey.FromBytes(x3.SharedSecret.ToArray());
         var initiatorSession = RatchetBootstrap.CreateInitiatorSession(
             sessionId,
             new Percolator.Cryptography.Primitives.PeerId(remotePeerId.Value),
@@ -300,7 +300,7 @@ public class RequestPreKeyBundleByPkhHandler : IRequestHandler<RequestPreKeyBund
             profile.BindIdentity(new Percolator.Network.PeerId(remotePeerId.Value));
         }
         profile.AddGrpcEndPoint(new GrpcEndPoint(endpoint, _clock.UtcNow), _clock.UtcNow);
-        profile.SetIdentityPublicKey(new IdentityPublicKey(remoteIdentitySpki));
+        profile.SetIdentityPublicKey(IdentityPublicKey.FromBytes(remoteIdentitySpki));
         await _routingProfiles.UpsertAsync(profile, ct).ConfigureAwait(false);
     }
 }

@@ -13,7 +13,7 @@ file sealed class TestClock2 : IClock
 file sealed class NoopCrypto : ICryptoPrimitives
 {
     public HandshakeResponseMessage CreateHandshakeResponse(HandshakeInvitation invitation, IKeyStore keyStore)
-        => new HandshakeResponseMessage(new byte[] { 0xEE });
+        => HandshakeResponseMessage.FromBytes(new byte[] { 0xEE });
 }
 
 [TestFixture]
@@ -23,7 +23,7 @@ public class PendingSessionBehaviorTests
     public void ApproveAndRespond_SetsApproved_And_ReturnsResponse()
     {
         var clock = new TestClock2 { UtcNow = DateTimeOffset.Parse("2025-05-01T00:00:00Z") };
-        var inv = new HandshakeInvitation(new byte[] { 1, 2, 3 });
+        var inv = HandshakeInvitation.FromBytes(new byte[] { 1, 2, 3 });
         var pending = PendingSession.FromInvitationWithMetadata(
             PendingSessionId.NewId(),
             PeerId.NewId(),
@@ -41,14 +41,14 @@ public class PendingSessionBehaviorTests
         var resp = pending.ApproveAndRespond(new NoopCrypto(), new Mock<IKeyStore>().Object);
 
         pending.State.Should().Be(ApprovalState.Approved);
-        resp.Value.Should().Equal(new byte[] { 0xEE });
+        resp.ToArray().Should().Equal(new byte[] { 0xEE });
     }
 
     [Test]
     public void AutoRespond_Allows_WhenPolicyPermits()
     {
         var clock = new TestClock2 { UtcNow = DateTimeOffset.Parse("2025-05-01T00:00:00Z") };
-        var inv = new HandshakeInvitation(new byte[] { 4, 5, 6 });
+        var inv = HandshakeInvitation.FromBytes(new byte[] { 4, 5, 6 });
         var pending = PendingSession.FromInvitationWithMetadata(
             PendingSessionId.NewId(),
             PeerId.NewId(),
@@ -66,14 +66,14 @@ public class PendingSessionBehaviorTests
         var resp = pending.AutoRespond(new NoopCrypto(), new Mock<IKeyStore>().Object, new ApprovalPolicy(allowAutoRespond: true));
 
         pending.State.Should().Be(ApprovalState.AutoResponded);
-        resp.Value.Should().Equal(new byte[] { 0xEE });
+        resp.ToArray().Should().Equal(new byte[] { 0xEE });
     }
 
     [Test]
     public void AutoRespond_Denied_WhenPolicyForbids()
     {
         var clock = new TestClock2 { UtcNow = DateTimeOffset.Parse("2025-05-01T00:00:00Z") };
-        var inv = new HandshakeInvitation(new byte[] { 7, 8, 9 });
+        var inv = HandshakeInvitation.FromBytes(new byte[] { 7, 8, 9 });
         var pending = PendingSession.FromInvitationWithMetadata(
             PendingSessionId.NewId(),
             PeerId.NewId(),
@@ -102,7 +102,7 @@ public class PendingSessionBehaviorTests
             PendingSessionId.NewId(),
             PeerId.NewId(),
             new ProtocolVersion(1),
-            new HandshakeInvitation(new byte[] { 1 }),
+            HandshakeInvitation.FromBytes(new byte[] { 1 }),
             requestCorrelationId: new RequestCorrelationId(Guid.NewGuid()),
             isRelayed: false,
             relayHostPeerId: null,
@@ -129,7 +129,7 @@ public class PendingSessionBehaviorTests
             PendingSessionId.NewId(),
             PeerId.NewId(),
             new ProtocolVersion(1),
-            new HandshakeInvitation(new byte[] { 2 }),
+            HandshakeInvitation.FromBytes(new byte[] { 2 }),
             requestCorrelationId: new RequestCorrelationId(Guid.NewGuid()),
             isRelayed: false,
             relayHostPeerId: null,
@@ -156,7 +156,7 @@ public class PendingSessionBehaviorTests
             PendingSessionId.NewId(),
             PeerId.NewId(),
             new ProtocolVersion(1),
-            new HandshakeInvitation(new byte[] { 3 }),
+            HandshakeInvitation.FromBytes(new byte[] { 3 }),
             requestCorrelationId: new RequestCorrelationId(Guid.NewGuid()),
             isRelayed: false,
             relayHostPeerId: null,
@@ -183,7 +183,7 @@ public class PendingSessionBehaviorTests
             PendingSessionId.NewId(),
             PeerId.NewId(),
             new ProtocolVersion(1),
-            new HandshakeInvitation(new byte[] { 4 }),
+            HandshakeInvitation.FromBytes(new byte[] { 4 }),
             requestCorrelationId: new RequestCorrelationId(Guid.NewGuid()),
             isRelayed: false,
             relayHostPeerId: null,
@@ -210,7 +210,7 @@ public class PendingSessionBehaviorTests
             PendingSessionId.NewId(),
             PeerId.NewId(),
             new ProtocolVersion(1),
-            new HandshakeInvitation(new byte[] { 5 }),
+            HandshakeInvitation.FromBytes(new byte[] { 5 }),
             requestCorrelationId: new RequestCorrelationId(Guid.NewGuid()),
             isRelayed: false,
             relayHostPeerId: null,
@@ -237,7 +237,7 @@ public class PendingSessionBehaviorTests
             PendingSessionId.NewId(),
             PeerId.NewId(),
             new ProtocolVersion(1),
-            new HandshakeInvitation(new byte[] { 6 }),
+            HandshakeInvitation.FromBytes(new byte[] { 6 }),
             requestCorrelationId: new RequestCorrelationId(Guid.NewGuid()),
             isRelayed: false,
             relayHostPeerId: null,
@@ -263,7 +263,7 @@ public class PendingSessionBehaviorTests
             PendingSessionId.NewId(),
             PeerId.NewId(),
             new ProtocolVersion(1),
-            new HandshakeInvitation(new byte[] { 1 }),
+            HandshakeInvitation.FromBytes(new byte[] { 1 }),
             requestCorrelationId: new RequestCorrelationId(Guid.NewGuid()),
             isRelayed: false,
             relayHostPeerId: null,
@@ -283,7 +283,7 @@ public class PendingSessionBehaviorTests
             PendingSessionId.NewId(),
             PeerId.NewId(),
             new ProtocolVersion(1),
-            new HandshakeInvitation(new byte[] { 1 }),
+            HandshakeInvitation.FromBytes(new byte[] { 1 }),
             requestCorrelationId: new RequestCorrelationId(Guid.NewGuid()),
             isRelayed: false,
             relayHostPeerId: null,

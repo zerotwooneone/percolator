@@ -51,7 +51,7 @@ public sealed class ReverseSignalInviteFactory : IReverseSignalInviteFactory
             throw new InvalidOperationException("Active identity keys not loaded.");
         }
 
-        var preKeySig = _signing.Sign(new Payload(inviterSignedPreKeySpki));
+        var preKeySig = _signing.Sign(Payload.FromBytes(inviterSignedPreKeySpki));
 
         var payload = new InviteHandshakeRequestPayload
         {
@@ -64,21 +64,21 @@ public sealed class ReverseSignalInviteFactory : IReverseSignalInviteFactory
             {
                 Version = 1,
                 InviterSignedPreKey = ByteString.CopyFrom(inviterSignedPreKeySpki),
-                PreKeySignature = ByteString.CopyFrom(preKeySig.Value)
+                PreKeySignature = ByteString.CopyFrom(preKeySig.ToArray())
             }
         };
 
         var payloadBytes = payload.ToByteArray();
-        var payloadSig = _signing.Sign(new Payload(payloadBytes));
+        var payloadSig = _signing.Sign(Payload.FromBytes(payloadBytes));
 
-        var inviterIdentityKeySpki = _signing.GetActivePublicKey().Value;
+        var inviterIdentityKeySpki = _signing.GetActivePublicKey().ToArray();
 
         return new EstablishDirectSessionRequest
         {
             Version = 1,
             InviterIdentityKey = ByteString.CopyFrom(inviterIdentityKeySpki),
             Payload = ByteString.CopyFrom(payloadBytes),
-            PayloadSignature = ByteString.CopyFrom(payloadSig.Value)
+            PayloadSignature = ByteString.CopyFrom(payloadSig.ToArray())
         };
     }
 }

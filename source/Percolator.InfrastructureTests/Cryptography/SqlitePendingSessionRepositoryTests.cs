@@ -8,6 +8,7 @@ using Percolator.Identity.Model;
 using Percolator.Infrastructure.Cryptography;
 using Percolator.Infrastructure.Persistence;
 using PeerId = Percolator.Cryptography.Primitives.PeerId;
+using System.Security.Cryptography;
 
 namespace Percolator.InfrastructureTests.Cryptography;
 
@@ -43,15 +44,18 @@ public sealed class SqlitePendingSessionRepositoryTests
 
         var repo = new SqlitePendingSessionRepository(ctx, active, new TestClock());
 
+        using var ecdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        var inviterKeyBytes = ecdh.PublicKey.ExportSubjectPublicKeyInfo();
+
         var pending = PendingSession.FromInvitationWithMetadata(
             PendingSessionId.NewId(),
             PeerId.NewId(),
             new ProtocolVersion(1),
-            new HandshakeInvitation(new byte[] { 1, 2, 3 }),
+            HandshakeInvitation.FromBytes(new byte[] { 1, 2, 3 }),
             requestCorrelationId: new RequestCorrelationId(Guid.Parse("11111111-1111-1111-1111-111111111111")),
             isRelayed: false,
             relayHostPeerId: null,
-            inviterIdentityKey: new RatchetIdentityKey(new byte[] { 9, 9, 9 }),
+            inviterIdentityKey: RatchetIdentityKey.FromBytes(inviterKeyBytes),
             callbackEndpointHost: "example.com",
             callbackEndpointPort: 443,
             new TestClock(),
@@ -64,7 +68,7 @@ public sealed class SqlitePendingSessionRepositoryTests
 
         Assert.That(loaded!.IsRelayed, Is.EqualTo(false));
         Assert.That(loaded.InviterIdentityKey, Is.Not.Null);
-        Assert.That(loaded.InviterIdentityKey!.Value, Is.EqualTo(new byte[] { 9, 9, 9 }));
+        Assert.That(loaded.InviterIdentityKey!.ToArray(), Is.EqualTo(inviterKeyBytes));
         Assert.That(loaded.CallbackEndpointHost, Is.EqualTo("example.com"));
         Assert.That(loaded.CallbackEndpointPort, Is.EqualTo(443));
         Assert.That(

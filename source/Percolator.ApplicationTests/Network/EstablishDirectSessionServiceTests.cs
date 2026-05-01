@@ -49,14 +49,14 @@ namespace Percolator.ApplicationTests.Network
                 {
                     Version = 1,
                     InviterSignedPreKey = ByteString.CopyFrom(ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256).PublicKey.ExportSubjectPublicKeyInfo()),
-                    PreKeySignature = ByteString.CopyFrom(new byte[] { 1, 2, 3 })
+                    PreKeySignature = ByteString.CopyFrom(new byte[64])
                 },
                 ExpiresAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow.AddMinutes(10)),
                 RequestCorrelationId = "11111111-1111-1111-1111-111111111111"
             };
 
             var payloadBytes = payload.ToByteArray();
-            var payloadSignatureBytes = new byte[] { 9, 9, 9 };
+            var payloadSignatureBytes = new byte[64];
 
             // Mocks
             signing.Setup(s => s.Verify(
@@ -130,14 +130,14 @@ namespace Percolator.ApplicationTests.Network
                 {
                     Version = 1,
                     InviterSignedPreKey = ByteString.CopyFrom(ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256).PublicKey.ExportSubjectPublicKeyInfo()),
-                    PreKeySignature = ByteString.CopyFrom(new byte[] { 1, 2, 3 })
+                    PreKeySignature = ByteString.CopyFrom(new byte[64])
                 },
                 ExpiresAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow.AddMinutes(10)),
                 RequestCorrelationId = "11111111-1111-1111-1111-111111111111"
             };
 
             var payloadBytes = payload.ToByteArray();
-            var payloadSignatureBytes = new byte[] { 0x00, 0x01, 0x02 };
+            var payloadSignatureBytes = new byte[64];
 
             signing.Setup(s => s.Verify(
                     It.IsAny<Percolator.Network.Payload>(),
@@ -194,13 +194,13 @@ namespace Percolator.ApplicationTests.Network
                 {
                     Version = 1,
                     InviterSignedPreKey = ByteString.CopyFrom(ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256).PublicKey.ExportSubjectPublicKeyInfo()),
-                    PreKeySignature = ByteString.CopyFrom(new byte[] { 1, 2, 3 })
+                    PreKeySignature = ByteString.CopyFrom(new byte[64])
                 },
                 ExpiresAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow.AddMinutes(10)),
                 RequestCorrelationId = "22222222-2222-2222-2222-222222222222"
             };
             var payloadBytes = payload.ToByteArray();
-            var payloadSignatureBytes = new byte[] { 9, 9, 9 };
+            var payloadSignatureBytes = new byte[64];
 
             signing.Setup(s => s.Verify(
                     It.IsAny<Percolator.Network.Payload>(),
@@ -214,11 +214,11 @@ namespace Percolator.ApplicationTests.Network
                     PendingSessionId.NewId(),
                     new Percolator.Cryptography.Primitives.PeerId(Guid.NewGuid()),
                     new ProtocolVersion(1),
-                    new HandshakeInvitation(new byte[] { 0x01 }),
+                    HandshakeInvitation.FromBytes(new byte[] { 0x01 }),
                     requestCorrelationId: new Percolator.Cryptography.Primitives.RequestCorrelationId(Guid.Parse("22222222-2222-2222-2222-222222222222")),
                     isRelayed: false,
                     relayHostPeerId: null,
-                    inviterIdentityKey: new RatchetIdentityKey(inviterSpki),
+                    inviterIdentityKey: RatchetIdentityKey.FromBytes(inviterSpki),
                     callbackEndpointHost: null,
                     callbackEndpointPort: null,
                     clock: clock,
@@ -276,13 +276,13 @@ namespace Percolator.ApplicationTests.Network
                 {
                     Version = 1,
                     InviterSignedPreKey = ByteString.CopyFrom(ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256).PublicKey.ExportSubjectPublicKeyInfo()),
-                    PreKeySignature = ByteString.CopyFrom(new byte[] { 1, 2, 3 })
+                    PreKeySignature = ByteString.CopyFrom(new byte[64])
                 },
                 ExpiresAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow.AddMinutes(-10)),
                 RequestCorrelationId = "33333333-3333-3333-3333-333333333333"
             };
             var payloadBytes = payload.ToByteArray();
-            var payloadSignatureBytes = new byte[] { 9, 9, 9 };
+            var payloadSignatureBytes = new byte[64];
 
             signing.Setup(s => s.Verify(
                     It.IsAny<Percolator.Network.Payload>(),

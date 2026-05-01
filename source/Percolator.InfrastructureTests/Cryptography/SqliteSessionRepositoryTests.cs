@@ -33,18 +33,27 @@ public class SqliteSessionRepositoryTests
         var id = SessionId.NewId();
         var remote = Percolator.Cryptography.Primitives.PeerId.NewId();
         var ver = new ProtocolVersion(1);
-        var state = new RatchetState(new RootKey(new byte[]{1}), new ChainKey(new byte[]{2}), 3UL, new ChainKey(new byte[]{4}), 5UL, 0UL, null, null, 1000);
+        var state = new RatchetState(
+            RootKey.FromBytes(new byte[32]),
+            ChainKey.FromBytes(new byte[32]),
+            3UL,
+            ChainKey.FromBytes(new byte[32]),
+            5UL,
+            0UL,
+            null,
+            null,
+            1000);
         return SecureSession.Create(id, remote, ver, state, crypto, clock);
     }
 
     private sealed class NoopSessionCrypto : ISessionCrypto
     {
         public (SharedSecret SharedSecret, RatchetEphemeralKey EphemeralPublic) X3DH_Initiate(PrivatePreKey mySignedPreKey, PreKeyBundle remoteBundle)
-            => (new SharedSecret(new byte[]{0xAA}), new RatchetEphemeralKey(new byte[]{0xBB}));
+            => (SharedSecret.FromBytes(new byte[32]), RatchetEphemeralKey.FromBytes(new byte[64]));
         public (Ciphertext Ciphertext, RatchetEphemeralKey HeaderKey, RatchetState NewState) DR_Encrypt(RatchetState state, Plaintext pt, AssociatedData ad, ulong ctr, ulong prevLen)
-            => (new Ciphertext(new byte[]{0x01}), new RatchetEphemeralKey(new byte[]{0x02}), state);
+            => (Ciphertext.FromBytes(new byte[]{0x01}), RatchetEphemeralKey.FromBytes(new byte[64]), state);
         public (Plaintext Plaintext, RatchetState NewState) DR_Decrypt(RatchetState state, SessionRatchetMessage message, AssociatedData ad)
-            => (new Plaintext(new byte[]{0x03}), state);
+            => (Plaintext.FromBytes(new byte[]{0x03}), state);
 
         public SharedSecret X3DH_Respond(
             RatchetIdentityKey initiatorId,

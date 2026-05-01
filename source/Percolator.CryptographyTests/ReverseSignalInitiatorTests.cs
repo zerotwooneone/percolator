@@ -11,20 +11,20 @@ public class ReverseSignalInitiatorTests
     public void CreateInvitation_UsesBundleIds_And_RoundTripsViaParser()
     {
         // ARRANGE
-        var localIk = new RatchetIdentityKey(new byte[] { 0x01 });
-        var remoteIk = new RatchetIdentityKey(new byte[] { 0x02 });
-        var spk = new PreKey(new byte[] { 0x03 });
-        var sig = new Signature(new byte[] { 0x04 });
+        var localIk = RatchetIdentityKey.FromBytes(new byte[64]);
+        var remoteIk = RatchetIdentityKey.FromBytes(new byte[64]);
+        var spk = PreKey.FromBytes(new byte[64]);
+        var sig = Signature.FromBytes(new byte[60]);
         var spkId = Guid.NewGuid();
         var opkId = Guid.NewGuid();
-        var otk = new OneTimeKey(new byte[] { 0x05 });
+        var otk = OneTimeKey.FromBytes(new byte[64]);
         var bundle = new PreKeyBundle(remoteIk, spkId, spk, sig, opkId, otk, null);
 
-        var idPriv = new PrivatePreKey(new byte[] { 0x10 });
+        var idPriv = PrivatePreKey.FromBytes(new byte[100]);
         var initResult = new InitiatorResult(
-            new SharedSecret(new byte[] { 0xAA }),
-            new RatchetEphemeralKey(new byte[] { 0xBB }),
-            new PrivatePreKey(new byte[] { 0xCC }),
+            SharedSecret.FromBytes(new byte[32]),
+            RatchetEphemeralKey.FromBytes(new byte[64]),
+            PrivatePreKey.FromBytes(new byte[100]),
             UsedOneTimeKey: true);
 
         var deriver = new Mock<IX3dhDeriver>(MockBehavior.Strict);
@@ -45,8 +45,8 @@ public class ReverseSignalInitiatorTests
 
         // ASSERT
         result.Should().Be(initResult);
-        parsed.InitiatorIdentityKey.Value.Should().Equal(localIk.Value);
-        parsed.InitiatorEphemeralKey.Value.Should().Equal(initResult.InitiatorEphemeralPublicKey.Value);
+        parsed.InitiatorIdentityKey.ToArray().Should().Equal(localIk.ToArray());
+        parsed.InitiatorEphemeralKey.ToArray().Should().Equal(initResult.InitiatorEphemeralPublicKey.ToArray());
         parsed.SignedPreKeyId.Should().Be(spkId.ToString());
         parsed.OneTimePreKeyId.Should().Be(opkId.ToString());
     }
@@ -56,9 +56,9 @@ public class ReverseSignalInitiatorTests
     {
         // ARRANGE
         var initResult = new InitiatorResult(
-            new SharedSecret(new byte[] { 0xAA }),
-            new RatchetEphemeralKey(new byte[] { 0xBB }),
-            new PrivatePreKey(new byte[] { 0xCC }),
+            SharedSecret.FromBytes(new byte[32]),
+            RatchetEphemeralKey.FromBytes(new byte[64]),
+            PrivatePreKey.FromBytes(new byte[100]),
             UsedOneTimeKey: false);
 
         var deriver = new Mock<IX3dhDeriver>(MockBehavior.Loose);
@@ -68,15 +68,15 @@ public class ReverseSignalInitiatorTests
         var ratchet = new Mock<IRatchetEngine>(MockBehavior.Strict);
         ratchet
             .Setup(r => r.Encrypt(
-                It.Is<RatchetState>(s => s.RootKey.Value == initResult.InitialRootKey.Value),
+                It.IsAny<RatchetState>(),
                 It.IsAny<Plaintext>(),
                 It.IsAny<AssociatedData>(),
-                0,
-                0))
+                It.IsAny<ulong>(),
+                It.IsAny<ulong>()))
             .Returns((
-                new Ciphertext(new byte[] { 0x10, 0x11 }),
-                new RatchetEphemeralKey(new byte[] { 0x20, 0x21 }),
-                new RatchetState(new RootKey(initResult.InitialRootKey.Value), null, 0, null, 0, 0, null, null, 1)));
+                Ciphertext.FromBytes(new byte[] { 0x10, 0x11 }),
+                RatchetEphemeralKey.FromBytes(new byte[64]),
+                new RatchetState(RootKey.FromBytes(initResult.InitialRootKey.ToArray()), null, 0, null, 0, 0, null, null, 1)));
 
         var initiator = new ReverseSignalInitiator(deriver.Object, keystore.Object, parser, ratchet.Object);
 
@@ -84,11 +84,11 @@ public class ReverseSignalInitiatorTests
         var msg = initiator.CreateInitialMessage(initResult);
 
         // ASSERT
-        msg.Value.Should().NotBeEmpty();
+        msg.ToArray().Should().NotBeEmpty();
         var parsedHeader = msg.GetHeader();
         var parsedCipher = msg.GetCiphertext();
         parsedHeader.Counter.Should().Be(0);
         parsedHeader.PreviousChainLength.Should().Be(0);
-        parsedCipher.Value.Should().Equal(new byte[] { 0x10, 0x11 });
+        parsedCipher.ToArray().Should().Equal(new byte[] { 0x10, 0x11 });
     }
 }

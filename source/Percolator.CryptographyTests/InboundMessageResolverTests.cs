@@ -86,19 +86,19 @@ public class InboundMessageResolverTests
 
         var sid = SessionId.NewId();
         index.Resolved = sid;
-        var root = new RootKey(new byte[32]);
+        var root = RootKey.FromBytes(new byte[32]);
         var (initiator, responder) = CryptoTestBootstrap.CreatePairedStates(root);
         var receiver = MakeSession(sid, responder, clock);
         await repo.AddAsync(receiver);
 
         // Create a sender session to produce a valid framed message
         var sender = MakeSession(SessionId.NewId(), initiator, clock);
-        var msg = sender.Encrypt(new Plaintext(new byte[] { 1 }), clock);
+        var msg = sender.Encrypt(Plaintext.FromBytes(new byte[] { 1 }), clock);
         var result = await resolver.ResolveAsync(1, msg, clock, CancellationToken.None);
 
         result.Should().NotBeNull();
         result!.Value.sessionId.Should().Be(sid);
-        result.Value.plaintext.Value.Should().NotBeNull();
+        result.Value.plaintext.ToArray().Should().NotBeNull();
         index.Upserted.HasValue.Should().BeTrue();
     }
 
@@ -116,20 +116,20 @@ public class InboundMessageResolverTests
         catalog.Sessions.Add(sid1);
         catalog.Sessions.Add(sid2);
 
-        var root = new RootKey(new byte[32]);
+        var root = RootKey.FromBytes(new byte[32]);
         var (initiator, responder) = CryptoTestBootstrap.CreatePairedStates(root);
         await repo.AddAsync(MakeSession(sid1, responder, clock));
         await repo.AddAsync(MakeSession(sid2, responder, clock));
 
         // Sender produces a real framed message
         var sender2 = MakeSession(SessionId.NewId(), initiator, clock);
-        var msg = sender2.Encrypt(new Plaintext(new byte[] { 2 }), clock);
+        var msg = sender2.Encrypt(Plaintext.FromBytes(new byte[] { 2 }), clock);
 
         var result = await resolver.ResolveAsync(1, msg, clock, CancellationToken.None);
 
         result.Should().NotBeNull();
         result!.Value.sessionId.Should().BeOneOf(sid1, sid2);
-        result.Value.plaintext.Value.Should().NotBeNull();
+        result.Value.plaintext.ToArray().Should().NotBeNull();
         index.Upserted.HasValue.Should().BeTrue();
     }
 }

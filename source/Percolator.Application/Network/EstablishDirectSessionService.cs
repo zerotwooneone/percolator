@@ -74,9 +74,9 @@ namespace Percolator.Application.Network
             }
 
             var payloadVerified = _signingService.Verify(
-                new Percolator.Network.Payload(payloadBytes),
-                new Percolator.Network.Signature(payloadSignatureBytes),
-                new Percolator.Network.PublicKey(inviterIdentityKeySpki));
+                Percolator.Network.Payload.FromBytes(payloadBytes),
+                Percolator.Network.Signature.FromBytes(payloadSignatureBytes),
+                Percolator.Network.PublicKey.FromBytes(inviterIdentityKeySpki));
             if (!payloadVerified)
             {
                 throw new InvalidOperationException("handshake payload signature invalid");
@@ -175,9 +175,9 @@ namespace Percolator.Application.Network
             }
 
             var preKeyVerified = _signingService.Verify(
-                new Percolator.Network.Payload(payload.InviterPreKey.InviterSignedPreKey.ToByteArray()),
-                new Percolator.Network.Signature(payload.InviterPreKey.PreKeySignature.ToByteArray()),
-                new Percolator.Network.PublicKey(inviterIdentityKeySpki));
+                Percolator.Network.Payload.FromBytes(payload.InviterPreKey.InviterSignedPreKey.ToByteArray()),
+                Percolator.Network.Signature.FromBytes(payload.InviterPreKey.PreKeySignature.ToByteArray()),
+                Percolator.Network.PublicKey.FromBytes(inviterIdentityKeySpki));
             if (!preKeyVerified)
             {
                 throw new InvalidOperationException("pre_key_signature invalid");
@@ -206,8 +206,8 @@ namespace Percolator.Application.Network
                 Payload = ByteString.CopyFrom(payloadBytes),
                 PayloadSignature = ByteString.CopyFrom(payloadSignatureBytes)
             };
-            var invitation = new HandshakeInvitation(invitationEnvelope.ToByteArray());
-            var inviterIdentityKey = new RatchetIdentityKey(inviterIdentityKeySpki);
+            var invitation = HandshakeInvitation.FromBytes(invitationEnvelope.ToByteArray());
+            var inviterIdentityKey = RatchetIdentityKey.FromBytes(inviterIdentityKeySpki);
             var protocolVersion = payload.HasVersion ? new ProtocolVersion((int)payload.Version) : new ProtocolVersion(1);
 
             var pending = PendingSession.FromInvitationWithMetadata(

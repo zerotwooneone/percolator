@@ -8,13 +8,13 @@ public class EcdsaSigningService : ISigningService
     {
         var ecdsa = ECDsa.Create(privateKey.ExportParameters(true));
         var signature = ecdsa.SignData(data, HashAlgorithmName.SHA256);
-        return new Signature(signature);
+        return Signature.FromBytes(signature);
     }
 
     public bool Verify(byte[] data, Signature signature, PublicKey publicKey)
     {
         using var ecdsa = ECDsa.Create();
-        ecdsa.ImportSubjectPublicKeyInfo(publicKey.Value, out _);
-        return ecdsa.VerifyData(data, signature.Value, HashAlgorithmName.SHA256);
+        ecdsa.ImportSubjectPublicKeyInfo(publicKey.Span, out _);
+        return ecdsa.VerifyData(data, signature.Span, HashAlgorithmName.SHA256);
     }
 }

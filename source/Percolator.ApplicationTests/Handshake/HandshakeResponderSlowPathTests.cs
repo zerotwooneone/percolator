@@ -52,7 +52,7 @@ namespace Percolator.ApplicationTests.Handshake
                         Version = 1,
                         DirectSessionId = expectedSid.Value.ToString()
                     };
-                    return (expectedSid, new Plaintext(inner.ToByteArray()));
+                    return (expectedSid, Plaintext.FromBytes(inner.ToByteArray()));
                 });
 
             var sut = new HandleHandshakeResponderHelloHandler(
@@ -60,8 +60,8 @@ namespace Percolator.ApplicationTests.Handshake
                 lookup.Object,
                 finalize.Object);
 
-            var headerPk = new RatchetEphemeralKey(new byte[] { 0xE1 });
-            var payload = SessionRatchetMessage.Create(headerPk, 1, 0, new Ciphertext(new byte[] { 0xF1 })).Value;
+            var headerPk = RatchetEphemeralKey.FromBytes(new byte[64]);
+            var payload = SessionRatchetMessage.Create(headerPk, 1, 0, Ciphertext.FromBytes(new byte[] { 0xF1 })).ToArray();
             var resp = new InviteHandshakeResponse
             {
                 Version = 1,

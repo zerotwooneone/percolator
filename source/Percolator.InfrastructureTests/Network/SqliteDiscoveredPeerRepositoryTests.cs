@@ -33,7 +33,7 @@ public class SqliteDiscoveredPeerRepositoryTests
         var repo = new SqliteDiscoveredPeerRepository(ctx);
 
         var key = new DiscoveryKey("seed:localhost:5001");
-        var pkh = new PublicKeyHash(new byte[32]);
+        var pkh = PublicKeyHash.FromBytes(new byte[32]);
         var now = DateTimeOffset.UtcNow;
         var dp = DiscoveredPeer.Create(key, pkh, now);
         dp.ObserveEndpoint(new GrpcEndPoint(new DnsEndPoint("localhost", 5001), now), now);
@@ -69,14 +69,14 @@ public class SqliteDiscoveredPeerRepositoryTests
         var repo = new SqliteDiscoveredPeerRepository(ctx);
 
         var key = new DiscoveryKey("seed:pkh:6003");
-        var pkh = new PublicKeyHash(new byte[] { 9, 9, 9 });
+        var pkh = PublicKeyHash.FromBytes(new byte[32]);
         var now = DateTimeOffset.UtcNow;
         var dp = DiscoveredPeer.Create(key, pkh, now);
         await repo.UpsertAsync(dp);
 
         var loaded = await repo.GetByPublicKeyHashAsync(pkh);
         loaded.Should().NotBeNull();
-        loaded!.IdentityPublicKeyHash!.Value.Should().BeEquivalentTo(pkh.Value);
+        loaded!.IdentityPublicKeyHash!.ToArray().Should().BeEquivalentTo(pkh.ToArray());
     }
 
     [Test]
@@ -86,13 +86,13 @@ public class SqliteDiscoveredPeerRepositoryTests
         var repo = new SqliteDiscoveredPeerRepository(ctx);
         var seenSince = DateTimeOffset.UtcNow.AddHours(-1);
 
-        var a = DiscoveredPeer.Create(new DiscoveryKey("seed:a"), new PublicKeyHash(new byte[] { 1 }), seenSince.AddMinutes(-10));
+        var a = DiscoveredPeer.Create(new DiscoveryKey("seed:a"), PublicKeyHash.FromBytes(new byte[32]), seenSince.AddMinutes(-10));
         a.RecordDiscovery(DiscoverySource.Dht, seenSince.AddMinutes(10)); // lastSeen  +10
-        var b = DiscoveredPeer.Create(new DiscoveryKey("seed:b"), new PublicKeyHash(new byte[] { 2 }), seenSince.AddMinutes(-10));
+        var b = DiscoveredPeer.Create(new DiscoveryKey("seed:b"), PublicKeyHash.FromBytes(new byte[32]), seenSince.AddMinutes(-10));
         b.RecordDiscovery(DiscoverySource.Dht, seenSince.AddMinutes(5)); // lastSeen  +5
         // Boost b confidence slightly
         b.RecordDiscovery(DiscoverySource.Dht, seenSince.AddMinutes(6));
-        var c = DiscoveredPeer.Create(new DiscoveryKey("seed:c"), new PublicKeyHash(new byte[] { 3 }), seenSince.AddMinutes(-10));
+        var c = DiscoveredPeer.Create(new DiscoveryKey("seed:c"), PublicKeyHash.FromBytes(new byte[32]), seenSince.AddMinutes(-10));
         c.RecordDiscovery(DiscoverySource.Dht, seenSince.AddMinutes(10)); // tie on lastSeen with a, but lower confidence
 
         await repo.UpsertAsync(a);

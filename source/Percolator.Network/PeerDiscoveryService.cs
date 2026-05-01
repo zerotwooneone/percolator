@@ -81,9 +81,9 @@ public class PeerDiscoveryService : IDisposable, IPeerDiscoveryService
                 {
                     Timestamp = Timestamp.FromDateTime(DateTime.UtcNow),
                     Port = _config.ListenPort,
-                    PublicKey = ByteString.CopyFrom(publicKey.Value)
+                    PublicKey = ByteString.CopyFrom(publicKey.ToArray())
                 };
-                var payload = new Payload(protoPayload.ToByteArray());
+                var payload = Payload.FromBytes(protoPayload.ToByteArray());
 
                 // 3. Sign the payload
                 var signature = _signingService.Sign(payload);
@@ -91,9 +91,9 @@ public class PeerDiscoveryService : IDisposable, IPeerDiscoveryService
                 // 4. Construct the broadcast message
                 var broadcast = new DiscoveryBroadcast
                 {
-                    PublicKey = ByteString.CopyFrom(publicKey.Value),
-                    Signature = ByteString.CopyFrom(signature.Value),
-                    Payload = ByteString.CopyFrom(payload.Value)
+                    PublicKey = ByteString.CopyFrom(publicKey.ToArray()),
+                    Signature = ByteString.CopyFrom(signature.ToArray()),
+                    Payload = ByteString.CopyFrom(payload.ToArray())
                 };
 
                 // 5. Serialize and send
@@ -129,9 +129,9 @@ public class PeerDiscoveryService : IDisposable, IPeerDiscoveryService
                 var broadcast = DiscoveryBroadcast.Parser.ParseFrom(result.Buffer);
 
                 // 2. Wrap primitives in value types for verification
-                var payload = new Payload(broadcast.Payload.ToByteArray());
-                var signature = new Signature(broadcast.Signature.ToByteArray());
-                var publicKey = new PublicKey(broadcast.PublicKey.ToByteArray());
+                var payload = Payload.FromBytes(broadcast.Payload.ToByteArray());
+                var signature = Signature.FromBytes(broadcast.Signature.ToByteArray());
+                var publicKey = PublicKey.FromBytes(broadcast.PublicKey.ToByteArray());
 
                 // 3. Verify the signature
                 if (!_signingService.Verify(payload, signature, publicKey))
@@ -140,8 +140,8 @@ public class PeerDiscoveryService : IDisposable, IPeerDiscoveryService
                 }
 
                 // 4. Deserialize payload and verify the inner public key matches the outer one
-                var protoPayload = DiscoveryPayload.Parser.ParseFrom(payload.Value);
-                if (!publicKey.Value.SequenceEqual(protoPayload.PublicKey.ToByteArray()))
+                var protoPayload = DiscoveryPayload.Parser.ParseFrom(payload.Span);
+                if (!publicKey.Span.SequenceEqual(protoPayload.PublicKey.ToByteArray()))
                 {
                     throw new SecurityException($"Public key in broadcast wrapper does not match public key in signed payload from {result.RemoteEndPoint}.");
                 }
@@ -166,7 +166,7 @@ public class PeerDiscoveryService : IDisposable, IPeerDiscoveryService
 
                 if (_peers.TryAdd(publicKeyHash, peer))
                 {
-                    _logger.LogInformation("Discovered new peer {PeerEndpoint} pkh={Pkh}", $"{discoveredIp}:{discoveredPort}", BitConverter.ToString(publicKeyHash.Value));
+                    _logger.LogInformation("Discovered new peer {PeerEndpoint} pkh={Pkh}", $"{discoveredIp}:{discoveredPort}", BitConverter.ToString(publicKeyHash.ToArray()));
                     await _handler.HandlePeerDiscoveredAsync(peer);
                 }
                 else if (_peers.TryGetValue(publicKeyHash, out var existingPeer))

@@ -52,7 +52,7 @@ public class DhtIntegrationTests : IntegrationTestBase
             },
             Ciphertext = ByteString.CopyFrom(new byte[] { 1, 2, 3 })
         };
-        var remoteSigningKey = new DirectMessagePublicKey(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes("remote-peer")));
+        var remoteSigningKey = DirectMessagePublicKey.FromBytes(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes("remote-peer")));
         var remoteEndpoint = new DnsEndPoint("localhost", 1234);
         var port = GetAvailablePort();
         using var host = CreateHost(port, "DhtTest",  services =>
@@ -64,8 +64,8 @@ public class DhtIntegrationTests : IntegrationTestBase
             services.AddSingleton<IMessageQueueService>(new Mock<IMessageQueueService>().Object);
             // Fast-path lookup resolves our header key via domain index
             var ratchetLookup = new Moq.Mock<IRatchetKeyIndex>();
-            var preKey = new PreKey(headerKey);
-            ratchetLookup.Setup(l => l.TryResolveAsync(It.IsAny<int>(), It.Is<RatchetEphemeralKey>(p => p.Value.SequenceEqual(headerKey)), It.IsAny<CancellationToken>()))
+            var preKey = PreKey.FromBytes(headerKey);
+            ratchetLookup.Setup(l => l.TryResolveAsync(It.IsAny<int>(), It.Is<RatchetEphemeralKey>(p => p.ToArray().SequenceEqual(headerKey)), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(sessionId);
             ratchetLookup.Setup(l => l.UpsertAsync(It.IsAny<int>(), It.Is<SessionId>(s => s.Value == sessionId.Value), It.IsAny<RatchetEphemeralKey>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
                 .Returns(Task.CompletedTask);
@@ -84,7 +84,7 @@ public class DhtIntegrationTests : IntegrationTestBase
                     profile.BindIdentity(pid);
                     var now = DateTimeOffset.UtcNow;
                     profile.AddGrpcEndPoint(new GrpcEndPoint(remoteEndpoint, now), now);
-                    profile.SetIdentityPublicKey(new Percolator.Network.ValueObjects.IdentityPublicKey(remoteSigningKey.Value));
+                    profile.SetIdentityPublicKey(Percolator.Network.ValueObjects.IdentityPublicKey.FromBytes(remoteSigningKey.ToArray()));
                     return Task.FromResult<PeerRoutingProfile?>(profile);
                 });
             services.AddSingleton<IPeerRoutingProfileRepository>(profileRepoMock.Object);
@@ -105,10 +105,10 @@ public class DhtIntegrationTests : IntegrationTestBase
         // 1. Mock inbound decrypt via SecureMessagingService to return the expected InternalEnvelope
         var dhtEnvelope = new DhtEnvelope { PingRequest = new Contracts.PingRequest() };
         var internalEnvelope = new InternalEnvelope { DhtEnvelope = dhtEnvelope };
-        var ciphertext = new Ciphertext(new byte[1]); // Content doesn't matter
+        var ciphertext = Ciphertext.FromBytes(new byte[1]); // Content doesn't matter
         secureSvcMock
             .Setup(s => s.DecryptInboundAsync(It.IsAny<int>(), It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((sessionId, new Plaintext(internalEnvelope.ToByteArray())));
+            .ReturnsAsync((sessionId, Plaintext.FromBytes(internalEnvelope.ToByteArray())));
 
         // 2. Mock the direct session repository to map session to remote peer
         directSessionRepoMock.Setup(r => r.GetBySessionIdAsync(new DirectSessionId(sessionId.Value), It.IsAny<int>()))
@@ -122,16 +122,16 @@ public class DhtIntegrationTests : IntegrationTestBase
         };
         
         // Production derives NodeId as SHA-256 of the signing key bytes (SPKI). Reflect that here.
-        var nodeId = new NodeId(SHA256.HashData(remoteSigningKey.Value));
+        var nodeId = NodeId.FromBytes(SHA256.HashData(remoteSigningKey.ToArray()));
         dhtRepositoryMock.Setup(r => r.GetAsync(nodeId)).ReturnsAsync(() => (DhtNode?)null);
 
         // Act
         await messageService.DeliverOpaqueMessage(request, new TestServerCallContext());
 
         // Assert: Verify the repository was called by the MediatR handler
-        dhtRepositoryMock.Verify(r => r.GetAsync(It.Is<NodeId>(n => n.Value.SequenceEqual(SHA256.HashData(remoteSigningKey.Value)))), Times.Once);
+        dhtRepositoryMock.Verify(r => r.GetAsync(It.Is<NodeId>(n => n.ToArray().SequenceEqual(SHA256.HashData(remoteSigningKey.ToArray())))), Times.Once);
         dhtRepositoryMock.Verify(r => r.AddAsync(It.Is<DhtNode>(n => 
-            n.Id.Value.SequenceEqual(SHA256.HashData(remoteSigningKey.Value)) &&
+            n.Id.ToArray().SequenceEqual(SHA256.HashData(remoteSigningKey.ToArray())) &&
             n.EndPoint.Equals(remoteEndpoint)
             )), Times.Once);
     }
@@ -178,9 +178,9 @@ public class DhtIntegrationTests : IntegrationTestBase
             });
             // Fast-path lookup resolves our header key via domain index
             var ratchetLookup2 = new Moq.Mock<IRatchetKeyIndex>();
-            var preKey2 = new PreKey(headerKey2);
+            var preKey2 = PreKey.FromBytes(headerKey2);
             ratchetLookup2
-                .Setup(l => l.TryResolveAsync(It.IsAny<int>(), It.Is<RatchetEphemeralKey>(p => p.Value.SequenceEqual(headerKey2)), It.IsAny<CancellationToken>()))
+                .Setup(l => l.TryResolveAsync(It.IsAny<int>(), It.Is<RatchetEphemeralKey>(p => p.ToArray().SequenceEqual(headerKey2)), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(sessionId);
             ratchetLookup2
                 .Setup(l => l.UpsertAsync(It.IsAny<int>(), It.Is<SessionId>(s => s.Value == sessionId.Value), It.IsAny<RatchetEphemeralKey>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
@@ -205,16 +205,16 @@ public class DhtIntegrationTests : IntegrationTestBase
         });
 
         // Prepare inputs for this test scope
-        var targetId = new NodeId(SHA256.HashData(Guid.NewGuid().ToByteArray()));
+        var targetId = NodeId.FromBytes(SHA256.HashData(Guid.NewGuid().ToByteArray()));
         var remotePeerId = new Percolator.Identity.PeerId(Guid.NewGuid());
 
         // 1. Mock inbound decrypt via SecureMessagingService for FindNodeRequest
-        var findNodeRequestProto = new Contracts.FindNodeRequest { TargetPeerId = ByteString.CopyFrom(targetId.Value) };
+        var findNodeRequestProto = new Contracts.FindNodeRequest { TargetPeerId = ByteString.CopyFrom(targetId.ToArray()) };
         var dhtEnvelope = new DhtEnvelope { FindNodeRequest = findNodeRequestProto };
         var internalEnvelope = new InternalEnvelope { DhtEnvelope = dhtEnvelope };
         secureSvcMock
             .Setup(s => s.DecryptInboundAsync(It.IsAny<int>(), It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((sessionId, new Plaintext(internalEnvelope.ToByteArray())));
+            .ReturnsAsync((sessionId, Plaintext.FromBytes(internalEnvelope.ToByteArray())));
 
         // 2. Mock the direct session repository to map session to remote peer
         directSessionRepoMock.Setup(r => r.GetBySessionIdAsync(new DirectSessionId(sessionId.Value), It.IsAny<int>()))
@@ -225,14 +225,14 @@ public class DhtIntegrationTests : IntegrationTestBase
         // 4. Mock the DHT repository to return a list of closer nodes
         var closerNodes = new List<DhtNode>
         {
-            new(new(SHA256.HashData(Guid.NewGuid().ToByteArray())), new DnsEndPoint("localhost", 5001), System.DateTimeOffset.UtcNow),
-            new(new(SHA256.HashData(Guid.NewGuid().ToByteArray())), new DnsEndPoint("localhost", 5002), System.DateTimeOffset.UtcNow)
+            new(NodeId.FromBytes(SHA256.HashData(Guid.NewGuid().ToByteArray())), new DnsEndPoint("localhost", 5001), System.DateTimeOffset.UtcNow),
+            new(NodeId.FromBytes(SHA256.HashData(Guid.NewGuid().ToByteArray())), new DnsEndPoint("localhost", 5002), System.DateTimeOffset.UtcNow)
         };
         dhtNodeRepoMock.Setup(r => r.GetAllAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(closerNodes);
 
         // 5. Mock the secure service's encryption call for the response
-        var expectedResponsePayload = new SessionRatchetMessage(Guid.NewGuid().ToByteArray());
+        var expectedResponsePayload = SessionRatchetMessage.FromBytes(Guid.NewGuid().ToByteArray());
         secureSvcMock.Setup(s => s.EncryptAsync(sessionId, It.IsAny<Plaintext>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(expectedResponsePayload);
 
@@ -250,6 +250,6 @@ public class DhtIntegrationTests : IntegrationTestBase
         response.ResultCase.Should().Be(DeliverOpaqueMessageResponse.ResultOneofCase.ResponsePayload);
         response.ResponsePayload.Should().NotBeNull();
         response.ResponsePayload.HasResponsePayload.Should().BeTrue();
-        response.ResponsePayload.ResponsePayload.ToByteArray().Should().BeEquivalentTo(expectedResponsePayload.Value);
+        response.ResponsePayload.ResponsePayload.ToByteArray().Should().BeEquivalentTo(expectedResponsePayload.ToArray());
     }
 }

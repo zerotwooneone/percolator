@@ -79,16 +79,16 @@ public class SubmitPreKeysHandler : IRequestHandler<SubmitPreKeysCommand, int>
         var signedPreKeyId = Guid.NewGuid();
         // Sign the signed-pre-key public bytes with identity signing key (ECDSA over SPKI)
         using var ecdsa = ECDsa.Create(_activeIdentity.Keys.IdentitySigningKey.ExportParameters(true));
-        var preKeySignature = ecdsa.SignData(oneTime.Value.publicKey.Value, HashAlgorithmName.SHA256);
+        var preKeySignature = ecdsa.SignData(oneTime.Value.publicKey.ToArray(), HashAlgorithmName.SHA256);
 
         var oneTimeList = new List<SubmitPreKeyBundleRequest.Types.OneTimePreKey>(request.OneTimeKeyCount);
         var otkPrivs = new List<(Guid otkId, byte[] otkPriv, byte[] otkSpki)>(request.OneTimeKeyCount);
         for (int i = 0; i < request.OneTimeKeyCount; i++)
         {
             var otk = _oneTimeKeyProvider.PopOneTimeKey()!;
-            var otkSpki = otk.Value.publicKey.Value;
+            var otkSpki = otk.Value.publicKey.ToArray();
             var otkId = Guid.NewGuid();
-            otkPrivs.Add((otkId, otk.Value.privateKey.Value, otkSpki));
+            otkPrivs.Add((otkId, otk.Value.privateKey.ToArray(), otkSpki));
             oneTimeList.Add(new SubmitPreKeyBundleRequest.Types.OneTimePreKey
             {
                 Version = 1,
@@ -99,7 +99,7 @@ public class SubmitPreKeysHandler : IRequestHandler<SubmitPreKeysCommand, int>
 
         // 2b) Persist locally for responder use
         var selfId = _activeIdentity.Identity.SelfIdentityId;
-        await _selfPreKeyRepo.SaveSignedPreKeyAsync(selfId.Value, signedPreKeyId, oneTime.Value.privateKey.Value, oneTime.Value.publicKey.Value, preKeySignature, request.ExpiresUtc, cancellationToken).ConfigureAwait(false);
+        await _selfPreKeyRepo.SaveSignedPreKeyAsync(selfId.Value, signedPreKeyId, oneTime.Value.privateKey.ToArray(), oneTime.Value.publicKey.ToArray(), preKeySignature, request.ExpiresUtc, cancellationToken).ConfigureAwait(false);
         await _selfPreKeyRepo.SaveOneTimePreKeysAsync(selfId.Value, otkPrivs, cancellationToken).ConfigureAwait(false);
 
         // 3) Build protobuf request
@@ -108,7 +108,7 @@ public class SubmitPreKeysHandler : IRequestHandler<SubmitPreKeysCommand, int>
             Version = 1,
             IdentityKey = ByteString.CopyFrom(identitySigningSpki),
             SignedPreKeyId = ByteString.CopyFrom(signedPreKeyId.ToByteArray()),
-            SignedPreKey = ByteString.CopyFrom(oneTime.Value.publicKey.Value),
+            SignedPreKey = ByteString.CopyFrom(oneTime.Value.publicKey.ToArray()),
             PreKeySignature = ByteString.CopyFrom(preKeySignature),
             ExpiresUtc = Timestamp.FromDateTimeOffset(request.ExpiresUtc)
         };
@@ -135,14 +135,14 @@ public class SubmitPreKeysHandler : IRequestHandler<SubmitPreKeysCommand, int>
             throw new InvalidOperationException("No response payload returned.");
         }
 
-        var respCipher = new SessionRatchetMessage(deliverResp.ResponsePayload.ResponsePayload.ToByteArray());
+        var respCipher = SessionRatchetMessage.FromBytes(deliverResp.ResponsePayload.ResponsePayload.ToByteArray());
         var resolved = await _secureMessaging.DecryptInboundAsync(1, respCipher, cancellationToken).ConfigureAwait(false);
         var respPlain = resolved?.plaintext;
         if (respPlain is null)
         {
             throw new InvalidOperationException("Could not decrypt SubmitPreKeyBundle response.");
         }
-        var internalResp = InternalEnvelope.Parser.ParseFrom(respPlain.Value);
+        var internalResp = InternalEnvelope.Parser.ParseFrom(respPlain.ToArray());
         if (internalResp.ApplicationPayloadCase != InternalEnvelope.ApplicationPayloadOneofCase.SubmitPreKeyBundleResponse)
         {
             _logger.LogWarning("Unexpected response type: {Type}", internalResp.ApplicationPayloadCase);
@@ -158,7 +158,7 @@ public class SubmitPreKeysHandler : IRequestHandler<SubmitPreKeysCommand, int>
         IdentityPeerId remotePeerId, 
         CancellationToken cancellationToken)
     {
-        var plaintext = new Plaintext(envelope.ToByteArray());
+        var plaintext = Plaintext.FromBytes(envelope.ToByteArray());
         var ratchetMessage = await _secureMessaging.EncryptAsync(new SessionId(directSessionId.Value), plaintext, cancellationToken).ConfigureAwait(false);
         _logger.LogInformation("DHT probe sending (with response) to peer {PeerId}", remotePeerId);
         var response = await _transport.SendMessageAsync(remotePeerId, directSessionId, ratchetMessage, cancellationToken).ConfigureAwait(false);

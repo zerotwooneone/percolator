@@ -42,8 +42,8 @@ namespace Percolator.ApplicationTests.Handshake
                 lookup.Object,
                 finalize.Object);
 
-            var pk = new RatchetEphemeralKey(new byte[] { 0xAA });
-            var payload = SessionRatchetMessage.Create(pk, 1, 0, new Ciphertext(new byte[] { 0xBB })).Value;
+            var pk = RatchetEphemeralKey.FromBytes(new byte[64]);
+            var payload = SessionRatchetMessage.Create(pk, 1, 0, Ciphertext.FromBytes(new byte[] { 0xBB })).ToArray();
             var resp = new InviteHandshakeResponse
             {
                 Version = 1,

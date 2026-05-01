@@ -50,11 +50,11 @@ public sealed class ApprovePendingSessionCommandTests
             id,
             inviterPeerId,
             new ProtocolVersion(1),
-            new HandshakeInvitation(invitationEnvelope.ToByteArray()),
+            HandshakeInvitation.FromBytes(invitationEnvelope.ToByteArray()),
             requestCorrelationId: correlationId,
             isRelayed: false,
             relayHostPeerId: null,
-            inviterIdentityKey: new RatchetIdentityKey(inviterIdentitySpki),
+            inviterIdentityKey: RatchetIdentityKey.FromBytes(inviterIdentitySpki),
             callbackEndpointHost: "example.com",
             callbackEndpointPort: 7777,
             clock,
@@ -94,7 +94,7 @@ public sealed class ApprovePendingSessionCommandTests
             {
                 Version = 1,
                 InviterSignedPreKey = ByteString.CopyFrom(inviterEcdh.ExportSubjectPublicKeyInfo()),
-                PreKeySignature = ByteString.CopyFrom(new byte[] { 1, 2, 3 })
+                PreKeySignature = ByteString.CopyFrom(new byte[64])
             }
         };
 
@@ -104,7 +104,7 @@ public sealed class ApprovePendingSessionCommandTests
             correlation,
             inviterSpki,
             payload.ToByteArray(),
-            new byte[] { 9 },
+            new byte[64],
             clock);
 
         var pendingRepo = new Mock<IPendingSessionRepository>(MockBehavior.Strict);
@@ -123,8 +123,8 @@ public sealed class ApprovePendingSessionCommandTests
         var sessionCrypto = new Mock<ISessionCrypto>(MockBehavior.Strict);
         sessionCrypto.Setup(c => c.X3DH_Initiate(It.IsAny<PrivatePreKey>(), It.IsAny<Percolator.Cryptography.PreKeyBundle>()))
             .Returns((PrivatePreKey _, Percolator.Cryptography.PreKeyBundle _) => (
-                new SharedSecret(new byte[32]),
-                new RatchetEphemeralKey(new byte[32])
+                SharedSecret.FromBytes(new byte[32]),
+                RatchetEphemeralKey.FromBytes(new byte[64])
             ));
 
         var sessions = new Mock<ISessionRepository>(MockBehavior.Strict);

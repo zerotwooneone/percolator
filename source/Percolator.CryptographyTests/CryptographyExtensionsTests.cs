@@ -13,7 +13,7 @@ public class CryptographyExtensionsTests
         // Arrange
         using var ecdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var originalPublicKeyBytes = ecdh.PublicKey.ExportSubjectPublicKeyInfo();
-        var publicKey = new RatchetIdentityKey(originalPublicKeyBytes);
+        var publicKey = RatchetIdentityKey.FromBytes(originalPublicKeyBytes);
 
         // Act
         var result = publicKey.ToEcdhPublicKey();

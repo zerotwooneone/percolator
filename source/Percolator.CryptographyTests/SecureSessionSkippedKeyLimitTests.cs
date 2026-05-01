@@ -21,16 +21,16 @@ public class SecureSessionSkippedKeyLimitTests
             SessionId.NewId(),
             PeerId.NewId(),
             new ProtocolVersion(1),
-            new RatchetState(new RootKey(new byte[32]), null, 0, null, 0, 0, null, null, skippedKeyLimit: 1),
+            new RatchetState(RootKey.FromBytes(new byte[32]), null, 0, null, 0, 0, null, null, skippedKeyLimit: 1),
             crypto,
             clock);
 
         // First out-of-order (counter 1) is buffered
-        var m1 = SessionRatchetMessage.Create(new RatchetEphemeralKey(new byte[32]), 1, 0, new Ciphertext(new byte[] { 0xAA }));
+        var m1 = SessionRatchetMessage.Create(RatchetEphemeralKey.FromBytes(new byte[64]), 1, 0, Ciphertext.FromBytes(new byte[] { 0xAA }));
         s.Decrypt(m1, clock);
 
         // Second out-of-order (counter 2) should exceed limit and throw
-        var m2 = SessionRatchetMessage.Create(new RatchetEphemeralKey(new byte[32]), 2, 0, new Ciphertext(new byte[] { 0xBB }));
+        var m2 = SessionRatchetMessage.Create(RatchetEphemeralKey.FromBytes(new byte[64]), 2, 0, Ciphertext.FromBytes(new byte[] { 0xBB }));
         Action act = () => s.Decrypt(m2, clock);
         act.Should().Throw<InvalidOperationException>();
     }

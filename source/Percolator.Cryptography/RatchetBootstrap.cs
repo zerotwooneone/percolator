@@ -9,15 +9,15 @@ public static class RatchetBootstrap
 
     public static (ChainKey Send, ChainKey Recv) DeriveInitiatorChains(RootKey root)
     {
-        var send = new ChainKey(CryptoUtils.KDF(null, root.Value, LabelInitSend, CryptoUtils.KeySize));
-        var recv = new ChainKey(CryptoUtils.KDF(null, root.Value, LabelInitRecv, CryptoUtils.KeySize));
+        var send = ChainKey.FromBytes(CryptoUtils.KDF(null, root.ToArray(), LabelInitSend, CryptoUtils.KeySize));
+        var recv = ChainKey.FromBytes(CryptoUtils.KDF(null, root.ToArray(), LabelInitRecv, CryptoUtils.KeySize));
         return (send, recv);
     }
 
     public static (ChainKey Send, ChainKey Recv) DeriveResponderChains(RootKey root)
     {
-        var send = new ChainKey(CryptoUtils.KDF(null, root.Value, LabelInitRecv, CryptoUtils.KeySize));
-        var recv = new ChainKey(CryptoUtils.KDF(null, root.Value, LabelInitSend, CryptoUtils.KeySize));
+        var send = ChainKey.FromBytes(CryptoUtils.KDF(null, root.ToArray(), LabelInitRecv, CryptoUtils.KeySize));
+        var recv = ChainKey.FromBytes(CryptoUtils.KDF(null, root.ToArray(), LabelInitSend, CryptoUtils.KeySize));
         return (send, recv);
     }
 

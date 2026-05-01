@@ -1,10 +1,12 @@
 using Google.Protobuf;
 using Percolator.Contracts;
 using Percolator.Cryptography.Primitives;
+using Percolator.SourceGenerators;
 
 namespace Percolator.Cryptography;
 
-public record HandshakeInvitation(byte[] Value) : ByteArrayRecord(Value);
+[ByteArray(minLength: 1, maxLength: 10000)]
+public sealed partial record HandshakeInvitation;
 
 public sealed record ParsedInvitation(
     RatchetIdentityKey InitiatorIdentityKey,
@@ -30,7 +32,7 @@ public sealed class HandshakeInvitationParser : IHandshakeInvitationParser
         EstablishSessionRequest request;
         try
         {
-            request = EstablishSessionRequest.Parser.ParseFrom(invitation.Value);
+            request = EstablishSessionRequest.Parser.ParseFrom(invitation.ToArray());
         }
         catch (InvalidProtocolBufferException ex)
         {
@@ -44,8 +46,8 @@ public sealed class HandshakeInvitationParser : IHandshakeInvitationParser
             throw new InvalidOperationException("Handshake invitation is missing required X3DH fields.");
         }
 
-        var ik = new RatchetIdentityKey(request.IdentitySigningKey.ToByteArray());
-        var ek = new RatchetEphemeralKey(request.EphemeralKey.ToByteArray());
+        var ik = RatchetIdentityKey.FromBytes(request.IdentitySigningKey.ToByteArray());
+        var ek = RatchetEphemeralKey.FromBytes(request.EphemeralKey.ToByteArray());
         var spkId = request.PrekeyId.ToStringUtf8();
         string? opkId = request.OnetimePrekeyId.IsEmpty ? null : request.OnetimePrekeyId.ToStringUtf8();
 
@@ -68,8 +70,8 @@ public static class HandshakeInvitationBuilder
         var request = new EstablishSessionRequest
         {
             Version = 1,
-            IdentitySigningKey = ByteString.CopyFrom(initiatorIdentityKey.Value),
-            EphemeralKey = ByteString.CopyFrom(initiatorEphemeralKey.Value),
+            IdentitySigningKey = ByteString.CopyFrom(initiatorIdentityKey.ToArray()),
+            EphemeralKey = ByteString.CopyFrom(initiatorEphemeralKey.ToArray()),
             PrekeyId = ByteString.CopyFromUtf8(signedPreKeyId)
         };
 
@@ -79,6 +81,6 @@ public static class HandshakeInvitationBuilder
         }
 
         var bytes = request.ToByteArray();
-        return new HandshakeInvitation(bytes);
+        return HandshakeInvitation.FromBytes(bytes);
     }
 }

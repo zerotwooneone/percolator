@@ -15,20 +15,20 @@ public class HandshakeInvitationTests
         var request = new EstablishSessionRequest
         {
             Version = 1,
-            IdentitySigningKey = ByteString.CopyFrom(new byte[] { 0x01, 0x02 }),
-            EphemeralKey = ByteString.CopyFrom(new byte[] { 0x03, 0x04 }),
+            IdentitySigningKey = ByteString.CopyFrom(new byte[64]),
+            EphemeralKey = ByteString.CopyFrom(new byte[64]),
             PrekeyId = ByteString.CopyFromUtf8("spk-1"),
             OnetimePrekeyId = ByteString.CopyFromUtf8("opk-1")
         };
         var bytes = request.ToByteArray();
-        var invitation = new HandshakeInvitation(bytes);
+        var invitation = HandshakeInvitation.FromBytes(bytes);
 
         // ACT
         var parsed = HandshakeInvitationParser.Internal_Parse(invitation);
 
         // ASSERT
-        parsed.InitiatorIdentityKey.Value.Should().Equal(request.IdentitySigningKey.ToByteArray());
-        parsed.InitiatorEphemeralKey.Value.Should().Equal(request.EphemeralKey.ToByteArray());
+        parsed.InitiatorIdentityKey.ToArray().Should().Equal(request.IdentitySigningKey.ToByteArray());
+        parsed.InitiatorEphemeralKey.ToArray().Should().Equal(request.EphemeralKey.ToByteArray());
         parsed.SignedPreKeyId.Should().Be("spk-1");
         parsed.OneTimePreKeyId.Should().Be("opk-1");
     }
@@ -39,7 +39,7 @@ public class HandshakeInvitationTests
         // ARRANGE: no identity key, no ephemeral key, no prekey id
         var request = new EstablishSessionRequest { Version = 1 };
         var bytes = request.ToByteArray();
-        var invitation = new HandshakeInvitation(bytes);
+        var invitation = HandshakeInvitation.FromBytes(bytes);
 
         // ACT
         Action act = () => HandshakeInvitationParser.Internal_Parse(invitation);
@@ -52,8 +52,8 @@ public class HandshakeInvitationTests
     public void Build_And_Parse_RoundTrips_AllFields()
     {
         // ARRANGE
-        var ik = new RatchetIdentityKey(new byte[] { 0x10, 0x11 });
-        var ek = new RatchetEphemeralKey(new byte[] { 0x20, 0x21 });
+        var ik = RatchetIdentityKey.FromBytes(new byte[64]);
+        var ek = RatchetEphemeralKey.FromBytes(new byte[64]);
         const string spkId = "spk-xyz";
         const string opkId = "opk-abc";
 
@@ -62,8 +62,8 @@ public class HandshakeInvitationTests
         var parsed = HandshakeInvitationParser.Internal_Parse(invitation);
 
         // ASSERT
-        parsed.InitiatorIdentityKey.Value.Should().Equal(ik.Value);
-        parsed.InitiatorEphemeralKey.Value.Should().Equal(ek.Value);
+        parsed.InitiatorIdentityKey.ToArray().Should().Equal(ik.ToArray());
+        parsed.InitiatorEphemeralKey.ToArray().Should().Equal(ek.ToArray());
         parsed.SignedPreKeyId.Should().Be(spkId);
         parsed.OneTimePreKeyId.Should().Be(opkId);
     }

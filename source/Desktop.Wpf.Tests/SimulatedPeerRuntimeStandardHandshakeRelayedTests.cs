@@ -672,7 +672,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
 
         var clock = new StaticClock(StaticClock.DefaultNow);
         var sessionId = SessionId.NewId();
-        var root = new RootKey(new byte[32]);
+        var root = RootKey.FromBytes(new byte[32]);
         var initiatorSession = RatchetBootstrap.CreateInitiatorSession(
             sessionId,
             Percolator.Cryptography.Primitives.PeerId.NewId(),
@@ -732,9 +732,9 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
             }
         };
 
-        var pt = new Plaintext(envReq.ToByteArray());
+        var pt = Plaintext.FromBytes(envReq.ToByteArray());
         var cipher = initiatorSession.Encrypt(pt, clock);
-        var deliverReq = new DeliverOpaqueMessageRequest { Version = 1, Payload = ByteString.CopyFrom(cipher.Value) };
+        var deliverReq = new DeliverOpaqueMessageRequest { Version = 1, Payload = ByteString.CopyFrom(cipher.ToArray()) };
 
         // Act
         var deliverResp = await sut.ReceiveOpaqueMessageFromMainAsync(relayHostPeerId, deliverReq, CancellationToken.None);
@@ -744,9 +744,9 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
         deliverResp.ResponsePayload.Should().NotBeNull();
         deliverResp.ResponsePayload!.ResponsePayload.Length.Should().BeGreaterThan(0);
 
-        var respCipher = new SessionRatchetMessage(deliverResp.ResponsePayload.ResponsePayload.ToByteArray());
+        var respCipher = SessionRatchetMessage.FromBytes(deliverResp.ResponsePayload.ResponsePayload.ToByteArray());
         var respPlain = initiatorSession.Decrypt(respCipher, clock);
-        var respEnv = InternalEnvelope.Parser.ParseFrom(respPlain.Value);
+        var respEnv = InternalEnvelope.Parser.ParseFrom(respPlain.ToArray());
         respEnv.ApplicationPayloadCase.Should().Be(InternalEnvelope.ApplicationPayloadOneofCase.GetPreKeyBundleResponse);
         respEnv.GetPreKeyBundleResponse.Should().NotBeNull();
         respEnv.GetPreKeyBundleResponse.PreKeyBundle.Should().NotBeNull();
@@ -768,7 +768,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
 
         var clock = new StaticClock(StaticClock.DefaultNow);
         var sessionId = SessionId.NewId();
-        var root = new RootKey(new byte[32]);
+        var root = RootKey.FromBytes(new byte[32]);
         var initiatorSession = RatchetBootstrap.CreateInitiatorSession(
             sessionId,
             Percolator.Cryptography.Primitives.PeerId.NewId(),
@@ -816,9 +816,9 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
             }
         };
 
-        var pt = new Plaintext(envReq.ToByteArray());
+        var pt = Plaintext.FromBytes(envReq.ToByteArray());
         var cipher = initiatorSession.Encrypt(pt, clock);
-        var deliverReq = new DeliverOpaqueMessageRequest { Version = 1, Payload = ByteString.CopyFrom(cipher.Value) };
+        var deliverReq = new DeliverOpaqueMessageRequest { Version = 1, Payload = ByteString.CopyFrom(cipher.ToArray()) };
 
         // Act
         var deliverResp = await sut.ReceiveOpaqueMessageFromMainAsync(relayHostPeerId, deliverReq, CancellationToken.None);

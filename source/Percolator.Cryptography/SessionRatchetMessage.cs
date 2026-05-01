@@ -1,5 +1,6 @@
 using Google.Protobuf;
 using Percolator.Cryptography.Primitives;
+using Percolator.SourceGenerators;
 
 namespace Percolator.Cryptography;
 
@@ -8,7 +9,8 @@ namespace Percolator.Cryptography;
 /// Encapsulates the serialization and deserialization of ratchet messages
 /// between domain objects and protobuf for wire transmission.
 /// </summary>
-public record SessionRatchetMessage(byte[] Value) : ByteArrayRecord(Value)
+[ByteArray(minLength: 1, maxLength: 1000000)]
+public sealed partial record SessionRatchetMessage
 {
     /// <summary>
     /// Creates a SessionRatchetMessage from domain components.
@@ -24,16 +26,16 @@ public record SessionRatchetMessage(byte[] Value) : ByteArrayRecord(Value)
             Version = 1,
             Header = new Contracts.RatchetHeader
             {
-                RatchetKey = ByteString.CopyFrom(ratchetKey.Value),
+                RatchetKey = ByteString.CopyFrom(ratchetKey.Span),
                 Counter = counter,
                 PreviousChainLength = previousChainLength
             },
-            Ciphertext = ByteString.CopyFrom(ciphertext.Value)
+            Ciphertext = ByteString.CopyFrom(ciphertext.Span)
         };
 
         using var ms = new MemoryStream();
         protoMessage.WriteTo(ms);
-        return new SessionRatchetMessage(ms.ToArray());
+        return SessionRatchetMessage.FromBytesOwned(ms.ToArray());
     }
 
     /// <summary>
@@ -41,14 +43,14 @@ public record SessionRatchetMessage(byte[] Value) : ByteArrayRecord(Value)
     /// </summary>
     public (RatchetEphemeralKey PreKey, ulong Counter, ulong PreviousChainLength) GetHeader()
     {
-        var protoMessage = Contracts.RatchetMessage.Parser.ParseFrom(Value);
+        var protoMessage = Contracts.RatchetMessage.Parser.ParseFrom(Span);
         if (protoMessage.Header == null)
         {
             throw new InvalidOperationException("Invalid ratchet message: header is missing");
         }
         
         return (
-            new RatchetEphemeralKey(protoMessage.Header.RatchetKey.ToByteArray()),
+            RatchetEphemeralKey.FromBytesOwned(protoMessage.Header.RatchetKey.ToByteArray()),
             protoMessage.Header.Counter,
             protoMessage.Header.PreviousChainLength
         );
@@ -59,13 +61,13 @@ public record SessionRatchetMessage(byte[] Value) : ByteArrayRecord(Value)
     /// </summary>
     public Ciphertext GetCiphertext()
     {
-        var protoMessage = Contracts.RatchetMessage.Parser.ParseFrom(Value);
+        var protoMessage = Contracts.RatchetMessage.Parser.ParseFrom(Span);
         if (!protoMessage.HasCiphertext)
         {
             throw new InvalidOperationException("Invalid ratchet message: ciphertext is missing");
         }
         
-        return new Ciphertext(protoMessage.Ciphertext.ToByteArray());
+        return Ciphertext.FromBytesOwned(protoMessage.Ciphertext.ToByteArray());
     }
 
     /// <summary>
@@ -80,7 +82,8 @@ public record SessionRatchetMessage(byte[] Value) : ByteArrayRecord(Value)
         // The order and format must be identical for both sender and receiver.
         using var stream = new MemoryStream();
         using var writer = new BinaryWriter(stream);
-        writer.Write(header.PreKey.Value);
+        var preKeyBytes = header.PreKey.ToArray();
+        writer.Write(preKeyBytes);
         writer.Write(header.Counter);
         writer.Write(header.PreviousChainLength);
         return stream.ToArray();
@@ -95,7 +98,8 @@ public record SessionRatchetMessage(byte[] Value) : ByteArrayRecord(Value)
         // The order and format must be identical for both sender and receiver.
         using var stream = new MemoryStream();
         using var writer = new BinaryWriter(stream);
-        writer.Write(header.PreKey.Value);
+        var preKeyBytes = header.PreKey.ToArray();
+        writer.Write(preKeyBytes);
         writer.Write(header.Counter);
         writer.Write(header.PreviousChainLength);
         writer.Write(additionalData);

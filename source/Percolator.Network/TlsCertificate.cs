@@ -1,4 +1,4 @@
-using Percolator.Network.Primitives;
+using Percolator.SourceGenerators;
 
 namespace Percolator.Network;
 
@@ -6,4 +6,5 @@ namespace Percolator.Network;
 /// Represents a trusted TLS certificate.
 /// This is a value object.
 /// </summary>
-public record TlsCertificate(byte[] RawData) : ByteArrayRecord(RawData);
+[ByteArray(minLength: 1, maxLength: 50000)]
+public sealed partial record TlsCertificate;

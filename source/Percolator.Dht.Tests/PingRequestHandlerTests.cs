@@ -21,7 +21,7 @@ public class PingRequestHandlerTests
         _fixture = new Fixture();
         _fixture.Customize<DnsEndPoint>(c => c.FromFactory(() => new DnsEndPoint(_fixture.Create<string>(), _fixture.Create<ushort>())));
         // Ensure any NodeId created by AutoFixture is a valid 32-byte value
-        _fixture.Register(() => new NodeId(SHA256.HashData(Guid.NewGuid().ToByteArray())));
+        _fixture.Register(() => NodeId.FromBytes(SHA256.HashData(Guid.NewGuid().ToByteArray())));
         _mockRepository = new Mock<IDhtNodeRepository>();
         _sut = new PingRequestHandler(_mockRepository.Object);
     }

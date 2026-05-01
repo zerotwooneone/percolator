@@ -81,11 +81,11 @@ namespace Percolator.Application.Network
                     var cmd = new SubmitPreKeyBundleCommand
                     {
                         PublicSigningKey = upload.IdentityKey.ToByteArray(),
-                        SignedPreKeyId = new Guid(upload.SignedPreKeyId.ToByteArray()),
+                        SignedPreKeyId = new Guid(upload.SignedPreKeyId.Span),
                         SignedPreKey = upload.SignedPreKey.ToByteArray(),
                         PreKeySignature = upload.PreKeySignature.ToByteArray(),
                         OneTimePreKeys = upload.OneTimePreKeys.Select(x => new SubmitPreKeyBundleCommand.OneTimePreKey(
-                            new Guid(x.Id.ToByteArray()), x.PublicKey.ToByteArray())).ToList(),
+                            new Guid(x.Id.Span), x.PublicKey.ToByteArray())).ToList(),
                         Expires = upload.ExpiresUtc.ToDateTimeOffset(),
                         RemotePeerId = remotePeerId
                     };
@@ -96,7 +96,7 @@ namespace Percolator.Application.Network
                     if (!getReq.HasPublicKeyHash) throw new InvalidOperationException("PublicKeyHash is required");
                     var bundle = await _mediator.Send(new Percolator.Prekey.Handlers.GetPreKeyBundleQuery
                     {
-                        TargetPublicSigningKeyHash = IdentityPublicKeyHash.FromBytes(getReq.PublicKeyHash.ToByteArray())
+                        TargetPublicSigningKeyHash = IdentityPublicKeyHash.FromSpan(getReq.PublicKeyHash.Span)
                     }, ct).ConfigureAwait(false);
                     var resp = new GetPreKeyBundleResponse { Version = 1 };
                     if (bundle is not null)
@@ -104,10 +104,10 @@ namespace Percolator.Application.Network
                         var msg = new GetPreKeyBundleResponse.Types.PreKeyBundle
                         {
                             Version = 1,
-                            IdentityKey = ByteString.CopyFrom(bundle.IdentitySigningKey.Value),
+                            IdentityKey = ByteString.CopyFrom(bundle.IdentitySigningKey.Span),
                             SignedPreKeyId = ByteString.CopyFrom(bundle.SignedPreKeyId.ToByteArray()),
-                            SignedPreKey = ByteString.CopyFrom(bundle.SignedPreKey.Value),
-                            PreKeySignature = ByteString.CopyFrom(bundle.SignedPreKeySignature.Value)
+                            SignedPreKey = ByteString.CopyFrom(bundle.SignedPreKey.Span),
+                            PreKeySignature = ByteString.CopyFrom(bundle.SignedPreKeySignature.Span)
                         };
                         if (bundle.OneTimePreKey is not null)
                         {
@@ -115,7 +115,7 @@ namespace Percolator.Application.Network
                             {
                                 Version = 1,
                                 OneTimeKeyId = ByteString.CopyFrom(bundle.OneTimePreKeyId!.Value.ToByteArray()),
-                                KeyBytes = ByteString.CopyFrom(bundle.OneTimePreKey.Value)
+                                KeyBytes = ByteString.CopyFrom(bundle.OneTimePreKey.Span)
                             });
                         }
                         resp.PreKeyBundle = msg;
@@ -132,7 +132,7 @@ namespace Percolator.Application.Network
             var selfIdentityId = request.SelfIdentityId.Value;
             _logger.LogInformation("Processing opaque message (session inferred from ratchet header)");
             
-                var sessionRatchetMessage = new SessionRatchetMessage(request.PayloadBytes);
+                var sessionRatchetMessage = SessionRatchetMessage.FromBytes(request.PayloadBytes);
                 var header = sessionRatchetMessage.GetHeader();
                 var ratchetKey = header.PreKey;
                 var resolved = await _secureMessaging.DecryptInboundAsync(selfIdentityId, sessionRatchetMessage, cancellationToken).ConfigureAwait(false);
@@ -174,7 +174,7 @@ namespace Percolator.Application.Network
                     return new DeliverOpaqueMessageResult();
                 }
 
-                var internalEnvelope = InternalEnvelope.Parser.ParseFrom(plaintext.Value);
+                var internalEnvelope = InternalEnvelope.Parser.ParseFrom(plaintext.Span);
                 _logger.LogDebug("Parsed InternalEnvelope with case {Case}", internalEnvelope.ApplicationPayloadCase);
                 InternalEnvelope? responseEnvelope = null;
 
@@ -194,7 +194,7 @@ namespace Percolator.Application.Network
                     // Process the inner opaque payload (this may establish sessions and send responder msg via MessageService)
                     await _mediator.Send(new ProcessRelayedOpaquePayloadCommand(
                         request.SelfIdentityId,
-                        new Payload(relay.OpaquePayload.ToByteArray()),
+                        Payload.FromBytesOwned(relay.OpaquePayload.ToByteArray()),
                         // Relay host is the remote peer for this direct session (Host as known by this node)
                         new Percolator.Identity.PeerId(directSession.RemotePeerId.Value)), cancellationToken).ConfigureAwait(false);
 
@@ -205,9 +205,9 @@ namespace Percolator.Application.Network
                         MessageAckId = relay.MessageAckId
                     };
                     // Encrypt ack bytes directly as RPC response payload
-                    var ackPlain = new Plaintext(ack.ToByteArray());
+                    var ackPlain = Plaintext.FromBytesOwned(ack.ToByteArray());
                     var ackCipher = await _secureMessaging.EncryptAsync(inferredSessionId, ackPlain, cancellationToken).ConfigureAwait(false);
-                    var ackBytes = ackCipher.Value;
+                    var ackBytes = ackCipher.ToArray();
                     return new DeliverOpaqueMessageResult { ResponsePayloadBytes = ackBytes };
                 }
 
@@ -244,9 +244,9 @@ namespace Percolator.Application.Network
         }
         private async Task<byte[]> EncryptResponseEnvelope(SessionId sessionId, InternalEnvelope internalEnvelope)
         {
-            var plaintext = new Plaintext(internalEnvelope.ToByteArray());
+            var plaintext = Plaintext.FromBytes(internalEnvelope.ToByteArray());
             var ratchetMessage = await _secureMessaging.EncryptAsync(sessionId, plaintext).ConfigureAwait(false);
-            return ratchetMessage.Value;
+            return ratchetMessage.ToArray();
         }
     }
 }

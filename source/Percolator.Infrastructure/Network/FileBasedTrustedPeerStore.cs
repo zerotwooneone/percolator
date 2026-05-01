@@ -41,7 +41,7 @@ public class FileBasedTrustedPeerStore : ITrustedPeerStore
                 // Note: We're doing synchronous file I/O within a lock
                 // This is acceptable for this specific use case as the file is small
                 File.WriteAllText(_trustedHashesFilePath, 
-                    JsonSerializer.Serialize(_trustedHashes.Keys.Select(h => h.Value).ToList()));
+                    JsonSerializer.Serialize(_trustedHashes.Keys.Select(h => h.ToArray()).ToList()));
             }
         }
         
@@ -79,7 +79,7 @@ public class FileBasedTrustedPeerStore : ITrustedPeerStore
             var hashes = JsonSerializer.Deserialize<List<byte[]>>(json) ?? new List<byte[]>();
 
             return new ConcurrentDictionary<PublicKeyHash, byte>(
-                hashes.Select(h => new KeyValuePair<PublicKeyHash, byte>(new PublicKeyHash(h), 0)));
+                hashes.Select(h => new KeyValuePair<PublicKeyHash, byte>(PublicKeyHash.FromBytes(h), 0)));
         }
         catch (Exception)
         {

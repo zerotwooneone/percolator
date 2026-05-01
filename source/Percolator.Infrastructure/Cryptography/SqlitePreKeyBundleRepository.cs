@@ -43,12 +43,12 @@ public class SqlitePreKeyBundleRepository : IPreKeyBundleRepository
             var oneTimePreKey = identityKeyDbo.OneTimePreKeys.FirstOrDefault();
 
             var bundle = new PreKeyBundle(
-                new RatchetIdentityKey(identityKeyDbo.PublicKey),
+                RatchetIdentityKey.FromBytesOwned(identityKeyDbo.PublicKey),
                 Guid.Parse(signedPreKey.Id),
-                new PreKey(signedPreKey.PublicKey),
-                new Signature(signedPreKey.Signature),
+                PreKey.FromBytesOwned(signedPreKey.PublicKey),
+                Signature.FromBytesOwned(signedPreKey.Signature),
                 oneTimePreKey is not null ? Guid.Parse(oneTimePreKey.Id) : null,
-                oneTimePreKey is not null ? new OneTimeKey(oneTimePreKey.PublicKey) : null
+                oneTimePreKey is not null ? OneTimeKey.FromBytesOwned(oneTimePreKey.PublicKey) : null
             );
 
             // Remove the used one-time key
@@ -107,15 +107,15 @@ public class SqlitePreKeyBundleRepository : IPreKeyBundleRepository
             var identityKey = new PeerIdentityKeyDbo
             {
                 PeerId = peerId.Value,
-                PublicKey = first.IdentitySigningKey.Value,
+                PublicKey = first.IdentitySigningKey.ToArray(),
             };
 
             // Add the canonical signed pre-key from the first bundle
             identityKey.SignedPreKeys.Add(new SignedPreKeyDbo
             {
                 Id = first.SignedPreKeyId.ToString(),
-                PublicKey = first.SignedPreKey.Value,
-                Signature = first.SignedPreKeySignature.Value,
+                PublicKey = first.SignedPreKey.ToArray(),
+                Signature = first.SignedPreKeySignature.ToArray(),
             });
 
             // Add all one-time pre-keys present across bundles
@@ -125,7 +125,7 @@ public class SqlitePreKeyBundleRepository : IPreKeyBundleRepository
                 identityKey.OneTimePreKeys.Add(new OneTimePreKeyDbo
                 {
                     Id = b.OneTimePreKeyId.ToString(),
-                    PublicKey = b.OneTimePreKey.Value,
+                    PublicKey = b.OneTimePreKey.ToArray(),
                 });
             }
 
@@ -182,12 +182,12 @@ public class SqlitePreKeyBundleRepository : IPreKeyBundleRepository
             }
 
             var bundle = new PreKeyBundle(
-                new RatchetIdentityKey(identityKeyDbo.PublicKey),
+                RatchetIdentityKey.FromBytesOwned(identityKeyDbo.PublicKey),
                 signedPreKeyId,
-                new PreKey(spk.PublicKey),
-                new Signature(spk.Signature),
+                PreKey.FromBytesOwned(spk.PublicKey),
+                Signature.FromBytesOwned(spk.Signature),
                 otkDbo is not null ? Guid.Parse(otkDbo.Id) : null,
-                otkDbo is not null ? new OneTimeKey(otkDbo.PublicKey) : null
+                otkDbo is not null ? OneTimeKey.FromBytesOwned(otkDbo.PublicKey) : null
             );
 
             // Remove the used one-time key if any

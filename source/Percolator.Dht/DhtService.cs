@@ -15,7 +15,7 @@ public class DhtService : IDhtService
         var allNodes = await _repository.GetAllAsync(cancellationToken);
 
         // Ensure we only compute distances against nodes with the same ID length
-        var candidates = allNodes.Where(node => node.Id.Value.Length == targetId.Value.Length);
+        var candidates = allNodes.Where(node => node.Id.Span.Length == targetId.Span.Length);
 
         var distances = candidates
             .Select(node => new

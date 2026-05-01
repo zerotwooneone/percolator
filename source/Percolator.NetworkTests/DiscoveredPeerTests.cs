@@ -12,7 +12,7 @@ public class DiscoveredPeerTests
     public void Create_and_ObserveEndpoint_sets_properties()
     {
         var dk = new DiscoveryKey("seed:127.0.0.1:1234");
-        var pkh = new PublicKeyHash(new byte[32]);
+        var pkh = PublicKeyHash.FromBytes(new byte[32]);
         var now = DateTimeOffset.UtcNow;
 
         var peer = DiscoveredPeer.Create(dk, pkh, now);

@@ -88,7 +88,7 @@ public sealed class MainReverseSignalInviteFactory : IMainReverseSignalInviteFac
         var signedPreKeySpki = spk.ExportSubjectPublicKeyInfo();
         var signedPreKeyPriv = spk.ExportECPrivateKey();
 
-        var preKeySig = _signing.Sign(new Payload(signedPreKeySpki));
+        var preKeySig = _signing.Sign(Payload.FromBytes(signedPreKeySpki));
 
         var payload = new InviteHandshakeRequestPayload
         {
@@ -101,14 +101,14 @@ public sealed class MainReverseSignalInviteFactory : IMainReverseSignalInviteFac
             {
                 Version = 1,
                 InviterSignedPreKey = ByteString.CopyFrom(signedPreKeySpki),
-                PreKeySignature = ByteString.CopyFrom(preKeySig.Value)
+                PreKeySignature = ByteString.CopyFrom(preKeySig.ToArray())
             }
         };
 
         var payloadBytes = payload.ToByteArray();
-        var payloadSig = _signing.Sign(new Payload(payloadBytes));
+        var payloadSig = _signing.Sign(Payload.FromBytes(payloadBytes));
 
-        var inviterIdentityKeySpki = _signing.GetActivePublicKey().Value;
+        var inviterIdentityKeySpki = _signing.GetActivePublicKey().ToArray();
 
         // Persist signed pre-key and track correlation for finalization.
         _selfPreKeys.SaveSignedPreKeyAsync(
@@ -116,7 +116,7 @@ public sealed class MainReverseSignalInviteFactory : IMainReverseSignalInviteFac
                 signedPreKeyId,
                 signedPreKeyPriv,
                 signedPreKeySpki,
-                preKeySig.Value,
+                preKeySig.ToArray(),
                 expiresAtUtc)
             .GetAwaiter()
             .GetResult();
@@ -144,7 +144,7 @@ public sealed class MainReverseSignalInviteFactory : IMainReverseSignalInviteFac
             Version = 1,
             InviterIdentityKey = ByteString.CopyFrom(inviterIdentityKeySpki),
             Payload = ByteString.CopyFrom(payloadBytes),
-            PayloadSignature = ByteString.CopyFrom(payloadSig.Value)
+            PayloadSignature = ByteString.CopyFrom(payloadSig.ToArray())
         };
     }
 }

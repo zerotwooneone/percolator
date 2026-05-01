@@ -398,7 +398,7 @@ public sealed class SimulatedPeerModel : IDisposable
                     b.SignedPreKeyId,
                     b.SignedPreKey,
                     b.PreKeySignature,
-                    b.OneTimeKeys.Select(otk => new OneTimeKeySnapshot(otk.Id, otk.Key.Value)).ToList(),
+                    b.OneTimeKeys.Select(otk => new OneTimeKeySnapshot(otk.Id, otk.Key.ToArray())).ToList(),
                     b.ExpiresUtc))
                 .ToList(),
             Sessions: _sessions
@@ -407,14 +407,14 @@ public sealed class SimulatedPeerModel : IDisposable
                     SessionId: s.Id.Value,
                     RemotePeerId: s.RemotePeerId.Value,
                     ProtocolVersion: s.ProtocolVersion.Value,
-                    RootKey: s.State.RootKey.Value.ToArray(),
-                    SendChainKey: s.State.SendingChainKey?.Value?.ToArray(),
+                    RootKey: s.State.RootKey.ToArray(),
+                    SendChainKey: s.State.SendingChainKey?.ToArray(),
                     SendCounter: s.State.SendingCounter,
-                    RecvChainKey: s.State.ReceivingChainKey?.Value?.ToArray(),
+                    RecvChainKey: s.State.ReceivingChainKey?.ToArray(),
                     RecvCounter: s.State.ReceivingCounter,
                     PrevChainLength: s.State.PreviousChainLength,
-                    RemoteRatchetKey: s.State.RemoteRatchetKey?.Value?.ToArray(),
-                    DhRatchetPrivateKey: s.State.DhRatchetPrivateKey?.Value?.ToArray(),
+                    RemoteRatchetKey: s.State.RemoteRatchetKey?.ToArray(),
+                    DhRatchetPrivateKey: s.State.DhRatchetPrivateKey?.ToArray(),
                     SkippedKeysCount: s.SkippedKeysCount,
                     CreatedAtUtc: s.CreatedAtUtc,
                     LastUsedAtUtc: s.LastUsedAtUtc))
@@ -432,7 +432,7 @@ public sealed class SimulatedPeerModel : IDisposable
             OneTimePreKeysPrivate: _oneTimePreKeysPrivate
                 .Select(r => new SimulatedOneTimePreKeyPrivateSnapshot(
                     r.Id.Value,
-                    r.PrivateKey.Value,
+                    r.PrivateKey.ToArray(),
                     r.CreatedAtUtc))
                 .ToList());
     }

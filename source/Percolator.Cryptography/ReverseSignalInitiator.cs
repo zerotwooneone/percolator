@@ -55,7 +55,7 @@ public sealed class ReverseSignalInitiator : IReverseSignalInitiator
     {
         if (initiatorResult is null) throw new ArgumentNullException(nameof(initiatorResult));
 
-        var rootKey = new RootKey(initiatorResult.InitialRootKey.Value);
+        var rootKey = RootKey.FromBytes(initiatorResult.InitialRootKey.ToArray());
         var (sendChain, recvChain) = RatchetBootstrap.DeriveInitiatorChains(rootKey);
 
         var state = new RatchetState(
@@ -69,8 +69,8 @@ public sealed class ReverseSignalInitiator : IReverseSignalInitiator
             dhRatchetPrivateKey: null,
             skippedKeyLimit: 1000);
 
-        var pt = new Plaintext(Array.Empty<byte>());
-        var ad = new AssociatedData(Array.Empty<byte>());
+        var pt = Plaintext.Empty;
+        var ad = AssociatedData.None;
 
         var (ciphertext, headerKey, _) = _ratchet.Encrypt(state, pt, ad, counter: 0, previousChainLength: 0);
         return SessionRatchetMessage.Create(headerKey, 0, 0, ciphertext);

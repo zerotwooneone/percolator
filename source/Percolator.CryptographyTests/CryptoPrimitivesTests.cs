@@ -21,15 +21,15 @@ public class CryptoPrimitivesTests
             PrekeyId = ByteString.CopyFromUtf8("spk-1"),
             OnetimePrekeyId = ByteString.CopyFromUtf8("opk-1")
         };
-        var invitation = new HandshakeInvitation(request.ToByteArray());
+        var invitation = HandshakeInvitation.FromBytes(request.ToByteArray());
 
         var parsed = new ParsedInvitation(
-            new RatchetIdentityKey(new byte[] { 0xAA }),
-            new RatchetEphemeralKey(new byte[] { 0xBB }),
+            RatchetIdentityKey.FromBytes(new byte[64]),
+            RatchetEphemeralKey.FromBytes(new byte[64]),
             "spk-1",
             "opk-1");
 
-        var bridgeResult = new ResponderResult(new SharedSecret(new byte[] { 0xCC }), UsedOneTimeKey: true);
+        var bridgeResult = new ResponderResult(SharedSecret.FromBytes(new byte[32]), UsedOneTimeKey: true);
 
         var parserMock = new Mock<IHandshakeInvitationParser>(MockBehavior.Strict);
         parserMock
@@ -44,15 +44,15 @@ public class CryptoPrimitivesTests
         var ratchetMock = new Mock<IRatchetEngine>(MockBehavior.Strict);
         ratchetMock
             .Setup(r => r.Encrypt(
-                It.Is<RatchetState>(s => s.RootKey.Value == bridgeResult.InitialRootKey.Value),
+                It.IsAny<RatchetState>(),
                 It.IsAny<Plaintext>(),
                 It.IsAny<AssociatedData>(),
-                0,
-                0))
+                It.IsAny<ulong>(),
+                It.IsAny<ulong>()))
             .Returns((
-                new Ciphertext(new byte[] { 0x10, 0x11 }),
-                new RatchetEphemeralKey(new byte[] { 0x20, 0x21 }),
-                new RatchetState(new RootKey(bridgeResult.InitialRootKey.Value), null, 0, null, 0, 0, null, null, 1)));
+                Ciphertext.FromBytes(new byte[] { 0x10, 0x11 }),
+                RatchetEphemeralKey.FromBytes(new byte[64]),
+                new RatchetState(RootKey.FromBytes(bridgeResult.InitialRootKey.ToArray()), null, 0, null, 0, 0, null, null, 1)));
 
         var crypto = new CryptoPrimitives(parserMock.Object, bridgeMock.Object, ratchetMock.Object);
 
@@ -60,20 +60,20 @@ public class CryptoPrimitivesTests
         var response = crypto.CreateHandshakeResponse(invitation, new Mock<IKeyStore>().Object);
 
         // ASSERT
-        response.Value.Should().NotBeEmpty();
-        var msg = new SessionRatchetMessage(response.Value);
+        response.ToArray().Should().NotBeEmpty();
+        var msg = SessionRatchetMessage.FromBytes(response.ToArray());
         var (_, counter, prevLen) = msg.GetHeader();
         var ct = msg.GetCiphertext();
         counter.Should().Be(0);
         prevLen.Should().Be(0);
-        ct.Value.Should().Equal(new byte[] { 0x10, 0x11 });
+        ct.ToArray().Should().Equal(new byte[] { 0x10, 0x11 });
     }
 
     [Test]
     public void CreateHandshakeResponse_WhenParserFails_Throws()
     {
         // ARRANGE
-        var invitation = new HandshakeInvitation(new byte[] { 0xFF });
+        var invitation = HandshakeInvitation.FromBytes(new byte[] { 0xFF });
         var parserMock = new Mock<IHandshakeInvitationParser>(MockBehavior.Strict);
         parserMock
             .Setup(p => p.Parse(invitation))

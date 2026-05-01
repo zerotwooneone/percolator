@@ -1,5 +1,7 @@
 using Percolator.Cryptography.Primitives;
+using Percolator.SourceGenerators;
 
 namespace Percolator.Cryptography;
 
-public record PreKey(byte[] Value) : ByteArrayRecord(Value);
+[ByteArray(minLength: 64, maxLength: 200)]
+public sealed partial record PreKey;

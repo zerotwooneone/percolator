@@ -38,12 +38,12 @@ public class SecureSession
         IClock clock)
     {
         if (remoteBundle is null) throw new ArgumentNullException(nameof(remoteBundle));
+        if (keyStore is null) throw new ArgumentNullException(nameof(keyStore));
         if (sessionCrypto is null) throw new ArgumentNullException(nameof(sessionCrypto));
         if (clock is null) throw new ArgumentNullException(nameof(clock));
 
-        // For initial step, we do not yet read keys from store; we rely on the adapter implementation for testing.
-        var (sharedSecret, _ephPub) = sessionCrypto.X3DH_Initiate(new PrivatePreKey(new byte[32]), remoteBundle);
-        var state = new RatchetState(new RootKey(sharedSecret.Value), null, 0, null, 0, 0, null, null, 1000);
+        var (sharedSecret, _ephPub) = sessionCrypto.X3DH_Initiate(keyStore.GetIdentityPrivateKey(), remoteBundle);
+        var state = new RatchetState(RootKey.FromBytes(sharedSecret.ToArray()), null, 0, null, 0, 0, null, null, 1000);
         return new SecureSession(SessionId.NewId(), remotePeerId, protocolVersion, state, sessionCrypto, clock.UtcNow, true);
     }
 
@@ -67,7 +67,7 @@ public class SecureSession
         LastUsedAtUtc = clock.UtcNow;
         var counter = _state.SendingCounter;
         var previousChainLength = counter;
-        var (ct, headerKey, newState) = _crypto.DR_Encrypt(_state, plaintext, new AssociatedData(Array.Empty<byte>()), counter, previousChainLength);
+        var (ct, headerKey, newState) = _crypto.DR_Encrypt(_state, plaintext, AssociatedData.None, counter, previousChainLength);
         var msg = SessionRatchetMessage.Create(headerKey, counter, previousChainLength, ct);
         _state = newState;
         return msg;
@@ -97,7 +97,7 @@ public class SecureSession
             if (_skippedBuffer.Count >= _state.SkippedKeyLimit)
                 throw new InvalidOperationException("Skipped-key buffer limit reached.");
             _skippedBuffer[ctr] = message;
-            return new Plaintext(Array.Empty<byte>());
+            return Plaintext.Empty;
         }
         if (ctr < recvCounter)
         {
@@ -106,7 +106,7 @@ public class SecureSession
         Plaintext pt;
         try
         {
-            var r = _crypto.DR_Decrypt(_state, message, new AssociatedData(Array.Empty<byte>()));
+            var r = _crypto.DR_Decrypt(_state, message, AssociatedData.None);
             pt = r.Plaintext;
             _state = r.NewState;
         }
@@ -129,7 +129,7 @@ public class SecureSession
             if (_skippedBuffer.Count >= _state.SkippedKeyLimit)
                 throw new InvalidOperationException("Skipped-key buffer limit reached.");
             _skippedBuffer[ctr] = message;
-            return new Plaintext(Array.Empty<byte>());
+            return Plaintext.Empty;
         }
         if (ctr < recvCounter)
         {

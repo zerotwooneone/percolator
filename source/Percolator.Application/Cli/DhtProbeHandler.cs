@@ -91,7 +91,7 @@ public class DhtProbeHandler : IRequestHandler<DhtProbeCommand, FindNodeResponse
             return new FindNodeResponse();
         }
 
-        var respRatchet = new SessionRatchetMessage(response.ResponsePayload.ResponsePayload.ToByteArray());
+        var respRatchet = SessionRatchetMessage.FromBytes(response.ResponsePayload.ResponsePayload.ToByteArray());
         var resolved = await _secureMessaging.DecryptInboundAsync(1, respRatchet, cancellationToken).ConfigureAwait(false);
         var plaintext = resolved?.plaintext;
         if (plaintext is null)
@@ -99,7 +99,7 @@ public class DhtProbeHandler : IRequestHandler<DhtProbeCommand, FindNodeResponse
             throw new InvalidOperationException("Could not decrypt DHT probe response.");
         }
 
-        var internalResp = InternalEnvelope.Parser.ParseFrom(plaintext.Value);
+        var internalResp = InternalEnvelope.Parser.ParseFrom(plaintext.ToArray());
         if (internalResp.ApplicationPayloadCase != InternalEnvelope.ApplicationPayloadOneofCase.DhtEnvelope)
         {
             _logger.LogWarning("Unexpected response envelope type: {Type}", internalResp.ApplicationPayloadCase);

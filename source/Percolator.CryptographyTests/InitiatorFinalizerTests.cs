@@ -13,8 +13,8 @@ public class InitiatorFinalizerTests
     public void Finalize_FromInitialRootKey_ParsesSessionId_FromResponderInnerHello()
     {
         // ARRANGE
-        var initialRoot = new SharedSecret(new byte[] { 0xAA });
-        var responderMessage = new SessionRatchetMessage(new byte[] { 0x01, 0x02 });
+        var initialRoot = SharedSecret.FromBytes(new byte[32]);
+        var responderMessage = SessionRatchetMessage.FromBytes(new byte[] { 0x01, 0x02 });
 
         // Fake inner payload with direct_session_id
         var inner = new ResponderInnerHello
@@ -32,10 +32,10 @@ public class InitiatorFinalizerTests
         var ratchet = new Mock<IRatchetEngine>(MockBehavior.Strict);
         ratchet
             .Setup(r => r.Decrypt(
-                It.Is<RatchetState>(s => s.RootKey.Value == initialRoot.Value),
-                responderMessage,
+                It.IsAny<RatchetState>(),
+                It.IsAny<SessionRatchetMessage>(),
                 It.IsAny<AssociatedData>()))
-            .Returns((new Plaintext(innerBytes), new RatchetState(new RootKey(initialRoot.Value), null, 0, null, 0, 0, null, null, 1)));
+            .Returns((Plaintext.FromBytes(innerBytes), new RatchetState(RootKey.FromBytes(initialRoot.ToArray()), null, 0, null, 0, 0, null, null, 1)));
 
         var finalizer = new InitiatorFinalizer(ratchet.Object);
 

@@ -45,8 +45,8 @@ namespace Percolator.Application.Apps.Chat
             var convoGuidBytes = notification.ConversationId.ToByteArray();
             var adopterPubKey = _signingService.GetActivePublicKey();
 
-            var payloadBytes = BuildCanonicalConfirmationPayload(convoGuidBytes, notification.KeyVersion, adopterPubKey.Value);
-            var signature = _signingService.Sign(new Payload(payloadBytes));
+            var payloadBytes = BuildCanonicalConfirmationPayload(convoGuidBytes, notification.KeyVersion, adopterPubKey.ToArray());
+            var signature = _signingService.Sign(Payload.FromBytes(payloadBytes));
 
             var chat = new ChatEnvelope
             {
@@ -54,9 +54,9 @@ namespace Percolator.Application.Apps.Chat
                 {
                     GroupConversationGuid = ByteString.CopyFrom(convoGuidBytes),
                     KeyVersion = notification.KeyVersion,
-                    AdopterIdentityKey = ByteString.CopyFrom(adopterPubKey.Value),
+                    AdopterIdentityKey = ByteString.CopyFrom(adopterPubKey.ToArray()),
                     SentTimestampUtc = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow),
-                    Signature = ByteString.CopyFrom(signature.Value)
+                    Signature = ByteString.CopyFrom(signature.ToArray())
                 }
             };
             // Chat envelope ready for dispatch

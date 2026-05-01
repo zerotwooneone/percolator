@@ -69,10 +69,10 @@ namespace Percolator.Infrastructure.Cryptography
                 var row = await _db.Sessions.FirstOrDefaultAsync(x => x.SessionId == session.Id.Value, cancellationToken).ConfigureAwait(false);
                 if (row is null) return;
                 // Update mutable fields
-                row.RootKey = session.State.RootKey.Value;
-                row.SendChainKey = session.State.SendingChainKey?.Value;
+                row.RootKey = session.State.RootKey.ToArray();
+                row.SendChainKey = session.State.SendingChainKey?.ToArray();
                 row.SendCounter = session.State.SendingCounter;
-                row.RecvChainKey = session.State.ReceivingChainKey?.Value;
+                row.RecvChainKey = session.State.ReceivingChainKey?.ToArray();
                 row.RecvCounter = session.State.ReceivingCounter;
                 row.PrevChainLength = session.State.PreviousChainLength;
                 row.LastUsedAtUtc = session.LastUsedAtUtc;
@@ -112,14 +112,14 @@ namespace Percolator.Infrastructure.Cryptography
                 SessionId = s.Id.Value,
                 RemotePeerId = s.RemotePeerId.Value,
                 ProtocolVersion = s.ProtocolVersion.Value,
-                RootKey = s.State.RootKey.Value,
-                SendChainKey = s.State.SendingChainKey?.Value,
+                RootKey = s.State.RootKey.ToArray(),
+                SendChainKey = s.State.SendingChainKey?.ToArray(),
                 SendCounter = s.State.SendingCounter,
-                RecvChainKey = s.State.ReceivingChainKey?.Value,
+                RecvChainKey = s.State.ReceivingChainKey?.ToArray(),
                 RecvCounter = s.State.ReceivingCounter,
                 PrevChainLength = s.State.PreviousChainLength,
-                RemoteRatchetKey = s.State.RemoteRatchetKey?.Value,
-                DhRatchetPrivateKey = s.State.DhRatchetPrivateKey?.Value,
+                RemoteRatchetKey = s.State.RemoteRatchetKey?.ToArray(),
+                DhRatchetPrivateKey = s.State.DhRatchetPrivateKey?.ToArray(),
                 AssociatedData = null,
                 CreatedAtUtc = s.CreatedAtUtc,
                 LastUsedAtUtc = s.LastUsedAtUtc
@@ -132,14 +132,14 @@ namespace Percolator.Infrastructure.Cryptography
             var remote = new PeerId(row.RemotePeerId);
             var ver = new ProtocolVersion(row.ProtocolVersion);
             var state = new RatchetState(
-                new RootKey(row.RootKey),
-                row.SendChainKey is null ? null : new ChainKey(row.SendChainKey),
+                RootKey.FromBytesOwned(row.RootKey),
+                row.SendChainKey is null ? null : ChainKey.FromBytesOwned(row.SendChainKey),
                 row.SendCounter,
-                row.RecvChainKey is null ? null : new ChainKey(row.RecvChainKey),
+                row.RecvChainKey is null ? null : ChainKey.FromBytesOwned(row.RecvChainKey),
                 row.RecvCounter,
                 row.PrevChainLength,
-                row.RemoteRatchetKey is null ? null : new RatchetEphemeralKey(row.RemoteRatchetKey),
-                row.DhRatchetPrivateKey is null ? null : new PrivateEphemeralKey(row.DhRatchetPrivateKey),
+                row.RemoteRatchetKey is null ? null : RatchetEphemeralKey.FromBytesOwned(row.RemoteRatchetKey),
+                row.DhRatchetPrivateKey is null ? null : PrivateEphemeralKey.FromBytesOwned(row.DhRatchetPrivateKey),
                 1000);
             var session = SecureSession.Create(id, remote, ver, state, _crypto, _clock);
             return session;

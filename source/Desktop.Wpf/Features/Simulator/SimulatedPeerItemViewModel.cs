@@ -316,7 +316,7 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
 
         var dequeued = await _state.DequeueRelayDownstreamToPeerAsync(
                 relayHostPeerId: relayPeerId,
-                targetIdentityPublicKeyHash: selfPkh,
+                targetIdentityPublicKeyHash: Percolator.Identity.IdentityPublicKeyHash.FromBytes(selfPkh),
                 max: 1,
                 cancellationToken: ct)
             .ConfigureAwait(false);

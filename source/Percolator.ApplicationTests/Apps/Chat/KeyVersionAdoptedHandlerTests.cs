@@ -51,11 +51,11 @@ namespace Percolator.ApplicationTests.Apps.Chat
             var adminPeer = Guid.NewGuid();
             _acting.Setup(a => a.GetActingAdminPeerIdAsync(convoId, It.IsAny<CancellationToken>())).ReturnsAsync(adminPeer);
 
-            var pub = new PublicKey(new byte[]{ 1,2,3 });
+            var pub = PublicKey.FromBytes(new byte[80]);
             _signing.Setup(s => s.GetActivePublicKey()).Returns(pub);
             var pkh = new byte[32];
             _pkh.Setup(p => p.GetActivePkhAsync(adminPeer, It.IsAny<CancellationToken>())).ReturnsAsync(pkh);
-            _signing.Setup(s => s.Sign(It.IsAny<Payload>())).Returns(new Signature(new byte[]{ 9,9 }));
+            _signing.Setup(s => s.Sign(It.IsAny<Payload>())).Returns(Signature.FromBytes(new byte[64]));
 
             _sender
                 .Setup(s => s.SendChatEnvelopeToPeerAsync(
@@ -76,9 +76,9 @@ namespace Percolator.ApplicationTests.Apps.Chat
             var adminPeer = Guid.NewGuid();
             _acting.Setup(a => a.GetActingAdminPeerIdAsync(convoId, It.IsAny<CancellationToken>())).ReturnsAsync(adminPeer);
 
-            var pub = new PublicKey(new byte[]{ 1,2,3 });
+            var pub = PublicKey.FromBytes(new byte[80]);
             _signing.Setup(s => s.GetActivePublicKey()).Returns(pub);
-            _signing.Setup(s => s.Sign(It.IsAny<Payload>())).Returns(new Signature(new byte[]{ 9,9 }));
+            _signing.Setup(s => s.Sign(It.IsAny<Payload>())).Returns(Signature.FromBytes(new byte[64]));
 
             _pkh.Setup(p => p.GetActivePkhAsync(adminPeer, It.IsAny<CancellationToken>())).ReturnsAsync((byte[]?)null);
 

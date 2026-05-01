@@ -17,7 +17,7 @@ public class SecureSessionAdMismatchTests
     {
         var clock = new TestClock_ADMismatch();
         var crypto = new AeadSessionCrypto();
-        var root = new RootKey(new byte[32]);
+        var root = RootKey.FromBytes(new byte[32]);
         var (initiator, responder) = CryptoTestBootstrap.CreatePairedStates(root);
         var receiver = SecureSession.Create(
             SessionId.NewId(),
@@ -34,9 +34,9 @@ public class SecureSessionAdMismatchTests
             crypto,
             clock);
 
-        var adSender = new AssociatedData(new byte[] { 0xA1 });
-        var adReceiver = new AssociatedData(new byte[] { 0xB2 });
-        var good = sender.Encrypt(new Plaintext(new byte[] { 0x33 }), adSender, clock);
+        var adSender = AssociatedData.FromBytes(new byte[] { 0xA1 });
+        var adReceiver = AssociatedData.FromBytes(new byte[] { 0xB2 });
+        var good = sender.Encrypt(Plaintext.FromBytes(new byte[] { 0x33 }), adSender, clock);
 
         Action act = () => receiver.Decrypt(good, adReceiver, clock);
         act.Should().Throw<Exception>();

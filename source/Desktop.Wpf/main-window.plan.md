@@ -2143,3 +2143,76 @@ These are used for general payloads or ciphertext/plaintext and do not have a na
 
 - **Percolator.Network.Signature**
   - Proposed: `[ByteArray(minLength: 60, maxLength: 120)]`
+#### H.11 - Inventory: `T.FromBytes(Array.Empty<byte>())` call sites
+
+These call sites are incompatible with any `ByteArray` type that enforces `minLength >= 1`.
+
+Guidance: not every call site should be “fixed” by allowing empty. Many are *negative tests* that intentionally create invalid values. For each type below:
+
+- Note: the current `ByteArrayGenerator` rejects `minLength <= 0` and `maxLength <= 0` (`minLength and maxLength must be > 0.`). So “allow empty by constraint” is not currently possible.
+- If “empty” is a meaningful domain value, use **Option 2** by adding a named sentinel (e.g. `AssociatedData.None`, `Plaintext.Empty`) that is constructed via the generated private constructor (`new(...)`) rather than `FromBytes(...)`, thereby bypassing length validation.
+- If “empty” should be invalid, keep `minLength >= 1` and update tests to use a non-empty-but-invalid payload, or validate earlier.
+
+- **Percolator.Cryptography.AssociatedData**
+  - `Percolator.Cryptography\CryptoPrimitives.cs`
+  - `Percolator.Cryptography\InitiatorFinalizer.cs`
+  - `Percolator.Cryptography\ReverseSignalInitiator.cs`
+  - `Percolator.Cryptography\SecureSession.cs`
+  - `Percolator.CryptographyTests\AeadSessionCryptoHeaderTests.cs`
+  - `Percolator.CryptographyTests\AeadSessionCryptoTests.cs`
+  - Recommendation:
+    - Treat “no AD” as a valid value.
+    - Keep constraint as-is (`minLength >= 1`) and provide `AssociatedData.None` via constructor-bypass.
+
+- **Percolator.Cryptography.Plaintext**
+  - `Percolator.Cryptography\CryptoPrimitives.cs`
+  - `Percolator.Cryptography\ReverseSignalInitiator.cs`
+  - `Percolator.Cryptography\SecureSession.cs`
+  - `Percolator.CryptographyTests\CryptoBoundaryTests.cs`
+  - Evidence: `CryptoBoundaryTests.SecureSession_WithEmptyMessage_ShouldRoundtripSuccessfully` asserts empty plaintext round-trips.
+  - Recommendation:
+    - Treat empty plaintext as valid.
+    - Keep constraint as-is (`minLength >= 1`) and provide `Plaintext.Empty` via constructor-bypass.
+
+- **Percolator.Cryptography.Ciphertext**
+  - `Percolator.CryptographyTests\CryptoBoundaryTests.cs`
+  - Evidence: only used in a serialization-focused test (`SessionRatchetMessage_WithEmptyMessage_ShouldSerializeDeserializeSuccessfully`).
+  - Recommendation:
+    - Do **not** allow empty ciphertext (for AES-GCM, even empty plaintext produces a non-empty ciphertext/tag).
+    - Keep `minLength >= 1` (or consider tightening to `minLength: 16` if ciphertext always includes the 16-byte tag).
+    - Update the test to use a minimal non-empty ciphertext payload instead of `Array.Empty<byte>()`.
+
+- **Percolator.Cryptography.RatchetEphemeralKey**
+  - `Percolator.CryptographyTests\AeadSessionCryptoTests.cs`
+  - `Percolator.CryptographyTests\SecureSessionAdEnforcementTests.cs`
+  - Evidence: both are tamper/negative tests (empty ratchet header key is intended to be invalid).
+  - Recommendation:
+    - Keep empty invalid (keep tightened key constraints).
+    - Keep tests as-is only if the type allows constructing invalid values; otherwise update tests to generate an invalid-but-non-empty header.
+
+- **Percolator.Cryptography.HandshakeInvitation**
+  - `Percolator.CryptographyTests\HandshakePlannerTests.cs`
+  - Evidence: negative test (`ValidateInvitation_Throws_When_Empty`).
+  - Recommendation:
+    - Keep empty invalid (invitation should not be empty).
+    - If tightening the constraint to `minLength >= 1`, update this test to pass a non-empty-but-invalid invitation payload so the failure occurs inside `HandshakePlanner.ValidateInvitation` rather than at `HandshakeInvitation.FromBytes`.
+
+- **Percolator.Cryptography.Signature**
+  - `Percolator.CryptographyTests\PreKeyBundleValidatorTests.cs`
+  - Evidence: negative test uses empty signature to simulate missing signature.
+  - Recommendation:
+    - Keep empty invalid (signature should never be empty).
+    - If the validator needs to handle “missing signature”, prefer making the signature optional at the model boundary (e.g., nullable) or provide a dedicated “missing” representation distinct from a `Signature` value object.
+
+- **Percolator.Network.TlsCertificate**
+  - `Percolator.NetworkTests\PeerRoutingProfileTests.cs`
+  - Evidence: test uses empty certificates but does not assert certificate validity.
+  - Recommendation:
+    - Keep empty invalid (certificate blob should be non-empty).
+    - Update the test to use a non-empty placeholder (or, ideally, a real DER test certificate if/when certificate validation is introduced).
+
+- **Percolator.Identity.IdentityPublicKeyHash**
+  - `Percolator.PrekeyTests\GetPreKeyBundleHandlerTests.cs`
+  - Evidence: explicit negative test `FromBytes_with_empty_array_throws`.
+  - Recommendation:
+    - Keep fixed length 32; empty must throw.

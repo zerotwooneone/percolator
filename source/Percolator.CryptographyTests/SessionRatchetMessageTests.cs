@@ -13,11 +13,11 @@ public class SessionRatchetMessageTests
     {
         // Arrange
         using var keyPair = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        var ratchetKey = new RatchetEphemeralKey(keyPair.PublicKey.ExportSubjectPublicKeyInfo());
+        var ratchetKey = RatchetEphemeralKey.FromBytes(keyPair.PublicKey.ExportSubjectPublicKeyInfo());
         ulong counter = 42;
         ulong previousChainLength = 10;
         byte[] data = "Encrypted data"u8.ToArray();
-        var ciphertext = new Ciphertext(data);
+        var ciphertext = Ciphertext.FromBytes(data);
 
         // Act
         var message = SessionRatchetMessage.Create(ratchetKey, counter, previousChainLength, ciphertext);
@@ -25,10 +25,10 @@ public class SessionRatchetMessageTests
         // Assert
         message.Should().NotBeNull();
         var (retrievedKey, retrievedCounter, retrievedPreviousChainLength) = message.GetHeader();
-        retrievedKey.Value.Should().BeEquivalentTo(ratchetKey.Value);
+        retrievedKey.ToArray().Should().BeEquivalentTo(ratchetKey.ToArray());
         retrievedCounter.Should().Be(counter);
         retrievedPreviousChainLength.Should().Be(previousChainLength);
-        message.GetCiphertext().Value.Should().BeEquivalentTo(ciphertext.Value);
+        message.GetCiphertext().ToArray().Should().BeEquivalentTo(ciphertext.ToArray());
     }
 
     [Test]
@@ -36,15 +36,15 @@ public class SessionRatchetMessageTests
     {
         // Arrange
         using var keyPair = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        var ratchetKey = new RatchetEphemeralKey(keyPair.PublicKey.ExportSubjectPublicKeyInfo());
+        var ratchetKey = RatchetEphemeralKey.FromBytes(keyPair.PublicKey.ExportSubjectPublicKeyInfo());
         ulong counter = 123;
         ulong previousChainLength = 50;
-        var ciphertext = new Ciphertext(RandomNumberGenerator.GetBytes(64));
+        var ciphertext = Ciphertext.FromBytes(RandomNumberGenerator.GetBytes(64));
         var original = SessionRatchetMessage.Create(ratchetKey, counter, previousChainLength, ciphertext);
 
-        // Act - Serialize by getting Value and deserialize by creating new instance
-        var serialized = original.Value;
-        var deserialized = new SessionRatchetMessage(serialized);
+        // Act - Serialize by getting ToArray and deserialize by creating new instance
+        var serialized = original.ToArray();
+        var deserialized = SessionRatchetMessage.FromBytes(serialized);
 
         // Assert
         serialized.Should().NotBeEmpty();
@@ -53,10 +53,10 @@ public class SessionRatchetMessageTests
         // Check that all properties roundtrip correctly
         var (originalKey, originalCounter, originalPreviousChainLength) = original.GetHeader();
         var (deserializedKey, deserializedCounter, deserializedPreviousChainLength) = deserialized.GetHeader();
-        deserializedKey.Value.Should().BeEquivalentTo(originalKey.Value);
+        deserializedKey.ToArray().Should().BeEquivalentTo(originalKey.ToArray());
         deserializedCounter.Should().Be(originalCounter);
         deserializedPreviousChainLength.Should().Be(originalPreviousChainLength);
-        deserialized.GetCiphertext().Value.Should().BeEquivalentTo(original.GetCiphertext().Value);
+        deserialized.GetCiphertext().ToArray().Should().BeEquivalentTo(original.GetCiphertext().ToArray());
         
         // Header associated data should be deterministic
         deserialized.GetHeaderAssociatedData().Should().BeEquivalentTo(original.GetHeaderAssociatedData());
@@ -68,8 +68,8 @@ public class SessionRatchetMessageTests
         // Arrange
         byte[] invalidData = RandomNumberGenerator.GetBytes(10); // Too short to be valid
 
-        // Act & Assert - This should throw when trying to parse the protobuf data
-        var message = new SessionRatchetMessage(invalidData);
+        // Act & Assert - Different invalid inputs can throw different protobuf exceptions
+        var message = SessionRatchetMessage.FromBytes(invalidData);
         Assert.Throws<InvalidProtocolBufferException>(() => message.GetHeader());
     }
 
@@ -78,12 +78,12 @@ public class SessionRatchetMessageTests
     {
         // Arrange
         using var keyPair = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        var ratchetKey = new RatchetEphemeralKey(keyPair.PublicKey.ExportSubjectPublicKeyInfo());
+        var ratchetKey = RatchetEphemeralKey.FromBytes(keyPair.PublicKey.ExportSubjectPublicKeyInfo());
         var message = SessionRatchetMessage.Create(
             ratchetKey, 
             1,
             0, // previous chain length
-            new Ciphertext("data"u8.ToArray()));
+            Ciphertext.FromBytes("data"u8.ToArray()));
         
         // Act
         var associatedData1 = message.GetHeaderAssociatedData();

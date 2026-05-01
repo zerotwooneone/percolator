@@ -31,7 +31,7 @@ public class SkippedMessageKeyIdentifier : IEquatable<SkippedMessageKeyIdentifie
     /// <summary>
     /// Returns a string representation of this identifier.
     /// </summary>
-    public override string ToString() => $"{Convert.ToBase64String(RatchetKey.Value)}:{MessageNumber}";
+    public override string ToString() => $"{Convert.ToBase64String(RatchetKey.ToArray())}:{MessageNumber}";
 
     /// <summary>
     /// Determines if this identifier equals another object.
@@ -56,7 +56,7 @@ public class SkippedMessageKeyIdentifier : IEquatable<SkippedMessageKeyIdentifie
         return MessageNumber == other.MessageNumber && 
                ((RatchetKey is null && other.RatchetKey is null) ||
                 (RatchetKey is not null && other.RatchetKey is not null && 
-                 RatchetKey.Value.AsSpan().SequenceEqual(other.RatchetKey.Value)));
+                 RatchetKey.ToArray().AsSpan().SequenceEqual(other.RatchetKey.ToArray())));
     }
 
     /// <summary>
@@ -66,9 +66,9 @@ public class SkippedMessageKeyIdentifier : IEquatable<SkippedMessageKeyIdentifie
     {
         var hashCode = new HashCode();
         
-        if (RatchetKey?.Value is not null)
+        if (RatchetKey?.ToArray() is not null)
         {
-            foreach (var b in RatchetKey.Value)
+            foreach (var b in RatchetKey.ToArray())
             {
                 hashCode.Add(b);
             }

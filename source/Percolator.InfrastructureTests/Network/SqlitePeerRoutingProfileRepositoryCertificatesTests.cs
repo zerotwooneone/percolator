@@ -35,20 +35,20 @@ public class SqlitePeerRoutingProfileRepositoryCertificatesTests
 
         // First rotation
         var t0 = DateTimeOffset.UtcNow.AddMinutes(-5);
-        var c0a = new TlsCertificate(new byte[] { 1, 2, 3 });
-        var c0b = new TlsCertificate(new byte[] { 4, 5, 6 });
+        var c0a = TlsCertificate.FromBytes(new byte[] { 1, 2, 3 });
+        var c0b = TlsCertificate.FromBytes(new byte[] { 4, 5, 6 });
         prp.RotateCertificates(new[] { c0a, c0b }, t0);
         await repo.UpsertAsync(prp);
 
         // Second rotation replaces set
         var t1 = DateTimeOffset.UtcNow;
-        var c1a = new TlsCertificate(new byte[] { 7, 8, 9 });
+        var c1a = TlsCertificate.FromBytes(new byte[] { 7, 8, 9 });
         prp.RotateCertificates(new[] { c1a }, t1);
         await repo.UpsertAsync(prp);
 
         var loaded = await repo.GetByIdAsync(pid);
         loaded.Should().NotBeNull();
         loaded!.Certificates.Should().HaveCount(1);
-        loaded.Certificates.Single().RawData.Should().BeEquivalentTo(c1a.RawData);
+        loaded.Certificates.Single().ToArray().Should().BeEquivalentTo(c1a.ToArray());
     }
 }

@@ -91,13 +91,13 @@ namespace Percolator.Application.Network.Handshake
 
             // This is the initiator's view (the inviter who sent the signed pre-key). We derive the shared secret
             // using X3DH_Respond and then decrypt the acceptor's first ratchet message.
-            var acceptorIdentityPublic = new RatchetIdentityKey(response.AcceptorIdentityKey.ToByteArray());
-            var acceptorEphemeralPublic = new RatchetEphemeralKey(response.AcceptorX3DhEphemeralKey.ToByteArray());
+            var acceptorIdentityPublic = RatchetIdentityKey.FromBytes(response.AcceptorIdentityKey.ToByteArray());
+            var acceptorEphemeralPublic = RatchetEphemeralKey.FromBytes(response.AcceptorX3DhEphemeralKey.ToByteArray());
 
             // Derive remote PKH from acceptor identity key (SHA-256 of SPKI).
             var remotePkh = System.Security.Cryptography.SHA256.HashData(response.AcceptorIdentityKey.ToByteArray());
 
-            var localIkPriv = new PrivatePreKey(keys.IdentitySigningKey.ExportECPrivateKey());
+            var localIkPriv = PrivatePreKey.FromBytes(keys.IdentitySigningKey.ExportECPrivateKey());
 
             // IMPORTANT: For reverse-signal, the inviter's signed pre-key used in the invite may be
             // different from _active.Keys.SignedPreKey. Resolve the correct private key via SentInvitation.
@@ -134,7 +134,7 @@ namespace Percolator.Application.Network.Handshake
                     return null;
                 }
 
-                localSpkPriv = new PrivatePreKey(spk.Value.spkPrivate);
+                localSpkPriv = PrivatePreKey.FromBytes(spk.Value.spkPrivate);
             }
             catch (Exception ex)
             {
@@ -185,12 +185,12 @@ namespace Percolator.Application.Network.Handshake
                 return null;
             }
 
-            var root = new RootKey(shared.Value);
+            var root = RootKey.FromBytes(shared.ToArray());
 
             SessionRatchetMessage ratchetMessage;
             try
             {
-                ratchetMessage = new SessionRatchetMessage(response.InitialRatchetMessage.ToByteArray());
+                ratchetMessage = SessionRatchetMessage.FromBytes(response.InitialRatchetMessage.ToByteArray());
             }
             catch (Exception ex)
             {
@@ -233,7 +233,7 @@ namespace Percolator.Application.Network.Handshake
             ResponderInnerHello inner;
             try
             {
-                inner = ResponderInnerHello.Parser.ParseFrom(pt.Value);
+                inner = ResponderInnerHello.Parser.ParseFrom(pt.ToArray());
             }
             catch (Exception ex)
             {
@@ -311,7 +311,7 @@ namespace Percolator.Application.Network.Handshake
                         var endpoint = new System.Net.DnsEndPoint(sentInvitation.TargetEndpointHost!, sentInvitation.TargetEndpointPort.Value);
                         profile.AddGrpcEndPoint(new GrpcEndPoint(endpoint, _clock.UtcNow), _clock.UtcNow);
                         // Bind identity public key from the handshake response (SPKI bytes)
-                        profile.SetIdentityPublicKey(new Percolator.Network.ValueObjects.IdentityPublicKey(response.AcceptorIdentityKey.ToByteArray()));
+                        profile.SetIdentityPublicKey(Percolator.Network.ValueObjects.IdentityPublicKey.FromBytes(response.AcceptorIdentityKey.ToByteArray()));
                         await _routingProfiles.UpsertAsync(profile, cancellationToken).ConfigureAwait(false);
                     }
                     catch (Exception ex)
@@ -371,7 +371,7 @@ namespace Percolator.Application.Network.Handshake
             {
                 try
                 {
-                    var root = new RootKey(pending.InitialRootKey);
+                    var root = RootKey.FromBytes(pending.InitialRootKey.ToArray());
                     var tmp = RatchetBootstrap.CreateInitiatorSession(
                         SessionId.NewId(),
                         Percolator.Cryptography.Primitives.PeerId.NewId(),
@@ -382,7 +382,7 @@ namespace Percolator.Application.Network.Handshake
                     var pt = tmp.Decrypt(responderFirst, _clock);
 
                     // Parse inner payload for responder-assigned session id
-                    var inner = ResponderInnerHello.Parser.ParseFrom(pt.Value);
+                    var inner = ResponderInnerHello.Parser.ParseFrom(pt.ToArray());
                     if (!inner.HasVersion || inner.Version != 1)
                         throw new InvalidOperationException("Responder inner payload version invalid.");
                     if (!inner.HasDirectSessionId || string.IsNullOrWhiteSpace(inner.DirectSessionId))
@@ -494,7 +494,7 @@ namespace Percolator.Application.Network.Handshake
                 peerIdentity = null;
             }
 
-            var root = new RootKey(match.InitialRootKey);
+            var root = RootKey.FromBytes(match.InitialRootKey.ToArray());
             var remoteCryptoPeerId = peerIdentity is null
                 ? Percolator.Cryptography.Primitives.PeerId.NewId()
                 : new Percolator.Cryptography.Primitives.PeerId(peerIdentity.Id.Value);
@@ -539,7 +539,7 @@ namespace Percolator.Application.Network.Handshake
                             profile.BindIdentity(netPeerId);
                         }
                         profile.AddOrRefreshRelay(new Percolator.Network.PeerId(relayPeerId.Value), _clock.UtcNow);
-                        profile.SetIdentityPublicKey(new Percolator.Network.ValueObjects.IdentityPublicKey(remoteIdentitySpki));
+                        profile.SetIdentityPublicKey(Percolator.Network.ValueObjects.IdentityPublicKey.FromBytes(remoteIdentitySpki));
                         await _routingProfiles.UpsertAsync(profile, cancellationToken).ConfigureAwait(false);
 
                         // Upsert PKH record for target peer so relayed sends can look it up

@@ -212,14 +212,14 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         OneTimeKey? inviterOtk = null;
         if (payload.InviterPreKey.HasInviterOneTimePreKey && payload.InviterPreKey.InviterOneTimePreKey.Length > 0)
         {
-            inviterOtk = new OneTimeKey(payload.InviterPreKey.InviterOneTimePreKey.ToByteArray());
+            inviterOtk = OneTimeKey.FromBytes(payload.InviterPreKey.InviterOneTimePreKey.ToByteArray());
         }
 
         var inviterBundle = new Percolator.Cryptography.PreKeyBundle(
-            identitySigningKey: new RatchetIdentityKey(invite.InviterIdentityKey.ToByteArray()),
+            identitySigningKey: RatchetIdentityKey.FromBytes(invite.InviterIdentityKey.ToByteArray()),
             signedPreKeyId: Guid.Empty,
-            signedPreKey: new PreKey(payload.InviterPreKey.InviterSignedPreKey.ToByteArray()),
-            signedPreKeySignature: new Percolator.Cryptography.Signature(payload.InviterPreKey.PreKeySignature.ToByteArray()),
+            signedPreKey: PreKey.FromBytes(payload.InviterPreKey.InviterSignedPreKey.ToByteArray()),
+            signedPreKeySignature: Percolator.Cryptography.Signature.FromBytes(payload.InviterPreKey.PreKeySignature.ToByteArray()),
             oneTimePreKeyId: null,
             oneTimePreKey: inviterOtk,
             expirationDateUtc: payload.ExpiresAtUtc?.ToDateTimeOffset());
@@ -227,11 +227,11 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             var crypto = new AeadSessionCrypto();
             var clock = ResolveClock();
 
-            var localIkPriv = new PrivatePreKey(model.IdentitySigningKeyPrivateKeyEcPrivateKey);
+            var localIkPriv = PrivatePreKey.FromBytes(model.IdentitySigningKeyPrivateKeyEcPrivateKey);
             var x3 = crypto.X3DH_Initiate(localIkPriv, inviterBundle);
 
             var sessionId = SessionId.NewId();
-            var root = new RootKey(x3.SharedSecret.Value);
+            var root = RootKey.FromBytes(x3.SharedSecret.ToArray());
             var session = RatchetBootstrap.CreateInitiatorSession(
                 sessionId,
                 new Percolator.Cryptography.Primitives.PeerId(inviterPeerId.Value),
@@ -248,7 +248,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
                 DirectSessionId = sessionId.Value.ToString()
             };
 
-            var initial = session.Encrypt(new Plaintext(inner.ToByteArray()), clock);
+            var initial = session.Encrypt(Plaintext.FromBytes(inner.ToByteArray()), clock);
             model.SessionsMutable[sessionId] = session;
 
             var response = new InviteHandshakeResponse
@@ -256,8 +256,8 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
                 Version = 1,
                 RequestCorrelationId = payload.RequestCorrelationId,
                 AcceptorIdentityKey = ByteString.CopyFrom(model.IdentitySigningKeySpki),
-                AcceptorX3DhEphemeralKey = ByteString.CopyFrom(x3.EphemeralPublic.Value),
-                InitialRatchetMessage = ByteString.CopyFrom(initial.Value)
+                AcceptorX3DhEphemeralKey = ByteString.CopyFrom(x3.EphemeralPublic.ToArray()),
+                InitialRatchetMessage = ByteString.CopyFrom(initial.ToArray())
             };
 
             return new SimulatedPeerInviteAcceptance(sessionId, response);
@@ -374,12 +374,12 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         if (!response.HasInitialRatchetMessage || response.InitialRatchetMessage.Length == 0)
             throw new InvalidOperationException("InviteHandshakeResponse missing initial_ratchet_message");
 
-        var acceptorIdentityPublic = new RatchetIdentityKey(response.AcceptorIdentityKey.ToByteArray());
-        var acceptorEphemeralPublic = new RatchetEphemeralKey(response.AcceptorX3DhEphemeralKey.ToByteArray());
+        var acceptorIdentityPublic = RatchetIdentityKey.FromBytes(response.AcceptorIdentityKey.ToByteArray());
+        var acceptorEphemeralPublic = RatchetEphemeralKey.FromBytes(response.AcceptorX3DhEphemeralKey.ToByteArray());
 
         var crypto = new AeadSessionCrypto();
-        var localIkPriv = new PrivatePreKey(model.IdentitySigningKeyPrivateKeyEcPrivateKey);
-        var localSpkPriv = new PrivatePreKey(outbound.SignedPreKeyPrivateEcPrivateKey);
+        var localIkPriv = PrivatePreKey.FromBytes(model.IdentitySigningKeyPrivateKeyEcPrivateKey);
+        var localSpkPriv = PrivatePreKey.FromBytes(outbound.SignedPreKeyPrivateEcPrivateKey);
 
         SharedSecret shared;
         try
@@ -396,12 +396,12 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             return null;
         }
 
-        var root = new RootKey(shared.Value);
+        var root = RootKey.FromBytes(shared.ToArray());
 
         SessionRatchetMessage ratchetMessage;
         try
         {
-            ratchetMessage = new SessionRatchetMessage(response.InitialRatchetMessage.ToByteArray());
+            ratchetMessage = SessionRatchetMessage.FromBytes(response.InitialRatchetMessage.ToByteArray());
         }
         catch
         {
@@ -429,7 +429,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         ResponderInnerHello inner;
         try
         {
-            inner = ResponderInnerHello.Parser.ParseFrom(pt.Value);
+            inner = ResponderInnerHello.Parser.ParseFrom(pt.ToArray());
         }
         catch
         {
@@ -507,12 +507,12 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
            throw new InvalidOperationException($"could not find signed prekey by signed prekey id");
         }
 
-        var initiatorId = new RatchetIdentityKey(request.IdentitySigningKey.ToByteArray());
-        var initiatorEph = new RatchetEphemeralKey(request.EphemeralKey.ToByteArray());
+        var initiatorId = RatchetIdentityKey.FromBytes(request.IdentitySigningKey.ToByteArray());
+        var initiatorEph = RatchetEphemeralKey.FromBytes(request.EphemeralKey.ToByteArray());
 
         var crypto = new AeadSessionCrypto();
-        var localIkPriv = new PrivatePreKey(model.IdentitySigningKeyPrivateKeyEcPrivateKey);
-        var localSpkPriv = new PrivatePreKey(spk.PrivateEcPrivateKey);
+        var localIkPriv = PrivatePreKey.FromBytes(model.IdentitySigningKeyPrivateKeyEcPrivateKey);
+        var localSpkPriv = PrivatePreKey.FromBytes(spk.PrivateEcPrivateKey);
 
         PrivatePreKey localOtkPrivate;
         if (request.HasOnetimePrekeyId && request.OnetimePrekeyId.Length > 0)
@@ -540,7 +540,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             localOtkPrivate);
 
         var sessionId = SessionId.NewId();
-        var root = new RootKey(shared.Value);
+        var root = RootKey.FromBytes(shared.ToArray());
         var clock = ResolveClock();
         var session = RatchetBootstrap.CreateResponderSession(
             sessionId,
@@ -606,7 +606,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
                 ?? throw new InvalidOperationException($"No simulated peer exists with id {simulatedPeerId}");
 
             // Best-effort: try to decrypt with any known session (typically 1 per peer in simulator today)
-            var cipher = new SessionRatchetMessage(request.Payload.ToByteArray());
+            var cipher = SessionRatchetMessage.FromBytes(request.Payload.ToByteArray());
             
 
             pt = null;
@@ -621,7 +621,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
                 {
                     var candidate = kv.Value;
                     var candidatePt = candidate.Decrypt(cipher, clock);
-                    if (candidatePt.Value.Length == 0)
+                    if (candidatePt.ToArray().Length == 0)
                     {
                         model.SessionsMutable[kv.Key] = candidate;
                         return new DeliverOpaqueMessageResponse { Version = 1 };
@@ -652,7 +652,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         InternalEnvelope env;
         try
         {
-            env = InternalEnvelope.Parser.ParseFrom(pt.Value);
+            env = InternalEnvelope.Parser.ParseFrom(pt.ToArray());
         }
         catch
         {
@@ -721,7 +721,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
                 bundleDto.OneTimeKeys.Add(new GetPreKeyBundleResponse.Types.OneTimeKey
                 {
                     OneTimeKeyId = ByteString.CopyFrom(onetimekey.Id.ToByteArray()),
-                    KeyBytes = ByteString.CopyFrom(onetimekey.Key.Value)
+                    KeyBytes = ByteString.CopyFrom(onetimekey.Key.ToArray())
                 });
             }
 
@@ -732,7 +732,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             };
 
             var responseEnvelope = new InternalEnvelope { GetPreKeyBundleResponse = resp };
-            var responsePlain = new Plaintext(responseEnvelope.ToByteArray());
+            var responsePlain = Plaintext.FromBytes(responseEnvelope.ToByteArray());
             var responseCipher = matched.Encrypt(responsePlain, clock);
 
             await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -751,7 +751,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
                 ResponsePayload = new DeliverOpaqueMessageResponse.Types.Payload
                 {
                     Version = 1,
-                    ResponsePayload = ByteString.CopyFrom(responseCipher.Value)
+                    ResponsePayload = ByteString.CopyFrom(responseCipher.ToArray())
                 }
             };
         }
@@ -811,8 +811,8 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
                 Version = 1,
                 IdentityKey = ByteString.CopyFrom(model.IdentitySigningKeySpki),
                 SignedPreKeyId = ByteString.CopyFrom(bundle.SignedPreKeyId.ToByteArray()),
-                SignedPreKey = ByteString.CopyFrom(bundle.SignedPreKey.Value),
-                PreKeySignature = ByteString.CopyFrom(bundle.SignedPreKeySignature.Value)
+                SignedPreKey = ByteString.CopyFrom(bundle.SignedPreKey.ToArray()),
+                PreKeySignature = ByteString.CopyFrom(bundle.SignedPreKeySignature.ToArray())
             };
 
             foreach (var bundleOneTimeKey in bundle.OneTimeKeys)        
@@ -820,16 +820,16 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
                 dto.OneTimeKeys.Add(new GetPreKeyBundleResponse.Types.OneTimeKey
                 {
                     OneTimeKeyId = ByteString.CopyFrom(bundleOneTimeKey.Id.ToByteArray()),
-                    KeyBytes = ByteString.CopyFrom(bundleOneTimeKey.Key.Value)
+                    KeyBytes = ByteString.CopyFrom(bundleOneTimeKey.Key.ToArray())
                 });
             }
 
             recipientPublicKeyHash = SHA256.HashData(model.IdentitySigningKeySpki);
             dtoBytes = dto.ToByteArray();
-            identityKey = bundle.IdentitySigningKey.Value;
+            identityKey = bundle.IdentitySigningKey.ToArray();
             signedPreKeyId = bundle.SignedPreKeyId;
-            signedPreKey = bundle.SignedPreKey.Value;
-            preKeySignature = bundle.SignedPreKeySignature.Value;
+            signedPreKey = bundle.SignedPreKey.ToArray();
+            preKeySignature = bundle.SignedPreKeySignature.ToArray();
             oneTimeKeys = bundle.OneTimeKeys;
         }
         finally
@@ -896,7 +896,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             bundleProto.OneTimeKeys.Add(new GetPreKeyBundleResponse.Types.OneTimeKey
             {
                 OneTimeKeyId = ByteString.CopyFrom(otk.Id.ToByteArray()),
-                KeyBytes = ByteString.CopyFrom(otk.Key.Value)
+                KeyBytes = ByteString.CopyFrom(otk.Key.ToArray())
             });
         }
 
@@ -931,14 +931,14 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             return null;
         }
         var oneTimePreKeyInstance = bundleProto.OneTimeKeys
-                .Select(k => new OneTimeKeyInstance(new Guid(k.OneTimeKeyId.ToByteArray()), new OneTimeKey(k.KeyBytes.ToByteArray())))
+                .Select(k => new OneTimeKeyInstance(new Guid(k.OneTimeKeyId.ToByteArray()), OneTimeKey.FromBytes(k.KeyBytes.ToByteArray())))
                 .FirstOrDefault();
         
         var responderBundle = new Percolator.Cryptography.PreKeyBundle(
-            identitySigningKey: new RatchetIdentityKey(bundleProto.IdentityKey.ToByteArray()),
+            identitySigningKey: RatchetIdentityKey.FromBytes(bundleProto.IdentityKey.ToByteArray()),
             signedPreKeyId: signedPreKeyId,
-            signedPreKey: new PreKey(bundleProto.SignedPreKey.ToByteArray()),
-            signedPreKeySignature: new Percolator.Cryptography.Signature(bundleProto.PreKeySignature.ToByteArray()),
+            signedPreKey: PreKey.FromBytes(bundleProto.SignedPreKey.ToByteArray()),
+            signedPreKeySignature: Percolator.Cryptography.Signature.FromBytes(bundleProto.PreKeySignature.ToByteArray()),
             oneTimePreKeyId: oneTimePreKeyInstance?.Id,
             oneTimePreKey: oneTimePreKeyInstance?.Key,
             expirationDateUtc: null);
@@ -1214,7 +1214,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             var model = _peers.FirstOrDefault(p => p.PeerId == simulatedPeerId)
                 ?? throw new InvalidOperationException($"No simulated peer exists with id {simulatedPeerId}");
 
-            var plaintext = new Plaintext(envelope.ToByteArray());
+            var plaintext = Plaintext.FromBytes(envelope.ToByteArray());
             var cipher = _engine.Encrypt(model, sessionId, plaintext);
             return cipher;
         }
@@ -1510,13 +1510,11 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
 
     public async Task<IReadOnlyList<InboundRelayMessage>> DequeueRelayDownstreamToPeerAsync(
         Percolator.Network.PeerId relayHostPeerId,
-        byte[] targetIdentityPublicKeyHash,
+        Percolator.Identity.IdentityPublicKeyHash targetIdentityPublicKeyHash,
         int max,
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (targetIdentityPublicKeyHash is null) throw new ArgumentNullException(nameof(targetIdentityPublicKeyHash));
-        if (targetIdentityPublicKeyHash.Length == 0) return Array.Empty<InboundRelayMessage>();
         if (max <= 0) return Array.Empty<InboundRelayMessage>();
 
         List<InboundRelayMessage> snapshot;
@@ -1527,7 +1525,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             snapshot = relay.MessageQueue
                 .Select(kvp => kvp.Value)
                 .OfType<InboundRelayMessage>()
-                .Where(x => x.TargetPkh.AsReadOnlyMemory().Span.SequenceEqual(targetIdentityPublicKeyHash))
+                .Where(x => x.TargetPkh.Span.SequenceEqual(targetIdentityPublicKeyHash.Span))
                 .OrderBy(x => x.EnqueuedUtc)
                 .Take(max)
                 .ToList();
@@ -1613,7 +1611,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
                 var request = new DeliverOpaqueMessageRequest
                 {
                     Version = 1,
-                    Payload = ByteString.CopyFrom(cipher.Value)
+                    Payload = ByteString.CopyFrom(cipher.ToArray())
                 };
 
                 var ctx = new ServerCallContextStub(
@@ -1634,10 +1632,10 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
                     break;
                 }
 
-                var ackCipher = new SessionRatchetMessage(resp.ResponsePayload.ResponsePayload.ToByteArray());
+                var ackCipher = SessionRatchetMessage.FromBytes(resp.ResponsePayload.ResponsePayload.ToByteArray());
                 var ackPlain = await DecryptSessionMessageAsync(relayHostPeerId, relayHostToMainSessionId, ackCipher, cancellationToken)
                     .ConfigureAwait(false);
-                var ack = RelayOpaqueResponse.Parser.ParseFrom(ackPlain.Value);
+                var ack = RelayOpaqueResponse.Parser.ParseFrom(ackPlain.ToArray());
                 if (!ack.HasMessageAckId || ack.MessageAckId.Length == 0)
                 {
                     await EnqueueRelayUpstreamToMainAsync(relayHostPeerId, next.OpaqueBytes, next.DebugType, cancellationToken).ConfigureAwait(false);
@@ -1713,7 +1711,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             var request = new DeliverOpaqueMessageRequest
             {
                 Version = 1,
-                Payload = ByteString.CopyFrom(cipher.Value)
+                Payload = ByteString.CopyFrom(cipher.ToArray())
             };
 
             var ctx = new ServerCallContextStub(
@@ -1733,10 +1731,10 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
                 return false;
             }
 
-            var ackCipher = new SessionRatchetMessage(resp.ResponsePayload.ResponsePayload.ToByteArray());
+            var ackCipher = SessionRatchetMessage.FromBytes(resp.ResponsePayload.ResponsePayload.ToByteArray());
             var ackPlain = await DecryptSessionMessageAsync(relayHostPeerId, relayHostToMainSessionId, ackCipher, cancellationToken)
                 .ConfigureAwait(false);
-            var ack = RelayOpaqueResponse.Parser.ParseFrom(ackPlain.Value);
+            var ack = RelayOpaqueResponse.Parser.ParseFrom(ackPlain.ToArray());
             if (!ack.HasMessageAckId || ack.MessageAckId.Length == 0)
             {
                 await EnqueueRelayUpstreamToMainAsync(relayHostPeerId, msg.OpaqueBytes, msg.DebugType, cancellationToken).ConfigureAwait(false);
@@ -1862,7 +1860,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         // Try to decrypt as a ratchet message (chat or other encrypted payload from Main via relay)
         try
         {
-            var cipher = new SessionRatchetMessage(opaqueBytes);
+            var cipher = SessionRatchetMessage.FromBytes(opaqueBytes);
             var clock = ResolveClock();
 
             await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -1881,12 +1879,12 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
                         var pt = kv.Value.Decrypt(cipher, clock);
                         peerModel.SessionsMutable[kv.Key] = kv.Value;
 
-                        if (pt.Value.Length == 0)
+                        if (pt.ToArray().Length == 0)
                         {
                             return null;
                         }
 
-                        var innerEnv = InternalEnvelope.Parser.ParseFrom(pt.Value);
+                        var innerEnv = InternalEnvelope.Parser.ParseFrom(pt.ToArray());
                         if (innerEnv.ApplicationPayloadCase == InternalEnvelope.ApplicationPayloadOneofCase.ChatEnvelope
                             && innerEnv.ChatEnvelope?.MessageCase == ChatEnvelope.MessageOneofCase.TextMessage)
                         {
@@ -1958,7 +1956,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
                 {
                     await EnqueueRelayUpstreamToMainAsync(
                         relayHostPeerId: new Percolator.Network.PeerId(relayHostPeerId.Value),
-                        opaqueBytes: cipher.Value,
+                        opaqueBytes: cipher.ToArray(),
                         debugType: "Chat",
                         cancellationToken: cancellationToken).ConfigureAwait(false);
                 }
@@ -1971,7 +1969,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
                 var request = new DeliverOpaqueMessageRequest
                 {
                     Version = 1,
-                    Payload = Google.Protobuf.ByteString.CopyFrom(cipher.Value)
+                    Payload = Google.Protobuf.ByteString.CopyFrom(cipher.ToArray())
                 };
 
                 var ctx = new ServerCallContextStub(
@@ -2160,7 +2158,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
                     new ObservableList<Percolator.Cryptography.OneTimeKeyInstance>(
                         b.OneTimeKeys.Select(otk => new Percolator.Cryptography.OneTimeKeyInstance(
                             otk.Id,
-                            new Percolator.Cryptography.OneTimeKey(otk.KeyBytes)))),
+                            Percolator.Cryptography.OneTimeKey.FromBytes(otk.KeyBytes)))),
                     b.ExpiresUtc))
                 .ToList());
 
@@ -2198,11 +2196,11 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         // Hydrate sessions
         foreach (var sessionSnap in snap.Sessions)
         {
-            var rootKey = new RootKey(sessionSnap.RootKey);
-            var sendChainKey = sessionSnap.SendChainKey is not null ? new ChainKey(sessionSnap.SendChainKey) : null;
-            var recvChainKey = sessionSnap.RecvChainKey is not null ? new ChainKey(sessionSnap.RecvChainKey) : null;
-            var remoteRatchetKey = sessionSnap.RemoteRatchetKey is not null ? new RatchetEphemeralKey(sessionSnap.RemoteRatchetKey) : null;
-            var dhRatchetPrivateKey = sessionSnap.DhRatchetPrivateKey is not null ? new PrivateEphemeralKey(sessionSnap.DhRatchetPrivateKey) : null;
+            var rootKey = RootKey.FromBytes(sessionSnap.RootKey);
+            var sendChainKey = sessionSnap.SendChainKey is not null ? ChainKey.FromBytes(sessionSnap.SendChainKey) : null;
+            var recvChainKey = sessionSnap.RecvChainKey is not null ? ChainKey.FromBytes(sessionSnap.RecvChainKey) : null;
+            var remoteRatchetKey = sessionSnap.RemoteRatchetKey is not null ? RatchetEphemeralKey.FromBytes(sessionSnap.RemoteRatchetKey) : null;
+            var dhRatchetPrivateKey = sessionSnap.DhRatchetPrivateKey is not null ? PrivateEphemeralKey.FromBytes(sessionSnap.DhRatchetPrivateKey) : null;
 
             var ratchetState = new RatchetState(
                 rootKey: rootKey,

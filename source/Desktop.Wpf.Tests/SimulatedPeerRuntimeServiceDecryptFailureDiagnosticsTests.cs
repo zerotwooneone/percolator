@@ -92,7 +92,7 @@ public sealed class SimulatedPeerRuntimeServiceDecryptFailureDiagnosticsTests
         await ((ISimulatorStateInitializer)sut).InitializeAsync(CancellationToken.None);
 
         var sessionId = new SessionId(Guid.NewGuid());
-        var badMessage = new SessionRatchetMessage(RandomNumberGenerator.GetBytes(10));
+        var badMessage = SessionRatchetMessage.FromBytes(RandomNumberGenerator.GetBytes(10));
 
         // Act
         var act = async () => await sut.DecryptSessionMessageAsync(peerId, sessionId, badMessage, CancellationToken.None);

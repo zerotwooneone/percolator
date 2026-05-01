@@ -163,7 +163,7 @@ public sealed class ConnectViaNetworkCommandHandler : IRequestHandler<ConnectVia
                 }
             };
 
-            var plaintext = new Plaintext(internalEnvelope.ToByteArray());
+            var plaintext = Plaintext.FromBytesOwned(internalEnvelope.ToByteArray());
             var cryptoSessionId = new SessionId(direct.SessionId.Value);
             var cipher = await _secureMessaging
                 .EncryptAsync(cryptoSessionId, plaintext);
@@ -180,7 +180,8 @@ public sealed class ConnectViaNetworkCommandHandler : IRequestHandler<ConnectVia
                 throw new InvalidOperationException("No response payload returned.");
             }
 
-            var respCipher = new SessionRatchetMessage(response.ResponsePayload.ResponsePayload.ToByteArray());
+            var responseBytes = response.ResponsePayload.ResponsePayload.ToByteArray();
+            var respCipher = SessionRatchetMessage.FromBytesOwned(responseBytes);
             var resolved = await _secureMessaging
                 .DecryptInboundAsync(selfIdentityId, respCipher);
             var respPlain = resolved?.plaintext;
@@ -189,7 +190,7 @@ public sealed class ConnectViaNetworkCommandHandler : IRequestHandler<ConnectVia
                 throw new InvalidOperationException("Could not decrypt pre-key bundle response.");
             }
 
-            var internalResp = InternalEnvelope.Parser.ParseFrom(respPlain.Value);
+            var internalResp = InternalEnvelope.Parser.ParseFrom(respPlain.Span);
             if (internalResp.ApplicationPayloadCase != InternalEnvelope.ApplicationPayloadOneofCase.GetPreKeyBundleResponse)
             {
                 throw new InvalidOperationException("Unexpected response type.");
@@ -216,12 +217,8 @@ public sealed class ConnectViaNetworkCommandHandler : IRequestHandler<ConnectVia
         }
 
         // Verify PKH matches returned identity key and verify signature.
+        byte[] actualRemotePkh = SHA256.HashData(bundle.IdentityKey.Span);
         byte[] remoteIdentitySpki = bundle.IdentityKey.ToByteArray();
-        byte[] actualRemotePkh;
-        using (var sha = SHA256.Create())
-        {
-            actualRemotePkh = sha.ComputeHash(remoteIdentitySpki);
-        }
         if (!actualRemotePkh.AsSpan().SequenceEqual(targetIdentityPublicKeyHash))
         {
             return new ConnectViaNetworkResult.Failed("Remote identity key does not match requested PKH.");
@@ -230,7 +227,7 @@ public sealed class ConnectViaNetworkCommandHandler : IRequestHandler<ConnectVia
         Guid signedPreKeyId;
         try
         {
-            signedPreKeyId = new Guid(bundle.SignedPreKeyId.ToByteArray());
+            signedPreKeyId = new Guid(bundle.SignedPreKeyId.Span);
         }
         catch
         {
@@ -246,8 +243,8 @@ public sealed class ConnectViaNetworkCommandHandler : IRequestHandler<ConnectVia
             {
                 try
                 {
-                    oneTimePreKeyId = new Guid(first.OneTimeKeyId.ToByteArray());
-                    oneTimePreKey = new OneTimeKey(first.KeyBytes.ToByteArray());
+                    oneTimePreKeyId = new Guid(first.OneTimeKeyId.Span);
+                    oneTimePreKey = OneTimeKey.FromSpan(first.KeyBytes.Span);
                 }
                 catch
                 {
@@ -257,9 +254,9 @@ public sealed class ConnectViaNetworkCommandHandler : IRequestHandler<ConnectVia
             }
         }
 
-        var remoteIdentity = new RatchetIdentityKey(remoteIdentitySpki);
-        var remoteSpk = new PreKey(bundle.SignedPreKey.ToByteArray());
-        var remoteSig = new Percolator.Cryptography.Signature(bundle.PreKeySignature.ToByteArray());
+        var remoteIdentity = RatchetIdentityKey.FromBytes(remoteIdentitySpki);
+        var remoteSpk = PreKey.FromSpan(bundle.SignedPreKey.Span);
+        var remoteSig = Percolator.Cryptography.Signature.FromSpan(bundle.PreKeySignature.Span);
         if (!_sessionCrypto.VerifySignature(remoteIdentity, remoteSpk, remoteSig))
         {
             return new ConnectViaNetworkResult.Failed("Pre-key bundle signature invalid.");
@@ -280,7 +277,7 @@ public sealed class ConnectViaNetworkCommandHandler : IRequestHandler<ConnectVia
             oneTimePreKey,
             expirationDateUtc: null);
 
-        var localIkPriv = new PrivatePreKey(_active.Keys.IdentitySigningKey.ExportECPrivateKey());
+        var localIkPriv = PrivatePreKey.FromBytes(_active.Keys.IdentitySigningKey.ExportECPrivateKey());
         var x3 = _sessionCrypto.X3DH_Initiate(localIkPriv, pkb);
 
         var correlationId = Guid.NewGuid();
@@ -296,7 +293,7 @@ public sealed class ConnectViaNetworkCommandHandler : IRequestHandler<ConnectVia
                         RecipientPublicKeyHash: targetIdentityPublicKeyHash,
                         LocalRequestId: correlationId,
                         InitiatorEphemeralPrivateKey: Array.Empty<byte>(),
-                        InitialRootKey: x3.SharedSecret.Value,
+                        InitialRootKey: x3.SharedSecret.ToArray(),
                         CreatedAtUtc: nowUtc,
                         ExpiresAtUtc: expiresAtUtc,
                         RemoteIdentityKeySpki: remoteIdentitySpki),
@@ -340,7 +337,7 @@ public sealed class ConnectViaNetworkCommandHandler : IRequestHandler<ConnectVia
         {
             Version = 1,
             InitiatorIdentityKeySpki = ByteString.CopyFrom(_active.Keys.IdentitySigningKey.ExportSubjectPublicKeyInfo()),
-            InitiatorEphemeralKeySpki = ByteString.CopyFrom(x3.EphemeralPublic.Value),
+            InitiatorEphemeralKeySpki = ByteString.CopyFrom(x3.EphemeralPublic.ToArray()),
             SignedPreKeyId = ByteString.CopyFrom(signedPreKeyId.ToByteArray())
         };
         if (oneTimePreKeyId is not null)
@@ -366,7 +363,7 @@ public sealed class ConnectViaNetworkCommandHandler : IRequestHandler<ConnectVia
                 }
             };
 
-            var plainMq = new Plaintext(env.ToByteArray());
+            var plainMq = Plaintext.FromBytesOwned(env.ToByteArray());
             var cryptoSessionIdMq = new SessionId(direct.SessionId.Value);
             var cipherMq = await _secureMessaging
                 .EncryptAsync(cryptoSessionIdMq, plainMq)

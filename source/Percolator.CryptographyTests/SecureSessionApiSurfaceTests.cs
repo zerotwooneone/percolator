@@ -17,18 +17,18 @@ public class SecureSessionApiSurfaceTests
     {
         var clock = new TestClock3();
         var crypto = new AeadSessionCrypto();
-        var root = new RootKey(new byte[32]);
+        var root = RootKey.FromBytes(new byte[32]);
         var (initiator, responder) = CryptoTestBootstrap.CreatePairedStates(root);
         var sender = SecureSession.Create(SessionId.NewId(), PeerId.NewId(), new ProtocolVersion(1), initiator, crypto, clock);
         var receiver = SecureSession.Create(SessionId.NewId(), PeerId.NewId(), new ProtocolVersion(1), responder, crypto, clock);
 
-        var encrypted = sender.Encrypt(new Plaintext(new byte[] { 1 }), clock);
+        var encrypted = sender.Encrypt(Plaintext.FromBytes(new byte[] { 1 }), clock);
         encrypted.Should().NotBeNull();
-        encrypted.GetCiphertext().Value.Should().NotBeNull();
+        encrypted.GetCiphertext().ToArray().Should().NotBeNull();
 
         // Decrypt a real message produced by the peer session (sanity)
         var decrypted = receiver.Decrypt(encrypted, clock);
-        decrypted.Value.Should().NotBeNull();
+        decrypted.ToArray().Should().NotBeNull();
     }
 
     [Test]
@@ -40,7 +40,7 @@ public class SecureSessionApiSurfaceTests
             SessionId.NewId(),
             PeerId.NewId(),
             new ProtocolVersion(1),
-            CryptoTestBootstrap.CreateBootstrappedState(new RootKey(new byte[32])),
+            CryptoTestBootstrap.CreateBootstrappedState(RootKey.FromBytes(new byte[32])),
             crypto,
             clock);
 

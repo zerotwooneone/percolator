@@ -244,7 +244,7 @@ namespace Percolator.ApplicationTests.Network
         public async Task FindNodeRequest_multiple_results_maps_all()
         {
             var mediator = new Mock<IMediator>(MockBehavior.Loose);
-            var nodeId = new NodeId(new byte[32]);
+            var nodeId = NodeId.FromBytes(new byte[32]);
             var dns1 = new DnsEndPoint("10.0.0.1", 1234);
             var dns2 = new DnsEndPoint("10.0.0.2", 5678);
             var nodes = new[]
@@ -520,7 +520,7 @@ namespace Percolator.ApplicationTests.Network
             var mediator = new Mock<IMediator>(MockBehavior.Loose);
 
             // Arrange DHT service response
-            var nodeId = new NodeId(new byte[] { 1,2,3,4, 5,6,7,8, 9,10,11,12, 13,14,15,16,
+            var nodeId = NodeId.FromBytes(new byte[] { 1,2,3,4, 5,6,7,8, 9,10,11,12, 13,14,15,16,
                                                   17,18,19,20, 21,22,23,24, 25,26,27,28, 29,30,31,32 });
             var dns = new DnsEndPoint("127.0.0.1", 3030);
             var dhtNode = new DhtNode(nodeId, dns, DateTimeOffset.UtcNow);
@@ -537,7 +537,7 @@ namespace Percolator.ApplicationTests.Network
             // Build InternalEnvelope with DHT FindNodeRequest
             var contractsReq = new Percolator.Contracts.FindNodeRequest
             {
-                TargetPeerId = Google.Protobuf.ByteString.CopyFrom(nodeId.Value)
+                TargetPeerId = Google.Protobuf.ByteString.CopyFrom(nodeId.ToArray())
             };
             var env = new InternalEnvelope
             {

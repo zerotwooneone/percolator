@@ -29,7 +29,7 @@ public class SecureMessagingServiceTests
 
         // Seed sender and receiver sessions with complementary chains via canonical bootstrap
         var clock = new TestClock();
-        var root = new RootKey(new byte[32]);
+        var root = RootKey.FromBytes(new byte[32]);
         var sender = RatchetBootstrap.CreateInitiatorSession(
             SessionId.NewId(),
             new PeerId(Guid.NewGuid()),
@@ -45,7 +45,7 @@ public class SecureMessagingServiceTests
         await repo.AddAsync(sender);
         await repo.AddAsync(receiver);
 
-        var pt = new Plaintext(new byte[] { 0x10, 0x20 });
+        var pt = Plaintext.FromBytes(new byte[] { 0x10, 0x20 });
         var svc = new SecureMessagingService(repo, index.Object, catalog.Object, new Services.TestClock());
         var msg = await svc.EncryptAsync(sender.Id, pt, CancellationToken.None);
         msg.Should().NotBeNull();
@@ -60,7 +60,7 @@ public class SecureMessagingServiceTests
         var roundtrip = await svc.DecryptInboundAsync(1, msg, CancellationToken.None);
         roundtrip.Should().NotBeNull();
         roundtrip!.Value.sessionId.Should().Be(receiver.Id);
-        roundtrip!.Value.plaintext.Value.Should().BeEquivalentTo(pt.Value);
+        roundtrip!.Value.plaintext.ToArray().Should().BeEquivalentTo(pt.ToArray());
     }
 
     private sealed class TestClock : IClock

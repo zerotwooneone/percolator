@@ -70,7 +70,7 @@ public sealed class ConnectionManagementDialogRelayFetchInitiateTests
         sessionCrypto.Setup(x => x.VerifySignature(It.IsAny<RatchetIdentityKey>(), It.IsAny<PreKey>(), It.IsAny<Percolator.Cryptography.Signature>()))
             .Returns(true);
         sessionCrypto.Setup(x => x.X3DH_Initiate(It.IsAny<PrivatePreKey>(), It.IsAny<Percolator.Cryptography.PreKeyBundle>()))
-            .Returns((new SharedSecret(new byte[32]), new RatchetEphemeralKey(new byte[32])));
+            .Returns((SharedSecret.FromBytes(new byte[32]), RatchetEphemeralKey.FromBytes(new byte[64])));
 
         var preHandshake = new Mock<IPreHandshakeSessionStore>(MockBehavior.Loose);
         var sentInvitations = new Mock<ISentInvitationRepository>(MockBehavior.Loose);

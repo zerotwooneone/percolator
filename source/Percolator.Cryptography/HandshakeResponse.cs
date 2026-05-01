@@ -1,6 +1,8 @@
 using Percolator.Cryptography.Primitives;
+using Percolator.SourceGenerators;
 
 namespace Percolator.Cryptography;
 
 // Renamed to avoid conflict with Percolator.Application.KeyExchange.HandshakeResponse
-public record HandshakeResponseMessage(byte[] Value) : ByteArrayRecord(Value);
+[ByteArray(minLength: 1, maxLength: 10000)]
+public sealed partial record HandshakeResponseMessage;

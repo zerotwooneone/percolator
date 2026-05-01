@@ -55,7 +55,8 @@ namespace Percolator.Application.Network
             }
 
             var sessionId = new SessionId(ds.SessionId.Value);
-            var cipher = await _secureMessaging.EncryptAsync(sessionId, new Plaintext(envelope.ToByteArray()), ct).ConfigureAwait(false);
+            var cipher = await _secureMessaging.EncryptAsync(sessionId, Plaintext.FromBytes(envelope.ToByteArray()), ct).ConfigureAwait(false);
+            var cipherBytes = cipher.ToArray();
 
             if (_wireTap.Enabled)
             {
@@ -67,14 +68,14 @@ namespace Percolator.Application.Network
                         SendPath: sendPath,
                         MessageType: "EncryptedEnvelope",
                         RequestCorrelationId: null,
-                        PayloadBytes: cipher.Value,
-                        PayloadLength: cipher.Value.Length));
+                        PayloadBytes: cipherBytes,
+                        PayloadLength: cipherBytes.Length));
                     return (SendResult.CreateSuccess(sendPath, new[] { sendPath }, attempts: 0), null);
                 }
             }
 
             var outcome = await _networkSender
-                .SendAsync(_active.Identity!.SelfIdentityId.Value, new Percolator.Network.PeerId(recipientPeerId.Value), new NetworkPayload(cipher.Value), SendStrategy.DirectThenRelay, ct)
+                .SendAsync(_active.Identity!.SelfIdentityId.Value, new Percolator.Network.PeerId(recipientPeerId.Value), new NetworkPayload(cipherBytes), SendStrategy.DirectThenRelay, ct)
                 .ConfigureAwait(false);
 
             if (_wireTap.Enabled)
@@ -84,13 +85,14 @@ namespace Percolator.Application.Network
                     SendPath: outcome.Path,
                     MessageType: "EncryptedEnvelope",
                     RequestCorrelationId: null,
-                    PayloadBytes: cipher.Value,
-                    PayloadLength: cipher.Value.Length));
+                    PayloadBytes: cipherBytes,
+                    PayloadLength: cipherBytes.Length));
             }
 
             if (!outcome.Success)
             {
-                return (SendResult.CreateFailure(outcome.AttemptedPaths.ToArray(), outcome.Attempts, outcome.LastError), null);
+                var attemptedPaths = outcome.AttemptedPaths.ToArray();
+                return (SendResult.CreateFailure(attemptedPaths, outcome.Attempts, outcome.LastError), null);
             }
 
             // Map optional response payload into DeliverOpaqueMessageResponse if present
@@ -103,11 +105,12 @@ namespace Percolator.Application.Network
                     ResponsePayload = new DeliverOpaqueMessageResponse.Types.Payload
                     {
                         Version = 1,
-                        ResponsePayload = Google.Protobuf.ByteString.CopyFrom(outcome.ResponsePayload.Value.Value.ToArray())
+                        ResponsePayload = Google.Protobuf.ByteString.CopyFrom(outcome.ResponsePayload.Value.Value.Span)
                     }
                 };
             }
-            return (SendResult.CreateSuccess(outcome.Path, outcome.AttemptedPaths.ToArray(), outcome.Attempts), resp);
+            var attemptedPaths2 = outcome.AttemptedPaths.ToArray();
+            return (SendResult.CreateSuccess(outcome.Path, attemptedPaths2, outcome.Attempts), resp);
         }
 
         public async Task<SendResult> SendMessageAsync(InternalEnvelope envelope, PeerId recipientPeerId, CancellationToken ct = default)
@@ -123,7 +126,8 @@ namespace Percolator.Application.Network
             }
 
             var sessionId = new SessionId(ds.SessionId.Value);
-            var cipher = await _secureMessaging.EncryptAsync(sessionId, new Plaintext(envelope.ToByteArray()), ct).ConfigureAwait(false);
+            var cipher = await _secureMessaging.EncryptAsync(sessionId, Plaintext.FromBytes(envelope.ToByteArray()), ct).ConfigureAwait(false);
+            var cipherBytes = cipher.ToArray();
 
             if (_wireTap.Enabled)
             {
@@ -135,14 +139,14 @@ namespace Percolator.Application.Network
                         SendPath: sendPath,
                         MessageType: "EncryptedEnvelope",
                         RequestCorrelationId: null,
-                        PayloadBytes: cipher.Value,
-                        PayloadLength: cipher.Value.Length));
+                        PayloadBytes: cipherBytes,
+                        PayloadLength: cipherBytes.Length));
                     return SendResult.CreateSuccess(sendPath, new[] { sendPath }, attempts: 0);
                 }
             }
 
             var outcome = await _networkSender
-                .SendAsync(_active.Identity!.SelfIdentityId.Value, new Percolator.Network.PeerId(recipientPeerId.Value), new NetworkPayload(cipher.Value), SendStrategy.DirectThenRelay, ct)
+                .SendAsync(_active.Identity!.SelfIdentityId.Value, new Percolator.Network.PeerId(recipientPeerId.Value), new NetworkPayload(cipherBytes), SendStrategy.DirectThenRelay, ct)
                 .ConfigureAwait(false);
 
             if (_wireTap.Enabled)
@@ -152,15 +156,17 @@ namespace Percolator.Application.Network
                     SendPath: outcome.Path,
                     MessageType: "EncryptedEnvelope",
                     RequestCorrelationId: null,
-                    PayloadBytes: cipher.Value,
-                    PayloadLength: cipher.Value.Length));
+                    PayloadBytes: cipherBytes,
+                    PayloadLength: cipherBytes.Length));
             }
 
             if (outcome.Success)
             {
-                return SendResult.CreateSuccess(outcome.Path, outcome.AttemptedPaths.ToArray(), outcome.Attempts);
+                var attemptedPaths = outcome.AttemptedPaths.ToArray();
+                return SendResult.CreateSuccess(outcome.Path, attemptedPaths, outcome.Attempts);
             }
-            return SendResult.CreateFailure(outcome.AttemptedPaths.ToArray(), outcome.Attempts, outcome.LastError);
+            var attemptedPaths2 = outcome.AttemptedPaths.ToArray();
+            return SendResult.CreateFailure(attemptedPaths2, outcome.Attempts, outcome.LastError);
         }
     }
 }

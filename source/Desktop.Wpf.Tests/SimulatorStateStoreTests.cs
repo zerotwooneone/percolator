@@ -69,7 +69,7 @@ public sealed class SimulatorStateStoreTests
                 PublicSpki: new byte[] { 4, 5, 6 }));
 
             var ratchet = new RatchetState(
-                rootKey: new RootKey(new byte[] { 9, 9, 9 }),
+                rootKey: RootKey.FromBytes(new byte[32]),
                 sendingChainKey: null,
                 sendingCounter: 7,
                 receivingChainKey: null,

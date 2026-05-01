@@ -25,7 +25,7 @@ public sealed class CryptoPrimitives : ICryptoPrimitives
         var responder = _bridge.DeriveResponder(parsed);
         
         // Convert shared secret from X3DH into initial RootKey
-        var rootKey = new RootKey(responder.InitialRootKey.Value);
+        var rootKey = RootKey.FromBytes(responder.InitialRootKey.ToArray());
 
         // Derive responder chains from root key
         var (sendChain, recvChain) = RatchetBootstrap.DeriveResponderChains(rootKey);
@@ -43,8 +43,8 @@ public sealed class CryptoPrimitives : ICryptoPrimitives
             dhRatchetPrivateKey: null,
             skippedKeyLimit: 1000);
 
-        var emptyPt = new Plaintext(Array.Empty<byte>());
-        var emptyAd = new AssociatedData(Array.Empty<byte>());
+        var emptyPt = Plaintext.Empty;
+        var emptyAd = AssociatedData.None;
 
         var (ciphertext, headerKey, _) = _ratchet.Encrypt(
             initialState,
@@ -54,6 +54,6 @@ public sealed class CryptoPrimitives : ICryptoPrimitives
             previousChainLength: 0);
 
         var ratchetMessage = SessionRatchetMessage.Create(headerKey, 0, 0, ciphertext);
-        return new HandshakeResponseMessage(ratchetMessage.Value);
+        return HandshakeResponseMessage.FromBytes(ratchetMessage.ToArray());
     }
 }

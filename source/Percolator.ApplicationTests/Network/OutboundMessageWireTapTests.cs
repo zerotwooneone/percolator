@@ -35,7 +35,7 @@ public sealed class OutboundMessageWireTapTests
 
         var secure = new Mock<ISecureMessagingService>(MockBehavior.Strict);
         secure.Setup(s => s.EncryptAsync(It.IsAny<SessionId>(), It.IsAny<Plaintext>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new SessionRatchetMessage(new byte[] { 0xAA, 0xBB }));
+            .ReturnsAsync(SessionRatchetMessage.FromBytes(new byte[] { 0xAA, 0xBB }));
 
         var sender = new Mock<INetworkSender>(MockBehavior.Strict);
         sender.Setup(s => s.SendAsync(It.IsAny<int>(), It.IsAny<PeerId>(), It.IsAny<NetworkPayload>(), It.IsAny<SendStrategy>(), It.IsAny<CancellationToken>()))
@@ -52,7 +52,7 @@ public sealed class OutboundMessageWireTapTests
             tap,
             keyStore.Object);
 
-        var env = new InternalEnvelope ();
+        var env = new InternalEnvelope { ChatEnvelope = new ChatEnvelope { TextMessage = new TextMessage { Content = "test" } } };
         var recipient = new Percolator.Identity.PeerId(Guid.NewGuid());
 
         _ = await sut.SendMessageAsync(env, recipient, CancellationToken.None);
@@ -80,7 +80,7 @@ public sealed class OutboundMessageWireTapTests
         var secure = new Mock<ISecureMessagingService>(MockBehavior.Strict);
         var expectedCipher = new byte[] { 0x01, 0x02, 0x03 };
         secure.Setup(s => s.EncryptAsync(It.IsAny<SessionId>(), It.IsAny<Plaintext>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new SessionRatchetMessage(expectedCipher));
+            .ReturnsAsync(SessionRatchetMessage.FromBytes(expectedCipher));
 
         var sender = new Mock<INetworkSender>(MockBehavior.Strict);
         sender.Setup(s => s.SendAsync(It.IsAny<int>(), It.IsAny<PeerId>(), It.IsAny<NetworkPayload>(), It.IsAny<SendStrategy>(), It.IsAny<CancellationToken>()))
@@ -97,7 +97,7 @@ public sealed class OutboundMessageWireTapTests
             tap,
             keyStore.Object);
 
-        var env = new InternalEnvelope ();
+        var env = new InternalEnvelope { ChatEnvelope = new ChatEnvelope { TextMessage = new TextMessage { Content = "test" } } };
         var recipient = new Percolator.Identity.PeerId(Guid.NewGuid());
 
         _ = await sut.SendMessageAsync(env, recipient, CancellationToken.None);

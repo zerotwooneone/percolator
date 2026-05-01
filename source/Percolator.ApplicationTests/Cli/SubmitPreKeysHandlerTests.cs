@@ -67,7 +67,7 @@ public class SubmitPreKeysHandlerTests
         // Secure messaging encrypt returns a dummy ratchet message
         _secureSvc
             .Setup(s => s.EncryptAsync(It.IsAny<SessionId>(), It.IsAny<Plaintext>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new SessionRatchetMessage(new byte[] { 1, 2, 3 }));
+            .ReturnsAsync(SessionRatchetMessage.FromBytes(new byte[] { 1, 2, 3 }));
 
         // Build a fake response envelope bytes (SubmitPreKeyBundleResponse)
         var responseEnvelope = new InternalEnvelope
@@ -94,7 +94,7 @@ public class SubmitPreKeysHandlerTests
 
         _secureSvc
             .Setup(s => s.DecryptInboundAsync(It.IsAny<int>(), It.IsAny<SessionRatchetMessage>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((new SessionId(directSessionId.Value), new Plaintext(responseBytes)));
+            .ReturnsAsync((new SessionId(directSessionId.Value), Plaintext.FromBytes(responseBytes)));
 
         // Act
         var handler = new SubmitPreKeysHandler(

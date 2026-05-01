@@ -48,11 +48,11 @@ namespace Percolator.ApplicationTests.ReverseSignal
                 id,
                 inviterPeerId,
                 new ProtocolVersion(1),
-                new HandshakeInvitation(invitationEnvelope.ToByteArray()),
+                HandshakeInvitation.FromBytes(invitationEnvelope.ToByteArray()),
                 requestCorrelationId: correlationId,
                 isRelayed: false,
                 relayHostPeerId: null,
-                inviterIdentityKey: new RatchetIdentityKey(inviterIdentitySpki),
+                inviterIdentityKey: RatchetIdentityKey.FromBytes(inviterIdentitySpki),
                 callbackEndpointHost: "example.com",
                 callbackEndpointPort: 7777,
                 clock,
@@ -119,7 +119,7 @@ namespace Percolator.ApplicationTests.ReverseSignal
                 {
                     Version = 1,
                     InviterSignedPreKey = ByteString.CopyFrom(inviterEcdh.ExportSubjectPublicKeyInfo()),
-                    PreKeySignature = ByteString.CopyFrom(new byte[] { 1, 2, 3 })
+                    PreKeySignature = ByteString.CopyFrom(new byte[64])
                 }
             };
 
@@ -130,7 +130,7 @@ namespace Percolator.ApplicationTests.ReverseSignal
                 correlation,
                 inviterSpki,
                 payload.ToByteArray(),
-                new byte[] { 9 },
+                new byte[64],
                 clock);
 
             var pendingRepo = new Mock<IPendingSessionRepository>(MockBehavior.Strict);
@@ -150,8 +150,8 @@ namespace Percolator.ApplicationTests.ReverseSignal
             var sessionCrypto = new Mock<ISessionCrypto>(MockBehavior.Strict);
             sessionCrypto.Setup(c => c.X3DH_Initiate(It.IsAny<PrivatePreKey>(), It.IsAny<Percolator.Cryptography.PreKeyBundle>()))
                 .Returns((PrivatePreKey _, Percolator.Cryptography.PreKeyBundle _) => (
-                    new SharedSecret(new byte[32]),
-                    new RatchetEphemeralKey(new byte[32])
+                    SharedSecret.FromBytes(new byte[32]),
+                    RatchetEphemeralKey.FromBytes(new byte[64])
                 ));
 
             var sessionRepo = new Mock<ISessionRepository>(MockBehavior.Strict);
@@ -231,7 +231,7 @@ namespace Percolator.ApplicationTests.ReverseSignal
                 {
                     Version = 1,
                     InviterSignedPreKey = ByteString.CopyFrom(inviterEcdh.ExportSubjectPublicKeyInfo()),
-                    PreKeySignature = ByteString.CopyFrom(new byte[] { 1, 2, 3 })
+                    PreKeySignature = ByteString.CopyFrom(new byte[64])
                 }
             };
 
@@ -242,7 +242,7 @@ namespace Percolator.ApplicationTests.ReverseSignal
                 correlation,
                 inviterSpki,
                 payload.ToByteArray(),
-                new byte[] { 9 },
+                new byte[64],
                 clock);
 
             var pendingRepo = new Mock<IPendingSessionRepository>(MockBehavior.Strict);
@@ -261,8 +261,8 @@ namespace Percolator.ApplicationTests.ReverseSignal
             var sessionCrypto = new Mock<ISessionCrypto>(MockBehavior.Strict);
             sessionCrypto.Setup(c => c.X3DH_Initiate(It.IsAny<PrivatePreKey>(), It.IsAny<Percolator.Cryptography.PreKeyBundle>()))
                 .Returns((PrivatePreKey _, Percolator.Cryptography.PreKeyBundle _) => (
-                    new SharedSecret(new byte[32]),
-                    new RatchetEphemeralKey(new byte[32])
+                    SharedSecret.FromBytes(new byte[32]),
+                    RatchetEphemeralKey.FromBytes(new byte[64])
                 ));
 
             var sessionRepo = new Mock<ISessionRepository>(MockBehavior.Strict);
@@ -347,7 +347,7 @@ namespace Percolator.ApplicationTests.ReverseSignal
                 {
                     Version = 1,
                     InviterSignedPreKey = ByteString.CopyFrom(inviterEcdh.ExportSubjectPublicKeyInfo()),
-                    PreKeySignature = ByteString.CopyFrom(new byte[] { 1, 2, 3 })
+                    PreKeySignature = ByteString.CopyFrom(new byte[64])
                 }
             };
 
@@ -356,7 +356,7 @@ namespace Percolator.ApplicationTests.ReverseSignal
                 Version = 1,
                 InviterIdentityKey = ByteString.CopyFrom(inviterSpki),
                 Payload = ByteString.CopyFrom(payload.ToByteArray()),
-                PayloadSignature = ByteString.CopyFrom(new byte[] { 9 })
+                PayloadSignature = ByteString.CopyFrom(new byte[64])
             };
 
             var pendingId = PendingSessionId.NewId();
@@ -364,11 +364,11 @@ namespace Percolator.ApplicationTests.ReverseSignal
                 pendingId,
                 new Percolator.Cryptography.Primitives.PeerId(Guid.NewGuid()),
                 new ProtocolVersion(1),
-                new HandshakeInvitation(invitationEnvelope.ToByteArray()),
+                HandshakeInvitation.FromBytes(invitationEnvelope.ToByteArray()),
                 requestCorrelationId: correlation,
                 isRelayed: true,
                 relayHostPeerId: new Percolator.Cryptography.Primitives.PeerId(Guid.NewGuid()),
-                inviterIdentityKey: new RatchetIdentityKey(inviterSpki),
+                inviterIdentityKey: RatchetIdentityKey.FromBytes(inviterSpki),
                 callbackEndpointHost: null,
                 callbackEndpointPort: null,
                 clock,
@@ -390,8 +390,8 @@ namespace Percolator.ApplicationTests.ReverseSignal
             planner.Setup(p => p.ValidatePreKeyBundle(It.IsAny<Percolator.Cryptography.PreKeyBundle>()));
             sessionCrypto.Setup(c => c.X3DH_Initiate(It.IsAny<PrivatePreKey>(), It.IsAny<Percolator.Cryptography.PreKeyBundle>()))
                 .Returns((PrivatePreKey _, Percolator.Cryptography.PreKeyBundle _) => (
-                    new SharedSecret(new byte[32]),
-                    new RatchetEphemeralKey(new byte[32])
+                    SharedSecret.FromBytes(new byte[32]),
+                    RatchetEphemeralKey.FromBytes(new byte[64])
                 ));
             sessionRepo.Setup(r => r.AddAsync(It.IsAny<SecureSession>(), It.IsAny<CancellationToken>()))
                 .Returns(Task.CompletedTask);
@@ -405,7 +405,7 @@ namespace Percolator.ApplicationTests.ReverseSignal
 
             var secure = new Mock<ISecureMessagingService>(MockBehavior.Strict);
             secure.Setup(s => s.EncryptAsync(It.IsAny<Percolator.Cryptography.SessionId>(), It.IsAny<Plaintext>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync(new SessionRatchetMessage(new byte[] { 1, 2, 3 }));
+                .ReturnsAsync(SessionRatchetMessage.FromBytes(new byte[] { 1, 2, 3 }));
 
             var transport = new Mock<IMessageTransportService>(MockBehavior.Strict);
             transport.Setup(t => t.SendMessageAsync(

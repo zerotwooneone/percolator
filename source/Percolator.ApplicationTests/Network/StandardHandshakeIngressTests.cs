@@ -38,7 +38,7 @@ public sealed class StandardHandshakeIngressTests
             .ReturnsAsync(keys);
 
         var selfPreKeys = new Mock<ISelfPreKeyBundleRepository>(MockBehavior.Strict);
-        var spk = (spkPrivate: new byte[32], spkPublicSpki: new byte[32], preKeySignature: new byte[32], expires: clock.UtcNow);
+        var spk = (spkPrivate: new byte[100], spkPublicSpki: new byte[64], preKeySignature: new byte[64], expires: clock.UtcNow);
         var spkId = Guid.NewGuid();
         selfPreKeys
             .Setup(s => s.TryGetSignedPreKeyAsync(selfIdentityId.Value, spkId, It.IsAny<CancellationToken>()))
@@ -53,7 +53,7 @@ public sealed class StandardHandshakeIngressTests
                 It.IsAny<PrivatePreKey>(),
                 It.IsAny<PrivatePreKey?>()))
             .Returns((RatchetIdentityKey _, RatchetEphemeralKey _, PrivatePreKey _, PrivatePreKey _, PrivatePreKey? _) =>
-                new SharedSecret(new byte[32]));
+                SharedSecret.FromBytes(new byte[32]));
 
         var sessions = new Mock<ISessionRepository>(MockBehavior.Strict);
         sessions.Setup(s => s.AddAsync(It.IsAny<SecureSession>(), It.IsAny<CancellationToken>()))
@@ -88,7 +88,7 @@ public sealed class StandardHandshakeIngressTests
         var signingService = new Mock<Percolator.Cryptography.ISigningService>(MockBehavior.Strict);
         signingService
             .Setup(s => s.Sign(It.IsAny<byte[]>(), It.IsAny<ECDiffieHellman>()))
-            .Returns(new Percolator.Cryptography.Signature(new byte[32]));
+            .Returns(Percolator.Cryptography.Signature.FromBytes(new byte[64]));
 
         var mediator = new Mock<IMediator>(MockBehavior.Strict);
         mediator.Setup(m => m.Publish(It.IsAny<SecureSessionCreatedNotification>(), It.IsAny<CancellationToken>()))
@@ -97,8 +97,8 @@ public sealed class StandardHandshakeIngressTests
         var request = new EstablishSessionRequest
         {
             Version = 1,
-            IdentitySigningKey = ByteString.CopyFrom(new byte[32]),
-            EphemeralKey = ByteString.CopyFrom(new byte[32]),
+            IdentitySigningKey = ByteString.CopyFrom(new byte[64]),
+            EphemeralKey = ByteString.CopyFrom(new byte[64]),
             PrekeyId = ByteString.CopyFrom(spkId.ToByteArray())
         };
 
@@ -148,7 +148,7 @@ public sealed class StandardHandshakeIngressTests
             .ReturnsAsync(keys);
 
         var selfPreKeys = new Mock<ISelfPreKeyBundleRepository>(MockBehavior.Strict);
-        var spk = (spkPrivate: new byte[32], spkPublicSpki: new byte[32], preKeySignature: new byte[32], expires: clock.UtcNow);
+        var spk = (spkPrivate: new byte[100], spkPublicSpki: new byte[64], preKeySignature: new byte[64], expires: clock.UtcNow);
         var spkId = Guid.NewGuid();
         selfPreKeys
             .Setup(s => s.TryGetSignedPreKeyAsync(selfIdentityId.Value, spkId, It.IsAny<CancellationToken>()))
@@ -163,7 +163,7 @@ public sealed class StandardHandshakeIngressTests
                 It.IsAny<PrivatePreKey>(),
                 It.IsAny<PrivatePreKey?>()))
             .Returns((RatchetIdentityKey _, RatchetEphemeralKey _, PrivatePreKey _, PrivatePreKey _, PrivatePreKey? _) =>
-                new SharedSecret(new byte[32]));
+                SharedSecret.FromBytes(new byte[32]));
 
         var sessions = new Mock<ISessionRepository>(MockBehavior.Strict);
         sessions.Setup(s => s.AddAsync(It.IsAny<SecureSession>(), It.IsAny<CancellationToken>()))
@@ -189,7 +189,7 @@ public sealed class StandardHandshakeIngressTests
         var signingService = new Mock<Percolator.Cryptography.ISigningService>(MockBehavior.Strict);
         signingService
             .Setup(s => s.Sign(It.IsAny<byte[]>(), It.IsAny<ECDiffieHellman>()))
-            .Returns(new Percolator.Cryptography.Signature(new byte[32]));
+            .Returns(Percolator.Cryptography.Signature.FromBytes(new byte[64]));
 
         var mediator = new Mock<IMediator>(MockBehavior.Strict);
         mediator.Setup(m => m.Publish(It.IsAny<SecureSessionCreatedNotification>(), It.IsAny<CancellationToken>()))
@@ -198,8 +198,8 @@ public sealed class StandardHandshakeIngressTests
         var request = new EstablishSessionRequest
         {
             Version = 1,
-            IdentitySigningKey = ByteString.CopyFrom(new byte[32]),
-            EphemeralKey = ByteString.CopyFrom(new byte[32]),
+            IdentitySigningKey = ByteString.CopyFrom(new byte[64]),
+            EphemeralKey = ByteString.CopyFrom(new byte[64]),
             PrekeyId = ByteString.CopyFrom(spkId.ToByteArray())
         };
 

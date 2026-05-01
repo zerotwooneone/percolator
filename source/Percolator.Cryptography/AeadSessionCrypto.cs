@@ -22,7 +22,7 @@ public sealed class AeadSessionCrypto : ISessionCrypto
 
     public (SharedSecret SharedSecret, RatchetEphemeralKey EphemeralPublic) X3DH_Initiate(PrivatePreKey localIdentityPrivate, PreKeyBundle remoteBundle)
     {
-        if (localIdentityPrivate?.Value is null || localIdentityPrivate.Value.Length == 0)
+        if (localIdentityPrivate is null || localIdentityPrivate.Span.Length == 0)
             throw new ArgumentException("local identity private key missing", nameof(localIdentityPrivate));
         if (remoteBundle is null)
             throw new ArgumentNullException(nameof(remoteBundle));
@@ -56,13 +56,13 @@ public sealed class AeadSessionCrypto : ISessionCrypto
 
     public bool VerifySignature(RatchetIdentityKey identityPublic, PreKey signedPreKey, Signature signature)
     {
-        if (identityPublic?.Value is null || signedPreKey?.Value is null || signature?.Value is null)
+        if (identityPublic is null || signedPreKey is null || signature is null)
             return false;
         try
         {
             using var ecdsa = ECDsa.Create();
-            ecdsa.ImportSubjectPublicKeyInfo(identityPublic.Value, out _);
-            return ecdsa.VerifyData(signedPreKey.Value, signature.Value, HashAlgorithmName.SHA256);
+            ecdsa.ImportSubjectPublicKeyInfo(identityPublic.Span, out _);
+            return ecdsa.VerifyData(signedPreKey.Span, signature.Span, HashAlgorithmName.SHA256);
         }
         catch
         {

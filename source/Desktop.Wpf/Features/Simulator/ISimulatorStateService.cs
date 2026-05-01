@@ -35,7 +35,7 @@ public interface ISimulatorStateService
 
     Task<IReadOnlyList<InboundRelayMessage>> DequeueRelayDownstreamToPeerAsync(
         Percolator.Network.PeerId relayHostPeerId,
-        byte[] targetIdentityPublicKeyHash,
+        Percolator.Identity.IdentityPublicKeyHash targetIdentityPublicKeyHash,
         int max,
         CancellationToken cancellationToken = default);
 

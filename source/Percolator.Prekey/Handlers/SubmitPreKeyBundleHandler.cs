@@ -30,8 +30,8 @@ namespace Percolator.Prekey.Handlers
         public async Task<Unit> Handle(SubmitPreKeyBundleCommand request, CancellationToken cancellationToken)
         {
             var signedPreKeyBytes = request.SignedPreKey;
-            var signedPreKeySignature = new CryptoSignature(request.PreKeySignature);
-            if (!_signingService.Verify(signedPreKeyBytes, signedPreKeySignature, new PublicKey(request.PublicSigningKey)))
+            var signedPreKeySignature = Signature.FromBytes(request.PreKeySignature);
+            if (!_signingService.Verify(signedPreKeyBytes, signedPreKeySignature, PublicKey.FromBytes(request.PublicSigningKey)))
             {
                 throw new InvalidOperationException("Invalid signed pre-key signature.");
             }
@@ -51,12 +51,12 @@ namespace Percolator.Prekey.Handlers
                 var oneTimePreKeyId = oneTimePreKey.Id;
 
                 var domainBundle = new Percolator.Cryptography.PreKeyBundle(
-                    new RatchetIdentityKey(request.PublicSigningKey),
+                    RatchetIdentityKey.FromBytes(request.PublicSigningKey),
                     signedPreKeyId,
-                    new PreKey(signedPreKeyBytes),
+                    PreKey.FromBytes(signedPreKeyBytes),
                     signedPreKeySignature,
                     oneTimePreKeyId,
-                    new OneTimeKey(oneTimePreKey.Key),
+                    OneTimeKey.FromBytes(oneTimePreKey.Key),
                     request.Expires
                 );
                 domainBundles.Add(domainBundle);

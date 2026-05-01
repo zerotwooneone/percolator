@@ -223,7 +223,7 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
                     new ObservableList<Percolator.Cryptography.OneTimeKeyInstance>(
                         b.OneTimeKeys.Select(otk => new Percolator.Cryptography.OneTimeKeyInstance(
                             otk.Id,
-                            new Percolator.Cryptography.OneTimeKey(otk.KeyBytes)))),
+                            Percolator.Cryptography.OneTimeKey.FromBytes(otk.KeyBytes)))),
                     b.ExpiresUtc))
                 .ToList());
 
@@ -499,14 +499,14 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
             if (dto.RootKey is null || dto.RootKey.Length == 0) continue;
 
             var state = new RatchetState(
-                rootKey: new RootKey(dto.RootKey),
-                sendingChainKey: dto.SendChainKey is null || dto.SendChainKey.Length == 0 ? null : new ChainKey(dto.SendChainKey),
+                rootKey: RootKey.FromBytes(dto.RootKey),
+                sendingChainKey: dto.SendChainKey is null || dto.SendChainKey.Length == 0 ? null : ChainKey.FromBytes(dto.SendChainKey),
                 sendingCounter: dto.SendCounter,
-                receivingChainKey: dto.RecvChainKey is null || dto.RecvChainKey.Length == 0 ? null : new ChainKey(dto.RecvChainKey),
+                receivingChainKey: dto.RecvChainKey is null || dto.RecvChainKey.Length == 0 ? null : ChainKey.FromBytes(dto.RecvChainKey),
                 receivingCounter: dto.RecvCounter,
                 previousChainLength: dto.PrevChainLength,
-                remoteRatchetKey: dto.RemoteRatchetKey is null || dto.RemoteRatchetKey.Length == 0 ? null : new RatchetEphemeralKey(dto.RemoteRatchetKey),
-                dhRatchetPrivateKey: dto.DhRatchetPrivateKey is null || dto.DhRatchetPrivateKey.Length == 0 ? null : new PrivateEphemeralKey(dto.DhRatchetPrivateKey),
+                remoteRatchetKey: dto.RemoteRatchetKey is null || dto.RemoteRatchetKey.Length == 0 ? null : RatchetEphemeralKey.FromBytes(dto.RemoteRatchetKey),
+                dhRatchetPrivateKey: dto.DhRatchetPrivateKey is null || dto.DhRatchetPrivateKey.Length == 0 ? null : PrivateEphemeralKey.FromBytes(dto.DhRatchetPrivateKey),
                 skippedKeyLimit: 1000);
 
             var session = SecureSession.Create(
@@ -544,7 +544,7 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
             if (dto.PrivateKeyBytes is null || dto.PrivateKeyBytes.Length == 0) continue;
             model.OneTimePreKeysPrivateMutable.Add(new SimulatedOneTimePreKeyPrivateRecord(
                 SimulatedOneTimePreKeyId.FromGuid(dto.Id),
-                new PrivatePreKey(dto.PrivateKeyBytes),
+                PrivatePreKey.FromBytes(dto.PrivateKeyBytes),
                 dto.CreatedAtUtc));
         }
     }

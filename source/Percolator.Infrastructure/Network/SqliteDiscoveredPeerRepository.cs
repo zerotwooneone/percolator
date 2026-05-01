@@ -55,7 +55,7 @@ public sealed class SqliteDiscoveredPeerRepository : IDiscoveredPeerRepository
             row = new DiscoveredPeerDbo
             {
                 DiscoveryKey = entity.DiscoveryKey.Value,
-                PublicKeyHash = entity.IdentityPublicKeyHash?.Value,
+                PublicKeyHash = entity.IdentityPublicKeyHash?.ToArray(),
                 FirstSeenUtc = entity.FirstSeenUtc,
                 LastSeenUtc = entity.LastSeenUtc,
                 Source = (int)entity.Source,
@@ -66,7 +66,7 @@ public sealed class SqliteDiscoveredPeerRepository : IDiscoveredPeerRepository
         }
         else
         {
-            row.PublicKeyHash = entity.IdentityPublicKeyHash?.Value;
+            row.PublicKeyHash = entity.IdentityPublicKeyHash?.ToArray();
             row.LastSeenUtc = entity.LastSeenUtc;
             row.Source = (int)entity.Source;
             row.Confidence = entity.Confidence;
@@ -106,7 +106,7 @@ public sealed class SqliteDiscoveredPeerRepository : IDiscoveredPeerRepository
         var row = await _db.DiscoveredPeers.AsNoTracking().FirstOrDefaultAsync(x => x.DiscoveryKey == key.Value, ct);
         if (row is null) return null;
 
-        var pkh = row.PublicKeyHash is null ? (PublicKeyHash?)null : new PublicKeyHash(row.PublicKeyHash);
+        var pkh = row.PublicKeyHash is null ? (PublicKeyHash?)null : PublicKeyHash.FromBytes(row.PublicKeyHash);
         var dp = DiscoveredPeer.Create(new DiscoveryKey(row.DiscoveryKey), pkh, row.FirstSeenUtc);
         if (row.LastSeenUtc > row.FirstSeenUtc)
         {
@@ -126,9 +126,9 @@ public sealed class SqliteDiscoveredPeerRepository : IDiscoveredPeerRepository
 
     private async Task<DiscoveredPeer?> GetByPublicKeyHashInternalAsync(PublicKeyHash pkh, CancellationToken ct)
     {
-        var row = await _db.DiscoveredPeers.AsNoTracking().FirstOrDefaultAsync(x => x.PublicKeyHash != null && x.PublicKeyHash == pkh.Value, ct);
+        var row = await _db.DiscoveredPeers.AsNoTracking().FirstOrDefaultAsync(x => x.PublicKeyHash != null && x.PublicKeyHash.SequenceEqual(pkh.ToArray()), ct);
         if (row is null) return null;
-        var dp = DiscoveredPeer.Create(new DiscoveryKey(row.DiscoveryKey), new PublicKeyHash(row.PublicKeyHash!), row.FirstSeenUtc);
+        var dp = DiscoveredPeer.Create(new DiscoveryKey(row.DiscoveryKey), PublicKeyHash.FromBytes(row.PublicKeyHash!), row.FirstSeenUtc);
         if (row.LastSeenUtc > row.FirstSeenUtc)
         {
             dp.RecordDiscovery((DiscoverySource)row.Source, row.LastSeenUtc);
@@ -143,7 +143,7 @@ public sealed class SqliteDiscoveredPeerRepository : IDiscoveredPeerRepository
 
         var candidates = rows.Select(row =>
         {
-            var pkh = row.PublicKeyHash is null ? (PublicKeyHash?)null : new PublicKeyHash(row.PublicKeyHash);
+            var pkh = row.PublicKeyHash is null ? (PublicKeyHash?)null : PublicKeyHash.FromBytes(row.PublicKeyHash);
             var dp = DiscoveredPeer.Create(new DiscoveryKey(row.DiscoveryKey), pkh, row.FirstSeenUtc);
             if (row.LastSeenUtc > row.FirstSeenUtc)
             {

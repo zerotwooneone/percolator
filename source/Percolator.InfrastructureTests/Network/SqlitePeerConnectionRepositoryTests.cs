@@ -41,7 +41,8 @@ public class SqlitePeerConnectionRepositoryTests
         var now = DateTimeOffset.UtcNow;
         var profile = new PeerRoutingProfile();
         profile.BindIdentity(peerId);
-        profile.SetIdentityPublicKey(new Percolator.Network.ValueObjects.IdentityPublicKey(RandomNumberGenerator.GetBytes(32)));
+        using var ecdsa = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        profile.SetIdentityPublicKey(Percolator.Network.ValueObjects.IdentityPublicKey.FromBytes(ecdsa.ExportSubjectPublicKeyInfo()));
         profile.AddGrpcEndPoint(new GrpcEndPoint(new DnsEndPoint("127.0.0.1", 5001), now), now);
         profile.AddGrpcEndPoint(new GrpcEndPoint(new DnsEndPoint("localhost", 5002), now.AddMinutes(-5)), now.AddMinutes(-5));
 
@@ -52,7 +53,7 @@ public class SqlitePeerConnectionRepositoryTests
         // Assert
         loaded.Should().NotBeNull();
         loaded!.Id.Should().Be(profile.Id);
-        loaded.IdentityPublicKey!.Value.Should().BeEquivalentTo(profile.IdentityPublicKey!.Value);
+        loaded.IdentityPublicKey!.ToArray().Should().BeEquivalentTo(profile.IdentityPublicKey!.ToArray());
         loaded.Endpoints.Should().HaveCount(2);
     }
 
@@ -70,7 +71,8 @@ public class SqlitePeerConnectionRepositoryTests
         await ctx.SaveChangesAsync();
 
         var now = DateTimeOffset.UtcNow;
-        var profileA = new PeerRoutingProfile(); profileA.BindIdentity(peerA); profileA.SetIdentityPublicKey(new Percolator.Network.ValueObjects.IdentityPublicKey(RandomNumberGenerator.GetBytes(32))); profileA.AddGrpcEndPoint(new GrpcEndPoint(new DnsEndPoint("localhost", 5001), now), now);
+        using var ecdsa = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var profileA = new PeerRoutingProfile(); profileA.BindIdentity(peerA); profileA.SetIdentityPublicKey(Percolator.Network.ValueObjects.IdentityPublicKey.FromBytes(ecdsa.ExportSubjectPublicKeyInfo())); profileA.AddGrpcEndPoint(new GrpcEndPoint(new DnsEndPoint("localhost", 5001), now), now);
         var profileB = new PeerRoutingProfile(); profileB.BindIdentity(peerB); profileB.AddGrpcEndPoint(new GrpcEndPoint(new DnsEndPoint("localhost", 5002), now), now);
         await repo.UpsertAsync(profileA);
         await repo.UpsertAsync(profileB);

@@ -15,7 +15,7 @@ file sealed class DummySessionCrypto : ISessionCrypto
 {
     public (SharedSecret SharedSecret, RatchetEphemeralKey EphemeralPublic) X3DH_Initiate(PrivatePreKey localIdentityPrivate, PreKeyBundle remoteBundle)
     {
-        return (new SharedSecret(new byte[32]), new RatchetEphemeralKey(new byte[] { 0xEE }));
+        return (SharedSecret.FromBytes(new byte[32]), RatchetEphemeralKey.FromBytes(new byte[64]));
     }
 
     public (Ciphertext Ciphertext, RatchetEphemeralKey HeaderKey, RatchetState NewState) DR_Encrypt(
@@ -24,10 +24,10 @@ file sealed class DummySessionCrypto : ISessionCrypto
         AssociatedData ad,
         ulong counter,
         ulong previousChainLength)
-        => (new Ciphertext(new byte[] { 0x01 }), new RatchetEphemeralKey(new byte[] { 0x02 }), state);
+        => (Ciphertext.FromBytes(new byte[] { 0x01 }), RatchetEphemeralKey.FromBytes(new byte[64]), state);
 
     public (Plaintext Plaintext, RatchetState NewState) DR_Decrypt(RatchetState state, SessionRatchetMessage framed, AssociatedData ad)
-        => (new Plaintext(new byte[] { 0x01 }), state);
+        => (Plaintext.FromBytes(new byte[] { 0x01 }), state);
 
     public bool VerifySignature(RatchetIdentityKey identityPublic, PreKey signedPreKey, Signature signature) => true;
 
@@ -37,7 +37,7 @@ file sealed class DummySessionCrypto : ISessionCrypto
         PrivatePreKey responderIdentityPrivate,
         PrivatePreKey responderSignedPreKeyPrivate,
         PrivatePreKey? responderOneTimePreKeyPrivate)
-        => new SharedSecret(new byte[32]);
+        => SharedSecret.FromBytes(new byte[32]);
 }
 
 [TestFixture]
@@ -51,16 +51,19 @@ public class SecureSessionFactoryTests
         var peer = PeerId.NewId();
         var version = new ProtocolVersion(1);
         var bundle = new PreKeyBundle(
-            new RatchetIdentityKey(new byte[] { 0x10 }),
+            RatchetIdentityKey.FromBytes(new byte[64]),
             Guid.NewGuid(),
-            new PreKey(new byte[] { 0x20 }),
-            new Signature(new byte[] { 0x30 }),
+            PreKey.FromBytes(new byte[64]),
+            Signature.FromBytes(new byte[60]),
             Guid.NewGuid(),
-            new OneTimeKey(new byte[] { 0x40 }),
+            OneTimeKey.FromBytes(new byte[64]),
             DateTimeOffset.UtcNow.AddDays(1));
 
+        var keyStore = new Mock<IKeyStore>(MockBehavior.Strict);
+        keyStore.Setup(k => k.GetIdentityPrivateKey()).Returns(PrivatePreKey.FromBytes(new byte[100]));
+
         // Act
-        var session = SecureSession.EstablishFromX3DH(bundle, new Mock<IKeyStore>().Object, new DummySessionCrypto(), peer, version, clock);
+        var session = SecureSession.EstablishFromX3DH(bundle, keyStore.Object, new DummySessionCrypto(), peer, version, clock);
 
         // Assert
         session.Should().NotBeNull();

@@ -48,7 +48,7 @@ public class Phase17CommandsOnlyTests : IntegrationTestBase
             }
             var mediator = _hostProvider.GetRequiredService<IMediator>();
             var ctx = _hostProvider.GetRequiredService<ActiveIdentityContext>();
-            var cmd = new DeliverOpaqueMessageCommand { PayloadBytes = message.Value, SelfIdentityId = ctx.Identity!.SelfIdentityId };
+            var cmd = new DeliverOpaqueMessageCommand { PayloadBytes = message.ToArray(), SelfIdentityId = ctx.Identity!.SelfIdentityId };
             var result = await mediator.Send(cmd, cancellationToken);
             var response = new DeliverOpaqueMessageResponse { Version = 1 };
             if (result.ResponsePayloadBytes is not null)
@@ -93,7 +93,7 @@ public class Phase17CommandsOnlyTests : IntegrationTestBase
             }
             var mediator = provider.GetRequiredService<IMediator>();
             var ctx = provider.GetRequiredService<ActiveIdentityContext>();
-            var cmd = new DeliverOpaqueMessageCommand { PayloadBytes = message.Value, SelfIdentityId = ctx.Identity!.SelfIdentityId };
+            var cmd = new DeliverOpaqueMessageCommand { PayloadBytes = message.ToArray(), SelfIdentityId = ctx.Identity!.SelfIdentityId };
             var result = await mediator.Send(cmd, cancellationToken);
             var response = new DeliverOpaqueMessageResponse { Version = 1 };
             if (result.ResponsePayloadBytes is not null)

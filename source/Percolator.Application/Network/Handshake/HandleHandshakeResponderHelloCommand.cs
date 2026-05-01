@@ -41,7 +41,7 @@ namespace Percolator.Application.Network.Handshake
             }
 
             // Parse the encrypted payload as a SessionRatchetMessage
-            var ratchetMessage = new SessionRatchetMessage(request.Response.InitialRatchetMessage.ToByteArray());
+            var ratchetMessage = SessionRatchetMessage.FromBytes(request.Response.InitialRatchetMessage.ToByteArray());
             var header = ratchetMessage.GetHeader();
 
             // Fast-path: resolve session by ratchet header key (expected to miss on first responder message)

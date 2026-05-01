@@ -48,7 +48,7 @@ public class InMemoryPeerTrustStore : IPeerTrustManager
         foreach (var hash in allTrustedHashes)
         {
             _trustedHashes.TryAdd(hash, 0);
-            _logger.LogDebug("Loaded trusted peer with public key hash {Hash}", Convert.ToHexString(hash.Value));
+            _logger.LogDebug("Loaded trusted peer with public key hash {Hash}", Convert.ToHexString(hash.ToArray()));
         }
         _logger.LogInformation("In-memory peer trust store initialized with {Count} entries.", _trustedHashes.Count);
     }
@@ -76,7 +76,7 @@ public class InMemoryPeerTrustStore : IPeerTrustManager
         var spki = presentedKey.ExportSubjectPublicKeyInfo();
         var hash = SHA256.HashData(spki);
 
-        var publicKeyHash = new PublicKeyHash(hash);
+        var publicKeyHash = PublicKeyHash.FromBytes(hash);
 
         return _trustedHashes.ContainsKey(publicKeyHash);
     }
@@ -102,7 +102,7 @@ public class InMemoryPeerTrustStore : IPeerTrustManager
 
         var spki = presentedKey.ExportSubjectPublicKeyInfo();
         var hash = SHA256.HashData(spki);
-        var publicKeyHash = new PublicKeyHash(hash);
+        var publicKeyHash = PublicKeyHash.FromBytes(hash);
 
         if (_trustedHashes.TryAdd(publicKeyHash, 0))
         {

@@ -38,9 +38,9 @@ public class ValueObjectBasicsTests
     [Test]
     public void Plaintext_Equality_IsByContent()
     {
-        var a1 = new Plaintext(new byte[] {1,2,3});
-        var a2 = new Plaintext(new byte[] {1,2,3});
-        var b = new Plaintext(new byte[] {1,2,4});
+        var a1 = Plaintext.FromBytes(new byte[] {1,2,3});
+        var a2 = Plaintext.FromBytes(new byte[] {1,2,3});
+        var b = Plaintext.FromBytes(new byte[] {1,2,4});
         a1.Should().Be(a2);
         a1.Should().NotBe(b);
     }
@@ -48,9 +48,9 @@ public class ValueObjectBasicsTests
     [Test]
     public void Ciphertext_Equality_IsByContent()
     {
-        var a1 = new Ciphertext(new byte[] {9,8,7});
-        var a2 = new Ciphertext(new byte[] {9,8,7});
-        var b = new Ciphertext(new byte[] {9,8,6});
+        var a1 = Ciphertext.FromBytes(new byte[] {9,8,7});
+        var a2 = Ciphertext.FromBytes(new byte[] {9,8,7});
+        var b = Ciphertext.FromBytes(new byte[] {9,8,6});
         a1.Should().Be(a2);
         a1.Should().NotBe(b);
     }
@@ -58,9 +58,9 @@ public class ValueObjectBasicsTests
     [Test]
     public void AssociatedData_Equality_IsByContent()
     {
-        var a1 = new AssociatedData(new byte[] {5,5,5});
-        var a2 = new AssociatedData(new byte[] {5,5,5});
-        var b = new AssociatedData(new byte[] {5,5,6});
+        var a1 = AssociatedData.FromBytes(new byte[] {5,5,5});
+        var a2 = AssociatedData.FromBytes(new byte[] {5,5,5});
+        var b = AssociatedData.FromBytes(new byte[] {5,5,6});
         a1.Should().Be(a2);
         a1.Should().NotBe(b);
     }

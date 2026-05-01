@@ -12,7 +12,7 @@ public class DiscoveredPeer_AuthoritativeTests
     public void DiscoveredPeer_tracks_discovery_key_and_observed_endpoints()
     {
         var dk = new DiscoveryKey("seed:127.0.0.1:5000");
-        var pkh = new PublicKeyHash(new byte[32]);
+        var pkh = PublicKeyHash.FromBytes(new byte[32]);
         var now = DateTimeOffset.UtcNow;
 
         // Expect a new authoritative ctor/factory taking DiscoveryKey and optional pkh
@@ -36,7 +36,7 @@ public class DiscoveredPeer_AuthoritativeTests
     public void PromoteToRoutingProfile_merges_endpoints_and_marks_promoted()
     {
         var dk = new DiscoveryKey("seed:10.0.0.2:6001");
-        var pkh = new PublicKeyHash(new byte[32]);
+        var pkh = PublicKeyHash.FromBytes(new byte[32]);
         var t0 = DateTimeOffset.UtcNow;
         var dp = DiscoveredPeer.Create(dk, pkh, t0);
         dp.ObserveEndpoint(new GrpcEndPoint(new DnsEndPoint("node", 6001), t0), t0);

@@ -50,18 +50,19 @@ public sealed class PendingHandshakeQueriesTests
 
         var repo = new SqlitePendingSessionRepository(ctx, active, clock);
 
-        var inviterKeyBytes = new byte[] { 1, 2, 3 };
+        using var ecdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+        var inviterKeyBytes = ecdh.PublicKey.ExportSubjectPublicKeyInfo();
         var expectedFingerprintHex = Convert.ToHexString(SHA256.HashData(inviterKeyBytes));
 
         var expired = PendingSession.FromInvitationWithMetadata(
             PendingSessionId.NewId(),
             PeerId.NewId(),
             new ProtocolVersion(1),
-            new HandshakeInvitation(new byte[] { 9 }),
+            HandshakeInvitation.FromBytes(new byte[] { 9 }),
             requestCorrelationId: new RequestCorrelationId(Guid.Parse("33333333-3333-3333-3333-333333333333")),
             isRelayed: false,
             relayHostPeerId: null,
-            inviterIdentityKey: new RatchetIdentityKey(inviterKeyBytes),
+            inviterIdentityKey: RatchetIdentityKey.FromBytes(inviterKeyBytes),
             callbackEndpointHost: "example.com",
             callbackEndpointPort: 443,
             clock,
@@ -71,11 +72,11 @@ public sealed class PendingHandshakeQueriesTests
             PendingSessionId.NewId(),
             PeerId.NewId(),
             new ProtocolVersion(1),
-            new HandshakeInvitation(new byte[] { 8 }),
+            HandshakeInvitation.FromBytes(new byte[] { 8 }),
             requestCorrelationId: new RequestCorrelationId(Guid.Parse("11111111-1111-1111-1111-111111111111")),
             isRelayed: false,
             relayHostPeerId: null,
-            inviterIdentityKey: new RatchetIdentityKey(inviterKeyBytes),
+            inviterIdentityKey: RatchetIdentityKey.FromBytes(inviterKeyBytes),
             callbackEndpointHost: "example.com",
             callbackEndpointPort: 443,
             clock,
@@ -176,7 +177,7 @@ public sealed class PendingHandshakeQueriesTests
             PendingSessionId.NewId(),
             remotePeerId,
             new ProtocolVersion(1),
-            new HandshakeInvitation(new byte[] { 8 }),
+            HandshakeInvitation.FromBytes(new byte[] { 8 }),
             requestCorrelationId: new RequestCorrelationId(Guid.Parse("11111111-1111-1111-1111-111111111111")),
             isRelayed: true,
             relayHostPeerId: relayPeerId,

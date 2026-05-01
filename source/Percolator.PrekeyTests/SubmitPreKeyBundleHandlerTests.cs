@@ -36,12 +36,12 @@ public class SubmitPreKeyBundleHandlerTests
     {
         // Arrange
         var remotePeerId = new CryptoPeerId(Guid.NewGuid());
-        var publicSigningKey = new byte[] { 1, 2, 3 };
+        var publicSigningKey = new byte[80];
         var signedPreKeyId = Guid.NewGuid();
-        var signedPreKey = new byte[] { 9, 9, 9 };
-        var signature = new byte[] { 5, 5 };
-        var otk1 = new SubmitPreKeyBundleCommand.OneTimePreKey(Guid.NewGuid(), new byte[] { 10 });
-        var otk2 = new SubmitPreKeyBundleCommand.OneTimePreKey(Guid.NewGuid(), new byte[] { 11 });
+        var signedPreKey = new byte[64];
+        var signature = new byte[64];
+        var otk1 = new SubmitPreKeyBundleCommand.OneTimePreKey(Guid.NewGuid(), new byte[64]);
+        var otk2 = new SubmitPreKeyBundleCommand.OneTimePreKey(Guid.NewGuid(), new byte[64]);
         var expires = DateTimeOffset.UtcNow.AddHours(1);
 
         var cmd = new SubmitPreKeyBundleCommand
@@ -58,8 +58,8 @@ public class SubmitPreKeyBundleHandlerTests
         _signingService
             .Setup(s => s.Verify(
                 It.Is<byte[]>(b => b.SequenceEqual(signedPreKey)),
-                It.Is<Percolator.Cryptography.Signature>(sig => sig.Value.SequenceEqual(signature)),
-                It.Is<Percolator.Cryptography.PublicKey>(pk => pk.Value.SequenceEqual(publicSigningKey))))
+                It.Is<Percolator.Cryptography.Signature>(sig => sig.ToArray().SequenceEqual(signature)),
+                It.Is<Percolator.Cryptography.PublicKey>(pk => pk.ToArray().SequenceEqual(publicSigningKey))))
             .Returns(true);
 
         // Act
@@ -86,11 +86,11 @@ public class SubmitPreKeyBundleHandlerTests
         var cmd = new SubmitPreKeyBundleCommand
         {
             RemotePeerId = new NetworkPeerId(Guid.NewGuid()),
-            PublicSigningKey = new byte[] { 1 },
+            PublicSigningKey = new byte[80],
             SignedPreKeyId = Guid.NewGuid(),
-            SignedPreKey = new byte[] { 2 },
-            PreKeySignature = new byte[] { 3 },
-            OneTimePreKeys = new[] { new SubmitPreKeyBundleCommand.OneTimePreKey(Guid.NewGuid(), new byte[] { 4 }) },
+            SignedPreKey = new byte[64],
+            PreKeySignature = new byte[64],
+            OneTimePreKeys = new[] { new SubmitPreKeyBundleCommand.OneTimePreKey(Guid.NewGuid(), new byte[64]) },
             Expires = DateTimeOffset.UtcNow.AddMinutes(5)
         };
 
@@ -114,10 +114,10 @@ public class SubmitPreKeyBundleHandlerTests
         var cmd = new SubmitPreKeyBundleCommand
         {
             RemotePeerId = new NetworkPeerId(Guid.NewGuid()),
-            PublicSigningKey = new byte[] { 1 },
+            PublicSigningKey = new byte[80],
             SignedPreKeyId = Guid.NewGuid(),
-            SignedPreKey = new byte[] { 2 },
-            PreKeySignature = new byte[] { 3 },
+            SignedPreKey = new byte[64],
+            PreKeySignature = new byte[64],
             OneTimePreKeys = Array.Empty<SubmitPreKeyBundleCommand.OneTimePreKey>(),
             Expires = DateTimeOffset.UtcNow.AddMinutes(5)
         };

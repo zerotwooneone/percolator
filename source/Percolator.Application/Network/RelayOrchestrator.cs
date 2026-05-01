@@ -72,7 +72,7 @@ public class RelayOrchestrator
         var env = new InternalEnvelope { RelayOpaqueEnvelope = relay };
 
         // Encrypt and send
-        var plaintext = new Plaintext(env.ToByteArray());
+        var plaintext = Plaintext.FromBytes(env.ToByteArray());
         var cipher = await _secureMessaging.EncryptAsync(sessionId, plaintext, ct).ConfigureAwait(false);
         var responseWrapper = await _transport.SendMessageAsync(recipientPeerId, directSessionId, cipher, ct).ConfigureAwait(false);
         var response = responseWrapper.OriginalResponse;
@@ -85,14 +85,14 @@ public class RelayOrchestrator
         }
 
         // Decrypt response payload as RelayOpaqueResponse
-        var ackCipher = new SessionRatchetMessage(response.ResponsePayload.ResponsePayload.ToByteArray());
+        var ackCipher = SessionRatchetMessage.FromBytes(response.ResponsePayload.ResponsePayload.ToByteArray());
         var resolved = await _secureMessaging.DecryptInboundAsync(selfIdentityId.Value, ackCipher, ct).ConfigureAwait(false);
         var ackPlain = resolved?.plaintext;
         if (ackPlain is null)
         {
             throw new InvalidOperationException("Failed to decrypt RelayOpaqueResponse");
         }
-        var ack = RelayOpaqueResponse.Parser.ParseFrom(ackPlain.Value);
+        var ack = RelayOpaqueResponse.Parser.ParseFrom(ackPlain.ToArray());
         if (!ack.HasMessageAckId)
         {
             throw new InvalidOperationException("RelayOpaqueResponse missing message_ack_id");

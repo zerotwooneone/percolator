@@ -49,21 +49,20 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
             var dht = env.DhtEnvelope;
             if (dht.FindNodeRequest is not null)
             {
-                var target = dht.FindNodeRequest.HasTargetPeerId ? dht.FindNodeRequest.TargetPeerId.ToByteArray() : Array.Empty<byte>();
-                if (target.Length == 0)
+                if (!dht.FindNodeRequest.HasTargetPeerId || dht.FindNodeRequest.TargetPeerId.Length == 0)
                 {
                     _logger.LogWarning("FindNodeRequest missing target_peer_id");
                     return null;
                 }
 
-                var closerNodes = await _dhtService.GetClosestNodesAsync(new NodeId(target), cancellationToken).ConfigureAwait(false);
+                var closerNodes = await _dhtService.GetClosestNodesAsync(NodeId.FromSpan(dht.FindNodeRequest.TargetPeerId.Span), cancellationToken).ConfigureAwait(false);
 
                 var outResp = new Contracts.FindNodeResponse();
                 foreach (var node in closerNodes)
                 {
                     outResp.CloserPeers.Add(new Contracts.NodeInfo
                     {
-                        PeerId = ByteString.CopyFrom(node.Id.Value),
+                        PeerId = ByteString.CopyFrom(node.Id.Span),
                         Address = $"{node.EndPoint.Host}:{node.EndPoint.Port}"
                     });
                 }
@@ -92,8 +91,8 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                     _logger.LogWarning("No endpoints in routing profile for remote peer {PeerId} to handle PingRequest", remotePeerId);
                     return null;
                 }
-                var nodeIdBytes = System.Security.Cryptography.SHA256.HashData(profile.IdentityPublicKey.Value);
-                await _mediator.Send(new Percolator.Dht.Messages.PingRequest(new NodeId(nodeIdBytes), freshest.EndPoint), cancellationToken).ConfigureAwait(false);
+                var nodeIdBytes = System.Security.Cryptography.SHA256.HashData(profile.IdentityPublicKey.Span);
+                await _mediator.Send(new Percolator.Dht.Messages.PingRequest(NodeId.FromBytesOwned(nodeIdBytes), freshest.EndPoint), cancellationToken).ConfigureAwait(false);
                 return null;
             }
             return null;
@@ -126,10 +125,10 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                     var cmd = new SubmitPreKeyBundleCommand
                     {
                         PublicSigningKey = upload.IdentityKey.ToByteArray(),
-                        SignedPreKeyId = new Guid(upload.SignedPreKeyId.ToByteArray()),
+                        SignedPreKeyId = new Guid(upload.SignedPreKeyId.Span),
                         SignedPreKey = upload.SignedPreKey.ToByteArray(),
                         PreKeySignature = upload.PreKeySignature.ToByteArray(),
-                        OneTimePreKeys = upload.OneTimePreKeys.Select(x => new SubmitPreKeyBundleCommand.OneTimePreKey(new Guid(x.Id.ToByteArray()), x.PublicKey.ToByteArray())).ToList(),
+                        OneTimePreKeys = upload.OneTimePreKeys.Select(x => new SubmitPreKeyBundleCommand.OneTimePreKey(new Guid(x.Id.Span), x.PublicKey.ToByteArray())).ToList(),
                         Expires = upload.ExpiresUtc.ToDateTimeOffset(),
                         RemotePeerId = new Percolator.Network.PeerId(request.Context.RemotePeerGuid.Value)
                     };
@@ -142,7 +141,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                     if (!getReq.HasPublicKeyHash) throw new InvalidOperationException("PublicKeyHash is required");
                     var bundle = await _mediator.Send(new GetPreKeyBundleQuery
                     {
-                        TargetPublicSigningKeyHash = IdentityPublicKeyHash.FromBytes(getReq.PublicKeyHash.ToByteArray())
+                        TargetPublicSigningKeyHash = IdentityPublicKeyHash.FromSpan(getReq.PublicKeyHash.Span)
                     }, cancellationToken).ConfigureAwait(false);
                     var resp = new GetPreKeyBundleResponse { Version = 1 };
                     if (bundle is not null)
@@ -150,10 +149,10 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                         var msg = new GetPreKeyBundleResponse.Types.PreKeyBundle
                         {
                             Version = 1,
-                            IdentityKey = Google.Protobuf.ByteString.CopyFrom(bundle.IdentitySigningKey.Value),
+                            IdentityKey = Google.Protobuf.ByteString.CopyFrom(bundle.IdentitySigningKey.Span),
                             SignedPreKeyId = Google.Protobuf.ByteString.CopyFrom(bundle.SignedPreKeyId.ToByteArray()),
-                            SignedPreKey = Google.Protobuf.ByteString.CopyFrom(bundle.SignedPreKey.Value),
-                            PreKeySignature = Google.Protobuf.ByteString.CopyFrom(bundle.SignedPreKeySignature.Value)
+                            SignedPreKey = Google.Protobuf.ByteString.CopyFrom(bundle.SignedPreKey.Span),
+                            PreKeySignature = Google.Protobuf.ByteString.CopyFrom(bundle.SignedPreKeySignature.Span)
                         };
                         if (bundle.OneTimePreKey is not null)
                         {
@@ -161,7 +160,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                             {
                                 Version = 1,
                                 OneTimeKeyId = Google.Protobuf.ByteString.CopyFrom(bundle.OneTimePreKeyId!.Value.ToByteArray()),
-                                KeyBytes = Google.Protobuf.ByteString.CopyFrom(bundle.OneTimePreKey.Value)
+                                KeyBytes = Google.Protobuf.ByteString.CopyFrom(bundle.OneTimePreKey.Span)
                             });
                         }
                         resp.PreKeyBundle = msg;
@@ -180,7 +179,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
             if(request.Context.RemotePeerGuid is null) throw new InvalidOperationException($"{nameof(request)} must have a {nameof(ProcessInternalEnvelopeCommand.Context.RemotePeerGuid)}");
             var relayPeerId = new Percolator.Identity.PeerId(request.Context.RemotePeerGuid.Value);
             var relay = env.RelayOpaqueEnvelope;
-            await _mediator.Send(new ProcessRelayedOpaquePayloadCommand(request.Context.SelfIdentityId, new Payload(relay.OpaquePayload.ToByteArray()), relayPeerId)).ConfigureAwait(false);
+            await _mediator.Send(new ProcessRelayedOpaquePayloadCommand(request.Context.SelfIdentityId, Payload.FromBytesOwned(relay.OpaquePayload.ToByteArray()), relayPeerId)).ConfigureAwait(false);
             return null;
         }
 
@@ -195,7 +194,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                     var cg = chat.CreateGroup;
                     if (cg == null || !cg.HasGroupConversationGuid || cg.GroupConversationGuid.Length != 16)
                         throw new InvalidOperationException("CreateGroup.group_conversation_guid must be 16 bytes (GUID).");
-                    var groupGuid = new Guid(cg.GroupConversationGuid.ToByteArray());
+                    var groupGuid = new Guid(cg.GroupConversationGuid.Span);
 
                     if (!cg.HasCreatorIdentityKey || cg.CreatorIdentityKey == null || cg.CreatorIdentityKey.Length == 0)
                         throw new InvalidOperationException("CreateGroup.creator_identity_key is required and must be non-empty.");
@@ -228,7 +227,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                     {
                         if (text.GroupConversationGuid.Length != 16)
                             throw new InvalidOperationException("TextMessage.group_conversation_guid must be 16 bytes (GUID).");
-                        groupGuid = new Guid(text.GroupConversationGuid.ToByteArray());
+                        groupGuid = new Guid(text.GroupConversationGuid.Span);
                     }
                     byte[]? pkh = null;
                     if (text.HasPublicKeyHash)
@@ -252,8 +251,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                         // Group chat: Use AuthorIdentityKey (SPKI) to compute PKH, then resolve to ParticipantId
                         if (!text.HasAuthorIdentityKey || text.AuthorIdentityKey is null || text.AuthorIdentityKey.Length == 0)
                             throw new InvalidOperationException("Group chat TextMessage must include AuthorIdentityKey.");
-                        var authorSpki = text.AuthorIdentityKey.ToByteArray();
-                        var authorPkh = System.Security.Cryptography.SHA256.HashData(authorSpki);
+                        var authorPkh = System.Security.Cryptography.SHA256.HashData(text.AuthorIdentityKey.Span);
                         var resolved = await _pkhPeerResolver.GetParticipantIdByPkhAsync(Pkh.FromBytes(authorPkh), cancellationToken).ConfigureAwait(false);
                         if (resolved is null)
                             throw new InvalidOperationException("Group chat message sender not found in peer store. The sender must be introduced/known before we can attribute.");
@@ -267,7 +265,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                         senderId = new ParticipantId(request.Context.RemotePeerGuid.Value);
                     }
 
-                    var messageId = new MessageId(new Guid(text.MessageId.ToByteArray()));
+                    var messageId = new MessageId(new Guid(text.MessageId.Span));
                     var sentTs = text.SentTimestampUtc.ToDateTimeOffset();
                     await _mediator.Send(new ReceiveTextMessageCommand(lookup, senderId, messageId, text.Content, sentTs), cancellationToken).ConfigureAwait(false);
                     return null;
@@ -283,7 +281,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                     {
                         if (rr.GroupConversationGuid.Length != 16)
                             throw new InvalidOperationException("ReadReceipt.group_conversation_guid must be 16 bytes (GUID).");
-                        groupGuid = new Guid(rr.GroupConversationGuid.ToByteArray());
+                        groupGuid = new Guid(rr.GroupConversationGuid.Span);
                     }
                     byte[]? pkh = null;
                     if (rr.HasPublicKeyHash)
@@ -307,8 +305,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                         // Group chat: Use AuthorIdentityKey (SPKI) to compute PKH, then resolve to ParticipantId
                         if (!rr.HasAuthorIdentityKey || rr.AuthorIdentityKey is null || rr.AuthorIdentityKey.Length == 0)
                             throw new InvalidOperationException("Group chat ReadReceipt must include AuthorIdentityKey.");
-                        var authorSpki = rr.AuthorIdentityKey.ToByteArray();
-                        var authorPkh = System.Security.Cryptography.SHA256.HashData(authorSpki);
+                        var authorPkh = System.Security.Cryptography.SHA256.HashData(rr.AuthorIdentityKey.Span);
                         var resolved = await _pkhPeerResolver.GetParticipantIdByPkhAsync(Pkh.FromBytes(authorPkh), cancellationToken).ConfigureAwait(false);
                         if (resolved is null)
                             throw new InvalidOperationException("Group chat receipt sender not found in peer store. The sender must be introduced/known before we can attribute.");
@@ -322,7 +319,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                         readerId = new ParticipantId(request.Context.RemotePeerGuid.Value);
                     }
 
-                    var messageId = new MessageId(new Guid(rr.MessageId.ToByteArray()));
+                    var messageId = new MessageId(new Guid(rr.MessageId.Span));
                     var ts = rr.SentTimestampUtc.ToDateTimeOffset();
                     await _mediator.Send(new ReceiveReadReceiptCommand(lookup, readerId, messageId, ts), cancellationToken).ConfigureAwait(false);
                     return null;
@@ -340,7 +337,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                     {
                         if (em.GroupConversationGuid.Length != 16)
                             throw new InvalidOperationException("EmojiAnnotation.group_conversation_guid must be 16 bytes (GUID).");
-                        groupGuid = new Guid(em.GroupConversationGuid.ToByteArray());
+                        groupGuid = new Guid(em.GroupConversationGuid.Span);
                     }
                     byte[]? pkh = null;
                     if (em.HasPublicKeyHash)
@@ -364,8 +361,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                         // Group chat: Use AuthorIdentityKey (SPKI) to compute PKH, then resolve to ParticipantId
                         if (!em.HasAuthorIdentityKey || em.AuthorIdentityKey is null || em.AuthorIdentityKey.Length == 0)
                             throw new InvalidOperationException("Group chat EmojiAnnotation must include AuthorIdentityKey.");
-                        var authorSpki = em.AuthorIdentityKey.ToByteArray();
-                        var authorPkh = System.Security.Cryptography.SHA256.HashData(authorSpki);
+                        var authorPkh = System.Security.Cryptography.SHA256.HashData(em.AuthorIdentityKey.Span);
                         var resolved = await _pkhPeerResolver.GetParticipantIdByPkhAsync(Pkh.FromBytes(authorPkh), cancellationToken).ConfigureAwait(false);
                         if (resolved is null)
                             throw new InvalidOperationException("Group chat emoji reactor not found in peer store. The sender must be introduced/known before we can attribute.");
@@ -379,7 +375,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                         reactorId = new ParticipantId(request.Context.RemotePeerGuid.Value);
                     }
 
-                    var messageId = new MessageId(new Guid(em.MessageId.ToByteArray()));
+                    var messageId = new MessageId(new Guid(em.MessageId.Span));
                     var ts = em.SentTimestampUtc.ToDateTimeOffset();
                     await _mediator.Send(new ReceiveEmojiAnnotationCommand(lookup, reactorId, messageId, em.Emoji, ts), cancellationToken).ConfigureAwait(false);
                     return null;
@@ -395,7 +391,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                     {
                         if (dr.GroupConversationGuid.Length != 16)
                             throw new InvalidOperationException("DeliveredReceipt.group_conversation_guid must be 16 bytes (GUID).");
-                        groupGuid = new Guid(dr.GroupConversationGuid.ToByteArray());
+                        groupGuid = new Guid(dr.GroupConversationGuid.Span);
                     }
                     byte[]? pkh = null;
                     if (dr.HasPublicKeyHash)
@@ -419,8 +415,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                         // Group chat: Use AuthorIdentityKey (SPKI) to compute PKH, then resolve to ParticipantId
                         if (!dr.HasAuthorIdentityKey || dr.AuthorIdentityKey is null || dr.AuthorIdentityKey.Length == 0)
                             throw new InvalidOperationException("Group chat DeliveredReceipt must include AuthorIdentityKey.");
-                        var authorSpki = dr.AuthorIdentityKey.ToByteArray();
-                        var authorPkh = System.Security.Cryptography.SHA256.HashData(authorSpki);
+                        var authorPkh = System.Security.Cryptography.SHA256.HashData(dr.AuthorIdentityKey.Span);
                         var resolved = await _pkhPeerResolver.GetParticipantIdByPkhAsync(Pkh.FromBytes(authorPkh), cancellationToken).ConfigureAwait(false);
                         if (resolved is null)
                             throw new InvalidOperationException("Group chat delivered receipt recipient not found in peer store. The sender must be introduced/known before we can attribute.");
@@ -434,7 +429,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                         recipientId = new ParticipantId(request.Context.RemotePeerGuid.Value);
                     }
 
-                    var messageId = new MessageId(new Guid(dr.MessageId.ToByteArray()));
+                    var messageId = new MessageId(new Guid(dr.MessageId.Span));
                     var ts = dr.SentTimestampUtc.ToDateTimeOffset();
                     await _mediator.Send(new ReceiveDeliveredReceiptCommand(lookup, recipientId, messageId, ts), cancellationToken).ConfigureAwait(false);
                     return null;
@@ -449,10 +444,10 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                     if (!sao.Payload.HasOpId || sao.Payload.OpId.Length != 16)
                         throw new InvalidOperationException("SignedAdminOperation.payload.op_id must be 16 bytes (GUID).");
 
-                    var groupGuid = new Guid(sao.Payload.GroupConversationGuid.ToByteArray());
+                    var groupGuid = new Guid(sao.Payload.GroupConversationGuid.Span);
                     var lookup = ConversationLookupKey.ForGroup(groupGuid);
 
-                    var opId = new Guid(sao.Payload.OpId.ToByteArray());
+                    var opId = new Guid(sao.Payload.OpId.Span);
                     var sentUtc = sao.Payload.SentTimestampUtc.ToDateTimeOffset();
                     ulong? adminSeq = sao.Payload.HasAdminSequenceNumber ? sao.Payload.AdminSequenceNumber : null;
 
@@ -480,13 +475,13 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                             foreach (var b in sao.Payload.UpdateGroupMembership.MembersToAdd)
                             {
                                 if (b.Length != 16) throw new InvalidOperationException("members_to_add must be GUID bytes (16).");
-                                add.Add(new Percolator.Chat.ValueObjects.ParticipantId(new Guid(b.ToByteArray())));
+                                add.Add(new Percolator.Chat.ValueObjects.ParticipantId(new Guid(b.Span)));
                             }
                             remove = new List<Percolator.Chat.ValueObjects.ParticipantId>();
                             foreach (var b in sao.Payload.UpdateGroupMembership.MembersToRemove)
                             {
                                 if (b.Length != 16) throw new InvalidOperationException("members_to_remove must be GUID bytes (16).");
-                                remove.Add(new Percolator.Chat.ValueObjects.ParticipantId(new Guid(b.ToByteArray())));
+                                remove.Add(new Percolator.Chat.ValueObjects.ParticipantId(new Guid(b.Span)));
                             }
                             leave = sao.Payload.UpdateGroupMembership.HasLeaveGroup ? sao.Payload.UpdateGroupMembership.LeaveGroup : (bool?)null;
                             break;
@@ -541,7 +536,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                     if (!kac.HasSignature || kac.Signature.Length == 0)
                         throw new InvalidOperationException("SignedKeyAdoptionConfirmation.signature is required.");
 
-                    var groupGuid = new Guid(kac.GroupConversationGuid.ToByteArray());
+                    var groupGuid = new Guid(kac.GroupConversationGuid.Span);
                     var lookup = ConversationLookupKey.ForGroup(groupGuid);
                     await _mediator.Send(new ReceiveKeyAdoptionConfirmationCommand(
                         lookup,
@@ -566,11 +561,11 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                     if (!aco.HasAdminSequenceNumber)
                         throw new InvalidOperationException("SignedAdminCommitOperation.admin_sequence_number is required.");
 
-                    var groupGuid = new Guid(aco.GroupConversationGuid.ToByteArray());
+                    var groupGuid = new Guid(aco.GroupConversationGuid.Span);
                     var lookup = ConversationLookupKey.ForGroup(groupGuid);
                     await _mediator.Send(new ReceiveAdminCommitCommand(
                         lookup,
-                        new Guid(aco.OpId.ToByteArray()),
+                        new Guid(aco.OpId.Span),
                         new GroupKeyVersion(aco.CommittedKeyVersion),
                         aco.SentTimestampUtc.ToDateTimeOffset(),
                         aco.AdminSequenceNumber,
@@ -588,7 +583,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                     if (!kd.HasEncryptedGroupKeyForRecipient || kd.EncryptedGroupKeyForRecipient.Length == 0)
                         throw new InvalidOperationException("KeyDistributionPayload.encrypted_group_key_for_recipient is required.");
 
-                    var groupGuid = new Guid(kd.GroupConversationGuid.ToByteArray());
+                    var groupGuid = new Guid(kd.GroupConversationGuid.Span);
                     var lookup = ConversationLookupKey.ForGroup(groupGuid);
                     await _mediator.Send(new ReceiveKeyDistributionCommand(
                         lookup,
@@ -604,20 +599,20 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                     {
                         throw new InvalidOperationException("UpdateGroupMembershipRequest.group_conversation_guid must be 16 bytes (GUID).");
                     }
-                    var groupGuid = new Guid(ugr.GroupConversationGuid.ToByteArray());
+                    var groupGuid = new Guid(ugr.GroupConversationGuid.Span);
                     var lookup = ConversationLookupKey.ForGroup(groupGuid);
 
                     var toAdd = new List<Percolator.Chat.ValueObjects.ParticipantId>(ugr.MembersToAdd.Count);
                     foreach (var b in ugr.MembersToAdd)
                     {
                         if (b.Length != 16) throw new InvalidOperationException("members_to_add must be GUID bytes (16).");
-                        toAdd.Add(new Percolator.Chat.ValueObjects.ParticipantId(new Guid(b.ToByteArray())));
+                        toAdd.Add(new Percolator.Chat.ValueObjects.ParticipantId(new Guid(b.Span)));
                     }
                     var toRemove = new List<Percolator.Chat.ValueObjects.ParticipantId>(ugr.MembersToRemove.Count);
                     foreach (var b in ugr.MembersToRemove)
                     {
                         if (b.Length != 16) throw new InvalidOperationException("members_to_remove must be GUID bytes (16).");
-                        toRemove.Add(new Percolator.Chat.ValueObjects.ParticipantId(new Guid(b.ToByteArray())));
+                        toRemove.Add(new Percolator.Chat.ValueObjects.ParticipantId(new Guid(b.Span)));
                     }
 
                     await _mediator.Send(new UpdateGroupMembershipCommand(lookup, toAdd, toRemove, ugr.LeaveGroup), cancellationToken).ConfigureAwait(false);
@@ -630,7 +625,7 @@ internal sealed class ProcessInternalEnvelopeHandler : IRequestHandler<ProcessIn
                     {
                         throw new InvalidOperationException("UpdateGroupInfoRequest.group_conversation_guid must be 16 bytes (GUID).");
                     }
-                    var groupGuid = new Guid(ugi.GroupConversationGuid.ToByteArray());
+                    var groupGuid = new Guid(ugi.GroupConversationGuid.Span);
                     var lookup = ConversationLookupKey.ForGroup(groupGuid);
                     var newName = ugi.HasNewGroupName ? ugi.NewGroupName : null;
                     await _mediator.Send(new UpdateGroupInfoCommand(lookup, newName), cancellationToken).ConfigureAwait(false);

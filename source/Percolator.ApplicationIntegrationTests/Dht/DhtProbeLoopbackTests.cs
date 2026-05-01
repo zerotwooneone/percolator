@@ -96,7 +96,7 @@ public class DhtProbeLoopbackTests : IntegrationTestBase
         {
             var request = new DeliverOpaqueMessageRequest
             {
-                Payload = ByteString.CopyFrom(message.Value)
+                Payload = ByteString.CopyFrom(message.ToArray())
             };
 
             // Call directly into the remote service (no gRPC)
@@ -127,18 +127,18 @@ public class DhtProbeLoopbackTests : IntegrationTestBase
             {
                 var req = new FindNodeRequest { TargetPeerId = ByteString.CopyFrom(SHA256.HashData(Guid.NewGuid().ToByteArray())) };
                 var env = new InternalEnvelope { DhtEnvelope = new DhtEnvelope { FindNodeRequest = req } };
-                return (new SessionId(Guid.NewGuid()), new Percolator.Cryptography.Plaintext(env.ToByteArray()));
+                return (new SessionId(Guid.NewGuid()), Plaintext.FromBytes(env.ToByteArray()));
             });
 
         // Server DHT returns nodes
         var closer = new List<DhtNode>
         {
-            new(new(SHA256.HashData(Guid.NewGuid().ToByteArray())), new DnsEndPoint("localhost", 59001), DateTimeOffset.UtcNow)
+            new(NodeId.FromBytes(SHA256.HashData(Guid.NewGuid().ToByteArray())), new DnsEndPoint("localhost", 59001), DateTimeOffset.UtcNow)
         };
         serverDhtRepo.Setup(r => r.GetAllAsync(It.IsAny<CancellationToken>())).ReturnsAsync(closer);
 
         // Server Encrypt response (bypassed by fake handler, but keep stub)
-        var responseCipher = new Percolator.Cryptography.SessionRatchetMessage(Guid.NewGuid().ToByteArray());
+        var responseCipher = SessionRatchetMessage.FromBytes(Guid.NewGuid().ToByteArray());
         serverSecureSvc
             .Setup(s => s.EncryptAsync(It.IsAny<SessionId>(), It.IsAny<Percolator.Cryptography.Plaintext>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(responseCipher);
@@ -185,7 +185,7 @@ public class DhtProbeLoopbackTests : IntegrationTestBase
         // Client encrypts request: return an InternalEnvelope with Dht FindNodeRequest directly as bytes
         var findReq = new FindNodeRequest { TargetPeerId = Google.Protobuf.ByteString.CopyFrom(Guid.NewGuid().ToByteArray()) };
         var clientReqEnvelope = new InternalEnvelope { DhtEnvelope = new DhtEnvelope { FindNodeRequest = findReq } };
-        var clientRequestCipher = new Percolator.Cryptography.SessionRatchetMessage(clientReqEnvelope.ToByteArray());
+        var clientRequestCipher = SessionRatchetMessage.FromBytes(clientReqEnvelope.ToByteArray());
         clientSecureSvc
             .Setup(s => s.EncryptAsync(It.IsAny<SessionId>(), It.IsAny<Percolator.Cryptography.Plaintext>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(clientRequestCipher);
@@ -198,7 +198,7 @@ public class DhtProbeLoopbackTests : IntegrationTestBase
                 var resp = new FindNodeResponse();
                 resp.CloserPeers.Add(new NodeInfo { PeerId = ByteString.CopyFrom(Guid.NewGuid().ToByteArray()), Address = "localhost:59001" });
                 var env = new InternalEnvelope { DhtEnvelope = new DhtEnvelope { FindNodeResponse = resp } };
-                return (new SessionId(Guid.NewGuid()), new Percolator.Cryptography.Plaintext(env.ToByteArray()));
+                return (new SessionId(Guid.NewGuid()), Plaintext.FromBytes(env.ToByteArray()));
             });
 
         // Build client host, wiring loopback transport to server's message service

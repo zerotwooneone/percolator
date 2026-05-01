@@ -30,7 +30,7 @@ public class RouteSenderTests
         var target = new Percolator.Network.PeerId(Guid.NewGuid());
         var dsid = new DirectSessionId(Guid.NewGuid());
         sessions.Setup(s => s.GetByRemotePeerIdAsync(target, 1)).ReturnsAsync(new DirectSession(target, dsid));
-        var cipher = new SessionRatchetMessage(new byte[] {1,2});
+        var cipher = SessionRatchetMessage.FromBytes(new byte[] {1,2});
         secure.Setup(s => s.EncryptAsync(It.IsAny<SessionId>(), It.IsAny<Plaintext>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(cipher);
 
@@ -118,7 +118,7 @@ public class RouteSenderTests
         keyStore.Setup(k => k.GetPublicKeyHashByPeerIdAsync(new Percolator.Identity.PeerId(target.Value), It.IsAny<CancellationToken>()))
             .ReturnsAsync(IdentityPublicKeyHash.FromBytes(new byte[32].Select((_, i) => i == 0 ? (byte)5 : (byte)0).ToArray()));
 
-        var relayCipher = new SessionRatchetMessage(new byte[] { 7 });
+        var relayCipher = SessionRatchetMessage.FromBytes(new byte[] { 7 });
         secure.Setup(s => s.EncryptAsync(It.IsAny<SessionId>(), It.IsAny<Plaintext>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(relayCipher);
 

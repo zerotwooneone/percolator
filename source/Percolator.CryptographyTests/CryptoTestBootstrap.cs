@@ -67,14 +67,14 @@ public static class CryptoTestBootstrap
     public static PrivateEphemeralKey NewDhPrivateKey()
     {
         using var dh = System.Security.Cryptography.ECDiffieHellman.Create(System.Security.Cryptography.ECCurve.NamedCurves.nistP256);
-        return new PrivateEphemeralKey(dh.ExportECPrivateKey());
+        return PrivateEphemeralKey.FromBytes(dh.ExportECPrivateKey());
     }
 
     // Convert a DH private key to its public counterpart VO
     public static RatchetEphemeralKey ToPublic(PrivateEphemeralKey priv)
     {
         using var dh = System.Security.Cryptography.ECDiffieHellman.Create();
-        dh.ImportECPrivateKey(priv.Value, out _);
-        return new RatchetEphemeralKey(dh.PublicKey.ExportSubjectPublicKeyInfo());
+        dh.ImportECPrivateKey(priv.ToArray(), out _);
+        return RatchetEphemeralKey.FromBytes(dh.PublicKey.ExportSubjectPublicKeyInfo());
     }
 }

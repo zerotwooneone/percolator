@@ -403,7 +403,7 @@ public class PercolatorDbContext : DbContext
         {
             builder.HasKey(e => e.Id);
             builder.Property(e => e.Id)
-                .HasConversion(new ValueConverter<NodeId, byte[]>(v => v.Value, v => new NodeId(v)));
+                .HasConversion(new ValueConverter<NodeId, byte[]>(v => v.ToArray(), v => NodeId.FromBytes(v)));
 
             builder.Property(e => e.EndPoint)
                 .HasConversion(new DnsEndPointValueConverter());

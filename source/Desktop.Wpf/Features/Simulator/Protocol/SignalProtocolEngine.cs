@@ -44,19 +44,19 @@ public sealed class SignalProtocolEngine : ISignalProtocolEngine
             // Store private key on the peer's private OTK store
             var otkPrivateRecord = new SimulatedOneTimePreKeyPrivateRecord(
                 SimulatedOneTimePreKeyId.FromGuid(otkId),
-                new PrivatePreKey(otkPrivateBytes),
+                PrivatePreKey.FromBytes(otkPrivateBytes),
                 _clock.UtcNow);
             peer.OneTimePreKeysPrivateMutable.Add(otkPrivateRecord);
 
             // Publish only the public portion
-            oneTimeKeys[oneTimeIndex] = new OneTimeKeyInstance(otkId, new OneTimeKey(otkPublicSpki));
+            oneTimeKeys[oneTimeIndex] = new OneTimeKeyInstance(otkId, OneTimeKey.FromBytes(otkPublicSpki));
         }
         
         return new PreKeyBundleForPublish(
-            identitySigningKey: new RatchetIdentityKey(peer.IdentitySigningKeySpki),
+            identitySigningKey: RatchetIdentityKey.FromBytes(peer.IdentitySigningKeySpki),
             signedPreKeyId: signedPreKey.SignedPreKeyId,
-            signedPreKey: new PreKey(signedPreKey.PublicSpki),
-            signedPreKeySignature: new Signature(signature),
+            signedPreKey: PreKey.FromBytes(signedPreKey.PublicSpki),
+            signedPreKeySignature: Signature.FromBytes(signature),
             oneTimeKeys: oneTimeKeys,
             expirationDateUtc: expiresUtc);
     }
@@ -73,11 +73,11 @@ public sealed class SignalProtocolEngine : ISignalProtocolEngine
             return null;
         }
 
-        var localIkPriv = new PrivatePreKey(initiator.IdentitySigningKeyPrivateKeyEcPrivateKey);
+        var localIkPriv = PrivatePreKey.FromBytes(initiator.IdentitySigningKeyPrivateKeyEcPrivateKey);
         var x3 = _crypto.X3DH_Initiate(localIkPriv, responderBundle);
 
         var sessionId = SessionId.NewId();
-        var root = new RootKey(x3.SharedSecret.Value);
+        var root = RootKey.FromBytes(x3.SharedSecret.ToArray());
 
         var session = RatchetBootstrap.CreateInitiatorSession(
             sessionId,
@@ -92,10 +92,10 @@ public sealed class SignalProtocolEngine : ISignalProtocolEngine
         return new InitiateStandardHandshakeResult(
             SessionId: sessionId,
             InitiatorIdentitySigningKeySpki: initiator.IdentitySigningKeySpki,
-            InitiatorEphemeralKeySpki: x3.EphemeralPublic.Value,
+            InitiatorEphemeralKeySpki: x3.EphemeralPublic.ToArray(),
             SignedPreKeyId: responderBundle.SignedPreKeyId,
             OneTimePreKeyId: responderBundle.OneTimePreKeyId,
-            InitialRootKey: x3.SharedSecret.Value);
+            InitialRootKey: x3.SharedSecret.ToArray());
     }
 
     public SessionRatchetMessage Encrypt(

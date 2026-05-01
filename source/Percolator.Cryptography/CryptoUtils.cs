@@ -19,6 +19,16 @@ namespace Percolator.Cryptography
                 Encoding.UTF8.GetBytes(info));
         }
 
+        public static byte[] KDF(byte[]? salt, ReadOnlySpan<byte> key, string info, int outputLength)
+        {
+            return HKDF.DeriveKey(
+                HashAlgorithmName.SHA256,
+                key.ToArray(),
+                outputLength,
+                salt,
+                Encoding.UTF8.GetBytes(info));
+        }
+
         /// <summary>
         /// Encrypts data using AES-GCM with a deterministic, counter-based nonce.
         /// </summary>
@@ -51,6 +61,23 @@ namespace Percolator.Cryptography
             return result;
         }
 
+        public static byte[] EncryptAesGcm(ReadOnlySpan<byte> key, ulong counter, ReadOnlySpan<byte> plaintext, ReadOnlySpan<byte> associatedData)
+        {
+            var nonceBytes = new byte[12];
+            BinaryPrimitives.WriteUInt64BigEndian(nonceBytes, counter);
+
+            using var aes = new AesGcm(key.ToArray(), TagSize);
+            var ciphertext = new byte[plaintext.Length];
+            var tag = new byte[TagSize];
+            var ad = associatedData.Length > 0 ? associatedData.ToArray() : null;
+            aes.Encrypt(nonceBytes, plaintext.ToArray(), ciphertext, tag, ad);
+
+            var result = new byte[ciphertext.Length + tag.Length];
+            ciphertext.CopyTo(result, 0);
+            tag.CopyTo(result, ciphertext.Length);
+            return result;
+        }
+
         public static byte[] DecryptAesGcm(byte[] key, ulong counter, byte[] ciphertextWithTag, byte[]? associatedData)
         {
             var nonceBytes = new byte[12];
@@ -63,6 +90,22 @@ namespace Percolator.Cryptography
 
             var plaintext = new byte[ciphertext.Length];
             aes.Decrypt(nonceBytes, ciphertext, tag, plaintext, associatedData);
+            return plaintext;
+        }
+
+        public static byte[] DecryptAesGcm(ReadOnlySpan<byte> key, ulong counter, ReadOnlySpan<byte> ciphertextWithTag, ReadOnlySpan<byte> associatedData)
+        {
+            var nonceBytes = new byte[12];
+            BinaryPrimitives.WriteUInt64BigEndian(nonceBytes, counter);
+
+            using var aes = new AesGcm(key.ToArray(), TagSize);
+            var tagOffset = ciphertextWithTag.Length - TagSize;
+            var ciphertext = ciphertextWithTag.Slice(0, tagOffset).ToArray();
+            var tag = ciphertextWithTag.Slice(tagOffset).ToArray();
+            var ad = associatedData.Length > 0 ? associatedData.ToArray() : null;
+
+            var plaintext = new byte[ciphertext.Length];
+            aes.Decrypt(nonceBytes, ciphertext, tag, plaintext, ad);
             return plaintext;
         }
 

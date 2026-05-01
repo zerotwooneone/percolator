@@ -210,7 +210,7 @@ namespace Percolator.ApplicationIntegrationTests.ChatMessaging
                         var svc = ActivatorUtilities.CreateInstance<PercolatorMessageService>(scope.ServiceProvider);
                         var req = new DeliverOpaqueMessageRequest
                         {
-                            Payload = ByteString.CopyFrom(message.Value)
+                            Payload = ByteString.CopyFrom(message.ToArray())
                         };
                         var ctx = new ServerCallContextStub(
                             peer: "ipv4:127.0.0.1:0",
@@ -470,7 +470,7 @@ namespace Percolator.ApplicationIntegrationTests.ChatMessaging
             var peerIdentity = await identityRepo.GetByNameAsync(new Percolator.Identity.Model.DisplayName(recipientName), CancellationToken.None)
                 ?? throw new InvalidOperationException($"Unknown peer name {recipientName}");
             var internalEnvelope = new Percolator.Contracts.InternalEnvelope { ChatEnvelope = envelope };
-            var plaintext = new Percolator.Cryptography.Plaintext(internalEnvelope.ToByteArray());
+            var plaintext = Percolator.Cryptography.Plaintext.FromBytes(internalEnvelope.ToByteArray());
 
             const int maxAttempts = 3;
             for (int attempt = 1; attempt <= maxAttempts; attempt++)

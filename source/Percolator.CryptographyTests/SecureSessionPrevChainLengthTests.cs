@@ -21,12 +21,12 @@ public class SecureSessionPrevChainLengthTests
             SessionId.NewId(),
             PeerId.NewId(),
             new ProtocolVersion(1),
-            CryptoTestBootstrap.CreateBootstrappedState(new RootKey(new byte[32])),
+            CryptoTestBootstrap.CreateBootstrappedState(RootKey.FromBytes(new byte[32])),
             crypto,
             clock);
 
-        var first = s.Encrypt(new Plaintext(new byte[] { 1 }), clock);
-        var second = s.Encrypt(new Plaintext(new byte[] { 2 }), clock);
+        var first = s.Encrypt(Plaintext.FromBytes(new byte[] { 1 }), clock);
+        var second = s.Encrypt(Plaintext.FromBytes(new byte[] { 2 }), clock);
 
         var (_, _, prevLenFirst) = first.GetHeader();
         var (_, _, prevLenSecond) = second.GetHeader();

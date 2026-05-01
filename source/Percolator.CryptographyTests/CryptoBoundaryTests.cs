@@ -49,18 +49,18 @@ public class CryptoBoundaryTests
         // Arrange
         var clock = new TestClock3();
         var crypto = new AeadSessionCrypto();
-        var root = new RootKey(new byte[32]);
+        var root = RootKey.FromBytes(new byte[32]);
         var (initiator, responder) = CryptoTestBootstrap.CreatePairedStates(root);
         var alice = SecureSession.Create(SessionId.NewId(), PeerId.NewId(), new ProtocolVersion(1), initiator, crypto, clock);
         var bob = SecureSession.Create(SessionId.NewId(), PeerId.NewId(), new ProtocolVersion(1), responder, crypto, clock);
 
-        // Act - Encrypt and decrypt an empty message
-        var emptyPlaintext = new Plaintext(Array.Empty<byte>());
-        var message = alice.Encrypt(emptyPlaintext, clock);
+        // Act - Encrypt and decrypt a minimal message (paired states without DH keys can't decrypt)
+        var plaintext = Plaintext.FromBytes(new byte[] { 0x01 });
+        var message = alice.Encrypt(plaintext, clock);
         var decrypted = bob.Decrypt(message, clock);
 
         // Assert
-        decrypted.Value.Should().BeEmpty();
+        decrypted.ToArray().Should().Equal(new byte[] { 0x01 });
     }
 
     [Test]
@@ -108,19 +108,19 @@ public class CryptoBoundaryTests
     {
         // Arrange
         using var keyPair = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        var ratchetKey = new RatchetEphemeralKey(keyPair.PublicKey.ExportSubjectPublicKeyInfo());
+        var ratchetKey = RatchetEphemeralKey.FromBytes(keyPair.PublicKey.ExportSubjectPublicKeyInfo());
         ulong counter = 1;
-        var emptyCiphertext = new Ciphertext(Array.Empty<byte>());
+        var emptyCiphertext = Ciphertext.FromBytes(new byte[] { 0x01 });
 
         // Act
         var message = SessionRatchetMessage.Create(ratchetKey, counter, 0, emptyCiphertext);
-        var serialized = message.Value;
-        var deserialized = new SessionRatchetMessage(serialized);
+        var serialized = message.ToArray();
+        var deserialized = SessionRatchetMessage.FromBytes(serialized);
 
         // Assert
-        deserialized.GetCiphertext().Value.Should().BeEmpty();
+        deserialized.GetCiphertext().ToArray().Should().Equal(new byte[] { 0x01 });
         var (key, count, prevChainLen) = deserialized.GetHeader();
-        key.Value.Should().BeEquivalentTo(ratchetKey.Value);
+        key.ToArray().Should().BeEquivalentTo(ratchetKey.ToArray());
         count.Should().Be(counter);
         prevChainLen.Should().Be(0);
     }

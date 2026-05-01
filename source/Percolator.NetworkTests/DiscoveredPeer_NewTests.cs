@@ -12,7 +12,7 @@ public class DiscoveredPeer_NewTests
     public void RecordDiscovery_Sets_LastSeen_And_Allows_ObserveEndpoint()
     {
         var dk = new DiscoveryKey("seed:127.0.0.1:5000");
-        var pkh = new PublicKeyHash(new byte[32]);
+        var pkh = PublicKeyHash.FromBytes(new byte[32]);
         var now = DateTimeOffset.UtcNow;
         var dp = DiscoveredPeer.Create(dk, pkh, now);
 

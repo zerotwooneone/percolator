@@ -30,7 +30,7 @@ public sealed class AeadRatchetEngine : IRatchetEngine
         if (state is null) throw new ArgumentNullException(nameof(state));
         if (state.SendingChainKey is null) throw new InvalidOperationException("sending chain key not initialized");
 
-        var derived = CryptoUtils.KDF(null, state.SendingChainKey.Value, DeriveLabel, CryptoUtils.KeySize * 2);
+        var derived = CryptoUtils.KDF(null, state.SendingChainKey.Span, DeriveLabel, CryptoUtils.KeySize * 2);
         var messageKey = new byte[CryptoUtils.KeySize];
         var nextChainKey = new byte[CryptoUtils.KeySize];
         Buffer.BlockCopy(derived, 0, messageKey, 0, CryptoUtils.KeySize);
@@ -40,22 +40,24 @@ public sealed class AeadRatchetEngine : IRatchetEngine
         if (state.DhRatchetPrivateKey is not null)
         {
             using var dh = ECDiffieHellman.Create();
-            dh.ImportECPrivateKey(state.DhRatchetPrivateKey.Value, out _);
-            headerKey = new RatchetEphemeralKey(dh.PublicKey.ExportSubjectPublicKeyInfo());
+            dh.ImportECPrivateKey(state.DhRatchetPrivateKey.Span, out _);
+            headerKey = RatchetEphemeralKey.FromBytes(dh.PublicKey.ExportSubjectPublicKeyInfo());
         }
         else
         {
             using var eph = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-            headerKey = new RatchetEphemeralKey(eph.PublicKey.ExportSubjectPublicKeyInfo());
+            headerKey = RatchetEphemeralKey.FromBytes(eph.PublicKey.ExportSubjectPublicKeyInfo());
         }
 
-        var adBuf = SessionRatchetMessage.GetAssociatedData((headerKey, counter, previousChainLength), ad.Value);
-        var ctBytes = CryptoUtils.EncryptAesGcm(messageKey, counter, pt.Value, adBuf);
-        var ct = new Ciphertext(ctBytes);
+        var adBytes = ad.ToArray();
+        var ptBytes = pt.ToArray();
+        var adBuf = SessionRatchetMessage.GetAssociatedData((headerKey, counter, previousChainLength), adBytes);
+        var ctBytes = CryptoUtils.EncryptAesGcm(messageKey, counter, ptBytes, adBuf);
+        var ct = Ciphertext.FromBytes(ctBytes);
 
         var newState = new RatchetState(
             state.RootKey,
-            new ChainKey(nextChainKey),
+            ChainKey.FromBytes(nextChainKey),
             state.SendingCounter + 1,
             state.ReceivingChainKey,
             state.ReceivingCounter,
@@ -77,27 +79,29 @@ public sealed class AeadRatchetEngine : IRatchetEngine
         if (state.ReceivingChainKey is null) throw new InvalidOperationException("receiving chain key not initialized");
 
         var (preKey, counter, prevLen) = framed.GetHeader();
-        if (preKey.Value.Length == 0) throw new ArgumentException("invalid header key");
-        var adBuf = SessionRatchetMessage.GetAssociatedData((preKey, counter, prevLen), ad.Value);
+        if (preKey.Span.Length == 0) throw new ArgumentException("invalid header key");
+        var adBytes = ad.ToArray();
+        var adBuf = SessionRatchetMessage.GetAssociatedData((preKey, counter, prevLen), adBytes);
 
-        var derived = CryptoUtils.KDF(null, state.ReceivingChainKey.Value, DeriveLabel, CryptoUtils.KeySize * 2);
+        var derived = CryptoUtils.KDF(null, state.ReceivingChainKey.Span, DeriveLabel, CryptoUtils.KeySize * 2);
         var messageKey = new byte[CryptoUtils.KeySize];
         var nextChainKey = new byte[CryptoUtils.KeySize];
         Buffer.BlockCopy(derived, 0, messageKey, 0, CryptoUtils.KeySize);
         Buffer.BlockCopy(derived, CryptoUtils.KeySize, nextChainKey, 0, CryptoUtils.KeySize);
 
-        var ptBytes = CryptoUtils.DecryptAesGcm(messageKey, counter, framed.GetCiphertext().Value, adBuf);
+        var ctBytes = framed.GetCiphertext().ToArray();
+        var ptBytes = CryptoUtils.DecryptAesGcm(messageKey, counter, ctBytes, adBuf);
         var newState = new RatchetState(
             state.RootKey,
             state.SendingChainKey,
             state.SendingCounter,
-            new ChainKey(nextChainKey),
+            ChainKey.FromBytes(nextChainKey),
             state.ReceivingCounter + 1,
             prevLen,
             state.RemoteRatchetKey,
             state.DhRatchetPrivateKey,
             state.SkippedKeyLimit);
 
-        return (new Plaintext(ptBytes), newState);
+        return (Plaintext.FromBytes(ptBytes), newState);
     }
 }

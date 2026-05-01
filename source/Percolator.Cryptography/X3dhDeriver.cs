@@ -37,23 +37,23 @@ public sealed class X3dhDeriver : IX3dhDeriver
         OneTimeKey? remoteOneTimePreKey,
         PrivatePreKey localIdentityPrivateKey)
     {
-        if (remoteIdentityKey?.Value is null || remoteIdentityKey.Value.Length == 0)
+        if (remoteIdentityKey is null || remoteIdentityKey.Span.Length == 0)
             throw new CryptographicException("remote IK missing");
-        if (remoteSignedPreKey?.Value is null || remoteSignedPreKey.Value.Length == 0)
+        if (remoteSignedPreKey is null || remoteSignedPreKey.Span.Length == 0)
             throw new CryptographicException("remote SPK missing");
-        if (localIdentityPrivateKey?.Value is null || localIdentityPrivateKey.Value.Length == 0)
+        if (localIdentityPrivateKey is null || localIdentityPrivateKey.Span.Length == 0)
             throw new CryptographicException("local IK private missing");
 
         using var ikA = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        ikA.ImportECPrivateKey(localIdentityPrivateKey.Value, out _);
+        ikA.ImportECPrivateKey(localIdentityPrivateKey.Span, out _);
         using var ikB = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        ikB.ImportSubjectPublicKeyInfo(remoteIdentityKey.Value, out _);
+        ikB.ImportSubjectPublicKeyInfo(remoteIdentityKey.Span, out _);
         using var spkB = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        spkB.ImportSubjectPublicKeyInfo(remoteSignedPreKey.Value, out _);
+        spkB.ImportSubjectPublicKeyInfo(remoteSignedPreKey.Span, out _);
         using var opkB = remoteOneTimePreKey is null ? null : ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         if (opkB is not null)
         {
-            opkB!.ImportSubjectPublicKeyInfo(remoteOneTimePreKey!.Value, out _);
+            opkB!.ImportSubjectPublicKeyInfo(remoteOneTimePreKey!.Span, out _);
         }
 
         using var ekA = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
@@ -91,9 +91,9 @@ public sealed class X3dhDeriver : IX3dhDeriver
         var irk = CryptoUtils.KDF(null, input, KdfLabel_X3dh, CryptoUtils.KeySize);
 
         return new InitiatorResult(
-            new SharedSecret(irk),
-            new RatchetEphemeralKey(ekA_pub_spki),
-            new PrivatePreKey(ekA_priv),
+            SharedSecret.FromBytes(irk),
+            RatchetEphemeralKey.FromBytes(ekA_pub_spki),
+            PrivatePreKey.FromBytes(ekA_priv),
             remoteOneTimePreKey is not null);
     }
 
@@ -104,29 +104,29 @@ public sealed class X3dhDeriver : IX3dhDeriver
         PrivatePreKey localSignedPreKeyPrivate,
         PrivatePreKey? localOneTimePreKeyPrivate)
     {
-        if (initiatorIdentityKey?.Value is null || initiatorIdentityKey.Value.Length == 0)
+        if (initiatorIdentityKey is null || initiatorIdentityKey.Span.Length == 0)
             throw new CryptographicException("initiator IK missing");
-        if (initiatorEphemeralKey?.Value is null || initiatorEphemeralKey.Value.Length == 0)
+        if (initiatorEphemeralKey is null || initiatorEphemeralKey.Span.Length == 0)
             throw new CryptographicException("initiator EK missing");
-        if (localIdentityPrivateKey?.Value is null || localIdentityPrivateKey.Value.Length == 0)
+        if (localIdentityPrivateKey is null || localIdentityPrivateKey.Span.Length == 0)
             throw new CryptographicException("local IK private missing");
-        if (localSignedPreKeyPrivate?.Value is null || localSignedPreKeyPrivate.Value.Length == 0)
+        if (localSignedPreKeyPrivate is null || localSignedPreKeyPrivate.Span.Length == 0)
             throw new CryptographicException("local SPK private missing");
 
         using var ikB = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        ikB.ImportECPrivateKey(localIdentityPrivateKey.Value, out _);
+        ikB.ImportECPrivateKey(localIdentityPrivateKey.Span, out _);
         using var spkB = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        spkB.ImportECPrivateKey(localSignedPreKeyPrivate.Value, out _);
+        spkB.ImportECPrivateKey(localSignedPreKeyPrivate.Span, out _);
         using var otkB = localOneTimePreKeyPrivate is null ? null : ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         if (otkB is not null)
         {
-            otkB!.ImportECPrivateKey(localOneTimePreKeyPrivate!.Value, out _);
+            otkB!.ImportECPrivateKey(localOneTimePreKeyPrivate!.Span, out _);
         }
 
         using var ikA = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        ikA.ImportSubjectPublicKeyInfo(initiatorIdentityKey.Value, out _);
+        ikA.ImportSubjectPublicKeyInfo(initiatorIdentityKey.Span, out _);
         using var ekA = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        ekA.ImportSubjectPublicKeyInfo(initiatorEphemeralKey.Value, out _);
+        ekA.ImportSubjectPublicKeyInfo(initiatorEphemeralKey.Span, out _);
 
         EnsureP256("IK_B", ikB);
         EnsureP256("SPK_B", spkB);
@@ -158,6 +158,6 @@ public sealed class X3dhDeriver : IX3dhDeriver
         }
         var irk = CryptoUtils.KDF(null, input, KdfLabel_X3dh, CryptoUtils.KeySize);
 
-        return new ResponderResult(new SharedSecret(irk), localOneTimePreKeyPrivate is not null);
+        return new ResponderResult(SharedSecret.FromBytes(irk), localOneTimePreKeyPrivate is not null);
     }
 }

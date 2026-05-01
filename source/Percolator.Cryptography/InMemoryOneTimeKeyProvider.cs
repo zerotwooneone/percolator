@@ -9,6 +9,6 @@ public class InMemoryOneTimeKeyProvider : IOneTimeKeyProvider
         using var key = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var spki = key.PublicKey.ExportSubjectPublicKeyInfo();
         var privateKey = key.ExportECPrivateKey();
-        return new ValueTuple<OneTimeKey, PrivateOneTimeKey>(new OneTimeKey(spki), new PrivateOneTimeKey(privateKey));
+        return new ValueTuple<OneTimeKey, PrivateOneTimeKey>(OneTimeKey.FromBytes(spki), PrivateOneTimeKey.FromBytes(privateKey));
     }
 }

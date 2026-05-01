@@ -1,31 +1,21 @@
-using Percolator.Dht.Primitives;
+using Percolator.SourceGenerators;
 using System.Numerics;
 
 namespace Percolator.Dht;
 
-public record NodeId : ByteArrayRecord
+[ByteArray(length: 32)]
+public sealed partial record NodeId
 {
-    public NodeId(byte[] value) : base(value)
-    {
-        if (value.Length != 32)
-        {
-            throw new ArgumentException(
-                "Invalid NodeId length. Expected 32 bytes (SHA-256 digest of the peer's public signing key in SubjectPublicKeyInfo format).",
-                nameof(value));
-        }
-    }
 
     public static BigInteger XorDistance(NodeId id1, NodeId id2)
     {
-        if (id1.Value.Length != id2.Value.Length)
-        {
-            throw new ArgumentException("Node IDs must have the same length for XOR distance calculation.");
-        }
+        var span1 = id1.Span;
+        var span2 = id2.Span;
 
-        var xorResult = new byte[id1.Value.Length];
-        for (int i = 0; i < id1.Value.Length; i++)
+        var xorResult = new byte[span1.Length];
+        for (int i = 0; i < span1.Length; i++)
         {
-            xorResult[i] = (byte)(id1.Value[i] ^ id2.Value[i]);
+            xorResult[i] = (byte)(span1[i] ^ span2[i]);
         }
 
         // The 'true' argument ensures the BigInteger is treated as unsigned.

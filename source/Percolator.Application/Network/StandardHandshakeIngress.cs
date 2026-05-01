@@ -121,12 +121,12 @@ internal sealed class StandardHandshakeIngress : IStandardHandshakeIngress
             otkPriv = await _selfPreKeys.TryPopOneTimePreKeyPrivateAsync(selfIdentityId.Value, otkId, ct).ConfigureAwait(false);
         }
 
-        var initiatorIdentityPublic = new RatchetIdentityKey(initiatorIdentitySpki);
-        var initiatorEphemeralPublic = new RatchetEphemeralKey(request.EphemeralKey.ToByteArray());
+        var initiatorIdentityPublic = RatchetIdentityKey.FromBytes(initiatorIdentitySpki);
+        var initiatorEphemeralPublic = RatchetEphemeralKey.FromBytes(request.EphemeralKey.ToByteArray());
 
-        var localIkPriv = new PrivatePreKey(keys.IdentitySigningKey.ExportECPrivateKey());
-        var localSpkPriv = new PrivatePreKey(spk.Value.spkPrivate);
-        var localOtkPriv = otkPriv is null ? null : new PrivatePreKey(otkPriv);
+        var localIkPriv = PrivatePreKey.FromBytes(keys.IdentitySigningKey.ExportECPrivateKey());
+        var localSpkPriv = PrivatePreKey.FromBytes(spk.Value.spkPrivate);
+        var localOtkPriv = otkPriv is null ? null : PrivatePreKey.FromBytes(otkPriv);
 
         var shared = _sessionCrypto.X3DH_Respond(
             initiatorIdentityPublic,
@@ -135,7 +135,7 @@ internal sealed class StandardHandshakeIngress : IStandardHandshakeIngress
             localSpkPriv,
             localOtkPriv);
 
-        var root = new RootKey(shared.Value);
+        var root = RootKey.FromBytes(shared.ToArray());
         var sessionId = SessionId.NewId();
         var session = RatchetBootstrap.CreateResponderSession(
             sessionId,
@@ -189,7 +189,7 @@ internal sealed class StandardHandshakeIngress : IStandardHandshakeIngress
                 Version = 1,
                 IdentitySigningKey = ByteString.CopyFrom(keys.IdentitySigningKey.ExportSubjectPublicKeyInfo()),
                 ResponsePayload = ByteString.CopyFrom(responsePayloadBytes),
-                PayloadSignature = ByteString.CopyFrom(signature.Value)
+                PayloadSignature = ByteString.CopyFrom(signature.ToArray())
             }
         };
     }

@@ -112,7 +112,7 @@ public sealed class SimulatorStateServiceInitializationTests
 
         // Add session
         var ratchet = new RatchetState(
-            rootKey: new RootKey(new byte[] { 9, 9, 9 }),
+            rootKey: RootKey.FromBytes(new byte[32]),
             sendingChainKey: null,
             sendingCounter: 7,
             receivingChainKey: null,

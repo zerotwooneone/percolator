@@ -17,7 +17,7 @@ public class SecureSessionAdEnforcementTests
     {
         var clock = new TestClock8();
         var crypto = new AeadSessionCrypto();
-        var root = new RootKey(new byte[32]);
+        var root = RootKey.FromBytes(new byte[32]);
         var (initiator, responder) = CryptoTestBootstrap.CreatePairedStates(root);
         var receiver = SecureSession.Create(
             SessionId.NewId(),
@@ -34,16 +34,16 @@ public class SecureSessionAdEnforcementTests
             crypto,
             clock);
 
-        var good = sender.Encrypt(new Plaintext(new byte[] { 0x11 }), clock);
+        var good = sender.Encrypt(Plaintext.FromBytes(new byte[] { 0x11 }), clock);
 
-        // Tamper header: empty ratchet key is invalid (test first to avoid replay)
+        // Tamper header: use a different ratchet key (same length, different content)
         var (hdr, ctr, prev) = good.GetHeader();
-        var tampered = SessionRatchetMessage.Create(new RatchetEphemeralKey(Array.Empty<byte>()), ctr, prev, good.GetCiphertext());
+        var tampered = SessionRatchetMessage.Create(RatchetEphemeralKey.FromBytes(new byte[64]), ctr, prev, good.GetCiphertext());
         Action act = () => receiver.Decrypt(tampered, clock);
         act.Should().Throw<InvalidOperationException>();
 
         // Sanity: non-tampered decrypt then succeeds
         var pt = receiver.Decrypt(good, clock);
-        pt.Value.Should().NotBeNull();
+        pt.ToArray().Should().NotBeNull();
     }
 }

@@ -96,7 +96,7 @@ public class InitiatorFinalizeServiceTests
             SessionId.NewId(),
             PeerId.NewId(),
             new ProtocolVersion(1),
-            new RootKey(root),
+            RootKey.FromBytes(root),
             clock);
 
         var assigned = SessionId.NewId();
@@ -105,7 +105,7 @@ public class InitiatorFinalizeServiceTests
             Version = 1,
             DirectSessionId = assigned.Value.ToString()
         };
-        var first = responder.Encrypt(new Plaintext(inner.ToByteArray()), clock);
+        var first = responder.Encrypt(Plaintext.FromBytes(inner.ToByteArray()), clock);
 
         var sut = new InitiatorFinalizeService(
             new NullLogger<InitiatorFinalizeService>(),
@@ -202,7 +202,7 @@ public class InitiatorFinalizeServiceTests
             SessionId.NewId(),
             PeerId.NewId(),
             new ProtocolVersion(1),
-            new RootKey(root),
+            RootKey.FromBytes(root),
             clock);
 
         var assigned = SessionId.NewId();
@@ -211,7 +211,7 @@ public class InitiatorFinalizeServiceTests
             Version = 1,
             DirectSessionId = assigned.Value.ToString()
         };
-        var first = responder.Encrypt(new Plaintext(inner.ToByteArray()), clock);
+        var first = responder.Encrypt(Plaintext.FromBytes(inner.ToByteArray()), clock);
 
         var sut = new InitiatorFinalizeService(
             new NullLogger<InitiatorFinalizeService>(),

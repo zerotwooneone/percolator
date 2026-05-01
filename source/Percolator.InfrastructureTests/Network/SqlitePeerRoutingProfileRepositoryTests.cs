@@ -1,4 +1,5 @@
 using FluentAssertions;
+using System.Security.Cryptography;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Percolator.Infrastructure.Network;
@@ -32,16 +33,17 @@ public class SqlitePeerRoutingProfileRepositoryTests
         var repo = new SqlitePeerRoutingProfileRepository(ctx);
         var peerId = PeerId.NewId();
 
-        var keyBytes = new byte[] { 1, 2, 3, 4, 5 };
+        using var ecdsa = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var keyBytes = ecdsa.ExportSubjectPublicKeyInfo();
         var profile = new PeerRoutingProfile();
         profile.BindIdentity(peerId);
-        profile.SetIdentityPublicKey(new IdentityPublicKey(keyBytes));
+        profile.SetIdentityPublicKey(IdentityPublicKey.FromBytes(keyBytes));
         await repo.UpsertAsync(profile);
 
-        var loaded = await repo.GetByPublicKeyAsync(new IdentityPublicKey(keyBytes));
+        var loaded = await repo.GetByPublicKeyAsync(IdentityPublicKey.FromBytes(keyBytes));
         loaded.Should().NotBeNull();
         loaded!.Id.Should().Be(peerId);
-        loaded.IdentityPublicKey!.Value.Should().BeEquivalentTo(keyBytes);
+        loaded.IdentityPublicKey!.ToArray().Should().BeEquivalentTo(keyBytes);
     }
 
     [Test]

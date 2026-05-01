@@ -26,7 +26,7 @@ public class SessionMessageTests
         if (identity.Identity is null) throw new InvalidOperationException("Identity context not loaded");
         // Simplified test helper: wrap plaintext bytes into a ratchet message (passthrough)
         await Task.Yield();
-        return new SessionRatchetMessage(plaintext.Value);
+        return SessionRatchetMessage.FromBytes(plaintext.ToArray());
     }
 
     private async Task<Plaintext> TryInferAndDecryptViaStoreAsync(
@@ -37,7 +37,7 @@ public class SessionMessageTests
         if (identity.Identity is null) throw new InvalidOperationException("Identity context not loaded");
         // Simplified test helper: unwrap the ratchet message back to plaintext (passthrough)
         await Task.Yield();
-        return new Plaintext(encrypted.Value);
+        return Plaintext.FromBytes(encrypted.ToArray());
     }
     private ActiveIdentityContext _aliceIdentity = null!;
     private ActiveIdentityContext _bobIdentity = null!;
@@ -111,13 +111,13 @@ public class SessionMessageTests
         // Arrange: Use the shared secret to establish a double ratchet session
         var conversationId = new SessionId(Guid.NewGuid());
         var bobPeerId = new PeerId(_bobIdentity.Identity!.Id);
-        var bobIdentityKey = new CryptoRatchetIdentityKey(_bobIdentity.Keys!.IdentitySigningKey.PublicKey.ExportSubjectPublicKeyInfo());
-        var bobRatchetKey = new RatchetEphemeralKey(_bobIdentity.Keys!.SignedPreKey.PublicKey.ExportSubjectPublicKeyInfo());
+        var bobIdentityKey = RatchetIdentityKey.FromBytes(_bobIdentity.Keys!.IdentitySigningKey.PublicKey.ExportSubjectPublicKeyInfo());
+        var bobRatchetKey = RatchetEphemeralKey.FromBytes(_bobIdentity.Keys!.SignedPreKey.PublicKey.ExportSubjectPublicKeyInfo());
         
 
         var alicePeerId = new PeerId(_aliceIdentity.Identity!.Id);
-        var aliceIdentityKey = new CryptoRatchetIdentityKey(_aliceIdentity.Keys!.IdentitySigningKey.PublicKey.ExportSubjectPublicKeyInfo());
-        var aliceEphemeralKey = new RatchetEphemeralKey(_aliceIdentity.Keys.SignedPreKey.PublicKey.ExportSubjectPublicKeyInfo());
+        var aliceIdentityKey = RatchetIdentityKey.FromBytes(_aliceIdentity.Keys!.IdentitySigningKey.PublicKey.ExportSubjectPublicKeyInfo());
+        var aliceEphemeralKey = RatchetEphemeralKey.FromBytes(_aliceIdentity.Keys.SignedPreKey.PublicKey.ExportSubjectPublicKeyInfo());
         
         // Create the ECDiffieHellman key using Bob's SignedPreKey that was used in the handshake
         using var bobHandshakeKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
@@ -129,22 +129,22 @@ public class SessionMessageTests
         var encryptedBytes = new byte[] { 1, 2, 3, 4, 5 }; // Dummy encrypted data
 
         // Act: Alice encrypts a message using stored session state directly
-        var encryptedResult = await EncryptViaStoreAsync(_aliceIdentity, conversationId, new Plaintext(originalBytes));
+        var encryptedResult = await EncryptViaStoreAsync(_aliceIdentity, conversationId, Plaintext.FromBytes(originalBytes));
 
         // Act: Bob decrypts the message by inferring the correct session using stored state
         var decryptedBytes = await TryInferAndDecryptViaStoreAsync(_bobIdentity, encryptedResult, CancellationToken.None);
 
         // Assert: The decrypted message matches the original
         decryptedBytes.Should().NotBeNull();
-        decryptedBytes!.Value.Should().BeEquivalentTo(originalBytes);
-        Encoding.UTF8.GetString(decryptedBytes!.Value).Should().Be(originalMessage);
+        decryptedBytes!.ToArray().Should().BeEquivalentTo(originalBytes);
+        Encoding.UTF8.GetString(decryptedBytes!.ToArray()).Should().Be(originalMessage);
     }
 
     private (CryptoSharedSecret, CryptoSharedSecret) PerformX3DH()
     {
         // Return dummy shared secrets; actual X3DH handshake is cutover pending
-        var aliceSharedSecret = new CryptoSharedSecret(new byte[32]);
-        var bobSharedSecret = new CryptoSharedSecret(new byte[32]);
+        var aliceSharedSecret = CryptoSharedSecret.FromBytes(new byte[32]);
+        var bobSharedSecret = CryptoSharedSecret.FromBytes(new byte[32]);
         return (aliceSharedSecret, bobSharedSecret);
     }
 }

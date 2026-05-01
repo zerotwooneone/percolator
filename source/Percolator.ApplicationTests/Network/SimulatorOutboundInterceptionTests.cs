@@ -116,7 +116,7 @@ public sealed class SimulatorOutboundInterceptionTests
         routePlanner.Setup(p => p.SelectRoute(profile)).Returns(selection);
 
         var requestSessionId = new DirectSessionId(Guid.NewGuid());
-        var cipher = new SessionRatchetMessage(new byte[] { 1, 2, 3 });
+        var cipher = SessionRatchetMessage.FromBytes(new byte[] { 1, 2, 3 });
 
         interceptor
             .Setup(i => i.InterceptDeliverOpaqueMessageAsync(
@@ -170,7 +170,7 @@ public sealed class SimulatorOutboundInterceptionTests
         routePlanner.Setup(p => p.SelectRoute(profile)).Returns(selection);
 
         var requestSessionId = new DirectSessionId(Guid.NewGuid());
-        var cipher = new SessionRatchetMessage(new byte[] { 1, 2, 3 });
+        var cipher = SessionRatchetMessage.FromBytes(new byte[] { 1, 2, 3 });
 
         interceptor
             .Setup(i => i.InterceptDeliverOpaqueMessageAsync(
@@ -227,7 +227,7 @@ public sealed class SimulatorOutboundInterceptionTests
         routePlanner.Setup(p => p.SelectRoute(profile)).Returns(selection);
 
         var requestSessionId = new DirectSessionId(Guid.NewGuid());
-        var cipher = new SessionRatchetMessage(new byte[] { 1, 2, 3 });
+        var cipher = SessionRatchetMessage.FromBytes(new byte[] { 1, 2, 3 });
 
         interceptor
             .Setup(i => i.InterceptDeliverOpaqueMessageAsync(

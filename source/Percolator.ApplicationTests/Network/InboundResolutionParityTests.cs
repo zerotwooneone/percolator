@@ -38,8 +38,8 @@ namespace Percolator.ApplicationTests.Network
                 ratchetIndex.Object,
                 finalize.Object);
 
-            var pk = new RatchetEphemeralKey(new byte[] { 0xA1 });
-            var payload = SessionRatchetMessage.Create(pk, 1, 0, new Ciphertext(new byte[] { 0x01 })).Value;
+            var pk = RatchetEphemeralKey.FromBytes(new byte[64]);
+            var payload = SessionRatchetMessage.Create(pk, 1, 0, Ciphertext.FromBytes(new byte[] { 0x01 })).ToArray();
 
             var resp = new InviteHandshakeResponse
             {
@@ -78,7 +78,7 @@ namespace Percolator.ApplicationTests.Network
 
             var sid = new SessionId(Guid.NewGuid());
             var inner = MakeInner(sid.Value);
-            var plaintext = new Plaintext(inner.ToByteArray());
+            var plaintext = Plaintext.FromBytes(inner.ToByteArray());
 
             var finalize = new Mock<IInitiatorFinalizeService>(MockBehavior.Strict);
             finalize
@@ -93,8 +93,8 @@ namespace Percolator.ApplicationTests.Network
                 ratchetIndex.Object,
                 finalize.Object);
 
-            var pk2 = new RatchetEphemeralKey(new byte[] { 0xB1 });
-            var payload2 = SessionRatchetMessage.Create(pk2, 1, 0, new Ciphertext(new byte[] { 0x02 })).Value;
+            var pk2 = RatchetEphemeralKey.FromBytes(new byte[64]);
+            var payload2 = SessionRatchetMessage.Create(pk2, 1, 0, Ciphertext.FromBytes(new byte[] { 0x02 })).ToArray();
 
             var resp = new InviteHandshakeResponse
             {
