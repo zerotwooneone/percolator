@@ -82,7 +82,7 @@ namespace Percolator.Application.Network.Handshake
             SessionRatchetMessage ratchetMessage;
             try
             {
-                ratchetMessage = SessionRatchetMessage.FromBytesOwned(request.OpaquePayload.ToArray());
+                ratchetMessage = SessionRatchetMessage.FromSpan(request.OpaquePayload.Span);
             }
             catch
             {

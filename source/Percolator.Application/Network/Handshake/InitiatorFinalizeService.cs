@@ -185,7 +185,7 @@ namespace Percolator.Application.Network.Handshake
                 return null;
             }
 
-            var root = RootKey.FromBytesOwned(shared.ToArray());
+            var root = RootKey.FromSpan(shared.Span);
 
             SessionRatchetMessage ratchetMessage;
             try
@@ -371,7 +371,7 @@ namespace Percolator.Application.Network.Handshake
             {
                 try
                 {
-                    var root = RootKey.FromBytesOwned(pending.InitialRootKey.ToArray());
+                    var root = RootKey.FromBytesOwned(pending.InitialRootKey);
                     var tmp = RatchetBootstrap.CreateInitiatorSession(
                         SessionId.NewId(),
                         Percolator.Cryptography.Primitives.PeerId.NewId(),
@@ -494,7 +494,7 @@ namespace Percolator.Application.Network.Handshake
                 peerIdentity = null;
             }
 
-            var root = RootKey.FromBytesOwned(match.InitialRootKey.ToArray());
+            var root = RootKey.FromBytesOwned(match.InitialRootKey);
             var remoteCryptoPeerId = peerIdentity is null
                 ? Percolator.Cryptography.Primitives.PeerId.NewId()
                 : new Percolator.Cryptography.Primitives.PeerId(peerIdentity.Id.Value);

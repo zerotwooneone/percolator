@@ -22,7 +22,7 @@ public sealed class InitiatorFinalizer : IInitiatorFinalizer
         if (initialRootKey is null) throw new ArgumentNullException(nameof(initialRootKey));
         if (responderMessage is null) throw new ArgumentNullException(nameof(responderMessage));
 
-        var root = RootKey.FromBytesOwned(initialRootKey.ToArray());
+        var root = RootKey.FromSpan(initialRootKey.Span);
         var (send, recv) = RatchetBootstrap.DeriveInitiatorChains(root);
 
         var state = new RatchetState(

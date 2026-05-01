@@ -195,7 +195,7 @@ namespace Percolator.Application.Network
 
             // Create initiator session (acceptor side) with a session id chosen by the acceptor.
             var sessionId = SessionId.NewId();
-            var root = RootKey.FromBytesOwned(x3.SharedSecret.ToArray());
+            var root = RootKey.FromSpan(x3.SharedSecret.Span);
             var proto = pending.ProtocolVersion;
             var session = RatchetBootstrap.CreateInitiatorSession(
                 sessionId,

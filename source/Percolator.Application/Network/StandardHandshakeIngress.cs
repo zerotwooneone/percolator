@@ -135,7 +135,7 @@ internal sealed class StandardHandshakeIngress : IStandardHandshakeIngress
             localSpkPriv,
             localOtkPriv);
 
-        var root = RootKey.FromBytesOwned(shared.ToArray());
+        var root = RootKey.FromSpan(shared.Span);
         var sessionId = SessionId.NewId();
         var session = RatchetBootstrap.CreateResponderSession(
             sessionId,

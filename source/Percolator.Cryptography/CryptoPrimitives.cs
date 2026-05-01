@@ -25,7 +25,7 @@ public sealed class CryptoPrimitives : ICryptoPrimitives
         var responder = _bridge.DeriveResponder(parsed);
         
         // Convert shared secret from X3DH into initial RootKey
-        var rootKey = RootKey.FromBytesOwned(responder.InitialRootKey.ToArray());
+        var rootKey = RootKey.FromSpan(responder.InitialRootKey.Span);
 
         // Derive responder chains from root key
         var (sendChain, recvChain) = RatchetBootstrap.DeriveResponderChains(rootKey);

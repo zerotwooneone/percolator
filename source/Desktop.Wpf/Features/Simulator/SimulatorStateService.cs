@@ -396,7 +396,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             return null;
         }
 
-        var root = RootKey.FromBytesOwned(shared.ToArray());
+        var root = RootKey.FromSpan(shared.Span);
 
         SessionRatchetMessage ratchetMessage;
         try
@@ -540,7 +540,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             localOtkPrivate);
 
         var sessionId = SessionId.NewId();
-        var root = RootKey.FromBytesOwned(shared.ToArray());
+        var root = RootKey.FromSpan(shared.Span);
         var clock = ResolveClock();
         var session = RatchetBootstrap.CreateResponderSession(
             sessionId,

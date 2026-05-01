@@ -276,7 +276,7 @@ public class RequestPreKeyBundleByPkhHandler : IRequestHandler<RequestPreKeyBund
 
         var sessionId = new SessionId(Guid.Parse(respPayload.SessionId));
 
-        var root = RootKey.FromBytesOwned(x3.SharedSecret.ToArray());
+        var root = RootKey.FromSpan(x3.SharedSecret.Span);
         var initiatorSession = RatchetBootstrap.CreateInitiatorSession(
             sessionId,
             new Percolator.Cryptography.Primitives.PeerId(remotePeerId.Value),
