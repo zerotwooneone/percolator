@@ -154,25 +154,13 @@ namespace Percolator.Application.Network
                     ?? throw new InvalidOperationException($"No direct session mapping found for session {inferredSessionId}");
                 var remotePeerId = directSession.RemotePeerId;
                 _logger.LogInformation("Resolved remote peer {PeerId} for session {SessionId}", remotePeerId, directSession.SessionId);
-                // Prefer domain routing profile with RoutePlanner selection
-                DnsEndPoint? endpoint = null;
-                var profile = await _profileRepository.GetByIdAsync(remotePeerId, cancellationToken).ConfigureAwait(false);
-                if (profile is not null)
+                
+                var internalEnvelope = InternalEnvelope.Parser.ParseFrom(plaintext.Span);
+                if (internalEnvelope.ApplicationPayloadCase == InternalEnvelope.ApplicationPayloadOneofCase.None)
                 {
-                    var selection = _routePlanner.SelectRoute(profile);
-                    if (selection.Relay is null)
-                    {
-                        endpoint = selection.Endpoint.EndPoint;
-                        _logger.LogInformation("Using domain-planned endpoint {Endpoint} for peer {PeerId}", endpoint, remotePeerId);
-                    }
-                }
-                if (endpoint is null)
-                {
-                    _logger.LogWarning("No route available for peer {PeerId}; skipping opaque message processing side-effects", remotePeerId);
+                    _logger.LogWarning("Received unhandled one-of message type: {MessageType}", internalEnvelope.ApplicationPayloadCase);
                     return new DeliverOpaqueMessageResult();
                 }
-
-                var internalEnvelope = InternalEnvelope.Parser.ParseFrom(plaintext.Span);
                 _logger.LogDebug("Parsed InternalEnvelope with case {Case}", internalEnvelope.ApplicationPayloadCase);
                 InternalEnvelope? responseEnvelope = null;
 

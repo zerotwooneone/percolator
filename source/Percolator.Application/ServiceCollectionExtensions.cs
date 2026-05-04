@@ -11,6 +11,7 @@ using Percolator.Application.PeerDiscovery;
 using Percolator.Application.RateLimiting;
 using Percolator.Application.ReverseSignal;
 using Percolator.Application.Sessions;
+using Percolator.Chat.App.Handlers;
 using Percolator.Dht.Messages;
 
 namespace Percolator.Application;
@@ -44,8 +45,9 @@ public static class ServiceCollectionExtensions
             cfg.RegisterServicesFromAssembly(typeof(ServiceCollectionExtensions).Assembly);
             // Also include DHT assembly where request/notification handlers live
             cfg.RegisterServicesFromAssembly(typeof(PingRequest).Assembly);
-            // Include Chat handlers assembly (Percolator.Chat)
+            // Include Chat handler assemblies
             cfg.RegisterServicesFromAssembly(typeof(PostTextMessageHandler).Assembly);
+            cfg.RegisterServicesFromAssembly(typeof(ReceiveTextMessageHandler).Assembly);
             // Include Prekey handlers assembly (Percolator.Prekey)
             cfg.RegisterServicesFromAssembly(typeof(Percolator.Prekey.Handlers.SubmitPreKeyBundleHandler).Assembly);
             // Include MessageQueue assembly (Percolator.MessageQueue) without referencing removed handler type
