@@ -121,7 +121,7 @@ public interface ISimulatorStateService
     Task<SessionId?> InitiateStandardHandshakeToMainByRelayPkhAsync(
         Percolator.Network.PeerId simulatedPeerId,
         Percolator.Network.PeerId relayHostPeerId,
-        byte[] responderPublicKeyHash,
+        Percolator.Identity.IdentityPublicKeyHash responderPublicKeyHash,
         CancellationToken cancellationToken = default);
 
     Task<byte[]> ComputePublicKeyHashAsync(Percolator.Network.PeerId simulatedPeerId, CancellationToken cancellationToken = default);

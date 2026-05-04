@@ -1,6 +1,7 @@
 using ObservableCollections;
 using Desktop.Wpf.Features.Simulator.Models;
 using Percolator.Cryptography;
+using Percolator.Identity;
 using Percolator.Network;
 using R3;
 using System;
@@ -19,17 +20,17 @@ public sealed class SimulatedPeerModel : IDisposable
     private readonly ReactiveProperty<byte[]?> _targetPublicKeyHash;
     private readonly ReactiveProperty<ConnectionMode?> _selectedRouteMode;
     private readonly ReactiveProperty<string?> _directEndpoint;
-    private readonly ReactiveProperty<PeerId?> _relayHostPeerId;
+    private readonly ReactiveProperty<Percolator.Network.PeerId?> _relayHostPeerId;
 
     private readonly ReactiveProperty<ConnectionMode> _connectionMode;
     private readonly ReactiveProperty<string?> _host;
     private readonly ReactiveProperty<int> _port;
-    private readonly ReactiveProperty<PeerId> _relayPeerId;
+    private readonly ReactiveProperty<Percolator.Network.PeerId> _relayPeerId;
     private readonly ReactiveProperty<string?> _phase;
     private readonly ReactiveProperty<DateTimeOffset?> _notUntilUtc;
     private readonly ReactiveProperty<string?> _lastError;
 
-    private readonly ReactiveProperty<byte[]?> _pendingStandardHandshakeToMainResponderPublicKeyHash;
+    private readonly ReactiveProperty<IdentityPublicKeyHash?> _pendingStandardHandshakeToMainResponderPublicKeyHash;
     private readonly ReactiveProperty<Guid?> _pendingStandardHandshakeToMainTemporarySessionId;
 
     private readonly ObservableList<SimulatorHandshakeAttemptState> _handshakeAttempts;
@@ -48,7 +49,7 @@ public sealed class SimulatedPeerModel : IDisposable
     private readonly ObservableDictionary<string, SimulatedPendingStandardSignalHelloModel> _pendingInboundStandardSignalHellos;
 
     public SimulatedPeerModel(
-        PeerId peerId,
+        Percolator.Network.PeerId peerId,
         int selfIdentityId,
         string? displayName,
         bool isOnline,
@@ -58,18 +59,18 @@ public sealed class SimulatedPeerModel : IDisposable
         ConnectionMode connectionMode = Desktop.Wpf.Features.Simulator.ConnectionMode.Direct,
         string? host = null,
         int port = 0,
-        PeerId? relayPeerId = null,
+        Percolator.Network.PeerId? relayPeerId = null,
         SimulatorPeerUiState uiState = SimulatorPeerUiState.Ready,
         Guid? pendingCorrelationId = null,
         byte[]? targetPublicKeyHash = null,
         ConnectionMode? selectedRouteMode = null,
         string? directEndpoint = null,
-        PeerId? relayHostPeerId = null,
+        Percolator.Network.PeerId? relayHostPeerId = null,
         string? phase = null,
         DateTimeOffset? notUntilUtc = null,
         string? lastError = null,
         List<SimulatorHandshakeAttemptState>? handshakeAttempts = null,
-        byte[]? pendingStandardHandshakeToMainResponderPublicKeyHash = null,
+        IdentityPublicKeyHash? pendingStandardHandshakeToMainResponderPublicKeyHash = null,
         Guid? pendingStandardHandshakeToMainTemporarySessionId = null,
         List<Guid>? knownPeerIds = null,
         List<SimulatedPublishedPreKeyBundleModel>? publishedPreKeyBundles = null)
@@ -101,17 +102,17 @@ public sealed class SimulatedPeerModel : IDisposable
         _targetPublicKeyHash = new ReactiveProperty<byte[]?>(targetPublicKeyHash);
         _selectedRouteMode = new ReactiveProperty<ConnectionMode?>(selectedRouteMode);
         _directEndpoint = new ReactiveProperty<string?>(directEndpoint);
-        _relayHostPeerId = new ReactiveProperty<PeerId?>(relayHostPeerId);
+        _relayHostPeerId = new ReactiveProperty<Percolator.Network.PeerId?>(relayHostPeerId);
 
         _connectionMode = new ReactiveProperty<ConnectionMode>(connectionMode);
         _host = new ReactiveProperty<string?>(host);
         _port = new ReactiveProperty<int>(port);
-        _relayPeerId = new ReactiveProperty<PeerId>(relayPeerId ?? new PeerId(Guid.Empty));
+        _relayPeerId = new ReactiveProperty<Percolator.Network.PeerId>(relayPeerId ?? new Percolator.Network.PeerId(Guid.Empty));
         _phase = new ReactiveProperty<string?>(phase);
         _notUntilUtc = new ReactiveProperty<DateTimeOffset?>(notUntilUtc);
         _lastError = new ReactiveProperty<string?>(lastError);
 
-        _pendingStandardHandshakeToMainResponderPublicKeyHash = new ReactiveProperty<byte[]?>(pendingStandardHandshakeToMainResponderPublicKeyHash);
+        _pendingStandardHandshakeToMainResponderPublicKeyHash = new ReactiveProperty<IdentityPublicKeyHash?>(pendingStandardHandshakeToMainResponderPublicKeyHash);
         _pendingStandardHandshakeToMainTemporarySessionId = new ReactiveProperty<Guid?>(pendingStandardHandshakeToMainTemporarySessionId);
 
         _handshakeAttempts = new ObservableList<SimulatorHandshakeAttemptState>();
@@ -134,7 +135,7 @@ public sealed class SimulatedPeerModel : IDisposable
         _pendingInboundStandardSignalHellos = new ObservableDictionary<string, SimulatedPendingStandardSignalHelloModel>(StringComparer.Ordinal);
     }
 
-    public PeerId PeerId { get; }
+    public Percolator.Network.PeerId PeerId { get; }
 
     public int SelfIdentityId { get; }
 
@@ -150,17 +151,17 @@ public sealed class SimulatedPeerModel : IDisposable
     public ReadOnlyReactiveProperty<byte[]?> TargetPublicKeyHash => _targetPublicKeyHash;
     public ReadOnlyReactiveProperty<ConnectionMode?> SelectedRouteMode => _selectedRouteMode;
     public ReadOnlyReactiveProperty<string?> DirectEndpoint => _directEndpoint;
-    public ReadOnlyReactiveProperty<PeerId?> RelayHostPeerId => _relayHostPeerId;
+    public ReadOnlyReactiveProperty<Percolator.Network.PeerId?> RelayHostPeerId => _relayHostPeerId;
 
     public ReadOnlyReactiveProperty<ConnectionMode> ConnectionMode => _connectionMode;
     public ReadOnlyReactiveProperty<string?> Host => _host;
     public ReadOnlyReactiveProperty<int> Port => _port;
-    public ReadOnlyReactiveProperty<PeerId> RelayPeerId => _relayPeerId;
+    public ReadOnlyReactiveProperty<Percolator.Network.PeerId> RelayPeerId => _relayPeerId;
     public ReadOnlyReactiveProperty<string?> Phase => _phase;
     public ReadOnlyReactiveProperty<DateTimeOffset?> NotUntilUtc => _notUntilUtc;
     public ReadOnlyReactiveProperty<string?> LastError => _lastError;
 
-    public ReadOnlyReactiveProperty<byte[]?> PendingStandardHandshakeToMainResponderPublicKeyHash => _pendingStandardHandshakeToMainResponderPublicKeyHash;
+    public ReadOnlyReactiveProperty<IdentityPublicKeyHash?> PendingStandardHandshakeToMainResponderPublicKeyHash => _pendingStandardHandshakeToMainResponderPublicKeyHash;
     public ReadOnlyReactiveProperty<Guid?> PendingStandardHandshakeToMainTemporarySessionId => _pendingStandardHandshakeToMainTemporarySessionId;
 
     public IReadOnlyObservableList<SimulatorHandshakeAttemptState> HandshakeAttempts => _handshakeAttempts;
@@ -222,10 +223,10 @@ public sealed class SimulatedPeerModel : IDisposable
     public void SetDirectEndpoint(string? directEndpoint)
         => _directEndpoint.Value = directEndpoint;
 
-    public void SetRelayHostPeerId(PeerId? relayHostPeerId)
+    public void SetRelayHostPeerId(Percolator.Network.PeerId? relayHostPeerId)
         => _relayHostPeerId.Value = relayHostPeerId;
 
-    public void SetConnection(ConnectionMode mode, string? host, int port, PeerId relayPeerId)
+    public void SetConnection(ConnectionMode mode, string? host, int port, Percolator.Network.PeerId relayPeerId)
     {
         _connectionMode.Value = mode;
         _host.Value = host;
@@ -242,7 +243,7 @@ public sealed class SimulatedPeerModel : IDisposable
     public void SetLastError(string? lastError)
         => _lastError.Value = lastError;
 
-    public void SetPendingStandardHandshakeToMain(byte[]? responderPublicKeyHash, Guid? temporarySessionId)
+    public void SetPendingStandardHandshakeToMain(IdentityPublicKeyHash? responderPublicKeyHash, Guid? temporarySessionId)
     {
         _pendingStandardHandshakeToMainResponderPublicKeyHash.Value = responderPublicKeyHash;
         _pendingStandardHandshakeToMainTemporarySessionId.Value = temporarySessionId;
@@ -387,7 +388,7 @@ public sealed class SimulatedPeerModel : IDisposable
             NotUntilUtc: _notUntilUtc.Value,
             LastError: _lastError.Value,
             HandshakeAttempts: _handshakeAttempts.ToList(),
-            PendingStandardHandshakeToMainResponderPublicKeyHash: _pendingStandardHandshakeToMainResponderPublicKeyHash.Value?.ToArray(),
+            PendingStandardHandshakeToMainResponderPublicKeyHash: _pendingStandardHandshakeToMainResponderPublicKeyHash.Value,
             PendingStandardHandshakeToMainTemporarySessionId: _pendingStandardHandshakeToMainTemporarySessionId.Value,
             KnownPeerIds: KnownPeerIds.ToList(),
             PublishedPreKeyBundles: PublishedPreKeyBundles
@@ -511,8 +512,8 @@ public sealed record SimulatedOutboundInviteModel(Guid CorrelationId, byte[] Sig
 public sealed record SimulatedPendingInviteHandshakeResponseModel(Guid CorrelationId, byte[] ResponseBytes);
 
 public sealed record SimulatedPublishedPreKeyBundleModel(
-    byte[] RecipientPublicKeyHash,
-    PeerId LogicalOwnerPeerId,
+    IdentityPublicKeyHash RecipientPublicKeyHash,
+    Percolator.Network.PeerId LogicalOwnerPeerId,
     byte[] IdentityKey,
     Guid SignedPreKeyId,
     byte[] SignedPreKey,

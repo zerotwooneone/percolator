@@ -478,7 +478,7 @@ public sealed class SimulatedPeerItemViewModel : IDisposable
         }
 
         var mainSpki = _active.Keys.IdentitySigningKey.ExportSubjectPublicKeyInfo();
-        var mainPkh = SHA256.HashData(mainSpki);
+        var mainPkh = Percolator.Identity.IdentityPublicKeyHash.FromSpki(mainSpki);
 
         _ = await _state.InitiateStandardHandshakeToMainByRelayPkhAsync(
                 simulatedPeerId: _model.PeerId,

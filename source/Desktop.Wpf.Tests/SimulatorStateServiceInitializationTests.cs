@@ -245,7 +245,7 @@ public sealed class SimulatorStateServiceInitializationTests
             cancellationToken: CancellationToken.None);
 
         var simulatedPeer = sut.Peers.Single(p => p.PeerId == simulatedPeerId);
-        var simulatedPkh = SHA256.HashData(simulatedPeer.IdentitySigningKeySpki);
+        var simulatedPkh = Percolator.Identity.IdentityPublicKeyHash.FromSpki(simulatedPeer.IdentitySigningKeySpki);
 
         // Act: pop the bundle 4 times
         var pop1 = await sut.TryPopPreKeyBundleByRecipientPkhAsync(

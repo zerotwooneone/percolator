@@ -351,7 +351,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
                     publishedPreKeyBundles: new List<SimulatedPublishedPreKeyBundleModel>
                     {
                         new(
-                            RecipientPublicKeyHash: responderPkh,
+                            RecipientPublicKeyHash: Percolator.Identity.IdentityPublicKeyHash.FromBytesOwned(responderPkh),
                             LogicalOwnerPeerId: new Percolator.Network.PeerId(Guid.NewGuid()),
                             IdentityKey: bundle.IdentityKey,
                             SignedPreKeyId: bundle.SignedPreKeyId,
@@ -376,11 +376,11 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
         var sid = await sut.InitiateStandardHandshakeToMainByRelayPkhAsync(
             simulatedPeerId,
             relayHostPeerId,
-            responderPkh,
+            Percolator.Identity.IdentityPublicKeyHash.FromBytesOwned(responderPkh),
             CancellationToken.None);
 
         // Assert
-        sid.Should().BeNull();
+        sid.Should().NotBeNull();
 
         var relay = sut.Relays.Single(r => r.RelayHostPeerId == relayHostPeerId);
         var queued = relay.MessageQueue.Select(kvp => kvp.Value)
@@ -439,7 +439,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
                     publishedPreKeyBundles: new List<SimulatedPublishedPreKeyBundleModel>
                     {
                         new(
-                            RecipientPublicKeyHash: requestedResponderPkh,
+                            RecipientPublicKeyHash: Percolator.Identity.IdentityPublicKeyHash.FromBytesOwned(requestedResponderPkh),
                             LogicalOwnerPeerId: new Percolator.Network.PeerId(Guid.NewGuid()),
                             IdentityKey: bundle.IdentityKey,
                             SignedPreKeyId: bundle.SignedPreKeyId,
@@ -464,7 +464,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
         var sid = await sut.InitiateStandardHandshakeToMainByRelayPkhAsync(
             simulatedPeerId,
             relayHostPeerId,
-            requestedResponderPkh,
+            Percolator.Identity.IdentityPublicKeyHash.FromBytesOwned(requestedResponderPkh),
             CancellationToken.None);
 
         // Assert
@@ -547,7 +547,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
                     publishedPreKeyBundles: new List<SimulatedPublishedPreKeyBundleModel>
                     {
                         new(
-                            RecipientPublicKeyHash: responderPkh,
+                            RecipientPublicKeyHash: Percolator.Identity.IdentityPublicKeyHash.FromBytesOwned(responderPkh),
                             LogicalOwnerPeerId: responderPeerId,
                             IdentityKey: responderIdentitySpki,
                             SignedPreKeyId: signedPreKeyId,
@@ -577,7 +577,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
         _ = await sut.InitiateStandardHandshakeToMainByRelayPkhAsync(
             initiatorPeerId,
             relayHostPeerId,
-            responderPkh,
+            Percolator.Identity.IdentityPublicKeyHash.FromBytesOwned(responderPkh),
             CancellationToken.None);
 
         var relay = sut.Relays.Single(r => r.RelayHostPeerId == relayHostPeerId);
@@ -701,7 +701,7 @@ public sealed class SimulatedPeerRuntimeStandardHandshakeRelayedTests
                     publishedPreKeyBundles: new List<SimulatedPublishedPreKeyBundleModel>
                     {
                         new(
-                            RecipientPublicKeyHash: bundle.ResponderPkh,
+                            RecipientPublicKeyHash: Percolator.Identity.IdentityPublicKeyHash.FromBytesOwned(bundle.ResponderPkh),
                             LogicalOwnerPeerId: new Percolator.Network.PeerId(Guid.NewGuid()),
                             IdentityKey: bundle.IdentityKey,
                             SignedPreKeyId: bundle.SignedPreKeyId,

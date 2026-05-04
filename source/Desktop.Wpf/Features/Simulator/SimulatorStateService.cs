@@ -691,7 +691,10 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             SimulatedPublishedPreKeyBundleModel? popped;
             try
             {
-                popped = await TryPopPreKeyBundleByRecipientPkhAsync(simulatedPeerId, getReq.PublicKeyHash.ToByteArray(), cancellationToken)
+                popped = await TryPopPreKeyBundleByRecipientPkhAsync(
+                        simulatedPeerId,
+                        Percolator.Identity.IdentityPublicKeyHash.FromBytesOwned(getReq.PublicKeyHash.ToByteArray()),
+                        cancellationToken)
                     .ConfigureAwait(false);
             }
             catch
@@ -787,8 +790,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        byte[] recipientPublicKeyHash;
-        byte[] dtoBytes;
+        Percolator.Identity.IdentityPublicKeyHash recipientPublicKeyHash;
         byte[] identityKey;
         Guid signedPreKeyId;
         byte[] signedPreKey;
@@ -806,26 +808,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
                 expiresUtc: expiresUtc,
                 oneTimeKeyCount: oneTimeKeyCount);
 
-            var dto = new GetPreKeyBundleResponse.Types.PreKeyBundle
-            {
-                Version = 1,
-                IdentityKey = ByteString.CopyFrom(model.IdentitySigningKeySpki),
-                SignedPreKeyId = ByteString.CopyFrom(bundle.SignedPreKeyId.ToByteArray()),
-                SignedPreKey = ByteString.CopyFrom(bundle.SignedPreKey.ToArray()),
-                PreKeySignature = ByteString.CopyFrom(bundle.SignedPreKeySignature.ToArray())
-            };
-
-            foreach (var bundleOneTimeKey in bundle.OneTimeKeys)        
-            {
-                dto.OneTimeKeys.Add(new GetPreKeyBundleResponse.Types.OneTimeKey
-                {
-                    OneTimeKeyId = ByteString.CopyFrom(bundleOneTimeKey.Id.ToByteArray()),
-                    KeyBytes = ByteString.CopyFrom(bundleOneTimeKey.Key.ToArray())
-                });
-            }
-
-            recipientPublicKeyHash = SHA256.HashData(model.IdentitySigningKeySpki);
-            dtoBytes = dto.ToByteArray();
+            recipientPublicKeyHash = Percolator.Identity.IdentityPublicKeyHash.FromSpki(model.IdentitySigningKeySpki);
             identityKey = bundle.IdentitySigningKey.ToArray();
             signedPreKeyId = bundle.SignedPreKeyId;
             signedPreKey = bundle.SignedPreKey.ToArray();
@@ -860,13 +843,10 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
     public async Task<SessionId?> InitiateStandardHandshakeToMainByRelayPkhAsync(
         Percolator.Network.PeerId simulatedPeerId,
         Percolator.Network.PeerId relayHostPeerId,
-        byte[] responderPublicKeyHash,
+        Percolator.Identity.IdentityPublicKeyHash responderPublicKeyHash,
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (responderPublicKeyHash is null) throw new ArgumentNullException(nameof(responderPublicKeyHash));
-        if (responderPublicKeyHash.Length == 0) return null;
-
         var popped = await TryPopPreKeyBundleByRecipientPkhAsync(relayHostPeerId, responderPublicKeyHash, cancellationToken)
             .ConfigureAwait(false);
 
@@ -906,16 +886,15 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         if (!bundleProto.HasPreKeySignature || bundleProto.PreKeySignature.Length == 0) return null;
 
         var actualPkh = Percolator.Identity.IdentityPublicKeyHash.FromSpki(bundleProto.IdentityKey.ToByteArray());
-        var responderPkhTyped = Percolator.Identity.IdentityPublicKeyHash.FromBytes(responderPublicKeyHash);
-        if (!actualPkh.Equals(responderPkhTyped))
+        if (!actualPkh.Equals(responderPublicKeyHash))
         {
             return null;
         }
 
-        Guid signedPreKeyId;
+        Guid signedPreKeyGuid;
         try
         {
-            signedPreKeyId = new Guid(bundleProto.SignedPreKeyId.ToByteArray());
+            signedPreKeyGuid = new Guid(bundleProto.SignedPreKeyId.ToByteArray());
         }
         catch
         {
@@ -936,7 +915,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         
         var responderBundle = new Percolator.Cryptography.PreKeyBundle(
             identitySigningKey: RatchetIdentityKey.FromBytesOwned(bundleProto.IdentityKey.ToByteArray()),
-            signedPreKeyId: signedPreKeyId,
+            signedPreKeyId: signedPreKeyGuid,
             signedPreKey: PreKey.FromBytesOwned(bundleProto.SignedPreKey.ToByteArray()),
             signedPreKeySignature: Percolator.Cryptography.Signature.FromBytesOwned(bundleProto.PreKeySignature.ToByteArray()),
             oneTimePreKeyId: oneTimePreKeyInstance?.Id,
@@ -944,6 +923,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             expirationDateUtc: null);
 
         byte[] helloBytes;
+        SessionId sessionId;
         await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -956,6 +936,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
                 return null;
             }
 
+            sessionId = initiated.SessionId;
             model.SetPendingStandardHandshakeToMain(responderPublicKeyHash, initiated.SessionId.Value);
 
             var hello = new HandshakeInitiatorHello
@@ -979,7 +960,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
 
         await EnqueueRelayDownstreamToPeerAsync(
                 relayHostPeerId: relayHostPeerId,
-                targetIdentityPublicKeyHash: Percolator.Identity.IdentityPublicKeyHash.FromBytes(responderPublicKeyHash),
+                targetIdentityPublicKeyHash: responderPublicKeyHash,
                 opaqueBytes: helloBytes,
                 debugType: nameof(HandshakeInitiatorHello),
                 cancellationToken: cancellationToken)
@@ -991,7 +972,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             peerId: simulatedPeerId,
             relayHostPeerId: relayHostPeerId);
 
-        return null;
+        return sessionId;
     }
 
     private const int OneTimeKeyRequestSanityLimit = 100;
@@ -1533,7 +1514,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             snapshot = relay.MessageQueue
                 .Select(kvp => kvp.Value)
                 .OfType<InboundRelayMessage>()
-                .Where(x => x.TargetPkh.Span.SequenceEqual(targetIdentityPublicKeyHash.Span))
+                .Where(x => x.TargetPkh == targetIdentityPublicKeyHash)
                 .OrderBy(x => x.EnqueuedUtc)
                 .Take(max)
                 .ToList();
@@ -1806,7 +1787,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
                     return null;
                 }
 
-                var responderPkhTyped = Percolator.Identity.IdentityPublicKeyHash.FromSpki(resp.Response.IdentitySigningKey.ToByteArray());
+                var responderPkh = Percolator.Identity.IdentityPublicKeyHash.FromSpki(resp.Response.IdentitySigningKey.ToByteArray());
                 await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
                 try
                 {
@@ -1815,12 +1796,11 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
 
                     var pendingPkh = model.PendingStandardHandshakeToMainResponderPublicKeyHash.CurrentValue;
                     var pendingSidGuid = model.PendingStandardHandshakeToMainTemporarySessionId.CurrentValue;
-                    if (pendingPkh is null || pendingPkh.Length == 0 || pendingSidGuid is null)
+                    if (pendingPkh is null || pendingSidGuid is null)
                     {
                         return null;
                     }
-                    var pendingPkhTyped = Percolator.Identity.IdentityPublicKeyHash.FromBytes(pendingPkh);
-                    if (!pendingPkhTyped.Equals(responderPkhTyped))
+                    if (!pendingPkh.Equals(responderPkh))
                     {
                         return null;
                     }
@@ -2532,7 +2512,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
 
     public async Task PublishPreKeyBundleAsync(
         Percolator.Network.PeerId relayHostPeerId,
-        byte[] recipientPublicKeyHash,
+        Percolator.Identity.IdentityPublicKeyHash recipientPublicKeyHash,
         Percolator.Network.PeerId logicalOwnerPeerId,
         byte[] identityKey,
         Guid signedPreKeyId,
@@ -2543,7 +2523,6 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (recipientPublicKeyHash is null) throw new ArgumentNullException(nameof(recipientPublicKeyHash));
 
         await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -2572,16 +2551,15 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             "Pre-key bundle published",
             peerId: logicalOwnerPeerId,
             relayHostPeerId: relayHostPeerId,
-            contextTag: Convert.ToBase64String(recipientPublicKeyHash));
+            contextTag: recipientPublicKeyHash.ToString());
     }
 
     internal async Task<SimulatedPublishedPreKeyBundleModel?> TryPopPreKeyBundleByRecipientPkhAsync(
         Percolator.Network.PeerId relayHostPeerId,
-        byte[] recipientPublicKeyHash,
+        Percolator.Identity.IdentityPublicKeyHash recipientPublicKeyHash,
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (recipientPublicKeyHash is null) throw new ArgumentNullException(nameof(recipientPublicKeyHash));
 
         await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -2598,7 +2576,7 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             }
 
             var match = host.PublishedPreKeyBundles
-                .FirstOrDefault(b => b.RecipientPublicKeyHash.SequenceEqual(recipientPublicKeyHash));
+                .FirstOrDefault(b => b.RecipientPublicKeyHash.Equals(recipientPublicKeyHash));
 
             if (match is null)
             {

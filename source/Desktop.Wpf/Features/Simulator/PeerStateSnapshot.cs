@@ -1,12 +1,13 @@
 using Desktop.Wpf.Features.Chat;
 using Desktop.Wpf.Features.Simulator.Models;
 using Percolator.Cryptography;
+using Percolator.Identity;
 using Percolator.Network;
 
 namespace Desktop.Wpf.Features.Simulator;
 
 public sealed record PeerStateSnapshot(
-    PeerId PeerId,
+   Percolator.Network.PeerId PeerId,
     int SelfIdentityId,
     string? DisplayName,
     bool IsOnline,
@@ -16,18 +17,18 @@ public sealed record PeerStateSnapshot(
     ConnectionMode ConnectionMode,
     string? Host,
     int Port,
-    PeerId RelayPeerId,
+   Percolator.Network.PeerId RelayPeerId,
     SimulatorPeerUiState UiState,
     Guid? InboundReverseSignalPendingCorrelationId,
     byte[]? TargetPublicKeyHash,
     ConnectionMode? SelectedRouteMode,
     string? DirectEndpoint,
-    PeerId? RelayHostPeerId,
+   Percolator.Network.PeerId? RelayHostPeerId,
     string? Phase,
     DateTimeOffset? NotUntilUtc,
     string? LastError,
     IReadOnlyList<SimulatorHandshakeAttemptState> HandshakeAttempts,
-    byte[]? PendingStandardHandshakeToMainResponderPublicKeyHash,
+    IdentityPublicKeyHash? PendingStandardHandshakeToMainResponderPublicKeyHash,
     Guid? PendingStandardHandshakeToMainTemporarySessionId,
     IReadOnlyList<Guid> KnownPeerIds,
     IReadOnlyList<PublishedPreKeyBundleSnapshot> PublishedPreKeyBundles,
@@ -39,8 +40,8 @@ public sealed record PeerStateSnapshot(
     IReadOnlyList<SimulatedOneTimePreKeyPrivateSnapshot> OneTimePreKeysPrivate);
 
 public sealed record PublishedPreKeyBundleSnapshot(
-    byte[] RecipientPublicKeyHash,
-    PeerId LogicalOwnerPeerId,
+    IdentityPublicKeyHash RecipientPublicKeyHash,
+   Percolator.Network.PeerId LogicalOwnerPeerId,
     byte[] IdentityKey,
     Guid SignedPreKeyId,
     byte[] SignedPreKey,

@@ -210,11 +210,13 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
             lastError: dto.LastError,
             knownPeerIds: dto.KnownPeerIds,
             handshakeAttempts: dto.HandshakeAttempts,
-            pendingStandardHandshakeToMainResponderPublicKeyHash: dto.PendingStandardHandshakeToMainResponderPublicKeyHash,
+            pendingStandardHandshakeToMainResponderPublicKeyHash: dto.PendingStandardHandshakeToMainResponderPublicKeyHash is null
+                ? null
+                : Percolator.Identity.IdentityPublicKeyHash.FromBytesOwned(dto.PendingStandardHandshakeToMainResponderPublicKeyHash),
             pendingStandardHandshakeToMainTemporarySessionId: dto.PendingStandardHandshakeToMainTemporarySessionId,
             publishedPreKeyBundles: dto.Relay?.PreKeyStore?.PublishedBundles
                 ?.Select(b => new SimulatedPublishedPreKeyBundleModel(
-                    b.RecipientPublicKeyHash,
+                    Percolator.Identity.IdentityPublicKeyHash.FromBytesOwned(b.RecipientPublicKeyHash),
                     b.LogicalOwnerPeerId,
                     b.IdentityKey,
                     b.SignedPreKeyId,
@@ -260,7 +262,7 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
             NotUntilUtc = model.NotUntilUtc,
             LastError = model.LastError,
             HandshakeAttempts = model.HandshakeAttempts.ToList(),
-            PendingStandardHandshakeToMainResponderPublicKeyHash = model.PendingStandardHandshakeToMainResponderPublicKeyHash,
+            PendingStandardHandshakeToMainResponderPublicKeyHash = model.PendingStandardHandshakeToMainResponderPublicKeyHash?.ToArray(),
             PendingStandardHandshakeToMainTemporarySessionId = model.PendingStandardHandshakeToMainTemporarySessionId,
             Relay = new SimulatedPeerRelayStateDto
             {
@@ -271,7 +273,7 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
                     PublishedBundles = model.PublishedPreKeyBundles
                         .Select(b => new PublishedPreKeyBundleDto
                         {
-                            RecipientPublicKeyHash = b.RecipientPublicKeyHash,
+                            RecipientPublicKeyHash = b.RecipientPublicKeyHash.ToArray(),
                             LogicalOwnerPeerId = b.LogicalOwnerPeerId,
                             IdentityKey = b.IdentityKey,
                             SignedPreKeyId = b.SignedPreKeyId,
