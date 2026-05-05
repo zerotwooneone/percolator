@@ -24,10 +24,9 @@ public class ChatViewModelTests
     {
         var ctx = new SessionContext();
         using var chatState = new ChatStateService();
-        var reloadCoordinator = new Mock<IChatReloadCoordinator>(MockBehavior.Loose);
         var mediator = new Mock<IMediator>(MockBehavior.Loose);
         var ui = new Mock<IUiDispatcher>(MockBehavior.Loose);
-        var vm = new ChatViewModel(ctx, chatState, reloadCoordinator.Object, mediator.Object, ui.Object);
+        var vm = new ChatViewModel(ctx, chatState, mediator.Object, ui.Object);
 
         vm.MessageInput.Value = "";
         vm.CanSend.Value.Should().BeFalse();
@@ -41,10 +40,9 @@ public class ChatViewModelTests
     {
         var ctx = new SessionContext();
         var chatState = new ChatStateService();
-        var reloadCoordinator = new Mock<IChatReloadCoordinator>(MockBehavior.Loose);
         var mediator = new Mock<IMediator>(MockBehavior.Loose);
         var ui = new Mock<IUiDispatcher>(MockBehavior.Loose);
-        var vm = new ChatViewModel(ctx, chatState, reloadCoordinator.Object, mediator.Object, ui.Object);
+        var vm = new ChatViewModel(ctx, chatState, mediator.Object, ui.Object);
         var testSessionId = new DirectSessionId(Guid.NewGuid());
         vm.SetSession(testSessionId);
 
@@ -71,10 +69,9 @@ public class ChatViewModelTests
     {
         var ctx = new SessionContext();
         using var chatState = new ChatStateService();
-        var reloadCoordinator = new Mock<IChatReloadCoordinator>(MockBehavior.Loose);
         var mediator = new Mock<IMediator>(MockBehavior.Loose);
         var ui = new Mock<IUiDispatcher>(MockBehavior.Loose);
-        var vm = new ChatViewModel(ctx, chatState, reloadCoordinator.Object, mediator.Object, ui.Object);
+        var vm = new ChatViewModel(ctx, chatState, mediator.Object, ui.Object);
 
         vm.MessageInput.Value = string.Empty;
         vm.SendCommand.CanExecute(null).Should().BeFalse();
@@ -88,10 +85,9 @@ public class ChatViewModelTests
     {
         var ctx = new SessionContext();
         using var chatState = new ChatStateService();
-        var reloadCoordinator = new Mock<IChatReloadCoordinator>(MockBehavior.Loose);
         var mediator = new Mock<IMediator>(MockBehavior.Loose);
         var ui = new Mock<IUiDispatcher>(MockBehavior.Loose);
-        var vm = new ChatViewModel(ctx, chatState, reloadCoordinator.Object, mediator.Object, ui.Object);
+        var vm = new ChatViewModel(ctx, chatState, mediator.Object, ui.Object);
 
         // Direct state
         vm.IsRelayed.Value = false;

@@ -32,7 +32,6 @@ public sealed class ChatViewModel : ViewModelBase
     private DirectSessionId? _sessionId;
     private readonly SessionContext _sessionContext;
     private readonly Desktop.Wpf.Features.Chat.State.ChatStateService _chatState;
-    private readonly IChatReloadCoordinator _reloadCoordinator;
     private readonly IMediator _mediator;
     private readonly IUiDispatcher _ui;
     private DisposableBag _bag;
@@ -41,13 +40,11 @@ public sealed class ChatViewModel : ViewModelBase
     public ChatViewModel(
         SessionContext sessionContext,
         Desktop.Wpf.Features.Chat.State.ChatStateService chatState,
-        IChatReloadCoordinator reloadCoordinator,
         IMediator mediator,
         IUiDispatcher ui)
     {
         _sessionContext = sessionContext;
         _chatState = chatState;
-        _reloadCoordinator = reloadCoordinator;
         _mediator = mediator;
         _ui = ui;
 
