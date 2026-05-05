@@ -346,6 +346,14 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
                         PrivateKeyBytes = r.PrivateKeyBytes,
                         CreatedAtUtc = r.CreatedAtUtc
                     })
+                    .ToList(),
+                RecentChatMessages = model.RecentChatMessages
+                    .Select(m => new SimulatedChatMessageDto
+                    {
+                        IsFromMain = m.IsFromMain,
+                        Content = m.Content,
+                        ReceivedUtc = m.ReceivedUtc
+                    })
                     .ToList()
             }
         };
@@ -549,6 +557,14 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
                 PrivatePreKey.FromBytes(dto.PrivateKeyBytes),
                 dto.CreatedAtUtc));
         }
+
+        foreach (var dto in store.RecentChatMessages ?? new())
+        {
+            model.RecentChatMessagesMutable.Add(new SimulatedChatMessageSnapshot(
+                dto.IsFromMain,
+                dto.Content,
+                dto.ReceivedUtc));
+        }
     }
 
     private static void NormalizePeer(SimulatedPeerDto peer, TransportOptions transportOptions)
@@ -561,6 +577,7 @@ public sealed class JsonSimulatorStateRepository : ISimulatorStateRepository, ID
         peer.RuntimeStore.Sessions ??= new();
         peer.RuntimeStore.SignedPreKeys ??= new();
         peer.RuntimeStore.OneTimePreKeysPrivate ??= new();
+        peer.RuntimeStore.RecentChatMessages ??= new();
         peer.HandshakeAttempts ??= new();
         peer.Relay ??= new();
         peer.Relay.ActiveSessionsPeerIds ??= new();

@@ -57,6 +57,7 @@ public sealed class SimulatedPeerRuntimeStoreDto
     public List<SimulatedOutboundInviteDto> OutboundInvites { get; set; } = new();
     public List<SimulatedPendingInviteHandshakeResponseDto> PendingInviteHandshakeResponses { get; set; } = new();
     public List<OneTimePreKeyPrivateDto> OneTimePreKeysPrivate { get; set; } = new();
+    public List<SimulatedChatMessageDto> RecentChatMessages { get; set; } = new();
 }
 
 public sealed class SimulatedOutboundInviteDto
@@ -191,4 +192,11 @@ public sealed class OneTimePreKeyPrivateDto
     public Guid Id { get; set; }
     public byte[] PrivateKeyBytes { get; set; } = Array.Empty<byte>();
     public DateTimeOffset CreatedAtUtc { get; set; }
+}
+
+public sealed class SimulatedChatMessageDto
+{
+    public bool IsFromMain { get; set; }
+    public string Content { get; set; } = string.Empty;
+    public DateTimeOffset ReceivedUtc { get; set; }
 }
