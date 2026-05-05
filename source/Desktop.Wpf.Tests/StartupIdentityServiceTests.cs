@@ -19,7 +19,7 @@ public class StartupIdentityServiceTests
         // Arrange
         var now = new DateTimeOffset(2025, 7, 1, 0, 0, 0, TimeSpan.Zero);
         var repo = new Mock<ISelfIdentityRepository>(MockBehavior.Strict);
-        var existing = new SelfIdentity(new SelfId(123));
+        var existing = new SelfIdentity(new SelfId(123), new PeerId(Guid.NewGuid()));
         existing.SetDisplayName("Alice");
         existing.TouchLastUsed(now.AddDays(-1));
         repo.Setup(r => r.GetMostRecentAsync(It.IsAny<CancellationToken>()))
@@ -51,7 +51,7 @@ public class StartupIdentityServiceTests
         repo.Setup(r => r.GetByIdAsync(newId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(() =>
             {
-                var created = new SelfIdentity(newId);
+                var created = new SelfIdentity(newId, new PeerId(Guid.NewGuid()));
                 created.TouchLastUsed(now);
                 return created;
             });

@@ -8,10 +8,12 @@ public sealed class SelfIdentity
     public DisplayName? DisplayName { get; private set; }
     public IReadOnlyList<IdentityKey> Keys => _keys;
     public DateTimeOffset LastUsedUtc { get; private set; }
+    public PeerId PeerId { get; }
 
-    public SelfIdentity(SelfId id)
+    public SelfIdentity(SelfId id, PeerId peerId)
     {
         Id = id;
+        PeerId = peerId;
         LastUsedUtc = default; // Explicit non-nullable; caller should set via TouchLastUsed
     }
 

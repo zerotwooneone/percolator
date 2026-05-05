@@ -7,6 +7,7 @@ using Percolator.Chat.App;
 using Percolator.Chat.App.Commands;
 using Percolator.Chat.ValueObjects;
 using Percolator.Chat.Events;
+using Percolator.Identity;
 
 namespace Percolator.Chat.Tests;
 
@@ -49,7 +50,7 @@ public class PostTextMessageHandlerTests
         var selfIdentityId = 42;
         var selfParticipantId = new ParticipantId(Guid.NewGuid());
 
-        _active.SetActiveIdentity(new Percolator.Identity.Model.IdentityRecord(selfParticipantId.Value, "self"));
+        _active.SetActiveIdentity(new Percolator.Identity.Model.IdentityRecord(selfParticipantId.Value, "self") { PeerId = new PeerId(selfParticipantId.Value) });
 
         _resolver
             .Setup(r => r.ResolveAsync(lookup, It.IsAny<CancellationToken>()))

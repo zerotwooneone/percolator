@@ -53,7 +53,7 @@ public sealed class SqliteSelfIdentityDomainRepository : ISelfIdentityRepository
 
         var dbo = new SelfIdentityDbo
         {
-            PeerId = Guid.NewGuid(),
+            PeerId = identity.PeerId.Value,
             Name = identity.DisplayName?.Value ?? string.Empty,
             LastUsedUtc = identity.LastUsedUtc
         };
@@ -79,7 +79,7 @@ public sealed class SqliteSelfIdentityDomainRepository : ISelfIdentityRepository
                 dbo = new SelfIdentityDbo
                 {
                     Id = identity.Id.Value,
-                    PeerId = Guid.NewGuid(),
+                    PeerId = identity.PeerId.Value,
                     Name = identity.DisplayName?.Value ?? string.Empty,
                     LastUsedUtc = identity.LastUsedUtc
                 };
@@ -96,7 +96,7 @@ public sealed class SqliteSelfIdentityDomainRepository : ISelfIdentityRepository
 
     private static SelfIdentity Map(SelfIdentityDbo dbo)
     {
-        var self = new SelfIdentity(new SelfId(dbo.Id));
+        var self = new SelfIdentity(new SelfId(dbo.Id), new PeerId(dbo.PeerId));
         if (!string.IsNullOrWhiteSpace(dbo.Name)) self.SetDisplayName(dbo.Name);
         self.TouchLastUsed(dbo.LastUsedUtc);
         return self;

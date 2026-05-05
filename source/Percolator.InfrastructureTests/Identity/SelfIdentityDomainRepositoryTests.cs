@@ -37,7 +37,7 @@ public class SelfIdentityDomainRepositoryTests
         // Arrange
         await using var ctx = new PercolatorDbContext(_options);
         var repo = new SqliteSelfIdentityDomainRepository(ctx);
-        var self = new SelfIdentity(new SelfId(0)); // Id not assigned yet; will be set by DB
+        var self = new SelfIdentity(new SelfId(0), new PeerId(Guid.NewGuid())); // Id not assigned yet; will be set by DB
         self.SetDisplayName("alice");
         var used = new DateTimeOffset(2025, 6, 1, 0, 0, 0, TimeSpan.Zero);
         self.TouchLastUsed(used);
@@ -60,8 +60,8 @@ public class SelfIdentityDomainRepositoryTests
         // Arrange
         await using var ctx = new PercolatorDbContext(_options);
         var repo = new SqliteSelfIdentityDomainRepository(ctx);
-        var a = new SelfIdentity(new SelfId(0)); a.SetDisplayName("a"); a.TouchLastUsed(new DateTimeOffset(2025,1,1,0,0,0,TimeSpan.Zero));
-        var b = new SelfIdentity(new SelfId(0)); b.SetDisplayName("b"); b.TouchLastUsed(new DateTimeOffset(2025,2,1,0,0,0,TimeSpan.Zero));
+        var a = new SelfIdentity(new SelfId(0), new PeerId(Guid.NewGuid())); a.SetDisplayName("a"); a.TouchLastUsed(new DateTimeOffset(2025,1,1,0,0,0,TimeSpan.Zero));
+        var b = new SelfIdentity(new SelfId(0), new PeerId(Guid.NewGuid())); b.SetDisplayName("b"); b.TouchLastUsed(new DateTimeOffset(2025,2,1,0,0,0,TimeSpan.Zero));
         await repo.SaveAsync(a);
         await repo.SaveAsync(b);
 

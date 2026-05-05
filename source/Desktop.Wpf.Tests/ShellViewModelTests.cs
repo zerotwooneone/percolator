@@ -92,7 +92,7 @@ public class ShellViewModelTests
 
         sut.IsLoading.Value.Should().BeTrue();
 
-        var loaded = new SelfIdentity(new SelfId(1));
+        var loaded = new SelfIdentity(new SelfId(1), new PeerId(Guid.NewGuid()));
         loaded.SetDisplayName("Alice");
         tcs.SetResult(loaded);
         // Wait for state flip
@@ -109,9 +109,9 @@ public class ShellViewModelTests
     {
         var repo = new Mock<ISelfIdentityRepository>();
         repo.Setup(r => r.GetByIdAsync(It.IsAny<SelfId>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(() => { var si = new SelfIdentity(new SelfId(42)); si.SetDisplayName("Bob"); return si; });
+            .ReturnsAsync(() => { var si = new SelfIdentity(new SelfId(42), new PeerId(Guid.NewGuid())); si.SetDisplayName("Bob"); return si; });
         var startupIdentityService = new Mock<IStartupIdentityService>();
-        var domain = new SelfIdentity(new SelfId(42));
+        var domain = new SelfIdentity(new SelfId(42), new PeerId(Guid.NewGuid()));
         startupIdentityService
             .Setup(s => s.ResolveOrCreateAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(domain);
@@ -158,9 +158,9 @@ public class ShellViewModelTests
     {
         var repo = new Mock<ISelfIdentityRepository>();
         repo.Setup(r => r.GetByIdAsync(It.IsAny<SelfId>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(() => { var si = new SelfIdentity(new SelfId(7)); si.SetDisplayName("Carol"); return si; });
+            .ReturnsAsync(() => { var si = new SelfIdentity(new SelfId(7), new PeerId(Guid.NewGuid())); si.SetDisplayName("Carol"); return si; });
         var startupIdentityService = new Mock<IStartupIdentityService>();
-        var domain = new SelfIdentity(new SelfId(7));
+        var domain = new SelfIdentity(new SelfId(7), new PeerId(Guid.NewGuid()));
         startupIdentityService
             .Setup(s => s.ResolveOrCreateAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(domain);
@@ -237,9 +237,9 @@ public class ShellViewModelTests
     {
         var repo = new Mock<ISelfIdentityRepository>();
         repo.Setup(r => r.GetByIdAsync(It.IsAny<SelfId>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(() => { var si = new SelfIdentity(new SelfId(9)); si.SetDisplayName("Dora"); return si; });
+            .ReturnsAsync(() => { var si = new SelfIdentity(new SelfId(9), new PeerId(Guid.NewGuid())); si.SetDisplayName("Dora"); return si; });
         var startupIdentityService = new Mock<IStartupIdentityService>();
-        var domain = new SelfIdentity(new SelfId(9));
+        var domain = new SelfIdentity(new SelfId(9), new PeerId(Guid.NewGuid()));
         startupIdentityService
             .Setup(s => s.ResolveOrCreateAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(domain);

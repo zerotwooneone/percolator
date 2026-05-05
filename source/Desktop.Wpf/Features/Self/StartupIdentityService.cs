@@ -24,7 +24,7 @@ public sealed class StartupIdentityService : IStartupIdentityService
         }
 
         var now = _clock.UtcNow;
-        var created = new SelfIdentity(new SelfId(0));
+        var created = new SelfIdentity(new SelfId(0), PeerId.NewId());
         created.TouchLastUsed(now);
         var newId =await _repo.CreateAsync(created, ct).ConfigureAwait(false);
         return await _repo.GetByIdAsync(newId, ct).ConfigureAwait(false)!;

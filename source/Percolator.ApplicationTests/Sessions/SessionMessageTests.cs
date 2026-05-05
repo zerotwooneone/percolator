@@ -73,7 +73,7 @@ public class SessionMessageTests
         _aliceEphemeral = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         _aliceIdentity = new ActiveIdentityContext
         {
-            Identity = new IdentityRecord(Guid.NewGuid(), "Alice") { SelfIdentityId = new SelfId(1) },
+            Identity = new IdentityRecord(Guid.NewGuid(), "Alice") { SelfIdentityId = new SelfId(1), PeerId = new PeerId(Guid.NewGuid()) },
             Keys = new X3dhKeys(
                 ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
                 _aliceEphemeral
@@ -82,7 +82,7 @@ public class SessionMessageTests
 
         _bobIdentity = new ActiveIdentityContext
         {
-            Identity = new IdentityRecord(Guid.NewGuid(), "Bob") { SelfIdentityId = new SelfId(1) },
+            Identity = new IdentityRecord(Guid.NewGuid(), "Bob") { SelfIdentityId = new SelfId(1), PeerId = new PeerId(Guid.NewGuid()) },
             Keys = new X3dhKeys(
                 ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
                 ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256)

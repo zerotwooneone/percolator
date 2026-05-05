@@ -70,12 +70,9 @@ public class IdentityOrchestrator : IIdentityOrchestrator
                 _logger.LogWarning("Regenerated X3DH keys for identity {IdentityName} because existing keys were not P-256 (SelfIdentityId={SelfIdentityId})", dto.DisplayName, selfId);
             }
         }
-        //todo: figure out what to use for participant id in chat conversations
-        var peerId = Guid.NewGuid();
-        
-        //todo: figure out what name to use
+        var peerId = dto.PeerId.Value;
         var identityName = dto.DisplayName?.Value ?? dto.Id.ToString();
-        var identity = new IdentityRecord(peerId, identityName, null)  with { SelfIdentityId = selfId };
+        var identity = new IdentityRecord(peerId, identityName, null) with { SelfIdentityId = selfId, PeerId = dto.PeerId };
 
         _activeIdentityContext.SetActiveIdentity(identity, keys);
 

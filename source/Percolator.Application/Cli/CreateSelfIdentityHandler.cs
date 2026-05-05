@@ -30,7 +30,7 @@ public class CreateSelfIdentityHandler : IRequestHandler<CreateSelfIdentityComma
 
         // Create domain identity and persist, capturing generated id
         var now = DateTimeOffset.UtcNow;
-        var identity = new Percolator.Identity.Model.SelfIdentity(new SelfId(0));
+        var identity = new Percolator.Identity.Model.SelfIdentity(new SelfId(0), PeerId.NewId());
         identity.SetDisplayName(request.Name);
         identity.TouchLastUsed(now);
         var newId = await _selfIdentityRepository.CreateAsync(identity, cancellationToken).ConfigureAwait(false);

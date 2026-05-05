@@ -97,7 +97,7 @@ namespace Percolator.ApplicationTests.ReverseSignal
             var logger = NullLogger<ApprovePendingSessionHandler>.Instance;
             var activeAccessor = new ActiveAccessorStub { IsActive = true };
             var active = new ActiveIdentityContext();
-            var identity = new IdentityRecord(Guid.NewGuid(), "self") { SelfIdentityId = new SelfId(1) };
+            var identity = new IdentityRecord(Guid.NewGuid(), "self") { SelfIdentityId = new SelfId(1), PeerId = new Percolator.Identity.PeerId(Guid.NewGuid()) };
             var keys = new X3dhKeys(
                 ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
                 ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256));
@@ -209,7 +209,7 @@ namespace Percolator.ApplicationTests.ReverseSignal
             var logger = NullLogger<ApprovePendingSessionHandler>.Instance;
             var activeAccessor = new ActiveAccessorStub { IsActive = true };
             var active = new ActiveIdentityContext();
-            var identity = new IdentityRecord(Guid.NewGuid(), "self") { SelfIdentityId = new SelfId(1) };
+            var identity = new IdentityRecord(Guid.NewGuid(), "self") { SelfIdentityId = new SelfId(1), PeerId = new Percolator.Identity.PeerId(Guid.NewGuid()) };
             var keys = new X3dhKeys(
                 ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
                 ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256));
@@ -325,7 +325,7 @@ namespace Percolator.ApplicationTests.ReverseSignal
             var logger = NullLogger<ApprovePendingSessionHandler>.Instance;
             var activeAccessor = new ActiveAccessorStub { IsActive = true };
             var active = new ActiveIdentityContext();
-            var identity = new IdentityRecord(Guid.NewGuid(), "self") { SelfIdentityId = new SelfId(1) };
+            var identity = new IdentityRecord(Guid.NewGuid(), "self") { SelfIdentityId = new SelfId(1), PeerId = new Percolator.Identity.PeerId(Guid.NewGuid()) };
             var keys = new X3dhKeys(
                 ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256),
                 ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256));
