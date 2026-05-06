@@ -1,3 +1,4 @@
+using Desktop.Wpf.Features.Sessions.Models;
 using Percolator.Application.Cryptography;
 using Percolator.Cryptography;
 using Percolator.Cryptography.Primitives;
@@ -54,7 +55,7 @@ internal sealed class PeerConnectionQueries : IPeerConnectionQueries
             var status = isRelayed ? PeerConnectionStatus.Relay : PeerConnectionStatus.Direct;
 
             snapshots.Add(new PeerConnectionStateSnapshot(
-                ConnectionId: session.Id.Value,
+                Key: PeerConnectionKey.FromSessionId(session.Id.Value),
                 PeerId: session.RemotePeerId.Value,
                 DisplayName: displayName,
                 Initials: initials,

@@ -1,6 +1,8 @@
+using Desktop.Wpf.Features.Sessions.Models;
 using Desktop.Wpf.Features.Sessions.Queries;
 using Desktop.Wpf.Shared.Mvvm;
 using Microsoft.Extensions.DependencyInjection;
+using Percolator.Application.Sessions;
 using R3;
 
 namespace Desktop.Wpf.Features.Sessions;
@@ -13,7 +15,7 @@ public sealed class PeerConnectionReloadCoordinator : IDisposable
     private DisposableBag _bag;
 
     public PeerConnectionReloadCoordinator(
-        IServiceScopeFactory scopeFactory, 
+        IServiceScopeFactory scopeFactory,
         PeerConnectionStateService state,
         TimeProvider timeProvider)
     {
@@ -21,7 +23,7 @@ public sealed class PeerConnectionReloadCoordinator : IDisposable
         _state = state;
 
         _reloadTrigger
-            .Debounce(TimeSpan.FromMilliseconds(250),timeProvider)
+            .Debounce(TimeSpan.FromMilliseconds(250), timeProvider)
             .SubscribeAwait(async (_, ct) => await ReloadCoreAsync(ct).ConfigureAwait(false), AwaitOperation.Drop)
             .AddTo(ref _bag);
     }
@@ -33,12 +35,35 @@ public sealed class PeerConnectionReloadCoordinator : IDisposable
         if (!_state.ActiveSelfIdentityId.HasValue) return;
 
         using var scope = _scopeFactory.CreateScope();
-        var queries = scope.ServiceProvider.GetRequiredService<IPeerConnectionQueries>();
+        var sidebarQueries = scope.ServiceProvider.GetRequiredService<IPeerConnectionSidebarQueries>();
 
-        var connections = await queries.LoadAllConnectionsAsync(_state.ActiveSelfIdentityId.Value.Value, cancellationToken).ConfigureAwait(false);
-        _state.UpdateConnections(connections);
+        var sidebarDtos = await sidebarQueries.LoadSidebarConnectionsAsync(_state.ActiveSelfIdentityId.Value.Value, cancellationToken).ConfigureAwait(false);
 
-        var pending = await queries.LoadPendingInboundAsync(cancellationToken).ConfigureAwait(false);
+        // Map SidebarPeerConnectionDto to PeerConnectionStateSnapshot
+        var snapshots = sidebarDtos.Select(dto => new PeerConnectionStateSnapshot(
+            Key: dto.KeyType == Percolator.Application.Sessions.SidebarPeerConnectionKeyType.SecureSession
+                ? PeerConnectionKey.FromSessionId(dto.KeyValue)
+                : PeerConnectionKey.FromPendingCorrelationId(dto.KeyValue),
+            PeerId: dto.PeerId,
+            DisplayName: dto.DisplayName,
+            Initials: dto.Initials,
+            Status: dto.Status switch
+            {
+                Percolator.Application.Sessions.SidebarPeerConnectionStatus.Direct => PeerConnectionStatus.Direct,
+                Percolator.Application.Sessions.SidebarPeerConnectionStatus.Relay => PeerConnectionStatus.Relay,
+                Percolator.Application.Sessions.SidebarPeerConnectionStatus.Group => PeerConnectionStatus.Group,
+                Percolator.Application.Sessions.SidebarPeerConnectionStatus.PendingOutbound => PeerConnectionStatus.PendingOutbound,
+                _ => PeerConnectionStatus.Relay
+            },
+            RelayHostPeerId: dto.RelayHostPeerId,
+            LastActivityUtc: dto.LastActivityUtc
+        )).ToList();
+
+        _state.UpdateConnections(snapshots);
+
+        // Inbound pending remains separate - load via existing query
+        var inboundQueries = scope.ServiceProvider.GetRequiredService<IPeerConnectionQueries>();
+        var pending = await inboundQueries.LoadPendingInboundAsync(cancellationToken).ConfigureAwait(false);
         _state.UpdatePendingInbound(pending);
     }
 

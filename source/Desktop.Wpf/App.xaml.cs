@@ -148,6 +148,7 @@ public partial class App : Application
                 services.AddScoped<Desktop.Wpf.Features.Sessions.IMainInvitationOutbox, Desktop.Wpf.Features.Sessions.MainInvitationOutbox>();
                 services.AddScoped<Desktop.Wpf.Features.Sessions.IMainInvitationActions, Desktop.Wpf.Features.Sessions.MainInvitationActions>();
                 services.AddSingleton<Desktop.Wpf.Features.Sessions.IMainInvitationInboxEvents, Desktop.Wpf.Features.Sessions.MainInvitationInboxEvents>();
+                services.AddScoped<Percolator.Application.Sessions.IPeerConnectionSidebarQueries, Percolator.Infrastructure.Sessions.PeerConnectionSidebarQueries>();
                 services.AddScoped<Desktop.Wpf.Features.Sessions.Queries.IPeerConnectionQueries, Desktop.Wpf.Features.Sessions.Queries.PeerConnectionQueries>();
                 services.AddSingleton<Desktop.Wpf.Features.Sessions.PeerConnectionStateService>();
                 services.AddSingleton<Desktop.Wpf.Features.Sessions.PeerConnectionReloadCoordinator>();

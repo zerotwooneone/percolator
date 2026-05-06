@@ -22,7 +22,7 @@ public sealed class PeerConnectionListItemViewModel : IDisposable
     public PeerConnectionListItemViewModel(PeerConnectionModel model)
     {
         _model = model;
-        Id = model.ConnectionId.ToString("N");
+        Id = model.Key.ToString();
 
         DisplayName = model.DisplayName
             .DistinctUntilChanged()

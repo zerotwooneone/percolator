@@ -29,12 +29,35 @@ public sealed class PeerConnectionStateService : IDisposable
     {
         ActiveSelfIdentityId = selfIdentityId;
         using var scope = _scopeFactory.CreateScope();
-        var queries = scope.ServiceProvider.GetRequiredService<IPeerConnectionQueries>();
+        var sidebarQueries = scope.ServiceProvider.GetRequiredService<Percolator.Application.Sessions.IPeerConnectionSidebarQueries>();
 
-        var connectionSnapshots = await queries.LoadAllConnectionsAsync(selfIdentityId.Value, cancellationToken).ConfigureAwait(false);
-        UpdateConnections(connectionSnapshots);
+        var sidebarDtos = await sidebarQueries.LoadSidebarConnectionsAsync(selfIdentityId.Value, cancellationToken).ConfigureAwait(false);
 
-        var pendingSnapshots = await queries.LoadPendingInboundAsync(cancellationToken).ConfigureAwait(false);
+        // Map SidebarPeerConnectionDto to PeerConnectionStateSnapshot
+        var snapshots = sidebarDtos.Select(dto => new PeerConnectionStateSnapshot(
+            Key: dto.KeyType == Percolator.Application.Sessions.SidebarPeerConnectionKeyType.SecureSession
+                ? PeerConnectionKey.FromSessionId(dto.KeyValue)
+                : PeerConnectionKey.FromPendingCorrelationId(dto.KeyValue),
+            PeerId: dto.PeerId,
+            DisplayName: dto.DisplayName,
+            Initials: dto.Initials,
+            Status: dto.Status switch
+            {
+                Percolator.Application.Sessions.SidebarPeerConnectionStatus.Direct => PeerConnectionStatus.Direct,
+                Percolator.Application.Sessions.SidebarPeerConnectionStatus.Relay => PeerConnectionStatus.Relay,
+                Percolator.Application.Sessions.SidebarPeerConnectionStatus.Group => PeerConnectionStatus.Group,
+                Percolator.Application.Sessions.SidebarPeerConnectionStatus.PendingOutbound => PeerConnectionStatus.PendingOutbound,
+                _ => PeerConnectionStatus.Relay
+            },
+            RelayHostPeerId: dto.RelayHostPeerId,
+            LastActivityUtc: dto.LastActivityUtc
+        )).ToList();
+
+        UpdateConnections(snapshots);
+
+        // Inbound pending remains separate - load via existing query
+        var inboundQueries = scope.ServiceProvider.GetRequiredService<IPeerConnectionQueries>();
+        var pendingSnapshots = await inboundQueries.LoadPendingInboundAsync(cancellationToken).ConfigureAwait(false);
         UpdatePendingInbound(pendingSnapshots);
     }
 
@@ -42,12 +65,12 @@ public sealed class PeerConnectionStateService : IDisposable
     {
         lock (_stateGate)
         {
-            var existingById = _connections.ToDictionary(c => c.ConnectionId);
+            var existingByKey = _connections.ToDictionary(c => c.Key);
 
-            var toRemove = existingById.Keys.Except(snapshots.Select(s => s.ConnectionId)).ToList();
-            foreach (var id in toRemove)
+            var toRemove = existingByKey.Keys.Except(snapshots.Select(s => s.Key)).ToList();
+            foreach (var key in toRemove)
             {
-                if (existingById.TryGetValue(id, out var model))
+                if (existingByKey.TryGetValue(key, out var model))
                 {
                     // FIX: Remove from the collection BEFORE disposing to prevent UI glitching
                     _connections.Remove(model);
@@ -57,14 +80,14 @@ public sealed class PeerConnectionStateService : IDisposable
 
             foreach (var snapshot in snapshots)
             {
-                if (existingById.TryGetValue(snapshot.ConnectionId, out var existing))
+                if (existingByKey.TryGetValue(snapshot.Key, out var existing))
                 {
                     existing.UpdateFromSnapshot(snapshot);
                 }
                 else
                 {
                     var model = new PeerConnectionModel(
-                        snapshot.ConnectionId,
+                        snapshot.Key,
                         snapshot.PeerId,
                         snapshot.DisplayName,
                         snapshot.Initials,

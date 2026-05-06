@@ -56,11 +56,11 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.Infrastructure",
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.InfrastructureTests", "Percolator.InfrastructureTests\Percolator.InfrastructureTests.csproj", "{AB5DB604-C8D2-4017-8FE9-54A2E0010AF5}"
 EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "02 - Infrastructure", "02 - Infrastructure", "{1BA0BC13-1FAC-43E6-8485-EB8EA00CD072}"
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "03 - Infrastructure", "03 - Infrastructure", "{1BA0BC13-1FAC-43E6-8485-EB8EA00CD072}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.ApplicationIntegrationTests", "Percolator.ApplicationIntegrationTests\Percolator.ApplicationIntegrationTests.csproj", "{39757A1B-B502-4A78-9EFF-4845050A032C}"
 EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "03 - Application", "03 - Application", "{72EA6752-DA13-4F0D-9963-A0C2DDAAEC9F}"
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "02 - Application", "02 - Application", "{72EA6752-DA13-4F0D-9963-A0C2DDAAEC9F}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Percolator.Dht", "Percolator.Dht\Percolator.Dht.csproj", "{127B80B5-1F20-4AF8-B650-6E7A50795562}"
 EndProject

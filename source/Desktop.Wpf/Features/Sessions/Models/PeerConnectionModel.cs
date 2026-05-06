@@ -12,14 +12,14 @@ public sealed class PeerConnectionModel : IDisposable
     private readonly ReactiveProperty<DateTimeOffset> _lastActivityUtc;
 
     public PeerConnectionModel(
-        Guid connectionId,
-        Guid peerId,
+        PeerConnectionKey key,
+        Guid? peerId,
         string displayName,
         string initials,
         PeerConnectionStatus status,
         DateTimeOffset lastActivityUtc)
     {
-        ConnectionId = connectionId;
+        Key = key;
         PeerId = peerId;
 
         _displayName = new ReactiveProperty<string>(displayName);
@@ -28,8 +28,8 @@ public sealed class PeerConnectionModel : IDisposable
         _lastActivityUtc = new ReactiveProperty<DateTimeOffset>(lastActivityUtc);
     }
 
-    public Guid ConnectionId { get; }
-    public Guid PeerId { get; }
+    public PeerConnectionKey Key { get; }
+    public Guid? PeerId { get; }
 
     public ReadOnlyReactiveProperty<string> DisplayName => _displayName;
     public ReadOnlyReactiveProperty<string> Initials => _initials;

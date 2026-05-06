@@ -1,15 +1,18 @@
+using Desktop.Wpf.Features.Sessions.Models;
+
 namespace Desktop.Wpf.Features.Sessions.Queries;
 
 public enum PeerConnectionStatus
 {
     Direct,
     Relay,
-    Group
+    Group,
+    PendingOutbound
 }
 
 public sealed record PeerConnectionStateSnapshot(
-    Guid ConnectionId,
-    Guid PeerId,
+    PeerConnectionKey Key,
+    Guid? PeerId,
     string DisplayName,
     string Initials,
     PeerConnectionStatus Status,

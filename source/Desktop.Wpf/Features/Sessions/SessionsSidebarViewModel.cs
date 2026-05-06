@@ -90,7 +90,7 @@ public sealed class SessionsSidebarViewModel : ViewModelBase
             .DistinctUntilChanged()
             .Subscribe(key =>
             {
-                var next = key is null ? null : key.Value.Value.ToString("N");
+                var next = key is null ? null : key.Value.ToString();
                 if (SelectedSessionId.Value != next)
                     SelectedSessionId.Value = next;
             }).AddTo(ref _bag);
@@ -99,8 +99,21 @@ public sealed class SessionsSidebarViewModel : ViewModelBase
     private static PeerConnectionKey? TryParseKey(string? id)
     {
         if (string.IsNullOrWhiteSpace(id)) return null;
-        if (!Guid.TryParse(id, out var guid)) return null;
-        return PeerConnectionKey.FromSessionId(guid);
+
+        // Canonical format: "{Type}:{guid}"
+        var parts = id.Split(':');
+        if (parts.Length != 2) return null;
+
+        if (!Enum.TryParse<SecureChannelKeyType>(parts[0], true, out var keyType)) return null;
+        if (!Guid.TryParse(parts[1], out var guid)) return null;
+
+        return keyType switch
+        {
+            SecureChannelKeyType.SecureSession => PeerConnectionKey.FromSessionId(guid),
+            SecureChannelKeyType.PendingCorrelation => PeerConnectionKey.FromPendingCorrelationId(guid),
+            SecureChannelKeyType.PendingSession => PeerConnectionKey.FromPendingSessionId(guid),
+            _ => null
+        };
     }
 
     protected override void DisposeCore()

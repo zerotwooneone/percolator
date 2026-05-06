@@ -50,9 +50,8 @@ public sealed class SelectedChannelPaneViewModel : ViewModelBase
             .DistinctUntilChanged()
             .Select(key =>
             {
-                if (key is null || key.Value.Type != SecureChannelKeyType.SecureSession)
-                    return null;
-                return _stateService.Connections.FirstOrDefault(c => c.ConnectionId == key.Value.Value);
+                if (key is null) return null;
+                return _stateService.Connections.FirstOrDefault(c => c.Key == key.Value);
             })
             .DistinctUntilChanged();
 
@@ -111,7 +110,7 @@ public sealed class SelectedChannelPaneViewModel : ViewModelBase
                     return null;
 
                 var keyVal = key.Value;
-                var model = _stateService.Connections.FirstOrDefault(c => c.ConnectionId == keyVal.Value);
+                var model = _stateService.Connections.FirstOrDefault(c => c.Key == keyVal);
                 if (model is null)
                     return null;
 
@@ -146,6 +145,7 @@ public sealed class SelectedChannelPaneViewModel : ViewModelBase
             PeerConnectionStatus.Direct => SelectedPaneState.Active,
             PeerConnectionStatus.Relay => SelectedPaneState.Active,
             PeerConnectionStatus.Group => SelectedPaneState.Active,
+            PeerConnectionStatus.PendingOutbound => SelectedPaneState.Pending,
             _ => SelectedPaneState.Offline
         };
 

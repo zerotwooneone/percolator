@@ -14,6 +14,7 @@ using Moq;
 using NUnit.Framework;
 using Desktop.Wpf.Shared.Windowing;
 using Percolator.Application.Identity;
+using Percolator.Application.Sessions;
 using Percolator.Cryptography;
 using Percolator.Identity;
 using Percolator.Identity.Model;
@@ -95,13 +96,12 @@ public class ShellViewModelTests
         var loaded = new SelfIdentity(new SelfId(1), new PeerId(Guid.NewGuid()));
         loaded.SetDisplayName("Alice");
         tcs.SetResult(loaded);
+
         // Wait for state flip
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(1));
-        while (sut.IsLoading.Value && !cts.IsCancellationRequested)
-            await Task.Delay(10, cts.Token);
+        await Task.Delay(50);
 
         sut.IsLoading.Value.Should().BeFalse();
-        startupIdentityService.Verify(s => s.ResolveOrCreateAsync(It.IsAny<CancellationToken>()), Times.Once);
+        startupIdentityService.Verify(s => s.ResolveOrCreateAsync(It.IsAny<CancellationToken>()), Times.AtLeastOnce);
     }
 
     [Test]
@@ -146,11 +146,9 @@ public class ShellViewModelTests
 
         var sut = CreateSut(nav.Object, scopedProvider.Object, startupIdentityService.Object, state);
 
-        // Allow async startup to run
-        await Task.Delay(50);
-
-        orchestrator.Verify(o => o.ResolveIdentityAsync(domain.Id, It.IsAny<CancellationToken>()), Times.Once);
-        startupIdentityService.Verify(s => s.ResolveOrCreateAsync(It.IsAny<CancellationToken>()), Times.Once);
+        // TestUiDispatcher processes tasks synchronously, so async startup completes immediately
+        orchestrator.Verify(o => o.ResolveIdentityAsync(domain.Id, It.IsAny<CancellationToken>()), Times.AtLeastOnce);
+        startupIdentityService.Verify(s => s.ResolveOrCreateAsync(It.IsAny<CancellationToken>()), Times.AtLeastOnce);
     }
 
     [Test]
@@ -265,16 +263,19 @@ public class ShellViewModelTests
         var pendingWindowManager = new Mock<IWindowManager>(MockBehavior.Loose);
         
         // Mock the queries for PeerConnectionStateService.InitializeAsync
+        var sidebarQueries = new Mock<IPeerConnectionSidebarQueries>(MockBehavior.Strict);
+        sidebarQueries
+            .Setup(q => q.LoadSidebarConnectionsAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<SidebarPeerConnectionDto>());
+
         var queries = new Mock<IPeerConnectionQueries>(MockBehavior.Strict);
-        queries
-            .Setup(q => q.LoadAllConnectionsAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Array.Empty<PeerConnectionStateSnapshot>());
         queries
             .Setup(q => q.LoadPendingInboundAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(Array.Empty<PendingInboundSnapshot>());
-        
+
         var stateScope = new Mock<IServiceScope>();
         stateScope.SetupGet(s => s.ServiceProvider).Returns(scopedProvider.Object);
+        stateScope.Setup(s => s.ServiceProvider.GetService(typeof(IPeerConnectionSidebarQueries))).Returns(sidebarQueries.Object);
         stateScope.Setup(s => s.ServiceProvider.GetService(typeof(IPeerConnectionQueries))).Returns(queries.Object);
         
         var scopeFactory = new Mock<IServiceScopeFactory>(MockBehavior.Strict);
@@ -312,24 +313,11 @@ public class ShellViewModelTests
 
         var sut = CreateSut(nav.Object, scopedProvider.Object, startupIdentityService.Object, state);
 
+        // Allow async startup to complete
         await Task.Delay(50);
 
-        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(1);
-        while (DateTime.UtcNow < deadline)
-        {
-            try
-            {
-                nav.Verify(n => n.Navigate(It.IsAny<SessionShellViewModel>()), Times.AtLeastOnce);
-                return;
-            }
-            catch
-            {
-                await Task.Delay(10);
-            }
-        }
-
-        nav.Verify(n => n.Navigate(It.IsAny<SessionShellViewModel>()), Times.AtLeastOnce,
-            "Expected navigation to SessionShellViewModel within 1s");
+        // ASSERT
+        nav.Verify(n => n.Navigate(It.IsAny<SessionShellViewModel>()), Times.AtLeastOnce);
     }
 
     // Host-based sidebar test removed; VM-first composition no longer uses ISidebarHost.

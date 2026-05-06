@@ -2,6 +2,7 @@ using System;
 using System.Collections.ObjectModel;
 using Desktop.Wpf.Features.Self;
 using Desktop.Wpf.Features.Sessions;
+using Desktop.Wpf.Features.Sessions.Models;
 using Desktop.Wpf.Features.Sessions.Queries;
 using Desktop.Wpf.Features.Sessions.State;
 using FluentAssertions;
@@ -36,7 +37,7 @@ public sealed class SessionsSidebarViewModelTests
 
         // ACT
         var a1 = new PeerConnectionStateSnapshot(
-            ConnectionId: Guid.NewGuid(),
+            Key: PeerConnectionKey.FromSessionId(Guid.NewGuid()),
             PeerId: Guid.NewGuid(),
             DisplayName: "Alice",
             Initials: "A",
@@ -50,5 +51,41 @@ public sealed class SessionsSidebarViewModelTests
         itemsCollection.Count.Should().Be(1);
         itemsCollection[0].Should().BeOfType<PeerConnectionListItemViewModel>();
         ((PeerConnectionListItemViewModel)itemsCollection[0]).DisplayName.Value.Should().Be("Alice");
+    }
+
+    [Test]
+    public void PeerConnectionKey_FromSessionId_GeneratesCanonicalFormat()
+    {
+        // ACT
+        var sessionId = Guid.NewGuid();
+        var key = PeerConnectionKey.FromSessionId(sessionId);
+        var keyString = key.ToString();
+
+        // ASSERT
+        keyString.Should().Match($"SecureSession:{sessionId:N}");
+    }
+
+    [Test]
+    public void PeerConnectionKey_FromPendingCorrelationId_GeneratesCanonicalFormat()
+    {
+        // ACT
+        var correlationId = Guid.NewGuid();
+        var key = PeerConnectionKey.FromPendingCorrelationId(correlationId);
+        var keyString = key.ToString();
+
+        // ASSERT
+        keyString.Should().Match($"PendingCorrelation:{correlationId:N}");
+    }
+
+    [Test]
+    public void PeerConnectionKey_FromPendingSessionId_GeneratesCanonicalFormat()
+    {
+        // ACT
+        var pendingSessionId = Guid.NewGuid();
+        var key = PeerConnectionKey.FromPendingSessionId(pendingSessionId);
+        var keyString = key.ToString();
+
+        // ASSERT
+        keyString.Should().Match($"PendingSession:{pendingSessionId:N}");
     }
 }

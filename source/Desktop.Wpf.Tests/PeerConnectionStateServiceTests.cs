@@ -1,6 +1,7 @@
 using System;
 using System.Linq;
 using Desktop.Wpf.Features.Sessions;
+using Desktop.Wpf.Features.Sessions.Models;
 using Desktop.Wpf.Features.Sessions.Queries;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
@@ -20,7 +21,7 @@ public sealed class PeerConnectionStateServiceTests
         var sut = new PeerConnectionStateService(scopeFactory.Object);
 
         var a1 = new PeerConnectionStateSnapshot(
-            ConnectionId: Guid.NewGuid(),
+            Key: PeerConnectionKey.FromSessionId(Guid.NewGuid()),
             PeerId: Guid.NewGuid(),
             DisplayName: "Alice",
             Initials: "A",
@@ -29,7 +30,7 @@ public sealed class PeerConnectionStateServiceTests
             LastActivityUtc: DateTimeOffset.UtcNow);
 
         var b1 = new PeerConnectionStateSnapshot(
-            ConnectionId: Guid.NewGuid(),
+            Key: PeerConnectionKey.FromSessionId(Guid.NewGuid()),
             PeerId: Guid.NewGuid(),
             DisplayName: "Bob",
             Initials: "B",
@@ -42,7 +43,7 @@ public sealed class PeerConnectionStateServiceTests
 
         // ASSERT 1
         sut.Connections.Should().HaveCount(2);
-        sut.Connections.Select(x => x.ConnectionId).Should().BeEquivalentTo(new[] { a1.ConnectionId, b1.ConnectionId });
+        sut.Connections.Select(x => x.Key).Should().BeEquivalentTo(new[] { a1.Key, b1.Key });
 
         // ACT 2: update alice, remove bob
         var a2 = a1 with { DisplayName = "Alice Updated", Status = PeerConnectionStatus.Group };
@@ -50,7 +51,7 @@ public sealed class PeerConnectionStateServiceTests
 
         // ASSERT 2
         sut.Connections.Should().HaveCount(1);
-        sut.Connections[0].ConnectionId.Should().Be(a1.ConnectionId);
+        sut.Connections[0].Key.Should().Be(a1.Key);
         sut.Connections[0].DisplayName.CurrentValue.Should().Be("Alice Updated");
         sut.Connections[0].Status.CurrentValue.Should().Be(PeerConnectionStatus.Group);
     }
