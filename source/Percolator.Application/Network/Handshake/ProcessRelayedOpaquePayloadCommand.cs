@@ -27,6 +27,7 @@ namespace Percolator.Application.Network.Handshake
         private readonly ISecureMessagingService _secureMessaging;
         private readonly IMessageTransportService _transport;
         private readonly IDirectSessionLocator _directSessions;
+        private readonly IDirectSessionRepository _directSessionRepository;
         private readonly IEstablishDirectSessionService _establishDirectSessionService;
         private readonly IInviteHandshakeResponseIngress _inviteHandshakeResponseIngress;
         private readonly IStandardHandshakeIngress _standardHandshakeIngress;
@@ -52,6 +53,7 @@ namespace Percolator.Application.Network.Handshake
             ISecureMessagingService secureMessaging,
             IMessageTransportService transport,
             IDirectSessionLocator directSessions,
+            IDirectSessionRepository directSessionRepository,
             IEstablishDirectSessionService establishDirectSessionService,
             IInviteHandshakeResponseIngress inviteHandshakeResponseIngress,
             IStandardHandshakeIngress standardHandshakeIngress,
@@ -62,6 +64,7 @@ namespace Percolator.Application.Network.Handshake
             _secureMessaging = secureMessaging;
             _transport = transport;
             _directSessions = directSessions;
+            _directSessionRepository = directSessionRepository;
             _establishDirectSessionService = establishDirectSessionService;
             _inviteHandshakeResponseIngress = inviteHandshakeResponseIngress;
             _standardHandshakeIngress = standardHandshakeIngress;
@@ -133,9 +136,22 @@ namespace Percolator.Application.Network.Handshake
             }
             _logger.LogDebug("Relayed InternalEnvelope allowed case {Case}; delegating to orchestrator", inner.ApplicationPayloadCase);
 
+            Guid? remotePeerGuid = null;
+            try
+            {
+                var directSession = await _directSessionRepository
+                    .GetBySessionIdAsync(new DirectSessionId(sid.Value), selfIdentityId)
+                    .ConfigureAwait(false);
+                remotePeerGuid = directSession?.RemotePeerId.Value;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to resolve remote peer for relayed session {SessionId}; continuing with null RemotePeerGuid", sid);
+            }
+
             await _mediator.Send(new Percolator.Application.Network.ProcessInternalEnvelopeCommand(
                 inner,
-                new Percolator.Application.Network.SessionContext(sid.Value, request.SelfIdentityId, null)
+                new Percolator.Application.Network.SessionContext(sid.Value, request.SelfIdentityId, remotePeerGuid)
             ), cancellationToken).ConfigureAwait(false);
 
             return ProcessRelayedOpaquePayloadResponse.Success;

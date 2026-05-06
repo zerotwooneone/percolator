@@ -1,28 +1,14 @@
 using Google.Protobuf;
-using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using ObservableCollections;
 using Percolator.Application.Configuration;
-using Percolator.Application.Network;
 using Percolator.Contracts;
 using Percolator.Cryptography;
-using Percolator.Identity;
-using Percolator.Network;
 using R3;
 using Desktop.Wpf.Features.Simulator.Models;
-using System;
-using System.Collections.Concurrent;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
 using System.Security.Cryptography;
-using System.Text;
-using System.Text.Json;
-using System.Threading;
-using System.Threading.Tasks;
 using Desktop.Wpf.Features.Simulator.Tracking;
 
 namespace Desktop.Wpf.Features.Simulator;
@@ -1110,6 +1096,30 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             throw;
         }
 
+        // Set connection mode for relayed handshakes
+        if (relayHostPeerId.Value != Guid.Empty)
+        {
+            await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                var model = _peers.FirstOrDefault(p => p.PeerId == recipientPeerId);
+                if (model is not null)
+                {
+                    // Set connection mode to ViaRelay with the relay host peer ID
+                    // Preserve existing Host and Port values
+                    model.SetConnection(
+                        ConnectionMode.ViaRelay,
+                        host: model.Host.CurrentValue,
+                        port: model.Port.CurrentValue,
+                        relayPeerId: relayHostPeerId);
+                }
+            }
+            finally
+            {
+                _stateGate.Release();
+            }
+        }
+
         var initiatorPkh = Convert.FromHexString(initiatorPkhHex);
         var initiatorPkhTyped = Percolator.Identity.IdentityPublicKeyHash.FromBytes(initiatorPkh);
         var initiatorPeerId = await TryGetPeerIdByIdentityPublicKeyHashAsync(initiatorPkhTyped, cancellationToken).ConfigureAwait(false);
@@ -1824,6 +1834,19 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
                     model.SessionsMutable.Remove(pendingSessionId);
                     model.SessionsMutable[final.Id] = final;
 
+                    // Check if this was a relay handshake by looking at RelayHostPeerId
+                    var relayHostPeerId = model.RelayHostPeerId.CurrentValue;
+                    if (relayHostPeerId is not null && relayHostPeerId.Value != Guid.Empty)
+                    {
+                        // Set connection mode to ViaRelay with the relay host peer ID
+                        // Preserve existing Host and Port values
+                        model.SetConnection(
+                            ConnectionMode.ViaRelay,
+                            host: model.Host.CurrentValue,
+                            port: model.Port.CurrentValue,
+                            relayPeerId: relayHostPeerId);
+                    }
+
                     model.ClearPendingStandardHandshakeToMain();
                 }
                 finally
@@ -1914,6 +1937,11 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
         };
         var internalEnvelope = new InternalEnvelope { ChatEnvelope = chatEnvelope };
 
+        Percolator.Network.PeerId? relayHostPeerId = null;
+        byte[]? cipherBytes = null;
+        bool useRelay = false;
+        bool useDirect = false;
+
         await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -1935,43 +1963,57 @@ public sealed class SimulatorStateService : ISimulatorStateService, ISimulatorSt
             // Record outbound message in peer's chat history
             model.AddChatMessage(isFromMain: false, content: content, receivedUtc: now);
 
-            // Route based on connection mode
-            if (model.ConnectionMode.CurrentValue == ConnectionMode.ViaRelay)
+            // Determine routing and capture necessary values while holding the gate
+            if (model.ConnectionMode.CurrentValue == ConnectionMode.ViaRelay && model.RelayPeerId.CurrentValue.Value != Guid.Empty)
             {
-                var relayHostPeerId = model.RelayPeerId.CurrentValue;
-                if (relayHostPeerId.Value != Guid.Empty)
+                relayHostPeerId = model.RelayPeerId.CurrentValue;
+                if (relayHostPeerId.Value == Guid.Empty)
                 {
-                    await EnqueueRelayUpstreamToMainAsync(
-                        relayHostPeerId: new Percolator.Network.PeerId(relayHostPeerId.Value),
-                        opaqueBytes: cipher.ToArray(),
-                        debugType: "Chat",
-                        cancellationToken: cancellationToken).ConfigureAwait(false);
+                    throw new InvalidOperationException("Relay peer ID is empty, but connection mode is ViaRelay");
                 }
+
+                cipherBytes = cipher.ToArray();
+                useRelay = true;
             }
             else
             {
-                using var scope = _scopeFactory.CreateScope();
-                var messageService = scope.ServiceProvider.GetRequiredService<Percolator.Application.Network.PercolatorMessageService>();
-
-                var request = new DeliverOpaqueMessageRequest
-                {
-                    Version = 1,
-                    Payload = Google.Protobuf.ByteString.CopyFrom(cipher.ToArray())
-                };
-
-                var ctx = new ServerCallContextStub(
-                    method: "/percolator.contracts.TransportService/DeliverOpaqueMessage",
-                    peer: "ipv4:127.0.0.1:0",
-                    deadline: DateTime.UtcNow.AddMinutes(1),
-                    requestHeaders: new Metadata(),
-                    cancellationToken: cancellationToken);
-
-                _ = await messageService.DeliverOpaqueMessage(request, ctx).ConfigureAwait(false);
+                cipherBytes = cipher.ToArray();
+                useDirect = true;
             }
         }
         finally
         {
             _stateGate.Release();
+        }
+
+        // Perform routing outside the state gate to avoid deadlock
+        if (useRelay)
+        {
+            await EnqueueRelayUpstreamToMainAsync(
+                relayHostPeerId: relayHostPeerId,
+                opaqueBytes: cipherBytes!,
+                debugType: "Chat",
+                cancellationToken: cancellationToken).ConfigureAwait(false);
+        }
+        else if (useDirect)
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var messageService = scope.ServiceProvider.GetRequiredService<Percolator.Application.Network.PercolatorMessageService>();
+
+            var request = new DeliverOpaqueMessageRequest
+            {
+                Version = 1,
+                Payload = Google.Protobuf.ByteString.CopyFrom(cipherBytes!)
+            };
+
+            var ctx = new ServerCallContextStub(
+                method: "/percolator.contracts.TransportService/DeliverOpaqueMessage",
+                peer: "ipv4:127.0.0.1:0",
+                deadline: DateTime.UtcNow.AddMinutes(1),
+                requestHeaders: new Metadata(),
+                cancellationToken: cancellationToken);
+
+            _ = await messageService.DeliverOpaqueMessage(request, ctx).ConfigureAwait(false);
         }
         _saveTrigger.OnNext(Unit.Default);
     }
